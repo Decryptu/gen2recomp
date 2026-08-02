@@ -9,7 +9,7 @@ extends RefCounted
 ##
 ## Order of business, and it matters: verify the hash, then verify the layout,
 ## then decode. [method verify_layout] exists because an offset table is a claim
-## that can rot — a wrong constant produces plausible-looking garbage rather
+## that can rot: a wrong constant produces plausible-looking garbage rather
 ## than an error, and garbage that reaches the cache is indistinguishable from
 ## real data later on. Checking a handful of values whose correct answers are
 ## known independently turns that class of mistake into an immediate failure.
@@ -47,7 +47,7 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 		return {"ok": false, "message": "Species name table: expected CELEBI, read %s." % last}
 
 	# Every base stats entry opens with its own Pokédex number, so the whole
-	# table self-checks in one pass — and a stride that is off by any amount
+	# table self-checks in one pass, and a stride that is off by any amount
 	# stops matching immediately.
 	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
 		var stored: int = rom.u8(RomLayout.base_stats_offset(layout, species))
@@ -61,8 +61,8 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	# a colour is 15 bits, and no species is drawn in two blacks. An offset that
 	# lands on the wrong table, or a stride that runs past the end of the right
 	# one, breaks one of those. This check exists because a palette table that
-	# was one whole table too far along still decoded — into sprites that were
-	# the correct shapes in the wrong colours, which nothing else would catch.
+	# was one whole table too far along still decoded into sprites that were the
+	# correct shapes in the wrong colours, which nothing else would catch.
 	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
 		var entry: int = RomLayout.palette_offset(layout, species)
 		var packed: Array = []
@@ -79,7 +79,70 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 		if packed.count(0) == packed.size():
 			return {"ok": false, "message": "Palette %d is blank." % species}
 
+	# Move and item names are variable-length, so one wrong byte at the start
+	# slides every entry after it and still reads as words. Checking the last
+	# entry of each table catches that; checking only the first would not.
+	var moves: PackedStringArray = Gen2Text.decode_sequence(
+		data, int(layout["move_names"]), RomLayout.MOVE_COUNT, RomLayout.MAX_NAME_LENGTH
+	)
+	if moves.size() != RomLayout.MOVE_COUNT:
+		return {"ok": false, "message": "Move name table ran out after %d." % moves.size()}
+	if moves[0] != "POUND":
+		return {"ok": false, "message": "Move name table: expected POUND, read %s." % moves[0]}
+	if moves[RomLayout.MOVE_COUNT - 1] != "BEAT UP":
+		return {
+			"ok": false,
+			"message": "Move name table: expected BEAT UP, read %s." % moves[
+				RomLayout.MOVE_COUNT - 1
+			],
+		}
+
+	# Every move entry opens with its animation, which is the move's own number,
+	# so the whole table self-checks the way the base stats do. The type byte is
+	# range-checked in the same pass because it indexes the type name table.
+	for move: int in range(1, RomLayout.MOVE_COUNT + 1):
+		var entry: int = RomLayout.move_data_offset(layout, move)
+		var animation: int = rom.u8(entry + RomLayout.MOVE_ANIMATION)
+		if animation != move:
+			return {"ok": false, "message": "Move entry %d claims to be %d." % [move, animation]}
+		var type_number: int = rom.u8(entry + RomLayout.MOVE_TYPE)
+		if type_number >= RomLayout.TYPE_COUNT:
+			return {
+				"ok": false,
+				"message": "Move %d has type $%02X, past the end of the type table." % [
+					move, type_number,
+				],
+			}
+
+	var items: PackedStringArray = Gen2Text.decode_sequence(
+		data, int(layout["item_names"]), RomLayout.ITEM_COUNT, RomLayout.MAX_NAME_LENGTH
+	)
+	if items.size() != RomLayout.ITEM_COUNT:
+		return {"ok": false, "message": "Item name table ran out after %d." % items.size()}
+	if items[0] != "MASTER BALL":
+		return {"ok": false, "message": "Item name table: expected MASTER BALL, read %s." % items[0]}
+	# Four entries in, so a start that is right but a walk that is not still
+	# fails here.
+	if items[3] != "GREAT BALL":
+		return {"ok": false, "message": "Item 4: expected GREAT BALL, read %s." % items[3]}
+
+	# The first and last type, either side of the padding run in the middle.
+	var first_type: String = type_name(rom, layout, 0)
+	if first_type != "NORMAL":
+		return {"ok": false, "message": "Type table: expected NORMAL, read %s." % first_type}
+	var last_type: String = type_name(rom, layout, RomLayout.TYPE_COUNT - 1)
+	if last_type != "DARK":
+		return {"ok": false, "message": "Type table: expected DARK, read %s." % last_type}
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## Resolves one entry of the type name pointer table.
+static func type_name(rom: RomFile, layout: Dictionary, type_number: int) -> String:
+	var table: int = RomLayout.type_name_pointer_offset(layout, type_number)
+	var address: int = rom.u16le(table)
+	var offset: int = RomFile.linear(RomLayout.bank_of(table), address)
+	return Gen2Text.decode(rom.bytes(), offset, RomLayout.MAX_NAME_LENGTH)
 
 
 ## Imports [param rom] into its cache directory, replacing whatever was there.
@@ -94,6 +157,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"message": "",
 		"directory": directory,
 		"species": 0,
+		"moves": 0,
+		"items": 0,
+		"types": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -121,8 +187,21 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not decode pics."
 		return result
 
+	var moves: Array = _import_moves(rom, layout, on_progress)
+	var items: Array = _import_items(rom, layout, on_progress)
+	var types: Array = _import_types(rom, layout, on_progress)
+
 	if not RomCache.write_json(RomCache.species_path(directory), species):
 		result["message"] = "Could not write species data."
+		return result
+	if not RomCache.write_json(RomCache.moves_path(directory), moves):
+		result["message"] = "Could not write move data."
+		return result
+	if not RomCache.write_json(RomCache.items_path(directory), items):
+		result["message"] = "Could not write item data."
+		return result
+	if not RomCache.write_json(RomCache.types_path(directory), types):
+		result["message"] = "Could not write type data."
 		return result
 
 	var manifest: Dictionary = {
@@ -130,6 +209,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"game_id": String(rom.id),
 		"sha1": rom.sha1,
 		"species_count": species.size(),
+		"move_count": moves.size(),
+		"item_count": items.size(),
+		"type_count": types.size(),
 		"atlases": pics,
 		"complete": true,
 	}
@@ -139,8 +221,13 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 
 	result["ok"] = true
 	result["species"] = species.size()
+	result["moves"] = moves.size()
+	result["items"] = items.size()
+	result["types"] = types.size()
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
-	result["message"] = "Imported %d species in %d ms." % [species.size(), result["elapsed_ms"]]
+	result["message"] = "Imported %d species, %d moves and %d items in %d ms." % [
+		species.size(), moves.size(), items.size(), result["elapsed_ms"],
+	]
 	return result
 
 
@@ -191,6 +278,58 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 
 		if on_progress.is_valid():
 			on_progress.call("species", species, RomLayout.SPECIES_COUNT)
+
+	return out
+
+
+func _import_moves(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
+	var names: PackedStringArray = Gen2Text.decode_sequence(
+		rom.bytes(), int(layout["move_names"]), RomLayout.MOVE_COUNT, RomLayout.MAX_NAME_LENGTH
+	)
+	var out: Array = []
+
+	for move: int in range(1, RomLayout.MOVE_COUNT + 1):
+		var entry: int = RomLayout.move_data_offset(layout, move)
+		# The animation byte is dropped: it is the move's own number, and it is
+		# already spent proving the table is where the layout says it is.
+		out.append({
+			"number": move,
+			"name": names[move - 1],
+			"effect": rom.u8(entry + RomLayout.MOVE_EFFECT),
+			"power": rom.u8(entry + RomLayout.MOVE_POWER),
+			"type": rom.u8(entry + RomLayout.MOVE_TYPE),
+			"accuracy": rom.u8(entry + RomLayout.MOVE_ACCURACY),
+			"pp": rom.u8(entry + RomLayout.MOVE_PP),
+			"effect_chance": rom.u8(entry + RomLayout.MOVE_EFFECT_CHANCE),
+		})
+
+		if on_progress.is_valid():
+			on_progress.call("moves", move, RomLayout.MOVE_COUNT)
+
+	return out
+
+
+func _import_items(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
+	var names: PackedStringArray = Gen2Text.decode_sequence(
+		rom.bytes(), int(layout["item_names"]), RomLayout.ITEM_COUNT, RomLayout.MAX_NAME_LENGTH
+	)
+	var out: Array = []
+
+	for item: int in range(1, RomLayout.ITEM_COUNT + 1):
+		out.append({"number": item, "name": names[item - 1]})
+		if on_progress.is_valid():
+			on_progress.call("items", item, RomLayout.ITEM_COUNT)
+
+	return out
+
+
+func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
+	var out: Array = []
+
+	for type_number: int in RomLayout.TYPE_COUNT:
+		out.append({"number": type_number, "name": type_name(rom, layout, type_number)})
+		if on_progress.is_valid():
+			on_progress.call("types", type_number + 1, RomLayout.TYPE_COUNT)
 
 	return out
 

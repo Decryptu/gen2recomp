@@ -28,7 +28,7 @@ func test_every_script_parses() -> void:
 	for root: String in ROOTS:
 		_gd_files(root, scripts)
 
-	assert_gt(scripts.size(), 0, "found no scripts to check — is the walk broken?")
+	assert_gt(scripts.size(), 0, "found no scripts to check; is the walk broken?")
 	for path: String in scripts:
 		assert_not_null(load(path), "failed to load %s" % path)
 

@@ -6,7 +6,7 @@ extends SceneTree
 ##
 ## e.g. gold /tmp/gold_front.png front
 ##
-## The cache stores colour indices, not pixels — a palette is applied at draw
+## The cache stores colour indices, not pixels; a palette is applied at draw
 ## time so that shiny is free. This applies one and writes the result out, which
 ## is the only way to tell a correct decode from a plausible-looking wrong one.
 ## Runs headless: it writes an image, it does not open a window.

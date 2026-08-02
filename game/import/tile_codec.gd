@@ -8,7 +8,7 @@ extends RefCounted
 ## leftmost pixel.
 ##
 ## Decoding stops at indices 0-3. Turning those into colours needs a palette,
-## which is a separate concern — see [Gen2Palette]. Keeping the two apart is
+## which is a separate concern; see [Gen2Palette]. Keeping the two apart is
 ## what makes shiny variants free: same pixels, different palette.
 
 const TILE_WIDTH: int = 8
@@ -44,8 +44,8 @@ static func decode_tile(data: PackedByteArray, offset: int) -> PackedByteArray:
 ## Decodes a Pokémon or trainer pic into a row-major index buffer
 ## [param columns] * 8 wide and [param rows] * 8 tall.
 ##
-## Pics store their tiles column-major — the whole left column top to bottom,
-## then the next — because the game streams them into VRAM a column at a time.
+## Pics store their tiles column-major, the whole left column top to bottom and
+## then the next, because the game streams them into VRAM a column at a time.
 ## Every other tilemap in these games is row-major, so this is the one place
 ## that ordering flips.
 ##

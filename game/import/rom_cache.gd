@@ -12,18 +12,21 @@ extends RefCounted
 ## game never share a cache and a re-import cannot half-overwrite the last one.
 ##
 ## Pixel data is stored as raw colour indices rather than as images. It is what
-## the renderer wants — palettes are applied per species and per shiny state at
-## draw time — and it avoids a decode round-trip whose exactness would have to
+## the renderer wants (palettes are applied per species and per shiny state at
+## draw time), and it avoids a decode round-trip whose exactness would have to
 ## be trusted.
 
 const ROOT: String = "user://rom_cache"
 const MANIFEST: String = "manifest.json"
 const SPECIES: String = "species.json"
+const MOVES: String = "moves.json"
+const ITEMS: String = "items.json"
+const TYPES: String = "types.json"
 const PICS_DIR: String = "pics"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 1
+const FORMAT_VERSION: int = 2
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -36,6 +39,18 @@ static func manifest_path(directory: String) -> String:
 
 static func species_path(directory: String) -> String:
 	return "%s/%s" % [directory, SPECIES]
+
+
+static func moves_path(directory: String) -> String:
+	return "%s/%s" % [directory, MOVES]
+
+
+static func items_path(directory: String) -> String:
+	return "%s/%s" % [directory, ITEMS]
+
+
+static func types_path(directory: String) -> String:
+	return "%s/%s" % [directory, TYPES]
 
 
 static func pic_path(directory: String, name: String) -> String:
@@ -78,7 +93,7 @@ static func read_json(path: String) -> Variant:
 	return JSON.parse_string(text)
 
 
-## Index buffers are mostly runs of the same value, so they compress hard —
+## Index buffers are mostly runs of the same value, so they compress hard,
 ## roughly ten to one for a pic atlas.
 static func write_indices(path: String, data: PackedByteArray) -> bool:
 	var file: FileAccess = FileAccess.open_compressed(

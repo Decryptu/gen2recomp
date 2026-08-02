@@ -41,6 +41,33 @@ static func decode_fixed(data: PackedByteArray, offset: int, length: int) -> Str
 	return decode(data, offset, length)
 
 
+## Walks [param count] consecutive terminated strings starting at [param offset].
+##
+## The species names are a fixed-width table, but the move and item names are
+## not: each entry ends at its terminator and the next one begins on the very
+## next byte. Nothing announces how long an entry is, so a single wrong byte
+## slides every name after it, which is why the importer checks the last entry
+## of such a table and not only the first.
+##
+## [param max_length] is a runaway guard rather than a field width. Without it, a
+## table read past its own end would scan the remaining megabyte looking for a
+## terminator that is not coming.
+static func decode_sequence(
+	data: PackedByteArray, offset: int, count: int, max_length: int
+) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var at: int = offset
+	for i: int in count:
+		if at < 0 or at >= data.size():
+			break
+		out.append(decode(data, at, max_length))
+		var end: int = at
+		while end < data.size() and data[end] != TERMINATOR and end - at < max_length:
+			end += 1
+		at = end + 1
+	return out
+
+
 static func character(byte: int) -> String:
 	var table: Dictionary = _characters()
 	if table.has(byte):

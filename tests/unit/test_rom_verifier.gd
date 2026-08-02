@@ -1,6 +1,6 @@
 extends GutTest
 
-## These tests never touch a real cartridge — the repo has none and must never
+## These tests never touch a real cartridge; the repo has none and must never
 ## gain one. Synthetic files cover the rejection paths, and the accept path is
 ## covered by asserting the registry's own hashes round-trip. Hashing a genuine
 ## ROM is a manual check: `tools/verify_rom.gd` (see README.md).

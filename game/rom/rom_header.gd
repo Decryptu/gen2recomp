@@ -4,7 +4,7 @@ extends RefCounted
 ## The Game Boy cartridge header at $0100-$014F.
 ##
 ## The import gate identifies a dump by SHA-1, which is stricter than anything
-## in here — this exists so a *diagnostic* can say why a file looked wrong, and
+## in here. This exists so a *diagnostic* can say why a file looked wrong, and
 ## so an added registry entry can be sanity-checked against what the cartridge
 ## claims about itself. Nothing in the importer branches on these fields.
 
@@ -23,7 +23,7 @@ const HEADER_CHECKSUM: int = 0x14D
 const GLOBAL_CHECKSUM: int = 0x14E
 
 ## $80 runs on both Game Boy and Game Boy Color; $C0 is Color-only. Gold and
-## Silver are $80, Crystal is $C0 — Crystal was the first mainline game that
+## Silver are $80, Crystal is $C0, because Crystal was the first mainline game that
 ## would not boot on a DMG.
 const CGB_COMPATIBLE: int = 0x80
 const CGB_ONLY: int = 0xC0

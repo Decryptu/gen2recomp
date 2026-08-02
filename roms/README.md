@@ -19,8 +19,8 @@ Two independent mechanisms:
 - **`.gitignore` + the pre-commit hook** keep them out of the repository. The
   hook checks staged blobs by extension *and* by size, so even a renamed dump
   with no extension is refused.
-- **`.gdignore`** makes Godot's resource system skip this directory entirely —
-  the files are never imported and never swept into an export. That file must
+- **`.gdignore`** makes Godot's resource system skip this directory entirely,
+  so the files are never imported and never swept into an export. That file must
   stay here; deleting it would let a build pick up a cartridge.
 
 ## Checking your files

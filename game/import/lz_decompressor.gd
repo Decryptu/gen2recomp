@@ -19,7 +19,7 @@ extends RefCounted
 ## The three back-references take an offset that is either a one-byte distance
 ## back from the write head (high bit set) or a two-byte absolute position from
 ## the start of the output (high bit clear). Sources may overlap the bytes being
-## written, which is how the format expresses runs — so the copy has to be
+## written, which is how the format expresses runs, so the copy has to be
 ## byte-at-a-time, not a slice.
 ##
 ## The bit-reversing opcode exists because these streams encode 2bpp tiles: a
@@ -56,7 +56,7 @@ static var _reversed_bits: PackedByteArray = PackedByteArray()
 
 
 ## Decompresses the stream starting at [param offset]. Returns the decompressed
-## bytes, or an empty array on failure — check [member failed] to tell that
+## bytes, or an empty array on failure; check [member failed] to tell that
 ## apart from a legitimately empty stream.
 func decompress(data: PackedByteArray, offset: int) -> PackedByteArray:
 	failed = false

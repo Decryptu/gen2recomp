@@ -50,7 +50,7 @@ func test_out_of_range_offset_yields_a_blank_tile() -> void:
 
 func test_pic_tiles_are_stored_column_major() -> void:
 	# Two columns of two tiles. Storage order is top-left, bottom-left,
-	# top-right, bottom-right — down the columns, not across the rows.
+	# top-right, bottom-right, down the columns and not across the rows.
 	var data: PackedByteArray = PackedByteArray()
 	for index: int in [1, 2, 3, 1]:
 		data.append_array(_solid_tile(index))

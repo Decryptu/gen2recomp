@@ -29,6 +29,19 @@ func test_a_directory_is_named_by_game_and_hash() -> void:
 	assert_true(gold.contains("gold"))
 
 
+func test_each_table_gets_its_own_file() -> void:
+	var paths: Array = [
+		RomCache.species_path(_directory),
+		RomCache.moves_path(_directory),
+		RomCache.items_path(_directory),
+		RomCache.types_path(_directory),
+		RomCache.manifest_path(_directory),
+	]
+	for path: String in paths:
+		assert_eq(paths.count(path), 1, "%s is not unique" % path)
+		assert_true(path.begins_with(_directory))
+
+
 func test_prepare_creates_the_tree() -> void:
 	assert_true(RomCache.prepare(_directory))
 	assert_true(DirAccess.dir_exists_absolute("%s/%s" % [_directory, RomCache.PICS_DIR]))

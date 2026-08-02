@@ -12,7 +12,7 @@ enforce this, and none of them should be weakened:
 
 1. **`.gitignore`** blocks the known extensions, the `roms/` drop folder and
    the runtime cache directories.
-2. **`.githooks/pre-commit`** checks what is actually *staged* — by extension,
+2. **`.githooks/pre-commit`** checks what is actually *staged*: by extension,
    and by size for any blob ≥ 512 KiB outside `addons/` and `assets/`. That
    second check catches a renamed or trimmed dump that no extension rule would
    see. Enable it with `git config core.hooksPath .githooks`; Git does not
@@ -22,7 +22,7 @@ enforce this, and none of them should be weakened:
    on any machine and in CI.
 
 `roms/` additionally carries a `.gdignore`, which makes Godot's resource system
-skip the directory entirely — files there are never imported and never swept
+skip the directory entirely, so files there are never imported and never swept
 into an export. `FileAccess` can still read them during development, which is
 how `tools/verify_rom.gd` works. Do not delete that file.
 
@@ -30,11 +30,11 @@ how `tools/verify_rom.gd` works. Do not delete that file.
 
 The ROM layer is the model for the rest of the engine:
 
-- `game/rom/rom_registry.gd` — the SHA-1 allowlist.
-- `game/rom/rom_verifier.gd` — size pre-filter, then chunked SHA-1, then
+- `game/rom/rom_registry.gd`: the SHA-1 allowlist.
+- `game/rom/rom_verifier.gd`: size pre-filter, then chunked SHA-1, then
   lookup.
-- `game/rom/rom_file.gd` — a verified dump in memory, plus bank addressing.
-- `game/rom/rom_header.gd` — the cartridge header, for diagnostics only.
+- `game/rom/rom_file.gd`: a verified dump in memory, plus bank addressing.
+- `game/rom/rom_header.gd`: the cartridge header, for diagnostics only.
 
 All of them are `RefCounted` statics with no scene dependencies, so the import
 gate is fully testable headlessly. Keep the engine core the same shape: rules
@@ -54,7 +54,7 @@ The importer under `game/import/` decodes a verified cartridge into a cache:
 | `rom_cache.gd` | The `user://` cache: paths, formats, lifecycle |
 | `rom_importer.gd` | Orchestration, and the layout self-check |
 
-Each decoder takes bytes and returns data — none of them knows what a cartridge
+Each decoder takes bytes and returns data; none of them knows what a cartridge
 is, so all of them are testable on a handful of hand-built bytes.
 
 ## Offsets, and why they are checked at runtime
@@ -62,8 +62,8 @@ is, so all of them are testable on a handful of hand-built bytes.
 `rom_layout.gd` is a table of absolute positions inside each supported dump. An
 offset is a claim about a specific 2 MiB file, and a wrong one does not throw:
 it decodes neighbouring data into something plausible. A palette table that was
-one entire table too far along still produced 251 sprites — the right shapes in
-the wrong colours — and every unit test stayed green.
+one entire table too far along still produced 251 sprites (the right shapes in
+the wrong colours) and every unit test stayed green.
 
 So every offset ships with a check that would fail if it were wrong, and
 `RomImporter.verify_layout()` runs all of them before a single byte is decoded:
@@ -75,12 +75,21 @@ So every offset ships with a check that would fail if it were wrong, and
   self-checks in one pass.
 - Palettes have no self-identifying field, so they are checked structurally: a
   colour is 15 bits, and no species is drawn in two blacks.
+- Every move entry opens with its own animation number, which is its move
+  number, so the move table self-checks in one pass exactly like the base
+  stats. Its type byte is range-checked in the same loop, because it indexes
+  the type name table.
+- The move and item names are variable-length, terminated rather than padded,
+  so a start that is one byte out slides every later entry and still reads as
+  words. Both tables are checked at the far end as well as the near one, and
+  the item table also at entry four, where a start that is right but a walk
+  that is not shows up first.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 
 New offsets were found by searching the cartridge for content whose bytes are
-known independently — the encoded string `BULBASAUR`, a species' published base
-stats — and then confirming the *structure* against the
+known independently (the encoded string `BULBASAUR`, a species' published base
+stats), and then confirming the *structure* against the
 [pret](https://github.com/pret) disassemblies, which are the reference for how
 these games are laid out. Do not copy an address out of a disassembly and
 assume it applies: those are bank:address pairs for a build of the source, and
@@ -96,9 +105,21 @@ godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png f
 ```
 
 A contact sheet of all 251 species is the fastest correctness check the project
-has — a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
+has: a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
 in a pointer table all look obviously wrong, and all of them look fine in a
 manifest.
+
+Text decodes get the same treatment from `tools/dump_tables.gd`, which prints a
+cached table rather than drawing it:
+
+```bash
+godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
+```
+
+A name table that has slid by a byte still decodes into words, so reading the
+output is the check. Cross-check a handful of moves against published power,
+accuracy and PP while you are there; the runtime checks pin the ends of a
+table, not what is between them.
 
 ## Seeing the UI without pressing Play
 
@@ -110,8 +131,8 @@ godot --path . -s res://tools/screenshot.gd -- res://game/main/main.tscn /tmp/sh
 
 An optional trailing `<method> <times> [int arg]` drives the scene before
 capturing, so you can photograph a screen mid-interaction rather than only on
-its first frame. This briefly opens a real window — rendering needs a display,
-so it cannot run under `--headless`.
+its first frame. This briefly opens a real window, because rendering needs a
+display, so it cannot run under `--headless`.
 
 ## Pitfalls that cost real time
 
@@ -147,7 +168,7 @@ so it cannot run under `--headless`.
   in `test_rom_cache.gd` that pins this down so nobody rediscovers it the hard
   way.
 - **GDScript lambdas capture by value.** Assigning to a captured local inside a
-  `func():` closure updates the copy, not the original — the write silently
+  `func():` closure updates the copy, not the original, and the write silently
   vanishes. Append to an Array/Dictionary, or use a method.
 - **A closure stored on the signal of an object it captures leaks that
   object.** The cycle is invisible until Godot prints "ObjectDB instances were
@@ -158,17 +179,17 @@ so it cannot run under `--headless`.
 
 ## GDScript conventions
 
-- Tabs for indentation (Godot default — don't reformat to spaces).
+- Tabs for indentation (Godot default; don't reformat to spaces).
 - Static typing everywhere practical: `var health: int = 10`,
   `func heal(amount: int) -> void:`.
 - `snake_case` for variables, functions and files; `PascalCase` for classes and
   nodes.
-- No comments explaining *what* code does — only *why*, for non-obvious
+- No comments explaining *what* code does, only *why*, for non-obvious
   constraints.
 
 ## Scenes
 
-`.tscn` and `.tres` are plain text (format 3) — read and edit them directly
+`.tscn` and `.tres` are plain text (format 3), so read and edit them directly
 like source. Don't hand-invent `uid://` identifiers; Godot regenerates missing
 or invalid ones on load, or omit the `uid` field on `ext_resource` lines and
 let the editor fill it in.

@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Game Boy Color palette entries.
 ##
-## A colour is 15 bits packed little-endian as $0BBBBBGG GGGRRRRR — five bits
+## A colour is 15 bits packed little-endian as $0BBBBBGG GGGRRRRR, five bits
 ## per channel, red in the low bits. The hardware ignores bit 15.
 ##
 ## A Pokémon's stored palette holds only two colours. The other two are implied:
