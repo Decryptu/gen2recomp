@@ -141,6 +141,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if last_type != "DARK":
 		return {"ok": false, "message": "Type table: expected DARK, read %s." % last_type}
 
+	var matchups: Dictionary = verify_matchups(rom, layout)
+	if not matchups["ok"]:
+		return matchups
+
 	var font: Dictionary = verify_font(rom, layout)
 	if not font["ok"]:
 		return font
@@ -158,6 +162,122 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 		return trainers
 
 	return {"ok": true, "message": "Layout verified."}
+
+
+## Walks the type matchup chart from its offset to the terminator.
+##
+## Returns an Array of { attacker, defender, multiplier, negated_by_foresight },
+## or an empty Array if the walk ran away without finding an end. The rows after
+## the $FE marker carry the flag: they are the matchups that stop applying once
+## Foresight has identified the defender, which is how the cartridge gets a Ghost
+## to be hittable by Normal without a second table.
+static func read_matchups(rom: RomFile, layout: Dictionary) -> Array:
+	var at: int = int(layout["type_matchups"])
+	var out: Array = []
+	var after_foresight: bool = false
+
+	for _step: int in RomLayout.MAX_MATCHUPS:
+		if not rom.in_bounds(at, RomLayout.MATCHUP_ENTRY_SIZE):
+			return []
+
+		var attacker: int = rom.u8(at + RomLayout.MATCHUP_ATTACKER)
+		if attacker == RomLayout.MATCHUP_END:
+			return out
+		if attacker == RomLayout.MATCHUP_END_FORESIGHT:
+			# The first marker is one byte, not an entry: the rows it separates
+			# follow immediately after it.
+			after_foresight = true
+			at += 1
+			continue
+
+		out.append({
+			"attacker": attacker,
+			"defender": rom.u8(at + RomLayout.MATCHUP_DEFENDER),
+			"multiplier": rom.u8(at + RomLayout.MATCHUP_MULTIPLIER),
+			"negated_by_foresight": after_foresight,
+		})
+		at += RomLayout.MATCHUP_ENTRY_SIZE
+
+	return []
+
+
+## The matchup chart, checked by the shape a chart of exceptions has to have.
+##
+## It carries no name and no number, but it is unusually hard to land on by
+## accident: every row is two sparse type numbers and a multiplier drawn from a
+## set of three, the whole run has to walk to a $FE and then a $FF at exactly the
+## right distance, and both ends are known content. A wrong offset fails on the
+## very first row, because the padding run between the two groups of type numbers
+## is most of the byte range.
+static func verify_matchups(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var rows: Array = read_matchups(rom, layout)
+	if rows.is_empty():
+		return {"ok": false, "message": "Type matchups: no terminator within reach."}
+
+	for index: int in rows.size():
+		var row: Dictionary = rows[index]
+		for side: String in ["attacker", "defender"]:
+			var type_number: int = int(row[side])
+			if not RomLayout.is_matchup_type(type_number):
+				return {
+					"ok": false,
+					"message": "Type matchup %d: %s is $%02X, not a type." % [
+						index, side, type_number,
+					],
+				}
+		# A neutral matchup is an absent row, so a byte of ten here would mean the
+		# walk is reading something that is not the chart.
+		if not RomLayout.MATCHUP_MULTIPLIERS.has(int(row["multiplier"])):
+			return {
+				"ok": false,
+				"message": "Type matchup %d has multiplier %d, which the chart never stores." % [
+					index, int(row["multiplier"]),
+				],
+			}
+
+	var negated: Array = rows.filter(func(row: Dictionary) -> bool:
+		return bool(row["negated_by_foresight"])
+	)
+	if rows.size() != RomLayout.MATCHUP_COUNT + RomLayout.FORESIGHT_MATCHUP_COUNT:
+		return {
+			"ok": false,
+			"message": "Type matchups: read %d rows, expected %d." % [
+				rows.size(), RomLayout.MATCHUP_COUNT + RomLayout.FORESIGHT_MATCHUP_COUNT,
+			],
+		}
+	if negated.size() != RomLayout.FORESIGHT_MATCHUP_COUNT:
+		return {
+			"ok": false,
+			"message": "Type matchups: %d rows past the Foresight marker, expected %d." % [
+				negated.size(), RomLayout.FORESIGHT_MATCHUP_COUNT,
+			],
+		}
+
+	# Both ends, as content whose answer is known independently. The chart opens
+	# with Normal against Rock and closes with Steel against itself, and the two
+	# rows Foresight cancels are the Ghost immunities.
+	var checks: Array = [
+		[rows[0], RomLayout.TYPE_NORMAL, RomLayout.TYPE_ROCK,
+			RomLayout.MATCHUP_NOT_VERY_EFFECTIVE, "the first row"],
+		[rows[RomLayout.MATCHUP_COUNT - 1], RomLayout.TYPE_STEEL, RomLayout.TYPE_STEEL,
+			RomLayout.MATCHUP_NOT_VERY_EFFECTIVE, "the last row"],
+		[negated[0], RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST,
+			RomLayout.MATCHUP_NO_EFFECT, "the first Foresight row"],
+		[negated[1], RomLayout.TYPE_FIGHTING, RomLayout.TYPE_GHOST,
+			RomLayout.MATCHUP_NO_EFFECT, "the second Foresight row"],
+	]
+	for check: Array in checks:
+		var row: Dictionary = check[0]
+		if int(row["attacker"]) != int(check[1]) or int(row["defender"]) != int(check[2]) \
+			or int(row["multiplier"]) != int(check[3]):
+			return {
+				"ok": false,
+				"message": "Type matchups: %s is $%02X against $%02X at x%d/10." % [
+					check[4], int(row["attacker"]), int(row["defender"]), int(row["multiplier"]),
+				],
+			}
+
+	return {"ok": true, "message": ""}
 
 
 ## The font carries no name and no number, so it is checked against the one
@@ -516,6 +636,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"moves": 0,
 		"items": 0,
 		"types": 0,
+		"matchups": 0,
 		"trainers": 0,
 		"elapsed_ms": 0,
 	}
@@ -552,6 +673,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	var moves: Array = _import_moves(rom, layout, on_progress)
 	var items: Array = _import_items(rom, layout, on_progress)
 	var types: Array = _import_types(rom, layout, on_progress)
+	var matchups: Array = read_matchups(rom, layout)
 	var trainers: Array = _import_trainers(rom, layout, on_progress)
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
@@ -566,6 +688,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if not RomCache.write_json(RomCache.types_path(directory), types):
 		result["message"] = "Could not write type data."
 		return result
+	if not RomCache.write_json(RomCache.matchups_path(directory), matchups):
+		result["message"] = "Could not write the type matchup chart."
+		return result
 	if not RomCache.write_json(RomCache.trainers_path(directory), trainers):
 		result["message"] = "Could not write trainer data."
 		return result
@@ -578,6 +703,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"move_count": moves.size(),
 		"item_count": items.size(),
 		"type_count": types.size(),
+		"matchup_count": matchups.size(),
 		"trainer_count": trainers.size(),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
@@ -593,10 +719,13 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["moves"] = moves.size()
 	result["items"] = items.size()
 	result["types"] = types.size()
+	result["matchups"] = matchups.size()
 	result["trainers"] = trainers.size()
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
-	result["message"] = "Imported %d species, %d moves, %d items and %d trainer classes in %d ms." % [
-		species.size(), moves.size(), items.size(), trainers.size(), result["elapsed_ms"],
+	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups and "
+		+ "%d trainer classes in %d ms.") % [
+		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
+		result["elapsed_ms"],
 	]
 	return result
 

@@ -30,6 +30,14 @@ func _write_cache(complete: bool = true) -> void:
 	RomCache.write_json(RomCache.types_path(_directory), [
 		{"number": 0, "name": "NORMAL"}, {"number": 1, "name": "FIGHTING"},
 	])
+	RomCache.write_json(RomCache.matchups_path(_directory), [
+		_matchup(0x14, 0x16, RomLayout.MATCHUP_SUPER_EFFECTIVE),
+		_matchup(0x17, 0x04, RomLayout.MATCHUP_NO_EFFECT),
+		_matchup(0x16, 0x16, RomLayout.MATCHUP_NOT_VERY_EFFECTIVE),
+		_matchup(0x16, 0x14, RomLayout.MATCHUP_NOT_VERY_EFFECTIVE),
+		_matchup(0x14, 0x09, RomLayout.MATCHUP_SUPER_EFFECTIVE),
+		_matchup(RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST, RomLayout.MATCHUP_NO_EFFECT, true),
+	])
 	RomCache.write_json(RomCache.trainers_path(_directory), [
 		{"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678]},
 		{"number": 2, "name": "YOUNGSTER", "palette": [0x0C63, 0x1084]},
@@ -58,6 +66,17 @@ func _write_cache(complete: bool = true) -> void:
 		},
 		"complete": complete,
 	})
+
+
+func _matchup(
+	attacker: int, defender: int, multiplier: int, foresight: bool = false
+) -> Dictionary:
+	return {
+		"attacker": attacker,
+		"defender": defender,
+		"multiplier": multiplier,
+		"negated_by_foresight": foresight,
+	}
 
 
 func _species(number: int, name: String, normal: int, shiny: int) -> Dictionary:
@@ -112,6 +131,66 @@ func test_types_are_indexed_from_zero() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	assert_eq(data.type_name(0), "NORMAL")
 	assert_eq(data.type_name(1), "FIGHTING")
+
+
+func test_a_matchup_the_chart_does_not_list_is_neutral() -> void:
+	# The chart holds only the exceptions, which is why the whole of Generation 2
+	# fits in 332 bytes. Everything else is ten tenths.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.type_matchup(0x14, 0x16), RomLayout.MATCHUP_SUPER_EFFECTIVE)
+	assert_eq(data.type_matchup(0x17, 0x04), RomLayout.MATCHUP_NO_EFFECT)
+	assert_eq(data.type_matchup(0x14, 0x15), RomLayout.MATCHUP_EFFECTIVE, "not in the chart")
+	assert_eq(data.type_matchup(0x13, 0x13), RomLayout.MATCHUP_EFFECTIVE, "nor is Curse's type")
+
+
+func test_foresight_cancels_the_ghost_immunities_and_nothing_else() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(
+		data.type_matchup(RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST),
+		RomLayout.MATCHUP_NO_EFFECT
+	)
+	assert_eq(
+		data.type_matchup(RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST, true),
+		RomLayout.MATCHUP_EFFECTIVE
+	)
+	assert_eq(
+		data.type_matchup(0x17, 0x04, true), RomLayout.MATCHUP_NO_EFFECT,
+		"Foresight does not make a Ground type hittable by Electric"
+	)
+
+
+func test_two_types_truncate_between_them() -> void:
+	# The quirk this returns tenths for. Grass is resisted by both halves of a
+	# Grass/Fire defender, and the cartridge's accumulator reports 2, not 2.5:
+	# ten to five to two, truncating on the way.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.type_effectiveness(0x16, [0x16, 0x14]), 2)
+
+
+func test_a_single_type_defender_is_not_hit_twice() -> void:
+	# A Pokémon with one type carries it in both slots. The cartridge applies a
+	# row once whichever slot matched it.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.type_effectiveness(0x14, [0x16, 0x16]), RomLayout.MATCHUP_SUPER_EFFECTIVE)
+
+
+func test_an_immunity_beats_a_weakness_whichever_way_round_they_are() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.type_effectiveness(RomLayout.TYPE_NORMAL, [RomLayout.TYPE_GHOST, 0x16]), 0)
+
+
+func test_a_cache_with_no_chart_reads_everything_as_neutral() -> void:
+	# A cache from before there was a chart, or an import that stopped short. The
+	# engine gets a flat answer rather than a wrong one.
+	_write_cache()
+	DirAccess.remove_absolute(RomCache.matchups_path(_directory))
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.type_matchup(0x14, 0x16), RomLayout.MATCHUP_EFFECTIVE)
 
 
 func test_an_unknown_number_answers_empty_rather_than_failing() -> void:

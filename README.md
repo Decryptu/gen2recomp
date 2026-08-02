@@ -27,12 +27,13 @@ the same thing for Generation 1.
 > ### Status: early
 >
 > The import gate and the first half of the importer exist and are tested: a
-> verified cartridge decodes into species data, moves, items, types, palettes,
-> every Pokémon sprite, every trainer pic, the font, the text box borders and
-> the battle HUD. The battle screen draws: two Pokémon, two status panels and a
-> text box on a real 160x144 screen. Nothing happens on it yet, and the
-> overworld, the battle system, audio and the mod loader do not exist. There is
-> nothing playable here today.
+> verified cartridge decodes into species data, moves, items, types, the type
+> chart, palettes, every Pokémon sprite, every trainer pic, the font, the text
+> box borders and the battle HUD. A battle can be fought: stats, damage,
+> accuracy and turn order, on a real 160x144 screen with the bars draining and
+> the messages appearing. There are no parties, no switching, no status
+> conditions and no move effects, and the overworld, audio and the mod loader do
+> not exist. There is nothing playable here today.
 
 ## Getting started
 
@@ -89,6 +90,7 @@ What comes out today:
 | Moves | Names, power, type, accuracy, PP, effect and its chance |
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
+| Type chart | Every matchup, and which two Foresight cancels |
 | Trainers | Every trainer class: name, pic and palette |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
@@ -109,12 +111,15 @@ The same tool takes `trainers` for the trainer classes, or `font` or `frames` in
 place of an atlas name, which is how you check that the glyphs are where the
 character codes say they are.
 
-or as text, for any of `species`, `moves`, `items`, `types`, `trainers` or
-`all`:
+or as text, for any of `species`, `moves`, `items`, `types`, `matchups`,
+`trainers` or `all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
+
+`matchups` prints the type chart as a grid rather than as a list, because a grid
+is the shape the published table has and a single wrong cell shows up in it.
 
 ## Running
 
@@ -137,10 +142,15 @@ resolution.
 once.
 
 `game/battle/battle_screen.tscn` is the battle screen itself: two Pokémon, a
-status panel each and a text box, where the hardware puts them. Left and right
-change which Pokémon are on it, `S` and `D` take health off the player's and the
-enemy's, and the bars change colour as they empty. Nothing else happens: there
-is no battle behind it yet.
+status panel each and a text box, where the hardware puts them, with a real
+battle behind it. `A` takes a turn and space steps through what happened, so the
+bars drain, the messages appear and one of the two eventually faints. Left and
+right change which Pokémon are on it, and `S` and `D` take health off the
+player's and the enemy's without a turn, which is the fastest way to see the
+bars change colour.
+
+Both Pokémon know Tackle and nothing else, because learnsets are not decoded
+yet.
 
 ## Tests
 

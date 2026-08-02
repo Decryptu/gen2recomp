@@ -37,9 +37,67 @@ const ITEM_COUNT: int = 255
 const TYPE_COUNT: int = 28
 const TYPE_POINTER_SIZE: int = 2
 
+## The type numbers themselves. Only the ones something here names are listed:
+## the rest are reached by number, since a move's type byte is already one.
+## $06 sits between ROCK and BUG and is the unused BIRD slot, which is why the
+## physical types are not a contiguous run of nine.
+const TYPE_NORMAL: int = 0x00
+const TYPE_FIGHTING: int = 0x01
+const TYPE_ROCK: int = 0x05
+const TYPE_GHOST: int = 0x08
+const TYPE_STEEL: int = 0x09
+
 ## The longest move and item name in these games is twelve characters. This is
 ## the runaway guard for a terminator walk, not a field width.
 const MAX_NAME_LENGTH: int = 16
+
+## The type matchup chart: three bytes an entry, attacker then defender then the
+## multiplier, and only the exceptions are listed. A pair that is not in the
+## table is [constant MATCHUP_EFFECTIVE], which is why the whole of Generation 2
+## fits in 332 bytes.
+##
+## Multipliers are in tenths, as the cartridge stores them, so a matchup is
+## applied by multiplying and then dividing by ten. Keeping the tenth rather
+## than a float is not pedantry: the games truncate after each of a defender's
+## two types, and a Pokémon that survives on one hit point does so because of it.
+const MATCHUP_ENTRY_SIZE: int = 3
+const MATCHUP_ATTACKER: int = 0
+const MATCHUP_DEFENDER: int = 1
+const MATCHUP_MULTIPLIER: int = 2
+
+const MATCHUP_NO_EFFECT: int = 0
+const MATCHUP_NOT_VERY_EFFECTIVE: int = 5
+const MATCHUP_EFFECTIVE: int = 10
+const MATCHUP_SUPER_EFFECTIVE: int = 20
+
+## Every multiplier the table actually contains. [constant MATCHUP_EFFECTIVE] is
+## not among them: a neutral matchup is an absent row, so a byte of 10 here would
+## mean the walk has left the table.
+const MATCHUP_MULTIPLIERS: Array = [
+	MATCHUP_NO_EFFECT, MATCHUP_NOT_VERY_EFFECTIVE, MATCHUP_SUPER_EFFECTIVE,
+]
+
+## The table ends twice. $FE ends it for a defender under Foresight, and $FF ends
+## it for everything else, so the rows between the two are exactly the matchups
+## Foresight cancels: Normal and Fighting against a Ghost. Reading the rows as
+## "true unless Foresight" rather than "extra under Foresight" is the way round
+## the cartridge means them, and the flag in the cache is named for it.
+const MATCHUP_END_FORESIGHT: int = 0xFE
+const MATCHUP_END: int = 0xFF
+
+## What the walk has to find. All three games carry the same chart, so unlike the
+## trainer class count these are constants rather than layout entries.
+const MATCHUP_COUNT: int = 108
+const FORESIGHT_MATCHUP_COUNT: int = 2
+
+## Runaway guard for the walk, well past the real end of the table.
+const MAX_MATCHUPS: int = 256
+
+## A type number the chart can name. The physical types run $00-$09 and the
+## special ones $14-$1B; everything between is padding that a move may carry but
+## that no matchup mentions.
+const PHYSICAL_TYPES_END: int = 0x09
+const SPECIAL_TYPES_START: int = 0x14
 
 ## Unown's entry in the main pic table is a deliberate $FF placeholder: its 26
 ## letter forms live in a table of their own.
@@ -182,6 +240,7 @@ const GOLD_SILVER: Dictionary = {
 	"item_names": 0x1B0000,
 	"move_data": 0x41AFE,
 	"type_names": 0x509AE,
+	"type_matchups": 0x34D01,
 	"font": 0xF82F2,
 	"frames": 0xF88F2,
 	"bar_palettes": 0xAD2D,
@@ -211,6 +270,7 @@ const CRYSTAL: Dictionary = {
 	"item_names": 0x1C8000,
 	"move_data": 0x41AFB,
 	"type_names": 0x5097B,
+	"type_matchups": 0x34BB1,
 	"font": 0xF8200,
 	"frames": 0xF8800,
 	"bar_palettes": 0xA8BE,
@@ -314,6 +374,18 @@ static func move_data_offset(layout: Dictionary, move: int) -> int:
 ## pointers are two bytes, not three: the strings sit in the table's own bank.
 static func type_name_pointer_offset(layout: Dictionary, type_number: int) -> int:
 	return int(layout["type_names"]) + type_number * TYPE_POINTER_SIZE
+
+
+## Whether a byte is a type number the matchup chart could be talking about.
+##
+## The type numbers are sparse, and the run between the two groups is padding
+## that a move's type byte may legitimately hold but that no matchup names. A
+## walk that has left the table lands in that gap almost immediately, which is
+## most of what makes this a check worth having.
+static func is_matchup_type(value: int) -> bool:
+	if value <= PHYSICAL_TYPES_END:
+		return true
+	return value >= SPECIAL_TYPES_START and value < TYPE_COUNT
 
 
 static func font_offset(layout: Dictionary) -> int:
