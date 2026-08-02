@@ -17,7 +17,9 @@ extends SceneTree
 ## them and the digits where they can be read at a glance.
 
 const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back", "trainers"]
-const SHEETS: PackedStringArray = ["font", "frames"]
+const SHEETS: PackedStringArray = [
+	"font", "frames", "battle_font", "enemy_hud", "player_hud", "exp_bar",
+]
 
 ## Tiles per row when a strip is folded for viewing.
 const SHEET_COLUMNS: int = 16
@@ -87,8 +89,9 @@ func _find_cache(game: StringName) -> String:
 	return directory if RomCache.is_usable(directory) else ""
 
 
-## A 1bpp strip, folded into rows of [constant SHEET_COLUMNS] tiles. There is no
-## palette to choose: 1bpp graphics are black on white and nothing else.
+## A tile strip, folded into rows of [constant SHEET_COLUMNS] tiles. There is no
+## palette to choose: a sheet has none of its own, so it is drawn in the greys a
+## Game Boy would have shown before a palette was applied.
 func _render_sheet(directory: String, sheet: Dictionary, name: String) -> Image:
 	var indices: PackedByteArray = RomCache.read_indices(RomCache.tile_path(directory, name))
 	var strip_width: int = int(sheet["width"])
@@ -117,7 +120,9 @@ func _render_sheet(directory: String, sheet: Dictionary, name: String) -> Image:
 
 	return Gen2PicImage.from_indices(
 		folded, width, rows * Gen2Tiles.TILE_HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		Gen2Palette.pic_palette(PackedColorArray([
+			Color(0.66, 0.66, 0.66), Color(0.33, 0.33, 0.33),
+		]))
 	)
 
 

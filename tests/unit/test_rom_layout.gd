@@ -218,6 +218,39 @@ func test_the_font_and_the_frames_do_not_overlap_or_run_off_the_end() -> void:
 		assert_lt(last, RomRegistry.EXPECTED_SIZE)
 
 
+func test_the_battle_graphics_sit_back_to_back_in_the_order_they_are_stored() -> void:
+	# They are one run in the cartridge: the enemy's HUD border, the player's,
+	# then the exp bar. Each offset is a claim about where the one before it ends.
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		assert_eq(
+			int(layout["enemy_hud"]) + RomLayout.ENEMY_HUD_TILES * Gen2Tiles.TILE_1BPP_BYTES,
+			int(layout["player_hud"]), "%s: the player's HUD does not follow the enemy's" % id
+		)
+		assert_eq(
+			int(layout["player_hud"]) + RomLayout.PLAYER_HUD_TILES * Gen2Tiles.TILE_1BPP_BYTES,
+			int(layout["exp_bar"]), "%s: the exp bar does not follow the HUD borders" % id
+		)
+
+
+func test_the_battle_font_follows_the_font_itself() -> void:
+	# Both are in the section the font opens, and the battle sheet is the next
+	# thing in it after the 128 glyphs.
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		assert_eq(
+			RomLayout.font_offset(layout) + RomLayout.FONT_TILES * Gen2Tiles.TILE_1BPP_BYTES,
+			int(layout["battle_font"]), "%s battle font" % id
+		)
+
+
+func test_the_bars_have_a_level_for_every_step_of_their_tiles() -> void:
+	assert_lt(
+		RomLayout.HP_BAR_FIRST_TILE + RomLayout.HP_BAR_LEVELS, RomLayout.BATTLE_FONT_TILES
+	)
+	assert_lt(RomLayout.EXP_BAR_LEVELS, RomLayout.EXP_BAR_TILES)
+
+
 func test_a_fixed_bank_still_addresses_inside_the_cartridge() -> void:
 	for id: StringName in RomRegistry.ORDER:
 		var layout: Dictionary = RomLayout.for_id(id)

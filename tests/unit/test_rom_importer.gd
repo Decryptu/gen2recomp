@@ -274,3 +274,85 @@ func test_a_dump_with_no_trainers_in_it_fails() -> void:
 	var data: PackedByteArray = PackedByteArray()
 	data.resize(RomRegistry.EXPECTED_SIZE)
 	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
+
+
+## A battle sheet at every offset the layout claims: two bars that count up, and
+## two HUD borders whose tiles all differ.
+func _battle_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_bar(data, int(_layout["battle_font"]), RomLayout.HP_BAR_FIRST_TILE, RomLayout.HP_BAR_LEVELS)
+	_write_bar(data, int(_layout["exp_bar"]), 0, RomLayout.EXP_BAR_LEVELS)
+	_write_hud(data, int(_layout["enemy_hud"]), RomLayout.ENEMY_HUD_TILES)
+	_write_hud(data, int(_layout["player_hud"]), RomLayout.PLAYER_HUD_TILES)
+	return data
+
+
+## Fill levels as 2bpp tiles, each one two pixels fuller than the last.
+func _write_bar(data: PackedByteArray, at: int, first: int, levels: int) -> void:
+	for level: int in levels:
+		_write(
+			data, at + (first + level) * Gen2Tiles.TILE_BYTES,
+			_lit_tile(Gen2Tiles.TILE_WIDTH + level * RomLayout.BAR_STEP_PIXELS)
+		)
+
+
+## A 2bpp tile with [param pixels] lit, filled row by row.
+func _lit_tile(pixels: int) -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(Gen2Tiles.TILE_BYTES)
+	for pixel: int in pixels:
+		@warning_ignore("integer_division")
+		var row: int = pixel / Gen2Tiles.TILE_WIDTH
+		out[row * 2] |= 1 << (7 - pixel % Gen2Tiles.TILE_WIDTH)
+	return out
+
+
+## 1bpp tiles that all have ink and none of which repeats another.
+func _write_hud(data: PackedByteArray, at: int, tiles: int) -> void:
+	for tile: int in tiles:
+		var bytes: PackedByteArray = PackedByteArray()
+		bytes.resize(Gen2Tiles.TILE_1BPP_BYTES)
+		bytes[0] = 0xFF << (7 - tile) & 0xFF
+		bytes[1] = 0x18
+		_write(data, at + tile * Gen2Tiles.TILE_1BPP_BYTES, bytes)
+
+
+func test_battle_graphics_that_count_up_verify() -> void:
+	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(_battle_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+func test_a_bar_whose_levels_do_not_climb_fails() -> void:
+	# The check the bars exist for: neither has a name or a number in the
+	# cartridge, and a run of tiles that counts up is what says it is a bar.
+	var data: PackedByteArray = _battle_dump()
+	_write(
+		data,
+		int(_layout["battle_font"]) + (RomLayout.HP_BAR_FIRST_TILE + 4) * Gen2Tiles.TILE_BYTES,
+		_lit_tile(Gen2Tiles.TILE_WIDTH)
+	)
+	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+func test_an_exp_bar_that_is_not_there_fails() -> void:
+	var data: PackedByteArray = _battle_dump()
+	for i: int in RomLayout.EXP_BAR_TILES * Gen2Tiles.TILE_BYTES:
+		data[int(_layout["exp_bar"]) + i] = 0
+	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+func test_a_blank_hud_tile_fails() -> void:
+	var data: PackedByteArray = _battle_dump()
+	for row: int in Gen2Tiles.TILE_1BPP_BYTES:
+		data[int(_layout["player_hud"]) + 2 * Gen2Tiles.TILE_1BPP_BYTES + row] = 0
+	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+func test_hud_tiles_that_repeat_mean_it_is_not_the_border() -> void:
+	var data: PackedByteArray = _battle_dump()
+	_write(
+		data, int(_layout["enemy_hud"]) + Gen2Tiles.TILE_1BPP_BYTES,
+		data.slice(int(_layout["enemy_hud"]), int(_layout["enemy_hud"]) + Gen2Tiles.TILE_1BPP_BYTES)
+	)
+	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])

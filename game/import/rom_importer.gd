@@ -149,6 +149,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not frames["ok"]:
 		return frames
 
+	var battle: Dictionary = verify_battle_graphics(rom, layout)
+	if not battle["ok"]:
+		return battle
+
 	var trainers: Dictionary = verify_trainers(rom, layout)
 	if not trainers["ok"]:
 		return trainers
@@ -263,6 +267,102 @@ static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
 		seen.append(tiles)
 
 	return {"ok": true, "message": ""}
+
+
+## The battle HUD's graphics, checked by the one thing they do that nothing else
+## in the section does: they count.
+##
+## A bar's fill levels are consecutive tiles, each lighting one more column than
+## the last, so the ink in that run climbs by exactly two pixels a step. Neither
+## bar has a name or a number in the cartridge, but a run that counts up like
+## that is not something a wrong offset lands on. The two HUD borders have
+## neither content nor a progression, so they are checked the way the text box
+## frames are: every tile has ink, and no two tiles are the same.
+static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var data: PackedByteArray = rom.bytes()
+
+	var battle_font: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, int(layout["battle_font"]), RomLayout.BATTLE_FONT_TILES
+	)
+	var hp_bar: Dictionary = _verify_bar(
+		battle_font, RomLayout.BATTLE_FONT_TILES, RomLayout.HP_BAR_FIRST_TILE,
+		RomLayout.HP_BAR_LEVELS, "HP bar"
+	)
+	if not hp_bar["ok"]:
+		return hp_bar
+
+	var exp_bar: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, int(layout["exp_bar"]), RomLayout.EXP_BAR_TILES
+	)
+	var levels: Dictionary = _verify_bar(
+		exp_bar, RomLayout.EXP_BAR_TILES, 0, RomLayout.EXP_BAR_LEVELS, "exp bar"
+	)
+	if not levels["ok"]:
+		return levels
+
+	for name: String in ["enemy_hud", "player_hud"]:
+		var tiles: int = RomLayout.ENEMY_HUD_TILES if name == "enemy_hud" \
+			else RomLayout.PLAYER_HUD_TILES
+		var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(
+			data, int(layout[name]), tiles
+		)
+		var seen: Array = []
+		for tile: int in tiles:
+			var pixels: PackedByteArray = _strip_tile(strip, tiles, tile)
+			if _ink(pixels) == 0:
+				return {"ok": false, "message": "%s tile %d is blank." % [name, tile]}
+			if seen.has(pixels):
+				return {"ok": false, "message": "%s tile %d repeats an earlier one." % [name, tile]}
+			seen.append(pixels)
+
+	return {"ok": true, "message": ""}
+
+
+## One bar's fill levels: consecutive tiles whose ink climbs by a fixed step.
+static func _verify_bar(
+	strip: PackedByteArray, tiles: int, first: int, levels: int, what: String
+) -> Dictionary:
+	if strip.size() != tiles * Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT:
+		return {"ok": false, "message": "%s: strip decoded short." % what}
+
+	var previous: int = _ink(_strip_tile(strip, tiles, first))
+	if previous == 0:
+		return {"ok": false, "message": "%s: the empty level has no ink." % what}
+
+	for level: int in range(1, levels):
+		var ink: int = _ink(_strip_tile(strip, tiles, first + level))
+		if ink != previous + RomLayout.BAR_STEP_PIXELS:
+			return {
+				"ok": false,
+				"message": "%s: level %d has %d pixels, expected %d." % [
+					what, level, ink, previous + RomLayout.BAR_STEP_PIXELS,
+				],
+			}
+		previous = ink
+
+	return {"ok": true, "message": ""}
+
+
+## One tile out of a strip, as its own buffer.
+static func _strip_tile(strip: PackedByteArray, tiles: int, tile: int) -> PackedByteArray:
+	var width: int = tiles * Gen2Tiles.TILE_WIDTH
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(Gen2Tiles.TILE_PIXELS)
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			out[row * Gen2Tiles.TILE_WIDTH + column] = strip[
+				row * width + tile * Gen2Tiles.TILE_WIDTH + column
+			]
+	return out
+
+
+## Lit pixels in a decoded tile, whatever colour they are.
+static func _ink(pixels: PackedByteArray) -> int:
+	var out: int = 0
+	for index: int in pixels:
+		if index != 0:
+			out += 1
+	return out
 
 
 ## The three trainer tables, each checked by what is known about it independently.
@@ -614,12 +714,19 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 	return out
 
 
-## Decodes the font and the eight text box borders, each as one strip of tiles.
+## Decodes the fixed tile sheets: the font, the eight text box borders and the
+## battle HUD's graphics, each as one strip of tiles.
 ##
-## Neither is compressed and neither is per-species, so unlike a pic there is
-## nothing to look up: the whole of both is a fixed run of 1bpp tiles. They are
-## kept as strips because both are addressed by character code, and a strip
-## turns that code into a horizontal offset and nothing else.
+## None of them is compressed and none is per-species, so unlike a pic there is
+## nothing to look up: each is a fixed run of tiles at a known place. They are
+## kept as strips because each is addressed by a number, whether a character code
+## or a tile in a bar, and a strip turns that number into a horizontal offset and
+## nothing else.
+##
+## [code]first_code[/code] is the character code a sheet's first tile draws, and
+## is zero for the sheets that are graphics rather than characters. [code]bits[/code]
+## is how the cartridge stores them: the font and the borders are 1bpp, the
+## battle graphics 2bpp.
 func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 	var sheets: Dictionary = {
@@ -627,11 +734,37 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"offset": RomLayout.font_offset(layout),
 			"tiles": RomLayout.FONT_TILES,
 			"first_code": RomLayout.FONT_FIRST_CODE,
+			"bits": 1,
 		},
 		"frames": {
 			"offset": RomLayout.frame_offset(layout, 0),
 			"tiles": RomLayout.FRAME_COUNT * RomLayout.FRAME_TILES,
 			"first_code": RomLayout.FRAME_FIRST_CODE,
+			"bits": 1,
+		},
+		"battle_font": {
+			"offset": int(layout["battle_font"]),
+			"tiles": RomLayout.BATTLE_FONT_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"enemy_hud": {
+			"offset": int(layout["enemy_hud"]),
+			"tiles": RomLayout.ENEMY_HUD_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"player_hud": {
+			"offset": int(layout["player_hud"]),
+			"tiles": RomLayout.PLAYER_HUD_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"exp_bar": {
+			"offset": int(layout["exp_bar"]),
+			"tiles": RomLayout.EXP_BAR_TILES,
+			"first_code": 0,
+			"bits": 2,
 		},
 	}
 
@@ -640,7 +773,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]
 		var count: int = sheet["tiles"]
-		var indices: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, sheet["offset"], count)
+		var indices: PackedByteArray = _decode_strip(data, sheet)
 		var directory: String = RomCache.directory_for(rom.id, rom.sha1)
 		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
 			return {}
@@ -649,6 +782,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"height": Gen2Tiles.TILE_HEIGHT,
 			"tiles": count,
 			"first_code": sheet["first_code"],
+			"bits": sheet["bits"],
 		}
 
 		done += 1
@@ -656,6 +790,12 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			on_progress.call("tiles", done, sheets.size())
 
 	return written
+
+
+static func _decode_strip(data: PackedByteArray, sheet: Dictionary) -> PackedByteArray:
+	if int(sheet["bits"]) == 1:
+		return Gen2Tiles.decode_1bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
+	return Gen2Tiles.decode_2bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
 
 
 func _import_pics(
