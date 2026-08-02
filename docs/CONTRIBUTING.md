@@ -33,11 +33,72 @@ The ROM layer is the model for the rest of the engine:
 - `game/rom/rom_registry.gd` — the SHA-1 allowlist.
 - `game/rom/rom_verifier.gd` — size pre-filter, then chunked SHA-1, then
   lookup.
+- `game/rom/rom_file.gd` — a verified dump in memory, plus bank addressing.
+- `game/rom/rom_header.gd` — the cartridge header, for diagnostics only.
 
-Both are `RefCounted` statics with no scene dependencies, so the import gate is
-fully testable headlessly. Keep the engine core the same shape: rules apart
-from content, and randomness injected as an explicit `RandomNumberGenerator`
-rather than pulled from a global, so a whole battle can play out inside a test.
+All of them are `RefCounted` statics with no scene dependencies, so the import
+gate is fully testable headlessly. Keep the engine core the same shape: rules
+apart from content, and randomness injected as an explicit
+`RandomNumberGenerator` rather than pulled from a global, so a whole battle can
+play out inside a test.
+
+The importer under `game/import/` decodes a verified cartridge into a cache:
+
+| | |
+|---|---|
+| `lz_decompressor.gd` | The LZ variant every compressed graphic uses |
+| `tile_codec.gd` | 2bpp tiles to colour indices; pic layout |
+| `text_codec.gd` | The Generation 2 character encoding |
+| `palette.gd` | 15-bit BGR colours |
+| `rom_layout.gd` | Where each table lives, per game |
+| `rom_cache.gd` | The `user://` cache: paths, formats, lifecycle |
+| `rom_importer.gd` | Orchestration, and the layout self-check |
+
+Each decoder takes bytes and returns data — none of them knows what a cartridge
+is, so all of them are testable on a handful of hand-built bytes.
+
+## Offsets, and why they are checked at runtime
+
+`rom_layout.gd` is a table of absolute positions inside each supported dump. An
+offset is a claim about a specific 2 MiB file, and a wrong one does not throw:
+it decodes neighbouring data into something plausible. A palette table that was
+one entire table too far along still produced 251 sprites — the right shapes in
+the wrong colours — and every unit test stayed green.
+
+So every offset ships with a check that would fail if it were wrong, and
+`RomImporter.verify_layout()` runs all of them before a single byte is decoded:
+
+- Species names are read through the text codec and compared against the first
+  and last species, which pins the offset, the stride and the character map at
+  once.
+- Every base stats entry begins with its own Pokédex number, so the whole table
+  self-checks in one pass.
+- Palettes have no self-identifying field, so they are checked structurally: a
+  colour is 15 bits, and no species is drawn in two blacks.
+
+When you add an offset, add its check. "It produced output" is not evidence.
+
+New offsets were found by searching the cartridge for content whose bytes are
+known independently — the encoded string `BULBASAUR`, a species' published base
+stats — and then confirming the *structure* against the
+[pret](https://github.com/pret) disassemblies, which are the reference for how
+these games are laid out. Do not copy an address out of a disassembly and
+assume it applies: those are bank:address pairs for a build of the source, and
+Gold, Silver and Crystal do not agree.
+
+## Seeing that a decode is right
+
+For anything graphical, look at it. `tools/preview_pics.gd` applies a palette to
+the cached indices and writes a PNG:
+
+```bash
+godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
+```
+
+A contact sheet of all 251 species is the fastest correctness check the project
+has — a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
+in a pointer table all look obviously wrong, and all of them look fine in a
+manifest.
 
 ## Seeing the UI without pressing Play
 
@@ -80,6 +141,11 @@ so it cannot run under `--headless`.
 - **A `.tscn` root node with no `script =` line fails quietly.** The scene
   loads and every node resolves; it just does nothing. If a screen is inert,
   check the root kept its script line.
+- **JSON has one number type, so everything comes back as a float.** A species
+  number written as `1` reads back as `1.0`, and `read["number"] == 1` is
+  false. Anything loading the cache must coerce with `int()`; there is a test
+  in `test_rom_cache.gd` that pins this down so nobody rediscovers it the hard
+  way.
 - **GDScript lambdas capture by value.** Assigning to a captured local inside a
   `func():` closure updates the copy, not the original — the write silently
   vanishes. Append to an Array/Dictionary, or use a method.
