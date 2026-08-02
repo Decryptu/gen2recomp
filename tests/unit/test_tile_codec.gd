@@ -115,6 +115,26 @@ func test_a_1bpp_strip_that_runs_out_of_data_keeps_its_size() -> void:
 	assert_eq(strip.count(0), strip.size())
 
 
+func test_a_2bpp_strip_keeps_all_four_colours_where_a_1bpp_one_has_two() -> void:
+	# The battle HUD is 2bpp, so its strips carry the middle indices the font
+	# never produces.
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(Gen2Tiles.TILE_BYTES)
+	data[0] = 0xF0
+	data[1] = 0xCC
+	var strip: PackedByteArray = Gen2Tiles.decode_2bpp_strip(data, 0, 1)
+	assert_eq(strip.size(), Gen2Tiles.TILE_PIXELS)
+	assert_eq(strip[0], 3, "both planes set")
+	assert_eq(strip[2], 1, "low plane only")
+	assert_eq(strip[4], 2, "high plane only")
+	assert_eq(strip[6], 0)
+
+
+func test_a_2bpp_strip_that_runs_out_of_data_keeps_its_size() -> void:
+	var strip: PackedByteArray = Gen2Tiles.decode_2bpp_strip(PackedByteArray(), 0, 4)
+	assert_eq(strip.size(), 4 * Gen2Tiles.TILE_PIXELS)
+
+
 func test_blit_places_a_small_pic_inside_a_cell() -> void:
 	var source: PackedByteArray = PackedByteArray([1, 2, 3, 4])
 	var destination: PackedByteArray = PackedByteArray()

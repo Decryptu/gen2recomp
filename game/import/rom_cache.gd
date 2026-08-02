@@ -28,7 +28,7 @@ const TILES_DIR: String = "tiles"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 4
+const FORMAT_VERSION: int = 5
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -63,9 +63,10 @@ static func pic_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, PICS_DIR, name]
 
 
-## Fixed tile sheets: the font and the text box borders. Kept apart from the
-## pics because they are addressed by character code rather than by species, and
-## because they are 1bpp, so the two never want the same accessor.
+## Fixed tile sheets: the font, the text box borders and the battle HUD's
+## graphics. Kept apart from the pics because they are addressed by a tile number
+## rather than by species, and because a sheet has no palette of its own, so the
+## two never want the same accessor.
 static func tile_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, TILES_DIR, name]
 

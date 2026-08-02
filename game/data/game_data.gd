@@ -27,6 +27,7 @@ var _types: Array = []
 var _trainers: Array = []
 var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
+var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 
 
@@ -51,6 +52,7 @@ static func open_directory(path: String) -> GameData:
 	data.sha1 = String(manifest.get("sha1", ""))
 	data._atlases = manifest.get("atlases", {})
 	data._tiles = manifest.get("tiles", {})
+	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
@@ -112,6 +114,31 @@ func palette(number: int, shiny: bool = false) -> PackedColorArray:
 		Gen2Palette.from_packed(int(stored[0])),
 		Gen2Palette.from_packed(int(stored[1])),
 	]))
+
+
+## One of the battle bars' palettes, by the names in
+## [constant RomLayout.BAR_PALETTE_NAMES]. An unknown name answers with white and
+## black, which draws a bar that is legible and obviously not coloured.
+func bar_palette(name: String) -> PackedColorArray:
+	var stored: Variant = _bar_palettes.get(name, null)
+	if not stored is Array or (stored as Array).size() < 2:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int(stored[0])),
+		Gen2Palette.from_packed(int(stored[1])),
+	]))
+
+
+## Which HP bar palette a bar of [param lit] pixels is drawn in. The colour
+## follows what is drawn rather than the numbers behind it, which is why a bar
+## can turn red on a Pokémon that still has a good few hit points.
+static func hp_bar_palette_name(lit: int) -> String:
+	if lit >= RomLayout.HP_GREEN_PIXELS:
+		return "hp_green"
+	if lit >= RomLayout.HP_YELLOW_PIXELS:
+		return "hp_yellow"
+	return "hp_red"
 
 
 func trainer_count() -> int:

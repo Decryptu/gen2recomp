@@ -76,6 +76,35 @@ static func decode_1bpp_strip(data: PackedByteArray, offset: int, count: int) ->
 	return out
 
 
+## The same, for tiles stored 2bpp: the battle HUD's graphics, which are four
+## colours where the font is two.
+##
+## Kept as a strip for the same reason the font is. These sheets are addressed by
+## tile number, so one row turns that number into a horizontal offset and nothing
+## else, and a sheet that decoded short leaves a visible hole rather than failing.
+static func decode_2bpp_strip(data: PackedByteArray, offset: int, count: int) -> PackedByteArray:
+	var width: int = count * TILE_WIDTH
+	var out: PackedByteArray = PackedByteArray()
+	if count <= 0:
+		return out
+	out.resize(width * TILE_HEIGHT)
+
+	var pixels: PackedByteArray = PackedByteArray()
+	pixels.resize(TILE_PIXELS)
+
+	for tile: int in count:
+		var at: int = offset + tile * TILE_BYTES
+		if at < 0 or at + TILE_BYTES > data.size():
+			break
+		decode_tile_into(data, at, pixels, 0)
+		for row: int in TILE_HEIGHT:
+			var destination: int = row * width + tile * TILE_WIDTH
+			for column: int in TILE_WIDTH:
+				out[destination + column] = pixels[row * TILE_WIDTH + column]
+
+	return out
+
+
 ## Decodes a Pokémon or trainer pic into a row-major index buffer
 ## [param columns] * 8 wide and [param rows] * 8 tall.
 ##

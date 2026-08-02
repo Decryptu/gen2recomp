@@ -83,6 +83,47 @@ const FRAME_VERTICAL: int = 3
 const FRAME_BOTTOM_LEFT: int = 4
 const FRAME_BOTTOM_RIGHT: int = 5
 
+## The battle HUD's own graphics, which sit in the same section as the font and
+## the text box borders and are the rest of what a battle screen draws.
+##
+## [code]battle_font[/code] is 2bpp and carries "HP:", the nine fill levels of
+## the HP bar and the battle screen's odds and ends. The two HUD borders are 1bpp
+## and are the boxes a name and a level sit in, one shape for the enemy's and one
+## for the player's. The exp bar is 2bpp and is seven fill levels and two ends.
+const BATTLE_FONT_TILES: int = 32
+const ENEMY_HUD_TILES: int = 4
+const PLAYER_HUD_TILES: int = 6
+const EXP_BAR_TILES: int = 9
+
+## The four palettes a battle draws its bars with: the HP bar in green, yellow
+## or red depending on how much is left, and the exp bar in blue. They are two
+## colours each like a species' palette, white and black being implied, and they
+## sit immediately before the species palettes in every game.
+##
+## The names are the cache's keys, and the order is the cartridge's.
+const BAR_PALETTE_NAMES: Array = ["hp_green", "hp_yellow", "hp_red", "exp"]
+
+## What those palettes hold. This is content whose value is known independently,
+## like the first species name, so the check for the offset is the values
+## themselves: every bar shares a light colour and differs in the dark one.
+const BAR_PALETTES: Array = [
+	[0x3F5E, 0x02E0], [0x3F5E, 0x02BF], [0x3F5E, 0x001F], [0x3F5E, 0x7E24],
+]
+
+## An HP bar is green down to half and yellow down to a fifth, measured in lit
+## pixels rather than in hit points: what colours the bar is what is drawn.
+const HP_GREEN_PIXELS: int = 24
+const HP_YELLOW_PIXELS: int = 10
+
+## The HP bar's fill levels within [constant BATTLE_FONT_TILES], and the exp
+## bar's within its own strip. Each step lights one more column, which is two
+## more pixels than the step before, and that progression is what proves the
+## offset: nothing else in the section counts up like this.
+const HP_BAR_FIRST_TILE: int = 2
+const HP_BAR_LEVELS: int = 9
+const EXP_BAR_LEVELS: int = 7
+const BAR_STEP_PIXELS: int = 2
+
 ## Trainer classes are numbered from 1; class 0 is the player, who has a palette
 ## in the table but no pic in it. Crystal added one class to the sixty-six Gold
 ## and Silver have, so the count lives in the layout rather than here.
@@ -143,6 +184,11 @@ const GOLD_SILVER: Dictionary = {
 	"type_names": 0x509AE,
 	"font": 0xF82F2,
 	"frames": 0xF88F2,
+	"bar_palettes": 0xAD2D,
+	"battle_font": 0xF86F2,
+	"enemy_hud": 0xF8BB2,
+	"player_hud": 0xF8BD2,
+	"exp_bar": 0xF8C02,
 	"trainer_pic_pointers": 0x80000,
 	"trainer_palettes": 0xB53D,
 	"trainer_class_names": 0x1B0955,
@@ -167,6 +213,11 @@ const CRYSTAL: Dictionary = {
 	"type_names": 0x5097B,
 	"font": 0xF8200,
 	"frames": 0xF8800,
+	"bar_palettes": 0xA8BE,
+	"battle_font": 0xF8600,
+	"enemy_hud": 0xF8AC0,
+	"player_hud": 0xF8AE0,
+	"exp_bar": 0xF8B10,
 	"trainer_pic_pointers": 0x128000,
 	"trainer_palettes": 0xB0CE,
 	"trainer_class_names": 0x2C1EF,
@@ -229,6 +280,11 @@ static func pic_pointer_offset(layout: Dictionary, species: int, back: bool) -> 
 static func unown_pic_pointer_offset(layout: Dictionary, form: int, back: bool) -> int:
 	var pair: int = form * 2 + (1 if back else 0)
 	return int(layout["unown_pic_pointers"]) + pair * PIC_POINTER_SIZE
+
+
+## One of the four bar palettes, by its position in [constant BAR_PALETTE_NAMES].
+static func bar_palette_offset(layout: Dictionary, index: int) -> int:
+	return int(layout["bar_palettes"]) + index * Gen2Palette.PAIR_BYTES
 
 
 static func trainer_class_count(layout: Dictionary) -> int:
