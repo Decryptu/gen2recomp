@@ -30,6 +30,10 @@ func _write_cache(complete: bool = true) -> void:
 	RomCache.write_json(RomCache.types_path(_directory), [
 		{"number": 0, "name": "NORMAL"}, {"number": 1, "name": "FIGHTING"},
 	])
+	RomCache.write_json(RomCache.trainers_path(_directory), [
+		{"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678]},
+		{"number": 2, "name": "YOUNGSTER", "palette": [0x0C63, 0x1084]},
+	])
 	RomCache.write_indices(RomCache.pic_path(_directory, "front"), PackedByteArray([
 		0, 0, 1, 1,
 		0, 0, 1, 1,
@@ -47,6 +51,7 @@ func _write_cache(complete: bool = true) -> void:
 		"atlases": {
 			"front": {"width": 4, "height": 4, "cell": 2, "columns": 2, "decoded": 2},
 			"back": {"width": 4, "height": 4, "cell": 2, "columns": 2, "decoded": 2},
+			"trainers": {"width": 4, "height": 2, "cell": 2, "columns": 2, "decoded": 2},
 		},
 		"tiles": {
 			"font": {"width": 2, "height": 2, "tiles": 1, "first_code": 0x80},
@@ -154,6 +159,42 @@ func test_unown_forms_come_from_their_own_atlas() -> void:
 	# There is no Unown in this two-species cache, so the answer is empty
 	# rather than a lie about slot 0 of an atlas that was never written.
 	assert_true(data.unown_pic(0).is_empty())
+
+
+func test_trainer_classes_are_numbered_from_the_first_class_not_the_player() -> void:
+	# The cartridge's palette table opens with the player, who has no pic. The
+	# cache does not carry that entry, so class 1 is the first row here.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.trainer_count(), 2)
+	assert_eq(data.trainer_name(1), "LEADER")
+	assert_eq(data.trainer_pic(1)["slot"], 0)
+
+
+func test_a_trainer_palette_has_no_shiny_half() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var palette: PackedColorArray = data.trainer_palette(1)
+	assert_eq(palette.size(), Gen2Palette.COLORS_PER_PIC)
+	assert_eq(palette[0], Color.WHITE)
+	assert_ne(palette, data.trainer_palette(2))
+
+
+func test_a_trainer_pic_always_fills_its_cell() -> void:
+	# Every trainer is drawn at one size, unlike a species front pic.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var pic: Dictionary = data.trainer_pic(2)
+	assert_eq(pic["width"], 2)
+	assert_eq(pic["height"], 2)
+
+
+func test_an_unknown_trainer_class_answers_empty() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_true(data.trainer(0).is_empty(), "class 0 is the player, who has no entry")
+	assert_true(data.trainer_pic(99).is_empty())
+	assert_eq(data.trainer_name(99), "")
 
 
 func test_index_buffers_are_read_once_and_kept() -> void:

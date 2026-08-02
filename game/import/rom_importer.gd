@@ -19,6 +19,13 @@ extends RefCounted
 ## their real size.
 const ATLAS_COLUMNS: int = 16
 
+## Falkner is trainer class 1 in all three games, and the class in the middle is
+## a walk check on a table whose entries are terminated rather than padded. The
+## class that ends the table differs between games and lives in [RomLayout].
+const TRAINER_FIRST_CLASS: String = "LEADER"
+const TRAINER_MIDDLE_CLASS: int = 22
+const TRAINER_MIDDLE_CLASS_NAME: String = "YOUNGSTER"
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -142,6 +149,14 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not frames["ok"]:
 		return frames
 
+	var battle: Dictionary = verify_battle_graphics(rom, layout)
+	if not battle["ok"]:
+		return battle
+
+	var trainers: Dictionary = verify_trainers(rom, layout)
+	if not trainers["ok"]:
+		return trainers
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -254,6 +269,230 @@ static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"ok": true, "message": ""}
 
 
+## The battle HUD's graphics, checked by the one thing they do that nothing else
+## in the section does: they count.
+##
+## A bar's fill levels are consecutive tiles, each lighting one more column than
+## the last, so the ink in that run climbs by exactly two pixels a step. Neither
+## bar has a name or a number in the cartridge, but a run that counts up like
+## that is not something a wrong offset lands on. The two HUD borders have
+## neither content nor a progression, so they are checked the way the text box
+## frames are: every tile has ink, and no two tiles are the same.
+static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var data: PackedByteArray = rom.bytes()
+
+	# The bar palettes are known values rather than a shape, so they are checked
+	# as the species names are: against what they have to say.
+	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
+		var entry: int = RomLayout.bar_palette_offset(layout, index)
+		var wanted: Array = RomLayout.BAR_PALETTES[index]
+		for colour: int in wanted.size():
+			var read: int = rom.u16le(entry + colour * Gen2Palette.COLOR_BYTES)
+			if read != int(wanted[colour]):
+				return {
+					"ok": false,
+					"message": "Bar palette %s colour %d: expected $%04X, read $%04X." % [
+						RomLayout.BAR_PALETTE_NAMES[index], colour, wanted[colour], read,
+					],
+				}
+
+	var battle_font: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, int(layout["battle_font"]), RomLayout.BATTLE_FONT_TILES
+	)
+	var hp_bar: Dictionary = _verify_bar(
+		battle_font, RomLayout.BATTLE_FONT_TILES, RomLayout.HP_BAR_FIRST_TILE,
+		RomLayout.HP_BAR_LEVELS, "HP bar"
+	)
+	if not hp_bar["ok"]:
+		return hp_bar
+
+	var exp_bar: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, int(layout["exp_bar"]), RomLayout.EXP_BAR_TILES
+	)
+	var levels: Dictionary = _verify_bar(
+		exp_bar, RomLayout.EXP_BAR_TILES, 0, RomLayout.EXP_BAR_LEVELS, "exp bar"
+	)
+	if not levels["ok"]:
+		return levels
+
+	for name: String in ["enemy_hud", "player_hud"]:
+		var tiles: int = RomLayout.ENEMY_HUD_TILES if name == "enemy_hud" \
+			else RomLayout.PLAYER_HUD_TILES
+		var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(
+			data, int(layout[name]), tiles
+		)
+		var seen: Array = []
+		for tile: int in tiles:
+			var pixels: PackedByteArray = _strip_tile(strip, tiles, tile)
+			if _ink(pixels) == 0:
+				return {"ok": false, "message": "%s tile %d is blank." % [name, tile]}
+			if seen.has(pixels):
+				return {"ok": false, "message": "%s tile %d repeats an earlier one." % [name, tile]}
+			seen.append(pixels)
+
+	return {"ok": true, "message": ""}
+
+
+## One bar's fill levels: consecutive tiles whose ink climbs by a fixed step.
+static func _verify_bar(
+	strip: PackedByteArray, tiles: int, first: int, levels: int, what: String
+) -> Dictionary:
+	if strip.size() != tiles * Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT:
+		return {"ok": false, "message": "%s: strip decoded short." % what}
+
+	var previous: int = _ink(_strip_tile(strip, tiles, first))
+	if previous == 0:
+		return {"ok": false, "message": "%s: the empty level has no ink." % what}
+
+	for level: int in range(1, levels):
+		var ink: int = _ink(_strip_tile(strip, tiles, first + level))
+		if ink != previous + RomLayout.BAR_STEP_PIXELS:
+			return {
+				"ok": false,
+				"message": "%s: level %d has %d pixels, expected %d." % [
+					what, level, ink, previous + RomLayout.BAR_STEP_PIXELS,
+				],
+			}
+		previous = ink
+
+	return {"ok": true, "message": ""}
+
+
+## One tile out of a strip, as its own buffer.
+static func _strip_tile(strip: PackedByteArray, tiles: int, tile: int) -> PackedByteArray:
+	var width: int = tiles * Gen2Tiles.TILE_WIDTH
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(Gen2Tiles.TILE_PIXELS)
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			out[row * Gen2Tiles.TILE_WIDTH + column] = strip[
+				row * width + tile * Gen2Tiles.TILE_WIDTH + column
+			]
+	return out
+
+
+## Lit pixels in a decoded tile, whatever colour they are.
+static func _ink(pixels: PackedByteArray) -> int:
+	var out: int = 0
+	for index: int in pixels:
+		if index != 0:
+			out += 1
+	return out
+
+
+## The three trainer tables, each checked by what is known about it independently.
+##
+## They are checked together because they are three views of one numbering, and
+## a mistake in any of them shows up as the three disagreeing: the names say what
+## a class is, the palette table has one entry more than the pic table because
+## the player owns the first one, and the pic table's entries have to decompress
+## into pics of the one size every trainer is drawn at.
+static func verify_trainers(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.trainer_class_count(layout)
+	var names: PackedStringArray = Gen2Text.decode_sequence(
+		rom.bytes(), int(layout["trainer_class_names"]), count, RomLayout.MAX_NAME_LENGTH
+	)
+	if names.size() != count:
+		return {"ok": false, "message": "Trainer class names ran out after %d." % names.size()}
+	# Falkner opens the table, and the classes are terminated rather than padded,
+	# so the far end is checked as well as the near one. The class in the middle
+	# catches a start that is right and a walk that is not.
+	if names[0] != TRAINER_FIRST_CLASS:
+		return {
+			"ok": false,
+			"message": "Trainer class 1: expected %s, read %s." % [TRAINER_FIRST_CLASS, names[0]],
+		}
+	if names[TRAINER_MIDDLE_CLASS - 1] != TRAINER_MIDDLE_CLASS_NAME:
+		return {
+			"ok": false,
+			"message": "Trainer class %d: expected %s, read %s." % [
+				TRAINER_MIDDLE_CLASS, TRAINER_MIDDLE_CLASS_NAME, names[TRAINER_MIDDLE_CLASS - 1],
+			],
+		}
+	var last_class: String = String(layout["trainer_last_class"])
+	if names[count - 1] != last_class:
+		return {
+			"ok": false,
+			"message": "Trainer class %d: expected %s, read %s." % [
+				count, last_class, names[count - 1],
+			],
+		}
+
+	# Palettes are checked structurally, as the species ones are, and then at one
+	# entry past the end: the table is the player plus every class, so whatever
+	# follows it must not read as a palette. Without that, an offset that slid by
+	# a whole entry would pass every check above it.
+	for trainer_class: int in range(0, count + 1):
+		var check: Dictionary = _trainer_palette_check(rom, layout, trainer_class)
+		if not check["ok"]:
+			return check
+	if _trainer_palette_check(rom, layout, count + 1)["ok"]:
+		return {
+			"ok": false,
+			"message": "Trainer palette table has a %dth entry; it should end at %d." % [
+				count + 2, count + 1,
+			],
+		}
+
+	# Every pointer has to address the switchable window of a bank that exists.
+	# The two ends are decompressed as well, which is what proves the bank repair
+	# is the same one the Pokémon pics need.
+	var lz := Gen2Lz.new()
+	var wanted: int = RomLayout.TRAINER_PIC_TILES * RomLayout.TRAINER_PIC_TILES \
+		* Gen2Tiles.TILE_BYTES
+	for trainer_class: int in range(1, count + 1):
+		var offset: int = RomLayout.trainer_pic_pointer_offset(layout, trainer_class)
+		var pointer: Dictionary = rom.far_pointer(offset)
+		var address: int = int(pointer["address"])
+		if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+			return {
+				"ok": false,
+				"message": "Trainer pic %d points at $%04X, outside the banked window." % [
+					trainer_class, address,
+				],
+			}
+		var start: int = RomFile.linear(
+			RomLayout.fix_pic_bank(layout, int(pointer["bank"])), address
+		)
+		if not rom.in_bounds(start):
+			return {"ok": false, "message": "Trainer pic %d points past the dump." % trainer_class}
+		if trainer_class != 1 and trainer_class != count:
+			continue
+		var raw: PackedByteArray = lz.decompress(rom.bytes(), start)
+		if lz.failed or raw.size() < wanted:
+			return {
+				"ok": false,
+				"message": "Trainer pic %d decompressed to %d bytes, wanted %d." % [
+					trainer_class, raw.size(), wanted,
+				],
+			}
+
+	return {"ok": true, "message": ""}
+
+
+## One trainer palette entry, checked the way a species' is: fifteen-bit colours,
+## and never two blacks.
+static func _trainer_palette_check(
+	rom: RomFile, layout: Dictionary, trainer_class: int
+) -> Dictionary:
+	var entry: int = RomLayout.trainer_palette_offset(layout, trainer_class)
+	if not rom.in_bounds(entry, Gen2Palette.PAIR_BYTES):
+		return {"ok": false, "message": "Trainer palette %d is past the end." % trainer_class}
+
+	var first: int = rom.u16le(entry)
+	var second: int = rom.u16le(entry + Gen2Palette.COLOR_BYTES)
+	if (first | second) & 0x8000:
+		return {
+			"ok": false,
+			"message": "Trainer palette %d has bit 15 set ($%04X, $%04X)." % [
+				trainer_class, first, second,
+			],
+		}
+	if first == 0 and second == 0:
+		return {"ok": false, "message": "Trainer palette %d is blank." % trainer_class}
+	return {"ok": true, "message": ""}
+
+
 ## Resolves one entry of the type name pointer table.
 static func type_name(rom: RomFile, layout: Dictionary, type_number: int) -> String:
 	var table: int = RomLayout.type_name_pointer_offset(layout, type_number)
@@ -277,6 +516,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"moves": 0,
 		"items": 0,
 		"types": 0,
+		"trainers": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -312,6 +552,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	var moves: Array = _import_moves(rom, layout, on_progress)
 	var items: Array = _import_items(rom, layout, on_progress)
 	var types: Array = _import_types(rom, layout, on_progress)
+	var trainers: Array = _import_trainers(rom, layout, on_progress)
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
 		result["message"] = "Could not write species data."
@@ -325,6 +566,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if not RomCache.write_json(RomCache.types_path(directory), types):
 		result["message"] = "Could not write type data."
 		return result
+	if not RomCache.write_json(RomCache.trainers_path(directory), trainers):
+		result["message"] = "Could not write trainer data."
+		return result
 
 	var manifest: Dictionary = {
 		"format_version": RomCache.FORMAT_VERSION,
@@ -334,6 +578,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"move_count": moves.size(),
 		"item_count": items.size(),
 		"type_count": types.size(),
+		"trainer_count": trainers.size(),
+		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
 		"complete": true,
@@ -347,9 +593,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["moves"] = moves.size()
 	result["items"] = items.size()
 	result["types"] = types.size()
+	result["trainers"] = trainers.size()
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
-	result["message"] = "Imported %d species, %d moves and %d items in %d ms." % [
-		species.size(), moves.size(), items.size(), result["elapsed_ms"],
+	result["message"] = "Imported %d species, %d moves, %d items and %d trainer classes in %d ms." % [
+		species.size(), moves.size(), items.size(), trainers.size(), result["elapsed_ms"],
 	]
 	return result
 
@@ -457,12 +704,57 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 	return out
 
 
-## Decodes the font and the eight text box borders, each as one strip of tiles.
+## Decodes the trainer classes: a name and the two colours the class is drawn in.
 ##
-## Neither is compressed and neither is per-species, so unlike a pic there is
-## nothing to look up: the whole of both is a fixed run of 1bpp tiles. They are
-## kept as strips because both are addressed by character code, and a strip
-## turns that code into a horizontal offset and nothing else.
+## A class has one palette and no shiny counterpart, so the pair is stored flat
+## rather than under a key, and the pic is found by class number in the trainer
+## atlas the way a species' is in the front one.
+func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
+	var count: int = RomLayout.trainer_class_count(layout)
+	var names: PackedStringArray = Gen2Text.decode_sequence(
+		rom.bytes(), int(layout["trainer_class_names"]), count, RomLayout.MAX_NAME_LENGTH
+	)
+	var out: Array = []
+
+	for trainer_class: int in range(1, count + 1):
+		var palette: int = RomLayout.trainer_palette_offset(layout, trainer_class)
+		out.append({
+			"number": trainer_class,
+			"name": names[trainer_class - 1],
+			"palette": [rom.u16le(palette), rom.u16le(palette + Gen2Palette.COLOR_BYTES)],
+		})
+
+		if on_progress.is_valid():
+			on_progress.call("trainers", trainer_class, count)
+
+	return out
+
+
+## The four colours a battle draws its bars in. Small enough to live in the
+## manifest beside the atlas metadata rather than in a file of its own.
+func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
+		var entry: int = RomLayout.bar_palette_offset(layout, index)
+		out[RomLayout.BAR_PALETTE_NAMES[index]] = [
+			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
+		]
+	return out
+
+
+## Decodes the fixed tile sheets: the font, the eight text box borders and the
+## battle HUD's graphics, each as one strip of tiles.
+##
+## None of them is compressed and none is per-species, so unlike a pic there is
+## nothing to look up: each is a fixed run of tiles at a known place. They are
+## kept as strips because each is addressed by a number, whether a character code
+## or a tile in a bar, and a strip turns that number into a horizontal offset and
+## nothing else.
+##
+## [code]first_code[/code] is the character code a sheet's first tile draws, and
+## is zero for the sheets that are graphics rather than characters. [code]bits[/code]
+## is how the cartridge stores them: the font and the borders are 1bpp, the
+## battle graphics 2bpp.
 func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 	var sheets: Dictionary = {
@@ -470,11 +762,37 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"offset": RomLayout.font_offset(layout),
 			"tiles": RomLayout.FONT_TILES,
 			"first_code": RomLayout.FONT_FIRST_CODE,
+			"bits": 1,
 		},
 		"frames": {
 			"offset": RomLayout.frame_offset(layout, 0),
 			"tiles": RomLayout.FRAME_COUNT * RomLayout.FRAME_TILES,
 			"first_code": RomLayout.FRAME_FIRST_CODE,
+			"bits": 1,
+		},
+		"battle_font": {
+			"offset": int(layout["battle_font"]),
+			"tiles": RomLayout.BATTLE_FONT_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"enemy_hud": {
+			"offset": int(layout["enemy_hud"]),
+			"tiles": RomLayout.ENEMY_HUD_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"player_hud": {
+			"offset": int(layout["player_hud"]),
+			"tiles": RomLayout.PLAYER_HUD_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"exp_bar": {
+			"offset": int(layout["exp_bar"]),
+			"tiles": RomLayout.EXP_BAR_TILES,
+			"first_code": 0,
+			"bits": 2,
 		},
 	}
 
@@ -483,7 +801,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]
 		var count: int = sheet["tiles"]
-		var indices: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, sheet["offset"], count)
+		var indices: PackedByteArray = _decode_strip(data, sheet)
 		var directory: String = RomCache.directory_for(rom.id, rom.sha1)
 		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
 			return {}
@@ -492,6 +810,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"height": Gen2Tiles.TILE_HEIGHT,
 			"tiles": count,
 			"first_code": sheet["first_code"],
+			"bits": sheet["bits"],
 		}
 
 		done += 1
@@ -501,6 +820,12 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	return written
 
 
+static func _decode_strip(data: PackedByteArray, sheet: Dictionary) -> PackedByteArray:
+	if int(sheet["bits"]) == 1:
+		return Gen2Tiles.decode_1bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
+	return Gen2Tiles.decode_2bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
+
+
 func _import_pics(
 	rom: RomFile, layout: Dictionary, species: Array, on_progress: Callable
 ) -> Dictionary:
@@ -508,6 +833,8 @@ func _import_pics(
 	var back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.SPECIES_COUNT)
 	var unown_front: Dictionary = _new_atlas(RomLayout.FRONTPIC_MAX_TILES, RomLayout.UNOWN_FORMS)
 	var unown_back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.UNOWN_FORMS)
+	var trainer_classes: int = RomLayout.trainer_class_count(layout)
+	var trainers: Dictionary = _new_atlas(RomLayout.TRAINER_PIC_TILES, trainer_classes)
 
 	for entry: Dictionary in species:
 		var number: int = entry["number"]
@@ -549,9 +876,21 @@ func _import_pics(
 		if on_progress.is_valid():
 			on_progress.call("pics", number, RomLayout.SPECIES_COUNT)
 
+	# Trainer pics share the pointer form and the bank repair, and differ in that
+	# every one of them is the same square and none of them has a back half.
+	for trainer_class: int in range(1, trainer_classes + 1):
+		_decode_into(
+			rom, layout, RomLayout.trainer_pic_pointer_offset(layout, trainer_class),
+			RomLayout.TRAINER_PIC_TILES, RomLayout.TRAINER_PIC_TILES, trainers, trainer_class - 1
+		)
+
+		if on_progress.is_valid():
+			on_progress.call("trainer pics", trainer_class, trainer_classes)
+
 	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
 	var atlases: Dictionary = {
 		"front": front, "back": back, "unown_front": unown_front, "unown_back": unown_back,
+		"trainers": trainers,
 	}
 	var written: Dictionary = {}
 	for name: String in atlases:

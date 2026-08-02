@@ -7,9 +7,9 @@ extends SceneTree
 ## The written-down counterpart of the contact sheet: a bad offset in a name
 ## table produces plausible words rather than an error, so the check is to read
 ## the output. <game> is a registry id (gold, silver, crystal); [table] is one of
-## species, moves, items, types, or all.
+## species, moves, items, types, trainers, or all.
 
-const TABLES: PackedStringArray = ["species", "moves", "items", "types"]
+const TABLES: PackedStringArray = ["species", "moves", "items", "types", "trainers"]
 
 
 func _initialize() -> void:
@@ -69,6 +69,11 @@ func _describe(table: String, row: Dictionary) -> String:
 			return "%3d  %-13s pow %3d  type %2d  acc %3d  pp %2d  effect %3d/%3d" % [
 				number, name, int(row["power"]), int(row["type"]), int(row["accuracy"]),
 				int(row["pp"]), int(row["effect"]), int(row["effect_chance"]),
+			]
+		"trainers":
+			var palette: Array = row["palette"]
+			return "%3d  %-13s $%04X $%04X" % [
+				number, name, int(palette[0]), int(palette[1]),
 			]
 		"species":
 			var stats: Dictionary = row["stats"]

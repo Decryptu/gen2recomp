@@ -16,8 +16,10 @@ extends SceneTree
 ## the shape the charmap describes, and it puts the alphabets, the gaps between
 ## them and the digits where they can be read at a glance.
 
-const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back"]
-const SHEETS: PackedStringArray = ["font", "frames"]
+const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back", "trainers"]
+const SHEETS: PackedStringArray = [
+	"font", "frames", "battle_font", "enemy_hud", "player_hud", "exp_bar",
+]
 
 ## Tiles per row when a strip is folded for viewing.
 const SHEET_COLUMNS: int = 16
@@ -87,8 +89,9 @@ func _find_cache(game: StringName) -> String:
 	return directory if RomCache.is_usable(directory) else ""
 
 
-## A 1bpp strip, folded into rows of [constant SHEET_COLUMNS] tiles. There is no
-## palette to choose: 1bpp graphics are black on white and nothing else.
+## A tile strip, folded into rows of [constant SHEET_COLUMNS] tiles. There is no
+## palette to choose: a sheet has none of its own, so it is drawn in the greys a
+## Game Boy would have shown before a palette was applied.
 func _render_sheet(directory: String, sheet: Dictionary, name: String) -> Image:
 	var indices: PackedByteArray = RomCache.read_indices(RomCache.tile_path(directory, name))
 	var strip_width: int = int(sheet["width"])
@@ -117,7 +120,9 @@ func _render_sheet(directory: String, sheet: Dictionary, name: String) -> Image:
 
 	return Gen2PicImage.from_indices(
 		folded, width, rows * Gen2Tiles.TILE_HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		Gen2Palette.pic_palette(PackedColorArray([
+			Color(0.66, 0.66, 0.66), Color(0.33, 0.33, 0.33),
+		]))
 	)
 
 
@@ -131,24 +136,51 @@ func _render(
 		push_error("%s holds %d bytes, expected %d." % [name, indices.size(), width * height])
 		return null
 
-	var species: Array = RomCache.read_json(RomCache.species_path(directory))
 	var cell: int = int(atlas["cell"])
 	var columns: int = int(atlas["columns"])
-	var key: String = "shiny" if shiny else "normal"
+	var palettes: Array = _palettes(directory, name, shiny)
+	if palettes.is_empty():
+		push_error("No palettes for %s." % name)
+		return null
 
 	var image: Image = Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
 	for y: int in height:
 		for x: int in width:
 			var slot: int = (y / cell) * columns + (x / cell)
-			# Unown's atlas is one cell per letter, all of them the same species.
-			var entry: Dictionary = species[
-				RomLayout.UNOWN_SPECIES - 1 if name.begins_with("unown") else mini(slot, species.size() - 1)
-			]
-			var packed: Array = entry["palette"][key]
-			var palette: PackedColorArray = Gen2Palette.pic_palette(PackedColorArray([
-				Gen2Palette.from_packed(int(packed[0])),
-				Gen2Palette.from_packed(int(packed[1])),
-			]))
+			var palette: PackedColorArray = palettes[mini(slot, palettes.size() - 1)]
 			image.set_pixel(x, y, palette[indices[y * width + x]])
 
 	return image
+
+
+## One palette per cell of an atlas, in slot order.
+##
+## The three kinds of atlas are indexed differently: a species atlas by species,
+## the trainer atlas by class, and Unown's by letter form, all twenty-six of
+## which are the one species and so share its colours.
+func _palettes(directory: String, name: String, shiny: bool) -> Array:
+	var out: Array = []
+
+	if name == "trainers":
+		for entry: Dictionary in RomCache.read_json(RomCache.trainers_path(directory)):
+			out.append(_palette_of(entry["palette"]))
+		return out
+
+	var species: Array = RomCache.read_json(RomCache.species_path(directory))
+	var key: String = "shiny" if shiny else "normal"
+	if name.begins_with("unown"):
+		var unown: Dictionary = species[RomLayout.UNOWN_SPECIES - 1]
+		for form: int in RomLayout.UNOWN_FORMS:
+			out.append(_palette_of(unown["palette"][key]))
+		return out
+
+	for entry: Dictionary in species:
+		out.append(_palette_of(entry["palette"][key]))
+	return out
+
+
+func _palette_of(packed: Array) -> PackedColorArray:
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int(packed[0])),
+		Gen2Palette.from_packed(int(packed[1])),
+	]))

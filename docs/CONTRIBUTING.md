@@ -71,6 +71,13 @@ The drawing layer is deliberately thin:
 | `render/font.gd` | Character codes to glyph tiles, blitted into a buffer |
 | `render/text_layout.gd` | A string to the lines and pages a box can show |
 | `render/text_box.gd` | The two of them, as a bordered window on the grid |
+| `render/battle_tiles.gd` | The battle's tile page, assembled as the hardware does |
+| `render/battle_hud.gd` | The two status panels, on the tile grid |
+
+`game/battle/battle_screen.gd` is the first screen that is not a development
+view. It draws what it is given and decides nothing: no turn order, no damage,
+no faint. When there is an engine it will hand the screen the same numbers a
+caller hands it today, which is why its setters take plain values.
 
 `Gen2Screen` renders the game into a `SubViewport` the size of the real
 hardware and blows it up by an integer factor, while the interface around it
@@ -126,6 +133,20 @@ So every offset ships with a check that would fail if it were wrong, and
   `Gen2Text` says are there must have ink, and the runs it has no character for
   must be blank. Those runs sit between the alphabets, so an offset out by a
   single tile drags a blank onto "z" and a glyph onto a code that has none.
+- The battle HUD's graphics are checked by the one thing they do that nothing
+  around them does: they count. A bar's fill levels are consecutive tiles, each
+  lighting one more column than the last, so the ink climbs by exactly two
+  pixels a step, and no wrong offset lands on a run like that. The two HUD
+  borders have no progression, so they are checked the way the text box frames
+  are. The four palettes the bars are drawn in are known values, so they are
+  checked against those values.
+- The three trainer tables are checked against each other, because they are
+  three views of one numbering and a mistake shows up as them disagreeing. The
+  class names pin the ends and the middle of a terminated table the way the move
+  names do; the palettes are checked structurally *and* one entry past the end,
+  since the table is the player plus every class and something that is not a
+  palette has to follow it; and the pic pointers have to address the banked
+  window and decompress into a pic of the one size every trainer is drawn at.
 - The eight text box borders have no content to check, so they are checked by
   the shape a border has to have: inset from the top of its tile row, corners
   that carry the pattern of the side they hang from, and no two frames the
@@ -163,6 +184,10 @@ A contact sheet of all 251 species is the fastest correctness check the project
 has: a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
 in a pointer table all look obviously wrong, and all of them look fine in a
 manifest.
+
+`trainers` does the same for the trainer classes, each drawn in its own class
+palette, which is where a palette table that has slid by an entry becomes
+obvious: the pics stay right and the colours move one class along.
 
 The same tool takes `font` or `frames`, which it folds into rows of sixteen
 tiles. That is the shape the charmap describes, so the alphabets, the gaps
@@ -212,6 +237,14 @@ box does not depend on how long the capture took to arrive.
 
 ```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tscn /tmp/shot.png 24 finish 1
+```
+
+The battle screen is built the same way, and it is worth photographing in more
+than one state: an HP bar changes colour as it empties, and the rule is about
+how many pixels are lit rather than how many hit points are left.
+
+```bash
+godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
 ```
 
 Keep that property when you add a screen. A handler that only exists inside an
