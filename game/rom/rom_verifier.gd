@@ -4,7 +4,7 @@ extends RefCounted
 ## Identifies a user-supplied ROM file by SHA-1 against [RomRegistry].
 ##
 ## Pure and node-free so the whole import gate is testable headlessly. Nothing
-## here reads game content — it only answers "is this a cartridge we know?".
+## here reads game content; it only answers "is this a cartridge we know?".
 ## The importer that follows is entitled to assume a verified hash.
 
 enum Status {

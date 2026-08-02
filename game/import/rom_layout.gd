@@ -7,9 +7,9 @@ extends RefCounted
 ## a decoder never has to think about banking. Gold and Silver share a layout;
 ## Crystal moved almost everything and is its own table.
 ##
-## Every offset here was located in the cartridges themselves — by searching for
+## Every offset here was located in the cartridges themselves, by searching for
 ## content whose bytes are known independently (the encoded string "BULBASAUR",
-## Bulbasaur's published base stats) — and then cross-checked against the pret
+## Bulbasaur's published base stats), and then cross-checked against the pret
 ## disassemblies for structure. That is why there is no entry for a ROM that is
 ## not in [RomRegistry]: an offset table is a claim about a specific dump, and
 ## the honest answer for an uncharacterised one is a refusal, not a guess.
@@ -22,6 +22,24 @@ const SPECIES_COUNT: int = 251
 const NAME_LENGTH: int = 10
 const BASE_STATS_SIZE: int = 32
 const PIC_POINTER_SIZE: int = 3
+
+const MOVE_COUNT: int = 251
+const MOVE_DATA_SIZE: int = 7
+
+## Item numbers run from 1 to 255. The last several entries are the unused
+## "TERU-SAMA" slots the cartridges ship with; they are decoded rather than
+## trimmed, so an item number always indexes the table directly.
+const ITEM_COUNT: int = 255
+
+## Type numbers are sparse: $00-$09 are the physical types, $14-$1B the special
+## ones, and the run between is padding that still has a name entry. Reading all
+## 28 keeps the table indexable by type number.
+const TYPE_COUNT: int = 28
+const TYPE_POINTER_SIZE: int = 2
+
+## The longest move and item name in these games is twelve characters. This is
+## the runaway guard for a terminator walk, not a field width.
+const MAX_NAME_LENGTH: int = 16
 
 ## Unown's entry in the main pic table is a deliberate $FF placeholder: its 26
 ## letter forms live in a table of their own.
@@ -57,6 +75,17 @@ const OFFSET_EGG_GROUPS: int = 23
 const OFFSET_TMHM: int = 24
 const TMHM_BYTES: int = 8
 
+## Byte positions within a 7-byte move entry.
+## The animation is the move's own number, which is what makes the table
+## self-checking in the same way the base stats are.
+const MOVE_ANIMATION: int = 0
+const MOVE_EFFECT: int = 1
+const MOVE_POWER: int = 2
+const MOVE_TYPE: int = 3
+const MOVE_ACCURACY: int = 4
+const MOVE_PP: int = 5
+const MOVE_EFFECT_CHANCE: int = 6
+
 ## Gold and Silver are byte-identical in every table below; only content differs.
 const GOLD_SILVER: Dictionary = {
 	"species_names": 0x1B0B74,
@@ -67,6 +96,7 @@ const GOLD_SILVER: Dictionary = {
 	"move_names": 0x1B1574,
 	"item_names": 0x1B0000,
 	"move_data": 0x41AFE,
+	"type_names": 0x509AE,
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -83,6 +113,7 @@ const CRYSTAL: Dictionary = {
 	"move_names": 0x1C9F29,
 	"item_names": 0x1C8000,
 	"move_data": 0x41AFB,
+	"type_names": 0x5097B,
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -109,7 +140,7 @@ static func is_characterised(id: StringName) -> bool:
 ##
 ## The tables were written before the pic sections were shuffled between banks
 ## and nobody rebuilt them, so the game repairs each pointer as it loads it.
-## Reproducing that is not optional — the stored numbers are simply wrong.
+## Reproducing that is not optional: the stored numbers are simply wrong.
 static func fix_pic_bank(layout: Dictionary, stored: int) -> int:
 	var patch: Dictionary = layout["pic_bank_patch"]
 	if patch.has(stored):
@@ -140,3 +171,21 @@ static func pic_pointer_offset(layout: Dictionary, species: int, back: bool) -> 
 static func unown_pic_pointer_offset(layout: Dictionary, form: int, back: bool) -> int:
 	var pair: int = form * 2 + (1 if back else 0)
 	return int(layout["unown_pic_pointers"]) + pair * PIC_POINTER_SIZE
+
+
+static func move_data_offset(layout: Dictionary, move: int) -> int:
+	return int(layout["move_data"]) + (move - 1) * MOVE_DATA_SIZE
+
+
+## Type names are reached through a pointer table rather than stored inline,
+## because every unused type number points at the same "NORMAL" string. The
+## pointers are two bytes, not three: the strings sit in the table's own bank.
+static func type_name_pointer_offset(layout: Dictionary, type_number: int) -> int:
+	return int(layout["type_names"]) + type_number * TYPE_POINTER_SIZE
+
+
+## The bank a dump offset falls in, for resolving a pointer that carries an
+## address but no bank number of its own.
+static func bank_of(offset: int) -> int:
+	@warning_ignore("integer_division")
+	return offset / RomFile.BANK_SIZE

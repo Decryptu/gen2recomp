@@ -1,6 +1,6 @@
 extends GutTest
 
-## The offset tables cannot be checked for correctness without a cartridge —
+## The offset tables cannot be checked for correctness without a cartridge;
 ## that is what [method RomImporter.verify_layout] does at import time. What can
 ## be checked here is that they are internally consistent and complete, and that
 ## the addressing arithmetic around them is right.
@@ -49,12 +49,45 @@ func test_tables_do_not_run_off_the_end() -> void:
 		assert_lt(last_stats + RomLayout.BASE_STATS_SIZE, RomRegistry.EXPECTED_SIZE)
 		var last_pic: int = RomLayout.pic_pointer_offset(layout, RomLayout.SPECIES_COUNT, true)
 		assert_lt(last_pic + RomLayout.PIC_POINTER_SIZE, RomRegistry.EXPECTED_SIZE)
+		var last_move: int = RomLayout.move_data_offset(layout, RomLayout.MOVE_COUNT)
+		assert_lt(last_move + RomLayout.MOVE_DATA_SIZE, RomRegistry.EXPECTED_SIZE)
+		var last_type: int = RomLayout.type_name_pointer_offset(layout, RomLayout.TYPE_COUNT - 1)
+		assert_lt(last_type + RomLayout.TYPE_POINTER_SIZE, RomRegistry.EXPECTED_SIZE)
 
 
 func test_species_tables_are_one_based() -> void:
 	var layout: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 	assert_eq(RomLayout.species_name_offset(layout, 1), int(layout["species_names"]))
 	assert_eq(RomLayout.base_stats_offset(layout, 1), int(layout["base_stats"]))
+
+
+func test_move_data_is_one_based_and_fixed_stride() -> void:
+	var layout: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
+	assert_eq(RomLayout.move_data_offset(layout, 1), int(layout["move_data"]))
+	assert_eq(
+		RomLayout.move_data_offset(layout, 3) - RomLayout.move_data_offset(layout, 2),
+		RomLayout.MOVE_DATA_SIZE
+	)
+
+
+func test_the_type_table_is_indexed_by_type_number_from_zero() -> void:
+	# Unlike the species tables: NORMAL is type $00.
+	var layout: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
+	assert_eq(RomLayout.type_name_pointer_offset(layout, 0), int(layout["type_names"]))
+	assert_eq(
+		RomLayout.type_name_pointer_offset(layout, 1) - int(layout["type_names"]),
+		RomLayout.TYPE_POINTER_SIZE
+	)
+
+
+func test_a_type_pointer_resolves_against_its_own_bank() -> void:
+	# The table stores an address and no bank, so the bank comes from where the
+	# table itself sits.
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var table: int = RomLayout.type_name_pointer_offset(layout, 0)
+		var bank: int = RomLayout.bank_of(table)
+		assert_eq(RomFile.linear(bank, 0x4000 + (table & 0x3FFF)), table)
 
 
 func test_the_palette_table_is_indexed_by_species_number() -> void:

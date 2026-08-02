@@ -12,7 +12,7 @@
 # ---------------------------------------------------------------------------
 # Bring-your-own-ROM. Nothing derived from a commercial cartridge may ever be
 # committed: not the ROM, not a save, not the extracted asset cache. The
-# pre-commit hook in .githooks/ enforces this too — see docs/CONTRIBUTING.md.
+# pre-commit hook in .githooks/ enforces this too; see docs/CONTRIBUTING.md.
 # ---------------------------------------------------------------------------
 *.gb
 *.gbc

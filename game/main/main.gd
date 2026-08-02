@@ -15,7 +15,7 @@ func _ready() -> void:
 	for id: StringName in RomRegistry.ORDER:
 		lines.append("  %-8s %s" % [RomRegistry.title_for(id), RomRegistry.sha1_for(id)])
 
-	print("gen2recomp — supported cartridges:")
+	print("gen2recomp supported cartridges:")
 	print("\n".join(lines))
 
 	_status.text = "No ROM imported\n\nSupported: %s" % ", ".join(_titles())

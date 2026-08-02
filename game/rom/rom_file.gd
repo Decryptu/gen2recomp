@@ -9,7 +9,7 @@ extends RefCounted
 ## a decoder.
 ##
 ## Reads are bounds-checked and return zero rather than faulting. Decoders walk
-## data whose length is only known once it has been decoded — a corrupt stream
+## data whose length is only known once it has been decoded, and a corrupt stream
 ## should end up as an honest "that did not decode" instead of an engine error.
 
 ## Cartridge banks are 16 KiB; the CPU sees one fixed and one switchable.
@@ -42,7 +42,7 @@ static func open_verified(rom_path: String) -> RomFile:
 	return rom
 
 
-## Wraps bytes that have already been vouched for. For tests and tooling —
+## Wraps bytes that have already been vouched for. For tests and tooling;
 ## production paths should go through [method open_verified].
 static func from_bytes(data: PackedByteArray, id: StringName = &"") -> RomFile:
 	var rom := RomFile.new()

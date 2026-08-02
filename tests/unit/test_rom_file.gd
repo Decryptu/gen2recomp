@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Addressing and header parsing, on a synthetic cartridge. No real dump is
-## involved — the bytes here are built to exercise the arithmetic, not to
+## involved: the bytes here are built to exercise the arithmetic, not to
 ## resemble a game.
 
 const SCRATCH_DIR: String = "user://test_roms"
@@ -133,7 +133,7 @@ func test_the_header_checksum_matches_when_it_is_written_correctly() -> void:
 	data[RomHeader.HEADER_CHECKSUM] = computed
 	assert_eq(RomHeader.parse(RomFile.from_bytes(data)).header_checksum, computed)
 
-	# Changing any covered byte must change the result — the boot ROM's check.
+	# Changing any covered byte must change the result; that is the boot ROM's check.
 	data[RomHeader.CART_TYPE] = 0x11
 	assert_ne(RomHeader.compute_header_checksum(RomFile.from_bytes(data)), computed)
 

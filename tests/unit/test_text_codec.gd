@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Synthetic byte strings only. The encoding is a fixed table, so it can be
-## checked without a cartridge — and the importer's own layout check re-tests it
+## checked without a cartridge, and the importer's own layout check re-tests it
 ## against real data by insisting species 1 decodes to BULBASAUR.
 
 
@@ -59,6 +59,35 @@ func test_apostrophe_ligatures_expand_to_two_characters() -> void:
 func test_unknown_byte_is_visible_rather_than_dropped() -> void:
 	# A silently skipped byte would turn a wrong offset into a plausible name.
 	assert_eq(Gen2Text.decode(PackedByteArray([0x80, 0x01]), 0, 4), "A<01>")
+
+
+func test_a_sequence_walks_past_each_terminator() -> void:
+	var data: PackedByteArray = _encode("AB")
+	data.append(Gen2Text.TERMINATOR)
+	data.append_array(_encode("CD"))
+	data.append(Gen2Text.TERMINATOR)
+	assert_eq(Gen2Text.decode_sequence(data, 0, 2, 8), PackedStringArray(["AB", "CD"]))
+
+
+func test_a_sequence_stops_at_the_end_of_the_data() -> void:
+	# Short is a failure the caller must be able to see: the move and item
+	# tables are variable-length, so a wrong start runs off the end rather than
+	# landing on a boundary.
+	var data: PackedByteArray = _encode("AB")
+	data.append(Gen2Text.TERMINATOR)
+	assert_eq(Gen2Text.decode_sequence(data, 0, 4, 8).size(), 1)
+
+
+func test_a_sequence_gives_up_on_an_entry_with_no_terminator() -> void:
+	# The guard, not a field width: without it this walks the rest of the dump.
+	var result: PackedStringArray = Gen2Text.decode_sequence(_encode("ABCDEFGH"), 0, 2, 3)
+	assert_eq(result[0], "ABC")
+
+
+func test_an_empty_entry_is_kept_rather_than_skipped() -> void:
+	# Dropping it would shift every later name down by one.
+	var data: PackedByteArray = PackedByteArray([Gen2Text.TERMINATOR, 0x80, Gen2Text.TERMINATOR])
+	assert_eq(Gen2Text.decode_sequence(data, 0, 2, 8), PackedStringArray(["", "A"]))
 
 
 func test_a_real_species_name_round_trips() -> void:
