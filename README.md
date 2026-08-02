@@ -14,8 +14,9 @@ the same thing for Generation 1.
 
 > ### Status: early
 >
-> The project skeleton and the ROM import gate exist and are tested. The
-> importer, renderer, overworld, battle system, audio and mod loader do not
+> The import gate and the first half of the importer exist and are tested: a
+> verified cartridge decodes into species data, palettes and every Pokémon
+> sprite. The renderer, overworld, battle system, audio and mod loader do not
 > exist yet. There is nothing playable here today.
 
 ## Getting started
@@ -50,6 +51,37 @@ Matching is by SHA-1, never by filename.
 An unrecognised hash is refused outright rather than imported on a best-effort
 basis: a cartridge whose bank layout has not been characterised produces
 corrupt assets instead of an honest error.
+
+## Importing
+
+Decoding a cartridge into the cache:
+
+```bash
+godot --headless --path . -s res://tools/import_rom.gd
+```
+
+Takes under a second per game. The cache lands in Godot's `user://` directory —
+never inside the project, because it is cartridge-derived data and subject to
+exactly the same rule as the ROM itself. Add `--verify` to run the checks
+without writing anything.
+
+Each import is keyed by game and hash, so two revisions never share a cache.
+What comes out today:
+
+| | |
+|---|---|
+| Species | Names, base stats, types, held items, egg groups, TM/HM flags |
+| Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
+| Sprites | Front and back for all 251 species, plus all 26 Unown forms |
+
+Sprites are stored as colour indices rather than as images, and a palette is
+applied when they are drawn — which is the whole of what being shiny costs.
+
+To look at what was decoded:
+
+```bash
+godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
+```
 
 ## Running
 
