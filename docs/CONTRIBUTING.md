@@ -74,10 +74,46 @@ The drawing layer is deliberately thin:
 | `render/battle_tiles.gd` | The battle's tile page, assembled as the hardware does |
 | `render/battle_hud.gd` | The two status panels, on the tile grid |
 
+The battle engine is the same shape as the ROM layer: `RefCounted`, no scenes,
+and randomness passed in as an explicit `RandomNumberGenerator`, so a whole
+battle can be fought inside a test:
+
+| | |
+|---|---|
+| `battle/stats.gd` | Base stats, DVs and stat experience into the six stats |
+| `battle/damage.gd` | The damage formula, STAB, criticals and the spread |
+| `battle/accuracy.gd` | Whether a move connects |
+| `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
+| `battle/battle.gd` | The turn: order, PP, the hit, the faint |
+
+Everything in there is integer arithmetic in the order the hardware does it.
+That is not nostalgia. Every step truncates and the steps do not commute, so a
+formula rearranged into something tidier gives a different answer often enough
+to matter, and the Pokémon that survives on one hit point does so because of a
+truncation somewhere in it. Two in particular are easy to write in a form that
+is almost right:
+
+- **The square root for stat experience is a ceiling.** The cartridge scans a
+  table of squares for the first entry that is not smaller than the value, so
+  an untrained Pokémon answers 1 and not 0. A floor puts a trained stat one out.
+- **Type matchups are applied to the damage one type at a time.** That is not
+  the same as applying the combined multiplier once, because each step
+  truncates, and it is also not the same number the battle announces: the
+  announced one is a separate accumulator that truncates in tenths. Ember on a
+  Fire/Rock defender deals 6 and reports "not very effective" on the strength of
+  a 2. `GameData.type_effectiveness` is for the message and
+  `GameData.type_matchup` per type is for the damage.
+
+`Gen2Battle` answers a turn with a list of events rather than with a new state
+or a string. An event says what happened and carries the numbers behind it, so a
+battle can be asserted on rather than read, and turning one into a sentence, an
+animation or a bar that drains stays the screen's job.
+
 `game/battle/battle_screen.gd` is the first screen that is not a development
-view. It draws what it is given and decides nothing: no turn order, no damage,
-no faint. When there is an engine it will hand the screen the same numbers a
-caller hands it today, which is why its setters take plain values.
+view. It draws what it is given and decides nothing: it takes every number it
+draws out of the event it is showing, not out of the Pokémon, because a turn has
+finished resolving before its first event is shown and reading the Pokémon would
+draw the end of the turn during the middle of it.
 
 `Gen2Screen` renders the game into a `SubViewport` the size of the real
 hardware and blows it up by an integer factor, while the interface around it
@@ -253,6 +289,15 @@ how many pixels are lit rather than how many hit points are left.
 
 ```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
+```
+
+`advance` is the same button the player presses, so repeating it fights the
+battle: it finishes the message on screen, then steps to the next event, then
+takes another turn when there is nothing left to say. Enough of them and one of
+the two faints, which is how the whole loop gets looked at without a keyboard.
+
+```bash
+godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 40 advance 26
 ```
 
 Keep that property when you add a screen. A handler that only exists inside an

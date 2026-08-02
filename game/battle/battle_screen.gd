@@ -10,10 +10,11 @@ extends Control
 ## of them goes: the enemy's pic in the top right, the player's back pic below
 ## and to the left of it, a panel each, and the standard box along the bottom.
 ##
-## It draws what it is given and decides nothing. There is no battle here: no
-## turn order, no damage, no faint. When there is an engine, it will hand this
-## the same numbers a caller hands it now, which is why the setters take plain
-## values rather than a battle state object.
+## It draws what it is given and decides nothing. A [Gen2Battle] behind it works
+## out the turn and answers with a list of events; this shows them one at a time,
+## taking every number it draws out of the event rather than asking the engine
+## again. That is why the setters still take plain values: the engine is one
+## caller of them and not the only possible one.
 ##
 ## The panels are composed into one screen-sized index buffer and drawn over the
 ## pics with index 0 transparent, because a panel is a shape on a white field
@@ -30,6 +31,12 @@ const DEFAULT_ENEMY: int = 16
 const DEFAULT_PLAYER: int = 155
 const DEFAULT_LEVEL: int = 5
 
+## What both Pokémon know, until there are learnsets to ask. Tackle because
+## every early Pokémon has it and because a Normal move against anything gives a
+## plain hit to look at. This is scaffolding: a party's moves come from the
+## learnset and trainer party tables, and neither is decoded yet.
+const PLACEHOLDER_MOVES: Array = [33]
+
 const TILE: int = Gen2Font.TILE
 
 ## The white the hardware fills the battle background with.
@@ -37,6 +44,13 @@ const BACKGROUND: Color = Color.WHITE
 
 var _data: GameData = null
 var _hud: Gen2BattleHud = null
+
+## The battle behind the screen, and the two Pokémon in it. The display state
+## below is what is currently drawn, which is not always where the battle has
+## got to: a turn resolves at once and is then shown an event at a time.
+var _battle: Gen2Battle = null
+var _pending: Array = []
+var _rng := RandomNumberGenerator.new()
 
 var _enemy: int = 1
 var _player: int = 1
@@ -92,17 +106,28 @@ func is_ready() -> bool:
 	return _hud != null
 
 
-## Puts two Pokémon on the screen at a level each, both at full health.
+## Puts two Pokémon on the screen at a level each, both at full health, and
+## starts a battle between them.
 func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: int = 5) -> void:
 	_enemy = _wrap_species(enemy)
 	_player = _wrap_species(player)
 	_enemy_level = enemy_level
 	_player_level = player_level
-	_enemy_max_hp = _hp_at_level(_enemy, _enemy_level)
-	_player_max_hp = _hp_at_level(_player, _player_level)
-	_enemy_hp = _enemy_max_hp
-	_player_hp = _player_max_hp
-	_refresh()
+
+	_pending = []
+	_battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, _player, _player_level, PLACEHOLDER_MOVES),
+		Gen2BattleMon.create(_data, _enemy, _enemy_level, PLACEHOLDER_MOVES),
+		_rng
+	)
+	if _battle == null:
+		return
+
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
 
 
 ## Both HP totals, for a caller that has its own numbers.
@@ -143,15 +168,120 @@ func next_player() -> void:
 
 
 ## Takes a quarter of the enemy's health off, which is the fastest way to see
-## that a bar and its numbers agree.
+## that a bar and its numbers agree. It goes through the Pokémon rather than
+## through the display, so the battle and the screen do not drift apart.
 func hurt_enemy() -> void:
-	_enemy_hp = maxi(_enemy_hp - maxi(_enemy_max_hp / 4, 1), 0)
-	_refresh()
+	_hurt(_battle.enemy if _battle != null else null)
 
 
 func hurt_player() -> void:
-	_player_hp = maxi(_player_hp - maxi(_player_max_hp / 4, 1), 0)
-	_refresh()
+	_hurt(_battle.player if _battle != null else null)
+
+
+func _hurt(mon: Gen2BattleMon) -> void:
+	if mon == null:
+		return
+	@warning_ignore("integer_division")
+	mon.take_damage(maxi(mon.max_hp() / 4, 1))
+	_read_hp()
+
+
+## Plays one turn out: both sides use their first move, and the events come back
+## to be shown one at a time.
+func take_turn() -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	_pending = _battle.take_turn(0, 0)
+	_show_next_event()
+
+
+## What a button press does. Finishes the current message if it is still
+## revealing, then moves on to the next event, and starts a turn when there is
+## nothing left to say.
+func advance() -> void:
+	if _box == null:
+		return
+	if _box.advance():
+		return
+	if _pending.is_empty():
+		take_turn()
+		return
+	_show_next_event()
+
+
+## The next event, with whatever it changes applied first.
+##
+## Every number drawn comes out of the event rather than out of the Pokémon,
+## because the turn has already finished resolving by the time the first event is
+## shown. Reading the Pokémon here would draw the end of the turn during the
+## middle of it.
+func _show_next_event() -> void:
+	while not _pending.is_empty():
+		var event: Dictionary = _pending.pop_front()
+		_apply_event(event)
+		var text: String = _describe(event)
+		if not text.is_empty():
+			show_message(text)
+			return
+
+
+func _apply_event(event: Dictionary) -> void:
+	match event["type"]:
+		Gen2Battle.HIT, Gen2Battle.RECOIL:
+			var target: int = int(event.get("target", event["side"]))
+			if target == Gen2Battle.ENEMY:
+				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
+			else:
+				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+
+
+## An event as a sentence, or an empty string for one there is nothing to say
+## about. A neutral hit has no line of its own in these games: the bar moving is
+## the whole of the message.
+func _describe(event: Dictionary) -> String:
+	var side: int = int(event["side"])
+	match event["type"]:
+		Gen2Battle.USED_MOVE:
+			return "%s used %s!" % [
+				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.MISSED:
+			return "%s's attack missed!" % _battler_name(side)
+		Gen2Battle.NO_EFFECT:
+			return "It doesn't affect %s!" % _battler_name(int(event["target"]))
+		Gen2Battle.HIT:
+			if bool(event["critical"]):
+				return "A critical hit!"
+			if int(event["effectiveness"]) > RomLayout.MATCHUP_EFFECTIVE:
+				return "It's super effective!"
+			if int(event["effectiveness"]) < RomLayout.MATCHUP_EFFECTIVE:
+				return "It's not very effective..."
+		Gen2Battle.RECOIL:
+			return "%s is hit with recoil!" % _battler_name(side)
+		Gen2Battle.FAINTED:
+			return "%s fainted!" % _battler_name(side)
+		Gen2Battle.OVER:
+			return "%s won!" % ("The enemy" if event["winner"] == Gen2Battle.ENEMY else "Player")
+	return ""
+
+
+## How a battle refers to one of the two, which is by side and not by species:
+## the enemy's name is prefixed and the player's is not.
+func _battler_name(side: int) -> String:
+	if side == Gen2Battle.ENEMY:
+		return "Enemy %s" % _name_of(_enemy)
+	return _name_of(_player)
+
+
+## Re-reads both Pokémon. For the paths that change health outside a turn, where
+## there is no event to read it out of.
+func _read_hp() -> void:
+	if _battle == null:
+		return
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -171,8 +301,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			hurt_enemy()
 		KEY_S:
 			hurt_player()
+		KEY_A:
+			take_turn()
 		KEY_SPACE, KEY_ENTER:
-			_box.advance()
+			advance()
 		_:
 			return
 	accept_event()
@@ -189,18 +321,6 @@ func _new_layer() -> TextureRect:
 func _wrap_species(number: int) -> int:
 	var count: int = _data.species_count() if _data != null else 0
 	return wrapi(number, 1, maxi(count, 1) + 1) if count > 0 else 1
-
-
-## A rough HP total, so the bar and the numbers have something to show. The real
-## formula belongs to the engine that does not exist yet, along with the IVs and
-## the effort values it also reads.
-func _hp_at_level(species: int, level: int) -> int:
-	var entry: Dictionary = _data.species(species)
-	if entry.is_empty():
-		return 1
-	var base: int = int(entry["stats"]["hp"])
-	@warning_ignore("integer_division")
-	return (base * 2 * level) / 100 + level + 10
 
 
 func _refresh() -> void:
