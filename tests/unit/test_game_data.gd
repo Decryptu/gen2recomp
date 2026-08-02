@@ -36,6 +36,9 @@ func _write_cache(complete: bool = true) -> void:
 		2, 2, 3, 3,
 		2, 2, 3, 3,
 	]))
+	RomCache.write_indices(
+		RomCache.tile_path(_directory, "font"), PackedByteArray([0, 3, 3, 0])
+	)
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testgame",
@@ -44,6 +47,9 @@ func _write_cache(complete: bool = true) -> void:
 		"atlases": {
 			"front": {"width": 4, "height": 4, "cell": 2, "columns": 2, "decoded": 2},
 			"back": {"width": 4, "height": 4, "cell": 2, "columns": 2, "decoded": 2},
+		},
+		"tiles": {
+			"font": {"width": 2, "height": 2, "tiles": 1, "first_code": 0x80},
 		},
 		"complete": complete,
 	})
@@ -156,6 +162,27 @@ func test_index_buffers_are_read_once_and_kept() -> void:
 	var first: PackedByteArray = data.atlas_indices("front")
 	assert_eq(first.size(), 16)
 	assert_eq(data.atlas_indices("front"), first)
+
+
+func test_a_tile_sheet_is_read_back_coerced_and_kept() -> void:
+	# The font and the borders are not pics, so they have their own accessor and
+	# their own directory in the cache; only the reading-once part is shared.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var sheet: Dictionary = data.tile_sheet("font")
+	assert_eq(sheet["first_code"], 0x80)
+	assert_true(sheet["tiles"] is int)
+	assert_eq(data.tile_indices("font").size(), 4)
+	assert_eq(data.tile_indices("font"), data.tile_indices("font"))
+
+
+func test_a_tile_sheet_that_was_never_written_reads_as_empty() -> void:
+	# An import that stopped before the font, or a cache from before there was
+	# one. The renderer asks and gets nothing rather than a wrong answer.
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_true(data.tile_sheet("frames").is_empty())
+	assert_eq(data.tile_indices("frames"), PackedByteArray())
 
 
 func test_an_atlas_that_was_never_written_reads_as_empty() -> void:

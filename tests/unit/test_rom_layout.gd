@@ -129,6 +129,52 @@ func test_gold_patches_only_the_three_banks_that_moved() -> void:
 	assert_eq(RomLayout.fix_pic_bank(layout, 0x1A), 0x1A, "an unpatched bank passes through")
 
 
+func test_the_font_covers_the_printable_half_of_the_charmap() -> void:
+	# The font is indexed by character code, so its first tile is $80 and its
+	# last is $FF. Anything else and a character byte stops being a tile number.
+	assert_eq(RomLayout.FONT_FIRST_CODE, Gen2Text.FIRST_PRINTABLE)
+	assert_eq(RomLayout.FONT_FIRST_CODE + RomLayout.FONT_TILES - 1, 0xFF)
+
+
+func test_the_font_runs_where_the_charmap_agrees() -> void:
+	for run: Array in RomLayout.FONT_INK_RUNS:
+		for code: int in range(run[0], run[1] + 1):
+			assert_ne(Gen2Text.character(code), "<%02X>" % code, "$%02X has no character" % code)
+	for run: Array in RomLayout.FONT_BLANK_RUNS:
+		for code: int in range(run[0], run[1] + 1):
+			assert_eq(Gen2Text.character(code), "<%02X>" % code, "$%02X has one" % code)
+
+
+func test_the_box_drawing_codes_address_a_border_directly() -> void:
+	# ┌ ─ ┐ │ └ ┘ are consecutive in the charmap, and the frame is loaded so
+	# that those codes name its six tiles.
+	assert_eq(Gen2Text.character(RomLayout.FRAME_FIRST_CODE), "┌")
+	assert_eq(
+		Gen2Text.character(RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TILES - 1), "┘"
+	)
+
+
+func test_frames_are_a_fixed_stride_table() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		assert_eq(RomLayout.frame_offset(layout, 0), int(layout["frames"]))
+		assert_eq(
+			RomLayout.frame_offset(layout, 1) - RomLayout.frame_offset(layout, 0),
+			RomLayout.FRAME_TILES * Gen2Tiles.TILE_1BPP_BYTES
+		)
+
+
+func test_the_font_and_the_frames_do_not_overlap_or_run_off_the_end() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var font_end: int = RomLayout.font_offset(layout) \
+			+ RomLayout.FONT_TILES * Gen2Tiles.TILE_1BPP_BYTES
+		assert_lt(font_end, RomLayout.frame_offset(layout, 0), "%s font overlaps its frames" % id)
+		var last: int = RomLayout.frame_offset(layout, RomLayout.FRAME_COUNT - 1) \
+			+ RomLayout.FRAME_TILES * Gen2Tiles.TILE_1BPP_BYTES
+		assert_lt(last, RomRegistry.EXPECTED_SIZE)
+
+
 func test_a_fixed_bank_still_addresses_inside_the_cartridge() -> void:
 	for id: StringName in RomRegistry.ORDER:
 		var layout: Dictionary = RomLayout.for_id(id)

@@ -23,10 +23,11 @@ const MOVES: String = "moves.json"
 const ITEMS: String = "items.json"
 const TYPES: String = "types.json"
 const PICS_DIR: String = "pics"
+const TILES_DIR: String = "tiles"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 2
+const FORMAT_VERSION: int = 3
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -57,8 +58,18 @@ static func pic_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, PICS_DIR, name]
 
 
+## Fixed tile sheets: the font and the text box borders. Kept apart from the
+## pics because they are addressed by character code rather than by species, and
+## because they are 1bpp, so the two never want the same accessor.
+static func tile_path(directory: String, name: String) -> String:
+	return "%s/%s/%s.idx" % [directory, TILES_DIR, name]
+
+
 static func prepare(directory: String) -> bool:
-	return DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, PICS_DIR]) == OK
+	for sub: String in [PICS_DIR, TILES_DIR]:
+		if DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, sub]) != OK:
+			return false
+	return true
 
 
 ## True when [param directory] holds a complete cache this build can read.

@@ -94,3 +94,58 @@ func test_a_real_species_name_round_trips() -> void:
 	# The bytes of "MEWTWO@" as they sit in the cartridge.
 	var data: PackedByteArray = PackedByteArray([0x8C, 0x84, 0x96, 0x93, 0x96, 0x8E, 0x50])
 	assert_eq(Gen2Text.decode(data, 0, 10), "MEWTWO")
+
+
+func test_encoding_is_the_inverse_of_decoding_over_the_printable_range() -> void:
+	for code: int in range(Gen2Text.FIRST_PRINTABLE, 0x100):
+		var text: String = Gen2Text.character(code)
+		if text.begins_with("<"):
+			continue
+		var codes: PackedByteArray = Gen2Text.encode(text)
+		assert_eq(codes.size(), 1, "$%02X (%s) is one tile" % [code, text])
+		assert_eq(Gen2Text.character(codes[0]), text, "$%02X did not round-trip" % code)
+
+
+func test_a_ligature_is_two_characters_in_one_tile() -> void:
+	# The font has no free-standing apostrophe followed by a letter, so anything
+	# measuring a line has to ask rather than count characters.
+	assert_eq(Gen2Text.encode("'s"), PackedByteArray([0xD4]))
+	assert_eq(Gen2Text.encoded_length("It's"), 3)
+	assert_eq("It's".length(), 4, "which is not what the string says")
+
+
+func test_only_the_lowercase_ligatures_exist() -> void:
+	# The font has "'s" as one tile and no "'S", so a name in capitals costs a
+	# tile more than the same name in lower case.
+	assert_eq(Gen2Text.encoded_length("IT'S"), 4)
+
+
+func test_a_ligature_wins_over_the_characters_it_is_made_of() -> void:
+	# Longest match first, or "'s" encodes as an apostrophe and a lowercase s.
+	assert_eq(Gen2Text.encoded_length("It's not"), 7)
+
+
+func test_the_full_stop_beats_the_decimal_point() -> void:
+	# Two codes draw a dot. $E8 is the one sentences end with; $F2 is narrower
+	# and belongs between digits.
+	assert_eq(Gen2Text.encode("."), PackedByteArray([0xE8]))
+
+
+func test_a_character_the_font_cannot_draw_becomes_a_question_mark() -> void:
+	# Visible rather than dropped, on the same principle as an unrecognised byte
+	# on the way in.
+	assert_eq(Gen2Text.encode("~"), PackedByteArray([Gen2Text.UNKNOWN]))
+	assert_eq(Gen2Text.encoded_length("a~b"), 3, "and it still takes a tile")
+
+
+func test_control_codes_are_decode_only() -> void:
+	# A newline is a layout decision here, not a byte, and a name substituted at
+	# print time is not a glyph.
+	assert_eq(Gen2Text.encode("\n"), PackedByteArray([Gen2Text.UNKNOWN]))
+	for code: int in Gen2Text.encode("<PLAYER>"):
+		assert_true(code >= Gen2Text.FIRST_PRINTABLE or code == Gen2Text.SPACE)
+
+
+func test_a_space_encodes_even_though_the_font_has_no_tile_for_it() -> void:
+	assert_eq(Gen2Text.encode(" "), PackedByteArray([Gen2Text.SPACE]))
+	assert_true(Gen2Text.SPACE < Gen2Text.FIRST_PRINTABLE, "so it draws nothing")

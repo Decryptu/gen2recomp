@@ -16,7 +16,23 @@ extends RefCounted
 const TERMINATOR: int = 0x50
 const SPACE: int = 0x7F
 
+## The lowest code the font has a tile for. Everything below it is a space, a
+## border, a control code or a name substituted at print time, so it is also the
+## line between what [method encode] will produce and what only [method decode]
+## understands.
+const FIRST_PRINTABLE: int = 0x80
+
+## What an unencodable character becomes: "?", because a question mark on screen
+## is a bug someone will report and a dropped character is not.
+const UNKNOWN: int = 0xE6
+
+## The longest character sequence one tile can stand for: the apostrophe
+## ligatures ('s, 't) and PK/MN are two characters in a single glyph, because
+## the font has no room for a free-standing apostrophe followed by a letter.
+const MAX_LIGATURE: int = 2
+
 static var _table: Dictionary = {}
+static var _codes: Dictionary = {}
 
 
 ## Decodes bytes from [param offset] up to a terminator or [param max_length]
@@ -66,6 +82,45 @@ static func decode_sequence(
 			end += 1
 		at = end + 1
 	return out
+
+
+## Turns a string into the codes that draw it, one code per tile.
+##
+## The inverse of [method decode] over the printable range only. The engine's
+## own strings have to become tiles somehow, and a name read back out of the
+## cache is a Godot [String] by then, so this is the way back. Control codes and
+## the ones that stand for a name at print time are decode-only: they are not
+## glyphs, and the layer that lays text out handles line breaks itself.
+##
+## Anything the font cannot draw becomes [constant UNKNOWN] rather than being
+## dropped, on the same principle as an unrecognised byte on the way in.
+static func encode(text: String) -> PackedByteArray:
+	var codes: Dictionary = _encodings()
+	var out: PackedByteArray = PackedByteArray()
+	var at: int = 0
+
+	while at < text.length():
+		var taken: int = 0
+		# Longest first, so "'s" wins over "'" followed by an "s" that has no
+		# code of its own.
+		for length: int in range(mini(MAX_LIGATURE, text.length() - at), 0, -1):
+			var candidate: String = text.substr(at, length)
+			if codes.has(candidate):
+				out.append(codes[candidate])
+				taken = length
+				break
+		if taken == 0:
+			out.append(UNKNOWN)
+			taken = 1
+		at += taken
+
+	return out
+
+
+## How many tiles a string occupies, which is not its length: a ligature is two
+## characters in one tile, so anything laying text out has to ask.
+static func encoded_length(text: String) -> int:
+	return encode(text).size()
 
 
 static func character(byte: int) -> String:
@@ -178,3 +233,26 @@ static func _characters() -> Dictionary:
 
 	_table = table
 	return _table
+
+
+## The printable table inverted. Built in ascending code order and never
+## overwritten, so where two codes draw the same character the lower one wins:
+## the only such pair is the full stop at $E8 and the narrower decimal point at
+## $F2, and $E8 is the one sentences end with.
+static func _encodings() -> Dictionary:
+	if not _codes.is_empty():
+		return _codes
+
+	var out: Dictionary = {" ": SPACE}
+	var table: Dictionary = _characters()
+	var codes: Array = table.keys()
+	codes.sort()
+	for code: int in codes:
+		if code < FIRST_PRINTABLE:
+			continue
+		var text: String = table[code]
+		if not out.has(text):
+			out[text] = code
+
+	_codes = out
+	return _codes
