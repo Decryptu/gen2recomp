@@ -102,3 +102,9 @@ pitfalls that have cost real time on this project.
 repository. Not a ROM, not a `.sav`, not extracted sprites, text, maps or
 audio. Three layers enforce it — `.gitignore`, the pre-commit hook, and tests
 that never touch a real file. Please do not weaken any of them.
+
+## Licence
+
+[MIT](LICENSE). This covers the engine source in this repository and nothing
+else: the games themselves are not included, not redistributed, and remain the
+property of their respective owners. You supply your own cartridge dump.
