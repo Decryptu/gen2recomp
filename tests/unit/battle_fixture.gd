@@ -101,22 +101,24 @@ static func _species() -> Array:
 
 
 static func _moves() -> Array:
+	# Name, power, type, accuracy, PP, effect. The effect byte is the cartridge's
+	# own, because the turn loop reads priority and recoil out of it.
 	var known: Dictionary = {
-		TACKLE: ["TACKLE", 35, NORMAL, 255, 35],
-		GROWL: ["GROWL", 0, NORMAL, 255, 40],
-		EMBER: ["EMBER", 40, FIRE, 255, 25],
-		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15],
-		SLASH: ["SLASH", 70, NORMAL, 255, 20],
-		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10],
+		TACKLE: ["TACKLE", 35, NORMAL, 255, 35, 0],
+		GROWL: ["GROWL", 0, NORMAL, 255, 40, 18],
+		EMBER: ["EMBER", 40, FIRE, 255, 25, 4],
+		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, 6],
+		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0],
+		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2Battle.EFFECT_RECOIL_HIT],
 	}
 
 	var out: Array = []
 	for number: int in range(1, STRUGGLE + 1):
-		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20])
+		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20, 0])
 		out.append({
 			"number": number,
 			"name": entry[0],
-			"effect": 0,
+			"effect": entry[5],
 			"power": entry[1],
 			"type": entry[2],
 			"accuracy": entry[3],

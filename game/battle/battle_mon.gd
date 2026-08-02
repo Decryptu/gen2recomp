@@ -17,8 +17,13 @@ extends RefCounted
 const MAX_MOVES: int = 4
 
 ## The stats a stage can be applied to, in the order the cartridge keeps them.
-## Accuracy and evasion have their own multiplier table and are not here.
 const STAGED_STATS: Array = ["attack", "defense", "speed", "sp_attack", "sp_defense"]
+
+## Accuracy and evasion are staged like a stat and are not stats: they have their
+## own multiplier table, and there is no number behind them for a stage to
+## multiply. They are kept in the same place because a battle raises and lowers
+## all seven the same way. See [Gen2Accuracy].
+const STAGED_ODDS: Array = ["accuracy", "evasion"]
 
 ## Every DV at its maximum. A caller that has not said otherwise gets a Pokémon
 ## that is as good as its species allows, which is the useful default for a test
@@ -129,7 +134,7 @@ func stage(key: String) -> int:
 ## Moves a stage, and answers whether it actually moved: at the top or the bottom
 ## the cartridge says so rather than silently doing nothing.
 func change_stage(key: String, by: int) -> bool:
-	if not STAGED_STATS.has(key):
+	if not STAGED_STATS.has(key) and not STAGED_ODDS.has(key):
 		return false
 	var before: int = int(stages.get(key, 0))
 	var after: int = clampi(before + by, Gen2Stats.MIN_STAGE, Gen2Stats.MAX_STAGE)
@@ -139,7 +144,7 @@ func change_stage(key: String, by: int) -> bool:
 
 func reset_stages() -> void:
 	stages = {}
-	for key: String in STAGED_STATS:
+	for key: String in STAGED_STATS + STAGED_ODDS:
 		stages[key] = 0
 
 
