@@ -100,6 +100,13 @@ godot --headless --path . --quit-after 30
 
 Boots the main scene for 30 frames and exits, as a quick smoke check.
 
+To see an imported sprite on a real screen, open
+`game/render/pic_viewer.tscn` in the editor and press Play. Left and right
+change species, `S` toggles shiny, `B` swaps the front pic for the back one.
+The game is drawn into a 160x144 viewport and scaled up by a whole number, so a
+Game Boy pixel stays square; the interface around it is at the window's own
+resolution.
+
 ## Tests
 
 [GUT](https://github.com/bitwes/Gut) lives in `addons/gut`; configuration is in

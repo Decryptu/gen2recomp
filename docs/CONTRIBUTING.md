@@ -57,6 +57,25 @@ The importer under `game/import/` decodes a verified cartridge into a cache:
 Each decoder takes bytes and returns data; none of them knows what a cartridge
 is, so all of them are testable on a handful of hand-built bytes.
 
+Above the cache, `game/data/game_data.gd` reads it back. It is the only thing
+the engine uses to see cartridge content: nothing above it opens a ROM, and
+nothing in it knows what a ROM is. It is also where JSON's single number type is
+coerced back to int, once, rather than at every call site.
+
+The drawing layer is deliberately thin:
+
+| | |
+|---|---|
+| `render/pic_image.gd` | Colour indices plus a palette to an `Image` |
+| `render/gen2_screen.gd` | The 160x144 screen, scaled by a whole number |
+
+`Gen2Screen` renders the game into a `SubViewport` the size of the real
+hardware and blows it up by an integer factor, while the interface around it
+stays at the window's own resolution. This is a `Control` and not a
+project-wide stretch setting on purpose: a stretch would have made the menus
+fuzzy to keep the game sharp, and any non-integer factor resamples an 8x8 tile
+into something that crawls when it moves.
+
 ## Offsets, and why they are checked at runtime
 
 `rom_layout.gd` is a table of absolute positions inside each supported dump. An
@@ -133,6 +152,19 @@ An optional trailing `<method> <times> [int arg]` drives the scene before
 capturing, so you can photograph a screen mid-interaction rather than only on
 its first frame. This briefly opens a real window, because rendering needs a
 display, so it cannot run under `--headless`.
+
+Screens are built so this works on them. `pic_viewer.gd` reacts to keys, but
+every one of those keys is also a plain method (`next_species`, `toggle_shiny`,
+`toggle_back`), so a screen can be photographed in any state without a human at
+the keyboard:
+
+```bash
+godot --path . -s res://tools/screenshot.gd -- res://game/render/pic_viewer.tscn /tmp/shot.png 20 show_species 1 249
+```
+
+Keep that property when you add a screen. A handler that only exists inside an
+input match statement cannot be driven, and a screen that cannot be driven
+cannot be checked without asking someone what they see.
 
 ## Pitfalls that cost real time
 
