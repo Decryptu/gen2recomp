@@ -28,9 +28,11 @@ the same thing for Generation 1.
 >
 > The import gate and the first half of the importer exist and are tested: a
 > verified cartridge decodes into species data, moves, items, types, palettes,
-> every Pokémon sprite, every trainer pic, the font and the text box borders.
-> Sprites and text draw on a real 160x144 screen. The overworld, battle system, audio and mod loader
-> do not exist yet. There is nothing playable here today.
+> every Pokémon sprite, every trainer pic, the font, the text box borders and
+> the battle HUD. The battle screen draws: two Pokémon, two status panels and a
+> text box on a real 160x144 screen. Nothing happens on it yet, and the
+> overworld, the battle system, audio and the mod loader do not exist. There is
+> nothing playable here today.
 
 ## Getting started
 
@@ -92,6 +94,7 @@ What comes out today:
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
 | Font | All 128 glyphs, indexed by character code |
 | Borders | All eight text box frames, six tiles each |
+| Battle HUD | The HP bar, the exp bar, both panel borders and the colours they are drawn in |
 
 Sprites are stored as colour indices rather than as images, and a palette is
 applied when they are drawn, which is the whole of what being shiny costs.
@@ -132,6 +135,12 @@ resolution.
 `game/render/text_viewer.tscn` does the same for text: space advances the box,
 `F` cycles through the eight borders, and `C` shows every glyph in the font at
 once.
+
+`game/battle/battle_screen.tscn` is the battle screen itself: two Pokémon, a
+status panel each and a text box, where the hardware puts them. Left and right
+change which Pokémon are on it, `S` and `D` take health off the player's and the
+enemy's, and the bars change colour as they empty. Nothing else happens: there
+is no battle behind it yet.
 
 ## Tests
 

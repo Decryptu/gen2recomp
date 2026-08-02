@@ -74,7 +74,7 @@ func draw_code(
 	var slot: int = code - _first_code
 	if slot < 0 or slot >= _glyph_tiles:
 		return
-	_blit(_glyphs, _glyph_width, slot, into, into_width, at_x, at_y)
+	blit_slot(_glyphs, _glyph_width, slot, into, into_width, at_x, at_y)
 
 
 ## Draws a string left to right from [param at_x], advancing eight pixels per
@@ -101,13 +101,16 @@ func draw_frame_code(
 	var slot: int = frame * RomLayout.FRAME_TILES + within
 	if frame < 0 or slot >= _frame_tiles:
 		return
-	_blit(_frames, _frame_width, slot, into, into_width, at_x, at_y)
+	blit_slot(_frames, _frame_width, slot, into, into_width, at_x, at_y)
 
 
 ## Copies one tile out of a strip, clipped to the destination. Clipping rather
 ## than refusing, because a text box that runs off the edge of the screen should
 ## look wrong at the edge and be right everywhere else.
-static func _blit(
+##
+## Public because every sheet in this project is a strip and they all draw from
+## one the same way; [Gen2BattleTiles] is the other caller.
+static func blit_slot(
 	strip: PackedByteArray,
 	strip_width: int,
 	slot: int,

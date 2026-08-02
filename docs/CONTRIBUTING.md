@@ -71,6 +71,13 @@ The drawing layer is deliberately thin:
 | `render/font.gd` | Character codes to glyph tiles, blitted into a buffer |
 | `render/text_layout.gd` | A string to the lines and pages a box can show |
 | `render/text_box.gd` | The two of them, as a bordered window on the grid |
+| `render/battle_tiles.gd` | The battle's tile page, assembled as the hardware does |
+| `render/battle_hud.gd` | The two status panels, on the tile grid |
+
+`game/battle/battle_screen.gd` is the first screen that is not a development
+view. It draws what it is given and decides nothing: no turn order, no damage,
+no faint. When there is an engine it will hand the screen the same numbers a
+caller hands it today, which is why its setters take plain values.
 
 `Gen2Screen` renders the game into a `SubViewport` the size of the real
 hardware and blows it up by an integer factor, while the interface around it
@@ -126,6 +133,13 @@ So every offset ships with a check that would fail if it were wrong, and
   `Gen2Text` says are there must have ink, and the runs it has no character for
   must be blank. Those runs sit between the alphabets, so an offset out by a
   single tile drags a blank onto "z" and a glyph onto a code that has none.
+- The battle HUD's graphics are checked by the one thing they do that nothing
+  around them does: they count. A bar's fill levels are consecutive tiles, each
+  lighting one more column than the last, so the ink climbs by exactly two
+  pixels a step, and no wrong offset lands on a run like that. The two HUD
+  borders have no progression, so they are checked the way the text box frames
+  are. The four palettes the bars are drawn in are known values, so they are
+  checked against those values.
 - The three trainer tables are checked against each other, because they are
   three views of one numbering and a mistake shows up as them disagreeing. The
   class names pin the ends and the middle of a terminated table the way the move
@@ -223,6 +237,14 @@ box does not depend on how long the capture took to arrive.
 
 ```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tscn /tmp/shot.png 24 finish 1
+```
+
+The battle screen is built the same way, and it is worth photographing in more
+than one state: an HP bar changes colour as it empties, and the rule is about
+how many pixels are lit rather than how many hit points are left.
+
+```bash
+godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
 ```
 
 Keep that property when you add a screen. A handler that only exists inside an

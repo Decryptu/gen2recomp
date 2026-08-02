@@ -281,6 +281,21 @@ static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
 static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 
+	# The bar palettes are known values rather than a shape, so they are checked
+	# as the species names are: against what they have to say.
+	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
+		var entry: int = RomLayout.bar_palette_offset(layout, index)
+		var wanted: Array = RomLayout.BAR_PALETTES[index]
+		for colour: int in wanted.size():
+			var read: int = rom.u16le(entry + colour * Gen2Palette.COLOR_BYTES)
+			if read != int(wanted[colour]):
+				return {
+					"ok": false,
+					"message": "Bar palette %s colour %d: expected $%04X, read $%04X." % [
+						RomLayout.BAR_PALETTE_NAMES[index], colour, wanted[colour], read,
+					],
+				}
+
 	var battle_font: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
 		data, int(layout["battle_font"]), RomLayout.BATTLE_FONT_TILES
 	)
@@ -564,6 +579,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"item_count": items.size(),
 		"type_count": types.size(),
 		"trainer_count": trainers.size(),
+		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
 		"complete": true,
@@ -711,6 +727,18 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 		if on_progress.is_valid():
 			on_progress.call("trainers", trainer_class, count)
 
+	return out
+
+
+## The four colours a battle draws its bars in. Small enough to live in the
+## manifest beside the atlas metadata rather than in a file of its own.
+func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
+		var entry: int = RomLayout.bar_palette_offset(layout, index)
+		out[RomLayout.BAR_PALETTE_NAMES[index]] = [
+			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
+		]
 	return out
 
 

@@ -285,7 +285,21 @@ func _battle_dump() -> PackedByteArray:
 	_write_bar(data, int(_layout["exp_bar"]), 0, RomLayout.EXP_BAR_LEVELS)
 	_write_hud(data, int(_layout["enemy_hud"]), RomLayout.ENEMY_HUD_TILES)
 	_write_hud(data, int(_layout["player_hud"]), RomLayout.PLAYER_HUD_TILES)
+	_write_bar_palettes(data)
 	return data
+
+
+## The four bar palettes, whose values are the check on where they are.
+func _write_bar_palettes(data: PackedByteArray) -> void:
+	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
+		var at: int = RomLayout.bar_palette_offset(_layout, index)
+		var wanted: Array = RomLayout.BAR_PALETTES[index]
+		for colour: int in wanted.size():
+			var packed: int = int(wanted[colour])
+			_write(
+				data, at + colour * Gen2Palette.COLOR_BYTES,
+				PackedByteArray([packed & 0xFF, packed >> 8])
+			)
 
 
 ## Fill levels as 2bpp tiles, each one two pixels fuller than the last.
@@ -340,6 +354,16 @@ func test_an_exp_bar_that_is_not_there_fails() -> void:
 	for i: int in RomLayout.EXP_BAR_TILES * Gen2Tiles.TILE_BYTES:
 		data[int(_layout["exp_bar"]) + i] = 0
 	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+func test_a_bar_palette_that_is_not_the_colour_it_should_be_fails() -> void:
+	# These are known values rather than a shape, so a wrong offset is caught by
+	# the colours themselves.
+	var data: PackedByteArray = _battle_dump()
+	_write(data, RomLayout.bar_palette_offset(_layout, 2), PackedByteArray([0x00, 0x00]))
+	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "hp_red")
 
 
 func test_a_blank_hud_tile_fails() -> void:
