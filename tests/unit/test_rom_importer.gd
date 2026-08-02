@@ -380,3 +380,98 @@ func test_hud_tiles_that_repeat_mean_it_is_not_the_border() -> void:
 		data.slice(int(_layout["enemy_hud"]), int(_layout["enemy_hud"]) + Gen2Tiles.TILE_1BPP_BYTES)
 	)
 	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+## A matchup chart of the right length with the right ends: the four rows whose
+## content is known, filler that is valid but says nothing, and both terminators.
+func _matchup_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write(data, int(_layout["type_matchups"]), _matchup_table())
+	return data
+
+
+func _matchup_table() -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	out.append_array(_row(
+		RomLayout.TYPE_NORMAL, RomLayout.TYPE_ROCK, RomLayout.MATCHUP_NOT_VERY_EFFECTIVE
+	))
+	for _filler: int in RomLayout.MATCHUP_COUNT - 2:
+		out.append_array(_row(
+			RomLayout.TYPE_FIGHTING, RomLayout.TYPE_NORMAL, RomLayout.MATCHUP_SUPER_EFFECTIVE
+		))
+	out.append_array(_row(
+		RomLayout.TYPE_STEEL, RomLayout.TYPE_STEEL, RomLayout.MATCHUP_NOT_VERY_EFFECTIVE
+	))
+	out.append(RomLayout.MATCHUP_END_FORESIGHT)
+	out.append_array(_row(
+		RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST, RomLayout.MATCHUP_NO_EFFECT
+	))
+	out.append_array(_row(
+		RomLayout.TYPE_FIGHTING, RomLayout.TYPE_GHOST, RomLayout.MATCHUP_NO_EFFECT
+	))
+	out.append(RomLayout.MATCHUP_END)
+	return out
+
+
+func _row(attacker: int, defender: int, multiplier: int) -> PackedByteArray:
+	return PackedByteArray([attacker, defender, multiplier])
+
+
+func test_a_plausible_matchup_chart_verifies() -> void:
+	var result: Dictionary = RomImporter.verify_matchups(_rom(_matchup_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+func test_the_chart_reads_back_as_rows_with_the_foresight_ones_flagged() -> void:
+	var rows: Array = RomImporter.read_matchups(_rom(_matchup_dump()), _layout)
+	assert_eq(rows.size(), RomLayout.MATCHUP_COUNT + RomLayout.FORESIGHT_MATCHUP_COUNT)
+	assert_false(rows[0]["negated_by_foresight"], "the chart proper is not conditional")
+	assert_true(rows[rows.size() - 1]["negated_by_foresight"], "past $FE it is")
+	assert_eq(int(rows[0]["multiplier"]), RomLayout.MATCHUP_NOT_VERY_EFFECTIVE)
+
+
+func test_a_chart_one_byte_out_fails() -> void:
+	# The failure this check exists for. Three-byte rows mean a slide of one byte
+	# still reads as rows, and every one of them is then a lie.
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write(data, int(_layout["type_matchups"]) + 1, _matchup_table())
+	assert_false(RomImporter.verify_matchups(_rom(data), _layout)["ok"])
+
+
+func test_a_multiplier_the_chart_never_stores_fails() -> void:
+	# A neutral matchup is an absent row, so a ten here means the walk has left
+	# the table and is reading something else.
+	var data: PackedByteArray = _matchup_dump()
+	data[int(_layout["type_matchups"]) + RomLayout.MATCHUP_MULTIPLIER] = RomLayout.MATCHUP_EFFECTIVE
+	var result: Dictionary = RomImporter.verify_matchups(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "multiplier")
+
+
+func test_a_type_number_in_the_padding_run_fails() -> void:
+	# $0A to $13 have names but no matchups. Landing on one is what a wrong
+	# offset does almost immediately, because it is most of the byte range.
+	var data: PackedByteArray = _matchup_dump()
+	data[int(_layout["type_matchups"]) + RomLayout.MATCHUP_DEFENDER] = 0x0E
+	assert_false(RomImporter.verify_matchups(_rom(data), _layout)["ok"])
+
+
+func test_a_chart_of_the_wrong_length_fails() -> void:
+	var data: PackedByteArray = _matchup_dump()
+	var short: PackedByteArray = _matchup_table()
+	short.resize(short.size() - RomLayout.MATCHUP_ENTRY_SIZE)
+	short[short.size() - 1] = RomLayout.MATCHUP_END
+	_write(data, int(_layout["type_matchups"]), short)
+	var result: Dictionary = RomImporter.verify_matchups(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "rows")
+
+
+func test_a_chart_with_no_terminator_fails_rather_than_running_away() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	for i: int in RomLayout.MAX_MATCHUPS * RomLayout.MATCHUP_ENTRY_SIZE:
+		data[int(_layout["type_matchups"]) + i] = RomLayout.TYPE_NORMAL
+	assert_false(RomImporter.verify_matchups(_rom(data), _layout)["ok"])

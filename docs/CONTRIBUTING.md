@@ -140,6 +140,14 @@ So every offset ships with a check that would fail if it were wrong, and
   borders have no progression, so they are checked the way the text box frames
   are. The four palettes the bars are drawn in are known values, so they are
   checked against those values.
+- The type matchup chart is checked by the shape a chart of exceptions has to
+  have. Every row is two type numbers and a multiplier, the type numbers are
+  sparse, and the multiplier is one of three values that never includes the
+  neutral one, because a neutral matchup is an absent row. A wrong offset lands
+  in the padding run between the two groups of type numbers almost immediately,
+  since that run is most of the byte range. On top of that the walk has to reach
+  `$FE` and then `$FF` at exactly the right distance, and both ends of the chart
+  are content whose answer is known independently.
 - The three trainer tables are checked against each other, because they are
   three views of one numbering and a mistake shows up as them disagreeing. The
   class names pin the ends and the middle of a terminated table the way the move

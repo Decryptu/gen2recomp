@@ -89,6 +89,7 @@ What comes out today:
 | Moves | Names, power, type, accuracy, PP, effect and its chance |
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
+| Type chart | Every matchup, and which two Foresight cancels |
 | Trainers | Every trainer class: name, pic and palette |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
@@ -109,12 +110,15 @@ The same tool takes `trainers` for the trainer classes, or `font` or `frames` in
 place of an atlas name, which is how you check that the glyphs are where the
 character codes say they are.
 
-or as text, for any of `species`, `moves`, `items`, `types`, `trainers` or
-`all`:
+or as text, for any of `species`, `moves`, `items`, `types`, `matchups`,
+`trainers` or `all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
+
+`matchups` prints the type chart as a grid rather than as a list, because a grid
+is the shape the published table has and a single wrong cell shows up in it.
 
 ## Running
 

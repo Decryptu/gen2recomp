@@ -25,6 +25,11 @@ var _moves: Array = []
 var _items: Array = []
 var _types: Array = []
 var _trainers: Array = []
+## The matchup chart, folded into a lookup on load: attacker * TYPE_COUNT +
+## defender to the multiplier in tenths. The chart is 110 rows of exceptions, so
+## a linear search would be a hundred comparisons per hit, twice a turn.
+var _matchups: Dictionary = {}
+var _foresight_matchups: Dictionary = {}
 var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
@@ -58,6 +63,7 @@ static func open_directory(path: String) -> GameData:
 	data._items = data._read_array(RomCache.items_path(path))
 	data._types = data._read_array(RomCache.types_path(path))
 	data._trainers = data._read_array(RomCache.trainers_path(path))
+	data._build_matchups(data._read_array(RomCache.matchups_path(path)))
 	return data
 
 
@@ -100,6 +106,65 @@ func item_name(number: int) -> String:
 ## Type names are indexed from zero, unlike everything else here.
 func type_name(number: int) -> String:
 	return String(_entry(_types, number).get("name", ""))
+
+
+## How effective [param attacking] is against [param defending], in tenths: 0 for
+## an immunity, 5 for a resistance, 20 for a weakness and 10 for everything else.
+##
+## Tenths rather than a float because that is what the cartridge stores and what
+## the damage formula divides by, and because the games truncate after applying
+## each of a defender's two types. A float would agree most of the time and
+## disagree exactly where it matters.
+##
+## The chart lists only the exceptions, so an absent pair is neutral, and a type
+## number that is not in the chart at all (the padding run, which is where Curse
+## lives) is neutral against everything by the same rule.
+##
+## [param foresight] is whether the defender has been identified, which cancels
+## the Ghost immunities and nothing else.
+func type_matchup(attacking: int, defending: int, foresight: bool = false) -> int:
+	var key: int = attacking * RomLayout.TYPE_COUNT + defending
+	if foresight and _foresight_matchups.has(key):
+		return RomLayout.MATCHUP_EFFECTIVE
+	return int(_matchups.get(key, RomLayout.MATCHUP_EFFECTIVE))
+
+
+## How effective [param attacking] is against a defender of one or two types,
+## in tenths, accumulated the way the cartridge accumulates it: start at ten,
+## multiply by each matching type in turn, and truncate after each.
+##
+## This is the number a battle announces, not the number it deals damage with.
+## The two are computed separately on the hardware and do not always agree: the
+## accumulator truncates in tenths, so a move resisted by both halves of a dual
+## type reports 2 rather than 2.5, while the damage is worked out by multiplying
+## the damage itself once per type. Use this for the message and
+## [method type_matchup] per type for the damage.
+##
+## A single-type Pokémon carries its type in both slots. The cartridge applies a
+## row at most once, matching either slot, so a repeat is skipped here for the
+## same reason.
+func type_effectiveness(attacking: int, defending: Array, foresight: bool = false) -> int:
+	var out: int = RomLayout.MATCHUP_EFFECTIVE
+	var applied: Array = []
+	for defending_type: int in defending:
+		if applied.has(defending_type):
+			continue
+		applied.append(defending_type)
+		@warning_ignore("integer_division")
+		out = out * type_matchup(attacking, defending_type, foresight) \
+			/ RomLayout.MATCHUP_EFFECTIVE
+	return out
+
+
+## Folds the cached rows into the lookup the engine asks questions of.
+func _build_matchups(rows: Array) -> void:
+	_matchups = {}
+	_foresight_matchups = {}
+	for row: Dictionary in rows:
+		var key: int = int(row["attacker"]) * RomLayout.TYPE_COUNT + int(row["defender"])
+		_matchups[key] = int(row["multiplier"])
+		if bool(row.get("negated_by_foresight", false)):
+			_foresight_matchups[key] = true
 
 
 ## The four colours a species is drawn with, in index order. The cache stores
