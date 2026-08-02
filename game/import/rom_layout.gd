@@ -83,6 +83,13 @@ const FRAME_VERTICAL: int = 3
 const FRAME_BOTTOM_LEFT: int = 4
 const FRAME_BOTTOM_RIGHT: int = 5
 
+## Trainer classes are numbered from 1; class 0 is the player, who has a palette
+## in the table but no pic in it. Crystal added one class to the sixty-six Gold
+## and Silver have, so the count lives in the layout rather than here.
+##
+## Every trainer pic is this square, unlike a Pokémon's front pic.
+const TRAINER_PIC_TILES: int = 7
+
 ## Back pics are always this square. Front pics vary and carry their own size in
 ## the base stats.
 const BACKPIC_TILES: int = 6
@@ -136,6 +143,11 @@ const GOLD_SILVER: Dictionary = {
 	"type_names": 0x509AE,
 	"font": 0xF82F2,
 	"frames": 0xF88F2,
+	"trainer_pic_pointers": 0x80000,
+	"trainer_palettes": 0xB53D,
+	"trainer_class_names": 0x1B0955,
+	"trainer_classes": 66,
+	"trainer_last_class": "ROCKET",
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -155,6 +167,11 @@ const CRYSTAL: Dictionary = {
 	"type_names": 0x5097B,
 	"font": 0xF8200,
 	"frames": 0xF8800,
+	"trainer_pic_pointers": 0x128000,
+	"trainer_palettes": 0xB0CE,
+	"trainer_class_names": 0x2C1EF,
+	"trainer_classes": 67,
+	"trainer_last_class": "MYSTICALMAN",
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -212,6 +229,24 @@ static func pic_pointer_offset(layout: Dictionary, species: int, back: bool) -> 
 static func unown_pic_pointer_offset(layout: Dictionary, form: int, back: bool) -> int:
 	var pair: int = form * 2 + (1 if back else 0)
 	return int(layout["unown_pic_pointers"]) + pair * PIC_POINTER_SIZE
+
+
+static func trainer_class_count(layout: Dictionary) -> int:
+	return int(layout["trainer_classes"])
+
+
+## Trainer pics have no back half and no size of their own, so unlike the
+## Pokémon table this one is a flat run of three-byte pointers, indexed from the
+## first class rather than from the player.
+static func trainer_pic_pointer_offset(layout: Dictionary, trainer_class: int) -> int:
+	return int(layout["trainer_pic_pointers"]) + (trainer_class - 1) * PIC_POINTER_SIZE
+
+
+## The palette table opens with the player, who is a trainer class with no pic,
+## so it is indexed by class number where the pic table is indexed by class
+## number minus one. The two are one entry out of step on purpose.
+static func trainer_palette_offset(layout: Dictionary, trainer_class: int) -> int:
+	return int(layout["trainer_palettes"]) + trainer_class * Gen2Palette.PAIR_BYTES
 
 
 static func move_data_offset(layout: Dictionary, move: int) -> int:

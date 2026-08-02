@@ -16,7 +16,7 @@ extends SceneTree
 ## the shape the charmap describes, and it puts the alphabets, the gaps between
 ## them and the digits where they can be read at a glance.
 
-const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back"]
+const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back", "trainers"]
 const SHEETS: PackedStringArray = ["font", "frames"]
 
 ## Tiles per row when a strip is folded for viewing.
@@ -131,24 +131,51 @@ func _render(
 		push_error("%s holds %d bytes, expected %d." % [name, indices.size(), width * height])
 		return null
 
-	var species: Array = RomCache.read_json(RomCache.species_path(directory))
 	var cell: int = int(atlas["cell"])
 	var columns: int = int(atlas["columns"])
-	var key: String = "shiny" if shiny else "normal"
+	var palettes: Array = _palettes(directory, name, shiny)
+	if palettes.is_empty():
+		push_error("No palettes for %s." % name)
+		return null
 
 	var image: Image = Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
 	for y: int in height:
 		for x: int in width:
 			var slot: int = (y / cell) * columns + (x / cell)
-			# Unown's atlas is one cell per letter, all of them the same species.
-			var entry: Dictionary = species[
-				RomLayout.UNOWN_SPECIES - 1 if name.begins_with("unown") else mini(slot, species.size() - 1)
-			]
-			var packed: Array = entry["palette"][key]
-			var palette: PackedColorArray = Gen2Palette.pic_palette(PackedColorArray([
-				Gen2Palette.from_packed(int(packed[0])),
-				Gen2Palette.from_packed(int(packed[1])),
-			]))
+			var palette: PackedColorArray = palettes[mini(slot, palettes.size() - 1)]
 			image.set_pixel(x, y, palette[indices[y * width + x]])
 
 	return image
+
+
+## One palette per cell of an atlas, in slot order.
+##
+## The three kinds of atlas are indexed differently: a species atlas by species,
+## the trainer atlas by class, and Unown's by letter form, all twenty-six of
+## which are the one species and so share its colours.
+func _palettes(directory: String, name: String, shiny: bool) -> Array:
+	var out: Array = []
+
+	if name == "trainers":
+		for entry: Dictionary in RomCache.read_json(RomCache.trainers_path(directory)):
+			out.append(_palette_of(entry["palette"]))
+		return out
+
+	var species: Array = RomCache.read_json(RomCache.species_path(directory))
+	var key: String = "shiny" if shiny else "normal"
+	if name.begins_with("unown"):
+		var unown: Dictionary = species[RomLayout.UNOWN_SPECIES - 1]
+		for form: int in RomLayout.UNOWN_FORMS:
+			out.append(_palette_of(unown["palette"][key]))
+		return out
+
+	for entry: Dictionary in species:
+		out.append(_palette_of(entry["palette"][key]))
+	return out
+
+
+func _palette_of(packed: Array) -> PackedColorArray:
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int(packed[0])),
+		Gen2Palette.from_packed(int(packed[1])),
+	]))

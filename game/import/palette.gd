@@ -12,8 +12,11 @@ extends RefCounted
 ## the whole of what being shiny means to the renderer.
 
 const COLOR_BYTES: int = 2
-## Two colours, normal and shiny.
-const ENTRY_BYTES: int = 8
+## The two middle colours a pic is drawn with. A trainer class stores one such
+## pair and nothing else: only a Pokémon can be shiny.
+const PAIR_BYTES: int = COLOR_BYTES * 2
+## A species' entry: two pairs, normal and shiny.
+const ENTRY_BYTES: int = PAIR_BYTES * 2
 const COLORS_PER_PIC: int = 4
 
 

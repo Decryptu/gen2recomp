@@ -126,6 +126,13 @@ So every offset ships with a check that would fail if it were wrong, and
   `Gen2Text` says are there must have ink, and the runs it has no character for
   must be blank. Those runs sit between the alphabets, so an offset out by a
   single tile drags a blank onto "z" and a glyph onto a code that has none.
+- The three trainer tables are checked against each other, because they are
+  three views of one numbering and a mistake shows up as them disagreeing. The
+  class names pin the ends and the middle of a terminated table the way the move
+  names do; the palettes are checked structurally *and* one entry past the end,
+  since the table is the player plus every class and something that is not a
+  palette has to follow it; and the pic pointers have to address the banked
+  window and decompress into a pic of the one size every trainer is drawn at.
 - The eight text box borders have no content to check, so they are checked by
   the shape a border has to have: inset from the top of its tile row, corners
   that carry the pattern of the side they hang from, and no two frames the
@@ -163,6 +170,10 @@ A contact sheet of all 251 species is the fastest correctness check the project
 has: a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
 in a pointer table all look obviously wrong, and all of them look fine in a
 manifest.
+
+`trainers` does the same for the trainer classes, each drawn in its own class
+palette, which is where a palette table that has slid by an entry becomes
+obvious: the pics stay right and the colours move one class along.
 
 The same tool takes `font` or `frames`, which it folds into rows of sixteen
 tiles. That is the shape the charmap describes, so the alphabets, the gaps

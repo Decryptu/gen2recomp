@@ -1,11 +1,16 @@
 extends GutTest
 
-## The font and border layout checks, against dumps this test builds.
+## The font, border and trainer layout checks, against dumps this test builds.
 ##
 ## No cartridge is opened here. What is being tested is not where the font is,
 ## which only a real dump can settle, but that the checks would notice if it
 ## were somewhere else: the whole value of a runtime check is that it fails, and
 ## a check nobody has ever seen fail is a comment.
+
+## Where the synthetic trainer pics are put: a bank the layout passes through
+## unpatched, so the check sees the same bank repair a real pointer gets.
+const PIC_BANK: int = 0x21
+const PIC_ADDRESS: int = 0x4010
 
 var _layout: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 
@@ -159,3 +164,113 @@ func test_eight_identical_borders_mean_it_is_not_the_table() -> void:
 func test_a_dump_too_short_to_hold_the_font_fails_rather_than_reading_past_it() -> void:
 	assert_false(RomImporter.verify_font(_rom(PackedByteArray()), _layout)["ok"])
 	assert_false(RomImporter.verify_frames(_rom(PackedByteArray()), _layout)["ok"])
+
+
+## Names, palettes and pic pointers for every class, all three agreeing.
+func _trainer_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_class_names(data, int(_layout["trainer_class_names"]))
+	_write_trainer_palettes(data, true)
+	_write_trainer_pointers(data)
+	_write(data, RomFile.linear(PIC_BANK, PIC_ADDRESS), _trainer_pic())
+	return data
+
+
+func _write_class_names(data: PackedByteArray, at: int) -> void:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	var cursor: int = at
+	for trainer_class: int in range(1, count + 1):
+		var name: String = "LASS"
+		if trainer_class == 1:
+			name = RomImporter.TRAINER_FIRST_CLASS
+		elif trainer_class == RomImporter.TRAINER_MIDDLE_CLASS:
+			name = RomImporter.TRAINER_MIDDLE_CLASS_NAME
+		elif trainer_class == count:
+			name = String(_layout["trainer_last_class"])
+		var encoded: PackedByteArray = Gen2Text.encode(name)
+		encoded.append(Gen2Text.TERMINATOR)
+		_write(data, cursor, encoded)
+		cursor += encoded.size()
+
+
+## The player's entry plus one per class, and then something that is not a
+## palette, because the table ending where it should is half of what is checked.
+func _write_trainer_palettes(data: PackedByteArray, ends: bool) -> void:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	for trainer_class: int in range(0, count + 2):
+		var at: int = RomLayout.trainer_palette_offset(_layout, trainer_class)
+		var high: int = 0x80 if ends and trainer_class == count + 1 else 0x00
+		_write(data, at, PackedByteArray([0x34, 0x12, 0x78, 0x56 | high]))
+
+
+func _write_trainer_pointers(data: PackedByteArray) -> void:
+	for trainer_class: int in range(1, RomLayout.trainer_class_count(_layout) + 1):
+		_write(
+			data, RomLayout.trainer_pic_pointer_offset(_layout, trainer_class),
+			PackedByteArray([PIC_BANK, PIC_ADDRESS & 0xFF, PIC_ADDRESS >> 8])
+		)
+
+
+## A long-form zero fill of exactly one trainer pic, then the terminator. The
+## pixels do not matter here; the length is what the check reads.
+func _trainer_pic() -> PackedByteArray:
+	var pixels: int = RomLayout.TRAINER_PIC_TILES * RomLayout.TRAINER_PIC_TILES \
+		* Gen2Tiles.TILE_BYTES
+	var length: int = pixels - 1
+	return PackedByteArray([
+		0xE0 | (Gen2Lz.Op.ZERO << 2) | (length >> 8), length & 0xFF, Gen2Lz.TERMINATOR,
+	])
+
+
+func test_a_plausible_trainer_table_verifies() -> void:
+	var result: Dictionary = RomImporter.verify_trainers(_rom(_trainer_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+func test_class_names_that_slid_by_a_byte_fail() -> void:
+	# The failure the far-end check exists for: the entries are terminated rather
+	# than padded, so a start that is one byte out still reads as words.
+	var data: PackedByteArray = _trainer_dump()
+	_write_class_names(data, int(_layout["trainer_class_names"]) + 1)
+	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
+
+
+func test_a_palette_table_that_does_not_end_where_the_classes_do_fails() -> void:
+	var data: PackedByteArray = _trainer_dump()
+	_write_trainer_palettes(data, false)
+	var result: Dictionary = RomImporter.verify_trainers(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "entry")
+
+
+func test_a_blank_trainer_palette_fails() -> void:
+	var data: PackedByteArray = _trainer_dump()
+	_write(data, RomLayout.trainer_palette_offset(_layout, 3), PackedByteArray([0, 0, 0, 0]))
+	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
+
+
+func test_a_pointer_outside_the_banked_window_fails() -> void:
+	# $0000-$3FFF is the fixed bank, which no pic pointer addresses: a pointer
+	# that lands there means the table is not a pointer table.
+	var data: PackedByteArray = _trainer_dump()
+	_write(
+		data, RomLayout.trainer_pic_pointer_offset(_layout, 5),
+		PackedByteArray([PIC_BANK, 0x00, 0x20])
+	)
+	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
+
+
+func test_a_pic_that_is_short_of_a_full_trainer_fails() -> void:
+	var data: PackedByteArray = _trainer_dump()
+	_write(
+		data, RomFile.linear(PIC_BANK, PIC_ADDRESS),
+		PackedByteArray([0x60 | 0x02, Gen2Lz.TERMINATOR])
+	)
+	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
+
+
+func test_a_dump_with_no_trainers_in_it_fails() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])

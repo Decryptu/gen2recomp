@@ -28,8 +28,8 @@ the same thing for Generation 1.
 >
 > The import gate and the first half of the importer exist and are tested: a
 > verified cartridge decodes into species data, moves, items, types, palettes,
-> every Pokémon sprite, the font and the text box borders. Sprites and text draw
-> on a real 160x144 screen. The overworld, battle system, audio and mod loader
+> every Pokémon sprite, every trainer pic, the font and the text box borders.
+> Sprites and text draw on a real 160x144 screen. The overworld, battle system, audio and mod loader
 > do not exist yet. There is nothing playable here today.
 
 ## Getting started
@@ -87,6 +87,7 @@ What comes out today:
 | Moves | Names, power, type, accuracy, PP, effect and its chance |
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
+| Trainers | Every trainer class: name, pic and palette |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
 | Font | All 128 glyphs, indexed by character code |
@@ -101,10 +102,12 @@ To look at what was decoded, as a contact sheet of sprites:
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
 ```
 
-The same tool takes `font` or `frames` in place of an atlas name, which is how
-you check that the glyphs are where the character codes say they are.
+The same tool takes `trainers` for the trainer classes, or `font` or `frames` in
+place of an atlas name, which is how you check that the glyphs are where the
+character codes say they are.
 
-or as text, for any of `species`, `moves`, `items`, `types` or `all`:
+or as text, for any of `species`, `moves`, `items`, `types`, `trainers` or
+`all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
@@ -120,7 +123,8 @@ Boots the main scene for 30 frames and exits, as a quick smoke check.
 
 To see an imported sprite on a real screen, open
 `game/render/pic_viewer.tscn` in the editor and press Play. Left and right
-change species, `S` toggles shiny, `B` swaps the front pic for the back one.
+change species, `S` toggles shiny, `B` swaps the front pic for the back one, and
+`T` switches to the trainer classes.
 The game is drawn into a 160x144 viewport and scaled up by a whole number, so a
 Game Boy pixel stays square; the interface around it is at the window's own
 resolution.

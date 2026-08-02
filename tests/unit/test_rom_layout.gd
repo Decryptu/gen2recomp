@@ -107,6 +107,49 @@ func test_pic_pointers_come_in_front_back_pairs() -> void:
 	assert_eq(front - RomLayout.pic_pointer_offset(layout, 1, false), RomLayout.PIC_POINTER_SIZE * 2)
 
 
+func test_the_trainer_tables_are_one_entry_out_of_step() -> void:
+	# The palette table opens with the player, who has no pic, so a class reaches
+	# its palette by its own number and its pic by one less.
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		assert_eq(
+			RomLayout.trainer_pic_pointer_offset(layout, 1),
+			int(layout["trainer_pic_pointers"]), "%s pics start at the first class" % id
+		)
+		assert_eq(
+			RomLayout.trainer_palette_offset(layout, 1),
+			int(layout["trainer_palettes"]) + Gen2Palette.PAIR_BYTES,
+			"%s palettes start at the player" % id
+		)
+
+
+func test_a_trainer_palette_is_one_pair_and_a_species_is_two() -> void:
+	# Only a Pokémon can be shiny, so a class stores half of what a species does.
+	assert_eq(Gen2Palette.ENTRY_BYTES, Gen2Palette.PAIR_BYTES * 2)
+
+
+func test_crystal_has_one_trainer_class_more_than_gold() -> void:
+	assert_eq(
+		RomLayout.trainer_class_count(RomLayout.for_id(RomRegistry.CRYSTAL)),
+		RomLayout.trainer_class_count(RomLayout.for_id(RomRegistry.GOLD)) + 1
+	)
+
+
+func test_the_trainer_tables_do_not_run_off_the_end() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var count: int = RomLayout.trainer_class_count(layout)
+		assert_gt(count, 0, "%s has no trainer classes" % id)
+		assert_lt(
+			RomLayout.trainer_pic_pointer_offset(layout, count) + RomLayout.PIC_POINTER_SIZE,
+			RomRegistry.EXPECTED_SIZE
+		)
+		assert_lt(
+			RomLayout.trainer_palette_offset(layout, count) + Gen2Palette.PAIR_BYTES,
+			RomRegistry.EXPECTED_SIZE
+		)
+
+
 func test_unown_forms_are_zero_based() -> void:
 	var layout: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 	assert_eq(
