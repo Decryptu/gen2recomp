@@ -1,4 +1,14 @@
-# gen2recomp
+<p align="center">
+  <img src="assets/brand/banner.png" alt="gen2recomp" width="820">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Godot-4.8.dev2-478CBF?style=flat-square&logo=godotengine&logoColor=white" alt="Godot 4.8.dev2">
+  <img src="https://img.shields.io/badge/GDScript-355570?style=flat-square&logo=godotengine&logoColor=white" alt="GDScript">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-8f8c98?style=flat-square" alt="Platforms">
+  <img src="https://img.shields.io/badge/status-early-e0a138?style=flat-square" alt="Status: early">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-7d59d4?style=flat-square" alt="MIT licence"></a>
+</p>
 
 A native [Godot 4](https://godotengine.org) reimplementation of the Generation 2
 Game Boy Color games: Gold, Silver and Crystal.
@@ -15,9 +25,10 @@ the same thing for Generation 1.
 > ### Status: early
 >
 > The import gate and the first half of the importer exist and are tested: a
-> verified cartridge decodes into species data, moves, items, types, palettes
-> and every Pokémon sprite. The renderer, overworld, battle system, audio and
-> mod loader do not exist yet. There is nothing playable here today.
+> verified cartridge decodes into species data, moves, items, types, palettes,
+> every Pokémon sprite, the font and the text box borders. Sprites and text draw
+> on a real 160x144 screen. The overworld, battle system, audio and mod loader
+> do not exist yet. There is nothing playable here today.
 
 ## Getting started
 
@@ -76,6 +87,8 @@ What comes out today:
 | Types | All 28 names, indexed by type number |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
+| Font | All 128 glyphs, indexed by character code |
+| Borders | All eight text box frames, six tiles each |
 
 Sprites are stored as colour indices rather than as images, and a palette is
 applied when they are drawn, which is the whole of what being shiny costs.
@@ -85,6 +98,9 @@ To look at what was decoded, as a contact sheet of sprites:
 ```bash
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
 ```
+
+The same tool takes `font` or `frames` in place of an atlas name, which is how
+you check that the glyphs are where the character codes say they are.
 
 or as text, for any of `species`, `moves`, `items`, `types` or `all`:
 
@@ -107,6 +123,10 @@ The game is drawn into a 160x144 viewport and scaled up by a whole number, so a
 Game Boy pixel stays square; the interface around it is at the window's own
 resolution.
 
+`game/render/text_viewer.tscn` does the same for text: space advances the box,
+`F` cycles through the eight borders, and `C` shows every glyph in the font at
+once.
+
 ## Tests
 
 [GUT](https://github.com/bitwes/Gut) lives in `addons/gut`; configuration is in
@@ -126,6 +146,7 @@ they use synthetic files and a known SHA-1 vector, so the suite runs anywhere.
 | `game/` | Feature folders, scene and script colocated |
 | `autoload/` | Singletons registered in Project Settings |
 | `assets/` | Only assets we authored or that are freely licensed |
+| `assets/brand/` | Logo and banner; see [its README](assets/brand/README.md) |
 | `addons/` | Third-party plugins |
 | `tests/` | GUT unit and integration tests |
 | `tools/` | Headless developer scripts, not shipped game code |

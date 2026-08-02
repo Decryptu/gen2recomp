@@ -79,6 +79,42 @@ func test_pic_with_too_little_data_is_blank_rather_than_partial() -> void:
 	assert_eq(pixels.count(0), 16 * 16)
 
 
+func test_a_1bpp_strip_is_one_tile_tall_and_as_wide_as_it_needs() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(3 * Gen2Tiles.TILE_1BPP_BYTES)
+	var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, 0, 3)
+	assert_eq(strip.size(), 3 * Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT)
+
+
+func test_a_set_1bpp_bit_decodes_to_ink_and_the_rest_to_the_background() -> void:
+	# The hardware widens 1bpp by copying the byte into both planes, so a lit
+	# pixel is index 3 and there are no middle colours to be had.
+	var data: PackedByteArray = PackedByteArray([0b1000_0001, 0, 0, 0, 0, 0, 0, 0])
+	var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, 0, 1)
+	assert_eq(strip[0], Gen2Tiles.INK, "bit 7 is the leftmost pixel")
+	assert_eq(strip[7], Gen2Tiles.INK, "bit 0 is the rightmost")
+	assert_eq(strip[1], 0)
+	assert_eq(strip[Gen2Tiles.TILE_WIDTH], 0, "the second row is untouched")
+
+
+func test_1bpp_tiles_sit_side_by_side_in_code_order() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	for byte: int in [0xFF, 0x00]:
+		for _row: int in Gen2Tiles.TILE_1BPP_BYTES:
+			data.append(byte)
+
+	var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, 0, 2)
+	assert_eq(strip[0], Gen2Tiles.INK, "the first tile is solid")
+	assert_eq(strip[Gen2Tiles.TILE_WIDTH], 0, "the second starts eight pixels along")
+
+
+func test_a_1bpp_strip_that_runs_out_of_data_keeps_its_size() -> void:
+	# A hole is visible on screen; a short buffer is a crash somewhere later.
+	var strip: PackedByteArray = Gen2Tiles.decode_1bpp_strip(PackedByteArray([0xFF]), 0, 2)
+	assert_eq(strip.size(), 2 * Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT)
+	assert_eq(strip.count(0), strip.size())
+
+
 func test_blit_places_a_small_pic_inside_a_cell() -> void:
 	var source: PackedByteArray = PackedByteArray([1, 2, 3, 4])
 	var destination: PackedByteArray = PackedByteArray()

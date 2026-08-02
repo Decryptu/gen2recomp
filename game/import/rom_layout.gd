@@ -46,6 +46,43 @@ const MAX_NAME_LENGTH: int = 16
 const UNOWN_SPECIES: int = 201
 const UNOWN_FORMS: int = 26
 
+## The font is indexed by character code, not by position in a sheet: its first
+## tile is code $80 ("A") and its last is $FF ("9"). That is not a coincidence of
+## ordering, it is how the hardware prints at all. The font is loaded so that a
+## character byte is already the tile number to draw, so the alphabet's runs in
+## [Gen2Text] and the tiles here are the same run seen twice.
+const FONT_TILES: int = 128
+const FONT_FIRST_CODE: int = 0x80
+
+## The alphabets and the digits: A-Z, a-z, 0-9. Every one of these has a glyph
+## in every supported cartridge, and they are the runs [Gen2Text] builds
+## arithmetically rather than listing.
+const FONT_INK_RUNS: Array = [[0x80, 0x99], [0xA0, 0xB9], [0xF6, 0xFF]]
+
+## Codes with no character in [Gen2Text], whose tiles are therefore blank. These
+## sit between the runs above, which is what makes the pair a layout check: an
+## offset out by a single tile drags a blank onto "z" and a glyph onto a code
+## that has none, and both halves fail at once.
+##
+## Not every unmapped code is here. Crystal draws an arrow at $EB where Gold and
+## Silver leave a hole, so only the runs all three agree on are checked.
+const FONT_BLANK_RUNS: Array = [[0xBA, 0xBF], [0xC6, 0xCF], [0xD7, 0xDE]]
+
+## Text box borders: eight to choose from, six tiles each, in the order
+## ┌ ─ ┐ │ └ ┘. They are loaded at code $79, which is where the box-drawing
+## codes start in [Gen2Text], so those codes address the border directly and a
+## box is drawn by printing characters like anything else.
+const FRAME_COUNT: int = 8
+const FRAME_TILES: int = 6
+const FRAME_FIRST_CODE: int = 0x79
+## Positions within a frame.
+const FRAME_TOP_LEFT: int = 0
+const FRAME_HORIZONTAL: int = 1
+const FRAME_TOP_RIGHT: int = 2
+const FRAME_VERTICAL: int = 3
+const FRAME_BOTTOM_LEFT: int = 4
+const FRAME_BOTTOM_RIGHT: int = 5
+
 ## Back pics are always this square. Front pics vary and carry their own size in
 ## the base stats.
 const BACKPIC_TILES: int = 6
@@ -97,6 +134,8 @@ const GOLD_SILVER: Dictionary = {
 	"item_names": 0x1B0000,
 	"move_data": 0x41AFE,
 	"type_names": 0x509AE,
+	"font": 0xF82F2,
+	"frames": 0xF88F2,
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -114,6 +153,8 @@ const CRYSTAL: Dictionary = {
 	"item_names": 0x1C8000,
 	"move_data": 0x41AFB,
 	"type_names": 0x5097B,
+	"font": 0xF8200,
+	"frames": 0xF8800,
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -182,6 +223,15 @@ static func move_data_offset(layout: Dictionary, move: int) -> int:
 ## pointers are two bytes, not three: the strings sit in the table's own bank.
 static func type_name_pointer_offset(layout: Dictionary, type_number: int) -> int:
 	return int(layout["type_names"]) + type_number * TYPE_POINTER_SIZE
+
+
+static func font_offset(layout: Dictionary) -> int:
+	return int(layout["font"])
+
+
+## Frames are stored back to back in selection order, six tiles of 1bpp each.
+static func frame_offset(layout: Dictionary, frame: int) -> int:
+	return int(layout["frames"]) + frame * FRAME_TILES * Gen2Tiles.TILE_1BPP_BYTES
 
 
 ## The bank a dump offset falls in, for resolving a pointer that carries an

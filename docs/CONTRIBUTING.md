@@ -47,7 +47,7 @@ The importer under `game/import/` decodes a verified cartridge into a cache:
 | | |
 |---|---|
 | `lz_decompressor.gd` | The LZ variant every compressed graphic uses |
-| `tile_codec.gd` | 2bpp tiles to colour indices; pic layout |
+| `tile_codec.gd` | 2bpp and 1bpp tiles to colour indices; pic layout |
 | `text_codec.gd` | The Generation 2 character encoding |
 | `palette.gd` | 15-bit BGR colours |
 | `rom_layout.gd` | Where each table lives, per game |
@@ -68,6 +68,9 @@ The drawing layer is deliberately thin:
 |---|---|
 | `render/pic_image.gd` | Colour indices plus a palette to an `Image` |
 | `render/gen2_screen.gd` | The 160x144 screen, scaled by a whole number |
+| `render/font.gd` | Character codes to glyph tiles, blitted into a buffer |
+| `render/text_layout.gd` | A string to the lines and pages a box can show |
+| `render/text_box.gd` | The two of them, as a bordered window on the grid |
 
 `Gen2Screen` renders the game into a `SubViewport` the size of the real
 hardware and blows it up by an integer factor, while the interface around it
@@ -75,6 +78,21 @@ stays at the window's own resolution. This is a `Control` and not a
 project-wide stretch setting on purpose: a stretch would have made the menus
 fuzzy to keep the game sharp, and any non-integer factor resamples an 8x8 tile
 into something that crawls when it moves.
+
+Text is not typeset, it is tilemapped. Every character is one 8x8 tile, a
+character code is already the number of the tile that draws it, and a text box
+is a border printed as box-drawing characters around lines that sit two rows
+apart. `Gen2Font` does the copying, `Gen2TextLayout` decides where the lines
+break, and only `Gen2TextBox` is a node. Two consequences worth knowing before
+you add a screen:
+
+- **Measure a line in tiles, never in characters.** The apostrophe ligatures
+  ($D0-$D6) and PK/MN are two characters in one glyph, so `String.length()`
+  overstates a line and wraps it a column early. `Gen2Text.encoded_length()` is
+  the measure that matches the screen.
+- **The space at $7F is not in the font.** It is below the first glyph, so it
+  draws nothing, which is exactly right and is also why `Gen2Font` treats a code
+  it has no tile for as a no-op rather than an error.
 
 ## Offsets, and why they are checked at runtime
 
@@ -103,6 +121,15 @@ So every offset ships with a check that would fail if it were wrong, and
   words. Both tables are checked at the far end as well as the near one, and
   the item table also at entry four, where a start that is right but a walk
   that is not shows up first.
+- The font is checked against the charmap, because the two are the same claim
+  seen twice: the font is indexed by character code, so the letters and digits
+  `Gen2Text` says are there must have ink, and the runs it has no character for
+  must be blank. Those runs sit between the alphabets, so an offset out by a
+  single tile drags a blank onto "z" and a glyph onto a code that has none.
+- The eight text box borders have no content to check, so they are checked by
+  the shape a border has to have: inset from the top of its tile row, corners
+  that carry the pattern of the side they hang from, and no two frames the
+  same.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 
@@ -113,6 +140,15 @@ stats), and then confirming the *structure* against the
 these games are laid out. Do not copy an address out of a disassembly and
 assume it applies: those are bank:address pairs for a build of the source, and
 Gold, Silver and Crystal do not agree.
+
+Graphics can be found the same way, more precisely, because pret keeps them as
+PNGs. Encode the reference image to the format the cartridge stores (1bpp for
+the font and the borders: one byte per row, bit 7 leftmost) and search the dump
+for that exact byte sequence. It matches in one place, which settles the offset
+with no guessing, and the section order in the disassembly then predicts where
+the neighbouring blobs are, which is a second check for free. Nothing from pret
+belongs in this repository; it is a way to locate data in your own dump, not a
+source of data to commit.
 
 ## Seeing that a decode is right
 
@@ -127,6 +163,14 @@ A contact sheet of all 251 species is the fastest correctness check the project
 has: a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
 in a pointer table all look obviously wrong, and all of them look fine in a
 manifest.
+
+The same tool takes `font` or `frames`, which it folds into rows of sixteen
+tiles. That is the shape the charmap describes, so the alphabets, the gaps
+between them and the digits at the end can be read off the image directly:
+
+```bash
+godot --headless --path . -s res://tools/preview_pics.gd -- crystal /tmp/font.png font
+```
 
 Text decodes get the same treatment from `tools/dump_tables.gd`, which prints a
 cached table rather than drawing it:
@@ -160,6 +204,14 @@ the keyboard:
 
 ```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/render/pic_viewer.tscn /tmp/shot.png 20 show_species 1 249
+```
+
+`text_viewer.gd` is built the same way, and one of its methods exists only for
+this: `finish` reveals the rest of the page at once, so a photograph of a text
+box does not depend on how long the capture took to arrive.
+
+```bash
+godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tscn /tmp/shot.png 24 finish 1
 ```
 
 Keep that property when you add a screen. A handler that only exists inside an

@@ -45,6 +45,11 @@ func test_each_table_gets_its_own_file() -> void:
 func test_prepare_creates_the_tree() -> void:
 	assert_true(RomCache.prepare(_directory))
 	assert_true(DirAccess.dir_exists_absolute("%s/%s" % [_directory, RomCache.PICS_DIR]))
+	assert_true(DirAccess.dir_exists_absolute("%s/%s" % [_directory, RomCache.TILES_DIR]))
+
+
+func test_tile_sheets_and_pics_of_the_same_name_do_not_collide() -> void:
+	assert_ne(RomCache.tile_path(_directory, "front"), RomCache.pic_path(_directory, "front"))
 
 
 func test_json_round_trips() -> void:

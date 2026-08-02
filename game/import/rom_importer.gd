@@ -134,7 +134,124 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if last_type != "DARK":
 		return {"ok": false, "message": "Type table: expected DARK, read %s." % last_type}
 
+	var font: Dictionary = verify_font(rom, layout)
+	if not font["ok"]:
+		return font
+
+	var frames: Dictionary = verify_frames(rom, layout)
+	if not frames["ok"]:
+		return frames
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## The font carries no name and no number, so it is checked against the one
+## thing that is known about it independently: the charmap.
+##
+## The font is indexed by character code, so the letters and digits [Gen2Text]
+## claims are there must have ink, and the runs of codes it has no character for
+## must be blank. Those runs sit between the alphabets, so an offset out by a
+## single tile drags a blank onto "z" and a glyph onto a code that has none, and
+## the check fails in both directions at once.
+static func verify_font(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = RomLayout.font_offset(layout)
+	var length: int = RomLayout.FONT_TILES * Gen2Tiles.TILE_1BPP_BYTES
+	if not rom.in_bounds(offset, length):
+		return {"ok": false, "message": "Font runs past the end of the dump."}
+
+	for run: Array in RomLayout.FONT_INK_RUNS:
+		for code: int in range(run[0], run[1] + 1):
+			if _glyph_ink(rom, offset, code) == 0:
+				return {
+					"ok": false,
+					"message": "Font: code $%02X (%s) has no glyph." % [
+						code, Gen2Text.character(code),
+					],
+				}
+
+	for run: Array in RomLayout.FONT_BLANK_RUNS:
+		for code: int in range(run[0], run[1] + 1):
+			if _glyph_ink(rom, offset, code) != 0:
+				return {
+					"ok": false,
+					"message": "Font: code $%02X has a glyph but no character." % code,
+				}
+
+	# No glyph fills a row of eight: every character leaves the spacing column
+	# clear, and most leave more. A run of $FF is graphics, not a font.
+	for i: int in length:
+		if rom.u8(offset + i) == 0xFF:
+			return {"ok": false, "message": "Font: solid row at byte %d; not font data." % i}
+
+	return {"ok": true, "message": ""}
+
+
+## Ink in the tile for one character code, in pixels.
+static func _glyph_ink(rom: RomFile, offset: int, code: int) -> int:
+	var at: int = offset + (code - RomLayout.FONT_FIRST_CODE) * Gen2Tiles.TILE_1BPP_BYTES
+	var ink: int = 0
+	for row: int in Gen2Tiles.TILE_1BPP_BYTES:
+		var byte: int = rom.u8(at + row)
+		for bit: int in 8:
+			ink += (byte >> bit) & 1
+	return ink
+
+
+## Frames are checked by the shape a border has to have rather than by content,
+## because all eight are decoration and none of them says which it is.
+static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var seen: Array = []
+
+	for frame: int in RomLayout.FRAME_COUNT:
+		var offset: int = RomLayout.frame_offset(layout, frame)
+		var tiles: PackedByteArray = rom.slice(
+			offset, RomLayout.FRAME_TILES * Gen2Tiles.TILE_1BPP_BYTES
+		)
+		if tiles.is_empty():
+			return {"ok": false, "message": "Frame %d runs past the end of the dump." % frame}
+
+		# A border is inset from the top of its tile row, so the top-left, top and
+		# top-right tiles all open with blank scanlines.
+		for tile: int in [
+			RomLayout.FRAME_TOP_LEFT, RomLayout.FRAME_HORIZONTAL, RomLayout.FRAME_TOP_RIGHT
+		]:
+			for row: int in 2:
+				if tiles[tile * Gen2Tiles.TILE_1BPP_BYTES + row] != 0:
+					return {
+						"ok": false,
+						"message": "Frame %d tile %d has ink on row %d of its top edge." % [
+							frame, tile, row,
+						],
+					}
+
+		# The two bottom corners continue the vertical edge they hang from, so
+		# their first row is one the vertical tile also draws.
+		var left: int = tiles[RomLayout.FRAME_BOTTOM_LEFT * Gen2Tiles.TILE_1BPP_BYTES]
+		var right: int = tiles[RomLayout.FRAME_BOTTOM_RIGHT * Gen2Tiles.TILE_1BPP_BYTES]
+		if left == 0 or left != right:
+			return {
+				"ok": false,
+				"message": "Frame %d corners do not meet its sides ($%02X, $%02X)." % [
+					frame, left, right,
+				],
+			}
+		var vertical: PackedByteArray = tiles.slice(
+			RomLayout.FRAME_VERTICAL * Gen2Tiles.TILE_1BPP_BYTES,
+			(RomLayout.FRAME_VERTICAL + 1) * Gen2Tiles.TILE_1BPP_BYTES
+		)
+		if not vertical.has(left):
+			return {
+				"ok": false,
+				"message": "Frame %d side never draws $%02X, which its corners do." % [frame, left],
+			}
+
+		# Eight identical frames would mean the table is not where it is claimed
+		# to be, or is not a table at all.
+		if seen.has(tiles):
+			return {"ok": false, "message": "Frame %d repeats an earlier frame." % frame}
+		seen.append(tiles)
+
+	return {"ok": true, "message": ""}
 
 
 ## Resolves one entry of the type name pointer table.
@@ -187,6 +304,11 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not decode pics."
 		return result
 
+	var tiles: Dictionary = _import_tiles(rom, layout, on_progress)
+	if tiles.is_empty():
+		result["message"] = "Could not write the font."
+		return result
+
 	var moves: Array = _import_moves(rom, layout, on_progress)
 	var items: Array = _import_items(rom, layout, on_progress)
 	var types: Array = _import_types(rom, layout, on_progress)
@@ -213,6 +335,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"item_count": items.size(),
 		"type_count": types.size(),
 		"atlases": pics,
+		"tiles": tiles,
 		"complete": true,
 	}
 	if not RomCache.write_json(RomCache.manifest_path(directory), manifest):
@@ -332,6 +455,50 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 			on_progress.call("types", type_number + 1, RomLayout.TYPE_COUNT)
 
 	return out
+
+
+## Decodes the font and the eight text box borders, each as one strip of tiles.
+##
+## Neither is compressed and neither is per-species, so unlike a pic there is
+## nothing to look up: the whole of both is a fixed run of 1bpp tiles. They are
+## kept as strips because both are addressed by character code, and a strip
+## turns that code into a horizontal offset and nothing else.
+func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
+	var data: PackedByteArray = rom.bytes()
+	var sheets: Dictionary = {
+		"font": {
+			"offset": RomLayout.font_offset(layout),
+			"tiles": RomLayout.FONT_TILES,
+			"first_code": RomLayout.FONT_FIRST_CODE,
+		},
+		"frames": {
+			"offset": RomLayout.frame_offset(layout, 0),
+			"tiles": RomLayout.FRAME_COUNT * RomLayout.FRAME_TILES,
+			"first_code": RomLayout.FRAME_FIRST_CODE,
+		},
+	}
+
+	var written: Dictionary = {}
+	var done: int = 0
+	for name: String in sheets:
+		var sheet: Dictionary = sheets[name]
+		var count: int = sheet["tiles"]
+		var indices: PackedByteArray = Gen2Tiles.decode_1bpp_strip(data, sheet["offset"], count)
+		var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
+			return {}
+		written[name] = {
+			"width": count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": count,
+			"first_code": sheet["first_code"],
+		}
+
+		done += 1
+		if on_progress.is_valid():
+			on_progress.call("tiles", done, sheets.size())
+
+	return written
 
 
 func _import_pics(

@@ -16,6 +16,12 @@ const TILE_HEIGHT: int = 8
 const TILE_PIXELS: int = 64
 ## Bytes of 2bpp data per tile.
 const TILE_BYTES: int = 16
+## Bytes of 1bpp data per tile: one row per byte, with no second plane.
+const TILE_1BPP_BYTES: int = 8
+## The index a set 1bpp pixel decodes to. The hardware widens 1bpp graphics by
+## copying the byte into both planes, so a lit pixel is index 3 and the rest is
+## index 0: text is black on white, and the two middle colours never appear.
+const INK: int = 3
 
 
 ## Decodes one tile into [param out] starting at [param out_offset], as 8 rows
@@ -38,6 +44,35 @@ static func decode_tile(data: PackedByteArray, offset: int) -> PackedByteArray:
 	if offset < 0 or offset + TILE_BYTES > data.size():
 		return out
 	decode_tile_into(data, offset, out, 0)
+	return out
+
+
+## Decodes [param count] consecutive 1bpp tiles into a single strip of indices,
+## eight pixels tall and [param count] * 8 wide.
+##
+## The font and the text box borders are stored this way, and both are addressed
+## by a character code rather than by a grid position, so one row is the layout
+## that makes a glyph's position arithmetic on that code. A short or absent
+## source leaves the remaining tiles blank rather than failing: a strip with a
+## hole in it is visible on screen, which is the point.
+static func decode_1bpp_strip(data: PackedByteArray, offset: int, count: int) -> PackedByteArray:
+	var width: int = count * TILE_WIDTH
+	var out: PackedByteArray = PackedByteArray()
+	if count <= 0:
+		return out
+	out.resize(width * TILE_HEIGHT)
+
+	for tile: int in count:
+		var at: int = offset + tile * TILE_1BPP_BYTES
+		if at < 0 or at + TILE_1BPP_BYTES > data.size():
+			break
+		for row: int in TILE_HEIGHT:
+			var byte: int = data[at + row]
+			var destination: int = row * width + tile * TILE_WIDTH
+			for column: int in TILE_WIDTH:
+				if byte & (1 << (7 - column)):
+					out[destination + column] = INK
+
 	return out
 
 

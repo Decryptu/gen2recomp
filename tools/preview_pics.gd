@@ -1,8 +1,8 @@
 extends SceneTree
 
-## Renders an imported pic atlas to a PNG so it can be looked at.
+## Renders an imported pic atlas or tile sheet to a PNG so it can be looked at.
 ##
-##   Godot --headless --path . -s res://tools/preview_pics.gd -- <game> <out.png> [atlas] [--shiny]
+##   Godot --headless --path . -s res://tools/preview_pics.gd -- <game> <out.png> [what] [--shiny]
 ##
 ## e.g. gold /tmp/gold_front.png front
 ##
@@ -10,8 +10,17 @@ extends SceneTree
 ## time so that shiny is free. This applies one and writes the result out, which
 ## is the only way to tell a correct decode from a plausible-looking wrong one.
 ## Runs headless: it writes an image, it does not open a window.
+##
+## The font and the borders come out too. They are one row of tiles rather than
+## a grid, so the font is folded to sixteen tiles a row on the way out: that is
+## the shape the charmap describes, and it puts the alphabets, the gaps between
+## them and the digits where they can be read at a glance.
 
 const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back"]
+const SHEETS: PackedStringArray = ["font", "frames"]
+
+## Tiles per row when a strip is folded for viewing.
+const SHEET_COLUMNS: int = 16
 
 
 func _initialize() -> void:
@@ -24,7 +33,9 @@ func _initialize() -> void:
 			positional.append(arg)
 
 	if positional.size() < 2:
-		push_error("Usage: <game> <out.png> [%s] [--shiny]" % "|".join(ATLASES))
+		push_error("Usage: <game> <out.png> [%s|%s] [--shiny]" % [
+			"|".join(ATLASES), "|".join(SHEETS),
+		])
 		quit(1)
 		return
 
@@ -40,12 +51,18 @@ func _initialize() -> void:
 
 	var manifest: Dictionary = RomCache.read_manifest(directory)
 	var atlases: Dictionary = manifest.get("atlases", {})
-	if not atlases.has(atlas_name):
-		push_error("No atlas named %s." % atlas_name)
+	var sheets: Dictionary = manifest.get("tiles", {})
+
+	var image: Image = null
+	if sheets.has(atlas_name):
+		image = _render_sheet(directory, sheets[atlas_name], atlas_name)
+	elif atlases.has(atlas_name):
+		image = _render(directory, manifest, atlases[atlas_name], atlas_name, shiny)
+	else:
+		push_error("Nothing named %s in this cache." % atlas_name)
 		quit(1)
 		return
 
-	var image: Image = _render(directory, manifest, atlases[atlas_name], atlas_name, shiny)
 	if image == null:
 		quit(1)
 		return
@@ -68,6 +85,40 @@ func _find_cache(game: StringName) -> String:
 		return ""
 	var directory: String = RomCache.directory_for(game, sha1)
 	return directory if RomCache.is_usable(directory) else ""
+
+
+## A 1bpp strip, folded into rows of [constant SHEET_COLUMNS] tiles. There is no
+## palette to choose: 1bpp graphics are black on white and nothing else.
+func _render_sheet(directory: String, sheet: Dictionary, name: String) -> Image:
+	var indices: PackedByteArray = RomCache.read_indices(RomCache.tile_path(directory, name))
+	var strip_width: int = int(sheet["width"])
+	var tiles: int = int(sheet["tiles"])
+	if indices.size() != strip_width * int(sheet["height"]):
+		push_error("%s holds %d bytes, expected %d." % [
+			name, indices.size(), strip_width * int(sheet["height"]),
+		])
+		return null
+
+	var columns: int = mini(SHEET_COLUMNS, tiles)
+	var rows: int = ceili(float(tiles) / columns)
+	var width: int = columns * Gen2Tiles.TILE_WIDTH
+	var folded: PackedByteArray = PackedByteArray()
+	folded.resize(width * rows * Gen2Tiles.TILE_HEIGHT)
+
+	for tile: int in tiles:
+		@warning_ignore("integer_division")
+		var at_y: int = (tile / columns) * Gen2Tiles.TILE_HEIGHT
+		var at_x: int = (tile % columns) * Gen2Tiles.TILE_WIDTH
+		for y: int in Gen2Tiles.TILE_HEIGHT:
+			var from: int = y * strip_width + tile * Gen2Tiles.TILE_WIDTH
+			var to: int = (at_y + y) * width + at_x
+			for x: int in Gen2Tiles.TILE_WIDTH:
+				folded[to + x] = indices[from + x]
+
+	return Gen2PicImage.from_indices(
+		folded, width, rows * Gen2Tiles.TILE_HEIGHT,
+		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	)
 
 
 func _render(

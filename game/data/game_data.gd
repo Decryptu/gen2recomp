@@ -25,6 +25,7 @@ var _moves: Array = []
 var _items: Array = []
 var _types: Array = []
 var _atlases: Dictionary = {}
+var _tiles: Dictionary = {}
 var _indices: Dictionary = {}
 
 
@@ -48,6 +49,7 @@ static func open_directory(path: String) -> GameData:
 	data.id = StringName(manifest.get("game_id", ""))
 	data.sha1 = String(manifest.get("sha1", ""))
 	data._atlases = manifest.get("atlases", {})
+	data._tiles = manifest.get("tiles", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
@@ -129,6 +131,29 @@ func atlas_indices(name: String) -> PackedByteArray:
 
 	var indices: PackedByteArray = RomCache.read_indices(RomCache.pic_path(directory, name))
 	_indices[name] = indices
+	return indices
+
+
+## Metadata for a 1bpp tile strip: width, height, tiles, first_code.
+func tile_sheet(name: String) -> Dictionary:
+	var value: Variant = _tiles.get(name, {})
+	if not value is Dictionary:
+		return {}
+
+	var out: Dictionary = {}
+	for key: String in value:
+		out[key] = int(value[key])
+	return out
+
+
+## The index buffer for a tile strip, read on first use and kept afterwards.
+func tile_indices(name: String) -> PackedByteArray:
+	var key: String = "tiles/%s" % name
+	if _indices.has(key):
+		return _indices[key]
+
+	var indices: PackedByteArray = RomCache.read_indices(RomCache.tile_path(directory, name))
+	_indices[key] = indices
 	return indices
 
 
