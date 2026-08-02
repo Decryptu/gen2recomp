@@ -1,0 +1,35 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Build/export output
+/builds/
+/export/
+
+# macOS
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Bring-your-own-ROM. Nothing derived from a commercial cartridge may ever be
+# committed: not the ROM, not a save, not the extracted asset cache. The
+# pre-commit hook in .githooks/ enforces this too — see docs/CONTRIBUTING.md.
+# ---------------------------------------------------------------------------
+*.gb
+*.gbc
+*.gba
+*.sav
+*.srm
+*.rom
+*.ips
+*.bps
+*.ups
+
+# The local ROM drop. Only the folder's docs and its .gdignore are tracked;
+# every cartridge inside it stays on your machine.
+/roms/*
+!/roms/README.md
+!/roms/.gdignore
+
+# Import cache produced from a user's ROM at runtime
+/user_cache/
+/rom_cache/

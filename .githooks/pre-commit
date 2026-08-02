@@ -1,0 +1,47 @@
+#!/bin/sh
+# Refuses any commit that would put cartridge-derived data in the repo.
+#
+# .gitignore already covers the obvious extensions, but `git add -f` bypasses
+# it and a renamed ROM has no extension to match on. This checks what is
+# actually staged: known extensions, and any blob big enough to be a cartridge.
+#
+# Enabled per-clone (hooks are not cloned) with:
+#   git config core.hooksPath .githooks
+
+set -e
+
+fail() {
+	echo "pre-commit: refusing to commit cartridge data." >&2
+	echo "$1" >&2
+	echo "" >&2
+	echo "gen2recomp is bring-your-own-ROM. Keep game files outside the repo." >&2
+	exit 1
+}
+
+staged=$(git diff --cached --name-only --diff-filter=AM)
+[ -z "$staged" ] && exit 0
+
+blocked=$(printf '%s\n' "$staged" | grep -Ei '\.(gb|gbc|gba|sav|srm|rom|ips|bps|ups)$' || true)
+[ -n "$blocked" ] && fail "  blocked by extension:
+$(printf '%s\n' "$blocked" | sed 's/^/    /')"
+
+# A trimmed or renamed dump still weighs what a cartridge weighs. 512 KiB is
+# below the smallest Game Boy game and far above anything source-shaped.
+LIMIT=524288
+large=""
+IFS='
+'
+for path in $staged; do
+	case "$path" in
+		addons/*|assets/*) continue ;;
+	esac
+	size=$(git cat-file -s "$(git rev-parse ":$path")" 2>/dev/null || echo 0)
+	[ "$size" -ge "$LIMIT" ] && large="$large    $path ($size bytes)
+"
+done
+
+[ -n "$large" ] && fail "  suspiciously large for source:
+$large
+  If it is legitimate, commit with --no-verify."
+
+exit 0
