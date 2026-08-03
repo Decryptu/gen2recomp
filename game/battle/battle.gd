@@ -41,6 +41,11 @@ const THAWED: StringName = &"thawed"
 ## A status put on a Pokémon, and a slice taken off by one it already had.
 const STATUS_INFLICTED: StringName = &"status_inflicted"
 const HURT_BY_STATUS: StringName = &"hurt_by_status"
+## A stat moved a stage, or tried to and could not. [code]stat[/code] is the key
+## [Gen2BattleMon] keeps it under, or [code]"all"[/code] for the five Ancientpower
+## moves at once; [code]by[/code] is how many stages, signed.
+const STAT_CHANGED: StringName = &"stat_changed"
+const STAT_CHANGE_FAILED: StringName = &"stat_change_failed"
 ## A Pokémon called back, and a Pokémon put out. They are two events rather than
 ## one because a replacement after a faint is only the second half: there is
 ## nobody to call back, and the screen has one sentence to say rather than two.
