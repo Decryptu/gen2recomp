@@ -97,7 +97,13 @@ static func calculate_with(
 	if power <= 0:
 		# A move with no power is not a failed attack, it is a move that does
 		# something else. The matchup is still worked out, because the battle
-		# announces it either way.
+		# announces it either way, and because a status move is stopped by an
+		# immunity exactly as an attack is: Thunder Wave does nothing to a Ground
+		# type and Poison Powder nothing to a Steel one.
+		for defending_type: int in defending:
+			if data.type_matchup(move_type, defending_type) == RomLayout.MATCHUP_NO_EFFECT:
+				out["immune"] = true
+				break
 		return out
 
 	var damage: int = base_damage(

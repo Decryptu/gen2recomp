@@ -91,6 +91,48 @@ func species(number: int) -> Dictionary:
 	return _entry(_species, number - 1)
 
 
+## A species' level-up moves, in the cartridge's own order, as
+## { level, move } with both coerced back to int.
+##
+## The order is not sorted and must not be: it decides which four moves a fresh
+## Pokémon ends up with, and one species' list genuinely is out of order. See
+## [Gen2Learnset], which is what turns this into an answer.
+func learnset(number: int) -> Array:
+	return _rows(species(number), "learnset", ["level", "move"])
+
+
+## How a species evolves, as { method, parameter, condition, target }. Empty for
+## the ones that do not.
+##
+## [code]method[/code] is one of the [code]RomLayout.EVOLVE_*[/code] constants and
+## decides what [code]parameter[/code] means: a level, an item, a held item or a
+## time of day. [code]condition[/code] is only ever set by
+## [constant RomLayout.EVOLVE_STAT].
+func evolutions(number: int) -> Array:
+	return _rows(species(number), "evolutions", ["method", "parameter", "condition", "target"])
+
+
+## The moves a Pokémon of this species is created knowing at [param level].
+func moves_at_level(number: int, level: int) -> Array:
+	return Gen2Learnset.moves_at_level(learnset(number), level)
+
+
+## One of the per-species lists, with every named field coerced out of JSON's
+## single number type.
+func _rows(entry: Dictionary, key: String, fields: Array) -> Array:
+	var value: Variant = entry.get(key, [])
+	if not value is Array:
+		return []
+
+	var out: Array = []
+	for row: Dictionary in value as Array:
+		var coerced: Dictionary = {}
+		for field: String in fields:
+			coerced[field] = int(row.get(field, 0))
+		out.append(coerced)
+	return out
+
+
 func move(number: int) -> Dictionary:
 	return _entry(_moves, number - 1)
 

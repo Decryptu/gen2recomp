@@ -29,7 +29,7 @@ const TILES_DIR: String = "tiles"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 6
+const FORMAT_VERSION: int = 7
 
 
 static func directory_for(id: StringName, sha1: String) -> String:

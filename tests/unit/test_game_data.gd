@@ -87,6 +87,11 @@ func _species(number: int, name: String, normal: int, shiny: int) -> Dictionary:
 		"types": [0, 3],
 		"front_tiles": [1, 1],
 		"palette": {"normal": [normal, normal], "shiny": [shiny, shiny]},
+		# Both halves of one cartridge table, cached on the species that owns them.
+		"evolutions": [] if number != 1 else [{
+			"method": RomLayout.EVOLVE_LEVEL, "parameter": 16, "condition": 0, "target": 2,
+		}],
+		"learnset": [{"level": 1, "move": 33}, {"level": 4, "move": 45}],
 	}
 
 
@@ -310,3 +315,39 @@ func test_an_atlas_that_was_never_written_reads_as_empty() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	assert_true(data.atlas("nothing").is_empty())
 	assert_eq(data.atlas_indices("back"), PackedByteArray())
+
+
+func test_a_learnset_comes_back_in_the_cartridges_order_as_ints() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var learnset: Array = data.learnset(1)
+	assert_eq(learnset.size(), 2)
+	assert_true(learnset[0]["level"] is int, "JSON gives a float back and the engine wants an int")
+	assert_eq(learnset[0], {"level": 1, "move": 33})
+	assert_eq(learnset[1], {"level": 4, "move": 45})
+
+
+func test_a_species_with_no_learnset_answers_with_nothing() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.learnset(99), [])
+	assert_eq(data.evolutions(99), [])
+	assert_eq(data.moves_at_level(99, 50), [])
+
+
+func test_evolutions_come_back_coerced_and_only_where_there_are_any() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var evolutions: Array = data.evolutions(1)
+	assert_eq(evolutions.size(), 1)
+	assert_true(evolutions[0]["method"] is int)
+	assert_eq(int(evolutions[0]["method"]), RomLayout.EVOLVE_LEVEL)
+	assert_eq(int(evolutions[0]["target"]), 2)
+	assert_eq(data.evolutions(2), [], "the second species does not evolve")
+
+
+func test_a_species_knows_what_its_level_says_it_knows() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.moves_at_level(1, 1), [33], "the move at level 4 is not learned yet")
+	assert_eq(data.moves_at_level(1, 4), [33, 45])

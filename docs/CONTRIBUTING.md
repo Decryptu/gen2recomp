@@ -62,6 +62,22 @@ the engine uses to see cartridge content: nothing above it opens a ROM, and
 nothing in it knows what a ROM is. It is also where JSON's single number type is
 coerced back to int, once, rather than at every call site.
 
+`game/data/learnset.gd` sits beside it and is the one rule that lives in this
+layer rather than in the engine: what a Pokémon knows at a level. It is here
+because a Pokémon is made outside a battle as well as inside one. It answers two
+questions that are not each other's shortcut, because the cartridge asks them
+with two different routines:
+
+- **Filling a new Pokémon** walks the list from the start and stops at the first
+  move above the level being filled for.
+- **Levelling up** reads the whole list and takes the entries at exactly the
+  level just reached.
+
+Those give different answers for Muk, whose list is not in ascending order in any
+of the three games. A Muk caught in the wild at 40 is genuinely missing three
+moves that a Muk raised to 40 has, and that is the cartridge's behaviour rather
+than an approximation of it.
+
 The drawing layer is deliberately thin:
 
 | | |
@@ -84,7 +100,12 @@ battle can be fought inside a test:
 | `battle/damage.gd` | The damage formula, STAB, criticals and the spread |
 | `battle/accuracy.gd` | Whether a move connects |
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
-| `battle/battle.gd` | The turn: order, PP, the hit, the faint |
+| `battle/party.gd` | The six a side carries, and which of them is out |
+| `battle/status.gd` | The status byte, and the four things it does |
+| `battle/turn.gd` | One move being used, while it is being used |
+| `battle/effect_commands.gd` | The steps a move is made of |
+| `battle/move_effect.gd` | Which steps each effect byte is made of |
+| `battle/battle.gd` | The turn: order, the switch, and running a move's steps |
 
 Everything in there is integer arithmetic in the order the hardware does it.
 That is not nostalgia. Every step truncates and the steps do not commute, so a
@@ -103,6 +124,54 @@ is almost right:
   Fire/Rock defender deals 6 and reports "not very effective" on the strength of
   a 2. `GameData.type_effectiveness` is for the message and
   `GameData.type_matchup` per type is for the damage.
+
+Two things a battle cannot decide for itself are left to whoever is driving it,
+because on the cartridge a person or an AI decides both: what a side does with
+its turn, and who replaces a Pokémon that has fainted. A turn that ends with
+somebody down stops there, says so through `must_replace`, and refuses to do
+anything else until `send_out` has been called. Nothing else in the engine has
+a policy hole in it, and this one is deliberate.
+
+A switch is not a move with a very high priority. The cartridge settles it
+before it looks at priority at all, so a switching side always acts first and
+the other side's move hits whoever came in. That is why an action is
+`use_move` or `switch_to` rather than a move number.
+
+**A move is a short program, not a special case.** The cartridge keeps a list of
+commands per effect byte and runs them in order, and an ordinary attack is the
+list that announces the move, spends the PP, works the damage out, rolls the
+hit, applies it and checks for a faint. Almost every other move is that list
+with a step added, removed or replaced. `move_effect.gd` is that table,
+`effect_commands.gd` is the steps, `turn.gd` is what one step hands the next,
+and `battle.gd` knows only how to run a list.
+
+The status conditions are the first thing written that way, and they are spread
+across the turn rather than gathered in one place, because that is where the
+cartridge puts them:
+
+- **Whether a Pokémon can move** is asked before the effect is looked up, so
+  every move goes through it and no sequence has to remember to include it.
+  Sleep, then freeze, then paralysis, in that order.
+- **What a status does to a stat** is applied where the stat is read, after the
+  stage and on the same copy. That is what decides that a critical hit, which
+  reads the unmodified stat, is free of a burn as well as of the stages.
+- **What a status takes each turn** is applied after both sides have acted, in
+  the order they acted.
+
+Two of those are worth knowing because they are the opposite of what is usually
+assumed. A Pokémon that wakes up **does** move that turn: the cartridge counts
+the sleep off, says it woke, and carries straight on into the rest of its
+checks. That is Generation 2's rule and not Generation 1's. And a secondary
+effect's roll sits *between* the hit and the status, so a failed roll costs the
+status and nothing else; the damage in front of it has already happened.
+
+Keep it that way. A burn is a command appended to a list, a move that cannot
+miss is a list without the roll, and a two-turn move is a list that ends early
+the first time. The moment an effect becomes a branch inside the turn loop, the
+next hundred of them have nowhere to go. The command names are the cartridge's
+own so a sequence can be read against `data/moves/effects.asm` line for line,
+and an effect with no list of its own falls back to the ordinary attack, which
+is why a move nobody has written yet behaves rather than doing nothing.
 
 `Gen2Battle` answers a turn with a list of events rather than with a new state
 or a string. An event says what happened and carries the numbers behind it, so a
@@ -191,6 +260,15 @@ So every offset ships with a check that would fail if it were wrong, and
   since the table is the player plus every class and something that is not a
   palette has to follow it; and the pic pointers have to address the banked
   window and decompress into a pic of the one size every trainer is drawn at.
+- Evolutions and level-up moves are one table read through a table of two-byte
+  pointers, and neither half says which species it belongs to, so what is
+  checked is the shape: every pointer has to address the banked window, every
+  evolution has to open with one of five methods and name a real species, and
+  every level-up entry has to be a level from 1 to 100 teaching a real move. Most
+  byte values are none of those, so a wrong pointer fails on its first byte. On
+  top of that the levels ascend everywhere but Muk, whose list the cartridges
+  themselves have out of order, and the total number of evolutions is the same
+  known figure in all three games.
 - The eight text box borders have no content to check, so they are checked by
   the shape a border has to have: inset from the top of its tile row, corners
   that carry the pattern of the side they hang from, and no two frames the
@@ -253,6 +331,12 @@ output is the check. Cross-check a handful of moves against published power,
 accuracy and PP while you are there; the runtime checks pin the ends of a
 table, not what is between them.
 
+`learnsets` and `evolutions` are the same idea for the one table whose runtime
+check can only prove the shape. Every level and every move number stays in range
+whatever a wrong pointer does, so what settles it is reading Bulbasaur's list
+back and finding Tackle at 1 and Growl at 4, and reading Eevee's five evolutions
+and Tyrogue's three. Both resolve their numbers into names for that reason.
+
 ## Seeing the UI without pressing Play
 
 `tools/screenshot.gd` renders a scene to a PNG:
@@ -307,9 +391,18 @@ cannot be checked without asking someone what they see.
 ## Pitfalls that cost real time
 
 - **GUT silently skips test scripts that fail to parse.** A broken file shows
-  up as a smaller run that still reports green. `test_smoke.gd` loads every
-  script under `game/`, `autoload/`, `tests/` and `tools/` explicitly to turn
-  that into a visible failure. Don't delete it.
+  up as a smaller run that still reports green, and the only tell is the script
+  count. `test_smoke.gd` loads every script under `game/`, `autoload/`,
+  `tests/` and `tools/` explicitly to turn that into a visible failure. Don't
+  delete it.
+- **A script that fails to parse does not load as null.** `load()` hands back a
+  real `GDScript` with its source code attached, no methods on it and nothing
+  behind it, so `assert_not_null(load(path))` passes on exactly the file it was
+  written to catch. `can_instantiate()` is the question that answers honestly,
+  and it is what `test_smoke.gd` asks. Loading with
+  `ResourceLoader.CACHE_MODE_IGNORE` also sees it, and re-parses scripts that
+  are running at the time, which corrupts them mid-call and takes the VM down
+  with an opcode error; don't reach for it.
 - **A newly created script is invisible until the editor scans it.** Plain
   `--headless` runs do *not* import new files, so a brand-new `class_name`
   fails with "not declared in the current scope" no matter how many times you
