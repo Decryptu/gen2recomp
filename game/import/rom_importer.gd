@@ -41,6 +41,17 @@ const FIRST_LEARNSET_MOVE: int = 33
 const STAT_EVOLUTION_SPECIES: int = 236
 const STAT_EVOLUTION_COUNT: int = 3
 
+## What the trainer *party* table is known to say, independently of the
+## cartridge, which is a different table from [constant TRAINER_FIRST_CLASS]:
+## that one is the class every gym leader shares ("LEADER"), and this one is the
+## individual trainer stored inside class 1's own entry. Falkner's level 7
+## Pidgey and level 9 Pidgeotto are the same in all three games.
+const TRAINER_PARTY_FIRST_NAME: String = "FALKNER"
+const TRAINER_PARTY_FIRST_LEVEL_1: int = 7
+const TRAINER_PARTY_FIRST_SPECIES_1: int = 16
+const TRAINER_PARTY_FIRST_LEVEL_2: int = 9
+const TRAINER_PARTY_FIRST_SPECIES_2: int = 17
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -179,6 +190,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var trainers: Dictionary = verify_trainers(rom, layout)
 	if not trainers["ok"]:
 		return trainers
+
+	var trainer_parties: Dictionary = verify_trainer_parties(rom, layout)
+	if not trainer_parties["ok"]:
+		return trainer_parties
 
 	return {"ok": true, "message": "Layout verified."}
 
@@ -859,6 +874,230 @@ static func _trainer_palette_check(
 	return {"ok": true, "message": ""}
 
 
+## Reads the whole trainer party table in one pass: every class's individual
+## trainers, each a name, a type and a party.
+##
+## This is not [method verify_trainers]'s table. That one is the class every
+## gym leader shares ("LEADER") and this one is the trainer inside it
+## ("FALKNER"), and the two are read through entirely different pointers, one
+## per class in both.
+##
+## Nothing inside a class's own bytes says where its group ends, so a class's
+## span is bounded by the *next* class's pointer rather than by anything it
+## carries itself, and the last class is walked until a byte that cannot open a
+## name is met instead. One class in every game shares its pointer with the
+## next, which is the one class the games never send into a battle: its honest
+## span is empty, not a copy of the class after it. See
+## [constant RomLayout.EMPTY_TRAINER_CLASS].
+##
+## Returns { ok, message, classes, total }, where [code]classes[/code] is one
+## Array of trainers per class, in order.
+static func read_trainer_parties(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.trainer_class_count(layout)
+	var table: int = int(layout["trainer_parties"])
+	var bank: int = RomLayout.bank_of(table)
+
+	var pointers: Array = []
+	for trainer_class: int in range(1, count + 1):
+		var offset: int = RomLayout.trainer_party_pointer_offset(layout, trainer_class)
+		if not rom.in_bounds(offset, RomLayout.TRAINER_PARTY_POINTER_SIZE):
+			return {
+				"ok": false,
+				"message": "Trainer party pointer %d is past the end." % trainer_class,
+			}
+		pointers.append(rom.u16le(offset))
+
+	var classes: Array = []
+	var total: int = 0
+	for trainer_class: int in range(1, count + 1):
+		var address: int = pointers[trainer_class - 1]
+		if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+			return {
+				"ok": false,
+				"message": "Trainer class %d's party points at $%04X, outside the banked window." % [
+					trainer_class, address,
+				],
+			}
+		var at: int = RomFile.linear(bank, address)
+
+		# The pointers are non-decreasing in class order in every game but one,
+		# so the class after this one is what bounds it; the walk itself proves
+		# the offset, because a span that has slid cannot tile the region.
+		var end: int = -1
+		if trainer_class < count:
+			var next_address: int = pointers[trainer_class]
+			if next_address < address:
+				return {
+					"ok": false,
+					"message": "Trainer class %d's party pointer goes backwards." % trainer_class,
+				}
+			end = RomFile.linear(bank, next_address)
+
+		var group: Dictionary = _read_trainer_group(rom, at, end)
+		if not group["ok"]:
+			return {
+				"ok": false,
+				"message": "Trainer class %d: %s" % [trainer_class, group["message"]],
+			}
+
+		classes.append(group["trainers"])
+		total += (group["trainers"] as Array).size()
+
+	return {"ok": true, "message": "", "classes": classes, "total": total}
+
+
+## One class's span of trainers: read from [param start] to exactly
+## [param end], or, when [param end] is negative because this is the last
+## class, until a byte that cannot open a name (the padding past the real
+## table) is met. A span that overshoots [param end] is caught here rather than
+## left for the next class to notice, because there may not be a next class.
+static func _read_trainer_group(rom: RomFile, start: int, end: int) -> Dictionary:
+	var trainers: Array = []
+	var at: int = start
+
+	while true:
+		if end >= 0:
+			if at == end:
+				break
+			if at > end:
+				return {"ok": false, "message": "a trainer's own party walked past the next class."}
+		elif not rom.in_bounds(at) or rom.u8(at) == 0:
+			break
+
+		if trainers.size() >= RomLayout.MAX_TRAINERS_PER_CLASS:
+			return {"ok": false, "message": "more trainers than any real class carries."}
+
+		var trainer: Dictionary = _read_one_trainer(rom, at)
+		if trainer.is_empty():
+			return {"ok": false, "message": "a trainer at $%X did not parse." % at}
+
+		trainers.append(trainer)
+		at = int(trainer["_next"])
+
+	return {"ok": true, "message": "", "trainers": trainers}
+
+
+## One trainer: a $50-terminated name, a type byte, its Pokémon and $FF. Returns
+## an empty Dictionary for anything that does not parse as that shape, which is
+## most byte values, since a level, a species and a move number are all
+## range-checked as they are read.
+static func _read_one_trainer(rom: RomFile, at: int) -> Dictionary:
+	var start: int = at
+	var end: int = at
+	while rom.in_bounds(end) and rom.u8(end) != Gen2Text.TERMINATOR:
+		end += 1
+		if end - start > RomLayout.MAX_NAME_LENGTH:
+			return {}
+	if not rom.in_bounds(end):
+		return {}
+	var name: String = Gen2Text.decode(rom.bytes(), start, end - start)
+
+	var pos: int = end + 1
+	if not rom.in_bounds(pos):
+		return {}
+	var mon_type: int = rom.u8(pos)
+	if not RomLayout.TRAINER_MON_TYPES.has(mon_type):
+		return {}
+	pos += 1
+
+	var party: Array = []
+	while rom.in_bounds(pos) and rom.u8(pos) != RomLayout.TRAINER_PARTY_END:
+		if party.size() >= RomLayout.MAX_TRAINER_PARTY_SIZE:
+			return {}
+		if not rom.in_bounds(pos, 2):
+			return {}
+		var level: int = rom.u8(pos)
+		var species: int = rom.u8(pos + 1)
+		if level < 1 or level > RomLayout.MAX_LEVEL:
+			return {}
+		if species < 1 or species > RomLayout.SPECIES_COUNT:
+			return {}
+		pos += 2
+
+		var extra: int = RomLayout.trainer_mon_extra_size(mon_type)
+		if not rom.in_bounds(pos, extra):
+			return {}
+		var item: int = 0
+		var moves: Array = []
+		if mon_type == RomLayout.TRAINER_MON_ITEM or mon_type == RomLayout.TRAINER_MON_ITEM_MOVES:
+			item = rom.u8(pos)
+			pos += 1
+		if mon_type == RomLayout.TRAINER_MON_MOVES or mon_type == RomLayout.TRAINER_MON_ITEM_MOVES:
+			for slot: int in RomLayout.TRAINER_MON_MOVE_COUNT:
+				var move: int = rom.u8(pos + slot)
+				if move > RomLayout.MOVE_COUNT:
+					return {}
+				moves.append(move)
+			pos += RomLayout.TRAINER_MON_MOVE_COUNT
+
+		party.append({"level": level, "species": species, "item": item, "moves": moves})
+
+	if not rom.in_bounds(pos) or party.is_empty():
+		return {}
+	pos += 1
+
+	return {"name": name, "type": mon_type, "party": party, "_next": pos}
+
+
+## The trainer party table, checked by everything known about it independently:
+## the walk itself (see [method _read_trainer_group]), the one class with no
+## party of its own, the total trainer count, and Falkner's team at one end and
+## the last class's first trainer's name at the other.
+static func verify_trainer_parties(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var result: Dictionary = read_trainer_parties(rom, layout)
+	if not result["ok"]:
+		return result
+
+	var classes: Array = result["classes"]
+	if int(result["total"]) != int(layout["trainer_party_total"]):
+		return {
+			"ok": false,
+			"message": "Read %d trainers, expected %d." % [
+				result["total"], layout["trainer_party_total"],
+			],
+		}
+
+	for trainer_class: int in range(1, classes.size() + 1):
+		var group: Array = classes[trainer_class - 1]
+		var should_be_empty: bool = trainer_class == RomLayout.EMPTY_TRAINER_CLASS
+		if should_be_empty != group.is_empty():
+			return {
+				"ok": false,
+				"message": "Trainer class %d has %d trainers; expected %s." % [
+					trainer_class, group.size(), "none" if should_be_empty else "at least one",
+				],
+			}
+
+	var falkner: Dictionary = classes[0][0]
+	if String(falkner["name"]) != TRAINER_PARTY_FIRST_NAME:
+		return {
+			"ok": false,
+			"message": "Trainer class 1's first trainer: expected %s, read %s." % [
+				TRAINER_PARTY_FIRST_NAME, falkner["name"],
+			],
+		}
+	var falkner_party: Array = falkner["party"]
+	if falkner_party.size() != 2 \
+		or int(falkner_party[0]["level"]) != TRAINER_PARTY_FIRST_LEVEL_1 \
+		or int(falkner_party[0]["species"]) != TRAINER_PARTY_FIRST_SPECIES_1 \
+		or int(falkner_party[1]["level"]) != TRAINER_PARTY_FIRST_LEVEL_2 \
+		or int(falkner_party[1]["species"]) != TRAINER_PARTY_FIRST_SPECIES_2:
+		return {"ok": false, "message": "Falkner's party does not match what is known of it."}
+
+	var last_group: Array = classes[classes.size() - 1]
+	var last_trainer: Dictionary = last_group[0]
+	var wanted_last: String = String(layout["trainer_party_last_trainer"])
+	if String(last_trainer["name"]) != wanted_last:
+		return {
+			"ok": false,
+			"message": "Last trainer class's first trainer: expected %s, read %s." % [
+				wanted_last, last_trainer["name"],
+			],
+		}
+
+	return {"ok": true, "message": ""}
+
+
 ## Resolves one entry of the type name pointer table.
 static func type_name(rom: RomFile, layout: Dictionary, type_number: int) -> String:
 	var table: int = RomLayout.type_name_pointer_offset(layout, type_number)
@@ -884,6 +1123,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"types": 0,
 		"matchups": 0,
 		"trainers": 0,
+		"trainer_party_count": 0,
 		"evolutions": 0,
 		"learnset_moves": 0,
 		"elapsed_ms": 0,
@@ -945,6 +1185,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 
 	var evolutions: int = _count_in(species, "evolutions")
 	var learnset_moves: int = _count_in(species, "learnset")
+	var trainer_party_count: int = _count_in(trainers, "trainers")
 
 	var manifest: Dictionary = {
 		"format_version": RomCache.FORMAT_VERSION,
@@ -958,6 +1199,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"type_count": types.size(),
 		"matchup_count": matchups.size(),
 		"trainer_count": trainers.size(),
+		"trainer_party_count": trainer_party_count,
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
@@ -974,13 +1216,15 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["types"] = types.size()
 	result["matchups"] = matchups.size()
 	result["trainers"] = trainers.size()
+	result["trainer_party_count"] = trainer_party_count
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
-		+ "%d trainer classes, %d evolutions and %d level-up moves in %d ms.") % [
+		+ "%d trainer classes carrying %d trainers, %d evolutions and %d level-up moves "
+		+ "in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
-		evolutions, learnset_moves, result["elapsed_ms"],
+		trainer_party_count, evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result
 
@@ -1106,11 +1350,18 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 ## A class has one palette and no shiny counterpart, so the pair is stored flat
 ## rather than under a key, and the pic is found by class number in the trainer
 ## atlas the way a species' is in the front one.
+## Decodes the trainer classes and, behind them, the trainer party table: who
+## carries what. The two are kept on the one entry rather than split into a
+## second cache file, the way a species' evolutions and learnset are, because
+## a class name and its trainers are the two tables one class number addresses,
+## not two separate questions.
 func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var names: PackedStringArray = Gen2Text.decode_sequence(
 		rom.bytes(), int(layout["trainer_class_names"]), count, RomLayout.MAX_NAME_LENGTH
 	)
+	var parties: Dictionary = RomImporter.read_trainer_parties(rom, layout)
+	var classes: Array = parties["classes"] if parties["ok"] else []
 	var out: Array = []
 
 	for trainer_class: int in range(1, count + 1):
@@ -1119,6 +1370,7 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 			"number": trainer_class,
 			"name": names[trainer_class - 1],
 			"palette": [rom.u16le(palette), rom.u16le(palette + Gen2Palette.COLOR_BYTES)],
+			"trainers": classes[trainer_class - 1] if trainer_class - 1 < classes.size() else [],
 		})
 
 		if on_progress.is_valid():

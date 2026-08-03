@@ -277,6 +277,46 @@ func trainer_palette(number: int) -> PackedColorArray:
 	]))
 
 
+## How many individual trainers trainer class [param number] carries. One class
+## in every game carries none: see [constant RomLayout.EMPTY_TRAINER_CLASS].
+func trainer_party_count(number: int) -> int:
+	return (trainer(number).get("trainers", []) as Array).size()
+
+
+## One of a trainer class's individual trainers, as { name, type, party }, where
+## [code]party[/code] is that trainer's Pokémon in the cartridge's own order, each
+## { level, species, item, moves }. Empty for a class or an index this class does
+## not have.
+##
+## [code]type[/code] is one of the [code]RomLayout.TRAINER_MON_*[/code]
+## constants and decides what a member's own Pokémon means: whether it knows
+## what its level teaches it or the moves stored with it, and whether it holds
+## an item. See [Gen2TrainerParty], which turns this into battle-ready Pokémon.
+func trainer_party(number: int, index: int) -> Dictionary:
+	var trainers: Array = trainer(number).get("trainers", [])
+	if index < 0 or index >= trainers.size():
+		return {}
+
+	var entry: Dictionary = trainers[index]
+	var party: Array = []
+	for mon: Dictionary in (entry.get("party", []) as Array):
+		var moves: Array = []
+		for move: Variant in (mon.get("moves", []) as Array):
+			moves.append(int(move))
+		party.append({
+			"level": int(mon.get("level", 0)),
+			"species": int(mon.get("species", 0)),
+			"item": int(mon.get("item", 0)),
+			"moves": moves,
+		})
+
+	return {
+		"name": String(entry.get("name", "")),
+		"type": int(entry.get("type", 0)),
+		"party": party,
+	}
+
+
 ## Where a trainer class sits in the trainer atlas. Every trainer is drawn at the
 ## same size, so unlike a species pic this one always fills its cell.
 func trainer_pic(number: int) -> Dictionary:

@@ -31,11 +31,10 @@ const DEFAULT_ENEMY: int = 16
 const DEFAULT_PLAYER: int = 155
 const DEFAULT_LEVEL: int = 5
 
-## How many Pokémon each side brings. Two, so that switching and being replaced
-## after a faint can both be seen. This is scaffolding: a real party comes from a
-## save on the player's side and from the trainer party tables on the enemy's,
-## and neither exists yet, so the screen makes one out of the species after the
-## one it is showing.
+## How many Pokémon [method _party_from] makes up, so that switching and being
+## replaced after a faint can both be seen on the player's side, which still has
+## nothing real to draw from: a save does not exist yet. [method show_trainer]
+## puts a real party of whatever size the cartridge gives it on the enemy's.
 const PARTY_SIZE: int = 2
 
 ## What a status says when it stops a Pokémon moving, and when it lands on one.
@@ -162,9 +161,46 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	)
 
 
-## A party led by [param species], with the species after it behind. Scaffolding,
-## and the only thing on this screen that still invents a number: everything else
-## it draws now comes out of the cartridge or out of an event.
+## Puts the player against one of a trainer class's own trainers, built from the
+## cartridge's own party rather than invented. The player's side is still
+## [method _party_from]'s made-up one: nothing plays it yet, so there is nothing
+## real to put there.
+func show_trainer(
+	trainer_class: int, index: int = 0, player_species: int = DEFAULT_PLAYER,
+	player_level: int = DEFAULT_LEVEL
+) -> void:
+	var enemy_party: Gen2Party = Gen2TrainerParty.build(_data, trainer_class, index)
+	if enemy_party == null:
+		return
+
+	_player = _wrap_species(player_species)
+	_player_level = player_level
+
+	var lead: Gen2BattleMon = enemy_party.active_mon()
+	_enemy = lead.species
+	_enemy_level = lead.level
+
+	_pending = []
+	_battle = Gen2Battle.create_parties(
+		_data, _party_from(_player, _player_level), enemy_party, _rng
+	)
+	if _battle == null:
+		return
+
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
+
+	var trainer: Dictionary = _data.trainer_party(trainer_class, index)
+	show_message("%s %s wants to fight!" % [
+		_data.trainer_name(trainer_class), String(trainer.get("name", "")),
+	])
+
+
+## A party led by [param species], with the species after it behind. Scaffolding
+## for the player's side, which still has nothing real to draw from: a save does
+## not exist yet. The enemy's side no longer uses this; see [method show_trainer].
 func _party_from(species: int, level: int) -> Gen2Party:
 	var members: Array = []
 	for offset: int in PARTY_SIZE:
@@ -342,12 +378,15 @@ func _apply_event(event: Dictionary) -> void:
 		Gen2Battle.SENT_OUT:
 			# The pic and the panel both change, and both come out of the event
 			# rather than out of the party, for the same reason every other number
-			# here does.
+			# here does. The level is part of that: a trainer's own party is not
+			# all one level the way the invented one used to be.
 			if int(event["side"]) == Gen2Battle.ENEMY:
 				_enemy = int(event["species"])
+				_enemy_level = int(event["level"])
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				_player = int(event["species"])
+				_player_level = int(event["level"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
 
 

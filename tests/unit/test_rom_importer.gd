@@ -276,6 +276,237 @@ func test_a_dump_with_no_trainers_in_it_fails() -> void:
 	assert_false(RomImporter.verify_trainers(_rom(data), _layout)["ok"])
 
 
+## A plausible trainer party table for the real GOLD layout: Falkner's own team
+## at class 1, the one empty class genuinely empty, a filler trainer in every
+## other class, and the last class carrying whatever name the layout expects,
+## the whole table adding up to the exact total the layout knows.
+##
+## The known facts here (Falkner's team, the empty class, the total, the last
+## trainer's name) are the same kind pinned elsewhere in this file (Bulbasaur's
+## evolution, Tyrogue's three): real content, hand-verified against the
+## cartridges once, not bytes copied out of one.
+func _trainer_party_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_parties(data, _trainer_party_classes())
+	return data
+
+
+func _trainer_party_classes() -> Array:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	var total: int = int(_layout["trainer_party_total"])
+	var last_name: String = String(_layout["trainer_party_last_trainer"])
+
+	var classes: Array = []
+	classes.resize(count)
+	for i: int in count:
+		classes[i] = []
+
+	classes[0] = [{
+		"name": RomImporter.TRAINER_PARTY_FIRST_NAME, "type": RomLayout.TRAINER_MON_NORMAL,
+		"party": [
+			{"level": RomImporter.TRAINER_PARTY_FIRST_LEVEL_1,
+				"species": RomImporter.TRAINER_PARTY_FIRST_SPECIES_1},
+			{"level": RomImporter.TRAINER_PARTY_FIRST_LEVEL_2,
+				"species": RomImporter.TRAINER_PARTY_FIRST_SPECIES_2},
+		],
+	}]
+	# RomLayout.EMPTY_TRAINER_CLASS is left as the empty Array _trainer_party_classes()
+	# already gave it.
+	classes[count - 1] = [{
+		"name": last_name, "type": RomLayout.TRAINER_MON_NORMAL,
+		"party": [{"level": 5, "species": 1}],
+	}]
+
+	# Every other class gets one filler trainer each, and the remaining total is
+	# spread across them as evenly as a per-class cap allows, the same way
+	# _evos_entries() pads out the evolution count.
+	var filler_classes: Array = []
+	for trainer_class: int in range(1, count + 1):
+		if trainer_class != 1 and trainer_class != RomLayout.EMPTY_TRAINER_CLASS \
+			and trainer_class != count:
+			filler_classes.append(trainer_class)
+
+	var remaining: int = total - 2
+	var base: int = remaining / filler_classes.size()
+	var extra: int = remaining % filler_classes.size()
+	for i: int in filler_classes.size():
+		var trainer_class: int = filler_classes[i]
+		var mine: int = base + (1 if i < extra else 0)
+		var trainers: Array = []
+		for _n: int in mine:
+			trainers.append({
+				"name": "FILLER", "type": RomLayout.TRAINER_MON_NORMAL,
+				"party": [{"level": 5, "species": 1}],
+			})
+		classes[trainer_class - 1] = trainers
+
+	return classes
+
+
+## Writes the pointer table and, right behind it in the same bank, every
+## class's trainers back to back in class order. An empty class writes nothing
+## at all, so its pointer ends up equal to the next class's: the same thing the
+## real cartridge does for the one class with no party of its own.
+func _write_trainer_parties(data: PackedByteArray, classes: Array) -> void:
+	var table: int = int(_layout["trainer_parties"])
+	var bank: int = RomLayout.bank_of(table)
+	var at: int = table + classes.size() * RomLayout.TRAINER_PARTY_POINTER_SIZE
+
+	for i: int in classes.size():
+		var address: int = RomFile.BANK_SIZE + (at % RomFile.BANK_SIZE)
+		var pointer: int = table + i * RomLayout.TRAINER_PARTY_POINTER_SIZE
+		data[pointer] = address & 0xFF
+		data[pointer + 1] = address >> 8
+
+		for trainer: Dictionary in (classes[i] as Array):
+			var encoded: PackedByteArray = Gen2Text.encode(String(trainer["name"]))
+			encoded.append(Gen2Text.TERMINATOR)
+			_write(data, at, encoded)
+			at += encoded.size()
+			data[at] = int(trainer["type"])
+			at += 1
+			for mon: Dictionary in (trainer["party"] as Array):
+				data[at] = int(mon["level"])
+				data[at + 1] = int(mon["species"])
+				at += 2
+			data[at] = RomLayout.TRAINER_PARTY_END
+			at += 1
+
+	assert(RomLayout.bank_of(at) == bank, "the filler table overran its own bank")
+
+
+func test_a_plausible_trainer_party_table_verifies() -> void:
+	var result: Dictionary = RomImporter.verify_trainer_parties(_rom(_trainer_party_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+func test_falkners_team_reads_back() -> void:
+	var result: Dictionary = RomImporter.read_trainer_parties(_rom(_trainer_party_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+	var falkner: Dictionary = result["classes"][0][0]
+	assert_eq(String(falkner["name"]), "FALKNER")
+	assert_eq((falkner["party"] as Array).size(), 2)
+	assert_eq(int(falkner["party"][1]["species"]), RomImporter.TRAINER_PARTY_FIRST_SPECIES_2)
+
+
+func test_the_one_class_with_no_party_reads_back_empty() -> void:
+	var result: Dictionary = RomImporter.read_trainer_parties(_rom(_trainer_party_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+	var empty_class: Array = result["classes"][RomLayout.EMPTY_TRAINER_CLASS - 1]
+	assert_eq(empty_class.size(), 0)
+
+
+func test_a_trainer_class_that_is_not_empty_where_the_layout_says_it_is_fails() -> void:
+	var classes: Array = _trainer_party_classes()
+	classes[RomLayout.EMPTY_TRAINER_CLASS - 1] = [{
+		"name": "OOPS", "type": RomLayout.TRAINER_MON_NORMAL, "party": [{"level": 5, "species": 1}],
+	}]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_parties(data, classes)
+	var result: Dictionary = RomImporter.verify_trainer_parties(_rom(data), _layout)
+	assert_false(result["ok"])
+
+
+func test_a_trainer_party_with_the_wrong_total_fails() -> void:
+	var classes: Array = _trainer_party_classes()
+	classes[1] = []
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_parties(data, classes)
+	var result: Dictionary = RomImporter.verify_trainer_parties(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "trainers")
+
+
+func test_falkners_team_not_matching_what_is_known_fails() -> void:
+	var classes: Array = _trainer_party_classes()
+	classes[0][0]["party"][0]["species"] = 99
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_parties(data, classes)
+	var result: Dictionary = RomImporter.verify_trainer_parties(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "Falkner")
+
+
+func test_a_stored_moves_trainer_reads_its_moves_and_item() -> void:
+	var classes: Array = _trainer_party_classes()
+	classes[1] = [{
+		"name": "PICKY", "type": RomLayout.TRAINER_MON_ITEM_MOVES,
+		"party": [{"level": 20, "species": 4, "item": 5, "moves": [10, 20, 0, 0]}],
+	}]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_full_trainer_parties(data, classes)
+	var result: Dictionary = RomImporter.read_trainer_parties(_rom(data), _layout)
+	assert_true(result["ok"], result["message"])
+	var mon: Dictionary = result["classes"][1][0]["party"][0]
+	assert_eq(int(mon["item"]), 5)
+	assert_eq(mon["moves"], [10, 20, 0, 0])
+
+
+## The general form of [method _write_trainer_parties], which only ever wrote
+## the type byte, level and species: this one also writes an item byte and four
+## move bytes when the type says a Pokémon carries them, for the one test that
+## needs a MOVES or ITEM trainer rather than a plain one.
+func _write_full_trainer_parties(data: PackedByteArray, classes: Array) -> void:
+	var table: int = int(_layout["trainer_parties"])
+	var at: int = table + classes.size() * RomLayout.TRAINER_PARTY_POINTER_SIZE
+
+	for i: int in classes.size():
+		var address: int = RomFile.BANK_SIZE + (at % RomFile.BANK_SIZE)
+		var pointer: int = table + i * RomLayout.TRAINER_PARTY_POINTER_SIZE
+		data[pointer] = address & 0xFF
+		data[pointer + 1] = address >> 8
+
+		for trainer: Dictionary in (classes[i] as Array):
+			var mon_type: int = int(trainer["type"])
+			var encoded: PackedByteArray = Gen2Text.encode(String(trainer["name"]))
+			encoded.append(Gen2Text.TERMINATOR)
+			_write(data, at, encoded)
+			at += encoded.size()
+			data[at] = mon_type
+			at += 1
+			for mon: Dictionary in (trainer["party"] as Array):
+				data[at] = int(mon["level"])
+				data[at + 1] = int(mon["species"])
+				at += 2
+				if mon_type == RomLayout.TRAINER_MON_ITEM \
+					or mon_type == RomLayout.TRAINER_MON_ITEM_MOVES:
+					data[at] = int(mon.get("item", 0))
+					at += 1
+				if mon_type == RomLayout.TRAINER_MON_MOVES \
+					or mon_type == RomLayout.TRAINER_MON_ITEM_MOVES:
+					for move: Variant in (mon.get("moves", [0, 0, 0, 0]) as Array):
+						data[at] = int(move)
+						at += 1
+			data[at] = RomLayout.TRAINER_PARTY_END
+			at += 1
+
+
+func test_a_trainer_pointer_outside_the_banked_window_fails() -> void:
+	var data: PackedByteArray = _trainer_party_dump()
+	data[int(_layout["trainer_parties"]) + 1] = 0x20
+	assert_false(RomImporter.verify_trainer_parties(_rom(data), _layout)["ok"])
+
+
+func test_a_trainer_party_pointer_table_with_no_terminator_anywhere_fails() -> void:
+	# The failure the last class's own walk exists for: nothing bounds it but a
+	# padding byte, and a dump with none reads on into whatever comes next.
+	var data: PackedByteArray = _trainer_party_dump()
+	var count: int = RomLayout.trainer_class_count(_layout)
+	var last_pointer: int = int(_layout["trainer_parties"]) \
+		+ (count - 1) * RomLayout.TRAINER_PARTY_POINTER_SIZE
+	var address: int = data[last_pointer] | (data[last_pointer + 1] << 8)
+	var bank: int = RomLayout.bank_of(int(_layout["trainer_parties"]))
+	var at: int = RomFile.linear(bank, address)
+	for i: int in RomFile.BANK_SIZE - (at % RomFile.BANK_SIZE):
+		data[at + i] = 0x41
+	assert_false(RomImporter.verify_trainer_parties(_rom(data), _layout)["ok"])
+
+
 ## A battle sheet at every offset the layout claims: two bars that count up, and
 ## two HUD borders whose tiles all differ.
 func _battle_dump() -> PackedByteArray:

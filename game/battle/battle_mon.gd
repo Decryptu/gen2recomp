@@ -69,6 +69,10 @@ var charged_move: int = 0
 ## Toxic's damage ramps on. Zero unless actually toxic.
 var toxic_counter: int = 0
 
+## The item this Pokémon is holding, by item number, or zero for none. Carried
+## through from a trainer's party or a save; nothing in the engine reads it yet.
+var item: int = 0
+
 
 ## Builds a Pokémon at a level, at full health, knowing [param moves].
 ##
@@ -80,7 +84,8 @@ static func create(
 	at_level: int,
 	known_moves: Array = [],
 	dv_word: int = PERFECT_DVS,
-	trained: Dictionary = {}
+	trained: Dictionary = {},
+	held_item: int = 0
 ) -> Gen2BattleMon:
 	if game_data == null:
 		return null
@@ -94,6 +99,7 @@ static func create(
 	out.dvs = dv_word
 	out.stat_exp = trained
 	out.moves = known_moves.slice(0, MAX_MOVES)
+	out.item = held_item
 	out.reset_stages()
 	out.recalculate()
 	out.hp = out.max_hp()

@@ -39,8 +39,23 @@ func _write_cache(complete: bool = true) -> void:
 		_matchup(RomLayout.TYPE_NORMAL, RomLayout.TYPE_GHOST, RomLayout.MATCHUP_NO_EFFECT, true),
 	])
 	RomCache.write_json(RomCache.trainers_path(_directory), [
-		{"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678]},
-		{"number": 2, "name": "YOUNGSTER", "palette": [0x0C63, 0x1084]},
+		{
+			"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678],
+			"trainers": [
+				{
+					"name": "FALKNER", "type": RomLayout.TRAINER_MON_NORMAL,
+					"party": [
+						{"level": 7, "species": 1, "item": 0, "moves": []},
+						{"level": 9, "species": 2, "item": 0, "moves": []},
+					],
+				},
+				{
+					"name": "PICKY", "type": RomLayout.TRAINER_MON_ITEM_MOVES,
+					"party": [{"level": 20, "species": 1, "item": 5, "moves": [1, 0, 0, 0]}],
+				},
+			],
+		},
+		{"number": 2, "name": "YOUNGSTER", "palette": [0x0C63, 0x1084], "trainers": []},
 	])
 	RomCache.write_indices(RomCache.pic_path(_directory, "front"), PackedByteArray([
 		0, 0, 1, 1,
@@ -277,6 +292,36 @@ func test_an_unknown_trainer_class_answers_empty() -> void:
 	_write_cache()
 	var data: GameData = GameData.open_directory(_directory)
 	assert_true(data.trainer(0).is_empty(), "class 0 is the player, who has no entry")
+
+
+func test_a_trainer_classs_own_trainers_are_counted_and_read_back() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.trainer_party_count(1), 2)
+	assert_eq(data.trainer_party_count(2), 0, "the one class this cache gives no party")
+
+	var falkner: Dictionary = data.trainer_party(1, 0)
+	assert_eq(falkner["name"], "FALKNER")
+	assert_eq(falkner["type"], RomLayout.TRAINER_MON_NORMAL)
+	assert_eq((falkner["party"] as Array).size(), 2)
+	assert_eq(int(falkner["party"][1]["level"]), 9, "JSON's one number type, coerced back")
+	assert_eq(int(falkner["party"][1]["species"]), 2)
+
+
+func test_a_stored_moves_trainers_item_and_moves_read_back_as_ints() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var picky: Dictionary = data.trainer_party(1, 1)
+	var mon: Dictionary = picky["party"][0]
+	assert_eq(int(mon["item"]), 5)
+	assert_eq(mon["moves"], [1, 0, 0, 0])
+
+
+func test_an_out_of_range_trainer_party_index_answers_empty() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_true(data.trainer_party(1, 2).is_empty())
+	assert_true(data.trainer_party(1, -1).is_empty())
 	assert_true(data.trainer_pic(99).is_empty())
 	assert_eq(data.trainer_name(99), "")
 

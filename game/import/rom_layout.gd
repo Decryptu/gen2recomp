@@ -254,6 +254,57 @@ const BAR_STEP_PIXELS: int = 2
 ## Every trainer pic is this square, unlike a Pokémon's front pic.
 const TRAINER_PIC_TILES: int = 7
 
+## The trainer *party* table is a second table indexed the same way as the class
+## names, pics and palettes, one pointer per class, and it is where the game's
+## individual trainers actually live. "LEADER" is the class name every gym
+## leader shares; FALKNER is a name stored inside class 1's own party entry,
+## next to the Pokémon he brings. Reading a class's identity therefore always
+## means reading two tables, not one.
+##
+## The pointer is two bytes, in the pointer table's own bank, exactly like
+## [member evos_attacks]: the entries sit in the same bank as the pointers that
+## address them, so there is no bank number to store.
+const TRAINER_PARTY_POINTER_SIZE: int = 2
+
+## What a trainer's Pokémon carries, in the type byte between its name and its
+## first Pokémon. The low bit says whether it holds an item, the high bit
+## whether it knows chosen moves rather than whatever its level teaches it.
+const TRAINER_MON_NORMAL: int = 0
+const TRAINER_MON_MOVES: int = 1
+const TRAINER_MON_ITEM: int = 2
+const TRAINER_MON_ITEM_MOVES: int = 3
+const TRAINER_MON_TYPES: Array = [
+	TRAINER_MON_NORMAL, TRAINER_MON_MOVES, TRAINER_MON_ITEM, TRAINER_MON_ITEM_MOVES,
+]
+
+## How many move slots a stored-moves Pokémon carries in the table, whatever a
+## zero slot in it means: nothing, the way [Gen2BattleMon] treats one.
+const TRAINER_MON_MOVE_COUNT: int = 4
+
+## One trainer's Pokémon list ends here; so does a class's whole party group, but
+## the two terminators are not read the same way. A Pokémon's own end is read
+## for real; a group's is only reached by the *next* class's pointer, because
+## nothing marks a group's end from inside it. See [constant EMPTY_TRAINER_CLASS].
+const TRAINER_PARTY_END: int = 0xFF
+
+## What a trainer can carry. Six is the real maximum in all three games, not a
+## rule this layout invents.
+const MAX_TRAINER_PARTY_SIZE: int = 6
+
+## Runaway guard for a single class's trainers, well past the real maximum of 31
+## (the wandering trainer classes: YOUNGSTER, LASS and the like carry the most).
+const MAX_TRAINERS_PER_CLASS: int = 64
+
+## The one trainer class with no party of its own: the eleven o'clock scholar,
+## Professor Elm's class in the class table, whose name and pic exist but who
+## the games never send into a battle. Its own label in the source is followed
+## immediately by the next class's with nothing between, so its pointer equals
+## the next class's, and the honest reading of that is zero trainers rather than
+## a copy of somebody else's. Confirmed against pret's own party data
+## (`PokemonProfGroup` has no entries before `WillGroup`, in that order), and
+## the same class number in every game.
+const EMPTY_TRAINER_CLASS: int = 10
+
 ## Back pics are always this square. Front pics vary and carry their own size in
 ## the base stats.
 const BACKPIC_TILES: int = 6
@@ -319,6 +370,9 @@ const GOLD_SILVER: Dictionary = {
 	"trainer_class_names": 0x1B0955,
 	"trainer_classes": 66,
 	"trainer_last_class": "ROCKET",
+	"trainer_parties": 0x3993E,
+	"trainer_party_total": 495,
+	"trainer_party_last_trainer": "GRUNT",
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -350,6 +404,9 @@ const CRYSTAL: Dictionary = {
 	"trainer_class_names": 0x2C1EF,
 	"trainer_classes": 67,
 	"trainer_last_class": "MYSTICALMAN",
+	"trainer_parties": 0x39999,
+	"trainer_party_total": 541,
+	"trainer_party_last_trainer": "EUSINE",
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -430,6 +487,25 @@ static func trainer_pic_pointer_offset(layout: Dictionary, trainer_class: int) -
 ## number minus one. The two are one entry out of step on purpose.
 static func trainer_palette_offset(layout: Dictionary, trainer_class: int) -> int:
 	return int(layout["trainer_palettes"]) + trainer_class * Gen2Palette.PAIR_BYTES
+
+
+## Where a trainer class's own pointer sits in the trainer party table. The
+## pointer itself still has to be resolved through [method bank_of] on this
+## offset and [method RomFile.linear], the same as [method evos_attacks_pointer_offset].
+static func trainer_party_pointer_offset(layout: Dictionary, trainer_class: int) -> int:
+	return int(layout["trainer_parties"]) + (trainer_class - 1) * TRAINER_PARTY_POINTER_SIZE
+
+
+## How many bytes one Pokémon occupies in a trainer's party, past its level and
+## species: nothing for [constant TRAINER_MON_NORMAL], an item, four moves, or
+## both, depending on the type byte its trainer opens with.
+static func trainer_mon_extra_size(mon_type: int) -> int:
+	var size: int = 0
+	if mon_type == TRAINER_MON_ITEM or mon_type == TRAINER_MON_ITEM_MOVES:
+		size += 1
+	if mon_type == TRAINER_MON_MOVES or mon_type == TRAINER_MON_ITEM_MOVES:
+		size += TRAINER_MON_MOVE_COUNT
+	return size
 
 
 static func move_data_offset(layout: Dictionary, move: int) -> int:

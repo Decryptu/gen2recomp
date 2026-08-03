@@ -218,7 +218,7 @@ func send_out(side: int, index: int) -> Array:
 		})
 	events.append({
 		"type": SENT_OUT, "side": side, "index": index,
-		"species": current.active_mon().species,
+		"species": current.active_mon().species, "level": current.active_mon().level,
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
 	})
 	return events
