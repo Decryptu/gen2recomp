@@ -86,6 +86,14 @@ var _battle: Gen2Battle = null
 var _pending: Array = []
 var _rng := RandomNumberGenerator.new()
 
+## The trainer class behind the enemy's own moves, or zero for
+## [method show_matchup]'s invented pairing, which has no class and so no AI
+## flags of its own to read: it falls back to [method _random_slot], same as
+## before this existed. Reset by both, set only by [method show_trainer].
+var _enemy_trainer_class: int = 0
+var _enemy_turns_taken: int = 0
+var _player_turns_taken: int = 0
+
 var _enemy: int = 1
 var _player: int = 1
 var _enemy_level: int = 5
@@ -149,6 +157,9 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_player_level = player_level
 
 	_pending = []
+	_enemy_trainer_class = 0
+	_enemy_turns_taken = 0
+	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), _party_from(_enemy, _enemy_level), _rng
 	)
@@ -181,6 +192,9 @@ func show_trainer(
 	_enemy_level = lead.level
 
 	_pending = []
+	_enemy_trainer_class = trainer_class
+	_enemy_turns_taken = 0
+	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), enemy_party, _rng
 	)
@@ -269,14 +283,18 @@ func _hurt(mon: Gen2BattleMon) -> void:
 
 ## Plays one turn out, and the events come back to be shown one at a time.
 ##
-## Both sides pick at random from what they know. Scaffolding, like the party:
-## the player's choice is a menu and the enemy's is an AI, and neither exists
-## yet. Random rather than the first slot because a Pokémon that only ever used
-## its first move would never show what the other three do.
+## The player still picks at random from what it knows: a menu does not exist
+## yet. The enemy does too, unless it is one of the cartridge's own trainers
+## ([method show_trainer] rather than [method show_matchup]), in which case
+## [Gen2BattleAI] scores its choice the way that trainer class's own AI flags
+## say to. Random rather than the first slot because a Pokémon that only ever
+## used its first move would never show what the other three do.
 func take_turn() -> void:
 	if _battle == null or _battle.is_over() or not _pending.is_empty():
 		return
-	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _random_slot(Gen2Battle.ENEMY))
+	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
+	_player_turns_taken += 1
+	_enemy_turns_taken += 1
 	_show_next_event()
 
 
@@ -287,6 +305,20 @@ func _random_slot(side: int) -> int:
 		if mon.can_use(slot):
 			usable.append(slot)
 	return usable[_rng.randi_range(0, usable.size() - 1)] if not usable.is_empty() else 0
+
+
+## The enemy's own move choice: [Gen2BattleAI] against a real trainer's AI
+## flags, or [method _random_slot] for [method show_matchup]'s invented
+## pairing, which is not one of the cartridge's own trainers and so has no AI
+## flags to read.
+func _enemy_slot() -> int:
+	if _enemy_trainer_class == 0:
+		return _random_slot(Gen2Battle.ENEMY)
+	var weights: int = int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
+	return Gen2BattleAI.choose_slot(
+		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
+		_enemy_turns_taken, _player_turns_taken
+	)
 
 
 ## Swaps the player's Pokémon for the next one that is standing, as a turn.

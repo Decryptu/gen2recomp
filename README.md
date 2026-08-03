@@ -33,9 +33,11 @@ the same thing for Generation 1.
 > fought: parties, switching, stats, damage, accuracy, turn order, the five
 > status conditions, confusion, flinching, two-turn moves, recharging, Toxic,
 > Haze, Belly Drum and Psych Up, on a real 160x144 screen with the bars
-> draining and the messages appearing. Disable, Attract, multi-hit moves,
-> drain moves, OHKOs, Counter and the fixed-damage moves are still an ordinary
-> attack, and the overworld, audio and the mod loader do not exist.
+> draining and the messages appearing, against a trainer AI scored by that
+> trainer class's own AI flags rather than a random pick. Disable, Attract,
+> multi-hit moves, drain moves, OHKOs, Counter and the fixed-damage moves are
+> still an ordinary attack, and the overworld, audio and the mod loader do not
+> exist.
 > There is nothing playable here today.
 
 ## Getting started
@@ -96,7 +98,7 @@ What comes out today:
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
 | Type chart | Every matchup, and which two Foresight cancels |
-| Trainers | Every trainer class: name, pic and palette; and every individual trainer's own party, level by level |
+| Trainers | Every trainer class: name, pic, palette and its own AI flags; and every individual trainer's own party, level by level |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
 | Font | All 128 glyphs, indexed by character code |
@@ -157,12 +159,14 @@ attacks whoever came in. Left and right change which Pokémon are on it, and `S`
 and `D` take health off the player's and the enemy's without a turn, which is
 the fastest way to see the bars change colour.
 
-Both Pokémon know what their level says they know, out of the learnset, and both
-pick at random from those moves: choosing one is a menu on the player's side and
-an AI on the enemy's, and neither exists yet. What is on screen when you press
-Play is still two made-up Pokémon a side, because the player's party comes from
-a save that does not exist yet; call `show_trainer(trainer_class)` on the scene
-to fight one of the cartridge's own trainers instead, Falkner among them.
+Both Pokémon know what their level says they know, out of the learnset. The
+player still picks at random from those moves, because the menu does not exist
+yet; the enemy does too when what is on screen is `show_matchup`'s invented
+pairing, but fights with the cartridge's own trainer AI, scored by that
+trainer class's own AI flags, once `show_trainer(trainer_class)` is called on
+the scene to fight one of the cartridge's own trainers instead, Falkner among
+them. What is on screen when you press Play is still two made-up Pokémon a
+side, because the player's party comes from a save that does not exist yet.
 
 ## Tests
 
