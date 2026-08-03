@@ -102,6 +102,7 @@ battle can be fought inside a test:
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
 | `battle/party.gd` | The six a side carries, and which of them is out |
 | `battle/status.gd` | The status byte, and the four things it does |
+| `battle/substatus.gd` | The second byte: confusion, flinching, a charge, a recharge |
 | `battle/turn.gd` | One move being used, while it is being used |
 | `battle/effect_commands.gd` | The steps a move is made of |
 | `battle/move_effect.gd` | Which steps each effect byte is made of |
@@ -172,6 +173,22 @@ next hundred of them have nowhere to go. The command names are the cartridge's
 own so a sequence can be read against `data/moves/effects.asm` line for line,
 and an effect with no list of its own falls back to the ordinary attack, which
 is why a move nobody has written yet behaves rather than doing nothing.
+
+`battle/status.gd` is one status byte, one at a time, refusing a second rather
+than adding it. `battle/substatus.gd` is everything that does not fit on that
+byte because a Pokémon can carry several of it at once: confusion alongside a
+burn, a two-turn move's charge alongside either. It is the same shape, flag
+constants and pure arithmetic holding no state of its own, but the counters
+that go with a flag (how many turns of confusion are left, which move was
+charged, how ramped a Toxic is) live on `Gen2BattleMon` next to it rather than
+packed into the byte, because `Gen2Turn` is discarded at the end of the move
+that needed them and the byte alone cannot say "and three turns of it". All of
+it clears on a switch, in `Gen2BattleMon.reset_volatile`, called from
+`Gen2Party.send_out` alongside `reset_stages` rather than folded into it: Haze
+resets stages on both sides without touching either one's volatiles, so the two
+have to stay two calls. A flag added here and forgotten in `reset_volatile` is
+a bug that only shows up after a switch, which is why one test exists purely to
+set every volatile field and ask for a blank Pokémon back.
 
 `Gen2Battle` answers a turn with a list of events rather than with a new state
 or a string. An event says what happened and carries the numbers behind it, so a

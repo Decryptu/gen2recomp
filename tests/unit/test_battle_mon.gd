@@ -144,6 +144,24 @@ func test_stages_reset() -> void:
 	assert_eq(mon.stat("speed"), 110)
 
 
+## A field added here and forgotten in [method Gen2BattleMon.reset_volatile]
+## is a bug that only shows up after a switch, so every volatile field is set
+## before this asks for a blank one back.
+func test_every_volatile_field_clears() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.substatus = Gen2Substatus.CONFUSED | Gen2Substatus.FLINCHED
+	mon.confusion_turns = 3
+	mon.charged_move = Fixture.TACKLE
+	mon.toxic_counter = 2
+
+	mon.reset_volatile()
+
+	assert_eq(mon.substatus, Gen2Substatus.NONE)
+	assert_eq(mon.confusion_turns, 0)
+	assert_eq(mon.charged_move, 0)
+	assert_eq(mon.toxic_counter, 0)
+
+
 func test_rolled_dvs_stay_inside_a_nibble_each() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7

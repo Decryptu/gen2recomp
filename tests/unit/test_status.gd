@@ -72,6 +72,13 @@ func test_a_burn_or_a_poison_costs_an_eighth_and_never_nothing() -> void:
 	assert_eq(Gen2Status.residual_damage(4), 1, "a small Pokémon still loses one")
 
 
+func test_toxic_ramps_a_sixteenth_at_a_time_and_never_nothing() -> void:
+	assert_eq(Gen2Status.toxic_damage(160, 1), 10, "a sixteenth, half a plain poison's eighth")
+	assert_eq(Gen2Status.toxic_damage(160, 2), 20, "twice the counter, twice the damage")
+	assert_eq(Gen2Status.toxic_damage(160, 3), 30)
+	assert_eq(Gen2Status.toxic_damage(4, 1), 1, "a small Pokémon still loses one")
+
+
 func test_full_paralysis_is_about_a_quarter_of_the_time() -> void:
 	var stopped: int = 0
 	for _roll: int in 2000:

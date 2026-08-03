@@ -43,6 +43,12 @@ var dealt: int = 0
 ## missed, because it did nothing, or because it reached its end.
 var ended: bool = false
 
+## Whether this is the release turn of a two-turn move, set by [Gen2Battle]
+## before anything runs. The PP for a two-turn move is spent once, on the
+## charge turn, so [method Gen2EffectCommands._do_turn] reads this rather than
+## spending again on the turn the attack actually lands.
+var locked: bool = false
+
 ## Set when a secondary effect's roll came up short. It is not the same as
 ## [member ended]: the move has happened and its damage stands, and only what was
 ## behind the roll is skipped.

@@ -91,10 +91,11 @@ func first_healthy() -> int:
 
 ## Puts [param index] out, and answers whether it went.
 ##
-## The Pokémon leaving keeps its health and its PP and loses its stat stages,
-## which is the cartridge's rule and the reason a stage is worth resetting rather
-## than a Pokémon worth rebuilding: a stage is a lens on a stat and the lens does
-## not survive the walk back to the ball.
+## The Pokémon leaving keeps its health and its PP and loses its stat stages and
+## everything [Gen2Substatus] holds, which is the cartridge's rule and the
+## reason a stage is worth resetting rather than a Pokémon worth rebuilding: a
+## stage is a lens on a stat and the lens does not survive the walk back to the
+## ball, and confusion, a charge or a recharge do not survive it either.
 func send_out(index: int) -> bool:
 	if not can_send_out(index):
 		return false
@@ -102,5 +103,6 @@ func send_out(index: int) -> bool:
 	var leaving: Gen2BattleMon = active_mon()
 	if leaving != null:
 		leaving.reset_stages()
+		leaving.reset_volatile()
 	active = index
 	return true

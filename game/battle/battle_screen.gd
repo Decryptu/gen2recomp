@@ -45,11 +45,14 @@ const STOPPED_BY: Dictionary = {
 	&"sleep": "is fast asleep!",
 	&"freeze": "is frozen solid!",
 	&"paralysis": "is fully paralyzed!",
+	&"flinch": "flinched!",
+	&"recharge": "must recharge!",
 }
 
 const INFLICTED: Dictionary = {
 	&"sleep": "fell asleep!",
 	&"poison": "was poisoned!",
+	&"toxic": "was badly poisoned!",
 	&"burn": "was burned!",
 	&"freeze": "was frozen solid!",
 	&"paralysis": "is paralyzed!",
@@ -331,7 +334,7 @@ func _apply_event(event: Dictionary) -> void:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
-		Gen2Battle.HURT_BY_STATUS:
+		Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF:
 			if int(event["side"]) == Gen2Battle.ENEMY:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
@@ -388,6 +391,22 @@ func _describe(event: Dictionary) -> String:
 			]
 		Gen2Battle.HURT_BY_STATUS:
 			return "%s is hurt by its %s!" % [_battler_name(side), event["name"]]
+		Gen2Battle.CONFUSE_INFLICTED:
+			return "%s became confused!" % _battler_name(int(event["target"]))
+		Gen2Battle.CONFUSED:
+			return "%s is confused!" % _battler_name(side)
+		Gen2Battle.SNAPPED_OUT:
+			return "%s snapped out of confusion!" % _battler_name(side)
+		Gen2Battle.HURT_ITSELF:
+			return "It hurt itself in its confusion!"
+		Gen2Battle.CHARGING_UP:
+			# The real games print a line of the move's own, which nothing here has
+			# a source for yet; this is the one sentence every two-turn move shares.
+			return "%s is charging up its power!" % _battler_name(side)
+		Gen2Battle.STAGES_CLEARED:
+			return "All stat changes were eliminated!"
+		Gen2Battle.STAGES_COPIED:
+			return "%s copied the target's stat changes!" % _battler_name(side)
 		Gen2Battle.STAT_CHANGED:
 			return _stat_changed_text(event)
 		Gen2Battle.STAT_CHANGE_FAILED:

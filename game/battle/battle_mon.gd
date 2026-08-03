@@ -52,6 +52,23 @@ var stages: Dictionary = {}
 ## rather than with them.
 var status: int = Gen2Status.NONE
 
+## The second byte: see [Gen2Substatus]. Unlike [member status] this one clears
+## on a switch, along with the counters below it, which is what makes it
+## volatile rather than a status.
+var substatus: int = Gen2Substatus.NONE
+
+## How many turns of confusion are left, meaningful only while
+## [constant Gen2Substatus.CONFUSED] is set.
+var confusion_turns: int = 0
+
+## The move a two-turn move locked this Pokémon into, meaningful only while
+## [constant Gen2Substatus.CHARGING] is set. Zero means nothing is charged.
+var charged_move: int = 0
+
+## How many turns a badly poisoned Pokémon has been poisoned, which is what
+## Toxic's damage ramps on. Zero unless actually toxic.
+var toxic_counter: int = 0
+
 
 ## Builds a Pokémon at a level, at full health, knowing [param moves].
 ##
@@ -165,6 +182,17 @@ func reset_stages() -> void:
 	stages = {}
 	for key: String in STAGED_STATS + STAGED_ODDS:
 		stages[key] = 0
+
+
+## Clears everything [Gen2Substatus] holds, and the counters that go with it.
+## Called on a switch, alongside but separately from [method reset_stages]:
+## Haze resets the stages on both sides without touching either one's
+## volatiles, so the two have to stay two calls rather than become one.
+func reset_volatile() -> void:
+	substatus = Gen2Substatus.NONE
+	confusion_turns = 0
+	charged_move = 0
+	toxic_counter = 0
 
 
 ## The two type numbers, which are the same number twice for a single-type
