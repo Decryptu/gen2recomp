@@ -109,7 +109,7 @@ static func _moves() -> Array:
 		EMBER: ["EMBER", 40, FIRE, 255, 25, 4],
 		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, 6],
 		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0],
-		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2Battle.EFFECT_RECOIL_HIT],
+		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2MoveEffect.RECOIL_HIT],
 	}
 
 	var out: Array = []

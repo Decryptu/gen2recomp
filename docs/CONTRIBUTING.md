@@ -101,7 +101,10 @@ battle can be fought inside a test:
 | `battle/accuracy.gd` | Whether a move connects |
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
 | `battle/party.gd` | The six a side carries, and which of them is out |
-| `battle/battle.gd` | The turn: order, PP, the hit, the faint, the switch |
+| `battle/turn.gd` | One move being used, while it is being used |
+| `battle/effect_commands.gd` | The steps a move is made of |
+| `battle/move_effect.gd` | Which steps each effect byte is made of |
+| `battle/battle.gd` | The turn: order, the switch, and running a move's steps |
 
 Everything in there is integer arithmetic in the order the hardware does it.
 That is not nostalgia. Every step truncates and the steps do not commute, so a
@@ -132,6 +135,22 @@ A switch is not a move with a very high priority. The cartridge settles it
 before it looks at priority at all, so a switching side always acts first and
 the other side's move hits whoever came in. That is why an action is
 `use_move` or `switch_to` rather than a move number.
+
+**A move is a short program, not a special case.** The cartridge keeps a list of
+commands per effect byte and runs them in order, and an ordinary attack is the
+list that announces the move, spends the PP, works the damage out, rolls the
+hit, applies it and checks for a faint. Almost every other move is that list
+with a step added, removed or replaced. `move_effect.gd` is that table,
+`effect_commands.gd` is the steps, `turn.gd` is what one step hands the next,
+and `battle.gd` knows only how to run a list.
+
+Keep it that way. A burn is a command appended to a list, a move that cannot
+miss is a list without the roll, and a two-turn move is a list that ends early
+the first time. The moment an effect becomes a branch inside the turn loop, the
+next hundred of them have nowhere to go. The command names are the cartridge's
+own so a sequence can be read against `data/moves/effects.asm` line for line,
+and an effect with no list of its own falls back to the ordinary attack, which
+is why a move nobody has written yet behaves rather than doing nothing.
 
 `Gen2Battle` answers a turn with a list of events rather than with a new state
 or a string. An event says what happened and carries the numbers behind it, so a

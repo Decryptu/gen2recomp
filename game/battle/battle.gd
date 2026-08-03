@@ -63,12 +63,6 @@ const EFFECT_PRIORITIES: Dictionary = {
 ## than through its effect, so it is the one move the table cannot answer for.
 const VITAL_THROW: int = 0xE9
 
-## Recoil is a quarter of the damage dealt, never less than one. It is the only
-## move effect this understands, and it is here because Struggle needs it: a
-## Pokémon out of PP has to be able to hurt itself, or a battle between two
-## empty Pokémon never ends.
-const EFFECT_RECOIL_HIT: int = 48
-const RECOIL_DIVISOR: int = 4
 
 var data: GameData = null
 var rng: RandomNumberGenerator = null
@@ -303,65 +297,21 @@ static func priority_of(move: Dictionary) -> int:
 	return int(EFFECT_PRIORITIES.get(int(move.get("effect", -1)), BASE_PRIORITY))
 
 
-## One side's move, from the announcement to the faint.
+## One side's move, run as the list of commands its effect is made of.
 ##
-## The order is the cartridge's: the damage is worked out before the hit is
-## rolled, and an immunity is settled before either. That matters less for the
-## answer than for the shape, but it is also free.
+## Nothing about what a particular move does lives here. The effect byte picks a
+## sequence out of [Gen2MoveEffect], the commands in it are run in order against
+## a [Gen2Turn] until one of them says the move is finished, and every rule about
+## announcing, spending, rolling, applying and fainting is one of those commands.
+## That is the cartridge's own arrangement, and it is what lets the rest of
+## Generation 2 be written as commands rather than as branches in here.
 func _act(side: int, slot: int, move_number: int, events: Array) -> void:
-	var attacker: Gen2BattleMon = mon(side)
-	var target: int = opponent_of(side)
-	var defender: Gen2BattleMon = mon(target)
 	var move: Dictionary = data.move(move_number)
 	if move.is_empty():
 		return
 
-	# Struggle is what happens when there is nothing to spend, so it spends
-	# nothing.
-	if move_number != Gen2Damage.STRUGGLE:
-		attacker.spend_pp(slot)
-	events.append({"type": USED_MOVE, "side": side, "move": move_number})
-
-	var result: Dictionary = Gen2Damage.calculate(attacker, defender, move, rng)
-	if bool(result["immune"]):
-		events.append({"type": NO_EFFECT, "side": side, "target": target})
-		return
-
-	if not Gen2Accuracy.rolls_hit(rng, _hit_chance(attacker, defender, move)):
-		events.append({"type": MISSED, "side": side, "target": target})
-		return
-
-	var dealt: int = defender.take_damage(int(result["damage"]))
-	events.append({
-		"type": HIT,
-		"side": side,
-		"target": target,
-		"amount": dealt,
-		"critical": bool(result["critical"]),
-		"effectiveness": int(result["effectiveness"]),
-		"hp": defender.hp,
-		"max_hp": defender.max_hp(),
-	})
-
-	if int(move.get("effect", -1)) == EFFECT_RECOIL_HIT and dealt > 0:
-		@warning_ignore("integer_division")
-		var recoil: int = maxi(dealt / RECOIL_DIVISOR, 1)
-		var taken: int = attacker.take_damage(recoil)
-		events.append({
-			"type": RECOIL, "side": side, "amount": taken,
-			"hp": attacker.hp, "max_hp": attacker.max_hp(),
-		})
-
-	# Both can be down at this point: recoil can take the attacker with it.
-	for fainted: int in [target, side]:
-		if mon(fainted).is_fainted():
-			events.append({"type": FAINTED, "side": fainted})
-
-
-func _hit_chance(
-	attacker: Gen2BattleMon, defender: Gen2BattleMon, move: Dictionary
-) -> int:
-	return Gen2Accuracy.chance(
-		int(move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
-		attacker.stage("accuracy"), defender.stage("evasion")
-	)
+	var turn: Gen2Turn = Gen2Turn.create(self, side, slot, move_number, move, events)
+	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
+		if turn.ended:
+			return
+		Gen2EffectCommands.run(command, turn)
