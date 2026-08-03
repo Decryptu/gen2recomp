@@ -62,6 +62,91 @@ func test_recoil_is_the_ordinary_list_with_a_step_in_it() -> void:
 	)
 
 
+func test_the_stat_runs_land_on_the_right_stat() -> void:
+	# Effect 20 is the down-by-one run's third stop (18 + 2) and String Shot is
+	# published as lowering Speed; effect 72 is the down-on-hit run's fifth stop
+	# (68 + 4) and Psychic is published as lowering Sp.Defense. Both are the
+	# numbers most likely to be off by one, and neither shows up in a passing
+	# battle unless the wrong stat actually moves.
+	assert_true(Gen2MoveEffect.sequence_for(20).has(Gen2EffectCommands.SPEED_DOWN))
+	assert_true(
+		Gen2MoveEffect.sequence_for(72).has(Gen2EffectCommands.SP_DEFENSE_DOWN)
+	)
+
+
+func test_a_stat_that_only_rises_cannot_miss() -> void:
+	# Swords Dance's own effect byte, 50, is the first stop of the up-by-two run.
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.STAT_UP_2_BASE)
+	assert_false(sequence.has(Gen2EffectCommands.CHECK_HIT))
+	assert_true(sequence.has(Gen2EffectCommands.ATTACK_UP_2))
+
+
+func test_a_stat_that_can_be_lowered_can_also_be_missed() -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.STAT_DOWN_BASE)
+	assert_true(sequence.has(Gen2EffectCommands.CHECK_HIT))
+	assert_lt(
+		sequence.find(Gen2EffectCommands.CHECK_HIT),
+		sequence.find(Gen2EffectCommands.ATTACK_DOWN)
+	)
+
+
+func test_a_stage_already_at_the_top_reports_failure_not_a_rise() -> void:
+	var turn: Gen2Turn = _turn(_battle())
+	turn.attacker().change_stage("attack", Gen2Stats.MAX_STAGE)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTACK_UP, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAT_UP_MESSAGE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAT_UP_FAIL_TEXT, turn)
+
+	assert_eq(turn.attacker().stage("attack"), Gen2Stats.MAX_STAGE)
+	assert_eq(_first(turn.events, Gen2Battle.STAT_CHANGED), {})
+	assert_eq(int(_first(turn.events, Gen2Battle.STAT_CHANGE_FAILED)["by"]), 1)
+
+
+func test_a_secondary_effects_failed_roll_costs_the_stat_and_not_the_damage() -> void:
+	var turn: Gen2Turn = _turn(_battle())
+	turn.failed_chance = true
+
+	Gen2EffectCommands.run(Gen2EffectCommands.SP_DEFENSE_DOWN, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAT_DOWN_MESSAGE, turn)
+
+	assert_eq(turn.defender().stage("sp_defense"), 0)
+	assert_eq(turn.events.size(), 0, "a failed roll behind a hit says nothing at all")
+
+
+func test_a_hit_based_stat_drop_that_fails_says_nothing() -> void:
+	# The one difference from a status move's own sequence: there is no fail-text
+	# step behind a secondary effect, so a stage already at the bottom is silent
+	# rather than reporting it could not go lower.
+	var turn: Gen2Turn = _turn(_battle())
+	turn.defender().change_stage("sp_defense", Gen2Stats.MIN_STAGE)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.SP_DEFENSE_DOWN, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAT_DOWN_MESSAGE, turn)
+
+	assert_eq(turn.events.size(), 0)
+
+
+func test_ancientpower_raises_all_five_real_stats_as_one_event() -> void:
+	var turn: Gen2Turn = _turn(_battle())
+	Gen2EffectCommands.run(Gen2EffectCommands.ALL_STATS_UP, turn)
+
+	for key: String in ["attack", "defense", "speed", "sp_attack", "sp_defense"]:
+		assert_eq(turn.attacker().stage(key), 1, key)
+	assert_eq(turn.attacker().stage("accuracy"), 0, "not among the five it raises")
+	assert_eq(turn.events.size(), 1)
+	assert_eq(String(turn.events[0]["stat"]), "all")
+
+
+func test_ancientpower_does_nothing_behind_a_failed_roll() -> void:
+	var turn: Gen2Turn = _turn(_battle())
+	turn.failed_chance = true
+	Gen2EffectCommands.run(Gen2EffectCommands.ALL_STATS_UP, turn)
+
+	assert_eq(turn.attacker().stage("attack"), 0)
+	assert_eq(turn.events.size(), 0)
+
+
 func test_a_turn_knows_who_is_on_the_other_side_of_it() -> void:
 	var battle: Gen2Battle = _battle()
 	var turn: Gen2Turn = _turn(battle)

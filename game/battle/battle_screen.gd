@@ -55,6 +55,20 @@ const INFLICTED: Dictionary = {
 	&"paralysis": "is paralyzed!",
 }
 
+## The word the games print for a stat, keyed the way [Gen2BattleMon] keeps the
+## stat itself. A key the engine grows later shows up here as its own snake_case
+## name in capitals rather than as a wrong word, the same fallback
+## [method _battler_name] gives a status it does not recognise.
+const STAT_NAMES: Dictionary = {
+	"attack": "ATTACK",
+	"defense": "DEFENSE",
+	"speed": "SPEED",
+	"sp_attack": "SP.ATK",
+	"sp_defense": "SP.DEF",
+	"accuracy": "ACCURACY",
+	"evasion": "EVASIVENESS",
+}
+
 const TILE: int = Gen2Font.TILE
 
 ## The white the hardware fills the battle background with.
@@ -374,6 +388,10 @@ func _describe(event: Dictionary) -> String:
 			]
 		Gen2Battle.HURT_BY_STATUS:
 			return "%s is hurt by its %s!" % [_battler_name(side), event["name"]]
+		Gen2Battle.STAT_CHANGED:
+			return _stat_changed_text(event)
+		Gen2Battle.STAT_CHANGE_FAILED:
+			return _stat_failed_text(event)
 		Gen2Battle.WITHDREW:
 			# Named out of the event, because by the time this is read the one on
 			# the field is already the one that came in.
@@ -391,6 +409,34 @@ func _describe(event: Dictionary) -> String:
 				return "Both sides are out of Pokémon!"
 			return "%s won!" % ("The enemy" if event["winner"] == Gen2Battle.ENEMY else "Player")
 	return ""
+
+
+## The sentence for a stat that actually moved. Ancientpower's [code]"all"[/code]
+## reads as one sentence about the Pokémon rather than five about its stats,
+## because that is the one thing the event says that a single stat's does not.
+func _stat_changed_text(event: Dictionary) -> String:
+	var who: String = _battler_name(int(event["target"]))
+	if String(event["stat"]) == "all":
+		return "%s's stats rose!" % who
+
+	var stat_name: String = STAT_NAMES.get(event["stat"], String(event["stat"]).to_upper())
+	var by: int = int(event["by"])
+	if by > 0:
+		return "%s's %s went way up!" % [who, stat_name] if by >= 2 \
+			else "%s's %s went up!" % [who, stat_name]
+	return "%s's %s sharply fell!" % [who, stat_name] if by <= -2 \
+		else "%s's %s fell!" % [who, stat_name]
+
+
+## The sentence for a stat that was already at the end of the line. Whether it
+## reads "rise" or "drop" depends only on which end, not on how the move phrases
+## itself, because that is the cartridge's own rule.
+func _stat_failed_text(event: Dictionary) -> String:
+	var who: String = _battler_name(int(event["target"]))
+	var stat_name: String = STAT_NAMES.get(event["stat"], String(event["stat"]).to_upper())
+	if int(event["by"]) > 0:
+		return "%s's %s won't rise anymore!" % [who, stat_name]
+	return "%s's %s won't drop anymore!" % [who, stat_name]
 
 
 ## How a battle refers to one of the two, which is by side and not by species:

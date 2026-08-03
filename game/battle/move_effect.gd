@@ -99,8 +99,11 @@ const PARALYZE_SEQUENCE: Array = [
 
 ## An attack that leaves something behind if its roll comes up. The damage is
 ## done either way: the roll sits between the hit and the status, so a failed one
-## costs the status and nothing else.
-static func _secondary(status_command: StringName) -> Array:
+## costs [param trailing] and nothing else. Most callers leave one command
+## behind; a stat change leaves two, the change and its message, because a
+## secondary effect never carries the fail-text step a status move's own
+## sequence has.
+static func _secondary(trailing: Array) -> Array:
 	return [
 		Gen2EffectCommands.USED_MOVE_TEXT,
 		Gen2EffectCommands.DO_TURN,
@@ -110,9 +113,102 @@ static func _secondary(status_command: StringName) -> Array:
 		Gen2EffectCommands.EFFECT_CHANCE,
 		Gen2EffectCommands.APPLY_DAMAGE,
 		Gen2EffectCommands.CHECK_FAINT,
-		status_command,
+	] + trailing + [Gen2EffectCommands.END_MOVE]
+
+
+## Where each run of seven starts, in the cartridge's own numbering. The seven
+## across a run are [constant Gen2BattleMon.STAGED_STATS] followed by
+## [constant Gen2BattleMon.STAGED_ODDS], which is also the order
+## [Gen2EffectCommands] keeps its per-stat command lists in, so a run and an
+## index into those lists are the same number.
+const STAT_UP_BASE: int = 10
+const STAT_DOWN_BASE: int = 18
+const STAT_UP_2_BASE: int = 50
+const STAT_DOWN_2_BASE: int = 58
+const STAT_DOWN_HIT_BASE: int = 68
+const STAT_RUN_LENGTH: int = 7
+
+## The two effect bytes a run does not reach. Metal Claw raises the user's
+## Attack on a roll and Ancientpower raises all five of them, and neither sits
+## in a run of its own: 139 falls where an eighth "down by one, on a hit" stat
+## would if there were one, and 140 is the byte after it.
+const ATTACK_UP_HIT: int = 139
+const ALL_STATS_UP_HIT: int = 140
+
+const STAT_UP_COMMANDS: Array = [
+	Gen2EffectCommands.ATTACK_UP, Gen2EffectCommands.DEFENSE_UP,
+	Gen2EffectCommands.SPEED_UP, Gen2EffectCommands.SP_ATTACK_UP,
+	Gen2EffectCommands.SP_DEFENSE_UP, Gen2EffectCommands.ACCURACY_UP,
+	Gen2EffectCommands.EVASION_UP,
+]
+const STAT_UP_2_COMMANDS: Array = [
+	Gen2EffectCommands.ATTACK_UP_2, Gen2EffectCommands.DEFENSE_UP_2,
+	Gen2EffectCommands.SPEED_UP_2, Gen2EffectCommands.SP_ATTACK_UP_2,
+	Gen2EffectCommands.SP_DEFENSE_UP_2, Gen2EffectCommands.ACCURACY_UP_2,
+	Gen2EffectCommands.EVASION_UP_2,
+]
+const STAT_DOWN_COMMANDS: Array = [
+	Gen2EffectCommands.ATTACK_DOWN, Gen2EffectCommands.DEFENSE_DOWN,
+	Gen2EffectCommands.SPEED_DOWN, Gen2EffectCommands.SP_ATTACK_DOWN,
+	Gen2EffectCommands.SP_DEFENSE_DOWN, Gen2EffectCommands.ACCURACY_DOWN,
+	Gen2EffectCommands.EVASION_DOWN,
+]
+const STAT_DOWN_2_COMMANDS: Array = [
+	Gen2EffectCommands.ATTACK_DOWN_2, Gen2EffectCommands.DEFENSE_DOWN_2,
+	Gen2EffectCommands.SPEED_DOWN_2, Gen2EffectCommands.SP_ATTACK_DOWN_2,
+	Gen2EffectCommands.SP_DEFENSE_DOWN_2, Gen2EffectCommands.ACCURACY_DOWN_2,
+	Gen2EffectCommands.EVASION_DOWN_2,
+]
+
+## A status move that only raises a stat: it cannot miss, so there is no roll in
+## its list, only the change, its message, and the text for when it was already
+## at the top.
+static func _stat_up_sequence(command: StringName) -> Array:
+	return [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		command,
+		Gen2EffectCommands.STAT_UP_MESSAGE,
+		Gen2EffectCommands.STAT_UP_FAIL_TEXT,
 		Gen2EffectCommands.END_MOVE,
 	]
+
+
+## A status move that lowers the foe's stat: it can miss, which is the one
+## difference from the list above and the reason Screech has a roll where Swords
+## Dance does not.
+static func _stat_down_sequence(command: StringName) -> Array:
+	return [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.CHECK_HIT,
+		command,
+		Gen2EffectCommands.STAT_DOWN_MESSAGE,
+		Gen2EffectCommands.STAT_DOWN_FAIL_TEXT,
+		Gen2EffectCommands.END_MOVE,
+	]
+
+
+## The seven-wide runs, walked once into a dictionary rather than written out by
+## hand. A wrong entry here would be a wrong number in a table that self-checks
+## nothing, which is why [code]tools/dump_tables.gd[/code] and the published
+## effect list are what settled the five bases in the first place, not this
+## function.
+static func _stat_sequences() -> Dictionary:
+	var out: Dictionary = {}
+	for offset: int in STAT_RUN_LENGTH:
+		out[STAT_UP_BASE + offset] = _stat_up_sequence(STAT_UP_COMMANDS[offset])
+		out[STAT_UP_2_BASE + offset] = _stat_up_sequence(STAT_UP_2_COMMANDS[offset])
+		out[STAT_DOWN_BASE + offset] = _stat_down_sequence(STAT_DOWN_COMMANDS[offset])
+		out[STAT_DOWN_2_BASE + offset] = _stat_down_sequence(STAT_DOWN_2_COMMANDS[offset])
+		out[STAT_DOWN_HIT_BASE + offset] = _secondary([
+			STAT_DOWN_COMMANDS[offset], Gen2EffectCommands.STAT_DOWN_MESSAGE,
+		])
+	out[ATTACK_UP_HIT] = _secondary([
+		STAT_UP_COMMANDS[0], Gen2EffectCommands.STAT_UP_MESSAGE,
+	])
+	out[ALL_STATS_UP_HIT] = _secondary([Gen2EffectCommands.ALL_STATS_UP])
+	return out
 
 
 ## Effect bytes that do something other than [constant NORMAL_HIT]. An effect
@@ -123,17 +219,19 @@ static func _secondary(status_command: StringName) -> Array:
 ## doubles every turn, counted on a substatus that nothing here carries yet, so
 ## it is currently the weaker thing it is closest to rather than nothing at all.
 static func _sequences() -> Dictionary:
-	return {
+	var out: Dictionary = {
 		SLEEP: SLEEP_SEQUENCE,
 		POISON: POISON_SEQUENCE,
 		TOXIC: POISON_SEQUENCE,
 		PARALYZE: PARALYZE_SEQUENCE,
-		POISON_HIT: _secondary(Gen2EffectCommands.POISON_TARGET),
-		BURN_HIT: _secondary(Gen2EffectCommands.BURN_TARGET),
-		FREEZE_HIT: _secondary(Gen2EffectCommands.FREEZE_TARGET),
-		PARALYZE_HIT: _secondary(Gen2EffectCommands.PARALYZE_TARGET),
+		POISON_HIT: _secondary([Gen2EffectCommands.POISON_TARGET]),
+		BURN_HIT: _secondary([Gen2EffectCommands.BURN_TARGET]),
+		FREEZE_HIT: _secondary([Gen2EffectCommands.FREEZE_TARGET]),
+		PARALYZE_HIT: _secondary([Gen2EffectCommands.PARALYZE_TARGET]),
 		RECOIL_HIT: RECOIL_HIT_SEQUENCE,
 	}
+	out.merge(_stat_sequences())
+	return out
 
 
 ## The commands a move with this effect byte is made of.

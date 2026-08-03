@@ -73,6 +73,94 @@ const BURN_TARGET: StringName = &"burntarget"
 const FREEZE_TARGET: StringName = &"freezetarget"
 const PARALYZE_TARGET: StringName = &"paralyzetarget"
 
+## Raises and lowers a stat by one stage or two, named the way the cartridge
+## names them and in the order [constant Gen2BattleMon.STAGED_STATS] plus
+## [constant Gen2BattleMon.STAGED_ODDS] already keeps the seven in, because that
+## is also the order the cartridge's own effect bytes run in: seven in a row for
+## "up by one", seven more for "down by one", and so on. [Gen2MoveEffect] is what
+## turns that run into a table; this only names the seven stops along it.
+const ATTACK_UP: StringName = &"attackup"
+const DEFENSE_UP: StringName = &"defenseup"
+const SPEED_UP: StringName = &"speedup"
+const SP_ATTACK_UP: StringName = &"specialattackup"
+const SP_DEFENSE_UP: StringName = &"specialdefenseup"
+const ACCURACY_UP: StringName = &"accuracyup"
+const EVASION_UP: StringName = &"evasionup"
+
+const ATTACK_UP_2: StringName = &"attackup2"
+const DEFENSE_UP_2: StringName = &"defenseup2"
+const SPEED_UP_2: StringName = &"speedup2"
+const SP_ATTACK_UP_2: StringName = &"specialattackup2"
+const SP_DEFENSE_UP_2: StringName = &"specialdefenseup2"
+const ACCURACY_UP_2: StringName = &"accuracyup2"
+const EVASION_UP_2: StringName = &"evasionup2"
+
+const ATTACK_DOWN: StringName = &"attackdown"
+const DEFENSE_DOWN: StringName = &"defensedown"
+const SPEED_DOWN: StringName = &"speeddown"
+const SP_ATTACK_DOWN: StringName = &"specialattackdown"
+const SP_DEFENSE_DOWN: StringName = &"specialdefensedown"
+const ACCURACY_DOWN: StringName = &"accuracydown"
+const EVASION_DOWN: StringName = &"evasiondown"
+
+const ATTACK_DOWN_2: StringName = &"attackdown2"
+const DEFENSE_DOWN_2: StringName = &"defensedown2"
+const SPEED_DOWN_2: StringName = &"speeddown2"
+const SP_ATTACK_DOWN_2: StringName = &"specialattackdown2"
+const SP_DEFENSE_DOWN_2: StringName = &"specialdefensedown2"
+const ACCURACY_DOWN_2: StringName = &"accuracydown2"
+const EVASION_DOWN_2: StringName = &"evasiondown2"
+
+## Raises the user's five real stats at once, which is what Ancientpower leaves
+## behind on a roll. Accuracy and evasion are not among them: the cartridge's own
+## command is a loop over the five stats a stage multiplies a real number for,
+## and the two odds are not that.
+const ALL_STATS_UP: StringName = &"allstatsup"
+
+## The stat commands in the run order the cartridge's effect bytes use, indexed
+## by [Gen2MoveEffect] rather than named one at a time there. Each entry is
+## [param stat_key, param amount, param targets_user]: the key
+## [method Gen2BattleMon.change_stage] takes, how many stages it moves by, and
+## whether the move points it at whoever used it rather than the other side.
+const STAT_COMMANDS: Dictionary = {
+	ATTACK_UP: ["attack", 1, true], DEFENSE_UP: ["defense", 1, true],
+	SPEED_UP: ["speed", 1, true], SP_ATTACK_UP: ["sp_attack", 1, true],
+	SP_DEFENSE_UP: ["sp_defense", 1, true], ACCURACY_UP: ["accuracy", 1, true],
+	EVASION_UP: ["evasion", 1, true],
+
+	ATTACK_UP_2: ["attack", 2, true], DEFENSE_UP_2: ["defense", 2, true],
+	SPEED_UP_2: ["speed", 2, true], SP_ATTACK_UP_2: ["sp_attack", 2, true],
+	SP_DEFENSE_UP_2: ["sp_defense", 2, true], ACCURACY_UP_2: ["accuracy", 2, true],
+	EVASION_UP_2: ["evasion", 2, true],
+
+	ATTACK_DOWN: ["attack", -1, false], DEFENSE_DOWN: ["defense", -1, false],
+	SPEED_DOWN: ["speed", -1, false], SP_ATTACK_DOWN: ["sp_attack", -1, false],
+	SP_DEFENSE_DOWN: ["sp_defense", -1, false], ACCURACY_DOWN: ["accuracy", -1, false],
+	EVASION_DOWN: ["evasion", -1, false],
+
+	ATTACK_DOWN_2: ["attack", -2, false], DEFENSE_DOWN_2: ["defense", -2, false],
+	SPEED_DOWN_2: ["speed", -2, false], SP_ATTACK_DOWN_2: ["sp_attack", -2, false],
+	SP_DEFENSE_DOWN_2: ["sp_defense", -2, false], ACCURACY_DOWN_2: ["accuracy", -2, false],
+	EVASION_DOWN_2: ["evasion", -2, false],
+}
+
+## The five real stats [constant ALL_STATS_UP] raises, in the cartridge's order.
+const ALL_STATS_KEYS: Array = ["attack", "defense", "speed", "sp_attack", "sp_defense"]
+
+## Reports a stat change, or says nothing for one that is folded into a hit and
+## has no message step of its own. Separate from the change itself because a
+## status move that fails to move a stat says so and a secondary effect that
+## fails to says nothing, which is two different steps rather than one asking
+## both questions.
+const STAT_UP_MESSAGE: StringName = &"statupmessage"
+const STAT_DOWN_MESSAGE: StringName = &"statdownmessage"
+
+## Reports that a stat could not go any higher or lower. Only on a status move's
+## own sequence: a secondary effect's sequence has no step here at all, so its
+## failure is silent, the way a failed [constant EFFECT_CHANCE] already is.
+const STAT_UP_FAIL_TEXT: StringName = &"statupfailtext"
+const STAT_DOWN_FAIL_TEXT: StringName = &"statdownfailtext"
+
 ## Recoil is a quarter of the damage dealt, never less than one, and it is the
 ## same quarter for every move that has it rather than a figure per move.
 const RECOIL_DIVISOR: int = 4
@@ -121,8 +209,17 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_status_target(turn, Gen2Status.FREEZE)
 		PARALYZE_TARGET:
 			_status_target(turn, Gen2Status.PARALYSIS)
+		ALL_STATS_UP:
+			_all_stats_up(turn)
+		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
+			_stat_message(turn)
+		STAT_UP_FAIL_TEXT, STAT_DOWN_FAIL_TEXT:
+			_stat_fail_text(turn)
 		_:
-			push_error("No such effect command: %s" % command)
+			if STAT_COMMANDS.has(command):
+				_stat_change(command, turn)
+			else:
+				push_error("No such effect command: %s" % command)
 
 
 static func _used_move_text(turn: Gen2Turn) -> void:
@@ -266,4 +363,66 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 		"target": turn.target,
 		"status": defender.status,
 		"name": Gen2Status.name_of(defender.status),
+	})
+
+
+## Moves one stat by one command's worth, and writes down who it happened to and
+## whether it actually moved, for the message step behind it to read.
+##
+## A secondary effect's failed roll skips this the same way it skips a status:
+## the damage in front of it has already landed, and what was behind the roll is
+## the only thing the roll can still cost.
+static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
+	var entry: Array = STAT_COMMANDS[command]
+	var stat_key: String = String(entry[0])
+	var amount: int = int(entry[1])
+	var side: int = turn.side if bool(entry[2]) else turn.target
+
+	turn.stat_key = stat_key
+	turn.stat_by = amount
+	turn.stat_target = side
+
+	if turn.failed_chance:
+		turn.stat_moved = false
+		return
+
+	turn.stat_moved = turn.battle.mon(side).change_stage(stat_key, amount)
+
+
+## Ancientpower's roll: the user's five real stats, all at once, reported as one
+## event rather than five. Accuracy and evasion are not among them, because the
+## cartridge's own command loops over the five a stage multiplies a real number
+## for and not the two that only have a table of their own.
+static func _all_stats_up(turn: Gen2Turn) -> void:
+	if turn.failed_chance:
+		return
+
+	var mon: Gen2BattleMon = turn.attacker()
+	var moved: bool = false
+	for key: String in ALL_STATS_KEYS:
+		if mon.change_stage(key, 1):
+			moved = true
+
+	if moved:
+		turn.emit(Gen2Battle.STAT_CHANGED, {"target": turn.side, "stat": "all", "by": 1})
+
+
+## Says a stat moved, or says nothing. A move whose sequence has no fail-text
+## step behind this, which is every secondary effect, is silent either way when
+## the stage was already at its limit.
+static func _stat_message(turn: Gen2Turn) -> void:
+	if not turn.stat_moved:
+		return
+	turn.emit(Gen2Battle.STAT_CHANGED, {
+		"target": turn.stat_target, "stat": turn.stat_key, "by": turn.stat_by,
+	})
+
+
+## Says a stat could not move. Only reached from a status move's own sequence,
+## which is the only place the cartridge follows a message step with this one.
+static func _stat_fail_text(turn: Gen2Turn) -> void:
+	if turn.stat_moved:
+		return
+	turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {
+		"target": turn.stat_target, "stat": turn.stat_key, "by": turn.stat_by,
 	})

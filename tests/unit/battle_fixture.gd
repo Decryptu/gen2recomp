@@ -35,6 +35,17 @@ const EMBER_BURNS: int = 92
 const NEVER_BURNS: int = 93
 const FLAME_WHEEL: int = 172
 
+## The stat-changing moves, in the shapes the effect bytes come in: a pure raise,
+## a pure drop, a raise on hit, and a drop on hit that always rolls or never
+## does, the same trick [constant EMBER_BURNS] and [constant NEVER_BURNS] already
+## use.
+const SWORDS_DANCE: int = 14
+const SCREECH: int = 103
+const METAL_CLAW: int = 232
+const ANCIENTPOWER: int = 246
+const PSYCHIC_LOWERS: int = 210
+const PSYCHIC_NEVER: int = 211
+
 const NORMAL: int = 0x00
 const GROUND: int = 0x04
 const ROCK: int = 0x05
@@ -44,6 +55,7 @@ const FIRE: int = 0x14
 const WATER: int = 0x15
 const GRASS: int = 0x16
 const ELECTRIC: int = 0x17
+const PSYCHIC_TYPE: int = 0x18
 const POISON: int = 0x03
 const FLYING: int = 0x02
 
@@ -120,7 +132,7 @@ static func _moves() -> Array:
 	# plain attacks they were written against.
 	var known: Dictionary = {
 		TACKLE: ["TACKLE", 35, NORMAL, 255, 35, 0, 0],
-		GROWL: ["GROWL", 0, NORMAL, 255, 40, 18, 0],
+		GROWL: ["GROWL", 0, NORMAL, 255, 40, Gen2MoveEffect.STAT_DOWN_BASE, 0],
 		EMBER: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
 		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, Gen2MoveEffect.PARALYZE_HIT, 0],
 		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0, 0],
@@ -133,10 +145,24 @@ static func _moves() -> Array:
 		EMBER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 256],
 		NEVER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
 		FLAME_WHEEL: ["FLAME WHEEL", 60, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
+		# Attack up by two, on the user, with no roll to miss.
+		SWORDS_DANCE: ["SWORDS DANCE", 0, NORMAL, 255, 30, Gen2MoveEffect.STAT_UP_2_BASE, 0],
+		# Defense down by two, on the foe, which can still miss.
+		SCREECH: ["SCREECH", 0, NORMAL, 216, 40, Gen2MoveEffect.STAT_DOWN_2_BASE + 1, 0],
+		# Attack up on the user, behind a roll, the way Metal Claw does it.
+		METAL_CLAW: ["METAL CLAW", 50, STEEL, 255, 35, Gen2MoveEffect.ATTACK_UP_HIT, 256],
+		# All five real stats up on the user, behind a roll, the way Ancientpower
+		# does it.
+		ANCIENTPOWER: ["ANCIENTPOWER", 60, ROCK, 255, 5, Gen2MoveEffect.ALL_STATS_UP_HIT, 256],
+		# Sp.Defense down on the foe, behind a roll, the way Psychic does it. One
+		# chance never fails and the other never does, the same trick
+		# [constant EMBER_BURNS] and [constant NEVER_BURNS] use for a status.
+		PSYCHIC_LOWERS: ["PSYCHIC", 90, PSYCHIC_TYPE, 255, 10, Gen2MoveEffect.STAT_DOWN_HIT_BASE + 4, 256],
+		PSYCHIC_NEVER: ["PSYCHIC", 90, PSYCHIC_TYPE, 255, 10, Gen2MoveEffect.STAT_DOWN_HIT_BASE + 4, 0],
 	}
 
 	var out: Array = []
-	for number: int in range(1, FLAME_WHEEL + 1):
+	for number: int in range(1, ANCIENTPOWER + 1):
 		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20, 0, 0])
 		out.append({
 			"number": number,

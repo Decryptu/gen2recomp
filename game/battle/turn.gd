@@ -48,6 +48,14 @@ var ended: bool = false
 ## behind the roll is skipped.
 var failed_chance: bool = false
 
+## What a stat-changing command worked out, for the message command behind it.
+## [member stat_target] is who it happened to, which is the user for a raise and
+## the defender for almost every drop.
+var stat_key: String = ""
+var stat_by: int = 0
+var stat_target: int = Gen2Battle.PLAYER
+var stat_moved: bool = false
+
 
 static func create(
 	in_battle: Gen2Battle, acting: int, from_slot: int, number: int, move_data: Dictionary,

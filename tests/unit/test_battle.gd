@@ -507,3 +507,47 @@ func test_a_secondary_effect_that_does_not_come_up_still_does_its_damage() -> vo
 	var events: Array = battle.take_turn(0, 0)
 	assert_gt(int(_first(events, Gen2Battle.HIT)["amount"]), 0)
 	assert_eq(battle.enemy.status, Gen2Status.NONE)
+
+
+func test_a_stat_drop_actually_bends_the_stat_the_damage_formula_reads() -> void:
+	# Not just an event: the stage has to reach Gen2BattleMon.stat() itself, which
+	# is what a battle asserted only on the event log would miss.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var before: int = battle.player.stat("attack")
+	battle.take_turn(0, 0)
+	assert_lt(battle.player.stat("attack"), before)
+
+
+func test_ancientpower_raises_the_users_stats_as_one_event() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.ANCIENTPOWER]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("attack"), 1)
+	assert_eq(battle.player.stage("speed"), 1)
+	assert_eq(_of_type(events, Gen2Battle.STAT_CHANGED).size(), 1, "one event for all five")
+
+
+func test_a_secondary_stat_drop_that_never_rolls_still_deals_its_damage() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PSYCHIC_NEVER]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_gt(int(_first(events, Gen2Battle.HIT)["amount"]), 0)
+	assert_eq(battle.enemy.stage("sp_defense"), 0)
+
+
+func test_a_status_move_that_cannot_rise_further_says_so() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SWORDS_DANCE]),
+		_mon(Fixture.MAGCARGO, 50, [Fixture.TACKLE])
+	)
+	battle.player.change_stage("attack", Gen2Stats.MAX_STAGE)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.STAT_CHANGED).size(), 0)
+	assert_eq(_of_type(events, Gen2Battle.STAT_CHANGE_FAILED).size(), 1)
