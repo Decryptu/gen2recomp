@@ -105,6 +105,8 @@ func _dump(directory: String, table: String) -> void:
 		"matchups":
 			print("\n%s (%d)" % [table, (rows as Array).size()])
 			_dump_matchups(directory, rows)
+		"trainers":
+			_dump_trainers(directory, rows)
 		"learnsets":
 			_dump_learnsets(directory, rows)
 		"evolutions":
@@ -155,6 +157,48 @@ func _dump_evolutions(directory: String, rows: Array) -> void:
 			parts.append(_describe_evolution(evolution, items, species))
 		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), "; ".join(parts)])
 	print("  %d evolutions" % total)
+
+
+## Every trainer class, and behind it every individual trainer's own party.
+## Reading this is the check the runtime one cannot be: a level, a species and
+## a move number are all in range whatever a wrong pointer does, but a group
+## that reads Falkner's Pidgey and Pidgeotto, or that leaves the one empty
+## class empty, is right and one that does not is not.
+func _dump_trainers(directory: String, rows: Array) -> void:
+	var species: Array = _names_in(RomCache.species_path(directory))
+	var moves: Array = _names_in(RomCache.moves_path(directory))
+	var items: Array = _names_in(RomCache.items_path(directory))
+	var total: int = 0
+
+	print("\ntrainers (%d classes)" % rows.size())
+	for row: Dictionary in rows:
+		print("  %s" % _describe("trainers", row))
+		var trainers: Array = row.get("trainers", [])
+		total += trainers.size()
+		for trainer: Dictionary in trainers:
+			var parts: PackedStringArray = []
+			for mon: Dictionary in (trainer.get("party", []) as Array):
+				parts.append(_describe_trainer_mon(mon, species, moves, items))
+			print("    %-13s %s" % [String(trainer["name"]), "; ".join(parts)])
+
+	print("  %d trainers" % total)
+
+
+func _describe_trainer_mon(mon: Dictionary, species: Array, moves: Array, items: Array) -> String:
+	var out: String = "%d %s" % [int(mon["level"]), _name_at(species, int(mon["species"]))]
+
+	var item: int = int(mon.get("item", 0))
+	if item != 0:
+		out += " @ %s" % _name_at(items, item)
+
+	var move_names: PackedStringArray = []
+	for move: Variant in (mon.get("moves", []) as Array):
+		if int(move) != 0:
+			move_names.append(_name_at(moves, int(move)))
+	if not move_names.is_empty():
+		out += " (%s)" % ", ".join(move_names)
+
+	return out
 
 
 func _describe_evolution(evolution: Dictionary, items: Array, species: Array) -> String:

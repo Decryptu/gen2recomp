@@ -96,7 +96,7 @@ What comes out today:
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
 | Type chart | Every matchup, and which two Foresight cancels |
-| Trainers | Every trainer class: name, pic and palette |
+| Trainers | Every trainer class: name, pic and palette; and every individual trainer's own party, level by level |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
 | Font | All 128 glyphs, indexed by character code |
@@ -159,9 +159,10 @@ the fastest way to see the bars change colour.
 
 Both Pokémon know what their level says they know, out of the learnset, and both
 pick at random from those moves: choosing one is a menu on the player's side and
-an AI on the enemy's, and neither exists yet. Each side brings two Pokémon, made
-up by the screen, because a real party comes from a save on one side and from
-the trainer party tables on the other and neither is decoded yet.
+an AI on the enemy's, and neither exists yet. What is on screen when you press
+Play is still two made-up Pokémon a side, because the player's party comes from
+a save that does not exist yet; call `show_trainer(trainer_class)` on the scene
+to fight one of the cartridge's own trainers instead, Falkner among them.
 
 ## Tests
 

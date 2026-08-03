@@ -101,6 +101,7 @@ battle can be fought inside a test:
 | `battle/accuracy.gd` | Whether a move connects |
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
 | `battle/party.gd` | The six a side carries, and which of them is out |
+| `battle/trainer_party.gd` | One of the cartridge's own trainers, built into a party |
 | `battle/status.gd` | The status byte, and the four things it does |
 | `battle/substatus.gd` | The second byte: confusion, flinching, a charge, a recharge |
 | `battle/turn.gd` | One move being used, while it is being used |
@@ -137,6 +138,19 @@ A switch is not a move with a very high priority. The cartridge settles it
 before it looks at priority at all, so a switching side always acts first and
 the other side's move hits whoever came in. That is why an action is
 `use_move` or `switch_to` rather than a move number.
+
+`Gen2TrainerParty.build` turns one of a trainer class's own trainers into a
+`Gen2Party`, the same way `Gen2Learnset` turns a species' learnset into what a
+level knows. It sits beside the rest of the battle engine rather than next to
+`Gen2Learnset` because what it hands back is battle types, not cartridge data,
+and it draws the same distinction the trainer party table itself draws
+between a NORMAL or ITEM trainer's Pokémon (which knows what its level teaches
+it, through `GameData.moves_at_level`, the same as a wild one) and a MOVES or
+ITEM_MOVES trainer's (which knows exactly what is stored with it, zero slots
+dropped rather than passed to `Gen2BattleMon` as a move). Its Pokémon carry
+`Gen2BattleMon.PERFECT_DVS` rather than the cartridge's own per-trainer-class
+DVs, because that is a second table (`data/trainers/dvs.asm` in pokecrystal)
+this change did not locate; see `HANDOFF.md`.
 
 **A move is a short program, not a special case.** The cartridge keeps a list of
 commands per effect byte and runs them in order, and an ordinary attack is the
@@ -290,6 +304,20 @@ So every offset ships with a check that would fail if it were wrong, and
   the shape a border has to have: inset from the top of its tile row, corners
   that carry the pattern of the side they hang from, and no two frames the
   same.
+- The trainer party table is a second table indexed the same way as the trainer
+  classes above, one pointer per class, and it is where the games' individual
+  trainers actually live: "LEADER" is the class every gym leader shares, and
+  "FALKNER" is stored inside class 1's own entry. Nothing inside a class's bytes
+  says where its group ends, so a class's span is bounded by the *next* class's
+  pointer, and the walk itself is the check: a span that does not land exactly
+  on the next class's start cannot be right, the same argument the evolution
+  and learnset table's pointers make. One class in every game shares its
+  pointer with the class after it, and reads as an honestly empty group rather
+  than a copy of somebody else's; see `RomLayout.EMPTY_TRAINER_CLASS`. On top
+  of that the total trainer count is a known figure per game, and both ends of
+  the table are content whose answer is known independently: Falkner's level 7
+  Pidgey and level 9 Pidgeotto open it, and the last class's first trainer's
+  name closes it.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 
