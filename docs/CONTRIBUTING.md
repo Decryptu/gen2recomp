@@ -307,9 +307,18 @@ cannot be checked without asking someone what they see.
 ## Pitfalls that cost real time
 
 - **GUT silently skips test scripts that fail to parse.** A broken file shows
-  up as a smaller run that still reports green. `test_smoke.gd` loads every
-  script under `game/`, `autoload/`, `tests/` and `tools/` explicitly to turn
-  that into a visible failure. Don't delete it.
+  up as a smaller run that still reports green, and the only tell is the script
+  count. `test_smoke.gd` loads every script under `game/`, `autoload/`,
+  `tests/` and `tools/` explicitly to turn that into a visible failure. Don't
+  delete it.
+- **A script that fails to parse does not load as null.** `load()` hands back a
+  real `GDScript` with its source code attached, no methods on it and nothing
+  behind it, so `assert_not_null(load(path))` passes on exactly the file it was
+  written to catch. `can_instantiate()` is the question that answers honestly,
+  and it is what `test_smoke.gd` asks. Loading with
+  `ResourceLoader.CACHE_MODE_IGNORE` also sees it, and re-parses scripts that
+  are running at the time, which corrupts them mid-call and takes the VM down
+  with an opcode error; don't reach for it.
 - **A newly created script is invisible until the editor scans it.** Plain
   `--headless` runs do *not* import new files, so a brand-new `class_name`
   fails with "not declared in the current scope" no matter how many times you

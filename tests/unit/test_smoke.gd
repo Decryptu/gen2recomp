@@ -30,7 +30,16 @@ func test_every_script_parses() -> void:
 
 	assert_gt(scripts.size(), 0, "found no scripts to check; is the walk broken?")
 	for path: String in scripts:
-		assert_not_null(load(path), "failed to load %s" % path)
+		# A script that failed to parse is not null. It comes back as a real
+		# GDScript with its source code attached, no methods on it and nothing
+		# behind it, so the failure this test exists to catch is invisible to a
+		# null check and shows up here instead. Asking the loader to bypass its
+		# cache would also see it, and would re-parse scripts that are running at
+		# the time, which corrupts them mid-call.
+		var script: Variant = load(path)
+		assert_not_null(script, "failed to load %s" % path)
+		if script is GDScript:
+			assert_true((script as GDScript).can_instantiate(), "failed to parse %s" % path)
 
 
 func test_every_scene_loads_and_keeps_its_script() -> void:
