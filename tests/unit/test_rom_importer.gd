@@ -507,6 +507,103 @@ func test_a_trainer_party_pointer_table_with_no_terminator_anywhere_fails() -> v
 	assert_false(RomImporter.verify_trainer_parties(_rom(data), _layout)["ok"])
 
 
+## Every class carrying Falkner's own known entry, which is a plausible table:
+## every flag word is in range and class 1 matches what is known of it.
+func _trainer_attributes_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, _trainer_attributes_entries())
+	return data
+
+
+func _trainer_attributes_entries() -> Array:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	var entries: Array = []
+	for _i: int in count:
+		entries.append({
+			"item1": 0, "item2": 0,
+			"base_reward": RomImporter.TRAINER_ATTR_FIRST_REWARD,
+			"ai_move_weights": RomImporter.TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS,
+			"ai_item_switch": RomImporter.TRAINER_ATTR_FIRST_AI_ITEM_SWITCH,
+		})
+	return entries
+
+
+func _write_trainer_attributes(data: PackedByteArray, entries: Array) -> void:
+	for trainer_class: int in range(1, entries.size() + 1):
+		var entry: Dictionary = entries[trainer_class - 1]
+		var at: int = RomLayout.trainer_attributes_offset(_layout, trainer_class)
+		data[at + RomLayout.ATTR_ITEM1] = int(entry["item1"])
+		data[at + RomLayout.ATTR_ITEM2] = int(entry["item2"])
+		data[at + RomLayout.ATTR_BASE_REWARD] = int(entry["base_reward"])
+		var weights: int = int(entry["ai_move_weights"])
+		data[at + RomLayout.ATTR_AI_MOVE_WEIGHTS] = weights & 0xFF
+		data[at + RomLayout.ATTR_AI_MOVE_WEIGHTS + 1] = (weights >> 8) & 0xFF
+		var switch_flags: int = int(entry["ai_item_switch"])
+		data[at + RomLayout.ATTR_AI_ITEM_SWITCH] = switch_flags & 0xFF
+		data[at + RomLayout.ATTR_AI_ITEM_SWITCH + 1] = (switch_flags >> 8) & 0xFF
+
+
+func test_a_plausible_trainer_attributes_table_verifies() -> void:
+	var result: Dictionary = RomImporter.verify_trainer_attributes(_rom(_trainer_attributes_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+## Twins carry no AI at all in the real cartridge (their flag word is zero), and
+## that is not a decoding failure: a class is allowed to score nothing.
+func test_a_zero_ai_move_weight_is_allowed() -> void:
+	var entries: Array = _trainer_attributes_entries()
+	entries[1]["ai_move_weights"] = RomLayout.NO_AI
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, entries)
+	assert_true(RomImporter.verify_trainer_attributes(_rom(data), _layout)["ok"])
+
+
+func test_an_ai_move_weight_with_an_undefined_bit_fails() -> void:
+	var entries: Array = _trainer_attributes_entries()
+	entries[1]["ai_move_weights"] = RomLayout.AI_MOVE_WEIGHTS_MASK + 1
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, entries)
+	assert_false(RomImporter.verify_trainer_attributes(_rom(data), _layout)["ok"])
+
+
+func test_an_item_switch_word_with_an_undefined_bit_fails() -> void:
+	var entries: Array = _trainer_attributes_entries()
+	# Bit 3 is skipped in the cartridge's own numbering, so it is never legal.
+	entries[1]["ai_item_switch"] = 1 << 3
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, entries)
+	assert_false(RomImporter.verify_trainer_attributes(_rom(data), _layout)["ok"])
+
+
+func test_falkners_attributes_not_matching_what_is_known_fails() -> void:
+	var entries: Array = _trainer_attributes_entries()
+	entries[0]["base_reward"] = 99
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, entries)
+	assert_false(RomImporter.verify_trainer_attributes(_rom(data), _layout)["ok"])
+
+
+func test_trainer_attributes_read_back_by_class() -> void:
+	var entries: Array = _trainer_attributes_entries()
+	entries[4]["item1"] = 0x10 # HYPER POTION, Pryce's own entry on the real cartridge.
+	entries[4]["base_reward"] = 42
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_attributes(data, entries)
+
+	var pryce: Dictionary = RomImporter.read_trainer_attributes(_rom(data), _layout, 5)
+	assert_eq(int(pryce["item1"]), 0x10)
+	assert_eq(int(pryce["base_reward"]), 42)
+
+	var falkner: Dictionary = RomImporter.read_trainer_attributes(_rom(data), _layout, 1)
+	assert_eq(int(falkner["ai_move_weights"]), RomImporter.TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS)
+
+
 ## A battle sheet at every offset the layout claims: two bars that count up, and
 ## two HUD borders whose tiles all differ.
 func _battle_dump() -> PackedByteArray:

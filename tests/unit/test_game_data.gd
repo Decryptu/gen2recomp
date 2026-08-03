@@ -41,6 +41,11 @@ func _write_cache(complete: bool = true) -> void:
 	RomCache.write_json(RomCache.trainers_path(_directory), [
 		{
 			"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678],
+			"attributes": {
+				"item1": 0, "item2": 0, "base_reward": 25,
+				"ai_move_weights": RomLayout.AI_BASIC | RomLayout.AI_STATUS,
+				"ai_item_switch": RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES,
+			},
 			"trainers": [
 				{
 					"name": "FALKNER", "type": RomLayout.TRAINER_MON_NORMAL,
@@ -306,6 +311,18 @@ func test_a_trainer_classs_own_trainers_are_counted_and_read_back() -> void:
 	assert_eq((falkner["party"] as Array).size(), 2)
 	assert_eq(int(falkner["party"][1]["level"]), 9, "JSON's one number type, coerced back")
 	assert_eq(int(falkner["party"][1]["species"]), 2)
+
+
+func test_a_trainer_classs_own_attributes_read_back_as_ints() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var attributes: Dictionary = data.trainer_attributes(1)
+	assert_eq(int(attributes["base_reward"]), 25, "JSON's one number type, coerced back")
+	assert_eq(int(attributes["ai_move_weights"]), RomLayout.AI_BASIC | RomLayout.AI_STATUS)
+	assert_eq(
+		int(attributes["ai_item_switch"]), RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES
+	)
+	assert_true(data.trainer_attributes(0).is_empty(), "class 0 is the player, who has no entry")
 
 
 func test_a_stored_moves_trainers_item_and_moves_read_back_as_ints() -> void:

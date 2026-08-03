@@ -46,6 +46,31 @@ const CONDITION_NAMES: Dictionary = {
 	RomLayout.ATTACK_EQUALS_DEFENSE: "attack equals defense",
 }
 
+## Which of a move's scoring routines a class's AI move weight word turns on.
+const AI_MOVE_FLAG_NAMES: Dictionary = {
+	RomLayout.AI_BASIC: "basic",
+	RomLayout.AI_SETUP: "setup",
+	RomLayout.AI_TYPES: "types",
+	RomLayout.AI_OFFENSIVE: "offensive",
+	RomLayout.AI_SMART: "smart",
+	RomLayout.AI_OPPORTUNIST: "opportunist",
+	RomLayout.AI_AGGRESSIVE: "aggressive",
+	RomLayout.AI_CAUTIOUS: "cautious",
+	RomLayout.AI_STATUS: "status",
+	RomLayout.AI_RISKY: "risky",
+}
+
+## How a class's item/switch word decides what its trainers do with a held item
+## and when they switch out.
+const AI_SWITCH_FLAG_NAMES: Dictionary = {
+	RomLayout.SWITCH_OFTEN: "switch often",
+	RomLayout.SWITCH_RARELY: "switch rarely",
+	RomLayout.SWITCH_SOMETIMES: "switch sometimes",
+	RomLayout.ALWAYS_USE: "always use item",
+	RomLayout.UNKNOWN_USE: "unknown use",
+	RomLayout.CONTEXT_USE: "context use",
+}
+
 ## How a multiplier is drawn in the matchup grid. Symbols rather than numbers so
 ## that a column stays narrow enough for all seventeen types to fit on a line,
 ## and so that a wrong chart looks wrong at a glance instead of having to be read.
@@ -173,6 +198,7 @@ func _dump_trainers(directory: String, rows: Array) -> void:
 	print("\ntrainers (%d classes)" % rows.size())
 	for row: Dictionary in rows:
 		print("  %s" % _describe("trainers", row))
+		print("    %s" % _describe_ai(row.get("attributes", {}), items))
 		var trainers: Array = row.get("trainers", [])
 		total += trainers.size()
 		for trainer: Dictionary in trainers:
@@ -182,6 +208,44 @@ func _dump_trainers(directory: String, rows: Array) -> void:
 			print("    %-13s %s" % [String(trainer["name"]), "; ".join(parts)])
 
 	print("  %d trainers" % total)
+
+
+## A class's AI: which scoring routines run, how it treats a held item and when
+## it switches, and the reward it pays out. Reading this against
+## `data/trainers/attributes.asm` is the check the runtime one cannot be: the
+## flag words are in range whatever a wrong offset does, but a line that reads
+## Falkner as basic, setup, smart, aggressive, cautious, status, risky is right
+## and one that does not is not.
+func _describe_ai(attributes: Dictionary, items: Array) -> String:
+	if attributes.is_empty():
+		return "AI: none"
+
+	var move_flags: String = _describe_flags(
+		int(attributes.get("ai_move_weights", 0)), AI_MOVE_FLAG_NAMES
+	)
+	var switch_flags: String = _describe_flags(
+		int(attributes.get("ai_item_switch", 0)), AI_SWITCH_FLAG_NAMES
+	)
+	var held: PackedStringArray = []
+	for key: String in ["item1", "item2"]:
+		var item: int = int(attributes.get(key, 0))
+		if item != 0:
+			held.append(_name_at(items, item))
+
+	var line: String = "AI: %s | %s | reward %d" % [
+		move_flags, switch_flags, int(attributes.get("base_reward", 0)),
+	]
+	if not held.is_empty():
+		line += " | may use %s" % ", ".join(held)
+	return line
+
+
+func _describe_flags(value: int, names: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	for flag: int in names:
+		if value & flag:
+			parts.append(String(names[flag]))
+	return ", ".join(parts) if not parts.is_empty() else "none"
 
 
 func _describe_trainer_mon(mon: Dictionary, species: Array, moves: Array, items: Array) -> String:
