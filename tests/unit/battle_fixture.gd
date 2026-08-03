@@ -66,8 +66,27 @@ const HAZE: int = 256
 const BELLY_DRUM: int = 257
 const PSYCH_UP: int = 258
 
+## Multi-hit, in the two counting shapes: a random 2-5 and a fixed 2, plus the
+## fixed 2 with a poison chance behind both hits, the way Twineedle does it.
+const MULTI_HIT_MOVE: int = 259
+const DOUBLE_HIT_MOVE: int = 260
+const TWINEEDLE_MOVE: int = 261
+
+## Drain, in the two shapes: an ordinary attack that heals, and one gated on
+## the target being asleep.
+const DRAIN_MOVE: int = 262
+const DREAM_EATER_MOVE: int = 263
+
+## The four fixed-damage effects sharing one command.
+const LEVEL_DAMAGE_MOVE: int = 264
+const STATIC_DAMAGE_MOVE: int = 265
+const SUPER_FANG_MOVE: int = 266
+const PSYWAVE_MOVE: int = 267
+
+const OHKO_MOVE: int = 268
+
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = PSYCH_UP
+const MAX_MOVE: int = OHKO_MOVE
 
 const NORMAL: int = 0x00
 const GROUND: int = 0x04
@@ -197,6 +216,18 @@ static func _moves() -> Array:
 		HAZE: ["HAZE", 0, NORMAL, 255, 30, Gen2MoveEffect.HAZE, 0],
 		BELLY_DRUM: ["BELLY DRUM", 0, NORMAL, 255, 10, Gen2MoveEffect.BELLY_DRUM, 0],
 		PSYCH_UP: ["PSYCH UP", 0, NORMAL, 255, 10, Gen2MoveEffect.PSYCH_UP, 0],
+		MULTI_HIT_MOVE: ["COMET PUNCH", 18, NORMAL, 255, 15, Gen2MoveEffect.MULTI_HIT, 0],
+		DOUBLE_HIT_MOVE: ["DOUBLE KICK", 30, NORMAL, 255, 30, Gen2MoveEffect.DOUBLE_HIT, 0],
+		# A chance of 256 never fails, which is how a test gets Twineedle's poison
+		# without a seed, the same trick EMBER_BURNS uses for a status.
+		TWINEEDLE_MOVE: ["TWINEEDLE", 25, POISON, 255, 20, Gen2MoveEffect.TWINEEDLE, 256],
+		DRAIN_MOVE: ["ABSORB", 20, GRASS, 255, 20, Gen2MoveEffect.LEECH_HIT, 0],
+		DREAM_EATER_MOVE: ["DREAM EATER", 100, PSYCHIC_TYPE, 255, 15, Gen2MoveEffect.DREAM_EATER, 0],
+		LEVEL_DAMAGE_MOVE: ["SEISMIC TOSS", 1, NORMAL, 255, 20, Gen2MoveEffect.LEVEL_DAMAGE, 0],
+		STATIC_DAMAGE_MOVE: ["SONICBOOM", 20, NORMAL, 255, 20, Gen2MoveEffect.STATIC_DAMAGE, 0],
+		SUPER_FANG_MOVE: ["SUPER FANG", 1, NORMAL, 255, 10, Gen2MoveEffect.SUPER_FANG, 0],
+		PSYWAVE_MOVE: ["PSYWAVE", 1, PSYCHIC_TYPE, 255, 15, Gen2MoveEffect.PSYWAVE, 0],
+		OHKO_MOVE: ["GUILLOTINE", 0, NORMAL, 76, 5, Gen2MoveEffect.OHKO, 0],
 	}
 
 	var out: Array = []

@@ -204,6 +204,19 @@ static func confusion_damage(mon: Gen2BattleMon, rng: RandomNumberGenerator) -> 
 	return apply_variation(damage, roll_variation(rng))
 
 
+## Psywave: a random amount from one up to, but not including, one and a half
+## times the user's own level, the halving floored first. The cartridge draws
+## this by rerolling a byte until it lands inside that range rather than
+## clamping into it, which is a uniform pick over the same range and not a
+## detail worth reproducing bit for bit; a level of 1 has no such range at all
+## on the real hardware and would spin forever, which this reads as a minimum
+## of one rather than replicate.
+static func psywave_damage(level: int, rng: RandomNumberGenerator) -> int:
+	@warning_ignore("integer_division")
+	var upper: int = level / 2 + level
+	return rng.randi_range(1, maxi(upper - 1, 1))
+
+
 ## Whether a move is worked out from Attack or from Special Attack.
 ##
 ## Generation 2 splits by the move's type and not by the move: every type below

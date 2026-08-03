@@ -33,6 +33,17 @@ const NO_EFFECT: StringName = &"no_effect"
 const HIT: StringName = &"hit"
 const RECOIL: StringName = &"recoil"
 const FAINTED: StringName = &"fainted"
+## A multi-hit move's own summary, once every planned hit has landed. Not
+## shown at all if the target faints partway through: the cartridge's own
+## loop jumps straight to ending the move on a faint, before it ever reaches
+## the line that would have said how many times it hit.
+const HIT_TIMES: StringName = &"hit_times"
+## A draining move healed the attacker off what it dealt.
+const DRAINED: StringName = &"drained"
+## A one-hit KO landed. Its own event rather than a flag on [constant HIT]:
+## the cartridge shows neither a critical hit nor an effectiveness line for
+## one, since the damage was never actually multiplied by either.
+const OHKO: StringName = &"ohko"
 ## A status stopped a Pokémon moving. [code]reason[/code] says which one, since
 ## the six read differently and not all of them are a surprise: [code]&"sleep"[/code],
 ## [code]&"freeze"[/code], [code]&"paralysis"[/code], [code]&"flinch"[/code],
