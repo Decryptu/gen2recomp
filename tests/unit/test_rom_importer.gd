@@ -475,3 +475,206 @@ func test_a_chart_with_no_terminator_fails_rather_than_running_away() -> void:
 	for i: int in RomLayout.MAX_MATCHUPS * RomLayout.MATCHUP_ENTRY_SIZE:
 		data[int(_layout["type_matchups"]) + i] = RomLayout.TYPE_NORMAL
 	assert_false(RomImporter.verify_matchups(_rom(data), _layout)["ok"])
+
+
+## A plausible evolution and learnset table: 251 entries laid out one after
+## another behind their pointer table, in the same bank the pointers can reach.
+##
+## The contents are the ones the check knows independently, plus filler that is
+## valid and says nothing. Only the first species, Tyrogue and the last are real.
+func _evos_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, _evos_entries())
+	return data
+
+
+func _evos_entries() -> Array:
+	var out: Array = []
+	for _species: int in RomLayout.SPECIES_COUNT:
+		out.append({"evolutions": [], "learnset": [[1, 33]]})
+
+	out[0]["evolutions"] = [[RomLayout.EVOLVE_LEVEL, RomImporter.FIRST_EVOLUTION_LEVEL, 0, 2]]
+	out[0]["learnset"] = [[1, RomImporter.FIRST_LEARNSET_MOVE], [7, 45]]
+
+	out[RomImporter.STAT_EVOLUTION_SPECIES - 1]["evolutions"] = [
+		[RomLayout.EVOLVE_STAT, 20, RomLayout.ATTACK_OVER_DEFENSE, 106],
+		[RomLayout.EVOLVE_STAT, 20, RomLayout.ATTACK_UNDER_DEFENSE, 107],
+		[RomLayout.EVOLVE_STAT, 20, RomLayout.ATTACK_EQUALS_DEFENSE, 237],
+	]
+
+	# Enough ordinary evolutions elsewhere to reach the total the check knows,
+	# kept well clear of the three species that are checked by name.
+	var filler: int = RomLayout.EVOLUTION_COUNT - 1 - RomImporter.STAT_EVOLUTION_COUNT
+	for species: int in range(2, 2 + filler):
+		out[species - 1]["evolutions"] = [[RomLayout.EVOLVE_LEVEL, 20, 0, species + 1]]
+
+	return out
+
+
+func _write_evos(data: PackedByteArray, entries: Array) -> void:
+	var table: int = int(_layout["evos_attacks"])
+	var at: int = table + RomLayout.SPECIES_COUNT * RomLayout.EVOS_ATTACKS_POINTER_SIZE
+
+	for species: int in RomLayout.SPECIES_COUNT:
+		# A two-byte pointer carries an address and no bank, so it is written the
+		# way the cartridge writes one: an offset into the bank it is already in.
+		var address: int = RomFile.BANK_SIZE + (at % RomFile.BANK_SIZE)
+		var pointer: int = table + species * RomLayout.EVOS_ATTACKS_POINTER_SIZE
+		data[pointer] = address & 0xFF
+		data[pointer + 1] = address >> 8
+
+		var entry: Dictionary = entries[species]
+		for evolution: Array in entry["evolutions"]:
+			var size: int = RomLayout.evolution_size(int(evolution[0]))
+			data[at] = evolution[0]
+			data[at + 1] = evolution[1]
+			if int(evolution[0]) == RomLayout.EVOLVE_STAT:
+				data[at + 2] = evolution[2]
+			data[at + size - 1] = evolution[3]
+			at += size
+		data[at] = RomLayout.EVOS_ATTACKS_END
+		at += 1
+
+		for move: Array in entry["learnset"]:
+			data[at] = move[0]
+			data[at + 1] = move[1]
+			at += 2
+		data[at] = RomLayout.EVOS_ATTACKS_END
+		at += 1
+
+
+func test_a_plausible_evolution_and_learnset_table_verifies() -> void:
+	var result: Dictionary = RomImporter.verify_evos_attacks(_rom(_evos_dump()), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+func test_an_entry_reads_back_as_its_two_halves() -> void:
+	var entry: Dictionary = RomImporter.read_evos_attacks(_rom(_evos_dump()), _layout, 1)
+	assert_eq((entry["evolutions"] as Array).size(), 1)
+	assert_eq(int(entry["evolutions"][0]["target"]), 2)
+	assert_eq(int(entry["evolutions"][0]["parameter"]), RomImporter.FIRST_EVOLUTION_LEVEL)
+	assert_eq((entry["learnset"] as Array).size(), 2)
+	assert_eq(int(entry["learnset"][0]["move"]), RomImporter.FIRST_LEARNSET_MOVE)
+
+
+func test_the_four_byte_method_keeps_the_walk_in_step() -> void:
+	# The failure this check exists for. Every evolution is three bytes except the
+	# stat one, so a decoder that assumes three reads Tyrogue's second and third
+	# entries out of the middle of the first and comes out somewhere else entirely.
+	var entry: Dictionary = RomImporter.read_evos_attacks(
+		_rom(_evos_dump()), _layout, RomImporter.STAT_EVOLUTION_SPECIES
+	)
+	var evolutions: Array = entry["evolutions"]
+	assert_eq(evolutions.size(), RomImporter.STAT_EVOLUTION_COUNT)
+	assert_eq(int(evolutions[0]["condition"]), RomLayout.ATTACK_OVER_DEFENSE)
+	assert_eq(int(evolutions[2]["target"]), 237)
+	assert_eq(int(entry["learnset"][0]["level"]), 1, "the moves still start where they should")
+
+
+func test_a_pointer_table_one_byte_out_fails() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, _evos_entries())
+	# Slide every pointer by a byte, which is what a wrong offset looks like: the
+	# addresses stay inside the bank and point at nothing in particular.
+	var table: int = int(_layout["evos_attacks"])
+	for species: int in RomLayout.SPECIES_COUNT:
+		var at: int = table + species * RomLayout.EVOS_ATTACKS_POINTER_SIZE
+		data[at] = (data[at] + 1) & 0xFF
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+func test_an_entry_pointer_outside_the_banked_window_fails() -> void:
+	var data: PackedByteArray = _evos_dump()
+	data[int(_layout["evos_attacks"]) + 1] = 0x20
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+func test_a_byte_that_is_not_an_evolution_method_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["evolutions"] = [[0x42, 20, 0, 11]]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+func test_an_evolution_into_a_species_that_does_not_exist_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["evolutions"] = [[RomLayout.EVOLVE_LEVEL, 20, 0, 255]]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	var result: Dictionary = RomImporter.verify_evos_attacks(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "does not exist")
+
+
+func test_a_happiness_evolution_with_no_such_trigger_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["evolutions"] = [[RomLayout.EVOLVE_HAPPINESS, 9, 0, 11]]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+func test_a_move_learned_above_the_level_cap_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["learnset"] = [[1, 33], [200, 45]]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	var result: Dictionary = RomImporter.verify_evos_attacks(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "level 200")
+
+
+func test_a_species_that_learns_nothing_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["learnset"] = []
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+func test_levels_out_of_order_fail_everywhere_but_the_one_species() -> void:
+	# Muk's list really is out of order in all three cartridges, so the check has
+	# to let that one through and nothing else. Both halves are tested here,
+	# because an exception nobody has seen close is a hole.
+	var entries: Array = _evos_entries()
+	var scrambled: Array = [[1, 33], [40, 45], [20, 46]]
+
+	entries[RomLayout.UNSORTED_LEARNSET_SPECIES - 1]["learnset"] = scrambled
+	var allowed: PackedByteArray = PackedByteArray()
+	allowed.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(allowed, entries)
+	assert_true(RomImporter.verify_evos_attacks(_rom(allowed), _layout)["ok"])
+
+	entries[9]["learnset"] = scrambled
+	var refused: PackedByteArray = PackedByteArray()
+	refused.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(refused, entries)
+	assert_false(RomImporter.verify_evos_attacks(_rom(refused), _layout)["ok"])
+
+
+func test_a_table_with_the_wrong_number_of_evolutions_fails() -> void:
+	var entries: Array = _evos_entries()
+	entries[9]["evolutions"] = []
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_evos(data, entries)
+	var result: Dictionary = RomImporter.verify_evos_attacks(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "evolutions")
+
+
+func test_a_learnset_with_no_terminator_fails_rather_than_running_away() -> void:
+	var data: PackedByteArray = _evos_dump()
+	var at: int = int(_layout["evos_attacks"]) \
+		+ RomLayout.SPECIES_COUNT * RomLayout.EVOS_ATTACKS_POINTER_SIZE
+	for i: int in RomLayout.MAX_LEVEL_UP_MOVES * 2 + 8:
+		data[at + i] = 1
+	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])

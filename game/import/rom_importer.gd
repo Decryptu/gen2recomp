@@ -26,6 +26,21 @@ const TRAINER_FIRST_CLASS: String = "LEADER"
 const TRAINER_MIDDLE_CLASS: int = 22
 const TRAINER_MIDDLE_CLASS_NAME: String = "YOUNGSTER"
 
+## What the evolution and learnset table is known to say, independently of the
+## cartridge. The first species evolves at sixteen into the second and opens with
+## Tackle at level one; the last has no evolution at all. One at each end of the
+## pointer table, so a start that is right and a stride that is not fails too.
+const FIRST_EVOLUTION_LEVEL: int = 16
+const FIRST_LEARNSET_MOVE: int = 33
+
+## Tyrogue, the only species that evolves on a stat comparison, and the number of
+## ways it can go. It is worth checking on its own: [constant RomLayout.EVOLVE_STAT]
+## is the one entry that is four bytes rather than three, so a decoder that has
+## the size wrong stays in step everywhere except here and comes out the far side
+## of Tyrogue reading rubbish.
+const STAT_EVOLUTION_SPECIES: int = 236
+const STAT_EVOLUTION_COUNT: int = 3
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -144,6 +159,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var matchups: Dictionary = verify_matchups(rom, layout)
 	if not matchups["ok"]:
 		return matchups
+
+	var evos_attacks: Dictionary = verify_evos_attacks(rom, layout)
+	if not evos_attacks["ok"]:
+		return evos_attacks
 
 	var font: Dictionary = verify_font(rom, layout)
 	if not font["ok"]:
@@ -274,6 +293,233 @@ static func verify_matchups(rom: RomFile, layout: Dictionary) -> Dictionary:
 				"ok": false,
 				"message": "Type matchups: %s is $%02X against $%02X at x%d/10." % [
 					check[4], int(row["attacker"]), int(row["defender"]), int(row["multiplier"]),
+				],
+			}
+
+	return {"ok": true, "message": ""}
+
+
+## Walks one species' entry in the combined evolution and level-up move table.
+##
+## Returns { evolutions, learnset }, or an empty Dictionary if the walk did not
+## find both terminators where a well-formed entry has them. An evolution is
+## { method, parameter, condition, target } and a level-up move is
+## { level, move }; [code]condition[/code] is zero for every method except
+## [constant RomLayout.EVOLVE_STAT], which is the only one that asks two
+## questions.
+##
+## Level-up moves are kept in the cartridge's order rather than sorted. The order
+## is what decides which move a fresh Pokémon ends up with when more than four are
+## on offer, and one species is genuinely out of order; see
+## [constant RomLayout.UNSORTED_LEARNSET_SPECIES].
+static func read_evos_attacks(rom: RomFile, layout: Dictionary, species: int) -> Dictionary:
+	var table: int = RomLayout.evos_attacks_pointer_offset(layout, species)
+	if not rom.in_bounds(table, RomLayout.EVOS_ATTACKS_POINTER_SIZE):
+		return {}
+
+	# The pointer is an address with no bank, so it has to be one the switchable
+	# window can hold: the entry is in the pointer table's own bank.
+	var address: int = rom.u16le(table)
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return {}
+	var at: int = RomFile.linear(RomLayout.bank_of(table), address)
+
+	var evolutions: Array = []
+	while rom.in_bounds(at) and rom.u8(at) != RomLayout.EVOS_ATTACKS_END:
+		if evolutions.size() >= RomLayout.MAX_EVOLUTIONS:
+			return {}
+		var method: int = rom.u8(at)
+		if not RomLayout.EVOLVE_METHODS.has(method):
+			return {}
+		var size: int = RomLayout.evolution_size(method)
+		if not rom.in_bounds(at, size):
+			return {}
+		# The target is always last, which is what makes the four-byte method fit
+		# the same shape as the three-byte ones.
+		evolutions.append({
+			"method": method,
+			"parameter": rom.u8(at + 1),
+			"condition": rom.u8(at + 2) if method == RomLayout.EVOLVE_STAT else 0,
+			"target": rom.u8(at + size - 1),
+		})
+		at += size
+
+	if not rom.in_bounds(at):
+		return {}
+	at += 1
+
+	var learnset: Array = []
+	while rom.in_bounds(at) and rom.u8(at) != RomLayout.EVOS_ATTACKS_END:
+		if learnset.size() >= RomLayout.MAX_LEVEL_UP_MOVES or not rom.in_bounds(at, 2):
+			return {}
+		learnset.append({"level": rom.u8(at), "move": rom.u8(at + 1)})
+		at += 2
+
+	if not rom.in_bounds(at):
+		return {}
+	return {"evolutions": evolutions, "learnset": learnset}
+
+
+## The evolution and learnset table, checked species by species.
+##
+## Nothing in it says which species an entry belongs to, so what is checked is
+## the shape: 251 pointers into the banked window, each naming a run of
+## evolutions whose methods come from a set of five and whose targets are real
+## species, then a run of level-up moves at real levels teaching real moves. A
+## wrong pointer fails on the first byte it reads, because most byte values are
+## not an evolution method and not a terminator.
+##
+## On top of that, the levels ascend in all but one species, the totals are known,
+## and both ends of the table are content whose answer is known independently.
+static func verify_evos_attacks(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entries: Array = []
+	var evolutions: int = 0
+
+	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		var entry: Dictionary = read_evos_attacks(rom, layout, species)
+		if entry.is_empty():
+			return {
+				"ok": false,
+				"message": "Species %d has no readable evolution and learnset entry." % species,
+			}
+
+		for evolution: Dictionary in entry["evolutions"]:
+			var check: Dictionary = _evolution_check(species, evolution)
+			if not check["ok"]:
+				return check
+		evolutions += (entry["evolutions"] as Array).size()
+
+		var learnset: Array = entry["learnset"]
+		# Every species learns something by levelling, even the ones that learn it
+		# all at level one, so an empty run means the walk is not on the table.
+		if learnset.is_empty():
+			return {"ok": false, "message": "Species %d learns no moves at all." % species}
+
+		var previous: int = 0
+		for move: Dictionary in learnset:
+			var level: int = int(move["level"])
+			var number: int = int(move["move"])
+			if level < 1 or level > RomLayout.MAX_LEVEL:
+				return {
+					"ok": false,
+					"message": "Species %d learns a move at level %d." % [species, level],
+				}
+			if number < 1 or number > RomLayout.MOVE_COUNT:
+				return {
+					"ok": false,
+					"message": "Species %d learns move %d, which does not exist." % [
+						species, number,
+					],
+				}
+			if level < previous and species != RomLayout.UNSORTED_LEARNSET_SPECIES:
+				return {
+					"ok": false,
+					"message": "Species %d learns at level %d after level %d." % [
+						species, level, previous,
+					],
+				}
+			previous = level
+
+		entries.append(entry)
+
+	if evolutions != RomLayout.EVOLUTION_COUNT:
+		return {
+			"ok": false,
+			"message": "Read %d evolutions, expected %d." % [
+				evolutions, RomLayout.EVOLUTION_COUNT,
+			],
+		}
+
+	return _verify_known_evos_attacks(entries)
+
+
+## One evolution entry, checked against what its method is allowed to say.
+static func _evolution_check(species: int, evolution: Dictionary) -> Dictionary:
+	var method: int = int(evolution["method"])
+	var parameter: int = int(evolution["parameter"])
+	var target: int = int(evolution["target"])
+
+	if target < 1 or target > RomLayout.SPECIES_COUNT:
+		return {
+			"ok": false,
+			"message": "Species %d evolves into %d, which does not exist." % [species, target],
+		}
+
+	match method:
+		RomLayout.EVOLVE_LEVEL, RomLayout.EVOLVE_STAT:
+			if parameter < 1 or parameter > RomLayout.MAX_LEVEL:
+				return {
+					"ok": false,
+					"message": "Species %d evolves at level %d." % [species, parameter],
+				}
+		RomLayout.EVOLVE_HAPPINESS:
+			if parameter < RomLayout.TRIGGER_ANYTIME or parameter > RomLayout.TRIGGER_NITE:
+				return {
+					"ok": false,
+					"message": "Species %d evolves on happiness trigger %d." % [species, parameter],
+				}
+
+	if method == RomLayout.EVOLVE_STAT:
+		var condition: int = int(evolution["condition"])
+		if condition < RomLayout.ATTACK_OVER_DEFENSE \
+			or condition > RomLayout.ATTACK_EQUALS_DEFENSE:
+			return {
+				"ok": false,
+				"message": "Species %d evolves on stat comparison %d." % [species, condition],
+			}
+
+	return {"ok": true, "message": ""}
+
+
+## The three entries whose contents are known independently of the cartridge.
+static func _verify_known_evos_attacks(entries: Array) -> Dictionary:
+	var first: Dictionary = entries[0]
+	var first_evolutions: Array = first["evolutions"]
+	if first_evolutions.size() != 1 \
+		or int(first_evolutions[0]["method"]) != RomLayout.EVOLVE_LEVEL \
+		or int(first_evolutions[0]["parameter"]) != FIRST_EVOLUTION_LEVEL \
+		or int(first_evolutions[0]["target"]) != 2:
+		return {
+			"ok": false,
+			"message": "Species 1 should evolve into species 2 at level %d." % FIRST_EVOLUTION_LEVEL,
+		}
+
+	var first_learnset: Array = first["learnset"]
+	if int(first_learnset[0]["level"]) != 1 \
+		or int(first_learnset[0]["move"]) != FIRST_LEARNSET_MOVE:
+		return {
+			"ok": false,
+			"message": "Species 1 should open with move %d at level 1, not move %d at level %d." % [
+				FIRST_LEARNSET_MOVE, int(first_learnset[0]["move"]),
+				int(first_learnset[0]["level"]),
+			],
+		}
+
+	# The last species is the far end of the pointer table, and it is one of the
+	# ones that never evolves.
+	var last_evolutions: Array = entries[RomLayout.SPECIES_COUNT - 1]["evolutions"]
+	if not last_evolutions.is_empty():
+		return {
+			"ok": false,
+			"message": "Species %d should not evolve, and has %d evolutions." % [
+				RomLayout.SPECIES_COUNT, last_evolutions.size(),
+			],
+		}
+
+	var stat_evolutions: Array = entries[STAT_EVOLUTION_SPECIES - 1]["evolutions"]
+	if stat_evolutions.size() != STAT_EVOLUTION_COUNT:
+		return {
+			"ok": false,
+			"message": "Species %d should have %d evolutions, and has %d." % [
+				STAT_EVOLUTION_SPECIES, STAT_EVOLUTION_COUNT, stat_evolutions.size(),
+			],
+		}
+	for evolution: Dictionary in stat_evolutions:
+		if int(evolution["method"]) != RomLayout.EVOLVE_STAT:
+			return {
+				"ok": false,
+				"message": "Species %d should evolve on a stat comparison, and uses method %d." % [
+					STAT_EVOLUTION_SPECIES, int(evolution["method"]),
 				],
 			}
 
@@ -638,6 +884,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"types": 0,
 		"matchups": 0,
 		"trainers": 0,
+		"evolutions": 0,
+		"learnset_moves": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -695,11 +943,16 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not write trainer data."
 		return result
 
+	var evolutions: int = _count_in(species, "evolutions")
+	var learnset_moves: int = _count_in(species, "learnset")
+
 	var manifest: Dictionary = {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": String(rom.id),
 		"sha1": rom.sha1,
 		"species_count": species.size(),
+		"evolution_count": evolutions,
+		"learnset_move_count": learnset_moves,
 		"move_count": moves.size(),
 		"item_count": items.size(),
 		"type_count": types.size(),
@@ -721,13 +974,23 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["types"] = types.size()
 	result["matchups"] = matchups.size()
 	result["trainers"] = trainers.size()
+	result["evolutions"] = evolutions
+	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
-	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups and "
-		+ "%d trainer classes in %d ms.") % [
+	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
+		+ "%d trainer classes, %d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
-		result["elapsed_ms"],
+		evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result
+
+
+## Rows of one list across every species, for the manifest's counts.
+static func _count_in(species: Array, key: String) -> int:
+	var out: int = 0
+	for entry: Dictionary in species:
+		out += (entry[key] as Array).size()
+	return out
 
 
 func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
@@ -739,6 +1002,7 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 		var dimensions: int = rom.u8(stats + RomLayout.OFFSET_PIC_SIZE)
 		var egg_groups: int = rom.u8(stats + RomLayout.OFFSET_EGG_GROUPS)
 		var palette: int = RomLayout.palette_offset(layout, species)
+		var evos_attacks: Dictionary = read_evos_attacks(rom, layout, species)
 
 		out.append({
 			"number": species,
@@ -768,6 +1032,10 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 			"growth_rate": rom.u8(stats + RomLayout.OFFSET_GROWTH_RATE),
 			"egg_groups": [egg_groups >> 4, egg_groups & 0x0F],
 			"tmhm": Array(rom.slice(stats + RomLayout.OFFSET_TMHM, RomLayout.TMHM_BYTES)),
+			# Both halves of one table, which is why they arrive together and are
+			# stored on the species rather than in tables of their own.
+			"evolutions": evos_attacks.get("evolutions", []),
+			"learnset": evos_attacks.get("learnset", []),
 			"front_tiles": [dimensions & 0x0F, dimensions >> 4],
 			"palette": {
 				"normal": [rom.u16le(palette), rom.u16le(palette + 2)],

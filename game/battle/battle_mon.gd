@@ -13,8 +13,9 @@ extends RefCounted
 ## in a battle does. Stages are applied on the way out instead, to the unmodified
 ## stat every time, which is why they are stored separately rather than folded in.
 
-## What a Pokémon can carry into a battle.
-const MAX_MOVES: int = 4
+## What a Pokémon can carry into a battle, which is the same four slots
+## [Gen2Learnset] fills.
+const MAX_MOVES: int = Gen2Learnset.MOVE_SLOTS
 
 ## The stats a stage can be applied to, in the order the cartridge keeps them.
 const STAGED_STATS: Array = ["attack", "defense", "speed", "sp_attack", "sp_defense"]

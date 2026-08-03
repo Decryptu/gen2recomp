@@ -62,6 +62,22 @@ the engine uses to see cartridge content: nothing above it opens a ROM, and
 nothing in it knows what a ROM is. It is also where JSON's single number type is
 coerced back to int, once, rather than at every call site.
 
+`game/data/learnset.gd` sits beside it and is the one rule that lives in this
+layer rather than in the engine: what a Pokémon knows at a level. It is here
+because a Pokémon is made outside a battle as well as inside one. It answers two
+questions that are not each other's shortcut, because the cartridge asks them
+with two different routines:
+
+- **Filling a new Pokémon** walks the list from the start and stops at the first
+  move above the level being filled for.
+- **Levelling up** reads the whole list and takes the entries at exactly the
+  level just reached.
+
+Those give different answers for Muk, whose list is not in ascending order in any
+of the three games. A Muk caught in the wild at 40 is genuinely missing three
+moves that a Muk raised to 40 has, and that is the cartridge's behaviour rather
+than an approximation of it.
+
 The drawing layer is deliberately thin:
 
 | | |
@@ -191,6 +207,15 @@ So every offset ships with a check that would fail if it were wrong, and
   since the table is the player plus every class and something that is not a
   palette has to follow it; and the pic pointers have to address the banked
   window and decompress into a pic of the one size every trainer is drawn at.
+- Evolutions and level-up moves are one table read through a table of two-byte
+  pointers, and neither half says which species it belongs to, so what is
+  checked is the shape: every pointer has to address the banked window, every
+  evolution has to open with one of five methods and name a real species, and
+  every level-up entry has to be a level from 1 to 100 teaching a real move. Most
+  byte values are none of those, so a wrong pointer fails on its first byte. On
+  top of that the levels ascend everywhere but Muk, whose list the cartridges
+  themselves have out of order, and the total number of evolutions is the same
+  known figure in all three games.
 - The eight text box borders have no content to check, so they are checked by
   the shape a border has to have: inset from the top of its tile row, corners
   that carry the pattern of the side they hang from, and no two frames the
@@ -252,6 +277,12 @@ A name table that has slid by a byte still decodes into words, so reading the
 output is the check. Cross-check a handful of moves against published power,
 accuracy and PP while you are there; the runtime checks pin the ends of a
 table, not what is between them.
+
+`learnsets` and `evolutions` are the same idea for the one table whose runtime
+check can only prove the shape. Every level and every move number stays in range
+whatever a wrong pointer does, so what settles it is reading Bulbasaur's list
+back and finding Tackle at 1 and Growl at 4, and reading Eevee's five evolutions
+and Tyrogue's three. Both resolve their numbers into names for that reason.
 
 ## Seeing the UI without pressing Play
 

@@ -99,6 +99,71 @@ const MAX_MATCHUPS: int = 256
 const PHYSICAL_TYPES_END: int = 0x09
 const SPECIAL_TYPES_START: int = 0x14
 
+## Evolutions and level-up moves are one table, not two. A species' entry lists
+## its evolutions, then a zero byte, then its level-up moves as level and move
+## pairs, then another zero byte. One pointer answers both questions, which is
+## why the two are decoded in the same pass rather than as separate tables.
+##
+## The pointers are two bytes rather than three: the entries sit in the pointer
+## table's own bank, so there is no bank number to store.
+const EVOS_ATTACKS_POINTER_SIZE: int = 2
+const EVOS_ATTACKS_END: int = 0
+
+## How a species evolves. The byte after the method is a level for
+## [constant EVOLVE_LEVEL] and [constant EVOLVE_STAT], an item for
+## [constant EVOLVE_ITEM], the item that has to be held for
+## [constant EVOLVE_TRADE] ($FF when the trade needs none), and a time of day for
+## [constant EVOLVE_HAPPINESS].
+const EVOLVE_LEVEL: int = 1
+const EVOLVE_ITEM: int = 2
+const EVOLVE_TRADE: int = 3
+const EVOLVE_HAPPINESS: int = 4
+## The one method that takes a second parameter, and the one only Tyrogue uses:
+## a level, and then which way Attack and Defense have to compare.
+const EVOLVE_STAT: int = 5
+
+## Every method the table can name, which is what makes an evolution entry
+## checkable: the byte that opens one is either a method or the terminator.
+const EVOLVE_METHODS: Array = [
+	EVOLVE_LEVEL, EVOLVE_ITEM, EVOLVE_TRADE, EVOLVE_HAPPINESS, EVOLVE_STAT,
+]
+
+## What [constant EVOLVE_HAPPINESS] asks about besides the happiness itself.
+## Golbat evolves at any time, Eevee into Espeon by day and Umbreon by night.
+const TRIGGER_ANYTIME: int = 1
+const TRIGGER_MORNDAY: int = 2
+const TRIGGER_NITE: int = 3
+
+## Which way Attack and Defense have to compare for [constant EVOLVE_STAT].
+const ATTACK_OVER_DEFENSE: int = 1
+const ATTACK_UNDER_DEFENSE: int = 2
+const ATTACK_EQUALS_DEFENSE: int = 3
+
+## The highest level these games count to, and so the highest a level-up move or
+## a level evolution can name.
+const MAX_LEVEL: int = 100
+
+## Runaway guards for the two walks. Five evolutions is the most any species has
+## and fourteen level-up moves is the most, so both are well clear.
+const MAX_EVOLUTIONS: int = 8
+const MAX_LEVEL_UP_MOVES: int = 32
+
+## Every evolution in the table, counted. All three games agree, as they do about
+## the type matchup chart, so this is a constant rather than a layout entry.
+const EVOLUTION_COUNT: int = 122
+
+## Muk, whose level-up moves are not in ascending order. The cartridges ship it
+## that way in all three games, and it is not a decoding artefact: pret's own
+## listing carries a comment saying so.
+##
+## It is worth naming rather than working around, because the order is load
+## bearing. Filling a fresh Pokémon's moves stops at the first entry above the
+## level being filled for, so a Muk below 45 never reaches the three moves listed
+## after the level 45 one and is short of what its level says it should know.
+## Checking the order everywhere else is worth the one exception: scrambled
+## levels are exactly what a wrong offset produces.
+const UNSORTED_LEARNSET_SPECIES: int = 89
+
 ## Unown's entry in the main pic table is a deliberate $FF placeholder: its 26
 ## letter forms live in a table of their own.
 const UNOWN_SPECIES: int = 201
@@ -239,6 +304,7 @@ const GOLD_SILVER: Dictionary = {
 	"move_names": 0x1B1574,
 	"item_names": 0x1B0000,
 	"move_data": 0x41AFE,
+	"evos_attacks": 0x427BD,
 	"type_names": 0x509AE,
 	"type_matchups": 0x34D01,
 	"font": 0xF82F2,
@@ -269,6 +335,7 @@ const CRYSTAL: Dictionary = {
 	"move_names": 0x1C9F29,
 	"item_names": 0x1C8000,
 	"move_data": 0x41AFB,
+	"evos_attacks": 0x425B1,
 	"type_names": 0x5097B,
 	"type_matchups": 0x34BB1,
 	"font": 0xF8200,
@@ -367,6 +434,23 @@ static func trainer_palette_offset(layout: Dictionary, trainer_class: int) -> in
 
 static func move_data_offset(layout: Dictionary, move: int) -> int:
 	return int(layout["move_data"]) + (move - 1) * MOVE_DATA_SIZE
+
+
+## One species' entry in the combined evolution and level-up move table. The
+## pointer is two bytes and the entry it names is in the pointer table's own
+## bank, so [method bank_of] on the table itself resolves it.
+static func evos_attacks_pointer_offset(layout: Dictionary, species: int) -> int:
+	return int(layout["evos_attacks"]) + (species - 1) * EVOS_ATTACKS_POINTER_SIZE
+
+
+## How many bytes one evolution entry occupies. [constant EVOLVE_STAT] carries a
+## second parameter and so is a byte longer than the rest.
+##
+## The cartridge never needs this: it skips the evolutions by reading bytes until
+## it meets the terminator, which works because no byte inside an entry is ever
+## zero. Something that decodes them rather than skipping them does need it.
+static func evolution_size(method: int) -> int:
+	return 4 if method == EVOLVE_STAT else 3
 
 
 ## Type names are reached through a pointer table rather than stored inline,

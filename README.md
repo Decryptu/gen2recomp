@@ -28,12 +28,12 @@ the same thing for Generation 1.
 >
 > The import gate and the first half of the importer exist and are tested: a
 > verified cartridge decodes into species data, moves, items, types, the type
-> chart, palettes, every Pokémon sprite, every trainer pic, the font, the text
-> box borders and the battle HUD. A battle can be fought: stats, damage,
-> accuracy and turn order, on a real 160x144 screen with the bars draining and
-> the messages appearing. There are no parties, no switching, no status
-> conditions and no move effects, and the overworld, audio and the mod loader do
-> not exist. There is nothing playable here today.
+> chart, learnsets, evolutions, palettes, every Pokémon sprite, every trainer
+> pic, the font, the text box borders and the battle HUD. A battle can be
+> fought: stats, damage, accuracy and turn order, on a real 160x144 screen with
+> the bars draining and the messages appearing. There are no parties, no
+> switching, no status conditions and no move effects, and the overworld, audio
+> and the mod loader do not exist. There is nothing playable here today.
 
 ## Getting started
 
@@ -87,6 +87,8 @@ What comes out today:
 | | |
 |---|---|
 | Species | Names, base stats, types, held items, egg groups, TM/HM flags |
+| Learnsets | Every level-up move of all 251 species, in the cartridge's order |
+| Evolutions | Every evolution, and what each one asks for |
 | Moves | Names, power, type, accuracy, PP, effect and its chance |
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
@@ -112,7 +114,7 @@ place of an atlas name, which is how you check that the glyphs are where the
 character codes say they are.
 
 or as text, for any of `species`, `moves`, `items`, `types`, `matchups`,
-`trainers` or `all`:
+`trainers`, `learnsets`, `evolutions` or `all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
@@ -120,6 +122,8 @@ godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 
 `matchups` prints the type chart as a grid rather than as a list, because a grid
 is the shape the published table has and a single wrong cell shows up in it.
+`learnsets` and `evolutions` resolve their numbers into names, so a line reads
+as "level 20, attack over defense -> HITMONLEE" rather than as three bytes.
 
 ## Running
 
@@ -149,8 +153,9 @@ right change which Pokémon are on it, and `S` and `D` take health off the
 player's and the enemy's without a turn, which is the fastest way to see the
 bars change colour.
 
-Both Pokémon know Tackle and nothing else, because learnsets are not decoded
-yet.
+Both Pokémon know what their level says they know, out of the learnset, and both
+use the first of those moves: choosing one is a menu on the player's side and an
+AI on the enemy's, and neither exists yet.
 
 ## Tests
 

@@ -7,11 +7,44 @@ extends SceneTree
 ## The written-down counterpart of the contact sheet: a bad offset in a name
 ## table produces plausible words rather than an error, so the check is to read
 ## the output. <game> is a registry id (gold, silver, crystal); [table] is one of
-## species, moves, items, types, matchups, trainers, or all.
+## species, moves, items, types, matchups, trainers, learnsets, evolutions, or
+## all.
 
 const TABLES: PackedStringArray = [
-	"species", "moves", "items", "types", "matchups", "trainers",
+	"species", "moves", "items", "types", "matchups", "trainers", "learnsets",
+	"evolutions",
 ]
+
+## Which file a table is read out of, where it is not a file of its own.
+## Evolutions and level-up moves are two halves of one cartridge table and are
+## cached on the species, so they are two views of species.json rather than two
+## files.
+const SOURCES: Dictionary = {
+	"learnsets": RomCache.SPECIES,
+	"evolutions": RomCache.SPECIES,
+}
+
+## How an evolution method is written out. The parameter that follows it means
+## something different in each case, which is the point of naming them here.
+const EVOLVE_NAMES: Dictionary = {
+	RomLayout.EVOLVE_LEVEL: "level",
+	RomLayout.EVOLVE_ITEM: "item",
+	RomLayout.EVOLVE_TRADE: "trade",
+	RomLayout.EVOLVE_HAPPINESS: "happiness",
+	RomLayout.EVOLVE_STAT: "level",
+}
+
+const TRIGGER_NAMES: Dictionary = {
+	RomLayout.TRIGGER_ANYTIME: "any time",
+	RomLayout.TRIGGER_MORNDAY: "morning or day",
+	RomLayout.TRIGGER_NITE: "night",
+}
+
+const CONDITION_NAMES: Dictionary = {
+	RomLayout.ATTACK_OVER_DEFENSE: "attack over defense",
+	RomLayout.ATTACK_UNDER_DEFENSE: "attack under defense",
+	RomLayout.ATTACK_EQUALS_DEFENSE: "attack equals defense",
+}
 
 ## How a multiplier is drawn in the matchup grid. Symbols rather than numbers so
 ## that a column stays narrow enough for all seventeen types to fit on a line,
@@ -62,18 +95,115 @@ func _cache_for(id: StringName) -> String:
 
 
 func _dump(directory: String, table: String) -> void:
-	var path: String = "%s/%s.json" % [directory, table]
+	var path: String = "%s/%s" % [directory, SOURCES.get(table, "%s.json" % table)]
 	var rows: Variant = RomCache.read_json(path)
 	if not rows is Array:
 		print("\n%s: missing" % table)
 		return
 
-	print("\n%s (%d)" % [table, (rows as Array).size()])
-	if table == "matchups":
-		_dump_matchups(directory, rows)
-		return
+	match table:
+		"matchups":
+			print("\n%s (%d)" % [table, (rows as Array).size()])
+			_dump_matchups(directory, rows)
+		"learnsets":
+			_dump_learnsets(directory, rows)
+		"evolutions":
+			_dump_evolutions(directory, rows)
+		_:
+			print("\n%s (%d)" % [table, (rows as Array).size()])
+			for row: Dictionary in rows:
+				print("  %s" % _describe(table, row))
+
+
+## Every species' level-up moves, in the cartridge's order rather than sorted.
+##
+## Reading them is the check the runtime one cannot be: the levels and move
+## numbers are in range whatever a wrong offset does, but a learnset that reads
+## Tackle at 1 and Growl at 4 for Bulbasaur is right and one that does not is not.
+## The order is worth reading too, since it decides what a fresh Pokémon knows.
+func _dump_learnsets(directory: String, rows: Array) -> void:
+	var moves: Array = _names_in(RomCache.moves_path(directory))
+	var total: int = 0
+
+	print("\nlearnsets (%d species)" % rows.size())
 	for row: Dictionary in rows:
-		print("  %s" % _describe(table, row))
+		var learnset: Array = row.get("learnset", [])
+		total += learnset.size()
+		var parts: PackedStringArray = []
+		for entry: Dictionary in learnset:
+			parts.append("%d %s" % [int(entry["level"]), _name_at(moves, int(entry["move"]))])
+		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), ", ".join(parts)])
+	print("  %d level-up moves" % total)
+
+
+## Only the species that evolve, which is under half of them. The rest would be
+## 130 lines saying nothing, and what is worth reading here is the shape of an
+## entry: what the parameter means changes with the method.
+func _dump_evolutions(directory: String, rows: Array) -> void:
+	var items: Array = _names_in(RomCache.items_path(directory))
+	var species: Array = _names_in(RomCache.species_path(directory))
+	var total: int = 0
+
+	print("\nevolutions")
+	for row: Dictionary in rows:
+		var evolutions: Array = row.get("evolutions", [])
+		if evolutions.is_empty():
+			continue
+		total += evolutions.size()
+		var parts: PackedStringArray = []
+		for evolution: Dictionary in evolutions:
+			parts.append(_describe_evolution(evolution, items, species))
+		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), "; ".join(parts)])
+	print("  %d evolutions" % total)
+
+
+func _describe_evolution(evolution: Dictionary, items: Array, species: Array) -> String:
+	var method: int = int(evolution["method"])
+	var parameter: int = int(evolution["parameter"])
+	var target: String = _name_at(species, int(evolution["target"]))
+	var how: String = String(EVOLVE_NAMES.get(method, "method %d" % method))
+
+	match method:
+		RomLayout.EVOLVE_ITEM:
+			how += " %s" % _name_at(items, parameter)
+		RomLayout.EVOLVE_TRADE:
+			# $FF is the trades that need nothing held, which is most of them.
+			how += " holding %s" % _name_at(items, parameter) if parameter != 0xFF else ""
+		RomLayout.EVOLVE_HAPPINESS:
+			how += " %s" % String(TRIGGER_NAMES.get(parameter, "trigger %d" % parameter))
+		RomLayout.EVOLVE_STAT:
+			how += " %d, %s" % [
+				parameter,
+				String(CONDITION_NAMES.get(
+					int(evolution["condition"]), "condition %d" % int(evolution["condition"])
+				)),
+			]
+		_:
+			how += " %d" % parameter
+
+	return "%s -> %s" % [how, target]
+
+
+## The name column of a cached table, indexed by the number that names a row, so
+## that a lookup is arithmetic rather than a search.
+func _names_in(path: String) -> Array:
+	var rows: Variant = RomCache.read_json(path)
+	if not rows is Array:
+		return []
+
+	var out: Array = []
+	for row: Dictionary in rows as Array:
+		var number: int = int(row["number"])
+		while out.size() <= number:
+			out.append("")
+		out[number] = String(row["name"])
+	return out
+
+
+func _name_at(names: Array, number: int) -> String:
+	if number < 0 or number >= names.size() or String(names[number]).is_empty():
+		return "#%d" % number
+	return String(names[number])
 
 
 ## The chart as a grid, attacker down the side and defender across the top.

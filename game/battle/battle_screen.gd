@@ -31,12 +31,6 @@ const DEFAULT_ENEMY: int = 16
 const DEFAULT_PLAYER: int = 155
 const DEFAULT_LEVEL: int = 5
 
-## What both Pokémon know, until there are learnsets to ask. Tackle because
-## every early Pokémon has it and because a Normal move against anything gives a
-## plain hit to look at. This is scaffolding: a party's moves come from the
-## learnset and trainer party tables, and neither is decoded yet.
-const PLACEHOLDER_MOVES: Array = [33]
-
 const TILE: int = Gen2Font.TILE
 
 ## The white the hardware fills the battle background with.
@@ -117,8 +111,12 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_pending = []
 	_battle = Gen2Battle.create(
 		_data,
-		Gen2BattleMon.create(_data, _player, _player_level, PLACEHOLDER_MOVES),
-		Gen2BattleMon.create(_data, _enemy, _enemy_level, PLACEHOLDER_MOVES),
+		Gen2BattleMon.create(
+			_data, _player, _player_level, _data.moves_at_level(_player, _player_level)
+		),
+		Gen2BattleMon.create(
+			_data, _enemy, _enemy_level, _data.moves_at_level(_enemy, _enemy_level)
+		),
 		_rng
 	)
 	if _battle == null:
