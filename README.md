@@ -148,14 +148,17 @@ once.
 `game/battle/battle_screen.tscn` is the battle screen itself: two Pokémon, a
 status panel each and a text box, where the hardware puts them, with a real
 battle behind it. `A` takes a turn and space steps through what happened, so the
-bars drain, the messages appear and one of the two eventually faints. Left and
-right change which Pokémon are on it, and `S` and `D` take health off the
-player's and the enemy's without a turn, which is the fastest way to see the
-bars change colour.
+bars drain, the messages appear and one of the two eventually faints, whereupon
+the next one out is sent in. `W` switches, which costs the turn: the other side
+attacks whoever came in. Left and right change which Pokémon are on it, and `S`
+and `D` take health off the player's and the enemy's without a turn, which is
+the fastest way to see the bars change colour.
 
 Both Pokémon know what their level says they know, out of the learnset, and both
 use the first of those moves: choosing one is a menu on the player's side and an
-AI on the enemy's, and neither exists yet.
+AI on the enemy's, and neither exists yet. Each side brings two Pokémon, made up
+by the screen, because a real party comes from a save on one side and from the
+trainer party tables on the other and neither is decoded yet.
 
 ## Tests
 

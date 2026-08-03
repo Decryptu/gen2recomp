@@ -1,7 +1,7 @@
 class_name Gen2Battle
 extends RefCounted
 
-## A battle: two Pokémon, a turn at a time.
+## A battle: two parties, a turn at a time.
 ##
 ## [RefCounted] and scene-free, with its randomness injected, so a whole battle
 ## can be fought inside a test with no display. It knows nothing about how a
@@ -12,8 +12,12 @@ extends RefCounted
 ## into a sentence, an animation or a bar that drains is the screen's job, and
 ## keeping the two apart is what lets a battle be asserted on rather than read.
 ##
-## One Pokémon a side, and no switching. A party, and the choice of what to send
-## out next, is the next thing this wants and is deliberately not here yet.
+## A side is a party, and a wild encounter is a party of one. Two things are the
+## caller's to decide rather than this class's, because the cartridge asks a
+## person or an AI for both and neither exists yet: which action a side takes,
+## and who replaces a Pokémon that has fainted. A turn that ends with somebody
+## down stops there and says so through [method must_replace]; nothing is sent
+## out until [method send_out] is called.
 
 ## The two sides, as plain numbers rather than an enum: they are dictionary keys
 ## and event payloads throughout, and an enum buys nothing where everything that
@@ -29,7 +33,18 @@ const NO_EFFECT: StringName = &"no_effect"
 const HIT: StringName = &"hit"
 const RECOIL: StringName = &"recoil"
 const FAINTED: StringName = &"fainted"
+## A Pokémon called back, and a Pokémon put out. They are two events rather than
+## one because a replacement after a faint is only the second half: there is
+## nobody to call back, and the screen has one sentence to say rather than two.
+const WITHDREW: StringName = &"withdrew"
+const SENT_OUT: StringName = &"sent_out"
 const OVER: StringName = &"over"
+
+## What a side does with its turn. Switching is not a move with a very high
+## priority: it is settled before priority is looked at, which is why it is an
+## action rather than a move number.
+const ACTION_MOVE: StringName = &"move"
+const ACTION_SWITCH: StringName = &"switch"
 
 ## Priority runs from 0 to 3 and most moves are 1, so a move can go below the
 ## ordinary as well as above it. The values are keyed by the move's effect byte,
@@ -58,71 +73,180 @@ const RECOIL_DIVISOR: int = 4
 var data: GameData = null
 var rng: RandomNumberGenerator = null
 
-var player: Gen2BattleMon = null
-var enemy: Gen2BattleMon = null
+## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
+var parties: Dictionary = {}
+
+## Whoever is out on each side. Read through the party every time rather than
+## kept in step with it: a switch changes who this is, and a copy that had to be
+## updated is a copy that will one day not be.
+var player: Gen2BattleMon:
+	get:
+		return party(PLAYER).active_mon()
+var enemy: Gen2BattleMon:
+	get:
+		return party(ENEMY).active_mon()
 
 
+## Two parties, each led by whoever is first in it.
+static func create_parties(
+	game_data: GameData,
+	player_party: Gen2Party,
+	enemy_party: Gen2Party,
+	generator: RandomNumberGenerator
+) -> Gen2Battle:
+	if game_data == null or player_party == null or enemy_party == null:
+		return null
+	if player_party.is_wiped() or enemy_party.is_wiped():
+		return null
+
+	var out := Gen2Battle.new()
+	out.data = game_data
+	out.parties = {PLAYER: player_party, ENEMY: enemy_party}
+	out.rng = generator if generator != null else RandomNumberGenerator.new()
+	return out
+
+
+## One Pokémon a side, which is what a wild encounter is.
 static func create(
 	game_data: GameData,
 	player_mon: Gen2BattleMon,
 	enemy_mon: Gen2BattleMon,
 	generator: RandomNumberGenerator
 ) -> Gen2Battle:
-	if game_data == null or player_mon == null or enemy_mon == null:
+	if player_mon == null or enemy_mon == null:
 		return null
+	return create_parties(
+		game_data, Gen2Party.of(player_mon), Gen2Party.of(enemy_mon), generator
+	)
 
-	var out := Gen2Battle.new()
-	out.data = game_data
-	out.player = player_mon
-	out.enemy = enemy_mon
-	out.rng = generator if generator != null else RandomNumberGenerator.new()
-	return out
+
+## What a side asks for with its turn.
+static func use_move(slot: int) -> Dictionary:
+	return {"type": ACTION_MOVE, "slot": slot}
+
+
+static func switch_to(index: int) -> Dictionary:
+	return {"type": ACTION_SWITCH, "index": index}
+
+
+func party(side: int) -> Gen2Party:
+	return parties[side]
 
 
 func mon(side: int) -> Gen2BattleMon:
-	return player if side == PLAYER else enemy
+	return party(side).active_mon()
 
 
 func opponent_of(side: int) -> int:
 	return ENEMY if side == PLAYER else PLAYER
 
 
+## A battle is lost when a whole party is down, not when the Pokémon that is out
+## has fainted. One of those is a defeat and the other is a Pokémon to replace.
 func is_over() -> bool:
-	return player.is_fainted() or enemy.is_fainted()
+	return party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
 
 
 ## Whoever is still standing, or null if the battle is not over. Both sides can
-## faint in one turn, through recoil; the cartridge gives it to whoever is left
+## go down in one turn, through recoil; the cartridge gives it to whoever is left
 ## and there is nobody, so this answers null for that too.
 func winner() -> Variant:
 	if not is_over():
 		return null
-	if player.is_fainted() and enemy.is_fainted():
+	if party(PLAYER).is_wiped() and party(ENEMY).is_wiped():
 		return null
-	return ENEMY if player.is_fainted() else PLAYER
+	return ENEMY if party(PLAYER).is_wiped() else PLAYER
 
 
-## Both sides pick a move slot, and the turn plays out. Returns the events in the
-## order they happened.
-func take_turn(player_slot: int, enemy_slot: int) -> Array:
+## Whether a side is waiting for somebody to be sent out: the Pokémon that was
+## out has fainted and there is still a party behind it. Nothing else can happen
+## on either side until it is answered, which is the cartridge's order too.
+func must_replace(side: int) -> bool:
+	var current: Gen2Party = party(side)
+	return current.active_mon().is_fainted() and not current.is_wiped()
+
+
+func awaiting_replacement() -> bool:
+	return must_replace(PLAYER) or must_replace(ENEMY)
+
+
+## Sends a side's [param index] out, whether as a replacement or between turns.
+## Returns the events, which is one event or none: a switch that cannot be made
+## is refused rather than approximated.
+func send_out(side: int, index: int) -> Array:
 	var events: Array = []
 	if is_over():
 		return events
 
-	var chosen: Dictionary = {
-		PLAYER: move_for(PLAYER, player_slot),
-		ENEMY: move_for(ENEMY, enemy_slot),
-	}
-	var slots: Dictionary = {PLAYER: player_slot, ENEMY: enemy_slot}
+	var current: Gen2Party = party(side)
+	var leaving: int = current.active
+	var leaving_species: int = current.active_mon().species
+	var withdrawing: bool = not current.active_mon().is_fainted()
+	if not current.send_out(index):
+		return events
 
-	for side: int in order(chosen):
-		if is_over():
+	# Nothing is called back after a faint, so the first half of the pair is only
+	# there when there was somebody to call back.
+	if withdrawing:
+		events.append({
+			"type": WITHDREW, "side": side, "index": leaving, "species": leaving_species,
+		})
+	events.append({
+		"type": SENT_OUT, "side": side, "index": index,
+		"species": current.active_mon().species,
+		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
+	})
+	return events
+
+
+## Both sides act, and the turn plays out. Returns the events in the order they
+## happened.
+##
+## An action is [method use_move] or [method switch_to]. Nothing happens while
+## either side owes a replacement, and a faint ends the turn where it is: a
+## Pokémon that is knocked out before it has moved does not get to move, which is
+## most of what speed is for.
+func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
+	var events: Array = []
+	if is_over() or awaiting_replacement():
+		return events
+
+	var actions: Dictionary = {PLAYER: player_action, ENEMY: enemy_action}
+	var chosen: Dictionary = {
+		PLAYER: _move_for_action(PLAYER, player_action),
+		ENEMY: _move_for_action(ENEMY, enemy_action),
+	}
+
+	for side: int in order(chosen, actions):
+		if _is_switch(actions[side]):
+			events.append_array(send_out(side, int(actions[side].get("index", -1))))
+			continue
+		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
 			break
-		_act(side, slots[side], chosen[side], events)
+		_act(side, int(actions[side].get("slot", 0)), chosen[side], events)
 
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
 	return events
+
+
+## Both sides use a move slot, which is the common case and the whole of a battle
+## that has one Pokémon a side.
+func take_turn(player_slot: int, enemy_slot: int) -> Array:
+	return take_actions(use_move(player_slot), use_move(enemy_slot))
+
+
+static func _is_switch(action: Dictionary) -> bool:
+	return StringName(action.get("type", ACTION_MOVE)) == ACTION_SWITCH
+
+
+## The move an action commits a side to, which is nothing at all for a switch.
+## Struggle stands in there so that the order can be worked out without a special
+## case; a switching side never reaches the point of using it.
+func _move_for_action(side: int, action: Dictionary) -> int:
+	if _is_switch(action):
+		return Gen2Damage.STRUGGLE
+	return move_for(side, int(action.get("slot", 0)))
 
 
 ## Which move a side will actually use.
@@ -139,11 +263,22 @@ func move_for(side: int, slot: int) -> int:
 
 ## Who goes first, as the two sides in the order they act.
 ##
-## Priority decides it; equal priority goes to the faster Pokémon, by its speed
-## with stages applied; and a genuine tie is a coin flip. The cartridge weighs a
-## held Quick Claw between the priority and the speed, which nothing here carries
-## yet.
-func order(chosen: Dictionary) -> Array:
+## A switch is settled before any of this: the cartridge sends the incoming
+## Pokémon out and then lets the other side's move hit it, so a side that is
+## switching acts first however fast the other one is and whatever priority its
+## move has. Two switches in the same turn go to the player, which is what the
+## cartridge does outside a link battle.
+##
+## Failing that, priority decides it; equal priority goes to the faster Pokémon,
+## by its speed with stages applied; and a genuine tie is a coin flip. The
+## cartridge weighs a held Quick Claw between the priority and the speed, which
+## nothing here carries yet.
+func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
+	var player_switching: bool = _is_switch(actions.get(PLAYER, {}))
+	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {}))
+	if player_switching or enemy_switching:
+		return _sides(player_switching)
+
 	var player_priority: int = priority_of(data.move(int(chosen[PLAYER])))
 	var enemy_priority: int = priority_of(data.move(int(chosen[ENEMY])))
 	if player_priority != enemy_priority:

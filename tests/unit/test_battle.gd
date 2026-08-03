@@ -208,3 +208,122 @@ func test_a_battle_needs_both_sides() -> void:
 	assert_null(Gen2Battle.create(null, _mon(Fixture.PIKACHU, 5, []), _mon(
 		Fixture.PIKACHU, 5, []
 	), _rng))
+
+
+## Two Pokémon a side, which is what everything below is about.
+func _party_battle(player: Array, enemy: Array) -> Gen2Battle:
+	return Gen2Battle.create_parties(
+		_data, Gen2Party.create(player), Gen2Party.create(enemy), _rng
+	)
+
+
+func _faint(mon: Gen2BattleMon) -> void:
+	mon.take_damage(mon.max_hp())
+
+
+func test_a_battle_is_not_over_while_a_party_still_has_somebody() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	_faint(battle.player)
+	assert_false(battle.is_over(), "one down is a replacement, not a defeat")
+	assert_true(battle.must_replace(Gen2Battle.PLAYER))
+	assert_false(battle.must_replace(Gen2Battle.ENEMY))
+
+
+func test_nothing_happens_while_a_replacement_is_owed() -> void:
+	# The cartridge's order: the field is settled before the next turn is taken.
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	_faint(battle.player)
+	assert_eq(battle.take_turn(0, 0), [])
+
+
+func test_sending_one_out_after_a_faint_calls_nobody_back() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	_faint(battle.player)
+	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(_of_type(events, Gen2Battle.WITHDREW).size(), 0, "there was nobody to call back")
+	assert_eq(_first(events, Gen2Battle.SENT_OUT)["index"], 1)
+	assert_eq(battle.player.species, Fixture.GEODUDE)
+	assert_false(battle.must_replace(Gen2Battle.PLAYER))
+
+
+func test_a_switch_between_turns_calls_one_back_and_sends_one_out() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(events.size(), 2)
+	assert_eq(events[0]["type"], Gen2Battle.WITHDREW)
+	assert_eq(int(events[0]["index"]), 0)
+	assert_eq(events[1]["type"], Gen2Battle.SENT_OUT)
+
+
+func test_a_battle_is_over_when_a_whole_party_is_down() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	_faint(battle.party(Gen2Battle.PLAYER).at(0))
+	_faint(battle.party(Gen2Battle.PLAYER).at(1))
+	assert_true(battle.is_over())
+	assert_eq(battle.winner(), Gen2Battle.ENEMY)
+
+
+func test_a_switch_goes_before_a_move_however_slow_the_switcher_is() -> void:
+	# Not a very fast move: the cartridge settles a switch before it looks at
+	# priority at all, which is why a switching side takes the incoming Pokémon's
+	# hit rather than trading with the outgoing one.
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]), _mon(Fixture.MAGCARGO, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])]
+	)
+	var events: Array = battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	assert_eq(events[0]["type"], Gen2Battle.WITHDREW)
+	assert_eq(events[1]["type"], Gen2Battle.SENT_OUT)
+	assert_eq(_first(events, Gen2Battle.USED_MOVE)["side"], Gen2Battle.ENEMY)
+	assert_eq(_first(events, Gen2Battle.HIT)["target"], Gen2Battle.PLAYER)
+
+
+func test_the_pokemon_that_came_in_is_the_one_that_gets_hit() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]), _mon(Fixture.MAGCARGO, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])]
+	)
+	var incoming: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	var outgoing: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(0)
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	assert_lt(incoming.hp, incoming.max_hp())
+	assert_eq(outgoing.hp, outgoing.max_hp(), "the one that left is untouched")
+
+
+func test_a_switch_that_cannot_be_made_is_refused_rather_than_approximated() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	_faint(battle.party(Gen2Battle.PLAYER).at(1))
+	var events: Array = battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	assert_eq(_of_type(events, Gen2Battle.SENT_OUT).size(), 0)
+	assert_eq(battle.player.species, Fixture.PIKACHU)
+
+
+func test_a_pokemon_knocked_out_before_it_moves_does_not_move() -> void:
+	# Most of what speed is for, and the reason a faint ends the turn where it is.
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.THUNDERBOLT])],
+		[_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])]
+	)
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.FAINTED).size(), 1)
+	assert_false(battle.is_over(), "there is another one behind it")
+	assert_true(battle.must_replace(Gen2Battle.ENEMY))

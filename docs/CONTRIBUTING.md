@@ -100,7 +100,8 @@ battle can be fought inside a test:
 | `battle/damage.gd` | The damage formula, STAB, criticals and the spread |
 | `battle/accuracy.gd` | Whether a move connects |
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
-| `battle/battle.gd` | The turn: order, PP, the hit, the faint |
+| `battle/party.gd` | The six a side carries, and which of them is out |
+| `battle/battle.gd` | The turn: order, PP, the hit, the faint, the switch |
 
 Everything in there is integer arithmetic in the order the hardware does it.
 That is not nostalgia. Every step truncates and the steps do not commute, so a
@@ -119,6 +120,18 @@ is almost right:
   Fire/Rock defender deals 6 and reports "not very effective" on the strength of
   a 2. `GameData.type_effectiveness` is for the message and
   `GameData.type_matchup` per type is for the damage.
+
+Two things a battle cannot decide for itself are left to whoever is driving it,
+because on the cartridge a person or an AI decides both: what a side does with
+its turn, and who replaces a Pokémon that has fainted. A turn that ends with
+somebody down stops there, says so through `must_replace`, and refuses to do
+anything else until `send_out` has been called. Nothing else in the engine has
+a policy hole in it, and this one is deliberate.
+
+A switch is not a move with a very high priority. The cartridge settles it
+before it looks at priority at all, so a switching side always acts first and
+the other side's move hits whoever came in. That is why an action is
+`use_move` or `switch_to` rather than a move number.
 
 `Gen2Battle` answers a turn with a list of events rather than with a new state
 or a string. An event says what happened and carries the numbers behind it, so a

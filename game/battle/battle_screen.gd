@@ -31,6 +31,13 @@ const DEFAULT_ENEMY: int = 16
 const DEFAULT_PLAYER: int = 155
 const DEFAULT_LEVEL: int = 5
 
+## How many Pokémon each side brings. Two, so that switching and being replaced
+## after a faint can both be seen. This is scaffolding: a real party comes from a
+## save on the player's side and from the trainer party tables on the enemy's,
+## and neither exists yet, so the screen makes one out of the species after the
+## one it is showing.
+const PARTY_SIZE: int = 2
+
 const TILE: int = Gen2Font.TILE
 
 ## The white the hardware fills the battle background with.
@@ -109,15 +116,8 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_player_level = player_level
 
 	_pending = []
-	_battle = Gen2Battle.create(
-		_data,
-		Gen2BattleMon.create(
-			_data, _player, _player_level, _data.moves_at_level(_player, _player_level)
-		),
-		Gen2BattleMon.create(
-			_data, _enemy, _enemy_level, _data.moves_at_level(_enemy, _enemy_level)
-		),
-		_rng
+	_battle = Gen2Battle.create_parties(
+		_data, _party_from(_player, _player_level), _party_from(_enemy, _enemy_level), _rng
 	)
 	if _battle == null:
 		return
@@ -126,6 +126,19 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 		_battle.enemy.hp, _battle.enemy.max_hp(),
 		_battle.player.hp, _battle.player.max_hp()
 	)
+
+
+## A party led by [param species], with the species after it behind. Scaffolding,
+## and the only thing on this screen that still invents a number: everything else
+## it draws now comes out of the cartridge or out of an event.
+func _party_from(species: int, level: int) -> Gen2Party:
+	var members: Array = []
+	for offset: int in PARTY_SIZE:
+		var number: int = _wrap_species(species + offset)
+		members.append(
+			Gen2BattleMon.create(_data, number, level, _data.moves_at_level(number, level))
+		)
+	return Gen2Party.create(members)
 
 
 ## Both HP totals, for a caller that has its own numbers.
@@ -193,18 +206,61 @@ func take_turn() -> void:
 	_show_next_event()
 
 
+## Swaps the player's Pokémon for the next one that is standing, as a turn.
+##
+## The enemy attacks while it happens, because a switch is not free: this is the
+## whole point of the ordering rule, and it is worth being able to look at.
+func switch_player() -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	var next: int = _next_healthy(Gen2Battle.PLAYER)
+	if next < 0:
+		return
+	_pending = _battle.take_actions(Gen2Battle.switch_to(next), Gen2Battle.use_move(0))
+	_show_next_event()
+
+
 ## What a button press does. Finishes the current message if it is still
-## revealing, then moves on to the next event, and starts a turn when there is
-## nothing left to say.
+## revealing, then moves on to the next event, sends out whoever is owed, and
+## starts a turn when there is nothing left to say.
 func advance() -> void:
 	if _box == null:
 		return
 	if _box.advance():
 		return
-	if _pending.is_empty():
-		take_turn()
+	if not _pending.is_empty():
+		_show_next_event()
 		return
-	_show_next_event()
+	if _replace_the_fallen():
+		return
+	take_turn()
+
+
+## Sends out the first Pokémon standing on any side that owes one, and answers
+## whether it had to. Choosing which is a menu on the player's side and an AI on
+## the enemy's; this screen has neither, so it takes the first.
+func _replace_the_fallen() -> bool:
+	if _battle == null:
+		return false
+
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		if not _battle.must_replace(side):
+			continue
+		var next: int = _next_healthy(side)
+		if next < 0:
+			continue
+		_pending = _battle.send_out(side, next)
+		_show_next_event()
+		return true
+	return false
+
+
+func _next_healthy(side: int) -> int:
+	var party: Gen2Party = _battle.party(side)
+	for index: int in party.size():
+		if party.can_send_out(index):
+			return index
+	return -1
 
 
 ## The next event, with whatever it changes applied first.
@@ -230,6 +286,16 @@ func _apply_event(event: Dictionary) -> void:
 			if target == Gen2Battle.ENEMY:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
+				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+		Gen2Battle.SENT_OUT:
+			# The pic and the panel both change, and both come out of the event
+			# rather than out of the party, for the same reason every other number
+			# here does.
+			if int(event["side"]) == Gen2Battle.ENEMY:
+				_enemy = int(event["species"])
+				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
+			else:
+				_player = int(event["species"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
 
 
@@ -258,6 +324,16 @@ func _describe(event: Dictionary) -> String:
 			return "%s is hit with recoil!" % _battler_name(side)
 		Gen2Battle.FAINTED:
 			return "%s fainted!" % _battler_name(side)
+		Gen2Battle.WITHDREW:
+			# Named out of the event, because by the time this is read the one on
+			# the field is already the one that came in.
+			if side == Gen2Battle.ENEMY:
+				return "Enemy withdrew %s!" % _name_of(int(event["species"]))
+			return "%s, come back!" % _name_of(int(event["species"]))
+		Gen2Battle.SENT_OUT:
+			if side == Gen2Battle.ENEMY:
+				return "Enemy sent out %s!" % _name_of(int(event["species"]))
+			return "Go! %s!" % _name_of(int(event["species"]))
 		Gen2Battle.OVER:
 			return "%s won!" % ("The enemy" if event["winner"] == Gen2Battle.ENEMY else "Player")
 	return ""
@@ -301,6 +377,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			hurt_player()
 		KEY_A:
 			take_turn()
+		KEY_W:
+			switch_player()
 		KEY_SPACE, KEY_ENTER:
 			advance()
 		_:
