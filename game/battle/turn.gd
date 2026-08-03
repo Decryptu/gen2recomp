@@ -43,6 +43,11 @@ var dealt: int = 0
 ## missed, because it did nothing, or because it reached its end.
 var ended: bool = false
 
+## Set when a secondary effect's roll came up short. It is not the same as
+## [member ended]: the move has happened and its damage stands, and only what was
+## behind the roll is skipped.
+var failed_chance: bool = false
+
 
 static func create(
 	in_battle: Gen2Battle, acting: int, from_slot: int, number: int, move_data: Dictionary,

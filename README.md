@@ -30,10 +30,11 @@ the same thing for Generation 1.
 > verified cartridge decodes into species data, moves, items, types, the type
 > chart, learnsets, evolutions, palettes, every Pokémon sprite, every trainer
 > pic, the font, the text box borders and the battle HUD. A battle can be
-> fought: stats, damage, accuracy and turn order, on a real 160x144 screen with
-> the bars draining and the messages appearing. There are no parties, no
-> switching, no status conditions and no move effects, and the overworld, audio
-> and the mod loader do not exist. There is nothing playable here today.
+> fought: parties, switching, stats, damage, accuracy, turn order and the five
+> status conditions, on a real 160x144 screen with the bars draining and the
+> messages appearing. Every move effect other than the status ones is still an
+> ordinary attack, and the overworld, audio and the mod loader do not exist.
+> There is nothing playable here today.
 
 ## Getting started
 
@@ -155,10 +156,10 @@ and `D` take health off the player's and the enemy's without a turn, which is
 the fastest way to see the bars change colour.
 
 Both Pokémon know what their level says they know, out of the learnset, and both
-use the first of those moves: choosing one is a menu on the player's side and an
-AI on the enemy's, and neither exists yet. Each side brings two Pokémon, made up
-by the screen, because a real party comes from a save on one side and from the
-trainer party tables on the other and neither is decoded yet.
+pick at random from those moves: choosing one is a menu on the player's side and
+an AI on the enemy's, and neither exists yet. Each side brings two Pokémon, made
+up by the screen, because a real party comes from a save on one side and from
+the trainer party tables on the other and neither is decoded yet.
 
 ## Tests
 

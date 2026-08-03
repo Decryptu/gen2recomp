@@ -327,3 +327,183 @@ func test_a_pokemon_knocked_out_before_it_moves_does_not_move() -> void:
 	assert_eq(_of_type(events, Gen2Battle.FAINTED).size(), 1)
 	assert_false(battle.is_over(), "there is another one behind it")
 	assert_true(battle.must_replace(Gen2Battle.ENEMY))
+
+
+func test_a_burn_halves_what_a_pokemon_hits_with() -> void:
+	# Through the stat rather than through the stored one: a Pokémon cured of a
+	# burn has its Attack back with nothing recalculated.
+	var mon: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	var healthy: int = mon.stat("attack")
+	mon.status = Gen2Status.BURN
+	assert_eq(mon.stat("attack"), Gen2Status.apply_burn(healthy))
+	assert_eq(mon.unmodified_stat("attack"), healthy, "a critical hit is free of it")
+
+
+func test_paralysis_quarters_what_a_pokemon_moves_at() -> void:
+	var mon: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	var healthy: int = mon.stat("speed")
+	mon.status = Gen2Status.PARALYSIS
+	assert_eq(mon.stat("speed"), Gen2Status.apply_paralysis(healthy))
+
+
+func test_a_paralysed_pokemon_loses_the_turn_order_it_had() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	)
+	assert_eq(_first(battle.take_turn(0, 0), Gen2Battle.USED_MOVE)["side"], Gen2Battle.PLAYER)
+
+	battle.player.status = Gen2Status.PARALYSIS
+	assert_eq(
+		_first(battle.take_turn(0, 0), Gen2Battle.USED_MOVE)["side"], Gen2Battle.ENEMY,
+		"110 Speed quartered is under Charmander's 65"
+	)
+
+
+func test_a_sleeping_pokemon_does_not_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = 3
+	var events: Array = battle.take_turn(0, 0)
+	var stopped: Dictionary = _first(events, Gen2Battle.CANNOT_MOVE)
+	assert_eq(int(stopped["side"]), Gen2Battle.PLAYER)
+	assert_eq(stopped["reason"], &"sleep")
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1, "only the enemy moved")
+
+
+func test_waking_up_does_not_cost_the_turn() -> void:
+	# Generation 2's rule and not Generation 1's: the counter runs out, the
+	# Pokémon is told it woke, and it attacks in the same breath.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = 1
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.WOKE_UP).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 0)
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 2, "both of them moved")
+	assert_eq(battle.player.status, Gen2Status.NONE)
+
+
+func test_a_frozen_pokemon_does_not_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = Gen2Status.FREEZE
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_first(events, Gen2Battle.CANNOT_MOVE)["reason"], &"freeze")
+	assert_eq(battle.player.status, Gen2Status.FREEZE, "and stays frozen")
+
+
+func test_flame_wheel_is_used_through_a_freeze_and_thaws_it() -> void:
+	# The only two moves in the game that do, and the reason they are named by
+	# number rather than by effect: nothing about their effect says it.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.FLAME_WHEEL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = Gen2Status.FREEZE
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.THAWED).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 0)
+	assert_eq(battle.player.status, Gen2Status.NONE)
+
+
+func test_a_burn_takes_an_eighth_at_the_end_of_the_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = Gen2Status.BURN
+	var before: int = battle.player.hp
+	var hurt: Dictionary = _first(battle.take_turn(0, 0), Gen2Battle.HURT_BY_STATUS)
+	assert_eq(hurt["name"], &"burn")
+	assert_eq(int(hurt["amount"]), Gen2Status.residual_damage(battle.player.max_hp()))
+	assert_lt(battle.player.hp, before)
+
+
+func test_a_poison_can_be_the_thing_that_faints_a_pokemon() -> void:
+	# The enemy growls rather than attacking, so that the only thing that can put
+	# the player down is the poison.
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.MAGCARGO, 50, [Fixture.GROWL])]
+	)
+	battle.player.status = Gen2Status.POISON
+	battle.player.hp = 1
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_STATUS).size(), 1)
+	assert_true(battle.player.is_fainted())
+	assert_eq(_of_type(events, Gen2Battle.FAINTED).size(), 1)
+	assert_true(battle.must_replace(Gen2Battle.PLAYER))
+
+
+func test_a_pokemon_that_has_already_fainted_is_not_burned_further() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 5, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])],
+		[_mon(Fixture.MAGCARGO, 50, [Fixture.SLASH])]
+	)
+	battle.player.status = Gen2Status.BURN
+	battle.player.hp = 1
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_STATUS).size(), 0)
+
+
+func test_a_status_move_puts_its_status_on() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SLEEP_POWDER]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	)
+	var inflicted: Dictionary = _first(battle.take_turn(0, 0), Gen2Battle.STATUS_INFLICTED)
+	assert_eq(inflicted["name"], &"sleep")
+	assert_true(Gen2Status.is_asleep(battle.enemy.status))
+
+
+func test_one_status_at_a_time() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SLEEP_POWDER]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	)
+	battle.enemy.status = Gen2Status.BURN
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.STATUS_INFLICTED).size(), 0)
+	assert_eq(battle.enemy.status, Gen2Status.BURN, "the burn is not replaced")
+
+
+func test_a_type_that_cannot_be_touched_cannot_be_paralysed_either() -> void:
+	# Thunder Wave against a Ground type. A status move is stopped by an immunity
+	# exactly as an attack is, and it says so rather than saying it missed.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.THUNDER_WAVE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.NO_EFFECT).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.STATUS_INFLICTED).size(), 0)
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+
+
+func test_a_secondary_effect_that_comes_up_leaves_its_status_behind() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.EMBER_BURNS]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.HIT).size(), 2, "both of them attacked")
+	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.BURN))
+
+
+func test_a_secondary_effect_that_does_not_come_up_still_does_its_damage() -> void:
+	# The roll sits between the hit and the status, so a failed one costs the
+	# status and nothing else.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.NEVER_BURNS]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_gt(int(_first(events, Gen2Battle.HIT)["amount"]), 0)
+	assert_eq(battle.enemy.status, Gen2Status.NONE)

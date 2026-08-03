@@ -33,6 +33,14 @@ const NO_EFFECT: StringName = &"no_effect"
 const HIT: StringName = &"hit"
 const RECOIL: StringName = &"recoil"
 const FAINTED: StringName = &"fainted"
+## A status stopped a Pokémon moving. [code]reason[/code] says which one, since
+## the three read differently and only one of them is a surprise.
+const CANNOT_MOVE: StringName = &"cannot_move"
+const WOKE_UP: StringName = &"woke_up"
+const THAWED: StringName = &"thawed"
+## A status put on a Pokémon, and a slice taken off by one it already had.
+const STATUS_INFLICTED: StringName = &"status_inflicted"
+const HURT_BY_STATUS: StringName = &"hurt_by_status"
 ## A Pokémon called back, and a Pokémon put out. They are two events rather than
 ## one because a replacement after a faint is only the second half: there is
 ## nobody to call back, and the screen has one sentence to say rather than two.
@@ -211,13 +219,16 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		ENEMY: _move_for_action(ENEMY, enemy_action),
 	}
 
-	for side: int in order(chosen, actions):
+	var acting: Array = order(chosen, actions)
+	for side: int in acting:
 		if _is_switch(actions[side]):
 			events.append_array(send_out(side, int(actions[side].get("index", -1))))
 			continue
 		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
 			break
 		_act(side, int(actions[side].get("slot", 0)), chosen[side], events)
+
+	_residual_damage(acting, events)
 
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
@@ -228,6 +239,34 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 ## that has one Pokémon a side.
 func take_turn(player_slot: int, enemy_slot: int) -> Array:
 	return take_actions(use_move(player_slot), use_move(enemy_slot))
+
+
+## What a burn or a poison takes at the end of the turn, from each side in the
+## order it acted.
+##
+## After both moves rather than after each, and skipping whoever is already down:
+## a Pokémon that has fainted this turn is not burned any further, and one that
+## goes down to its burn faints here rather than in the middle of somebody's move.
+func _residual_damage(acting: Array, events: Array) -> void:
+	for side: int in acting:
+		var current: Gen2BattleMon = mon(side)
+		if current.is_fainted():
+			continue
+		if not Gen2Status.has(current.status, Gen2Status.BURN | Gen2Status.POISON):
+			continue
+
+		var taken: int = current.take_damage(Gen2Status.residual_damage(current.max_hp()))
+		events.append({
+			"type": HURT_BY_STATUS,
+			"side": side,
+			"status": current.status,
+			"name": Gen2Status.name_of(current.status),
+			"amount": taken,
+			"hp": current.hp,
+			"max_hp": current.max_hp(),
+		})
+		if current.is_fainted():
+			events.append({"type": FAINTED, "side": side})
 
 
 static func _is_switch(action: Dictionary) -> bool:
@@ -311,6 +350,12 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 		return
 
 	var turn: Gen2Turn = Gen2Turn.create(self, side, slot, move_number, move, events)
+
+	# Whether the Pokémon can move at all is asked before the effect is looked up,
+	# which is the cartridge's arrangement: every move goes through it, so no
+	# sequence has to remember to include it.
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
+
 	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
 		if turn.ended:
 			return

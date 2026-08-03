@@ -101,6 +101,7 @@ battle can be fought inside a test:
 | `battle/accuracy.gd` | Whether a move connects |
 | `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
 | `battle/party.gd` | The six a side carries, and which of them is out |
+| `battle/status.gd` | The status byte, and the four things it does |
 | `battle/turn.gd` | One move being used, while it is being used |
 | `battle/effect_commands.gd` | The steps a move is made of |
 | `battle/move_effect.gd` | Which steps each effect byte is made of |
@@ -143,6 +144,26 @@ hit, applies it and checks for a faint. Almost every other move is that list
 with a step added, removed or replaced. `move_effect.gd` is that table,
 `effect_commands.gd` is the steps, `turn.gd` is what one step hands the next,
 and `battle.gd` knows only how to run a list.
+
+The status conditions are the first thing written that way, and they are spread
+across the turn rather than gathered in one place, because that is where the
+cartridge puts them:
+
+- **Whether a Pokémon can move** is asked before the effect is looked up, so
+  every move goes through it and no sequence has to remember to include it.
+  Sleep, then freeze, then paralysis, in that order.
+- **What a status does to a stat** is applied where the stat is read, after the
+  stage and on the same copy. That is what decides that a critical hit, which
+  reads the unmodified stat, is free of a burn as well as of the stages.
+- **What a status takes each turn** is applied after both sides have acted, in
+  the order they acted.
+
+Two of those are worth knowing because they are the opposite of what is usually
+assumed. A Pokémon that wakes up **does** move that turn: the cartridge counts
+the sleep off, says it woke, and carries straight on into the rest of its
+checks. That is Generation 2's rule and not Generation 1's. And a secondary
+effect's roll sits *between* the hit and the status, so a failed roll costs the
+status and nothing else; the damage in front of it has already happened.
 
 Keep it that way. A burn is a command appended to a list, a move that cannot
 miss is a list without the roll, and a two-turn move is a list that ends early

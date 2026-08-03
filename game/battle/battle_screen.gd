@@ -38,6 +38,23 @@ const DEFAULT_LEVEL: int = 5
 ## one it is showing.
 const PARTY_SIZE: int = 2
 
+## What a status says when it stops a Pokémon moving, and when it lands on one.
+## Keyed by the names [Gen2Status] answers with, so a status the engine grows
+## later shows up here as a missing key rather than as a wrong sentence.
+const STOPPED_BY: Dictionary = {
+	&"sleep": "is fast asleep!",
+	&"freeze": "is frozen solid!",
+	&"paralysis": "is fully paralyzed!",
+}
+
+const INFLICTED: Dictionary = {
+	&"sleep": "fell asleep!",
+	&"poison": "was poisoned!",
+	&"burn": "was burned!",
+	&"freeze": "was frozen solid!",
+	&"paralysis": "is paralyzed!",
+}
+
 const TILE: int = Gen2Font.TILE
 
 ## The white the hardware fills the battle background with.
@@ -197,13 +214,26 @@ func _hurt(mon: Gen2BattleMon) -> void:
 	_read_hp()
 
 
-## Plays one turn out: both sides use their first move, and the events come back
-## to be shown one at a time.
+## Plays one turn out, and the events come back to be shown one at a time.
+##
+## Both sides pick at random from what they know. Scaffolding, like the party:
+## the player's choice is a menu and the enemy's is an AI, and neither exists
+## yet. Random rather than the first slot because a Pokémon that only ever used
+## its first move would never show what the other three do.
 func take_turn() -> void:
 	if _battle == null or _battle.is_over() or not _pending.is_empty():
 		return
-	_pending = _battle.take_turn(0, 0)
+	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _random_slot(Gen2Battle.ENEMY))
 	_show_next_event()
+
+
+func _random_slot(side: int) -> int:
+	var mon: Gen2BattleMon = _battle.mon(side)
+	var usable: Array = []
+	for slot: int in mon.moves.size():
+		if mon.can_use(slot):
+			usable.append(slot)
+	return usable[_rng.randi_range(0, usable.size() - 1)] if not usable.is_empty() else 0
 
 
 ## Swaps the player's Pokémon for the next one that is standing, as a turn.
@@ -287,6 +317,11 @@ func _apply_event(event: Dictionary) -> void:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+		Gen2Battle.HURT_BY_STATUS:
+			if int(event["side"]) == Gen2Battle.ENEMY:
+				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
+			else:
+				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
 		Gen2Battle.SENT_OUT:
 			# The pic and the panel both change, and both come out of the event
 			# rather than out of the party, for the same reason every other number
@@ -303,7 +338,9 @@ func _apply_event(event: Dictionary) -> void:
 ## about. A neutral hit has no line of its own in these games: the bar moving is
 ## the whole of the message.
 func _describe(event: Dictionary) -> String:
-	var side: int = int(event["side"])
+	# Every event carries a side except the one that ends the battle, which is
+	# about both of them.
+	var side: int = int(event.get("side", Gen2Battle.PLAYER))
 	match event["type"]:
 		Gen2Battle.USED_MOVE:
 			return "%s used %s!" % [
@@ -324,6 +361,19 @@ func _describe(event: Dictionary) -> String:
 			return "%s is hit with recoil!" % _battler_name(side)
 		Gen2Battle.FAINTED:
 			return "%s fainted!" % _battler_name(side)
+		Gen2Battle.CANNOT_MOVE:
+			return "%s %s" % [_battler_name(side), STOPPED_BY.get(event["reason"], "cannot move!")]
+		Gen2Battle.WOKE_UP:
+			return "%s woke up!" % _battler_name(side)
+		Gen2Battle.THAWED:
+			return "%s thawed out!" % _battler_name(side)
+		Gen2Battle.STATUS_INFLICTED:
+			return "%s %s" % [
+				_battler_name(int(event["target"])),
+				INFLICTED.get(event["name"], "was hurt!"),
+			]
+		Gen2Battle.HURT_BY_STATUS:
+			return "%s is hurt by its %s!" % [_battler_name(side), event["name"]]
 		Gen2Battle.WITHDREW:
 			# Named out of the event, because by the time this is read the one on
 			# the field is already the one that came in.
@@ -335,6 +385,10 @@ func _describe(event: Dictionary) -> String:
 				return "Enemy sent out %s!" % _name_of(int(event["species"]))
 			return "Go! %s!" % _name_of(int(event["species"]))
 		Gen2Battle.OVER:
+			# Both sides can go down in the same turn, through recoil or a burn,
+			# and then there is nobody to declare.
+			if event["winner"] == null:
+				return "Both sides are out of Pokémon!"
 			return "%s won!" % ("The enemy" if event["winner"] == Gen2Battle.ENEMY else "Player")
 	return ""
 

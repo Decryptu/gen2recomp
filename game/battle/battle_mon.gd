@@ -47,6 +47,11 @@ var hp: int = 0
 var stats: Dictionary = {}
 var stages: Dictionary = {}
 
+## The status byte, as the cartridge packs it: see [Gen2Status]. It survives a
+## switch and a battle, unlike a stage, which is why it sits with the health
+## rather than with them.
+var status: int = Gen2Status.NONE
+
 
 ## Builds a Pokémon at a level, at full health, knowing [param moves].
 ##
@@ -114,12 +119,25 @@ func _stat(
 	)
 
 
-## A stat as the damage formula sees it, with its stage applied.
+## A stat as the damage formula sees it, with its stage and then its status
+## applied.
+##
+## The order is the cartridge's: it copies the stat, applies the stage, and then
+## halves the Attack of a burned Pokémon and quarters the Speed of a paralysed
+## one. Both land on the same copy the stages did, which is what decides that a
+## critical hit reading [method unmodified_stat] is free of the burn as well as of
+## the stages.
 func stat(key: String) -> int:
 	var value: int = int(stats.get(key, 0))
 	if not STAGED_STATS.has(key):
 		return value
-	return Gen2Stats.apply_stage(value, int(stages.get(key, 0)))
+
+	var out: int = Gen2Stats.apply_stage(value, int(stages.get(key, 0)))
+	if key == "attack" and Gen2Status.has(status, Gen2Status.BURN):
+		out = Gen2Status.apply_burn(out)
+	elif key == "speed" and Gen2Status.has(status, Gen2Status.PARALYSIS):
+		out = Gen2Status.apply_paralysis(out)
+	return out
 
 
 ## A stat with no stage applied, which is what a critical hit uses when the

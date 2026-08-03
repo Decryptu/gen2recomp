@@ -51,9 +51,35 @@ const CHECK_FAINT: StringName = &"checkfaint"
 ## as a step so a sequence reads the way the cartridge's does.
 const END_MOVE: StringName = &"endmove"
 
+## Whether the move happens at all. Sleep, freeze and paralysis are checked here,
+## in that order, and any of them can cost the turn.
+##
+## Not part of any sequence: the cartridge runs this before it looks the effect
+## up, so every move goes through it and no list has to remember to. [Gen2Battle]
+## runs it ahead of the list for that reason.
+const CHECK_STATUS: StringName = &"checkstatus"
+
+## Whether a secondary effect happens, out of the move's own chance. A move whose
+## sequence has this in it does its damage either way; what is behind it is what
+## the roll decides.
+const EFFECT_CHANCE: StringName = &"effectchance"
+
+## The five things a move can leave on a Pokémon. Each refuses a target that
+## already has something, which is the rule the status byte encodes: one at a
+## time, and a second is a failure rather than an addition.
+const SLEEP_TARGET: StringName = &"sleeptarget"
+const POISON_TARGET: StringName = &"poisontarget"
+const BURN_TARGET: StringName = &"burntarget"
+const FREEZE_TARGET: StringName = &"freezetarget"
+const PARALYZE_TARGET: StringName = &"paralyzetarget"
+
 ## Recoil is a quarter of the damage dealt, never less than one, and it is the
 ## same quarter for every move that has it rather than a figure per move.
 const RECOIL_DIVISOR: int = 4
+
+## The two moves a frozen Pokémon can use, which thaw it in the using. Flame
+## Wheel and Sacred Fire, by move number.
+const THAWING_MOVES: Array = [172, 221]
 
 
 ## Runs one command against [param turn].
@@ -81,6 +107,20 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_check_faint(turn)
 		END_MOVE:
 			turn.end()
+		CHECK_STATUS:
+			_check_status(turn)
+		EFFECT_CHANCE:
+			_effect_chance(turn)
+		SLEEP_TARGET:
+			_status_target(turn, Gen2Status.SLEEP_MASK)
+		POISON_TARGET:
+			_status_target(turn, Gen2Status.POISON)
+		BURN_TARGET:
+			_status_target(turn, Gen2Status.BURN)
+		FREEZE_TARGET:
+			_status_target(turn, Gen2Status.FREEZE)
+		PARALYZE_TARGET:
+			_status_target(turn, Gen2Status.PARALYSIS)
 		_:
 			push_error("No such effect command: %s" % command)
 
@@ -154,3 +194,76 @@ static func _check_faint(turn: Gen2Turn) -> void:
 	for side: int in [turn.target, turn.side]:
 		if turn.battle.mon(side).is_fainted():
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
+
+
+## Sleep, then freeze, then paralysis, which is the order the cartridge asks in.
+## A frozen Pokémon is never asked whether it is also paralysed, because the byte
+## cannot say both.
+##
+## Waking up does not cost the turn. The cartridge counts the sleep off, prints
+## that the Pokémon woke, and carries on into the rest of its checks rather than
+## ending the turn, so a Pokémon whose counter runs out attacks the same turn it
+## opens its eyes. That is Generation 2's rule and not Generation 1's.
+static func _check_status(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+
+	if Gen2Status.is_asleep(mon.status):
+		mon.status = Gen2Status.tick_sleep(mon.status)
+		if Gen2Status.is_asleep(mon.status):
+			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"sleep"})
+			turn.end()
+			return
+		turn.emit(Gen2Battle.WOKE_UP)
+
+	if Gen2Status.has(mon.status, Gen2Status.FREEZE):
+		# Flame Wheel and Sacred Fire are used through a freeze, and thaw the
+		# Pokémon using them; nothing else in the game does.
+		if not THAWING_MOVES.has(turn.move_number):
+			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"freeze"})
+			turn.end()
+			return
+		mon.status &= ~Gen2Status.FREEZE
+		turn.emit(Gen2Battle.THAWED)
+
+	if Gen2Status.has(mon.status, Gen2Status.PARALYSIS) \
+		and Gen2Status.rolls_full_paralysis(turn.rng()):
+		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"paralysis"})
+		turn.end()
+
+
+## A secondary effect's roll. The chance is a byte out of 256 in the move's own
+## table, like accuracy, and what it gates is only what comes after it: the
+## damage in front of it has already been done.
+##
+## A chance of zero never comes up, which is what the cartridge's comparison
+## does with it too. That is worth leaving alone rather than reading as "no
+## chance was given, so always": a move that says zero is a move that says never.
+static func _effect_chance(turn: Gen2Turn) -> void:
+	var chance: int = int(turn.move.get("effect_chance", 0))
+	if turn.rng().randi_range(0, Gen2Status.CHANCE_RANGE - 1) >= chance:
+		turn.failed_chance = true
+
+
+## Puts a status on the defender, or fails.
+##
+## One status at a time: a Pokémon that already has something on its byte is
+## refused rather than added to, and so is one whose type makes it immune. A
+## sleep is rolled for how long it lasts; the rest are a flag.
+static func _status_target(turn: Gen2Turn, flag: int) -> void:
+	if turn.failed_chance:
+		return
+
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
+		return
+
+	if flag == Gen2Status.SLEEP_MASK:
+		defender.status = Gen2Status.roll_sleep(turn.rng())
+	else:
+		defender.status |= flag
+
+	turn.emit(Gen2Battle.STATUS_INFLICTED, {
+		"target": turn.target,
+		"status": defender.status,
+		"name": Gen2Status.name_of(defender.status),
+	})

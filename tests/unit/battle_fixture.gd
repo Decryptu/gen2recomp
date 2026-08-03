@@ -24,6 +24,17 @@ const SLASH: int = 163
 const STRUGGLE: int = 165
 const GROWL: int = 45
 
+## The status moves, in the two shapes they come in. Thunder Wave and Sleep
+## Powder are the status and nothing else; Ember Burns and Flame Wheel are
+## attacks with something behind a roll, one of which never rolls and one of
+## which always does, so a test can have either without a seed.
+const THUNDER_WAVE: int = 86
+const SLEEP_POWDER: int = 79
+const POISON_POWDER: int = 77
+const EMBER_BURNS: int = 92
+const NEVER_BURNS: int = 93
+const FLAME_WHEEL: int = 172
+
 const NORMAL: int = 0x00
 const GROUND: int = 0x04
 const ROCK: int = 0x05
@@ -103,18 +114,30 @@ static func _species() -> Array:
 static func _moves() -> Array:
 	# Name, power, type, accuracy, PP, effect. The effect byte is the cartridge's
 	# own, because the turn loop reads priority and recoil out of it.
+	# Name, power, type, accuracy, PP, effect, and the secondary effect's chance
+	# out of 256. Ember and Thunderbolt keep a chance of zero, which is never, so
+	# that the tests written before there were status conditions still see the
+	# plain attacks they were written against.
 	var known: Dictionary = {
-		TACKLE: ["TACKLE", 35, NORMAL, 255, 35, 0],
-		GROWL: ["GROWL", 0, NORMAL, 255, 40, 18],
-		EMBER: ["EMBER", 40, FIRE, 255, 25, 4],
-		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, 6],
-		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0],
-		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2MoveEffect.RECOIL_HIT],
+		TACKLE: ["TACKLE", 35, NORMAL, 255, 35, 0, 0],
+		GROWL: ["GROWL", 0, NORMAL, 255, 40, 18, 0],
+		EMBER: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
+		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, Gen2MoveEffect.PARALYZE_HIT, 0],
+		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0, 0],
+		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2MoveEffect.RECOIL_HIT, 0],
+		THUNDER_WAVE: ["THUNDERWAVE", 0, ELECTRIC, 255, 20, Gen2MoveEffect.PARALYZE, 0],
+		SLEEP_POWDER: ["SLEEP POWDER", 0, GRASS, 255, 15, Gen2MoveEffect.SLEEP, 0],
+		POISON_POWDER: ["POISONPOWDER", 0, POISON, 255, 35, Gen2MoveEffect.POISON, 0],
+		# A chance of 256 is one the roll cannot fail, which is how a test gets a
+		# burn without a seed. Its opposite is a chance of zero.
+		EMBER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 256],
+		NEVER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
+		FLAME_WHEEL: ["FLAME WHEEL", 60, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
 	}
 
 	var out: Array = []
-	for number: int in range(1, STRUGGLE + 1):
-		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20, 0])
+	for number: int in range(1, FLAME_WHEEL + 1):
+		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20, 0, 0])
 		out.append({
 			"number": number,
 			"name": entry[0],
@@ -123,7 +146,7 @@ static func _moves() -> Array:
 			"type": entry[2],
 			"accuracy": entry[3],
 			"pp": entry[4],
-			"effect_chance": 0,
+			"effect_chance": entry[6],
 		})
 	return out
 
