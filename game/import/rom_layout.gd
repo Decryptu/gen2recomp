@@ -295,6 +295,59 @@ const MAX_TRAINER_PARTY_SIZE: int = 6
 ## (the wandering trainer classes: YOUNGSTER, LASS and the like carry the most).
 const MAX_TRAINERS_PER_CLASS: int = 64
 
+## The trainer *attributes* table: a third table indexed the same way as the
+## class names, pics, palettes and parties, one fixed-stride entry per class
+## rather than a pointer, and it is where a class's own AI behaviour lives.
+## Seven bytes: two item numbers a trainer of this class may use, a base money
+## reward, then two words of bit flags. Confirmed against pret's own
+## `TrainerClassAttributes`, entry by entry: Falkner opens the table with the
+## bytes his own listing gives, class 5 (Pryce) is the first to differ (he may
+## use a Hyper Potion), and one class further down the list carries an AI move
+## weight word of zero ([constant NO_AI]), which the check below has to allow
+## rather than reject as garbage.
+const TRAINER_ATTRIBUTES_SIZE: int = 7
+const ATTR_ITEM1: int = 0
+const ATTR_ITEM2: int = 1
+const ATTR_BASE_REWARD: int = 2
+const ATTR_AI_MOVE_WEIGHTS: int = 3
+const ATTR_AI_ITEM_SWITCH: int = 5
+
+## Which of a move's scoring routines run, as a bitfield: [constant AI_BASIC]
+## always runs when any bit is set, and the rest layer their own nudges on top
+## of it. A class can carry none of them ([constant NO_AI]), which is not a
+## decoding failure: Twins are really that undiscerning on the cartridge.
+const AI_BASIC: int = 1 << 0
+const AI_SETUP: int = 1 << 1
+const AI_TYPES: int = 1 << 2
+const AI_OFFENSIVE: int = 1 << 3
+const AI_SMART: int = 1 << 4
+const AI_OPPORTUNIST: int = 1 << 5
+const AI_AGGRESSIVE: int = 1 << 6
+const AI_CAUTIOUS: int = 1 << 7
+const AI_STATUS: int = 1 << 8
+const AI_RISKY: int = 1 << 9
+const NO_AI: int = 0
+
+## Every bit [constant ATTR_AI_MOVE_WEIGHTS] can legally carry. A wrong offset
+## reading this word as something else has roughly a 1.5% chance of landing
+## inside this mask by accident, and has to do it 66 or 67 times running.
+const AI_MOVE_WEIGHTS_MASK: int = AI_BASIC | AI_SETUP | AI_TYPES | AI_OFFENSIVE \
+	| AI_SMART | AI_OPPORTUNIST | AI_AGGRESSIVE | AI_CAUTIOUS | AI_STATUS | AI_RISKY
+
+## How a class uses its held items and when it switches out. Bit 3 is skipped
+## in the cartridge's own numbering (`const_skip` in pret's source), which is
+## why the flags jump from [constant SWITCH_SOMETIMES] to [constant ALWAYS_USE].
+const SWITCH_OFTEN: int = 1 << 0
+const SWITCH_RARELY: int = 1 << 1
+const SWITCH_SOMETIMES: int = 1 << 2
+const ALWAYS_USE: int = 1 << 4
+const UNKNOWN_USE: int = 1 << 5
+const CONTEXT_USE: int = 1 << 6
+
+## Every bit [constant ATTR_AI_ITEM_SWITCH] can legally carry, bit 3 excluded.
+const AI_ITEM_SWITCH_MASK: int = SWITCH_OFTEN | SWITCH_RARELY | SWITCH_SOMETIMES \
+	| ALWAYS_USE | UNKNOWN_USE | CONTEXT_USE
+
 ## The one trainer class with no party of its own: the eleven o'clock scholar,
 ## Professor Elm's class in the class table, whose name and pic exist but who
 ## the games never send into a battle. Its own label in the source is followed
@@ -373,6 +426,7 @@ const GOLD_SILVER: Dictionary = {
 	"trainer_parties": 0x3993E,
 	"trainer_party_total": 495,
 	"trainer_party_last_trainer": "GRUNT",
+	"trainer_attributes": 0x39562,
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -407,6 +461,7 @@ const CRYSTAL: Dictionary = {
 	"trainer_parties": 0x39999,
 	"trainer_party_total": 541,
 	"trainer_party_last_trainer": "EUSINE",
+	"trainer_attributes": 0x3959C,
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -494,6 +549,13 @@ static func trainer_palette_offset(layout: Dictionary, trainer_class: int) -> in
 ## offset and [method RomFile.linear], the same as [method evos_attacks_pointer_offset].
 static func trainer_party_pointer_offset(layout: Dictionary, trainer_class: int) -> int:
 	return int(layout["trainer_parties"]) + (trainer_class - 1) * TRAINER_PARTY_POINTER_SIZE
+
+
+## A trainer class's own entry in the attributes table, indexed the same way as
+## [method trainer_pic_pointer_offset] and [method trainer_party_pointer_offset]:
+## from the first class rather than from the player.
+static func trainer_attributes_offset(layout: Dictionary, trainer_class: int) -> int:
+	return int(layout["trainer_attributes"]) + (trainer_class - 1) * TRAINER_ATTRIBUTES_SIZE
 
 
 ## How many bytes one Pokémon occupies in a trainer's party, past its level and

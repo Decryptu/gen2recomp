@@ -108,6 +108,7 @@ battle can be fought inside a test:
 | `battle/effect_commands.gd` | The steps a move is made of |
 | `battle/move_effect.gd` | Which steps each effect byte is made of |
 | `battle/battle.gd` | The turn: order, the switch, and running a move's steps |
+| `battle/ai.gd` | A trainer class's own AI: scores each move slot off its AI flags |
 
 Everything in there is integer arithmetic in the order the hardware does it.
 That is not nostalgia. Every step truncates and the steps do not commute, so a
@@ -151,6 +152,29 @@ dropped rather than passed to `Gen2BattleMon` as a move). Its Pokémon carry
 `Gen2BattleMon.PERFECT_DVS` rather than the cartridge's own per-trainer-class
 DVs, because that is a second table (`data/trainers/dvs.asm` in pokecrystal)
 this change did not locate; see `HANDOFF.md`.
+
+`Gen2BattleAI.choose_slot` picks a trainer's own move the way pokecrystal's
+`AIChooseMove` does: every slot starts at a fixed score, unusable ones start
+worse, and every bit set in the trainer class's own AI move weight word
+(`GameData.trainer_attributes`, decoded by `RomImporter.read_trainer_attributes`
+out of a third trainer table) runs one scoring layer that nudges a slot's
+score up or down, in the cartridge's own bit order. The lowest score wins.
+`_pick_lowest` is not the cartridge's own way of finding it: `AIChooseMove`
+decrements every slot's counter once per pass until one reaches zero, then
+walks backward correcting for the round-robin order so every slot tied for
+the true minimum ends up equally eligible, before a final random pick. That
+byte-level race is provably the same outcome as finding the minimum directly
+and breaking ties at random, which is what this does instead, because the
+race is how eight-bit hardware computes an argmin without a MIN instruction,
+not a rule of its own worth reproducing. `AI_Smart`'s own per-effect handlers
+(`AI_Smart_Toxic`, `AI_Smart_Sleep`, and the rest) are implemented only for
+the effects `move_effect.gd` already gives a battle sequence: an effect this
+engine cannot play out yet cannot be tested against a real cartridge's choice
+either, so it falls to the generic layers alone, the same falling-back
+discipline the move table itself uses. See `HANDOFF.md`'s "Deliberate" section
+for what else the AI does not cover (a trainer's switch and item decisions,
+Razor Wind/Solar Beam/Fly's own handlers, which read weather and a
+semi-invulnerability substatus nothing here tracks).
 
 **A move is a short program, not a special case.** The cartridge keeps a list of
 commands per effect byte and runs them in order, and an ordinary attack is the
@@ -318,6 +342,15 @@ So every offset ships with a check that would fail if it were wrong, and
   the table are content whose answer is known independently: Falkner's level 7
   Pidgey and level 9 Pidgeotto open it, and the last class's first trainer's
   name closes it.
+- The trainer attributes table is a fourth trainer table, one fixed seven-byte
+  entry per class rather than a pointer, so unlike the party table above there
+  is no walk to be the check: what is checked is the shape every entry has to
+  have. Two of its five fields are bit flags, and neither may carry a bit past
+  what the cartridge defines, which a wrong offset fails almost immediately
+  and has to pass 66 or 67 times running, once per class, to slip through by
+  chance. On top of that class 1's own entry is content whose answer is known
+  independently, the same anchor the class name table has in Falkner's own
+  name.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 

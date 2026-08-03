@@ -52,6 +52,15 @@ const TRAINER_PARTY_FIRST_SPECIES_1: int = 16
 const TRAINER_PARTY_FIRST_LEVEL_2: int = 9
 const TRAINER_PARTY_FIRST_SPECIES_2: int = 17
 
+## Falkner's own entry in the trainer attributes table, known independently of
+## the cartridge from pret's `TrainerClassAttributes`: no items, a reward of 25,
+## and the AI flag word every gym leader shares.
+const TRAINER_ATTR_FIRST_REWARD: int = 25
+const TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS: int = RomLayout.AI_BASIC | RomLayout.AI_SETUP \
+	| RomLayout.AI_SMART | RomLayout.AI_AGGRESSIVE | RomLayout.AI_CAUTIOUS \
+	| RomLayout.AI_STATUS | RomLayout.AI_RISKY
+const TRAINER_ATTR_FIRST_AI_ITEM_SWITCH: int = RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -194,6 +203,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var trainer_parties: Dictionary = verify_trainer_parties(rom, layout)
 	if not trainer_parties["ok"]:
 		return trainer_parties
+
+	var trainer_attributes: Dictionary = verify_trainer_attributes(rom, layout)
+	if not trainer_attributes["ok"]:
+		return trainer_attributes
 
 	return {"ok": true, "message": "Layout verified."}
 
@@ -1098,6 +1111,65 @@ static func verify_trainer_parties(rom: RomFile, layout: Dictionary) -> Dictiona
 	return {"ok": true, "message": ""}
 
 
+## One trainer class's own entry in the attributes table: two item numbers,
+## a base money reward, and the two flag words the AI reads. A fixed stride,
+## not a pointer, so unlike the party table nothing here is walked.
+static func read_trainer_attributes(rom: RomFile, layout: Dictionary, trainer_class: int) -> Dictionary:
+	var offset: int = RomLayout.trainer_attributes_offset(layout, trainer_class)
+	return {
+		"item1": rom.u8(offset + RomLayout.ATTR_ITEM1),
+		"item2": rom.u8(offset + RomLayout.ATTR_ITEM2),
+		"base_reward": rom.u8(offset + RomLayout.ATTR_BASE_REWARD),
+		"ai_move_weights": rom.u16le(offset + RomLayout.ATTR_AI_MOVE_WEIGHTS),
+		"ai_item_switch": rom.u16le(offset + RomLayout.ATTR_AI_ITEM_SWITCH),
+	}
+
+
+## The trainer attributes table, checked entry by entry: neither flag word may
+## carry a bit past what [constant RomLayout.AI_MOVE_WEIGHTS_MASK] and
+## [constant RomLayout.AI_ITEM_SWITCH_MASK] define, which a wrong offset fails
+## almost immediately and has to pass 66 or 67 times running to slip through by
+## chance. Falkner's own entry is content whose answer is known independently,
+## the same anchor [constant TRAINER_FIRST_CLASS] gives the class name table.
+static func verify_trainer_attributes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.trainer_class_count(layout)
+
+	for trainer_class: int in range(1, count + 1):
+		var offset: int = RomLayout.trainer_attributes_offset(layout, trainer_class)
+		if not rom.in_bounds(offset, RomLayout.TRAINER_ATTRIBUTES_SIZE):
+			return {
+				"ok": false,
+				"message": "Trainer attributes %d is past the end." % trainer_class,
+			}
+
+		var entry: Dictionary = read_trainer_attributes(rom, layout, trainer_class)
+		var weights: int = int(entry["ai_move_weights"])
+		if weights & ~RomLayout.AI_MOVE_WEIGHTS_MASK:
+			return {
+				"ok": false,
+				"message": "Trainer attributes %d: AI move weights $%04X use undefined bits." % [
+					trainer_class, weights,
+				],
+			}
+		var switch_flags: int = int(entry["ai_item_switch"])
+		if switch_flags & ~RomLayout.AI_ITEM_SWITCH_MASK:
+			return {
+				"ok": false,
+				"message": "Trainer attributes %d: item/switch flags $%04X use undefined bits." % [
+					trainer_class, switch_flags,
+				],
+			}
+
+	var falkner: Dictionary = read_trainer_attributes(rom, layout, 1)
+	if int(falkner["item1"]) != 0 or int(falkner["item2"]) != 0 \
+		or int(falkner["base_reward"]) != TRAINER_ATTR_FIRST_REWARD \
+		or int(falkner["ai_move_weights"]) != TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS \
+		or int(falkner["ai_item_switch"]) != TRAINER_ATTR_FIRST_AI_ITEM_SWITCH:
+		return {"ok": false, "message": "Trainer class 1's attributes do not match what is known of it."}
+
+	return {"ok": true, "message": ""}
+
+
 ## Resolves one entry of the type name pointer table.
 static func type_name(rom: RomFile, layout: Dictionary, type_number: int) -> String:
 	var table: int = RomLayout.type_name_pointer_offset(layout, type_number)
@@ -1350,11 +1422,12 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 ## A class has one palette and no shiny counterpart, so the pair is stored flat
 ## rather than under a key, and the pic is found by class number in the trainer
 ## atlas the way a species' is in the front one.
-## Decodes the trainer classes and, behind them, the trainer party table: who
-## carries what. The two are kept on the one entry rather than split into a
-## second cache file, the way a species' evolutions and learnset are, because
-## a class name and its trainers are the two tables one class number addresses,
-## not two separate questions.
+## Decodes the trainer classes and, behind them, the trainer party table (who
+## carries what) and the trainer attributes table (how the class's AI plays
+## it). The three are kept on the one entry rather than split into cache files
+## of their own, the way a species' evolutions and learnset are, because a
+## class name, its trainers and its own AI behaviour are three tables one
+## class number addresses, not three separate questions.
 func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var names: PackedStringArray = Gen2Text.decode_sequence(
@@ -1371,6 +1444,7 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 			"name": names[trainer_class - 1],
 			"palette": [rom.u16le(palette), rom.u16le(palette + Gen2Palette.COLOR_BYTES)],
 			"trainers": classes[trainer_class - 1] if trainer_class - 1 < classes.size() else [],
+			"attributes": RomImporter.read_trainer_attributes(rom, layout, trainer_class),
 		})
 
 		if on_progress.is_valid():

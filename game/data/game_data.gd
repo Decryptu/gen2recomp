@@ -317,6 +317,24 @@ func trainer_party(number: int, index: int) -> Dictionary:
 	}
 
 
+## A trainer class's own attributes: the two items its trainers may use, the
+## base money reward, and the two AI flag words [Gen2BattleAI] scores moves
+## against. Empty for a class the cache does not carry.
+func trainer_attributes(number: int) -> Dictionary:
+	var entry: Dictionary = trainer(number)
+	if entry.is_empty():
+		return {}
+
+	var attributes: Dictionary = entry.get("attributes", {})
+	return {
+		"item1": int(attributes.get("item1", 0)),
+		"item2": int(attributes.get("item2", 0)),
+		"base_reward": int(attributes.get("base_reward", 0)),
+		"ai_move_weights": int(attributes.get("ai_move_weights", 0)),
+		"ai_item_switch": int(attributes.get("ai_item_switch", 0)),
+	}
+
+
 ## Where a trainer class sits in the trainer atlas. Every trainer is drawn at the
 ## same size, so unlike a species pic this one always fills its cell.
 func trainer_pic(number: int) -> Dictionary:
