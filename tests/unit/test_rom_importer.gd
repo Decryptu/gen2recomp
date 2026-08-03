@@ -604,6 +604,54 @@ func test_trainer_attributes_read_back_by_class() -> void:
 	assert_eq(int(falkner["ai_move_weights"]), RomImporter.TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS)
 
 
+## A plausible trainer DVs table: Falkner's own known word at class 1, and the
+## layout's own known word at the last class.
+func _write_trainer_dvs(data: PackedByteArray, entries: Dictionary = {}) -> void:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	for trainer_class: int in range(1, count + 1):
+		var word: int = int(entries.get(
+			trainer_class,
+			RomImporter.TRAINER_DVS_FIRST if trainer_class == 1 else int(_layout["trainer_dvs_last"])
+		))
+		var at: int = RomLayout.trainer_dvs_offset(_layout, trainer_class)
+		data[at] = (word >> 8) & 0xFF
+		data[at + 1] = word & 0xFF
+
+
+func test_a_plausible_trainer_dvs_table_verifies() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_dvs(data)
+	var result: Dictionary = RomImporter.verify_trainer_dvs(_rom(data), _layout)
+	assert_true(result["ok"], result["message"])
+
+
+## The failure this check exists for: nothing about a nibble's shape can catch a
+## wrong offset, since every nibble is a legal DV, so a wrong Falkner has to be
+## what fails it.
+func test_falkners_dvs_not_matching_what_is_known_fails() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_dvs(data, {1: 0x0000})
+	assert_false(RomImporter.verify_trainer_dvs(_rom(data), _layout)["ok"])
+
+
+func test_the_last_classs_dvs_not_matching_what_is_known_fails() -> void:
+	var count: int = RomLayout.trainer_class_count(_layout)
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_dvs(data, {count: 0x0000})
+	assert_false(RomImporter.verify_trainer_dvs(_rom(data), _layout)["ok"])
+
+
+func test_trainer_dvs_read_back_by_class() -> void:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_trainer_dvs(data, {5: 0x7C33}) # Pryce, made up: attack 7, defense 12, speed 3, special 3.
+	assert_eq(RomImporter.read_trainer_dvs(_rom(data), _layout, 5), 0x7C33)
+	assert_eq(RomImporter.read_trainer_dvs(_rom(data), _layout, 1), RomImporter.TRAINER_DVS_FIRST)
+
+
 ## A battle sheet at every offset the layout claims: two bars that count up, and
 ## two HUD borders whose tiles all differ.
 func _battle_dump() -> PackedByteArray:

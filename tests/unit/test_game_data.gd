@@ -46,6 +46,7 @@ func _write_cache(complete: bool = true) -> void:
 				"ai_move_weights": RomLayout.AI_BASIC | RomLayout.AI_STATUS,
 				"ai_item_switch": RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES,
 			},
+				"dvs": 0x9A77,
 			"trainers": [
 				{
 					"name": "FALKNER", "type": RomLayout.TRAINER_MON_NORMAL,
@@ -323,6 +324,17 @@ func test_a_trainer_classs_own_attributes_read_back_as_ints() -> void:
 		int(attributes["ai_item_switch"]), RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES
 	)
 	assert_true(data.trainer_attributes(0).is_empty(), "class 0 is the player, who has no entry")
+
+
+func test_a_trainer_classs_own_dvs_read_back_as_an_int() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.trainer_dvs(1), 0x9A77, "JSON's one number type, coerced back")
+	assert_eq(
+		data.trainer_dvs(2), Gen2BattleMon.PERFECT_DVS,
+		"class 2 has an entry but no dvs key, the same shape an unimported field takes"
+	)
+	assert_eq(data.trainer_dvs(0), Gen2BattleMon.PERFECT_DVS, "class 0 is the player, no entry at all")
 
 
 func test_a_stored_moves_trainers_item_and_moves_read_back_as_ints() -> void:

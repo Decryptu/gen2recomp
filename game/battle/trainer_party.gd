@@ -15,9 +15,11 @@ extends RefCounted
 ## through [method GameData.moves_at_level] and the stored list respectively
 ## rather than through one shared path.
 ##
-## Trainer Pokémon are given [constant Gen2BattleMon.PERFECT_DVS] here rather
-## than the cartridge's own per-trainer-class DVs, because that is a second
-## table this change does not locate; see [code]HANDOFF.md[/code].
+## Trainer Pokémon carry the cartridge's own per-trainer-class DVs
+## ([method GameData.trainer_dvs]), not [constant Gen2BattleMon.PERFECT_DVS]: a
+## trainer's whole team shares one fixed set of DVs on the real cartridge,
+## which is why the word is asked for once per class rather than once per
+## Pokémon.
 
 
 ## The party a trainer class's [param index]th trainer brings, or null if
@@ -31,15 +33,14 @@ static func build(data: GameData, trainer_class: int, index: int) -> Gen2Party:
 		return null
 
 	var mon_type: int = int(trainer["type"])
+	var dvs: int = data.trainer_dvs(trainer_class)
 	var members: Array = []
 	for mon: Dictionary in (trainer["party"] as Array):
 		var species: int = int(mon["species"])
 		var level: int = int(mon["level"])
 		var moves: Array = _moves_for(data, mon_type, species, level, mon["moves"])
 		members.append(
-			Gen2BattleMon.create(
-				data, species, level, moves, Gen2BattleMon.PERFECT_DVS, {}, int(mon["item"])
-			)
+			Gen2BattleMon.create(data, species, level, moves, dvs, {}, int(mon["item"]))
 		)
 
 	return Gen2Party.create(members)
