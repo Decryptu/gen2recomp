@@ -73,6 +73,46 @@ const BURN_TARGET: StringName = &"burntarget"
 const FREEZE_TARGET: StringName = &"freezetarget"
 const PARALYZE_TARGET: StringName = &"paralyzetarget"
 
+## What Toxic leaves behind: the same poison flag [constant POISON_TARGET]
+## leaves, plus the ramping counter that makes it Toxic rather than an ordinary
+## poison. Its own command rather than [constant POISON_TARGET] with an extra
+## step after it, because the counter has to start before the first residual
+## turn sees it, and nothing else needs a command that touches both.
+const TOXIC_TARGET: StringName = &"toxictarget"
+
+## The two things a move can leave on [Gen2Substatus] rather than the status
+## byte. Flinch is only ever a secondary effect, so it obeys
+## [member Gen2Turn.failed_chance] the same way the five above do; confusion
+## comes both ways, as a status move of its own (Confuse Ray, Supersonic) and
+## as a secondary effect (Confusion, Psybeam), which is why [Gen2MoveEffect]
+## reaches for this command from both shapes of sequence.
+const FLINCH_TARGET: StringName = &"flinchtarget"
+const CONFUSE_TARGET: StringName = &"confusetarget"
+
+## Recharge: locks the user out of its next turn, the tail of Hyper Beam's own
+## list rather than anything a target-facing command touches.
+const RECHARGE: StringName = &"recharge"
+
+## A two-turn move's charge. The first time it is run it locks the user in,
+## announces the charge and ends the move there; the second time, it is the
+## release turn, so it clears the lock and lets the rest of the list run as an
+## ordinary attack. [Gen2Battle._act] is what makes sure the second call is the
+## user's only option: see [method Gen2Battle.move_for].
+const CHARGE_MOVE: StringName = &"chargemove"
+
+## Clears every stage on both sides. Only the stages: nothing here touches
+## either Pokémon's status byte or [Gen2Substatus].
+const HAZE: StringName = &"haze"
+
+## Costs half the user's maximum HP to raise its own Attack straight to the top
+## of its range. Fails without costing anything if the user does not have more
+## than half its health, or if Attack is already there.
+const BELLY_DRUM: StringName = &"bellydrum"
+
+## Copies the target's stages onto the user, all seven at once. Fails if the
+## target has nothing raised or lowered to copy.
+const PSYCH_UP: StringName = &"psychup"
+
 ## Raises and lowers a stat by one stage or two, named the way the cartridge
 ## names them and in the order [constant Gen2BattleMon.STAGED_STATS] plus
 ## [constant Gen2BattleMon.STAGED_ODDS] already keeps the seven in, because that
@@ -209,6 +249,22 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_status_target(turn, Gen2Status.FREEZE)
 		PARALYZE_TARGET:
 			_status_target(turn, Gen2Status.PARALYSIS)
+		TOXIC_TARGET:
+			_toxic_target(turn)
+		FLINCH_TARGET:
+			_flinch_target(turn)
+		CONFUSE_TARGET:
+			_confuse_target(turn)
+		RECHARGE:
+			_recharge(turn)
+		CHARGE_MOVE:
+			_charge_move(turn)
+		HAZE:
+			_haze(turn)
+		BELLY_DRUM:
+			_belly_drum(turn)
+		PSYCH_UP:
+			_psych_up(turn)
 		ALL_STATS_UP:
 			_all_stats_up(turn)
 		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
@@ -227,8 +283,12 @@ static func _used_move_text(turn: Gen2Turn) -> void:
 
 
 ## Struggle is what a Pokémon does when there is nothing left to spend, so it
-## spends nothing, and it is the one move that arrives without a slot.
+## spends nothing, and it is the one move that arrives without a slot. Neither
+## does the release turn of a two-turn move: the PP for it went on the charge
+## turn, which is what [member Gen2Turn.locked] means here.
 static func _do_turn(turn: Gen2Turn) -> void:
+	if turn.locked:
+		return
 	if turn.slot >= 0 and turn.move_number != Gen2Damage.STRUGGLE:
 		turn.attacker().spend_pp(turn.slot)
 
@@ -293,16 +353,30 @@ static func _check_faint(turn: Gen2Turn) -> void:
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
 
 
-## Sleep, then freeze, then paralysis, which is the order the cartridge asks in.
-## A frozen Pokémon is never asked whether it is also paralysed, because the byte
-## cannot say both.
+## Recharge, then sleep, then freeze, then flinch, then confusion, then
+## paralysis, which is the cartridge's own order in [code]CheckPlayerTurn[/code].
+## Disable and Attract sit between flinch and confusion on the cartridge and are
+## not written yet; nothing here skips a slot for them because neither writes
+## [Gen2Substatus] yet either.
+##
+## A frozen Pokémon is never asked whether it is also paralysed, because the
+## status byte cannot say both; a confused Pokémon that hits itself is never
+## asked about paralysis either, because it has already spent its turn.
 ##
 ## Waking up does not cost the turn. The cartridge counts the sleep off, prints
 ## that the Pokémon woke, and carries on into the rest of its checks rather than
 ## ending the turn, so a Pokémon whose counter runs out attacks the same turn it
-## opens its eyes. That is Generation 2's rule and not Generation 1's.
+## opens its eyes. That is Generation 2's rule and not Generation 1's. Snapping
+## out of confusion works the same way: the counter reaching zero clears the
+## flag and lets the move through the same turn.
 static func _check_status(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
+
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.RECHARGING):
+		mon.substatus &= ~Gen2Substatus.RECHARGING
+		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"recharge"})
+		turn.end()
+		return
 
 	if Gen2Status.is_asleep(mon.status):
 		mon.status = Gen2Status.tick_sleep(mon.status)
@@ -321,6 +395,27 @@ static func _check_status(turn: Gen2Turn) -> void:
 			return
 		mon.status &= ~Gen2Status.FREEZE
 		turn.emit(Gen2Battle.THAWED)
+
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.FLINCHED):
+		mon.substatus &= ~Gen2Substatus.FLINCHED
+		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"flinch"})
+		turn.end()
+		return
+
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CONFUSED):
+		mon.confusion_turns -= 1
+		if mon.confusion_turns <= 0:
+			mon.substatus &= ~Gen2Substatus.CONFUSED
+			turn.emit(Gen2Battle.SNAPPED_OUT)
+		else:
+			turn.emit(Gen2Battle.CONFUSED)
+			if Gen2Substatus.rolls_confusion_hit(turn.rng()):
+				var dealt: int = mon.take_damage(Gen2Damage.confusion_damage(mon, turn.rng()))
+				turn.emit(Gen2Battle.HURT_ITSELF, {
+					"amount": dealt, "hp": mon.hp, "max_hp": mon.max_hp(),
+				})
+				turn.end()
+				return
 
 	if Gen2Status.has(mon.status, Gen2Status.PARALYSIS) \
 		and Gen2Status.rolls_full_paralysis(turn.rng()):
@@ -364,6 +459,138 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 		"status": defender.status,
 		"name": Gen2Status.name_of(defender.status),
 	})
+
+
+## Poisons the target the way [constant POISON_TARGET] does, and starts the
+## counter that makes it Toxic rather than an ordinary poison: see
+## [method Gen2Status.toxic_damage], which reads it back at the end of every
+## turn from here on.
+static func _toxic_target(turn: Gen2Turn) -> void:
+	if turn.failed_chance:
+		return
+
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
+		return
+
+	defender.status |= Gen2Status.POISON
+	defender.toxic_counter = 1
+	turn.emit(Gen2Battle.STATUS_INFLICTED, {
+		"target": turn.target, "status": defender.status, "name": &"toxic",
+	})
+
+
+## Sets the target flinching, for [constant CHECK_STATUS] to catch on its turn.
+## Only ever a secondary effect, so it obeys [member Gen2Turn.failed_chance] the
+## same way a status target does; a fainted target cannot be made to flinch on
+## a turn it will not take.
+static func _flinch_target(turn: Gen2Turn) -> void:
+	if turn.failed_chance:
+		return
+
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.is_fainted():
+		return
+
+	defender.substatus |= Gen2Substatus.FLINCHED
+
+
+## Sets the target confused and rolls how long for, or fails. A Pokémon already
+## confused is refused rather than having its counter restarted, which is the
+## rule [Gen2Substatus.CONFUSED] enforces the same way the status byte enforces
+## it for sleep, poison, burn, freeze and paralysis, except that confusion sits
+## alongside a status rather than instead of one: a poisoned Pokémon can still
+## be confused.
+static func _confuse_target(turn: Gen2Turn) -> void:
+	if turn.failed_chance:
+		return
+
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.is_fainted() or Gen2Substatus.has(defender.substatus, Gen2Substatus.CONFUSED):
+		return
+
+	defender.substatus |= Gen2Substatus.CONFUSED
+	defender.confusion_turns = Gen2Substatus.roll_confusion(turn.rng())
+
+	# Not [constant Gen2Battle.STATUS_INFLICTED]: that event's [code]status[/code]
+	# field is the status byte, and confusion never touches it.
+	turn.emit(Gen2Battle.CONFUSE_INFLICTED, {"target": turn.target})
+
+
+## Locks the user out of its next turn. The tail of Hyper Beam's own list,
+## always reached: there is no roll behind it and nothing it can fail against.
+static func _recharge(turn: Gen2Turn) -> void:
+	turn.attacker().substatus |= Gen2Substatus.RECHARGING
+
+
+## A two-turn move's charge, in the shape [code]docs/CONTRIBUTING.md[/code]
+## already describes: a list that ends early the first time.
+##
+## Not charging yet: locks the user in, announces it and ends the move before
+## the damage is even worked out. Already charging, which is the release turn:
+## clears the lock and falls through into the rest of the list, which is an
+## ordinary attack from here. [method Gen2Battle.move_for] is what guarantees
+## the release turn's move is the one that was charged, whatever slot the
+## caller asks for.
+static func _charge_move(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING):
+		mon.substatus &= ~Gen2Substatus.CHARGING
+		mon.charged_move = 0
+		return
+
+	mon.substatus |= Gen2Substatus.CHARGING
+	mon.charged_move = turn.move_number
+	turn.emit(Gen2Battle.CHARGING_UP)
+	turn.end()
+
+
+## Haze: every stage on both sides, back to nothing. Not [Gen2Substatus] and not
+## the status byte, either side's: only what [method Gen2BattleMon.reset_stages]
+## already resets on a switch is reset here on demand.
+static func _haze(turn: Gen2Turn) -> void:
+	turn.battle.mon(Gen2Battle.PLAYER).reset_stages()
+	turn.battle.mon(Gen2Battle.ENEMY).reset_stages()
+	turn.emit(Gen2Battle.STAGES_CLEARED)
+
+
+## Belly Drum. Fails, and costs nothing, unless the user has more than half its
+## maximum HP and Attack has somewhere left to go; otherwise it takes half the
+## maximum off and sends Attack straight to the top, however far short of it
+## the stage already was.
+static func _belly_drum(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	var has_enough_hp: bool = mon.hp * 2 > mon.max_hp()
+	var stage: int = mon.stage("attack")
+	if not has_enough_hp or stage >= Gen2Stats.MAX_STAGE:
+		turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {"target": turn.side, "stat": "attack", "by": 6})
+		return
+
+	@warning_ignore("integer_division")
+	mon.take_damage(mon.max_hp() / 2)
+	mon.change_stage("attack", Gen2Stats.MAX_STAGE - stage)
+	turn.emit(Gen2Battle.STAT_CHANGED, {"target": turn.side, "stat": "attack", "by": 6})
+
+
+## Psych Up: the target's seven stages, copied onto the user in one go, or a
+## failure if the target has nothing raised or lowered for there to be anything
+## to copy.
+static func _psych_up(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+	var keys: Array = Gen2BattleMon.STAGED_STATS + Gen2BattleMon.STAGED_ODDS
+
+	var defender_changed: bool = false
+	for key: String in keys:
+		if int(defender.stages.get(key, 0)) != 0:
+			defender_changed = true
+			break
+	if not defender_changed:
+		return
+
+	for key: String in keys:
+		attacker.stages[key] = int(defender.stages.get(key, 0))
+	turn.emit(Gen2Battle.STAGES_COPIED)
 
 
 ## Moves one stat by one command's worth, and writes down who it happened to and

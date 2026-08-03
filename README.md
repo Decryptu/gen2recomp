@@ -30,10 +30,12 @@ the same thing for Generation 1.
 > verified cartridge decodes into species data, moves, items, types, the type
 > chart, learnsets, evolutions, palettes, every Pokémon sprite, every trainer
 > pic, the font, the text box borders and the battle HUD. A battle can be
-> fought: parties, switching, stats, damage, accuracy, turn order and the five
-> status conditions, on a real 160x144 screen with the bars draining and the
-> messages appearing. Every move effect other than the status ones is still an
-> ordinary attack, and the overworld, audio and the mod loader do not exist.
+> fought: parties, switching, stats, damage, accuracy, turn order, the five
+> status conditions, confusion, flinching, two-turn moves, recharging, Toxic,
+> Haze, Belly Drum and Psych Up, on a real 160x144 screen with the bars
+> draining and the messages appearing. Disable, Attract, multi-hit moves,
+> drain moves, OHKOs, Counter and the fixed-damage moves are still an ordinary
+> attack, and the overworld, audio and the mod loader do not exist.
 > There is nothing playable here today.
 
 ## Getting started

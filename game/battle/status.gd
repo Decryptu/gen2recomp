@@ -48,6 +48,11 @@ const CHANCE_RANGE: int = 256
 ## Burn and poison cost an eighth of the maximum, never less than one.
 const RESIDUAL_DIVISOR: int = 8
 
+## Toxic ramps rather than costing a flat eighth: a sixteenth of the maximum for
+## every turn it has been in effect, so the first turn costs the least of any
+## status and the Pokémon that stays in against it pays more each turn after.
+const TOXIC_RESIDUAL_DIVISOR: int = 16
+
 
 static func has(status: int, flag: int) -> bool:
 	return (status & flag) != 0
@@ -102,6 +107,14 @@ static func apply_paralysis(speed: int) -> int:
 static func residual_damage(max_hp: int) -> int:
 	@warning_ignore("integer_division")
 	return maxi(max_hp / RESIDUAL_DIVISOR, 1)
+
+
+## What Toxic takes at the end of a turn, at [param counter] turns of it having
+## been in effect. [param counter] starts at 1 the turn it is inflicted, so the
+## first hit is a sixteenth and not nothing.
+static func toxic_damage(max_hp: int, counter: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp * counter / TOXIC_RESIDUAL_DIVISOR, 1)
 
 
 ## What is on the byte, as a name a message can be built from, or an empty

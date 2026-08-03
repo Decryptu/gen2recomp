@@ -46,6 +46,29 @@ const ANCIENTPOWER: int = 246
 const PSYCHIC_LOWERS: int = 210
 const PSYCHIC_NEVER: int = 211
 
+## The substatus moves. Flinch and confusion each in the two shapes they come
+## in, the same [code]_ALWAYS[/code]/nothing pairing [constant EMBER_BURNS] and
+## [constant NEVER_BURNS] use so a test can have one without a seed; Hyper Beam
+## for recharge, since nothing else in this table needs it.
+const ROLLING_KICK_ALWAYS: int = 247
+const ROLLING_KICK_NEVER: int = 248
+const CONFUSION_ALWAYS: int = 249
+const CONFUSION_NEVER: int = 250
+const SUPERSONIC: int = 251
+const HYPER_BEAM: int = 252
+
+## Solarbeam for the plain two-turn shape, Skull Bash for the one that raises a
+## stat behind the hit.
+const SOLARBEAM: int = 253
+const SKULL_BASH: int = 254
+const TOXIC: int = 255
+const HAZE: int = 256
+const BELLY_DRUM: int = 257
+const PSYCH_UP: int = 258
+
+## The highest move number this table fills. Grown as new moves are added.
+const MAX_MOVE: int = PSYCH_UP
+
 const NORMAL: int = 0x00
 const GROUND: int = 0x04
 const ROCK: int = 0x05
@@ -159,10 +182,25 @@ static func _moves() -> Array:
 		# [constant EMBER_BURNS] and [constant NEVER_BURNS] use for a status.
 		PSYCHIC_LOWERS: ["PSYCHIC", 90, PSYCHIC_TYPE, 255, 10, Gen2MoveEffect.STAT_DOWN_HIT_BASE + 4, 256],
 		PSYCHIC_NEVER: ["PSYCHIC", 90, PSYCHIC_TYPE, 255, 10, Gen2MoveEffect.STAT_DOWN_HIT_BASE + 4, 0],
+		# A flinch behind a roll, the way Rolling Kick does it.
+		ROLLING_KICK_ALWAYS: ["ROLLING KICK", 60, NORMAL, 255, 15, Gen2MoveEffect.FLINCH_HIT, 256],
+		ROLLING_KICK_NEVER: ["ROLLING KICK", 60, NORMAL, 255, 15, Gen2MoveEffect.FLINCH_HIT, 0],
+		# A confusion behind a roll, the way Confusion itself does it.
+		CONFUSION_ALWAYS: ["CONFUSION", 50, PSYCHIC_TYPE, 255, 25, Gen2MoveEffect.CONFUSE_HIT, 256],
+		CONFUSION_NEVER: ["CONFUSION", 50, PSYCHIC_TYPE, 255, 25, Gen2MoveEffect.CONFUSE_HIT, 0],
+		# Confusion as the whole of the move, the way Supersonic does it.
+		SUPERSONIC: ["SUPERSONIC", 0, NORMAL, 255, 20, Gen2MoveEffect.CONFUSE, 0],
+		HYPER_BEAM: ["HYPER BEAM", 150, NORMAL, 255, 5, Gen2MoveEffect.RECHARGE_HIT, 0],
+		SOLARBEAM: ["SOLARBEAM", 120, NORMAL, 255, 10, Gen2MoveEffect.SOLARBEAM, 0],
+		SKULL_BASH: ["SKULL BASH", 100, NORMAL, 255, 15, Gen2MoveEffect.SKULL_BASH, 0],
+		TOXIC: ["TOXIC", 0, POISON, 255, 10, Gen2MoveEffect.TOXIC, 0],
+		HAZE: ["HAZE", 0, NORMAL, 255, 30, Gen2MoveEffect.HAZE, 0],
+		BELLY_DRUM: ["BELLY DRUM", 0, NORMAL, 255, 10, Gen2MoveEffect.BELLY_DRUM, 0],
+		PSYCH_UP: ["PSYCH UP", 0, NORMAL, 255, 10, Gen2MoveEffect.PSYCH_UP, 0],
 	}
 
 	var out: Array = []
-	for number: int in range(1, ANCIENTPOWER + 1):
+	for number: int in range(1, MAX_MOVE + 1):
 		var entry: Array = known.get(number, ["FILLER", 40, NORMAL, 255, 20, 0, 0])
 		out.append({
 			"number": number,

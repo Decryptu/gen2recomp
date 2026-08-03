@@ -551,3 +551,219 @@ func test_a_status_move_that_cannot_rise_further_says_so() -> void:
 	var events: Array = battle.take_turn(0, 0)
 	assert_eq(_of_type(events, Gen2Battle.STAT_CHANGED).size(), 0)
 	assert_eq(_of_type(events, Gen2Battle.STAT_CHANGE_FAILED).size(), 1)
+
+
+func test_a_flinch_from_the_faster_side_costs_the_slower_side_its_turn() -> void:
+	# Pikachu moves first and flinches Geodude with a roll that cannot fail;
+	# Geodude's own move never happens this turn.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.ROLLING_KICK_ALWAYS]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1, "only Pikachu got to move")
+	var stopped: Dictionary = _first(events, Gen2Battle.CANNOT_MOVE)
+	assert_eq(int(stopped["side"]), Gen2Battle.ENEMY)
+	assert_eq(stopped["reason"], &"flinch")
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.FLINCHED), "cleared behind it")
+
+
+func test_a_flinch_that_never_rolls_leaves_the_slower_side_free_to_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.ROLLING_KICK_NEVER]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 2)
+	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 0)
+
+
+func test_a_status_move_confuses_rather_than_touching_the_status_byte() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SUPERSONIC]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.CONFUSED))
+	assert_eq(battle.enemy.status, Gen2Status.NONE, "confusion is not a status")
+	assert_eq(_of_type(events, Gen2Battle.CONFUSE_INFLICTED).size(), 1)
+
+
+func test_a_confused_pokemon_that_hits_itself_never_lands_its_own_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.substatus |= Gen2Substatus.CONFUSED
+	battle.player.confusion_turns = 3
+	var before: int = battle.player.hp
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.HURT_ITSELF).size(), 1)
+	assert_lt(battle.player.hp, before)
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1, "only the enemy's own move")
+
+
+func test_a_pokemon_confused_and_paralysed_can_still_be_stopped_by_either() -> void:
+	# The two live on different bytes and are asked about independently, so a
+	# Pokémon can carry both, unlike two entries on the status byte itself.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.status = Gen2Status.PARALYSIS
+	battle.player.substatus |= Gen2Substatus.CONFUSED
+	battle.player.confusion_turns = 3
+	assert_true(Gen2Status.has(battle.player.status, Gen2Status.PARALYSIS))
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CONFUSED))
+
+
+func test_hyper_beam_locks_the_user_out_the_turn_after_it_connects() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.HYPER_BEAM]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var first_turn: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(first_turn, Gen2Battle.HIT).filter(
+		func(event: Dictionary) -> bool: return int(event["side"]) == Gen2Battle.PLAYER
+	).size(), 1, "Hyper Beam connected")
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RECHARGING))
+
+	var second_turn: Array = battle.take_turn(0, 0)
+	var stopped: Dictionary = _first(second_turn, Gen2Battle.CANNOT_MOVE)
+	assert_eq(int(stopped["side"]), Gen2Battle.PLAYER)
+	assert_eq(stopped["reason"], &"recharge")
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RECHARGING))
+
+
+func test_switching_out_clears_confusion_and_recharge() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.player.substatus |= Gen2Substatus.CONFUSED | Gen2Substatus.RECHARGING
+	battle.player.confusion_turns = 4
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	var bulbasaur: Gen2BattleMon = battle.player
+	assert_eq(bulbasaur.substatus, Gen2Substatus.NONE)
+	assert_eq(bulbasaur.confusion_turns, 0)
+
+
+func test_a_two_turn_move_charges_then_hits_on_the_next() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SOLARBEAM]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var before: int = int(battle.player.pp[0])
+
+	var first_turn: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(first_turn, Gen2Battle.CHARGING_UP).size(), 1)
+	assert_eq(_of_type(first_turn, Gen2Battle.HIT).filter(
+		func(event: Dictionary) -> bool: return int(event["side"]) == Gen2Battle.PLAYER
+	).size(), 0, "nothing lands on the charge turn")
+	assert_eq(int(battle.player.pp[0]), before - 1, "the PP goes on the charge turn")
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CHARGING))
+
+	var second_turn: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(second_turn, Gen2Battle.HIT).filter(
+		func(event: Dictionary) -> bool: return int(event["side"]) == Gen2Battle.PLAYER
+	).size(), 1, "the release turn lands it")
+	assert_eq(int(battle.player.pp[0]), before - 1, "nothing more is spent on release")
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CHARGING))
+
+
+func test_a_two_turn_move_ignores_the_slot_it_is_asked_for_on_release() -> void:
+	# Whatever slot the caller passes on the release turn, the move that
+	# actually happens is the one that was charged, because nothing is chosen
+	# on that turn at all on the cartridge.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SOLARBEAM, Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.take_turn(0, 0)
+	var second_turn: Array = battle.take_turn(1, 0)
+	assert_eq(int(_first(second_turn, Gen2Battle.USED_MOVE)["move"]), Fixture.SOLARBEAM)
+
+
+func test_skull_bashs_charge_raises_defense_only_once_it_lands() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SKULL_BASH]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("defense"), 0, "nothing moves on the charge turn")
+
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("defense"), 1)
+
+
+func test_toxic_takes_more_each_turn_than_an_ordinary_poison_would() -> void:
+	# Poison Powder rather than Tackle on the enemy, so nothing but the toxic
+	# counter changes what the residual step takes off Geodude.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TOXIC]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var max_hp: int = battle.enemy.max_hp()
+
+	# The turn Toxic lands, the residual step already reads the counter it just
+	# started: one sixteenth, and then it ramps to two.
+	var first_turn: Array = battle.take_turn(0, 0)
+	assert_eq(int(_first(first_turn, Gen2Battle.HURT_BY_STATUS)["amount"]), Gen2Status.toxic_damage(max_hp, 1))
+	assert_eq(battle.enemy.toxic_counter, 2)
+
+	var second_turn: Array = battle.take_turn(0, 0)
+	assert_eq(int(_first(second_turn, Gen2Battle.HURT_BY_STATUS)["amount"]), Gen2Status.toxic_damage(max_hp, 2))
+	assert_eq(battle.enemy.toxic_counter, 3)
+	assert_gt(
+		int(_first(second_turn, Gen2Battle.HURT_BY_STATUS)["amount"]),
+		int(_first(first_turn, Gen2Battle.HURT_BY_STATUS)["amount"]),
+		"the counter ramped"
+	)
+
+
+func test_switching_out_a_toxic_pokemon_resets_the_ramp() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.player.status = Gen2Status.POISON
+	battle.player.toxic_counter = 4
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	assert_eq(battle.player.toxic_counter, 0, "cleared with the rest of the volatiles")
+
+
+func test_haze_wipes_out_both_sides_stages_in_the_middle_of_a_battle() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.HAZE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.change_stage("speed", 2)
+	battle.enemy.change_stage("defense", -2)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("speed"), 0)
+	assert_eq(battle.enemy.stage("defense"), 0, "both sides, not just the user's own")
+	assert_eq(_of_type(events, Gen2Battle.STAGES_CLEARED).size(), 1)
+
+
+func test_belly_drum_costs_the_user_half_its_health_for_a_maxed_attack() -> void:
+	# Thunder Wave rather than Tackle or Growl on the enemy: it neither damages
+	# Pikachu nor touches the stage Belly Drum is being checked against.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.BELLY_DRUM]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.THUNDER_WAVE])
+	)
+	var max_hp: int = battle.player.max_hp()
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("attack"), Gen2Stats.MAX_STAGE)
+	@warning_ignore("integer_division")
+	assert_eq(battle.player.hp, max_hp - max_hp / 2)
+
+
+func test_psych_up_copies_stat_changes_across_in_a_real_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PSYCH_UP]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.enemy.change_stage("defense", 3)
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.stage("defense"), 3)

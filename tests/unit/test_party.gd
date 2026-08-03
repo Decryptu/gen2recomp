@@ -111,3 +111,14 @@ func test_a_pokemon_called_back_keeps_its_health_and_loses_its_stages() -> void:
 	assert_eq(party.active, 1)
 	assert_eq(leaving.hp, hurt, "it comes back as hurt as it left")
 	assert_eq(int(leaving.stages["attack"]), 0)
+
+
+func test_a_pokemon_called_back_loses_what_gen2substatus_holds() -> void:
+	var party: Gen2Party = _party(2)
+	var leaving: Gen2BattleMon = party.at(0)
+	leaving.substatus = Gen2Substatus.CONFUSED
+	leaving.confusion_turns = 4
+
+	assert_true(party.send_out(1))
+	assert_eq(leaving.substatus, Gen2Substatus.NONE)
+	assert_eq(leaving.confusion_turns, 0)

@@ -34,6 +34,39 @@ const RECOIL_HIT: int = 48
 const POISON: int = 66
 const PARALYZE: int = 67
 
+## The substatuses: flinching and confusion, each in the two shapes a status
+## can come in, plus Hyper Beam's own effect, which is the only move that
+## recharges. The numbers are read off the real cartridge's move table with
+## [code]tools/dump_tables.gd[/code], the same way every other effect byte here
+## was: Rolling Kick, Headbutt, Bite, Bone Club and Hyper Fang all carry 31;
+## Confusion and Psybeam carry 76; Supersonic and Confuse Ray carry 49; Hyper
+## Beam alone carries 80.
+const FLINCH_HIT: int = 31
+const CONFUSE_HIT: int = 76
+const CONFUSE: int = 49
+const RECHARGE_HIT: int = 80
+
+## The two-turn moves: charge on the first turn, hit on the second. Razor Wind,
+## Solarbeam, Fly and Dig share the plain shape; Sky Attack and Skull Bash each
+## add one thing behind the hit, which is why they keep their own effect byte
+## rather than folding into the plain one. Fly and Dig share 155 with each
+## other and nothing else, since both leave the field for their charge turn on
+## the cartridge, which nothing here models yet: see [code]HANDOFF.md[/code].
+const RAZOR_WIND: int = 39
+const SKY_ATTACK: int = 75
+const SKULL_BASH: int = 145
+const SOLARBEAM: int = 151
+const FLY_OR_DIG: int = 155
+
+## None of the three needs any state this file has not already grown for
+## something else: [Gen2BattleMon.reset_stages] for Haze,
+## [method Gen2BattleMon.change_stage] and [method Gen2BattleMon.take_damage]
+## for Belly Drum, and reading one side's stages to write the other's for
+## Psych Up.
+const HAZE: int = 25
+const BELLY_DRUM: int = 142
+const PSYCH_UP: int = 143
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
@@ -83,6 +116,18 @@ const POISON_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## Toxic: the same shape as [constant POISON_SEQUENCE], with the command that
+## starts the ramping counter in place of the one that leaves a flat poison.
+const TOXIC_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.TOXIC_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
 ## The matchup before the roll rather than after it, which is the order the
 ## cartridge lists them in and the reason Thunder Wave against a Ground type says
 ## it had no effect rather than that it missed.
@@ -93,6 +138,107 @@ const PARALYZE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.PARALYZE_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Supersonic and Confuse Ray: no power, so no matchup step either, the same
+## shape as [constant SLEEP_SEQUENCE].
+const CONFUSE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CONFUSE_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Hyper Beam: an ordinary attack with the recharge locked in behind the hit,
+## which is why it sits after [constant Gen2EffectCommands.CHECK_HIT] rather
+## than before it. A miss ends the move at [constant Gen2EffectCommands.CHECK_HIT]
+## the way any other miss does, so a missed Hyper Beam costs nothing extra.
+const RECHARGE_HIT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.RECHARGE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Razor Wind, Solarbeam, Fly and Dig: a normal attack with the charge in front
+## of it. The first time this runs, [constant Gen2EffectCommands.CHARGE_MOVE]
+## ends the move before [constant Gen2EffectCommands.DAMAGE_CALC] is reached;
+## the second time, it clears the lock and everything after it is
+## [constant NORMAL_HIT] again.
+const CHARGE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Sky Attack: the same charge, with a flinch chance behind the hit exactly the
+## way [constant FLINCH_HIT] carries one. The real cartridge's own move table
+## gives it a chance of zero, which is never, so this is written the way the
+## disassembly has it rather than left out: a flinch that cannot come up reads
+## the same as no flinch at all, and nothing here should assume that stays true
+## forever.
+const SKY_ATTACK_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.FLINCH_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Skull Bash: the same charge, with the user's own Defense raised by one stage
+## behind the hit landing, which is the one thing that sets it apart from
+## [constant CHARGE_SEQUENCE].
+const SKULL_BASH_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.DEFENSE_UP,
+	Gen2EffectCommands.STAT_UP_MESSAGE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const HAZE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.HAZE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const BELLY_DRUM_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.BELLY_DRUM,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const PSYCH_UP_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.PSYCH_UP,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -214,21 +360,29 @@ static func _stat_sequences() -> Dictionary:
 ## Effect bytes that do something other than [constant NORMAL_HIT]. An effect
 ## that is not in here is an ordinary attack, which is what most of the table is
 ## and what an effect nobody has written yet falls back to.
-##
-## Toxic shares the ordinary poison list. On the cartridge it is a poison that
-## doubles every turn, counted on a substatus that nothing here carries yet, so
-## it is currently the weaker thing it is closest to rather than nothing at all.
 static func _sequences() -> Dictionary:
 	var out: Dictionary = {
 		SLEEP: SLEEP_SEQUENCE,
 		POISON: POISON_SEQUENCE,
-		TOXIC: POISON_SEQUENCE,
+		TOXIC: TOXIC_SEQUENCE,
 		PARALYZE: PARALYZE_SEQUENCE,
 		POISON_HIT: _secondary([Gen2EffectCommands.POISON_TARGET]),
 		BURN_HIT: _secondary([Gen2EffectCommands.BURN_TARGET]),
 		FREEZE_HIT: _secondary([Gen2EffectCommands.FREEZE_TARGET]),
 		PARALYZE_HIT: _secondary([Gen2EffectCommands.PARALYZE_TARGET]),
 		RECOIL_HIT: RECOIL_HIT_SEQUENCE,
+		FLINCH_HIT: _secondary([Gen2EffectCommands.FLINCH_TARGET]),
+		CONFUSE_HIT: _secondary([Gen2EffectCommands.CONFUSE_TARGET]),
+		CONFUSE: CONFUSE_SEQUENCE,
+		RECHARGE_HIT: RECHARGE_HIT_SEQUENCE,
+		RAZOR_WIND: CHARGE_SEQUENCE,
+		SOLARBEAM: CHARGE_SEQUENCE,
+		FLY_OR_DIG: CHARGE_SEQUENCE,
+		SKY_ATTACK: SKY_ATTACK_SEQUENCE,
+		SKULL_BASH: SKULL_BASH_SEQUENCE,
+		HAZE: HAZE_SEQUENCE,
+		BELLY_DRUM: BELLY_DRUM_SEQUENCE,
+		PSYCH_UP: PSYCH_UP_SEQUENCE,
 	}
 	out.merge(_stat_sequences())
 	return out

@@ -34,13 +34,31 @@ const HIT: StringName = &"hit"
 const RECOIL: StringName = &"recoil"
 const FAINTED: StringName = &"fainted"
 ## A status stopped a Pokémon moving. [code]reason[/code] says which one, since
-## the three read differently and only one of them is a surprise.
+## the six read differently and not all of them are a surprise: [code]&"sleep"[/code],
+## [code]&"freeze"[/code], [code]&"paralysis"[/code], [code]&"flinch"[/code],
+## [code]&"recharge"[/code].
 const CANNOT_MOVE: StringName = &"cannot_move"
 const WOKE_UP: StringName = &"woke_up"
 const THAWED: StringName = &"thawed"
 ## A status put on a Pokémon, and a slice taken off by one it already had.
 const STATUS_INFLICTED: StringName = &"status_inflicted"
 const HURT_BY_STATUS: StringName = &"hurt_by_status"
+## Confusion put on a target. Not [constant STATUS_INFLICTED]: confusion lives
+## on [Gen2Substatus] rather than the status byte, and a Pokémon can carry both
+## at once.
+const CONFUSE_INFLICTED: StringName = &"confuse_inflicted"
+## Confusion said every turn it is still there, and the turn it lifts.
+const CONFUSED: StringName = &"confused"
+const SNAPPED_OUT: StringName = &"snapped_out"
+## A confused Pokémon hit itself instead of moving.
+const HURT_ITSELF: StringName = &"hurt_itself"
+## The first half of a two-turn move: the user is locked in and nothing else
+## happens this turn. See [method move_for] for the second half.
+const CHARGING_UP: StringName = &"charging_up"
+## Haze: every stage on both sides is gone. About both sides, like [constant OVER].
+const STAGES_CLEARED: StringName = &"stages_cleared"
+## Psych Up: the target's stages, now the user's too.
+const STAGES_COPIED: StringName = &"stages_copied"
 ## A stat moved a stage, or tried to and could not. [code]stat[/code] is the key
 ## [Gen2BattleMon] keeps it under, or [code]"all"[/code] for the five Ancientpower
 ## moves at once; [code]by[/code] is how many stages, signed.
@@ -252,6 +270,11 @@ func take_turn(player_slot: int, enemy_slot: int) -> Array:
 ## After both moves rather than after each, and skipping whoever is already down:
 ## a Pokémon that has fainted this turn is not burned any further, and one that
 ## goes down to its burn faints here rather than in the middle of somebody's move.
+##
+## A poisoned Pokémon with a running [member Gen2BattleMon.toxic_counter] is
+## the one Toxic left, and it ramps instead of taking the flat eighth every
+## other poison and every burn take; the counter itself goes up here, once a
+## turn, so the turn it was inflicted on counts as the first.
 func _residual_damage(acting: Array, events: Array) -> void:
 	for side: int in acting:
 		var current: Gen2BattleMon = mon(side)
@@ -260,7 +283,14 @@ func _residual_damage(acting: Array, events: Array) -> void:
 		if not Gen2Status.has(current.status, Gen2Status.BURN | Gen2Status.POISON):
 			continue
 
-		var taken: int = current.take_damage(Gen2Status.residual_damage(current.max_hp()))
+		var amount: int
+		if Gen2Status.has(current.status, Gen2Status.POISON) and current.toxic_counter > 0:
+			amount = Gen2Status.toxic_damage(current.max_hp(), current.toxic_counter)
+			current.toxic_counter += 1
+		else:
+			amount = Gen2Status.residual_damage(current.max_hp())
+
+		var taken: int = current.take_damage(amount)
 		events.append({
 			"type": HURT_BY_STATUS,
 			"side": side,
@@ -289,13 +319,19 @@ func _move_for_action(side: int, action: Dictionary) -> int:
 
 ## Which move a side will actually use.
 ##
-## A slot with nothing usable in it answers Struggle, which is the cartridge's
-## answer for a Pokémon with no PP anywhere. Here it is also the answer for a
-## slot that is empty or spent while others are not, because a caller that points
-## at one has asked for something that cannot happen, and Struggle is the only
-## move that is always available.
+## A Pokémon locked into a two-turn move's release turn answers with what it
+## charged, whatever slot the caller asks for: on the cartridge nothing is
+## chosen on that turn at all, so nothing here is either.
+##
+## Failing that, a slot with nothing usable in it answers Struggle, which is
+## the cartridge's answer for a Pokémon with no PP anywhere. Here it is also the
+## answer for a slot that is empty or spent while others are not, because a
+## caller that points at one has asked for something that cannot happen, and
+## Struggle is the only move that is always available.
 func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
+	if attacker.charged_move != 0:
+		return attacker.charged_move
 	return int(attacker.moves[slot]) if attacker.can_use(slot) else Gen2Damage.STRUGGLE
 
 
@@ -355,6 +391,10 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 		return
 
 	var turn: Gen2Turn = Gen2Turn.create(self, side, slot, move_number, move, events)
+	# The release turn of a two-turn move: the PP for it was already spent on
+	# the charge turn, and [method Gen2EffectCommands._do_turn] reads this so it
+	# is not spent again.
+	turn.locked = mon(side).charged_move == move_number and move_number != 0
 
 	# Whether the Pokémon can move at all is asked before the effect is looked up,
 	# which is the cartridge's arrangement: every move goes through it, so no

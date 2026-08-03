@@ -50,6 +50,11 @@ const STRUGGLE: int = 0xA5
 const STAB_NUMERATOR: int = 3
 const STAB_DENOMINATOR: int = 2
 
+## What a confused Pokémon hits itself for: a 40-power typeless physical hit
+## against its own Attack and Defense. Neither side's type comes into it, so
+## there is no STAB and no matchup, and it is never a critical.
+const CONFUSION_POWER: int = 40
+
 
 ## A hit, rolled. Returns what [method calculate_with] returns.
 static func calculate(
@@ -187,6 +192,16 @@ static func critical_level(move_number: int, focus_energy: bool = false) -> int:
 
 static func roll_variation(rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(MIN_VARIATION, MAX_VARIATION)
+
+
+## What a confused Pokémon does to itself instead of moving: its own Attack
+## against its own Defense, with the stages and any burn applied exactly as an
+## ordinary physical hit would read them, but no STAB, no type matchup and no
+## critical, because the hit is not really an attack at all.
+static func confusion_damage(mon: Gen2BattleMon, rng: RandomNumberGenerator) -> int:
+	var damage: int = base_damage(mon.level, CONFUSION_POWER, mon.stat("attack"), mon.stat("defense"))
+	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
+	return apply_variation(damage, roll_variation(rng))
 
 
 ## Whether a move is worked out from Attack or from Special Attack.
