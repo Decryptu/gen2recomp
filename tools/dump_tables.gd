@@ -199,6 +199,7 @@ func _dump_trainers(directory: String, rows: Array) -> void:
 	for row: Dictionary in rows:
 		print("  %s" % _describe("trainers", row))
 		print("    %s" % _describe_ai(row.get("attributes", {}), items))
+		print("    DVs: %s" % _describe_dvs(int(row.get("dvs", 0))))
 		var trainers: Array = row.get("trainers", [])
 		total += trainers.size()
 		for trainer: Dictionary in trainers:
@@ -238,6 +239,15 @@ func _describe_ai(attributes: Dictionary, items: Array) -> String:
 	if not held.is_empty():
 		line += " | may use %s" % ", ".join(held)
 	return line
+
+
+## A class's own DVs, unpacked back into the four numbers pret's
+## `TrainerClassDVs` lists them as, for reading against that table directly.
+func _describe_dvs(dv_word: int) -> String:
+	return "%d atk, %d def, %d spd, %d spc" % [
+		Gen2Stats.attack_dv(dv_word), Gen2Stats.defense_dv(dv_word),
+		Gen2Stats.speed_dv(dv_word), Gen2Stats.special_dv(dv_word),
+	]
 
 
 func _describe_flags(value: int, names: Dictionary) -> String:

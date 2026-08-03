@@ -26,13 +26,57 @@ extends RefCounted
 ## something behind on a roll.
 const SLEEP: int = 1
 const POISON_HIT: int = 2
+## Absorb, Mega Drain, Giga Drain and Leech Life: half of what the hit
+## calculated healed onto the attacker. Named for the disassembly's own
+## "LeechHit" label rather than a bare "drain", so this reads against
+## `data/moves/effects_pointers.asm` line for line the way every other
+## constant here does.
+const LEECH_HIT: int = 3
 const BURN_HIT: int = 4
 const FREEZE_HIT: int = 5
 const PARALYZE_HIT: int = 6
+## Dream Eater: the same drain [constant LEECH_HIT] leaves, gated on the
+## target being asleep. The gate lives inside
+## [method Gen2EffectCommands._check_hit] rather than a command of its own,
+## because that is where the real cartridge's shared accuracy check puts it: a
+## Dream Eater used on a Pokémon that is not asleep is read as a miss, not as
+## a separate failure.
+const DREAM_EATER: int = 8
 const TOXIC: int = 33
 const RECOIL_HIT: int = 48
 const POISON: int = 66
 const PARALYZE: int = 67
+
+## Two to five hits, the cartridge's own weighted roll
+## ([method Gen2EffectCommands._roll_multi_hit_count]); and exactly two, always,
+## for [constant DOUBLE_HIT]. Both point at the one command,
+## [constant Gen2EffectCommands.MULTI_HIT], which tells the two apart by
+## reading the effect byte back off the turn the same way the cartridge's own
+## loop does, rather than needing two commands that differ only in a number.
+const MULTI_HIT: int = 29
+const DOUBLE_HIT: int = 44
+## Twineedle: the same two hits as [constant DOUBLE_HIT], with a chance of
+## poison rolled once before either lands and applied once after both do,
+## never per hit.
+const TWINEEDLE: int = 77
+
+## Guillotine, Horn Drill and Fissure: an instant faint if it connects at all,
+## which is its own accuracy rule rather than the move's stored one. See
+## [method Gen2EffectCommands._ohko].
+const OHKO: int = 38
+
+## The four effects behind [constant Gen2EffectCommands.FIXED_DAMAGE], sharing
+## one command the way the cartridge shares one, `BattleCommand_ConstantDamage`,
+## reading the effect byte back to decide which number it is.
+## Super Fang: half the target's current HP, floored, never less than one.
+const SUPER_FANG: int = 40
+## Sonicboom and Dragon Rage: the move's own power field, taken directly as the
+## whole of the hit rather than as an input to the formula.
+const STATIC_DAMAGE: int = 41
+## Seismic Toss and Night Shade: the user's own level, exactly.
+const LEVEL_DAMAGE: int = 87
+## Psywave: a roll of the user's own, [method Gen2Damage.psywave_damage].
+const PSYWAVE: int = 88
 
 ## The substatuses: flinching and confusion, each in the two shapes a status
 ## can come in, plus Hyper Beam's own effect, which is the only move that
@@ -242,6 +286,82 @@ const PSYCH_UP_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## [constant MULTI_HIT] and [constant DOUBLE_HIT]: the accuracy roll happens
+## once, the way the cartridge's own script checks it before the loop that
+## repeats the hit even starts, and everything from the critical roll onward
+## is [constant Gen2EffectCommands.MULTI_HIT]'s own job, hit by hit.
+const MULTI_HIT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Twineedle: the same two hits, with the poison roll taken once right after
+## the accuracy check, in the same slot [method Gen2MoveEffect._secondary]
+## already puts a secondary effect's roll, and applied once at the very end,
+## after both hits, rather than after either one on its own.
+const TWINEEDLE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.POISON_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## [constant LEECH_HIT] and [constant DREAM_EATER]: the same list, since
+## Dream Eater's own "must be asleep" rule lives inside
+## [constant Gen2EffectCommands.CHECK_HIT] rather than in a step of its own,
+## the same place the real cartridge's shared accuracy check puts it.
+const DRAIN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.DRAIN_TARGET,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## [constant SUPER_FANG], [constant STATIC_DAMAGE], [constant LEVEL_DAMAGE] and
+## [constant PSYWAVE]: one shared list, the way the cartridge shares one
+## script (`StaticDamage:`) across all four labels. [constant DAMAGE_CALC]'s
+## own roll runs first and is thrown away except for the one thing worth
+## keeping from it, whether the hit is immune at all; the real number is
+## [constant Gen2EffectCommands.FIXED_DAMAGE]'s to decide.
+const FIXED_DAMAGE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.FIXED_DAMAGE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Guillotine, Horn Drill and Fissure. [constant Gen2EffectCommands.OHKO] does
+## its own accuracy roll and its own damage, so nothing after
+## [constant CHECK_IMMUNE] is shared with an ordinary attack.
+const OHKO_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.OHKO,
+	Gen2EffectCommands.END_MOVE,
+]
+
 
 ## An attack that leaves something behind if its roll comes up. The damage is
 ## done either way: the roll sits between the hit and the status, so a failed one
@@ -383,6 +503,16 @@ static func _sequences() -> Dictionary:
 		HAZE: HAZE_SEQUENCE,
 		BELLY_DRUM: BELLY_DRUM_SEQUENCE,
 		PSYCH_UP: PSYCH_UP_SEQUENCE,
+		LEECH_HIT: DRAIN_SEQUENCE,
+		DREAM_EATER: DRAIN_SEQUENCE,
+		MULTI_HIT: MULTI_HIT_SEQUENCE,
+		DOUBLE_HIT: MULTI_HIT_SEQUENCE,
+		TWINEEDLE: TWINEEDLE_SEQUENCE,
+		OHKO: OHKO_SEQUENCE,
+		SUPER_FANG: FIXED_DAMAGE_SEQUENCE,
+		STATIC_DAMAGE: FIXED_DAMAGE_SEQUENCE,
+		LEVEL_DAMAGE: FIXED_DAMAGE_SEQUENCE,
+		PSYWAVE: FIXED_DAMAGE_SEQUENCE,
 	}
 	out.merge(_stat_sequences())
 	return out

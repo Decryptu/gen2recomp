@@ -767,3 +767,48 @@ func test_psych_up_copies_stat_changes_across_in_a_real_turn() -> void:
 	battle.enemy.change_stage("defense", 3)
 	battle.take_turn(0, 0)
 	assert_eq(battle.player.stage("defense"), 3)
+
+
+func test_a_multi_hit_move_lands_more_than_once_in_a_real_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.MULTI_HIT_MOVE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.THUNDER_WAVE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var hits: int = _of_type(events, Gen2Battle.HIT).size()
+	assert_between(hits, 2, 5)
+	assert_eq(int(_first(events, Gen2Battle.HIT_TIMES)["times"]), hits)
+
+
+func test_a_draining_move_heals_the_user_in_a_real_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.DRAIN_MOVE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.THUNDER_WAVE])
+	)
+	battle.player.hp = 1
+	var before: int = battle.player.hp
+	battle.take_turn(0, 0)
+	assert_gt(battle.player.hp, before)
+
+
+func test_seismic_toss_deals_the_users_level_however_the_formula_would_read_it() -> void:
+	# Geodude's real Defense would cut an ordinary Normal-type hit down hard;
+	# Seismic Toss ignores every bit of that and lands exactly 50.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.LEVEL_DAMAGE_MOVE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.THUNDER_WAVE])
+	)
+	var before: int = battle.enemy.hp
+	battle.take_turn(0, 0)
+	assert_eq(before - battle.enemy.hp, 50)
+
+
+func test_guillotine_faints_its_target_outright_in_a_real_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 100, [Fixture.OHKO_MOVE]),
+		_mon(Fixture.GEODUDE, 5, [Fixture.THUNDER_WAVE])
+	)
+	# A hundred-level gap pushes the boosted accuracy past 255, which never
+	# misses, so the outcome needs no seed to be sure of.
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.hp, 0)

@@ -348,6 +348,18 @@ const CONTEXT_USE: int = 1 << 6
 const AI_ITEM_SWITCH_MASK: int = SWITCH_OFTEN | SWITCH_RARELY | SWITCH_SOMETIMES \
 	| ALWAYS_USE | UNKNOWN_USE | CONTEXT_USE
 
+## The trainer *DVs* table: a fifth trainer table, indexed the same way as the
+## attributes table, one fixed two-byte entry per class rather than a pointer.
+## Two nibbles a byte, attack and defense in the first and speed and special in
+## the second, which is exactly the shape [method Gen2Stats.pack_dvs] already
+## packs a DV word into: a class's two raw bytes, read as one big-endian
+## integer, are a [Gen2BattleMon] DV word with no repacking. Confirmed against
+## pret's own `TrainerClassDVs` entry by entry in all three games: Falkner opens
+## the table with his own known DVs, and the class that closes it (class 66 in
+## Gold and Silver, 67 in Crystal, since Crystal alone carries MYSTICALMAN)
+## carries its own.
+const TRAINER_DVS_SIZE: int = 2
+
 ## The one trainer class with no party of its own: the eleven o'clock scholar,
 ## Professor Elm's class in the class table, whose name and pic exist but who
 ## the games never send into a battle. Its own label in the source is followed
@@ -427,6 +439,8 @@ const GOLD_SILVER: Dictionary = {
 	"trainer_party_total": 495,
 	"trainer_party_last_trainer": "GRUNT",
 	"trainer_attributes": 0x39562,
+	"trainer_dvs": 0x27283,
+	"trainer_dvs_last": 0x7EA8, # GRUNTF, class 66, "ROCKET" in-game: atk 7, def 14, spd 10, spc 8.
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -462,6 +476,8 @@ const CRYSTAL: Dictionary = {
 	"trainer_party_total": 541,
 	"trainer_party_last_trainer": "EUSINE",
 	"trainer_attributes": 0x3959C,
+	"trainer_dvs": 0x270D6,
+	"trainer_dvs_last": 0x9888, # MYSTICALMAN, class 67: atk 9, def 8, spd 8, spc 8.
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -556,6 +572,12 @@ static func trainer_party_pointer_offset(layout: Dictionary, trainer_class: int)
 ## from the first class rather than from the player.
 static func trainer_attributes_offset(layout: Dictionary, trainer_class: int) -> int:
 	return int(layout["trainer_attributes"]) + (trainer_class - 1) * TRAINER_ATTRIBUTES_SIZE
+
+
+## A trainer class's own entry in the DVs table, indexed the same way as
+## [method trainer_attributes_offset].
+static func trainer_dvs_offset(layout: Dictionary, trainer_class: int) -> int:
+	return int(layout["trainer_dvs"]) + (trainer_class - 1) * TRAINER_DVS_SIZE
 
 
 ## How many bytes one Pokémon occupies in a trainer's party, past its level and

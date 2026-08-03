@@ -174,6 +174,25 @@ func test_the_trainer_party_table_does_not_run_off_the_end() -> void:
 		)
 
 
+func test_the_trainer_dvs_table_is_a_flat_run_indexed_from_the_first_class() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		assert_eq(
+			RomLayout.trainer_dvs_offset(layout, 1),
+			int(layout["trainer_dvs"]), "%s DVs start at the first class" % id
+		)
+		assert_eq(
+			RomLayout.trainer_dvs_offset(layout, 2),
+			int(layout["trainer_dvs"]) + RomLayout.TRAINER_DVS_SIZE
+		)
+
+		var count: int = RomLayout.trainer_class_count(layout)
+		assert_lt(
+			RomLayout.trainer_dvs_offset(layout, count) + RomLayout.TRAINER_DVS_SIZE,
+			RomRegistry.EXPECTED_SIZE
+		)
+
+
 ## A NORMAL Pokémon is level and species only; the other three types add an
 ## item, four moves, or both, on top of that, never fewer than either half asks
 ## for on its own.

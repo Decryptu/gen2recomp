@@ -64,6 +64,7 @@ func _write_cache() -> void:
 	RomCache.write_json(RomCache.trainers_path(_directory), [
 		{
 			"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678],
+			"dvs": 0x9A77, # Falkner's own: attack 9, defense 10, speed 7, special 7.
 			"trainers": [
 				{
 					"name": "FALKNER", "type": RomLayout.TRAINER_MON_NORMAL,
@@ -109,8 +110,17 @@ func test_trainer_pokemon_are_full_health_with_no_stat_experience() -> void:
 	var party: Gen2Party = Gen2TrainerParty.build(_data, 1, 0)
 	var lead: Gen2BattleMon = party.at(0)
 	assert_eq(lead.hp, lead.max_hp())
-	assert_eq(lead.dvs, Gen2BattleMon.PERFECT_DVS)
 	assert_eq(lead.stat_exp, {})
+
+
+## The whole point of carrying the class's own DVs rather than
+## [constant Gen2BattleMon.PERFECT_DVS]: every one of the class's Pokémon shares
+## them, the same as the real cartridge, because a trainer's DVs are a property
+## of the class rather than of the individual Pokémon.
+func test_a_trainer_classs_whole_party_shares_its_own_dvs() -> void:
+	var party: Gen2Party = Gen2TrainerParty.build(_data, 1, 0)
+	assert_eq(party.at(0).dvs, 0x9A77)
+	assert_eq(party.at(1).dvs, 0x9A77)
 
 
 func test_a_stored_moves_trainers_pokemon_knows_exactly_what_is_stored() -> void:

@@ -490,6 +490,225 @@ func test_psych_up_fails_when_the_target_has_nothing_to_copy() -> void:
 	assert_eq(turn.events.size(), 0)
 
 
+func test_multi_hit_and_double_hit_share_one_command() -> void:
+	var multi: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.MULTI_HIT)
+	var double_hit: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DOUBLE_HIT)
+	assert_eq(multi, double_hit)
+	assert_true(multi.has(Gen2EffectCommands.MULTI_HIT))
+	assert_eq(
+		multi.find(Gen2EffectCommands.CHECK_HIT) + 1, multi.find(Gen2EffectCommands.MULTI_HIT),
+		"the accuracy roll happens once, right before the hits it covers"
+	)
+
+
+func test_double_hit_always_hits_exactly_twice() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.DOUBLE_HIT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 2)
+	assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), 2)
+
+
+func test_multi_hit_lands_between_two_and_five_times() -> void:
+	# Twenty different seeds, so the roll's own range gets exercised rather than
+	# whatever one seed happens to land on.
+	for seed_value: int in range(1, 21):
+		_rng.seed = seed_value
+		var turn: Gen2Turn = _turn(_battle(), Fixture.MULTI_HIT_MOVE)
+		Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+		Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+		var hits: int = _of_type(turn.events, Gen2Battle.HIT).size()
+		assert_between(hits, 2, 5, "seed %d" % seed_value)
+		assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), hits)
+
+
+func test_multi_hit_stops_and_says_nothing_once_the_target_is_down() -> void:
+	# The cartridge's own loop jumps straight past the "hit N times" line the
+	# moment a hit brings the target down, so no summary is the whole point.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 1
+	var turn: Gen2Turn = _turn(battle, Fixture.MULTI_HIT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1, "the one hit that finished it")
+	assert_eq(_first(turn.events, Gen2Battle.HIT_TIMES), {})
+	assert_true(turn.ended)
+	assert_eq(_first(turn.events, Gen2Battle.FAINTED)["side"], Gen2Battle.ENEMY)
+
+
+func test_twineedle_hits_twice_then_rolls_poison_once_for_both() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.TWINEEDLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.POISON_TARGET, turn)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 2)
+	assert_true(
+		Gen2Status.has(turn.defender().status, Gen2Status.POISON), "the 256-chance never fails"
+	)
+	assert_eq(_of_type(turn.events, Gen2Battle.STATUS_INFLICTED).size(), 1, "once, not per hit")
+
+
+func test_drain_sequences_share_one_list_gated_by_check_hit() -> void:
+	var leech: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.LEECH_HIT)
+	var dream_eater: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DREAM_EATER)
+	assert_eq(leech, dream_eater)
+	assert_true(leech.has(Gen2EffectCommands.DRAIN_TARGET))
+	assert_lt(
+		leech.find(Gen2EffectCommands.APPLY_DAMAGE), leech.find(Gen2EffectCommands.DRAIN_TARGET),
+		"drained before checked for a faint, the same slot recoil takes"
+	)
+	assert_lt(
+		leech.find(Gen2EffectCommands.DRAIN_TARGET), leech.find(Gen2EffectCommands.CHECK_FAINT)
+	)
+
+
+func test_drain_heals_half_of_what_was_calculated_not_what_was_taken() -> void:
+	# A target with three hit points left takes three, but the drain reads the
+	# uncapped fifty the formula worked out, the cartridge's own quirk.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 3
+	battle.player.hp = 1
+	var turn: Gen2Turn = _turn(battle, Fixture.DRAIN_MOVE)
+	turn.damage = 50
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+	assert_eq(turn.dealt, 3, "clamped to what was left to take")
+
+	Gen2EffectCommands.run(Gen2EffectCommands.DRAIN_TARGET, turn)
+	assert_eq(int(_first(turn.events, Gen2Battle.DRAINED)["amount"]), 25, "half of fifty, not of three")
+	assert_eq(_first(turn.events, Gen2Battle.DRAINED)["from"], turn.target)
+
+
+func test_drain_heals_at_least_one() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.hp = 1
+	var turn: Gen2Turn = _turn(battle, Fixture.DRAIN_MOVE)
+	turn.damage = 1
+	Gen2EffectCommands.run(Gen2EffectCommands.DRAIN_TARGET, turn)
+	assert_eq(int(_first(turn.events, Gen2Battle.DRAINED)["amount"]), 1)
+
+
+func test_dream_eater_misses_a_target_that_is_not_asleep() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.DREAM_EATER_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+	assert_true(turn.ended)
+	assert_eq(_first(turn.events, Gen2Battle.MISSED)["target"], turn.target)
+
+
+func test_dream_eater_connects_against_a_sleeping_target() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.status = Gen2Status.roll_sleep(_rng)
+	var turn: Gen2Turn = _turn(battle, Fixture.DREAM_EATER_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+	assert_false(turn.ended)
+	assert_eq(turn.events.size(), 0, "an ordinary hit, nothing to say about the check itself")
+
+
+func test_the_four_fixed_damage_effects_share_one_list() -> void:
+	var sequences: Array = [
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.SUPER_FANG),
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.STATIC_DAMAGE),
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.LEVEL_DAMAGE),
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.PSYWAVE),
+	]
+	for sequence: Array in sequences:
+		assert_eq(sequence, sequences[0])
+	assert_true(sequences[0].has(Gen2EffectCommands.FIXED_DAMAGE))
+	assert_lt(
+		sequences[0].find(Gen2EffectCommands.CHECK_IMMUNE),
+		sequences[0].find(Gen2EffectCommands.FIXED_DAMAGE),
+		"the roll DAMAGE_CALC already made is only kept for whether it is immune"
+	)
+
+
+func test_level_damage_deals_exactly_the_users_level() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.LEVEL_DAMAGE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	assert_eq(turn.damage, turn.attacker().level)
+	assert_false(turn.critical, "constant damage never criticals")
+	assert_eq(turn.effectiveness, RomLayout.MATCHUP_EFFECTIVE, "no effectiveness line for it either")
+
+
+func test_static_damage_deals_exactly_the_moves_own_power() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.STATIC_DAMAGE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	assert_eq(turn.damage, 20, "Sonicboom's own power in the fixture")
+
+
+func test_super_fang_halves_the_targets_current_hp() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 51
+	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	assert_eq(turn.damage, 25, "floored, not rounded")
+
+
+func test_super_fang_never_deals_less_than_one() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 1
+	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	assert_eq(turn.damage, 1)
+
+
+func test_psywave_stays_inside_its_own_range() -> void:
+	var turn: Gen2Turn = _turn(_battle(), Fixture.PSYWAVE_MOVE)
+	var level: int = turn.attacker().level
+	@warning_ignore("integer_division")
+	var upper: int = level / 2 + level
+	for seed_value: int in range(1, 21):
+		_rng.seed = seed_value
+		Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+		Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+		assert_between(turn.damage, 1, upper - 1, "seed %d" % seed_value)
+
+
+func test_ohko_has_no_ordinary_hit_or_damage_steps() -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.OHKO)
+	assert_true(sequence.has(Gen2EffectCommands.OHKO))
+	assert_false(sequence.has(Gen2EffectCommands.CHECK_HIT))
+	assert_false(sequence.has(Gen2EffectCommands.APPLY_DAMAGE))
+
+
+func test_ohko_fails_outright_against_a_higher_level_target() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.level = 10
+	battle.enemy.level = 50
+	var turn: Gen2Turn = _turn(battle, Fixture.OHKO_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.OHKO, turn)
+	assert_true(turn.ended)
+	assert_eq(_first(turn.events, Gen2Battle.NO_EFFECT)["target"], turn.target)
+	assert_eq(battle.enemy.hp, battle.enemy.max_hp(), "untouched, not even rolled for")
+
+
+func test_ohko_can_still_miss_its_boosted_roll() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.OHKO_MOVE)
+	turn.move = turn.move.duplicate()
+	turn.move["accuracy"] = 0
+	Gen2EffectCommands.run(Gen2EffectCommands.OHKO, turn)
+	assert_eq(_first(turn.events, Gen2Battle.MISSED)["target"], turn.target)
+	assert_eq(battle.enemy.hp, battle.enemy.max_hp())
+
+
+func test_ohko_faints_the_target_outright_when_it_connects() -> void:
+	# A hundred-level gap pushes the boosted accuracy past 255, which
+	# Gen2Accuracy.rolls_hit treats as never missing, so this needs no seed.
+	var battle: Gen2Battle = _battle()
+	battle.player.level = 100
+	battle.enemy.level = 5
+	var turn: Gen2Turn = _turn(battle, Fixture.OHKO_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.OHKO, turn)
+	assert_eq(battle.enemy.hp, 0)
+	assert_eq(int(_first(turn.events, Gen2Battle.OHKO)["amount"]), battle.enemy.max_hp())
+	assert_eq(_first(turn.events, Gen2Battle.FAINTED)["side"], Gen2Battle.ENEMY)
+
+
 func _of_type(events: Array, type: StringName) -> Array:
 	return events.filter(func(event: Dictionary) -> bool: return event["type"] == type)
 

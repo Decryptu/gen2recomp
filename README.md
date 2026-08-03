@@ -34,10 +34,12 @@ the same thing for Generation 1.
 > status conditions, confusion, flinching, two-turn moves, recharging, Toxic,
 > Haze, Belly Drum and Psych Up, on a real 160x144 screen with the bars
 > draining and the messages appearing, against a trainer AI scored by that
-> trainer class's own AI flags rather than a random pick. Disable, Attract,
-> multi-hit moves, drain moves, OHKOs, Counter and the fixed-damage moves are
-> still an ordinary attack, and the overworld, audio and the mod loader do not
-> exist.
+> trainer class's own AI flags rather than a random pick, and every trainer's
+> Pokémon carries its own class's DVs rather than a perfect set. Multi-hit
+> moves, drain moves, Dream Eater, the fixed-damage moves and OHKOs all have
+> their own sequence now; Disable, Attract, Mist, Focus Energy, Counter and
+> Mirror Coat are still an ordinary attack, and the overworld, audio and the
+> mod loader do not exist.
 > There is nothing playable here today.
 
 ## Getting started
@@ -98,7 +100,7 @@ What comes out today:
 | Items | All 255 names, indexed by item number |
 | Types | All 28 names, indexed by type number |
 | Type chart | Every matchup, and which two Foresight cancels |
-| Trainers | Every trainer class: name, pic, palette and its own AI flags; and every individual trainer's own party, level by level |
+| Trainers | Every trainer class: name, pic, palette, its own AI flags and its own DVs; and every individual trainer's own party, level by level |
 | Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
 | Sprites | Front and back for all 251 species, plus all 26 Unown forms |
 | Font | All 128 glyphs, indexed by character code |

@@ -89,6 +89,29 @@ const TOXIC_TARGET: StringName = &"toxictarget"
 const FLINCH_TARGET: StringName = &"flinchtarget"
 const CONFUSE_TARGET: StringName = &"confusetarget"
 
+## Heals the attacker for half of what the hit calculated, the same command for
+## Absorb-family drain and, gated by [constant Gen2MoveEffect.DREAM_EATER]'s own
+## rule inside [constant CHECK_HIT], for Dream Eater.
+const DRAIN_TARGET: StringName = &"draintarget"
+
+## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], or exactly two for
+## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE]:
+## one command that repeats the roll and the hit itself rather than a sequence
+## repeated by the runner, the same way [constant ALL_STATS_UP] repeats a stage
+## change five times without five commands.
+const MULTI_HIT: StringName = &"multihit"
+
+## Overwrites what [constant DAMAGE_CALC] worked out with the number
+## [constant Gen2MoveEffect.SUPER_FANG], [constant Gen2MoveEffect.STATIC_DAMAGE],
+## [constant Gen2MoveEffect.LEVEL_DAMAGE] and [constant Gen2MoveEffect.PSYWAVE]
+## actually deal. [constant DAMAGE_CALC]'s own roll still ran first, and its
+## immunity answer is the one thing about it this keeps.
+const FIXED_DAMAGE: StringName = &"fixeddamage"
+
+## Guillotine, Horn Drill and Fissure's own accuracy rule and their own damage:
+## nothing here is [constant CHECK_HIT] or [constant APPLY_DAMAGE].
+const OHKO: StringName = &"ohko"
+
 ## Recharge: locks the user out of its next turn, the tail of Hyper Beam's own
 ## list rather than anything a target-facing command touches.
 const RECHARGE: StringName = &"recharge"
@@ -255,6 +278,14 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_flinch_target(turn)
 		CONFUSE_TARGET:
 			_confuse_target(turn)
+		DRAIN_TARGET:
+			_drain_target(turn)
+		MULTI_HIT:
+			_multi_hit(turn)
+		FIXED_DAMAGE:
+			_fixed_damage(turn)
+		OHKO:
+			_ohko(turn)
 		RECHARGE:
 			_recharge(turn)
 		CHARGE_MOVE:
@@ -310,7 +341,17 @@ static func _check_immune(turn: Gen2Turn) -> void:
 	turn.end()
 
 
+## Dream Eater's own rule ("a Pokémon that isn't asleep cannot be eaten from")
+## is not a step of its own: the real cartridge folds it into this same shared
+## check, reading as a miss on a target that is not asleep rather than as a
+## distinct failure.
 static func _check_hit(turn: Gen2Turn) -> void:
+	if turn.effect() == Gen2MoveEffect.DREAM_EATER \
+		and not Gen2Status.is_asleep(turn.defender().status):
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		turn.end()
+		return
+
 	var chance: int = Gen2Accuracy.chance(
 		int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
 		turn.attacker().stage("accuracy"), turn.defender().stage("evasion")
@@ -515,6 +556,151 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	# Not [constant Gen2Battle.STATUS_INFLICTED]: that event's [code]status[/code]
 	# field is the status byte, and confusion never touches it.
 	turn.emit(Gen2Battle.CONFUSE_INFLICTED, {"target": turn.target})
+
+
+## Heals the attacker for half of what the hit calculated, at least one.
+##
+## Half of [member Gen2Turn.damage], the number the formula worked out, not
+## half of [member Gen2Turn.dealt], the number that actually came off a target
+## who had less than that left. The real cartridge's own drain reads the same
+## uncapped figure [constant APPLY_DAMAGE] read before clamping it to what the
+## defender had, so a move that calculates fifty against a target with three
+## hit points left heals twenty-five, not one.
+static func _drain_target(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	@warning_ignore("integer_division")
+	var healed: int = attacker.heal(maxi(turn.damage / 2, 1))
+	turn.emit(Gen2Battle.DRAINED, {
+		# "from" rather than "target": the healing lands on the attacker, whose
+		# hp and max_hp these are, but the message names who it was sucked from.
+		"from": turn.target, "amount": healed, "hp": attacker.hp, "max_hp": attacker.max_hp(),
+	})
+
+
+## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], or exactly two for
+## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE].
+##
+## [constant CHECK_HIT] has already rolled the one accuracy check the whole
+## move gets, the way the cartridge's own script checks it before the loop
+## that repeats the hit even starts; everything from here on is this command's
+## own job. The first hit reuses what [constant DAMAGE_CALC] already worked
+## out; every hit after it rerolls the critical and the spread fresh, the way
+## the cartridge's own loop does by jumping back to reroll rather than reusing
+## the first hit's numbers. A faint ends the move where it stands, which is
+## also why the "hit N times" summary is only sent when every planned hit
+## actually landed: the cartridge's own loop jumps straight past that line the
+## moment a hit brings the target down.
+static func _multi_hit(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+	var hits: int = 2 if FIXED_TWO_HIT_EFFECTS.has(turn.effect()) else _roll_multi_hit_count(turn.rng())
+
+	for hit: int in hits:
+		if hit > 0:
+			var result: Dictionary = Gen2Damage.calculate(attacker, defender, turn.move, turn.rng())
+			turn.damage = int(result["damage"])
+			turn.critical = bool(result["critical"])
+			turn.effectiveness = int(result["effectiveness"])
+
+		turn.dealt = defender.take_damage(turn.damage)
+		turn.emit(Gen2Battle.HIT, {
+			"target": turn.target, "amount": turn.dealt, "critical": turn.critical,
+			"effectiveness": turn.effectiveness, "hp": defender.hp, "max_hp": defender.max_hp(),
+		})
+
+		if defender.is_fainted():
+			_check_faint(turn)
+			turn.end()
+			return
+
+	turn.emit(Gen2Battle.HIT_TIMES, {"target": turn.target, "times": hits})
+
+
+const FIXED_TWO_HIT_EFFECTS: Array = [Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE]
+
+
+## How many times a generic multi-hit move connects, following the cartridge's
+## own two-roll algorithm: a first roll out of four keeps 0 or 1 outright, or
+## triggers a second roll out of four for 2 or 3, so 2 and 3 hits come up three
+## times as often as 4 and 5 do (37.5%, 37.5%, 12.5%, 12.5%).
+static func _roll_multi_hit_count(rng: RandomNumberGenerator) -> int:
+	var first: int = rng.randi_range(0, 3)
+	if first < 2:
+		return first + 2
+	return rng.randi_range(0, 3) + 2
+
+
+## Overwrites what [constant DAMAGE_CALC] worked out with the number these four
+## effects actually deal, none of which come out of the ordinary formula:
+## [constant Gen2MoveEffect.LEVEL_DAMAGE] is the user's own level,
+## [constant Gen2MoveEffect.PSYWAVE] a roll of it, [constant Gen2MoveEffect.SUPER_FANG]
+## half the target's current HP, and [constant Gen2MoveEffect.STATIC_DAMAGE] the
+## move's own power field, taken directly rather than as an input to a formula.
+## None of the four criticals or gets announced as super or not very effective,
+## since the number was never actually multiplied by either; [constant DAMAGE_CALC]'s
+## own roll, already spent, is only kept for the one thing worth keeping from
+## it, whether the hit is immune at all, which [constant CHECK_IMMUNE] has
+## already acted on by the time this runs.
+static func _fixed_damage(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+
+	match turn.effect():
+		Gen2MoveEffect.LEVEL_DAMAGE:
+			turn.damage = attacker.level
+		Gen2MoveEffect.PSYWAVE:
+			turn.damage = Gen2Damage.psywave_damage(attacker.level, turn.rng())
+		Gen2MoveEffect.SUPER_FANG:
+			@warning_ignore("integer_division")
+			turn.damage = maxi(defender.hp / 2, 1)
+		_: # STATIC_DAMAGE: Sonicboom and Dragon Rage deal exactly their own power.
+			turn.damage = int(turn.move.get("power", 0))
+
+	turn.critical = false
+	turn.effectiveness = RomLayout.MATCHUP_EFFECTIVE
+
+
+## How much an attacker's own level adds to an OHKO move's accuracy, doubled
+## and added to the move's stored 30%-ish base once the defender's level is
+## subtracted off.
+const OHKO_LEVEL_BONUS: int = 2
+
+## Guillotine, Horn Drill and Fissure: an instant faint with its own accuracy
+## rule rather than the move's stored one read plainly.
+##
+## A defender with a higher level than the attacker is immune outright, no
+## roll at all. Otherwise the move's own stored accuracy (a shade under 30%)
+## is raised by two for every level the attacker has over the defender, capped
+## the way any accuracy is, and rolled through the ordinary stage machinery
+## before it decides anything: an attacker that has lowered the target's
+## evasion or raised its own accuracy makes a one-hit KO likelier to land, the
+## same as it would any other move.
+static func _ohko(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+
+	if attacker.level < defender.level:
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		turn.end()
+		return
+
+	var accuracy: int = clampi(
+		int(turn.move.get("accuracy", 0)) + (attacker.level - defender.level) * OHKO_LEVEL_BONUS,
+		0, Gen2Accuracy.ALWAYS_HITS
+	)
+	var chance: int = Gen2Accuracy.chance(
+		accuracy, attacker.stage("accuracy"), defender.stage("evasion")
+	)
+	if not Gen2Accuracy.rolls_hit(turn.rng(), chance):
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		turn.end()
+		return
+
+	var dealt: int = defender.take_damage(defender.hp)
+	turn.emit(Gen2Battle.OHKO, {
+		"target": turn.target, "amount": dealt, "hp": defender.hp, "max_hp": defender.max_hp(),
+	})
+	_check_faint(turn)
 
 
 ## Locks the user out of its next turn. The tail of Hyper Beam's own list,

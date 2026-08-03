@@ -149,9 +149,12 @@ between a NORMAL or ITEM trainer's Pokémon (which knows what its level teaches
 it, through `GameData.moves_at_level`, the same as a wild one) and a MOVES or
 ITEM_MOVES trainer's (which knows exactly what is stored with it, zero slots
 dropped rather than passed to `Gen2BattleMon` as a move). Its Pokémon carry
-`Gen2BattleMon.PERFECT_DVS` rather than the cartridge's own per-trainer-class
-DVs, because that is a second table (`data/trainers/dvs.asm` in pokecrystal)
-this change did not locate; see `HANDOFF.md`.
+the class's own DVs (`GameData.trainer_dvs`, decoded out of a fifth trainer
+table by `RomImporter.read_trainer_dvs`) rather than
+`Gen2BattleMon.PERFECT_DVS`: a class's whole party shares one fixed
+Attack/Defense/Speed/Special word on the real cartridge, which is why the
+word is asked for once per class in `Gen2TrainerParty.build` rather than once
+per Pokémon.
 
 `Gen2BattleAI.choose_slot` picks a trainer's own move the way pokecrystal's
 `AIChooseMove` does: every slot starts at a fixed score, unusable ones start
@@ -211,6 +214,35 @@ next hundred of them have nowhere to go. The command names are the cartridge's
 own so a sequence can be read against `data/moves/effects.asm` line for line,
 and an effect with no list of its own falls back to the ordinary attack, which
 is why a move nobody has written yet behaves rather than doing nothing.
+
+A multi-hit move is where that shape was tested hardest, because the
+cartridge's own script does not run its commands once each: `BattleCommand_StartLoop`
+and `BattleCommand_EndLoop` jump the instruction pointer backward until a hit
+count decided on the first pass runs out. Giving `Gen2Battle._act` an
+instruction pointer that can move backward would have been reproducing how
+eight-bit hardware repeats a handful of steps without a real loop construct,
+not what it repeats, so `Gen2EffectCommands.MULTI_HIT` is one command that
+rolls and applies every hit itself, stopping early on a faint exactly the way
+the cartridge's loop does by jumping past its own summary text. That is the
+same move the whole design already made for `ALL_STATS_UP`, which loops over
+five stats inside one command rather than five commands: a small loop *inside*
+a step is still one step, and only a loop that reaches back across several
+different steps would have needed the list itself to change shape. Drain and
+the four fixed-damage effects (`FIXED_DAMAGE`, shared by Super Fang, Sonicboom,
+Seismic Toss and Psywave the way the cartridge shares one `ConstantDamage`
+routine between them) both overwrite what `DAMAGE_CALC` already worked out
+rather than replacing it in the list, keeping only the one thing worth keeping
+from that spent roll: whether the hit is immune at all. Drain is worth a second
+look before assuming its shape follows recoil's: it heals off
+`Gen2Turn.damage`, the number the formula calculated, not `Gen2Turn.dealt`, the
+number that actually came off a target with less left than that, because the
+cartridge's own `SapHealth` reads the same uncapped figure `ApplyDamage` reads
+before clamping it. `Gen2EffectCommands._recoil` uses `Gen2Turn.dealt` instead,
+which the disassembly's own `BattleCommand_Recoil` does not: it also reads the
+uncapped `wCurDamage`. That divergence was not fixed here, since it was found
+while writing an unrelated effect and touching an already-shipped, already-
+tested one was outside what this change was for; whoever picks it up should
+decide whether an overkill hit's recoil is worth correcting to match.
 
 `battle/status.gd` is one status byte, one at a time, refusing a second rather
 than adding it. `battle/substatus.gd` is everything that does not fit on that
@@ -351,6 +383,20 @@ So every offset ships with a check that would fail if it were wrong, and
   chance. On top of that class 1's own entry is content whose answer is known
   independently, the same anchor the class name table has in Falkner's own
   name.
+- The trainer DVs table is a fifth trainer table, the same fixed-stride shape
+  as the attributes table, but with nothing structural to check: every nibble
+  is a legal DV, so a wrong offset produces just as plausible-looking a table
+  as a right one would. What settles it is content whose answer is known
+  independently at both ends, the same discipline the move and item name
+  tables lean on: Falkner opens the table with his own known DVs, and the
+  class that closes it (a different one per game, since Crystal alone carries
+  MYSTICALMAN) carries its own. Both were confirmed against the entire
+  published table, not only the two anchors the runtime check uses: the
+  offset was pinned by computing what the whole table's bytes have to be from
+  pret's own `TrainerClassDVs` and searching each dump for that exact
+  sequence, the same technique the font, the matchup chart and the attributes
+  table were found with, and it matched byte for byte across all 66 or 67
+  classes in every game.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 

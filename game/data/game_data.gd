@@ -335,6 +335,17 @@ func trainer_attributes(number: int) -> Dictionary:
 	}
 
 
+## A trainer class's own DVs, packed the same way [method Gen2BattleMon.create]
+## takes them as [code]dv_word[/code]. [constant Gen2BattleMon.PERFECT_DVS] for
+## a class the cache does not carry, which is the same default a caller gets by
+## not passing one at all.
+func trainer_dvs(number: int) -> int:
+	var entry: Dictionary = trainer(number)
+	if entry.is_empty():
+		return Gen2BattleMon.PERFECT_DVS
+	return int(entry.get("dvs", Gen2BattleMon.PERFECT_DVS))
+
+
 ## Where a trainer class sits in the trainer atlas. Every trainer is drawn at the
 ## same size, so unlike a species pic this one always fills its cell.
 func trainer_pic(number: int) -> Dictionary:

@@ -61,6 +61,11 @@ const TRAINER_ATTR_FIRST_AI_MOVE_WEIGHTS: int = RomLayout.AI_BASIC | RomLayout.A
 	| RomLayout.AI_STATUS | RomLayout.AI_RISKY
 const TRAINER_ATTR_FIRST_AI_ITEM_SWITCH: int = RomLayout.CONTEXT_USE | RomLayout.SWITCH_SOMETIMES
 
+## Falkner's own DVs, known independently of the cartridge from pret's
+## `TrainerClassDVs`: attack 9, defense 10, speed 7, special 7, packed the way
+## [method Gen2Stats.pack_dvs] packs a DV word.
+const TRAINER_DVS_FIRST: int = 0x9A77
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -207,6 +212,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var trainer_attributes: Dictionary = verify_trainer_attributes(rom, layout)
 	if not trainer_attributes["ok"]:
 		return trainer_attributes
+
+	var trainer_dvs: Dictionary = verify_trainer_dvs(rom, layout)
+	if not trainer_dvs["ok"]:
+		return trainer_dvs
 
 	return {"ok": true, "message": "Layout verified."}
 
@@ -1170,6 +1179,51 @@ static func verify_trainer_attributes(rom: RomFile, layout: Dictionary) -> Dicti
 	return {"ok": true, "message": ""}
 
 
+## One trainer class's own entry in the DVs table, packed into the same DV word
+## shape [method Gen2BattleMon.create] takes as [code]dv_word[/code]: the two
+## raw bytes read as one big-endian integer are already attack, defense, speed
+## and special in [method Gen2Stats.pack_dvs]'s own nibble order, so nothing
+## here has to unpack and repack them.
+static func read_trainer_dvs(rom: RomFile, layout: Dictionary, trainer_class: int) -> int:
+	var offset: int = RomLayout.trainer_dvs_offset(layout, trainer_class)
+	return (rom.u8(offset) << 8) | rom.u8(offset + 1)
+
+
+## The trainer DVs table has no structural shape to check: every nibble is a
+## legal DV, so a wrong offset produces a plausible-looking table exactly the
+## way it always would. What settles it is content whose answer is known
+## independently at both ends, the same way the move and item name tables are
+## checked: Falkner opens the table with his own known DVs, and the class that
+## closes it (a different one per game, since Crystal alone carries
+## MYSTICALMAN) carries its own, stored in the layout as [code]trainer_dvs_last[/code].
+static func verify_trainer_dvs(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.trainer_class_count(layout)
+	var last_offset: int = RomLayout.trainer_dvs_offset(layout, count)
+	if not rom.in_bounds(last_offset, RomLayout.TRAINER_DVS_SIZE):
+		return {"ok": false, "message": "Trainer DVs table is past the end."}
+
+	var falkner: int = read_trainer_dvs(rom, layout, 1)
+	if falkner != TRAINER_DVS_FIRST:
+		return {
+			"ok": false,
+			"message": "Trainer class 1's DVs: expected $%04X, read $%04X." % [
+				TRAINER_DVS_FIRST, falkner,
+			],
+		}
+
+	var last: int = read_trainer_dvs(rom, layout, count)
+	var expected_last: int = int(layout["trainer_dvs_last"])
+	if last != expected_last:
+		return {
+			"ok": false,
+			"message": "Trainer class %d's DVs: expected $%04X, read $%04X." % [
+				count, expected_last, last,
+			],
+		}
+
+	return {"ok": true, "message": ""}
+
+
 ## Resolves one entry of the type name pointer table.
 static func type_name(rom: RomFile, layout: Dictionary, type_number: int) -> String:
 	var table: int = RomLayout.type_name_pointer_offset(layout, type_number)
@@ -1423,11 +1477,12 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 ## rather than under a key, and the pic is found by class number in the trainer
 ## atlas the way a species' is in the front one.
 ## Decodes the trainer classes and, behind them, the trainer party table (who
-## carries what) and the trainer attributes table (how the class's AI plays
-## it). The three are kept on the one entry rather than split into cache files
-## of their own, the way a species' evolutions and learnset are, because a
-## class name, its trainers and its own AI behaviour are three tables one
-## class number addresses, not three separate questions.
+## carries what), the trainer attributes table (how the class's AI plays it)
+## and the trainer DVs table (how good its Pokémon's stats are). The four are
+## kept on the one entry rather than split into cache files of their own, the
+## way a species' evolutions and learnset are, because a class name, its
+## trainers, its own AI behaviour and its own DVs are four tables one class
+## number addresses, not four separate questions.
 func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var names: PackedStringArray = Gen2Text.decode_sequence(
@@ -1445,6 +1500,7 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 			"palette": [rom.u16le(palette), rom.u16le(palette + Gen2Palette.COLOR_BYTES)],
 			"trainers": classes[trainer_class - 1] if trainer_class - 1 < classes.size() else [],
 			"attributes": RomImporter.read_trainer_attributes(rom, layout, trainer_class),
+			"dvs": RomImporter.read_trainer_dvs(rom, layout, trainer_class),
 		})
 
 		if on_progress.is_valid():

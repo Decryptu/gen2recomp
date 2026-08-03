@@ -396,7 +396,7 @@ func _show_next_event() -> void:
 
 func _apply_event(event: Dictionary) -> void:
 	match event["type"]:
-		Gen2Battle.HIT, Gen2Battle.RECOIL:
+		Gen2Battle.HIT, Gen2Battle.RECOIL, Gen2Battle.DRAINED, Gen2Battle.OHKO:
 			var target: int = int(event.get("target", event["side"]))
 			if target == Gen2Battle.ENEMY:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
@@ -447,6 +447,12 @@ func _describe(event: Dictionary) -> String:
 				return "It's not very effective..."
 		Gen2Battle.RECOIL:
 			return "%s is hit with recoil!" % _battler_name(side)
+		Gen2Battle.HIT_TIMES:
+			return "Hit %d time%s!" % [int(event["times"]), "" if int(event["times"]) == 1 else "s"]
+		Gen2Battle.DRAINED:
+			return "%s sucked health from %s!" % [_battler_name(side), _battler_name(int(event["from"]))]
+		Gen2Battle.OHKO:
+			return "It's a one-hit KO!"
 		Gen2Battle.FAINTED:
 			return "%s fainted!" % _battler_name(side)
 		Gen2Battle.CANNOT_MOVE:
