@@ -128,7 +128,7 @@ func _build_ui() -> void:
 	status_box.add_child(_progress_label)
 
 	var footer := Label.new()
-	footer.text = "Save slots and mods are not available yet. Imported cartridges stay on this machine."
+	footer.text = "Save slot 1 is used by the development battle. Mods are not available yet."
 	footer.add_theme_color_override("font_color", MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(footer)
@@ -176,6 +176,7 @@ func launcher_snapshot() -> Dictionary:
 			"title": RomRegistry.title_for(game_id),
 			"imported": data != null,
 			"selected": game_id == _selected_game_id,
+			"save_slots": Gen2SaveStore.slots_for(game_id, data.sha1, data) if data != null else [],
 		}
 	return {
 		"status": _status_label.text if _status_label != null else "",
@@ -224,8 +225,9 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 	detail.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	detail.add_theme_color_override("font_color", MUTED)
 	if imported:
-		detail.text = "%d species, %d trainer classes\nCache format %d" % [
+		detail.text = "%d species, %d trainer classes\nCache format %d\n%s" % [
 			data.species_count(), data.trainer_count(), RomCache.FORMAT_VERSION,
+			_save_slot_detail(game_id, data),
 		]
 	else:
 		detail.text = "Bring your own verified dump.\nThe filename does not matter."
@@ -249,11 +251,17 @@ func _on_game_action(game_id: StringName, imported: bool) -> void:
 
 
 func _launch_game(game_id: StringName) -> void:
-	if not GameRuntime.select_game(game_id):
+	var data: GameData = GameData.open(game_id)
+	var save_result: Dictionary = Gen2SaveStore.ensure_development_save(data, 0)
+	if not save_result["ok"]:
+		_set_status("Could not open save slot 1.", String(save_result["message"]), ERROR)
+		_refresh_games()
+		return
+	if not GameRuntime.select_save_slot(game_id, 0):
 		_set_status("Could not select %s." % RomRegistry.title_for(game_id), "The registry did not recognise that game.", ERROR)
 		return
 	_selected_game_id = game_id
-	_set_status("Opening %s." % RomRegistry.title_for(game_id), "The development battle uses the selected cartridge cache.", SUCCESS)
+	_set_status("Opening %s." % RomRegistry.title_for(game_id), "Save slot 1 is loaded for the development battle.", SUCCESS)
 	get_tree().change_scene_to_file.call_deferred("res://game/battle/battle_screen.tscn")
 
 
@@ -340,6 +348,12 @@ func _set_status(title: String, detail: String, colour: Color) -> void:
 func _revision_for(game_id: StringName) -> String:
 	var row: Dictionary = RomRegistry.lookup(RomRegistry.sha1_for(game_id))
 	return String(row.get("revision", "Supported cartridge"))
+
+
+func _save_slot_detail(game_id: StringName, data: GameData) -> String:
+	var slots: Array = Gen2SaveStore.slots_for(game_id, data.sha1, data)
+	var first: Dictionary = slots[0]
+	return "Save slot 1: %s" % ("READY" if first["valid"] else "EMPTY")
 
 
 func _print_allowlist() -> void:
