@@ -139,7 +139,6 @@ func _ready() -> void:
 	_box.place_at_bottom()
 
 	show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
-	set_exp(0.5)
 	_announce()
 
 
@@ -170,6 +169,7 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 		_battle.enemy.hp, _battle.enemy.max_hp(),
 		_battle.player.hp, _battle.player.max_hp()
 	)
+	_refresh_exp_bar()
 
 
 ## Puts the player against one of a trainer class's own trainers, built from the
@@ -205,6 +205,7 @@ func show_trainer(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
 		_battle.player.hp, _battle.player.max_hp()
 	)
+	_refresh_exp_bar()
 
 	var trainer: Dictionary = _data.trainer_party(trainer_class, index)
 	show_message("%s %s wants to fight!" % [
@@ -238,6 +239,23 @@ func set_hp(enemy: int, enemy_max: int, player: int, player_max: int) -> void:
 func set_exp(fraction: float) -> void:
 	_exp = clampf(fraction, 0.0, 1.0)
 	_refresh()
+
+
+## Where [member _battle]'s own player Pokémon sits between its current level's
+## own threshold and the next one's, on its own growth curve. Called whenever a
+## battle starts and whenever [constant Gen2Battle.EXP_GAINED] or
+## [constant Gen2Battle.GREW_LEVEL] says the number behind it moved, rather
+## than read once and left to go stale.
+func _refresh_exp_bar() -> void:
+	if _battle == null or _battle.player == null:
+		set_exp(0.0)
+		return
+
+	var mon: Gen2BattleMon = _battle.player
+	var rate: int = mon.growth_rate()
+	var floor_exp: int = Gen2Experience.total_exp_at(rate, mon.level)
+	var span: int = Gen2Experience.total_exp_at(rate, mon.level + 1) - floor_exp
+	set_exp(float(mon.exp - floor_exp) / float(span) if span > 0 else 1.0)
 
 
 func show_message(text: String) -> void:
@@ -295,6 +313,7 @@ func take_turn() -> void:
 	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
 	_player_turns_taken += 1
 	_enemy_turns_taken += 1
+	_auto_decline_move_learns()
 	_show_next_event()
 
 
@@ -332,7 +351,20 @@ func switch_player() -> void:
 	if next < 0:
 		return
 	_pending = _battle.take_actions(Gen2Battle.switch_to(next), Gen2Battle.use_move(0))
+	_auto_decline_move_learns()
 	_show_next_event()
+
+
+## No menu exists yet to ask which move to forget, the same scaffolding this
+## screen already has for which move to use ([method _random_slot]): a pending
+## offer is declined automatically instead, so a battle nobody is driving from
+## a real menu does not simply stop. [Gen2Battle] still exposes the real
+## question through [method Gen2Battle.must_learn_move] for whatever asks it
+## properly later.
+func _auto_decline_move_learns() -> void:
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		while _battle.must_learn_move(side):
+			_pending.append_array(_battle.decline_move(side))
 
 
 ## What a button press does. Finishes the current message if it is still
@@ -420,6 +452,22 @@ func _apply_event(event: Dictionary) -> void:
 				_player = int(event["species"])
 				_player_level = int(event["level"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+			_refresh_exp_bar()
+		Gen2Battle.EXP_GAINED:
+			# Never [constant Gen2Battle.ENEMY]: see the event's own doc comment.
+			# [method _refresh_exp_bar] always reads whoever is active right now,
+			# which answers correctly on its own even when the index that gained
+			# it is a benched participant rather than the one on screen.
+			_refresh_exp_bar()
+		Gen2Battle.GREW_LEVEL:
+			# The level number in the panel belongs to whoever is on screen, so it
+			# only moves when the index that grew is the one currently active: a
+			# benched participant can level up too, and this screen has no bench
+			# to show it on.
+			if int(event["index"]) == _battle.party(Gen2Battle.PLAYER).active:
+				_player_level = int(event["new_level"])
+				_refresh()
+			_refresh_exp_bar()
 
 
 ## An event as a sentence, or an empty string for one there is nothing to say
@@ -498,6 +546,32 @@ func _describe(event: Dictionary) -> String:
 			if side == Gen2Battle.ENEMY:
 				return "Enemy sent out %s!" % _name_of(int(event["species"]))
 			return "Go! %s!" % _name_of(int(event["species"]))
+		Gen2Battle.EXP_GAINED:
+			return "%s gained %d EXP. Points!" % [_name_of(int(event["species"])), int(event["amount"])]
+		Gen2Battle.STAT_EXP_GAINED:
+			# The cartridge never prints a line of its own for this: it happens
+			# silently behind the EXP. Points message above it.
+			return ""
+		Gen2Battle.GREW_LEVEL:
+			return "%s grew to level %d!" % [_name_of(int(event["species"])), int(event["new_level"])]
+		Gen2Battle.MOVE_LEARNED:
+			return "%s learned %s!" % [
+				_name_of(int(event["species"])), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.MOVE_OFFERED:
+			return "%s wants to learn %s!" % [
+				_name_of(int(event["species"])), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.MOVE_FORGOTTEN:
+			return "%s forgot %s and learned %s!" % [
+				_name_of(int(event["species"])),
+				String(_data.move(int(event["forgot"])).get("name", "")),
+				String(_data.move(int(event["learned"])).get("name", "")),
+			]
+		Gen2Battle.MOVE_DECLINED:
+			return "%s did not learn %s." % [
+				_name_of(int(event["species"])), String(_data.move(int(event["move"])).get("name", "")),
+			]
 		Gen2Battle.OVER:
 			# Both sides can go down in the same turn, through recoil or a burn,
 			# and then there is nobody to declare.

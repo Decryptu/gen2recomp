@@ -82,6 +82,30 @@ const WITHDREW: StringName = &"withdrew"
 const SENT_OUT: StringName = &"sent_out"
 const OVER: StringName = &"over"
 
+## Experience, once whoever fainted's own opponent has somebody left to award
+## it to. Never emitted for [constant ENEMY]: the cartridge's own
+## [code]GiveExperiencePoints[/code] only ever reads the player's own party
+## structure, so a trainer's Pokémon are never on the receiving end of this,
+## only ever the reason for it.
+const EXP_GAINED: StringName = &"exp_gained"
+## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], split among
+## [constant Gen2Battle] participants the way [method Gen2Experience.stat_exp_gain]
+## splits them, none of it the same number as [constant EXP_GAINED].
+const STAT_EXP_GAINED: StringName = &"stat_exp_gained"
+## A level gained from the experience just awarded. [code]old_stats[/code] and
+## [code]new_stats[/code] are both [Gen2BattleMon.stats], so a screen can show
+## what moved without asking the Pokémon twice.
+const GREW_LEVEL: StringName = &"grew_level"
+## A move learned into a slot that had nothing in it, no question asked because
+## the cartridge does not ask one when there is nowhere for the answer to go.
+const MOVE_LEARNED: StringName = &"move_learned"
+## Every slot already held something, so nothing was learned automatically:
+## see [method must_learn_move].
+const MOVE_OFFERED: StringName = &"move_offered"
+## The offer from [constant MOVE_OFFERED] was answered, one way or the other.
+const MOVE_FORGOTTEN: StringName = &"move_forgotten"
+const MOVE_DECLINED: StringName = &"move_declined"
+
 ## What a side does with its turn. Switching is not a move with a very high
 ## priority: it is settled before priority is looked at, which is why it is an
 ## action rather than a move number.
@@ -109,8 +133,29 @@ const VITAL_THROW: int = 0xE9
 var data: GameData = null
 var rng: RandomNumberGenerator = null
 
+## Whether beating this opponent is worth the 1.5x [Gen2Experience] gives a
+## trainer battle. A wild encounter (the default, and every existing caller's
+## meaning before this field existed) never sets it.
+var is_trainer_battle: bool = false
+
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
+
+## Which of a side's own party indices have fought since the opponent currently
+## out was sent in, kept as a Dictionary used for its keys. Seeded with the
+## lead at [method create_parties], added to on every [method send_out], and
+## reset to just whoever is left standing once experience has been given for
+## the opponent that just fainted: see [method _award_experience].
+##
+## Only [constant PLAYER]'s side is ever read for anything, mirroring the
+## cartridge's own asymmetry (see [constant EXP_GAINED]), but both sides are
+## tracked the same way rather than leaving one of them a special case.
+var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
+
+## Moves waiting on [method learn_move] or [method decline_move], one queue per
+## side, FIFO: a level that teaches two moves into a full six-move team asks
+## about both, one at a time, in the order they were learned.
+var _move_learn_queue: Dictionary = {PLAYER: [], ENEMY: []}
 
 ## Whoever is out on each side. Read through the party every time rather than
 ## kept in step with it: a switch changes who this is, and a copy that had to be
@@ -128,7 +173,8 @@ static func create_parties(
 	game_data: GameData,
 	player_party: Gen2Party,
 	enemy_party: Gen2Party,
-	generator: RandomNumberGenerator
+	generator: RandomNumberGenerator,
+	trainer_battle: bool = false
 ) -> Gen2Battle:
 	if game_data == null or player_party == null or enemy_party == null:
 		return null
@@ -139,6 +185,8 @@ static func create_parties(
 	out.data = game_data
 	out.parties = {PLAYER: player_party, ENEMY: enemy_party}
 	out.rng = generator if generator != null else RandomNumberGenerator.new()
+	out.is_trainer_battle = trainer_battle
+	out._participants = {PLAYER: {player_party.active: true}, ENEMY: {enemy_party.active: true}}
 	return out
 
 
@@ -206,6 +254,63 @@ func awaiting_replacement() -> bool:
 	return must_replace(PLAYER) or must_replace(ENEMY)
 
 
+## Whether [param side] has a move waiting on [method learn_move] or
+## [method decline_move]: every slot already held something when a level
+## taught it a new one, so nothing was learned without asking, the same
+## refusal-until-answered shape [method must_replace] already uses.
+func must_learn_move(side: int) -> bool:
+	return not (_move_learn_queue.get(side, []) as Array).is_empty()
+
+
+func awaiting_move_learn() -> bool:
+	return must_learn_move(PLAYER) or must_learn_move(ENEMY)
+
+
+## The offer waiting on [param side], or an empty Dictionary if there is none.
+## [code]species[/code], [code]index[/code], [code]move[/code] and
+## [code]level[/code] are enough to say "your FOO wants to learn BAR" without
+## asking the Pokémon anything a caller cannot already read off the event that
+## put this here.
+func pending_learn(side: int) -> Dictionary:
+	var queue: Array = _move_learn_queue.get(side, [])
+	return queue[0] if not queue.is_empty() else {}
+
+
+## Answers a pending offer by giving up [param forget_slot] for it. Refuses if
+## there is nothing pending: an answer to a question nobody asked is not
+## approximated into one that was.
+func learn_move(side: int, forget_slot: int) -> Array:
+	if not must_learn_move(side):
+		return []
+
+	var offer: Dictionary = (_move_learn_queue[side] as Array).pop_front()
+	var learner: Gen2BattleMon = party(side).at(int(offer["index"]))
+	if learner == null or forget_slot < 0 or forget_slot >= learner.moves.size():
+		return []
+
+	var forgot: int = int(learner.moves[forget_slot])
+	if not learner.replace_move(forget_slot, int(offer["move"])):
+		return []
+
+	return [{
+		"type": MOVE_FORGOTTEN, "side": side, "index": int(offer["index"]),
+		"species": learner.species, "forgot": forgot, "learned": int(offer["move"]), "slot": forget_slot,
+	}]
+
+
+## Answers a pending offer by refusing it: the Pokémon keeps its four moves and
+## never learns the fifth.
+func decline_move(side: int) -> Array:
+	if not must_learn_move(side):
+		return []
+
+	var offer: Dictionary = (_move_learn_queue[side] as Array).pop_front()
+	return [{
+		"type": MOVE_DECLINED, "side": side, "index": int(offer["index"]),
+		"species": int(offer["species"]), "move": int(offer["move"]),
+	}]
+
+
 ## Sends a side's [param index] out, whether as a replacement or between turns.
 ## Returns the events, which is one event or none: a switch that cannot be made
 ## is refused rather than approximated.
@@ -232,6 +337,7 @@ func send_out(side: int, index: int) -> Array:
 		"species": current.active_mon().species, "level": current.active_mon().level,
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
 	})
+	(_participants[side] as Dictionary)[index] = true
 	return events
 
 
@@ -244,7 +350,7 @@ func send_out(side: int, index: int) -> Array:
 ## most of what speed is for.
 func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
-	if is_over() or awaiting_replacement():
+	if is_over() or awaiting_replacement() or awaiting_move_learn():
 		return events
 
 	var actions: Dictionary = {PLAYER: player_action, ENEMY: enemy_action}
@@ -263,6 +369,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		_act(side, int(actions[side].get("slot", 0)), chosen[side], events)
 
 	_residual_damage(acting, events)
+	_award_experience(events)
 
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
@@ -313,6 +420,96 @@ func _residual_damage(acting: Array, events: Array) -> void:
 		})
 		if current.is_fainted():
 			events.append({"type": FAINTED, "side": side})
+
+
+## Experience for every enemy Pokémon that fainted this turn, whether the faint
+## came from a move ([method _act], already in [param events] by the time this
+## runs) or from status damage ([method _residual_damage], run just before
+## this).
+##
+## A side's own [constant FAINTED] clears its fainted member out of
+## [member _participants] regardless of which side it is, because that half of
+## the rule (a fainted Pokémon stops participating) is not specific to the
+## side that receives experience; only [method _give_experience_for] is.
+func _award_experience(events: Array) -> void:
+	for event: Dictionary in events.duplicate():
+		if StringName(event.get("type", "")) != FAINTED:
+			continue
+		var side: int = int(event["side"])
+		(_participants[side] as Dictionary).erase(party(side).active)
+		if side == ENEMY:
+			_give_experience_for(mon(ENEMY), events)
+
+
+## Splits the exp and the stat exp [param defeated] is worth among every
+## [constant PLAYER] party index that has fought since it was sent in, then
+## resets that set to whoever is left standing: the next enemy Pokémon, if the
+## trainer has one, starts its own participant count fresh.
+func _give_experience_for(defeated: Gen2BattleMon, events: Array) -> void:
+	var participants: Array = (_participants[PLAYER] as Dictionary).keys()
+	if not participants.is_empty():
+		var award: int = Gen2Experience.award_for(
+			defeated.level, defeated.base_exp(), is_trainer_battle
+		)
+		var stat_gains: Dictionary = Gen2Experience.stat_exp_gain(
+			defeated.base_stat_exp_shape(), participants.size()
+		)
+		for index: int in participants:
+			var learner: Gen2BattleMon = party(PLAYER).at(int(index))
+			if learner != null and not learner.is_fainted():
+				_give_experience_to(learner, int(index), award, stat_gains, events)
+
+	_participants[PLAYER] = {party(PLAYER).active: true}
+
+
+func _give_experience_to(
+	learner: Gen2BattleMon, index: int, award: int, stat_gains: Dictionary, events: Array
+) -> void:
+	learner.gain_exp(award)
+	events.append({
+		"type": EXP_GAINED, "side": PLAYER, "index": index,
+		"species": learner.species, "amount": award, "exp": learner.exp,
+	})
+
+	learner.gain_stat_exp(stat_gains)
+	events.append({
+		"type": STAT_EXP_GAINED, "side": PLAYER, "index": index, "gains": stat_gains,
+	})
+
+	var target_level: int = learner.level_for_exp()
+	while learner.level < target_level:
+		var old_level: int = learner.level
+		var old_stats: Dictionary = learner.stats.duplicate()
+		learner.level_up()
+		events.append({
+			"type": GREW_LEVEL, "side": PLAYER, "index": index, "species": learner.species,
+			"old_level": old_level, "new_level": learner.level,
+			"old_stats": old_stats, "new_stats": learner.stats.duplicate(),
+		})
+		_offer_moves_learned_at(learner, index, learner.level, events)
+
+
+## What [param learner] is taught at exactly [param level]: straight into an
+## empty slot with no question asked, the same as the cartridge asks none when
+## there is nowhere for the answer to go, or queued for [method learn_move] or
+## [method decline_move] when every slot already holds something.
+func _offer_moves_learned_at(learner: Gen2BattleMon, index: int, level: int, events: Array) -> void:
+	for move: int in data.moves_learned_at(learner.species, level):
+		if learner.moves.has(move):
+			continue
+		if learner.learn_move(move):
+			events.append({
+				"type": MOVE_LEARNED, "side": PLAYER, "index": index,
+				"species": learner.species, "move": move, "slot": learner.moves.size() - 1,
+			})
+		else:
+			(_move_learn_queue[PLAYER] as Array).append({
+				"index": index, "move": move, "level": level, "species": learner.species,
+			})
+			events.append({
+				"type": MOVE_OFFERED, "side": PLAYER, "index": index,
+				"species": learner.species, "move": move, "level": level,
+			})
 
 
 static func _is_switch(action: Dictionary) -> bool:

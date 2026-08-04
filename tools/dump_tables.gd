@@ -12,17 +12,26 @@ extends SceneTree
 
 const TABLES: PackedStringArray = [
 	"species", "moves", "items", "types", "matchups", "trainers", "learnsets",
-	"evolutions",
+	"evolutions", "growth",
 ]
 
 ## Which file a table is read out of, where it is not a file of its own.
-## Evolutions and level-up moves are two halves of one cartridge table and are
-## cached on the species, so they are two views of species.json rather than two
-## files.
+## Evolutions, level-up moves and growth rate/base exp are all read off the
+## species entry itself, so they are views of species.json rather than files
+## of their own.
 const SOURCES: Dictionary = {
 	"learnsets": RomCache.SPECIES,
 	"evolutions": RomCache.SPECIES,
+	"growth": RomCache.SPECIES,
 }
+
+## The six growth curves, in the cartridge's own byte order (GROWTH_MEDIUM_FAST
+## through GROWTH_SLOW). Only four are ever used by a real species in any of the
+## three games; the other two are named for completeness, not because a species
+## exercises them.
+const GROWTH_NAMES: PackedStringArray = [
+	"medium fast", "slightly fast", "slightly slow", "medium slow", "fast", "slow",
+]
 
 ## How an evolution method is written out. The parameter that follows it means
 ## something different in each case, which is the point of naming them here.
@@ -136,6 +145,8 @@ func _dump(directory: String, table: String) -> void:
 			_dump_learnsets(directory, rows)
 		"evolutions":
 			_dump_evolutions(directory, rows)
+		"growth":
+			_dump_growth(rows)
 		_:
 			print("\n%s (%d)" % [table, (rows as Array).size()])
 			for row: Dictionary in rows:
@@ -161,6 +172,22 @@ func _dump_learnsets(directory: String, rows: Array) -> void:
 			parts.append("%d %s" % [int(entry["level"]), _name_at(moves, int(entry["move"]))])
 		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), ", ".join(parts)])
 	print("  %d level-up moves" % total)
+
+
+## Every species' growth rate and base experience yield, the two fields
+## [Gen2Experience] needs and nothing else reads. Neither has a self-checking
+## shape (a growth rate byte 0-5 and a base exp byte are both plausible
+## whatever the offset is), so what settles them is reading a name against a
+## curve published independently: Bulbasaur medium slow, Caterpie medium fast,
+## Chansey fast, Mewtwo slow.
+func _dump_growth(rows: Array) -> void:
+	print("\ngrowth (%d species)" % rows.size())
+	for row: Dictionary in rows:
+		var rate: int = int(row.get("growth_rate", -1))
+		var rate_name: String = GROWTH_NAMES[rate] if rate >= 0 and rate < GROWTH_NAMES.size() else "?"
+		print("  %3d  %-11s %-13s base exp %3d" % [
+			int(row["number"]), String(row["name"]), rate_name, int(row.get("base_exp", 0)),
+		])
 
 
 ## Only the species that evolve, which is under half of them. The rest would be

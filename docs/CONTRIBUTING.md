@@ -109,6 +109,7 @@ battle can be fought inside a test:
 | `battle/move_effect.gd` | Which steps each effect byte is made of |
 | `battle/battle.gd` | The turn: order, the switch, and running a move's steps |
 | `battle/ai.gd` | A trainer class's own AI: scores each move slot off its AI flags |
+| `battle/experience.gd` | The six growth curves, what a faint is worth, and how it splits |
 
 Everything in there is integer arithmetic in the order the hardware does it.
 That is not nostalgia. Every step truncates and the steps do not commute, so a
@@ -178,6 +179,36 @@ discipline the move table itself uses. See `HANDOFF.md`'s "Deliberate" section
 for what else the AI does not cover (a trainer's switch and item decisions,
 Razor Wind/Solar Beam/Fly's own handlers, which read weather and a
 semi-invulnerability substatus nothing here tracks).
+
+`Gen2Experience.total_exp_at` is the six growth curves as `CalcExpAtLevel`'s own
+formula, `exp(n) = floor(a*n^3/b) + c*n^2 + d*n - e`, pinned against
+pokecrystal's `data/growth_rates.asm` and checked against all 251 species in
+all three real games rather than trusted on the strength of the disassembly
+alone: see `tools/dump_tables.gd`'s `growth` view. `Gen2Battle` calls it from
+`_award_experience`, which runs once a turn, after `_residual_damage`, and
+reads every `FAINTED` event the turn produced rather than hooking a faint at
+its source: a faint can come from a move landing or from a status ticking, and
+this is the one point downstream of both. Experience itself is never divided
+among participants; only the stat experience `Gen2Experience.stat_exp_gain`
+works out is, which is the opposite of what dividing *something* for multiple
+participants might suggest, and is the cartridge's own rule rather than a
+simplification of it. Participants are tracked per side as whoever has been
+sent out since the opponent currently out was sent in, added to on
+`send_out`, and reset to whoever is left standing once experience has been
+given for that opponent's own faint, which is what lets a benched-but-alive
+switch-in still be credited for a kill it did not personally land. Levelling
+up and learning a move both ride on the same event: `_give_experience_to`
+loops one level at a time from old to new, because a move taught partway up a
+multi-level jump has to be checked at the level that actually teaches it, not
+at the last one reached. A move that finds an empty slot is learned without a
+question, the same as the cartridge asks none when there is nowhere for the
+answer to go; a full moveset gets a third policy hole, the same shape as
+`must_replace`: `Gen2Battle.must_learn_move`, `pending_learn`, `learn_move`
+and `decline_move` refuse to let a battle continue until an offer is answered,
+because which move to give up is not this engine's decision to make on its
+own. `battle_screen.gd` answers every such offer with `decline_move`
+automatically, since no menu exists yet to ask a person; see `HANDOFF.md`'s
+"Scaffolding" section.
 
 **A move is a short program, not a special case.** The cartridge keeps a list of
 commands per effect byte and runs them in order, and an ordinary attack is the
@@ -397,6 +428,16 @@ So every offset ships with a check that would fail if it were wrong, and
   sequence, the same technique the font, the matchup chart and the attributes
   table were found with, and it matched byte for byte across all 66 or 67
   classes in every game.
+- A species' growth rate and base experience are already inside the species
+  table, at an offset this project had decoded and shipped since the
+  importer's first session, and neither field had ever been read for anything
+  until `Gen2Experience` did. Both were plausible either way: a growth rate
+  byte 0-5 and a base exp byte are both legal values whatever the offset is,
+  so nothing about decoding them wrong would have looked wrong. What settled
+  them was reading a name against a curve published independently for every
+  one of the 251 species in all three games, not a handful of anchors: see
+  `tools/dump_tables.gd`'s `growth` view and the table it is checked against
+  in `data/pokemon/base_stats/*.asm`.
 
 When you add an offset, add its check. "It produced output" is not evidence.
 
@@ -460,6 +501,11 @@ check can only prove the shape. Every level and every move number stays in range
 whatever a wrong pointer does, so what settles it is reading Bulbasaur's list
 back and finding Tackle at 1 and Growl at 4, and reading Eevee's five evolutions
 and Tyrogue's three. Both resolve their numbers into names for that reason.
+
+`growth` is the same idea again for the two fields nothing structural can
+check: a growth rate byte and a base exp byte are both legal whatever the
+offset is, so what settles them is reading a name against a curve published
+independently, the same as the learnsets above.
 
 ## Seeing the UI without pressing Play
 

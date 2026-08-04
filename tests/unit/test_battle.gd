@@ -812,3 +812,193 @@ func test_guillotine_faints_its_target_outright_in_a_real_turn() -> void:
 	# misses, so the outcome needs no seed to be sure of.
 	battle.take_turn(0, 0)
 	assert_eq(battle.enemy.hp, 0)
+
+
+## Experience: what a wild faint is worth, a trainer battle's own 1.5x, how it
+## splits among participants, and what a level crossed on the way there
+## actually teaches. [Gen2Experience]'s own arithmetic is checked in
+## [code]test_experience.gd[/code]; what matters here is that [Gen2Battle]
+## calls it with the right numbers at the right moment.
+
+
+func test_a_wild_faint_awards_experience_to_the_winner() -> void:
+	# Bulbasaur, base exp 64, at level 5: floor(64*5/7) = 45. A wild battle,
+	# [method _battle]'s own shape, never adds the trainer bonus.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT]),
+		_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var gained: Dictionary = _first(events, Gen2Battle.EXP_GAINED)
+	assert_eq(gained["side"], Gen2Battle.PLAYER)
+	assert_eq(gained["index"], 0)
+	assert_eq(gained["amount"], 45)
+
+	var stats: Dictionary = _first(events, Gen2Battle.STAT_EXP_GAINED)
+	# One participant, so nothing is divided: Bulbasaur's own base stats,
+	# plain, with base Sp. Attack (65) filling the shared "special" slot.
+	assert_eq(stats["gains"], {"hp": 45, "attack": 49, "defense": 49, "speed": 45, "special": 65})
+	assert_eq(battle.player.stat_exp, stats["gains"])
+
+
+func test_a_trainer_battle_adds_the_experience_bonus() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT])),
+		Gen2Party.of(_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])), _rng, true
+	)
+	var events: Array = battle.take_turn(0, 0)
+	# 45 without the bonus (see the wild test above); with it, 45 + floor(45/2).
+	assert_eq(_first(events, Gen2Battle.EXP_GAINED)["amount"], 67)
+
+
+func test_experience_is_not_divided_among_participants_but_stat_experience_is() -> void:
+	# Geodude, base exp 86, at level 20: floor(86*20/7) = 245, the same number
+	# for every participant. Its own base stats (40/80/100/20/30), split two
+	# ways, truncated per stat, are the only thing that divides.
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		]),
+		Gen2Party.create([_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])]), _rng
+	)
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	battle.enemy.hp = 1
+	var events: Array = battle.take_turn(0, 0)
+
+	var gains: Array = _of_type(events, Gen2Battle.EXP_GAINED)
+	assert_eq(gains.size(), 2, "both the lead and the one switched in")
+	for gain: Dictionary in gains:
+		assert_eq(gain["amount"], 245, "full, unsplit, for every participant")
+
+	var stat_gains: Array = _of_type(events, Gen2Battle.STAT_EXP_GAINED)
+	assert_eq(stat_gains.size(), 2)
+	for stat_gain: Dictionary in stat_gains:
+		assert_eq(stat_gain["gains"]["attack"], 40, "80 / 2, truncated")
+		assert_eq(stat_gain["gains"]["speed"], 10, "20 / 2")
+
+
+func test_participants_narrow_to_whoever_is_active_once_an_enemy_faints() -> void:
+	# Three enemies, one at a time. The lead player Pokémon is credited for the
+	# first kill by default; switching in the second one adds it without
+	# dropping the lead, since both are still on the field's own roster for
+	# that enemy's life; only once experience has actually been given does the
+	# set narrow back down to whoever is active, which is what the third kill
+	# is here to prove.
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		]),
+		Gen2Party.create([
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+			_mon(Fixture.MAGCARGO, 20, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 20, [Fixture.TACKLE]),
+		]),
+		_rng
+	)
+
+	battle.enemy.hp = 1
+	var first_kill: Array = battle.take_turn(0, 0)
+	assert_eq(
+		_of_type(first_kill, Gen2Battle.EXP_GAINED).map(func(e: Dictionary) -> int: return e["index"]),
+		[0], "only the lead fought Geodude"
+	)
+	battle.send_out(Gen2Battle.ENEMY, 1)
+	battle.send_out(Gen2Battle.PLAYER, 1)
+
+	battle.enemy.hp = 1
+	var second_kill: Array = battle.take_turn(0, 0)
+	assert_eq(
+		(_of_type(second_kill, Gen2Battle.EXP_GAINED)
+			.map(func(e: Dictionary) -> int: return e["index"]) as Array), [0, 1],
+		"index 0 was still active when Magcargo's life began, so it still counts"
+	)
+	battle.send_out(Gen2Battle.ENEMY, 2)
+
+	battle.enemy.hp = 1
+	var third_kill: Array = battle.take_turn(0, 0)
+	assert_eq(
+		_of_type(third_kill, Gen2Battle.EXP_GAINED).map(func(e: Dictionary) -> int: return e["index"]),
+		[1], "index 0 was never sent back in during Bulbasaur's own life"
+	)
+
+
+func test_levelling_up_learns_a_move_into_an_empty_slot_without_asking() -> void:
+	# Charmander's own curve reads 135 at level 5. Beating a level 20 Geodude
+	# (245 exp) lands at 380, which is level 8: level 6 teaches Ember, and
+	# Charmander still has an empty fourth slot for it to go into.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	# The level gap that makes the exp worth crossing three levels also makes
+	# Geodude both faster and hard enough hitting to otherwise flatten a level 5
+	# Charmander before it gets a turn at all, which is not what this test is
+	# about; a healthy Charmander guaranteed to survive one hit is.
+	battle.player.hp = battle.player.max_hp() * 10
+	battle.enemy.hp = 1
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_eq(_of_type(events, Gen2Battle.GREW_LEVEL).size(), 3, "5 to 6, 6 to 7, 7 to 8")
+	var learned: Dictionary = _first(events, Gen2Battle.MOVE_LEARNED)
+	assert_eq(learned["move"], Fixture.EMBER)
+	assert_eq(learned["slot"], 1)
+	assert_eq(battle.player.moves, [Fixture.TACKLE, Fixture.EMBER])
+	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
+
+
+func test_a_full_moveset_is_offered_a_new_move_rather_than_taught_it() -> void:
+	# Geodude's own curve also reads 135 at level 5. A level 33 Magcargo (base
+	# exp 154) is worth floor(154*33/7) = 726 exactly, landing at 861, which is
+	# level 11: level 6 auto-learns Growl into the one empty slot, and level 11's
+	# own Slash finds every slot full.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+
+	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
+	var offer: Dictionary = battle.pending_learn(Gen2Battle.PLAYER)
+	assert_eq(offer["move"], Fixture.SLASH)
+	assert_eq(offer["level"], 11)
+	assert_eq(battle.player.moves, [
+		Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT, Fixture.GROWL,
+	], "Growl already took the one empty slot on the way up")
+
+
+func test_a_battle_refuses_to_continue_until_the_offered_move_is_answered() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
+
+	assert_eq(battle.take_turn(0, 0), [], "a battle cannot go on with an unanswered offer")
+
+	var events: Array = battle.learn_move(Gen2Battle.PLAYER, 1)
+	assert_eq(events[0]["forgot"], Fixture.EMBER)
+	assert_eq(events[0]["learned"], Fixture.SLASH)
+	assert_eq(battle.player.moves[1], Fixture.SLASH)
+	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
+
+
+func test_declining_the_offered_move_keeps_the_four_already_known() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+	var before: Array = battle.player.moves.duplicate()
+
+	var events: Array = battle.decline_move(Gen2Battle.PLAYER)
+
+	assert_eq(events[0]["type"], Gen2Battle.MOVE_DECLINED)
+	assert_eq(events[0]["move"], Fixture.SLASH)
+	assert_eq(battle.player.moves, before)
+	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
