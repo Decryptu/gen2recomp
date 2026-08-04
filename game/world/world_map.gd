@@ -45,8 +45,8 @@ static func from_cache(value: Dictionary) -> Gen2WorldMap:
 	out.collision_width = int(value.get("collision_width", out.width_blocks * 2))
 	out.collision_height = int(value.get("collision_height", out.height_blocks * 2))
 	out.connections = int(value.get("connections", 0))
-	out.scripts = value.get("scripts", {}) if value.get("scripts", {}) is Dictionary else {}
-	out.events = value.get("events", {}) if value.get("events", {}) is Dictionary else {}
+	out.scripts = _scripts_from_cache(value.get("scripts", {}))
+	out.events = _events_from_cache(value.get("events", {}))
 	return out
 
 
@@ -60,3 +60,42 @@ func collision_at(cell_x: int, cell_y: int) -> int:
 	if cell_x < 0 or cell_x >= collision_width or cell_y < 0 or cell_y >= collision_height:
 		return -1
 	return int(collision[cell_y * collision_width + cell_x])
+
+
+static func _scripts_from_cache(value: Variant) -> Dictionary:
+	if not value is Dictionary:
+		return {}
+	var scripts: Dictionary = value
+	return {
+		"bank": int(scripts.get("bank", 0)),
+		"address": int(scripts.get("address", 0)),
+	}
+
+
+static func _events_from_cache(value: Variant) -> Dictionary:
+	if not value is Dictionary:
+		return {}
+	var events: Dictionary = value
+	return {
+		"bank": int(events.get("bank", 0)),
+		"address": int(events.get("address", 0)),
+		"warps": _event_rows(events.get("warps", []), ["x", "y", "destination", "map_group", "map_number"]),
+		"coord_events": _event_rows(events.get("coord_events", []), ["scene", "x", "y", "script"]),
+		"bg_events": _event_rows(events.get("bg_events", []), ["x", "y", "type", "script"]),
+		"objects": _event_rows(events.get("objects", []), [
+			"sprite", "x", "y", "movement", "x_radius", "y_radius", "hour_1", "hour_2",
+			"palette", "object_type", "sight_range", "script", "event_flag",
+		]),
+	}
+
+
+static func _event_rows(value: Variant, integer_fields: Array[String]) -> Array:
+	if not value is Array:
+		return []
+	var out: Array = []
+	for raw: Dictionary in value as Array:
+		var event: Dictionary = raw.duplicate(true)
+		for field: String in integer_fields:
+			event[field] = int(raw.get(field, 0))
+		out.append(event)
+	return out
