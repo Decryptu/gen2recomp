@@ -117,6 +117,14 @@ func moves_at_level(number: int, level: int) -> Array:
 	return Gen2Learnset.moves_at_level(learnset(number), level)
 
 
+## The moves a Pokémon of this species is offered on reaching exactly
+## [param level] by levelling up, which is not [method moves_at_level]'s
+## question asked again: see [Gen2Learnset] for why Muk's own list answers the
+## two differently.
+func moves_learned_at(number: int, level: int) -> Array:
+	return Gen2Learnset.moves_learned_at(learnset(number), level)
+
+
 ## One of the per-species lists, with every named field coerced out of JSON's
 ## single number type.
 func _rows(entry: Dictionary, key: String, fields: Array) -> Array:

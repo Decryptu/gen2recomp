@@ -162,6 +162,78 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.toxic_counter, 0)
 
 
+func test_a_pokemon_is_created_already_on_its_curve_not_at_zero() -> void:
+	# Pikachu is medium fast, so a level 50 Pikachu is created already carrying
+	# 50 cubed, not zero, the same as a box screen always agreeing with a
+	# Pokémon's level.
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	assert_eq(mon.growth_rate(), Gen2Experience.GROWTH_MEDIUM_FAST)
+	assert_eq(mon.base_exp(), 82)
+	assert_eq(mon.exp, 125000)
+	assert_eq(mon.level_for_exp(), 50)
+
+
+func test_base_stat_exp_shape_uses_special_attacks_base_never_defenses() -> void:
+	# Pikachu: 35/55/30/90/50/40. The shared "special" slot borrows Sp. Attack's
+	# 50 and never Sp. Defense's 40, the same asymmetry the base stats table
+	# itself carries.
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	assert_eq(mon.base_stat_exp_shape(), {
+		"hp": 35, "attack": 55, "defense": 30, "speed": 90, "special": 50,
+	})
+
+
+func test_gaining_experience_can_cross_a_level_threshold() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	assert_eq(mon.level_for_exp(), 50)
+	mon.gain_exp(132651 - 125000)
+	assert_eq(mon.level_for_exp(), 51, "51 cubed is exactly 132651")
+
+
+func test_experience_is_capped_at_the_three_byte_maximum() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.gain_exp(Gen2Experience.MAX_EXP)
+	assert_eq(mon.exp, Gen2Experience.MAX_EXP)
+
+
+func test_stat_experience_accumulates_across_more_than_one_gain() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.gain_stat_exp({"attack": 45, "speed": 90})
+	mon.gain_stat_exp({"attack": 45, "hp": 35})
+	assert_eq(mon.stat_exp.get("attack"), 90)
+	assert_eq(mon.stat_exp.get("speed"), 90)
+	assert_eq(mon.stat_exp.get("hp"), 35)
+
+
+func test_stat_experience_gain_is_capped_the_same_as_training_it_by_hand() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.gain_stat_exp({"attack": Gen2Stats.MAX_STAT_EXP + 1000})
+	assert_eq(mon.stat_exp.get("attack"), Gen2Stats.MAX_STAT_EXP)
+
+
+func test_levelling_up_recalculates_stats_and_grows_current_hp_by_the_delta() -> void:
+	# Pikachu's own max HP is 110 at 50 and 112 at 51: a Pokémon that took five
+	# points of damage before levelling comes out with two more than it had,
+	# not refilled and not left where it was.
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.take_damage(5)
+	assert_eq(mon.hp, 105)
+
+	mon.level_up()
+
+	assert_eq(mon.level, 51)
+	assert_eq(mon.max_hp(), 112)
+	assert_eq(mon.hp, 107, "105 plus the two extra the new max hp is worth")
+
+
+func test_levelling_up_refuses_past_the_cap() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, Gen2Experience.MAX_LEVEL)
+	var before_hp: int = mon.hp
+	mon.level_up()
+	assert_eq(mon.level, Gen2Experience.MAX_LEVEL)
+	assert_eq(mon.hp, before_hp)
+
+
 func test_rolled_dvs_stay_inside_a_nibble_each() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7

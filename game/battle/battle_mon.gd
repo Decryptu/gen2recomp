@@ -39,6 +39,13 @@ var level: int = 1
 var dvs: int = PERFECT_DVS
 var stat_exp: Dictionary = {}
 
+## Total experience, on this species' own growth curve. Seeded at
+## [method create] to exactly what [param at_level] starts with, not zero: a
+## level 7 Pidgey is created already carrying level 7's own threshold, the same
+## way the cartridge's box and party screens always agree with a Pokémon's
+## level rather than a fresh one reading level 1 until its first battle.
+var exp: int = 0
+
 ## Move numbers and the PP left in each, one to one.
 var moves: Array = []
 var pp: Array = []
@@ -104,6 +111,7 @@ static func create(
 	out.recalculate()
 	out.hp = out.max_hp()
 	out.restore_pp()
+	out.exp = Gen2Experience.total_exp_at(out.growth_rate(), out.level)
 	return out
 
 
@@ -212,6 +220,70 @@ func name_text() -> String:
 	return String(data.species(species).get("name", ""))
 
 
+## The curve [Gen2Experience] should read this species on, or medium fast for
+## a species the cache does not have: the same fallback [method recalculate]
+## already makes for a missing base stats entry.
+func growth_rate() -> int:
+	return int(data.species(species).get("growth_rate", Gen2Experience.GROWTH_MEDIUM_FAST))
+
+
+func base_exp() -> int:
+	return int(data.species(species).get("base_exp", 0))
+
+
+## The five base stats [Gen2Experience.stat_exp_gain] wants when this Pokémon
+## is the one fainting, keyed the way [member stat_exp] already is. Special
+## Attack's base value fills the shared [code]"special"[/code] slot, never
+## Special Defense's: see [constant Gen2Experience.STAT_EXP_KEYS] for why the
+## cartridge reads it that way.
+func base_stat_exp_shape() -> Dictionary:
+	var base: Dictionary = data.species(species).get("stats", {})
+	return {
+		"hp": int(base.get("hp", 0)),
+		"attack": int(base.get("attack", 0)),
+		"defense": int(base.get("defense", 0)),
+		"speed": int(base.get("speed", 0)),
+		"special": int(base.get("sp_attack", 0)),
+	}
+
+
+## Adds experience, capped the way the cartridge's own three-byte total is.
+func gain_exp(amount: int) -> void:
+	exp = clampi(exp + amount, 0, Gen2Experience.MAX_EXP)
+
+
+## Adds a level's worth of stat experience, one entry per key in [param gains],
+## each capped the way a stat's own training already is in [method recalculate].
+func gain_stat_exp(gains: Dictionary) -> void:
+	for key: String in gains:
+		var total: int = int(stat_exp.get(key, 0)) + int(gains[key])
+		stat_exp[key] = clampi(total, 0, Gen2Stats.MAX_STAT_EXP)
+
+
+## The level [member exp] has actually reached on this species' curve, which is
+## not necessarily [member level]: a caller awards experience first and asks
+## this after, one level at a time, so that a move learned partway up a
+## multi-level jump is offered at the level that actually teaches it.
+func level_for_exp() -> int:
+	return Gen2Experience.level_for_exp(growth_rate(), exp)
+
+
+## Raises the level by exactly one and recalculates every stat from it, the
+## same call [method create] makes and the only other time this is meant to
+## happen. Current HP gains the *difference* the new max makes, rather than
+## being refilled or left where it was: the cartridge adds the two maximums'
+## delta onto whatever HP was sitting at, so a Pokémon one hit from fainting
+## before the level up is still one hit from fainting after it, just against a
+## bigger hit.
+func level_up() -> void:
+	if level >= Gen2Experience.MAX_LEVEL:
+		return
+	var before_max: int = max_hp()
+	level += 1
+	recalculate()
+	hp += max_hp() - before_max
+
+
 func max_hp() -> int:
 	return int(stats.get("hp", 1))
 
@@ -256,6 +328,26 @@ func is_out_of_pp() -> bool:
 	for slot: int in moves.size():
 		if can_use(slot):
 			return false
+	return true
+
+
+## Learns a move into an empty slot, with its own full PP. Refuses if every
+## slot is already taken: [method Gen2Battle.learn_move] is what overwrites one
+## instead, because which one to give up is not this class's decision.
+func learn_move(move: int) -> bool:
+	if moves.size() >= MAX_MOVES:
+		return false
+	moves.append(move)
+	pp.append(int(data.move(move).get("pp", 0)))
+	return true
+
+
+## Overwrites [param slot] with [param move], full PP, whatever was there.
+func replace_move(slot: int, move: int) -> bool:
+	if slot < 0 or slot >= moves.size():
+		return false
+	moves[slot] = move
+	pp[slot] = int(data.move(move).get("pp", 0))
 	return true
 
 

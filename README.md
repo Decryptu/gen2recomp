@@ -37,9 +37,12 @@ the same thing for Generation 1.
 > trainer class's own AI flags rather than a random pick, and every trainer's
 > Pokémon carries its own class's DVs rather than a perfect set. Multi-hit
 > moves, drain moves, Dream Eater, the fixed-damage moves and OHKOs all have
-> their own sequence now; Disable, Attract, Mist, Focus Energy, Counter and
-> Mirror Coat are still an ordinary attack, and the overworld, audio and the
-> mod loader do not exist.
+> their own sequence now, and a battle that ends awards something: the winner
+> gains experience and stat experience off the cartridge's own six growth
+> curves, levels up, recalculates its stats and picks up whatever its
+> learnset teaches along the way, with the exp bar moving to match. Disable,
+> Attract, Mist, Focus Energy, Counter and Mirror Coat are still an ordinary
+> attack, and the overworld, audio and the mod loader do not exist.
 > There is nothing playable here today.
 
 ## Getting started
@@ -160,6 +163,14 @@ the next one out is sent in. `W` switches, which costs the turn: the other side
 attacks whoever came in. Left and right change which Pokémon are on it, and `S`
 and `D` take health off the player's and the enemy's without a turn, which is
 the fastest way to see the bars change colour.
+
+Beating one of the enemy's Pokémon now awards experience: the player's own
+Pokémon gains it and its stat experience, levels up if it has earned it, and
+learns whatever its learnset teaches along the way, straight into an empty
+move slot or offered for one already taken. Nothing on this screen asks which
+move to give up yet, because the menu for that does not exist either, so an
+offer is declined automatically; `Gen2Battle.learn_move` and `decline_move`
+are the real answer for whatever asks properly later.
 
 Both Pokémon know what their level says they know, out of the learnset. The
 player still picks at random from those moves, because the menu does not exist

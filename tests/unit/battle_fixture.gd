@@ -139,17 +139,45 @@ static func build(directory: String) -> GameData:
 ## The species table, indexed by number like the real one, with the gaps filled
 ## by entries that exist only so a number indexes its own row.
 static func _species() -> Array:
+	# Growth rate and base exp, appended after the type pair, are the published
+	# ones too: Pikachu and Magcargo are medium fast, Bulbasaur, Charmander and
+	# Geodude medium slow, which is why [constant Gen2Experience.GROWTH_MEDIUM_FAST]
+	# and [constant Gen2Experience.GROWTH_MEDIUM_SLOW] are the two
+	# [test_experience.gd] and [test_battle.gd] ever need a fixture for.
+	# The two learnsets exist only for [test_battle.gd]'s own experience tests:
+	# Charmander's single entry is the plain "an empty slot needs no question"
+	# case, and Geodude's two are a level-up jump that crosses both a free slot
+	# and, once that slot is gone, [Gen2Battle.must_learn_move]'s own offer.
 	var known: Dictionary = {
-		BULBASAUR: ["BULBASAUR", [45, 49, 49, 45, 65, 65], [GRASS, POISON]],
-		CHARMANDER: ["CHARMANDER", [39, 52, 43, 65, 60, 50], [FIRE, FIRE]],
-		PIKACHU: ["PIKACHU", [35, 55, 30, 90, 50, 40], [ELECTRIC, ELECTRIC]],
-		GEODUDE: ["GEODUDE", [40, 80, 100, 20, 30, 30], [ROCK, GROUND]],
-		MAGCARGO: ["MAGCARGO", [50, 50, 120, 30, 80, 80], [FIRE, ROCK]],
+		BULBASAUR: [
+			"BULBASAUR", [45, 49, 49, 45, 65, 65], [GRASS, POISON],
+			Gen2Experience.GROWTH_MEDIUM_SLOW, 64, [],
+		],
+		CHARMANDER: [
+			"CHARMANDER", [39, 52, 43, 65, 60, 50], [FIRE, FIRE],
+			Gen2Experience.GROWTH_MEDIUM_SLOW, 65, [{"level": 6, "move": EMBER}],
+		],
+		PIKACHU: [
+			"PIKACHU", [35, 55, 30, 90, 50, 40], [ELECTRIC, ELECTRIC],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 82, [],
+		],
+		GEODUDE: [
+			"GEODUDE", [40, 80, 100, 20, 30, 30], [ROCK, GROUND],
+			Gen2Experience.GROWTH_MEDIUM_SLOW, 86,
+			[{"level": 6, "move": GROWL}, {"level": 11, "move": SLASH}],
+		],
+		MAGCARGO: [
+			"MAGCARGO", [50, 50, 120, 30, 80, 80], [FIRE, ROCK],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 154, [],
+		],
 	}
 
 	var out: Array = []
 	for number: int in range(1, MAGCARGO + 1):
-		var entry: Array = known.get(number, ["FILLER", [10, 10, 10, 10, 10, 10], [NORMAL, NORMAL]])
+		var entry: Array = known.get(number, [
+			"FILLER", [10, 10, 10, 10, 10, 10], [NORMAL, NORMAL],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 64, [],
+		])
 		var stats: Array = entry[1]
 		out.append({
 			"number": number,
@@ -158,7 +186,10 @@ static func _species() -> Array:
 				"hp": stats[0], "attack": stats[1], "defense": stats[2],
 				"speed": stats[3], "sp_attack": stats[4], "sp_defense": stats[5],
 			},
+			"learnset": entry[5],
 			"types": entry[2],
+			"growth_rate": entry[3],
+			"base_exp": entry[4],
 			"front_tiles": [7, 7],
 			"palette": {"normal": [0x1234, 0x5678], "shiny": [0x0C63, 0x1084]},
 		})
