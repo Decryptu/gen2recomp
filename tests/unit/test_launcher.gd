@@ -1,0 +1,61 @@
+extends GutTest
+
+## Launcher tests use the real scene and synthetic rejected files. They never
+## import a cartridge or create cartridge-derived data.
+
+var _launcher: Control = null
+var _scratch_path: String = "user://launcher-test-small.gbc"
+
+
+func after_each() -> void:
+	if is_instance_valid(_launcher):
+		_launcher.free()
+	_launcher = null
+	DirAccess.remove_absolute(_scratch_path)
+
+
+func _open_launcher() -> void:
+	var packed: PackedScene = load("res://game/main/main.tscn")
+	_launcher = packed.instantiate()
+	add_child(_launcher)
+	await get_tree().process_frame
+
+
+func test_launcher_lists_every_supported_game() -> void:
+	await _open_launcher()
+	var snapshot: Dictionary = _launcher.launcher_snapshot()
+	var games: Dictionary = snapshot["games"]
+
+	assert_eq(games.size(), RomRegistry.ORDER.size())
+	for game_id: StringName in RomRegistry.ORDER:
+		var row: Dictionary = games[String(game_id)]
+		assert_eq(row["title"], RomRegistry.title_for(game_id))
+		assert_true(row["imported"] is bool)
+		assert_false(row["selected"])
+
+
+func test_launcher_reports_a_rejected_rom_without_importing() -> void:
+	await _open_launcher()
+	var file: FileAccess = FileAccess.open(_scratch_path, FileAccess.WRITE)
+	var bytes := PackedByteArray()
+	bytes.resize(1024)
+	file.store_buffer(bytes)
+	file.close()
+
+	_launcher.import_rom_path(_scratch_path)
+	var snapshot: Dictionary = _launcher.launcher_snapshot()
+
+	assert_eq(snapshot["status"], "Import stopped.")
+	assert_string_contains(snapshot["detail"], "bytes")
+	assert_false(snapshot["importing"])
+
+
+func test_runtime_selection_accepts_registry_games_and_rejects_unknown_ids() -> void:
+	var previous: StringName = GameRuntime.selected_game_id
+
+	assert_true(GameRuntime.select_game(RomRegistry.CRYSTAL))
+	assert_eq(GameRuntime.selected_game_id, RomRegistry.CRYSTAL)
+	assert_false(GameRuntime.select_game(&"not_a_game"))
+	assert_eq(GameRuntime.selected_game_id, RomRegistry.CRYSTAL)
+
+	GameRuntime.selected_game_id = previous
