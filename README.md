@@ -12,61 +12,36 @@
   <a href="https://x.com/DecryptTV"><img src="https://img.shields.io/badge/follow-%40DecryptTV-000000?style=flat-square&logo=x&logoColor=white" alt="X"></a>
 </p>
 
-A native [Godot 4](https://godotengine.org) reimplementation of the Generation 2
-Game Boy Color games: Gold, Silver and Crystal.
+A native [Godot 4](https://godotengine.org) reimplementation of the Generation
+2 Game Boy Color games, Gold, Silver and Crystal. It is written from scratch in
+GDScript, not an emulator, static recompilation or disassembly. A user-supplied
+cartridge dump is verified by SHA-1, decoded once into a cache, then released.
+No game data ships here. Bring your own ROM.
 
-**Not an emulator, not a static recompilation, not a disassembly.** The engine
-is written from scratch in GDScript. Your own cartridge dump is used as an
-*asset database*: verified by SHA-1, decoded once into a cache, then released.
-
-No game data ships in this repository. **Bring your own ROM.**
-
-Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp), which does
-the same thing for Generation 1.
+Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 
 > ### Status: early
 >
-> The import gate and the first half of the importer exist and are tested: a
-> verified cartridge decodes into species data, moves, items, types, the type
-> chart, learnsets, evolutions, palettes, every Pokémon sprite, every trainer
-> pic, the font, the text box borders and the battle HUD. A battle can be
-> fought: parties, switching, stats, damage, accuracy, turn order, the five
-> status conditions, confusion, flinching, two-turn moves, recharging, Toxic,
-> Haze, Belly Drum and Psych Up, on a real 160x144 screen with the bars
-> draining and the messages appearing, against a trainer AI scored by that
-> trainer class's own AI flags rather than a random pick, and every trainer's
-> Pokémon carries its own class's DVs rather than a perfect set. Multi-hit
-> moves, drain moves, Dream Eater, the fixed-damage moves and OHKOs all have
-> their own sequence now, and a battle that ends awards something: the winner
-> gains experience and stat experience off the cartridge's own six growth
-> curves, levels up, recalculates its stats and picks up whatever its
-> learnset teaches along the way, with the exp bar moving to match. Disable,
-> Attract, Encore, Mist and Focus Energy all lock a move slot, a target's
-> gender or the user's own state now too. Counter, Mirror Coat, Selfdestruct
-> and Explosion's own halved Defense, and Fly and Dig's semi-invulnerability
-> now have their own battle sequences as well, alongside Rollout, Defense Curl
-> and the Thrash family. The launcher lists the three supported cartridges,
-> shows which caches are ready, imports a verified dump through the UI and opens
-> the selected cache's save screen. The save screen creates and validates a new
-> game, imports stable player and party fields from an original `.sav`, shows
-> persistent HP and status, and opens the selected party in the development
-> battle. The overworld, audio and mod loader do not exist yet. There is no
-> complete game here today.
+> The import gate and first importer half are tested. A verified cartridge
+> decodes species, moves, items, types, the type chart, learnsets, evolutions,
+> palettes, all Pokémon sprites, trainer pics and parties, the font, text-box
+> borders and battle HUD. Battles support parties, switching, stats, damage,
+> accuracy, turn order, status and substatus effects, trainer AI, experience,
+> levelling and move learning on a real 160x144 screen. The launcher imports a
+> verified dump, opens its cache's save screen, creates or imports a party, and
+> starts the development battle. The overworld, audio and mod loader do not
+> exist yet, so this is not a complete game.
 
 ## Getting started
 
-You need Godot 4.8 or newer. Clone the repo, then enable the commit guard
-(Git does not clone hooks, so this is once per clone):
+You need Godot 4.8 or newer. After cloning, enable the commit guard once per
+clone because Git does not clone hooks:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-Put your cartridge dumps in `roms/`; see [roms/README.md](roms/README.md).
-That folder is gitignored and carries a `.gdignore`, so its contents are
-excluded from both commits and builds.
-
-Verify them:
+Put dumps in `roms/`, then verify them. See [roms/README.md](roms/README.md).
 
 ```bash
 godot --headless --path . -s res://tools/verify_rom.gd
@@ -74,7 +49,8 @@ godot --headless --path . -s res://tools/verify_rom.gd
 
 ## Supported cartridges
 
-Matching is by SHA-1, never by filename.
+Matching uses SHA-1, never filenames. Unknown hashes are refused because an
+uncharacterised bank layout would produce corrupt assets.
 
 | Game | SHA-1 |
 |---|---|
@@ -82,170 +58,119 @@ Matching is by SHA-1, never by filename.
 | Silver (USA/Europe) | `49b163f7e57702bc939d642a18f591de55d92dae` |
 | Crystal (USA/Europe Rev 1) | `f2f52230b536214ef7c9924f483392993e226cfb` |
 
-An unrecognised hash is refused outright rather than imported on a best-effort
-basis: a cartridge whose bank layout has not been characterised produces
-corrupt assets instead of an honest error.
-
 ## Importing
-
-Decoding a cartridge into the cache:
 
 ```bash
 godot --headless --path . -s res://tools/import_rom.gd
 ```
 
-Takes under a second per game. The cache lands in Godot's `user://` directory,
-never inside the project, because it is cartridge-derived data and subject to
-exactly the same rule as the ROM itself. Add `--verify` to run the checks
-without writing anything.
+Import takes under a second per game. The cache is keyed by game and hash and
+stored in Godot's `user://`, never in the project or an export. Use `--verify`
+to run checks without writing.
 
-Each import is keyed by game and hash, so two revisions never share a cache.
-What comes out today:
-
-| | |
+| Data | Contents |
 |---|---|
 | Species | Names, base stats, types, held items, egg groups, TM/HM flags |
-| Learnsets | Every level-up move of all 251 species, in the cartridge's order |
-| Evolutions | Every evolution, and what each one asks for |
-| Moves | Names, power, type, accuracy, PP, effect and its chance |
-| Items | All 255 names, indexed by item number |
-| Types | All 28 names, indexed by type number |
-| Type chart | Every matchup, and which two Foresight cancels |
-| Trainers | Every trainer class: name, pic, palette, its own AI flags and its own DVs; and every individual trainer's own party, level by level |
-| Palettes | Normal and shiny, as the cartridge's own 15-bit colours |
-| Sprites | Front and back for all 251 species, plus all 26 Unown forms |
-| Font | All 128 glyphs, indexed by character code |
-| Borders | All eight text box frames, six tiles each |
-| Battle HUD | The HP bar, the exp bar, both panel borders and the colours they are drawn in |
+| Learnsets | All 251 species' level-up moves, in cartridge order |
+| Evolutions | Every evolution and its method/requirements |
+| Moves | Names, power, type, accuracy, PP, effect and chance |
+| Items, types | 255 item names and 28 type names, indexed by number |
+| Type chart | Every matchup and the two Foresight-cancelled entries |
+| Trainers | Class names, pics, palettes, AI flags, DVs, and every party |
+| Palettes | Normal and shiny, as the cartridge's 15-bit colours |
+| Sprites | Front/back for 251 species and all 26 Unown forms |
+| Font and borders | 128 glyphs and eight six-tile text-box frames |
+| Battle HUD | HP/EXP bars, panel borders and their colours |
 
-Sprites are stored as colour indices rather than as images, and a palette is
-applied when they are drawn, which is the whole of what being shiny costs.
+Sprites remain colour indices and receive a palette at draw time, so shiny
+rendering costs no duplicate images.
 
-To look at what was decoded, as a contact sheet of sprites:
+Preview decoded graphics:
 
 ```bash
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
 ```
 
-The same tool takes `trainers` for the trainer classes, or `font` or `frames` in
-place of an atlas name, which is how you check that the glyphs are where the
-character codes say they are.
-
-or as text, for any of `species`, `moves`, `items`, `types`, `matchups`,
-`trainers`, `learnsets`, `evolutions` or `all`:
+Use `trainers`, `font` or `frames` instead of `front`. Dump decoded tables with
+any of `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`,
+`evolutions`, `growth` or `all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
 
-`matchups` prints the type chart as a grid rather than as a list, because a grid
-is the shape the published table has and a single wrong cell shows up in it.
-`learnsets` and `evolutions` resolve their numbers into names, so a line reads
-as "level 20, attack over defense -> HITMONLEE" rather than as three bytes.
+`matchups` prints a grid. `learnsets` and `evolutions` resolve numbers into
+names. `growth` checks all 251 species against the six curves and base EXP.
 
 ## Running
+
+Smoke test the main scene:
 
 ```bash
 godot --headless --path . --quit-after 30
 ```
 
-Boots the main scene for 30 frames and exits, as a quick smoke check.
+The launcher lists Gold, Silver and Crystal cache status, imports a selected
+ROM, and opens its save screen. That screen offers three validated slots, new
+games with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import,
+party inspection and the development battle. Battles write back to the same
+validated slot after events finish. See [docs/SAVES.md](docs/SAVES.md) for the
+save contract and cartridge SRAM boundary.
 
-The normal main scene is now the launcher. It shows the imported-cache status
-for Gold, Silver and Crystal, accepts a user-selected ROM through `Import ROM`,
-and opens the save screen for an imported game. The save screen offers three
-validated project slots, new-game creation with Chikorita, Cyndaquil or
-Totodile, original `.sav` import, party inspection and the development battle.
-The selected party is written back to the same validated slot after a battle.
+Development scenes:
 
-The current save contract and the boundary between project saves and original
-cartridge SRAM are documented in [docs/SAVES.md](docs/SAVES.md).
-
-To see an imported sprite on a real screen, open
-`game/render/pic_viewer.tscn` in the editor and press Play. Left and right
-change species, `S` toggles shiny, `B` swaps the front pic for the back one, and
-`T` switches to the trainer classes.
-The game is drawn into a 160x144 viewport and scaled up by a whole number, so a
-Game Boy pixel stays square; the interface around it is at the window's own
-resolution.
-
-`game/render/text_viewer.tscn` does the same for text: space advances the box,
-`F` cycles through the eight borders, and `C` shows every glyph in the font at
-once.
-
-`game/battle/battle_screen.tscn` is the battle screen itself: two Pokémon, a
-status panel each and a text box, where the hardware puts them, with a real
-battle behind it. `A` takes a turn and space steps through what happened, so the
-bars drain, the messages appear and one of the two eventually faints, whereupon
-the next one out is sent in. `W` switches, which costs the turn: the other side
-attacks whoever came in. Left and right change which Pokémon are on it, and `S`
-and `D` take health off the player's and the enemy's without a turn, which is
-the fastest way to see the bars change colour.
-
-Beating one of the enemy's Pokémon now awards experience: the player's own
-Pokémon gains it and its stat experience, levels up if it has earned it, and
-learns whatever its learnset teaches along the way, straight into an empty
-move slot or offered for one already taken. Nothing on this screen asks which
-move to give up yet, because the menu for that does not exist either, so an
-offer is declined automatically; `Gen2Battle.learn_move` and `decline_move`
-are the real answer for whatever asks properly later.
-
-Both Pokémon know what their level says they know, out of the learnset. The
-player still picks at random from those moves, because the menu does not exist
-yet; the enemy does too when what is on screen is `show_matchup`'s invented
-pairing, but fights with the cartridge's own trainer AI, scored by that
-trainer class's own AI flags, once `show_trainer(trainer_class)` is called on
-the scene to fight one of the cartridge's own trainers instead, Falkner among
-them. The launcher path loads the player's party from the selected save slot, while
-directly opening the development scene still uses its fallback matchup.
+- `game/render/pic_viewer.tscn`: Left/right changes species, `S` toggles shiny,
+  `B` swaps front/back, and `T` selects trainer classes.
+- `game/render/text_viewer.tscn`: Space advances, `F` cycles borders, and `C`
+  shows every glyph.
+- `game/battle/battle_screen.tscn`: `A` takes a turn, space advances events,
+  `W` switches, left/right changes the matchup, and `S`/`D` damage either side
+  without using a turn. The player currently chooses moves randomly; a full
+  moveset's learn-offer is declined automatically because those menus do not
+  exist yet. `show_trainer(trainer_class)` uses the real party and trainer AI;
+  `show_matchup` uses a fallback invented pairing.
 
 ## Tests
 
-[GUT](https://github.com/bitwes/Gut) lives in `addons/gut`; configuration is in
+[GUT](https://github.com/bitwes/Gut) is in `addons/gut`; configuration is in
 `.gutconfig.json`.
 
 ```bash
 godot --headless -s res://addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit
 ```
 
-Exit code `0` means everything passed. Tests never load a real cartridge;
-they use synthetic files and a known SHA-1 vector, so the suite runs anywhere.
+Exit code `0` means all tests passed. They use synthetic files and a known
+SHA-1 vector, never a real cartridge.
 
 ## Layout
 
-| Path | |
+| Path | Contents |
 |---|---|
-| `game/` | Feature folders, scene and script colocated |
-| `autoload/` | Singletons registered in Project Settings |
-| `assets/` | Only assets we authored or that are freely licensed |
-| `assets/brand/` | Logo and banner; see [its README](assets/brand/README.md) |
+| `game/` | Feature folders with colocated scenes and scripts |
+| `autoload/` | Project singletons |
+| `assets/` | Authored or freely licensed assets |
+| `assets/brand/` | Logo and banner, see its README |
 | `addons/` | Third-party plugins |
 | `tests/` | GUT unit and integration tests |
-| `tools/` | Headless developer scripts, not shipped game code |
-| `roms/` | Your cartridges (gitignored) |
+| `tools/` | Headless developer scripts |
+| `roms/` | User cartridges, excluded from Git and Godot imports |
 | `docs/` | Contributor notes |
 
 ## Platforms
 
-Windows, macOS, Linux, Android and iOS, using the GL Compatibility renderer for
-the widest hardware reach. Export presets are not configured yet.
-
-Note that iOS forbids JIT compilation and loading native code at runtime. Mods
-are therefore GDScript interpreted by the shipped VM, never compiled
-extensions. That is why the project is GDScript-first.
+Windows, macOS, Linux, Android and iOS use the GL Compatibility renderer.
+Export presets are not configured. iOS forbids JIT and runtime native code, so
+mods will be interpreted GDScript, never compiled extensions. This is why the
+project is GDScript-first.
 
 ## Contributing
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for conventions and the Godot
-pitfalls that have cost real time on this project.
-
-**The one rule that matters:** no cartridge-derived data enters this
-repository. Not a ROM, not a `.sav`, not extracted sprites, text, maps or
-audio. Three layers enforce it: `.gitignore`, the pre-commit hook, and tests
-that never touch a real file. Please do not weaken any of them.
+Read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). No cartridge-derived data
+may enter the repository: no ROM, `.sav`, extracted sprites, text, maps or
+audio. `.gitignore`, the pre-commit hook and tests enforce this; do not weaken
+them.
 
 ## Licence
 
-[MIT](LICENSE). This covers the engine source in this repository and nothing
-else: the games themselves are not included, not redistributed, and remain the
-property of their respective owners. You supply your own cartridge dump.
+[MIT](LICENSE) covers the engine source here, not the games or supplied dumps,
+which remain the property of their respective owners.
