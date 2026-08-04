@@ -47,9 +47,10 @@ the same thing for Generation 1.
 > now have their own battle sequences as well, alongside Rollout, Defense Curl
 > and the Thrash family. The launcher lists the three supported cartridges,
 > shows which caches are ready, imports a verified dump through the UI and can
-> open the development battle against the selected cache. Save slots, a real
-> player party, the overworld, audio and the mod loader do not exist yet. There
-> is no complete game here today.
+> open the development battle against the selected cache. The development
+> battle now creates and reloads a validated save slot with a persistent player
+> party. The real new-game flow, overworld, audio and mod loader do not exist
+> yet. There is no complete game here today.
 
 ## Getting started
 
@@ -151,8 +152,12 @@ Boots the main scene for 30 frames and exits, as a quick smoke check.
 
 The normal main scene is now the launcher. It shows the imported-cache status
 for Gold, Silver and Crystal, accepts a user-selected ROM through `Import ROM`,
-and opens the development battle for an imported game. Save slots and the
-player's persistent party are not wired up yet.
+and opens the development battle for an imported game. The first development
+save slot is created under Godot's `user://` directory when the battle opens,
+then the validated player party is loaded back into the battle.
+
+The current save contract and the boundary between project saves and original
+cartridge SRAM are documented in [docs/SAVES.md](docs/SAVES.md).
 
 To see an imported sprite on a real screen, open
 `game/render/pic_viewer.tscn` in the editor and press Play. Left and right
@@ -189,8 +194,8 @@ yet; the enemy does too when what is on screen is `show_matchup`'s invented
 pairing, but fights with the cartridge's own trainer AI, scored by that
 trainer class's own AI flags, once `show_trainer(trainer_class)` is called on
 the scene to fight one of the cartridge's own trainers instead, Falkner among
-them. What is on screen when you press Play is still two made-up Pokémon a
-side, because the player's party comes from a save that does not exist yet.
+them. The launcher path loads the player's party from save slot 1, while
+directly opening the development scene still uses its fallback matchup.
 
 ## Tests
 

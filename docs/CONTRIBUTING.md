@@ -68,6 +68,14 @@ because a Pokémon is made outside a battle as well as inside one. It answers tw
 questions that are not each other's shortcut, because the cartridge asks them
 with two different routines:
 
+`game/save/` owns project save data, not cartridge-derived data. Its versioned
+model and validator carry the stable party fields, while the battle adapter
+reconstructs derived stats and deliberately drops volatile battle state. The
+save store keys slots by game ID and ROM SHA-1, validates against `GameData`,
+and writes through a temporary file before replacing the slot. Keep this layer
+scene-free and do not make it parse original SRAM until a checksum-aware adapter
+has been researched and tested against the real save layout.
+
 - **Filling a new Pokémon** walks the list from the start and stops at the first
   move above the level being filled for.
 - **Levelling up** reads the whole list and takes the entries at exactly the

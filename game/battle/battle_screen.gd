@@ -31,10 +31,8 @@ const DEFAULT_ENEMY: int = 16
 const DEFAULT_PLAYER: int = 155
 const DEFAULT_LEVEL: int = 5
 
-## How many Pokémon [method _party_from] makes up, so that switching and being
-## replaced after a faint can both be seen on the player's side, which still has
-## nothing real to draw from: a save does not exist yet. [method show_trainer]
-## puts a real party of whatever size the cartridge gives it on the enemy's.
+## How many Pokémon [method _party_from] makes up for the fallback development
+## matchup. A validated save supplies the player's real party instead.
 const PARTY_SIZE: int = 2
 
 ## What a status says when it stops a Pokémon moving, and when it lands on one.
@@ -87,6 +85,8 @@ var _hud: Gen2BattleHud = null
 var _battle: Gen2Battle = null
 var _pending: Array = []
 var _rng := RandomNumberGenerator.new()
+var _save_slot: int = -1
+var _save_written: bool = false
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -142,8 +142,12 @@ func _ready() -> void:
 	_screen.display(_box)
 	_box.place_at_bottom()
 
-	show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
-	_announce()
+	var saved: Gen2SaveData = GameRuntime.selected_save()
+	if saved != null and show_saved_party(saved):
+		show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
+	else:
+		show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
+		_announce()
 
 
 ## True once the cache had everything the screen draws with.
@@ -160,6 +164,8 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_player_level = player_level
 
 	_pending = []
+	_save_slot = -1
+	_save_written = false
 	_enemy_trainer_class = 0
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
@@ -177,9 +183,8 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 
 
 ## Puts the player against one of a trainer class's own trainers, built from the
-## cartridge's own party rather than invented. The player's side is still
-## [method _party_from]'s made-up one: nothing plays it yet, so there is nothing
-## real to put there.
+## cartridge's own party rather than invented. The player's side is the
+## fallback development party when this method is called directly.
 func show_trainer(
 	trainer_class: int, index: int = 0, player_species: int = DEFAULT_PLAYER,
 	player_level: int = DEFAULT_LEVEL
@@ -196,6 +201,8 @@ func show_trainer(
 	_enemy_level = lead.level
 
 	_pending = []
+	_save_slot = -1
+	_save_written = false
 	_enemy_trainer_class = trainer_class
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
@@ -217,9 +224,40 @@ func show_trainer(
 	])
 
 
-## A party led by [param species], with the species after it behind. Scaffolding
-## for the player's side, which still has nothing real to draw from: a save does
-## not exist yet. The enemy's side no longer uses this; see [method show_trainer].
+## Starts the development battle with the player party from a validated save
+## slot. The enemy remains the existing wild demonstration, while the player
+## side now carries persistent levels, HP, PP, status, DVs and stat experience.
+func show_saved_party(save: Gen2SaveData) -> bool:
+	var player_party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, save)
+	var enemy_party: Gen2Party = _party_from(DEFAULT_ENEMY, DEFAULT_LEVEL)
+	if player_party == null or enemy_party == null:
+		return false
+	var player_lead: Gen2BattleMon = player_party.active_mon()
+	var enemy_lead: Gen2BattleMon = enemy_party.active_mon()
+	_pending = []
+	_save_slot = save.slot
+	_save_written = false
+	_enemy_trainer_class = 0
+	_enemy_turns_taken = 0
+	_player_turns_taken = 0
+	_player = player_lead.species
+	_player_level = player_lead.level
+	_enemy = enemy_lead.species
+	_enemy_level = enemy_lead.level
+	_battle = Gen2Battle.create_parties(_data, player_party, enemy_party, _rng)
+	if _battle == null:
+		_save_slot = -1
+		return false
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
+	_refresh_exp_bar()
+	return true
+
+
+## A fallback party led by [param species], with the species after it behind.
+## The enemy's side no longer uses this; see [method show_trainer].
 func _party_from(species: int, level: int) -> Gen2Party:
 	var members: Array = []
 	for offset: int in PARTY_SIZE:
@@ -384,7 +422,26 @@ func advance() -> void:
 		return
 	if _replace_the_fallen():
 		return
+	if _battle != null and _battle.is_over():
+		_save_battle_result()
+		return
 	take_turn()
+
+
+## Writes back only after every event from a finished battle has been shown.
+## Saving during a resolved turn would capture battle state the player has not
+## seen yet, while the persistent save model intentionally has no such state.
+func _save_battle_result() -> void:
+	if _save_slot < 0 or _save_written or _battle == null:
+		return
+	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER)
+	)
+	var result: Dictionary = Gen2SaveStore.save(save, _data)
+	if not result["ok"]:
+		push_error("Could not save battle result: %s" % result["message"])
+		return
+	_save_written = true
 
 
 ## Sends out the first Pokémon standing on any side that owes one, and answers
