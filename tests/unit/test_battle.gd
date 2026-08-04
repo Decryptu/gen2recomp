@@ -1002,3 +1002,187 @@ func test_declining_the_offered_move_keeps_the_four_already_known() -> void:
 	assert_eq(events[0]["move"], Fixture.SLASH)
 	assert_eq(battle.player.moves, before)
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
+
+
+func _used_move_by(events: Array, side: int) -> Dictionary:
+	for event: Dictionary in events:
+		if event["type"] == Gen2Battle.USED_MOVE and int(event["side"]) == side:
+			return event
+	return {}
+
+
+## Pikachu is faster than Geodude, so Encore lands before Geodude has acted
+## this same turn. The real cartridge's own `CheckOpponentWentFirst` forces an
+## already-chosen action over for the turn it lands on top of the ones after
+## it; this engine gets the same thing by not committing to a move until
+## [method Gen2Battle._act] actually reaches it, so Geodude's own request for
+## Slash is overridden back to Tackle in the very turn Encore lands, not only
+## the turns after.
+func test_encore_forces_the_targets_last_move_even_the_turn_it_lands() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.ENCORE_MOVE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE, Fixture.SLASH])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.last_move_used, Fixture.TACKLE)
+
+	var events: Array = battle.take_turn(1, 1)
+	assert_eq(battle.enemy.encored_slot, 0)
+	assert_eq(
+		int(_used_move_by(events, Gen2Battle.ENEMY)["move"]), Fixture.TACKLE,
+		"forced back to Tackle despite asking for Slash"
+	)
+
+
+func test_encore_keeps_forcing_the_locked_slot_on_a_later_turn_too() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE, Fixture.SLASH])
+	)
+	battle.enemy.encored_slot = 0
+	battle.enemy.encore_turns = 5
+
+	var events: Array = battle.take_turn(0, 1)
+	assert_eq(
+		int(_used_move_by(events, Gen2Battle.ENEMY)["move"]), Fixture.TACKLE,
+		"still locked, whatever slot is asked for"
+	)
+
+
+func test_encore_ends_when_its_own_counter_runs_out() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE, Fixture.SLASH])
+	)
+	battle.enemy.encored_slot = 0
+	battle.enemy.encore_turns = 1
+
+	var events: Array = battle.take_turn(0, 1)
+	assert_eq(
+		int(_used_move_by(events, Gen2Battle.ENEMY)["move"]), Fixture.TACKLE,
+		"still forced for the turn the counter reaches zero on"
+	)
+	assert_eq(battle.enemy.encored_slot, -1)
+	assert_eq(battle.enemy.encore_turns, 0)
+	assert_false(_first(events, Gen2Battle.ENCORE_ENDED).is_empty())
+
+
+func test_encore_ends_early_once_its_own_move_runs_out_of_pp() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE, Fixture.SLASH])
+	)
+	battle.enemy.encored_slot = 0
+	battle.enemy.encore_turns = 5
+	battle.enemy.pp[0] = 1
+
+	var events: Array = battle.take_turn(0, 1)
+	assert_eq(battle.enemy.pp[0], 0)
+	assert_eq(battle.enemy.encored_slot, -1, "ran out of PP mid-encore, not the counter")
+	assert_false(_first(events, Gen2Battle.ENCORE_ENDED).is_empty())
+
+
+## A regression test for a real bug found while writing this: comparing
+## [member Gen2Turn.slot] against the disabled slot inside
+## [constant Gen2EffectCommands.CHECK_STATUS] fired even when
+## [method Gen2BattleMon.can_use] had already rerouted the request to Struggle,
+## reading an ordinary Struggle turn as a false "cannot move: disabled". The
+## fix compares the move that is actually about to run, by number, instead.
+func test_a_disabled_slot_falls_back_to_struggle_rather_than_a_false_cannot_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.THUNDERBOLT]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.disabled_slot = 1
+	battle.player.disable_turns = 3
+
+	var events: Array = battle.take_turn(1, 0)
+	assert_eq(int(_used_move_by(events, Gen2Battle.PLAYER)["move"]), Gen2Damage.STRUGGLE)
+	assert_true(_first(events, Gen2Battle.CANNOT_MOVE).is_empty())
+
+
+func test_disable_wears_off_and_the_slot_becomes_usable_again() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.THUNDERBOLT]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.disabled_slot = 1
+	battle.player.disable_turns = 1
+
+	# Ticks down whichever move is actually used this turn: the countdown is
+	# unconditional, the same as confusion's own counter.
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.player.disabled_slot, -1)
+	assert_eq(battle.player.disable_turns, 0)
+	assert_false(_first(events, Gen2Battle.DISABLE_ENDED).is_empty())
+	assert_true(battle.player.can_use(1))
+
+
+## Pinned against seed 12345, the same fixed seed [method before_each] already
+## sets for every test in this file: a bare coin flip like this one has no
+## accuracy field to guarantee it the way a move's own miss chance does, and
+## [method test_a_confused_pokemon_that_hits_itself_never_lands_its_own_move]
+## already leans on this same seed for the same reason.
+func test_attract_can_stop_a_pokemon_moving_on_the_immobilise_roll() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.substatus |= Gen2Substatus.ATTRACTED
+
+	var events: Array = battle.take_turn(0, 0)
+	var stopped: Dictionary = _first(events, Gen2Battle.CANNOT_MOVE)
+	assert_eq(int(stopped["side"]), Gen2Battle.PLAYER)
+	assert_eq(stopped["reason"], &"attract")
+	assert_true(_used_move_by(events, Gen2Battle.PLAYER).is_empty())
+
+
+func test_switching_out_clears_attract_disable_and_encore() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.player.substatus |= Gen2Substatus.ATTRACTED | Gen2Substatus.DISABLED | Gen2Substatus.ENCORED
+	battle.player.disabled_slot = 0
+	battle.player.disable_turns = 3
+	battle.player.encored_slot = 0
+	battle.player.encore_turns = 3
+	battle.player.last_move_used = Fixture.TACKLE
+
+	var pikachu: Gen2BattleMon = battle.player
+	battle.send_out(Gen2Battle.PLAYER, 1)
+
+	assert_eq(pikachu.substatus, Gen2Substatus.NONE)
+	assert_eq(pikachu.disabled_slot, -1)
+	assert_eq(pikachu.encored_slot, -1)
+	assert_eq(pikachu.last_move_used, 0)
+
+
+## The statistical confirmation that Focus Energy actually raises the rate
+## lives in test_damage.gd, against [method Gen2Damage.critical_level] directly;
+## this is only the wiring, that a real turn's own damage calc reads the flag
+## at all rather than the argument sitting unused.
+## Seed 12, pinned by search rather than assumed, is one where the same first
+## roll misses Tackle's own critical chance at the base rate and lands it at
+## the rate Focus Energy raises it to: the same draw read two different ways,
+## which is a direct proof the flag reaches the roll rather than a statistical
+## one over many turns.
+func test_focus_energy_reaches_the_damage_calc_of_a_real_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.rng.seed = 12
+	var without_boost: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
+	)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, without_boost)
+	assert_false(without_boost.critical, "the base rate misses this particular roll")
+
+	battle.rng.seed = 12
+	battle.player.substatus |= Gen2Substatus.FOCUS_ENERGY
+	var with_boost: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
+	)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, with_boost)
+	assert_true(with_boost.critical, "the same roll lands once Focus Energy raises the rate")

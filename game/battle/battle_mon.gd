@@ -76,6 +76,26 @@ var charged_move: int = 0
 ## Toxic's damage ramps on. Zero unless actually toxic.
 var toxic_counter: int = 0
 
+## Which move slot Disable has locked, or -1 for none: -1 rather than 0 so
+## "nothing disabled" is never confusable with the first slot. Meaningful only
+## while [constant Gen2Substatus.DISABLED] is set.
+var disabled_slot: int = -1
+## How many turns [member disabled_slot] stays locked.
+var disable_turns: int = 0
+
+## Which move slot Encore has locked, or -1 for none, the same shape as
+## [member disabled_slot]. Meaningful only while
+## [constant Gen2Substatus.ENCORED] is set.
+var encored_slot: int = -1
+## How many turns [member encored_slot] stays locked.
+var encore_turns: int = 0
+
+## The move this Pokémon last used, by move number, or zero for none: what
+## Disable and Encore both search a target's own move list for. The cartridge's
+## own `wLastPlayerMove`/`wLastEnemyMove` clear on a switch exactly the way this
+## does, since a freshly sent-out Pokémon has not used a move yet.
+var last_move_used: int = 0
+
 ## The item this Pokémon is holding, by item number, or zero for none. Carried
 ## through from a trainer's party or a save; nothing in the engine reads it yet.
 var item: int = 0
@@ -207,6 +227,45 @@ func reset_volatile() -> void:
 	confusion_turns = 0
 	charged_move = 0
 	toxic_counter = 0
+	disabled_slot = -1
+	disable_turns = 0
+	encored_slot = -1
+	encore_turns = 0
+	last_move_used = 0
+
+
+## The gender the cartridge's own `GetGender` would answer, from the species'
+## gender ratio and this Pokémon's own Attack and Speed DVs.
+##
+## Not a coin flip and not tied to a stat total: the cartridge folds the
+## Attack DV into the high nibble of one byte and the Speed DV into the low
+## nibble, and compares that byte against the species' own ratio the same way
+## a personality value is compared against one from Generation 3 onward. A
+## ratio of 0 is always male and 254 is always female outright, with no
+## comparison run at all; 255 is genderless. Otherwise a combined value below
+## the ratio is male and at or above it is female, which is why raising the
+## ratio raises the odds of female: [constant Gen2Species.GENDER_UNKNOWN] and
+## the two extremes are named on [Gen2BattleMon] rather than repeated at every
+## caller.
+const GENDER_F0: int = 0
+const GENDER_F100: int = 254
+const GENDER_UNKNOWN: int = 255
+
+const GENDER_MALE: StringName = &"male"
+const GENDER_FEMALE: StringName = &"female"
+const GENDER_NONE: StringName = &"genderless"
+
+func gender() -> StringName:
+	var ratio: int = int(data.species(species).get("gender_ratio", GENDER_UNKNOWN))
+	if ratio == GENDER_UNKNOWN:
+		return GENDER_NONE
+	if ratio == GENDER_F0:
+		return GENDER_MALE
+	if ratio == GENDER_F100:
+		return GENDER_FEMALE
+
+	var combined: int = (Gen2Stats.attack_dv(dvs) << 4) | Gen2Stats.speed_dv(dvs)
+	return GENDER_MALE if combined < ratio else GENDER_FEMALE
 
 
 ## The two type numbers, which are the same number twice for a single-type
@@ -318,8 +377,14 @@ func spend_pp(slot: int) -> void:
 
 
 ## Whether there is anything left to do with a move slot.
+##
+## A disabled slot answers false here regardless of its PP, the same way the
+## cartridge's own menu never offers it: [method Gen2Battle.effective_slot] and
+## [method Gen2Battle.move_for] are what reroute a caller that still asks for
+## it, and [constant Gen2EffectCommands.CHECK_STATUS]'s own belt-and-suspenders
+## check is what catches the one path that does not go through either.
 func can_use(slot: int) -> bool:
-	return slot >= 0 and slot < moves.size() and pp_left(slot) > 0
+	return slot >= 0 and slot < moves.size() and pp_left(slot) > 0 and slot != disabled_slot
 
 
 ## True when every slot is empty. The cartridge answers Struggle here; this

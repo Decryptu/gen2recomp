@@ -213,13 +213,16 @@ static func _skip_80_20(rng: RandomNumberGenerator) -> bool:
 
 
 ## [constant RomLayout.AI_BASIC]: don't do anything redundant. A status move
-## whose target already carries a status does nothing on the cartridge, and
-## Confuse Ray or Supersonic against an already-confused target is the one
-## other case `AI_Redundant` covers that this engine's move list can reach;
-## the rest of that routine's table (Light Screen while it is already up, a
-## Substitute already standing, Mist, and so on) reads state this engine does
-## not carry yet and so never fires, which reads as "not redundant" rather
-## than as a wrong answer.
+## whose target already carries a status does nothing on the cartridge, and so
+## do Confuse Ray or Supersonic against an already-confused target, Disable or
+## Encore against an already-locked target, Attract against a target already
+## in love or of the same or an unknown gender, and Mist or Focus Energy used
+## a second time by the attacker itself, which is why those two read the
+## attacker's own state rather than the defender's. The rest of
+## `AI_Redundant`'s own table (Light Screen while it is already up, a
+## Substitute already standing, and so on) reads state this engine does not
+## carry yet and so never fires, which reads as "not redundant" rather than as
+## a wrong answer.
 static func _apply_basic(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int
@@ -233,6 +236,20 @@ static func _apply_basic(
 			redundant = Gen2Substatus.has(defender.substatus, Gen2Substatus.CONFUSED)
 		elif STATUS_ONLY_EFFECTS.has(effect):
 			redundant = Gen2Status.is_afflicted(defender.status)
+		elif effect == Gen2MoveEffect.DISABLE:
+			redundant = defender.disabled_slot >= 0
+		elif effect == Gen2MoveEffect.ENCORE:
+			redundant = defender.encored_slot >= 0
+		elif effect == Gen2MoveEffect.ATTRACT:
+			var same_gender: bool = attacker.gender() == defender.gender()
+			var unknown_gender: bool = attacker.gender() == Gen2BattleMon.GENDER_NONE \
+				or defender.gender() == Gen2BattleMon.GENDER_NONE
+			redundant = same_gender or unknown_gender \
+				or Gen2Substatus.has(defender.substatus, Gen2Substatus.ATTRACTED)
+		elif effect == Gen2MoveEffect.MIST:
+			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.MIST)
+		elif effect == Gen2MoveEffect.FOCUS_ENERGY:
+			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY)
 		if redundant:
 			_discourage(scores, slot)
 

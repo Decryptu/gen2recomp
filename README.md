@@ -41,9 +41,11 @@ the same thing for Generation 1.
 > gains experience and stat experience off the cartridge's own six growth
 > curves, levels up, recalculates its stats and picks up whatever its
 > learnset teaches along the way, with the exp bar moving to match. Disable,
-> Attract, Mist, Focus Energy, Counter and Mirror Coat are still an ordinary
-> attack, and the overworld, audio and the mod loader do not exist.
-> There is nothing playable here today.
+> Attract, Encore, Mist and Focus Energy all lock a move slot, a target's
+> gender or the user's own state now too. Counter, Mirror Coat, Selfdestruct
+> and Explosion's own halved Defense, and Fly and Dig's semi-invulnerability
+> are still an ordinary attack, and the overworld, audio and the mod loader do
+> not exist. There is nothing playable here today.
 
 ## Getting started
 

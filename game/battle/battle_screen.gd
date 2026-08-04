@@ -46,6 +46,8 @@ const STOPPED_BY: Dictionary = {
 	&"paralysis": "is fully paralyzed!",
 	&"flinch": "flinched!",
 	&"recharge": "must recharge!",
+	&"disabled": "is disabled!",
+	&"attract": "is immobilized by love!",
 }
 
 const INFLICTED: Dictionary = {
@@ -572,6 +574,26 @@ func _describe(event: Dictionary) -> String:
 			return "%s did not learn %s." % [
 				_name_of(int(event["species"])), String(_data.move(int(event["move"])).get("name", "")),
 			]
+		Gen2Battle.MOVE_FAILED:
+			return "But it failed!"
+		Gen2Battle.DISABLE_INFLICTED:
+			return "%s's %s was disabled!" % [
+				_battler_name(int(event["target"])), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.DISABLE_ENDED:
+			return "%s is disabled no more!" % _battler_name(side)
+		Gen2Battle.ATTRACT_INFLICTED:
+			return "%s fell in love!" % _battler_name(int(event["target"]))
+		Gen2Battle.ENCORE_INFLICTED:
+			return "%s got an encore!" % _battler_name(int(event["target"]))
+		Gen2Battle.ENCORE_ENDED:
+			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.MIST_SET:
+			return "%s is shrouded in mist!" % _battler_name(side)
+		Gen2Battle.FOCUS_ENERGY_SET:
+			return "%s is getting pumped!" % _battler_name(side)
+		Gen2Battle.MIST_PROTECTED:
+			return "%s's stat drop was blocked by mist!" % _battler_name(int(event["target"]))
 		Gen2Battle.OVER:
 			# Both sides can go down in the same turn, through recoil or a burn,
 			# and then there is nobody to declare.

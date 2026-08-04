@@ -233,3 +233,76 @@ func test_opportunist_only_discourages_stall_moves_once_hp_is_low() -> void:
 	Gen2BattleAI._apply_opportunist(scores, pikachu, geodude, _data, _rng, 0, 0)
 	assert_eq(scores[0], 21)
 	assert_eq(scores[1], 20, "Tackle is not a stall move and is left alone")
+
+
+func test_basic_discourages_disable_against_an_already_disabled_target() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.DISABLE_MOVE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.disabled_slot = 0
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_BASIC, _rng
+		)
+		assert_eq(slot, 1, "disabling an already-disabled target does nothing on the cartridge")
+
+
+func test_basic_discourages_encore_against_an_already_encored_target() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.ENCORE_MOVE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.encored_slot = 0
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_BASIC, _rng
+		)
+		assert_eq(slot, 1, "encoring an already-encored target does nothing on the cartridge")
+
+
+func test_basic_discourages_attract_between_the_same_gender() -> void:
+	# Same DVs on the same species read the same gender, so Attract can never
+	# land between them.
+	var attacker: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE, Fixture.TACKLE],
+		Gen2Stats.pack_dvs(0, 0, 0, 0)
+	)
+	var defender: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE], Gen2Stats.pack_dvs(0, 0, 0, 0)
+	)
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(attacker, defender, _data, RomLayout.AI_BASIC, _rng)
+		assert_eq(slot, 1, "the same gender can never fall for Attract")
+
+
+func test_basic_discourages_attract_against_a_genderless_target() -> void:
+	var attacker: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE, Fixture.TACKLE]
+	)
+	# Species 6 is not named in the fixture, so it reads genderless.
+	var defender: Gen2BattleMon = Gen2BattleMon.create(_data, 6, 50, [Fixture.TACKLE])
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(attacker, defender, _data, RomLayout.AI_BASIC, _rng)
+		assert_eq(slot, 1, "a genderless target can never fall for Attract")
+
+
+func test_basic_discourages_mist_and_focus_energy_used_a_second_time() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.MIST_MOVE, Fixture.TACKLE])
+	pikachu.substatus |= Gen2Substatus.MIST
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_BASIC, _rng
+		)
+		assert_eq(slot, 1, "a second Mist fails without re-applying")
+
+	var pikachu2: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.FOCUS_ENERGY_MOVE, Fixture.TACKLE])
+	pikachu2.substatus |= Gen2Substatus.FOCUS_ENERGY
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu2, geodude, _data, RomLayout.AI_BASIC, _rng
+		)
+		assert_eq(slot, 1, "a second Focus Energy fails without re-applying")

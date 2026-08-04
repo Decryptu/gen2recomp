@@ -111,6 +111,19 @@ const HAZE: int = 25
 const BELLY_DRUM: int = 142
 const PSYCH_UP: int = 143
 
+## Disable, Mist, Focus Energy, Attract and Encore: the numbers are read off
+## the real cartridge with [code]tools/dump_tables.gd -- gold moves[/code], the
+## same way every other effect byte here was, since Gold, Silver and Crystal do
+## not share Generation 1's numbering. Mist and Focus Energy need nothing new;
+## Disable, Attract and Encore are what
+## [member Gen2BattleMon.disabled_slot]/[member Gen2BattleMon.encored_slot] and
+## [method Gen2BattleMon.gender] exist for.
+const DISABLE: int = 86
+const MIST: int = 46
+const FOCUS_ENERGY: int = 47
+const ATTRACT: int = 120
+const ENCORE: int = 90
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
@@ -283,6 +296,52 @@ const PSYCH_UP_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.PSYCH_UP,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Mist and Focus Energy: no roll at all, the same shape as [constant HAZE_SEQUENCE]
+## and [constant BELLY_DRUM_SEQUENCE] above, since both fail on their own
+## precondition (already active) rather than ever missing.
+const MIST_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.MIST,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const FOCUS_ENERGY_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.FOCUS_ENERGY,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Disable, Attract and Encore all roll to connect before they do anything:
+## the cartridge's own sequences for all three are
+## [code]usedmovetext, doturn, checkhit, <effect>, endmove[/code], read off
+## [code]data/moves/effects.asm[/code] directly rather than assumed from the
+## shape of the other three above.
+const DISABLE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.DISABLE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const ATTRACT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.ATTRACT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const ENCORE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.ENCORE,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -503,6 +562,11 @@ static func _sequences() -> Dictionary:
 		HAZE: HAZE_SEQUENCE,
 		BELLY_DRUM: BELLY_DRUM_SEQUENCE,
 		PSYCH_UP: PSYCH_UP_SEQUENCE,
+		MIST: MIST_SEQUENCE,
+		FOCUS_ENERGY: FOCUS_ENERGY_SEQUENCE,
+		DISABLE: DISABLE_SEQUENCE,
+		ATTRACT: ATTRACT_SEQUENCE,
+		ENCORE: ENCORE_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DRAIN_SEQUENCE,
 		MULTI_HIT: MULTI_HIT_SEQUENCE,

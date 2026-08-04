@@ -62,6 +62,11 @@ var stat_by: int = 0
 var stat_target: int = Gen2Battle.PLAYER
 var stat_moved: bool = false
 
+## Set instead of moving a stat when a drop was blocked by the target's own
+## Mist, so the fail-text step behind it can tell that apart from the ordinary
+## "already at the bottom" failure and say the right thing.
+var stat_mist_blocked: bool = false
+
 
 static func create(
 	in_battle: Gen2Battle, acting: int, from_slot: int, number: int, move_data: Dictionary,

@@ -153,6 +153,11 @@ func test_every_volatile_field_clears() -> void:
 	mon.confusion_turns = 3
 	mon.charged_move = Fixture.TACKLE
 	mon.toxic_counter = 2
+	mon.disabled_slot = 1
+	mon.disable_turns = 4
+	mon.encored_slot = 2
+	mon.encore_turns = 3
+	mon.last_move_used = Fixture.TACKLE
 
 	mon.reset_volatile()
 
@@ -160,6 +165,43 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.confusion_turns, 0)
 	assert_eq(mon.charged_move, 0)
 	assert_eq(mon.toxic_counter, 0)
+	assert_eq(mon.disabled_slot, -1)
+	assert_eq(mon.disable_turns, 0)
+	assert_eq(mon.encored_slot, -1)
+	assert_eq(mon.encore_turns, 0)
+	assert_eq(mon.last_move_used, 0)
+
+
+## Attract's own "opposite gender" rule reads [method Gen2BattleMon.gender],
+## which the cartridge's own `GetGender` works out from the species' gender
+## ratio and the Attack and Speed DVs combined into one byte, not from a coin
+## flip. Bulbasaur is really 12.5% female (ratio 31); Pikachu is really an even
+## 50/50 (ratio 127), which is what makes it the one to check the exact
+## boundary on, since a combined value equal to the ratio reads female rather
+## than male.
+func test_gender_reads_the_combined_dv_byte_against_the_species_ratio() -> void:
+	var mostly_male := func(attack: int, speed: int) -> Gen2BattleMon:
+		var dvs: int = Gen2Stats.pack_dvs(attack, 0, speed, 0)
+		return Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [], dvs)
+
+	assert_eq(mostly_male.call(0, 0).gender(), &"male")
+	assert_eq(mostly_male.call(15, 15).gender(), &"female")
+
+	var even_odds := func(attack: int, speed: int) -> Gen2BattleMon:
+		var dvs: int = Gen2Stats.pack_dvs(attack, 0, speed, 0)
+		return Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [], dvs)
+
+	# 126 is one under Pikachu's own ratio of 127; 127 is the ratio itself, and
+	# the cartridge reads a value equal to the ratio as female, not male.
+	assert_eq(even_odds.call(7, 14).gender(), &"male")
+	assert_eq(even_odds.call(7, 15).gender(), &"female")
+
+
+func test_gender_is_none_for_a_genderless_species() -> void:
+	# Every species this fixture does not name outright reads a gender ratio of
+	# 255, the cartridge's own "genderless" marker.
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, 6, 50)
+	assert_eq(mon.gender(), &"genderless")
 
 
 func test_a_pokemon_is_created_already_on_its_curve_not_at_zero() -> void:

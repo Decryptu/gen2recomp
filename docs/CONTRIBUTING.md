@@ -263,17 +263,83 @@ the four fixed-damage effects (`FIXED_DAMAGE`, shared by Super Fang, Sonicboom,
 Seismic Toss and Psywave the way the cartridge shares one `ConstantDamage`
 routine between them) both overwrite what `DAMAGE_CALC` already worked out
 rather than replacing it in the list, keeping only the one thing worth keeping
-from that spent roll: whether the hit is immune at all. Drain is worth a second
-look before assuming its shape follows recoil's: it heals off
-`Gen2Turn.damage`, the number the formula calculated, not `Gen2Turn.dealt`, the
-number that actually came off a target with less left than that, because the
-cartridge's own `SapHealth` reads the same uncapped figure `ApplyDamage` reads
-before clamping it. `Gen2EffectCommands._recoil` uses `Gen2Turn.dealt` instead,
-which the disassembly's own `BattleCommand_Recoil` does not: it also reads the
-uncapped `wCurDamage`. That divergence was not fixed here, since it was found
-while writing an unrelated effect and touching an already-shipped, already-
-tested one was outside what this change was for; whoever picks it up should
-decide whether an overkill hit's recoil is worth correcting to match.
+from that spent roll: whether the hit is immune at all. Drain and recoil both
+heal or cost off `Gen2Turn.damage`, the number the formula calculated, not
+`Gen2Turn.dealt`, the number that actually came off a target with less left
+than that, because the cartridge's own `SapHealth` and `BattleCommand_Recoil`
+both read the same uncapped figure `ApplyDamage` reads before clamping it. A
+target with three hit points left against a move that calculates fifty takes
+three, but a draining attacker heals twenty-five and a recoiling one costs
+itself twelve or thirteen, not one; `_recoil` read `Gen2Turn.dealt` until a
+later session found the divergence and corrected it to match `_drain_target`,
+which had always read it correctly.
+
+Disable, Attract and Encore are a different shape of problem from the rest of
+this table: each acts on a target's own last-used move or its own gender,
+neither of which anything else here needed to track. `Gen2BattleMon.last_move_used`
+is set in `USED_MOVE_TEXT`, cleared on a switch alongside everything else
+`reset_volatile` clears, and is what both effects search the target's own move
+list for; `Gen2BattleMon.disabled_slot`/`disable_turns` and
+`encored_slot`/`encore_turns` are the slot each one locks and for how long,
+`-1` for neither so a locked slot 0 is never confusable with nothing locked at
+all. `Gen2BattleMon.gender` is `GetGender`'s own formula: the species' gender
+ratio compared against the Attack and Speed DVs folded into one byte, high
+nibble and low nibble, the same comparison a personality value gets from
+Generation 3 onward; a ratio of 0 or 254 answers outright with no comparison
+run, and 255 is genderless. Disable's own duration is a reroll-on-zero three
+bits of a random byte plus one (`Gen2Substatus.roll_disable`); Encore's is two
+bits plus three, no reroll; both are named after the cartridge's own rolls
+rather than assumed to share one shape.
+
+Disable is not a slot the *attacker* chooses: it searches the *target's* own
+move list for whatever `last_move_used` names, which is the cartridge's own
+rule (`BattleCommand_Disable` reads `BATTLE_VARS_LAST_COUNTER_MOVE_OPP`, not a
+menu selection), and fails on a target that has not moved yet, whose last move
+was Struggle, who is already disabled, or whose found slot has already run out
+of PP. `Gen2BattleMon.can_use` refuses a disabled slot outright, which is
+enough to reroute every ordinary caller to a different slot or to Struggle;
+`CHECK_STATUS` still carries a belt-and-suspenders refusal for a Pokémon
+somehow still about to use the disabled move regardless, compared by move
+*number* rather than by slot, because a slot that has already been rerouted to
+Struggle by `can_use` still names the disabled slot in `Gen2Turn.slot`, and
+comparing slots there would refuse the Struggle too. Both the tick-down and the
+belt-and-suspenders check sit between flinch and confusion in `CHECK_STATUS`,
+the cartridge's own order.
+
+Encore is the same search, with its own exclusions (Struggle, Encore itself,
+Mirror Move) and its own state, but nothing about *forcing* the locked move
+lives in its own command: `Gen2Battle.effective_slot` is what
+`Gen2Battle.move_for` and `Gen2Battle.take_actions` both read to decide which
+slot actually spends its PP, the same extension point `charged_move` already
+uses for a two-turn move's release turn. The real cartridge's own
+`CheckOpponentWentFirst` forces an already-chosen action over for the very
+turn Encore lands on top of, not only the ones after it, when the encored side
+has not gone yet this same turn; this engine gets that for free by not
+committing to `chosen[side]` until `Gen2Battle._act` actually reaches it,
+reading `effective_slot`/`move_for` fresh at that point rather than at the top
+of the turn where priority was decided. Encore's own countdown ticks once a
+turn rather than once a side's move, in `Gen2Battle._tick_encore`, run
+alongside `_residual_damage`: that is where the cartridge's own `HandleEncore`
+runs too, and it is also what ends Encore early the moment its own locked move
+runs out of PP, not only when the counter reaches zero on its own.
+
+Attract fails between the same gender, a genderless pair, or a target already
+in love, and otherwise sets a substatus flag with no counter, cleared only on
+a switch: what stops the target moving is a fresh coin flip every turn inside
+`CHECK_STATUS`, after confusion, not something decided once when Attract
+lands.
+
+Mist and Focus Energy need nothing `Gen2Substatus` had not already grown for
+something else: a flag, cleared on a switch, checked at the point that already
+existed. Mist's own check sits inside `_stat_change`, gating only the "down"
+and "down2" families (a rise is never checked, since only the entries that
+target the opponent are ever a drop worth blocking), and gets its own event,
+`MIST_PROTECTED`, rather than the generic `STAT_CHANGE_FAILED`: the cartridge
+prints its own line for this one rather than "won't go any lower". Focus
+Energy is closer to wiring than to building: `Gen2Damage.calculate`,
+`roll_critical` and `critical_level` already took a `focus_energy` argument
+before this, unused by any caller; the work was setting the flag and reading
+it back in `_damage_calc` and `_multi_hit`'s own per-hit reroll.
 
 `battle/status.gd` is one status byte, one at a time, refusing a second rather
 than adding it. `battle/substatus.gd` is everything that does not fit on that
