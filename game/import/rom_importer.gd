@@ -217,6 +217,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not trainer_dvs["ok"]:
 		return trainer_dvs
 
+	var world: Dictionary = Gen2WorldImporter.verify_layout(rom)
+	if not world["ok"]:
+		return world
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -1252,6 +1256,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"trainer_party_count": 0,
 		"evolutions": 0,
 		"learnset_moves": 0,
+		"maps": 0,
+		"tilesets": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -1289,6 +1295,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	var types: Array = _import_types(rom, layout, on_progress)
 	var matchups: Array = read_matchups(rom, layout)
 	var trainers: Array = _import_trainers(rom, layout, on_progress)
+	var world: Dictionary = Gen2WorldImporter.import_to_cache(rom, layout, directory, on_progress)
+	if not bool(world.get("ok", false)):
+		result["message"] = String(world.get("message", "Could not import overworld data."))
+		return result
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
 		result["message"] = "Could not write species data."
@@ -1326,6 +1336,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"matchup_count": matchups.size(),
 		"trainer_count": trainers.size(),
 		"trainer_party_count": trainer_party_count,
+		"world_map_count": int(world["maps"]),
+		"world_tileset_count": int(world["tilesets"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
@@ -1343,14 +1355,17 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["matchups"] = matchups.size()
 	result["trainers"] = trainers.size()
 	result["trainer_party_count"] = trainer_party_count
+	result["maps"] = int(world["maps"])
+	result["tilesets"] = int(world["tilesets"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
-		+ "%d trainer classes carrying %d trainers, %d evolutions and %d level-up moves "
-		+ "in %d ms.") % [
+		+ "%d trainer classes carrying %d trainers, %d maps and %d tilesets, %d evolutions "
+		+ "and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
-		trainer_party_count, evolutions, learnset_moves, result["elapsed_ms"],
+		trainer_party_count, int(world["maps"]), int(world["tilesets"]), evolutions,
+		learnset_moves, result["elapsed_ms"],
 	]
 	return result
 

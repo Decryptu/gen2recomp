@@ -26,10 +26,13 @@ const MATCHUPS: String = "matchups.json"
 const TRAINERS: String = "trainers.json"
 const PICS_DIR: String = "pics"
 const TILES_DIR: String = "tiles"
+const WORLD_MAPS: String = "world_maps.json"
+const WORLD_TILESETS: String = "world_tilesets.json"
+const WORLD_TILES_DIR: String = "world_tiles"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 8
+const FORMAT_VERSION: int = 9
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -67,6 +70,14 @@ static func trainers_path(directory: String) -> String:
 	return "%s/%s" % [directory, TRAINERS]
 
 
+static func world_maps_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_MAPS]
+
+
+static func world_tilesets_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_TILESETS]
+
+
 static func pic_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, PICS_DIR, name]
 
@@ -79,8 +90,12 @@ static func tile_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, TILES_DIR, name]
 
 
+static func world_tile_path(directory: String, number: int) -> String:
+	return "%s/%s/%02d.idx" % [directory, WORLD_TILES_DIR, number]
+
+
 static func prepare(directory: String) -> bool:
-	for sub: String in [PICS_DIR, TILES_DIR]:
+	for sub: String in [PICS_DIR, TILES_DIR, WORLD_TILES_DIR]:
 		if DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, sub]) != OK:
 			return false
 	return true

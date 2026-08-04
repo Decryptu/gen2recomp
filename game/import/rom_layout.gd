@@ -23,6 +23,32 @@ const NAME_LENGTH: int = 10
 const BASE_STATS_SIZE: int = 32
 const PIC_POINTER_SIZE: int = 3
 
+## Map records are fixed-size entries in a 26-group table. Map dimensions are
+## measured in 4x4-tile blocks, while event coordinates are measured in the
+## resulting 2x2-cell walk grid.
+const MAP_GROUP_COUNT: int = 26
+const MAP_GROUP_POINTER_SIZE: int = 2
+const MAP_RECORD_SIZE: int = 9
+const MAP_ATTRIBUTES_SIZE: int = 12
+const MAP_BLOCK_TILE_WIDTH: int = 4
+const MAP_BLOCK_CELL_WIDTH: int = 2
+const MAP_MAX_BLOCKS: int = 128
+const MAP_MAX_WIDTH_BLOCKS: int = 40
+const MAP_MAX_HEIGHT_BLOCKS: int = 54
+const MAP_EVENT_HEADER_SIZE: int = 2
+const MAP_WARP_EVENT_SIZE: int = 5
+const MAP_COORD_EVENT_SIZE: int = 8
+const MAP_BG_EVENT_SIZE: int = 5
+const MAP_OBJECT_EVENT_SIZE: int = 13
+
+## The graphics stream supplies the 96 tiles loaded by the overworld. Metatile
+## and collision tables are shorter for tilesets that never use all 128 blocks;
+## unused metatile entries may still contain $FF placeholders.
+const TILESET_RECORD_SIZE: int = 15
+const TILESET_TILE_COUNT: int = 96
+const TILESET_META_BYTES_PER_BLOCK: int = 16
+const TILESET_COLLISION_BYTES_PER_BLOCK: int = 4
+
 const MOVE_COUNT: int = 251
 const MOVE_DATA_SIZE: int = 7
 
@@ -441,6 +467,10 @@ const GOLD_SILVER: Dictionary = {
 	"trainer_attributes": 0x39562,
 	"trainer_dvs": 0x27283,
 	"trainer_dvs_last": 0x7EA8, # GRUNTF, class 66, "ROCKET" in-game: atk 7, def 14, spd 10, spc 8.
+	"map_group_pointers": 0x940ED,
+	"map_group_counts": [14, 7, 82, 9, 10, 8, 17, 7, 6, 17, 22, 13, 6, 8, 12, 8, 13, 14, 4, 4, 26, 9, 13, 13, 15, 11],
+	"tilesets": 0x156BE,
+	"tileset_block_counts": [128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64],
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -478,6 +508,10 @@ const CRYSTAL: Dictionary = {
 	"trainer_attributes": 0x3959C,
 	"trainer_dvs": 0x270D6,
 	"trainer_dvs_last": 0x9888, # MYSTICALMAN, class 67: atk 9, def 8, spd 8, spc 8.
+	"map_group_pointers": 0x94000,
+	"map_group_counts": [14, 7, 91, 9, 10, 8, 17, 7, 6, 17, 24, 13, 6, 8, 12, 8, 13, 14, 4, 6, 26, 16, 13, 13, 15, 11],
+	"tilesets": 0x4D596,
+	"tileset_block_counts": [128, 128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 40, 64, 64, 64, 64, 64],
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,
@@ -544,6 +578,44 @@ static func bar_palette_offset(layout: Dictionary, index: int) -> int:
 
 static func trainer_class_count(layout: Dictionary) -> int:
 	return int(layout["trainer_classes"])
+
+
+static func map_group_count(layout: Dictionary, group: int) -> int:
+	var counts: Array = layout.get("map_group_counts", [])
+	if group < 1 or group > counts.size():
+		return 0
+	return int(counts[group - 1])
+
+
+static func map_count(layout: Dictionary) -> int:
+	var out: int = 0
+	for count: int in layout.get("map_group_counts", []):
+		out += count
+	return out
+
+
+static func map_group_pointer_offset(layout: Dictionary, group: int) -> int:
+	return int(layout["map_group_pointers"]) + (group - 1) * MAP_GROUP_POINTER_SIZE
+
+
+static func map_record_offset(layout: Dictionary, group_pointer: int, number: int) -> int:
+	return RomFile.linear(bank_of(int(layout["map_group_pointers"])), group_pointer) \
+		+ (number - 1) * MAP_RECORD_SIZE
+
+
+static func tileset_count(layout: Dictionary) -> int:
+	return (layout.get("tileset_block_counts", []) as Array).size()
+
+
+static func tileset_offset(layout: Dictionary, number: int) -> int:
+	return int(layout["tilesets"]) + number * TILESET_RECORD_SIZE
+
+
+static func tileset_block_count(layout: Dictionary, number: int) -> int:
+	var counts: Array = layout.get("tileset_block_counts", [])
+	if number < 0 or number >= counts.size():
+		return 0
+	return int(counts[number])
 
 
 ## Trainer pics have no back half and no size of their own, so unlike the
