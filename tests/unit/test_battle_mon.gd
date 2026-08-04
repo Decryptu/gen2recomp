@@ -152,6 +152,9 @@ func test_every_volatile_field_clears() -> void:
 	mon.substatus = Gen2Substatus.CONFUSED | Gen2Substatus.FLINCHED
 	mon.confusion_turns = 3
 	mon.charged_move = Fixture.TACKLE
+	mon.rollout_count = 4
+	mon.rampage_turns = 2
+	mon.rampage_move = Fixture.TACKLE
 	mon.toxic_counter = 2
 	mon.disabled_slot = 1
 	mon.disable_turns = 4
@@ -164,6 +167,9 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.substatus, Gen2Substatus.NONE)
 	assert_eq(mon.confusion_turns, 0)
 	assert_eq(mon.charged_move, 0)
+	assert_eq(mon.rollout_count, 0)
+	assert_eq(mon.rampage_turns, 0)
+	assert_eq(mon.rampage_move, 0)
 	assert_eq(mon.toxic_counter, 0)
 	assert_eq(mon.disabled_slot, -1)
 	assert_eq(mon.disable_turns, 0)

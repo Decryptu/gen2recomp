@@ -72,6 +72,17 @@ var confusion_turns: int = 0
 ## [constant Gen2Substatus.CHARGING] is set. Zero means nothing is charged.
 var charged_move: int = 0
 
+## How many successful hits the current Rollout has made. Zero means the next
+## Rollout hit is its first; a completed or interrupted chain resets this before
+## the next Rollout starts.
+var rollout_count: int = 0
+
+## How many turns remain after the move that started a rampage. The move number
+## is kept separately so the next turns can force the exact move used to start
+## it, whether it was Thrash, Petal Dance or Outrage.
+var rampage_turns: int = 0
+var rampage_move: int = 0
+
 ## How many turns a badly poisoned Pokémon has been poisoned, which is what
 ## Toxic's damage ramps on. Zero unless actually toxic.
 var toxic_counter: int = 0
@@ -226,6 +237,9 @@ func reset_volatile() -> void:
 	substatus = Gen2Substatus.NONE
 	confusion_turns = 0
 	charged_move = 0
+	rollout_count = 0
+	rampage_turns = 0
+	rampage_move = 0
 	toxic_counter = 0
 	disabled_slot = -1
 	disable_turns = 0

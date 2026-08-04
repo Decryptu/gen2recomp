@@ -41,6 +41,26 @@ func _turn(battle: Gen2Battle, move_number: int = Fixture.TACKLE) -> Gen2Turn:
 	)
 
 
+func _run_move(
+	battle: Gen2Battle,
+	move_number: int,
+	locked: bool = false,
+	move_override: Dictionary = {}
+) -> Gen2Turn:
+	var move: Dictionary = _data.move(move_number).duplicate()
+	move.merge(move_override, true)
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, move_number, move, []
+	)
+	turn.locked = locked
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
+	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
+		if turn.ended:
+			break
+		Gen2EffectCommands.run(command, turn)
+	return turn
+
+
 func test_an_effect_nobody_has_written_is_an_ordinary_attack() -> void:
 	# Most of the table is, and so is every effect still waiting to be written,
 	# which is why a move with one behaves rather than doing nothing.
@@ -511,6 +531,152 @@ func test_charge_move_releases_on_the_second_call_and_lets_the_rest_run() -> voi
 	assert_false(turn.ended)
 	assert_false(Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING))
 	assert_eq(mon.charged_move, 0)
+
+
+func test_rollout_rampage_and_defense_curl_use_their_effect_sequences() -> void:
+	var rollout: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.ROLLOUT)
+	var rampage: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.RAMPAGE)
+	var curl: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DEFENSE_CURL)
+	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.ROLLOUT))
+	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.RAMPAGE))
+	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.DEFENSE_CURL))
+	assert_lt(
+		rollout.find(Gen2EffectCommands.CHECK_HIT),
+		rollout.find(Gen2EffectCommands.ROLLOUT_POWER)
+	)
+	assert_lt(
+		rampage.find(Gen2EffectCommands.RAMPAGE),
+		rampage.find(Gen2EffectCommands.DAMAGE_CALC)
+	)
+	assert_lt(
+		curl.find(Gen2EffectCommands.DEFENSE_UP), curl.find(Gen2EffectCommands.CURL)
+	)
+
+
+func test_defense_curl_raises_defense_and_leaves_the_rollout_flag() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.DEFENSE_CURL, false)
+	assert_eq(battle.player.stage("defense"), 1)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CURLED))
+	assert_eq(_of_type(turn.events, Gen2Battle.STAT_CHANGED).size(), 1)
+
+
+func test_rollout_counts_hits_and_forces_the_move_without_spending_more_pp() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.ROLLOUT, Fixture.TACKLE]
+	battle.player.restore_pp()
+	battle.enemy.hp = 10000
+	var always_hits: Dictionary = {"accuracy": 255}
+	var first: Gen2Turn = _run_move(battle, Fixture.ROLLOUT, false, always_hits)
+	assert_eq(battle.player.rollout_count, 1)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ROLLOUT))
+	assert_eq(battle.player.pp_left(0), 19)
+
+	for hit_number: int in range(2, 5):
+		var continuation: Gen2Turn = _run_move(
+			battle, Fixture.ROLLOUT, true, always_hits
+		)
+		assert_eq(int(_first(continuation.events, Gen2Battle.USED_MOVE)["move"]), Fixture.ROLLOUT)
+		assert_eq(battle.player.rollout_count, hit_number)
+		assert_eq(battle.player.pp_left(0), 19)
+
+	var fifth: Gen2Turn = _run_move(battle, Fixture.ROLLOUT, true, always_hits)
+	assert_eq(battle.player.rollout_count, 5)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ROLLOUT))
+	assert_eq(_of_type(fifth.events, Gen2Battle.HIT).size(), 1)
+	assert_eq(battle.player.pp_left(0), 19)
+	assert_gt(first.damage, 0)
+
+
+func test_rollout_multiplier_is_applied_before_variation() -> void:
+	var battle: Gen2Battle = _battle()
+	var move: Dictionary = _data.move(Fixture.ROLLOUT)
+	var plain: Dictionary = Gen2Damage.calculate_with(
+		battle.player, battle.enemy, move, false, Gen2Damage.MAX_VARIATION
+	)
+	var doubled: Dictionary = Gen2Damage.calculate_with(
+		battle.player, battle.enemy, move, false, Gen2Damage.MAX_VARIATION, false, 2
+	)
+	assert_eq(int(doubled["damage"]), int(plain["damage"]) * 2)
+
+
+func test_rollout_ends_on_a_miss_or_immunity() -> void:
+	var battle: Gen2Battle = _battle()
+	var miss: Gen2Turn = _run_move(battle, Fixture.ROLLOUT, false, {"accuracy": 0})
+	assert_eq(_of_type(miss.events, Gen2Battle.MISSED).size(), 1)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ROLLOUT))
+
+	var immune: Gen2Turn = _run_move(
+		battle, Fixture.ROLLOUT, false, {"accuracy": 255, "type": Fixture.ELECTRIC}
+	)
+	assert_eq(_of_type(immune.events, Gen2Battle.NO_EFFECT).size(), 1)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ROLLOUT))
+
+
+func test_status_interruption_cancels_rollout_without_advancing_it() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 10000
+	_run_move(battle, Fixture.ROLLOUT, false, {"accuracy": 255})
+	battle.player.status = 2
+	var stopped: Gen2Turn = _run_move(battle, Fixture.ROLLOUT, true, {"accuracy": 255})
+	assert_true(stopped.ended)
+	assert_eq(_of_type(stopped.events, Gen2Battle.CANNOT_MOVE).size(), 1)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ROLLOUT))
+	assert_eq(battle.player.rollout_count, 1)
+
+
+func test_rampage_forces_its_starting_move_and_confuses_after_the_last_turn() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.THRASH, Fixture.TACKLE]
+	battle.player.restore_pp()
+	battle.enemy.hp = 10000
+	var always_hits: Dictionary = {"accuracy": 255}
+	_run_move(battle, Fixture.THRASH, false, always_hits)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RAMPAGING))
+	assert_eq(battle.player.rampage_move, Fixture.THRASH)
+	assert_between(
+		battle.player.rampage_turns,
+		Gen2Substatus.MIN_RAMPAGE_TURNS,
+		Gen2Substatus.MAX_RAMPAGE_TURNS
+	)
+	assert_eq(battle.player.pp_left(0), 19)
+
+	var future_turns: int = battle.player.rampage_turns
+	for _turn_number: int in future_turns:
+		var continuation: Gen2Turn = _run_move(
+			battle, Fixture.THRASH, true, always_hits
+		)
+		assert_eq(int(_first(continuation.events, Gen2Battle.USED_MOVE)["move"]), Fixture.THRASH)
+		assert_eq(battle.player.pp_left(0), 19)
+
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RAMPAGING))
+	assert_eq(battle.player.rampage_move, 0)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CONFUSED))
+	assert_between(
+		battle.player.confusion_turns,
+		Gen2Substatus.MIN_RAMPAGE_CONFUSION,
+		Gen2Substatus.MAX_RAMPAGE_CONFUSION
+	)
+
+
+func test_rampage_miss_keeps_the_chain_but_status_interrupt_cancels_it() -> void:
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.THRASH, false, {"accuracy": 0})
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RAMPAGING))
+	battle.player.status = 2
+	var stopped: Gen2Turn = _run_move(battle, Fixture.THRASH, true, {"accuracy": 255})
+	assert_true(stopped.ended)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.RAMPAGING))
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CONFUSED))
+
+
+func test_rampage_can_force_each_of_its_three_move_numbers() -> void:
+	var battle: Gen2Battle = _battle()
+	for move_number: int in [Fixture.THRASH, Fixture.PETAL_DANCE, Fixture.OUTRAGE]:
+		battle.player.substatus = Gen2Substatus.RAMPAGING
+		battle.player.rampage_move = move_number
+		assert_eq(battle.move_for(Gen2Battle.PLAYER, 1), move_number)
+		battle.player.substatus = Gen2Substatus.NONE
 
 
 func test_skull_bash_raises_defense_after_the_hit_lands() -> void:

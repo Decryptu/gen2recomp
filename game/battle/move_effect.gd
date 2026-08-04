@@ -102,6 +102,9 @@ const SKY_ATTACK: int = 75
 const SKULL_BASH: int = 145
 const SOLARBEAM: int = 151
 const FLY_OR_DIG: int = 155
+const RAMPAGE: int = 27
+const ROLLOUT: int = 117
+const DEFENSE_CURL: int = 156
 const SELFDESTRUCT: int = 7
 const COUNTER: int = 0x59
 const MIRROR_COAT: int = 0x90
@@ -118,6 +121,11 @@ const TWISTER_MOVE: int = 239
 const EARTHQUAKE_MOVE: int = 89
 const FISSURE_MOVE: int = 90
 const MAGNITUDE_MOVE: int = 222
+const THRASH_MOVE: int = 37
+const PETAL_DANCE_MOVE: int = 80
+const OUTRAGE_MOVE: int = 200
+const ROLLOUT_MOVE: int = 205
+const DEFENSE_CURL_MOVE: int = 111
 
 ## None of the three needs any state this file has not already grown for
 ## something else: [Gen2BattleMon.reset_stages] for Haze,
@@ -290,6 +298,48 @@ const CHARGE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Thrash, Petal Dance and Outrage use one shared rampage state. The first turn
+## starts the state; later turns are forced through [method Gen2Battle.move_for]
+## and this command counts them down. The cartridge does not clear the state on
+## a miss, so the hit check is allowed to finish before the next turn's choice.
+const RAMPAGE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.RAMPAGE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Rollout increases its power after the hit has been checked and before the
+## damage variation is applied. This command also ends the chain on a miss and
+## counts successful hits so the next call can select the right multiplier.
+const ROLLOUT_SEQUENCE: Array = [
+	Gen2EffectCommands.ROLLOUT_CHECK,
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.ROLLOUT_POWER,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Defense Curl raises Defense and leaves the Curl flag even when Defense is
+## already at its maximum. Rollout reads the flag from the attacker later.
+const DEFENSE_CURL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DEFENSE_UP,
+	Gen2EffectCommands.CURL,
+	Gen2EffectCommands.STAT_UP_MESSAGE,
+	Gen2EffectCommands.STAT_UP_FAIL_TEXT,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -614,6 +664,9 @@ static func _sequences() -> Dictionary:
 		FLY_OR_DIG: CHARGE_SEQUENCE,
 		SKY_ATTACK: SKY_ATTACK_SEQUENCE,
 		SKULL_BASH: SKULL_BASH_SEQUENCE,
+		RAMPAGE: RAMPAGE_SEQUENCE,
+		ROLLOUT: ROLLOUT_SEQUENCE,
+		DEFENSE_CURL: DEFENSE_CURL_SEQUENCE,
 		HAZE: HAZE_SEQUENCE,
 		BELLY_DRUM: BELLY_DRUM_SEQUENCE,
 		PSYCH_UP: PSYCH_UP_SEQUENCE,

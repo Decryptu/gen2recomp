@@ -133,6 +133,17 @@ const RECHARGE: StringName = &"recharge"
 ## user's only option: see [method Gen2Battle.move_for].
 const CHARGE_MOVE: StringName = &"chargemove"
 
+## Rollout checks whether a chain is already active, applies its power state and
+## then advances the successful-hit count. The first command resets a completed
+## chain before PP and damage are processed.
+const ROLLOUT_CHECK: StringName = &"rolloutcheck"
+const ROLLOUT_POWER: StringName = &"rolloutpower"
+
+## Starts or advances Thrash, Petal Dance and Outrage, and marks Defense Curl's
+## persistent substatus for Rollout.
+const RAMPAGE: StringName = &"rampage"
+const CURL: StringName = &"curl"
+
 ## Clears every stage on both sides. Only the stages: nothing here touches
 ## either Pokémon's status byte or [Gen2Substatus].
 const HAZE: StringName = &"haze"
@@ -341,6 +352,14 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_recharge(turn)
 		CHARGE_MOVE:
 			_charge_move(turn)
+		ROLLOUT_CHECK:
+			_rollout_check(turn)
+		ROLLOUT_POWER:
+			_rollout_power(turn)
+		RAMPAGE:
+			_rampage(turn)
+		CURL:
+			_curl(turn)
 		HAZE:
 			_haze(turn)
 		BELLY_DRUM:
@@ -396,10 +415,16 @@ static func _do_turn(turn: Gen2Turn) -> void:
 
 
 static func _damage_calc(turn: Gen2Turn) -> void:
+	var rollout_multiplier: int = 1
+	if turn.effect() == Gen2MoveEffect.ROLLOUT:
+		rollout_multiplier = 1 << turn.attacker().rollout_count
+		if Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.CURLED):
+			rollout_multiplier *= 2
 	var result: Dictionary = Gen2Damage.calculate(
 		turn.attacker(), turn.defender(), turn.move, turn.rng(),
 		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
-		turn.effect() == Gen2MoveEffect.SELFDESTRUCT
+		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
+		rollout_multiplier
 	)
 	turn.damage = int(result["damage"])
 	turn.critical = bool(result["critical"])
@@ -424,7 +449,8 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	if turn.immune:
 		turn.missed = true
 		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
+			and turn.effect() != Gen2MoveEffect.ROLLOUT:
 			turn.end()
 		return
 
@@ -432,7 +458,8 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		and not _can_hit_hidden(turn.move_number, turn.defender().substatus):
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
+			and turn.effect() != Gen2MoveEffect.ROLLOUT:
 			turn.end()
 		return
 
@@ -440,7 +467,8 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		and not Gen2Status.is_asleep(turn.defender().status):
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
+			and turn.effect() != Gen2MoveEffect.ROLLOUT:
 			turn.end()
 		return
 
@@ -452,7 +480,8 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		return
 	turn.missed = true
 	turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-	if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+	if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
+		and turn.effect() != Gen2MoveEffect.ROLLOUT:
 		turn.end()
 
 
@@ -569,12 +598,16 @@ static func _check_faint(turn: Gen2Turn) -> void:
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
 
 
-## CantMove on the cartridge cancels a pending two-turn move. For Fly and Dig
-## that also makes the user visible again, so a sleep, flinch or paralysis on
-## the release turn cannot leave a Pokémon permanently untouchable.
+## CantMove on the cartridge cancels a pending two-turn move, Rollout or
+## rampage. For Fly and Dig that also makes the user visible again, so a sleep,
+## flinch or paralysis on the release turn cannot leave a Pokémon permanently
+## untouchable.
 static func _cancel_charge(mon: Gen2BattleMon) -> void:
 	mon.substatus &= ~(Gen2Substatus.CHARGING | Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
 	mon.charged_move = 0
+	mon.substatus &= ~(Gen2Substatus.ROLLOUT | Gen2Substatus.RAMPAGING)
+	mon.rampage_move = 0
+	mon.rampage_turns = 0
 
 
 ## Recharge, then sleep, then freeze, then flinch, then Disable's own
@@ -965,6 +998,57 @@ static func _charge_move(turn: Gen2Turn) -> void:
 			mon.substatus |= Gen2Substatus.UNDERGROUND
 	turn.emit(Gen2Battle.CHARGING_UP)
 	turn.end()
+
+
+## A new Rollout starts a fresh count. A continuation leaves the count alone so
+## [method _damage_calc] can apply the next power before this command advances
+## it after a successful hit.
+static func _rollout_check(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if not Gen2Substatus.has(mon.substatus, Gen2Substatus.ROLLOUT):
+		mon.rollout_count = 0
+
+
+## Rollout's power step runs after the hit check. A miss, including an immunity,
+## ends the chain. A successful fifth hit also clears the continuation flag, but
+## its count is retained until the next Rollout starts and resets it.
+static func _rollout_power(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if turn.missed:
+		mon.substatus &= ~Gen2Substatus.ROLLOUT
+		return
+
+	mon.rollout_count += 1
+	if mon.rollout_count >= 5:
+		mon.substatus &= ~Gen2Substatus.ROLLOUT
+	else:
+		mon.substatus |= Gen2Substatus.ROLLOUT
+
+
+## Thrash, Petal Dance and Outrage share the rampage flag. The first turn rolls
+## one or two future turns. Each forced continuation consumes one of those turns;
+## when the last one is consumed, the user becomes confused after still getting
+## this final attack.
+static func _rampage(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.RAMPAGING):
+		mon.rampage_turns -= 1
+		if mon.rampage_turns <= 0:
+			mon.substatus &= ~Gen2Substatus.RAMPAGING
+			mon.rampage_move = 0
+			mon.confusion_turns = Gen2Substatus.roll_rampage_confusion(turn.rng())
+			mon.substatus |= Gen2Substatus.CONFUSED
+		return
+
+	mon.substatus |= Gen2Substatus.RAMPAGING
+	mon.rampage_move = turn.move_number
+	mon.rampage_turns = Gen2Substatus.roll_rampage_turns(turn.rng())
+
+
+## Defense Curl's flag is independent of whether its Defense stage changed. It
+## remains until the Pokémon switches and doubles every later Rollout power.
+static func _curl(turn: Gen2Turn) -> void:
+	turn.attacker().substatus |= Gen2Substatus.CURLED
 
 
 ## Haze: every stage on both sides, back to nothing. Not [Gen2Substatus] and not
