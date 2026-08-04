@@ -1,105 +1,78 @@
 # Save data
 
-The project keeps persistent player data separate from cartridge-derived
-`GameData` and from the scene-free battle engine. Save slots live under
-Godot's `user://` directory and are never written into the repository.
+Project saves are separate from cartridge-derived `GameData` and the
+scene-free battle engine. Slots live under Godot's `user://`, never in the
+repository.
 
-## Current canonical model
+## Canonical project model
 
-The first save format stores the fields needed to restore a player party:
+The versioned first format stores:
 
-- game ID and ROM SHA-1, so a slot cannot be opened against another cache;
-- party order and player name;
-- each Pokémon's species, held item, level, experience, current HP and status;
-- DVs, five Generation 2 stat-experience values, moves and remaining PP;
-- identity fields reserved for later save import: OT ID, nickname, original
+- game ID and ROM SHA-1, preventing use with another cache;
+- player name and party order;
+- each Pokémon's species, held item, level, experience, current HP, status,
+  DVs, five Generation 2 stat-experience values, moves and PP;
+- reserved identity fields for future import: OT ID, nickname, original
   trainer, happiness, Pokerus and caught data.
 
-Derived battle stats are recalculated when a save is loaded. Volatile battle
-state, such as stat stages, confusion, recharge, Disable, Encore, Fly, Dig,
-Rollout and rampage, is never saved.
+Derived battle stats are recalculated on load. Volatile state, including stat
+stages, confusion, recharge, Disable, Encore, Fly, Dig, Rollout and rampage,
+is never saved. The validator checks the selected `GameData`; three JSON slots
+are available per game revision under `user://save_slots`.
 
-The format is versioned and validated against the selected `GameData` before a
-slot is accepted. The current implementation provides three slots per game
-revision and stores them as JSON under `user://save_slots`.
+## Player flow
 
-## Player-facing flow
+The launcher selects an imported cache and opens `game/save/save_screen.tscn`.
+The screen shows three explicit slots as `EMPTY`, `READY` or `INCOMPATIBLE` and
+rejects a failed original `.sav` import before calling
+`Gen2SaveStore.save`, so partial data cannot replace a slot.
 
-The launcher selects an imported cartridge cache, then opens
-`game/save/save_screen.tscn`. The screen presents the three slots as `EMPTY`,
-`READY` or `INCOMPATIBLE`, and keeps the selected slot explicit while it creates
-a new game or imports an original `.sav`. A failed import is rejected before
-`Gen2SaveStore.save` is called, so it cannot replace an existing slot with
-partial data.
+New games accept a name of up to ten encoded characters and start Chikorita,
+Cyndaquil or Totodile at level 5 holding Berry, with moves from the imported
+learnset. `game/save/party_screen.tscn` shows all six positions, current and
+derived maximum HP, and persistent status. It starts the development battle
+only after the same validated slot is selected in `GameRuntime`.
 
-New games require a player name of up to ten encoded characters and use the
-three starters from the real Johto opening sequence: Chikorita, Cyndaquil or
-Totodile at level 5, each holding Berry. Their starting moves come from the
-imported learnset. `game/save/party_screen.tscn` displays all six party
-positions, current and derived maximum HP, and persistent status. It starts the
-development battle only after selecting the same validated slot in
-`GameRuntime`.
-
-The development battle writes back through `Gen2SaveBattleAdapter` after the
-pending event messages have finished. It preserves player name, Pokémon
-identity, held item, happiness, Pokerus, caught data, nickname, original
-trainer, HP, status, experience, DVs, stat experience, moves and PP while still
-discarding volatile battle state.
+After pending battle messages finish, `Gen2SaveBattleAdapter` writes back the
+player name, Pokémon identity, held item, happiness, Pokerus, caught data,
+nickname, original trainer, HP, status, experience, DVs, stat experience, moves
+and PP. Volatile battle state is discarded.
 
 ## Original Generation 2 shape
 
-The canonical model follows the stable fields in the original Crystal source.
-Its `box_struct` contains species, item, four moves, OT ID, three-byte
-experience, five stat-experience words, DVs, PP, happiness, Pokerus, caught
-data and level. Its `party_struct` adds status, current HP, maximum HP and the
-five derived battle stats.
+The model follows stable fields in the original Crystal source. `box_struct`
+contains species, item, four moves, OT ID, three-byte experience, five
+stat-experience words, DVs, PP, happiness, Pokerus, caught data and level.
+`party_struct` adds status, current/max HP and five derived stats.
 
-The original SRAM save also contains player, map, Pokémon, checksum, PC box,
-mail, Hall of Fame and Crystal-specific data. Those regions are intentionally
-not mixed into the first party-only save model. The cartridge adapter validates
-the complete save boundary but exposes only the player and party fields until
-the canonical model owns map, inventory, box and event state explicitly.
+Original SRAM also contains player, map, checksum, PC box, mail, Hall of Fame
+and Crystal-specific regions. The first model deliberately exposes only player
+and party data until map, inventory, box and event state have canonical models.
 
 ## Cartridge SRAM boundary
 
-`Gen2SramAdapter` is the first real cartridge boundary. It accepts a raw SRAM
-image as `PackedByteArray`, requires the supported ROM identity and a complete
-32 KiB SRAM image, and accepts trailing bytes so emulator files with extra RTC
-data are not truncated. Import selects the primary copy first, then the backup
-copy, and refuses the image when both marker pairs or checksums fail.
+`Gen2SramAdapter` accepts a raw `PackedByteArray`, a supported ROM identity and
+a complete 32 KiB SRAM image. It permits trailing emulator RTC data. Import
+selects the primary copy, then the backup, and refuses both if their 99/127
+markers or checksums fail. Gold and Silver use split backup regions; Crystal uses
+contiguous ranges. A valid backup repairs the primary before patching, and
+both copies are rewritten with little-endian 16-bit checksums.
 
-The adapter currently maps the player name and the six-slot party: species,
-held item, moves, OT ID, experience, stat experience, DVs, PP, happiness,
-Pokerus, caught data, level, status, current HP, nickname and original trainer.
-Derived party stats are regenerated from the selected `GameData` on export.
-The primary copy is repaired from a valid backup before it is patched, and both
-copies are rewritten with their little-endian 16-bit checksums. Bytes outside
-those fields remain untouched. Export therefore needs an existing valid SRAM
-image and does not pretend to create map or event state that the canonical
-model does not own yet.
+The adapter maps player name and six-party fields: species, item, moves, OT ID,
+experience, stat experience, DVs, PP, happiness, Pokerus, caught data, level,
+status, current HP, nickname and original trainer. Derived stats are rebuilt
+from selected `GameData`; bytes outside those fields stay untouched. Export
+requires an existing valid SRAM image and does not invent unsupported map or
+event state.
 
-Gold and Silver share the same split backup layout. Their primary game data is
-`0x2009..0x2D68`, with the checksum at `0x2D69`, the party at `0x288A`, and
-backup data spread across SRAM banks at `0x0C6B`, `0x10E8`, `0x15C7`, `0x3D96`
-and `0x7E39`. Crystal uses its own contiguous game data ranges, with primary
-data at `0x2009..0x2B82`, checksum at `0x2D0D`, party at `0x2865`, and backup
-data at `0x1209..0x1D82`, checksum at `0x1F0D`.
+Gold/Silver primary data is `0x2009..0x2D68`, checksum `0x2D69`, party `0x288A`,
+with backup at `0x0C6B`, `0x10E8`, `0x15C7`, `0x3D96`, `0x7E39`.
+Crystal primary data is `0x2009..0x2B82`, checksum `0x2D0D`, party `0x2865`,
+and backup `0x1209..0x1D82`, checksum `0x1F0D`.
 
-The implementation and synthetic fixtures live in:
+Implementation and synthetic fixtures:
 
 - `game/save/sram_adapter.gd`
 - `tests/unit/test_save.gd`
 
-The layout and save behavior are based on pret's source: [Gold and Silver SRAM
-layout](https://raw.githubusercontent.com/pret/pokegold/master/ram/sram.asm),
-[Gold and Silver save routines](https://raw.githubusercontent.com/pret/pokegold/master/engine/menus/save.asm),
-[Crystal SRAM layout](https://raw.githubusercontent.com/pret/pokecrystal/master/ram/sram.asm),
-[Crystal save routines](https://raw.githubusercontent.com/pret/pokecrystal/master/engine/menus/save.asm),
-[Crystal Pokémon data constants](https://raw.githubusercontent.com/pret/pokecrystal/master/constants/pokemon_data_constants.asm),
-and the [Crystal SRAM bank map](https://raw.githubusercontent.com/pret/pokecrystal/master/layout.link).
-
-Primary references:
-
-- [pret/pokecrystal `macros/ram.asm`](https://github.com/pret/pokecrystal/blob/master/macros/ram.asm)
-- [pret/pokecrystal `constants/pokemon_data_constants.asm`](https://github.com/pret/pokecrystal/blob/master/constants/pokemon_data_constants.asm)
-- [pret/pokecrystal `ram/sram.asm`](https://github.com/pret/pokecrystal/blob/master/ram/sram.asm)
+Layout references: [Gold/Silver SRAM layout](https://raw.githubusercontent.com/pret/pokegold/master/ram/sram.asm), [Gold/Silver save routines](https://raw.githubusercontent.com/pret/pokegold/master/engine/menus/save.asm), [Crystal SRAM layout](https://raw.githubusercontent.com/pret/pokecrystal/master/ram/sram.asm), [Crystal save routines](https://raw.githubusercontent.com/pret/pokecrystal/master/engine/menus/save.asm), [Crystal Pokémon constants](https://raw.githubusercontent.com/pret/pokecrystal/master/constants/pokemon_data_constants.asm), [Crystal bank map](https://github.com/pret/pokecrystal/blob/master/layout.link), [Crystal RAM macros](https://github.com/pret/pokecrystal/blob/master/macros/ram.asm).

@@ -1,702 +1,310 @@
 # Contributing
 
-Read [the README](../README.md) first for how to run the project and its
-tests. This file covers conventions and the pitfalls that have already cost
-time here.
+Read [the README](../README.md) first. This file records project conventions,
+architecture, verification methods, and Godot pitfalls.
 
-## Keeping cartridge data out
+## Keep cartridge data out
 
-Nothing derived from a commercial cartridge may be committed: not the ROM, not
-a `.sav`, not extracted sprites, text, maps or audio. Three independent layers
-enforce this, and none of them should be weakened:
+Never commit a commercial cartridge or anything derived from one: ROMs, `.sav`
+files, sprites, text, maps or audio. Three independent layers enforce this:
 
-1. **`.gitignore`** blocks the known extensions, the `roms/` drop folder and
-   the runtime cache directories.
-2. **`.githooks/pre-commit`** checks what is actually *staged*: by extension,
-   and by size for any blob ≥ 512 KiB outside `addons/` and `assets/`. That
-   second check catches a renamed or trimmed dump that no extension rule would
-   see. Enable it with `git config core.hooksPath .githooks`; Git does not
-   clone hooks, so every clone needs it once.
-3. **Tests never load a real cartridge.** `test_rom_verifier.gd` covers the
-   import gate with synthetic files and a known SHA-1 vector, so the suite runs
-   on any machine and in CI.
+1. `.gitignore` blocks known extensions, `roms/` and runtime caches.
+2. `.githooks/pre-commit` checks staged blobs by extension and rejects any blob
+   at least 512 KiB outside `addons/` and `assets/`, catching renamed or
+   trimmed dumps. Enable it once per clone:
+   `git config core.hooksPath .githooks`.
+3. Tests use synthetic files and a known SHA-1 vector, never a real cartridge,
+   so they run locally and in CI.
 
-`roms/` additionally carries a `.gdignore`, which makes Godot's resource system
-skip the directory entirely, so files there are never imported and never swept
-into an export. `FileAccess` can still read them during development, which is
-how `tools/verify_rom.gd` works. Do not delete that file.
+`roms/.gdignore` keeps Godot from importing or exporting that directory, while
+development tools can still read it with `FileAccess`. Do not delete it.
 
 ## Architecture
 
-The ROM layer is the model for the rest of the engine:
+### ROM and importer
 
-- `game/rom/rom_registry.gd`: the SHA-1 allowlist.
-- `game/rom/rom_verifier.gd`: size pre-filter, then chunked SHA-1, then
-  lookup.
-- `game/rom/rom_file.gd`: a verified dump in memory, plus bank addressing.
-- `game/rom/rom_header.gd`: the cartridge header, for diagnostics only.
+The ROM layer is node-free and fully headless-testable:
 
-All of them are `RefCounted` statics with no scene dependencies, so the import
-gate is fully testable headlessly. Keep the engine core the same shape: rules
-apart from content, and randomness injected as an explicit
-`RandomNumberGenerator` rather than pulled from a global, so a whole battle can
-play out inside a test.
-
-The importer under `game/import/` decodes a verified cartridge into a cache:
-
-| | |
+| File | Role |
 |---|---|
-| `lz_decompressor.gd` | The LZ variant every compressed graphic uses |
-| `tile_codec.gd` | 2bpp and 1bpp tiles to colour indices; pic layout |
-| `text_codec.gd` | The Generation 2 character encoding |
+| `game/rom/rom_registry.gd` | SHA-1 allowlist |
+| `game/rom/rom_verifier.gd` | Size filter, chunked SHA-1, lookup |
+| `game/rom/rom_file.gd` | Verified in-memory dump and bank addressing |
+| `game/rom/rom_header.gd` | Header diagnostics only |
+
+These are `RefCounted` statics. Keep rules separate from content and inject a
+`RandomNumberGenerator`; do not use global randomness.
+
+`game/import/` decodes verified ROMs into the `user://` cache:
+
+| File | Role |
+|---|---|
+| `lz_decompressor.gd` | Cartridge LZ graphics |
+| `tile_codec.gd` | 2bpp/1bpp tiles and pic layout |
+| `text_codec.gd` | Generation 2 character encoding |
 | `palette.gd` | 15-bit BGR colours |
-| `rom_layout.gd` | Where each table lives, per game |
-| `rom_cache.gd` | The `user://` cache: paths, formats, lifecycle |
-| `rom_importer.gd` | Orchestration, and the layout self-check |
+| `rom_layout.gd` | Per-game table locations |
+| `rom_cache.gd` | Cache paths, formats and lifecycle |
+| `rom_importer.gd` | Orchestration and layout checks |
 
-Each decoder takes bytes and returns data; none of them knows what a cartridge
-is, so all of them are testable on a handful of hand-built bytes.
+Decoders take bytes and return data, with no cartridge knowledge, so they can
+be tested on small hand-built inputs. `game/data/game_data.gd` is the only
+engine-facing cartridge-content API. It alone knows the cache and converts
+JSON's single numeric type back to `int`. `game/data/learnset.gd` stays beside
+it because a Pokémon can be created outside battle. Do not sort learnsets:
 
-Above the cache, `game/data/game_data.gd` reads it back. It is the only thing
-the engine uses to see cartridge content: nothing above it opens a ROM, and
-nothing in it knows what a ROM is. It is also where JSON's single number type is
-coerced back to int, once, rather than at every call site.
+- filling a new Pokémon stops at the first move above its level;
+- levelling up reads every entry at the newly reached level.
 
-`game/data/learnset.gd` sits beside it and is the one rule that lives in this
-layer rather than in the engine: what a Pokémon knows at a level. It is here
-because a Pokémon is made outside a battle as well as inside one. It answers two
-questions that are not each other's shortcut, because the cartridge asks them
-with two different routines:
+Muk is out of order in all three games, so these operations intentionally
+differ.
 
-`game/save/` owns project save data, not cartridge-derived data. Its versioned
-model and validator carry the stable party fields, while the battle adapter
-reconstructs derived stats and deliberately drops volatile battle state. The
-save store keys slots by game ID and ROM SHA-1, validates against `GameData`,
-and writes through a temporary file before replacing the slot. Keep this layer
-scene-free and do not make it parse original SRAM until a checksum-aware adapter
-has been researched and tested against the real save layout.
+`game/save/` owns project saves, not cartridge data. Keep its versioned model,
+validator, store and battle adapter scene-free. It validates against `GameData`,
+writes through a temporary file, and must not parse original SRAM until a
+checksum-aware adapter has been researched and tested against the real layout.
+The current adapter maps only stable player and party fields; do not add map,
+inventory, box or event state before those models are canonical.
 
-- **Filling a new Pokémon** walks the list from the start and stops at the first
-  move above the level being filled for.
-- **Levelling up** reads the whole list and takes the entries at exactly the
-  level just reached.
+### Rendering and text
 
-Those give different answers for Muk, whose list is not in ascending order in any
-of the three games. A Muk caught in the wild at 40 is genuinely missing three
-moves that a Muk raised to 40 has, and that is the cartridge's behaviour rather
-than an approximation of it.
+The drawing layer is intentionally thin:
 
-The drawing layer is deliberately thin:
-
-| | |
+| File | Role |
 |---|---|
-| `render/pic_image.gd` | Colour indices plus a palette to an `Image` |
-| `render/gen2_screen.gd` | The 160x144 screen, scaled by a whole number |
-| `render/font.gd` | Character codes to glyph tiles, blitted into a buffer |
-| `render/text_layout.gd` | A string to the lines and pages a box can show |
-| `render/text_box.gd` | The two of them, as a bordered window on the grid |
-| `render/battle_tiles.gd` | The battle's tile page, assembled as the hardware does |
-| `render/battle_hud.gd` | The two status panels, on the tile grid |
+| `render/pic_image.gd` | Colour indices plus palette to `Image` |
+| `render/gen2_screen.gd` | 160x144 viewport, integer scaling |
+| `render/font.gd` | Character codes to glyph tiles |
+| `render/text_layout.gd` | Strings to box lines and pages |
+| `render/text_box.gd` | Bordered text window |
+| `render/battle_tiles.gd` | Hardware-order battle tile page |
+| `render/battle_hud.gd` | Status panels on the tile grid |
 
-The battle engine is the same shape as the ROM layer: `RefCounted`, no scenes,
-and randomness passed in as an explicit `RandomNumberGenerator`, so a whole
-battle can be fought inside a test:
+`Gen2Screen` is a `Control` with a 160x144 `SubViewport`, scaled by an integer;
+the surrounding UI uses the window resolution. Project-wide stretch would blur
+menus, and fractional scaling resamples 8x8 tiles. Battle rendering is layered
+by palette with index 0 transparent, preserving per-tile colours; replace this
+with a per-tile-attribute tilemap when the overworld needs one. Keep the
+hardware tile numbers in `Gen2BattleTiles`, including deliberate overwritten
+font tiles.
 
-| | |
+Text is tilemapped, not typeset: every glyph is 8x8 and its character byte is
+its tile number. Measure with `Gen2Text.encoded_length()`, not
+`String.length()`, because apostrophe ligatures and PK/MN occupy two characters
+but one glyph. `$7F` is a blank below the font and unknown codes are no-ops.
+`Gen2TextLayout` wraps at runtime and honours explicit newlines; the cartridge's
+author-time breaks cannot support mod-added text.
+
+### Battle engine
+
+The engine is `RefCounted`, scene-free and deterministic when given a seeded
+RNG. Keep integer operations in hardware order, including truncation. In
+particular:
+
+- stat-experience square root is a ceiling, so untrained is 1, not 0;
+- type damage multiplies one defender type at a time, truncating each step;
+- announced effectiveness is a separate tenths accumulator. For example,
+  Ember against Fire/Rock deals 6 but reports 2/10. Use
+  `GameData.type_matchup` for damage and `type_effectiveness` for the message;
+- `Gen2Damage.calculate_with` is deterministic and receives critical/spread;
+  `calculate` rolls them. Hand-worked tests should target the deterministic
+  function rather than reproducing the implementation's formula;
+- Struggle skips STAB and the type chart, and has at least 1 recoil damage;
+- accuracy is a byte out of 255. Stored `$FF` never rolls. Accuracy/evasion
+  stages use their own rounded table, not the stat-stage table.
+
+The core battle files are:
+
+| File | Role |
 |---|---|
-| `battle/stats.gd` | Base stats, DVs and stat experience into the six stats |
-| `battle/damage.gd` | The damage formula, STAB, criticals and the spread |
-| `battle/accuracy.gd` | Whether a move connects |
-| `battle/battle_mon.gd` | One Pokémon: its stats, PP, health and stages |
-| `battle/party.gd` | The six a side carries, and which of them is out |
-| `battle/trainer_party.gd` | One of the cartridge's own trainers, built into a party |
-| `battle/status.gd` | The status byte, and the four things it does |
-| `battle/substatus.gd` | The second byte: confusion, flinching, a charge, a recharge |
-| `battle/turn.gd` | One move being used, while it is being used |
-| `battle/effect_commands.gd` | The steps a move is made of |
-| `battle/move_effect.gd` | Which steps each effect byte is made of |
-| `battle/battle.gd` | The turn: order, the switch, and running a move's steps |
-| `battle/ai.gd` | A trainer class's own AI: scores each move slot off its AI flags |
-| `battle/experience.gd` | The six growth curves, what a faint is worth, and how it splits |
+| `battle/stats.gd` | Base stats, DVs and stat experience |
+| `battle/damage.gd` | Damage, STAB, criticals and spread |
+| `battle/accuracy.gd` | Accuracy and evasion |
+| `battle/battle_mon.gd` | Pokémon stats, PP, HP and stages |
+| `battle/party.gd` | Six-member party and active member |
+| `battle/trainer_party.gd` | Cartridge trainer to battle party |
+| `battle/status.gd` | One packed status byte |
+| `battle/substatus.gd` | Confusion, flinch, charge and recharge flags |
+| `battle/turn.gd` | Current move and command state |
+| `battle/effect_commands.gd` | Move steps |
+| `battle/move_effect.gd` | Effect byte to step-list table |
+| `battle/battle.gd` | Order, switches and command execution |
+| `battle/ai.gd` | Trainer-class move scoring |
+| `battle/experience.gd` | Growth curves, faint value and stat EXP |
 
-Everything in there is integer arithmetic in the order the hardware does it.
-That is not nostalgia. Every step truncates and the steps do not commute, so a
-formula rearranged into something tidier gives a different answer often enough
-to matter, and the Pokémon that survives on one hit point does so because of a
-truncation somewhere in it. Two in particular are easy to write in a form that
-is almost right:
+Moves are short command programs. `move_effect.gd` is the table,
+`effect_commands.gd` the steps, `turn.gd` the handoff, and `battle.gd` only runs
+the list. Unimplemented effects fall back to an ordinary attack. A loop inside
+one command is fine, as with multi-hit and all-stat changes; changing the turn
+runner to jump backward would reproduce hardware implementation rather than
+game behavior. Drain and recoil use the formula's uncapped `Gen2Turn.damage`,
+not capped HP loss, so a move calculating 50 against 3 HP heals 25 or costs
+12/13 as the cartridge does.
 
-- **The square root for stat experience is a ceiling.** The cartridge scans a
-  table of squares for the first entry that is not smaller than the value, so
-  an untrained Pokémon answers 1 and not 0. A floor puts a trained stat one out.
-- **Type matchups are applied to the damage one type at a time.** That is not
-  the same as applying the combined multiplier once, because each step
-  truncates, and it is also not the same number the battle announces: the
-  announced one is a separate accumulator that truncates in tenths. Ember on a
-  Fire/Rock defender deals 6 and reports "not very effective" on the strength of
-  a 2. `GameData.type_effectiveness` is for the message and
-  `GameData.type_matchup` per type is for the damage.
+Status and substatus are separate. One status is allowed; multiple substatuses
+can coexist, with counters on `Gen2BattleMon`. `CHECK_STATUS` follows the
+cartridge order: recharge, sleep, freeze, flinch, confusion, paralysis. A
+Pokémon that wakes up moves that turn. Secondary effects roll after a hit and
+before applying the status. `reset_volatile`, called on switch separately from
+`reset_stages`, must clear every flag and counter. Haze resets stages but not
+volatiles.
 
-Two things a battle cannot decide for itself are left to whoever is driving it,
-because on the cartridge a person or an AI decides both: what a side does with
-its turn, and who replaces a Pokémon that has fainted. A turn that ends with
-somebody down stops there, says so through `must_replace`, and refuses to do
-anything else until `send_out` has been called. Nothing else in the engine has
-a policy hole in it, and this one is deliberate.
+Two-turn moves use `Gen2BattleMon.charged_move`: `move_for` forces the release
+move and `Gen2Turn.locked` prevents a second PP spend. Rollout and rampage use
+the same forced-move point. Rollout scales 1, 2, 4, 8, 16 before variation,
+stops on miss/immunity or its fifth hit, and Defense Curl doubles it. Thrash,
+Petal Dance and Outrage continue for their rolled duration, then confuse. A
+status interruption cancels chains; rampage remains active after a miss.
 
-A switch is not a move with a very high priority. The cartridge settles it
-before it looks at priority at all, so a switching side always acts first and
-the other side's move hits whoever came in. That is why an action is
-`use_move` or `switch_to` rather than a move number.
+Switches happen before priority, so the incoming Pokémon takes the other side's
+move. A fainted replacement is a caller policy: the turn stops at
+`must_replace` until `send_out`. A full move set during levelling creates the
+same deliberate policy hole with `must_learn_move`, `learn_move` and
+`decline_move`; the development screen declines automatically.
 
-`Gen2TrainerParty.build` turns one of a trainer class's own trainers into a
-`Gen2Party`, the same way `Gen2Learnset` turns a species' learnset into what a
-level knows. It sits beside the rest of the battle engine rather than next to
-`Gen2Learnset` because what it hands back is battle types, not cartridge data,
-and it draws the same distinction the trainer party table itself draws
-between a NORMAL or ITEM trainer's Pokémon (which knows what its level teaches
-it, through `GameData.moves_at_level`, the same as a wild one) and a MOVES or
-ITEM_MOVES trainer's (which knows exactly what is stored with it, zero slots
-dropped rather than passed to `Gen2BattleMon` as a move). Its Pokémon carry
-the class's own DVs (`GameData.trainer_dvs`, decoded out of a fifth trainer
-table by `RomImporter.read_trainer_dvs`) rather than
-`Gen2BattleMon.PERFECT_DVS`: a class's whole party shares one fixed
-Attack/Defense/Speed/Special word on the real cartridge, which is why the
-word is asked for once per class in `Gen2TrainerParty.build` rather than once
-per Pokémon.
+Trainer details matter:
 
-`Gen2BattleAI.choose_slot` picks a trainer's own move the way pokecrystal's
-`AIChooseMove` does: every slot starts at a fixed score, unusable ones start
-worse, and every bit set in the trainer class's own AI move weight word
-(`GameData.trainer_attributes`, decoded by `RomImporter.read_trainer_attributes`
-out of a third trainer table) runs one scoring layer that nudges a slot's
-score up or down, in the cartridge's own bit order. The lowest score wins.
-`_pick_lowest` is not the cartridge's own way of finding it: `AIChooseMove`
-decrements every slot's counter once per pass until one reaches zero, then
-walks backward correcting for the round-robin order so every slot tied for
-the true minimum ends up equally eligible, before a final random pick. That
-byte-level race is provably the same outcome as finding the minimum directly
-and breaking ties at random, which is what this does instead, because the
-race is how eight-bit hardware computes an argmin without a MIN instruction,
-not a rule of its own worth reproducing. `AI_Smart`'s own per-effect handlers
-(`AI_Smart_Toxic`, `AI_Smart_Sleep`, and the rest) are implemented only for
-the effects `move_effect.gd` already gives a battle sequence: an effect this
-engine cannot play out yet cannot be tested against a real cartridge's choice
-either, so it falls to the generic layers alone, the same falling-back
-discipline the move table itself uses. See `HANDOFF.md`'s "Deliberate" section
-for what else the AI does not cover (a trainer's switch and item decisions,
-Razor Wind/Solar Beam/Fly's own handlers, which read weather and move-specific
-setup state).
+- trainer classes and individual trainers are separate tables. The class name
+  is shared by gym leaders, while the party table stores names and rosters;
+- party pointers are walked in class order, not sorted by address. Class 10 is
+  intentionally empty because its pointer equals class 11;
+- a class owns one packed DVs word for its whole party;
+- `Gen2BattleAI` directly finds the lowest scored move with random tie-breaking.
+  This matches the cartridge's result, although not its byte-level decrement
+  race. It chooses moves only, not switches or items;
+- only implemented `AI_Smart` handlers are present. Unsupported effects fall
+  back to generic scoring. Weather-sensitive Razor Wind, Solar Beam and Fly
+  handlers remain absent;
+- trainer experience uses the cartridge's six growth curves. Level 1 is zero
+  even for Medium Slow, whose literal formula underflows. Experience is not
+  divided among participants, stat experience is, and only the player's side
+  receives experience. Participants are those sent out since the current
+  opponent arrived, excluding fainted members at award time;
+- experience and learning are processed one level at a time. Level-up HP gains
+  the difference in max HP rather than refilling.
 
-`Gen2Experience.total_exp_at` is the six growth curves as `CalcExpAtLevel`'s own
-formula, `exp(n) = floor(a*n^3/b) + c*n^2 + d*n - e`, pinned against
-pokecrystal's `data/growth_rates.asm` and checked against all 251 species in
-all three real games rather than trusted on the strength of the disassembly
-alone: see `tools/dump_tables.gd`'s `growth` view. `Gen2Battle` calls it from
-`_award_experience`, which runs once a turn, after `_residual_damage`, and
-reads every `FAINTED` event the turn produced rather than hooking a faint at
-its source: a faint can come from a move landing or from a status ticking, and
-this is the one point downstream of both. Experience itself is never divided
-among participants; only the stat experience `Gen2Experience.stat_exp_gain`
-works out is, which is the opposite of what dividing *something* for multiple
-participants might suggest, and is the cartridge's own rule rather than a
-simplification of it. Participants are tracked per side as whoever has been
-sent out since the opponent currently out was sent in, added to on
-`send_out`, and reset to whoever is left standing once experience has been
-given for that opponent's own faint, which is what lets a benched-but-alive
-switch-in still be credited for a kill it did not personally land. Levelling
-up and learning a move both ride on the same event: `_give_experience_to`
-loops one level at a time from old to new, because a move taught partway up a
-multi-level jump has to be checked at the level that actually teaches it, not
-at the last one reached. A move that finds an empty slot is learned without a
-question, the same as the cartridge asks none when there is nowhere for the
-answer to go; a full moveset gets a third policy hole, the same shape as
-`must_replace`: `Gen2Battle.must_learn_move`, `pending_learn`, `learn_move`
-and `decline_move` refuse to let a battle continue until an offer is answered,
-because which move to give up is not this engine's decision to make on its
-own. `battle_screen.gd` answers every such offer with `decline_move`
-automatically, since no menu exists yet to ask a person; see `HANDOFF.md`'s
-"Scaffolding" section.
+`Gen2Battle` returns event lists, not strings or final state. The screen must
+draw values from the event being shown, since the turn has finished resolving
+before the first event is displayed. Keep wording, animation and timing out of
+the engine.
 
-**A move is a short program, not a special case.** The cartridge keeps a list of
-commands per effect byte and runs them in order, and an ordinary attack is the
-list that announces the move, spends the PP, works the damage out, rolls the
-hit, applies it and checks for a faint. Almost every other move is that list
-with a step added, removed or replaced. `move_effect.gd` is that table,
-`effect_commands.gd` is the steps, `turn.gd` is what one step hands the next,
-and `battle.gd` knows only how to run a list.
+## Offsets and runtime checks
 
-The status conditions are the first thing written that way, and they are spread
-across the turn rather than gathered in one place, because that is where the
-cartridge puts them:
+`rom_layout.gd` contains absolute positions for each supported 2 MiB dump.
+Wrong offsets often decode plausible neighbouring data, so every offset needs a
+check and `RomImporter.verify_layout()` must run all checks before decoding.
 
-- **Whether a Pokémon can move** is asked before the effect is looked up, so
-  every move goes through it and no sequence has to remember to include it.
-  Sleep, then freeze, then paralysis, in that order.
-- **What a status does to a stat** is applied where the stat is read, after the
-  stage and on the same copy. That is what decides that a critical hit, which
-  reads the unmodified stat, is free of a burn as well as of the stages.
-- **What a status takes each turn** is applied after both sides have acted, in
-  the order they acted.
+- Species names check first/last entries, stride and text mapping; base-stat
+  entries self-identify by Pokédex number.
+- Palettes are structurally checked as 15-bit colours with no species drawn in
+  two blacks. Move entries self-identify by animation number and type bytes are
+  range-checked.
+- Variable-length move/item names are checked at the near and far ends; items
+  are also checked at entry four to catch an incorrect walk. The item table
+  retains placeholder names such as `TERU-SAMA` so numbers remain direct keys.
+- Font data is checked against the charmap, including blank ranges and the
+  character codes that must have ink. Battle HUD bars must have consecutive
+  fill levels increasing by two lit pixels per step; borders use the same shape
+  checks as text frames; known bar palettes are checked by value.
+- The type chart checks sparse type IDs, the three non-neutral multipliers,
+  exact `$FE` and `$FF` terminators, and independently known content at both
+  ends. The `$FE` rows are the Normal/Fighting versus Ghost entries cancelled
+  by Foresight.
+- Trainer class name, pic and palette tables cross-check numbering, ends and
+  pic pointers. Parties are walked to the next class pointer, including the
+  intentional empty class, and checked against known count and endpoints
+  (Falkner's level 7 Pidgey/level 9 Pidgeotto and the last class's first name).
+  Attribute entries validate defined flag bits and class 1's known bytes.
+  DVs have no structural invalid value, so both table ends are anchored to
+  known class values; the complete tables were also compared byte-for-byte
+  against the published reference.
+- Evolution/learnset pointers must address the banked window; methods, species,
+  moves and levels must be valid, levels ascend except Muk, and evolution count
+  matches the known value. `EVOLVE_STAT` is four bytes, not three.
+- Growth rate and base EXP bytes are checked against all 251 species in all
+  three games, not just a few plausible values.
 
-Two of those are worth knowing because they are the opposite of what is usually
-assumed. A Pokémon that wakes up **does** move that turn: the cartridge counts
-the sleep off, says it woke, and carries straight on into the rest of its
-checks. That is Generation 2's rule and not Generation 1's. And a secondary
-effect's roll sits *between* the hit and the status, so a failed roll costs the
-status and nothing else; the damage in front of it has already happened.
+When adding an offset, add its check. Find new data by searching a dump for
+independently known bytes, such as an encoded name or published base stats,
+then confirm structure against [pret](https://github.com/pret) disassemblies.
+Do not copy a disassembly address directly: bank/address pairs differ by game.
+For graphics, encode the reference PNG into cartridge 1bpp format (one byte
+per row, bit 7 leftmost) and search for the exact sequence. Reference material
+locates data, but does not belong in this repository.
 
-Keep it that way. A burn is a command appended to a list, a move that cannot
-miss is a list without the roll, and a two-turn move is a list that ends early
-the first time. The moment an effect becomes a branch inside the turn loop, the
-next hundred of them have nowhere to go. The command names are the cartridge's
-own so a sequence can be read against `data/moves/effects.asm` line for line,
-and an effect with no list of its own falls back to the ordinary attack, which
-is why a move nobody has written yet behaves rather than doing nothing.
+## Verify decoded output
 
-A multi-hit move is where that shape was tested hardest, because the
-cartridge's own script does not run its commands once each: `BattleCommand_StartLoop`
-and `BattleCommand_EndLoop` jump the instruction pointer backward until a hit
-count decided on the first pass runs out. Giving `Gen2Battle._act` an
-instruction pointer that can move backward would have been reproducing how
-eight-bit hardware repeats a handful of steps without a real loop construct,
-not what it repeats, so `Gen2EffectCommands.MULTI_HIT` is one command that
-rolls and applies every hit itself, stopping early on a faint exactly the way
-the cartridge's loop does by jumping past its own summary text. That is the
-same move the whole design already made for `ALL_STATS_UP`, which loops over
-five stats inside one command rather than five commands: a small loop *inside*
-a step is still one step, and only a loop that reaches back across several
-different steps would have needed the list itself to change shape. Drain and
-the four fixed-damage effects (`FIXED_DAMAGE`, shared by Super Fang, Sonicboom,
-Seismic Toss and Psywave the way the cartridge shares one `ConstantDamage`
-routine between them) both overwrite what `DAMAGE_CALC` already worked out
-rather than replacing it in the list, keeping only the one thing worth keeping
-from that spent roll: whether the hit is immune at all. Drain and recoil both
-heal or cost off `Gen2Turn.damage`, the number the formula calculated, not
-`Gen2Turn.dealt`, the number that actually came off a target with less left
-than that, because the cartridge's own `SapHealth` and `BattleCommand_Recoil`
-both read the same uncapped figure `ApplyDamage` reads before clamping it. A
-target with three hit points left against a move that calculates fifty takes
-three, but a draining attacker heals twenty-five and a recoiling one costs
-itself twelve or thirteen, not one; `_recoil` read `Gen2Turn.dealt` until a
-later session found the divergence and corrected it to match `_drain_target`,
-which had always read it correctly.
-
-Disable, Attract and Encore are a different shape of problem from the rest of
-this table: each acts on a target's own last-used move or its own gender,
-neither of which anything else here needed to track. `Gen2BattleMon.last_move_used`
-is set in `USED_MOVE_TEXT`, cleared on a switch alongside everything else
-`reset_volatile` clears, and is what both effects search the target's own move
-list for; `Gen2BattleMon.disabled_slot`/`disable_turns` and
-`encored_slot`/`encore_turns` are the slot each one locks and for how long,
-`-1` for neither so a locked slot 0 is never confusable with nothing locked at
-all. `Gen2BattleMon.gender` is `GetGender`'s own formula: the species' gender
-ratio compared against the Attack and Speed DVs folded into one byte, high
-nibble and low nibble, the same comparison a personality value gets from
-Generation 3 onward; a ratio of 0 or 254 answers outright with no comparison
-run, and 255 is genderless. Disable's own duration is a reroll-on-zero three
-bits of a random byte plus one (`Gen2Substatus.roll_disable`); Encore's is two
-bits plus three, no reroll; both are named after the cartridge's own rolls
-rather than assumed to share one shape.
-
-Disable is not a slot the *attacker* chooses: it searches the *target's* own
-move list for whatever `last_move_used` names, which is the cartridge's own
-rule (`BattleCommand_Disable` reads `BATTLE_VARS_LAST_COUNTER_MOVE_OPP`, not a
-menu selection), and fails on a target that has not moved yet, whose last move
-was Struggle, who is already disabled, or whose found slot has already run out
-of PP. `Gen2BattleMon.can_use` refuses a disabled slot outright, which is
-enough to reroute every ordinary caller to a different slot or to Struggle;
-`CHECK_STATUS` still carries a belt-and-suspenders refusal for a Pokémon
-somehow still about to use the disabled move regardless, compared by move
-*number* rather than by slot, because a slot that has already been rerouted to
-Struggle by `can_use` still names the disabled slot in `Gen2Turn.slot`, and
-comparing slots there would refuse the Struggle too. Both the tick-down and the
-belt-and-suspenders check sit between flinch and confusion in `CHECK_STATUS`,
-the cartridge's own order.
-
-Encore is the same search, with its own exclusions (Struggle, Encore itself,
-Mirror Move) and its own state, but nothing about *forcing* the locked move
-lives in its own command: `Gen2Battle.effective_slot` is what
-`Gen2Battle.move_for` and `Gen2Battle.take_actions` both read to decide which
-slot actually spends its PP, the same extension point `charged_move` already
-uses for a two-turn move's release turn. The real cartridge's own
-`CheckOpponentWentFirst` forces an already-chosen action over for the very
-turn Encore lands on top of, not only the ones after it, when the encored side
-has not gone yet this same turn; this engine gets that for free by not
-committing to `chosen[side]` until `Gen2Battle._act` actually reaches it,
-reading `effective_slot`/`move_for` fresh at that point rather than at the top
-of the turn where priority was decided. Encore's own countdown ticks once a
-turn rather than once a side's move, in `Gen2Battle._tick_encore`, run
-alongside `_residual_damage`: that is where the cartridge's own `HandleEncore`
-runs too, and it is also what ends Encore early the moment its own locked move
-runs out of PP, not only when the counter reaches zero on its own.
-
-Attract fails between the same gender, a genderless pair, or a target already
-in love, and otherwise sets a substatus flag with no counter, cleared only on
-a switch: what stops the target moving is a fresh coin flip every turn inside
-`CHECK_STATUS`, after confusion, not something decided once when Attract
-lands.
-
-Mist and Focus Energy need nothing `Gen2Substatus` had not already grown for
-something else: a flag, cleared on a switch, checked at the point that already
-existed. Mist's own check sits inside `_stat_change`, gating only the "down"
-and "down2" families (a rise is never checked, since only the entries that
-target the opponent are ever a drop worth blocking), and gets its own event,
-`MIST_PROTECTED`, rather than the generic `STAT_CHANGE_FAILED`: the cartridge
-prints its own line for this one rather than "won't go any lower". Focus
-Energy is closer to wiring than to building: `Gen2Damage.calculate`,
-`roll_critical` and `critical_level` already took a `focus_energy` argument
-before this, unused by any caller; the work was setting the flag and reading
-it back in `_damage_calc` and `_multi_hit`'s own per-hit reroll.
-
-`battle/status.gd` is one status byte, one at a time, refusing a second rather
-than adding it. `battle/substatus.gd` is everything that does not fit on that
-byte because a Pokémon can carry several of it at once: confusion alongside a
-burn, a two-turn move's charge alongside either. It is the same shape, flag
-constants and pure arithmetic holding no state of its own, but the counters
-that go with a flag (how many turns of confusion are left, which move was
-charged, how ramped a Toxic is) live on `Gen2BattleMon` next to it rather than
-packed into the byte, because `Gen2Turn` is discarded at the end of the move
-that needed them and the byte alone cannot say "and three turns of it". All of
-it clears on a switch, in `Gen2BattleMon.reset_volatile`, called from
-`Gen2Party.send_out` alongside `reset_stages` rather than folded into it: Haze
-resets stages on both sides without touching either one's volatiles, so the two
-have to stay two calls. A flag added here and forgotten in `reset_volatile` is
-a bug that only shows up after a switch, which is why one test exists purely to
-set every volatile field and ask for a blank Pokémon back.
-
-`Gen2Battle` answers a turn with a list of events rather than with a new state
-or a string. An event says what happened and carries the numbers behind it, so a
-battle can be asserted on rather than read, and turning one into a sentence, an
-animation or a bar that drains stays the screen's job.
-
-`game/battle/battle_screen.gd` is the first screen that is not a development
-view. It draws what it is given and decides nothing: it takes every number it
-draws out of the event it is showing, not out of the Pokémon, because a turn has
-finished resolving before its first event is shown and reading the Pokémon would
-draw the end of the turn during the middle of it.
-
-`Gen2Screen` renders the game into a `SubViewport` the size of the real
-hardware and blows it up by an integer factor, while the interface around it
-stays at the window's own resolution. This is a `Control` and not a
-project-wide stretch setting on purpose: a stretch would have made the menus
-fuzzy to keep the game sharp, and any non-integer factor resamples an 8x8 tile
-into something that crawls when it moves.
-
-Text is not typeset, it is tilemapped. Every character is one 8x8 tile, a
-character code is already the number of the tile that draws it, and a text box
-is a border printed as box-drawing characters around lines that sit two rows
-apart. `Gen2Font` does the copying, `Gen2TextLayout` decides where the lines
-break, and only `Gen2TextBox` is a node. Two consequences worth knowing before
-you add a screen:
-
-- **Measure a line in tiles, never in characters.** The apostrophe ligatures
-  ($D0-$D6) and PK/MN are two characters in one glyph, so `String.length()`
-  overstates a line and wraps it a column early. `Gen2Text.encoded_length()` is
-  the measure that matches the screen.
-- **The space at $7F is not in the font.** It is below the first glyph, so it
-  draws nothing, which is exactly right and is also why `Gen2Font` treats a code
-  it has no tile for as a no-op rather than an error.
-
-## Offsets, and why they are checked at runtime
-
-`rom_layout.gd` is a table of absolute positions inside each supported dump. An
-offset is a claim about a specific 2 MiB file, and a wrong one does not throw:
-it decodes neighbouring data into something plausible. A palette table that was
-one entire table too far along still produced 251 sprites (the right shapes in
-the wrong colours) and every unit test stayed green.
-
-So every offset ships with a check that would fail if it were wrong, and
-`RomImporter.verify_layout()` runs all of them before a single byte is decoded:
-
-- Species names are read through the text codec and compared against the first
-  and last species, which pins the offset, the stride and the character map at
-  once.
-- Every base stats entry begins with its own Pokédex number, so the whole table
-  self-checks in one pass.
-- Palettes have no self-identifying field, so they are checked structurally: a
-  colour is 15 bits, and no species is drawn in two blacks.
-- Every move entry opens with its own animation number, which is its move
-  number, so the move table self-checks in one pass exactly like the base
-  stats. Its type byte is range-checked in the same loop, because it indexes
-  the type name table.
-- The move and item names are variable-length, terminated rather than padded,
-  so a start that is one byte out slides every later entry and still reads as
-  words. Both tables are checked at the far end as well as the near one, and
-  the item table also at entry four, where a start that is right but a walk
-  that is not shows up first.
-- The font is checked against the charmap, because the two are the same claim
-  seen twice: the font is indexed by character code, so the letters and digits
-  `Gen2Text` says are there must have ink, and the runs it has no character for
-  must be blank. Those runs sit between the alphabets, so an offset out by a
-  single tile drags a blank onto "z" and a glyph onto a code that has none.
-- The battle HUD's graphics are checked by the one thing they do that nothing
-  around them does: they count. A bar's fill levels are consecutive tiles, each
-  lighting one more column than the last, so the ink climbs by exactly two
-  pixels a step, and no wrong offset lands on a run like that. The two HUD
-  borders have no progression, so they are checked the way the text box frames
-  are. The four palettes the bars are drawn in are known values, so they are
-  checked against those values.
-- The type matchup chart is checked by the shape a chart of exceptions has to
-  have. Every row is two type numbers and a multiplier, the type numbers are
-  sparse, and the multiplier is one of three values that never includes the
-  neutral one, because a neutral matchup is an absent row. A wrong offset lands
-  in the padding run between the two groups of type numbers almost immediately,
-  since that run is most of the byte range. On top of that the walk has to reach
-  `$FE` and then `$FF` at exactly the right distance, and both ends of the chart
-  are content whose answer is known independently.
-- The three trainer tables are checked against each other, because they are
-  three views of one numbering and a mistake shows up as them disagreeing. The
-  class names pin the ends and the middle of a terminated table the way the move
-  names do; the palettes are checked structurally *and* one entry past the end,
-  since the table is the player plus every class and something that is not a
-  palette has to follow it; and the pic pointers have to address the banked
-  window and decompress into a pic of the one size every trainer is drawn at.
-- Evolutions and level-up moves are one table read through a table of two-byte
-  pointers, and neither half says which species it belongs to, so what is
-  checked is the shape: every pointer has to address the banked window, every
-  evolution has to open with one of five methods and name a real species, and
-  every level-up entry has to be a level from 1 to 100 teaching a real move. Most
-  byte values are none of those, so a wrong pointer fails on its first byte. On
-  top of that the levels ascend everywhere but Muk, whose list the cartridges
-  themselves have out of order, and the total number of evolutions is the same
-  known figure in all three games.
-- The eight text box borders have no content to check, so they are checked by
-  the shape a border has to have: inset from the top of its tile row, corners
-  that carry the pattern of the side they hang from, and no two frames the
-  same.
-- The trainer party table is a second table indexed the same way as the trainer
-  classes above, one pointer per class, and it is where the games' individual
-  trainers actually live: "LEADER" is the class every gym leader shares, and
-  "FALKNER" is stored inside class 1's own entry. Nothing inside a class's bytes
-  says where its group ends, so a class's span is bounded by the *next* class's
-  pointer, and the walk itself is the check: a span that does not land exactly
-  on the next class's start cannot be right, the same argument the evolution
-  and learnset table's pointers make. One class in every game shares its
-  pointer with the class after it, and reads as an honestly empty group rather
-  than a copy of somebody else's; see `RomLayout.EMPTY_TRAINER_CLASS`. On top
-  of that the total trainer count is a known figure per game, and both ends of
-  the table are content whose answer is known independently: Falkner's level 7
-  Pidgey and level 9 Pidgeotto open it, and the last class's first trainer's
-  name closes it.
-- The trainer attributes table is a fourth trainer table, one fixed seven-byte
-  entry per class rather than a pointer, so unlike the party table above there
-  is no walk to be the check: what is checked is the shape every entry has to
-  have. Two of its five fields are bit flags, and neither may carry a bit past
-  what the cartridge defines, which a wrong offset fails almost immediately
-  and has to pass 66 or 67 times running, once per class, to slip through by
-  chance. On top of that class 1's own entry is content whose answer is known
-  independently, the same anchor the class name table has in Falkner's own
-  name.
-- The trainer DVs table is a fifth trainer table, the same fixed-stride shape
-  as the attributes table, but with nothing structural to check: every nibble
-  is a legal DV, so a wrong offset produces just as plausible-looking a table
-  as a right one would. What settles it is content whose answer is known
-  independently at both ends, the same discipline the move and item name
-  tables lean on: Falkner opens the table with his own known DVs, and the
-  class that closes it (a different one per game, since Crystal alone carries
-  MYSTICALMAN) carries its own. Both were confirmed against the entire
-  published table, not only the two anchors the runtime check uses: the
-  offset was pinned by computing what the whole table's bytes have to be from
-  pret's own `TrainerClassDVs` and searching each dump for that exact
-  sequence, the same technique the font, the matchup chart and the attributes
-  table were found with, and it matched byte for byte across all 66 or 67
-  classes in every game.
-- A species' growth rate and base experience are already inside the species
-  table, at an offset this project had decoded and shipped since the
-  importer's first session, and neither field had ever been read for anything
-  until `Gen2Experience` did. Both were plausible either way: a growth rate
-  byte 0-5 and a base exp byte are both legal values whatever the offset is,
-  so nothing about decoding them wrong would have looked wrong. What settled
-  them was reading a name against a curve published independently for every
-  one of the 251 species in all three games, not a handful of anchors: see
-  `tools/dump_tables.gd`'s `growth` view and the table it is checked against
-  in `data/pokemon/base_stats/*.asm`.
-
-When you add an offset, add its check. "It produced output" is not evidence.
-
-New offsets were found by searching the cartridge for content whose bytes are
-known independently (the encoded string `BULBASAUR`, a species' published base
-stats), and then confirming the *structure* against the
-[pret](https://github.com/pret) disassemblies, which are the reference for how
-these games are laid out. Do not copy an address out of a disassembly and
-assume it applies: those are bank:address pairs for a build of the source, and
-Gold, Silver and Crystal do not agree.
-
-Graphics can be found the same way, more precisely, because pret keeps them as
-PNGs. Encode the reference image to the format the cartridge stores (1bpp for
-the font and the borders: one byte per row, bit 7 leftmost) and search the dump
-for that exact byte sequence. It matches in one place, which settles the offset
-with no guessing, and the section order in the disassembly then predicts where
-the neighbouring blobs are, which is a second check for free. Nothing from pret
-belongs in this repository; it is a way to locate data in your own dump, not a
-source of data to commit.
-
-## Seeing that a decode is right
-
-For anything graphical, look at it. `tools/preview_pics.gd` applies a palette to
-the cached indices and writes a PNG:
+For graphics, inspect the output, not only a manifest:
 
 ```bash
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
-```
-
-A contact sheet of all 251 species is the fastest correctness check the project
-has: a bad decompressor, a wrong tile order, a wrong palette and an off-by-one
-in a pointer table all look obviously wrong, and all of them look fine in a
-manifest.
-
-`trainers` does the same for the trainer classes, each drawn in its own class
-palette, which is where a palette table that has slid by an entry becomes
-obvious: the pics stay right and the colours move one class along.
-
-The same tool takes `font` or `frames`, which it folds into rows of sixteen
-tiles. That is the shape the charmap describes, so the alphabets, the gaps
-between them and the digits at the end can be read off the image directly:
-
-```bash
 godot --headless --path . -s res://tools/preview_pics.gd -- crystal /tmp/font.png font
 ```
 
-Text decodes get the same treatment from `tools/dump_tables.gd`, which prints a
-cached table rather than drawing it:
+Species contact sheets expose decompression, tile order, palettes and pointer
+errors. `trainers` exposes class palette shifts; `font` and `frames` expose
+charmap gaps. Dump tables for text checks:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
 
-A name table that has slid by a byte still decodes into words, so reading the
-output is the check. Cross-check a handful of moves against published power,
-accuracy and PP while you are there; the runtime checks pin the ends of a
-table, not what is between them.
+Cross-check move properties, Bulbasaur's Tackle/Growl, Eevee's five
+evolutions, Tyrogue's three, and growth values against published data. The
+runtime checks prove shape and endpoints, not every interior value.
 
-`learnsets` and `evolutions` are the same idea for the one table whose runtime
-check can only prove the shape. Every level and every move number stays in range
-whatever a wrong pointer does, so what settles it is reading Bulbasaur's list
-back and finding Tackle at 1 and Growl at 4, and reading Eevee's five evolutions
-and Tyrogue's three. Both resolve their numbers into names for that reason.
+## Inspect the UI without Play
 
-`growth` is the same idea again for the two fields nothing structural can
-check: a growth rate byte and a base exp byte are both legal whatever the
-offset is, so what settles them is reading a name against a curve published
-independently, the same as the learnsets above.
-
-## Seeing the UI without pressing Play
-
-`tools/screenshot.gd` renders a scene to a PNG:
+`tools/screenshot.gd` renders a scene to PNG and cannot be headless because it
+opens a window:
 
 ```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/main/main.tscn /tmp/shot.png 20
-```
-
-An optional trailing `<method> <times> [int arg]` drives the scene before
-capturing, so you can photograph a screen mid-interaction rather than only on
-its first frame. This briefly opens a real window, because rendering needs a
-display, so it cannot run under `--headless`.
-
-Screens are built so this works on them. `pic_viewer.gd` reacts to keys, but
-every one of those keys is also a plain method (`next_species`, `toggle_shiny`,
-`toggle_back`), so a screen can be photographed in any state without a human at
-the keyboard:
-
-```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/render/pic_viewer.tscn /tmp/shot.png 20 show_species 1 249
-```
-
-`text_viewer.gd` is built the same way, and one of its methods exists only for
-this: `finish` reveals the rest of the page at once, so a photograph of a text
-box does not depend on how long the capture took to arrive.
-
-```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tscn /tmp/shot.png 24 finish 1
-```
-
-The battle screen is built the same way, and it is worth photographing in more
-than one state: an HP bar changes colour as it empties, and the rule is about
-how many pixels are lit rather than how many hit points are left.
-
-```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
-```
-
-`advance` is the same button the player presses, so repeating it fights the
-battle: it finishes the message on screen, then steps to the next event, then
-takes another turn when there is nothing left to say. Enough of them and one of
-the two faints, which is how the whole loop gets looked at without a keyboard.
-
-```bash
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 40 advance 26
 ```
 
-Keep that property when you add a screen. A handler that only exists inside an
-input match statement cannot be driven, and a screen that cannot be driven
-cannot be checked without asking someone what they see.
+An optional `<method> <times> [int arg]` drives a scene before capture. Keep
+state changes as callable methods, not only input branches, so every screen is
+automatically inspectable. `advance` completes the visible message, advances
+events, and starts the next turn when needed.
 
-## Pitfalls that cost real time
+## Pitfalls
 
-- **GUT silently skips test scripts that fail to parse.** A broken file shows
-  up as a smaller run that still reports green, and the only tell is the script
-  count. `test_smoke.gd` loads every script under `game/`, `autoload/`,
-  `tests/` and `tools/` explicitly to turn that into a visible failure. Don't
-  delete it.
-- **A script that fails to parse does not load as null.** `load()` hands back a
-  real `GDScript` with its source code attached, no methods on it and nothing
-  behind it, so `assert_not_null(load(path))` passes on exactly the file it was
-  written to catch. `can_instantiate()` is the question that answers honestly,
-  and it is what `test_smoke.gd` asks. Loading with
-  `ResourceLoader.CACHE_MODE_IGNORE` also sees it, and re-parses scripts that
-  are running at the time, which corrupts them mid-call and takes the VM down
-  with an opcode error; don't reach for it.
-- **A newly created script is invisible until the editor scans it.** Plain
-  `--headless` runs do *not* import new files, so a brand-new `class_name`
-  fails with "not declared in the current scope" no matter how many times you
-  re-run the tests. After adding any script:
+- GUT silently skips scripts that fail to parse. `test_smoke.gd` explicitly
+  loads every script under `game/`, `autoload/`, `tests/` and `tools/`, and uses
+  `can_instantiate()`, not `assert_not_null(load(path))`.
+- Do not use `ResourceLoader.CACHE_MODE_IGNORE` on a running script: reparsing
+  it during a call can corrupt the VM. Use `godot --headless --check-only
+  --script res://path.gd` for syntax checks.
+- New scripts need an editor scan; plain headless runs do not import them:
 
   ```bash
   godot --headless --editor --path . --quit
   ```
 
-  That generates the `.gd.uid` files and updates
-  `.godot/global_script_class_cache.cfg`. A missing `.gd.uid` next to a script
-  is the tell. Editing an *existing* script needs no scan pass. To rule out a
-  real syntax problem: `godot --headless --check-only --script res://path.gd`.
-- **Changing scene inside `_ready()` errors.** The tree is still adding
-  children, so `change_scene_to_file` tries to remove them mid-pass. Use
+  This generates `.gd.uid` files and updates the script-class cache. Existing
+  script edits do not need the scan.
+- Defer `change_scene_to_file` from `_ready()` with
   `change_scene_to_file.call_deferred(path)`.
-- **A bare `PanelContainer` is transparent.** The default theme draws nothing,
-  so a "panel" shows the scene straight through it. Give any modal a
-  `theme_override_styles/panel` StyleBoxFlat.
-- **A `.tscn` root node with no `script =` line fails quietly.** The scene
-  loads and every node resolves; it just does nothing. If a screen is inert,
-  check the root kept its script line.
-- **JSON has one number type, so everything comes back as a float.** A species
-  number written as `1` reads back as `1.0`, and `read["number"] == 1` is
-  false. Anything loading the cache must coerce with `int()`; there is a test
-  in `test_rom_cache.gd` that pins this down so nobody rediscovers it the hard
-  way.
-- **GDScript lambdas capture by value.** Assigning to a captured local inside a
-  `func():` closure updates the copy, not the original, and the write silently
-  vanishes. Append to an Array/Dictionary, or use a method.
-- **A closure stored on the signal of an object it captures leaks that
-  object.** The cycle is invisible until Godot prints "ObjectDB instances were
-  leaked at exit". Connect a method rather than a capturing lambda; that
-  warning at the end of a test run is worth chasing.
-- Godot 4.8 is a *dev* build. If something behaves oddly, check it against 4.6
-  stable before assuming the bug is ours.
+- A bare `PanelContainer` is transparent; give modals a
+  `theme_override_styles/panel` `StyleBoxFlat`.
+- A scene root without its `script =` line loads but does nothing.
+- JSON numbers return as floats; cache readers must use `int()`.
+- GDScript closures capture locals by value. Mutate an Array/Dictionary or use
+  a method instead. A signal closure capturing its source can also leak it;
+  connect a method.
+- Godot 4.8 is a dev build. Compare odd behavior with 4.6 stable before
+  blaming project code.
 
-## GDScript conventions
+## Style and scenes
 
-- Tabs for indentation (Godot default; don't reformat to spaces).
-- Static typing everywhere practical: `var health: int = 10`,
-  `func heal(amount: int) -> void:`.
-- `snake_case` for variables, functions and files; `PascalCase` for classes and
-  nodes.
-- No comments explaining *what* code does, only *why*, for non-obvious
-  constraints.
-
-## Scenes
-
-`.tscn` and `.tres` are plain text (format 3), so read and edit them directly
-like source. Don't hand-invent `uid://` identifiers; Godot regenerates missing
-or invalid ones on load, or omit the `uid` field on `ext_resource` lines and
-let the editor fill it in.
+- Tabs for indentation; static typing where practical.
+- `snake_case` for variables, functions and files; `PascalCase` for classes
+  and nodes.
+- Comment only non-obvious constraints, not what code plainly does.
+- `.tscn` and `.tres` are plain text format 3. Edit them directly. Do not
+  invent `uid://` values; omit invalid `uid` fields and let Godot regenerate
+  them.
