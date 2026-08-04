@@ -34,6 +34,7 @@ var damage: int = 0
 var critical: bool = false
 var effectiveness: int = RomLayout.MATCHUP_EFFECTIVE
 var immune: bool = false
+var missed: bool = false
 
 ## What was actually taken off, which is not the same as [member damage]: a
 ## Pokémon with three hit points left takes three from a hit worth forty.

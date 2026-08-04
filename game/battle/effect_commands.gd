@@ -37,6 +37,16 @@ const CHECK_IMMUNE: StringName = &"checkimmune"
 ## Rolls whether the move connects, and ends it if it does not.
 const CHECK_HIT: StringName = &"checkhit"
 
+## Counter and Mirror Coat do not roll their own accuracy. They validate the
+## move that just hit the user, then leave the doubled damage for APPLY_DAMAGE.
+const COUNTER: StringName = &"counter"
+const MIRROR_COAT: StringName = &"mirrorcoat"
+
+## Selfdestruct and Explosion faint their user after the hit check, even when
+## the hit missed or was immune. The damage step still runs first so effect byte
+## 7 can halve the defender's Defense in the ordinary formula.
+const SELFDESTRUCT: StringName = &"selfdestruct"
+
 ## Takes the damage off, and reports what was actually taken.
 const APPLY_DAMAGE: StringName = &"applydamage"
 
@@ -285,6 +295,12 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_check_immune(turn)
 		CHECK_HIT:
 			_check_hit(turn)
+		COUNTER:
+			_counter(turn, false)
+		MIRROR_COAT:
+			_counter(turn, true)
+		SELFDESTRUCT:
+			_selfdestruct(turn)
 		APPLY_DAMAGE:
 			_apply_damage(turn)
 		RECOIL:
@@ -382,12 +398,15 @@ static func _do_turn(turn: Gen2Turn) -> void:
 static func _damage_calc(turn: Gen2Turn) -> void:
 	var result: Dictionary = Gen2Damage.calculate(
 		turn.attacker(), turn.defender(), turn.move, turn.rng(),
-		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY)
+		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
+		turn.effect() == Gen2MoveEffect.SELFDESTRUCT
 	)
 	turn.damage = int(result["damage"])
 	turn.critical = bool(result["critical"])
 	turn.effectiveness = int(result["effectiveness"])
 	turn.immune = bool(result["immune"])
+	if _doubles_flying_damage(turn) or _doubles_underground_damage(turn):
+		turn.damage = mini(turn.damage * 2, 0xFFFF)
 
 
 static func _check_immune(turn: Gen2Turn) -> void:
@@ -402,10 +421,27 @@ static func _check_immune(turn: Gen2Turn) -> void:
 ## check, reading as a miss on a target that is not asleep rather than as a
 ## distinct failure.
 static func _check_hit(turn: Gen2Turn) -> void:
+	if turn.immune:
+		turn.missed = true
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+			turn.end()
+		return
+
+	if _is_hidden(turn.defender().substatus) \
+		and not _can_hit_hidden(turn.move_number, turn.defender().substatus):
+		turn.missed = true
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+			turn.end()
+		return
+
 	if turn.effect() == Gen2MoveEffect.DREAM_EATER \
 		and not Gen2Status.is_asleep(turn.defender().status):
+		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		turn.end()
+		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+			turn.end()
 		return
 
 	var chance: int = Gen2Accuracy.chance(
@@ -414,12 +450,19 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	)
 	if Gen2Accuracy.rolls_hit(turn.rng(), chance):
 		return
+	turn.missed = true
 	turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-	turn.end()
+	if turn.effect() != Gen2MoveEffect.SELFDESTRUCT:
+		turn.end()
 
 
 static func _apply_damage(turn: Gen2Turn) -> void:
+	if turn.missed or turn.damage <= 0:
+		return
 	var defender: Gen2BattleMon = turn.defender()
+	turn.battle.record_damage_taken(
+		turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
+	)
 	turn.dealt = defender.take_damage(turn.damage)
 	turn.emit(Gen2Battle.HIT, {
 		"target": turn.target,
@@ -429,6 +472,75 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		"hp": defender.hp,
 		"max_hp": defender.max_hp(),
 	})
+
+
+static func _counter(turn: Gen2Turn, mirror_coat: bool) -> void:
+	var remembered: Dictionary = turn.battle.last_damage_taken(turn.side)
+	var expected_effect: int = (
+		Gen2MoveEffect.MIRROR_COAT if mirror_coat else Gen2MoveEffect.COUNTER
+	)
+	var last_move: Dictionary = turn.data().move(int(remembered.get("move", 0)))
+	var valid: bool = not remembered.is_empty() \
+		and int(remembered.get("source", -1)) == turn.target \
+		and int(remembered.get("effect", -1)) != expected_effect \
+		and not last_move.is_empty() \
+		and int(last_move.get("power", 0)) > 0 \
+		and Gen2Damage.is_physical(int(last_move.get("type", RomLayout.TYPE_NORMAL))) != mirror_coat \
+		and int(remembered.get("damage", 0)) > 0
+
+	if valid:
+		var matchup: int = turn.data().type_effectiveness(
+			int(turn.move.get("type", RomLayout.TYPE_NORMAL)), turn.defender().types()
+		)
+		if matchup == RomLayout.MATCHUP_NO_EFFECT:
+			turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+			turn.end()
+			return
+
+		turn.damage = mini(int(remembered["damage"]) * 2, 0xFFFF)
+		turn.critical = false
+		turn.effectiveness = matchup
+		turn.immune = false
+		turn.missed = false
+		return
+
+	turn.emit(Gen2Battle.MOVE_FAILED)
+	turn.end()
+
+
+## Selfdestruct's command clears the user's status and sets its HP to zero.
+## The faint event itself remains in CHECK_FAINT so the target is still reported
+## first when the explosion also brings it down.
+static func _selfdestruct(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	attacker.status = Gen2Status.NONE
+	attacker.substatus &= ~(Gen2Substatus.CHARGING | Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
+	attacker.take_damage(attacker.hp)
+
+
+static func _is_hidden(substatus: int) -> bool:
+	return Gen2Substatus.has(substatus, Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
+
+
+static func _can_hit_hidden(move_number: int, substatus: int) -> bool:
+	if Gen2Substatus.has(substatus, Gen2Substatus.FLYING):
+		return [Gen2MoveEffect.GUST_MOVE, Gen2MoveEffect.WHIRLWIND_MOVE,
+			Gen2MoveEffect.THUNDER_MOVE, Gen2MoveEffect.TWISTER_MOVE].has(move_number)
+	if Gen2Substatus.has(substatus, Gen2Substatus.UNDERGROUND):
+		return [Gen2MoveEffect.EARTHQUAKE_MOVE, Gen2MoveEffect.FISSURE_MOVE,
+			Gen2MoveEffect.MAGNITUDE_MOVE].has(move_number)
+	return false
+
+
+static func _doubles_flying_damage(turn: Gen2Turn) -> bool:
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.FLYING) \
+		and [Gen2MoveEffect.GUST_MOVE, Gen2MoveEffect.TWISTER_MOVE].has(turn.move_number)
+
+
+static func _doubles_underground_damage(turn: Gen2Turn) -> bool:
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.UNDERGROUND) \
+		and [Gen2MoveEffect.EARTHQUAKE_MOVE, Gen2MoveEffect.FISSURE_MOVE,
+			Gen2MoveEffect.MAGNITUDE_MOVE].has(turn.move_number)
 
 
 ## A quarter of [member Gen2Turn.damage], the number the formula calculated,
@@ -457,6 +569,14 @@ static func _check_faint(turn: Gen2Turn) -> void:
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
 
 
+## CantMove on the cartridge cancels a pending two-turn move. For Fly and Dig
+## that also makes the user visible again, so a sleep, flinch or paralysis on
+## the release turn cannot leave a Pokémon permanently untouchable.
+static func _cancel_charge(mon: Gen2BattleMon) -> void:
+	mon.substatus &= ~(Gen2Substatus.CHARGING | Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
+	mon.charged_move = 0
+
+
 ## Recharge, then sleep, then freeze, then flinch, then Disable's own
 ## countdown, then confusion, then Attract's immobilise roll, then a
 ## belt-and-suspenders refusal for a Pokémon still locked into the disabled
@@ -480,6 +600,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.RECHARGING):
+		_cancel_charge(mon)
 		mon.substatus &= ~Gen2Substatus.RECHARGING
 		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"recharge"})
 		turn.end()
@@ -488,6 +609,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 	if Gen2Status.is_asleep(mon.status):
 		mon.status = Gen2Status.tick_sleep(mon.status)
 		if Gen2Status.is_asleep(mon.status):
+			_cancel_charge(mon)
 			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"sleep"})
 			turn.end()
 			return
@@ -497,6 +619,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 		# Flame Wheel and Sacred Fire are used through a freeze, and thaw the
 		# Pokémon using them; nothing else in the game does.
 		if not THAWING_MOVES.has(turn.move_number):
+			_cancel_charge(mon)
 			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"freeze"})
 			turn.end()
 			return
@@ -504,6 +627,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 		turn.emit(Gen2Battle.THAWED)
 
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.FLINCHED):
+		_cancel_charge(mon)
 		mon.substatus &= ~Gen2Substatus.FLINCHED
 		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"flinch"})
 		turn.end()
@@ -525,6 +649,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 		else:
 			turn.emit(Gen2Battle.CONFUSED)
 			if Gen2Substatus.rolls_confusion_hit(turn.rng()):
+				_cancel_charge(mon)
 				var dealt: int = mon.take_damage(Gen2Damage.confusion_damage(mon, turn.rng()))
 				turn.emit(Gen2Battle.HURT_ITSELF, {
 					"amount": dealt, "hp": mon.hp, "max_hp": mon.max_hp(),
@@ -534,6 +659,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.ATTRACTED) \
 		and Gen2Substatus.rolls_attract_immobile(turn.rng()):
+		_cancel_charge(mon)
 		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"attract"})
 		turn.end()
 		return
@@ -547,12 +673,14 @@ static func _check_status(turn: Gen2Turn) -> void:
 	# happening, so comparing slots here would refuse that Struggle too.
 	if mon.disabled_slot >= 0 and mon.disabled_slot < mon.moves.size() \
 		and turn.move_number == int(mon.moves[mon.disabled_slot]):
+		_cancel_charge(mon)
 		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"disabled"})
 		turn.end()
 		return
 
 	if Gen2Status.has(mon.status, Gen2Status.PARALYSIS) \
 		and Gen2Status.rolls_full_paralysis(turn.rng()):
+		_cancel_charge(mon)
 		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"paralysis"})
 		turn.end()
 
@@ -699,6 +827,9 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 			turn.effectiveness = int(result["effectiveness"])
 
 		turn.dealt = defender.take_damage(turn.damage)
+		turn.battle.record_damage_taken(
+			turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
+		)
 		turn.emit(Gen2Battle.HIT, {
 			"target": turn.target, "amount": turn.dealt, "critical": turn.critical,
 			"effectiveness": turn.effectiveness, "hp": defender.hp, "max_hp": defender.max_hp(),
@@ -792,6 +923,9 @@ static func _ohko(turn: Gen2Turn) -> void:
 		turn.end()
 		return
 
+	turn.battle.record_damage_taken(
+		turn.target, turn.side, turn.move_number, turn.effect(), 0xFFFF
+	)
 	var dealt: int = defender.take_damage(defender.hp)
 	turn.emit(Gen2Battle.OHKO, {
 		"target": turn.target, "amount": dealt, "hp": defender.hp, "max_hp": defender.max_hp(),
@@ -818,11 +952,17 @@ static func _charge_move(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING):
 		mon.substatus &= ~Gen2Substatus.CHARGING
+		mon.substatus &= ~(Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
 		mon.charged_move = 0
 		return
 
 	mon.substatus |= Gen2Substatus.CHARGING
 	mon.charged_move = turn.move_number
+	if turn.effect() == Gen2MoveEffect.FLY_OR_DIG:
+		if turn.move_number == Gen2MoveEffect.FLY_MOVE:
+			mon.substatus |= Gen2Substatus.FLYING
+		elif turn.move_number == Gen2MoveEffect.DIG_MOVE:
+			mon.substatus |= Gen2Substatus.UNDERGROUND
 	turn.emit(Gen2Battle.CHARGING_UP)
 	turn.end()
 

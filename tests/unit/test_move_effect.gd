@@ -62,6 +62,121 @@ func test_recoil_is_the_ordinary_list_with_a_step_in_it() -> void:
 	)
 
 
+func test_counter_mirror_coat_and_selfdestruct_have_their_cartridge_sequences() -> void:
+	var counter: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.COUNTER)
+	var mirror: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.MIRROR_COAT)
+	var selfdestruct: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.SELFDESTRUCT)
+	assert_true(counter.has(Gen2EffectCommands.COUNTER))
+	assert_true(mirror.has(Gen2EffectCommands.MIRROR_COAT))
+	assert_true(selfdestruct.has(Gen2EffectCommands.SELFDESTRUCT))
+	assert_lt(
+		selfdestruct.find(Gen2EffectCommands.SELFDESTRUCT),
+		selfdestruct.find(Gen2EffectCommands.APPLY_DAMAGE)
+	)
+
+
+func test_counter_only_reflects_a_physical_move_that_hit_this_action_pair() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.THUNDERBOLT]),
+		Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.COUNTER]),
+		_rng
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var hits: Array = _of_type(events, Gen2Battle.HIT)
+	assert_eq(hits.size(), 1, "the special-category check rejects Counter")
+	assert_eq(_of_type(events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_mirror_coat_only_reflects_a_special_move_that_hit_this_action_pair() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.THUNDERBOLT]),
+		Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.MIRROR_COAT]),
+		_rng
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var hits: Array = _of_type(events, Gen2Battle.HIT)
+	assert_eq(hits.size(), 2)
+	assert_eq(int(hits[1]["amount"]), int(hits[0]["amount"]) * 2)
+
+
+func test_selfdestruct_faints_the_user_after_dealing_its_damage() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.SELFDESTRUCT]
+	battle.player.pp = [5]
+	var before: int = battle.enemy.hp
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.player.hp, 0)
+	assert_lt(battle.enemy.hp, before)
+	assert_eq(_of_type(events, Gen2Battle.FAINTED).size(), 1)
+	assert_eq(int(_first(events, Gen2Battle.FAINTED)["side"]), Gen2Battle.PLAYER)
+
+
+func test_selfdestruct_still_faints_the_user_when_accuracy_fails() -> void:
+	var battle: Gen2Battle = _battle()
+	var move: Dictionary = _data.move(Fixture.SELFDESTRUCT).duplicate()
+	move["accuracy"] = 0
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.SELFDESTRUCT, move, []
+	)
+	for command: StringName in Gen2MoveEffect.SELFDESTRUCT_SEQUENCE:
+		if turn.ended:
+			break
+		Gen2EffectCommands.run(command, turn)
+	assert_eq(battle.player.hp, 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.MISSED).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.FAINTED).size(), 1)
+
+
+func test_fly_makes_the_user_untouchable_until_its_release_turn() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.FLY]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var first: Array = battle.take_turn(0, 0)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.FLYING))
+	assert_eq(battle.player.hp, battle.player.max_hp())
+	assert_eq(_of_type(first, Gen2Battle.MISSED).size(), 1)
+	assert_eq(_of_type(first, Gen2Battle.MISSED)[0]["side"], Gen2Battle.ENEMY)
+
+	var second: Array = battle.take_turn(0, 0)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.FLYING))
+	assert_gt(_of_type(second, Gen2Battle.HIT).size(), 0)
+
+
+func test_a_status_that_stops_fly_on_release_makes_the_user_visible_again() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.FLY]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	battle.take_turn(0, 0)
+	battle.player.substatus |= Gen2Substatus.FLINCHED
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 1)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.FLYING))
+	assert_eq(battle.player.charged_move, 0)
+
+
+func test_dig_uses_underground_and_earthquake_can_hit_it() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.DIG]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.EARTHQUAKE]),
+		_rng
+	)
+	var first: Array = battle.take_turn(0, 0)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.UNDERGROUND))
+	assert_eq(_of_type(first, Gen2Battle.HIT).filter(
+		func(event: Dictionary) -> bool: return int(event["side"]) == Gen2Battle.ENEMY
+	).size(), 1)
+
+
 func test_the_stat_runs_land_on_the_right_stat() -> void:
 	# Effect 20 is the down-by-one run's third stop (18 + 2) and String Shot is
 	# published as lowering Speed; effect 72 is the down-on-hit run's fifth stop

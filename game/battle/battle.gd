@@ -192,6 +192,12 @@ var parties: Dictionary = {}
 ## tracked the same way rather than leaving one of them a special case.
 var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
 
+## The last direct damage each side took during the current pair of actions.
+## Counter and Mirror Coat read this after the faster side has acted. It is
+## cleared at the start of every action pair, because the cartridge's own
+## `wCurDamage` is a move-local value rather than a battle-long history.
+var _last_damage_taken: Dictionary = {PLAYER: {}, ENEMY: {}}
+
 ## Moves waiting on [method learn_move] or [method decline_move], one queue per
 ## side, FIFO: a level that teaches two moves into a full six-move team asks
 ## about both, one at a time, in the order they were learned.
@@ -263,6 +269,31 @@ func mon(side: int) -> Gen2BattleMon:
 
 func opponent_of(side: int) -> int:
 	return ENEMY if side == PLAYER else PLAYER
+
+
+## Clears the damage that Counter and Mirror Coat are allowed to remember.
+## Residual damage is deliberately not recorded: the cartridge's counter move
+## reads the damage produced by the opponent's move, not end-of-turn status loss.
+func reset_damage_taken() -> void:
+	_last_damage_taken = {PLAYER: {}, ENEMY: {}}
+
+
+## Keeps the uncapped damage figure, the move that produced it and its source
+## side. The command layer calls this before HP clamping, matching the
+## cartridge's `wCurDamage` rather than the amount that happened to remain.
+func record_damage_taken(target: int, source: int, move_number: int, effect: int, amount: int) -> void:
+	if amount <= 0 or target not in [PLAYER, ENEMY] or source not in [PLAYER, ENEMY]:
+		return
+	_last_damage_taken[target] = {
+		"damage": amount,
+		"source": source,
+		"move": move_number,
+		"effect": effect,
+	}
+
+
+func last_damage_taken(side: int) -> Dictionary:
+	return _last_damage_taken.get(side, {})
 
 
 ## A battle is lost when a whole party is down, not when the Pokémon that is out
@@ -403,6 +434,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
 		return events
+	reset_damage_taken()
 
 	var actions: Dictionary = {PLAYER: player_action, ENEMY: enemy_action}
 	var chosen: Dictionary = {

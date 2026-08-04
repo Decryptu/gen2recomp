@@ -177,8 +177,8 @@ engine cannot play out yet cannot be tested against a real cartridge's choice
 either, so it falls to the generic layers alone, the same falling-back
 discipline the move table itself uses. See `HANDOFF.md`'s "Deliberate" section
 for what else the AI does not cover (a trainer's switch and item decisions,
-Razor Wind/Solar Beam/Fly's own handlers, which read weather and a
-semi-invulnerability substatus nothing here tracks).
+Razor Wind/Solar Beam/Fly's own handlers, which read weather and move-specific
+setup state).
 
 `Gen2Experience.total_exp_at` is the six growth curves as `CalcExpAtLevel`'s own
 formula, `exp(n) = floor(a*n^3/b) + c*n^2 + d*n - e`, pinned against

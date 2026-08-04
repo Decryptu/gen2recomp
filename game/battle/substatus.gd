@@ -8,8 +8,8 @@ extends RefCounted
 ## own rule: a Pokémon that is already poisoned cannot also be confused by
 ## refusing a second flag on the same byte. Confusion, flinching, being locked
 ## into a recharge turn or a two-turn move's charge, Disable, Attract, Encore,
-## Mist and Focus Energy are all independent of that and of each other, so they
-## live apart from it.
+## Mist, Focus Energy, flying and underground are all independent of that and
+## of each other, so they live apart from it.
 ##
 ## The cartridge itself keeps these as five separate bytes
 ## (`wPlayerSubStatus1` through `wPlayerSubStatus5`), not one: this project
@@ -39,6 +39,8 @@ const ATTRACTED: int = 1 << 5
 const ENCORED: int = 1 << 6
 const MIST: int = 1 << 7
 const FOCUS_ENERGY: int = 1 << 8
+const FLYING: int = 1 << 9
+const UNDERGROUND: int = 1 << 10
 
 const NONE: int = 0
 
