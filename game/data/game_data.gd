@@ -34,6 +34,8 @@ var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
+var _world_maps: Array = []
+var _world_tilesets: Dictionary = {}
 
 
 ## Opens the cache for a registry game, or null if it has not been imported.
@@ -64,6 +66,7 @@ static func open_directory(path: String) -> GameData:
 	data._types = data._read_array(RomCache.types_path(path))
 	data._trainers = data._read_array(RomCache.trainers_path(path))
 	data._build_matchups(data._read_array(RomCache.matchups_path(path)))
+	data._load_world(path)
 	return data
 
 
@@ -83,6 +86,41 @@ func title() -> String:
 
 func species_count() -> int:
 	return _species.size()
+
+
+func map_count() -> int:
+	return _world_maps.size()
+
+
+## One map by its stable cartridge group and number, or null when it is absent.
+func world_map(group: int, number: int) -> Gen2WorldMap:
+	for value: Gen2WorldMap in _world_maps:
+		if value.group == group and value.number == number:
+			return value
+	return null
+
+
+func world_maps() -> Array:
+	return _world_maps.duplicate()
+
+
+## One decoded tileset's metatile and collision tables, or null if absent.
+func world_tileset(number: int) -> Gen2WorldTileset:
+	return _world_tilesets.get(number, null)
+
+
+func world_tileset_count() -> int:
+	return _world_tilesets.size()
+
+
+## Indexed 2bpp pixels for one tileset's 96 overworld tiles, loaded on demand.
+func world_tileset_indices(number: int) -> PackedByteArray:
+	var key: String = "world_tiles/%d" % number
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(RomCache.world_tile_path(directory, number))
+	_indices[key] = data
+	return data
 
 
 ## One species by Pokédex number, or an empty Dictionary if there is no such
@@ -450,6 +488,19 @@ func unown_pic(form: int, back: bool = false) -> Dictionary:
 	pic["atlas"] = "unown_back" if back else "unown_front"
 	pic["slot"] = form
 	return pic
+
+
+func _load_world(path: String) -> void:
+	var map_rows: Variant = RomCache.read_json(RomCache.world_maps_path(path))
+	if map_rows is Array:
+		for value: Dictionary in map_rows as Array:
+			_world_maps.append(Gen2WorldMap.from_cache(value))
+
+	var tileset_rows: Variant = RomCache.read_json(RomCache.world_tilesets_path(path))
+	if tileset_rows is Array:
+		for value: Dictionary in tileset_rows as Array:
+			var tileset: Gen2WorldTileset = Gen2WorldTileset.from_cache(value)
+			_world_tilesets[tileset.number] = tileset
 
 
 func _read_array(path: String) -> Array:
