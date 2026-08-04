@@ -82,10 +82,9 @@ const RESIDUAL_MOVE_NUMBERS: Array = [54, 73, 77, 78, 86, 116, 117, 139, 144, 16
 ## [code]HANDOFF.md[/code] for what pret's own table covers beyond this.
 ##
 ## Razor Wind, Solar Beam and Fly's own handlers are deliberately absent: all
-## three read either the weather or a semi-invulnerability substatus this
-## engine does not track yet, and a handler that always reads "not weather"
-## or "not invulnerable" is not a simplification, it is a handler that never
-## fires.
+## three read weather or move-specific setup state that is not part of the
+## generic scoring layers. The battle now tracks Fly and Dig's flags, but that
+## is not enough to reproduce the AI handler's full weather and setup checks.
 
 
 ## Picks a move slot for [param attacker] to use against [param defender], the

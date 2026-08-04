@@ -95,12 +95,29 @@ const RECHARGE_HIT: int = 80
 ## add one thing behind the hit, which is why they keep their own effect byte
 ## rather than folding into the plain one. Fly and Dig share 155 with each
 ## other and nothing else, since both leave the field for their charge turn on
-## the cartridge, which nothing here models yet: see [code]HANDOFF.md[/code].
+## the cartridge. Their shared charge command now carries the two distinct
+## semi-invulnerability flags and the incoming hit check reads them.
 const RAZOR_WIND: int = 39
 const SKY_ATTACK: int = 75
 const SKULL_BASH: int = 145
 const SOLARBEAM: int = 151
 const FLY_OR_DIG: int = 155
+const SELFDESTRUCT: int = 7
+const COUNTER: int = 0x59
+const MIRROR_COAT: int = 0x90
+
+## Real move numbers used by the shared two-turn and semi-invulnerability
+## commands. These are kept here because the cartridge stores Fly and Dig under
+## one effect byte, while the charge command still has to tell them apart.
+const FLY_MOVE: int = 19
+const DIG_MOVE: int = 91
+const GUST_MOVE: int = 16
+const WHIRLWIND_MOVE: int = 18
+const THUNDER_MOVE: int = 9
+const TWISTER_MOVE: int = 239
+const EARTHQUAKE_MOVE: int = 89
+const FISSURE_MOVE: int = 90
+const MAGNITUDE_MOVE: int = 222
 
 ## None of the three needs any state this file has not already grown for
 ## something else: [Gen2BattleMon.reset_stages] for Haze,
@@ -132,6 +149,41 @@ const NORMAL_HIT: Array = [
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Counter and Mirror Coat validate the damage the opponent dealt earlier in
+## this action pair, then apply twice that uncapped figure. Their command owns
+## the failure path, so neither one uses the ordinary accuracy or damage steps.
+const COUNTER_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.COUNTER,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const MIRROR_COAT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.MIRROR_COAT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## The cartridge runs Selfdestruct after the shared hit check and before its
+## failure text and damage application. Keeping that order means the user faints
+## even when the target is immune or the accuracy roll misses.
+const SELFDESTRUCT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.SELFDESTRUCT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.END_MOVE,
@@ -550,6 +602,9 @@ static func _sequences() -> Dictionary:
 		FREEZE_HIT: _secondary([Gen2EffectCommands.FREEZE_TARGET]),
 		PARALYZE_HIT: _secondary([Gen2EffectCommands.PARALYZE_TARGET]),
 		RECOIL_HIT: RECOIL_HIT_SEQUENCE,
+		COUNTER: COUNTER_SEQUENCE,
+		MIRROR_COAT: MIRROR_COAT_SEQUENCE,
+		SELFDESTRUCT: SELFDESTRUCT_SEQUENCE,
 		FLINCH_HIT: _secondary([Gen2EffectCommands.FLINCH_TARGET]),
 		CONFUSE_HIT: _secondary([Gen2EffectCommands.CONFUSE_TARGET]),
 		CONFUSE: CONFUSE_SEQUENCE,

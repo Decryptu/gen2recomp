@@ -57,6 +57,22 @@ const CONFUSION_NEVER: int = 250
 const SUPERSONIC: int = 251
 const HYPER_BEAM: int = 252
 
+## The three move families this fixture keeps at their real Generation 2 move
+## numbers, so the command layer can exercise the cartridge's number-based
+## exceptions as well as the effect-byte table.
+const COUNTER: int = 68
+const DIG: int = 91
+const SELFDESTRUCT: int = 120
+const EXPLOSION: int = 153
+const FLY: int = 19
+const MIRROR_COAT: int = 243
+const GUST: int = 16
+const THUNDER: int = 9
+const TWISTER: int = 239
+const EARTHQUAKE: int = 89
+const FISSURE: int = 90
+const MAGNITUDE: int = 222
+
 ## Solarbeam for the plain two-turn shape, Skull Bash for the one that raises a
 ## stat behind the hit.
 const SOLARBEAM: int = 253
@@ -107,6 +123,7 @@ const GENDER_F50: int = 127
 const GENDER_UNKNOWN: int = 255
 
 const NORMAL: int = 0x00
+const FIGHTING: int = 0x01
 const GROUND: int = 0x04
 const ROCK: int = 0x05
 const GHOST: int = 0x08
@@ -118,6 +135,8 @@ const ELECTRIC: int = 0x17
 const PSYCHIC_TYPE: int = 0x18
 const POISON: int = 0x03
 const FLYING: int = 0x02
+const DRAGON: int = 0x1A
+const DARK: int = 0x1B
 
 ## Only the matchups the battle tests use, not the whole chart. The chart itself
 ## is the importer's business and is tested there; what matters here is that the
@@ -128,6 +147,7 @@ const MATCHUPS: Array = [
 	[FIRE, GRASS, 20], [FIRE, WATER, 5], [FIRE, FIRE, 5], [FIRE, ROCK, 5],
 	[GRASS, ROCK, 20], [GRASS, GROUND, 20], [GRASS, POISON, 5], [GRASS, GRASS, 5],
 	[NORMAL, ROCK, 5], [NORMAL, STEEL, 5],
+	[FIGHTING, GHOST, 0], [PSYCHIC_TYPE, DARK, 0],
 ]
 
 ## The two the cartridge keeps past the Foresight marker.
@@ -261,6 +281,18 @@ static func _moves() -> Array:
 		# Confusion as the whole of the move, the way Supersonic does it.
 		SUPERSONIC: ["SUPERSONIC", 0, NORMAL, 255, 20, Gen2MoveEffect.CONFUSE, 0],
 		HYPER_BEAM: ["HYPER BEAM", 150, NORMAL, 255, 5, Gen2MoveEffect.RECHARGE_HIT, 0],
+		FLY: ["FLY", 70, FLYING, 242, 15, Gen2MoveEffect.FLY_OR_DIG, 0],
+		DIG: ["DIG", 100, GROUND, 255, 10, Gen2MoveEffect.FLY_OR_DIG, 0],
+		GUST: ["GUST", 40, FLYING, 255, 35, 0, 0],
+		THUNDER: ["THUNDER", 120, ELECTRIC, 179, 10, Gen2MoveEffect.PARALYZE_HIT, 0],
+		TWISTER: ["TWISTER", 40, DRAGON, 255, 20, Gen2MoveEffect.FLINCH_HIT, 0],
+		EARTHQUAKE: ["EARTHQUAKE", 100, GROUND, 255, 10, 0, 0],
+		FISSURE: ["FISSURE", 0, GROUND, 76, 5, Gen2MoveEffect.OHKO, 0],
+		MAGNITUDE: ["MAGNITUDE", 100, GROUND, 255, 30, 0, 0],
+		COUNTER: ["COUNTER", 0, FIGHTING, 255, 20, Gen2MoveEffect.COUNTER, 0],
+		SELFDESTRUCT: ["SELF-DESTRUCT", 200, NORMAL, 255, 5, Gen2MoveEffect.SELFDESTRUCT, 0],
+		EXPLOSION: ["EXPLOSION", 250, NORMAL, 255, 5, Gen2MoveEffect.SELFDESTRUCT, 0],
+		MIRROR_COAT: ["MIRROR COAT", 0, PSYCHIC_TYPE, 255, 20, Gen2MoveEffect.MIRROR_COAT, 0],
 		SOLARBEAM: ["SOLARBEAM", 120, NORMAL, 255, 10, Gen2MoveEffect.SOLARBEAM, 0],
 		SKULL_BASH: ["SKULL BASH", 100, NORMAL, 255, 15, Gen2MoveEffect.SKULL_BASH, 0],
 		TOXIC: ["TOXIC", 0, POISON, 255, 10, Gen2MoveEffect.TOXIC, 0],

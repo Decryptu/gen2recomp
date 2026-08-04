@@ -81,6 +81,28 @@ func test_priority_beats_speed() -> void:
 	assert_eq(Gen2Battle.priority_of({"number": 1, "effect": 0x59}), 0, "Counter")
 
 
+func test_counter_doubles_the_raw_damage_taken_by_the_slower_side() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.COUNTER])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var hits: Array = _of_type(events, Gen2Battle.HIT)
+	assert_eq(hits.size(), 2)
+	assert_eq(int(hits[1]["amount"]), int(hits[0]["amount"]) * 2)
+
+
+func test_counter_does_not_keep_damage_from_a_previous_action_pair() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL, Fixture.COUNTER])
+	)
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var events: Array = battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(1))
+	assert_eq(_of_type(events, Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.HIT).size(), 0)
+
+
 func test_vital_throw_says_it_is_last_in_the_move_and_not_in_the_effect() -> void:
 	# The one move the effect table cannot answer for.
 	assert_eq(Gen2Battle.priority_of({"number": Gen2Battle.VITAL_THROW, "effect": 17}), 0)

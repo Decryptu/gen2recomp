@@ -62,11 +62,12 @@ static func calculate(
 	defender: Gen2BattleMon,
 	move: Dictionary,
 	rng: RandomNumberGenerator,
-	focus_energy: bool = false
+	focus_energy: bool = false,
+	defense_halved: bool = false
 ) -> Dictionary:
 	return calculate_with(
 		attacker, defender, move,
-		roll_critical(move, rng, focus_energy), roll_variation(rng)
+		roll_critical(move, rng, focus_energy), roll_variation(rng), defense_halved
 	)
 
 
@@ -82,7 +83,8 @@ static func calculate_with(
 	defender: Gen2BattleMon,
 	move: Dictionary,
 	critical: bool,
-	variation: int
+	variation: int,
+	defense_halved: bool = false
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
@@ -111,9 +113,12 @@ static func calculate_with(
 				break
 		return out
 
+	var defense: int = _defense_stat(attacker, defender, move_type, critical)
+	if defense_halved:
+		@warning_ignore("integer_division")
+		defense = maxi(defense / 2, 1)
 	var damage: int = base_damage(
-		attacker.level, power, _attack_stat(attacker, defender, move_type, critical),
-		_defense_stat(attacker, defender, move_type, critical)
+		attacker.level, power, _attack_stat(attacker, defender, move_type, critical), defense
 	)
 	if critical:
 		damage *= CRITICAL_MULTIPLIER

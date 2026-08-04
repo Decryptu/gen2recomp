@@ -177,3 +177,16 @@ func test_a_move_with_no_power_never_crits() -> void:
 	rng.seed = 1
 	for _try: int in 200:
 		assert_false(Gen2Damage.roll_critical(_data.move(Fixture.GROWL), rng))
+
+
+func test_selfdestruct_halves_defense_before_the_formula() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var move: Dictionary = _data.move(Fixture.SELFDESTRUCT)
+	var ordinary: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION, false
+	)
+	var halved: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION, true
+	)
+	assert_gt(int(halved["damage"]), int(ordinary["damage"]))
