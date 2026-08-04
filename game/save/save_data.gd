@@ -9,6 +9,7 @@ extends RefCounted
 
 const FORMAT_VERSION: int = 1
 const MAX_PARTY: int = Gen2Party.MAX_SIZE
+const MAX_PLAYER_NAME: int = 10
 
 var format_version: int = FORMAT_VERSION
 var game_id: StringName = &""

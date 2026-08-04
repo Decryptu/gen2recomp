@@ -23,6 +23,29 @@ The format is versioned and validated against the selected `GameData` before a
 slot is accepted. The current implementation provides three slots per game
 revision and stores them as JSON under `user://save_slots`.
 
+## Player-facing flow
+
+The launcher selects an imported cartridge cache, then opens
+`game/save/save_screen.tscn`. The screen presents the three slots as `EMPTY`,
+`READY` or `INCOMPATIBLE`, and keeps the selected slot explicit while it creates
+a new game or imports an original `.sav`. A failed import is rejected before
+`Gen2SaveStore.save` is called, so it cannot replace an existing slot with
+partial data.
+
+New games require a player name of up to ten encoded characters and use the
+three starters from the real Johto opening sequence: Chikorita, Cyndaquil or
+Totodile at level 5, each holding Berry. Their starting moves come from the
+imported learnset. `game/save/party_screen.tscn` displays all six party
+positions, current and derived maximum HP, and persistent status. It starts the
+development battle only after selecting the same validated slot in
+`GameRuntime`.
+
+The development battle writes back through `Gen2SaveBattleAdapter` after the
+pending event messages have finished. It preserves player name, Pokémon
+identity, held item, happiness, Pokerus, caught data, nickname, original
+trainer, HP, status, experience, DVs, stat experience, moves and PP while still
+discarding volatile battle state.
+
 ## Original Generation 2 shape
 
 The canonical model follows the stable fields in the original Crystal source.

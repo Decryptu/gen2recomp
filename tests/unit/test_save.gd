@@ -91,6 +91,41 @@ func test_a_saved_pokemon_restores_stats_hp_status_exp_and_pp() -> void:
 	assert_eq(mon.substatus, Gen2Substatus.NONE, "volatile battle state is never loaded")
 
 
+func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
+	var source: Gen2SaveData = _save()
+	(source.party[0] as Gen2SaveMon).nickname = "SPARKY"
+	(source.party[0] as Gen2SaveMon).original_trainer = "RED"
+	var party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, source)
+	var written: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, source.slot, party, "", source
+	)
+	assert_eq(written.player_name, "RED")
+	assert_eq((written.party[0] as Gen2SaveMon).nickname, "SPARKY")
+	assert_eq((written.party[0] as Gen2SaveMon).original_trainer, "RED")
+
+
+func test_new_game_uses_the_real_starter_choices_and_berry() -> void:
+	var created: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 1, "ASH", 155)
+	assert_not_null(created)
+	assert_eq(created.player_name, "ASH")
+	assert_eq(created.slot, 1)
+	assert_eq(created.party.size(), 1)
+	var mon: Gen2SaveMon = created.party[0]
+	assert_eq(mon.species, 155)
+	assert_eq(mon.level, 5)
+	assert_eq(mon.item, Gen2SaveStore.STARTER_ITEM)
+	assert_eq(mon.nickname, "FILLER")
+	assert_eq(mon.original_trainer, "ASH")
+	var validation: Dictionary = Gen2SaveValidator.validate(created, _data)
+	assert_true(validation["ok"], validation["message"])
+
+
+func test_development_save_has_a_valid_default_player_name() -> void:
+	var result: Dictionary = Gen2SaveStore.ensure_development_save(_data, 2)
+	assert_true(result["ok"], result["message"])
+	assert_eq((result["save"] as Gen2SaveData).player_name, "PLAYER")
+
+
 func test_a_valid_save_is_accepted_against_its_cartridge_cache() -> void:
 	var result: Dictionary = Gen2SaveValidator.validate(_save(), _data)
 	assert_true(result["ok"], result["message"])

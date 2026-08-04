@@ -122,6 +122,7 @@ const FOCUS_ENERGY_MOVE: int = 273
 
 ## The highest move number this table fills. Grown as new moves are added.
 const MAX_MOVE: int = FOCUS_ENERGY_MOVE
+const BERRY_ITEM: int = 0xAD
 
 ## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
 ## species' own ratio here can be checked against pret's own base stats rather
@@ -170,7 +171,7 @@ static func build(directory: String) -> GameData:
 
 	RomCache.write_json(RomCache.species_path(directory), _species())
 	RomCache.write_json(RomCache.moves_path(directory), _moves())
-	RomCache.write_json(RomCache.items_path(directory), [])
+	RomCache.write_json(RomCache.items_path(directory), _items())
 	RomCache.write_json(RomCache.types_path(directory), _types())
 	RomCache.write_json(RomCache.matchups_path(directory), _matchups())
 	RomCache.write_json(RomCache.trainers_path(directory), [])
@@ -352,6 +353,16 @@ static func _types() -> Array:
 	var out: Array = []
 	for number: int in RomLayout.TYPE_COUNT:
 		out.append({"number": number, "name": "TYPE%d" % number})
+	return out
+
+
+static func _items() -> Array:
+	var out: Array = []
+	for number: int in range(1, BERRY_ITEM + 1):
+		out.append({
+			"number": number,
+			"name": "BERRY" if number == BERRY_ITEM else "ITEM%d" % number,
+		})
 	return out
 
 

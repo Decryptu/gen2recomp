@@ -128,7 +128,7 @@ func _build_ui() -> void:
 	status_box.add_child(_progress_label)
 
 	var footer := Label.new()
-	footer.text = "Save slot 1 is used by the development battle. Mods are not available yet."
+	footer.text = "Choose a cartridge, then create or load a validated player save. Mods are not available yet."
 	footer.add_theme_color_override("font_color", MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(footer)
@@ -233,7 +233,7 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 		detail.text = "Bring your own verified dump.\nThe filename does not matter."
 	body.add_child(detail)
 
-	var action := _button("Play development battle" if imported else "Choose ROM", ACCENT if imported else TEXT)
+	var action := _button("Open save slots" if imported else "Choose ROM", ACCENT if imported else TEXT)
 	action.custom_minimum_size = Vector2(0, 38)
 	action.pressed.connect(_on_game_action.bind(game_id, imported))
 	body.add_child(action)
@@ -252,17 +252,12 @@ func _on_game_action(game_id: StringName, imported: bool) -> void:
 
 func _launch_game(game_id: StringName) -> void:
 	var data: GameData = GameData.open(game_id)
-	var save_result: Dictionary = Gen2SaveStore.ensure_development_save(data, 0)
-	if not save_result["ok"]:
-		_set_status("Could not open save slot 1.", String(save_result["message"]), ERROR)
-		_refresh_games()
-		return
-	if not GameRuntime.select_save_slot(game_id, 0):
+	if data == null or not GameRuntime.select_game(game_id):
 		_set_status("Could not select %s." % RomRegistry.title_for(game_id), "The registry did not recognise that game.", ERROR)
 		return
 	_selected_game_id = game_id
-	_set_status("Opening %s." % RomRegistry.title_for(game_id), "Save slot 1 is loaded for the development battle.", SUCCESS)
-	get_tree().change_scene_to_file.call_deferred("res://game/battle/battle_screen.tscn")
+	_set_status("Opening %s." % RomRegistry.title_for(game_id), "Choose a save slot or import an original cartridge save.", SUCCESS)
+	get_tree().change_scene_to_file.call_deferred("res://game/save/save_screen.tscn")
 
 
 func _open_import_dialog() -> void:
@@ -352,8 +347,17 @@ func _revision_for(game_id: StringName) -> String:
 
 func _save_slot_detail(game_id: StringName, data: GameData) -> String:
 	var slots: Array = Gen2SaveStore.slots_for(game_id, data.sha1, data)
-	var first: Dictionary = slots[0]
-	return "Save slot 1: %s" % ("READY" if first["valid"] else "EMPTY")
+	var ready: int = 0
+	var incompatible: int = 0
+	for row: Dictionary in slots:
+		if row["valid"]:
+			ready += 1
+		elif row["exists"]:
+			incompatible += 1
+	var detail: String = "%d/%d slots ready" % [ready, Gen2SaveStore.SLOT_COUNT]
+	if incompatible > 0:
+		detail += ", %d incompatible" % incompatible
+	return detail
 
 
 func _print_allowlist() -> void:

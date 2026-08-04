@@ -46,11 +46,12 @@ the same thing for Generation 1.
 > and Explosion's own halved Defense, and Fly and Dig's semi-invulnerability
 > now have their own battle sequences as well, alongside Rollout, Defense Curl
 > and the Thrash family. The launcher lists the three supported cartridges,
-> shows which caches are ready, imports a verified dump through the UI and can
-> open the development battle against the selected cache. The development
-> battle now creates and reloads a validated save slot with a persistent player
-> party. The real new-game flow, overworld, audio and mod loader do not exist
-> yet. There is no complete game here today.
+> shows which caches are ready, imports a verified dump through the UI and opens
+> the selected cache's save screen. The save screen creates and validates a new
+> game, imports stable player and party fields from an original `.sav`, shows
+> persistent HP and status, and opens the selected party in the development
+> battle. The overworld, audio and mod loader do not exist yet. There is no
+> complete game here today.
 
 ## Getting started
 
@@ -152,9 +153,10 @@ Boots the main scene for 30 frames and exits, as a quick smoke check.
 
 The normal main scene is now the launcher. It shows the imported-cache status
 for Gold, Silver and Crystal, accepts a user-selected ROM through `Import ROM`,
-and opens the development battle for an imported game. The first development
-save slot is created under Godot's `user://` directory when the battle opens,
-then the validated player party is loaded back into the battle.
+and opens the save screen for an imported game. The save screen offers three
+validated project slots, new-game creation with Chikorita, Cyndaquil or
+Totodile, original `.sav` import, party inspection and the development battle.
+The selected party is written back to the same validated slot after a battle.
 
 The current save contract and the boundary between project saves and original
 cartridge SRAM are documented in [docs/SAVES.md](docs/SAVES.md).
@@ -194,7 +196,7 @@ yet; the enemy does too when what is on screen is `show_matchup`'s invented
 pairing, but fights with the cartridge's own trainer AI, scored by that
 trainer class's own AI flags, once `show_trainer(trainer_class)` is called on
 the scene to fight one of the cartridge's own trainers instead, Falkner among
-them. The launcher path loads the player's party from save slot 1, while
+them. The launcher path loads the player's party from the selected save slot, while
 directly opening the development scene still uses its fallback matchup.
 
 ## Tests
