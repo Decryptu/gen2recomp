@@ -118,7 +118,9 @@ var _box: Gen2TextBox = null
 
 
 func _ready() -> void:
-	_data = GameData.open_any()
+	_data = GameRuntime.selected_data() if GameRuntime.has_selected_game() else null
+	if _data == null:
+		_data = GameData.open_any()
 	_hud = Gen2BattleHud.from_data(_data)
 	if _hud == null:
 		return
