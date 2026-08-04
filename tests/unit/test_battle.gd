@@ -225,6 +225,28 @@ func test_an_unusable_slot_answers_struggle_rather_than_nothing() -> void:
 	assert_eq(battle.move_for(Gen2Battle.PLAYER, 3), Gen2Damage.STRUGGLE)
 
 
+func test_a_real_rollout_continuation_forces_the_move_and_keeps_its_pp() -> void:
+	var attacker: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.ROLLOUT, Fixture.TACKLE]
+	)
+	var battle: Gen2Battle = _battle(attacker, _mon(Fixture.GEODUDE, 50, [Fixture.GROWL]))
+	battle.enemy.hp = 10000
+	# Make the stored 90% Rollout deterministic for this integration check while
+	# leaving the fixture's real accuracy byte intact.
+	attacker.change_stage("accuracy", Gen2Stats.MAX_STAGE)
+	battle.enemy.change_stage("evasion", Gen2Stats.MIN_STAGE)
+	var first: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(int(_first(first, Gen2Battle.USED_MOVE)["move"]), Fixture.ROLLOUT)
+	assert_true(Gen2Substatus.has(attacker.substatus, Gen2Substatus.ROLLOUT))
+	assert_eq(attacker.pp_left(0), 19)
+
+	var continuation: Array = battle.take_actions(
+		Gen2Battle.use_move(1), Gen2Battle.use_move(0)
+	)
+	assert_eq(int(_first(continuation, Gen2Battle.USED_MOVE)["move"]), Fixture.ROLLOUT)
+	assert_eq(attacker.pp_left(0), 19)
+
+
 func test_a_battle_needs_both_sides() -> void:
 	assert_null(Gen2Battle.create(_data, null, _mon(Fixture.PIKACHU, 5, []), _rng))
 	assert_null(Gen2Battle.create(null, _mon(Fixture.PIKACHU, 5, []), _mon(

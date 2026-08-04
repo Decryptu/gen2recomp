@@ -649,9 +649,10 @@ func effective_slot(side: int, requested_slot: int) -> int:
 ##
 ## A Pokémon locked into a two-turn move's release turn answers with what it
 ## charged, whatever slot the caller asks for: on the cartridge nothing is
-## chosen on that turn at all, so nothing here is either. Failing that, Encore
-## answers with whatever [method effective_slot] resolves to, which may not be
-## the slot the caller asked for either.
+## chosen on that turn at all, so nothing here is either. Rollout and rampage
+## continuations use the same rule, forcing the move that started the chain.
+## Failing that, Encore answers with whatever [method effective_slot] resolves
+## to, which may not be the slot the caller asked for either.
 ##
 ## Failing that, a slot with nothing usable in it answers Struggle, which is
 ## the cartridge's answer for a Pokémon with no PP anywhere. Here it is also the
@@ -662,6 +663,11 @@ func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.charged_move != 0:
 		return attacker.charged_move
+	if Gen2Substatus.has(attacker.substatus, Gen2Substatus.ROLLOUT):
+		return Gen2MoveEffect.ROLLOUT_MOVE
+	if Gen2Substatus.has(attacker.substatus, Gen2Substatus.RAMPAGING) \
+		and attacker.rampage_move != 0:
+		return attacker.rampage_move
 	var chosen_slot: int = effective_slot(side, slot)
 	return int(attacker.moves[chosen_slot]) if attacker.can_use(chosen_slot) else Gen2Damage.STRUGGLE
 
@@ -722,10 +728,15 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 		return
 
 	var turn: Gen2Turn = Gen2Turn.create(self, side, slot, move_number, move, events)
-	# The release turn of a two-turn move: the PP for it was already spent on
-	# the charge turn, and [method Gen2EffectCommands._do_turn] reads this so it
-	# is not spent again.
-	turn.locked = mon(side).charged_move == move_number and move_number != 0
+	# The release turn of a two-turn move, or any Rollout/rampage continuation:
+	# the PP was already spent on the first turn, and
+	# [method Gen2EffectCommands._do_turn] reads this so it is not spent again.
+	var active_substatus: int = mon(side).substatus
+	turn.locked = (
+		mon(side).charged_move == move_number
+		or Gen2Substatus.has(active_substatus, Gen2Substatus.ROLLOUT)
+		or Gen2Substatus.has(active_substatus, Gen2Substatus.RAMPAGING)
+	) and move_number != 0
 
 	# Whether the Pokémon can move at all is asked before the effect is looked up,
 	# which is the cartridge's arrangement: every move goes through it, so no

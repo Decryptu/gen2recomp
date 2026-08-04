@@ -73,6 +73,15 @@ const EARTHQUAKE: int = 89
 const FISSURE: int = 90
 const MAGNITUDE: int = 222
 
+## Rollout, its Defense Curl partner and the three rampage moves keep their real
+## move numbers so the state can be forced through the same number-based path as
+## the cartridge.
+const THRASH: int = 37
+const DEFENSE_CURL: int = 111
+const PETAL_DANCE: int = 80
+const OUTRAGE: int = 200
+const ROLLOUT: int = 205
+
 ## Solarbeam for the plain two-turn shape, Skull Bash for the one that raises a
 ## stat behind the hit.
 const SOLARBEAM: int = 253
@@ -289,6 +298,11 @@ static func _moves() -> Array:
 		EARTHQUAKE: ["EARTHQUAKE", 100, GROUND, 255, 10, 0, 0],
 		FISSURE: ["FISSURE", 0, GROUND, 76, 5, Gen2MoveEffect.OHKO, 0],
 		MAGNITUDE: ["MAGNITUDE", 100, GROUND, 255, 30, 0, 0],
+		THRASH: ["THRASH", 90, NORMAL, 255, 20, Gen2MoveEffect.RAMPAGE, 0],
+		PETAL_DANCE: ["PETAL DANCE", 70, GRASS, 255, 20, Gen2MoveEffect.RAMPAGE, 0],
+		OUTRAGE: ["OUTRAGE", 90, DRAGON, 255, 15, Gen2MoveEffect.RAMPAGE, 0],
+		ROLLOUT: ["ROLLOUT", 30, ROCK, 229, 20, Gen2MoveEffect.ROLLOUT, 0],
+		DEFENSE_CURL: ["DEFENSE CURL", 0, NORMAL, 255, 40, Gen2MoveEffect.DEFENSE_CURL, 0],
 		COUNTER: ["COUNTER", 0, FIGHTING, 255, 20, Gen2MoveEffect.COUNTER, 0],
 		SELFDESTRUCT: ["SELF-DESTRUCT", 200, NORMAL, 255, 5, Gen2MoveEffect.SELFDESTRUCT, 0],
 		EXPLOSION: ["EXPLOSION", 250, NORMAL, 255, 5, Gen2MoveEffect.SELFDESTRUCT, 0],

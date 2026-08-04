@@ -7,7 +7,8 @@ extends RefCounted
 ## a sequence rather than as an expression. Rearranging it into one line changes
 ## the answer: the type matchups are applied to the damage one type at a time
 ## with a truncation between them, the critical multiplier lands before the cap
-## and the minimum, and the random spread lands after everything.
+## and the minimum, Rollout's multiplier lands after type but before variation,
+## and the random spread lands after everything.
 ##
 ## Randomness is injected. [method calculate] rolls the two things a hit rolls,
 ## the critical and the spread, and hands both to [method calculate_with], which
@@ -63,11 +64,13 @@ static func calculate(
 	move: Dictionary,
 	rng: RandomNumberGenerator,
 	focus_energy: bool = false,
-	defense_halved: bool = false
+	defense_halved: bool = false,
+	damage_multiplier: int = 1
 ) -> Dictionary:
 	return calculate_with(
 		attacker, defender, move,
-		roll_critical(move, rng, focus_energy), roll_variation(rng), defense_halved
+		roll_critical(move, rng, focus_energy), roll_variation(rng), defense_halved,
+		damage_multiplier
 	)
 
 
@@ -84,7 +87,8 @@ static func calculate_with(
 	move: Dictionary,
 	critical: bool,
 	variation: int,
-	defense_halved: bool = false
+	defense_halved: bool = false,
+	damage_multiplier: int = 1
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
@@ -146,6 +150,9 @@ static func calculate_with(
 			# nothing: a hit that has landed cannot be rounded away.
 			@warning_ignore("integer_division")
 			damage = maxi(damage * multiplier / RomLayout.MATCHUP_EFFECTIVE, 1)
+
+	if damage_multiplier > 1:
+		damage = mini(damage * damage_multiplier, 0xFFFF)
 
 	out["damage"] = apply_variation(damage, variation)
 	return out

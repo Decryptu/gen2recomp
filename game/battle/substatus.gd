@@ -19,8 +19,9 @@ extends RefCounted
 ##
 ## Unlike [Gen2Status] this one is not the whole of its state: a few of these
 ## flags need a counter alongside them (how many turns of confusion are left,
-## which move was charged, which slot is disabled and for how long), which is
-## why [Gen2BattleMon] keeps those as separate fields next to
+## which move was charged, which slot is disabled and for how long, or how many
+## turns Rollout or a rampage has left), which is why [Gen2BattleMon] keeps
+## those as separate fields next to
 ## [member Gen2BattleMon.substatus] rather than packing them into the byte.
 ## This class stays pure arithmetic and holds no state of its own, the same
 ## shape as [Gen2Status].
@@ -41,6 +42,9 @@ const MIST: int = 1 << 7
 const FOCUS_ENERGY: int = 1 << 8
 const FLYING: int = 1 << 9
 const UNDERGROUND: int = 1 << 10
+const CURLED: int = 1 << 11
+const ROLLOUT: int = 1 << 12
+const RAMPAGING: int = 1 << 13
 
 const NONE: int = 0
 
@@ -50,6 +54,16 @@ const NONE: int = 0
 ## counter starts inclusive of both ends.
 const MIN_CONFUSION: int = 2
 const MAX_CONFUSION: int = 5
+
+## A rampage lasts one or two more turns after the move that starts it. The
+## cartridge uses the low bit of a random byte and adds one.
+const MIN_RAMPAGE_TURNS: int = 1
+const MAX_RAMPAGE_TURNS: int = 2
+
+## When a rampage ends, confusion lasts two or three turns. This is a separate
+## roll from ordinary confusion, which can last through five turns.
+const MIN_RAMPAGE_CONFUSION: int = 2
+const MAX_RAMPAGE_CONFUSION: int = 3
 
 ## How many turns Disable lasts, from `BattleCommand_Disable`'s own roll: three
 ## bits of a random byte, rerolled on zero, plus one. The result is packed
@@ -82,6 +96,16 @@ static func has(substatus: int, flag: int) -> bool:
 ## How long a newly confused Pokémon stays that way.
 static func roll_confusion(rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(MIN_CONFUSION, MAX_CONFUSION)
+
+
+## How many more turns a newly started rampage lasts.
+static func roll_rampage_turns(rng: RandomNumberGenerator) -> int:
+	return rng.randi_range(MIN_RAMPAGE_TURNS, MAX_RAMPAGE_TURNS)
+
+
+## How long confusion lasts when a rampage ends.
+static func roll_rampage_confusion(rng: RandomNumberGenerator) -> int:
+	return rng.randi_range(MIN_RAMPAGE_CONFUSION, MAX_RAMPAGE_CONFUSION)
 
 
 ## Whether a confused Pokémon hurts itself this turn instead of moving.
