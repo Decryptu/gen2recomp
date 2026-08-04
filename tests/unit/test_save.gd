@@ -1,8 +1,8 @@
 extends GutTest
 
-## Save tests use the same synthetic cache as the battle tests. They exercise
-## the save model, validation and storage without opening a real cartridge or
-## writing cartridge-derived data.
+## Save tests use the same synthetic cache as the battle tests. The cartridge
+## fixtures exercise the real SRAM byte boundary without requiring a physical
+## cartridge or emulator save file.
 
 const Fixture := preload("res://tests/unit/battle_fixture.gd")
 
@@ -152,3 +152,229 @@ func test_a_malformed_slot_is_refused_without_becoming_a_partial_save() -> void:
 	var result: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
 	assert_false(result["ok"])
 	assert_string_contains(result["message"], "valid JSON")
+
+
+func _adapter_data(game_id: StringName) -> GameData:
+	_data.id = game_id
+	_data.sha1 = RomRegistry.sha1_for(game_id)
+	return _data
+
+
+func _adapter_save(data: GameData) -> Gen2SaveData:
+	var save: Gen2SaveData = _save()
+	save.game_id = data.id
+	save.rom_sha1 = data.sha1
+	save.player_name = "RED"
+	(save.party[0] as Gen2SaveMon).original_trainer = "RED"
+	(save.party[0] as Gen2SaveMon).nickname = "SPARKY"
+	(save.party[1] as Gen2SaveMon).original_trainer = "RED"
+	(save.party[1] as Gen2SaveMon).nickname = "ROCKY"
+	return save
+
+
+func _raw_cartridge(game_id: StringName, data: GameData) -> PackedByteArray:
+	var raw := PackedByteArray()
+	raw.resize(Gen2SramAdapter.SRAM_SIZE)
+	var layout: Dictionary = Gen2SramAdapter.LAYOUTS[String(game_id)]
+	var save: Gen2SaveData = _adapter_save(data)
+	raw[int(layout["player_name"])] = 0x80
+	_write_fixed_raw_text(raw, int(layout["player_name"]), 11, save.player_name)
+	var party_start: int = int(layout["party"])
+	raw[party_start] = save.party.size()
+	for index: int in 6:
+		raw[party_start + 1 + index] = 0xFF if index >= save.party.size() else int((save.party[index] as Gen2SaveMon).species)
+	raw[party_start + 1 + save.party.size()] = 0xFF
+	var mons_start: int = party_start + 8
+	var ot_start: int = mons_start + 6 * 48
+	var nickname_start: int = ot_start + 6 * 11
+	for index: int in 6:
+		_write_fixed_raw_text(raw, ot_start + index * 11, 11, "")
+		_write_fixed_raw_text(raw, nickname_start + index * 11, 11, "")
+		if index >= save.party.size():
+			continue
+		var mon: Gen2SaveMon = save.party[index]
+		_write_raw_mon(raw, mons_start + index * 48, mon, data)
+		_write_fixed_raw_text(raw, ot_start + index * 11, 11, mon.original_trainer)
+		_write_fixed_raw_text(raw, nickname_start + index * 11, 11, mon.nickname)
+	raw[0x2500] = 0x77
+
+	raw[int(layout["primary_check_1"])] = Gen2SramAdapter.SAVE_CHECK_VALUE_1
+	raw[int(layout["primary_check_2"])] = Gen2SramAdapter.SAVE_CHECK_VALUE_2
+	raw[int(layout["backup_check_1"])] = Gen2SramAdapter.SAVE_CHECK_VALUE_1
+	raw[int(layout["backup_check_2"])] = Gen2SramAdapter.SAVE_CHECK_VALUE_2
+	for segment: Array in layout["backup_segments"]:
+		for index: int in int(segment[2]):
+			raw[int(segment[1]) + index] = raw[int(segment[0]) + index]
+	_write_u16_le_raw(
+		raw, int(layout["primary_checksum"]), _raw_checksum(
+			raw, [[int(layout["primary_data_start"]), int(layout["primary_data_end"]) - int(layout["primary_data_start"])] ]
+		)
+	)
+	_write_u16_le_raw(
+		raw, int(layout["backup_checksum"]), _raw_checksum(raw, layout["backup_checksum_segments"])
+	)
+	return raw
+
+
+func _write_raw_mon(raw: PackedByteArray, start: int, mon: Gen2SaveMon, data: GameData) -> void:
+	raw[start] = mon.species
+	raw[start + 1] = mon.item
+	for index: int in Gen2SaveMon.MAX_MOVES:
+		raw[start + 2 + index] = int(mon.moves[index])
+	_write_u16_raw(raw, start + 6, mon.ot_id)
+	raw[start + 8] = (mon.exp >> 16) & 0xFF
+	raw[start + 9] = (mon.exp >> 8) & 0xFF
+	raw[start + 10] = mon.exp & 0xFF
+	for index: int in Gen2SaveMon.STAT_EXP_KEYS.size():
+		_write_u16_raw(raw, start + 11 + index * 2, int(mon.stat_exp.get(Gen2SaveMon.STAT_EXP_KEYS[index], 0)))
+	_write_u16_raw(raw, start + 21, mon.dvs)
+	for index: int in Gen2SaveMon.MAX_MOVES:
+		raw[start + 23 + index] = int(mon.pp[index])
+	raw[start + 27] = mon.happiness
+	raw[start + 28] = mon.pokerus
+	raw[start + 29] = (mon.caught_time << 6) | mon.caught_level
+	raw[start + 30] = (mon.caught_gender << 7) | mon.caught_location
+	raw[start + 31] = mon.level
+	raw[start + 32] = mon.status
+	raw[start + 34] = (mon.hp >> 8) & 0xFF
+	raw[start + 35] = mon.hp & 0xFF
+	var base: Dictionary = data.species(mon.species).get("stats", {})
+	var max_hp: int = Gen2Stats.calculate(
+		int(base.get("hp", 0)), Gen2Stats.hp_dv(mon.dvs), int(mon.stat_exp.get("hp", 0)), mon.level, true
+	)
+	_write_u16_raw(raw, start + 36, max_hp)
+	var stat_keys: Array = ["attack", "defense", "speed", "sp_attack", "sp_defense"]
+	var dv_values: Array = [
+		Gen2Stats.attack_dv(mon.dvs), Gen2Stats.defense_dv(mon.dvs),
+		Gen2Stats.speed_dv(mon.dvs), Gen2Stats.special_dv(mon.dvs), Gen2Stats.special_dv(mon.dvs),
+	]
+	var exp_keys: Array = ["attack", "defense", "speed", "special", "special"]
+	for index: int in stat_keys.size():
+		_write_u16_raw(raw, start + 38 + index * 2, Gen2Stats.calculate(
+			int(base.get(stat_keys[index], 0)), dv_values[index],
+			int(mon.stat_exp.get(exp_keys[index], 0)), mon.level
+		))
+
+
+func _write_fixed_raw_text(raw: PackedByteArray, start: int, length: int, text: String) -> void:
+	for index: int in length:
+		raw[start + index] = Gen2Text.TERMINATOR
+	var encoded: PackedByteArray = Gen2Text.encode(text)
+	for index: int in mini(encoded.size(), length - 1):
+		raw[start + index] = encoded[index]
+
+
+func _write_u16_raw(raw: PackedByteArray, offset: int, value: int) -> void:
+	raw[offset] = (value >> 8) & 0xFF
+	raw[offset + 1] = value & 0xFF
+
+
+func _write_u16_le_raw(raw: PackedByteArray, offset: int, value: int) -> void:
+	raw[offset] = value & 0xFF
+	raw[offset + 1] = (value >> 8) & 0xFF
+
+
+func _raw_checksum(raw: PackedByteArray, segments: Array) -> int:
+	var total: int = 0
+	for segment: Array in segments:
+		var start: int = int(segment[0])
+		var length: int = int(segment[1])
+		for index: int in length:
+			total = (total + int(raw[start + index])) & 0xFFFF
+	return total
+
+
+func test_a_gold_sram_import_reads_the_primary_party_and_fields() -> void:
+	var data: GameData = _adapter_data(RomRegistry.GOLD)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.GOLD, data)
+	var result: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 1, raw, data
+	)
+	assert_true(result["ok"], result["message"])
+	assert_eq(result["copy"], "primary")
+	var save: Gen2SaveData = result["save"]
+	assert_eq(save.slot, 1)
+	assert_eq(save.player_name, "RED")
+	assert_eq(save.party.size(), 2)
+	assert_eq((save.party[0] as Gen2SaveMon).nickname, "SPARKY")
+	assert_eq((save.party[0] as Gen2SaveMon).ot_id, 0)
+	assert_eq((save.party[0] as Gen2SaveMon).hp, (_save().party[0] as Gen2SaveMon).hp)
+
+
+func test_silver_uses_the_gold_save_layout() -> void:
+	var data: GameData = _adapter_data(RomRegistry.SILVER)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.SILVER, data)
+	var result: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.SILVER, data.sha1, 0, raw, data
+	)
+	assert_true(result["ok"], result["message"])
+	assert_eq((result["save"] as Gen2SaveData).player_name, "RED")
+	assert_eq((result["save"] as Gen2SaveData).party.size(), 2)
+
+
+func test_a_backup_copy_is_selected_when_primary_checksum_fails() -> void:
+	var data: GameData = _adapter_data(RomRegistry.GOLD)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.GOLD, data)
+	raw[0x2500] ^= 0x01
+	var result: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 0, raw, data
+	)
+	assert_true(result["ok"], result["message"])
+	assert_eq(result["copy"], "backup")
+	assert_eq((result["save"] as Gen2SaveData).player_name, "RED")
+	var normalized: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 0, result["raw"], data
+	)
+	assert_true(normalized["ok"], normalized["message"])
+	assert_eq(normalized["copy"], "primary")
+
+
+func test_an_invalid_primary_and_backup_are_refused() -> void:
+	var data: GameData = _adapter_data(RomRegistry.GOLD)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.GOLD, data)
+	raw[0x2009] ^= 0x01
+	raw[0x0C6B] ^= 0x01
+	var result: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 0, raw, data
+	)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "both cartridge save copies")
+
+
+func test_a_crystal_layout_uses_its_distinct_party_and_backup_offsets() -> void:
+	var data: GameData = _adapter_data(RomRegistry.CRYSTAL)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.CRYSTAL, data)
+	var result: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.CRYSTAL, data.sha1, 0, raw, data
+	)
+	assert_true(result["ok"], result["message"])
+	assert_eq(result["copy"], "primary")
+	assert_eq((result["save"] as Gen2SaveData).party.size(), 2)
+
+
+func test_export_updates_both_copies_and_preserves_trailing_bytes() -> void:
+	var data: GameData = _adapter_data(RomRegistry.GOLD)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.GOLD, data)
+	raw.resize(Gen2SramAdapter.SRAM_SIZE + 16)
+	raw[Gen2SramAdapter.SRAM_SIZE + 4] = 0xA5
+	raw[0x2500] = 0x77
+	var save: Gen2SaveData = _adapter_save(data)
+	save.player_name = "BLUE"
+	var export_result: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
+	assert_true(export_result["ok"], export_result["message"])
+	var output: PackedByteArray = export_result["raw"]
+	assert_eq(output.size(), Gen2SramAdapter.SRAM_SIZE + 16)
+	assert_eq(output[Gen2SramAdapter.SRAM_SIZE + 4], 0xA5)
+	assert_eq(output[0x2500], 0x77)
+	var imported: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 0, output, data
+	)
+	assert_true(imported["ok"], imported["message"])
+	assert_eq((imported["save"] as Gen2SaveData).player_name, "BLUE")
+	output[0x2009] ^= 0x01
+	var backup_import: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.GOLD, data.sha1, 0, output, data
+	)
+	assert_true(backup_import["ok"], backup_import["message"])
+	assert_eq(backup_import["copy"], "backup")
+	assert_eq((backup_import["save"] as Gen2SaveData).player_name, "BLUE")
