@@ -4,11 +4,6 @@ extends SceneTree
 ##
 ##   Godot --headless --path . -s res://tools/preview_world.gd -- gold 1 1 /tmp/world.png
 
-const PALETTE: Array[Color] = [
-	Color("#f5f1d8"), Color("#b6c7a2"), Color("#6f8f78"), Color("#273647"),
-]
-
-
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 4:
@@ -45,6 +40,7 @@ func _render(data: GameData, map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Im
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	var pixels: PackedByteArray = data.world_tileset_indices(tileset.number)
 	var atlas_width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
+	var palettes: Array = Gen2WorldPalette.tile_palettes(data, map, tileset)
 
 	for tile_y: int in map.height_blocks * RomLayout.MAP_BLOCK_TILE_WIDTH:
 		for tile_x: int in map.width_blocks * RomLayout.MAP_BLOCK_TILE_WIDTH:
@@ -53,11 +49,14 @@ func _render(data: GameData, map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Im
 			for pixel_y: int in Gen2Tiles.TILE_HEIGHT:
 				for pixel_x: int in Gen2Tiles.TILE_WIDTH:
 					var color_index: int = 0
+					var palette := PackedColorArray()
 					if tile < tileset.tile_count:
 						color_index = pixels[pixel_y * atlas_width + tile * 8 + pixel_x]
+						palette = palettes[tile]
+					var color: Color = palette[color_index] if color_index < palette.size() else Color.MAGENTA
 					image.set_pixel(
 						tile_x * 8 + pixel_x, tile_y * 8 + pixel_y,
-						PALETTE[color_index if color_index < PALETTE.size() else 0]
+						color
 					)
 
 	# Mark event coordinates in a restrained red so the screenshot shows that

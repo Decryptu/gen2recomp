@@ -25,6 +25,12 @@ static func import_to_cache(
 	var tilesets: Array = result["tilesets"]
 	if not RomCache.write_json(RomCache.world_tilesets_path(directory), tilesets):
 		return {"ok": false, "message": "Could not write overworld tileset data."}
+	if not RomCache.write_json(RomCache.world_palettes_path(directory), result["palettes"]):
+		return {"ok": false, "message": "Could not write overworld palette data."}
+	if not RomCache.write_json(
+		RomCache.world_animation_assets_path(directory), result["animation_assets"]
+	):
+		return {"ok": false, "message": "Could not write overworld animation data."}
 	if not RomCache.write_json(RomCache.world_maps_path(directory), result["maps"]):
 		return {"ok": false, "message": "Could not write overworld map data."}
 
@@ -45,6 +51,13 @@ static func read_world(
 ) -> Dictionary:
 	if layout.is_empty():
 		return {"ok": false, "message": "No world layout for %s." % rom.id}
+
+	var palettes: Dictionary = _read_world_palettes(rom, layout)
+	if not bool(palettes.get("ok", false)):
+		return palettes
+	var animation_assets: Dictionary = _read_world_animation_assets(rom, layout)
+	if not bool(animation_assets.get("ok", false)):
+		return animation_assets
 
 	var tilesets: Array = []
 	var graphics: Dictionary = {}
@@ -78,7 +91,14 @@ static func read_world(
 			if on_progress.is_valid():
 				on_progress.call("world_maps", maps.size(), RomLayout.map_count(layout))
 
-	return {"ok": true, "maps": maps, "tilesets": tilesets, "graphics": graphics}
+	return {
+		"ok": true,
+		"maps": maps,
+		"tilesets": tilesets,
+		"graphics": graphics,
+		"palettes": palettes["groups"],
+		"animation_assets": animation_assets["assets"],
+	}
 
 
 static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dictionary:
@@ -109,6 +129,17 @@ static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dict
 	if meta_bytes.size() != meta_size or collision_bytes.size() != collision_size:
 		return _error("Tileset %d tables are shorter than their verified layout." % number)
 
+	var palette_map_offset: int = RomFile.linear(
+		int(layout["tileset_palette_bank"]), rom.u16le(table + 13)
+	)
+	var palette_map: PackedByteArray = rom.slice(palette_map_offset, RomLayout.WORLD_PALETTE_MAP_BYTES)
+	if palette_map.size() != RomLayout.WORLD_PALETTE_MAP_BYTES:
+		return _error("Tileset %d palette map is outside the cartridge." % number)
+
+	var animation: Dictionary = _read_animation(rom, layout, rom.u16le(table + 9), number)
+	if not bool(animation.get("ok", false)):
+		return animation
+
 	return {
 		"ok": true,
 		"number": number,
@@ -118,8 +149,94 @@ static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dict
 		"collision": Array(collision_bytes),
 		"animation_pointer": rom.u16le(table + 9),
 		"palette_map_pointer": rom.u16le(table + 13),
+		"palette_map": Array(palette_map),
+		"animation_commands": animation["commands"],
 		"pixels": Gen2Tiles.decode_2bpp_strip(raw_graphics, 0, RomLayout.TILESET_TILE_COUNT),
 	}
+
+
+static func _read_world_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout["world_palette_offset"])
+	var bytes: PackedByteArray = rom.slice(offset, RomLayout.WORLD_PALETTE_BYTES)
+	if bytes.size() != RomLayout.WORLD_PALETTE_BYTES:
+		return _error("Overworld palette data is outside the cartridge.")
+
+	var groups: Array = []
+	for group: int in RomLayout.WORLD_PALETTE_GROUP_COUNT:
+		var colors: Array = []
+		for color: int in 4:
+			var at: int = group * RomLayout.WORLD_PALETTE_GROUP_BYTES + color * 2
+			colors.append(int(bytes[at]) | (int(bytes[at + 1]) << 8))
+		groups.append(colors)
+	return {"ok": true, "groups": groups}
+
+
+static func _read_world_animation_assets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var assets: Dictionary = {}
+	var specs: Dictionary = layout.get("world_animation_assets", {})
+	for name: String in specs:
+		var spec: Dictionary = specs[name]
+		var bytes: PackedByteArray = rom.slice(int(spec["offset"]), int(spec["bytes"]))
+		if bytes.size() != int(spec["bytes"]):
+			return _error("Overworld animation asset %s is outside the cartridge." % name)
+		assets[name] = Array(bytes)
+	return {"ok": true, "assets": assets}
+
+
+static func _read_animation(rom: RomFile, layout: Dictionary, pointer: int, number: int) -> Dictionary:
+	var offset: int = RomFile.linear(RomLayout.WORLD_ANIMATION_BANK, pointer)
+	var functions: Dictionary = layout.get("world_animation_functions", {})
+	var done: int = int(layout["world_animation_done"])
+	var commands: Array = []
+	var found_done: bool = false
+	for index: int in RomLayout.WORLD_ANIMATION_MAX_COMMANDS:
+		var at: int = offset + index * RomLayout.WORLD_ANIMATION_COMMAND_BYTES
+		if not rom.in_bounds(at, RomLayout.WORLD_ANIMATION_COMMAND_BYTES):
+			return _error("Tileset %d animation table is truncated." % number)
+		var parameter: int = rom.u16le(at)
+		var function: int = rom.u16le(at + 2)
+		if not functions.has(function):
+			return _error("Tileset %d uses unknown animation function $%04X." % [number, function])
+		var command: Dictionary = {
+			"parameter": parameter,
+			"function": function,
+			"operation": String(functions[function]),
+		}
+		if command["operation"] in ["water", "fountain", "scroll_horizontal", "scroll_vertical", "read_buffer", "write_buffer"]:
+			command["tile"] = _vram_tile(parameter)
+		elif command["operation"] in ["tower", "whirlpool"]:
+			var target: int = RomFile.linear(RomLayout.WORLD_ANIMATION_BANK, parameter)
+			if not rom.in_bounds(target, 4):
+				return _error("Tileset %d animation target is outside the cartridge." % number)
+			command["tile"] = _vram_tile(rom.u16le(target))
+			command["asset_index"] = _animation_asset_index(
+				rom, layout, command["operation"], rom.u16le(target + 2)
+			)
+		commands.append(command)
+		if function == done:
+			found_done = true
+			break
+	if not found_done:
+		return _error("Tileset %d animation table has no terminator." % number)
+	return {"ok": true, "commands": commands}
+
+
+static func _vram_tile(address: int) -> int:
+	if address < 0x9000 or address >= 0xA000 or (address - 0x9000) % Gen2Tiles.TILE_BYTES != 0:
+		return -1
+	return (address - 0x9000) / Gen2Tiles.TILE_BYTES
+
+
+static func _animation_asset_index(rom: RomFile, layout: Dictionary, operation: String, pointer: int) -> int:
+	var name: String = "tower" if operation == "tower" else "whirlpool"
+	var spec: Dictionary = layout["world_animation_assets"][name]
+	var base: int = int(spec["offset"])
+	var stride: int = 80 if name == "tower" else 64
+	var offset: int = RomFile.linear(RomLayout.WORLD_ANIMATION_BANK, pointer)
+	var delta: int = offset - base
+	if delta < 0 or delta % stride != 0 or delta >= int(spec["bytes"]):
+		return -1
+	return delta / stride
 
 
 static func _read_map(

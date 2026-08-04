@@ -18,6 +18,7 @@ const MUTED: Color = Color("#9eacc0")
 var _data: GameData = null
 var _world: Gen2WorldAPI = null
 var _renderer: Gen2WorldRenderer = null
+var _animation: Gen2WorldAnimation = null
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -41,10 +42,17 @@ func _build_world() -> void:
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
 		return
 
+	_animation = Gen2WorldAnimation.new()
+	_animation.configure(_world)
 	_renderer = Gen2WorldRenderer.new()
-	_renderer.set_world(_world)
+	_renderer.set_world(_world, _animation)
 	_screen.display(_renderer)
 	_refresh_labels()
+
+
+func _process(_delta: float) -> void:
+	if _animation != null and _animation.tick() and _renderer != null:
+		_renderer.refresh_animation()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -78,7 +86,8 @@ func move_player(direction: Vector2i) -> bool:
 		var transition: Dictionary = _world.try_warp()
 		if _renderer != null:
 			if bool(transition.get("ok", false)):
-				_renderer.set_world(_world)
+				_animation.configure(_world)
+				_renderer.set_world(_world, _animation)
 			else:
 				_renderer.refresh()
 		_refresh_labels()

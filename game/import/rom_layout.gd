@@ -49,6 +49,18 @@ const TILESET_TILE_COUNT: int = 96
 const TILESET_META_BYTES_PER_BLOCK: int = 16
 const TILESET_COLLISION_BYTES_PER_BLOCK: int = 4
 
+## The overworld palette file contains 42 four-colour groups: morning, day,
+## night and dark outdoor groups, the indoor group, and the two animated water
+## groups. Palette maps use two nibbles per tile and reserve sixteen bytes for
+## the font tiles between VRAM banks.
+const WORLD_PALETTE_GROUP_COUNT: int = 42
+const WORLD_PALETTE_GROUP_BYTES: int = 8
+const WORLD_PALETTE_BYTES: int = WORLD_PALETTE_GROUP_COUNT * WORLD_PALETTE_GROUP_BYTES
+const WORLD_PALETTE_MAP_BYTES: int = 0x70
+const WORLD_ANIMATION_BANK: int = 0x3F
+const WORLD_ANIMATION_COMMAND_BYTES: int = 4
+const WORLD_ANIMATION_MAX_COMMANDS: int = 64
+
 const MOVE_COUNT: int = 251
 const MOVE_DATA_SIZE: int = 7
 
@@ -471,6 +483,23 @@ const GOLD_SILVER: Dictionary = {
 	"map_group_counts": [14, 7, 82, 9, 10, 8, 17, 7, 6, 17, 22, 13, 6, 8, 12, 8, 13, 14, 4, 4, 26, 9, 13, 13, 15, 11],
 	"tilesets": 0x156BE,
 	"tileset_block_counts": [128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64],
+	"tileset_palette_bank": 0x02,
+	"world_palette_offset": 0xB75E,
+	"world_animation_done": 0x42A2,
+	"world_animation_functions": {
+		0x42A2: "done", 0x42A5: "wait", 0x42A6: "timer_8", 0x42B0: "scroll_horizontal",
+		0x4311: "scroll_vertical", 0x432E: "water", 0x4388: "flower",
+		0x43E7: "lava_1", 0x4406: "lava_2", 0x4460: "tower",
+		0x448E: "timer", 0x4493: "whirlpool", 0x44B1: "write_buffer",
+		0x44BD: "read_buffer", 0x44F2: "water_palette", 0x452D: "cave_palette",
+	},
+	"world_animation_assets": {
+		"water": {"offset": 0xFC348, "bytes": 64},
+		"flower": {"offset": 0xFC3A7, "bytes": 64},
+		"lava": {"offset": 0xFC420, "bytes": 64},
+		"tower": {"offset": 0xFC57D, "bytes": 800},
+		"whirlpool": {"offset": 0xFC8AD, "bytes": 256},
+	},
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -512,6 +541,27 @@ const CRYSTAL: Dictionary = {
 	"map_group_counts": [14, 7, 91, 9, 10, 8, 17, 7, 6, 17, 24, 13, 6, 8, 12, 8, 13, 14, 4, 6, 26, 16, 13, 13, 15, 11],
 	"tilesets": 0x4D596,
 	"tileset_block_counts": [128, 128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 40, 64, 64, 64, 64, 64],
+	"tileset_palette_bank": 0x13,
+	"world_palette_offset": 0xB319,
+	"world_animation_done": 0x42FB,
+	"world_animation_functions": {
+		0x42FB: "done", 0x42FE: "wait", 0x42FF: "timer_8", 0x4309: "scroll_horizontal",
+		0x436A: "scroll_vertical", 0x4387: "fountain", 0x4402: "water",
+		0x445C: "forest_left", 0x44C4: "forest_right", 0x44F2: "forest_left_2",
+		0x451C: "forest_right_2", 0x456D: "flower", 0x45CC: "lava_1",
+		0x45EB: "lava_2", 0x4645: "tower", 0x4673: "timer", 0x4678: "whirlpool",
+		0x4696: "write_buffer", 0x46A2: "read_buffer", 0x46D7: "water_palette",
+		0x471E: "cave_palette",
+	},
+	"world_animation_assets": {
+		"water": {"offset": 0xFC41C, "bytes": 64},
+		"flower": {"offset": 0xFC58C, "bytes": 64},
+		"fountain": {"offset": 0xFC3B2, "bytes": 80},
+		"forest": {"offset": 0xFC484, "bytes": 64},
+		"lava": {"offset": 0xFC605, "bytes": 64},
+		"tower": {"offset": 0xFC778, "bytes": 800},
+		"whirlpool": {"offset": 0xFCAA8, "bytes": 256},
+	},
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
 	"pic_bank_add": 0x36,

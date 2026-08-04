@@ -43,6 +43,37 @@ func test_tileset_expands_four_by_four_tiles_and_two_by_two_collision() -> void:
 	assert_eq(tileset.collision_index(1, 1, 1), 23)
 
 
+func test_tileset_palette_map_reads_low_nibble_first() -> void:
+	var tileset := Gen2WorldTileset.from_cache({
+		"number": 2,
+		"block_count": 1,
+		"tile_count": 6,
+		"palette_map": [0x21, 0x43, 0x65],
+	})
+
+	assert_eq(tileset.palette_index(0), 1)
+	assert_eq(tileset.palette_index(1), 2)
+	assert_eq(tileset.palette_index(2), 3)
+	assert_eq(tileset.palette_index(3), 4)
+	assert_eq(tileset.palette_index(4), 5)
+	assert_eq(tileset.palette_index(5), 6)
+
+
+func test_world_palette_environment_rows_match_the_cartridge_table() -> void:
+	assert_eq(
+		Gen2WorldPalette.palette_slots(Gen2WorldMap.new().environment, Gen2WorldPalette.TIME_MORNING),
+		[0, 1, 2, 40, 4, 5, 6, 7],
+	)
+	assert_eq(
+		Gen2WorldPalette.palette_slots(3, Gen2WorldPalette.TIME_NIGHT),
+		[16, 17, 18, 19, 20, 21, 22, 7],
+	)
+	assert_eq(
+		Gen2WorldPalette.palette_slots(7, Gen2WorldPalette.TIME_DARK),
+		[24, 25, 26, 27, 28, 29, 30, 31],
+	)
+
+
 func test_layout_carries_verified_world_table_shapes() -> void:
 	var gold: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 	var crystal: Dictionary = RomLayout.for_id(RomRegistry.CRYSTAL)
