@@ -87,6 +87,7 @@ var _pending: Array = []
 var _rng := RandomNumberGenerator.new()
 var _save_slot: int = -1
 var _save_written: bool = false
+var _source_save: Gen2SaveData = null
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -166,6 +167,7 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_pending = []
 	_save_slot = -1
 	_save_written = false
+	_source_save = null
 	_enemy_trainer_class = 0
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
@@ -203,6 +205,7 @@ func show_trainer(
 	_pending = []
 	_save_slot = -1
 	_save_written = false
+	_source_save = null
 	_enemy_trainer_class = trainer_class
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
@@ -237,6 +240,7 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_pending = []
 	_save_slot = save.slot
 	_save_written = false
+	_source_save = save
 	_enemy_trainer_class = 0
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
@@ -435,7 +439,7 @@ func _save_battle_result() -> void:
 	if _save_slot < 0 or _save_written or _battle == null:
 		return
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
-		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER)
+		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save
 	)
 	var result: Dictionary = Gen2SaveStore.save(save, _data)
 	if not result["ok"]:

@@ -50,7 +50,8 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 
 
 static func from_battle_party(
-	game_id: StringName, rom_sha1: String, slot: int, party: Gen2Party, player_name: String = ""
+	game_id: StringName, rom_sha1: String, slot: int, party: Gen2Party, player_name: String = "",
+	source_save: Gen2SaveData = null
 ) -> Gen2SaveData:
 	if party == null or party.mons.is_empty() or party.mons.size() > Gen2Party.MAX_SIZE:
 		return null
@@ -58,9 +59,21 @@ static func from_battle_party(
 	out.game_id = game_id
 	out.rom_sha1 = rom_sha1
 	out.slot = slot
-	out.player_name = player_name
-	for mon: Gen2BattleMon in party.mons:
-		out.party.append(from_battle_mon(mon))
+	out.player_name = source_save.player_name if source_save != null else player_name
+	for index: int in party.mons.size():
+		var saved_mon: Gen2SaveMon = from_battle_mon(party.mons[index])
+		if source_save != null and index < source_save.party.size():
+			var previous: Gen2SaveMon = source_save.party[index]
+			saved_mon.ot_id = previous.ot_id
+			saved_mon.happiness = previous.happiness
+			saved_mon.pokerus = previous.pokerus
+			saved_mon.caught_time = previous.caught_time
+			saved_mon.caught_gender = previous.caught_gender
+			saved_mon.caught_level = previous.caught_level
+			saved_mon.caught_location = previous.caught_location
+			saved_mon.nickname = previous.nickname
+			saved_mon.original_trainer = previous.original_trainer
+		out.party.append(saved_mon)
 	return out
 
 

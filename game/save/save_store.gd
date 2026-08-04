@@ -6,6 +6,9 @@ extends RefCounted
 
 const ROOT: String = "user://save_slots"
 const SLOT_COUNT: int = 3
+const STARTER_LEVEL: int = 5
+const STARTER_SPECIES: Array[int] = [152, 155, 158]
+const STARTER_ITEM: int = 0xAD
 
 
 static func path_for(game_id: StringName, rom_sha1: String, slot: int) -> String:
@@ -92,7 +95,41 @@ static func create_development_save(data: GameData, slot: int) -> Gen2SaveData:
 		if mon == null:
 			return null
 		members.append(mon)
-	return Gen2SaveBattleAdapter.from_battle_party(data.id, data.sha1, slot, Gen2Party.create(members))
+	return Gen2SaveBattleAdapter.from_battle_party(
+		data.id, data.sha1, slot, Gen2Party.create(members), "PLAYER"
+	)
+
+
+## Creates the party obtained from Professor Elm's three starter balls. The
+## project save model does not own the player's trainer ID yet, so the starter
+## keeps the canonical zero value for its OT ID until that field exists.
+static func create_new_game(
+	data: GameData, slot: int, player_name: String, starter_species: int
+) -> Gen2SaveData:
+	if data == null or not _valid_slot(slot):
+		return null
+	if player_name.is_empty() or Gen2Text.encoded_length(player_name) > Gen2SaveData.MAX_PLAYER_NAME:
+		return null
+	if not STARTER_SPECIES.has(starter_species):
+		return null
+	if data.species(starter_species).is_empty() or data.item(STARTER_ITEM).is_empty():
+		return null
+	var known_moves: Array = data.moves_at_level(starter_species, STARTER_LEVEL)
+	var mon: Gen2BattleMon = Gen2BattleMon.create(
+		data, starter_species, STARTER_LEVEL, known_moves, Gen2BattleMon.PERFECT_DVS, {}, STARTER_ITEM
+	)
+	if mon == null:
+		return null
+	var save := Gen2SaveData.new()
+	save.game_id = data.id
+	save.rom_sha1 = data.sha1
+	save.slot = slot
+	save.player_name = player_name
+	var saved_mon: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(mon)
+	saved_mon.nickname = String(data.species(starter_species).get("name", ""))
+	saved_mon.original_trainer = player_name
+	save.party.append(saved_mon)
+	return save
 
 
 static func ensure_development_save(data: GameData, slot: int = 0) -> Dictionary:

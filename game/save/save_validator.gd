@@ -19,6 +19,10 @@ static func validate(save: Gen2SaveData, data: GameData) -> Dictionary:
 		return _failure("the save belongs to a different cartridge revision")
 	if save.slot < 0 or save.slot >= Gen2SaveStore.SLOT_COUNT:
 		return _failure("save slot %d is out of range" % save.slot)
+	if save.player_name.is_empty():
+		return _failure("the player name is empty")
+	if Gen2Text.encoded_length(save.player_name) > Gen2SaveData.MAX_PLAYER_NAME:
+		return _failure("the player name is too long")
 	if save.party.is_empty() or save.party.size() > Gen2SaveData.MAX_PARTY:
 		return _failure("the party must contain between one and six Pokémon")
 
