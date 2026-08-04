@@ -36,6 +36,8 @@ var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
 var _world_tilesets: Dictionary = {}
+var _world_palettes: Array = []
+var _world_animation_assets: Dictionary = {}
 
 
 ## Opens the cache for a registry game, or null if it has not been imported.
@@ -111,6 +113,31 @@ func world_tileset(number: int) -> Gen2WorldTileset:
 
 func world_tileset_count() -> int:
 	return _world_tilesets.size()
+
+
+## One of the cartridge's four-colour background palette groups.
+func world_palette(number: int) -> PackedColorArray:
+	if number < 0 or number >= _world_palettes.size():
+		return PackedColorArray()
+	var raw: Variant = _world_palettes[number]
+	if not raw is Array:
+		return PackedColorArray()
+	var out := PackedColorArray()
+	for packed: Variant in raw as Array:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
+
+
+## Raw 2bpp frames embedded in the cartridge's animation routines.
+func world_animation_asset(name: String) -> PackedByteArray:
+	var raw: Variant = _world_animation_assets.get(name, [])
+	if not raw is Array:
+		return PackedByteArray()
+	var out := PackedByteArray()
+	out.resize((raw as Array).size())
+	for index: int in out.size():
+		out[index] = int((raw as Array)[index])
+	return out
 
 
 ## Indexed 2bpp pixels for one tileset's 96 overworld tiles, loaded on demand.
@@ -501,6 +528,13 @@ func _load_world(path: String) -> void:
 		for value: Dictionary in tileset_rows as Array:
 			var tileset: Gen2WorldTileset = Gen2WorldTileset.from_cache(value)
 			_world_tilesets[tileset.number] = tileset
+
+	var palettes: Variant = RomCache.read_json(RomCache.world_palettes_path(path))
+	if palettes is Array:
+		_world_palettes = palettes
+	var animation_assets: Variant = RomCache.read_json(RomCache.world_animation_assets_path(path))
+	if animation_assets is Dictionary:
+		_world_animation_assets = animation_assets
 
 
 func _read_array(path: String) -> Array:
