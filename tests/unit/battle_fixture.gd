@@ -85,8 +85,26 @@ const PSYWAVE_MOVE: int = 267
 
 const OHKO_MOVE: int = 268
 
+## Disable, Attract, Encore, Mist and Focus Energy, with the real accuracy
+## bytes (Disable's own shade under 55%; the other four always hit) and the
+## real effect bytes, both read off the real cartridges with
+## [code]tools/dump_tables.gd -- gold moves[/code].
+const DISABLE_MOVE: int = 269
+const ENCORE_MOVE: int = 270
+const ATTRACT_MOVE: int = 271
+const MIST_MOVE: int = 272
+const FOCUS_ENERGY_MOVE: int = 273
+
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = OHKO_MOVE
+const MAX_MOVE: int = FOCUS_ENERGY_MOVE
+
+## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
+## species' own ratio here can be checked against pret's own base stats rather
+## than against this file. Bulbasaur and Charmander are really 12.5% female;
+## Pikachu, Geodude and Magcargo are really an even 50/50.
+const GENDER_F12_5: int = 31
+const GENDER_F50: int = 127
+const GENDER_UNKNOWN: int = 255
 
 const NORMAL: int = 0x00
 const GROUND: int = 0x04
@@ -151,24 +169,25 @@ static func _species() -> Array:
 	var known: Dictionary = {
 		BULBASAUR: [
 			"BULBASAUR", [45, 49, 49, 45, 65, 65], [GRASS, POISON],
-			Gen2Experience.GROWTH_MEDIUM_SLOW, 64, [],
+			Gen2Experience.GROWTH_MEDIUM_SLOW, 64, [], GENDER_F12_5,
 		],
 		CHARMANDER: [
 			"CHARMANDER", [39, 52, 43, 65, 60, 50], [FIRE, FIRE],
 			Gen2Experience.GROWTH_MEDIUM_SLOW, 65, [{"level": 6, "move": EMBER}],
+			GENDER_F12_5,
 		],
 		PIKACHU: [
 			"PIKACHU", [35, 55, 30, 90, 50, 40], [ELECTRIC, ELECTRIC],
-			Gen2Experience.GROWTH_MEDIUM_FAST, 82, [],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 82, [], GENDER_F50,
 		],
 		GEODUDE: [
 			"GEODUDE", [40, 80, 100, 20, 30, 30], [ROCK, GROUND],
 			Gen2Experience.GROWTH_MEDIUM_SLOW, 86,
-			[{"level": 6, "move": GROWL}, {"level": 11, "move": SLASH}],
+			[{"level": 6, "move": GROWL}, {"level": 11, "move": SLASH}], GENDER_F50,
 		],
 		MAGCARGO: [
 			"MAGCARGO", [50, 50, 120, 30, 80, 80], [FIRE, ROCK],
-			Gen2Experience.GROWTH_MEDIUM_FAST, 154, [],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 154, [], GENDER_F50,
 		],
 	}
 
@@ -176,7 +195,7 @@ static func _species() -> Array:
 	for number: int in range(1, MAGCARGO + 1):
 		var entry: Array = known.get(number, [
 			"FILLER", [10, 10, 10, 10, 10, 10], [NORMAL, NORMAL],
-			Gen2Experience.GROWTH_MEDIUM_FAST, 64, [],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 64, [], GENDER_UNKNOWN,
 		])
 		var stats: Array = entry[1]
 		out.append({
@@ -190,6 +209,7 @@ static func _species() -> Array:
 			"types": entry[2],
 			"growth_rate": entry[3],
 			"base_exp": entry[4],
+			"gender_ratio": entry[6],
 			"front_tiles": [7, 7],
 			"palette": {"normal": [0x1234, 0x5678], "shiny": [0x0C63, 0x1084]},
 		})
@@ -259,6 +279,11 @@ static func _moves() -> Array:
 		SUPER_FANG_MOVE: ["SUPER FANG", 1, NORMAL, 255, 10, Gen2MoveEffect.SUPER_FANG, 0],
 		PSYWAVE_MOVE: ["PSYWAVE", 1, PSYCHIC_TYPE, 255, 15, Gen2MoveEffect.PSYWAVE, 0],
 		OHKO_MOVE: ["GUILLOTINE", 0, NORMAL, 76, 5, Gen2MoveEffect.OHKO, 0],
+		DISABLE_MOVE: ["DISABLE", 0, NORMAL, 140, 20, Gen2MoveEffect.DISABLE, 0],
+		ENCORE_MOVE: ["ENCORE", 0, NORMAL, 255, 5, Gen2MoveEffect.ENCORE, 0],
+		ATTRACT_MOVE: ["ATTRACT", 0, NORMAL, 255, 15, Gen2MoveEffect.ATTRACT, 0],
+		MIST_MOVE: ["MIST", 0, NORMAL, 255, 30, Gen2MoveEffect.MIST, 0],
+		FOCUS_ENERGY_MOVE: ["FOCUS ENERGY", 0, NORMAL, 255, 30, Gen2MoveEffect.FOCUS_ENERGY, 0],
 	}
 
 	var out: Array = []

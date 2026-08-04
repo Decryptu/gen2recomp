@@ -106,6 +106,46 @@ const MOVE_OFFERED: StringName = &"move_offered"
 const MOVE_FORGOTTEN: StringName = &"move_forgotten"
 const MOVE_DECLINED: StringName = &"move_declined"
 
+## Disable, Attract, Encore, Mist and Focus Energy each refuse for their own
+## reason (a target with nothing to disable, a same-gender or genderless
+## target, an already-encored target, and so on) rather than missing or doing
+## nothing to a type: not [constant MISSED], whose accuracy was rolled and
+## lost, and not [constant NO_EFFECT], which is about a type matchup. One event
+## for every one of the five, the same "but it failed!" the cartridge shares
+## across all of them.
+const MOVE_FAILED: StringName = &"move_failed"
+
+## Disable locked a slot, and later let it go. [code]slot[/code] and
+## [code]move[/code] on the first are the target's own, read off
+## [member Gen2BattleMon.disabled_slot] before it moves; the belt-and-suspenders
+## refusal for a Pokémon that is still locked into the disabled move itself is
+## [constant CANNOT_MOVE]'s own [code]&"disabled"[/code] reason, not this.
+const DISABLE_INFLICTED: StringName = &"disable_inflicted"
+const DISABLE_ENDED: StringName = &"disable_ended"
+
+## Attract's own two events: falling in love, which is
+## [constant Gen2Substatus.ATTRACTED] set and stays set until a switch, and the
+## turn a fresh roll finds the target too smitten to move, which is
+## [constant CANNOT_MOVE]'s own [code]&"attract"[/code] reason rather than an
+## event of its own, the same shape flinch and confusion already use.
+const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
+
+## Encore locked a slot, and later let it go, the same pair
+## [constant DISABLE_INFLICTED] and [constant DISABLE_ENDED] are for Disable.
+const ENCORE_INFLICTED: StringName = &"encore_inflicted"
+const ENCORE_ENDED: StringName = &"encore_ended"
+
+## Mist and Focus Energy, set on the user. Both fail with [constant MOVE_FAILED]
+## on a second use rather than silently re-applying.
+const MIST_SET: StringName = &"mist_set"
+const FOCUS_ENERGY_SET: StringName = &"focus_energy_set"
+
+## A stat drop blocked by the target's own Mist. Not [constant STAT_CHANGE_FAILED]:
+## the cartridge prints a line of its own ("It's protected by mist!") rather
+## than the generic "won't go any lower" a drop already at its floor gets, and a
+## screen that read this as the generic failure would say the wrong thing.
+const MIST_PROTECTED: StringName = &"mist_protected"
+
 ## What a side does with its turn. Switching is not a move with a very high
 ## priority: it is settled before priority is looked at, which is why it is an
 ## action rather than a move number.
@@ -348,6 +388,17 @@ func send_out(side: int, index: int) -> Array:
 ## either side owes a replacement, and a faint ends the turn where it is: a
 ## Pokémon that is knocked out before it has moved does not get to move, which is
 ## most of what speed is for.
+##
+## The move each side is credited with for [method order]'s own priority check
+## is worked out once, before either side has acted, because that is the
+## moment the cartridge's own move order is decided too. What actually runs is
+## worked out again, fresh, right before [method _act]: Encore can land on a
+## side that has not gone yet this same turn, and the cartridge's own
+## `CheckOpponentWentFirst` forces that side's already-chosen action over for
+## the very turn it lands, not just the ones after it. Recomputing at the
+## point of use rather than committing to [param chosen] gets that for free,
+## since nothing about which move a side actually uses is settled until this
+## reaches it.
 func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
@@ -366,9 +417,11 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 			continue
 		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
 			break
-		_act(side, int(actions[side].get("slot", 0)), chosen[side], events)
+		var slot: int = effective_slot(side, int(actions[side].get("slot", 0)))
+		_act(side, slot, move_for(side, slot), events)
 
 	_residual_damage(acting, events)
+	_tick_encore(acting, events)
 	_award_experience(events)
 
 	if is_over():
@@ -420,6 +473,28 @@ func _residual_damage(acting: Array, events: Array) -> void:
 		})
 		if current.is_fainted():
 			events.append({"type": FAINTED, "side": side})
+
+
+## Encore's own countdown, once a turn rather than once a side's move: the
+## cartridge's own `HandleEncore` runs after both sides have acted, the same
+## timing [method _residual_damage] already uses for a burn or a poison.
+##
+## Ends early, before the counter reaches zero, the moment the encored slot
+## itself runs out of PP: the cartridge checks that every turn Encore ticks,
+## not only when the counter would have expired on its own.
+func _tick_encore(acting: Array, events: Array) -> void:
+	for side: int in acting:
+		var current: Gen2BattleMon = mon(side)
+		if current.is_fainted() or current.encored_slot < 0:
+			continue
+
+		current.encore_turns -= 1
+		if current.encore_turns > 0 and current.pp_left(current.encored_slot) > 0:
+			continue
+
+		current.encored_slot = -1
+		current.encore_turns = 0
+		events.append({"type": ENCORE_ENDED, "side": side})
 
 
 ## Experience for every enemy Pokémon that fainted this turn, whether the faint
@@ -525,22 +600,38 @@ func _move_for_action(side: int, action: Dictionary) -> int:
 	return move_for(side, int(action.get("slot", 0)))
 
 
+## The slot PP is actually spent from, which is not always the slot a caller
+## asks for: Encore forces whichever slot it locked in, the same way a
+## two-turn move's release turn forces its own move number regardless of which
+## slot [method move_for] is asked about. Falls back to the encored slot only
+## while it is still usable, so an encored move that has run out of PP does not
+## reach for it once [method _tick_encore] has already ended the effect.
+func effective_slot(side: int, requested_slot: int) -> int:
+	var attacker: Gen2BattleMon = mon(side)
+	if attacker.encored_slot >= 0 and attacker.can_use(attacker.encored_slot):
+		return attacker.encored_slot
+	return requested_slot
+
+
 ## Which move a side will actually use.
 ##
 ## A Pokémon locked into a two-turn move's release turn answers with what it
 ## charged, whatever slot the caller asks for: on the cartridge nothing is
-## chosen on that turn at all, so nothing here is either.
+## chosen on that turn at all, so nothing here is either. Failing that, Encore
+## answers with whatever [method effective_slot] resolves to, which may not be
+## the slot the caller asked for either.
 ##
 ## Failing that, a slot with nothing usable in it answers Struggle, which is
 ## the cartridge's answer for a Pokémon with no PP anywhere. Here it is also the
-## answer for a slot that is empty or spent while others are not, because a
-## caller that points at one has asked for something that cannot happen, and
-## Struggle is the only move that is always available.
+## answer for a slot that is empty, spent or disabled while others are not,
+## because a caller that points at one has asked for something that cannot
+## happen, and Struggle is the only move that is always available.
 func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.charged_move != 0:
 		return attacker.charged_move
-	return int(attacker.moves[slot]) if attacker.can_use(slot) else Gen2Damage.STRUGGLE
+	var chosen_slot: int = effective_slot(side, slot)
+	return int(attacker.moves[chosen_slot]) if attacker.can_use(chosen_slot) else Gen2Damage.STRUGGLE
 
 
 ## Who goes first, as the two sides in the order they act.

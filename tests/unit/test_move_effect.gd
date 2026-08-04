@@ -220,14 +220,21 @@ func test_an_ordinary_move_spends_its_slot() -> void:
 	assert_eq(int(battle.player.pp[0]), before - 1)
 
 
-func test_recoil_is_a_quarter_of_what_was_dealt_and_never_nothing() -> void:
+## A quarter of [member Gen2Turn.damage], the number the formula calculated,
+## never [member Gen2Turn.dealt], the number that actually came off a target
+## with less left than that: the real cartridge's own recoil reads the same
+## uncapped figure drain does. A target with 3 HP left against a hit worth 20
+## costs the attacker a quarter of 20, not a quarter of 3.
+func test_recoil_is_a_quarter_of_what_the_formula_calculated_and_never_nothing() -> void:
 	var battle: Gen2Battle = _battle()
 	var turn: Gen2Turn = _turn(battle)
-	turn.dealt = 20
+	turn.damage = 20
+	turn.dealt = 3
 	Gen2EffectCommands.run(Gen2EffectCommands.RECOIL, turn)
 	assert_eq(int(_first(turn.events, Gen2Battle.RECOIL)["amount"]), 5)
 
 	var second: Gen2Turn = _turn(battle)
+	second.damage = 2
 	second.dealt = 2
 	Gen2EffectCommands.run(Gen2EffectCommands.RECOIL, second)
 	assert_eq(int(_first(second.events, Gen2Battle.RECOIL)["amount"]), 1)
@@ -707,6 +714,219 @@ func test_ohko_faints_the_target_outright_when_it_connects() -> void:
 	assert_eq(battle.enemy.hp, 0)
 	assert_eq(int(_first(turn.events, Gen2Battle.OHKO)["amount"]), battle.enemy.max_hp())
 	assert_eq(_first(turn.events, Gen2Battle.FAINTED)["side"], Gen2Battle.ENEMY)
+
+
+func test_disable_attract_encore_mist_and_focus_energy_have_their_own_sequences() -> void:
+	for effect: int in [
+		Gen2MoveEffect.DISABLE, Gen2MoveEffect.ATTRACT, Gen2MoveEffect.ENCORE,
+		Gen2MoveEffect.MIST, Gen2MoveEffect.FOCUS_ENERGY,
+	]:
+		assert_true(Gen2MoveEffect.is_written(effect))
+
+
+func test_disable_locks_the_targets_own_last_move() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
+	assert_eq(battle.enemy.disabled_slot, 0)
+	assert_between(battle.enemy.disable_turns, Gen2Substatus.MIN_DISABLE, Gen2Substatus.MAX_DISABLE)
+	assert_eq(int(_first(turn.events, Gen2Battle.DISABLE_INFLICTED)["slot"]), 0)
+
+
+func test_disable_fails_against_a_target_that_has_not_moved_yet() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
+	assert_eq(battle.enemy.disabled_slot, -1)
+	assert_false(_first(turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_disable_fails_against_struggle() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.STRUGGLE
+	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
+	assert_eq(battle.enemy.disabled_slot, -1)
+
+
+func test_disable_fails_against_an_already_disabled_target() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.disabled_slot = 0
+	battle.enemy.disable_turns = 3
+	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
+	assert_eq(battle.enemy.disable_turns, 3, "unchanged, not re-rolled")
+	assert_false(_first(turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_disable_fails_against_a_move_already_out_of_pp() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.pp[0] = 0
+	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
+	assert_eq(battle.enemy.disabled_slot, -1)
+
+
+func test_a_disabled_slot_cannot_be_used() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.THUNDERBOLT]
+	)
+	mon.disabled_slot = 0
+	assert_false(mon.can_use(0))
+	assert_true(mon.can_use(1))
+
+
+func test_encore_locks_the_targets_own_last_move() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	var turn: Gen2Turn = _turn(battle, Fixture.ENCORE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ENCORE, turn)
+	assert_eq(battle.enemy.encored_slot, 0)
+	assert_between(battle.enemy.encore_turns, Gen2Substatus.MIN_ENCORE, Gen2Substatus.MAX_ENCORE)
+	assert_eq(int(_first(turn.events, Gen2Battle.ENCORE_INFLICTED)["slot"]), 0)
+
+
+## 227 and 119 are Encore's and Mirror Move's own real move numbers, not this
+## fixture's arbitrary ones: the exclusion the cartridge writes is by move
+## number, checked before this project's own move list is ever searched, so
+## the numbers matter here and the fixture's own [constant Fixture.ENCORE_MOVE]
+## would not exercise it.
+func test_encore_refuses_struggle_encore_itself_and_mirror_move() -> void:
+	for excluded: int in [Fixture.STRUGGLE, 227, 119]:
+		var battle: Gen2Battle = _battle()
+		battle.enemy.last_move_used = excluded
+		var turn: Gen2Turn = _turn(battle, Fixture.ENCORE_MOVE)
+		Gen2EffectCommands.run(Gen2EffectCommands.ENCORE, turn)
+		assert_eq(battle.enemy.encored_slot, -1)
+
+
+func test_encore_fails_against_an_already_encored_target() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.encored_slot = 0
+	battle.enemy.encore_turns = 4
+	var turn: Gen2Turn = _turn(battle, Fixture.ENCORE_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ENCORE, turn)
+	assert_eq(battle.enemy.encore_turns, 4, "unchanged, not re-rolled")
+
+
+func test_attract_succeeds_between_opposite_genders() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE], Gen2Stats.pack_dvs(0, 0, 0, 0)
+		),
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE], Gen2Stats.pack_dvs(15, 0, 15, 0)
+		),
+		_rng
+	)
+	var turn: Gen2Turn = _turn(battle, Fixture.ATTRACT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTRACT, turn)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED))
+	assert_false(_first(turn.events, Gen2Battle.ATTRACT_INFLICTED).is_empty())
+
+
+func test_attract_fails_between_the_same_gender() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE], Gen2Stats.pack_dvs(0, 0, 0, 0)
+		),
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE], Gen2Stats.pack_dvs(0, 0, 0, 0)
+		),
+		_rng
+	)
+	var turn: Gen2Turn = _turn(battle, Fixture.ATTRACT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTRACT, turn)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED))
+	assert_false(_first(turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_attract_fails_against_a_genderless_target() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE]),
+		Gen2BattleMon.create(_data, 6, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var turn: Gen2Turn = _turn(battle, Fixture.ATTRACT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTRACT, turn)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED))
+
+
+func test_attract_fails_against_an_already_smitten_target() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.ATTRACT_MOVE], Gen2Stats.pack_dvs(0, 0, 0, 0)
+		),
+		Gen2BattleMon.create(
+			_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE], Gen2Stats.pack_dvs(15, 0, 15, 0)
+		),
+		_rng
+	)
+	battle.enemy.substatus |= Gen2Substatus.ATTRACTED
+	var turn: Gen2Turn = _turn(battle, Fixture.ATTRACT_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTRACT, turn)
+	assert_false(_first(turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_mist_sets_the_flag_and_fails_on_a_second_use() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.MIST_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.MIST, turn)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.MIST))
+	assert_false(_first(turn.events, Gen2Battle.MIST_SET).is_empty())
+
+	var second: Gen2Turn = _turn(battle, Fixture.MIST_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.MIST, second)
+	assert_false(_first(second.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_focus_energy_sets_the_flag_and_fails_on_a_second_use() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.FOCUS_ENERGY_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.FOCUS_ENERGY, turn)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.FOCUS_ENERGY))
+	assert_false(_first(turn.events, Gen2Battle.FOCUS_ENERGY_SET).is_empty())
+
+	var second: Gen2Turn = _turn(battle, Fixture.FOCUS_ENERGY_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.FOCUS_ENERGY, second)
+	assert_false(_first(second.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+func test_mist_blocks_a_drop_aimed_at_its_own_side() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.MIST
+	var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTACK_DOWN, turn)
+	assert_false(turn.stat_moved)
+	assert_true(turn.stat_mist_blocked)
+	assert_eq(battle.enemy.stage("attack"), 0)
+
+
+func test_mist_never_blocks_the_users_own_rise() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.substatus |= Gen2Substatus.MIST
+	var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTACK_UP, turn)
+	assert_true(turn.stat_moved)
+	assert_eq(battle.player.stage("attack"), 1)
+
+
+func test_mist_protected_gets_its_own_message_not_the_generic_fail() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.MIST
+	var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+	Gen2EffectCommands.run(Gen2EffectCommands.ATTACK_DOWN, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAT_DOWN_FAIL_TEXT, turn)
+	assert_false(_first(turn.events, Gen2Battle.MIST_PROTECTED).is_empty())
+	assert_true(_first(turn.events, Gen2Battle.STAT_CHANGE_FAILED).is_empty())
 
 
 func _of_type(events: Array, type: StringName) -> Array:

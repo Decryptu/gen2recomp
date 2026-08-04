@@ -136,6 +136,34 @@ const BELLY_DRUM: StringName = &"bellydrum"
 ## target has nothing raised or lowered to copy.
 const PSYCH_UP: StringName = &"psychup"
 
+## Locks one of the target's own move slots, the one it last used, out for a
+## few turns. Fails if the target has not used a move yet, if that move was
+## Struggle, if it has already run out of PP, or if the target is already
+## disabled: only one slot at a time, the same "one at a time" rule the status
+## byte enforces for a different kind of affliction.
+const DISABLE: StringName = &"disable"
+
+## Locks the target into repeating its own last move for a few turns. The same
+## exclusions as [constant DISABLE] apply, plus two the cartridge names outright
+## rather than leaving to a structural check: the last move cannot have been
+## Encore itself or Mirror Move, neither of which means anything repeated.
+const ENCORE: StringName = &"encore"
+
+## Puts the target in love, provided the user and the target have opposite,
+## known genders and the target is not already smitten. Persists until a
+## switch; [constant Gen2EffectCommands.CHECK_STATUS] is what rolls, every turn,
+## whether that stops the target moving at all.
+const ATTRACT: StringName = &"attract"
+
+## Shields the user from the opponent's own stat-lowering moves, until a
+## switch. Blocks a drop aimed at the user; never a rise, and never the user's
+## own drop aimed at the opponent. Fails, without re-applying, on a second use.
+const MIST: StringName = &"mist"
+
+## Raises the user's own critical-hit rate for the rest of the battle, until a
+## switch. Fails, without re-applying, on a second use.
+const FOCUS_ENERGY: StringName = &"focusenergy"
+
 ## Raises and lowers a stat by one stage or two, named the way the cartridge
 ## names them and in the order [constant Gen2BattleMon.STAGED_STATS] plus
 ## [constant Gen2BattleMon.STAGED_ODDS] already keeps the seven in, because that
@@ -232,6 +260,13 @@ const RECOIL_DIVISOR: int = 4
 ## Wheel and Sacred Fire, by move number.
 const THAWING_MOVES: Array = [172, 221]
 
+## What Encore refuses to lock a target into repeating even though the target
+## did just use it, by move number: Encore itself, and Mirror Move, since
+## forcing either to repeat means nothing (Encore stacked on Encore locks in
+## nothing new, and Mirror Move's own effect is to copy whatever the opponent
+## did last, not to repeat itself).
+const ENCORE_EXCLUDED_MOVES: Array = [119, 227]
+
 
 ## Runs one command against [param turn].
 ##
@@ -296,6 +331,16 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_belly_drum(turn)
 		PSYCH_UP:
 			_psych_up(turn)
+		DISABLE:
+			_disable(turn)
+		ENCORE:
+			_encore(turn)
+		ATTRACT:
+			_attract(turn)
+		MIST:
+			_mist(turn)
+		FOCUS_ENERGY:
+			_focus_energy(turn)
 		ALL_STATS_UP:
 			_all_stats_up(turn)
 		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
@@ -309,7 +354,17 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 				push_error("No such effect command: %s" % command)
 
 
+## Announces the move, and records it as what Disable and Encore will find if
+## the opponent's next move searches for "what did this Pokémon last use".
+##
+## The real cartridge skips that second part on the release turn of a two-turn
+## move, so Disable and Encore that land mid-charge see the move that was
+## charging rather than the one that was just released; this always records
+## the move actually announced, which is simpler and only differs from the
+## cartridge in that one narrow interaction. Worth revisiting if Disable or
+## Encore's behaviour against a charging Pokémon ever needs to match exactly.
 static func _used_move_text(turn: Gen2Turn) -> void:
+	turn.attacker().last_move_used = turn.move_number
 	turn.emit(Gen2Battle.USED_MOVE, {"move": turn.move_number})
 
 
@@ -326,7 +381,8 @@ static func _do_turn(turn: Gen2Turn) -> void:
 
 static func _damage_calc(turn: Gen2Turn) -> void:
 	var result: Dictionary = Gen2Damage.calculate(
-		turn.attacker(), turn.defender(), turn.move, turn.rng()
+		turn.attacker(), turn.defender(), turn.move, turn.rng(),
+		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY)
 	)
 	turn.damage = int(result["damage"])
 	turn.critical = bool(result["critical"])
@@ -375,13 +431,20 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 	})
 
 
+## A quarter of [member Gen2Turn.damage], the number the formula calculated,
+## never less than one, and never [member Gen2Turn.dealt], the number that
+## actually came off a target with less left than that. The real cartridge's
+## own `BattleCommand_Recoil` reads the same uncapped `wCurDamage`
+## [constant Gen2EffectCommands.DRAIN_TARGET] already reads, so a target with
+## three hit points left against a move that calculates fifty costs the
+## attacker a quarter of fifty, not a quarter of three.
 static func _recoil(turn: Gen2Turn) -> void:
-	if turn.dealt <= 0:
+	if turn.damage <= 0:
 		return
 
 	var attacker: Gen2BattleMon = turn.attacker()
 	@warning_ignore("integer_division")
-	var taken: int = attacker.take_damage(maxi(turn.dealt / RECOIL_DIVISOR, 1))
+	var taken: int = attacker.take_damage(maxi(turn.damage / RECOIL_DIVISOR, 1))
 	turn.emit(Gen2Battle.RECOIL, {
 		"amount": taken, "hp": attacker.hp, "max_hp": attacker.max_hp(),
 	})
@@ -394,11 +457,10 @@ static func _check_faint(turn: Gen2Turn) -> void:
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
 
 
-## Recharge, then sleep, then freeze, then flinch, then confusion, then
-## paralysis, which is the cartridge's own order in [code]CheckPlayerTurn[/code].
-## Disable and Attract sit between flinch and confusion on the cartridge and are
-## not written yet; nothing here skips a slot for them because neither writes
-## [Gen2Substatus] yet either.
+## Recharge, then sleep, then freeze, then flinch, then Disable's own
+## countdown, then confusion, then Attract's immobilise roll, then a
+## belt-and-suspenders refusal for a Pokémon still locked into the disabled
+## move itself, then paralysis. This is the cartridge's own order.
 ##
 ## A frozen Pokémon is never asked whether it is also paralysed, because the
 ## status byte cannot say both; a confused Pokémon that hits itself is never
@@ -409,7 +471,11 @@ static func _check_faint(turn: Gen2Turn) -> void:
 ## ending the turn, so a Pokémon whose counter runs out attacks the same turn it
 ## opens its eyes. That is Generation 2's rule and not Generation 1's. Snapping
 ## out of confusion works the same way: the counter reaching zero clears the
-## flag and lets the move through the same turn.
+## flag and lets the move through the same turn, and Disable wearing off here
+## does too, for the same reason: [method Gen2BattleMon.can_use] already
+## refuses the slot before this runs, so a countdown that reaches zero this
+## turn has already stopped mattering by the time the belt-and-suspenders check
+## further down would otherwise have caught it.
 static func _check_status(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 
@@ -443,6 +509,14 @@ static func _check_status(turn: Gen2Turn) -> void:
 		turn.end()
 		return
 
+	if mon.disabled_slot >= 0:
+		mon.disable_turns -= 1
+		if mon.disable_turns <= 0:
+			var slot: int = mon.disabled_slot
+			mon.disabled_slot = -1
+			mon.disable_turns = 0
+			turn.emit(Gen2Battle.DISABLE_ENDED, {"slot": slot})
+
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CONFUSED):
 		mon.confusion_turns -= 1
 		if mon.confusion_turns <= 0:
@@ -457,6 +531,25 @@ static func _check_status(turn: Gen2Turn) -> void:
 				})
 				turn.end()
 				return
+
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.ATTRACTED) \
+		and Gen2Substatus.rolls_attract_immobile(turn.rng()):
+		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"attract"})
+		turn.end()
+		return
+
+	# Belt-and-suspenders: a Pokémon that is still, somehow, about to use its
+	# own disabled move is refused here rather than allowed through on a
+	# technicality. By move number, not by slot: [method Gen2BattleMon.can_use]
+	# has already turned an ordinary request for the disabled slot into
+	# Struggle by the time this runs, and [member Gen2Turn.slot] still names
+	# the slot that was asked for rather than the one that is actually
+	# happening, so comparing slots here would refuse that Struggle too.
+	if mon.disabled_slot >= 0 and mon.disabled_slot < mon.moves.size() \
+		and turn.move_number == int(mon.moves[mon.disabled_slot]):
+		turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"disabled"})
+		turn.end()
+		return
 
 	if Gen2Status.has(mon.status, Gen2Status.PARALYSIS) \
 		and Gen2Status.rolls_full_paralysis(turn.rng()):
@@ -595,9 +688,12 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
 	var hits: int = 2 if FIXED_TWO_HIT_EFFECTS.has(turn.effect()) else _roll_multi_hit_count(turn.rng())
 
+	var focus_energy: bool = Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY)
 	for hit: int in hits:
 		if hit > 0:
-			var result: Dictionary = Gen2Damage.calculate(attacker, defender, turn.move, turn.rng())
+			var result: Dictionary = Gen2Damage.calculate(
+				attacker, defender, turn.move, turn.rng(), focus_energy
+			)
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
 			turn.effectiveness = int(result["effectiveness"])
@@ -779,24 +875,157 @@ static func _psych_up(turn: Gen2Turn) -> void:
 	turn.emit(Gen2Battle.STAGES_COPIED)
 
 
+## Locks one of the target's own move slots: whichever one holds
+## [member Gen2BattleMon.last_move_used], found by searching the target's own
+## move list the way the cartridge does rather than by asking which slot it
+## came from, because nothing the attacker did carries that information.
+##
+## Fails, doing nothing, if the target has not moved yet this battle, if that
+## move was Struggle, if the target is already disabled, if the move it used
+## is no longer in its list at all (a level-up mid-battle can replace a slot;
+## the cartridge never has to consider this since nothing on it can), or if
+## the slot that move sits in has already run out of PP.
+static func _disable(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.disabled_slot >= 0:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var last_move: int = defender.last_move_used
+	if last_move == 0 or last_move == Gen2Damage.STRUGGLE:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var slot: int = defender.moves.find(last_move)
+	if slot < 0 or defender.pp_left(slot) <= 0:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.disabled_slot = slot
+	defender.disable_turns = Gen2Substatus.roll_disable(turn.rng())
+	defender.substatus |= Gen2Substatus.DISABLED
+	turn.emit(Gen2Battle.DISABLE_INFLICTED, {
+		"target": turn.target, "slot": slot, "move": last_move,
+	})
+
+
+## Locks the target into repeating [member Gen2BattleMon.last_move_used] for a
+## few turns, found the same way [method _disable] finds its own slot and
+## refused for the same reasons, plus two the cartridge names outright rather
+## than leaving to a structural check: see [constant ENCORE_EXCLUDED_MOVES].
+##
+## What actually forces the move each turn is not here: [method Gen2Battle.
+## effective_slot] and [method Gen2Battle.move_for] read
+## [member Gen2BattleMon.encored_slot] back at the point a side acts, the same
+## way a two-turn move's release turn is forced through
+## [member Gen2BattleMon.charged_move].
+static func _encore(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.encored_slot >= 0:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var last_move: int = defender.last_move_used
+	if last_move == 0 or last_move == Gen2Damage.STRUGGLE \
+		or ENCORE_EXCLUDED_MOVES.has(last_move):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var slot: int = defender.moves.find(last_move)
+	if slot < 0 or defender.pp_left(slot) <= 0:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.encored_slot = slot
+	defender.encore_turns = Gen2Substatus.roll_encore(turn.rng())
+	defender.substatus |= Gen2Substatus.ENCORED
+	turn.emit(Gen2Battle.ENCORE_INFLICTED, {"target": turn.target, "slot": slot, "move": last_move})
+
+
+## Puts the target in love, provided the user and the target have opposite,
+## known genders (a genderless Pokémon or a matching pair refuses the same way
+## a Pokémon already in love does) and the target is not already smitten.
+## [constant Gen2EffectCommands.CHECK_STATUS] is what rolls, every turn from
+## here on, whether that stops the target moving at all.
+static func _attract(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+	if Gen2Substatus.has(defender.substatus, Gen2Substatus.ATTRACTED):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var user_gender: StringName = attacker.gender()
+	var target_gender: StringName = defender.gender()
+	if user_gender == Gen2BattleMon.GENDER_NONE or target_gender == Gen2BattleMon.GENDER_NONE \
+		or user_gender == target_gender:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.substatus |= Gen2Substatus.ATTRACTED
+	turn.emit(Gen2Battle.ATTRACT_INFLICTED, {"target": turn.target})
+
+
+## Shields the user from the opponent's own stat-lowering moves, until a
+## switch: [method _stat_change] is what actually blocks a drop, reading this
+## flag back off whichever side a drop is aimed at. Fails, without
+## re-applying, on a second use, the same as [method _focus_energy].
+static func _mist(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.MIST):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	mon.substatus |= Gen2Substatus.MIST
+	turn.emit(Gen2Battle.MIST_SET)
+
+
+## Raises the user's own critical-hit rate for the rest of the battle, until a
+## switch: [method _damage_calc] and [method _multi_hit] are what read this
+## flag back, through [method Gen2Damage.calculate]'s own [code]focus_energy[/code]
+## argument. Fails, without re-applying, on a second use.
+static func _focus_energy(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.FOCUS_ENERGY):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	mon.substatus |= Gen2Substatus.FOCUS_ENERGY
+	turn.emit(Gen2Battle.FOCUS_ENERGY_SET)
+
+
 ## Moves one stat by one command's worth, and writes down who it happened to and
 ## whether it actually moved, for the message step behind it to read.
 ##
 ## A secondary effect's failed roll skips this the same way it skips a status:
 ## the damage in front of it has already landed, and what was behind the roll is
 ## the only thing the roll can still cost.
+##
+## A drop aimed at a target shielded by Mist never reaches
+## [method Gen2BattleMon.change_stage] at all: every entry that lowers a stat
+## targets the opponent rather than the user (`entry[2]` is false for exactly
+## that set), which is the same thing Mist itself only ever blocks. A rise
+## always targets the user and is never checked against it, the same as the
+## cartridge's own [code]CheckMist[/code] only gates the "down" and "down2"
+## effect-byte ranges.
 static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 	var entry: Array = STAT_COMMANDS[command]
 	var stat_key: String = String(entry[0])
 	var amount: int = int(entry[1])
-	var side: int = turn.side if bool(entry[2]) else turn.target
+	var targets_user: bool = bool(entry[2])
+	var side: int = turn.side if targets_user else turn.target
 
 	turn.stat_key = stat_key
 	turn.stat_by = amount
 	turn.stat_target = side
+	turn.stat_mist_blocked = false
 
 	if turn.failed_chance:
 		turn.stat_moved = false
+		return
+
+	if not targets_user and Gen2Substatus.has(turn.battle.mon(side).substatus, Gen2Substatus.MIST):
+		turn.stat_moved = false
+		turn.stat_mist_blocked = true
 		return
 
 	turn.stat_moved = turn.battle.mon(side).change_stage(stat_key, amount)
@@ -832,9 +1061,21 @@ static func _stat_message(turn: Gen2Turn) -> void:
 
 
 ## Says a stat could not move. Only reached from a status move's own sequence,
-## which is the only place the cartridge follows a message step with this one.
+## which is the only place the cartridge follows a message step with this one:
+## an on-hit drop blocked by Mist has no fail-text step behind it at all, the
+## same silent failure any other on-hit drop that misses its own roll already
+## gets, since [code]data/moves/effects.asm[/code] never follows one with
+## [code]statdownfailtext[/code] either.
+##
+## Mist gets its own line rather than the generic one: the cartridge's own
+## [code]BattleCommand_StatDownFailText[/code] prints
+## [code]ProtectedByMistText[/code] for exactly this case, not "won't go any
+## lower".
 static func _stat_fail_text(turn: Gen2Turn) -> void:
 	if turn.stat_moved:
+		return
+	if turn.stat_mist_blocked:
+		turn.emit(Gen2Battle.MIST_PROTECTED, {"target": turn.stat_target})
 		return
 	turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {
 		"target": turn.stat_target, "stat": turn.stat_key, "by": turn.stat_by,
