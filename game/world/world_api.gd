@@ -256,6 +256,10 @@ func script_input_waiting() -> bool:
 	return _active_script != null and _active_script.is_waiting()
 
 
+func pending_runtime_request() -> Dictionary:
+	return _active_script.pending_runtime_request() if _active_script != null else {}
+
+
 ## Starts one callback type from the current map's callback table. A type of -1
 ## runs all callbacks in their stored order.
 func dispatch_callbacks(callback_type: int = -1) -> Array:
@@ -286,6 +290,36 @@ func run_event_queue(acknowledge: bool = false) -> Array:
 			results.append(result)
 			break
 		results.append(_finish_script_result(result))
+		_active_script = null
+	return results
+
+
+## Completes the currently pending host-owned request and resumes the same
+## scene-free script invocation. The world API owns the runner lifecycle, so a
+## screen never needs to reach into the runner or replace its state.
+func complete_runtime_request(result: Dictionary) -> Array:
+	if _active_script == null:
+		return []
+	var results: Array = []
+	var advanced: Dictionary = _active_script.complete_runtime_request(result)
+	if StringName(advanced.get("status", &"")) == &"waiting":
+		results.append(advanced)
+		return results
+	if bool(advanced.get("ok", false)):
+		results.append(_finish_script_result(advanced))
+	else:
+		results.append(advanced)
+	_active_script = null
+	while _active_script == null and not _script_queue.is_empty():
+		var request: Dictionary = _script_queue.pop_front()
+		_active_script = Gen2WorldScriptRunner.begin(
+			data, state, request, Callable(self, "_validate_script_warp")
+		)
+		var next: Dictionary = _active_script.advance()
+		if StringName(next.get("status", &"")) == &"waiting":
+			results.append(next)
+			break
+		results.append(_finish_script_result(next) if bool(next.get("ok", false)) else next)
 		_active_script = null
 	return results
 

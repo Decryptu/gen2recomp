@@ -528,5 +528,71 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	assert_eq(battle["event"]["request"]["kind"], &"battle_requested")
 	assert_eq(battle["event"]["request"]["values"]["pokemon"], 25)
 
-	var complete: Dictionary = runner.advance(true)
+	var still_waiting: Dictionary = runner.advance(true)
+	assert_eq(still_waiting["status"], &"waiting")
+
+	var complete: Dictionary = runner.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
 	assert_eq(complete["status"], &"complete")
+	assert_true(complete["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_completed"
+	))
+
+
+func test_world_battle_completion_commits_just_battled_only_after_the_host_result() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6068": [0x5D, 25, 5, 0x5F, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6068
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+
+	var waiting: Array = world.dispatch_script_events()
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(world.pending_runtime_request()["kind"], &"battle_requested")
+	assert_false(world.state.just_battled())
+
+	var acknowledged: Array = world.run_event_queue(true)
+	assert_eq(acknowledged[0]["status"], &"waiting")
+	assert_false(world.state.just_battled())
+
+	var complete: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
+	assert_eq(complete[0]["status"], &"complete")
+	assert_true(world.state.just_battled())
+
+
+func test_world_battle_loss_fails_without_committing_world_state() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6078": [0x5D, 25, 5, 0x5F, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6078
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+
+	var failed: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_LOST,
+	})
+	assert_eq(failed[0]["status"], &"failed")
+	assert_eq(failed[0]["reason"], &"battle_lost")
+	assert_false(world.state.just_battled())
+
+
+func test_world_battle_requires_an_explicit_outcome() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6088": [0x5D, 25, 5, 0x5F, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6088
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+
+	var failed: Array = world.complete_runtime_request({"ok": true})
+	assert_eq(failed[0]["status"], &"failed")
+	assert_eq(failed[0]["reason"], &"invalid_battle_outcome")
