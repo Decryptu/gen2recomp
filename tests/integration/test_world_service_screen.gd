@@ -1,0 +1,178 @@
+extends GutTest
+
+## Scene integration for the cache-backed service overlay. The fixture is
+## synthetic, but the world screen, script runner, transaction host and UI
+## scene are the production paths.
+
+const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
+
+var _data: GameData = null
+var _world_screen: Gen2WorldScreen = null
+
+
+func before_each() -> void:
+	_data = Fixture.build()
+	_write_service_cache()
+	_data = GameData.open_directory(Fixture.directory())
+
+
+func after_each() -> void:
+	if is_instance_valid(_world_screen):
+		_world_screen.free()
+		_world_screen = null
+	RomCache.clear(Fixture.directory())
+
+
+func _open_world() -> void:
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	var state := Gen2WorldState.new({}, {}, {7: 1}, {0: 500})
+	var world := Gen2WorldAPI.open(
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6), state
+	)
+	var save := Gen2SaveStore.create_development_save(_data, 0)
+	save.world = world.snapshot()
+	_world_screen.set_data(_data)
+	_world_screen.set_save(save)
+	add_child(_world_screen)
+	await get_tree().process_frame
+
+
+func _queue_service() -> void:
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	_world_screen._show_script_results(waiting)
+	await get_tree().process_frame
+
+
+func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "MART")
+	assert_eq(host.selected_index(), 0)
+	assert_true(host.handle_key(KEY_ENTER))
+	assert_eq(_world_screen._world.state.money(), 380)
+	assert_eq(_world_screen._world.state.item_quantity(7), 2)
+	assert_true(host.is_active())
+
+	assert_true(host.handle_key(KEY_DOWN))
+	assert_true(host.handle_key(KEY_ENTER))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
+	_write_menu_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "MENU")
+	assert_eq(host.selected_index(), 0)
+	assert_true(host.handle_key(KEY_ESCAPE))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_phone_overlay_presents_the_imported_contact_and_returns() -> void:
+	_write_phone_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "PHONE")
+	assert_true(host._summary.text.contains("LEADER 2"))
+	assert_true(host.handle_key(KEY_ENTER))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_audio_overlay_keeps_the_decoder_boundary_explicit() -> void:
+	_write_audio_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "AUDIO HOST")
+	assert_true(host._status.text.contains("gb_audio_decoder_pending"))
+	assert_true(host.handle_key(KEY_ENTER))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
+func _write_service_cache() -> void:
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		if int(raw.get("number", 0)) == 7:
+			raw["name"] = "ITEM7"
+			raw["price"] = 120
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+	RomCache.write_json(RomCache.world_marts_path(Fixture.directory()), {
+		"marts": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000, "items": [7]}],
+		"default": {"items": [7]}, "special": {},
+	})
+	RomCache.write_json(RomCache.world_audio_path(Fixture.directory()), {
+		"music": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000,
+			"bytes": [1, 2], "byte_count": 2}],
+		"sfx": [],
+	})
+	_write_request_script([0x94, 0, 0x00, 0x40, 0x91], 0x6320)
+
+
+func _write_menu_request() -> void:
+	_write_request_script([0x4F, 0x34, 0x12, 0x59, 0x91], 0x6320)
+	RomCache.write_json(RomCache.world_menus_path(Fixture.directory()), {
+		Gen2WorldScript.pointer_key(Fixture.BANK, 0x1234): {
+			"bank": Fixture.BANK, "address": 0x1234, "options": ["YES", "NO"],
+		},
+	})
+
+
+func _write_phone_request() -> void:
+	_write_request_script([0x98, 0x00, 0x64, 0x91], 0x6320)
+	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), {
+		"contacts": [{
+			"index": 0, "trainer_class": 1, "trainer_number": 2,
+			"map_group": Fixture.MAP_GROUP, "map_number": Fixture.MAP_NUMBER,
+			"callee_time": 1, "caller_time": 2,
+			"caller_script": {"bank": Fixture.BANK, "address": 0x6400},
+			"callee_script": {"bank": Fixture.BANK, "address": 0x6500},
+		}],
+		"special_calls": [],
+	})
+
+
+func _write_audio_request() -> void:
+	_write_request_script([0x7F, 0x00, 0x40, 0x91], 0x6320)
+
+
+func _write_request_script(script: Array, address: int) -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, address)] = script
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var maps: Array = RomCache.read_json(RomCache.world_maps_path(Fixture.directory()))
+	for raw: Dictionary in maps:
+		if int(raw.get("group", -1)) != Fixture.MAP_GROUP \
+		or int(raw.get("number", -1)) != Fixture.MAP_NUMBER:
+			continue
+		var events: Dictionary = raw.get("events", {})
+		events["coord_events"] = [{"x": 7, "y": 6, "script": address}]
+		raw["events"] = events
+	RomCache.write_json(RomCache.world_maps_path(Fixture.directory()), maps)
