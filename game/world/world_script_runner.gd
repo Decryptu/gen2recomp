@@ -44,6 +44,17 @@ var _loaded_emote: int = -1
 var _battle_setup: Dictionary = {}
 var _phone_context: Dictionary = {}
 var _phone_started: bool = false
+var _text_buffers: Dictionary = {}
+var _phone_random := RandomNumberGenerator.new()
+
+const PHONE_CONTACT_GOT: int = 0
+const PHONE_CONTACTS_FULL: int = 1
+const PHONE_CONTACT_REFUSED: int = 2
+const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
+const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
+const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
+const SPECIAL_RANDOM_PHONE_MON: int = 93
+const TEXT_STRING_BUFFER: int = 0x14
 
 
 static func begin(
@@ -58,6 +69,7 @@ static func begin(
 	runner.warp_validator = validator
 	runner._request = request.duplicate(true)
 	runner._phone_context = request.get("phone", {}).duplicate(true)
+	runner._phone_random.randomize()
 	runner._reset_phone_receive_timer = bool(request.get("reset_receive_timer", false))
 	runner._last_talked_object_index = int(request.get("object_index", -1))
 	runner._last_item = int(request.get("item", 0))
@@ -89,10 +101,19 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			_script_value = choice
 		if pending_type == &"choice" and _pending.has("contact"):
 			var contact: int = int(_pending.get("contact", -1))
-			if choice == 0 and contact >= 0:
-				_staged_phone_contacts[contact] = true
+			if choice == 0:
+				var phone_result: Dictionary = _stage_phone_contact(contact)
+				if not bool(phone_result.get("ok", false)):
+					return _fail(
+						StringName(phone_result.get("reason", &"phone_contact_failed")),
+						phone_result
+					)
+			else:
+				_script_value = PHONE_CONTACT_REFUSED
 			_emit_runtime_event(&"phone_number_result", {
-				"contact": contact, "accepted": choice == 0,
+				"contact": contact,
+				"accepted": choice == 0 and _script_value == PHONE_CONTACT_GOT,
+				"result": _script_value,
 			})
 		if pending_type == &"battle":
 			_stage_just_battled(true)
@@ -418,6 +439,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			_script_value = 1 if Gen2WorldPhoneHost.time_mask_matches(
 				int(command["value"]), _clock_hour()
 			) else 0
+		Gen2WorldScript.ADDCELLNUM:
+			return _stage_phone_contact(int(command["value"]))
+		Gen2WorldScript.DELCELLNUM:
+			return _stage_phone_contact(int(command["value"]), false)
+		Gen2WorldScript.CHECKCELLNUM:
+			_script_value = 1 if _phone_contact_registered(int(command["value"])) else 0
 		Gen2WorldScript.SPECIAL:
 			return _execute_phone_special(int(command["value"]))
 		Gen2WorldScript.RANDOM:
@@ -446,17 +473,59 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKCOINS:
 			_script_value = _compare_amount(_coins_value(), int(command["value"]))
 		Gen2WorldScript.GETMONEY:
+			var money: int = _money_balance(int(command["account"]))
+			_set_text_buffer(int(command["string_buffer"]), str(money), &"money")
 			_emit_runtime_event(&"text_value_requested", {
 				"value_kind": &"money", "account": int(command["account"]),
-				"value": _money_balance(int(command["account"])),
+				"value": money,
 				"string_buffer": int(command["string_buffer"]),
 			})
 		Gen2WorldScript.GETCOINS:
+			var coins: int = _coins_value()
+			_set_text_buffer(int(command["string_buffer"]), str(coins), &"coins")
 			_emit_runtime_event(&"text_value_requested", {
-				"value_kind": &"coins", "value": _coins_value(),
+				"value_kind": &"coins", "value": coins,
 				"string_buffer": int(command["string_buffer"]),
 			})
-		Gen2WorldScript.GETITEMNAME, Gen2WorldScript.GETMONNAME, Gen2WorldScript.GETTRAINERNAME, Gen2WorldScript.GETSTRING:
+		Gen2WorldScript.GETITEMNAME:
+			_set_text_buffer(
+				int(command["string_buffer"]),
+				data.item_name(int(command["item"])) if data != null else "",
+				&"item_name",
+				{"item": int(command["item"])}
+			)
+			_emit_runtime_event(&"text_buffer_requested", command)
+		Gen2WorldScript.GETMONNAME:
+			_set_text_buffer(
+				int(command["string_buffer"]),
+				String(data.species(int(command["pokemon"])).get("name", "")) if data != null else "",
+				&"mon_name",
+				{"pokemon": int(command["pokemon"])}
+			)
+			_emit_runtime_event(&"text_buffer_requested", command)
+		Gen2WorldScript.GETTRAINERNAME:
+			var trainer_name: String = ""
+			if data != null:
+				trainer_name = String(data.trainer_party(
+					int(command["trainer_group"]), int(command["trainer_id"]) - 1
+				).get("name", ""))
+			_set_text_buffer(
+				int(command["string_buffer"]), trainer_name, &"trainer_name",
+				{"trainer_group": int(command["trainer_group"]), "trainer_id": int(command["trainer_id"])}
+			)
+			_emit_runtime_event(&"text_buffer_requested", command)
+		Gen2WorldScript.GETSTRING:
+			var string_text: String = ""
+			if data != null:
+				var string_data: PackedByteArray = data.world_text(
+					int(_request.get("bank", 0)), int(command["address"])
+				)
+				var string_decoded: Dictionary = _decode_text_with_buffers(string_data)
+				if bool(string_decoded.get("ok", false)):
+					string_text = String(string_decoded.get("text", ""))
+			_set_text_buffer(int(command["string_buffer"]), string_text, &"string", {
+				"bank": int(_request.get("bank", 0)), "address": int(command["address"]),
+			})
 			_emit_runtime_event(&"text_buffer_requested", command)
 		Gen2WorldScript.CLEAREVENT:
 			_staged_flags[int(command["flag"])] = false
@@ -507,6 +576,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
+		Gen2WorldScript.ADDCELLNUM, Gen2WorldScript.DELCELLNUM,
+		Gen2WorldScript.CHECKCELLNUM,
 		Gen2WorldScript.GOLD_FACEPLAYER, Gen2WorldScript.FACEPLAYER,
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP,
 		Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE,
@@ -888,6 +959,60 @@ func _stage_audio_request(kind: StringName, values: Dictionary) -> Dictionary:
 	return _stage_runtime_request(&"audio_requested", event)
 
 
+func _phone_contact_registered(contact: int) -> bool:
+	if _staged_phone_contacts.has(contact):
+		return bool(_staged_phone_contacts[contact])
+	return state != null and state.has_phone_contact(contact)
+
+
+func _phone_contact_candidate() -> Dictionary:
+	var candidate: Dictionary = state.phone_contacts() if state != null else {}
+	for raw_contact: Variant in _staged_phone_contacts:
+		var contact: int = int(raw_contact)
+		if bool(_staged_phone_contacts[raw_contact]):
+			candidate[contact] = true
+		else:
+			candidate.erase(contact)
+	return candidate
+
+
+func _stage_phone_contact(contact: int, add: bool = true) -> Dictionary:
+	if data == null or contact < 0 or contact >= data.world_phone_contact_count():
+		return {"ok": false, "reason": &"invalid_phone_contact", "contact": contact}
+	if add:
+		if _phone_contact_registered(contact):
+			_script_value = PHONE_CONTACTS_FULL
+			_emit_runtime_event(&"phone_contact_changed", {
+				"contact": contact, "added": false, "result": _script_value,
+			})
+			return {"ok": true, "added": false, "result": _script_value}
+		var candidate: Dictionary = _phone_contact_candidate()
+		if candidate.size() >= Gen2WorldState.PHONE_CONTACT_CAPACITY:
+			_script_value = PHONE_CONTACTS_FULL
+			_emit_runtime_event(&"phone_contact_changed", {
+				"contact": contact, "added": false, "result": _script_value,
+			})
+			return {"ok": true, "added": false, "result": _script_value}
+		_staged_phone_contacts[contact] = true
+		_script_value = PHONE_CONTACT_GOT
+		_emit_runtime_event(&"phone_contact_changed", {
+			"contact": contact, "added": true, "result": _script_value,
+		})
+		return {"ok": true, "added": true, "result": _script_value}
+	if not _phone_contact_registered(contact):
+		_script_value = 1
+		_emit_runtime_event(&"phone_contact_changed", {
+			"contact": contact, "added": false, "removed": false, "result": _script_value,
+		})
+		return {"ok": true, "removed": false, "result": _script_value}
+	_staged_phone_contacts[contact] = false
+	_script_value = 0
+	_emit_runtime_event(&"phone_contact_changed", {
+		"contact": contact, "added": false, "removed": true, "result": _script_value,
+	})
+	return {"ok": true, "removed": true, "result": _script_value}
+
+
 func _stage_phone_choice(contact: int) -> Dictionary:
 	_pending = {
 		"type": &"choice",
@@ -968,21 +1093,92 @@ func _clock_hour() -> int:
 
 
 func _execute_phone_special(special: int) -> Dictionary:
-	## These are the two specials called by the imported phone scripts. They
-	## populate text buffers on the cartridge; the text host publishes the same
-	## semantic event and leaves the display-specific formatting to the UI.
-	if special not in [91, 92]:
-		return {
-			"ok": false,
-			"reason": &"unsupported_phone_special",
-			"special": special,
-		}
-	_emit_runtime_event(&"phone_special_requested", {
-			"special": special,
-			"kind": &"random_wild_mon" if special == 91 else &"random_trainer_mon",
-		})
-	_script_value = 1
+	## These IDs are the source SpecialsPointers entries used by imported phone
+	## scripts. The random phone routines write StringBuffer4, while the
+	## fishing routine preserves wScriptVar as its species flag.
+	match special:
+		SPECIAL_ACTIVATE_FISHING_SWARM:
+			_emit_runtime_event(&"phone_special_requested", {
+				"special": special, "kind": &"activate_fishing_swarm",
+				"species": _script_value,
+			})
+		SPECIAL_RANDOM_UNSEEN_WILD_MON:
+			_emit_runtime_event(&"phone_special_requested", {
+				"special": special, "kind": &"random_unseen_wild_mon",
+				"internal_text": true,
+			})
+			_script_value = 1
+		SPECIAL_RANDOM_PHONE_WILD_MON:
+			var wild_name: String = _phone_wild_mon_name()
+			_set_text_buffer(1, wild_name, &"phone_wild_mon", {"special": special})
+			_emit_runtime_event(&"phone_special_requested", {
+				"special": special, "kind": &"random_phone_wild_mon",
+				"buffer": 1, "value": wild_name,
+			})
+		SPECIAL_RANDOM_PHONE_MON:
+			var trainer_mon_name: String = _phone_trainer_mon_name()
+			_set_text_buffer(1, trainer_mon_name, &"phone_mon", {"special": special})
+			_emit_runtime_event(&"phone_special_requested", {
+				"special": special, "kind": &"random_phone_mon",
+				"buffer": 1, "value": trainer_mon_name,
+			})
+		_:
+			return {
+				"ok": false,
+				"reason": &"unsupported_phone_special",
+				"special": special,
+			}
 	return {"ok": true}
+
+
+func _phone_contact() -> Dictionary:
+	if data == null:
+		return {}
+	var contact_id: int = int(_phone_context.get(
+		"caller_id", _phone_context.get("contact_id", -1)
+	))
+	return data.world_phone_contact(contact_id)
+
+
+func _phone_wild_mon_name() -> String:
+	var contact: Dictionary = _phone_contact()
+	var record: Dictionary = data.world_encounter(
+		Gen2WorldEncounter.METHOD_GRASS,
+		int(contact.get("map_group", -1)), int(contact.get("map_number", -1))
+	) if data != null else {}
+	var slots: Variant = record.get("slots", [])
+	var hour: int = int((_request.get("clock", {}) as Dictionary).get("hour", 0))
+	var time_of_day: int = Gen2WorldClock.new(hour).time_of_day()
+	if not slots is Array or time_of_day < 0 or time_of_day >= (slots as Array).size():
+		return ""
+	var selected: Variant = (slots as Array)[time_of_day]
+	if not selected is Array or (selected as Array).size() < 4:
+		return ""
+	## RandomPhoneWildMon masks the cartridge RNG to select one of the first
+	## four grass slots, rather than using the ordinary weighted encounter roll.
+	var raw_slot: Variant = (selected as Array)[_phone_random.randi_range(0, 3)]
+	if not raw_slot is Dictionary:
+		return ""
+	var species: int = int((raw_slot as Dictionary).get("species", 0))
+	if species <= 0 or data.species(species).is_empty():
+		return ""
+	return String(data.species(species).get("name", ""))
+
+
+func _phone_trainer_mon_name() -> String:
+	var contact: Dictionary = _phone_contact()
+	var trainer_group: int = int(contact.get("trainer_class", 0))
+	var trainer_id: int = int(contact.get("trainer_number", 0)) - 1
+	var party: Array = data.trainer_party(trainer_group, trainer_id).get("party", []) if data != null else []
+	var candidates: Array[int] = []
+	for mon: Dictionary in party:
+		var species: int = int(mon.get("species", 0))
+		if species > 0 and data.species(species).size() > 0:
+			candidates.append(species)
+	if candidates.is_empty():
+		return ""
+	var species: int = candidates[_phone_random.randi_range(0, candidates.size() - 1)]
+	return String(data.species(species).get("name", ""))
 
 
 func _stage_warp_facing_request(command: Dictionary) -> Dictionary:
@@ -1083,7 +1279,7 @@ func _stage_choice(command: Dictionary, choices: Array) -> Dictionary:
 
 func _show_text(bank: int, address: int, finish_after: bool) -> Dictionary:
 	var raw: PackedByteArray = data.world_text(bank, address) if data != null else PackedByteArray()
-	var decoded: Dictionary = Gen2WorldScript.decode_text(raw)
+	var decoded: Dictionary = _decode_text_with_buffers(raw)
 	if not bool(decoded.get("ok", false)):
 		return {
 			"ok": false,
@@ -1101,6 +1297,39 @@ func _show_text(bank: int, address: int, finish_after: bool) -> Dictionary:
 	}
 	_finish_after_pending = finish_after
 	return {"ok": true}
+
+
+func _set_text_buffer(
+	buffer: int, value: String, kind: StringName, details: Dictionary = {}
+) -> void:
+	_text_buffers[buffer] = value
+	var event: Dictionary = {
+		"buffer": buffer, "value": value, "kind": kind,
+	}
+	for key: Variant in details:
+		event[key] = details[key]
+	_emit_runtime_event(&"text_buffer_changed", event)
+
+
+func _decode_text_with_buffers(raw: PackedByteArray) -> Dictionary:
+	if raw.is_empty():
+		return {"ok": false, "reason": &"missing_text"}
+	var at: int = 1 if raw[0] == Gen2WorldScript.TEXT_START else 0
+	var out: String = ""
+	while at < raw.size():
+		var byte: int = int(raw[at])
+		if byte == Gen2WorldScript.TEXT_TERMINATOR:
+			return {"ok": true, "text": out, "bytes": at + 1}
+		if byte == TEXT_STRING_BUFFER:
+			if at + 1 >= raw.size():
+				return {"ok": false, "reason": &"truncated_text_buffer", "text": out}
+			var buffer: int = int(raw[at + 1])
+			out += String(_text_buffers.get(buffer, "<BUFFER_%d>" % buffer))
+			at += 2
+			continue
+		out += Gen2Text.character(byte)
+		at += 1
+	return {"ok": false, "reason": &"missing_text_terminator", "text": out}
 
 
 func _stage_warp(command: Dictionary) -> Dictionary:

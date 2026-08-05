@@ -41,6 +41,8 @@ var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
 ## reproducible route sets its own generator; otherwise map setup randomizes.
 var schedule_random: RandomNumberGenerator = null
 var _last_schedule: Dictionary = {}
+var _phone_ring: Gen2WorldPhoneRing = null
+var _phone_ring_request: Dictionary = {}
 
 const PHONE_ENTRANCE_COLLISIONS: Array[int] = [0x71, 0x79, 0x7A, 0x7B]
 
@@ -333,6 +335,36 @@ func world_clock() -> Dictionary:
 	return {"day": world_day, "hour": world_hour, "minute": world_minute}
 
 
+func phone_ring_active() -> bool:
+	return _phone_ring != null and not _phone_ring.is_finished()
+
+
+func pending_phone_ring() -> Dictionary:
+	if _phone_ring == null:
+		return {}
+	var ring: Dictionary = _phone_ring.snapshot()
+	ring["kind"] = _phone_ring_request.get("kind", &"phone_incoming")
+	ring["phone"] = (_phone_ring_request.get("phone", {}) as Dictionary).duplicate(true)
+	ring["contact"] = (_phone_ring_request.get("contact", {}) as Dictionary).duplicate(true)
+	return ring
+
+
+## Advances the source ring timing and starts the imported phone script when
+## both rings have completed. A phone ring is transient runtime state and is
+## intentionally absent from world snapshots.
+func advance_phone_ring(delta: float) -> Array:
+	if _phone_ring == null:
+		return []
+	var progress: Dictionary = _phone_ring.advance(delta)
+	if not bool(progress.get("finished", false)):
+		return []
+	var request: Dictionary = _phone_ring_request.duplicate(true)
+	_phone_ring = null
+	_phone_ring_request = {}
+	_enqueue_script(request)
+	return run_event_queue(false)
+
+
 ## Queues a source-style incoming call after checking the entrance, receive
 ## timer, random roll, service map, registration, time and same-map rules.
 func request_incoming_phone_call(
@@ -342,6 +374,8 @@ func request_incoming_phone_call(
 	force: bool = false,
 	selection_byte: int = 0,
 ) -> Array:
+	if phone_ring_active():
+		return [{"ok": true, "status": &"phone_ring", "event": pending_phone_ring()}]
 	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_incoming(
 		data, state, current_map, world_hour, standing_on_entrance, timer_ready,
 		random_byte, force, selection_byte
@@ -349,7 +383,7 @@ func request_incoming_phone_call(
 	if not bool(resolved.get("ok", false)):
 		return [{"ok": false, "status": &"phone_unavailable", "reason": resolved.get("reason", &"phone_unavailable")}]
 	var contact: Dictionary = resolved["contact"]
-	_enqueue_script({
+	var request: Dictionary = {
 		"kind": &"phone_incoming",
 		"map_group": current_map.group,
 		"map_number": current_map.number,
@@ -358,13 +392,15 @@ func request_incoming_phone_call(
 		"phone": resolved["phone"],
 		"contact": contact,
 		"reset_receive_timer": true,
-	})
-	return run_event_queue(false)
+	}
+	return _start_phone_ring(request)
 
 
 ## Queues a source-style special call. The pending call remains in world state
 ## until the imported phone script clears VAR_SPECIALPHONECALL.
 func request_special_phone_call(call_id: int) -> Array:
+	if phone_ring_active():
+		return [{"ok": true, "status": &"phone_ring", "event": pending_phone_ring()}]
 	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_special(
 		data, current_map, call_id, world_hour
 	)
@@ -373,7 +409,7 @@ func request_special_phone_call(call_id: int) -> Array:
 			"ok": false, "status": &"special_phone_unavailable",
 			"reason": resolved.get("reason", &"special_phone_unavailable"),
 		}]
-	_enqueue_script({
+	var request: Dictionary = {
 		"kind": &"phone_special",
 		"map_group": current_map.group,
 		"map_number": current_map.number,
@@ -383,8 +419,8 @@ func request_special_phone_call(call_id: int) -> Array:
 		"contact": resolved["contact"],
 		"special_call_id": call_id,
 		"reset_receive_timer": true,
-	})
-	return run_event_queue(false)
+	}
+	return _start_phone_ring(request, 30)
 
 
 ## Checks the pending special call before ordinary step effects, matching the
@@ -425,6 +461,13 @@ func advance_phone_schedule(
 ) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": &"missing_world_state", "timer_ready": false}
+	if phone_ring_active():
+		return {
+			"ok": true,
+			"timer_ready": state.phone_receive_ready(),
+			"ringing": true,
+			"results": [{"ok": true, "status": &"phone_ring", "event": pending_phone_ring()}],
+		}
 	var crossed: bool = state.advance_phone_receive_timer(minutes)
 	var attempt: Dictionary = {
 		"ok": true,
@@ -465,12 +508,14 @@ func registered_phone_contacts() -> Array:
 ## Queues the selected outgoing caller script. Pokegear presentation can use
 ## this boundary without duplicating phone eligibility rules in a scene.
 func request_outgoing_phone_call(contact_id: int) -> Array:
+	if phone_ring_active():
+		return [{"ok": true, "status": &"phone_ring", "event": pending_phone_ring()}]
 	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_outgoing(
 		data, state, current_map, contact_id, world_hour
 	)
 	if not bool(resolved.get("ok", false)):
 		return [{"ok": false, "status": &"phone_unavailable", "reason": resolved.get("reason", &"phone_unavailable")}]
-	_enqueue_script({
+	var request: Dictionary = {
 		"kind": &"phone_outgoing",
 		"map_group": current_map.group,
 		"map_number": current_map.number,
@@ -478,8 +523,21 @@ func request_outgoing_phone_call(contact_id: int) -> Array:
 		"script": int(resolved["script"]["address"]),
 		"phone": resolved["phone"],
 		"contact": resolved["contact"],
-	})
-	return run_event_queue(false)
+	}
+	return _start_phone_ring(request)
+
+
+func _start_phone_ring(request: Dictionary, lead_frames: int = 0) -> Array:
+	if _phone_ring != null:
+		return [{"ok": false, "status": &"phone_unavailable", "reason": &"phone_ring_active"}]
+	_phone_ring_request = request.duplicate(true)
+	_phone_ring = Gen2WorldPhoneRing.new(lead_frames)
+	return [{
+		"ok": true,
+		"status": &"phone_ring",
+		"event": pending_phone_ring(),
+		"request": request.duplicate(true),
+	}]
 
 
 func _fishing_group_for_state(group: int) -> int:
@@ -1547,6 +1605,8 @@ func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictiona
 ## Moves one cell or enters a neighboring map when the step leaves a connected
 ## map edge. The legacy boolean move() wrapper remains available to callers.
 func move_result(direction: Vector2i) -> Dictionary:
+	if phone_ring_active():
+		return {"ok": false, "kind": &"move", "reason": &"phone_ring_active"}
 	if abs(direction.x) + abs(direction.y) != 1:
 		return {"ok": false, "kind": &"move", "reason": &"invalid_direction"}
 	var destination: Vector2i = player_cell + direction

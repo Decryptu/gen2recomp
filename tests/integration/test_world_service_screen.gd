@@ -97,6 +97,9 @@ func test_pending_special_call_dispatches_the_imported_script() -> void:
 	assert_true(attempt["attempted"])
 	_world_screen._show_script_results(attempt["results"])
 	await get_tree().process_frame
+	var resumed: Array = _world_screen._world.advance_phone_ring(3.0)
+	_world_screen._show_script_results(resumed)
+	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.script_input_waiting())
 	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
@@ -123,6 +126,30 @@ func test_phone_list_shows_registered_numbers_and_can_close() -> void:
 	assert_true(host.handle_key(KEY_ESCAPE))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
+
+
+func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
+	_write_phone_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	var registered: Dictionary = _world_screen._world.state.apply_changes({}, {}, {
+		"phone_contacts": {0: true},
+	})
+	assert_true(registered["ok"])
+	_world_screen._open_phone_list()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_true(host.handle_key(KEY_ENTER))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_true(_world_screen._world.phone_ring_active())
+	assert_true(_world_screen._caption.text.contains("PHONE RING"))
+	var resumed: Array = _world_screen._world.advance_phone_ring(3.0)
+	_world_screen._show_script_results(resumed)
+	await get_tree().process_frame
+	assert_true(_world_screen._world.script_input_waiting())
+	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
 
 
 func test_audio_request_decodes_and_starts_the_runtime_player() -> void:
@@ -169,6 +196,9 @@ func _write_menu_request() -> void:
 func _write_phone_request() -> void:
 	_write_request_script([0x9C, 0x01, 0x00, 0x91], 0x6320)
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6400)] = [
+		0x4B, Fixture.BANK, 0x00, 0x70, 0x9C, 0x00, 0x00, 0x91,
+	]
 	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6500)] = [
 		0x4B, Fixture.BANK, 0x00, 0x70, 0x9C, 0x00, 0x00, 0x91,
 	]
@@ -183,8 +213,9 @@ func _write_phone_request() -> void:
 	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), {
 		"contacts": [{
 			"index": 0, "trainer_class": 1, "trainer_number": 2,
-			"map_group": Fixture.MAP_GROUP, "map_number": Fixture.MAP_NUMBER,
-			"callee_time": 1, "caller_time": 2,
+			"map_group": Fixture.MAP_GROUP + 1, "map_number": Fixture.MAP_NUMBER,
+			"callee_time": Gen2WorldPhoneHost.TIME_ANY,
+			"caller_time": Gen2WorldPhoneHost.TIME_ANY,
 			"caller_script": {"bank": Fixture.BANK, "address": 0x6400},
 			"callee_script": {"bank": Fixture.BANK, "address": 0x6500},
 		}],
