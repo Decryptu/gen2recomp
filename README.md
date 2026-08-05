@@ -33,7 +33,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > real maps, moves through connected maps and hosts explicit script requests,
 > including real trainer battles, imported win/loss text, map reloads and
 > save-safe blackout recovery. Full story state, audio and the mod loader do not exist
-> yet, so this is not a complete game.
+> yet, so this is not a complete game. Scene-level integration tests also cover
+> trainer sight through the real overworld battle overlay, imported terminal
+> text, live object refresh and save-backed blackout recovery.
 
 ## Getting started
 
@@ -149,7 +151,8 @@ godot --headless -s res://addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_su
 ```
 
 Exit code `0` means all tests passed. They use synthetic files and a known
-SHA-1 vector, never a real cartridge.
+SHA-1 vector, never a real cartridge. The overworld trainer integration suite
+can be run on its own with `-gdir=res://tests/integration`.
 
 ## Layout
 
