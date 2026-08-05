@@ -130,3 +130,45 @@ func test_clear_removes_subdirectories_too() -> void:
 	RomCache.write_indices(RomCache.pic_path(_directory, "front"), PackedByteArray([1, 2, 3]))
 	RomCache.clear(_directory)
 	assert_false(DirAccess.dir_exists_absolute(_directory))
+
+
+func test_a_payload_map_keeps_pointers_in_json_and_bytes_in_the_blob() -> void:
+	RomCache.prepare(_directory)
+	var json_path: String = RomCache.world_scripts_path(_directory)
+	var blob_path: String = RomCache.blob_path(json_path)
+	assert_true(RomCache.write_payload_map(json_path, blob_path, {
+		"48:6000": [0x33, 0x91],
+		"48:7000": [0x14, 0x02, 0x91],
+	}))
+
+	var stored: Variant = RomCache.read_json(json_path)
+	assert_true(stored is Dictionary)
+	# The pointer survives as the key; the run is a span, not decimal text.
+	assert_eq(_span((stored as Dictionary)["48:6000"]), [0, 2])
+	assert_eq(_span((stored as Dictionary)["48:7000"]), [2, 3])
+	assert_eq(RomCache.read_blob(blob_path), PackedByteArray([0x33, 0x91, 0x14, 0x02, 0x91]))
+
+
+func test_a_section_moves_only_named_byte_fields_into_the_blob() -> void:
+	RomCache.prepare(_directory)
+	var json_path: String = RomCache.world_audio_path(_directory)
+	var blob_path: String = RomCache.blob_path(json_path)
+	assert_true(RomCache.write_section(json_path, blob_path, {
+		"music": [{"bank": 2, "address": 0x4000, "bytes": [7, 8, 9]}],
+		"wave_samples": {"bytes": [1, 2]},
+	}))
+
+	var stored: Dictionary = RomCache.read_json(json_path)
+	var record: Dictionary = (stored["music"] as Array)[0]
+	assert_eq(_span(record), [0, 3])
+	# A pointer field is small and byte-sized but is not a payload, so it stays.
+	assert_eq(int(record["bank"]), 2)
+	assert_eq(int(record["address"]), 0x4000)
+	assert_eq(_span(stored["wave_samples"]), [3, 2])
+	assert_eq(RomCache.read_blob(blob_path), PackedByteArray([7, 8, 9, 1, 2]))
+
+
+## JSON has one number type, so a span reads back as floats.
+func _span(record: Variant) -> Array:
+	var raw: Array = (record as Dictionary)[RomCache.PAYLOAD_KEY]
+	return [int(raw[0]), int(raw[1])]

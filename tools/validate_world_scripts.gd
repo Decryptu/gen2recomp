@@ -56,7 +56,9 @@ func _validate(game_id: StringName) -> bool:
 	var failure_opcodes: Dictionary = {}
 	var command_names: Dictionary = {}
 	for raw_key: Variant in (scripts_value as Dictionary):
-		var bytes: PackedByteArray = _bytes(scripts_value[raw_key])
+		# Read through GameData rather than off the JSON: the cache stores byte
+		# runs as spans into a blob, and this checks the path the runtime uses.
+		var bytes: PackedByteArray = _pointer_bytes(data, String(raw_key), false)
 		if bytes.is_empty():
 			parse_failures += 1
 			failure_reasons["empty_script"] = int(failure_reasons.get("empty_script", 0)) + 1
@@ -86,8 +88,8 @@ func _validate(game_id: StringName) -> bool:
 	var invalid_text: int = 0
 	var invalid_text_reasons: Dictionary = {}
 	var invalid_text_samples: Array = []
-	for raw_value: Variant in (text_value as Dictionary).values():
-		var raw_text: PackedByteArray = _bytes(raw_value)
+	for raw_key: Variant in (text_value as Dictionary):
+		var raw_text: PackedByteArray = _pointer_bytes(data, String(raw_key), true)
 		var decoded: Dictionary = Gen2WorldScript.decode_text(raw_text)
 		if not bool(decoded.get("ok", false)):
 			invalid_text += 1
@@ -110,13 +112,14 @@ func _validate(game_id: StringName) -> bool:
 	return true
 
 
-func _bytes(value: Variant) -> PackedByteArray:
-	var out := PackedByteArray()
-	if not value is Array:
-		return out
-	for byte: Variant in value as Array:
-		out.append(int(byte))
-	return out
+## Resolves one "bank:address" cache key through the runtime accessor.
+func _pointer_bytes(data: GameData, key: String, text: bool) -> PackedByteArray:
+	var parts: PackedStringArray = key.split(":")
+	if parts.size() != 2:
+		return PackedByteArray()
+	var bank: int = int(parts[0])
+	var address: int = ("0x%s" % parts[1]).hex_to_int()
+	return data.world_text(bank, address) if text else data.world_script(bank, address)
 
 
 func _head(bytes: PackedByteArray) -> String:

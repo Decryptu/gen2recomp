@@ -54,15 +54,29 @@ static func import_to_cache(
 		return {"ok": false, "message": "Could not write overworld animation data."}
 	if not RomCache.write_json(RomCache.world_maps_path(directory), result["maps"]):
 		return {"ok": false, "message": "Could not write overworld map data."}
-	if not RomCache.write_json(RomCache.world_scripts_path(directory), result["scripts"]):
+	if not RomCache.write_payload_map(
+		RomCache.world_scripts_path(directory),
+		RomCache.blob_path(RomCache.world_scripts_path(directory)),
+		result["scripts"],
+	):
 		return {"ok": false, "message": "Could not write overworld script data."}
-	if not RomCache.write_json(
-		RomCache.world_standard_scripts_path(directory), result["standard_scripts"]
+	if not RomCache.write_section(
+		RomCache.world_standard_scripts_path(directory),
+		RomCache.blob_path(RomCache.world_standard_scripts_path(directory)),
+		result["standard_scripts"],
 	):
 		return {"ok": false, "message": "Could not write standard overworld script data."}
-	if not RomCache.write_json(RomCache.world_text_path(directory), result["text"]):
+	if not RomCache.write_payload_map(
+		RomCache.world_text_path(directory),
+		RomCache.blob_path(RomCache.world_text_path(directory)),
+		result["text"],
+	):
 		return {"ok": false, "message": "Could not write overworld text data."}
-	if not RomCache.write_json(RomCache.world_movements_path(directory), result["movements"]):
+	if not RomCache.write_payload_map(
+		RomCache.world_movements_path(directory),
+		RomCache.blob_path(RomCache.world_movements_path(directory)),
+		result["movements"],
+	):
 		return {"ok": false, "message": "Could not write overworld movement data."}
 
 	var graphics: Dictionary = result["graphics"]
@@ -82,6 +96,13 @@ static func import_to_cache(
 		"maps": result["maps"].size(),
 		"tilesets": tilesets.size(),
 		"overworld_sprites": result["sprites"].size(),
+		# The service importer scans and extends these. Handing back what was
+		# just decoded keeps them raw byte runs; reading them off disk again
+		# would hand it the spans the cache stores instead.
+		"scripts": result["scripts"],
+		"standard_scripts": result["standard_scripts"],
+		"text": result["text"],
+		"movements": result["movements"],
 	}
 
 

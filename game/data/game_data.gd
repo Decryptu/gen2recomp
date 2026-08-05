@@ -131,7 +131,9 @@ func world_maps() -> Array:
 ## Raw bounded script bytes indexed by the cartridge's bank and CPU address.
 ## Runtime never opens a ROM; these bytes come from the user cache only.
 func world_script(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_scripts().get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_scripts().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("scripts")
+	)
 
 
 ## One imported menu header referenced by an overworld script.
@@ -172,7 +174,7 @@ func world_phone_contact_count() -> int:
 
 
 func world_audio(kind: StringName, index: int) -> Dictionary:
-	return _service_row(_audio().get(String(kind), []), index)
+	return _service_row(_audio().get(String(kind), []), index, _blob("audio"))
 
 
 func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionary:
@@ -181,17 +183,17 @@ func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionar
 		return {}
 	for value: Dictionary in rows as Array:
 		if int(value.get("bank", -1)) == bank and int(value.get("address", -1)) == address:
-			return _coerce_service_dictionary(value)
+			return _coerce_service_dictionary(value, _blob("audio"))
 	return {}
 
 
 func world_audio_asset(kind: StringName) -> Dictionary:
 	var value: Variant = _audio().get(String(kind), {})
-	return _coerce_service_dictionary(value)
+	return _coerce_service_dictionary(value, _blob("audio"))
 
 
 func world_audio_asset_bytes(kind: StringName) -> PackedByteArray:
-	return _cached_bytes(world_audio_asset(kind).get("bytes", []))
+	return _payload_bytes(world_audio_asset(kind).get("bytes", []), _blob("audio"))
 
 
 func world_service_counts() -> Dictionary:
@@ -214,18 +216,23 @@ func world_standard_script(index: int) -> Dictionary:
 	var entry: Dictionary = (value as Dictionary).duplicate(true)
 	entry["bank"] = int(entry.get("bank", -1))
 	entry["address"] = int(entry.get("address", -1))
-	entry["data"] = _cached_bytes(entry.get("bytes", []))
+	entry["data"] = _payload_bytes(entry, _blob("standard_scripts")) if entry.has("payload") \
+		else _payload_bytes(entry.get("bytes", []), _blob("standard_scripts"))
 	return entry
 
 
 ## Raw bounded text bytes indexed by the cartridge's bank and CPU address.
 func world_text(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_text().get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_text().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("text")
+	)
 
 
 ## Raw bounded movement bytes indexed by the script bank and movement pointer.
 func world_movement(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_movements().get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_movements().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("movements")
+	)
 
 
 ## One decoded tileset's metatile and collision tables, or null if absent.
@@ -767,6 +774,35 @@ func _read_section(path: String, as_array: bool) -> Variant:
 	return value if value is Dictionary else {}
 
 
+## The binary blob a section's byte spans address, read once and kept. It is a
+## [PackedByteArray], so it costs one byte per cartridge byte rather than the
+## twenty-odd a Variant in an Array costs.
+func _blob(section: String) -> PackedByteArray:
+	var key: String = "blob/%s" % section
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_blob(
+		RomCache.blob_path(_section_json_path(section))
+	)
+	_indices[key] = data
+	return data
+
+
+func _section_json_path(section: String) -> String:
+	match section:
+		"scripts":
+			return RomCache.world_scripts_path(directory)
+		"standard_scripts":
+			return RomCache.world_standard_scripts_path(directory)
+		"text":
+			return RomCache.world_text_path(directory)
+		"movements":
+			return RomCache.world_movements_path(directory)
+		"audio":
+			return RomCache.world_audio_path(directory)
+	return ""
+
+
 func _maps() -> Array:
 	if _claim_section("maps"):
 		for value: Dictionary in _read_section(RomCache.world_maps_path(directory), true):
@@ -877,43 +913,75 @@ func _entry(rows: Array, index: int) -> Dictionary:
 	return rows[index]
 
 
-func _service_row(value: Variant, index: int) -> Dictionary:
+func _service_row(
+	value: Variant, index: int, blob: PackedByteArray = PackedByteArray()
+) -> Dictionary:
 	if not value is Array or index < 0 or index >= (value as Array).size():
 		return {}
-	return _coerce_service_dictionary((value as Array)[index])
+	return _coerce_service_dictionary((value as Array)[index], blob)
 
 
 func _service_rows_count(value: Variant) -> int:
 	return (value as Array).size() if value is Array else 0
 
 
-func _coerce_service_dictionary(value: Variant) -> Dictionary:
-	var coerced: Variant = _coerce_service_value(value)
+func _coerce_service_dictionary(
+	value: Variant, blob: PackedByteArray = PackedByteArray()
+) -> Dictionary:
+	var coerced: Variant = _coerce_service_value(value, blob)
 	return coerced if coerced is Dictionary else {}
 
 
-func _coerce_service_value(value: Variant) -> Variant:
+func _coerce_service_value(value: Variant, blob: PackedByteArray) -> Variant:
 	if value is float:
 		return int(value)
 	if value is Array:
 		var array: Array = []
 		for entry: Variant in value as Array:
-			array.append(_coerce_service_value(entry))
+			array.append(_coerce_service_value(entry, blob))
 		return array
 	if value is Dictionary:
 		var dictionary: Dictionary = {}
 		for key: Variant in value:
-			dictionary[key] = _coerce_service_value(value[key])
+			# A payload span is handed back under the name the record used to
+			# carry inline, so nothing downstream of here has to know that the
+			# bytes now live in a blob.
+			if String(key) == RomCache.PAYLOAD_KEY:
+				dictionary[RomCache.BYTES_KEY] = _span_bytes(value[key], blob)
+				continue
+			dictionary[key] = _coerce_service_value(value[key], blob)
 		return dictionary
 	return value
 
 
-func _cached_bytes(value: Variant) -> PackedByteArray:
+## Resolves one cached byte run, whichever way the cache holds it.
+##
+## A record carrying a [constant RomCache.PAYLOAD_KEY] is a span into the
+## section's blob. A bare Array is read inline, which is what a hand-written test
+## fixture holds. The two never have to be told apart by shape: the key says
+## which one this is.
+func _payload_bytes(value: Variant, blob: PackedByteArray) -> PackedByteArray:
+	if value is PackedByteArray:
+		return value
+	if value is Dictionary and (value as Dictionary).has(RomCache.PAYLOAD_KEY):
+		return _span_bytes((value as Dictionary)[RomCache.PAYLOAD_KEY], blob)
 	if not value is Array:
 		return PackedByteArray()
 	var raw: Array = value as Array
 	var out := PackedByteArray()
 	out.resize(raw.size())
 	for index: int in out.size():
-		out[index] = int(raw[index])
+		out[index] = int(raw[index]) & 0xFF
 	return out
+
+
+## Reads an [offset, length] span out of a section blob. A span that does not
+## address the blob answers empty rather than reading a neighbouring record.
+func _span_bytes(span: Variant, blob: PackedByteArray) -> PackedByteArray:
+	if not span is Array or (span as Array).size() != RomCache.PAYLOAD_SPAN:
+		return PackedByteArray()
+	var at: int = int((span as Array)[0])
+	var length: int = int((span as Array)[1])
+	if at < 0 or length < 0 or at + length > blob.size():
+		return PackedByteArray()
+	return blob.slice(at, at + length)

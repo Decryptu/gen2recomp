@@ -45,9 +45,18 @@ const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
 const WORLD_AUDIO: String = "world_audio.json"
 
+## The key a payload span is stored under, and how many numbers it holds. A
+## cartridge byte run written inline as JSON decimals costs about four bytes on
+## disk and about twenty-six resident once parsed into an Array of Variants.
+## Scripts, text and audio are almost entirely such runs, so they live in a
+## binary blob beside the JSON and the JSON keeps only [offset, length].
+const PAYLOAD_KEY: String = "payload"
+const PAYLOAD_SPAN: int = 2
+const BYTES_KEY: String = "bytes"
+
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 21
+const FORMAT_VERSION: int = 22
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -91,6 +100,12 @@ static func trainers_path(directory: String) -> String:
 
 static func world_maps_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_MAPS]
+
+
+## The binary blob beside a section's JSON, holding the cartridge byte runs that
+## the JSON refers to by span.
+static func blob_path(json_path: String) -> String:
+	return "%s.bin" % json_path.get_basename()
 
 
 static func world_scripts_path(directory: String) -> String:
@@ -206,6 +221,71 @@ static func read_json(path: String) -> Variant:
 	var text: String = file.get_as_text()
 	file.close()
 	return JSON.parse_string(text)
+
+
+## Writes a pointer map of raw cartridge byte runs: scripts, text and movements,
+## all of which are [code]{ "bank:address": [bytes] }[/code]. Every value is a
+## run, so each becomes a [constant PAYLOAD_KEY] span into the blob.
+static func write_payload_map(
+	json_path: String, blob_path: String, entries: Dictionary
+) -> bool:
+	var blob := PackedByteArray()
+	var stripped: Dictionary = {}
+	for key: Variant in entries:
+		var value: Variant = entries[key]
+		stripped[key] = {PAYLOAD_KEY: _append_payload(value, blob)} if value is Array \
+			else value
+	if not write_json(json_path, stripped):
+		return false
+	return write_indices(blob_path, blob)
+
+
+## Writes a section whose byte runs are named fields rather than whole values,
+## as the audio records and the standard-script table are.
+##
+## Only a [code]bytes[/code] field holding an array is moved. Nothing else is
+## touched: plenty of cached arrays are small numbers without being cartridge
+## payloads, and a mart list or an encounter rate must stay an array.
+static func write_section(json_path: String, blob_path: String, value: Variant) -> bool:
+	var blob := PackedByteArray()
+	var stripped: Variant = _extract_payloads(value, blob)
+	if not write_json(json_path, stripped):
+		return false
+	return write_indices(blob_path, blob)
+
+
+## The binary blob for a section, or empty when the section has none. Held as a
+## [PackedByteArray], which costs one byte per cartridge byte.
+static func read_blob(path: String) -> PackedByteArray:
+	return read_indices(path)
+
+
+## Replaces each [code]bytes[/code] array with a span into [param blob], walking
+## lists and records to reach the ones nested inside them.
+static func _extract_payloads(value: Variant, blob: PackedByteArray) -> Variant:
+	if value is Array:
+		var out: Array = []
+		for entry: Variant in value as Array:
+			out.append(_extract_payloads(entry, blob))
+		return out
+	if value is Dictionary:
+		var out_dictionary: Dictionary = {}
+		for key: Variant in value as Dictionary:
+			var entry: Variant = (value as Dictionary)[key]
+			if String(key) == BYTES_KEY and entry is Array:
+				out_dictionary[PAYLOAD_KEY] = _append_payload(entry as Array, blob)
+				continue
+			out_dictionary[key] = _extract_payloads(entry, blob)
+		return out_dictionary
+	return value
+
+
+static func _append_payload(run: Array, blob: PackedByteArray) -> Array:
+	var at: int = blob.size()
+	blob.resize(at + run.size())
+	for index: int in run.size():
+		blob[at + index] = int(run[index]) & 0xFF
+	return [at, run.size()]
 
 
 ## Index buffers are mostly runs of the same value, so they compress hard,
