@@ -4,8 +4,9 @@ extends RefCounted
 ## Where the data lives inside each supported cartridge.
 ##
 ## Offsets are absolute positions in the 2 MiB dump, not bank:address pairs, so
-## a decoder never has to think about banking. Gold and Silver share a layout;
-## Crystal moved almost everything and is its own table.
+## a decoder never has to think about banking. Gold and Silver share the bank
+## map, while a few data sections use per-game offsets; Crystal moved almost
+## everything and is its own table.
 ##
 ## Every offset here was located in the cartridges themselves, by searching for
 ## content whose bytes are known independently (the encoded string "BULBASAUR",
@@ -138,6 +139,23 @@ const MOVE_DATA_SIZE: int = 7
 ## "TERU-SAMA" slots the cartridges ship with; they are decoded rather than
 ## trimmed, so an item number always indexes the table directly.
 const ITEM_COUNT: int = 255
+const ITEM_ATTRIBUTE_SIZE: int = 7
+const ITEM_ATTRIBUTE_PARAM: int = 3
+const ITEM_ATTRIBUTE_PERMISSIONS: int = 4
+const ITEM_ATTRIBUTE_POCKET: int = 5
+const ITEM_ATTRIBUTE_HELP: int = 6
+## The item attribute table calls this field a pocket, but its value is the
+## cartridge's item type: ITEM=1, KEY_ITEM=2, BALL=3, TM_HM=4.
+const ITEM_POCKET_BALL: int = 3
+const ITEMMENU_CURRENT: int = 4
+const ITEMMENU_PARTY: int = 5
+const ITEMMENU_CLOSE: int = 6
+const ITEM_ATTRIBUTE_CANT_SELECT: int = 1 << 6
+const TRADE_RECORD_SIZE: int = 32
+const TRADE_NAME_LENGTH: int = 11
+const TRADE_GENDER_EITHER: int = 0
+const TRADE_GENDER_MALE: int = 1
+const TRADE_GENDER_FEMALE: int = 2
 
 ## Type numbers are sparse: $00-$09 are the physical types, $14-$1B the special
 ## ones, and the run between is padding that still has a name entry. Reading all
@@ -518,7 +536,8 @@ const MOVE_ACCURACY: int = 4
 const MOVE_PP: int = 5
 const MOVE_EFFECT_CHANCE: int = 6
 
-## Gold and Silver are byte-identical in every table below; only content differs.
+## Gold and Silver share the world and battle layout, while a few variable-size
+## data sections move because their content differs.
 const GOLD_SILVER: Dictionary = {
 	"species_names": 0x1B0B74,
 	"base_stats": 0x51B0B,
@@ -527,6 +546,11 @@ const GOLD_SILVER: Dictionary = {
 	"palettes": 0xAD3D,
 	"move_names": 0x1B1574,
 	"item_names": 0x1B0000,
+	"item_attributes": 0x68A0,
+	"item_status_actions": 0xF0C7,
+	"item_healing_hp": 0xF405,
+	"world_trades": 0xFCC24,
+	"world_trade_count": 6,
 	"move_data": 0x41AFE,
 	"evos_attacks": 0x427BD,
 	"type_names": 0x509AE,
@@ -627,6 +651,11 @@ const CRYSTAL: Dictionary = {
 	"palettes": 0xA8CE,
 	"move_names": 0x1C9F29,
 	"item_names": 0x1C8000,
+	"item_attributes": 0x67C1,
+	"item_status_actions": 0xF071,
+	"item_healing_hp": 0xF3AF,
+	"world_trades": 0xFCE58,
+	"world_trade_count": 7,
 	"move_data": 0x41AFB,
 	"evos_attacks": 0x425B1,
 	"type_names": 0x5097B,
@@ -725,8 +754,14 @@ const CRYSTAL: Dictionary = {
 ## The layout for a game id, or an empty Dictionary if it is not characterised.
 static func for_id(id: StringName) -> Dictionary:
 	match id:
-		RomRegistry.GOLD, RomRegistry.SILVER:
+		RomRegistry.GOLD:
 			return GOLD_SILVER
+		RomRegistry.SILVER:
+			var silver: Dictionary = GOLD_SILVER.duplicate(true)
+			silver["item_attributes"] = 0x6866
+			silver["item_status_actions"] = 0xF0C5
+			silver["item_healing_hp"] = 0xF403
+			return silver
 		RomRegistry.CRYSTAL:
 			return CRYSTAL
 	return {}

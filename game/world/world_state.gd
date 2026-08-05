@@ -95,6 +95,27 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	)
 
 
+## Restores the mutable state after a host transaction could not be persisted.
+## The state object stays alive so existing world systems keep their signal
+## connection.
+func restore_from_dict(raw: Variant) -> void:
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(raw)
+	if restored == null:
+		return
+	_event_flags = restored._event_flags.duplicate()
+	_map_scenes = restored._map_scenes.duplicate()
+	_items = restored._items.duplicate()
+	_money = restored._money.duplicate()
+	_coins = restored._coins
+	_phone_contacts = restored._phone_contacts.duplicate()
+	_just_battled = restored._just_battled
+	_repel_steps = restored._repel_steps
+	_swarm_map = restored._swarm_map
+	_fishing_swarm_species = restored._fishing_swarm_species
+	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
+	changed.emit()
+
+
 static func _vector_from_value(value: Variant) -> Vector2i:
 	if value is Array and (value as Array).size() >= 2:
 		return Vector2i(int((value as Array)[0]), int((value as Array)[1]))

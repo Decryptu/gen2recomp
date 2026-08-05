@@ -7,13 +7,23 @@ extends RefCounted
 ## pending with a specific reason rather than being guessed or acknowledged as
 ## if the subsystem had run.
 
-static func complete_runtime_request(world: Gen2WorldAPI, result: Dictionary) -> Dictionary:
+static func complete_runtime_request(
+	world: Gen2WorldAPI,
+	result: Dictionary,
+	save: Gen2SaveData = null,
+	persist: bool = true,
+	random: RandomNumberGenerator = null
+) -> Dictionary:
 	if world == null:
 		return _unavailable(&"missing_world", {})
 	var request: Dictionary = world.pending_runtime_request()
 	if request.is_empty():
 		return _unavailable(&"runtime_request_not_pending", {})
 	var kind: StringName = StringName(request.get("kind", &""))
+	if kind in [&"pokemon_requested", &"trade_requested"]:
+		return Gen2WorldPartyHost.complete_runtime_request(
+			world, result, save, persist, random
+		)
 	if kind in [&"battle_requested", &"swarm_requested"]:
 		return {"ok": true, "handled": true, "results": world.complete_runtime_request(result)}
 	var resolved: Dictionary = _resolve_data_request(world, request)

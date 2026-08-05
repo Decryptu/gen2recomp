@@ -202,8 +202,13 @@ check and `RomImporter.verify_layout()` must run all checks before decoding.
   two blacks. Move entries self-identify by animation number and type bytes are
   range-checked.
 - Variable-length move/item names are checked at the near and far ends; items
-  are also checked at entry four to catch an incorrect walk. The item table
-  retains placeholder names such as `TERU-SAMA` so numbers remain direct keys.
+  are also checked at entry four to catch an incorrect walk. Item attributes,
+  status-healing rows and HP-healing rows are checked before import. The item
+  table retains placeholder names such as `TERU-SAMA` so numbers remain direct
+  keys.
+- NPC trade records are checked for bounded species, gender and reserved bytes.
+  Their 32-byte shape includes the cartridge's 11-byte nickname and OT fields;
+  do not reduce those fields to the ten-byte species-name table.
 - Font data is checked against the charmap, including blank ranges and the
   character codes that must have ink. Battle HUD bars must have consecutive
   fill levels increasing by two lit pixels per step; borders use the same shape

@@ -23,6 +23,7 @@ var directory: String = ""
 var _species: Array = []
 var _moves: Array = []
 var _items: Array = []
+var _world_trades: Array = []
 var _types: Array = []
 var _trainers: Array = []
 ## The matchup chart, folded into a lookup on load: attacker * TYPE_COUNT +
@@ -76,6 +77,7 @@ static func open_directory(path: String) -> GameData:
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
+	data._world_trades = data._read_array(RomCache.world_trades_path(path))
 	data._types = data._read_array(RomCache.types_path(path))
 	data._trainers = data._read_array(RomCache.trainers_path(path))
 	data._build_matchups(data._read_array(RomCache.matchups_path(path)))
@@ -416,6 +418,16 @@ func item(number: int) -> Dictionary:
 
 func item_name(number: int) -> String:
 	return String(item(number).get("name", ""))
+
+
+## One imported NPC trade record, or an empty dictionary when this cartridge
+## does not contain the requested row.
+func world_trade(index: int) -> Dictionary:
+	return _entry(_world_trades, index)
+
+
+func world_trade_count() -> int:
+	return _world_trades.size()
 
 
 ## Type names are indexed from zero, unlike everything else here.

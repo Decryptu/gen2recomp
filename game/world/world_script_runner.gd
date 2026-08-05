@@ -163,7 +163,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		return advance()
 	if kind in [
 		&"mart_requested", &"audio_requested", &"phone_call_requested",
-		&"special_phone_call_requested",
+		&"special_phone_call_requested", &"pokemon_requested", &"trade_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
