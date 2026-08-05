@@ -92,6 +92,8 @@ func create_new_game(player_name: String, starter_species: int) -> bool:
 	if not result["ok"]:
 		_set_status("New game was not saved.", String(result["message"]), ERROR)
 		return false
+	# The slot now holds a different save than the one the runtime is sharing.
+	GameRuntime.reload_selected_save()
 	_new_game_visible = false
 	_refresh()
 	_set_status(
@@ -128,6 +130,7 @@ func import_sav_path(path: String, slot: int = -1) -> bool:
 	if not result["ok"]:
 		_set_status("Save import failed.", String(result["message"]), ERROR)
 		return false
+	GameRuntime.reload_selected_save()
 	_new_game_visible = false
 	_refresh()
 	_set_status(

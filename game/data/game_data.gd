@@ -15,6 +15,12 @@ extends RefCounted
 ## Index buffers are loaded on first use and kept. A pic atlas is a megabyte or
 ## so of indices; reading four of them to draw one sprite would be a waste, and
 ## re-reading one per frame would be worse.
+##
+## The world sections are read the same way, for a blunter reason: scripts, text
+## and audio are almost all of a cache, and the launcher, the pic viewer and a
+## battle never look at any of them. Reading them at open() made listing three
+## games cost more than entering one, and put the whole cache in memory on a
+## phone that has no room for it.
 
 var id: StringName = &""
 var sha1: String = ""
@@ -50,6 +56,10 @@ var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
 var _world_phone: Dictionary = {}
 var _world_audio: Dictionary = {}
+## Which of the sections above have been read. A section that is genuinely empty
+## is indistinguishable from one that has not been read yet, so the answer is
+## recorded rather than inferred from the value.
+var _sections: Dictionary = {}
 
 
 ## Opens the cache for a registry game, or null if it has not been imported.
@@ -81,7 +91,6 @@ static func open_directory(path: String) -> GameData:
 	data._types = data._read_array(RomCache.types_path(path))
 	data._trainers = data._read_array(RomCache.trainers_path(path))
 	data._build_matchups(data._read_array(RomCache.matchups_path(path)))
-	data._load_world(path)
 	return data
 
 
@@ -104,128 +113,135 @@ func species_count() -> int:
 
 
 func map_count() -> int:
-	return _world_maps.size()
+	return _maps().size()
 
 
 ## One map by its stable cartridge group and number, or null when it is absent.
 func world_map(group: int, number: int) -> Gen2WorldMap:
-	for value: Gen2WorldMap in _world_maps:
+	for value: Gen2WorldMap in _maps():
 		if value.group == group and value.number == number:
 			return value
 	return null
 
 
 func world_maps() -> Array:
-	return _world_maps.duplicate()
+	return _maps().duplicate()
 
 
 ## Raw bounded script bytes indexed by the cartridge's bank and CPU address.
 ## Runtime never opens a ROM; these bytes come from the user cache only.
 func world_script(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_world_scripts.get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_scripts().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("scripts")
+	)
 
 
 ## One imported menu header referenced by an overworld script.
 func world_menu(bank: int, address: int) -> Dictionary:
-	var value: Variant = _world_menus.get(Gen2WorldScript.pointer_key(bank, address), {})
+	var value: Variant = _menus().get(Gen2WorldScript.pointer_key(bank, address), {})
 	return _coerce_service_dictionary(value)
 
 
 func world_menu_count() -> int:
-	return _world_menus.size()
+	return _menus().size()
 
 
 ## One mart item list by the source MART_* index, or the default list when the
 ## cartridge requested an index outside the static table.
 func world_mart(index: int) -> Dictionary:
-	var rows: Variant = _world_marts.get("marts", [])
+	var rows: Variant = _marts().get("marts", [])
 	if rows is Array and index >= 0 and index < (rows as Array).size():
 		return _coerce_service_dictionary((rows as Array)[index])
-	var default_value: Variant = _world_marts.get("default", {})
+	var default_value: Variant = _marts().get("default", {})
 	return _coerce_service_dictionary(default_value)
 
 
 func world_mart_count() -> int:
-	var rows: Variant = _world_marts.get("marts", [])
+	var rows: Variant = _marts().get("marts", [])
 	return (rows as Array).size() if rows is Array else 0
 
 
 func world_phone_contact(index: int) -> Dictionary:
-	return _service_row(_world_phone.get("contacts", []), index)
+	return _service_row(_phone().get("contacts", []), index)
 
 
 func world_special_phone_call(index: int) -> Dictionary:
-	return _service_row(_world_phone.get("special_calls", []), index)
+	return _service_row(_phone().get("special_calls", []), index)
 
 
 func world_phone_contact_count() -> int:
-	return _service_rows_count(_world_phone.get("contacts", []))
+	return _service_rows_count(_phone().get("contacts", []))
 
 
 func world_audio(kind: StringName, index: int) -> Dictionary:
-	return _service_row(_world_audio.get(String(kind), []), index)
+	return _service_row(_audio().get(String(kind), []), index, _blob("audio"))
 
 
 func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionary:
-	var rows: Variant = _world_audio.get(String(kind), [])
+	var rows: Variant = _audio().get(String(kind), [])
 	if not rows is Array:
 		return {}
 	for value: Dictionary in rows as Array:
 		if int(value.get("bank", -1)) == bank and int(value.get("address", -1)) == address:
-			return _coerce_service_dictionary(value)
+			return _coerce_service_dictionary(value, _blob("audio"))
 	return {}
 
 
 func world_audio_asset(kind: StringName) -> Dictionary:
-	var value: Variant = _world_audio.get(String(kind), {})
-	return _coerce_service_dictionary(value)
+	var value: Variant = _audio().get(String(kind), {})
+	return _coerce_service_dictionary(value, _blob("audio"))
 
 
 func world_audio_asset_bytes(kind: StringName) -> PackedByteArray:
-	return _cached_bytes(world_audio_asset(kind).get("bytes", []))
+	return _payload_bytes(world_audio_asset(kind).get("bytes", []), _blob("audio"))
 
 
 func world_service_counts() -> Dictionary:
 	return {
-		"menus": _world_menus.size(),
+		"menus": _menus().size(),
 		"marts": world_mart_count(),
 		"phone_contacts": world_phone_contact_count(),
-		"music": _service_rows_count(_world_audio.get("music", [])),
-		"sfx": _service_rows_count(_world_audio.get("sfx", [])),
-		"cries": _service_rows_count(_world_audio.get("cries", [])),
+		"music": _service_rows_count(_audio().get("music", [])),
+		"sfx": _service_rows_count(_audio().get("sfx", [])),
+		"cries": _service_rows_count(_audio().get("cries", [])),
 	}
 
 
 ## One standard-script entry by its source table index. The pointer is retained
 ## for diagnostics, while the bounded bytes keep the runtime independent of ROMs.
 func world_standard_script(index: int) -> Dictionary:
-	var value: Variant = _world_standard_scripts.get(str(index), {})
+	var value: Variant = _standard_scripts().get(str(index), {})
 	if not value is Dictionary:
 		return {}
 	var entry: Dictionary = (value as Dictionary).duplicate(true)
 	entry["bank"] = int(entry.get("bank", -1))
 	entry["address"] = int(entry.get("address", -1))
-	entry["data"] = _cached_bytes(entry.get("bytes", []))
+	entry["data"] = _payload_bytes(entry, _blob("standard_scripts")) if entry.has("payload") \
+		else _payload_bytes(entry.get("bytes", []), _blob("standard_scripts"))
 	return entry
 
 
 ## Raw bounded text bytes indexed by the cartridge's bank and CPU address.
 func world_text(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_world_text.get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_text().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("text")
+	)
 
 
 ## Raw bounded movement bytes indexed by the script bank and movement pointer.
 func world_movement(bank: int, address: int) -> PackedByteArray:
-	return _cached_bytes(_world_movements.get(Gen2WorldScript.pointer_key(bank, address), []))
+	return _payload_bytes(
+		_movements().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("movements")
+	)
 
 
 ## One decoded tileset's metatile and collision tables, or null if absent.
 func world_tileset(number: int) -> Gen2WorldTileset:
-	return _world_tilesets.get(number, null)
+	return _tilesets().get(number, null)
 
 
 func world_tileset_count() -> int:
-	return _world_tilesets.size()
+	return _tilesets().size()
 
 
 ## One normal encounter record by method and map group/number. The runtime
@@ -233,7 +249,7 @@ func world_tileset_count() -> int:
 ## "water" name.
 func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
 	var table_name: String = "water" if method == &"surf" else String(method)
-	var table: Variant = _world_encounters.get(table_name, {})
+	var table: Variant = _encounters().get(table_name, {})
 	if not table is Dictionary:
 		return {}
 	var value: Variant = (table as Dictionary).get("%d:%d" % [group, number], {})
@@ -245,7 +261,7 @@ func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
 func world_fishing_group(group: int) -> Dictionary:
 	if group < 1:
 		return {}
-	var fishing: Variant = _world_encounters.get("fishing", {})
+	var fishing: Variant = _encounters().get("fishing", {})
 	if not fishing is Dictionary:
 		return {}
 	var groups: Variant = (fishing as Dictionary).get("groups", [])
@@ -258,7 +274,7 @@ func world_fishing_group(group: int) -> Dictionary:
 ## The twenty-two day/night fishing substitutions used by entries whose
 ## species byte is zero in the cartridge stream.
 func world_fishing_time_groups() -> Array:
-	var fishing: Variant = _world_encounters.get("fishing", {})
+	var fishing: Variant = _encounters().get("fishing", {})
 	if not fishing is Dictionary:
 		return []
 	var groups: Variant = (fishing as Dictionary).get("time_groups", [])
@@ -266,7 +282,7 @@ func world_fishing_time_groups() -> Array:
 
 
 func world_roaming_maps() -> Array:
-	var roaming: Variant = _world_encounters.get("roaming", {})
+	var roaming: Variant = _encounters().get("roaming", {})
 	if not roaming is Dictionary:
 		return []
 	var maps: Variant = (roaming as Dictionary).get("maps", [])
@@ -274,7 +290,7 @@ func world_roaming_maps() -> Array:
 
 
 func world_roaming_mons() -> Array:
-	var roaming: Variant = _world_encounters.get("roaming", {})
+	var roaming: Variant = _encounters().get("roaming", {})
 	if not roaming is Dictionary:
 		return []
 	var mons: Variant = (roaming as Dictionary).get("mons", [])
@@ -283,19 +299,19 @@ func world_roaming_mons() -> Array:
 
 func world_encounter_count(method: StringName) -> int:
 	var table_name: String = "water" if method == &"surf" else String(method)
-	var table: Variant = _world_encounters.get(table_name, {})
+	var table: Variant = _encounters().get(table_name, {})
 	return (table as Dictionary).size() if table is Dictionary else 0
 
 
 ## Metadata for one cartridge overworld sprite, indexed by the source sprite
 ## number. Sprite number zero is reserved for no sprite by the cartridge.
 func overworld_sprite(number: int) -> Gen2WorldSprite:
-	var row: Dictionary = _entry(_overworld_sprites, number - 1)
+	var row: Dictionary = _entry(_sprites(), number - 1)
 	return Gen2WorldSprite.from_cache(row) if not row.is_empty() else null
 
 
 func overworld_sprite_count() -> int:
-	return _overworld_sprites.size()
+	return _sprites().size()
 
 
 ## Indexed pixels for one raw overworld sprite tile strip, loaded on demand.
@@ -316,9 +332,9 @@ func overworld_sprite_indices(number: int) -> PackedByteArray:
 func overworld_sprite_palette(palette: int, time_of_day: int) -> PackedColorArray:
 	var group: int = clampi(time_of_day, 0, 3) * RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT \
 		+ (palette & (RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT - 1))
-	if group < 0 or group >= _overworld_sprite_palettes.size():
+	if group < 0 or group >= _sprite_palettes().size():
 		return PackedColorArray()
-	var raw: Variant = _overworld_sprite_palettes[group]
+	var raw: Variant = _sprite_palettes()[group]
 	if not raw is Array:
 		return PackedColorArray()
 	var out := PackedColorArray()
@@ -329,9 +345,9 @@ func overworld_sprite_palette(palette: int, time_of_day: int) -> PackedColorArra
 
 ## One of the cartridge's four-colour background palette groups.
 func world_palette(number: int) -> PackedColorArray:
-	if number < 0 or number >= _world_palettes.size():
+	if number < 0 or number >= _palettes().size():
 		return PackedColorArray()
-	var raw: Variant = _world_palettes[number]
+	var raw: Variant = _palettes()[number]
 	if not raw is Array:
 		return PackedColorArray()
 	var out := PackedColorArray()
@@ -342,7 +358,7 @@ func world_palette(number: int) -> PackedColorArray:
 
 ## Raw 2bpp frames embedded in the cartridge's animation routines.
 func world_animation_asset(name: String) -> PackedByteArray:
-	var raw: Variant = _world_animation_assets.get(name, [])
+	var raw: Variant = _animation_assets().get(name, [])
 	if not raw is Array:
 		return PackedByteArray()
 	var out := PackedByteArray()
@@ -739,63 +755,151 @@ func unown_pic(form: int, back: bool = false) -> Dictionary:
 	return pic
 
 
-func _load_world(path: String) -> void:
-	var map_rows: Variant = RomCache.read_json(RomCache.world_maps_path(path))
-	if map_rows is Array:
-		for value: Dictionary in map_rows as Array:
-			_world_maps.append(Gen2WorldMap.from_cache(value))
+## True once [param section] has been read, marking it read on the first ask.
+## The caller fills the matching member; a section is only ever read once.
+func _claim_section(section: String) -> bool:
+	if _sections.has(section):
+		return false
+	_sections[section] = true
+	return true
 
-	var script_rows: Variant = RomCache.read_json(RomCache.world_scripts_path(path))
-	if script_rows is Dictionary:
-		_world_scripts = script_rows
-	var standard_script_rows: Variant = RomCache.read_json(
-		RomCache.world_standard_scripts_path(path)
+
+## One cached world file, as an Array or a Dictionary. A file that is missing or
+## the wrong shape answers empty, which is the same answer an unimported section
+## gave before these became lazy.
+func _read_section(path: String, as_array: bool) -> Variant:
+	var value: Variant = RomCache.read_json(path)
+	if as_array:
+		return value if value is Array else []
+	return value if value is Dictionary else {}
+
+
+## The binary blob a section's byte spans address, read once and kept. It is a
+## [PackedByteArray], so it costs one byte per cartridge byte rather than the
+## twenty-odd a Variant in an Array costs.
+func _blob(section: String) -> PackedByteArray:
+	var key: String = "blob/%s" % section
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_blob(
+		RomCache.blob_path(_section_json_path(section))
 	)
-	if standard_script_rows is Dictionary:
-		_world_standard_scripts = standard_script_rows
-	var text_rows: Variant = RomCache.read_json(RomCache.world_text_path(path))
-	if text_rows is Dictionary:
-		_world_text = text_rows
-	var movement_rows: Variant = RomCache.read_json(RomCache.world_movements_path(path))
-	if movement_rows is Dictionary:
-		_world_movements = movement_rows
+	_indices[key] = data
+	return data
 
-	var tileset_rows: Variant = RomCache.read_json(RomCache.world_tilesets_path(path))
-	if tileset_rows is Array:
-		for value: Dictionary in tileset_rows as Array:
+
+func _section_json_path(section: String) -> String:
+	match section:
+		"scripts":
+			return RomCache.world_scripts_path(directory)
+		"standard_scripts":
+			return RomCache.world_standard_scripts_path(directory)
+		"text":
+			return RomCache.world_text_path(directory)
+		"movements":
+			return RomCache.world_movements_path(directory)
+		"audio":
+			return RomCache.world_audio_path(directory)
+	return ""
+
+
+func _maps() -> Array:
+	if _claim_section("maps"):
+		for value: Dictionary in _read_section(RomCache.world_maps_path(directory), true):
+			_world_maps.append(Gen2WorldMap.from_cache(value))
+	return _world_maps
+
+
+func _scripts() -> Dictionary:
+	if _claim_section("scripts"):
+		_world_scripts = _read_section(RomCache.world_scripts_path(directory), false)
+	return _world_scripts
+
+
+func _standard_scripts() -> Dictionary:
+	if _claim_section("standard_scripts"):
+		_world_standard_scripts = _read_section(
+			RomCache.world_standard_scripts_path(directory), false
+		)
+	return _world_standard_scripts
+
+
+func _text() -> Dictionary:
+	if _claim_section("text"):
+		_world_text = _read_section(RomCache.world_text_path(directory), false)
+	return _world_text
+
+
+func _movements() -> Dictionary:
+	if _claim_section("movements"):
+		_world_movements = _read_section(RomCache.world_movements_path(directory), false)
+	return _world_movements
+
+
+func _tilesets() -> Dictionary:
+	if _claim_section("tilesets"):
+		for value: Dictionary in _read_section(RomCache.world_tilesets_path(directory), true):
 			var tileset: Gen2WorldTileset = Gen2WorldTileset.from_cache(value)
 			_world_tilesets[tileset.number] = tileset
+	return _world_tilesets
 
-	var encounter_rows: Variant = RomCache.read_json(RomCache.world_encounters_path(path))
-	if encounter_rows is Dictionary:
-		_world_encounters = encounter_rows
 
-	var palettes: Variant = RomCache.read_json(RomCache.world_palettes_path(path))
-	if palettes is Array:
-		_world_palettes = palettes
-	var animation_assets: Variant = RomCache.read_json(RomCache.world_animation_assets_path(path))
-	if animation_assets is Dictionary:
-		_world_animation_assets = animation_assets
-	var sprites: Variant = RomCache.read_json(RomCache.overworld_sprites_path(path))
-	if sprites is Array:
-		_overworld_sprites = sprites
-	var sprite_palettes: Variant = RomCache.read_json(
-		RomCache.overworld_sprite_palettes_path(path)
-	)
-	if sprite_palettes is Array:
-		_overworld_sprite_palettes = sprite_palettes
-	var menus: Variant = RomCache.read_json(RomCache.world_menus_path(path))
-	if menus is Dictionary:
-		_world_menus = menus
-	var marts: Variant = RomCache.read_json(RomCache.world_marts_path(path))
-	if marts is Dictionary:
-		_world_marts = marts
-	var phone: Variant = RomCache.read_json(RomCache.world_phone_path(path))
-	if phone is Dictionary:
-		_world_phone = phone
-	var audio: Variant = RomCache.read_json(RomCache.world_audio_path(path))
-	if audio is Dictionary:
-		_world_audio = audio
+func _encounters() -> Dictionary:
+	if _claim_section("encounters"):
+		_world_encounters = _read_section(RomCache.world_encounters_path(directory), false)
+	return _world_encounters
+
+
+func _palettes() -> Array:
+	if _claim_section("palettes"):
+		_world_palettes = _read_section(RomCache.world_palettes_path(directory), true)
+	return _world_palettes
+
+
+func _animation_assets() -> Dictionary:
+	if _claim_section("animation_assets"):
+		_world_animation_assets = _read_section(
+			RomCache.world_animation_assets_path(directory), false
+		)
+	return _world_animation_assets
+
+
+func _sprites() -> Array:
+	if _claim_section("sprites"):
+		_overworld_sprites = _read_section(RomCache.overworld_sprites_path(directory), true)
+	return _overworld_sprites
+
+
+func _sprite_palettes() -> Array:
+	if _claim_section("sprite_palettes"):
+		_overworld_sprite_palettes = _read_section(
+			RomCache.overworld_sprite_palettes_path(directory), true
+		)
+	return _overworld_sprite_palettes
+
+
+func _menus() -> Dictionary:
+	if _claim_section("menus"):
+		_world_menus = _read_section(RomCache.world_menus_path(directory), false)
+	return _world_menus
+
+
+func _marts() -> Dictionary:
+	if _claim_section("marts"):
+		_world_marts = _read_section(RomCache.world_marts_path(directory), false)
+	return _world_marts
+
+
+func _phone() -> Dictionary:
+	if _claim_section("phone"):
+		_world_phone = _read_section(RomCache.world_phone_path(directory), false)
+	return _world_phone
+
+
+func _audio() -> Dictionary:
+	if _claim_section("audio"):
+		_world_audio = _read_section(RomCache.world_audio_path(directory), false)
+	return _world_audio
 
 
 func _read_array(path: String) -> Array:
@@ -809,43 +913,75 @@ func _entry(rows: Array, index: int) -> Dictionary:
 	return rows[index]
 
 
-func _service_row(value: Variant, index: int) -> Dictionary:
+func _service_row(
+	value: Variant, index: int, blob: PackedByteArray = PackedByteArray()
+) -> Dictionary:
 	if not value is Array or index < 0 or index >= (value as Array).size():
 		return {}
-	return _coerce_service_dictionary((value as Array)[index])
+	return _coerce_service_dictionary((value as Array)[index], blob)
 
 
 func _service_rows_count(value: Variant) -> int:
 	return (value as Array).size() if value is Array else 0
 
 
-func _coerce_service_dictionary(value: Variant) -> Dictionary:
-	var coerced: Variant = _coerce_service_value(value)
+func _coerce_service_dictionary(
+	value: Variant, blob: PackedByteArray = PackedByteArray()
+) -> Dictionary:
+	var coerced: Variant = _coerce_service_value(value, blob)
 	return coerced if coerced is Dictionary else {}
 
 
-func _coerce_service_value(value: Variant) -> Variant:
+func _coerce_service_value(value: Variant, blob: PackedByteArray) -> Variant:
 	if value is float:
 		return int(value)
 	if value is Array:
 		var array: Array = []
 		for entry: Variant in value as Array:
-			array.append(_coerce_service_value(entry))
+			array.append(_coerce_service_value(entry, blob))
 		return array
 	if value is Dictionary:
 		var dictionary: Dictionary = {}
 		for key: Variant in value:
-			dictionary[key] = _coerce_service_value(value[key])
+			# A payload span is handed back under the name the record used to
+			# carry inline, so nothing downstream of here has to know that the
+			# bytes now live in a blob.
+			if String(key) == RomCache.PAYLOAD_KEY:
+				dictionary[RomCache.BYTES_KEY] = _span_bytes(value[key], blob)
+				continue
+			dictionary[key] = _coerce_service_value(value[key], blob)
 		return dictionary
 	return value
 
 
-func _cached_bytes(value: Variant) -> PackedByteArray:
+## Resolves one cached byte run, whichever way the cache holds it.
+##
+## A record carrying a [constant RomCache.PAYLOAD_KEY] is a span into the
+## section's blob. A bare Array is read inline, which is what a hand-written test
+## fixture holds. The two never have to be told apart by shape: the key says
+## which one this is.
+func _payload_bytes(value: Variant, blob: PackedByteArray) -> PackedByteArray:
+	if value is PackedByteArray:
+		return value
+	if value is Dictionary and (value as Dictionary).has(RomCache.PAYLOAD_KEY):
+		return _span_bytes((value as Dictionary)[RomCache.PAYLOAD_KEY], blob)
 	if not value is Array:
 		return PackedByteArray()
 	var raw: Array = value as Array
 	var out := PackedByteArray()
 	out.resize(raw.size())
 	for index: int in out.size():
-		out[index] = int(raw[index])
+		out[index] = int(raw[index]) & 0xFF
 	return out
+
+
+## Reads an [offset, length] span out of a section blob. A span that does not
+## address the blob answers empty rather than reading a neighbouring record.
+func _span_bytes(span: Variant, blob: PackedByteArray) -> PackedByteArray:
+	if not span is Array or (span as Array).size() != RomCache.PAYLOAD_SPAN:
+		return PackedByteArray()
+	var at: int = int((span as Array)[0])
+	var length: int = int((span as Array)[1])
+	if at < 0 or length < 0 or at + length > blob.size():
+		return PackedByteArray()
+	return blob.slice(at, at + length)

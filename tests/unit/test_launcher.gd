@@ -66,3 +66,28 @@ func test_runtime_selection_accepts_registry_games_and_rejects_unknown_ids() -> 
 
 	GameRuntime.selected_game_id = previous
 	GameRuntime.selected_save_slot = previous_slot
+	GameRuntime.reload_selected_save()
+
+
+func test_the_selected_save_is_one_shared_instance_until_the_selection_changes() -> void:
+	var previous: StringName = GameRuntime.selected_game_id
+	var previous_slot: int = GameRuntime.selected_save_slot
+	var data: GameData = GameData.open_any()
+	if data == null:
+		pass_test("No imported cache on this machine.")
+		return
+
+	assert_true(GameRuntime.select_save_slot(data.id, 0))
+	var save: Gen2SaveData = GameRuntime.selected_save()
+	if save == null:
+		pass_test("Slot 0 of the imported cache is empty.")
+	else:
+		# Two readers must see one save, or a party change made by a battle is
+		# invisible to whoever writes the world snapshot.
+		assert_same(save, GameRuntime.selected_save())
+		GameRuntime.reload_selected_save()
+		assert_not_same(save, GameRuntime.selected_save())
+
+	GameRuntime.selected_game_id = previous
+	GameRuntime.selected_save_slot = previous_slot
+	GameRuntime.reload_selected_save()

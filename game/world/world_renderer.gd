@@ -24,10 +24,11 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 	queue_redraw()
 
 
+## Selects the palette rows this view draws with. The world owns the clock and
+## object visibility; a renderer only reads them, so a second view of the same
+## world cannot change what the first one sees.
 func set_time_of_day(time_of_day: int) -> void:
 	_time_of_day = clampi(time_of_day, 0, 3)
-	if _world != null:
-		_world.set_object_time(_world.object_hour, _time_of_day)
 	_actor_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()

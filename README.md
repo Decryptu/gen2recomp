@@ -46,8 +46,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
 >
-> Full story state, complete phone UI and the mod loader do not exist yet, so
-> this is not a complete game. Scene-level integration tests cover trainer sight,
+> Full story state and the complete phone UI do not exist yet, so this is not a
+> complete game. The mod boundary is in: a mod under `user://mods/` can register
+> a replacement world renderer, which is what a 3D or HD view needs. Scene-level integration tests cover trainer sight,
 > imported terminal text, live object refresh, emotes, wild capture, save-backed
 > blackout recovery and all four service overlay modes.
 
@@ -194,6 +195,7 @@ marts, phone calls and audio requests.
 | `tests/` | GUT unit and integration tests |
 | `tools/` | Headless developer scripts |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
+| `game/mods/` | Mod manifest and host |
 | `docs/` | Contributor notes |
 
 ## Platforms
@@ -201,7 +203,7 @@ marts, phone calls and audio requests.
 Windows, macOS, Linux, Android and iOS use GL Compatibility. Export presets
 are not configured. iOS forbids JIT and runtime native code, so mods must be
 interpreted GDScript, not compiled extensions. The project is therefore
-GDScript-first.
+GDScript-first. See [docs/MODS.md](docs/MODS.md).
 
 ## Contributing
 

@@ -1328,18 +1328,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if not bool(encounters.get("ok", false)):
 		result["message"] = String(encounters.get("message", "Could not import wild encounter data."))
 		return result
-	var script_cache: Variant = RomCache.read_json(RomCache.world_scripts_path(directory))
-	var standard_script_cache: Variant = RomCache.read_json(
-		RomCache.world_standard_scripts_path(directory)
-	)
-	var text_cache: Variant = RomCache.read_json(RomCache.world_text_path(directory))
-	var movement_cache: Variant = RomCache.read_json(RomCache.world_movements_path(directory))
 	var services: Dictionary = Gen2WorldServicesImporter.import_to_cache(
 		rom, layout, directory,
-		script_cache if script_cache is Dictionary else {},
-		standard_script_cache if standard_script_cache is Dictionary else {},
-		text_cache if text_cache is Dictionary else {},
-		movement_cache if movement_cache is Dictionary else {}
+		world.get("scripts", {}), world.get("standard_scripts", {}),
+		world.get("text", {}), world.get("movements", {})
 	)
 	if not bool(services.get("ok", false)):
 		result["message"] = String(services.get("message", "Could not import world service data."))

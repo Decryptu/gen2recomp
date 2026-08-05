@@ -26,7 +26,9 @@ var _data: GameData = null
 var _injected_data: GameData = null
 var _injected_save: Gen2SaveData = null
 var _world: Gen2WorldAPI = null
-var _renderer: Gen2WorldRenderer = null
+## Whatever the mod host supplies. Typed as Node because a registered renderer
+## only has to satisfy Gen2ModHost.WORLD_RENDERER_METHODS, not extend the 2D one.
+var _renderer: Node = null
 var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
@@ -98,6 +100,7 @@ func _build_world() -> void:
 	else:
 		_encounter_random.randomize()
 
+	_world.schedule_random = _encounter_random
 	_clock = Gen2WorldClock.new(hour, minute, day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -107,7 +110,9 @@ func _build_world() -> void:
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
 	_animation.configure(_world, time_of_day)
-	_renderer = Gen2WorldRenderer.new()
+	# Constructed through the mod host rather than directly, so a registered
+	# renderer replaces this view without the screen knowing what it draws with.
+	_renderer = Gen2ModHost.instance().create_world_renderer()
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(time_of_day)
 	_screen.display(_renderer)
@@ -125,12 +130,12 @@ func _build_world() -> void:
 
 
 func _process(delta: float) -> void:
-	if _animation != null and _animation.tick() and _renderer != null:
+	if _animation != null and _animation.advance(delta) and _renderer != null:
 		_renderer.refresh_animation()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
 	if _clock != null and _world != null:
-		var ticks: Array = _clock.advance(delta, _world, _encounter_random)
+		var ticks: Array = _clock.advance(delta, _world)
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
@@ -324,7 +329,7 @@ func persist_world_snapshot() -> Dictionary:
 func advance_world_time(seconds: float) -> Array:
 	if _clock == null or _world == null:
 		return []
-	var ticks: Array = _clock.advance(seconds, _world, _encounter_random)
+	var ticks: Array = _clock.advance(seconds, _world)
 	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 	if not ticks.is_empty():
 		_update_time_of_day()

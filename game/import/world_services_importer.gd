@@ -41,13 +41,26 @@ static func import_to_cache(
 		return _error("Could not write world mart data.")
 	if not RomCache.write_json(RomCache.world_phone_path(directory), result["phone"]):
 		return _error("Could not write world phone data.")
-	if not RomCache.write_json(RomCache.world_audio_path(directory), result["audio"]):
+	if not RomCache.write_section(
+		RomCache.world_audio_path(directory),
+		RomCache.blob_path(RomCache.world_audio_path(directory)),
+		result["audio"],
+	):
 		return _error("Could not write world audio data.")
-	if not RomCache.write_json(RomCache.world_scripts_path(directory), scripts):
+	if not RomCache.write_payload_map(
+		RomCache.world_scripts_path(directory),
+		RomCache.blob_path(RomCache.world_scripts_path(directory)), scripts,
+	):
 		return _error("Could not update world scripts with phone scripts.")
-	if not RomCache.write_json(RomCache.world_text_path(directory), text_data):
+	if not RomCache.write_payload_map(
+		RomCache.world_text_path(directory),
+		RomCache.blob_path(RomCache.world_text_path(directory)), text_data,
+	):
 		return _error("Could not update world text with phone text.")
-	if not RomCache.write_json(RomCache.world_movements_path(directory), movement_data):
+	if not RomCache.write_payload_map(
+		RomCache.world_movements_path(directory),
+		RomCache.blob_path(RomCache.world_movements_path(directory)), movement_data,
+	):
 		return _error("Could not update world movements with phone movements.")
 
 	return {
