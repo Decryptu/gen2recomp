@@ -662,6 +662,8 @@ static func command_at(
 			0x75:
 				command["object_id"] = int(data[offset + 1])
 				command["facing"] = int(data[offset + 2])
+			0x77:
+				command["value"] = int(data[offset + 1])
 			0x78, 0x88:
 				command["bank"] = int(data[offset + 1])
 				command["address"] = read_u16(data, offset + 2)
@@ -671,6 +673,8 @@ static func command_at(
 				command["block"] = int(data[offset + 3])
 			0x7C, 0x7E, 0x8C, 0x8E, 0x94, 0x97, 0x9B:
 				command["address"] = read_u16(data, offset + 1)
+			0x7D:
+				command["value"] = int(data[offset + 1])
 			0x80:
 				command["value"] = read_u16(data, offset + 1)
 				command["value_2"] = int(data[offset + 3])

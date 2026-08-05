@@ -35,7 +35,7 @@ func _write_cache() -> void:
 		"block_count": 2,
 		"tile_count": RomLayout.TILESET_TILE_COUNT,
 		"meta": meta,
-		"collision": [],
+		"collision": [0, 0, 0, 0, 0x20, 0x20, 0x20, 0x20],
 	}])
 
 	var blocks: Array = []
@@ -678,3 +678,98 @@ func test_world_battle_requires_an_explicit_outcome() -> void:
 	var failed: Array = world.complete_runtime_request({"ok": true})
 	assert_eq(failed[0]["status"], &"failed")
 	assert_eq(failed[0]["reason"], &"invalid_battle_outcome")
+
+
+func test_disappear_and_appear_update_the_object_event_flag() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6035"] = [0x6F, 2, 0x91]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var world := _world(Vector2i(5, 6))
+	var disappeared: Array = world.dispatch_script_events()
+	assert_eq(disappeared[0]["status"], &"complete")
+	assert_true(world.event_flag_active(7))
+	assert_eq(world.visible_objects().size(), 0)
+
+	world.clear_event_flag(7)
+	var map: Gen2WorldMap = world.current_map
+	map.events["bg_events"][0]["script"] = 0x6035
+	var appeared: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(appeared[0]["status"], &"complete")
+	assert_false(world.event_flag_active(7))
+	assert_eq(world.visible_objects().size(), 1)
+
+
+func test_movement_remove_object_is_live_until_the_next_map_reload() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6120": [0x49, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6130": [0x69, 2, 0x20, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6130
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.visible_objects().size(), 0)
+
+	world.reload_current_map()
+	assert_eq(world.visible_objects().size(), 1)
+
+
+func test_change_block_updates_tiles_and_collision_from_the_tileset_block() -> void:
+	var world := _world()
+	assert_eq(world.block_at(0, 0), 0)
+	assert_eq(world.tile_index_at(0, 0), 0)
+	assert_eq(world.change_block(0, 0, 1)["ok"], true)
+	assert_eq(world.block_at(0, 0), 1)
+	assert_eq(world.tile_index_at(0, 0), 16)
+	assert_eq(world.collision_code_at(Vector2i(0, 0)), 0x20)
+	assert_eq(world.change_block(0, 0, 0)["ok"], true)
+	assert_eq(world.collision_code_at(Vector2i(0, 0)), 0)
+
+
+func test_scripted_change_block_refresh_and_command_queue_state_are_explicit() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6140": [0x7A, 0, 0, 1, 0x7C, 0x7D, 0x20, 0x60, 0x7E, 0, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6140
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result[0]["status"], &"complete")
+	assert_eq(world.block_at(0, 0), 1)
+	assert_true(result[0]["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"map_refreshed"
+	))
+	assert_true(world.command_queues().is_empty())
+	world.reload_current_map()
+	assert_eq(world.block_at(0, 0), 0)
+
+
+func test_scripted_emote_is_visible_for_its_bounded_duration() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6150": [0x75, 1, 2, 2, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6150
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	var object: Gen2WorldObject = world.objects[0]
+	assert_true(object.emote_visible)
+	assert_eq(object.emote_id, 1)
+	assert_false(world.tick())
+	assert_true(world.tick())
+	assert_false(object.emote_visible)
+
+
+func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void:
+	var world := _world(Vector2i(8, 6))
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	var movement: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(movement["ok"])
+	assert_eq(movement["kind"], &"water_move")
+	assert_eq(world.collision_permission_at(world.player_cell), Gen2WorldCollision.WATER_TILE)
+	var encounter: Dictionary = world.encounter_request()
+	assert_eq(encounter["kind"], &"wild_encounter_requested")
+	assert_eq(encounter["fish_group"], 0)
+	assert_true(world.move(Vector2i.UP))

@@ -45,6 +45,10 @@ var event_flag: int = 0
 var facing: int = Gen2WorldSprite.FACING_DOWN
 var frame: int = 0
 var active: bool = false
+var deleted: bool = false
+var emote_id: int = -1
+var emote_visible: bool = false
+var emote_remaining: int = 0
 
 
 static func from_event(
@@ -146,3 +150,19 @@ func apply_direction(direction: Vector2i) -> void:
 		facing = Gen2WorldSprite.FACING_LEFT
 	elif direction == Vector2i.RIGHT:
 		facing = Gen2WorldSprite.FACING_RIGHT
+
+
+func set_emote(value: int, visible: bool, duration: int = 0) -> void:
+	emote_id = value
+	emote_visible = visible
+	emote_remaining = maxi(0, duration) if visible else 0
+
+
+func tick_emote() -> bool:
+	if not emote_visible or emote_remaining <= 0:
+		return false
+	emote_remaining -= 1
+	if emote_remaining == 0:
+		emote_visible = false
+		return true
+	return false

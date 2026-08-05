@@ -32,10 +32,13 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > starts the development battle. The first overworld runtime slice now renders
 > real maps, moves through connected maps and hosts explicit script requests,
 > including real trainer battles, imported win/loss text, map reloads and
-> save-safe blackout recovery. Full story state, audio and the mod loader do not exist
-> yet, so this is not a complete game. Scene-level integration tests also cover
-> trainer sight through the real overworld battle overlay, imported terminal
-> text, live object refresh and save-backed blackout recovery.
+> save-safe blackout recovery. The live overworld slice also covers scripted
+> object lifecycle, bounded followers, map block edits, emotes, surf movement
+> and explicit wild-encounter requests. Full story state, audio and the mod
+> loader do not exist yet, so this is not a complete game. Scene-level
+> integration tests also cover trainer sight through the real overworld battle
+> overlay, imported terminal text, live object refresh, emote rendering and
+> save-backed blackout recovery.
 
 ## Getting started
 
@@ -86,6 +89,7 @@ to run checks without writing.
 | Sprites | Front/back for 251 species and all 26 Unown forms |
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Battle HUD | HP/EXP bars, panel borders and their colours |
+| Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
 rendering costs no duplicate images.
@@ -136,6 +140,8 @@ Development scenes:
   `show_matchup` uses a fallback invented pairing.
 - `game/world/world_screen.tscn`: renders the development map with real
   palettes, animation and object sprites. Arrows/WASD move the player, and
+  `preview_emote()` shows the live object-emote renderer path.
+  `preview_script_event()` exercises an imported map event, while
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's
   `preview_world_battle_loss()` drives the recovery message for a visual smoke
