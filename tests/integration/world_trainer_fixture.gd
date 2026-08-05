@@ -77,6 +77,7 @@ static func _write_world(directory: String) -> void:
 	var collision: Array = []
 	collision.resize(MAP_WIDTH_CELLS * MAP_HEIGHT_CELLS)
 	collision.fill(0)
+	collision[7 * MAP_WIDTH_CELLS + 8] = 0x20
 
 	var objects: Array = [{
 		"sprite": TRAINER_SPRITE,
@@ -98,6 +99,7 @@ static func _write_world(directory: String) -> void:
 		"number": MAP_NUMBER,
 		"tileset": 0,
 		"environment": 0,
+		"fish_group": 1,
 		"width_blocks": MAP_WIDTH_BLOCKS,
 		"height_blocks": MAP_HEIGHT_BLOCKS,
 		"blocks": blocks,
@@ -117,6 +119,13 @@ static func _write_world(directory: String) -> void:
 			"map": "1:1", "rates": [255, 255, 255], "slots": grass_times,
 		}},
 		"water": {},
+		"fishing": {
+			"groups": [{
+				"chance": 255,
+				"rods": [[{"threshold": 255, "species": TRAINER_SPECIES, "level": 5}], [], []],
+			}],
+			"time_groups": [],
+		},
 		"probabilities": {
 			"grass": RomLayout.WILD_GRASS_PROBABILITIES,
 			"water": RomLayout.WILD_WATER_PROBABILITIES,

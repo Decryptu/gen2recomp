@@ -129,9 +129,7 @@ var _box: Gen2TextBox = null
 
 
 func _ready() -> void:
-	_data = _injected_data if _injected_data != null else (
-		GameRuntime.selected_data() if GameRuntime.has_selected_game() else null
-	)
+	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	if _data == null:
 		_data = GameData.open_any()
 	_hud = Gen2BattleHud.from_data(_data)
@@ -159,7 +157,7 @@ func _ready() -> void:
 	if world_meta is Dictionary and not (world_meta as Dictionary).is_empty():
 		call_deferred("_start_world_battle_from_meta", world_meta)
 	else:
-		var saved: Gen2SaveData = GameRuntime.selected_save()
+		var saved: Gen2SaveData = _selected_runtime_save()
 		if saved != null and show_saved_party(saved):
 			show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
 		else:
@@ -172,6 +170,20 @@ func _ready() -> void:
 ## imported cache.
 func set_data(data: GameData) -> void:
 	_injected_data = data
+
+
+func _selected_runtime_data() -> GameData:
+	var runtime: Node = get_node_or_null("/root/GameRuntime")
+	if runtime != null and bool(runtime.call("has_selected_game")):
+		return runtime.call("selected_data") as GameData
+	return null
+
+
+func _selected_runtime_save() -> Gen2SaveData:
+	var runtime: Node = get_node_or_null("/root/GameRuntime")
+	if runtime != null and bool(runtime.call("has_selected_save_slot")):
+		return runtime.call("selected_save") as Gen2SaveData
+	return null
 
 
 ## True once the cache had everything the screen draws with.

@@ -32,6 +32,7 @@ var _object_followers: Dictionary = {}
 var _block_overrides: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
+var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
 
 
 ## Opens one map through the public cartridge-content API.
@@ -54,6 +55,33 @@ static func open(
 	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state)
 
 
+## Opens a validated map/player snapshot without silently clamping its cell.
+static func open_snapshot(game_data: GameData, snapshot: Gen2WorldSnapshot) -> Gen2WorldAPI:
+	if game_data == null or snapshot == null:
+		return null
+	var map: Gen2WorldMap = game_data.world_map(snapshot.map_id.x, snapshot.map_id.y)
+	if map == null or snapshot.world_state == null:
+		return null
+	if snapshot.player_cell.x < 0 or snapshot.player_cell.y < 0 \
+		or snapshot.player_cell.x >= map.collision_width \
+		or snapshot.player_cell.y >= map.collision_height:
+		return null
+	if snapshot.player_facing < Gen2WorldSprite.FACING_DOWN \
+		or snapshot.player_facing > Gen2WorldSprite.FACING_RIGHT:
+		return null
+	if snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
+		return null
+	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
+	if tileset == null:
+		return null
+	var out := Gen2WorldAPI.new(
+		game_data, map, tileset, snapshot.player_cell, snapshot.world_state
+	)
+	out.player_facing = snapshot.player_facing
+	out.movement_mode = snapshot.movement_mode
+	return out
+
+
 func _init(
 	game_data: GameData,
 	map: Gen2WorldMap,
@@ -73,6 +101,10 @@ func _init(
 
 func map_id() -> Vector2i:
 	return Vector2i(current_map.group, current_map.number) if current_map != null else Vector2i(-1, -1)
+
+
+func snapshot() -> Gen2WorldSnapshot:
+	return Gen2WorldSnapshot.from_world(self)
 
 
 func map_size_cells() -> Vector2i:
@@ -116,6 +148,57 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 	return {"ok": true, "mode": movement_mode}
 
 
+func available_fishing_rods() -> Array[StringName]:
+	return Gen2WorldFishing.rods()
+
+
+func fishing_state() -> StringName:
+	return _fishing.state()
+
+
+func fishing_busy() -> bool:
+	return _fishing.is_busy()
+
+
+func facing_cell() -> Vector2i:
+	return player_cell + _direction_for_facing(player_facing)
+
+
+func fishing_request(
+	rod: StringName,
+	random: RandomNumberGenerator = null,
+	force_encounter: bool = false,
+) -> Dictionary:
+	if current_map == null or data == null:
+		return _fishing_failure(&"missing_map")
+	var context: Dictionary = _fishing_context(rod)
+	if not bool(context.get("ok", false)):
+		return _fishing_failure(StringName(context.get("reason", &"cannot_fish")))
+	return _fishing.begin(
+		rod,
+		context["record"],
+		int(context["fish_group"]),
+		int(context["selected_fish_group"]),
+		object_time_of_day,
+		data.world_fishing_time_groups(),
+		map_id(),
+		player_cell,
+		player_facing,
+		context["facing_cell"],
+		movement_mode,
+		random,
+		force_encounter,
+	)
+
+
+func advance_fishing() -> Dictionary:
+	return _fishing.advance()
+
+
+func cancel_fishing() -> Dictionary:
+	return _fishing.cancel()
+
+
 ## Rolls an encounter from the current map. Auto mode preserves the existing
 ## terrain behavior; an explicit rod method uses the map header's fishing
 ## group. The caller supplies the generator so tests can reproduce a result.
@@ -130,9 +213,12 @@ func encounter_request(
 		Gen2WorldEncounter.METHOD_GOOD_ROD,
 		Gen2WorldEncounter.METHOD_SUPER_ROD,
 	]:
-		var fish_group: int = current_map.fish_group
-		var selected_group: int = _fishing_group_for_state(fish_group)
-		var fishing_record: Dictionary = data.world_fishing_group(selected_group)
+		var context: Dictionary = _fishing_context(method)
+		if not bool(context.get("ok", false)):
+			return {}
+		var fish_group: int = int(context["fish_group"])
+		var selected_group: int = int(context["selected_fish_group"])
+		var fishing_record: Dictionary = context["record"]
 		var fishing: Dictionary = Gen2WorldEncounter.resolve_fishing(
 			fishing_record, method, object_time_of_day, data.world_fishing_time_groups(),
 			random, force_encounter
@@ -144,6 +230,8 @@ func encounter_request(
 		fishing["fish_group"] = fish_group
 		fishing["selected_fish_group"] = selected_group
 		fishing["movement"] = movement_mode
+		fishing["facing"] = player_facing
+		fishing["facing_cell"] = context["facing_cell"]
 		return fishing
 	if method != &"auto" and method not in [
 		Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF,
@@ -206,6 +294,20 @@ func advance_roaming(random: RandomNumberGenerator = null) -> Array:
 	return state.advance_roaming(data.world_roaming_maps(), random)
 
 
+## Applies one host schedule tick to the imported roaming graph. Swarm state is
+## returned alongside it so a clock, radio event or save host can publish one
+## coherent update without reaching into Gen2WorldState.
+func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
+	var moved: Array = advance_roaming(random)
+	return {
+		"ok": true,
+		"kind": &"world_schedule_updated",
+		"roaming": moved,
+		"swarm_map": state.swarm_map(),
+		"fishing_swarm_species": state.fishing_swarm_species(),
+	}
+
+
 func _fishing_group_for_state(group: int) -> int:
 	var fishing_swarm: int = state.fishing_swarm_species()
 	if fishing_swarm == 0:
@@ -215,6 +317,28 @@ func _fishing_group_for_state(group: int) -> int:
 	if group == 12 and fishing_swarm == 0xDF:
 		return 7
 	return group
+
+
+func _fishing_context(rod: StringName) -> Dictionary:
+	if not Gen2WorldFishing.is_rod(rod):
+		return {"ok": false, "reason": &"invalid_rod"}
+	if movement_mode == MOVEMENT_SURF:
+		return {"ok": false, "reason": &"cannot_fish_while_surfing"}
+	var target: Vector2i = facing_cell()
+	if collision_permission_at(target) != Gen2WorldCollision.WATER_TILE:
+		return {"ok": false, "reason": &"not_facing_water"}
+	var fish_group: int = current_map.fish_group
+	var selected_group: int = _fishing_group_for_state(fish_group)
+	var record: Dictionary = data.world_fishing_group(selected_group)
+	if fish_group <= 0 or selected_group <= 0 or record.is_empty():
+		return {"ok": false, "reason": &"no_fishing_group"}
+	return {
+		"ok": true,
+		"fish_group": fish_group,
+		"selected_fish_group": selected_group,
+		"record": record,
+		"facing_cell": target,
+	}
 
 
 func tick() -> bool:
@@ -1260,6 +1384,17 @@ func _direction_name(direction: Vector2i) -> String:
 	return ""
 
 
+func _direction_for_facing(facing: int) -> Vector2i:
+	match facing:
+		Gen2WorldSprite.FACING_UP:
+			return Vector2i.UP
+		Gen2WorldSprite.FACING_LEFT:
+			return Vector2i.LEFT
+		Gen2WorldSprite.FACING_RIGHT:
+			return Vector2i.RIGHT
+	return Vector2i.DOWN
+
+
 func _facing_for_direction(direction: Vector2i) -> int:
 	match direction:
 		Vector2i.UP:
@@ -1271,6 +1406,15 @@ func _facing_for_direction(direction: Vector2i) -> int:
 		Vector2i.RIGHT:
 			return Gen2WorldSprite.FACING_RIGHT
 	return player_facing
+
+
+func _fishing_failure(reason: StringName) -> Dictionary:
+	return {
+		"ok": false,
+		"kind": &"fishing_failed",
+		"reason": reason,
+		"state": Gen2WorldFishing.STATE_IDLE,
+	}
 
 
 func _at_connection_edge(direction_name: String) -> bool:

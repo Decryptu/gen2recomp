@@ -141,3 +141,36 @@ func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
 	assert_true(host.is_ready())
 	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
 	assert_eq(host.battle_snapshot()["message"], "Wild FILLER appeared!")
+
+
+func test_fishing_reaches_the_real_battle_overlay() -> void:
+	await _open_world()
+	_world_screen.start_cell = Vector2i(8, 6)
+	_world_screen._world.player_cell = Vector2i(8, 6)
+	var started: Dictionary = _world_screen.start_fishing(true)
+	assert_true(started["ok"])
+	assert_eq(_world_screen._world.advance_fishing()["kind"], &"fishing_bite")
+	var battle: Dictionary = _world_screen._world.advance_fishing()
+	assert_eq(battle["kind"], &"battle_requested")
+	_world_screen._handle_fishing_result(battle)
+	await get_tree().process_frame
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
+
+
+func test_project_save_can_carry_the_world_snapshot_without_guessing_a_spawn() -> void:
+	await _open_world()
+	var player: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.TRAINER_SPECIES, 5, [BattleFixture.TACKLE]
+	)
+	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, 0, Gen2Party.of(player), "TEST"
+	)
+	save.world = _world_screen.world_save_snapshot()
+	var validation: Dictionary = Gen2SaveValidator.validate(save, _data)
+	assert_true(validation["ok"], validation["message"])
+	var round_trip: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_not_null(round_trip.world)
+	assert_eq(round_trip.world.map_id, Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
+	assert_eq(round_trip.world.player_cell, Vector2i(4, 5))

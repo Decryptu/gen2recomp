@@ -29,6 +29,7 @@ var _text_box: Gen2TextBox = null
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
 var _encounter_random := RandomNumberGenerator.new()
+var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -36,9 +37,7 @@ var _encounter_random := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
-	_data = _injected_data if _injected_data != null else (
-		GameRuntime.selected_data() if GameRuntime.has_selected_game() else GameData.open_any()
-	)
+	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	_build_world()
 
 
@@ -62,7 +61,15 @@ func _build_world() -> void:
 		_hint.text = "Import a supported cartridge first."
 		return
 
-	_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
+	var selected_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	if selected_save != null and selected_save.world != null:
+		_world = Gen2WorldAPI.open_snapshot(_data, selected_save.world)
+		if _world == null:
+			_caption.text = "Saved overworld unavailable"
+			_hint.text = "The saved map or player position is not valid for this cache."
+			return
+	else:
+		_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
 	if _world == null:
 		_caption.text = "Map %d/%d unavailable" % [map_group, map_number]
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
@@ -101,6 +108,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
 		return
+	if _world.fishing_busy() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+		_handle_fishing_result(_world.advance_fishing())
+		accept_event()
+		return
 	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
 		if _text_box != null and _text_box.visible:
 			_advance_script_input()
@@ -118,6 +129,22 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			direction = Vector2i.LEFT
 		KEY_RIGHT, KEY_D:
 			direction = Vector2i.RIGHT
+		KEY_1:
+			select_fishing_rod(0)
+			accept_event()
+			return
+		KEY_2:
+			select_fishing_rod(1)
+			accept_event()
+			return
+		KEY_3:
+			select_fishing_rod(2)
+			accept_event()
+			return
+		KEY_F:
+			start_fishing()
+			accept_event()
+			return
 		_:
 			return
 	move_player(direction)
@@ -126,7 +153,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
-	if _world == null:
+	if _world == null or _world.fishing_busy():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -184,9 +211,26 @@ func world_snapshot() -> Dictionary:
 		"movement_mode": _world.movement_mode if _world != null else Gen2WorldAPI.MOVEMENT_WALK,
 		"visible_objects": _world.visible_objects().size() if _world != null else 0,
 		"just_battled": _world.state.just_battled() if _world != null else false,
+		"fishing_state": _world.fishing_state() if _world != null else Gen2WorldFishing.STATE_IDLE,
+		"swarm_map": _world.state.swarm_map() if _world != null else Vector2i(-1, -1),
+		"roaming_count": _world.state.roaming_mons().size() if _world != null else 0,
 		"battle_active": _battle_host != null,
 		"script_prompt": _script_prompt,
 	}
+
+
+func world_save_snapshot() -> Gen2WorldSnapshot:
+	return _world.snapshot() if _world != null else null
+
+
+## Public host boundary for a time/radio tick. The imported roaming graph is
+## advanced once, while swarm state remains the state transaction's result.
+func advance_world_schedule() -> Dictionary:
+	if _world == null:
+		return {"ok": false, "reason": &"missing_map"}
+	var result: Dictionary = _world.advance_schedule(_encounter_random)
+	_refresh_labels()
+	return result
 
 
 ## Public screenshot driver for the scripted emote state and renderer path.
@@ -249,10 +293,108 @@ func preview_wild_encounter() -> void:
 	})
 
 
+## Public screenshot and scene-test driver for the production fishing path.
+## The caller can advance the cast and bite pauses with Space, Enter or Z.
+func preview_fishing() -> void:
+	_position_for_fishing_preview()
+	start_fishing(true)
+
+
+## Public screenshot driver for the complete fishing-to-battle host path.
+func preview_fishing_battle() -> void:
+	if _world == null:
+		return
+	_position_for_fishing_preview()
+	var started: Dictionary = start_fishing(true)
+	if not bool(started.get("ok", false)):
+		return
+	var bite: Dictionary = _world.advance_fishing()
+	if StringName(bite.get("kind", &"")) != &"fishing_bite":
+		_handle_fishing_result(bite)
+		return
+	_handle_fishing_result(_world.advance_fishing())
+
+
+func _position_for_fishing_preview() -> void:
+	if _world.current_map == null or _world.current_map.fish_group <= 0:
+		return
+	var size: Vector2i = _world.map_size_cells()
+	var directions: Array[Vector2i] = [Vector2i.DOWN, Vector2i.UP, Vector2i.LEFT, Vector2i.RIGHT]
+	for y: int in size.y:
+		for x: int in size.x:
+			var cell := Vector2i(x, y)
+			if _world.collision_permission_at(cell) != Gen2WorldCollision.LAND_TILE:
+				continue
+			for direction: Vector2i in directions:
+				if _world.collision_permission_at(cell + direction) != Gen2WorldCollision.WATER_TILE:
+					continue
+				_world.player_cell = cell
+				_world.player_facing = _facing_for_direction(direction)
+				if _renderer != null:
+					_renderer.refresh()
+				return
+
+
+func _facing_for_direction(direction: Vector2i) -> int:
+	match direction:
+		Vector2i.UP:
+			return Gen2WorldSprite.FACING_UP
+		Vector2i.LEFT:
+			return Gen2WorldSprite.FACING_LEFT
+		Vector2i.RIGHT:
+			return Gen2WorldSprite.FACING_RIGHT
+	return Gen2WorldSprite.FACING_DOWN
+
+
+func select_fishing_rod(index: int) -> Dictionary:
+	if _world == null:
+		return {"ok": false, "reason": &"missing_map"}
+	var rods: Array[StringName] = _world.available_fishing_rods()
+	if index < 0 or index >= rods.size():
+		return {"ok": false, "reason": &"invalid_rod"}
+	_selected_rod = rods[index]
+	_script_prompt = "Selected %s. F: cast" % Gen2WorldFishing.rod_label(_selected_rod)
+	_refresh_labels()
+	return {"ok": true, "rod": _selected_rod}
+
+
+func start_fishing(force_encounter: bool = false) -> Dictionary:
+	if _world == null:
+		return {"ok": false, "reason": &"missing_map"}
+	var result: Dictionary = _world.fishing_request(
+		_selected_rod, _encounter_random, force_encounter
+	)
+	if not bool(result.get("ok", false)):
+		_script_prompt = "Fishing failed: %s" % String(result.get("reason", "unknown"))
+		_refresh_labels()
+		return result
+	_script_prompt = "Cast %s. Space: wait" % String(result.get("rod_label", "ROD"))
+	_refresh_labels()
+	return result
+
+
+func _handle_fishing_result(result: Dictionary) -> void:
+	if not bool(result.get("ok", false)):
+		_script_prompt = "Fishing stopped: %s" % String(result.get("reason", "unknown"))
+		_refresh_labels()
+		return
+	match StringName(result.get("kind", &"")):
+		&"fishing_no_bite":
+			_script_prompt = "Nothing was hooked. F: cast again"
+		&"fishing_bite":
+			_script_prompt = "A bite! Space: reel in"
+		&"battle_requested":
+			_start_battle_request(result)
+			return
+		_:
+			_script_prompt = "Fishing: %s" % String(result.get("kind", "unknown"))
+	_refresh_labels()
+
+
 func _start_battle_request(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
-	var save: Gen2SaveData = _injected_save if _injected_save != null else GameRuntime.selected_save()
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
 	host.set_meta("world_battle_request", {"request": request.duplicate(true), "save": save})
@@ -324,6 +466,16 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) == &"battle_requested":
 					_start_battle_request(request)
 					break
+				if StringName(request.get("kind", &"")) == &"swarm_requested":
+					var values: Dictionary = request.get("values", {})
+					var swarm_results: Array = _world.complete_runtime_request({
+						"ok": true,
+						"active": true,
+						"map_group": int(values.get("map_group", -1)),
+						"map_number": int(values.get("map_number", -1)),
+					})
+					_show_script_results(swarm_results)
+					return
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
 				)
@@ -376,5 +528,20 @@ func _refresh_labels() -> void:
 	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
+	_hint.text += "    1/2/3: %s    F: fish" % Gen2WorldFishing.rod_label(_selected_rod)
 	if not _script_prompt.is_empty():
 		_hint.text += "    " + _script_prompt
+
+
+func _selected_runtime_data() -> GameData:
+	var runtime: Node = get_node_or_null("/root/GameRuntime")
+	if runtime != null and bool(runtime.call("has_selected_game")):
+		return runtime.call("selected_data") as GameData
+	return GameData.open_any()
+
+
+func _selected_runtime_save() -> Gen2SaveData:
+	var runtime: Node = get_node_or_null("/root/GameRuntime")
+	if runtime != null and bool(runtime.call("has_selected_save_slot")):
+		return runtime.call("selected_save") as Gen2SaveData
+	return null
