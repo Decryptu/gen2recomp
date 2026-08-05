@@ -46,6 +46,8 @@ func advance(
 	while _elapsed_seconds >= SECONDS_PER_MINUTE:
 		_elapsed_seconds -= SECONDS_PER_MINUTE
 		_advance_minute()
+		if world != null:
+			world.set_world_clock(day, hour, minute)
 		var schedule: Dictionary = world.advance_schedule(random) if world != null else {}
 		ticks.append({
 			"kind": &"world_clock_minute",

@@ -101,6 +101,7 @@ func _build_world() -> void:
 	_clock = Gen2WorldClock.new(hour, minute, day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
+	_world.set_world_clock(day, hour, minute)
 	_world.set_object_time(hour, time_of_day)
 	var rods: Array[StringName] = _world.available_fishing_rods()
 	if not rods.is_empty() and not rods.has(_selected_rod):
@@ -130,6 +131,7 @@ func _process(delta: float) -> void:
 		_renderer.refresh()
 	if _clock != null and _world != null:
 		var ticks: Array = _clock.advance(delta, _world, _encounter_random)
+		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
 			_refresh_labels()
@@ -323,6 +325,7 @@ func advance_world_time(seconds: float) -> Array:
 	if _clock == null or _world == null:
 		return []
 	var ticks: Array = _clock.advance(seconds, _world, _encounter_random)
+	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 	if not ticks.is_empty():
 		_update_time_of_day()
 		_refresh_labels()

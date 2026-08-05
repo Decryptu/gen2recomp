@@ -47,7 +47,7 @@ const WORLD_AUDIO: String = "world_audio.json"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 20
+const FORMAT_VERSION: int = 21
 
 
 static func directory_for(id: StringName, sha1: String) -> String:

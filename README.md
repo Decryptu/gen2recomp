@@ -37,15 +37,16 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > normal and swarm grass and surf encounter tables, fishing groups, roaming state,
 > repel checks, deterministic encounter resolution and movement-triggered wild
 > battle requests. The importer also preserves referenced overworld menus, 34
-> mart lists, phone contacts and music/SFX pointer records. The scene-free host
-> resolves those records without reopening the ROM, and the overworld now has a
-> production service overlay for menu selection, atomic mart purchases, phone
-> metadata and bounded Gen II audio playback for music, effects and cries. Party-owned overworld
+> mart lists, phone contacts, special-call records and music/SFX pointer records.
+> The scene-free host resolves those records without reopening the ROM, and the
+> overworld now has a production service overlay for menu selection, atomic mart
+> purchases, bounded phone caller/callee script dispatch and bounded Gen II audio
+> playback for music, effects and cries. Party-owned overworld
 > transactions now cover gifts, eggs, imported NPC trades, common HP/status
 > items, repel and the core Poké Ball catch calculation behind a validated
 > candidate-save boundary. Wild battle capture input now drives the production
-> overlay through that transaction. Full story state, phone script execution
-> and the mod loader do not exist yet, so this is not a complete
+> overlay through that transaction. Full story state, complete phone UI and the
+> mod loader do not exist yet, so this is not a complete
 > game.
 > Scene-level
 > integration tests also cover trainer sight through the real overworld battle
@@ -104,7 +105,7 @@ hash and stored in Godot's `user://`, never in the project or an export. Use
 | Battle HUD | HP/EXP bars, panel borders and their colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal and swarm grass/water tables, 13 fishing groups with day/night substitutions, a 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf level variance and repel checks |
-| World services | Referenced menus, mart inventories, phone contacts, special calls, music, sound effects, cries and shared waveform assets |
+| World services | Referenced menus, mart inventories, phone contacts, special calls and their bounded script/text resources, music, sound effects, cries and shared waveform assets |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
 rendering costs no duplicate images.

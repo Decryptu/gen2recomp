@@ -39,6 +39,8 @@ var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
 var _loaded_emote: int = -1
 var _battle_setup: Dictionary = {}
+var _phone_context: Dictionary = {}
+var _phone_started: bool = false
 
 
 static func begin(
@@ -52,6 +54,7 @@ static func begin(
 	runner.state = world_state
 	runner.warp_validator = validator
 	runner._request = request.duplicate(true)
+	runner._phone_context = request.get("phone", {}).duplicate(true)
 	runner._last_talked_object_index = int(request.get("object_index", -1))
 	runner._last_item = int(request.get("item", 0))
 	var bank: int = int(request.get("bank", 0))
@@ -65,6 +68,9 @@ static func begin(
 
 ## Advances until a text/button pause, completion or a bounded failure.
 func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
+	if not _phone_context.is_empty() and not _phone_started:
+		_phone_started = true
+		_emit_runtime_event(&"phone_call_started", _phone_context)
 	if _pending:
 		var pending_request: Dictionary = _pending.get("request", {})
 		if _pending.get("type", &"") == &"runtime_request" \
@@ -163,10 +169,35 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		})
 		_pending = {}
 		return advance()
-	if kind in [
-		&"mart_requested", &"audio_requested", &"phone_call_requested",
-		&"special_phone_call_requested", &"pokemon_requested", &"trade_requested",
-	]:
+	if kind in [&"phone_call_requested", &"special_phone_call_requested"]:
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", "runtime_request_failed")), result
+			)
+		var phone_data: Dictionary = result.get("data", {})
+		_events.append({
+			"type": &"runtime_request_completed",
+			"kind": kind,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		if bool(phone_data.get("clear", false)):
+			_phone_context = {}
+			_script_value = 1
+			return advance()
+		var phone_script: Dictionary = phone_data.get("script", {})
+		if phone_script.is_empty():
+			_script_value = int(result.get("script_value", 1))
+			return advance()
+		_phone_context = phone_data.get("phone", {}).duplicate(true)
+		_phone_started = false
+		if not _push_frame(
+			int(phone_script.get("bank", -1)), int(phone_script.get("address", -1))
+		):
+			return _fail(&"phone_script_missing", phone_script)
+		return advance()
+	if kind in [&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested"]:
 		if not bool(result.get("ok", false)):
 			return _fail(
 				StringName(result.get("reason", "runtime_request_failed")), result
@@ -373,6 +404,18 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			_script_value = int(command["value"])
 		Gen2WorldScript.ADDVAL:
 			_script_value += int(command["value"])
+		Gen2WorldScript.READVAR:
+			return _read_runtime_variable(int(command["value"]))
+		Gen2WorldScript.LOADVAR:
+			return _load_runtime_variable(
+				int(command["value"]), int(command["value_2"])
+			)
+		Gen2WorldScript.CHECKTIME:
+			_script_value = 1 if Gen2WorldPhoneHost.time_mask_matches(
+				int(command["value"]), _clock_hour()
+			) else 0
+		Gen2WorldScript.SPECIAL:
+			return _execute_phone_special(int(command["value"]))
 		Gen2WorldScript.RANDOM:
 			var maximum: int = int(command["value"])
 			_script_value = randi_range(0, maximum - 1) if maximum > 0 else 0
@@ -458,6 +501,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKSCENE, Gen2WorldScript.SETSCENE,
 		Gen2WorldScript.SETVAL, Gen2WorldScript.ADDVAL, Gen2WorldScript.RANDOM,
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
+		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
+		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
 		Gen2WorldScript.GOLD_FACEPLAYER, Gen2WorldScript.FACEPLAYER,
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP,
 		Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE,
@@ -638,11 +683,23 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				"tree_id": int(command.get("value", 0)),
 			})
 		0x9B:
+			## The cartridge uses specialphonecall to store the pending special
+			## call. Imported phone scripts also use SPECIALCALL_NONE to clear it.
+			## Keep the existing host request for a top-level service command, but
+			## do not reopen the service overlay while a phone script is running.
+			if not _phone_context.is_empty():
+				_phone_context["special_call_id"] = int(command.get("address", 0))
+				_script_value = 1
+				_emit_runtime_event(&"special_phone_call_changed", {
+					"call_id": int(command.get("address", 0)),
+				})
+				return {"ok": true}
 			return _stage_runtime_request(&"special_phone_call_requested", {
 				"address": int(command.get("address", 0)),
 			})
 		0x9C:
-			_script_value = 1 if _request.get("special_phone_call", false) else 0
+			_script_value = 1 if int(_phone_context.get("special_call_id", 0)) != 0 \
+				or bool(_request.get("special_phone_call", false)) else 0
 		0x9D:
 			return _stage_item_delta(int(command.get("item", 0)), int(command.get("quantity", 1)))
 		0x9E:
@@ -842,6 +899,78 @@ func _stage_runtime_request(kind: StringName, values: Dictionary) -> Dictionary:
 		"request": {"kind": kind, "values": values.duplicate(true)},
 		"source": _request.duplicate(true),
 	}
+	return {"ok": true}
+
+
+func _read_runtime_variable(variable: int) -> Dictionary:
+	var clock: Dictionary = _request.get("clock", {})
+	var hour: int = int(clock.get("hour", _clock_hour()))
+	var day: int = int(clock.get("day", 0))
+	match variable:
+		0x04: # VAR_TIMEOFDAY
+			_script_value = Gen2WorldClock.new(hour, 0, day).time_of_day()
+		0x0A: # VAR_HOUR
+			_script_value = hour
+		0x0B: # VAR_WEEKDAY
+			_script_value = day
+		0x0C: # VAR_MAPGROUP
+			_script_value = int(_request.get("map_group", -1))
+		0x0D: # VAR_MAPNUMBER
+			_script_value = int(_request.get("map_number", -1))
+		0x0F: # VAR_ENVIRONMENT
+			_script_value = int(_request.get("environment", -1))
+		0x14: # VAR_SPECIALPHONECALL
+			_script_value = int(_phone_context.get("special_call_id", 0))
+		0x17: # VAR_CALLERID
+			_script_value = int(_phone_context.get("caller_id", -1))
+		_:
+			return {
+				"ok": false,
+				"reason": &"unsupported_runtime_variable",
+				"variable": variable,
+			}
+	return {"ok": true}
+
+
+func _load_runtime_variable(variable: int, value: int) -> Dictionary:
+	## Phone scripts use LOADVAR for the two runtime values that are not
+	## ordinary world-state variables. Other cartridge variables stay explicit
+	## failures until their owning subsystem is implemented.
+	match variable:
+		0x14: # VAR_SPECIALPHONECALL
+			_phone_context["special_call_id"] = value
+		0x17: # VAR_CALLERID
+			_phone_context["caller_id"] = value
+		_:
+			return {
+				"ok": false,
+				"reason": &"unsupported_runtime_loadvar",
+				"variable": variable,
+				"value": value,
+			}
+	return {"ok": true}
+
+
+func _clock_hour() -> int:
+	var clock: Dictionary = _request.get("clock", {})
+	return clampi(int(clock.get("hour", 0)), 0, 23)
+
+
+func _execute_phone_special(special: int) -> Dictionary:
+	## These are the two specials called by the imported phone scripts. They
+	## populate text buffers on the cartridge; the text host publishes the same
+	## semantic event and leaves the display-specific formatting to the UI.
+	if special not in [91, 92]:
+		return {
+			"ok": false,
+			"reason": &"unsupported_phone_special",
+			"special": special,
+		}
+	_emit_runtime_event(&"phone_special_requested", {
+			"special": special,
+			"kind": &"random_wild_mon" if special == 91 else &"random_trainer_mon",
+		})
+	_script_value = 1
 	return {"ok": true}
 
 

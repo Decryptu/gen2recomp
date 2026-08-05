@@ -23,6 +23,9 @@ var player_facing: int = Gen2WorldSprite.FACING_DOWN
 var objects: Array = []
 var object_hour: int = 6
 var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
+var world_day: int = 0
+var world_hour: int = 6
+var world_minute: int = 0
 var movement_mode: StringName = MOVEMENT_WALK
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
@@ -312,6 +315,64 @@ func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
 		"swarm_map": state.swarm_map(),
 		"fishing_swarm_species": state.fishing_swarm_species(),
 	}
+
+
+func set_world_clock(day: int, hour: int, minute: int) -> void:
+	world_day = posmod(day, Gen2WorldClock.DAYS_PER_WEEK)
+	world_hour = posmod(hour, Gen2WorldClock.HOURS_PER_DAY)
+	world_minute = posmod(minute, Gen2WorldClock.MINUTES_PER_HOUR)
+
+
+func world_clock() -> Dictionary:
+	return {"day": world_day, "hour": world_hour, "minute": world_minute}
+
+
+## Queues a source-style incoming call after checking the entrance, receive
+## timer, random roll, service map, registration, time and same-map rules.
+func request_incoming_phone_call(
+	standing_on_entrance: bool = true,
+	timer_ready: bool = true,
+	random_byte: int = 0,
+	force: bool = false,
+	selection_byte: int = 0,
+) -> Array:
+	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_incoming(
+		data, state, current_map, world_hour, standing_on_entrance, timer_ready,
+		random_byte, force, selection_byte
+	)
+	if not bool(resolved.get("ok", false)):
+		return [{"ok": false, "status": &"phone_unavailable", "reason": resolved.get("reason", &"phone_unavailable")}]
+	var contact: Dictionary = resolved["contact"]
+	_enqueue_script({
+		"kind": &"phone_incoming",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"bank": int(resolved["script"]["bank"]),
+		"script": int(resolved["script"]["address"]),
+		"phone": resolved["phone"],
+		"contact": contact,
+	})
+	return run_event_queue(false)
+
+
+## Queues the selected outgoing caller script. Pokegear presentation can use
+## this boundary without duplicating phone eligibility rules in a scene.
+func request_outgoing_phone_call(contact_id: int) -> Array:
+	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_outgoing(
+		data, state, current_map, contact_id, world_hour
+	)
+	if not bool(resolved.get("ok", false)):
+		return [{"ok": false, "status": &"phone_unavailable", "reason": resolved.get("reason", &"phone_unavailable")}]
+	_enqueue_script({
+		"kind": &"phone_outgoing",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"bank": int(resolved["script"]["bank"]),
+		"script": int(resolved["script"]["address"]),
+		"phone": resolved["phone"],
+		"contact": resolved["contact"],
+	})
+	return run_event_queue(false)
 
 
 func _fishing_group_for_state(group: int) -> int:
@@ -734,6 +795,10 @@ func _enqueue_script(request: Dictionary) -> void:
 		var cell_value: Variant = request.get("cell", player_cell)
 		var cell: Vector2i = cell_value if cell_value is Vector2i else player_cell
 		request["collision"] = collision_code_at(cell)
+	if not request.has("clock"):
+		request["clock"] = world_clock()
+	if current_map != null and not request.has("environment"):
+		request["environment"] = current_map.environment
 	_script_queue.append(request)
 
 

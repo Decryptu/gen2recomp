@@ -71,8 +71,9 @@ cartridge fields before those models are canonical.
 `game/world/` keeps request resolution and UI separate. `world_host.gd` and the
 scene-free service helpers validate imported data and world transactions;
 `world_service_screen.gd` owns only labels, selection and input. A mart purchase
-must pass candidate-save validation before writeback. Phone presentation must
-not be treated as phone-script execution. Audio playback must remain behind the
+must pass candidate-save validation before writeback. Phone presentation only
+confirms the host request; the world script runner then executes the imported
+caller or callee script at the same transaction boundary. Audio playback must remain behind the
 verified bounded decoder, renderer and player layers, with real imported records
 validated before a host reports success.
 
