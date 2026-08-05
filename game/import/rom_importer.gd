@@ -225,6 +225,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not encounters["ok"]:
 		return encounters
 
+	var services: Dictionary = Gen2WorldServicesImporter.verify_layout(rom)
+	if not services["ok"]:
+		return services
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -1263,6 +1267,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"maps": 0,
 		"tilesets": 0,
 		"overworld_sprites": 0,
+		"menus": 0,
+		"marts": 0,
+		"phone_contacts": 0,
+		"special_phone_calls": 0,
+		"music": 0,
+		"sfx": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -1307,6 +1317,18 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	var encounters: Dictionary = Gen2WorldEncounterImporter.import_to_cache(rom, layout, directory)
 	if not bool(encounters.get("ok", false)):
 		result["message"] = String(encounters.get("message", "Could not import wild encounter data."))
+		return result
+	var script_cache: Variant = RomCache.read_json(RomCache.world_scripts_path(directory))
+	var standard_script_cache: Variant = RomCache.read_json(
+		RomCache.world_standard_scripts_path(directory)
+	)
+	var services: Dictionary = Gen2WorldServicesImporter.import_to_cache(
+		rom, layout, directory,
+		script_cache if script_cache is Dictionary else {},
+		standard_script_cache if standard_script_cache is Dictionary else {}
+	)
+	if not bool(services.get("ok", false)):
+		result["message"] = String(services.get("message", "Could not import world service data."))
 		return result
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
@@ -1354,6 +1376,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_fishing_group_count": int(encounters["fish_groups"]),
 		"world_roam_map_count": int(encounters["roam_maps"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
+		"world_menu_count": int(services["menus"]),
+		"world_mart_count": int(services["marts"]),
+		"world_phone_contact_count": int(services["phone_contacts"]),
+		"world_special_phone_call_count": int(services["special_phone_calls"]),
+		"world_music_count": int(services["music"]),
+		"world_sfx_count": int(services["sfx"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
@@ -1380,6 +1408,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["fishing_groups"] = int(encounters["fish_groups"])
 	result["roam_maps"] = int(encounters["roam_maps"])
 	result["overworld_sprites"] = int(world["overworld_sprites"])
+	result["menus"] = int(services["menus"])
+	result["marts"] = int(services["marts"])
+	result["phone_contacts"] = int(services["phone_contacts"])
+	result["special_phone_calls"] = int(services["special_phone_calls"])
+	result["music"] = int(services["music"])
+	result["sfx"] = int(services["sfx"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
@@ -1387,6 +1421,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
 		+ "%d water encounter maps, %d swarm grass maps, %d swarm water maps, "
 		+ "%d fishing groups, %d roaming maps and %d overworld sprites, "
+		+ "%d menus, %d marts, %d phone contacts, %d music tracks and %d sound effects, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
@@ -1394,6 +1429,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		int(encounters["swarm_grass"]), int(encounters["swarm_water"]),
 		int(encounters["fish_groups"]), int(encounters["roam_maps"]),
 		int(world["overworld_sprites"]),
+		int(services["menus"]), int(services["marts"]), int(services["phone_contacts"]),
+		int(services["music"]), int(services["sfx"]),
 		evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result

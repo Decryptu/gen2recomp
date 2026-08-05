@@ -45,6 +45,10 @@ var _world_palettes: Array = []
 var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
 var _overworld_sprite_palettes: Array = []
+var _world_menus: Dictionary = {}
+var _world_marts: Dictionary = {}
+var _world_phone: Dictionary = {}
+var _world_audio: Dictionary = {}
 
 
 ## Opens the cache for a registry game, or null if it has not been imported.
@@ -117,6 +121,67 @@ func world_maps() -> Array:
 ## Runtime never opens a ROM; these bytes come from the user cache only.
 func world_script(bank: int, address: int) -> PackedByteArray:
 	return _cached_bytes(_world_scripts.get(Gen2WorldScript.pointer_key(bank, address), []))
+
+
+## One imported menu header referenced by an overworld script.
+func world_menu(bank: int, address: int) -> Dictionary:
+	var value: Variant = _world_menus.get(Gen2WorldScript.pointer_key(bank, address), {})
+	return _coerce_service_dictionary(value)
+
+
+func world_menu_count() -> int:
+	return _world_menus.size()
+
+
+## One mart item list by the source MART_* index, or the default list when the
+## cartridge requested an index outside the static table.
+func world_mart(index: int) -> Dictionary:
+	var rows: Variant = _world_marts.get("marts", [])
+	if rows is Array and index >= 0 and index < (rows as Array).size():
+		return _coerce_service_dictionary((rows as Array)[index])
+	var default_value: Variant = _world_marts.get("default", {})
+	return _coerce_service_dictionary(default_value)
+
+
+func world_mart_count() -> int:
+	var rows: Variant = _world_marts.get("marts", [])
+	return (rows as Array).size() if rows is Array else 0
+
+
+func world_phone_contact(index: int) -> Dictionary:
+	return _service_row(_world_phone.get("contacts", []), index)
+
+
+func world_special_phone_call(index: int) -> Dictionary:
+	return _service_row(_world_phone.get("special_calls", []), index)
+
+
+func world_phone_contact_count() -> int:
+	return _service_rows_count(_world_phone.get("contacts", []))
+
+
+func world_audio(kind: StringName, index: int) -> Dictionary:
+	return _service_row(_world_audio.get(String(kind), []), index)
+
+
+func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionary:
+	var rows: Variant = _world_audio.get(String(kind), [])
+	if not rows is Array:
+		return {}
+	for value: Dictionary in rows as Array:
+		if int(value.get("bank", -1)) == bank and int(value.get("address", -1)) == address:
+			return _coerce_service_dictionary(value)
+	return {}
+
+
+func world_service_counts() -> Dictionary:
+	return {
+		"menus": _world_menus.size(),
+		"marts": world_mart_count(),
+		"phone_contacts": world_phone_contact_count(),
+		"music": _service_rows_count(_world_audio.get("music", [])),
+		"sfx": _service_rows_count(_world_audio.get("sfx", [])),
+	}
 
 
 ## One standard-script entry by its source table index. The pointer is retained
@@ -697,6 +762,18 @@ func _load_world(path: String) -> void:
 	)
 	if sprite_palettes is Array:
 		_overworld_sprite_palettes = sprite_palettes
+	var menus: Variant = RomCache.read_json(RomCache.world_menus_path(path))
+	if menus is Dictionary:
+		_world_menus = menus
+	var marts: Variant = RomCache.read_json(RomCache.world_marts_path(path))
+	if marts is Dictionary:
+		_world_marts = marts
+	var phone: Variant = RomCache.read_json(RomCache.world_phone_path(path))
+	if phone is Dictionary:
+		_world_phone = phone
+	var audio: Variant = RomCache.read_json(RomCache.world_audio_path(path))
+	if audio is Dictionary:
+		_world_audio = audio
 
 
 func _read_array(path: String) -> Array:
@@ -708,6 +785,37 @@ func _entry(rows: Array, index: int) -> Dictionary:
 	if index < 0 or index >= rows.size():
 		return {}
 	return rows[index]
+
+
+func _service_row(value: Variant, index: int) -> Dictionary:
+	if not value is Array or index < 0 or index >= (value as Array).size():
+		return {}
+	return _coerce_service_dictionary((value as Array)[index])
+
+
+func _service_rows_count(value: Variant) -> int:
+	return (value as Array).size() if value is Array else 0
+
+
+func _coerce_service_dictionary(value: Variant) -> Dictionary:
+	var coerced: Variant = _coerce_service_value(value)
+	return coerced if coerced is Dictionary else {}
+
+
+func _coerce_service_value(value: Variant) -> Variant:
+	if value is float:
+		return int(value)
+	if value is Array:
+		var array: Array = []
+		for entry: Variant in value as Array:
+			array.append(_coerce_service_value(entry))
+		return array
+	if value is Dictionary:
+		var dictionary: Dictionary = {}
+		for key: Variant in value:
+			dictionary[key] = _coerce_service_value(value[key])
+		return dictionary
+	return value
 
 
 func _cached_bytes(value: Variant) -> PackedByteArray:

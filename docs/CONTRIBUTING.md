@@ -45,6 +45,7 @@ These are `RefCounted` statics. Keep rules separate from content and inject a
 | `palette.gd` | 15-bit BGR colours |
 | `rom_layout.gd` | Per-game table locations |
 | `rom_cache.gd` | Cache paths, formats and lifecycle |
+| `world_services_importer.gd` | Menus, marts, phone records and audio pointer tables |
 | `rom_importer.gd` | Orchestration and layout checks |
 
 Decoders take bytes and return data, with no cartridge knowledge, so they can
@@ -224,6 +225,11 @@ check and `RomImporter.verify_layout()` must run all checks before decoding.
   matches the known value. `EVOLVE_STAT` is four bytes, not three.
 - Growth rate and base EXP bytes are checked against all 251 species in all
   three games, not just a few plausible values.
+- World service tables check their source counts, pointer widths, banked
+  addresses, mart terminators, phone record sizes and bounded audio payloads.
+  Referenced menu headers are accepted only when their data pointer and
+  command-derived shape are valid; malformed candidates in bounded script
+  tails are ignored rather than becoming runtime records.
 
 When adding an offset, add its check. Find new data by searching a dump for
 independently known bytes, such as an encoded name or published base stats,

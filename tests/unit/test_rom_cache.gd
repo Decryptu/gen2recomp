@@ -35,6 +35,10 @@ func test_each_table_gets_its_own_file() -> void:
 		RomCache.moves_path(_directory),
 		RomCache.items_path(_directory),
 		RomCache.types_path(_directory),
+		RomCache.world_menus_path(_directory),
+		RomCache.world_marts_path(_directory),
+		RomCache.world_phone_path(_directory),
+		RomCache.world_audio_path(_directory),
 		RomCache.manifest_path(_directory),
 	]
 	for path: String in paths:

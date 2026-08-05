@@ -161,6 +161,23 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		})
 		_pending = {}
 		return advance()
+	if kind in [
+		&"mart_requested", &"audio_requested", &"phone_call_requested",
+		&"special_phone_call_requested",
+	]:
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", "runtime_request_failed")), result
+			)
+		_script_value = int(result.get("script_value", 1))
+		_events.append({
+			"type": &"runtime_request_completed",
+			"kind": kind,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
 	if kind != &"battle_requested":
 		return {
 			"ok": false, "status": &"failed", "reason": &"runtime_request_kind_mismatch",
@@ -209,7 +226,9 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 func pending_runtime_request() -> Dictionary:
 	if _pending.get("type", &"") != &"runtime_request":
 		return {}
-	return (_pending.get("request", {}) as Dictionary).duplicate(true)
+	var request: Dictionary = (_pending.get("request", {}) as Dictionary).duplicate(true)
+	request["source"] = (_pending.get("source", {}) as Dictionary).duplicate(true)
+	return request
 
 
 func pending_input() -> Dictionary:
@@ -385,6 +404,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 				"bank": int(_request.get("bank", 0)),
 				"address": int(command["address"]),
 			}
+			if data != null:
+				var cached_menu: Dictionary = data.world_menu(
+					int(_request.get("bank", 0)), int(command["address"])
+				)
+				for key: String in cached_menu:
+					_loaded_menu[key] = cached_menu[key]
 			_emit_runtime_event(&"menu_loaded", _loaded_menu)
 		Gen2WorldScript.GIVEPOKE, Gen2WorldScript.GIVEEGG:
 			return _stage_runtime_request(&"pokemon_requested", command)
@@ -748,7 +773,7 @@ func _stage_menu(two_dimensional: bool, command: Dictionary) -> Dictionary:
 		"type": &"menu",
 		"menu_kind": &"2d" if two_dimensional else &"vertical",
 		"header": _loaded_menu.duplicate(true),
-		"options": [],
+		"options": _loaded_menu.get("options", []).duplicate(true),
 		"source": _request.duplicate(true),
 	}
 	return {"ok": true}
