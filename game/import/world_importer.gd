@@ -40,6 +40,10 @@ static func import_to_cache(
 		return {"ok": false, "message": "Could not write overworld animation data."}
 	if not RomCache.write_json(RomCache.world_maps_path(directory), result["maps"]):
 		return {"ok": false, "message": "Could not write overworld map data."}
+	if not RomCache.write_json(RomCache.world_scripts_path(directory), result["scripts"]):
+		return {"ok": false, "message": "Could not write overworld script data."}
+	if not RomCache.write_json(RomCache.world_text_path(directory), result["text"]):
+		return {"ok": false, "message": "Could not write overworld text data."}
 
 	var graphics: Dictionary = result["graphics"]
 	for number: int in graphics:
@@ -92,6 +96,8 @@ static func read_world(
 			on_progress.call("world_tilesets", number + 1, tilesets.size())
 
 	var maps: Array = []
+	var script_data: Dictionary = {}
+	var text_data: Dictionary = {}
 	for group: int in range(1, RomLayout.MAP_GROUP_COUNT + 1):
 		var pointer_offset: int = RomLayout.map_group_pointer_offset(layout, group)
 		if not rom.in_bounds(pointer_offset, RomLayout.MAP_GROUP_POINTER_SIZE):
@@ -102,7 +108,9 @@ static func read_world(
 
 		var group_count: int = RomLayout.map_group_count(layout, group)
 		for number: int in range(1, group_count + 1):
-			var map_result: Dictionary = _read_map(rom, layout, tilesets, group, number, group_pointer)
+			var map_result: Dictionary = _read_map(
+				rom, layout, tilesets, group, number, group_pointer, script_data, text_data
+			)
 			if not bool(map_result.get("ok", false)):
 				return map_result
 			map_result.erase("ok")
@@ -113,6 +121,8 @@ static func read_world(
 	return {
 		"ok": true,
 		"maps": maps,
+		"scripts": script_data,
+		"text": text_data,
 		"tilesets": tilesets,
 		"graphics": graphics,
 		"palettes": palettes["groups"],
@@ -339,6 +349,8 @@ static func _read_map(
 	group: int,
 	number: int,
 	group_pointer: int,
+	script_data: Dictionary,
+	text_data: Dictionary,
 ) -> Dictionary:
 	var record: int = RomLayout.map_record_offset(layout, group_pointer, number)
 	if not rom.in_bounds(record, RomLayout.MAP_RECORD_SIZE):
@@ -395,6 +407,15 @@ static func _read_map(
 	if not bool(event_result.get("ok", false)):
 		return event_result
 
+	var scripts_result: Dictionary = _read_map_scripts(
+		rom, scripts_bank, scripts_address, group, number, script_data, text_data
+	)
+	if not bool(scripts_result.get("ok", false)):
+		return scripts_result
+	for source: String in ["coord_events", "bg_events", "objects"]:
+		for event: Dictionary in event_result[source]:
+			_collect_script(rom, scripts_bank, int(event.get("script", 0)), script_data, text_data)
+
 	var tileset: Dictionary = tilesets[tileset_number]
 	var collision_grid: Array = []
 	for cell_y: int in height * RomLayout.MAP_BLOCK_CELL_WIDTH:
@@ -428,7 +449,12 @@ static func _read_map(
 		"collision_height": height * 2,
 		"connection_flags": connection_flags,
 		"connections": connections,
-		"scripts": {"bank": scripts_bank, "address": scripts_address},
+		"scripts": {
+			"bank": scripts_bank,
+			"address": scripts_address,
+			"scenes": scripts_result["scenes"],
+			"callbacks": scripts_result["callbacks"],
+		},
 		"events": {
 			"bank": scripts_bank,
 			"address": events_address,
@@ -603,6 +629,100 @@ static func _read_events(
 		"bg_events": bg_events,
 		"objects": objects,
 	}
+
+
+static func _read_map_scripts(
+	rom: RomFile,
+	bank: int,
+	address: int,
+	group: int,
+	number: int,
+	script_data: Dictionary,
+	text_data: Dictionary,
+) -> Dictionary:
+	var at: int = _far_offset(rom, {"bank": bank, "address": address})
+	if at < 0 or not rom.in_bounds(at):
+		return _error("Map %d/%d scripts are outside the ROM." % [group, number])
+
+	var scene_count: int = rom.u8(at)
+	if scene_count > RomLayout.MAP_MAX_SCENE_SCRIPTS:
+		return _error("Map %d/%d has %d scene scripts." % [group, number, scene_count])
+	at += 1
+	var scenes: Array = []
+	for scene: int in scene_count:
+		if not rom.in_bounds(at, RomLayout.MAP_SCENE_SCRIPT_SIZE):
+			return _error("Map %d/%d scene scripts are truncated." % [group, number])
+		var script_address: int = rom.u16le(at)
+		scenes.append({"id": scene, "script": script_address})
+		_collect_script(rom, bank, script_address, script_data, text_data)
+		at += RomLayout.MAP_SCENE_SCRIPT_SIZE
+
+	if not rom.in_bounds(at):
+		return _error("Map %d/%d has no callback count." % [group, number])
+	var callback_count: int = rom.u8(at)
+	if callback_count > RomLayout.MAP_MAX_CALLBACKS:
+		return _error("Map %d/%d has %d callbacks." % [group, number, callback_count])
+	at += 1
+	var callbacks: Array = []
+	for _callback: int in callback_count:
+		if not rom.in_bounds(at, RomLayout.MAP_CALLBACK_SIZE):
+			return _error("Map %d/%d callbacks are truncated." % [group, number])
+		var callback_type: int = rom.u8(at)
+		var script_address: int = rom.u16le(at + 1)
+		callbacks.append({"type": callback_type, "script": script_address})
+		_collect_script(rom, bank, script_address, script_data, text_data)
+		at += RomLayout.MAP_CALLBACK_SIZE
+
+	return {"ok": true, "scenes": scenes, "callbacks": callbacks}
+
+
+static func _collect_script(
+	rom: RomFile,
+	bank: int,
+	address: int,
+	script_data: Dictionary,
+	text_data: Dictionary,
+) -> void:
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return
+	var key: String = Gen2WorldScript.pointer_key(bank, address)
+	if script_data.has(key):
+		return
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0:
+		return
+	var length: int = mini(Gen2WorldScript.MAX_SCRIPT_BYTES, rom.size() - offset)
+	var bytes: PackedByteArray = rom.slice(offset, length)
+	if bytes.is_empty():
+		return
+	script_data[key] = Array(bytes)
+	var references: Dictionary = Gen2WorldScript.scan_references(
+		bytes, bank, address, rom.id == &"crystal"
+	)
+	for reference: Dictionary in references.get("scripts", []):
+		_collect_script(
+			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)),
+			script_data, text_data
+		)
+	for reference: Dictionary in references.get("texts", []):
+		_collect_text(
+			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)), text_data
+		)
+
+
+static func _collect_text(rom: RomFile, bank: int, address: int, text_data: Dictionary) -> void:
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return
+	var key: String = Gen2WorldScript.pointer_key(bank, address)
+	if text_data.has(key):
+		return
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0:
+		return
+	var length: int = mini(Gen2WorldScript.MAX_TEXT_BYTES, rom.size() - offset)
+	var bytes: PackedByteArray = rom.slice(offset, length)
+	if not bytes.is_empty():
+		text_data[key] = Array(bytes)
 
 
 static func _valid_coord(x: int, y: int, width: int, height: int) -> bool:

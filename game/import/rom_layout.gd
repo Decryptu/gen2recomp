@@ -45,6 +45,10 @@ const MAP_WARP_EVENT_SIZE: int = 5
 const MAP_COORD_EVENT_SIZE: int = 8
 const MAP_BG_EVENT_SIZE: int = 5
 const MAP_OBJECT_EVENT_SIZE: int = 13
+const MAP_SCENE_SCRIPT_SIZE: int = 4
+const MAP_CALLBACK_SIZE: int = 3
+const MAP_MAX_SCENE_SCRIPTS: int = 32
+const MAP_MAX_CALLBACKS: int = 16
 
 ## The graphics stream supplies the 96 tiles loaded by the overworld. Metatile
 ## and collision tables are shorter for tilesets that never use all 128 blocks;

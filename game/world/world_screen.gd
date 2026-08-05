@@ -21,6 +21,8 @@ var _data: GameData = null
 var _world: Gen2WorldAPI = null
 var _renderer: Gen2WorldRenderer = null
 var _animation: Gen2WorldAnimation = null
+var _text_box: Gen2TextBox = null
+var _script_prompt: String = ""
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -51,6 +53,12 @@ func _build_world() -> void:
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(time_of_day)
 	_screen.display(_renderer)
+	_text_box = Gen2TextBox.new()
+	_text_box.font = Gen2Font.from_data(_data)
+	_text_box.reveal_speed = 0.0
+	_text_box.place_at_bottom()
+	_text_box.visible = false
+	_screen.display(_text_box)
 	_refresh_labels()
 
 
@@ -64,6 +72,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
+		return
+	if _text_box != null and _text_box.visible and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+		_advance_script_input()
+		accept_event()
 		return
 	var direction := Vector2i.ZERO
 	match key.keycode:
@@ -99,6 +111,7 @@ func move_player(direction: Vector2i) -> bool:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+	_show_script_results(_world.dispatch_script_events())
 	return true
 
 
@@ -124,7 +137,71 @@ func world_snapshot() -> Dictionary:
 		"player_cell": _world.player_cell if _world != null else Vector2i(-1, -1),
 		"origin_cell": _world.visible_origin_cell() if _world != null else Vector2i(-1, -1),
 		"collision": _world.collision_code_at(_world.player_cell) if _world != null else -1,
+		"script_prompt": _script_prompt,
 	}
+
+
+## Public screenshot driver. It executes the first active scripted event in
+## source order, which keeps the debug image tied to imported map data.
+func preview_script_event() -> void:
+	if _world == null:
+		return
+	for source: String in ["coord_events", "bg_events", "objects"]:
+		for event: Dictionary in _world.current_map.events.get(source, []):
+			var cell := Vector2i(int(event.get("x", -1)), int(event.get("y", -1)))
+			var results: Array = _world.dispatch_script_events(cell)
+			if not results.is_empty():
+				_show_script_results(results)
+				return
+	_script_prompt = "No active script at this map's event records"
+	_refresh_labels()
+
+
+func _advance_script_input() -> void:
+	if _text_box.is_revealing():
+		_text_box.finish()
+		return
+	if _text_box.advance():
+		return
+	_text_box.visible = false
+	_script_prompt = ""
+	_show_script_results(_world.run_event_queue(true))
+	_refresh_labels()
+
+
+func _show_script_results(results: Array) -> void:
+	var waiting: bool = false
+	var failed: bool = false
+	var map_changed: bool = false
+	for result: Dictionary in results:
+		if StringName(result.get("status", &"")) == &"waiting":
+			waiting = true
+			var event: Dictionary = result.get("event", {})
+			var event_type: StringName = StringName(event.get("type", &""))
+			if event_type == &"text" and _text_box != null and _text_box.font != null:
+				_text_box.show_text(String(event.get("text", "")))
+				_text_box.visible = true
+				_script_prompt = "Space/Enter: advance text"
+			elif event_type == &"button":
+				if _text_box != null:
+					_text_box.visible = true
+				_script_prompt = "Space/Enter: continue script"
+		elif not bool(result.get("ok", false)):
+			failed = true
+			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
+		for result_event: Dictionary in result.get("events", []):
+			if result_event.get("type", &"") == &"warp":
+				map_changed = true
+	if not waiting and not failed:
+		_script_prompt = ""
+	if _renderer != null:
+		if map_changed:
+			_animation.configure(_world, time_of_day)
+			_renderer.set_world(_world, _animation)
+			_renderer.set_time_of_day(time_of_day)
+		else:
+			_renderer.refresh()
+	_refresh_labels()
 
 
 func _refresh_labels() -> void:
@@ -135,3 +212,5 @@ func _refresh_labels() -> void:
 	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
+	if not _script_prompt.is_empty():
+		_hint.text += "    " + _script_prompt
