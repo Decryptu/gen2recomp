@@ -157,6 +157,11 @@ Development scenes:
   `preview_world_battle_loss()` drives the recovery message for a visual smoke
   check.
 
+  `tools/preview_fishing.gd` captures the fishing state from the normal
+  renderer. With an imported cache, pass the game and map after the output
+  path, for example `silver 2 5`; the one-argument form remains a deterministic
+  integration-fixture smoke check.
+
 ## Tests
 
 [GUT](https://github.com/bitwes/Gut) is in `addons/gut`; configuration is in
