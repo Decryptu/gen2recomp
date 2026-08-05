@@ -17,6 +17,7 @@ var rom_sha1: String = ""
 var slot: int = -1
 var player_name: String = ""
 var party: Array = []
+var world: Gen2WorldSnapshot = null
 
 
 func to_dict() -> Dictionary:
@@ -30,6 +31,7 @@ func to_dict() -> Dictionary:
 		"slot": slot,
 		"player_name": player_name,
 		"party": saved_party,
+		"world": world.to_dict() if world != null else {},
 	}
 
 
@@ -49,4 +51,7 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	if raw_party is Array:
 		for raw_mon: Variant in raw_party as Array:
 			out.party.append(Gen2SaveMon.from_dict(raw_mon))
+	var raw_world: Variant = source.get("world", {})
+	if raw_world is Dictionary and not (raw_world as Dictionary).is_empty():
+		out.world = Gen2WorldSnapshot.from_dict(raw_world)
 	return out

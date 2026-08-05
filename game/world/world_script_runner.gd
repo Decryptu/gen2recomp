@@ -22,6 +22,8 @@ var _staged_coins: int = -1
 var _staged_phone_contacts: Dictionary = {}
 var _staged_just_battled: bool = false
 var _has_staged_just_battled: bool = false
+var _staged_swarm: Dictionary = {}
+var _has_staged_swarm: bool = false
 var _events: Array = []
 var _pending: Dictionary = {}
 var _last_text: Dictionary = {}
@@ -129,6 +131,36 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		}
 	var request: Dictionary = _pending.get("request", {})
 	var kind: StringName = StringName(request.get("kind", &""))
+	if kind == &"swarm_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"swarm_request_failed")), result
+			)
+		var values: Dictionary = request.get("values", {})
+		var active: bool = bool(result.get("active", true))
+		var map_group: int = int(result.get("map_group", values.get("map_group", -1)))
+		var map_number: int = int(result.get("map_number", values.get("map_number", -1)))
+		var fishing_species: int = int(result.get("fishing_species", 0))
+		if active and (map_group < 0 or map_number < 0):
+			return _fail(&"invalid_swarm_map", result)
+		if fishing_species not in [0, 0xD3, 0xDF]:
+			return _fail(&"invalid_fishing_swarm_species", result)
+		_staged_swarm = {
+			"active": active,
+			"map_group": map_group,
+			"map_number": map_number,
+			"fishing_species": fishing_species,
+		}
+		_has_staged_swarm = true
+		_events.append({
+			"type": &"swarm_changed",
+			"map_group": map_group,
+			"map_number": map_number,
+			"active": active,
+			"fishing_species": fishing_species,
+		})
+		_pending = {}
+		return advance()
 	if kind != &"battle_requested":
 		return {
 			"ok": false, "status": &"failed", "reason": &"runtime_request_kind_mismatch",
@@ -962,6 +994,8 @@ func _complete() -> Dictionary:
 		runtime_changes["phone_contacts"] = _staged_phone_contacts.duplicate()
 	if _has_staged_just_battled:
 		runtime_changes["just_battled"] = _staged_just_battled
+	if _has_staged_swarm:
+		runtime_changes["swarm"] = _staged_swarm.duplicate()
 	var applied: Dictionary = state.apply_changes(
 		_staged_flags, _staged_scenes, runtime_changes
 	)

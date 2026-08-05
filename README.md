@@ -143,11 +143,14 @@ Development scenes:
   `show_matchup` uses a fallback invented pairing.
 - `game/world/world_screen.tscn`: renders Route 29 by default with real
   palettes, animation and object sprites. Arrows/WASD move the player and roll
-  imported encounters on maps with a table. `preview_emote()` shows the live
-  object-emote renderer path, while `preview_wild_encounter()` opens a resolved
-  imported wild battle through the production battle overlay. The scene-free
-  world API also exposes explicit fishing rods, swarm overrides, roaming state
-  and repel countdowns.
+  imported encounters on maps with a table. Keys `1`, `2` and `3` select the
+  imported rod table, and `F` starts a cast when the player faces water. Space,
+  Enter or Z advances the cast and bite states. `preview_emote()` shows the
+  live object-emote renderer path, while `preview_wild_encounter()` and
+  `preview_fishing_battle()` open resolved imported battles through the
+  production battle overlay. The scene-free world API also exposes explicit
+  swarm and roaming schedule updates, repel countdowns and a JSON-safe world
+  snapshot that can be carried by a validated project save.
   `preview_script_event()` exercises an imported map event, while
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's

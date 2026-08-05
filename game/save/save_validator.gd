@@ -25,12 +25,41 @@ static func validate(save: Gen2SaveData, data: GameData) -> Dictionary:
 		return _failure("the player name is too long")
 	if save.party.is_empty() or save.party.size() > Gen2SaveData.MAX_PARTY:
 		return _failure("the party must contain between one and six Pokémon")
+	var world_result: Dictionary = _validate_world(save.world, data)
+	if not world_result["ok"]:
+		return world_result
 
 	for index: int in save.party.size():
 		var mon: Gen2SaveMon = save.party[index]
 		var result: Dictionary = _validate_mon(mon, data, index)
 		if not result["ok"]:
 			return result
+	return {"ok": true, "message": ""}
+
+
+static func _validate_world(world: Gen2WorldSnapshot, data: GameData) -> Dictionary:
+	if world == null:
+		return {"ok": true, "message": ""}
+	if world.format_version != Gen2WorldSnapshot.FORMAT_VERSION:
+		return _failure("unsupported world snapshot format %d" % world.format_version)
+	var map: Gen2WorldMap = data.world_map(world.map_id.x, world.map_id.y)
+	if map == null:
+		return _failure("the saved world map %d/%d is not in the cartridge cache" % [
+			world.map_id.x, world.map_id.y,
+		])
+	if world.player_cell.x < 0 or world.player_cell.y < 0 \
+		or world.player_cell.x >= map.collision_width \
+		or world.player_cell.y >= map.collision_height:
+		return _failure("the saved player cell is outside map %d/%d" % [
+			world.map_id.x, world.map_id.y,
+		])
+	if world.player_facing < Gen2WorldSprite.FACING_DOWN \
+		or world.player_facing > Gen2WorldSprite.FACING_RIGHT:
+		return _failure("the saved player facing is invalid")
+	if world.movement_mode not in [Gen2WorldAPI.MOVEMENT_WALK, Gen2WorldAPI.MOVEMENT_SURF]:
+		return _failure("the saved movement mode is invalid")
+	if world.world_state == null:
+		return _failure("the saved world state is missing")
 	return {"ok": true, "message": ""}
 
 

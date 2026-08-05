@@ -596,6 +596,55 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	))
 
 
+func test_swarm_runtime_request_commits_its_map_indices_as_one_transaction() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:60B0": [0x9F, 1, 2, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x60B0,
+	})
+	var waiting: Dictionary = runner.advance()
+	assert_eq(waiting["status"], &"waiting")
+	assert_eq(waiting["event"]["request"]["kind"], &"swarm_requested")
+	assert_eq(state.swarm_map(), Vector2i(-1, -1))
+	var complete: Dictionary = runner.complete_runtime_request({
+		"ok": true, "active": true, "map_group": 1, "map_number": 2,
+		"fishing_species": 0xD3,
+	})
+	assert_eq(complete["status"], &"complete")
+	assert_eq(state.swarm_map(), Vector2i(1, 2))
+	assert_eq(state.fishing_swarm_species(), 0xD3)
+
+
+func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new({}, {"1:1": 3}, {4: 2}, {0: 100}, 7, {9: true}, 5, Vector2i(1, 1), 0xD3, [], true)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	var snapshot: Gen2WorldSnapshot = world.snapshot()
+	world.state.set_repel_steps(99)
+	assert_eq(snapshot.world_state.repel_steps(), 5)
+	var encoded: Dictionary = snapshot.to_dict()
+	var decoded := Gen2WorldSnapshot.from_dict(encoded)
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(data, decoded)
+	assert_not_null(restored)
+	assert_eq(restored.map_id(), Vector2i(1, 1))
+	assert_eq(restored.player_cell, Vector2i(8, 6))
+	assert_eq(restored.player_facing, Gen2WorldSprite.FACING_LEFT)
+	assert_eq(restored.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(restored.state.map_scene(1, 1), 3)
+	assert_eq(restored.state.repel_steps(), 5)
+	assert_eq(restored.state.swarm_map(), Vector2i(1, 1))
+	assert_true(restored.state.just_battled())
+	var schedule: Dictionary = restored.advance_schedule()
+	assert_true(schedule["ok"])
+	assert_eq(schedule["kind"], &"world_schedule_updated")
+
+
 func test_battle_request_keeps_trainer_source_and_result_text_pointers() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
@@ -843,6 +892,53 @@ func test_explicit_fishing_uses_the_current_map_fish_group() -> void:
 	assert_eq(encounter["method"], Gen2WorldEncounter.METHOD_OLD_ROD)
 	assert_eq(encounter["fish_group"], 1)
 	assert_eq(encounter["values"]["pokemon"], 16)
+	assert_eq(encounter["facing_cell"], Vector2i(8, 7))
+
+
+func test_fishing_requires_a_facing_water_tile_and_not_surfing() -> void:
+	var world := _world(Vector2i(8, 6))
+	var started: Dictionary = world.fishing_request(
+		Gen2WorldEncounter.METHOD_OLD_ROD, null, true
+	)
+	assert_true(started["ok"])
+	assert_eq(started["kind"], &"fishing_started")
+	assert_eq(started["state"], Gen2WorldFishing.STATE_CASTING)
+	assert_eq(world.fishing_state(), Gen2WorldFishing.STATE_CASTING)
+
+	var bite: Dictionary = world.advance_fishing()
+	assert_eq(bite["kind"], &"fishing_bite")
+	assert_eq(bite["state"], Gen2WorldFishing.STATE_BITE)
+	var battle: Dictionary = world.advance_fishing()
+	assert_eq(battle["kind"], &"battle_requested")
+	assert_eq(battle["values"]["pokemon"], 16)
+	assert_eq(world.fishing_state(), Gen2WorldFishing.STATE_IDLE)
+
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var invalid: Dictionary = world.fishing_request(
+		Gen2WorldEncounter.METHOD_OLD_ROD, null, true
+	)
+	assert_false(invalid["ok"])
+	assert_eq(invalid["reason"], &"not_facing_water")
+
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	invalid = world.fishing_request(Gen2WorldEncounter.METHOD_OLD_ROD, null, true)
+	assert_false(invalid["ok"])
+	assert_eq(invalid["reason"], &"cannot_fish_while_surfing")
+
+
+func test_fishing_cast_can_end_without_a_bite() -> void:
+	var fishing := Gen2WorldFishing.new()
+	var started: Dictionary = fishing.begin(
+		Gen2WorldEncounter.METHOD_OLD_ROD,
+		{"chance": 0, "rods": [[{"threshold": 255, "species": 16, "level": 5}], [], []]},
+		1, 1, Gen2WorldPalette.TIME_MORNING, [], Vector2i(1, 1), Vector2i(8, 6),
+		Gen2WorldSprite.FACING_DOWN, Vector2i(8, 7), Gen2WorldAPI.MOVEMENT_WALK,
+	)
+	assert_true(started["ok"])
+	var result: Dictionary = fishing.advance()
+	assert_eq(result["kind"], &"fishing_no_bite")
+	assert_eq(fishing.state(), Gen2WorldFishing.STATE_IDLE)
 
 
 func test_active_swarm_replaces_the_normal_map_record() -> void:

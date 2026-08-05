@@ -26,7 +26,7 @@ func _init(
 	event_flags: Dictionary = {}, map_scenes: Dictionary = {}, items: Dictionary = {},
 	money: Dictionary = {}, coins: int = 0, phone_contacts: Dictionary = {},
 	repel_steps: int = 0, swarm_map: Vector2i = Vector2i(-1, -1),
-	fishing_swarm_species: int = 0, roaming_mons: Array = [],
+	fishing_swarm_species: int = 0, roaming_mons: Array = [], just_battled: bool = false,
 ) -> void:
 	for flag: Variant in event_flags:
 		if int(flag) > 0 and bool(event_flags[flag]):
@@ -53,6 +53,54 @@ func _init(
 	_swarm_map = swarm_map
 	_fishing_swarm_species = fishing_swarm_species if fishing_swarm_species in [0, 0xD3, 0xDF] else 0
 	_roaming_mons = _copy_roaming_mons(roaming_mons)
+	_just_battled = just_battled
+
+
+## JSON-safe representation of the mutable overworld state. Cartridge records
+## are deliberately absent because they belong to GameData, not a save.
+func to_dict() -> Dictionary:
+	return {
+		"event_flags": _event_flags.duplicate(),
+		"map_scenes": _map_scenes.duplicate(),
+		"items": _items.duplicate(),
+		"money": _money.duplicate(),
+		"coins": _coins,
+		"phone_contacts": _phone_contacts.duplicate(),
+		"just_battled": _just_battled,
+		"repel_steps": _repel_steps,
+		"swarm_map": [_swarm_map.x, _swarm_map.y],
+		"fishing_swarm_species": _fishing_swarm_species,
+		"roaming_mons": _copy_roaming_mons(_roaming_mons),
+	}
+
+
+## Rehydrates only the bounded state shape. The selected GameData remains
+## responsible for validating map, item and species references at save load.
+static func from_dict(raw: Variant) -> Gen2WorldState:
+	if not raw is Dictionary:
+		return Gen2WorldState.new()
+	var source: Dictionary = raw
+	var swarm: Vector2i = _vector_from_value(source.get("swarm_map", [-1, -1]))
+	return Gen2WorldState.new(
+		source.get("event_flags", {}) if source.get("event_flags", {}) is Dictionary else {},
+		source.get("map_scenes", {}) if source.get("map_scenes", {}) is Dictionary else {},
+		source.get("items", {}) if source.get("items", {}) is Dictionary else {},
+		source.get("money", {}) if source.get("money", {}) is Dictionary else {},
+		int(source.get("coins", 0)),
+		source.get("phone_contacts", {}) if source.get("phone_contacts", {}) is Dictionary else {},
+		int(source.get("repel_steps", 0)), swarm,
+		int(source.get("fishing_swarm_species", 0)),
+		source.get("roaming_mons", []) if source.get("roaming_mons", []) is Array else [],
+		bool(source.get("just_battled", false)),
+	)
+
+
+static func _vector_from_value(value: Variant) -> Vector2i:
+	if value is Array and (value as Array).size() >= 2:
+		return Vector2i(int((value as Array)[0]), int((value as Array)[1]))
+	if value is Dictionary:
+		return Vector2i(int((value as Dictionary).get("x", -1)), int((value as Dictionary).get("y", -1)))
+	return Vector2i(-1, -1)
 
 
 func is_event_flag_active(flag: int) -> bool:
@@ -298,6 +346,26 @@ func apply_changes(
 	for raw_contact: Variant in phone_changes:
 		if int(raw_contact) < 0:
 			return {"ok": false, "reason": &"invalid_phone_contact"}
+	var swarm_change: Variant = runtime_changes.get("swarm", null)
+	if swarm_change != null and not swarm_change is Dictionary:
+		return {"ok": false, "reason": &"invalid_swarm"}
+	var next_swarm_map: Vector2i = _swarm_map
+	var next_fishing_swarm_species: int = _fishing_swarm_species
+	if swarm_change is Dictionary:
+		var swarm: Dictionary = swarm_change
+		var swarm_active: bool = bool(swarm.get("active", true))
+		var swarm_group: int = int(swarm.get("map_group", -1))
+		var swarm_number: int = int(swarm.get("map_number", -1))
+		if swarm_active and (swarm_group < 0 or swarm_number < 0):
+			return {"ok": false, "reason": &"invalid_swarm_map"}
+		var swarm_species: int = int(swarm.get("fishing_species", 0))
+		if swarm_species not in [0, 0xD3, 0xDF]:
+			return {"ok": false, "reason": &"invalid_fishing_swarm_species"}
+		next_swarm_map = Vector2i(swarm_group, swarm_number) if swarm_active else Vector2i(-1, -1)
+		next_fishing_swarm_species = swarm_species
+	var next_repel_steps: int = int(runtime_changes.get("repel_steps", _repel_steps))
+	if next_repel_steps < 0:
+		return {"ok": false, "reason": &"invalid_repel_steps"}
 
 	var next_flags: Dictionary = _event_flags.duplicate()
 	for raw_flag: Variant in flag_changes:
@@ -338,7 +406,9 @@ func apply_changes(
 
 	var did_change: bool = next_flags != _event_flags or next_scenes != _map_scenes \
 		or next_items != _items or next_money != _money or next_coins != _coins \
-		or next_contacts != _phone_contacts or next_just_battled != _just_battled
+		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
+		or next_repel_steps != _repel_steps or next_swarm_map != _swarm_map \
+		or next_fishing_swarm_species != _fishing_swarm_species
 	_event_flags = next_flags
 	_map_scenes = next_scenes
 	_items = next_items
@@ -346,6 +416,9 @@ func apply_changes(
 	_coins = next_coins
 	_phone_contacts = next_contacts
 	_just_battled = next_just_battled
+	_repel_steps = next_repel_steps
+	_swarm_map = next_swarm_map
+	_fishing_swarm_species = next_fishing_swarm_species
 	if did_change:
 		changed.emit()
 	return {"ok": true, "changed": did_change}

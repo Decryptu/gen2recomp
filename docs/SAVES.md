@@ -10,6 +10,9 @@ The versioned first format stores:
 
 - game ID and ROM SHA-1, preventing use with another cache;
 - player name and party order;
+- an optional validated overworld snapshot containing the map ID, player cell,
+  facing, movement mode, event flags, map scenes, inventory quantities, money,
+  coins, phone contacts, repel steps, swarm state and roaming positions;
 - each Pokémon's species, held item, level, experience, current HP, status,
   DVs, five Generation 2 stat-experience values, moves and PP;
 - reserved identity fields for future import: OT ID, nickname, original
@@ -42,7 +45,10 @@ Overworld battle writeback is transactional. A confirmed win is saved only
 after its visible result messages finish. A loss never overwrites the selected
 slot: the host validates and reconstructs the source save party, then returns a
 blackout recovery result to the overworld. Map position, inventory and broader
-blackout relocation are still outside this party-only save format.
+blackout relocation are not created by the new-game screen yet. When a host
+provides a world snapshot, `Gen2SaveValidator` checks its map and player cell
+against the selected cartridge cache, and `Gen2WorldAPI.open_snapshot()` restores
+the same state without clamping it to another location.
 
 ## Original Generation 2 shape
 
@@ -52,8 +58,9 @@ stat-experience words, DVs, PP, happiness, Pokerus, caught data and level.
 `party_struct` adds status, current/max HP and five derived stats.
 
 Original SRAM also contains player, map, checksum, PC box, mail, Hall of Fame
-and Crystal-specific regions. The first model deliberately exposes only player
-and party data until map, inventory, box and event state have canonical models.
+and Crystal-specific regions. The first model deliberately keeps cartridge SRAM
+import party-only. The optional project-save world snapshot is a separate
+canonical runtime shape and does not claim to reproduce unsupported SRAM bytes.
 
 ## Cartridge SRAM boundary
 
