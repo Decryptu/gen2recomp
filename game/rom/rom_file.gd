@@ -44,9 +44,9 @@ static func open_verified(rom_path: String) -> RomFile:
 
 ## Wraps bytes that have already been vouched for. For tests and tooling;
 ## production paths should go through [method open_verified].
-static func from_bytes(data: PackedByteArray, id: StringName = &"") -> RomFile:
+static func from_bytes(data: PackedByteArray, game_id: StringName = &"") -> RomFile:
 	var rom := RomFile.new()
-	rom.id = id
+	rom.id = game_id
 	rom._bytes = data
 	return rom
 

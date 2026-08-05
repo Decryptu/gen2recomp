@@ -110,9 +110,9 @@ static func total_exp_at(growth_rate: int, level: int) -> int:
 ## way [code]CalcLevel[/code] finds it: by walking levels upward rather than
 ## solving the cubic backward, because the forward formula truncates and its
 ## inverse would not agree with it at every level if it were solved directly.
-static func level_for_exp(growth_rate: int, exp: int) -> int:
+static func level_for_exp(growth_rate: int, experience_points: int) -> int:
 	var level: int = 1
-	while level < MAX_LEVEL and total_exp_at(growth_rate, level + 1) <= exp:
+	while level < MAX_LEVEL and total_exp_at(growth_rate, level + 1) <= experience_points:
 		level += 1
 	return level
 

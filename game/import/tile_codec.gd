@@ -152,7 +152,7 @@ static func blit(
 ) -> void:
 	if source_width <= 0:
 		return
-	var height: int = source.size() / source_width
+	var height: int = floori(float(source.size()) / float(source_width))
 	for y: int in height:
 		var from: int = y * source_width
 		var to: int = (at_y + y) * destination_width + at_x

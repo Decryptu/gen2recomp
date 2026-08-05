@@ -114,6 +114,31 @@ func test_phone_time_masks_and_map_rules_match_the_cartridge() -> void:
 	assert_eq(no_service["reason"], &"phone_service_unavailable")
 
 
+func test_outgoing_phone_uses_imported_same_map_and_out_of_area_scripts() -> void:
+	var metadata: Dictionary = {
+		"out_of_area_script": {"bank": Fixture.BANK, "address": 0x6600},
+		"just_talk_script": {"bank": Fixture.BANK, "address": 0x6610},
+	}
+	var phone: Dictionary = RomCache.read_json(RomCache.world_phone_path(Fixture.directory()))
+	phone["metadata"] = metadata
+	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), phone)
+	_data = GameData.open_directory(Fixture.directory())
+	var state := Gen2WorldState.new({}, {}, {}, {}, 0, {0: true})
+	var same_map: Dictionary = Gen2WorldPhoneHost.resolve_outgoing(
+		_data, state, _world.current_map, 0, 12
+	)
+	assert_true(same_map["ok"])
+	assert_true(same_map["phone"]["same_map"])
+	assert_eq(same_map["script"]["address"], 0x6610)
+	_world.current_map.phone_flag = 1
+	var out_of_area: Dictionary = Gen2WorldPhoneHost.resolve_outgoing(
+		_data, state, _world.current_map, 0, 12
+	)
+	assert_true(out_of_area["ok"])
+	assert_true(out_of_area["out_of_area"])
+	assert_eq(out_of_area["script"]["address"], 0x6600)
+
+
 func test_audio_host_renders_the_real_record() -> void:
 	var record: Dictionary = _data.world_audio(&"music", 0)
 	var result: Dictionary = Gen2WorldAudioHost.play(record, &"music")

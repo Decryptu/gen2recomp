@@ -19,11 +19,11 @@ static func exists(game_id: StringName, rom_sha1: String, slot: int) -> bool:
 	return _valid_slot(slot) and FileAccess.file_exists(path_for(game_id, rom_sha1, slot))
 
 
-static func save(save: Gen2SaveData, data: GameData) -> Dictionary:
-	var validation: Dictionary = Gen2SaveValidator.validate(save, data)
+static func save(save_data: Gen2SaveData, data: GameData) -> Dictionary:
+	var validation: Dictionary = Gen2SaveValidator.validate(save_data, data)
 	if not validation["ok"]:
 		return validation
-	var path: String = path_for(save.game_id, save.rom_sha1, save.slot)
+	var path: String = path_for(save_data.game_id, save_data.rom_sha1, save_data.slot)
 	var directory: String = path.get_base_dir()
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return _failure("could not create the save directory")
@@ -32,7 +32,7 @@ static func save(save: Gen2SaveData, data: GameData) -> Dictionary:
 	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
 		return _failure("could not open the save for writing")
-	file.store_string(JSON.stringify(save.to_dict(), "\t"))
+	file.store_string(JSON.stringify(save_data.to_dict(), "\t"))
 	file.flush()
 	file.close()
 	if DirAccess.rename_absolute(temporary, path) != OK:
@@ -56,13 +56,13 @@ static func load_result(game_id: StringName, rom_sha1: String, slot: int, data: 
 	if parse_error != OK:
 		return _failure("save slot %d is not valid JSON data" % (slot + 1))
 	var raw: Variant = parser.data
-	var save: Gen2SaveData = Gen2SaveData.from_dict(raw)
-	if save == null:
+	var loaded_save: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	if loaded_save == null:
 		return _failure("save slot %d is not valid JSON data" % (slot + 1))
-	var validation: Dictionary = Gen2SaveValidator.validate(save, data)
+	var validation: Dictionary = Gen2SaveValidator.validate(loaded_save, data)
 	if not validation["ok"]:
 		return _failure("save slot %d: %s" % [slot + 1, validation["message"]])
-	return {"ok": true, "message": "", "save": save}
+	return {"ok": true, "message": "", "save": loaded_save}
 
 
 static func slots_for(game_id: StringName, rom_sha1: String, data: GameData) -> Array:
@@ -120,17 +120,17 @@ static func create_new_game(
 	)
 	if mon == null:
 		return null
-	var save := Gen2SaveData.new()
-	save.game_id = data.id
-	save.rom_sha1 = data.sha1
-	save.slot = slot
-	save.player_name = player_name
+	var new_save := Gen2SaveData.new()
+	new_save.game_id = data.id
+	new_save.rom_sha1 = data.sha1
+	new_save.slot = slot
+	new_save.player_name = player_name
 	var saved_mon: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(mon)
 	saved_mon.nickname = String(data.species(starter_species).get("name", ""))
 	saved_mon.original_trainer = player_name
-	save.party.append(saved_mon)
-	save.world = Gen2WorldSpawn.new_game_snapshot(data)
-	return save
+	new_save.party.append(saved_mon)
+	new_save.world = Gen2WorldSpawn.new_game_snapshot(data)
+	return new_save
 
 
 static func ensure_development_save(data: GameData, slot: int = 0) -> Dictionary:

@@ -257,10 +257,28 @@ static func _read_phone(rom: RomFile, layout: Dictionary) -> Dictionary:
 			"contact": rom.u8(at + 2),
 			"script": script,
 		})
+	var out_of_area: Dictionary = _layout_script_pointer(
+		rom, layout, "phone_out_of_area_bank", "phone_out_of_area_address"
+	)
+	var just_talk: Dictionary = _layout_script_pointer(
+		rom, layout, "phone_just_talk_bank", "phone_just_talk_address"
+	)
+	if out_of_area.is_empty() or just_talk.is_empty():
+		return _error("Phone service script pointers are invalid.")
 
 	return {
 		"ok": true,
-		"data": {"contacts": contacts, "special_calls": special_calls},
+		"data": {
+			"contacts": contacts,
+			"special_calls": special_calls,
+			"metadata": {
+				"max_contacts": 10,
+				"permanent_contacts": [1, 4],
+				"receive_call_delays": [20, 10, 5, 3],
+				"out_of_area_script": out_of_area,
+				"just_talk_script": just_talk,
+			},
+		},
 	}
 
 
@@ -268,6 +286,18 @@ static func _phone_pointer(rom: RomFile, at: int) -> Dictionary:
 	var bank: int = rom.u8(at)
 	var address: int = rom.u16le(at + 1)
 	if not _valid_cpu_address(address) or not rom.in_bounds(RomFile.linear(bank, address)):
+		return {}
+	return {"bank": bank, "address": address}
+
+
+static func _layout_script_pointer(
+	rom: RomFile, layout: Dictionary, bank_key: String, address_key: String
+) -> Dictionary:
+	var bank: int = int(layout.get(bank_key, -1))
+	var address: int = int(layout.get(address_key, -1))
+	if bank < 0 or not _valid_cpu_address(address):
+		return {}
+	if not rom.in_bounds(RomFile.linear(bank, address)):
 		return {}
 	return {"bank": bank, "address": address}
 
@@ -365,6 +395,13 @@ static func _collect_phone_scripts(
 			)
 	for special_call: Dictionary in phone.get("special_calls", []):
 		var pointer: Dictionary = special_call.get("script", {})
+		Gen2WorldImporter.collect_script(
+			rom, int(pointer.get("bank", -1)), int(pointer.get("address", -1)),
+			scripts, text_data, movement_data
+		)
+	var metadata: Dictionary = phone.get("metadata", {})
+	for field: String in ["out_of_area_script", "just_talk_script"]:
+		var pointer: Dictionary = metadata.get(field, {})
 		Gen2WorldImporter.collect_script(
 			rom, int(pointer.get("bank", -1)), int(pointer.get("address", -1)),
 			scripts, text_data, movement_data
@@ -475,9 +512,9 @@ static func _read_menus(rom: RomFile, scripts: Dictionary, standard_scripts: Dic
 
 	var menus: Dictionary = {}
 	for key: String in references:
-		var reference: Dictionary = references[key]
-		var bank: int = int(reference["bank"])
-		var address: int = int(reference["address"])
+		var menu_reference: Dictionary = references[key]
+		var bank: int = int(menu_reference["bank"])
+		var address: int = int(menu_reference["address"])
 		if not _valid_cpu_address(address):
 			continue
 		var header_offset: int = RomFile.linear(bank, address)
@@ -502,7 +539,7 @@ static func _read_menus(rom: RomFile, scripts: Dictionary, standard_scripts: Dic
 			"data_bank": bank,
 			"data_address": data_address,
 			"default": rom.u8(header_offset + 7),
-			"uses": reference.get("uses", []),
+			"uses": menu_reference.get("uses", []),
 			"data": Array(raw),
 		}
 		var decoded: Dictionary = _decode_menu_data(raw)
@@ -513,7 +550,7 @@ static func _read_menus(rom: RomFile, scripts: Dictionary, standard_scripts: Dic
 
 
 static func _scan_menu_references(
-	rom: RomFile,
+	_rom: RomFile,
 	data: PackedByteArray,
 	bank: int,
 	crystal_commands: bool,

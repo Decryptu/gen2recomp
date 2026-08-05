@@ -599,6 +599,10 @@ const GOLD_SILVER: Dictionary = {
 	"rooftop_mart_2": 0,
 	"phone_contacts": 0x9043A,
 	"special_phone_calls": 0x905F6,
+	"phone_out_of_area_bank": 0x24,
+	"phone_out_of_area_address": 0x4626,
+	"phone_just_talk_bank": 0x24,
+	"phone_just_talk_address": 0x462F,
 	# SpecialCallOnlyWhenOutside and SpecialCallWhereverYouAre in engine/phone/phone.asm.
 	"phone_condition_outside": 0x4190,
 	"phone_condition_anywhere": 0x419F,
@@ -716,6 +720,10 @@ const CRYSTAL: Dictionary = {
 	"rooftop_mart_2": 0x15AFF,
 	"phone_contacts": 0x9045F,
 	"special_phone_calls": 0x90627,
+	"phone_out_of_area_bank": 0x24,
+	"phone_out_of_area_address": 0x4657,
+	"phone_just_talk_bank": 0x24,
+	"phone_just_talk_address": 0x4660,
 	# Crystal's relocated special-call condition routines.
 	"phone_condition_outside": 0x4188,
 	"phone_condition_anywhere": 0x4197,

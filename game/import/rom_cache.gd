@@ -227,7 +227,7 @@ static func read_json(path: String) -> Variant:
 ## all of which are [code]{ "bank:address": [bytes] }[/code]. Every value is a
 ## run, so each becomes a [constant PAYLOAD_KEY] span into the blob.
 static func write_payload_map(
-	json_path: String, blob_path: String, entries: Dictionary
+	json_path: String, payload_blob_path: String, entries: Dictionary
 ) -> bool:
 	var blob := PackedByteArray()
 	var stripped: Dictionary = {}
@@ -237,7 +237,7 @@ static func write_payload_map(
 			else value
 	if not write_json(json_path, stripped):
 		return false
-	return write_indices(blob_path, blob)
+	return write_indices(payload_blob_path, blob)
 
 
 ## Writes a section whose byte runs are named fields rather than whole values,
@@ -246,12 +246,12 @@ static func write_payload_map(
 ## Only a [code]bytes[/code] field holding an array is moved. Nothing else is
 ## touched: plenty of cached arrays are small numbers without being cartridge
 ## payloads, and a mart list or an encounter rate must stay an array.
-static func write_section(json_path: String, blob_path: String, value: Variant) -> bool:
+static func write_section(json_path: String, payload_blob_path: String, value: Variant) -> bool:
 	var blob := PackedByteArray()
 	var stripped: Variant = _extract_payloads(value, blob)
 	if not write_json(json_path, stripped):
 		return false
-	return write_indices(blob_path, blob)
+	return write_indices(payload_blob_path, blob)
 
 
 ## The binary blob for a section, or empty when the section has none. Held as a

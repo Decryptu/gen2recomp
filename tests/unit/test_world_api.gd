@@ -266,7 +266,6 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		{"script": 0x6100, "kind": &"audio_requested", "data_key": "audio", "row_key": "index"},
 		{"script": 0x6110, "kind": &"mart_requested", "data_key": "mart", "row_key": "index"},
 		{"script": 0x6120, "kind": &"phone_call_requested", "data_key": "contact", "row_key": "index"},
-		{"script": 0x6130, "kind": &"special_phone_call_requested", "data_key": "special_call", "row_key": "index"},
 	]
 	for test_case: Dictionary in cases:
 		data.world_map(1, 1).events["coord_events"][0]["script"] = test_case["script"]
@@ -279,6 +278,12 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		assert_true(complete["handled"])
 		assert_eq(complete["data"][test_case["data_key"]][test_case["row_key"]], 0)
 		assert_eq(complete["results"][0]["status"], &"complete")
+
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6130
+	var special_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var special_results: Array = special_world.dispatch_script_events()
+	assert_eq(special_results[0]["status"], &"complete")
+	assert_eq(special_world.state.pending_special_phone_call(), 1)
 
 
 func test_world_host_resolves_contextual_warp_and_item_sounds() -> void:

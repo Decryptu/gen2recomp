@@ -732,7 +732,7 @@ static func _givepoke_command_at(data: PackedByteArray, offset: int) -> Dictiona
 
 
 static func scan_references(
-	data: PackedByteArray, bank: int, address: int, crystal_commands: bool = true
+	data: PackedByteArray, bank: int, _address: int, crystal_commands: bool = true
 ) -> Dictionary:
 	## Scans only commands understood by this slice. An unknown command stops the
 	## scan because its operand width cannot be inferred safely.

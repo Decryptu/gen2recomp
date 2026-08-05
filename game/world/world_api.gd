@@ -42,6 +42,8 @@ var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
 var schedule_random: RandomNumberGenerator = null
 var _last_schedule: Dictionary = {}
 
+const PHONE_ENTRANCE_COLLISIONS: Array[int] = [0x71, 0x79, 0x7A, 0x7B]
+
 
 ## Opens one map through the public cartridge-content API.
 ## Returns null when the cache does not contain the requested map or tileset.
@@ -64,29 +66,29 @@ static func open(
 
 
 ## Opens a validated map/player snapshot without silently clamping its cell.
-static func open_snapshot(game_data: GameData, snapshot: Gen2WorldSnapshot) -> Gen2WorldAPI:
-	if game_data == null or snapshot == null:
+static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot) -> Gen2WorldAPI:
+	if game_data == null or world_snapshot == null:
 		return null
-	var map: Gen2WorldMap = game_data.world_map(snapshot.map_id.x, snapshot.map_id.y)
-	if map == null or snapshot.world_state == null:
+	var map: Gen2WorldMap = game_data.world_map(world_snapshot.map_id.x, world_snapshot.map_id.y)
+	if map == null or world_snapshot.world_state == null:
 		return null
-	if snapshot.player_cell.x < 0 or snapshot.player_cell.y < 0 \
-		or snapshot.player_cell.x >= map.collision_width \
-		or snapshot.player_cell.y >= map.collision_height:
+	if world_snapshot.player_cell.x < 0 or world_snapshot.player_cell.y < 0 \
+		or world_snapshot.player_cell.x >= map.collision_width \
+		or world_snapshot.player_cell.y >= map.collision_height:
 		return null
-	if snapshot.player_facing < Gen2WorldSprite.FACING_DOWN \
-		or snapshot.player_facing > Gen2WorldSprite.FACING_RIGHT:
+	if world_snapshot.player_facing < Gen2WorldSprite.FACING_DOWN \
+		or world_snapshot.player_facing > Gen2WorldSprite.FACING_RIGHT:
 		return null
-	if snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
+	if world_snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
 		return null
 	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
 	if tileset == null:
 		return null
 	var out := Gen2WorldAPI.new(
-		game_data, map, tileset, snapshot.player_cell, snapshot.world_state
+		game_data, map, tileset, world_snapshot.player_cell, world_snapshot.world_state
 	)
-	out.player_facing = snapshot.player_facing
-	out.movement_mode = snapshot.movement_mode
+	out.player_facing = world_snapshot.player_facing
+	out.movement_mode = world_snapshot.movement_mode
 	return out
 
 
@@ -133,8 +135,8 @@ func visible_origin_cell() -> Vector2i:
 	var max_x: int = maxi(0, size.x - VIEW_CELLS.x)
 	var max_y: int = maxi(0, size.y - VIEW_CELLS.y)
 	return Vector2i(
-		clampi(player_cell.x - VIEW_CELLS.x / 2, 0, max_x),
-		clampi(player_cell.y - VIEW_CELLS.y / 2, 0, max_y)
+		clampi(player_cell.x - floori(float(VIEW_CELLS.x) / 2.0), 0, max_x),
+		clampi(player_cell.y - floori(float(VIEW_CELLS.y) / 2.0), 0, max_y)
 	)
 
 
@@ -295,8 +297,8 @@ func repel_steps() -> int:
 	return state.repel_steps()
 
 
-func set_swarm_map(map_id: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
-	state.set_swarm_map(map_id, active, fishing_species)
+func set_swarm_map(map_key: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
+	state.set_swarm_map(map_key, active, fishing_species)
 
 
 func roaming_mons() -> Array:
@@ -355,8 +357,109 @@ func request_incoming_phone_call(
 		"script": int(resolved["script"]["address"]),
 		"phone": resolved["phone"],
 		"contact": contact,
+		"reset_receive_timer": true,
 	})
 	return run_event_queue(false)
+
+
+## Queues a source-style special call. The pending call remains in world state
+## until the imported phone script clears VAR_SPECIALPHONECALL.
+func request_special_phone_call(call_id: int) -> Array:
+	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_special(
+		data, current_map, call_id, world_hour
+	)
+	if not bool(resolved.get("ok", false)):
+		return [{
+			"ok": false, "status": &"special_phone_unavailable",
+			"reason": resolved.get("reason", &"special_phone_unavailable"),
+		}]
+	_enqueue_script({
+		"kind": &"phone_special",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"bank": int(resolved["script"]["bank"]),
+		"script": int(resolved["script"]["address"]),
+		"phone": resolved["phone"],
+		"contact": resolved["contact"],
+		"special_call_id": call_id,
+		"reset_receive_timer": true,
+	})
+	return run_event_queue(false)
+
+
+## Checks the pending special call before ordinary step effects, matching the
+## source CountStep path. A failed condition leaves the pending call queued.
+func try_special_phone_call() -> Dictionary:
+	if state == null:
+		return {"ok": false, "reason": &"missing_world_state", "attempted": false}
+	var call_id: int = state.pending_special_phone_call()
+	if call_id <= 0:
+		return {"ok": true, "attempted": false, "results": []}
+	var resolved: Dictionary = Gen2WorldPhoneHost.resolve_special(
+		data, current_map, call_id, world_hour
+	)
+	if not bool(resolved.get("ok", false)):
+		return {
+			"ok": true,
+			"attempted": false,
+			"call_id": call_id,
+			"reason": resolved.get("reason", &"special_phone_unavailable"),
+			"results": [],
+		}
+	return {
+		"ok": true,
+		"attempted": true,
+		"call_id": call_id,
+		"results": request_special_phone_call(call_id),
+	}
+
+
+## Advances the receive timer by completed game minutes. The source checks the
+## entrance before it checks the timer, so a due call waits until the player is
+## standing on a door, staircase or cave tile.
+func advance_phone_schedule(
+	minutes: int = 1,
+	random: RandomNumberGenerator = null,
+	selection_byte: int = -1,
+	force: bool = false
+) -> Dictionary:
+	if state == null:
+		return {"ok": false, "reason": &"missing_world_state", "timer_ready": false}
+	var crossed: bool = state.advance_phone_receive_timer(minutes)
+	var attempt: Dictionary = {
+		"ok": true,
+		"timer_ready": state.phone_receive_ready(),
+		"timer_crossed": crossed,
+		"results": [],
+	}
+	if not state.phone_receive_ready() or not standing_on_phone_entrance():
+		return attempt
+	var random_byte: int = random.randi_range(0, 255) if random != null else 0
+	var chosen: int = selection_byte
+	if chosen < 0:
+		chosen = random.randi_range(0, 255) if random != null else 0
+	state.consume_phone_receive_timer()
+	attempt["attempted"] = true
+	attempt["results"] = request_incoming_phone_call(
+		true, true, random_byte, force, chosen
+	)
+	return attempt
+
+
+## Checks a due receive timer after movement or map setup. This covers the
+## source path where elapsed time made the timer ready away from an entrance.
+func try_receive_phone_call(
+	random: RandomNumberGenerator = null, selection_byte: int = -1, force: bool = false
+) -> Dictionary:
+	return advance_phone_schedule(0, random, selection_byte, force)
+
+
+func standing_on_phone_entrance(cell: Vector2i = player_cell) -> bool:
+	return PHONE_ENTRANCE_COLLISIONS.has(collision_code_at(cell))
+
+
+func registered_phone_contacts() -> Array:
+	return Gen2WorldPhoneHost.registered_contact_summaries(data, state)
 
 
 ## Queues the selected outgoing caller script. Pokegear presentation can use
@@ -534,8 +637,8 @@ func tile_index_at(tile_x: int, tile_y: int) -> int:
 		return -1
 
 	var block: int = block_at(
-		tile_x / RomLayout.MAP_BLOCK_TILE_WIDTH,
-		tile_y / RomLayout.MAP_BLOCK_TILE_WIDTH,
+		floori(float(tile_x) / float(RomLayout.MAP_BLOCK_TILE_WIDTH)),
+		floori(float(tile_y) / float(RomLayout.MAP_BLOCK_TILE_WIDTH)),
 	)
 	var local_tile: int = (tile_y & 3) * RomLayout.MAP_BLOCK_TILE_WIDTH + (tile_x & 3)
 	return current_tileset.tile_index(block, local_tile)
@@ -561,12 +664,12 @@ func collision_code_at(cell: Vector2i) -> int:
 	if current_map == null or current_tileset == null:
 		return -1
 	var block: int = block_at(
-		cell.x / RomLayout.MAP_BLOCK_CELL_WIDTH,
-		cell.y / RomLayout.MAP_BLOCK_CELL_WIDTH,
+		floori(float(cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
+		floori(float(cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
 	)
 	if block != current_map.block_at(
-		cell.x / RomLayout.MAP_BLOCK_CELL_WIDTH,
-		cell.y / RomLayout.MAP_BLOCK_CELL_WIDTH
+		floori(float(cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
+		floori(float(cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
 	):
 		return current_tileset.collision_index(
 			block,

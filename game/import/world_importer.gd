@@ -274,7 +274,7 @@ static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Diction
 		var raw: PackedByteArray = rom.slice(graphics_offset, byte_size)
 		if raw.size() != byte_size:
 			return _error("Overworld sprite %d graphics are truncated." % number)
-		var tiles: int = byte_size / Gen2Tiles.TILE_BYTES
+		var tiles: int = floori(float(byte_size) / float(Gen2Tiles.TILE_BYTES))
 		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
 		if pixels.size() != tiles * Gen2Tiles.TILE_PIXELS:
 			return _error("Overworld sprite %d graphics did not decode." % number)
@@ -415,10 +415,10 @@ static func _read_animation(rom: RomFile, layout: Dictionary, pointer: int, numb
 static func _vram_tile(address: int) -> int:
 	if address < 0x9000 or address >= 0xA000 or (address - 0x9000) % Gen2Tiles.TILE_BYTES != 0:
 		return -1
-	return (address - 0x9000) / Gen2Tiles.TILE_BYTES
+	return floori(float(address - 0x9000) / float(Gen2Tiles.TILE_BYTES))
 
 
-static func _animation_asset_index(rom: RomFile, layout: Dictionary, operation: String, pointer: int) -> int:
+static func _animation_asset_index(_rom: RomFile, layout: Dictionary, operation: String, pointer: int) -> int:
 	var name: String = "tower" if operation == "tower" else "whirlpool"
 	var spec: Dictionary = layout["world_animation_assets"][name]
 	var base: int = int(spec["offset"])
@@ -427,7 +427,7 @@ static func _animation_asset_index(rom: RomFile, layout: Dictionary, operation: 
 	var delta: int = offset - base
 	if delta < 0 or delta % stride != 0 or delta >= int(spec["bytes"]):
 		return -1
-	return delta / stride
+	return floori(float(delta) / float(stride))
 
 
 static func _read_map(
@@ -794,18 +794,18 @@ static func _collect_script(
 	var references: Dictionary = Gen2WorldScript.scan_references(
 		bytes, bank, address, rom.id == &"crystal"
 	)
-	for reference: Dictionary in references.get("scripts", []):
+	for script_reference: Dictionary in references.get("scripts", []):
 		_collect_script(
-			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)),
+			rom, int(script_reference.get("bank", bank)), int(script_reference.get("address", 0)),
 			script_data, text_data, movement_data
 		)
-	for reference: Dictionary in references.get("texts", []):
+	for text_reference: Dictionary in references.get("texts", []):
 		_collect_text(
-			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)), text_data
+			rom, int(text_reference.get("bank", bank)), int(text_reference.get("address", 0)), text_data
 		)
-	for reference: Dictionary in references.get("movements", []):
+	for movement_reference: Dictionary in references.get("movements", []):
 		_collect_movement(
-			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)), movement_data
+			rom, int(movement_reference.get("bank", bank)), int(movement_reference.get("address", 0)), movement_data
 		)
 
 

@@ -17,6 +17,7 @@ var item: int = 0
 var moves: Array = [0, 0, 0, 0]
 var pp: Array = [0, 0, 0, 0]
 var ot_id: int = 0
+@warning_ignore("shadowed_global_identifier")
 var exp: int = 0
 var stat_exp: Dictionary = {
 	"hp": 0,

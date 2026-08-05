@@ -46,7 +46,7 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
 >
-> Full story state and the complete phone UI do not exist yet, so this is not a
+> Full story state and the remaining incoming phone and special-call UI do not exist yet, so this is not a
 > complete game. The mod boundary is in: a mod under `user://mods/` can register
 > a replacement world renderer, which is what a 3D or HD view needs. Scene-level integration tests cover trainer sight,
 > imported terminal text, live object refresh, emotes, wild capture, save-backed
@@ -157,7 +157,7 @@ Development scenes:
   imported tables, and `F` fishes only while facing water with an owned rod.
   Space, Enter or `Z` advances casting and bites; F5 saves. The host clock
   advances one real-time game minute per minute and updates source day
-  boundaries. `preview_emote()`, `preview_wild_encounter()`,
+  boundaries. `P` opens the registered Pokegear phone list. `preview_emote()`, `preview_wild_encounter()`,
   `preview_fishing_battle()`, `preview_script_event()`,
   `preview_battle_request()`, `preview_world_battle_loss()`,
   `preview_capture()` and `preview_party_transaction()` exercise their live

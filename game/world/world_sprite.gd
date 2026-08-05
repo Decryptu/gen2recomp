@@ -30,7 +30,9 @@ static func from_cache(value: Dictionary) -> Gen2WorldSprite:
 	out.address = int(value.get("address", 0))
 	out.bank = int(value.get("bank", 0))
 	out.bytes = int(value.get("bytes", 0))
-	out.tiles = int(value.get("tiles", out.bytes / Gen2Tiles.TILE_BYTES))
+	out.tiles = int(value.get(
+		"tiles", floori(float(out.bytes) / float(Gen2Tiles.TILE_BYTES))
+	))
 	out.sprite_type = int(value.get("type", TYPE_STILL))
 	out.default_palette = int(value.get("palette", 0))
 	return out
