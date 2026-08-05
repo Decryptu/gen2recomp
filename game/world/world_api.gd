@@ -15,6 +15,10 @@ var data: GameData = null
 var current_map: Gen2WorldMap = null
 var current_tileset: Gen2WorldTileset = null
 var player_cell: Vector2i = Vector2i.ZERO
+var player_facing: int = Gen2WorldSprite.FACING_DOWN
+var objects: Array = []
+var object_hour: int = 6
+var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
 
 
 ## Opens one map through the public cartridge-content API.
@@ -43,6 +47,7 @@ func _init(
 	current_map = map
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
+	_load_objects()
 
 
 func map_id() -> Vector2i:
@@ -77,6 +82,34 @@ func player_view_cell() -> Vector2i:
 
 func player_pixel_position() -> Vector2i:
 	return player_view_cell() * CELL_PIXELS
+
+
+func player_sprite() -> Gen2WorldSprite:
+	return data.overworld_sprite(1) if data != null else null
+
+
+func set_object_time(hour: int, time_of_day: int) -> void:
+	object_hour = clampi(hour, 0, 23)
+	object_time_of_day = clampi(time_of_day, 0, 3)
+	for object: Gen2WorldObject in objects:
+		object.active = object.visible_at(object_hour, object_time_of_day)
+
+
+func visible_objects() -> Array:
+	var out: Array = []
+	for object: Gen2WorldObject in objects:
+		if object.active and object.sprite != null:
+			out.append(object)
+	return out
+
+
+func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
+	for object: Gen2WorldObject in objects:
+		if object.cell != cell or (visible_only and not object.active):
+			continue
+		if object.sprite != null:
+			return object
+	return null
 
 
 ## The expanded graphics tile at a map-space tile coordinate, or -1 outside
@@ -205,6 +238,7 @@ func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(Vector2i(int(target_warp["x"]), int(target_warp["y"])))
+	_load_objects()
 	return {
 		"ok": true,
 		"kind": &"warp",
@@ -221,7 +255,44 @@ func can_walk_to(cell: Vector2i) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
-	return Gen2WorldCollision.is_walkable(collision_code_at(cell))
+	return Gen2WorldCollision.is_walkable(collision_code_at(cell)) and object_at(cell) == null
+
+
+func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
+	if current_map == null or cell.x < 0 or cell.y < 0 \
+		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
+		return false
+	if not Gen2WorldCollision.is_walkable(collision_code_at(cell)):
+		return false
+	for object: Gen2WorldObject in objects:
+		if object != moving and object.active and object.sprite != null and object.cell == cell:
+			return false
+	return cell != player_cell
+
+
+## Advances only the movement templates whose source behavior is data-driven in
+## this slice. Scripted, follower and interaction objects remain at their
+## imported coordinates until those systems are implemented.
+func advance_objects(random: RandomNumberGenerator) -> int:
+	var moved: int = 0
+	for object: Gen2WorldObject in objects:
+		if not object.active or not object.movement_supported():
+			continue
+		if object.movement in [Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW, Gen2WorldObject.MOVEMENT_SPINRANDOM_FAST]:
+			object.facing = random.randi_range(
+				Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_RIGHT
+			)
+			continue
+		var direction: Vector2i = object.next_direction(random)
+		if direction == Vector2i.ZERO:
+			continue
+		var destination: Vector2i = object.cell + direction
+		if not object.can_leave_to(destination) or not can_object_walk_to(destination, object):
+			continue
+		object.cell = destination
+		object.apply_direction(direction)
+		moved += 1
+	return moved
 
 
 ## Moves exactly one walk cell in a cardinal direction. Diagonal, zero and
@@ -233,6 +304,14 @@ func move(direction: Vector2i) -> bool:
 	if not can_walk_to(destination):
 		return false
 	player_cell = destination
+	if direction == Vector2i.UP:
+		player_facing = Gen2WorldSprite.FACING_UP
+	elif direction == Vector2i.DOWN:
+		player_facing = Gen2WorldSprite.FACING_DOWN
+	elif direction == Vector2i.LEFT:
+		player_facing = Gen2WorldSprite.FACING_LEFT
+	elif direction == Vector2i.RIGHT:
+		player_facing = Gen2WorldSprite.FACING_RIGHT
 	return true
 
 
@@ -242,3 +321,16 @@ func _clamp_cell(cell: Vector2i) -> Vector2i:
 		clampi(cell.x, 0, maxi(0, size.x - 1)),
 		clampi(cell.y, 0, maxi(0, size.y - 1)),
 	)
+
+
+func _load_objects() -> void:
+	objects = []
+	if current_map == null or data == null:
+		return
+	var rows: Array = current_map.events.get("objects", [])
+	for index: int in rows.size():
+		var value: Dictionary = rows[index]
+		var sprite_number: int = int(value.get("sprite", 0))
+		var sprite: Gen2WorldSprite = data.overworld_sprite(sprite_number)
+		objects.append(Gen2WorldObject.from_event(index, value, sprite))
+	set_object_time(object_hour, object_time_of_day)

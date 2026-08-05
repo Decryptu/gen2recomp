@@ -1,8 +1,9 @@
 class_name Gen2WorldImporter
 extends RefCounted
 
-## Imports the map table, map attributes, map events, tileset tables and
-## addressable overworld tile strips for a verified Generation 2 cartridge.
+## Imports the map table, map attributes, map events, tileset tables, overworld
+## object graphics and addressable overworld tile strips for a verified
+## Generation 2 cartridge.
 ##
 ## The parser follows the official map macros and the runtime's collision
 ## lookup: map blocks are 4x4 graphics tiles, walk coordinates are 2x2 cells per
@@ -23,6 +24,12 @@ static func import_to_cache(
 		return result
 
 	var tilesets: Array = result["tilesets"]
+	if not RomCache.write_json(RomCache.overworld_sprites_path(directory), result["sprites"]):
+		return {"ok": false, "message": "Could not write overworld sprite data."}
+	if not RomCache.write_json(
+		RomCache.overworld_sprite_palettes_path(directory), result["sprite_palettes"]
+	):
+		return {"ok": false, "message": "Could not write overworld sprite palettes."}
 	if not RomCache.write_json(RomCache.world_tilesets_path(directory), tilesets):
 		return {"ok": false, "message": "Could not write overworld tileset data."}
 	if not RomCache.write_json(RomCache.world_palettes_path(directory), result["palettes"]):
@@ -39,10 +46,18 @@ static func import_to_cache(
 		if not RomCache.write_indices(RomCache.world_tile_path(directory, number), graphics[number]):
 			return {"ok": false, "message": "Could not write overworld tileset %d." % number}
 
+	var sprite_graphics: Dictionary = result["sprite_graphics"]
+	for number: int in sprite_graphics:
+		if not RomCache.write_indices(
+			RomCache.overworld_sprite_path(directory, number), sprite_graphics[number]
+		):
+			return {"ok": false, "message": "Could not write overworld sprite %d." % number}
+
 	return {
 		"ok": true,
 		"maps": result["maps"].size(),
 		"tilesets": tilesets.size(),
+		"overworld_sprites": result["sprites"].size(),
 	}
 
 
@@ -51,6 +66,10 @@ static func read_world(
 ) -> Dictionary:
 	if layout.is_empty():
 		return {"ok": false, "message": "No world layout for %s." % rom.id}
+
+	var sprites: Dictionary = _read_overworld_sprites(rom, layout)
+	if not bool(sprites.get("ok", false)):
+		return sprites
 
 	var palettes: Dictionary = _read_world_palettes(rom, layout)
 	if not bool(palettes.get("ok", false)):
@@ -98,7 +117,81 @@ static func read_world(
 		"graphics": graphics,
 		"palettes": palettes["groups"],
 		"animation_assets": animation_assets["assets"],
+		"sprites": sprites["sprites"],
+		"sprite_palettes": sprites["palettes"],
+		"sprite_graphics": sprites["graphics"],
 	}
+
+
+## The cartridge stores these graphics as raw 2bpp tile strips. The table is
+## independent of map objects: an object event's sprite byte indexes it, while
+## the event supplies its movement, visibility and optional palette override.
+static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.overworld_sprite_count(layout)
+	var table: int = int(layout.get("overworld_sprites", -1))
+	if count <= 0 or not rom.in_bounds(table, count * RomLayout.OVERWORLD_SPRITE_RECORD_SIZE):
+		return _error("Overworld sprite table is outside the cartridge.")
+
+	var palette_offset: int = int(layout.get("overworld_sprite_palettes", -1))
+	if not rom.in_bounds(palette_offset, RomLayout.OVERWORLD_SPRITE_PALETTE_BYTES):
+		return _error("Overworld sprite palettes are outside the cartridge.")
+
+	var palettes: Array = []
+	for group: int in RomLayout.OVERWORLD_SPRITE_PALETTE_GROUP_COUNT:
+		var colors: Array = []
+		for color: int in 4:
+			var at: int = palette_offset + group * RomLayout.OVERWORLD_SPRITE_PALETTE_GROUP_BYTES + color * 2
+			var packed: int = rom.u16le(at)
+			if packed & 0x8000:
+				return _error("Overworld sprite palette %d has bit 15 set." % group)
+			colors.append(packed)
+		palettes.append(colors)
+
+	# The first palette row is the source's red overworld palette. It is a
+	# stable content check for the palette table because a nearby table still
+	# yields legal 15-bit colours.
+	var first_palette: Array = palettes[0]
+	if first_palette != [0x43FC, 0x2A7F, 0x04FF, 0x0000]:
+		return _error("Overworld sprite palette table does not start with red.")
+
+	var sprites: Array = []
+	var graphics: Dictionary = {}
+	for number: int in range(1, count + 1):
+		var at: int = RomLayout.overworld_sprite_offset(layout, number)
+		var address: int = rom.u16le(at)
+		var byte_size: int = rom.u8(at + 2)
+		var bank: int = rom.u8(at + 3)
+		var sprite_type: int = rom.u8(at + 4)
+		var default_palette: int = rom.u8(at + 5)
+		if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+			return _error("Overworld sprite %d has an invalid CPU address." % number)
+		if byte_size <= 0 or byte_size % Gen2Tiles.TILE_BYTES != 0:
+			return _error("Overworld sprite %d has an invalid byte length." % number)
+		if sprite_type not in RomLayout.OVERWORLD_SPRITE_TYPES:
+			return _error("Overworld sprite %d has unknown type %d." % [number, sprite_type])
+		if default_palette < 0 or default_palette >= RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT:
+			return _error("Overworld sprite %d has palette %d." % [number, default_palette])
+
+		var graphics_offset: int = RomFile.linear(bank, address)
+		var raw: PackedByteArray = rom.slice(graphics_offset, byte_size)
+		if raw.size() != byte_size:
+			return _error("Overworld sprite %d graphics are truncated." % number)
+		var tiles: int = byte_size / Gen2Tiles.TILE_BYTES
+		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
+		if pixels.size() != tiles * Gen2Tiles.TILE_PIXELS:
+			return _error("Overworld sprite %d graphics did not decode." % number)
+		graphics[number] = pixels
+		sprites.append({
+			"number": number,
+			"address": address,
+			"bank": bank,
+			"bytes": byte_size,
+			"tiles": tiles,
+			"type": sprite_type,
+			"palette": default_palette,
+		})
+
+	return {"ok": true, "sprites": sprites, "palettes": palettes, "graphics": graphics}
 
 
 static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dictionary:
@@ -421,6 +514,14 @@ static func _read_events(
 		# map's interior dimensions.
 		var radius: int = rom.u8(at + 4)
 		var palette_type: int = rom.u8(at + 7)
+		var hour_1: int = rom.u8(at + 5)
+		var hour_2: int = rom.u8(at + 6)
+		# The source macro writes -1 as $FF to select the time-of-day mask in
+		# hour_2. Preserve that sentinel as a signed value in the cache.
+		if hour_1 == 0xFF:
+			hour_1 = -1
+		if hour_2 == 0xFF:
+			hour_2 = -1
 		objects.append({
 			"sprite": rom.u8(at),
 			"x": object_x,
@@ -428,8 +529,8 @@ static func _read_events(
 			"movement": rom.u8(at + 3),
 			"x_radius": radius & 0x0F,
 			"y_radius": radius >> 4,
-			"hour_1": rom.u8(at + 5),
-			"hour_2": rom.u8(at + 6),
+			"hour_1": hour_1,
+			"hour_2": hour_2,
 			"palette": palette_type >> 4,
 			"object_type": palette_type & 0x0F,
 			"sight_range": rom.u8(at + 8),

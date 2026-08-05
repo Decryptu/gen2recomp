@@ -11,9 +11,11 @@ const BACKGROUND: Color = Color("#09111f")
 const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 
-@export var map_group: int = 1
-@export var map_number: int = 1
-@export var start_cell: Vector2i = Vector2i(3, 1)
+@export var map_group: int = 10
+@export var map_number: int = 17
+@export var start_cell: Vector2i = Vector2i(4, 4)
+@export_range(0, 23) var hour: int = 6
+@export_range(0, 3) var time_of_day: int = Gen2WorldPalette.TIME_MORNING
 
 var _data: GameData = null
 var _world: Gen2WorldAPI = null
@@ -43,9 +45,11 @@ func _build_world() -> void:
 		return
 
 	_animation = Gen2WorldAnimation.new()
-	_animation.configure(_world)
+	_world.set_object_time(hour, time_of_day)
+	_animation.configure(_world, time_of_day)
 	_renderer = Gen2WorldRenderer.new()
 	_renderer.set_world(_world, _animation)
+	_renderer.set_time_of_day(time_of_day)
 	_screen.display(_renderer)
 	_refresh_labels()
 
@@ -86,7 +90,7 @@ func move_player(direction: Vector2i) -> bool:
 		var transition: Dictionary = _world.try_warp()
 		if _renderer != null:
 			if bool(transition.get("ok", false)):
-				_animation.configure(_world)
+				_animation.configure(_world, time_of_day)
 				_renderer.set_world(_world, _animation)
 			else:
 				_renderer.refresh()

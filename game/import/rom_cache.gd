@@ -31,10 +31,13 @@ const WORLD_TILESETS: String = "world_tilesets.json"
 const WORLD_PALETTES: String = "world_palettes.json"
 const WORLD_ANIMATION_ASSETS: String = "world_animation_assets.json"
 const WORLD_TILES_DIR: String = "world_tiles"
+const OVERWORLD_SPRITES: String = "overworld_sprites.json"
+const OVERWORLD_SPRITE_PALETTES: String = "overworld_sprite_palettes.json"
+const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 10
+const FORMAT_VERSION: int = 11
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -88,6 +91,14 @@ static func world_animation_assets_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_ANIMATION_ASSETS]
 
 
+static func overworld_sprites_path(directory: String) -> String:
+	return "%s/%s" % [directory, OVERWORLD_SPRITES]
+
+
+static func overworld_sprite_palettes_path(directory: String) -> String:
+	return "%s/%s" % [directory, OVERWORLD_SPRITE_PALETTES]
+
+
 static func pic_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, PICS_DIR, name]
 
@@ -104,8 +115,12 @@ static func world_tile_path(directory: String, number: int) -> String:
 	return "%s/%s/%02d.idx" % [directory, WORLD_TILES_DIR, number]
 
 
+static func overworld_sprite_path(directory: String, number: int) -> String:
+	return "%s/%s/%03d.idx" % [directory, OVERWORLD_SPRITES_DIR, number]
+
+
 static func prepare(directory: String) -> bool:
-	for sub: String in [PICS_DIR, TILES_DIR, WORLD_TILES_DIR]:
+	for sub: String in [PICS_DIR, TILES_DIR, WORLD_TILES_DIR, OVERWORLD_SPRITES_DIR]:
 		if DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, sub]) != OK:
 			return false
 	return true

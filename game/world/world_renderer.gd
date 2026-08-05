@@ -13,17 +13,22 @@ var _animation: Gen2WorldAnimation = null
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _atlas: Texture2D = null
 var _background_color: Color = FALLBACK_BACKGROUND
+var _actor_textures: Dictionary = {}
 
 
 func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> void:
 	_world = world
 	_animation = animation
+	_actor_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()
 
 
 func set_time_of_day(time_of_day: int) -> void:
 	_time_of_day = clampi(time_of_day, 0, 3)
+	if _world != null:
+		_world.set_object_time(_world.object_hour, _time_of_day)
+	_actor_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()
 
@@ -95,8 +100,48 @@ func _draw() -> void:
 				Rect2(Vector2(tile * Gen2Tiles.TILE_WIDTH, 0), Vector2(8, 8)),
 			)
 
+	var actors: Array = _world.visible_objects()
+	actors.sort_custom(_sort_objects)
+	for object: Gen2WorldObject in actors:
+		var pixel: Vector2i = (object.cell - _world.visible_origin_cell()) * Gen2WorldAPI.CELL_PIXELS
+		var texture: Texture2D = _actor_texture(object.sprite, object.palette, object.facing, object.frame)
+		if texture != null:
+			draw_texture(texture, Vector2(pixel))
+
 	var player: Vector2i = _world.player_pixel_position()
-	var marker := Rect2(Vector2(player.x, player.y), Vector2(16, 16))
-	draw_rect(marker, PLAYER_COLOR, false, 1.0)
-	draw_line(marker.position, marker.end, PLAYER_COLOR, 1.0)
-	draw_line(Vector2(marker.end.x, marker.position.y), Vector2(marker.position.x, marker.end.y), PLAYER_COLOR, 1.0)
+	var player_texture: Texture2D = _actor_texture(
+		_world.player_sprite(), 0, _world.player_facing, 0
+	)
+	if player_texture != null:
+		draw_texture(player_texture, Vector2(player))
+	else:
+		var marker := Rect2(Vector2(player.x, player.y), Vector2(16, 16))
+		draw_rect(marker, PLAYER_COLOR, false, 1.0)
+		draw_line(marker.position, marker.end, PLAYER_COLOR, 1.0)
+		draw_line(Vector2(marker.end.x, marker.position.y), Vector2(marker.position.x, marker.end.y), PLAYER_COLOR, 1.0)
+
+
+func _actor_texture(
+	sprite: Gen2WorldSprite,
+	palette_override: int,
+	facing: int,
+	frame: int,
+) -> Texture2D:
+	if sprite == null or _world == null or _world.data == null:
+		return null
+	var palette: int = palette_override if palette_override != 0 else sprite.default_palette
+	var key: String = "%d:%d:%d:%d:%d" % [sprite.number, palette, facing, frame, _time_of_day]
+	if _actor_textures.has(key):
+		return _actor_textures[key]
+	var indices: PackedByteArray = _world.data.overworld_sprite_indices(sprite.number)
+	var colors: PackedColorArray = _world.data.overworld_sprite_palette(palette, _time_of_day)
+	var image: Image = Gen2WorldSprite.image_for(sprite, indices, colors, facing, frame)
+	var texture: Texture2D = ImageTexture.create_from_image(image)
+	_actor_textures[key] = texture
+	return texture
+
+
+func _sort_objects(first: Gen2WorldObject, second: Gen2WorldObject) -> bool:
+	if first.cell.y == second.cell.y:
+		return first.index < second.index
+	return first.cell.y < second.cell.y
