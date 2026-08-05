@@ -129,6 +129,7 @@ static func create_new_game(
 	saved_mon.nickname = String(data.species(starter_species).get("name", ""))
 	saved_mon.original_trainer = player_name
 	save.party.append(saved_mon)
+	save.world = Gen2WorldSpawn.new_game_snapshot(data)
 	return save
 
 

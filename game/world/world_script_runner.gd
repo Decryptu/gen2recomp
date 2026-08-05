@@ -68,12 +68,12 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		if _pending.get("type", &"") == &"runtime_request" \
 			and StringName(pending_request.get("kind", &"")) == &"battle_requested":
 			return _waiting_result()
-		if not acknowledge or (_pending.get("type", &"") == &"choice" and choice < 0):
+		if not acknowledge:
 			return _waiting_result()
 		var pending_type: StringName = StringName(_pending.get("type", &""))
 		if pending_type in [&"choice", &"menu"]:
-			if pending_type == &"menu" and choice < 0:
-				choice = 0
+			if choice < 0:
+				return _waiting_result()
 			_script_value = choice
 		if pending_type == &"choice" and _pending.has("contact"):
 			var contact: int = int(_pending.get("contact", -1))
@@ -210,6 +210,10 @@ func pending_runtime_request() -> Dictionary:
 	if _pending.get("type", &"") != &"runtime_request":
 		return {}
 	return (_pending.get("request", {}) as Dictionary).duplicate(true)
+
+
+func pending_input() -> Dictionary:
+	return _pending.duplicate(true)
 
 
 func is_waiting() -> bool:

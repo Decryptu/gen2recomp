@@ -60,6 +60,15 @@ static func _validate_world(world: Gen2WorldSnapshot, data: GameData) -> Diction
 		return _failure("the saved movement mode is invalid")
 	if world.world_state == null:
 		return _failure("the saved world state is missing")
+	for raw_item: Variant in world.world_state.items():
+		if data.item(int(raw_item)).is_empty():
+			return _failure("the saved world contains unknown item %d" % int(raw_item))
+	for raw_account: Variant in world.world_state.money_balances():
+		var balance: int = int(world.world_state.money_balances()[raw_account])
+		if balance < 0 or balance > Gen2WorldInventory.MAX_MONEY:
+			return _failure("the saved world money balance is invalid")
+	if world.world_state.coins() < 0 or world.world_state.coins() > Gen2WorldInventory.MAX_COINS:
+		return _failure("the saved world coin balance is invalid")
 	return {"ok": true, "message": ""}
 
 

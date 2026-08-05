@@ -20,7 +20,15 @@ func after_each() -> void:
 func _write_cache() -> void:
 	RomCache.write_json(RomCache.species_path(_directory), [])
 	RomCache.write_json(RomCache.moves_path(_directory), [])
-	RomCache.write_json(RomCache.items_path(_directory), [])
+	var items: Array = []
+	for number: int in Gen2WorldInventory.ITEM_SUPER_ROD:
+		items.append({
+			"number": number,
+			"name": "OLD ROD" if number == Gen2WorldInventory.ITEM_OLD_ROD
+			else ("GOOD ROD" if number == Gen2WorldInventory.ITEM_GOOD_ROD
+			else ("SUPER ROD" if number == Gen2WorldInventory.ITEM_SUPER_ROD else "ITEM%d" % number)),
+		})
+	RomCache.write_json(RomCache.items_path(_directory), items)
 	RomCache.write_json(RomCache.types_path(_directory), [])
 	RomCache.write_json(RomCache.matchups_path(_directory), [])
 	RomCache.write_json(RomCache.trainers_path(_directory), [])
@@ -213,7 +221,12 @@ func _world(
 	start: Vector2i = Vector2i(8, 6), state: Gen2WorldState = null
 ) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
-	return Gen2WorldAPI.open(data, 1, 1, start, state)
+	var world_state: Gen2WorldState = state
+	if world_state == null:
+		world_state = Gen2WorldState.new(
+			{}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1}
+		)
+	return Gen2WorldAPI.open(data, 1, 1, start, world_state)
 
 
 func test_collision_codes_keep_the_cartridge_permission_categories() -> void:
@@ -578,7 +591,9 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	assert_eq(menu["event"]["type"], &"menu")
 	assert_eq(menu["event"]["header"]["address"], 0x1234)
 
-	var battle: Dictionary = runner.advance(true)
+	var still_menu: Dictionary = runner.advance(true)
+	assert_eq(still_menu["status"], &"waiting")
+	var battle: Dictionary = runner.advance(true, 0)
 	assert_eq(battle["status"], &"waiting")
 	assert_eq(battle["event"]["type"], &"runtime_request")
 	assert_eq(battle["event"]["request"]["kind"], &"battle_requested")
@@ -594,6 +609,23 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	assert_true(complete["events"].any(func(event: Dictionary) -> bool:
 		return event.get("type", &"") == &"battle_completed"
 	))
+
+
+func test_missing_audio_host_does_not_acknowledge_an_audio_request() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6098": [0x7F, 0x34, 0x12, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6098
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var waiting: Array = world.dispatch_script_events()
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(world.pending_runtime_request()["kind"], &"audio_requested")
+	var unavailable: Dictionary = Gen2WorldHost.complete_runtime_request(world, {"ok": true})
+	assert_false(unavailable["ok"])
+	assert_eq(unavailable["reason"], &"audio_host_unavailable")
+	assert_eq(world.pending_runtime_request()["kind"], &"audio_requested")
 
 
 func test_swarm_runtime_request_commits_its_map_indices_as_one_transaction() -> void:
@@ -925,6 +957,37 @@ func test_fishing_requires_a_facing_water_tile_and_not_surfing() -> void:
 	invalid = world.fishing_request(Gen2WorldEncounter.METHOD_OLD_ROD, null, true)
 	assert_false(invalid["ok"])
 	assert_eq(invalid["reason"], &"cannot_fish_while_surfing")
+
+
+func test_fishing_requires_the_matching_inventory_item() -> void:
+	var world := _world(Vector2i(8, 6), Gen2WorldState.new())
+	var missing: Dictionary = world.fishing_request(
+		Gen2WorldEncounter.METHOD_OLD_ROD, null, true
+	)
+	assert_false(missing["ok"])
+	assert_eq(missing["reason"], &"rod_not_owned")
+	var added: Dictionary = world.inventory.set_item_quantity(
+		Gen2WorldInventory.ITEM_OLD_ROD, 1
+	)
+	assert_true(added["ok"])
+	assert_true(world.available_fishing_rods().has(Gen2WorldEncounter.METHOD_OLD_ROD))
+	assert_true(world.fishing_request(
+		Gen2WorldEncounter.METHOD_OLD_ROD, null, true
+	)["ok"])
+
+
+func test_inventory_adapter_changes_items_and_currency_atomically() -> void:
+	var world := _world(Vector2i(8, 6), Gen2WorldState.new())
+	assert_true(world.inventory.set_item_quantity(1, 2)["ok"])
+	assert_eq(world.state.item_quantity(1), 2)
+	assert_true(world.inventory.change_item_quantity(1, -1)["ok"])
+	assert_eq(world.state.item_quantity(1), 1)
+	assert_true(world.inventory.set_money(0, 3000)["ok"])
+	assert_true(world.inventory.change_money(0, -500)["ok"])
+	assert_eq(world.state.money(), 2500)
+	assert_true(world.inventory.set_coins(25)["ok"])
+	assert_true(world.inventory.change_coins(5)["ok"])
+	assert_eq(world.state.coins(), 30)
 
 
 func test_fishing_cast_can_end_without_a_bite() -> void:

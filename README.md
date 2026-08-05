@@ -125,9 +125,12 @@ godot --headless --path . --quit-after 30
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
 ROM, and opens its save screen. That screen offers three validated slots, new
 games with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import,
-party inspection and the development battle. Battles write back to the same
-validated slot after events finish. See [docs/SAVES.md](docs/SAVES.md) for the
-save contract and cartridge SRAM boundary.
+party inspection and the development battle. New games carry the verified
+Crystal home spawn and source starting money when that map exists in the
+selected cache. Continue enters the overworld; F5 writes its map, inventory
+and event snapshot back to the selected slot. See
+[docs/SAVES.md](docs/SAVES.md) for the save contract and cartridge SRAM
+boundary.
 
 Development scenes:
 
@@ -143,9 +146,11 @@ Development scenes:
   `show_matchup` uses a fallback invented pairing.
 - `game/world/world_screen.tscn`: renders Route 29 by default with real
   palettes, animation and object sprites. Arrows/WASD move the player and roll
-  imported encounters on maps with a table. Keys `1`, `2` and `3` select the
-  imported rod table, and `F` starts a cast when the player faces water. Space,
-  Enter or Z advances the cast and bite states. `preview_emote()` shows the
+  imported encounters on maps with a table. Fishing selection is limited to
+  owned rod items, and `F` starts a cast only when the player faces water.
+  Space, Enter or Z advances the cast and bite states. F5 persists the current
+  world snapshot. The live host clock advances one real-time game minute per
+  minute and updates the source day boundaries. `preview_emote()` shows the
   live object-emote renderer path, while `preview_wild_encounter()` and
   `preview_fishing_battle()` open resolved imported battles through the
   production battle overlay. The scene-free world API also exposes explicit

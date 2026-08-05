@@ -63,8 +63,9 @@ differ.
 validator, store and battle adapter scene-free. It validates against `GameData`,
 writes through a temporary file, and must not parse original SRAM until a
 checksum-aware adapter has been researched and tested against the real layout.
-The current adapter maps only stable player and party fields; do not add map,
-inventory, box or event state before those models are canonical.
+The project world snapshot now owns canonical map, inventory and event state;
+the original SRAM adapter remains party-focused. Do not add box or unsupported
+cartridge fields before those models are canonical.
 
 ### Rendering and text
 

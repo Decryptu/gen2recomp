@@ -44,6 +44,9 @@ func _initialize() -> void:
 	if args.size() >= 4:
 		_screen.map_group = int(args[2])
 		_screen.map_number = int(args[3])
+	else:
+		_screen.map_group = Fixture.MAP_GROUP
+		_screen.map_number = Fixture.MAP_NUMBER
 	_screen.start_cell = Vector2i.ZERO
 	_screen.set_data(_data)
 	root.add_child(_screen)

@@ -1,11 +1,10 @@
 class_name Gen2WorldScreen
 extends Control
 
-## Development overworld screen for the first runtime slice.
+## Cartridge-backed overworld screen.
 ##
-## It intentionally takes an explicit map and starting cell rather than
-## inventing save-backed map state. Later save integration belongs after the
-## canonical map, inventory and event models exist.
+## A validated world snapshot is authoritative. The explicit map and cell are
+## retained as a development entry point for scene tests and cache inspection.
 
 const BACKGROUND: Color = Color("#09111f")
 const TEXT: Color = Color("#f4f7fb")
@@ -16,6 +15,8 @@ const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn"
 @export var map_number: int = 3
 @export var start_cell: Vector2i = Vector2i(4, 4)
 @export_range(0, 23) var hour: int = 6
+@export_range(0, 59) var minute: int = 0
+@export_range(0, 6) var day: int = 0
 @export_range(0, 3) var time_of_day: int = Gen2WorldPalette.TIME_MORNING
 @export var encounter_seed: int = 0
 
@@ -26,6 +27,7 @@ var _world: Gen2WorldAPI = null
 var _renderer: Gen2WorldRenderer = null
 var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
+var _clock: Gen2WorldClock = null
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
 var _encounter_random := RandomNumberGenerator.new()
@@ -68,8 +70,15 @@ func _build_world() -> void:
 			_caption.text = "Saved overworld unavailable"
 			_hint.text = "The saved map or player position is not valid for this cache."
 			return
-	else:
+	elif selected_save != null:
 		_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
+	else:
+		var development_state := Gen2WorldState.new(
+			{}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1}
+		)
+		_world = Gen2WorldAPI.open(
+			_data, map_group, map_number, start_cell, development_state
+		)
 	if _world == null:
 		_caption.text = "Map %d/%d unavailable" % [map_group, map_number]
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
@@ -79,8 +88,13 @@ func _build_world() -> void:
 	else:
 		_encounter_random.randomize()
 
+	_clock = Gen2WorldClock.new(hour, minute, day)
+	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
 	_world.set_object_time(hour, time_of_day)
+	var rods: Array[StringName] = _world.available_fishing_rods()
+	if not rods.is_empty() and not rods.has(_selected_rod):
+		_selected_rod = rods[0]
 	_animation.configure(_world, time_of_day)
 	_renderer = Gen2WorldRenderer.new()
 	_renderer.set_world(_world, _animation)
@@ -95,11 +109,16 @@ func _build_world() -> void:
 	_refresh_labels()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _animation != null and _animation.tick() and _renderer != null:
 		_renderer.refresh_animation()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
+	if _clock != null and _world != null:
+		var ticks: Array = _clock.advance(delta, _world, _encounter_random)
+		if not ticks.is_empty():
+			_update_time_of_day()
+			_refresh_labels()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -115,6 +134,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
 		if _text_box != null and _text_box.visible:
 			_advance_script_input()
+		elif StringName(_world.pending_script_input().get("type", &"")) in [
+			&"choice", &"menu",
+		]:
+			_script_prompt = "Host choice required: call choose_script_input(choice)"
+			_refresh_labels()
+		elif not _world.pending_runtime_request().is_empty():
+			var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
+				_world, {"ok": true}
+			)
+			_script_prompt = "Host unavailable: %s" % String(host_result["reason"])
+			_refresh_labels()
 		else:
 			_show_script_results(_world.run_event_queue(true))
 		accept_event()
@@ -143,6 +173,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			return
 		KEY_F:
 			start_fishing()
+			accept_event()
+			return
+		KEY_F5:
+			var saved: Dictionary = persist_world_snapshot()
+			_script_prompt = "World saved" if bool(saved.get("ok", false)) else "Save failed"
+			_refresh_labels()
 			accept_event()
 			return
 		_:
@@ -214,6 +250,8 @@ func world_snapshot() -> Dictionary:
 		"fishing_state": _world.fishing_state() if _world != null else Gen2WorldFishing.STATE_IDLE,
 		"swarm_map": _world.state.swarm_map() if _world != null else Vector2i(-1, -1),
 		"roaming_count": _world.state.roaming_mons().size() if _world != null else 0,
+		"owned_rods": _world.available_fishing_rods() if _world != null else [],
+		"clock": _clock.snapshot() if _clock != null else {},
 		"battle_active": _battle_host != null,
 		"script_prompt": _script_prompt,
 	}
@@ -221,6 +259,33 @@ func world_snapshot() -> Dictionary:
 
 func world_save_snapshot() -> Gen2WorldSnapshot:
 	return _world.snapshot() if _world != null else null
+
+
+## Writes the current map, player and mutable world state back to the selected
+## project save. Injected test saves are updated in memory instead of touching
+## the user's save directory.
+func persist_world_snapshot() -> Dictionary:
+	if _world == null or _data == null:
+		return {"ok": false, "reason": &"missing_world"}
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	if save == null:
+		return {"ok": false, "reason": &"missing_save"}
+	save.world = _world.snapshot()
+	if _injected_save != null:
+		return {"ok": true, "kind": &"world_snapshot_saved", "save": save}
+	return Gen2SaveStore.save(save, _data)
+
+
+## Deterministic driver for tests and screenshot tooling. The live scene uses
+## the same clock through _process(delta).
+func advance_world_time(seconds: float) -> Array:
+	if _clock == null or _world == null:
+		return []
+	var ticks: Array = _clock.advance(seconds, _world, _encounter_random)
+	if not ticks.is_empty():
+		_update_time_of_day()
+		_refresh_labels()
+	return ticks
 
 
 ## Public host boundary for a time/radio tick. The imported roaming graph is
@@ -231,6 +296,20 @@ func advance_world_schedule() -> Dictionary:
 	var result: Dictionary = _world.advance_schedule(_encounter_random)
 	_refresh_labels()
 	return result
+
+
+func _update_time_of_day() -> void:
+	if _clock == null or _world == null:
+		return
+	var next_time_of_day: int = _clock.time_of_day()
+	if next_time_of_day == time_of_day:
+		return
+	time_of_day = next_time_of_day
+	_world.set_object_time(_clock.hour, time_of_day)
+	if _animation != null:
+		_animation.configure(_world, time_of_day)
+	if _renderer != null:
+		_renderer.set_time_of_day(time_of_day)
 
 
 ## Public screenshot driver for the scripted emote state and renderer path.
@@ -521,14 +600,24 @@ func _show_script_results(results: Array) -> void:
 
 
 func _refresh_labels() -> void:
+	if _world == null or _data == null:
+		return
 	_caption.text = "%s   map %d/%d   cell %d,%d" % [
 		_data.title(), _world.current_map.group, _world.current_map.number,
 		_world.player_cell.x, _world.player_cell.y,
 	]
+	var rods: Array[StringName] = _world.available_fishing_rods()
+	var rod_labels: Array[String] = []
+	for rod: StringName in rods:
+		rod_labels.append(Gen2WorldFishing.rod_label(rod))
+	var owned: String = ", ".join(rod_labels) if not rod_labels.is_empty() else "none"
+	var clock_text: String = "%02d:%02d" % [_clock.hour, _clock.minute] if _clock != null else "--:--"
 	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
-	_hint.text += "    1/2/3: %s    F: fish" % Gen2WorldFishing.rod_label(_selected_rod)
+	_hint.text += "    time %s    rods: %s    F5: save" % [clock_text, owned]
+	if not rods.is_empty():
+		_hint.text += "    1-%d: select    F: fish" % rods.size()
 	if not _script_prompt.is_empty():
 		_hint.text += "    " + _script_prompt
 

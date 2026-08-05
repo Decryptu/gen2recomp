@@ -32,9 +32,12 @@ rejects a failed original `.sav` import before calling
 
 New games accept a name of up to ten encoded characters and start Chikorita,
 Cyndaquil or Totodile at level 5 holding Berry, with moves from the imported
-learnset. `game/save/party_screen.tscn` shows all six positions, current and
-derived maximum HP, and persistent status. It starts the development battle
-only after the same validated slot is selected in `GameRuntime`.
+learnset. When the selected cache contains the source home map, the save also
+starts at map group 24, map 7, cell 3,3 with 3000 money. These values come from
+Crystal's `SPAWN_HOME` record and `START_MONEY` constant. `game/save/party_screen.tscn`
+shows all six positions, current and derived maximum HP, and persistent status.
+It starts the development battle only after the same validated slot is selected
+in `GameRuntime`.
 
 After pending battle messages finish, `Gen2SaveBattleAdapter` writes back the
 player name, Pokémon identity, held item, happiness, Pokerus, caught data,
@@ -44,11 +47,14 @@ and PP. Volatile battle state is discarded.
 Overworld battle writeback is transactional. A confirmed win is saved only
 after its visible result messages finish. A loss never overwrites the selected
 slot: the host validates and reconstructs the source save party, then returns a
-blackout recovery result to the overworld. Map position, inventory and broader
-blackout relocation are not created by the new-game screen yet. When a host
-provides a world snapshot, `Gen2SaveValidator` checks its map and player cell
-against the selected cartridge cache, and `Gen2WorldAPI.open_snapshot()` restores
-the same state without clamping it to another location.
+blackout recovery result to the overworld. Continue enters the overworld when a
+validated snapshot exists, and F5 writes the current map, player, item,
+currency, event and schedule state back through `Gen2SaveStore`. Legacy project
+saves without a world snapshot do not invent progress state and remain on the
+configured development entry until a migration path exists. The validator
+checks item and currency references against the selected cartridge cache, and
+`Gen2WorldAPI.open_snapshot()` restores a saved position without clamping it to
+another location.
 
 ## Original Generation 2 shape
 

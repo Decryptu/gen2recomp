@@ -15,6 +15,7 @@ const MOVEMENT_SURF: StringName = &"surf"
 
 var data: GameData = null
 var state: Gen2WorldState = null
+var inventory: Gen2WorldInventory = null
 var current_map: Gen2WorldMap = null
 var current_tileset: Gen2WorldTileset = null
 var player_cell: Vector2i = Vector2i.ZERO
@@ -92,6 +93,7 @@ func _init(
 	data = game_data
 	state = world_state if world_state != null else Gen2WorldState.new()
 	state.changed.connect(_on_world_state_changed)
+	inventory = Gen2WorldInventory.new(data, state)
 	state.ensure_roaming_mons(data.world_roaming_mons())
 	current_map = map
 	current_tileset = tileset
@@ -149,7 +151,7 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 
 
 func available_fishing_rods() -> Array[StringName]:
-	return Gen2WorldFishing.rods()
+	return inventory.owned_rods() if inventory != null else []
 
 
 func fishing_state() -> StringName:
@@ -171,6 +173,8 @@ func fishing_request(
 ) -> Dictionary:
 	if current_map == null or data == null:
 		return _fishing_failure(&"missing_map")
+	if inventory == null or not inventory.owns_rod(rod):
+		return _fishing_failure(&"rod_not_owned")
 	var context: Dictionary = _fishing_context(rod)
 	if not bool(context.get("ok", false)):
 		return _fishing_failure(StringName(context.get("reason", &"cannot_fish")))
@@ -213,6 +217,8 @@ func encounter_request(
 		Gen2WorldEncounter.METHOD_GOOD_ROD,
 		Gen2WorldEncounter.METHOD_SUPER_ROD,
 	]:
+		if inventory == null or not inventory.owns_rod(method):
+			return {}
 		var context: Dictionary = _fishing_context(method)
 		if not bool(context.get("ok", false)):
 			return {}
@@ -322,6 +328,8 @@ func _fishing_group_for_state(group: int) -> int:
 func _fishing_context(rod: StringName) -> Dictionary:
 	if not Gen2WorldFishing.is_rod(rod):
 		return {"ok": false, "reason": &"invalid_rod"}
+	if inventory == null or not inventory.owns_rod(rod):
+		return {"ok": false, "reason": &"rod_not_owned"}
 	if movement_mode == MOVEMENT_SURF:
 		return {"ok": false, "reason": &"cannot_fish_while_surfing"}
 	var target: Vector2i = facing_cell()
@@ -581,6 +589,10 @@ func pending_runtime_request() -> Dictionary:
 	return _active_script.pending_runtime_request() if _active_script != null else {}
 
 
+func pending_script_input() -> Dictionary:
+	return _active_script.pending_input() if _active_script != null else {}
+
+
 ## Starts one callback type from the current map's callback table. A type of -1
 ## runs all callbacks in their stored order.
 func dispatch_callbacks(callback_type: int = -1) -> Array:
@@ -594,9 +606,10 @@ func dispatch_callbacks(callback_type: int = -1) -> Array:
 ## Acknowledge the current text/button pause and continue the first queued
 ## script. Completed results retain the source event so a screen can react to
 ## them without reaching into the runner.
-func run_event_queue(acknowledge: bool = false) -> Array:
+func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 	var results: Array = []
 	var accept: bool = acknowledge
+	var selected_choice: int = choice
 	while true:
 		if _active_script == null:
 			if _script_queue.is_empty():
@@ -605,14 +618,21 @@ func run_event_queue(acknowledge: bool = false) -> Array:
 			_active_script = Gen2WorldScriptRunner.begin(
 				data, state, request, Callable(self, "_validate_script_warp")
 			)
-		var result: Dictionary = _active_script.advance(accept)
+		var result: Dictionary = _active_script.advance(accept, selected_choice)
 		accept = false
+		selected_choice = -1
 		if StringName(result.get("status", &"")) == &"waiting":
 			results.append(result)
 			break
 		results.append(_finish_script_result(result))
 		_active_script = null
 	return results
+
+
+## Completes an explicit menu or yes/no host input without allowing a default
+## selection to leak into cartridge script state.
+func choose_script_input(choice: int) -> Array:
+	return run_event_queue(true, choice)
 
 
 ## Completes the currently pending host-owned request and resumes the same

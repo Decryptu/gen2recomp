@@ -109,7 +109,24 @@ static func _write_world(directory: String) -> void:
 		"scripts": {"bank": BANK, "callbacks": []},
 		"events": {"bank": BANK, "objects": objects},
 	}
-	RomCache.write_json(RomCache.world_maps_path(directory), [map])
+	var home_map: Dictionary = map.duplicate(true)
+	home_map["group"] = Gen2WorldSpawn.NEW_BARK_GROUP
+	home_map["number"] = Gen2WorldSpawn.PLAYERS_HOUSE_2F
+	home_map["fish_group"] = 0
+	home_map["width_blocks"] = 4
+	home_map["height_blocks"] = 3
+	var home_blocks: Array = []
+	home_blocks.resize(12)
+	home_blocks.fill(0)
+	home_map["blocks"] = home_blocks
+	var home_collision: Array = []
+	home_collision.resize(8 * 6)
+	home_collision.fill(0)
+	home_map["collision"] = home_collision
+	home_map["collision_width"] = 8
+	home_map["collision_height"] = 6
+	home_map["events"] = {"bank": BANK, "objects": []}
+	RomCache.write_json(RomCache.world_maps_path(directory), [map, home_map])
 	var grass_slots: Array = []
 	for _slot: int in RomLayout.WILD_GRASS_SLOT_COUNT:
 		grass_slots.append({"level": 5, "species": TRAINER_SPECIES})
