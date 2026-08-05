@@ -505,7 +505,7 @@ func _continue_selected() -> void:
 	if not GameRuntime.select_save_slot(_data.id, _selected_slot):
 		_set_status("Could not select save slot.", "The selected cartridge is not in the registry.", ERROR)
 		return
-	get_tree().change_scene_to_file.call_deferred("res://game/battle/battle_screen.tscn")
+	get_tree().change_scene_to_file.call_deferred("res://game/world/world_screen.tscn")
 
 
 func _open_party() -> void:

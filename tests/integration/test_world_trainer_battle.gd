@@ -36,6 +36,11 @@ func _open_world(with_save: bool = false) -> void:
 		var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 			_data.id, _data.sha1, 0, Gen2Party.of(player), "TEST"
 		)
+		var snapshot := Gen2WorldSnapshot.new()
+		snapshot.map_id = Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER)
+		snapshot.player_cell = Vector2i(4, 5)
+		snapshot.world_state = Gen2WorldState.new()
+		save.world = snapshot
 		_world_screen.set_save(save)
 	add_child(_world_screen)
 	await get_tree().process_frame
@@ -174,3 +179,14 @@ func test_project_save_can_carry_the_world_snapshot_without_guessing_a_spawn() -
 	assert_not_null(round_trip.world)
 	assert_eq(round_trip.world.map_id, Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
 	assert_eq(round_trip.world.player_cell, Vector2i(4, 5))
+
+
+func test_new_game_uses_the_verified_home_spawn_and_source_start_money() -> void:
+	var save: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 0, "TEST", 155)
+	assert_not_null(save)
+	assert_not_null(save.world)
+	assert_eq(save.world.map_id, Vector2i(Gen2WorldSpawn.NEW_BARK_GROUP, Gen2WorldSpawn.PLAYERS_HOUSE_2F))
+	assert_eq(save.world.player_cell, Gen2WorldSpawn.HOME_CELL)
+	assert_eq(save.world.world_state.money(), Gen2WorldSpawn.START_MONEY)
+	var validation: Dictionary = Gen2SaveValidator.validate(save, _data)
+	assert_true(validation["ok"], validation["message"])
