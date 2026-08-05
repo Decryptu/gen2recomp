@@ -145,7 +145,7 @@ func _copy_asset_tile(
 		offset = asset_index * 64 + frame * TILE_BYTES
 	if offset < 0 or offset + TILE_BYTES > asset.size():
 		return
-	_set_tile_bytes(tile, asset.slice(offset, TILE_BYTES))
+	_set_tile_bytes(tile, asset.slice(offset, offset + TILE_BYTES))
 
 
 func _tile_bytes(tile: int) -> PackedByteArray:

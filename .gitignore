@@ -33,3 +33,6 @@
 # Import cache produced from a user's ROM at runtime
 /user_cache/
 /rom_cache/
+
+# Local visual verification output
+/artifacts/

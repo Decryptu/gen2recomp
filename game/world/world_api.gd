@@ -115,18 +115,33 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 	return {"ok": true, "mode": movement_mode}
 
 
-func encounter_request() -> Dictionary:
-	if current_map == null or movement_mode != MOVEMENT_SURF:
+## Rolls a normal wild encounter from the current standing terrain. The
+## caller supplies the generator so tests can reproduce a result, while the
+## optional force flag is reserved for development previews.
+func encounter_request(
+	random: RandomNumberGenerator = null, force_encounter: bool = false
+) -> Dictionary:
+	if current_map == null or data == null:
 		return {}
-	if collision_permission_at(player_cell) != Gen2WorldCollision.WATER_TILE:
+	var permission: int = collision_permission_at(player_cell)
+	var method: StringName
+	if permission == Gen2WorldCollision.WATER_TILE:
+		method = Gen2WorldEncounter.METHOD_SURF
+	elif permission == Gen2WorldCollision.LAND_TILE:
+		method = Gen2WorldEncounter.METHOD_GRASS
+	else:
 		return {}
-	return {
-		"kind": &"wild_encounter_requested",
-		"map": map_id(),
-		"cell": player_cell,
-		"fish_group": current_map.fish_group,
-		"movement": movement_mode,
-	}
+	var record: Dictionary = data.world_encounter(method, current_map.group, current_map.number)
+	var resolved: Dictionary = Gen2WorldEncounter.resolve(
+		record, method, object_time_of_day, random, force_encounter
+	)
+	if resolved.is_empty():
+		return {}
+	resolved["map"] = map_id()
+	resolved["cell"] = player_cell
+	resolved["fish_group"] = current_map.fish_group
+	resolved["movement"] = movement_mode
+	return resolved
 
 
 func tick() -> bool:

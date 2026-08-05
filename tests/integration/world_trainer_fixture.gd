@@ -108,6 +108,20 @@ static func _write_world(directory: String) -> void:
 		"events": {"bank": BANK, "objects": objects},
 	}
 	RomCache.write_json(RomCache.world_maps_path(directory), [map])
+	var grass_slots: Array = []
+	for _slot: int in RomLayout.WILD_GRASS_SLOT_COUNT:
+		grass_slots.append({"level": 5, "species": TRAINER_SPECIES})
+	var grass_times: Array = [grass_slots.duplicate(true), grass_slots.duplicate(true), grass_slots.duplicate(true)]
+	RomCache.write_json(RomCache.world_encounters_path(directory), {
+		"grass": {"1:1": {
+			"map": "1:1", "rates": [255, 255, 255], "slots": grass_times,
+		}},
+		"water": {},
+		"probabilities": {
+			"grass": RomLayout.WILD_GRASS_PROBABILITIES,
+			"water": RomLayout.WILD_WATER_PROBABILITIES,
+		},
+	})
 
 	var script: Array = [
 		0x5E, 1, 0,

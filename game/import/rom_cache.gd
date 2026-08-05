@@ -32,6 +32,7 @@ const WORLD_STANDARD_SCRIPTS: String = "world_standard_scripts.json"
 const WORLD_TEXT: String = "world_text.json"
 const WORLD_MOVEMENTS: String = "world_movements.json"
 const WORLD_TILESETS: String = "world_tilesets.json"
+const WORLD_ENCOUNTERS: String = "world_encounters.json"
 const WORLD_PALETTES: String = "world_palettes.json"
 const WORLD_ANIMATION_ASSETS: String = "world_animation_assets.json"
 const WORLD_TILES_DIR: String = "world_tiles"
@@ -41,7 +42,7 @@ const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 15
+const FORMAT_VERSION: int = 16
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -101,6 +102,10 @@ static func world_movements_path(directory: String) -> String:
 
 static func world_tilesets_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_TILESETS]
+
+
+static func world_encounters_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_ENCOUNTERS]
 
 
 static func world_palettes_path(directory: String) -> String:
