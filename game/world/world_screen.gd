@@ -85,6 +85,8 @@ func _build_world() -> void:
 func _process(_delta: float) -> void:
 	if _animation != null and _animation.tick() and _renderer != null:
 		_renderer.refresh_animation()
+	if _world != null and _world.tick() and _renderer != null:
+		_renderer.refresh()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -163,10 +165,27 @@ func world_snapshot() -> Dictionary:
 		"player_cell": _world.player_cell if _world != null else Vector2i(-1, -1),
 		"origin_cell": _world.visible_origin_cell() if _world != null else Vector2i(-1, -1),
 		"collision": _world.collision_code_at(_world.player_cell) if _world != null else -1,
+		"movement_mode": _world.movement_mode if _world != null else Gen2WorldAPI.MOVEMENT_WALK,
 		"visible_objects": _world.visible_objects().size() if _world != null else 0,
 		"just_battled": _world.state.just_battled() if _world != null else false,
 		"script_prompt": _script_prompt,
 	}
+
+
+## Public screenshot driver for the scripted emote state and renderer path.
+func preview_emote() -> void:
+	if _world == null or _renderer == null:
+		return
+	var actors: Array = _world.visible_objects()
+	if actors.is_empty():
+		_script_prompt = "No visible object for emote preview"
+		_refresh_labels()
+		return
+	var object: Gen2WorldObject = actors[0]
+	object.set_emote(0, true)
+	_renderer.refresh()
+	_script_prompt = "Debug emote preview"
+	_refresh_labels()
 
 
 ## Public screenshot driver. It executes the first active scripted event in

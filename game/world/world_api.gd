@@ -10,6 +10,8 @@ extends RefCounted
 const VIEW_CELLS: Vector2i = Vector2i(10, 9)
 const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
+const MOVEMENT_WALK: StringName = &"walk"
+const MOVEMENT_SURF: StringName = &"surf"
 
 var data: GameData = null
 var state: Gen2WorldState = null
@@ -20,12 +22,16 @@ var player_facing: int = Gen2WorldSprite.FACING_DOWN
 var objects: Array = []
 var object_hour: int = 6
 var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
+var movement_mode: StringName = MOVEMENT_WALK
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _object_visibility_overrides: Dictionary = {}
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
+var _block_overrides: Dictionary = {}
+var _command_queues: Dictionary = {}
+var _next_command_queue_id: int = 0
 
 
 ## Opens one map through the public cartridge-content API.
@@ -102,6 +108,34 @@ func player_sprite() -> Gen2WorldSprite:
 	return data.overworld_sprite(1) if data != null else null
 
 
+func set_movement_mode(mode: StringName) -> Dictionary:
+	if mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
+		return {"ok": false, "reason": &"invalid_movement_mode", "mode": mode}
+	movement_mode = mode
+	return {"ok": true, "mode": movement_mode}
+
+
+func encounter_request() -> Dictionary:
+	if current_map == null or movement_mode != MOVEMENT_SURF:
+		return {}
+	if collision_permission_at(player_cell) != Gen2WorldCollision.WATER_TILE:
+		return {}
+	return {
+		"kind": &"wild_encounter_requested",
+		"map": map_id(),
+		"cell": player_cell,
+		"fish_group": current_map.fish_group,
+		"movement": movement_mode,
+	}
+
+
+func tick() -> bool:
+	var changed: bool = false
+	for object: Gen2WorldObject in objects:
+		changed = object.tick_emote() or changed
+	return changed
+
+
 func set_object_time(hour: int, time_of_day: int) -> void:
 	object_hour = clampi(hour, 0, 23)
 	object_time_of_day = clampi(time_of_day, 0, 3)
@@ -110,6 +144,8 @@ func set_object_time(hour: int, time_of_day: int) -> void:
 		var key: String = _object_key(current_map.group, current_map.number, object.index)
 		if _object_visibility_overrides.has(key):
 			object.active = bool(_object_visibility_overrides[key])
+		if object.deleted:
+			object.active = false
 
 
 func set_event_flag(flag: int, active: bool = true) -> void:
@@ -127,18 +163,78 @@ func event_flag_active(flag: int) -> bool:
 func visible_objects() -> Array:
 	var out: Array = []
 	for object: Gen2WorldObject in objects:
-		if object.active and object.sprite != null:
+		if object.active and not object.deleted and object.sprite != null:
 			out.append(object)
 	return out
 
 
 func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 	for object: Gen2WorldObject in objects:
-		if object.cell != cell or (visible_only and not object.active):
+		if object.cell != cell or object.deleted or (visible_only and not object.active):
 			continue
 		if object.sprite != null:
 			return object
 	return null
+
+
+func block_at(block_x: int, block_y: int) -> int:
+	if current_map == null:
+		return 0
+	var key: String = _block_key(current_map, block_x, block_y)
+	if _block_overrides.has(key):
+		return int(_block_overrides[key])
+	return current_map.block_at(block_x, block_y)
+
+
+func change_block(block_x: int, block_y: int, block: int) -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return {"ok": false, "reason": &"missing_map"}
+	if block_x < 0 or block_y < 0 or block_x >= current_map.width_blocks \
+		or block_y >= current_map.height_blocks:
+		return {
+			"ok": false, "reason": &"invalid_block_cell",
+			"cell": Vector2i(block_x, block_y),
+		}
+	if block < 0 or block >= current_tileset.block_count:
+		return {"ok": false, "reason": &"invalid_block", "block": block}
+	var key: String = _block_key(current_map, block_x, block_y)
+	if block == current_map.block_at(block_x, block_y):
+		_block_overrides.erase(key)
+	else:
+		_block_overrides[key] = block
+	return {
+		"ok": true,
+		"kind": &"block_change",
+		"cell": Vector2i(block_x, block_y),
+		"block": block,
+	}
+
+
+func command_queues() -> Array:
+	var out: Array = []
+	for key: Variant in _command_queues:
+		out.append((_command_queues[key] as Dictionary).duplicate(true))
+	return out
+
+
+func apply_command_queue_write(bank: int, address: int) -> Dictionary:
+	var key: String = "%d:%04X" % [bank, address]
+	var queue_id: int = _next_command_queue_id
+	_next_command_queue_id += 1
+	_command_queues[key] = {
+		"id": queue_id, "bank": bank, "address": address,
+	}
+	return {"ok": true, "kind": &"command_queue_written", "queue": _command_queues[key]}
+
+
+func apply_command_queue_delete(queue_id: int) -> Dictionary:
+	for key: Variant in _command_queues:
+		var queue: Dictionary = _command_queues[key]
+		if int(queue.get("id", -1)) != queue_id:
+			continue
+		_command_queues.erase(key)
+		return {"ok": true, "kind": &"command_queue_deleted", "queue_id": queue_id}
+	return {"ok": true, "kind": &"command_queue_deleted", "queue_id": queue_id, "removed": false}
 
 
 ## The expanded graphics tile at a map-space tile coordinate, or -1 outside
@@ -152,7 +248,7 @@ func tile_index_at(tile_x: int, tile_y: int) -> int:
 		or tile_y >= current_map.height_blocks * RomLayout.MAP_BLOCK_TILE_WIDTH:
 		return -1
 
-	var block: int = current_map.block_at(
+	var block: int = block_at(
 		tile_x / RomLayout.MAP_BLOCK_TILE_WIDTH,
 		tile_y / RomLayout.MAP_BLOCK_TILE_WIDTH,
 	)
@@ -177,8 +273,21 @@ func visible_tile_indices() -> PackedInt32Array:
 
 
 func collision_code_at(cell: Vector2i) -> int:
-	if current_map == null:
+	if current_map == null or current_tileset == null:
 		return -1
+	var block: int = block_at(
+		cell.x / RomLayout.MAP_BLOCK_CELL_WIDTH,
+		cell.y / RomLayout.MAP_BLOCK_CELL_WIDTH,
+	)
+	if block != current_map.block_at(
+		cell.x / RomLayout.MAP_BLOCK_CELL_WIDTH,
+		cell.y / RomLayout.MAP_BLOCK_CELL_WIDTH
+	):
+		return current_tileset.collision_index(
+			block,
+			cell.x & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
+			cell.y & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
+		)
 	return current_map.collision_at(cell.x, cell.y)
 
 
@@ -395,7 +504,42 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 			continue
 		if event_type == &"object_movement_requested":
 			generated.append_array(_apply_object_movement(event))
-			reload_objects = true
+			continue
+		if event_type == &"map_block_changed":
+			if current_map == null or int(event.get("map_group", -1)) != current_map.group \
+				or int(event.get("map_number", -1)) != current_map.number:
+				generated.append({"type": &"map_change_failed", "reason": &"invalid_map"})
+				continue
+			var changed_block: Dictionary = change_block(
+				int(event.get("x", -1)), int(event.get("y", -1)), int(event.get("block", -1))
+			)
+			if bool(changed_block.get("ok", false)):
+				generated.append({"type": &"map_block_changed", "change": changed_block})
+			else:
+				generated.append({
+					"type": &"map_change_failed",
+					"reason": changed_block.get("reason", &"invalid_block"),
+				})
+			continue
+		if event_type == &"map_reload_requested":
+			generated.append(reload_current_map())
+			continue
+		if event_type == &"map_refresh_requested":
+			generated.append({"type": &"map_refreshed", "map": map_id()})
+			continue
+		if event_type == &"command_queue_written":
+			generated.append(apply_command_queue_write(
+				int(event.get("bank", 0)), int(event.get("address", 0))
+			))
+			continue
+		if event_type == &"command_queue_deleted":
+			generated.append(apply_command_queue_delete(int(event.get("queue_id", -1))))
+			continue
+		if event_type == &"earthquake_requested":
+			generated.append({
+				"type": &"screen_shake_requested",
+				"strength": int(event.get("strength", 0)),
+			})
 			continue
 		if event_type == &"object_follow":
 			var follow_key: String = _object_key(
@@ -409,6 +553,33 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 			continue
 		if event_type == &"object_stop_follow":
 			_object_followers.clear()
+			continue
+		if event_type in [&"object_deleted", &"object_emote", &"object_event_flag"]:
+			var local_map_group: int = int(event.get("map_group", -1))
+			var local_map_number: int = int(event.get("map_number", -1))
+			var local_index: int = int(event.get("object_index", -1))
+			if current_map == null or local_map_group != current_map.group \
+				or local_map_number != current_map.number \
+				or local_index < 0 or local_index >= objects.size():
+				generated.append({"type": &"object_change_failed", "reason": &"invalid_object"})
+				continue
+			var local_object: Gen2WorldObject = objects[local_index]
+			var local_key: String = _object_key(local_map_group, local_map_number, local_index)
+			match event_type:
+				&"object_deleted":
+					local_object.deleted = true
+					local_object.active = false
+					_object_followers.erase(local_key)
+					generated.append({"type": &"object_deleted", "object_index": local_index})
+				&"object_emote":
+					local_object.set_emote(
+						int(event.get("emote_id", -1)), bool(event.get("visible", false)),
+						int(event.get("duration", 0))
+					)
+				&"object_event_flag":
+					var flag: int = local_object.event_flag
+					if flag > 0:
+						state.set_event_flag(flag, bool(event.get("active", false)))
 			continue
 		if event_type not in [
 			&"object_visibility", &"object_position", &"object_facing",
@@ -503,9 +674,22 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			continue
 		match kind:
 			&"show_object":
+				object.deleted = false
+				object.active = true
 				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = true
-			&"hide_object", &"remove_object":
+			&"hide_object":
+				object.active = false
 				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = false
+			&"remove_object":
+				object.deleted = true
+				object.active = false
+				_object_followers.erase(_object_key(map_group, map_number, object_index))
+				generated.append({"type": &"object_deleted", "object_index": object_index})
+				break
+			&"show_emote":
+				object.set_emote(object.emote_id, true)
+			&"hide_emote":
+				object.set_emote(object.emote_id, false)
 			&"step_stop":
 				break
 			&"step_sleep", &"set_sliding", &"remove_sliding", &"fix_facing", &"remove_fixed_facing":
@@ -591,6 +775,10 @@ func _movement_direction(direction: int) -> Vector2i:
 
 func _object_key(map_group: int, map_number: int, object_index: int) -> String:
 	return "%d:%d:%d" % [map_group, map_number, object_index]
+
+
+func _block_key(map: Gen2WorldMap, block_x: int, block_y: int) -> String:
+	return "%d:%d:%d:%d" % [map.group, map.number, block_x, block_y]
 
 
 func _facing_toward(from: Vector2i, to: Vector2i) -> int:
@@ -815,17 +1003,26 @@ func can_walk_to(cell: Vector2i) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
-	return Gen2WorldCollision.is_walkable(collision_code_at(cell)) and object_at(cell) == null
+	if object_at(cell) != null:
+		return false
+	var permission: int = collision_permission_at(cell)
+	if movement_mode == MOVEMENT_SURF:
+		var current_permission: int = collision_permission_at(player_cell)
+		if current_permission == Gen2WorldCollision.WATER_TILE:
+			return permission in [Gen2WorldCollision.LAND_TILE, Gen2WorldCollision.WATER_TILE]
+		return permission == Gen2WorldCollision.WATER_TILE
+	return permission == Gen2WorldCollision.LAND_TILE
 
 
 func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
-	if not Gen2WorldCollision.is_walkable(collision_code_at(cell)):
+	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != Gen2WorldCollision.LAND_TILE:
 		return false
 	for object: Gen2WorldObject in objects:
-		if object != moving and object.active and object.sprite != null and object.cell == cell:
+		if object != moving and object.active and not object.deleted \
+			and object.sprite != null and object.cell == cell:
 			return false
 	return cell != player_cell
 
@@ -855,28 +1052,46 @@ func advance_objects(random: RandomNumberGenerator) -> int:
 	return moved
 
 
-func _advance_followers() -> void:
+func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictionary) -> void:
+	var relations: Array = []
 	for key: String in _object_followers:
 		var separator: PackedStringArray = key.split(":")
 		if separator.size() != 3 or int(separator[0]) != current_map.group \
 			or int(separator[1]) != current_map.number:
 			continue
-		var follower_index: int = int(separator[2])
+		relations.append({
+			"key": key,
+			"index": int(separator[2]),
+			"relation": (_object_followers[key] as Dictionary).duplicate(true),
+		})
+	relations.sort_custom(func(first: Dictionary, second: Dictionary) -> bool:
+		return int(first["index"]) < int(second["index"])
+	)
+	for entry: Dictionary in relations:
+		var follower_index: int = int(entry["index"])
 		if follower_index < 0 or follower_index >= objects.size():
 			continue
 		var follower: Gen2WorldObject = objects[follower_index]
-		if not follower.active:
+		if not follower.active or follower.deleted:
 			continue
-		var relation: Dictionary = _object_followers[key]
+		var relation: Dictionary = entry["relation"]
 		var target_index: int = int(relation.get("target_index", -1))
-		var target_cell: Vector2i = player_cell
-		if target_index >= 0 and target_index < objects.size():
+		var exact: bool = bool(relation.get("exact", true))
+		var target_cell: Vector2i = previous_player_cell
+		if target_index >= 0 and previous_cells.has(target_index):
+			target_cell = previous_cells[target_index]
+		elif target_index >= 0 and target_index < objects.size():
 			target_cell = (objects[target_index] as Gen2WorldObject).cell
 		var delta: Vector2i = target_cell - follower.cell
 		if abs(delta.x) + abs(delta.y) <= 1:
 			continue
 		var direction: Vector2i
-		if abs(delta.x) >= abs(delta.y):
+		if exact and abs(delta.x) != 0 and abs(delta.y) != 0:
+			# Exact followers preserve the leader's cardinal path instead of
+			# cutting a diagonal corner.
+			direction = Vector2i(signi(delta.x), 0) if abs(delta.x) >= abs(delta.y) \
+				else Vector2i(0, signi(delta.y))
+		elif abs(delta.x) >= abs(delta.y):
 			direction = Vector2i(signi(delta.x), 0)
 		else:
 			direction = Vector2i(0, signi(delta.y))
@@ -912,12 +1127,15 @@ func move_result(direction: Vector2i) -> Dictionary:
 		return {"ok": false, "kind": &"move", "reason": &"blocked"}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
+	var previous_cells: Dictionary = {}
+	for index: int in objects.size():
+		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
-	_advance_followers()
+	_advance_followers(from_cell, previous_cells)
 	return {
 		"ok": true,
-		"kind": &"move",
+		"kind": &"water_move" if movement_mode == MOVEMENT_SURF else &"move",
 		"from_map": from_map,
 		"from_cell": from_cell,
 		"to_map": from_map,
@@ -983,6 +1201,7 @@ func _at_connection_edge(direction_name: String) -> bool:
 func _apply_map(
 	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
 ) -> void:
+	_block_overrides.clear()
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
@@ -996,6 +1215,7 @@ func _apply_map(
 func reload_current_map() -> Dictionary:
 	if current_map == null or current_tileset == null:
 		return {"ok": false, "reason": &"missing_map"}
+	_block_overrides.clear()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
 

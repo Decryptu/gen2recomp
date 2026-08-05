@@ -107,6 +107,8 @@ func _draw() -> void:
 		var texture: Texture2D = _actor_texture(object.sprite, object.palette, object.facing, object.frame)
 		if texture != null:
 			draw_texture(texture, Vector2(pixel))
+		if object.emote_visible:
+			_draw_emote(object.emote_id, Vector2(pixel))
 
 	var player: Vector2i = _world.player_pixel_position()
 	var player_texture: Texture2D = _actor_texture(
@@ -145,3 +147,23 @@ func _sort_objects(first: Gen2WorldObject, second: Gen2WorldObject) -> bool:
 	if first.cell.y == second.cell.y:
 		return first.index < second.index
 	return first.cell.y < second.cell.y
+
+
+func _draw_emote(emote_id: int, pixel: Vector2) -> void:
+	var bubble := Rect2(pixel + Vector2(4, -10), Vector2(8, 8))
+	draw_rect(bubble, Color("#fff8d6"), true)
+	draw_rect(bubble, Color("#18243a"), false, 1.0)
+	draw_colored_polygon(
+		PackedVector2Array([
+			pixel + Vector2(6, -2), pixel + Vector2(8, 2), pixel + Vector2(10, -2),
+		]),
+		Color("#fff8d6")
+	)
+	var style: int = posmod(emote_id, 3)
+	if style == 0:
+		draw_circle(pixel + Vector2(8, -6), 2.0, Color("#d34a5a"))
+	elif style == 1:
+		draw_line(pixel + Vector2(6, -8), pixel + Vector2(10, -4), Color("#3d6fd6"), 1.5)
+		draw_line(pixel + Vector2(10, -8), pixel + Vector2(6, -4), Color("#3d6fd6"), 1.5)
+	else:
+		draw_rect(Rect2(pixel + Vector2(6, -8), Vector2(4, 4)), Color("#d69b2f"), true)

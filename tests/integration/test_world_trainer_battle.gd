@@ -119,3 +119,12 @@ func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 	assert_eq(world["player_cell"], Vector2i(5, 5))
 	assert_eq(world["visible_objects"], 1)
 	assert_false(world["just_battled"])
+
+
+func test_emote_preview_reaches_the_production_world_renderer() -> void:
+	await _open_world()
+	_world_screen.preview_emote()
+	await get_tree().process_frame
+
+	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Debug emote preview")
+	assert_true((_world_screen._world.objects[0] as Gen2WorldObject).emote_visible)

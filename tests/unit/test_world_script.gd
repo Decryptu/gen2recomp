@@ -135,3 +135,37 @@ func test_reference_scan_collects_movement_pointers() -> void:
 	)
 	assert_eq(references["movements"].size(), 1)
 	assert_eq(references["movements"][0]["address"], 0x1234)
+
+
+func test_command_parser_reads_scripted_overworld_feature_operands() -> void:
+	var emote: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x75, 2, 3, 4]), 0, true
+	)
+	assert_true(emote["ok"])
+	assert_eq(emote["name"], &"showemote")
+	assert_eq(emote["value"], 2)
+	assert_eq(emote["object_id"], 3)
+	assert_eq(emote["value_2"], 4)
+
+	var block: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x7A, 1, 2, 3]), 0, true
+	)
+	assert_true(block["ok"])
+	assert_eq(block["name"], &"changeblock")
+	assert_eq(block["x"], 1)
+	assert_eq(block["y"], 2)
+	assert_eq(block["block"], 3)
+
+	var write_queue: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x7D, 0x34, 0x12]), 0, true
+	)
+	assert_true(write_queue["ok"])
+	assert_eq(write_queue["name"], &"writecmdqueue")
+	assert_eq(write_queue["address"], 0x1234)
+
+	var delete_queue: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x7E, 2]), 0, true
+	)
+	assert_true(delete_queue["ok"])
+	assert_eq(delete_queue["name"], &"delcmdqueue")
+	assert_eq(delete_queue["value"], 2)

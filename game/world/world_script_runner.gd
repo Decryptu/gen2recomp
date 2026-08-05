@@ -34,6 +34,7 @@ var _completed: bool = false
 var _failure: Dictionary = {}
 var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
+var _loaded_emote: int = -1
 var _battle_setup: Dictionary = {}
 
 
@@ -437,6 +438,48 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			_script_value = 1 if _has_staged_just_battled or (
 				state != null and state.just_battled()
 			) else 0
+		0x73:
+			_loaded_emote = int(command.get("value", -1))
+			if _loaded_emote == 0xFF:
+				_loaded_emote = _script_value
+			_emit_runtime_event(&"emote_loaded", {"emote_id": _loaded_emote})
+		0x74:
+			var emote_id: int = int(command.get("value", _loaded_emote))
+			if emote_id == 0xFF:
+				emote_id = _loaded_emote
+			_emit_object_event(&"object_emote", {
+				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
+				"emote_id": emote_id,
+				"visible": true,
+				"duration": int(command.get("value_2", 0)),
+			})
+		0x77:
+			_emit_runtime_event(&"earthquake_requested", {
+				"strength": int(command.get("value", 0)),
+			})
+		0x78:
+			_emit_runtime_event(&"map_blocks_requested", {
+				"bank": bank, "address": int(command.get("address", 0)),
+			})
+		0x79:
+			_emit_runtime_event(&"map_block_changed", {
+				"x": int(command.get("x", 0)), "y": int(command.get("y", 0)),
+				"block": int(command.get("block", 0)),
+			})
+		0x7A:
+			_emit_runtime_event(&"map_reload_requested", {})
+			_frames.clear()
+		0x7B:
+			_emit_runtime_event(&"map_refresh_requested", {})
+		0x7C:
+			_emit_runtime_event(&"command_queue_written", {
+				"bank": bank, "address": int(command.get("address", 0)),
+			})
+		0x7D:
+			_script_value = 1
+			_emit_runtime_event(&"command_queue_deleted", {
+				"queue_id": int(command.get("value", -1)),
+			})
 		0x7E:
 			return _stage_audio_request(&"music", {
 				"address": int(command.get("address", 0)),
@@ -514,6 +557,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 	var handled_sources: Array = [
 		0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
+		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -560,10 +604,18 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
 				"active": false,
 			})
+			_emit_object_event(&"object_event_flag", {
+				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
+				"active": true,
+			})
 		0x6E:
 			_emit_object_event(&"object_visibility", {
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
 				"active": true,
+			})
+			_emit_object_event(&"object_event_flag", {
+				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
+				"active": false,
 			})
 		0x6F, 0x76:
 			_emit_object_event(&"object_follow", {
