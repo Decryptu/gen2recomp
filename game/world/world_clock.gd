@@ -2,9 +2,13 @@ class_name Gen2WorldClock
 extends RefCounted
 
 ## Deterministic host clock for the real-time Generation 2 day cycle.
-## One elapsed host second is one cartridge clock second. Schedule work is
-## published at each completed game minute, while time-of-day changes use the
-## cartridge's 04:00, 10:00 and 18:00 boundaries.
+## One elapsed host second is one cartridge clock second. A tick is published at
+## each completed game minute, while time-of-day changes use the cartridge's
+## 04:00, 10:00 and 18:00 boundaries.
+##
+## The clock does not move roaming Pokémon. The cartridge advances those during
+## map setup, so [method Gen2WorldAPI.advance_schedule] is driven by a map
+## change rather than by elapsed time.
 
 const SECONDS_PER_MINUTE: float = 60.0
 const MINUTES_PER_HOUR: int = 60
@@ -36,9 +40,7 @@ func time_of_day() -> int:
 	return Gen2WorldPalette.TIME_NIGHT
 
 
-func advance(
-	seconds: float, world: Gen2WorldAPI, random: RandomNumberGenerator = null
-) -> Array:
+func advance(seconds: float, world: Gen2WorldAPI = null) -> Array:
 	if seconds <= 0.0:
 		return []
 	_elapsed_seconds += seconds
@@ -48,14 +50,12 @@ func advance(
 		_advance_minute()
 		if world != null:
 			world.set_world_clock(day, hour, minute)
-		var schedule: Dictionary = world.advance_schedule(random) if world != null else {}
 		ticks.append({
 			"kind": &"world_clock_minute",
 			"day": day,
 			"hour": hour,
 			"minute": minute,
 			"time_of_day": time_of_day(),
-			"schedule": schedule,
 		})
 	return ticks
 

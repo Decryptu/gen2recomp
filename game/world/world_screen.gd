@@ -98,6 +98,7 @@ func _build_world() -> void:
 	else:
 		_encounter_random.randomize()
 
+	_world.schedule_random = _encounter_random
 	_clock = Gen2WorldClock.new(hour, minute, day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -130,7 +131,7 @@ func _process(delta: float) -> void:
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
 	if _clock != null and _world != null:
-		var ticks: Array = _clock.advance(delta, _world, _encounter_random)
+		var ticks: Array = _clock.advance(delta, _world)
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
@@ -324,7 +325,7 @@ func persist_world_snapshot() -> Dictionary:
 func advance_world_time(seconds: float) -> Array:
 	if _clock == null or _world == null:
 		return []
-	var ticks: Array = _clock.advance(seconds, _world, _encounter_random)
+	var ticks: Array = _clock.advance(seconds, _world)
 	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 	if not ticks.is_empty():
 		_update_time_of_day()

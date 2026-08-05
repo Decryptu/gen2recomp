@@ -534,6 +534,29 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
 
+func test_roaming_mons_move_on_map_setup_and_not_on_elapsed_time() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
+	var random := RandomNumberGenerator.new()
+	random.seed = 2
+	world.schedule_random = random
+	var before: Array = world.roaming_mons()
+	assert_eq(before[0]["map_group"], 1)
+	assert_eq(before[0]["map_number"], 2)
+
+	# An hour of clock does not move a roamer: the cartridge advances them in
+	# map setup, so standing still keeps them where they are.
+	var clock := Gen2WorldClock.new(6, 0, 0)
+	clock.advance(60.0 * 60.0, world)
+	var after_clock: Array = world.roaming_mons()
+	assert_eq(after_clock[0]["map_group"], 1)
+	assert_eq(after_clock[0]["map_number"], 2)
+
+	assert_true(world.try_warp()["ok"])
+	var moved: Array = world.last_schedule().get("roaming", [])
+	assert_eq(moved.size(), 1)
+	assert_eq(world.roaming_mons()[0]["map_number"], 1)
+
+
 func test_map_transition_queues_target_callbacks_for_the_next_script_pump() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var transition: Dictionary = world.try_warp()

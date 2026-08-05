@@ -37,6 +37,10 @@ var _block_overrides: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
+## Supplies the roaming jumps performed during map setup. A caller that needs a
+## reproducible route sets its own generator; otherwise map setup randomizes.
+var schedule_random: RandomNumberGenerator = null
+var _last_schedule: Dictionary = {}
 
 
 ## Opens one map through the public cartridge-content API.
@@ -706,22 +710,7 @@ func cancel_script_input() -> Array:
 	if StringName(advanced.get("status", &"")) == &"waiting":
 		results.append(advanced)
 		return results
-	if bool(advanced.get("ok", false)):
-		results.append(_finish_script_result(advanced))
-	else:
-		results.append(advanced)
-	_active_script = null
-	while _active_script == null and not _script_queue.is_empty():
-		var request: Dictionary = _script_queue.pop_front()
-		_active_script = Gen2WorldScriptRunner.begin(
-			data, state, request, Callable(self, "_validate_script_warp")
-		)
-		var next: Dictionary = _active_script.advance()
-		if StringName(next.get("status", &"")) == &"waiting":
-			results.append(next)
-			break
-		results.append(_finish_script_result(next) if bool(next.get("ok", false)) else next)
-		_active_script = null
+	results.append_array(_resume_after(advanced))
 	return results
 
 
@@ -741,11 +730,27 @@ func complete_runtime_request(result: Dictionary) -> Array:
 		_active_script = null
 		_script_queue.clear()
 		return results
-	if bool(advanced.get("ok", false)):
-		results.append(_finish_script_result(advanced))
-	else:
-		results.append(advanced)
+	results.append_array(_resume_after(advanced))
+	return results
+
+
+## Closes out a resumed invocation and runs whatever was queued behind it. Both
+## resume boundaries, a cancelled input and a completed host request, end the
+## same way, and the terminal result must not be finished twice.
+func _resume_after(advanced: Dictionary) -> Array:
+	var results: Array = []
+	results.append(
+		_finish_script_result(advanced) if bool(advanced.get("ok", false)) else advanced
+	)
 	_active_script = null
+	results.append_array(_drain_script_queue())
+	return results
+
+
+## Starts each queued script in turn and stops at the first one that waits for
+## the host.
+func _drain_script_queue() -> Array:
+	var results: Array = []
 	while _active_script == null and not _script_queue.is_empty():
 		var request: Dictionary = _script_queue.pop_front()
 		_active_script = Gen2WorldScriptRunner.begin(
@@ -1558,7 +1563,16 @@ func _apply_map(
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
 	_load_objects()
+	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
+	# player who stands still does not watch them cross Johto.
+	_last_schedule = advance_schedule(schedule_random)
 	_queue_map_callbacks(-1)
+
+
+## The schedule update produced by the most recent map change, for a host that
+## wants to report where the roamers went.
+func last_schedule() -> Dictionary:
+	return _last_schedule.duplicate(true)
 
 
 ## Reloads the current map's live object records without changing the player
