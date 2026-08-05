@@ -37,6 +37,7 @@ var hp: int = 0
 var status: int = Gen2Status.NONE
 var nickname: String = ""
 var original_trainer: String = ""
+var is_egg: bool = false
 
 
 func to_dict() -> Dictionary:
@@ -63,6 +64,7 @@ func to_dict() -> Dictionary:
 		"status": status,
 		"nickname": nickname,
 		"original_trainer": original_trainer,
+		"is_egg": is_egg,
 	}
 
 
@@ -95,6 +97,7 @@ static func from_dict(raw: Variant) -> Gen2SaveMon:
 	out.status = int(source.get("status", Gen2Status.NONE))
 	out.nickname = String(source.get("nickname", ""))
 	out.original_trainer = String(source.get("original_trainer", ""))
+	out.is_egg = bool(source.get("is_egg", false))
 	return out
 
 

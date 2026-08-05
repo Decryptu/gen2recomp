@@ -21,6 +21,7 @@ const MANIFEST: String = "manifest.json"
 const SPECIES: String = "species.json"
 const MOVES: String = "moves.json"
 const ITEMS: String = "items.json"
+const WORLD_TRADES: String = "world_trades.json"
 const TYPES: String = "types.json"
 const MATCHUPS: String = "matchups.json"
 const TRAINERS: String = "trainers.json"
@@ -46,7 +47,7 @@ const WORLD_AUDIO: String = "world_audio.json"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 18
+const FORMAT_VERSION: int = 19
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -67,6 +68,10 @@ static func moves_path(directory: String) -> String:
 
 static func items_path(directory: String) -> String:
 	return "%s/%s" % [directory, ITEMS]
+
+
+static func world_trades_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_TRADES]
 
 
 static func types_path(directory: String) -> String:

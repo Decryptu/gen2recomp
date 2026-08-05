@@ -15,8 +15,10 @@ The versioned first format stores:
   coins, phone contacts, repel steps, swarm state and roaming positions;
 - each Pokémon's species, held item, level, experience, current HP, status,
   DVs, five Generation 2 stat-experience values, moves and PP;
-- reserved identity fields for future import: OT ID, nickname, original
-  trainer, happiness, Pokerus and caught data.
+- identity fields used by imported saves and party transactions: OT ID, nickname,
+  original trainer, happiness, Pokerus and caught data;
+- an `is_egg` marker for received eggs. Eggs remain in the party model but are
+  rejected by the battle adapter until hatch behavior exists.
 
 Derived battle stats are recalculated on load. Volatile state, including stat
 stages, confusion, recharge, Disable, Encore, Fly, Dig, Rollout and rampage,
@@ -55,6 +57,13 @@ configured development entry until a migration path exists. The validator
 checks item and currency references against the selected cartridge cache, and
 `Gen2WorldAPI.open_snapshot()` restores a saved position without clamping it to
 another location.
+
+Party-owned overworld transactions use a candidate `Gen2SaveData` and a live
+world snapshot. Gifts, eggs, NPC trades, item effects and catches are applied to
+that candidate first; validation and optional persistence happen before the
+candidate replaces the caller's save. A failed write restores the live world
+state. The current model refuses a sixth-party addition rather than sending it
+to a PC box, because boxes are not yet canonical project data.
 
 ## Original Generation 2 shape
 

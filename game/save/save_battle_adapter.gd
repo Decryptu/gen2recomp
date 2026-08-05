@@ -27,7 +27,7 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 
 
 static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
-	if data == null or saved == null:
+	if data == null or saved == null or saved.is_egg:
 		return null
 	var known_moves: Array = []
 	var saved_pp: Array = []

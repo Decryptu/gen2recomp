@@ -15,9 +15,15 @@ func test_an_unknown_game_has_none() -> void:
 	assert_true(RomLayout.for_id(&"emerald").is_empty())
 
 
-func test_gold_and_silver_share_one_layout() -> void:
-	# Same engine, same build: only the content between the offsets differs.
-	assert_eq(RomLayout.for_id(RomRegistry.GOLD), RomLayout.for_id(RomRegistry.SILVER))
+func test_gold_and_silver_share_their_common_layout() -> void:
+	# The bank map is shared, but the item tables move between the two dumps.
+	var gold: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
+	var silver: Dictionary = RomLayout.for_id(RomRegistry.SILVER)
+	for key: String in gold:
+		if key in ["item_attributes", "item_status_actions", "item_healing_hp"]:
+			continue
+		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
+	assert_ne(gold["item_attributes"], silver["item_attributes"])
 
 
 func test_crystal_has_its_own() -> void:

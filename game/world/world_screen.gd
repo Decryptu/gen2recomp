@@ -140,8 +140,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_script_prompt = "Host choice required: call choose_script_input(choice)"
 			_refresh_labels()
 		elif not _world.pending_runtime_request().is_empty():
+			var pending_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 			var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
-				_world, {"ok": true}
+				_world, {"ok": true}, pending_save,
+				_injected_save == null, _encounter_random
 			)
 			if bool(host_result.get("ok", false)):
 				_show_script_results(host_result.get("results", []))
@@ -347,6 +349,39 @@ func preview_script_event() -> void:
 				return
 	_script_prompt = "No active script at this map's event records"
 	_refresh_labels()
+
+
+## Public screenshot driver for the scene-free party item transaction. It uses a
+## development save and keeps the result in memory, so the image demonstrates
+## the real host boundary without changing a user's selected slot.
+func preview_party_transaction() -> void:
+	if _world == null or _data == null:
+		return
+	var preview_save: Gen2SaveData = Gen2SaveStore.create_development_save(_data, 0)
+	if preview_save == null or preview_save.party.is_empty():
+		_script_prompt = "Party transaction preview unavailable"
+		_refresh_labels()
+		return
+	preview_save.world = _world.snapshot()
+	var item_result: Dictionary = _world.state.apply_changes({}, {}, {"items": {0x12: 1}})
+	if not bool(item_result.get("ok", false)):
+		_script_prompt = "Party transaction preview unavailable"
+		_refresh_labels()
+		return
+	preview_save.party[0].hp = 1
+	var result: Dictionary = Gen2WorldPartyHost.use_item(
+		_world, preview_save, 0x12, 0, false
+	)
+	var preview_caption: String = ""
+	if bool(result.get("ok", false)):
+		var healed: int = int(result.get("healed", 0))
+		_script_prompt = "POTION +%d HP" % healed
+		preview_caption = "%s   PARTY TX: POTION +%d HP" % [_data.title(), healed]
+	else:
+		_script_prompt = "Party transaction failed: %s" % String(result.get("reason", "unknown"))
+	_refresh_labels()
+	if not preview_caption.is_empty():
+		_caption.text = preview_caption
 
 
 ## Public screenshot driver for the battle-request host path. It starts the
@@ -560,6 +595,11 @@ func _show_script_results(results: Array) -> void:
 					})
 					_show_script_results(swarm_results)
 					return
+				if StringName(request.get("kind", &"")) in [
+					&"pokemon_requested", &"trade_requested",
+				]:
+					_script_prompt = "Party transaction: Space to confirm"
+					continue
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
 				)

@@ -173,6 +173,14 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if items[3] != "GREAT BALL":
 		return {"ok": false, "message": "Item 4: expected GREAT BALL, read %s." % items[3]}
 
+	var item_metadata: Dictionary = verify_item_metadata(rom, layout)
+	if not bool(item_metadata.get("ok", false)):
+		return item_metadata
+
+	var trades: Dictionary = verify_world_trades(rom, layout)
+	if not bool(trades.get("ok", false)):
+		return trades
+
 	# The first and last type, either side of the padding run in the middle.
 	var first_type: String = type_name(rom, layout, 0)
 	if first_type != "NORMAL":
@@ -1307,6 +1315,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 
 	var moves: Array = _import_moves(rom, layout, on_progress)
 	var items: Array = _import_items(rom, layout, on_progress)
+	var trades: Array = _import_world_trades(rom, layout)
 	var types: Array = _import_types(rom, layout, on_progress)
 	var matchups: Array = read_matchups(rom, layout)
 	var trainers: Array = _import_trainers(rom, layout, on_progress)
@@ -1340,6 +1349,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if not RomCache.write_json(RomCache.items_path(directory), items):
 		result["message"] = "Could not write item data."
 		return result
+	if not RomCache.write_json(RomCache.world_trades_path(directory), trades):
+		result["message"] = "Could not write world trade data."
+		return result
 	if not RomCache.write_json(RomCache.types_path(directory), types):
 		result["message"] = "Could not write type data."
 		return result
@@ -1363,6 +1375,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"learnset_move_count": learnset_moves,
 		"move_count": moves.size(),
 		"item_count": items.size(),
+		"world_trade_count": trades.size(),
 		"type_count": types.size(),
 		"matchup_count": matchups.size(),
 		"trainer_count": trainers.size(),
@@ -1532,12 +1545,130 @@ func _import_items(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 		rom.bytes(), int(layout["item_names"]), RomLayout.ITEM_COUNT, RomLayout.MAX_NAME_LENGTH
 	)
 	var out: Array = []
+	var status_masks: Dictionary = _read_item_status_masks(rom, layout)
+	var healing_amounts: Dictionary = _read_item_healing_amounts(rom, layout)
 
 	for item: int in range(1, RomLayout.ITEM_COUNT + 1):
-		out.append({"number": item, "name": names[item - 1]})
+		var at: int = int(layout["item_attributes"]) + (item - 1) * RomLayout.ITEM_ATTRIBUTE_SIZE
+		var packed_menu: int = rom.u8(at + RomLayout.ITEM_ATTRIBUTE_HELP)
+		var parameter: int = rom.u8(at + RomLayout.ITEM_ATTRIBUTE_PARAM)
+		if parameter == 0xFF:
+			parameter = -1
+		var entry: Dictionary = {
+			"number": item,
+			"name": names[item - 1],
+			"price": rom.u16le(at),
+			"effect": rom.u8(at + 2),
+			"parameter": parameter,
+			"permissions": rom.u8(at + RomLayout.ITEM_ATTRIBUTE_PERMISSIONS),
+			"pocket": rom.u8(at + RomLayout.ITEM_ATTRIBUTE_POCKET),
+			"field_menu": packed_menu >> 4,
+			"battle_menu": packed_menu & 0x0F,
+		}
+		if status_masks.has(item):
+			entry["status_mask"] = int(status_masks[item])
+		if healing_amounts.has(item):
+			entry["heal_amount"] = int(healing_amounts[item])
+		out.append(entry)
 		if on_progress.is_valid():
 			on_progress.call("items", item, RomLayout.ITEM_COUNT)
 
+	return out
+
+
+static func verify_item_metadata(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var attributes: int = int(layout.get("item_attributes", -1))
+	if not rom.in_bounds(attributes, RomLayout.ITEM_COUNT * RomLayout.ITEM_ATTRIBUTE_SIZE):
+		return {"ok": false, "message": "Item attribute table is outside the ROM."}
+	if rom.u8(attributes + RomLayout.ITEM_ATTRIBUTE_POCKET) != RomLayout.ITEM_POCKET_BALL:
+		return {"ok": false, "message": "Master Ball is not in the cartridge ball pocket."}
+	var poke_ball: int = attributes + 4 * RomLayout.ITEM_ATTRIBUTE_SIZE
+	if rom.u8(poke_ball + RomLayout.ITEM_ATTRIBUTE_POCKET) != RomLayout.ITEM_POCKET_BALL:
+		return {"ok": false, "message": "Poke Ball is not in the cartridge ball pocket."}
+	var status_at: int = int(layout.get("item_status_actions", -1))
+	var status_found: bool = false
+	for index: int in 32:
+		if rom.u8(status_at + index * 3) == 0xFF:
+			status_found = true
+			break
+	if not status_found:
+		return {"ok": false, "message": "Status-healing item table has no terminator."}
+	var healing_at: int = int(layout.get("item_healing_hp", -1))
+	var healing_found: bool = false
+	for index: int in 32:
+		if rom.u8(healing_at + index * 3) == 0xFF:
+			healing_found = true
+			break
+	if not healing_found:
+		return {"ok": false, "message": "HP-healing item table has no terminator."}
+	return {"ok": true, "message": ""}
+
+
+static func verify_world_trades(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = int(layout.get("world_trade_count", 0))
+	var at: int = int(layout.get("world_trades", -1))
+	if count <= 0 or not rom.in_bounds(at, count * RomLayout.TRADE_RECORD_SIZE):
+		return {"ok": false, "message": "NPC trade table is outside the ROM."}
+	for index: int in count:
+		var row: int = at + index * RomLayout.TRADE_RECORD_SIZE
+		if rom.u8(row + 1) <= 0 or rom.u8(row + 1) > RomLayout.SPECIES_COUNT \
+			or rom.u8(row + 2) <= 0 or rom.u8(row + 2) > RomLayout.SPECIES_COUNT:
+			return {"ok": false, "message": "NPC trade %d has an invalid species." % index}
+		if rom.u8(row + 30) > RomLayout.TRADE_GENDER_FEMALE or rom.u8(row + 31) != 0:
+			return {"ok": false, "message": "NPC trade %d has an invalid record tail." % index}
+	return {"ok": true, "message": ""}
+
+
+static func _read_item_status_masks(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	var at: int = int(layout["item_status_actions"])
+	for index: int in 32:
+		var item: int = rom.u8(at)
+		if item == 0xFF:
+			break
+		if item <= 0 or item > RomLayout.ITEM_COUNT:
+			break
+		out[item] = rom.u8(at + 2)
+		at += 3
+	return out
+
+
+static func _read_item_healing_amounts(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	var at: int = int(layout["item_healing_hp"])
+	for index: int in 32:
+		var item: int = rom.u8(at)
+		if item == 0xFF:
+			break
+		if item <= 0 or item > RomLayout.ITEM_COUNT:
+			break
+		out[item] = rom.u16le(at + 1)
+		at += 3
+	return out
+
+
+static func _import_world_trades(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	var count: int = int(layout["world_trade_count"])
+	var at: int = int(layout["world_trades"])
+	for index: int in count:
+		var row: int = at + index * RomLayout.TRADE_RECORD_SIZE
+		out.append({
+			"trade_id": index,
+			"dialog": rom.u8(row),
+			"requested_species": rom.u8(row + 1),
+			"offered_species": rom.u8(row + 2),
+			"nickname": Gen2Text.decode_fixed(
+				rom.bytes(), row + 3, RomLayout.TRADE_NAME_LENGTH
+			),
+			"dvs": (rom.u8(row + 14) << 8) | rom.u8(row + 15),
+			"item": rom.u8(row + 16),
+			"ot_id": rom.u16le(row + 17),
+			"ot_name": Gen2Text.decode_fixed(
+				rom.bytes(), row + 19, RomLayout.TRADE_NAME_LENGTH
+			),
+			"gender": rom.u8(row + 30),
+		})
 	return out
 
 

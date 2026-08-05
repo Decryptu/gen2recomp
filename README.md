@@ -38,9 +38,12 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > repel checks, deterministic encounter resolution and movement-triggered wild
 > battle requests. The importer also preserves referenced overworld menus, 34
 > mart lists, phone contacts and music/SFX pointer records, and the scene-free
-> host resolves those records without reopening the ROM. Full story state,
-> audio playback and the mod loader do not exist yet, so this is not a complete
-> game. Scene-level
+> host resolves those records without reopening the ROM. Party-owned overworld
+> transactions now cover gifts, eggs, imported NPC trades, common HP/status
+> items, repel and the core Poké Ball catch calculation behind a validated
+> candidate-save boundary. Full story state, battle capture input, audio
+> playback and the mod loader do not exist yet, so this is not a complete game.
+> Scene-level
 > integration tests also cover trainer sight through the real overworld battle
 > overlay, imported terminal text, live object refresh, emote rendering and
 > save-backed blackout recovery.
@@ -77,9 +80,9 @@ uncharacterised bank layout would produce corrupt assets.
 godot --headless --path . -s res://tools/import_rom.gd
 ```
 
-Import takes under a second per game. The cache is keyed by game and hash and
-stored in Godot's `user://`, never in the project or an export. Use `--verify`
-to run checks without writing.
+Import normally takes a few seconds per game. The cache is keyed by game and
+hash and stored in Godot's `user://`, never in the project or an export. Use
+`--verify` to run checks without writing.
 
 | Data | Contents |
 |---|---|
@@ -87,7 +90,8 @@ to run checks without writing.
 | Learnsets | All 251 species' level-up moves, in cartridge order |
 | Evolutions | Every evolution and its method/requirements |
 | Moves | Names, power, type, accuracy, PP, effect and chance |
-| Items, types | 255 item names and 28 type names, indexed by number |
+| Items, types | 255 item names plus imported prices, effects, menus, pockets and healing metadata; 28 type names |
+| NPC trades | Gold/Silver six-row or Crystal seven-row trade records with requested/offered species, DVs, held item and OT data |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
 | Trainers | Class names, pics, palettes, AI flags, DVs, and every party |
 | Palettes | Normal and shiny, as the cartridge's 15-bit colours |
@@ -164,7 +168,9 @@ Development scenes:
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's
   `preview_world_battle_loss()` drives the recovery message for a visual smoke
-  check. The hint line also reports the imported world-service record counts.
+  check. `preview_party_transaction()` runs an in-memory Potion transaction
+  through the party host. The hint line also reports the imported world-service
+  record counts.
 
   `tools/preview_fishing.gd` captures the fishing state from the normal
   renderer. With an imported cache, pass the game and map after the output
