@@ -42,6 +42,10 @@ static func import_to_cache(
 		return {"ok": false, "message": "Could not write overworld map data."}
 	if not RomCache.write_json(RomCache.world_scripts_path(directory), result["scripts"]):
 		return {"ok": false, "message": "Could not write overworld script data."}
+	if not RomCache.write_json(
+		RomCache.world_standard_scripts_path(directory), result["standard_scripts"]
+	):
+		return {"ok": false, "message": "Could not write standard overworld script data."}
 	if not RomCache.write_json(RomCache.world_text_path(directory), result["text"]):
 		return {"ok": false, "message": "Could not write overworld text data."}
 
@@ -118,10 +122,15 @@ static func read_world(
 			if on_progress.is_valid():
 				on_progress.call("world_maps", maps.size(), RomLayout.map_count(layout))
 
+	var standard_result: Dictionary = _read_standard_scripts(rom, script_data, text_data)
+	if not bool(standard_result.get("ok", false)):
+		return standard_result
+
 	return {
 		"ok": true,
 		"maps": maps,
 		"scripts": script_data,
+		"standard_scripts": standard_result["scripts"],
 		"text": text_data,
 		"tilesets": tilesets,
 		"graphics": graphics,
@@ -131,6 +140,41 @@ static func read_world(
 		"sprite_palettes": sprites["palettes"],
 		"sprite_graphics": sprites["graphics"],
 	}
+
+
+## JUMPSTD and CALLSTD address a profile-specific far-pointer table. These
+## locations and counts come from the verified cartridge layouts, not from a
+## scan for plausible pointers.
+static func _read_standard_scripts(
+	rom: RomFile, script_data: Dictionary, text_data: Dictionary
+) -> Dictionary:
+	var bank: int = 0x2F if rom.id == &"crystal" else 0x40
+	var count: int = 52 if rom.id == &"crystal" else 46
+	var table_offset: int = RomFile.linear(bank, RomFile.BANK_SIZE)
+	if not rom.in_bounds(table_offset, count * 3):
+		return _error("Standard-script table is outside the cartridge.")
+
+	var scripts: Dictionary = {}
+	for index: int in count:
+		var at: int = table_offset + index * 3
+		var target_bank: int = rom.u8(at)
+		var target_address: int = rom.u16le(at + 1)
+		if _far_offset(rom, {"bank": target_bank, "address": target_address}) < 0:
+			return _error("Standard script %d has an invalid far pointer." % index)
+		_collect_script(rom, target_bank, target_address, script_data, text_data)
+		var target_offset: int = _far_offset(
+			rom, {"bank": target_bank, "address": target_address}
+		)
+		var length: int = mini(Gen2WorldScript.MAX_SCRIPT_BYTES, rom.size() - target_offset)
+		var raw: PackedByteArray = rom.slice(target_offset, length)
+		if raw.is_empty():
+			return _error("Standard script %d is empty." % index)
+		scripts[str(index)] = {
+			"bank": target_bank,
+			"address": target_address,
+			"bytes": Array(raw),
+		}
+	return {"ok": true, "scripts": scripts}
 
 
 ## The cartridge stores these graphics as raw 2bpp tile strips. The table is

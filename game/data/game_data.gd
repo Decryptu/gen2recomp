@@ -36,6 +36,7 @@ var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
 var _world_scripts: Dictionary = {}
+var _world_standard_scripts: Dictionary = {}
 var _world_text: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_palettes: Array = []
@@ -114,6 +115,19 @@ func world_maps() -> Array:
 ## Runtime never opens a ROM; these bytes come from the user cache only.
 func world_script(bank: int, address: int) -> PackedByteArray:
 	return _cached_bytes(_world_scripts.get(Gen2WorldScript.pointer_key(bank, address), []))
+
+
+## One standard-script entry by its source table index. The pointer is retained
+## for diagnostics, while the bounded bytes keep the runtime independent of ROMs.
+func world_standard_script(index: int) -> Dictionary:
+	var value: Variant = _world_standard_scripts.get(str(index), {})
+	if not value is Dictionary:
+		return {}
+	var entry: Dictionary = (value as Dictionary).duplicate(true)
+	entry["bank"] = int(entry.get("bank", -1))
+	entry["address"] = int(entry.get("address", -1))
+	entry["data"] = _cached_bytes(entry.get("bytes", []))
+	return entry
 
 
 ## Raw bounded text bytes indexed by the cartridge's bank and CPU address.
@@ -581,6 +595,11 @@ func _load_world(path: String) -> void:
 	var script_rows: Variant = RomCache.read_json(RomCache.world_scripts_path(path))
 	if script_rows is Dictionary:
 		_world_scripts = script_rows
+	var standard_script_rows: Variant = RomCache.read_json(
+		RomCache.world_standard_scripts_path(path)
+	)
+	if standard_script_rows is Dictionary:
+		_world_standard_scripts = standard_script_rows
 	var text_rows: Variant = RomCache.read_json(RomCache.world_text_path(path))
 	if text_rows is Dictionary:
 		_world_text = text_rows
