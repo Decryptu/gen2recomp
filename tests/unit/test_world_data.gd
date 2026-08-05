@@ -24,6 +24,28 @@ func test_map_uses_row_major_blocks_and_collision_cells() -> void:
 	assert_eq(map.collision_at(4, 0), -1)
 
 
+func test_map_reads_directional_connections_and_signed_offsets() -> void:
+	var map := Gen2WorldMap.from_cache({
+		"group": 1,
+		"number": 1,
+		"width_blocks": 4,
+		"height_blocks": 3,
+		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_NORTH,
+		"connections": [{
+			"direction": "north", "map_group": 2, "map_number": 4,
+			"length": 5, "target_width_blocks": 8,
+			"x_offset": -10, "y_offset": 11,
+		}],
+	})
+
+	assert_eq(map.connection_flags, RomLayout.MAP_CONNECTION_FLAG_NORTH)
+	assert_eq(map.connections.size(), 1)
+	assert_eq(map.connections[0]["direction"], "north")
+	assert_eq(map.connections[0]["map_group"], 2)
+	assert_eq(map.connections[0]["x_offset"], -10)
+	assert_eq(map.connections[0]["y_offset"], 11)
+
+
 func test_tileset_expands_four_by_four_tiles_and_two_by_two_collision() -> void:
 	var meta: Array = []
 	for value: int in 32:

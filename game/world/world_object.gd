@@ -62,6 +62,8 @@ static func from_event(
 	out.sight_range = int(value.get("sight_range", 0))
 	out.event_script = int(value.get("script", 0))
 	out.event_flag = int(value.get("event_flag", 0))
+	if out.event_flag == 0xFFFF:
+		out.event_flag = -1
 	out.facing = out.initial_facing()
 	return out
 
@@ -100,6 +102,16 @@ func visible_at(hour: int, time_of_day: int) -> bool:
 	if hour_1 < hour_2:
 		return hour >= hour_1 and hour <= hour_2
 	return hour >= hour_1 or hour <= hour_2
+
+
+## A zero or negative flag is the cache's no-flag/default value. The source
+## uses $FFFF as the explicit always-visible sentinel, imported as -1.
+func visible_with_state(hour: int, time_of_day: int, state: Gen2WorldState) -> bool:
+	return visible_at(hour, time_of_day) and not event_flag_active(state)
+
+
+func event_flag_active(state: Gen2WorldState) -> bool:
+	return event_flag > 0 and state != null and state.is_event_flag_active(event_flag)
 
 
 func can_leave_to(destination: Vector2i) -> bool:

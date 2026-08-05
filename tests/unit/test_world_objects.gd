@@ -21,6 +21,15 @@ func test_time_of_day_mask_uses_the_source_bits() -> void:
 	assert_false(object.visible_at(22, Gen2WorldPalette.TIME_NIGHT))
 
 
+func test_ff_event_flag_is_the_source_always_visible_sentinel() -> void:
+	var object: Gen2WorldObject = Gen2WorldObject.from_event(0, {
+		"event_flag": 0xFFFF,
+	})
+	var state := Gen2WorldState.new({65535: true})
+	assert_eq(object.event_flag, -1)
+	assert_true(object.visible_with_state(6, Gen2WorldPalette.TIME_MORNING, state))
+
+
 func test_hour_ranges_include_endpoints_and_wrap_midnight() -> void:
 	var object: Gen2WorldObject = _object()
 	assert_true(object.visible_at(6, Gen2WorldPalette.TIME_MORNING))
