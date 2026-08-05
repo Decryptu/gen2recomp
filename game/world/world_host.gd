@@ -135,7 +135,8 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 			return {"ok": true, "data": {"contact": contact}}
 		&"audio_requested":
 			var audio: Dictionary = _audio_for_request(world, request)
-			if audio.is_empty():
+			var audio_kind: StringName = StringName(request.get("values", {}).get("kind", &""))
+			if audio.is_empty() and audio_kind != &"sound_wait":
 				return {"ok": false, "reason": &"audio_data_unavailable"}
 			return {"ok": true, "data": {"audio": audio}}
 	return {}
@@ -171,6 +172,22 @@ static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dict
 			if sound.is_empty() and address >= 0:
 				sound = data.world_audio(&"sfx", address)
 			return sound
+		&"cry":
+			return data.world_audio(&"cries", int(values.get("cry_id", -1)))
+		&"warp_sound":
+			var collision: int = int(values.get("collision", -1))
+			var warp_sfx: int = 0x23
+			if collision == 0x71:
+				warp_sfx = 0x1F
+			elif collision == 0x7C:
+				warp_sfx = 0x13
+			return data.world_audio(&"sfx", warp_sfx)
+		&"special_sound":
+			var item: Dictionary = data.item(int(values.get("item", 0)))
+			var item_sfx: int = 0x9B if int(item.get("pocket", 0)) == 4 else 0x01
+			return data.world_audio(&"sfx", item_sfx)
+		&"sound_wait":
+			return {"kind": &"sound_wait"}
 		&"map_music", &"encounter_music":
 			if world.current_map == null:
 				return {}

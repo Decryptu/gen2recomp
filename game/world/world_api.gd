@@ -577,7 +577,7 @@ func dispatch_sight_events() -> Array:
 	var request: Dictionary = _find_sight_request()
 	if request.is_empty():
 		return []
-	_script_queue.append(request)
+	_enqueue_script(request)
 	return run_event_queue(false)
 
 
@@ -730,6 +730,10 @@ func _enqueue_script_events(events: Array) -> void:
 func _enqueue_script(request: Dictionary) -> void:
 	if int(request.get("script", 0)) <= 0:
 		return
+	if not request.has("collision"):
+		var cell_value: Variant = request.get("cell", player_cell)
+		var cell: Vector2i = cell_value if cell_value is Vector2i else player_cell
+		request["collision"] = collision_code_at(cell)
 	_script_queue.append(request)
 
 

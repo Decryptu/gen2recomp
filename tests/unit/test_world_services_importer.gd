@@ -40,6 +40,10 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	assert_eq((audio["sfx"] as Array).size(), int(_layout["sfx_count"]))
 	assert_eq(audio["music"][0]["bank"], int(_layout["music_first_bank"]))
 	assert_eq(audio["sfx"][0]["address"], int(_layout["sfx_first_address"]))
+	assert_eq((audio["cries"] as Array).size(), RomLayout.AUDIO_CRY_COUNT)
+	assert_eq(audio["cries"][0]["address"], int(_layout["cry_first_address"]))
+	assert_eq(audio["wave_samples"]["sample_count"], RomLayout.AUDIO_WAVE_SAMPLE_COUNT)
+	assert_eq(audio["drumkits"]["byte_count"], RomLayout.AUDIO_DRUMKIT_BYTES)
 	assert_gt(audio["music"][0]["byte_count"], 0)
 
 	var menus: Dictionary = result["menus"]
@@ -106,6 +110,15 @@ func _write_phone(data: PackedByteArray) -> void:
 
 
 func _write_audio(data: PackedByteArray) -> void:
+	var wave_offset: int = int(_layout["wave_samples"])
+	data[wave_offset] = 0x02
+	data[wave_offset + 1] = 0x46
+	data[wave_offset + RomLayout.AUDIO_WAVE_SAMPLE_COUNT * RomLayout.AUDIO_WAVE_SAMPLE_BYTES - 2] = 0x43
+	data[wave_offset + RomLayout.AUDIO_WAVE_SAMPLE_COUNT * RomLayout.AUDIO_WAVE_SAMPLE_BYTES - 1] = 0x21
+	var drum_offset: int = int(_layout["drumkits"])
+	data[drum_offset] = 0x5E
+	data[drum_offset + 1] = 0x4E
+	data[drum_offset + RomLayout.AUDIO_DRUMKIT_BYTES - 1] = 0xCB
 	var music_table: int = int(_layout["music_pointers"])
 	for index: int in int(_layout["music_count"]):
 		var address: int = int(_layout["music_first_address"]) + index
@@ -116,6 +129,11 @@ func _write_audio(data: PackedByteArray) -> void:
 		var address: int = int(_layout["sfx_first_address"]) + index
 		_write_far(data, sfx_table + index * 3, int(_layout["sfx_first_bank"]), address)
 		data[RomFile.linear(int(_layout["sfx_first_bank"]), address)] = 0xFF
+	var cry_table: int = int(_layout["cry_pointers"])
+	for index: int in RomLayout.AUDIO_CRY_COUNT:
+		var address: int = int(_layout["cry_first_address"]) + index
+		_write_far(data, cry_table + index * 3, int(_layout["cry_first_bank"]), address)
+		data[RomFile.linear(int(_layout["cry_first_bank"]), address)] = 0xFF
 
 
 func _write_menu(data: PackedByteArray) -> void:

@@ -101,19 +101,16 @@ func test_phone_overlay_presents_the_imported_contact_and_returns() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
-func test_audio_overlay_keeps_the_decoder_boundary_explicit() -> void:
+func test_audio_request_decodes_and_starts_the_runtime_player() -> void:
 	_write_audio_request()
 	_data = GameData.open_directory(Fixture.directory())
 	await _open_world()
 	await _queue_service()
 
-	var host: Gen2WorldServiceScreen = _world_screen._service_host
-	assert_not_null(host)
-	assert_eq(host._title.text, "AUDIO HOST")
-	assert_true(host._status.text.contains("gb_audio_decoder_pending"))
-	assert_true(host.handle_key(KEY_ENTER))
-	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
+	var audio_player: Node = _world_screen.get_node("AudioPlayer") as Node
+	assert_not_null(audio_player)
+	assert_not_null(audio_player.get_node("MusicPlayer").stream)
 	assert_false(_world_screen._world.script_input_waiting())
 
 
@@ -130,7 +127,7 @@ func _write_service_cache() -> void:
 	})
 	RomCache.write_json(RomCache.world_audio_path(Fixture.directory()), {
 		"music": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000,
-			"bytes": [1, 2], "byte_count": 2}],
+			"bytes": [0x00, 0x03, 0x40, 0xD4, 0x10, 0xFF], "byte_count": 6}],
 		"sfx": [],
 	})
 	_write_request_script([0x94, 0, 0x00, 0x40, 0x91], 0x6320)

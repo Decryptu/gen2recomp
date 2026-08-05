@@ -28,6 +28,7 @@ var _events: Array = []
 var _pending: Dictionary = {}
 var _last_text: Dictionary = {}
 var _last_talked_object_index: int = -1
+var _last_item: int = 0
 var _staged_warp: Dictionary = {}
 var _script_value: int = 0
 var _command_count: int = 0
@@ -52,6 +53,7 @@ static func begin(
 	runner.warp_validator = validator
 	runner._request = request.duplicate(true)
 	runner._last_talked_object_index = int(request.get("object_index", -1))
+	runner._last_item = int(request.get("item", 0))
 	var bank: int = int(request.get("bank", 0))
 	var address: int = int(request.get("script", request.get("address", 0)))
 	if not runner._push_frame(bank, address):
@@ -594,11 +596,13 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x84:
 			return _stage_audio_request(&"sound", {"address": int(command.get("value", 0))})
 		0x85:
-			_emit_runtime_event(&"sound_wait_requested", {})
+			return _stage_audio_request(&"sound_wait", {})
 		0x86:
-			return _stage_audio_request(&"warp_sound", {})
+			return _stage_audio_request(&"warp_sound", {
+				"collision": int(_request.get("collision", -1)),
+			})
 		0x87:
-			return _stage_audio_request(&"special_sound", {})
+			return _stage_audio_request(&"special_sound", {"item": _last_item})
 		0x8A, 0x8B:
 			_emit_runtime_event(&"script_timing_requested", {
 				"kind": &"pause" if source_opcode == 0x8A else &"deactivate_facing",
@@ -739,6 +743,8 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 
 
 func _stage_item_delta(item: int, delta: int) -> Dictionary:
+	if item > 0:
+		_last_item = item
 	if item <= 0 or delta == 0:
 		_script_value = 1 if delta >= 0 else 0
 		return {"ok": true}

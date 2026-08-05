@@ -118,7 +118,16 @@ const PHONE_CONTACT_SIZE: int = 12
 const SPECIAL_PHONE_CALL_COUNT: int = 8
 const SPECIAL_PHONE_CALL_SIZE: int = 6
 const AUDIO_POINTER_SIZE: int = 3
-const AUDIO_MAX_RECORD_BYTES: int = 4096
+## Audio channel programs share subroutines within their bank, so one cached
+## record keeps the complete 16 KiB bank window rather than truncating a valid
+## jump target at the next top-level pointer.
+const AUDIO_MAX_RECORD_BYTES: int = 0x4000
+const AUDIO_WAVE_SAMPLE_COUNT: int = 10
+const AUDIO_WAVE_SAMPLE_BYTES: int = 16
+const AUDIO_DRUMKIT_COUNT: int = 6
+const AUDIO_DRUMKIT_SAMPLE_COUNT: int = 13
+const AUDIO_DRUMKIT_BYTES: int = 0x174
+const AUDIO_CRY_COUNT: int = 67
 
 ## The overworld palette file contains 42 four-colour groups: morning, day,
 ## night and dark outdoor groups, the indoor group, and the two animated water
@@ -598,6 +607,15 @@ const GOLD_SILVER: Dictionary = {
 	"sfx_count": 188,
 	"sfx_first_bank": 0x3C,
 	"sfx_first_address": 0x4B3F,
+	"cry_pointers": 0xE9192,
+	"cry_first_bank": 0x3C,
+	"cry_first_address": 0x743D,
+	"wave_samples": 0xE8DB2,
+	"wave_samples_bank": 0x3A,
+	"wave_samples_address": 0x4DB2,
+	"drumkits": 0xE8E52,
+	"drumkits_bank": 0x3A,
+	"drumkits_address": 0x4E52,
 	"world_animation_done": 0x42A2,
 	"world_animation_functions": {
 		0x42A2: "done", 0x42A5: "wait", 0x42A6: "timer_8", 0x42B0: "scroll_horizontal",
@@ -703,6 +721,15 @@ const CRYSTAL: Dictionary = {
 	"sfx_count": 207,
 	"sfx_first_bank": 0x3C,
 	"sfx_first_address": 0x4B3F,
+	"cry_pointers": 0xE91B0,
+	"cry_first_bank": 0x3C,
+	"cry_first_address": 0x747D,
+	"wave_samples": 0xE8DB2,
+	"wave_samples_bank": 0x3A,
+	"wave_samples_address": 0x4DB2,
+	"drumkits": 0xE8E52,
+	"drumkits_bank": 0x3A,
+	"drumkits_address": 0x4E52,
 	"world_animation_done": 0x42FB,
 	"world_animation_functions": {
 		0x42FB: "done", 0x42FE: "wait", 0x42FF: "timer_8", 0x4309: "scroll_horizontal",

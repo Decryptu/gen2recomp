@@ -100,6 +100,7 @@ static func _write_world(directory: String) -> void:
 		"tileset": 0,
 		"environment": 0,
 		"fish_group": 1,
+		"music": 0,
 		"width_blocks": MAP_WIDTH_BLOCKS,
 		"height_blocks": MAP_HEIGHT_BLOCKS,
 		"blocks": blocks,
