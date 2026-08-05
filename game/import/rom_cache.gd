@@ -39,10 +39,14 @@ const WORLD_TILES_DIR: String = "world_tiles"
 const OVERWORLD_SPRITES: String = "overworld_sprites.json"
 const OVERWORLD_SPRITE_PALETTES: String = "overworld_sprite_palettes.json"
 const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
+const WORLD_MENUS: String = "world_menus.json"
+const WORLD_MARTS: String = "world_marts.json"
+const WORLD_PHONE: String = "world_phone.json"
+const WORLD_AUDIO: String = "world_audio.json"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 17
+const FORMAT_VERSION: int = 18
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -122,6 +126,22 @@ static func overworld_sprites_path(directory: String) -> String:
 
 static func overworld_sprite_palettes_path(directory: String) -> String:
 	return "%s/%s" % [directory, OVERWORLD_SPRITE_PALETTES]
+
+
+static func world_menus_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_MENUS]
+
+
+static func world_marts_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_MARTS]
+
+
+static func world_phone_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_PHONE]
+
+
+static func world_audio_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_AUDIO]
 
 
 static func pic_path(directory: String, name: String) -> String:

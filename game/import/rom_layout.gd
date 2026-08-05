@@ -105,6 +105,20 @@ const OVERWORLD_SPRITE_PALETTE_BYTES: int = OVERWORLD_SPRITE_PALETTE_GROUP_COUNT
 const OVERWORLD_SPRITE_TYPES: Array = [1, 2, 3]
 const OVERWORLD_SPRITE_PALETTE_COUNT: int = 8
 
+## Global overworld service tables. The source keeps these apart from map data:
+## marts are an index table of item lists, phone contacts are fixed records,
+## and audio is two far-pointer tables into the banked audio programs.
+const MART_COUNT: int = 34
+const MART_POINTER_SIZE: int = 2
+const MART_RECORD_MAX_ITEMS: int = 16
+const MART_TERMINATOR: int = 0xFF
+const PHONE_CONTACT_COUNT: int = 38
+const PHONE_CONTACT_SIZE: int = 12
+const SPECIAL_PHONE_CALL_COUNT: int = 8
+const SPECIAL_PHONE_CALL_SIZE: int = 6
+const AUDIO_POINTER_SIZE: int = 3
+const AUDIO_MAX_RECORD_BYTES: int = 4096
+
 ## The overworld palette file contains 42 four-colour groups: morning, day,
 ## night and dark outdoor groups, the indoor group, and the two animated water
 ## groups. Palette maps use two nibbles per tile and reserve sixteen bytes for
@@ -544,6 +558,22 @@ const GOLD_SILVER: Dictionary = {
 	"overworld_sprites": 0x147DE,
 	"overworld_sprite_count": 95,
 	"overworld_sprite_palettes": 0xB8AE,
+	"mart_table": 0x162FE,
+	"default_mart": 0x16469,
+	"bargain_mart": 0x15EDA,
+	"rooftop_mart_count": 0,
+	"rooftop_mart_1": 0,
+	"rooftop_mart_2": 0,
+	"phone_contacts": 0x9043A,
+	"special_phone_calls": 0x905F6,
+	"music_pointers": 0xE906E,
+	"music_count": 93,
+	"music_first_bank": 0x3A,
+	"music_first_address": 0x5185,
+	"sfx_pointers": 0xE925E,
+	"sfx_count": 188,
+	"sfx_first_bank": 0x3C,
+	"sfx_first_address": 0x4B3F,
 	"world_animation_done": 0x42A2,
 	"world_animation_functions": {
 		0x42A2: "done", 0x42A5: "wait", 0x42A6: "timer_8", 0x42B0: "scroll_horizontal",
@@ -628,6 +658,22 @@ const CRYSTAL: Dictionary = {
 	"overworld_sprites": 0x14736,
 	"overworld_sprite_count": 99,
 	"overworld_sprite_palettes": 0xB469,
+	"mart_table": 0x160A9,
+	"default_mart": 0x16214,
+	"bargain_mart": 0x15C51,
+	"rooftop_mart_count": 2,
+	"rooftop_mart_1": 0x15AEE,
+	"rooftop_mart_2": 0x15AFF,
+	"phone_contacts": 0x9045F,
+	"special_phone_calls": 0x90627,
+	"music_pointers": 0xE906E,
+	"music_count": 103,
+	"music_first_bank": 0x3A,
+	"music_first_address": 0x51A3,
+	"sfx_pointers": 0xE927C,
+	"sfx_count": 207,
+	"sfx_first_bank": 0x3C,
+	"sfx_first_address": 0x4B3F,
 	"world_animation_done": 0x42FB,
 	"world_animation_functions": {
 		0x42FB: "done", 0x42FE: "wait", 0x42FF: "timer_8", 0x4309: "scroll_horizontal",

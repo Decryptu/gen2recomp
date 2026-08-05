@@ -72,6 +72,21 @@ func _write_cache(complete: bool = true) -> void:
 	RomCache.write_indices(
 		RomCache.tile_path(_directory, "font"), PackedByteArray([0, 3, 3, 0])
 	)
+	RomCache.write_json(RomCache.world_menus_path(_directory), {
+		"5:7000": {"bank": 5, "address": 0x7000, "options": ["A", "B"]},
+	})
+	RomCache.write_json(RomCache.world_marts_path(_directory), {
+		"marts": [{"index": 0, "items": [1, 2]}],
+		"default": {"items": [3]}, "special": {},
+	})
+	RomCache.write_json(RomCache.world_phone_path(_directory), {
+		"contacts": [{"index": 0, "trainer_class": 1}],
+		"special_calls": [{"index": 0, "contact": 1}],
+	})
+	RomCache.write_json(RomCache.world_audio_path(_directory), {
+		"music": [{"index": 0, "bank": 1, "address": 0x4000}],
+		"sfx": [{"index": 0, "bank": 2, "address": 0x4000}],
+	})
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testgame",
@@ -157,6 +172,20 @@ func test_types_are_indexed_from_zero() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	assert_eq(data.type_name(0), "NORMAL")
 	assert_eq(data.type_name(1), "FIGHTING")
+
+
+func test_world_service_records_are_read_from_the_cache() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.world_menu(5, 0x7000)["options"], ["A", "B"])
+	assert_eq(data.world_mart(0)["items"], [1, 2])
+	assert_eq(data.world_mart(99)["items"], [3])
+	assert_eq(data.world_phone_contact(0)["trainer_class"], 1)
+	assert_eq(data.world_special_phone_call(0)["contact"], 1)
+	assert_eq(data.world_audio_pointer(&"music", 1, 0x4000)["index"], 0)
+	assert_eq(data.world_service_counts(), {
+		"menus": 1, "marts": 1, "phone_contacts": 1, "music": 1, "sfx": 1,
+	})
 
 
 func test_a_matchup_the_chart_does_not_list_is_neutral() -> void:

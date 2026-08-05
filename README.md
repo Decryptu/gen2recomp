@@ -36,8 +36,11 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > object lifecycle, bounded followers, map block edits, emotes, surf movement,
 > normal and swarm grass and surf encounter tables, fishing groups, roaming state,
 > repel checks, deterministic encounter resolution and movement-triggered wild
-> battle requests. Full story state, audio and the mod
-> loader do not exist yet, so this is not a complete game. Scene-level
+> battle requests. The importer also preserves referenced overworld menus, 34
+> mart lists, phone contacts and music/SFX pointer records, and the scene-free
+> host resolves those records without reopening the ROM. Full story state,
+> audio playback and the mod loader do not exist yet, so this is not a complete
+> game. Scene-level
 > integration tests also cover trainer sight through the real overworld battle
 > overlay, imported terminal text, live object refresh, emote rendering and
 > save-backed blackout recovery.
@@ -93,6 +96,7 @@ to run checks without writing.
 | Battle HUD | HP/EXP bars, panel borders and their colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal and swarm grass/water tables, 13 fishing groups with day/night substitutions, a 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf level variance and repel checks |
+| World services | Referenced menus, mart inventories, phone contacts, special calls, music pointers and sound-effect pointers |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
 rendering costs no duplicate images.
@@ -160,7 +164,7 @@ Development scenes:
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's
   `preview_world_battle_loss()` drives the recovery message for a visual smoke
-  check.
+  check. The hint line also reports the imported world-service record counts.
 
   `tools/preview_fishing.gd` captures the fishing state from the normal
   renderer. With an imported cache, pass the game and map after the output

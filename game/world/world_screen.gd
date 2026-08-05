@@ -143,8 +143,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
 				_world, {"ok": true}
 			)
-			_script_prompt = "Host unavailable: %s" % String(host_result["reason"])
-			_refresh_labels()
+			if bool(host_result.get("ok", false)):
+				_show_script_results(host_result.get("results", []))
+			else:
+				_script_prompt = "Host unavailable: %s" % String(
+					host_result.get("reason", "unknown")
+				)
+				_refresh_labels()
 		else:
 			_show_script_results(_world.run_event_queue(true))
 		accept_event()
@@ -616,6 +621,12 @@ func _refresh_labels() -> void:
 		_world.collision_code_at(_world.player_cell),
 	]
 	_hint.text += "    time %s    rods: %s    F5: save" % [clock_text, owned]
+	var services: Dictionary = _data.world_service_counts()
+	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d" % [
+		int(services.get("menus", 0)), int(services.get("marts", 0)),
+		int(services.get("phone_contacts", 0)), int(services.get("music", 0)),
+		int(services.get("sfx", 0)),
+	]
 	if not rods.is_empty():
 		_hint.text += "    1-%d: select    F: fish" % rods.size()
 	if not _script_prompt.is_empty():

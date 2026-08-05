@@ -229,6 +229,52 @@ func _world(
 	return Gen2WorldAPI.open(data, 1, 1, start, world_state)
 
 
+func _write_service_cache() -> void:
+	RomCache.write_json(RomCache.world_marts_path(_directory), {
+		"marts": [{"index": 0, "bank": 48, "address": 0x4000, "items": [7]}],
+		"default": {"items": [7]}, "special": {},
+	})
+	RomCache.write_json(RomCache.world_phone_path(_directory), {
+		"contacts": [{
+			"index": 0, "caller_script": {"bank": 48, "address": 0x1234},
+			"callee_script": {"bank": 48, "address": 0x5678},
+		}],
+		"special_calls": [{"index": 0, "script": {"bank": 48, "address": 0x7000}}],
+	})
+	RomCache.write_json(RomCache.world_audio_path(_directory), {
+		"music": [{"index": 0, "bank": 48, "address": 0x1234, "bytes": [1, 2]}],
+		"sfx": [],
+	})
+
+
+func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
+	_write_service_cache()
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6100": [0x7F, 0x34, 0x12, 0x91],
+		"48:6110": [0x94, 2, 0x00, 0x40, 0x91],
+		"48:6120": [0x98, 0x34, 0x12, 0x91],
+		"48:6130": [0x9C, 0x00, 0x00, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	var cases: Array = [
+		{"script": 0x6100, "kind": &"audio_requested", "data_key": "audio", "row_key": "index"},
+		{"script": 0x6110, "kind": &"mart_requested", "data_key": "mart", "row_key": "index"},
+		{"script": 0x6120, "kind": &"phone_call_requested", "data_key": "contact", "row_key": "index"},
+		{"script": 0x6130, "kind": &"special_phone_call_requested", "data_key": "special_call", "row_key": "index"},
+	]
+	for test_case: Dictionary in cases:
+		data.world_map(1, 1).events["coord_events"][0]["script"] = test_case["script"]
+		var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+		var waiting: Array = world.dispatch_script_events()
+		assert_eq(waiting[0]["status"], &"waiting")
+		assert_eq(world.pending_runtime_request()["kind"], test_case["kind"])
+		var complete: Dictionary = Gen2WorldHost.complete_runtime_request(world, {})
+		assert_true(complete["ok"])
+		assert_true(complete["handled"])
+		assert_eq(complete["data"][test_case["data_key"]][test_case["row_key"]], 0)
+		assert_eq(complete["results"][0]["status"], &"complete")
+
+
 func test_collision_codes_keep_the_cartridge_permission_categories() -> void:
 	assert_eq(Gen2WorldCollision.permission_for(0x00), Gen2WorldCollision.LAND_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(0x70), Gen2WorldCollision.LAND_TILE)
@@ -611,7 +657,7 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	))
 
 
-func test_missing_audio_host_does_not_acknowledge_an_audio_request() -> void:
+func test_missing_audio_data_does_not_acknowledge_an_audio_request() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
 		"48:6098": [0x7F, 0x34, 0x12, 0x91],
@@ -624,7 +670,7 @@ func test_missing_audio_host_does_not_acknowledge_an_audio_request() -> void:
 	assert_eq(world.pending_runtime_request()["kind"], &"audio_requested")
 	var unavailable: Dictionary = Gen2WorldHost.complete_runtime_request(world, {"ok": true})
 	assert_false(unavailable["ok"])
-	assert_eq(unavailable["reason"], &"audio_host_unavailable")
+	assert_eq(unavailable["reason"], &"audio_data_unavailable")
 	assert_eq(world.pending_runtime_request()["kind"], &"audio_requested")
 
 
