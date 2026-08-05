@@ -48,6 +48,8 @@ static func import_to_cache(
 		return {"ok": false, "message": "Could not write standard overworld script data."}
 	if not RomCache.write_json(RomCache.world_text_path(directory), result["text"]):
 		return {"ok": false, "message": "Could not write overworld text data."}
+	if not RomCache.write_json(RomCache.world_movements_path(directory), result["movements"]):
+		return {"ok": false, "message": "Could not write overworld movement data."}
 
 	var graphics: Dictionary = result["graphics"]
 	for number: int in graphics:
@@ -102,6 +104,7 @@ static func read_world(
 	var maps: Array = []
 	var script_data: Dictionary = {}
 	var text_data: Dictionary = {}
+	var movement_data: Dictionary = {}
 	for group: int in range(1, RomLayout.MAP_GROUP_COUNT + 1):
 		var pointer_offset: int = RomLayout.map_group_pointer_offset(layout, group)
 		if not rom.in_bounds(pointer_offset, RomLayout.MAP_GROUP_POINTER_SIZE):
@@ -113,7 +116,8 @@ static func read_world(
 		var group_count: int = RomLayout.map_group_count(layout, group)
 		for number: int in range(1, group_count + 1):
 			var map_result: Dictionary = _read_map(
-				rom, layout, tilesets, group, number, group_pointer, script_data, text_data
+				rom, layout, tilesets, group, number, group_pointer,
+				script_data, text_data, movement_data
 			)
 			if not bool(map_result.get("ok", false)):
 				return map_result
@@ -122,7 +126,9 @@ static func read_world(
 			if on_progress.is_valid():
 				on_progress.call("world_maps", maps.size(), RomLayout.map_count(layout))
 
-	var standard_result: Dictionary = _read_standard_scripts(rom, script_data, text_data)
+	var standard_result: Dictionary = _read_standard_scripts(
+		rom, script_data, text_data, movement_data
+	)
 	if not bool(standard_result.get("ok", false)):
 		return standard_result
 
@@ -132,6 +138,7 @@ static func read_world(
 		"scripts": script_data,
 		"standard_scripts": standard_result["scripts"],
 		"text": text_data,
+		"movements": movement_data,
 		"tilesets": tilesets,
 		"graphics": graphics,
 		"palettes": palettes["groups"],
@@ -146,7 +153,7 @@ static func read_world(
 ## locations and counts come from the verified cartridge layouts, not from a
 ## scan for plausible pointers.
 static func _read_standard_scripts(
-	rom: RomFile, script_data: Dictionary, text_data: Dictionary
+	rom: RomFile, script_data: Dictionary, text_data: Dictionary, movement_data: Dictionary
 ) -> Dictionary:
 	var bank: int = 0x2F if rom.id == &"crystal" else 0x40
 	var count: int = 52 if rom.id == &"crystal" else 46
@@ -161,7 +168,9 @@ static func _read_standard_scripts(
 		var target_address: int = rom.u16le(at + 1)
 		if _far_offset(rom, {"bank": target_bank, "address": target_address}) < 0:
 			return _error("Standard script %d has an invalid far pointer." % index)
-		_collect_script(rom, target_bank, target_address, script_data, text_data)
+		_collect_script(
+			rom, target_bank, target_address, script_data, text_data, movement_data
+		)
 		var target_offset: int = _far_offset(
 			rom, {"bank": target_bank, "address": target_address}
 		)
@@ -395,6 +404,7 @@ static func _read_map(
 	group_pointer: int,
 	script_data: Dictionary,
 	text_data: Dictionary,
+	movement_data: Dictionary,
 ) -> Dictionary:
 	var record: int = RomLayout.map_record_offset(layout, group_pointer, number)
 	if not rom.in_bounds(record, RomLayout.MAP_RECORD_SIZE):
@@ -452,13 +462,17 @@ static func _read_map(
 		return event_result
 
 	var scripts_result: Dictionary = _read_map_scripts(
-		rom, scripts_bank, scripts_address, group, number, script_data, text_data
+		rom, scripts_bank, scripts_address, group, number,
+		script_data, text_data, movement_data
 	)
 	if not bool(scripts_result.get("ok", false)):
 		return scripts_result
 	for source: String in ["coord_events", "bg_events", "objects"]:
 		for event: Dictionary in event_result[source]:
-			_collect_script(rom, scripts_bank, int(event.get("script", 0)), script_data, text_data)
+			_collect_script(
+				rom, scripts_bank, int(event.get("script", 0)),
+				script_data, text_data, movement_data
+			)
 
 	var tileset: Dictionary = tilesets[tileset_number]
 	var collision_grid: Array = []
@@ -683,6 +697,7 @@ static func _read_map_scripts(
 	number: int,
 	script_data: Dictionary,
 	text_data: Dictionary,
+	movement_data: Dictionary,
 ) -> Dictionary:
 	var at: int = _far_offset(rom, {"bank": bank, "address": address})
 	if at < 0 or not rom.in_bounds(at):
@@ -698,7 +713,7 @@ static func _read_map_scripts(
 			return _error("Map %d/%d scene scripts are truncated." % [group, number])
 		var script_address: int = rom.u16le(at)
 		scenes.append({"id": scene, "script": script_address})
-		_collect_script(rom, bank, script_address, script_data, text_data)
+		_collect_script(rom, bank, script_address, script_data, text_data, movement_data)
 		at += RomLayout.MAP_SCENE_SCRIPT_SIZE
 
 	if not rom.in_bounds(at):
@@ -714,7 +729,7 @@ static func _read_map_scripts(
 		var callback_type: int = rom.u8(at)
 		var script_address: int = rom.u16le(at + 1)
 		callbacks.append({"type": callback_type, "script": script_address})
-		_collect_script(rom, bank, script_address, script_data, text_data)
+		_collect_script(rom, bank, script_address, script_data, text_data, movement_data)
 		at += RomLayout.MAP_CALLBACK_SIZE
 
 	return {"ok": true, "scenes": scenes, "callbacks": callbacks}
@@ -726,6 +741,7 @@ static func _collect_script(
 	address: int,
 	script_data: Dictionary,
 	text_data: Dictionary,
+	movement_data: Dictionary,
 ) -> void:
 	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
 		return
@@ -746,12 +762,36 @@ static func _collect_script(
 	for reference: Dictionary in references.get("scripts", []):
 		_collect_script(
 			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)),
-			script_data, text_data
+			script_data, text_data, movement_data
 		)
 	for reference: Dictionary in references.get("texts", []):
 		_collect_text(
 			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)), text_data
 		)
+	for reference: Dictionary in references.get("movements", []):
+		_collect_movement(
+			rom, int(reference.get("bank", bank)), int(reference.get("address", 0)), movement_data
+		)
+
+
+static func _collect_movement(
+	rom: RomFile, bank: int, address: int, movement_data: Dictionary
+) -> void:
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return
+	var key: String = Gen2WorldScript.pointer_key(bank, address)
+	if movement_data.has(key):
+		return
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0:
+		return
+	var bytes: PackedByteArray = rom.slice(
+		offset, mini(Gen2WorldMovement.MAX_BYTES, rom.size() - offset)
+	)
+	var decoded: Dictionary = Gen2WorldMovement.decode(bytes)
+	if not bool(decoded.get("ok", false)):
+		return
+	movement_data[key] = Array(bytes.slice(0, int(decoded.get("bytes", bytes.size()))))
 
 
 static func _collect_text(rom: RomFile, bank: int, address: int, text_data: Dictionary) -> void:

@@ -73,8 +73,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
 		return
-	if _text_box != null and _text_box.visible and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
-		_advance_script_input()
+	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+		if _text_box != null and _text_box.visible:
+			_advance_script_input()
+		else:
+			_show_script_results(_world.run_event_queue(true))
 		accept_event()
 		return
 	var direction := Vector2i.ZERO
@@ -111,7 +114,10 @@ func move_player(direction: Vector2i) -> bool:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
-	_show_script_results(_world.dispatch_script_events())
+	var sight_results: Array = _world.dispatch_sight_events()
+	if sight_results.is_empty():
+		sight_results = _world.dispatch_script_events()
+	_show_script_results(sight_results)
 	return true
 
 
@@ -186,12 +192,26 @@ func _show_script_results(results: Array) -> void:
 				if _text_box != null:
 					_text_box.visible = true
 				_script_prompt = "Space/Enter: continue script"
+			elif event_type == &"menu":
+				_script_prompt = "Menu request: %s, choose an entry or press Space" % String(
+					event.get("menu_kind", "menu")
+				)
+			elif event_type == &"runtime_request":
+				var request: Dictionary = event.get("request", {})
+				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
+					request.get("kind", "effect")
+				)
 		elif not bool(result.get("ok", false)):
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
 		for result_event: Dictionary in result.get("events", []):
 			if result_event.get("type", &"") == &"warp":
 				map_changed = true
+			elif result_event.get("type", &"") in [
+				&"item_changed", &"money_changed", &"coins_changed", &"movement_blocked",
+				&"movement_failed",
+			]:
+				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
 	if not waiting and not failed:
 		_script_prompt = ""
 	if _renderer != null:

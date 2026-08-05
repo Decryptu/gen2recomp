@@ -25,6 +25,7 @@ var _active_script: Gen2WorldScriptRunner = null
 var _object_visibility_overrides: Dictionary = {}
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
+var _object_followers: Dictionary = {}
 
 
 ## Opens one map through the public cartridge-content API.
@@ -238,6 +239,23 @@ func dispatch_script_events(cell: Vector2i = player_cell) -> Array:
 	return run_event_queue(false)
 
 
+## Queues the first visible trainer who can see the player, matching the
+## cartridge's trainer scan order. A trainer sees only along its facing axis,
+## and a nonzero event flag prevents the encounter from being queued.
+func dispatch_sight_events() -> Array:
+	if _active_script != null or not _script_queue.is_empty():
+		return run_event_queue(false)
+	var request: Dictionary = _find_sight_request()
+	if request.is_empty():
+		return []
+	_script_queue.append(request)
+	return run_event_queue(false)
+
+
+func script_input_waiting() -> bool:
+	return _active_script != null and _active_script.is_waiting()
+
+
 ## Starts one callback type from the current map's callback table. A type of -1
 ## runs all callbacks in their stored order.
 func dispatch_callbacks(callback_type: int = -1) -> Array:
@@ -323,14 +341,36 @@ func _queue_map_callbacks(callback_type: int) -> void:
 		})
 
 
-func _apply_script_object_events(raw_events: Variant) -> void:
+func _apply_script_object_events(raw_events: Variant) -> Array:
+	var generated: Array = []
 	if not raw_events is Array:
-		return
+		return generated
+	var reload_objects: bool = false
 	for raw_event: Variant in raw_events as Array:
 		if not raw_event is Dictionary:
 			continue
 		var event: Dictionary = raw_event as Dictionary
 		var event_type: StringName = StringName(event.get("type", &""))
+		if event_type == &"player_movement_requested":
+			generated.append_array(_apply_player_movement(event))
+			continue
+		if event_type == &"object_movement_requested":
+			generated.append_array(_apply_object_movement(event))
+			reload_objects = true
+			continue
+		if event_type == &"object_follow":
+			var follow_key: String = _object_key(
+				int(event.get("map_group", -1)), int(event.get("map_number", -1)),
+				int(event.get("object_index", -1))
+			)
+			_object_followers[follow_key] = {
+				"target_index": int(event.get("target_index", -1)),
+				"exact": bool(event.get("exact", true)),
+			}
+			continue
+		if event_type == &"object_stop_follow":
+			_object_followers.clear()
+			continue
 		if event_type not in [
 			&"object_visibility", &"object_position", &"object_facing",
 			&"object_face_player", &"object_face_object",
@@ -345,15 +385,18 @@ func _apply_script_object_events(raw_events: Variant) -> void:
 		match event_type:
 			&"object_visibility":
 				_object_visibility_overrides[key] = bool(event.get("active", false))
+				reload_objects = true
 			&"object_position":
 				var cell: Variant = event.get("cell", Vector2i.ZERO)
 				if cell is Vector2i:
 					_object_position_overrides[key] = cell
+					reload_objects = true
 			&"object_facing":
 				_object_facing_overrides[key] = clampi(
 					int(event.get("facing", Gen2WorldSprite.FACING_DOWN)),
 					Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_RIGHT
 				)
+				reload_objects = true
 			&"object_face_player":
 				if map_group == current_map.group and map_number == current_map.number \
 					and object_index < objects.size():
@@ -369,8 +412,142 @@ func _apply_script_object_events(raw_events: Variant) -> void:
 						(objects[object_index] as Gen2WorldObject).cell,
 						(objects[target_index] as Gen2WorldObject).cell
 					)
-		if map_group == current_map.group and map_number == current_map.number:
-			_load_objects()
+				reload_objects = true
+	if reload_objects and current_map != null:
+		_load_objects()
+	return generated
+
+
+func _apply_object_movement(event: Dictionary) -> Array:
+	var generated: Array = []
+	var map_group: int = int(event.get("map_group", -1))
+	var map_number: int = int(event.get("map_number", -1))
+	var object_index: int = int(event.get("object_index", -1))
+	if current_map == null or map_group != current_map.group or map_number != current_map.number \
+		or object_index < 0 or object_index >= objects.size():
+		generated.append({"type": &"movement_failed", "reason": &"invalid_object"})
+		return generated
+	var raw: PackedByteArray = data.world_movement(
+		int(event.get("bank", 0)), int(event.get("address", 0))
+	)
+	var decoded: Dictionary = Gen2WorldMovement.decode(raw)
+	if not bool(decoded.get("ok", false)):
+		generated.append({
+			"type": &"movement_failed", "reason": decoded.get("reason", &"invalid_movement"),
+			"object_index": object_index,
+		})
+		return generated
+	var object: Gen2WorldObject = objects[object_index]
+	for command: Dictionary in decoded.get("commands", []):
+		var kind: StringName = StringName(command.get("kind", &""))
+		if kind in [&"turn_head", &"turn_in", &"turn_waterfall"]:
+			object.apply_direction(_movement_direction(int(command.get("direction", 0))))
+			continue
+		if kind == &"turn_away":
+			object.apply_direction(-_movement_direction(int(command.get("direction", 0))))
+			continue
+		if kind in [
+			&"turn_step", &"slow_step", &"step", &"big_step", &"slow_slide_step",
+			&"slide_step", &"fast_slide_step", &"slow_jump_step", &"jump_step",
+			&"fast_jump_step",
+		]:
+			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
+			object.apply_direction(direction)
+			var destination: Vector2i = object.cell + direction
+			if can_object_walk_to(destination, object):
+				object.cell = destination
+			else:
+				generated.append({
+					"type": &"movement_blocked", "object_index": object_index,
+					"cell": destination,
+				})
+			continue
+		match kind:
+			&"show_object":
+				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = true
+			&"hide_object", &"remove_object":
+				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = false
+			&"step_stop":
+				break
+			&"step_sleep", &"set_sliding", &"remove_sliding", &"fix_facing", &"remove_fixed_facing":
+				pass
+			_:
+				generated.append({
+					"type": &"movement_command_requested", "object_index": object_index,
+					"command": command.duplicate(true),
+				})
+	var key: String = _object_key(map_group, map_number, object_index)
+	_object_position_overrides[key] = object.cell
+	_object_facing_overrides[key] = object.facing
+	return generated
+
+
+func _apply_player_movement(event: Dictionary) -> Array:
+	var generated: Array = []
+	var map_group: int = int(event.get("map_group", -1))
+	var map_number: int = int(event.get("map_number", -1))
+	if current_map == null or map_group != current_map.group or map_number != current_map.number:
+		return [{"type": &"movement_failed", "reason": &"invalid_map"}]
+	var raw: PackedByteArray = data.world_movement(
+		int(event.get("bank", 0)), int(event.get("address", 0))
+	)
+	var decoded: Dictionary = Gen2WorldMovement.decode(raw)
+	if not bool(decoded.get("ok", false)):
+		return [{
+			"type": &"movement_failed", "reason": decoded.get("reason", &"invalid_movement"),
+			"player": true,
+		}]
+	for command: Dictionary in decoded.get("commands", []):
+		var kind: StringName = StringName(command.get("kind", &""))
+		if kind in [&"turn_head", &"turn_in", &"turn_waterfall"]:
+			player_facing = _facing_for_direction(
+				_movement_direction(int(command.get("direction", 0)))
+			)
+			continue
+		if kind == &"turn_away":
+			var away: Vector2i = -_movement_direction(int(command.get("direction", 0)))
+			player_facing = _facing_for_direction(away)
+			continue
+		if kind in [
+			&"turn_step", &"slow_step", &"step", &"big_step", &"slow_slide_step",
+			&"slide_step", &"fast_slide_step", &"slow_jump_step", &"jump_step",
+			&"fast_jump_step",
+		]:
+			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
+			player_facing = _facing_for_direction(direction)
+			var destination: Vector2i = player_cell + direction
+			if can_walk_to(destination):
+				player_cell = destination
+			else:
+				generated.append({
+					"type": &"movement_blocked", "player": true, "cell": destination,
+				})
+			continue
+		if kind in [&"step_end", &"step_stop"]:
+			break
+		if kind in [
+			&"step_sleep", &"step_wait_end", &"set_sliding", &"remove_sliding",
+			&"fix_facing", &"remove_fixed_facing",
+		]:
+			continue
+		generated.append({
+			"type": &"movement_command_requested", "player": true,
+			"command": command.duplicate(true),
+		})
+	return generated
+
+
+func _movement_direction(direction: int) -> Vector2i:
+	match direction & 3:
+		0:
+			return Vector2i.DOWN
+		1:
+			return Vector2i.UP
+		2:
+			return Vector2i.LEFT
+		3:
+			return Vector2i.RIGHT
+	return Vector2i.ZERO
 
 
 func _object_key(map_group: int, map_number: int, object_index: int) -> String:
@@ -402,7 +579,9 @@ func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> D
 func _finish_script_result(result: Dictionary) -> Dictionary:
 	if not bool(result.get("ok", false)):
 		return result
-	_apply_script_object_events(result.get("events", []))
+	var generated_events: Array = _apply_script_object_events(result.get("events", []))
+	for generated: Dictionary in generated_events:
+		result["events"].append(generated)
 	var warp: Variant = result.get("warp", {})
 	if warp is Dictionary and not (warp as Dictionary).is_empty():
 		var transition: Dictionary = _apply_script_warp(warp as Dictionary)
@@ -612,9 +791,9 @@ func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
 	return cell != player_cell
 
 
-## Advances only the movement templates whose source behavior is data-driven in
-## this slice. Scripted, follower and interaction objects remain at their
-## imported coordinates until those systems are implemented.
+## Advances the movement templates whose source behavior is data-driven in this
+## slice. Scripted movement is executed by the script runner, while followers
+## advance after each successful player step.
 func advance_objects(random: RandomNumberGenerator) -> int:
 	var moved: int = 0
 	for object: Gen2WorldObject in objects:
@@ -635,6 +814,42 @@ func advance_objects(random: RandomNumberGenerator) -> int:
 		object.apply_direction(direction)
 		moved += 1
 	return moved
+
+
+func _advance_followers() -> void:
+	for key: String in _object_followers:
+		var separator: PackedStringArray = key.split(":")
+		if separator.size() != 3 or int(separator[0]) != current_map.group \
+			or int(separator[1]) != current_map.number:
+			continue
+		var follower_index: int = int(separator[2])
+		if follower_index < 0 or follower_index >= objects.size():
+			continue
+		var follower: Gen2WorldObject = objects[follower_index]
+		if not follower.active:
+			continue
+		var relation: Dictionary = _object_followers[key]
+		var target_index: int = int(relation.get("target_index", -1))
+		var target_cell: Vector2i = player_cell
+		if target_index >= 0 and target_index < objects.size():
+			target_cell = (objects[target_index] as Gen2WorldObject).cell
+		var delta: Vector2i = target_cell - follower.cell
+		if abs(delta.x) + abs(delta.y) <= 1:
+			continue
+		var direction: Vector2i
+		if abs(delta.x) >= abs(delta.y):
+			direction = Vector2i(signi(delta.x), 0)
+		else:
+			direction = Vector2i(0, signi(delta.y))
+		var destination: Vector2i = follower.cell + direction
+		if can_object_walk_to(destination, follower):
+			follower.cell = destination
+			follower.apply_direction(direction)
+			var override_key: String = _object_key(
+				current_map.group, current_map.number, follower_index
+			)
+			_object_position_overrides[override_key] = follower.cell
+			_object_facing_overrides[override_key] = follower.facing
 
 
 ## Moves one cell or enters a neighboring map when the step leaves a connected
@@ -660,6 +875,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	var from_cell: Vector2i = player_cell
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
+	_advance_followers()
 	return {
 		"ok": true,
 		"kind": &"move",
@@ -756,3 +972,60 @@ func _load_objects() -> void:
 			object.facing = int(_object_facing_overrides[key])
 		objects.append(object)
 	set_object_time(object_hour, object_time_of_day)
+
+
+func _find_sight_request() -> Dictionary:
+	if current_map == null:
+		return {}
+	var bank: int = int(current_map.events.get("bank", 0))
+	var rows: Array = current_map.events.get("objects", [])
+	for object: Gen2WorldObject in objects:
+		if not object.active or object.sprite == null \
+			or object.object_type != Gen2WorldObject.OBJECTTYPE_TRAINER \
+			or object.sight_range <= 0 or object.event_script <= 0:
+			continue
+		if object.event_flag_active(state):
+			continue
+		var sight: Dictionary = _sight_distance(object)
+		if sight.is_empty() or int(sight["distance"]) > object.sight_range:
+			continue
+		if object.index < 0 or object.index >= rows.size() or not rows[object.index] is Dictionary:
+			continue
+		var event: Dictionary = (rows[object.index] as Dictionary).duplicate(true)
+		event["kind"] = &"objects"
+		event["object_index"] = object.index
+		event["trigger"] = &"sight"
+		return {
+			"kind": &"sight",
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"cell": object.cell,
+			"bank": bank,
+			"script": object.event_script,
+			"object_index": object.index,
+			"event": event,
+			"distance": int(sight["distance"]),
+			"direction": sight["direction"],
+		}
+	return {}
+
+
+func _sight_distance(object: Gen2WorldObject) -> Dictionary:
+	var delta: Vector2i = player_cell - object.cell
+	var direction: Vector2i = Vector2i.ZERO
+	match object.facing:
+		Gen2WorldSprite.FACING_DOWN:
+			if delta.x == 0 and delta.y > 0:
+				direction = Vector2i.DOWN
+		Gen2WorldSprite.FACING_UP:
+			if delta.x == 0 and delta.y < 0:
+				direction = Vector2i.UP
+		Gen2WorldSprite.FACING_LEFT:
+			if delta.y == 0 and delta.x < 0:
+				direction = Vector2i.LEFT
+		Gen2WorldSprite.FACING_RIGHT:
+			if delta.y == 0 and delta.x > 0:
+				direction = Vector2i.RIGHT
+	if direction == Vector2i.ZERO:
+		return {}
+	return {"distance": absi(delta.x) + absi(delta.y), "direction": direction}

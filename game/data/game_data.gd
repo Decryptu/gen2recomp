@@ -38,6 +38,7 @@ var _world_maps: Array = []
 var _world_scripts: Dictionary = {}
 var _world_standard_scripts: Dictionary = {}
 var _world_text: Dictionary = {}
+var _world_movements: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_palettes: Array = []
 var _world_animation_assets: Dictionary = {}
@@ -133,6 +134,11 @@ func world_standard_script(index: int) -> Dictionary:
 ## Raw bounded text bytes indexed by the cartridge's bank and CPU address.
 func world_text(bank: int, address: int) -> PackedByteArray:
 	return _cached_bytes(_world_text.get(Gen2WorldScript.pointer_key(bank, address), []))
+
+
+## Raw bounded movement bytes indexed by the script bank and movement pointer.
+func world_movement(bank: int, address: int) -> PackedByteArray:
+	return _cached_bytes(_world_movements.get(Gen2WorldScript.pointer_key(bank, address), []))
 
 
 ## One decoded tileset's metatile and collision tables, or null if absent.
@@ -603,6 +609,9 @@ func _load_world(path: String) -> void:
 	var text_rows: Variant = RomCache.read_json(RomCache.world_text_path(path))
 	if text_rows is Dictionary:
 		_world_text = text_rows
+	var movement_rows: Variant = RomCache.read_json(RomCache.world_movements_path(path))
+	if movement_rows is Dictionary:
+		_world_movements = movement_rows
 
 	var tileset_rows: Variant = RomCache.read_json(RomCache.world_tilesets_path(path))
 	if tileset_rows is Array:
