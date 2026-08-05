@@ -224,8 +224,11 @@ func _show_script_results(results: Array) -> void:
 	var waiting: bool = false
 	var failed: bool = false
 	var map_changed: bool = false
+	var recovered: bool = false
+	var recovery_prompt: String = ""
 	for result: Dictionary in results:
-		if StringName(result.get("status", &"")) == &"waiting":
+		var status: StringName = StringName(result.get("status", &""))
+		if status == &"waiting":
 			waiting = true
 			var event: Dictionary = result.get("event", {})
 			var event_type: StringName = StringName(event.get("type", &""))
@@ -249,21 +252,39 @@ func _show_script_results(results: Array) -> void:
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
 				)
+		elif status == &"recovered":
+			recovered = true
 		elif not bool(result.get("ok", false)):
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
 		for result_event: Dictionary in result.get("events", []):
 			if result_event.get("type", &"") == &"warp":
 				map_changed = true
+			elif result_event.get("type", &"") == &"battle_map_reload_requested":
+				map_changed = true
+			elif result_event.get("type", &"") == &"blackout":
+				recovered = true
+				var recovery: Variant = result_event.get("recovery", {})
+				var source: StringName = StringName(
+					recovery.get("source", &"save") if recovery is Dictionary else &"save"
+				)
+				recovery_prompt = (
+					"Blackout recovered from the development party"
+					if source == &"development"
+					else "Blackout recovered from the last saved party"
+				)
 			elif result_event.get("type", &"") in [
 				&"item_changed", &"money_changed", &"coins_changed", &"movement_blocked",
 				&"movement_failed",
 			]:
 				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
-	if not waiting and not failed:
+	if recovered and not recovery_prompt.is_empty():
+		_script_prompt = recovery_prompt
+	elif not waiting and not failed:
 		_script_prompt = ""
 	if _renderer != null:
 		if map_changed:
+			_world.reload_current_map()
 			_animation.configure(_world, time_of_day)
 			_renderer.set_world(_world, _animation)
 			_renderer.set_time_of_day(time_of_day)

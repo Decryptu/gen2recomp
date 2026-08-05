@@ -540,6 +540,56 @@ func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	))
 
 
+func test_battle_request_keeps_trainer_source_and_result_text_pointers() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6090": [
+			0x64, 0x00, 0x70, 0x00, 0x71,
+			0x5E, 1, 0,
+			0x5F,
+			0x91,
+		],
+	})
+	data = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"sight", "map_group": 1, "map_number": 1, "bank": 48,
+		"script": 0x6090, "object_index": 2,
+		"distance": 3, "direction": Vector2i.DOWN,
+		"event": {"event_flag": 0x1234, "object_index": 2},
+	})
+	var waiting: Dictionary = runner.advance()
+	assert_eq(waiting["status"], &"waiting")
+	var values: Dictionary = waiting["event"]["request"]["values"]
+	assert_eq(values["kind"], &"trainer")
+	assert_eq(values["trainer_group"], 1)
+	assert_eq(values["trainer_id"], 0)
+	assert_eq(values["event"]["event_flag"], 0x1234)
+	assert_eq(values["object_index"], 2)
+	assert_eq(values["distance"], 3)
+	assert_eq(values["win_text"]["bank"], 48)
+	assert_eq(values["win_text"]["address"], 0x7000)
+	assert_eq(values["loss_text"]["address"], 0x7100)
+
+
+func test_reloadmapafterbattle_is_reported_after_a_confirmed_win() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:60A0": [0x5D, 25, 5, 0x5F, 0x60, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x60A0,
+	})
+	assert_eq(runner.advance()["status"], &"waiting")
+	var complete: Dictionary = runner.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
+	assert_eq(complete["status"], &"complete")
+	assert_true(complete["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_map_reload_requested"
+	))
+
+
 func test_world_battle_completion_commits_just_battled_only_after_the_host_result() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
@@ -575,12 +625,44 @@ func test_world_battle_loss_fails_without_committing_world_state() -> void:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 
+	var recovered: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_LOST,
+		"recovery": {"ok": true, "source": &"save", "slot": 0},
+	})
+	assert_eq(recovered[0]["status"], &"recovered")
+	assert_true(recovered[0]["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"blackout"
+	))
+	assert_false(world.state.just_battled())
+	assert_true(world.pending_runtime_request().is_empty())
+
+
+func test_world_battle_loss_requires_host_recovery_before_ending() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6098": [0x5D, 25, 5, 0x5F, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6098
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+
 	var failed: Array = world.complete_runtime_request({
 		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_LOST,
 	})
 	assert_eq(failed[0]["status"], &"failed")
-	assert_eq(failed[0]["reason"], &"battle_lost")
+	assert_eq(failed[0]["reason"], &"battle_recovery_failed")
 	assert_false(world.state.just_battled())
+
+
+func test_reloading_the_current_map_rebuilds_live_objects_without_moving_player() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(5, 6))
+	var before: Vector2i = world.player_cell
+	var reloaded: Dictionary = world.reload_current_map()
+	assert_true(reloaded["ok"])
+	assert_eq(reloaded["kind"], &"reload_map")
+	assert_eq(world.player_cell, before)
+	assert_eq(world.objects.size(), 1)
 
 
 func test_world_battle_requires_an_explicit_outcome() -> void:

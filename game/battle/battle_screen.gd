@@ -93,6 +93,9 @@ var _source_save: Gen2SaveData = null
 var _world_battle_active: bool = false
 var _world_battle_request: Dictionary = {}
 var _world_battle_completion_sent: bool = false
+var _world_battle_terminal_text_shown: bool = false
+var _world_battle_recovery_shown: bool = false
+var _world_battle_recovery: Dictionary = {}
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -171,6 +174,9 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
+	_world_battle_terminal_text_shown = false
+	_world_battle_recovery_shown = false
+	_world_battle_recovery = {}
 	_enemy = _wrap_species(enemy)
 	_player = _wrap_species(player)
 	_enemy_level = enemy_level
@@ -206,6 +212,9 @@ func show_trainer(
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
+	_world_battle_terminal_text_shown = false
+	_world_battle_recovery_shown = false
+	_world_battle_recovery = {}
 	var enemy_party: Gen2Party = Gen2TrainerParty.build(_data, trainer_class, index)
 	if enemy_party == null:
 		return
@@ -249,6 +258,9 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
+	_world_battle_terminal_text_shown = false
+	_world_battle_recovery_shown = false
+	_world_battle_recovery = {}
 	var player_party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, save)
 	var enemy_party: Gen2Party = _party_from(DEFAULT_ENEMY, DEFAULT_LEVEL)
 	if player_party == null or enemy_party == null:
@@ -299,6 +311,9 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_world_battle_active = true
 	_world_battle_request = (prepared.get("request", {}) as Dictionary).duplicate(true)
 	_world_battle_completion_sent = false
+	_world_battle_terminal_text_shown = false
+	_world_battle_recovery_shown = false
+	_world_battle_recovery = {}
 	_pending = []
 	_save_slot = save.slot if save != null else -1
 	_save_written = false
@@ -330,6 +345,30 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	else:
 		_announce()
 	return true
+
+
+## Public screenshot driver for the overworld battle recovery boundary. It
+## starts a real host battle using the fallback development party, then
+## completes it as a loss so the recovery message is visible without input.
+func preview_world_battle_loss() -> void:
+	if _world_battle_active or _data == null:
+		return
+	if not start_world_battle({
+		"kind": &"wild", "pokemon": DEFAULT_ENEMY, "level": DEFAULT_LEVEL,
+	}):
+		return
+	call_deferred("_preview_world_battle_loss")
+
+
+func _preview_world_battle_loss() -> void:
+	if not _world_battle_active or _battle == null:
+		return
+	for mon: Gen2BattleMon in _battle.party(Gen2Battle.PLAYER).mons:
+		mon.hp = 0
+	_read_hp()
+	finish()
+	advance()
+	finish()
 
 
 func _start_world_battle_from_meta(meta: Variant) -> void:
@@ -516,6 +555,15 @@ func advance() -> void:
 	if _replace_the_fallen():
 		return
 	if _battle != null and _battle.is_over():
+		if _world_battle_active:
+			if _show_world_battle_terminal_text():
+				return
+			if _battle.winner() != Gen2Battle.PLAYER and not _world_battle_recovery_shown:
+				if not _prepare_world_battle_recovery():
+					return
+				_world_battle_recovery_shown = true
+				show_message("Blackout! Party restored.")
+				return
 		if _save_battle_result() and _world_battle_active:
 			_finish_world_battle()
 		return
@@ -527,6 +575,8 @@ func advance() -> void:
 ## seen yet, while the persistent save model intentionally has no such state.
 func _save_battle_result() -> bool:
 	if _save_slot < 0 or _save_written or _battle == null:
+		return true
+	if _battle.winner() != Gen2Battle.PLAYER:
 		return true
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save
@@ -552,14 +602,67 @@ func _finish_world_battle() -> void:
 		if winner == Gen2Battle.PLAYER
 		else Gen2WorldBattleAdapter.OUTCOME_LOST
 	)
-	_world_battle_completion_sent = true
-	battle_finished.emit({
+	var result: Dictionary = {
 		"ok": true,
 		"outcome": outcome,
 		"winner": winner,
 		"request": _world_battle_request.duplicate(true),
 		"save_written": _save_written,
-	})
+	}
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST:
+		result["recovery"] = _world_battle_recovery.duplicate(true)
+	_world_battle_completion_sent = true
+	battle_finished.emit(result)
+
+
+func _show_world_battle_terminal_text() -> bool:
+	if _world_battle_terminal_text_shown:
+		return false
+	_world_battle_terminal_text_shown = true
+	var key: String = (
+		"win_text" if _battle.winner() == Gen2Battle.PLAYER else "loss_text"
+	)
+	var raw_pointer: Variant = _world_battle_request.get(key, {})
+	if not raw_pointer is Dictionary:
+		return false
+	var pointer: Dictionary = raw_pointer as Dictionary
+	var address: int = int(pointer.get("address", 0))
+	if address <= 0:
+		return false
+	var bank: int = int(pointer.get("bank", 0))
+	var raw: PackedByteArray = _data.world_text(bank, address)
+	var decoded: Dictionary = Gen2WorldScript.decode_text(raw)
+	if not bool(decoded.get("ok", false)):
+		_emit_world_battle_failure(&"missing_battle_result_text", {
+			"bank": bank, "address": address, "text_kind": key,
+		})
+		return true
+	var text: String = String(decoded.get("text", ""))
+	if text.is_empty():
+		return false
+	show_message(text)
+	return true
+
+
+func _prepare_world_battle_recovery() -> bool:
+	if _source_save == null:
+		_world_battle_recovery = {"ok": true, "source": &"development"}
+		return true
+	var validation: Dictionary = Gen2SaveValidator.validate(_source_save, _data)
+	if not bool(validation.get("ok", false)):
+		_emit_world_battle_failure(&"battle_recovery_failed", {
+			"message": validation.get("message", "invalid source save"),
+		})
+		return false
+	if Gen2SaveBattleAdapter.to_battle_party(_data, _source_save) == null:
+		_emit_world_battle_failure(&"battle_recovery_failed", {
+			"message": "the saved party could not be reconstructed",
+		})
+		return false
+	_world_battle_recovery = {
+		"ok": true, "source": &"save", "slot": _source_save.slot,
+	}
+	return true
 
 
 ## Sends out the first Pokémon standing on any side that owes one, and answers
