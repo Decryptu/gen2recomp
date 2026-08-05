@@ -184,7 +184,7 @@ func test_world_service_records_are_read_from_the_cache() -> void:
 	assert_eq(data.world_special_phone_call(0)["contact"], 1)
 	assert_eq(data.world_audio_pointer(&"music", 1, 0x4000)["index"], 0)
 	assert_eq(data.world_service_counts(), {
-		"menus": 1, "marts": 1, "phone_contacts": 1, "music": 1, "sfx": 1,
+		"menus": 1, "marts": 1, "phone_contacts": 1, "music": 1, "sfx": 1, "cries": 0,
 	})
 
 

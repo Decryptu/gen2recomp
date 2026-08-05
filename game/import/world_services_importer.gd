@@ -48,6 +48,7 @@ static func import_to_cache(
 		"special_phone_calls": (result["phone"].get("special_calls", []) as Array).size(),
 		"music": (result["audio"].get("music", []) as Array).size(),
 		"sfx": (result["audio"].get("sfx", []) as Array).size(),
+		"cries": (result["audio"].get("cries", []) as Array).size(),
 	}
 
 
@@ -251,27 +252,115 @@ static func _read_audio(rom: RomFile, layout: Dictionary) -> Dictionary:
 	)
 	if not bool(sfx_result.get("ok", false)):
 		return sfx_result
+	var cry_result: Dictionary = _read_audio_table(
+		rom, int(layout["cry_pointers"]), RomLayout.AUDIO_CRY_COUNT, "cry",
+		int(layout["cry_first_bank"]), int(layout["cry_first_address"])
+	)
+	if not bool(cry_result.get("ok", false)):
+		return cry_result
+	var assets: Dictionary = _read_audio_assets(rom, layout)
+	if not bool(assets.get("ok", false)):
+		return assets
 
-	var rows: Array = music_result["rows"] + sfx_result["rows"]
-	var targets: Array = []
+	var rows: Array = music_result["rows"] + sfx_result["rows"] + cry_result["rows"]
 	for row: Dictionary in rows:
-		targets.append({"bank": int(row["bank"]), "offset": int(row["offset"])})
-	for row: Dictionary in rows:
-		var next_offset: int = rom.size()
-		for target: Dictionary in targets:
-			if int(target["bank"]) == int(row["bank"]) \
-				and int(target["offset"]) > int(row["offset"]):
-				next_offset = mini(next_offset, int(target["offset"]))
-		var end: int = mini(
-			next_offset, int(row["offset"]) + RomLayout.AUDIO_MAX_RECORD_BYTES
-		)
-		var raw: PackedByteArray = rom.slice(int(row["offset"]), end - int(row["offset"]))
+		var window: Dictionary = _audio_data_window(rom, row)
+		if not bool(window.get("ok", false)):
+			return window
+		var start: int = int(window["start"])
+		var end: int = int(window["end"])
+		var raw: PackedByteArray = rom.slice(start, end - start)
 		row["bytes"] = Array(raw)
 		row["byte_count"] = raw.size()
+		row["data_offset"] = start
+		row["data_address"] = int(window["address"])
 
 	return {
 		"ok": true,
-		"data": {"music": music_result["rows"], "sfx": sfx_result["rows"]},
+		"data": {
+			"music": music_result["rows"],
+			"sfx": sfx_result["rows"],
+			"cries": cry_result["rows"],
+			"wave_samples": assets["wave_samples"],
+			"drumkits": assets["drumkits"],
+		},
+	}
+
+
+static func _audio_data_window(rom: RomFile, row: Dictionary) -> Dictionary:
+	var bank: int = int(row["bank"])
+	var header_offset: int = int(row["offset"])
+	if not rom.in_bounds(header_offset, 1):
+		return _error("Audio record header is outside the cartridge.")
+	var channel_count: int = ((rom.u8(header_offset) >> 6) & 0x03) + 1
+	for channel: int in channel_count:
+		var entry: int = header_offset + channel * 3
+		if not rom.in_bounds(entry, 3):
+			return _error("Audio record channel header is truncated.")
+		var address: int = _audio_address(rom.u16le(entry + 1))
+		var pointer_offset: int = RomFile.linear(bank, address)
+		if not rom.in_bounds(pointer_offset, 1):
+			return _error("Audio record channel pointer is outside the cartridge.")
+	var bank_start: int = bank * RomFile.BANK_SIZE
+	var bank_end: int = mini(rom.size(), bank_start + RomFile.BANK_SIZE)
+	var start: int = bank_start
+	var end: int = mini(bank_end, start + RomLayout.AUDIO_MAX_RECORD_BYTES)
+	if end <= start:
+		return _error("Audio record has no readable data window.")
+	return {
+		"ok": true,
+		"start": start,
+		"end": end,
+		"address": 0x4000 + (start - bank_start),
+}
+
+
+static func _audio_address(raw_address: int) -> int:
+	return 0x4000 | (raw_address & 0x3FFF)
+
+
+static func _read_audio_assets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var wave_offset: int = int(layout["wave_samples"])
+	var wave_bank: int = int(layout["wave_samples_bank"])
+	var wave_address: int = int(layout["wave_samples_address"])
+	if RomFile.linear(wave_bank, wave_address) != wave_offset \
+		or not rom.in_bounds(wave_offset, RomLayout.AUDIO_WAVE_SAMPLE_COUNT * RomLayout.AUDIO_WAVE_SAMPLE_BYTES):
+		return _error("Audio wave-sample table is outside the cartridge.")
+	var wave: PackedByteArray = rom.slice(
+		wave_offset, RomLayout.AUDIO_WAVE_SAMPLE_COUNT * RomLayout.AUDIO_WAVE_SAMPLE_BYTES
+	)
+	if wave[0] != 0x02 or wave[1] != 0x46 or wave[wave.size() - 2] != 0x43 \
+		or wave[wave.size() - 1] != 0x21:
+		return _error("Audio wave-sample table does not match the known cartridge data.")
+
+	var drum_offset: int = int(layout["drumkits"])
+	var drum_bank: int = int(layout["drumkits_bank"])
+	var drum_address: int = int(layout["drumkits_address"])
+	if RomFile.linear(drum_bank, drum_address) != drum_offset \
+		or not rom.in_bounds(drum_offset, RomLayout.AUDIO_DRUMKIT_BYTES):
+		return _error("Audio drum-kit data is outside the cartridge.")
+	var drumkits: PackedByteArray = rom.slice(drum_offset, RomLayout.AUDIO_DRUMKIT_BYTES)
+	if drumkits[0] != 0x5E or drumkits[1] != 0x4E or drumkits[drumkits.size() - 1] != 0xCB:
+		return _error("Audio drum-kit data does not match the known cartridge data.")
+
+	return {
+		"ok": true,
+		"wave_samples": {
+			"bank": wave_bank,
+			"address": wave_address,
+			"offset": wave_offset,
+			"sample_count": RomLayout.AUDIO_WAVE_SAMPLE_COUNT,
+			"sample_bytes": RomLayout.AUDIO_WAVE_SAMPLE_BYTES,
+			"bytes": Array(wave),
+			"byte_count": wave.size(),
+		},
+		"drumkits": {
+			"bank": drum_bank,
+			"address": drum_address,
+			"offset": drum_offset,
+			"bytes": Array(drumkits),
+			"byte_count": drumkits.size(),
+		},
 	}
 
 

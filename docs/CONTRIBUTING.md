@@ -45,7 +45,7 @@ These are `RefCounted` statics. Keep rules separate from content and inject a
 | `palette.gd` | 15-bit BGR colours |
 | `rom_layout.gd` | Per-game table locations |
 | `rom_cache.gd` | Cache paths, formats and lifecycle |
-| `world_services_importer.gd` | Menus, marts, phone records and audio pointer tables |
+| `world_services_importer.gd` | Menus, marts, phone records, audio pointers, cries and shared waveform assets |
 | `rom_importer.gd` | Orchestration and layout checks |
 
 Decoders take bytes and return data, with no cartridge knowledge, so they can
@@ -72,8 +72,23 @@ cartridge fields before those models are canonical.
 scene-free service helpers validate imported data and world transactions;
 `world_service_screen.gd` owns only labels, selection and input. A mart purchase
 must pass candidate-save validation before writeback. Phone presentation must
-not be treated as phone-script execution, and audio code must not claim playback
-until imported channel programs have a verified decoder.
+not be treated as phone-script execution. Audio playback must remain behind the
+verified bounded decoder, renderer and player layers, with real imported records
+validated before a host reports success.
+
+`game/audio/` keeps the audio pipeline split by responsibility:
+
+| File | Role |
+|---|---|
+| `audio/gen2_audio_decoder.gd` | Bounded Gen II command streams to event tracks |
+| `audio/gen2_audio_renderer.gd` | Deterministic event tracks to `AudioStreamWAV` |
+| `audio/gen2_audio_player.gd` | Music/effect players, caching and fades |
+
+`Gen2WorldAudioHost` composes those layers for world requests. The decoder must
+stay independent of scene nodes and audio devices so synthetic records can test
+headers, pointers, loops, timing and truncation. The renderer is deterministic
+and bounded; do not silently turn unsupported modulation into an unbounded
+stream or claim byte-level hardware fidelity.
 
 ### Rendering and text
 
@@ -238,7 +253,8 @@ check and `RomImporter.verify_layout()` must run all checks before decoding.
 - Growth rate and base EXP bytes are checked against all 251 species in all
   three games, not just a few plausible values.
 - World service tables check their source counts, pointer widths, banked
-  addresses, mart terminators, phone record sizes and bounded audio payloads.
+  addresses, mart terminators, phone record sizes, packed audio headers, cry
+  pointers, shared wave samples, drumkits and bounded bank-window payloads.
   Referenced menu headers are accepted only when their data pointer and
   command-derived shape are valid; malformed candidates in bounded script
   tails are ignored rather than becoming runtime records.

@@ -11,6 +11,7 @@ const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 const SERVICE_SCENE: PackedScene = preload("res://game/world/world_service_screen.tscn")
+const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -29,6 +30,8 @@ var _renderer: Gen2WorldRenderer = null
 var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
+var _audio_player: Gen2AudioPlayer = null
+var _audio_waiting: bool = false
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
 var _service_host: Gen2WorldServiceScreen = null
@@ -107,6 +110,10 @@ func _build_world() -> void:
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(time_of_day)
 	_screen.display(_renderer)
+	_audio_player = AUDIO_PLAYER_SCRIPT.new()
+	_audio_player.name = "AudioPlayer"
+	add_child(_audio_player)
+	_play_current_map_music()
 	_text_box = Gen2TextBox.new()
 	_text_box.font = Gen2Font.from_data(_data)
 	_text_box.reveal_speed = 0.0
@@ -126,6 +133,13 @@ func _process(delta: float) -> void:
 		if not ticks.is_empty():
 			_update_time_of_day()
 			_refresh_labels()
+	if _audio_waiting and _audio_player != null and not _audio_player.effect_playing():
+		_audio_waiting = false
+		var audio_result: Dictionary = Gen2WorldHost.complete_runtime_request(
+			_world, {"ok": true, "sound_finished": true}
+		)
+		if bool(audio_result.get("ok", false)):
+			_show_script_results(audio_result.get("results", []))
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -151,6 +165,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_script_prompt = "Host choice required: call choose_script_input(choice)"
 			_refresh_labels()
 		elif not _world.pending_runtime_request().is_empty():
+			var pending_request: Dictionary = _world.pending_runtime_request()
+			if StringName(pending_request.get("kind", &"")) == &"audio_requested":
+				var audio_results: Array = _handle_audio_request(pending_request)
+				if not audio_results.is_empty():
+					_show_script_results(audio_results)
+				accept_event()
+				return
 			var pending_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 			var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
 				_world, {"ok": true}, pending_save,
@@ -220,6 +241,7 @@ func move_player(direction: Vector2i) -> bool:
 		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
 			_animation.configure(_world, time_of_day)
 			_renderer.set_world(_world, _animation)
+			_play_current_map_music()
 		else:
 			_renderer.refresh()
 	_refresh_labels()
@@ -716,9 +738,14 @@ func _show_script_results(results: Array) -> void:
 					continue
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
-					&"special_phone_call_requested", &"audio_requested",
+					&"special_phone_call_requested",
 				]:
 					_open_service_host()
+					break
+				if StringName(request.get("kind", &"")) == &"audio_requested":
+					var audio_results: Array = _handle_audio_request(request)
+					if not audio_results.is_empty():
+						_show_script_results(audio_results)
 					break
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
@@ -759,9 +786,68 @@ func _show_script_results(results: Array) -> void:
 			_animation.configure(_world, time_of_day)
 			_renderer.set_world(_world, _animation)
 			_renderer.set_time_of_day(time_of_day)
+			_play_current_map_music()
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+
+
+func _handle_audio_request(request: Dictionary) -> Array:
+	if _audio_player == null:
+		_script_prompt = "Audio unavailable: player is not ready"
+		_refresh_labels()
+		return []
+	var kind: StringName = StringName(request.get("values", {}).get("kind", &""))
+	if kind == &"sound_wait":
+		if _audio_player.effect_playing():
+			_audio_waiting = true
+			_script_prompt = "Waiting for sound effect"
+			_refresh_labels()
+			return []
+		var finished: Dictionary = Gen2WorldHost.complete_runtime_request(_world, {"ok": true})
+		return finished.get("results", []) if bool(finished.get("ok", false)) else []
+	var resolve_request: Dictionary = request.duplicate(true)
+	if not resolve_request.has("source") and _world != null:
+		resolve_request["source"] = _world.pending_runtime_request().get("source", {})
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world, resolve_request)
+	if not bool(resolved.get("ok", false)):
+		_script_prompt = "Audio unavailable: %s" % String(resolved.get("reason", "unknown"))
+		_refresh_labels()
+		return []
+	var record: Dictionary = resolved.get("data", {}).get("audio", {})
+	if kind == &"music_fadeout":
+		record["fade_time"] = int(request.get("values", {}).get("fade_time", 0))
+	var playback: Dictionary = _audio_player.play_record(record, kind, _audio_assets())
+	if not bool(playback.get("ok", false)):
+		_script_prompt = "Audio unavailable: %s" % String(playback.get("reason", "unknown"))
+		_refresh_labels()
+		return []
+	var completed: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true, "audio_played": bool(playback.get("played", false))}
+	)
+	if not bool(completed.get("ok", false)):
+		_script_prompt = "Audio completion failed: %s" % String(
+			completed.get("reason", "unknown")
+		)
+		_refresh_labels()
+		return []
+	return completed.get("results", [])
+
+
+func _audio_assets() -> Dictionary:
+	return {
+		"wave_samples": _data.world_audio_asset(&"wave_samples") if _data != null else {},
+		"drumkits": _data.world_audio_asset(&"drumkits") if _data != null else {},
+	}
+
+
+func _play_current_map_music() -> void:
+	if _audio_player == null or _data == null or _world == null or _world.current_map == null:
+		return
+	var record: Dictionary = _data.world_audio(&"music", _world.current_map.music)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
 
 
 func _refresh_labels() -> void:
@@ -787,10 +873,10 @@ func _refresh_labels() -> void:
 	]
 	_hint.text += "    time %s    rods: %s    balls: %s    F5: save" % [clock_text, owned, balls]
 	var services: Dictionary = _data.world_service_counts()
-	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d" % [
+	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d cries %d" % [
 		int(services.get("menus", 0)), int(services.get("marts", 0)),
 		int(services.get("phone_contacts", 0)), int(services.get("music", 0)),
-		int(services.get("sfx", 0)),
+		int(services.get("sfx", 0)), int(services.get("cries", 0)),
 	]
 	if not rods.is_empty():
 		_hint.text += "    1-%d: select    F: fish" % rods.size()

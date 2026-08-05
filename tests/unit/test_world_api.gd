@@ -27,6 +27,7 @@ func _write_cache() -> void:
 			"name": "OLD ROD" if number == Gen2WorldInventory.ITEM_OLD_ROD
 			else ("GOOD ROD" if number == Gen2WorldInventory.ITEM_GOOD_ROD
 			else ("SUPER ROD" if number == Gen2WorldInventory.ITEM_SUPER_ROD else "ITEM%d" % number)),
+			"pocket": 4 if number == 6 else 1,
 		})
 	RomCache.write_json(RomCache.items_path(_directory), items)
 	RomCache.write_json(RomCache.types_path(_directory), [])
@@ -241,9 +242,12 @@ func _write_service_cache() -> void:
 		}],
 		"special_calls": [{"index": 0, "script": {"bank": 48, "address": 0x7000}}],
 	})
+	var sfx: Array = []
+	for index: int in 0x9C:
+		sfx.append({"index": index, "bank": 48, "address": 0x4000, "bytes": [1, 2]})
 	RomCache.write_json(RomCache.world_audio_path(_directory), {
 		"music": [{"index": 0, "bank": 48, "address": 0x1234, "bytes": [1, 2]}],
-		"sfx": [],
+		"sfx": sfx,
 	})
 
 
@@ -273,6 +277,25 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		assert_true(complete["handled"])
 		assert_eq(complete["data"][test_case["data_key"]][test_case["row_key"]], 0)
 		assert_eq(complete["results"][0]["status"], &"complete")
+
+
+func test_world_host_resolves_contextual_warp_and_item_sounds() -> void:
+	_write_service_cache()
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6140": [0x87, 0x91],
+		"48:6150": [0x1F, 7, 1, 0x88, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	var scripts: Array = [0x6140, 0x6150]
+	var expected_sfx: Array = [0x23, 0x9B]
+	for index: int in scripts.size():
+		data.world_map(1, 1).events["coord_events"][0]["script"] = scripts[index]
+		var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+		var waiting: Array = world.dispatch_script_events()
+		assert_eq(waiting[0]["status"], &"waiting")
+		var complete: Dictionary = Gen2WorldHost.complete_runtime_request(world, {})
+		assert_true(complete["ok"])
+		assert_eq(complete["data"]["audio"]["index"], expected_sfx[index])
 
 
 func test_collision_codes_keep_the_cartridge_permission_categories() -> void:

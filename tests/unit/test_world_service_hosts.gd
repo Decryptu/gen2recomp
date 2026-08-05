@@ -80,13 +80,14 @@ func test_phone_summary_uses_imported_contact_and_trainer_class() -> void:
 	assert_eq(summary["map_group"], Fixture.MAP_GROUP)
 
 
-func test_audio_host_reports_the_real_record_without_fabricating_playback() -> void:
+func test_audio_host_renders_the_real_record() -> void:
 	var record: Dictionary = _data.world_audio(&"music", 0)
 	var result: Dictionary = Gen2WorldAudioHost.play(record, &"music")
 	assert_true(result["ok"])
 	assert_false(result["played"])
-	assert_eq(result["backend"], Gen2WorldAudioHost.BACKEND_PENDING)
-	assert_eq(result["byte_count"], 2)
+	assert_eq(result["backend"], Gen2WorldAudioHost.BACKEND_WAV)
+	assert_true(result["ready"])
+	assert_eq(result["byte_count"], 6)
 
 
 func test_menu_input_can_be_cancelled_without_selecting_an_option() -> void:
@@ -124,7 +125,8 @@ func _write_services() -> void:
 		"special_calls": [],
 	})
 	RomCache.write_json(RomCache.world_audio_path(Fixture.directory()), {
-		"music": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000, "bytes": [1, 2], "byte_count": 2}],
+		"music": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000,
+			"bytes": [0x00, 0x03, 0x40, 0xD4, 0x10, 0xFF], "byte_count": 6}],
 		"sfx": [],
 	})
 

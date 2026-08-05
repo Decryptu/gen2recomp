@@ -1,0 +1,111 @@
+extends GutTest
+
+const Decoder := preload("res://game/audio/gen2_audio_decoder.gd")
+const Renderer := preload("res://game/audio/gen2_audio_renderer.gd")
+
+## The decoder tests use the source stream grammar directly. They verify the
+## details that are easy to lose when turning banked bytes into playback
+## events: packed channel headers, note timing, loop pointers and cry notes.
+
+
+func test_music_header_and_note_duration_follow_the_cartridge_math() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xD4, 0xD8, 0x02, 0xF1, 0x12, 0x20, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"])
+	assert_eq(decoded["tracks"].size(), 1)
+	var track: Dictionary = decoded["tracks"][0]
+	assert_eq(track["channel"], 1)
+	assert_eq(track["events"].size(), 2)
+	assert_eq(track["events"][0]["start_frame"], 0)
+	assert_eq(track["events"][0]["duration_frames"], 6)
+	assert_eq(track["events"][1]["start_frame"], 6)
+	assert_eq(track["events"][1]["duration_frames"], 2)
+	assert_eq(track["end_frame"], 8)
+	assert_gt(track["events"][0]["frequency"], 0)
+
+
+func test_counted_loop_jumps_to_the_source_pointer_and_then_exits() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xD8, 0x01, 0xF1, 0x10,
+			0xFD, 0x02, 0x06, 0x40, 0x20, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"])
+	var events: Array = decoded["tracks"][0]["events"]
+	assert_eq(events.size(), 4)
+	assert_eq(events[0]["start_frame"], 0)
+	assert_eq(events[1]["start_frame"], 1)
+	assert_eq(events[2]["start_frame"], 2)
+	assert_eq(events[3]["start_frame"], 3)
+	assert_eq(decoded["duration_frames"], 4)
+	assert_false(decoded["looped"])
+
+
+func test_sfx_starts_in_fixed_mode_then_toggle_sfx_restores_music_notes() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xDF, 0xD8, 0x01, 0xF1, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record, &"sound")
+	assert_true(decoded["ok"])
+	assert_eq(decoded["tracks"][0]["events"].size(), 1)
+	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
+
+
+func test_cry_header_runs_commands_before_square_and_noise_notes() -> void:
+	var record := {
+		"address": 0x7000,
+		"bytes": [
+			0x44, 0x06, 0x70, 0x07, 0x0D, 0x70,
+			0xDE, 0x1B, 1, 0xF8, 0x20, 0x03, 0xFF,
+			2, 0xA1, 0x6C, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record, &"cry")
+	assert_true(decoded["ok"])
+	assert_eq(decoded["tracks"].size(), 2)
+	assert_eq(decoded["tracks"][0]["hardware_channel"], 1)
+	assert_eq(decoded["tracks"][0]["events"][0]["frequency"], 0x0320)
+	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
+	assert_eq(decoded["tracks"][1]["hardware_channel"], 4)
+	assert_true(decoded["tracks"][1]["events"][0]["noise"])
+	assert_eq(decoded["duration_frames"], 3)
+
+
+func test_truncated_audio_is_refused_with_a_structured_reason() -> void:
+	var decoded: Dictionary = Decoder.decode({"bytes": [0x00, 0x00]})
+	assert_false(decoded["ok"])
+	assert_eq(decoded["reason"], &"audio_record_truncated")
+
+
+func test_renderer_builds_a_playable_stream_from_decoded_events() -> void:
+	var decoded: Dictionary = {
+		"ok": true,
+		"duration_frames": 2,
+		"looped": false,
+		"tracks": [{
+			"events": [{
+				"start_frame": 0, "duration_frames": 2, "pitch": 1,
+				"hardware_channel": 1, "frequency": 1000, "volume": 15, "duty": 2,
+			}],
+		}],
+	}
+	var rendered: Dictionary = Renderer.render(decoded)
+	assert_true(rendered["ok"])
+	assert_not_null(rendered["stream"])
+	assert_eq(rendered["stream"].data.size(), 2 * Renderer.SAMPLE_RATE * 4 / 60)
+	assert_ne(rendered["stream"].data[0], 0)
+	assert_false(rendered["stream"].loop_mode == AudioStreamWAV.LOOP_FORWARD)

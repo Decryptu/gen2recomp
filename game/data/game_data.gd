@@ -176,6 +176,15 @@ func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionar
 	return {}
 
 
+func world_audio_asset(kind: StringName) -> Dictionary:
+	var value: Variant = _world_audio.get(String(kind), {})
+	return _coerce_service_dictionary(value)
+
+
+func world_audio_asset_bytes(kind: StringName) -> PackedByteArray:
+	return _cached_bytes(world_audio_asset(kind).get("bytes", []))
+
+
 func world_service_counts() -> Dictionary:
 	return {
 		"menus": _world_menus.size(),
@@ -183,6 +192,7 @@ func world_service_counts() -> Dictionary:
 		"phone_contacts": world_phone_contact_count(),
 		"music": _service_rows_count(_world_audio.get("music", [])),
 		"sfx": _service_rows_count(_world_audio.get("sfx", [])),
+		"cries": _service_rows_count(_world_audio.get("cries", [])),
 	}
 
 
