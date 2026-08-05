@@ -20,6 +20,8 @@ var player_facing: int = Gen2WorldSprite.FACING_DOWN
 var objects: Array = []
 var object_hour: int = 6
 var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
+var _script_queue: Array = []
+var _active_script: Gen2WorldScriptRunner = null
 
 
 ## Opens one map through the public cartridge-content API.
@@ -209,9 +211,73 @@ func events_at(cell: Vector2i = player_cell) -> Array:
 	return out
 
 
-## Public event boundary for the screen and future systems. It reports active
-## decoded records without running cartridge scripts or changing event flags.
-func dispatch_events(cell: Vector2i = player_cell) -> Array:
+## Public event boundary for the screen and future systems. By default it
+## reports active decoded records without interpreting cartridge scripts. The
+## optional execution flag keeps the old raw-data call stable while exposing
+## the queued interpreter to callers that are ready for it.
+func dispatch_events(cell: Vector2i = player_cell, execute_scripts: bool = false) -> Array:
+	var events: Array = _active_events_at(cell)
+	if execute_scripts:
+		if _active_script == null and _script_queue.is_empty():
+			_enqueue_script_events(events)
+		return run_event_queue(false)
+	return events
+
+
+## Queues the active scripted records at a cell in cartridge source order and
+## advances until the queue reaches text/button input or is empty.
+func dispatch_script_events(cell: Vector2i = player_cell) -> Array:
+	if _active_script == null and _script_queue.is_empty():
+		_enqueue_script_events(_active_events_at(cell))
+	return run_event_queue(false)
+
+
+## Starts one callback type from the current map's callback table. A type of -1
+## runs all callbacks in their stored order.
+func dispatch_callbacks(callback_type: int = -1) -> Array:
+	if current_map == null:
+		return []
+	if _active_script == null and _script_queue.is_empty():
+		var bank: int = int(current_map.scripts.get("bank", 0))
+		for callback: Dictionary in current_map.scripts.get("callbacks", []):
+			if callback_type >= 0 and int(callback.get("type", -1)) != callback_type:
+				continue
+			_enqueue_script({
+				"kind": &"callback",
+				"callback_type": int(callback.get("type", -1)),
+				"map_group": current_map.group,
+				"map_number": current_map.number,
+				"bank": bank,
+				"script": int(callback.get("script", 0)),
+			})
+	return run_event_queue(false)
+
+
+## Acknowledge the current text/button pause and continue the first queued
+## script. Completed results retain the source event so a screen can react to
+## them without reaching into the runner.
+func run_event_queue(acknowledge: bool = false) -> Array:
+	var results: Array = []
+	var accept: bool = acknowledge
+	while true:
+		if _active_script == null:
+			if _script_queue.is_empty():
+				break
+			var request: Dictionary = _script_queue.pop_front()
+			_active_script = Gen2WorldScriptRunner.begin(
+				data, state, request, Callable(self, "_validate_script_warp")
+			)
+		var result: Dictionary = _active_script.advance(accept)
+		accept = false
+		if StringName(result.get("status", &"")) == &"waiting":
+			results.append(result)
+			break
+		results.append(_finish_script_result(result))
+		_active_script = null
+	return results
+
+
+func _active_events_at(cell: Vector2i) -> Array:
 	var out: Array = []
 	for event: Dictionary in events_at(cell):
 		if event.get("kind", &"") == &"objects":
@@ -221,6 +287,79 @@ func dispatch_events(cell: Vector2i = player_cell) -> Array:
 				continue
 		out.append(event)
 	return out
+
+
+func _enqueue_script_events(events: Array) -> void:
+	var bank: int = int(current_map.events.get("bank", 0)) if current_map != null else 0
+	for event: Dictionary in events:
+		if event.get("kind", &"") == &"warps" or not event.has("script"):
+			continue
+		_enqueue_script({
+			"kind": event.get("kind", &""),
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"cell": Vector2i(int(event.get("x", 0)), int(event.get("y", 0))),
+			"bank": bank,
+			"script": int(event.get("script", 0)),
+			"event": event.duplicate(true),
+		})
+
+
+func _enqueue_script(request: Dictionary) -> void:
+	if int(request.get("script", 0)) <= 0:
+		return
+	_script_queue.append(request)
+
+
+func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> Dictionary:
+	var target_map: Gen2WorldMap = data.world_map(map_group, map_number) if data != null else null
+	if target_map == null:
+		return {"ok": false, "reason": &"missing_map"}
+	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset) if data != null else null
+	if target_tileset == null:
+		return {"ok": false, "reason": &"missing_tileset"}
+	if cell.x < 0 or cell.y < 0 or cell.x >= target_map.collision_width \
+		or cell.y >= target_map.collision_height:
+		return {"ok": false, "reason": &"invalid_target_cell"}
+	return {"ok": true}
+
+
+func _finish_script_result(result: Dictionary) -> Dictionary:
+	if not bool(result.get("ok", false)):
+		return result
+	var warp: Variant = result.get("warp", {})
+	if warp is Dictionary and not (warp as Dictionary).is_empty():
+		var transition: Dictionary = _apply_script_warp(warp as Dictionary)
+		if not bool(transition.get("ok", false)):
+			result["ok"] = false
+			result["status"] = &"failed"
+			result["reason"] = transition.get("reason", &"warp_failed")
+			return result
+		result["events"].append({"type": &"warp", "transition": transition})
+	return result
+
+
+func _apply_script_warp(request: Dictionary) -> Dictionary:
+	var map_group: int = int(request.get("map_group", -1))
+	var map_number: int = int(request.get("map_number", -1))
+	var cell := Vector2i(int(request.get("x", -1)), int(request.get("y", -1)))
+	var validation: Dictionary = _validate_script_warp(map_group, map_number, cell)
+	if not bool(validation.get("ok", false)):
+		return validation
+	var target_map: Gen2WorldMap = data.world_map(map_group, map_number)
+	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset)
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	_apply_map(target_map, target_tileset, cell)
+	return {
+		"ok": true,
+		"kind": &"warp",
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": map_id(),
+		"to_cell": player_cell,
+		"destination": request.duplicate(true),
+	}
 
 
 ## Resolves and applies an ordinary warp at the current cell. The destination

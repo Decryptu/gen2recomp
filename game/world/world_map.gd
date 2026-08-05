@@ -77,7 +77,22 @@ static func _scripts_from_cache(value: Variant) -> Dictionary:
 	return {
 		"bank": int(scripts.get("bank", 0)),
 		"address": int(scripts.get("address", 0)),
+		"scenes": _script_pointer_rows(scripts.get("scenes", [])),
+		"callbacks": _script_pointer_rows(scripts.get("callbacks", [])),
 	}
+
+
+static func _script_pointer_rows(value: Variant) -> Array:
+	if not value is Array:
+		return []
+	var out: Array = []
+	for raw: Dictionary in value as Array:
+		var row: Dictionary = raw.duplicate(true)
+		for field: String in ["id", "type", "script"]:
+			if raw.has(field):
+				row[field] = int(raw[field])
+		out.append(row)
+	return out
 
 
 static func _connection_rows(value: Array) -> Array:

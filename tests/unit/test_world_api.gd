@@ -51,12 +51,13 @@ func _write_cache() -> void:
 	collision[6 * 16 + 6] = 0x70
 
 	var source_events: Dictionary = {
+		"bank": 48,
 		"warps": [{
 			"x": 6, "y": 6, "destination": 1, "map_group": 1, "map_number": 2,
 		}],
-		"coord_events": [{"scene": 0, "x": 7, "y": 6, "script": 0x1234}],
-		"bg_events": [{"x": 8, "y": 6, "type": 0, "script": 0x2345}],
-		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x3456, "event_flag": 7}],
+		"coord_events": [{"scene": 0, "x": 7, "y": 6, "script": 0x6000}],
+		"bg_events": [{"x": 8, "y": 6, "type": 0, "script": 0x6015}],
+		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x6000, "event_flag": 7}],
 	}
 
 	var target_collision: Array = []
@@ -79,6 +80,11 @@ func _write_cache() -> void:
 			"direction": "east", "map_group": 1, "map_number": 2,
 			"x_offset": 0, "y_offset": 0,
 		}],
+		"scripts": {
+			"bank": 48,
+			"address": 0x5000,
+			"callbacks": [{"type": 3, "script": 0x6010}],
+		},
 		"events": source_events,
 	}
 	var target_map: Dictionary = {
@@ -101,6 +107,14 @@ func _write_cache() -> void:
 		}]},
 	}
 	RomCache.write_json(RomCache.world_maps_path(_directory), [source_map, target_map])
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6000": [0x33, 7, 0, 0x4C, 0x00, 0x70, 0x91],
+		"48:6010": [0x14, 2, 0x91],
+		"48:6015": [0x3C, 1, 2, 2, 2, 0x91],
+	})
+	RomCache.write_json(RomCache.world_text_path(_directory), {
+		"48:7000": [0x00, 0x80, 0x81, 0x50],
+	})
 
 	var pixels := PackedByteArray()
 	pixels.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
@@ -229,10 +243,75 @@ func test_event_dispatch_reports_decoded_records_without_running_scripts() -> vo
 	var coord_events: Array = world.dispatch_events(Vector2i(7, 6))
 	assert_eq(coord_events.size(), 1)
 	assert_eq(coord_events[0]["kind"], &"coord_events")
-	assert_eq(coord_events[0]["script"], 0x1234)
+	assert_eq(coord_events[0]["script"], 0x6000)
 
 	var object_events: Array = world.dispatch_events(Vector2i(5, 6))
 	assert_eq(object_events[0]["kind"], &"objects")
+
+
+func test_script_dispatch_pauses_for_text_then_commits_flags_atomically() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(7, 6))
+	var state: Gen2WorldState = world.state
+	var waiting: Array = world.dispatch_script_events()
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(waiting[0]["event"]["type"], &"text")
+	assert_eq(waiting[0]["event"]["text"], "AB")
+	assert_false(state.is_event_flag_active(7))
+
+	var completed: Array = world.run_event_queue(true)
+	assert_eq(completed.size(), 1)
+	assert_eq(completed[0]["status"], &"complete")
+	assert_true(state.is_event_flag_active(7))
+
+
+func test_script_failure_does_not_commit_staged_state() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6008": [0x33, 8, 0, 0xFE],
+	})
+	# The current GameData was opened before the replacement, so use a fresh API.
+	data = GameData.open_directory(_directory)
+	var map: Gen2WorldMap = data.world_map(1, 1)
+	map.events["coord_events"][0]["script"] = 0x6008
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"failed")
+	assert_eq(result[0]["reason"], &"unsupported_command")
+	assert_false(world.event_flag_active(8))
+
+
+func test_callback_dispatch_updates_the_map_scene() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	assert_eq(world.state.map_scene(1, 1), 0)
+	var result: Array = world.dispatch_callbacks(3)
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete")
+	assert_eq(world.state.map_scene(1, 1), 2)
+
+
+func test_script_warp_is_validated_before_transition() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var result: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete")
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_eq(world.player_cell, Vector2i(2, 2))
+
+
+func test_script_queue_keeps_event_source_order() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var coordinate: Dictionary = world.current_map.events["coord_events"][0]
+	coordinate["x"] = 8
+	coordinate["y"] = 6
+	coordinate["script"] = 0x6010
+	var results: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(results.size(), 2)
+	assert_eq(results[0]["source"]["kind"], &"coord_events")
+	assert_eq(results[1]["source"]["kind"], &"bg_events")
+	assert_eq(world.state.map_scene(1, 1), 2)
+	assert_eq(world.map_id(), Vector2i(1, 2))
 
 
 func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> void:

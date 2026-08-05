@@ -35,6 +35,8 @@ var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
+var _world_scripts: Dictionary = {}
+var _world_text: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_palettes: Array = []
 var _world_animation_assets: Dictionary = {}
@@ -106,6 +108,17 @@ func world_map(group: int, number: int) -> Gen2WorldMap:
 
 func world_maps() -> Array:
 	return _world_maps.duplicate()
+
+
+## Raw bounded script bytes indexed by the cartridge's bank and CPU address.
+## Runtime never opens a ROM; these bytes come from the user cache only.
+func world_script(bank: int, address: int) -> PackedByteArray:
+	return _cached_bytes(_world_scripts.get(Gen2WorldScript.pointer_key(bank, address), []))
+
+
+## Raw bounded text bytes indexed by the cartridge's bank and CPU address.
+func world_text(bank: int, address: int) -> PackedByteArray:
+	return _cached_bytes(_world_text.get(Gen2WorldScript.pointer_key(bank, address), []))
 
 
 ## One decoded tileset's metatile and collision tables, or null if absent.
@@ -565,6 +578,13 @@ func _load_world(path: String) -> void:
 		for value: Dictionary in map_rows as Array:
 			_world_maps.append(Gen2WorldMap.from_cache(value))
 
+	var script_rows: Variant = RomCache.read_json(RomCache.world_scripts_path(path))
+	if script_rows is Dictionary:
+		_world_scripts = script_rows
+	var text_rows: Variant = RomCache.read_json(RomCache.world_text_path(path))
+	if text_rows is Dictionary:
+		_world_text = text_rows
+
 	var tileset_rows: Variant = RomCache.read_json(RomCache.world_tilesets_path(path))
 	if tileset_rows is Array:
 		for value: Dictionary in tileset_rows as Array:
@@ -596,3 +616,14 @@ func _entry(rows: Array, index: int) -> Dictionary:
 	if index < 0 or index >= rows.size():
 		return {}
 	return rows[index]
+
+
+func _cached_bytes(value: Variant) -> PackedByteArray:
+	if not value is Array:
+		return PackedByteArray()
+	var raw: Array = value as Array
+	var out := PackedByteArray()
+	out.resize(raw.size())
+	for index: int in out.size():
+		out[index] = int(raw[index])
+	return out
