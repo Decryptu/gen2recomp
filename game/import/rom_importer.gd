@@ -221,6 +221,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not world["ok"]:
 		return world
 
+	var encounters: Dictionary = Gen2WorldEncounterImporter.verify_layout(rom)
+	if not encounters["ok"]:
+		return encounters
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -1300,6 +1304,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if not bool(world.get("ok", false)):
 		result["message"] = String(world.get("message", "Could not import overworld data."))
 		return result
+	var encounters: Dictionary = Gen2WorldEncounterImporter.import_to_cache(rom, layout, directory)
+	if not bool(encounters.get("ok", false)):
+		result["message"] = String(encounters.get("message", "Could not import wild encounter data."))
+		return result
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
 		result["message"] = "Could not write species data."
@@ -1339,6 +1347,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"trainer_party_count": trainer_party_count,
 		"world_map_count": int(world["maps"]),
 		"world_tileset_count": int(world["tilesets"]),
+		"world_grass_encounter_count": int(encounters["grass"]),
+		"world_water_encounter_count": int(encounters["water"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
@@ -1359,16 +1369,20 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["trainer_party_count"] = trainer_party_count
 	result["maps"] = int(world["maps"])
 	result["tilesets"] = int(world["tilesets"])
+	result["grass_encounters"] = int(encounters["grass"])
+	result["water_encounters"] = int(encounters["water"])
 	result["overworld_sprites"] = int(world["overworld_sprites"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
-		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets and %d overworld sprites, "
+		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
+		+ "%d water encounter maps and %d overworld sprites, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
-		int(world["overworld_sprites"]), evolutions, learnset_moves, result["elapsed_ms"],
+		int(encounters["grass"]), int(encounters["water"]), int(world["overworld_sprites"]),
+		evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result
 

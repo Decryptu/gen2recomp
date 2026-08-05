@@ -40,6 +40,7 @@ var _world_standard_scripts: Dictionary = {}
 var _world_text: Dictionary = {}
 var _world_movements: Dictionary = {}
 var _world_tilesets: Dictionary = {}
+var _world_encounters: Dictionary = {}
 var _world_palettes: Array = []
 var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
@@ -148,6 +149,24 @@ func world_tileset(number: int) -> Gen2WorldTileset:
 
 func world_tileset_count() -> int:
 	return _world_tilesets.size()
+
+
+## One normal encounter record by method and map group/number. The runtime
+## names the water method "surf" while the cache keeps the cartridge table's
+## "water" name.
+func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
+	var table_name: String = "water" if method == &"surf" else String(method)
+	var table: Variant = _world_encounters.get(table_name, {})
+	if not table is Dictionary:
+		return {}
+	var value: Variant = (table as Dictionary).get("%d:%d" % [group, number], {})
+	return value.duplicate(true) if value is Dictionary else {}
+
+
+func world_encounter_count(method: StringName) -> int:
+	var table_name: String = "water" if method == &"surf" else String(method)
+	var table: Variant = _world_encounters.get(table_name, {})
+	return (table as Dictionary).size() if table is Dictionary else 0
 
 
 ## Metadata for one cartridge overworld sprite, indexed by the source sprite
@@ -618,6 +637,10 @@ func _load_world(path: String) -> void:
 		for value: Dictionary in tileset_rows as Array:
 			var tileset: Gen2WorldTileset = Gen2WorldTileset.from_cache(value)
 			_world_tilesets[tileset.number] = tileset
+
+	var encounter_rows: Variant = RomCache.read_json(RomCache.world_encounters_path(path))
+	if encounter_rows is Dictionary:
+		_world_encounters = encounter_rows
 
 	var palettes: Variant = RomCache.read_json(RomCache.world_palettes_path(path))
 	if palettes is Array:

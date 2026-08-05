@@ -111,6 +111,38 @@ func _write_cache() -> void:
 		}]},
 	}
 	RomCache.write_json(RomCache.world_maps_path(_directory), [source_map, target_map])
+	RomCache.write_json(RomCache.world_encounters_path(_directory), {
+		"grass": {
+			"1:1": {
+				"map": "1:1", "rates": [255, 255, 255],
+				"slots": [
+					[{"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}],
+					[{"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}],
+					[{"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}, {"level": 5, "species": 16},
+					 {"level": 5, "species": 16}],
+				],
+			},
+		},
+		"water": {
+			"1:1": {
+				"map": "1:1", "rate": 255,
+				"slots": [{"level": 5, "species": 16}, {"level": 5, "species": 16},
+					{"level": 5, "species": 16}],
+			},
+		},
+		"probabilities": {
+			"grass": RomLayout.WILD_GRASS_PROBABILITIES,
+			"water": RomLayout.WILD_WATER_PROBABILITIES,
+		},
+	})
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
 		"48:6000": [0x33, 7, 0, 0x4C, 0x00, 0x70, 0x91],
 		"48:6010": [0x14, 2, 0x91],
@@ -772,4 +804,7 @@ func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void
 	var encounter: Dictionary = world.encounter_request()
 	assert_eq(encounter["kind"], &"wild_encounter_requested")
 	assert_eq(encounter["fish_group"], 0)
+	assert_eq(encounter["values"]["kind"], &"wild")
+	assert_eq(encounter["values"]["pokemon"], 16)
+	assert_between(encounter["values"]["level"], 5, 9)
 	assert_true(world.move(Vector2i.UP))

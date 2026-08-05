@@ -12,11 +12,12 @@ const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 
-@export var map_group: int = 10
-@export var map_number: int = 17
+@export var map_group: int = 24
+@export var map_number: int = 3
 @export var start_cell: Vector2i = Vector2i(4, 4)
 @export_range(0, 23) var hour: int = 6
 @export_range(0, 3) var time_of_day: int = Gen2WorldPalette.TIME_MORNING
+@export var encounter_seed: int = 0
 
 var _data: GameData = null
 var _injected_data: GameData = null
@@ -27,6 +28,7 @@ var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
+var _encounter_random := RandomNumberGenerator.new()
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -65,6 +67,10 @@ func _build_world() -> void:
 		_caption.text = "Map %d/%d unavailable" % [map_group, map_number]
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
 		return
+	if encounter_seed != 0:
+		_encounter_random.seed = encounter_seed
+	else:
+		_encounter_random.randomize()
 
 	_animation = Gen2WorldAnimation.new()
 	_world.set_object_time(hour, time_of_day)
@@ -139,7 +145,17 @@ func move_player(direction: Vector2i) -> bool:
 	var sight_results: Array = _world.dispatch_sight_events()
 	if sight_results.is_empty():
 		sight_results = _world.dispatch_script_events()
-	_show_script_results(sight_results)
+	if not sight_results.is_empty():
+		_show_script_results(sight_results)
+		return true
+	_show_script_results([])
+	var encounter: Dictionary = _world.encounter_request(_encounter_random)
+	if not encounter.is_empty():
+		_start_battle_request({
+			"kind": &"battle_requested",
+			"values": encounter["values"],
+			"encounter": encounter.duplicate(true),
+		})
 	return true
 
 
@@ -168,6 +184,7 @@ func world_snapshot() -> Dictionary:
 		"movement_mode": _world.movement_mode if _world != null else Gen2WorldAPI.MOVEMENT_WALK,
 		"visible_objects": _world.visible_objects().size() if _world != null else 0,
 		"just_battled": _world.state.just_battled() if _world != null else false,
+		"battle_active": _battle_host != null,
 		"script_prompt": _script_prompt,
 	}
 
@@ -211,6 +228,24 @@ func preview_battle_request() -> void:
 	_start_battle_request({
 		"kind": &"battle_requested",
 		"values": {"kind": &"wild", "pokemon": 16, "level": 5},
+	})
+
+
+## Public screenshot driver for a resolved imported wild encounter. It uses the
+## current standing terrain and skips only the rate roll, leaving slot and surf
+## level selection on the production resolver path.
+func preview_wild_encounter() -> void:
+	if _world == null:
+		return
+	var encounter: Dictionary = _world.encounter_request(_encounter_random, true)
+	if encounter.is_empty():
+		_script_prompt = "No normal encounter table for this map and terrain"
+		_refresh_labels()
+		return
+	_start_battle_request({
+		"kind": &"battle_requested",
+		"values": encounter["values"],
+		"encounter": encounter.duplicate(true),
 	})
 
 

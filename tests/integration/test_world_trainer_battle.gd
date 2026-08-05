@@ -128,3 +128,16 @@ func test_emote_preview_reaches_the_production_world_renderer() -> void:
 
 	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Debug emote preview")
 	assert_true((_world_screen._world.objects[0] as Gen2WorldObject).emote_visible)
+
+
+func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
+	await _open_world()
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_true(host.is_ready())
+	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
+	assert_eq(host.battle_snapshot()["message"], "Wild FILLER appeared!")

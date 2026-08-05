@@ -50,6 +50,24 @@ const MAP_CALLBACK_SIZE: int = 3
 const MAP_MAX_SCENE_SCRIPTS: int = 32
 const MAP_MAX_CALLBACKS: int = 16
 
+## Normal wild encounter records are fixed-size tables keyed by map group and
+## number. Grass carries three time-of-day rates and seven slots per time;
+## water carries one rate and three slots. Swarm tables are separate cartridge
+## data and are intentionally left for the later swarm/roaming slice.
+const WILD_GRASS_RECORD_SIZE: int = 47
+const WILD_WATER_RECORD_SIZE: int = 9
+const WILD_GRASS_SLOT_COUNT: int = 7
+const WILD_WATER_SLOT_COUNT: int = 3
+const WILD_TIME_COUNT: int = 3
+const WILD_TABLE_END: int = 0xFF
+const WILD_GRASS_PROBABILITIES: Array[int] = [30, 60, 80, 90, 95, 99, 100]
+const WILD_WATER_PROBABILITIES: Array[int] = [60, 90, 100]
+
+## The cartridge compares an 8-bit random value directly with these encoded
+## percentage thresholds when it varies a surfing encounter's level. The
+## values are the source's integer `$FF / 100 * percent` expressions.
+const WILD_SURF_LEVEL_THRESHOLDS: Array[int] = [89, 165, 216, 242]
+
 ## The graphics stream supplies the 96 tiles loaded by the overworld. Metatile
 ## and collision tables are shorter for tilesets that never use all 128 blocks;
 ## unused metatile entries may still contain $FF placeholders.
@@ -523,6 +541,16 @@ const GOLD_SILVER: Dictionary = {
 		"tower": {"offset": 0xFC57D, "bytes": 800},
 		"whirlpool": {"offset": 0xFC8AD, "bytes": 256},
 	},
+	"wild_encounters": {
+		"grass_johto": 0x2AB35,
+		"water_johto": 0x2B669,
+		"grass_kanto": 0x2B7C0,
+		"water_kanto": 0x2BD43,
+		"grass_johto_count": 61,
+		"water_johto_count": 38,
+		"grass_kanto_count": 30,
+		"water_kanto_count": 24,
+	},
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
 	# moved; see FixPicBank in pokegold.
@@ -587,6 +615,16 @@ const CRYSTAL: Dictionary = {
 		"lava": {"offset": 0xFC605, "bytes": 64},
 		"tower": {"offset": 0xFC778, "bytes": 800},
 		"whirlpool": {"offset": 0xFCAA8, "bytes": 256},
+	},
+	"wild_encounters": {
+		"grass_johto": 0x2A5E9,
+		"water_johto": 0x2B11D,
+		"grass_kanto": 0x2B274,
+		"water_kanto": 0x2B7F7,
+		"grass_johto_count": 61,
+		"water_johto_count": 38,
+		"grass_kanto_count": 30,
+		"water_kanto_count": 24,
 	},
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
