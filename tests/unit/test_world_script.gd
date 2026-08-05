@@ -20,6 +20,19 @@ func test_command_parser_reads_near_and_warp_operands() -> void:
 	assert_eq(warp["y"], 10)
 
 
+func test_command_parser_reads_profile_specific_object_commands() -> void:
+	var crystal: Dictionary = Gen2WorldScript.command_at(PackedByteArray([0x6E, 2]), 0, true)
+	assert_true(crystal["ok"])
+	assert_eq(crystal["name"], &"disappear")
+	assert_eq(crystal["width"], 2)
+	assert_eq(crystal["object_id"], 2)
+
+	var gold: Dictionary = Gen2WorldScript.command_at(PackedByteArray([0x6D, 2]), 0, false)
+	assert_true(gold["ok"])
+	assert_eq(gold["name"], &"disappear")
+	assert_eq(gold["object_id"], 2)
+
+
 func test_unknown_and_truncated_commands_are_structured_failures() -> void:
 	var unknown: Dictionary = Gen2WorldScript.command_at(PackedByteArray([0xFE]), 0)
 	assert_false(unknown["ok"])

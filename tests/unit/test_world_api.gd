@@ -57,7 +57,7 @@ func _write_cache() -> void:
 		}],
 		"coord_events": [{"scene": 0, "x": 7, "y": 6, "script": 0x6000}],
 		"bg_events": [{"x": 8, "y": 6, "type": 0, "script": 0x6015}],
-		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x6000, "event_flag": 7}],
+		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x6030, "event_flag": 7}],
 	}
 
 	var target_collision: Array = []
@@ -102,6 +102,10 @@ func _write_cache() -> void:
 			"direction": "west", "map_group": 1, "map_number": 1,
 			"x_offset": 0, "y_offset": 0,
 		}],
+		"scripts": {
+			"bank": 48,
+			"callbacks": [{"type": 5, "script": 0x6040}],
+		},
 		"events": {"warps": [{
 			"x": 2, "y": 2, "destination": 1, "map_group": 1, "map_number": 1,
 		}]},
@@ -111,6 +115,11 @@ func _write_cache() -> void:
 		"48:6000": [0x33, 7, 0, 0x4C, 0x00, 0x70, 0x91],
 		"48:6010": [0x14, 2, 0x91],
 		"48:6015": [0x3C, 1, 2, 2, 2, 0x91],
+		"48:6030": [0x6E, 2, 0x91],
+		"48:6040": [0x14, 3, 0x91],
+	})
+	RomCache.write_json(RomCache.world_standard_scripts_path(_directory), {
+		"0": {"bank": 48, "address": 0x6020, "bytes": [0x4C, 0x00, 0x70, 0x91]},
 	})
 	RomCache.write_json(RomCache.world_text_path(_directory), {
 		"48:7000": [0x00, 0x80, 0x81, 0x50],
@@ -217,6 +226,16 @@ func test_active_map_objects_occupy_walk_cells() -> void:
 	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
 
+func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var result: Array = world.dispatch_script_events(Vector2i(5, 6))
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete")
+	assert_eq(result[0]["events"][0]["type"], &"object_visibility")
+	assert_eq(world.visible_objects().size(), 0)
+	assert_true(world.can_walk_to(Vector2i(5, 6)))
+
+
 func test_event_flags_hide_objects_from_rendering_occupancy_and_dispatch() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
@@ -265,6 +284,30 @@ func test_script_dispatch_pauses_for_text_then_commits_flags_atomically() -> voi
 	assert_true(state.is_event_flag_active(7))
 
 
+func test_standard_script_jump_and_call_use_the_imported_pointer_table() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var standard: Dictionary = data.world_standard_script(0)
+	assert_eq(standard["bank"], 48)
+	assert_eq(standard["address"], 0x6020)
+	assert_eq(standard["data"], PackedByteArray([0x4C, 0x00, 0x70, 0x91]))
+
+	for opcode: int in [Gen2WorldScript.JUMPSTD, Gen2WorldScript.CALLSTD]:
+		var request: Dictionary = {"kind": &"test", "bank": 48, "script": 0x6025}
+		var scripts: Dictionary = {
+			"48:6025": [opcode, 0, 0, 0x91],
+		}
+		RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+		data = GameData.open_directory(_directory)
+		var runner: Gen2WorldScriptRunner = Gen2WorldScriptRunner.begin(
+			data, Gen2WorldState.new(), request
+		)
+		var waiting: Dictionary = runner.advance()
+		assert_eq(waiting["status"], &"waiting")
+		assert_eq(waiting["event"]["text"], "AB")
+		var completed: Dictionary = runner.advance(true)
+		assert_eq(completed["status"], &"complete")
+
+
 func test_script_failure_does_not_commit_staged_state() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
@@ -294,8 +337,9 @@ func test_callback_dispatch_updates_the_map_scene() -> void:
 func test_script_warp_is_validated_before_transition() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(8, 6))
-	assert_eq(result.size(), 1)
+	assert_eq(result.size(), 2)
 	assert_eq(result[0]["status"], &"complete")
+	assert_eq(result[1]["source"]["kind"], &"callback")
 	assert_eq(world.map_id(), Vector2i(1, 2))
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
@@ -307,9 +351,10 @@ func test_script_queue_keeps_event_source_order() -> void:
 	coordinate["y"] = 6
 	coordinate["script"] = 0x6010
 	var results: Array = world.dispatch_script_events(Vector2i(8, 6))
-	assert_eq(results.size(), 2)
+	assert_eq(results.size(), 3)
 	assert_eq(results[0]["source"]["kind"], &"coord_events")
 	assert_eq(results[1]["source"]["kind"], &"bg_events")
+	assert_eq(results[2]["source"]["kind"], &"callback")
 	assert_eq(world.state.map_scene(1, 1), 2)
 	assert_eq(world.map_id(), Vector2i(1, 2))
 
@@ -324,6 +369,16 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(result["to_cell"], Vector2i(2, 2))
 	assert_eq(world.map_id(), Vector2i(1, 2))
 	assert_eq(world.player_cell, Vector2i(2, 2))
+
+
+func test_map_transition_queues_target_callbacks_for_the_next_script_pump() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
+	var transition: Dictionary = world.try_warp()
+	assert_true(transition["ok"])
+	var callbacks: Array = world.dispatch_callbacks(5)
+	assert_eq(callbacks.size(), 1)
+	assert_eq(callbacks[0]["status"], &"complete")
+	assert_eq(world.state.map_scene(1, 2), 3)
 
 
 func test_connected_edge_step_translates_the_player_and_reloads_the_target_map() -> void:

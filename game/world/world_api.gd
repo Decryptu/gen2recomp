@@ -22,6 +22,9 @@ var object_hour: int = 6
 var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
+var _object_visibility_overrides: Dictionary = {}
+var _object_position_overrides: Dictionary = {}
+var _object_facing_overrides: Dictionary = {}
 
 
 ## Opens one map through the public cartridge-content API.
@@ -103,6 +106,9 @@ func set_object_time(hour: int, time_of_day: int) -> void:
 	object_time_of_day = clampi(time_of_day, 0, 3)
 	for object: Gen2WorldObject in objects:
 		object.active = object.visible_with_state(object_hour, object_time_of_day, state)
+		var key: String = _object_key(current_map.group, current_map.number, object.index)
+		if _object_visibility_overrides.has(key):
+			object.active = bool(_object_visibility_overrides[key])
 
 
 func set_event_flag(flag: int, active: bool = true) -> void:
@@ -238,18 +244,7 @@ func dispatch_callbacks(callback_type: int = -1) -> Array:
 	if current_map == null:
 		return []
 	if _active_script == null and _script_queue.is_empty():
-		var bank: int = int(current_map.scripts.get("bank", 0))
-		for callback: Dictionary in current_map.scripts.get("callbacks", []):
-			if callback_type >= 0 and int(callback.get("type", -1)) != callback_type:
-				continue
-			_enqueue_script({
-				"kind": &"callback",
-				"callback_type": int(callback.get("type", -1)),
-				"map_group": current_map.group,
-				"map_number": current_map.number,
-				"bank": bank,
-				"script": int(callback.get("script", 0)),
-			})
+		_queue_map_callbacks(callback_type)
 	return run_event_queue(false)
 
 
@@ -311,6 +306,86 @@ func _enqueue_script(request: Dictionary) -> void:
 	_script_queue.append(request)
 
 
+func _queue_map_callbacks(callback_type: int) -> void:
+	if current_map == null:
+		return
+	var bank: int = int(current_map.scripts.get("bank", 0))
+	for callback: Dictionary in current_map.scripts.get("callbacks", []):
+		if callback_type >= 0 and int(callback.get("type", -1)) != callback_type:
+			continue
+		_enqueue_script({
+			"kind": &"callback",
+			"callback_type": int(callback.get("type", -1)),
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"bank": bank,
+			"script": int(callback.get("script", 0)),
+		})
+
+
+func _apply_script_object_events(raw_events: Variant) -> void:
+	if not raw_events is Array:
+		return
+	for raw_event: Variant in raw_events as Array:
+		if not raw_event is Dictionary:
+			continue
+		var event: Dictionary = raw_event as Dictionary
+		var event_type: StringName = StringName(event.get("type", &""))
+		if event_type not in [
+			&"object_visibility", &"object_position", &"object_facing",
+			&"object_face_player", &"object_face_object",
+		]:
+			continue
+		var map_group: int = int(event.get("map_group", -1))
+		var map_number: int = int(event.get("map_number", -1))
+		var object_index: int = int(event.get("object_index", -1))
+		if object_index < 0:
+			continue
+		var key: String = _object_key(map_group, map_number, object_index)
+		match event_type:
+			&"object_visibility":
+				_object_visibility_overrides[key] = bool(event.get("active", false))
+			&"object_position":
+				var cell: Variant = event.get("cell", Vector2i.ZERO)
+				if cell is Vector2i:
+					_object_position_overrides[key] = cell
+			&"object_facing":
+				_object_facing_overrides[key] = clampi(
+					int(event.get("facing", Gen2WorldSprite.FACING_DOWN)),
+					Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_RIGHT
+				)
+			&"object_face_player":
+				if map_group == current_map.group and map_number == current_map.number \
+					and object_index < objects.size():
+					var object: Gen2WorldObject = objects[object_index]
+					var facing: int = _facing_toward(object.cell, player_cell)
+					_object_facing_overrides[key] = facing
+			&"object_face_object":
+				var target_index: int = int(event.get("target_index", -1))
+				if map_group == current_map.group and map_number == current_map.number \
+					and object_index < objects.size() and target_index >= 0 \
+					and target_index < objects.size():
+					_object_facing_overrides[key] = _facing_toward(
+						(objects[object_index] as Gen2WorldObject).cell,
+						(objects[target_index] as Gen2WorldObject).cell
+					)
+		if map_group == current_map.group and map_number == current_map.number:
+			_load_objects()
+
+
+func _object_key(map_group: int, map_number: int, object_index: int) -> String:
+	return "%d:%d:%d" % [map_group, map_number, object_index]
+
+
+func _facing_toward(from: Vector2i, to: Vector2i) -> int:
+	var delta: Vector2i = to - from
+	if abs(delta.x) > abs(delta.y):
+		return Gen2WorldSprite.FACING_RIGHT if delta.x > 0 else Gen2WorldSprite.FACING_LEFT
+	if delta.y != 0:
+		return Gen2WorldSprite.FACING_DOWN if delta.y > 0 else Gen2WorldSprite.FACING_UP
+	return Gen2WorldSprite.FACING_DOWN
+
+
 func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> Dictionary:
 	var target_map: Gen2WorldMap = data.world_map(map_group, map_number) if data != null else null
 	if target_map == null:
@@ -327,6 +402,7 @@ func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> D
 func _finish_script_result(result: Dictionary) -> Dictionary:
 	if not bool(result.get("ok", false)):
 		return result
+	_apply_script_object_events(result.get("events", []))
 	var warp: Variant = result.get("warp", {})
 	if warp is Dictionary and not (warp as Dictionary).is_empty():
 		var transition: Dictionary = _apply_script_warp(warp as Dictionary)
@@ -656,6 +732,7 @@ func _apply_map(
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
 	_load_objects()
+	_queue_map_callbacks(-1)
 
 
 func _on_world_state_changed() -> void:
@@ -671,5 +748,11 @@ func _load_objects() -> void:
 		var value: Dictionary = rows[index]
 		var sprite_number: int = int(value.get("sprite", 0))
 		var sprite: Gen2WorldSprite = data.overworld_sprite(sprite_number)
-		objects.append(Gen2WorldObject.from_event(index, value, sprite))
+		var object: Gen2WorldObject = Gen2WorldObject.from_event(index, value, sprite)
+		var key: String = _object_key(current_map.group, current_map.number, index)
+		if _object_position_overrides.has(key):
+			object.cell = _object_position_overrides[key]
+		if _object_facing_overrides.has(key):
+			object.facing = int(_object_facing_overrides[key])
+		objects.append(object)
 	set_object_time(object_hour, object_time_of_day)
