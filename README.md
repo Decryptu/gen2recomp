@@ -12,51 +12,48 @@
   <a href="https://x.com/DecryptTV"><img src="https://img.shields.io/badge/follow-%40DecryptTV-000000?style=flat-square&logo=x&logoColor=white" alt="X"></a>
 </p>
 
-A native [Godot 4](https://godotengine.org) reimplementation of the Generation
-2 Game Boy Color games, Gold, Silver and Crystal. It is written from scratch in
+A native [Godot 4](https://godotengine.org) reimplementation of Generation 2
+Game Boy Color games Gold, Silver and Crystal. It is written from scratch in
 GDScript, not an emulator, static recompilation or disassembly. A user-supplied
-cartridge dump is verified by SHA-1, decoded once into a cache, then released.
-No game data ships here. Bring your own ROM.
+cartridge dump is SHA-1 verified, decoded once into a cache, then released. No
+game data ships here: bring your own ROM.
 
 Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 
 > ### Status: early
 >
-> The import gate and first importer half are tested. A verified cartridge
+> The importer gate and first importer half are tested. A verified cartridge
 > decodes species, moves, items, types, the type chart, learnsets, evolutions,
 > palettes, all Pokémon sprites, trainer pics and parties, the font, text-box
 > borders and battle HUD. Battles support parties, switching, stats, damage,
 > accuracy, turn order, status and substatus effects, trainer AI, experience,
-> levelling and move learning on a real 160x144 screen. The launcher imports a
-> verified dump, opens its cache's save screen, creates or imports a party, and
-> starts the development battle. The first overworld runtime slice now renders
-> real maps, moves through connected maps and hosts explicit script requests,
-> including real trainer battles, imported win/loss text, map reloads and
-> save-safe blackout recovery. The live overworld slice also covers scripted
-> object lifecycle, bounded followers, map block edits, emotes, surf movement,
-> normal and swarm grass and surf encounter tables, fishing groups, roaming state,
-> repel checks, deterministic encounter resolution and movement-triggered wild
-> battle requests. The importer also preserves referenced overworld menus, 34
-> mart lists, phone contacts, special-call records and music/SFX pointer records.
-> The scene-free host resolves those records without reopening the ROM, and the
-> overworld now has a production service overlay for menu selection, atomic mart
-> purchases, bounded phone caller/callee script dispatch and bounded Gen II audio
-> playback for music, effects and cries. Party-owned overworld
-> transactions now cover gifts, eggs, imported NPC trades, common HP/status
-> items, repel and the core Poké Ball catch calculation behind a validated
-> candidate-save boundary. Wild battle capture input now drives the production
-> overlay through that transaction. Full story state, complete phone UI and the
-> mod loader do not exist yet, so this is not a complete
-> game.
-> Scene-level
-> integration tests also cover trainer sight through the real overworld battle
-> overlay, imported terminal text, live object refresh, emote rendering, wild
-> capture, save-backed blackout recovery and the four service overlay modes.
+> levelling and move learning on a real 160x144 screen.
+>
+> The launcher imports a verified dump, opens its cache's save screen, creates
+> or imports a party, and starts the development battle. The overworld slice
+> renders real maps, traverses connected maps, runs explicit script requests,
+> handles trainer battles, imported win/loss text, map reloads and save-safe
+> blackout recovery, and covers object lifecycle, bounded followers, block
+> edits, emotes, surf, grass, fishing, roaming, repel and deterministic wild
+> battle requests.
+>
+> The importer also preserves referenced overworld menus, 34 mart lists, phone
+> contacts, special-call records and music/SFX pointer records. The scene-free
+> host resolves them without reopening the ROM. The production service overlay
+> supports menu selection, atomic mart purchases, bounded phone caller/callee
+> dispatch and bounded Gen II music, effects and cries. Party transactions cover
+> gifts, eggs, imported NPC trades, common HP/status items, repel and the core
+> Poké Ball catch calculation behind a validated candidate-save boundary; wild
+> capture input uses that transaction.
+>
+> Full story state, complete phone UI and the mod loader do not exist yet, so
+> this is not a complete game. Scene-level integration tests cover trainer sight,
+> imported terminal text, live object refresh, emotes, wild capture, save-backed
+> blackout recovery and all four service overlay modes.
 
 ## Getting started
 
-You need Godot 4.8 or newer. After cloning, enable the commit guard once per
-clone because Git does not clone hooks:
+You need Godot 4.8 or newer. Enable the commit guard once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -71,7 +68,7 @@ godot --headless --path . -s res://tools/verify_rom.gd
 ## Supported cartridges
 
 Matching uses SHA-1, never filenames. Unknown hashes are refused because an
-uncharacterised bank layout would produce corrupt assets.
+uncharacterised bank layout could produce corrupt assets.
 
 | Game | SHA-1 |
 |---|---|
@@ -85,30 +82,30 @@ uncharacterised bank layout would produce corrupt assets.
 godot --headless --path . -s res://tools/import_rom.gd
 ```
 
-Import normally takes a few seconds per game. The cache is keyed by game and
-hash and stored in Godot's `user://`, never in the project or an export. Use
-`--verify` to run checks without writing.
+Import takes a few seconds per game. The cache is keyed by game and hash and
+lives in Godot's `user://`, never in the project or an export. Use `--verify`
+to check without writing.
 
 | Data | Contents |
 |---|---|
-| Species | Names, base stats, types, held items, egg groups, TM/HM flags |
-| Learnsets | All 251 species' level-up moves, in cartridge order |
-| Evolutions | Every evolution and its method/requirements |
+| Species | Names, base stats, types, held items, egg groups and TM/HM flags |
+| Learnsets | All 251 species' level-up moves in cartridge order |
+| Evolutions | Every evolution and method/requirements |
 | Moves | Names, power, type, accuracy, PP, effect and chance |
-| Items, types | 255 item names plus imported prices, effects, menus, pockets and healing metadata; 28 type names |
-| NPC trades | Gold/Silver six-row or Crystal seven-row trade records with requested/offered species, DVs, held item and OT data |
+| Items, types | 255 item names, prices, effects, menus, pockets, healing metadata and 28 type names |
+| NPC trades | Gold/Silver six-row or Crystal seven-row records with requested/offered species, DVs, held item and OT data |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
-| Trainers | Class names, pics, palettes, AI flags, DVs, and every party |
-| Palettes | Normal and shiny, as the cartridge's 15-bit colours |
+| Trainers | Class names, pics, palettes, AI flags, DVs and every party |
+| Palettes | Normal and shiny 15-bit cartridge colours |
 | Sprites | Front/back for 251 species and all 26 Unown forms |
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
-| Battle HUD | HP/EXP bars, panel borders and their colours |
+| Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
-| Wild encounters | Normal and swarm grass/water tables, 13 fishing groups with day/night substitutions, a 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf level variance and repel checks |
-| World services | Referenced menus, mart inventories, phone contacts, special calls and their bounded script/text resources, music, sound effects, cries and shared waveform assets |
+| Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
+| World services | Referenced menus, mart inventories, phone contacts, special calls, bounded scripts/text, music, SFX, cries and shared waveform assets |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
-rendering costs no duplicate images.
+rendering needs no duplicate images.
 
 Preview decoded graphics:
 
@@ -116,16 +113,16 @@ Preview decoded graphics:
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
 ```
 
-Use `trainers`, `font` or `frames` instead of `front`. Dump decoded tables with
-any of `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`,
+Use `trainers`, `font` or `frames` instead of `front`. Dump decoded tables
+with `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`,
 `evolutions`, `growth` or `all`:
 
 ```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
 
-`matchups` prints a grid. `learnsets` and `evolutions` resolve numbers into
-names. `growth` checks all 251 species against the six curves and base EXP.
+`matchups` prints a grid; `learnsets` and `evolutions` resolve numbers into
+names; `growth` checks all 251 species against the six curves and base EXP.
 
 ## Running
 
@@ -136,57 +133,40 @@ godot --headless --path . --quit-after 30
 ```
 
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
-ROM, and opens its save screen. That screen offers three validated slots, new
-games with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import,
-party inspection and the development battle. New games carry the verified
-Crystal home spawn and source starting money when that map exists in the
-selected cache. Continue enters the overworld; F5 writes its map, inventory
-and event snapshot back to the selected slot. See
-[docs/SAVES.md](docs/SAVES.md) for the save contract and cartridge SRAM
-boundary.
+ROM, and opens its save screen. It provides three validated slots, new games
+with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import, party
+inspection and the development battle. New games use the verified Crystal home
+spawn and source starting money when that map exists. Continue enters the
+overworld; F5 saves its map, inventory and event snapshot. See
+[docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
 
 Development scenes:
 
-- `game/render/pic_viewer.tscn`: Left/right changes species, `S` toggles shiny,
-  `B` swaps front/back, and `T` selects trainer classes.
-- `game/render/text_viewer.tscn`: Space advances, `F` cycles borders, and `C`
-  shows every glyph.
-- `game/battle/battle_screen.tscn`: `A` takes a turn, space advances events,
-  `W` switches, left/right changes the matchup, and `S`/`D` damage either side
-  without using a turn. In a wild overworld battle, `B` opens the owned-ball
-  selector, left/right changes the ball and space throws it. The player currently
-  chooses moves randomly; a full
-  moveset's learn-offer is declined automatically because those menus do not
-  exist yet. `show_trainer(trainer_class)` uses the real party and trainer AI;
-  `show_matchup` uses a fallback invented pairing.
-- `game/world/world_screen.tscn`: renders Route 29 by default with real
-  palettes, animation and object sprites. Arrows/WASD move the player and roll
-  imported encounters on maps with a table. Fishing selection is limited to
-  owned rod items, and `F` starts a cast only when the player faces water.
-  Space, Enter or Z advances the cast and bite states. F5 persists the current
-  world snapshot. The live host clock advances one real-time game minute per
-  minute and updates the source day boundaries. `preview_emote()` shows the
-  live object-emote renderer path, while `preview_wild_encounter()` and
-  `preview_fishing_battle()` open resolved imported battles through the
-  production battle overlay. The scene-free world API also exposes explicit
-  swarm and roaming schedule updates, repel countdowns and a JSON-safe world
-  snapshot that can be carried by a validated project save.
-  `preview_script_event()` exercises an imported map event, while
-  `preview_battle_request()` exercises the battle overlay used by explicit
-  overworld battle requests. The battle screen's
-  `preview_world_battle_loss()` drives the recovery message for a visual smoke
-  check. `preview_capture()` drives the real Master Ball throw message through
-  the capture bridge. `preview_party_transaction()` runs an in-memory Potion transaction
-  through the party host. The hint line also reports the imported world-service
-  record counts.
+- `game/render/pic_viewer.tscn`: left/right species, `S` shiny, `B` front/back,
+  `T` trainer classes.
+- `game/render/text_viewer.tscn`: Space advances, `F` cycles borders, `C` shows
+  every glyph.
+- `game/battle/battle_screen.tscn`: `A` turn, Space events, `W` switch,
+  left/right matchup, `S`/`D` damage either side. In wild battles, `B` opens
+  the owned-ball selector, left/right changes the ball and Space throws it.
+  Moves are currently random; full move sets decline the learn offer. Use
+  `show_trainer(trainer_class)` for a real party and trainer AI, or
+  `show_matchup` for a fallback pairing.
+- `game/world/world_screen.tscn`: arrows/WASD move Route 29, encounters use
+  imported tables, and `F` fishes only while facing water with an owned rod.
+  Space, Enter or `Z` advances casting and bites; F5 saves. The host clock
+  advances one real-time game minute per minute and updates source day
+  boundaries. `preview_emote()`, `preview_wild_encounter()`,
+  `preview_fishing_battle()`, `preview_script_event()`,
+  `preview_battle_request()`, `preview_world_battle_loss()`,
+  `preview_capture()` and `preview_party_transaction()` exercise their live
+  paths. The API also exposes swarm/roaming updates, repel countdowns and a
+  JSON-safe snapshot. The hint line reports imported service counts.
 
   `tools/preview_world_services.gd` captures the production mart overlay with
-  the deterministic integration cache.
-
-  `tools/preview_fishing.gd` captures the fishing state from the normal
-  renderer. With an imported cache, pass the game and map after the output
-  path, for example `silver 2 5`; the one-argument form remains a deterministic
-  integration-fixture smoke check.
+  the deterministic integration cache. `tools/preview_fishing.gd` captures
+  fishing; with an imported cache pass game and map after the output path, such
+  as `silver 2 5`. Its one-argument form remains a fixture smoke test.
 
 ## Tests
 
@@ -198,9 +178,9 @@ godot --headless -s res://addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_su
 ```
 
 Exit code `0` means all tests passed. They use synthetic files and a known
-SHA-1 vector, never a real cartridge. The overworld integration suites can be
-run on their own with `-gdir=res://tests/integration`; service coverage
-includes menus, marts, phone calls and audio requests.
+SHA-1 vector, never a real cartridge. Overworld integration suites can run
+alone with `-gdir=res://tests/integration`; service coverage includes menus,
+marts, phone calls and audio requests.
 
 ## Layout
 
@@ -209,7 +189,7 @@ includes menus, marts, phone calls and audio requests.
 | `game/` | Feature folders with colocated scenes and scripts |
 | `autoload/` | Project singletons |
 | `assets/` | Authored or freely licensed assets |
-| `assets/brand/` | Logo and banner, see its README |
+| `assets/brand/` | Logo and banner; see its README |
 | `addons/` | Third-party plugins |
 | `tests/` | GUT unit and integration tests |
 | `tools/` | Headless developer scripts |
@@ -218,10 +198,10 @@ includes menus, marts, phone calls and audio requests.
 
 ## Platforms
 
-Windows, macOS, Linux, Android and iOS use the GL Compatibility renderer.
-Export presets are not configured. iOS forbids JIT and runtime native code, so
-mods will be interpreted GDScript, never compiled extensions. This is why the
-project is GDScript-first.
+Windows, macOS, Linux, Android and iOS use GL Compatibility. Export presets
+are not configured. iOS forbids JIT and runtime native code, so mods must be
+interpreted GDScript, not compiled extensions. The project is therefore
+GDScript-first.
 
 ## Contributing
 
