@@ -37,7 +37,7 @@ const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 11
+const FORMAT_VERSION: int = 12
 
 
 static func directory_for(id: StringName, sha1: String) -> String:

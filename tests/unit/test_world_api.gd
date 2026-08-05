@@ -56,7 +56,7 @@ func _write_cache() -> void:
 		}],
 		"coord_events": [{"scene": 0, "x": 7, "y": 6, "script": 0x1234}],
 		"bg_events": [{"x": 8, "y": 6, "type": 0, "script": 0x2345}],
-		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x3456}],
+		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x3456, "event_flag": 7}],
 	}
 
 	var target_collision: Array = []
@@ -74,6 +74,11 @@ func _write_cache() -> void:
 		"collision": collision,
 		"collision_width": 16,
 		"collision_height": 12,
+		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_EAST,
+		"connections": [{
+			"direction": "east", "map_group": 1, "map_number": 2,
+			"x_offset": 0, "y_offset": 0,
+		}],
 		"events": source_events,
 	}
 	var target_map: Dictionary = {
@@ -86,6 +91,11 @@ func _write_cache() -> void:
 		"collision": target_collision,
 		"collision_width": 16,
 		"collision_height": 12,
+		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_WEST,
+		"connections": [{
+			"direction": "west", "map_group": 1, "map_number": 1,
+			"x_offset": 0, "y_offset": 0,
+		}],
 		"events": {"warps": [{
 			"x": 2, "y": 2, "destination": 1, "map_group": 1, "map_number": 1,
 		}]},
@@ -120,9 +130,11 @@ func _write_cache() -> void:
 	})
 
 
-func _world(start: Vector2i = Vector2i(8, 6)) -> Gen2WorldAPI:
+func _world(
+	start: Vector2i = Vector2i(8, 6), state: Gen2WorldState = null
+) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
-	return Gen2WorldAPI.open(data, 1, 1, start)
+	return Gen2WorldAPI.open(data, 1, 1, start, state)
 
 
 func test_collision_codes_keep_the_cartridge_permission_categories() -> void:
@@ -191,6 +203,22 @@ func test_active_map_objects_occupy_walk_cells() -> void:
 	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
 
+func test_event_flags_hide_objects_from_rendering_occupancy_and_dispatch() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
+	assert_false(world.can_walk_to(Vector2i(5, 6)))
+
+	world.set_event_flag(7)
+	assert_eq(world.visible_objects().size(), 0)
+	assert_null(world.object_at(Vector2i(5, 6)))
+	assert_true(world.can_walk_to(Vector2i(5, 6)))
+	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 0)
+
+	world.clear_event_flag(7)
+	assert_eq(world.visible_objects().size(), 1)
+	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
+
+
 func test_event_dispatch_reports_decoded_records_without_running_scripts() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var events: Array = world.dispatch_events()
@@ -219,6 +247,34 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
 
+func test_connected_edge_step_translates_the_player_and_reloads_the_target_map() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(15, 6))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_true(result["ok"])
+	assert_eq(result["kind"], &"connection")
+	assert_eq(result["from_map"], Vector2i(1, 1))
+	assert_eq(result["from_cell"], Vector2i(15, 6))
+	assert_eq(result["to_map"], Vector2i(1, 2))
+	assert_eq(result["to_cell"], Vector2i(0, 6))
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_eq(world.player_cell, Vector2i(0, 6))
+
+	var return_result: Dictionary = world.move_result(Vector2i.LEFT)
+	assert_true(return_result["ok"])
+	assert_eq(return_result["kind"], &"connection")
+	assert_eq(world.map_id(), Vector2i(1, 1))
+	assert_eq(world.player_cell, Vector2i(15, 6))
+
+
+func test_connection_requires_the_player_to_be_on_the_requested_edge() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var result: Dictionary = world.try_connection(Vector2i.RIGHT)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"not_at_edge")
+	assert_eq(world.map_id(), Vector2i(1, 1))
+	assert_eq(world.player_cell, Vector2i(8, 6))
+
+
 func test_invalid_directions_and_map_edges_do_not_move_player() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(0, 0))
 	assert_false(world.move(Vector2i.ZERO))
@@ -228,5 +284,4 @@ func test_invalid_directions_and_map_edges_do_not_move_player() -> void:
 	assert_eq(world.player_cell, Vector2i.ZERO)
 
 	world.player_cell = Vector2i(15, 11)
-	assert_false(world.move(Vector2i.RIGHT))
 	assert_false(world.move(Vector2i.DOWN))

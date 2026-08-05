@@ -4,14 +4,15 @@ extends RefCounted
 ## Scene-free runtime access to one imported Generation 2 map.
 ##
 ## The API works in walk cells: every cell is a 2x2 group of 8x8 graphics
-## tiles. It owns player position and camera framing, but not save data,
-## scripts, object state or scene nodes.
+## tiles. It owns player position, camera framing and live object state, while
+## event flags are supplied through a separate scene-free world state.
 
 const VIEW_CELLS: Vector2i = Vector2i(10, 9)
 const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
 
 var data: GameData = null
+var state: Gen2WorldState = null
 var current_map: Gen2WorldMap = null
 var current_tileset: Gen2WorldTileset = null
 var player_cell: Vector2i = Vector2i.ZERO
@@ -24,7 +25,11 @@ var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
 ## Opens one map through the public cartridge-content API.
 ## Returns null when the cache does not contain the requested map or tileset.
 static func open(
-	game_data: GameData, group: int, number: int, start_cell: Vector2i
+	game_data: GameData,
+	group: int,
+	number: int,
+	start_cell: Vector2i,
+	world_state: Gen2WorldState = null,
 ) -> Gen2WorldAPI:
 	if game_data == null:
 		return null
@@ -34,7 +39,7 @@ static func open(
 	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
 	if tileset == null:
 		return null
-	return Gen2WorldAPI.new(game_data, map, tileset, start_cell)
+	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state)
 
 
 func _init(
@@ -42,8 +47,11 @@ func _init(
 	map: Gen2WorldMap,
 	tileset: Gen2WorldTileset,
 	start_cell: Vector2i = Vector2i.ZERO,
+	world_state: Gen2WorldState = null,
 ) -> void:
 	data = game_data
+	state = world_state if world_state != null else Gen2WorldState.new()
+	state.changed.connect(_on_world_state_changed)
 	current_map = map
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
@@ -92,7 +100,19 @@ func set_object_time(hour: int, time_of_day: int) -> void:
 	object_hour = clampi(hour, 0, 23)
 	object_time_of_day = clampi(time_of_day, 0, 3)
 	for object: Gen2WorldObject in objects:
-		object.active = object.visible_at(object_hour, object_time_of_day)
+		object.active = object.visible_with_state(object_hour, object_time_of_day, state)
+
+
+func set_event_flag(flag: int, active: bool = true) -> void:
+	state.set_event_flag(flag, active)
+
+
+func clear_event_flag(flag: int) -> void:
+	state.clear_event_flag(flag)
+
+
+func event_flag_active(flag: int) -> bool:
+	return state.is_event_flag_active(flag)
 
 
 func visible_objects() -> Array:
@@ -176,19 +196,31 @@ func events_at(cell: Vector2i = player_cell) -> Array:
 		return []
 	var out: Array = []
 	for source: String in ["warps", "coord_events", "bg_events", "objects"]:
-		for raw: Dictionary in current_map.events.get(source, []):
+		var rows: Array = current_map.events.get(source, [])
+		for index: int in rows.size():
+			var raw: Dictionary = rows[index]
 			if int(raw.get("x", -1)) != cell.x or int(raw.get("y", -1)) != cell.y:
 				continue
 			var event: Dictionary = raw.duplicate(true)
 			event["kind"] = StringName(source)
+			if source == "objects":
+				event["object_index"] = index
 			out.append(event)
 	return out
 
 
-## Public event boundary for the screen and future systems. It reports decoded
-## records without running cartridge scripts or changing event flags.
+## Public event boundary for the screen and future systems. It reports active
+## decoded records without running cartridge scripts or changing event flags.
 func dispatch_events(cell: Vector2i = player_cell) -> Array:
-	return events_at(cell)
+	var out: Array = []
+	for event: Dictionary in events_at(cell):
+		if event.get("kind", &"") == &"objects":
+			var index: int = int(event.get("object_index", -1))
+			if index >= 0 and index < objects.size() \
+				and not (objects[index] as Gen2WorldObject).active:
+				continue
+		out.append(event)
+	return out
 
 
 ## Resolves and applies an ordinary warp at the current cell. The destination
@@ -235,10 +267,7 @@ func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	var target_warp: Dictionary = (target_warps[destination_index] as Dictionary).duplicate(true)
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = cell
-	current_map = target_map
-	current_tileset = target_tileset
-	player_cell = _clamp_cell(Vector2i(int(target_warp["x"]), int(target_warp["y"])))
-	_load_objects()
+	_apply_map(target_map, target_tileset, Vector2i(int(target_warp["x"]), int(target_warp["y"])))
 	return {
 		"ok": true,
 		"kind": &"warp",
@@ -248,6 +277,104 @@ func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 		"to_cell": player_cell,
 		"source": source_warp,
 		"destination": target_warp,
+	}
+
+
+## Resolves the source connection for a cardinal step beyond the current map.
+## The stored offsets are the signed cell offsets generated by the cartridge's
+## connection macro. No map mutation occurs when the target is invalid.
+func try_connection(direction: Vector2i) -> Dictionary:
+	var direction_name: String = _direction_name(direction)
+	if direction_name.is_empty() or current_map == null or data == null:
+		return {}
+	if not _at_connection_edge(direction_name):
+		return {
+			"ok": false,
+			"kind": &"connection",
+			"reason": &"not_at_edge",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"direction": direction_name,
+		}
+	var source_connection: Dictionary = {}
+	for connection: Dictionary in current_map.connections:
+		if String(connection.get("direction", "")) == direction_name:
+			source_connection = connection.duplicate(true)
+			break
+	if source_connection.is_empty():
+		return {}
+
+	var target_group: int = int(source_connection.get("map_group", -1))
+	var target_number: int = int(source_connection.get("map_number", -1))
+	var target_map: Gen2WorldMap = data.world_map(target_group, target_number)
+	if target_map == null:
+		return {
+			"ok": false,
+			"kind": &"connection",
+			"reason": &"missing_map",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"direction": direction_name,
+		}
+	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset)
+	if target_tileset == null:
+		return {
+			"ok": false,
+			"kind": &"connection",
+			"reason": &"missing_tileset",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"direction": direction_name,
+		}
+
+	var target_cell: Vector2i
+	match direction_name:
+		"north":
+			target_cell = Vector2i(
+				player_cell.x + int(source_connection.get("x_offset", 0)),
+				target_map.collision_height - 1,
+			)
+		"south":
+			target_cell = Vector2i(
+				player_cell.x + int(source_connection.get("x_offset", 0)),
+				0,
+			)
+		"west":
+			target_cell = Vector2i(
+				target_map.collision_width - 1,
+				player_cell.y + int(source_connection.get("y_offset", 0)),
+			)
+		"east":
+			target_cell = Vector2i(
+				0,
+				player_cell.y + int(source_connection.get("y_offset", 0)),
+			)
+		_:
+			return {}
+	if target_cell.x < 0 or target_cell.y < 0 \
+		or target_cell.x >= target_map.collision_width \
+		or target_cell.y >= target_map.collision_height:
+		return {
+			"ok": false,
+			"kind": &"connection",
+			"reason": &"invalid_target_cell",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"direction": direction_name,
+		}
+
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	_apply_map(target_map, target_tileset, target_cell)
+	return {
+		"ok": true,
+		"kind": &"connection",
+		"direction": direction_name,
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": map_id(),
+		"to_cell": player_cell,
+		"source": source_connection,
 	}
 
 
@@ -295,24 +422,43 @@ func advance_objects(random: RandomNumberGenerator) -> int:
 	return moved
 
 
+## Moves one cell or enters a neighboring map when the step leaves a connected
+## map edge. The legacy boolean move() wrapper remains available to callers.
+func move_result(direction: Vector2i) -> Dictionary:
+	if abs(direction.x) + abs(direction.y) != 1:
+		return {"ok": false, "kind": &"move", "reason": &"invalid_direction"}
+	var destination: Vector2i = player_cell + direction
+	if current_map == null:
+		return {"ok": false, "kind": &"move", "reason": &"missing_map"}
+	if destination.x < 0 or destination.y < 0 \
+		or destination.x >= current_map.collision_width \
+		or destination.y >= current_map.collision_height:
+		var transition: Dictionary = try_connection(direction)
+		if not transition.is_empty():
+			if bool(transition.get("ok", false)):
+				player_facing = _facing_for_direction(direction)
+			return transition
+		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
+	if not can_walk_to(destination):
+		return {"ok": false, "kind": &"move", "reason": &"blocked"}
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	player_cell = destination
+	player_facing = _facing_for_direction(direction)
+	return {
+		"ok": true,
+		"kind": &"move",
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": from_map,
+		"to_cell": player_cell,
+	}
+
+
 ## Moves exactly one walk cell in a cardinal direction. Diagonal, zero and
 ## out-of-bounds moves are rejected without changing the player position.
 func move(direction: Vector2i) -> bool:
-	if abs(direction.x) + abs(direction.y) != 1:
-		return false
-	var destination: Vector2i = player_cell + direction
-	if not can_walk_to(destination):
-		return false
-	player_cell = destination
-	if direction == Vector2i.UP:
-		player_facing = Gen2WorldSprite.FACING_UP
-	elif direction == Vector2i.DOWN:
-		player_facing = Gen2WorldSprite.FACING_DOWN
-	elif direction == Vector2i.LEFT:
-		player_facing = Gen2WorldSprite.FACING_LEFT
-	elif direction == Vector2i.RIGHT:
-		player_facing = Gen2WorldSprite.FACING_RIGHT
-	return true
+	return bool(move_result(direction).get("ok", false))
 
 
 func _clamp_cell(cell: Vector2i) -> Vector2i:
@@ -321,6 +467,60 @@ func _clamp_cell(cell: Vector2i) -> Vector2i:
 		clampi(cell.x, 0, maxi(0, size.x - 1)),
 		clampi(cell.y, 0, maxi(0, size.y - 1)),
 	)
+
+
+func _direction_name(direction: Vector2i) -> String:
+	match direction:
+		Vector2i.UP:
+			return "north"
+		Vector2i.DOWN:
+			return "south"
+		Vector2i.LEFT:
+			return "west"
+		Vector2i.RIGHT:
+			return "east"
+	return ""
+
+
+func _facing_for_direction(direction: Vector2i) -> int:
+	match direction:
+		Vector2i.UP:
+			return Gen2WorldSprite.FACING_UP
+		Vector2i.DOWN:
+			return Gen2WorldSprite.FACING_DOWN
+		Vector2i.LEFT:
+			return Gen2WorldSprite.FACING_LEFT
+		Vector2i.RIGHT:
+			return Gen2WorldSprite.FACING_RIGHT
+	return player_facing
+
+
+func _at_connection_edge(direction_name: String) -> bool:
+	if current_map == null:
+		return false
+	match direction_name:
+		"north":
+			return player_cell.y == 0
+		"south":
+			return player_cell.y == current_map.collision_height - 1
+		"west":
+			return player_cell.x == 0
+		"east":
+			return player_cell.x == current_map.collision_width - 1
+	return false
+
+
+func _apply_map(
+	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
+) -> void:
+	current_map = target_map
+	current_tileset = target_tileset
+	player_cell = _clamp_cell(target_cell)
+	_load_objects()
+
+
+func _on_world_state_changed() -> void:
+	set_object_time(object_hour, object_time_of_day)
 
 
 func _load_objects() -> void:

@@ -380,6 +380,15 @@ static func _read_map(
 		or _far_offset(rom, {"bank": scripts_bank, "address": events_address}) < 0:
 		return _error("Map %d/%d has an invalid scripts or events pointer." % [group, number])
 
+	var connection_flags: int = rom.u8(attributes + 11)
+	if (connection_flags & 0xF0) != 0:
+		return _error("Map %d/%d has undefined connection flags $%02X." % [group, number, connection_flags])
+	var connections: Array = _read_connections(
+		rom, layout, attributes + RomLayout.MAP_ATTRIBUTES_SIZE, connection_flags
+	)
+	if connections.is_empty() and connection_flags != 0:
+		return _error("Map %d/%d connection records are truncated or invalid." % [group, number])
+
 	var event_result: Dictionary = _read_events(
 		rom, scripts_bank, events_address, group, number, width * 2, height * 2
 	)
@@ -417,7 +426,8 @@ static func _read_map(
 		"collision": collision_grid,
 		"collision_width": width * 2,
 		"collision_height": height * 2,
-		"connections": rom.u8(attributes + 11),
+		"connection_flags": connection_flags,
+		"connections": connections,
 		"scripts": {"bank": scripts_bank, "address": scripts_address},
 		"events": {
 			"bank": scripts_bank,
@@ -428,6 +438,50 @@ static func _read_map(
 			"objects": event_result["objects"],
 		},
 	}
+
+
+static func _read_connections(
+	rom: RomFile, layout: Dictionary, at: int, connection_flags: int
+) -> Array:
+	var out: Array = []
+	# The cartridge emits connection records in this order, regardless of which
+	# direction bits are present: north, south, west, east.
+	var directions: Array = [
+		["north", RomLayout.MAP_CONNECTION_FLAG_NORTH],
+		["south", RomLayout.MAP_CONNECTION_FLAG_SOUTH],
+		["west", RomLayout.MAP_CONNECTION_FLAG_WEST],
+		["east", RomLayout.MAP_CONNECTION_FLAG_EAST],
+	]
+	for direction: Array in directions:
+		var name: String = String(direction[0])
+		var flag: int = int(direction[1])
+		if (connection_flags & flag) == 0:
+			continue
+		if not rom.in_bounds(at, RomLayout.MAP_CONNECTION_RECORD_SIZE):
+			return []
+		var map_group: int = rom.u8(at)
+		var map_number: int = rom.u8(at + 1)
+		if map_group <= 0 or map_group > RomLayout.MAP_GROUP_COUNT \
+			or map_number <= 0 or map_number > RomLayout.map_group_count(layout, map_group):
+			return []
+		out.append({
+			"direction": name,
+			"map_group": map_group,
+			"map_number": map_number,
+			"target_block_pointer": rom.u16le(at + 2),
+			"map_pointer": rom.u16le(at + 4),
+			"length": rom.u8(at + 6),
+			"target_width_blocks": rom.u8(at + 7),
+			"y_offset": _signed_byte(rom.u8(at + 8)),
+			"x_offset": _signed_byte(rom.u8(at + 9)),
+			"window_pointer": rom.u16le(at + 10),
+		})
+		at += RomLayout.MAP_CONNECTION_RECORD_SIZE
+	return out
+
+
+static func _signed_byte(value: int) -> int:
+	return value - 0x100 if (value & 0x80) != 0 else value
 
 
 static func _read_events(
@@ -522,6 +576,9 @@ static func _read_events(
 			hour_1 = -1
 		if hour_2 == 0xFF:
 			hour_2 = -1
+		var event_flag: int = rom.u16le(at + 11)
+		if event_flag == 0xFFFF:
+			event_flag = -1
 		objects.append({
 			"sprite": rom.u8(at),
 			"x": object_x,
@@ -535,7 +592,7 @@ static func _read_events(
 			"object_type": palette_type & 0x0F,
 			"sight_range": rom.u8(at + 8),
 			"script": rom.u16le(at + 9),
-			"event_flag": rom.u16le(at + 11),
+			"event_flag": event_flag,
 		})
 		at += RomLayout.MAP_OBJECT_EVENT_SIZE
 

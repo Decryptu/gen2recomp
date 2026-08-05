@@ -21,7 +21,8 @@ var blocks: Array = []
 var collision: Array = []
 var collision_width: int = 0
 var collision_height: int = 0
-var connections: int = 0
+var connection_flags: int = 0
+var connections: Array = []
 var scripts: Dictionary = {}
 var events: Dictionary = {}
 
@@ -44,7 +45,14 @@ static func from_cache(value: Dictionary) -> Gen2WorldMap:
 	out.collision = value.get("collision", []) if value.get("collision", []) is Array else []
 	out.collision_width = int(value.get("collision_width", out.width_blocks * 2))
 	out.collision_height = int(value.get("collision_height", out.height_blocks * 2))
-	out.connections = int(value.get("connections", 0))
+	var cached_connections: Variant = value.get("connections", [])
+	if cached_connections is Array:
+		out.connections = _connection_rows(cached_connections)
+		out.connection_flags = int(value.get("connection_flags", 0))
+	else:
+		# Caches before format 12 stored only the raw direction flags.
+		out.connection_flags = int(cached_connections)
+		out.connections = []
 	out.scripts = _scripts_from_cache(value.get("scripts", {}))
 	out.events = _events_from_cache(value.get("events", {}))
 	return out
@@ -70,6 +78,20 @@ static func _scripts_from_cache(value: Variant) -> Dictionary:
 		"bank": int(scripts.get("bank", 0)),
 		"address": int(scripts.get("address", 0)),
 	}
+
+
+static func _connection_rows(value: Array) -> Array:
+	var out: Array = []
+	for raw: Dictionary in value:
+		var connection: Dictionary = raw.duplicate(true)
+		for field: String in [
+			"map_group", "map_number", "length", "target_width_blocks",
+			"x_offset", "y_offset", "target_block_pointer", "map_pointer",
+			"window_pointer",
+		]:
+			connection[field] = int(raw.get(field, 0))
+		out.append(connection)
+	return out
 
 
 static func _events_from_cache(value: Variant) -> Dictionary:

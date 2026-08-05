@@ -85,17 +85,21 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func move_player(direction: Vector2i) -> bool:
 	if _world == null:
 		return false
-	var moved: bool = _world.move(direction)
-	if moved:
-		var transition: Dictionary = _world.try_warp()
-		if _renderer != null:
-			if bool(transition.get("ok", false)):
-				_animation.configure(_world, time_of_day)
-				_renderer.set_world(_world, _animation)
-			else:
-				_renderer.refresh()
-		_refresh_labels()
-	return moved
+	var movement: Dictionary = _world.move_result(direction)
+	if not bool(movement.get("ok", false)):
+		return false
+
+	var transition: Dictionary = movement
+	if movement.get("kind", &"") == &"move":
+		transition = _world.try_warp()
+	if _renderer != null:
+		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
+			_animation.configure(_world, time_of_day)
+			_renderer.set_world(_world, _animation)
+		else:
+			_renderer.refresh()
+	_refresh_labels()
+	return true
 
 
 func move_right() -> void:
