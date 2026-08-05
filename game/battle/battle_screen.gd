@@ -1,6 +1,8 @@
 class_name Gen2BattleScreen
 extends Control
 
+signal battle_finished(result: Dictionary)
+
 ## The battle screen: two Pokémon, two status panels and a text box, at the
 ## positions the hardware puts them.
 ##
@@ -88,6 +90,9 @@ var _rng := RandomNumberGenerator.new()
 var _save_slot: int = -1
 var _save_written: bool = false
 var _source_save: Gen2SaveData = null
+var _world_battle_active: bool = false
+var _world_battle_request: Dictionary = {}
+var _world_battle_completion_sent: bool = false
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -143,12 +148,16 @@ func _ready() -> void:
 	_screen.display(_box)
 	_box.place_at_bottom()
 
-	var saved: Gen2SaveData = GameRuntime.selected_save()
-	if saved != null and show_saved_party(saved):
-		show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
+	var world_meta: Variant = get_meta("world_battle_request", {})
+	if world_meta is Dictionary and not (world_meta as Dictionary).is_empty():
+		call_deferred("_start_world_battle_from_meta", world_meta)
 	else:
-		show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
-		_announce()
+		var saved: Gen2SaveData = GameRuntime.selected_save()
+		if saved != null and show_saved_party(saved):
+			show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
+		else:
+			show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
+			_announce()
 
 
 ## True once the cache had everything the screen draws with.
@@ -159,6 +168,9 @@ func is_ready() -> bool:
 ## Puts two Pokémon on the screen at a level each, both at full health, and
 ## starts a battle between them.
 func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: int = 5) -> void:
+	_world_battle_active = false
+	_world_battle_request = {}
+	_world_battle_completion_sent = false
 	_enemy = _wrap_species(enemy)
 	_player = _wrap_species(player)
 	_enemy_level = enemy_level
@@ -191,6 +203,9 @@ func show_trainer(
 	trainer_class: int, index: int = 0, player_species: int = DEFAULT_PLAYER,
 	player_level: int = DEFAULT_LEVEL
 ) -> void:
+	_world_battle_active = false
+	_world_battle_request = {}
+	_world_battle_completion_sent = false
 	var enemy_party: Gen2Party = Gen2TrainerParty.build(_data, trainer_class, index)
 	if enemy_party == null:
 		return
@@ -210,7 +225,7 @@ func show_trainer(
 	_enemy_turns_taken = 0
 	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
-		_data, _party_from(_player, _player_level), enemy_party, _rng
+		_data, _party_from(_player, _player_level), enemy_party, _rng, true
 	)
 	if _battle == null:
 		return
@@ -231,6 +246,9 @@ func show_trainer(
 ## slot. The enemy remains the existing wild demonstration, while the player
 ## side now carries persistent levels, HP, PP, status, DVs and stat experience.
 func show_saved_party(save: Gen2SaveData) -> bool:
+	_world_battle_active = false
+	_world_battle_request = {}
+	_world_battle_completion_sent = false
 	var player_party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, save)
 	var enemy_party: Gen2Party = _party_from(DEFAULT_ENEMY, DEFAULT_LEVEL)
 	if player_party == null or enemy_party == null:
@@ -258,6 +276,77 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	)
 	_refresh_exp_bar()
 	return true
+
+
+## Starts a battle requested by the scene-free overworld runtime. The caller
+## keeps the world API alive while this screen owns the battle presentation.
+func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
+	if _data == null or _hud == null:
+		_emit_world_battle_failure(&"missing_battle_data")
+		return false
+	var player_party: Gen2Party = (
+		Gen2SaveBattleAdapter.to_battle_party(_data, save)
+		if save != null else Gen2WorldBattleAdapter.fallback_party(_data)
+	)
+	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(_data, request, player_party, _rng)
+	if not bool(prepared.get("ok", false)):
+		_emit_world_battle_failure(
+			StringName(prepared.get("reason", &"battle_setup_failed")),
+			prepared.get("details", {})
+		)
+		return false
+
+	_world_battle_active = true
+	_world_battle_request = (prepared.get("request", {}) as Dictionary).duplicate(true)
+	_world_battle_completion_sent = false
+	_pending = []
+	_save_slot = save.slot if save != null else -1
+	_save_written = false
+	_source_save = save
+	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
+	_enemy_turns_taken = 0
+	_player_turns_taken = 0
+	_battle = prepared["battle"]
+	var player_party_ready: Gen2Party = prepared["player_party"]
+	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
+	_player = player_party_ready.active_mon().species
+	_player_level = player_party_ready.active_mon().level
+	_enemy = enemy_party_ready.active_mon().species
+	_enemy_level = enemy_party_ready.active_mon().level
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
+	_refresh_exp_bar()
+
+	if bool(prepared.get("trainer_battle", false)):
+		var trainer: Dictionary = _data.trainer_party(
+			int(prepared.get("trainer_class", 0)), int(prepared.get("trainer_index", 0))
+		)
+		show_message("%s %s wants to fight!" % [
+			_data.trainer_name(int(prepared.get("trainer_class", 0))),
+			String(trainer.get("name", "")),
+		])
+	else:
+		_announce()
+	return true
+
+
+func _start_world_battle_from_meta(meta: Variant) -> void:
+	if not meta is Dictionary:
+		_emit_world_battle_failure(&"invalid_battle_metadata")
+		return
+	var values: Dictionary = meta as Dictionary
+	var save_value: Variant = values.get("save", null)
+	var save: Gen2SaveData = save_value if save_value is Gen2SaveData else null
+	start_world_battle(values.get("request", {}), save)
+
+
+func _emit_world_battle_failure(reason: StringName, details: Dictionary = {}) -> void:
+	if _world_battle_completion_sent:
+		return
+	_world_battle_completion_sent = true
+	battle_finished.emit({"ok": false, "reason": reason, "details": details.duplicate(true)})
 
 
 ## A fallback party led by [param species], with the species after it behind.
@@ -427,7 +516,8 @@ func advance() -> void:
 	if _replace_the_fallen():
 		return
 	if _battle != null and _battle.is_over():
-		_save_battle_result()
+		if _save_battle_result() and _world_battle_active:
+			_finish_world_battle()
 		return
 	take_turn()
 
@@ -435,17 +525,41 @@ func advance() -> void:
 ## Writes back only after every event from a finished battle has been shown.
 ## Saving during a resolved turn would capture battle state the player has not
 ## seen yet, while the persistent save model intentionally has no such state.
-func _save_battle_result() -> void:
+func _save_battle_result() -> bool:
 	if _save_slot < 0 or _save_written or _battle == null:
-		return
+		return true
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save
 	)
 	var result: Dictionary = Gen2SaveStore.save(save, _data)
 	if not result["ok"]:
 		push_error("Could not save battle result: %s" % result["message"])
-		return
+		if _world_battle_active:
+			_emit_world_battle_failure(&"battle_save_failed", {
+				"message": result.get("message", ""),
+			})
+		return false
 	_save_written = true
+	return true
+
+
+func _finish_world_battle() -> void:
+	if _world_battle_completion_sent or _battle == null or not _battle.is_over():
+		return
+	var winner: Variant = _battle.winner()
+	var outcome: StringName = (
+		Gen2WorldBattleAdapter.OUTCOME_WON
+		if winner == Gen2Battle.PLAYER
+		else Gen2WorldBattleAdapter.OUTCOME_LOST
+	)
+	_world_battle_completion_sent = true
+	battle_finished.emit({
+		"ok": true,
+		"outcome": outcome,
+		"winner": winner,
+		"request": _world_battle_request.duplicate(true),
+		"save_written": _save_written,
+	})
 
 
 ## Sends out the first Pokémon standing on any side that owes one, and answers

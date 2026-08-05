@@ -61,6 +61,10 @@ static func begin(
 ## Advances until a text/button pause, completion or a bounded failure.
 func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 	if _pending:
+		var pending_request: Dictionary = _pending.get("request", {})
+		if _pending.get("type", &"") == &"runtime_request" \
+			and StringName(pending_request.get("kind", &"")) == &"battle_requested":
+			return _waiting_result()
 		if not acknowledge or (_pending.get("type", &"") == &"choice" and choice < 0):
 			return _waiting_result()
 		var pending_type: StringName = StringName(_pending.get("type", &""))
@@ -111,6 +115,50 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			return _complete_result()
 
 	return _complete()
+
+
+## Completes a host-owned runtime request without treating a button press as its
+## result. Battle loss is deliberately a structured failure until blackout and
+## save-backed recovery have a canonical host model.
+func complete_runtime_request(result: Dictionary) -> Dictionary:
+	if _pending.is_empty() or _pending.get("type", &"") != &"runtime_request":
+		return {
+			"ok": false, "status": &"failed", "reason": &"runtime_request_not_pending",
+			"details": result.duplicate(true),
+		}
+	var request: Dictionary = _pending.get("request", {})
+	var kind: StringName = StringName(request.get("kind", &""))
+	if kind != &"battle_requested":
+		return {
+			"ok": false, "status": &"failed", "reason": &"runtime_request_kind_mismatch",
+			"details": {"kind": kind},
+		}
+	if not bool(result.get("ok", false)):
+		return _fail(
+			StringName(result.get("reason", &"runtime_request_failed")), result
+		)
+	var outcome: StringName = StringName(result.get("outcome", &""))
+	if String(outcome).is_empty():
+		return _fail(&"invalid_battle_outcome", result)
+	if outcome != Gen2WorldBattleAdapter.OUTCOME_WON:
+		return _fail(StringName("battle_%s" % outcome), result)
+
+	_stage_just_battled(true)
+	_script_value = 1
+	_events.append({
+		"type": &"battle_completed",
+		"outcome": outcome,
+		"request": request.duplicate(true),
+		"result": result.duplicate(true),
+	})
+	_pending = {}
+	return advance()
+
+
+func pending_runtime_request() -> Dictionary:
+	if _pending.get("type", &"") != &"runtime_request":
+		return {}
+	return (_pending.get("request", {}) as Dictionary).duplicate(true)
 
 
 func is_waiting() -> bool:

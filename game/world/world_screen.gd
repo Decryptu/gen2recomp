@@ -10,6 +10,7 @@ extends Control
 const BACKGROUND: Color = Color("#09111f")
 const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
+const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 
 @export var map_group: int = 10
 @export var map_number: int = 17
@@ -23,6 +24,7 @@ var _renderer: Gen2WorldRenderer = null
 var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
 var _script_prompt: String = ""
+var _battle_host: Gen2BattleScreen = null
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -68,7 +70,7 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if _world == null or not event.is_pressed():
+	if _world == null or _battle_host != null or not event.is_pressed():
 		return
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
@@ -163,6 +165,49 @@ func preview_script_event() -> void:
 	_refresh_labels()
 
 
+## Public screenshot driver for the battle-request host path. It starts the
+## same request shape emitted by [Gen2WorldScriptRunner], without pretending a
+## map event was present in the selected development map.
+func preview_battle_request() -> void:
+	_start_battle_request({
+		"kind": &"battle_requested",
+		"values": {"kind": &"wild", "pokemon": 16, "level": 5},
+	})
+
+
+func _start_battle_request(request: Dictionary) -> void:
+	if _battle_host != null or _data == null:
+		return
+	var save: Gen2SaveData = GameRuntime.selected_save()
+	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
+	host.set_meta("world_battle_request", {"request": request.duplicate(true), "save": save})
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 10
+	host.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(host)
+	host.battle_finished.connect(_on_battle_finished)
+	_battle_host = host
+	_script_prompt = "Battle in progress"
+	_refresh_labels()
+
+
+func _on_battle_finished(result: Dictionary) -> void:
+	var host: Gen2BattleScreen = _battle_host
+	_battle_host = null
+	if host != null:
+		host.queue_free()
+	if _world == null:
+		return
+	var resumed: Array = _world.complete_runtime_request(result)
+	if resumed.is_empty():
+		_script_prompt = "Battle finished: %s" % String(
+			result.get("outcome", result.get("reason", "unknown"))
+		)
+	else:
+		_show_script_results(resumed)
+	_refresh_labels()
+
+
 func _advance_script_input() -> void:
 	if _text_box.is_revealing():
 		_text_box.finish()
@@ -198,6 +243,9 @@ func _show_script_results(results: Array) -> void:
 				)
 			elif event_type == &"runtime_request":
 				var request: Dictionary = event.get("request", {})
+				if StringName(request.get("kind", &"")) == &"battle_requested":
+					_start_battle_request(request)
+					break
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
 				)

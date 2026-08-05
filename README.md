@@ -29,8 +29,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > accuracy, turn order, status and substatus effects, trainer AI, experience,
 > levelling and move learning on a real 160x144 screen. The launcher imports a
 > verified dump, opens its cache's save screen, creates or imports a party, and
-> starts the development battle. The overworld, audio and mod loader do not
-> exist yet, so this is not a complete game.
+> starts the development battle. The first overworld runtime slice now renders
+> real maps, moves through connected maps and hosts explicit script requests,
+> including battles. Full story state, audio and the mod loader do not exist
+> yet, so this is not a complete game.
 
 ## Getting started
 
@@ -129,6 +131,10 @@ Development scenes:
   moveset's learn-offer is declined automatically because those menus do not
   exist yet. `show_trainer(trainer_class)` uses the real party and trainer AI;
   `show_matchup` uses a fallback invented pairing.
+- `game/world/world_screen.tscn`: renders the development map with real
+  palettes, animation and object sprites. Arrows/WASD move the player, and
+  `preview_battle_request()` exercises the battle overlay used by explicit
+  overworld battle requests.
 
 ## Tests
 
