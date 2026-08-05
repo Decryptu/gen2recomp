@@ -43,9 +43,24 @@ keep rules separate from content and receive an injected
 | `text_codec.gd` | Generation 2 character encoding |
 | `palette.gd` | 15-bit BGR colours |
 | `rom_layout.gd` | Per-game table locations |
-| `rom_cache.gd` | Cache paths, formats and lifecycle |
+| `rom_cache.gd` | Cache paths, formats, payload blobs and lifecycle |
 | `world_services_importer.gd` | Menus, marts, phone records, audio pointers, cries and shared waveforms |
 | `rom_importer.gd` | Orchestration and layout checks |
+
+Raw cartridge byte runs do not go into JSON. A decimal array costs about four
+bytes on disk per cartridge byte and about twenty-six resident once parsed into
+an Array of Variants, which made scripts, text and audio 96 MB of a 100 MB
+cache. Write them with `RomCache.write_payload_map()` when the run is a whole
+value in a pointer map, or `RomCache.write_section()` when it is a `bytes`
+field of a record; both move the bytes into a `.bin` blob and leave an
+`[offset, length]` span in the JSON. `GameData` reads the blob as a
+`PackedByteArray` and hands the bytes back under `bytes`. Only a named `bytes`
+field is moved: plenty of cached arrays are small numbers without being
+payloads, and a mart list or an encounter rate must stay an array.
+
+World sections load on first use. The launcher, the pic viewer and a battle
+never read scripts, text or audio, and eagerly reading them made listing three
+games cost more than entering one.
 
 Decoders take bytes and return data, with no cartridge knowledge, so small
 hand-built inputs can test them. `game/data/game_data.gd` is the sole
@@ -88,6 +103,17 @@ scene nodes and audio devices so synthetic records can test headers, pointers,
 loops, timing and truncation. The renderer is deterministic and bounded; do
 not turn unsupported modulation into an unbounded stream or claim byte-level
 hardware fidelity.
+
+### Mods
+
+`game/mods/mod_manifest.gd` validates a mod's `mod.json` without running any of
+it; `game/mods/mod_host.gd` is the registry a mod is handed. The world screen
+constructs its renderer through the host, so a registered renderer replaces the
+view without the screen knowing what it draws with. Keep mods away from scene
+nodes and engine internals: a mod reaches cartridge content through `GameData`
+and world state through `Gen2WorldAPI`, both scene-free. See
+[MODS.md](MODS.md) for the contract and why a renderer must not write world
+state.
 
 ### Rendering and text
 

@@ -26,7 +26,9 @@ var _data: GameData = null
 var _injected_data: GameData = null
 var _injected_save: Gen2SaveData = null
 var _world: Gen2WorldAPI = null
-var _renderer: Gen2WorldRenderer = null
+## Whatever the mod host supplies. Typed as Node because a registered renderer
+## only has to satisfy Gen2ModHost.WORLD_RENDERER_METHODS, not extend the 2D one.
+var _renderer: Node = null
 var _animation: Gen2WorldAnimation = null
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
@@ -108,7 +110,9 @@ func _build_world() -> void:
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
 	_animation.configure(_world, time_of_day)
-	_renderer = Gen2WorldRenderer.new()
+	# Constructed through the mod host rather than directly, so a registered
+	# renderer replaces this view without the screen knowing what it draws with.
+	_renderer = Gen2ModHost.instance().create_world_renderer()
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(time_of_day)
 	_screen.display(_renderer)
