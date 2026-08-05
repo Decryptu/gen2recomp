@@ -79,6 +79,7 @@ const TILE: int = Gen2Font.TILE
 const BACKGROUND: Color = Color.WHITE
 
 var _data: GameData = null
+var _injected_data: GameData = null
 var _hud: Gen2BattleHud = null
 
 ## The battle behind the screen, and the two Pokémon in it. The display state
@@ -96,6 +97,7 @@ var _world_battle_completion_sent: bool = false
 var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
 var _world_battle_recovery: Dictionary = {}
+var _last_message: String = ""
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -127,7 +129,9 @@ var _box: Gen2TextBox = null
 
 
 func _ready() -> void:
-	_data = GameRuntime.selected_data() if GameRuntime.has_selected_game() else null
+	_data = _injected_data if _injected_data != null else (
+		GameRuntime.selected_data() if GameRuntime.has_selected_game() else null
+	)
 	if _data == null:
 		_data = GameData.open_any()
 	_hud = Gen2BattleHud.from_data(_data)
@@ -161,6 +165,13 @@ func _ready() -> void:
 		else:
 			show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
 			_announce()
+
+
+## Supplies a cache-backed data source before the scene enters the tree. The
+## normal launcher path still resolves data from GameRuntime or the first
+## imported cache.
+func set_data(data: GameData) -> void:
+	_injected_data = data
 
 
 ## True once the cache had everything the screen draws with.
@@ -433,8 +444,24 @@ func _refresh_exp_bar() -> void:
 
 
 func show_message(text: String) -> void:
+	_last_message = text
 	if _box != null:
 		_box.show_text(text)
+
+
+## Compact state for scene tests and screenshot drivers. It reports the message
+## currently shown by the text box rather than reaching into its texture.
+func battle_snapshot() -> Dictionary:
+	return {
+		"ready": is_ready(),
+		"world_battle_active": _world_battle_active,
+		"battle_over": _battle != null and _battle.is_over(),
+		"winner": _battle.winner() if _battle != null and _battle.is_over() else -1,
+		"enemy": _enemy,
+		"player": _player,
+		"message": _last_message,
+		"completion_sent": _world_battle_completion_sent,
+	}
 
 
 ## Reveals the rest of the message at once, so a photograph of the screen does

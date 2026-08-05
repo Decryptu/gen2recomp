@@ -19,6 +19,8 @@ const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn"
 @export_range(0, 3) var time_of_day: int = Gen2WorldPalette.TIME_MORNING
 
 var _data: GameData = null
+var _injected_data: GameData = null
+var _injected_save: Gen2SaveData = null
 var _world: Gen2WorldAPI = null
 var _renderer: Gen2WorldRenderer = null
 var _animation: Gen2WorldAnimation = null
@@ -32,8 +34,24 @@ var _battle_host: Gen2BattleScreen = null
 
 
 func _ready() -> void:
-	_data = GameRuntime.selected_data() if GameRuntime.has_selected_game() else GameData.open_any()
+	_data = _injected_data if _injected_data != null else (
+		GameRuntime.selected_data() if GameRuntime.has_selected_game() else GameData.open_any()
+	)
 	_build_world()
+
+
+## Supplies a cache-backed data source before the scene enters the tree. The
+## launcher continues to use GameRuntime; this boundary lets scene tests and
+## development tools exercise an explicitly selected cache without mutating
+## global runtime selection.
+func set_data(data: GameData) -> void:
+	_injected_data = data
+
+
+## Supplies an optional validated save for a scene test or development tool.
+## Normal gameplay still reads the selected slot from GameRuntime.
+func set_save(save: Gen2SaveData) -> void:
+	_injected_save = save
 
 
 func _build_world() -> void:
@@ -145,6 +163,8 @@ func world_snapshot() -> Dictionary:
 		"player_cell": _world.player_cell if _world != null else Vector2i(-1, -1),
 		"origin_cell": _world.visible_origin_cell() if _world != null else Vector2i(-1, -1),
 		"collision": _world.collision_code_at(_world.player_cell) if _world != null else -1,
+		"visible_objects": _world.visible_objects().size() if _world != null else 0,
+		"just_battled": _world.state.just_battled() if _world != null else false,
 		"script_prompt": _script_prompt,
 	}
 
@@ -178,8 +198,9 @@ func preview_battle_request() -> void:
 func _start_battle_request(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
-	var save: Gen2SaveData = GameRuntime.selected_save()
+	var save: Gen2SaveData = _injected_save if _injected_save != null else GameRuntime.selected_save()
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
+	host.set_data(_data)
 	host.set_meta("world_battle_request", {"request": request.duplicate(true), "save": save})
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 10
