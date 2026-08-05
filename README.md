@@ -31,7 +31,8 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > verified dump, opens its cache's save screen, creates or imports a party, and
 > starts the development battle. The first overworld runtime slice now renders
 > real maps, moves through connected maps and hosts explicit script requests,
-> including battles. Full story state, audio and the mod loader do not exist
+> including real trainer battles, imported win/loss text, map reloads and
+> save-safe blackout recovery. Full story state, audio and the mod loader do not exist
 > yet, so this is not a complete game.
 
 ## Getting started
@@ -134,7 +135,9 @@ Development scenes:
 - `game/world/world_screen.tscn`: renders the development map with real
   palettes, animation and object sprites. Arrows/WASD move the player, and
   `preview_battle_request()` exercises the battle overlay used by explicit
-  overworld battle requests.
+  overworld battle requests. The battle screen's
+  `preview_world_battle_loss()` drives the recovery message for a visual smoke
+  check.
 
 ## Tests
 

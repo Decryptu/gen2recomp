@@ -38,6 +38,12 @@ player name, Pokémon identity, held item, happiness, Pokerus, caught data,
 nickname, original trainer, HP, status, experience, DVs, stat experience, moves
 and PP. Volatile battle state is discarded.
 
+Overworld battle writeback is transactional. A confirmed win is saved only
+after its visible result messages finish. A loss never overwrites the selected
+slot: the host validates and reconstructs the source save party, then returns a
+blackout recovery result to the overworld. Map position, inventory and broader
+blackout relocation are still outside this party-only save format.
+
 ## Original Generation 2 shape
 
 The model follows stable fields in the original Crystal source. `box_struct`

@@ -118,8 +118,8 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 
 
 ## Completes a host-owned runtime request without treating a button press as its
-## result. Battle loss is deliberately a structured failure until blackout and
-## save-backed recovery have a canonical host model.
+## result. A confirmed loss ends this invocation through the explicit blackout
+## recovery result without committing its staged world state.
 func complete_runtime_request(result: Dictionary) -> Dictionary:
 	if _pending.is_empty() or _pending.get("type", &"") != &"runtime_request":
 		return {
@@ -140,6 +140,24 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 	var outcome: StringName = StringName(result.get("outcome", &""))
 	if String(outcome).is_empty():
 		return _fail(&"invalid_battle_outcome", result)
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST:
+		var recovery: Variant = result.get("recovery", {})
+		if not recovery is Dictionary or not bool((recovery as Dictionary).get("ok", false)):
+			return _fail(&"battle_recovery_failed", result)
+		_events.append({
+			"type": &"battle_lost",
+			"outcome": outcome,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_events.append({
+			"type": &"blackout",
+			"recovery": (recovery as Dictionary).duplicate(true),
+		})
+		_pending = {}
+		_active = false
+		_completed = true
+		return _recovered_result(recovery as Dictionary)
 	if outcome != Gen2WorldBattleAdapter.OUTCOME_WON:
 		return _fail(StringName("battle_%s" % outcome), result)
 
@@ -185,7 +203,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	var object_result: Dictionary = _execute_object_command(source_opcode, command)
 	if not object_result.is_empty():
 		return object_result
-	var later_result: Dictionary = _execute_later_command(source_opcode, command)
+	var later_result: Dictionary = _execute_later_command(source_opcode, command, bank)
 	if not later_result.is_empty():
 		return later_result
 	if Gen2WorldScript.is_terminal(opcode, _crystal_commands()):
@@ -362,30 +380,30 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	}
 
 
-func _execute_later_command(source_opcode: int, command: Dictionary) -> Dictionary:
+func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) -> Dictionary:
 	match source_opcode:
 		0x57, 0x58:
 			return _stage_menu(source_opcode == 0x57, command)
 		0x5C:
-			_battle_setup = {
+			_battle_setup = _new_battle_setup({
 				"kind": &"wild", "pokemon": int(command.get("pokemon", 0)),
 				"level": int(command.get("level", 0)),
-			}
+			})
 			_emit_runtime_event(&"battle_setup_changed", _battle_setup)
 		0x5D:
-			_battle_setup = {
+			_battle_setup = _new_battle_setup({
 				"kind": &"trainer", "trainer_group": int(command.get("trainer_group", 0)),
 				"trainer_id": int(command.get("trainer_id", 0)),
-			}
+			})
 			_emit_runtime_event(&"battle_setup_changed", _battle_setup)
 		0x5E:
 			if _battle_setup.is_empty():
 				return {
 					"ok": false, "reason": &"battle_setup_missing", "command": command,
 				}
-			return _stage_runtime_request(&"battle_requested", _battle_setup)
+			return _stage_runtime_request(&"battle_requested", _battle_request_values())
 		0x5F:
-			_emit_runtime_event(&"battle_map_reload_requested", {})
+			_emit_runtime_event(&"battle_map_reload_requested", {"requested": true})
 		0x60:
 			return _stage_runtime_request(&"catch_tutorial_requested", {
 				"value": int(command.get("value", 0)),
@@ -404,8 +422,12 @@ func _execute_later_command(source_opcode: int, command: Dictionary) -> Dictiona
 				"script_value": _script_value,
 			})
 		0x63:
-			_battle_setup["win_address"] = int(command.get("win_address", 0))
-			_battle_setup["loss_address"] = int(command.get("loss_address", 0))
+			_battle_setup["win_text"] = {
+				"bank": bank, "address": int(command.get("win_address", 0)),
+			}
+			_battle_setup["loss_text"] = {
+				"bank": bank, "address": int(command.get("loss_address", 0)),
+			}
 		0x64:
 			_emit_runtime_event(&"trainer_talk_after_requested", {})
 		0x65:
@@ -915,6 +937,38 @@ func _complete_result() -> Dictionary:
 		"warp": _staged_warp.duplicate(true),
 		"commands": _command_count,
 	}
+
+
+func _recovered_result(recovery: Dictionary) -> Dictionary:
+	return {
+		"ok": true,
+		"status": &"recovered",
+		"events": _events.duplicate(true),
+		"source": _request.duplicate(true),
+		"recovery": recovery.duplicate(true),
+		"commands": _command_count,
+	}
+
+
+func _new_battle_setup(base: Dictionary) -> Dictionary:
+	var out: Dictionary = base.duplicate(true)
+	for key: String in ["win_text", "loss_text"]:
+		if _battle_setup.has(key):
+			out[key] = (_battle_setup[key] as Dictionary).duplicate(true)
+	return out
+
+
+func _battle_request_values() -> Dictionary:
+	var out: Dictionary = _battle_setup.duplicate(true)
+	var source_event: Variant = _request.get("event", {})
+	if source_event is Dictionary:
+		out["event"] = (source_event as Dictionary).duplicate(true)
+	for key: String in [
+		"map_group", "map_number", "object_index", "distance", "direction", "trigger",
+	]:
+		if _request.has(key):
+			out[key] = _request[key]
+	return out
 
 
 func _waiting_result() -> Dictionary:

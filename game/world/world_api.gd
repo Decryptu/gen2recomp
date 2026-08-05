@@ -305,6 +305,11 @@ func complete_runtime_request(result: Dictionary) -> Array:
 	if StringName(advanced.get("status", &"")) == &"waiting":
 		results.append(advanced)
 		return results
+	if StringName(advanced.get("status", &"")) == &"recovered":
+		results.append(advanced)
+		_active_script = null
+		_script_queue.clear()
+		return results
 	if bool(advanced.get("ok", false)):
 		results.append(_finish_script_result(advanced))
 	else:
@@ -983,6 +988,16 @@ func _apply_map(
 	player_cell = _clamp_cell(target_cell)
 	_load_objects()
 	_queue_map_callbacks(-1)
+
+
+## Reloads the current map's live object records without changing the player
+## cell or queuing a second map transition. This is the host effect of
+## [code]reloadmapafterbattle[/code] when the suspended script resumes.
+func reload_current_map() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return {"ok": false, "reason": &"missing_map"}
+	_load_objects()
+	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
 
 
 func _on_world_state_changed() -> void:
