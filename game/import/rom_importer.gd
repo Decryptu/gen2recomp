@@ -1258,6 +1258,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"learnset_moves": 0,
 		"maps": 0,
 		"tilesets": 0,
+		"overworld_sprites": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -1338,6 +1339,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"trainer_party_count": trainer_party_count,
 		"world_map_count": int(world["maps"]),
 		"world_tileset_count": int(world["tilesets"]),
+		"overworld_sprite_count": int(world["overworld_sprites"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
@@ -1357,15 +1359,16 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["trainer_party_count"] = trainer_party_count
 	result["maps"] = int(world["maps"])
 	result["tilesets"] = int(world["tilesets"])
+	result["overworld_sprites"] = int(world["overworld_sprites"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
-		+ "%d trainer classes carrying %d trainers, %d maps and %d tilesets, %d evolutions "
-		+ "and %d level-up moves in %d ms.") % [
+		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets and %d overworld sprites, "
+		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
-		trainer_party_count, int(world["maps"]), int(world["tilesets"]), evolutions,
-		learnset_moves, result["elapsed_ms"],
+		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
+		int(world["overworld_sprites"]), evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result
 

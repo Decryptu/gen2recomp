@@ -49,6 +49,17 @@ const TILESET_TILE_COUNT: int = 96
 const TILESET_META_BYTES_PER_BLOCK: int = 16
 const TILESET_COLLISION_BYTES_PER_BLOCK: int = 4
 
+## Overworld object graphics are six-byte records: CPU address, byte length,
+## ROM bank, sprite type and default palette. The graphics are uncompressed
+## 2bpp tiles. Palette records are four 15-bit colours, grouped by time of day
+## and then by the eight overworld palette kinds.
+const OVERWORLD_SPRITE_RECORD_SIZE: int = 6
+const OVERWORLD_SPRITE_PALETTE_GROUP_COUNT: int = 32
+const OVERWORLD_SPRITE_PALETTE_GROUP_BYTES: int = 8
+const OVERWORLD_SPRITE_PALETTE_BYTES: int = OVERWORLD_SPRITE_PALETTE_GROUP_COUNT * OVERWORLD_SPRITE_PALETTE_GROUP_BYTES
+const OVERWORLD_SPRITE_TYPES: Array = [1, 2, 3]
+const OVERWORLD_SPRITE_PALETTE_COUNT: int = 8
+
 ## The overworld palette file contains 42 four-colour groups: morning, day,
 ## night and dark outdoor groups, the indoor group, and the two animated water
 ## groups. Palette maps use two nibbles per tile and reserve sixteen bytes for
@@ -485,6 +496,9 @@ const GOLD_SILVER: Dictionary = {
 	"tileset_block_counts": [128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64],
 	"tileset_palette_bank": 0x02,
 	"world_palette_offset": 0xB75E,
+	"overworld_sprites": 0x147DE,
+	"overworld_sprite_count": 95,
+	"overworld_sprite_palettes": 0xB8AE,
 	"world_animation_done": 0x42A2,
 	"world_animation_functions": {
 		0x42A2: "done", 0x42A5: "wait", 0x42A6: "timer_8", 0x42B0: "scroll_horizontal",
@@ -543,6 +557,9 @@ const CRYSTAL: Dictionary = {
 	"tileset_block_counts": [128, 128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 40, 64, 64, 64, 64, 64],
 	"tileset_palette_bank": 0x13,
 	"world_palette_offset": 0xB319,
+	"overworld_sprites": 0x14736,
+	"overworld_sprite_count": 99,
+	"overworld_sprite_palettes": 0xB469,
 	"world_animation_done": 0x42FB,
 	"world_animation_functions": {
 		0x42FB: "done", 0x42FE: "wait", 0x42FF: "timer_8", 0x4309: "scroll_horizontal",
@@ -666,6 +683,14 @@ static func tileset_block_count(layout: Dictionary, number: int) -> int:
 	if number < 0 or number >= counts.size():
 		return 0
 	return int(counts[number])
+
+
+static func overworld_sprite_offset(layout: Dictionary, number: int) -> int:
+	return int(layout["overworld_sprites"]) + (number - 1) * OVERWORLD_SPRITE_RECORD_SIZE
+
+
+static func overworld_sprite_count(layout: Dictionary) -> int:
+	return int(layout.get("overworld_sprite_count", 0))
 
 
 ## Trainer pics have no back half and no size of their own, so unlike the

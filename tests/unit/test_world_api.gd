@@ -98,6 +98,20 @@ func _write_cache() -> void:
 		pixels[index] = index % 4
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 0), pixels)
 
+	RomCache.write_json(RomCache.overworld_sprites_path(_directory), [{
+		"number": 1, "address": 0x4000, "bank": 0x30, "bytes": 64,
+		"tiles": 4, "type": Gen2WorldSprite.TYPE_STILL, "palette": 0,
+	}])
+	var sprite_palettes: Array = []
+	for _group: int in RomLayout.OVERWORLD_SPRITE_PALETTE_GROUP_COUNT:
+		sprite_palettes.append([0x7FFF, 0x421F, 0x2108, 0])
+	RomCache.write_json(RomCache.overworld_sprite_palettes_path(_directory), sprite_palettes)
+	var sprite_pixels := PackedByteArray()
+	sprite_pixels.resize(4 * Gen2Tiles.TILE_PIXELS)
+	for index: int in sprite_pixels.size():
+		sprite_pixels[index] = index % 4
+	RomCache.write_indices(RomCache.overworld_sprite_path(_directory, 1), sprite_pixels)
+
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testworld",
@@ -168,6 +182,13 @@ func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
 
 	assert_true(world.move(Vector2i.LEFT))
 	assert_eq(world.player_cell, Vector2i(7, 6))
+
+
+func test_active_map_objects_occupy_walk_cells() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_eq(world.visible_objects().size(), 1)
+	assert_eq(world.object_at(Vector2i(5, 6)).index, 0)
+	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
 
 func test_event_dispatch_reports_decoded_records_without_running_scripts() -> void:

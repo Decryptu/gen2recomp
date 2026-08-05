@@ -38,6 +38,8 @@ var _world_maps: Array = []
 var _world_tilesets: Dictionary = {}
 var _world_palettes: Array = []
 var _world_animation_assets: Dictionary = {}
+var _overworld_sprites: Array = []
+var _overworld_sprite_palettes: Array = []
 
 
 ## Opens the cache for a registry game, or null if it has not been imported.
@@ -113,6 +115,46 @@ func world_tileset(number: int) -> Gen2WorldTileset:
 
 func world_tileset_count() -> int:
 	return _world_tilesets.size()
+
+
+## Metadata for one cartridge overworld sprite, indexed by the source sprite
+## number. Sprite number zero is reserved for no sprite by the cartridge.
+func overworld_sprite(number: int) -> Gen2WorldSprite:
+	var row: Dictionary = _entry(_overworld_sprites, number - 1)
+	return Gen2WorldSprite.from_cache(row) if not row.is_empty() else null
+
+
+func overworld_sprite_count() -> int:
+	return _overworld_sprites.size()
+
+
+## Indexed pixels for one raw overworld sprite tile strip, loaded on demand.
+func overworld_sprite_indices(number: int) -> PackedByteArray:
+	var key: String = "overworld_sprites/%d" % number
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(
+		RomCache.overworld_sprite_path(directory, number)
+	)
+	_indices[key] = data
+	return data
+
+
+## One of the eight overworld object palette kinds for a time-of-day group.
+## The source's palette override bit selects the same eight rows while marking
+## that the object event, rather than the sprite table, supplied the choice.
+func overworld_sprite_palette(palette: int, time_of_day: int) -> PackedColorArray:
+	var group: int = clampi(time_of_day, 0, 3) * RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT \
+		+ (palette & (RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT - 1))
+	if group < 0 or group >= _overworld_sprite_palettes.size():
+		return PackedColorArray()
+	var raw: Variant = _overworld_sprite_palettes[group]
+	if not raw is Array:
+		return PackedColorArray()
+	var out := PackedColorArray()
+	for packed: Variant in raw as Array:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
 
 
 ## One of the cartridge's four-colour background palette groups.
@@ -535,6 +577,14 @@ func _load_world(path: String) -> void:
 	var animation_assets: Variant = RomCache.read_json(RomCache.world_animation_assets_path(path))
 	if animation_assets is Dictionary:
 		_world_animation_assets = animation_assets
+	var sprites: Variant = RomCache.read_json(RomCache.overworld_sprites_path(path))
+	if sprites is Array:
+		_overworld_sprites = sprites
+	var sprite_palettes: Variant = RomCache.read_json(
+		RomCache.overworld_sprite_palettes_path(path)
+	)
+	if sprite_palettes is Array:
+		_overworld_sprite_palettes = sprite_palettes
 
 
 func _read_array(path: String) -> Array:
