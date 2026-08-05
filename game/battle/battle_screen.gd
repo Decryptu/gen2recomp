@@ -2,6 +2,7 @@ class_name Gen2BattleScreen
 extends Control
 
 signal battle_finished(result: Dictionary)
+signal capture_requested(ball: int)
 
 ## The battle screen: two Pokémon, two status panels and a text box, at the
 ## positions the hardware puts them.
@@ -98,6 +99,14 @@ var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
 var _world_battle_recovery: Dictionary = {}
 var _last_message: String = ""
+var _capture_balls: Array[int] = []
+var _capture_quantities: Dictionary = {}
+var _capture_ball_index: int = 0
+var _capture_selecting: bool = false
+var _capture_waiting: bool = false
+var _capture_messages: Array[String] = []
+var _capture_terminal: bool = false
+var _capture_result: Dictionary = {}
 
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
@@ -194,6 +203,7 @@ func is_ready() -> bool:
 ## Puts two Pokémon on the screen at a level each, both at full health, and
 ## starts a battle between them.
 func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: int = 5) -> void:
+	_reset_capture_state()
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
@@ -232,6 +242,7 @@ func show_trainer(
 	trainer_class: int, index: int = 0, player_species: int = DEFAULT_PLAYER,
 	player_level: int = DEFAULT_LEVEL
 ) -> void:
+	_reset_capture_state()
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
@@ -278,6 +289,7 @@ func show_trainer(
 ## slot. The enemy remains the existing wild demonstration, while the player
 ## side now carries persistent levels, HP, PP, status, DVs and stat experience.
 func show_saved_party(save: Gen2SaveData) -> bool:
+	_reset_capture_state()
 	_world_battle_active = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
@@ -316,6 +328,7 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 ## Starts a battle requested by the scene-free overworld runtime. The caller
 ## keeps the world API alive while this screen owns the battle presentation.
 func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
+	_clear_capture_action()
 	if _data == null or _hud == null:
 		_emit_world_battle_failure(&"missing_battle_data")
 		return false
@@ -473,7 +486,164 @@ func battle_snapshot() -> Dictionary:
 		"player": _player,
 		"message": _last_message,
 		"completion_sent": _world_battle_completion_sent,
+		"capture_selecting": _capture_selecting,
+		"capture_waiting": _capture_waiting,
+		"capture_ball": _selected_capture_ball(),
+		"capture_balls": _capture_balls.duplicate(),
+		"capture_quantities": _capture_quantities.duplicate(),
 	}
+
+
+## Supplies the wild battle with the supported balls currently owned by the
+## overworld. The battle scene never reads or mutates world inventory itself.
+func set_capture_balls(balls: Array, quantities: Dictionary = {}) -> void:
+	_capture_balls.clear()
+	_capture_quantities.clear()
+	for raw_ball: Variant in balls:
+		var ball: int = int(raw_ball)
+		if ball > 0 and not _capture_balls.has(ball):
+			_capture_balls.append(ball)
+	for raw_ball: Variant in quantities:
+		var quantity: int = int(quantities[raw_ball])
+		if quantity > 0:
+			_capture_quantities[int(raw_ball)] = quantity
+	if _capture_ball_index >= _capture_balls.size():
+		_capture_ball_index = 0
+
+
+func available_capture_balls() -> Array[int]:
+	return _capture_balls.duplicate()
+
+
+## Returns the live enemy only for a wild overworld battle. The world host uses
+## this object as the source for the existing catch calculation and save adapter.
+func capture_target() -> Gen2BattleMon:
+	return _battle.enemy if _is_wild_battle() and _battle != null else null
+
+
+## Opens the small wild-battle ball selector. The full bag UI remains a later
+## world-service host; this boundary exposes only the capture action.
+func begin_capture() -> Dictionary:
+	if not _is_wild_battle() or _battle == null or _battle.is_over():
+		return _capture_failure(&"capture_not_available")
+	if _capture_selecting or _capture_waiting or not _capture_messages.is_empty() \
+		or not _capture_result.is_empty():
+		return _capture_failure(&"capture_input_busy")
+	if not _pending.is_empty():
+		return _capture_failure(&"battle_events_pending")
+	if _capture_balls.is_empty():
+		show_message("You have no POKE BALLS!")
+		return _capture_failure(&"no_capture_balls")
+	_capture_selecting = true
+	_capture_ball_index = 0
+	_show_capture_selection()
+	return {"ok": true, "ball": _selected_capture_ball()}
+
+
+func select_capture_ball(index: int) -> Dictionary:
+	if not _capture_selecting or _capture_balls.is_empty():
+		return _capture_failure(&"capture_selection_not_active")
+	_capture_ball_index = posmod(index, _capture_balls.size())
+	_show_capture_selection()
+	return {"ok": true, "ball": _selected_capture_ball()}
+
+
+func throw_capture_ball() -> Dictionary:
+	if not _capture_selecting or _capture_balls.is_empty():
+		return _capture_failure(&"capture_selection_not_active")
+	var ball: int = _selected_capture_ball()
+	_capture_selecting = false
+	_capture_waiting = true
+	show_message("You threw a %s!" % _item_name(ball))
+	capture_requested.emit(ball)
+	return {"ok": true, "status": &"waiting", "ball": ball}
+
+
+## Delivers the world host's resolved throw. The battle screen only turns the
+## structured result into messages and emits completion after those messages.
+func complete_capture(result: Dictionary) -> Dictionary:
+	if not _capture_waiting:
+		return _capture_failure(&"capture_result_not_pending")
+	_capture_waiting = false
+	_capture_messages.clear()
+	_capture_result = result.duplicate(true)
+	_capture_terminal = false
+	if not bool(result.get("ok", false)):
+		_capture_messages.append("The capture could not be completed.")
+		return result
+	var result_ball: int = int(result.get("ball", 0))
+	if result_ball > 0 and result.has("quantity"):
+		var next_quantity: int = int(result.get("quantity", 0))
+		if next_quantity > 0:
+			_capture_quantities[result_ball] = next_quantity
+		else:
+			_capture_quantities.erase(result_ball)
+			_capture_balls.erase(result_ball)
+			_capture_ball_index = mini(_capture_ball_index, maxi(_capture_balls.size() - 1, 0))
+
+	var wobbles: int = clampi(int(result.get("wobbles", 0)), 0, 3)
+	for _wobble: int in wobbles:
+		_capture_messages.append("The ball shook!")
+	if bool(result.get("caught", false)):
+		_capture_messages.append("Gotcha! %s was caught!" % _name_of(_enemy))
+		_capture_terminal = true
+	else:
+		_capture_messages.append("%s broke free!" % _name_of(_enemy))
+	return result
+
+
+func _show_capture_selection() -> void:
+	show_message(
+		"Choose %s x%d. Left/Right: select, Space: throw"
+		% [_item_name(_selected_capture_ball()), _capture_quantity(_selected_capture_ball())]
+	)
+
+
+func _show_next_capture_message() -> void:
+	if _capture_messages.is_empty():
+		return
+	show_message(_capture_messages.pop_front())
+
+
+func _selected_capture_ball() -> int:
+	return _capture_balls[_capture_ball_index] if not _capture_balls.is_empty() else 0
+
+
+func _capture_quantity(ball: int) -> int:
+	return int(_capture_quantities.get(ball, 0))
+
+
+func _item_name(item: int) -> String:
+	if _data == null:
+		return "BALL"
+	var name: String = _data.item_name(item)
+	return name if not name.is_empty() else "BALL %d" % item
+
+
+func _is_wild_battle() -> bool:
+	if not _world_battle_active:
+		return false
+	var values: Variant = _world_battle_request.get("values", _world_battle_request)
+	return values is Dictionary and StringName((values as Dictionary).get("kind", &"")) == &"wild"
+
+
+func _capture_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "reason": reason}
+
+
+func _clear_capture_action() -> void:
+	_capture_selecting = false
+	_capture_waiting = false
+	_capture_messages.clear()
+	_capture_terminal = false
+	_capture_result.clear()
+
+
+func _reset_capture_state() -> void:
+	_capture_balls.clear()
+	_capture_quantities.clear()
+	_capture_ball_index = 0
+	_clear_capture_action()
 
 
 ## Reveals the rest of the message at once, so a photograph of the screen does
@@ -588,6 +758,19 @@ func advance() -> void:
 		return
 	if _box.advance():
 		return
+	if _capture_selecting or _capture_waiting:
+		return
+	if not _capture_messages.is_empty():
+		_show_next_capture_message()
+		return
+	if _capture_terminal:
+		var capture: Dictionary = _capture_result.duplicate(true)
+		_clear_capture_action()
+		_finish_world_capture(capture)
+		return
+	if not _capture_result.is_empty():
+		_clear_capture_action()
+		return
 	if not _pending.is_empty():
 		_show_next_event()
 		return
@@ -652,6 +835,18 @@ func _finish_world_battle() -> void:
 		result["recovery"] = _world_battle_recovery.duplicate(true)
 	_world_battle_completion_sent = true
 	battle_finished.emit(result)
+
+
+func _finish_world_capture(capture: Dictionary) -> void:
+	if _world_battle_completion_sent:
+		return
+	_world_battle_completion_sent = true
+	battle_finished.emit({
+		"ok": true,
+		"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
+		"request": _world_battle_request.duplicate(true),
+		"capture": capture.duplicate(true),
+	})
 
 
 func _show_world_battle_terminal_text() -> bool:
@@ -975,6 +1170,27 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
+		return
+
+	if _capture_selecting:
+		match key.keycode:
+			KEY_RIGHT:
+				select_capture_ball(_capture_ball_index + 1)
+			KEY_LEFT:
+				select_capture_ball(_capture_ball_index - 1)
+			KEY_SPACE, KEY_ENTER:
+				throw_capture_ball()
+			KEY_ESCAPE:
+				_clear_capture_action()
+				show_message("Choose an action.")
+			_:
+				return
+		accept_event()
+		return
+
+	if key.keycode == KEY_B and _is_wild_battle():
+		begin_capture()
+		accept_event()
 		return
 
 	match key.keycode:

@@ -41,12 +41,13 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > host resolves those records without reopening the ROM. Party-owned overworld
 > transactions now cover gifts, eggs, imported NPC trades, common HP/status
 > items, repel and the core Poké Ball catch calculation behind a validated
-> candidate-save boundary. Full story state, battle capture input, audio
+> candidate-save boundary. Wild battle capture input now drives the production
+> overlay through that transaction. Full story state, audio
 > playback and the mod loader do not exist yet, so this is not a complete game.
 > Scene-level
 > integration tests also cover trainer sight through the real overworld battle
-> overlay, imported terminal text, live object refresh, emote rendering and
-> save-backed blackout recovery.
+> overlay, imported terminal text, live object refresh, emote rendering, wild
+> capture and save-backed blackout recovery.
 
 ## Getting started
 
@@ -148,7 +149,9 @@ Development scenes:
   shows every glyph.
 - `game/battle/battle_screen.tscn`: `A` takes a turn, space advances events,
   `W` switches, left/right changes the matchup, and `S`/`D` damage either side
-  without using a turn. The player currently chooses moves randomly; a full
+  without using a turn. In a wild overworld battle, `B` opens the owned-ball
+  selector, left/right changes the ball and space throws it. The player currently
+  chooses moves randomly; a full
   moveset's learn-offer is declined automatically because those menus do not
   exist yet. `show_trainer(trainer_class)` uses the real party and trainer AI;
   `show_matchup` uses a fallback invented pairing.
@@ -168,7 +171,8 @@ Development scenes:
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's
   `preview_world_battle_loss()` drives the recovery message for a visual smoke
-  check. `preview_party_transaction()` runs an in-memory Potion transaction
+  check. `preview_capture()` drives the real Master Ball throw message through
+  the capture bridge. `preview_party_transaction()` runs an in-memory Potion transaction
   through the party host. The hint line also reports the imported world-service
   record counts.
 

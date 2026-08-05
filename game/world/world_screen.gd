@@ -30,6 +30,8 @@ var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
+var _active_battle_save: Gen2SaveData = null
+var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
 var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 
@@ -74,7 +76,10 @@ func _build_world() -> void:
 		_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
 	else:
 		var development_state := Gen2WorldState.new(
-			{}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1}
+			{}, {}, {
+				Gen2WorldInventory.ITEM_OLD_ROD: 1,
+				Gen2WorldPartyHost.ITEM_POKE_BALL: 1,
+			}
 		)
 		_world = Gen2WorldAPI.open(
 			_data, map_group, map_number, start_cell, development_state
@@ -258,6 +263,7 @@ func world_snapshot() -> Dictionary:
 		"swarm_map": _world.state.swarm_map() if _world != null else Vector2i(-1, -1),
 		"roaming_count": _world.state.roaming_mons().size() if _world != null else 0,
 		"owned_rods": _world.available_fishing_rods() if _world != null else [],
+		"owned_balls": Gen2WorldPartyHost.owned_capture_balls(_world) if _world != null else [],
 		"clock": _clock.snapshot() if _clock != null else {},
 		"battle_active": _battle_host != null,
 		"script_prompt": _script_prompt,
@@ -394,6 +400,45 @@ func preview_battle_request() -> void:
 	})
 
 
+## Public screenshot driver for the real wild capture bridge. It adds one
+## development Master Ball, starts an imported wild encounter, and leaves the
+## production battle overlay on its throw message.
+func preview_capture() -> void:
+	if _world == null:
+		return
+	var added: Dictionary = _world.state.apply_changes(
+		{}, {}, {"items": {Gen2WorldPartyHost.ITEM_MASTER_BALL: 1}}
+	)
+	if not bool(added.get("ok", false)):
+		return
+	var encounter: Dictionary = _world.encounter_request(_encounter_random, true)
+	if encounter.is_empty():
+		_script_prompt = "No wild encounter for capture preview"
+		_refresh_labels()
+		return
+	_start_battle_request({
+		"kind": &"battle_requested",
+		"values": encounter["values"],
+		"encounter": encounter.duplicate(true),
+	})
+	call_deferred("_preview_capture_throw")
+
+
+func _preview_capture_throw() -> void:
+	if _battle_host == null or _battle_host.capture_target() == null:
+		call_deferred("_preview_capture_throw")
+		return
+	var balls: Array[int] = _battle_host.available_capture_balls()
+	var master_index: int = balls.find(Gen2WorldPartyHost.ITEM_MASTER_BALL)
+	if master_index < 0:
+		return
+	if not bool(_battle_host.begin_capture().get("ok", false)):
+		return
+	_battle_host.select_capture_ball(master_index)
+	_battle_host.throw_capture_ball()
+	_battle_host.finish()
+
+
 ## Public screenshot driver for a resolved imported wild encounter. It uses the
 ## current standing terrain and skips only the rate roll, leaving slot and surf
 ## level selection on the production resolver path.
@@ -514,16 +559,41 @@ func _start_battle_request(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	_active_battle_save = save
+	_active_battle_persist = save != null and _injected_save == null
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
+	if _world != null:
+		host.set_capture_balls(
+			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
+		)
 	host.set_meta("world_battle_request", {"request": request.duplicate(true), "save": save})
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 10
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
 	host.battle_finished.connect(_on_battle_finished)
+	host.capture_requested.connect(_on_capture_requested)
 	_battle_host = host
 	_script_prompt = "Battle in progress"
+	_refresh_labels()
+
+
+func _on_capture_requested(ball: int) -> void:
+	if _battle_host == null or _world == null or _data == null:
+		return
+	var save: Gen2SaveData = _active_battle_save
+	if save == null:
+		save = Gen2SaveStore.create_development_save(_data, 0)
+		if save != null:
+			save.world = _world.snapshot()
+		_active_battle_save = save
+		_active_battle_persist = false
+	var target: Gen2BattleMon = _battle_host.capture_target()
+	var result: Dictionary = Gen2WorldPartyHost.capture_wild(
+		_world, save, target, ball, _encounter_random, 0, _active_battle_persist
+	)
+	_battle_host.complete_capture(result)
 	_refresh_labels()
 
 
@@ -536,11 +606,18 @@ func _on_battle_finished(result: Dictionary) -> void:
 		return
 	var resumed: Array = _world.complete_runtime_request(result)
 	if resumed.is_empty():
-		_script_prompt = "Battle finished: %s" % String(
-			result.get("outcome", result.get("reason", "unknown"))
-		)
+		if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
+			var capture: Dictionary = result.get("capture", {})
+			var species: Dictionary = _data.species(int(capture.get("species", 0)))
+			_script_prompt = "Caught %s" % String(species.get("name", "UNKNOWN"))
+		else:
+			_script_prompt = "Battle finished: %s" % String(
+				result.get("outcome", result.get("reason", "unknown"))
+			)
 	else:
 		_show_script_results(resumed)
+	_active_battle_save = null
+	_active_battle_persist = false
 	_refresh_labels()
 
 
@@ -656,11 +733,16 @@ func _refresh_labels() -> void:
 	for rod: StringName in rods:
 		rod_labels.append(Gen2WorldFishing.rod_label(rod))
 	var owned: String = ", ".join(rod_labels) if not rod_labels.is_empty() else "none"
+	var ball_labels: Array[String] = []
+	if _world != null and _world.state != null:
+		for ball: int in Gen2WorldPartyHost.owned_capture_balls(_world):
+			ball_labels.append("%s x%d" % [_data.item_name(ball), _world.state.item_quantity(ball)])
+	var balls: String = ", ".join(ball_labels) if not ball_labels.is_empty() else "none"
 	var clock_text: String = "%02d:%02d" % [_clock.hour, _clock.minute] if _clock != null else "--:--"
 	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
-	_hint.text += "    time %s    rods: %s    F5: save" % [clock_text, owned]
+	_hint.text += "    time %s    rods: %s    balls: %s    F5: save" % [clock_text, owned, balls]
 	var services: Dictionary = _data.world_service_counts()
 	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d" % [
 		int(services.get("menus", 0)), int(services.get("marts", 0)),

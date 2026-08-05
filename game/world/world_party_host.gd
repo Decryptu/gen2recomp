@@ -18,12 +18,34 @@ const ITEM_ULTRA_BALL: int = 0x02
 const ITEM_GREAT_BALL: int = 0x04
 const ITEM_POKE_BALL: int = 0x05
 
+const CAPTURE_BALLS: Array[int] = [
+	ITEM_POKE_BALL, ITEM_GREAT_BALL, ITEM_ULTRA_BALL, ITEM_MASTER_BALL,
+]
+
 const WOBBLE_PROBABILITIES: Array = [
 	[1, 63], [2, 75], [3, 84], [4, 90], [5, 95], [7, 103], [10, 113],
 	[15, 126], [20, 134], [30, 149], [40, 160], [50, 169], [60, 177],
 	[80, 191], [100, 201], [120, 211], [140, 220], [160, 227], [180, 234],
 	[200, 240], [220, 246], [240, 251], [254, 253], [255, 255],
 ]
+
+
+## Returns the ball items whose capture effects are implemented by this host.
+## The order follows the ordinary ball pocket order used by the source menu.
+static func capture_ball_items() -> Array[int]:
+	return CAPTURE_BALLS.duplicate()
+
+
+## Returns owned supported balls without making the battle scene aware of world
+## state. Item definitions still validate the pocket when a throw is resolved.
+static func owned_capture_balls(world: Gen2WorldAPI) -> Array[int]:
+	var out: Array[int] = []
+	if world == null or world.state == null:
+		return out
+	for ball: int in CAPTURE_BALLS:
+		if world.state.item_quantity(ball) > 0:
+			out.append(ball)
+	return out
 
 
 static func complete_runtime_request(

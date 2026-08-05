@@ -208,6 +208,16 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		_active = false
 		_completed = true
 		return _recovered_result(recovery as Dictionary)
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
+		_script_value = 1
+		_events.append({
+			"type": &"battle_captured",
+			"outcome": outcome,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
 	if outcome != Gen2WorldBattleAdapter.OUTCOME_WON:
 		return _fail(StringName("battle_%s" % outcome), result)
 

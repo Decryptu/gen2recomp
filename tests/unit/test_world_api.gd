@@ -798,6 +798,29 @@ func test_world_battle_completion_commits_just_battled_only_after_the_host_resul
 	assert_true(world.state.just_battled())
 
 
+func test_caught_world_battle_completes_without_marking_just_battled() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6088": [0x5D, 25, 5, 0x5F, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6088
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+
+	var complete: Array = world.complete_runtime_request({
+		"ok": true,
+		"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
+		"capture": {"species": 25, "ball": 0x01},
+	})
+	assert_eq(complete[0]["status"], &"complete")
+	assert_true(complete[0]["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_captured"
+	))
+	assert_false(world.state.just_battled())
+	assert_true(world.pending_runtime_request().is_empty())
+
+
 func test_world_battle_loss_fails_without_committing_world_state() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
