@@ -3,8 +3,8 @@ extends RefCounted
 
 ## Scene-free state for one map-object event. Script pointers and event flags
 ## remain data here. The movement templates implemented in this slice cover
-## the source's standing, fixed-facing, axis-wander and random-wander rows;
-## scripted and follower rows remain stationary until their event systems exist.
+## the source's standing, fixed-facing, axis-wander and random-wander rows.
+## Scripted movement and follower state are driven by the world event runtime.
 
 const MOVEMENT_STILL: int = 1
 const MOVEMENT_WANDER: int = 2
@@ -20,6 +20,10 @@ const MOVEMENT_PLAYER: int = 11
 const MOVEMENT_FOLLOW: int = 19
 const MOVEMENT_SCRIPTED: int = 20
 const MOVEMENT_SWIM_WANDER: int = 0x24
+
+const OBJECTTYPE_SCRIPT: int = 0
+const OBJECTTYPE_ITEMBALL: int = 1
+const OBJECTTYPE_TRAINER: int = 2
 
 const TIME_MASKS: Array = [1, 2, 4, 4]
 

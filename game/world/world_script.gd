@@ -42,6 +42,9 @@ const LOADVAR: int = 0x1E
 const GIVEITEM: int = 0x1F
 const TAKEITEM: int = 0x20
 const CHECKITEM: int = 0x21
+const GIVEMONEY: int = 0x22
+const TAKEMONEY: int = 0x23
+const CHECKMONEY: int = 0x24
 const GIVECOINS: int = 0x25
 const TAKECOINS: int = 0x26
 const CHECKCOINS: int = 0x27
@@ -50,6 +53,7 @@ const DELCELLNUM: int = 0x29
 const CHECKCELLNUM: int = 0x2A
 const CHECKTIME: int = 0x2B
 const CHECKPOKE: int = 0x2C
+const GIVEPOKE: int = 0x2D
 const GIVEEGG: int = 0x2E
 const GIVEPOKEMAIL: int = 0x2F
 const CHECKPOKEMAIL: int = 0x30
@@ -183,6 +187,12 @@ static func command_name(opcode: int, crystal_commands: bool = true) -> StringNa
 			return &"takeitem"
 		CHECKITEM:
 			return &"checkitem"
+		GIVEMONEY:
+			return &"givemoney"
+		TAKEMONEY:
+			return &"takemoney"
+		CHECKMONEY:
+			return &"checkmoney"
 		GIVECOINS:
 			return &"givecoins"
 		TAKECOINS:
@@ -199,6 +209,8 @@ static func command_name(opcode: int, crystal_commands: bool = true) -> StringNa
 			return &"checktime"
 		CHECKPOKE:
 			return &"checkpoke"
+		GIVEPOKE:
+			return &"givepoke"
 		GIVEEGG:
 			return &"giveegg"
 		GIVEPOKEMAIL:
@@ -308,12 +320,26 @@ static func command_width(opcode: int, crystal_commands: bool = true) -> int:
 			return 1
 		SETSCENE:
 			return 2
-		SETVAL, ADDVAL, RANDOM, READVAR, WRITEVAR, CHECKITEM, ADDCELLNUM, DELCELLNUM, CHECKCELLNUM, CHECKTIME, CHECKPOKE, GIVEEGG, GETMONEY, GETCOINS, GETNUM, GETCURLANDMARKNAME, REANCHORMAP, WRITEUNUSEDBYTE:
+		SETVAL, ADDVAL, RANDOM, READVAR, WRITEVAR, CHECKITEM, ADDCELLNUM, DELCELLNUM, CHECKCELLNUM, CHECKTIME, CHECKPOKE, GETNUM, GETCURLANDMARKNAME, REANCHORMAP, WRITEUNUSEDBYTE:
 			return 2
 		LOADVAR, GIVEITEM, TAKEITEM:
 			return 3
-		GIVECOINS, TAKECOINS, CHECKCOINS, CHECKFLAG, CLEARFLAG, SETFLAG, CLEAREVENT, SETEVENT, BLACKOUTMOD, GETMONNAME, GETITEMNAME:
+		GIVECOINS, TAKECOINS, CHECKCOINS, CHECKFLAG, CLEARFLAG, SETFLAG, CLEAREVENT, SETEVENT, BLACKOUTMOD:
 			return 3
+		GIVEMONEY, TAKEMONEY, CHECKMONEY:
+			return 5
+		GETMONEY:
+			return 3
+		GETCOINS:
+			return 3 if crystal_commands else 2
+		GETMONNAME, GETITEMNAME:
+			return 3
+		GETTRAINERNAME, GETSTRING:
+			return 4
+		GIVEEGG:
+			return 3
+		GIVEPOKE:
+			return 0
 		CHECKEVENT:
 			return 3
 		WARP:
@@ -352,9 +378,9 @@ static func _later_command_width(opcode: int) -> int:
 			return 2
 		0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5E, 0x5F, 0x64, 0x65, 0x66, 0x6A, 0x70, 0x7B, 0x7F, 0x81, 0x82, 0x85, 0x86, 0x87, 0x8D, 0x8F, 0x90, 0x92, 0x98, 0x9C, 0x9F, 0xA0:
 			return 1
-		0x5C, 0x5D, 0x69, 0x6B, 0x6C, 0x6F, 0x75, 0x76, 0x77, 0x7C, 0x7E, 0x83, 0x84, 0x8C, 0x8E, 0x94, 0x97, 0x9B, 0x9D, 0x9E:
+		0x5C, 0x5D, 0x69, 0x6B, 0x6C, 0x6F, 0x75, 0x76, 0x7C, 0x7E, 0x83, 0x84, 0x8C, 0x8E, 0x94, 0x97, 0x9B, 0x9D, 0x9E:
 			return 3
-		0x60, 0x61, 0x62, 0x67, 0x6D, 0x6E, 0x72, 0x73, 0x78, 0x7D, 0x89, 0x8A, 0x8B, 0x91, 0x95, 0x96, 0x99, 0x9A:
+		0x60, 0x61, 0x62, 0x67, 0x6D, 0x6E, 0x72, 0x73, 0x77, 0x78, 0x7D, 0x89, 0x8A, 0x8B, 0x91, 0x95, 0x96, 0x99, 0x9A:
 			return 2
 		0x68, 0x71, 0x74, 0x79, 0x80, 0x88, 0x93:
 			return 4
@@ -495,6 +521,8 @@ static func command_at(
 		return {"ok": false, "reason": &"truncated_opcode", "offset": offset}
 	var opcode: int = int(data[offset])
 	var width: int = command_width(opcode, crystal_commands)
+	if opcode == GIVEPOKE:
+		return _givepoke_command_at(data, offset)
 	if width <= 0:
 		return {
 			"ok": false,
@@ -543,14 +571,39 @@ static func command_at(
 				command["scene"] = int(data[offset + 3])
 			SETSCENE:
 				command["scene"] = int(data[offset + 1])
-			SETVAL, ADDVAL, RANDOM, READVAR, WRITEVAR, CHECKITEM, ADDCELLNUM, DELCELLNUM, CHECKCELLNUM, CHECKTIME, CHECKPOKE, GIVEEGG, GETMONEY, GETCOINS, GETNUM, GETCURLANDMARKNAME, REANCHORMAP, WRITEUNUSEDBYTE:
+			SETVAL, ADDVAL, RANDOM, READVAR, WRITEVAR, CHECKITEM, ADDCELLNUM, DELCELLNUM, CHECKCELLNUM, CHECKTIME, CHECKPOKE, GETNUM, GETCURLANDMARKNAME, REANCHORMAP, WRITEUNUSEDBYTE:
 				command["value"] = int(data[offset + 1])
-			LOADVAR, GIVEITEM, TAKEITEM:
+			LOADVAR, GIVEITEM, TAKEITEM, GIVEEGG:
 				command["value"] = int(data[offset + 1])
 				command["value_2"] = int(data[offset + 2])
+			GIVEMONEY, TAKEMONEY, CHECKMONEY:
+				command["account"] = int(data[offset + 1])
+				command["amount_bytes"] = PackedByteArray([
+					int(data[offset + 2]), int(data[offset + 3]), int(data[offset + 4])
+				])
+			GETMONEY:
+				command["account"] = int(data[offset + 1])
+				command["string_buffer"] = int(data[offset + 2])
+			GETCOINS:
+				command["string_buffer"] = int(data[offset + 1])
+				if crystal_commands:
+					command["string_buffer_2"] = int(data[offset + 2])
+			GETMONNAME:
+				command["pokemon"] = int(data[offset + 1])
+				command["string_buffer"] = int(data[offset + 2])
+			GETITEMNAME:
+				command["item"] = int(data[offset + 1])
+				command["string_buffer"] = int(data[offset + 2])
+			GETTRAINERNAME:
+				command["trainer_group"] = int(data[offset + 1])
+				command["trainer_id"] = int(data[offset + 2])
+				command["string_buffer"] = int(data[offset + 3])
+			GETSTRING:
+				command["address"] = read_u16(data, offset + 1)
+				command["string_buffer"] = int(data[offset + 3])
 			CLEAREVENT, SETEVENT, CHECKFLAG, CLEARFLAG, SETFLAG, CHECKEVENT:
 				command["flag"] = read_u16(data, offset + 1)
-			GIVECOINS, TAKECOINS, CHECKCOINS, BLACKOUTMOD, GETMONNAME, GETITEMNAME:
+			GIVECOINS, TAKECOINS, CHECKCOINS, BLACKOUTMOD:
 				command["value"] = read_u16(data, offset + 1)
 			WARPMOD:
 				command["warp_id"] = int(data[offset + 1])
@@ -569,6 +622,14 @@ static func command_at(
 					command["pokemon"] = int(data[offset + 1])
 		var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
 		match source_opcode:
+			0x5C:
+				command["pokemon"] = int(data[offset + 1])
+				command["level"] = int(data[offset + 2])
+			0x5D:
+				command["trainer_group"] = int(data[offset + 1])
+				command["trainer_id"] = int(data[offset + 2])
+			0x60, 0x61, 0x62:
+				command["value"] = int(data[offset + 1])
 			0x63:
 				command["win_address"] = read_u16(data, offset + 1)
 				command["loss_address"] = read_u16(data, offset + 3)
@@ -618,8 +679,11 @@ static func command_at(
 			0x93:
 				command["value"] = int(data[offset + 1])
 				command["address"] = read_u16(data, offset + 2)
-			0x95, 0x96, 0x99, 0x9A, 0x9D:
+			0x95, 0x96, 0x99, 0x9A:
 				command["value"] = int(data[offset + 1])
+			0x9D:
+				command["item"] = int(data[offset + 1])
+				command["quantity"] = int(data[offset + 2])
 			0x9E:
 				command["map_group"] = int(data[offset + 1])
 				command["map_number"] = int(data[offset + 2])
@@ -632,6 +696,35 @@ static func command_at(
 	return command
 
 
+static func _givepoke_command_at(data: PackedByteArray, offset: int) -> Dictionary:
+	## givepoke is the one base command whose width depends on its trainer flag.
+	## The macro emits four operands for an ordinary gift and two extra near
+	## pointers when the gift carries trainer data.
+	var base_width: int = 5
+	if offset < 0 or offset + base_width > data.size():
+		return {
+			"ok": false, "reason": &"truncated_operands", "offset": offset,
+			"opcode": GIVEPOKE, "name": &"givepoke", "width": base_width,
+		}
+	var trainer: int = int(data[offset + 4])
+	var width: int = 9 if trainer != 0 else base_width
+	if offset + width > data.size():
+		return {
+			"ok": false, "reason": &"truncated_operands", "offset": offset,
+			"opcode": GIVEPOKE, "name": &"givepoke", "width": width,
+		}
+	var command: Dictionary = {
+		"ok": true, "offset": offset, "opcode": GIVEPOKE, "name": &"givepoke",
+		"width": width, "pokemon": int(data[offset + 1]),
+		"level": int(data[offset + 2]), "item": int(data[offset + 3]),
+		"trainer": trainer,
+	}
+	if trainer != 0:
+		command["nickname_address"] = read_u16(data, offset + 5)
+		command["ot_name_address"] = read_u16(data, offset + 7)
+	return command
+
+
 static func scan_references(
 	data: PackedByteArray, bank: int, address: int, crystal_commands: bool = true
 ) -> Dictionary:
@@ -639,6 +732,7 @@ static func scan_references(
 	## scan because its operand width cannot be inferred safely.
 	var scripts: Array = []
 	var texts: Array = []
+	var movements: Array = []
 	var at: int = 0
 	var command_count: int = 0
 	while at < data.size() and command_count < MAX_COMMANDS:
@@ -669,6 +763,8 @@ static func scan_references(
 					texts.append({"bank": bank, "address": int(command["address"])})
 		var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
 		match source_opcode:
+			0x68, 0x69:
+				movements.append({"bank": bank, "address": int(command["address"])})
 			0x63:
 				texts.append({"bank": bank, "address": int(command["win_address"])})
 				texts.append({"bank": bank, "address": int(command["loss_address"])})
@@ -678,7 +774,7 @@ static func scan_references(
 		command_count += 1
 		if is_terminal(opcode, crystal_commands):
 			break
-	return {"scripts": scripts, "texts": texts}
+	return {"scripts": scripts, "texts": texts, "movements": movements}
 
 
 ## Decodes the bounded text slice collected by the importer. Text resources in

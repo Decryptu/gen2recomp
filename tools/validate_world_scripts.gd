@@ -40,6 +40,9 @@ func _validate(game_id: StringName) -> bool:
 	var text_value: Variant = RomCache.read_json(
 		RomCache.world_text_path(data.directory)
 	)
+	var movement_value: Variant = RomCache.read_json(
+		RomCache.world_movements_path(data.directory)
+	)
 	if not scripts_value is Dictionary or not text_value is Dictionary:
 		print("FAIL %s: script or text table is missing" % game_id)
 		return false
@@ -96,6 +99,8 @@ func _validate(game_id: StringName) -> bool:
 		game_id, script_count, command_count, terminal_count, parse_failures,
 		(text_value as Dictionary).size(), invalid_text,
 	])
+	print("  movements=%d" % (movement_value as Dictionary).size() \
+		if movement_value is Dictionary else "  movements=missing")
 	print("  failures=%s" % failure_reasons)
 	print("  failure_opcodes=%s" % failure_opcodes)
 	print("  invalid_text_reasons=%s" % invalid_text_reasons)

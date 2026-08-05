@@ -226,6 +226,29 @@ func test_active_map_objects_occupy_walk_cells() -> void:
 	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
 
+func test_trainer_sight_queues_the_first_facing_trainer_in_range() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(5, 4))
+	var trainer: Gen2WorldObject = world.objects[0]
+	trainer.object_type = Gen2WorldObject.OBJECTTYPE_TRAINER
+	trainer.sight_range = 3
+	trainer.facing = Gen2WorldSprite.FACING_UP
+
+	var results: Array = world.dispatch_sight_events()
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	assert_eq(results[0]["source"]["kind"], &"sight")
+	assert_eq(results[0]["source"]["distance"], 2)
+	assert_eq(results[0]["source"]["direction"], Vector2i.UP)
+	assert_eq(results[0]["events"][0]["type"], &"object_visibility")
+	assert_false((world.objects[0] as Gen2WorldObject).active)
+
+	var hidden_trainer: Gen2WorldObject = world.objects[0]
+	hidden_trainer.active = true
+	hidden_trainer.facing = Gen2WorldSprite.FACING_UP
+	hidden_trainer.sight_range = 1
+	assert_true(world.dispatch_sight_events().is_empty())
+
+
 func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(5, 6))
@@ -419,3 +442,91 @@ func test_invalid_directions_and_map_edges_do_not_move_player() -> void:
 
 	world.player_cell = Vector2i(15, 11)
 	assert_false(world.move(Vector2i.DOWN))
+
+
+func test_script_applymovement_executes_imported_object_and_player_streams() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x47],
+		"48:6110": [0x0D, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [
+			0x69, 2, 0x00, 0x61,
+			0x69, 0, 0x10, 0x61,
+			0x91,
+		],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var results: Array = world.dispatch_script_events()
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	assert_eq((world.objects[0] as Gen2WorldObject).cell, Vector2i(6, 6))
+	assert_eq(world.player_cell, Vector2i(7, 5))
+
+
+func test_follow_command_moves_the_follower_after_a_player_step() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6080": [0x70, 2, 0, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6080
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	var results: Array = world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	assert_true(world.move(Vector2i.LEFT))
+	assert_eq((world.objects[0] as Gen2WorldObject).cell, Vector2i(6, 6))
+
+
+func test_script_items_money_and_coins_commit_as_one_runtime_transaction() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6050": [
+			0x1F, 3, 2,
+			0x22, 0, 0, 0, 0x10,
+			0x25, 10, 0,
+			0x91,
+		],
+	})
+	data = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new({}, {}, {3: 2}, {0: 100}, 20)
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6050,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete")
+	assert_eq(state.item_quantity(3), 4)
+	assert_eq(state.money(), 110)
+	assert_eq(state.coins(), 30)
+
+
+func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6060": [
+			0x4F, 0x34, 0x12,
+			0x59,
+			0x5D, 25, 5,
+			0x5F,
+			0x91,
+		],
+	})
+	data = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6060,
+	})
+	var menu: Dictionary = runner.advance()
+	assert_eq(menu["status"], &"waiting")
+	assert_eq(menu["event"]["type"], &"menu")
+	assert_eq(menu["event"]["header"]["address"], 0x1234)
+
+	var battle: Dictionary = runner.advance(true)
+	assert_eq(battle["status"], &"waiting")
+	assert_eq(battle["event"]["type"], &"runtime_request")
+	assert_eq(battle["event"]["request"]["kind"], &"battle_requested")
+	assert_eq(battle["event"]["request"]["values"]["pokemon"], 25)
+
+	var complete: Dictionary = runner.advance(true)
+	assert_eq(complete["status"], &"complete")
