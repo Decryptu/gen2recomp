@@ -7,6 +7,7 @@ extends RefCounted
 
 const OUTCOME_WON: StringName = &"won"
 const OUTCOME_LOST: StringName = &"lost"
+const OUTCOME_CAUGHT: StringName = &"caught"
 const OUTCOME_RAN: StringName = &"ran"
 const OUTCOME_CANCELLED: StringName = &"cancelled"
 

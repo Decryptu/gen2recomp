@@ -13,6 +13,8 @@ var _world_screen: Gen2WorldScreen = null
 
 func before_each() -> void:
 	_data = Fixture.build()
+	_add_capture_metadata()
+	_data = GameData.open_directory(Fixture.directory())
 
 
 func after_each() -> void:
@@ -164,6 +166,77 @@ func test_fishing_reaches_the_real_battle_overlay() -> void:
 	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
 
 
+func test_master_ball_capture_runs_through_the_real_battle_overlay() -> void:
+	await _open_world()
+	var added: Dictionary = _world_screen._world.state.apply_changes(
+		{}, {}, {"items": {Gen2WorldPartyHost.ITEM_MASTER_BALL: 1}}
+	)
+	assert_true(added["ok"])
+	assert_eq(_world_screen._world.state.items(), {
+		Gen2WorldInventory.ITEM_OLD_ROD: 1,
+		Gen2WorldPartyHost.ITEM_POKE_BALL: 1,
+		Gen2WorldPartyHost.ITEM_MASTER_BALL: 1,
+	})
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_eq(host.battle_snapshot()["capture_balls"], [
+		Gen2WorldPartyHost.ITEM_POKE_BALL, Gen2WorldPartyHost.ITEM_MASTER_BALL,
+	])
+	assert_true(host.begin_capture()["ok"])
+	assert_true(host.select_capture_ball(1)["ok"])
+	assert_true(host.throw_capture_ball()["ok"])
+	assert_eq(
+		host.battle_snapshot()["message"],
+		"You threw a %s!" % _data.item_name(Gen2WorldPartyHost.ITEM_MASTER_BALL)
+	)
+
+	for _message: int in 4:
+		host.finish()
+		host.advance()
+
+	assert_eq(host.battle_snapshot()["message"], "Gotcha! FILLER was caught!")
+	host.finish()
+	host.advance()
+	await get_tree().process_frame
+	assert_null(_battle_host())
+	assert_eq(_world_screen._world.state.item_quantity(Gen2WorldPartyHost.ITEM_MASTER_BALL), 0)
+	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Caught FILLER")
+
+
+func test_failed_capture_shows_break_free_and_returns_to_battle() -> void:
+	await _open_world()
+	_data.species(Fixture.TRAINER_SPECIES)["catch_rate"] = 1
+	_world_screen._encounter_random.seed = 1
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_true(host.begin_capture()["ok"])
+	assert_true(host.throw_capture_ball()["ok"])
+	assert_eq(
+		host.battle_snapshot()["message"],
+		"You threw a %s!" % _data.item_name(Gen2WorldPartyHost.ITEM_POKE_BALL)
+	)
+
+	var saw_break_free: bool = false
+	for _message: int in 5:
+		host.finish()
+		host.advance()
+		if host.battle_snapshot()["message"] == "FILLER broke free!":
+			saw_break_free = true
+
+	assert_true(saw_break_free)
+	assert_not_null(_battle_host())
+	assert_eq(_world_screen._world.state.item_quantity(Gen2WorldPartyHost.ITEM_POKE_BALL), 0)
+	assert_false(host.battle_snapshot()["capture_waiting"])
+
+
 func test_project_save_can_carry_the_world_snapshot_without_guessing_a_spawn() -> void:
 	await _open_world()
 	var player: Gen2BattleMon = Gen2BattleMon.create(
@@ -190,3 +263,16 @@ func test_new_game_uses_the_verified_home_spawn_and_source_start_money() -> void
 	assert_eq(save.world.world_state.money(), Gen2WorldSpawn.START_MONEY)
 	var validation: Dictionary = Gen2SaveValidator.validate(save, _data)
 	assert_true(validation["ok"], validation["message"])
+
+
+func _add_capture_metadata() -> void:
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		if int(raw["number"]) == Fixture.TRAINER_SPECIES:
+			raw["catch_rate"] = 190
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		if int(raw["number"]) in Gen2WorldPartyHost.capture_ball_items():
+			raw["pocket"] = RomLayout.ITEM_POCKET_BALL
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
