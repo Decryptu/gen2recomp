@@ -69,6 +69,7 @@ func _write_cache() -> void:
 		"group": 1,
 		"number": 1,
 		"tileset": 0,
+		"fish_group": 1,
 		"width_blocks": 8,
 		"height_blocks": 6,
 		"blocks": blocks,
@@ -91,6 +92,7 @@ func _write_cache() -> void:
 		"group": 1,
 		"number": 2,
 		"tileset": 0,
+		"fish_group": 1,
 		"width_blocks": 8,
 		"height_blocks": 6,
 		"blocks": blocks,
@@ -137,6 +139,28 @@ func _write_cache() -> void:
 				"slots": [{"level": 5, "species": 16}, {"level": 5, "species": 16},
 					{"level": 5, "species": 16}],
 			},
+		},
+		"swarm_grass": {
+			"1:1": {
+				"map": "1:1", "rates": [255, 255, 255],
+				"slots": [
+					[{"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}],
+					[{"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}],
+					[{"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}, {"level": 5, "species": 19}],
+				],
+			},
+		},
+		"swarm_water": {},
+		"fishing": {
+			"groups": [{
+				"chance": 255,
+				"rods": [[{"threshold": 255, "species": 16, "level": 5}], [], []],
+			}],
+			"time_groups": [],
+		},
+		"roaming": {
+			"maps": [{"map_group": 1, "map_number": 1, "connections": []}],
+			"mons": [{"species": 0xF3, "level": 40, "map_group": 1, "map_number": 2}],
 		},
 		"probabilities": {
 			"grass": RomLayout.WILD_GRASS_PROBABILITIES,
@@ -803,8 +827,45 @@ func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void
 	assert_eq(world.collision_permission_at(world.player_cell), Gen2WorldCollision.WATER_TILE)
 	var encounter: Dictionary = world.encounter_request()
 	assert_eq(encounter["kind"], &"wild_encounter_requested")
-	assert_eq(encounter["fish_group"], 0)
+	assert_eq(encounter["fish_group"], 1)
 	assert_eq(encounter["values"]["kind"], &"wild")
 	assert_eq(encounter["values"]["pokemon"], 16)
 	assert_between(encounter["values"]["level"], 5, 9)
 	assert_true(world.move(Vector2i.UP))
+
+
+func test_explicit_fishing_uses_the_current_map_fish_group() -> void:
+	var world := _world(Vector2i(8, 6))
+	var encounter: Dictionary = world.encounter_request(
+		null, true, Gen2WorldEncounter.METHOD_OLD_ROD
+	)
+	assert_eq(encounter["source"], Gen2WorldEncounter.SOURCE_FISHING)
+	assert_eq(encounter["method"], Gen2WorldEncounter.METHOD_OLD_ROD)
+	assert_eq(encounter["fish_group"], 1)
+	assert_eq(encounter["values"]["pokemon"], 16)
+
+
+func test_active_swarm_replaces_the_normal_map_record() -> void:
+	var world := _world(Vector2i(8, 6))
+	world.set_swarm_map(Vector2i(1, 1))
+	var encounter: Dictionary = world.encounter_request(
+		null, true, Gen2WorldEncounter.METHOD_GRASS
+	)
+	assert_eq(encounter["source"], Gen2WorldEncounter.SOURCE_SWARM)
+	assert_eq(encounter["values"]["pokemon"], 19)
+
+
+func test_repel_blocks_lower_level_candidates_and_counts_down_on_steps() -> void:
+	var world := _world(Vector2i(8, 6))
+	world.set_repel_steps(2)
+	assert_eq(world.repel_steps(), 2)
+	assert_true(world.move(Vector2i.LEFT))
+	assert_eq(world.repel_steps(), 1)
+	var blocked: Dictionary = world.encounter_request(
+		null, true, &"auto", 6
+	)
+	assert_true(blocked.is_empty())
+	var allowed: Dictionary = world.encounter_request(
+		null, true, &"auto", 5
+	)
+	assert_false(allowed.is_empty())

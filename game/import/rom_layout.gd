@@ -50,10 +50,10 @@ const MAP_CALLBACK_SIZE: int = 3
 const MAP_MAX_SCENE_SCRIPTS: int = 32
 const MAP_MAX_CALLBACKS: int = 16
 
-## Normal wild encounter records are fixed-size tables keyed by map group and
-## number. Grass carries three time-of-day rates and seven slots per time;
-## water carries one rate and three slots. Swarm tables are separate cartridge
-## data and are intentionally left for the later swarm/roaming slice.
+## Normal and swarm wild encounter records are fixed-size tables keyed by map
+## group and number. Grass carries three time-of-day rates and seven slots per
+## time; water carries one rate and three slots. Fishing and roaming use their
+## own source tables below.
 const WILD_GRASS_RECORD_SIZE: int = 47
 const WILD_WATER_RECORD_SIZE: int = 9
 const WILD_GRASS_SLOT_COUNT: int = 7
@@ -62,6 +62,24 @@ const WILD_TIME_COUNT: int = 3
 const WILD_TABLE_END: int = 0xFF
 const WILD_GRASS_PROBABILITIES: Array[int] = [30, 60, 80, 90, 95, 99, 100]
 const WILD_WATER_PROBABILITIES: Array[int] = [60, 90, 100]
+
+## Fishing groups contain a chance byte and three CPU pointers. Each pointed
+## rod table is a threshold/species/level stream whose final threshold is $FF.
+## A species byte of zero means that the level byte indexes TimeFishGroups
+## instead.
+const FISH_GROUP_COUNT: int = 13
+const FISH_GROUP_RECORD_SIZE: int = 7
+const FISH_ROD_COUNT: int = 3
+const FISH_TABLE_END: int = 0xFF
+const FISH_TIME_GROUP_COUNT: int = 22
+const FISH_TIME_GROUP_SIZE: int = 4
+const FISH_MAX_ENTRIES: int = 8
+
+## RoamMaps stores a start map, a count, that many target map pairs and a zero
+## terminator. The complete table has sixteen source rows in all supported
+## profiles.
+const ROAM_MAP_COUNT: int = 16
+const ROAM_TABLE_END: int = 0xFF
 
 ## The cartridge compares an 8-bit random value directly with these encoded
 ## percentage thresholds when it varies a surfing encounter's level. The
@@ -550,6 +568,19 @@ const GOLD_SILVER: Dictionary = {
 		"water_johto_count": 38,
 		"grass_kanto_count": 30,
 		"water_kanto_count": 24,
+		"swarm_grass": 0x2BE1C,
+		"swarm_grass_count": 4,
+		"swarm_water": 0x2BED9,
+		"swarm_water_count": 1,
+		"fish_groups": 0x929F7,
+		"fish_group_count": 13,
+		"roam_maps": 0x2A95B,
+		"roam_map_count": 16,
+		"roaming": [
+			{"species": 0xF3, "level": 40, "map_group": 2, "map_number": 5},
+			{"species": 0xF4, "level": 40, "map_group": 10, "map_number": 4},
+			{"species": 0xF5, "level": 40, "map_group": 1, "map_number": 12},
+		],
 	},
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
@@ -625,6 +656,18 @@ const CRYSTAL: Dictionary = {
 		"water_johto_count": 38,
 		"grass_kanto_count": 30,
 		"water_kanto_count": 24,
+		"swarm_grass": 0x2B8D0,
+		"swarm_grass_count": 2,
+		"swarm_water": -1,
+		"swarm_water_count": 0,
+		"fish_groups": 0x92488,
+		"fish_group_count": 13,
+		"roam_maps": 0x2A40F,
+		"roam_map_count": 16,
+		"roaming": [
+			{"species": 0xF3, "level": 40, "map_group": 2, "map_number": 5},
+			{"species": 0xF4, "level": 40, "map_group": 10, "map_number": 4},
+		],
 	},
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.

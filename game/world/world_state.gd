@@ -16,11 +16,17 @@ var _money: Dictionary = {}
 var _coins: int = 0
 var _phone_contacts: Dictionary = {}
 var _just_battled: bool = false
+var _repel_steps: int = 0
+var _swarm_map: Vector2i = Vector2i(-1, -1)
+var _fishing_swarm_species: int = 0
+var _roaming_mons: Array = []
 
 
 func _init(
 	event_flags: Dictionary = {}, map_scenes: Dictionary = {}, items: Dictionary = {},
 	money: Dictionary = {}, coins: int = 0, phone_contacts: Dictionary = {},
+	repel_steps: int = 0, swarm_map: Vector2i = Vector2i(-1, -1),
+	fishing_swarm_species: int = 0, roaming_mons: Array = [],
 ) -> void:
 	for flag: Variant in event_flags:
 		if int(flag) > 0 and bool(event_flags[flag]):
@@ -43,6 +49,10 @@ func _init(
 	for raw_contact: Variant in phone_contacts:
 		if bool(phone_contacts[raw_contact]):
 			_phone_contacts[int(raw_contact)] = true
+	_repel_steps = maxi(0, repel_steps)
+	_swarm_map = swarm_map
+	_fishing_swarm_species = fishing_swarm_species if fishing_swarm_species in [0, 0xD3, 0xDF] else 0
+	_roaming_mons = _copy_roaming_mons(roaming_mons)
 
 
 func is_event_flag_active(flag: int) -> bool:
@@ -102,6 +112,104 @@ func just_battled() -> bool:
 	return _just_battled
 
 
+func repel_steps() -> int:
+	return _repel_steps
+
+
+func set_repel_steps(steps: int) -> void:
+	var next_steps: int = maxi(0, steps)
+	if next_steps == _repel_steps:
+		return
+	_repel_steps = next_steps
+	changed.emit()
+
+
+func consume_repel_step() -> void:
+	if _repel_steps <= 0:
+		return
+	_repel_steps -= 1
+	changed.emit()
+
+
+func swarm_map() -> Vector2i:
+	return _swarm_map
+
+
+func set_swarm_map(map_id: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
+	var next_map: Vector2i = map_id if active else Vector2i(-1, -1)
+	var next_species: int = fishing_species if fishing_species in [0, 0xD3, 0xDF] else 0
+	if _swarm_map == next_map and _fishing_swarm_species == next_species:
+		return
+	_swarm_map = next_map
+	_fishing_swarm_species = next_species
+	changed.emit()
+
+
+func swarm_active_on(map_group: int, map_number: int) -> bool:
+	return _swarm_map == Vector2i(map_group, map_number)
+
+
+func fishing_swarm_species() -> int:
+	return _fishing_swarm_species
+
+
+func ensure_roaming_mons(source: Array) -> void:
+	if not _roaming_mons.is_empty() or source.is_empty():
+		return
+	_roaming_mons = _copy_roaming_mons(source)
+	changed.emit()
+
+
+func roaming_mons() -> Array:
+	return _copy_roaming_mons(_roaming_mons)
+
+
+func roaming_mons_on(map_group: int, map_number: int) -> Array:
+	var out: Array = []
+	for index: int in _roaming_mons.size():
+		var mon: Dictionary = _roaming_mons[index]
+		if int(mon.get("map_group", -1)) != map_group or int(mon.get("map_number", -1)) != map_number:
+			continue
+		var value: Dictionary = mon.duplicate(true)
+		value["index"] = index
+		out.append(value)
+	return out
+
+
+## Advances each active roaming Pokémon using the source's connected-map
+## selection. A zero in the source's five-bit mask performs a random jump to a
+## roaming map; otherwise the low two bits select one of the current row's
+## connections and retry when that index is absent.
+func advance_roaming(map_rows: Array, random: RandomNumberGenerator = null) -> Array:
+	if _roaming_mons.is_empty() or map_rows.is_empty():
+		return []
+	var generator := random if random != null else RandomNumberGenerator.new()
+	if random == null:
+		generator.randomize()
+	var moved: Array = []
+	var changed_state: bool = false
+	for index: int in _roaming_mons.size():
+		var mon: Dictionary = _roaming_mons[index]
+		var current := Vector2i(int(mon.get("map_group", -1)), int(mon.get("map_number", -1)))
+		var target: Vector2i = _roaming_target(map_rows, current, generator)
+		if target == Vector2i(-1, -1):
+			continue
+		if target == current:
+			continue
+		mon["map_group"] = target.x
+		mon["map_number"] = target.y
+		changed_state = true
+		moved.append({
+			"index": index,
+			"species": int(mon.get("species", 0)),
+			"from": current,
+			"to": target,
+		})
+	if changed_state:
+		changed.emit()
+	return moved
+
+
 static func map_scene_key(map_group: int, map_number: int) -> String:
 	return "%d:%d" % [map_group, map_number]
 
@@ -112,6 +220,49 @@ func map_scene(map_group: int, map_number: int) -> int:
 
 func map_scenes() -> Dictionary:
 	return _map_scenes.duplicate()
+
+
+func _copy_roaming_mons(source: Array) -> Array:
+	var out: Array = []
+	for raw: Variant in source:
+		if raw is Dictionary:
+			out.append((raw as Dictionary).duplicate(true))
+	return out
+
+
+func _roaming_target(
+	map_rows: Array, current: Vector2i, random: RandomNumberGenerator
+) -> Vector2i:
+	for _attempt: int in 128:
+		var roll: int = random.randi_range(0, 255)
+		if (roll & 0x1F) == 0:
+			for _jump_attempt: int in 128:
+				var random_row: Dictionary = map_rows[random.randi_range(0, map_rows.size() - 1)]
+				var jump := Vector2i(
+					int(random_row.get("map_group", -1)), int(random_row.get("map_number", -1))
+				)
+				if jump != current:
+					return jump
+			continue
+		var row: Dictionary = {}
+		for raw: Variant in map_rows:
+			if not raw is Dictionary:
+				continue
+			if int(raw.get("map_group", -1)) == current.x \
+				and int(raw.get("map_number", -1)) == current.y:
+				row = raw
+				break
+		var connections: Variant = row.get("connections", [])
+		var connection_index: int = roll & 0x03
+		if not connections is Array or connection_index >= (connections as Array).size():
+			continue
+		var target: Dictionary = (connections as Array)[connection_index]
+		var next := Vector2i(
+			int(target.get("map_group", -1)), int(target.get("map_number", -1))
+		)
+		if next != current:
+			return next
+	return Vector2i(-1, -1)
 
 
 ## Applies a script's staged state as one transaction. Validation happens before

@@ -1349,6 +1349,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_tileset_count": int(world["tilesets"]),
 		"world_grass_encounter_count": int(encounters["grass"]),
 		"world_water_encounter_count": int(encounters["water"]),
+		"world_swarm_grass_encounter_count": int(encounters["swarm_grass"]),
+		"world_swarm_water_encounter_count": int(encounters["swarm_water"]),
+		"world_fishing_group_count": int(encounters["fish_groups"]),
+		"world_roam_map_count": int(encounters["roam_maps"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"atlases": pics,
@@ -1371,17 +1375,25 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["tilesets"] = int(world["tilesets"])
 	result["grass_encounters"] = int(encounters["grass"])
 	result["water_encounters"] = int(encounters["water"])
+	result["swarm_grass_encounters"] = int(encounters["swarm_grass"])
+	result["swarm_water_encounters"] = int(encounters["swarm_water"])
+	result["fishing_groups"] = int(encounters["fish_groups"])
+	result["roam_maps"] = int(encounters["roam_maps"])
 	result["overworld_sprites"] = int(world["overworld_sprites"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
 		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
-		+ "%d water encounter maps and %d overworld sprites, "
+		+ "%d water encounter maps, %d swarm grass maps, %d swarm water maps, "
+		+ "%d fishing groups, %d roaming maps and %d overworld sprites, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
-		int(encounters["grass"]), int(encounters["water"]), int(world["overworld_sprites"]),
+		int(encounters["grass"]), int(encounters["water"]),
+		int(encounters["swarm_grass"]), int(encounters["swarm_water"]),
+		int(encounters["fish_groups"]), int(encounters["roam_maps"]),
+		int(world["overworld_sprites"]),
 		evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result
