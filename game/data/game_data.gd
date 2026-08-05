@@ -163,6 +163,47 @@ func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
 	return value.duplicate(true) if value is Dictionary else {}
 
 
+## One imported fishing group, indexed by the source map-header value. Group
+## zero is the cartridge's no-fishing sentinel.
+func world_fishing_group(group: int) -> Dictionary:
+	if group < 1:
+		return {}
+	var fishing: Variant = _world_encounters.get("fishing", {})
+	if not fishing is Dictionary:
+		return {}
+	var groups: Variant = (fishing as Dictionary).get("groups", [])
+	if not groups is Array or group > (groups as Array).size():
+		return {}
+	var value: Variant = (groups as Array)[group - 1]
+	return value.duplicate(true) if value is Dictionary else {}
+
+
+## The twenty-two day/night fishing substitutions used by entries whose
+## species byte is zero in the cartridge stream.
+func world_fishing_time_groups() -> Array:
+	var fishing: Variant = _world_encounters.get("fishing", {})
+	if not fishing is Dictionary:
+		return []
+	var groups: Variant = (fishing as Dictionary).get("time_groups", [])
+	return groups.duplicate(true) if groups is Array else []
+
+
+func world_roaming_maps() -> Array:
+	var roaming: Variant = _world_encounters.get("roaming", {})
+	if not roaming is Dictionary:
+		return []
+	var maps: Variant = (roaming as Dictionary).get("maps", [])
+	return maps.duplicate(true) if maps is Array else []
+
+
+func world_roaming_mons() -> Array:
+	var roaming: Variant = _world_encounters.get("roaming", {})
+	if not roaming is Dictionary:
+		return []
+	var mons: Variant = (roaming as Dictionary).get("mons", [])
+	return mons.duplicate(true) if mons is Array else []
+
+
 func world_encounter_count(method: StringName) -> int:
 	var table_name: String = "water" if method == &"surf" else String(method)
 	var table: Variant = _world_encounters.get(table_name, {})

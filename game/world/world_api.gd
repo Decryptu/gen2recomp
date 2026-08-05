@@ -64,6 +64,7 @@ func _init(
 	data = game_data
 	state = world_state if world_state != null else Gen2WorldState.new()
 	state.changed.connect(_on_world_state_changed)
+	state.ensure_roaming_mons(data.world_roaming_mons())
 	current_map = map
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
@@ -115,25 +116,66 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 	return {"ok": true, "mode": movement_mode}
 
 
-## Rolls a normal wild encounter from the current standing terrain. The
-## caller supplies the generator so tests can reproduce a result, while the
-## optional force flag is reserved for development previews.
+## Rolls an encounter from the current map. Auto mode preserves the existing
+## terrain behavior; an explicit rod method uses the map header's fishing
+## group. The caller supplies the generator so tests can reproduce a result.
 func encounter_request(
-	random: RandomNumberGenerator = null, force_encounter: bool = false
+	random: RandomNumberGenerator = null, force_encounter: bool = false,
+	method: StringName = &"auto", lead_level: int = -1
 ) -> Dictionary:
 	if current_map == null or data == null:
 		return {}
-	var permission: int = collision_permission_at(player_cell)
-	var method: StringName
-	if permission == Gen2WorldCollision.WATER_TILE:
-		method = Gen2WorldEncounter.METHOD_SURF
-	elif permission == Gen2WorldCollision.LAND_TILE:
-		method = Gen2WorldEncounter.METHOD_GRASS
-	else:
+	if method in [
+		Gen2WorldEncounter.METHOD_OLD_ROD,
+		Gen2WorldEncounter.METHOD_GOOD_ROD,
+		Gen2WorldEncounter.METHOD_SUPER_ROD,
+	]:
+		var fish_group: int = current_map.fish_group
+		var selected_group: int = _fishing_group_for_state(fish_group)
+		var fishing_record: Dictionary = data.world_fishing_group(selected_group)
+		var fishing: Dictionary = Gen2WorldEncounter.resolve_fishing(
+			fishing_record, method, object_time_of_day, data.world_fishing_time_groups(),
+			random, force_encounter
+		)
+		if fishing.is_empty():
+			return {}
+		fishing["map"] = map_id()
+		fishing["cell"] = player_cell
+		fishing["fish_group"] = fish_group
+		fishing["selected_fish_group"] = selected_group
+		fishing["movement"] = movement_mode
+		return fishing
+	if method != &"auto" and method not in [
+		Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF,
+	]:
 		return {}
-	var record: Dictionary = data.world_encounter(method, current_map.group, current_map.number)
+	var permission: int = collision_permission_at(player_cell)
+	var terrain_method: StringName = method
+	if terrain_method == &"auto" and permission == Gen2WorldCollision.WATER_TILE:
+		terrain_method = Gen2WorldEncounter.METHOD_SURF
+	elif terrain_method == &"auto" and permission == Gen2WorldCollision.LAND_TILE:
+		terrain_method = Gen2WorldEncounter.METHOD_GRASS
+	if terrain_method not in [Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF]:
+		return {}
+	var source: StringName = Gen2WorldEncounter.SOURCE_NORMAL
+	var record: Dictionary = data.world_encounter(terrain_method, current_map.group, current_map.number)
+	if state.swarm_active_on(current_map.group, current_map.number):
+		var swarm_method: StringName = &"swarm_grass" if terrain_method == Gen2WorldEncounter.METHOD_GRASS else &"swarm_water"
+		var swarm_record: Dictionary = data.world_encounter(
+			swarm_method, current_map.group, current_map.number
+		)
+		if not swarm_record.is_empty():
+			record = swarm_record
+			source = Gen2WorldEncounter.SOURCE_SWARM
 	var resolved: Dictionary = Gen2WorldEncounter.resolve(
-		record, method, object_time_of_day, random, force_encounter
+		record, terrain_method, object_time_of_day, random, force_encounter, {
+			"source": source,
+			"roaming_mons": state.roaming_mons(),
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"repel_steps": state.repel_steps(),
+			"lead_level": lead_level,
+		}
 	)
 	if resolved.is_empty():
 		return {}
@@ -142,6 +184,37 @@ func encounter_request(
 	resolved["fish_group"] = current_map.fish_group
 	resolved["movement"] = movement_mode
 	return resolved
+
+
+func set_repel_steps(steps: int) -> void:
+	state.set_repel_steps(steps)
+
+
+func repel_steps() -> int:
+	return state.repel_steps()
+
+
+func set_swarm_map(map_id: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
+	state.set_swarm_map(map_id, active, fishing_species)
+
+
+func roaming_mons() -> Array:
+	return state.roaming_mons()
+
+
+func advance_roaming(random: RandomNumberGenerator = null) -> Array:
+	return state.advance_roaming(data.world_roaming_maps(), random)
+
+
+func _fishing_group_for_state(group: int) -> int:
+	var fishing_swarm: int = state.fishing_swarm_species()
+	if fishing_swarm == 0:
+		return group
+	if group == 11 and fishing_swarm == 0xD3:
+		return 6
+	if group == 12 and fishing_swarm == 0xDF:
+		return 7
+	return group
 
 
 func tick() -> bool:
@@ -1136,6 +1209,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 		if not transition.is_empty():
 			if bool(transition.get("ok", false)):
 				player_facing = _facing_for_direction(direction)
+				state.consume_repel_step()
 			return transition
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
 	if not can_walk_to(destination):
@@ -1147,6 +1221,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
+	state.consume_repel_step()
 	_advance_followers(from_cell, previous_cells)
 	return {
 		"ok": true,

@@ -34,8 +34,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > including real trainer battles, imported win/loss text, map reloads and
 > save-safe blackout recovery. The live overworld slice also covers scripted
 > object lifecycle, bounded followers, map block edits, emotes, surf movement,
-> normal grass and surf encounter tables, deterministic encounter resolution
-> and movement-triggered wild battle requests. Full story state, audio and the mod
+> normal and swarm grass and surf encounter tables, fishing groups, roaming state,
+> repel checks, deterministic encounter resolution and movement-triggered wild
+> battle requests. Full story state, audio and the mod
 > loader do not exist yet, so this is not a complete game. Scene-level
 > integration tests also cover trainer sight through the real overworld battle
 > overlay, imported terminal text, live object refresh, emote rendering and
@@ -91,7 +92,7 @@ to run checks without writing.
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Battle HUD | HP/EXP bars, panel borders and their colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
-| Wild encounters | Normal grass and water tables, map-linked rates and slots, time-of-day selection and surf level variance |
+| Wild encounters | Normal and swarm grass/water tables, 13 fishing groups with day/night substitutions, a 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf level variance and repel checks |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
 rendering costs no duplicate images.
@@ -142,9 +143,11 @@ Development scenes:
   `show_matchup` uses a fallback invented pairing.
 - `game/world/world_screen.tscn`: renders Route 29 by default with real
   palettes, animation and object sprites. Arrows/WASD move the player and roll
-  imported normal encounters on maps with a table. `preview_emote()` shows the
-  live object-emote renderer path, while `preview_wild_encounter()` opens a
-  resolved imported wild battle through the production battle overlay.
+  imported encounters on maps with a table. `preview_emote()` shows the live
+  object-emote renderer path, while `preview_wild_encounter()` opens a resolved
+  imported wild battle through the production battle overlay. The scene-free
+  world API also exposes explicit fishing rods, swarm overrides, roaming state
+  and repel countdowns.
   `preview_script_event()` exercises an imported map event, while
   `preview_battle_request()` exercises the battle overlay used by explicit
   overworld battle requests. The battle screen's
