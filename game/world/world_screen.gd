@@ -134,6 +134,11 @@ func _process(delta: float) -> void:
 		_renderer.refresh_animation()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
+	if _world != null and _world.phone_ring_active():
+		var ring_results: Array = _world.advance_phone_ring(delta)
+		if not ring_results.is_empty():
+			_show_script_results(ring_results)
+		_refresh_labels()
 	if _clock != null and _world != null:
 		var ticks: Array = _clock.advance(delta, _world)
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
@@ -161,6 +166,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
+		return
+	if _world.phone_ring_active():
+		accept_event()
 		return
 	if _service_host != null:
 		if _service_host.handle_key(key.keycode):
@@ -246,7 +254,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
-	if _world == null or _world.fishing_busy() or _service_host != null:
+	if _world == null or _world.fishing_busy() or _service_host != null \
+		or _world.phone_ring_active():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -754,7 +763,12 @@ func _show_script_results(results: Array) -> void:
 	var recovery_prompt: String = ""
 	for result: Dictionary in results:
 		var status: StringName = StringName(result.get("status", &""))
-		if status == &"waiting":
+		if status == &"phone_ring":
+			waiting = true
+			var ring: Dictionary = result.get("event", {})
+			var contact: Dictionary = ring.get("contact", {})
+			_script_prompt = "Phone ringing: %s" % _phone_contact_label(contact)
+		elif status == &"waiting":
 			waiting = true
 			var event: Dictionary = result.get("event", {})
 			var event_type: StringName = StringName(event.get("type", &""))
@@ -910,6 +924,12 @@ func _refresh_labels() -> void:
 		_data.title(), _world.current_map.group, _world.current_map.number,
 		_world.player_cell.x, _world.player_cell.y,
 	]
+	var ring: Dictionary = _world.pending_phone_ring()
+	if _world.phone_ring_active() and not ring.is_empty():
+		_caption.text += "   PHONE RING %d/%d: %s" % [
+			int(ring.get("ring", 0)), int(ring.get("rings", 0)),
+			_phone_contact_label(ring.get("contact", {})),
+		]
 	var rods: Array[StringName] = _world.available_fishing_rods()
 	var rod_labels: Array[String] = []
 	for rod: StringName in rods:
@@ -935,6 +955,17 @@ func _refresh_labels() -> void:
 		_hint.text += "    1-%d: select    F: fish" % rods.size()
 	if not _script_prompt.is_empty():
 		_hint.text += "    " + _script_prompt
+
+
+func _phone_contact_label(contact: Dictionary) -> String:
+	if contact.is_empty():
+		return "UNKNOWN CALLER"
+	var trainer_class: int = int(contact.get("trainer_class", 0))
+	if trainer_class > 0 and _data != null:
+		var trainer_name: String = _data.trainer_name(trainer_class)
+		if not trainer_name.is_empty():
+			return "%s %d" % [trainer_name, int(contact.get("trainer_number", 0))]
+	return "CONTACT %d" % int(contact.get("index", -1))
 
 
 func _selected_runtime_data() -> GameData:

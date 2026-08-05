@@ -40,14 +40,15 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > The importer also preserves referenced overworld menus, 34 mart lists, phone
 > contacts, special-call records and music/SFX pointer records. The scene-free
 > host resolves them without reopening the ROM. The production service overlay
-> supports menu selection, atomic mart purchases, bounded phone caller/callee
+> supports menu selection, atomic mart purchases, source-timed phone caller/callee
 > dispatch and bounded Gen II music, effects and cries. Party transactions cover
 > gifts, eggs, imported NPC trades, common HP/status items, repel and the core
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
 >
-> Full story state and the remaining incoming phone and special-call UI do not exist yet, so this is not a
-> complete game. The mod boundary is in: a mod under `user://mods/` can register
+> Full story state, exact special-call behavior and complete phone presentation do not exist yet, so this is not a
+> complete game. The source two-ring phone timing, contact registration commands,
+> and bounded text-buffer expansion are implemented. The mod boundary is in: a mod under `user://mods/` can register
 > a replacement world renderer, which is what a 3D or HD view needs. Scene-level integration tests cover trainer sight,
 > imported terminal text, live object refresh, emotes, wild capture, save-backed
 > blackout recovery and all four service overlay modes.
