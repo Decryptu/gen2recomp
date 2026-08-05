@@ -1279,6 +1279,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"marts": 0,
 		"phone_contacts": 0,
 		"special_phone_calls": 0,
+		"phone_scripts": 0,
 		"music": 0,
 		"sfx": 0,
 		"elapsed_ms": 0,
@@ -1331,10 +1332,14 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	var standard_script_cache: Variant = RomCache.read_json(
 		RomCache.world_standard_scripts_path(directory)
 	)
+	var text_cache: Variant = RomCache.read_json(RomCache.world_text_path(directory))
+	var movement_cache: Variant = RomCache.read_json(RomCache.world_movements_path(directory))
 	var services: Dictionary = Gen2WorldServicesImporter.import_to_cache(
 		rom, layout, directory,
 		script_cache if script_cache is Dictionary else {},
-		standard_script_cache if standard_script_cache is Dictionary else {}
+		standard_script_cache if standard_script_cache is Dictionary else {},
+		text_cache if text_cache is Dictionary else {},
+		movement_cache if movement_cache is Dictionary else {}
 	)
 	if not bool(services.get("ok", false)):
 		result["message"] = String(services.get("message", "Could not import world service data."))
@@ -1393,6 +1398,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_mart_count": int(services["marts"]),
 		"world_phone_contact_count": int(services["phone_contacts"]),
 		"world_special_phone_call_count": int(services["special_phone_calls"]),
+		"world_phone_script_count": int(services["phone_scripts"]),
 		"world_music_count": int(services["music"]),
 		"world_sfx_count": int(services["sfx"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
@@ -1425,6 +1431,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["marts"] = int(services["marts"])
 	result["phone_contacts"] = int(services["phone_contacts"])
 	result["special_phone_calls"] = int(services["special_phone_calls"])
+	result["phone_scripts"] = int(services["phone_scripts"])
 	result["music"] = int(services["music"])
 	result["sfx"] = int(services["sfx"])
 	result["evolutions"] = evolutions
@@ -1434,7 +1441,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
 		+ "%d water encounter maps, %d swarm grass maps, %d swarm water maps, "
 		+ "%d fishing groups, %d roaming maps and %d overworld sprites, "
-		+ "%d menus, %d marts, %d phone contacts, %d music tracks and %d sound effects, "
+		+ "%d menus, %d marts, %d phone contacts, %d phone script resources, "
+		+ "%d music tracks and %d sound effects, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
@@ -1443,6 +1451,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		int(encounters["fish_groups"]), int(encounters["roam_maps"]),
 		int(world["overworld_sprites"]),
 		int(services["menus"]), int(services["marts"]), int(services["phone_contacts"]),
+		int(services["phone_scripts"]),
 		int(services["music"]), int(services["sfx"]),
 		evolutions, learnset_moves, result["elapsed_ms"],
 	]

@@ -80,6 +80,40 @@ func test_phone_summary_uses_imported_contact_and_trainer_class() -> void:
 	assert_eq(summary["map_group"], Fixture.MAP_GROUP)
 
 
+func test_phone_time_masks_and_map_rules_match_the_cartridge() -> void:
+	assert_eq(Gen2WorldPhoneHost.time_mask_for_hour(3), Gen2WorldPhoneHost.TIME_NIGHT)
+	assert_eq(Gen2WorldPhoneHost.time_mask_for_hour(4), Gen2WorldPhoneHost.TIME_MORNING)
+	assert_eq(Gen2WorldPhoneHost.time_mask_for_hour(10), Gen2WorldPhoneHost.TIME_DAY)
+	assert_eq(Gen2WorldPhoneHost.time_mask_for_hour(18), Gen2WorldPhoneHost.TIME_NIGHT)
+	assert_true(Gen2WorldPhoneHost.time_mask_matches(7, 23))
+	assert_false(Gen2WorldPhoneHost.time_mask_matches(2, 6))
+
+	var map := Gen2WorldMap.new()
+	map.group = Fixture.MAP_GROUP + 1
+	map.number = Fixture.MAP_NUMBER
+	map.environment = 0
+	map.phone_flag = 0
+	var state := Gen2WorldState.new({}, {}, {}, {}, 0, {0: true})
+	var incoming: Dictionary = Gen2WorldPhoneHost.resolve_incoming(
+		_data, state, map, 6, true, true, 0
+	)
+	assert_true(incoming["ok"])
+	assert_eq(incoming["contact_id"], 0)
+
+	map.group = Fixture.MAP_GROUP
+	var same_map: Dictionary = Gen2WorldPhoneHost.resolve_incoming(
+		_data, state, map, 6, true, true, 0
+	)
+	assert_false(same_map["ok"])
+	assert_eq(same_map["reason"], &"no_available_caller")
+	map.phone_flag = 1
+	var no_service: Dictionary = Gen2WorldPhoneHost.resolve_incoming(
+		_data, state, map, 6, true, true, 0
+	)
+	assert_false(no_service["ok"])
+	assert_eq(no_service["reason"], &"phone_service_unavailable")
+
+
 func test_audio_host_renders_the_real_record() -> void:
 	var record: Dictionary = _data.world_audio(&"music", 0)
 	var result: Dictionary = Gen2WorldAudioHost.play(record, &"music")

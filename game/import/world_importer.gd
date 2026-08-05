@@ -16,6 +16,20 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	return {"ok": true, "message": ""}
 
 
+## Adds one bounded script and every reference that the shared command scanner
+## can prove from it. Service tables use this same collector so phone scripts
+## enter the cache alongside map and standard scripts.
+static func collect_script(
+	rom: RomFile,
+	bank: int,
+	address: int,
+	script_data: Dictionary,
+	text_data: Dictionary = {},
+	movement_data: Dictionary = {},
+) -> void:
+	_collect_script(rom, bank, address, script_data, text_data, movement_data)
+
+
 static func import_to_cache(
 	rom: RomFile, layout: Dictionary, directory: String, on_progress: Callable = Callable()
 ) -> Dictionary:

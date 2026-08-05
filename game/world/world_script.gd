@@ -559,6 +559,8 @@ static func command_at(
 			command["address"] = read_u16(data, offset + 2)
 	else:
 		match opcode:
+			SPECIAL:
+				command["value"] = read_u16(data, offset + 1)
 			IFEQUAL, IFNOTEQUAL, IFGREATER, IFLESS:
 				command["value"] = int(data[offset + 1])
 				command["address"] = read_u16(data, offset + 2)

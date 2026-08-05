@@ -27,8 +27,12 @@ static func import_to_cache(
 	directory: String,
 	scripts: Dictionary = {},
 	standard_scripts: Dictionary = {},
+	text_data: Dictionary = {},
+	movement_data: Dictionary = {},
 ) -> Dictionary:
-	var result: Dictionary = read_services(rom, layout, scripts, standard_scripts)
+	var result: Dictionary = read_services(
+		rom, layout, scripts, standard_scripts, text_data, movement_data
+	)
 	if not bool(result.get("ok", false)):
 		return result
 	if not RomCache.write_json(RomCache.world_menus_path(directory), result["menus"]):
@@ -39,6 +43,12 @@ static func import_to_cache(
 		return _error("Could not write world phone data.")
 	if not RomCache.write_json(RomCache.world_audio_path(directory), result["audio"]):
 		return _error("Could not write world audio data.")
+	if not RomCache.write_json(RomCache.world_scripts_path(directory), scripts):
+		return _error("Could not update world scripts with phone scripts.")
+	if not RomCache.write_json(RomCache.world_text_path(directory), text_data):
+		return _error("Could not update world text with phone text.")
+	if not RomCache.write_json(RomCache.world_movements_path(directory), movement_data):
+		return _error("Could not update world movements with phone movements.")
 
 	return {
 		"ok": true,
@@ -46,6 +56,7 @@ static func import_to_cache(
 		"marts": (result["marts"].get("marts", []) as Array).size(),
 		"phone_contacts": (result["phone"].get("contacts", []) as Array).size(),
 		"special_phone_calls": (result["phone"].get("special_calls", []) as Array).size(),
+		"phone_scripts": int(result.get("phone_scripts", 0)),
 		"music": (result["audio"].get("music", []) as Array).size(),
 		"sfx": (result["audio"].get("sfx", []) as Array).size(),
 		"cries": (result["audio"].get("cries", []) as Array).size(),
@@ -57,6 +68,8 @@ static func read_services(
 	layout: Dictionary,
 	scripts: Dictionary = {},
 	standard_scripts: Dictionary = {},
+	text_data: Dictionary = {},
+	movement_data: Dictionary = {},
 ) -> Dictionary:
 	var marts: Dictionary = _read_marts(rom, layout)
 	if not bool(marts.get("ok", false)):
@@ -70,12 +83,16 @@ static func read_services(
 	var menus: Dictionary = _read_menus(rom, scripts, standard_scripts)
 	if not bool(menus.get("ok", false)):
 		return menus
+	var phone_scripts: int = _collect_phone_scripts(
+		rom, phone["data"], scripts, text_data, movement_data
+	)
 	return {
 		"ok": true,
 		"menus": menus["menus"],
 		"marts": marts["data"],
 		"phone": phone["data"],
 		"audio": audio["data"],
+		"phone_scripts": phone_scripts,
 	}
 
 
@@ -221,6 +238,9 @@ static func _read_phone(rom: RomFile, layout: Dictionary) -> Dictionary:
 		special_calls.append({
 			"index": index,
 			"condition": rom.u16le(at),
+			"condition_kind": _phone_condition_kind(
+				rom.u16le(at), layout
+			),
 			"contact": rom.u8(at + 2),
 			"script": script,
 		})
@@ -313,6 +333,38 @@ static func _audio_data_window(rom: RomFile, row: Dictionary) -> Dictionary:
 		"end": end,
 		"address": 0x4000 + (start - bank_start),
 }
+
+
+static func _collect_phone_scripts(
+	rom: RomFile,
+	phone: Dictionary,
+	scripts: Dictionary,
+	text_data: Dictionary,
+	movement_data: Dictionary,
+) -> int:
+	var before: int = scripts.size()
+	for contact: Dictionary in phone.get("contacts", []):
+		for field: String in ["callee_script", "caller_script"]:
+			var pointer: Dictionary = contact.get(field, {})
+			Gen2WorldImporter.collect_script(
+				rom, int(pointer.get("bank", -1)), int(pointer.get("address", -1)),
+				scripts, text_data, movement_data
+			)
+	for special_call: Dictionary in phone.get("special_calls", []):
+		var pointer: Dictionary = special_call.get("script", {})
+		Gen2WorldImporter.collect_script(
+			rom, int(pointer.get("bank", -1)), int(pointer.get("address", -1)),
+			scripts, text_data, movement_data
+		)
+	return scripts.size() - before
+
+
+static func _phone_condition_kind(condition: int, layout: Dictionary) -> StringName:
+	if condition == int(layout.get("phone_condition_outside", -1)):
+		return &"outside"
+	if condition == int(layout.get("phone_condition_anywhere", -1)):
+		return &"anywhere"
+	return &"unknown"
 
 
 static func _audio_address(raw_address: int) -> int:

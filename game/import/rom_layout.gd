@@ -599,6 +599,9 @@ const GOLD_SILVER: Dictionary = {
 	"rooftop_mart_2": 0,
 	"phone_contacts": 0x9043A,
 	"special_phone_calls": 0x905F6,
+	# SpecialCallOnlyWhenOutside and SpecialCallWhereverYouAre in engine/phone/phone.asm.
+	"phone_condition_outside": 0x4190,
+	"phone_condition_anywhere": 0x419F,
 	"music_pointers": 0xE906E,
 	"music_count": 93,
 	"music_first_bank": 0x3A,
@@ -713,6 +716,9 @@ const CRYSTAL: Dictionary = {
 	"rooftop_mart_2": 0x15AFF,
 	"phone_contacts": 0x9045F,
 	"special_phone_calls": 0x90627,
+	# Crystal's relocated special-call condition routines.
+	"phone_condition_outside": 0x4188,
+	"phone_condition_anywhere": 0x4197,
 	"music_pointers": 0xE906E,
 	"music_count": 103,
 	"music_first_bank": 0x3A,

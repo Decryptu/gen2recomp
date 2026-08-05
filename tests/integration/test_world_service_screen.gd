@@ -85,7 +85,7 @@ func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
-func test_phone_overlay_presents_the_imported_contact_and_returns() -> void:
+func test_phone_overlay_dispatches_the_imported_special_script() -> void:
 	_write_phone_request()
 	_data = GameData.open_directory(Fixture.directory())
 	await _open_world()
@@ -94,10 +94,14 @@ func test_phone_overlay_presents_the_imported_contact_and_returns() -> void:
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
 	assert_eq(host._title.text, "PHONE")
-	assert_true(host._summary.text.contains("LEADER 2"))
+	assert_true(host._summary.text.contains("Special call 0 for contact 0"))
 	assert_true(host.handle_key(KEY_ENTER))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
+	assert_true(_world_screen._world.script_input_waiting())
+	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
+	_world_screen._advance_script_input()
+	await get_tree().process_frame
 	assert_false(_world_screen._world.script_input_waiting())
 
 
@@ -143,7 +147,19 @@ func _write_menu_request() -> void:
 
 
 func _write_phone_request() -> void:
-	_write_request_script([0x98, 0x00, 0x64, 0x91], 0x6320)
+	_write_request_script([0x9C, 0x01, 0x00, 0x91], 0x6320)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6500)] = [
+		0x4B, Fixture.BANK, 0x00, 0x70, 0x9C, 0x00, 0x00, 0x91,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var phone_text: Array = [Gen2WorldScript.TEXT_START]
+	for byte: int in Gen2Text.encode("PHONE SCRIPT"):
+		phone_text.append(byte)
+	phone_text.append(Gen2WorldScript.TEXT_TERMINATOR)
+	RomCache.write_json(RomCache.world_text_path(Fixture.directory()), {
+		Gen2WorldScript.pointer_key(Fixture.BANK, 0x7000): phone_text,
+	})
 	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), {
 		"contacts": [{
 			"index": 0, "trainer_class": 1, "trainer_number": 2,
@@ -152,7 +168,10 @@ func _write_phone_request() -> void:
 			"caller_script": {"bank": Fixture.BANK, "address": 0x6400},
 			"callee_script": {"bank": Fixture.BANK, "address": 0x6500},
 		}],
-		"special_calls": [],
+		"special_calls": [{
+			"index": 0, "condition_kind": "anywhere", "contact": 0,
+			"script": {"bank": Fixture.BANK, "address": 0x6500},
+		}],
 	})
 
 

@@ -34,6 +34,8 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	assert_eq((phone["contacts"] as Array).size(), RomLayout.PHONE_CONTACT_COUNT)
 	assert_eq(phone["contacts"][1]["map_group"], 1)
 	assert_eq((phone["special_calls"] as Array).size(), RomLayout.SPECIAL_PHONE_CALL_COUNT)
+	assert_eq(phone["special_calls"][0]["condition_kind"], &"outside")
+	assert_eq(phone["special_calls"][1]["condition_kind"], &"anywhere")
 
 	var audio: Dictionary = result["audio"]
 	assert_eq((audio["music"] as Array).size(), int(_layout["music_count"]))
@@ -104,7 +106,12 @@ func _write_phone(data: PackedByteArray) -> void:
 	var special: int = int(_layout["special_phone_calls"])
 	for index: int in RomLayout.SPECIAL_PHONE_CALL_COUNT:
 		var at: int = special + index * RomLayout.SPECIAL_PHONE_CALL_SIZE
-		_write_u16(data, at, 0x4000)
+		var condition: int = 0x4000
+		if index == 0:
+			condition = int(_layout["phone_condition_outside"])
+		elif index == 1:
+			condition = int(_layout["phone_condition_anywhere"])
+		_write_u16(data, at, condition)
 		data[at + 2] = 4
 		_write_far(data, at + 3, 5, 0x7400)
 

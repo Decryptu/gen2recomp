@@ -240,7 +240,8 @@ func _write_service_cache() -> void:
 			"index": 0, "caller_script": {"bank": 48, "address": 0x1234},
 			"callee_script": {"bank": 48, "address": 0x5678},
 		}],
-		"special_calls": [{"index": 0, "script": {"bank": 48, "address": 0x7000}}],
+		"special_calls": [{"index": 0, "condition_kind": "anywhere", "contact": 0,
+			"script": {"bank": 48, "address": 0x7000}}],
 	})
 	var sfx: Array = []
 	for index: int in 0x9C:
@@ -257,7 +258,8 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		"48:6100": [0x7F, 0x34, 0x12, 0x91],
 		"48:6110": [0x94, 2, 0x00, 0x40, 0x91],
 		"48:6120": [0x98, 0x34, 0x12, 0x91],
-		"48:6130": [0x9C, 0x00, 0x00, 0x91],
+		"48:6130": [0x9C, 0x01, 0x00, 0x91],
+		"48:7000": [0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	var cases: Array = [

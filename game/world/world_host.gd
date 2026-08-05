@@ -120,19 +120,41 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 			return {"ok": true, "data": {"mart": mart, "mart_id": mart_id}}
 		&"special_phone_call_requested":
 			var call_id: int = int(values.get("address", 0))
-			var call: Dictionary = world.data.world_special_phone_call(call_id)
-			if call.is_empty():
-				return {"ok": false, "reason": &"phone_data_unavailable"}
-			return {"ok": true, "data": {"special_call": call, "call_id": call_id}}
+			var special: Dictionary = Gen2WorldPhoneHost.resolve_special(
+				world.data, world.current_map, call_id, world.world_hour
+			)
+			if not bool(special.get("ok", false)):
+				return {
+					"ok": false,
+					"reason": StringName(special.get("reason", &"phone_data_unavailable")),
+				}
+			return {"ok": true, "data": special}
 		&"phone_call_requested":
 			var source: Dictionary = request.get("source", {})
 			var address: int = int(values.get("address", 0))
+			if values.has("contact"):
+				var outgoing: Dictionary = Gen2WorldPhoneHost.resolve_outgoing(
+					world.data, world.state, world.current_map,
+					int(values.get("contact", -1)), world.world_hour
+				)
+				if not bool(outgoing.get("ok", false)):
+					return {
+						"ok": false,
+						"reason": StringName(outgoing.get("reason", &"phone_data_unavailable")),
+					}
+				return {"ok": true, "data": outgoing}
 			var contact: Dictionary = _phone_contact_for_script(
 				world.data, int(source.get("bank", -1)), address
 			)
 			if contact.is_empty():
 				return {"ok": false, "reason": &"phone_data_unavailable"}
-			return {"ok": true, "data": {"contact": contact}}
+			## Crystal's phonecall operand is a caller-name pointer, not this
+			## contact script pointer. Keep the old pointer match only for cached
+			## synthetic callers and expose that it is a compatibility path.
+			return {
+				"ok": true,
+				"data": {"contact": contact, "legacy_pointer_match": true},
+			}
 		&"audio_requested":
 			var audio: Dictionary = _audio_for_request(world, request)
 			var audio_kind: StringName = StringName(request.get("values", {}).get("kind", &""))
