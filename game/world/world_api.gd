@@ -635,6 +635,35 @@ func choose_script_input(choice: int) -> Array:
 	return run_event_queue(true, choice)
 
 
+## Cancels the current menu or choice and resumes the queued script with a
+## false result. This is distinct from choosing an imported option.
+func cancel_script_input() -> Array:
+	if _active_script == null:
+		return []
+	var results: Array = []
+	var advanced: Dictionary = _active_script.cancel_input()
+	if StringName(advanced.get("status", &"")) == &"waiting":
+		results.append(advanced)
+		return results
+	if bool(advanced.get("ok", false)):
+		results.append(_finish_script_result(advanced))
+	else:
+		results.append(advanced)
+	_active_script = null
+	while _active_script == null and not _script_queue.is_empty():
+		var request: Dictionary = _script_queue.pop_front()
+		_active_script = Gen2WorldScriptRunner.begin(
+			data, state, request, Callable(self, "_validate_script_warp")
+		)
+		var next: Dictionary = _active_script.advance()
+		if StringName(next.get("status", &"")) == &"waiting":
+			results.append(next)
+			break
+		results.append(_finish_script_result(next) if bool(next.get("ok", false)) else next)
+		_active_script = null
+	return results
+
+
 ## Completes the currently pending host-owned request and resumes the same
 ## scene-free script invocation. The world API owns the runner lifecycle, so a
 ## screen never needs to reach into the runner or replace its state.

@@ -26,7 +26,7 @@ static func complete_runtime_request(
 		)
 	if kind in [&"battle_requested", &"swarm_requested"]:
 		return {"ok": true, "handled": true, "results": world.complete_runtime_request(result)}
-	var resolved: Dictionary = _resolve_data_request(world, request)
+	var resolved: Dictionary = resolve_runtime_request(world, request)
 	if not resolved.is_empty():
 		if not bool(resolved.get("ok", false)):
 			return _unavailable(
@@ -37,6 +37,10 @@ static func complete_runtime_request(
 			"kind": kind,
 			"data": resolved.get("data", {}).duplicate(true),
 		}
+		for key: Variant in result:
+			if key == "ok":
+				continue
+			completion[key] = result[key]
 		return {
 			"ok": true,
 			"handled": true,
@@ -45,6 +49,35 @@ static func complete_runtime_request(
 			"results": world.complete_runtime_request(completion),
 		}
 	return _unavailable(_reason_for(kind), request)
+
+
+## Resolves one pending cached-service request without completing its script.
+## Scene hosts use this to build their presentation from cartridge data while
+## keeping script state suspended until the host returns an explicit result.
+static func resolve_runtime_request(
+	world: Gen2WorldAPI, request: Dictionary = {}
+) -> Dictionary:
+	if world == null:
+		return _unavailable(&"missing_world", request)
+	var pending: Dictionary = request.duplicate(true)
+	if pending.is_empty():
+		pending = world.pending_runtime_request()
+	if pending.is_empty():
+		return _unavailable(&"runtime_request_not_pending", {})
+	var kind: StringName = StringName(pending.get("kind", &""))
+	var resolved: Dictionary = _resolve_data_request(world, pending)
+	if resolved.is_empty():
+		return _unavailable(_reason_for(kind), pending)
+	if not bool(resolved.get("ok", false)):
+		return _unavailable(
+			StringName(resolved.get("reason", &"runtime_data_unavailable")), pending
+		)
+	return {
+		"ok": true,
+		"handled": false,
+		"request": pending.duplicate(true),
+		"data": resolved.get("data", {}).duplicate(true),
+	}
 
 
 static func choose_script_input(world: Gen2WorldAPI, choice: int) -> Array:
@@ -134,7 +167,10 @@ static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dict
 		&"music_fadeout":
 			return data.world_audio(&"music", int(values.get("music", -1)))
 		&"sound":
-			return data.world_audio_pointer(&"sfx", bank, address)
+			var sound: Dictionary = data.world_audio_pointer(&"sfx", bank, address)
+			if sound.is_empty() and address >= 0:
+				sound = data.world_audio(&"sfx", address)
+			return sound
 		&"map_music", &"encounter_music":
 			if world.current_map == null:
 				return {}

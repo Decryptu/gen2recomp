@@ -245,6 +245,29 @@ func pending_input() -> Dictionary:
 	return _pending.duplicate(true)
 
 
+## Cancels a pending menu or choice without inventing a cartridge option. The
+## script receives zero, matching the false branch used by yes/no commands.
+func cancel_input() -> Dictionary:
+	if _pending.is_empty() or StringName(_pending.get("type", &"")) not in [&"choice", &"menu"]:
+		return {
+			"ok": false,
+			"status": &"failed",
+			"reason": &"script_input_not_cancellable",
+		}
+	var pending_type: StringName = StringName(_pending.get("type", &""))
+	if pending_type == &"choice" and _pending.has("contact"):
+		_emit_runtime_event(&"phone_number_result", {
+			"contact": int(_pending.get("contact", -1)), "accepted": false,
+		})
+	_script_value = 0
+	var finish_after_pending: bool = _finish_after_pending
+	_pending = {}
+	_finish_after_pending = false
+	if finish_after_pending:
+		return _complete()
+	return advance()
+
+
 func is_waiting() -> bool:
 	return not _pending.is_empty()
 

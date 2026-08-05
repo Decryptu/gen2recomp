@@ -10,6 +10,7 @@ const BACKGROUND: Color = Color("#09111f")
 const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
+const SERVICE_SCENE: PackedScene = preload("res://game/world/world_service_screen.tscn")
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -30,6 +31,7 @@ var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
+var _service_host: Gen2WorldServiceScreen = null
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
@@ -132,6 +134,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
 		return
+	if _service_host != null:
+		if _service_host.handle_key(key.keycode):
+			accept_event()
+		return
 	if _world.fishing_busy() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
 		_handle_fishing_result(_world.advance_fishing())
 		accept_event()
@@ -201,7 +207,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
-	if _world == null or _world.fishing_busy():
+	if _world == null or _world.fishing_busy() or _service_host != null:
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -633,6 +639,38 @@ func _advance_script_input() -> void:
 	_refresh_labels()
 
 
+func _open_service_host() -> void:
+	if _service_host != null or _world == null or _data == null:
+		return
+	var host: Gen2WorldServiceScreen = SERVICE_SCENE.instantiate() as Gen2WorldServiceScreen
+	if host == null:
+		_script_prompt = "Service scene unavailable"
+		_refresh_labels()
+		return
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	add_child(host)
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var persist: bool = save != null and _injected_save == null
+	if not host.open_pending(_world, _data, save, persist):
+		host.queue_free()
+		_script_prompt = "Service request unavailable"
+		_refresh_labels()
+		return
+	host.completed.connect(_on_service_completed)
+	_service_host = host
+	_script_prompt = "Service host open"
+	_refresh_labels()
+
+
+func _on_service_completed(results: Array) -> void:
+	var host: Gen2WorldServiceScreen = _service_host
+	_service_host = null
+	if host != null:
+		host.queue_free()
+	_show_script_results(results)
+
+
 func _show_script_results(results: Array) -> void:
 	var waiting: bool = false
 	var failed: bool = false
@@ -653,10 +691,9 @@ func _show_script_results(results: Array) -> void:
 				if _text_box != null:
 					_text_box.visible = true
 				_script_prompt = "Space/Enter: continue script"
-			elif event_type == &"menu":
-				_script_prompt = "Menu request: %s, choose an entry or press Space" % String(
-					event.get("menu_kind", "menu")
-				)
+			elif event_type in [&"choice", &"menu"]:
+				_open_service_host()
+				break
 			elif event_type == &"runtime_request":
 				var request: Dictionary = event.get("request", {})
 				if StringName(request.get("kind", &"")) == &"battle_requested":
@@ -677,6 +714,12 @@ func _show_script_results(results: Array) -> void:
 				]:
 					_script_prompt = "Party transaction: Space to confirm"
 					continue
+				if StringName(request.get("kind", &"")) in [
+					&"mart_requested", &"phone_call_requested",
+					&"special_phone_call_requested", &"audio_requested",
+				]:
+					_open_service_host()
+					break
 				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
 					request.get("kind", "effect")
 				)

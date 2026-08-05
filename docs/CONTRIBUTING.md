@@ -68,6 +68,13 @@ The project world snapshot now owns canonical map, inventory and event state;
 the original SRAM adapter remains party-focused. Do not add box or unsupported
 cartridge fields before those models are canonical.
 
+`game/world/` keeps request resolution and UI separate. `world_host.gd` and the
+scene-free service helpers validate imported data and world transactions;
+`world_service_screen.gd` owns only labels, selection and input. A mart purchase
+must pass candidate-save validation before writeback. Phone presentation must
+not be treated as phone-script execution, and audio code must not claim playback
+until imported channel programs have a verified decoder.
+
 ### Rendering and text
 
 The drawing layer is intentionally thin:
@@ -276,6 +283,7 @@ godot --path . -s res://tools/screenshot.gd -- res://game/render/pic_viewer.tscn
 godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tscn /tmp/shot.png 24 finish 1
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 40 advance 26
+godot --path . -s res://tools/preview_world_services.gd -- /tmp/world-mart.png
 ```
 
 An optional `<method> <times> [int arg]` drives a scene before capture. Keep
