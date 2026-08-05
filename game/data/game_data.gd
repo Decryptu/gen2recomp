@@ -64,10 +64,10 @@ var _sections: Dictionary = {}
 
 ## Opens the cache for a registry game, or null if it has not been imported.
 static func open(game_id: StringName) -> GameData:
-	var hash: String = RomRegistry.sha1_for(game_id)
-	if hash.is_empty():
+	var rom_hash: String = RomRegistry.sha1_for(game_id)
+	if rom_hash.is_empty():
 		return null
-	return open_directory(RomCache.directory_for(game_id, hash))
+	return open_directory(RomCache.directory_for(game_id, rom_hash))
 
 
 ## Opens a cache directory, or null if it is missing, incomplete, or was written
@@ -171,6 +171,16 @@ func world_special_phone_call(index: int) -> Dictionary:
 
 func world_phone_contact_count() -> int:
 	return _service_rows_count(_phone().get("contacts", []))
+
+
+func world_phone_metadata() -> Dictionary:
+	return _coerce_service_dictionary(_phone().get("metadata", {}))
+
+
+func world_phone_script(kind: StringName) -> Dictionary:
+	var metadata: Dictionary = world_phone_metadata()
+	var key: String = "just_talk_script" if kind == &"just_talk" else "out_of_area_script"
+	return _coerce_service_dictionary(metadata.get(key, {}))
 
 
 func world_audio(kind: StringName, index: int) -> Dictionary:
@@ -329,9 +339,9 @@ func overworld_sprite_indices(number: int) -> PackedByteArray:
 ## One of the eight overworld object palette kinds for a time-of-day group.
 ## The source's palette override bit selects the same eight rows while marking
 ## that the object event, rather than the sprite table, supplied the choice.
-func overworld_sprite_palette(palette: int, time_of_day: int) -> PackedColorArray:
+func overworld_sprite_palette(palette_index: int, time_of_day: int) -> PackedColorArray:
 	var group: int = clampi(time_of_day, 0, 3) * RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT \
-		+ (palette & (RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT - 1))
+		+ (palette_index & (RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT - 1))
 	if group < 0 or group >= _sprite_palettes().size():
 		return PackedColorArray()
 	var raw: Variant = _sprite_palettes()[group]
@@ -612,8 +622,8 @@ func trainer_party(number: int, index: int) -> Dictionary:
 	var party: Array = []
 	for mon: Dictionary in (entry.get("party", []) as Array):
 		var moves: Array = []
-		for move: Variant in (mon.get("moves", []) as Array):
-			moves.append(int(move))
+		for move_number: Variant in (mon.get("moves", []) as Array):
+			moves.append(int(move_number))
 		party.append({
 			"level": int(mon.get("level", 0)),
 			"species": int(mon.get("species", 0)),

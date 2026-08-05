@@ -44,6 +44,7 @@ var stat_exp: Dictionary = {}
 ## level 7 Pidgey is created already carrying level 7's own threshold, the same
 ## way the cartridge's box and party screens always agree with a Pokémon's
 ## level rather than a fresh one reading level 1 until its first battle.
+@warning_ignore("shadowed_global_identifier")
 var exp: int = 0
 
 ## Move numbers and the PP left in each, one to one.

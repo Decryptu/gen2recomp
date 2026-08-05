@@ -16,7 +16,7 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
-enum MODE { MENU, MART, PHONE, AUDIO }
+enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO }
 
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
@@ -29,6 +29,7 @@ var _choices: Array = []
 var _cursor: int = 0
 var _mart_entries: Array = []
 var _mart_purchased: bool = false
+var _phone_entries: Array = []
 
 var _title: Label = null
 var _summary: Label = null
@@ -88,6 +89,26 @@ func open_pending(
 
 func is_active() -> bool:
 	return _mode >= 0
+
+
+## Opens the Pokegear phone list. Contact order follows the cartridge table,
+## and only registered numbers are selectable.
+func open_phone_list(
+	world: Gen2WorldAPI,
+	data: GameData,
+	save: Gen2SaveData = null,
+	persist: bool = false
+) -> bool:
+	_world = world
+	_data = data
+	_save = save
+	_persist = persist
+	if _world == null or _data == null:
+		_show_error("Phone has no world or cartridge cache.")
+		return false
+	_phone_entries = _world.registered_phone_contacts()
+	_open_phone_list()
+	return true
 
 
 ## Parent screens route keys here so the service overlay owns input while open.
@@ -205,8 +226,22 @@ func _open_phone(request: Dictionary, data: Dictionary) -> void:
 			int(summary.get("index", -1)), int(summary.get("contact", -1)),
 		]
 	_status.text = "The imported call record is ready."
+	if bool(data.get("out_of_area", false)):
+		_status.text = "This call will use the cartridge out-of-area script."
+	elif bool(data.get("phone", {}).get("same_map", false)):
+		_status.text = "This call will use the cartridge same-map script."
 	_footer.text = "Space/Enter: continue    Esc: hang up"
 	_render_options(["Continue"])
+
+
+func _open_phone_list() -> void:
+	_mode = MODE.PHONE_LIST
+	_cursor = 0
+	_title.text = "PHONE"
+	_summary.text = "Registered numbers"
+	_status.text = "Choose a contact to call." if not _phone_entries.is_empty() else "No registered numbers."
+	_footer.text = "Arrows: move    Space/Enter: call    Esc: close"
+	_render_options()
 
 
 func _open_audio(request: Dictionary, record: Dictionary) -> void:
@@ -262,6 +297,15 @@ func _confirm() -> void:
 		]
 		_status.add_theme_color_override("font_color", SUCCESS)
 		return
+	if _mode == MODE.PHONE_LIST:
+		if _phone_entries.is_empty():
+			_status.text = "No registered numbers."
+			return
+		var contact: Dictionary = _phone_entries[_cursor]
+		var results: Array = _world.request_outgoing_phone_call(int(contact.get("index", -1)))
+		_mode = -1
+		completed.emit(results)
+		return
 	if _mode in [MODE.PHONE, MODE.AUDIO]:
 		_finish_runtime({"ok": true, "script_value": 1})
 
@@ -271,6 +315,9 @@ func _cancel() -> void:
 		_finish_input_cancelled()
 	elif _mode == MODE.MART:
 		_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0, "cancelled": true})
+	elif _mode == MODE.PHONE_LIST:
+		_mode = -1
+		completed.emit([])
 	elif _mode in [MODE.PHONE, MODE.AUDIO]:
 		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
 
@@ -307,14 +354,20 @@ func _render_options(override: Array = []) -> void:
 	for child: Node in _options.get_children():
 		child.queue_free()
 	var values: Array = override if not override.is_empty() else (
-		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART else ["Continue"]
+		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART \
+		else _phone_entries if _mode == MODE.PHONE_LIST else ["Continue"]
 	)
 	for index: int in values.size():
 		var value: Variant = values[index]
 		var label := Label.new()
-		var name: String = String(value) if not value is Dictionary else String((value as Dictionary).get("name", ""))
-		if value is Dictionary and not bool((value as Dictionary).get("leave", false)):
+		var name: String = String(value) if not value is Dictionary else String(
+			(value as Dictionary).get("name", (value as Dictionary).get("trainer_name", "UNKNOWN"))
+		)
+		if value is Dictionary and _mode == MODE.MART \
+			and not bool((value as Dictionary).get("leave", false)):
 			name = "%s    %d" % [name, int((value as Dictionary).get("price", 0))]
+		if value is Dictionary and _mode == MODE.PHONE_LIST:
+			name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
 		label.text = ("> " if index == _cursor else "  ") + name
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
@@ -326,6 +379,8 @@ func _option_count() -> int:
 		return _choices.size()
 	if _mode == MODE.MART:
 		return _mart_entries.size()
+	if _mode == MODE.PHONE_LIST:
+		return _phone_entries.size()
 	return 1
 
 

@@ -31,3 +31,36 @@ func test_world_state_rejects_invalid_swarm_transaction_without_mutation() -> vo
 	assert_false(failed["ok"])
 	assert_eq(state.swarm_map(), Vector2i(-1, -1))
 	assert_eq(state.fishing_swarm_species(), 0)
+
+
+func test_phone_timer_and_pending_special_call_round_trip() -> void:
+	var state := Gen2WorldState.new()
+	assert_eq(state.phone_receive_cycle(), 0)
+	assert_eq(state.phone_receive_minutes(), 20)
+	assert_false(state.advance_phone_receive_timer(19))
+	assert_eq(state.phone_receive_minutes(), 1)
+	assert_true(state.advance_phone_receive_timer(1))
+	assert_true(state.phone_receive_ready())
+	assert_true(state.consume_phone_receive_timer())
+	assert_eq(state.phone_receive_cycle(), 1)
+	assert_eq(state.phone_receive_minutes(), 10)
+	var changed: Dictionary = state.apply_changes({}, {}, {
+		"pending_special_phone_call": 6,
+	})
+	assert_true(changed["ok"])
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.pending_special_phone_call(), 6)
+	assert_eq(restored.phone_receive_cycle(), 1)
+	assert_eq(restored.phone_receive_minutes(), 10)
+
+
+func test_phone_contact_transaction_enforces_the_cartridge_capacity() -> void:
+	var state := Gen2WorldState.new()
+	var contacts: Dictionary = {}
+	for contact: int in Gen2WorldState.PHONE_CONTACT_CAPACITY:
+		contacts[contact] = true
+	var accepted: Dictionary = state.apply_changes({}, {}, {"phone_contacts": contacts})
+	assert_true(accepted["ok"])
+	var rejected: Dictionary = state.apply_changes({}, {}, {"phone_contacts": {10: true}})
+	assert_false(rejected["ok"])
+	assert_eq(state.phone_contact_count(), Gen2WorldState.PHONE_CONTACT_CAPACITY)

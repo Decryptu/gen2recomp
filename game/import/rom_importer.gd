@@ -113,7 +113,7 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
 		var entry: int = RomLayout.palette_offset(layout, species)
 		var packed: Array = []
-		for i: int in Gen2Palette.ENTRY_BYTES / Gen2Palette.COLOR_BYTES:
+		for i: int in int(float(Gen2Palette.ENTRY_BYTES) / float(Gen2Palette.COLOR_BYTES)):
 			packed.append(rom.u16le(entry + i * Gen2Palette.COLOR_BYTES))
 		for color: int in packed:
 			if color & 0x8000:
@@ -1938,7 +1938,7 @@ func _decode_into(
 	Gen2Tiles.blit(
 		pixels, columns * Gen2Tiles.TILE_WIDTH,
 		atlas["pixels"], atlas["width"],
-		(slot % ATLAS_COLUMNS) * cell, (slot / ATLAS_COLUMNS) * cell
+		(slot % ATLAS_COLUMNS) * cell, floori(float(slot) / float(ATLAS_COLUMNS)) * cell
 	)
 	atlas["decoded"] = int(atlas["decoded"]) + 1
 	return true

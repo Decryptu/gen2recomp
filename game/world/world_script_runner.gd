@@ -24,6 +24,9 @@ var _staged_just_battled: bool = false
 var _has_staged_just_battled: bool = false
 var _staged_swarm: Dictionary = {}
 var _has_staged_swarm: bool = false
+var _has_staged_special_phone_call: bool = false
+var _staged_special_phone_call: int = 0
+var _reset_phone_receive_timer: bool = false
 var _events: Array = []
 var _pending: Dictionary = {}
 var _last_text: Dictionary = {}
@@ -55,6 +58,7 @@ static func begin(
 	runner.warp_validator = validator
 	runner._request = request.duplicate(true)
 	runner._phone_context = request.get("phone", {}).duplicate(true)
+	runner._reset_phone_receive_timer = bool(request.get("reset_receive_timer", false))
 	runner._last_talked_object_index = int(request.get("object_index", -1))
 	runner._last_item = int(request.get("item", 0))
 	var bank: int = int(request.get("bank", 0))
@@ -685,20 +689,22 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x9B:
 			## The cartridge uses specialphonecall to store the pending special
 			## call. Imported phone scripts also use SPECIALCALL_NONE to clear it.
-			## Keep the existing host request for a top-level service command, but
-			## do not reopen the service overlay while a phone script is running.
+			## This command never starts the call directly. CheckSpecialPhoneCall
+			## consumes the staged value during a later step.
+			var special_call_id: int = int(command.get("address", 0))
 			if not _phone_context.is_empty():
-				_phone_context["special_call_id"] = int(command.get("address", 0))
-				_script_value = 1
-				_emit_runtime_event(&"special_phone_call_changed", {
-					"call_id": int(command.get("address", 0)),
-				})
-				return {"ok": true}
-			return _stage_runtime_request(&"special_phone_call_requested", {
-				"address": int(command.get("address", 0)),
+				_phone_context["special_call_id"] = special_call_id
+			_staged_special_phone_call = special_call_id
+			_has_staged_special_phone_call = true
+			_script_value = 1
+			_emit_runtime_event(&"special_phone_call_changed", {
+				"call_id": special_call_id,
 			})
+			return {"ok": true}
 		0x9C:
+			var pending_special: int = state.pending_special_phone_call() if state != null else 0
 			_script_value = 1 if int(_phone_context.get("special_call_id", 0)) != 0 \
+				or pending_special != 0 \
 				or bool(_request.get("special_phone_call", false)) else 0
 		0x9D:
 			return _stage_item_delta(int(command.get("item", 0)), int(command.get("quantity", 1)))
@@ -921,6 +927,8 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 			_script_value = int(_request.get("environment", -1))
 		0x14: # VAR_SPECIALPHONECALL
 			_script_value = int(_phone_context.get("special_call_id", 0))
+			if _script_value == 0 and state != null:
+				_script_value = state.pending_special_phone_call()
 		0x17: # VAR_CALLERID
 			_script_value = int(_phone_context.get("caller_id", -1))
 		_:
@@ -938,7 +946,10 @@ func _load_runtime_variable(variable: int, value: int) -> Dictionary:
 	## failures until their owning subsystem is implemented.
 	match variable:
 		0x14: # VAR_SPECIALPHONECALL
-			_phone_context["special_call_id"] = value
+			if not _phone_context.is_empty():
+				_phone_context["special_call_id"] = value
+			_staged_special_phone_call = value
+			_has_staged_special_phone_call = true
 		0x17: # VAR_CALLERID
 			_phone_context["caller_id"] = value
 		_:
@@ -1193,6 +1204,11 @@ func _complete() -> Dictionary:
 		runtime_changes["just_battled"] = _staged_just_battled
 	if _has_staged_swarm:
 		runtime_changes["swarm"] = _staged_swarm.duplicate()
+	if _has_staged_special_phone_call:
+		runtime_changes["pending_special_phone_call"] = _staged_special_phone_call
+	if _reset_phone_receive_timer:
+		runtime_changes["phone_receive_cycle"] = 0
+		runtime_changes["phone_receive_minutes"] = Gen2WorldState.PHONE_RECEIVE_DELAYS[0]
 	var applied: Dictionary = state.apply_changes(
 		_staged_flags, _staged_scenes, runtime_changes
 	)

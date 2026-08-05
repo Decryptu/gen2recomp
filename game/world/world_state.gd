@@ -9,6 +9,9 @@ extends RefCounted
 
 signal changed
 
+const PHONE_CONTACT_CAPACITY: int = 10
+const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
+
 var _event_flags: Dictionary = {}
 var _map_scenes: Dictionary = {}
 var _items: Dictionary = {}
@@ -20,40 +23,49 @@ var _repel_steps: int = 0
 var _swarm_map: Vector2i = Vector2i(-1, -1)
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
+var _phone_receive_cycle: int = 0
+var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
+var _pending_special_phone_call: int = 0
 
 
 func _init(
-	event_flags: Dictionary = {}, map_scenes: Dictionary = {}, items: Dictionary = {},
-	money: Dictionary = {}, coins: int = 0, phone_contacts: Dictionary = {},
-	repel_steps: int = 0, swarm_map: Vector2i = Vector2i(-1, -1),
-	fishing_swarm_species: int = 0, roaming_mons: Array = [], just_battled: bool = false,
+	initial_event_flags: Dictionary = {}, initial_map_scenes: Dictionary = {},
+	initial_items: Dictionary = {}, initial_money: Dictionary = {}, initial_coins: int = 0,
+	initial_phone_contacts: Dictionary = {}, initial_repel_steps: int = 0,
+	initial_swarm_map: Vector2i = Vector2i(-1, -1), initial_fishing_swarm_species: int = 0,
+	initial_roaming_mons: Array = [], initial_just_battled: bool = false,
+	initial_phone_receive_cycle: int = 0, initial_phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0],
+	initial_pending_special_phone_call: int = 0,
 ) -> void:
-	for flag: Variant in event_flags:
-		if int(flag) > 0 and bool(event_flags[flag]):
+	for flag: Variant in initial_event_flags:
+		if int(flag) > 0 and bool(initial_event_flags[flag]):
 			_event_flags[int(flag)] = true
-	for map_key: Variant in map_scenes:
-		var scene: int = int(map_scenes[map_key])
+	for map_key: Variant in initial_map_scenes:
+		var scene: int = int(initial_map_scenes[map_key])
 		if scene >= 0:
 			_map_scenes[String(map_key)] = scene
-	for raw_item: Variant in items:
+	for raw_item: Variant in initial_items:
 		var item: int = int(raw_item)
-		var quantity: int = int(items[raw_item])
+		var quantity: int = int(initial_items[raw_item])
 		if item > 0 and quantity > 0:
 			_items[item] = quantity
-	for raw_account: Variant in money:
+	for raw_account: Variant in initial_money:
 		var account: int = int(raw_account)
-		var balance: int = int(money[raw_account])
+		var balance: int = int(initial_money[raw_account])
 		if account >= 0 and balance > 0:
 			_money[account] = balance
-	_coins = maxi(0, coins)
-	for raw_contact: Variant in phone_contacts:
-		if bool(phone_contacts[raw_contact]):
+	_coins = maxi(0, initial_coins)
+	for raw_contact: Variant in initial_phone_contacts:
+		if bool(initial_phone_contacts[raw_contact]) and _phone_contacts.size() < PHONE_CONTACT_CAPACITY:
 			_phone_contacts[int(raw_contact)] = true
-	_repel_steps = maxi(0, repel_steps)
-	_swarm_map = swarm_map
-	_fishing_swarm_species = fishing_swarm_species if fishing_swarm_species in [0, 0xD3, 0xDF] else 0
-	_roaming_mons = _copy_roaming_mons(roaming_mons)
-	_just_battled = just_battled
+	_repel_steps = maxi(0, initial_repel_steps)
+	_swarm_map = initial_swarm_map
+	_fishing_swarm_species = initial_fishing_swarm_species if initial_fishing_swarm_species in [0, 0xD3, 0xDF] else 0
+	_roaming_mons = _copy_roaming_mons(initial_roaming_mons)
+	_just_battled = initial_just_battled
+	_phone_receive_cycle = clampi(initial_phone_receive_cycle, 0, PHONE_RECEIVE_DELAYS.size() - 1)
+	_phone_receive_minutes = maxi(0, initial_phone_receive_minutes)
+	_pending_special_phone_call = maxi(0, initial_pending_special_phone_call)
 
 
 ## JSON-safe representation of the mutable overworld state. Cartridge records
@@ -71,6 +83,9 @@ func to_dict() -> Dictionary:
 		"swarm_map": [_swarm_map.x, _swarm_map.y],
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
+		"phone_receive_cycle": _phone_receive_cycle,
+		"phone_receive_minutes": _phone_receive_minutes,
+		"pending_special_phone_call": _pending_special_phone_call,
 	}
 
 
@@ -92,6 +107,9 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		int(source.get("fishing_swarm_species", 0)),
 		source.get("roaming_mons", []) if source.get("roaming_mons", []) is Array else [],
 		bool(source.get("just_battled", false)),
+		int(source.get("phone_receive_cycle", 0)),
+		int(source.get("phone_receive_minutes", PHONE_RECEIVE_DELAYS[0])),
+		int(source.get("pending_special_phone_call", 0)),
 	)
 
 
@@ -113,6 +131,9 @@ func restore_from_dict(raw: Variant) -> void:
 	_swarm_map = restored._swarm_map
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
+	_phone_receive_cycle = restored._phone_receive_cycle
+	_phone_receive_minutes = restored._phone_receive_minutes
+	_pending_special_phone_call = restored._pending_special_phone_call
 	changed.emit()
 
 
@@ -173,8 +194,66 @@ func phone_contacts() -> Dictionary:
 	return _phone_contacts.duplicate()
 
 
+func phone_contact_count() -> int:
+	return _phone_contacts.size()
+
+
 func has_phone_contact(contact: int) -> bool:
 	return bool(_phone_contacts.get(contact, false))
+
+
+func phone_receive_cycle() -> int:
+	return _phone_receive_cycle
+
+
+func phone_receive_minutes() -> int:
+	return _phone_receive_minutes
+
+
+func pending_special_phone_call() -> int:
+	return _pending_special_phone_call
+
+
+func reset_phone_receive_delay() -> void:
+	_phone_receive_cycle = 0
+	_phone_receive_minutes = PHONE_RECEIVE_DELAYS[0]
+	changed.emit()
+
+
+func advance_phone_receive_timer(minutes: int) -> bool:
+	if _phone_receive_minutes <= 0:
+		return false
+	var ready: bool = false
+	for _minute: int in maxi(0, minutes):
+		_phone_receive_minutes = maxi(0, _phone_receive_minutes - 1)
+		if _phone_receive_minutes > 0:
+			continue
+		ready = true
+	if ready:
+		changed.emit()
+	return ready
+
+
+func phone_receive_ready() -> bool:
+	return _phone_receive_minutes <= 0
+
+
+func consume_phone_receive_timer() -> bool:
+	if not phone_receive_ready():
+		return false
+	_phone_receive_cycle = mini(_phone_receive_cycle + 1, PHONE_RECEIVE_DELAYS.size() - 1)
+	_phone_receive_minutes = PHONE_RECEIVE_DELAYS[_phone_receive_cycle]
+	changed.emit()
+	return true
+
+
+func set_pending_special_phone_call(call_id: int) -> bool:
+	var next_call_id: int = maxi(0, call_id)
+	if next_call_id == _pending_special_phone_call:
+		return false
+	_pending_special_phone_call = next_call_id
+	changed.emit()
+	return true
 
 
 func just_battled() -> bool:
@@ -367,6 +446,21 @@ func apply_changes(
 	for raw_contact: Variant in phone_changes:
 		if int(raw_contact) < 0:
 			return {"ok": false, "reason": &"invalid_phone_contact"}
+	var next_receive_cycle: int = int(
+		runtime_changes.get("phone_receive_cycle", _phone_receive_cycle)
+	)
+	if next_receive_cycle < 0 or next_receive_cycle >= PHONE_RECEIVE_DELAYS.size():
+		return {"ok": false, "reason": &"invalid_phone_receive_cycle"}
+	var next_receive_minutes: int = int(
+		runtime_changes.get("phone_receive_minutes", _phone_receive_minutes)
+	)
+	if next_receive_minutes < 0:
+		return {"ok": false, "reason": &"invalid_phone_receive_minutes"}
+	var next_special_phone_call: int = int(
+		runtime_changes.get("pending_special_phone_call", _pending_special_phone_call)
+	)
+	if next_special_phone_call < 0:
+		return {"ok": false, "reason": &"invalid_special_phone_call"}
 	var swarm_change: Variant = runtime_changes.get("swarm", null)
 	if swarm_change != null and not swarm_change is Dictionary:
 		return {"ok": false, "reason": &"invalid_swarm"}
@@ -421,6 +515,8 @@ func apply_changes(
 			next_contacts[contact] = true
 		else:
 			next_contacts.erase(contact)
+	if next_contacts.size() > PHONE_CONTACT_CAPACITY:
+		return {"ok": false, "reason": &"phone_contact_capacity"}
 	var next_just_battled: bool = bool(
 		runtime_changes.get("just_battled", _just_battled)
 	)
@@ -429,7 +525,10 @@ func apply_changes(
 		or next_items != _items or next_money != _money or next_coins != _coins \
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
 		or next_repel_steps != _repel_steps or next_swarm_map != _swarm_map \
-		or next_fishing_swarm_species != _fishing_swarm_species
+		or next_fishing_swarm_species != _fishing_swarm_species \
+		or next_receive_cycle != _phone_receive_cycle \
+		or next_receive_minutes != _phone_receive_minutes \
+		or next_special_phone_call != _pending_special_phone_call
 	_event_flags = next_flags
 	_map_scenes = next_scenes
 	_items = next_items
@@ -440,6 +539,9 @@ func apply_changes(
 	_repel_steps = next_repel_steps
 	_swarm_map = next_swarm_map
 	_fishing_swarm_species = next_fishing_swarm_species
+	_phone_receive_cycle = next_receive_cycle
+	_phone_receive_minutes = next_receive_minutes
+	_pending_special_phone_call = next_special_phone_call
 	if did_change:
 		changed.emit()
 	return {"ok": true, "changed": did_change}

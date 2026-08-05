@@ -347,14 +347,14 @@ func _revision_for(game_id: StringName) -> String:
 
 func _save_slot_detail(game_id: StringName, data: GameData) -> String:
 	var slots: Array = Gen2SaveStore.slots_for(game_id, data.sha1, data)
-	var ready: int = 0
+	var ready_slots: int = 0
 	var incompatible: int = 0
 	for row: Dictionary in slots:
 		if row["valid"]:
-			ready += 1
+			ready_slots += 1
 		elif row["exists"]:
 			incompatible += 1
-	var detail: String = "%d/%d slots ready" % [ready, Gen2SaveStore.SLOT_COUNT]
+	var detail: String = "%d/%d slots ready" % [ready_slots, Gen2SaveStore.SLOT_COUNT]
 	if incompatible > 0:
 		detail += ", %d incompatible" % incompatible
 	return detail

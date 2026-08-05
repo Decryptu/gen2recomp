@@ -85,17 +85,17 @@ func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
-func test_phone_overlay_dispatches_the_imported_special_script() -> void:
+func test_pending_special_call_dispatches_the_imported_script() -> void:
 	_write_phone_request()
 	_data = GameData.open_directory(Fixture.directory())
 	await _open_world()
-	await _queue_service()
-
-	var host: Gen2WorldServiceScreen = _world_screen._service_host
-	assert_not_null(host)
-	assert_eq(host._title.text, "PHONE")
-	assert_true(host._summary.text.contains("Special call 0 for contact 0"))
-	assert_true(host.handle_key(KEY_ENTER))
+	var staged: Dictionary = _world_screen._world.state.apply_changes({}, {}, {
+		"pending_special_phone_call": 1,
+	})
+	assert_true(staged["ok"])
+	var attempt: Dictionary = _world_screen._world.try_special_phone_call()
+	assert_true(attempt["attempted"])
+	_world_screen._show_script_results(attempt["results"])
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.script_input_waiting())
@@ -103,6 +103,26 @@ func test_phone_overlay_dispatches_the_imported_special_script() -> void:
 	_world_screen._advance_script_input()
 	await get_tree().process_frame
 	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_phone_list_shows_registered_numbers_and_can_close() -> void:
+	_write_phone_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	var registered: Dictionary = _world_screen._world.state.apply_changes({}, {}, {
+		"phone_contacts": {0: true},
+	})
+	assert_true(registered["ok"])
+	_world_screen._open_phone_list()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "PHONE")
+	assert_eq(host._summary.text, "Registered numbers")
+	assert_eq(host.selected_index(), 0)
+	assert_true(host.handle_key(KEY_ESCAPE))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
 
 
 func test_audio_request_decodes_and_starts_the_runtime_player() -> void:

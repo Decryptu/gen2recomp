@@ -139,6 +139,13 @@ func _process(delta: float) -> void:
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
+			if _service_host == null and _battle_host == null and not _world.script_input_waiting():
+				var phone_schedule: Dictionary = _world.advance_phone_schedule(
+					ticks.size(), _encounter_random
+				)
+				var phone_results: Array = phone_schedule.get("results", [])
+				if bool(phone_schedule.get("attempted", false)) and not phone_results.is_empty():
+					_show_script_results(phone_results)
 			_refresh_labels()
 	if _audio_waiting and _audio_player != null and not _audio_player.effect_playing():
 		_audio_waiting = false
@@ -221,6 +228,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			start_fishing()
 			accept_event()
 			return
+		KEY_P:
+			_open_phone_list()
+			accept_event()
+			return
 		KEY_F5:
 			var saved: Dictionary = persist_world_snapshot()
 			_script_prompt = "World saved" if bool(saved.get("ok", false)) else "Save failed"
@@ -257,6 +268,16 @@ func move_player(direction: Vector2i) -> bool:
 		sight_results = _world.dispatch_script_events()
 	if not sight_results.is_empty():
 		_show_script_results(sight_results)
+		return true
+	var special_attempt: Dictionary = _world.try_special_phone_call()
+	var special_results: Array = special_attempt.get("results", [])
+	if bool(special_attempt.get("attempted", false)) and not special_results.is_empty():
+		_show_script_results(special_results)
+		return true
+	var phone_attempt: Dictionary = _world.try_receive_phone_call(_encounter_random)
+	var phone_results: Array = phone_attempt.get("results", [])
+	if bool(phone_attempt.get("attempted", false)) and not phone_results.is_empty():
+		_show_script_results(phone_results)
 		return true
 	_show_script_results([])
 	var encounter: Dictionary = _world.encounter_request(_encounter_random)
@@ -693,6 +714,30 @@ func _open_service_host() -> void:
 	_refresh_labels()
 
 
+func _open_phone_list() -> void:
+	if _service_host != null or _world == null or _data == null:
+		return
+	var host: Gen2WorldServiceScreen = SERVICE_SCENE.instantiate() as Gen2WorldServiceScreen
+	if host == null:
+		_script_prompt = "Phone scene unavailable"
+		_refresh_labels()
+		return
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	add_child(host)
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var persist: bool = save != null and _injected_save == null
+	if not host.open_phone_list(_world, _data, save, persist):
+		host.queue_free()
+		_script_prompt = "Phone list unavailable"
+		_refresh_labels()
+		return
+	host.completed.connect(_on_service_completed)
+	_service_host = host
+	_script_prompt = "Phone list open"
+	_refresh_labels()
+
+
 func _on_service_completed(results: Array) -> void:
 	var host: Gen2WorldServiceScreen = _service_host
 	_service_host = null
@@ -879,7 +924,7 @@ func _refresh_labels() -> void:
 	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
-	_hint.text += "    time %s    rods: %s    balls: %s    F5: save" % [clock_text, owned, balls]
+	_hint.text += "    time %s    rods: %s    balls: %s    P: phone    F5: save" % [clock_text, owned, balls]
 	var services: Dictionary = _data.world_service_counts()
 	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d cries %d" % [
 		int(services.get("menus", 0)), int(services.get("marts", 0)),

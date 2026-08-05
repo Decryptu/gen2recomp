@@ -73,12 +73,12 @@ func collision_at(cell_x: int, cell_y: int) -> int:
 static func _scripts_from_cache(value: Variant) -> Dictionary:
 	if not value is Dictionary:
 		return {}
-	var scripts: Dictionary = value
+	var script_values: Dictionary = value
 	return {
-		"bank": int(scripts.get("bank", 0)),
-		"address": int(scripts.get("address", 0)),
-		"scenes": _script_pointer_rows(scripts.get("scenes", [])),
-		"callbacks": _script_pointer_rows(scripts.get("callbacks", [])),
+		"bank": int(script_values.get("bank", 0)),
+		"address": int(script_values.get("address", 0)),
+		"scenes": _script_pointer_rows(script_values.get("scenes", [])),
+		"callbacks": _script_pointer_rows(script_values.get("callbacks", [])),
 	}
 
 
@@ -112,14 +112,14 @@ static func _connection_rows(value: Array) -> Array:
 static func _events_from_cache(value: Variant) -> Dictionary:
 	if not value is Dictionary:
 		return {}
-	var events: Dictionary = value
+	var event_values: Dictionary = value
 	return {
-		"bank": int(events.get("bank", 0)),
-		"address": int(events.get("address", 0)),
-		"warps": _event_rows(events.get("warps", []), ["x", "y", "destination", "map_group", "map_number"]),
-		"coord_events": _event_rows(events.get("coord_events", []), ["scene", "x", "y", "script"]),
-		"bg_events": _event_rows(events.get("bg_events", []), ["x", "y", "type", "script"]),
-		"objects": _event_rows(events.get("objects", []), [
+		"bank": int(event_values.get("bank", 0)),
+		"address": int(event_values.get("address", 0)),
+		"warps": _event_rows(event_values.get("warps", []), ["x", "y", "destination", "map_group", "map_number"]),
+		"coord_events": _event_rows(event_values.get("coord_events", []), ["scene", "x", "y", "script"]),
+		"bg_events": _event_rows(event_values.get("bg_events", []), ["x", "y", "type", "script"]),
+		"objects": _event_rows(event_values.get("objects", []), [
 			"sprite", "x", "y", "movement", "x_radius", "y_radius", "hour_1", "hour_2",
 			"palette", "object_type", "sight_range", "script", "event_flag",
 		]),

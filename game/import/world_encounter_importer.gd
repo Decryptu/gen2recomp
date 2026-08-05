@@ -237,13 +237,13 @@ static func _read_record(
 
 
 static func _read_fishing_groups(
-	rom: RomFile, layout: Dictionary, configured: Dictionary
+	rom: RomFile, _layout: Dictionary, configured: Dictionary
 ) -> Dictionary:
 	var offset: int = int(configured.get("fish_groups", -1))
 	var expected_count: int = int(configured.get("fish_group_count", -1))
 	if offset < 0 or expected_count != RomLayout.FISH_GROUP_COUNT:
 		return _error("Fishing group layout is incomplete.")
-	var bank: int = offset / RomFile.BANK_SIZE
+	var bank: int = floori(float(offset) / float(RomFile.BANK_SIZE))
 	var groups: Array = []
 	var data_end: int = offset + expected_count * RomLayout.FISH_GROUP_RECORD_SIZE
 	for group: int in expected_count:

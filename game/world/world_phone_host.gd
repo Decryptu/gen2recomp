@@ -59,15 +59,15 @@ static func contact_summary(data: GameData, contact: Dictionary) -> Dictionary:
 	}
 
 
-static func special_call_summary(data: GameData, call: Dictionary) -> Dictionary:
-	if data == null or call.is_empty():
+static func special_call_summary(data: GameData, special_call: Dictionary) -> Dictionary:
+	if data == null or special_call.is_empty():
 		return {}
 	return {
-		"index": int(call.get("index", -1)),
-		"condition": int(call.get("condition", 0)),
-		"condition_kind": StringName(call.get("condition_kind", &"unknown")),
-		"contact": int(call.get("contact", -1)),
-		"script": (call.get("script", {}) as Dictionary).duplicate(true),
+		"index": int(special_call.get("index", -1)),
+		"condition": int(special_call.get("condition", 0)),
+		"condition_kind": StringName(special_call.get("condition_kind", &"unknown")),
+		"contact": int(special_call.get("contact", -1)),
+		"script": (special_call.get("script", {}) as Dictionary).duplicate(true),
 	}
 
 
@@ -132,21 +132,35 @@ static func resolve_incoming(
 static func resolve_outgoing(
 	data: GameData, state: Gen2WorldState, map: Gen2WorldMap, contact_id: int, hour: int
 ) -> Dictionary:
-	if data == null or state == null or not map_has_phone_service(map):
-		return _phone_unavailable(&"phone_service_unavailable")
+	if data == null or state == null:
+		return _phone_unavailable(&"phone_data_unavailable")
 	if contact_id < 0 or not state.has_phone_contact(contact_id):
 		return _phone_unavailable(&"phone_number_not_registered")
 	var contact: Dictionary = data.world_phone_contact(contact_id)
 	if contact.is_empty():
 		return _phone_unavailable(&"phone_contact_missing")
+	if not map_has_phone_service(map):
+		return _out_of_area_result(data, contact, contact_id, &"phone_service_unavailable")
 	if not time_mask_matches(int(contact.get("caller_time", 0)), hour):
-		return _phone_unavailable(&"caller_unavailable_at_this_time")
+		return _out_of_area_result(data, contact, contact_id, &"caller_unavailable_at_this_time")
 	if int(contact.get("map_group", -1)) == map.group \
 		and int(contact.get("map_number", -1)) == map.number:
-		## The cartridge routes this case to PhoneScript_JustTalkToThem. That
-		## standard script is not part of the phone table, so keep the boundary
-		## explicit until the standard-script host exposes it.
-		return _phone_unavailable(&"same_map_phone_script_unavailable")
+		var just_talk: Dictionary = data.world_phone_script(&"just_talk")
+		if just_talk.is_empty():
+			return _phone_unavailable(&"same_map_phone_script_unavailable")
+		return {
+			"ok": true,
+			"contact": contact.duplicate(true),
+			"contact_id": contact_id,
+			"role": &"caller",
+			"script": just_talk,
+			"phone": {
+				"contact_id": contact_id,
+				"caller_id": contact_id,
+				"role": &"outgoing",
+				"same_map": true,
+			},
+		}
 	return {
 		"ok": true,
 		"contact": contact.duplicate(true),
@@ -161,8 +175,18 @@ static func resolve_outgoing(
 	}
 
 
+static func registered_contact_summaries(data: GameData, state: Gen2WorldState) -> Array:
+	var summaries: Array = []
+	if data == null or state == null:
+		return summaries
+	for index: int in data.world_phone_contact_count():
+		if state.has_phone_contact(index):
+			summaries.append(contact_summary(data, data.world_phone_contact(index)))
+	return summaries
+
+
 static func resolve_special(
-	data: GameData, map: Gen2WorldMap, call_id: int, hour: int
+	data: GameData, map: Gen2WorldMap, call_id: int, _hour: int
 ) -> Dictionary:
 	## SPECIALCALL_NONE clears the pending special-call variable and does not
 	## ring or run another phone script.
@@ -170,25 +194,25 @@ static func resolve_special(
 		return {"ok": true, "clear": true, "call_id": 0}
 	if data == null or not map_has_phone_service(map):
 		return _phone_unavailable(&"phone_service_unavailable")
-	var call: Dictionary = data.world_special_phone_call(call_id - 1)
-	if call.is_empty():
+	var special_call: Dictionary = data.world_special_phone_call(call_id - 1)
+	if special_call.is_empty():
 		return _phone_unavailable(&"special_phone_call_missing")
-	var condition: StringName = StringName(call.get("condition_kind", &"unknown"))
+	var condition: StringName = StringName(special_call.get("condition_kind", &"unknown"))
 	if condition == &"unknown":
 		return _phone_unavailable(&"unknown_special_call_condition")
 	if condition == CONDITION_OUTSIDE and not is_outside_environment(map.environment):
 		return _phone_unavailable(&"special_call_requires_outside")
 	if condition != CONDITION_OUTSIDE and condition != CONDITION_ANYWHERE:
 		return _phone_unavailable(&"unsupported_special_call_condition")
-	var contact_id: int = int(call.get("contact", -1))
+	var contact_id: int = int(special_call.get("contact", -1))
 	var contact: Dictionary = data.world_phone_contact(contact_id)
-	var script: Dictionary = call.get("script", {})
+	var script: Dictionary = special_call.get("script", {})
 	if contact.is_empty() or script.is_empty():
 		return _phone_unavailable(&"special_phone_call_data_missing")
 	return {
 		"ok": true,
 		"call_id": call_id,
-		"special_call": call.duplicate(true),
+		"special_call": special_call.duplicate(true),
 		"contact": contact,
 		"contact_id": contact_id,
 		"role": &"callee",
@@ -204,3 +228,26 @@ static func resolve_special(
 
 static func _phone_unavailable(reason: StringName) -> Dictionary:
 	return {"ok": false, "reason": reason}
+
+
+static func _out_of_area_result(
+	data: GameData, contact: Dictionary, contact_id: int, reason: StringName
+) -> Dictionary:
+	var script: Dictionary = data.world_phone_script(&"out_of_area")
+	if script.is_empty():
+		return _phone_unavailable(reason)
+	return {
+		"ok": true,
+		"reason": reason,
+		"out_of_area": true,
+		"contact": contact.duplicate(true),
+		"contact_id": contact_id,
+		"role": &"caller",
+		"script": script,
+		"phone": {
+			"contact_id": contact_id,
+			"caller_id": contact_id,
+			"role": &"outgoing",
+			"out_of_area": true,
+		},
+	}
