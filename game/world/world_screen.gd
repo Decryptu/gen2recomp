@@ -125,7 +125,7 @@ func _build_world() -> void:
 
 
 func _process(delta: float) -> void:
-	if _animation != null and _animation.tick() and _renderer != null:
+	if _animation != null and _animation.advance(delta) and _renderer != null:
 		_renderer.refresh_animation()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()

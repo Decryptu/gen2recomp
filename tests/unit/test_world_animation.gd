@@ -89,3 +89,45 @@ func test_water_command_writes_the_imported_frame_and_done_loops() -> void:
 	assert_true(animation.tick())
 	assert_true(animation.tick())
 	assert_eq(animation.current_indices()[0], 1)
+
+
+func test_advance_paces_commands_by_elapsed_time_not_by_rendered_frames() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+
+	# A frame shorter than one hardware frame runs no command at all, so a fast
+	# display cannot make the sequence run faster than the cartridge does.
+	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS * 0.5))
+	assert_eq(animation.current_indices()[0], 0)
+
+	# The remainder carries over: two half frames are one whole one.
+	assert_true(animation.advance(Gen2WorldAnimation.FRAME_SECONDS * 0.5))
+	assert_eq(animation.current_indices()[0], 1)
+
+
+func test_advance_reports_no_redraw_when_the_command_changes_nothing() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+
+	assert_true(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+	# "done" only rewinds the command index, so nothing new is drawn and the
+	# renderer must not rebuild its atlas for it.
+	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+	# The water command runs again, but writes the frame that is already there.
+	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+
+
+func test_advance_drops_frames_after_a_stall_instead_of_running_the_backlog() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+
+	# Ten seconds of stall is close to 600 hardware frames. Only the capped
+	# catch-up runs, so recovery costs a bounded amount of work.
+	animation.advance(10.0)
+	assert_lt(animation.command_index(), Gen2WorldAnimation.MAX_CATCHUP_FRAMES + 1)

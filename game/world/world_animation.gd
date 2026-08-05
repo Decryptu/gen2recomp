@@ -8,6 +8,13 @@ extends RefCounted
 ## the indexed tile strip held by GameData.
 
 const TILE_BYTES: int = Gen2Tiles.TILE_BYTES
+## One command runs per hardware VBlank, so the sequence has to be paced by
+## elapsed time rather than by rendered frames. Stepping it once per drawn frame
+## makes water flow at the monitor's refresh rate instead of the cartridge's.
+const FRAME_SECONDS: float = 1.0 / 59.7275
+## The most catch-up frames one call will run. A stall should drop animation
+## frames, not spend the recovery frame walking thousands of commands.
+const MAX_CATCHUP_FRAMES: int = 4
 const TIMER_WATER_FRAMES: Array = [0, 1, 2, 3]
 const TIMER_FOUNTAIN_FRAMES: Array = [0, 1, 2, 3, 2, 3, 4, 0]
 const TIMER_TOWER_FRAMES: Array = [0, 1, 2, 3, 4, 3, 2, 1]
@@ -24,6 +31,8 @@ var _timer: int = 0
 var _water_color: int = -1
 var _cave_color: int = -1
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
+var _frame_seconds: float = 0.0
+var _changed: bool = false
 
 
 func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MORNING) -> void:
@@ -35,6 +44,8 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	_timer = 0
 	_water_color = -1
 	_cave_color = -1
+	_frame_seconds = 0.0
+	_changed = false
 	_buffer.resize(TILE_BYTES)
 	if data == null or tileset == null:
 		_indices = PackedByteArray()
@@ -42,6 +53,33 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 		return
 	_indices = data.world_tileset_indices(tileset.number).duplicate()
 	_commands = tileset.animation_commands.duplicate(true)
+
+
+## Runs the commands that [param delta] seconds of real time are worth and
+## reports whether the tile strip or a palette row actually changed.
+##
+## Most commands are waits and timer bumps that draw nothing new, so the return
+## value is what a renderer should gate its atlas rebuild on; [method tick] is
+## the single-command step the sequence is defined in.
+func advance(delta: float) -> bool:
+	if _commands.is_empty() or tileset == null or delta <= 0.0:
+		return false
+	_frame_seconds = minf(
+		_frame_seconds + delta, FRAME_SECONDS * float(MAX_CATCHUP_FRAMES)
+	)
+	var changed: bool = false
+	while _frame_seconds >= FRAME_SECONDS:
+		_frame_seconds -= FRAME_SECONDS
+		_changed = false
+		tick()
+		changed = changed or _changed
+	return changed
+
+
+## How far into the command list the sequence has reached, for tests and cache
+## inspection.
+func command_index() -> int:
+	return _command_index
 
 
 func current_indices() -> PackedByteArray:
@@ -115,10 +153,14 @@ func tick() -> bool:
 		"scroll_vertical":
 			_scroll_vertical()
 		"water_palette":
-			_water_color = TIMER_WATER_PALETTE[(_timer & 6) >> 1]
+			var water_color: int = TIMER_WATER_PALETTE[(_timer & 6) >> 1]
+			_changed = _changed or water_color != _water_color
+			_water_color = water_color
 		"cave_palette":
 			if _time_of_day == Gen2WorldPalette.TIME_DARK:
-				_cave_color = (_timer >> 1) & 1
+				var cave_color: int = (_timer >> 1) & 1
+				_changed = _changed or cave_color != _cave_color
+				_cave_color = cave_color
 	return true
 
 
@@ -175,7 +217,11 @@ func _set_tile_bytes(tile: int, bytes: PackedByteArray) -> void:
 		var high: int = int(bytes[y * 2 + 1])
 		for x: int in Gen2Tiles.TILE_WIDTH:
 			var value: int = ((low >> (7 - x)) & 1) | (((high >> (7 - x)) & 1) << 1)
-			_indices[y * width + tile * Gen2Tiles.TILE_WIDTH + x] = value
+			var at: int = y * width + tile * Gen2Tiles.TILE_WIDTH + x
+			if _indices[at] == value:
+				continue
+			_indices[at] = value
+			_changed = true
 
 
 func _scroll_horizontal() -> void:
