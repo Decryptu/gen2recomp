@@ -96,6 +96,53 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_eq(snapshot["world_battle_active"], true)
 
 
+## The approach still takes the same number of process frames it did before
+## sub-cell interpolation existed (proven by every other case in this file
+## reaching the battle overlay through the same _trigger_trainer budget);
+## this only checks that while the trainer object is mid-step, its
+## presentation offset eases toward zero instead of snapping.
+func test_trainer_approach_step_interpolates_the_objects_position() -> void:
+	await _open_world()
+	assert_true(_world_screen.move_player(Vector2i.RIGHT))
+
+	var object := _world_screen._world.objects[0] as Gen2WorldObject
+	var saw_step: bool = false
+	var was_stepping: bool = false
+	var previous_magnitude: int = -1
+	var lowest_magnitude: int = Gen2WorldAPI.CELL_PIXELS
+	for _frame: int in 80:
+		await get_tree().process_frame
+		if _battle_host() != null:
+			break
+		if object.is_stepping():
+			var offset: Vector2i = object.step_offset(Gen2WorldAPI.CELL_PIXELS)
+			var magnitude: int = abs(offset.x) + abs(offset.y)
+			if not saw_step:
+				# The source's single-step Route 30 fixture path starts at a
+				# full cell of offset; a longer path would restart here too.
+				assert_eq(magnitude, Gen2WorldAPI.CELL_PIXELS)
+			elif was_stepping:
+				assert_true(
+					magnitude <= previous_magnitude,
+					"step offset must ease toward zero within one step, not grow"
+				)
+			saw_step = true
+			was_stepping = true
+			previous_magnitude = magnitude
+			lowest_magnitude = mini(lowest_magnitude, magnitude)
+		else:
+			was_stepping = false
+		var pending: Dictionary = _world_screen._world.pending_script_input()
+		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
+			_world_screen._advance_script_input()
+	assert_not_null(_battle_host())
+	assert_true(saw_step)
+	# tick_step() decrements once per process call, the same rate the emote
+	# and movement-delay counters already use; the offset eases down to one
+	# sixteenth of a cell on the frame before the step formally ends.
+	assert_eq(lowest_magnitude, 1)
+
+
 func test_victory_displays_imported_text_reloads_objects_and_keeps_player_cell() -> void:
 	await _open_world()
 	await _trigger_trainer()

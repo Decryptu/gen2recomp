@@ -15,6 +15,9 @@ const MOVEMENT_SURF: StringName = &"surf"
 const TRAINER_SHOCK_EMOTE: int = 0
 const TRAINER_SHOCK_FRAMES: int = 30
 const TRAINER_SLOW_STEP_FRAMES: int = 16
+## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
+## duration for ordinary player walking (engine/overworld/map_objects.asm).
+const STEP_FRAMES_WALK: int = 8
 
 ## Crystal background event types from script_constants.asm. READ and the four
 ## facing variants point directly at a script. IFSET and IFNOTSET point at a
@@ -66,6 +69,14 @@ var script_random: RandomNumberGenerator = null
 var _last_schedule: Dictionary = {}
 var _phone_ring: Gen2WorldPhoneRing = null
 var _phone_ring_request: Dictionary = {}
+## Transient presentation offset for the player's own walk step. player_cell
+## already holds the committed destination; this only paces how far behind it
+## a renderer draws the sprite. Never read by collision, events or the
+## snapshot.
+var _player_step_direction: Vector2i = Vector2i.ZERO
+var _player_step_frames_total: int = 0
+var _player_step_frames_remaining: int = 0
+var _player_step_accumulator: float = 0.0
 
 const PHONE_ENTRANCE_COLLISIONS: Array[int] = [0x71, 0x79, 0x7A, 0x7B]
 
@@ -178,8 +189,64 @@ func player_view_cell() -> Vector2i:
 	return player_cell - visible_origin_cell()
 
 
+## The committed cell in pixels, offset by any in-flight walk step so a
+## renderer can draw the approach to it. player_cell itself never carries
+## this offset; collision, events and the snapshot never see it.
 func player_pixel_position() -> Vector2i:
-	return player_view_cell() * CELL_PIXELS
+	return player_view_cell() * CELL_PIXELS + Vector2i(
+		player_step_offset_cells() * float(CELL_PIXELS)
+	)
+
+
+func player_step_in_progress() -> bool:
+	return _player_step_frames_remaining > 0
+
+
+## The in-flight walk step's presentation offset in fractional walk cells,
+## from 1.0 cell behind player_cell down to zero, so a renderer that does not
+## think in hardware pixels (a 3D or free-roam mod) can still smooth against
+## it without reverse-engineering CELL_PIXELS.
+func player_step_offset_cells() -> Vector2:
+	if _player_step_frames_remaining <= 0 or _player_step_frames_total <= 0:
+		return Vector2.ZERO
+	var fraction: float = float(_player_step_frames_remaining) / float(_player_step_frames_total)
+	return Vector2(-_player_step_direction.x, -_player_step_direction.y) * fraction
+
+
+func _start_player_step(direction: Vector2i, frames: int) -> void:
+	_player_step_direction = direction
+	_player_step_frames_total = maxi(0, frames)
+	_player_step_frames_remaining = _player_step_frames_total
+
+
+func _clear_player_step() -> void:
+	_player_step_direction = Vector2i.ZERO
+	_player_step_frames_total = 0
+	_player_step_frames_remaining = 0
+	_player_step_accumulator = 0.0
+
+
+## Advances the player's walk-step offset by real elapsed time, at the same
+## hardware-frame rate and stall catch-up cap as Gen2WorldAnimation, so both
+## stay in phase after a pause instead of drifting apart. This only shrinks a
+## presentation offset that already starts and ends at player_cell; it never
+## changes player_cell, collision or event results, and callers that never
+## start a step (every existing caller of move()/move_result() before this
+## change) see no difference at all.
+func advance_player_step(delta: float) -> bool:
+	if _player_step_frames_remaining <= 0 or delta <= 0.0:
+		return false
+	_player_step_accumulator = minf(
+		_player_step_accumulator + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
+	)
+	var changed: bool = false
+	while _player_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS \
+		and _player_step_frames_remaining > 0:
+		_player_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+		_player_step_frames_remaining -= 1
+		changed = true
+	return changed
 
 
 func player_sprite() -> Gen2WorldSprite:
@@ -695,7 +762,9 @@ func trainer_approach_plan(
 	}
 
 
-## Applies one source slow-step from an already validated approach plan.
+## Applies one source slow-step from an already validated approach plan and
+## starts that object's presentation offset for the pacing caller to consume;
+## the object's cell is already the destination when this returns.
 func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Dictionary:
 	if current_map == null or object_index < 0 or object_index >= objects.size():
 		return {"ok": false, "reason": &"invalid_trainer_object"}
@@ -708,6 +777,7 @@ func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Di
 			"object_index": object_index, "cell": destination,
 		}
 	object.cell = destination
+	object.start_step(direction, TRAINER_SLOW_STEP_FRAMES)
 	var key: String = _object_key(current_map.group, current_map.number, object_index)
 	_object_position_overrides[key] = object.cell
 	_object_facing_overrides[key] = object.facing
@@ -2062,6 +2132,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
 	_advance_followers(from_cell, previous_cells)
+	_start_player_step(direction, STEP_FRAMES_WALK)
 	return {
 		"ok": true,
 		"kind": &"water_move" if movement_mode == MOVEMENT_SURF else &"move",
@@ -2155,6 +2226,7 @@ func _apply_map(
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
+	_clear_player_step()
 	_load_objects()
 	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
 	# player who stands still does not watch them cross Johto.

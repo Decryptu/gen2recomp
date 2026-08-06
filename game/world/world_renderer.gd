@@ -140,7 +140,8 @@ func _draw() -> void:
 	var actors: Array = _world.visible_objects()
 	actors.sort_custom(_sort_objects)
 	for object: Gen2WorldObject in actors:
-		var pixel: Vector2i = (object.cell - _world.visible_origin_cell()) * Gen2WorldAPI.CELL_PIXELS
+		var pixel: Vector2i = (object.cell - _world.visible_origin_cell()) * Gen2WorldAPI.CELL_PIXELS \
+			+ object.step_offset(Gen2WorldAPI.CELL_PIXELS)
 		var texture: Texture2D = _actor_texture(object.sprite, object.palette, object.facing, object.frame)
 		if texture != null:
 			draw_texture(texture, Vector2(pixel))

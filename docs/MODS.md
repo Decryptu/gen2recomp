@@ -134,27 +134,38 @@ What the contract above already supports:
   rectangles, so geometry textured from the atlas follows water and flowers
   without the renderer knowing an animation ran.
 
-What is missing, in the order it blocks work:
+What the contract above now also supports:
 
-1. **Sub-cell player position.** `Gen2WorldAPI` moves the player a whole walk
-   cell at a time and holds no interpolation, so a free-roam or first-person
-   camera has nothing to smooth against and a third-person one snaps. The API
-   needs a movement progress value, or a renderer has to invent its own and
-   drift from the world it is drawing.
-2. **Per-tile height.** Extruded height here is a guess from the collision
+- a movement progress value. `Gen2WorldAPI.player_step_offset_cells()` returns
+  the player's in-flight walk step as a fractional cell, from one cell behind
+  `player_cell` down to zero, paced by `advance_player_step(delta)` at the
+  same hardware-frame rate and stall cap `Gen2WorldAnimation` uses. The
+  logical cell still commits at the start of the step, exactly as documented
+  above; the fractional value is presentation only and never reaches
+  collision, events or the world snapshot. `mods/examples/voxel_preview/`
+  reads it for its player box and camera instead of snapping.
+
+What is still missing, in the order it blocks work:
+
+1. **Per-tile height.** Extruded height here is a guess from the collision
    permission, which cannot tell a tree from a cliff from a building. Gen II
    has no height data; a renderer needs a per-block table it supplies itself,
    and the host should let a mod attach one rather than have each renderer
    hard-code Johto.
-3. **Battles and interiors are not renderer-owned.** `Gen2BattleScreen` builds
+2. **Battles and interiors are not renderer-owned.** `Gen2BattleScreen` builds
    its own 160x144 presentation directly and does not go through the mod host,
    so the voxel mod's 3D battles have no equivalent here. Battle presentation
    needs the same registration the world renderer has.
-4. **No camera boundary.** The screen decides the visible page through
-   `Gen2WorldAPI.visible_origin_cell()`. A free camera would need the world to
-   stop being the thing that frames the view.
-5. **No input hook.** Camera pitch, first person and free-roam are all input a
+3. **No camera boundary.** The screen decides the visible page through
+   `Gen2WorldAPI.visible_origin_cell()`, which still follows the committed
+   cell rather than the interpolated one, so a free camera pans a step early.
+   A free camera would need the world to stop being the thing that frames the
+   view.
+4. **No input hook.** Camera pitch, first person and free-roam are all input a
    mod would have to receive, and the world screen currently reads keys itself.
+5. **NPC movement templates do not interpolate.** Wandering and follower
+   objects still snap between cells; only the player's ordinary walk and the
+   trainer-approach object share the sub-cell offset so far.
 
 Nothing in that list changes the world's own data, which is the part that
 matters: they are all presentation boundaries that do not exist yet, not
