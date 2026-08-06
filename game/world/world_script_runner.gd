@@ -121,7 +121,7 @@ static func begin(
 		started = runner._push_frame(
 			bank, address, runner._trainer_intro_script(trainer as Dictionary)
 		)
-		runner._trainer_intro_approach_pending = runner._crystal_commands()
+		runner._trainer_intro_approach_pending = true
 	else:
 		started = runner._push_frame(bank, address)
 	if not started:
@@ -1994,29 +1994,33 @@ func _trainer_text_pointer(trainer: Dictionary, key: String, default_bank: int) 
 	return {"bank": default_bank, "address": 0}
 
 
+## Builds the source SeenByTrainerScript/StartBattleWithMapTrainerScript
+## sequence: loadtemptrainer, encountermusic, farwritetext, waitbutton,
+## loadtemptrainer, startbattle, reloadmapafterbattle, trainerflagaction, end.
+## The sequence is identical between profiles at the source-opcode level;
+## only the raw bytes differ, so every command goes through
+## Gen2WorldScript.raw_opcode() rather than hard-coding either profile's byte.
 func _trainer_intro_script(trainer: Dictionary) -> PackedByteArray:
 	var seen: Dictionary = _trainer_text_pointer(
 		trainer, "seen_text", int(_request.get("bank", 0))
 	)
 	var bank: int = int(seen.get("bank", _request.get("bank", 0)))
 	var address: int = int(seen.get("address", 0))
+	var crystal: bool = _crystal_commands()
+	var raw: Callable = func(source_opcode: int) -> int:
+		return Gen2WorldScript.raw_opcode(source_opcode, crystal)
 	var bytes: Array = [
-		# Crystal's loadtemptrainer command points at the request's trainer record.
-		0x5C,
-	]
-	if _crystal_commands():
-		# Crystal's raw command byte is one higher than the Gold/Silver source
-		# opcode after farjumptext was inserted in the command table.
-		bytes.append(0x80) # encountermusic
-	bytes.append_array([
+		# loadtemptrainer points at the request's trainer record.
+		raw.call(Gen2WorldScript.GOLD_LOADTEMPTRAINER),
+		raw.call(Gen2WorldScript.GOLD_ENCOUNTERMUSIC),
 		Gen2WorldScript.FARWRITETEXT, bank, address & 0xFF, address >> 8,
-		Gen2WorldScript.WAITBUTTON,
-		0x5C,
-		0x5F,
-		0x60,
-		0x63, 1,
-		Gen2WorldScript.END,
-	])
+		raw.call(0x53), # waitbutton
+		raw.call(Gen2WorldScript.GOLD_LOADTEMPTRAINER),
+		raw.call(Gen2WorldScript.GOLD_STARTBATTLE),
+		raw.call(Gen2WorldScript.GOLD_RELOADMAPAFTERBATTLE),
+		raw.call(Gen2WorldScript.GOLD_TRAINERFLAGACTION), 1,
+		raw.call(Gen2WorldScript.GOLD_END),
+	]
 	return PackedByteArray(bytes)
 
 
