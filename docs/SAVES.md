@@ -65,6 +65,13 @@ invent a world position. Item and currency references are
 checked against the selected cache, and `Gen2WorldAPI.open_snapshot()` restores
 the saved position without clamping it elsewhere.
 
+The party screen opens `box_screen.tscn`, which presents one of fourteen numbered
+boxes at a time with twenty fixed slots and a party selection column. Depositing
+uses the current box's first free slot; withdrawal requires party capacity. Both
+directions use `Gen2SaveStorage` to validate and write a candidate save before
+updating the shared runtime object. The screen's current box is transient UI
+state, and box names and cartridge SRAM placement remain outside the model.
+
 Party-owned overworld transactions first modify a candidate `Gen2SaveData` and
 live world snapshot. Gifts, eggs, NPC trades, item effects and catches commit
 only after validation and optional persistence; a failed write restores live

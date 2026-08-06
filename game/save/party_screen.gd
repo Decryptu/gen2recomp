@@ -103,6 +103,10 @@ func _build_ui() -> void:
 	var back := _button("Back to save slots", TEXT)
 	back.custom_minimum_size = Vector2(190, 44)
 	back.pressed.connect(_back)
+	var storage := _button("Open PC storage", ACCENT)
+	storage.custom_minimum_size = Vector2(170, 44)
+	storage.pressed.connect(_open_storage)
+	header.add_child(storage)
 	header.add_child(back)
 
 	_player_label = Label.new()
@@ -237,6 +241,18 @@ func _start_battle() -> void:
 
 func _back() -> void:
 	get_tree().change_scene_to_file.call_deferred("res://game/save/save_screen.tscn")
+
+
+func _open_storage() -> void:
+	if _data == null or _save == null:
+		_status.text = "No validated save selected."
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	if not GameRuntime.select_save_slot(_data.id, _save.slot):
+		_status.text = "The selected cartridge is not in the registry."
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	get_tree().change_scene_to_file.call_deferred("res://game/save/box_screen.tscn")
 
 
 func _button(text: String, colour: Color) -> Button:

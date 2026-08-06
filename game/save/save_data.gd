@@ -144,3 +144,23 @@ func add_party_or_box(mon: Gen2SaveMon) -> Dictionary:
 		"box": int(destination["box"]),
 		"slot": int(destination["slot"]),
 	}
+
+
+## Replaces this shared runtime save with a validated candidate while keeping
+## the object identity that GameRuntime and open screens already reference.
+func copy_from(source: Gen2SaveData) -> bool:
+	if source == null:
+		return false
+	var copied: Gen2SaveData = Gen2SaveData.from_dict(source.to_dict())
+	if copied == null:
+		return false
+	format_version = copied.format_version
+	game_id = copied.game_id
+	rom_sha1 = copied.rom_sha1
+	slot = copied.slot
+	player_name = copied.player_name
+	party = copied.party
+	boxes = copied.boxes
+	world = copied.world
+	boxes_shape_valid = copied.boxes_shape_valid
+	return true
