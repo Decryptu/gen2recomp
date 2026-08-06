@@ -49,6 +49,36 @@ func _queue_service() -> void:
 	await get_tree().process_frame
 
 
+func _write_pc_request() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts["48:6190"] = [Gen2WorldScript.SPECIAL, 29, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+
+
+func test_players_house_pc_embeds_box_storage_and_resumes_the_waiting_script() -> void:
+	_write_pc_request()
+	await _open_world()
+	_world_screen._world.current_map.events["coord_events"][0]["script"] = 0x6190
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	_world_screen._show_script_results(waiting)
+	await get_tree().process_frame
+
+	var pc: Gen2BoxScreen = _world_screen._pc_host
+	assert_not_null(pc)
+	assert_eq(pc.box_snapshot()["boxes"].size(), Gen2SaveData.BOX_COUNT)
+	assert_true(pc.select_party_member(0))
+	assert_true(pc.deposit_selected_party())
+	assert_eq((_world_screen._injected_save as Gen2SaveData).party.size(), 1)
+
+	pc.close_embedded()
+	await get_tree().process_frame
+	assert_null(_world_screen._pc_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
 func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 	await _open_world()
 	await _queue_service()

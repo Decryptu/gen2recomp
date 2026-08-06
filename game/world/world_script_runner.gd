@@ -54,6 +54,7 @@ const PHONE_CONTACT_REFUSED: int = 2
 const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
 const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
 const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
+const SPECIAL_PLAYERS_HOUSE_PC: int = 29
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
@@ -236,7 +237,10 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		):
 			return _fail(&"phone_script_missing", phone_script)
 		return advance()
-	if kind in [&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested"]:
+	if kind in [
+		&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested",
+		&"pc_requested",
+	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
 				StringName(result.get("reason", "runtime_request_failed")), result
@@ -1161,6 +1165,11 @@ func _execute_special(special: int) -> Dictionary:
 	## SPECIAL is a shared cartridge dispatch table. Phone routines are only one
 	## part of it; map callbacks also use the adjacent decoration routines.
 	match special:
+		SPECIAL_PLAYERS_HOUSE_PC:
+			return _stage_runtime_request(&"pc_requested", {
+				"special": special,
+				"mode": &"players_house",
+			})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",

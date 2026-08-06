@@ -13,6 +13,19 @@ const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
 
+## Crystal background event types from script_constants.asm. READ and the four
+## facing variants point directly at a script. IFSET and IFNOTSET point at a
+## four-byte conditional record containing an event flag and script pointer.
+const BGEVENT_READ: int = 0
+const BGEVENT_UP: int = 1
+const BGEVENT_DOWN: int = 2
+const BGEVENT_RIGHT: int = 3
+const BGEVENT_LEFT: int = 4
+const BGEVENT_IFSET: int = 5
+const BGEVENT_IFNOTSET: int = 6
+const BGEVENT_ITEM: int = 7
+const BGEVENT_COPY: int = 8
+
 var data: GameData = null
 var state: Gen2WorldState = null
 var inventory: Gen2WorldInventory = null
@@ -856,8 +869,15 @@ func interact() -> Array:
 		return run_event_queue(false)
 	var target: Vector2i = facing_cell()
 	var events: Array = []
+	## TryObjectEvent runs before TryBGEvent in the cartridge event loop. Keep
+	## that order even though events_at() exposes the cache's source order.
 	for event: Dictionary in _active_events_at(target):
 		if event.get("kind", &"") == &"objects" and event.has("script"):
+			events.append(event)
+	for event: Dictionary in _active_events_at(target):
+		if event.get("kind", &"") != &"bg_events":
+			continue
+		if _bg_event_interacts(event) and _script_address_for_event(event) > 0:
 			events.append(event)
 	if events.is_empty():
 		return []
@@ -970,6 +990,9 @@ func _active_events_at(cell: Vector2i) -> Array:
 			if index >= 0 and index < objects.size() \
 				and not (objects[index] as Gen2WorldObject).active:
 				continue
+		elif event.get("kind", &"") == &"bg_events" \
+			and not _bg_event_condition_active(event):
+			continue
 		out.append(event)
 	return out
 
@@ -979,15 +1002,74 @@ func _enqueue_script_events(events: Array) -> void:
 	for event: Dictionary in events:
 		if event.get("kind", &"") == &"warps" or not event.has("script"):
 			continue
+		var script_address: int = _script_address_for_event(event)
+		if script_address <= 0:
+			continue
 		_enqueue_script({
 			"kind": event.get("kind", &""),
 			"map_group": current_map.group,
 			"map_number": current_map.number,
 			"cell": Vector2i(int(event.get("x", 0)), int(event.get("y", 0))),
 			"bank": bank,
-			"script": int(event.get("script", 0)),
+			"script": script_address,
 			"event": event.duplicate(true),
 		})
+
+
+func _bg_event_interacts(event: Dictionary) -> bool:
+	var event_type: int = int(event.get("type", -1))
+	match event_type:
+		BGEVENT_READ, BGEVENT_IFSET, BGEVENT_IFNOTSET:
+			return true
+		BGEVENT_UP:
+			return player_facing == Gen2WorldSprite.FACING_UP
+		BGEVENT_DOWN:
+			return player_facing == Gen2WorldSprite.FACING_DOWN
+		BGEVENT_LEFT:
+			return player_facing == Gen2WorldSprite.FACING_LEFT
+		BGEVENT_RIGHT:
+			return player_facing == Gen2WorldSprite.FACING_RIGHT
+	return false
+
+
+func _bg_event_condition_active(event: Dictionary) -> bool:
+	var event_type: int = int(event.get("type", -1))
+	if event_type not in [BGEVENT_IFSET, BGEVENT_IFNOTSET]:
+		return true
+	var conditional: Dictionary = _bg_event_condition(event)
+	if not bool(conditional.get("ok", false)):
+		return false
+	var active: bool = event_flag_active(int(conditional["flag"]))
+	return active if event_type == BGEVENT_IFSET else not active
+
+
+func _bg_event_condition(event: Dictionary) -> Dictionary:
+	if data == null or current_map == null:
+		return {"ok": false, "reason": &"missing_bg_event_context"}
+	var pointer: int = int(event.get("script", 0))
+	var raw: PackedByteArray = data.world_script(
+		int(current_map.events.get("bank", 0)), pointer
+	)
+	if raw.size() < 4:
+		return {"ok": false, "reason": &"invalid_bg_event_condition", "pointer": pointer}
+	return {
+		"ok": true,
+		"flag": int(raw[0]) | (int(raw[1]) << 8),
+		"script": int(raw[2]) | (int(raw[3]) << 8),
+	}
+
+
+func _script_address_for_event(event: Dictionary) -> int:
+	if event.get("kind", &"") != &"bg_events":
+		return int(event.get("script", 0))
+	var event_type: int = int(event.get("type", -1))
+	if event_type in [BGEVENT_IFSET, BGEVENT_IFNOTSET]:
+		if not _bg_event_condition_active(event):
+			return -1
+		return int(_bg_event_condition(event).get("script", -1))
+	if event_type in [BGEVENT_READ, BGEVENT_UP, BGEVENT_DOWN, BGEVENT_RIGHT, BGEVENT_LEFT]:
+		return int(event.get("script", 0))
+	return -1
 
 
 func _enqueue_script(request: Dictionary) -> void:

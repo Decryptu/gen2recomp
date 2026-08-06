@@ -199,3 +199,13 @@ func test_pc_storage_refuses_depositing_the_last_party_member() -> void:
 	assert_eq(result["reason"], &"last_party_member")
 	assert_eq(save.party.size(), 1)
 	assert_null(save.boxes[0].slots[0])
+
+
+func test_pc_storage_can_commit_in_memory_without_writing_slot() -> void:
+	var save: Gen2SaveData = _save_with_two()
+	var result: Dictionary = Gen2SaveStorage.deposit_party_to_box(save, _data, 0, 0, -1, false)
+	assert_true(result["ok"])
+	assert_false(result["persisted"])
+	assert_eq(save.party.size(), 1)
+	assert_not_null(save.boxes[0].slots[0])
+	assert_false(Gen2SaveStore.exists(_data.id, _data.sha1, save.slot))
