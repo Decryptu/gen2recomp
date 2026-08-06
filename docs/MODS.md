@@ -144,6 +144,12 @@ What the contract above now also supports:
   above; the fractional value is presentation only and never reaches
   collision, events or the world snapshot. `mods/examples/voxel_preview/`
   reads it for its player box and camera instead of snapping.
+- the same progress value for NPCs. `Gen2WorldObject.step_offset_cells()`
+  returns a wandering or following object's in-flight step as a fractional
+  cell, on the same terms as the player's. `Gen2WorldAPI.advance_object_steps()`
+  paces the wandering and spinning movement templates at the source's own step
+  and wait durations, and the example renderer reads the offset for its object
+  markers.
 
 What is still missing, in the order it blocks work:
 
@@ -163,9 +169,10 @@ What is still missing, in the order it blocks work:
    view.
 4. **No input hook.** Camera pitch, first person and free-roam are all input a
    mod would have to receive, and the world screen currently reads keys itself.
-5. **NPC movement templates do not interpolate.** Wandering and follower
-   objects still snap between cells; only the player's ordinary walk and the
-   trainer-approach object share the sub-cell offset so far.
+5. **Scripted movement does not interpolate.** `applymovement` streams still
+   place objects a whole cell at a time, and so do the jump, teleport and
+   boulder step types. The wandering, spinning, following, player and
+   trainer-approach paths all carry the sub-cell offset.
 
 Nothing in that list changes the world's own data, which is the part that
 matters: they are all presentation boundaries that do not exist yet, not

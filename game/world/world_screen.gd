@@ -45,6 +45,9 @@ var _trainer_approach: Dictionary = {}
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
+## NPC movement rolls from its own generator, so a seeded route keeps the same
+## encounters and script results however long the player stands watching.
+var _object_random := RandomNumberGenerator.new()
 var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 
 @onready var _screen: Gen2Screen = %Screen
@@ -109,11 +112,14 @@ func _build_world() -> void:
 		return
 	if encounter_seed != 0:
 		_encounter_random.seed = encounter_seed
+		_object_random.seed = encounter_seed + 1
 	else:
 		_encounter_random.randomize()
+		_object_random.randomize()
 
 	_world.schedule_random = _encounter_random
 	_world.script_random = _encounter_random
+	_world.object_random = _object_random
 	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -210,6 +216,9 @@ func _process(delta: float) -> void:
 		_renderer.refresh()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
+	if _objects_may_move() and _world.advance_object_steps(delta, _object_random) \
+		and _renderer != null:
+		_renderer.refresh()
 	if not _trainer_approach.is_empty():
 		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
@@ -238,6 +247,18 @@ func _process(delta: float) -> void:
 		)
 		if bool(audio_result.get("ok", false)):
 			_show_script_results(audio_result.get("results", []))
+
+
+## Wandering objects keep to themselves while anything else owns the world. A
+## script may be moving those same objects, a trainer approach paces its own
+## object by call count, and an overlay hides the map entirely.
+func _objects_may_move() -> bool:
+	return _world != null \
+		and _battle_host == null and _service_host == null and _pc_host == null \
+		and _trainer_approach.is_empty() \
+		and not _world.script_busy() \
+		and not _world.phone_ring_active() \
+		and not _world.fishing_busy()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

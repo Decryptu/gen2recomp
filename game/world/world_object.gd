@@ -56,6 +56,10 @@ var emote_remaining: int = 0
 var step_direction: Vector2i = Vector2i.ZERO
 var step_frames_total: int = 0
 var step_frames_remaining: int = 0
+## Frames this object waits before its movement template decides again. The
+## source keeps this in OBJECT_STEP_DURATION while the object sits in
+## STEP_TYPE_SLEEP (engine/overworld/map_objects.asm, StepFunction_Sleep).
+var idle_frames_remaining: int = 0
 
 
 static func from_event(
@@ -104,6 +108,17 @@ func movement_supported() -> bool:
 		MOVEMENT_WALK_UP_DOWN, MOVEMENT_WALK_LEFT_RIGHT,
 		MOVEMENT_FIXED_DOWN, MOVEMENT_FIXED_UP, MOVEMENT_FIXED_LEFT,
 		MOVEMENT_FIXED_RIGHT, MOVEMENT_SPINRANDOM_FAST, MOVEMENT_SWIM_WANDER,
+	]
+
+
+## The supported templates that actually decide something on their own: the
+## three random-walk rows and the two random-spin rows. The standing and
+## fixed-facing rows resolve once in the source and never ask again, so a
+## per-frame driver skips them rather than re-deciding nothing every frame.
+func movement_advances() -> bool:
+	return movement in [
+		MOVEMENT_WANDER, MOVEMENT_WALK_UP_DOWN, MOVEMENT_WALK_LEFT_RIGHT,
+		MOVEMENT_SWIM_WANDER, MOVEMENT_SPINRANDOM_SLOW, MOVEMENT_SPINRANDOM_FAST,
 	]
 
 
@@ -207,6 +222,26 @@ func is_stepping() -> bool:
 	return step_frames_remaining > 0
 
 
+## Starts the wait a movement template takes before deciding again. The source
+## rolls this duration itself; the caller supplies the rolled value so this
+## class stays free of the generator.
+func start_idle(frames: int) -> void:
+	idle_frames_remaining = maxi(0, frames)
+
+
+## Consumes one frame of that wait. Returns true when a frame was consumed,
+## matching tick_step() so one caller can pace both.
+func tick_idle() -> bool:
+	if idle_frames_remaining <= 0:
+		return false
+	idle_frames_remaining -= 1
+	return true
+
+
+func is_idle() -> bool:
+	return idle_frames_remaining > 0
+
+
 ## Pixel offset from the committed cell back toward where the step began,
 ## shrinking to zero as step_frames_remaining reaches zero.
 func step_offset(cell_pixels: int) -> Vector2i:
@@ -216,3 +251,14 @@ func step_offset(cell_pixels: int) -> Vector2i:
 		float(step_frames_remaining) / float(step_frames_total) * float(cell_pixels)
 	))
 	return Vector2i(-step_direction.x, -step_direction.y) * behind
+
+
+## The same offset in fractional walk cells, from one cell behind the committed
+## cell down to zero. A renderer that does not think in hardware pixels reads
+## this instead of step_offset(), exactly as a renderer reads the player's
+## Gen2WorldAPI.player_step_offset_cells().
+func step_offset_cells() -> Vector2:
+	if step_frames_remaining <= 0 or step_frames_total <= 0:
+		return Vector2.ZERO
+	var fraction: float = float(step_frames_remaining) / float(step_frames_total)
+	return Vector2(-step_direction.x, -step_direction.y) * fraction
