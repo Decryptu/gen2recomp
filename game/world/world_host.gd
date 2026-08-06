@@ -143,17 +143,23 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 						"reason": StringName(outgoing.get("reason", &"phone_data_unavailable")),
 					}
 				return {"ok": true, "data": outgoing}
-			var contact: Dictionary = _phone_contact_for_script(
-				world.data, int(source.get("bank", -1)), address
-			)
-			if contact.is_empty():
-				return {"ok": false, "reason": &"phone_data_unavailable"}
-			## Crystal's phonecall operand is a caller-name pointer, not this
-			## contact script pointer. Keep the old pointer match only for cached
-			## synthetic callers and expose that it is a compatibility path.
+			var bank: int = int(source.get("bank", -1))
+			var caller_name_raw: PackedByteArray = world.data.world_text(bank, address)
+			var caller_name: Dictionary = Gen2WorldScript.decode_text(caller_name_raw)
+			if not bool(caller_name.get("ok", false)):
+				return {"ok": false, "reason": &"phone_caller_name_unavailable"}
+			## The source phonecall command passes a text pointer directly to
+			## PhoneCall. It does not identify a phone contact or dispatch a
+			## contact script.
 			return {
 				"ok": true,
-				"data": {"contact": contact, "legacy_pointer_match": true},
+				"data": {
+					"phone_call": {
+						"caller_name_pointer": {"bank": bank, "address": address},
+						"caller_name": String(caller_name.get("text", "")),
+					},
+					"phone": source.get("phone", {}).duplicate(true),
+				},
 			}
 		&"audio_requested":
 			var audio: Dictionary = _audio_for_request(world, request)
@@ -162,18 +168,6 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 				return {"ok": false, "reason": &"audio_data_unavailable"}
 			return {"ok": true, "data": {"audio": audio}}
 	return {}
-
-
-static func _phone_contact_for_script(data: GameData, bank: int, address: int) -> Dictionary:
-	for index: int in data.world_phone_contact_count():
-		var contact: Dictionary = data.world_phone_contact(index)
-		for key: String in ["caller_script", "callee_script"]:
-			var script: Dictionary = contact.get(key, {})
-			if int(script.get("bank", -1)) == bank and int(script.get("address", -1)) == address:
-				return contact
-	return {}
-
-
 static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dictionary:
 	var values: Dictionary = request.get("values", {})
 	var audio_kind: StringName = StringName(values.get("kind", &""))

@@ -267,11 +267,13 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		"48:6130": [0x9C, 0x01, 0x00, 0x91],
 		"48:7000": [0x91],
 	})
+	RomCache.write_json(RomCache.world_text_path(_directory), {
+		"48:4234": [Gen2WorldScript.TEXT_START, 0x81, 0x88, 0x8B, 0x8B, 0x50],
+	})
 	var data: GameData = GameData.open_directory(_directory)
 	var cases: Array = [
 		{"script": 0x6100, "kind": &"audio_requested", "data_key": "audio", "row_key": "index"},
 		{"script": 0x6110, "kind": &"mart_requested", "data_key": "mart", "row_key": "index"},
-		{"script": 0x6120, "kind": &"phone_call_requested", "data_key": "contact", "row_key": "index"},
 	]
 	for test_case: Dictionary in cases:
 		data.world_map(1, 1).events["coord_events"][0]["script"] = test_case["script"]
@@ -284,6 +286,16 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		assert_true(complete["handled"])
 		assert_eq(complete["data"][test_case["data_key"]][test_case["row_key"]], 0)
 		assert_eq(complete["results"][0]["status"], &"complete")
+
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6120
+	var phone_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var phone_waiting: Array = phone_world.dispatch_script_events()
+	assert_eq(phone_waiting[0]["status"], &"waiting")
+	assert_eq(phone_world.pending_runtime_request()["kind"], &"phone_call_requested")
+	var phone_complete: Dictionary = Gen2WorldHost.complete_runtime_request(phone_world, {})
+	assert_true(phone_complete["ok"])
+	assert_eq(phone_complete["data"]["phone_call"]["caller_name"], "BILL")
+	assert_eq(phone_complete["results"][0]["status"], &"complete")
 
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6130
 	var special_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
@@ -406,6 +418,62 @@ func test_phone_special_ids_match_the_source_phone_routines() -> void:
 	assert_eq(_event_value(result[0]["events"], &"phone_special_requested", "kind", 1), &"random_unseen_wild_mon")
 	assert_eq(_event_value(result[0]["events"], &"phone_special_requested", "kind", 2), &"random_phone_wild_mon")
 	assert_eq(_event_value(result[0]["events"], &"phone_special_requested", "kind", 3), &"random_phone_mon")
+
+
+func test_random_unseen_wild_mon_uses_morning_rare_slots_and_seen_species() -> void:
+	_write_service_cache()
+	var species: Array = []
+	for number: int in 27:
+		species.append({"number": number + 1, "name": "MON%d" % (number + 1)})
+	RomCache.write_json(RomCache.species_path(_directory), species)
+	var phone: Dictionary = RomCache.read_json(RomCache.world_phone_path(_directory))
+	phone["contacts"][0]["map_group"] = 1
+	phone["contacts"][0]["map_number"] = 1
+	RomCache.write_json(RomCache.world_phone_path(_directory), phone)
+	var morning: Array = []
+	for index: int in RomLayout.WILD_GRASS_SLOT_COUNT:
+		morning.append({
+			"level": 5,
+			"species": 16 if index < 4 else 25 + index - 4,
+		})
+	var day: Array = morning.duplicate(true)
+	var night: Array = morning.duplicate(true)
+	RomCache.write_json(RomCache.world_encounters_path(_directory), {
+		"grass": {"1:1": {
+			"map": "1:1", "rates": [255, 255, 255],
+			"slots": [morning, day, night],
+		}},
+		"water": {}, "fishing": {"groups": [], "time_groups": []},
+	})
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6250"] = [Gen2WorldScript.SPECIAL, 91, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var unseen_runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), {
+		"kind": &"phone", "bank": 48, "script": 0x6250,
+		"phone": {"caller_id": 0},
+	})
+	var unseen: Dictionary = unseen_runner.advance()
+	assert_eq(unseen["status"], &"complete", JSON.stringify(unseen))
+	assert_true(_event_value(
+		unseen["events"], &"phone_special_requested", "internal_text"
+	))
+	assert_between(
+		int(_event_value(unseen["events"], &"phone_special_requested", "species")),
+		25, 27
+	)
+
+	var seen_runner := Gen2WorldScriptRunner.begin(
+		data, Gen2WorldState.from_dict({"seen_species": {25: true, 26: true, 27: true}}), {
+			"kind": &"phone", "bank": 48, "script": 0x6250,
+			"phone": {"caller_id": 0},
+		}
+	)
+	var seen: Dictionary = seen_runner.advance()
+	assert_eq(seen["status"], &"complete", JSON.stringify(seen))
+	assert_false(_event_value(
+		seen["events"], &"phone_special_requested", "internal_text"
+	))
 
 
 func test_script_text_expands_a_source_string_buffer() -> void:
@@ -810,6 +878,50 @@ func test_script_items_money_and_coins_commit_as_one_runtime_transaction() -> vo
 	assert_eq(state.item_quantity(3), 4)
 	assert_eq(state.money(), 110)
 	assert_eq(state.coins(), 30)
+
+
+func test_memcall_and_memjump_follow_far_pointers_supplied_by_runtime_memory() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6058": [Gen2WorldScript.MEMCALL, 0x00, 0xD0, Gen2WorldScript.END],
+		"48:6068": [Gen2WorldScript.SETEVENT, 9, 0, Gen2WorldScript.END],
+		"48:6078": [Gen2WorldScript.MEMJUMP, 0x10, 0xD0, Gen2WorldScript.END],
+	})
+	data = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6058,
+		"memory_pointers": {
+			"0xD000": {"bank": 48, "address": 0x6068},
+		},
+	})
+	var completed: Dictionary = runner.advance()
+	assert_eq(completed["status"], &"complete", JSON.stringify(completed))
+	assert_true(state.is_event_flag_active(9))
+
+	var jump_runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6078,
+		"memory_pointers": {
+			0xD010: {"bank": 48, "address": 0x6068},
+		},
+	})
+	var jumped: Dictionary = jump_runner.advance()
+	assert_eq(jumped["status"], &"complete", JSON.stringify(jumped))
+
+
+func test_special_phone_call_check_reads_staged_id_before_commit() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6088": [0x9C, 2, 0, 0x9D, Gen2WorldScript.END],
+	})
+	data = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6088,
+	})
+	var completed: Dictionary = runner.advance()
+	assert_eq(completed["status"], &"complete", JSON.stringify(completed))
+	assert_eq(state.pending_special_phone_call(), 2, JSON.stringify(completed))
 
 
 func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:

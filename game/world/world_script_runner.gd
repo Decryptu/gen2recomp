@@ -364,7 +364,25 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.FARSCALL:
 			return {"ok": _push_frame(int(command["bank"]), int(command["address"]))}
 		Gen2WorldScript.MEMCALL, Gen2WorldScript.MEMJUMP:
-			return {"ok": false, "reason": &"unsupported_runtime_command", "command": command}
+			var runtime_pointer: Dictionary = _runtime_memory_pointer(
+				int(command.get("address", 0))
+			)
+			if runtime_pointer.is_empty():
+				return {
+					"ok": false, "reason": &"missing_runtime_pointer",
+					"address": int(command.get("address", 0)), "command": command,
+				}
+			var pointer_bank: int = int(runtime_pointer.get("bank", -1))
+			var pointer_address: int = int(runtime_pointer.get("address", -1))
+			if opcode == Gen2WorldScript.MEMCALL:
+				if not _push_frame(pointer_bank, pointer_address):
+					return {
+						"ok": false, "reason": &"missing_runtime_script",
+						"bank": pointer_bank, "address": pointer_address,
+					}
+				return {"ok": true}
+			var jump_result: Dictionary = _replace_frame(pointer_bank, pointer_address)
+			return jump_result
 		Gen2WorldScript.SJUMP:
 			return _replace_frame(bank, int(command["address"]))
 		Gen2WorldScript.FARSJUMP:
@@ -773,10 +791,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 			return {"ok": true}
 		0x9C:
-			var pending_special: int = state.pending_special_phone_call() if state != null else 0
-			_script_value = 1 if int(_phone_context.get("special_call_id", 0)) != 0 \
-				or pending_special != 0 \
-				or bool(_request.get("special_phone_call", false)) else 0
+			_script_value = 1 if _current_special_phone_call() != 0 else 0
 		0x9D:
 			return _stage_item_delta(int(command.get("item", 0)), int(command.get("quantity", 1)))
 		0x9E:
@@ -789,7 +804,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 	var handled_sources: Array = [
 		0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
-		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D,
+		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -1051,9 +1066,7 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 		0x0F: # VAR_ENVIRONMENT
 			_script_value = int(_request.get("environment", -1))
 		0x14: # VAR_SPECIALPHONECALL
-			_script_value = int(_phone_context.get("special_call_id", 0))
-			if _script_value == 0 and state != null:
-				_script_value = state.pending_special_phone_call()
+			_script_value = _current_special_phone_call()
 		0x17: # VAR_CALLERID
 			_script_value = int(_phone_context.get("caller_id", -1))
 		_:
@@ -1087,6 +1100,21 @@ func _load_runtime_variable(variable: int, value: int) -> Dictionary:
 	return {"ok": true}
 
 
+func _current_special_phone_call() -> int:
+	## A staged specialphonecall updates the script-visible variable before
+	## the transaction commits, just as the source WRAM byte does.
+	if _has_staged_special_phone_call:
+		return _staged_special_phone_call
+	var context_value: int = int(_phone_context.get("special_call_id", 0))
+	if context_value != 0:
+		return context_value
+	var request_value: Variant = _request.get("special_phone_call", 0)
+	if request_value is int or request_value is float:
+		if int(request_value) != 0:
+			return int(request_value)
+	return state.pending_special_phone_call() if state != null else 0
+
+
 func _clock_hour() -> int:
 	var clock: Dictionary = _request.get("clock", {})
 	return clampi(int(clock.get("hour", 0)), 0, 23)
@@ -1103,11 +1131,24 @@ func _execute_phone_special(special: int) -> Dictionary:
 				"species": _script_value,
 			})
 		SPECIAL_RANDOM_UNSEEN_WILD_MON:
-			_emit_runtime_event(&"phone_special_requested", {
-				"special": special, "kind": &"random_unseen_wild_mon",
-				"internal_text": true,
-			})
-			_script_value = 1
+			var rare_species: int = _phone_unseen_rare_species()
+			if rare_species <= 0:
+				_emit_runtime_event(&"phone_special_requested", {
+					"special": special, "kind": &"random_unseen_wild_mon",
+					"internal_text": false, "script_value": 1,
+				})
+				_script_value = 1
+			else:
+				var rare_name: String = String(data.species(rare_species).get("name", ""))
+				_set_text_buffer(1, rare_name, &"phone_unseen_wild_mon", {
+					"special": special, "species": rare_species,
+				})
+				_emit_runtime_event(&"phone_special_requested", {
+					"special": special, "kind": &"random_unseen_wild_mon",
+					"internal_text": true, "buffer": 1, "value": rare_name,
+					"species": rare_species, "script_value": 0,
+				})
+				_script_value = 0
 		SPECIAL_RANDOM_PHONE_WILD_MON:
 			var wild_name: String = _phone_wild_mon_name()
 			_set_text_buffer(1, wild_name, &"phone_wild_mon", {"special": special})
@@ -1163,6 +1204,44 @@ func _phone_wild_mon_name() -> String:
 	if species <= 0 or data.species(species).is_empty():
 		return ""
 	return String(data.species(species).get("name", ""))
+
+
+func _phone_unseen_rare_species() -> int:
+	var contact: Dictionary = _phone_contact()
+	var record: Dictionary = data.world_encounter(
+		Gen2WorldEncounter.METHOD_GRASS,
+		int(contact.get("map_group", -1)), int(contact.get("map_number", -1))
+	) if data != null else {}
+	var slots: Variant = record.get("slots", [])
+	if not slots is Array or (slots as Array).is_empty():
+		return 0
+	## Crystal's routine reads wTimeOfDay but fails to use it when applying
+	## the table offset, so the shipped game always examines the morning row.
+	var morning: Variant = (slots as Array)[0]
+	if not morning is Array or (morning as Array).size() < RomLayout.WILD_GRASS_SLOT_COUNT:
+		return 0
+	var common_species: Array[int] = []
+	for index: int in 4:
+		var common: Variant = (morning as Array)[index]
+		if common is Dictionary:
+			common_species.append(int((common as Dictionary).get("species", 0)))
+	for _attempt: int in 128:
+		var roll: int = _phone_random.randi() & 0x03
+		if roll == 0:
+			continue
+		var slot_index: int = 4 + roll - 1
+		var rare: Variant = (morning as Array)[slot_index]
+		if not rare is Dictionary:
+			return 0
+		var species: int = int((rare as Dictionary).get("species", 0))
+		if species <= 0 or common_species.has(species):
+			return 0
+		if state != null and state.has_seen_species(species):
+			return 0
+		if data == null or data.species(species).is_empty():
+			return 0
+		return species
+	return 0
 
 
 func _phone_trainer_mon_name() -> String:
@@ -1330,6 +1409,40 @@ func _decode_text_with_buffers(raw: PackedByteArray) -> Dictionary:
 		out += Gen2Text.character(byte)
 		at += 1
 	return {"ok": false, "reason": &"missing_text_terminator", "text": out}
+
+
+func _runtime_memory_pointer(address: int) -> Dictionary:
+	## memcall and memjump read a three-byte far pointer from a live RAM
+	## address. The host supplies that RAM snapshot explicitly because the
+	## runner does not emulate the cartridge's whole WRAM address space.
+	var pointers: Variant = _request.get("memory_pointers", {})
+	if not pointers is Dictionary:
+		return {}
+	var value: Variant = null
+	if (pointers as Dictionary).has(address):
+		value = (pointers as Dictionary)[address]
+	else:
+		for raw_address: Variant in pointers as Dictionary:
+			if _runtime_memory_address(raw_address) == address:
+				value = (pointers as Dictionary)[raw_address]
+				break
+	if not value is Dictionary:
+		return {}
+	var pointer: Dictionary = value as Dictionary
+	var bank: int = int(pointer.get("bank", -1))
+	var target: int = int(pointer.get("address", -1))
+	if bank < 0 or target < RomFile.BANK_SIZE or target >= RomFile.BANK_SIZE * 2:
+		return {}
+	return {"bank": bank, "address": target}
+
+
+static func _runtime_memory_address(value: Variant) -> int:
+	if value is int or value is float:
+		return int(value)
+	var text: String = String(value).strip_edges()
+	if text.begins_with("0x") or text.begins_with("0X"):
+		return text.substr(2).hex_to_int()
+	return text.to_int()
 
 
 func _stage_warp(command: Dictionary) -> Dictionary:

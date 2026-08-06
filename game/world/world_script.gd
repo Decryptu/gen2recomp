@@ -547,7 +547,7 @@ static func command_at(
 		"name": command_name(opcode, crystal_commands),
 		"width": width,
 	}
-	if opcode in [SCALL, MEMCALL, SJUMP, MEMJUMP, WRITETEXT, JUMPTEXTFACEPLAYER,
+	if opcode in [SCALL, MEMCALL, SJUMP, MEMJUMP, MEMCALLASM, WRITETEXT, JUMPTEXTFACEPLAYER,
 		IFFALSE, IFTRUE, JUMPSTD, CALLSTD, READMEM, WRITEMEM, XYCOMPARE,
 		GIVEPOKEMAIL, CHECKPOKEMAIL, LOADMENU] \
 		or (crystal_commands and opcode == JUMPTEXT) \
@@ -747,7 +747,7 @@ static func scan_references(
 			break
 		var opcode: int = int(command["opcode"])
 		match opcode:
-			SCALL, MEMCALL, SJUMP, MEMJUMP:
+			SCALL, SJUMP:
 				scripts.append({"bank": bank, "address": int(command["address"])})
 			IFEQUAL, IFNOTEQUAL, IFFALSE, IFTRUE, IFGREATER, IFLESS:
 				scripts.append({"bank": bank, "address": int(command["address"])})
@@ -776,6 +776,10 @@ static func scan_references(
 				texts.append({"bank": bank, "address": int(command["loss_address"])})
 			0x8C, 0x8E:
 				scripts.append({"bank": bank, "address": int(command["address"])})
+			0x97:
+				## phonecall passes a caller-name text pointer to PhoneCall. It is
+				## not a script pointer and must be collected as text data.
+				texts.append({"bank": bank, "address": int(command["address"])})
 		at += int(command["width"])
 		command_count += 1
 		if is_terminal(opcode, crystal_commands):

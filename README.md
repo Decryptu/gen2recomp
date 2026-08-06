@@ -46,9 +46,12 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
 >
-> Full story state, exact special-call behavior and complete phone presentation do not exist yet, so this is not a
-> complete game. The source two-ring phone timing, contact registration commands,
-> and bounded text-buffer expansion are implemented. The mod boundary is in: a mod under `user://mods/` can register
+> Full story state and complete phone presentation do not exist yet, so this is not
+> a complete game. Source two-ring timing, contact registration commands,
+> non-trainer caller labels, seen-species phone text and bounded phone pointer
+> semantics are implemented. The remaining source special-call condition branches
+> and story-driven permanent-contact setup are still pending. The mod boundary is
+> in: a mod under `user://mods/` can register
 > a replacement world renderer, which is what a 3D or HD view needs. Scene-level integration tests cover trainer sight,
 > imported terminal text, live object refresh, emotes, wild capture, save-backed
 > blackout recovery and all four service overlay modes.

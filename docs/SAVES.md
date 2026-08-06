@@ -13,7 +13,7 @@ The versioned first format stores:
   moves and PP;
 - an optional validated world snapshot: map ID, player cell, facing, movement
   mode, event flags, map scenes, inventory quantities, money, coins, phone
-  contacts, repel steps, swarm state and roaming positions;
+  contacts, seen species, repel steps, swarm state and roaming positions;
 - imported-save and party-transaction identity fields: OT ID, nickname, OT,
   happiness, Pokerus and caught data;
 - `is_egg` for received eggs. Eggs remain in the party model but the battle

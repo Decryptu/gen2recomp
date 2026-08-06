@@ -360,14 +360,22 @@ func _render_options(override: Array = []) -> void:
 	for index: int in values.size():
 		var value: Variant = values[index]
 		var label := Label.new()
-		var name: String = String(value) if not value is Dictionary else String(
-			(value as Dictionary).get("name", (value as Dictionary).get("trainer_name", "UNKNOWN"))
-		)
+		var name: String = str(value)
+		if value is Dictionary:
+			var dictionary: Dictionary = value as Dictionary
+			name = str(dictionary.get("name", ""))
+			if name.is_empty():
+				name = str(dictionary.get("caller_label", ""))
+			if name.is_empty():
+				name = str(dictionary.get("trainer_name", "UNKNOWN"))
+			if name.is_empty() and dictionary.has("index"):
+				name = "CONTACT %d" % int(dictionary.get("index", -1))
 		if value is Dictionary and _mode == MODE.MART \
 			and not bool((value as Dictionary).get("leave", false)):
 			name = "%s    %d" % [name, int((value as Dictionary).get("price", 0))]
 		if value is Dictionary and _mode == MODE.PHONE_LIST:
-			name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
+			if int((value as Dictionary).get("trainer_class", 0)) > 0:
+				name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
 		label.text = ("> " if index == _cursor else "  ") + name
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)

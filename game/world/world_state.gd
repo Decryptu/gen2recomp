@@ -23,6 +23,7 @@ var _repel_steps: int = 0
 var _swarm_map: Vector2i = Vector2i(-1, -1)
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
+var _seen_species: Dictionary = {}
 var _phone_receive_cycle: int = 0
 var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
 var _pending_special_phone_call: int = 0
@@ -36,6 +37,7 @@ func _init(
 	initial_roaming_mons: Array = [], initial_just_battled: bool = false,
 	initial_phone_receive_cycle: int = 0, initial_phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0],
 	initial_pending_special_phone_call: int = 0,
+	initial_seen_species: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
 		if int(flag) > 0 and bool(initial_event_flags[flag]):
@@ -62,6 +64,9 @@ func _init(
 	_swarm_map = initial_swarm_map
 	_fishing_swarm_species = initial_fishing_swarm_species if initial_fishing_swarm_species in [0, 0xD3, 0xDF] else 0
 	_roaming_mons = _copy_roaming_mons(initial_roaming_mons)
+	for raw_species: Variant in initial_seen_species:
+		if int(raw_species) > 0 and bool(initial_seen_species[raw_species]):
+			_seen_species[int(raw_species)] = true
 	_just_battled = initial_just_battled
 	_phone_receive_cycle = clampi(initial_phone_receive_cycle, 0, PHONE_RECEIVE_DELAYS.size() - 1)
 	_phone_receive_minutes = maxi(0, initial_phone_receive_minutes)
@@ -83,6 +88,7 @@ func to_dict() -> Dictionary:
 		"swarm_map": [_swarm_map.x, _swarm_map.y],
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
+		"seen_species": _seen_species.duplicate(),
 		"phone_receive_cycle": _phone_receive_cycle,
 		"phone_receive_minutes": _phone_receive_minutes,
 		"pending_special_phone_call": _pending_special_phone_call,
@@ -110,6 +116,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		int(source.get("phone_receive_cycle", 0)),
 		int(source.get("phone_receive_minutes", PHONE_RECEIVE_DELAYS[0])),
 		int(source.get("pending_special_phone_call", 0)),
+		source.get("seen_species", {}) if source.get("seen_species", {}) is Dictionary else {},
 	)
 
 
@@ -131,6 +138,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_swarm_map = restored._swarm_map
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
+	_seen_species = restored._seen_species.duplicate()
 	_phone_receive_cycle = restored._phone_receive_cycle
 	_phone_receive_minutes = restored._phone_receive_minutes
 	_pending_special_phone_call = restored._pending_special_phone_call
@@ -324,6 +332,14 @@ func roaming_mons_on(map_group: int, map_number: int) -> Array:
 	return out
 
 
+func has_seen_species(species: int) -> bool:
+	return species > 0 and bool(_seen_species.get(species, false))
+
+
+func seen_species() -> Dictionary:
+	return _seen_species.duplicate()
+
+
 ## Advances each active roaming Pokémon using the source's connected-map
 ## selection. A zero in the source's five-bit mask performs a random jump to a
 ## roaming map; otherwise the low two bits select one of the current row's
@@ -481,6 +497,12 @@ func apply_changes(
 	var next_repel_steps: int = int(runtime_changes.get("repel_steps", _repel_steps))
 	if next_repel_steps < 0:
 		return {"ok": false, "reason": &"invalid_repel_steps"}
+	var seen_changes: Dictionary = runtime_changes.get("seen_species", {})
+	if not seen_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_seen_species"}
+	for raw_species: Variant in seen_changes:
+		if int(raw_species) <= 0:
+			return {"ok": false, "reason": &"invalid_seen_species"}
 
 	var next_flags: Dictionary = _event_flags.duplicate()
 	for raw_flag: Variant in flag_changes:
@@ -508,6 +530,13 @@ func apply_changes(
 			next_money.erase(account)
 		else:
 			next_money[account] = balance
+	var next_seen_species: Dictionary = _seen_species.duplicate()
+	for raw_species: Variant in seen_changes:
+		var species: int = int(raw_species)
+		if bool(seen_changes[raw_species]):
+			next_seen_species[species] = true
+		else:
+			next_seen_species.erase(species)
 	var next_contacts: Dictionary = _phone_contacts.duplicate()
 	for raw_contact: Variant in phone_changes:
 		var contact: int = int(raw_contact)
@@ -524,6 +553,7 @@ func apply_changes(
 	var did_change: bool = next_flags != _event_flags or next_scenes != _map_scenes \
 		or next_items != _items or next_money != _money or next_coins != _coins \
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
+		or next_seen_species != _seen_species \
 		or next_repel_steps != _repel_steps or next_swarm_map != _swarm_map \
 		or next_fishing_swarm_species != _fishing_swarm_species \
 		or next_receive_cycle != _phone_receive_cycle \
@@ -533,6 +563,7 @@ func apply_changes(
 	_map_scenes = next_scenes
 	_items = next_items
 	_money = next_money
+	_seen_species = next_seen_species
 	_coins = next_coins
 	_phone_contacts = next_contacts
 	_just_battled = next_just_battled
