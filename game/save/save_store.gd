@@ -56,13 +56,19 @@ static func load_result(game_id: StringName, rom_sha1: String, slot: int, data: 
 	if parse_error != OK:
 		return _failure("save slot %d is not valid JSON data" % (slot + 1))
 	var raw: Variant = parser.data
-	var loaded_save: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	var migration: Dictionary = Gen2SaveData.migrate_dict(raw)
+	if not bool(migration.get("ok", false)):
+		return _failure("save slot %d: %s" % [slot + 1, migration.get("message", "unsupported save format")])
+	var loaded_save: Gen2SaveData = Gen2SaveData.from_dict(migration["data"])
 	if loaded_save == null:
 		return _failure("save slot %d is not valid JSON data" % (slot + 1))
 	var validation: Dictionary = Gen2SaveValidator.validate(loaded_save, data)
 	if not validation["ok"]:
 		return _failure("save slot %d: %s" % [slot + 1, validation["message"]])
-	return {"ok": true, "message": "", "save": loaded_save}
+	return {
+		"ok": true, "message": "", "save": loaded_save,
+		"migrated": bool(migration.get("migrated", false)),
+	}
 
 
 static func slots_for(game_id: StringName, rom_sha1: String, data: GameData) -> Array:

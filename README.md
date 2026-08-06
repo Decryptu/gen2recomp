@@ -50,6 +50,11 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Fame engine flag is committed. The imported bargain shop keeps its Monday
 > morning, one-item-per-visit and daily close behavior in the world snapshot.
 >
+> Project saves now have a validated 14-box PC model with 20 slots per box.
+> Full parties route gifts, eggs and successful captures into the first free
+> box slot, while full storage refuses the transaction atomically. Format 1
+> project saves migrate without inventing a world position.
+>
 > Full story state and complete phone presentation do not exist yet, so this is not
 > a complete game. Source two-ring timing, contact registration commands,
 > non-trainer caller labels, seen-species phone text and bounded phone pointer

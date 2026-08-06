@@ -5,12 +5,15 @@ battle engine. Slots live in Godot's `user://`, never in the repository.
 
 ## Canonical project model
 
-The versioned first format stores:
+Save format version 2 stores:
 
 - game ID and ROM SHA-1, preventing use with another cache;
 - player name, party order and each Pokémon's species, held item, level,
   experience, current HP, status, DVs, five Gen II stat-experience values,
   moves and PP;
+- fourteen PC boxes with twenty ordered slots each. Boxed Pokémon use the same
+  persistent model as party Pokémon. Gifts, eggs and catches fill the party
+  first, then the first empty box slot in box order;
 - an optional validated world snapshot: map ID, player cell, facing, movement
   mode, event flags, map scenes, inventory quantities, money, coins, phone
   contacts, seen species, repel steps, swarm state, roaming positions, source
@@ -23,7 +26,12 @@ The versioned first format stores:
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, Fly, Dig, Rollout and rampage, is never
 saved. The validator checks the selected `GameData`; three JSON slots exist per
-game revision under `user://save_slots`.
+game revision under `user://save_slots`. Box names, current-box UI state and
+cartridge SRAM box placement are intentionally outside this model.
+
+Version 1 project saves migrate in memory by adding fourteen empty boxes. The
+migration preserves a missing world snapshot as missing; it does not invent a
+map, player position or event state. The next successful save writes version 2.
 
 ## Player flow
 
@@ -51,16 +59,18 @@ and reconstructs the source save party, then returns blackout recovery.
 Continue enters the overworld only when a validated snapshot exists; F5 writes
 map, player, items, currency, events, source engine flags and schedule state
 through `Gen2SaveStore`. Daily engine flags reset when the saved world day
-changes, while story flags such as Hall of Fame persist. Legacy saves without a snapshot keep the configured
-development entry until migration exists. Item and currency references are
+changes, while story flags such as Hall of Fame persist. Legacy saves without a
+snapshot keep the configured development entry because migration does not
+invent a world position. Item and currency references are
 checked against the selected cache, and `Gen2WorldAPI.open_snapshot()` restores
 the saved position without clamping it elsewhere.
 
 Party-owned overworld transactions first modify a candidate `Gen2SaveData` and
 live world snapshot. Gifts, eggs, NPC trades, item effects and catches commit
 only after validation and optional persistence; a failed write restores live
-world state. A full party refuses a sixth-party addition because PC boxes are
-not yet canonical project data.
+world state. A full party routes a valid addition to the first free PC slot. If
+the party and all 280 box slots are occupied, the transaction refuses before
+consuming an item or ball and leaves the save and world state unchanged.
 
 ## Original Generation 2 shape
 
