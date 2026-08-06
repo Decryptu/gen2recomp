@@ -119,7 +119,7 @@ func refresh_animation() -> void:
 func refresh() -> void:
 	if _world == null or _camera == null:
 		return
-	var here: Vector3 = _cell_center(_world.player_cell)
+	var here: Vector3 = _player_position()
 	_player.position = here + Vector3(0.0, 0.6, 0.0)
 	_camera.position = here + CAMERA_OFFSET
 	_camera.look_at(here, Vector3.UP)
@@ -128,6 +128,14 @@ func refresh() -> void:
 
 func _cell_center(cell: Vector2i) -> Vector3:
 	return Vector3(float(cell.x) * CELL_SIZE, 0.0, float(cell.y) * CELL_SIZE)
+
+
+## player_cell plus its in-flight walk step's fractional offset, so the box
+## and camera ease into a new cell instead of snapping the way they did
+## before Gen2WorldAPI carried any sub-cell presentation state.
+func _player_position() -> Vector3:
+	var offset: Vector2 = _world.player_step_offset_cells()
+	return _cell_center(_world.player_cell) + Vector3(offset.x, 0.0, offset.y) * CELL_SIZE
 
 
 ## One solid per walk cell, extruded by what the cell's collision permission

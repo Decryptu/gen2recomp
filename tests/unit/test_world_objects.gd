@@ -56,3 +56,33 @@ func test_random_wander_stays_cardinal() -> void:
 	random.seed = 1234
 	var direction: Vector2i = object.next_direction(random)
 	assert_eq(abs(direction.x) + abs(direction.y), 1)
+
+
+func test_step_offset_starts_a_full_cell_behind_and_reaches_zero() -> void:
+	var object: Gen2WorldObject = _object()
+	assert_false(object.is_stepping())
+	assert_eq(object.step_offset(16), Vector2i.ZERO)
+
+	object.start_step(Vector2i.RIGHT, 8)
+	assert_true(object.is_stepping())
+	# A step's destination cell is already committed; the offset starts a
+	# full cell behind it and eases toward zero, never overshooting.
+	assert_eq(object.step_offset(16), Vector2i(-16, 0))
+
+	for _frame: int in 8:
+		assert_true(object.tick_step())
+	assert_eq(object.step_offset(16), Vector2i.ZERO)
+	assert_false(object.is_stepping())
+	assert_false(object.tick_step())
+
+
+func test_step_offset_direction_matches_the_committed_movement() -> void:
+	var object: Gen2WorldObject = _object()
+	object.start_step(Vector2i.UP, 16)
+	object.tick_step()
+	# One of sixteen slow-step frames consumed: 15/16 of a cell remains
+	# behind the committed cell, in the direction moved away from.
+	assert_eq(object.step_offset(16), Vector2i(0, 15))
+
+	object.start_step(Vector2i.LEFT, 4)
+	assert_eq(object.step_offset(4), Vector2i(4, 0))

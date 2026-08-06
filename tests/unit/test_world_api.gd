@@ -694,6 +694,116 @@ func test_trainer_approach_path_uses_the_source_longer_axis_first() -> void:
 	)
 
 
+func test_player_walk_step_starts_a_cell_behind_and_never_moves_the_committed_cell() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_false(world.player_step_in_progress())
+	assert_true(world.move(Vector2i.LEFT))
+	# The logical cell already committed to the destination; the step only
+	# paces a presentation offset that starts a full cell behind it.
+	assert_eq(world.player_cell, Vector2i(7, 6))
+	assert_true(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2(1.0, 0.0))
+	assert_eq(
+		world.player_pixel_position(),
+		world.player_view_cell() * Gen2WorldAPI.CELL_PIXELS + Vector2i(16, 0)
+	)
+
+
+func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_true(world.move(Vector2i.LEFT))
+	assert_eq(world.player_cell, Vector2i(7, 6))
+
+	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_eq(world.player_step_offset_cells(), Vector2(0.875, 0.0))
+
+	# A huge delta advances at most Gen2WorldAnimation.MAX_CATCHUP_FRAMES
+	# hardware frames per call, the same stall cap the tile animation uses, so
+	# a pause drops step frames instead of snapping the sprite to its
+	# destination. STEP_FRAMES_WALK is 8: one frame already consumed above,
+	# four more are capped here, leaving three of eight.
+	assert_true(world.advance_player_step(1000.0))
+	assert_eq(world.player_step_offset_cells(), Vector2(3.0 / 8.0, 0.0))
+	assert_eq(world.player_cell, Vector2i(7, 6))
+
+	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
+	assert_false(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+	assert_eq(world.player_cell, Vector2i(7, 6))
+	assert_false(world.advance_player_step(1.0))
+
+
+func test_player_step_does_not_affect_cell_collision_or_events() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_true(world.move(Vector2i.LEFT))
+	assert_eq(world.player_cell, Vector2i(7, 6))
+	assert_true(world.player_step_in_progress())
+	var during_events: Array = world.dispatch_events()
+	var during_permission: int = world.collision_permission_at(world.player_cell)
+	var during_walkable: bool = world.can_walk_to(Vector2i(6, 6))
+
+	assert_true(world.advance_player_step(1000.0))
+	assert_true(world.advance_player_step(1000.0))
+	assert_false(world.player_step_in_progress())
+
+	# A presentation offset in flight never changes what resolves off the
+	# already-committed cell.
+	assert_eq(world.dispatch_events(), during_events)
+	assert_eq(world.collision_permission_at(world.player_cell), during_permission)
+	assert_eq(world.can_walk_to(Vector2i(6, 6)), during_walkable)
+	assert_eq(world.player_cell, Vector2i(7, 6))
+
+
+func test_player_step_clears_on_connection_transition() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(14, 6))
+	assert_true(world.move(Vector2i.RIGHT))
+	assert_eq(world.player_cell, Vector2i(15, 6))
+	assert_true(world.player_step_in_progress())
+
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_true(result["ok"])
+	assert_eq(result["kind"], &"connection")
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_false(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+
+
+func test_player_step_clears_on_warp() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(7, 6))
+	assert_true(world.move(Vector2i.LEFT))
+	assert_eq(world.player_cell, Vector2i(6, 6))
+	assert_true(world.player_step_in_progress())
+
+	var result: Dictionary = world.try_warp()
+	assert_true(result["ok"])
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_false(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+
+
+func test_snapshot_ignores_transient_player_step() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_true(world.move(Vector2i.LEFT))
+	assert_true(world.player_step_in_progress())
+	var mid_step: Dictionary = world.snapshot().to_dict()
+
+	assert_true(world.advance_player_step(1000.0))
+	assert_true(world.advance_player_step(1000.0))
+	assert_false(world.player_step_in_progress())
+	var finished: Dictionary = world.snapshot().to_dict()
+
+	# The snapshot is identical whether captured mid-step or after it
+	# finishes: nothing about the transient offset reaches it.
+	assert_eq(mid_step, finished)
+
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(
+		GameData.open_directory(_directory), world.snapshot()
+	)
+	assert_not_null(restored)
+	assert_false(restored.player_step_in_progress())
+	assert_eq(restored.player_cell, Vector2i(7, 6))
+
+
 func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(5, 6))

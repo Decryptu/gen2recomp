@@ -50,6 +50,12 @@ var deleted: bool = false
 var emote_id: int = -1
 var emote_visible: bool = false
 var emote_remaining: int = 0
+## Transient sub-cell presentation offset toward a cell this object already
+## committed to. The logical cell changes at the start of a step, not here;
+## a renderer reads this only to draw the approach to it.
+var step_direction: Vector2i = Vector2i.ZERO
+var step_frames_total: int = 0
+var step_frames_remaining: int = 0
 
 
 static func from_event(
@@ -175,3 +181,38 @@ func tick_emote() -> bool:
 		emote_visible = false
 		return true
 	return false
+
+
+## Starts the presentation offset for a step whose destination cell is
+## already committed. [param frames] is the caller's own step duration, kept
+## caller-side so a slow trainer approach and an ordinary walk can share this
+## helper without this class knowing which one is running.
+func start_step(direction: Vector2i, frames: int) -> void:
+	step_direction = direction
+	step_frames_total = maxi(0, frames)
+	step_frames_remaining = step_frames_total
+
+
+## Consumes one frame of an in-flight step. Returns true when a frame was
+## consumed, false once the step has already finished, so a caller pacing by
+## call count rather than delta time can tell "still stepping" from "done".
+func tick_step() -> bool:
+	if step_frames_remaining <= 0:
+		return false
+	step_frames_remaining -= 1
+	return true
+
+
+func is_stepping() -> bool:
+	return step_frames_remaining > 0
+
+
+## Pixel offset from the committed cell back toward where the step began,
+## shrinking to zero as step_frames_remaining reaches zero.
+func step_offset(cell_pixels: int) -> Vector2i:
+	if step_frames_remaining <= 0 or step_frames_total <= 0:
+		return Vector2i.ZERO
+	var behind: int = int(round(
+		float(step_frames_remaining) / float(step_frames_total) * float(cell_pixels)
+	))
+	return Vector2i(-step_direction.x, -step_direction.y) * behind

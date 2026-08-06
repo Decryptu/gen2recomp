@@ -206,6 +206,8 @@ func cycle_world_renderer() -> Dictionary:
 func _process(delta: float) -> void:
 	if _animation != null and _animation.advance(delta) and _renderer != null:
 		_renderer.refresh_animation()
+	if _world != null and _world.advance_player_step(delta) and _renderer != null:
+		_renderer.refresh()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
 	if not _trainer_approach.is_empty():
@@ -349,7 +351,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
 		or _pc_host != null or _world.phone_ring_active() \
-		or not _trainer_approach.is_empty():
+		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -831,7 +833,6 @@ func _start_trainer_approach(request: Dictionary) -> void:
 		"path_index": 0,
 		"emote_frames": int(plan.get("emote_frames", Gen2WorldAPI.TRAINER_SHOCK_FRAMES)),
 		"movement_delay": 1,
-		"step_frames": 0,
 	}
 	_script_prompt = "Trainer spotted you"
 	if _renderer != null:
@@ -839,6 +840,13 @@ func _start_trainer_approach(request: Dictionary) -> void:
 	_refresh_labels()
 
 
+## Paces the approach by call count rather than delta time, so this matches
+## the emote and movement-delay counters beside it and stays independent of
+## real frame timing. The stepping object's own step_frames_remaining (set by
+## [method Gen2WorldAPI.advance_trainer_approach_step]) is consumed here at
+## the same one-per-call rate the emote and delay counters already use; the
+## object's step_offset() gives the renderer the same 16-frame interpolation
+## without changing how many calls the approach takes to finish.
 func _advance_trainer_approach() -> void:
 	if _world == null:
 		_trainer_approach = {}
@@ -853,13 +861,15 @@ func _advance_trainer_approach() -> void:
 	if movement_delay > 0:
 		_trainer_approach["movement_delay"] = movement_delay - 1
 		return
-	var step_frames: int = int(_trainer_approach.get("step_frames", 0))
-	if step_frames > 0:
-		_trainer_approach["step_frames"] = step_frames - 1
+	var object_index: int = int(_trainer_approach.get("object_index", -1))
+	var stepping_object: Gen2WorldObject = _world.objects[object_index] \
+		if _world != null and object_index >= 0 and object_index < _world.objects.size() else null
+	if stepping_object != null and stepping_object.tick_step():
+		if _renderer != null:
+			_renderer.refresh()
 		return
 	var path: Array = _trainer_approach.get("path", [])
 	var path_index: int = int(_trainer_approach.get("path_index", 0))
-	var object_index: int = int(_trainer_approach.get("object_index", -1))
 	if path_index < path.size():
 		var direction_value: Variant = path[path_index]
 		if not direction_value is Vector2i:
@@ -873,7 +883,6 @@ func _advance_trainer_approach() -> void:
 			_finish_trainer_approach(false, step.get("reason", &"trainer_approach_failed"), step)
 			return
 		_trainer_approach["path_index"] = path_index + 1
-		_trainer_approach["step_frames"] = Gen2WorldAPI.TRAINER_SLOW_STEP_FRAMES
 		if _renderer != null:
 			_renderer.refresh()
 		return
