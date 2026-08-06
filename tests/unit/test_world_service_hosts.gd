@@ -71,6 +71,50 @@ func test_mart_purchase_refuses_insufficient_money_without_mutation() -> void:
 	assert_eq(_save.world.world_state.money(), 500)
 
 
+func test_mart_dialog_resolves_all_imported_shop_variants() -> void:
+	var standard: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_STANDARD, 0
+	)
+	assert_true(standard["ok"])
+	assert_eq(standard["mart"]["variant"], &"standard")
+	var bitter: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_BITTER, 0
+	)
+	assert_true(bitter["ok"])
+	assert_eq(bitter["mart"]["variant"], &"bitter")
+	var pharmacy: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_PHARMACY, 0
+	)
+	assert_true(pharmacy["ok"])
+	assert_eq(pharmacy["mart"]["variant"], &"pharmacy")
+	var bargain: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0
+	)
+	assert_true(bargain["ok"])
+	assert_eq(bargain["mart"]["variant"], &"bargain")
+	assert_eq(bargain["mart"]["items"][0]["price"], 50)
+	var rooftop: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_ROOFTOP, 0
+	)
+	assert_true(rooftop["ok"])
+	assert_eq(rooftop["mart"]["variant"], &"rooftop_mart_1")
+	assert_eq(rooftop["mart"]["items"][0]["price"], 10)
+	var invalid: Dictionary = Gen2WorldMartHost.resolve_mart(_data, 9, 0)
+	assert_false(invalid["ok"])
+	assert_eq(invalid["reason"], &"unsupported_mart_dialog")
+
+
+func test_mart_purchase_refuses_crossing_the_source_item_stack_limit() -> void:
+	var mart: Dictionary = _data.world_mart(0)
+	var before: Dictionary = _world.snapshot().to_dict()
+	var result: Dictionary = Gen2WorldMartHost.purchase(
+		_world, _save, mart, 7, Gen2WorldMartHost.MAX_ITEM_STACK, false
+	)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"item_stack_full")
+	assert_eq(_world.snapshot().to_dict(), before)
+
+
 func test_phone_summary_uses_imported_contact_and_trainer_class() -> void:
 	var contact: Dictionary = _data.world_phone_contact(0)
 	var summary: Dictionary = Gen2WorldPhoneHost.contact_summary(_data, contact)
@@ -173,7 +217,11 @@ func _write_services() -> void:
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
 	RomCache.write_json(RomCache.world_marts_path(Fixture.directory()), {
 		"marts": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000, "items": [7, 8]}],
-		"default": {"items": [7]}, "special": {},
+		"default": {"items": [7]}, "special": {
+			"bargain": [{"item": 7, "price": 50}],
+			"rooftop_mart_1": [{"item": 8, "price": 10}],
+			"rooftop_mart_2": [{"item": 8, "price": 20}],
+		},
 	})
 	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), {
 		"contacts": [{

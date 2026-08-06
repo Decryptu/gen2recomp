@@ -156,6 +156,19 @@ func world_mart(index: int) -> Dictionary:
 	return _coerce_service_dictionary(default_value)
 
 
+## One imported priced or special mart list. The source keeps these lists apart
+## from the indexed standard mart table because their prices and availability
+## are handled by a different shop routine.
+func world_mart_special(variant: StringName) -> Dictionary:
+	var special: Variant = _marts().get("special", {})
+	if not special is Dictionary:
+		return {}
+	var items: Variant = (special as Dictionary).get(String(variant), [])
+	if not items is Array:
+		return {}
+	return {"variant": variant, "items": _coerce_service_value(items, PackedByteArray())}
+
+
 func world_mart_count() -> int:
 	var rows: Variant = _marts().get("marts", [])
 	return (rows as Array).size() if rows is Array else 0

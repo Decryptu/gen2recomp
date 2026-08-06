@@ -957,6 +957,12 @@ func _stage_coins_delta(amount: int, give: bool) -> Dictionary:
 func _stage_menu(two_dimensional: bool, command: Dictionary) -> Dictionary:
 	if _loaded_menu.is_empty():
 		return {"ok": false, "reason": &"menu_header_missing", "command": command}
+	if _loaded_menu.has("decode_error"):
+		return {
+			"ok": false,
+			"reason": &"menu_data_invalid",
+			"details": _loaded_menu.get("decode_error", ""),
+		}
 	_pending = {
 		"type": &"menu",
 		"menu_kind": &"2d" if two_dimensional else &"vertical",

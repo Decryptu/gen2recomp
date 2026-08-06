@@ -84,8 +84,11 @@ unsupported cartridge fields before those models are canonical.
 
 `game/world/` separates request resolution from UI. `world_host.gd` and
 scene-free service helpers validate imported data and transactions;
-`world_service_screen.gd` owns labels, selection and input. Mart purchases pass
-candidate-save validation before writeback. Phone presentation lists registered
+`world_service_screen.gd` owns labels, selection and input. Menu layout and
+cursor behavior follow cached vertical or two-dimensional records. Mart dialog
+variants and prices come from imported source lists, and purchases enforce the
+source 99-item stack limit before passing candidate-save validation to writeback.
+Phone presentation lists registered
 contacts, dispatches outgoing calls and confirms pending host requests; the world
 runner executes the imported caller/callee script at the same transaction
 boundary. Audio stays behind verified bounded decoder,

@@ -113,11 +113,23 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 	var values: Dictionary = request.get("values", {})
 	match kind:
 		&"mart_requested":
+			var dialog_id: int = int(values.get("dialog", 0))
 			var mart_id: int = int(values.get("address", 0)) & 0xFF
-			var mart: Dictionary = world.data.world_mart(mart_id)
-			if mart.is_empty():
-				return {"ok": false, "reason": &"mart_data_unavailable"}
-			return {"ok": true, "data": {"mart": mart, "mart_id": mart_id}}
+			var mart_result: Dictionary = Gen2WorldMartHost.resolve_mart(
+				world.data, dialog_id, mart_id
+			)
+			if not bool(mart_result.get("ok", false)):
+				return {
+					"ok": false,
+					"reason": StringName(mart_result.get("reason", &"mart_data_unavailable")),
+				}
+			return {
+				"ok": true,
+				"data": {
+					"mart": mart_result["mart"], "mart_id": mart_id,
+					"dialog": dialog_id,
+				},
+			}
 		&"special_phone_call_requested":
 			var call_id: int = int(values.get("address", 0))
 			var special: Dictionary = Gen2WorldPhoneHost.resolve_special(
