@@ -14,6 +14,7 @@ var movement_mode: StringName = &"walk"
 var world_day: int = 0
 var world_hour: int = 6
 var world_minute: int = 0
+var dst_enabled: bool = false
 var world_state: Gen2WorldState = Gen2WorldState.new()
 
 
@@ -29,6 +30,7 @@ static func from_world(world: Gen2WorldAPI) -> Gen2WorldSnapshot:
 	out.world_day = int(clock.get("day", 0))
 	out.world_hour = int(clock.get("hour", 6))
 	out.world_minute = int(clock.get("minute", 0))
+	out.dst_enabled = world.daylight_saving_time_enabled()
 	out.world_state = Gen2WorldState.from_dict(world.state.to_dict())
 	return out
 
@@ -41,6 +43,7 @@ func to_dict() -> Dictionary:
 		"player_facing": player_facing,
 		"movement_mode": String(movement_mode),
 		"clock": [world_day, world_hour, world_minute],
+		"dst_enabled": dst_enabled,
 		"world_state": world_state.to_dict() if world_state != null else {},
 	}
 
@@ -61,6 +64,7 @@ static func from_dict(raw: Variant) -> Gen2WorldSnapshot:
 		out.world_day = int(clock[0])
 		out.world_hour = int(clock[1])
 		out.world_minute = int(clock[2])
+	out.dst_enabled = bool(source.get("dst_enabled", false))
 	out.world_state = Gen2WorldState.from_dict(source.get("world_state", {}))
 	return out
 

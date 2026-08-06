@@ -10,7 +10,7 @@ const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
 const STORY_CALLBACK: int = 0x6200
 const STORY_OBJECT: int = 0x6210
 const STORY_TEXT: int = 0x7200
-const STORY_EVENT_FLAG: int = 7
+const STORY_EVENT_FLAG: int = 8
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null

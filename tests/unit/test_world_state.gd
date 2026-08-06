@@ -43,6 +43,21 @@ func test_engine_flags_round_trip_and_daily_reset_preserves_hall_of_fame() -> vo
 	assert_false(restored.reset_daily_flags())
 
 
+func test_source_temporary_event_flags_include_zero_and_reset_on_map_reload() -> void:
+	var state := Gen2WorldState.new()
+	state.set_event_flag(0)
+	state.set_event_flag(7)
+	state.set_event_flag(8)
+	assert_true(state.is_event_flag_active(0))
+	assert_true(state.is_event_flag_active(7))
+	assert_true(state.is_event_flag_active(8))
+	assert_true(state.reset_map_reload_flags())
+	assert_false(state.is_event_flag_active(0))
+	assert_false(state.is_event_flag_active(7))
+	assert_true(state.is_event_flag_active(8))
+	assert_false(state.reset_map_reload_flags())
+
+
 func test_invalid_engine_flag_transaction_does_not_mutate_state() -> void:
 	var state := Gen2WorldState.new()
 	var failed: Dictionary = state.apply_changes({}, {}, {

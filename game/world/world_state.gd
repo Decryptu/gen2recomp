@@ -11,6 +11,7 @@ signal changed
 
 const PHONE_CONTACT_CAPACITY: int = 10
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
+const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
 ## table to ENGINE_CREDITS_SKIP, and the Goldenrod bargain merchant uses the
 ## daily ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED flag.
@@ -49,7 +50,7 @@ func _init(
 	initial_engine_flags: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
-		if int(flag) > 0 and bool(initial_event_flags[flag]):
+		if int(flag) >= 0 and bool(initial_event_flags[flag]):
 			_event_flags[int(flag)] = true
 	for flag: Variant in initial_engine_flags:
 		if int(flag) >= 0 and bool(initial_engine_flags[flag]):
@@ -169,11 +170,11 @@ static func _vector_from_value(value: Variant) -> Vector2i:
 
 
 func is_event_flag_active(flag: int) -> bool:
-	return flag > 0 and bool(_event_flags.get(flag, false))
+	return flag >= 0 and bool(_event_flags.get(flag, false))
 
 
 func set_event_flag(flag: int, active: bool = true) -> void:
-	if flag <= 0:
+	if flag < 0:
 		return
 	var was_active: bool = is_event_flag_active(flag)
 	if was_active == active:
@@ -238,6 +239,21 @@ func reset_daily_flags() -> bool:
 		if not _engine_flags.has(flag):
 			continue
 		_engine_flags.erase(flag)
+		did_change = true
+	if did_change:
+		changed.emit()
+	return did_change
+
+
+## The source resets its first eight event flags whenever a map reloads. These
+## flags are used for temporary movement and scene branches, so they are not
+## part of a permanent story save.
+func reset_map_reload_flags() -> bool:
+	var did_change: bool = false
+	for flag: int in TEMPORARY_MAP_RELOAD_FLAGS:
+		if not _event_flags.has(flag):
+			continue
+		_event_flags.erase(flag)
 		did_change = true
 	if did_change:
 		changed.emit()
@@ -502,7 +518,7 @@ func apply_changes(
 	flag_changes: Dictionary, scene_changes: Dictionary, runtime_changes: Dictionary = {}
 ) -> Dictionary:
 	for raw_flag: Variant in flag_changes:
-		if int(raw_flag) <= 0:
+		if int(raw_flag) < 0:
 			return {"ok": false, "reason": &"invalid_event_flag"}
 	for raw_map: Variant in scene_changes:
 		if String(raw_map).is_empty() or int(scene_changes[raw_map]) < 0:

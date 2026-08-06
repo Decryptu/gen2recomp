@@ -842,6 +842,103 @@ func test_players_house_pc_special_is_a_host_request_and_returns_false_without_d
 	assert_true(world.pending_runtime_request().is_empty())
 
 
+func test_set_day_of_week_follows_the_source_selection_and_confirmation_flow() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61A0"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_SET_DAY_OF_WEEK, 0,
+		Gen2WorldScript.WRITETEXT, 0x30, 0x70,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	RomCache.write_json(RomCache.world_text_path(_directory), {
+		"48:7030": [Gen2WorldScript.TEXT_START, 0x80, 0x81, Gen2WorldScript.TEXT_TERMINATOR],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x61A0,
+		"clock": {"day": 2, "hour": 8, "minute": 15},
+	})
+
+	var menu: Dictionary = runner.advance()
+	assert_eq(menu["status"], &"waiting")
+	assert_eq(menu["event"]["type"], &"menu")
+	assert_eq(menu["event"]["options"], [
+		&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
+	])
+
+	var confirmation_text: Dictionary = runner.advance(true, 3)
+	assert_eq(confirmation_text["event"]["type"], &"text")
+	assert_eq(confirmation_text["event"]["text"], "Wednesday,\nis it?")
+	var confirmation: Dictionary = runner.advance(true)
+	assert_eq(confirmation["event"]["type"], &"choice")
+	assert_eq(confirmation["event"]["choices"], [&"yes", &"no"])
+
+	var text: Dictionary = runner.advance(true, 0)
+	assert_eq(text["event"]["type"], &"text")
+	assert_eq(text["event"]["text"], "AB")
+	var complete: Dictionary = runner.advance(true)
+	assert_eq(complete["status"], &"complete")
+	assert_eq(complete["clock"], {"day": 3, "hour": 8, "minute": 15})
+
+
+func test_initial_dst_specials_publish_source_confirmation_text_and_commit_state() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61B0"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_INITIAL_SET_DST_FLAG, 0,
+		Gen2WorldScript.YESORNO, Gen2WorldScript.END,
+	]
+	scripts["48:61C0"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_INITIAL_CLEAR_DST_FLAG, 0,
+		Gen2WorldScript.YESORNO, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var enabled := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x61B0,
+		"clock": {"day": 1, "hour": 10, "minute": 5},
+	})
+	var enabled_text: Dictionary = enabled.advance()
+	assert_eq(enabled_text["event"]["text"], "10:05 DST,\nis that OK?")
+	var enabled_choice: Dictionary = enabled.advance(true)
+	assert_eq(enabled_choice["event"]["type"], &"choice")
+	var enabled_result: Dictionary = enabled.advance(true, 0)
+	assert_eq(enabled_result["status"], &"complete")
+	assert_true(enabled_result["dst_enabled"])
+
+	var disabled := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x61C0,
+		"clock": {"day": 1, "hour": 10, "minute": 5},
+	})
+	var disabled_text: Dictionary = disabled.advance()
+	assert_eq(disabled_text["event"]["text"], "10:05,\nis that OK?")
+	var disabled_choice: Dictionary = disabled.advance(true)
+	assert_eq(disabled_choice["event"]["type"], &"choice")
+	var disabled_result: Dictionary = disabled.advance(true, 0)
+	assert_eq(disabled_result["status"], &"complete")
+	assert_false(disabled_result["dst_enabled"])
+
+
+func test_restart_map_music_special_uses_the_audio_runtime_request() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61D0"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_RESTART_MAP_MUSIC, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x61D0,
+	})
+	var waiting: Dictionary = runner.advance()
+	assert_eq(waiting["event"]["type"], &"runtime_request")
+	assert_eq(waiting["event"]["request"]["kind"], &"audio_requested")
+	assert_eq(waiting["event"]["request"]["values"]["kind"], &"map_music")
+	var complete: Dictionary = runner.complete_runtime_request({"ok": true})
+	assert_eq(complete["status"], &"complete")
+
+
 func test_script_warp_is_validated_before_transition() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(8, 6))
@@ -1172,6 +1269,7 @@ func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	state.set_hall_of_fame()
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
 	world.set_world_clock(2, 7, 12)
+	world.set_daylight_saving_time_enabled(true)
 	world.player_facing = Gen2WorldSprite.FACING_LEFT
 	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
 	var snapshot: Gen2WorldSnapshot = world.snapshot()
@@ -1186,6 +1284,7 @@ func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	assert_eq(restored.player_facing, Gen2WorldSprite.FACING_LEFT)
 	assert_eq(restored.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
 	assert_eq(restored.world_clock(), {"day": 2, "hour": 7, "minute": 12})
+	assert_true(restored.daylight_saving_time_enabled())
 	assert_eq(restored.state.map_scene(1, 1), 3)
 	assert_eq(restored.state.repel_steps(), 5)
 	assert_eq(restored.state.swarm_map(), Vector2i(1, 1))

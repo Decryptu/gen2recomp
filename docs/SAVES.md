@@ -17,7 +17,8 @@ Save format version 2 stores:
 - an optional validated world snapshot: map ID, player cell, facing, movement
   mode, event flags, map scenes, inventory quantities, money, coins, phone
   contacts, seen species, repel steps, swarm state, roaming positions, source
-  engine flags and the current day/hour/minute clock;
+  engine flags, the current day/hour/minute clock and the daylight-saving
+  flag;
 - imported-save and party-transaction identity fields: OT ID, nickname, OT,
   happiness, Pokerus and caught data;
 - `is_egg` for received eggs. Eggs remain in the party model but the battle

@@ -839,9 +839,12 @@ func _show_script_results(results: Array) -> void:
 	var waiting: bool = false
 	var failed: bool = false
 	var map_changed: bool = false
+	var clock_changed: bool = false
 	var recovered: bool = false
 	var recovery_prompt: String = ""
 	for result: Dictionary in results:
+		if result.has("clock"):
+			clock_changed = true
 		var status: StringName = StringName(result.get("status", &""))
 		if status == &"phone_ring":
 			waiting = true
@@ -908,6 +911,8 @@ func _show_script_results(results: Array) -> void:
 		for result_event: Dictionary in result.get("events", []):
 			if result_event.get("type", &"") == &"warp":
 				map_changed = true
+			elif result_event.get("type", &"") == &"world_clock_changed":
+				clock_changed = true
 			elif result_event.get("type", &"") == &"battle_map_reload_requested":
 				map_changed = true
 			elif result_event.get("type", &"") == &"blackout":
@@ -930,6 +935,8 @@ func _show_script_results(results: Array) -> void:
 		_script_prompt = recovery_prompt
 	elif not waiting and not failed:
 		_script_prompt = ""
+	if clock_changed:
+		_sync_host_clock()
 	if _renderer != null:
 		if map_changed:
 			_world.reload_current_map()
@@ -940,6 +947,15 @@ func _show_script_results(results: Array) -> void:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+
+
+func _sync_host_clock() -> void:
+	if _clock == null or _world == null:
+		return
+	var clock: Dictionary = _world.world_clock()
+	_clock.day = int(clock.get("day", _clock.day))
+	_clock.hour = int(clock.get("hour", _clock.hour))
+	_clock.minute = int(clock.get("minute", _clock.minute))
 
 
 func _handle_audio_request(request: Dictionary) -> Array:
