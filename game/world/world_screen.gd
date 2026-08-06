@@ -41,6 +41,7 @@ var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
 var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
+var _trainer_approach: Dictionary = {}
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
@@ -207,6 +208,8 @@ func _process(delta: float) -> void:
 		_renderer.refresh_animation()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
+	if not _trainer_approach.is_empty():
+		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
 		var ring_results: Array = _world.advance_phone_ring(delta)
 		if not ring_results.is_empty():
@@ -240,6 +243,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
+		return
+	if not _trainer_approach.is_empty():
+		accept_event()
 		return
 	if _world.phone_ring_active():
 		accept_event()
@@ -342,7 +348,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
-		or _pc_host != null or _world.phone_ring_active():
+		or _pc_host != null or _world.phone_ring_active() \
+		or not _trainer_approach.is_empty():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -801,6 +808,98 @@ func _advance_script_input() -> void:
 	_refresh_labels()
 
 
+func _start_trainer_approach(request: Dictionary) -> void:
+	if _world == null or not _trainer_approach.is_empty():
+		return
+	var values: Dictionary = request.get("values", {})
+	var direction_value: Variant = values.get("direction", Vector2i.ZERO)
+	var direction: Vector2i = direction_value if direction_value is Vector2i else Vector2i.ZERO
+	var plan: Dictionary = _world.start_trainer_approach(
+		int(values.get("object_index", -1)), direction, int(values.get("distance", 0))
+	)
+	if not bool(plan.get("ok", false)):
+		var failed: Array = _world.complete_runtime_request({
+			"ok": false,
+			"reason": plan.get("reason", &"trainer_approach_failed"),
+			"details": plan.duplicate(true),
+		})
+		_show_script_results(failed)
+		return
+	_trainer_approach = {
+		"object_index": int(plan.get("object_index", -1)),
+		"path": plan.get("path", []).duplicate(true),
+		"path_index": 0,
+		"emote_frames": int(plan.get("emote_frames", Gen2WorldAPI.TRAINER_SHOCK_FRAMES)),
+		"movement_delay": 1,
+		"step_frames": 0,
+	}
+	_script_prompt = "Trainer spotted you"
+	if _renderer != null:
+		_renderer.refresh()
+	_refresh_labels()
+
+
+func _advance_trainer_approach() -> void:
+	if _world == null:
+		_trainer_approach = {}
+		return
+	var emote_frames: int = int(_trainer_approach.get("emote_frames", 0))
+	if emote_frames > 0:
+		_trainer_approach["emote_frames"] = emote_frames - 1
+		if _renderer != null:
+			_renderer.refresh()
+		return
+	var movement_delay: int = int(_trainer_approach.get("movement_delay", 0))
+	if movement_delay > 0:
+		_trainer_approach["movement_delay"] = movement_delay - 1
+		return
+	var step_frames: int = int(_trainer_approach.get("step_frames", 0))
+	if step_frames > 0:
+		_trainer_approach["step_frames"] = step_frames - 1
+		return
+	var path: Array = _trainer_approach.get("path", [])
+	var path_index: int = int(_trainer_approach.get("path_index", 0))
+	var object_index: int = int(_trainer_approach.get("object_index", -1))
+	if path_index < path.size():
+		var direction_value: Variant = path[path_index]
+		if not direction_value is Vector2i:
+			_finish_trainer_approach(false, &"invalid_trainer_path", {})
+			return
+		var direction: Vector2i = direction_value
+		var step: Dictionary = _world.advance_trainer_approach_step(
+			object_index, direction
+		)
+		if not bool(step.get("ok", false)):
+			_finish_trainer_approach(false, step.get("reason", &"trainer_approach_failed"), step)
+			return
+		_trainer_approach["path_index"] = path_index + 1
+		_trainer_approach["step_frames"] = Gen2WorldAPI.TRAINER_SLOW_STEP_FRAMES
+		if _renderer != null:
+			_renderer.refresh()
+		return
+	var finished: Dictionary = _world.finish_trainer_approach(object_index)
+	if not bool(finished.get("ok", false)):
+		_finish_trainer_approach(false, finished.get("reason", &"trainer_approach_failed"), finished)
+		return
+	_finish_trainer_approach(true, &"", finished)
+
+
+func _finish_trainer_approach(ok: bool, reason: StringName, details: Dictionary) -> void:
+	var request: Dictionary = _trainer_approach.duplicate(true)
+	_trainer_approach = {}
+	if _world == null:
+		return
+	var result: Dictionary = {"ok": ok}
+	if not ok:
+		result["reason"] = reason
+		result["details"] = details.duplicate(true)
+	else:
+		result["object_index"] = int(request.get("object_index", -1))
+		result["path"] = request.get("path", []).duplicate(true)
+	var resumed: Array = _world.complete_runtime_request(result)
+	_show_script_results(resumed)
+
+
 func _open_service_host() -> void:
 	if _service_host != null or _world == null or _data == null:
 		return
@@ -936,6 +1035,9 @@ func _show_script_results(results: Array) -> void:
 				break
 			elif event_type == &"runtime_request":
 				var request: Dictionary = event.get("request", {})
+				if StringName(request.get("kind", &"")) == &"trainer_approach_requested":
+					_start_trainer_approach(request)
+					break
 				if StringName(request.get("kind", &"")) == &"battle_requested":
 					_start_battle_request(request)
 					break
@@ -1088,6 +1190,12 @@ func _handle_audio_request(request: Dictionary) -> Array:
 		resolve_request["source"] = _world.pending_runtime_request().get("source", {})
 	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world, resolve_request)
 	if not bool(resolved.get("ok", false)):
+		if kind == &"encounter_music":
+			var skipped: Array = _world.complete_runtime_request({
+				"ok": true, "audio_played": false,
+				"audio_unavailable": resolved.get("reason", &"audio_data_unavailable"),
+			})
+			return skipped
 		_script_prompt = "Audio unavailable: %s" % String(resolved.get("reason", "unknown"))
 		_refresh_labels()
 		return []
@@ -1099,6 +1207,12 @@ func _handle_audio_request(request: Dictionary) -> Array:
 		bool(request.get("values", {}).get("restart", false))
 	)
 	if not bool(playback.get("ok", false)):
+		if kind == &"encounter_music":
+			var skipped: Array = _world.complete_runtime_request({
+				"ok": true, "audio_played": false,
+				"audio_unavailable": playback.get("reason", &"audio_playback_failed"),
+			})
+			return skipped
 		_script_prompt = "Audio unavailable: %s" % String(playback.get("reason", "unknown"))
 		_refresh_labels()
 		return []

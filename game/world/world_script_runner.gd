@@ -45,6 +45,7 @@ var _failure: Dictionary = {}
 var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
 var _loaded_emote: int = -1
+var _trainer_intro_approach_pending: bool = false
 var _battle_setup: Dictionary = {}
 var _loaded_battle_type: int = -1
 var _phone_context: Dictionary = {}
@@ -120,6 +121,7 @@ static func begin(
 		started = runner._push_frame(
 			bank, address, runner._trainer_intro_script(trainer as Dictionary)
 		)
+		runner._trainer_intro_approach_pending = runner._crystal_commands()
 	else:
 		started = runner._push_frame(bank, address)
 	if not started:
@@ -317,6 +319,18 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		):
 			return _fail(&"phone_script_missing", phone_script)
 		return advance()
+	if kind == &"trainer_approach_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"trainer_approach_failed")), result
+			)
+		_events.append({
+			"type": &"trainer_approach_completed",
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
 	if kind in [
 		&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested",
 		&"pc_requested", &"party_heal_requested",
@@ -332,7 +346,13 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 			"request": request.duplicate(true),
 			"result": result.duplicate(true),
 		})
+		var approach_after_audio: bool = kind == &"audio_requested" \
+			and StringName((request.get("values", {}) as Dictionary).get("kind", &"")) \
+			== &"encounter_music" and _trainer_intro_approach_pending
 		_pending = {}
+		if approach_after_audio:
+			_trainer_intro_approach_pending = false
+			_stage_trainer_approach()
 		return advance()
 	if kind == &"rival_name_requested":
 		if not bool(result.get("ok", false)):
@@ -1033,9 +1053,16 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 					"object_index": _last_talked_object_index,
 				})
 		0x6B:
-			var first_object: int = _object_index_from_id(int(command.get("object_id", 0)))
+			var first_object_id: int = int(command.get("object_id", 0))
+			var first_object: int = _object_index_from_id(first_object_id)
 			var second_object: int = _object_index_from_id(int(command.get("object_id_2", 0)))
-			if first_object >= 0 and second_object >= 0:
+			if first_object_id == 0 and second_object >= 0:
+				# faceobject PLAYER, LAST_TALKED faces the player toward the
+				# trainer. The cache omits PLAYER from its object array.
+				_emit_object_event(&"player_face_object", {
+					"target_index": second_object,
+				})
+			elif first_object >= 0 and second_object >= 0:
 				_emit_object_event(&"object_face_object", {
 					"object_index": first_object,
 					"target_index": second_object,
@@ -1246,6 +1273,14 @@ func _stage_runtime_request(kind: StringName, values: Dictionary) -> Dictionary:
 		"source": _request.duplicate(true),
 	}
 	return {"ok": true}
+
+
+func _stage_trainer_approach() -> void:
+	_stage_runtime_request(&"trainer_approach_requested", {
+		"object_index": int(_request.get("object_index", -1)),
+		"distance": int(_request.get("distance", 0)),
+		"direction": _request.get("direction", Vector2i.ZERO),
+	})
 
 
 func _read_runtime_variable(variable: int) -> Dictionary:
@@ -1965,9 +2000,15 @@ func _trainer_intro_script(trainer: Dictionary) -> PackedByteArray:
 	)
 	var bank: int = int(seen.get("bank", _request.get("bank", 0)))
 	var address: int = int(seen.get("address", 0))
-	return PackedByteArray([
+	var bytes: Array = [
 		# Crystal's loadtemptrainer command points at the request's trainer record.
 		0x5C,
+	]
+	if _crystal_commands():
+		# Crystal's raw command byte is one higher than the Gold/Silver source
+		# opcode after farjumptext was inserted in the command table.
+		bytes.append(0x80) # encountermusic
+	bytes.append_array([
 		Gen2WorldScript.FARWRITETEXT, bank, address & 0xFF, address >> 8,
 		Gen2WorldScript.WAITBUTTON,
 		0x5C,
@@ -1976,6 +2017,7 @@ func _trainer_intro_script(trainer: Dictionary) -> PackedByteArray:
 		0x63, 1,
 		Gen2WorldScript.END,
 	])
+	return PackedByteArray(bytes)
 
 
 func _battle_request_values() -> Dictionary:

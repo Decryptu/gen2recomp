@@ -55,8 +55,14 @@ func _open_world(with_save: bool = false) -> void:
 
 func _trigger_trainer() -> void:
 	assert_true(_world_screen.move_player(Vector2i.RIGHT))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	for _frame: int in 80:
+		await get_tree().process_frame
+		if _battle_host() != null:
+			return
+		var pending: Dictionary = _world_screen._world.pending_script_input()
+		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
+			_world_screen._advance_script_input()
+	assert_not_null(_battle_host())
 
 
 func _battle_host() -> Gen2BattleScreen:
@@ -76,6 +82,12 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_eq(before["map"], Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
 	assert_eq(before["player_cell"], Vector2i(4, 5))
 	assert_eq(_world_screen.world_snapshot()["player_cell"], Vector2i(5, 5))
+	assert_eq((_world_screen._world.objects[0] as Gen2WorldObject).cell, Vector2i(5, 4))
+	assert_eq(
+		(_world_screen._world.objects[0] as Gen2WorldObject).facing,
+		Gen2WorldSprite.FACING_DOWN
+	)
+	assert_eq(_world_screen._world.player_facing, Gen2WorldSprite.FACING_UP)
 	assert_true(host.is_ready())
 	var snapshot: Dictionary = host.battle_snapshot()
 	assert_eq(snapshot["enemy"], Fixture.TRAINER_SPECIES)

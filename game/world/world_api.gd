@@ -12,6 +12,9 @@ const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
+const TRAINER_SHOCK_EMOTE: int = 0
+const TRAINER_SHOCK_FRAMES: int = 30
+const TRAINER_SLOW_STEP_FRAMES: int = 16
 
 ## Crystal background event types from script_constants.asm. READ and the four
 ## facing variants point directly at a script. IFSET and IFNOTSET point at a
@@ -620,6 +623,118 @@ func tick() -> bool:
 	for object: Gen2WorldObject in objects:
 		changed = object.tick_emote() or changed
 	return changed
+
+
+## Builds the source trainer approach path. The cartridge's
+## ComputePathToWalkToPlayer routine emits the longer axis first, with the
+## final movement removed by TrainerWalkToPlayer so the trainer stops before
+## the player. This helper keeps that path rule deterministic and scene-free.
+static func trainer_approach_path(start_cell: Vector2i, target_cell: Vector2i) -> Array:
+	var path: Array = []
+	var x_delta: int = target_cell.x - start_cell.x
+	var y_delta: int = target_cell.y - start_cell.y
+	var x_direction: Vector2i = Vector2i.RIGHT if x_delta > 0 else Vector2i.LEFT
+	var y_direction: Vector2i = Vector2i.DOWN if y_delta > 0 else Vector2i.UP
+	var x_steps: int = abs(x_delta)
+	var y_steps: int = abs(y_delta)
+	if x_steps >= y_steps:
+		for _step: int in x_steps:
+			path.append(x_direction)
+		for _step: int in y_steps:
+			path.append(y_direction)
+	else:
+		for _step: int in y_steps:
+			path.append(y_direction)
+		for _step: int in x_steps:
+			path.append(x_direction)
+	return path
+
+
+## Starts the scene-free portion of SeenByTrainerScript that follows the
+## encounter-music request. The screen owns pacing; the API owns validation,
+## emote state and the logical object position.
+func start_trainer_approach(
+	object_index: int, direction: Vector2i, distance: int
+) -> Dictionary:
+	var plan: Dictionary = trainer_approach_plan(object_index, direction, distance)
+	if not bool(plan.get("ok", false)):
+		return plan
+	var object: Gen2WorldObject = objects[object_index]
+	object.set_emote(TRAINER_SHOCK_EMOTE, true, TRAINER_SHOCK_FRAMES)
+	plan["emote_id"] = TRAINER_SHOCK_EMOTE
+	plan["emote_frames"] = TRAINER_SHOCK_FRAMES
+	plan["step_frames"] = TRAINER_SLOW_STEP_FRAMES
+	return plan
+
+
+## Returns the source trainer approach target and movement directions without
+## mutating the world. A sight distance of one produces the source's empty
+## movement buffer and leaves the trainer in place.
+func trainer_approach_plan(
+	object_index: int, direction: Vector2i, distance: int
+) -> Dictionary:
+	if current_map == null or object_index < 0 or object_index >= objects.size():
+		return {"ok": false, "reason": &"invalid_trainer_object"}
+	if direction not in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
+		return {"ok": false, "reason": &"invalid_trainer_direction"}
+	var object: Gen2WorldObject = objects[object_index]
+	if object.object_type != Gen2WorldObject.OBJECTTYPE_TRAINER:
+		return {"ok": false, "reason": &"not_a_trainer"}
+	var target_cell: Vector2i = object.cell
+	if distance > 1:
+		target_cell = player_cell - direction
+	var path: Array = trainer_approach_path(object.cell, target_cell)
+	return {
+		"ok": true,
+		"object_index": object_index,
+		"start_cell": object.cell,
+		"target_cell": target_cell,
+		"path": path,
+		"distance": distance,
+		"direction": direction,
+	}
+
+
+## Applies one source slow-step from an already validated approach plan.
+func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Dictionary:
+	if current_map == null or object_index < 0 or object_index >= objects.size():
+		return {"ok": false, "reason": &"invalid_trainer_object"}
+	var object: Gen2WorldObject = objects[object_index]
+	var destination: Vector2i = object.cell + direction
+	object.apply_direction(direction)
+	if not can_object_walk_to(destination, object):
+		return {
+			"ok": false, "reason": &"movement_blocked",
+			"object_index": object_index, "cell": destination,
+		}
+	object.cell = destination
+	var key: String = _object_key(current_map.group, current_map.number, object_index)
+	_object_position_overrides[key] = object.cell
+	_object_facing_overrides[key] = object.facing
+	return {
+		"ok": true, "type": &"trainer_approach_step",
+		"object_index": object_index, "cell": object.cell,
+		"direction": direction,
+	}
+
+
+## Completes the source writeobjectxy and faceobject portion of the trainer
+## intro after the final movement step.
+func finish_trainer_approach(object_index: int) -> Dictionary:
+	if current_map == null or object_index < 0 or object_index >= objects.size():
+		return {"ok": false, "reason": &"invalid_trainer_object"}
+	var object: Gen2WorldObject = objects[object_index]
+	object.set_emote(TRAINER_SHOCK_EMOTE, false)
+	object.facing = _facing_toward(object.cell, player_cell)
+	var key: String = _object_key(current_map.group, current_map.number, object_index)
+	_object_position_overrides[key] = object.cell
+	_object_facing_overrides[key] = object.facing
+	player_facing = _facing_toward(player_cell, object.cell)
+	return {
+		"ok": true, "type": &"trainer_approach_finished",
+		"object_index": object_index, "cell": object.cell,
+		"facing": object.facing, "player_facing": player_facing,
+	}
 
 
 func set_object_time(hour: int, time_of_day: int) -> void:
@@ -1243,6 +1358,25 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 		if event_type == &"object_movement_requested":
 			generated.append_array(_apply_object_movement(event))
 			continue
+		if event_type == &"object_write_position":
+			var write_map_group: int = int(event.get("map_group", -1))
+			var write_map_number: int = int(event.get("map_number", -1))
+			var write_index: int = int(event.get("object_index", -1))
+			if current_map == null or write_map_group != current_map.group \
+				or write_map_number != current_map.number \
+				or write_index < 0 or write_index >= objects.size():
+				generated.append({"type": &"object_change_failed", "reason": &"invalid_object"})
+				continue
+			var write_object: Gen2WorldObject = objects[write_index]
+			var write_key: String = _object_key(
+				write_map_group, write_map_number, write_index
+			)
+			_object_position_overrides[write_key] = write_object.cell
+			generated.append({
+				"type": &"object_position_written",
+				"object_index": write_index, "cell": write_object.cell,
+			})
+			continue
 		if event_type == &"map_block_changed":
 			if current_map == null or int(event.get("map_group", -1)) != current_map.group \
 				or int(event.get("map_number", -1)) != current_map.number:
@@ -1340,6 +1474,15 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 					var flag: int = local_object.event_flag
 					if flag > 0:
 						state.set_event_flag(flag, bool(event.get("active", false)))
+			continue
+		if event_type == &"player_face_object":
+			var player_target_index: int = int(event.get("target_index", -1))
+			if current_map != null and int(event.get("map_group", -1)) == current_map.group \
+				and int(event.get("map_number", -1)) == current_map.number \
+				and player_target_index >= 0 and player_target_index < objects.size():
+				player_facing = _facing_toward(
+					player_cell, (objects[player_target_index] as Gen2WorldObject).cell
+				)
 			continue
 		if event_type not in [
 			&"object_visibility", &"object_position", &"object_facing",
