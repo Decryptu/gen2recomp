@@ -25,21 +25,26 @@ const TRAINER_SPECIES: int = 16
 const TRAINER_SPRITE: int = 1
 
 
-static func directory() -> String:
-	return RomCache.directory_for(GAME_ID, SHA1)
+## Every caller but the Gold/Silver profile tests uses the default id, so the
+## existing Crystal-profile fixture directory and manifest are unchanged.
+static func directory(game_id: StringName = GAME_ID) -> String:
+	return RomCache.directory_for(game_id, SHA1)
 
 
-static func build() -> GameData:
-	var directory: String = directory()
+static func build(game_id: StringName = GAME_ID) -> GameData:
+	var directory: String = directory(game_id)
 	var base: GameData = BattleFixture.build(directory)
 	assert(base != null)
 
 	var manifest: Dictionary = RomCache.read_manifest(directory)
+	# GameData.id, and therefore Gen2WorldScriptRunner's command profile, comes
+	# straight from this field, so the trainer script bytes below must match it.
+	var crystal_commands: bool = game_id != &"gold" and game_id != &"silver"
 	_write_trainers(directory)
-	_write_world(directory)
+	_write_world(directory, crystal_commands)
 	_write_overworld_graphics(directory)
 	_write_battle_graphics(directory, manifest)
-	manifest["game_id"] = String(GAME_ID)
+	manifest["game_id"] = String(game_id)
 	manifest["sha1"] = SHA1
 	manifest["complete"] = true
 	RomCache.write_json(RomCache.manifest_path(directory), manifest)
@@ -72,7 +77,7 @@ static func _write_trainers(directory: String) -> void:
 	}])
 
 
-static func _write_world(directory: String) -> void:
+static func _write_world(directory: String, crystal_commands: bool = true) -> void:
 	var blocks: Array = []
 	blocks.resize(MAP_WIDTH_BLOCKS * MAP_HEIGHT_BLOCKS)
 	blocks.fill(0)
@@ -165,15 +170,25 @@ static func _write_world(directory: String) -> void:
 		},
 	})
 
+	# These two scripts are stored at the object's/coord event's own address,
+	# separate from the synthesized SeenByTrainerScript sequence the runner
+	# builds for the initial sight-triggered phase. Their raw bytes must still
+	# match the requested profile.
+	var raw: Callable = func(source_opcode: int) -> int:
+		return Gen2WorldScript.raw_opcode(source_opcode, crystal_commands)
 	var script: Array = [
-		0x5E, 1, 0,
-		0x64, WIN_TEXT & 0xFF, WIN_TEXT >> 8, LOSS_TEXT & 0xFF, LOSS_TEXT >> 8,
-		0x5F,
-		0x33, TRAINER_FLAG & 0xFF, TRAINER_FLAG >> 8,
-		0x60,
-		0x91,
+		raw.call(0x5D), 1, 0, # loadtrainer
+		raw.call(0x63), WIN_TEXT & 0xFF, WIN_TEXT >> 8, LOSS_TEXT & 0xFF, LOSS_TEXT >> 8, # winlosstext
+		raw.call(0x5E), # startbattle
+		Gen2WorldScript.SETEVENT, TRAINER_FLAG & 0xFF, TRAINER_FLAG >> 8,
+		raw.call(0x5F), # reloadmapafterbattle
+		raw.call(0x90), # end
 	]
-	var tutorial_script: Array = [0x5D, TRAINER_SPECIES, 5, 0x61, 3, 0x91]
+	var tutorial_script: Array = [
+		raw.call(0x5C), TRAINER_SPECIES, 5, # loadwildmon
+		raw.call(0x60), 3, # catchtutorial
+		raw.call(0x90), # end
+	]
 	RomCache.write_json(RomCache.world_scripts_path(directory), {
 		Gen2WorldScript.pointer_key(BANK, TRAINER_SCRIPT): script,
 		Gen2WorldScript.pointer_key(BANK, TUTORIAL_SCRIPT): tutorial_script,

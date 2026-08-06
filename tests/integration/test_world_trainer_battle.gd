@@ -27,6 +27,7 @@ func after_each() -> void:
 		_world_screen.free()
 		_world_screen = null
 	RomCache.clear(Fixture.directory())
+	RomCache.clear(Fixture.directory(&"gold"))
 
 
 func _open_world(with_save: bool = false) -> void:
@@ -113,6 +114,54 @@ func test_victory_displays_imported_text_reloads_objects_and_keeps_player_cell()
 	await get_tree().process_frame
 	var world: Dictionary = _world_screen.world_snapshot()
 	assert_eq(world["map"], Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
+	assert_eq(world["player_cell"], Vector2i(5, 5))
+	assert_eq(world["visible_objects"], 0)
+	assert_true(world["just_battled"])
+
+
+## Gold/Silver share one command profile (Gen2WorldScriptRunner._crystal_commands()
+## returns false for both), so covering the "gold" game id also covers Silver's
+## opcode layout for this flow.
+func test_gold_profile_trainer_sight_reaches_the_real_battle_overlay() -> void:
+	_data = Fixture.build(&"gold")
+	await _open_world()
+	var before: Dictionary = _world_screen.world_snapshot()
+	await _trigger_trainer()
+
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_eq(before["player_cell"], Vector2i(4, 5))
+	assert_eq(_world_screen.world_snapshot()["player_cell"], Vector2i(5, 5))
+	assert_eq((_world_screen._world.objects[0] as Gen2WorldObject).cell, Vector2i(5, 4))
+	assert_eq(
+		(_world_screen._world.objects[0] as Gen2WorldObject).facing,
+		Gen2WorldSprite.FACING_DOWN
+	)
+	assert_eq(_world_screen._world.player_facing, Gen2WorldSprite.FACING_UP)
+	assert_true(host.is_ready())
+	var snapshot: Dictionary = host.battle_snapshot()
+	assert_eq(snapshot["enemy"], Fixture.TRAINER_SPECIES)
+	assert_eq(snapshot["message"], "LEADER RIVAL wants to fight!")
+	assert_eq(snapshot["world_battle_active"], true)
+
+
+func test_gold_profile_victory_commits_beaten_flag_and_reloads_objects() -> void:
+	_data = Fixture.build(&"gold")
+	await _open_world()
+	await _trigger_trainer()
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+
+	for _hit: int in 12:
+		host.hurt_enemy()
+	host.finish()
+	host.advance()
+	assert_eq(host.battle_snapshot()["message"], "YOU WON.")
+
+	host.finish()
+	host.advance()
+	await get_tree().process_frame
+	var world: Dictionary = _world_screen.world_snapshot()
 	assert_eq(world["player_cell"], Vector2i(5, 5))
 	assert_eq(world["visible_objects"], 0)
 	assert_true(world["just_battled"])

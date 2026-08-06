@@ -101,6 +101,15 @@ const GOLD_END: int = 0x90
 const ENDCALLBACK: int = 0x90
 const END: int = 0x91
 
+## Gold/Silver raw opcodes for the trainer intro sequence. Crystal inserted
+## farjumptext at raw $52, so every Gold/Silver opcode at or above $52 shifts
+## up by one in Crystal's raw byte stream; see raw_opcode().
+const GOLD_LOADTEMPTRAINER: int = 0x5B
+const GOLD_STARTBATTLE: int = 0x5E
+const GOLD_RELOADMAPAFTERBATTLE: int = 0x5F
+const GOLD_TRAINERFLAGACTION: int = 0x62
+const GOLD_ENCOUNTERMUSIC: int = 0x7F
+
 const TEXT_START: int = 0x00
 ## World text uses the source text-command stream. $50 is a page control;
 ## $57 (done) ends the text box and $58 (prompt) pauses for a prompt.
@@ -480,6 +489,17 @@ static func _later_command_name(opcode: int, crystal_commands: bool) -> StringNa
 		0xA0: return &"credits"
 		0xA1: return &"warpfacing"
 	return &""
+
+
+## Converts a Gold/Silver source opcode into the raw byte the matching game's
+## command stream uses. Crystal's raw stream shifts every opcode at or above
+## $52 up by one; below that boundary the two profiles agree. This is the
+## documented inverse of the raw-to-source normalization in
+## Gen2WorldScriptRunner._execute().
+static func raw_opcode(source_opcode: int, crystal_commands: bool = true) -> int:
+	if crystal_commands and source_opcode >= 0x52:
+		return source_opcode + 1
+	return source_opcode
 
 
 static func is_endcallback(opcode: int, crystal_commands: bool = true) -> bool:

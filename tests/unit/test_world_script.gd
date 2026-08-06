@@ -71,6 +71,52 @@ func test_crystal_trainer_and_tutorial_commands_use_the_pinned_layout() -> void:
 	assert_eq(tutorial["value"], 3)
 
 
+func test_raw_opcode_shifts_only_at_and_above_the_farjumptext_insertion() -> void:
+	# Below the shift boundary both profiles agree on the raw byte.
+	assert_eq(Gen2WorldScript.raw_opcode(0x51, false), 0x51)
+	assert_eq(Gen2WorldScript.raw_opcode(0x51, true), 0x51)
+	# At and above $52, Crystal's raw byte is one higher than the Gold/Silver
+	# source opcode because farjumptext was inserted at raw $52.
+	assert_eq(Gen2WorldScript.raw_opcode(0x52, false), 0x52)
+	assert_eq(Gen2WorldScript.raw_opcode(0x52, true), 0x53)
+	assert_eq(Gen2WorldScript.raw_opcode(0x53, true), 0x54) # gold waitbutton
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_LOADTEMPTRAINER, false), 0x5B)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_LOADTEMPTRAINER, true), 0x5C)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_STARTBATTLE, true), 0x5F)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_RELOADMAPAFTERBATTLE, true), 0x60)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_TRAINERFLAGACTION, true), 0x63)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_ENCOUNTERMUSIC, true), 0x80)
+	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_END, true), 0x91)
+
+
+func test_raw_opcode_round_trips_the_trainer_intro_commands_through_command_at() -> void:
+	# Each trainer-intro command name should decode identically whether it is
+	# reached through the Gold/Silver raw byte or the shifted Crystal raw byte.
+	var intro_commands: Array = [
+		[Gen2WorldScript.GOLD_LOADTEMPTRAINER, &"loadtemptrainer"],
+		[Gen2WorldScript.GOLD_ENCOUNTERMUSIC, &"encountermusic"],
+		[0x53, &"waitbutton"],
+		[Gen2WorldScript.GOLD_STARTBATTLE, &"startbattle"],
+		[Gen2WorldScript.GOLD_RELOADMAPAFTERBATTLE, &"reloadmapafterbattle"],
+		[Gen2WorldScript.GOLD_TRAINERFLAGACTION, &"trainerflagaction"],
+		[Gen2WorldScript.GOLD_END, &"end"],
+	]
+	for entry: Array in intro_commands:
+		var source_opcode: int = entry[0]
+		var expected_name: StringName = entry[1]
+		for crystal_commands: bool in [false, true]:
+			var raw: int = Gen2WorldScript.raw_opcode(source_opcode, crystal_commands)
+			var operand_count: int = Gen2WorldScript.command_width(raw, crystal_commands) - 1
+			var bytes: PackedByteArray = PackedByteArray([raw])
+			bytes.resize(1 + maxi(operand_count, 0))
+			var decoded: Dictionary = Gen2WorldScript.command_at(bytes, 0, crystal_commands)
+			assert_true(
+				decoded["ok"],
+				"%s should decode under crystal_commands=%s" % [expected_name, crystal_commands]
+			)
+			assert_eq(decoded["name"], expected_name)
+
+
 func test_unknown_and_truncated_commands_are_structured_failures() -> void:
 	var unknown: Dictionary = Gen2WorldScript.command_at(PackedByteArray([0xFE]), 0)
 	assert_false(unknown["ok"])
