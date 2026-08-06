@@ -109,6 +109,22 @@ runner executes the imported caller/callee script at the same transaction
 boundary. Audio stays behind verified bounded decoder,
 renderer and player layers, with imported records validated before success.
 
+`world_start_menu.gd` is the scene-free model of `engine/menus/start_menu.asm`'s
+item list: it reproduces the source's Pokedex/Pokemon/Pokegear gating and
+`STATICMENU_WRAP` cursor, and still builds Pokedex, Player and Options in
+their source position, marked unavailable, rather than omitting entries this
+project has not implemented. `world_pack.gd` groups owned items into the four
+cartridge pack pockets using the item type byte `GameData` already imports
+under the confusingly-named `pocket` field; it is presentation only; item
+counts stay a flat map on `Gen2WorldState`, and pocket capacities are not
+enforced. `start_menu_screen.gd` is the overlay: it owns Pack and a Save
+confirmation as internal modes the same way `world_service_screen.gd` owns a
+mart mode, and delegates Pokemon and Pokegear to the existing party screen and
+phone list rather than re-implementing them. `Gen2PartyScreen` and
+`Gen2BoxScreen` share one embedded-mode shape: a `set_context(..., embedded)`
+flag and a `closed(result)` signal so the overworld can stack them above the
+running world instead of navigating away with `change_scene_to_file`.
+
 ### Audio
 
 | File | Role |
