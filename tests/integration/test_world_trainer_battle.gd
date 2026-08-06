@@ -7,6 +7,11 @@ extends GutTest
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
 
+const STORY_CALLBACK: int = 0x6200
+const STORY_OBJECT: int = 0x6210
+const STORY_TEXT: int = 0x7200
+const STORY_EVENT_FLAG: int = 7
+
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
 
@@ -135,6 +140,32 @@ func test_emote_preview_reaches_the_production_world_renderer() -> void:
 
 	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Debug emote preview")
 	assert_true((_world_screen._world.objects[0] as Gen2WorldObject).emote_visible)
+
+
+func test_production_world_entry_and_facing_object_story_persist_separate_flags() -> void:
+	_install_story_slice()
+	await _open_world()
+	assert_eq(_world_screen._world.state.map_scene(Fixture.MAP_GROUP, Fixture.MAP_NUMBER), 2)
+
+	_world_screen._world.player_cell = Vector2i(4, 3)
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	assert_true(_world_screen.interact())
+	assert_eq(_world_screen._world.pending_script_input()["type"], &"text")
+	assert_false(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
+	assert_false(_world_screen._world.state.hall_of_fame())
+
+	_world_screen._advance_script_input()
+	assert_true(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
+	assert_true(_world_screen._world.state.hall_of_fame())
+	assert_eq(_world_screen.world_snapshot()["visible_objects"], 0)
+
+	var snapshot: Gen2WorldSnapshot = _world_screen.world_save_snapshot()
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(_data, snapshot)
+	assert_not_null(restored)
+	assert_eq(restored.state.map_scene(Fixture.MAP_GROUP, Fixture.MAP_NUMBER), 2)
+	assert_true(restored.event_flag_active(STORY_EVENT_FLAG))
+	assert_true(restored.state.hall_of_fame())
+	assert_eq(restored.visible_objects().size(), 0)
 
 
 func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
@@ -276,3 +307,29 @@ func _add_capture_metadata() -> void:
 		if int(raw["number"]) in Gen2WorldPartyHost.capture_ball_items():
 			raw["pocket"] = RomLayout.ITEM_POCKET_BALL
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+
+
+func _install_story_slice() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, STORY_CALLBACK)] = [
+		Gen2WorldScript.SETSCENE, 2, Gen2WorldScript.END,
+	]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, STORY_OBJECT)] = [
+		Gen2WorldScript.WRITETEXT, STORY_TEXT & 0xFF, STORY_TEXT >> 8,
+		Gen2WorldScript.SETEVENT, STORY_EVENT_FLAG, 0,
+		Gen2WorldScript.SETFLAG, Gen2WorldState.ENGINE_HALL_OF_FAME, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	RomCache.write_json(RomCache.world_text_path(Fixture.directory()), {
+		Gen2WorldScript.pointer_key(Fixture.BANK, STORY_TEXT): [
+			Gen2WorldScript.TEXT_START, 0x41, 0x42, Gen2WorldScript.TEXT_TERMINATOR,
+		],
+	})
+	_data = GameData.open_directory(Fixture.directory())
+	var map: Gen2WorldMap = _data.world_map(Fixture.MAP_GROUP, Fixture.MAP_NUMBER)
+	map.scripts["callbacks"] = [{"type": 3, "script": STORY_CALLBACK}]
+	var object: Dictionary = map.events["objects"][0]
+	object["object_type"] = Gen2WorldObject.OBJECTTYPE_SCRIPT
+	object["script"] = STORY_OBJECT
+	object["event_flag"] = STORY_EVENT_FLAG

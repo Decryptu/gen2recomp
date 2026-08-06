@@ -25,6 +25,8 @@ static func validate(save: Gen2SaveData, data: GameData) -> Dictionary:
 		return _failure("the player name is too long")
 	if save.party.is_empty() or save.party.size() > Gen2SaveData.MAX_PARTY:
 		return _failure("the party must contain between one and six Pokémon")
+	if not save.boxes_shape_valid or save.boxes.size() != Gen2SaveData.BOX_COUNT:
+		return _failure("the save does not contain exactly %d PC boxes" % Gen2SaveData.BOX_COUNT)
 	var world_result: Dictionary = _validate_world(save.world, data)
 	if not world_result["ok"]:
 		return world_result
@@ -34,6 +36,19 @@ static func validate(save: Gen2SaveData, data: GameData) -> Dictionary:
 		var result: Dictionary = _validate_mon(mon, data, index)
 		if not result["ok"]:
 			return result
+	for box_index: int in Gen2SaveData.BOX_COUNT:
+		var box: Gen2SaveBox = save.boxes[box_index]
+		if box == null or not box.shape_valid or box.slots.size() != Gen2SaveBox.CAPACITY:
+			return _failure("PC box %d has an invalid slot shape" % (box_index + 1))
+		for slot_index: int in Gen2SaveBox.CAPACITY:
+			var boxed: Gen2SaveMon = box.slots[slot_index]
+			if boxed == null:
+				continue
+			var box_result: Dictionary = _validate_mon(
+				boxed, data, slot_index, "PC box %d slot" % (box_index + 1)
+			)
+			if not box_result["ok"]:
+				return box_result
 	return {"ok": true, "message": ""}
 
 
@@ -80,27 +95,30 @@ static func _validate_world(world: Gen2WorldSnapshot, data: GameData) -> Diction
 	return {"ok": true, "message": ""}
 
 
-static func _validate_mon(mon: Gen2SaveMon, data: GameData, index: int) -> Dictionary:
+static func _validate_mon(
+	mon: Gen2SaveMon, data: GameData, index: int, label: String = "party member"
+) -> Dictionary:
+	var subject: String = "%s %d" % [label, index + 1]
 	if mon == null:
-		return _failure("party member %d is missing" % (index + 1))
+		return _failure("%s is missing" % subject)
 	if mon.species <= 0 or data.species(mon.species).is_empty():
-		return _failure("party member %d has unknown species %d" % [index + 1, mon.species])
+		return _failure("%s has unknown species %d" % [subject, mon.species])
 	if mon.level < 1 or mon.level > Gen2Experience.MAX_LEVEL:
-		return _failure("party member %d has invalid level %d" % [index + 1, mon.level])
+		return _failure("%s has invalid level %d" % [subject, mon.level])
 	if mon.exp < 0 or mon.exp > Gen2Experience.MAX_EXP:
-		return _failure("party member %d has invalid experience" % (index + 1))
+		return _failure("%s has invalid experience" % subject)
 	var expected_level: int = Gen2Experience.level_for_exp(
 		int(data.species(mon.species).get("growth_rate", Gen2Experience.GROWTH_MEDIUM_FAST)),
 		mon.exp
 	)
 	if expected_level != mon.level:
-		return _failure("party member %d level and experience disagree" % (index + 1))
+		return _failure("%s level and experience disagree" % subject)
 	if mon.dvs < 0 or mon.dvs > 0xFFFF:
-		return _failure("party member %d has invalid DVs" % (index + 1))
+		return _failure("%s has invalid DVs" % subject)
 	for key: String in Gen2SaveMon.STAT_EXP_KEYS:
 		var value: int = int(mon.stat_exp.get(key, -1))
 		if value < 0 or value > Gen2Stats.MAX_STAT_EXP:
-			return _failure("party member %d has invalid %s stat experience" % [index + 1, key])
+			return _failure("%s has invalid %s stat experience" % [subject, key])
 
 	var base: Dictionary = data.species(mon.species).get("stats", {})
 	var max_hp: int = Gen2Stats.calculate(
@@ -108,12 +126,12 @@ static func _validate_mon(mon: Gen2SaveMon, data: GameData, index: int) -> Dicti
 		mon.level, true
 	)
 	if mon.hp < 0 or mon.hp > max_hp:
-		return _failure("party member %d has invalid HP" % (index + 1))
+		return _failure("%s has invalid HP" % subject)
 	if not _valid_status(mon.status):
-		return _failure("party member %d has invalid status" % (index + 1))
+		return _failure("%s has invalid status" % subject)
 
 	if mon.moves.size() != Gen2SaveMon.MAX_MOVES or mon.pp.size() != Gen2SaveMon.MAX_MOVES:
-		return _failure("party member %d does not have four move slots" % (index + 1))
+		return _failure("%s does not have four move slots" % subject)
 	var empty_seen: bool = false
 	for move_slot: int in Gen2SaveMon.MAX_MOVES:
 		var move_number: int = int(mon.moves[move_slot])
@@ -121,21 +139,21 @@ static func _validate_mon(mon: Gen2SaveMon, data: GameData, index: int) -> Dicti
 		if move_number == 0:
 			empty_seen = true
 			if pp != 0:
-				return _failure("party member %d has PP for an empty move" % (index + 1))
+				return _failure("%s has PP for an empty move" % subject)
 			continue
 		if empty_seen:
-			return _failure("party member %d has a move after an empty slot" % (index + 1))
+			return _failure("%s has a move after an empty slot" % subject)
 		var move: Dictionary = data.move(move_number)
 		if move.is_empty():
-			return _failure("party member %d has unknown move %d" % [index + 1, move_number])
+			return _failure("%s has unknown move %d" % [subject, move_number])
 		var max_pp: int = int(move.get("pp", 0))
 		if pp < 0 or pp > max_pp:
-			return _failure("party member %d has invalid PP for move %d" % [index + 1, move_number])
+			return _failure("%s has invalid PP for move %d" % [subject, move_number])
 
 	if mon.item < 0:
-		return _failure("party member %d has an invalid item" % (index + 1))
+		return _failure("%s has an invalid item" % subject)
 	if mon.item > 0 and data.item(mon.item).is_empty():
-		return _failure("party member %d has unknown item %d" % [index + 1, mon.item])
+		return _failure("%s has unknown item %d" % [subject, mon.item])
 	return {"ok": true, "message": ""}
 
 

@@ -133,6 +133,9 @@ func _build_world() -> void:
 	_text_box.place_at_bottom()
 	_text_box.visible = false
 	_screen.display(_text_box)
+	var entry_results: Array = _world.dispatch_map_entry()
+	if not entry_results.is_empty():
+		_show_script_results(entry_results)
 	_refresh_labels()
 
 
@@ -216,6 +219,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		else:
 			_show_script_results(_world.run_event_queue(true))
 		accept_event()
+		return
+	if key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+		if interact():
+			accept_event()
 		return
 	var direction := Vector2i.ZERO
 	match key.keycode:
@@ -303,6 +310,18 @@ func move_player(direction: Vector2i) -> bool:
 			"values": encounter["values"],
 			"encounter": encounter.duplicate(true),
 		})
+	return true
+
+
+## Public driver for the production NPC/object interaction path.
+func interact() -> bool:
+	if _world == null or _battle_host != null or _service_host != null \
+		or _world.phone_ring_active() or _world.fishing_busy():
+		return false
+	var results: Array = _world.interact()
+	if results.is_empty():
+		return false
+	_show_script_results(results)
 	return true
 
 

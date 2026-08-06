@@ -76,12 +76,13 @@ differ.
 
 `game/save/` owns project saves, not cartridge data. Keep its versioned model,
 validator, store and battle adapter scene-free. It validates against
-`GameData`, writes through a temporary file, and must not parse original SRAM
-until a checksum-aware adapter has been researched and tested against the real
-layout. The project world snapshot owns canonical map, inventory, event,
-source-engine-flag and clock state; the original SRAM adapter remains
-party-focused. Do not add box or other unsupported cartridge fields before
-those models are canonical.
+`GameData` and writes through a temporary file. Project save format 2 owns a
+fixed fourteen-box, twenty-slot PC model, with migration from format 1 that
+does not invent a world snapshot. Party-owned world transactions must update a
+candidate save and live snapshot together, then restore both on a failed write.
+The original SRAM adapter is a separate, checksum-aware boundary and remains
+party-focused until cartridge box ownership and layout are explicitly
+researched.
 
 `game/world/` separates request resolution from UI. `world_host.gd` and
 scene-free service helpers validate imported data and transactions;

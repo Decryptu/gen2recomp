@@ -840,6 +840,30 @@ func dispatch_callbacks(callback_type: int = -1) -> Array:
 	return run_event_queue(false)
 
 
+## Runs the callbacks that belong to entering the current map. The scene calls
+## this once after opening a new or validated snapshot; map transitions already
+## queue the same callback set from _apply_map().
+func dispatch_map_entry() -> Array:
+	return dispatch_callbacks()
+
+
+## Starts the first active scripted object in the cell the player is facing.
+## This is the explicit interaction boundary for NPCs, signs and item-like
+## objects. It never executes a hidden object or invents a fallback action.
+func interact() -> Array:
+	if _active_script != null or not _script_queue.is_empty():
+		return run_event_queue(false)
+	var target: Vector2i = facing_cell()
+	var events: Array = []
+	for event: Dictionary in _active_events_at(target):
+		if event.get("kind", &"") == &"objects" and event.has("script"):
+			events.append(event)
+	if events.is_empty():
+		return []
+	_enqueue_script_events(events)
+	return run_event_queue(false)
+
+
 ## Acknowledge the current text/button pause and continue the first queued
 ## script. Completed results retain the source event so a screen can react to
 ## them without reaching into the runner.

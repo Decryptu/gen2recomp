@@ -60,6 +60,20 @@ static func from_battle_party(
 	out.rom_sha1 = rom_sha1
 	out.slot = slot
 	out.player_name = source_save.player_name if source_save != null else player_name
+	if source_save != null:
+		out.boxes.clear()
+		for raw_box: Variant in source_save.boxes:
+			var box: Gen2SaveBox = raw_box if raw_box is Gen2SaveBox else null
+			if box == null:
+				out.boxes.append(Gen2SaveBox.new())
+				continue
+			var copied_box: Gen2SaveBox = Gen2SaveBox.from_dict(box.to_dict())
+			copied_box.shape_valid = box.shape_valid
+			out.boxes.append(copied_box)
+		while out.boxes.size() < Gen2SaveData.BOX_COUNT:
+			out.boxes.append(Gen2SaveBox.new())
+		if source_save.world != null:
+			out.world = Gen2WorldSnapshot.from_dict(source_save.world.to_dict())
 	for index: int in party.mons.size():
 		var saved_mon: Gen2SaveMon = from_battle_mon(party.mons[index])
 		if source_save != null and index < source_save.party.size():

@@ -712,6 +712,50 @@ func test_callback_dispatch_updates_the_map_scene() -> void:
 	assert_eq(world.state.map_scene(1, 1), 2)
 
 
+func test_map_entry_dispatch_runs_the_current_map_callbacks() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var result: Array = world.dispatch_map_entry()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["source"]["kind"], &"callback")
+	assert_eq(world.state.map_scene(1, 1), 2)
+
+
+func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6160"] = [
+		Gen2WorldScript.WRITETEXT, 0x00, 0x70,
+		Gen2WorldScript.SETEVENT, 7, 0,
+		Gen2WorldScript.SETFLAG, Gen2WorldState.ENGINE_HALL_OF_FAME, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 6))
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	world.current_map.events["objects"][0]["script"] = 0x6160
+	(world.objects[0] as Gen2WorldObject).event_script = 0x6160
+
+	var waiting: Array = world.interact()
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(waiting[0]["event"]["text"], "AB")
+	assert_false(world.event_flag_active(7))
+	assert_false(world.state.hall_of_fame())
+
+	var completed: Array = world.run_event_queue(true)
+	assert_eq(completed.size(), 1)
+	assert_eq(completed[0]["status"], &"complete")
+	assert_true(world.event_flag_active(7))
+	assert_true(world.state.hall_of_fame())
+	assert_eq(world.visible_objects().size(), 0)
+
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(data, world.snapshot())
+	assert_not_null(restored)
+	assert_true(restored.event_flag_active(7))
+	assert_true(restored.state.hall_of_fame())
+	assert_eq(restored.visible_objects().size(), 0)
+
+
 func test_script_warp_is_validated_before_transition() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(8, 6))

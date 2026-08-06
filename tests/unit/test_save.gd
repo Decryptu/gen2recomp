@@ -95,6 +95,10 @@ func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 	var source: Gen2SaveData = _save()
 	(source.party[0] as Gen2SaveMon).nickname = "SPARKY"
 	(source.party[0] as Gen2SaveMon).original_trainer = "RED"
+	var boxed: Gen2SaveMon = Gen2SaveMon.from_dict(source.party[1].to_dict())
+	source.boxes[2].slots[4] = boxed
+	source.world = Gen2WorldSnapshot.new()
+	source.world.map_id = Vector2i(1, 1)
 	var party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, source)
 	var written: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, source.slot, party, "", source
@@ -102,6 +106,9 @@ func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 	assert_eq(written.player_name, "RED")
 	assert_eq((written.party[0] as Gen2SaveMon).nickname, "SPARKY")
 	assert_eq((written.party[0] as Gen2SaveMon).original_trainer, "RED")
+	assert_eq(written.boxes[2].slots[4].species, boxed.species)
+	assert_not_null(written.world)
+	assert_eq(written.world.map_id, Vector2i(1, 1))
 
 
 func test_new_game_uses_the_real_starter_choices_and_berry() -> void:
@@ -129,6 +136,49 @@ func test_development_save_has_a_valid_default_player_name() -> void:
 func test_a_valid_save_is_accepted_against_its_cartridge_cache() -> void:
 	var result: Dictionary = Gen2SaveValidator.validate(_save(), _data)
 	assert_true(result["ok"], result["message"])
+	assert_eq((_save().boxes as Array).size(), Gen2SaveData.BOX_COUNT)
+
+
+func test_boxed_pokemon_round_trips_and_is_validated_against_the_cache() -> void:
+	var save: Gen2SaveData = _save()
+	var boxed: Gen2SaveMon = Gen2SaveMon.from_dict(save.party[0].to_dict())
+	save.boxes[2].slots[4] = boxed
+	var validation: Dictionary = Gen2SaveValidator.validate(save, _data)
+	assert_true(validation["ok"], validation["message"])
+	var round_trip: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_eq(round_trip.boxes.size(), Gen2SaveData.BOX_COUNT)
+	assert_eq(round_trip.boxes[2].occupied_count(), 1)
+	assert_eq(round_trip.boxes[2].slots[4].species, boxed.species)
+
+
+func test_a_current_save_with_the_wrong_box_shape_is_rejected() -> void:
+	var save: Gen2SaveData = _save()
+	var raw: Dictionary = save.to_dict()
+	(raw["boxes"] as Array).pop_back()
+	var malformed: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	var result: Dictionary = Gen2SaveValidator.validate(malformed, _data)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "PC boxes")
+
+
+func test_a_legacy_save_migrates_to_empty_pc_boxes_without_inventing_world_state() -> void:
+	var save: Gen2SaveData = _save()
+	var raw: Dictionary = save.to_dict()
+	raw["format_version"] = Gen2SaveData.LEGACY_FORMAT_VERSION
+	raw.erase("boxes")
+	var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, 0)
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(raw))
+	file.close()
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_true(loaded["ok"], loaded["message"])
+	assert_true(loaded["migrated"])
+	var migrated: Gen2SaveData = loaded["save"]
+	assert_eq(migrated.format_version, Gen2SaveData.FORMAT_VERSION)
+	assert_eq(migrated.boxes.size(), Gen2SaveData.BOX_COUNT)
+	assert_true(migrated.world == null)
+	assert_true(Gen2SaveValidator.validate(migrated, _data)["ok"])
 
 
 func test_a_save_with_the_wrong_cartridge_identity_is_rejected() -> void:

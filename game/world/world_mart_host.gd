@@ -191,6 +191,7 @@ static func _copy_save(target: Gen2SaveData, source: Gen2SaveData) -> void:
 	target.slot = source.slot
 	target.player_name = source.player_name
 	target.party = source.party.duplicate(true)
+	target.boxes = source.boxes
 	target.world = source.world
 
 

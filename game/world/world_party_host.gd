@@ -176,8 +176,8 @@ static func use_item(
 
 ## Attempts to catch one wild battle mon and consumes the ball on either result.
 ## The battle screen owns the animation; this host owns the cartridge outcome and
-## the save/world writeback. A full party is refused before the ball is consumed
-## because the current save model has no PC-box owner yet.
+## the save/world writeback. A caught mon enters the party when there is room and
+## otherwise uses the first free PC-box slot.
 static func capture_wild(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -189,8 +189,13 @@ static func capture_wild(
 ) -> Dictionary:
 	if world == null or save == null or world.data == null or wild == null:
 		return _failure(&"missing_capture_context", {})
+	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
+	if not bool(validation.get("ok", false)):
+		return _failure(&"invalid_save", {"message": validation.get("message", "")})
 	if save.party.size() >= Gen2SaveData.MAX_PARTY:
-		return _failure(&"party_full", {"ball": ball})
+		var storage: Dictionary = save.first_empty_box_slot()
+		if not bool(storage.get("ok", false)):
+			return _failure(&"storage_full", {"ball": ball})
 	var definition: Dictionary = world.data.item(ball)
 	if definition.is_empty():
 		return _failure(&"unknown_ball", {"ball": ball})
@@ -200,21 +205,23 @@ static func capture_wild(
 		return _failure(&"unsupported_ball_effect", {"ball": ball})
 	if world.state == null or world.state.item_quantity(ball) <= 0:
 		return _failure(&"insufficient_ball_quantity", {"ball": ball})
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
 	var generator: RandomNumberGenerator = random if random != null else RandomNumberGenerator.new()
 	if random == null:
 		generator.randomize()
 	var outcome: Dictionary = _capture_outcome(world.data, wild, ball, generator)
 	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var destination: Dictionary = {}
 	if bool(outcome.get("caught", false)):
 		var captured: Gen2SaveMon = _captured_mon(
 			world.data, save, wild, generator, caught_location
 		)
 		if captured == null:
 			return _failure(&"could_not_create_captured_pokemon", outcome)
-		candidate.party.append(captured)
+		destination = candidate.add_party_or_box(captured)
+		if not bool(destination.get("ok", false)):
+			return _failure(StringName(destination.get("reason", &"storage_full")), {
+				"ball": ball, "outcome": outcome,
+			})
 	var before: Gen2WorldSnapshot = world.snapshot()
 	var next_quantity: int = world.state.item_quantity(ball) - 1
 	var item_result: Dictionary = world.state.apply_changes({}, {}, {"items": {ball: next_quantity}})
@@ -241,6 +248,7 @@ static func capture_wild(
 		"catch_rate": int(outcome.get("catch_rate", 0)),
 		"wobbles": int(outcome.get("wobbles", 0)),
 		"species": wild.species,
+		"destination": destination.duplicate(true),
 	}
 
 
@@ -252,11 +260,6 @@ static func _apply_party_request(
 	random: RandomNumberGenerator
 ) -> Dictionary:
 	var kind: StringName = StringName(request.get("kind", &""))
-	if candidate.party.size() >= Gen2SaveData.MAX_PARTY:
-		return {
-			"ok": true, "accepted": false, "script_value": 0,
-			"reason": &"party_full", "summary": {"kind": kind, "accepted": false},
-		}
 	if kind == &"pokemon_requested":
 		var values: Dictionary = request.get("values", {})
 		var is_egg: bool = not values.has("pokemon")
@@ -338,10 +341,18 @@ static func _apply_party_request(
 static func _append_mon(
 	candidate: Gen2SaveData, mon: Gen2SaveMon, script_value: int, summary: Dictionary
 ) -> Dictionary:
-	candidate.party.append(mon)
+	var destination: Dictionary = candidate.add_party_or_box(mon)
+	if not bool(destination.get("ok", false)):
+		return {
+			"ok": false,
+			"reason": destination.get("reason", &"storage_full"),
+			"destination": destination,
+		}
 	return {
 		"ok": true, "accepted": true, "script_value": script_value,
-		"summary": summary.merged({"accepted": true}),
+		"summary": summary.merged({
+			"accepted": true, "destination": destination.duplicate(true),
+		}),
 	}
 
 
@@ -544,6 +555,7 @@ static func _copy_save(target: Gen2SaveData, source: Gen2SaveData) -> void:
 	target.slot = source.slot
 	target.player_name = source.player_name
 	target.party = source.party
+	target.boxes = source.boxes
 	target.world = source.world
 
 
