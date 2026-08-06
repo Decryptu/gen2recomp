@@ -72,6 +72,12 @@ directions use `Gen2SaveStorage` to validate and write a candidate save before
 updating the shared runtime object. The screen's current box is transient UI
 state, and box names and cartridge SRAM placement remain outside the model.
 
+The imported Players House PC opens the same box screen as an embedded
+overworld overlay. Its close result resumes the paused source script with no
+decoration change. Selected runtime saves persist transfers through the same
+candidate-save boundary; injected scene-test and development saves use the
+validated in-memory candidate without writing a slot.
+
 Party-owned overworld transactions first modify a candidate `Gen2SaveData` and
 live world snapshot. Gifts, eggs, NPC trades, item effects and catches commit
 only after validation and optional persistence; a failed write restores live

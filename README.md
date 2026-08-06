@@ -52,6 +52,10 @@ The party screen opens a first PC storage presentation with fourteen numbered
 boxes and twenty fixed slots per box. It can deposit into the current box's
 first free slot and withdraw into a party with room. Each transfer validates and
 writes a candidate save atomically, and the last party member cannot be boxed.
+The imported Players House PC now reaches this same storage screen as an
+embedded overworld overlay. Closing it resumes the source script, while
+selected saves persist transfers and injected or development saves remain
+memory-only.
 > Crystal rooftop stock switches from the imported first list after the Hall of
 > Fame engine flag is committed. The imported bargain shop keeps its Monday
 > morning, one-item-per-visit and daily close behavior in the world snapshot.
@@ -176,7 +180,9 @@ Development scenes:
   imported tables, and `F` fishes only while facing water with an owned rod.
   Space, Enter or `Z` advances casting and bites; F5 saves. The host clock
   advances one real-time game minute per minute and updates source day
-  boundaries. `P` opens the registered Pokegear phone list. `preview_emote()`, `preview_wild_encounter()`,
+  boundaries. `P` opens the registered Pokegear phone list. The imported
+  Players House PC opens the embedded numbered box storage screen and `Esc`
+  closes it. `preview_emote()`, `preview_wild_encounter()`,
   `preview_fishing_battle()`, `preview_script_event()`,
   `preview_battle_request()`, `preview_world_battle_loss()`,
   `preview_capture()` and `preview_party_transaction()` exercise their live
@@ -196,6 +202,14 @@ Development scenes:
   ```bash
   godot --headless --path . -s res://tools/preview_world_story.gd -- \
     crystal 3 19 3 5 1 37,1744
+  ```
+
+  The real Crystal bedroom PC and the validated bedroom-to-town warp chain can
+  be checked with:
+
+  ```bash
+  godot --headless --path . -s res://tools/preview_world_story.gd -- \
+    crystal 24 7 2 2 1 none home
   ```
 
   World text follows the cartridge command stream: `$50` is a page break,

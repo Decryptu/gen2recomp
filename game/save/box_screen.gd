@@ -5,6 +5,8 @@ extends Control
 ## explicit party/box transfer boundary. Box names and cartridge SRAM layout
 ## remain outside this screen until their canonical source is verified.
 
+signal closed(result: Dictionary)
+
 const BACKGROUND: Color = Color("#09111f")
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#2d4566")
@@ -18,6 +20,8 @@ var _data: GameData = null
 var _data_override: GameData = null
 var _save: Gen2SaveData = null
 var _save_override: Gen2SaveData = null
+var _persist: bool = true
+var _embedded: bool = false
 var _box_index: int = 0
 var _selected_box_slot: int = -1
 var _selected_party_index: int = -1
@@ -35,10 +39,15 @@ func _ready() -> void:
 	_refresh()
 
 
-## Test seam for a synthetic cache and validated save.
-func set_context(data: GameData, save: Gen2SaveData) -> void:
+## Supplies the cache/save context. Embedded overworld use can keep the same
+## atomic storage operations in memory while a selected runtime save persists.
+func set_context(
+	data: GameData, save: Gen2SaveData, persist: bool = true, embedded: bool = false
+) -> void:
 	_data_override = data
 	_save_override = save
+	_persist = persist
+	_embedded = embedded
 	_data = data
 	_save = save
 	if is_inside_tree() and _box_grid != null:
@@ -98,7 +107,7 @@ func deposit_selected_party() -> bool:
 		_set_status("Select a party member first.", ERROR)
 		return false
 	var result: Dictionary = Gen2SaveStorage.deposit_party_to_box(
-		_save, _data, _selected_party_index, _box_index
+		_save, _data, _selected_party_index, _box_index, -1, _persist
 	)
 	if not bool(result.get("ok", false)):
 		_set_status(String(result.get("message", result.get("reason", "Deposit refused."))), ERROR)
@@ -114,7 +123,7 @@ func withdraw_selected_box() -> bool:
 		_set_status("Select a stored Pokémon first.", ERROR)
 		return false
 	var result: Dictionary = Gen2SaveStorage.withdraw_box_to_party(
-		_save, _data, _box_index, _selected_box_slot
+		_save, _data, _box_index, _selected_box_slot, _persist
 	)
 	if not bool(result.get("ok", false)):
 		_set_status(String(result.get("message", result.get("reason", "Withdrawal refused."))), ERROR)
@@ -176,7 +185,7 @@ func _build_ui() -> void:
 	var next := _button("Next box", TEXT)
 	next.pressed.connect(_next_box)
 	header.add_child(next)
-	var back := _button("Back to party", TEXT)
+	var back := _button("Turn off PC" if _embedded else "Back to party", TEXT)
 	back.pressed.connect(_back)
 	header.add_child(back)
 
@@ -347,7 +356,16 @@ func _set_status(message: String, colour: Color) -> void:
 
 
 func _back() -> void:
+	if _embedded:
+		close_embedded()
+		return
 	get_tree().change_scene_to_file.call_deferred("res://game/save/party_screen.tscn")
+
+
+func close_embedded() -> void:
+	if not _embedded:
+		return
+	closed.emit({"ok": true, "script_value": 0, "changed": false})
 
 
 func _button(text: String, colour: Color) -> Button:

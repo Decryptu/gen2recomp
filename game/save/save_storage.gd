@@ -15,6 +15,7 @@ static func deposit_party_to_box(
 	party_index: int,
 	box_index: int = -1,
 	box_slot: int = -1,
+	persist: bool = true,
 ) -> Dictionary:
 	var candidate_result: Dictionary = _candidate(save, data)
 	if not bool(candidate_result.get("ok", false)):
@@ -40,7 +41,7 @@ static func deposit_party_to_box(
 		"party_index": party_index,
 		"box": int(destination["box"]),
 		"slot": int(destination["slot"]),
-	})
+	}, persist)
 
 
 static func withdraw_box_to_party(
@@ -48,6 +49,7 @@ static func withdraw_box_to_party(
 	data: GameData,
 	box_index: int,
 	box_slot: int,
+	persist: bool = true,
 ) -> Dictionary:
 	var candidate_result: Dictionary = _candidate(save, data)
 	if not bool(candidate_result.get("ok", false)):
@@ -72,7 +74,7 @@ static func withdraw_box_to_party(
 		"party_index": candidate.party.size() - 1,
 		"box": box_index,
 		"slot": box_slot,
-	})
+	}, persist)
 
 
 static func _candidate(save: Gen2SaveData, data: GameData) -> Dictionary:
@@ -118,16 +120,19 @@ static func _commit(
 	data: GameData,
 	candidate: Gen2SaveData,
 	transaction: Dictionary,
+	persist: bool = true,
 ) -> Dictionary:
-	var write: Dictionary = Gen2SaveStore.save(candidate, data)
-	if not bool(write.get("ok", false)):
-		return {
-			"ok": false,
-			"reason": &"save_failed",
-			"message": write.get("message", "save failed"),
-		}
+	if persist:
+		var write: Dictionary = Gen2SaveStore.save(candidate, data)
+		if not bool(write.get("ok", false)):
+			return {
+				"ok": false,
+				"reason": &"save_failed",
+				"message": write.get("message", "save failed"),
+			}
 	source.copy_from(candidate)
 	var result: Dictionary = {"ok": true, "message": ""}
+	result["persisted"] = persist
 	for key: Variant in transaction:
 		result[key] = transaction[key]
 	return result

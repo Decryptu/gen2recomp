@@ -11,6 +11,7 @@ const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 const SERVICE_SCENE: PackedScene = preload("res://game/world/world_service_screen.tscn")
+const BOX_SCENE: PackedScene = preload("res://game/save/box_screen.tscn")
 const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 
 @export var map_group: int = 24
@@ -37,6 +38,7 @@ var _audio_waiting: bool = false
 var _script_prompt: String = ""
 var _battle_host: Gen2BattleScreen = null
 var _service_host: Gen2WorldServiceScreen = null
+var _pc_host: Gen2BoxScreen = null
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
@@ -154,7 +156,8 @@ func _process(delta: float) -> void:
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
-			if _service_host == null and _battle_host == null and not _world.script_input_waiting():
+			if _service_host == null and _battle_host == null and _pc_host == null \
+				and not _world.script_input_waiting():
 				var phone_schedule: Dictionary = _world.advance_phone_schedule(
 					ticks.size(), _encounter_random
 				)
@@ -178,6 +181,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null:
 		return
 	if _world.phone_ring_active():
+		accept_event()
+		return
+	if _pc_host != null:
+		if key.keycode == KEY_ESCAPE:
+			_pc_host.close_embedded()
 		accept_event()
 		return
 	if _service_host != null:
@@ -269,7 +277,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
-		or _world.phone_ring_active():
+		or _pc_host != null or _world.phone_ring_active():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
@@ -316,7 +324,7 @@ func move_player(direction: Vector2i) -> bool:
 ## Public driver for the production NPC/object interaction path.
 func interact() -> bool:
 	if _world == null or _battle_host != null or _service_host != null \
-		or _world.phone_ring_active() or _world.fishing_busy():
+		or _pc_host != null or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
 	if results.is_empty():
@@ -749,6 +757,52 @@ func _open_service_host() -> void:
 	_refresh_labels()
 
 
+func _open_pc_host() -> void:
+	if _pc_host != null or _world == null or _data == null:
+		return
+	var host: Gen2BoxScreen = BOX_SCENE.instantiate() as Gen2BoxScreen
+	if host == null:
+		_script_prompt = "PC storage scene unavailable"
+		_refresh_labels()
+		return
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var persist: bool = save != null and _injected_save == null
+	if save == null:
+		save = Gen2SaveStore.create_development_save(_data, 0)
+		if save != null:
+			save.world = _world.snapshot()
+		persist = false
+	if save == null:
+		host.queue_free()
+		_script_prompt = "PC storage requires a validated save"
+		_refresh_labels()
+		return
+	host.set_context(_data, save, persist, true)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	host.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(host)
+	host.closed.connect(_on_pc_closed)
+	_pc_host = host
+	_script_prompt = "PC storage open"
+	_refresh_labels()
+
+
+func _on_pc_closed(result: Dictionary) -> void:
+	var host: Gen2BoxScreen = _pc_host
+	_pc_host = null
+	if host != null:
+		host.queue_free()
+	if _world == null:
+		return
+	var resumed: Array = _world.complete_runtime_request(result)
+	if resumed.is_empty():
+		_script_prompt = "PC storage closed"
+	else:
+		_show_script_results(resumed)
+	_refresh_labels()
+
+
 func _open_phone_list() -> void:
 	if _service_host != null or _world == null or _data == null:
 		return
@@ -834,6 +888,9 @@ func _show_script_results(results: Array) -> void:
 					&"special_phone_call_requested",
 				]:
 					_open_service_host()
+					break
+				if StringName(request.get("kind", &"")) == &"pc_requested":
+					_open_pc_host()
 					break
 				if StringName(request.get("kind", &"")) == &"audio_requested":
 					var audio_results: Array = _handle_audio_request(request)

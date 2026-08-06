@@ -795,6 +795,53 @@ func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
 	assert_eq(restored.visible_objects().size(), 0)
 
 
+func test_background_events_honor_source_direction_and_conditional_pointer_records() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6170"] = [Gen2WorldScript.SETEVENT, 11, 0, Gen2WorldScript.END]
+	scripts["48:6180"] = [12, 0, 0x70, 0x61]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	world.current_map.events["bg_events"] = [
+		{"x": 9, "y": 6, "type": Gen2WorldAPI.BGEVENT_RIGHT, "script": 0x6170},
+		{"x": 8, "y": 5, "type": Gen2WorldAPI.BGEVENT_IFSET, "script": 0x6180},
+	]
+
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_true(world.interact().is_empty())
+	world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	var direct: Array = world.interact()
+	assert_eq(direct.size(), 1)
+	assert_eq(direct[0]["status"], &"complete")
+	assert_true(world.event_flag_active(11))
+
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(world.dispatch_events(Vector2i(8, 5)).size(), 0)
+	world.set_event_flag(12)
+	assert_eq(world.dispatch_events(Vector2i(8, 5)).size(), 1)
+	var conditional: Array = world.dispatch_script_events(Vector2i(8, 5))
+	assert_eq(conditional.size(), 1)
+	assert_true(world.event_flag_active(11))
+
+
+func test_players_house_pc_special_is_a_host_request_and_returns_false_without_decoration_changes() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6190"] = [Gen2WorldScript.SPECIAL, 29, 0, Gen2WorldScript.IFTRUE, 0x99, 0x61, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6190
+	var waiting: Array = world.dispatch_script_events()
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(world.pending_runtime_request()["kind"], &"pc_requested")
+
+	var resumed: Array = world.complete_runtime_request({"ok": true, "script_value": 0})
+	assert_eq(resumed.size(), 1)
+	assert_eq(resumed[0]["status"], &"complete")
+	assert_true(world.pending_runtime_request().is_empty())
+
+
 func test_script_warp_is_validated_before_transition() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(8, 6))
