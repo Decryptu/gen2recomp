@@ -58,8 +58,16 @@ static func _validate_world(world: Gen2WorldSnapshot, data: GameData) -> Diction
 		return _failure("the saved player facing is invalid")
 	if world.movement_mode not in [Gen2WorldAPI.MOVEMENT_WALK, Gen2WorldAPI.MOVEMENT_SURF]:
 		return _failure("the saved movement mode is invalid")
+	if world.world_day < 0 or world.world_day >= Gen2WorldClock.DAYS_PER_WEEK \
+		or world.world_hour < 0 or world.world_hour >= Gen2WorldClock.HOURS_PER_DAY \
+		or world.world_minute < 0 \
+		or world.world_minute >= Gen2WorldClock.MINUTES_PER_HOUR:
+		return _failure("the saved world clock is invalid")
 	if world.world_state == null:
 		return _failure("the saved world state is missing")
+	for raw_flag: Variant in world.world_state.engine_flags():
+		if int(raw_flag) < 0:
+			return _failure("the saved world engine flag is invalid")
 	for raw_item: Variant in world.world_state.items():
 		if data.item(int(raw_item)).is_empty():
 			return _failure("the saved world contains unknown item %d" % int(raw_item))

@@ -25,6 +25,34 @@ func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	assert_eq(restored.roaming_mons().size(), 1)
 
 
+func test_engine_flags_round_trip_and_daily_reset_preserves_hall_of_fame() -> void:
+	var state := Gen2WorldState.new()
+	state.set_hall_of_fame()
+	var changed: Dictionary = state.apply_changes({}, {}, {
+		"engine_flags": {
+			Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: true,
+		},
+	})
+	assert_true(changed["ok"])
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_true(restored.hall_of_fame())
+	assert_true(restored.bargain_merchant_closed())
+	assert_true(restored.reset_daily_flags())
+	assert_true(restored.hall_of_fame())
+	assert_false(restored.bargain_merchant_closed())
+	assert_false(restored.reset_daily_flags())
+
+
+func test_invalid_engine_flag_transaction_does_not_mutate_state() -> void:
+	var state := Gen2WorldState.new()
+	var failed: Dictionary = state.apply_changes({}, {}, {
+		"engine_flags": {-1: true},
+	})
+	assert_false(failed["ok"])
+	assert_false(state.hall_of_fame())
+	assert_false(state.bargain_merchant_closed())
+
+
 func test_world_state_rejects_invalid_swarm_transaction_without_mutation() -> void:
 	var state := Gen2WorldState.new()
 	var failed: Dictionary = state.apply_changes({}, {}, {

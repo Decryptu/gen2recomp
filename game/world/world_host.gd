@@ -116,7 +116,7 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 			var dialog_id: int = int(values.get("dialog", 0))
 			var mart_id: int = int(values.get("address", 0)) & 0xFF
 			var mart_result: Dictionary = Gen2WorldMartHost.resolve_mart(
-				world.data, dialog_id, mart_id
+				world.data, dialog_id, mart_id, world.state.hall_of_fame(), world.state
 			)
 			if not bool(mart_result.get("ok", false)):
 				return {

@@ -205,14 +205,14 @@ func _open_menu(input: Dictionary) -> void:
 
 func _open_mart(mart: Dictionary) -> void:
 	_mode = MODE.MART
-	_mart_entries = Gen2WorldMartHost.entries(_data, mart)
-	_mart_entries.append({"leave": true, "name": "LEAVE"})
+	_refresh_mart_entries()
 	_mart_quantity = 1
 	_mart_purchased = false
 	_cursor = 0
 	_title.text = String(mart.get("label", "MART"))
 	_summary.text = "Money: %d" % _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT)
-	_status.text = "Select an item. Left/Right changes quantity."
+	_status.text = "One of each item per visit." if StringName(mart.get("variant", &"")) == &"bargain" \
+		else "Select an item. Left/Right changes quantity."
 	_footer.text = "Arrows: move/quantity    Space/Enter: buy    Esc: leave"
 	_render_options()
 
@@ -309,6 +309,10 @@ func _confirm() -> void:
 		if bool(entry.get("leave", false)):
 			_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0})
 			return
+		if bool(entry.get("sold_out", false)):
+			_status.text = "This item is sold out for this visit."
+			_status.add_theme_color_override("font_color", ERROR)
+			return
 		var purchase: Dictionary = Gen2WorldMartHost.purchase(
 			_world, _save, _mart_source(), int(entry.get("item", 0)), _mart_quantity, _persist
 		)
@@ -323,6 +327,7 @@ func _confirm() -> void:
 		]
 		_status.add_theme_color_override("font_color", SUCCESS)
 		_mart_quantity = 1
+		_refresh_mart_entries()
 		_render_options()
 		return
 	if _mode == MODE.PHONE_LIST:
@@ -407,6 +412,13 @@ func _render_options(override: Array = []) -> void:
 				name = "CONTACT %d" % int(dictionary.get("index", -1))
 		if value is Dictionary and _mode == MODE.MART \
 			and not bool((value as Dictionary).get("leave", false)):
+			if bool((value as Dictionary).get("sold_out", false)):
+				name = "%s    SOLD OUT" % name
+				label.text = ("> " if index == _cursor else "  ") + name
+				label.add_theme_color_override("font_color", ERROR if index == _cursor else MUTED)
+				label.add_theme_font_size_override("font_size", 18)
+				parent.add_child(label)
+				continue
 			var price: int = int((value as Dictionary).get("price", 0))
 			if index == _cursor:
 				name = "%s    %d x %d = %d" % [
@@ -439,11 +451,18 @@ func _mart_source() -> Dictionary:
 	return _resolved.get("data", {}).get("mart", {})
 
 
+func _refresh_mart_entries() -> void:
+	_mart_entries = Gen2WorldMartHost.entries(_data, _mart_source())
+	_mart_entries.append({"leave": true, "name": "LEAVE"})
+
+
 func _change_mart_quantity(delta: int) -> void:
 	if _cursor < 0 or _cursor >= _mart_entries.size():
 		return
 	var entry: Dictionary = _mart_entries[_cursor]
-	if bool(entry.get("leave", false)):
+	if bool(entry.get("leave", false)) or bool(entry.get("sold_out", false)):
+		return
+	if StringName(_mart_source().get("variant", &"")) == &"bargain":
 		return
 	var owned: int = _world.state.item_quantity(int(entry.get("item", 0)))
 	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK - owned
@@ -460,6 +479,9 @@ func _update_mart_status() -> void:
 	var entry: Dictionary = _mart_entries[_cursor]
 	if bool(entry.get("leave", false)):
 		_status.text = "Leave this shop."
+		return
+	if bool(entry.get("sold_out", false)):
+		_status.text = "Sold out for this visit."
 		return
 	var item: int = int(entry.get("item", 0))
 	var owned: int = _world.state.item_quantity(item)
