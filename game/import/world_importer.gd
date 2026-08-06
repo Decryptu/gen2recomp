@@ -840,8 +840,19 @@ static func _collect_text(rom: RomFile, bank: int, address: int, text_data: Dict
 		return
 	var length: int = mini(Gen2WorldScript.MAX_TEXT_BYTES, rom.size() - offset)
 	var bytes: PackedByteArray = rom.slice(offset, length)
-	if not bytes.is_empty():
-		text_data[key] = Array(bytes)
+	if bytes.is_empty():
+		return
+	# World text is a command stream, not a fixed-width name field. $50 is a
+	# page control; the source $57 done command is the bounded text resource end.
+	for index: int in bytes.size():
+		if bytes[index] != Gen2WorldScript.TEXT_TERMINATOR \
+			and bytes[index] != Gen2WorldScript.TEXT_PROMPT:
+			continue
+		text_data[key] = Array(bytes.slice(0, index + 1))
+		return
+	# Preserve an unterminated bounded slice for diagnostics. Runtime decoding
+	# still fails explicitly instead of reading into an adjacent resource.
+	text_data[key] = Array(bytes)
 
 
 static func _valid_coord(x: int, y: int, width: int, height: int) -> bool:

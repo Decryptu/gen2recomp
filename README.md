@@ -182,6 +182,18 @@ Development scenes:
   fishing; with an imported cache pass game and map after the output path, such
   as `silver 2 5`. Its one-argument form remains a fixture smoke test.
 
+  `tools/preview_world_story.gd` exercises a real imported map entry callback,
+  event-flag object visibility and a facing object interaction without opening
+  the cartridge at runtime. For example:
+
+  ```bash
+  godot --headless --path . -s res://tools/preview_world_story.gd -- \
+    crystal 3 19 3 5 1 37,1744
+  ```
+
+  World text follows the cartridge command stream: `$50` is a page break,
+  `$57` ends a text box and `$58` pauses for a prompt.
+
 ## Tests
 
 [GUT](https://github.com/bitwes/Gut) is in `addons/gut`; configuration is in

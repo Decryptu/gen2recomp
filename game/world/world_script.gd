@@ -102,7 +102,11 @@ const ENDCALLBACK: int = 0x90
 const END: int = 0x91
 
 const TEXT_START: int = 0x00
-const TEXT_TERMINATOR: int = Gen2Text.TERMINATOR
+## World text uses the source text-command stream. $50 is a page control;
+## $57 (done) ends the text box and $58 (prompt) pauses for a prompt.
+const TEXT_PAGE: int = 0x50
+const TEXT_TERMINATOR: int = 0x57
+const TEXT_PROMPT: int = 0x58
 
 const MAX_COMMANDS: int = 128
 const MAX_CALL_DEPTH: int = 8
@@ -787,10 +791,11 @@ static func scan_references(
 	return {"scripts": scripts, "texts": texts, "movements": movements}
 
 
-## Decodes the bounded text slice collected by the importer. Text resources in
-## the cartridge begin with TX_START and end with the same $50 terminator used
-## by the existing Gen2Text codec. Bytes that are not part of its known glyph
-## table remain visible as bracketed markers instead of being discarded.
+## Decodes the bounded text-command slice collected by the importer. Map text
+## begins with text_start and ends with the source done command $57. The generic
+## Gen2Text codec uses $50 for fixed names, but in world text $50 is a page
+## control and must remain in the decoded stream. Unknown bytes remain visible
+## as bracketed markers instead of being discarded.
 static func decode_text(data: PackedByteArray) -> Dictionary:
 	if data.is_empty():
 		return {"ok": false, "reason": &"missing_text"}
@@ -800,6 +805,12 @@ static func decode_text(data: PackedByteArray) -> Dictionary:
 		var byte: int = int(data[at])
 		if byte == TEXT_TERMINATOR:
 			return {"ok": true, "text": out, "bytes": at + 1}
+		if byte == TEXT_PROMPT:
+			return {"ok": true, "text": out, "bytes": at + 1, "prompt": true}
+		if byte == TEXT_PAGE:
+			out += "\n\n"
+			at += 1
+			continue
 		out += Gen2Text.character(byte)
 		at += 1
 	return {"ok": false, "reason": &"missing_text_terminator", "text": out}

@@ -1041,15 +1041,22 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 				or int(event.get("map_number", -1)) != current_map.number:
 				generated.append({"type": &"map_change_failed", "reason": &"invalid_map"})
 				continue
+			var source_cell := Vector2i(
+				int(event.get("x", -1)), int(event.get("y", -1))
+			)
+			var block_cell: Vector2i = _script_block_cell(source_cell)
 			var changed_block: Dictionary = change_block(
-				int(event.get("x", -1)), int(event.get("y", -1)), int(event.get("block", -1))
+				block_cell.x, block_cell.y, int(event.get("block", -1))
 			)
 			if bool(changed_block.get("ok", false)):
+				changed_block["source_cell"] = source_cell
 				generated.append({"type": &"map_block_changed", "change": changed_block})
 			else:
 				generated.append({
 					"type": &"map_change_failed",
 					"reason": changed_block.get("reason", &"invalid_block"),
+					"source_cell": source_cell,
+					"block_cell": block_cell,
 				})
 			continue
 		if event_type == &"map_reload_requested":
@@ -1805,6 +1812,17 @@ func _load_objects() -> void:
 			object.facing = int(_object_facing_overrides[key])
 		objects.append(object)
 	set_object_time(object_hour, object_time_of_day)
+
+
+## The source changeblock macro receives walk-cell coordinates. The cartridge
+## adds four tile coordinates before resolving the padded block buffer. Since
+## one block contains two walk cells and the live map exposes only its interior,
+## the resulting local block is floor((source + 4) / 2) - 2.
+func _script_block_cell(source_cell: Vector2i) -> Vector2i:
+	return Vector2i(
+		floori(float(source_cell.x + 4) / 2.0) - 2,
+		floori(float(source_cell.y + 4) / 2.0) - 2,
+	)
 
 
 func _find_sight_request() -> Dictionary:
