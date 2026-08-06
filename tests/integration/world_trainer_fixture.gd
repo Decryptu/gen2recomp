@@ -17,6 +17,7 @@ const MAP_WIDTH_CELLS: int = MAP_WIDTH_BLOCKS * 2
 const MAP_HEIGHT_CELLS: int = MAP_HEIGHT_BLOCKS * 2
 const TRAINER_SCRIPT: int = 0x6100
 const TUTORIAL_SCRIPT: int = 0x6110
+const SEEN_TEXT: int = 0x6FF0
 const WIN_TEXT: int = 0x7000
 const LOSS_TEXT: int = 0x7010
 const TRAINER_FLAG: int = 8
@@ -94,6 +95,15 @@ static func _write_world(directory: String) -> void:
 		"sight_range": 3,
 		"script": TRAINER_SCRIPT,
 		"event_flag": TRAINER_FLAG,
+		"trainer": {
+			"event_flag": TRAINER_FLAG,
+			"trainer_group": 1,
+			"trainer_id": 1,
+			"seen_text": {"bank": BANK, "address": SEEN_TEXT},
+			"win_text": {"bank": BANK, "address": WIN_TEXT},
+			"loss_text": {"bank": BANK, "address": LOSS_TEXT},
+			"after_script": 0,
+		},
 	}]
 	var map: Dictionary = {
 		"group": MAP_GROUP,
@@ -169,6 +179,7 @@ static func _write_world(directory: String) -> void:
 		Gen2WorldScript.pointer_key(BANK, TUTORIAL_SCRIPT): tutorial_script,
 	})
 	RomCache.write_json(RomCache.world_text_path(directory), {
+		Gen2WorldScript.pointer_key(BANK, SEEN_TEXT): _text("RIVAL noticed you."),
 		Gen2WorldScript.pointer_key(BANK, WIN_TEXT): _text("YOU WON."),
 		Gen2WorldScript.pointer_key(BANK, LOSS_TEXT): _text("YOU LOST."),
 	})

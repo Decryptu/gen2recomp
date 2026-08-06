@@ -679,6 +679,21 @@ func test_trainer_sight_queues_the_first_facing_trainer_in_range() -> void:
 	assert_true(world.dispatch_sight_events().is_empty())
 
 
+func test_trainer_approach_path_uses_the_source_longer_axis_first() -> void:
+	assert_eq(
+		Gen2WorldAPI.trainer_approach_path(Vector2i(1, 1), Vector2i(4, 3)),
+		[Vector2i.RIGHT, Vector2i.RIGHT, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.DOWN]
+	)
+	assert_eq(
+		Gen2WorldAPI.trainer_approach_path(Vector2i(4, 4), Vector2i(2, 1)),
+		[Vector2i.UP, Vector2i.UP, Vector2i.UP, Vector2i.LEFT, Vector2i.LEFT]
+	)
+	assert_eq(
+		Gen2WorldAPI.trainer_approach_path(Vector2i(1, 1), Vector2i(3, 3)),
+		[Vector2i.RIGHT, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.DOWN]
+	)
+
+
 func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(5, 6))
@@ -1495,7 +1510,44 @@ func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
 		"loss_text": {"bank": 48, "address": 0x7000},
 		"after_script": 0x6040,
 	}
-	var text: Array = world.dispatch_sight_events()
+	var audio: Array = world.dispatch_sight_events()
+	assert_eq(audio[0]["status"], &"waiting")
+	assert_eq(audio[0]["event"]["type"], &"runtime_request")
+	assert_eq(audio[0]["event"]["request"]["kind"], &"audio_requested")
+	assert_eq(audio[0]["event"]["request"]["values"]["kind"], &"encounter_music")
+	var approach: Array = world.complete_runtime_request({
+		"ok": true, "audio_played": false,
+	})
+	assert_eq(approach[0]["status"], &"waiting")
+	assert_eq(approach[0]["event"]["type"], &"runtime_request")
+	assert_eq(approach[0]["event"]["request"]["kind"], &"trainer_approach_requested")
+	var approach_values: Dictionary = approach[0]["event"]["request"]["values"]
+	assert_eq(approach_values["object_index"], 0)
+	assert_eq(approach_values["distance"], 2)
+	assert_eq(approach_values["direction"], Vector2i.UP)
+	var plan: Dictionary = world.start_trainer_approach(
+		int(approach_values["object_index"]), approach_values["direction"],
+		int(approach_values["distance"])
+	)
+	assert_true(plan["ok"])
+	assert_eq(plan["path"], [Vector2i.UP])
+	assert_eq(world.objects[0].emote_remaining, Gen2WorldAPI.TRAINER_SHOCK_FRAMES)
+	for _frame: int in Gen2WorldAPI.TRAINER_SHOCK_FRAMES - 1:
+		world.tick()
+	assert_true(world.objects[0].emote_visible)
+	assert_true(world.tick())
+	assert_false(world.objects[0].emote_visible)
+	var step: Dictionary = world.advance_trainer_approach_step(0, Vector2i.UP)
+	assert_true(step["ok"])
+	assert_eq(world.objects[0].cell, Vector2i(5, 5))
+	var finished: Dictionary = world.finish_trainer_approach(0)
+	assert_true(finished["ok"])
+	assert_eq(finished["facing"], Gen2WorldSprite.FACING_UP)
+	assert_eq(finished["player_facing"], Gen2WorldSprite.FACING_DOWN)
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+	var text: Array = world.complete_runtime_request({
+		"ok": true, "object_index": 0, "path": plan["path"],
+	})
 	assert_eq(text[0]["status"], &"waiting")
 	assert_eq(text[0]["event"]["type"], &"text")
 	assert_eq(text[0]["event"]["text"], "AB")
