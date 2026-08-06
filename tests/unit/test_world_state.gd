@@ -58,6 +58,76 @@ func test_badge_count_matches_active_flags_across_both_bytes() -> void:
 	assert_eq(kanto_only.badge_count(), 1)
 
 
+## pokegold's engine flag table has no ENGINE_MOBILE_SYSTEM entry ahead of the
+## badge section, so every pokegold badge sits one index lower than the same
+## symbol in pokecrystal's constants/engine_flags.asm. A Crystal-numbered
+## ENGINE_ZEPHYRBADGE write must not count as a Gold/Silver badge, and a
+## Gold/Silver-numbered write (one lower) must not count as a Crystal badge.
+func test_badge_count_uses_the_gold_silver_table_when_requested() -> void:
+	## Index 42 (ENGINE_EARTHBADGE) is the Crystal table's Kanto endpoint and
+	## falls outside the Gold/Silver table (26-41), so it isolates the
+	## Crystal-only end of the one-index shift.
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.ENGINE_EARTHBADGE)
+	assert_eq(state.badge_count(true), 1)
+	assert_eq(state.badge_count(false), 0)
+
+	## Index 26 (ENGINE_ZEPHYRBADGE - 1) is the Gold/Silver table's Johto
+	## endpoint and falls outside the Crystal table (27-42), isolating the
+	## Gold/Silver-only end.
+	var gold_state := Gen2WorldState.new()
+	gold_state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE - 1)
+	assert_eq(gold_state.badge_count(false), 1)
+	assert_eq(gold_state.badge_count(true), 0)
+
+	for flag: int in Gen2WorldState.BADGE_ENGINE_FLAGS_GOLD_SILVER:
+		gold_state.set_engine_flag(flag)
+	assert_eq(gold_state.badge_count(false), 16)
+
+
+## Same one-index shift for the Goldenrod Underground merchant flag: pinned
+## pokecrystal has it at 86, pinned pokegold at 85.
+func test_bargain_merchant_closed_uses_the_gold_silver_flag_when_requested() -> void:
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+	assert_true(state.bargain_merchant_closed(true))
+	assert_false(state.bargain_merchant_closed(false))
+
+	var gold_state := Gen2WorldState.new()
+	gold_state.set_engine_flag(
+		Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER
+	)
+	assert_true(gold_state.bargain_merchant_closed(false))
+	assert_false(gold_state.bargain_merchant_closed(true))
+
+
+func test_reset_daily_flags_clears_the_matching_profiles_merchant_flag_only() -> void:
+	var gold_state := Gen2WorldState.new()
+	gold_state.set_engine_flag(
+		Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER
+	)
+	assert_false(gold_state.reset_daily_flags(true))
+	assert_true(gold_state.bargain_merchant_closed(false))
+	assert_true(gold_state.reset_daily_flags(false))
+	assert_false(gold_state.bargain_merchant_closed(false))
+
+
+## Gen2WorldState.is_crystal_profile mirrors
+## Gen2WorldScriptRunner._crystal_commands(): only a verified Gold or Silver
+## cache is treated as the shorter engine flag table.
+func test_is_crystal_profile_matches_the_game_id_and_defaults_true_for_no_data() -> void:
+	assert_true(Gen2WorldState.is_crystal_profile(null))
+	var crystal_data := GameData.new()
+	crystal_data.id = &"crystal"
+	assert_true(Gen2WorldState.is_crystal_profile(crystal_data))
+	var gold_data := GameData.new()
+	gold_data.id = &"gold"
+	assert_false(Gen2WorldState.is_crystal_profile(gold_data))
+	var silver_data := GameData.new()
+	silver_data.id = &"silver"
+	assert_false(Gen2WorldState.is_crystal_profile(silver_data))
+
+
 func test_badge_flags_survive_round_trip_and_daily_or_map_reload_resets() -> void:
 	var state := Gen2WorldState.new()
 	state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)

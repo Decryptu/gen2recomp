@@ -14,14 +14,22 @@ const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
 const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
 ## table to ENGINE_CREDITS_SKIP, and the Goldenrod bargain merchant uses the
-## daily ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED flag.
+## daily ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED flag. Both names are
+## Crystal indices, called out explicitly because pokegold's shorter engine
+## flag table (see the badge comment below) puts the same symbol one index
+## lower there.
 const ENGINE_CREDITS_SKIP: int = 15
 const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
-const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 43
-const DAILY_ENGINE_FLAGS: Array[int] = [ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED]
+const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
+const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
 
 ## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array;
-## VAR_BADGES counts both bytes together, not Johto alone.
+## VAR_BADGES counts both bytes together, not Johto alone. These are Crystal
+## indices. pokegold's constants/engine_flags.asm has no ENGINE_MOBILE_SYSTEM
+## entry, which pokecrystal inserts ahead of the badge section, so every
+## pokegold badge (and the merchant flag above) sits exactly one index lower
+## than the same symbol here; `_GetVarAction.CountBadges` and the flag order
+## are otherwise identical between the two games.
 const ENGINE_ZEPHYRBADGE: int = 27
 const ENGINE_HIVEBADGE: int = 28
 const ENGINE_PLAINBADGE: int = 29
@@ -43,6 +51,12 @@ const BADGE_ENGINE_FLAGS: Array[int] = [
 	ENGINE_MINERALBADGE, ENGINE_STORMBADGE, ENGINE_GLACIERBADGE, ENGINE_RISINGBADGE,
 	ENGINE_BOULDERBADGE, ENGINE_CASCADEBADGE, ENGINE_THUNDERBADGE, ENGINE_RAINBOWBADGE,
 	ENGINE_SOULBADGE, ENGINE_MARSHBADGE, ENGINE_VOLCANOBADGE, ENGINE_EARTHBADGE,
+]
+const BADGE_ENGINE_FLAGS_GOLD_SILVER: Array[int] = [
+	ENGINE_ZEPHYRBADGE - 1, ENGINE_HIVEBADGE - 1, ENGINE_PLAINBADGE - 1, ENGINE_FOGBADGE - 1,
+	ENGINE_MINERALBADGE - 1, ENGINE_STORMBADGE - 1, ENGINE_GLACIERBADGE - 1, ENGINE_RISINGBADGE - 1,
+	ENGINE_BOULDERBADGE - 1, ENGINE_CASCADEBADGE - 1, ENGINE_THUNDERBADGE - 1, ENGINE_RAINBOWBADGE - 1,
+	ENGINE_SOULBADGE - 1, ENGINE_MARSHBADGE - 1, ENGINE_VOLCANOBADGE - 1, ENGINE_EARTHBADGE - 1,
 ]
 
 var _event_flags: Dictionary = {}
@@ -252,14 +266,17 @@ func set_hall_of_fame(active: bool = true) -> void:
 	set_engine_flag(ENGINE_HALL_OF_FAME, active)
 
 
-func bargain_merchant_closed() -> bool:
-	return is_engine_flag_active(ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+## `crystal` selects which game's engine flag table this state's raw flag
+## numbers were written against; pass [method is_crystal_profile] with the
+## active GameData. Defaults to Crystal, matching every existing caller.
+func bargain_merchant_closed(crystal: bool = true) -> bool:
+	return is_engine_flag_active(_merchant_closed_flag(crystal))
 
 
 ## Mirrors _GetVarAction's .CountBadges: a popcount over both badge bytes.
-func badge_count() -> int:
+func badge_count(crystal: bool = true) -> int:
 	var count: int = 0
-	for flag: int in BADGE_ENGINE_FLAGS:
+	for flag: int in (BADGE_ENGINE_FLAGS if crystal else BADGE_ENGINE_FLAGS_GOLD_SILVER):
 		if is_engine_flag_active(flag):
 			count += 1
 	return count
@@ -267,9 +284,9 @@ func badge_count() -> int:
 
 ## Clears only source daily engine flags. Story flags such as Hall of Fame
 ## survive the day boundary.
-func reset_daily_flags() -> bool:
+func reset_daily_flags(crystal: bool = true) -> bool:
 	var did_change: bool = false
-	for flag: int in DAILY_ENGINE_FLAGS:
+	for flag: int in [_merchant_closed_flag(crystal)]:
 		if not _engine_flags.has(flag):
 			continue
 		_engine_flags.erase(flag)
@@ -277,6 +294,20 @@ func reset_daily_flags() -> bool:
 	if did_change:
 		changed.emit()
 	return did_change
+
+
+func _merchant_closed_flag(crystal: bool) -> int:
+	return ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED if crystal \
+		else ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER
+
+
+## True unless [param data] is a verified Gold or Silver cache, matching
+## Gen2WorldScriptRunner._crystal_commands(). Both engine flag tables and
+## `_GetVarAction.CountBadges` agree on everything except this table's
+## offset, so every profile-dependent flag lookup here keys off the same
+## question the script command-width split already answers.
+static func is_crystal_profile(data: GameData) -> bool:
+	return data == null or (data.id != &"gold" and data.id != &"silver")
 
 
 ## The source resets its first eight event flags whenever a map reloads. These
