@@ -2,9 +2,11 @@
 .godot/
 /android/
 
-# Build/export output
+# Build/export output. export_presets.cfg is tracked; Godot keeps keystore and
+# signing passwords in export_credentials.cfg, which is not.
 /builds/
 /export/
+export_credentials.cfg
 
 # macOS
 .DS_Store

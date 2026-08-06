@@ -41,3 +41,7 @@ joypads/ignore_joypad_on_unfocused_application=true
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+; Required to export for arm64: macOS universal, Android and iOS all refuse
+; without it. Nothing here ships a compressed texture, so it costs no import
+; time; it is the format the exporters check for, not one this project uses.
+textures/vram_compression/import_etc2_astc=true
