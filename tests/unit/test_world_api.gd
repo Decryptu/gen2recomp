@@ -1317,6 +1317,59 @@ func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
 	))
 
 
+func test_the_source_random_command_rolls_on_the_injected_generator() -> void:
+	# RANDOM 4, then set one of four event flags by the value it rolled.
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6100": [
+			0x17, 4,
+			0x06, 0, 0x10, 0x61,
+			0x06, 1, 0x20, 0x61,
+			0x06, 2, 0x30, 0x61,
+			0x33, 103, 0, 0x91,
+		],
+		"48:6110": [0x33, 100, 0, 0x91],
+		"48:6120": [0x33, 101, 0, 0x91],
+		"48:6130": [0x33, 102, 0, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+
+	# A seeded generator has to reproduce the branch. Before this was injected the
+	# command rolled on the engine's global generator, which no seed can reach, so
+	# a script that branches on RANDOM could not be pinned by a test or replayed.
+	var rolled: Array[int] = []
+	for attempt: int in 2:
+		var random := RandomNumberGenerator.new()
+		random.seed = 20250806
+		var state := Gen2WorldState.new()
+		var runner := Gen2WorldScriptRunner.begin(
+			data, state, {"kind": &"test", "bank": 48, "script": 0x6100},
+			Callable(), random
+		)
+		assert_eq(runner.advance()["status"], &"complete")
+		for flag: int in [100, 101, 102, 103]:
+			if state.is_event_flag_active(flag):
+				rolled.append(flag)
+	assert_eq(rolled.size(), 2)
+	assert_eq(rolled[0], rolled[1])
+
+	# And the roll has to be a roll: over many seeds it must not always land in
+	# the same branch.
+	var seen: Dictionary = {}
+	for attempt: int in 40:
+		var random := RandomNumberGenerator.new()
+		random.seed = attempt
+		var state := Gen2WorldState.new()
+		var runner := Gen2WorldScriptRunner.begin(
+			data, state, {"kind": &"test", "bank": 48, "script": 0x6100},
+			Callable(), random
+		)
+		runner.advance()
+		for flag: int in [100, 101, 102, 103]:
+			if state.is_event_flag_active(flag):
+				seen[flag] = true
+	assert_gt(seen.size(), 1, "RANDOM must reach more than one branch")
+
+
 func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new({}, {"1:1": 3}, {4: 2}, {0: 100}, 7, {9: true}, 5, Vector2i(1, 1), 0xD3, [], true)

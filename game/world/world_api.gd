@@ -56,6 +56,10 @@ var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
 ## Supplies the roaming jumps performed during map setup. A caller that needs a
 ## reproducible route sets its own generator; otherwise map setup randomizes.
 var schedule_random: RandomNumberGenerator = null
+## Supplies the source RANDOM command and the phone routines that roll. Kept
+## apart from schedule_random so seeding one route does not shift the other.
+## A null generator leaves each invocation to randomize its own.
+var script_random: RandomNumberGenerator = null
 var _last_schedule: Dictionary = {}
 var _phone_ring: Gen2WorldPhoneRing = null
 var _phone_ring_request: Dictionary = {}
@@ -947,7 +951,8 @@ func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 				break
 			var request: Dictionary = _script_queue.pop_front()
 			_active_script = Gen2WorldScriptRunner.begin(
-				data, state, request, Callable(self, "_validate_script_warp")
+				data, state, request, Callable(self, "_validate_script_warp"),
+				script_random
 			)
 		var result: Dictionary = _active_script.advance(accept, selected_choice)
 		accept = false
@@ -1020,7 +1025,8 @@ func _drain_script_queue() -> Array:
 	while _active_script == null and not _script_queue.is_empty():
 		var request: Dictionary = _script_queue.pop_front()
 		_active_script = Gen2WorldScriptRunner.begin(
-			data, state, request, Callable(self, "_validate_script_warp")
+			data, state, request, Callable(self, "_validate_script_warp"),
+			script_random
 		)
 		var next: Dictionary = _active_script.advance()
 		if StringName(next.get("status", &"")) == &"waiting":

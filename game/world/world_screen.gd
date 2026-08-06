@@ -112,6 +112,7 @@ func _build_world() -> void:
 		_encounter_random.randomize()
 
 	_world.schedule_random = _encounter_random
+	_world.script_random = _encounter_random
 	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -1087,7 +1088,10 @@ func _handle_audio_request(request: Dictionary) -> Array:
 	var record: Dictionary = resolved.get("data", {}).get("audio", {})
 	if kind == &"music_fadeout":
 		record["fade_time"] = int(request.get("values", {}).get("fade_time", 0))
-	var playback: Dictionary = _audio_player.play_record(record, kind, _audio_assets())
+	var playback: Dictionary = _audio_player.play_record(
+		record, kind, _audio_assets(),
+		bool(request.get("values", {}).get("restart", false))
+	)
 	if not bool(playback.get("ok", false)):
 		_script_prompt = "Audio unavailable: %s" % String(playback.get("reason", "unknown"))
 		_refresh_labels()

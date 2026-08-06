@@ -53,3 +53,4 @@ theme_override_colors/font_color = Color(0.619608, 0.67451, 0.752941, 1)
 theme_override_font_sizes/font_size = 14
 text = ""
 horizontal_alignment = 1
+autowrap_mode = 3
