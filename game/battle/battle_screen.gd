@@ -93,6 +93,7 @@ var _save_slot: int = -1
 var _save_written: bool = false
 var _source_save: Gen2SaveData = null
 var _world_battle_active: bool = false
+var _world_battle_tutorial: bool = false
 var _world_battle_request: Dictionary = {}
 var _world_battle_completion_sent: bool = false
 var _world_battle_terminal_text_shown: bool = false
@@ -205,6 +206,7 @@ func is_ready() -> bool:
 func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: int = 5) -> void:
 	_reset_capture_state()
 	_world_battle_active = false
+	_world_battle_tutorial = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
 	_world_battle_terminal_text_shown = false
@@ -244,6 +246,7 @@ func show_trainer(
 ) -> void:
 	_reset_capture_state()
 	_world_battle_active = false
+	_world_battle_tutorial = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
 	_world_battle_terminal_text_shown = false
@@ -291,6 +294,7 @@ func show_trainer(
 func show_saved_party(save: Gen2SaveData) -> bool:
 	_reset_capture_state()
 	_world_battle_active = false
+	_world_battle_tutorial = false
 	_world_battle_request = {}
 	_world_battle_completion_sent = false
 	_world_battle_terminal_text_shown = false
@@ -346,6 +350,7 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 
 	_world_battle_active = true
 	_world_battle_request = (prepared.get("request", {}) as Dictionary).duplicate(true)
+	_world_battle_tutorial = bool(_world_battle_request.get("tutorial", false))
 	_world_battle_completion_sent = false
 	_world_battle_terminal_text_shown = false
 	_world_battle_recovery_shown = false
@@ -370,7 +375,10 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	)
 	_refresh_exp_bar()
 
-	if bool(prepared.get("trainer_battle", false)):
+	if _world_battle_tutorial:
+		show_message("Gotcha! %s was caught!" % _name_of(_enemy))
+		call_deferred("_finish_world_catch_tutorial")
+	elif bool(prepared.get("trainer_battle", false)):
 		var trainer: Dictionary = _data.trainer_party(
 			int(prepared.get("trainer_class", 0)), int(prepared.get("trainer_index", 0))
 		)
@@ -381,6 +389,24 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	else:
 		_announce()
 	return true
+
+
+func _finish_world_catch_tutorial() -> void:
+	if not _world_battle_active or not _world_battle_tutorial \
+		or _world_battle_completion_sent:
+		return
+	_world_battle_completion_sent = true
+	battle_finished.emit({
+		"ok": true,
+		"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
+		"request": _world_battle_request.duplicate(true),
+		"capture": {
+			"species": _enemy,
+			"ball": Gen2WorldPartyHost.ITEM_POKE_BALL,
+			"tutorial": true,
+			"persistent": false,
+		},
+	})
 
 
 ## Public screenshot driver for the overworld battle recovery boundary. It
@@ -759,6 +785,8 @@ func advance() -> void:
 	if _box.advance():
 		return
 	if _capture_selecting or _capture_waiting:
+		return
+	if _world_battle_tutorial:
 		return
 	if not _capture_messages.is_empty():
 		_show_next_capture_message()

@@ -1,6 +1,9 @@
 class_name Gen2WorldImporter
 extends RefCounted
 
+const OBJECTTYPE_TRAINER: int = 2
+const TRAINER_RECORD_SIZE: int = 12
+
 ## Imports the map table, map attributes, map events, tileset tables, overworld
 ## object graphics and addressable overworld tile strips for a verified
 ## Generation 2 cartridge.
@@ -504,6 +507,19 @@ static func _read_map(
 		return scripts_result
 	for source: String in ["coord_events", "bg_events", "objects"]:
 		for event: Dictionary in event_result[source]:
+			if source == "objects" and event.has("trainer"):
+				var trainer: Dictionary = event.get("trainer", {})
+				_collect_script(
+					rom, scripts_bank, int(trainer.get("after_script", 0)),
+					script_data, text_data, movement_data
+				)
+				for text_key: String in ["seen_text", "win_text", "loss_text"]:
+					var text_pointer: Dictionary = trainer.get(text_key, {})
+					_collect_text(
+						rom, int(text_pointer.get("bank", scripts_bank)),
+						int(text_pointer.get("address", 0)), text_data
+					)
+				continue
 			_collect_script(
 				rom, scripts_bank, int(event.get("script", 0)),
 				script_data, text_data, movement_data
@@ -698,7 +714,12 @@ static func _read_events(
 		var event_flag: int = rom.u16le(at + 11)
 		if event_flag == 0xFFFF:
 			event_flag = -1
-		objects.append({
+		var object_type: int = palette_type & 0x0F
+		var object_script: int = rom.u16le(at + 9)
+		var trainer: Dictionary = {}
+		if object_type == OBJECTTYPE_TRAINER:
+			trainer = _read_trainer_record(rom, bank, object_script)
+		var object: Dictionary = {
 			"sprite": rom.u8(at),
 			"x": object_x,
 			"y": object_y,
@@ -708,11 +729,14 @@ static func _read_events(
 			"hour_1": hour_1,
 			"hour_2": hour_2,
 			"palette": palette_type >> 4,
-			"object_type": palette_type & 0x0F,
+			"object_type": object_type,
 			"sight_range": rom.u8(at + 8),
-			"script": rom.u16le(at + 9),
+			"script": object_script,
 			"event_flag": event_flag,
-		})
+		}
+		if not trainer.is_empty():
+			object["trainer"] = trainer
+		objects.append(object)
 		at += RomLayout.MAP_OBJECT_EVENT_SIZE
 
 	return {
@@ -721,6 +745,27 @@ static func _read_events(
 		"coord_events": coord_events,
 		"bg_events": bg_events,
 		"objects": objects,
+}
+
+
+## Decodes the source trainer macro referenced by an OBJECTTYPE_TRAINER event.
+## The object pointer is not executable script: it names a 12-byte record whose
+## final pointer enters the trainer's after-battle script.
+static func _read_trainer_record(rom: RomFile, bank: int, address: int) -> Dictionary:
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0 or not rom.in_bounds(offset, TRAINER_RECORD_SIZE):
+		return {}
+	var event_flag: int = rom.u16le(offset)
+	if event_flag == 0xFFFF:
+		event_flag = -1
+	return {
+		"event_flag": event_flag,
+		"trainer_group": rom.u8(offset + 2),
+		"trainer_id": rom.u8(offset + 3),
+		"seen_text": {"bank": bank, "address": rom.u16le(offset + 4)},
+		"win_text": {"bank": bank, "address": rom.u16le(offset + 6)},
+		"loss_text": {"bank": bank, "address": rom.u16le(offset + 8)},
+		"after_script": address + TRAINER_RECORD_SIZE,
 	}
 
 

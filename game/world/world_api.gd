@@ -1063,7 +1063,7 @@ func _enqueue_script_events(events: Array) -> void:
 		var script_address: int = _script_address_for_event(event)
 		if script_address <= 0:
 			continue
-		_enqueue_script({
+		var request: Dictionary = {
 			"kind": event.get("kind", &""),
 			"map_group": current_map.group,
 			"map_number": current_map.number,
@@ -1071,7 +1071,43 @@ func _enqueue_script_events(events: Array) -> void:
 			"bank": bank,
 			"script": script_address,
 			"event": event.duplicate(true),
-		})
+		}
+		var trainer_request: Dictionary = _trainer_request_for_event(event)
+		if not trainer_request.is_empty():
+			request = trainer_request
+		_enqueue_script(request)
+
+
+func _trainer_request_for_event(event: Dictionary) -> Dictionary:
+	if event.get("kind", &"") != &"objects" or current_map == null:
+		return {}
+	var object_index: int = int(event.get("object_index", -1))
+	if object_index < 0 or object_index >= objects.size():
+		return {}
+	var object: Gen2WorldObject = objects[object_index]
+	if object.object_type != Gen2WorldObject.OBJECTTYPE_TRAINER \
+		or object.trainer_data.is_empty():
+		return {}
+	var trainer: Dictionary = object.trainer_data.duplicate(true)
+	var beaten: bool = object.trainer_flag_active(state)
+	var script_address: int = int(trainer.get("after_script", 0)) if beaten \
+		else int(event.get("script", object.event_script))
+	if script_address <= 0:
+		return {}
+	var request: Dictionary = {
+		"kind": &"trainer",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": object.cell,
+		"bank": int(current_map.events.get("bank", 0)),
+		"script": script_address,
+		"object_index": object.index,
+		"event": event.duplicate(true),
+		"trainer": trainer,
+		"trainer_phase": &"after" if beaten else &"initial",
+	}
+	request["event"]["trainer"] = trainer.duplicate(true)
+	return request
 
 
 func _bg_event_interacts(event: Dictionary) -> bool:
@@ -2038,7 +2074,7 @@ func _find_sight_request() -> Dictionary:
 			or object.object_type != Gen2WorldObject.OBJECTTYPE_TRAINER \
 			or object.sight_range <= 0 or object.event_script <= 0:
 			continue
-		if object.event_flag_active(state):
+		if object.event_flag_active(state) or object.trainer_flag_active(state):
 			continue
 		var sight: Dictionary = _sight_distance(object)
 		if sight.is_empty() or int(sight["distance"]) > object.sight_range:
@@ -2049,18 +2085,22 @@ func _find_sight_request() -> Dictionary:
 		event["kind"] = &"objects"
 		event["object_index"] = object.index
 		event["trigger"] = &"sight"
-		return {
-			"kind": &"sight",
-			"map_group": current_map.group,
-			"map_number": current_map.number,
-			"cell": object.cell,
-			"bank": bank,
-			"script": object.event_script,
-			"object_index": object.index,
-			"event": event,
-			"distance": int(sight["distance"]),
-			"direction": sight["direction"],
-		}
+		var request: Dictionary = _trainer_request_for_event(event)
+		if request.is_empty():
+			request = {
+				"kind": &"sight",
+				"map_group": current_map.group,
+				"map_number": current_map.number,
+				"cell": object.cell,
+				"bank": bank,
+				"script": object.event_script,
+				"object_index": object.index,
+				"event": event,
+			}
+		request["kind"] = &"sight"
+		request["distance"] = int(sight["distance"])
+		request["direction"] = sight["direction"]
+		return request
 	return {}
 
 

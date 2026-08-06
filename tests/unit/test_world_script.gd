@@ -47,6 +47,30 @@ func test_command_parser_reads_profile_specific_object_commands() -> void:
 	assert_eq(crystal_coins["string_buffer_2"], 5)
 
 
+func test_crystal_trainer_and_tutorial_commands_use_the_pinned_layout() -> void:
+	var load_temp: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x5C]), 0, true
+	)
+	assert_true(load_temp["ok"])
+	assert_eq(load_temp["name"], &"loadtemptrainer")
+	assert_eq(load_temp["width"], 1)
+
+	var load_wild: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x5D, 16, 5]), 0, true
+	)
+	assert_true(load_wild["ok"])
+	assert_eq(load_wild["name"], &"loadwildmon")
+	assert_eq(load_wild["pokemon"], 16)
+	assert_eq(load_wild["level"], 5)
+
+	var tutorial: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x61, 3]), 0, true
+	)
+	assert_true(tutorial["ok"])
+	assert_eq(tutorial["name"], &"catchtutorial")
+	assert_eq(tutorial["value"], 3)
+
+
 func test_unknown_and_truncated_commands_are_structured_failures() -> void:
 	var unknown: Dictionary = Gen2WorldScript.command_at(PackedByteArray([0xFE]), 0)
 	assert_false(unknown["ok"])

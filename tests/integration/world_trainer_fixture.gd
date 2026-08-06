@@ -16,6 +16,7 @@ const MAP_HEIGHT_BLOCKS: int = 5
 const MAP_WIDTH_CELLS: int = MAP_WIDTH_BLOCKS * 2
 const MAP_HEIGHT_CELLS: int = MAP_HEIGHT_BLOCKS * 2
 const TRAINER_SCRIPT: int = 0x6100
+const TUTORIAL_SCRIPT: int = 0x6110
 const WIN_TEXT: int = 0x7000
 const LOSS_TEXT: int = 0x7010
 const TRAINER_FLAG: int = 8
@@ -108,7 +109,11 @@ static func _write_world(directory: String) -> void:
 		"collision_width": MAP_WIDTH_CELLS,
 		"collision_height": MAP_HEIGHT_CELLS,
 		"scripts": {"bank": BANK, "callbacks": []},
-		"events": {"bank": BANK, "objects": objects},
+		"events": {
+			"bank": BANK,
+			"coord_events": [{"scene": 0, "x": 4, "y": 5, "script": TUTORIAL_SCRIPT}],
+			"objects": objects,
+		},
 	}
 	var home_map: Dictionary = map.duplicate(true)
 	home_map["group"] = Gen2WorldSpawn.NEW_BARK_GROUP
@@ -158,8 +163,10 @@ static func _write_world(directory: String) -> void:
 		0x60,
 		0x91,
 	]
+	var tutorial_script: Array = [0x5D, TRAINER_SPECIES, 5, 0x61, 3, 0x91]
 	RomCache.write_json(RomCache.world_scripts_path(directory), {
 		Gen2WorldScript.pointer_key(BANK, TRAINER_SCRIPT): script,
+		Gen2WorldScript.pointer_key(BANK, TUTORIAL_SCRIPT): tutorial_script,
 	})
 	RomCache.write_json(RomCache.world_text_path(directory), {
 		Gen2WorldScript.pointer_key(BANK, WIN_TEXT): _text("YOU WON."),

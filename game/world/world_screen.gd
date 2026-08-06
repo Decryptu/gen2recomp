@@ -723,12 +723,14 @@ func _handle_fishing_result(result: Dictionary) -> void:
 func _start_battle_request(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
+	var values: Dictionary = request.get("values", {})
+	var tutorial: bool = bool(values.get("tutorial", false))
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	_active_battle_save = save
 	_active_battle_persist = save != null and _injected_save == null
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
-	if _world != null:
+	if _world != null and not tutorial:
 		host.set_capture_balls(
 			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
 		)
@@ -738,7 +740,8 @@ func _start_battle_request(request: Dictionary) -> void:
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
 	host.battle_finished.connect(_on_battle_finished)
-	host.capture_requested.connect(_on_capture_requested)
+	if not tutorial:
+		host.capture_requested.connect(_on_capture_requested)
 	_battle_host = host
 	_script_prompt = "Battle in progress"
 	_refresh_labels()
@@ -934,6 +937,9 @@ func _show_script_results(results: Array) -> void:
 			elif event_type == &"runtime_request":
 				var request: Dictionary = event.get("request", {})
 				if StringName(request.get("kind", &"")) == &"battle_requested":
+					_start_battle_request(request)
+					break
+				if StringName(request.get("kind", &"")) == &"catch_tutorial_requested":
 					_start_battle_request(request)
 					break
 				if StringName(request.get("kind", &"")) == &"swarm_requested":
