@@ -188,7 +188,8 @@ Development scenes:
   `preview_battle_request()`, `preview_world_battle_loss()`,
   `preview_capture()` and `preview_party_transaction()` exercise their live
   paths. The API also exposes swarm/roaming updates, repel countdowns and a
-  JSON-safe snapshot. The hint line reports imported service counts.
+  JSON-safe snapshot. `V` cycles the registered world renderers. The hint line
+  reports imported service counts.
 
   `tools/preview_world_services.gd` captures the production mart overlay with
   the deterministic integration cache. `tools/preview_fishing.gd` captures
@@ -256,6 +257,7 @@ marts, phone calls and audio requests.
 | `tools/` | Headless developer scripts |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
 | `game/mods/` | Mod manifest and host |
+| `mods/examples/` | Example mods to copy into `user://mods/` |
 | `docs/` | Contributor notes |
 
 ## Platforms

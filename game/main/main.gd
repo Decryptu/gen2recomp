@@ -22,6 +22,7 @@ var _status_detail: Label = null
 var _progress: ProgressBar = null
 var _progress_label: Label = null
 var _file_dialog: FileDialog = null
+var _mods_label: Label = null
 var _cards: Dictionary = {}
 var _selected_game_id: StringName = &""
 var _importing: bool = false
@@ -128,10 +129,18 @@ func _build_ui() -> void:
 	status_box.add_child(_progress_label)
 
 	var footer := Label.new()
-	footer.text = "Choose a cartridge, then create or load a validated player save. Mods are not available yet."
+	footer.text = "Choose a cartridge, then create or load a validated player save."
 	footer.add_theme_color_override("font_color", MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(footer)
+
+	_mods_label = Label.new()
+	_mods_label.add_theme_color_override("font_color", MUTED)
+	_mods_label.add_theme_font_size_override("font_size", 13)
+	_mods_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mods_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mods_label.text = _mods_summary()
+	content.add_child(_mods_label)
 
 	_file_dialog = FileDialog.new()
 	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -358,6 +367,26 @@ func _save_slot_detail(game_id: StringName, data: GameData) -> String:
 	if incompatible > 0:
 		detail += ", %d incompatible" % incompatible
 	return detail
+
+
+## What the mod host found, said in one line. A refused mod is named with its
+## reason rather than silently missing, which is the whole point of reading a
+## manifest without running the mod behind it.
+func _mods_summary() -> String:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var names: Array[String] = []
+	for manifest: Gen2ModManifest in host.manifests():
+		names.append(manifest.name)
+	var failures: Array = host.failures()
+	if names.is_empty() and failures.is_empty():
+		return "No mods installed. Put one in %s to load it at start." % Gen2ModHost.ROOT
+	var line: String = "Mods: %s" % (", ".join(names) if not names.is_empty() else "none loaded")
+	for failure: Dictionary in failures:
+		line += "   %s refused (%s)" % [
+			failure.get("directory", failure.get("id", "?")),
+			failure.get("reason", "unknown"),
+		]
+	return line
 
 
 func _print_allowlist() -> void:

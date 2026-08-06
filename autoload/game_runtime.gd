@@ -16,6 +16,38 @@ var selected_save_slot: int = -1
 
 var _save: Gen2SaveData = null
 var _save_key: String = ""
+var _loaded_mods: Array = []
+
+
+## Loads installed mods before any screen exists.
+##
+## A mod registers what it provides and returns, so this has to happen before the
+## first screen asks the host for one: a renderer registered after the overworld
+## was built would not be offered until the next map. Loading here also means a
+## broken mod is reported while there is still a launcher to report it in.
+func _ready() -> void:
+	load_mods()
+
+
+## Discovers and runs every mod under [constant Gen2ModHost.ROOT], returning the
+## ids that loaded. The directory is created when it is absent so a player has
+## somewhere to put one without being told the path.
+func load_mods() -> Array:
+	if not DirAccess.dir_exists_absolute(Gen2ModHost.ROOT):
+		DirAccess.make_dir_recursive_absolute(Gen2ModHost.ROOT)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover()
+	_loaded_mods = host.load_discovered()
+	for failure: Dictionary in host.failures():
+		push_warning("Mod %s was not loaded: %s (%s)" % [
+			failure.get("directory", failure.get("id", "?")),
+			failure.get("reason", "unknown"), failure.get("detail", ""),
+		])
+	return _loaded_mods
+
+
+func loaded_mods() -> Array:
+	return _loaded_mods.duplicate()
 
 
 func select_game(game_id: StringName) -> bool:

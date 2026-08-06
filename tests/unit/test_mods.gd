@@ -153,6 +153,50 @@ func register(host, manifest) -> void:
 	built_in.free()
 
 
+func test_a_renderer_choosing_the_native_layer_is_not_confined_to_hardware_pixels() -> void:
+	# A 3D or HD view cannot be drawn in a 160x144 buffer and magnified, so the
+	# screen has to be told which of its two layers a renderer belongs on.
+	var hardware := Gen2WorldRenderer.new()
+	assert_true(Gen2ModHost.renderer_uses_hardware_viewport(hardware))
+	hardware.free()
+
+	var script := GDScript.new()
+	script.source_code = """extends Node2D
+
+func set_world(_world, _animation = null) -> void:
+	pass
+
+func set_time_of_day(_time_of_day: int) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+
+func refresh_animation() -> void:
+	pass
+
+func uses_hardware_viewport() -> bool:
+	return false
+"""
+	script.reload()
+	assert_true(Gen2ModHost.instance().register_world_renderer(&"native", script)["ok"])
+	var native: Node = script.new()
+	assert_false(Gen2ModHost.renderer_uses_hardware_viewport(native))
+	native.free()
+
+
+func test_manifests_survive_reading_the_failures_recorded_after_discovery() -> void:
+	_write_manifest(_valid_manifest())
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	host.load_discovered()
+	# The entry script was never written, so loading failed. Listing what is
+	# installed must not discover again and drop that.
+	assert_eq(host.manifests().size(), 1)
+	assert_eq(host.failures().size(), 1)
+	assert_eq(host.manifests().size(), 1)
+
+
 func test_a_broken_mod_is_reported_and_does_not_stop_the_others() -> void:
 	_write_manifest(_valid_manifest())
 	# Declared entry never written, so this mod cannot load.
