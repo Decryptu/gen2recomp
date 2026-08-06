@@ -490,6 +490,113 @@ func _story_path(data: GameData) -> Dictionary:
 	})
 	if not bool(balls_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Aide Poke Ball event did not finish"}
+
+	# Route 30 and Route 31 cross one-way ledges the ordinary walkable-cell
+	# pathfinding this tool uses cannot cross (ledge hops are not a modeled
+	# movement type yet). The badge slice this preview exists to exercise is
+	# the Pokemon Center and Violet Gym scripts, not that intervening terrain,
+	# so the world reopens directly in Violet City on the same mutable state
+	# rather than attempting to walk a route it cannot path through.
+	var violet_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 10, 5, Vector2i(31, 25), world.state)
+	if violet_world == null:
+		return {"ok": false, "path": path, "reason": "missing Violet City map"}
+	world = violet_world
+	var violet_entry: Array = world.dispatch_map_entry()
+	var violet_entry_run: Dictionary = _drain_story(world, violet_entry, save, random, data)
+	path.append({
+		"step": "violet_city_entry",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": violet_entry_run,
+	})
+	if not bool(violet_entry_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Violet City entry did not finish"}
+
+	# The Pokemon Center nurse reads CheckPokerus and VAR_PARTYCOUNT, so the
+	# world needs the read-only party mirror before either can resolve.
+	world.set_party_summary(save.party.size(), false)
+
+	var pokecenter_warp: Dictionary = _warp_to(world.current_map, 10, 10)
+	if pokecenter_warp.is_empty():
+		return {"ok": false, "path": path, "reason": "missing Violet Pokemon Center warp"}
+	world.player_cell = Vector2i(pokecenter_warp["x"], pokecenter_warp["y"])
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Pokemon Center warp failed"}
+	var pokecenter_entry: Array = world.dispatch_map_entry()
+	var pokecenter_entry_run: Dictionary = _drain_story(world, pokecenter_entry, save, random, data)
+	path.append({
+		"step": "violet_pokecenter_entry",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": pokecenter_entry_run,
+	})
+
+	# VioletPokecenter1F places the nurse object at block (3,1); the counter
+	# tile directly below her at (3,2) is not walkable, so ordinary pathfinding
+	# cannot reach it. The player is placed there directly, the same
+	# known-limitation workaround already used for Route 30's ledge, rather
+	# than guessing an unverified counter-side approach.
+	world.player_cell = Vector2i(3, 2)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var nurse_events: Array = world.interact()
+	for mon: Gen2SaveMon in save.party:
+		mon.hp = 1
+	var nurse_run: Dictionary = _drain_story(world, nurse_events, save, random, data)
+	path.append({
+		"step": "violet_pokecenter_nurse",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": nurse_run,
+		"party_hp_after": _party_hp(save),
+	})
+	if not bool(nurse_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Pokemon Center nurse event did not finish"}
+
+	var pokecenter_exit: Dictionary = _warp_to(world.current_map, 10, 5)
+	if pokecenter_exit.is_empty():
+		return {"ok": false, "path": path, "reason": "missing Violet Pokemon Center exit warp"}
+	world.player_cell = Vector2i(pokecenter_exit["x"], pokecenter_exit["y"])
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Pokemon Center exit warp failed"}
+	path.append({"step": "violet_city_after_heal", "map": _map_value(world), "cell": _cell_value(world)})
+
+	var gym_warp: Dictionary = _warp_to(world.current_map, 10, 7)
+	if gym_warp.is_empty():
+		return {"ok": false, "path": path, "reason": "missing Violet Gym warp"}
+	world.player_cell = Vector2i(gym_warp["x"], gym_warp["y"])
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Gym warp failed"}
+	var gym_entry: Array = world.dispatch_map_entry()
+	var gym_entry_run: Dictionary = _drain_story(world, gym_entry, save, random, data)
+	path.append({
+		"step": "violet_gym_entry",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": gym_entry_run,
+	})
+
+	# Falkner is object 0 at block (5,1); facing up from (5,2) matches the
+	# source's faceplayer interaction cell.
+	var falkner_events: Array = []
+	var walked_to_falkner: Dictionary = _walk_to_story_cell(world, Vector2i(5, 2))
+	if bool(walked_to_falkner.get("ok", false)):
+		world.player_facing = Gen2WorldSprite.FACING_UP
+		falkner_events = world.interact()
+	var falkner_run: Dictionary = _drain_story(world, falkner_events, save, random, data)
+	path.append({
+		"step": "violet_gym_falkner",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": falkner_run,
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+	})
+	if not bool(falkner_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Falkner event did not finish"}
+
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
 		party_summary.append({
@@ -503,7 +610,15 @@ func _story_path(data: GameData) -> Dictionary:
 		"party": party_summary,
 		"event_flags": world.state.event_flags(),
 		"map_scenes": world.state.to_dict().get("map_scenes", {}),
+		"badge_count": world.state.badge_count(),
 	}
+
+
+func _party_hp(save: Gen2SaveData) -> Array:
+	var values: Array = []
+	for mon: Gen2SaveMon in save.party:
+		values.append(int(mon.hp))
+	return values
 
 
 func _drain_story(

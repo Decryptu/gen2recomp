@@ -446,6 +446,113 @@ func test_party_heal_special_restores_save_hp_status_and_move_pp() -> void:
 	assert_eq(healed_mon.pp[0], int(_data.move(BattleFixture.TACKLE).get("pp", 0)))
 
 
+## A trimmed PokecenterNurseScript: yesorno, HealParty, then HealMachineAnim,
+## matching the source's std script call order in
+## engine/events/std_scripts.asm.
+func test_nurse_script_heals_the_party_after_accepting_and_shows_the_heal_machine() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	var nurse_script: int = 0x6310
+	var done_script: int = 0x6320
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, nurse_script)] = [
+		Gen2WorldScript.YESORNO,
+		Gen2WorldScript.IFFALSE, done_script & 0xFF, (done_script >> 8) & 0xFF,
+		Gen2WorldScript.SPECIAL, 27, 0,
+		Gen2WorldScript.SETVAL, 0,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_HEAL_MACHINE_ANIM, 0,
+		Gen2WorldScript.END,
+	]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, done_script)] = [Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world(true)
+
+	var save: Gen2SaveData = _world_screen._injected_save
+	var mon: Gen2SaveMon = save.party[0]
+	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
+	mon.hp = 1
+	_world_screen._world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 4, "y": 5, "script": nurse_script,
+	}]
+
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(4, 5))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	assert_eq(waiting[0]["event"]["type"], &"choice")
+
+	var after_choice: Array = _world_screen._world.choose_script_input(0)
+	assert_eq(after_choice[0]["status"], &"waiting", JSON.stringify(after_choice))
+	assert_eq(_world_screen._world.pending_runtime_request()["kind"], &"party_heal_requested")
+
+	var complete: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world_screen._world, {}, save, false
+	)
+	assert_true(complete["ok"], JSON.stringify(complete))
+	var results: Array = complete.get("results", [])
+	assert_eq(results[results.size() - 1]["status"], &"complete", JSON.stringify(results))
+	assert_eq(
+		_event_value(results[results.size() - 1].get("events", []), &"presentation_special_applied", "kind"),
+		&"heal_machine_anim",
+		JSON.stringify(results),
+	)
+	var healed_mon: Gen2SaveMon = save.party[0]
+	assert_eq(healed_mon.hp, battle_mon.max_hp())
+
+
+func test_nurse_script_leaves_the_party_unhealed_on_refusal() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	var nurse_script: int = 0x6330
+	var done_script: int = 0x6340
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, nurse_script)] = [
+		Gen2WorldScript.YESORNO,
+		Gen2WorldScript.IFFALSE, done_script & 0xFF, (done_script >> 8) & 0xFF,
+		Gen2WorldScript.SPECIAL, 27, 0,
+		Gen2WorldScript.END,
+	]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, done_script)] = [Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world(true)
+
+	var save: Gen2SaveData = _world_screen._injected_save
+	var mon: Gen2SaveMon = save.party[0]
+	mon.hp = 1
+	_world_screen._world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 4, "y": 5, "script": nurse_script,
+	}]
+
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(4, 5))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+
+	var after_choice: Array = _world_screen._world.choose_script_input(1)
+	assert_eq(after_choice[0]["status"], &"complete", JSON.stringify(after_choice))
+	assert_true(_world_screen._world.pending_runtime_request().is_empty())
+	assert_eq(save.party[0].hp, 1)
+
+
+func test_zephyr_badge_survives_a_snapshot_save_and_reload() -> void:
+	await _open_world(true)
+	_world_screen._world.state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)
+	assert_eq(_world_screen._world.state.badge_count(), 1)
+
+	var save: Gen2SaveData = _world_screen._injected_save
+	save.world = _world_screen._world.snapshot()
+	var validation: Dictionary = Gen2SaveValidator.validate(save, _data)
+	assert_true(validation["ok"], validation["message"])
+
+	var round_trip: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_not_null(round_trip.world)
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(_data, round_trip.world)
+	assert_not_null(restored)
+	assert_eq(restored.state.badge_count(), 1)
+	assert_true(restored.state.is_engine_flag_active(Gen2WorldState.ENGINE_ZEPHYRBADGE))
+
+
+func _event_value(events: Array, event_type: StringName, key: String) -> Variant:
+	for event: Dictionary in events:
+		if event.get("type", &"") == event_type:
+			return event.get(key, null)
+	return null
+
+
 func test_new_game_uses_the_verified_home_spawn_and_source_start_money() -> void:
 	var save: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 0, "TEST", 155)
 	assert_not_null(save)

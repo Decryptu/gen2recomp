@@ -79,6 +79,33 @@ func test_players_house_pc_embeds_box_storage_and_resumes_the_waiting_script() -
 	assert_false(_world_screen._world.script_input_waiting())
 
 
+func test_pokemon_center_pc_embeds_box_storage_and_resumes_the_waiting_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts["48:6195"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_POKEMON_CENTER_PC, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	_world_screen._world.current_map.events["coord_events"][0]["script"] = 0x6195
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(_world_screen._world.pending_runtime_request()["values"]["mode"], &"pokemon_center")
+	_world_screen._show_script_results(waiting)
+	await get_tree().process_frame
+
+	var pc: Gen2BoxScreen = _world_screen._pc_host
+	assert_not_null(pc)
+	assert_eq(pc.box_snapshot()["boxes"].size(), Gen2SaveData.BOX_COUNT)
+
+	pc.close_embedded()
+	await get_tree().process_frame
+	assert_null(_world_screen._pc_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
 func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 	await _open_world()
 	await _queue_service()

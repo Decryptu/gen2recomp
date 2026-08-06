@@ -92,6 +92,11 @@ var _player_step_accumulator: float = 0.0
 ## Real time banked toward the next hardware frame of object movement, held
 ## beside the player's own accumulator so the two stay in phase after a stall.
 var _object_step_accumulator: float = 0.0
+## Read-only mirror of the selected save's party, refreshed by the screen
+## whenever the save or party changes. Gen2WorldAPI does not own a save, so
+## this stays optional; a script that reads it while empty fails rather than
+## reporting an invented zero. Never written by the script runner.
+var _party_summary: Dictionary = {}
 
 const PHONE_ENTRANCE_COLLISIONS: Array[int] = [0x71, 0x79, 0x7A, 0x7B]
 
@@ -273,6 +278,29 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 		return {"ok": false, "reason": &"invalid_movement_mode", "mode": mode}
 	movement_mode = mode
 	return {"ok": true, "mode": movement_mode}
+
+
+## Sets the read-only party mirror a queued script's VAR_PARTYCOUNT read and
+## CheckPokerus special consult. count must be non-negative; has_pokerus is the
+## source's own low-nibble-nonzero check across the whole party, computed by
+## the caller because Gen2WorldAPI does not read Gen2SaveMon fields directly.
+func set_party_summary(count: int, has_pokerus: bool) -> Dictionary:
+	if count < 0:
+		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
+	_party_summary = {"count": count, "pokerus": has_pokerus}
+	return {"ok": true}
+
+
+## Clears the mirror so a stale count cannot answer a later read after the
+## caller stops refreshing it (for example, closing the injected preview save).
+func clear_party_summary() -> void:
+	_party_summary = {}
+
+
+## Empty when no caller has set a summary yet; a script-visible read must fail
+## rather than invent a count in that case.
+func party_summary() -> Dictionary:
+	return _party_summary.duplicate()
 
 
 func available_fishing_rods() -> Array[StringName]:
@@ -1399,6 +1427,8 @@ func _enqueue_script(request: Dictionary) -> void:
 		request["environment"] = current_map.environment
 	if not request.has("facing"):
 		request["facing"] = player_facing
+	if not request.has("party") and not _party_summary.is_empty():
+		request["party"] = _party_summary.duplicate()
 	_script_queue.append(request)
 
 

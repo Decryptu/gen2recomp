@@ -20,6 +20,31 @@ const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 43
 const DAILY_ENGINE_FLAGS: Array[int] = [ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED]
 
+## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array;
+## VAR_BADGES counts both bytes together, not Johto alone.
+const ENGINE_ZEPHYRBADGE: int = 27
+const ENGINE_HIVEBADGE: int = 28
+const ENGINE_PLAINBADGE: int = 29
+const ENGINE_FOGBADGE: int = 30
+const ENGINE_MINERALBADGE: int = 31
+const ENGINE_STORMBADGE: int = 32
+const ENGINE_GLACIERBADGE: int = 33
+const ENGINE_RISINGBADGE: int = 34
+const ENGINE_BOULDERBADGE: int = 35
+const ENGINE_CASCADEBADGE: int = 36
+const ENGINE_THUNDERBADGE: int = 37
+const ENGINE_RAINBOWBADGE: int = 38
+const ENGINE_SOULBADGE: int = 39
+const ENGINE_MARSHBADGE: int = 40
+const ENGINE_VOLCANOBADGE: int = 41
+const ENGINE_EARTHBADGE: int = 42
+const BADGE_ENGINE_FLAGS: Array[int] = [
+	ENGINE_ZEPHYRBADGE, ENGINE_HIVEBADGE, ENGINE_PLAINBADGE, ENGINE_FOGBADGE,
+	ENGINE_MINERALBADGE, ENGINE_STORMBADGE, ENGINE_GLACIERBADGE, ENGINE_RISINGBADGE,
+	ENGINE_BOULDERBADGE, ENGINE_CASCADEBADGE, ENGINE_THUNDERBADGE, ENGINE_RAINBOWBADGE,
+	ENGINE_SOULBADGE, ENGINE_MARSHBADGE, ENGINE_VOLCANOBADGE, ENGINE_EARTHBADGE,
+]
+
 var _event_flags: Dictionary = {}
 var _engine_flags: Dictionary = {}
 var _map_scenes: Dictionary = {}
@@ -229,6 +254,15 @@ func set_hall_of_fame(active: bool = true) -> void:
 
 func bargain_merchant_closed() -> bool:
 	return is_engine_flag_active(ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+
+
+## Mirrors _GetVarAction's .CountBadges: a popcount over both badge bytes.
+func badge_count() -> int:
+	var count: int = 0
+	for flag: int in BADGE_ENGINE_FLAGS:
+		if is_engine_flag_active(flag):
+			count += 1
+	return count
 
 
 ## Clears only source daily engine flags. Story flags such as Hall of Fame
