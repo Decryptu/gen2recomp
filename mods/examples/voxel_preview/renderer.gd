@@ -239,7 +239,13 @@ func _rebuild_objects() -> void:
 		mesh.size = Vector3(0.6, 1.0, 0.6)
 		marker.mesh = mesh
 		marker.material_override = _material(Color("#f3c969"))
-		marker.position = _cell_center(object.cell) + Vector3(0.0, 0.5, 0.0)
+		# The same fractional offset the player box reads, from the object's
+		# own in-flight step, so a wandering NPC eases between cells here
+		# without this renderer knowing anything about hardware pixels.
+		var offset: Vector2 = object.step_offset_cells()
+		marker.position = _cell_center(object.cell) \
+			+ Vector3(offset.x, 0.0, offset.y) * CELL_SIZE \
+			+ Vector3(0.0, 0.5, 0.0)
 		_objects.add_child(marker)
 
 

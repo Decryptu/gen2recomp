@@ -18,6 +18,14 @@ const TRAINER_SLOW_STEP_FRAMES: int = 16
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
 ## duration for ordinary player walking (engine/overworld/map_objects.asm).
 const STEP_FRAMES_WALK: int = 8
+## StepVectors' slow row: 1 pixel per frame for 16 frames. _RandomWalkContinue
+## calls InitStep with a direction of 0 to 3, which indexes that first row, so
+## a wandering object steps at half the player's walking speed.
+const STEP_FRAMES_NPC_WALK: int = 16
+## RandomStepDuration_Slow and _Fast mask the source random byte before storing
+## it as the wait preceding the next movement decision.
+const IDLE_MASK_SLOW: int = 0x7F
+const IDLE_MASK_FAST: int = 0x1F
 
 ## Crystal background event types from script_constants.asm. READ and the four
 ## facing variants point directly at a script. IFSET and IFNOTSET point at a
@@ -66,6 +74,10 @@ var schedule_random: RandomNumberGenerator = null
 ## apart from schedule_random so seeding one route does not shift the other.
 ## A null generator leaves each invocation to randomize its own.
 var script_random: RandomNumberGenerator = null
+## Supplies the wandering and spinning movement templates. Kept apart from the
+## other two so seeding NPC motion cannot shift an encounter, a phone roll or a
+## script's RANDOM result.
+var object_random: RandomNumberGenerator = null
 var _last_schedule: Dictionary = {}
 var _phone_ring: Gen2WorldPhoneRing = null
 var _phone_ring_request: Dictionary = {}
@@ -77,6 +89,9 @@ var _player_step_direction: Vector2i = Vector2i.ZERO
 var _player_step_frames_total: int = 0
 var _player_step_frames_remaining: int = 0
 var _player_step_accumulator: float = 0.0
+## Real time banked toward the next hardware frame of object movement, held
+## beside the player's own accumulator so the two stay in phase after a stall.
+var _object_step_accumulator: float = 0.0
 
 const PHONE_ENTRANCE_COLLISIONS: Array[int] = [0x71, 0x79, 0x7A, 0x7B]
 
@@ -1064,6 +1079,13 @@ func script_input_waiting() -> bool:
 	return _active_script != null and _active_script.is_waiting()
 
 
+## True while a script holds the world, either running or still queued. A host
+## that drives ambient motion checks this so a script keeps sole ownership of
+## the objects it may be moving.
+func script_busy() -> bool:
+	return _active_script != null or not _script_queue.is_empty()
+
+
 func pending_runtime_request() -> Dictionary:
 	return _active_script.pending_runtime_request() if _active_script != null else {}
 
@@ -2025,26 +2047,103 @@ func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
 ## Advances the movement templates whose source behavior is data-driven in this
 ## slice. Scripted movement is executed by the script runner, while followers
 ## advance after each successful player step.
+##
+## This remains one movement decision per eligible object per call. A caller
+## that wants the source's own pacing uses advance_object_steps() instead,
+## which spends the step and idle durations this function records.
 func advance_objects(random: RandomNumberGenerator) -> int:
 	var moved: int = 0
 	for object: Gen2WorldObject in objects:
 		if not object.active or not object.movement_supported():
 			continue
-		if object.movement in [Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW, Gen2WorldObject.MOVEMENT_SPINRANDOM_FAST]:
-			object.facing = random.randi_range(
-				Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_RIGHT
-			)
-			continue
-		var direction: Vector2i = object.next_direction(random)
-		if direction == Vector2i.ZERO:
-			continue
-		var destination: Vector2i = object.cell + direction
-		if not object.can_leave_to(destination) or not can_object_walk_to(destination, object):
-			continue
-		object.cell = destination
-		object.apply_direction(direction)
-		moved += 1
+		if _decide_object_movement(object, random):
+			moved += 1
 	return moved
+
+
+## One object's turn at StepFunction_FromMovement: the movement template picks
+## a facing or a direction, then records how long the resulting step or wait
+## lasts. Returns true when the object committed to a new cell.
+func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenerator) -> bool:
+	if object.movement in [
+		Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW, Gen2WorldObject.MOVEMENT_SPINRANDOM_FAST
+	]:
+		# MovementFunction_RandomSpinSlow and _Fast set a facing and go straight
+		# to their own wait; neither ever starts a step.
+		object.facing = random.randi_range(
+			Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_RIGHT
+		)
+		var spin_mask: int = IDLE_MASK_SLOW \
+			if object.movement == Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW else IDLE_MASK_FAST
+		object.start_idle(random.randi() & spin_mask)
+		return false
+	var direction: Vector2i = object.next_direction(random)
+	if direction == Vector2i.ZERO:
+		return false
+	var destination: Vector2i = object.cell + direction
+	if not object.can_leave_to(destination) or not can_object_walk_to(destination, object):
+		# _RandomWalkContinue's .new_duration branch: a blocked object keeps its
+		# cell and waits again before trying another direction.
+		object.start_idle(random.randi() & IDLE_MASK_SLOW)
+		return false
+	object.cell = destination
+	object.apply_direction(direction)
+	object.start_step(direction, STEP_FRAMES_NPC_WALK)
+	return true
+
+
+## Paces the data-driven movement templates by real elapsed time, at the same
+## hardware-frame rate and stall catch-up cap the player's own walk step and
+## Gen2WorldAnimation use.
+##
+## Per frame an object either spends one frame of an in-flight step, one frame
+## of its wait, or takes a new movement decision, which is the source's
+## STEP_TYPE_CONTINUE_WALK, STEP_TYPE_SLEEP and STEP_TYPE_FROM_MOVEMENT cycle.
+## The cell commits when the step starts, matching InitStep and the player path;
+## only the presentation offset trails behind it. Returns true when something a
+## renderer draws changed.
+func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
+	if delta <= 0.0 or random == null or objects.is_empty():
+		return false
+	_object_step_accumulator = minf(
+		_object_step_accumulator + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
+	)
+	var changed: bool = false
+	while _object_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
+		_object_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+		for object: Gen2WorldObject in objects:
+			if not object.active or object.deleted or object.sprite == null \
+				or not object.movement_advances():
+				continue
+			if object.tick_step():
+				changed = true
+				if not object.is_stepping():
+					# StepFunction_ContinueWalk rolls a new wait the moment the
+					# step duration reaches zero, so a wandering object pauses
+					# between steps instead of walking without stopping.
+					object.start_idle(random.randi() & IDLE_MASK_SLOW)
+				continue
+			if object.tick_idle():
+				continue
+			var facing_before: int = object.facing
+			if _decide_object_movement(object, random):
+				_remember_object_position(object)
+				changed = true
+			elif object.facing != facing_before:
+				_remember_object_position(object)
+				changed = true
+	return changed
+
+
+## Keeps a moved or turned object's live cell and facing across the map reloads
+## that rebuild object records, the same way the trainer approach does.
+func _remember_object_position(object: Gen2WorldObject) -> void:
+	if current_map == null:
+		return
+	var key: String = _object_key(current_map.group, current_map.number, object.index)
+	_object_position_overrides[key] = object.cell
+	_object_facing_overrides[key] = object.facing
 
 
 func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictionary) -> void:
@@ -2094,6 +2193,9 @@ func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictiona
 		if can_object_walk_to(destination, follower):
 			follower.cell = destination
 			follower.apply_direction(direction)
+			# A follower keeps pace with the player, so it takes the player's
+			# own walk duration rather than the slower wandering one.
+			follower.start_step(direction, STEP_FRAMES_WALK)
 			var override_key: String = _object_key(
 				current_map.group, current_map.number, follower_index
 			)
@@ -2227,6 +2329,9 @@ func _apply_map(
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
 	_clear_player_step()
+	# _load_objects() rebuilds every record, so in-flight object steps end with
+	# the objects that owned them; only the shared frame accumulator survives.
+	_object_step_accumulator = 0.0
 	_load_objects()
 	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
 	# player who stands still does not watch them cross Johto.

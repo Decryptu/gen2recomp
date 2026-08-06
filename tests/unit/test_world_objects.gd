@@ -86,3 +86,48 @@ func test_step_offset_direction_matches_the_committed_movement() -> void:
 
 	object.start_step(Vector2i.LEFT, 4)
 	assert_eq(object.step_offset(4), Vector2i(4, 0))
+
+
+func test_fractional_step_offset_matches_the_pixel_offset() -> void:
+	var object: Gen2WorldObject = _object()
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+
+	object.start_step(Vector2i.RIGHT, 16)
+	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0))
+	# A renderer working in cells and one working in pixels must place the
+	# same sprite in the same place at every frame of the step.
+	for frame: int in 16:
+		var cells: Vector2 = object.step_offset_cells()
+		assert_eq(object.step_offset(16), Vector2i(roundi(cells.x * 16.0), roundi(cells.y * 16.0)))
+		assert_true(object.tick_step(), "frame %d should still be in flight" % frame)
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+
+
+func test_idle_frames_are_consumed_one_at_a_time() -> void:
+	var object: Gen2WorldObject = _object(Gen2WorldObject.MOVEMENT_WANDER)
+	assert_false(object.is_idle())
+	assert_false(object.tick_idle())
+
+	object.start_idle(3)
+	assert_true(object.is_idle())
+	for _frame: int in 3:
+		assert_true(object.tick_idle())
+	assert_false(object.is_idle())
+	assert_false(object.tick_idle())
+
+
+func test_only_deciding_templates_advance_on_their_own() -> void:
+	# The standing and fixed-facing rows resolve once in the source, so a
+	# per-frame driver must not keep asking them for a decision.
+	for movement: int in [
+		Gen2WorldObject.MOVEMENT_WANDER, Gen2WorldObject.MOVEMENT_WALK_UP_DOWN,
+		Gen2WorldObject.MOVEMENT_WALK_LEFT_RIGHT, Gen2WorldObject.MOVEMENT_SWIM_WANDER,
+		Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW, Gen2WorldObject.MOVEMENT_SPINRANDOM_FAST,
+	]:
+		assert_true(_object(movement).movement_advances(), "movement %d advances" % movement)
+	for movement: int in [
+		Gen2WorldObject.MOVEMENT_STILL, Gen2WorldObject.MOVEMENT_FIXED_DOWN,
+		Gen2WorldObject.MOVEMENT_FIXED_UP, Gen2WorldObject.MOVEMENT_FIXED_LEFT,
+		Gen2WorldObject.MOVEMENT_FIXED_RIGHT,
+	]:
+		assert_false(_object(movement).movement_advances(), "movement %d stands" % movement)

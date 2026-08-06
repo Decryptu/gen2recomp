@@ -804,6 +804,254 @@ func test_snapshot_ignores_transient_player_step() -> void:
 	assert_eq(restored.player_cell, Vector2i(7, 6))
 
 
+## The fixture's single object stands still. These tests hand it a wandering
+## template so the data-driven driver has something to decide about.
+func _wandering_world(
+	movement: int = Gen2WorldObject.MOVEMENT_WANDER, x_radius: int = 2, y_radius: int = 2,
+	start: Vector2i = Vector2i(12, 10)
+) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = _world(start)
+	var object: Gen2WorldObject = world.objects[0]
+	object.movement = movement
+	object.x_radius = x_radius
+	object.y_radius = y_radius
+	return world
+
+
+func _advance_object_frames(
+	world: Gen2WorldAPI, frames: int, random: RandomNumberGenerator
+) -> void:
+	for _frame: int in frames:
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+
+
+func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 90210
+	var start: Vector2i = object.cell
+
+	# The first frame is the object's turn at the movement function.
+	assert_true(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_true(object.is_stepping())
+	# StepVectors' slow row is 16 frames, half the player's walking speed.
+	assert_eq(object.step_frames_total, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
+	# The cell commits when the step starts, exactly as InitStep and the
+	# player's own walk do; only the drawn offset trails behind it.
+	assert_ne(object.cell, start)
+	assert_eq(object.step_offset_cells(), Vector2(start - object.cell))
+
+	# The deciding frame starts the step without spending one of its frames,
+	# the way the source runs the movement function and the step function on
+	# separate frames, so the full duration follows it.
+	_advance_object_frames(world, Gen2WorldAPI.STEP_FRAMES_NPC_WALK, random)
+	assert_false(object.is_stepping())
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+	assert_eq(abs(object.cell.x - start.x) + abs(object.cell.y - start.y), 1)
+
+
+func test_wander_object_waits_its_rolled_idle_before_deciding_again() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 4242
+
+	_advance_object_frames(world, 1 + Gen2WorldAPI.STEP_FRAMES_NPC_WALK, random)
+	assert_false(object.is_stepping())
+	# The step's final frame rolls the next wait, exactly as
+	# StepFunction_ContinueWalk jumps to RandomStepDuration_Slow. That mask is
+	# $7F, so the wait never exceeds 127 frames.
+	assert_true(object.is_idle())
+	assert_true(object.idle_frames_remaining <= Gen2WorldAPI.IDLE_MASK_SLOW)
+
+	var resting_cell: Vector2i = object.cell
+	var idle_frames: int = object.idle_frames_remaining
+	_advance_object_frames(world, idle_frames, random)
+	assert_eq(object.cell, resting_cell)
+	assert_false(object.is_idle())
+
+
+func test_blocked_wander_object_keeps_its_cell_and_waits() -> void:
+	# A radius of zero leaves every neighbouring cell outside the object's
+	# bounds, which is the source's blocked branch.
+	var world: Gen2WorldAPI = _wandering_world(Gen2WorldObject.MOVEMENT_WANDER, 0, 0)
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 77
+	var start: Vector2i = object.cell
+
+	assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_eq(object.cell, start)
+	assert_false(object.is_stepping())
+	# _RandomWalkContinue's .new_duration branch waits again rather than
+	# retrying a direction on the very next frame.
+	assert_true(object.is_idle())
+
+	_advance_object_frames(world, 400, random)
+	assert_eq(object.cell, start)
+
+
+func test_wander_object_never_leaves_its_source_radius() -> void:
+	var world: Gen2WorldAPI = _wandering_world(Gen2WorldObject.MOVEMENT_WANDER, 1, 1)
+	var object: Gen2WorldObject = world.objects[0]
+	var origin: Vector2i = object.initial_cell
+	var random := RandomNumberGenerator.new()
+	random.seed = 31337
+
+	var strayed: Vector2i = Vector2i.MAX
+	var visited: Dictionary = {}
+	for _frame: int in 2000:
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		visited[object.cell] = true
+		if abs(object.cell.x - origin.x) > 1 or abs(object.cell.y - origin.y) > 1:
+			strayed = object.cell
+			break
+	assert_eq(strayed, Vector2i.MAX, "object left its radius")
+	# The same run has to prove the object actually wandered, or a driver that
+	# never moved anything would pass the bound above.
+	assert_gt(visited.size(), 1, "object never moved")
+
+
+func test_spin_templates_turn_without_starting_a_step() -> void:
+	for movement: int in [
+		Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW, Gen2WorldObject.MOVEMENT_SPINRANDOM_FAST,
+	]:
+		var world: Gen2WorldAPI = _wandering_world(movement)
+		var object: Gen2WorldObject = world.objects[0]
+		var random := RandomNumberGenerator.new()
+		random.seed = 8
+		var start: Vector2i = object.cell
+
+		_advance_object_frames(world, 200, random)
+		# MovementFunction_RandomSpinSlow and _Fast set a facing and wait; they
+		# never call InitStep, so a spinning object has no step to interpolate.
+		assert_eq(object.cell, start)
+		assert_false(object.is_stepping())
+		var mask: int = Gen2WorldAPI.IDLE_MASK_SLOW \
+			if movement == Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW else Gen2WorldAPI.IDLE_MASK_FAST
+		assert_true(object.idle_frames_remaining <= mask)
+
+
+func test_standing_objects_are_never_moved_by_the_driver() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(12, 10))
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 5
+	var start: Vector2i = object.cell
+	var facing: int = object.facing
+
+	for _frame: int in 300:
+		assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_eq(object.cell, start)
+	assert_eq(object.facing, facing)
+
+
+func test_object_driver_caps_catchup_after_a_stall() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 90210
+
+	assert_true(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_eq(object.step_frames_remaining, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
+	# A huge delta spends at most MAX_CATCHUP_FRAMES frames, the same stall cap
+	# the tile animation and the player's walk step use.
+	assert_true(world.advance_object_steps(1000.0, random))
+	assert_eq(
+		object.step_frames_remaining,
+		Gen2WorldAPI.STEP_FRAMES_NPC_WALK - Gen2WorldAnimation.MAX_CATCHUP_FRAMES
+	)
+
+
+func test_object_steps_do_not_survive_a_map_transition() -> void:
+	var world: Gen2WorldAPI = _wandering_world(
+		Gen2WorldObject.MOVEMENT_WANDER, 2, 2, Vector2i(6, 6)
+	)
+	var random := RandomNumberGenerator.new()
+	random.seed = 90210
+	var object: Gen2WorldObject = world.objects[0]
+	# The player stands on the warp beside this object, so its first rolled
+	# direction may be blocked. Run until a step is genuinely in flight.
+	for _frame: int in 600:
+		if object.is_stepping():
+			break
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+	assert_true(object.is_stepping())
+
+	var result: Dictionary = world.try_warp()
+	assert_true(result["ok"])
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	for loaded: Gen2WorldObject in world.objects:
+		assert_false(loaded.is_stepping())
+		assert_eq(loaded.step_offset_cells(), Vector2.ZERO)
+
+
+func test_object_movement_does_not_disturb_the_other_random_streams() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var script_random := RandomNumberGenerator.new()
+	script_random.seed = 1000
+	world.script_random = script_random
+	var schedule_random := RandomNumberGenerator.new()
+	schedule_random.seed = 2000
+	world.schedule_random = schedule_random
+
+	var object_random := RandomNumberGenerator.new()
+	object_random.seed = 3000
+	_advance_object_frames(world, 500, object_random)
+
+	# Watching an NPC wander for hundreds of frames must not shift the next
+	# encounter, phone or script roll by a single draw.
+	var expected_script := RandomNumberGenerator.new()
+	expected_script.seed = 1000
+	assert_eq(script_random.randi(), expected_script.randi())
+	var expected_schedule := RandomNumberGenerator.new()
+	expected_schedule.seed = 2000
+	assert_eq(schedule_random.randi(), expected_schedule.randi())
+
+
+func test_object_driver_ignores_a_missing_generator() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var object: Gen2WorldObject = world.objects[0]
+	var start: Vector2i = object.cell
+	assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, null))
+	assert_eq(object.cell, start)
+	assert_false(object.is_stepping())
+
+
+func test_advance_objects_still_makes_one_decision_per_call() -> void:
+	var world: Gen2WorldAPI = _wandering_world()
+	var object: Gen2WorldObject = world.objects[0]
+	var random := RandomNumberGenerator.new()
+	random.seed = 90210
+	var start: Vector2i = object.cell
+
+	# The existing per-call primitive keeps its contract: one decision, one
+	# committed cell, with no frame pacing involved.
+	assert_eq(world.advance_objects(random), 1)
+	assert_eq(abs(object.cell.x - start.x) + abs(object.cell.y - start.y), 1)
+
+
+func test_follower_carries_the_player_walk_step_offset() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6080": [0x70, 2, 0, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6080
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	assert_eq(world.dispatch_script_events(Vector2i(7, 6))[0]["status"], &"complete")
+	assert_true(world.move(Vector2i.LEFT))
+
+	var follower: Gen2WorldObject = world.objects[0]
+	assert_eq(follower.cell, Vector2i(6, 6))
+	# A follower keeps the player's pace, not the slower wandering one.
+	assert_true(follower.is_stepping())
+	assert_eq(follower.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK)
+	# The follower moved right, into the cell the player left, so it is drawn
+	# one cell to the left of its committed cell as the step begins.
+	assert_eq(follower.step_offset_cells(), Vector2(-1.0, 0.0))
+
+
 func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Array = world.dispatch_script_events(Vector2i(5, 6))
