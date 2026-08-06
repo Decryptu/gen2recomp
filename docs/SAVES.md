@@ -82,8 +82,8 @@ candidate-save boundary; injected scene-test and development saves use the
 validated in-memory candidate without writing a slot.
 
 Party-owned overworld transactions first modify a candidate `Gen2SaveData` and
-live world snapshot. Gifts, eggs, NPC trades, item effects and catches commit
-only after validation and optional persistence; a failed write restores live
+live world snapshot. Gifts, eggs, NPC trades, source `HealParty` recovery, item
+effects and catches commit only after validation and optional persistence; a failed write restores live
 world state. A full party routes a valid addition to the first free PC slot. If
 the party and all 280 box slots are occupied, the transaction refuses before
 consuming an item or ball and leaves the save and world state unchanged.

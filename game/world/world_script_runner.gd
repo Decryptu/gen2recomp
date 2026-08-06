@@ -46,9 +46,11 @@ var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
 var _loaded_emote: int = -1
 var _battle_setup: Dictionary = {}
+var _loaded_battle_type: int = -1
 var _phone_context: Dictionary = {}
 var _phone_started: bool = false
 var _text_buffers: Dictionary = {}
+var _rival_name: String = "???"
 ## Everything this invocation rolls: the source RANDOM command and the phone
 ## routines that pick a caller line or an unseen species. Injected like the rest
 ## of the project's randomness, so a caller can reproduce a branch; a runner
@@ -71,6 +73,7 @@ const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
 const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
 const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
+const SPECIAL_FADE_OUT_MUSIC: int = 106
 const TEXT_STRING_BUFFER: int = 0x14
 const WEEKDAY_NAMES: Array[StringName] = [
 	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
@@ -290,7 +293,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		return advance()
 	if kind in [
 		&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested",
-		&"pc_requested",
+		&"pc_requested", &"party_heal_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -305,6 +308,21 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		})
 		_pending = {}
 		return advance()
+	if kind == &"rival_name_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"runtime_request_failed")), result
+			)
+		var default_name: String = String(
+			(request.get("values", {}) as Dictionary).get("default_name", "SILVER")
+		)
+		_rival_name = String(result.get("name", default_name)).strip_edges()
+		if _rival_name.is_empty():
+			_rival_name = default_name
+		_script_value = 1
+		_events.append({"type": &"rival_name_changed", "name": _rival_name})
+		_pending = {}
+		return advance()
 	if kind != &"battle_requested":
 		return {
 			"ok": false, "status": &"failed", "reason": &"runtime_request_kind_mismatch",
@@ -317,6 +335,18 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 	var outcome: StringName = StringName(result.get("outcome", &""))
 	if String(outcome).is_empty():
 		return _fail(&"invalid_battle_outcome", result)
+	var battle_values: Dictionary = request.get("values", {})
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST and bool(battle_values.get("can_lose", false)):
+		_script_value = 0
+		_events.append({
+			"type": &"battle_lost",
+			"outcome": outcome,
+			"can_lose": true,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
 	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST:
 		var recovery: Variant = result.get("recovery", {})
 		if not recovery is Dictionary or not bool((recovery as Dictionary).get("ok", false)):
@@ -452,6 +482,13 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 				return {"ok": true}
 			var jump_result: Dictionary = _replace_frame(pointer_bank, pointer_address)
 			return jump_result
+		Gen2WorldScript.BLACKOUTMOD:
+			## BLACKOUTMOD changes the cartridge's recovery destination. The current
+			## save boundary does not yet relocate a player on ordinary blackout, so
+			## retain the source value as an explicit event rather than discarding it.
+			_emit_runtime_event(&"blackout_destination_changed", {
+				"map": int(command.get("value", 0)),
+			})
 		Gen2WorldScript.SJUMP:
 			return _replace_frame(bank, int(command["address"]))
 		Gen2WorldScript.FARSJUMP:
@@ -670,17 +707,19 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKFLAG, Gen2WorldScript.CLEARFLAG, Gen2WorldScript.SETFLAG,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
+		Gen2WorldScript.CHECKITEM,
 		Gen2WorldScript.ADDCELLNUM, Gen2WorldScript.DELCELLNUM,
 		Gen2WorldScript.CHECKCELLNUM,
 		Gen2WorldScript.GOLD_FACEPLAYER, Gen2WorldScript.FACEPLAYER,
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP,
 		Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE,
 		Gen2WorldScript.CLOSEWINDOW,
+		Gen2WorldScript.ITEMNOTIFY,
 		Gen2WorldScript.LOADMENU,
 		Gen2WorldScript.GETMONEY, Gen2WorldScript.GETCOINS, Gen2WorldScript.GETNUM,
 		Gen2WorldScript.GETMONNAME, Gen2WorldScript.GETITEMNAME,
 		Gen2WorldScript.GETCURLANDMARKNAME, Gen2WorldScript.GETTRAINERNAME,
-		Gen2WorldScript.GETSTRING,
+		Gen2WorldScript.GETSTRING, Gen2WorldScript.BLACKOUTMOD,
 	]
 	if opcode in handled_base:
 		return {"ok": true}
@@ -708,9 +747,12 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 			_emit_runtime_event(&"battle_setup_changed", _battle_setup)
 		0x5D:
+			_loaded_battle_type = -1
 			_battle_setup = _new_battle_setup({
 				"kind": &"trainer", "trainer_group": int(command.get("trainer_group", 0)),
-				"trainer_id": int(command.get("trainer_id", 0)),
+				# The cartridge's loadtrainer operand is one-based; the imported
+				# party table API is zero-based.
+				"trainer_id": maxi(int(command.get("trainer_id", 0)) - 1, 0),
 			})
 			_emit_runtime_event(&"battle_setup_changed", _battle_setup)
 		0x5E:
@@ -784,7 +826,6 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 		0x7A:
 			_emit_runtime_event(&"map_reload_requested", {})
-			_frames.clear()
 		0x7B:
 			_emit_runtime_event(&"map_refresh_requested", {})
 		0x7C:
@@ -1187,9 +1228,15 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 
 func _load_runtime_variable(variable: int, value: int) -> Dictionary:
 	## Phone scripts use LOADVAR for the two runtime values that are not
-	## ordinary world-state variables. Other cartridge variables stay explicit
-	## failures until their owning subsystem is implemented.
+	## ordinary world-state variables. Battles also load VAR_BATTLETYPE before
+	## STARTBATTLE so a source can explicitly permit a non-blackout loss.
 	match variable:
+		0x03: # VAR_BATTLETYPE
+			if _battle_setup.is_empty():
+				_loaded_battle_type = value
+			else:
+				_battle_setup["battle_type"] = value
+				_battle_setup["can_lose"] = value == 1
 		0x14: # VAR_SPECIALPHONECALL
 			if not _phone_context.is_empty():
 				_phone_context["special_call_id"] = value
@@ -1262,6 +1309,21 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 				"restart": special == SPECIAL_RESTART_MAP_MUSIC,
 			})
+		SPECIAL_FADE_OUT_MUSIC:
+			_emit_runtime_event(&"music_fadeout_requested", {"special": special})
+		36:
+			return _stage_runtime_request(&"rival_name_requested", {
+				"special": special, "default_name": "SILVER",
+			})
+		27:
+			## HealParty is a save-owned transaction. It is deliberately a host
+			## request so HP, status and PP are changed together with the selected
+			## project save.
+			return _stage_runtime_request(&"party_heal_requested", {"special": special})
+		48, 50, 51, 157:
+			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
+			## affect presentation or source-only counters, not scene-free state.
+			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",
@@ -1604,7 +1666,7 @@ func _decode_text_with_buffers(raw: PackedByteArray) -> Dictionary:
 			out += String(_text_buffers.get(buffer, "<BUFFER_%d>" % buffer))
 			at += 2
 			continue
-		out += Gen2Text.character(byte)
+		out += _rival_name if byte == 0x53 else Gen2Text.character(byte)
 		at += 1
 	return {"ok": false, "reason": &"missing_text_terminator", "text": out}
 
@@ -1824,6 +1886,9 @@ func _recovered_result(recovery: Dictionary) -> Dictionary:
 
 func _new_battle_setup(base: Dictionary) -> Dictionary:
 	var out: Dictionary = base.duplicate(true)
+	if _loaded_battle_type >= 0:
+		out["battle_type"] = _loaded_battle_type
+		out["can_lose"] = _loaded_battle_type == 1
 	for key: String in ["win_text", "loss_text"]:
 		if _battle_setup.has(key):
 			out[key] = (_battle_setup[key] as Dictionary).duplicate(true)

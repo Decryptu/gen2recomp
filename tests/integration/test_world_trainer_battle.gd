@@ -285,6 +285,39 @@ func test_project_save_can_carry_the_world_snapshot_without_guessing_a_spawn() -
 	assert_eq(round_trip.world.player_cell, Vector2i(4, 5))
 
 
+func test_party_heal_special_restores_save_hp_status_and_move_pp() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	var heal_script: int = 0x6300
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, heal_script)] = [
+		Gen2WorldScript.SPECIAL, 27, 0, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world(true)
+
+	var save: Gen2SaveData = _world_screen._injected_save
+	var mon: Gen2SaveMon = save.party[0]
+	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
+	mon.hp = 1
+	mon.status = Gen2Status.POISON
+	mon.pp[0] = 0
+	_world_screen._world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 4, "y": 5, "script": heal_script,
+	}]
+
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(4, 5))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	assert_eq(_world_screen._world.pending_runtime_request()["kind"], &"party_heal_requested")
+	var complete: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world_screen._world, {}, save, false
+	)
+	assert_true(complete["ok"], JSON.stringify(complete))
+	var healed_mon: Gen2SaveMon = save.party[0]
+	assert_eq(healed_mon.hp, battle_mon.max_hp())
+	assert_eq(healed_mon.status, Gen2Status.NONE)
+	assert_eq(healed_mon.pp[0], int(_data.move(BattleFixture.TACKLE).get("pp", 0)))
+
+
 func test_new_game_uses_the_verified_home_spawn_and_source_start_money() -> void:
 	var save: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 0, "TEST", 155)
 	assert_not_null(save)

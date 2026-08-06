@@ -182,6 +182,13 @@ func test_command_parser_reads_scripted_overworld_feature_operands() -> void:
 	assert_eq(block["y"], 2)
 	assert_eq(block["block"], 3)
 
+	var reload: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x7B]), 0, true
+	)
+	assert_true(reload["ok"])
+	assert_eq(reload["name"], &"reloadmap")
+	assert_eq(reload["width"], 1)
+
 	var write_queue: Dictionary = Gen2WorldScript.command_at(
 		PackedByteArray([0x7D, 0x34, 0x12]), 0, true
 	)

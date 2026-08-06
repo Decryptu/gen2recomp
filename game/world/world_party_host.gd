@@ -123,6 +123,64 @@ static func complete_runtime_request(
 	}
 
 
+## Restores HP, status and PP for every non-egg party member, matching the
+## source HealParty routine. The candidate save is validated before writeback,
+## and the live world only resumes after the candidate is ready.
+static func heal_party(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	persist: bool = true,
+) -> Dictionary:
+	if world == null or save == null or world.data == null:
+		return _failure(&"missing_save", {})
+	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
+	if not bool(validation.get("ok", false)):
+		return _failure(&"invalid_save", {"message": validation.get("message", "")})
+	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var healed: int = 0
+	for mon: Gen2SaveMon in candidate.party:
+		if mon == null or mon.is_egg:
+			continue
+		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(world.data, mon)
+		if battle_mon == null:
+			return _failure(&"invalid_party_member", {"species": mon.species})
+		var max_hp: int = battle_mon.max_hp()
+		if mon.hp != max_hp or mon.status != Gen2Status.NONE:
+			healed += 1
+		mon.hp = max_hp
+		mon.status = Gen2Status.NONE
+		for slot: int in Gen2SaveMon.MAX_MOVES:
+			var move_number: int = int(mon.moves[slot])
+			mon.pp[slot] = int(world.data.move(move_number).get("pp", 0)) if move_number > 0 else 0
+
+	var before: Gen2WorldSnapshot = world.snapshot()
+	var resumed: Array = world.complete_runtime_request({
+		"ok": true,
+		"script_value": 1,
+		"healed_members": healed,
+	})
+	if resumed.is_empty() or not bool(resumed[0].get("ok", false)):
+		return _failure(&"runtime_request_failed", {"results": resumed})
+	candidate.world = world.snapshot()
+	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
+	if not bool(candidate_validation.get("ok", false)):
+		world.state.restore_from_dict(before.world_state.to_dict())
+		return _failure(&"candidate_save_invalid", candidate_validation)
+	var write_result: Dictionary = {"ok": true}
+	if persist:
+		write_result = Gen2SaveStore.save(candidate, world.data)
+	if not bool(write_result.get("ok", false)):
+		world.state.restore_from_dict(before.world_state.to_dict())
+		return _failure(&"save_failed", write_result)
+	_copy_save(save, candidate)
+	return {
+		"ok": true,
+		"handled": true,
+		"healed_members": healed,
+		"results": resumed,
+	}
+
+
 ## Applies a field item to a save and the live world as one candidate transaction.
 ## The current slice covers the source's HP/status/revival and repel effects.
 static func use_item(

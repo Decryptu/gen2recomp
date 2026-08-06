@@ -1498,6 +1498,82 @@ func test_reloadmapafterbattle_is_reported_after_a_confirmed_win() -> void:
 	))
 
 
+func test_crystal_rival_battle_preserves_can_lose_and_continues_after_reloadmap() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:60B8": [0x5E, 9, 3, 0x1E, 3, 1, 0x5F, 0x7B, 0x91],
+	})
+	data = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x60B8,
+	})
+	var waiting: Dictionary = runner.advance()
+	assert_eq(waiting["status"], &"waiting")
+	var values: Dictionary = waiting["event"]["request"]["values"]
+	assert_eq(values["kind"], &"trainer")
+	assert_eq(values["trainer_group"], 9)
+	assert_eq(values["trainer_id"], 2)
+	assert_eq(values["battle_type"], 1)
+	assert_true(values["can_lose"])
+
+	var lost: Dictionary = runner.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_LOST,
+	})
+	assert_eq(lost["status"], &"complete")
+	assert_true(lost["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_lost" and bool(event.get("can_lose", false))
+	))
+	assert_true(lost["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"map_reload_requested"
+	))
+	assert_false(lost["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"blackout"
+	))
+
+
+func test_crystal_post_starter_specials_and_checkitem_have_explicit_boundaries() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:60C8"] = [Gen2WorldScript.SPECIAL, 27, 0, Gen2WorldScript.END]
+	scripts["48:60D8"] = [Gen2WorldScript.SPECIAL, 36, 0, Gen2WorldScript.END]
+	scripts["48:60E8"] = [Gen2WorldScript.CHECKITEM, 7, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var heal_runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x60C8,
+	})
+	var heal_waiting: Dictionary = heal_runner.advance()
+	assert_eq(heal_waiting["status"], &"waiting")
+	assert_eq(heal_waiting["event"]["request"]["kind"], &"party_heal_requested")
+	var healed: Dictionary = heal_runner.complete_runtime_request({
+		"ok": true, "script_value": 1,
+	})
+	assert_eq(healed["status"], &"complete")
+
+	var rival_runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x60D8,
+	})
+	var rival_waiting: Dictionary = rival_runner.advance()
+	assert_eq(rival_waiting["status"], &"waiting")
+	assert_eq(rival_waiting["event"]["request"]["kind"], &"rival_name_requested")
+	assert_eq(rival_waiting["event"]["request"]["values"]["default_name"], "SILVER")
+	var named: Dictionary = rival_runner.complete_runtime_request({
+		"ok": true, "name": "RIVAL",
+	})
+	assert_eq(named["status"], &"complete")
+	assert_eq(named["events"].filter(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"rival_name_changed"
+	)[0]["name"], "RIVAL")
+
+	var item_runner := Gen2WorldScriptRunner.begin(
+		data, Gen2WorldState.new({}, {}, {7: 1}), {
+			"kind": &"test", "bank": 48, "script": 0x60E8,
+		}
+	)
+	var item_result: Dictionary = item_runner.advance()
+	assert_eq(item_result["status"], &"complete", JSON.stringify(item_result))
+
+
 func test_world_battle_completion_commits_just_battled_only_after_the_host_result() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
