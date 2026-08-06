@@ -3,6 +3,11 @@ extends Control
 
 ## Player party summary for a validated project save.
 
+## Emitted only when embedded, mirroring Gen2BoxScreen.closed: the overworld
+## start menu resumes on this rather than the screen navigating away with
+## change_scene_to_file, which would tear down the running world.
+signal closed(result: Dictionary)
+
 const BACKGROUND: Color = Color("#09111f")
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#2d4566")
@@ -16,9 +21,12 @@ var _data: GameData = null
 var _data_override: GameData = null
 var _save: Gen2SaveData = null
 var _save_override: Gen2SaveData = null
+var _embedded: bool = false
 var _cards: VBoxContainer = null
 var _player_label: Label = null
 var _status: Label = null
+var _storage_button: Button = null
+var _battle_button: Button = null
 
 
 func _ready() -> void:
@@ -28,10 +36,14 @@ func _ready() -> void:
 	_refresh()
 
 
-## Test seam for a synthetic cache and validated save.
-func set_context(data: GameData, save: Gen2SaveData) -> void:
+## Test seam for a synthetic cache and validated save. `embedded` is the
+## overworld start menu's Pokemon entry: the save-screen navigation actions
+## (development battle, PC storage by scene change) do not apply while a
+## world is running, so they are hidden rather than left to tear it down.
+func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> void:
 	_data_override = data
 	_save_override = save
+	_embedded = embedded
 	_data = data
 	_save = save
 	if is_inside_tree() and _cards != null:
@@ -100,13 +112,14 @@ func _build_ui() -> void:
 	subtitle.text = "Player party and persistent condition"
 	subtitle.add_theme_color_override("font_color", MUTED)
 	heading.add_child(subtitle)
-	var back := _button("Back to save slots", TEXT)
+	var back := _button("Close" if _embedded else "Back to save slots", TEXT)
 	back.custom_minimum_size = Vector2(190, 44)
 	back.pressed.connect(_back)
-	var storage := _button("Open PC storage", ACCENT)
-	storage.custom_minimum_size = Vector2(170, 44)
-	storage.pressed.connect(_open_storage)
-	header.add_child(storage)
+	_storage_button = _button("Open PC storage", ACCENT)
+	_storage_button.custom_minimum_size = Vector2(170, 44)
+	_storage_button.pressed.connect(_open_storage)
+	_storage_button.visible = not _embedded
+	header.add_child(_storage_button)
 	header.add_child(back)
 
 	_player_label = Label.new()
@@ -126,9 +139,10 @@ func _build_ui() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 10)
 	content.add_child(footer)
-	var battle := _button("Start development battle", ACCENT)
-	battle.pressed.connect(_start_battle)
-	footer.add_child(battle)
+	_battle_button = _button("Start development battle", ACCENT)
+	_battle_button.pressed.connect(_start_battle)
+	_battle_button.visible = not _embedded
+	footer.add_child(_battle_button)
 	_status = Label.new()
 	_status.add_theme_color_override("font_color", MUTED)
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -240,7 +254,16 @@ func _start_battle() -> void:
 
 
 func _back() -> void:
+	if _embedded:
+		close_embedded()
+		return
 	get_tree().change_scene_to_file.call_deferred("res://game/save/save_screen.tscn")
+
+
+func close_embedded() -> void:
+	if not _embedded:
+		return
+	closed.emit({"ok": true})
 
 
 func _open_storage() -> void:

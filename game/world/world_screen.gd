@@ -12,6 +12,8 @@ const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 const SERVICE_SCENE: PackedScene = preload("res://game/world/world_service_screen.tscn")
 const BOX_SCENE: PackedScene = preload("res://game/save/box_screen.tscn")
+const START_MENU_SCENE: PackedScene = preload("res://game/world/start_menu_screen.tscn")
+const PARTY_SCENE: PackedScene = preload("res://game/save/party_screen.tscn")
 const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 
 @export var map_group: int = 24
@@ -41,6 +43,10 @@ var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
 var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
+var _start_menu_host: Gen2StartMenuScreen = null
+var _party_host: Gen2PartyScreen = null
+## Mirrors the source's wBattleMenuCursorPosition surviving a reopen.
+var _start_menu_cursor: int = 0
 var _trainer_approach: Dictionary = {}
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
@@ -233,6 +239,7 @@ func _process(delta: float) -> void:
 		if not ticks.is_empty():
 			_update_time_of_day()
 			if _service_host == null and _battle_host == null and _pc_host == null \
+				and _start_menu_host == null and _party_host == null \
 				and not _world.script_input_waiting():
 				var phone_schedule: Dictionary = _world.advance_phone_schedule(
 					ticks.size(), _encounter_random
@@ -256,6 +263,7 @@ func _process(delta: float) -> void:
 func _objects_may_move() -> bool:
 	return _world != null \
 		and _battle_host == null and _service_host == null and _pc_host == null \
+		and _start_menu_host == null and _party_host == null \
 		and _trainer_approach.is_empty() \
 		and not _world.script_busy() \
 		and not _world.phone_ring_active() \
@@ -279,15 +287,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_pc_host.close_embedded()
 		accept_event()
 		return
+	if _party_host != null:
+		if key.keycode == KEY_ESCAPE:
+			_party_host.close_embedded()
+		accept_event()
+		return
+	if _start_menu_host != null:
+		if _start_menu_host.handle_key(key.keycode):
+			accept_event()
+		return
 	if _service_host != null:
 		if _service_host.handle_key(key.keycode):
 			accept_event()
 		return
-	if _world.fishing_busy() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+	if _world.fishing_busy() and key.keycode in [KEY_SPACE, KEY_Z]:
 		_handle_fishing_result(_world.advance_fishing())
 		accept_event()
 		return
-	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_Z]:
 		if _text_box != null and _text_box.visible:
 			_advance_script_input()
 		elif StringName(_world.pending_script_input().get("type", &"")) in [
@@ -319,7 +336,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_show_script_results(_world.run_event_queue(true))
 		accept_event()
 		return
-	if key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+	if key.keycode in [KEY_SPACE, KEY_Z]:
 		if interact():
 			accept_event()
 		return
@@ -353,6 +370,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_open_phone_list()
 			accept_event()
 			return
+		KEY_ENTER, KEY_TAB:
+			_open_start_menu()
+			accept_event()
+			return
 		KEY_V:
 			cycle_world_renderer()
 			accept_event()
@@ -372,7 +393,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
-		or _pc_host != null or _world.phone_ring_active() \
+		or _pc_host != null or _start_menu_host != null or _party_host != null \
+		or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
@@ -420,7 +442,8 @@ func move_player(direction: Vector2i) -> bool:
 ## Public driver for the production NPC/object interaction path.
 func interact() -> bool:
 	if _world == null or _battle_host != null or _service_host != null \
-		or _pc_host != null or _world.phone_ring_active() or _world.fishing_busy():
+		or _pc_host != null or _start_menu_host != null or _party_host != null \
+		or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
 	if results.is_empty():
@@ -998,6 +1021,97 @@ func _on_pc_closed(result: Dictionary) -> void:
 		_script_prompt = "PC storage closed"
 	else:
 		_show_script_results(resumed)
+	_refresh_labels()
+
+
+## Public driver for screenshot tooling and scene tests, mirroring
+## _open_pc_host()'s shape. The Enter/Tab key branch in
+## _unhandled_key_input() is the normal path.
+func _open_start_menu() -> void:
+	if _start_menu_host != null or _party_host != null or _service_host != null \
+		or _pc_host != null or _battle_host != null or _world == null or _data == null \
+		or not _trainer_approach.is_empty() or _world.script_busy() \
+		or _world.phone_ring_active() or _world.fishing_busy():
+		return
+	var host: Gen2StartMenuScreen = START_MENU_SCENE.instantiate() as Gen2StartMenuScreen
+	if host == null:
+		_script_prompt = "Start menu scene unavailable"
+		_refresh_labels()
+		return
+	if not host.open(
+		_world, _data, Callable(self, "persist_world_snapshot"), _start_menu_cursor
+	):
+		host.queue_free()
+		_script_prompt = "Start menu unavailable"
+		_refresh_labels()
+		return
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	add_child(host)
+	host.action_chosen.connect(_on_start_menu_action)
+	host.closed.connect(_on_start_menu_closed)
+	_start_menu_host = host
+	_script_prompt = "Start menu open"
+	_refresh_labels()
+
+
+func _on_start_menu_action(kind: StringName) -> void:
+	var host: Gen2StartMenuScreen = _start_menu_host
+	_start_menu_host = null
+	if host != null:
+		_start_menu_cursor = host.cursor()
+		host.queue_free()
+	match kind:
+		Gen2WorldStartMenu.ITEM_POKEMON:
+			_open_embedded_party()
+		Gen2WorldStartMenu.ITEM_POKEGEAR:
+			_open_phone_list()
+	_refresh_labels()
+
+
+func _on_start_menu_closed() -> void:
+	var host: Gen2StartMenuScreen = _start_menu_host
+	_start_menu_host = null
+	if host != null:
+		_start_menu_cursor = host.cursor()
+		host.queue_free()
+	_script_prompt = "Start menu closed"
+	_refresh_labels()
+
+
+func _open_embedded_party() -> void:
+	if _party_host != null or _world == null or _data == null:
+		return
+	var host: Gen2PartyScreen = PARTY_SCENE.instantiate() as Gen2PartyScreen
+	if host == null:
+		_script_prompt = "Party scene unavailable"
+		_refresh_labels()
+		return
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	if save == null:
+		save = Gen2SaveStore.create_development_save(_data, 0)
+	if save == null:
+		host.queue_free()
+		_script_prompt = "Party requires a validated save"
+		_refresh_labels()
+		return
+	host.set_context(_data, save, true)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	host.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(host)
+	host.closed.connect(_on_party_closed)
+	_party_host = host
+	_script_prompt = "Party open"
+	_refresh_labels()
+
+
+func _on_party_closed(_result: Dictionary) -> void:
+	var host: Gen2PartyScreen = _party_host
+	_party_host = null
+	if host != null:
+		host.queue_free()
+	_script_prompt = "Party closed"
 	_refresh_labels()
 
 

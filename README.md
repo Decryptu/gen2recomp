@@ -182,9 +182,13 @@ Development scenes:
   `show_matchup` for a fallback pairing.
 - `game/world/world_screen.tscn`: arrows/WASD move Route 29, encounters use
   imported tables, and `F` fishes only while facing water with an owned rod.
-  Space, Enter or `Z` advances casting and bites; F5 saves. The host clock
+  Space or `Z` advances casting and bites; F5 saves. The host clock
   advances one real-time game minute per minute and updates source day
-  boundaries. `P` opens the registered Pokegear phone list. The imported
+  boundaries. `P` opens the registered Pokegear phone list. `Enter` or `Tab`
+  opens the start menu (Pokemon, Pack, Pokegear, Save, Exit; Pokedex, Player
+  and Options are listed in their source position but are not implemented
+  yet). Pokemon opens the embedded party screen; Pokegear and Save reach the
+  existing phone list and save path. The imported
   Players House PC opens the embedded numbered box storage screen and `Esc`
   closes it. `preview_emote()`, `preview_wild_encounter()`,
   `preview_fishing_battle()`, `preview_script_event()`,
