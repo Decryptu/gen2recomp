@@ -187,7 +187,7 @@ func _write_cache() -> void:
 		"0": {"bank": 48, "address": 0x6020, "bytes": [0x4C, 0x00, 0x70, 0x91]},
 	})
 	RomCache.write_json(RomCache.world_text_path(_directory), {
-		"48:7000": [0x00, 0x80, 0x81, 0x50],
+		"48:7000": [0x00, 0x80, 0x81, Gen2WorldScript.TEXT_TERMINATOR],
 	})
 
 	var pixels := PackedByteArray()
@@ -268,7 +268,7 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 		"48:7000": [0x91],
 	})
 	RomCache.write_json(RomCache.world_text_path(_directory), {
-		"48:4234": [Gen2WorldScript.TEXT_START, 0x81, 0x88, 0x8B, 0x8B, 0x50],
+		"48:4234": [Gen2WorldScript.TEXT_START, 0x81, 0x88, 0x8B, 0x8B, Gen2WorldScript.TEXT_TERMINATOR],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	var cases: Array = [
@@ -1334,20 +1334,26 @@ func test_change_block_updates_tiles_and_collision_from_the_tileset_block() -> v
 
 func test_scripted_change_block_refresh_and_command_queue_state_are_explicit() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
-		"48:6140": [0x7A, 0, 0, 1, 0x7C, 0x7D, 0x20, 0x60, 0x7E, 0, 0x91],
+		"48:6140": [0x7A, 14, 2, 0, 0x7C, 0x7D, 0x20, 0x60, 0x7E, 0, 0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6140
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	var result: Array = world.dispatch_script_events()
 	assert_eq(result[0]["status"], &"complete")
-	assert_eq(world.block_at(0, 0), 1)
+	assert_eq(world.block_at(7, 1), 0)
+	var block_event: Dictionary = {}
+	for event: Dictionary in result[0]["events"]:
+		if event.get("type", &"") == &"map_block_changed" and event.has("change"):
+			block_event = event["change"]
+	assert_eq(block_event["source_cell"], Vector2i(14, 2))
+	assert_eq(block_event["cell"], Vector2i(7, 1))
 	assert_true(result[0]["events"].any(func(event: Dictionary) -> bool:
 		return event.get("type", &"") == &"map_refreshed"
 	))
 	assert_true(world.command_queues().is_empty())
 	world.reload_current_map()
-	assert_eq(world.block_at(0, 0), 0)
+	assert_eq(world.block_at(7, 1), 1)
 
 
 func test_scripted_emote_is_visible_for_its_bounded_duration() -> void:

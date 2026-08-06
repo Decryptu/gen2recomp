@@ -271,5 +271,5 @@ static func _text(text: String) -> Array:
 	var out: Array = [Gen2WorldScript.TEXT_START]
 	for byte: int in Gen2Text.encode(text):
 		out.append(byte)
-	out.append(Gen2Text.TERMINATOR)
+	out.append(Gen2WorldScript.TEXT_TERMINATOR)
 	return out

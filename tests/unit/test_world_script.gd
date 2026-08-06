@@ -108,13 +108,13 @@ func test_memcall_operands_are_runtime_addresses_not_static_script_references() 
 	assert_eq(references["scripts"].size(), 0)
 
 
-func test_text_decoder_skips_tx_start_and_requires_the_terminator() -> void:
+func test_text_decoder_skips_text_start_and_stops_at_source_done() -> void:
 	var decoded: Dictionary = Gen2WorldScript.decode_text(
-		PackedByteArray([0x00, 0x80, 0x81, 0x50, 0x80])
+		PackedByteArray([0x00, 0x80, Gen2WorldScript.TEXT_PAGE, 0x81, 0x57, 0x80])
 	)
 	assert_true(decoded["ok"])
-	assert_eq(decoded["text"], "AB")
-	assert_eq(decoded["bytes"], 4)
+	assert_eq(decoded["text"], "A\n\nB")
+	assert_eq(decoded["bytes"], 5)
 
 	var missing: Dictionary = Gen2WorldScript.decode_text(PackedByteArray([0x00, 0x80]))
 	assert_false(missing["ok"])
