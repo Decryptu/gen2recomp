@@ -24,6 +24,25 @@ static func complete_runtime_request(
 		return Gen2WorldPartyHost.complete_runtime_request(
 			world, result, save, persist, random
 		)
+	if kind == &"party_heal_requested":
+		return Gen2WorldPartyHost.heal_party(world, save, persist)
+	if kind == &"rival_name_requested":
+		var completion: Dictionary = {"ok": true}
+		for key: Variant in result:
+			completion[key] = result[key]
+		if not completion.has("name"):
+			completion["name"] = String(request.get("values", {}).get("default_name", "SILVER"))
+		var resumed: Array = world.complete_runtime_request(completion)
+		if resumed.is_empty() or not bool(resumed[0].get("ok", false)):
+			return _unavailable(&"rival_name_request_failed", {
+				"request": request, "results": resumed,
+			})
+		return {
+			"ok": true,
+			"handled": true,
+			"request": request.duplicate(true),
+			"results": resumed,
+		}
 	if kind in [&"battle_requested", &"swarm_requested"]:
 		return {"ok": true, "handled": true, "results": world.complete_runtime_request(result)}
 	var resolved: Dictionary = resolve_runtime_request(world, request)
@@ -102,6 +121,8 @@ static func _reason_for(kind: StringName) -> StringName:
 		&"phone_call_requested", &"special_phone_call_requested":
 			return &"phone_host_unavailable"
 		&"pokemon_requested", &"trade_requested":
+			return &"party_host_unavailable"
+		&"party_heal_requested":
 			return &"party_host_unavailable"
 	return &"runtime_host_unavailable"
 

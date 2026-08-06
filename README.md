@@ -36,7 +36,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > handles trainer battles, imported win/loss text, map reloads and save-safe
 > blackout recovery, and covers object lifecycle, bounded followers, block
 > edits, emotes, surf, grass, fishing, roaming, repel and deterministic wild
-> battle requests.
+> battle requests. The real-data story preview now follows the post-starter
+> route through Elm's aide Potion, Route 29, Cherrygrove, Route 30, Mr. Pokémon's
+> Mystery Egg event, the first rival battle and the return to Elm's Lab for the
+> Egg and Poké Ball handoffs.
 >
 > The importer also preserves referenced overworld menus, 34 mart lists, phone
 > contacts, special-call records and music/SFX pointer records. The scene-free
@@ -217,8 +220,10 @@ Development scenes:
   The bounded story preview follows production movement from the bedroom to
   Players House 1F, executes the imported Mom setup with weekday and
   daylight-saving prompts, reaches the imported New Bark Town teacher scene,
-  enters Elm's lab, shows the source Cyndaquil choice and completes the
-  candidate-save `GIVEPOKE` handoff:
+  enters Elm's lab, completes the source starter and aide Potion events, crosses
+  Route 29 and Cherrygrove to Route 30, runs Mr. Pokémon's Mystery Egg event,
+  resolves the can-lose rival battle and party heal, then returns to Elm's lab
+  for the officer, Egg and five Poké Ball handoffs:
 
   ```bash
   godot --headless --path . -s res://tools/preview_world_story.gd -- \
