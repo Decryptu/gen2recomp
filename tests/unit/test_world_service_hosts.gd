@@ -149,6 +149,42 @@ func test_bargain_purchase_closes_merchant_and_sells_each_item_once() -> void:
 	assert_true(next_day["ok"])
 
 
+## The Goldenrod Underground merchant flag is one index lower in pinned
+## pokegold than in pinned pokecrystal (constants/engine_flags.asm). A
+## purchase against a Gold-profile GameData must close the merchant at that
+## lower index, not the Crystal one, or a real pokegold bargain script's
+## checkflag would never see the closure this project just wrote.
+func test_bargain_purchase_on_a_gold_profile_cache_closes_the_gold_silver_flag() -> void:
+	var gold_directory: String = Fixture.directory(&"gold")
+	var gold_data: GameData = Fixture.build(&"gold")
+	_write_services_at(gold_directory)
+	gold_data = GameData.open_directory(gold_directory)
+	var gold_world: Gen2WorldAPI = Gen2WorldAPI.open(
+		gold_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6),
+		Gen2WorldState.new({}, {}, {7: 1}, {0: 500})
+	)
+	var gold_save: Gen2SaveData = Gen2SaveStore.create_development_save(gold_data, 0)
+	gold_save.world = gold_world.snapshot()
+
+	var bargain: Dictionary = Gen2WorldMartHost.resolve_mart(
+		gold_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0, false, gold_world.state
+	)
+	assert_true(bargain["ok"])
+	var purchase: Dictionary = Gen2WorldMartHost.purchase(
+		gold_world, gold_save, bargain["mart"], 7, 1, false
+	)
+	assert_true(purchase["ok"])
+	assert_true(gold_world.state.bargain_merchant_closed(false))
+	assert_false(gold_world.state.bargain_merchant_closed(true))
+	var closed: Dictionary = Gen2WorldMartHost.resolve_mart(
+		gold_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0, false, gold_world.state
+	)
+	assert_false(closed["ok"])
+	assert_eq(closed["reason"], &"bargain_mart_closed")
+
+	RomCache.clear(gold_directory)
+
+
 func test_bargain_host_refuses_a_closed_merchant_before_opening_ui() -> void:
 	_set_mart_script(Gen2WorldMartHost.MARTTYPE_BARGAIN)
 	_world.state.set_engine_flag(Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
@@ -286,13 +322,17 @@ func test_menu_input_can_be_cancelled_without_selecting_an_option() -> void:
 
 
 func _write_services() -> void:
-	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	_write_services_at(Fixture.directory())
+
+
+func _write_services_at(directory: String) -> void:
+	var items: Array = RomCache.read_json(RomCache.items_path(directory))
 	for raw: Dictionary in items:
 		if int(raw.get("number", 0)) == 7:
 			raw["name"] = "ITEM7"
 			raw["price"] = 120
-	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
-	RomCache.write_json(RomCache.world_marts_path(Fixture.directory()), {
+	RomCache.write_json(RomCache.items_path(directory), items)
+	RomCache.write_json(RomCache.world_marts_path(directory), {
 		"marts": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000, "items": [7, 8]}],
 		"default": {"items": [7]}, "special": {
 			"bargain": [{"item": 7, "price": 50}],
@@ -300,7 +340,7 @@ func _write_services() -> void:
 			"rooftop_mart_2": [{"item": 8, "price": 20}],
 		},
 	})
-	RomCache.write_json(RomCache.world_phone_path(Fixture.directory()), {
+	RomCache.write_json(RomCache.world_phone_path(directory), {
 		"contacts": [{
 			"index": 0, "trainer_class": 1, "trainer_number": 2,
 			"map_group": Fixture.MAP_GROUP, "map_number": Fixture.MAP_NUMBER,
@@ -308,7 +348,7 @@ func _write_services() -> void:
 		}],
 		"special_calls": [],
 	})
-	RomCache.write_json(RomCache.world_audio_path(Fixture.directory()), {
+	RomCache.write_json(RomCache.world_audio_path(directory), {
 		"music": [{"index": 0, "bank": Fixture.BANK, "address": 0x4000,
 			"bytes": [0x00, 0x03, 0x40, 0xD4, 0x10, 0xFF], "byte_count": 6}],
 		"sfx": [],

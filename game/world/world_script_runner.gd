@@ -1301,7 +1301,7 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 		0x04: # VAR_TIMEOFDAY
 			_script_value = Gen2WorldClock.new(hour, 0, day).time_of_day()
 		0x07: # VAR_BADGES
-			_script_value = state.badge_count() if state != null else 0
+			_script_value = state.badge_count(_crystal_commands()) if state != null else 0
 		0x0A: # VAR_HOUR
 			_script_value = hour
 		0x0B: # VAR_WEEKDAY

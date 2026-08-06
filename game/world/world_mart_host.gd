@@ -50,7 +50,8 @@ static func resolve_mart(
 			label = "ROOFTOP SALE"
 		_:
 			return _failure(&"unsupported_mart_dialog", {"dialog": dialog_id})
-	if variant == &"bargain" and world_state != null and world_state.bargain_merchant_closed():
+	if variant == &"bargain" and world_state != null \
+		and world_state.bargain_merchant_closed(Gen2WorldState.is_crystal_profile(data)):
 		return _failure(&"bargain_mart_closed", {"dialog": dialog_id})
 	if mart.is_empty() or not mart.has("items") or not mart["items"] is Array \
 		or (mart["items"] as Array).is_empty():
@@ -138,12 +139,15 @@ static func purchase(
 			"item": item, "price": price, "quantity": quantity,
 			"total": total, "balance": balance,
 		})
+	var merchant_closed_flag: int = Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED \
+		if Gen2WorldState.is_crystal_profile(world.data) \
+		else Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER
 	var before: Gen2WorldSnapshot = world.snapshot()
 	var applied: Dictionary = world.state.apply_changes({}, {}, {
 		"items": {item: next_quantity},
 		"money": {MONEY_ACCOUNT: balance - total},
 		"engine_flags": {
-			Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: true,
+			merchant_closed_flag: true,
 		} if is_bargain else {},
 	})
 	if not bool(applied.get("ok", false)):

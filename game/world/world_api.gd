@@ -470,7 +470,7 @@ func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
 func set_world_clock(day: int, hour: int, minute: int) -> void:
 	var next_day: int = posmod(day, Gen2WorldClock.DAYS_PER_WEEK)
 	if next_day != world_day and state != null:
-		state.reset_daily_flags()
+		state.reset_daily_flags(Gen2WorldState.is_crystal_profile(data))
 	world_day = next_day
 	world_hour = posmod(hour, Gen2WorldClock.HOURS_PER_DAY)
 	world_minute = posmod(minute, Gen2WorldClock.MINUTES_PER_HOUR)
