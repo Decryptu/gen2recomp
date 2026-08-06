@@ -6,6 +6,8 @@ extends RefCounted
 
 const ROOT: String = "user://save_slots"
 const SLOT_COUNT: int = 3
+# Canonical Crystal Elm's Lab gift records. These values describe the imported
+# story choices and are not inserted into a new save before the lab handoff.
 const STARTER_LEVEL: int = 5
 const STARTER_SPECIES: Array[int] = [152, 155, 158]
 const STARTER_ITEM: int = 0xAD
@@ -106,35 +108,23 @@ static func create_development_save(data: GameData, slot: int) -> Gen2SaveData:
 	)
 
 
-## Creates the party obtained from Professor Elm's three starter balls. The
-## project save model does not own the player's trainer ID yet, so the starter
-## keeps the canonical zero value for its OT ID until that field exists.
+## Creates the source-shaped Crystal new-game save. Crystal initializes an
+## empty party before the player reaches Elm's Lab; the imported GIVEPOKE
+## script creates the first party member later. The optional fourth argument
+## remains accepted for callers from the earlier development launcher, but it
+## is deliberately ignored so a new save cannot skip the story handoff.
 static func create_new_game(
-	data: GameData, slot: int, player_name: String, starter_species: int
+	data: GameData, slot: int, player_name: String, _starter_species: int = -1
 ) -> Gen2SaveData:
 	if data == null or not _valid_slot(slot):
 		return null
 	if player_name.is_empty() or Gen2Text.encoded_length(player_name) > Gen2SaveData.MAX_PLAYER_NAME:
-		return null
-	if not STARTER_SPECIES.has(starter_species):
-		return null
-	if data.species(starter_species).is_empty() or data.item(STARTER_ITEM).is_empty():
-		return null
-	var known_moves: Array = data.moves_at_level(starter_species, STARTER_LEVEL)
-	var mon: Gen2BattleMon = Gen2BattleMon.create(
-		data, starter_species, STARTER_LEVEL, known_moves, Gen2BattleMon.PERFECT_DVS, {}, STARTER_ITEM
-	)
-	if mon == null:
 		return null
 	var new_save := Gen2SaveData.new()
 	new_save.game_id = data.id
 	new_save.rom_sha1 = data.sha1
 	new_save.slot = slot
 	new_save.player_name = player_name
-	var saved_mon: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(mon)
-	saved_mon.nickname = String(data.species(starter_species).get("name", ""))
-	saved_mon.original_trainer = player_name
-	new_save.party.append(saved_mon)
 	new_save.world = Gen2WorldSpawn.new_game_snapshot(data)
 	return new_save
 

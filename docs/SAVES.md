@@ -41,10 +41,12 @@ It shows three slots as `EMPTY`, `READY` or `INCOMPATIBLE`, and rejects failed
 `.sav` imports before calling `Gen2SaveStore.save`, so partial data cannot
 replace a slot.
 
-New games accept up to ten encoded characters and start Chikorita, Cyndaquil or
-Totodile at level 5 holding Berry, with moves from the imported learnset. When
-the source home map exists, they start at map group 24, map 7, cell 3,3 with
-3000 money, from Crystal's `SPAWN_HOME` and `START_MONEY`. The party screen
+New games accept up to ten encoded characters and start with an empty party,
+matching Crystal's new-game initialization. When the source home map exists,
+they start at map group 24, map 7, cell 3,3 with 3000 money, from Crystal's
+`SPAWN_HOME` and `START_MONEY`. The imported Elm's Lab scripts offer Chikorita,
+Cyndaquil or Totodile at level 5 holding Berry; the party host creates the first
+save Pokémon only after the player confirms the source choice. The party screen
 shows all six positions, current and maximum HP, and persistent status; it
 starts the development battle only after the same validated slot is selected in
 `GameRuntime`.

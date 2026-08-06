@@ -158,9 +158,10 @@ godot --headless --path . --quit-after 30
 
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
 ROM, and opens its save screen. It provides three validated slots, new games
-with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import, party
-inspection and the development battle. New games use the verified Crystal home
-spawn and source starting money when that map exists. Continue enters the
+with an empty party until Professor Elm's imported lab handoff, original `.sav`
+import, party inspection and the development battle. The lab scripts then offer
+Chikorita, Cyndaquil or Totodile at level 5 with Berry, using the verified Crystal
+home spawn and source starting money when that map exists. Continue enters the
 overworld; F5 saves its map, inventory, event and clock snapshot. See
 [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
 
@@ -212,10 +213,11 @@ Development scenes:
     crystal 24 7 2 2 1 none home
   ```
 
-  The bounded first-floor story preview follows production movement from the
-  bedroom to Players House 1F, executes the imported Mom setup with weekday
-  and daylight-saving prompts, then reaches the imported New Bark Town teacher
-  scene:
+  The bounded story preview follows production movement from the bedroom to
+  Players House 1F, executes the imported Mom setup with weekday and
+  daylight-saving prompts, reaches the imported New Bark Town teacher scene,
+  enters Elm's lab, shows the source Cyndaquil choice and completes the
+  candidate-save `GIVEPOKE` handoff:
 
   ```bash
   godot --headless --path . -s res://tools/preview_world_story.gd -- \

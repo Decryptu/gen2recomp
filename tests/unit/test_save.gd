@@ -111,18 +111,13 @@ func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 	assert_eq(written.world.map_id, Vector2i(1, 1))
 
 
-func test_new_game_uses_the_real_starter_choices_and_berry() -> void:
+func test_new_game_starts_empty_until_the_elm_lab_handoff() -> void:
 	var created: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 1, "ASH", 155)
 	assert_not_null(created)
 	assert_eq(created.player_name, "ASH")
 	assert_eq(created.slot, 1)
-	assert_eq(created.party.size(), 1)
-	var mon: Gen2SaveMon = created.party[0]
-	assert_eq(mon.species, 155)
-	assert_eq(mon.level, 5)
-	assert_eq(mon.item, Gen2SaveStore.STARTER_ITEM)
-	assert_eq(mon.nickname, "FILLER")
-	assert_eq(mon.original_trainer, "ASH")
+	assert_eq(created.party.size(), 0)
+	assert_null(created.world)
 	var validation: Dictionary = Gen2SaveValidator.validate(created, _data)
 	assert_true(validation["ok"], validation["message"])
 

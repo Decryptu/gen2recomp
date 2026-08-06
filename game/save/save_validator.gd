@@ -23,8 +23,8 @@ static func validate(save: Gen2SaveData, data: GameData) -> Dictionary:
 		return _failure("the player name is empty")
 	if Gen2Text.encoded_length(save.player_name) > Gen2SaveData.MAX_PLAYER_NAME:
 		return _failure("the player name is too long")
-	if save.party.is_empty() or save.party.size() > Gen2SaveData.MAX_PARTY:
-		return _failure("the party must contain between one and six Pokémon")
+	if save.party.size() > Gen2SaveData.MAX_PARTY:
+		return _failure("the party cannot contain more than six Pokémon")
 	if not save.boxes_shape_valid or save.boxes.size() != Gen2SaveData.BOX_COUNT:
 		return _failure("the save does not contain exactly %d PC boxes" % Gen2SaveData.BOX_COUNT)
 	var world_result: Dictionary = _validate_world(save.world, data)
