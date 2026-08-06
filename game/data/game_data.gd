@@ -42,6 +42,11 @@ var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
+## Group and number to the map's position in [member _world_maps]. Warps,
+## connections and every script warp validation ask for a map by its cartridge
+## identity, and walking 388 records to answer costs more than the lookup it is
+## part of.
+var _world_map_index: Dictionary = {}
 var _world_scripts: Dictionary = {}
 var _world_standard_scripts: Dictionary = {}
 var _world_text: Dictionary = {}
@@ -49,6 +54,7 @@ var _world_movements: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_encounters: Dictionary = {}
 var _world_palettes: Array = []
+var _decoded_palettes: Dictionary = {}
 var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
 var _overworld_sprite_palettes: Array = []
@@ -118,10 +124,9 @@ func map_count() -> int:
 
 ## One map by its stable cartridge group and number, or null when it is absent.
 func world_map(group: int, number: int) -> Gen2WorldMap:
-	for value: Gen2WorldMap in _maps():
-		if value.group == group and value.number == number:
-			return value
-	return null
+	var maps: Array = _maps()
+	var at: int = int(_world_map_index.get(Vector2i(group, number), -1))
+	return maps[at] if at >= 0 and at < maps.size() else null
 
 
 func world_maps() -> Array:
@@ -367,15 +372,21 @@ func overworld_sprite_palette(palette_index: int, time_of_day: int) -> PackedCol
 
 
 ## One of the cartridge's four-colour background palette groups.
+##
+## Decoded once and kept: there are forty-two groups, they never change, and the
+## overworld asks for them again every time an animated tile redraws the atlas.
 func world_palette(number: int) -> PackedColorArray:
+	if _decoded_palettes.has(number):
+		return _decoded_palettes[number]
+	var out := PackedColorArray()
 	if number < 0 or number >= _palettes().size():
-		return PackedColorArray()
+		return out
 	var raw: Variant = _palettes()[number]
 	if not raw is Array:
-		return PackedColorArray()
-	var out := PackedColorArray()
+		return out
 	for packed: Variant in raw as Array:
 		out.append(Gen2Palette.from_packed(int(packed)))
+	_decoded_palettes[number] = out
 	return out
 
 
@@ -829,7 +840,13 @@ func _section_json_path(section: String) -> String:
 func _maps() -> Array:
 	if _claim_section("maps"):
 		for value: Dictionary in _read_section(RomCache.world_maps_path(directory), true):
-			_world_maps.append(Gen2WorldMap.from_cache(value))
+			var map: Gen2WorldMap = Gen2WorldMap.from_cache(value)
+			# The first record of a duplicated identity wins, matching the scan
+			# this replaced.
+			var key := Vector2i(map.group, map.number)
+			if not _world_map_index.has(key):
+				_world_map_index[key] = _world_maps.size()
+			_world_maps.append(map)
 	return _world_maps
 
 

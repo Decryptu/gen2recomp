@@ -662,9 +662,12 @@ func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 func block_at(block_x: int, block_y: int) -> int:
 	if current_map == null:
 		return 0
-	var key: String = _block_key(current_map, block_x, block_y)
-	if _block_overrides.has(key):
-		return int(_block_overrides[key])
+	# Every drawn tile asks this, so the key is only built when a changeblock has
+	# actually put an override on the loaded map.
+	if not _block_overrides.is_empty():
+		var key: String = _block_key(current_map, block_x, block_y)
+		if _block_overrides.has(key):
+			return int(_block_overrides[key])
 	return current_map.block_at(block_x, block_y)
 
 
@@ -740,37 +743,62 @@ func tile_index_at(tile_x: int, tile_y: int) -> int:
 
 ## Returns the visible 20x18 graphics-tile page in row-major order. -1 marks
 ## the padding around maps smaller than the hardware viewport.
+##
+## This is [method tile_index_at] for 360 tiles, written out rather than called
+## 360 times: it is on the draw path, and the per-tile call did the same block
+## division and bounds check for every tile of the same block row.
 func visible_tile_indices() -> PackedInt32Array:
 	var out := PackedInt32Array()
 	out.resize(VIEW_TILES.x * VIEW_TILES.y)
-	for index: int in out.size():
-		out[index] = -1
+	out.fill(-1)
+	if current_map == null or current_tileset == null:
+		return out
 
+	# visible_origin_cell() is clamped to the map, so both coordinates below are
+	# non-negative and the block divisions are plain integer divisions.
 	var origin: Vector2i = visible_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH
+	var tile_width: int = RomLayout.MAP_BLOCK_TILE_WIDTH
+	var map_tile_width: int = current_map.width_blocks * tile_width
+	var map_tile_height: int = current_map.height_blocks * tile_width
 	for y: int in VIEW_TILES.y:
+		var tile_y: int = origin.y + y
+		if tile_y >= map_tile_height:
+			break
+		var row: int = y * VIEW_TILES.x
+		@warning_ignore("integer_division")
+		var block_y: int = tile_y / tile_width
+		var local_row: int = (tile_y % tile_width) * tile_width
 		for x: int in VIEW_TILES.x:
-			var tile: int = tile_index_at(origin.x + x, origin.y + y)
-			out[y * VIEW_TILES.x + x] = tile
+			var tile_x: int = origin.x + x
+			if tile_x >= map_tile_width:
+				break
+			@warning_ignore("integer_division")
+			var block: int = block_at(tile_x / tile_width, block_y)
+			out[row + x] = current_tileset.tile_index(block, local_row + tile_x % tile_width)
 	return out
 
 
+## The raw cartridge permission byte at a walk cell.
+##
+## The imported grid already holds the code the tileset gave each cell, so it is
+## the answer unless a changeblock has replaced the block this cell belongs to.
+## An overridden block has to be looked up in the tileset instead, because the
+## imported grid still describes the block the cartridge shipped.
 func collision_code_at(cell: Vector2i) -> int:
 	if current_map == null or current_tileset == null:
 		return -1
-	var block: int = block_at(
-		floori(float(cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
-		floori(float(cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
+	if _block_overrides.is_empty():
+		return current_map.collision_at(cell.x, cell.y)
+	var block_x: int = floori(float(cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+	var block_y: int = floori(float(cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+	var block: int = block_at(block_x, block_y)
+	if block == current_map.block_at(block_x, block_y):
+		return current_map.collision_at(cell.x, cell.y)
+	return current_tileset.collision_index(
+		block,
+		cell.x & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
+		cell.y & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
 	)
-	if block != current_map.block_at(
-		floori(float(cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH)),
-		floori(float(cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
-	):
-		return current_tileset.collision_index(
-			block,
-			cell.x & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
-			cell.y & (RomLayout.MAP_BLOCK_CELL_WIDTH - 1),
-		)
-	return current_map.collision_at(cell.x, cell.y)
 
 
 func collision_permission_at(cell: Vector2i) -> int:

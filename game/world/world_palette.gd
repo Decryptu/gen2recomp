@@ -71,6 +71,12 @@ static func palette_slots(environment: int, time_of_day: int) -> Array:
 	return (PALETTE_ROWS[environment_index] as Array)[time_index]
 
 
+## One palette per tile of [param tileset], in tile order.
+##
+## A tileset's ninety-six tiles share eight palette slots, so the eight are
+## resolved once and the same one is handed to every tile that uses it. This runs
+## again on every frame an animated tileset changes a tile, and building
+## ninety-six copies of eight palettes was most of that frame's cost.
 static func tile_palettes(
 	data: GameData,
 	map: Gen2WorldMap,
@@ -80,16 +86,20 @@ static func tile_palettes(
 	cave_color: int = -1,
 ) -> Array:
 	var slots: Array = palette_slots(map.environment, time_of_day)
-	var out: Array = []
-	for tile: int in tileset.tile_count:
-		var slot: int = tileset.palette_index(tile)
-		var group: int = int(slots[slot]) if slot >= 0 and slot < slots.size() else 0
-		var base: PackedColorArray = data.world_palette(group)
+	var resolved: Array = []
+	for slot: int in slots.size():
+		var base: PackedColorArray = data.world_palette(int(slots[slot]))
 		var palette := PackedColorArray()
 		palette.append_array(base)
 		if slot == 3 and water_color >= 0 and base.size() >= 4:
 			palette[0] = base[clampi(water_color, 0, 2)]
-		if slot == 4 and cave_color >= 0 and base.size() >= 2:
+		elif slot == 4 and cave_color >= 0 and base.size() >= 2:
 			palette[0] = base[clampi(cave_color, 0, 1)]
-		out.append(palette)
+		resolved.append(palette)
+	var fallback: PackedColorArray = data.world_palette(0)
+	var out: Array = []
+	out.resize(tileset.tile_count)
+	for tile: int in tileset.tile_count:
+		var slot: int = tileset.palette_index(tile)
+		out[tile] = resolved[slot] if slot >= 0 and slot < resolved.size() else fallback
 	return out

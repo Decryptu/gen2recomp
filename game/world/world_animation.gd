@@ -33,6 +33,12 @@ var _cave_color: int = -1
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _frame_seconds: float = 0.0
 var _changed: bool = false
+## Which tiles a run of commands rewrote, and whether a palette row moved. A
+## renderer that keeps a texture only has to redo these tiles: the sequence
+## touches one or two of the ninety-six per frame, and a palette change is the
+## only thing that invalidates the rest.
+var _changed_tiles: Dictionary = {}
+var _palette_changed: bool = false
 
 
 func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MORNING) -> void:
@@ -46,6 +52,8 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	_cave_color = -1
 	_frame_seconds = 0.0
 	_changed = false
+	_changed_tiles = {}
+	_palette_changed = false
 	_buffer.resize(TILE_BYTES)
 	if data == null or tileset == null:
 		_indices = PackedByteArray()
@@ -68,12 +76,29 @@ func advance(delta: float) -> bool:
 		_frame_seconds + delta, FRAME_SECONDS * float(MAX_CATCHUP_FRAMES)
 	)
 	var changed: bool = false
+	_changed_tiles = {}
+	_palette_changed = false
 	while _frame_seconds >= FRAME_SECONDS:
 		_frame_seconds -= FRAME_SECONDS
 		_changed = false
 		tick()
 		changed = changed or _changed
 	return changed
+
+
+## The tiles rewritten by the most recent [method advance], in ascending order.
+func changed_tiles() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for tile: int in _changed_tiles:
+		out.append(tile)
+	out.sort()
+	return out
+
+
+## Whether the most recent [method advance] moved a palette row, which changes
+## every tile drawn with it rather than only the ones it rewrote.
+func palette_changed() -> bool:
+	return _palette_changed
 
 
 ## How far into the command list the sequence has reached, for tests and cache
@@ -154,12 +179,16 @@ func tick() -> bool:
 			_scroll_vertical()
 		"water_palette":
 			var water_color: int = TIMER_WATER_PALETTE[(_timer & 6) >> 1]
-			_changed = _changed or water_color != _water_color
+			if water_color != _water_color:
+				_changed = true
+				_palette_changed = true
 			_water_color = water_color
 		"cave_palette":
 			if _time_of_day == Gen2WorldPalette.TIME_DARK:
 				var cave_color: int = (_timer >> 1) & 1
-				_changed = _changed or cave_color != _cave_color
+				if cave_color != _cave_color:
+					_changed = true
+					_palette_changed = true
 				_cave_color = cave_color
 	return true
 
@@ -222,6 +251,7 @@ func _set_tile_bytes(tile: int, bytes: PackedByteArray) -> void:
 				continue
 			_indices[at] = value
 			_changed = true
+			_changed_tiles[tile] = true
 
 
 func _scroll_horizontal() -> void:
