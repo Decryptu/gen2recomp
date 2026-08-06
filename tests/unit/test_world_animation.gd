@@ -121,6 +121,32 @@ func test_advance_reports_no_redraw_when_the_command_changes_nothing() -> void:
 	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
 
 
+func test_changed_tiles_reports_exactly_the_tiles_a_frame_rewrote() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+
+	# A renderer repaints only the reported tiles, so an under-report leaves a
+	# stale tile on screen and an over-report costs the work this replaced.
+	for _frame: int in 240:
+		var before: PackedByteArray = animation.current_indices().duplicate()
+		var redraw: bool = animation.advance(Gen2WorldAnimation.FRAME_SECONDS)
+		var after: PackedByteArray = animation.current_indices()
+		var actually_changed: Array = []
+		var width: int = RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_WIDTH
+		for tile: int in RomLayout.TILESET_TILE_COUNT:
+			for pixel: int in Gen2Tiles.TILE_PIXELS:
+				@warning_ignore("integer_division")
+				var at: int = (pixel / Gen2Tiles.TILE_WIDTH) * width \
+					+ tile * Gen2Tiles.TILE_WIDTH + pixel % Gen2Tiles.TILE_WIDTH
+				if before[at] != after[at]:
+					actually_changed.append(tile)
+					break
+		assert_eq(Array(animation.changed_tiles()), actually_changed)
+		assert_eq(redraw, not actually_changed.is_empty() or animation.palette_changed())
+
+
 func test_advance_drops_frames_after_a_stall_instead_of_running_the_backlog() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)

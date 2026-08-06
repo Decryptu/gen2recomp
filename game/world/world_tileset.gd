@@ -10,11 +10,14 @@ extends RefCounted
 var number: int = 0
 var block_count: int = 0
 var tile_count: int = RomLayout.TILESET_TILE_COUNT
-var meta: Array = []
-var collision: Array = []
+## The three lookup tables are cartridge bytes and are read once per drawn tile,
+## so they are packed rather than kept as Arrays of Variants. Only the animation
+## command list stays an Array, because its entries are records.
+var meta: PackedByteArray = PackedByteArray()
+var collision: PackedByteArray = PackedByteArray()
 var animation_pointer: int = 0
 var palette_map_pointer: int = 0
-var palette_map: Array = []
+var palette_map: PackedByteArray = PackedByteArray()
 var animation_commands: Array = []
 
 
@@ -23,11 +26,11 @@ static func from_cache(value: Dictionary) -> Gen2WorldTileset:
 	out.number = int(value.get("number", 0))
 	out.block_count = int(value.get("block_count", 0))
 	out.tile_count = int(value.get("tile_count", RomLayout.TILESET_TILE_COUNT))
-	out.meta = value.get("meta", []) if value.get("meta", []) is Array else []
-	out.collision = value.get("collision", []) if value.get("collision", []) is Array else []
+	out.meta = RomCache.packed_bytes(value.get("meta", []))
+	out.collision = RomCache.packed_bytes(value.get("collision", []))
 	out.animation_pointer = int(value.get("animation_pointer", 0))
 	out.palette_map_pointer = int(value.get("palette_map_pointer", 0))
-	out.palette_map = value.get("palette_map", []) if value.get("palette_map", []) is Array else []
+	out.palette_map = RomCache.packed_bytes(value.get("palette_map", []))
 	out.animation_commands = value.get("animation_commands", []) if value.get("animation_commands", []) is Array else []
 	return out
 
@@ -36,14 +39,14 @@ func tile_index(block: int, tile: int) -> int:
 	if block < 0 or block >= block_count or tile < 0 or tile >= RomLayout.MAP_BLOCK_TILE_WIDTH * RomLayout.MAP_BLOCK_TILE_WIDTH:
 		return 0
 	var at: int = block * RomLayout.TILESET_META_BYTES_PER_BLOCK + tile
-	return int(meta[at]) if at < meta.size() else 0
+	return meta[at] if at < meta.size() else 0
 
 
 func collision_index(block: int, cell_x: int, cell_y: int) -> int:
 	if block <= 0 or block >= block_count or cell_x < 0 or cell_x >= 2 or cell_y < 0 or cell_y >= 2:
 		return -1
 	var at: int = block * RomLayout.TILESET_COLLISION_BYTES_PER_BLOCK + cell_x + cell_y * 2
-	return int(collision[at]) if at < collision.size() else -1
+	return collision[at] if at < collision.size() else -1
 
 
 ## Palette maps store two tile assignments per byte, low nibble first. The
@@ -54,5 +57,5 @@ func palette_index(tile: int) -> int:
 	var at: int = tile >> 1
 	if at >= palette_map.size():
 		return 0
-	var packed: int = int(palette_map[at])
+	var packed: int = palette_map[at]
 	return packed & 0x0F if (tile & 1) == 0 else packed >> 4

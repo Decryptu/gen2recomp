@@ -49,7 +49,12 @@ var _battle_setup: Dictionary = {}
 var _phone_context: Dictionary = {}
 var _phone_started: bool = false
 var _text_buffers: Dictionary = {}
-var _phone_random := RandomNumberGenerator.new()
+## Everything this invocation rolls: the source RANDOM command and the phone
+## routines that pick a caller line or an unseen species. Injected like the rest
+## of the project's randomness, so a caller can reproduce a branch; a runner
+## started without one randomizes its own rather than reaching for the engine's
+## global generator, which no seed can reach.
+var _random := RandomNumberGenerator.new()
 
 const PHONE_CONTACT_GOT: int = 0
 const PHONE_CONTACTS_FULL: int = 1
@@ -88,6 +93,7 @@ static func begin(
 	world_state: Gen2WorldState,
 	request: Dictionary,
 	validator: Callable = Callable(),
+	random: RandomNumberGenerator = null,
 ) -> Gen2WorldScriptRunner:
 	var runner := Gen2WorldScriptRunner.new()
 	runner.data = game_data
@@ -95,7 +101,10 @@ static func begin(
 	runner.warp_validator = validator
 	runner._request = request.duplicate(true)
 	runner._phone_context = request.get("phone", {}).duplicate(true)
-	runner._phone_random.randomize()
+	if random != null:
+		runner._random = random
+	else:
+		runner._random.randomize()
 	runner._reset_phone_receive_timer = bool(request.get("reset_receive_timer", false))
 	runner._last_talked_object_index = int(request.get("object_index", -1))
 	runner._last_item = int(request.get("item", 0))
@@ -527,7 +536,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			return _execute_special(int(command["value"]))
 		Gen2WorldScript.RANDOM:
 			var maximum: int = int(command["value"])
-			_script_value = randi_range(0, maximum - 1) if maximum > 0 else 0
+			_script_value = _random.randi_range(0, maximum - 1) if maximum > 0 else 0
 		Gen2WorldScript.GIVEITEM:
 			return _stage_item_delta(int(command["value"]), int(command["value_2"]))
 		Gen2WorldScript.TAKEITEM:
@@ -1246,7 +1255,13 @@ func _execute_special(special: int) -> Dictionary:
 			_stage_dst_confirmation_text(false)
 			return {"ok": true}
 		SPECIAL_PLAY_MAP_MUSIC, SPECIAL_RESTART_MAP_MUSIC:
-			return _stage_audio_request(&"map_music", {"special": special})
+			# Entering a map with the music already playing does not restart it,
+			# which is why crossing a route boundary is one continuous track.
+			# RestartMapMusic exists to override exactly that, so it says so.
+			return _stage_audio_request(&"map_music", {
+				"special": special,
+				"restart": special == SPECIAL_RESTART_MAP_MUSIC,
+			})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",
@@ -1380,7 +1395,7 @@ func _phone_wild_mon_name() -> String:
 		return ""
 	## RandomPhoneWildMon masks the cartridge RNG to select one of the first
 	## four grass slots, rather than using the ordinary weighted encounter roll.
-	var raw_slot: Variant = (selected as Array)[_phone_random.randi_range(0, 3)]
+	var raw_slot: Variant = (selected as Array)[_random.randi_range(0, 3)]
 	if not raw_slot is Dictionary:
 		return ""
 	var species: int = int((raw_slot as Dictionary).get("species", 0))
@@ -1409,7 +1424,7 @@ func _phone_unseen_rare_species() -> int:
 		if common is Dictionary:
 			common_species.append(int((common as Dictionary).get("species", 0)))
 	for _attempt: int in 128:
-		var roll: int = _phone_random.randi() & 0x03
+		var roll: int = _random.randi() & 0x03
 		if roll == 0:
 			continue
 		var slot_index: int = 4 + roll - 1
@@ -1439,7 +1454,7 @@ func _phone_trainer_mon_name() -> String:
 			candidates.append(species)
 	if candidates.is_empty():
 		return ""
-	var species: int = candidates[_phone_random.randi_range(0, candidates.size() - 1)]
+	var species: int = candidates[_random.randi_range(0, candidates.size() - 1)]
 	return String(data.species(species).get("name", ""))
 
 

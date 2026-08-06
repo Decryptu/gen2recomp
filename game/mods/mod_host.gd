@@ -27,6 +27,19 @@ const ROOT: String = "user://mods"
 const WORLD_RENDERER_METHODS: Array[String] = [
 	"set_world", "set_time_of_day", "refresh", "refresh_animation",
 ]
+## Optional. A renderer that defines this and answers false is given the screen's
+## own rectangle at the window's resolution instead of the 160x144 hardware
+## viewport. A view built out of geometry rather than hardware tiles cannot be
+## drawn into a 160x144 buffer and then magnified, so this is the difference
+## between a 3D or HD renderer being possible and not.
+##
+## A renderer that does not define it draws in hardware pixels, which is what the
+## built-in one does and what a mod that only recolours tiles wants.
+const WORLD_RENDERER_SURFACE_METHOD: String = "uses_hardware_viewport"
+## Optional. Called with the native layer's size in window pixels when it is
+## created and whenever the window changes it. Only reached by a renderer that
+## asked for the native layer.
+const WORLD_RENDERER_RESIZE_METHOD: String = "set_native_size"
 ## The id of the built-in 2D renderer, which is always registered.
 const BUILT_IN_RENDERER: StringName = &"gen2"
 
@@ -124,6 +137,15 @@ func create_world_renderer() -> Node:
 	return Gen2WorldRenderer.new()
 
 
+## Which of the screen's two layers [param renderer] is drawn on. See
+## [constant WORLD_RENDERER_SURFACE_METHOD]; not answering means hardware pixels,
+## so a renderer written before this existed keeps the layer it was written for.
+static func renderer_uses_hardware_viewport(renderer: Node) -> bool:
+	if renderer == null or not renderer.has_method(WORLD_RENDERER_SURFACE_METHOD):
+		return true
+	return bool(renderer.call(WORLD_RENDERER_SURFACE_METHOD))
+
+
 ## Reads every installed mod's manifest without running any of them. The
 ## launcher lists these; refusals are kept so it can say why one is absent.
 func discover(root: String = ROOT) -> Array:
@@ -145,6 +167,12 @@ func discover(root: String = ROOT) -> Array:
 				_failures.append(result)
 		name = directory.get_next()
 	directory.list_dir_end()
+	return _manifests.values()
+
+
+## What the last [method discover] accepted, without discovering again. A second
+## discover would drop the load failures recorded after it.
+func manifests() -> Array:
 	return _manifests.values()
 
 

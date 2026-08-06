@@ -11,7 +11,10 @@ const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
 var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
-var _atlas: Texture2D = null
+var _atlas: ImageTexture = null
+## Kept beside the texture so an animation frame can repaint the one or two
+## tiles it rewrote instead of recolouring the whole strip.
+var _atlas_image: Image = null
 var _background_color: Color = FALLBACK_BACKGROUND
 var _actor_textures: Dictionary = {}
 
@@ -34,19 +37,55 @@ func set_time_of_day(time_of_day: int) -> void:
 	queue_redraw()
 
 
+## Repaints the tiles the last animation frame rewrote.
+##
+## The sequence touches one or two of a tileset's ninety-six tiles per frame, so
+## recolouring the whole strip was almost all of the frame's cost. A palette
+## command is the exception: it changes every tile drawn with that row, so it
+## still rebuilds.
 func refresh_animation() -> void:
-	_rebuild_atlas()
+	if _animation == null or _atlas == null or _atlas_image == null \
+		or _animation.palette_changed():
+		_rebuild_atlas()
+		queue_redraw()
+		return
+	var changed: PackedInt32Array = _animation.changed_tiles()
+	if changed.is_empty():
+		return
+	var indices: PackedByteArray = _animation.current_indices()
+	var palettes: Array = _tile_palettes()
+	for tile: int in changed:
+		_paint_tile(_atlas_image, indices, palettes, tile)
+	_atlas.update(_atlas_image)
 	queue_redraw()
 
 
 func _rebuild_atlas() -> void:
 	_atlas = null
+	_atlas_image = null
 	if _world == null or _world.data == null or _world.current_tileset == null:
 		return
 	var indices: PackedByteArray = _world.data.world_tileset_indices(_world.current_tileset.number)
 	if _animation != null and not _animation.current_indices().is_empty():
 		indices = _animation.current_indices()
-	var palettes: Array = Gen2WorldPalette.tile_palettes(
+	var palettes: Array = _tile_palettes()
+	if not palettes.is_empty() and (palettes[0] as PackedColorArray).size() >= 1:
+		_background_color = (palettes[0] as PackedColorArray)[0]
+	else:
+		_background_color = FALLBACK_BACKGROUND
+	var tile_count: int = _world.current_tileset.tile_count
+	if indices.size() < tile_count * Gen2Tiles.TILE_PIXELS:
+		return
+	_atlas_image = Image.create(
+		tile_count * Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
+	)
+	for tile: int in tile_count:
+		_paint_tile(_atlas_image, indices, palettes, tile)
+	_atlas = ImageTexture.create_from_image(_atlas_image)
+
+
+func _tile_palettes() -> Array:
+	return Gen2WorldPalette.tile_palettes(
 		_world.data,
 		_world.current_map,
 		_world.current_tileset,
@@ -54,26 +93,23 @@ func _rebuild_atlas() -> void:
 		_animation.water_palette_color() if _animation != null else -1,
 		_animation.cave_palette_color() if _animation != null else -1,
 	)
-	if not palettes.is_empty() and (palettes[0] as PackedColorArray).size() >= 1:
-		_background_color = (palettes[0] as PackedColorArray)[0]
-	else:
-		_background_color = FALLBACK_BACKGROUND
-	if indices.size() >= _world.current_tileset.tile_count * Gen2Tiles.TILE_PIXELS:
-		var image: Image = _image_from_tiles(indices, palettes, _world.current_tileset.tile_count)
-		_atlas = ImageTexture.create_from_image(image)
 
 
-func _image_from_tiles(indices: PackedByteArray, palettes: Array, tile_count: int) -> Image:
-	var width: int = tile_count * Gen2Tiles.TILE_WIDTH
-	var image := Image.create(width, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8)
-	for tile: int in tile_count:
-		var palette: PackedColorArray = palettes[tile] if tile < palettes.size() else PackedColorArray()
-		for y: int in Gen2Tiles.TILE_HEIGHT:
-			for x: int in Gen2Tiles.TILE_WIDTH:
-				var color_index: int = int(indices[y * width + tile * Gen2Tiles.TILE_WIDTH + x])
-				var color: Color = palette[color_index] if color_index < palette.size() else _background_color
-				image.set_pixel(tile * Gen2Tiles.TILE_WIDTH + x, y, color)
-	return image
+## One tile of the strip, coloured. Index 0 is a colour here rather than a hole:
+## the atlas is the background layer, and the cartridge's transparent index
+## belongs to sprites.
+func _paint_tile(image: Image, indices: PackedByteArray, palettes: Array, tile: int) -> void:
+	var width: int = image.get_width()
+	var palette: PackedColorArray = palettes[tile] if tile < palettes.size() else PackedColorArray()
+	var left: int = tile * Gen2Tiles.TILE_WIDTH
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		var row: int = y * width + left
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			var color_index: int = indices[row + x]
+			image.set_pixel(
+				left + x, y,
+				palette[color_index] if color_index < palette.size() else _background_color
+			)
 
 
 func refresh() -> void:

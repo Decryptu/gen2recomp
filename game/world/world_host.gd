@@ -180,6 +180,8 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 				return {"ok": false, "reason": &"audio_data_unavailable"}
 			return {"ok": true, "data": {"audio": audio}}
 	return {}
+
+
 static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dictionary:
 	var values: Dictionary = request.get("values", {})
 	var audio_kind: StringName = StringName(values.get("kind", &""))

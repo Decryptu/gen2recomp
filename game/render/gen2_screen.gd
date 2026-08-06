@@ -15,6 +15,12 @@ extends Control
 ## game stays a Game Boy.
 ##
 ## Add what the game draws with [method display]; it goes inside the viewport.
+##
+## There is a second layer behind it, [method display_native], covering the same
+## rectangle at the window's own resolution. A view that is not made of hardware
+## pixels goes there: a 3D or HD renderer cannot be drawn in a 160x144 buffer and
+## then magnified, but it still has to line up with the text boxes and menus
+## drawn above it, which are hardware pixels and stay that way.
 
 const WIDTH: int = 160
 const HEIGHT: int = 144
@@ -22,11 +28,15 @@ const HEIGHT: int = 144
 ## Emitted after a resize changes the whole-number factor the screen is drawn
 ## at. Nothing in the game should care, but a debug overlay might.
 signal scale_changed(factor: int)
+## Emitted after the native layer's rectangle changes, in window pixels. A view
+## drawn there sizes itself to this rather than to the window.
+signal native_size_changed(size: Vector2i)
 
 var scale_factor: int = 1
 
 @onready var _container: SubViewportContainer = %Container
 @onready var _viewport: SubViewport = %Viewport
+@onready var _native: Control = %Native
 
 
 func _ready() -> void:
@@ -43,11 +53,25 @@ func display(node: Node) -> void:
 	_viewport.add_child(node)
 
 
-## Removes and frees everything currently on screen.
+## Puts a node on the layer behind the hardware screen, covering the same
+## rectangle at the window's own resolution. Position it in [method native_size]
+## pixels; what is drawn in the hardware viewport is composited over it.
+func display_native(node: Node) -> void:
+	_native.add_child(node)
+
+
+## The native layer's rectangle in window pixels, which is the hardware screen's
+## size times the whole-number factor it is drawn at.
+func native_size() -> Vector2i:
+	return Vector2i(WIDTH * scale_factor, HEIGHT * scale_factor)
+
+
+## Removes and frees everything currently on screen, on both layers.
 func clear() -> void:
-	for child: Node in _viewport.get_children():
-		_viewport.remove_child(child)
-		child.queue_free()
+	for parent: Node in [_viewport, _native]:
+		for child: Node in parent.get_children():
+			parent.remove_child(child)
+			child.queue_free()
 
 
 ## The viewport itself, for a caller that needs to read the drawn frame.
@@ -65,7 +89,10 @@ func _fit() -> void:
 	# Centred rather than anchored: a screen that does not divide evenly into
 	# the window leaves a margin, and an uneven one is visible.
 	_container.position = ((size - drawn) * 0.5).floor()
+	_native.size = drawn
+	_native.position = _container.position
 
 	if factor != scale_factor:
 		scale_factor = factor
 		scale_changed.emit(factor)
+	native_size_changed.emit(Vector2i(drawn))

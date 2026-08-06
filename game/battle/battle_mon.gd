@@ -270,6 +270,7 @@ const GENDER_MALE: StringName = &"male"
 const GENDER_FEMALE: StringName = &"female"
 const GENDER_NONE: StringName = &"genderless"
 
+
 func gender() -> StringName:
 	var ratio: int = int(data.species(species).get("gender_ratio", GENDER_UNKNOWN))
 	if ratio == GENDER_UNKNOWN:

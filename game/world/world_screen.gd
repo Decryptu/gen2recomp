@@ -112,6 +112,7 @@ func _build_world() -> void:
 		_encounter_random.randomize()
 
 	_world.schedule_random = _encounter_random
+	_world.script_random = _encounter_random
 	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -121,12 +122,7 @@ func _build_world() -> void:
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
 	_animation.configure(_world, time_of_day)
-	# Constructed through the mod host rather than directly, so a registered
-	# renderer replaces this view without the screen knowing what it draws with.
-	_renderer = Gen2ModHost.instance().create_world_renderer()
-	_renderer.set_world(_world, _animation)
-	_renderer.set_time_of_day(time_of_day)
-	_screen.display(_renderer)
+	_build_renderer()
 	_audio_player = AUDIO_PLAYER_SCRIPT.new()
 	_audio_player.name = "AudioPlayer"
 	add_child(_audio_player)
@@ -141,6 +137,69 @@ func _build_world() -> void:
 	if not entry_results.is_empty():
 		_show_script_results(entry_results)
 	_refresh_labels()
+
+
+## Builds the view for the selected renderer and attaches it to the layer that
+## renderer asked for.
+##
+## Constructed through the mod host rather than directly, so a registered
+## renderer replaces this view without the screen knowing what it draws with. A
+## renderer that answers the surface question with false is given the screen's
+## rectangle at window resolution instead of the hardware viewport, which is what
+## a 3D or HD view needs; the text boxes and menus above it stay hardware pixels
+## either way.
+func _build_renderer() -> void:
+	if _world == null:
+		return
+	if _renderer != null:
+		if _screen.native_size_changed.is_connected(_on_native_size_changed):
+			_screen.native_size_changed.disconnect(_on_native_size_changed)
+		_renderer.get_parent().remove_child(_renderer)
+		_renderer.queue_free()
+	_renderer = Gen2ModHost.instance().create_world_renderer()
+	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
+		_screen.display(_renderer)
+	else:
+		_screen.display_native(_renderer)
+		_screen.native_size_changed.connect(_on_native_size_changed)
+		_on_native_size_changed(_screen.native_size())
+	_renderer.set_world(_world, _animation)
+	_renderer.set_time_of_day(time_of_day)
+
+
+func _on_native_size_changed(size_pixels: Vector2i) -> void:
+	if _renderer != null \
+		and _renderer.has_method(Gen2ModHost.WORLD_RENDERER_RESIZE_METHOD):
+		_renderer.call(Gen2ModHost.WORLD_RENDERER_RESIZE_METHOD, size_pixels)
+
+
+## Switches the live view to another registered renderer without disturbing the
+## world behind it. This is the boundary a keybind uses to flip between the 2D
+## view and a mod's: nothing about the map, the player or the running script
+## changes, because a renderer only ever reads them.
+func select_world_renderer(id: StringName) -> Dictionary:
+	var result: Dictionary = Gen2ModHost.instance().select_world_renderer(id)
+	if not bool(result.get("ok", false)):
+		_script_prompt = "Renderer unavailable: %s" % String(result.get("reason", "unknown"))
+		_refresh_labels()
+		return result
+	_build_renderer()
+	_script_prompt = "Renderer: %s" % Gen2ModHost.instance().world_renderer_label(id)
+	_refresh_labels()
+	return result
+
+
+## Selects the registered renderer after the current one, wrapping. One key can
+## then cycle every installed view, which is how a mod's 3D world is reached.
+func cycle_world_renderer() -> Dictionary:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var ids: Array = host.world_renderer_ids()
+	if ids.size() < 2:
+		_script_prompt = "No other renderer is registered"
+		_refresh_labels()
+		return {"ok": false, "reason": &"single_renderer"}
+	var at: int = ids.find(host.selected_world_renderer())
+	return select_world_renderer(ids[posmod(at + 1, ids.size())])
 
 
 func _process(delta: float) -> void:
@@ -262,6 +321,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			return
 		KEY_P:
 			_open_phone_list()
+			accept_event()
+			return
+		KEY_V:
+			cycle_world_renderer()
 			accept_event()
 			return
 		KEY_F5:
@@ -1025,7 +1088,10 @@ func _handle_audio_request(request: Dictionary) -> Array:
 	var record: Dictionary = resolved.get("data", {}).get("audio", {})
 	if kind == &"music_fadeout":
 		record["fade_time"] = int(request.get("values", {}).get("fade_time", 0))
-	var playback: Dictionary = _audio_player.play_record(record, kind, _audio_assets())
+	var playback: Dictionary = _audio_player.play_record(
+		record, kind, _audio_assets(),
+		bool(request.get("values", {}).get("restart", false))
+	)
 	if not bool(playback.get("ok", false)):
 		_script_prompt = "Audio unavailable: %s" % String(playback.get("reason", "unknown"))
 		_refresh_labels()
@@ -1086,6 +1152,9 @@ func _refresh_labels() -> void:
 		_world.collision_code_at(_world.player_cell),
 	]
 	_hint.text += "    time %s    rods: %s    balls: %s    P: phone    F5: save" % [clock_text, owned, balls]
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	if host.world_renderer_ids().size() > 1:
+		_hint.text += "    V: view (%s)" % host.world_renderer_label(host.selected_world_renderer())
 	var services: Dictionary = _data.world_service_counts()
 	_hint.text += "    services menus %d marts %d phone %d music %d sfx %d cries %d" % [
 		int(services.get("menus", 0)), int(services.get("marts", 0)),

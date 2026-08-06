@@ -223,6 +223,27 @@ static func read_json(path: String) -> Variant:
 	return JSON.parse_string(text)
 
 
+## One cached grid of cartridge bytes, packed on the way out of JSON.
+##
+## A JSON number comes back as a float and an Array of them costs about
+## twenty-six bytes resident per cartridge byte. The map block, map collision and
+## tileset lookup tables are all byte grids that are read once per drawn tile and
+## are resident for every map at once, so they are unboxed here rather than at
+## each lookup. A value that is not an array answers empty, which the record's
+## own bounds checks then report as absent.
+static func packed_bytes(value: Variant) -> PackedByteArray:
+	if value is PackedByteArray:
+		return value
+	var out := PackedByteArray()
+	if not value is Array:
+		return out
+	var rows: Array = value as Array
+	out.resize(rows.size())
+	for index: int in rows.size():
+		out[index] = int(rows[index]) & 0xFF
+	return out
+
+
 ## Writes a pointer map of raw cartridge byte runs: scripts, text and movements,
 ## all of which are [code]{ "bank:address": [bytes] }[/code]. Every value is a
 ## run, so each becomes a [constant PAYLOAD_KEY] span into the blob.

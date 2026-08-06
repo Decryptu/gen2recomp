@@ -188,7 +188,8 @@ Development scenes:
   `preview_battle_request()`, `preview_world_battle_loss()`,
   `preview_capture()` and `preview_party_transaction()` exercise their live
   paths. The API also exposes swarm/roaming updates, repel countdowns and a
-  JSON-safe snapshot. The hint line reports imported service counts.
+  JSON-safe snapshot. `V` cycles the registered world renderers. The hint line
+  reports imported service counts.
 
   `tools/preview_world_services.gd` captures the production mart overlay with
   the deterministic integration cache. `tools/preview_fishing.gd` captures
@@ -256,14 +257,26 @@ marts, phone calls and audio requests.
 | `tools/` | Headless developer scripts |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
 | `game/mods/` | Mod manifest and host |
+| `mods/examples/` | Example mods to copy into `user://mods/` |
 | `docs/` | Contributor notes |
 
 ## Platforms
 
-Windows, macOS, Linux, Android and iOS use GL Compatibility. Export presets
-are not configured. iOS forbids JIT and runtime native code, so mods must be
-interpreted GDScript, not compiled extensions. The project is therefore
-GDScript-first. See [docs/MODS.md](docs/MODS.md).
+Windows, macOS, Linux, Android and iOS use GL Compatibility.
+`export_presets.cfg` covers all five and writes into `builds/`. Install the
+matching export templates first, then:
+
+```bash
+godot --headless --path . --export-release "Linux" builds/linux/gen2recomp.x86_64
+```
+
+Tests, tools and GUT are excluded, and `roms/` and the `user://` cache are not
+reachable from an export at all. Signing identities are placeholders: set the
+bundle identifiers, Android SDK paths and Apple team ID before publishing.
+
+iOS forbids JIT and runtime native code, so mods must be interpreted GDScript,
+not compiled extensions. The project is therefore GDScript-first. See
+[docs/MODS.md](docs/MODS.md).
 
 ## Contributing
 

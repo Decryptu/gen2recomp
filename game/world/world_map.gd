@@ -17,8 +17,12 @@ var fish_group: int = 0
 var border_block: int = 0
 var width_blocks: int = 0
 var height_blocks: int = 0
-var blocks: Array = []
-var collision: Array = []
+## Both grids are cartridge bytes, so they are packed rather than kept as Arrays
+## of Variants. Every map in the cache is resident at once and each lookup is on
+## the draw path, so the twenty-odd bytes a Variant costs are paid 388 times over
+## and unboxed once per tile.
+var blocks: PackedByteArray = PackedByteArray()
+var collision: PackedByteArray = PackedByteArray()
 var collision_width: int = 0
 var collision_height: int = 0
 var connection_flags: int = 0
@@ -41,8 +45,8 @@ static func from_cache(value: Dictionary) -> Gen2WorldMap:
 	out.border_block = int(value.get("border_block", 0))
 	out.width_blocks = int(value.get("width_blocks", 0))
 	out.height_blocks = int(value.get("height_blocks", 0))
-	out.blocks = value.get("blocks", []) if value.get("blocks", []) is Array else []
-	out.collision = value.get("collision", []) if value.get("collision", []) is Array else []
+	out.blocks = RomCache.packed_bytes(value.get("blocks", []))
+	out.collision = RomCache.packed_bytes(value.get("collision", []))
 	out.collision_width = int(value.get("collision_width", out.width_blocks * 2))
 	out.collision_height = int(value.get("collision_height", out.height_blocks * 2))
 	var cached_connections: Variant = value.get("connections", [])
@@ -61,13 +65,15 @@ static func from_cache(value: Dictionary) -> Gen2WorldMap:
 func block_at(block_x: int, block_y: int) -> int:
 	if block_x < 0 or block_x >= width_blocks or block_y < 0 or block_y >= height_blocks:
 		return 0
-	return int(blocks[block_y * width_blocks + block_x])
+	var at: int = block_y * width_blocks + block_x
+	return blocks[at] if at < blocks.size() else 0
 
 
 func collision_at(cell_x: int, cell_y: int) -> int:
 	if cell_x < 0 or cell_x >= collision_width or cell_y < 0 or cell_y >= collision_height:
 		return -1
-	return int(collision[cell_y * collision_width + cell_x])
+	var at: int = cell_y * collision_width + cell_x
+	return collision[at] if at < collision.size() else -1
 
 
 static func _scripts_from_cache(value: Variant) -> Dictionary:
