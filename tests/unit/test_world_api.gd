@@ -555,12 +555,47 @@ func test_world_host_resolves_contextual_warp_and_item_sounds() -> void:
 
 
 func test_collision_codes_keep_the_cartridge_permission_categories() -> void:
+	assert_eq(Gen2WorldCollision.PERMISSIONS.size(), 256)
 	assert_eq(Gen2WorldCollision.permission_for(0x00), Gen2WorldCollision.LAND_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(0x70), Gen2WorldCollision.LAND_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(0x20), Gen2WorldCollision.WATER_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(0x07), Gen2WorldCollision.WALL_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(0x90), Gen2WorldCollision.WALL_TILE)
 	assert_eq(Gen2WorldCollision.permission_for(-1), Gen2WorldCollision.WALL_TILE)
+	assert_eq(Gen2WorldCollision.permission_for(0x100), Gen2WorldCollision.WALL_TILE)
+
+	# The waterfall, current and buoy families. Every one of these was ordinary
+	# ground before the table was carried whole, so a player walked out to sea
+	# and surf refused to enter it.
+	for code: int in range(0x30, 0x40):
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WATER_TILE,
+			"$%02X is water" % code
+		)
+	for code: int in range(0xC0, 0xD0):
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WATER_TILE,
+			"$%02X is water" % code
+		)
+
+	# Both headbutt trees and both cut trees block, and the source marks all four
+	# as tiles the player can face and press A on.
+	for code: int in [0x12, 0x15, 0x1A, 0x1D]:
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WALL_TILE,
+			"$%02X blocks" % code
+		)
+		assert_true(Gen2WorldCollision.talks(code), "$%02X talks" % code)
+	assert_false(Gen2WorldCollision.talks(0x07))
+
+	# Whirlpools and buoys float and talk at once, which is why the TALK bit is
+	# masked off rather than compared as part of the permission.
+	for code: int in [0x22, 0x24, 0x2A, 0x2C]:
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WATER_TILE,
+			"$%02X is water" % code
+		)
+		assert_true(Gen2WorldCollision.talks(code), "$%02X talks" % code)
 
 
 func test_api_resolves_map_and_clamps_start_cell() -> void:
