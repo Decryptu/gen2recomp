@@ -215,6 +215,10 @@ static func _read_price_mart_at(rom: RomFile, offset: int, name: String) -> Dict
 
 
 static func _read_phone(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var names_result: Dictionary = _read_phone_non_trainer_names(rom, layout)
+	if not bool(names_result.get("ok", false)):
+		return names_result
+	var non_trainer_names: Array = names_result.get("names", [])
 	var table: int = int(layout["phone_contacts"])
 	if not rom.in_bounds(table, RomLayout.PHONE_CONTACT_COUNT * RomLayout.PHONE_CONTACT_SIZE):
 		return _error("Phone contact table is outside the cartridge.")
@@ -225,10 +229,17 @@ static func _read_phone(rom: RomFile, layout: Dictionary) -> Dictionary:
 		var caller: Dictionary = _phone_pointer(rom, at + 9)
 		if callee.is_empty() or caller.is_empty():
 			return _error("Phone contact %d has an invalid script pointer." % index)
+		var trainer_class: int = rom.u8(at)
+		var trainer_number: int = rom.u8(at + 1)
+		var caller_label: String = ""
+		if trainer_class == 0 and trainer_number >= 0 and trainer_number < non_trainer_names.size():
+			caller_label = String((non_trainer_names[trainer_number] as Dictionary).get("name", ""))
 		contacts.append({
 			"index": index,
-			"trainer_class": rom.u8(at),
-			"trainer_number": rom.u8(at + 1),
+			"trainer_class": trainer_class,
+			"trainer_number": trainer_number,
+			"non_trainer_id": trainer_number if trainer_class == 0 else -1,
+			"caller_label": caller_label,
 			"map_group": rom.u8(at + 2),
 			"map_number": rom.u8(at + 3),
 			"callee_time": rom.u8(at + 4),
@@ -270,6 +281,7 @@ static func _read_phone(rom: RomFile, layout: Dictionary) -> Dictionary:
 		"ok": true,
 		"data": {
 			"contacts": contacts,
+			"non_trainer_names": non_trainer_names,
 			"special_calls": special_calls,
 			"metadata": {
 				"max_contacts": 10,
@@ -376,6 +388,41 @@ static func _audio_data_window(rom: RomFile, row: Dictionary) -> Dictionary:
 		"end": end,
 		"address": 0x4000 + (start - bank_start),
 }
+
+
+static func _read_phone_non_trainer_names(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var table: int = int(layout.get("phone_non_trainer_names", -1))
+	var bank: int = int(layout.get("phone_non_trainer_names_bank", -1))
+	var count: int = int(layout.get("phone_non_trainer_name_count", -1))
+	if table < 0 or bank < 0 or count <= 0:
+		return _error("Phone non-trainer caller-name layout is incomplete.")
+	if not rom.in_bounds(table, count * RomLayout.PHONE_NON_TRAINER_NAME_POINTER_SIZE):
+		return _error("Phone non-trainer caller-name pointers are outside the cartridge.")
+	var names: Array = []
+	for index: int in count:
+		var address: int = rom.u16le(
+			table + index * RomLayout.PHONE_NON_TRAINER_NAME_POINTER_SIZE
+		)
+		if not _valid_cpu_address(address):
+			return _error("Phone non-trainer caller name %d has an invalid pointer." % index)
+		var offset: int = RomFile.linear(bank, address)
+		if not rom.in_bounds(offset):
+			return _error("Phone non-trainer caller name %d is outside the cartridge." % index)
+		var end: int = offset
+		while end < rom.size() and end - offset < RomLayout.MAX_NAME_LENGTH + 16:
+			if rom.u8(end) == Gen2Text.TERMINATOR:
+				break
+			end += 1
+		if end >= rom.size() or end - offset >= RomLayout.MAX_NAME_LENGTH + 16:
+			return _error("Phone non-trainer caller name %d has no terminator." % index)
+		var raw: PackedByteArray = rom.slice(offset, end - offset + 1)
+		names.append({
+			"index": index,
+			"bank": bank,
+			"address": address,
+			"name": Gen2Text.decode(raw, 0, raw.size()),
+		})
+	return {"ok": true, "names": names}
 
 
 static func _collect_phone_scripts(

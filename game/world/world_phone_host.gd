@@ -50,6 +50,8 @@ static func contact_summary(data: GameData, contact: Dictionary) -> Dictionary:
 		"trainer_class": trainer_class,
 		"trainer_name": data.trainer_name(trainer_class),
 		"trainer_number": int(contact.get("trainer_number", 0)),
+		"non_trainer_id": int(contact.get("non_trainer_id", -1)),
+		"caller_label": String(contact.get("caller_label", "")),
 		"map_group": int(contact.get("map_group", -1)),
 		"map_number": int(contact.get("map_number", -1)),
 		"callee_time": int(contact.get("callee_time", 0)),
@@ -192,8 +194,8 @@ static func resolve_special(
 	## ring or run another phone script.
 	if call_id == 0:
 		return {"ok": true, "clear": true, "call_id": 0}
-	if data == null or not map_has_phone_service(map):
-		return _phone_unavailable(&"phone_service_unavailable")
+	if data == null:
+		return _phone_unavailable(&"phone_data_unavailable")
 	var special_call: Dictionary = data.world_special_phone_call(call_id - 1)
 	if special_call.is_empty():
 		return _phone_unavailable(&"special_phone_call_missing")

@@ -82,6 +82,32 @@ func test_reference_scan_finds_scripts_and_text_without_following_unknown_bytes(
 	assert_eq(references["texts"].size(), 1)
 
 
+func test_phonecall_scans_its_caller_name_pointer_as_text() -> void:
+	var references: Dictionary = Gen2WorldScript.scan_references(
+		PackedByteArray([0x98, 0x34, 0x12, 0x91]), 48, 0x6000, true
+	)
+	assert_eq(references["scripts"].size(), 0)
+	assert_eq(references["texts"], [{"bank": 48, "address": 0x1234}])
+
+
+func test_memcall_operands_are_runtime_addresses_not_static_script_references() -> void:
+	var memcall: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([Gen2WorldScript.MEMCALL, 0x00, 0xD0]), 0
+	)
+	assert_true(memcall["ok"])
+	assert_eq(memcall["address"], 0xD000)
+	var memcallasm: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([Gen2WorldScript.MEMCALLASM, 0x00, 0xD0]), 0
+	)
+	assert_true(memcallasm["ok"])
+	assert_eq(memcallasm["address"], 0xD000)
+	var references: Dictionary = Gen2WorldScript.scan_references(
+		PackedByteArray([Gen2WorldScript.MEMCALL, 0x00, 0xD0, Gen2WorldScript.END]),
+		48, 0x6000
+	)
+	assert_eq(references["scripts"].size(), 0)
+
+
 func test_text_decoder_skips_tx_start_and_requires_the_terminator() -> void:
 	var decoded: Dictionary = Gen2WorldScript.decode_text(
 		PackedByteArray([0x00, 0x80, 0x81, 0x50, 0x80])

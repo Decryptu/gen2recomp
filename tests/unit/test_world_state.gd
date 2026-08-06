@@ -7,7 +7,8 @@ func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	var state := Gen2WorldState.new(
 		{7: true}, {"1:2": 4}, {3: 8}, {0: 120}, 17, {9: true},
 		6, Vector2i(1, 2), 0xDF,
-		[{"species": 0xF3, "level": 40, "map_group": 1, "map_number": 2}], true
+		[{"species": 0xF3, "level": 40, "map_group": 1, "map_number": 2}], true,
+		0, Gen2WorldState.PHONE_RECEIVE_DELAYS[0], 0, {16: true}
 	)
 	var restored := Gen2WorldState.from_dict(state.to_dict())
 	assert_true(restored.is_event_flag_active(7))
@@ -20,6 +21,7 @@ func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	assert_eq(restored.swarm_map(), Vector2i(1, 2))
 	assert_eq(restored.fishing_swarm_species(), 0xDF)
 	assert_true(restored.just_battled())
+	assert_true(restored.has_seen_species(16))
 	assert_eq(restored.roaming_mons().size(), 1)
 
 
@@ -64,3 +66,12 @@ func test_phone_contact_transaction_enforces_the_cartridge_capacity() -> void:
 	var rejected: Dictionary = state.apply_changes({}, {}, {"phone_contacts": {10: true}})
 	assert_false(rejected["ok"])
 	assert_eq(state.phone_contact_count(), Gen2WorldState.PHONE_CONTACT_CAPACITY)
+
+
+func test_seen_species_changes_round_trip_and_commit_atomically() -> void:
+	var state := Gen2WorldState.new()
+	var changed: Dictionary = state.apply_changes({}, {}, {"seen_species": {25: true}})
+	assert_true(changed["ok"])
+	assert_true(state.has_seen_species(25))
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_true(restored.has_seen_species(25))

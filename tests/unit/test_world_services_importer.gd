@@ -33,6 +33,9 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	var phone: Dictionary = result["phone"]
 	assert_eq((phone["contacts"] as Array).size(), RomLayout.PHONE_CONTACT_COUNT)
 	assert_eq(phone["contacts"][1]["map_group"], 1)
+	assert_eq(phone["contacts"][1]["non_trainer_id"], 1)
+	assert_eq(phone["contacts"][1]["caller_label"], "MOM")
+	assert_eq(phone["non_trainer_names"][1]["name"], "MOM")
 	assert_eq((phone["special_calls"] as Array).size(), RomLayout.SPECIAL_PHONE_CALL_COUNT)
 	assert_eq(phone["special_calls"][0]["condition_kind"], &"outside")
 	assert_eq(phone["special_calls"][1]["condition_kind"], &"anywhere")
@@ -98,6 +101,21 @@ func _write_marts(data: PackedByteArray) -> void:
 
 
 func _write_phone(data: PackedByteArray) -> void:
+	var name_table: int = int(_layout["phone_non_trainer_names"])
+	var name_bank: int = int(_layout["phone_non_trainer_names_bank"])
+	var names: Array[String] = ["NONE", "MOM", "BIKE", "BILL", "ELM"]
+	for index: int in names.size():
+		var address: int = 0x7600 + index * 0x10
+		_write_u16(
+			data,
+			name_table + index * RomLayout.PHONE_NON_TRAINER_NAME_POINTER_SIZE,
+			address
+		)
+		var encoded: PackedByteArray = Gen2Text.encode(names[index])
+		encoded.append(Gen2Text.TERMINATOR)
+		var name_offset: int = RomFile.linear(name_bank, address)
+		for byte_index: int in encoded.size():
+			data[name_offset + byte_index] = encoded[byte_index]
 	var table: int = int(_layout["phone_contacts"])
 	for index: int in RomLayout.PHONE_CONTACT_COUNT:
 		var at: int = table + index * RomLayout.PHONE_CONTACT_SIZE

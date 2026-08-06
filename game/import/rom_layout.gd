@@ -117,6 +117,7 @@ const PHONE_CONTACT_COUNT: int = 38
 const PHONE_CONTACT_SIZE: int = 12
 const SPECIAL_PHONE_CALL_COUNT: int = 8
 const SPECIAL_PHONE_CALL_SIZE: int = 6
+const PHONE_NON_TRAINER_NAME_POINTER_SIZE: int = 2
 const AUDIO_POINTER_SIZE: int = 3
 ## Audio channel programs share subroutines within their bank, so one cached
 ## record keeps the complete 16 KiB bank window rather than truncating a valid
@@ -598,6 +599,9 @@ const GOLD_SILVER: Dictionary = {
 	"rooftop_mart_1": 0,
 	"rooftop_mart_2": 0,
 	"phone_contacts": 0x9043A,
+	"phone_non_trainer_names": 0x903CD,
+	"phone_non_trainer_names_bank": 0x24,
+	"phone_non_trainer_name_count": 5,
 	"special_phone_calls": 0x905F6,
 	"phone_out_of_area_bank": 0x24,
 	"phone_out_of_area_address": 0x4626,
@@ -719,6 +723,9 @@ const CRYSTAL: Dictionary = {
 	"rooftop_mart_1": 0x15AEE,
 	"rooftop_mart_2": 0x15AFF,
 	"phone_contacts": 0x9045F,
+	"phone_non_trainer_names": 0x903D6,
+	"phone_non_trainer_names_bank": 0x24,
+	"phone_non_trainer_name_count": 6,
 	"special_phone_calls": 0x90627,
 	"phone_out_of_area_bank": 0x24,
 	"phone_out_of_area_address": 0x4657,

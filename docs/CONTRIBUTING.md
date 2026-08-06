@@ -261,10 +261,12 @@ Because wrong offsets can decode plausible neighboring data,
 - growth rate and base EXP bytes are checked for all 251 species in all three
   games;
 - world services check source counts, pointer widths, banked addresses, mart
-  terminators, phone sizes, packed audio headers, cry pointers, shared waves,
-  drumkits and bounded bank-window payloads. Menu headers require valid data
-  pointers and command-derived shape; malformed bounded-script candidates are
-  ignored.
+  terminators, phone sizes, non-trainer caller-name pointer tables, packed audio
+  headers, cry pointers, shared waves, drumkits and bounded bank-window payloads.
+  Menu headers require valid data pointers and command-derived shape; the script
+  collector validates `phonecall` text pointers and leaves `memcall`/`memjump`
+  addresses to explicit runtime memory snapshots. Malformed bounded-script
+  candidates are ignored.
 
 When adding an offset, add its check. Find data by searching a dump for
 independently known bytes, such as an encoded name or published base stats,

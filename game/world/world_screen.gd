@@ -960,6 +960,9 @@ func _refresh_labels() -> void:
 func _phone_contact_label(contact: Dictionary) -> String:
 	if contact.is_empty():
 		return "UNKNOWN CALLER"
+	var caller_label: String = String(contact.get("caller_label", ""))
+	if not caller_label.is_empty():
+		return caller_label
 	var trainer_class: int = int(contact.get("trainer_class", 0))
 	if trainer_class > 0 and _data != null:
 		var trainer_name: String = _data.trainer_name(trainer_class)
