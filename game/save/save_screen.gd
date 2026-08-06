@@ -21,7 +21,6 @@ const ERROR: Color = Color("#ef8a8a")
 var _data: GameData = null
 var _data_override: GameData = null
 var _selected_slot: int = 0
-var _selected_starter: int = Gen2SaveStore.STARTER_SPECIES[1]
 var _new_game_visible: bool = false
 var _slots: Array = []
 var _pending_replace_action: StringName = &""
@@ -74,17 +73,17 @@ func open_new_game(slot: int = -1) -> bool:
 
 
 ## Creates and validates a new-game save in the selected slot.
-func create_new_game(player_name: String, starter_species: int) -> bool:
+func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
 	if _data == null:
 		_set_status("New game unavailable.", "No imported cartridge cache is selected.", ERROR)
 		return false
 	var created: Gen2SaveData = Gen2SaveStore.create_new_game(
-		_data, _selected_slot, player_name, starter_species
+		_data, _selected_slot, player_name
 	)
 	if created == null:
 		_set_status(
 			"New game was not created.",
-			"Enter a name of ten characters or fewer and choose a valid starter.",
+			"Enter a name of ten characters or fewer.",
 			ERROR
 		)
 		return false
@@ -98,7 +97,7 @@ func create_new_game(player_name: String, starter_species: int) -> bool:
 	_refresh()
 	_set_status(
 		"New game created in slot %d." % (_selected_slot + 1),
-		"%s is ready." % _species_name(starter_species),
+		"Professor Elm's starter is waiting in the lab.",
 		SUCCESS
 	)
 	return true
@@ -386,7 +385,7 @@ func _refresh_details() -> void:
 
 func _build_new_game_form() -> void:
 	var prompt := Label.new()
-	prompt.text = "Choose a name and Professor Elm's starter Pokémon."
+	prompt.text = "Enter a name. Professor Elm's starter is waiting in the lab."
 	prompt.add_theme_color_override("font_color", MUTED)
 	prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_details_box.add_child(prompt)
@@ -395,19 +394,6 @@ func _build_new_game_form() -> void:
 	_name_input.max_length = Gen2SaveData.MAX_PLAYER_NAME
 	_name_input.custom_minimum_size = Vector2(0, 42)
 	_details_box.add_child(_labeled_control("PLAYER NAME", _name_input))
-	var starter_label := Label.new()
-	starter_label.text = "STARTER"
-	starter_label.add_theme_color_override("font_color", ACCENT)
-	starter_label.add_theme_font_size_override("font_size", 12)
-	_details_box.add_child(starter_label)
-	var starters := HBoxContainer.new()
-	starters.add_theme_constant_override("separation", 10)
-	_details_box.add_child(starters)
-	for starter: int in Gen2SaveStore.STARTER_SPECIES:
-		var button := _button(_species_name(starter), ACCENT if starter == _selected_starter else TEXT)
-		button.custom_minimum_size = Vector2(150, 38)
-		button.pressed.connect(_select_starter.bind(starter))
-		starters.add_child(button)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 10)
 	_details_box.add_child(actions)
@@ -489,12 +475,7 @@ func _on_replace_confirmed() -> void:
 
 func _create_from_form() -> void:
 	if _name_input != null:
-		create_new_game(_name_input.text, _selected_starter)
-
-
-func _select_starter(species: int) -> void:
-	_selected_starter = species
-	_refresh_details()
+		create_new_game(_name_input.text)
 
 
 func _cancel_new_game() -> void:

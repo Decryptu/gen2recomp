@@ -43,6 +43,7 @@ var dst_enabled: bool = false
 var movement_mode: StringName = MOVEMENT_WALK
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
+var _map_entry_scene_pending: bool = false
 var _object_visibility_overrides: Dictionary = {}
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
@@ -868,7 +869,12 @@ func dispatch_callbacks(callback_type: int = -1) -> Array:
 ## this once after opening a new or validated snapshot; map transitions already
 ## queue the same callback set from _apply_map().
 func dispatch_map_entry() -> Array:
-	return dispatch_callbacks()
+	if current_map == null:
+		return []
+	if _active_script == null and _script_queue.is_empty():
+		_queue_map_callbacks(-1)
+		_map_entry_scene_pending = true
+	return run_event_queue(false)
 
 
 ## Starts the first active scripted object in the cell the player is facing.
@@ -905,6 +911,11 @@ func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 	while true:
 		if _active_script == null:
 			if _script_queue.is_empty():
+				if _map_entry_scene_pending:
+					_map_entry_scene_pending = false
+					_queue_map_scene()
+					if not _script_queue.is_empty():
+						continue
 				break
 			var request: Dictionary = _script_queue.pop_front()
 			_active_script = Gen2WorldScriptRunner.begin(
@@ -1003,6 +1014,9 @@ func _active_events_at(cell: Vector2i) -> Array:
 		elif event.get("kind", &"") == &"bg_events" \
 			and not _bg_event_condition_active(event):
 			continue
+		elif event.get("kind", &"") == &"coord_events" \
+			and not _coord_event_condition_active(event):
+			continue
 		out.append(event)
 	return out
 
@@ -1093,6 +1107,8 @@ func _enqueue_script(request: Dictionary) -> void:
 		request["clock"] = world_clock()
 	if current_map != null and not request.has("environment"):
 		request["environment"] = current_map.environment
+	if not request.has("facing"):
+		request["facing"] = player_facing
 	_script_queue.append(request)
 
 
@@ -1111,6 +1127,34 @@ func _queue_map_callbacks(callback_type: int) -> void:
 			"bank": bank,
 			"script": int(callback.get("script", 0)),
 		})
+
+
+func _queue_map_scene() -> void:
+	if current_map == null:
+		return
+	var scenes: Array = current_map.scripts.get("scenes", [])
+	if scenes.is_empty():
+		return
+	var current_scene: int = state.map_scene(current_map.group, current_map.number)
+	for scene: Dictionary in scenes:
+		if int(scene.get("id", -1)) != current_scene:
+			continue
+		_enqueue_script({
+			"kind": &"scene",
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"scene": current_scene,
+			"bank": int(current_map.scripts.get("bank", 0)),
+			"script": int(scene.get("script", 0)),
+		})
+		break
+
+
+func _coord_event_condition_active(event: Dictionary) -> bool:
+	var scenes: Array = current_map.scripts.get("scenes", []) if current_map != null else []
+	if scenes.is_empty():
+		return true
+	return int(event.get("scene", -1)) == state.map_scene(current_map.group, current_map.number)
 
 
 func _apply_script_object_events(raw_events: Variant) -> Array:
@@ -1890,6 +1934,7 @@ func _apply_map(
 	# player who stands still does not watch them cross Johto.
 	_last_schedule = advance_schedule(schedule_random)
 	_queue_map_callbacks(-1)
+	_map_entry_scene_pending = true
 
 
 ## The schedule update produced by the most recent map change, for a host that

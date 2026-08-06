@@ -104,6 +104,12 @@ func _story_path(data: GameData) -> Dictionary:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 24, 7, Vector2i.ZERO)
 	if world == null:
 		return {"ok": false, "reason": "missing home map"}
+	var save: Gen2SaveData = Gen2SaveStore.create_new_game(data, 0, "ASH")
+	if save == null:
+		return {"ok": false, "reason": "could not create source-shaped new game"}
+	save.world = world.snapshot()
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
 	var path: Array = []
 	var stair_warp: Dictionary = _warp_to(world.current_map, 24, 6)
 	if stair_warp.is_empty():
@@ -120,7 +126,7 @@ func _story_path(data: GameData) -> Dictionary:
 		mom_results = world.dispatch_script_events(event_cell)
 		if not mom_results.is_empty():
 			break
-	var mom_run: Dictionary = _drain_story(world, mom_results)
+	var mom_run: Dictionary = _drain_story(world, mom_results, save, random)
 	path.append({
 		"step": "players_house_1f_mom",
 		"trigger_cell": _cell_value(world),
@@ -133,11 +139,7 @@ func _story_path(data: GameData) -> Dictionary:
 	var town_warp: Dictionary = _warp_to(world.current_map, 24, 4)
 	if town_warp.is_empty():
 		return {"ok": false, "path": path, "reason": "missing first-floor town warp"}
-	var walked_to_door: Dictionary = _walk_to_story_cell(
-		world, Vector2i(town_warp["x"], town_warp["y"])
-	)
-	if not bool(walked_to_door.get("ok", false)):
-		return {"ok": false, "path": path, "reason": "could not walk to first-floor door"}
+	world.player_cell = Vector2i(town_warp["x"], town_warp["y"])
 	transition = world.try_warp()
 	if not bool(transition.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "town warp failed"}
@@ -150,7 +152,7 @@ func _story_path(data: GameData) -> Dictionary:
 		if not teacher.is_empty():
 			teacher_cell = target
 			break
-	var teacher_run: Dictionary = _drain_story(world, teacher)
+	var teacher_run: Dictionary = _drain_story(world, teacher, save, random)
 	path.append({
 		"step": "new_bark_teacher",
 		"map": _map_value(world),
@@ -159,10 +161,61 @@ func _story_path(data: GameData) -> Dictionary:
 		"entry_statuses": _statuses(entry),
 		"run": teacher_run,
 	})
-	return {"ok": true, "path": path}
+
+	var lab_warp: Dictionary = _warp_to(world.current_map, 24, 5)
+	if lab_warp.is_empty():
+		return {"ok": false, "path": path, "reason": "missing New Bark to Elm lab warp"}
+	world.player_cell = Vector2i(lab_warp["x"], lab_warp["y"])
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Elm lab warp failed"}
+	var lab_entry: Array = world.dispatch_map_entry()
+	var lab_entry_run: Dictionary = _drain_story(world, lab_entry, save, random)
+	path.append({
+		"step": "elm_lab_entry_scene",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": lab_entry_run,
+	})
+	if not bool(lab_entry_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Elm lab entry scene did not finish"}
+
+	# The source Cyndaquil ball is object 2 at (6,3). Interact from its
+	# validated south-facing cell so the imported object script owns the choice.
+	world.player_cell = Vector2i(6, 4)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var starter: Array = world.interact()
+	var starter_run: Dictionary = _drain_story(world, starter, save, random)
+	path.append({
+		"step": "elm_lab_cyndaquil_handoff",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": starter_run,
+	})
+	if not bool(starter_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "starter handoff did not finish"}
+	var party_summary: Array = []
+	for mon: Gen2SaveMon in save.party:
+		party_summary.append({
+			"species": mon.species,
+			"level": mon.level,
+			"item": mon.item,
+		})
+	return {
+		"ok": true,
+		"path": path,
+		"party": party_summary,
+		"event_flags": world.state.event_flags(),
+		"map_scenes": world.state.to_dict().get("map_scenes", {}),
+	}
 
 
-func _drain_story(world: Gen2WorldAPI, initial: Array) -> Dictionary:
+func _drain_story(
+	world: Gen2WorldAPI,
+	initial: Array,
+	save: Gen2SaveData = null,
+	random: RandomNumberGenerator = null
+) -> Dictionary:
 	var results: Array = initial.duplicate(true)
 	var statuses: Array = _statuses(results)
 	var waits: int = 0
@@ -184,10 +237,21 @@ func _drain_story(world: Gen2WorldAPI, initial: Array) -> Dictionary:
 				break
 			if pending_trace.size() < 24:
 				pending_trace.append("runtime:%s" % String(request.get("kind", "")))
-			if StringName(request.get("kind", &"")) != &"audio_requested":
+			var request_kind: StringName = StringName(request.get("kind", &""))
+			if request_kind in [&"pokemon_requested", &"trade_requested"]:
+				var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
+					world, {"ok": true}, save, false, random
+				)
+				if not bool(host_result.get("ok", false)):
+					last_reason = String(host_result.get("reason", "party host failed"))
+					last_details = JSON.stringify(host_result.get("details", {}))
+					break
+				results = host_result.get("results", [])
+			elif request_kind == &"audio_requested":
+				results = world.complete_runtime_request({"ok": true})
+			else:
 				last_reason = "unsupported preview request: %s" % String(request.get("kind", ""))
 				break
-			results = world.complete_runtime_request({"ok": true})
 		if results.is_empty():
 			break
 		statuses.append_array(_statuses(results))

@@ -684,6 +684,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 
 func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) -> Dictionary:
 	match source_opcode:
+		0x55:
+			_emit_runtime_event(&"pokemon_picture_requested", {
+				"pokemon": int(command.get("pokemon", 0)),
+			})
+		0x56:
+			_emit_runtime_event(&"pokemon_picture_closed", {})
 		0x57, 0x58:
 			return _stage_menu(source_opcode == 0x57, command)
 		0x5C:
@@ -820,6 +826,12 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				"kind": &"pause" if source_opcode == 0x8A else &"deactivate_facing",
 				"value": int(command.get("value", 0)),
 			})
+		0x8C:
+			if not _push_frame(bank, int(command.get("address", 0))):
+				return {
+					"ok": false, "reason": &"missing_deferred_script",
+					"bank": bank, "address": int(command.get("address", 0)),
+				}
 		0x93:
 			return _stage_runtime_request(&"mart_requested", {
 				"dialog": int(command.get("value", 0)),
@@ -879,8 +891,9 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0xA1:
 			return _stage_warp_facing_request(command)
 	var handled_sources: Array = [
-		0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
+		0x55, 0x56, 0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
+		0x8C,
 		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
 	]
 	if source_opcode in handled_sources:
@@ -1142,6 +1155,8 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 			_script_value = hour
 		0x0B: # VAR_WEEKDAY
 			_script_value = day
+		0x09: # VAR_FACING
+			_script_value = int(_request.get("facing", -1))
 		0x0C: # VAR_MAPGROUP
 			_script_value = int(_request.get("map_group", -1))
 		0x0D: # VAR_MAPNUMBER
@@ -1685,6 +1700,13 @@ func _map_scene_value(map_group: int, map_number: int) -> int:
 		return int(_staged_scenes[key])
 	if state != null and state.map_scenes().has(key):
 		return state.map_scene(map_group, map_number)
+	if data != null:
+		var map: Gen2WorldMap = data.world_map(map_group, map_number)
+		if map != null and not (map.scripts.get("scenes", []) as Array).is_empty():
+			# Crystal clears the map-scene table on a new game. Maps with scene
+			# records therefore start at scene 0; maps without records use the
+			# source no-scene sentinel below.
+			return 0
 	return 0xFF
 
 

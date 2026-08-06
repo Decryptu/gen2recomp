@@ -134,7 +134,8 @@ func test_save_screen_creates_a_valid_new_game() -> void:
 	assert_true(loaded["ok"], loaded["message"])
 	var save: Gen2SaveData = loaded["save"]
 	assert_eq(save.player_name, "ASH")
-	assert_eq((save.party[0] as Gen2SaveMon).species, 155)
+	assert_eq(save.party.size(), 0)
+	assert_string_contains(_screen.save_screen_snapshot()["detail"], "starter")
 
 
 func test_save_screen_rejects_an_invalid_sram_without_creating_a_slot() -> void:

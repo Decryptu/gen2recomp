@@ -630,6 +630,8 @@ static func command_at(
 					command["pokemon"] = int(data[offset + 1])
 		var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
 		match source_opcode:
+			0x55:
+				command["pokemon"] = int(data[offset + 1])
 			0x5C:
 				command["pokemon"] = int(data[offset + 1])
 				command["level"] = int(data[offset + 2])

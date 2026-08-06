@@ -759,6 +759,60 @@ func test_map_entry_dispatch_runs_the_current_map_callbacks() -> void:
 	assert_eq(world.state.map_scene(1, 1), 2)
 
 
+func test_map_entry_runs_the_default_scene_and_coordinate_events_follow_scene_state() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6050"] = [Gen2WorldScript.SETEVENT, 13, 0, Gen2WorldScript.END]
+	scripts["48:6060"] = [Gen2WorldScript.SETEVENT, 14, 0, Gen2WorldScript.END]
+	scripts["48:6070"] = [Gen2WorldScript.SETEVENT, 15, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var target_map: Gen2WorldMap = data.world_map(1, 2)
+	target_map.scripts["callbacks"] = []
+	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6050}]
+	var target: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 2, Vector2i(2, 2))
+	var entry: Array = target.dispatch_map_entry()
+	assert_eq(entry.size(), 1)
+	assert_eq(entry[0]["source"]["kind"], &"scene")
+	assert_true(target.event_flag_active(13))
+	assert_eq(target.state.map_scene(1, 2), 0)
+
+	var source_map: Gen2WorldMap = data.world_map(1, 1)
+	source_map.scripts["scenes"] = [
+		{"id": 0, "script": 0x6060}, {"id": 1, "script": 0x6060},
+	]
+	source_map.events["coord_events"] = [
+		{"scene": 1, "x": 7, "y": 6, "script": 0x6070},
+	]
+	var default_scene: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(default_scene.dispatch_script_events().size(), 0)
+	var scene_one_state := Gen2WorldState.new({}, {"1:1": 1})
+	var scene_one: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(7, 6), scene_one_state
+	)
+	var active: Array = scene_one.dispatch_script_events()
+	assert_eq(active.size(), 1)
+	assert_true(scene_one.event_flag_active(15))
+
+
+func test_script_requests_supply_the_live_player_facing_to_readvar() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6080"] = [
+		Gen2WorldScript.READVAR, 0x09,
+		Gen2WorldScript.IFEQUAL, Gen2WorldSprite.FACING_RIGHT, 0x90, 0x60,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6090"] = [Gen2WorldScript.SETEVENT, 22, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6080
+	world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete")
+	assert_true(world.event_flag_active(22))
+
+
 func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6160"] = [
