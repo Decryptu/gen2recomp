@@ -40,8 +40,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > The importer also preserves referenced overworld menus, 34 mart lists, phone
 > contacts, special-call records and music/SFX pointer records. The scene-free
 > host resolves them without reopening the ROM. The production service overlay
-> supports menu selection, atomic mart purchases, source-timed phone caller/callee
-> dispatch and bounded Gen II music, effects and cries. Party transactions cover
+> supports cached vertical and two-dimensional menu selection, source mart dialog
+> variants, bounded quantity purchases, source-timed phone caller/callee dispatch
+> and bounded Gen II music, effects and cries. Party transactions cover
 > gifts, eggs, imported NPC trades, common HP/status items, repel and the core
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.

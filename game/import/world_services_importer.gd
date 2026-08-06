@@ -8,6 +8,7 @@ extends RefCounted
 
 const MAX_MENU_DATA_BYTES: int = 256
 const MAX_MENU_ITEMS: int = 32
+const MAX_MENU_STRING_BYTES: int = 64
 const MAX_AUDIO_POINTERS: int = 512
 
 
@@ -589,7 +590,9 @@ static func _read_menus(rom: RomFile, scripts: Dictionary, standard_scripts: Dic
 			"uses": menu_reference.get("uses", []),
 			"data": Array(raw),
 		}
-		var decoded: Dictionary = _decode_menu_data(raw)
+		var decoded: Dictionary = _decode_menu_data(
+			rom, bank, data_address, raw, menu_reference.get("uses", [])
+		)
 		for decoded_key: String in decoded:
 			row[decoded_key] = decoded[decoded_key]
 		menus[key] = row
@@ -633,33 +636,152 @@ static func _scan_menu_references(
 			break
 
 
-static func _decode_menu_data(raw: PackedByteArray) -> Dictionary:
+static func _decode_menu_data(
+	rom: RomFile, data_bank: int, data_address: int, raw: PackedByteArray, uses: Variant
+) -> Dictionary:
 	if raw.size() < 2:
 		return {}
-	var out: Dictionary = {"data_flags": raw[0]}
-	var count_or_dimensions: int = raw[1]
-	if count_or_dimensions > 0 and count_or_dimensions <= MAX_MENU_ITEMS:
-		var options: Array = []
-		var at: int = 2
-		for _index: int in count_or_dimensions:
-			if at >= raw.size():
-				return out
-			var end: int = at
-			while end < raw.size() and raw[end] != Gen2Text.TERMINATOR:
-				end += 1
-			if end >= raw.size():
-				return out
-			options.append(Gen2Text.decode(raw, at, end - at))
-			at = end + 1
-		out["options"] = options
-		out["kind"] = "static"
+	var menu_uses: Array = uses if uses is Array else []
+	if menu_uses.has("2d"):
+		return _decode_2d_menu_data(rom, data_bank, data_address, raw)
+	return _decode_vertical_menu_data(raw)
+
+
+static func _decode_vertical_menu_data(raw: PackedByteArray) -> Dictionary:
+	var flags: int = raw[0]
+	var count: int = raw[1]
+	var out: Dictionary = {
+		"data_flags": flags,
+		"kind": "vertical",
+		"items": count,
+		"wrap": (flags & (1 << 5)) != 0,
+		"cursor": (flags & (1 << 7)) != 0,
+		"disable_b": (flags & 1) != 0,
+		"enable_select": (flags & (1 << 1)) != 0,
+	}
+	if count > MAX_MENU_ITEMS:
+		out["decode_error"] = "vertical menu has too many items"
 		return out
-	if raw.size() >= 9:
-		out["kind"] = "2d_or_scrolling"
-		out["dimensions"] = count_or_dimensions
-		out["spacing_or_width"] = raw[2]
-		out["pointer_bank_or_format"] = raw[3]
+	var strings: Dictionary = _read_inline_menu_strings(raw, 2, count)
+	if not bool(strings.get("ok", false)):
+		out["decode_error"] = strings.get("reason", "invalid vertical menu strings")
+		return out
+	out["options"] = strings["strings"]
+	var at: int = int(strings["next_offset"])
+	if (flags & (1 << 4)) != 0 and at < raw.size():
+		var title_offset: int = raw[at]
+		var title: Dictionary = _read_inline_menu_string(raw, at + 1, title_offset)
+		if bool(title.get("ok", false)):
+			out["title_offset"] = title_offset
+			out["title"] = title["text"]
 	return out
+
+
+static func _decode_2d_menu_data(
+	rom: RomFile, data_bank: int, data_address: int, raw: PackedByteArray
+) -> Dictionary:
+	var flags: int = raw[0]
+	var dimensions: int = raw[1]
+	var rows: int = (dimensions >> 4) & 0x0F
+	var columns: int = dimensions & 0x0F
+	var out: Dictionary = {
+		"data_flags": flags,
+		"kind": "2d",
+		"dimensions": dimensions,
+		"rows": rows,
+		"columns": columns,
+		"spacing": raw[2] if raw.size() > 2 else 0,
+		"wrap": (flags & (1 << 5)) != 0,
+		"cursor": (flags & (1 << 7)) != 0,
+		"disable_b": (flags & 1) != 0,
+		"enable_select": (flags & (1 << 1)) != 0,
+	}
+	if rows <= 0 or columns <= 0 or rows * columns > MAX_MENU_ITEMS:
+		out["decode_error"] = "2D menu dimensions are invalid"
+		return out
+	var data_offset: int = RomFile.linear(data_bank, data_address)
+	if not rom.in_bounds(data_offset, 9):
+		out["decode_error"] = "2D menu data is truncated"
+		return out
+	var strings_pointer: Dictionary = rom.far_pointer(data_offset + 3)
+	if not _valid_menu_pointer(strings_pointer):
+		out["decode_error"] = "2D menu strings pointer is invalid"
+		return out
+	var strings: Dictionary = _read_menu_strings(
+		rom, strings_pointer, rows * columns
+	)
+	if not bool(strings.get("ok", false)):
+		out["decode_error"] = strings.get("reason", "2D menu strings are invalid")
+		return out
+	out["options"] = strings["strings"]
+	out["strings_pointer"] = strings_pointer
+	var function_pointer: Dictionary = rom.far_pointer(data_offset + 6)
+	if function_pointer.get("address", 0) != 0:
+		out["function_pointer"] = function_pointer
+	return out
+
+
+static func _read_inline_menu_strings(
+	raw: PackedByteArray, offset: int, count: int
+) -> Dictionary:
+	var strings: Array = []
+	var at: int = offset
+	for _index: int in count:
+		var string: Dictionary = _read_inline_menu_string(raw, at, MAX_MENU_STRING_BYTES)
+		if not bool(string.get("ok", false)):
+			return string
+		strings.append(string["text"])
+		at = int(string["next_offset"])
+	return {"ok": true, "strings": strings, "next_offset": at}
+
+
+static func _read_inline_menu_string(
+	raw: PackedByteArray, offset: int, max_length: int
+) -> Dictionary:
+	if offset < 0 or offset >= raw.size():
+		return {"ok": false, "reason": "menu string is outside the data"}
+	var end: int = offset
+	while end < raw.size() and end - offset < max_length:
+		if raw[end] == Gen2Text.TERMINATOR:
+			return {
+				"ok": true,
+				"text": Gen2Text.decode(raw, offset, end - offset),
+				"next_offset": end + 1,
+			}
+		end += 1
+	return {"ok": false, "reason": "menu string has no terminator"}
+
+
+static func _read_menu_strings(
+	rom: RomFile, pointer: Dictionary, count: int
+) -> Dictionary:
+	var strings: Array = []
+	var address: int = int(pointer.get("address", -1))
+	var bank: int = int(pointer.get("bank", -1))
+	if not _valid_menu_pointer(pointer):
+		return {"ok": false, "reason": "menu strings pointer is invalid"}
+	var at: int = RomFile.linear(bank, address)
+	for _index: int in count:
+		if not rom.in_bounds(at):
+			return {"ok": false, "reason": "menu strings run off the cartridge"}
+		var end: int = at
+		var terminated: bool = false
+		while rom.in_bounds(end) and end - at < MAX_MENU_STRING_BYTES:
+			if rom.u8(end) == Gen2Text.TERMINATOR:
+				strings.append(Gen2Text.decode(rom.bytes(), at, end - at))
+				at = end + 1
+				terminated = true
+				break
+			end += 1
+		if not terminated:
+			return {"ok": false, "reason": "menu strings have an invalid terminator"}
+	return {"ok": true, "strings": strings}
+
+
+static func _valid_menu_pointer(pointer: Dictionary) -> bool:
+	var bank: int = int(pointer.get("bank", -1))
+	var address: int = int(pointer.get("address", -1))
+	return bank >= 0 and address >= RomFile.BANK_SIZE and address < RomFile.BANK_SIZE * 2
 
 
 static func _bytes_from_variant(value: Variant) -> PackedByteArray:

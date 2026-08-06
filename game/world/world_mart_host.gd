@@ -6,6 +6,59 @@ extends RefCounted
 ## writeback for one purchase.
 
 const MONEY_ACCOUNT: int = 0
+const MAX_ITEM_STACK: int = 99
+
+const MARTTYPE_STANDARD: int = 0
+const MARTTYPE_BITTER: int = 1
+const MARTTYPE_BARGAIN: int = 2
+const MARTTYPE_PHARMACY: int = 3
+const MARTTYPE_ROOFTOP: int = 4
+
+
+## Resolves the source pokemart dialog before the UI is opened. Standard,
+## bitter and pharmacy shops use the indexed pointer; bargain and rooftop
+## shops use their imported priced records.
+static func resolve_mart(
+	data: GameData, dialog_id: int, mart_id: int, rooftop_after_hall: bool = false
+) -> Dictionary:
+	if data == null:
+		return _failure(&"missing_data", {})
+	var mart: Dictionary = {}
+	var variant: StringName = &"standard"
+	var label: String = "MART"
+	match dialog_id:
+		MARTTYPE_STANDARD:
+			mart = data.world_mart(mart_id)
+			variant = &"standard"
+			label = "MART"
+		MARTTYPE_BITTER:
+			mart = data.world_mart(mart_id)
+			variant = &"bitter"
+			label = "HERB SHOP"
+		MARTTYPE_BARGAIN:
+			mart = data.world_mart_special(&"bargain")
+			variant = &"bargain"
+			label = "BARGAIN SHOP"
+		MARTTYPE_PHARMACY:
+			mart = data.world_mart(mart_id)
+			variant = &"pharmacy"
+			label = "PHARMACY"
+		MARTTYPE_ROOFTOP:
+			variant = &"rooftop_mart_2" if rooftop_after_hall else &"rooftop_mart_1"
+			mart = data.world_mart_special(variant)
+			label = "ROOFTOP SALE"
+		_:
+			return _failure(&"unsupported_mart_dialog", {"dialog": dialog_id})
+	if mart.is_empty() or not mart.has("items") or not mart["items"] is Array \
+		or (mart["items"] as Array).is_empty():
+		return _failure(&"mart_variant_unavailable", {
+			"dialog": dialog_id, "variant": variant, "mart_id": mart_id,
+		})
+	mart["dialog_id"] = dialog_id
+	mart["mart_id"] = mart_id
+	mart["variant"] = variant
+	mart["label"] = label
+	return {"ok": true, "mart": mart}
 
 
 static func entries(data: GameData, mart: Dictionary) -> Array:
@@ -57,13 +110,19 @@ static func purchase(
 		return _failure(&"item_not_in_mart", {"item": item})
 	var price: int = int(selected.get("price", 0))
 	var total: int = price * quantity
+	var owned: int = world.state.item_quantity(item)
+	var next_quantity: int = owned + quantity
+	if next_quantity > MAX_ITEM_STACK:
+		return _failure(&"item_stack_full", {
+			"item": item, "quantity": quantity, "owned": owned,
+			"maximum": MAX_ITEM_STACK,
+		})
 	var balance: int = world.state.money(MONEY_ACCOUNT)
 	if total < 0 or total > balance:
 		return _failure(&"insufficient_money", {
 			"item": item, "price": price, "quantity": quantity,
 			"total": total, "balance": balance,
 		})
-	var next_quantity: int = world.state.item_quantity(item) + quantity
 	var before: Gen2WorldSnapshot = world.snapshot()
 	var applied: Dictionary = world.state.apply_changes({}, {}, {
 		"items": {item: next_quantity},

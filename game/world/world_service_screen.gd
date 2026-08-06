@@ -18,6 +18,8 @@ const ERROR: Color = Color("#ef8a8a")
 
 enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO }
 
+const WorldMenu := preload("res://game/world/world_menu.gd")
+
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
 var _save: Gen2SaveData = null
@@ -26,8 +28,11 @@ var _request: Dictionary = {}
 var _resolved: Dictionary = {}
 var _mode: int = -1
 var _choices: Array = []
+var _menu_input: Dictionary = {}
+var _menu: Gen2WorldMenu = null
 var _cursor: int = 0
 var _mart_entries: Array = []
+var _mart_quantity: int = 1
 var _mart_purchased: bool = false
 var _phone_entries: Array = []
 
@@ -117,16 +122,16 @@ func handle_key(keycode: int) -> bool:
 		return false
 	match keycode:
 		KEY_UP, KEY_W:
-			_move_cursor(-1)
+			_move_direction(Vector2i.UP)
 			return true
 		KEY_DOWN, KEY_S:
-			_move_cursor(1)
+			_move_direction(Vector2i.DOWN)
 			return true
 		KEY_LEFT, KEY_A:
-			_move_cursor(-1)
+			_move_direction(Vector2i.LEFT)
 			return true
 		KEY_RIGHT, KEY_D:
-			_move_cursor(1)
+			_move_direction(Vector2i.RIGHT)
 			return true
 		KEY_SPACE, KEY_ENTER, KEY_Z:
 			_confirm()
@@ -187,8 +192,10 @@ func _build_ui() -> void:
 
 func _open_menu(input: Dictionary) -> void:
 	_mode = MODE.MENU
-	_choices = input.get("options", input.get("choices", [])).duplicate(true)
-	_cursor = 0
+	_menu_input = input.duplicate(true)
+	_menu = WorldMenu.from_input(_menu_input)
+	_choices = _menu.options.duplicate(true)
+	_cursor = _menu.selected_index()
 	_title.text = "MENU"
 	_summary.text = String(input.get("command", input.get("menu_kind", "Choose an option")))
 	_status.text = ""
@@ -200,11 +207,13 @@ func _open_mart(mart: Dictionary) -> void:
 	_mode = MODE.MART
 	_mart_entries = Gen2WorldMartHost.entries(_data, mart)
 	_mart_entries.append({"leave": true, "name": "LEAVE"})
+	_mart_quantity = 1
+	_mart_purchased = false
 	_cursor = 0
-	_title.text = "MART"
+	_title.text = String(mart.get("label", "MART"))
 	_summary.text = "Money: %d" % _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT)
-	_status.text = "Select an item to buy one."
-	_footer.text = "Arrows: move    Space/Enter: buy    Esc: leave"
+	_status.text = "Select an item. Left/Right changes quantity."
+	_footer.text = "Arrows: move/quantity    Space/Enter: buy    Esc: leave"
 	_render_options()
 
 
@@ -264,7 +273,24 @@ func _move_cursor(delta: int) -> void:
 	if count <= 0:
 		return
 	_cursor = wrapi(_cursor + delta, 0, count)
+	if _mode == MODE.MART:
+		_mart_quantity = 1
 	_render_options()
+
+
+func _move_direction(direction: Vector2i) -> void:
+	if _mode == MODE.MENU and _menu != null:
+		if _menu.move(direction):
+			_cursor = _menu.selected_index()
+			_render_options()
+		return
+	if _mode == MODE.MART and direction.x != 0:
+		_change_mart_quantity(direction.x)
+		return
+	if direction.x != 0:
+		_move_cursor(direction.x)
+	else:
+		_move_cursor(direction.y)
 
 
 func _confirm() -> void:
@@ -284,7 +310,7 @@ func _confirm() -> void:
 			_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0})
 			return
 		var purchase: Dictionary = Gen2WorldMartHost.purchase(
-			_world, _save, _mart_source(), int(entry.get("item", 0)), 1, _persist
+			_world, _save, _mart_source(), int(entry.get("item", 0)), _mart_quantity, _persist
 		)
 		if not bool(purchase.get("ok", false)):
 			_status.text = "Purchase failed: %s" % String(purchase.get("reason", "unknown"))
@@ -296,6 +322,8 @@ func _confirm() -> void:
 			String(purchase.get("name", "UNKNOWN")), int(purchase.get("owned", 0)),
 		]
 		_status.add_theme_color_override("font_color", SUCCESS)
+		_mart_quantity = 1
+		_render_options()
 		return
 	if _mode == MODE.PHONE_LIST:
 		if _phone_entries.is_empty():
@@ -353,6 +381,13 @@ func _render_options(override: Array = []) -> void:
 		return
 	for child: Node in _options.get_children():
 		child.queue_free()
+	var parent: Container = _options
+	if _mode == MODE.MENU and _menu != null and _menu.kind == &"2d":
+		var grid := GridContainer.new()
+		grid.columns = maxi(1, _menu.columns)
+		grid.add_theme_constant_override("h_separation", 18)
+		_options.add_child(grid)
+		parent = grid
 	var values: Array = override if not override.is_empty() else (
 		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART \
 		else _phone_entries if _mode == MODE.PHONE_LIST else ["Continue"]
@@ -372,19 +407,27 @@ func _render_options(override: Array = []) -> void:
 				name = "CONTACT %d" % int(dictionary.get("index", -1))
 		if value is Dictionary and _mode == MODE.MART \
 			and not bool((value as Dictionary).get("leave", false)):
-			name = "%s    %d" % [name, int((value as Dictionary).get("price", 0))]
+			var price: int = int((value as Dictionary).get("price", 0))
+			if index == _cursor:
+				name = "%s    %d x %d = %d" % [
+					name, price, _mart_quantity, price * _mart_quantity,
+				]
+			else:
+				name = "%s    %d" % [name, price]
 		if value is Dictionary and _mode == MODE.PHONE_LIST:
 			if int((value as Dictionary).get("trainer_class", 0)) > 0:
 				name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
 		label.text = ("> " if index == _cursor else "  ") + name
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
-		_options.add_child(label)
+		parent.add_child(label)
+	if _mode == MODE.MART:
+		_update_mart_status()
 
 
 func _option_count() -> int:
 	if _mode == MODE.MENU:
-		return _choices.size()
+		return _menu.options.size() if _menu != null else _choices.size()
 	if _mode == MODE.MART:
 		return _mart_entries.size()
 	if _mode == MODE.PHONE_LIST:
@@ -394,6 +437,39 @@ func _option_count() -> int:
 
 func _mart_source() -> Dictionary:
 	return _resolved.get("data", {}).get("mart", {})
+
+
+func _change_mart_quantity(delta: int) -> void:
+	if _cursor < 0 or _cursor >= _mart_entries.size():
+		return
+	var entry: Dictionary = _mart_entries[_cursor]
+	if bool(entry.get("leave", false)):
+		return
+	var owned: int = _world.state.item_quantity(int(entry.get("item", 0)))
+	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK - owned
+	if maximum <= 0:
+		_mart_quantity = 0
+	else:
+		_mart_quantity = clampi(_mart_quantity + delta, 1, maximum)
+	_render_options()
+
+
+func _update_mart_status() -> void:
+	if _mode != MODE.MART or _cursor < 0 or _cursor >= _mart_entries.size():
+		return
+	var entry: Dictionary = _mart_entries[_cursor]
+	if bool(entry.get("leave", false)):
+		_status.text = "Leave this shop."
+		return
+	var item: int = int(entry.get("item", 0))
+	var owned: int = _world.state.item_quantity(item)
+	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK - owned
+	if maximum <= 0:
+		_status.text = "This item stack is full."
+		return
+	_status.text = "Owned: %d    Quantity: %d    Total: %d" % [
+		owned, _mart_quantity, int(entry.get("price", 0)) * _mart_quantity,
+	]
 
 
 func _phone_text(summary: Dictionary) -> String:
@@ -407,6 +483,7 @@ func _phone_text(summary: Dictionary) -> String:
 
 func _show_error(message: String) -> void:
 	_mode = -1
+	_menu = null
 	if _title != null:
 		_title.text = "SERVICE ERROR"
 		_summary.text = message

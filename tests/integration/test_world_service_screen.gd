@@ -69,6 +69,25 @@ func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
+func test_mart_overlay_purchases_the_selected_quantity() -> void:
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_true(host.handle_key(KEY_RIGHT))
+	assert_true(host.handle_key(KEY_ENTER))
+	assert_eq(_world_screen._world.state.money(), 260)
+	assert_eq(_world_screen._world.state.item_quantity(7), 3)
+	assert_true(host.is_active())
+
+	assert_true(host.handle_key(KEY_DOWN))
+	assert_true(host.handle_key(KEY_ENTER))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
 func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 	_write_menu_request()
 	_data = GameData.open_directory(Fixture.directory())
@@ -80,6 +99,32 @@ func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 	assert_eq(host._title.text, "MENU")
 	assert_eq(host.selected_index(), 0)
 	assert_true(host.handle_key(KEY_ESCAPE))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_two_dimensional_menu_uses_cached_grid_and_default_cursor() -> void:
+	_write_2d_menu_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "MENU")
+	assert_eq(host.selected_index(), 1)
+	assert_eq(host._options.get_child_count(), 1)
+	var grid: GridContainer = host._options.get_child(0) as GridContainer
+	assert_not_null(grid)
+	assert_eq(grid.columns, 2)
+	assert_eq(grid.get_child_count(), 4)
+
+	assert_true(host.handle_key(KEY_LEFT))
+	assert_eq(host.selected_index(), 0)
+	assert_true(host.handle_key(KEY_DOWN))
+	assert_eq(host.selected_index(), 2)
+	assert_true(host.handle_key(KEY_ENTER))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
@@ -189,6 +234,17 @@ func _write_menu_request() -> void:
 	RomCache.write_json(RomCache.world_menus_path(Fixture.directory()), {
 		Gen2WorldScript.pointer_key(Fixture.BANK, 0x1234): {
 			"bank": Fixture.BANK, "address": 0x1234, "options": ["YES", "NO"],
+		},
+	})
+
+
+func _write_2d_menu_request() -> void:
+	_write_request_script([0x4F, 0x34, 0x12, 0x58, 0x91], 0x6320)
+	RomCache.write_json(RomCache.world_menus_path(Fixture.directory()), {
+		Gen2WorldScript.pointer_key(Fixture.BANK, 0x1234): {
+			"bank": Fixture.BANK, "address": 0x1234, "kind": "2d",
+			"data_flags": 1 << 5, "rows": 2, "columns": 2,
+			"options": ["A", "B", "C", "D"], "default": 2,
 		},
 	})
 

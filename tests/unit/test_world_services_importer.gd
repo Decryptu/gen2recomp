@@ -17,7 +17,11 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	_write_menu(data)
 
 	var scripts: Dictionary = {
-		"5:7000": [Gen2WorldScript.LOADMENU, 0x00, 0x75, 0x58],
+		"5:7000": [
+			Gen2WorldScript.LOADMENU, 0x00, 0x75, 0x58,
+			Gen2WorldScript.LOADMENU, 0x00, 0x76, 0x57,
+			Gen2WorldScript.END,
+		],
 	}
 	var result: Dictionary = Gen2WorldServicesImporter.read_services(
 		RomFile.from_bytes(data, RomRegistry.GOLD), _layout, scripts
@@ -61,6 +65,15 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	var menu: Dictionary = menus[Gen2WorldScript.pointer_key(5, 0x7500)]
 	assert_eq(menu["uses"], ["vertical"])
 	assert_eq(menu["options"], ["A", "B"])
+	assert_eq(menu["kind"], "vertical")
+	assert_eq(menu["wrap"], false)
+	var menu_2d: Dictionary = menus[Gen2WorldScript.pointer_key(5, 0x7600)]
+	assert_eq(menu_2d["uses"], ["2d"])
+	assert_eq(menu_2d["kind"], "2d")
+	assert_eq(menu_2d["rows"], 2)
+	assert_eq(menu_2d["columns"], 2)
+	assert_eq(menu_2d["spacing"], 6)
+	assert_eq(menu_2d["options"], ["A", "B", "C", "D"])
 
 
 func test_mart_terminator_is_required() -> void:
@@ -183,6 +196,31 @@ func _write_menu(data: PackedByteArray) -> void:
 	data[menu_data + 3] = 0x50
 	data[menu_data + 4] = 0x81
 	data[menu_data + 5] = 0x50
+	var header_2d: int = RomFile.linear(5, 0x7600)
+	data[header_2d] = 0x40
+	data[header_2d + 1] = 1
+	data[header_2d + 2] = 2
+	data[header_2d + 3] = 9
+	data[header_2d + 4] = 10
+	_write_u16(data, header_2d + 5, 0x7610)
+	data[header_2d + 7] = 1
+	var menu_2d: int = RomFile.linear(5, 0x7610)
+	data[menu_2d] = 0x20
+	data[menu_2d + 1] = 0x22
+	data[menu_2d + 2] = 6
+	data[menu_2d + 3] = 5
+	data[menu_2d + 4] = 0x30
+	data[menu_2d + 5] = 0x76
+	data[menu_2d + 6] = 5
+	data[menu_2d + 7] = 0
+	data[menu_2d + 8] = 0
+	var strings: int = RomFile.linear(5, 0x7630)
+	var encoded: PackedByteArray = PackedByteArray()
+	for value: String in ["A", "B", "C", "D"]:
+		encoded.append_array(Gen2Text.encode(value))
+		encoded.append(Gen2Text.TERMINATOR)
+	for index: int in encoded.size():
+		data[strings + index] = encoded[index]
 
 
 func _write_far(data: PackedByteArray, offset: int, bank: int, address: int) -> void:
