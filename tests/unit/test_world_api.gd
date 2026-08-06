@@ -1569,6 +1569,15 @@ func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
 		return event.get("type", &"") == &"battle_map_reload_requested"
 	))
 	assert_true(world.dispatch_sight_events().is_empty())
+	assert_true((world.objects[0] as Gen2WorldObject).active)
+	assert_false((world.objects[0] as Gen2WorldObject).event_flag_active(world.state))
+	assert_true((world.objects[0] as Gen2WorldObject).trainer_flag_active(world.state))
+
+	var after_battle: Array = world.interact()
+	assert_eq(after_battle.size(), 1)
+	assert_eq(after_battle[0]["status"], &"complete")
+	assert_eq(after_battle[0]["source"]["trainer_phase"], &"after")
+	assert_eq(after_battle[0]["source"]["script"], 0x6040)
 
 
 func test_catch_tutorial_uses_wild_setup_without_persistent_capture_changes() -> void:

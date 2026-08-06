@@ -1155,17 +1155,30 @@ func _drain_script_queue() -> Array:
 func _active_events_at(cell: Vector2i) -> Array:
 	var out: Array = []
 	for event: Dictionary in events_at(cell):
+		# Object records below are matched against their live cells. A source
+		# movement or trainer approach can move one away from its cached cell.
 		if event.get("kind", &"") == &"objects":
-			var index: int = int(event.get("object_index", -1))
-			if index >= 0 and index < objects.size() \
-				and not (objects[index] as Gen2WorldObject).active:
-				continue
-		elif event.get("kind", &"") == &"bg_events" \
+			continue
+		if event.get("kind", &"") == &"bg_events" \
 			and not _bg_event_condition_active(event):
 			continue
 		elif event.get("kind", &"") == &"coord_events" \
 			and not _coord_event_condition_active(event):
 			continue
+		out.append(event)
+	if current_map == null:
+		return out
+	var rows: Array = current_map.events.get("objects", [])
+	for object: Gen2WorldObject in objects:
+		if not object.active or object.cell != cell \
+			or object.index < 0 or object.index >= rows.size() \
+			or not rows[object.index] is Dictionary:
+			continue
+		var event: Dictionary = (rows[object.index] as Dictionary).duplicate(true)
+		event["x"] = object.cell.x
+		event["y"] = object.cell.y
+		event["kind"] = &"objects"
+		event["object_index"] = object.index
 		out.append(event)
 	return out
 

@@ -230,6 +230,14 @@ Development scenes:
     crystal 24 7 2 2 1 none home story
   ```
 
+  A freshly imported Crystal cache can verify the first Route 30 trainer's
+  source record, sight line, approach, battle request, beaten flag and later
+  interaction without reopening the cartridge:
+
+  ```bash
+  godot --headless --path . -s res://tools/validate_crystal_route30_trainer.gd
+  ```
+
   World text follows the cartridge command stream: `$50` is a page break,
   `$57` ends a text box and `$58` pauses for a prompt. The story runner keeps
   the source yes/no order, weekday wrapping and first eight temporary event
