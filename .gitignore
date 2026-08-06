@@ -38,3 +38,7 @@ export_credentials.cfg
 
 # Local visual verification output
 /artifacts/
+
+# Local checkouts of the authoritative source repositories. These are fetched
+# for comparison only and must never become project content.
+/.references/
