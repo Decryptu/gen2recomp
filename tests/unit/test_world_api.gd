@@ -420,6 +420,45 @@ func test_phone_special_ids_match_the_source_phone_routines() -> void:
 	assert_eq(_event_value(result[0]["events"], &"phone_special_requested", "kind", 3), &"random_phone_mon")
 
 
+func test_map_decoration_specials_apply_the_default_room_state() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6250"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_TOGGLE_DECORATIONS_VISIBILITY, 0,
+		Gen2WorldScript.ENDCALLBACK,
+	]
+	scripts["48:6260"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_TOGGLE_MAPTILE_DECORATIONS, 0,
+		Gen2WorldScript.ENDCALLBACK,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var map: Gen2WorldMap = data.world_map(1, 1)
+	map.scripts["callbacks"] = [
+		{"type": 5, "script": 0x6250},
+		{"type": 1, "script": 0x6260},
+	]
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var result: Array = world.dispatch_map_entry()
+	assert_eq(result.size(), 2, JSON.stringify(result))
+	for callback_result: Dictionary in result:
+		assert_eq(callback_result["status"], &"complete", JSON.stringify(result))
+	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_CONSOLE))
+	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_1))
+	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_2))
+	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_BIG_DOLL))
+	assert_false(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_ROOM_POSTER))
+	assert_eq(
+		_event_value(result[0]["events"], &"decoration_callback_applied", "kind"),
+		&"toggle_decorations_visibility",
+		JSON.stringify(result),
+	)
+	assert_eq(
+		_event_value(result[1]["events"], &"decoration_callback_applied", "kind"),
+		&"toggle_maptile_decorations",
+		JSON.stringify(result),
+	)
+
+
 func test_random_unseen_wild_mon_uses_morning_rare_slots_and_seen_species() -> void:
 	_write_service_cache()
 	var species: Array = []

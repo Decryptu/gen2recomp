@@ -6,6 +6,7 @@ var _directory: String = ""
 var _data: GameData = null
 var _screen: Gen2SaveScreen = null
 var _party_screen: Gen2PartyScreen = null
+var _box_screen: Gen2BoxScreen = null
 var _save_directory: String = ""
 
 
@@ -22,7 +23,10 @@ func after_each() -> void:
 	_screen = null
 	if is_instance_valid(_party_screen):
 		_party_screen.free()
-	_party_screen = null
+		_party_screen = null
+	if is_instance_valid(_box_screen):
+		_box_screen.free()
+		_box_screen = null
 	_clear_saves()
 	RomCache.clear(_directory)
 
@@ -48,6 +52,15 @@ func _save() -> Gen2SaveData:
 	return save
 
 
+func _save_with_two() -> Gen2SaveData:
+	var save: Gen2SaveData = _save()
+	var second: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.GEODUDE, 18, [Fixture.GROWL]
+	)
+	save.party.append(Gen2SaveBattleAdapter.from_battle_mon(second))
+	return save
+
+
 func _open_save_screen() -> void:
 	var packed: PackedScene = load("res://game/save/save_screen.tscn")
 	_screen = packed.instantiate()
@@ -61,6 +74,14 @@ func _open_party_screen(save: Gen2SaveData) -> void:
 	_party_screen = packed.instantiate()
 	_party_screen.set_context(_data, save)
 	add_child(_party_screen)
+	await get_tree().process_frame
+
+
+func _open_box_screen(save: Gen2SaveData) -> void:
+	var packed: PackedScene = load("res://game/save/box_screen.tscn")
+	_box_screen = packed.instantiate()
+	_box_screen.set_context(_data, save)
+	add_child(_box_screen)
 	await get_tree().process_frame
 
 
@@ -139,3 +160,42 @@ func test_party_screen_exposes_saved_hp_status_and_empty_positions() -> void:
 	assert_eq((members[0] as Dictionary)["status"], "POISON")
 	assert_false((members[0] as Dictionary)["empty"])
 	assert_true((members[1] as Dictionary)["empty"])
+
+
+func test_box_screen_exposes_all_fourteen_fixed_boxes_and_slots() -> void:
+	var save: Gen2SaveData = _save()
+	await _open_box_screen(save)
+	var snapshot: Dictionary = _box_screen.box_snapshot()
+	var boxes: Array = snapshot["boxes"]
+	assert_eq(boxes.size(), Gen2SaveData.BOX_COUNT)
+	assert_eq((boxes[0]["slots"] as Array).size(), Gen2SaveBox.CAPACITY)
+	assert_true((boxes[0]["slots"][0] as Dictionary)["empty"])
+
+
+func test_pc_storage_moves_party_to_box_and_back_through_atomic_save() -> void:
+	var save: Gen2SaveData = _save_with_two()
+	var initial_write: Dictionary = Gen2SaveStore.save(save, _data)
+	assert_true(initial_write["ok"], initial_write["message"])
+	await _open_box_screen(save)
+	assert_true(_box_screen.select_party_member(0))
+	assert_true(_box_screen.deposit_selected_party())
+	assert_eq(save.party.size(), 1)
+	assert_not_null(save.boxes[0].slots[0])
+	assert_true(_box_screen.select_box_slot(0))
+	assert_true(_box_screen.withdraw_selected_box())
+	assert_eq(save.party.size(), 2)
+	assert_null(save.boxes[0].slots[0])
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, save.slot, _data)
+	assert_true(loaded["ok"], loaded["message"])
+	var restored: Gen2SaveData = loaded["save"]
+	assert_eq(restored.party.size(), 2)
+	assert_null(restored.boxes[0].slots[0])
+
+
+func test_pc_storage_refuses_depositing_the_last_party_member() -> void:
+	var save: Gen2SaveData = _save()
+	var result: Dictionary = Gen2SaveStorage.deposit_party_to_box(save, _data, 0, 0)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"last_party_member")
+	assert_eq(save.party.size(), 1)
+	assert_null(save.boxes[0].slots[0])

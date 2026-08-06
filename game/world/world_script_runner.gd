@@ -52,10 +52,23 @@ const PHONE_CONTACT_GOT: int = 0
 const PHONE_CONTACTS_FULL: int = 1
 const PHONE_CONTACT_REFUSED: int = 2
 const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
+const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
+const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
 const TEXT_STRING_BUFFER: int = 0x14
+
+## Crystal event flags used by the player's room decoration callbacks. The
+## importer keeps raw cartridge flag numbers, so these values match the
+## source event flag table rather than a project-local enum.
+const EVENT_TEMPORARY_UNTIL_MAP_RELOAD_8: int = 7
+const EVENT_PLAYERS_ROOM_POSTER: int = 716
+const EVENT_PLAYERS_HOUSE_2F_CONSOLE: int = 1857
+const EVENT_PLAYERS_HOUSE_2F_DOLL_1: int = 1858
+const EVENT_PLAYERS_HOUSE_2F_DOLL_2: int = 1859
+const EVENT_PLAYERS_HOUSE_2F_BIG_DOLL: int = 1860
+const VARIABLE_SPRITE_BASE: int = 0xF0
 
 
 static func begin(
@@ -465,7 +478,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKCELLNUM:
 			_script_value = 1 if _phone_contact_registered(int(command["value"])) else 0
 		Gen2WorldScript.SPECIAL:
-			return _execute_phone_special(int(command["value"]))
+			return _execute_special(int(command["value"]))
 		Gen2WorldScript.RANDOM:
 			var maximum: int = int(command["value"])
 			_script_value = randi_range(0, maximum - 1) if maximum > 0 else 0
@@ -749,6 +762,13 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 		0x87:
 			return _stage_audio_request(&"special_sound", {"item": _last_item})
+		0x6C:
+			## variablesprite stores a sprite id in the source's variable-sprite
+			## table. The first operand is an index relative to SPRITE_VARS.
+			_emit_runtime_event(&"variable_sprite_changed", {
+				"variable_sprite": VARIABLE_SPRITE_BASE + int(command.get("value", 0)),
+				"sprite": int(command.get("value_2", 0)),
+			})
 		0x8A, 0x8B:
 			_emit_runtime_event(&"script_timing_requested", {
 				"kind": &"pause" if source_opcode == 0x8A else &"deactivate_facing",
@@ -815,7 +835,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 	var handled_sources: Array = [
 		0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
-		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
+		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -1137,15 +1157,39 @@ func _clock_hour() -> int:
 	return clampi(int(clock.get("hour", 0)), 0, 23)
 
 
-func _execute_phone_special(special: int) -> Dictionary:
-	## These IDs are the source SpecialsPointers entries used by imported phone
-	## scripts. The random phone routines write StringBuffer4, while the
-	## fishing routine preserves wScriptVar as its species flag.
+func _execute_special(special: int) -> Dictionary:
+	## SPECIAL is a shared cartridge dispatch table. Phone routines are only one
+	## part of it; map callbacks also use the adjacent decoration routines.
 	match special:
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",
 				"species": _script_value,
+			})
+		SPECIAL_TOGGLE_MAPTILE_DECORATIONS:
+			## A fresh project save has no imported bedroom decoration selection.
+			## Crystal's default decoration values are zero, which leaves the
+			## decoration blocks unchanged and hides the room poster.
+			_staged_flags[EVENT_PLAYERS_ROOM_POSTER] = false
+			_emit_runtime_event(&"decoration_callback_applied", {
+				"special": special,
+				"kind": &"toggle_maptile_decorations",
+				"defaults": true,
+			})
+		SPECIAL_TOGGLE_DECORATIONS_VISIBILITY:
+			## With the default zero decoration selections, ToggleDecorationVisibility
+			## sets each object event flag and the renderer removes those objects.
+			for flag: int in [
+				EVENT_PLAYERS_HOUSE_2F_CONSOLE,
+				EVENT_PLAYERS_HOUSE_2F_DOLL_1,
+				EVENT_PLAYERS_HOUSE_2F_DOLL_2,
+				EVENT_PLAYERS_HOUSE_2F_BIG_DOLL,
+			]:
+				_staged_flags[flag] = true
+			_emit_runtime_event(&"decoration_callback_applied", {
+				"special": special,
+				"kind": &"toggle_decorations_visibility",
+				"defaults": true,
 			})
 		SPECIAL_RANDOM_UNSEEN_WILD_MON:
 			var rare_species: int = _phone_unseen_rare_species()

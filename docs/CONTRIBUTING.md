@@ -80,6 +80,11 @@ validator, store and battle adapter scene-free. It validates against
 fixed fourteen-box, twenty-slot PC model, with migration from format 1 that
 does not invent a world snapshot. Party-owned world transactions must update a
 candidate save and live snapshot together, then restore both on a failed write.
+`Gen2SaveStorage` applies the same candidate, validator and temporary-file
+boundary to explicit party-to-box and box-to-party transfers; `box_screen.gd`
+owns selection and presentation only. Keep box names, current-box UI state and
+cartridge SRAM placement outside the model until their source ownership is
+verified.
 The original SRAM adapter is a separate, checksum-aware boundary and remains
 party-focused until cartridge box ownership and layout are explicitly
 researched.

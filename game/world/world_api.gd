@@ -33,6 +33,7 @@ var _object_visibility_overrides: Dictionary = {}
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
+var _variable_sprites: Dictionary = {}
 var _block_overrides: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
@@ -1062,6 +1063,21 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 		if event_type == &"map_reload_requested":
 			generated.append(reload_current_map())
 			continue
+		if event_type == &"variable_sprite_changed":
+			var variable_sprite: int = int(event.get("variable_sprite", -1))
+			var sprite: int = int(event.get("sprite", 0))
+			if variable_sprite < Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE \
+				or sprite <= 0:
+				generated.append({"type": &"variable_sprite_change_failed"})
+				continue
+			_variable_sprites[variable_sprite] = sprite
+			reload_objects = true
+			generated.append({
+				"type": &"variable_sprite_changed",
+				"variable_sprite": variable_sprite,
+				"sprite": sprite,
+			})
+			continue
 		if event_type == &"map_refresh_requested":
 			generated.append({"type": &"map_refreshed", "map": map_id()})
 			continue
@@ -1802,9 +1818,14 @@ func _load_objects() -> void:
 	var rows: Array = current_map.events.get("objects", [])
 	for index: int in rows.size():
 		var value: Dictionary = rows[index]
-		var sprite_number: int = int(value.get("sprite", 0))
+		var source_sprite_number: int = int(value.get("sprite", 0))
+		var sprite_number: int = int(_variable_sprites.get(
+			source_sprite_number, source_sprite_number
+		))
 		var sprite: Gen2WorldSprite = data.overworld_sprite(sprite_number)
-		var object: Gen2WorldObject = Gen2WorldObject.from_event(index, value, sprite)
+		var object_event: Dictionary = value.duplicate(true)
+		object_event["sprite"] = sprite_number
+		var object: Gen2WorldObject = Gen2WorldObject.from_event(index, object_event, sprite)
 		var key: String = _object_key(current_map.group, current_map.number, index)
 		if _object_position_overrides.has(key):
 			object.cell = _object_position_overrides[key]

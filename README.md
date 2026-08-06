@@ -31,7 +31,8 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >
 > The launcher imports a verified dump, opens its cache's save screen, creates
 > or imports a party, and starts the development battle. The overworld slice
-> renders real maps, traverses connected maps, runs explicit script requests,
+> renders real maps, enters the imported Crystal home callbacks from a new
+> game, traverses connected maps, runs explicit script requests,
 > handles trainer battles, imported win/loss text, map reloads and save-safe
 > blackout recovery, and covers object lifecycle, bounded followers, block
 > edits, emotes, surf, grass, fishing, roaming, repel and deterministic wild
@@ -46,6 +47,11 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > gifts, eggs, imported NPC trades, common HP/status items, repel and the core
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
+
+The party screen opens a first PC storage presentation with fourteen numbered
+boxes and twenty fixed slots per box. It can deposit into the current box's
+first free slot and withdraw into a party with room. Each transfer validates and
+writes a candidate save atomically, and the last party member cannot be boxed.
 > Crystal rooftop stock switches from the imported first list after the Hall of
 > Fame engine flag is committed. The imported bargain shop keeps its Monday
 > morning, one-item-per-visit and daily close behavior in the world snapshot.
@@ -182,9 +188,10 @@ Development scenes:
   fishing; with an imported cache pass game and map after the output path, such
   as `silver 2 5`. Its one-argument form remains a fixture smoke test.
 
-  `tools/preview_world_story.gd` exercises a real imported map entry callback,
+  `tools/preview_world_story.gd` exercises real imported map entry callbacks,
   event-flag object visibility and a facing object interaction without opening
-  the cartridge at runtime. For example:
+  the cartridge at runtime. The Crystal home map also covers source decoration
+  callbacks and the long initial event setup script. For example:
 
   ```bash
   godot --headless --path . -s res://tools/preview_world_story.gd -- \

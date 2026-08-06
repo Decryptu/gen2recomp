@@ -108,7 +108,9 @@ const TEXT_PAGE: int = 0x50
 const TEXT_TERMINATOR: int = 0x57
 const TEXT_PROMPT: int = 0x58
 
-const MAX_COMMANDS: int = 128
+## Long map-entry initialization callbacks can include the cartridge's full
+## event-variable setup routine, which is larger than one hundred commands.
+const MAX_COMMANDS: int = 512
 const MAX_CALL_DEPTH: int = 8
 const MAX_SCRIPT_BYTES: int = 512
 const MAX_TEXT_BYTES: int = 1024
