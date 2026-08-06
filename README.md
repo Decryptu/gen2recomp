@@ -35,7 +35,8 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > game, traverses connected maps, runs explicit script requests,
 > handles trainer battles, imported win/loss text, map reloads and save-safe
 > blackout recovery, and covers object lifecycle, bounded followers, block
-> edits, emotes, surf, grass, fishing, roaming, repel and deterministic wild
+> edits, emotes, surf, ledge hops, grass, fishing, roaming, repel and
+> deterministic wild
 > battle requests. The real-data story preview now follows the post-starter
 > route through Elm's aide Potion, Route 29, Cherrygrove, Route 30, Mr. Pokémon's
 > Mystery Egg event, the first rival battle and the return to Elm's Lab for the
@@ -240,6 +241,14 @@ Development scenes:
 
   ```bash
   godot --headless --path . -s res://tools/validate_crystal_route30_trainer.gd
+  ```
+
+  Ledge hopping is checked the same way, against both games at once: the eight
+  source hop codes, the directions each one accepts, Route 30's own ledge
+  record and the two-cell landing.
+
+  ```bash
+  godot --headless --path . -s res://tools/validate_ledge_hops.gd
   ```
 
   World text follows the cartridge command stream: `$50` is a page break,
