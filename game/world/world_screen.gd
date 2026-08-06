@@ -110,6 +110,7 @@ func _build_world() -> void:
 		_caption.text = "Map %d/%d unavailable" % [map_group, map_number]
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
 		return
+	_refresh_party_summary()
 	if encounter_seed != 0:
 		_encounter_random.seed = encounter_seed
 		_object_random.seed = encounter_seed + 1
@@ -1274,9 +1275,40 @@ func _play_current_map_music() -> void:
 	_audio_player.play_record(record, &"map_music", _audio_assets())
 
 
+## The save whose party a queued script's VAR_PARTYCOUNT read and CheckPokerus
+## special should see. A battle in progress may hold its own save, including a
+## synthesized development one from a fallback capture, so it takes priority
+## over the screen's ordinary selected save.
+func _active_party_save() -> Gen2SaveData:
+	if _active_battle_save != null:
+		return _active_battle_save
+	return _injected_save if _injected_save != null else _selected_runtime_save()
+
+
+## Mirrors the active save's party size and Pokerus state onto the world so a
+## queued script can answer VAR_PARTYCOUNT and CheckPokerus without the
+## scene-free world owning a save. Cleared, not zeroed, when no save is
+## selected, so a missing wiring fails loudly instead of reading an invented
+## empty party.
+func _refresh_party_summary() -> void:
+	if _world == null:
+		return
+	var save: Gen2SaveData = _active_party_save()
+	if save == null:
+		_world.clear_party_summary()
+		return
+	var has_pokerus: bool = false
+	for member: Variant in save.party:
+		if member is Gen2SaveMon and (int((member as Gen2SaveMon).pokerus) & 0x0F) != 0:
+			has_pokerus = true
+			break
+	_world.set_party_summary(save.party.size(), has_pokerus)
+
+
 func _refresh_labels() -> void:
 	if _world == null or _data == null:
 		return
+	_refresh_party_summary()
 	_caption.text = "%s   map %d/%d   cell %d,%d" % [
 		_data.title(), _world.current_map.group, _world.current_map.number,
 		_world.player_cell.x, _world.player_cell.y,

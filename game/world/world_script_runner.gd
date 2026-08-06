@@ -65,10 +65,13 @@ const PHONE_CONTACT_REFUSED: int = 2
 const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
 const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
 const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
+const SPECIAL_POKEMON_CENTER_PC: int = 28
 const SPECIAL_PLAYERS_HOUSE_PC: int = 29
 const SPECIAL_SET_DAY_OF_WEEK: int = 37
 const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
+const SPECIAL_HEAL_MACHINE_ANIM: int = 62
+const SPECIAL_CHECK_POKERUS: int = 78
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
@@ -1288,8 +1291,17 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 	var hour: int = int(clock.get("hour", _clock_hour()))
 	var day: int = int(clock.get("day", 0))
 	match variable:
+		0x01: # VAR_PARTYCOUNT
+			var party: Dictionary = _request.get("party", {})
+			if party.is_empty():
+				return {
+					"ok": false, "reason": &"missing_party_summary", "variable": variable,
+				}
+			_script_value = int(party.get("count", 0))
 		0x04: # VAR_TIMEOFDAY
 			_script_value = Gen2WorldClock.new(hour, 0, day).time_of_day()
+		0x07: # VAR_BADGES
+			_script_value = state.badge_count() if state != null else 0
 		0x0A: # VAR_HOUR
 			_script_value = hour
 		0x0B: # VAR_WEEKDAY
@@ -1377,6 +1389,11 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 				"mode": &"players_house",
 			})
+		SPECIAL_POKEMON_CENTER_PC:
+			return _stage_runtime_request(&"pc_requested", {
+				"special": special,
+				"mode": &"pokemon_center",
+			})
 		SPECIAL_SET_DAY_OF_WEEK:
 			_stage_day_of_week_menu()
 			return {"ok": true}
@@ -1409,6 +1426,19 @@ func _execute_special(special: int) -> Dictionary:
 			## request so HP, status and PP are changed together with the selected
 			## project save.
 			return _stage_runtime_request(&"party_heal_requested", {"special": special})
+		SPECIAL_HEAL_MACHINE_ANIM:
+			## wScriptVar selects the machine's screen position: 0 Pokemon Center,
+			## 1 Elm's Lab, 2 Hall of Fame. A preceding SETVAL loads it, so it is
+			## carried through as presentation only; nothing here changes state.
+			_emit_runtime_event(&"presentation_special_applied", {
+				"special": special, "kind": &"heal_machine_anim",
+				"machine_type": _script_value,
+			})
+		SPECIAL_CHECK_POKERUS:
+			var party: Dictionary = _request.get("party", {})
+			if party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			_script_value = 1 if bool(party.get("pokerus", false)) else 0
 		48, 50, 51, 157:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.

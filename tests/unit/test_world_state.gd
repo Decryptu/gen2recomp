@@ -43,6 +43,33 @@ func test_engine_flags_round_trip_and_daily_reset_preserves_hall_of_fame() -> vo
 	assert_false(restored.reset_daily_flags())
 
 
+func test_badge_count_matches_active_flags_across_both_bytes() -> void:
+	var state := Gen2WorldState.new()
+	assert_eq(state.badge_count(), 0)
+	state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)
+	assert_eq(state.badge_count(), 1)
+	for flag: int in Gen2WorldState.BADGE_ENGINE_FLAGS:
+		state.set_engine_flag(flag)
+	assert_eq(state.badge_count(), 16)
+	## wBadges is one contiguous flag_array spanning both wJohtoBadges and
+	## wKantoBadges, so a Kanto badge must count toward the same total.
+	var kanto_only := Gen2WorldState.new()
+	kanto_only.set_engine_flag(Gen2WorldState.ENGINE_EARTHBADGE)
+	assert_eq(kanto_only.badge_count(), 1)
+
+
+func test_badge_flags_survive_round_trip_and_daily_or_map_reload_resets() -> void:
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)
+	state.set_engine_flag(Gen2WorldState.ENGINE_HIVEBADGE)
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.badge_count(), 2)
+	restored.reset_daily_flags()
+	assert_eq(restored.badge_count(), 2)
+	restored.reset_map_reload_flags()
+	assert_eq(restored.badge_count(), 2)
+
+
 func test_source_temporary_event_flags_include_zero_and_reset_on_map_reload() -> void:
 	var state := Gen2WorldState.new()
 	state.set_event_flag(0)

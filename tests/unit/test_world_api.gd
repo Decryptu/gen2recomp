@@ -1305,6 +1305,158 @@ func test_players_house_pc_special_is_a_host_request_and_returns_false_without_d
 	assert_true(world.pending_runtime_request().is_empty())
 
 
+func test_pokemon_center_pc_special_stages_the_pokemon_center_mode() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6195"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_POKEMON_CENTER_PC, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6195
+	var waiting: Array = world.dispatch_script_events()
+	assert_eq(waiting.size(), 1)
+	assert_eq(waiting[0]["status"], &"waiting")
+	assert_eq(world.pending_runtime_request()["kind"], &"pc_requested")
+	assert_eq(world.pending_runtime_request()["values"]["mode"], &"pokemon_center")
+
+	var resumed: Array = world.complete_runtime_request({"ok": true, "script_value": 0})
+	assert_eq(resumed.size(), 1)
+	assert_eq(resumed[0]["status"], &"complete")
+
+
+func test_readvar_badges_counts_active_engine_flags_across_both_bytes() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6300"] = [
+		Gen2WorldScript.READVAR, 0x07,
+		Gen2WorldScript.IFEQUAL, 1, 0x10, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6310"] = [Gen2WorldScript.SETEVENT, 40, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.state.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)
+	world.current_map.events["coord_events"][0]["script"] = 0x6300
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_true(world.event_flag_active(40))
+
+
+func test_readvar_partycount_reads_the_set_party_summary() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6320"] = [
+		Gen2WorldScript.READVAR, 0x01,
+		Gen2WorldScript.IFEQUAL, 2, 0x30, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6330"] = [Gen2WorldScript.SETEVENT, 41, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.set_party_summary(2, false)
+	world.current_map.events["coord_events"][0]["script"] = 0x6320
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_true(world.event_flag_active(41))
+
+
+func test_readvar_partycount_fails_without_a_party_summary() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6340"] = [Gen2WorldScript.READVAR, 0x01, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6340
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"failed")
+	assert_eq(result[0]["reason"], &"missing_party_summary")
+
+
+func test_heal_machine_anim_special_emits_presentation_event_without_state_change() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6350"] = [
+		Gen2WorldScript.SETVAL, 0,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_HEAL_MACHINE_ANIM, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6350
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_eq(
+		_event_value(result[0]["events"], &"presentation_special_applied", "kind"),
+		&"heal_machine_anim",
+		JSON.stringify(result),
+	)
+	assert_eq(
+		int(_event_value(result[0]["events"], &"presentation_special_applied", "machine_type")),
+		0,
+		JSON.stringify(result),
+	)
+	assert_false(world.event_flag_active(0))
+
+
+func test_check_pokerus_special_reads_the_low_nibble_across_the_party_summary() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6360"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_CHECK_POKERUS, 0,
+		Gen2WorldScript.IFTRUE, 0x70, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6370"] = [Gen2WorldScript.SETEVENT, 42, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var infected := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	infected.set_party_summary(1, true)
+	infected.current_map.events["coord_events"][0]["script"] = 0x6360
+	var infected_result: Array = infected.dispatch_script_events()
+	assert_eq(infected_result[0]["status"], &"complete", JSON.stringify(infected_result))
+	assert_true(infected.event_flag_active(42))
+
+	var clean_data: GameData = GameData.open_directory(_directory)
+	var clean := Gen2WorldAPI.open(clean_data, 1, 1, Vector2i(7, 6))
+	clean.set_party_summary(1, false)
+	clean.current_map.events["coord_events"][0]["script"] = 0x6360
+	var clean_result: Array = clean.dispatch_script_events()
+	assert_eq(clean_result[0]["status"], &"complete", JSON.stringify(clean_result))
+	assert_false(clean.event_flag_active(42))
+
+
+func test_check_pokerus_special_fails_without_a_party_summary() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6380"] = [
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_CHECK_POKERUS, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6380
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"failed")
+	assert_eq(result[0]["reason"], &"missing_party_summary")
+
+
+func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void:
+	var world: Gen2WorldAPI = _world()
+	assert_true(world.party_summary().is_empty())
+	assert_true(world.set_party_summary(3, true)["ok"])
+	assert_eq(world.party_summary(), {"count": 3, "pokerus": true})
+	assert_false(world.set_party_summary(-1, false)["ok"])
+	assert_eq(world.party_summary(), {"count": 3, "pokerus": true})
+	world.clear_party_summary()
+	assert_true(world.party_summary().is_empty())
+
+
 func test_set_day_of_week_follows_the_source_selection_and_confirmation_flow() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:61A0"] = [
