@@ -89,6 +89,29 @@ switch between the built-in `gen2` renderer and a mod's while the game runs.
 the player and any running script are untouched, because a renderer reads world
 state and must not write it. Two views of one world have to agree.
 
+## Logical world state and optional mod pose
+
+The normal game remains logically grid-based. The player and NPCs occupy walk
+cells, movement commits one cell at a time in the four cardinal directions, and
+interactions use the current logical cell plus one of the four cardinal facing
+directions. The original hardware may animate a sprite between cells during a
+step, but that visual progress does not change the source interaction model.
+
+A movement mod may add a more precise pose for smooth, analog, first-person or
+3D movement. That pose can contain a sub-cell position and an arbitrary facing
+angle, but it is an optional mod layer, not a replacement for the authoritative
+world state. The core world remains responsible for collision, logical cell
+transitions, map triggers, warps and script or NPC interactions.
+
+When a mod requests an interaction, it must project its pose back onto the
+normal rules. Resolve a deterministic logical cell, quantize the precise facing
+angle to one of the four source directions, and pass that cell and direction to
+the existing interaction path. Use the source tie-breaking behavior when an
+angle lies between directions. A mod must not directly replace the world's
+authoritative cell or bypass its collision and event boundaries. This lets a
+mod provide smooth movement while an NPC in the neighboring logical cell still
+interacts exactly as it would in the original game.
+
 ## Measured against the voxel mod
 
 [DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod)
