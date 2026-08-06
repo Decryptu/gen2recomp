@@ -1,0 +1,8 @@
+# Authoritative source repositories used for source comparison.
+# Keep exact commits here so local checkouts are reproducible.
+pokecrystal_repo=https://github.com/pret/pokecrystal.git
+pokecrystal_branch=master
+pokecrystal_ref=5593381195342e481b69a2fd4ab25e202ddcf708
+pokegold_repo=https://github.com/pret/pokegold.git
+pokegold_branch=master
+pokegold_ref=add1dbe018170d7f25f7b7360e8046cec6354906

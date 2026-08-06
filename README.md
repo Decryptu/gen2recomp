@@ -288,7 +288,8 @@ not compiled extensions. The project is therefore GDScript-first. See
 Read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). No cartridge-derived data
 may enter the repository: no ROM, `.sav`, extracted sprites, text, maps or
 audio. `.gitignore`, the pre-commit hook and tests enforce this; do not weaken
-them.
+them. For reproducible comparisons with the upstream disassemblies, see
+[docs/REFERENCES.md](docs/REFERENCES.md).
 
 ## Licence
 
