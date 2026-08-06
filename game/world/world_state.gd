@@ -11,8 +11,16 @@ signal changed
 
 const PHONE_CONTACT_CAPACITY: int = 10
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
+## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
+## table to ENGINE_CREDITS_SKIP, and the Goldenrod bargain merchant uses the
+## daily ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED flag.
+const ENGINE_CREDITS_SKIP: int = 15
+const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
+const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 43
+const DAILY_ENGINE_FLAGS: Array[int] = [ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED]
 
 var _event_flags: Dictionary = {}
+var _engine_flags: Dictionary = {}
 var _map_scenes: Dictionary = {}
 var _items: Dictionary = {}
 var _money: Dictionary = {}
@@ -38,10 +46,14 @@ func _init(
 	initial_phone_receive_cycle: int = 0, initial_phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0],
 	initial_pending_special_phone_call: int = 0,
 	initial_seen_species: Dictionary = {},
+	initial_engine_flags: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
 		if int(flag) > 0 and bool(initial_event_flags[flag]):
 			_event_flags[int(flag)] = true
+	for flag: Variant in initial_engine_flags:
+		if int(flag) >= 0 and bool(initial_engine_flags[flag]):
+			_engine_flags[int(flag)] = true
 	for map_key: Variant in initial_map_scenes:
 		var scene: int = int(initial_map_scenes[map_key])
 		if scene >= 0:
@@ -78,6 +90,7 @@ func _init(
 func to_dict() -> Dictionary:
 	return {
 		"event_flags": _event_flags.duplicate(),
+		"engine_flags": _engine_flags.duplicate(),
 		"map_scenes": _map_scenes.duplicate(),
 		"items": _items.duplicate(),
 		"money": _money.duplicate(),
@@ -117,6 +130,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		int(source.get("phone_receive_minutes", PHONE_RECEIVE_DELAYS[0])),
 		int(source.get("pending_special_phone_call", 0)),
 		source.get("seen_species", {}) if source.get("seen_species", {}) is Dictionary else {},
+		source.get("engine_flags", {}) if source.get("engine_flags", {}) is Dictionary else {},
 	)
 
 
@@ -128,6 +142,7 @@ func restore_from_dict(raw: Variant) -> void:
 	if restored == null:
 		return
 	_event_flags = restored._event_flags.duplicate()
+	_engine_flags = restored._engine_flags.duplicate()
 	_map_scenes = restored._map_scenes.duplicate()
 	_items = restored._items.duplicate()
 	_money = restored._money.duplicate()
@@ -176,6 +191,57 @@ func clear_event_flag(flag: int) -> void:
 
 func event_flags() -> Dictionary:
 	return _event_flags.duplicate()
+
+
+func is_engine_flag_active(flag: int) -> bool:
+	return flag >= 0 and bool(_engine_flags.get(flag, false))
+
+
+func set_engine_flag(flag: int, active: bool = true) -> void:
+	if flag < 0:
+		return
+	var was_active: bool = is_engine_flag_active(flag)
+	if was_active == active:
+		return
+	if active:
+		_engine_flags[flag] = true
+	else:
+		_engine_flags.erase(flag)
+	changed.emit()
+
+
+func clear_engine_flag(flag: int) -> void:
+	set_engine_flag(flag, false)
+
+
+func engine_flags() -> Dictionary:
+	return _engine_flags.duplicate()
+
+
+func hall_of_fame() -> bool:
+	return is_engine_flag_active(ENGINE_HALL_OF_FAME)
+
+
+func set_hall_of_fame(active: bool = true) -> void:
+	set_engine_flag(ENGINE_HALL_OF_FAME, active)
+
+
+func bargain_merchant_closed() -> bool:
+	return is_engine_flag_active(ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+
+
+## Clears only source daily engine flags. Story flags such as Hall of Fame
+## survive the day boundary.
+func reset_daily_flags() -> bool:
+	var did_change: bool = false
+	for flag: int in DAILY_ENGINE_FLAGS:
+		if not _engine_flags.has(flag):
+			continue
+		_engine_flags.erase(flag)
+		did_change = true
+	if did_change:
+		changed.emit()
+	return did_change
 
 
 func item_quantity(item: int) -> int:
@@ -447,6 +513,12 @@ func apply_changes(
 	for raw_item: Variant in item_changes:
 		if int(raw_item) <= 0 or int(item_changes[raw_item]) < 0:
 			return {"ok": false, "reason": &"invalid_item_quantity"}
+	var engine_flag_changes: Dictionary = runtime_changes.get("engine_flags", {})
+	if not engine_flag_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_engine_flags"}
+	for raw_flag: Variant in engine_flag_changes:
+		if int(raw_flag) < 0:
+			return {"ok": false, "reason": &"invalid_engine_flag"}
 	var money_changes: Dictionary = runtime_changes.get("money", {})
 	if not money_changes is Dictionary:
 		return {"ok": false, "reason": &"invalid_money"}
@@ -511,6 +583,13 @@ func apply_changes(
 			next_flags[flag] = true
 		else:
 			next_flags.erase(flag)
+	var next_engine_flags: Dictionary = _engine_flags.duplicate()
+	for raw_flag: Variant in engine_flag_changes:
+		var engine_flag: int = int(raw_flag)
+		if bool(engine_flag_changes[raw_flag]):
+			next_engine_flags[engine_flag] = true
+		else:
+			next_engine_flags.erase(engine_flag)
 	var next_scenes: Dictionary = _map_scenes.duplicate()
 	for raw_map: Variant in scene_changes:
 		next_scenes[String(raw_map)] = int(scene_changes[raw_map])
@@ -550,7 +629,8 @@ func apply_changes(
 		runtime_changes.get("just_battled", _just_battled)
 	)
 
-	var did_change: bool = next_flags != _event_flags or next_scenes != _map_scenes \
+	var did_change: bool = next_flags != _event_flags or next_engine_flags != _engine_flags \
+		or next_scenes != _map_scenes \
 		or next_items != _items or next_money != _money or next_coins != _coins \
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
 		or next_seen_species != _seen_species \
@@ -560,6 +640,7 @@ func apply_changes(
 		or next_receive_minutes != _phone_receive_minutes \
 		or next_special_phone_call != _pending_special_phone_call
 	_event_flags = next_flags
+	_engine_flags = next_engine_flags
 	_map_scenes = next_scenes
 	_items = next_items
 	_money = next_money

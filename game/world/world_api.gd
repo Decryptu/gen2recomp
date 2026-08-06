@@ -83,6 +83,11 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 		return null
 	if world_snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
 		return null
+	if world_snapshot.world_day < 0 or world_snapshot.world_day >= Gen2WorldClock.DAYS_PER_WEEK \
+		or world_snapshot.world_hour < 0 or world_snapshot.world_hour >= Gen2WorldClock.HOURS_PER_DAY \
+		or world_snapshot.world_minute < 0 \
+		or world_snapshot.world_minute >= Gen2WorldClock.MINUTES_PER_HOUR:
+		return null
 	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
 	if tileset == null:
 		return null
@@ -91,6 +96,9 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	)
 	out.player_facing = world_snapshot.player_facing
 	out.movement_mode = world_snapshot.movement_mode
+	out.world_day = world_snapshot.world_day
+	out.world_hour = world_snapshot.world_hour
+	out.world_minute = world_snapshot.world_minute
 	return out
 
 
@@ -326,7 +334,10 @@ func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
 
 
 func set_world_clock(day: int, hour: int, minute: int) -> void:
-	world_day = posmod(day, Gen2WorldClock.DAYS_PER_WEEK)
+	var next_day: int = posmod(day, Gen2WorldClock.DAYS_PER_WEEK)
+	if next_day != world_day and state != null:
+		state.reset_daily_flags()
+	world_day = next_day
 	world_hour = posmod(hour, Gen2WorldClock.HOURS_PER_DAY)
 	world_minute = posmod(minute, Gen2WorldClock.MINUTES_PER_HOUR)
 

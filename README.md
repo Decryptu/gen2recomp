@@ -46,6 +46,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > gifts, eggs, imported NPC trades, common HP/status items, repel and the core
 > Poké Ball catch calculation behind a validated candidate-save boundary; wild
 > capture input uses that transaction.
+> Crystal rooftop stock switches from the imported first list after the Hall of
+> Fame engine flag is committed. The imported bargain shop keeps its Monday
+> morning, one-item-per-visit and daily close behavior in the world snapshot.
 >
 > Full story state and complete phone presentation do not exist yet, so this is not
 > a complete game. Source two-ring timing, contact registration commands,
@@ -143,7 +146,7 @@ ROM, and opens its save screen. It provides three validated slots, new games
 with Chikorita, Cyndaquil or Totodile at level 5, original `.sav` import, party
 inspection and the development battle. New games use the verified Crystal home
 spawn and source starting money when that map exists. Continue enters the
-overworld; F5 saves its map, inventory and event snapshot. See
+overworld; F5 saves its map, inventory, event and clock snapshot. See
 [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
 
 Development scenes:

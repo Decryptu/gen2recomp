@@ -19,7 +19,8 @@ const MARTTYPE_ROOFTOP: int = 4
 ## bitter and pharmacy shops use the indexed pointer; bargain and rooftop
 ## shops use their imported priced records.
 static func resolve_mart(
-	data: GameData, dialog_id: int, mart_id: int, rooftop_after_hall: bool = false
+	data: GameData, dialog_id: int, mart_id: int, rooftop_after_hall: bool = false,
+	world_state: Gen2WorldState = null
 ) -> Dictionary:
 	if data == null:
 		return _failure(&"missing_data", {})
@@ -49,6 +50,8 @@ static func resolve_mart(
 			label = "ROOFTOP SALE"
 		_:
 			return _failure(&"unsupported_mart_dialog", {"dialog": dialog_id})
+	if variant == &"bargain" and world_state != null and world_state.bargain_merchant_closed():
+		return _failure(&"bargain_mart_closed", {"dialog": dialog_id})
 	if mart.is_empty() or not mart.has("items") or not mart["items"] is Array \
 		or (mart["items"] as Array).is_empty():
 		return _failure(&"mart_variant_unavailable", {
@@ -80,11 +83,16 @@ static func entries(data: GameData, mart: Dictionary) -> Array:
 			price = int((raw as Dictionary).get("price", price))
 		if price < 0:
 			continue
+		var sold_out: bool = false
+		var sold_items: Variant = mart.get("_sold_items", {})
+		if sold_items is Dictionary:
+			sold_out = bool((sold_items as Dictionary).get(item, false))
 		out.append({
 			"item": item,
 			"name": String(definition.get("name", "UNKNOWN")),
 			"price": price,
 			"pocket": int(definition.get("pocket", 0)),
+			"sold_out": sold_out,
 		})
 	return out
 
@@ -101,6 +109,13 @@ static func purchase(
 		return _failure(&"missing_world", {})
 	if quantity <= 0:
 		return _failure(&"invalid_purchase_quantity", {"quantity": quantity})
+	var is_bargain: bool = StringName(mart.get("variant", &"")) == &"bargain"
+	if is_bargain and quantity != 1:
+		return _failure(&"bargain_quantity_must_be_one", {"quantity": quantity})
+	if is_bargain:
+		var sold_items: Variant = mart.get("_sold_items", {})
+		if sold_items is Dictionary and bool((sold_items as Dictionary).get(item, false)):
+			return _failure(&"bargain_item_sold_out", {"item": item})
 	var selected: Dictionary = {}
 	for entry: Dictionary in entries(world.data, mart):
 		if int(entry.get("item", 0)) == item:
@@ -127,6 +142,9 @@ static func purchase(
 	var applied: Dictionary = world.state.apply_changes({}, {}, {
 		"items": {item: next_quantity},
 		"money": {MONEY_ACCOUNT: balance - total},
+		"engine_flags": {
+			Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: true,
+		} if is_bargain else {},
 	})
 	if not bool(applied.get("ok", false)):
 		return _failure(&"purchase_state_failed", applied)
@@ -147,6 +165,13 @@ static func purchase(
 				world.state.restore_from_dict(before.world_state.to_dict())
 				return _failure(&"save_failed", write_result)
 		_copy_save(save, candidate)
+	if is_bargain:
+		var next_sold_items: Dictionary = {}
+		var previous_sold_items: Variant = mart.get("_sold_items", {})
+		if previous_sold_items is Dictionary:
+			next_sold_items = (previous_sold_items as Dictionary).duplicate()
+		next_sold_items[item] = true
+		mart["_sold_items"] = next_sold_items
 	return {
 		"ok": true,
 		"item": item,

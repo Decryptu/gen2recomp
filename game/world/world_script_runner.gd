@@ -15,6 +15,7 @@ var warp_validator: Callable = Callable()
 var _request: Dictionary = {}
 var _frames: Array = []
 var _staged_flags: Dictionary = {}
+var _staged_engine_flags: Dictionary = {}
 var _staged_scenes: Dictionary = {}
 var _staged_items: Dictionary = {}
 var _staged_money: Dictionary = {}
@@ -551,6 +552,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			_staged_flags[int(command["flag"])] = true
 		Gen2WorldScript.CHECKEVENT:
 			_script_value = 1 if _event_flag_active(int(command["flag"])) else 0
+		Gen2WorldScript.CLEARFLAG:
+			_staged_engine_flags[int(command["flag"])] = false
+		Gen2WorldScript.SETFLAG:
+			_staged_engine_flags[int(command["flag"])] = true
+		Gen2WorldScript.CHECKFLAG:
+			_script_value = 1 if _engine_flag_active(int(command["flag"])) else 0
 		Gen2WorldScript.WARP:
 			return _stage_warp(command)
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP, Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE, Gen2WorldScript.CLOSEWINDOW:
@@ -592,6 +599,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKSCENE, Gen2WorldScript.SETSCENE,
 		Gen2WorldScript.SETVAL, Gen2WorldScript.ADDVAL, Gen2WorldScript.RANDOM,
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
+		Gen2WorldScript.CHECKFLAG, Gen2WorldScript.CLEARFLAG, Gen2WorldScript.SETFLAG,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
 		Gen2WorldScript.ADDCELLNUM, Gen2WorldScript.DELCELLNUM,
@@ -799,12 +807,15 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				"map_group": int(command.get("map_group", 0)),
 				"map_number": int(command.get("map_number", 0)),
 			})
+		0x9F:
+			_staged_engine_flags[Gen2WorldState.ENGINE_HALL_OF_FAME] = true
+			_events.append({"type": &"hall_of_fame_requested"})
 		0xA1:
 			return _stage_warp_facing_request(command)
 	var handled_sources: Array = [
 		0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
-		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C,
+		0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -1511,6 +1522,12 @@ func _event_flag_active(flag: int) -> bool:
 	return state != null and state.is_event_flag_active(flag)
 
 
+func _engine_flag_active(flag: int) -> bool:
+	if _staged_engine_flags.has(flag):
+		return bool(_staged_engine_flags[flag])
+	return state != null and state.is_engine_flag_active(flag)
+
+
 func _map_scene_value(map_group: int, map_number: int) -> int:
 	var key: String = Gen2WorldState.map_scene_key(map_group, map_number)
 	if _staged_scenes.has(key):
@@ -1554,6 +1571,8 @@ func _complete() -> Dictionary:
 		runtime_changes["swarm"] = _staged_swarm.duplicate()
 	if _has_staged_special_phone_call:
 		runtime_changes["pending_special_phone_call"] = _staged_special_phone_call
+	if not _staged_engine_flags.is_empty():
+		runtime_changes["engine_flags"] = _staged_engine_flags.duplicate()
 	if _reset_phone_receive_timer:
 		runtime_changes["phone_receive_cycle"] = 0
 		runtime_changes["phone_receive_minutes"] = Gen2WorldState.PHONE_RECEIVE_DELAYS[0]

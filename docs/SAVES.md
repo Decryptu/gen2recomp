@@ -13,7 +13,8 @@ The versioned first format stores:
   moves and PP;
 - an optional validated world snapshot: map ID, player cell, facing, movement
   mode, event flags, map scenes, inventory quantities, money, coins, phone
-  contacts, seen species, repel steps, swarm state and roaming positions;
+  contacts, seen species, repel steps, swarm state, roaming positions, source
+  engine flags and the current day/hour/minute clock;
 - imported-save and party-transaction identity fields: OT ID, nickname, OT,
   happiness, Pokerus and caught data;
 - `is_egg` for received eggs. Eggs remain in the party model but the battle
@@ -48,8 +49,9 @@ Overworld writeback is transactional. A confirmed win saves after result
 messages finish. A loss never overwrites the selected slot: the host validates
 and reconstructs the source save party, then returns blackout recovery.
 Continue enters the overworld only when a validated snapshot exists; F5 writes
-map, player, items, currency, events and schedule state through
-`Gen2SaveStore`. Legacy saves without a snapshot keep the configured
+map, player, items, currency, events, source engine flags and schedule state
+through `Gen2SaveStore`. Daily engine flags reset when the saved world day
+changes, while story flags such as Hall of Fame persist. Legacy saves without a snapshot keep the configured
 development entry until migration exists. Item and currency references are
 checked against the selected cache, and `Gen2WorldAPI.open_snapshot()` restores
 the saved position without clamping it elsewhere.

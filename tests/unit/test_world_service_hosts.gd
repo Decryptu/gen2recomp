@@ -104,6 +104,83 @@ func test_mart_dialog_resolves_all_imported_shop_variants() -> void:
 	assert_eq(invalid["reason"], &"unsupported_mart_dialog")
 
 
+func test_mart_host_uses_hall_of_fame_for_rooftop_stock() -> void:
+	_set_mart_script(Gen2WorldMartHost.MARTTYPE_ROOFTOP)
+	_world.state.set_hall_of_fame()
+	var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting[0]["status"], &"waiting")
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_true(resolved["ok"])
+	assert_eq(resolved["data"]["mart"]["variant"], &"rooftop_mart_2")
+	assert_eq(resolved["data"]["mart"]["items"][0]["price"], 20)
+
+
+func test_bargain_purchase_closes_merchant_and_sells_each_item_once() -> void:
+	var bargain: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0, false, _world.state
+	)
+	assert_true(bargain["ok"])
+	var quantity: Dictionary = Gen2WorldMartHost.purchase(
+		_world, _save, bargain["mart"], 7, 2, false
+	)
+	assert_false(quantity["ok"])
+	assert_eq(quantity["reason"], &"bargain_quantity_must_be_one")
+	var purchase: Dictionary = Gen2WorldMartHost.purchase(
+		_world, _save, bargain["mart"], 7, 1, false
+	)
+	assert_true(purchase["ok"])
+	assert_true(_world.state.bargain_merchant_closed())
+	assert_true(_save.world.world_state.bargain_merchant_closed())
+	assert_true(Gen2WorldMartHost.entries(_data, bargain["mart"])[0]["sold_out"])
+	var sold_out: Dictionary = Gen2WorldMartHost.purchase(
+		_world, _save, bargain["mart"], 7, 1, false
+	)
+	assert_false(sold_out["ok"])
+	assert_eq(sold_out["reason"], &"bargain_item_sold_out")
+	var closed: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0, false, _world.state
+	)
+	assert_false(closed["ok"])
+	assert_eq(closed["reason"], &"bargain_mart_closed")
+	_world.set_world_clock(1, 6, 0)
+	var next_day: Dictionary = Gen2WorldMartHost.resolve_mart(
+		_data, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0, false, _world.state
+	)
+	assert_true(next_day["ok"])
+
+
+func test_bargain_host_refuses_a_closed_merchant_before_opening_ui() -> void:
+	_set_mart_script(Gen2WorldMartHost.MARTTYPE_BARGAIN)
+	_world.state.set_engine_flag(Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+	var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting[0]["status"], &"waiting")
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_false(resolved["ok"])
+	assert_eq(resolved["reason"], &"bargain_mart_closed")
+
+
+func test_bargain_script_keeps_the_source_monday_morning_gate() -> void:
+	_write_bargain_schedule_script()
+	var monday_morning := Gen2WorldScriptRunner.begin(_data, _world.state, {
+		"kind": &"test", "bank": Fixture.BANK, "script": 0x6300,
+		"clock": {"day": 1, "hour": 6, "minute": 0},
+	})
+	var morning_result: Dictionary = monday_morning.advance()
+	assert_eq(morning_result["status"], &"waiting")
+	assert_eq(morning_result["event"]["request"]["kind"], &"mart_requested")
+	assert_eq(morning_result["event"]["request"]["values"]["dialog"], Gen2WorldMartHost.MARTTYPE_BARGAIN)
+	var sunday := Gen2WorldScriptRunner.begin(_data, _world.state, {
+		"kind": &"test", "bank": Fixture.BANK, "script": 0x6300,
+		"clock": {"day": 0, "hour": 6, "minute": 0},
+	})
+	assert_eq(sunday.advance()["status"], &"complete")
+	var monday_night := Gen2WorldScriptRunner.begin(_data, _world.state, {
+		"kind": &"test", "bank": Fixture.BANK, "script": 0x6300,
+		"clock": {"day": 1, "hour": 18, "minute": 0},
+	})
+	assert_eq(monday_night.advance()["status"], &"complete")
+
+
 func test_mart_purchase_refuses_crossing_the_source_item_stack_limit() -> void:
 	var mart: Dictionary = _data.world_mart(0)
 	var before: Dictionary = _world.snapshot().to_dict()
@@ -238,9 +315,9 @@ func _write_services() -> void:
 	})
 
 
-func _set_mart_script() -> void:
+func _set_mart_script(dialog_id: int = Gen2WorldMartHost.MARTTYPE_STANDARD) -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
-	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [0x94, 0, 0x00, 0x40, 0x91]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [0x94, dialog_id, 0x00, 0x40, 0x91]
 	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
 	var maps: Array = RomCache.read_json(RomCache.world_maps_path(Fixture.directory()))
 	for raw: Dictionary in maps:
@@ -258,6 +335,21 @@ func _set_mart_script() -> void:
 	)
 	_save = Gen2SaveStore.create_development_save(_data, 0)
 	_save.world = _world.snapshot()
+
+
+func _write_bargain_schedule_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [
+		0x1C, 0x0B, 0x06, 1, 0x10, 0x63, 0x91,
+	]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6310)] = [
+		0x2B, Gen2WorldPhoneHost.TIME_MORNING, 0x09, 0x20, 0x63, 0x91,
+	]
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6320)] = [
+		0x94, Gen2WorldMartHost.MARTTYPE_BARGAIN, 0x00, 0x40, 0x91,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
 
 
 func _write_menu_script() -> void:

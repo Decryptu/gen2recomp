@@ -73,12 +73,19 @@ func _build_world() -> void:
 		return
 
 	var selected_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var initial_day: int = day
+	var initial_hour: int = hour
+	var initial_minute: int = minute
 	if selected_save != null and selected_save.world != null:
 		_world = Gen2WorldAPI.open_snapshot(_data, selected_save.world)
 		if _world == null:
 			_caption.text = "Saved overworld unavailable"
 			_hint.text = "The saved map or player position is not valid for this cache."
 			return
+		var saved_clock: Dictionary = selected_save.world.world_clock()
+		initial_day = int(saved_clock.get("day", initial_day))
+		initial_hour = int(saved_clock.get("hour", initial_hour))
+		initial_minute = int(saved_clock.get("minute", initial_minute))
 	elif selected_save != null:
 		_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
 	else:
@@ -101,11 +108,11 @@ func _build_world() -> void:
 		_encounter_random.randomize()
 
 	_world.schedule_random = _encounter_random
-	_clock = Gen2WorldClock.new(hour, minute, day)
+	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
-	_world.set_world_clock(day, hour, minute)
-	_world.set_object_time(hour, time_of_day)
+	_world.set_world_clock(initial_day, initial_hour, initial_minute)
+	_world.set_object_time(initial_hour, time_of_day)
 	var rods: Array[StringName] = _world.available_fishing_rods()
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]

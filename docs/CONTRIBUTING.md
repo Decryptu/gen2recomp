@@ -78,9 +78,10 @@ differ.
 validator, store and battle adapter scene-free. It validates against
 `GameData`, writes through a temporary file, and must not parse original SRAM
 until a checksum-aware adapter has been researched and tested against the real
-layout. The project world snapshot owns canonical map, inventory and event
-state; the original SRAM adapter remains party-focused. Do not add box or other
-unsupported cartridge fields before those models are canonical.
+layout. The project world snapshot owns canonical map, inventory, event,
+source-engine-flag and clock state; the original SRAM adapter remains
+party-focused. Do not add box or other unsupported cartridge fields before
+those models are canonical.
 
 `game/world/` separates request resolution from UI. `world_host.gd` and
 scene-free service helpers validate imported data and transactions;
@@ -88,6 +89,10 @@ scene-free service helpers validate imported data and transactions;
 cursor behavior follow cached vertical or two-dimensional records. Mart dialog
 variants and prices come from imported source lists, and purchases enforce the
 source 99-item stack limit before passing candidate-save validation to writeback.
+Crystal rooftop selection reads the persisted Hall of Fame engine flag. The
+Goldenrod Underground bargain shop is opened by its imported Monday morning
+script, sells one of each item per visit, and records the source daily
+merchant-closed flag after a purchase.
 Phone presentation lists registered
 contacts, dispatches outgoing calls and confirms pending host requests; the world
 runner executes the imported caller/callee script at the same transaction

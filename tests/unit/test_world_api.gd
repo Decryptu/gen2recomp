@@ -1004,10 +1004,44 @@ func test_swarm_runtime_request_commits_its_map_indices_as_one_transaction() -> 
 	assert_eq(state.fishing_swarm_species(), 0xD3)
 
 
+func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:60C0": [
+			0x36, Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED, 0,
+			0x34, Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED, 0,
+			0x09, 0xD0, 0x60,
+			0x91,
+		],
+		"48:60D0": [0x33, 7, 0, 0x91],
+		"48:60E0": [0xA0, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var flag_runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x60C0,
+	})
+	var flag_result: Dictionary = flag_runner.advance()
+	assert_eq(flag_result["status"], &"complete")
+	assert_true(state.bargain_merchant_closed())
+	assert_true(state.is_event_flag_active(7))
+
+	var hall_runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x60E0,
+	})
+	var hall_result: Dictionary = hall_runner.advance()
+	assert_eq(hall_result["status"], &"complete")
+	assert_true(state.hall_of_fame())
+	assert_true(hall_result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"hall_of_fame_requested"
+	))
+
+
 func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new({}, {"1:1": 3}, {4: 2}, {0: 100}, 7, {9: true}, 5, Vector2i(1, 1), 0xD3, [], true)
+	state.set_hall_of_fame()
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
+	world.set_world_clock(2, 7, 12)
 	world.player_facing = Gen2WorldSprite.FACING_LEFT
 	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
 	var snapshot: Gen2WorldSnapshot = world.snapshot()
@@ -1021,13 +1055,26 @@ func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	assert_eq(restored.player_cell, Vector2i(8, 6))
 	assert_eq(restored.player_facing, Gen2WorldSprite.FACING_LEFT)
 	assert_eq(restored.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(restored.world_clock(), {"day": 2, "hour": 7, "minute": 12})
 	assert_eq(restored.state.map_scene(1, 1), 3)
 	assert_eq(restored.state.repel_steps(), 5)
 	assert_eq(restored.state.swarm_map(), Vector2i(1, 1))
 	assert_true(restored.state.just_battled())
+	assert_true(restored.state.hall_of_fame())
 	var schedule: Dictionary = restored.advance_schedule()
 	assert_true(schedule["ok"])
 	assert_eq(schedule["kind"], &"world_schedule_updated")
+
+
+func test_world_clock_day_change_clears_daily_engine_flags() -> void:
+	var state := Gen2WorldState.new()
+	state.set_hall_of_fame()
+	state.set_engine_flag(Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED)
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6), state)
+	world.set_world_clock(0, 23, 59)
+	world.set_world_clock(1, 0, 0)
+	assert_true(world.state.hall_of_fame())
+	assert_false(world.state.bargain_merchant_closed())
 
 
 func test_battle_request_keeps_trainer_source_and_result_text_pointers() -> void:
