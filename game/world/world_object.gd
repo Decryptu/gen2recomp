@@ -42,6 +42,7 @@ var object_type: int = 0
 var sight_range: int = 0
 var event_script: int = 0
 var event_flag: int = 0
+var trainer_data: Dictionary = {}
 var facing: int = Gen2WorldSprite.FACING_DOWN
 var frame: int = 0
 var active: bool = false
@@ -70,6 +71,9 @@ static func from_event(
 	out.sight_range = int(value.get("sight_range", 0))
 	out.event_script = int(value.get("script", 0))
 	out.event_flag = int(value.get("event_flag", 0))
+	var trainer: Variant = value.get("trainer", {})
+	if trainer is Dictionary:
+		out.trainer_data = (trainer as Dictionary).duplicate(true)
 	if out.event_flag == 0xFFFF:
 		out.event_flag = -1
 	out.facing = out.initial_facing()
@@ -120,6 +124,11 @@ func visible_with_state(hour: int, time_of_day: int, state: Gen2WorldState) -> b
 
 func event_flag_active(state: Gen2WorldState) -> bool:
 	return event_flag > 0 and state != null and state.is_event_flag_active(event_flag)
+
+
+func trainer_flag_active(state: Gen2WorldState) -> bool:
+	var flag: int = int(trainer_data.get("event_flag", -1))
+	return flag >= 0 and state != null and state.is_event_flag_active(flag)
 
 
 func can_leave_to(destination: Vector2i) -> bool:

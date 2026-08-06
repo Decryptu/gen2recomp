@@ -181,6 +181,26 @@ func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
 	assert_eq(host.battle_snapshot()["message"], "Wild FILLER appeared!")
 
 
+func test_catch_tutorial_uses_the_real_battle_overlay_without_persistent_capture() -> void:
+	await _open_world()
+	var balls_before: int = _world_screen._world.state.item_quantity(
+		Gen2WorldPartyHost.ITEM_POKE_BALL
+	)
+	var results: Array = _world_screen._world.dispatch_script_events(Vector2i(4, 5))
+	assert_eq(results[0]["status"], &"waiting")
+	assert_eq(results[0]["event"]["request"]["kind"], &"catch_tutorial_requested")
+	_world_screen._show_script_results(results)
+	assert_not_null(_battle_host())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_null(_battle_host())
+	assert_eq(
+		_world_screen._world.state.item_quantity(Gen2WorldPartyHost.ITEM_POKE_BALL),
+		balls_before
+	)
+	assert_false(_world_screen._world.state.just_battled())
+
+
 func test_fishing_reaches_the_real_battle_overlay() -> void:
 	await _open_world()
 	_world_screen.start_cell = Vector2i(8, 6)

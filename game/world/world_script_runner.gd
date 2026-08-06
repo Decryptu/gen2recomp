@@ -113,7 +113,16 @@ static func begin(
 	runner._last_item = int(request.get("item", 0))
 	var bank: int = int(request.get("bank", 0))
 	var address: int = int(request.get("script", request.get("address", 0)))
-	if not runner._push_frame(bank, address):
+	var trainer_phase: StringName = StringName(request.get("trainer_phase", &""))
+	var trainer: Variant = request.get("trainer", {})
+	var started: bool = false
+	if trainer_phase == &"initial" and trainer is Dictionary:
+		started = runner._push_frame(
+			bank, address, runner._trainer_intro_script(trainer as Dictionary)
+		)
+	else:
+		started = runner._push_frame(bank, address)
+	if not started:
 		runner._fail(&"missing_script", {"bank": bank, "address": address})
 	else:
 		runner._active = true
@@ -233,6 +242,23 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		}
 	var request: Dictionary = _pending.get("request", {})
 	var kind: StringName = StringName(request.get("kind", &""))
+	if kind == &"catch_tutorial_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"catch_tutorial_failed")), result
+			)
+		var outcome: StringName = StringName(result.get("outcome", &""))
+		if outcome != Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
+			return _fail(&"invalid_catch_tutorial_outcome", result)
+		_script_value = 1
+		_events.append({
+			"type": &"catch_tutorial_completed",
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_events.append({"type": &"battle_map_reload_requested", "tutorial": true})
+		_pending = {}
+		return advance()
 	if kind == &"swarm_requested":
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -740,6 +766,19 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			_emit_runtime_event(&"pokemon_picture_closed", {})
 		0x57, 0x58:
 			return _stage_menu(source_opcode == 0x57, command)
+		0x5B:
+			var trainer_value: Variant = _request.get("trainer", {})
+			if trainer_value is Dictionary and not (trainer_value as Dictionary).is_empty():
+				var trainer: Dictionary = trainer_value as Dictionary
+				_battle_setup = _new_battle_setup({
+					"kind": &"trainer",
+					"trainer_group": int(trainer.get("trainer_group", 0)),
+					"trainer_id": maxi(int(trainer.get("trainer_id", 0)) - 1, 0),
+					"trainer_flag": int(trainer.get("event_flag", -1)),
+					"win_text": _trainer_text_pointer(trainer, "win_text", bank),
+					"loss_text": _trainer_text_pointer(trainer, "loss_text", bank),
+				})
+				_emit_runtime_event(&"battle_setup_changed", _battle_setup)
 		0x5C:
 			_battle_setup = _new_battle_setup({
 				"kind": &"wild", "pokemon": int(command.get("pokemon", 0)),
@@ -764,9 +803,13 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x5F:
 			_emit_runtime_event(&"battle_map_reload_requested", {"requested": true})
 		0x60:
-			return _stage_runtime_request(&"catch_tutorial_requested", {
-				"value": int(command.get("value", 0)),
-			})
+			var tutorial_setup: Dictionary = _battle_setup.duplicate(true)
+			if tutorial_setup.is_empty() or StringName(tutorial_setup.get("kind", &"")) != &"wild":
+				return {"ok": false, "reason": &"tutorial_battle_setup_missing"}
+			tutorial_setup["tutorial"] = true
+			tutorial_setup["battle_type"] = int(command.get("value", 0))
+			tutorial_setup["can_lose"] = false
+			return _stage_runtime_request(&"catch_tutorial_requested", tutorial_setup)
 		0x61:
 			return _stage_runtime_request(&"trainer_text_requested", {
 				"text_id": int(command.get("value", 0)),
@@ -774,10 +817,21 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 		0x62:
 			var trainer_event: Dictionary = _request.get("event", {})
+			var trainer_data: Variant = _request.get("trainer", {})
 			var trainer_flag: int = int(trainer_event.get("event_flag", 0))
-			_script_value = 1 if _event_flag_active(trainer_flag) else 0
+			if trainer_data is Dictionary and not (trainer_data as Dictionary).is_empty():
+				trainer_flag = int((trainer_data as Dictionary).get("event_flag", -1))
+			var action: int = int(command.get("value", 0))
+			if action == 0:
+				_staged_flags[trainer_flag] = false
+			elif action == 1:
+				_staged_flags[trainer_flag] = true
+			elif action == 2:
+				_script_value = 1 if _event_flag_active(trainer_flag) else 0
+			else:
+				return {"ok": false, "reason": &"unsupported_trainer_flag_action", "action": action}
 			_emit_runtime_event(&"trainer_flag_action", {
-				"action": int(command.get("value", 0)), "event_flag": trainer_flag,
+				"action": action, "event_flag": trainer_flag,
 				"script_value": _script_value,
 			})
 		0x63:
@@ -941,7 +995,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0xA1:
 			return _stage_warp_facing_request(command)
 	var handled_sources: Array = [
-		0x55, 0x56, 0x57, 0x58, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
+		0x55, 0x56, 0x57, 0x58, 0x5B, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
 		0x8C,
 		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
@@ -1893,6 +1947,35 @@ func _new_battle_setup(base: Dictionary) -> Dictionary:
 		if _battle_setup.has(key):
 			out[key] = (_battle_setup[key] as Dictionary).duplicate(true)
 	return out
+
+
+func _trainer_text_pointer(trainer: Dictionary, key: String, default_bank: int) -> Dictionary:
+	var raw: Variant = trainer.get(key, {})
+	if raw is Dictionary:
+		var pointer: Dictionary = (raw as Dictionary).duplicate(true)
+		pointer["bank"] = int(pointer.get("bank", default_bank))
+		pointer["address"] = int(pointer.get("address", 0))
+		return pointer
+	return {"bank": default_bank, "address": 0}
+
+
+func _trainer_intro_script(trainer: Dictionary) -> PackedByteArray:
+	var seen: Dictionary = _trainer_text_pointer(
+		trainer, "seen_text", int(_request.get("bank", 0))
+	)
+	var bank: int = int(seen.get("bank", _request.get("bank", 0)))
+	var address: int = int(seen.get("address", 0))
+	return PackedByteArray([
+		# Crystal's loadtemptrainer command points at the request's trainer record.
+		0x5C,
+		Gen2WorldScript.FARWRITETEXT, bank, address & 0xFF, address >> 8,
+		Gen2WorldScript.WAITBUTTON,
+		0x5C,
+		0x5F,
+		0x60,
+		0x63, 1,
+		Gen2WorldScript.END,
+	])
 
 
 func _battle_request_values() -> Dictionary:

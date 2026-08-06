@@ -182,6 +182,7 @@ func _write_cache() -> void:
 		"48:6015": [0x3C, 1, 2, 2, 2, 0x91],
 		"48:6030": [0x6E, 2, 0x91],
 		"48:6040": [0x14, 3, 0x91],
+		"48:6050": [0x5D, 16, 5, 0x61, 3, 0x91],
 	})
 	RomCache.write_json(RomCache.world_standard_scripts_path(_directory), {
 		"0": {"bank": 48, "address": 0x6020, "bytes": [0x4C, 0x00, 0x70, 0x91]},
@@ -1477,6 +1478,74 @@ func test_battle_request_keeps_trainer_source_and_result_text_pointers() -> void
 	assert_eq(values["win_text"]["bank"], 48)
 	assert_eq(values["win_text"]["address"], 0x7000)
 	assert_eq(values["loss_text"]["address"], 0x7100)
+
+
+func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(5, 4))
+	var trainer: Gen2WorldObject = world.objects[0]
+	trainer.object_type = Gen2WorldObject.OBJECTTYPE_TRAINER
+	trainer.sight_range = 3
+	trainer.facing = Gen2WorldSprite.FACING_UP
+	trainer.trainer_data = {
+		"event_flag": 42,
+		"trainer_group": 1,
+		"trainer_id": 1,
+		"seen_text": {"bank": 48, "address": 0x7000},
+		"win_text": {"bank": 48, "address": 0x7000},
+		"loss_text": {"bank": 48, "address": 0x7000},
+		"after_script": 0x6040,
+	}
+	var text: Array = world.dispatch_sight_events()
+	assert_eq(text[0]["status"], &"waiting")
+	assert_eq(text[0]["event"]["type"], &"text")
+	assert_eq(text[0]["event"]["text"], "AB")
+	var button: Array = world.run_event_queue(true)
+	assert_eq(button[0]["event"]["type"], &"button")
+	var battle: Array = world.run_event_queue(true)
+	assert_eq(battle[0]["event"]["type"], &"runtime_request")
+	assert_eq(battle[0]["event"]["request"]["kind"], &"battle_requested")
+	var values: Dictionary = battle[0]["event"]["request"]["values"]
+	assert_eq(values["trainer_group"], 1)
+	assert_eq(values["trainer_id"], 0)
+	assert_eq(values["win_text"]["address"], 0x7000)
+	var complete: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
+	assert_eq(complete[0]["status"], &"complete")
+	assert_true(world.state.is_event_flag_active(42))
+	assert_true(complete[0]["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_map_reload_requested"
+	))
+	assert_true(world.dispatch_sight_events().is_empty())
+
+
+func test_catch_tutorial_uses_wild_setup_without_persistent_capture_changes() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new({}, {}, {Gen2WorldPartyHost.ITEM_POKE_BALL: 3})
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"coord_events", "bank": 48, "script": 0x6050,
+	})
+	var waiting: Dictionary = runner.advance()
+	assert_eq(waiting["status"], &"waiting")
+	var request: Dictionary = waiting["event"]["request"]
+	assert_eq(request["kind"], &"catch_tutorial_requested")
+	assert_eq(request["values"]["kind"], &"wild")
+	assert_eq(request["values"]["pokemon"], 16)
+	assert_eq(request["values"]["level"], 5)
+	assert_true(request["values"]["tutorial"])
+	assert_eq(request["values"]["battle_type"], 3)
+	var complete: Dictionary = runner.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
+	})
+	assert_eq(complete["status"], &"complete")
+	assert_eq(state.item_quantity(Gen2WorldPartyHost.ITEM_POKE_BALL), 3)
+	assert_false(state.just_battled())
+	assert_true(complete["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"catch_tutorial_completed"
+	))
+	assert_true(complete["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"battle_map_reload_requested"
+	))
 
 
 func test_reloadmapafterbattle_is_reported_after_a_confirmed_win() -> void:
