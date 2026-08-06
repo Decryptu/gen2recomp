@@ -15,6 +15,14 @@ const BOX_SCENE: PackedScene = preload("res://game/save/box_screen.tscn")
 const START_MENU_SCENE: PackedScene = preload("res://game/world/start_menu_screen.tscn")
 const PARTY_SCENE: PackedScene = preload("res://game/save/party_screen.tscn")
 const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
+## constants/sfx_constants.asm's SFX_JUMP_OVER_LEDGE (comments there are hex,
+## confirmed against neighboring entries $0a/$0f/$1a), played by
+## engine/overworld/player_movement.asm's .TryJump as the hop starts. Played
+## directly rather than through the script-request path in
+## _handle_audio_request(), which expects a runtime request to acknowledge; a
+## hop is player movement, not a script. _play_current_map_music() below is
+## the existing precedent for this direct-play shape.
+const SFX_JUMP_OVER_LEDGE: int = 0x16
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -400,9 +408,11 @@ func move_player(direction: Vector2i) -> bool:
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
 		return false
+	if movement.get("kind", &"") == &"ledge_hop":
+		_play_ledge_hop_sfx()
 
 	var transition: Dictionary = movement
-	if movement.get("kind", &"") == &"move":
+	if movement.get("kind", &"") in [&"move", &"ledge_hop"]:
 		transition = _world.try_warp()
 	if _renderer != null:
 		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
@@ -1387,6 +1397,15 @@ func _play_current_map_music() -> void:
 	if record.is_empty():
 		return
 	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
+func _play_ledge_hop_sfx() -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.world_audio(&"sfx", SFX_JUMP_OVER_LEDGE)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"sound", _audio_assets())
 
 
 ## The save whose party a queued script's VAR_PARTYCOUNT read and CheckPokerus

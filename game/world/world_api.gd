@@ -18,6 +18,13 @@ const TRAINER_SLOW_STEP_FRAMES: int = 16
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
 ## duration for ordinary player walking (engine/overworld/map_objects.asm).
 const STEP_FRAMES_WALK: int = 8
+## A ledge hop is two chained STEP_WALK-duration cells back to back
+## (engine/overworld/map_objects.asm's StepFunction_PlayerJump: .initjump/
+## .stepjump then .initland/.stepland, each timed by the same InitStep call
+## the ordinary walk uses). The source also overlays a visual jump arc via
+## OBJECT_JUMP_HEIGHT/UpdateJumpPosition, which this project does not render;
+## no vertical bob exists anywhere else in this renderer either.
+const STEP_FRAMES_HOP: int = STEP_FRAMES_WALK * 2
 ## StepVectors' slow row: 1 pixel per frame for 16 frames. _RandomWalkContinue
 ## calls InitStep with a direction of 0 to 3, which indexes that first row, so
 ## a wandering object steps at half the player's walking speed.
@@ -1162,10 +1169,43 @@ func interact() -> Array:
 			continue
 		if _bg_event_interacts(event) and _script_address_for_event(event) > 0:
 			events.append(event)
-	if events.is_empty():
+	if not events.is_empty():
+		_enqueue_script_events(events)
+		return run_event_queue(false)
+	## TryTileCollisionEvent runs last, only when neither an object nor a
+	## background event answered (engine/overworld/events.asm PlayerEvents).
+	var tile_request: Dictionary = _tile_collision_script_request(target)
+	if tile_request.is_empty():
 		return []
-	_enqueue_script_events(events)
+	_enqueue_script(tile_request)
 	return run_event_queue(false)
+
+
+## engine/events/std_collision.asm's CheckFacingTileForStdScript. Keyed by the
+## faced cell's collision code, not its tile ID despite the source's own
+## comment: GetFacingTileCoord returns wTileUp/Down/Left/Right, which
+## GetMovementPermissions fills from GetCoordTileCollision. Returns an empty
+## Dictionary when the code has no entry in TileCollisionStdScripts.
+func _tile_collision_script_request(cell: Vector2i) -> Dictionary:
+	if current_map == null or data == null:
+		return {}
+	var collision: int = collision_code_at(cell)
+	var index: int = Gen2WorldCollision.tile_collision_std_index(
+		collision, Gen2WorldState.is_crystal_profile(data)
+	)
+	if index < 0:
+		return {}
+	var entry: Dictionary = data.world_standard_script(index)
+	if entry.is_empty():
+		return {}
+	return {
+		"kind": &"tile_collision",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": cell,
+		"bank": int(entry.get("bank", -1)),
+		"script": int(entry.get("address", -1)),
+	}
 
 
 ## Acknowledge the current text/button pause and continue the first queued
@@ -2254,6 +2294,9 @@ func move_result(direction: Vector2i) -> Dictionary:
 			return transition
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
 	if not can_walk_to(destination):
+		var hop: Dictionary = _try_ledge_hop(direction)
+		if not hop.is_empty():
+			return hop
 		return {"ok": false, "kind": &"move", "reason": &"blocked"}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
@@ -2275,8 +2318,50 @@ func move_result(direction: Vector2i) -> Dictionary:
 	}
 
 
-## Moves exactly one walk cell in a cardinal direction. Diagonal, zero and
-## out-of-bounds moves are rejected without changing the player position.
+## engine/overworld/player_movement.asm's .TryJump, reached only after an
+## ordinary step into [param direction] is blocked. Reads the collision code
+## of the cell the player already stands on, not the faced cell; on a match
+## the player covers two cells in one bounded action, bypassing collision on
+## both the intervening and landing cells exactly as the source does. Returns
+## an empty Dictionary when no hop applies, so the caller falls through to an
+## ordinary blocked result. Surfing never reaches .TryJump in the source
+## (.Surf calls .TrySurf then jumps straight to .NotMoving), so this refuses
+## outright while surfing. A landing cell outside the map is refused rather
+## than attempted, matching this project's existing rule that out-of-range
+## cells always block.
+func _try_ledge_hop(direction: Vector2i) -> Dictionary:
+	if movement_mode == MOVEMENT_SURF:
+		return {}
+	if not Gen2WorldCollision.allows_hop(collision_code_at(player_cell), direction):
+		return {}
+	var landing: Vector2i = player_cell + direction * 2
+	if landing.x < 0 or landing.y < 0 \
+		or landing.x >= current_map.collision_width \
+		or landing.y >= current_map.collision_height:
+		return {}
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	var previous_cells: Dictionary = {}
+	for index: int in objects.size():
+		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
+	player_cell = landing
+	player_facing = _facing_for_direction(direction)
+	state.consume_repel_step()
+	_advance_followers(from_cell, previous_cells)
+	_start_player_step(direction * 2, STEP_FRAMES_HOP)
+	return {
+		"ok": true,
+		"kind": &"ledge_hop",
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": from_map,
+		"to_cell": player_cell,
+	}
+
+
+## Moves exactly one walk cell in a cardinal direction, or two when a ledge
+## hop applies. Diagonal, zero and out-of-bounds moves are rejected without
+## changing the player position.
 func move(direction: Vector2i) -> bool:
 	return bool(move_result(direction).get("ok", false))
 

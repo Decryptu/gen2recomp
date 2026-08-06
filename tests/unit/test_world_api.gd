@@ -59,6 +59,20 @@ func _write_cache() -> void:
 	collision[7 * 16 + 8] = 0x20
 	collision[6 * 16 + 6] = 0x70
 
+	# Ledge fixture, rows 2-4: a plain hop-down at (3,2) with a wall below it
+	# and to its left, a hop-down-right at (5,2) with walls right and below,
+	# and a hop-right at (14,2) whose landing cell would fall outside the
+	# 16-wide grid. Every landing cell is left at its default LAND_TILE.
+	collision[2 * 16 + 3] = 0xA3   # COLL_HOP_DOWN
+	collision[3 * 16 + 3] = 0x07   # wall below the hop-down cell
+	collision[2 * 16 + 2] = 0x07   # wall left of the hop-down cell
+	collision[2 * 16 + 5] = 0xA4   # COLL_HOP_DOWN_RIGHT
+	collision[2 * 16 + 6] = 0x07   # wall right of the diagonal hop cell
+	collision[3 * 16 + 5] = 0x07   # wall below the diagonal hop cell
+	collision[2 * 16 + 14] = 0xA0  # COLL_HOP_RIGHT, landing would be x=16
+	collision[2 * 16 + 15] = 0x07  # wall right of the edge hop cell
+	collision[2 * 16 + 10] = 0x93  # COLL_PC, faced (not stood on) for std scripts
+
 	var source_events: Dictionary = {
 		"bank": 48,
 		"warps": [{
@@ -647,6 +661,160 @@ func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
 
 	assert_true(world.move(Vector2i.LEFT))
 	assert_eq(world.player_cell, Vector2i(7, 6))
+
+
+func test_player_walks_onto_a_ledge_cell_as_ordinary_land() -> void:
+	# Hop codes are LAND_TILE, so entering one is an ordinary step, not a hop.
+	var world: Gen2WorldAPI = _world(Vector2i(3, 1))
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result["ok"])
+	assert_eq(result["kind"], &"move")
+	assert_eq(world.player_cell, Vector2i(3, 2))
+
+
+func test_ledge_hop_crosses_two_cells_after_an_ordinary_step_is_blocked() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
+	world.set_repel_steps(2)
+	assert_false(world.can_walk_to(Vector2i(3, 3)))
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["kind"], &"ledge_hop")
+	assert_eq(result["from_cell"], Vector2i(3, 2))
+	assert_eq(result["to_cell"], Vector2i(3, 4))
+	assert_eq(world.player_cell, Vector2i(3, 4))
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+	assert_eq(world.repel_steps(), 1)
+
+	# The presentation offset starts two cells behind and eases to zero over
+	# STEP_FRAMES_HOP frames, the same generic step system a one-cell walk
+	# uses with a magnitude-2 direction.
+	assert_true(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2(0, -2))
+	for _tick: int in 4:
+		world.advance_player_step(1000.0)
+	assert_false(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+
+
+func test_ledge_hop_refuses_a_direction_the_code_does_not_allow() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
+	assert_false(world.can_walk_to(Vector2i(2, 2)))
+	var result: Dictionary = world.move_result(Vector2i.LEFT)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"blocked")
+	assert_eq(world.player_cell, Vector2i(3, 2))
+
+
+func test_diagonal_ledge_hop_allows_both_of_its_directions() -> void:
+	var right_world: Gen2WorldAPI = _world(Vector2i(5, 2))
+	var right_result: Dictionary = right_world.move_result(Vector2i.RIGHT)
+	assert_true(right_result["ok"], JSON.stringify(right_result))
+	assert_eq(right_result["kind"], &"ledge_hop")
+	assert_eq(right_world.player_cell, Vector2i(7, 2))
+
+	var down_world: Gen2WorldAPI = _world(Vector2i(5, 2))
+	var down_result: Dictionary = down_world.move_result(Vector2i.DOWN)
+	assert_true(down_result["ok"], JSON.stringify(down_result))
+	assert_eq(down_result["kind"], &"ledge_hop")
+	assert_eq(down_world.player_cell, Vector2i(5, 4))
+
+
+func test_ledge_hop_refuses_a_landing_cell_outside_the_map() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(14, 2))
+	assert_false(world.can_walk_to(Vector2i(15, 2)))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"blocked")
+	assert_eq(world.player_cell, Vector2i(14, 2))
+
+
+func test_ledge_hop_never_fires_while_surfing() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"blocked")
+	assert_eq(world.player_cell, Vector2i(3, 2))
+
+
+func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var standard_scripts: Dictionary = RomCache.read_json(
+		RomCache.world_standard_scripts_path(_directory)
+	)
+	standard_scripts["49"] = {"bank": 48, "address": 0x6900, "bytes": [
+		Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END,
+	]}
+	RomCache.write_json(RomCache.world_standard_scripts_path(_directory), standard_scripts)
+
+	# Faces the COLL_PC cell at (10,2) from below; nothing else is registered
+	# at that cell, so TryTileCollisionEvent is the only stage that can answer.
+	var world: Gen2WorldAPI = _world(Vector2i(10, 3))
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_true(world.state.map_scene(1, 1) != 90)
+	var results: Array = world.interact()
+	assert_false(results.is_empty())
+	assert_eq(results[0]["status"], &"complete", JSON.stringify(results[0]))
+	assert_eq(world.state.map_scene(1, 1), 90)
+
+
+func test_interact_finds_no_tile_collision_script_for_an_untabled_code() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	assert_eq(world.collision_code_at(world.facing_cell()), 0)
+	assert_eq(world.interact(), [])
+
+
+func test_tile_collision_std_index_is_profile_split_for_pc_only() -> void:
+	assert_eq(
+		Gen2WorldCollision.tile_collision_std_index(Gen2WorldCollision.COLL_PC, true), 49
+	)
+	assert_eq(
+		Gen2WorldCollision.tile_collision_std_index(Gen2WorldCollision.COLL_PC, false), 43
+	)
+	for code: int in [
+		Gen2WorldCollision.COLL_BOOKSHELF, Gen2WorldCollision.COLL_RADIO,
+		Gen2WorldCollision.COLL_TOWN_MAP, Gen2WorldCollision.COLL_MART_SHELF,
+		Gen2WorldCollision.COLL_TV, Gen2WorldCollision.COLL_WINDOW,
+		Gen2WorldCollision.COLL_INCENSE_BURNER,
+	]:
+		assert_eq(
+			Gen2WorldCollision.tile_collision_std_index(code, true),
+			Gen2WorldCollision.tile_collision_std_index(code, false),
+			"$%02X is not profile-split" % code
+		)
+	assert_eq(Gen2WorldCollision.tile_collision_std_index(0x00, true), -1)
+
+
+func test_interact_dispatches_the_gold_silver_pc_index_under_that_profile() -> void:
+	# Gold/Silver's raw command stream is not Crystal's shifted by one: END is
+	# $90 there, not Crystal's $91 (Gen2WorldScript.raw_opcode/GOLD_END).
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6910"] = [Gen2WorldScript.SETSCENE, 91, Gen2WorldScript.GOLD_END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var standard_scripts: Dictionary = RomCache.read_json(
+		RomCache.world_standard_scripts_path(_directory)
+	)
+	standard_scripts["43"] = {"bank": 48, "address": 0x6910, "bytes": [
+		Gen2WorldScript.SETSCENE, 91, Gen2WorldScript.GOLD_END,
+	]}
+	RomCache.write_json(RomCache.world_standard_scripts_path(_directory), standard_scripts)
+	var manifest: Dictionary = RomCache.read_json(RomCache.manifest_path(_directory))
+	manifest["game_id"] = "gold"
+	RomCache.write_json(RomCache.manifest_path(_directory), manifest)
+
+	var data: GameData = GameData.open_directory(_directory)
+	assert_false(Gen2WorldState.is_crystal_profile(data))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(10, 3), Gen2WorldState.new()
+	)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var results: Array = world.interact()
+	assert_false(results.is_empty())
+	assert_eq(results[0]["status"], &"complete", JSON.stringify(results[0]))
+	assert_eq(world.state.map_scene(1, 1), 91)
 
 
 func test_active_map_objects_occupy_walk_cells() -> void:

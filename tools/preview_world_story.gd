@@ -491,12 +491,20 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(balls_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Aide Poke Ball event did not finish"}
 
-	# Route 30 and Route 31 cross one-way ledges the ordinary walkable-cell
-	# pathfinding this tool uses cannot cross (ledge hops are not a modeled
-	# movement type yet). The badge slice this preview exists to exercise is
-	# the Pokemon Center and Violet Gym scripts, not that intervening terrain,
-	# so the world reopens directly in Violet City on the same mutable state
-	# rather than attempting to walk a route it cannot path through.
+	# Route 30 and Route 31 both cross one-way ledges, which this project now
+	# hops (Gen2WorldCollision.allows_hop, wired into _reachable_step below),
+	# and the northward corridor at Route 30 x=6..7 is plain floor the whole
+	# way to the map's north edge. The walk is still not driven here because
+	# _reachable_step resolves occupancy through Gen2WorldAPI.can_walk_to(),
+	# which refuses any cell holding an active object: Route 30 puts four
+	# objects on the single passable cell of its row 25 chokepoint at x=5,
+	# sealing the corridor for a static search even though those NPCs move at
+	# runtime. Ignoring occupancy the same search reaches the north edge, so
+	# the terrain and the hops are not what stops it; see
+	# tools/validate_ledge_hops.gd, which asserts exactly that. The badge
+	# slice this preview exists to exercise is the Pokemon Center and Violet
+	# Gym scripts, so the world reopens directly in Violet City on the same
+	# mutable state rather than waiting on transient-object pathfinding.
 	var violet_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 10, 5, Vector2i(31, 25), world.state)
 	if violet_world == null:
 		return {"ok": false, "path": path, "reason": "missing Violet City map"}
@@ -534,9 +542,9 @@ func _story_path(data: GameData) -> Dictionary:
 
 	# VioletPokecenter1F places the nurse object at block (3,1); the counter
 	# tile directly below her at (3,2) is not walkable, so ordinary pathfinding
-	# cannot reach it. The player is placed there directly, the same
-	# known-limitation workaround already used for Route 30's ledge, rather
-	# than guessing an unverified counter-side approach.
+	# cannot reach it (a counter, not a ledge; Gen2WorldCollision.allows_hop
+	# does not apply). The player is placed there directly rather than
+	# guessing an unverified counter-side approach.
 	world.player_cell = Vector2i(3, 2)
 	world.player_facing = Gen2WorldSprite.FACING_UP
 	var nurse_events: Array = world.interact()
@@ -757,8 +765,8 @@ func _walk_to_connection(
 			edge = cell
 			break
 		for step: Vector2i in directions:
-			var next: Vector2i = cell + step
-			if previous.has(next) or not world.can_walk_to(next):
+			var next: Vector2i = _reachable_step(world, cell, step)
+			if next.x < 0 or previous.has(next):
 				continue
 			previous[next] = {"cell": cell, "direction": step}
 			frontier.append(next)
@@ -784,6 +792,28 @@ func _walk_to_connection(
 		"steps": steps.size(),
 		"transition": transition,
 	}
+
+
+## The cell [param step] from [param cell] reaches through an ordinary walk
+## or, when the ordinary step is blocked, a ledge hop
+## (Gen2WorldCollision.allows_hop, mirroring Gen2WorldAPI._try_ledge_hop's own
+## order and its surf and map-bounds refusals). Returns (-1, -1) when neither
+## applies, so callers can use it as a single reachability test in a BFS
+## frontier. Replaying the recorded direction through world.move_result()
+## performs the same hop automatically; no separate hop replay step exists.
+func _reachable_step(world: Gen2WorldAPI, cell: Vector2i, step: Vector2i) -> Vector2i:
+	var direct: Vector2i = cell + step
+	if world.can_walk_to(direct):
+		return direct
+	if world.movement_mode == Gen2WorldAPI.MOVEMENT_SURF:
+		return Vector2i(-1, -1)
+	if not Gen2WorldCollision.allows_hop(world.collision_code_at(cell), step):
+		return Vector2i(-1, -1)
+	var landing: Vector2i = cell + step * 2
+	var size: Vector2i = world.map_size_cells()
+	if landing.x < 0 or landing.y < 0 or landing.x >= size.x or landing.y >= size.y:
+		return Vector2i(-1, -1)
+	return landing
 
 
 func _is_connection_edge(world: Gen2WorldAPI, cell: Vector2i, direction_name: String) -> bool:
@@ -830,8 +860,8 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 			found = true
 			break
 		for direction: Vector2i in directions:
-			var next: Vector2i = cell + direction
-			if previous.has(next) or not world.can_walk_to(next):
+			var next: Vector2i = _reachable_step(world, cell, direction)
+			if next.x < 0 or previous.has(next):
 				continue
 			previous[next] = {"cell": cell, "direction": direction}
 			frontier.append(next)
