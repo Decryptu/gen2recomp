@@ -39,6 +39,7 @@ var object_time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var world_day: int = 0
 var world_hour: int = 6
 var world_minute: int = 0
+var dst_enabled: bool = false
 var movement_mode: StringName = MOVEMENT_WALK
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
@@ -113,6 +114,7 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	out.world_day = world_snapshot.world_day
 	out.world_hour = world_snapshot.world_hour
 	out.world_minute = world_snapshot.world_minute
+	out.dst_enabled = world_snapshot.dst_enabled
 	return out
 
 
@@ -358,6 +360,14 @@ func set_world_clock(day: int, hour: int, minute: int) -> void:
 
 func world_clock() -> Dictionary:
 	return {"day": world_day, "hour": world_hour, "minute": world_minute}
+
+
+func daylight_saving_time_enabled() -> bool:
+	return dst_enabled
+
+
+func set_daylight_saving_time_enabled(enabled: bool) -> void:
+	dst_enabled = enabled
 
 
 func phone_ring_active() -> bool:
@@ -1442,6 +1452,15 @@ func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> D
 func _finish_script_result(result: Dictionary) -> Dictionary:
 	if not bool(result.get("ok", false)):
 		return result
+	if result.has("clock"):
+		var clock: Dictionary = result.get("clock", {})
+		set_world_clock(
+			int(clock.get("day", world_day)),
+			int(clock.get("hour", world_hour)),
+			int(clock.get("minute", world_minute))
+		)
+	if result.has("dst_enabled"):
+		set_daylight_saving_time_enabled(bool(result.get("dst_enabled", false)))
 	var generated_events: Array = _apply_script_object_events(result.get("events", []))
 	for generated: Dictionary in generated_events:
 		result["events"].append(generated)
@@ -1862,6 +1881,7 @@ func _apply_map(
 	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
 ) -> void:
 	_block_overrides.clear()
+	state.reset_map_reload_flags()
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
@@ -1885,6 +1905,7 @@ func reload_current_map() -> Dictionary:
 	if current_map == null or current_tileset == null:
 		return {"ok": false, "reason": &"missing_map"}
 	_block_overrides.clear()
+	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
 

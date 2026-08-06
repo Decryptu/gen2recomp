@@ -17,6 +17,9 @@ var _frames: Array = []
 var _staged_flags: Dictionary = {}
 var _staged_engine_flags: Dictionary = {}
 var _staged_scenes: Dictionary = {}
+var _staged_day_of_week: int = -1
+var _staged_dst_enabled: bool = false
+var _has_staged_dst: bool = false
 var _staged_items: Dictionary = {}
 var _staged_money: Dictionary = {}
 var _staged_coins: int = -1
@@ -55,10 +58,18 @@ const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
 const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
 const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
 const SPECIAL_PLAYERS_HOUSE_PC: int = 29
+const SPECIAL_SET_DAY_OF_WEEK: int = 37
+const SPECIAL_PLAY_MAP_MUSIC: int = 60
+const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
+const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
+const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
 const TEXT_STRING_BUFFER: int = 0x14
+const WEEKDAY_NAMES: Array[StringName] = [
+	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
+]
 
 ## Crystal event flags used by the player's room decoration callbacks. The
 ## importer keeps raw cartridge flag numbers, so these values match the
@@ -110,10 +121,41 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		if not acknowledge:
 			return _waiting_result()
 		var pending_type: StringName = StringName(_pending.get("type", &""))
+		if pending_type == &"menu" and _pending.get("special", &"") == &"set_day_of_week":
+			if choice < 0:
+				return _waiting_result()
+			var selected_day: int = posmod(choice, WEEKDAY_NAMES.size())
+			_pending = {
+				"type": &"text",
+				"text": "%s,\nis it?" % String(WEEKDAY_NAMES[selected_day]),
+				"special": &"set_day_of_week_confirmation",
+				"day": selected_day,
+				"source": _request.duplicate(true),
+			}
+			return _waiting_result()
+		if pending_type == &"text" and _pending.get("special", &"") == &"set_day_of_week_confirmation":
+			var confirmation_day: int = int(_pending.get("day", 0))
+			_stage_day_of_week_confirmation(confirmation_day)
+			return _waiting_result()
+		if pending_type == &"choice" and _pending.get("special", &"") == &"set_day_of_week_confirmation":
+			if choice < 0:
+				return _waiting_result()
+			var confirmed_day: int = int(_pending.get("day", 0))
+			_pending = {}
+			if choice == 0:
+				_staged_day_of_week = confirmed_day
+				_script_value = 1
+				return advance()
+			_stage_day_of_week_menu()
+			return _waiting_result()
 		if pending_type in [&"choice", &"menu"]:
 			if choice < 0:
 				return _waiting_result()
-			_script_value = choice
+			if pending_type == &"choice" \
+				and _pending.get("choices", []) == [&"yes", &"no"]:
+				_script_value = 1 if choice == 0 else 0
+			else:
+				_script_value = choice
 		if pending_type == &"choice" and _pending.has("contact"):
 			var contact: int = int(_pending.get("contact", -1))
 			if choice == 0:
@@ -1161,15 +1203,35 @@ func _clock_hour() -> int:
 	return clampi(int(clock.get("hour", 0)), 0, 23)
 
 
+func _clock_minute() -> int:
+	var clock: Dictionary = _request.get("clock", {})
+	return clampi(int(clock.get("minute", 0)), 0, 59)
+
+
 func _execute_special(special: int) -> Dictionary:
 	## SPECIAL is a shared cartridge dispatch table. Phone routines are only one
-	## part of it; map callbacks also use the adjacent decoration routines.
+	## part of it; map callbacks and the new-game clock setup use the same table.
 	match special:
 		SPECIAL_PLAYERS_HOUSE_PC:
 			return _stage_runtime_request(&"pc_requested", {
 				"special": special,
 				"mode": &"players_house",
 			})
+		SPECIAL_SET_DAY_OF_WEEK:
+			_stage_day_of_week_menu()
+			return {"ok": true}
+		SPECIAL_INITIAL_SET_DST_FLAG:
+			_staged_dst_enabled = true
+			_has_staged_dst = true
+			_stage_dst_confirmation_text(true)
+			return {"ok": true}
+		SPECIAL_INITIAL_CLEAR_DST_FLAG:
+			_staged_dst_enabled = false
+			_has_staged_dst = true
+			_stage_dst_confirmation_text(false)
+			return {"ok": true}
+		SPECIAL_PLAY_MAP_MUSIC, SPECIAL_RESTART_MAP_MUSIC:
+			return _stage_audio_request(&"map_music", {"special": special})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",
@@ -1240,6 +1302,42 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 			}
 	return {"ok": true}
+
+
+func _stage_day_of_week_menu() -> void:
+	_pending = {
+		"type": &"menu",
+		"menu_kind": &"vertical",
+		"command": &"set_day_of_week",
+		"options": WEEKDAY_NAMES.duplicate(),
+		"header": {"default": 1, "data_flags": 1 << 5},
+		"special": &"set_day_of_week",
+		"source": _request.duplicate(true),
+	}
+
+
+func _stage_day_of_week_confirmation(day: int) -> void:
+	_pending = {
+		"type": &"choice",
+		"command": &"set_day_of_week_confirmation",
+		"choices": [&"yes", &"no"],
+		"special": &"set_day_of_week_confirmation",
+		"day": posmod(day, WEEKDAY_NAMES.size()),
+		"source": _request.duplicate(true),
+	}
+
+
+func _stage_dst_confirmation_text(enabled: bool) -> void:
+	var clock: Dictionary = _request.get("clock", {})
+	var hour: int = clampi(int(clock.get("hour", 0)), 0, 23)
+	var minute: int = clampi(int(clock.get("minute", 0)), 0, 59)
+	var time_text: String = "%02d:%02d" % [hour, minute]
+	_pending = {
+		"type": &"text",
+		"text": "%s%s,\nis that OK?" % [time_text, " DST" if enabled else ""],
+		"special": &"initial_dst_confirmation",
+		"source": _request.duplicate(true),
+	}
 
 
 func _phone_contact() -> Dictionary:
@@ -1644,11 +1742,20 @@ func _complete() -> Dictionary:
 			"scenes": _staged_scenes.duplicate(true),
 			"runtime": runtime_changes.duplicate(true),
 		})
+	if _staged_day_of_week >= 0:
+		_events.append({
+			"type": &"world_clock_changed",
+			"day": _staged_day_of_week,
+			"hour": _clock_hour(),
+			"minute": _clock_minute(),
+		})
+	if _has_staged_dst:
+		_events.append({"type": &"dst_changed", "enabled": _staged_dst_enabled})
 	return _complete_result()
 
 
 func _complete_result() -> Dictionary:
-	return {
+	var result: Dictionary = {
 		"ok": true,
 		"status": &"complete",
 		"events": _events.duplicate(true),
@@ -1656,6 +1763,15 @@ func _complete_result() -> Dictionary:
 		"warp": _staged_warp.duplicate(true),
 		"commands": _command_count,
 	}
+	if _staged_day_of_week >= 0:
+		result["clock"] = {
+			"day": _staged_day_of_week,
+			"hour": _clock_hour(),
+			"minute": _clock_minute(),
+		}
+	if _has_staged_dst:
+		result["dst_enabled"] = _staged_dst_enabled
+	return result
 
 
 func _recovered_result(recovery: Dictionary) -> Dictionary:

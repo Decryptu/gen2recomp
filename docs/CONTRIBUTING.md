@@ -89,9 +89,13 @@ The original SRAM adapter is a separate, checksum-aware boundary and remains
 party-focused until cartridge box ownership and layout are explicitly
 researched.
 
-`game/world/` separates request resolution from UI. `world_host.gd` and
-scene-free service helpers validate imported data and transactions;
-`world_service_screen.gd` owns labels, selection and input. Menu layout and
+`game/world/` separates request resolution from UI. `world_api.gd`,
+`world_host.gd` and scene-free service helpers validate imported map records,
+transactions and script result boundaries; `world_service_screen.gd` owns
+labels, selection and input. Map reloads clear the source first eight temporary event flags, while
+permanent event flags and engine flags remain separate. The script runner keeps
+the source yes/no result order and commits clock/daylight-saving changes only
+after the corresponding host prompt completes. Menu layout and
 cursor behavior follow cached vertical or two-dimensional records. Mart dialog
 variants and prices come from imported source lists, and purchases enforce the
 source 99-item stack limit before passing candidate-save validation to writeback.

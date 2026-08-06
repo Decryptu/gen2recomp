@@ -18,7 +18,7 @@ const MAP_HEIGHT_CELLS: int = MAP_HEIGHT_BLOCKS * 2
 const TRAINER_SCRIPT: int = 0x6100
 const WIN_TEXT: int = 0x7000
 const LOSS_TEXT: int = 0x7010
-const TRAINER_FLAG: int = 7
+const TRAINER_FLAG: int = 8
 const TRAINER_SPECIES: int = 16
 const TRAINER_SPRITE: int = 1
 

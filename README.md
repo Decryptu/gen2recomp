@@ -212,8 +212,20 @@ Development scenes:
     crystal 24 7 2 2 1 none home
   ```
 
+  The bounded first-floor story preview follows production movement from the
+  bedroom to Players House 1F, executes the imported Mom setup with weekday
+  and daylight-saving prompts, then reaches the imported New Bark Town teacher
+  scene:
+
+  ```bash
+  godot --headless --path . -s res://tools/preview_world_story.gd -- \
+    crystal 24 7 2 2 1 none home story
+  ```
+
   World text follows the cartridge command stream: `$50` is a page break,
-  `$57` ends a text box and `$58` pauses for a prompt.
+  `$57` ends a text box and `$58` pauses for a prompt. The story runner keeps
+  the source yes/no order, weekday wrapping and first eight temporary event
+  flags, which reset on a map reload.
 
 ## Tests
 
