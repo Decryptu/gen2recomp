@@ -338,18 +338,34 @@ func pending_learn(side: int) -> Dictionary:
 ## Answers a pending offer by giving up [param forget_slot] for it. Refuses if
 ## there is nothing pending: an answer to a question nobody asked is not
 ## approximated into one that was.
+##
+## An HM slot is refused too, because `ForgetMove` never returns one: its
+## `.hmmove` branch prints `MoveCantForgetHMText` and redisplays the list
+## (engine/pokemon/learn.asm). A refused answer leaves the offer pending, so
+## [method must_learn_move] still holds and the caller can ask again.
 func learn_move(side: int, forget_slot: int) -> Array:
 	if not must_learn_move(side):
 		return []
 
-	var offer: Dictionary = (_move_learn_queue[side] as Array).pop_front()
+	var offer: Dictionary = (_move_learn_queue[side] as Array)[0]
 	var learner: Gen2BattleMon = party(side).at(int(offer["index"]))
 	if learner == null or forget_slot < 0 or forget_slot >= learner.moves.size():
 		return []
 
 	var forgot: int = int(learner.moves[forget_slot])
+	if Gen2MoveForget.is_hm_move(forgot):
+		return []
 	if not learner.replace_move(forget_slot, int(offer["move"])):
 		return []
+	(_move_learn_queue[side] as Array).pop_front()
+
+	# LearnMove clears a Disable naming the move that just went, but only in
+	# battle. The cartridge compares move numbers against wDisabledMove; Disable
+	# is a slot here, and the new move takes the forgotten one's slot, so slot
+	# equality is the same test.
+	if learner.disabled_slot == forget_slot:
+		learner.disabled_slot = -1
+		learner.disable_turns = 0
 
 	return [{
 		"type": MOVE_FORGOTTEN, "side": side, "index": int(offer["index"]),

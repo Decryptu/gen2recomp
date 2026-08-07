@@ -275,6 +275,145 @@ func test_tmhm_use_reports_an_incompatible_species() -> void:
 	assert_false(save.party[0].moves.has(HM_MOVE))
 
 
+## Fills the first party member's four move slots so LearnMove's scan finds no
+## zero and reaches ForgetMove. Slot 1 is SURF, HM03, the row .hmmove refuses.
+func _fill_moveset(with_hm: bool = true) -> Gen2SaveMon:
+	var mon: Gen2SaveMon = _world_screen._injected_save.party[0]
+	mon.moves = [1, 0x39 if with_hm else 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	return mon
+
+
+## Walks the pack to the TEACH prompt and answers yes, which reaches the party
+## list and then LearnMove.
+func _reach_forget_ask() -> Gen2StartMenuScreen:
+	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	return host
+
+
+## LearnMove reaches ForgetMove, whose ask comes before the list.
+func test_a_full_moveset_opens_forget_move_and_a_choice_replaces_that_slot() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	var mon: Gen2SaveMon = _fill_moveset()
+	var host: Gen2StartMenuScreen = await _reach_forget_ask()
+
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
+	assert_true(
+		String(host.get("_summary").text).contains("can't learn more than four moves"),
+		String(host.get("_summary").text)
+	)
+
+	## Yes is YesNoBox's default, which opens the list.
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
+	assert_eq((host.get("_forget_moves") as Array).size(), 4)
+
+	## Slot 2, past the HM, is an ordinary move.
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_true(bool(host.get("_pack_result_ok")), String(host.get("_pack_result")))
+	assert_eq(_world_screen._injected_save.party[0].moves, [1, 0x39, HM_MOVE, 4])
+	assert_true(String(host.get("_pack_result")).contains("forgot"), String(host.get("_pack_result")))
+
+
+## .hmmove prints MoveCantForgetHMText and is `jr .loop`, so the list stays open
+## and nothing is written.
+func test_choosing_an_hm_row_refuses_and_keeps_the_list_open() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	_fill_moveset()
+	var host: Gen2StartMenuScreen = await _reach_forget_ask()
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET, "the list stays open")
+	assert_eq(String(host.get("_status").text), "HM moves can't be forgotten now.")
+	assert_eq(_world_screen._injected_save.party[0].moves, [1, 0x39, 3, 4])
+
+
+## No at the ask is YesNoBox's carry, which is LearnMove.cancel: the
+## stop-learning yes/no, and yes there ends with DidNotLearnMoveText.
+func test_refusing_to_forget_reaches_stop_learning_and_teaches_nothing() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	_fill_moveset()
+	var host: Gen2StartMenuScreen = await _reach_forget_ask()
+
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
+	assert_true(
+		String(host.get("_summary").text).begins_with("Stop learning"),
+		String(host.get("_summary").text)
+	)
+
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_false(bool(host.get("_pack_result_ok")))
+	assert_true(
+		String(host.get("_pack_result")).contains("did not learn"),
+		String(host.get("_pack_result"))
+	)
+	assert_eq(_world_screen._injected_save.party[0].moves, [1, 0x39, 3, 4])
+	## An HM is never consumed, refused or not.
+	assert_eq(_world_screen._world.state.item_quantity(HM_ITEM), 1)
+
+
+## No to "Stop learning?" is `jp .loop`, which reaches ForgetMove's ask again
+## rather than ending the offer.
+func test_declining_to_stop_returns_to_the_forget_ask() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	_fill_moveset()
+	var host: Gen2StartMenuScreen = await _reach_forget_ask()
+
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
+
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
+	## YesNoBox opens on YES every time it is opened.
+	assert_eq(host.get("_forget_confirm_cursor"), 0)
+
+
+## B in the list is ForgetMove's own .cancel, the same carry the ask's no sets.
+func test_backing_out_of_the_move_list_reaches_stop_learning() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	_fill_moveset()
+	var host: Gen2StartMenuScreen = await _reach_forget_ask()
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
+
+	host.handle_key(KEY_ESCAPE)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
+
+
 func test_pokegear_reaches_the_existing_phone_list() -> void:
 	await _open_world()
 	_world_screen._world.state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEGEAR)

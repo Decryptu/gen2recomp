@@ -216,7 +216,7 @@ func _teachable_save() -> Gen2SaveMon:
 func test_teaching_an_hm_fills_the_first_empty_slot_and_keeps_the_hm() -> void:
 	var mon: Gen2SaveMon = _teachable_save()
 	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, -1, false)
 	assert_true(result["ok"], JSON.stringify(result))
 	assert_eq(int(result["move"]), HM_MOVE)
 	assert_eq(int(result["slot"]), 1)
@@ -235,7 +235,7 @@ func test_teaching_an_hm_fills_the_first_empty_slot_and_keeps_the_hm() -> void:
 func test_teaching_a_tm_consumes_it() -> void:
 	_teachable_save()
 	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 2}})
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, false)
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, -1, false)
 	assert_true(result["ok"], JSON.stringify(result))
 	assert_true(bool(result["consumed"]))
 	assert_eq(_world.state.item_quantity(TM_ITEM), 1)
@@ -247,7 +247,7 @@ func test_teaching_refuses_an_incompatible_species_without_writing() -> void:
 	_teachable_save()
 	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
 	var before: Dictionary = _save.to_dict()
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 1, false)
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 1, -1, false)
 	assert_false(result["ok"])
 	assert_eq(result["reason"], &"not_compatible")
 	assert_eq(_save.to_dict(), before)
@@ -258,35 +258,104 @@ func test_teaching_refuses_a_move_the_mon_already_knows() -> void:
 	var mon: Gen2SaveMon = _teachable_save()
 	mon.moves = [HM_MOVE, 0, 0, 0]
 	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, -1, false)
 	assert_false(result["ok"])
 	assert_eq(result["reason"], &"already_knows_move")
 	assert_eq(_world.state.item_quantity(HM_ITEM), 1)
 
 
-## Where the source opens ForgetMove, which does not exist here.
-func test_teaching_refuses_a_full_moveset_rather_than_replacing_one() -> void:
+## Where LearnMove opens ForgetMove. With no slot named, this is the call that
+## runs the two compatibility checks and then asks; it writes nothing, and it
+## carries the moves the menu lists.
+func test_teaching_a_full_moveset_asks_rather_than_replacing_one() -> void:
 	var mon: Gen2SaveMon = _teachable_save()
 	mon.moves = [1, 2, 3, 4]
 	mon.pp = [10, 10, 10, 10]
 	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, -1, false)
 	assert_false(result["ok"])
 	assert_eq(result["reason"], &"moveset_full")
+	assert_eq(result["details"]["moves"], [1, 2, 3, 4], "the list ForgetMove's menu draws")
 	assert_eq(mon.moves, [1, 2, 3, 4])
+	assert_eq(_world.state.item_quantity(HM_ITEM), 1)
+
+
+## LearnMove.learn writes the same way on both branches, so a forgotten slot
+## takes the new move at full PP just as an empty one does.
+func test_teaching_with_a_forget_slot_replaces_that_move_at_full_pp() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [1, 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, 2, false)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(int(result["slot"]), 2)
+	assert_eq(int(result["forgot"]), 3)
+	assert_eq(int(result["pp"]), 15)
+	var taught: Gen2SaveMon = _save.party[0]
+	assert_eq(taught.moves, [1, 2, TM_MOVE, 4])
+	assert_eq(taught.pp[2], 15)
+	## ConsumeTM still runs: a forgotten move does not change whether the item is
+	## used up, only IsHM does.
+	assert_true(bool(result["consumed"]))
+	assert_eq(_world.state.item_quantity(TM_ITEM), 0)
+
+
+## ForgetMove's .hmmove branch never returns an HM slot, so one arriving here is
+## refused outright rather than honoured.
+func test_teaching_refuses_to_forget_an_hm_move_without_writing() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	# Slot 1 is SURF, HM03.
+	mon.moves = [1, 0x39, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 1}})
+	var before: Dictionary = _save.to_dict()
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, 1, false)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"cannot_forget_hm")
+	assert_eq(int(result["details"]["forgot"]), 0x39)
+	assert_eq(_save.to_dict(), before)
+	assert_eq(_world.state.item_quantity(TM_ITEM), 1)
+
+
+func test_teaching_refuses_an_out_of_range_forget_slot_without_writing() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [1, 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 1}})
+	var before: Dictionary = _save.to_dict()
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, 4, false)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"invalid_forget_slot")
+	assert_eq(_save.to_dict(), before)
+
+
+## LearnMove.loop reaches ForgetMove only when its own scan finds no zero, so an
+## empty slot wins over a slot the caller named. The save model keeps moves
+## contiguous, so the gap is at the end.
+func test_an_empty_slot_wins_over_a_passed_forget_slot() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [1, 2, 0, 0]
+	mon.pp = [10, 10, 0, 0]
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, 0, false)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(int(result["slot"]), 2, "the first empty slot, not the named one")
+	assert_eq(int(result["forgot"]), 0)
+	assert_eq(_save.party[0].moves, [1, 2, HM_MOVE, 0])
 
 
 func test_teaching_refuses_an_item_that_is_not_a_tm_or_hm_and_an_absent_one() -> void:
 	_teachable_save()
 	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
 	assert_eq(
-		Gen2WorldPartyHost.teach_tm_hm(_world, _save, 0x12, 0, false)["reason"],
+		Gen2WorldPartyHost.teach_tm_hm(_world, _save, 0x12, 0, -1, false)["reason"],
 		&"not_a_tm_hm"
 	)
 	# ConvertCurItemIntoCurTMHM is reached only from the pocket, so an item the
 	# bag does not hold fails on the quantity first.
 	assert_eq(
-		Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, false)["reason"],
+		Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, -1, false)["reason"],
 		&"insufficient_item_quantity"
 	)
 

@@ -64,6 +64,16 @@ func test_hash_encodes_the_poke_ligature_the_source_charmap_names() -> void:
 	assert_eq(Gen2Text.encoded_length("POKéMON"), 7)
 
 
+## $75 is decode-only for the same reason $54 is, and source text writes the
+## character itself, so a synthesized line quoting it has to encode.
+func test_ellipsis_encodes_the_source_charmap_code() -> void:
+	assert_eq(Gen2Text.encode("…"), PackedByteArray([0x75]))
+	assert_ne(Gen2Text.encode("…")[0], Gen2Text.UNKNOWN)
+	assert_eq(Gen2Text.decode(Gen2Text.encode("1, 2 and…"), 0, 16), "1, 2 and…")
+	## One tile, so a message using it is laid out at its real width.
+	assert_eq(Gen2Text.encoded_length("and…"), 4)
+
+
 func test_apostrophe_ligatures_expand_to_two_characters() -> void:
 	# One tile in the font, two letters on screen.
 	assert_eq(Gen2Text.decode(PackedByteArray([0x88, 0xD5]), 0, 4), "I't")

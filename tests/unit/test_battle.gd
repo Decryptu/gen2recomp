@@ -1031,6 +1031,83 @@ func test_a_battle_refuses_to_continue_until_the_offered_move_is_answered() -> v
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
 
 
+## ForgetMove's .hmmove branch redisplays the list instead of answering, so an
+## HM slot is not an answer the source can produce. Refusing it has to leave the
+## offer standing, or the move would be lost to a press the cartridge ignores.
+func test_an_hm_slot_is_refused_and_leaves_the_offer_pending() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
+	# Slot 2 becomes SURF, HM03, which ForgetMove refuses to give up.
+	battle.player.moves[2] = 0x39
+	var before: Array = battle.player.moves.duplicate()
+
+	assert_eq(battle.learn_move(Gen2Battle.PLAYER, 2), [])
+	assert_eq(battle.player.moves, before, "nothing is overwritten")
+	assert_true(battle.must_learn_move(Gen2Battle.PLAYER), "the offer still stands")
+
+	## An ordinary slot still answers it afterwards.
+	assert_eq(battle.learn_move(Gen2Battle.PLAYER, 1).size(), 1)
+	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
+
+
+## An out-of-range slot is not an answer either, so it must not swallow the
+## offer on its way to refusing.
+func test_an_out_of_range_slot_leaves_the_offer_pending() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+
+	assert_eq(battle.learn_move(Gen2Battle.PLAYER, 9), [])
+	assert_eq(battle.learn_move(Gen2Battle.PLAYER, -1), [])
+	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
+
+
+## LearnMove clears a Disable naming the move that just went (its wDisabledMove
+## check, in battle only). Disable is a slot here and the new move takes the
+## forgotten one's slot, so the test is slot equality.
+func test_forgetting_the_disabled_move_clears_the_disable() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+	battle.player.disabled_slot = 1
+	battle.player.disable_turns = 4
+
+	battle.learn_move(Gen2Battle.PLAYER, 1)
+
+	assert_eq(battle.player.disabled_slot, -1)
+	assert_eq(battle.player.disable_turns, 0)
+	assert_true(battle.player.can_use(1), "the slot is usable again")
+
+
+## A different slot leaves the Disable where it was: the cartridge compares the
+## forgotten move against wDisabledMove rather than clearing unconditionally.
+func test_forgetting_another_move_leaves_the_disable_alone() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),
+		_mon(Fixture.MAGCARGO, 33, [Fixture.TACKLE])
+	)
+	battle.enemy.hp = 1
+	battle.take_turn(0, 0)
+	battle.player.disabled_slot = 0
+	battle.player.disable_turns = 4
+
+	battle.learn_move(Gen2Battle.PLAYER, 1)
+
+	assert_eq(battle.player.disabled_slot, 0)
+	assert_eq(battle.player.disable_turns, 4)
+
+
 func test_declining_the_offered_move_keeps_the_four_already_known() -> void:
 	var battle: Gen2Battle = _battle(
 		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE, Fixture.EMBER, Fixture.THUNDERBOLT]),

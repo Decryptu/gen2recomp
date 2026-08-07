@@ -823,6 +823,70 @@ func preview_pack_use() -> void:
 	_start_menu_host.handle_key(KEY_SPACE)
 
 
+## Public screenshot driver for ForgetMove. It fills the first party member's
+## four move slots and grants a TM or HM that member can learn, on an injected
+## save so nothing persists, then advances one menu step per call: Pack, the
+## TM/HM, USE, YES, the party member, ForgetMove's ask, and the move list.
+##
+## The granted item is whichever TM or HM this species can actually learn, since
+## a development save's first member is whatever the cache holds; a species that
+## can learn none reports that rather than opening a menu it cannot fill.
+func preview_move_forget() -> void:
+	if _world == null or _data == null:
+		return
+	if _start_menu_host != null:
+		_start_menu_host.handle_key(KEY_SPACE)
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Forget preview needs a party"
+		_refresh_labels()
+		return
+	var mon: Gen2SaveMon = save.party[0]
+	var item: int = _teachable_tmhm_for(mon.species)
+	if item <= 0:
+		_script_prompt = "Forget preview: this species learns no TM or HM"
+		_refresh_labels()
+		return
+	# Four moves the species need not know legitimately: ForgetMove is reached by
+	# the slot count alone, and this is a screenshot rather than a save.
+	mon.moves = [1, 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_injected_save = save
+	_world.state.apply_changes({}, {}, {"items": {item: 1}})
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
+		_start_menu_host.handle_key(KEY_DOWN)
+	_start_menu_host.handle_key(KEY_SPACE)
+	# The pack opens on the ITEM pocket, and the granted item is in the TM/HM
+	# one. The guard bounds the walk in case no such pocket is built.
+	var guard: int = Gen2WorldPack.POCKET_ORDER.size() + 1
+	while guard > 0 and _previewed_pocket() != Gen2WorldPack.TYPE_TM_HM:
+		_start_menu_host.handle_key(KEY_RIGHT)
+		guard -= 1
+
+
+func _previewed_pocket() -> int:
+	var pockets: Array = _start_menu_host.get("_pack_pockets")
+	var index: int = int(_start_menu_host.get("_pack_pocket_index"))
+	if index < 0 or index >= pockets.size():
+		return -1
+	return int((pockets[index] as Dictionary).get("pocket", -1))
+
+
+## The first TM or HM item [param species] can learn, or 0. Walks the numbers
+## rather than the items, since the run is not contiguous.
+func _teachable_tmhm_for(species: int) -> int:
+	var count: int = _data.tmhm_moves().size()
+	for number: int in range(1, count + 1):
+		var move: int = _data.tmhm_move(number)
+		if move > 0 and Gen2WorldTMHM.can_learn(_data, species, move):
+			return RomLayout.item_for_tmhm_number(number, count)
+	return 0
+
+
 ## Public screenshot driver for the battle-request host path. It starts the
 ## same request shape emitted by [Gen2WorldScriptRunner], without pretending a
 ## map event was present in the selected development map.

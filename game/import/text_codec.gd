@@ -260,5 +260,12 @@ static func _encodings() -> Dictionary:
 	# and draws a question mark.
 	out["#"] = 0x54
 
+	# charmap.asm maps "…" to $75, which is likewise below FIRST_PRINTABLE and so
+	# decode-only. Source text writes the character itself (Text_MoveForgetCount's
+	# "1, 2 and…"), so a synthesized line quoting that wording needs it to encode
+	# rather than draw a question mark. $56 is "……" and stays decode-only: two
+	# $75s draw the same thing, and nothing has to choose between them.
+	out["…"] = 0x75
+
 	_codes = out
 	return _codes
