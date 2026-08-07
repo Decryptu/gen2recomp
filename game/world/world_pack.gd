@@ -3,16 +3,15 @@ extends RefCounted
 
 ## Scene-free grouping of owned items into the cartridge's four pack pockets.
 ##
-## `Gen2WorldState` stores items as a flat item-to-quantity map; this class is
-## presentation only and does not change that shape. Classification uses the
-## item type byte GameData already imports under the confusingly-named
-## `pocket` field (`data/items/attributes.asm`'s `item_attribute` macro calls
-## it "pocket" while `constants/item_data_constants.asm` names the same values
-## `ITEM`/`KEY_ITEM`/`BALL`/`TM_HM`), which is the value that decides which
-## pack pocket a real item lives in. Source capacities (`MAX_ITEMS` = 20,
-## `MAX_BALLS` = 12, `MAX_KEY_ITEMS` = 25, `MAX_PC_ITEMS` = 50) are recorded
-## here for reference but not enforced, since enforcing them would change the
-## save's item storage shape.
+## `Gen2WorldState` stores items as a flat item-to-quantity map; this is
+## presentation only and does not change that. Classification uses the item type
+## byte GameData imports under the confusingly-named `pocket` field
+## (`data/items/attributes.asm`'s `item_attribute` macro calls it "pocket";
+## `constants/item_data_constants.asm` names the same values
+## `ITEM`/`KEY_ITEM`/`BALL`/`TM_HM`), which is what decides a real item's pocket.
+## Source capacities (`MAX_ITEMS` 20, `MAX_BALLS` 12, `MAX_KEY_ITEMS` 25,
+## `MAX_PC_ITEMS` 50) are recorded but not enforced, since enforcing them would
+## change the save's item storage shape.
 
 const TYPE_ITEM: int = 1
 const TYPE_KEY_ITEM: int = 2

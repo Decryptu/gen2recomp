@@ -3,23 +3,19 @@ extends RefCounted
 
 ## Turns one of a trainer class's individual trainers into a battle-ready party.
 ##
-## Lives beside the rest of [code]game/battle/[/code] rather than next to
-## [Gen2Learnset], because what it produces is [Gen2BattleMon]s and
-## [Gen2Party]s, and the data layer holds no battle types. [RefCounted] and
-## static throughout, the same as [Gen2Learnset]: nothing here needs a scene,
-## only [GameData] and the trainer number to ask it about.
+## Lives in [code]game/battle/[/code] rather than beside [Gen2Learnset] because
+## it produces [Gen2BattleMon]s and [Gen2Party]s, and the data layer holds no
+## battle types. [RefCounted] and static: it needs only [GameData] and a trainer
+## number.
 ##
-## A NORMAL or ITEM trainer's Pokémon knows what its level says it knows, out of
-## the learnset, the same as a wild one. A MOVES or ITEM_MOVES trainer's Pokémon
-## knows exactly the moves stored with it instead, which is why the two are read
-## through [method GameData.moves_at_level] and the stored list respectively
-## rather than through one shared path.
+## A NORMAL or ITEM trainer's Pokémon knows what its level teaches, from the
+## learnset, like a wild one; a MOVES or ITEM_MOVES trainer's knows exactly the
+## moves stored with it. Hence [method GameData.moves_at_level] for one and the
+## stored list for the other.
 ##
-## Trainer Pokémon carry the cartridge's own per-trainer-class DVs
-## ([method GameData.trainer_dvs]), not [constant Gen2BattleMon.PERFECT_DVS]: a
-## trainer's whole team shares one fixed set of DVs on the real cartridge,
-## which is why the word is asked for once per class rather than once per
-## Pokémon.
+## Trainer Pokémon carry the per-class DVs ([method GameData.trainer_dvs]), not
+## [constant Gen2BattleMon.PERFECT_DVS]: a trainer's whole team shares one fixed
+## word, asked for once per class.
 
 
 ## The party a trainer class's [param index]th trainer brings, or null if

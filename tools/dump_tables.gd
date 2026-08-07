@@ -4,11 +4,10 @@ extends SceneTree
 ##
 ##   Godot --headless --path . -s res://tools/dump_tables.gd -- <game> [table]
 ##
-## The written-down counterpart of the contact sheet: a bad offset in a name
-## table produces plausible words rather than an error, so the check is to read
-## the output. <game> is a registry id (gold, silver, crystal); [table] is one of
-## species, moves, items, types, matchups, trainers, learnsets, evolutions, or
-## all.
+## The written counterpart of the contact sheet: a bad offset in a name table
+## produces plausible words rather than an error, so the check is reading the
+## output. <game> is a registry id; [table] is species, moves, items, types,
+## matchups, trainers, learnsets, evolutions or all.
 
 const TABLES: PackedStringArray = [
 	"species", "moves", "items", "types", "matchups", "trainers", "learnsets",
@@ -353,11 +352,10 @@ func _name_at(names: Array, number: int) -> String:
 
 ## The chart as a grid, attacker down the side and defender across the top.
 ##
-## A list of 110 rows is not something anyone checks; a grid is, because the
-## published table has the same shape and a single wrong cell stands out. Only
-## the seventeen types that exist are shown: the padding numbers between the two
-## groups have names but no matchups, so a column each would be seventeen columns
-## of nothing.
+## Nobody checks a list of 110 rows; a grid gets checked, because the published
+## table has the same shape and a wrong cell stands out. Only the seventeen real
+## types are shown: the padding numbers between the two groups have names but no
+## matchups.
 func _dump_matchups(directory: String, rows: Array) -> void:
 	var names: Array = _type_names(directory)
 	var chart: Dictionary = {}

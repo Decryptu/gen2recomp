@@ -47,9 +47,9 @@ they start at map group 24, map 7, cell 3,3 with 3000 money, from Crystal's
 `SPAWN_HOME` and `START_MONEY`. The imported Elm's Lab scripts offer Chikorita,
 Cyndaquil or Totodile at level 5 holding Berry; the party host creates the first
 save Pokémon only after the player confirms the source choice. The party screen
-shows all six positions, current and maximum HP, and persistent status; it
-starts the development battle only after the same validated slot is selected in
-`GameRuntime`.
+shows all six positions, current and maximum HP and persistent status, and
+starts the development battle only once `GameRuntime` holds the same validated
+slot.
 
 After battle messages finish, `Gen2SaveBattleAdapter` writes player name,
 Pokémon identity, held item, happiness, Pokerus, caught data, nickname, OT, HP,
@@ -57,36 +57,35 @@ status, experience, DVs, stat experience, moves and PP. Volatile state is
 discarded.
 
 Overworld writeback is transactional. A confirmed win saves after result
-messages finish. A loss never overwrites the selected slot: the host validates
-and reconstructs the source save party, then returns blackout recovery.
-Continue enters the overworld only when a validated snapshot exists; F5 writes
-map, player, items, currency, events, source engine flags and schedule state
-through `Gen2SaveStore`. Daily engine flags reset when the saved world day
-changes, while story flags such as Hall of Fame persist. Legacy saves without a
-snapshot keep the configured development entry because migration does not
-invent a world position. Item and currency references are
-checked against the selected cache, and `Gen2WorldAPI.open_snapshot()` restores
-the saved position without clamping it elsewhere.
+messages finish; a loss never overwrites the slot, and the host validates and
+reconstructs the source save party before returning blackout recovery. Continue
+enters the overworld only with a validated snapshot; F5 writes map, player,
+items, currency, events, source engine flags and schedule state through
+`Gen2SaveStore`, with item and currency references checked against the selected
+cache. Daily engine flags reset when the saved world day changes while story
+flags such as Hall of Fame persist. Saves without a snapshot keep the configured
+development entry, since migration invents no world position, and
+`Gen2WorldAPI.open_snapshot()` restores a saved position without clamping it.
 
-The party screen opens `box_screen.tscn`, which presents one of fourteen numbered
-boxes at a time with twenty fixed slots and a party selection column. Depositing
-uses the current box's first free slot; withdrawal requires party capacity. Both
-directions use `Gen2SaveStorage` to validate and write a candidate save before
-updating the shared runtime object. The screen's current box is transient UI
-state, and box names and cartridge SRAM placement remain outside the model.
+`box_screen.tscn`, opened from the party screen or from the imported Players
+House PC as an embedded overworld overlay, presents one numbered box at a time
+with twenty fixed slots and a party selection column. Depositing uses the
+current box's first free slot, withdrawal requires party capacity, and both go
+through `Gen2SaveStorage` to validate and write a candidate save before the
+shared runtime object changes. The last party member cannot be boxed. The
+current box is transient UI state; box names and SRAM placement stay outside the
+model. Closing the embedded overlay resumes the paused source script with no
+decoration change. Selected runtime saves persist transfers; injected scene-test
+and development saves use the validated in-memory candidate without writing a
+slot.
 
-The imported Players House PC opens the same box screen as an embedded
-overworld overlay. Its close result resumes the paused source script with no
-decoration change. Selected runtime saves persist transfers through the same
-candidate-save boundary; injected scene-test and development saves use the
-validated in-memory candidate without writing a slot.
-
-Party-owned overworld transactions first modify a candidate `Gen2SaveData` and
-live world snapshot. Gifts, eggs, NPC trades, source `HealParty` recovery, item
-effects and catches commit only after validation and optional persistence; a failed write restores live
-world state. A full party routes a valid addition to the first free PC slot. If
-the party and all 280 box slots are occupied, the transaction refuses before
-consuming an item or ball and leaves the save and world state unchanged.
+Party-owned overworld transactions modify a candidate `Gen2SaveData` and the
+live world snapshot first. Gifts, eggs, NPC trades, source `HealParty` recovery,
+item effects and catches commit only after validation and optional persistence,
+and a failed write restores live world state. A full party routes a valid
+addition to the first free PC slot; with the party and all 280 box slots
+occupied the transaction refuses before consuming an item or ball, leaving save
+and world state unchanged.
 
 ## Original Generation 2 shape
 

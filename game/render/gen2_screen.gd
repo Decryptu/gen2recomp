@@ -3,24 +3,21 @@ extends Control
 
 ## A Game Boy Color screen: 160x144 pixels, scaled by a whole number to fit.
 ##
-## The game does not run at the window's resolution and must not. A GBC pixel
-## has to stay square and stay sharp, so everything the game draws goes into a
-## [SubViewport] the size of the real hardware and that image is blown up by an
-## integer factor. Any other scale resamples an 8x8 tile into something that
-## crawls when it moves.
+## The game must not run at the window's resolution: a GBC pixel has to stay
+## square and sharp, so everything the game draws goes into a hardware-sized
+## [SubViewport] blown up by an integer factor. Any other scale resamples an 8x8
+## tile into something that crawls when it moves.
 ##
-## The launcher chrome around it is ordinary Godot UI at the window's own
-## resolution. Keeping the two apart is why this is a [Control] rather than a
-## project-wide stretch setting: menus stay crisp at any window size, and the
-## game stays a Game Boy.
+## Surrounding chrome is ordinary Godot UI at window resolution. Keeping the two
+## apart is why this is a [Control] rather than a project-wide stretch setting.
 ##
 ## Add what the game draws with [method display]; it goes inside the viewport.
 ##
-## There is a second layer behind it, [method display_native], covering the same
-## rectangle at the window's own resolution. A view that is not made of hardware
-## pixels goes there: a 3D or HD renderer cannot be drawn in a 160x144 buffer and
-## then magnified, but it still has to line up with the text boxes and menus
-## drawn above it, which are hardware pixels and stay that way.
+## [method display_native] is a second layer behind it, covering the same
+## rectangle at window resolution, for a view not made of hardware pixels: a 3D
+## or HD renderer cannot be drawn into a 160x144 buffer and magnified, but still
+## has to line up with the text boxes and menus above it, which stay hardware
+## pixels.
 
 const WIDTH: int = 160
 const HEIGHT: int = 144

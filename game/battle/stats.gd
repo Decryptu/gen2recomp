@@ -4,15 +4,13 @@ extends RefCounted
 ## The stat arithmetic: base stats, DVs and stat experience into the numbers a
 ## battle is fought with.
 ##
-## Integer arithmetic throughout, in the order the hardware does it. That is not
-## nostalgia: every division here truncates, and a formula rearranged to be
-## tidier gives a different answer often enough to matter. A Pokémon that
-## survives on one hit point does so because of a truncation somewhere in here.
+## Integer arithmetic in the hardware's order: every division truncates, and a
+## tidier rearrangement gives a different answer often enough to matter.
 ##
-## Generation 2 has DVs and stat experience, not the effort values later games
-## use. A DV is four bits per stat, and HP's is assembled from the low bit of the
-## other four rather than stored, which is why a shiny Pokémon has the stats it
-## does: shininess is a pattern in the same nibbles.
+## Generation 2 has DVs and stat experience, not later games' effort values. A DV
+## is four bits per stat, and HP's is assembled from the low bit of the other
+## four rather than stored, which is why a shiny Pokémon has the stats it does:
+## shininess is a pattern in the same nibbles.
 
 ## The two constants the formula ends on. A stat is never below its floor, so a
 ## level 1 Pokémon with nothing going for it still has 5 of everything and 11 hit
@@ -59,11 +57,10 @@ const DV_SPECIAL_SHIFT: int = 0
 ## square is at least [param value], never below 1 and never above
 ## [constant MAX_SQUARE_ROOT].
 ##
-## This is a ceiling, not a floor, which is easy to get wrong and shows up as a
-## stat being one out on a Pokémon that has been trained at all. The cartridge
-## scans a table of squares for the first entry that is not smaller than the
-## stat experience, and the first entry is 1, so a Pokémon with no stat
-## experience answers 1 rather than 0.
+## A ceiling, not a floor: getting it wrong shows up as a stat being one out on
+## any trained Pokémon. The cartridge scans a table of squares for the first
+## entry not smaller than the stat experience, and that table starts at 1, so an
+## untrained Pokémon answers 1 rather than 0.
 static func square_root(value: int) -> int:
 	for root: int in range(1, MAX_SQUARE_ROOT):
 		if root * root >= value:

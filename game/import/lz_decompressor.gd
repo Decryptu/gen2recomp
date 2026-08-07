@@ -18,12 +18,10 @@ extends RefCounted
 ##
 ## The three back-references take an offset that is either a one-byte distance
 ## back from the write head (high bit set) or a two-byte absolute position from
-## the start of the output (high bit clear). Sources may overlap the bytes being
-## written, which is how the format expresses runs, so the copy has to be
-## byte-at-a-time, not a slice.
-##
-## The bit-reversing opcode exists because these streams encode 2bpp tiles: a
-## mirrored sprite half is the same bytes with their bits flipped.
+## the output's start (high bit clear). Sources may overlap the bytes being
+## written, which is how the format expresses runs, so the copy is
+## byte-at-a-time, not a slice. The bit-reversing opcode exists because these
+## streams encode 2bpp tiles: a mirrored sprite half is the same bytes flipped.
 
 enum Op {
 	LITERAL,

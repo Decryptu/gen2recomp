@@ -2,14 +2,11 @@ extends GutTest
 
 ## The battle AI: which move a trainer class's own flag word ends up preferring.
 ##
-## Most assertions here pick a scenario where a layer's own logic settles the
-## outcome without any help from the tie-break, so the test is not really about
-## the random number generator at all: a discouraged move starts ten points
-## behind a plain one, which nothing here comes close to erasing by chance. The
-## handful of genuinely probabilistic layers (Setup, Opportunist) are checked by
-## calling the layer directly across many seeds and asking whether both of its
-## outcomes are reachable, which is what "50% chance" and "90% chance" actually
-## claim.
+## Most assertions pick a scenario a layer's own logic settles without the
+## tie-break: a discouraged move starts ten points behind, which chance does not
+## erase. The genuinely probabilistic layers (Setup, Opportunist) are called
+## directly across many seeds to check both outcomes are reachable, which is what
+## "50% chance" and "90% chance" claim.
 
 const Fixture := preload("res://tests/unit/battle_fixture.gd")
 

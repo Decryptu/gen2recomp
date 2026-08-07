@@ -6,15 +6,14 @@ extends SceneTree
 ##
 ## e.g. gold /tmp/gold_front.png front
 ##
-## The cache stores colour indices, not pixels; a palette is applied at draw
-## time so that shiny is free. This applies one and writes the result out, which
-## is the only way to tell a correct decode from a plausible-looking wrong one.
-## Runs headless: it writes an image, it does not open a window.
+## The cache stores colour indices, not pixels, with a palette applied at draw
+## time so shiny is free. This applies one and writes the result out, the only
+## way to tell a correct decode from a plausible wrong one. Headless: it writes
+## an image and opens no window.
 ##
-## The font and the borders come out too. They are one row of tiles rather than
-## a grid, so the font is folded to sixteen tiles a row on the way out: that is
-## the shape the charmap describes, and it puts the alphabets, the gaps between
-## them and the digits where they can be read at a glance.
+## The font and borders come out too. Both are one row of tiles, so the font is
+## folded to sixteen a row, the shape the charmap describes, putting the
+## alphabets, the gaps and the digits where they can be read at a glance.
 
 const ATLASES: PackedStringArray = ["front", "back", "unown_front", "unown_back", "trainers"]
 const SHEETS: PackedStringArray = [

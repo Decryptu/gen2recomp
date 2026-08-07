@@ -1055,13 +1055,11 @@ func _used_move_by(events: Array, side: int) -> Dictionary:
 	return {}
 
 
-## Pikachu is faster than Geodude, so Encore lands before Geodude has acted
-## this same turn. The real cartridge's own `CheckOpponentWentFirst` forces an
-## already-chosen action over for the turn it lands on top of the ones after
-## it; this engine gets the same thing by not committing to a move until
-## [method Gen2Battle._act] actually reaches it, so Geodude's own request for
-## Slash is overridden back to Tackle in the very turn Encore lands, not only
-## the turns after.
+## Pikachu outspeeds Geodude, so Encore lands before Geodude acts this turn.
+## `CheckOpponentWentFirst` overrides an already-chosen action for the turn it
+## lands on as well as later ones; this engine gets that by not committing to a
+## move until [method Gen2Battle._act] reaches it, so Geodude's Slash is
+## overridden back to Tackle in the very turn Encore lands.
 func test_encore_forces_the_targets_last_move_even_the_turn_it_lands() -> void:
 	var battle: Gen2Battle = _battle(
 		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.ENCORE_MOVE]),
@@ -1202,15 +1200,13 @@ func test_switching_out_clears_attract_disable_and_encore() -> void:
 	assert_eq(pikachu.last_move_used, 0)
 
 
-## The statistical confirmation that Focus Energy actually raises the rate
-## lives in test_damage.gd, against [method Gen2Damage.critical_level] directly;
-## this is only the wiring, that a real turn's own damage calc reads the flag
-## at all rather than the argument sitting unused.
-## Seed 12, pinned by search rather than assumed, is one where the same first
-## roll misses Tackle's own critical chance at the base rate and lands it at
-## the rate Focus Energy raises it to: the same draw read two different ways,
-## which is a direct proof the flag reaches the roll rather than a statistical
-## one over many turns.
+## test_damage.gd confirms statistically that Focus Energy raises the rate,
+## against [method Gen2Damage.critical_level]; this only checks the wiring, that
+## a real turn's damage calc reads the flag at all.
+## Seed 12, found by search, is one where the same first roll misses Tackle's
+## critical chance at the base rate and lands it at the Focus Energy rate: one
+## draw read two ways, which proves the flag reaches the roll directly rather
+## than statistically.
 func test_focus_energy_reaches_the_damage_calc_of_a_real_turn() -> void:
 	var battle: Gen2Battle = _battle(
 		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),

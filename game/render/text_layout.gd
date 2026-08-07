@@ -3,19 +3,17 @@ extends RefCounted
 
 ## Breaking a string into the lines and pages a text box can show.
 ##
-## Pure rules, no font and no screen: it counts tiles and returns strings, so
-## the whole of a conversation's pagination can be checked in a test without
-## drawing anything.
+## Pure rules, no font and no screen: it counts tiles and returns strings, so a
+## conversation's pagination can be checked without drawing anything.
 ##
-## Widths are counted in tiles, never in characters. A ligature like "'s" is two
-## characters in a single glyph, so [method String.length] overstates a line and
-## would wrap it a column early; [method Gen2Text.encoded_length] is the measure
-## that matches what ends up on screen.
+## Widths count tiles, never characters: a ligature like "'s" is two characters
+## in one glyph, so [method String.length] overstates a line and wraps it a
+## column early. [method Gen2Text.encoded_length] is the measure that matches the
+## screen.
 ##
-## The cartridges do not do this. Their text is pre-broken at authoring time
-## with control codes for the line and page breaks, which works when every
-## string is known in advance and does not when a mod adds one or a name is
-## longer than the writer assumed.
+## The cartridges do not wrap at runtime; their text is pre-broken at authoring
+## time with control codes, which works when every string is known in advance and
+## does not when a mod adds one or a name runs long.
 
 
 ## Breaks [param text] into lines of at most [param columns] tiles.

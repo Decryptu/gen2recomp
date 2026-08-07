@@ -2,11 +2,9 @@ extends GutTest
 
 ## The commands a move is made of, one at a time.
 ##
-## The turn loop is tested through whole battles in test_battle.gd. What is
-## tested here is the machinery underneath it: that an effect picks a list, that
-## a command writes down what the next one reads, and that a command which ends
-## the move really does stop the ones behind it. Those are the properties every
-## effect written from here on will lean on.
+## test_battle.gd tests the turn loop through whole battles. This tests the
+## machinery underneath: an effect picks a list, a command writes down what the
+## next one reads, and a command that ends the move stops the ones behind it.
 
 const Fixture := preload("res://tests/unit/battle_fixture.gd")
 

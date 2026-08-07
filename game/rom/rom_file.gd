@@ -4,13 +4,12 @@ extends RefCounted
 ## A cartridge dump held in memory for the duration of an import.
 ##
 ## Node-free like the rest of the ROM layer. [method open_verified] refuses
-## anything [RomVerifier] has not accepted: every offset in [RomLayout] is only
-## meaningful for a characterised dump, so an unverified file must never reach
-## a decoder.
+## anything [RomVerifier] has not accepted, since every [RomLayout] offset is
+## only meaningful for a characterised dump.
 ##
-## Reads are bounds-checked and return zero rather than faulting. Decoders walk
-## data whose length is only known once it has been decoded, and a corrupt stream
-## should end up as an honest "that did not decode" instead of an engine error.
+## Reads are bounds-checked and return zero rather than faulting: decoders walk
+## data whose length is only known once decoded, and a corrupt stream should end
+## as an honest "that did not decode" rather than an engine error.
 
 ## Cartridge banks are 16 KiB; the CPU sees one fixed and one switchable.
 const BANK_SIZE: int = 0x4000

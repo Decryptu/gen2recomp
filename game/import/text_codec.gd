@@ -3,15 +3,13 @@ extends RefCounted
 
 ## The Generation 2 character encoding, for the international ROMs.
 ##
-## One byte per character, terminated by $50, with the alphabet laid out in
-## runs: $80 is "A", $A0 is "a", $F6 is "0". Several codes expand to whole
-## words ($5D is "TRAINER") or name the player at print time ($52); those are
-## kept as bracketed markers so a caller can substitute them, and so nothing is
-## silently lost.
+## One byte per character, terminated by $50, the alphabet in runs: $80 is "A",
+## $A0 is "a", $F6 is "0". Some codes expand to whole words ($5D is "TRAINER") or
+## name the player at print time ($52); those stay bracketed markers so a caller
+## can substitute them and nothing is silently lost.
 ##
 ## The Japanese cartridges reuse most of this range for kana. They are not in
-## [RomRegistry] and this table would decode them into nonsense, which is the
-## same reason the import gate refuses an unknown hash.
+## [RomRegistry], and this table would decode them into nonsense.
 
 const TERMINATOR: int = 0x50
 const SPACE: int = 0x7F
@@ -59,15 +57,14 @@ static func decode_fixed(data: PackedByteArray, offset: int, length: int) -> Str
 
 ## Walks [param count] consecutive terminated strings starting at [param offset].
 ##
-## The species names are a fixed-width table, but the move and item names are
-## not: each entry ends at its terminator and the next one begins on the very
-## next byte. Nothing announces how long an entry is, so a single wrong byte
-## slides every name after it, which is why the importer checks the last entry
-## of such a table and not only the first.
+## Species names are fixed-width, but move and item names are not: each entry
+## ends at its terminator and the next begins on the very next byte. Nothing
+## announces a length, so one wrong byte slides every name after it, which is why
+## the importer checks such a table's last entry as well as its first.
 ##
-## [param max_length] is a runaway guard rather than a field width. Without it, a
-## table read past its own end would scan the remaining megabyte looking for a
-## terminator that is not coming.
+## [param max_length] is a runaway guard, not a field width: without it a table
+## read past its end would scan the remaining megabyte for a terminator that is
+## not coming.
 static func decode_sequence(
 	data: PackedByteArray, offset: int, count: int, max_length: int
 ) -> PackedStringArray:
@@ -86,14 +83,13 @@ static func decode_sequence(
 
 ## Turns a string into the codes that draw it, one code per tile.
 ##
-## The inverse of [method decode] over the printable range only. The engine's
-## own strings have to become tiles somehow, and a name read back out of the
-## cache is a Godot [String] by then, so this is the way back. Control codes and
-## the ones that stand for a name at print time are decode-only: they are not
-## glyphs, and the layer that lays text out handles line breaks itself.
+## The inverse of [method decode] over the printable range only: a name read back
+## out of the cache is a Godot [String] and has to become tiles again. Control
+## codes and print-time name codes are decode-only, since they are not glyphs and
+## the layout layer handles line breaks itself.
 ##
 ## Anything the font cannot draw becomes [constant UNKNOWN] rather than being
-## dropped, on the same principle as an unrecognised byte on the way in.
+## dropped, like an unrecognised byte on the way in.
 static func encode(text: String) -> PackedByteArray:
 	var codes: Dictionary = _encodings()
 	var out: PackedByteArray = PackedByteArray()

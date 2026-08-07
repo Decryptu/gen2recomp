@@ -7,22 +7,20 @@ signal capture_requested(ball: int)
 ## The battle screen: two Pokémon, two status panels and a text box, at the
 ## positions the hardware puts them.
 ##
-## This is the first screen that is not a development view. Everything on it
-## already existed a layer down (a pic from an atlas, a panel from the HUD
-## sheets, a box from the font and a border), and what this adds is where each
-## of them goes: the enemy's pic in the top right, the player's back pic below
-## and to the left of it, a panel each, and the standard box along the bottom.
+## Everything on it exists a layer down (a pic from an atlas, a panel from the
+## HUD sheets, a box from the font and a border); this decides placement: enemy
+## pic top right, player back pic below and left, a panel each, the standard box
+## along the bottom.
 ##
-## It draws what it is given and decides nothing. A [Gen2Battle] behind it works
-## out the turn and answers with a list of events; this shows them one at a time,
-## taking every number it draws out of the event rather than asking the engine
-## again. That is why the setters still take plain values: the engine is one
-## caller of them and not the only possible one.
+## It draws what it is given and decides nothing. A [Gen2Battle] resolves the
+## turn and answers with events; this shows them one at a time, reading every
+## number out of the event rather than asking the engine again, which is why the
+## setters still take plain values.
 ##
-## The panels are composed into one screen-sized index buffer and drawn over the
-## pics with index 0 transparent, because a panel is a shape on a white field
-## rather than a rectangle: the games draw them into the background layer, where
-## nothing overlaps, and the pics have to show through everything that is not ink.
+## Panels compose into one screen-sized index buffer drawn over the pics with
+## index 0 transparent: a panel is a shape on a white field, drawn into the
+## background layer on hardware, so the pics show through everything that is not
+## ink.
 
 ## Where the two pics sit, in tiles.
 const ENEMY_PIC: Vector2i = Vector2i(12, 0)
@@ -477,11 +475,10 @@ func set_exp(fraction: float) -> void:
 	_refresh()
 
 
-## Where [member _battle]'s own player Pokémon sits between its current level's
-## own threshold and the next one's, on its own growth curve. Called whenever a
-## battle starts and whenever [constant Gen2Battle.EXP_GAINED] or
-## [constant Gen2Battle.GREW_LEVEL] says the number behind it moved, rather
-## than read once and left to go stale.
+## Where the player's Pokémon sits between its current level's threshold and the
+## next, on its growth curve. Recomputed at battle start and whenever
+## [constant Gen2Battle.EXP_GAINED] or [constant Gen2Battle.GREW_LEVEL] moves the
+## number behind it.
 func _refresh_exp_bar() -> void:
 	if _battle == null or _battle.player == null:
 		set_exp(0.0)
@@ -710,12 +707,11 @@ func _hurt(mon: Gen2BattleMon) -> void:
 
 ## Plays one turn out, and the events come back to be shown one at a time.
 ##
-## The player still picks at random from what it knows: a menu does not exist
-## yet. The enemy does too, unless it is one of the cartridge's own trainers
-## ([method show_trainer] rather than [method show_matchup]), in which case
-## [Gen2BattleAI] scores its choice the way that trainer class's own AI flags
-## say to. Random rather than the first slot because a Pokémon that only ever
-## used its first move would never show what the other three do.
+## The player picks at random from what it knows, since no menu exists yet; so
+## does the enemy, unless it is a real trainer ([method show_trainer] rather than
+## [method show_matchup]), where [Gen2BattleAI] scores the choice from that
+## class's AI flags. Random rather than the first slot, so the other three moves
+## are ever seen.
 func take_turn() -> void:
 	if _battle == null or _battle.is_over() or not _pending.is_empty():
 		return
@@ -764,12 +760,11 @@ func switch_player() -> void:
 	_show_next_event()
 
 
-## No menu exists yet to ask which move to forget, the same scaffolding this
-## screen already has for which move to use ([method _random_slot]): a pending
-## offer is declined automatically instead, so a battle nobody is driving from
-## a real menu does not simply stop. [Gen2Battle] still exposes the real
-## question through [method Gen2Battle.must_learn_move] for whatever asks it
-## properly later.
+## No menu exists yet to ask which move to forget, the same gap
+## [method _random_slot] fills for which move to use, so a pending offer is
+## declined automatically and an undriven battle does not stop. [Gen2Battle]
+## still exposes the real question through
+## [method Gen2Battle.must_learn_move].
 func _auto_decline_move_learns() -> void:
 	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
 		while _battle.must_learn_move(side):
@@ -956,10 +951,9 @@ func _next_healthy(side: int) -> int:
 
 ## The next event, with whatever it changes applied first.
 ##
-## Every number drawn comes out of the event rather than out of the Pokémon,
-## because the turn has already finished resolving by the time the first event is
-## shown. Reading the Pokémon here would draw the end of the turn during the
-## middle of it.
+## Every number drawn comes from the event, not the Pokémon: the turn has already
+## resolved by the time the first event is shown, so reading the Pokémon would
+## draw the end of the turn during the middle of it.
 func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
@@ -1279,10 +1273,9 @@ func _draw_pic(
 
 ## The panels, and then each bar over them in its own colour.
 ##
-## The hardware gives every tile of the background its own palette, so a green
-## HP bar sits in a panel of black text without either being a separate thing.
-## Layering is how that is done here, one buffer per palette, which is why the
-## bars are drawn apart from the panels that hold them.
+## The hardware gives every background tile its own palette, so a green HP bar
+## sits in a panel of black text without either being separate. Here that is one
+## buffer per palette, which is why the bars are drawn apart from the panels.
 func _draw_panels() -> void:
 	var panels: PackedByteArray = _new_buffer()
 	_hud.draw_enemy(panels, Gen2Screen.WIDTH, _name_of(_enemy), _enemy_level)

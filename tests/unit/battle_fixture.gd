@@ -2,14 +2,13 @@ extends RefCounted
 
 ## A cache the battle tests are fought inside.
 ##
-## Not a cartridge and not a fake of one: it is a real cache directory with a
-## handful of real species and moves in it, written the way the importer writes
-## one. The battle engine reads cartridge content through [GameData] and nothing
-## else, so a cache with four Pokémon in it exercises the same path a cache with
-## 251 does, and the suite still runs on a machine that has no ROM.
+## Not a fake cartridge: a real cache directory with a handful of real species
+## and moves, written the way the importer writes one. The battle engine reads
+## cartridge content only through [GameData], so four Pokémon exercise the same
+## path 251 do and the suite runs on a machine with no ROM.
 ##
-## The numbers here are the published ones, so a stat or a damage figure in a
-## test can be checked against a calculator rather than against this file.
+## The numbers are the published ones, so a stat or damage figure in a test can
+## be checked against a calculator rather than against this file.
 
 const PIKACHU: int = 25
 const GEODUDE: int = 74
@@ -187,15 +186,12 @@ static func build(directory: String) -> GameData:
 ## The species table, indexed by number like the real one, with the gaps filled
 ## by entries that exist only so a number indexes its own row.
 static func _species() -> Array:
-	# Growth rate and base exp, appended after the type pair, are the published
-	# ones too: Pikachu and Magcargo are medium fast, Bulbasaur, Charmander and
-	# Geodude medium slow, which is why [constant Gen2Experience.GROWTH_MEDIUM_FAST]
-	# and [constant Gen2Experience.GROWTH_MEDIUM_SLOW] are the two
-	# [test_experience.gd] and [test_battle.gd] ever need a fixture for.
-	# The two learnsets exist only for [test_battle.gd]'s own experience tests:
-	# Charmander's single entry is the plain "an empty slot needs no question"
-	# case, and Geodude's two are a level-up jump that crosses both a free slot
-	# and, once that slot is gone, [Gen2Battle.must_learn_move]'s own offer.
+	# Growth rate and base exp after the type pair are published values too:
+	# Pikachu and Magcargo medium fast, Bulbasaur, Charmander and Geodude medium
+	# slow, which is why those are the only two curves the tests fixture.
+	# The two learnsets serve test_battle.gd's experience tests: Charmander's
+	# single entry is the "empty slot needs no question" case, Geodude's two are
+	# a level-up jump crossing a free slot and then must_learn_move's offer.
 	var known: Dictionary = {
 		BULBASAUR: [
 			"BULBASAUR", [45, 49, 49, 45, 65, 65], [GRASS, POISON],

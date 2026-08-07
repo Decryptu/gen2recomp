@@ -3,20 +3,17 @@ extends RefCounted
 
 ## The cartridge's own font, drawn a tile at a time.
 ##
-## Text on this hardware is not typeset, it is tilemapped: every character is
-## one 8x8 tile, every tile is the same width, and a character code is already
-## the number of the tile that draws it. So this does not measure or kern
-## anything. It copies indices into a buffer at multiples of eight, and the only
-## question it ever answers is which tile a code names.
+## Text here is tilemapped, not typeset: every character is one 8x8 tile of equal
+## width, and a character code is already the tile number that draws it. Nothing
+## is measured or kerned; indices are copied into a buffer at multiples of eight.
 ##
 ## Both sheets are one row of tiles ([method Gen2Tiles.decode_1bpp_strip]), so a
-## code becomes a horizontal offset and nothing else. A code the sheet has no
-## tile for draws nothing at all rather than a placeholder: the space at $7F is
-## exactly that case, and the hardware treats it the same way.
+## code is a horizontal offset and nothing else. A code with no tile draws
+## nothing rather than a placeholder, which is what the space at $7F is and what
+## the hardware does.
 ##
-## Node-free like the rest of the drawing layer. It writes into an index buffer,
-## not onto the screen, so a whole text box can be laid out and checked in a
-## headless test.
+## Node-free: it writes into an index buffer, not the screen, so a whole text box
+## can be laid out and checked headless.
 
 const TILE: int = 8
 

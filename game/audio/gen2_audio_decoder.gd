@@ -3,12 +3,11 @@ extends RefCounted
 
 ## Bounded decoder for the Gen II music, SFX and cry streams.
 ##
-## The importer keeps the original bank/address and a bounded byte window for
-## every record. This decoder follows the command table used by the cartridge,
-## including little-endian stream pointers, note-duration accumulation,
-## subroutine returns and counted/infinite loops. It returns events rather than
-## touching an audio device, which keeps the cartridge format testable in
-## headless runs and lets the playback layer choose its output rate.
+## The importer keeps the original bank/address and a bounded byte window per
+## record. This follows the cartridge's command table: little-endian stream
+## pointers, note-duration accumulation, subroutine returns, counted and infinite
+## loops. It returns events rather than touching an audio device, so the format
+## stays testable headless and the playback layer picks its own output rate.
 
 const FIRST_MUSIC_COMMAND: int = 0xD0
 const SOUND_RETURN: int = 0xFF

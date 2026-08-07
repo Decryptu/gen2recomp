@@ -3,16 +3,14 @@ extends RefCounted
 
 ## The battle screen's tile page, assembled the way the hardware assembles it.
 ##
-## A battle loads four sheets into one run of tile numbers, and they overlap on
-## purpose: the battle font is copied in first and the two HUD borders are
-## copied over the middle of it, so thirteen of its tiles are never seen. Rather
-## than trim the sheets and renumber them, this copies them in the same order
-## into one strip and keeps the cartridge's own tile numbers. The result is that
-## the constants below are the numbers the disassembly uses, and a screen built
-## from them can be read against it.
+## A battle loads four sheets into one run of tile numbers, overlapping on
+## purpose: the battle font goes in first and the two HUD borders over the middle
+## of it, so thirteen of its tiles are never seen. This copies them in the same
+## order into one strip and keeps the cartridge's tile numbers, so the constants
+## below are the disassembly's own.
 ##
-## Node-free like the rest of the drawing layer: it writes indices into a buffer,
-## so a whole HUD can be laid out and checked with no display.
+## Node-free like the rest of the drawing layer: indices into a buffer, so a
+## whole HUD can be laid out and checked with no display.
 
 const TILE: int = Gen2Font.TILE
 

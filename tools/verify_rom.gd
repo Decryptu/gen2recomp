@@ -4,9 +4,8 @@ extends SceneTree
 ##
 ##   Godot --headless --path . -s res://tools/verify_rom.gd -- [file-or-dir ...]
 ##
-## Defaults to res://roms, the gitignored drop folder. Accepts absolute host
-## paths too. Exits 0 only if every candidate verified as a supported
-## cartridge.
+## Defaults to res://roms, the gitignored drop folder; absolute host paths work
+## too. Exits 0 only if every candidate verified as a supported cartridge.
 
 const DEFAULT_DIR: String = "res://roms"
 

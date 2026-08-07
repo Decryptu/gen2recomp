@@ -281,10 +281,9 @@ func test_a_dump_with_no_trainers_in_it_fails() -> void:
 ## other class, and the last class carrying whatever name the layout expects,
 ## the whole table adding up to the exact total the layout knows.
 ##
-## The known facts here (Falkner's team, the empty class, the total, the last
-## trainer's name) are the same kind pinned elsewhere in this file (Bulbasaur's
-## evolution, Tyrogue's three): real content, hand-verified against the
-## cartridges once, not bytes copied out of one.
+## The known facts (Falkner's team, the empty class, the total, the last
+## trainer's name) are the same kind pinned elsewhere here: real content
+## hand-verified against the cartridges once, not bytes copied out of one.
 func _trainer_party_dump() -> PackedByteArray:
 	var data: PackedByteArray = PackedByteArray()
 	data.resize(RomRegistry.EXPECTED_SIZE)

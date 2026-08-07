@@ -3,22 +3,19 @@ extends TextureRect
 
 ## A bordered text window, drawn the way the hardware draws one.
 ##
-## Everything here is on the tile grid. The border is six tiles of the chosen
-## frame printed as box-drawing characters, the interior is white, and the text
-## sits one tile in from the left on every second row, because a line of text is
-## eight pixels tall in a box whose rows are sixteen apart. None of those are
-## style choices; they are what the games do, and a box that ignores them looks
-## wrong in a way that is hard to name and easy to see.
+## Everything is on the tile grid, at the games' own measurements rather than by
+## choice: the border is six tiles of the chosen frame printed as box-drawing
+## characters, the interior is white, and text sits one tile in from the left on
+## every second row, since a line is eight pixels tall in a box whose rows are
+## sixteen apart.
 ##
-## The whole box is composed as one index buffer and handed to the same
-## index-plus-palette path a sprite goes through, so a glyph and a Pokémon are
-## lit by the same code. Only index 0 and index 3 ever appear in it: 1bpp
-## graphics have no middle colours.
+## The box composes into one index buffer and goes through the same
+## index-plus-palette path a sprite does, so a glyph and a Pokémon are lit by the
+## same code. Only indices 0 and 3 appear: 1bpp graphics have no middle colours.
 ##
-## Text is revealed a tile at a time and waits to be advanced at the end of each
-## page. [method advance] and [method finish] are plain methods as well as key
-## handlers so a screen can be photographed mid-sentence; see
-## docs/CONTRIBUTING.md.
+## Text reveals a tile at a time and waits at the end of each page.
+## [method advance] and [method finish] are plain methods as well as key
+## handlers, so a screen can be photographed mid-sentence.
 
 ## Emitted when the last page has been shown and advanced past.
 signal finished

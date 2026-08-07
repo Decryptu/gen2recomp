@@ -22,62 +22,34 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 
 > ### Status: early
 >
-> The importer gate and first importer half are tested. A verified cartridge
-> decodes species, moves, items, types, the type chart, learnsets, evolutions,
-> palettes, all Pokémon sprites, trainer pics and parties, the font, text-box
-> borders and battle HUD. Battles support parties, switching, stats, damage,
-> accuracy, turn order, status and substatus effects, trainer AI, experience,
-> levelling and move learning on a real 160x144 screen.
+> Not a complete game yet. What works today:
 >
-> The launcher imports a verified dump, opens its cache's save screen, creates
-> or imports a party, and starts the development battle. The overworld slice
-> renders real maps, enters the imported Crystal home callbacks from a new
-> game, traverses connected maps, runs explicit script requests,
-> handles trainer battles, imported win/loss text, map reloads and save-safe
-> blackout recovery, and covers object lifecycle, bounded followers, block
-> edits, emotes, surf, ledge hops, grass, fishing, roaming, repel and
-> deterministic wild
-> battle requests. The real-data story preview now follows the post-starter
-> route through Elm's aide Potion, Route 29, Cherrygrove, Route 30, Mr. Pokémon's
-> Mystery Egg event, the first rival battle and the return to Elm's Lab for the
-> Egg and Poké Ball handoffs.
+> - **Import.** Species, moves, items, types, the type chart, learnsets,
+>   evolutions, palettes, every Pokémon sprite, trainer pics and parties, the
+>   font, text-box borders, the battle HUD, maps, overworld menus, 34 mart
+>   lists, phone contacts, special calls and music/SFX pointers. A scene-free
+>   host resolves all of it without reopening the ROM.
+> - **Battles.** Parties, switching, stats, damage, accuracy, turn order, status
+>   and substatus effects, trainer AI, experience, levelling, move learning and
+>   capture input on a real 160x144 screen.
+> - **Overworld.** Real maps, map connections, script requests, trainer battles
+>   with imported win/loss text, map reloads, save-safe blackout recovery,
+>   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
+>   fishing, roaming, repel and wild encounters. The service overlay covers
+>   menu selection, mart dialog variants and quantity purchases, source-timed
+>   phone dispatch and bounded music, effects and cries.
+> - **Saves.** Three slots, `.sav` import, and a 14-box PC model with 20 slots
+>   per box. Gifts, eggs, NPC trades, HP/status items, repel and captures commit
+>   through a validated candidate save; a full party routes into the first free
+>   box slot and full storage refuses atomically. Format 1 saves migrate without
+>   inventing a world position.
+> - **Mods.** A mod under `user://mods/` can register a replacement world
+>   renderer, which is what a 3D or HD view needs.
 >
-> The importer also preserves referenced overworld menus, 34 mart lists, phone
-> contacts, special-call records and music/SFX pointer records. The scene-free
-> host resolves them without reopening the ROM. The production service overlay
-> supports cached vertical and two-dimensional menu selection, source mart dialog
-> variants, bounded quantity purchases, source-timed phone caller/callee dispatch
-> and bounded Gen II music, effects and cries. Party transactions cover
-> gifts, eggs, imported NPC trades, common HP/status items, repel and the core
-> Poké Ball catch calculation behind a validated candidate-save boundary; wild
-> capture input uses that transaction.
-
-The party screen opens a first PC storage presentation with fourteen numbered
-boxes and twenty fixed slots per box. It can deposit into the current box's
-first free slot and withdraw into a party with room. Each transfer validates and
-writes a candidate save atomically, and the last party member cannot be boxed.
-The imported Players House PC now reaches this same storage screen as an
-embedded overworld overlay. Closing it resumes the source script, while
-selected saves persist transfers and injected or development saves remain
-memory-only.
-> Crystal rooftop stock switches from the imported first list after the Hall of
-> Fame engine flag is committed. The imported bargain shop keeps its Monday
-> morning, one-item-per-visit and daily close behavior in the world snapshot.
->
-> Project saves now have a validated 14-box PC model with 20 slots per box.
-> Full parties route gifts, eggs and successful captures into the first free
-> box slot, while full storage refuses the transaction atomically. Format 1
-> project saves migrate without inventing a world position.
->
-> Full story state and complete phone presentation do not exist yet, so this is not
-> a complete game. Source two-ring timing, contact registration commands,
-> non-trainer caller labels, seen-species phone text and bounded phone pointer
-> semantics are implemented. The remaining source special-call condition branches
-> and story-driven permanent-contact setup are still pending. The mod boundary is
-> in: a mod under `user://mods/` can register
-> a replacement world renderer, which is what a 3D or HD view needs. Scene-level integration tests cover trainer sight,
-> imported terminal text, live object refresh, emotes, wild capture, save-backed
-> blackout recovery and all four service overlay modes.
+> The real-data story preview walks the Crystal route from Elm's lab through
+> Route 29, Cherrygrove, Route 30 and Mr. Pokémon's Mystery Egg event to the
+> Zephyr Badge. Missing: full story state, dex, trainer card, options, the
+> remaining special-call branches and story-driven permanent contacts.
 
 ## Getting started
 
@@ -161,100 +133,59 @@ godot --headless --path . --quit-after 30
 ```
 
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
-ROM, and opens its save screen. It provides three validated slots, new games
-with an empty party until Professor Elm's imported lab handoff, original `.sav`
-import, party inspection and the development battle. The lab scripts then offer
-Chikorita, Cyndaquil or Totodile at level 5 with Berry, using the verified Crystal
-home spawn and source starting money when that map exists. Continue enters the
-overworld; F5 saves its map, inventory, event and clock snapshot. See
+ROM, and opens its save screen: three validated slots, `.sav` import, party
+inspection and the development battle. A new game starts with an empty party at
+the Crystal home spawn with source starting money; Elm's imported lab scripts
+offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry. Continue enters
+the overworld and F5 saves its map, inventory, event and clock snapshot. See
 [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
 
 Development scenes:
 
-- `game/render/pic_viewer.tscn`: left/right species, `S` shiny, `B` front/back,
-  `T` trainer classes.
-- `game/render/text_viewer.tscn`: Space advances, `F` cycles borders, `C` shows
-  every glyph.
-- `game/battle/battle_screen.tscn`: `A` turn, Space events, `W` switch,
-  left/right matchup, `S`/`D` damage either side. In wild battles, `B` opens
-  the owned-ball selector, left/right changes the ball and Space throws it.
-  Moves are currently random; full move sets decline the learn offer. Use
-  `show_trainer(trainer_class)` for a real party and trainer AI, or
-  `show_matchup` for a fallback pairing.
-- `game/world/world_screen.tscn`: arrows/WASD move Route 29, encounters use
-  imported tables, and `F` fishes only while facing water with an owned rod.
-  Space or `Z` advances casting and bites; F5 saves. The host clock
-  advances one real-time game minute per minute and updates source day
-  boundaries. `P` opens the registered Pokegear phone list. `Enter` or `Tab`
-  opens the start menu (Pokemon, Pack, Pokegear, Save, Exit; Pokedex, Player
-  and Options are listed in their source position but are not implemented
-  yet). Pokemon opens the embedded party screen; Pokegear and Save reach the
-  existing phone list and save path. The imported
-  Players House PC opens the embedded numbered box storage screen and `Esc`
-  closes it. `preview_emote()`, `preview_wild_encounter()`,
-  `preview_fishing_battle()`, `preview_script_event()`,
-  `preview_battle_request()`, `preview_world_battle_loss()`,
-  `preview_capture()` and `preview_party_transaction()` exercise their live
-  paths. The API also exposes swarm/roaming updates, repel countdowns and a
-  JSON-safe snapshot. `V` cycles the registered world renderers. The hint line
-  reports imported service counts.
+| Scene | Keys |
+|---|---|
+| `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
+| `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
+| `game/battle/battle_screen.tscn` | `A` turn, Space events, `W` switch, left/right matchup, `S`/`D` damage either side; in wild battles `B` opens the ball selector, left/right changes ball, Space throws |
+| `game/world/world_screen.tscn` | arrows/WASD move, Space or `Z` confirms, `F` fishes while facing water with an owned rod, `P` opens the phone list, `Enter`/`Tab` opens the start menu, `Esc` closes an overlay, `V` cycles world renderers, F5 saves |
 
-  `tools/preview_world_services.gd` captures the production mart overlay with
-  the deterministic integration cache. `tools/preview_fishing.gd` captures
-  fishing; with an imported cache pass game and map after the output path, such
-  as `silver 2 5`. Its one-argument form remains a fixture smoke test.
+Battle-screen moves are random and a full move set declines the learn offer; use
+`show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`
+for a fallback pairing.
 
-  `tools/preview_world_story.gd` exercises real imported map entry callbacks,
-  event-flag object visibility and a facing object interaction without opening
-  the cartridge at runtime. The Crystal home map also covers source decoration
-  callbacks and the long initial event setup script. For example:
+The world screen's start menu wires Pokemon, Pack, Pokegear, Save and Exit;
+Pokedex, Player and Options appear in their source position but do nothing yet.
+The imported Players House PC opens the embedded box storage screen. The host
+clock advances one game minute per real minute and crosses source day
+boundaries. `preview_emote()`, `preview_wild_encounter()`,
+`preview_fishing_battle()`, `preview_script_event()`, `preview_battle_request()`,
+`preview_world_battle_loss()`, `preview_capture()` and
+`preview_party_transaction()` drive their live paths; the API also exposes
+swarm/roaming updates, repel countdowns and a JSON-safe snapshot.
 
-  ```bash
-  godot --headless --path . -s res://tools/preview_world_story.gd -- \
-    crystal 3 19 3 5 1 37,1744
-  ```
+Headless tools, all against a real imported cache:
 
-  The real Crystal bedroom PC and the validated bedroom-to-town warp chain can
-  be checked with:
+| Tool | Checks |
+|---|---|
+| `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
+| `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
+| `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
+| `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
+| `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
 
-  ```bash
-  godot --headless --path . -s res://tools/preview_world_story.gd -- \
-    crystal 24 7 2 2 1 none home
-  ```
+```bash
+# Crystal map 3/19: block edits, hidden object, facing interaction
+godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
+# bedroom PC and the bedroom-to-town warp chain
+godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
+# the full walked route, ending at the Zephyr Badge
+godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
+```
 
-  The bounded story preview follows production movement from the bedroom to
-  Players House 1F, executes the imported Mom setup with weekday and
-  daylight-saving prompts, reaches the imported New Bark Town teacher scene,
-  enters Elm's lab, completes the source starter and aide Potion events, crosses
-  Route 29 and Cherrygrove to Route 30, runs Mr. Pokémon's Mystery Egg event,
-  resolves the can-lose rival battle and party heal, then returns to Elm's lab
-  for the officer, Egg and five Poké Ball handoffs:
-
-  ```bash
-  godot --headless --path . -s res://tools/preview_world_story.gd -- \
-    crystal 24 7 2 2 1 none home story
-  ```
-
-  A freshly imported Crystal cache can verify the first Route 30 trainer's
-  source record, sight line, approach, battle request, beaten flag and later
-  interaction without reopening the cartridge:
-
-  ```bash
-  godot --headless --path . -s res://tools/validate_crystal_route30_trainer.gd
-  ```
-
-  Ledge hopping is checked the same way, against both games at once: the eight
-  source hop codes, the directions each one accepts, Route 30's own ledge
-  record and the two-cell landing.
-
-  ```bash
-  godot --headless --path . -s res://tools/validate_ledge_hops.gd
-  ```
-
-  World text follows the cartridge command stream: `$50` is a page break,
-  `$57` ends a text box and `$58` pauses for a prompt. The story runner keeps
-  the source yes/no order, weekday wrapping and first eight temporary event
-  flags, which reset on a map reload.
+World text follows the cartridge command stream: `$50` is a page break, `$57`
+ends a text box and `$58` pauses for a prompt. The story runner keeps the source
+yes/no order, weekday wrapping and first eight temporary event flags, which
+reset on a map reload.
 
 ## Tests
 

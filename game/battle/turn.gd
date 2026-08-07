@@ -3,15 +3,12 @@ extends RefCounted
 
 ## One move being used, while it is being used.
 ##
-## The commands in [Gen2EffectCommands] are steps in a sequence and have to hand
-## each other their working: the damage step writes down what it worked out and
-## the step that applies it reads that back, rather than either of them doing the
-## other's job. This is where that working lives, and it lasts exactly as long as
-## the move does.
+## The commands in [Gen2EffectCommands] hand each other their working: the damage
+## step writes down what it calculated and the applying step reads it back. This
+## is where that lives, for exactly as long as the move does.
 ##
-## It is not a copy of the battle. Everything about the two Pokémon is read
-## through the battle every time, so a command that changes one is seen by the
-## commands after it.
+## Not a copy of the battle: both Pokémon are read through the battle every time,
+## so a command that changes one is seen by the commands after it.
 
 var battle: Gen2Battle = null
 

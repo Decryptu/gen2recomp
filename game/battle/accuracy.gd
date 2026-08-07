@@ -3,14 +3,12 @@ extends RefCounted
 
 ## Whether a move connects.
 ##
-## Accuracy is a byte out of 255 rather than a percentage, so a move that is
-## "100%" stores 255 and one that is "90%" stores 229. That is not a detail worth
-## converting away: the roll is against the same byte, and the cartridge treats a
-## stored 255 as a special case that never misses, which a percentage would lose.
+## Accuracy is a byte out of 255, not a percentage: "100%" stores 255 and "90%"
+## stores 229. Kept as the byte, because the roll is against it and a stored 255
+## is a special case that never misses.
 ##
-## Accuracy and evasion have their own multiplier table, separate from the one
-## the other stats use. The two curves are not the same shape, so a stage of -1
-## on accuracy and a stage of -1 on Attack are different fractions.
+## Accuracy and evasion use their own multiplier table, a different shape from
+## the other stats', so -1 accuracy and -1 Attack are different fractions.
 
 ## The move accuracy that cannot miss. Anything the stages leave below this rolls.
 const ALWAYS_HITS: int = 255
@@ -26,14 +24,12 @@ const STAGE_MULTIPLIERS: Array = [
 
 ## The chance a move connects, out of 255.
 ##
-## Evasion is applied by reading the same table from the other end, which is what
-## the cartridge does rather than keeping a second table: the multiplier for an
-## evasion of +2 is the one accuracy uses at -2.
+## Evasion reads the same table from the other end rather than a second table:
+## +2 evasion is the multiplier accuracy uses at -2.
 ##
-## [param foresight] is whether the defender has been identified, which drops
-## both sides' stages rather than only the evasion. It is narrower than it
-## sounds: the cartridge only skips them when the evasion stage is at least the
-## accuracy stage, so Foresight cannot undo an accuracy the attacker has raised.
+## [param foresight] drops both sides' stages, not only evasion, and only when
+## the evasion stage is at least the accuracy stage, so it cannot undo an
+## accuracy the attacker raised.
 static func chance(
 	move_accuracy: int,
 	accuracy_stage: int = 0,
