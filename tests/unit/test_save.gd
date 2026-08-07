@@ -113,6 +113,52 @@ func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 	assert_eq(written.world.map_id, Vector2i(1, 1))
 
 
+func _save_with_egg_between() -> Gen2SaveData:
+	var source: Gen2SaveData = _save()
+	var egg := Gen2SaveMon.new()
+	egg.is_egg = true
+	egg.species = Fixture.CHARMANDER
+	egg.level = 5
+	egg.nickname = "EGG"
+	egg.original_trainer = "RED"
+	source.party.insert(1, egg)
+	return source
+
+
+func test_an_egg_keeps_its_party_slot_and_stays_out_of_the_battle_party() -> void:
+	var source: Gen2SaveData = _save_with_egg_between()
+	assert_eq(source.party.size(), 3)
+	var party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, source)
+	assert_not_null(party, "an egg is skipped, not a party the battle engine refuses")
+	assert_eq(party.mons.size(), 2)
+	assert_eq(party.at(0).species, Fixture.PIKACHU)
+	assert_eq(party.at(1).species, Fixture.GEODUDE)
+
+
+func test_a_battle_writeback_puts_the_egg_back_in_its_own_slot() -> void:
+	var source: Gen2SaveData = _save_with_egg_between()
+	var party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(_data, source)
+	var written: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, source.slot, party, "", source
+	)
+	assert_not_null(written)
+	assert_eq(written.party.size(), 3)
+	assert_eq((written.party[0] as Gen2SaveMon).species, Fixture.PIKACHU)
+	assert_false((written.party[0] as Gen2SaveMon).is_egg)
+	assert_true((written.party[1] as Gen2SaveMon).is_egg)
+	assert_eq((written.party[1] as Gen2SaveMon).species, Fixture.CHARMANDER)
+	assert_eq((written.party[1] as Gen2SaveMon).nickname, "EGG")
+	assert_eq((written.party[2] as Gen2SaveMon).species, Fixture.GEODUDE)
+	assert_false((written.party[2] as Gen2SaveMon).is_egg)
+
+
+func test_a_party_of_nothing_but_eggs_has_no_fit_mon() -> void:
+	var source: Gen2SaveData = _save()
+	for mon: Gen2SaveMon in source.party:
+		mon.is_egg = true
+	assert_null(Gen2SaveBattleAdapter.to_battle_party(_data, source))
+
+
 func test_new_game_starts_empty_until_the_elm_lab_handoff() -> void:
 	var created: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 1, "ASH", 155)
 	assert_not_null(created)

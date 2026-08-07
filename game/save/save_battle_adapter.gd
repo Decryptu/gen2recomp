@@ -49,12 +49,25 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 	return out
 
 
+## Writes a fought party back over [param source_save]. Eggs never entered the
+## battle party, so they keep their own slots and the battle Pokémon fill the
+## rest in order; the write fails rather than dropping an egg or shifting a
+## slot when the two no longer line up.
 static func from_battle_party(
 	game_id: StringName, rom_sha1: String, slot: int, party: Gen2Party, player_name: String = "",
 	source_save: Gen2SaveData = null
 ) -> Gen2SaveData:
 	if party == null or party.mons.is_empty() or party.mons.size() > Gen2Party.MAX_SIZE:
 		return null
+	var egg_count: int = 0
+	if source_save != null:
+		for member: Gen2SaveMon in source_save.party:
+			if member != null and member.is_egg:
+				egg_count += 1
+		if egg_count > 0 and source_save.party.size() - egg_count != party.mons.size():
+			return null
+		if source_save.party.size() > Gen2Party.MAX_SIZE:
+			return null
 	var out := Gen2SaveData.new()
 	out.game_id = game_id
 	out.rom_sha1 = rom_sha1
@@ -74,10 +87,19 @@ static func from_battle_party(
 			out.boxes.append(Gen2SaveBox.new())
 		if source_save.world != null:
 			out.world = Gen2WorldSnapshot.from_dict(source_save.world.to_dict())
-	for index: int in party.mons.size():
-		var saved_mon: Gen2SaveMon = from_battle_mon(party.mons[index])
-		if source_save != null and index < source_save.party.size():
-			var previous: Gen2SaveMon = source_save.party[index]
+	var fought: int = 0
+	var slot_count: int = source_save.party.size() if egg_count > 0 else party.mons.size()
+	for index: int in slot_count:
+		var previous: Gen2SaveMon = (
+			source_save.party[index]
+			if source_save != null and index < source_save.party.size() else null
+		)
+		if previous != null and previous.is_egg:
+			out.party.append(Gen2SaveMon.from_dict(previous.to_dict()))
+			continue
+		var saved_mon: Gen2SaveMon = from_battle_mon(party.mons[fought])
+		fought += 1
+		if previous != null:
 			saved_mon.ot_id = previous.ot_id
 			saved_mon.happiness = previous.happiness
 			saved_mon.pokerus = previous.pokerus
@@ -91,11 +113,18 @@ static func from_battle_party(
 	return out
 
 
+## The fighting half of a saved party. An egg keeps its party slot on the
+## cartridge and is only refused as a combatant (`CheckIfCurPartyMonIsFitToFight`
+## answers `BattleText_AnEGGCantBattle`), so it is skipped here rather than
+## failing the party; a party of nothing but eggs has no fit mon and answers
+## null the way `CheckPlayerPartyForFitMon` does.
 static func to_battle_party(data: GameData, save: Gen2SaveData) -> Gen2Party:
 	if data == null or save == null:
 		return null
 	var members: Array = []
 	for saved: Gen2SaveMon in save.party:
+		if saved != null and saved.is_egg:
+			continue
 		var mon: Gen2BattleMon = to_battle_mon(data, saved)
 		if mon == null:
 			return null
