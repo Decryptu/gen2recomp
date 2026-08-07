@@ -4,27 +4,15 @@ extends Control
 signal battle_finished(result: Dictionary)
 signal capture_requested(ball: int)
 
-## The battle screen: two Pokémon, two status panels and a text box, at the
-## positions the hardware puts them.
+## Owns the battle, the events and the text box; decides nothing about how they
+## are drawn. A [Gen2Battle] resolves the turn and answers with events; this
+## shows them one at a time, reading every number out of the event rather than
+## asking the engine again, which is why the setters still take plain values.
 ##
-## Everything on it exists a layer down (a pic from an atlas, a panel from the
-## HUD sheets, a box from the font and a border); this decides placement: enemy
-## pic top right, player back pic below and left, a panel each, the standard box
-## along the bottom.
-##
-## It draws what it is given and decides nothing. A [Gen2Battle] resolves the
-## turn and answers with events; this shows them one at a time, reading every
-## number out of the event rather than asking the engine again, which is why the
-## setters still take plain values.
-##
-## Panels compose into one screen-sized index buffer drawn over the pics with
-## index 0 transparent: a panel is a shape on a white field, drawn into the
-## background layer on hardware, so the pics show through everything that is not
-## ink.
-
-## Where the two pics sit, in tiles.
-const ENEMY_PIC: Vector2i = Vector2i(12, 0)
-const PLAYER_PIC: Vector2i = Vector2i(2, 6)
+## Presentation is a registered renderer, the same boundary the overworld's map
+## goes through: [method _push_view] hands plain display values to whatever
+## [Gen2ModHost] constructs, and the text box stays hardware pixels over it, as
+## menus do over the world renderer.
 
 ## What is on screen before a caller says otherwise: the first battle a player
 ## of Gold or Silver is likely to have.
@@ -72,14 +60,13 @@ const STAT_NAMES: Dictionary = {
 	"evasion": "EVASIVENESS",
 }
 
-const TILE: int = Gen2Font.TILE
-
-## The white the hardware fills the battle background with.
-const BACKGROUND: Color = Color.WHITE
-
 var _data: GameData = null
 var _injected_data: GameData = null
-var _hud: Gen2BattleHud = null
+## Whatever the mod host supplies. Typed as Node because a registered renderer
+## only has to satisfy Gen2ModHost.BATTLE_RENDERER_METHODS, not extend the
+## built-in one.
+var _renderer: Node = null
+var _renderer_ready: bool = false
 
 ## The battle behind the screen, and the two Pokémon in it. The display state
 ## below is what is currently drawn, which is not always where the battle has
@@ -125,12 +112,6 @@ var _player_hp: int = 0
 var _player_max_hp: int = 0
 var _exp: float = 0.0
 
-var _enemy_pic: TextureRect = null
-var _player_pic: TextureRect = null
-var _panels: TextureRect = null
-var _enemy_bar: TextureRect = null
-var _player_bar: TextureRect = null
-var _exp_bar: TextureRect = null
 var _box: Gen2TextBox = null
 
 @onready var _screen: Gen2Screen = %Screen
@@ -140,24 +121,12 @@ func _ready() -> void:
 	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	if _data == null:
 		_data = GameData.open_any()
-	_hud = Gen2BattleHud.from_data(_data)
-	if _hud == null:
+	_build_renderer()
+	if not _renderer_ready:
 		return
 
-	var field := ColorRect.new()
-	field.color = BACKGROUND
-	field.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
-	_screen.display(field)
-
-	_enemy_pic = _new_layer()
-	_player_pic = _new_layer()
-	_panels = _new_layer()
-	_enemy_bar = _new_layer()
-	_player_bar = _new_layer()
-	_exp_bar = _new_layer()
-
 	_box = Gen2TextBox.new()
-	_box.font = _hud.font
+	_box.font = Gen2Font.from_data(_data)
 	_screen.display(_box)
 	_box.place_at_bottom()
 
@@ -194,9 +163,9 @@ func _selected_runtime_save() -> Gen2SaveData:
 	return null
 
 
-## True once the cache had everything the screen draws with.
+## True once the cache had everything the renderer draws with.
 func is_ready() -> bool:
-	return _hud != null
+	return _renderer_ready and _box != null
 
 
 ## Puts two Pokémon on the screen at a level each, both at full health, and
@@ -331,7 +300,7 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 ## keeps the world API alive while this screen owns the battle presentation.
 func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_clear_capture_action()
-	if _data == null or _hud == null:
+	if _data == null or not is_ready():
 		_emit_world_battle_failure(&"missing_battle_data")
 		return false
 	var player_party: Gen2Party = (
@@ -466,13 +435,13 @@ func set_hp(enemy: int, enemy_max: int, player: int, player_max: int) -> void:
 	_enemy_max_hp = enemy_max
 	_player_hp = player
 	_player_max_hp = player_max
-	_refresh()
+	_push_view()
 
 
 ## How full the exp bar is, from nothing to a level's worth.
 func set_exp(fraction: float) -> void:
 	_exp = clampf(fraction, 0.0, 1.0)
-	_refresh()
+	_push_view()
 
 
 ## Where the player's Pokémon sits between its current level's threshold and the
@@ -1004,7 +973,7 @@ func _apply_event(event: Dictionary) -> void:
 			# to show it on.
 			if int(event["index"]) == _battle.party(Gen2Battle.PLAYER).active:
 				_player_level = int(event["new_level"])
-				_refresh()
+				_push_view()
 			_refresh_exp_bar()
 
 
@@ -1187,7 +1156,7 @@ func _read_hp() -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if _hud == null or not event.is_pressed():
+	if not is_ready() or not event.is_pressed():
 		return
 
 	var key: InputEventKey = event as InputEventKey
@@ -1230,17 +1199,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			switch_player()
 		KEY_SPACE, KEY_ENTER:
 			advance()
+		KEY_V:
+			cycle_battle_renderer()
 		_:
 			return
 	accept_event()
-
-
-func _new_layer() -> TextureRect:
-	var out := TextureRect.new()
-	# Nearest, or the integer-scaled viewport is undone on the last hop.
-	out.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_screen.display(out)
-	return out
 
 
 func _wrap_species(number: int) -> int:
@@ -1248,87 +1211,68 @@ func _wrap_species(number: int) -> int:
 	return wrapi(number, 1, maxi(count, 1) + 1) if count > 0 else 1
 
 
-func _refresh() -> void:
-	if _hud == null:
+## Builds the view for the selected renderer and attaches it to the layer that
+## renderer asked for. See [method Gen2WorldScreen._build_renderer], the same
+## boundary for the map.
+func _build_renderer() -> void:
+	if _renderer != null:
+		if _screen.native_size_changed.is_connected(_on_native_size_changed):
+			_screen.native_size_changed.disconnect(_on_native_size_changed)
+		_renderer.get_parent().remove_child(_renderer)
+		_renderer.queue_free()
+	_renderer = Gen2ModHost.instance().create_battle_renderer()
+	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
+		_screen.display(_renderer)
+	else:
+		_screen.display_native(_renderer)
+		_screen.native_size_changed.connect(_on_native_size_changed)
+		_on_native_size_changed(_screen.native_size())
+	_renderer_ready = bool(_renderer.set_battle_data(_data))
+	_push_view()
+
+
+func _on_native_size_changed(size_pixels: Vector2i) -> void:
+	if _renderer != null and _renderer.has_method(Gen2ModHost.RENDERER_RESIZE_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
+
+
+## Switches the live view to another registered renderer without disturbing the
+## battle behind it.
+func select_battle_renderer(id: StringName) -> Dictionary:
+	var result: Dictionary = Gen2ModHost.instance().select_battle_renderer(id)
+	if not bool(result.get("ok", false)):
+		show_message("Renderer unavailable: %s" % String(result.get("reason", "unknown")))
+		return result
+	_build_renderer()
+	show_message("Renderer: %s" % Gen2ModHost.instance().battle_renderer_label(id))
+	return result
+
+
+## Selects the registered renderer after the current one, wrapping.
+func cycle_battle_renderer() -> Dictionary:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var ids: Array = host.battle_renderer_ids()
+	if ids.size() < 2:
+		show_message("No other renderer is registered")
+		return {"ok": false, "reason": &"single_renderer"}
+	var at: int = ids.find(host.selected_battle_renderer())
+	return select_battle_renderer(ids[posmod(at + 1, ids.size())])
+
+
+## Pushes the current display values to the renderer. Plain values only, never
+## the battle engine: a turn resolves at once and is then shown an event at a
+## time, so what is drawn deliberately lags where the battle has got to.
+func _push_view() -> void:
+	if not _renderer_ready:
 		return
-
-	_draw_pic(_enemy_pic, _data.species_pic(_enemy), _data.palette(_enemy), ENEMY_PIC)
-	_draw_pic(_player_pic, _data.species_pic(_player, true), _data.palette(_player), PLAYER_PIC)
-	_draw_panels()
-
-
-func _draw_pic(
-	into: TextureRect, pic: Dictionary, palette: PackedColorArray, at: Vector2i
-) -> void:
-	if into == null or pic.is_empty():
-		return
-
-	var image: Image = Gen2PicImage.from_atlas(
-		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic, palette
-	)
-	into.texture = ImageTexture.create_from_image(image)
-	into.size = image.get_size()
-	into.position = Vector2(at.x * TILE, at.y * TILE)
-
-
-## The panels, and then each bar over them in its own colour.
-##
-## The hardware gives every background tile its own palette, so a green HP bar
-## sits in a panel of black text without either being separate. Here that is one
-## buffer per palette, which is why the bars are drawn apart from the panels.
-func _draw_panels() -> void:
-	var panels: PackedByteArray = _new_buffer()
-	_hud.draw_enemy(panels, Gen2Screen.WIDTH, _name_of(_enemy), _enemy_level)
-	_hud.draw_player(
-		panels, Gen2Screen.WIDTH, _name_of(_player), _player_level, _player_hp, _player_max_hp
-	)
-	_show_layer(
-		_panels, panels,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
-	)
-
-	var enemy: PackedByteArray = _new_buffer()
-	_hud.draw_hp_bar(
-		enemy, Gen2Screen.WIDTH, Gen2BattleHud.ENEMY_BAR, _enemy_hp, _enemy_max_hp
-	)
-	_show_layer(_enemy_bar, enemy, _hp_palette(_enemy_hp, _enemy_max_hp))
-
-	var player: PackedByteArray = _new_buffer()
-	_hud.draw_hp_bar(
-		player, Gen2Screen.WIDTH, Gen2BattleHud.PLAYER_BAR, _player_hp, _player_max_hp
-	)
-	_show_layer(_player_bar, player, _hp_palette(_player_hp, _player_max_hp))
-
-	var gained: PackedByteArray = _new_buffer()
-	_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, _exp)
-	_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
-
-
-func _new_buffer() -> PackedByteArray:
-	var out: PackedByteArray = PackedByteArray()
-	out.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
-	return out
-
-
-## Every layer above the pics is drawn with index 0 transparent: a panel is a
-## shape on the background, not a rectangle over it.
-func _show_layer(
-	into: TextureRect, indices: PackedByteArray, palette: PackedColorArray
-) -> void:
-	var image: Image = Gen2PicImage.from_indices(
-		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, palette, true
-	)
-	into.texture = ImageTexture.create_from_image(image)
-	into.size = image.get_size()
-
-
-## An HP bar is green, yellow or red by how much of it is lit rather than by the
-## hit points behind it, which is the rule the games use.
-func _hp_palette(hp: int, max_hp: int) -> PackedColorArray:
-	var lit: int = Gen2BattleHud.bar_pixels(
-		hp, max_hp, Gen2BattleHud.HP_BAR_TILES * Gen2BattleHud.TILE
-	)
-	return _data.bar_palette(GameData.hp_bar_palette_name(lit))
+	_renderer.set_view({
+		"enemy_species": _enemy, "player_species": _player,
+		"enemy_name": _name_of(_enemy), "player_name": _name_of(_player),
+		"enemy_level": _enemy_level, "player_level": _player_level,
+		"enemy_hp": _enemy_hp, "enemy_max_hp": _enemy_max_hp,
+		"player_hp": _player_hp, "player_max_hp": _player_max_hp,
+		"exp_fraction": _exp,
+	})
 
 
 func _name_of(species: int) -> String:

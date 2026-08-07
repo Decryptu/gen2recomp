@@ -88,6 +88,28 @@ switch between the built-in `gen2` renderer and a mod's while the game runs.
 the player and any running script are untouched, because a renderer reads world
 state and must not write it. Two views of one world have to agree.
 
+## Replacing the battle renderer
+
+The same boundary covers battle presentation. `Gen2BattleScreen` owns the
+battle, the events and the text box; it decides nothing about how a Pokémon,
+a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
+
+| Method | Called when |
+|---|---|
+| `set_battle_data(data) -> bool` | The screen is ready, before the first view; a false return leaves the screen not ready |
+| `set_view(view: Dictionary)` | The screen has new plain display values to show |
+| `refresh()` | The renderer should redraw its current view |
+
+`view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
+`enemy_level`, `player_level`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
+`player_max_hp` and `exp_fraction`: plain values read out of a resolved battle
+event, never the battle engine itself, the same rule `Gen2BattleScreen`'s own
+setters already followed.
+
+Registration uses the same refusal rules as a world renderer, and shares both
+optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`
+cycle, bound in `Gen2BattleScreen` the way `Gen2WorldScreen` binds it.
+
 ## Logical world state and optional mod pose
 
 The game stays logically grid-based. The player and NPCs occupy walk cells,
@@ -144,10 +166,8 @@ What is still missing, in the order it blocks work:
    has no height data, so a renderer needs a per-block table it supplies
    itself, and the host should let a mod attach one rather than have every
    renderer hard-code Johto.
-2. **Battles and interiors are not renderer-owned.** `Gen2BattleScreen` builds
-   its own 160x144 presentation directly instead of going through the mod host,
-   so the voxel mod's 3D battles have no equivalent here. Battle presentation
-   needs the same registration the world renderer has.
+2. **Interiors are not renderer-owned.** Only the overworld and battle are
+   registered; a 3D interior view has no equivalent boundary here.
 3. **No camera boundary.** `Gen2WorldAPI.visible_origin_cell()` still follows
    the committed cell rather than the interpolated one, so a free camera pans a
    step early. A free camera needs the world to stop framing the view.

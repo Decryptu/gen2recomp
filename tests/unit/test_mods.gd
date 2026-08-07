@@ -96,6 +96,102 @@ func test_the_built_in_renderer_is_registered_before_any_mod_loads() -> void:
 	renderer.free()
 
 
+func test_the_built_in_battle_renderer_is_registered_before_any_mod_loads() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(host.battle_renderer_ids().has(Gen2ModHost.BUILT_IN_RENDERER))
+	assert_eq(host.selected_battle_renderer(), Gen2ModHost.BUILT_IN_RENDERER)
+	var renderer: Node = host.create_battle_renderer()
+	assert_true(renderer is Gen2BattleRenderer)
+	renderer.free()
+
+
+func test_a_battle_renderer_missing_a_contract_method_is_refused_at_registration() -> void:
+	var script := GDScript.new()
+	# Has set_battle_data and refresh, but not set_view.
+	script.source_code = "extends Control\nfunc set_battle_data(_d) -> bool:\n\treturn true\nfunc refresh() -> void:\n\tpass\n"
+	script.reload()
+	var result: Dictionary = Gen2ModHost.instance().register_battle_renderer(&"broken", script)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"renderer_missing_methods")
+	assert_string_contains(String(result["detail"]), "set_view")
+
+
+func test_a_discovered_mod_registers_a_battle_renderer_the_screen_then_draws_with() -> void:
+	# A directory and mod id distinct from the world-renderer mod test above:
+	# res:// scripts load through Godot's resource cache keyed by path, so two
+	# tests writing different content to the same user:// script path in the
+	# same process can read back a stale cached script.
+	var directory: String = "%s/voxel_battle" % ROOT
+	DirAccess.make_dir_recursive_absolute(directory)
+	var manifest: Dictionary = _valid_manifest()
+	manifest["id"] = "voxel_battle"
+	_write("%s/mod.json" % directory, JSON.stringify(manifest))
+	_write("%s/battle_renderer.gd" % directory, """extends Control
+
+func set_battle_data(_data) -> bool:
+	return true
+
+func set_view(_view: Dictionary) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+
+func is_voxel_battle_renderer() -> bool:
+	return true
+""")
+	_write("%s/mod.gd" % directory, """extends RefCounted
+
+func register(host, manifest) -> void:
+	host.register_battle_renderer(
+		manifest.id, load("%s/battle_renderer.gd"), "Voxel"
+	)
+""" % directory)
+
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var found: Array = host.discover(ROOT)
+	assert_eq(found.size(), 1)
+	assert_eq(host.load_discovered(), [&"voxel_battle"])
+	assert_true(host.battle_renderer_ids().has(&"voxel_battle"))
+
+	assert_true(host.select_battle_renderer(&"voxel_battle")["ok"])
+	var renderer: Node = host.create_battle_renderer()
+	assert_true(renderer.has_method("is_voxel_battle_renderer"))
+	renderer.free()
+
+	assert_true(host.select_battle_renderer(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
+	var built_in: Node = host.create_battle_renderer()
+	assert_true(built_in is Gen2BattleRenderer)
+	built_in.free()
+
+
+func test_a_battle_renderer_choosing_the_native_layer_is_not_confined_to_hardware_pixels() -> void:
+	var hardware := Gen2BattleRenderer.new()
+	assert_true(Gen2ModHost.renderer_uses_hardware_viewport(hardware))
+	hardware.free()
+
+	var script := GDScript.new()
+	script.source_code = """extends Control
+
+func set_battle_data(_data) -> bool:
+	return true
+
+func set_view(_view: Dictionary) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+
+func uses_hardware_viewport() -> bool:
+	return false
+"""
+	script.reload()
+	assert_true(Gen2ModHost.instance().register_battle_renderer(&"native", script)["ok"])
+	var native: Node = script.new()
+	assert_false(Gen2ModHost.renderer_uses_hardware_viewport(native))
+	native.free()
+
+
 func test_a_renderer_missing_a_contract_method_is_refused_at_registration() -> void:
 	var script := GDScript.new()
 	# Has set_world and refresh, but not the rest of the contract.
