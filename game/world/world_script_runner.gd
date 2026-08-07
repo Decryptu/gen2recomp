@@ -246,7 +246,13 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		if pending_type in [&"choice", &"menu"]:
 			if choice < 0:
 				return _waiting_result()
-			if pending_type == &"choice" \
+			if pending_type == &"menu":
+				## Script_verticalmenu and Script__2dmenu store wMenuCursorY and
+				## wMenuCursorPosition, which count from one; cancel_input()
+				## already writes the zero their carry branch does. So a caller's
+				## zero-based option is the source's option minus one.
+				_script_value = choice + 1
+			elif pending_type == &"choice" \
 				and _pending.get("choices", []) == [&"yes", &"no"]:
 				_script_value = 1 if choice == 0 else 0
 			else:

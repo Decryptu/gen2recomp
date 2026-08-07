@@ -3032,6 +3032,51 @@ func test_special_phone_call_check_reads_staged_id_before_commit() -> void:
 	assert_eq(state.pending_special_phone_call(), 2, JSON.stringify(completed))
 
 
+## Script_verticalmenu stores wMenuCursorY, which counts from one, so the
+## Dragon Shrine's `ifequal 1, .RightAnswer` is asking for the first option.
+## cancel_input() keeps the zero the source's carry branch writes.
+func test_a_vertical_menu_answers_the_source_one_based_option() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6C60"] = [
+		Gen2WorldScript.LOADMENU, 0x34, 0x12,
+		0x59, # verticalmenu, raw Crystal
+		Gen2WorldScript.IFEQUAL, 2, 0x70, 0x6C,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6C70"] = [
+		Gen2WorldScript.SETVAL, 99,
+		Gen2WorldScript.WRITEMEM, 0xD8, 0xD1,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var chosen := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, chosen, {
+		"kind": &"test", "bank": 48, "script": 0x6C60,
+	})
+	assert_eq(runner.advance()["event"]["type"], &"menu")
+	# The second option, which the source numbers 2.
+	assert_eq(runner.advance(true, 1)["status"], &"complete")
+	assert_eq(chosen.script_memory(0xD1D8), 99, "option 1 answered the source's 2")
+
+	var first := Gen2WorldState.new()
+	var other := Gen2WorldScriptRunner.begin(data, first, {
+		"kind": &"test", "bank": 48, "script": 0x6C60,
+	})
+	assert_eq(other.advance()["event"]["type"], &"menu")
+	assert_eq(other.advance(true, 0)["status"], &"complete")
+	assert_eq(first.script_memory(0xD1D8), 0, "option 0 answered the source's 1")
+
+	var cancelled := Gen2WorldState.new()
+	var backed_out := Gen2WorldScriptRunner.begin(data, cancelled, {
+		"kind": &"test", "bank": 48, "script": 0x6C60,
+	})
+	assert_eq(backed_out.advance()["event"]["type"], &"menu")
+	assert_eq(backed_out.cancel_input()["status"], &"complete")
+	assert_eq(cancelled.script_memory(0xD1D8), 0, "cancelling still answers zero")
+
+
 func test_script_menu_and_battle_are_explicit_runtime_requests() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
