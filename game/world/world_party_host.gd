@@ -233,6 +233,93 @@ static func use_item(
 	}
 
 
+## engine/items/tmhm.asm's TeachTMHM, as one candidate transaction beside
+## use_item(). The pack's own USE reaches this, not `UseItem`'s jumptable: the
+## TM/HM pocket runs AskTeachTMHM, ChooseMonToLearnTMHM and TeachTMHM instead
+## (engine/items/pack.asm's .UseItem).
+##
+## The refusal order is the source's. CanLearnTMHMMove comes first, then
+## KnowsMove, then LearnMove's own search for an empty slot; each answers before
+## anything is written. A full moveset is where the source opens ForgetMove,
+## which does not exist here, so it is a typed refusal rather than an invented
+## replacement.
+##
+## An HM is not consumed: TeachTMHM returns straight after IsHM, so it skips both
+## ConsumeTM and the happiness change. The happiness change a TM does make is a
+## boundary, since no ChangeHappiness table is imported.
+static func teach_tm_hm(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	item: int,
+	party_index: int,
+	persist: bool = true
+) -> Dictionary:
+	if world == null or save == null or world.data == null:
+		return _failure(&"missing_save", {})
+	if world.state == null or world.state.item_quantity(item) <= 0:
+		return _failure(&"insufficient_item_quantity", {"item": item})
+	var move: int = Gen2WorldTMHM.move_for_item(world.data, item)
+	if move <= 0:
+		return _failure(&"not_a_tm_hm", {"item": item})
+	if party_index < 0 or party_index >= save.party.size():
+		return _failure(&"invalid_party_index", {"party_index": party_index})
+	var mon: Gen2SaveMon = save.party[party_index] as Gen2SaveMon
+	if mon == null:
+		return _failure(&"invalid_party_index", {"party_index": party_index})
+	# ChooseMonToLearnTMHM refuses an egg with SFX_WRONG and reopens the list, so
+	# an egg never reaches TeachTMHM at all.
+	if mon.is_egg:
+		return _failure(&"cannot_teach_egg", {"party_index": party_index})
+	if not Gen2WorldTMHM.can_learn(world.data, mon.species, move):
+		return _failure(&"not_compatible", {"species": mon.species, "move": move})
+	if Gen2WorldTMHM.knows_move(mon.moves, move):
+		return _failure(&"already_knows_move", {"move": move})
+	var slot: int = Gen2WorldTMHM.first_empty_slot(mon.moves)
+	if slot < 0:
+		return _failure(&"moveset_full", {"party_index": party_index, "move": move})
+
+	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
+	if not bool(validation.get("ok", false)):
+		return _failure(&"invalid_save", {"message": validation.get("message", "")})
+	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var learner: Gen2SaveMon = candidate.party[party_index] as Gen2SaveMon
+	learner.moves[slot] = move
+	# LearnMove writes the move, then its PP from Moves + MOVE_PP: a freshly
+	# learned move always arrives at full PP.
+	learner.pp[slot] = int(world.data.move(move).get("pp", 0))
+
+	var before: Gen2WorldSnapshot = world.snapshot()
+	var consumed: bool = not Gen2WorldTMHM.is_hm(item)
+	var applied: Dictionary = {"ok": true}
+	if consumed:
+		applied = world.state.apply_changes({}, {}, {
+			"items": {item: world.state.item_quantity(item) - 1},
+		})
+	if not bool(applied.get("ok", false)):
+		return _failure(&"item_state_failed", applied)
+	candidate.world = world.snapshot()
+	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
+	if not bool(candidate_validation.get("ok", false)):
+		world.state.restore_from_dict(before.world_state.to_dict())
+		return _failure(&"candidate_save_invalid", candidate_validation)
+	var write_result: Dictionary = {"ok": true}
+	if persist:
+		write_result = Gen2SaveStore.save(candidate, world.data)
+	if not bool(write_result.get("ok", false)):
+		world.state.restore_from_dict(before.world_state.to_dict())
+		return _failure(&"save_failed", write_result)
+	_copy_save(save, candidate)
+	return {
+		"ok": true,
+		"item": item,
+		"party_index": party_index,
+		"move": move,
+		"slot": slot,
+		"pp": learner.pp[slot],
+		"consumed": consumed,
+	}
+
+
 ## Attempts to catch one wild battle mon and consumes the ball on either result.
 ## The battle screen owns the animation; this host owns the cartridge outcome and
 ## the save/world writeback. A caught mon enters the party when there is room and

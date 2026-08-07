@@ -18,6 +18,7 @@ const ROOT: String = "user://rom_cache"
 const MANIFEST: String = "manifest.json"
 const SPECIES: String = "species.json"
 const MOVES: String = "moves.json"
+const TMHM_MOVES: String = "tmhm_moves.json"
 const ITEMS: String = "items.json"
 const WORLD_TRADES: String = "world_trades.json"
 const TYPES: String = "types.json"
@@ -54,7 +55,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 23
+const FORMAT_VERSION: int = 24
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -71,6 +72,10 @@ static func species_path(directory: String) -> String:
 
 static func moves_path(directory: String) -> String:
 	return "%s/%s" % [directory, MOVES]
+
+
+static func tmhm_moves_path(directory: String) -> String:
+	return "%s/%s" % [directory, TMHM_MOVES]
 
 
 static func items_path(directory: String) -> String:

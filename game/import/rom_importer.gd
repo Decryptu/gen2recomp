@@ -38,6 +38,11 @@ const FIRST_LEARNSET_MOVE: int = 33
 const STAT_EVOLUTION_SPECIES: int = 236
 const STAT_EVOLUTION_COUNT: int = 3
 
+## HM01's move, which is TMHMMoves' row 51 and so the entry directly after the
+## fifty TMs. Checking it is what pins the table: a run of legal move numbers
+## elsewhere in the bank would pass the range and terminator checks alone.
+const MOVE_CUT: int = 0x0F
+
 ## What the trainer *party* table is known to say, independently of the
 ## cartridge, which is a different table from [constant TRAINER_FIRST_CLASS]:
 ## that one is the class every gym leader shares ("LEADER"), and this one is the
@@ -1298,6 +1303,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 
 	var moves: Array = _import_moves(rom, layout, on_progress)
+	var tmhm_moves: Array = _import_tmhm_moves(rom, layout)
+	if tmhm_moves.is_empty():
+		result["message"] = "TM/HM move table is outside the cartridge or malformed."
+		return result
 	var items: Array = _import_items(rom, layout, on_progress)
 	var trades: Array = _import_world_trades(rom, layout)
 	var types: Array = _import_types(rom, layout, on_progress)
@@ -1325,6 +1334,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.moves_path(directory), moves):
 		result["message"] = "Could not write move data."
+		return result
+	if not RomCache.write_json(RomCache.tmhm_moves_path(directory), tmhm_moves):
+		result["message"] = "Could not write TM/HM move data."
 		return result
 	if not RomCache.write_json(RomCache.items_path(directory), items):
 		result["message"] = "Could not write item data."
@@ -1521,6 +1533,31 @@ func _import_moves(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 		if on_progress.is_valid():
 			on_progress.call("moves", move, RomLayout.MOVE_COUNT)
 
+	return out
+
+
+## data/moves/tmhm_moves.asm's TMHMMoves, in TMNUM order. Empty on any layout or
+## content failure, which the caller reports rather than caching a half table.
+##
+## Checked rather than trusted: every entry has to be a real move number, the
+## terminating zero has to be there, and HM01's row has to be CUT. The last is
+## what actually pins the table, since a nearby run of bytes can pass the first
+## two.
+func _import_tmhm_moves(rom: RomFile, layout: Dictionary) -> Array:
+	var at: int = int(layout.get("tmhm_moves", -1))
+	var count: int = int(layout.get("tmhm_move_count", 0))
+	if count <= RomLayout.TMHM_TM_COUNT or not rom.in_bounds(at, count + 1):
+		return []
+	if rom.u8(at + count) != 0:
+		return []
+	var out: Array = []
+	for index: int in count:
+		var move: int = rom.u8(at + index)
+		if move <= 0 or move > RomLayout.MOVE_COUNT:
+			return []
+		out.append(move)
+	if int(out[RomLayout.TMHM_TM_COUNT]) != MOVE_CUT:
+		return []
 	return out
 
 

@@ -16,7 +16,7 @@ signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
 
-enum Mode { LIST, PACK, PACK_ITEM, PACK_TARGET, PACK_RESULT, SAVE_CONFIRM }
+enum Mode { LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET, PACK_RESULT, SAVE_CONFIRM }
 
 ## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
 const OAK_TEXT: String = "OAK: This isn't the time to use that!"
@@ -47,6 +47,12 @@ var _item_cursor: int = 0
 var _target_cursor: int = 0
 var _pack_result: String = ""
 var _pack_result_ok: bool = false
+## AskTeachTMHM's resolved prompt, held while its yes/no is on screen, and
+## whether the party list that follows is ChooseMonToLearnTMHM's rather than
+## `.Party`'s.
+var _teach_prompt: Dictionary = {}
+var _teach_cursor: int = 0
+var _teaching: bool = false
 
 var _save_cursor: int = 0
 var _save_result_shown: bool = false
@@ -143,6 +149,10 @@ func _move(direction: Vector2i) -> void:
 			if direction.y != 0 and not _item_actions.is_empty():
 				_item_cursor = wrapi(_item_cursor + signi(direction.y), 0, _item_actions.size())
 				_render_item_menu()
+		Mode.PACK_TEACH:
+			if direction.y != 0 or direction.x != 0:
+				_teach_cursor = 1 - _teach_cursor
+				_render_teach()
 		Mode.PACK_TARGET:
 			if direction.y != 0 and not _party_targets().is_empty():
 				_target_cursor = wrapi(
@@ -164,8 +174,13 @@ func _confirm() -> void:
 				_open_item_mode()
 		Mode.PACK_ITEM:
 			_confirm_item_action()
+		Mode.PACK_TEACH:
+			_confirm_teach()
 		Mode.PACK_TARGET:
-			_use_selected_item(_target_cursor)
+			if _teaching:
+				_teach_selected_item(_target_cursor)
+			else:
+				_use_selected_item(_target_cursor)
 		Mode.PACK_RESULT:
 			_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
@@ -178,7 +193,7 @@ func _cancel() -> void:
 			closed.emit()
 		Mode.PACK:
 			_open_list_mode()
-		Mode.PACK_ITEM, Mode.PACK_RESULT:
+		Mode.PACK_ITEM, Mode.PACK_RESULT, Mode.PACK_TEACH:
 			_open_pack_mode(false)
 		Mode.PACK_TARGET:
 			_open_item_mode()
@@ -337,7 +352,13 @@ func _confirm_use() -> void:
 	var item: Dictionary = _selected_item()
 	if item.is_empty():
 		return
-	match Gen2WorldPack.field_use_kind(_data, int(item.get("item", 0))):
+	var number: int = int(item.get("item", 0))
+	## The TM/HM pocket never reaches `UseItem`'s jumptable: engine/items/pack.asm
+	## gives it its own USE, which runs AskTeachTMHM first.
+	if Gen2WorldPack.pocket_for(_data, number) == Gen2WorldPack.TYPE_TM_HM:
+		_open_teach_mode(number)
+		return
+	match Gen2WorldPack.field_use_kind(_data, number):
 		Gen2WorldPack.ITEMMENU_PARTY:
 			if _party_targets().is_empty():
 				_show_pack_result(NO_MON_TEXT, false)
@@ -369,6 +390,87 @@ func _party_targets() -> Array:
 			"egg": mon.is_egg,
 		})
 	return targets
+
+
+## AskTeachTMHM: the booted-up text and its yes/no. A TM/HM the cartridge does
+## not carry has no move, which is the source's `.NotTMHM` fall-through, so no
+## prompt appears and USE reports nothing happened.
+func _open_teach_mode(item: int) -> void:
+	_teach_prompt = Gen2WorldTMHM.teach_prompt(_data, item)
+	if not bool(_teach_prompt.get("ok", false)):
+		_show_pack_result(OAK_TEXT, false)
+		return
+	_teaching = false
+	_teach_cursor = 0
+	_mode = Mode.PACK_TEACH
+	_status.text = ""
+	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_render_teach()
+
+
+func _render_teach() -> void:
+	_title.text = "TEACH"
+	_summary.text = String(_teach_prompt.get("text", ""))
+	_render_options([{"label": "YES"}, {"label": "NO"}], _teach_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
+	)
+
+
+## The yes/no answer. Yes reaches ChooseMonToLearnTMHM, which is the same party
+## list `.Party` uses; no closes the way the source's carry return does.
+func _confirm_teach() -> void:
+	if _teach_cursor != 0:
+		_open_pack_mode(false)
+		return
+	if _party_targets().is_empty():
+		_show_pack_result(NO_MON_TEXT, false)
+		return
+	_teaching = true
+	_open_target_mode()
+
+
+func _teach_selected_item(party_index: int) -> void:
+	if _pack_save == null or _world == null:
+		_show_pack_result("No save is loaded.", false)
+		return
+	var item: int = int(_teach_prompt.get("item", 0))
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
+		_world, _pack_save, item, party_index, _pack_persist
+	)
+	_teaching = false
+	if not bool(result.get("ok", false)):
+		_show_pack_result(_teach_refusal(StringName(result.get("reason", &"")), party_index), false)
+		return
+	_show_pack_result("%s learned %s!" % [
+		_target_name(party_index), String(_teach_prompt.get("move_name", "")),
+	], true)
+
+
+func _target_name(party_index: int) -> String:
+	var targets: Array = _party_targets()
+	if party_index < 0 or party_index >= targets.size():
+		return "#MON"
+	return String((targets[party_index] as Dictionary).get("name", "#MON"))
+
+
+## TeachTMHM's own refusals, verbatim from data/text/common_2.asm and
+## common_3.asm. A full moveset is where the source opens ForgetMove, which does
+## not exist here, so it says so rather than inventing a replacement.
+func _teach_refusal(reason: StringName, party_index: int) -> String:
+	var move_name: String = String(_teach_prompt.get("move_name", "that move"))
+	var name: String = _target_name(party_index)
+	match reason:
+		&"not_compatible":
+			return "%s is not compatible with %s. It can't learn %s." % [
+				move_name, name, move_name,
+			]
+		&"already_knows_move":
+			return "%s knows %s." % [name, move_name]
+		&"moveset_full":
+			return "%s already knows four moves. Forgetting one is not available yet." % name
+		&"cannot_teach_egg":
+			return "An EGG can't learn anything."
+	return "Can't teach that: %s" % String(reason)
 
 
 func _open_target_mode() -> void:

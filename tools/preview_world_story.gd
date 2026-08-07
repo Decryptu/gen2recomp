@@ -31,6 +31,11 @@ const ITEM_HM_STRENGTH: int = 0xF6
 ## ENGINE_STORMBADGE's place in source badge order, for Gen2WorldState.badge_flag().
 const BADGE_STORM: int = 5
 
+## How many forced Union Cave encounters the route may roll looking for a
+## STRENGTH-capable catch. Its own five Poké Balls are the real limit; this only
+## bounds the rolls that find nothing worth throwing at.
+const CATCH_ATTEMPTS: int = 64
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -891,6 +896,10 @@ func _hive_badge_path(
 		"encounters": union_cave.get("encounters", []),
 		"run": union_entry,
 	})
+
+	var caught: Dictionary = _catch_strength_mon(world, save, random, data, path)
+	if not bool(caught.get("ok", false)):
+		return caught
 
 	var route33: Dictionary = _warp_walk(world, Vector2i(17, 31), save, random, data)
 	if not bool(route33.get("ok", false)):
@@ -2557,10 +2566,9 @@ func _lighthouse_shaft(
 ## maps/OlivineCafe.asm's sailor at (4,3), who hands over HM04 behind
 ## EVENT_GOT_HM04_STRENGTH. The cafe is Olivine City warp 7 at (7,21).
 ##
-## The move is then written straight into a party member's slots, because
-## AskTeachTMHM and TeachTMHM are not implemented: nothing else can turn the HM
-## in the bag into a move the party knows, and the boulder script's
-## CheckPartyMove reads exactly that. See _teach_move().
+## The HM is then taught through Gen2WorldPartyHost.teach_tm_hm(), the same
+## transaction the pack's own USE reaches, so the route learns STRENGTH the way a
+## player does rather than writing a move slot behind the game's back.
 func _olivine_cafe_hm04(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -2580,7 +2588,7 @@ func _olivine_cafe_hm04(
 	var sailor: Dictionary = _talk_to(
 		world, Vector2i(4, 4), Gen2WorldSprite.FACING_UP, save, random, data
 	)
-	var taught: bool = _teach_move(save, Gen2WorldFieldMove.MOVE_STRENGTH)
+	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_STRENGTH)
 	_mirror_party(world, save)
 	path.append({
 		"step": "olivine_cafe_hm04_strength",
@@ -2598,8 +2606,11 @@ func _olivine_cafe_hm04(
 		}
 	if not world.state.items().has(ITEM_HM_STRENGTH):
 		return {"ok": false, "path": path, "reason": "HM04 did not reach the bag"}
-	if not taught:
-		return {"ok": false, "path": path, "reason": "no party member could learn STRENGTH"}
+	if not bool(taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "teaching STRENGTH failed: %s" % taught.get("reason", ""),
+		}
 	var leaving: Dictionary = _warp_step(world, 1, 14)
 	if not bool(leaving.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "Olivine Cafe exit warp failed"}
@@ -2758,19 +2769,79 @@ func _push_boulder_at(
 	}
 
 
-## Stands in for AskTeachTMHM and TeachTMHM, which are not implemented: fills the
-## first empty move slot of the first party member that has one, so the party
-## mirror can answer CheckPartyMove. An egg is skipped, matching
-## CheckIfCurPartyMonIsFitToFight refusing one as a combatant.
-func _teach_move(save: Gen2SaveData, move: int) -> bool:
-	for mon: Gen2SaveMon in save.party:
-		if mon.is_egg or mon.moves.has(move):
+## Catches something in Union Cave that can learn STRENGTH, which is the only
+## way this route ever gets one: the starter is still unevolved by Olivine and
+## Chikorita, Cyndaquil and Totodile all learn it only after evolving
+## (data/pokemon/base_stats/*.asm). Union Cave 1F's own table carries Geodude and
+## Onix, which both can.
+##
+## The walk itself never rolls a wild encounter, so this forces one, checks the
+## species against CanLearnTMHMMove and throws a Poké Ball, retrying until the
+## bag runs out. Both rolls come from the route's seeded generator, so the answer
+## is the same on every run.
+func _catch_strength_mon(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var attempts: Array = []
+	var caught: Dictionary = {}
+	for _attempt: int in CATCH_ATTEMPTS:
+		if world.state.item_quantity(Gen2WorldPartyHost.ITEM_POKE_BALL) <= 0:
+			break
+		var encounter: Dictionary = world.encounter_request(random, true)
+		if encounter.is_empty():
+			break
+		var species: int = int(encounter.get("pokemon", 0))
+		var level: int = int(encounter.get("level", 0))
+		if not Gen2WorldTMHM.can_learn(data, species, Gen2WorldFieldMove.MOVE_STRENGTH):
+			attempts.append({"species": species, "level": level, "thrown": false})
 			continue
-		for slot: int in mon.moves.size():
-			if int(mon.moves[slot]) == 0:
-				mon.moves[slot] = move
-				return true
-	return false
+		var wild: Gen2BattleMon = Gen2BattleMon.create(
+			data, species, level, data.moves_at_level(species, level), random.randi() & 0xFFFF
+		)
+		var throw_result: Dictionary = Gen2WorldPartyHost.capture_wild(
+			world, save, wild, Gen2WorldPartyHost.ITEM_POKE_BALL, random, 0, false
+		)
+		attempts.append({
+			"species": species, "level": level, "thrown": true,
+			"caught": bool(throw_result.get("caught", false)),
+			"reason": throw_result.get("reason", ""),
+		})
+		if bool(throw_result.get("caught", false)):
+			caught = throw_result
+			break
+	_mirror_party(world, save)
+	path.append({
+		"step": "union_cave_catch_for_strength",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"attempts": attempts,
+		"party": _party_species(save),
+		"items": _named_items(data, world.state.items()),
+	})
+	if caught.is_empty():
+		return {
+			"ok": false, "path": path,
+			"reason": "no STRENGTH-capable catch in %d encounters" % attempts.size(),
+		}
+	return {"ok": true}
+
+
+## TeachTMHM against the first party member the HM will take, which is what
+## ChooseMonToLearnTMHM leaves the player to pick. Compatibility, a known move
+## and a full moveset are all real refusals, so the walk tries each slot in party
+## order and reports the last reason when none of them can learn it.
+func _teach_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary:
+	var reason: String = "no party member"
+	for index: int in save.party.size():
+		var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(world, save, item, index, false)
+		if bool(result.get("ok", false)):
+			return result
+		reason = String(result.get("reason", ""))
+	return {"ok": false, "reason": reason}
 
 
 func _party_moves(save: Gen2SaveData) -> Array:
