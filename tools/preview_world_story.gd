@@ -51,6 +51,71 @@ const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
 ## cell that reaches Blackthorn Gym's door (`maps/BlackthornCity.asm`).
 const EVENT_CLEARED_RADIO_TOWER: int = 33
 const EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM: int = 1763
+## The Blackthorn Gym boulders' own object event flags, which
+## `BlackthornGym1FBouldersCallback` reads back as `changeblock`s on 1F.
+const EVENT_BOULDER_IN_BLACKTHORN_GYM_1: int = 1798
+const EVENT_BOULDER_IN_BLACKTHORN_GYM_3: int = 1800
+const EVENT_BEAT_CLAIR: int = 1220
+const EVENT_ANSWERED_DRAGON_MASTER_QUIZ_WRONG: int = 193
+## ENGINE_RISINGBADGE's place in source badge order (`constants/engine_flags.asm`).
+const BADGE_RISING: int = 7
+
+## Blackthorn Gym 2F's pushes in order, each an approach cell and the direction
+## stepped from it (`maps/BlackthornGym2F.asm`).
+##
+## Four of the six boulders move. BOULDER5 on (6,1) and BOULDER6 on (8,14) are
+## in neither the `stonetable` nor any event flag: they seal the two pockets the
+## puzzle needs, the top-right one holding BOULDER1 and its hole, and the
+## bottom one holding the row BOULDER3 has to be pushed from. Shoving each three
+## cells clears both. BOULDER1 is then one push into (8,3), and BOULDER3 goes
+## north until the wall at (6,6) stops it and then east into (8,7).
+##
+## BOULDER2 is left alone. Its hole is a `stonetable` row like the other two,
+## but the 1F cell its flag opens, (2,5), is a dead end beside the entrance.
+const BLACKTHORN_GYM_PUSHES: Array = [
+	{
+		"step": "blackthorn_gym_clear_top_pocket",
+		"pushes": [
+			[Vector2i(5, 1), Vector2i.RIGHT],
+			[Vector2i(6, 1), Vector2i.RIGHT],
+			[Vector2i(7, 1), Vector2i.RIGHT],
+		],
+	},
+	{
+		"step": "blackthorn_gym_boulder_1",
+		"flag": 1798,
+		"pushes": [[Vector2i(8, 1), Vector2i.DOWN]],
+	},
+	{
+		"step": "blackthorn_gym_clear_south_pocket",
+		"pushes": [
+			[Vector2i(8, 13), Vector2i.DOWN],
+			[Vector2i(8, 14), Vector2i.DOWN],
+			[Vector2i(8, 15), Vector2i.DOWN],
+		],
+	},
+	{
+		"step": "blackthorn_gym_boulder_3",
+		"flag": 1800,
+		"pushes": [
+			[Vector2i(6, 17), Vector2i.UP], [Vector2i(6, 16), Vector2i.UP],
+			[Vector2i(6, 15), Vector2i.UP], [Vector2i(6, 14), Vector2i.UP],
+			[Vector2i(6, 13), Vector2i.UP], [Vector2i(6, 12), Vector2i.UP],
+			[Vector2i(6, 11), Vector2i.UP], [Vector2i(6, 10), Vector2i.UP],
+			[Vector2i(6, 9), Vector2i.UP],
+			[Vector2i(5, 7), Vector2i.RIGHT], [Vector2i(6, 7), Vector2i.RIGHT],
+		],
+	},
+]
+
+## The Dragon Shrine quiz, answered right (`maps/DragonShrine.asm`). Each
+## question is a three-option `verticalmenu` and these are zero-based, so the
+## source's accepted options are 1, 1, 2, 1 and 2.
+const DRAGON_SHRINE_ANSWERS: Array[int] = [0, 0, 1, 0, 1]
+
+## How many hardware frames one pushed boulder may spend sliding before the walk
+## calls it stuck. The slide is STEP_FRAMES_BOULDER_PUSH, well inside this.
+const OBJECT_STEP_FRAME_BUDGET: int = 64
 
 ## Route 44's Ice Path door and then every warp cell the cave is crossed by, in
 ## order (`maps/Route44.asm`, `maps/IcePath*.asm`).
@@ -800,6 +865,10 @@ func _story_path(data: GameData) -> Dictionary:
 	var blackthorn: Dictionary = _blackthorn_path(world, save, random, data, path)
 	if not bool(blackthorn.get("ok", false)):
 		return blackthorn
+
+	var rising: Dictionary = _rising_badge_path(world, save, random, data, path)
+	if not bool(rising.get("ok", false)):
+		return rising
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -3058,6 +3127,297 @@ func _lake_crossing(
 	return _walk_cell_resolving(world, landfall, save, random, data, true)
 
 
+## Blackthorn City to the Rising Badge, on the same world, state and save.
+##
+## The badge is not Clair's. `BlackthornGymClairScript` sets only
+## `EVENT_BEAT_CLAIR` and swaps the two Blackthorn gramps so the Dragon's Den
+## door at (20,1) opens; `maps/DragonShrine.asm` is what runs
+## `setflag ENGINE_RISINGBADGE`, at the end of the elder's five-question quiz.
+##
+## Appends to [param path] and answers only ok or the failure.
+func _rising_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var gym: Dictionary = _blackthorn_gym_leg(world, save, random, data, path)
+	if not bool(gym.get("ok", false)):
+		return gym
+
+	var shrine: Dictionary = _dragon_shrine_leg(world, save, random, data, path)
+	if not bool(shrine.get("ok", false)):
+		return shrine
+
+	return {"ok": true}
+
+
+## Blackthorn Gym's boulder puzzle and Clair.
+##
+## 1F is four regions, and the entrance reaches only one of them. 2F's three
+## holes are `stonetable` rows, and a boulder that falls through one is
+## `disappear`ed and sets its own event flag, which
+## `BlackthornGym1FBouldersCallback` turns into a `changeblock` on 1F. Two of
+## those changes are the route: BOULDER1 through the (8,3) hole opens 1F (8,3),
+## joining the middle corridor to Clair's room, and BOULDER3 through the (8,7)
+## hole opens 1F (8,7), joining that corridor to the pocket 2F's (7,9) staircase
+## drops into. BOULDER2's hole adds one 1F cell beside the entrance and reaches
+## nothing, so the walk leaves it alone.
+##
+## BOULDER1 is one push; BOULDER3 starts nine cells south of the row it has to
+## cross on, so it goes north until the wall at (6,6) stops it and then east
+## into the hole.
+func _blackthorn_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	if not world.strength_active():
+		return {"ok": false, "path": path, "reason": "Strength is not active"}
+	var to_gym: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(18, 11), Vector2i(1, 7)]
+	)
+	if not bool(to_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Gym 2F unreachable: %s" % to_gym.get("reason", ""),
+		}
+
+	for leg: Dictionary in BLACKTHORN_GYM_PUSHES:
+		var pushes: Array = []
+		for push: Array in leg["pushes"]:
+			var moved: Dictionary = _push_boulder_run(
+				world, push[0], push[1], save, random, data
+			)
+			pushes.append(moved)
+			if not bool(moved.get("ok", false)):
+				path.append({
+					"step": String(leg["step"]),
+					"map": _map_value(world),
+					"cell": _cell_value(world),
+					"pushes": pushes,
+				})
+				return {
+					"ok": false, "path": path,
+					"reason": "%s failed: %s" % [leg["step"], moved.get("reason", "")],
+				}
+		var flag: int = int(leg.get("flag", -1))
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"pushes": pushes.size(),
+			"fell": flag >= 0 and world.event_flag_active(flag),
+		})
+		if flag >= 0 and not world.event_flag_active(flag):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s did not fall through" % leg["step"],
+			}
+
+	# 2F's (7,9) staircase drops into the 1F pocket the two fallen boulders have
+	# just joined to Clair's room.
+	var down: Dictionary = _warp_chain(world, save, random, data, [Vector2i(7, 9)])
+	if not bool(down.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Gym 1F return failed: %s" % down.get("reason", ""),
+		}
+
+	var clair: Dictionary = _talk_to(
+		world, Vector2i(5, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "blackthorn_gym_clair",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": clair.get("run", {}),
+		"beat_clair": world.event_flag_active(EVENT_BEAT_CLAIR),
+	})
+	if not bool(clair.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Clair failed: %s" % clair.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_BEAT_CLAIR):
+		return {"ok": false, "path": path, "reason": "Clair was not beaten"}
+	return {"ok": true}
+
+
+## Blackthorn City to the Dragon Shrine, and the elder's quiz.
+##
+## Clair's script sets `EVENT_BLACKTHORN_CITY_GRAMPS_BLOCKS_DRAGONS_DEN` and
+## clears its partner, which swaps the gramps standing on (20,2) for one beside
+## it and opens the den door at (20,1). Neither den floor needs a field move:
+## B1F's shrine warp at (19,29) is on the same land region as the ladder from
+## 1F, and the whirlpool at (10,20) guards the water pocket rather than the way
+## through.
+##
+## The quiz is answered correctly. `.WrongAnswer` on the last question checks
+## `EVENT_TEMPORARY_UNTIL_MAP_RELOAD_6`, which question 5 has already set, so it
+## asks question 5 again: a wrong answer there is the one that does not move on.
+func _dragon_shrine_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(7, 9), Vector2i(1, 7), Vector2i(4, 17)]
+	)
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Gym exit failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	# The den door is across the lake, not around it. Every land route from the
+	# town centre is walled off by the $b2 fence line and the one-way $a3 ledges,
+	# and (20,4) below the door's shore is COLL_WATER, so the crossing is the
+	# way in. That is also what the gramps on (20,3) blocks until Clair moves him.
+	var crossing: Dictionary = _lake_crossing(
+		world, save, random, data,
+		Vector2i(22, 12), Gen2WorldSprite.FACING_UP, Vector2i(20, 3)
+	)
+	path.append({
+		"step": "blackthorn_lake_crossing",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(crossing.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn lake crossing failed: %s" % crossing.get("reason", ""),
+		}
+
+	# Dragon's Den 1F is two halves joined by its own warp pair, (3,3) into
+	# (5,13), so the ladder down at (5,15) is only reached through it.
+	var to_den: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(20, 1), Vector2i(3, 3), Vector2i(5, 15)]
+	)
+	if not bool(to_den.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den B1F unreachable: %s" % to_den.get("reason", ""),
+		}
+
+	# B1F is a lake with the shrine on its far shore: the ladder's own land
+	# region has 271 cells and none of them touch the shrine, whose only landfall
+	# from the water is (14,31). The whirlpool on (10,20) sits in the way.
+	var entered: Dictionary = _surf_at(
+		world, Vector2i(10, 7), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den surf entry failed: %s" % entered.get("reason", ""),
+		}
+	var cleared: Dictionary = _whirlpool_at(
+		world, Vector2i(10, 19), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "dragons_den_whirlpool",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": cleared,
+	})
+	if not bool(cleared.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den whirlpool failed: %s" % cleared.get("reason", ""),
+		}
+	var den_crossing: Dictionary = _walk_cell_resolving(
+		world, Vector2i(14, 31), save, random, data, true
+	)
+	path.append({
+		"step": "dragons_den_crossing",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(den_crossing.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den crossing failed: %s" % den_crossing.get("reason", ""),
+		}
+
+	var to_shrine: Dictionary = _warp_chain(world, save, random, data, [Vector2i(19, 29)])
+	if not bool(to_shrine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon Shrine unreachable: %s" % to_shrine.get("reason", ""),
+		}
+
+	# The shrine's scene 0 is SCENE_DRAGONSHRINE_TAKE_TEST, an sdefer, so the
+	# quiz runs off the map entry rather than an interaction.
+	var quiz: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data, true,
+		DRAGON_SHRINE_ANSWERS
+	)
+	path.append({
+		"step": "dragon_shrine_rising_badge",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": quiz,
+		"badge_count": world.state.badge_count(),
+		"answered_wrong": world.event_flag_active(EVENT_ANSWERED_DRAGON_MASTER_QUIZ_WRONG),
+	})
+	if not bool(quiz.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Dragon Shrine quiz did not finish: %s" % quiz.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		BADGE_RISING, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return {"ok": false, "path": path, "reason": "the Rising Badge was not given"}
+	return {"ok": true}
+
+
+## _push_boulder_at() for a boulder that may land on a `stonetable` pit: the
+## fall script is queued by the push that commits the cell, and the boulder
+## needs its own slide finished before the next push can reach it.
+func _push_boulder_run(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	direction: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var pushed: Dictionary = _push_boulder_at(world, approach, direction, save, random, data)
+	if not bool(pushed.get("ok", false)):
+		return pushed
+	var fall: Dictionary = _drain_story(
+		world, world.run_event_queue(false), save, random, data
+	)
+	if not bool(fall.get("terminal", true)):
+		return {"ok": false, "reason": "fall script did not finish: %s" % fall.get("reason", "")}
+	_settle_object_steps(world, random)
+	return pushed
+
+
+## Spends hardware frames until no object is mid-step. A pushed boulder slides
+## for STEP_FRAMES_BOULDER_PUSH frames and refuses a second push until it stands
+## again, and advance_object_steps() caps its own catch-up, so this has to tick.
+func _settle_object_steps(world: Gen2WorldAPI, random: RandomNumberGenerator) -> void:
+	for _frame: int in OBJECT_STEP_FRAME_BUDGET:
+		var stepping: bool = false
+		for object: Gen2WorldObject in world.objects:
+			if object.is_stepping():
+				stepping = true
+				break
+		if not stepping:
+			return
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+
+
 ## Mahogany Town east to Blackthorn City, on the same world, state and save.
 ## Starts in the town, since the Radio Tower leg before it left the gym.
 ##
@@ -3691,6 +4051,31 @@ func _surf_at(
 	return {"ok": true, "cell": applied.get("cell", approach)}
 
 
+## Clears the whirlpool the given water cell faces, the way _cut_at() cuts:
+## request then commit, since Script_UsedWhirlpool reaches DisappearWhirlpool
+## only after UseWhirlpoolText. The frontier stays on water, so the approach
+## cannot step ashore on the way.
+func _whirlpool_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data, true)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var request: Dictionary = world.whirlpool_request()
+	if not bool(request.get("ok", false)):
+		return {"ok": false, "reason": "whirlpool refused: %s" % request.get("reason", "")}
+	var applied: Dictionary = world.complete_whirlpool()
+	if not bool(applied.get("ok", false)):
+		return {"ok": false, "reason": "whirlpool failed: %s" % applied.get("reason", "")}
+	return {"ok": true, "cell": applied.get("cell", approach)}
+
+
 ## Walks to [param cell], faces [param facing] and drains the interaction.
 func _talk_to(
 	world: Gen2WorldAPI,
@@ -3810,7 +4195,9 @@ func _drain_story(
 	random: RandomNumberGenerator = null,
 	data: GameData = null,
 	require_events: bool = false,
+	answers: Array[int] = [],
 ) -> Dictionary:
+	var pending_answers: Array[int] = answers.duplicate()
 	if require_events and initial.is_empty():
 		return {
 			"statuses": [],
@@ -3850,7 +4237,13 @@ func _drain_story(
 		elif input_type in [&"text", &"button"]:
 			results = world.run_event_queue(true)
 		elif input_type in [&"choice", &"menu"]:
-			results = world.choose_script_input(0)
+			## Choices default to the source's first option, which is yes on a
+			## yesorno. A caller that needs particular answers, like the Dragon
+			## Shrine quiz, supplies them in the order the script asks.
+			var choice: int = 0
+			if not pending_answers.is_empty():
+				choice = pending_answers.pop_front()
+			results = world.choose_script_input(choice)
 		else:
 			var request: Dictionary = world.pending_runtime_request()
 			if request.is_empty():

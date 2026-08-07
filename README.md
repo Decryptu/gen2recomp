@@ -58,7 +58,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > and teaching it HM04 Strength to push Cianwood Gym's boulders aside for the
 > Storm Badge, then east across Route 42's lakes to Mahogany, the Lake of Rage's
 > Red Gyarados and Lance, the Rocket hideout's three floors and Pryce to the
-> Glacier Badge.
+> Glacier Badge, back west for the Goldenrod Radio Tower's basement and card
+> keys and its Rocket boss, then Route 44 and the Ice Path to Blackthorn, its
+> gym's boulder puzzle and Clair, and the Dragon Shrine's quiz for the Rising
+> Badge.
 > Missing: full story state, dex, trainer card, options, the remaining
 > special-call branches and story-driven permanent contacts.
 
@@ -200,6 +203,7 @@ Headless tools, all against a real imported cache:
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census, in all three games |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
+| `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
