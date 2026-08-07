@@ -528,3 +528,109 @@ func test_uninstall_removes_the_tree_and_is_quiet_when_it_is_already_gone() -> v
 	var again: Dictionary = Gen2ModInstaller.uninstall(&"packaged", ROOT)
 	assert_true(again["ok"])
 	assert_false(again["removed"])
+
+
+func test_index_source_resolves_the_shapes_a_player_might_paste() -> void:
+	var expected: String = "https://someone.github.io/mods/index.json"
+	for input: String in [
+		"someone/mods",
+		"https://github.com/someone/mods",
+		"https://github.com/someone/mods.git",
+	]:
+		var resolved: Dictionary = Gen2ModIndex.resolve_source(input)
+		assert_true(resolved["ok"], input)
+		assert_eq(resolved["feed"], expected, input)
+		assert_eq(resolved["label"], "someone/mods", input)
+
+	# A site root gains the feed name; a feed file is taken as given.
+	assert_eq(
+		Gen2ModIndex.resolve_source("https://mods.example.com/")["feed"],
+		"https://mods.example.com/index.json",
+	)
+	assert_eq(
+		Gen2ModIndex.resolve_source("https://mods.example.com/feed.json")["feed"],
+		"https://mods.example.com/feed.json",
+	)
+
+
+func test_index_source_refuses_plain_http_and_nothing() -> void:
+	# http would let anyone on the path rewrite the downloads the feed hands out.
+	var insecure: Dictionary = Gen2ModIndex.resolve_source("http://mods.example.com/")
+	assert_false(insecure["ok"])
+	assert_eq(insecure["reason"], &"index_url_not_https")
+	assert_eq(Gen2ModIndex.resolve_source("   ")["reason"], &"empty_index_url")
+
+
+func _feed(mods: Array, schema: int = Gen2ModIndex.SCHEMA_VERSION) -> String:
+	return JSON.stringify({"schema_version": schema, "name": "Example", "mods": mods})
+
+
+func test_index_feed_parses_entries_and_keeps_the_listing_order() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(_feed([
+		{"id": "voxel", "name": "Voxel", "version": "2.0.0",
+		 "download": "https://example.com/voxel.zip", "description": "A view"},
+		{"id": "second", "download": "https://example.com/second.zip"},
+	]))
+	assert_true(parsed["ok"], JSON.stringify(parsed))
+	assert_eq(parsed["name"], "Example")
+	var entries: Array = parsed["entries"]
+	assert_eq(entries.size(), 2)
+	assert_eq(entries[0]["id"], &"voxel")
+	assert_eq(entries[0]["version"], "2.0.0")
+	# A row with no name falls back to its id rather than listing as blank.
+	assert_eq(entries[1]["name"], "second")
+
+
+func test_index_feed_of_an_unknown_schema_is_refused_outright() -> void:
+	# A later format may reuse a field name, so this is a gate and not a hint.
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(
+		_feed([], Gen2ModIndex.SCHEMA_VERSION + 1)
+	)
+	assert_false(parsed["ok"])
+	assert_eq(parsed["reason"], &"unsupported_index_schema")
+	assert_eq(Gen2ModIndex.parse_feed("not json")["reason"], &"index_not_json")
+
+
+func test_index_feed_drops_unusable_rows_without_losing_the_rest() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(_feed([
+		{"name": "No id at all", "download": "https://example.com/a.zip"},
+		{"id": "insecure", "download": "http://example.com/b.zip"},
+		{"id": "no download"},
+		{"id": "Bad Id", "download": "https://example.com/c.zip"},
+		{"id": "voxel", "download": "https://example.com/voxel.zip"},
+		{"id": "voxel", "download": "https://example.com/duplicate.zip"},
+	]))
+	assert_true(parsed["ok"])
+	var entries: Array = parsed["entries"]
+	assert_eq(entries.size(), 1, JSON.stringify(entries))
+	assert_eq(entries[0]["id"], &"voxel")
+	assert_eq(entries[0]["download"], "https://example.com/voxel.zip")
+
+
+func test_following_an_index_persists_it_and_never_duplicates_a_feed() -> void:
+	var store: String = "%s/indexes.json" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	# Ships following nobody: an index is the player trusting a publisher.
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+	var added: Dictionary = Gen2ModIndex.follow("someone/mods", store)
+	assert_true(added["ok"])
+	assert_true(added["added"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 1)
+	assert_eq(Gen2ModIndex.followed(store)[0]["label"], "someone/mods")
+
+	# The same feed reached by another URL shape is still the same feed.
+	var again: Dictionary = Gen2ModIndex.follow("https://github.com/someone/mods", store)
+	assert_true(again["ok"])
+	assert_false(again["added"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 1)
+
+	Gen2ModIndex.unfollow(added["feed"], store)
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+
+func test_following_a_refused_url_stores_nothing() -> void:
+	var store: String = "%s/indexes.json" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	assert_false(Gen2ModIndex.follow("http://mods.example.com/", store)["ok"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)

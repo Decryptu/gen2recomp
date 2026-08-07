@@ -27,6 +27,8 @@ var _mod_replace_dialog: ConfirmationDialog = null
 var _mod_replace_path: String = ""
 var _mods_label: Label = null
 var _mod_button: Button = null
+var _index_button: Button = null
+var _index_dialog: Gen2ModIndexDialog = null
 var _cards: Dictionary = {}
 var _selected_game_id: StringName = &""
 var _importing: bool = false
@@ -87,6 +89,11 @@ func _build_ui() -> void:
 	_mod_button.custom_minimum_size = Vector2(168, 48)
 	_mod_button.pressed.connect(_open_mod_dialog)
 	header.add_child(_mod_button)
+
+	_index_button = _button("Mod index", MUTED)
+	_index_button.custom_minimum_size = Vector2(168, 48)
+	_index_button.pressed.connect(_open_index_dialog)
+	header.add_child(_index_button)
 
 	var section := Label.new()
 	section.text = "CARTRIDGES"
@@ -183,6 +190,10 @@ func _build_ui() -> void:
 	_mod_replace_dialog.confirmed.connect(_on_mod_replace_confirmed)
 	add_child(_mod_replace_dialog)
 
+	_index_dialog = Gen2ModIndexDialog.new()
+	_index_dialog.mod_installed.connect(_on_index_mod_installed)
+	add_child(_index_dialog)
+
 	# A window drop is the same import, so the OS file manager works wherever it
 	# offers one. Routing is by extension because the two imports validate very
 	# differently and neither should be handed the other's file.
@@ -270,6 +281,18 @@ func _open_mod_dialog() -> void:
 		MUTED,
 	)
 	_mod_dialog.popup_centered(Vector2i(920, 620))
+
+
+func _open_index_dialog() -> void:
+	if _importing:
+		return
+	_index_dialog.refresh()
+	_index_dialog.popup_centered(Vector2i(720, 560))
+
+
+func _on_index_mod_installed(_id: StringName) -> void:
+	GameRuntime.load_mods()
+	_mods_label.text = _mods_summary()
 
 
 func _on_mod_replace_confirmed() -> void:

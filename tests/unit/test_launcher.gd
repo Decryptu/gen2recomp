@@ -144,3 +144,26 @@ func test_launcher_reports_a_file_that_is_not_a_mod_archive() -> void:
 	var snapshot: Dictionary = _launcher.launcher_snapshot()
 	assert_eq(snapshot["status"], "That mod was not installed.")
 	assert_string_contains(snapshot["detail"], "not a .zip archive")
+
+
+func test_index_install_requires_the_download_to_be_the_listed_mod() -> void:
+	_write_probe_mod_zip()
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(_mod_archive)
+	var dialog := Gen2ModIndexDialog.new()
+	add_child_autofree(dialog)
+	await get_tree().process_frame
+
+	# A feed offering one mod cannot deliver another.
+	var wrong: Dictionary = dialog.install_entry_bytes(
+		{"id": &"something_else", "name": "Something Else"}, bytes
+	)
+	assert_false(wrong["ok"])
+	assert_eq(wrong["reason"], &"unexpected_mod_id")
+	assert_string_contains(dialog.status_text(), "different mod")
+
+	var right: Dictionary = dialog.install_entry_bytes(
+		{"id": PROBE_MOD_ID, "name": "Launcher Probe"}, bytes
+	)
+	assert_true(right["ok"], JSON.stringify(right))
+	assert_eq(right["id"], PROBE_MOD_ID)
+	assert_string_contains(dialog.status_text(), "Installed")
