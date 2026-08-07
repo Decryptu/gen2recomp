@@ -1297,10 +1297,65 @@ func apply_command_queue_write(bank: int, address: int) -> Dictionary:
 	var key: String = "%d:%04X" % [bank, address]
 	var queue_id: int = _next_command_queue_id
 	_next_command_queue_id += 1
-	_command_queues[key] = {
-		"id": queue_id, "bank": bank, "address": address,
-	}
+	var queue: Dictionary = {"id": queue_id, "bank": bank, "address": address}
+	# The imported payload, so a written queue carries what it does and not only
+	# where it came from. A queue the cartridge has no entry for stays pointer
+	# only, which is what every type but CMDQUEUE_STONETABLE is.
+	if data != null:
+		var record: Dictionary = data.world_command_queue(bank, address)
+		if not record.is_empty():
+			queue["type"] = int(record.get("type", 0))
+			queue["rows"] = record.get("rows", [])
+	_command_queues[key] = queue
 	return {"ok": true, "kind": &"command_queue_written", "queue": _command_queues[key]}
+
+
+## The one-based warp index `HandleStoneQueue.check_on_warp` counts, or 0 when
+## the cell carries no warp event. One-based because the source's
+## `.found_warp` answers `count - remaining + 1`.
+func warp_index_at(cell: Vector2i) -> int:
+	if current_map == null:
+		return 0
+	var warps: Array = current_map.events.get("warps", [])
+	for index: int in warps.size():
+		var event: Dictionary = warps[index]
+		if int(event.get("x", -1)) == cell.x and int(event.get("y", -1)) == cell.y:
+			return index + 1
+	return 0
+
+
+## engine/overworld/cmd_queue.asm's CmdQueue_StoneTable and home/stone_queue.asm's
+## HandleStoneQueue, as one question: which script does this boulder's cell fire?
+##
+## The source's own order, all five tests. The object must be a Strength boulder,
+## standing on a pit tile (`CheckPitTile`, COLL_PIT or COLL_PIT_68), not mid-step,
+## on a warp event, and named by a written CMDQUEUE_STONETABLE row for that
+## warp. Answers an empty Dictionary when any of them refuses.
+##
+## The row's object id is an `object_const_def` constant, which starts at 2, so
+## it is compared against the object's own index plus two. That is the same
+## mapping `applymovement` uses, and the source makes it by comparing against
+## OBJECT_MAP_OBJECT_INDEX + 1 over a table whose index zero is the player.
+func stone_queue_script(boulder: Gen2WorldObject) -> Dictionary:
+	if boulder == null or not boulder.is_strength_boulder() or boulder.is_stepping():
+		return {}
+	if not Gen2WorldCollision.is_pit_tile(collision_code_at(boulder.cell)):
+		return {}
+	var warp: int = warp_index_at(boulder.cell)
+	if warp <= 0:
+		return {}
+	var object_id: int = boulder.index + 2
+	for key: Variant in _command_queues:
+		var queue: Dictionary = _command_queues[key]
+		if int(queue.get("type", 0)) != Gen2WorldScript.CMDQUEUE_STONETABLE:
+			continue
+		for row: Dictionary in queue.get("rows", []):
+			if int(row.get("warp", -1)) != warp or int(row.get("object", -1)) != object_id:
+				continue
+			# The row scripts were collected under the queue's own bank, which is
+			# the map script bank the writecmdqueue ran in.
+			return {"bank": int(queue.get("bank", 0)), "script": int(row.get("script", 0))}
+	return {}
 
 
 func apply_command_queue_delete(queue_id: int) -> Dictionary:
@@ -2880,20 +2935,37 @@ func _try_push_boulder(direction: Vector2i, destination: Vector2i) -> Dictionary
 	if not can_object_walk_to(landing, boulder, direction):
 		return {}
 	boulder.cell = landing
+	# The stone queue is asked here, on the call that commits the cell, for the
+	# same reason the push itself is resolved here: the source waits for the
+	# boulder to reach STANDING, and nothing between those frames asks the
+	# boulder anything or moves it again.
+	var fall: Dictionary = stone_queue_script(boulder)
 	# FIXED_FACING is set on the boulder's movement data, so InitStep skips the
 	# OBJECT_DIRECTION write and the sprite keeps facing down while it slides.
 	boulder.start_step(direction, STEP_FRAMES_BOULDER_PUSH)
 	_remember_object_position(boulder)
+	var pushed: Dictionary = {
+		"index": boulder.index,
+		"from_cell": landing - direction,
+		"to_cell": landing,
+		"direction": direction,
+	}
+	if not fall.is_empty():
+		pushed["fall_script"] = int(fall["script"])
+		_enqueue_script({
+			"kind": &"stone_table",
+			"map_group": current_map.group,
+			"map_number": current_map.number,
+			"cell": landing,
+			"bank": int(fall["bank"]),
+			"script": int(fall["script"]),
+			"object_index": boulder.index,
+		})
 	return {
 		"ok": false,
 		"kind": &"move",
 		"reason": &"blocked",
-		"boulder_pushed": {
-			"index": boulder.index,
-			"from_cell": landing - direction,
-			"to_cell": landing,
-			"direction": direction,
-		},
+		"boulder_pushed": pushed,
 	}
 
 

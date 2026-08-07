@@ -125,6 +125,20 @@ const MAX_CALL_DEPTH: int = 8
 const MAX_SCRIPT_BYTES: int = 512
 const MAX_TEXT_BYTES: int = 1024
 
+## constants/script_constants.asm's cmdqueue block. An entry is
+## `dbw type, address` plus two filler bytes; four fit in wCmdQueue.
+const CMDQUEUE_ENTRY_SIZE: int = 5
+const CMDQUEUE_CAPACITY: int = 4
+const CMDQUEUE_NULL: int = 0
+const CMDQUEUE_STONETABLE: int = 2
+
+## macros/scripts/maps.asm's `stonetable warp_id, object_id, script`, which is
+## `db warp_id, object_id` then `dw script`, ending at a $ff warp id. Only two
+## maps ship one, so the bound is generous rather than tight.
+const STONETABLE_ROW_SIZE: int = 4
+const STONETABLE_TERMINATOR: int = 0xFF
+const MAX_STONETABLE_ROWS: int = 16
+
 
 static func pointer_key(bank: int, address: int) -> String:
 	return "%d:%04X" % [bank, address]
@@ -840,6 +854,7 @@ static func scan_references(
 	var scripts: Array = []
 	var texts: Array = []
 	var movements: Array = []
+	var command_queues: Array = []
 	var at: int = 0
 	var command_count: int = 0
 	while at < data.size() and command_count < MAX_COMMANDS:
@@ -881,15 +896,61 @@ static func scan_references(
 				## phonecall passes a caller-name text pointer to PhoneCall. It is
 				## not a script pointer and must be collected as text data.
 				texts.append({"bank": bank, "address": int(command["address"])})
+			0x7C:
+				## writecmdqueue points at a cmdqueue entry, which is data rather
+				## than script, so it is collected as its own kind.
+				command_queues.append({"bank": bank, "address": int(command["address"])})
 		at += int(command["width"])
 		command_count += 1
 		if is_terminal(opcode, crystal_commands):
 			break
-	return {"scripts": scripts, "texts": texts, "movements": movements}
+	return {
+		"scripts": scripts, "texts": texts, "movements": movements,
+		"command_queues": command_queues,
+	}
 
 
 ## Decodes the bounded text-command slice collected by the importer. Map text
 ## begins with text_start and ends with the source done command $57. The generic
+## Decodes one `cmdqueue` entry: `dbw type, address` and two filler bytes
+## (macros/scripts/maps.asm). Answers the type and the data pointer only; what
+## the pointer means is the type's business.
+static func decode_command_queue_entry(data: PackedByteArray) -> Dictionary:
+	if data.size() < CMDQUEUE_ENTRY_SIZE:
+		return {"ok": false, "reason": &"short_command_queue_entry"}
+	var type: int = data[0]
+	if type == CMDQUEUE_NULL:
+		return {"ok": false, "reason": &"null_command_queue"}
+	return {
+		"ok": true,
+		"type": type,
+		"address": data[1] | (data[2] << 8),
+	}
+
+
+## Decodes a `stonetable`, the only cmdqueue payload either game ships.
+##
+## Rows are `warp_id, object_id, script` until a $ff warp id, and the ids are
+## the source's own: the warp is one-based, as `.check_on_warp` counts it, and
+## the object is an `object_const_def` constant, which starts at 2, so it is two
+## more than the map's own object index.
+static func decode_stone_table(data: PackedByteArray) -> Dictionary:
+	var rows: Array = []
+	var at: int = 0
+	while at < data.size() and rows.size() <= MAX_STONETABLE_ROWS:
+		if data[at] == STONETABLE_TERMINATOR:
+			return {"ok": true, "rows": rows, "bytes": at + 1}
+		if at + STONETABLE_ROW_SIZE > data.size():
+			break
+		rows.append({
+			"warp": data[at],
+			"object": data[at + 1],
+			"script": data[at + 2] | (data[at + 3] << 8),
+		})
+		at += STONETABLE_ROW_SIZE
+	return {"ok": false, "reason": &"unterminated_stone_table", "rows": rows}
+
+
 ## Gen2Text codec uses $50 for fixed names, but in world text $50 is a page
 ## control and must remain in the decoded stream. Unknown bytes remain visible
 ## as bracketed markers instead of being discarded.

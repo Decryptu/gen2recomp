@@ -31,6 +31,7 @@ const WORLD_SCRIPTS: String = "world_scripts.json"
 const WORLD_STANDARD_SCRIPTS: String = "world_standard_scripts.json"
 const WORLD_TEXT: String = "world_text.json"
 const WORLD_MOVEMENTS: String = "world_movements.json"
+const WORLD_COMMAND_QUEUES: String = "world_command_queues.json"
 const WORLD_TILESETS: String = "world_tilesets.json"
 const WORLD_ENCOUNTERS: String = "world_encounters.json"
 const WORLD_PALETTES: String = "world_palettes.json"
@@ -55,7 +56,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 24
+const FORMAT_VERSION: int = 25
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -125,6 +126,12 @@ static func world_text_path(directory: String) -> String:
 
 static func world_movements_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_MOVEMENTS]
+
+
+## The decoded `cmdqueue` payloads a `writecmdqueue` points at, keyed by that
+## pointer. Only Blackthorn Gym 2F and Ice Path B1F ship one, both stone tables.
+static func world_command_queues_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_COMMAND_QUEUES]
 
 
 static func world_tilesets_path(directory: String) -> String:
