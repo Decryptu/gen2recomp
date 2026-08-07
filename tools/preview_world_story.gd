@@ -36,6 +36,38 @@ const BADGE_STORM: int = 5
 ## bounds the rolls that find nothing worth throwing at.
 const CATCH_ATTEMPTS: int = 64
 
+## Mahogany Town, whose map scene and merchant flag are what open the east exit
+## onto Route 44 (`data/maps/maps.asm`).
+const MAHOGANY_TOWN_GROUP: int = 2
+const MAHOGANY_TOWN_NUMBER: int = 7
+## constants/event_flags.asm. RadioTowerRocketsScript sets it, which hides the
+## RageCandyBar merchant standing on Mahogany's east edge.
+const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
+
+## Route 44's Ice Path door and then every warp cell the cave is crossed by, in
+## order (`maps/Route44.asm`, `maps/IcePath*.asm`).
+##
+## The cave is six floor-crossings, not one. Stepping on a warp takes it, so a
+## floor is only crossed between warps its own walk connects, and on Ice Path
+## those regions are disjoint: 1F's Route 44 door reaches the first staircase
+## and nothing else, while the Blackthorn door is reached only from the second
+## staircase, at the far end of the loop through B1F, both B2Fs and B3F.
+##
+## The `stonetable` boulders on B1F are not on this path. Their holes (B1F warps
+## 3 to 6) are shortcuts into B2F Mahogany side, which the walk already reaches
+## through warp 2, so the command-queue gap that stops Blackthorn Gym does not
+## stop the cave.
+const ICE_PATH_DOORS: Array = [
+	{"step": "route_44_to_ice_path_1f", "cell": Vector2i(56, 7)},
+	{"step": "ice_path_1f_to_b1f", "cell": Vector2i(37, 5)},
+	{"step": "ice_path_b1f_to_b2f_mahogany", "cell": Vector2i(17, 3)},
+	{"step": "ice_path_b2f_mahogany_to_b3f", "cell": Vector2i(9, 11)},
+	{"step": "ice_path_b3f_to_b2f_blackthorn", "cell": Vector2i(15, 5)},
+	{"step": "ice_path_b2f_blackthorn_to_b1f", "cell": Vector2i(3, 15)},
+	{"step": "ice_path_b1f_to_1f", "cell": Vector2i(5, 25)},
+	{"step": "ice_path_1f_to_blackthorn", "cell": Vector2i(36, 27)},
+]
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -753,6 +785,10 @@ func _story_path(data: GameData) -> Dictionary:
 	var glacier: Dictionary = _glacier_badge_path(world, save, random, data, path)
 	if not bool(glacier.get("ok", false)):
 		return glacier
+
+	var blackthorn: Dictionary = _blackthorn_path(world, save, random, data, path)
+	if not bool(blackthorn.get("ok", false)):
+		return blackthorn
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -2442,12 +2478,104 @@ func _glacier_badge_path(
 		"badge_count": world.state.badge_count(),
 		"engine_flags": world.state.engine_flags(),
 		"items": _named_items(data, world.state.items()),
+		# The badge is not all Pryce commits. `readvar VAR_BADGES` then
+		# `scall MahoganyGymActivateRockets` reaches RadioTowerRocketsScript at
+		# seven badges, which is what retires Mahogany's RageCandyBar coord
+		# events and hides the merchant blocking the east exit. Reported here
+		# because the next leg cannot start without both.
+		"mahogany_scene": world.state.map_scene(
+			MAHOGANY_TOWN_GROUP, MAHOGANY_TOWN_NUMBER
+		),
+		"east_merchant_hidden": world.state.is_event_flag_active(
+			EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST
+		),
 	})
 	if not bool(pryce.get("ok", false)):
 		return {
 			"ok": false, "path": path,
 			"reason": "Pryce failed: %s" % pryce.get("reason", ""),
 		}
+	return {"ok": true}
+
+
+## Mahogany Town east to Blackthorn City, on the same world, state and save.
+##
+## Route 44 carries seven trainers and no scripted gate, so the leg is a walk
+## the trainers interrupt rather than a sequence of errands. Its one warp is the
+## Ice Path door at (56,7) (`maps/Route44.asm`); the east connection to
+## Blackthorn exists in `data/maps/attributes.asm` but the cartridge's own way
+## through is the cave.
+##
+## Ice Path 1F is the only floor on the way: its second warp is Blackthorn's own
+## (`maps/IcePath1F.asm` warp 2 to BLACKTHORN_CITY 7), so the `stonetable`
+## boulder puzzle on B1F is beside the route rather than across it. The floor is
+## COLL_ICE, which is LAND_TILE, so the walk crosses it without the source's
+## sliding; sliding only ever removes choices, so nothing reachable with it is
+## unreachable here.
+##
+## Appends to [param path] and answers only ok or the failure.
+func _blackthorn_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 2, 7)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Mahogany Gym exit warp failed"}
+	var _town_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var to_route_44: Dictionary = _walk_connection_resolving(
+		world, "east", 2, 6, save, random, data
+	)
+	var route_44_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "mahogany_to_route_44",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_route_44.get("encounters", []),
+		"run": route_44_entry,
+	})
+	if not bool(to_route_44.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Mahogany to Route 44 failed: %s" % to_route_44.get("reason", ""),
+		}
+
+	# The Ice Path door, then the cave itself. Every trainer with a sight line
+	# onto the way there answers first, which is what the resolving walk is for.
+	for door: Dictionary in ICE_PATH_DOORS:
+		var walked: Dictionary = _warp_walk(
+			world, door["cell"], save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(door["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [door["step"], walked.get("reason", "")],
+			}
+
+	path.append({
+		"step": "blackthorn_city_arrival",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"party": _party_species(save),
+		"badge_count": world.state.badge_count(),
+	})
 	return {"ok": true}
 
 
