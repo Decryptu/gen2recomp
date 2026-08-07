@@ -131,7 +131,14 @@ static func begin(
 		started = runner._push_frame(
 			bank, address, runner._trainer_intro_script(trainer as Dictionary)
 		)
-		runner._trainer_intro_approach_pending = true
+		## Only SeenByTrainerScript shows the shock emote and walks the trainer
+		## over; TalkToTrainerScript is faceplayer, the flag check and
+		## encountermusic, then the same StartBattleWithMapTrainerScript
+		## (engine/events/trainer_scripts.asm). A sight request is the one that
+		## carries the direction the trainer saw along, so it is the one that
+		## approaches.
+		runner._trainer_intro_approach_pending = request.get("direction", Vector2i.ZERO) \
+			in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
 	else:
 		started = runner._push_frame(bank, address)
 	if not started:
@@ -1484,13 +1491,16 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
-		46, 48, 50, 51, 94, 157, 158:
+		46, 48, 49, 50, 51, 94, 157, 158:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
 			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
 			## `BattleTowerFade` sits at 47, so it needs no profile split;
-			## `LoadUsedSpritesGFX` (94) and `RefreshSprites` (158) reload the
-			## sprite set a `variablesprite` just changed.
+			## `FadeInFromWhite` is 49 here and 48 in Gold/Silver, which
+			## special_index() already normalizes (maps/OlivineLighthouse6F.asm's
+			## Amphy cure runs 46 then 49); `LoadUsedSpritesGFX` (94) and
+			## `RefreshSprites` (158) reload the sprite set a `variablesprite`
+			## just changed.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_INIT_ROAM_MONS:
 			## InitRoamMons seeds the roam structs with Raikou and Entei at

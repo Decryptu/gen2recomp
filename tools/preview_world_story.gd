@@ -21,6 +21,11 @@ const PHONE_RING_FRAME_BUDGET: int = 256
 ## Falkner and answered by ElmPhoneCallerScript's .assistant branch.
 const SPECIALCALL_ASSISTANT: int = 3
 
+## How many interruptions one walk may resolve before it is called stuck. A leg
+## crosses at most one map, and Route 41 carries the most trainers of any map on
+## the route at ten (maps/Route41.asm).
+const WALK_RESOLVE_ATTEMPTS: int = 16
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -730,6 +735,10 @@ func _story_path(data: GameData) -> Dictionary:
 	var fog: Dictionary = _fog_badge_path(world, save, random, data, path)
 	if not bool(fog.get("ok", false)):
 		return fog
+
+	var mineral: Dictionary = _mineral_badge_path(world, save, random, data, path)
+	if not bool(mineral.get("ok", false)):
+		return mineral
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -1633,6 +1642,391 @@ func _fog_badge_path(
 	return {"ok": true}
 
 
+## The Fog Badge to the Mineral Badge, on the same world, state and save. This
+## is the first leg that needs Surf on the real route: HM03 is the Dance
+## Theater's reward for the five Kimono Girls, and Routes 40 and 41 are the only
+## way to Cianwood, whose pharmacy holds the SecretPotion that
+## maps/OlivineLighthouse6F.asm wants before it clears EVENT_OLIVINE_GYM_JASMINE.
+##
+## The Storm Badge is not on this leg. maps/CianwoodGym.asm walls its only
+## corridor with SPRITEMOVEDATA_STRENGTH_BOULDER objects at (3,7), (4,7) and
+## (5,7), and Strength does not exist, so Chuck is unreachable.
+func _mineral_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 4, 9)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Ecruteak Gym exit warp failed"}
+	var _city_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var theater: Dictionary = _warp_walk(world, Vector2i(23, 21), save, random, data)
+	if not bool(theater.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dance Theater door unreachable: %s" % theater.get("reason", ""),
+		}
+	var _theater_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	# The five Kimono Girls stand on the stage above a row of COLL_HOP_DOWN, so
+	# the only ways up are the floor cells at (1,4) and (10,4). Their sight range
+	# is 0, so none of them can start a battle: every one has to be talked to.
+	var kimono_battles: Array = []
+	for girl: Dictionary in [
+		{"name": "naoko", "cell": Vector2i(1, 2), "facing": Gen2WorldSprite.FACING_LEFT},
+		{"name": "sayo", "cell": Vector2i(2, 2), "facing": Gen2WorldSprite.FACING_UP},
+		{"name": "zuki", "cell": Vector2i(5, 2), "facing": Gen2WorldSprite.FACING_RIGHT},
+		{"name": "kuni", "cell": Vector2i(9, 2), "facing": Gen2WorldSprite.FACING_UP},
+		{"name": "miki", "cell": Vector2i(10, 2), "facing": Gen2WorldSprite.FACING_RIGHT},
+	]:
+		var fought: Dictionary = _talk_to(
+			world, girl["cell"], int(girl["facing"]), save, random, data
+		)
+		kimono_battles.append({
+			"girl": String(girl["name"]),
+			"battles": fought.get("run", {}).get("battles", []),
+		})
+		if not bool(fought.get("ok", false)):
+			path.append({"step": "dance_theater_kimono_girls", "run": kimono_battles})
+			return {
+				"ok": false, "path": path,
+				"reason": "Kimono Girl %s failed: %s" % [girl["name"], fought.get("reason", "")],
+			}
+
+	# DanceTheaterSurfGuy checks all five beaten flags before .GetSurf, so this
+	# interaction is what the five battles were for.
+	var surf_guy: Dictionary = _talk_to(
+		world, Vector2i(7, 11), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "dance_theater_hm03_surf",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"kimono_girls": kimono_battles,
+		"run": surf_guy.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(surf_guy.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "HM03 handoff failed: %s" % surf_guy.get("reason", ""),
+		}
+
+	var leaving_theater: Dictionary = _warp_step(world, 4, 9)
+	if not bool(leaving_theater.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Dance Theater exit warp failed"}
+	var _city_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var to_route_38: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(0, 18), 1, 12
+	)
+	if not bool(to_route_38.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ecruteak to Route 38 failed: %s" % to_route_38.get("reason", ""),
+		}
+	for leg: Dictionary in [
+		{"step": "route_38_to_route_39", "direction": "west", "group": 1, "number": 13},
+		{"step": "route_39_to_olivine", "direction": "south", "group": 1, "number": 14},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	# OlivineCity's first scene is SCENE_OLIVINECITY_RIVAL_ENCOUNTER, and its
+	# coord event is the only thing that retires it. The scene ends on
+	# variablesprite plus LoadUsedSpritesGFX, so it also exercises the pair.
+	var rival: Dictionary = _walk_cell_resolving(world, Vector2i(13, 12), save, random, data)
+	path.append({
+		"step": "olivine_city_rival",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": rival.get("encounters", []),
+		"map_scene": world.state.map_scene(1, 14),
+	})
+	if not bool(rival.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Olivine rival scene failed: %s" % rival.get("reason", ""),
+		}
+
+	var first_visit: Dictionary = _lighthouse_visit(world, save, random, data, path, "first")
+	if not bool(first_visit.get("ok", false)):
+		return first_visit
+
+	var to_cianwood: Dictionary = _cianwood_crossing(world, save, random, data, path, false)
+	if not bool(to_cianwood.get("ok", false)):
+		return to_cianwood
+
+	var pharmacy: Dictionary = _warp_walk(world, Vector2i(15, 47), save, random, data)
+	if not bool(pharmacy.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Cianwood Pharmacy door unreachable: %s" % pharmacy.get("reason", ""),
+		}
+	var _pharmacy_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	# CianwoodPharmacist hands the SecretPotion over only while
+	# EVENT_JASMINE_EXPLAINED_AMPHYS_SICKNESS is set; without it the same
+	# interaction opens MART_CIANWOOD instead.
+	var potion: Dictionary = _talk_to(
+		world, Vector2i(2, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "cianwood_pharmacy_secretpotion",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": potion.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(potion.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "SecretPotion handoff failed: %s" % potion.get("reason", ""),
+		}
+	var leaving_pharmacy: Dictionary = _warp_step(world, 22, 3)
+	if not bool(leaving_pharmacy.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Cianwood Pharmacy exit warp failed"}
+	var _cianwood_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var back_to_olivine: Dictionary = _cianwood_crossing(world, save, random, data, path, true)
+	if not bool(back_to_olivine.get("ok", false)):
+		return back_to_olivine
+
+	var second_visit: Dictionary = _lighthouse_visit(world, save, random, data, path, "cure")
+	if not bool(second_visit.get("ok", false)):
+		return second_visit
+
+	world.set_party_summary(save.party.size(), false)
+	var gym: Dictionary = _warp_walk(world, Vector2i(10, 11), save, random, data)
+	if not bool(gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Olivine Gym door unreachable: %s" % gym.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	var jasmine: Dictionary = _talk_to(
+		world, Vector2i(5, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "olivine_gym_jasmine",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"run": jasmine.get("run", {}),
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(jasmine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Jasmine failed: %s" % jasmine.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## The lighthouse floors reached by ladder on the way up and by hole on the way
+## down, from Olivine City's door back to it. [param phase] is "first" for
+## Jasmine's SecretPotion errand and "cure" for the visit that carries it.
+##
+## The climb is not the obvious one: 4F's ladder at (3,5) reaches the half of 5F
+## that cannot see the 6F stairs at (9,15), so the route drops back to 3F
+## through the hole at 4F (9,3) and climbs the other shaft.
+func _lighthouse_visit(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	phase: String,
+) -> Dictionary:
+	var door: Dictionary = _warp_walk(world, Vector2i(29, 27), save, random, data)
+	if not bool(door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Olivine Lighthouse door unreachable: %s" % door.get("reason", ""),
+		}
+	var _entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+
+	var climb: Dictionary = _lighthouse_shaft(world, save, random, data, [
+		Vector2i(3, 11), Vector2i(5, 3), Vector2i(13, 3), Vector2i(9, 3),
+		Vector2i(9, 5), Vector2i(9, 7), Vector2i(9, 15),
+	])
+	if not bool(climb.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "lighthouse climb (%s) failed: %s" % [phase, climb.get("reason", "")],
+		}
+
+	# OlivineLighthouseJasmine answers checkitem SECRETPOTION first, so the same
+	# interaction explains Amphy's sickness on the first visit and cures it on
+	# the second. The cure runs FadeOutToWhite and FadeInFromWhite either side of
+	# the Ampharos cry.
+	var jasmine: Dictionary = _talk_to(
+		world, Vector2i(8, 9), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "olivine_lighthouse_jasmine_%s" % phase,
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"floors": climb.get("floors", []),
+		"run": jasmine.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(jasmine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "lighthouse Jasmine (%s) failed: %s" % [phase, jasmine.get("reason", "")],
+		}
+
+	var descent: Dictionary = _lighthouse_shaft(world, save, random, data, [
+		Vector2i(16, 5), Vector2i(16, 7), Vector2i(16, 9), Vector2i(16, 11),
+		Vector2i(16, 13), Vector2i(10, 17),
+	])
+	if not bool(descent.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "lighthouse descent (%s) failed: %s" % [phase, descent.get("reason", "")],
+		}
+	return {"ok": true}
+
+
+## Walks each cell in [param cells] on the floor it belongs to and takes the
+## warp there, draining the arrival callbacks between floors.
+func _lighthouse_shaft(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	cells: Array,
+) -> Dictionary:
+	var floors: Array = []
+	for cell: Vector2i in cells:
+		var taken: Dictionary = _warp_walk(world, cell, save, random, data)
+		if not bool(taken.get("ok", false)):
+			return {
+				"ok": false, "floors": floors,
+				"reason": "warp at %s unreachable: %s" % [cell, taken.get("reason", "")],
+			}
+		var _entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		floors.append(_map_value(world))
+	return {"ok": true, "floors": floors}
+
+
+## Olivine City to Cianwood City and back. Only the Route 40 and Route 41 legs
+## are surfed: Olivine reaches Route 40 on foot, since the two maps meet on
+## Olivine's western beach, and Route 40's south edge is the first water the
+## route cannot walk around.
+func _cianwood_crossing(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	returning: bool,
+) -> Dictionary:
+	var label: String = "return" if returning else "outbound"
+	# Route 40 (12,13) and Cianwood (27,41) are the two shores this leg uses: each
+	# is a plain floor cell whose neighbour in `facing` is COLL_WATER, and neither
+	# carries one of the SMASHABLE_ROCK objects Route 40 puts on its beach.
+	var legs: Array = [
+		{"step": "olivine_to_route_40", "direction": "west", "group": 22, "number": 1,
+			"water": false},
+		{"step": "route_40_to_route_41", "direction": "south", "group": 22, "number": 2,
+			"water": true, "surf": Vector2i(12, 13), "facing": Gen2WorldSprite.FACING_DOWN},
+		{"step": "route_41_to_cianwood", "direction": "west", "group": 22, "number": 3,
+			"water": true, "ashore": Vector2i(27, 41)},
+	]
+	if returning:
+		legs = [
+			{"step": "cianwood_to_route_41", "direction": "east", "group": 22, "number": 2,
+				"water": true, "surf": Vector2i(27, 41), "facing": Gen2WorldSprite.FACING_RIGHT},
+			{"step": "route_41_to_route_40", "direction": "north", "group": 22, "number": 1,
+				"water": true, "ashore": Vector2i(12, 13)},
+			{"step": "route_40_to_olivine", "direction": "east", "group": 1, "number": 14,
+				"water": false},
+		]
+	for leg: Dictionary in legs:
+		if leg.has("surf"):
+			var entered: Dictionary = _surf_at(
+				world, leg["surf"], int(leg["facing"]), save, random, data
+			)
+			if not bool(entered.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "%s surf entry (%s) failed: %s" % [
+						leg["step"], label, entered.get("reason", ""),
+					],
+				}
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data, bool(leg["water"])
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		var surfing: String = String(world.movement_mode)
+		var ashore: Dictionary = {}
+		if bool(walked.get("ok", false)) and leg.has("ashore"):
+			# The far side of a surfed connection is still water. One water-only
+			# walk to a named shore cell ends on .ExitWater, and every walk after
+			# it is an ordinary one.
+			ashore = _walk_cell_resolving(world, leg["ashore"], save, random, data, true)
+		path.append({
+			"step": "%s_%s" % [leg["step"], label],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"movement_mode_on_arrival": surfing,
+			"movement_mode": String(world.movement_mode),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s (%s) failed: %s" % [leg["step"], label, walked.get("reason", "")],
+			}
+		if not ashore.is_empty() and not bool(ashore.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s landfall (%s) failed: %s" % [
+					leg["step"], label, ashore.get("reason", ""),
+				],
+			}
+	return {"ok": true}
+
+
 ## Walks to a gate door, takes it, and takes the gate's own warp to
 ## [param group]/[param number] on the far side.
 func _gate_leg(
@@ -1680,6 +2074,31 @@ func _cut_at(
 	var applied: Dictionary = world.complete_cut()
 	if not bool(applied.get("ok", false)):
 		return {"ok": false, "reason": "cut failed: %s" % applied.get("reason", "")}
+	return {"ok": true, "cell": applied.get("cell", approach)}
+
+
+## Enters the water the given cell faces, the way _cut_at() cuts: request then
+## commit, since UsedSurfScript reaches SurfStartStep only after its waitbutton.
+## The commit spends the source's single slow_step, so the player ends one cell
+## into the water already surfing.
+func _surf_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var request: Dictionary = world.surf_request()
+	if not bool(request.get("ok", false)):
+		return {"ok": false, "reason": "surf refused: %s" % request.get("reason", "")}
+	var applied: Dictionary = world.complete_surf()
+	if not bool(applied.get("ok", false)):
+		return {"ok": false, "reason": "surf failed: %s" % applied.get("reason", "")}
 	return {"ok": true, "cell": applied.get("cell", approach)}
 
 
@@ -1970,7 +2389,8 @@ func _drain_story(
 
 
 func _walk_to_connection(
-	world: Gen2WorldAPI, direction_name: String, target_group: int, target_number: int
+	world: Gen2WorldAPI, direction_name: String, target_group: int, target_number: int,
+	water_only: bool = false,
 ) -> Dictionary:
 	if world == null or world.current_map == null:
 		return {"ok": false, "reason": "missing world"}
@@ -1994,7 +2414,7 @@ func _walk_to_connection(
 			edge = cell
 			break
 		for step: Vector2i in directions:
-			var next: Vector2i = _reachable_step(world, cell, step)
+			var next: Vector2i = _reachable_step(world, cell, step, Vector2i(-1, -1), water_only)
 			if next.x < 0 or previous.has(next):
 				continue
 			previous[next] = {"cell": cell, "direction": step}
@@ -2029,11 +2449,21 @@ func _walk_to_connection(
 ## Returns (-1, -1) when neither applies, so a BFS frontier can use it as one
 ## reachability test. Replaying the recorded direction through
 ## world.move_result() performs the same hop, so no separate replay step exists.
+##
+## [param water_only] is what a surfing plan needs. can_walk_to() lets a surfing
+## player step onto land, and that step is .ExitWater, so a plan drawn once and
+## replayed would stop surfing partway and see every later water step refused.
+## Restricting the frontier to WATER_TILE keeps the whole plan legal in the mode
+## it was drawn in; the caller enters and leaves the water explicitly.
 func _reachable_step(
 	world: Gen2WorldAPI, cell: Vector2i, step: Vector2i,
 	warp_target: Vector2i = Vector2i(-1, -1),
+	water_only: bool = false,
 ) -> Vector2i:
 	var direct: Vector2i = cell + step
+	if water_only \
+		and world.collision_permission_at(direct) != Gen2WorldCollision.WATER_TILE:
+		return Vector2i(-1, -1)
 	# Stepping onto a warp tile takes it, so a walked route can only cross one
 	# by leaving the map there. The BFS treats it as a wall unless it is the
 	# cell it was asked to reach, which is what makes Ecruteak Gym's thirty
@@ -2091,7 +2521,12 @@ func _named_items(data: GameData, items: Dictionary) -> Dictionary:
 	return named
 
 
-func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
+## [param water_only] keeps a surfing plan on the water, the way
+## _walk_to_connection() does, except that [param target] is always allowed: a
+## landfall names one land cell and the step onto it is .ExitWater.
+func _walk_to_story_cell(
+	world: Gen2WorldAPI, target: Vector2i, water_only: bool = false
+) -> Dictionary:
 	if world == null or world.current_map == null:
 		return {"ok": false, "reason": "missing world"}
 	if world.player_cell == target:
@@ -2106,7 +2541,9 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 			found = true
 			break
 		for direction: Vector2i in directions:
-			var next: Vector2i = _reachable_step(world, cell, direction, target)
+			var next: Vector2i = _reachable_step(
+				world, cell, direction, target, water_only and cell + direction != target
+			)
 			if next.x < 0 or previous.has(next):
 				continue
 			previous[next] = {"cell": cell, "direction": direction}
@@ -2165,11 +2602,12 @@ func _walk_connection_resolving(
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
+	water_only: bool = false,
 ) -> Dictionary:
 	var runs: Array = []
-	for _attempt: int in 8:
+	for _attempt: int in WALK_RESOLVE_ATTEMPTS:
 		var walked: Dictionary = _walk_to_connection(
-			world, direction_name, target_group, target_number
+			world, direction_name, target_group, target_number, water_only
 		)
 		if bool(walked.get("ok", false)):
 			walked["encounters"] = runs
@@ -2201,10 +2639,11 @@ func _walk_cell_resolving(
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
+	water_only: bool = false,
 ) -> Dictionary:
 	var runs: Array = []
-	for _attempt: int in 8:
-		var walked: Dictionary = _walk_to_story_cell(world, target)
+	for _attempt: int in WALK_RESOLVE_ATTEMPTS:
+		var walked: Dictionary = _walk_to_story_cell(world, target, water_only)
 		if not bool(walked.get("ok", false)):
 			walked["encounters"] = runs
 			return walked

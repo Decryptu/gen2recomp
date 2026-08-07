@@ -51,7 +51,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Zephyr Badge, then on through the Togepi egg, Route 32, Union Cave, Route 33,
 > Kurt and Slowpoke Well to the Hive Badge, and through Ilex Forest's Farfetch'd
 > hunt, HM01 Cut, Route 34 and Whitney to the Plain Badge, then the SquirtBottle
-> errand, Sudowoodo, the Burned Tower beasts and Morty to the Fog Badge.
+> errand, Sudowoodo, the Burned Tower beasts and Morty to the Fog Badge, and on
+> through the Dance Theatre's Kimono Girls for HM03 Surf, Routes 38 and 39, the
+> Olivine Lighthouse, Routes 40 and 41 surfed to Cianwood for the SecretPotion,
+> and Jasmine to the Mineral Badge.
 > Missing: full story state, dex, trainer card, options, the remaining
 > special-call branches and story-driven permanent contacts.
 
@@ -194,7 +197,7 @@ Headless tools, all against a real imported cache:
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending at the Zephyr Badge
+# the full walked route, ending at the Mineral Badge
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
