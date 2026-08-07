@@ -13,6 +13,14 @@ extends SceneTree
 ## `story` drives the imported first-floor Mom event and the New Bark entry
 ## event through explicit source inputs.
 
+## A ring is 30 lead frames plus two 60-frame rings; the budget only has to
+## outlast that.
+const PHONE_RING_FRAME_BUDGET: int = 256
+
+## SPECIALCALL_ASSISTANT (constants/phone_constants.asm), armed by beating
+## Falkner and answered by ElmPhoneCallerScript's .assistant branch.
+const SPECIALCALL_ASSISTANT: int = 3
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -111,6 +119,24 @@ func _story_path(data: GameData) -> Dictionary:
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
 	var path: Array = []
+
+	# The bedroom's MAPCALLBACK_NEWMAP is what runs InitializeEventsScript
+	# (maps/PlayersHouse2F.asm's PlayersHouse2FInitializeRoomCallback), which
+	# sets the story's initial event flags. Skipping it left the walked route on
+	# a different flag baseline from a real new game, where world_screen.gd
+	# dispatches the same callbacks on the spawn map.
+	var bedroom_entry: Array = world.dispatch_map_entry()
+	var bedroom_run: Dictionary = _drain_story(world, bedroom_entry, save, random, data, true)
+	path.append({
+		"step": "players_house_2f_initial_events",
+		"map": _map_value(world),
+		"run": bedroom_run,
+		"event_flag_count": world.state.event_flags().size(),
+		"engine_flags": world.state.engine_flags(),
+	})
+	if not bool(bedroom_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "initial event callbacks did not finish"}
+
 	var stair_warp: Dictionary = _warp_to(world.current_map, 24, 6)
 	if stair_warp.is_empty():
 		return {"ok": false, "reason": "missing home stair warp"}
@@ -693,6 +719,10 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(falkner_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Falkner event did not finish"}
 
+	var hive: Dictionary = _hive_badge_path(world, save, random, data, path)
+	if not bool(hive.get("ok", false)):
+		return hive
+
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
 		party_summary.append({
@@ -710,11 +740,350 @@ func _story_path(data: GameData) -> Dictionary:
 	}
 
 
+## Violet City to the Hive Badge, on the same world, state and save. Three
+## gates own this leg and each opens the next: the Togepi egg retires Route 32's
+## blocking coord event, Kurt hides the Rocket standing on the Slowpoke Well
+## corridor, and clearing the well hides the Rocket standing on the Azalea gym
+## door. Appends to [param path] and answers only ok or the failure.
+func _hive_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 10, 5)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Gym exit warp failed"}
+	var after_gym: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	path.append({
+		"step": "violet_city_after_falkner",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": after_gym,
+		"pending_special_call": world.state.pending_special_phone_call(),
+	})
+	if not bool(after_gym.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Violet City re-entry did not finish"}
+	if world.state.pending_special_phone_call() != SPECIALCALL_ASSISTANT:
+		return {"ok": false, "path": path, "reason": "Falkner did not arm the assistant call"}
+
+	# data/phone/special_calls.asm gives SPECIALCALL_ASSISTANT the
+	# SpecialCallOnlyWhenOutside condition, so the call resolves on Violet City
+	# and not in the gym it was armed in. ElmPhoneCallerScript's .assistant
+	# branch is the only thing that clears
+	# EVENT_ELMS_AIDE_IN_VIOLET_POKEMON_CENTER, which InitializeEventsScript set.
+	var call_attempt: Dictionary = world.try_special_phone_call()
+	if not bool(call_attempt.get("attempted", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "assistant call not attempted: %s" % call_attempt.get("reason", ""),
+		}
+	var call_run: Dictionary = _drain_story(
+		world, call_attempt.get("results", []), save, random, data, true
+	)
+	path.append({
+		"step": "elm_assistant_phone_call",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"call_id": int(call_attempt.get("call_id", 0)),
+		"run": call_run,
+		"pending_special_call": world.state.pending_special_phone_call(),
+	})
+	if not bool(call_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "assistant call did not finish"}
+
+	# The aide stands at (4,3); (4,4) is the only walkable cell facing him.
+	var entering_pokecenter: Dictionary = _warp_step(world, 10, 10)
+	if not bool(entering_pokecenter.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Pokemon Center warp failed"}
+	var pokecenter_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var walked_to_aide: Dictionary = _walk_cell_resolving(world, Vector2i(4, 4), save, random, data)
+	if not bool(walked_to_aide.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Elm's aide unreachable: %s" % walked_to_aide.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var egg_run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "violet_pokecenter_togepi_egg",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": pokecenter_entry.get("statuses", []),
+		"run": egg_run,
+		"party": _party_species(save),
+		"route_32_scene": world.state.map_scene(10, 1),
+	})
+	if not bool(egg_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Togepi egg event did not finish"}
+	if not _party_has_egg(save):
+		return {"ok": false, "path": path, "reason": "the Togepi egg did not reach the party"}
+	world.set_party_summary(save.party.size(), false)
+
+	var leaving_pokecenter: Dictionary = _warp_step(world, 10, 5)
+	if not bool(leaving_pokecenter.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet Pokemon Center exit warp failed"}
+	var route32_leg: Dictionary = _walk_connection_resolving(
+		world, "south", 10, 1, save, random, data
+	)
+	var route32_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "violet_city_to_route_32",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": route32_leg.get("encounters", []),
+		"run": route32_entry,
+	})
+	if not bool(route32_leg.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Violet City to Route 32 failed: %s" % route32_leg.get("reason", ""),
+		}
+
+	# Route 32's south edge does connect to Route 33, but that lands in the
+	# plaza north of Route 33's wall row, whose only exit is the Union Cave
+	# warp. The cartridge's own path is Route 32 (6,79) into Union Cave 1F and
+	# out again at (17,31), so the leg walks the warps, not the connection.
+	var union_cave: Dictionary = _warp_walk(world, Vector2i(6, 79), save, random, data)
+	if not bool(union_cave.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 32 to Union Cave failed: %s" % union_cave.get("reason", ""),
+		}
+	var union_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_32_to_union_cave",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": union_cave.get("encounters", []),
+		"run": union_entry,
+	})
+
+	var route33: Dictionary = _warp_walk(world, Vector2i(17, 31), save, random, data)
+	if not bool(route33.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Union Cave to Route 33 failed: %s" % route33.get("reason", ""),
+		}
+	var route33_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "union_cave_to_route_33",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": route33.get("encounters", []),
+		"run": route33_entry,
+	})
+
+	var azalea_leg: Dictionary = _walk_connection_resolving(
+		world, "west", 8, 7, save, random, data
+	)
+	var azalea_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_33_to_azalea",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": azalea_leg.get("encounters", []),
+		"run": azalea_entry,
+	})
+	if not bool(azalea_leg.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 33 to Azalea failed: %s" % azalea_leg.get("reason", ""),
+		}
+
+	# Kurt1 stands at (3,2); facing him from (3,3) takes his .RunAround branch,
+	# and the script sets EVENT_AZALEA_TOWN_SLOWPOKETAIL_ROCKET, which hides the
+	# Rocket standing on the well corridor at Azalea (31,9).
+	var entering_kurt: Dictionary = _warp_step(world, 8, 4)
+	if not bool(entering_kurt.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house warp failed"}
+	var kurt_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	var walked_to_kurt: Dictionary = _walk_cell_resolving(world, Vector2i(3, 3), save, random, data)
+	if not bool(walked_to_kurt.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Kurt unreachable: %s" % walked_to_kurt.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var kurt_run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "azalea_kurts_house",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": kurt_entry.get("statuses", []),
+		"run": kurt_run,
+	})
+	if not bool(kurt_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Kurt event did not finish"}
+
+	var leaving_kurt: Dictionary = _warp_step(world, 8, 7)
+	if not bool(leaving_kurt.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house exit warp failed"}
+	var _kurt_exit_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var well: Dictionary = _warp_walk(world, Vector2i(31, 7), save, random, data)
+	if not bool(well.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Slowpoke Well entrance blocked: %s" % well.get("reason", ""),
+		}
+	var well_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+
+	# TrainerGruntM1 stands at (5,2) facing down. His post-battle script is the
+	# clear sequence itself: it disappears all four Rockets, which share
+	# EVENT_SLOWPOKE_WELL_ROCKETS, then heals the party and warps to Kurt's
+	# house, so the map after this step is 8/4 rather than the well.
+	var well_walk: Dictionary = _walk_cell_resolving(world, Vector2i(5, 3), save, random, data)
+	# The clear sequence ends in `warp KURTS_HOUSE, 3, 3`, so the approach is
+	# finished by the script rather than by arriving: success is being on 8/4.
+	var cleared: bool = world.current_map != null \
+		and world.current_map.group == 8 and world.current_map.number == 4
+	path.append({
+		"step": "slowpoke_well_cleared",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": well_entry.get("statuses", []),
+		"encounters": well_walk.get("encounters", []),
+		"party_hp_after": _party_hp(save),
+		"cleared": cleared,
+	})
+	if not cleared:
+		return {
+			"ok": false, "path": path,
+			"reason": "Slowpoke Well clear failed: %s" % well_walk.get("reason", ""),
+		}
+	var after_well: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	path.append({
+		"step": "kurts_house_after_the_well",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": after_well,
+	})
+
+	var back_to_azalea: Dictionary = _warp_step(world, 8, 7)
+	if not bool(back_to_azalea.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house exit after the well failed"}
+	var _azalea_after_well: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var gym_door: Dictionary = _warp_walk(world, Vector2i(10, 15), save, random, data)
+	if not bool(gym_door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Azalea gym door blocked: %s" % gym_door.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+
+	# Bugsy is object 0 at (5,7); the gym's Bug Catchers and Twins hold sight
+	# lines across the approach, so they are fought on the way exactly as they
+	# are on the cartridge.
+	var walked_to_bugsy: Dictionary = _walk_cell_resolving(
+		world, Vector2i(5, 8), save, random, data
+	)
+	path.append({
+		"step": "azalea_gym_trainers",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"encounters": walked_to_bugsy.get("encounters", []),
+	})
+	if not bool(walked_to_bugsy.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Bugsy approach failed: %s" % walked_to_bugsy.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var bugsy_run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "azalea_gym_bugsy",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": bugsy_run,
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+	})
+	if not bool(bugsy_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Bugsy event did not finish"}
+	return {"ok": true}
+
+
+## Places the player on this map's warp to [param group]/[param number] and
+## takes it. Used where the destination warp is the step, not the walk.
+func _warp_step(world: Gen2WorldAPI, group: int, number: int) -> Dictionary:
+	var warp: Dictionary = _warp_to(world.current_map, group, number)
+	if warp.is_empty():
+		return {"ok": false, "reason": "missing warp to %d/%d" % [group, number]}
+	world.player_cell = Vector2i(warp["x"], warp["y"])
+	return world.try_warp()
+
+
+## Walks to a warp cell, resolving whatever answers on the way, and takes it.
+func _warp_walk(
+	world: Gen2WorldAPI,
+	cell: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	var transition: Dictionary = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {
+			"ok": false,
+			"reason": "warp at %s did not fire" % cell,
+			"encounters": walked.get("encounters", []),
+		}
+	walked["transition"] = transition
+	return walked
+
+
+func _party_species(save: Gen2SaveData) -> Array:
+	var values: Array = []
+	for mon: Gen2SaveMon in save.party:
+		values.append({"species": mon.species, "level": mon.level, "egg": mon.is_egg})
+	return values
+
+
+func _party_has_egg(save: Gen2SaveData) -> bool:
+	for mon: Gen2SaveMon in save.party:
+		if mon.is_egg:
+			return true
+	return false
+
+
 func _party_hp(save: Gen2SaveData) -> Array:
 	var values: Array = []
 	for mon: Gen2SaveMon in save.party:
 		values.append(int(mon.hp))
 	return values
+
+
+## Spends hardware frames until the source two-ring sequence and any
+## special-call lead have elapsed, and returns the imported phone script's
+## first results. Gen2WorldPhoneRing answers nothing before that, so a caller
+## that only drains script input would see the call as finished state.
+func _drain_phone_ring(world: Gen2WorldAPI) -> Array:
+	for _frame: int in PHONE_RING_FRAME_BUDGET:
+		if not world.phone_ring_active():
+			return []
+		var results: Array = world.advance_phone_ring(Gen2WorldPhoneRing.FRAME_SECONDS)
+		if not results.is_empty():
+			return results
+	return []
 
 
 ## Runs a dispatched event list to its terminal state. [param require_events]
@@ -758,9 +1127,16 @@ func _drain_story(
 	for _step: int in 256:
 		var input: Dictionary = world.pending_script_input()
 		var input_type: StringName = StringName(input.get("type", &""))
+		if world.phone_ring_active():
+			input_type = &"phone_ring"
 		if pending_trace.size() < 24:
 			pending_trace.append(String(input_type))
-		if input_type in [&"text", &"button"]:
+		if input_type == &"phone_ring":
+			results = _drain_phone_ring(world)
+			if results.is_empty():
+				last_reason = "phone ring did not finish"
+				break
+		elif input_type in [&"text", &"button"]:
 			results = world.run_event_queue(true)
 		elif input_type in [&"choice", &"menu"]:
 			results = world.choose_script_input(0)
@@ -970,7 +1346,14 @@ func _walk_to_connection(
 ## world.move_result() performs the same hop, so no separate replay step exists.
 func _reachable_step(world: Gen2WorldAPI, cell: Vector2i, step: Vector2i) -> Vector2i:
 	var direct: Vector2i = cell + step
-	if world.can_walk_to(direct):
+	# move_result() calls can_walk_to() with the direction, which reads the
+	# leave/enter wall mask at the player's own cell; from a BFS frontier that
+	# has to be anchored on the frontier cell instead, or the plan crosses walls
+	# the replayed walk then refuses. Route 32's UP_WALL row at y=72 is the
+	# first cell on the walked route where the two disagree.
+	var face: int = Gen2WorldCollision.face_mask_for_direction(step)
+	var walled: bool = face != 0 and (world.tile_permissions_at(cell) & face) != 0
+	if not walled and world.can_walk_to(direct):
 		return direct
 	if world.movement_mode == Gen2WorldAPI.MOVEMENT_SURF:
 		return Vector2i(-1, -1)
@@ -1044,7 +1427,12 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 	for direction: Vector2i in steps:
 		var moved: Dictionary = world.move_result(direction)
 		if not bool(moved.get("ok", false)):
-			return {"ok": false, "reason": "walk step failed", "step": direction}
+			return {
+				"ok": false,
+				"reason": "walk step %s from %s refused: %s" % [
+					direction, _cell_value(world), moved.get("reason", ""),
+				],
+			}
 		events = _dispatch_after_step(world)
 		if not events.is_empty():
 			break

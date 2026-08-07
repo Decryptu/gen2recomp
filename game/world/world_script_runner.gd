@@ -867,7 +867,23 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				"bank": bank, "address": int(command.get("loss_address", 0)),
 			}
 		0x64:
-			_emit_runtime_event(&"trainer_talk_after_requested", {})
+			## Script_scripttalkafter jumps to wScriptAfterPointer in
+			## wSeenTrainerBank, which is the map's own script bank here. A
+			## record without one leaves the script to end, since the source
+			## always writes the pointer the trainer macro carries.
+			var after_trainer: Variant = _request.get("trainer", {})
+			var after_address: int = int((after_trainer as Dictionary).get("after_script", 0)) \
+				if after_trainer is Dictionary else 0
+			_emit_runtime_event(&"trainer_talk_after_requested", {
+				"bank": bank, "address": after_address,
+			})
+			if after_address > 0:
+				_frames.clear()
+				if not _push_frame(bank, after_address):
+					return {
+						"ok": false, "reason": &"missing_trainer_after_script",
+						"bank": bank, "address": after_address,
+					}
 		0x65:
 			if _has_staged_just_battled or (state != null and state.just_battled()):
 				_frames.clear()
@@ -1444,9 +1460,11 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
-		48, 50, 51, 157:
+		46, 48, 50, 51, 157:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
+			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
+			## `BattleTowerFade` sits at 47, so it needs no profile split.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
@@ -2054,6 +2072,13 @@ func _trainer_intro_script(trainer: Dictionary) -> PackedByteArray:
 		raw.call(Gen2WorldScript.GOLD_STARTBATTLE),
 		raw.call(Gen2WorldScript.GOLD_RELOADMAPAFTERBATTLE),
 		raw.call(Gen2WorldScript.GOLD_TRAINERFLAGACTION), 1,
+		# StartBattleWithMapTrainerScript falls through into
+		# AlreadyBeatenTrainerScript's scripttalkafter, with
+		# wRunningTrainerBattleScript already set, so the after-battle script
+		# runs now and its own endifjustbattled is what usually ends it. A
+		# trainer that omits that command keeps going: Slowpoke Well's
+		# TrainerGruntM1 clears the well from there.
+		raw.call(Gen2WorldScript.GOLD_SCRIPTTALKAFTER),
 		raw.call(Gen2WorldScript.GOLD_END),
 	]
 	return PackedByteArray(bytes)

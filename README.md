@@ -48,8 +48,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >
 > The real-data story preview walks the Crystal route from Elm's lab through
 > Route 29, Cherrygrove, Route 30 and Mr. Pokémon's Mystery Egg event to the
-> Zephyr Badge. Missing: full story state, dex, trainer card, options, the
-> remaining special-call branches and story-driven permanent contacts.
+> Zephyr Badge, then on through the Togepi egg, Route 32, Union Cave, Route 33,
+> Kurt and Slowpoke Well to the Hive Badge. Missing: full story state, dex,
+> trainer card, options, the remaining special-call branches and story-driven
+> permanent contacts.
 
 ## Getting started
 

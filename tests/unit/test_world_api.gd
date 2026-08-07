@@ -968,6 +968,28 @@ func test_gold_profile_specials_normalize_onto_the_crystal_handlers() -> void:
 	RomCache.clear(gold_directory)
 
 
+func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
+	# Slowpoke Well's cleared script runs FadeOutToWhite before HealParty
+	# (maps/SlowpokeWellB1F.asm, TrainerGruntM1). It is index 46 in both pins,
+	# ahead of Crystal's inserted BattleTowerFade at 47, so the raw byte needs
+	# no profile mapping.
+	assert_eq(Gen2WorldScript.special_index(46, false), 46)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6A00"] = [Gen2WorldScript.SPECIAL, 46, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6A00,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(
+		int(_event_value(result["events"], &"presentation_special_applied", "special")),
+		46,
+		JSON.stringify(result),
+	)
+
+
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]
@@ -2598,6 +2620,61 @@ func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
 	assert_eq(after_battle[0]["status"], &"complete")
 	assert_eq(after_battle[0]["source"]["trainer_phase"], &"after")
 	assert_eq(after_battle[0]["source"]["script"], 0x6040)
+
+
+## StartBattleWithMapTrainerScript (engine/events/trainer_scripts.asm) falls
+## through into AlreadyBeatenTrainerScript's scripttalkafter with
+## wRunningTrainerBattleScript set, so the after-battle script runs at once and
+## its own endifjustbattled is what usually ends it. Slowpoke Well's
+## TrainerGruntM1 omits that command and clears the well from there.
+func test_a_beaten_trainer_runs_its_after_script_before_any_second_interaction() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6B00"] = [
+		Gen2WorldScript.SETEVENT, 0x11, 0x00, Gen2WorldScript.END,
+	]
+	scripts["48:6B10"] = [
+		0x66, # endifjustbattled, raw
+		Gen2WorldScript.SETEVENT, 0x12, 0x00, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+	for probe: Array in [[0x6B00, 0x11, true], [0x6B10, 0x12, false]]:
+		var world: Gen2WorldAPI = _world(Vector2i(5, 4))
+		var trainer: Gen2WorldObject = world.objects[0]
+		trainer.object_type = Gen2WorldObject.OBJECTTYPE_TRAINER
+		trainer.sight_range = 3
+		trainer.facing = Gen2WorldSprite.FACING_UP
+		trainer.trainer_data = {
+			"event_flag": 42,
+			"trainer_group": 1,
+			"trainer_id": 1,
+			"seen_text": {"bank": 48, "address": 0x7000},
+			"win_text": {"bank": 48, "address": 0x7000},
+			"loss_text": {"bank": 48, "address": 0x7000},
+			"after_script": int(probe[0]),
+		}
+		world.dispatch_sight_events()
+		world.complete_runtime_request({"ok": true, "audio_played": false})
+		var approach: Dictionary = (world.pending_runtime_request()["values"] as Dictionary)
+		world.start_trainer_approach(
+			int(approach["object_index"]), approach["direction"], int(approach["distance"])
+		)
+		world.advance_trainer_approach_step(0, Vector2i.UP)
+		world.finish_trainer_approach(0)
+		world.complete_runtime_request({
+			"ok": true, "object_index": 0, "path": [Vector2i.UP],
+		})
+		world.run_event_queue(true)
+		world.run_event_queue(true)
+		var complete: Array = world.complete_runtime_request({
+			"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+		})
+		assert_eq(complete[0]["status"], &"complete", JSON.stringify(complete))
+		assert_true(world.state.is_event_flag_active(42), "the beaten flag still commits")
+		assert_eq(
+			world.state.is_event_flag_active(int(probe[1])), bool(probe[2]),
+			"after script at %s" % probe[0],
+		)
 
 
 func test_catch_tutorial_uses_wild_setup_without_persistent_capture_changes() -> void:
