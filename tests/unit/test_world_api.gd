@@ -2080,6 +2080,36 @@ func test_script_requests_supply_the_live_player_facing_to_readvar() -> void:
 	assert_true(world.event_flag_active(22))
 
 
+## Every gym does `setflag` on its badge, then `readvar VAR_BADGES`, then
+## branches on the count in the same script (maps/MahoganyGym.asm's
+## MahoganyGymActivateRockets). The cartridge has no staging, so the read sees
+## the badge just awarded; counting committed flags answered one short and took
+## the wrong branch, which left Mahogany's east exit shut for the whole game.
+func test_readvar_badges_counts_a_badge_set_earlier_in_the_same_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:60A0"] = [
+		Gen2WorldScript.SETFLAG, Gen2WorldState.ENGINE_ZEPHYRBADGE, 0,
+		Gen2WorldScript.READVAR, 0x07,
+		Gen2WorldScript.IFEQUAL, 2, 0xB0, 0x60,
+		Gen2WorldScript.END,
+	]
+	scripts["48:60B0"] = [Gen2WorldScript.SETEVENT, 23, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	## One badge already committed, so the staged one has to make it two.
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.ENGINE_HIVEBADGE)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6), state)
+	world.current_map.events["coord_events"][0]["script"] = 0x60A0
+
+	var result: Array = world.dispatch_script_events()
+
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete")
+	assert_true(world.event_flag_active(23), "the two-badge branch was taken")
+	assert_eq(world.state.badge_count(), 2)
+
+
 func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6160"] = [

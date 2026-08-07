@@ -1420,7 +1420,7 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 		0x04: # VAR_TIMEOFDAY
 			_script_value = Gen2WorldClock.new(hour, 0, day).time_of_day()
 		0x07: # VAR_BADGES
-			_script_value = state.badge_count(_crystal_commands()) if state != null else 0
+			_script_value = _staged_badge_count()
 		0x0A: # VAR_HOUR
 			_script_value = hour
 		0x0B: # VAR_WEEKDAY
@@ -2150,6 +2150,25 @@ func _engine_flag_active(flag: int) -> bool:
 	if _staged_engine_flags.has(flag):
 		return bool(_staged_engine_flags[flag])
 	return state != null and state.is_engine_flag_active(flag)
+
+
+## _GetVarAction's .CountBadges, over staged flags rather than committed ones.
+##
+## The cartridge has no staging: `setflag` writes wBadges and the `readvar`
+## after it reads what was just written. Mahogany Gym is where that matters:
+## PryceScript sets ENGINE_GLACIERBADGE, reads VAR_BADGES and branches on 7 to
+## RadioTowerRocketsScript, which is what opens Mahogany's east exit. Counting
+## committed flags answered 6 there and took the Goldenrod branch instead.
+func _staged_badge_count() -> int:
+	var crystal: bool = _crystal_commands()
+	var count: int = 0
+	for flag: int in (
+		Gen2WorldState.BADGE_ENGINE_FLAGS if crystal
+		else Gen2WorldState.BADGE_ENGINE_FLAGS_GOLD_SILVER
+	):
+		if _engine_flag_active(flag):
+			count += 1
+	return count
 
 
 func _map_scene_value(map_group: int, map_number: int) -> int:
