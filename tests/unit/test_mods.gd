@@ -634,3 +634,57 @@ func test_following_a_refused_url_stores_nothing() -> void:
 	DirAccess.make_dir_recursive_absolute(ROOT)
 	assert_false(Gen2ModIndex.follow("http://mods.example.com/", store)["ok"])
 	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+
+func test_menu_entries_are_registered_per_menu_and_kept_in_order() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(host.menu_entries(Gen2ModHost.MENU_START), [])
+	assert_true(bool(host.register_menu_entry(
+		Gen2ModHost.MENU_START, &"first", {"label": "First"}
+	).get("ok", false)))
+	assert_true(bool(host.register_menu_entry(
+		Gen2ModHost.MENU_START, &"second", {"label": "Second"}
+	).get("ok", false)))
+	assert_true(bool(host.register_menu_entry(
+		Gen2ModHost.MENU_PACK_POCKET, &"relics",
+		{"label": "Relics", "pocket": Gen2ModHost.FIRST_MOD_POCKET}
+	).get("ok", false)))
+	var start: Array = host.menu_entries(Gen2ModHost.MENU_START)
+	assert_eq(start.size(), 2)
+	assert_eq(StringName(start[0]["kind"]), &"first")
+	assert_eq(StringName(start[1]["kind"]), &"second")
+	assert_eq(host.menu_entries(Gen2ModHost.MENU_PACK_POCKET).size(), 1)
+
+
+func test_a_menu_entry_is_refused_rather_than_silently_dropped() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		StringName(host.register_menu_entry(&"nowhere", &"x", {"label": "X"})["reason"]),
+		&"unknown_menu"
+	)
+	assert_eq(
+		StringName(host.register_menu_entry(Gen2ModHost.MENU_START, &"", {"label": "X"})["reason"]),
+		&"invalid_menu_entry"
+	)
+	assert_eq(
+		StringName(host.register_menu_entry(Gen2ModHost.MENU_START, &"x", {})["reason"]),
+		&"menu_entry_missing_label"
+	)
+	# Pocket numbers 1 to 4 are the cartridge's own, so a mod cannot claim one.
+	for pocket: int in [0, Gen2WorldPack.TYPE_ITEM, Gen2WorldPack.TYPE_TM_HM]:
+		assert_eq(
+			StringName(host.register_menu_entry(
+				Gen2ModHost.MENU_PACK_POCKET, &"p", {"label": "P", "pocket": pocket}
+			)["reason"]),
+			&"reserved_pocket", "pocket %d" % pocket
+		)
+	assert_true(bool(host.register_menu_entry(
+		Gen2ModHost.MENU_START, &"x", {"label": "X"}
+	).get("ok", false)))
+	# Two mods claiming the same id is the conflict a player would want named.
+	assert_eq(
+		StringName(host.register_menu_entry(
+			Gen2ModHost.MENU_START, &"x", {"label": "Other"}
+		)["reason"]),
+		&"duplicate_menu_entry"
+	)

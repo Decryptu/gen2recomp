@@ -281,10 +281,36 @@ What is still missing, in the order it blocks work:
 All three are presentation boundaries that do not exist yet; none of them
 changes the world's own data.
 
+## Adding a menu entry
+
+`register_menu_entry(menu, id, entry)` appends to a menu the game builds. The
+cartridge's own entries are never registered, so a mod can add but not reorder
+or remove them.
+
+| Menu | Where the entry lands | `entry` keys |
+|---|---|---|
+| `Gen2ModHost.MENU_START` | the start menu, immediately before EXIT | `label`, optional `handler: Callable` |
+| `Gen2ModHost.MENU_PACK_POCKET` | after the pack's four source pockets | `label`, `pocket` |
+
+```gdscript
+func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
+	host.register_menu_entry(Gen2ModHost.MENU_START, manifest.id, {
+		"label": "Atlas",
+		"handler": func() -> void: print("opened"),
+	})
+```
+
+A start-menu entry without a handler still appears, marked unavailable, which is
+what Pokedex, Player and Options already do. A pocket's number has to be at or
+above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
+BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
+claiming the same entry id is refused with `duplicate_menu_entry` rather than one
+silently winning.
+
 ## Not built yet
 
 Semver ranges and inter-mod dependencies, per-mod save data, hooks beyond the
-renderer, and `.zip`/`.pck` packs through
+renderer and menu entries, and `.zip`/`.pck` packs through
 `ProjectSettings.load_resource_pack()`. Evaluate
 [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) before
 expanding the loader itself.

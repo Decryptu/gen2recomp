@@ -127,3 +127,38 @@ func test_from_world_reads_party_count_and_engine_flags_off_the_live_world() -> 
 
 	assert_eq(_kinds(Gen2WorldStartMenu.from_world(null)), _kinds(Gen2WorldStartMenu.build(0, false, false)))
 	RomCache.clear(Fixture.directory())
+
+
+## The registry seam: a mod entry is spliced in ahead of EXIT, which stays last
+## because it is what closes the menu, and no source entry moves.
+func test_a_registered_entry_lands_before_exit() -> void:
+	Gen2ModHost.reset()
+	var called: Array = []
+	assert_true(bool(Gen2ModHost.instance().register_menu_entry(
+		Gen2ModHost.MENU_START, &"atlas",
+		{"label": "Atlas", "handler": func() -> void: called.append(true)}
+	).get("ok", false)))
+	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
+	assert_eq(_kinds(menu), [
+		Gen2WorldStartMenu.ITEM_PACK, Gen2WorldStartMenu.ITEM_PLAYER,
+		Gen2WorldStartMenu.ITEM_SAVE, Gen2WorldStartMenu.ITEM_OPTION,
+		&"atlas", Gen2WorldStartMenu.ITEM_EXIT,
+	])
+	var entry: Dictionary = menu.items()[4]
+	assert_eq(String(entry.get("label", "")), "Atlas")
+	assert_true(bool(entry.get("available", false)))
+	(entry["handler"] as Callable).call()
+	assert_eq(called.size(), 1)
+	Gen2ModHost.reset()
+
+
+## An entry with no handler still appears, marked unavailable, the way Pokedex,
+## Player and Options do.
+func test_a_registered_entry_without_a_handler_is_unavailable() -> void:
+	Gen2ModHost.reset()
+	Gen2ModHost.instance().register_menu_entry(
+		Gen2ModHost.MENU_START, &"atlas", {"label": "Atlas"}
+	)
+	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
+	assert_false(bool(menu.items()[4].get("available", false)))
+	Gen2ModHost.reset()

@@ -16,7 +16,11 @@ signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
 
-enum Mode { LIST, PACK, SAVE_CONFIRM }
+enum Mode { LIST, PACK, PACK_ITEM, PACK_TARGET, PACK_RESULT, SAVE_CONFIRM }
+
+## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
+const OAK_TEXT: String = "OAK: This isn't the time to use that!"
+const NO_MON_TEXT: String = "You don't have a #MON!"
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -36,6 +40,13 @@ var _menu: Gen2WorldStartMenu = null
 var _pack_pockets: Array = []
 var _pack_pocket_index: int = 0
 var _pack_cursor: int = 0
+var _pack_save: Gen2SaveData = null
+var _pack_persist: bool = true
+var _item_actions: Array = []
+var _item_cursor: int = 0
+var _target_cursor: int = 0
+var _pack_result: String = ""
+var _pack_result_ok: bool = false
 
 var _save_cursor: int = 0
 var _save_result_shown: bool = false
@@ -73,6 +84,18 @@ func open(world: Gen2WorldAPI, data: GameData, save_action: Callable, previous_c
 	if is_inside_tree() and _options != null:
 		_open_list_mode()
 	return true
+
+
+## The save the pack's USE applies to, and whether that write reaches disk.
+## Optional: without it the pack still lists items and refuses to use one, which
+## is what a screenshot tool driving an injected world gets.
+##
+## Passed rather than wrapped in a Callable the way `save_action` is, because
+## using an item is a Gen2WorldPartyHost transaction over this same save, not a
+## world-snapshot write only the world screen knows how to do.
+func set_party_context(save: Gen2SaveData, persist: bool = true) -> void:
+	_pack_save = save
+	_pack_persist = persist
 
 
 ## The list model's cursor, so a caller can carry it into the next open() the
@@ -116,6 +139,16 @@ func _move(direction: Vector2i) -> void:
 				_cycle_pocket(direction.x)
 			elif direction.y != 0:
 				_move_pack_cursor(direction.y)
+		Mode.PACK_ITEM:
+			if direction.y != 0 and not _item_actions.is_empty():
+				_item_cursor = wrapi(_item_cursor + signi(direction.y), 0, _item_actions.size())
+				_render_item_menu()
+		Mode.PACK_TARGET:
+			if direction.y != 0 and not _party_targets().is_empty():
+				_target_cursor = wrapi(
+					_target_cursor + signi(direction.y), 0, _party_targets().size()
+				)
+				_render_targets()
 		Mode.SAVE_CONFIRM:
 			if not _save_result_shown and (direction.x != 0 or direction.y != 0):
 				_save_cursor = 1 - _save_cursor
@@ -128,8 +161,13 @@ func _confirm() -> void:
 			_confirm_list()
 		Mode.PACK:
 			if not _current_pocket_items().is_empty():
-				_status.text = "Items cannot be used from the Pack yet."
-				_status.add_theme_color_override("font_color", MUTED)
+				_open_item_mode()
+		Mode.PACK_ITEM:
+			_confirm_item_action()
+		Mode.PACK_TARGET:
+			_use_selected_item(_target_cursor)
+		Mode.PACK_RESULT:
+			_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
 			_confirm_save()
 
@@ -140,6 +178,10 @@ func _cancel() -> void:
 			closed.emit()
 		Mode.PACK:
 			_open_list_mode()
+		Mode.PACK_ITEM, Mode.PACK_RESULT:
+			_open_pack_mode(false)
+		Mode.PACK_TARGET:
+			_open_item_mode()
 		Mode.SAVE_CONFIRM:
 			_open_list_mode()
 
@@ -160,6 +202,12 @@ func _confirm_list() -> void:
 			closed.emit()
 		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR:
 			action_chosen.emit(_menu.selected_kind())
+		_:
+			# A Gen2ModHost-registered entry. Its handler is what made it
+			# available at all, so this cannot reach an entry without one.
+			var handler: Variant = _menu.selected_item().get("handler", null)
+			if handler is Callable:
+				(handler as Callable).call()
 
 
 func _open_list_mode() -> void:
@@ -180,13 +228,19 @@ func _render_list() -> void:
 	)
 
 
-func _open_pack_mode() -> void:
+## [param reset] false keeps the pocket and cursor, which is what returning from
+## an item submenu does; the source restores each pocket's own saved cursor the
+## same way. The item list is always rebuilt, since a USE changed a quantity.
+func _open_pack_mode(reset: bool = true) -> void:
 	_mode = Mode.PACK
 	_pack_pockets = Gen2WorldPack.build(_data, _world.state) if _world != null else []
-	_pack_pocket_index = 0
-	_pack_cursor = 0
+	if reset:
+		_pack_pocket_index = 0
+		_pack_cursor = 0
+	_pack_pocket_index = clampi(_pack_pocket_index, 0, maxi(_pack_pockets.size() - 1, 0))
+	_pack_cursor = clampi(_pack_cursor, 0, maxi(_current_pocket_items().size() - 1, 0))
 	_status.text = ""
-	_footer.text = "Left/Right: pocket    Up/Down: move    Esc: back"
+	_footer.text = "Left/Right: pocket    Up/Down: move    Space/Enter: choose    Esc: back"
 	_render_pack()
 
 
@@ -227,6 +281,173 @@ func _render_pack() -> void:
 	_render_options(items, _pack_cursor, func(entry: Dictionary) -> String:
 		return "%s    x%d" % [entry.get("name", "UNKNOWN"), int(entry.get("quantity", 0))]
 	)
+
+
+func _selected_item() -> Dictionary:
+	var items: Array = _current_pocket_items()
+	if _pack_cursor < 0 or _pack_cursor >= items.size():
+		return {}
+	return items[_pack_cursor]
+
+
+## `.ItemBallsKey_LoadSubmenu` and `.TMHMPocketMenu` both open a submenu on the
+## selected item rather than acting on it directly.
+func _open_item_mode() -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	_mode = Mode.PACK_ITEM
+	_item_actions = Gen2WorldPack.item_submenu(_data, int(item.get("item", 0)))
+	_item_cursor = 0
+	_status.text = ""
+	_summary.text = String(item.get("name", ""))
+	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_render_item_menu()
+
+
+func _render_item_menu() -> void:
+	_title.text = "PACK"
+	_render_options(_item_actions, _item_cursor, func(entry: Dictionary) -> String:
+		var label: String = String(entry.get("label", ""))
+		return label if bool(entry.get("available", false)) else "%s (unavailable)" % label
+	)
+
+
+func _confirm_item_action() -> void:
+	if _item_cursor < 0 or _item_cursor >= _item_actions.size():
+		return
+	var entry: Dictionary = _item_actions[_item_cursor]
+	var action: StringName = StringName(entry.get("action", &""))
+	if action == Gen2WorldPack.ACTION_QUIT:
+		_open_pack_mode(false)
+		return
+	if not bool(entry.get("available", false)):
+		_status.text = "%s is not available yet." % String(entry.get("label", ""))
+		_status.add_theme_color_override("font_color", MUTED)
+		return
+	_confirm_use()
+
+
+## `UseItem`'s jumptable: `.Oak` refuses, `.Current` and `.Field` apply straight
+## away, and `.Party` asks which Pokemon first. `.Field`'s extra
+## `PACKSTATE_QUITRUNSCRIPT` on success has no counterpart yet, because no
+## `ITEMMENU_CLOSE` item has an effect here: Escape Rope and Dig need the spawn
+## warp, so every one of them reaches `.Oak`'s refusal instead.
+func _confirm_use() -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	match Gen2WorldPack.field_use_kind(_data, int(item.get("item", 0))):
+		Gen2WorldPack.ITEMMENU_PARTY:
+			if _party_targets().is_empty():
+				_show_pack_result(NO_MON_TEXT, false)
+				return
+			_open_target_mode()
+		Gen2WorldPack.ITEMMENU_CURRENT, Gen2WorldPack.ITEMMENU_CLOSE:
+			_use_selected_item(-1)
+		_:
+			_show_pack_result(OAK_TEXT, false)
+
+
+## `.Party`'s party list. Reads the same save the USE will be applied to, so a
+## screen without one offers no targets and answers `.NoPokemon`.
+func _party_targets() -> Array:
+	if _pack_save == null:
+		return []
+	var targets: Array = []
+	for member: Variant in _pack_save.party:
+		var mon: Gen2SaveMon = member as Gen2SaveMon
+		if mon == null:
+			continue
+		# Max HP is derived, not stored, the same way Gen2PartyScreen derives it.
+		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
+		targets.append({
+			"name": mon.nickname if not mon.nickname.is_empty() \
+				else String(_data.species(mon.species).get("name", "UNKNOWN")),
+			"hp": mon.hp,
+			"max_hp": battle_mon.max_hp() if battle_mon != null else 0,
+			"egg": mon.is_egg,
+		})
+	return targets
+
+
+func _open_target_mode() -> void:
+	_mode = Mode.PACK_TARGET
+	_target_cursor = clampi(_target_cursor, 0, maxi(_party_targets().size() - 1, 0))
+	_status.text = ""
+	_footer.text = "Up/Down: move    Space/Enter: use    Esc: back"
+	_render_targets()
+
+
+func _render_targets() -> void:
+	_title.text = "USE ON"
+	_summary.text = String(_selected_item().get("name", ""))
+	_render_options(_party_targets(), 0 if _party_targets().is_empty() else _target_cursor,
+		func(entry: Dictionary) -> String:
+			if bool(entry.get("egg", false)):
+				return "%s    EGG" % String(entry.get("name", ""))
+			return "%s    %d/%d HP" % [
+				String(entry.get("name", "")), int(entry.get("hp", 0)),
+				int(entry.get("max_hp", 0)),
+			]
+	)
+
+
+func _use_selected_item(party_index: int) -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	if _pack_save == null or _world == null:
+		_show_pack_result("No save is loaded.", false)
+		return
+	var number: int = int(item.get("item", 0))
+	var result: Dictionary = Gen2WorldPartyHost.use_item(
+		_world, _pack_save, number, party_index, _pack_persist
+	)
+	if not bool(result.get("ok", false)):
+		_show_pack_result(_use_refusal(StringName(result.get("reason", &""))), false)
+		return
+	_show_pack_result(_use_summary(item, result), true)
+
+
+## The source has no single "it worked" line: the effect routine prints its own.
+## These name what changed, from the values Gen2WorldPartyHost already returns.
+func _use_summary(item: Dictionary, result: Dictionary) -> String:
+	var name: String = String(item.get("name", "ITEM"))
+	if int(result.get("repel_steps", -1)) >= 0:
+		return "%s will repel weak Pokemon for %d steps." % [
+			name, int(result.get("repel_steps", 0)),
+		]
+	var healed: int = int(result.get("healed", 0))
+	if healed > 0:
+		return "%s restored %d HP." % [name, healed]
+	if int(result.get("status_cleared", 0)) != 0:
+		return "%s cured the status." % name
+	return "%s was used." % name
+
+
+func _use_refusal(reason: StringName) -> String:
+	match reason:
+		&"item_has_no_effect":
+			return "It won't have any effect."
+		&"insufficient_item_quantity":
+			return "You have none of those."
+	return "Can't use that here: %s" % String(reason)
+
+
+func _show_pack_result(message: String, ok: bool) -> void:
+	_mode = Mode.PACK_RESULT
+	_pack_result = message
+	_pack_result_ok = ok
+	_footer.text = "Space/Enter: continue"
+	_render_pack_result()
+
+
+func _render_pack_result() -> void:
+	_title.text = "PACK"
+	_status.text = _pack_result
+	_status.add_theme_color_override("font_color", SUCCESS if _pack_result_ok else MUTED)
+	_render_options(["Continue"], 0, func(entry: Variant) -> String: return str(entry))
 
 
 func _open_save_confirm_mode() -> void:

@@ -13,6 +13,9 @@ extends RefCounted
 ## omitted, keeping the list shape stable for whichever arrives first. QUIT never
 ## appears because its Bug Contest and link-mode gate is never true here.
 ##
+## Entries registered on `Gen2ModHost` are spliced in ahead of EXIT, so a mod can
+## add a screen without reordering or removing anything the cartridge shipped.
+##
 ## `STATICMENU_WRAP` is source flag data on `.MenuData`, so the cursor wraps at
 ## both ends like a cached cartridge menu.
 
@@ -33,6 +36,27 @@ const ITEM_SAVE: StringName = &"save"
 const ITEM_OPTION: StringName = &"option"
 const ITEM_EXIT: StringName = &"exit"
 
+## What `SetUpMenuItems` gates each source entry on. An empty gate is always
+## appended, matching the entries the source adds unconditionally.
+const GATE_POKEDEX: StringName = &"pokedex"
+const GATE_PARTY: StringName = &"party"
+const GATE_POKEGEAR: StringName = &"pokegear"
+
+## `SetUpMenuItems` in source order, as data rather than a run of appends, so the
+## host's registered entries can be spliced in without the order becoming a
+## question. EXIT stays last: it is what closes the menu, and the source never
+## puts anything after it.
+const SOURCE_ENTRIES: Array[Dictionary] = [
+	{"kind": ITEM_POKEDEX, "label": "Pokedex", "available": false, "gate": GATE_POKEDEX},
+	{"kind": ITEM_POKEMON, "label": "Pokemon", "available": true, "gate": GATE_PARTY},
+	{"kind": ITEM_PACK, "label": "Pack", "available": true, "gate": &""},
+	{"kind": ITEM_POKEGEAR, "label": "Pokegear", "available": true, "gate": GATE_POKEGEAR},
+	{"kind": ITEM_PLAYER, "label": "Player", "available": false, "gate": &""},
+	{"kind": ITEM_SAVE, "label": "Save", "available": true, "gate": &""},
+	{"kind": ITEM_OPTION, "label": "Options", "available": false, "gate": &""},
+	{"kind": ITEM_EXIT, "label": "Exit", "available": true, "gate": &""},
+]
+
 var cursor: int = 0
 var _items: Array = []
 
@@ -50,18 +74,21 @@ static func build(
 	previous_cursor: int = 0,
 ) -> Gen2WorldStartMenu:
 	var menu := Gen2WorldStartMenu.new()
+	var passes: Dictionary = {
+		GATE_POKEDEX: pokedex_obtained,
+		GATE_PARTY: party_count > 0,
+		GATE_POKEGEAR: pokegear_obtained,
+	}
 	var items: Array = []
-	if pokedex_obtained:
-		items.append(_entry(ITEM_POKEDEX, "Pokedex", false))
-	if party_count > 0:
-		items.append(_entry(ITEM_POKEMON, "Pokemon", true))
-	items.append(_entry(ITEM_PACK, "Pack", true))
-	if pokegear_obtained:
-		items.append(_entry(ITEM_POKEGEAR, "Pokegear", true))
-	items.append(_entry(ITEM_PLAYER, "Player", false))
-	items.append(_entry(ITEM_SAVE, "Save", true))
-	items.append(_entry(ITEM_OPTION, "Options", false))
-	items.append(_entry(ITEM_EXIT, "Exit", true))
+	for entry: Dictionary in SOURCE_ENTRIES:
+		var gate: StringName = StringName(entry.get("gate", &""))
+		if not String(gate).is_empty() and not bool(passes.get(gate, false)):
+			continue
+		if entry["kind"] == ITEM_EXIT:
+			items.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
+		items.append(_entry(
+			StringName(entry["kind"]), String(entry["label"]), bool(entry["available"])
+		))
 	menu._items = items
 	menu.cursor = clampi(previous_cursor, 0, maxi(items.size() - 1, 0))
 	return menu

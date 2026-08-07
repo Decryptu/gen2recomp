@@ -8,6 +8,7 @@ extends RefCounted
 ## the candidate after both sides have succeeded. The six-party limit is
 ## deliberate until the save model has a real PC-box owner.
 
+const ITEM_POTION: int = 0x12
 const ITEM_REVIVE: int = 0x27
 const ITEM_MAX_REVIVE: int = 0x28
 const ITEM_REPEL: int = 0x14
