@@ -50,6 +50,22 @@ skipped. One broken mod does not stop the others and does not stop the game.
 `user://mods/` and press `V` in the overworld. It reads the same collision,
 block and palette data the 2D view reads and extrudes geometry from it.
 
+## Where `user://mods/` is
+
+Mods load the same way in an exported build as in the editor: the entry script
+is plain GDScript read at runtime, even though the game's own scripts ship as
+binary tokens.
+
+| Platform | Path | Reachable by the player |
+|---|---|---|
+| Linux, macOS, Windows | the platform's `app_userdata/gen2recomp/mods` | Yes |
+| iOS | the app's `Documents/mods` | Yes: the export sets `UIFileSharingEnabled` |
+| Android | `/data/data/<package>/files/mods` | **No**, internal app storage |
+
+Android has no route for installing a mod yet, and its shared storage is not
+readable by the app. Until that changes, an Android mod has to be placed with
+`adb`.
+
 ## Replacing the world renderer
 
 Nothing about the world requires that the drawing be 2D: maps are node-free
