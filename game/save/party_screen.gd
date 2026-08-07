@@ -7,6 +7,10 @@ extends Control
 ## start menu resumes on this rather than the screen navigating away with
 ## change_scene_to_file, which would tear down the running world.
 signal closed(result: Dictionary)
+## A chosen submenu entry this screen does not own, mirroring
+## Gen2StartMenuScreen.action_chosen. Field moves need the live world, which
+## belongs to the world screen, so the choice is reported rather than run here.
+signal action_chosen(action: Dictionary)
 
 const BACKGROUND: Color = Color("#09111f")
 const PANEL: Color = Color("#14233a")
@@ -16,6 +20,16 @@ const MUTED: Color = Color("#9eacc0")
 const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
+
+## data/mon_menu.asm's MONMENUVALUE_* option strings, in that file's order.
+const OPTION_STATS: StringName = &"stats"
+const OPTION_SWITCH: StringName = &"switch"
+const OPTION_ITEM: StringName = &"item"
+const OPTION_CANCEL: StringName = &"cancel"
+const OPTION_MOVE: StringName = &"move"
+## engine/pokemon/mon_submenu.asm's NUM_MONMENU_ITEMS: a list already this long
+## drops CANCEL rather than growing.
+const MAX_SUBMENU_ITEMS: int = 8
 
 var _data: GameData = null
 var _data_override: GameData = null
@@ -27,6 +41,14 @@ var _player_label: Label = null
 var _status: Label = null
 var _storage_button: Button = null
 var _battle_button: Button = null
+## The keyboard cursor and per-mon submenu. Reachable only through handle_key(),
+## which only the world screen calls, so the standalone save-screen view keeps
+## its mouse-driven behavior unchanged.
+var _member_cursor: int = 0
+var _submenu: VBoxContainer = null
+var _submenu_items: Array = []
+var _submenu_cursor: int = 0
+var _submenu_open: bool = false
 
 
 func _ready() -> void:
@@ -46,6 +68,10 @@ func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> 
 	_embedded = embedded
 	_data = data
 	_save = save
+	_member_cursor = 0
+	_submenu_open = false
+	_submenu_items = []
+	_submenu_cursor = 0
 	if is_inside_tree() and _cards != null:
 		_refresh()
 
@@ -63,6 +89,167 @@ func party_snapshot() -> Dictionary:
 		"slot": _save.slot if _save != null else -1,
 		"members": members,
 	}
+
+
+## engine/pokemon/mon_submenu.asm's GetMonSubmenuItems for one party member.
+##
+## An egg gets three entries and no moves. Otherwise the four move slots are
+## walked in the mon's own slot order, appending every move that appears in
+## MonMenuOptions' field-move rows, then the fixed options follow. Only entries
+## this project acts on are marked available; the rest keep their source
+## position rather than being omitted, the same way Gen2WorldStartMenu carries
+## its unimplemented entries.
+##
+## The MAIL branch is not reproduced: ItemIsMail tests the held item against
+## data/items/mail_items.asm, and this project has no mail, so ITEM is always
+## the entry in that position.
+static func submenu_items_for(data: GameData, mon: Gen2SaveMon) -> Array:
+	var items: Array = []
+	if mon == null:
+		return items
+	# The source compares wCurPartySpecies against EGG ($fd); this save model
+	# carries the same fact as Gen2SaveMon.is_egg beside a real species.
+	if mon.is_egg:
+		items.append(_option_entry(OPTION_STATS, "STATS"))
+		items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
+		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
+		return items
+	for move: int in mon.moves:
+		if move == 0 or not Gen2WorldFieldMove.is_field_move(move):
+			continue
+		items.append({
+			"kind": &"field_move",
+			"move": move,
+			"label": String(data.move(move).get("name", "MOVE")) if data != null else "MOVE",
+			"available": true,
+		})
+	items.append(_option_entry(OPTION_STATS, "STATS"))
+	items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
+	items.append(_option_entry(OPTION_MOVE, "MOVE"))
+	items.append(_option_entry(OPTION_ITEM, "ITEM"))
+	if items.size() < MAX_SUBMENU_ITEMS:
+		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
+	return items
+
+
+static func _option_entry(option: StringName, label: String) -> Dictionary:
+	return {"kind": &"option", "option": option, "label": label, "available": false}
+
+
+func _party_size() -> int:
+	return _save.party.size() if _save != null else 0
+
+
+## Keyboard driver for the embedded overworld view, mirroring
+## Gen2StartMenuScreen.handle_key's key lists. Returns whether the key was used.
+func handle_key(keycode: int) -> bool:
+	if _party_size() == 0:
+		if keycode in [KEY_ESCAPE, KEY_X, KEY_B]:
+			close_embedded()
+			return true
+		return false
+	match keycode:
+		KEY_UP, KEY_W:
+			_move_cursor(-1)
+			return true
+		KEY_DOWN, KEY_S:
+			_move_cursor(1)
+			return true
+		KEY_SPACE, KEY_ENTER, KEY_Z:
+			_confirm()
+			return true
+		KEY_ESCAPE, KEY_X, KEY_B:
+			_cancel()
+			return true
+	return false
+
+
+func _move_cursor(delta: int) -> void:
+	if _submenu_open:
+		if _submenu_items.is_empty():
+			return
+		_submenu_cursor = wrapi(_submenu_cursor + delta, 0, _submenu_items.size())
+	else:
+		_member_cursor = wrapi(_member_cursor + delta, 0, _party_size())
+	_refresh()
+
+
+func _confirm() -> void:
+	if not _submenu_open:
+		_open_submenu()
+		return
+	if _submenu_cursor < 0 or _submenu_cursor >= _submenu_items.size():
+		return
+	var entry: Dictionary = _submenu_items[_submenu_cursor]
+	if StringName(entry.get("option", &"")) == OPTION_CANCEL:
+		_close_submenu()
+		return
+	if not bool(entry.get("available", false)):
+		_status.text = "%s is not available yet." % String(entry.get("label", ""))
+		_status.add_theme_color_override("font_color", MUTED)
+		return
+	if StringName(entry.get("kind", &"")) != &"field_move":
+		return
+	action_chosen.emit({
+		"kind": &"field_move",
+		"move": int(entry.get("move", 0)),
+		"slot": _member_cursor,
+		"name": _display_name(_save.party[_member_cursor]),
+	})
+
+
+func _cancel() -> void:
+	if _submenu_open:
+		_close_submenu()
+		return
+	close_embedded()
+
+
+func _open_submenu() -> void:
+	if _member_cursor < 0 or _member_cursor >= _party_size():
+		return
+	_submenu_items = submenu_items_for(_data, _save.party[_member_cursor])
+	_submenu_cursor = 0
+	_submenu_open = not _submenu_items.is_empty()
+	_refresh()
+
+
+func _close_submenu() -> void:
+	_submenu_open = false
+	_submenu_items = []
+	_submenu_cursor = 0
+	_refresh()
+
+
+## Test and host seam: the submenu as the screen currently shows it.
+func submenu_snapshot() -> Dictionary:
+	return {
+		"open": _submenu_open,
+		"cursor": _submenu_cursor,
+		"member": _member_cursor,
+		"items": _submenu_items.duplicate(true),
+	}
+
+
+func _render_submenu() -> void:
+	if _submenu == null:
+		return
+	for child: Node in _submenu.get_children():
+		child.queue_free()
+	_submenu.visible = _submenu_open
+	if not _submenu_open:
+		return
+	for index: int in _submenu_items.size():
+		var entry: Dictionary = _submenu_items[index]
+		var label := Label.new()
+		var text: String = String(entry.get("label", ""))
+		if not bool(entry.get("available", false)) \
+			and StringName(entry.get("option", &"")) != OPTION_CANCEL:
+			text = "%s (unavailable)" % text
+		label.text = ("> " if index == _submenu_cursor else "  ") + text
+		label.add_theme_color_override("font_color", ACCENT if index == _submenu_cursor else TEXT)
+		label.add_theme_font_size_override("font_size", 18)
+		_submenu.add_child(label)
 
 
 func _resolve_data() -> GameData:
@@ -136,6 +323,11 @@ func _build_ui() -> void:
 	_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_cards)
 
+	_submenu = VBoxContainer.new()
+	_submenu.add_theme_constant_override("separation", 4)
+	_submenu.visible = false
+	content.add_child(_submenu)
+
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 10)
 	content.add_child(footer)
@@ -163,13 +355,17 @@ func _refresh() -> void:
 		return
 	for index: int in Gen2SaveData.MAX_PARTY:
 		_cards.add_child(_member_card(index))
+	_render_submenu()
 	_status.text = "Slot %d" % (_save.slot + 1)
 	_status.add_theme_color_override("font_color", SUCCESS)
 
 
 func _member_card(index: int) -> PanelContainer:
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 8))
+	var selected: bool = index == _member_cursor and index < _party_size()
+	card.add_theme_stylebox_override(
+		"panel", _panel_style(PANEL, ACCENT if selected else BORDER, 8)
+	)
 	var content := HBoxContainer.new()
 	content.add_theme_constant_override("separation", 18)
 	card.add_child(content)
