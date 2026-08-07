@@ -2932,6 +2932,92 @@ func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void
 	assert_true(world.move(Vector2i.UP))
 
 
+func test_stepping_onto_land_while_surfing_gets_out_of_the_water() -> void:
+	# .TrySurf's .ExitWater: .GetOutOfWater restores PLAYER_NORMAL and the
+	# walking sprite before .DoStep, so the mode is already back by the time the
+	# result is reported.
+	var world := _world(Vector2i(8, 7))
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	world.player_sprite_number = Gen2WorldSprite.SPRITE_SURF
+	assert_eq(world.collision_permission_at(Vector2i(8, 7)), Gen2WorldCollision.WATER_TILE)
+
+	var exited: Dictionary = world.move_result(Vector2i.UP)
+	assert_true(exited["ok"], JSON.stringify(exited))
+	assert_eq(exited["kind"], &"exit_water")
+	assert_eq(world.player_cell, Vector2i(8, 6))
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)
+	# Walking again, so the water cell is no longer a legal step.
+	assert_false(world.move(Vector2i.DOWN))
+
+
+func test_a_step_between_water_cells_stays_a_water_move() -> void:
+	var world := _world(Vector2i(8, 6))
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	world.player_sprite_number = Gen2WorldSprite.SPRITE_SURF
+	assert_eq(world.move_result(Vector2i.DOWN)["kind"], &"water_move")
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_SURF)
+
+
+func test_surf_request_refuses_a_facing_object_on_crystal_only() -> void:
+	# Crystal's .TrySurf ends with a CheckFacingObject that pokegold's omits,
+	# under its own "You can Surf on top of NPCs" bug comment.
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, true))
+	var world := _world(Vector2i(8, 6), state)
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	world.objects[0].cell = Vector2i(8, 7)
+	assert_not_null(world.object_at(Vector2i(8, 7)))
+	assert_eq(world.surf_request()["reason"], &"cannot_surf")
+
+	var gold_directory: String = RomCache.directory_for(&"testworldsurfgold", "abcdef0123456789cd")
+	RomCache.clear(gold_directory)
+	RomCache.prepare(gold_directory)
+	var saved_directory: String = _directory
+	_directory = gold_directory
+	_write_cache("gold")
+	_directory = saved_directory
+
+	var gold_data: GameData = GameData.open_directory(gold_directory)
+	assert_false(Gen2WorldState.is_crystal_profile(gold_data))
+	var gold_state := Gen2WorldState.new()
+	gold_state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, false))
+	var gold_world: Gen2WorldAPI = Gen2WorldAPI.open(
+		gold_data, 1, 1, Vector2i(8, 6), gold_state
+	)
+	gold_world.player_facing = Gen2WorldSprite.FACING_DOWN
+	gold_world.objects[0].cell = Vector2i(8, 7)
+	assert_not_null(gold_world.object_at(Vector2i(8, 7)))
+	assert_true(bool(gold_world.surf_request().get("ok", false)))
+	RomCache.clear(gold_directory)
+
+
+func test_world_snapshot_round_trips_the_surfing_player_sprite() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	world.player_sprite_number = Gen2WorldSprite.SPRITE_SURFING_PIKACHU
+	var encoded: Dictionary = world.snapshot().to_dict()
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(
+		data, Gen2WorldSnapshot.from_dict(encoded)
+	)
+	assert_not_null(restored)
+	assert_eq(restored.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(restored.player_sprite_number, Gen2WorldSprite.SPRITE_SURFING_PIKACHU)
+
+	# A snapshot written before the sprite joined the format carries the movement
+	# mode alone, which resolves every state but the Pikachu variant.
+	encoded.erase("player_sprite_number")
+	var legacy := Gen2WorldSnapshot.from_dict(encoded)
+	assert_eq(legacy.player_sprite_number, Gen2WorldSprite.SPRITE_SURF)
+	encoded["movement_mode"] = "walk"
+	assert_eq(
+		Gen2WorldSnapshot.from_dict(encoded).player_sprite_number,
+		Gen2WorldSprite.SPRITE_PLAYER
+	)
+
+
 func test_explicit_fishing_uses_the_current_map_fish_group() -> void:
 	var world := _world(Vector2i(8, 6))
 	var encounter: Dictionary = world.encounter_request(

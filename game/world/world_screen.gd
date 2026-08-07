@@ -443,9 +443,15 @@ func move_player(direction: Vector2i) -> bool:
 		return false
 	if movement.get("kind", &"") == &"ledge_hop":
 		_play_ledge_hop_sfx()
+	## .ExitWater calls PlayMapMusic before the step, which is what drops the
+	## surfing track once the player is walking again.
+	if movement.get("kind", &"") == &"exit_water":
+		_play_current_map_music()
 
 	var transition: Dictionary = movement
-	if movement.get("kind", &"") in [&"move", &"ledge_hop"]:
+	## CheckTileEvent gates warps on nothing, so surfing onto a warp tile and the
+	## step back onto land both reach one.
+	if movement.get("kind", &"") in [&"move", &"ledge_hop", &"water_move", &"exit_water"]:
 		transition = _world.try_warp()
 	if _renderer != null:
 		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
@@ -620,29 +626,15 @@ func preview_script_event() -> void:
 
 
 ## Public screenshot driver for the party submenu's field-move entry. Grants the
-## Hive Badge and teaches the first party member Cut, then injects that save so
-## persistence stays off, the way preview_party_transaction() does.
+## move's badge and teaches it to the first party member, then injects that save
+## so persistence stays off, the way preview_party_transaction() does.
 func preview_field_move() -> void:
-	if _world == null or _data == null:
-		return
-	var save: Gen2SaveData = _embedded_party_save()
-	if save == null or save.party.is_empty():
-		_script_prompt = "Field move preview needs a party"
-		_refresh_labels()
-		return
-	(save.party[0] as Gen2SaveMon).moves[0] = Gen2WorldFieldMove.MOVE_CUT
-	_injected_save = save
-	_world.state.set_engine_flag(Gen2WorldState.badge_flag(
-		Gen2WorldFieldMove.BADGE_HIVE, Gen2WorldState.is_crystal_profile(_data)
-	))
-	_open_embedded_party()
-	if _party_host == null:
-		return
-	_party_host.handle_key(KEY_SPACE)
+	_preview_field_move(Gen2WorldFieldMove.MOVE_CUT, Gen2WorldFieldMove.BADGE_HIVE)
 
 
 ## The rest of that sequence, one step per call: the first chooses the submenu's
-## Cut entry and shows its message, the second acknowledges it and commits.
+## field-move entry and shows its message, the second acknowledges it and
+## commits.
 func preview_field_move_use() -> void:
 	if _field_move_text:
 		_acknowledge_field_move_text()
@@ -650,6 +642,41 @@ func preview_field_move_use() -> void:
 	preview_field_move()
 	if _party_host != null:
 		_party_host.handle_key(KEY_SPACE)
+
+
+## The same pair for Surf. The scene must be opened on a map where the player
+## starts beside water and facing it; the Cut preview has the matching
+## requirement of a cuttable tile.
+func preview_surf() -> void:
+	_preview_field_move(Gen2WorldFieldMove.MOVE_SURF, Gen2WorldFieldMove.BADGE_FOG)
+
+
+func preview_surf_use() -> void:
+	if _field_move_text:
+		_acknowledge_field_move_text()
+		return
+	preview_surf()
+	if _party_host != null:
+		_party_host.handle_key(KEY_SPACE)
+
+
+func _preview_field_move(move: int, badge: int) -> void:
+	if _world == null or _data == null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Field move preview needs a party"
+		_refresh_labels()
+		return
+	(save.party[0] as Gen2SaveMon).moves[0] = move
+	_injected_save = save
+	_world.state.set_engine_flag(Gen2WorldState.badge_flag(
+		badge, Gen2WorldState.is_crystal_profile(_data)
+	))
+	_open_embedded_party()
+	if _party_host == null:
+		return
+	_party_host.handle_key(KEY_SPACE)
 
 
 ## Public screenshot driver for the scene-free party item transaction. It uses a
@@ -1198,11 +1225,12 @@ func _on_party_closed(_result: Dictionary) -> void:
 	_refresh_labels()
 
 
-## MonMenu_Cut's shape: the party menu closes first, then CutFunction runs and
-## either queues Script_Cut or pushes its own refusal text. Both refusals and
-## the success message go through the hardware text box, and the block change
-## waits for the acknowledge, matching Script_Cut showing UseCutText before it
-## calls CutDownTreeOrGrass.
+## MonMenu_Cut and MonMenu_Surf share a shape: the party menu closes first, then
+## the field-move function runs and either queues its script or pushes its own
+## refusal text. Both refusals and the success message go through the hardware
+## text box, and nothing changes until the acknowledge, matching Script_Cut
+## reaching CutDownTreeOrGrass and UsedSurfScript reaching SurfStartStep only
+## after their text.
 func _on_party_action(action: Dictionary) -> void:
 	var host: Gen2PartyScreen = _party_host
 	_party_host = null
@@ -1211,17 +1239,35 @@ func _on_party_action(action: Dictionary) -> void:
 	if _world == null or StringName(action.get("kind", &"")) != &"field_move":
 		_refresh_labels()
 		return
-	if int(action.get("move", 0)) != Gen2WorldFieldMove.MOVE_CUT:
-		_show_field_move_text("Can't use that here.")
-		return
-	var request: Dictionary = _world.cut_request()
-	if not bool(request.get("ok", false)):
-		_show_field_move_text(_cut_refusal(StringName(request.get("reason", &""))))
-		return
-	_show_field_move_text("%s used CUT!" % String(action.get("name", "")))
+	match int(action.get("move", 0)):
+		Gen2WorldFieldMove.MOVE_CUT:
+			var cut: Dictionary = _world.cut_request()
+			if not bool(cut.get("ok", false)):
+				_show_field_move_text(_cut_refusal(StringName(cut.get("reason", &""))))
+				return
+			_show_field_move_text("%s used CUT!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_SURF:
+			var surf: Dictionary = _world.surf_request(_party_species(int(action.get("slot", -1))))
+			if not bool(surf.get("ok", false)):
+				_show_field_move_text(_surf_refusal(StringName(surf.get("reason", &""))))
+				return
+			_show_field_move_text("%s used SURF!" % String(action.get("name", "")))
+		_:
+			_show_field_move_text("Can't use that here.")
 
 
-## engine/events/overworld.asm's two refusal texts, verbatim from
+## GetSurfType reads wPartySpecies at wCurPartyMon; the submenu action carries
+## that slot. Zero when no save or slot answers, which is no species and so the
+## ordinary surf sprite.
+func _party_species(slot: int) -> int:
+	var save: Gen2SaveData = _active_party_save()
+	if save == null or slot < 0 or slot >= save.party.size():
+		return 0
+	var member: Variant = save.party[slot]
+	return int((member as Gen2SaveMon).species) if member is Gen2SaveMon else 0
+
+
+## engine/events/overworld.asm's refusal texts, verbatim from
 ## data/text/common_2.asm. A reason without a source text falls back to
 ## _CantUseItemText, which is the source's own generic field-move refusal.
 func _cut_refusal(reason: StringName) -> String:
@@ -1230,6 +1276,17 @@ func _cut_refusal(reason: StringName) -> String:
 			return "Sorry! A new BADGE is required."
 		&"nothing_to_cut":
 			return "There's nothing to CUT here."
+	return "Can't use that here."
+
+
+func _surf_refusal(reason: StringName) -> String:
+	match reason:
+		&"badge_required":
+			return "Sorry! A new BADGE is required."
+		&"already_surfing":
+			return "You're already SURFING."
+		&"cannot_surf":
+			return "You can't SURF here."
 	return "Can't use that here."
 
 
@@ -1242,26 +1299,43 @@ func _show_field_move_text(text: String) -> void:
 	_refresh_labels()
 
 
-## The acknowledge that closes a field-move message. A staged Cut commits here
+## The acknowledge that closes a field-move message. A staged move commits here
 ## rather than when it was resolved, because Script_Cut only reaches
-## CutDownTreeOrGrass after UseCutText. A refusal has nothing staged and just
+## CutDownTreeOrGrass after UseCutText and UsedSurfScript only reaches
+## SurfStartStep after its waitbutton. A refusal has nothing staged and just
 ## closes.
 func _acknowledge_field_move_text() -> void:
 	_field_move_text = false
 	if _text_box != null:
 		_text_box.visible = false
-	if _world == null or _world.pending_cut().is_empty():
+	if _world == null:
 		_script_prompt = ""
 		_refresh_labels()
 		return
-	var applied: Dictionary = _world.complete_cut()
+	if not _world.pending_cut().is_empty():
+		_commit_field_move(_world.complete_cut(), "Cut")
+		return
+	if not _world.pending_surf().is_empty():
+		_commit_field_move(_world.complete_surf(), "Surf")
+		return
+	_script_prompt = ""
+	_refresh_labels()
+
+
+## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN and Surf changes the music, so each
+## commit reports its own audio; both redraw, because both changed what the map
+## or the player looks like.
+func _commit_field_move(applied: Dictionary, label: String) -> void:
 	if bool(applied.get("ok", false)):
-		_play_sfx(SFX_CUT)
+		if StringName(applied.get("kind", &"")) == &"surf_applied":
+			_play_current_map_music()
+		else:
+			_play_sfx(SFX_CUT)
 		if _renderer != null:
 			_renderer.refresh()
-		_script_prompt = "Cut"
+		_script_prompt = label
 	else:
-		_script_prompt = "Cut failed: %s" % String(applied.get("reason", "unknown"))
+		_script_prompt = "%s failed: %s" % [label, String(applied.get("reason", "unknown"))]
 	_refresh_labels()
 
 
@@ -1530,10 +1604,15 @@ func _audio_assets() -> Dictionary:
 	}
 
 
+## PlayMapMusic: SpecialMapMusic answers first, so a surfing player carries
+## MUSIC_SURF across map loads, warps and the step back onto land.
 func _play_current_map_music() -> void:
 	if _audio_player == null or _data == null or _world == null or _world.current_map == null:
 		return
-	var record: Dictionary = _data.world_audio(&"music", _world.current_map.music)
+	var track: int = Gen2WorldFieldMove.MUSIC_SURF \
+		if _world.movement_mode == Gen2WorldAPI.MOVEMENT_SURF \
+		else _world.current_map.music
+	var record: Dictionary = _data.world_audio(&"music", track)
 	if record.is_empty():
 		return
 	_audio_player.play_record(record, &"map_music", _audio_assets())

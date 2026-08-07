@@ -62,6 +62,10 @@ var world_hour: int = 6
 var world_minute: int = 0
 var dst_enabled: bool = false
 var movement_mode: StringName = MOVEMENT_WALK
+## wPlayerState resolved through ChrisStateSprites, which is the only part of
+## that state a renderer reads. movement_mode carries the rest; the two surfing
+## states differ from each other here and nowhere else.
+var player_sprite_number: int = Gen2WorldSprite.SPRITE_PLAYER
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
@@ -80,6 +84,10 @@ var _block_overrides: Dictionary = {}
 ## the way Script_Cut holds wCutWhirlpool* across its writetext. Cleared with the
 ## block overrides, since the block it names belongs to the loaded map.
 var _pending_cut: Dictionary = {}
+## The same for Surf, held between surf_request() and complete_surf() while
+## UsedSurfScript shows its text. The cell it names belongs to the loaded map,
+## so it is cleared beside the Cut request.
+var _pending_surf: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -166,6 +174,7 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	)
 	out.player_facing = world_snapshot.player_facing
 	out.movement_mode = world_snapshot.movement_mode
+	out.player_sprite_number = world_snapshot.player_sprite_number
 	out.world_day = world_snapshot.world_day
 	out.world_hour = world_snapshot.world_hour
 	out.world_minute = world_snapshot.world_minute
@@ -309,8 +318,9 @@ func advance_player_step(delta: float) -> bool:
 	return changed
 
 
+## GetPlayerSprite: the sprite for the player's current state, not a fixed one.
 func player_sprite() -> Gen2WorldSprite:
-	return data.overworld_sprite(1) if data != null else null
+	return data.overworld_sprite(player_sprite_number) if data != null else null
 
 
 func set_movement_mode(mode: StringName) -> Dictionary:
@@ -467,6 +477,86 @@ func complete_cut() -> Dictionary:
 
 static func _cut_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"cut_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's SurfFunction .TrySurf, staged rather than
+## applied, for the same reason Cut is: UsedSurfScript changes nothing until its
+## text is acknowledged.
+##
+## The refusal order is the source's. The badge is tested before the player's own
+## state and before the tile, so a player without the Fog Badge is told about the
+## badge whether or not the water in front of them is surfable. CheckBadge itself
+## is what pushes that text, which is why this reports the same badge_required
+## Cut does. [param species] is the chosen party member's, for GetSurfType.
+##
+## The source's wBikeFlags branch has no counterpart here, since no bike exists.
+func surf_request(species: int = 0) -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _surf_failure(&"missing_map")
+	if not _pending_surf.is_empty():
+		return _surf_failure(&"surf_in_progress")
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	if not state.is_engine_flag_active(
+		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, crystal)
+	):
+		return _surf_failure(&"badge_required")
+	if movement_mode == MOVEMENT_SURF:
+		return _surf_failure(&"already_surfing")
+	var target: Vector2i = facing_cell()
+	if collision_permission_at(target) != Gen2WorldCollision.WATER_TILE:
+		return _surf_failure(&"cannot_surf")
+	var direction: Vector2i = _direction_for_facing(player_facing)
+	# CheckDirection: the standing cell's own permissions must not wall off the
+	# way the player faces.
+	var face: int = Gen2WorldCollision.face_mask_for_direction(direction)
+	if face != 0 and (tile_permissions_at(player_cell) & face) != 0:
+		return _surf_failure(&"cannot_surf")
+	# CheckFacingObject is Crystal only. pokegold's .TrySurf omits it and carries
+	# the "You can Surf on top of NPCs" bug comment.
+	if crystal and object_at(target) != null:
+		return _surf_failure(&"cannot_surf")
+	_pending_surf = {
+		"ok": true,
+		"kind": &"surf_requested",
+		"move": Gen2WorldFieldMove.MOVE_SURF,
+		"cell": target,
+		"direction": direction,
+		"sprite": Gen2WorldFieldMove.surf_sprite(species),
+	}
+	return _pending_surf.duplicate(true)
+
+
+## Empty until surf_request() succeeds. A host shows its text while this is set.
+func pending_surf() -> Dictionary:
+	return _pending_surf.duplicate(true)
+
+
+## The rest of UsedSurfScript after its waitbutton: writevar VAR_MOVEMENT,
+## UpdatePlayerSprite, then SurfStartStep's single slow_step into the water.
+##
+## That step is an applymovement, not player input, so it neither consumes a
+## repel step nor rolls an encounter, and it is not re-validated: .TrySurf
+## already checked the cell, and the movement engine does not check again.
+func complete_surf() -> Dictionary:
+	if _pending_surf.is_empty():
+		return _surf_failure(&"no_pending_surf")
+	var request: Dictionary = _pending_surf
+	_pending_surf = {}
+	movement_mode = MOVEMENT_SURF
+	player_sprite_number = int(request["sprite"])
+	player_cell = request["cell"]
+	_start_player_step(request["direction"], STEP_FRAMES_NPC_WALK)
+	return {
+		"ok": true,
+		"kind": &"surf_applied",
+		"move": int(request["move"]),
+		"cell": player_cell,
+		"sprite": player_sprite_number,
+	}
+
+
+static func _surf_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"surf_failed", "reason": reason}
 
 
 ## Rolls an encounter from the current map. Auto mode preserves the existing
@@ -2444,6 +2534,18 @@ func move_result(direction: Vector2i) -> Dictionary:
 	var previous_cells: Dictionary = {}
 	for index: int in objects.size():
 		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
+	## .TrySurf's .ExitWater: .GetOutOfWater restores PLAYER_NORMAL and the walking
+	## sprite before .DoStep runs, so the state is already back to walking while
+	## the step onto land is still being taken.
+	var exiting_water: bool = movement_mode == MOVEMENT_SURF \
+		and collision_permission_at(destination) == Gen2WorldCollision.LAND_TILE
+	var kind: StringName = &"move"
+	if exiting_water:
+		movement_mode = MOVEMENT_WALK
+		player_sprite_number = Gen2WorldSprite.SPRITE_PLAYER
+		kind = &"exit_water"
+	elif movement_mode == MOVEMENT_SURF:
+		kind = &"water_move"
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
@@ -2451,7 +2553,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	_start_player_step(direction, STEP_FRAMES_WALK)
 	return {
 		"ok": true,
-		"kind": &"water_move" if movement_mode == MOVEMENT_SURF else &"move",
+		"kind": kind,
 		"from_map": from_map,
 		"from_cell": from_cell,
 		"to_map": from_map,
@@ -2573,11 +2675,30 @@ func _at_connection_edge(direction_name: String) -> bool:
 	return false
 
 
+## engine/overworld/map_setup.asm's CheckUpdatePlayerSprite, which every warp and
+## connection reaches through warp_connection.asm. The cartridge re-derives the
+## player state from the cell it lands on rather than carrying it over:
+## .CheckSurfing starts surfing on water and keeps an existing surf state,
+## .ResetSurfingOrBikingState restores PLAYER_NORMAL anywhere else. Without it a
+## warp taken from a water tile lands on dry land still surfing, where nothing
+## but water is a legal step. .CheckForcedBiking has no counterpart here.
+func _apply_map_setup_player_state() -> void:
+	if collision_permission_at(player_cell) == Gen2WorldCollision.WATER_TILE:
+		if movement_mode != MOVEMENT_SURF:
+			movement_mode = MOVEMENT_SURF
+			player_sprite_number = Gen2WorldSprite.SPRITE_SURF
+		return
+	if movement_mode == MOVEMENT_SURF:
+		movement_mode = MOVEMENT_WALK
+		player_sprite_number = Gen2WorldSprite.SPRITE_PLAYER
+
+
 func _apply_map(
 	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
 ) -> void:
 	_block_overrides.clear()
 	_pending_cut.clear()
+	_pending_surf.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -2592,6 +2713,7 @@ func _apply_map(
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
+	_apply_map_setup_player_state()
 	_clear_player_step()
 	# _load_objects() rebuilds every record, so in-flight object steps end with
 	# the objects that owned them; only the shared frame accumulator survives.
@@ -2618,6 +2740,7 @@ func reload_current_map() -> Dictionary:
 		return {"ok": false, "reason": &"missing_map"}
 	_block_overrides.clear()
 	_pending_cut.clear()
+	_pending_surf.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

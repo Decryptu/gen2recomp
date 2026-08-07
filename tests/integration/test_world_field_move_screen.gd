@@ -1,12 +1,14 @@
 extends GutTest
 
-## Scene integration for Cut: the party submenu, the field-move message and the
-## block change, driven through the production world screen and party screen.
+## Scene integration for Cut and Surf: the party submenu, the field-move message
+## and the change each commits, driven through the production world screen and
+## party screen.
 ##
 ## The shared trainer fixture is patched here rather than extended, the same way
 ## test_world_start_menu_screen.gd patches its Potion in: the map moves onto
 ## TILESET_JOHTO so the real CutTreeBlockPointers rows apply, and block $5b's
-## bottom-left quadrant becomes the cut tree.
+## bottom-left quadrant becomes the cut tree. The fixture's own water cell at
+## (8,7) is what Surf is driven against.
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
@@ -18,6 +20,9 @@ const BLOCK_TREE_CUT: int = 0x3C
 const TREE_BLOCK: Vector2i = Vector2i(1, 1)
 const TREE_CELL: Vector2i = Vector2i(2, 3)
 const PLAYER_CELL: Vector2i = Vector2i(2, 2)
+## The fixture's own water cell and the land directly above it.
+const WATER_CELL: Vector2i = Vector2i(8, 7)
+const SHORE_CELL: Vector2i = Vector2i(8, 6)
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -42,6 +47,8 @@ func _write_cut_tree() -> void:
 	for raw: Dictionary in moves:
 		if int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_CUT:
 			raw["name"] = "CUT"
+		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_SURF:
+			raw["name"] = "SURF"
 	RomCache.write_json(RomCache.moves_path(directory), moves)
 
 	var tilesets: Array = RomCache.read_json(RomCache.world_tilesets_path(directory))
@@ -79,40 +86,49 @@ func _write_cut_tree() -> void:
 	RomCache.write_indices(RomCache.world_tile_path(directory, TILESET), tiles)
 
 
-## A save whose first party member knows Cut and whose second does not, so one
-## submenu offers the move and the other does not.
-func _save_with_cut() -> Gen2SaveData:
+## A save whose first party member knows the field move and whose second does
+## not, so one submenu offers it and the other does not.
+func _save_with_move(move: int) -> Gen2SaveData:
 	var save: Gen2SaveData = Gen2SaveStore.create_development_save(_data, 0)
-	(save.party[0] as Gen2SaveMon).moves = [Gen2WorldFieldMove.MOVE_CUT, 0, 0, 0]
+	(save.party[0] as Gen2SaveMon).moves = [move, 0, 0, 0]
 	(save.party[0] as Gen2SaveMon).nickname = "TESTMON"
 	if save.party.size() > 1:
 		(save.party[1] as Gen2SaveMon).moves = [BattleFixture.TACKLE, 0, 0, 0]
 	return save
 
 
-func _open_world(badge: bool = true) -> void:
+func _open_world(
+	badge: bool = true,
+	move: int = Gen2WorldFieldMove.MOVE_CUT,
+	badge_index: int = Gen2WorldFieldMove.BADGE_HIVE,
+	cell: Vector2i = PLAYER_CELL,
+) -> void:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
 	_world_screen.map_number = Fixture.MAP_NUMBER
-	_world_screen.start_cell = PLAYER_CELL
+	_world_screen.start_cell = cell
 	var state := Gen2WorldState.new()
 	if badge:
 		state.set_engine_flag(Gen2WorldState.badge_flag(
-			Gen2WorldFieldMove.BADGE_HIVE, Gen2WorldState.is_crystal_profile(_data)
+			badge_index, Gen2WorldState.is_crystal_profile(_data)
 		))
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(
-		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, PLAYER_CELL, state
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, cell, state
 	)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
-	var save: Gen2SaveData = _save_with_cut()
+	var save: Gen2SaveData = _save_with_move(move)
 	save.world = world.snapshot()
 	_world_screen.set_data(_data)
 	_world_screen.set_save(save)
 	add_child(_world_screen)
 	await get_tree().process_frame
-	_world_screen._world.player_cell = PLAYER_CELL
+	_world_screen._world.player_cell = cell
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+
+func _open_surf_world(badge: bool = true, cell: Vector2i = SHORE_CELL) -> void:
+	await _open_world(badge, Gen2WorldFieldMove.MOVE_SURF, Gen2WorldFieldMove.BADGE_FOG, cell)
 
 
 func _open_party() -> Gen2PartyScreen:
@@ -222,6 +238,103 @@ func test_cut_facing_nothing_reports_the_source_refusal() -> void:
 	_world_screen._acknowledge_field_move_text()
 	assert_true(_world_screen._world.pending_cut().is_empty())
 	assert_eq(_world_screen._world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE)
+
+
+func test_submenu_lists_surf_for_a_mon_that_knows_it() -> void:
+	await _open_surf_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["SURF", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
+	)
+
+
+func test_choosing_surf_shows_the_message_and_defers_entering_the_water() -> void:
+	await _open_surf_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_null(_world_screen._party_host)
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "TESTMON used SURF!")
+	# UsedSurfScript reaches writevar VAR_MOVEMENT only after its waitbutton.
+	assert_eq(world.player_cell, SHORE_CELL)
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)
+	assert_false(_world_screen.move_player(Vector2i.RIGHT))
+
+	_world_screen._acknowledge_field_move_text()
+	assert_false(_world_screen._field_move_text)
+	assert_eq(world.player_cell, WATER_CELL)
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_SURF)
+	assert_true(world.pending_surf().is_empty())
+
+
+func test_stepping_back_onto_land_stops_surfing_through_the_screen() -> void:
+	await _open_surf_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+
+	# The entry step is a slow_step, so the presentation offset has to run out
+	# before the screen accepts input again.
+	while world.player_step_in_progress():
+		world.advance_player_step(1.0)
+	assert_true(_world_screen.move_player(Vector2i.UP))
+	assert_eq(world.player_cell, SHORE_CELL)
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)
+
+
+func test_surf_without_the_badge_reports_the_badge_and_changes_nothing() -> void:
+	await _open_surf_world(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.player_cell, SHORE_CELL)
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+
+
+func test_surf_facing_land_reports_the_source_refusal() -> void:
+	await _open_surf_world()
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "You can't SURF here.")
+	_world_screen._acknowledge_field_move_text()
+	assert_true(_world_screen._world.pending_surf().is_empty())
+	assert_eq(_world_screen._world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+
+
+func test_surf_while_already_surfing_reports_the_source_refusal() -> void:
+	await _open_surf_world(true, WATER_CELL)
+	var world: Gen2WorldAPI = _world_screen._world
+	assert_true(world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)["ok"])
+	world.player_cell = WATER_CELL
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "You're already SURFING.")
 
 
 func test_cancel_closes_the_submenu_before_the_party_screen() -> void:
