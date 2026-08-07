@@ -995,6 +995,28 @@ func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
 	)
 
 
+func test_fade_in_from_white_is_presentation_on_both_profiles() -> void:
+	# maps/OlivineLighthouse6F.asm's OlivineLighthouseJasmine runs FadeOutToWhite
+	# and then FadeInFromWhite either side of the Ampharos cry, and that script is
+	# what clears EVENT_OLIVINE_GYM_JASMINE. FadeInFromWhite is 49 in Crystal and
+	# 48 in Gold/Silver, one behind Crystal's inserted BattleTowerFade at 47.
+	assert_eq(Gen2WorldScript.special_index(48, false), 49)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6A20"] = [Gen2WorldScript.SPECIAL, 49, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6A20,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(
+		int(_event_value(result["events"], &"presentation_special_applied", "special")),
+		49,
+		JSON.stringify(result),
+	)
+
+
 ## Ilex Forest's Farfetch'd herding is a ten-position state machine on
 ## wFarfetchdPosition, read and written with these three commands
 ## (maps/IlexForest.asm).
