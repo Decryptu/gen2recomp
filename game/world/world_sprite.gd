@@ -15,6 +15,14 @@ const FACING_UP: int = 1
 const FACING_LEFT: int = 2
 const FACING_RIGHT: int = 3
 
+## data/sprites/player_sprites.asm's ChrisStateSprites, the wPlayerState to
+## sprite lookup GetPlayerSprite walks. Identical in both pins, and the numbers
+## themselves (constants/sprite_constants.asm) agree too. KrisStateSprites is not
+## reproduced because this project has no gender model.
+const SPRITE_PLAYER: int = 0x01
+const SPRITE_SURFING_PIKACHU: int = 0x34
+const SPRITE_SURF: int = 0x53
+
 var number: int = 0
 var address: int = 0
 var bank: int = 0

@@ -11,6 +11,7 @@ var map_id: Vector2i = Vector2i(-1, -1)
 var player_cell: Vector2i = Vector2i.ZERO
 var player_facing: int = Gen2WorldSprite.FACING_DOWN
 var movement_mode: StringName = &"walk"
+var player_sprite_number: int = Gen2WorldSprite.SPRITE_PLAYER
 var world_day: int = 0
 var world_hour: int = 6
 var world_minute: int = 0
@@ -26,6 +27,7 @@ static func from_world(world: Gen2WorldAPI) -> Gen2WorldSnapshot:
 	out.player_cell = world.player_cell
 	out.player_facing = world.player_facing
 	out.movement_mode = world.movement_mode
+	out.player_sprite_number = world.player_sprite_number
 	var clock: Dictionary = world.world_clock()
 	out.world_day = int(clock.get("day", 0))
 	out.world_hour = int(clock.get("hour", 6))
@@ -42,6 +44,7 @@ func to_dict() -> Dictionary:
 		"player_cell": [player_cell.x, player_cell.y],
 		"player_facing": player_facing,
 		"movement_mode": String(movement_mode),
+		"player_sprite_number": player_sprite_number,
 		"clock": [world_day, world_hour, world_minute],
 		"dst_enabled": dst_enabled,
 		"world_state": world_state.to_dict() if world_state != null else {},
@@ -58,6 +61,13 @@ static func from_dict(raw: Variant) -> Gen2WorldSnapshot:
 	out.player_cell = _vector_from_value(source.get("player_cell", [0, 0]))
 	out.player_facing = int(source.get("player_facing", Gen2WorldSprite.FACING_DOWN))
 	out.movement_mode = StringName(source.get("movement_mode", "walk"))
+	# Snapshots written before the sprite joined the format carry the movement
+	# mode alone, which resolves every state but the Pikachu surf variant.
+	out.player_sprite_number = int(source.get(
+		"player_sprite_number",
+		Gen2WorldSprite.SPRITE_SURF if out.movement_mode == &"surf" \
+			else Gen2WorldSprite.SPRITE_PLAYER,
+	))
 	var raw_clock: Variant = source.get("clock", [0, 6, 0])
 	if raw_clock is Array and (raw_clock as Array).size() >= 3:
 		var clock: Array = raw_clock as Array

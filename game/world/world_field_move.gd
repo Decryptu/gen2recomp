@@ -4,25 +4,37 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## Only Cut is resolved here so far. The shape each remaining move reuses is the
-## one CutFunction defines: check the badge, then check the faced tile, then look
-## the standing block up in a per-tileset replacement table.
+## Cut and Surf are resolved here. Both follow the shape CutFunction defines:
+## check the badge, then check the faced tile, then stage a change the text
+## acknowledge commits. Strength, Whirlpool, Waterfall, Flash and Headbutt are
+## not resolved yet.
 
-## constants/move_constants.asm. The submenu, not CutFunction, is what checks a
-## party Pokemon knows this.
-const MOVE_CUT: int = 15
+## constants/move_constants.asm, whose comment column is hex. The submenu, not
+## CutFunction or SurfFunction, is what checks a party Pokemon knows these.
+const MOVE_CUT: int = 0x0F
+const MOVE_SURF: int = 0x39
 
-## CheckBadge's argument in CutFunction's .CheckAble, as a source badge-order
-## index rather than a flag number, so Gen2WorldState.badge_flag() resolves it
-## on either profile: ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold/Silver.
+## CheckBadge's arguments in CutFunction's .CheckAble and SurfFunction's
+## .TrySurf, as source badge-order indices rather than flag numbers, so
+## Gen2WorldState.badge_flag() resolves them on either profile: ENGINE_HIVEBADGE
+## is 28 in Crystal and 27 in Gold/Silver, ENGINE_FOGBADGE 30 and 29.
 const BADGE_HIVE: int = 1
+const BADGE_FOG: int = 3
 
-## data/mon_menu.asm's MonMenuOptions field-move rows, in table order. Both pins
-## ship the same rows, so this needs no profile split. Cut is the only one this
-## project acts on; the rest are listed because IsFieldMove decides submenu
-## membership from this table alone, and a move missing from it would silently
-## stop appearing when the next one lands.
-const FIELD_MOVES: Array[int] = [MOVE_CUT]
+## GetSurfType's comparison, constants/pokemon_constants.asm.
+const SPECIES_PIKACHU: int = 0x19
+
+## constants/music_constants.asm. home/audio.asm's SpecialMapMusic returns this
+## ahead of the map header's own music whenever the player state is surfing, so
+## it belongs to Surf rather than to any one map. Surf has no sound effect:
+## UsedSurfScript never calls PlaySFX.
+const MUSIC_SURF: int = 0x21
+
+## The data/mon_menu.asm MonMenuOptions field-move rows this project acts on.
+## Both pins ship the same rows, so this needs no profile split. IsFieldMove
+## decides submenu membership from this list alone, so a move stops appearing
+## the moment it leaves it.
+const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
 ## the six block ($12, $1a); the four grass codes are LAND_TILE and cuttable
@@ -87,6 +99,15 @@ const CUT_BLOCKS_FOREST: Dictionary = {
 
 static func is_field_move(move: int) -> bool:
 	return FIELD_MOVES.has(move)
+
+
+## GetSurfType resolved through ChrisStateSprites: the surfing player's sprite
+## for the party member carrying the move. The source keeps the Pikachu variant
+## as a separate wPlayerState value; only the sprite differs, so this collapses
+## the two lookups into the one number a renderer needs.
+static func surf_sprite(species: int) -> int:
+	return Gen2WorldSprite.SPRITE_SURFING_PIKACHU if species == SPECIES_PIKACHU \
+		else Gen2WorldSprite.SPRITE_SURF
 
 
 ## CheckCutCollision: whether the faced cell's collision code is one Cut acts on
