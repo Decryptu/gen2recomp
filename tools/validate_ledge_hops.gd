@@ -7,9 +7,9 @@ extends SceneTree
 ##
 ## This is the real-cartridge counterpart to tests/unit/test_world_collision.gd
 ## and the ledge cases in tests/unit/test_world_api.gd, which use synthetic
-## caches. It also pins the reason tools/preview_world_story.gd still reopens
-## in Violet City instead of walking Route 30: the terrain and the hops carry
-## the route, while a static search over occupied cells does not.
+## caches. It also pins what gates Route 30's corridor north, which
+## tools/preview_world_story.gd now walks: the terrain and the hops carry the
+## route, and EVENT_ROUTE_30_BATTLE is what opens the last two cells.
 ##
 ##   Godot --headless --path . -s res://tools/validate_ledge_hops.gd
 
@@ -24,6 +24,9 @@ const ROUTE30_HOP_ROW: int = 24
 const ROUTE30_HOP_COLUMNS: Array[int] = [2, 3, 4]
 ## The northward corridor is plain floor from row 7 to the map's north edge.
 const ROUTE30_CORRIDOR_COLUMNS: Array[int] = [6, 7]
+## constants/event_flags.asm's EVENT_ROUTE_30_BATTLE, carried by the objects
+## standing on the corridor north and set by maps/ElmsLab.asm.
+const ROUTE30_BATTLE_EVENT_FLAG: int = 1812
 
 var _failures: PackedStringArray = []
 
@@ -114,25 +117,40 @@ func _verify_route30(game_id: StringName, data: GameData) -> void:
 				"%s: Route 30 corridor cell %s is not land." % [game_id, cell]
 			)
 
-	# Terrain reachability, which is what the hops contribute to, reaches the
-	# north edge. The same search resolving live occupancy does not, because
-	# Route 30 parks objects on the single passable cell of its row 25
-	# chokepoint. That difference is the open limitation recorded in
-	# tools/preview_world_story.gd, and pinning it here keeps a future change
-	# to either side from going unnoticed.
-	var terrain: Dictionary = _reachable(world, true)
-	var occupied: Dictionary = _reachable(world, false)
-	_check(
-		_reaches_north_edge(world, terrain),
-		"%s: Route 30 north edge is unreachable even ignoring occupancy." % game_id
-	)
+	# The corridor north is a story gate, not a terrain or pathfinding problem.
+	# Two objects stand on its single-cell rows 24 and 25, both carrying
+	# EVENT_ROUTE_30_BATTLE, and CheckObjectFlag
+	# (engine/overworld/map_objects_2.asm) masks an object whose flag is set.
+	# maps/ElmsLab.asm's ElmAfterTheftScript sets that flag when the player
+	# hands Elm the Mystery Egg, so the route opens exactly when the cartridge
+	# opens it. Both halves are pinned here: sealed before the egg return,
+	# walkable after it, with live occupancy enforced in both searches.
+	var occupied: Dictionary = _reachable(world)
 	_check(
 		not _reaches_north_edge(world, occupied),
-		"%s: Route 30 north edge is now reachable through occupied cells; the story preview can walk the route and its Violet City reopen should be replaced." % game_id
+		"%s: Route 30 north edge is reachable before EVENT_ROUTE_30_BATTLE is set." % game_id
+	)
+
+	var opened_state := Gen2WorldState.new()
+	opened_state.set_event_flag(ROUTE30_BATTLE_EVENT_FLAG)
+	var opened_world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, ROUTE30_GROUP, ROUTE30_NUMBER, ROUTE30_ENTRY, opened_state
+	)
+	if not _check(opened_world != null, "%s: Route 30 did not reopen." % game_id):
+		return
+	_check(
+		opened_world.object_at(Vector2i(5, 24)) == null
+			and opened_world.object_at(Vector2i(5, 25)) == null,
+		"%s: EVENT_ROUTE_30_BATTLE did not clear the corridor objects." % game_id
+	)
+	var opened: Dictionary = _reachable(opened_world)
+	_check(
+		_reaches_north_edge(opened_world, opened),
+		"%s: Route 30 north edge is still unreachable after EVENT_ROUTE_30_BATTLE." % game_id
 	)
 	_check(
-		terrain.size() > occupied.size(),
-		"%s: ignoring occupancy did not widen Route 30 reachability." % game_id
+		opened.size() > occupied.size(),
+		"%s: EVENT_ROUTE_30_BATTLE did not widen Route 30 reachability." % game_id
 	)
 
 	# No assertion is made that hops widen whole-map reachability. A ledge is
@@ -145,10 +163,9 @@ func _verify_route30(game_id: StringName, data: GameData) -> void:
 
 ## Breadth-first reachability from the player's cell, following ordinary steps
 ## and ledge hops the same way tools/preview_world_story.gd's _reachable_step
-## does. [param terrain_only] resolves cells by collision permission alone,
-## ignoring live object occupancy; otherwise it uses the same
-## Gen2WorldAPI.can_walk_to() the runtime and the story preview use.
-func _reachable(world: Gen2WorldAPI, terrain_only: bool) -> Dictionary:
+## does. Cells resolve through the same Gen2WorldAPI.can_walk_to() the runtime
+## and the story preview use, so live object occupancy counts.
+func _reachable(world: Gen2WorldAPI) -> Dictionary:
 	var size: Vector2i = world.map_size_cells()
 	var frontier: Array[Vector2i] = [world.player_cell]
 	var seen: Dictionary = {world.player_cell: true}
@@ -160,9 +177,7 @@ func _reachable(world: Gen2WorldAPI, terrain_only: bool) -> Dictionary:
 			var next: Vector2i = Vector2i(-1, -1)
 			var open: bool = false
 			if direct.x >= 0 and direct.y >= 0 and direct.x < size.x and direct.y < size.y:
-				open = Gen2WorldCollision.permission_for(
-					world.collision_code_at(direct)
-				) == Gen2WorldCollision.LAND_TILE if terrain_only else world.can_walk_to(direct)
+				open = world.can_walk_to(direct)
 			if open:
 				next = direct
 			elif Gen2WorldCollision.allows_hop(world.collision_code_at(cell), step):
