@@ -155,6 +155,9 @@ for a fallback pairing.
 
 The world screen's start menu wires Pokemon, Pack, Pokegear, Save and Exit;
 Pokedex, Player and Options appear in their source position but do nothing yet.
+The Pack opens each item's own source submenu and can use one: a Potion asks
+which Pokemon and heals it, a Repel sets its step count, and GIVE, TOSS and SEL
+keep their source position marked unavailable.
 The party submenu offers Cut, Surf and Whirlpool to a Pokemon that knows one; all
 three show their message first and change the world on the acknowledge, and
 stepping from water back onto land stops surfing. Standing on a whirlpool,

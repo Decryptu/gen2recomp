@@ -747,14 +747,16 @@ func preview_party_transaction() -> void:
 		_refresh_labels()
 		return
 	preview_save.world = _world.snapshot()
-	var item_result: Dictionary = _world.state.apply_changes({}, {}, {"items": {0x12: 1}})
+	var item_result: Dictionary = _world.state.apply_changes(
+		{}, {}, {"items": {Gen2WorldPartyHost.ITEM_POTION: 1}}
+	)
 	if not bool(item_result.get("ok", false)):
 		_script_prompt = "Party transaction preview unavailable"
 		_refresh_labels()
 		return
 	preview_save.party[0].hp = 1
 	var result: Dictionary = Gen2WorldPartyHost.use_item(
-		_world, preview_save, 0x12, 0, false
+		_world, preview_save, Gen2WorldPartyHost.ITEM_POTION, 0, false
 	)
 	var preview_caption: String = ""
 	if bool(result.get("ok", false)):
@@ -766,6 +768,31 @@ func preview_party_transaction() -> void:
 	_refresh_labels()
 	if not preview_caption.is_empty():
 		_caption.text = preview_caption
+
+
+## Public screenshot driver for the pack's item use. It grants a Potion and hurts
+## the first party member on an injected save, so nothing persists, then advances
+## one menu step per call: Pack, the item, USE, the target, the result.
+func preview_pack_use() -> void:
+	if _world == null or _data == null:
+		return
+	if _start_menu_host != null:
+		_start_menu_host.handle_key(KEY_SPACE)
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Pack preview needs a party"
+		_refresh_labels()
+		return
+	(save.party[0] as Gen2SaveMon).hp = 1
+	_injected_save = save
+	_world.state.apply_changes({}, {}, {"items": {Gen2WorldPartyHost.ITEM_POTION: 1}})
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
+		_start_menu_host.handle_key(KEY_DOWN)
+	_start_menu_host.handle_key(KEY_SPACE)
 
 
 ## Public screenshot driver for the battle-request host path. It starts the
@@ -1197,6 +1224,12 @@ func _open_start_menu() -> void:
 		_script_prompt = "Start menu scene unavailable"
 		_refresh_labels()
 		return
+	# An injected save is a development or test one, so its item use stays in
+	# memory the same way preview_party_transaction() does.
+	host.set_party_context(
+		_injected_save if _injected_save != null else _selected_runtime_save(),
+		_injected_save == null
+	)
 	if not host.open(
 		_world, _data, Callable(self, "persist_world_snapshot"), _start_menu_cursor
 	):

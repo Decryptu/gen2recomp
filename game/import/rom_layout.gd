@@ -155,10 +155,13 @@ const ITEM_ATTRIBUTE_HELP: int = 6
 ## The item attribute table calls this field a pocket, but its value is the
 ## cartridge's item type: ITEM=1, KEY_ITEM=2, BALL=3, TM_HM=4.
 const ITEM_POCKET_BALL: int = 3
+const ITEMMENU_NOUSE: int = 0
 const ITEMMENU_CURRENT: int = 4
 const ITEMMENU_PARTY: int = 5
 const ITEMMENU_CLOSE: int = 6
+## Both permission bits read inverted: a set bit is what the item cannot do.
 const ITEM_ATTRIBUTE_CANT_SELECT: int = 1 << 6
+const ITEM_ATTRIBUTE_CANT_TOSS: int = 1 << 7
 const TRADE_RECORD_SIZE: int = 32
 const TRADE_NAME_LENGTH: int = 11
 const TRADE_GENDER_EITHER: int = 0

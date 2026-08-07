@@ -22,12 +22,17 @@ func after_each() -> void:
 	RomCache.clear(Fixture.directory())
 
 
+## Item 7 carries POTION's real ItemAttributes row, so the pack builds the
+## source's own USE/GIVE/TOSS/QUIT submenu for it and USE reaches .Party.
 func _write_pack_item() -> void:
 	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
 	for raw: Dictionary in items:
 		if int(raw.get("number", 0)) == 7:
 			raw["name"] = "POTION"
 			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+			raw["permissions"] = Gen2WorldPack.CANT_SELECT
+			raw["field_menu"] = Gen2WorldPack.ITEMMENU_PARTY
+			raw["heal_amount"] = 20
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
 
 
@@ -220,3 +225,96 @@ func _select(host: Gen2StartMenuScreen, kind: StringName) -> void:
 		host.handle_key(KEY_DOWN)
 		guard -= 1
 	assert_eq(menu.selected_kind(), kind)
+
+
+## Opens the pack with the cursor on the granted Potion, having damaged the
+## first party member so the item has something to do.
+func _open_pack_with_a_hurt_party() -> Gen2StartMenuScreen:
+	await _open_world()
+	var save: Gen2SaveData = _world_screen.get("_injected_save")
+	var mon: Gen2SaveMon = save.party[0]
+	mon.hp = maxi(mon.hp - 15, 1)
+	mon.nickname = "TESTMON"
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PACK)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	return host
+
+
+func test_choosing_an_item_opens_the_source_submenu() -> void:
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
+	var labels: Array = []
+	for entry: Dictionary in host.get("_item_actions"):
+		labels.append(String(entry.get("label", "")))
+	assert_eq(labels, ["USE", "GIVE", "TOSS", "QUIT"])
+
+	# QUIT returns to the pocket list, keeping the cursor the source restores.
+	while StringName((host.get("_item_actions")[host.get("_item_cursor")] as Dictionary)
+		.get("action", &"")) != Gen2WorldPack.ACTION_QUIT:
+		host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+
+
+func test_use_on_a_party_item_asks_which_mon_then_heals_and_spends_it() -> void:
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	var save: Gen2SaveData = _world_screen.get("_injected_save")
+	var before: int = (save.party[0] as Gen2SaveMon).hp
+	host.handle_key(KEY_ENTER)
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
+	# Nothing has changed until the target is chosen.
+	assert_eq((save.party[0] as Gen2SaveMon).hp, before)
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq((save.party[0] as Gen2SaveMon).hp, before + 15)
+	assert_eq(_world_screen._world.state.item_quantity(7), 0)
+	assert_eq(String(host.get("_pack_result")), "POTION restored 15 HP.")
+
+	# The spent item leaves the pocket on the way back.
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_eq(((host.get("_pack_pockets")[0] as Dictionary)["items"] as Array).size(), 0)
+
+
+func test_using_an_item_with_nothing_to_do_reports_it_and_spends_nothing() -> void:
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PACK)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	host.handle_key(KEY_ENTER)
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(String(host.get("_pack_result")), "It won't have any effect.")
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+
+## UseItem's .Oak branch: an item whose field menu is ITEMMENU_NOUSE never
+## reaches an effect at all.
+func test_an_item_with_no_field_menu_reports_oaks_refusal() -> void:
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		if int(raw.get("number", 0)) == 7:
+			raw["field_menu"] = Gen2WorldPack.ITEMMENU_NOUSE
+			raw["permissions"] = Gen2WorldPack.CANT_TOSS
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+	_data = GameData.open_directory(Fixture.directory())
+
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	host.handle_key(KEY_ENTER)
+	# CANT_TOSS with CANT_SELECT clear is MenuHeader_UnusableKeyItem: USE stays.
+	host.handle_key(KEY_ENTER)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(String(host.get("_pack_result")), Gen2StartMenuScreen.OAK_TEXT)
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)

@@ -63,6 +63,18 @@ const RENDERER_INPUT_METHOD: String = "handle_world_input"
 ## renderer kinds.
 const BUILT_IN_RENDERER: StringName = &"gen2"
 
+## The menus a mod may append an entry to. The cartridge's own entries are not
+## registered here: they live in Gen2WorldStartMenu and Gen2WorldPack, which
+## build their source list first and then append whatever is registered, so a
+## mod can only add and never reorder or remove what the game shipped.
+const MENU_START: StringName = &"start_menu"
+const MENU_PACK_POCKET: StringName = &"pack_pocket"
+const MENU_IDS: Array[StringName] = [MENU_START, MENU_PACK_POCKET]
+## Pocket type numbers 1 to 4 are the cartridge's ITEM, KEY_ITEM, BALL and TM_HM,
+## so a registered pocket has to claim a number above them, the same reservation
+## the content overlay will need for species and item numbers.
+const FIRST_MOD_POCKET: int = 5
+
 static var _instance: Gen2ModHost = null
 
 var _manifests: Dictionary = {}
@@ -70,6 +82,7 @@ var _world_renderers: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
 var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
+var _menu_entries: Dictionary = {}
 var _failures: Array = []
 
 
@@ -164,6 +177,49 @@ func select_battle_renderer(id: StringName) -> Dictionary:
 ## built-in one so a screen always has something to draw with.
 func create_battle_renderer() -> Node:
 	return _create(_battle_renderers, _selected_battle_renderer, Gen2BattleRenderer)
+
+
+## Adds one entry to [param menu]. [param entry] needs a [code]label[/code]; the
+## start menu takes an optional [code]handler[/code] Callable the screen calls
+## when the entry is chosen, and a pack pocket needs a [code]pocket[/code] type
+## number at or above [constant FIRST_MOD_POCKET], which is the number its items
+## carry in their own definitions.
+##
+## An entry without a handler still appears, marked unavailable, which is what
+## every unimplemented cartridge entry already does.
+func register_menu_entry(menu: StringName, id: StringName, entry: Dictionary) -> Dictionary:
+	if not MENU_IDS.has(menu):
+		return {"ok": false, "reason": &"unknown_menu", "detail": String(menu)}
+	if String(id).is_empty():
+		return {"ok": false, "reason": &"invalid_menu_entry", "detail": String(menu)}
+	var label: String = String(entry.get("label", ""))
+	if label.is_empty():
+		return {"ok": false, "reason": &"menu_entry_missing_label", "detail": String(id)}
+	var registered: Dictionary = {"kind": id, "label": label}
+	if menu == MENU_PACK_POCKET:
+		var pocket: int = int(entry.get("pocket", 0))
+		if pocket < FIRST_MOD_POCKET:
+			return {"ok": false, "reason": &"reserved_pocket", "detail": String(id)}
+		registered["pocket"] = pocket
+	else:
+		var handler: Variant = entry.get("handler", null)
+		registered["available"] = handler is Callable and (handler as Callable).is_valid()
+		if bool(registered["available"]):
+			registered["handler"] = handler
+	var entries: Array = _menu_entries.get(menu, [])
+	for existing: Dictionary in entries:
+		if StringName(existing.get("kind", &"")) == id:
+			return {"ok": false, "reason": &"duplicate_menu_entry", "detail": String(id)}
+	entries.append(registered)
+	_menu_entries[menu] = entries
+	return {"ok": true, "id": id}
+
+
+## Every entry registered for [param menu], in registration order. The callers
+## append these to their own source list rather than the other way round.
+func menu_entries(menu: StringName) -> Array:
+	var entries: Array = _menu_entries.get(menu, [])
+	return entries.duplicate(true)
 
 
 func _register(
