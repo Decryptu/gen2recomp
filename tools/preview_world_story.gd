@@ -26,6 +26,11 @@ const SPECIALCALL_ASSISTANT: int = 3
 ## the route at ten (maps/Route41.asm).
 const WALK_RESOLVE_ATTEMPTS: int = 16
 
+## constants/item_constants.asm's add_hm list, whose comment column is hex.
+const ITEM_HM_STRENGTH: int = 0xF6
+## ENGINE_STORMBADGE's place in source badge order, for Gen2WorldState.badge_flag().
+const BADGE_STORM: int = 5
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -1646,15 +1651,18 @@ func _fog_badge_path(
 	return {"ok": true}
 
 
-## The Fog Badge to the Mineral Badge, on the same world, state and save. This
-## is the first leg that needs Surf on the real route: HM03 is the Dance
-## Theater's reward for the five Kimono Girls, and Routes 40 and 41 are the only
-## way to Cianwood, whose pharmacy holds the SecretPotion that
-## maps/OlivineLighthouse6F.asm wants before it clears EVENT_OLIVINE_GYM_JASMINE.
+## The Fog Badge to the Mineral Badge, taking the Storm Badge on the way, on the
+## same world, state and save. This is the first leg that needs Surf on the real
+## route: HM03 is the Dance Theater's reward for the five Kimono Girls, and
+## Routes 40 and 41 are the only way to Cianwood, whose pharmacy holds the
+## SecretPotion that maps/OlivineLighthouse6F.asm wants before it clears
+## EVENT_OLIVINE_GYM_JASMINE.
 ##
-## The Storm Badge is not on this leg. maps/CianwoodGym.asm walls its only
-## corridor with SPRITEMOVEDATA_STRENGTH_BOULDER objects at (3,7), (4,7) and
-## (5,7), and Strength does not exist, so Chuck is unreachable.
+## Chuck is on this leg rather than one of its own because the crossing is: the
+## Mineral Badge sends the player to Cianwood for the SecretPotion anyway, and
+## maps/CianwoodGym.asm is two doors from the pharmacy. Doing it here costs no
+## extra Route 40/41 crossing, which is also the order a player walks. HM04 is
+## collected before the outbound crossing, from maps/OlivineCafe.asm.
 func _mineral_badge_path(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -1779,6 +1787,10 @@ func _mineral_badge_path(
 			"reason": "Olivine rival scene failed: %s" % rival.get("reason", ""),
 		}
 
+	var cafe: Dictionary = _olivine_cafe_hm04(world, save, random, data, path)
+	if not bool(cafe.get("ok", false)):
+		return cafe
+
 	var first_visit: Dictionary = _lighthouse_visit(world, save, random, data, path, "first")
 	if not bool(first_visit.get("ok", false)):
 		return first_visit
@@ -1820,6 +1832,10 @@ func _mineral_badge_path(
 	var _cianwood_again: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
+
+	var storm: Dictionary = _storm_badge_leg(world, save, random, data, path)
+	if not bool(storm.get("ok", false)):
+		return storm
 
 	var back_to_olivine: Dictionary = _cianwood_crossing(world, save, random, data, path, true)
 	if not bool(back_to_olivine.get("ok", false)):
@@ -2536,6 +2552,232 @@ func _lighthouse_shaft(
 		)
 		floors.append(_map_value(world))
 	return {"ok": true, "floors": floors}
+
+
+## maps/OlivineCafe.asm's sailor at (4,3), who hands over HM04 behind
+## EVENT_GOT_HM04_STRENGTH. The cafe is Olivine City warp 7 at (7,21).
+##
+## The move is then written straight into a party member's slots, because
+## AskTeachTMHM and TeachTMHM are not implemented: nothing else can turn the HM
+## in the bag into a move the party knows, and the boulder script's
+## CheckPartyMove reads exactly that. See _teach_move().
+func _olivine_cafe_hm04(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var door: Dictionary = _warp_walk(world, Vector2i(7, 21), save, random, data)
+	if not bool(door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Olivine Cafe door unreachable: %s" % door.get("reason", ""),
+		}
+	var _cafe_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var sailor: Dictionary = _talk_to(
+		world, Vector2i(4, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var taught: bool = _teach_move(save, Gen2WorldFieldMove.MOVE_STRENGTH)
+	_mirror_party(world, save)
+	path.append({
+		"step": "olivine_cafe_hm04_strength",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": sailor.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+		"strength_taught": taught,
+		"party_moves": _party_moves(save),
+	})
+	if not bool(sailor.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "HM04 handoff failed: %s" % sailor.get("reason", ""),
+		}
+	if not world.state.items().has(ITEM_HM_STRENGTH):
+		return {"ok": false, "path": path, "reason": "HM04 did not reach the bag"}
+	if not taught:
+		return {"ok": false, "path": path, "reason": "no party member could learn STRENGTH"}
+	var leaving: Dictionary = _warp_step(world, 1, 14)
+	if not bool(leaving.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Olivine Cafe exit warp failed"}
+	var _city_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	return {"ok": true}
+
+
+## Cianwood City's gym, whose only corridor is walled by three
+## SPRITEMOVEDATA_STRENGTH_BOULDER objects at (3,7), (4,7) and (5,7).
+##
+## Row 7 is the sole link between the entrance half and Chuck, its ends are walls
+## at x=2 and x=6, and row 5 above it opens only at (4,5) and (5,5), the second of
+## which a Black Belt stands on for good. So no single push opens it: pushing any
+## boulder north just moves the wall up a row. The corridor opens by clearing
+## (3,7) and (5,7) north first, then pushing the middle boulder sideways into the
+## cell (3,7) left behind, which leaves (4,6) and (4,5) free above the freed
+## (4,7). A state-space search over player cell plus boulder cells finds no
+## shorter answer.
+##
+## Chuck himself needs no Strength: his script throws BOULDER1 aside with an
+## applymovement of its own before the battle.
+func _storm_badge_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var door: Dictionary = _warp_walk(world, Vector2i(8, 43), save, random, data)
+	if not bool(door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Cianwood Gym door unreachable: %s" % door.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	# The boulder at (4,7), faced from (4,8), is the first one the walk meets, so
+	# it is the one that runs AskStrengthScript. TryStrengthOW answers 0 here
+	# (party move plus Plain Badge, flag still clear), the yes/no is answered yes
+	# by _drain_story, and Script_UsedStrength sets the flag.
+	var asked: Dictionary = _talk_to(
+		world, Vector2i(4, 8), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "cianwood_gym_ask_strength",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"run": asked.get("run", {}),
+		"strength_active": world.strength_active(),
+	})
+	if not bool(asked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "AskStrengthScript failed: %s" % asked.get("reason", ""),
+		}
+	if not world.strength_active():
+		return {"ok": false, "path": path, "reason": "Strength did not become active"}
+
+	var pushes: Array = []
+	for push: Dictionary in [
+		{"approach": Vector2i(3, 8), "direction": Vector2i.UP},
+		{"approach": Vector2i(5, 8), "direction": Vector2i.UP},
+		# The middle boulder goes sideways into the cell the first push freed.
+		{"approach": Vector2i(5, 7), "direction": Vector2i.LEFT},
+	]:
+		var moved: Dictionary = _push_boulder_at(
+			world, push["approach"], push["direction"], save, random, data
+		)
+		pushes.append(moved)
+		if not bool(moved.get("ok", false)):
+			path.append({
+				"step": "cianwood_gym_boulders",
+				"map": _map_value(world),
+				"cell": _cell_value(world),
+				"pushes": pushes,
+			})
+			return {
+				"ok": false, "path": path,
+				"reason": "boulder push from %s failed: %s" % [
+					push["approach"], moved.get("reason", ""),
+				],
+			}
+	path.append({
+		"step": "cianwood_gym_boulders",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"pushes": pushes,
+	})
+
+	_mirror_party(world, save)
+	var chuck: Dictionary = _talk_to(
+		world, Vector2i(4, 2), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "cianwood_gym_chuck",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": chuck.get("run", {}),
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(chuck.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Chuck failed: %s" % chuck.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		BADGE_STORM, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return {"ok": false, "path": path, "reason": "ENGINE_STORMBADGE was not set"}
+
+	var leaving: Dictionary = _warp_step(world, 22, 3)
+	if not bool(leaving.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Cianwood Gym exit warp failed"}
+	var _city_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	return {"ok": true}
+
+
+## Walks to [param approach] and steps into [param direction], which is a push
+## rather than a step because a boulder stands there. DoPlayerMovement.CheckNPC
+## bumps the player on a push, so the step reports blocked and the boulder moving
+## is the success signal.
+func _push_boulder_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	direction: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	var result: Dictionary = world.move_result(direction)
+	if not result.has("boulder_pushed"):
+		return {
+			"ok": false,
+			"reason": "no boulder moved from %s: %s" % [
+				approach, result.get("reason", "step succeeded"),
+			],
+		}
+	var pushed: Dictionary = result["boulder_pushed"]
+	return {
+		"ok": true,
+		"from_cell": _cell_value_from_vector(pushed["from_cell"]),
+		"to_cell": _cell_value_from_vector(pushed["to_cell"]),
+		"player_cell": _cell_value(world),
+	}
+
+
+## Stands in for AskTeachTMHM and TeachTMHM, which are not implemented: fills the
+## first empty move slot of the first party member that has one, so the party
+## mirror can answer CheckPartyMove. An egg is skipped, matching
+## CheckIfCurPartyMonIsFitToFight refusing one as a combatant.
+func _teach_move(save: Gen2SaveData, move: int) -> bool:
+	for mon: Gen2SaveMon in save.party:
+		if mon.is_egg or mon.moves.has(move):
+			continue
+		for slot: int in mon.moves.size():
+			if int(mon.moves[slot]) == 0:
+				mon.moves[slot] = move
+				return true
+	return false
+
+
+func _party_moves(save: Gen2SaveData) -> Array:
+	var out: Array = []
+	for mon: Gen2SaveMon in save.party:
+		out.append(mon.moves.duplicate())
+	return out
 
 
 ## Olivine City to Cianwood City and back. Only the Route 40 and Route 41 legs

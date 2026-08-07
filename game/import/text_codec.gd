@@ -27,6 +27,9 @@ const UNKNOWN: int = 0xE6
 ## The longest character sequence one tile can stand for: the apostrophe
 ## ligatures ('s, 't) and PK/MN are two characters in a single glyph, because
 ## the font has no room for a free-standing apostrophe followed by a letter.
+## The longer word codes $54 ("POKé") and $4a ("PKMN") are not reachable through
+## this: they sit below FIRST_PRINTABLE and so are decode-only by design. Write
+## "#" for $54 the way the source charmap does.
 const MAX_LIGATURE: int = 2
 
 static var _table: Dictionary = {}
