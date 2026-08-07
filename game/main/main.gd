@@ -159,6 +159,12 @@ func _build_ui() -> void:
 		"*.gbc; Game Boy Color ROM",
 	])
 	_file_dialog.title = "Choose a Gold, Silver, or Crystal ROM"
+	# Android's own picker is the only one that returns a readable file: the app
+	# declares no storage permission, so a path the built-in browser lists still
+	# fails to open. The system picker grants access to the one file chosen.
+	_file_dialog.use_native_dialog = DisplayServer.has_feature(
+		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
+	)
 	_file_dialog.file_selected.connect(_on_file_selected)
 	add_child(_file_dialog)
 
@@ -167,6 +173,7 @@ func _build_ui() -> void:
 	_mod_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	_mod_dialog.filters = PackedStringArray(["*.zip; Mod archive"])
 	_mod_dialog.title = "Choose a mod .zip"
+	_mod_dialog.use_native_dialog = _file_dialog.use_native_dialog
 	_mod_dialog.file_selected.connect(import_mod_path)
 	add_child(_mod_dialog)
 
