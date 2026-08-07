@@ -28,6 +28,9 @@ const WALK_RESOLVE_ATTEMPTS: int = 16
 
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
 const ITEM_HM_STRENGTH: int = 0xF6
+## The two Radio Tower keys, from the same hex comment column.
+const ITEM_CARD_KEY: int = 0x7F
+const ITEM_BASEMENT_KEY: int = 0x85
 ## ENGINE_STORMBADGE's place in source badge order, for Gen2WorldState.badge_flag().
 const BADGE_STORM: int = 5
 
@@ -43,6 +46,11 @@ const MAHOGANY_TOWN_NUMBER: int = 7
 ## constants/event_flags.asm. RadioTowerRocketsScript sets it, which hides the
 ## RageCandyBar merchant standing on Mahogany's east edge.
 const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
+## The two flags RadioTower5FRocketBossScript sets that this leg exists for. The
+## second hides BLACKTHORNCITY_SUPER_NERD1, who otherwise stands on the only
+## cell that reaches Blackthorn Gym's door (`maps/BlackthornCity.asm`).
+const EVENT_CLEARED_RADIO_TOWER: int = 33
+const EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM: int = 1763
 
 ## Route 44's Ice Path door and then every warp cell the cave is crossed by, in
 ## order (`maps/Route44.asm`, `maps/IcePath*.asm`).
@@ -55,8 +63,7 @@ const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
 ##
 ## The `stonetable` boulders on B1F are not on this path. Their holes (B1F warps
 ## 3 to 6) are shortcuts into B2F Mahogany side, which the walk already reaches
-## through warp 2, so the command-queue gap that stops Blackthorn Gym does not
-## stop the cave.
+## through warp 2.
 const ICE_PATH_DOORS: Array = [
 	{"step": "route_44_to_ice_path_1f", "cell": Vector2i(56, 7)},
 	{"step": "ice_path_1f_to_b1f", "cell": Vector2i(37, 5)},
@@ -785,6 +792,10 @@ func _story_path(data: GameData) -> Dictionary:
 	var glacier: Dictionary = _glacier_badge_path(world, save, random, data, path)
 	if not bool(glacier.get("ok", false)):
 		return glacier
+
+	var radio_tower: Dictionary = _radio_tower_path(world, save, random, data, path)
+	if not bool(radio_tower.get("ok", false)):
+		return radio_tower
 
 	var blackthorn: Dictionary = _blackthorn_path(world, save, random, data, path)
 	if not bool(blackthorn.get("ok", false)):
@@ -2498,7 +2509,557 @@ func _glacier_badge_path(
 	return {"ok": true}
 
 
+## Mahogany Town west to Goldenrod City and back, clearing the Radio Tower.
+##
+## This leg is what opens Blackthorn Gym. `maps/BlackthornCity.asm` stands
+## BLACKTHORNCITY_SUPER_NERD1 on (18,12), the only cell that reaches the gym
+## door warp at (18,11), and its event flag is set only by
+## `maps/RadioTower5F.asm`'s boss script. Beating Pryce already ran
+## `RadioTowerRocketsScript` (`engine/events/std_scripts.asm`), so the takeover
+## is armed before the leg starts: the Rockets are visible and the Black Belt
+## who would block 2F's stairs is hidden.
+##
+## The walk back is six connections west, all of them crossed eastward earlier
+## in the route, and the two Route 42 lakes are surfed in reverse. Appends to
+## [param path] and answers only ok or the failure.
+func _radio_tower_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 2, 7)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Mahogany Gym exit warp failed"}
+	var _town_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var westward: Dictionary = _goldenrod_crossing(world, save, random, data, path, "west")
+	if not bool(westward.get("ok", false)):
+		return westward
+
+	var basement_key: Dictionary = _radio_tower_basement_key(world, save, random, data, path)
+	if not bool(basement_key.get("ok", false)):
+		return basement_key
+
+	var card_key: Dictionary = _goldenrod_underground_card_key(world, save, random, data, path)
+	if not bool(card_key.get("ok", false)):
+		return card_key
+
+	var boss: Dictionary = _radio_tower_boss(world, save, random, data, path)
+	if not bool(boss.get("ok", false)):
+		return boss
+
+	var eastward: Dictionary = _goldenrod_crossing(world, save, random, data, path, "east")
+	if not bool(eastward.get("ok", false)):
+		return eastward
+
+	return {"ok": true}
+
+
+## The card-key shutter on Radio Tower 3F and the Rocket boss on 5F.
+##
+## `CardKeySlotScript` is a BGEVENT_UP at (14,2), so it is read by facing up
+## from (14,3). It changeblocks the shutter open and sets
+## EVENT_USED_THE_CARD_KEY_IN_THE_RADIO_TOWER, which is what
+## RadioTower3FCardKeyShutterCallback replays on every later load. Only then
+## does 3F's second staircase at (17,0) exist, and it is the only way into the
+## 4F and 5F shafts the boss stands in.
+func _radio_tower_boss(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var climbed: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(5, 15), Vector2i(15, 0), Vector2i(0, 0)]
+	)
+	if not bool(climbed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Radio Tower return climb failed: %s" % climbed.get("reason", ""),
+		}
+
+	var slot: Dictionary = _talk_to(
+		world, Vector2i(14, 3), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "radio_tower_card_key_slot",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": slot.get("run", {}),
+	})
+	if not bool(slot.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "card key slot failed: %s" % slot.get("reason", ""),
+		}
+
+	var to_boss: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(17, 0), Vector2i(12, 0)]
+	)
+	if not bool(to_boss.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Radio Tower shutter shaft failed: %s" % to_boss.get("reason", ""),
+		}
+
+	var boss: Dictionary = _walk_cell_resolving(world, Vector2i(16, 5), save, random, data)
+	path.append({
+		"step": "radio_tower_rocket_boss",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": boss.get("encounters", []),
+		"cleared_radio_tower": world.event_flag_active(EVENT_CLEARED_RADIO_TOWER),
+		"blackthorn_gym_open": world.event_flag_active(
+			EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM
+		),
+	})
+	if not bool(boss.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Rocket boss failed: %s" % boss.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_CLEARED_RADIO_TOWER):
+		return {"ok": false, "path": path, "reason": "the Radio Tower did not clear"}
+	if not world.event_flag_active(EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM):
+		return {"ok": false, "path": path, "reason": "Blackthorn Gym is still sealed"}
+
+	var descended: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(12, 0), Vector2i(17, 0), Vector2i(0, 0), Vector2i(15, 0), Vector2i(2, 7)]
+	)
+	if not bool(descended.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Radio Tower return descent failed: %s" % descended.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Goldenrod City to the warehouse director's CARD_KEY, and back.
+##
+## Three maps, each cut into regions the others join. GoldenrodUnderground's
+## north half is reached from the switch room's south corridor and ends at the
+## basement door (18,6), which `BasementDoorScript` unlocks with the
+## BASEMENT_KEY and which then warps to the underground's south half. That half
+## reaches the switch room's top corridor, where the three switches are.
+##
+## The puzzle is `GoldenrodUndergroundSwitchRoomEntrances_UpdateDoors`: switch 1,
+## 2 and 3 add 1, 2 and 3 to `wUndergroundSwitchPositions` and each position
+## opens some doors and closes others, leaving the ones it does not name alone,
+## so states accumulate. Turning 3, then 2, then 1 walks positions 3, 5 and 6 and
+## ends with doors 3, 5, 6, 8, 9 and 11 open, which is the one chain from the top
+## corridor to the warehouse doors at (22,10) and (23,10).
+##
+## Coming back needs the emergency switch: the warehouse's own
+## MAPCALLBACK_NEWMAP clears every door event, so re-entering the switch room
+## seals the room the warehouse opens into, and `EmergencySwitchScript` at
+## (20,11) is the only switch reachable from inside it.
+func _goldenrod_underground_card_key(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var inbound: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(9, 5), Vector2i(21, 25)]
+	)
+	if not bool(inbound.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod Underground entry failed: %s" % inbound.get("reason", ""),
+		}
+
+	var basement_door: Dictionary = _talk_to(
+		world, Vector2i(18, 7), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "goldenrod_underground_basement_door",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": basement_door.get("run", {}),
+	})
+	if not bool(basement_door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "basement door failed: %s" % basement_door.get("reason", ""),
+		}
+
+	var to_switch_room: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(18, 6), Vector2i(22, 27)]
+	)
+	if not bool(to_switch_room.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "basement door crossing failed: %s" % to_switch_room.get("reason", ""),
+		}
+
+	# Switch 3, then 2, then 1. The rival's coord event at (19,4) and (19,5) sits
+	# on the way to the first of them.
+	for switch: Vector2i in [Vector2i(2, 2), Vector2i(10, 2), Vector2i(16, 2)]:
+		var thrown: Dictionary = _talk_to(
+			world, switch, Gen2WorldSprite.FACING_UP, save, random, data
+		)
+		path.append({
+			"step": "goldenrod_underground_switch",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": thrown.get("run", {}),
+		})
+		if not bool(thrown.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "switch at %s failed: %s" % [switch, thrown.get("reason", "")],
+			}
+
+	var to_warehouse: Dictionary = _warp_chain(world, save, random, data, [Vector2i(22, 10)])
+	if not bool(to_warehouse.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "warehouse door failed: %s" % to_warehouse.get("reason", ""),
+		}
+
+	var director: Dictionary = _talk_to(
+		world, Vector2i(12, 9), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "goldenrod_warehouse_director",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": director.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(director.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "warehouse director failed: %s" % director.get("reason", ""),
+		}
+	if not world.state.items().has(ITEM_CARD_KEY):
+		return {"ok": false, "path": path, "reason": "the warehouse director left no CARD_KEY"}
+
+	var back_to_switch_room: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(2, 12)]
+	)
+	if not bool(back_to_switch_room.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "warehouse exit failed: %s" % back_to_switch_room.get("reason", ""),
+		}
+
+	var emergency: Dictionary = _talk_to(
+		world, Vector2i(20, 12), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "goldenrod_underground_emergency_switch",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": emergency.get("run", {}),
+	})
+	if not bool(emergency.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "emergency switch failed: %s" % emergency.get("reason", ""),
+		}
+
+	var outbound: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(23, 3), Vector2i(21, 31), Vector2i(3, 2), Vector2i(20, 29)]
+	)
+	if not bool(outbound.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod Underground exit failed: %s" % outbound.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Goldenrod City to the fake director on Radio Tower 5F, and back out.
+##
+## The climb is one shaft: 1F (15,0), 2F (0,0), 3F (7,0), 4F (0,0). 2F's stairs
+## are behind the Black Belt on (0,1), whom `RadioTowerRocketsScript` already
+## hid, and 3F's other staircase at (17,0) is behind the card-key shutter, which
+## is the second half of the leg. 4F and 5F are each two shafts that do not
+## join, so the fake director at 5F (0,3) is reachable only from this one.
+func _radio_tower_basement_key(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var climbed: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(5, 15), Vector2i(15, 0), Vector2i(0, 0), Vector2i(7, 0), Vector2i(0, 0)]
+	)
+	if not bool(climbed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Radio Tower climb failed: %s" % climbed.get("reason", ""),
+		}
+
+	# FakeDirectorScript is a coord event, not an interaction: stepping onto
+	# (0,3) runs it (`maps/RadioTower5F.asm`). It battles EXECUTIVEM_3, hands
+	# over the BASEMENT_KEY and arms the boss coord event with
+	# setscene SCENE_RADIOTOWER5F_ROCKET_BOSS.
+	var fake_director: Dictionary = _walk_cell_resolving(
+		world, Vector2i(0, 3), save, random, data
+	)
+	path.append({
+		"step": "radio_tower_fake_director",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": fake_director.get("encounters", []),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(fake_director.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "fake director failed: %s" % fake_director.get("reason", ""),
+		}
+	if not world.state.items().has(ITEM_BASEMENT_KEY):
+		return {"ok": false, "path": path, "reason": "the fake director left no BASEMENT_KEY"}
+
+	var descended: Dictionary = _warp_chain(
+		world, save, random, data,
+		[Vector2i(0, 0), Vector2i(9, 0), Vector2i(0, 0), Vector2i(15, 0), Vector2i(2, 7)]
+	)
+	if not bool(descended.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Radio Tower descent failed: %s" % descended.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Walks each cell in [param cells] on the map it belongs to and takes the warp
+## there, draining the arrival callbacks between maps.
+func _warp_chain(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	cells: Array,
+) -> Dictionary:
+	for cell: Vector2i in cells:
+		var walked: Dictionary = _warp_walk(world, cell, save, random, data)
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false,
+				"reason": "warp at %s on %s failed: %s" % [
+					cell, _map_value(world), walked.get("reason", ""),
+				],
+			}
+		var _entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+	return {"ok": true}
+
+
+## Mahogany Town and Goldenrod City in either direction, on the same world,
+## state and save. [param heading] is "west" for Mahogany to Goldenrod and
+## "east" for the return.
+##
+## The chain is Mahogany, Route 42, Ecruteak City, Route 37, Route 36, Route 35,
+## Goldenrod (`data/maps/attributes.asm`), with Route 35's south end a gate
+## building rather than a connection (`maps/Route35.asm` warp to
+## ROUTE_35_GOLDENROD_GATE). Route 42's two lakes have no land path around them,
+## so both are surfed, and Route 35's cut tree regrows on every map load, so it
+## is cut on every crossing.
+func _goldenrod_crossing(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	heading: String,
+) -> Dictionary:
+	var westbound: bool = heading == "west"
+	if westbound:
+		var to_route_42: Dictionary = _walk_connection_resolving(
+			world, "west", 2, 5, save, random, data
+		)
+		var _r42_entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		if not bool(to_route_42.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Mahogany to Route 42 failed: %s" % to_route_42.get("reason", ""),
+			}
+		# The same two lakes _glacier_badge_path() crossed eastward, taken from
+		# the far shore each time.
+		var second_lake: Dictionary = _lake_crossing(
+			world, save, random, data,
+			Vector2i(42, 9), Gen2WorldSprite.FACING_LEFT, Vector2i(33, 10)
+		)
+		if not bool(second_lake.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 42 east lake westbound failed: %s" % second_lake.get("reason", ""),
+			}
+		var first_lake: Dictionary = _lake_crossing(
+			world, save, random, data,
+			Vector2i(22, 12), Gen2WorldSprite.FACING_LEFT, Vector2i(13, 9)
+		)
+		if not bool(first_lake.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 42 west lake westbound failed: %s" % first_lake.get("reason", ""),
+			}
+		path.append({
+			"step": "route_42_lakes_westbound",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"movement_mode": String(world.movement_mode),
+		})
+		# Route 42's west end is the Ecruteak gate, not a connection: (0,8) and
+		# (0,9) are its only west-edge cells and both are warps
+		# (`maps/Route42.asm`).
+		var to_ecruteak: Dictionary = _gate_leg(
+			world, save, random, data, Vector2i(0, 8), 4, 9
+		)
+		if not bool(to_ecruteak.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 42 to Ecruteak failed: %s" % to_ecruteak.get("reason", ""),
+			}
+		for leg: Array in [["south", 10, 4], ["south", 10, 3], ["south", 10, 2]]:
+			var walked: Dictionary = _walk_connection_resolving(
+				world, String(leg[0]), int(leg[1]), int(leg[2]), save, random, data
+			)
+			var _entry: Dictionary = _drain_story(
+				world, world.dispatch_map_entry(), save, random, data
+			)
+			if not bool(walked.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "walk %s to %d/%d failed: %s" % [
+						leg[0], leg[1], leg[2], walked.get("reason", ""),
+					],
+				}
+		var south_cut: Dictionary = _cut_at(
+			world, Vector2i(17, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
+		)
+		if not bool(south_cut.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 35 southbound cut failed: %s" % south_cut.get("reason", ""),
+			}
+		var to_goldenrod: Dictionary = _gate_leg(
+			world, save, random, data, Vector2i(9, 33), 11, 2
+		)
+		if not bool(to_goldenrod.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 35 to Goldenrod failed: %s" % to_goldenrod.get("reason", ""),
+			}
+		path.append({
+			"step": "mahogany_to_goldenrod",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+		})
+		return {"ok": true}
+
+	var to_route_35: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(19, 1), 10, 2
+	)
+	if not bool(to_route_35.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod to Route 35 failed: %s" % to_route_35.get("reason", ""),
+		}
+	var north_cut: Dictionary = _cut_at(
+		world, Vector2i(17, 7), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	if not bool(north_cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 northbound cut failed: %s" % north_cut.get("reason", ""),
+		}
+	for leg: Array in [["north", 10, 3], ["north", 10, 4], ["north", 4, 9]]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg[0]), int(leg[1]), int(leg[2]), save, random, data
+		)
+		var _entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "walk %s to %d/%d failed: %s" % [
+					leg[0], leg[1], leg[2], walked.get("reason", ""),
+				],
+			}
+	var to_route_42: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(35, 26), 2, 5
+	)
+	if not bool(to_route_42.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ecruteak to Route 42 failed: %s" % to_route_42.get("reason", ""),
+		}
+	var west_lake: Dictionary = _lake_crossing(
+		world, save, random, data,
+		Vector2i(13, 9), Gen2WorldSprite.FACING_RIGHT, Vector2i(22, 12)
+	)
+	if not bool(west_lake.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 west lake eastbound failed: %s" % west_lake.get("reason", ""),
+		}
+	var east_lake: Dictionary = _lake_crossing(
+		world, save, random, data,
+		Vector2i(33, 10), Gen2WorldSprite.FACING_RIGHT, Vector2i(42, 9)
+	)
+	if not bool(east_lake.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 east lake eastbound failed: %s" % east_lake.get("reason", ""),
+		}
+	var to_mahogany: Dictionary = _walk_connection_resolving(
+		world, "east", 2, 7, save, random, data
+	)
+	var _mahogany_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(to_mahogany.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 to Mahogany failed: %s" % to_mahogany.get("reason", ""),
+		}
+	path.append({
+		"step": "goldenrod_to_mahogany",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+	})
+	return {"ok": true}
+
+
+## Surfs from [param shore] in [param facing] and lands on [param landfall],
+## keeping the plan on the water in between so it cannot step ashore partway.
+func _lake_crossing(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	shore: Vector2i,
+	facing: int,
+	landfall: Vector2i,
+) -> Dictionary:
+	var entered: Dictionary = _surf_at(world, shore, facing, save, random, data)
+	if not bool(entered.get("ok", false)):
+		return entered
+	return _walk_cell_resolving(world, landfall, save, random, data, true)
+
+
 ## Mahogany Town east to Blackthorn City, on the same world, state and save.
+## Starts in the town, since the Radio Tower leg before it left the gym.
 ##
 ## Route 44 carries seven trainers and no scripted gate, so the leg is a walk
 ## the trainers interrupt rather than a sequence of errands. Its one warp is the
@@ -2521,13 +3082,6 @@ func _blackthorn_path(
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
-	var leaving_gym: Dictionary = _warp_step(world, 2, 7)
-	if not bool(leaving_gym.get("ok", false)):
-		return {"ok": false, "path": path, "reason": "Mahogany Gym exit warp failed"}
-	var _town_entry: Dictionary = _drain_story(
-		world, world.dispatch_map_entry(), save, random, data
-	)
-
 	var to_route_44: Dictionary = _walk_connection_resolving(
 		world, "east", 2, 6, save, random, data
 	)

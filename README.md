@@ -199,6 +199,7 @@ Headless tools, all against a real imported cache:
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census, in all three games |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
+| `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction

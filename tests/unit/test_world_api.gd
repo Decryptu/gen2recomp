@@ -1288,6 +1288,58 @@ func test_script_memory_commands_read_write_and_commit_a_byte() -> void:
 	assert_eq(state.script_memory(address), 9, "the ifequal branch ran and committed")
 
 
+## Script_addval adds into wScriptVar, one byte, so it wraps in the variable
+## itself. The Goldenrod switch room turns a switch off with `addval -1` on
+## wUndergroundSwitchPositions and then branches on the result
+## (maps/GoldenrodUndergroundSwitchRoomEntrances.asm).
+func test_addval_wraps_in_the_script_variable_like_the_source_byte_add() -> void:
+	var address: int = 0xD1D7
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# setval 1, addval -1, writemem, then branch on zero.
+	scripts["48:6C20"] = [
+		Gen2WorldScript.SETVAL, 1,
+		Gen2WorldScript.ADDVAL, 0xFF,
+		Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.IFEQUAL, 0, 0x30, 0x6C,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6C30"] = [
+		Gen2WorldScript.SETVAL, 42,
+		Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.END,
+	]
+	# The other edge: 0 - 1 is 255, not -1, so the wrapped value is what a
+	# later ifequal and any writemem see.
+	scripts["48:6C40"] = [
+		Gen2WorldScript.SETVAL, 0,
+		Gen2WorldScript.ADDVAL, 0xFF,
+		Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.IFEQUAL, 255, 0x50, 0x6C,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6C50"] = [
+		Gen2WorldScript.SETVAL, 7,
+		Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var down := Gen2WorldState.new()
+	var to_zero := Gen2WorldScriptRunner.begin(data, down, {
+		"kind": &"test", "bank": 48, "script": 0x6C20,
+	})
+	assert_eq(to_zero.advance()["status"], &"complete")
+	assert_eq(down.script_memory(address), 42, "1 + -1 branched as 0")
+
+	var under := Gen2WorldState.new()
+	var to_255 := Gen2WorldScriptRunner.begin(data, under, {
+		"kind": &"test", "bank": 48, "script": 0x6C40,
+	})
+	assert_eq(to_255.advance()["status"], &"complete")
+	assert_eq(under.script_memory(address), 7, "0 + -1 branched as 255")
+
+
 ## Burned Tower's rival scene opens the hole under the player and then relies on
 ## warpcheck to drop them through it, so the command has to resolve the warp at
 ## the standing cell rather than one the script names.
@@ -2008,7 +2060,7 @@ func test_follower_carries_the_player_walk_step_offset() -> void:
 
 func test_script_object_visibility_changes_rendering_and_occupancy() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
-	var result: Array = world.dispatch_script_events(Vector2i(5, 6))
+	var result: Array = world.dispatch_events(Vector2i(5, 6), true)
 	assert_eq(result.size(), 1)
 	assert_eq(result[0]["status"], &"complete")
 	assert_eq(result[0]["events"][0]["type"], &"object_visibility")
@@ -2266,9 +2318,32 @@ func test_background_events_honor_source_direction_and_conditional_pointer_recor
 	assert_eq(world.dispatch_events(Vector2i(8, 5)).size(), 0)
 	world.set_event_flag(12)
 	assert_eq(world.dispatch_events(Vector2i(8, 5)).size(), 1)
-	var conditional: Array = world.dispatch_script_events(Vector2i(8, 5))
+	var conditional: Array = world.dispatch_events(Vector2i(8, 5), true)
 	assert_eq(conditional.size(), 1)
 	assert_true(world.event_flag_active(11))
+
+
+## CheckTileEvent (engine/overworld/events.asm) runs warps, coord events, the
+## step count and encounters. TryBGEvent is behind CheckAPressOW, so walking
+## onto a background event's own cell runs nothing; only interact() reaches it.
+func test_a_step_onto_a_background_event_runs_nothing() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6178"] = [Gen2WorldScript.SETEVENT, 13, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_READ, "script": 0x6178},
+	]
+
+	assert_true(world.dispatch_script_events(Vector2i(8, 6)).is_empty())
+	assert_false(world.event_flag_active(13))
+
+	# The same record still answers an A press and explicit execution.
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	world.player_cell = Vector2i(8, 7)
+	assert_eq(world.interact().size(), 1)
+	assert_true(world.event_flag_active(13))
 
 
 func test_players_house_pc_special_is_a_host_request_and_returns_false_without_decoration_changes() -> void:
@@ -2670,7 +2745,7 @@ func test_restart_map_music_special_uses_the_audio_runtime_request() -> void:
 
 func test_script_warp_is_validated_before_transition() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
-	var result: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var result: Array = world.dispatch_events(Vector2i(8, 6), true)
 	assert_eq(result.size(), 2)
 	assert_eq(result[0]["status"], &"complete")
 	assert_eq(result[1]["source"]["kind"], &"callback")
@@ -2684,7 +2759,7 @@ func test_script_queue_keeps_event_source_order() -> void:
 	coordinate["x"] = 8
 	coordinate["y"] = 6
 	coordinate["script"] = 0x6010
-	var results: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var results: Array = world.dispatch_events(Vector2i(8, 6), true)
 	assert_eq(results.size(), 3)
 	assert_eq(results[0]["source"]["kind"], &"coord_events")
 	assert_eq(results[1]["source"]["kind"], &"bg_events")
@@ -3580,7 +3655,7 @@ func test_disappear_and_appear_update_the_object_event_flag() -> void:
 	scripts["48:6035"] = [0x6F, 2, 0x91]
 	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
 	var world := _world(Vector2i(5, 6))
-	var disappeared: Array = world.dispatch_script_events()
+	var disappeared: Array = world.dispatch_events(world.player_cell, true)
 	assert_eq(disappeared[0]["status"], &"complete")
 	assert_true(world.event_flag_active(7))
 	assert_eq(world.visible_objects().size(), 0)
@@ -3588,7 +3663,7 @@ func test_disappear_and_appear_update_the_object_event_flag() -> void:
 	world.clear_event_flag(7)
 	var map: Gen2WorldMap = world.current_map
 	map.events["bg_events"][0]["script"] = 0x6035
-	var appeared: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var appeared: Array = world.dispatch_events(Vector2i(8, 6), true)
 	assert_eq(appeared[0]["status"], &"complete")
 	assert_false(world.event_flag_active(7))
 	assert_eq(world.visible_objects().size(), 1)

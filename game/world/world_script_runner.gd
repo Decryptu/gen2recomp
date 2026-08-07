@@ -678,7 +678,10 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.SETVAL:
 			_script_value = int(command["value"])
 		Gen2WorldScript.ADDVAL:
-			_script_value += int(command["value"])
+			## Script_addval adds into wScriptVar, one byte, so it wraps there
+			## and not only where the value is later written. Goldenrod's switch
+			## room turns a switch off with `addval -1` and branches on it.
+			_script_value = (_script_value + int(command["value"])) & 0xFF
 		Gen2WorldScript.READMEM:
 			_script_value = _script_memory_value(int(command["address"]))
 		Gen2WorldScript.WRITEMEM:

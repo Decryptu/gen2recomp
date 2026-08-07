@@ -1513,11 +1513,18 @@ func dispatch_events(cell: Vector2i = player_cell, execute_scripts: bool = false
 	return events
 
 
-## Queues the active scripted records at a cell in cartridge source order and
-## advances until the queue reaches text/button input or is empty.
+## The step path, `CheckTileEvent` (engine/overworld/events.asm): coordinate
+## events only. Background events and object scripts need `CheckAPressOW`, so
+## they belong to interact(); a walk onto a cell carrying one runs nothing.
+## dispatch_events(cell, true) is the explicit-execution call that still reaches
+## every record.
 func dispatch_script_events(cell: Vector2i = player_cell) -> Array:
 	if _active_script == null and _script_queue.is_empty():
-		_enqueue_script_events(_active_events_at(cell))
+		var stepped: Array = []
+		for event: Dictionary in _active_events_at(cell):
+			if event.get("kind", &"") == &"coord_events":
+				stepped.append(event)
+		_enqueue_script_events(stepped)
 	return run_event_queue(false)
 
 

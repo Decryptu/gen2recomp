@@ -669,7 +669,7 @@ func preview_script_event() -> void:
 	for source: String in ["coord_events", "bg_events", "objects"]:
 		for event: Dictionary in _world.current_map.events.get(source, []):
 			var cell := Vector2i(int(event.get("x", -1)), int(event.get("y", -1)))
-			var results: Array = _world.dispatch_script_events(cell)
+			var results: Array = _world.dispatch_events(cell, true)
 			if not results.is_empty():
 				_show_script_results(results)
 				return
