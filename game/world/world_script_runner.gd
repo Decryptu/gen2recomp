@@ -1444,9 +1444,11 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
-		48, 50, 51, 157:
+		46, 48, 50, 51, 157:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
+			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
+			## `BattleTowerFade` sits at 47, so it needs no profile split.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {

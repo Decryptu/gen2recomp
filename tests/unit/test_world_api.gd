@@ -968,6 +968,28 @@ func test_gold_profile_specials_normalize_onto_the_crystal_handlers() -> void:
 	RomCache.clear(gold_directory)
 
 
+func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
+	# Slowpoke Well's cleared script runs FadeOutToWhite before HealParty
+	# (maps/SlowpokeWellB1F.asm, TrainerGruntM1). It is index 46 in both pins,
+	# ahead of Crystal's inserted BattleTowerFade at 47, so the raw byte needs
+	# no profile mapping.
+	assert_eq(Gen2WorldScript.special_index(46, false), 46)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6A00"] = [Gen2WorldScript.SPECIAL, 46, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6A00,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(
+		int(_event_value(result["events"], &"presentation_special_applied", "special")),
+		46,
+		JSON.stringify(result),
+	)
+
+
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]
