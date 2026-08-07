@@ -1146,6 +1146,7 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
 				"active": true,
 			})
+			_stage_object_event_flag(int(command.get("object_id", 0)), true)
 		0x6E:
 			_emit_object_event(&"object_visibility", {
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
@@ -1155,6 +1156,7 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
 				"active": false,
 			})
+			_stage_object_event_flag(int(command.get("object_id", 0)), false)
 		0x6F, 0x76:
 			_emit_object_event(&"object_follow", {
 				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
@@ -1748,6 +1750,20 @@ func _just_battled() -> bool:
 	if _has_staged_just_battled:
 		return _staged_just_battled
 	return state != null and state.just_battled()
+
+
+## `disappear` and `appear` set and clear the object's own event flag where the
+## source does, so a `checkevent` later in the same script reads it back.
+## TeamRocketBaseB2F's third Electrode checks all three straight after
+## disappearing its own, and read the committed value without this.
+func _stage_object_event_flag(object_id: int, active: bool) -> void:
+	var index: int = _object_index_from_id(object_id)
+	var flags: Array = _request.get("object_event_flags", [])
+	if index < 0 or index >= flags.size():
+		return
+	var flag: int = int(flags[index])
+	if flag > 0:
+		_staged_flags[flag] = active
 
 
 func _stage_just_battled(value: bool) -> void:

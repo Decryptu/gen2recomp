@@ -3,6 +3,10 @@ extends RefCounted
 
 const OBJECTTYPE_TRAINER: int = 2
 const TRAINER_RECORD_SIZE: int = 12
+## The two background-event types whose pointer addresses a conditional_event
+## record rather than a script (constants/script_constants.asm).
+const BGEVENT_IFSET: int = 5
+const BGEVENT_IFNOTSET: int = 6
 
 ## Imports the map table, map attributes, map events, tileset tables, overworld
 ## object graphics and addressable overworld tile strips for a verified
@@ -524,6 +528,10 @@ static func _read_map(
 				rom, scripts_bank, int(event.get("script", 0)),
 				script_data, text_data, movement_data
 			)
+			if source == "bg_events":
+				_collect_conditional_bg_script(
+					rom, scripts_bank, event, script_data, text_data, movement_data
+				)
 
 	var tileset: Dictionary = tilesets[tileset_number]
 	var collision_grid: Array = []
@@ -813,6 +821,33 @@ static func _read_map_scripts(
 		at += RomLayout.MAP_CALLBACK_SIZE
 
 	return {"ok": true, "scenes": scenes, "callbacks": callbacks}
+
+
+## A `BGEVENT_IFSET` or `BGEVENT_IFNOTSET` background event does not point at a
+## script. It points at the four-byte `conditional_event` record
+## (`macros/scripts/maps.asm`), an event flag then a near script pointer, and the
+## script is one level behind that. Collecting only the event's own pointer left
+## the door to Giovanni's office and the Rocket hideout's transmitter door
+## resolving to a script that was never cached.
+static func _collect_conditional_bg_script(
+	rom: RomFile,
+	bank: int,
+	event: Dictionary,
+	script_data: Dictionary,
+	text_data: Dictionary,
+	movement_data: Dictionary,
+) -> void:
+	if int(event.get("type", -1)) not in [BGEVENT_IFSET, BGEVENT_IFNOTSET]:
+		return
+	var address: int = int(event.get("script", 0))
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0 or not rom.in_bounds(offset, 4):
+		return
+	_collect_script(
+		rom, bank, rom.u16le(offset + 2), script_data, text_data, movement_data
+	)
 
 
 static func _collect_script(

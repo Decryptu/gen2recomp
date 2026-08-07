@@ -740,9 +740,9 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(mineral.get("ok", false)):
 		return mineral
 
-	var hideout: Dictionary = _rocket_hideout_path(world, save, random, data, path)
-	if not bool(hideout.get("ok", false)):
-		return hideout
+	var glacier: Dictionary = _glacier_badge_path(world, save, random, data, path)
+	if not bool(glacier.get("ok", false)):
+		return glacier
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -1858,17 +1858,17 @@ func _mineral_badge_path(
 	return {"ok": true}
 
 
-## The Mineral Badge to the Rocket hideout's two passwords. Mahogany's gym is
-## closed until the hideout under its souvenir shop is cleared
+## The Mineral Badge to the Glacier Badge. Mahogany's gym is closed until the
+## Rocket hideout under its souvenir shop is cleared
 ## (`EVENT_MAHOGANY_TOWN_POKEFAN_M_BLOCKS_GYM`, `maps/MahoganyTown.asm`), and the
 ## hideout only opens after Lance is met at the Lake of Rage, which is behind the
 ## Red Gyarados in the middle of the water.
 ##
-## The leg stops on B3F with both passwords learned. What is left of the hideout
-## needs floor shuttles this walk does not do yet: B3F's northern half, where the
-## rival, Giovanni's door and the executive are, is reachable only from B2F's own
-## northern half, which the heal room does not reach either.
-func _rocket_hideout_path(
+## The hideout is three floors of one-way halves rather than one maze: each floor
+## is cut in two and the halves are joined through the other floor, so the route
+## climbs and drops the same ladders several times. Its own doors are the only
+## other links, and each opens on something learned a floor away.
+func _glacier_badge_path(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
@@ -2219,6 +2219,210 @@ func _rocket_hideout_path(
 					grunt["name"], password.get("reason", ""),
 				],
 			}
+
+	# B3F's northern half is walled off from this one, and it is entered from
+	# B2F's own northern half, so the route goes up one ladder and down another.
+	var b3f_up: Dictionary = _warp_walk(world, Vector2i(27, 2), save, random, data)
+	if not bool(b3f_up.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F north-east ladder unreachable: %s" % b3f_up.get("reason", ""),
+		}
+	var _b2f_north: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var b3f_down: Dictionary = _warp_walk(world, Vector2i(3, 2), save, random, data)
+	if not bool(b3f_down.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B2F north-west ladder unreachable: %s" % b3f_down.get("reason", ""),
+		}
+	var _b3f_north: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var rival: Dictionary = _walk_cell_resolving(world, Vector2i(8, 10), save, random, data)
+	path.append({
+		"step": "rocket_base_b3f_rival",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": rival.get("encounters", []),
+		"scene": world.state.map_scene(3, 51),
+	})
+	if not bool(rival.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F rival scene failed: %s" % rival.get("reason", ""),
+		}
+	# Giovanni's door is the only way into the office: row 9 is solid either side
+	# of it. It opens on the two passwords and changeblocks itself to floor.
+	var office_door: Dictionary = _talk_to(
+		world, Vector2i(10, 10), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "rocket_base_b3f_giovannis_door",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": office_door.get("run", {}),
+	})
+	if not bool(office_door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F office door failed: %s" % office_door.get("reason", ""),
+		}
+	var executive: Dictionary = _walk_cell_resolving(world, Vector2i(10, 8), save, random, data)
+	path.append({
+		"step": "rocket_base_b3f_executive",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": executive.get("encounters", []),
+		"scene": world.state.map_scene(3, 51),
+	})
+	if not bool(executive.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F executive failed: %s" % executive.get("reason", ""),
+		}
+	# The Murkrow behind the desk is what says the transmitter password.
+	var murkrow: Dictionary = _talk_to(
+		world, Vector2i(7, 3), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "rocket_base_b3f_murkrow",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": murkrow.get("run", {}),
+	})
+	if not bool(murkrow.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F Murkrow failed: %s" % murkrow.get("reason", ""),
+		}
+
+	# Back down to the machine room's own floor, which means unwinding the same
+	# three ladders: B2F's north-west pocket does not reach its south half either.
+	for ladder: Dictionary in [
+		{"step": "b3f_north_to_b2f_north", "cell": Vector2i(3, 2)},
+		{"step": "b2f_north_to_b3f_south", "cell": Vector2i(27, 2)},
+		{"step": "b3f_south_to_b2f_south", "cell": Vector2i(27, 14)},
+	]:
+		var taken: Dictionary = _warp_walk(world, ladder["cell"], save, random, data)
+		if not bool(taken.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s ladder unreachable: %s" % [
+					ladder["step"], taken.get("reason", ""),
+				],
+			}
+		var _floor_entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+	# The machine room is walled off on every side but its own door: B2F's row 12
+	# is solid and rows 3 to 11 between x=7 and x=22 touch nothing else. So the
+	# transmitter door is the way in, and it opens on the password the Murkrow
+	# gave.
+	var transmitter_door: Dictionary = _talk_to(
+		world, Vector2i(14, 13), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "rocket_base_b2f_transmitter_door",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": transmitter_door.get("run", {}),
+	})
+	if not bool(transmitter_door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B2F transmitter door failed: %s" % transmitter_door.get("reason", ""),
+		}
+	# Stepping onto the cell north of that door is the executive's coord event,
+	# and it ends by arming the electrodes.
+	# The scene walks the player itself and then confines them with the
+	# electrodes, so the walk is expected not to reach its own target: what says
+	# the executive happened is the scene moving on.
+	var boss_f: Dictionary = _walk_cell_resolving(world, Vector2i(14, 11), save, random, data)
+	var electrodes_armed: bool = world.state.map_scene(3, 50) == 2
+	path.append({
+		"step": "rocket_base_b2f_executive",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": boss_f.get("encounters", []),
+		"scene": world.state.map_scene(3, 50),
+	})
+	if not electrodes_armed:
+		return {
+			"ok": false, "path": path,
+			"reason": "B2F executive failed: %s" % boss_f.get("reason", ""),
+		}
+	# Three Electrodes power the transmitter. Each is a loadwildmon battle, and
+	# the third one to fall runs the script that ends the hideout.
+	for electrode: Dictionary in [
+		{"name": "1", "cell": Vector2i(8, 5)},
+		{"name": "2", "cell": Vector2i(8, 7)},
+		{"name": "3", "cell": Vector2i(8, 9)},
+	]:
+		var zapped: Dictionary = _talk_to(
+			world, electrode["cell"], Gen2WorldSprite.FACING_LEFT, save, random, data
+		)
+		path.append({
+			"step": "rocket_base_b2f_electrode_%s" % electrode["name"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": zapped.get("run", {}),
+			"items": _named_items(data, world.state.items()),
+		})
+		if not bool(zapped.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "B2F electrode %s failed: %s" % [
+					electrode["name"], zapped.get("reason", ""),
+				],
+			}
+
+	# Out the way the route came in. Clearing the base hides the grunts, so the
+	# walk back is not the one that came down.
+	for ladder: Dictionary in [
+		{"step": "b2f_to_b1f", "group": 3, "number": 49, "cell": Vector2i(3, 14)},
+		{"step": "b1f_to_the_shop", "group": 3, "number": 48, "cell": Vector2i(27, 2)},
+		{"step": "shop_to_mahogany", "group": 2, "number": 7, "cell": Vector2i(3, 7)},
+	]:
+		var climbed: Dictionary = _warp_walk(world, ladder["cell"], save, random, data)
+		if not bool(climbed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s unreachable: %s" % [ladder["step"], climbed.get("reason", "")],
+			}
+		var _above: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+
+	world.set_party_summary(save.party.size(), false)
+	var gym: Dictionary = _warp_walk(world, Vector2i(6, 13), save, random, data)
+	if not bool(gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Mahogany Gym door unreachable: %s" % gym.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	# Pryce's floor is COLL_ICE, which is LAND_TILE, so the walk crosses it
+	# without the source's sliding.
+	var pryce: Dictionary = _talk_to(
+		world, Vector2i(5, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "mahogany_gym_pryce",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"run": pryce.get("run", {}),
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(pryce.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Pryce failed: %s" % pryce.get("reason", ""),
+		}
 	return {"ok": true}
 
 

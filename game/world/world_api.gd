@@ -1761,6 +1761,15 @@ func _enqueue_script(request: Dictionary) -> void:
 		request["facing"] = player_facing
 	if not request.has("party") and not _party_summary.is_empty():
 		request["party"] = _party_summary.duplicate()
+	if not request.has("object_event_flags"):
+		## `disappear` and `appear` write an object's event flag where the source
+		## does, inside the script, so a later `checkevent` on the same flag sees
+		## it. The runner holds no object table, so it is handed the flag per
+		## object index the way it is handed collision and the clock.
+		var object_flags: Array[int] = []
+		for object: Gen2WorldObject in objects:
+			object_flags.append(object.event_flag)
+		request["object_event_flags"] = object_flags
 	_script_queue.append(request)
 
 
