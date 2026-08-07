@@ -3,44 +3,36 @@ extends RefCounted
 
 ## What each move's effect byte makes it do, as a list of commands.
 ##
-## This is the table the cartridge keeps in [code]data/moves/effects.asm[/code],
-## and the sequences below are meant to be read against it. Every move in these
-## games is one of these lists; a move number picks an effect byte and an effect
-## byte picks a list.
+## The table the cartridge keeps in [code]data/moves/effects.asm[/code], to be
+## read against it. A move number picks an effect byte and an effect byte picks a
+## list.
 ##
-## Almost every list is [constant NORMAL_HIT] with something inserted. That is
-## the whole reason for keeping the shape: burn, paralysis, the stat changes,
-## the multi-hit moves and the rest arrive as commands added to a list rather
-## than as branches added to the turn loop, and none of them reaches
-## [Gen2Battle], which knows only how to run a list.
-##
-## The effect bytes themselves are the cartridge's own, out of the move table.
+## Almost every list is [constant NORMAL_HIT] with something inserted, which is
+## the reason for keeping the shape: burn, paralysis, stat changes and the
+## multi-hit moves are commands added to a list rather than branches added to the
+## turn loop. The effect bytes are the cartridge's own.
 
-## The effect bytes with a list of their own. The numbers are the cartridge's,
-## out of the move table.
+## The effect bytes with a list of their own, numbered as the cartridge's move
+## table numbers them.
 ##
-## Recoil is here because Struggle needs it: a Pokémon with nothing left to spend
-## has to be able to hurt itself, or two empty Pokémon never finish their battle.
-## The rest are the status conditions, in the two shapes they come in: a move
-## whose whole purpose is the status, and a move that does damage and leaves
+## Recoil is here because Struggle needs it: without it two empty Pokémon never
+## finish their battle. The rest are the status conditions in their two shapes, a
+## move whose whole purpose is the status and a move that damages and leaves
 ## something behind on a roll.
 const SLEEP: int = 1
 const POISON_HIT: int = 2
-## Absorb, Mega Drain, Giga Drain and Leech Life: half of what the hit
-## calculated healed onto the attacker. Named for the disassembly's own
-## "LeechHit" label rather than a bare "drain", so this reads against
-## `data/moves/effects_pointers.asm` line for line the way every other
-## constant here does.
+## Absorb, Mega Drain, Giga Drain and Leech Life: half the calculated hit healed
+## onto the attacker. Named for the disassembly's "LeechHit" label rather than a
+## bare "drain", so this reads against `data/moves/effects_pointers.asm` line for
+## line.
 const LEECH_HIT: int = 3
 const BURN_HIT: int = 4
 const FREEZE_HIT: int = 5
 const PARALYZE_HIT: int = 6
-## Dream Eater: the same drain [constant LEECH_HIT] leaves, gated on the
-## target being asleep. The gate lives inside
-## [method Gen2EffectCommands._check_hit] rather than a command of its own,
-## because that is where the real cartridge's shared accuracy check puts it: a
-## Dream Eater used on a Pokémon that is not asleep is read as a miss, not as
-## a separate failure.
+## Dream Eater: [constant LEECH_HIT]'s drain gated on the target being asleep.
+## The gate lives inside [method Gen2EffectCommands._check_hit] rather than its
+## own command, because that is where the cartridge's shared accuracy check puts
+## it: against an awake target it reads as a miss, not a separate failure.
 const DREAM_EATER: int = 8
 const TOXIC: int = 33
 const RECOIL_HIT: int = 48
@@ -78,13 +70,11 @@ const LEVEL_DAMAGE: int = 87
 ## Psywave: a roll of the user's own, [method Gen2Damage.psywave_damage].
 const PSYWAVE: int = 88
 
-## The substatuses: flinching and confusion, each in the two shapes a status
-## can come in, plus Hyper Beam's own effect, which is the only move that
-## recharges. The numbers are read off the real cartridge's move table with
-## [code]tools/dump_tables.gd[/code], the same way every other effect byte here
-## was: Rolling Kick, Headbutt, Bite, Bone Club and Hyper Fang all carry 31;
-## Confusion and Psybeam carry 76; Supersonic and Confuse Ray carry 49; Hyper
-## Beam alone carries 80.
+## The substatuses: flinching and confusion in both shapes, plus Hyper Beam, the
+## only move that recharges. Numbers read off the real move table with
+## [code]tools/dump_tables.gd[/code]: Rolling Kick, Headbutt, Bite, Bone Club and
+## Hyper Fang carry 31; Confusion and Psybeam 76; Supersonic and Confuse Ray 49;
+## Hyper Beam 80.
 const FLINCH_HIT: int = 31
 const CONFUSE_HIT: int = 76
 const CONFUSE: int = 49
@@ -136,12 +126,11 @@ const HAZE: int = 25
 const BELLY_DRUM: int = 142
 const PSYCH_UP: int = 143
 
-## Disable, Mist, Focus Energy, Attract and Encore: the numbers are read off
-## the real cartridge with [code]tools/dump_tables.gd -- gold moves[/code], the
-## same way every other effect byte here was, since Gold, Silver and Crystal do
-## not share Generation 1's numbering. Mist and Focus Energy need nothing new;
-## Disable, Attract and Encore are what
-## [member Gen2BattleMon.disabled_slot]/[member Gen2BattleMon.encored_slot] and
+## Disable, Mist, Focus Energy, Attract and Encore, numbered off the real
+## cartridge with [code]tools/dump_tables.gd -- gold moves[/code], since Gen II
+## does not share Generation 1's numbering. Mist and Focus Energy need nothing
+## new; Disable, Attract and Encore are what
+## [member Gen2BattleMon.disabled_slot], [member Gen2BattleMon.encored_slot] and
 ## [method Gen2BattleMon.gender] exist for.
 const DISABLE: int = 86
 const MIST: int = 46

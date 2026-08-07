@@ -2,11 +2,10 @@ extends GutTest
 
 ## The experience arithmetic, against the published totals for each curve.
 ##
-## Every figure here is hand-worked from pokecrystal's own
-## [code]CalcExpAtLevel[/code] formula rather than recomputed the way the code
-## computes it, the same discipline [Gen2Damage]'s own tests hold to: a test
-## that ran the formula to check the formula would agree with a wrong one just
-## as readily as a right one.
+## Every figure is hand-worked from [code]CalcExpAtLevel[/code] rather than
+## recomputed the way the code computes it, like [Gen2Damage]'s tests: a test
+## that runs the formula to check the formula agrees with a wrong one just as
+## readily.
 
 
 func test_medium_fast_is_a_plain_cube() -> void:

@@ -2,14 +2,12 @@ extends Node
 
 ## Runtime selection shared by the launcher and screens opened from it.
 ##
-## Cartridge bytes and decoded data remain owned by their existing layers. The
-## selected save is the one exception: it is mutable, and every screen that
-## reads it has to be looking at the same one.
-##
-## Re-reading the slot per call returned a fresh instance each time, so a battle
-## result, a party transaction and a world snapshot each held a different save
-## and only whichever wrote last survived. The slot is loaded once here and kept
-## until the selection changes or a caller asks for it again from disk.
+## Cartridge bytes and decoded data stay owned by their existing layers. The
+## selected save is the exception: it is mutable, and every screen has to see the
+## same instance. Re-reading the slot per call handed a battle result, a party
+## transaction and a world snapshot three different saves, and only the last
+## write survived. The slot is loaded once and kept until the selection changes
+## or a caller asks for it from disk again.
 
 var selected_game_id: StringName = &""
 var selected_save_slot: int = -1
@@ -21,10 +19,10 @@ var _loaded_mods: Array = []
 
 ## Loads installed mods before any screen exists.
 ##
-## A mod registers what it provides and returns, so this has to happen before the
-## first screen asks the host for one: a renderer registered after the overworld
-## was built would not be offered until the next map. Loading here also means a
-## broken mod is reported while there is still a launcher to report it in.
+## A mod registers what it provides and returns, so this must happen before the
+## first screen asks the host: a renderer registered after the overworld was
+## built would not be offered until the next map. It also means a broken mod is
+## reported while there is still a launcher to report it in.
 func _ready() -> void:
 	load_mods()
 

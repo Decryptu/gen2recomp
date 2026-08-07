@@ -3,18 +3,16 @@ extends RefCounted
 
 ## Where decoded cartridge data lives between runs.
 ##
-## Under [code]user://[/code], never inside the project: the cache is derived
-## from a commercial cartridge, so it must not be committed and must not end up
-## in an export. Keeping it here is the runtime half of the rule the .gitignore
-## and the pre-commit hook enforce at build time.
+## Under [code]user://[/code], never inside the project: cartridge-derived data
+## must not be committed or exported. This is the runtime half of the rule
+## .gitignore and the pre-commit hook enforce at build time.
 ##
-## One directory per dump, named by game and hash, so two revisions of the same
-## game never share a cache and a re-import cannot half-overwrite the last one.
+## One directory per dump, named by game and hash, so two revisions never share a
+## cache and a re-import cannot half-overwrite the last one.
 ##
-## Pixel data is stored as raw colour indices rather than as images. It is what
-## the renderer wants (palettes are applied per species and per shiny state at
-## draw time), and it avoids a decode round-trip whose exactness would have to
-## be trusted.
+## Pixel data is raw colour indices rather than images: it is what the renderer
+## wants, with palettes applied per species and shiny state at draw time, and it
+## avoids a decode round-trip whose exactness would have to be trusted.
 
 const ROOT: String = "user://rom_cache"
 const MANIFEST: String = "manifest.json"
@@ -225,12 +223,11 @@ static func read_json(path: String) -> Variant:
 
 ## One cached grid of cartridge bytes, packed on the way out of JSON.
 ##
-## A JSON number comes back as a float and an Array of them costs about
-## twenty-six bytes resident per cartridge byte. The map block, map collision and
-## tileset lookup tables are all byte grids that are read once per drawn tile and
-## are resident for every map at once, so they are unboxed here rather than at
-## each lookup. A value that is not an array answers empty, which the record's
-## own bounds checks then report as absent.
+## A JSON number returns as a float, and an Array of them costs about twenty-six
+## resident bytes per cartridge byte. Map block, map collision and tileset lookup
+## tables are byte grids read once per drawn tile and resident for every map at
+## once, so they are unboxed here rather than at each lookup. A non-array answers
+## empty, which the record's bounds checks report as absent.
 static func packed_bytes(value: Variant) -> PackedByteArray:
 	if value is PackedByteArray:
 		return value

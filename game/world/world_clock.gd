@@ -6,9 +6,9 @@ extends RefCounted
 ## each completed game minute, while time-of-day changes use the cartridge's
 ## 04:00, 10:00 and 18:00 boundaries.
 ##
-## The clock does not move roaming Pokémon. The cartridge advances those during
-## map setup, so [method Gen2WorldAPI.advance_schedule] is driven by a map
-## change rather than by elapsed time.
+## The clock does not move roaming Pokémon: the cartridge advances those during
+## map setup, so [method Gen2WorldAPI.advance_schedule] is driven by a map change
+## rather than elapsed time.
 
 const SECONDS_PER_MINUTE: float = 60.0
 const MINUTES_PER_HOUR: int = 60

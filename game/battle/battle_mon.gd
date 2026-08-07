@@ -4,14 +4,13 @@ extends RefCounted
 ## One Pokémon as a battle sees it: its stats, what it knows, how much of it is
 ## left, and how far its stats have been pushed around.
 ##
-## [RefCounted] and scene-free, like everything below the renderer, so a whole
-## battle can be fought inside a test with no display. It reads cartridge content
-## through [GameData] and never touches a ROM.
+## [RefCounted] and scene-free, reading cartridge content through [GameData] and
+## never a ROM.
 ##
-## The stats are worked out once, when the Pokémon is built, because that is when
-## the cartridge works them out: a level up recalculates them, and nothing else
-## in a battle does. Stages are applied on the way out instead, to the unmodified
-## stat every time, which is why they are stored separately rather than folded in.
+## Stats are worked out once, at build time, because that is when the cartridge
+## works them out; only a level up recalculates them. Stages are applied on the
+## way out, to the unmodified stat every time, which is why they are stored
+## separately rather than folded in.
 
 ## What a Pokémon can carry into a battle, which is the same four slots
 ## [Gen2Learnset] fills.
@@ -39,11 +38,10 @@ var level: int = 1
 var dvs: int = PERFECT_DVS
 var stat_exp: Dictionary = {}
 
-## Total experience, on this species' own growth curve. Seeded at
-## [method create] to exactly what [param at_level] starts with, not zero: a
-## level 7 Pidgey is created already carrying level 7's own threshold, the same
-## way the cartridge's box and party screens always agree with a Pokémon's
-## level rather than a fresh one reading level 1 until its first battle.
+## Total experience on this species' growth curve. Seeded at [method create] to
+## what [param at_level] starts with, not zero: a level 7 Pidgey carries level
+## 7's threshold, so the box and party screens agree with its level rather than
+## reading level 1 until its first battle.
 @warning_ignore("shadowed_global_identifier")
 var exp: int = 0
 
@@ -185,11 +183,10 @@ func _stat(
 ## A stat as the damage formula sees it, with its stage and then its status
 ## applied.
 ##
-## The order is the cartridge's: it copies the stat, applies the stage, and then
-## halves the Attack of a burned Pokémon and quarters the Speed of a paralysed
-## one. Both land on the same copy the stages did, which is what decides that a
-## critical hit reading [method unmodified_stat] is free of the burn as well as of
-## the stages.
+## The cartridge's order: copy the stat, apply the stage, then halve a burned
+## Pokémon's Attack and quarter a paralysed one's Speed. Both land on the copy the
+## stages did, which is why a critical hit reading [method unmodified_stat] is
+## free of the burn as well as the stages.
 func stat(key: String) -> int:
 	var value: int = int(stats.get(key, 0))
 	if not STAGED_STATS.has(key):
@@ -252,16 +249,13 @@ func reset_volatile() -> void:
 ## The gender the cartridge's own `GetGender` would answer, from the species'
 ## gender ratio and this Pokémon's own Attack and Speed DVs.
 ##
-## Not a coin flip and not tied to a stat total: the cartridge folds the
-## Attack DV into the high nibble of one byte and the Speed DV into the low
-## nibble, and compares that byte against the species' own ratio the same way
-## a personality value is compared against one from Generation 3 onward. A
-## ratio of 0 is always male and 254 is always female outright, with no
-## comparison run at all; 255 is genderless. Otherwise a combined value below
-## the ratio is male and at or above it is female, which is why raising the
-## ratio raises the odds of female: [constant Gen2Species.GENDER_UNKNOWN] and
-## the two extremes are named on [Gen2BattleMon] rather than repeated at every
-## caller.
+## Not a coin flip and not a stat total: the cartridge folds the Attack DV into
+## one byte's high nibble and the Speed DV into its low nibble, then compares
+## that against the species ratio. Ratio 0 is always male and 254 always female
+## with no comparison at all; 255 is genderless. Otherwise below the ratio is
+## male and at or above it female, so a higher ratio means likelier female.
+## [constant Gen2Species.GENDER_UNKNOWN] and the two extremes are named here
+## rather than repeated at every caller.
 const GENDER_F0: int = 0
 const GENDER_F100: int = 254
 const GENDER_UNKNOWN: int = 255
@@ -306,11 +300,10 @@ func base_exp() -> int:
 	return int(data.species(species).get("base_exp", 0))
 
 
-## The five base stats [Gen2Experience.stat_exp_gain] wants when this Pokémon
-## is the one fainting, keyed the way [member stat_exp] already is. Special
-## Attack's base value fills the shared [code]"special"[/code] slot, never
-## Special Defense's: see [constant Gen2Experience.STAT_EXP_KEYS] for why the
-## cartridge reads it that way.
+## The five base stats [Gen2Experience.stat_exp_gain] wants when this Pokémon is
+## the one fainting, keyed like [member stat_exp]. Special Attack's base value
+## fills the shared [code]"special"[/code] slot, never Special Defense's: see
+## [constant Gen2Experience.STAT_EXP_KEYS].
 func base_stat_exp_shape() -> Dictionary:
 	var base: Dictionary = data.species(species).get("stats", {})
 	return {
@@ -343,13 +336,10 @@ func level_for_exp() -> int:
 	return Gen2Experience.level_for_exp(growth_rate(), exp)
 
 
-## Raises the level by exactly one and recalculates every stat from it, the
-## same call [method create] makes and the only other time this is meant to
-## happen. Current HP gains the *difference* the new max makes, rather than
-## being refilled or left where it was: the cartridge adds the two maximums'
-## delta onto whatever HP was sitting at, so a Pokémon one hit from fainting
-## before the level up is still one hit from fainting after it, just against a
-## bigger hit.
+## Raises the level by one and recalculates every stat, the same call
+## [method create] makes and the only other place this happens. Current HP gains
+## the max-HP *difference* rather than refilling: a Pokémon one hit from fainting
+## before the level up is still one hit from fainting after it.
 func level_up() -> void:
 	if level >= Gen2Experience.MAX_LEVEL:
 		return
@@ -394,11 +384,10 @@ func spend_pp(slot: int) -> void:
 
 ## Whether there is anything left to do with a move slot.
 ##
-## A disabled slot answers false here regardless of its PP, the same way the
-## cartridge's own menu never offers it: [method Gen2Battle.effective_slot] and
-## [method Gen2Battle.move_for] are what reroute a caller that still asks for
-## it, and [constant Gen2EffectCommands.CHECK_STATUS]'s own belt-and-suspenders
-## check is what catches the one path that does not go through either.
+## A disabled slot answers false whatever its PP, as the cartridge's menu never
+## offers it. [method Gen2Battle.effective_slot] and [method Gen2Battle.move_for]
+## reroute a caller that still asks; [constant Gen2EffectCommands.CHECK_STATUS]
+## catches the one path through neither.
 func can_use(slot: int) -> bool:
 	return slot >= 0 and slot < moves.size() and pp_left(slot) > 0 and slot != disabled_slot
 

@@ -3,14 +3,12 @@ extends RefCounted
 
 ## The Pokémon one side of a battle has, and which of them is out.
 ##
-## A party is an ordered list and a cursor into it, not a set: the order is what
-## a switch menu shows and what a replacement after a faint is chosen from, and
-## the first entry is who leads. A wild battle is a party of one, which is why
-## nothing here treats that as a special case.
+## An ordered list and a cursor into it, not a set: the order is what a switch
+## menu shows and what a replacement is chosen from, and the first entry leads. A
+## wild battle is a party of one, so it needs no special case.
 ##
-## Fainted Pokémon stay in the list. They are still carried, they still count
-## against the six, and a battle is lost when every one of them is down rather
-## than when the list runs out.
+## Fainted Pokémon stay in the list, still counting against the six. A battle is
+## lost when all of them are down, not when the list runs out.
 
 ## What a trainer can carry. Six is a rule of these games rather than of this
 ## class, but a party that is longer is a bug somewhere upstream and is worth
@@ -91,11 +89,9 @@ func first_healthy() -> int:
 
 ## Puts [param index] out, and answers whether it went.
 ##
-## The Pokémon leaving keeps its health and its PP and loses its stat stages and
-## everything [Gen2Substatus] holds, which is the cartridge's rule and the
-## reason a stage is worth resetting rather than a Pokémon worth rebuilding: a
-## stage is a lens on a stat and the lens does not survive the walk back to the
-## ball, and confusion, a charge or a recharge do not survive it either.
+## The Pokémon leaving keeps its health and PP and loses its stat stages and
+## everything [Gen2Substatus] holds. A stage is a lens on a stat, and neither it
+## nor confusion, a charge or a recharge survives the walk back to the ball.
 func send_out(index: int) -> bool:
 	if not can_send_out(index):
 		return false

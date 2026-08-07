@@ -40,14 +40,11 @@ func play_record(
 	if request_kind == &"music_fadeout":
 		return {"ok": true, "played": fade_out(int(record.get("fade_time", 0)))}
 	var music: bool = _is_music(request_kind)
-	# The music that is already playing is not started again. Two connected maps
-	# with the same header music are one continuous track on the cartridge, and
-	# restarting it at every map edge is audible.
-	#
-	# The comparison is against the last track started rather than against
-	# whether a channel is still sounding, which is what the cartridge compares:
-	# it keeps the current music id and skips when the new map asks for the same
-	# one. Stopping or fading clears the id, so those still start it again.
+	# Music already playing is not restarted: two connected maps with the same
+	# header music are one continuous track, and restarting at each map edge is
+	# audible. The comparison is against the last track started, not against
+	# whether a channel still sounds, which is what the cartridge compares.
+	# Stopping or fading clears the id, so those do start it again.
 	var key: String = "%d:%d" % [int(record.get("bank", -1)), int(record.get("address", -1))]
 	if music and not restart and key == _music_key:
 		return {"ok": true, "played": false, "continued": true}

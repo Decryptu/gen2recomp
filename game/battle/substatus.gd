@@ -4,31 +4,24 @@ extends RefCounted
 ## The volatile flags of battle state, for everything the status byte cannot
 ## hold.
 ##
-## [Gen2Status] is deliberately one status at a time, which is the cartridge's
-## own rule: a Pokémon that is already poisoned cannot also be confused by
-## refusing a second flag on the same byte. Confusion, flinching, being locked
-## into a recharge turn or a two-turn move's charge, Disable, Attract, Encore,
-## Mist, Focus Energy, flying and underground are all independent of that and
-## of each other, so they live apart from it.
+## [Gen2Status] is one status at a time, the cartridge's rule. Confusion,
+## flinching, a recharge turn, a two-turn charge, Disable, Attract, Encore, Mist,
+## Focus Energy, flying and underground are independent of that and of each
+## other, so they live apart from it.
 ##
-## The cartridge itself keeps these as five separate bytes
-## (`wPlayerSubStatus1` through `wPlayerSubStatus5`), not one: this project
-## folds them into a single int because nothing here needs to address one of
-## the five in isolation the way the cartridge's own bit-numbering does, and a
-## flag is a flag regardless of which byte it started on.
+## The cartridge keeps these as five bytes (`wPlayerSubStatus1` through
+## `wPlayerSubStatus5`); this folds them into one int, since nothing here needs
+## to address a byte in isolation.
 ##
-## Unlike [Gen2Status] this one is not the whole of its state: a few of these
-## flags need a counter alongside them (how many turns of confusion are left,
-## which move was charged, which slot is disabled and for how long, or how many
-## turns Rollout or a rampage has left), which is why [Gen2BattleMon] keeps
-## those as separate fields next to
-## [member Gen2BattleMon.substatus] rather than packing them into the byte.
-## This class stays pure arithmetic and holds no state of its own, the same
-## shape as [Gen2Status].
+## Some flags need a counter beside them (turns of confusion, the charged move,
+## the disabled slot and its duration, Rollout or rampage turns), which
+## [Gen2BattleMon] keeps as separate fields next to
+## [member Gen2BattleMon.substatus]. This class is pure arithmetic and holds no
+## state, the same shape as [Gen2Status].
 ##
-## Every flag here clears on a switch, which is what makes it volatile rather
-## than a status: [method Gen2BattleMon.reset_volatile] is the single place that
-## happens, called from [method Gen2Party.send_out] alongside
+## Every flag clears on a switch, which is what makes it volatile:
+## [method Gen2BattleMon.reset_volatile] is the one place that happens, called
+## from [method Gen2Party.send_out] beside
 ## [method Gen2BattleMon.reset_stages].
 
 const CONFUSED: int = 1 << 0

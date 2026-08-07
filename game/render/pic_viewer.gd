@@ -2,15 +2,13 @@ extends Control
 
 ## Development view: one species on a real 160x144 screen.
 ##
-## Scaffolding, and deliberately so. It exists to prove the whole path from a
-## cartridge to a lit pixel (cache to indices to palette to viewport to an
-## integer-scaled window) and to make a wrong decode visible without a dev tool
-## writing a PNG. The battle screen will do this properly, with the pic where
-## the hardware puts it and a tile-based font around it.
+## Deliberate scaffolding: it proves the whole path from cartridge to lit pixel
+## (cache, indices, palette, viewport, integer-scaled window) and makes a wrong
+## decode visible without a tool writing a PNG.
 ##
-## Left/right change species, S toggles shiny, B swaps front for back, and T
-## switches to the trainer classes, which have one palette each and no back pic.
-## Each is also a plain method so `tools/screenshot.gd` can drive it.
+## Left/right change species, S toggles shiny, B swaps front for back, T switches
+## to the trainer classes, which have one palette each and no back pic. Each is
+## also a plain method so `tools/screenshot.gd` can drive it.
 
 ## The white the hardware fills a pic window with. Index 0 of every pic is this
 ## colour, so a sprite on it looks exactly as it does in the game.

@@ -8,9 +8,9 @@ const TRAINER_RECORD_SIZE: int = 12
 ## object graphics and addressable overworld tile strips for a verified
 ## Generation 2 cartridge.
 ##
-## The parser follows the official map macros and the runtime's collision
-## lookup: map blocks are 4x4 graphics tiles, walk coordinates are 2x2 cells per
-## block, and collision bytes use x as the low bit and y as the high bit.
+## Follows the official map macros and the runtime collision lookup: map blocks
+## are 4x4 graphics tiles, walk coordinates 2x2 cells per block, and collision
+## bytes use x as the low bit and y as the high bit.
 
 static func verify_layout(rom: RomFile) -> Dictionary:
 	var result: Dictionary = read_world(rom, RomLayout.for_id(rom.id))

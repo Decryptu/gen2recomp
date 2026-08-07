@@ -3,21 +3,18 @@ extends RefCounted
 
 ## Scene-free model of the cartridge start menu (engine/menus/start_menu.asm).
 ##
-## `StartMenu.SetUpMenuItems` builds its list by appending items in a fixed
-## source order, skipping only the ones its own gate says are not present yet
-## (Pokedex behind wStatusFlags/STATUSFLAGS_POKEDEX_F, Pokemon behind a
-## non-zero wPartyCount, Pokegear behind wPokegearFlags/POKEGEAR_OBTAINED_F).
-## Everything else it always appends. This project does not yet have a dex
-## screen, a trainer card or an options screen, so those three entries are
-## still built in their source position, marked unavailable rather than
-## omitted, so the list shape does not silently change out from under a
-## future implementation of any of them. Bug Contest and link-mode branches
-## (STARTMENUITEM_QUIT, the contest status box) do not apply because this
-## project has neither system, which is why QUIT never appears here at all:
-## the source's own gate for it is never true.
+## `StartMenu.SetUpMenuItems` appends items in a fixed source order, skipping only
+## what its own gate refuses: Pokedex behind wStatusFlags/STATUSFLAGS_POKEDEX_F,
+## Pokemon behind a non-zero wPartyCount, Pokegear behind
+## wPokegearFlags/POKEGEAR_OBTAINED_F.
 ##
-## `STATICMENU_WRAP` is source flag data on `.MenuData`, so the cursor wraps
-## at both ends the same way a cached cartridge menu does.
+## This project has no dex, trainer card or options screen, so those three are
+## still built in their source position and marked unavailable rather than
+## omitted, keeping the list shape stable for whichever arrives first. QUIT never
+## appears because its Bug Contest and link-mode gate is never true here.
+##
+## `STATICMENU_WRAP` is source flag data on `.MenuData`, so the cursor wraps at
+## both ends like a cached cartridge menu.
 
 ## constants/engine_flags.asm: ENGINE_POKEGEAR = 4, ENGINE_POKEDEX = 11. Both
 ## indices are identical in pokecrystal and pokegold (unlike the badge and

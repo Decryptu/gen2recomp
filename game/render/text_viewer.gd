@@ -2,18 +2,16 @@ extends Control
 
 ## Development view: the cartridge's font and text box on a real 160x144 screen.
 ##
-## Scaffolding, like `pic_viewer.tscn`, and for the same reason: a wrong decode
-## has to be visible. A font that has slid by one tile still draws letters, and
-## a border whose six tiles are in the wrong order still draws a box, so both
-## are checked by looking at them rather than by counting bytes.
+## Scaffolding like `pic_viewer.tscn`, for the same reason: a font slid by one
+## tile still draws letters and a border with its six tiles out of order still
+## draws a box, so both are checked by looking rather than by counting bytes.
 ##
-## The chart draws all 128 glyphs in code order. The alphabet runs, the gaps
-## between them and the digits at the end are the shape the charmap describes,
-## and anything out of place shows up as a blank in the middle of a word or a
-## letter where a gap should be.
+## The chart draws all 128 glyphs in code order, so the alphabet runs, the gaps
+## between them and the trailing digits show up as the charmap describes, and
+## anything out of place is a blank mid-word or a letter in a gap.
 ##
-## Space advances, F cycles the border, C toggles the chart. Each is also a
-## plain method so `tools/screenshot.gd` can drive it.
+## Space advances, F cycles the border, C toggles the chart. Each is also a plain
+## method so `tools/screenshot.gd` can drive it.
 
 const BACKGROUND: Color = Color.WHITE
 

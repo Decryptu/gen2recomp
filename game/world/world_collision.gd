@@ -3,16 +3,16 @@ extends RefCounted
 
 ## Generation 2 collision-code permissions.
 ##
-## A map's collision grid stores the raw collision code from the tileset's
-## four-cell table. The game looks that code up in a second table before it
-## decides whether ordinary walking can enter the cell. Keeping that lookup
-## here leaves the imported code available for water, ledges and warp handling.
+## A map's collision grid stores the raw code from the tileset's four-cell table,
+## which the game looks up in a second table before deciding whether ordinary
+## walking can enter. Keeping that lookup here leaves the imported code available
+## for water, ledges and warps.
 ##
-## The table below is the source [code]CollisionPermissionTable[/code], entry for
-## entry; Gold, Silver and Crystal ship the same 256 bytes. It is carried whole
-## rather than as a list of the interesting codes, because a code left off such a
-## list silently becomes ordinary ground: that is how the waterfall, current and
-## buoy families, and one of the two headbutt trees, were walkable here.
+## The table below is the source [code]CollisionPermissionTable[/code] entry for
+## entry; all three games ship the same 256 bytes. Carried whole rather than as a
+## list of interesting codes, because a code left off such a list silently
+## becomes ordinary ground: that is how the waterfall, current and buoy families,
+## and one of the two headbutt trees, were walkable here.
 
 const LAND_TILE: int = 0x00
 const WATER_TILE: int = 0x01
@@ -70,13 +70,12 @@ static func is_walkable(collision_code: int) -> bool:
 	return permission_for(collision_code) == LAND_TILE
 
 
-## Ledges: engine/overworld/player_movement.asm's .TryJump. A hop is only
-## attempted after an ordinary step into the faced cell is blocked, and it
-## reads the collision code of the cell the player is already standing on
-## (wPlayerTileCollision), not the faced cell. All eight hop codes are
-## LAND_TILE in PERMISSIONS, so the player already walks onto one normally;
-## the hop itself bypasses collision on both the intervening and landing
-## cells, matching the source, which never checks either.
+## Ledges: engine/overworld/player_movement.asm's .TryJump. Attempted only after
+## an ordinary step into the faced cell is blocked, reading the collision code of
+## the cell the player already stands on (wPlayerTileCollision). All eight hop
+## codes are LAND_TILE in PERMISSIONS, so the player walks onto one normally; the
+## hop bypasses collision on both the intervening and landing cells, as the
+## source never checks either.
 const HI_NYBBLE_LEDGES: int = 0xA0
 const COLL_HOP_RIGHT: int = 0xA0
 const COLL_HOP_LEFT: int = 0xA1
@@ -142,14 +141,12 @@ static func allows_hop(collision_code: int, direction: Vector2i) -> bool:
 
 
 ## Tile-collision std scripts: engine/events/std_collision.asm's
-## CheckFacingTileForStdScript, dispatched on A after object and background
-## events both find nothing. data/collision/collision_stdscripts.asm is byte
-## identical between pokecrystal and pokegold, but the std-script index each
-## entry resolves to is not: engine/events/std_scripts.asm lists PCScript at
-## index 49 in Crystal and 43 in Gold/Silver, because Crystal's table carries
-## six extra phone entries earlier in the same list. Every other entry here
-## was recounted in both pinned repositories and lands on the same index in
-## both games.
+## CheckFacingTileForStdScript, dispatched on A once object and background events
+## both find nothing. data/collision/collision_stdscripts.asm is byte identical
+## between the two repositories, but the std-script index each entry resolves to
+## is not: PCScript is 49 in Crystal and 43 in Gold/Silver, because Crystal's
+## table carries six extra phone entries earlier. Every other entry was recounted
+## in both and lands on the same index.
 const COLL_BOOKSHELF: int = 0x91
 const COLL_PC: int = 0x93
 const COLL_RADIO: int = 0x94

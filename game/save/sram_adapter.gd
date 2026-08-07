@@ -4,11 +4,10 @@ extends RefCounted
 ## Boundary between an original Generation 2 SRAM image and the project's
 ## party-focused save model.
 ##
-## The adapter only writes an existing, checksummed cartridge image. This is
-## deliberate: the current canonical save model does not own map, options,
-## inventory, PC boxes or event flags, so creating those bytes from scratch
-## would silently invent game state. Bytes outside the fields mapped here stay
-## untouched.
+## Only an existing, checksummed cartridge image is written. The canonical save
+## model does not own map, options, inventory, PC boxes or event flags, so
+## creating those bytes from scratch would invent game state. Bytes outside the
+## mapped fields stay untouched.
 
 const SRAM_SIZE: int = 0x8000
 const SAVE_CHECK_VALUE_1: int = 99

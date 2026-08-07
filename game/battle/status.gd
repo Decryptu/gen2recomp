@@ -3,17 +3,15 @@ extends RefCounted
 
 ## The status byte, and the four things it does to a Pokémon.
 ##
-## One byte holds all of it, the way the cartridge stores it: the low three bits
-## are how many turns of sleep are left and the four above them are one flag
-## each. That is not a storage detail worth hiding, because it is also the rule:
-## a Pokémon has one status at a time, and inflicting a second is refused rather
-## than added, which falls out of the byte being checked as a whole.
+## One byte, as the cartridge stores it: the low three bits are turns of sleep
+## left and the four above are one flag each. That is also the rule, not just
+## storage: one status at a time, a second refused rather than added, which falls
+## out of checking the byte as a whole.
 ##
-## What the four do is spread across the turn rather than gathered here. Sleep,
-## freeze and paralysis stop a Pokémon moving and are checked before its move;
-## burn and paralysis bend a stat and are applied where the stat is read; burn
-## and poison take a slice off at the end of the turn. This class is the
-## arithmetic behind all of that and holds no state of its own.
+## What the four do is spread across the turn. Sleep, freeze and paralysis are
+## checked before a move; burn and paralysis bend a stat where it is read; burn
+## and poison take a slice at the end of the turn. This class is the arithmetic
+## behind that and holds no state.
 
 ## The low three bits: turns of sleep left, from 1 to 7.
 const SLEEP_MASK: int = 0b111

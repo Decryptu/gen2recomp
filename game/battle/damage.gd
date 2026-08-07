@@ -3,18 +3,16 @@ extends RefCounted
 
 ## The damage formula, in the order and the arithmetic the hardware uses.
 ##
-## Every step truncates, and the steps are not commutative, so this is written as
-## a sequence rather than as an expression. Rearranging it into one line changes
-## the answer: the type matchups are applied to the damage one type at a time
-## with a truncation between them, the critical multiplier lands before the cap
-## and the minimum, Rollout's multiplier lands after type but before variation,
-## and the random spread lands after everything.
+## Every step truncates and the steps are not commutative, so this is a sequence,
+## not an expression: rearranging it changes the answer. Type matchups apply one
+## type at a time with a truncation between, the critical multiplier lands before
+## the cap and minimum, Rollout's after type but before variation, and the random
+## spread after everything.
 ##
-## Randomness is injected. [method calculate] rolls the two things a hit rolls,
-## the critical and the spread, and hands both to [method calculate_with], which
-## is deterministic and is what a test should be pointed at. Asking for
-## [constant MAX_VARIATION] and no critical is the highest a hit can go, which is
-## the number a damage calculator quotes.
+## [method calculate] rolls the critical and the spread and hands both to the
+## deterministic [method calculate_with], which is what a test should target.
+## [constant MAX_VARIATION] with no critical is the highest a hit can go, the
+## number a damage calculator quotes.
 
 ## Where the formula's constants come from. The cap is applied before the
 ## minimum is added, so a hit that would flatten the counter lands at 999 and
@@ -76,11 +74,11 @@ static func calculate(
 
 ## A hit with both rolls decided. Deterministic, and the whole of the formula.
 ##
-## Returns { damage, critical, effectiveness, stab, immune }. [code]effectiveness[/code]
-## is in tenths and is the number the battle announces, which is not always the
-## number the damage was worked out with: see [method GameData.type_effectiveness].
-## [code]immune[/code] is the cartridge's own answer to a matchup of zero, which
-## it treats as a miss rather than as a hit for nothing.
+## Returns { damage, critical, effectiveness, stab, immune }.
+## [code]effectiveness[/code] is in tenths and is the announced number, not always
+## the one damage used: see [method GameData.type_effectiveness].
+## [code]immune[/code] is a matchup of zero, which the cartridge treats as a miss
+## rather than a hit for nothing.
 static func calculate_with(
 	attacker: Gen2BattleMon,
 	defender: Gen2BattleMon,
@@ -107,10 +105,9 @@ static func calculate_with(
 
 	if power <= 0:
 		# A move with no power is not a failed attack, it is a move that does
-		# something else. The matchup is still worked out, because the battle
-		# announces it either way, and because a status move is stopped by an
-		# immunity exactly as an attack is: Thunder Wave does nothing to a Ground
-		# type and Poison Powder nothing to a Steel one.
+		# something else. The matchup is still worked out: the battle announces
+		# it either way, and an immunity stops a status move exactly as it stops
+		# an attack (Thunder Wave against Ground, Poison Powder against Steel).
 		for defending_type: int in defending:
 			if data.type_matchup(move_type, defending_type) == RomLayout.MATCHUP_NO_EFFECT:
 				out["immune"] = true
@@ -216,13 +213,11 @@ static func confusion_damage(mon: Gen2BattleMon, rng: RandomNumberGenerator) -> 
 	return apply_variation(damage, roll_variation(rng))
 
 
-## Psywave: a random amount from one up to, but not including, one and a half
-## times the user's own level, the halving floored first. The cartridge draws
-## this by rerolling a byte until it lands inside that range rather than
-## clamping into it, which is a uniform pick over the same range and not a
-## detail worth reproducing bit for bit; a level of 1 has no such range at all
-## on the real hardware and would spin forever, which this reads as a minimum
-## of one rather than replicate.
+## Psywave: a random amount from one up to but excluding one and a half times the
+## user's level, the halving floored first. The cartridge rerolls a byte until it
+## lands in range rather than clamping, which is the same uniform pick. Level 1
+## has no such range and would spin forever on hardware, so it reads as a minimum
+## of one here.
 static func psywave_damage(level: int, rng: RandomNumberGenerator) -> int:
 	@warning_ignore("integer_division")
 	var upper: int = level / 2 + level
@@ -231,9 +226,9 @@ static func psywave_damage(level: int, rng: RandomNumberGenerator) -> int:
 
 ## Whether a move is worked out from Attack or from Special Attack.
 ##
-## Generation 2 splits by the move's type and not by the move: every type below
-## Fire is physical and every type from Fire up is special, which is why Hyper
-## Beam is special and Bite is physical.
+## Generation 2 splits by type, not by move: every type below Fire is physical
+## and every type from Fire up special, which is why Hyper Beam is special and
+## Bite physical.
 static func is_physical(move_type: int) -> bool:
 	return move_type < RomLayout.SPECIAL_TYPES_START
 
@@ -259,11 +254,10 @@ static func _defense_stat(
 ## A critical hit ignores both sides' stages, but only when they are working
 ## against the attacker.
 ##
-## This is narrower than it is usually described. The cartridge compares the two
-## stages and keeps them if the defender's is the lower one, so a critical hit
-## from an attacker who has raised its own Attack still gets the boost, and one
-## against a defender who has raised its Defense does not have to fight through
-## it. It is the attacker's advantage either way.
+## Narrower than usually described: the cartridge compares the two stages and
+## keeps them when the defender's is lower, so a critical from an attacker who
+## raised its Attack keeps the boost and one against a raised Defense ignores it.
+## The attacker's advantage either way.
 static func _ignores_stages(
 	attacker: Gen2BattleMon, defender: Gen2BattleMon, move_type: int, critical: bool
 ) -> bool:

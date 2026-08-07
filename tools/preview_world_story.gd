@@ -962,13 +962,12 @@ func _walk_to_connection(
 	}
 
 
-## The cell [param step] from [param cell] reaches through an ordinary walk
-## or, when the ordinary step is blocked, a ledge hop
-## (Gen2WorldCollision.allows_hop, mirroring Gen2WorldAPI._try_ledge_hop's own
-## order and its surf and map-bounds refusals). Returns (-1, -1) when neither
-## applies, so callers can use it as a single reachability test in a BFS
-## frontier. Replaying the recorded direction through world.move_result()
-## performs the same hop automatically; no separate hop replay step exists.
+## The cell [param step] from [param cell] reaches by an ordinary walk or, when
+## that is blocked, a ledge hop (Gen2WorldCollision.allows_hop, mirroring
+## Gen2WorldAPI._try_ledge_hop's order and its surf and map-bounds refusals).
+## Returns (-1, -1) when neither applies, so a BFS frontier can use it as one
+## reachability test. Replaying the recorded direction through
+## world.move_result() performs the same hop, so no separate replay step exists.
 func _reachable_step(world: Gen2WorldAPI, cell: Vector2i, step: Vector2i) -> Vector2i:
 	var direct: Vector2i = cell + step
 	if world.can_walk_to(direct):

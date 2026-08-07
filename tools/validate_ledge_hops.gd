@@ -5,11 +5,11 @@ extends SceneTree
 ## pokegold sources: engine/overworld/player_movement.asm's .TryJump, its
 ## .ledge_table, and data/collision/collision_permissions.asm.
 ##
-## This is the real-cartridge counterpart to tests/unit/test_world_collision.gd
-## and the ledge cases in tests/unit/test_world_api.gd, which use synthetic
-## caches. It also pins what gates Route 30's corridor north, which
-## tools/preview_world_story.gd now walks: the terrain and the hops carry the
-## route, and EVENT_ROUTE_30_BATTLE is what opens the last two cells.
+## The real-cartridge counterpart to tests/unit/test_world_collision.gd and the
+## ledge cases in tests/unit/test_world_api.gd, which use synthetic caches. It
+## also pins what gates Route 30's corridor north, which
+## tools/preview_world_story.gd walks: terrain and hops carry the route, and
+## EVENT_ROUTE_30_BATTLE opens the last two cells.
 ##
 ##   Godot --headless --path . -s res://tools/validate_ledge_hops.gd
 
@@ -117,14 +117,13 @@ func _verify_route30(game_id: StringName, data: GameData) -> void:
 				"%s: Route 30 corridor cell %s is not land." % [game_id, cell]
 			)
 
-	# The corridor north is a story gate, not a terrain or pathfinding problem.
-	# Two objects stand on its single-cell rows 24 and 25, both carrying
+	# The corridor north is a story gate, not terrain or pathfinding. Two objects
+	# stand on its single-cell rows 24 and 25, both carrying
 	# EVENT_ROUTE_30_BATTLE, and CheckObjectFlag
 	# (engine/overworld/map_objects_2.asm) masks an object whose flag is set.
-	# maps/ElmsLab.asm's ElmAfterTheftScript sets that flag when the player
-	# hands Elm the Mystery Egg, so the route opens exactly when the cartridge
-	# opens it. Both halves are pinned here: sealed before the egg return,
-	# walkable after it, with live occupancy enforced in both searches.
+	# maps/ElmsLab.asm's ElmAfterTheftScript sets it on the Mystery Egg handover,
+	# so the route opens when the cartridge opens it. Both halves are pinned:
+	# sealed before the egg return, walkable after, occupancy enforced in both.
 	var occupied: Dictionary = _reachable(world)
 	_check(
 		not _reaches_north_edge(world, occupied),

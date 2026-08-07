@@ -53,10 +53,9 @@ an Array of Variants, which made scripts, text and audio 96 MB of a 100 MB
 cache. Write them with `RomCache.write_payload_map()` when the run is a whole
 value in a pointer map, or `RomCache.write_section()` when it is a `bytes`
 field of a record; both move the bytes into a `.bin` blob and leave an
-`[offset, length]` span in the JSON. `GameData` reads the blob as a
-`PackedByteArray` and hands the bytes back under `bytes`. Only a named `bytes`
-field is moved: plenty of cached arrays are small numbers without being
-payloads, and a mart list or an encounter rate must stay an array.
+`[offset, length]` span in the JSON, which `GameData` reads back as a
+`PackedByteArray` under `bytes`. Only a named `bytes` field is moved: a mart
+list or an encounter rate is a small number array, not a payload.
 
 World sections load on first use. The launcher, the pic viewer and a battle
 never read scripts, text or audio, and eagerly reading them made listing three
@@ -66,64 +65,52 @@ Decoders take bytes and return data, with no cartridge knowledge, so small
 hand-built inputs can test them. `game/data/game_data.gd` is the sole
 engine-facing cartridge-content API; it owns the cache and converts JSON's
 single numeric type back to `int`. `game/data/learnset.gd` stays beside it
-because Pokémon can be created outside battle. Do not sort learnsets:
-
-- new-Pokémon filling stops at the first move above its level;
-- levelling reads every entry at the newly reached level.
-
-Muk is out of order in all three games, so these operations intentionally
-differ.
+because Pokémon can be created outside battle. Do not sort learnsets: filling a
+new Pokémon stops at the first move above its level, while levelling reads every
+entry at the newly reached level. Muk is out of order in all three games, so
+these operations intentionally differ.
 
 `game/save/` owns project saves, not cartridge data. Keep its versioned model,
-validator, store and battle adapter scene-free. It validates against
-`GameData` and writes through a temporary file. Project save format 2 owns a
-fixed fourteen-box, twenty-slot PC model, with migration from format 1 that
-does not invent a world snapshot. Party-owned world transactions must update a
-candidate save and live snapshot together, then restore both on a failed write.
-`Gen2SaveStorage` applies the same candidate, validator and temporary-file
-boundary to explicit party-to-box and box-to-party transfers; `box_screen.gd`
-owns selection and presentation only. Keep box names, current-box UI state and
-cartridge SRAM placement outside the model until their source ownership is
-verified.
-The original SRAM adapter is a separate, checksum-aware boundary and remains
-party-focused until cartridge box ownership and layout are explicitly
-researched.
+validator, store and battle adapter scene-free; it validates against `GameData`
+and writes through a temporary file. Format 2 owns a fixed fourteen-box,
+twenty-slot PC model, migrating from format 1 without inventing a world
+snapshot. Party-owned world transactions update a candidate save and live
+snapshot together and restore both on a failed write; `Gen2SaveStorage` applies
+the same boundary to explicit box transfers, and `box_screen.gd` owns selection
+and presentation only. Box names, current-box UI state and cartridge SRAM
+placement stay outside the model until their source ownership is verified. The
+SRAM adapter is a separate, checksum-aware boundary and remains party-focused
+for the same reason.
 
 `game/world/` separates request resolution from UI. `world_api.gd`,
 `world_host.gd` and scene-free service helpers validate imported map records,
 transactions and script result boundaries; `world_service_screen.gd` owns
-labels, selection and input. Map reloads clear the source first eight temporary event flags, while
-permanent event flags and engine flags remain separate. The script runner keeps
-the source yes/no result order and commits clock/daylight-saving changes only
-after the corresponding host prompt completes. Menu layout and
-cursor behavior follow cached vertical or two-dimensional records. Mart dialog
-variants and prices come from imported source lists, and purchases enforce the
-source 99-item stack limit before passing candidate-save validation to writeback.
-Crystal rooftop selection reads the persisted Hall of Fame engine flag. The
-Goldenrod Underground bargain shop is opened by its imported Monday morning
-script, sells one of each item per visit, and records the source daily
-merchant-closed flag after a purchase.
-Phone presentation lists registered
-contacts, dispatches outgoing calls and confirms pending host requests; the world
-runner executes the imported caller/callee script at the same transaction
-boundary. Audio stays behind verified bounded decoder,
-renderer and player layers, with imported records validated before success.
+labels, selection and input. Map reloads clear the source first eight temporary
+event flags; permanent event flags and engine flags stay separate. The script
+runner keeps the source yes/no result order and commits clock/daylight-saving
+changes only after the corresponding host prompt completes. Menus follow cached
+vertical or two-dimensional records. Mart dialog variants and prices come from
+imported lists, purchases enforce the source 99-item stack limit before
+candidate-save validation, Crystal rooftop selection reads the persisted Hall of
+Fame engine flag, and the Goldenrod Underground bargain shop sells one of each
+item per visit and records the daily merchant-closed flag. Phone presentation
+lists contacts and dispatches calls, with the world runner executing the
+imported caller/callee script at the same transaction boundary. Audio stays
+behind bounded decoder, renderer and player layers.
 
-`world_start_menu.gd` is the scene-free model of `engine/menus/start_menu.asm`'s
-item list: it reproduces the source's Pokedex/Pokemon/Pokegear gating and
-`STATICMENU_WRAP` cursor, and still builds Pokedex, Player and Options in
-their source position, marked unavailable, rather than omitting entries this
-project has not implemented. `world_pack.gd` groups owned items into the four
-cartridge pack pockets using the item type byte `GameData` already imports
-under the confusingly-named `pocket` field; it is presentation only; item
-counts stay a flat map on `Gen2WorldState`, and pocket capacities are not
-enforced. `start_menu_screen.gd` is the overlay: it owns Pack and a Save
-confirmation as internal modes the same way `world_service_screen.gd` owns a
-mart mode, and delegates Pokemon and Pokegear to the existing party screen and
-phone list rather than re-implementing them. `Gen2PartyScreen` and
-`Gen2BoxScreen` share one embedded-mode shape: a `set_context(..., embedded)`
-flag and a `closed(result)` signal so the overworld can stack them above the
-running world instead of navigating away with `change_scene_to_file`.
+`world_start_menu.gd` models `engine/menus/start_menu.asm`'s item list: source
+Pokedex/Pokemon/Pokegear gating, the `STATICMENU_WRAP` cursor, and Pokedex,
+Player and Options built in their source position marked unavailable rather than
+omitted. `world_pack.gd` groups owned items into the four cartridge pockets by
+the item type byte `GameData` imports under the confusingly-named `pocket`
+field; it is presentation only, item counts stay a flat map on `Gen2WorldState`
+and pocket capacities are not enforced. `start_menu_screen.gd` is the overlay,
+owning Pack and a Save confirmation as internal modes the way
+`world_service_screen.gd` owns a mart mode, and delegating Pokemon and Pokegear
+to the existing screens. `Gen2PartyScreen` and `Gen2BoxScreen` share one
+embedded-mode shape, a `set_context(..., embedded)` flag and a `closed(result)`
+signal, so the overworld can stack them above the running world instead of
+tearing it down with `change_scene_to_file`.
 
 ### Audio
 
@@ -146,9 +133,8 @@ it; `game/mods/mod_host.gd` is the registry a mod is handed. The world screen
 constructs its renderer through the host, so a registered renderer replaces the
 view without the screen knowing what it draws with. Keep mods away from scene
 nodes and engine internals: a mod reaches cartridge content through `GameData`
-and world state through `Gen2WorldAPI`, both scene-free. See
-[MODS.md](MODS.md) for the contract and why a renderer must not write world
-state.
+and world state through `Gen2WorldAPI`, both scene-free. [MODS.md](MODS.md) has
+the contract and why a renderer must not write world state.
 
 ### Rendering and text
 
@@ -210,10 +196,10 @@ operations in hardware order, including truncation:
 
 Moves are command programs: `move_effect.gd` is the table,
 `effect_commands.gd` the steps, `turn.gd` the handoff and `battle.gd` the
-runner. Unimplemented effects fall back to an ordinary attack. Loops remain
-inside one command, as with multi-hit and all-stat changes. Drain and recoil
-use uncapped `Gen2Turn.damage`, not capped HP loss, so a move calculating 50
-against 3 HP heals 25 or costs 12/13 as the cartridge does.
+runner. Unimplemented effects fall back to an ordinary attack. Loops stay inside
+one command, as with multi-hit and all-stat changes. Drain and recoil use
+uncapped `Gen2Turn.damage`, not capped HP loss, so a move calculating 50 against
+3 HP heals 25 or costs 12/13 as the cartridge does.
 
 Status and substatus are separate. One status is allowed; several substatuses
 and counters live on `Gen2BattleMon`. `CHECK_STATUS` order is recharge, sleep,
@@ -237,23 +223,21 @@ declines automatically.
 
 Trainer details:
 
-- trainer classes and individual trainers are separate tables; class names are
-  shared by gym leaders, while parties store names and rosters;
-- party pointers are walked in class order, not sorted. Class 10 is intentionally
-  empty because its pointer equals class 11;
-- one packed DVs word belongs to each class's whole party;
-- `Gen2BattleAI` chooses the lowest-scored move with random tie-breaking. This
-  matches the result, not the byte-level decrement race, and chooses no
-  switches/items;
-- only implemented `AI_Smart` handlers exist. Unsupported effects use generic
-  scoring; weather-sensitive Razor Wind, Solar Beam and Fly remain absent;
-- trainer experience uses six growth curves. Level 1 is zero, even for Medium
-  Slow, whose literal formula underflows. Experience is not divided among
+- trainer classes and individual trainers are separate tables. Class names are
+  shared by gym leaders; parties store names and rosters, and their pointers are
+  walked in class order, not sorted. Class 10 is intentionally empty because its
+  pointer equals class 11. One packed DVs word covers each class's whole party;
+- `Gen2BattleAI` picks the lowest-scored move with random tie-breaking, matching
+  the result rather than the byte-level decrement race, and never switches or
+  uses items. Only implemented `AI_Smart` handlers exist; unsupported effects use
+  generic scoring, and weather-sensitive Razor Wind, Solar Beam and Fly are
+  absent;
+- experience uses six growth curves and level 1 is zero, even for Medium Slow,
+  whose literal formula underflows. Experience is not divided among
   participants, stat experience is, and only the player side receives it.
   Participants were sent out since the current opponent arrived, excluding
-  fainted members at award time;
-- experience and learning process one level at a time. Level-up HP gains the
-  max-HP difference rather than refilling.
+  members fainted at award time. Levels process one at a time, and a level-up
+  adds the max-HP difference rather than refilling.
 
 `Gen2Battle` returns event lists, not strings or final state. The screen draws
 the event being shown because the turn has already resolved before display;
@@ -265,42 +249,19 @@ keep wording, animation and timing out of the engine.
 Because wrong offsets can decode plausible neighboring data,
 `RomImporter.verify_layout()` must run every check before decoding:
 
-- species names check first/last entries, stride and text mapping; base stats
-  self-identify by Pokédex number;
-- palettes are structurally checked as 15-bit colours, with no species drawn in
-  two blacks; move entries self-identify by animation number and type bytes are
-  range-checked;
-- variable-length move/item names are checked near and far; items also check
-  entry four. Item attributes, status-healing rows and HP-healing rows are
-  checked before import. Keep placeholder names such as `TERU-SAMA` as direct
-  item keys;
-- NPC trades check bounded species, gender and reserved bytes. Their 32-byte
-  shape includes the 11-byte nickname and OT fields, not the ten-byte species
-  name table;
-- font data checks the charmap, blank ranges and required ink. HUD bars must
-  have consecutive fill levels increasing by two lit pixels; borders use text
-  frame shape checks and known bar palettes are checked by value;
-- the type chart checks sparse IDs, the three non-neutral multipliers, exact
-  `$FE`/`$FF` terminators and known content at both ends. `$FE` rows are the
-  Normal/Fighting versus Ghost entries cancelled by Foresight;
-- trainer class name/pic/palette tables cross-check numbering, ends and pic
-  pointers. Parties walk to the next class pointer, including empty class 10,
-  and check counts/endpoints including Falkner's level 7 Pidgey and level 9
-  Pidgeotto and the last class's first name. Attributes validate defined flags
-  and class 1 bytes. DVs anchor both ends to known values; full tables match
-  the published reference byte-for-byte;
-- evolution/learnset pointers address the banked window; methods, species,
-  moves and levels are valid, levels ascend except Muk, and evolution count is
-  known. `EVOLVE_STAT` is four bytes, not three;
-- growth rate and base EXP bytes are checked for all 251 species in all three
-  games;
-- world services check source counts, pointer widths, banked addresses, mart
-  terminators, phone sizes, non-trainer caller-name pointer tables, packed audio
-  headers, cry pointers, shared waves, drumkits and bounded bank-window payloads.
-  Menu headers require valid data pointers and command-derived shape; the script
-  collector validates `phonecall` text pointers and leaves `memcall`/`memjump`
-  addresses to explicit runtime memory snapshots. Malformed bounded-script
-  candidates are ignored.
+| Data | Checks |
+|---|---|
+| Species | First/last names, stride and text mapping; base stats self-identify by Pokédex number |
+| Palettes | Structurally 15-bit colours, no species drawn in two blacks |
+| Moves | Entries self-identify by animation number; type bytes range-checked |
+| Names | Variable-length move/item names near and far; items also check entry four. Item attributes, status-healing and HP-healing rows. Placeholders such as `TERU-SAMA` stay direct item keys |
+| NPC trades | Bounded species, gender and reserved bytes. The 32-byte shape includes the 11-byte nickname and OT fields, not the ten-byte species name table |
+| Font and HUD | Charmap, blank ranges and required ink. HUD bar fill levels increase by two lit pixels; borders use text frame shape checks and bar palettes are checked by value |
+| Type chart | Sparse IDs, the three non-neutral multipliers, exact `$FE`/`$FF` terminators and known content at both ends. `$FE` rows are the Normal/Fighting versus Ghost entries cancelled by Foresight |
+| Trainers | Class name/pic/palette numbering, ends and pic pointers. Parties walk to the next class pointer, including empty class 10, checking counts and endpoints (Falkner's level 7 Pidgey and level 9 Pidgeotto, the last class's first name). Attributes validate defined flags and class 1 bytes; DVs anchor both ends and match the published tables byte-for-byte |
+| Evolutions, learnsets | Pointers address the banked window; methods, species, moves and levels valid, levels ascending except Muk, evolution count known. `EVOLVE_STAT` is four bytes, not three |
+| Growth | Growth rate and base EXP for all 251 species in all three games |
+| World services | Source counts, pointer widths, banked addresses, mart terminators, phone sizes, non-trainer caller-name pointer tables, packed audio headers, cry pointers, shared waves, drumkits and bounded bank-window payloads. Menu headers need valid data pointers and command-derived shape; the script collector validates `phonecall` text pointers, leaves `memcall`/`memjump` to runtime memory snapshots, and ignores malformed candidates |
 
 When adding an offset, add its check. Find data by searching a dump for
 independently known bytes, such as an encoded name or published base stats,
@@ -312,24 +273,19 @@ data but does not belong in this repository.
 
 ## Verify decoded output
 
-Inspect graphics, not only manifests:
+Runtime checks prove shape and endpoints, not every interior value, so inspect
+graphics and tables too:
 
 ```bash
 godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
 godot --headless --path . -s res://tools/preview_pics.gd -- crystal /tmp/font.png font
-```
-
-Species contact sheets expose decompression, tile order, palettes and pointer
-errors. `trainers` exposes class palette shifts; `font` and `frames` expose
-charmap gaps. Dump tables for text checks:
-
-```bash
 godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
 ```
 
-Cross-check move properties, Bulbasaur's Tackle/Growl, Eevee's five
-evolutions, Tyrogue's three and growth values against published data. Runtime
-checks prove shape and endpoints, not every interior value.
+Species contact sheets expose decompression, tile order, palette and pointer
+errors; `trainers` exposes class palette shifts; `font` and `frames` expose
+charmap gaps. Cross-check move properties, Bulbasaur's Tackle/Growl, Eevee's
+five evolutions, Tyrogue's three and growth values against published data.
 
 ## Inspect the UI without Play
 
@@ -382,6 +338,17 @@ starts the next turn when needed.
 - Tabs for indentation; static typing where practical.
 - `snake_case` for variables, functions and files; `PascalCase` for classes and
   nodes.
-- Comment only non-obvious constraints.
 - `.tscn` and `.tres` are plain-text format 3. Edit them directly. Do not invent
   `uid://` values; omit invalid fields and let Godot regenerate them.
+
+## Writing
+
+Comments and docs earn their length. Comment non-obvious constraints, source
+quirks and the disassembly symbol a rule came from; do not restate what the code
+says or argue at length that a decision was right. A source symbol plus a
+one-line reason is the target.
+
+State each fact once, where it is enforced, and link rather than repeat: source
+findings and constants near the code, contracts in `docs/`, current status in
+the project's own status notes. When something changes, replace the old text
+instead of appending a correction to it.

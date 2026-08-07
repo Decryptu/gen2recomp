@@ -3,21 +3,17 @@ extends RefCounted
 
 ## A battle: two parties, a turn at a time.
 ##
-## [RefCounted] and scene-free, with its randomness injected, so a whole battle
-## can be fought inside a test with no display. It knows nothing about how a
-## battle is drawn.
+## [RefCounted], scene-free, randomness injected, so a whole battle can be fought
+## in a test with no display.
 ##
-## A turn answers with a list of events rather than with a new state or a string.
-## An event says what happened and carries the numbers behind it; turning that
-## into a sentence, an animation or a bar that drains is the screen's job, and
-## keeping the two apart is what lets a battle be asserted on rather than read.
+## A turn answers with a list of events, not a new state or a string. An event
+## says what happened and carries its numbers; sentences, animation and draining
+## bars are the screen's job.
 ##
-## A side is a party, and a wild encounter is a party of one. Two things are the
-## caller's to decide rather than this class's, because the cartridge asks a
-## person or an AI for both and neither exists yet: which action a side takes,
-## and who replaces a Pokémon that has fainted. A turn that ends with somebody
-## down stops there and says so through [method must_replace]; nothing is sent
-## out until [method send_out] is called.
+## A side is a party, and a wild encounter is a party of one. The caller decides
+## which action a side takes and who replaces a fainted Pokémon: a turn that ends
+## with somebody down stops and says so through [method must_replace], and
+## nothing is sent out until [method send_out].
 
 ## The two sides, as plain numbers rather than an enum: they are dictionary keys
 ## and event payloads throughout, and an enum buys nothing where everything that
@@ -82,11 +78,10 @@ const WITHDREW: StringName = &"withdrew"
 const SENT_OUT: StringName = &"sent_out"
 const OVER: StringName = &"over"
 
-## Experience, once whoever fainted's own opponent has somebody left to award
-## it to. Never emitted for [constant ENEMY]: the cartridge's own
-## [code]GiveExperiencePoints[/code] only ever reads the player's own party
-## structure, so a trainer's Pokémon are never on the receiving end of this,
-## only ever the reason for it.
+## Experience, once the fainted Pokémon's opponent has somebody to award it to.
+## Never emitted for [constant ENEMY]: [code]GiveExperiencePoints[/code] only
+## reads the player's party structure, so a trainer's Pokémon are the reason for
+## this, never the recipient.
 const EXP_GAINED: StringName = &"exp_gained"
 ## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], split among
 ## [constant Gen2Battle] participants the way [method Gen2Experience.stat_exp_gain]
@@ -107,27 +102,24 @@ const MOVE_FORGOTTEN: StringName = &"move_forgotten"
 const MOVE_DECLINED: StringName = &"move_declined"
 
 ## Disable, Attract, Encore, Mist and Focus Energy each refuse for their own
-## reason (a target with nothing to disable, a same-gender or genderless
-## target, an already-encored target, and so on) rather than missing or doing
-## nothing to a type: not [constant MISSED], whose accuracy was rolled and
-## lost, and not [constant NO_EFFECT], which is about a type matchup. One event
-## for every one of the five, the same "but it failed!" the cartridge shares
-## across all of them.
+## reason (nothing to disable, a same-gender or genderless target, an already
+## encored target) rather than missing a roll ([constant MISSED]) or losing to a
+## type ([constant NO_EFFECT]). One event for all five, the "but it failed!" the
+## cartridge shares across them.
 const MOVE_FAILED: StringName = &"move_failed"
 
 ## Disable locked a slot, and later let it go. [code]slot[/code] and
-## [code]move[/code] on the first are the target's own, read off
-## [member Gen2BattleMon.disabled_slot] before it moves; the belt-and-suspenders
-## refusal for a Pokémon that is still locked into the disabled move itself is
-## [constant CANNOT_MOVE]'s own [code]&"disabled"[/code] reason, not this.
+## [code]move[/code] on the first are the target's, read off
+## [member Gen2BattleMon.disabled_slot] before it moves. A Pokémon still locked
+## into the disabled move is refused through [constant CANNOT_MOVE]'s
+## [code]&"disabled"[/code] reason, not here.
 const DISABLE_INFLICTED: StringName = &"disable_inflicted"
 const DISABLE_ENDED: StringName = &"disable_ended"
 
-## Attract's own two events: falling in love, which is
-## [constant Gen2Substatus.ATTRACTED] set and stays set until a switch, and the
-## turn a fresh roll finds the target too smitten to move, which is
-## [constant CANNOT_MOVE]'s own [code]&"attract"[/code] reason rather than an
-## event of its own, the same shape flinch and confusion already use.
+## Attract's two events: falling in love, [constant Gen2Substatus.ATTRACTED] set
+## until a switch, and a turn where a fresh roll finds the target too smitten to
+## move, which is [constant CANNOT_MOVE]'s [code]&"attract"[/code] reason rather
+## than an event, the shape flinch and confusion use.
 const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 
 ## Encore locked a slot, and later let it go, the same pair
@@ -181,15 +173,12 @@ var is_trainer_battle: bool = false
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
 
-## Which of a side's own party indices have fought since the opponent currently
-## out was sent in, kept as a Dictionary used for its keys. Seeded with the
-## lead at [method create_parties], added to on every [method send_out], and
-## reset to just whoever is left standing once experience has been given for
-## the opponent that just fainted: see [method _award_experience].
-##
-## Only [constant PLAYER]'s side is ever read for anything, mirroring the
-## cartridge's own asymmetry (see [constant EXP_GAINED]), but both sides are
-## tracked the same way rather than leaving one of them a special case.
+## Which of a side's party indices have fought since the current opponent was
+## sent in, a Dictionary used for its keys. Seeded with the lead at
+## [method create_parties], added to on every [method send_out], and reset to
+## whoever is left standing once experience is awarded: see
+## [method _award_experience]. Only [constant PLAYER]'s side is read, mirroring
+## the cartridge's asymmetry, but both are tracked the same way.
 var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
 
 ## The last direct damage each side took during the current pair of actions.
@@ -337,11 +326,10 @@ func awaiting_move_learn() -> bool:
 	return must_learn_move(PLAYER) or must_learn_move(ENEMY)
 
 
-## The offer waiting on [param side], or an empty Dictionary if there is none.
-## [code]species[/code], [code]index[/code], [code]move[/code] and
-## [code]level[/code] are enough to say "your FOO wants to learn BAR" without
-## asking the Pokémon anything a caller cannot already read off the event that
-## put this here.
+## The offer waiting on [param side], or an empty Dictionary. [code]species[/code],
+## [code]index[/code], [code]move[/code] and [code]level[/code] are enough to say
+## "your FOO wants to learn BAR" without asking the Pokémon anything the event
+## did not already carry.
 func pending_learn(side: int) -> Dictionary:
 	var queue: Array = _move_learn_queue.get(side, [])
 	return queue[0] if not queue.is_empty() else {}
@@ -416,20 +404,13 @@ func send_out(side: int, index: int) -> Array:
 ## happened.
 ##
 ## An action is [method use_move] or [method switch_to]. Nothing happens while
-## either side owes a replacement, and a faint ends the turn where it is: a
-## Pokémon that is knocked out before it has moved does not get to move, which is
-## most of what speed is for.
+## either side owes a replacement, and a faint ends the turn where it is.
 ##
-## The move each side is credited with for [method order]'s own priority check
-## is worked out once, before either side has acted, because that is the
-## moment the cartridge's own move order is decided too. What actually runs is
-## worked out again, fresh, right before [method _act]: Encore can land on a
-## side that has not gone yet this same turn, and the cartridge's own
-## `CheckOpponentWentFirst` forces that side's already-chosen action over for
-## the very turn it lands, not just the ones after it. Recomputing at the
-## point of use rather than committing to [param chosen] gets that for free,
-## since nothing about which move a side actually uses is settled until this
-## reaches it.
+## [method order]'s priority check reads the move each side is credited with once,
+## before either has acted, which is when the cartridge decides order. What
+## actually runs is recomputed just before [method _act], because Encore can land
+## on a side that has not gone yet and `CheckOpponentWentFirst` overrides that
+## side's chosen action for the very turn it lands.
 func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
@@ -470,14 +451,12 @@ func take_turn(player_slot: int, enemy_slot: int) -> Array:
 ## What a burn or a poison takes at the end of the turn, from each side in the
 ## order it acted.
 ##
-## After both moves rather than after each, and skipping whoever is already down:
-## a Pokémon that has fainted this turn is not burned any further, and one that
-## goes down to its burn faints here rather than in the middle of somebody's move.
+## After both moves rather than after each, skipping whoever is already down, so
+## a Pokémon that faints to its burn does so here rather than mid-move.
 ##
-## A poisoned Pokémon with a running [member Gen2BattleMon.toxic_counter] is
-## the one Toxic left, and it ramps instead of taking the flat eighth every
-## other poison and every burn take; the counter itself goes up here, once a
-## turn, so the turn it was inflicted on counts as the first.
+## A running [member Gen2BattleMon.toxic_counter] means Toxic, which ramps
+## instead of taking the flat eighth. The counter rises here, once a turn, so the
+## turn it was inflicted counts as the first.
 func _residual_damage(acting: Array, events: Array) -> void:
 	for side: int in acting:
 		var current: Gen2BattleMon = mon(side)
@@ -507,13 +486,10 @@ func _residual_damage(acting: Array, events: Array) -> void:
 			events.append({"type": FAINTED, "side": side})
 
 
-## Encore's own countdown, once a turn rather than once a side's move: the
-## cartridge's own `HandleEncore` runs after both sides have acted, the same
-## timing [method _residual_damage] already uses for a burn or a poison.
-##
-## Ends early, before the counter reaches zero, the moment the encored slot
-## itself runs out of PP: the cartridge checks that every turn Encore ticks,
-## not only when the counter would have expired on its own.
+## Encore's countdown, once a turn rather than once a side's move: `HandleEncore`
+## runs after both sides act, the timing [method _residual_damage] uses. Ends
+## early the moment the encored slot runs out of PP, which the cartridge checks
+## every tick, not only at expiry.
 func _tick_encore(acting: Array, events: Array) -> void:
 	for side: int in acting:
 		var current: Gen2BattleMon = mon(side)
@@ -529,15 +505,12 @@ func _tick_encore(acting: Array, events: Array) -> void:
 		events.append({"type": ENCORE_ENDED, "side": side})
 
 
-## Experience for every enemy Pokémon that fainted this turn, whether the faint
-## came from a move ([method _act], already in [param events] by the time this
-## runs) or from status damage ([method _residual_damage], run just before
-## this).
+## Experience for every enemy Pokémon that fainted this turn, from a move
+## ([method _act]) or from status damage ([method _residual_damage]).
 ##
-## A side's own [constant FAINTED] clears its fainted member out of
-## [member _participants] regardless of which side it is, because that half of
-## the rule (a fainted Pokémon stops participating) is not specific to the
-## side that receives experience; only [method _give_experience_for] is.
+## [constant FAINTED] clears the fainted member out of [member _participants] on
+## either side, since a fainted Pokémon stops participating regardless of which
+## side receives experience; only [method _give_experience_for] is asymmetric.
 func _award_experience(events: Array) -> void:
 	for event: Dictionary in events.duplicate():
 		if StringName(event.get("type", "")) != FAINTED:
@@ -632,12 +605,10 @@ func _move_for_action(side: int, action: Dictionary) -> int:
 	return move_for(side, int(action.get("slot", 0)))
 
 
-## The slot PP is actually spent from, which is not always the slot a caller
-## asks for: Encore forces whichever slot it locked in, the same way a
-## two-turn move's release turn forces its own move number regardless of which
-## slot [method move_for] is asked about. Falls back to the encored slot only
-## while it is still usable, so an encored move that has run out of PP does not
-## reach for it once [method _tick_encore] has already ended the effect.
+## The slot PP is actually spent from, not always the slot asked for: Encore
+## forces the slot it locked in, as a two-turn release forces its move number.
+## The encored slot is used only while still usable, so a move out of PP is not
+## reached for once [method _tick_encore] has ended the effect.
 func effective_slot(side: int, requested_slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.encored_slot >= 0 and attacker.can_use(attacker.encored_slot):
@@ -647,18 +618,15 @@ func effective_slot(side: int, requested_slot: int) -> int:
 
 ## Which move a side will actually use.
 ##
-## A Pokémon locked into a two-turn move's release turn answers with what it
-## charged, whatever slot the caller asks for: on the cartridge nothing is
-## chosen on that turn at all, so nothing here is either. Rollout and rampage
-## continuations use the same rule, forcing the move that started the chain.
-## Failing that, Encore answers with whatever [method effective_slot] resolves
-## to, which may not be the slot the caller asked for either.
+## A release turn answers with the charged move whatever slot is asked for, since
+## the cartridge chooses nothing on that turn. Rollout and rampage continuations
+## force the move that started the chain the same way. Failing that, Encore
+## answers with [method effective_slot], which may also not be the asked slot.
 ##
-## Failing that, a slot with nothing usable in it answers Struggle, which is
-## the cartridge's answer for a Pokémon with no PP anywhere. Here it is also the
-## answer for a slot that is empty, spent or disabled while others are not,
-## because a caller that points at one has asked for something that cannot
-## happen, and Struggle is the only move that is always available.
+## Failing that, an unusable slot answers Struggle. That is the cartridge's
+## answer for a Pokémon with no PP anywhere, and it is used here for an empty,
+## spent or disabled slot too: the caller asked for something that cannot happen,
+## and Struggle is the only always-available move.
 func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.charged_move != 0:
@@ -674,16 +642,13 @@ func move_for(side: int, slot: int) -> int:
 
 ## Who goes first, as the two sides in the order they act.
 ##
-## A switch is settled before any of this: the cartridge sends the incoming
-## Pokémon out and then lets the other side's move hit it, so a side that is
-## switching acts first however fast the other one is and whatever priority its
-## move has. Two switches in the same turn go to the player, which is what the
-## cartridge does outside a link battle.
+## A switch is settled first: the incoming Pokémon comes out and then takes the
+## other side's move, so a switching side acts first at any speed or priority.
+## Two switches in one turn go to the player, as outside a link battle.
 ##
-## Failing that, priority decides it; equal priority goes to the faster Pokémon,
-## by its speed with stages applied; and a genuine tie is a coin flip. The
-## cartridge weighs a held Quick Claw between the priority and the speed, which
-## nothing here carries yet.
+## Otherwise priority decides, then speed with stages applied, then a coin flip.
+## The cartridge weighs a held Quick Claw between priority and speed; no held
+## items exist here yet.
 func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
 	var player_switching: bool = _is_switch(actions.get(PLAYER, {}))
 	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {}))
@@ -716,12 +681,11 @@ static func priority_of(move: Dictionary) -> int:
 
 ## One side's move, run as the list of commands its effect is made of.
 ##
-## Nothing about what a particular move does lives here. The effect byte picks a
-## sequence out of [Gen2MoveEffect], the commands in it are run in order against
-## a [Gen2Turn] until one of them says the move is finished, and every rule about
-## announcing, spending, rolling, applying and fainting is one of those commands.
-## That is the cartridge's own arrangement, and it is what lets the rest of
-## Generation 2 be written as commands rather than as branches in here.
+## Nothing about a particular move lives here. The effect byte picks a sequence
+## out of [Gen2MoveEffect] and its commands run in order against a [Gen2Turn]
+## until one says the move is finished; announcing, spending, rolling, applying
+## and fainting are all commands. That is the cartridge's arrangement, and it is
+## why the rest of Generation 2 is commands rather than branches in here.
 func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	var move: Dictionary = data.move(move_number)
 	if move.is_empty():

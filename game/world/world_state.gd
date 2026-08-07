@@ -23,13 +23,12 @@ const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
 
-## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array;
-## VAR_BADGES counts both bytes together, not Johto alone. These are Crystal
-## indices. pokegold's constants/engine_flags.asm has no ENGINE_MOBILE_SYSTEM
-## entry, which pokecrystal inserts ahead of the badge section, so every
-## pokegold badge (and the merchant flag above) sits exactly one index lower
-## than the same symbol here; `_GetVarAction.CountBadges` and the flag order
-## are otherwise identical between the two games.
+## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array, and
+## VAR_BADGES counts both bytes, not Johto alone. These are Crystal indices:
+## pokegold's constants/engine_flags.asm has no ENGINE_MOBILE_SYSTEM, which
+## pokecrystal inserts ahead of the badge section, so every pokegold badge (and
+## the merchant flag above) sits one index lower. `_GetVarAction.CountBadges` and
+## the flag order are otherwise identical.
 const ENGINE_ZEPHYRBADGE: int = 27
 const ENGINE_HIVEBADGE: int = 28
 const ENGINE_PLAINBADGE: int = 29

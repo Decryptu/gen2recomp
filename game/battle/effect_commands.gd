@@ -3,21 +3,19 @@ extends RefCounted
 
 ## The steps a move is made of.
 ##
-## A move in these games is not a special case in a switch statement, it is a
-## short program: the cartridge keeps a list of commands per effect and runs them
-## in order, and an ordinary attack is the list that announces the move, spends
-## the PP, works the damage out, rolls the hit, applies it and checks for a
-## faint. Every other move is that list with steps added, removed or replaced.
+## A move is a short program, not a switch case: the cartridge keeps a command
+## list per effect and runs it in order. An ordinary attack announces the move,
+## spends the PP, works out damage, rolls the hit, applies it and checks for a
+## faint; every other move is that list with steps added, removed or replaced.
 ##
-## Reproducing the shape rather than the outcome is what makes the rest of
-## Generation 2 additive. A burn is a command appended to a list; a move that
-## cannot miss is a list with the roll left out; a two-turn move is a list that
-## ends early the first time. None of that reaches [Gen2Battle], which knows only
-## how to run a list.
+## Keeping the shape is what makes the rest of Generation 2 additive: a burn is
+## an appended command, a move that cannot miss is a list without the roll, a
+## two-turn move is a list that ends early the first time. None of it reaches
+## [Gen2Battle], which only knows how to run a list.
 ##
-## The names are the cartridge's own, so a sequence here can be read against
-## [code]data/moves/effects.asm[/code] in the pret disassembly line for line. See
-## [Gen2MoveEffect] for the lists themselves.
+## The names are the cartridge's, so a sequence reads against
+## [code]data/moves/effects.asm[/code] line for line. [Gen2MoveEffect] holds the
+## lists.
 
 ## Announces the move. First, because a move that fails still says it was used.
 const USED_MOVE_TEXT: StringName = &"usedmovetext"
@@ -64,9 +62,9 @@ const END_MOVE: StringName = &"endmove"
 ## Whether the move happens at all. Sleep, freeze and paralysis are checked here,
 ## in that order, and any of them can cost the turn.
 ##
-## Not part of any sequence: the cartridge runs this before it looks the effect
-## up, so every move goes through it and no list has to remember to. [Gen2Battle]
-## runs it ahead of the list for that reason.
+## Not part of any sequence: the cartridge runs it before looking the effect up,
+## so every move goes through it and no list has to remember to. [Gen2Battle]
+## runs it ahead of the list for the same reason.
 const CHECK_STATUS: StringName = &"checkstatus"
 
 ## Whether a secondary effect happens, out of the move's own chance. A move whose
@@ -83,19 +81,17 @@ const BURN_TARGET: StringName = &"burntarget"
 const FREEZE_TARGET: StringName = &"freezetarget"
 const PARALYZE_TARGET: StringName = &"paralyzetarget"
 
-## What Toxic leaves behind: the same poison flag [constant POISON_TARGET]
-## leaves, plus the ramping counter that makes it Toxic rather than an ordinary
-## poison. Its own command rather than [constant POISON_TARGET] with an extra
-## step after it, because the counter has to start before the first residual
-## turn sees it, and nothing else needs a command that touches both.
+## What Toxic leaves behind: [constant POISON_TARGET]'s poison flag plus the
+## ramping counter. Its own command rather than an extra step after
+## [constant POISON_TARGET], because the counter has to start before the first
+## residual turn sees it.
 const TOXIC_TARGET: StringName = &"toxictarget"
 
 ## The two things a move can leave on [Gen2Substatus] rather than the status
-## byte. Flinch is only ever a secondary effect, so it obeys
-## [member Gen2Turn.failed_chance] the same way the five above do; confusion
-## comes both ways, as a status move of its own (Confuse Ray, Supersonic) and
-## as a secondary effect (Confusion, Psybeam), which is why [Gen2MoveEffect]
-## reaches for this command from both shapes of sequence.
+## byte. Flinch is only ever a secondary effect, obeying
+## [member Gen2Turn.failed_chance] like the five above; confusion comes both ways,
+## as its own status move (Confuse Ray, Supersonic) and as a secondary effect
+## (Confusion, Psybeam), so [Gen2MoveEffect] reaches for it from both shapes.
 const FLINCH_TARGET: StringName = &"flinchtarget"
 const CONFUSE_TARGET: StringName = &"confusetarget"
 
@@ -104,11 +100,11 @@ const CONFUSE_TARGET: StringName = &"confusetarget"
 ## rule inside [constant CHECK_HIT], for Dream Eater.
 const DRAIN_TARGET: StringName = &"draintarget"
 
-## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], or exactly two for
+## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], exactly two for
 ## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE]:
-## one command that repeats the roll and the hit itself rather than a sequence
-## repeated by the runner, the same way [constant ALL_STATS_UP] repeats a stage
-## change five times without five commands.
+## one command repeating the roll and the hit rather than a runner-repeated
+## sequence, as [constant ALL_STATS_UP] repeats a stage change five times in one
+## command.
 const MULTI_HIT: StringName = &"multihit"
 
 ## Overwrites what [constant DAMAGE_CALC] worked out with the number
@@ -126,11 +122,10 @@ const OHKO: StringName = &"ohko"
 ## list rather than anything a target-facing command touches.
 const RECHARGE: StringName = &"recharge"
 
-## A two-turn move's charge. The first time it is run it locks the user in,
-## announces the charge and ends the move there; the second time, it is the
-## release turn, so it clears the lock and lets the rest of the list run as an
-## ordinary attack. [Gen2Battle._act] is what makes sure the second call is the
-## user's only option: see [method Gen2Battle.move_for].
+## A two-turn move's charge. First run: lock the user in, announce, end the move.
+## Second run, the release turn: clear the lock and let the rest of the list run
+## as an ordinary attack. [method Gen2Battle.move_for] is what makes that second
+## call the user's only option.
 const CHARGE_MOVE: StringName = &"chargemove"
 
 ## Rollout checks whether a chain is already active, applies its power state and
@@ -157,11 +152,9 @@ const BELLY_DRUM: StringName = &"bellydrum"
 ## target has nothing raised or lowered to copy.
 const PSYCH_UP: StringName = &"psychup"
 
-## Locks one of the target's own move slots, the one it last used, out for a
-## few turns. Fails if the target has not used a move yet, if that move was
-## Struggle, if it has already run out of PP, or if the target is already
-## disabled: only one slot at a time, the same "one at a time" rule the status
-## byte enforces for a different kind of affliction.
+## Locks the target's last-used move slot for a few turns. Fails if the target
+## has not moved, if that move was Struggle, if the slot is out of PP, or if the
+## target is already disabled: one slot at a time.
 const DISABLE: StringName = &"disable"
 
 ## Locks the target into repeating its own last move for a few turns. The same
@@ -185,12 +178,11 @@ const MIST: StringName = &"mist"
 ## switch. Fails, without re-applying, on a second use.
 const FOCUS_ENERGY: StringName = &"focusenergy"
 
-## Raises and lowers a stat by one stage or two, named the way the cartridge
-## names them and in the order [constant Gen2BattleMon.STAGED_STATS] plus
-## [constant Gen2BattleMon.STAGED_ODDS] already keeps the seven in, because that
-## is also the order the cartridge's own effect bytes run in: seven in a row for
-## "up by one", seven more for "down by one", and so on. [Gen2MoveEffect] is what
-## turns that run into a table; this only names the seven stops along it.
+## Raises and lowers a stat by one stage or two, named as the cartridge names
+## them and in [constant Gen2BattleMon.STAGED_STATS] plus
+## [constant Gen2BattleMon.STAGED_ODDS] order, which is also the order the effect
+## bytes run in: seven in a row for "up by one", seven more for "down by one",
+## and so on. [Gen2MoveEffect] turns that run into a table; this names the stops.
 const ATTACK_UP: StringName = &"attackup"
 const DEFENSE_UP: StringName = &"defenseup"
 const SPEED_UP: StringName = &"speedup"
@@ -259,10 +251,9 @@ const STAT_COMMANDS: Dictionary = {
 ## The five real stats [constant ALL_STATS_UP] raises, in the cartridge's order.
 const ALL_STATS_KEYS: Array = ["attack", "defense", "speed", "sp_attack", "sp_defense"]
 
-## Reports a stat change, or says nothing for one that is folded into a hit and
-## has no message step of its own. Separate from the change itself because a
-## status move that fails to move a stat says so and a secondary effect that
-## fails to says nothing, which is two different steps rather than one asking
+## Reports a stat change, or says nothing for one folded into a hit. Separate
+## from the change itself, because a status move that fails to move a stat says
+## so and a secondary effect that fails says nothing: two steps, not one asking
 ## both questions.
 const STAT_UP_MESSAGE: StringName = &"statupmessage"
 const STAT_DOWN_MESSAGE: StringName = &"statdownmessage"
@@ -281,19 +272,17 @@ const RECOIL_DIVISOR: int = 4
 ## Wheel and Sacred Fire, by move number.
 const THAWING_MOVES: Array = [172, 221]
 
-## What Encore refuses to lock a target into repeating even though the target
-## did just use it, by move number: Encore itself, and Mirror Move, since
-## forcing either to repeat means nothing (Encore stacked on Encore locks in
-## nothing new, and Mirror Move's own effect is to copy whatever the opponent
-## did last, not to repeat itself).
+## What Encore refuses to lock a target into, by move number: Encore itself and
+## Mirror Move, since forcing either to repeat means nothing. Encore on Encore
+## locks in nothing new, and Mirror Move copies the opponent's last move rather
+## than repeating itself.
 const ENCORE_EXCLUDED_MOVES: Array = [119, 227]
 
 
 ## Runs one command against [param turn].
 ##
-## An unknown command is an error rather than a no-op: a sequence that names a
-## step nobody wrote would otherwise play out as a move that quietly does less
-## than it says.
+## An unknown command is an error, not a no-op: a sequence naming a step nobody
+## wrote would otherwise play out as a move that quietly does less than it says.
 static func run(command: StringName, turn: Gen2Turn) -> void:
 	match command:
 		USED_MOVE_TEXT:
@@ -392,12 +381,10 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 ## Announces the move, and records it as what Disable and Encore will find if
 ## the opponent's next move searches for "what did this Pokémon last use".
 ##
-## The real cartridge skips that second part on the release turn of a two-turn
-## move, so Disable and Encore that land mid-charge see the move that was
-## charging rather than the one that was just released; this always records
-## the move actually announced, which is simpler and only differs from the
-## cartridge in that one narrow interaction. Worth revisiting if Disable or
-## Encore's behaviour against a charging Pokémon ever needs to match exactly.
+## The cartridge skips that second part on a two-turn release, so Disable and
+## Encore landing mid-charge see the charging move rather than the released one.
+## This always records the move announced, differing only in that one narrow
+## interaction.
 static func _used_move_text(turn: Gen2Turn) -> void:
 	turn.attacker().last_move_used = turn.move_number
 	turn.emit(Gen2Battle.USED_MOVE, {"move": turn.move_number})
@@ -572,13 +559,11 @@ static func _doubles_underground_damage(turn: Gen2Turn) -> bool:
 			Gen2MoveEffect.MAGNITUDE_MOVE].has(turn.move_number)
 
 
-## A quarter of [member Gen2Turn.damage], the number the formula calculated,
-## never less than one, and never [member Gen2Turn.dealt], the number that
-## actually came off a target with less left than that. The real cartridge's
-## own `BattleCommand_Recoil` reads the same uncapped `wCurDamage`
-## [constant Gen2EffectCommands.DRAIN_TARGET] already reads, so a target with
-## three hit points left against a move that calculates fifty costs the
-## attacker a quarter of fifty, not a quarter of three.
+## A quarter of [member Gen2Turn.damage], the calculated number, at least one, and
+## never [member Gen2Turn.dealt]. `BattleCommand_Recoil` reads the same uncapped
+## `wCurDamage` [constant Gen2EffectCommands.DRAIN_TARGET] reads, so a move
+## calculating fifty against a target with three HP left costs a quarter of
+## fifty.
 static func _recoil(turn: Gen2Turn) -> void:
 	if turn.damage <= 0:
 		return
@@ -615,20 +600,14 @@ static func _cancel_charge(mon: Gen2BattleMon) -> void:
 ## belt-and-suspenders refusal for a Pokémon still locked into the disabled
 ## move itself, then paralysis. This is the cartridge's own order.
 ##
-## A frozen Pokémon is never asked whether it is also paralysed, because the
-## status byte cannot say both; a confused Pokémon that hits itself is never
-## asked about paralysis either, because it has already spent its turn.
+## A frozen Pokémon is never asked about paralysis, since the status byte cannot
+## say both; a confused one that hits itself has already spent its turn.
 ##
-## Waking up does not cost the turn. The cartridge counts the sleep off, prints
-## that the Pokémon woke, and carries on into the rest of its checks rather than
-## ending the turn, so a Pokémon whose counter runs out attacks the same turn it
-## opens its eyes. That is Generation 2's rule and not Generation 1's. Snapping
-## out of confusion works the same way: the counter reaching zero clears the
-## flag and lets the move through the same turn, and Disable wearing off here
-## does too, for the same reason: [method Gen2BattleMon.can_use] already
-## refuses the slot before this runs, so a countdown that reaches zero this
-## turn has already stopped mattering by the time the belt-and-suspenders check
-## further down would otherwise have caught it.
+## Waking up does not cost the turn: the counter runs out, the wake is printed,
+## and the remaining checks continue, so the Pokémon attacks the same turn. That
+## is Generation 2's rule, not Generation 1's. Confusion and Disable expire the
+## same way, and [method Gen2BattleMon.can_use] has already refused a disabled
+## slot before this runs.
 static func _check_status(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 
@@ -697,13 +676,10 @@ static func _check_status(turn: Gen2Turn) -> void:
 		turn.end()
 		return
 
-	# Belt-and-suspenders: a Pokémon that is still, somehow, about to use its
-	# own disabled move is refused here rather than allowed through on a
-	# technicality. By move number, not by slot: [method Gen2BattleMon.can_use]
-	# has already turned an ordinary request for the disabled slot into
-	# Struggle by the time this runs, and [member Gen2Turn.slot] still names
-	# the slot that was asked for rather than the one that is actually
-	# happening, so comparing slots here would refuse that Struggle too.
+	# Last line of defence against using a disabled move. By move number, not by
+	# slot: can_use() has already turned a request for the disabled slot into
+	# Struggle, while Gen2Turn.slot still names the slot asked for, so comparing
+	# slots would refuse that Struggle too.
 	if mon.disabled_slot >= 0 and mon.disabled_slot < mon.moves.size() \
 		and turn.move_number == int(mon.moves[mon.disabled_slot]):
 		_cancel_charge(mon)
@@ -718,13 +694,10 @@ static func _check_status(turn: Gen2Turn) -> void:
 		turn.end()
 
 
-## A secondary effect's roll. The chance is a byte out of 256 in the move's own
-## table, like accuracy, and what it gates is only what comes after it: the
-## damage in front of it has already been done.
-##
-## A chance of zero never comes up, which is what the cartridge's comparison
-## does with it too. That is worth leaving alone rather than reading as "no
-## chance was given, so always": a move that says zero is a move that says never.
+## A secondary effect's roll: a byte out of 256 in the move's table, like
+## accuracy, gating only what comes after it, since the damage in front has
+## already landed. A chance of zero never fires, which is what the cartridge's
+## comparison does too: zero means never, not "unspecified".
 static func _effect_chance(turn: Gen2Turn) -> void:
 	var chance: int = int(turn.move.get("effect_chance", 0))
 	if turn.rng().randi_range(0, Gen2Status.CHANCE_RANGE - 1) >= chance:
@@ -790,12 +763,10 @@ static func _flinch_target(turn: Gen2Turn) -> void:
 	defender.substatus |= Gen2Substatus.FLINCHED
 
 
-## Sets the target confused and rolls how long for, or fails. A Pokémon already
-## confused is refused rather than having its counter restarted, which is the
-## rule [Gen2Substatus.CONFUSED] enforces the same way the status byte enforces
-## it for sleep, poison, burn, freeze and paralysis, except that confusion sits
-## alongside a status rather than instead of one: a poisoned Pokémon can still
-## be confused.
+## Sets the target confused and rolls its duration, or fails. An already-confused
+## Pokémon is refused rather than having its counter restarted, the rule
+## [Gen2Substatus.CONFUSED] enforces. Unlike a status, confusion sits alongside
+## one: a poisoned Pokémon can still be confused.
 static func _confuse_target(turn: Gen2Turn) -> void:
 	if turn.failed_chance:
 		return
@@ -814,12 +785,10 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 
 ## Heals the attacker for half of what the hit calculated, at least one.
 ##
-## Half of [member Gen2Turn.damage], the number the formula worked out, not
-## half of [member Gen2Turn.dealt], the number that actually came off a target
-## who had less than that left. The real cartridge's own drain reads the same
-## uncapped figure [constant APPLY_DAMAGE] read before clamping it to what the
-## defender had, so a move that calculates fifty against a target with three
-## hit points left heals twenty-five, not one.
+## Half of [member Gen2Turn.damage], the calculated number, not half of
+## [member Gen2Turn.dealt]. The cartridge's drain reads the same uncapped figure
+## [constant APPLY_DAMAGE] read before clamping, so a move calculating fifty
+## against a target with three HP left heals twenty-five.
 static func _drain_target(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	@warning_ignore("integer_division")
@@ -834,16 +803,12 @@ static func _drain_target(turn: Gen2Turn) -> void:
 ## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], or exactly two for
 ## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE].
 ##
-## [constant CHECK_HIT] has already rolled the one accuracy check the whole
-## move gets, the way the cartridge's own script checks it before the loop
-## that repeats the hit even starts; everything from here on is this command's
-## own job. The first hit reuses what [constant DAMAGE_CALC] already worked
-## out; every hit after it rerolls the critical and the spread fresh, the way
-## the cartridge's own loop does by jumping back to reroll rather than reusing
-## the first hit's numbers. A faint ends the move where it stands, which is
-## also why the "hit N times" summary is only sent when every planned hit
-## actually landed: the cartridge's own loop jumps straight past that line the
-## moment a hit brings the target down.
+## [constant CHECK_HIT] has already rolled the one accuracy check the whole move
+## gets, before the repeat loop starts. The first hit reuses
+## [constant DAMAGE_CALC]'s numbers; every later hit rerolls the critical and the
+## spread, as the cartridge's loop does. A faint ends the move where it stands,
+## which is why the "hit N times" summary is only sent when every planned hit
+## landed.
 static func _multi_hit(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	var defender: Gen2BattleMon = turn.defender()
@@ -890,17 +855,15 @@ static func _roll_multi_hit_count(rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(0, 3) + 2
 
 
-## Overwrites what [constant DAMAGE_CALC] worked out with the number these four
-## effects actually deal, none of which come out of the ordinary formula:
-## [constant Gen2MoveEffect.LEVEL_DAMAGE] is the user's own level,
-## [constant Gen2MoveEffect.PSYWAVE] a roll of it, [constant Gen2MoveEffect.SUPER_FANG]
-## half the target's current HP, and [constant Gen2MoveEffect.STATIC_DAMAGE] the
-## move's own power field, taken directly rather than as an input to a formula.
-## None of the four criticals or gets announced as super or not very effective,
-## since the number was never actually multiplied by either; [constant DAMAGE_CALC]'s
-## own roll, already spent, is only kept for the one thing worth keeping from
-## it, whether the hit is immune at all, which [constant CHECK_IMMUNE] has
-## already acted on by the time this runs.
+## Overwrites [constant DAMAGE_CALC] with the number these four effects deal,
+## none from the ordinary formula: [constant Gen2MoveEffect.LEVEL_DAMAGE] the
+## user's level, [constant Gen2MoveEffect.PSYWAVE] a roll of it,
+## [constant Gen2MoveEffect.SUPER_FANG] half the target's current HP, and
+## [constant Gen2MoveEffect.STATIC_DAMAGE] the move's power field taken directly.
+## None criticals or announces effectiveness, since the number was never
+## multiplied by either; only the immunity from the spent
+## [constant DAMAGE_CALC] roll is kept, and [constant CHECK_IMMUNE] has already
+## acted on it.
 static func _fixed_damage(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	var defender: Gen2BattleMon = turn.defender()
@@ -928,13 +891,10 @@ const OHKO_LEVEL_BONUS: int = 2
 ## Guillotine, Horn Drill and Fissure: an instant faint with its own accuracy
 ## rule rather than the move's stored one read plainly.
 ##
-## A defender with a higher level than the attacker is immune outright, no
-## roll at all. Otherwise the move's own stored accuracy (a shade under 30%)
-## is raised by two for every level the attacker has over the defender, capped
-## the way any accuracy is, and rolled through the ordinary stage machinery
-## before it decides anything: an attacker that has lowered the target's
-## evasion or raised its own accuracy makes a one-hit KO likelier to land, the
-## same as it would any other move.
+## A higher-level defender is immune outright, with no roll. Otherwise the stored
+## accuracy (a shade under 30%) rises by two per level the attacker leads by,
+## capped as any accuracy is, and rolls through the ordinary stage machinery, so
+## lowered evasion or raised accuracy helps a one-hit KO like any other move.
 static func _ohko(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	var defender: Gen2BattleMon = turn.defender()
@@ -975,12 +935,10 @@ static func _recharge(turn: Gen2Turn) -> void:
 ## A two-turn move's charge, in the shape [code]docs/CONTRIBUTING.md[/code]
 ## already describes: a list that ends early the first time.
 ##
-## Not charging yet: locks the user in, announces it and ends the move before
-## the damage is even worked out. Already charging, which is the release turn:
-## clears the lock and falls through into the rest of the list, which is an
-## ordinary attack from here. [method Gen2Battle.move_for] is what guarantees
-## the release turn's move is the one that was charged, whatever slot the
-## caller asks for.
+## Not charging yet: lock the user in, announce it and end the move before damage
+## is worked out. Already charging, the release turn: clear the lock and fall
+## through into an ordinary attack. [method Gen2Battle.move_for] guarantees the
+## release turn uses the charged move whatever slot is asked for.
 static func _charge_move(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING):
@@ -1099,16 +1057,14 @@ static func _psych_up(turn: Gen2Turn) -> void:
 	turn.emit(Gen2Battle.STAGES_COPIED)
 
 
-## Locks one of the target's own move slots: whichever one holds
-## [member Gen2BattleMon.last_move_used], found by searching the target's own
-## move list the way the cartridge does rather than by asking which slot it
-## came from, because nothing the attacker did carries that information.
+## Locks whichever of the target's slots holds
+## [member Gen2BattleMon.last_move_used], found by searching the target's move
+## list as the cartridge does, since nothing the attacker did carries the slot.
 ##
-## Fails, doing nothing, if the target has not moved yet this battle, if that
-## move was Struggle, if the target is already disabled, if the move it used
-## is no longer in its list at all (a level-up mid-battle can replace a slot;
-## the cartridge never has to consider this since nothing on it can), or if
-## the slot that move sits in has already run out of PP.
+## Fails silently if the target has not moved this battle, the move was Struggle,
+## the target is already disabled, the move is no longer in its list (a mid-battle
+## level up can replace a slot, which the cartridge never has to consider), or
+## that slot is out of PP.
 static func _disable(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.disabled_slot >= 0:
@@ -1134,14 +1090,12 @@ static func _disable(turn: Gen2Turn) -> void:
 
 
 ## Locks the target into repeating [member Gen2BattleMon.last_move_used] for a
-## few turns, found the same way [method _disable] finds its own slot and
-## refused for the same reasons, plus two the cartridge names outright rather
-## than leaving to a structural check: see [constant ENCORE_EXCLUDED_MOVES].
+## few turns, found and refused as [method _disable] does, plus the two moves the
+## cartridge names outright: see [constant ENCORE_EXCLUDED_MOVES].
 ##
-## What actually forces the move each turn is not here: [method Gen2Battle.
-## effective_slot] and [method Gen2Battle.move_for] read
-## [member Gen2BattleMon.encored_slot] back at the point a side acts, the same
-## way a two-turn move's release turn is forced through
+## The forcing happens elsewhere: [method Gen2Battle.effective_slot] and
+## [method Gen2Battle.move_for] read [member Gen2BattleMon.encored_slot] when a
+## side acts, as a two-turn release reads
 ## [member Gen2BattleMon.charged_move].
 static func _encore(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
@@ -1166,11 +1120,10 @@ static func _encore(turn: Gen2Turn) -> void:
 	turn.emit(Gen2Battle.ENCORE_INFLICTED, {"target": turn.target, "slot": slot, "move": last_move})
 
 
-## Puts the target in love, provided the user and the target have opposite,
-## known genders (a genderless Pokémon or a matching pair refuses the same way
-## a Pokémon already in love does) and the target is not already smitten.
-## [constant Gen2EffectCommands.CHECK_STATUS] is what rolls, every turn from
-## here on, whether that stops the target moving at all.
+## Puts the target in love, given opposite known genders (a genderless Pokémon or
+## a matching pair refuses, as does one already in love).
+## [constant Gen2EffectCommands.CHECK_STATUS] rolls each turn from here on
+## whether that stops the target moving.
 static func _attract(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	var defender: Gen2BattleMon = turn.defender()
@@ -1220,17 +1173,14 @@ static func _focus_energy(turn: Gen2Turn) -> void:
 ## Moves one stat by one command's worth, and writes down who it happened to and
 ## whether it actually moved, for the message step behind it to read.
 ##
-## A secondary effect's failed roll skips this the same way it skips a status:
-## the damage in front of it has already landed, and what was behind the roll is
-## the only thing the roll can still cost.
+## A secondary effect's failed roll skips this as it skips a status: the damage in
+## front has already landed.
 ##
-## A drop aimed at a target shielded by Mist never reaches
-## [method Gen2BattleMon.change_stage] at all: every entry that lowers a stat
-## targets the opponent rather than the user (`entry[2]` is false for exactly
-## that set), which is the same thing Mist itself only ever blocks. A rise
-## always targets the user and is never checked against it, the same as the
-## cartridge's own [code]CheckMist[/code] only gates the "down" and "down2"
-## effect-byte ranges.
+## A drop against a target shielded by Mist never reaches
+## [method Gen2BattleMon.change_stage]: every lowering entry targets the opponent
+## (`entry[2]` false), which is exactly what Mist blocks. A rise always targets
+## the user and is never checked, matching [code]CheckMist[/code] gating only the
+## "down" and "down2" effect-byte ranges.
 static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 	var entry: Array = STAT_COMMANDS[command]
 	var stat_key: String = String(entry[0])
@@ -1284,17 +1234,14 @@ static func _stat_message(turn: Gen2Turn) -> void:
 	})
 
 
-## Says a stat could not move. Only reached from a status move's own sequence,
-## which is the only place the cartridge follows a message step with this one:
-## an on-hit drop blocked by Mist has no fail-text step behind it at all, the
-## same silent failure any other on-hit drop that misses its own roll already
-## gets, since [code]data/moves/effects.asm[/code] never follows one with
-## [code]statdownfailtext[/code] either.
+## Says a stat could not move. Only reached from a status move's sequence, the
+## only place [code]data/moves/effects.asm[/code] follows a message step with
+## [code]statdownfailtext[/code]; an on-hit drop blocked by Mist fails silently,
+## like any on-hit drop that misses its roll.
 ##
-## Mist gets its own line rather than the generic one: the cartridge's own
+## Mist gets its own line, because
 ## [code]BattleCommand_StatDownFailText[/code] prints
-## [code]ProtectedByMistText[/code] for exactly this case, not "won't go any
-## lower".
+## [code]ProtectedByMistText[/code] here rather than "won't go any lower".
 static func _stat_fail_text(turn: Gen2Turn) -> void:
 	if turn.stat_moved:
 		return

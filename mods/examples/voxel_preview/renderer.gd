@@ -2,21 +2,17 @@ extends SubViewportContainer
 
 ## A world renderer that draws geometry instead of hardware tiles.
 ##
-## The point of this example is that nothing about the world requires the view to
-## be 2D. It reads exactly what the built-in renderer reads: the collision
-## permission of each walk cell, the block grid, the tileset's palettes and the
-## player's cell. From that it extrudes a solid per cell and points a camera at
-## the player.
+## The point is that nothing about the world requires the view to be 2D. It reads
+## exactly what the built-in renderer reads (each walk cell's collision
+## permission, the block grid, the tileset's palettes, the player's cell) and
+## extrudes a solid per cell with a camera on the player.
 ##
-## It answers [code]uses_hardware_viewport[/code] with false, so the screen gives
-## it the rectangle the Game Boy screen occupies at the window's own resolution
-## rather than a 160x144 buffer. Text boxes and menus keep being drawn in
-## hardware pixels over the top, which is what an HD or 3D presentation of these
-## games wants.
+## It answers [code]uses_hardware_viewport[/code] false, so it gets the Game Boy
+## screen's rectangle at window resolution rather than a 160x144 buffer. Text
+## boxes and menus stay hardware pixels over the top.
 ##
-## It reads the world and never writes it. Two views of one world have to agree,
-## so the built-in renderer and this one can be swapped mid-step and neither can
-## tell the other what changed.
+## It reads the world and never writes it, so the two renderers can be swapped
+## mid-step and neither can tell the other what changed.
 
 const CELL_SIZE: float = 1.0
 const WALL_HEIGHT: float = 1.0

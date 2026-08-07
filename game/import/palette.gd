@@ -6,10 +6,10 @@ extends RefCounted
 ## A colour is 15 bits packed little-endian as $0BBBBBGG GGGRRRRR, five bits
 ## per channel, red in the low bits. The hardware ignores bit 15.
 ##
-## A Pokémon's stored palette holds only two colours. The other two are implied:
-## every pic uses index 0 for white and index 3 for black, so only the middle
-## pair varies. Each species stores two such pairs, normal and shiny, which is
-## the whole of what being shiny means to the renderer.
+## A stored Pokémon palette holds only two colours; every pic uses index 0 for
+## white and index 3 for black, so only the middle pair varies. Each species
+## stores two such pairs, normal and shiny, which is all being shiny means to the
+## renderer.
 
 const COLOR_BYTES: int = 2
 ## The two middle colours a pic is drawn with. A trainer class stores one such

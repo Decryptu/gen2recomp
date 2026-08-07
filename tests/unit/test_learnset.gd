@@ -3,12 +3,11 @@ extends GutTest
 ## What a Pokémon knows at a level, against learnsets copied out of the
 ## cartridges rather than invented.
 ##
-## Two species carry everything worth testing between them. Golbat learns the
-## same move twice, which is what the duplicate check is for. Muk's list is not
-## in ascending order, which is the cartridge's own mistake and the reason the
-## two questions here give different answers: filling a fresh Pokémon's moves
-## stops at the first entry above its level, so a Muk caught at 40 is three moves
-## short of one raised to 40.
+## Two species cover everything worth testing. Golbat learns the same move twice,
+## which is the duplicate check. Muk's list is not ascending, which is why the
+## two questions give different answers: filling a fresh Pokémon stops at the
+## first entry above its level, so a Muk caught at 40 is three moves short of one
+## raised to 40.
 
 const SCREECH: int = 103
 const LEECH_LIFE: int = 141

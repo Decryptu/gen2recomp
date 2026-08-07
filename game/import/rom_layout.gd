@@ -8,16 +8,14 @@ extends RefCounted
 ## map, while a few data sections use per-game offsets; Crystal moved almost
 ## everything and is its own table.
 ##
-## Every offset here was located in the cartridges themselves, by searching for
-## content whose bytes are known independently (the encoded string "BULBASAUR",
-## Bulbasaur's published base stats), and then cross-checked against the pret
-## disassemblies for structure. That is why there is no entry for a ROM that is
-## not in [RomRegistry]: an offset table is a claim about a specific dump, and
-## the honest answer for an uncharacterised one is a refusal, not a guess.
+## Every offset was located in the cartridges themselves, by searching for
+## independently known bytes (the encoded string "BULBASAUR", Bulbasaur's
+## published base stats), then cross-checked against the pret disassemblies for
+## structure. An offset table is a claim about a specific dump, which is why an
+## uncharacterised ROM is refused rather than guessed at.
 ##
-## An offset is only trustworthy alongside the check that proves it: see
-## [method RomImporter.verify_layout], which the importer runs before it decodes
-## anything.
+## An offset is only trustworthy alongside its check: see
+## [method RomImporter.verify_layout], run before anything is decoded.
 
 const SPECIES_COUNT: int = 251
 const NAME_LENGTH: int = 10
@@ -192,10 +190,9 @@ const MAX_NAME_LENGTH: int = 16
 ## table is [constant MATCHUP_EFFECTIVE], which is why the whole of Generation 2
 ## fits in 332 bytes.
 ##
-## Multipliers are in tenths, as the cartridge stores them, so a matchup is
-## applied by multiplying and then dividing by ten. Keeping the tenth rather
-## than a float is not pedantry: the games truncate after each of a defender's
-## two types, and a Pokémon that survives on one hit point does so because of it.
+## Multipliers are in tenths as the cartridge stores them, applied by multiplying
+## then dividing by ten. Tenths rather than a float because the games truncate
+## after each of a defender's two types.
 const MATCHUP_ENTRY_SIZE: int = 3
 const MATCHUP_ATTACKER: int = 0
 const MATCHUP_DEFENDER: int = 1
@@ -292,12 +289,11 @@ const EVOLUTION_COUNT: int = 122
 ## that way in all three games, and it is not a decoding artefact: pret's own
 ## listing carries a comment saying so.
 ##
-## It is worth naming rather than working around, because the order is load
-## bearing. Filling a fresh Pokémon's moves stops at the first entry above the
-## level being filled for, so a Muk below 45 never reaches the three moves listed
-## after the level 45 one and is short of what its level says it should know.
-## Checking the order everywhere else is worth the one exception: scrambled
-## levels are exactly what a wrong offset produces.
+## Named rather than worked around, because the order is load bearing: filling a
+## fresh Pokémon stops at the first entry above its level, so a Muk below 45
+## never reaches the three moves after the level 45 one. Checking the order
+## everywhere else is worth the exception, since scrambled levels are exactly
+## what a wrong offset produces.
 const UNSORTED_LEARNSET_SPECIES: int = 89
 
 ## Unown's entry in the main pic table is a deliberate $FF placeholder: its 26
@@ -390,16 +386,13 @@ const BAR_STEP_PIXELS: int = 2
 ## Every trainer pic is this square, unlike a Pokémon's front pic.
 const TRAINER_PIC_TILES: int = 7
 
-## The trainer *party* table is a second table indexed the same way as the class
-## names, pics and palettes, one pointer per class, and it is where the game's
-## individual trainers actually live. "LEADER" is the class name every gym
-## leader shares; FALKNER is a name stored inside class 1's own party entry,
-## next to the Pokémon he brings. Reading a class's identity therefore always
-## means reading two tables, not one.
+## A second table indexed like the class names, pics and palettes, one pointer
+## per class, holding the individual trainers. "LEADER" is the class name every
+## gym leader shares; FALKNER is stored inside class 1's party entry beside the
+## Pokémon he brings, so a class's identity always means reading two tables.
 ##
-## The pointer is two bytes, in the pointer table's own bank, exactly like
-## [member evos_attacks]: the entries sit in the same bank as the pointers that
-## address them, so there is no bank number to store.
+## Two-byte pointers in the pointer table's own bank, like [member evos_attacks]:
+## the entries share that bank, so there is no bank number to store.
 const TRAINER_PARTY_POINTER_SIZE: int = 2
 
 ## What a trainer's Pokémon carries, in the type byte between its name and its
@@ -434,13 +427,11 @@ const MAX_TRAINERS_PER_CLASS: int = 64
 ## The trainer *attributes* table: a third table indexed the same way as the
 ## class names, pics, palettes and parties, one fixed-stride entry per class
 ## rather than a pointer, and it is where a class's own AI behaviour lives.
-## Seven bytes: two item numbers a trainer of this class may use, a base money
-## reward, then two words of bit flags. Confirmed against pret's own
-## `TrainerClassAttributes`, entry by entry: Falkner opens the table with the
-## bytes his own listing gives, class 5 (Pryce) is the first to differ (he may
-## use a Hyper Potion), and one class further down the list carries an AI move
-## weight word of zero ([constant NO_AI]), which the check below has to allow
-## rather than reject as garbage.
+## Seven bytes: two item numbers this class may use, a base money reward, then
+## two words of bit flags. Confirmed against `TrainerClassAttributes` entry by
+## entry: Falkner opens with his listed bytes, class 5 (Pryce) is the first to
+## differ with a Hyper Potion, and one class carries an AI move weight word of
+## zero ([constant NO_AI]), which the check must allow rather than reject.
 const TRAINER_ATTRIBUTES_SIZE: int = 7
 const ATTR_ITEM1: int = 0
 const ATTR_ITEM2: int = 1
@@ -486,24 +477,20 @@ const AI_ITEM_SWITCH_MASK: int = SWITCH_OFTEN | SWITCH_RARELY | SWITCH_SOMETIMES
 
 ## The trainer *DVs* table: a fifth trainer table, indexed the same way as the
 ## attributes table, one fixed two-byte entry per class rather than a pointer.
-## Two nibbles a byte, attack and defense in the first and speed and special in
-## the second, which is exactly the shape [method Gen2Stats.pack_dvs] already
-## packs a DV word into: a class's two raw bytes, read as one big-endian
-## integer, are a [Gen2BattleMon] DV word with no repacking. Confirmed against
-## pret's own `TrainerClassDVs` entry by entry in all three games: Falkner opens
-## the table with his own known DVs, and the class that closes it (class 66 in
-## Gold and Silver, 67 in Crystal, since Crystal alone carries MYSTICALMAN)
-## carries its own.
+## Two nibbles a byte, attack and defense in the first, speed and special in the
+## second: exactly the shape [method Gen2Stats.pack_dvs] packs into, so a class's
+## two raw bytes read big-endian are a [Gen2BattleMon] DV word unchanged.
+## Confirmed against `TrainerClassDVs` entry by entry in all three games, with
+## Falkner opening the table and the closing class (66 in Gold and Silver, 67 in
+## Crystal, which alone carries MYSTICALMAN) carrying its own.
 const TRAINER_DVS_SIZE: int = 2
 
-## The one trainer class with no party of its own: the eleven o'clock scholar,
-## Professor Elm's class in the class table, whose name and pic exist but who
-## the games never send into a battle. Its own label in the source is followed
-## immediately by the next class's with nothing between, so its pointer equals
-## the next class's, and the honest reading of that is zero trainers rather than
-## a copy of somebody else's. Confirmed against pret's own party data
-## (`PokemonProfGroup` has no entries before `WillGroup`, in that order), and
-## the same class number in every game.
+## The one trainer class with no party: Professor Elm's class, whose name and pic
+## exist but who is never sent into battle. Its source label is followed
+## immediately by the next class's, so its pointer equals that one, and the
+## honest reading is zero trainers rather than a copy. Confirmed against pret's
+## party data (`PokemonProfGroup` has no entries before `WillGroup`), same class
+## number in every game.
 const EMPTY_TRAINER_CLASS: int = 10
 
 ## Back pics are always this square. Front pics vary and carry their own size in

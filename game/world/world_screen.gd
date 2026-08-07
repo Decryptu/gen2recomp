@@ -16,12 +16,10 @@ const START_MENU_SCENE: PackedScene = preload("res://game/world/start_menu_scree
 const PARTY_SCENE: PackedScene = preload("res://game/save/party_screen.tscn")
 const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 ## constants/sfx_constants.asm's SFX_JUMP_OVER_LEDGE (comments there are hex,
-## confirmed against neighboring entries $0a/$0f/$1a), played by
-## engine/overworld/player_movement.asm's .TryJump as the hop starts. Played
-## directly rather than through the script-request path in
-## _handle_audio_request(), which expects a runtime request to acknowledge; a
-## hop is player movement, not a script. _play_current_map_music() below is
-## the existing precedent for this direct-play shape.
+## confirmed against neighbouring $0a/$0f/$1a), played by .TryJump as the hop
+## starts. Played directly rather than through _handle_audio_request(), which
+## expects a runtime request to acknowledge; a hop is movement, not a script.
+## _play_current_map_music() below is the precedent for this shape.
 const SFX_JUMP_OVER_LEDGE: int = 0x16
 
 @export var map_group: int = 24
@@ -164,12 +162,11 @@ func _build_world() -> void:
 ## Builds the view for the selected renderer and attaches it to the layer that
 ## renderer asked for.
 ##
-## Constructed through the mod host rather than directly, so a registered
-## renderer replaces this view without the screen knowing what it draws with. A
-## renderer that answers the surface question with false is given the screen's
-## rectangle at window resolution instead of the hardware viewport, which is what
-## a 3D or HD view needs; the text boxes and menus above it stay hardware pixels
-## either way.
+## Constructed through the mod host, so a registered renderer replaces this view
+## without the screen knowing what it draws with. A renderer answering the
+## surface question false gets the screen's rectangle at window resolution
+## instead of the hardware viewport, which is what a 3D or HD view needs; text
+## boxes and menus above it stay hardware pixels either way.
 func _build_renderer() -> void:
 	if _world == null:
 		return
@@ -895,13 +892,12 @@ func _start_trainer_approach(request: Dictionary) -> void:
 	_refresh_labels()
 
 
-## Paces the approach by call count rather than delta time, so this matches
-## the emote and movement-delay counters beside it and stays independent of
-## real frame timing. The stepping object's own step_frames_remaining (set by
-## [method Gen2WorldAPI.advance_trainer_approach_step]) is consumed here at
-## the same one-per-call rate the emote and delay counters already use; the
-## object's step_offset() gives the renderer the same 16-frame interpolation
-## without changing how many calls the approach takes to finish.
+## Paced by call count rather than delta time, matching the emote and
+## movement-delay counters beside it and staying independent of real frame
+## timing. The object's step_frames_remaining (set by
+## [method Gen2WorldAPI.advance_trainer_approach_step]) is consumed one per call
+## like those counters, while step_offset() still gives the renderer 16-frame
+## interpolation.
 func _advance_trainer_approach() -> void:
 	if _world == null:
 		_trainer_approach = {}

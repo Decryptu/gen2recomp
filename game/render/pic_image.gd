@@ -3,17 +3,15 @@ extends RefCounted
 
 ## Colour indices plus a palette to an [Image].
 ##
-## The cache stores what the cartridge stores: two bits per pixel, no colour. A
-## palette is chosen here, at draw time, which is why a shiny sprite costs one
-## different [PackedColorArray] and not a second copy of the pixels.
+## The cache stores what the cartridge stores: two bits per pixel, no colour. The
+## palette is chosen here, at draw time, so a shiny sprite costs one different
+## [PackedColorArray] rather than a second copy of the pixels.
 ##
-## The whole image is built as one buffer and handed to
-## [method Image.create_from_data]. Per-pixel [method Image.set_pixel] on a
-## 56x56 sprite is 3136 calls through the binding for something that is a table
-## lookup, and a battle can want several sprites in a frame.
+## The image is built as one buffer for [method Image.create_from_data]:
+## per-pixel [method Image.set_pixel] on a 56x56 sprite is 3136 binding calls for
+## a table lookup, and a battle can want several sprites a frame.
 ##
-## Node-free like the layers below it: an [Image] is data, not a scene, so this
-## can be checked in a headless test.
+## Node-free: an [Image] is data, not a scene, so this can be checked headless.
 
 const CHANNELS: int = 4
 

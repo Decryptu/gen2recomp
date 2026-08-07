@@ -3,16 +3,13 @@ extends RefCounted
 
 ## Decodes a verified cartridge into the cache under [code]user://[/code].
 ##
-## The ROM is an asset database, read once and released. Nothing downstream of
-## the cache holds a reference to it, and nothing in the engine reads cartridge
-## bytes at play time.
+## The ROM is an asset database, read once and released. Nothing downstream holds
+## a reference, and nothing in the engine reads cartridge bytes at play time.
 ##
-## Order of business, and it matters: verify the hash, then verify the layout,
-## then decode. [method verify_layout] exists because an offset table is a claim
-## that can rot: a wrong constant produces plausible-looking garbage rather
-## than an error, and garbage that reaches the cache is indistinguishable from
-## real data later on. Checking a handful of values whose correct answers are
-## known independently turns that class of mistake into an immediate failure.
+## The order matters: verify the hash, then the layout, then decode. A wrong
+## offset produces plausible garbage rather than an error, and garbage in the
+## cache is indistinguishable from real data later, so [method verify_layout]
+## checks values whose correct answers are known independently.
 
 ## Atlas cells are the largest pic of their kind so a renderer can index them
 ## arithmetically; smaller pics sit in the top-left of their cell and record
@@ -243,10 +240,9 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 ## Walks the type matchup chart from its offset to the terminator.
 ##
 ## Returns an Array of { attacker, defender, multiplier, negated_by_foresight },
-## or an empty Array if the walk ran away without finding an end. The rows after
-## the $FE marker carry the flag: they are the matchups that stop applying once
-## Foresight has identified the defender, which is how the cartridge gets a Ghost
-## to be hittable by Normal without a second table.
+## empty if the walk ran away without finding an end. Rows after the $FE marker
+## carry the flag: they stop applying once Foresight identifies the defender,
+## which is how a Ghost becomes hittable by Normal without a second table.
 static func read_matchups(rom: RomFile, layout: Dictionary) -> Array:
 	var at: int = int(layout["type_matchups"])
 	var out: Array = []
@@ -279,12 +275,11 @@ static func read_matchups(rom: RomFile, layout: Dictionary) -> Array:
 
 ## The matchup chart, checked by the shape a chart of exceptions has to have.
 ##
-## It carries no name and no number, but it is unusually hard to land on by
-## accident: every row is two sparse type numbers and a multiplier drawn from a
-## set of three, the whole run has to walk to a $FE and then a $FF at exactly the
-## right distance, and both ends are known content. A wrong offset fails on the
-## very first row, because the padding run between the two groups of type numbers
-## is most of the byte range.
+## No name and no number, but hard to land on by accident: every row is two
+## sparse type numbers and one of three multipliers, the run must reach $FE then
+## $FF at exactly the right distance, and both ends are known content. A wrong
+## offset fails on the first row, since the padding run between the two type
+## groups is most of the byte range.
 static func verify_matchups(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var rows: Array = read_matchups(rom, layout)
 	if rows.is_empty():
@@ -358,17 +353,16 @@ static func verify_matchups(rom: RomFile, layout: Dictionary) -> Dictionary:
 
 ## Walks one species' entry in the combined evolution and level-up move table.
 ##
-## Returns { evolutions, learnset }, or an empty Dictionary if the walk did not
-## find both terminators where a well-formed entry has them. An evolution is
-## { method, parameter, condition, target } and a level-up move is
-## { level, move }; [code]condition[/code] is zero for every method except
-## [constant RomLayout.EVOLVE_STAT], which is the only one that asks two
-## questions.
+## Returns { evolutions, learnset }, empty if both terminators were not where a
+## well-formed entry has them. An evolution is
+## { method, parameter, condition, target }, a level-up move { level, move };
+## [code]condition[/code] is zero except for [constant RomLayout.EVOLVE_STAT],
+## the only method asking two questions.
 ##
-## Level-up moves are kept in the cartridge's order rather than sorted. The order
-## is what decides which move a fresh Pokémon ends up with when more than four are
-## on offer, and one species is genuinely out of order; see
-## [constant RomLayout.UNSORTED_LEARNSET_SPECIES].
+## Level-up moves keep the cartridge's order rather than being sorted: the order
+## decides which move a fresh Pokémon ends up with when more than four are on
+## offer, and one species really is out of order (see
+## [constant RomLayout.UNSORTED_LEARNSET_SPECIES]).
 static func read_evos_attacks(rom: RomFile, layout: Dictionary, species: int) -> Dictionary:
 	var table: int = RomLayout.evos_attacks_pointer_offset(layout, species)
 	if not rom.in_bounds(table, RomLayout.EVOS_ATTACKS_POINTER_SIZE):
@@ -419,15 +413,13 @@ static func read_evos_attacks(rom: RomFile, layout: Dictionary, species: int) ->
 
 ## The evolution and learnset table, checked species by species.
 ##
-## Nothing in it says which species an entry belongs to, so what is checked is
-## the shape: 251 pointers into the banked window, each naming a run of
-## evolutions whose methods come from a set of five and whose targets are real
-## species, then a run of level-up moves at real levels teaching real moves. A
-## wrong pointer fails on the first byte it reads, because most byte values are
-## not an evolution method and not a terminator.
-##
-## On top of that, the levels ascend in all but one species, the totals are known,
-## and both ends of the table are content whose answer is known independently.
+## Nothing says which species an entry belongs to, so the shape is checked: 251
+## pointers into the banked window, each naming evolutions whose methods come
+## from a set of five and whose targets are real species, then level-up moves at
+## real levels teaching real moves. A wrong pointer fails on its first byte,
+## since most byte values are neither an evolution method nor a terminator. On
+## top of that, levels ascend in all but one species, the totals are known, and
+## both ends are independently known content.
 static func verify_evos_attacks(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var entries: Array = []
 	var evolutions: int = 0
@@ -587,10 +579,9 @@ static func _verify_known_evos_attacks(entries: Array) -> Dictionary:
 ## thing that is known about it independently: the charmap.
 ##
 ## The font is indexed by character code, so the letters and digits [Gen2Text]
-## claims are there must have ink, and the runs of codes it has no character for
-## must be blank. Those runs sit between the alphabets, so an offset out by a
-## single tile drags a blank onto "z" and a glyph onto a code that has none, and
-## the check fails in both directions at once.
+## claims must have ink and the runs it has no character for must be blank. Those
+## runs sit between the alphabets, so an offset out by one tile drags a blank
+## onto "z" and a glyph onto an unmapped code, failing both ways at once.
 static func verify_font(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var offset: int = RomLayout.font_offset(layout)
 	var length: int = RomLayout.FONT_TILES * Gen2Tiles.TILE_1BPP_BYTES
@@ -695,12 +686,10 @@ static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
 ## The battle HUD's graphics, checked by the one thing they do that nothing else
 ## in the section does: they count.
 ##
-## A bar's fill levels are consecutive tiles, each lighting one more column than
-## the last, so the ink in that run climbs by exactly two pixels a step. Neither
-## bar has a name or a number in the cartridge, but a run that counts up like
-## that is not something a wrong offset lands on. The two HUD borders have
-## neither content nor a progression, so they are checked the way the text box
-## frames are: every tile has ink, and no two tiles are the same.
+## A bar's fill levels are consecutive tiles each lighting one more column, so
+## the ink climbs by exactly two pixels a step, which a wrong offset does not
+## land on. The two HUD borders have neither content nor a progression, so they
+## are checked like the text box frames: every tile has ink, no two alike.
 static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 
@@ -805,11 +794,10 @@ static func _ink(pixels: PackedByteArray) -> int:
 
 ## The three trainer tables, each checked by what is known about it independently.
 ##
-## They are checked together because they are three views of one numbering, and
-## a mistake in any of them shows up as the three disagreeing: the names say what
-## a class is, the palette table has one entry more than the pic table because
-## the player owns the first one, and the pic table's entries have to decompress
-## into pics of the one size every trainer is drawn at.
+## Checked together because they are three views of one numbering, so a mistake
+## shows up as the three disagreeing: names say what a class is, the palette
+## table has one entry more than the pic table because the player owns the first,
+## and pic entries must decompress to the one size every trainer is drawn at.
 static func verify_trainers(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var names: PackedStringArray = Gen2Text.decode_sequence(
@@ -919,21 +907,18 @@ static func _trainer_palette_check(
 ## Reads the whole trainer party table in one pass: every class's individual
 ## trainers, each a name, a type and a party.
 ##
-## This is not [method verify_trainers]'s table. That one is the class every
-## gym leader shares ("LEADER") and this one is the trainer inside it
-## ("FALKNER"), and the two are read through entirely different pointers, one
-## per class in both.
+## Not [method verify_trainers]'s table: that is the class every gym leader
+## shares ("LEADER"), this is the trainer inside it ("FALKNER"), read through
+## different pointers, one per class in both.
 ##
-## Nothing inside a class's own bytes says where its group ends, so a class's
-## span is bounded by the *next* class's pointer rather than by anything it
-## carries itself, and the last class is walked until a byte that cannot open a
-## name is met instead. One class in every game shares its pointer with the
-## next, which is the one class the games never send into a battle: its honest
-## span is empty, not a copy of the class after it. See
-## [constant RomLayout.EMPTY_TRAINER_CLASS].
+## Nothing in a class's bytes says where its group ends, so its span is bounded
+## by the *next* class's pointer, and the last class is walked until a byte that
+## cannot open a name. One class per game shares its pointer with the next, the
+## one class never sent into battle: its honest span is empty, not a copy of the
+## next. See [constant RomLayout.EMPTY_TRAINER_CLASS].
 ##
-## Returns { ok, message, classes, total }, where [code]classes[/code] is one
-## Array of trainers per class, in order.
+## Returns { ok, message, classes, total }, [code]classes[/code] being one Array
+## of trainers per class, in order.
 static func read_trainer_parties(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var table: int = int(layout["trainer_parties"])
@@ -1209,13 +1194,11 @@ static func read_trainer_dvs(rom: RomFile, layout: Dictionary, trainer_class: in
 	return (rom.u8(offset) << 8) | rom.u8(offset + 1)
 
 
-## The trainer DVs table has no structural shape to check: every nibble is a
-## legal DV, so a wrong offset produces a plausible-looking table exactly the
-## way it always would. What settles it is content whose answer is known
-## independently at both ends, the same way the move and item name tables are
-## checked: Falkner opens the table with his own known DVs, and the class that
-## closes it (a different one per game, since Crystal alone carries
-## MYSTICALMAN) carries its own, stored in the layout as [code]trainer_dvs_last[/code].
+## No structural shape to check: every nibble is a legal DV, so a wrong offset
+## still looks plausible. Settled by content known independently at both ends,
+## like the move and item name tables: Falkner opens with his own known DVs, and
+## the closing class (different per game, since only Crystal carries MYSTICALMAN)
+## carries its own as [code]trainer_dvs_last[/code].
 static func verify_trainer_dvs(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var last_offset: int = RomLayout.trainer_dvs_offset(layout, count)
@@ -1686,16 +1669,13 @@ func _import_types(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 
 ## Decodes the trainer classes: a name and the two colours the class is drawn in.
 ##
-## A class has one palette and no shiny counterpart, so the pair is stored flat
-## rather than under a key, and the pic is found by class number in the trainer
-## atlas the way a species' is in the front one.
-## Decodes the trainer classes and, behind them, the trainer party table (who
-## carries what), the trainer attributes table (how the class's AI plays it)
-## and the trainer DVs table (how good its Pokémon's stats are). The four are
-## kept on the one entry rather than split into cache files of their own, the
-## way a species' evolutions and learnset are, because a class name, its
-## trainers, its own AI behaviour and its own DVs are four tables one class
-## number addresses, not four separate questions.
+## A class has one palette and no shiny counterpart, so the pair is stored flat,
+## and the pic is found by class number in the trainer atlas.
+##
+## Behind the classes sit the party table (who carries what), the attributes
+## table (how the class's AI plays it) and the DVs table. All four stay on one
+## entry rather than in separate cache files, because they are four tables one
+## class number addresses, not four separate questions.
 func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:
 	var count: int = RomLayout.trainer_class_count(layout)
 	var names: PackedStringArray = Gen2Text.decode_sequence(
@@ -1737,16 +1717,14 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 ## Decodes the fixed tile sheets: the font, the eight text box borders and the
 ## battle HUD's graphics, each as one strip of tiles.
 ##
-## None of them is compressed and none is per-species, so unlike a pic there is
-## nothing to look up: each is a fixed run of tiles at a known place. They are
-## kept as strips because each is addressed by a number, whether a character code
-## or a tile in a bar, and a strip turns that number into a horizontal offset and
-## nothing else.
+## None is compressed or per-species, so there is nothing to look up: each is a
+## fixed run of tiles at a known place. Strips, because each is addressed by a
+## number (a character code, a tile in a bar) and a strip turns that number into
+## a horizontal offset and nothing else.
 ##
-## [code]first_code[/code] is the character code a sheet's first tile draws, and
-## is zero for the sheets that are graphics rather than characters. [code]bits[/code]
-## is how the cartridge stores them: the font and the borders are 1bpp, the
-## battle graphics 2bpp.
+## [code]first_code[/code] is the character code the first tile draws, zero for
+## graphics sheets. [code]bits[/code] is the cartridge's storage: font and
+## borders 1bpp, battle graphics 2bpp.
 func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 	var sheets: Dictionary = {

@@ -3,20 +3,19 @@ extends RefCounted
 
 ## What a mod is allowed to change, and the only way it gets to change it.
 ##
-## A mod never touches scene nodes or engine internals. It is handed this host,
-## registers what it provides, and is done. Everything it can reach is either
-## cartridge content through [GameData] or live world state through
-## [Gen2WorldAPI], both of which are scene-free.
+## A mod never touches scene nodes or engine internals: it is handed this host,
+## registers what it provides, and is done. All it can reach is cartridge content
+## through [GameData] and live world state through [Gen2WorldAPI], both
+## scene-free.
 ##
-## The first thing a mod can replace is the world renderer. The 2D renderer here
-## reads the world and draws it; nothing about the world requires that the
-## drawing be 2D, so a renderer that builds geometry from the same block and
-## collision data is a registration rather than a fork. Swapping between two
-## registered renderers is [method select_world_renderer], which is why the
-## contract is a factory and not a one-time construction.
+## The first replaceable thing is the world renderer. Nothing about the world
+## requires the drawing to be 2D, so a renderer building geometry from the same
+## block and collision data is a registration, not a fork.
+## [method select_world_renderer] swaps between registered renderers, which is
+## why the contract is a factory rather than a one-time construction.
 ##
-## Mods are interpreted GDScript. iOS forbids JIT and loading native code at
-## runtime, so a compiled extension is not an option for a distributed mod.
+## Mods are interpreted GDScript: iOS forbids JIT and runtime native loading, so
+## a compiled extension is not an option for a distributed mod.
 
 ## Where installed mods live. Under user:// because a mod is not part of the
 ## build and must survive an update of it.
@@ -27,14 +26,13 @@ const ROOT: String = "user://mods"
 const WORLD_RENDERER_METHODS: Array[String] = [
 	"set_world", "set_time_of_day", "refresh", "refresh_animation",
 ]
-## Optional. A renderer that defines this and answers false is given the screen's
-## own rectangle at the window's resolution instead of the 160x144 hardware
-## viewport. A view built out of geometry rather than hardware tiles cannot be
-## drawn into a 160x144 buffer and then magnified, so this is the difference
-## between a 3D or HD renderer being possible and not.
+## Optional. A renderer defining this and answering false gets the screen's own
+## rectangle at window resolution instead of the 160x144 viewport. A view built
+## from geometry cannot be drawn into a 160x144 buffer and magnified, so this is
+## what makes a 3D or HD renderer possible at all.
 ##
 ## A renderer that does not define it draws in hardware pixels, which is what the
-## built-in one does and what a mod that only recolours tiles wants.
+## built-in one does and what a tile-recolouring mod wants.
 const WORLD_RENDERER_SURFACE_METHOD: String = "uses_hardware_viewport"
 ## Optional. Called with the native layer's size in window pixels when it is
 ## created and whenever the window changes it. Only reached by a renderer that

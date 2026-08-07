@@ -52,11 +52,11 @@ block and palette data the 2D view reads and extrudes geometry from it.
 
 ## Replacing the world renderer
 
-The 2D renderer reads the world and draws it. Nothing about the world requires
-that the drawing be 2D: maps are node-free `RefCounted` records, each tileset is
-one addressable atlas, animated tiles replace atlas slots rather than map
-rectangles, and collision is a raw permission byte per 2x2 walk cell. A renderer
-that extrudes geometry from that same data is a registration, not a fork.
+Nothing about the world requires that the drawing be 2D: maps are node-free
+`RefCounted` records, each tileset is one addressable atlas, animated tiles
+replace atlas slots rather than map rectangles, and collision is a raw
+permission byte per 2x2 walk cell. A renderer that extrudes geometry from that
+same data is a registration, not a fork.
 
 A registered renderer is a `Node` providing:
 
@@ -79,8 +79,7 @@ Two methods are optional:
 
 A view built out of geometry cannot be drawn into a 160x144 buffer and then
 magnified, so the second layer is what makes a 3D or HD renderer possible at
-all. Text boxes and menus keep being drawn in hardware pixels over the top,
-which is what an HD presentation of these games wants: the world gains
+all. Text boxes and menus stay hardware pixels over the top: the world gains
 resolution, the interface stays a Game Boy.
 
 The host constructs a renderer per world, so `select_world_renderer()` can
@@ -91,26 +90,22 @@ state and must not write it. Two views of one world have to agree.
 
 ## Logical world state and optional mod pose
 
-The normal game remains logically grid-based. The player and NPCs occupy walk
-cells, movement commits one cell at a time in the four cardinal directions, and
-interactions use the current logical cell plus one of the four cardinal facing
-directions. The original hardware may animate a sprite between cells during a
-step, but that visual progress does not change the source interaction model.
+The game stays logically grid-based. The player and NPCs occupy walk cells,
+movement commits one cell at a time in the four cardinal directions, and
+interactions use the current logical cell plus one cardinal facing. Animating a
+sprite between cells does not change that model.
 
 A movement mod may add a more precise pose for smooth, analog, first-person or
-3D movement. That pose can contain a sub-cell position and an arbitrary facing
-angle, but it is an optional mod layer, not a replacement for the authoritative
-world state. The core world remains responsible for collision, logical cell
-transitions, map triggers, warps and script or NPC interactions.
+3D movement, with a sub-cell position and an arbitrary facing angle. It is an
+extra layer, not a replacement: the core world stays responsible for collision,
+cell transitions, map triggers, warps and script or NPC interactions, and a mod
+must not overwrite the authoritative cell or bypass those boundaries.
 
-When a mod requests an interaction, it must project its pose back onto the
-normal rules. Resolve a deterministic logical cell, quantize the precise facing
-angle to one of the four source directions, and pass that cell and direction to
-the existing interaction path. Use the source tie-breaking behavior when an
-angle lies between directions. A mod must not directly replace the world's
-authoritative cell or bypass its collision and event boundaries. This lets a
-mod provide smooth movement while an NPC in the neighboring logical cell still
-interacts exactly as it would in the original game.
+When a mod requests an interaction it projects its pose back onto the normal
+rules: resolve a deterministic logical cell, quantize the facing angle to one of
+the four source directions using the source tie-breaking, and pass both to the
+existing interaction path. Smooth movement then leaves an NPC in the
+neighbouring cell interacting exactly as it would on the cartridge.
 
 ## Measured against the voxel mod
 
@@ -118,65 +113,53 @@ interacts exactly as it would in the original game.
 is the reference for what a renderer mod has to be able to do. It turns
 gen1recomp's overworld into a voxel diorama with selectable camera pitch,
 first- and third-person free-roam, VR through OpenXR, water reflections and a
-day cycle, and it ships no cartridge art: geometry is derived from the tile and
+day cycle, shipping no cartridge art: geometry is derived from the tile and
 sprite data the host already has.
 
-What the contract above already supports:
+Supported by the contract above:
 
 - deriving geometry from host data. Collision permissions, the block grid, the
   tileset atlas and its palettes are all reachable through `Gen2WorldAPI` and
-  `GameData` with no cartridge access and no authored 3D assets;
+  `GameData`, with no cartridge access and no authored 3D assets;
 - rendering at the window's resolution rather than the hardware's;
 - switching views mid-session on a keybind, with no world state involved;
-- a day cycle. `set_time_of_day` is called on the source 04:00, 10:00 and 18:00
-  boundaries, and the palette rows behind it are the cartridge's own;
-- animated tiles. `Gen2WorldAnimation` replaces atlas slots rather than map
-  rectangles, so geometry textured from the atlas follows water and flowers
-  without the renderer knowing an animation ran.
-
-What the contract above now also supports:
-
-- a movement progress value. `Gen2WorldAPI.player_step_offset_cells()` returns
-  the player's in-flight walk step as a fractional cell, from one cell behind
-  `player_cell` down to zero, paced by `advance_player_step(delta)` at the
-  same hardware-frame rate and stall cap `Gen2WorldAnimation` uses. The
-  logical cell still commits at the start of the step, exactly as documented
-  above; the fractional value is presentation only and never reaches
-  collision, events or the world snapshot. `mods/examples/voxel_preview/`
-  reads it for its player box and camera instead of snapping.
-- the same progress value for NPCs. `Gen2WorldObject.step_offset_cells()`
-  returns a wandering or following object's in-flight step as a fractional
-  cell, on the same terms as the player's. `Gen2WorldAPI.advance_object_steps()`
-  paces the wandering and spinning movement templates at the source's own step
-  and wait durations, and the example renderer reads the offset for its object
-  markers.
+- a day cycle, through `set_time_of_day` on the source 04:00, 10:00 and 18:00
+  boundaries, over the cartridge's own palette rows;
+- animated tiles, because `Gen2WorldAnimation` replaces atlas slots rather than
+  map rectangles, so geometry textured from the atlas follows water and flowers
+  without the renderer knowing an animation ran;
+- movement progress. `Gen2WorldAPI.player_step_offset_cells()` and
+  `Gen2WorldObject.step_offset_cells()` return an in-flight step as a fractional
+  cell, from one cell behind the committed cell down to zero, paced by
+  `advance_player_step(delta)` and `advance_object_steps()` at the hardware
+  frame rate and stall cap `Gen2WorldAnimation` uses. The logical cell still
+  commits at the start of the step; the fraction is presentation only and never
+  reaches collision, events or the world snapshot.
+  `mods/examples/voxel_preview/` reads both.
 
 What is still missing, in the order it blocks work:
 
-1. **Per-tile height.** Extruded height here is a guess from the collision
+1. **Per-tile height.** Extruded height is a guess from the collision
    permission, which cannot tell a tree from a cliff from a building. Gen II
-   has no height data; a renderer needs a per-block table it supplies itself,
-   and the host should let a mod attach one rather than have each renderer
-   hard-code Johto.
+   has no height data, so a renderer needs a per-block table it supplies
+   itself, and the host should let a mod attach one rather than have every
+   renderer hard-code Johto.
 2. **Battles and interiors are not renderer-owned.** `Gen2BattleScreen` builds
-   its own 160x144 presentation directly and does not go through the mod host,
+   its own 160x144 presentation directly instead of going through the mod host,
    so the voxel mod's 3D battles have no equivalent here. Battle presentation
    needs the same registration the world renderer has.
-3. **No camera boundary.** The screen decides the visible page through
-   `Gen2WorldAPI.visible_origin_cell()`, which still follows the committed
-   cell rather than the interpolated one, so a free camera pans a step early.
-   A free camera would need the world to stop being the thing that frames the
-   view.
+3. **No camera boundary.** `Gen2WorldAPI.visible_origin_cell()` still follows
+   the committed cell rather than the interpolated one, so a free camera pans a
+   step early. A free camera needs the world to stop framing the view.
 4. **No input hook.** Camera pitch, first person and free-roam are all input a
-   mod would have to receive, and the world screen currently reads keys itself.
-5. **Scripted movement does not interpolate.** `applymovement` streams still
-   place objects a whole cell at a time, and so do the jump, teleport and
-   boulder step types. The wandering, spinning, following, player and
-   trainer-approach paths all carry the sub-cell offset.
+   mod would have to receive, and the world screen reads keys itself.
+5. **Scripted movement does not interpolate.** `applymovement` streams, and the
+   jump, teleport and boulder step types, still place objects a whole cell at a
+   time. The wandering, spinning, following, player and trainer-approach paths
+   all carry the sub-cell offset.
 
-Nothing in that list changes the world's own data, which is the part that
-matters: they are all presentation boundaries that do not exist yet, not
-decisions that have been made the wrong way.
+All five are presentation boundaries that do not exist yet; none of them
+changes the world's own data.
 
 ## Not built yet
 

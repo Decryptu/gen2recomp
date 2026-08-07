@@ -258,13 +258,11 @@ func _clear_player_step() -> void:
 	_player_step_accumulator = 0.0
 
 
-## Advances the player's walk-step offset by real elapsed time, at the same
-## hardware-frame rate and stall catch-up cap as Gen2WorldAnimation, so both
-## stay in phase after a pause instead of drifting apart. This only shrinks a
-## presentation offset that already starts and ends at player_cell; it never
-## changes player_cell, collision or event results, and callers that never
-## start a step (every existing caller of move()/move_result() before this
-## change) see no difference at all.
+## Advances the player's walk-step offset by real elapsed time, at
+## Gen2WorldAnimation's hardware-frame rate and stall catch-up cap, so both stay
+## in phase after a pause. This only shrinks a presentation offset that starts
+## and ends at player_cell; it never changes player_cell, collision or event
+## results, and a caller that never starts a step sees no difference.
 func advance_player_step(delta: float) -> bool:
 	if _player_step_frames_remaining <= 0 or delta <= 0.0:
 		return false
@@ -2123,9 +2121,9 @@ func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
 ## slice. Scripted movement is executed by the script runner, while followers
 ## advance after each successful player step.
 ##
-## This remains one movement decision per eligible object per call. A caller
-## that wants the source's own pacing uses advance_object_steps() instead,
-## which spends the step and idle durations this function records.
+## One movement decision per eligible object per call. A caller wanting the
+## source's pacing uses advance_object_steps(), which spends the step and idle
+## durations this records.
 func advance_objects(random: RandomNumberGenerator) -> int:
 	var moved: int = 0
 	for object: Gen2WorldObject in objects:
@@ -2171,12 +2169,11 @@ func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenera
 ## hardware-frame rate and stall catch-up cap the player's own walk step and
 ## Gen2WorldAnimation use.
 ##
-## Per frame an object either spends one frame of an in-flight step, one frame
-## of its wait, or takes a new movement decision, which is the source's
-## STEP_TYPE_CONTINUE_WALK, STEP_TYPE_SLEEP and STEP_TYPE_FROM_MOVEMENT cycle.
-## The cell commits when the step starts, matching InitStep and the player path;
-## only the presentation offset trails behind it. Returns true when something a
-## renderer draws changed.
+## Per frame an object spends one frame of an in-flight step, one frame of its
+## wait, or takes a new decision: the source's STEP_TYPE_CONTINUE_WALK,
+## STEP_TYPE_SLEEP and STEP_TYPE_FROM_MOVEMENT cycle. The cell commits when the
+## step starts, matching InitStep and the player path, and only the presentation
+## offset trails. Returns true when something a renderer draws changed.
 func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
 	if delta <= 0.0 or random == null or objects.is_empty():
 		return false
@@ -2323,17 +2320,14 @@ func move_result(direction: Vector2i) -> Dictionary:
 	}
 
 
-## engine/overworld/player_movement.asm's .TryJump, reached only after an
-## ordinary step into [param direction] is blocked. Reads the collision code
-## of the cell the player already stands on, not the faced cell; on a match
-## the player covers two cells in one bounded action, bypassing collision on
-## both the intervening and landing cells exactly as the source does. Returns
-## an empty Dictionary when no hop applies, so the caller falls through to an
-## ordinary blocked result. Surfing never reaches .TryJump in the source
-## (.Surf calls .TrySurf then jumps straight to .NotMoving), so this refuses
-## outright while surfing. A landing cell outside the map is refused rather
-## than attempted, matching this project's existing rule that out-of-range
-## cells always block.
+## engine/overworld/player_movement.asm's .TryJump, reached only after an ordinary
+## step into [param direction] is blocked. Reads the collision code of the cell
+## the player already stands on, not the faced cell; on a match the player covers
+## two cells in one bounded action, bypassing collision on both the intervening
+## and landing cells as the source does. An empty Dictionary means no hop, so the
+## caller falls through to an ordinary blocked result. Surfing refuses outright,
+## since .Surf calls .TrySurf then jumps straight to .NotMoving; a landing cell
+## outside the map is refused too, as out-of-range cells always block here.
 func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	if movement_mode == MOVEMENT_SURF:
 		return {}
@@ -2446,14 +2440,12 @@ func _apply_map(
 	_block_overrides.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
-	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table
-	# (engine/overworld/scripting.asm's Script_moveobject through
-	# CopyDECoordsToMapObject), so a scripted position never survives a map
-	# load; a MAPCALLBACK_OBJECTS callback re-applies it when its own condition
-	# still holds. Keeping these overrides across a map change left objects
-	# where an earlier visit had put them: ElmsLabMoveElmCallback moves Elm to
-	# (3, 4) while the scene is SCENE_ELMSLAB_MEET_ELM, and the story then
-	# found nothing to talk to at his authored (5, 2) on returning.
+	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
+	# position never survives a map load; a MAPCALLBACK_OBJECTS callback
+	# re-applies it while its condition holds. Keeping these overrides across a
+	# map change left objects where an earlier visit had put them:
+	# ElmsLabMoveElmCallback moves Elm to (3, 4) during SCENE_ELMSLAB_MEET_ELM,
+	# and the story then found nothing at his authored (5, 2) on returning.
 	_object_position_overrides.clear()
 	_object_facing_overrides.clear()
 	state.reset_map_reload_flags()

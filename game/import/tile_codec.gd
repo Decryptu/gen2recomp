@@ -7,9 +7,9 @@ extends RefCounted
 ## low bit of every pixel in that row and the second the high bit. Bit 7 is the
 ## leftmost pixel.
 ##
-## Decoding stops at indices 0-3. Turning those into colours needs a palette,
-## which is a separate concern; see [Gen2Palette]. Keeping the two apart is
-## what makes shiny variants free: same pixels, different palette.
+## Decoding stops at indices 0-3; turning those into colours needs a palette (see
+## [Gen2Palette]). Keeping the two apart makes shiny variants free: same pixels,
+## different palette.
 
 const TILE_WIDTH: int = 8
 const TILE_HEIGHT: int = 8
@@ -50,11 +50,11 @@ static func decode_tile(data: PackedByteArray, offset: int) -> PackedByteArray:
 ## Decodes [param count] consecutive 1bpp tiles into a single strip of indices,
 ## eight pixels tall and [param count] * 8 wide.
 ##
-## The font and the text box borders are stored this way, and both are addressed
-## by a character code rather than by a grid position, so one row is the layout
-## that makes a glyph's position arithmetic on that code. A short or absent
-## source leaves the remaining tiles blank rather than failing: a strip with a
-## hole in it is visible on screen, which is the point.
+## The font and text box borders are stored this way and are addressed by
+## character code rather than grid position, so a single row makes a glyph's
+## position arithmetic on that code. A short or absent source leaves the
+## remaining tiles blank rather than failing: a hole in the strip is visible on
+## screen, which is the point.
 static func decode_1bpp_strip(data: PackedByteArray, offset: int, count: int) -> PackedByteArray:
 	var width: int = count * TILE_WIDTH
 	var out: PackedByteArray = PackedByteArray()
@@ -108,14 +108,13 @@ static func decode_2bpp_strip(data: PackedByteArray, offset: int, count: int) ->
 ## Decodes a Pokémon or trainer pic into a row-major index buffer
 ## [param columns] * 8 wide and [param rows] * 8 tall.
 ##
-## Pics store their tiles column-major, the whole left column top to bottom and
-## then the next, because the game streams them into VRAM a column at a time.
-## Every other tilemap in these games is row-major, so this is the one place
-## that ordering flips.
+## Pics store tiles column-major, the whole left column top to bottom then the
+## next, because the game streams them into VRAM a column at a time. Every other
+## tilemap here is row-major, so this is the one place the ordering flips.
 ##
-## Trailing data is ignored: Crystal's front pics carry the frames of the
-## Pokédex animation after the still image, so a stream is routinely longer
-## than [param columns] * [param rows] tiles.
+## Trailing data is ignored: Crystal's front pics carry Pokédex animation frames
+## after the still image, so a stream is routinely longer than
+## [param columns] * [param rows] tiles.
 static func decode_pic(data: PackedByteArray, columns: int, rows: int) -> PackedByteArray:
 	var width: int = columns * TILE_WIDTH
 	var out: PackedByteArray = PackedByteArray()

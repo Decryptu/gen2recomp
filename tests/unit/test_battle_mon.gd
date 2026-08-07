@@ -178,13 +178,11 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.last_move_used, 0)
 
 
-## Attract's own "opposite gender" rule reads [method Gen2BattleMon.gender],
-## which the cartridge's own `GetGender` works out from the species' gender
-## ratio and the Attack and Speed DVs combined into one byte, not from a coin
-## flip. Bulbasaur is really 12.5% female (ratio 31); Pikachu is really an even
-## 50/50 (ratio 127), which is what makes it the one to check the exact
-## boundary on, since a combined value equal to the ratio reads female rather
-## than male.
+## Attract's "opposite gender" rule reads [method Gen2BattleMon.gender], which
+## `GetGender` works out from the species ratio and the Attack and Speed DVs
+## combined into one byte, not a coin flip. Bulbasaur is 12.5% female (ratio 31);
+## Pikachu is an even 50/50 (ratio 127), which is why it checks the boundary,
+## since a combined value equal to the ratio reads female.
 func test_gender_reads_the_combined_dv_byte_against_the_species_ratio() -> void:
 	var mostly_male := func(attack: int, speed: int) -> Gen2BattleMon:
 		var dvs: int = Gen2Stats.pack_dvs(attack, 0, speed, 0)

@@ -3,12 +3,12 @@ extends RefCounted
 
 ## One mod's declared identity, read from its `mod.json`.
 ##
-## Parsing is separate from loading so the launcher can list what is installed,
-## and say why something was refused, without running a line of mod code.
+## Parsing is separate from loading, so the launcher can list what is installed
+## and say why something was refused without running a line of mod code.
 ##
-## [code]api_version[/code] is the contract in [Gen2ModHost], not the mod's own
-## version. A mod built against an older host is refused rather than loaded and
-## allowed to fail somewhere less obvious.
+## [code]api_version[/code] is [Gen2ModHost]'s contract, not the mod's own
+## version. A mod built against an older host is refused rather than allowed to
+## fail somewhere less obvious.
 
 const FILENAME: String = "mod.json"
 ## Bumped when the host contract changes in a way an existing mod would notice.

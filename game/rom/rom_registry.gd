@@ -3,15 +3,14 @@ extends RefCounted
 
 ## The allowlist of ROMs this project can import from.
 ##
-## gen2recomp ships no game data. A user supplies their own cartridge dump and
-## it is matched against this table by SHA-1 before a single byte is read for
-## content. An unknown hash is a hard refusal, never a "try anyway": a ROM we
-## have not characterised has unknown bank layout, and guessing produces
-## corrupt assets rather than an honest error.
+## The project ships no game data. A user-supplied dump is matched here by SHA-1
+## before a byte is read for content. An unknown hash is a hard refusal: an
+## uncharacterised ROM has unknown bank layout, and guessing produces corrupt
+## assets rather than an honest error.
 ##
-## Gen 2 is three games. Crystal's two common filenames (the "(UE) (V1.1)" and
-## "(USA, Europe) (Rev 1)" dumps) are byte-identical, so they collapse to one
-## entry here: matching is by hash, never by filename.
+## Crystal's two common filenames (the "(UE) (V1.1)" and "(USA, Europe) (Rev 1)"
+## dumps) are byte-identical and collapse to one entry: matching is by hash,
+## never by filename.
 
 ## Every Game Boy Color cartridge in this generation is 2 MiB. Used only as a
 ## cheap pre-filter so a wrong file is rejected before we hash it.

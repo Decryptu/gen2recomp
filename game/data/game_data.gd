@@ -3,24 +3,18 @@ extends RefCounted
 
 ## A decoded cartridge, read back out of the cache.
 ##
-## The importer's counterpart, and the only way the engine sees cartridge
-## content: nothing downstream of here opens a ROM, and nothing here knows what
-## a ROM is. It is [RefCounted] and scene-free like the layer that wrote it, so
-## a battle or a menu can be exercised in a test with no display.
+## The importer's counterpart and the only way the engine sees cartridge content:
+## nothing downstream opens a ROM, and nothing here knows what a ROM is.
+## [RefCounted] and scene-free, so a battle or menu can run in a test.
 ##
-## JSON has one number type, so every number in the cache comes back as a float
-## and every comparison against an int quietly fails. Coercion happens here,
-## once, rather than at each of the places that would otherwise have to remember.
+## JSON has one number type, so every cached number returns as a float and every
+## comparison against an int quietly fails. Coercion happens here, once.
 ##
-## Index buffers are loaded on first use and kept. A pic atlas is a megabyte or
-## so of indices; reading four of them to draw one sprite would be a waste, and
-## re-reading one per frame would be worse.
-##
-## The world sections are read the same way, for a blunter reason: scripts, text
-## and audio are almost all of a cache, and the launcher, the pic viewer and a
-## battle never look at any of them. Reading them at open() made listing three
-## games cost more than entering one, and put the whole cache in memory on a
-## phone that has no room for it.
+## Index buffers load on first use and are kept: a pic atlas is about a megabyte
+## of indices. World sections load the same way for a blunter reason, that
+## scripts, text and audio are almost all of a cache and the launcher, pic viewer
+## and battle never read them; reading them at open() made listing three games
+## cost more than entering one and put the whole cache in phone memory.
 
 var id: StringName = &""
 var sha1: String = ""
@@ -498,14 +492,12 @@ func type_name(number: int) -> String:
 ## How effective [param attacking] is against [param defending], in tenths: 0 for
 ## an immunity, 5 for a resistance, 20 for a weakness and 10 for everything else.
 ##
-## Tenths rather than a float because that is what the cartridge stores and what
-## the damage formula divides by, and because the games truncate after applying
-## each of a defender's two types. A float would agree most of the time and
-## disagree exactly where it matters.
+## Tenths rather than a float, because that is what the cartridge stores and what
+## the damage formula divides by, and the games truncate after each of a
+## defender's two types. A float would disagree exactly where it matters.
 ##
-## The chart lists only the exceptions, so an absent pair is neutral, and a type
-## number that is not in the chart at all (the padding run, which is where Curse
-## lives) is neutral against everything by the same rule.
+## Only exceptions are listed, so an absent pair is neutral, as is a type number
+## missing from the chart entirely (the padding run, where Curse lives).
 ##
 ## [param foresight] is whether the defender has been identified, which cancels
 ## the Ghost immunities and nothing else.
@@ -520,16 +512,14 @@ func type_matchup(attacking: int, defending: int, foresight: bool = false) -> in
 ## in tenths, accumulated the way the cartridge accumulates it: start at ten,
 ## multiply by each matching type in turn, and truncate after each.
 ##
-## This is the number a battle announces, not the number it deals damage with.
-## The two are computed separately on the hardware and do not always agree: the
-## accumulator truncates in tenths, so a move resisted by both halves of a dual
-## type reports 2 rather than 2.5, while the damage is worked out by multiplying
-## the damage itself once per type. Use this for the message and
-## [method type_matchup] per type for the damage.
+## The number a battle announces, not the one it deals damage with. The hardware
+## computes them separately and they disagree: this accumulator truncates in
+## tenths, so a move resisted by both halves of a dual type reports 2 rather than
+## 2.5, while damage multiplies the damage itself once per type. Use this for the
+## message and [method type_matchup] per type for damage.
 ##
-## A single-type Pokémon carries its type in both slots. The cartridge applies a
-## row at most once, matching either slot, so a repeat is skipped here for the
-## same reason.
+## A single-type Pokémon carries its type in both slots, and the cartridge
+## applies a row at most once, so a repeat is skipped here too.
 func type_effectiveness(attacking: int, defending: Array, foresight: bool = false) -> int:
 	var out: int = RomLayout.MATCHUP_EFFECTIVE
 	var applied: Array = []

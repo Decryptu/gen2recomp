@@ -5,12 +5,10 @@ extends Control
 ## window-resolution Control panel consistent with the mart, phone and PC
 ## storage overlays rather than the hardware `menu_coords` box.
 ##
-## Pokemon and Pokegear are existing separate screens the world already owns
-## (Gen2PartyScreen, the phone list on Gen2WorldServiceScreen), so this screen
-## only reports the choice through [signal action_chosen] and lets the world
-## screen open them; Pack and Save are small enough to live here as their own
-## internal modes, the same way Gen2WorldServiceScreen owns a mart mode beside
-## its menu mode.
+## Pokemon and Pokegear are screens the world already owns (Gen2PartyScreen, the
+## phone list on Gen2WorldServiceScreen), so this only reports the choice through
+## [signal action_chosen]. Pack and Save live here as internal modes, the way
+## Gen2WorldServiceScreen owns a mart mode beside its menu mode.
 
 ## Emitted for an available entry this screen does not own itself
 ## (Pokemon, Pokegear); the caller opens the matching screen.
@@ -62,10 +60,9 @@ func _ready() -> void:
 ## with "reason" on failure). Kept as a Callable so this screen does not need
 ## to know how a snapshot is written or where saves live.
 ##
-## Mirrors Gen2BoxScreen.set_context(): the caller may open() before or after
-## adding this node to the tree, so building the option list is deferred to
-## _ready() until _title/_options exist, then run immediately here for a
-## caller that opens after the node is already inside the tree.
+## Mirrors Gen2BoxScreen.set_context(): open() may be called before or after this
+## node enters the tree, so building the option list defers to _ready() until
+## _title/_options exist, and runs immediately here otherwise.
 func open(world: Gen2WorldAPI, data: GameData, save_action: Callable, previous_cursor: int = 0) -> bool:
 	_world = world
 	_data = data

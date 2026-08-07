@@ -3,19 +3,18 @@ extends RefCounted
 
 ## The two status panels a battle draws, on the tile grid the hardware uses.
 ##
-## Everything here is in tiles, and every position is the one the games use. The
-## enemy's panel hangs from a side on its left at the top of the screen and the
-## player's from a side on its right below the middle, and neither is a box: they
-## are an edge and two corners with the contents printed inside them, which is
-## why they are drawn from the HUD sheets rather than from a text box frame.
+## Everything is in tiles at the positions the games use. The enemy's panel hangs
+## from a side on its left at the top, the player's from a side on its right
+## below the middle. Neither is a box: an edge and two corners with the contents
+## printed inside, which is why both come from the HUD sheets rather than a text
+## box frame.
 ##
-## The panels differ in more than position. The player's carries its Pokémon's
-## HP as numbers and an exp bar along its bottom edge, and its bar closes with
-## the cap that hangs off the other side. The enemy's has neither, because the
-## player is not supposed to know either number.
+## The player's panel also carries HP as numbers and an exp bar along its bottom
+## edge, closed by the cap hanging off the other side. The enemy's has neither,
+## because the player is not supposed to know either number.
 ##
 ## Node-free: it writes indices into a buffer, so a HUD can be drawn and read
-## back in a headless test.
+## back headless.
 
 const TILE: int = Gen2Font.TILE
 
@@ -78,10 +77,10 @@ static func bar_pixels(current: int, maximum: int, length: int) -> int:
 ## The enemy's panel except for the bar's fill: the name, the level, the "HP:"
 ## label, the cap that closes the bar and the edge under it.
 ##
-## The fill is drawn separately because it is the one thing on the panel that is
-## not black on white. The hardware gives every tile its own palette; this
-## layers instead, which comes to the same picture and keeps the palette choice
-## where the colour is.
+## The fill is drawn separately as the one thing on the panel that is not black
+## on white. The hardware gives every tile its own palette; this layers instead,
+## which comes to the same picture and keeps the palette choice where the colour
+## is.
 func draw_enemy(
 	into: PackedByteArray, width: int, name: String, level: int
 ) -> void:
