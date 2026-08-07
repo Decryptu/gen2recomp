@@ -287,15 +287,25 @@ func load_discovered() -> Array:
 	return loaded
 
 
+## Refusals carry the id as well as the reason, because a manifest that parsed
+## is only reported by whatever the caller can name it with: without this the
+## launcher and the startup warning both say "?".
 func load_mod(manifest: Gen2ModManifest) -> Dictionary:
 	var path: String = manifest.entry_path()
 	if not FileAccess.file_exists(path):
-		return {"ok": false, "reason": &"missing_entry_script", "detail": path}
+		return _refuse_load(manifest, &"missing_entry_script", path)
 	var script: Variant = load(path)
 	if not script is Script:
-		return {"ok": false, "reason": &"entry_not_a_script", "detail": path}
+		return _refuse_load(manifest, &"entry_not_a_script", path)
 	var mod: Object = (script as Script).new()
 	if mod == null or not mod.has_method("register"):
-		return {"ok": false, "reason": &"entry_has_no_register", "detail": path}
+		return _refuse_load(manifest, &"entry_has_no_register", path)
 	mod.call("register", self, manifest)
 	return {"ok": true, "id": manifest.id}
+
+
+func _refuse_load(manifest: Gen2ModManifest, reason: StringName, path: String) -> Dictionary:
+	return {
+		"ok": false, "reason": reason, "detail": path,
+		"id": manifest.id, "directory": manifest.directory,
+	}

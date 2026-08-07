@@ -353,3 +353,7 @@ func test_a_broken_mod_is_reported_and_does_not_stop_the_others() -> void:
 	var failures: Array = host.failures()
 	assert_eq(failures.size(), 1)
 	assert_eq(failures[0]["reason"], &"missing_entry_script")
+	# The reason alone cannot be reported: the launcher and the startup warning
+	# name the mod from the failure itself.
+	assert_eq(failures[0]["id"], _valid_manifest()["id"])
+	assert_true(String(failures[0]["directory"]).ends_with(_valid_manifest()["id"]))
