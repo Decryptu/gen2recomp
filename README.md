@@ -172,6 +172,7 @@ Headless tools, all against a real imported cache:
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
 | `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
+| `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
