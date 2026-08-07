@@ -24,10 +24,12 @@ func after_each() -> void:
 
 
 func _clear_saves() -> void:
+	var game_id: StringName = _data.id if _data != null else &"savetest"
 	for slot: int in Gen2SaveStore.SLOT_COUNT:
-		var path: String = Gen2SaveStore.path_for(_data.id if _data != null else &"savetest", "0123456789abcdef", slot)
-		if FileAccess.file_exists(path):
-			DirAccess.remove_absolute(path)
+		var path: String = Gen2SaveStore.path_for(game_id, "0123456789abcdef", slot)
+		for copy: String in [path, "%s.bak" % path, "%s.tmp" % path, "%s.bak.tmp" % path]:
+			if FileAccess.file_exists(copy):
+				DirAccess.remove_absolute(copy)
 	if DirAccess.dir_exists_absolute(_save_directory):
 		DirAccess.remove_absolute(_save_directory)
 
@@ -232,6 +234,101 @@ func test_a_malformed_slot_is_refused_without_becoming_a_partial_save() -> void:
 	var result: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
 	assert_false(result["ok"])
 	assert_string_contains(result["message"], "valid JSON")
+
+
+func test_a_save_writes_a_primary_and_a_backup_copy() -> void:
+	var write: Dictionary = Gen2SaveStore.save(_save(), _data)
+	assert_true(write["ok"], write["message"])
+	var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, 0)
+	var backup: String = Gen2SaveStore.backup_path_for(_data.id, _data.sha1, 0)
+	assert_true(FileAccess.file_exists(path))
+	assert_true(FileAccess.file_exists(backup))
+	var document: String = _read_text(path)
+	assert_eq(_read_text(backup), document)
+	assert_true(document.begins_with(
+		"%s %d " % [Gen2SaveStore.CONTAINER_PREFIX, Gen2SaveStore.CONTAINER_VERSION]
+	))
+
+
+func test_a_corrupt_primary_is_recovered_from_the_backup() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, 0)
+	var document: String = _read_text(path)
+	_write_text(path, document.substr(0, document.length() / 2))
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_true(loaded["ok"], loaded["message"])
+	assert_true(loaded["recovered"])
+	var recovered: Gen2SaveData = loaded["save"]
+	assert_eq(recovered.player_name, "RED")
+	assert_eq(recovered.party.size(), 2)
+
+
+func test_a_missing_primary_still_reports_the_slot_as_occupied() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	DirAccess.remove_absolute(Gen2SaveStore.path_for(_data.id, _data.sha1, 0))
+	assert_true(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_true(loaded["ok"], loaded["message"])
+	assert_true(loaded["recovered"])
+
+
+## A same-length edit still parses and still validates, so the checksum is the
+## only thing that can refuse it.
+func test_a_tampered_payload_fails_its_checksum() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, 0)
+	_write_text(path, _read_text(path).replace("\"RED\"", "\"BLU\""))
+	DirAccess.remove_absolute(Gen2SaveStore.backup_path_for(_data.id, _data.sha1, 0))
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_false(loaded["ok"])
+	assert_string_contains(loaded["message"], "checksum")
+
+
+func test_both_copies_corrupt_report_the_primary_failure() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	for copy: String in [
+		Gen2SaveStore.path_for(_data.id, _data.sha1, 0),
+		Gen2SaveStore.backup_path_for(_data.id, _data.sha1, 0),
+	]:
+		_write_text(copy, "{\"format_version\": 1, \"party\": [}")
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_false(loaded["ok"])
+	assert_string_contains(loaded["message"], "valid JSON")
+
+
+func test_a_headerless_slot_loads_and_the_next_save_adds_both_copies() -> void:
+	var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, 0)
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	_write_text(path, JSON.stringify(_save().to_dict(), "\t"))
+	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
+	assert_true(loaded["ok"], loaded["message"])
+	assert_false(loaded["recovered"])
+	assert_true(Gen2SaveStore.save(loaded["save"], _data)["ok"])
+	var backup: String = Gen2SaveStore.backup_path_for(_data.id, _data.sha1, 0)
+	assert_true(FileAccess.file_exists(backup))
+	assert_true(_read_text(path).begins_with(Gen2SaveStore.CONTAINER_PREFIX))
+	assert_true(_read_text(backup).begins_with(Gen2SaveStore.CONTAINER_PREFIX))
+
+
+func test_deleting_a_slot_removes_both_copies() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	assert_true(Gen2SaveStore.delete_slot(_data.id, _data.sha1, 0))
+	assert_false(FileAccess.file_exists(Gen2SaveStore.path_for(_data.id, _data.sha1, 0)))
+	assert_false(FileAccess.file_exists(Gen2SaveStore.backup_path_for(_data.id, _data.sha1, 0)))
+	assert_false(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
+
+
+func _read_text(path: String) -> String:
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var text: String = file.get_as_text()
+	file.close()
+	return text
+
+
+func _write_text(path: String, text: String) -> void:
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
 
 
 func _adapter_data(game_id: StringName) -> GameData:

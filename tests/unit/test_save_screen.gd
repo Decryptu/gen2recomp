@@ -34,8 +34,9 @@ func after_each() -> void:
 func _clear_saves() -> void:
 	for slot: int in Gen2SaveStore.SLOT_COUNT:
 		var path: String = Gen2SaveStore.path_for(_data.id, _data.sha1, slot)
-		if FileAccess.file_exists(path):
-			DirAccess.remove_absolute(path)
+		for copy: String in [path, "%s.bak" % path, "%s.tmp" % path, "%s.bak.tmp" % path]:
+			if FileAccess.file_exists(copy):
+				DirAccess.remove_absolute(copy)
 	if DirAccess.dir_exists_absolute(_save_directory):
 		DirAccess.remove_absolute(_save_directory)
 

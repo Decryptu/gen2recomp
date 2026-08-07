@@ -6,6 +6,9 @@ extends RefCounted
 
 const ROOT: String = "user://save_slots"
 const SLOT_COUNT: int = 3
+const BACKUP_SUFFIX: String = ".bak"
+const CONTAINER_PREFIX: String = "#gen2save"
+const CONTAINER_VERSION: int = 1
 # Canonical Crystal Elm's Lab gift records. These values describe the imported
 # story choices and are not inserted into a new save before the lab handoff.
 const STARTER_LEVEL: int = 5
@@ -17,10 +20,20 @@ static func path_for(game_id: StringName, rom_sha1: String, slot: int) -> String
 	return "%s/%s_%s/slot_%d.json" % [ROOT, String(game_id), rom_sha1.substr(0, 8), slot]
 
 
+static func backup_path_for(game_id: StringName, rom_sha1: String, slot: int) -> String:
+	return "%s%s" % [path_for(game_id, rom_sha1, slot), BACKUP_SUFFIX]
+
+
 static func exists(game_id: StringName, rom_sha1: String, slot: int) -> bool:
-	return _valid_slot(slot) and FileAccess.file_exists(path_for(game_id, rom_sha1, slot))
+	if not _valid_slot(slot):
+		return false
+	return FileAccess.file_exists(path_for(game_id, rom_sha1, slot)) \
+		or FileAccess.file_exists(backup_path_for(game_id, rom_sha1, slot))
 
 
+## Writes the primary copy, then the backup, in `_SaveGameData`'s
+## complete-then-copy order. Neither copy relies on rename atomicity, so a crash
+## during either write leaves the other one readable.
 static func save(save_data: Gen2SaveData, data: GameData) -> Dictionary:
 	var validation: Dictionary = Gen2SaveValidator.validate(save_data, data)
 	if not validation["ok"]:
@@ -30,47 +43,46 @@ static func save(save_data: Gen2SaveData, data: GameData) -> Dictionary:
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return _failure("could not create the save directory")
 
-	var temporary: String = "%s.tmp" % path
-	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
-	if file == null:
-		return _failure("could not open the save for writing")
-	file.store_string(JSON.stringify(save_data.to_dict(), "\t"))
-	file.flush()
-	file.close()
-	if DirAccess.rename_absolute(temporary, path) != OK:
-		DirAccess.remove_absolute(temporary)
-		return _failure("could not finish writing the save")
+	var document: String = _wrap(JSON.stringify(save_data.to_dict(), "\t"))
+	var primary: Dictionary = _write_file(path, document)
+	if not primary["ok"]:
+		return primary
+	var backup: Dictionary = _write_file(
+		backup_path_for(save_data.game_id, save_data.rom_sha1, save_data.slot), document
+	)
+	if not backup["ok"]:
+		return _failure("could not write the backup save")
 	return {"ok": true, "message": ""}
 
 
+## Takes the primary copy and falls back to the backup on any failure, following
+## `TryLoadSaveFile`. Unlike the source this never repairs the weak copy, because
+## `slots_for()` loads every slot just to draw the menu and a read must not
+## write; the next save rewrites both copies.
 static func load_result(game_id: StringName, rom_sha1: String, slot: int, data: GameData) -> Dictionary:
 	if not _valid_slot(slot):
 		return _failure("save slot %d is out of range" % slot)
 	var path: String = path_for(game_id, rom_sha1, slot)
-	if not FileAccess.file_exists(path):
+	var backup: String = backup_path_for(game_id, rom_sha1, slot)
+	var has_primary: bool = FileAccess.file_exists(path)
+	var has_backup: bool = FileAccess.file_exists(backup)
+	if not has_primary and not has_backup:
 		return _failure("save slot %d is empty" % (slot + 1))
-	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return _failure("save slot %d could not be opened" % (slot + 1))
-	var parser := JSON.new()
-	var parse_error: Error = parser.parse(file.get_as_text())
-	file.close()
-	if parse_error != OK:
-		return _failure("save slot %d is not valid JSON data" % (slot + 1))
-	var raw: Variant = parser.data
-	var migration: Dictionary = Gen2SaveData.migrate_dict(raw)
-	if not bool(migration.get("ok", false)):
-		return _failure("save slot %d: %s" % [slot + 1, migration.get("message", "unsupported save format")])
-	var loaded_save: Gen2SaveData = Gen2SaveData.from_dict(migration["data"])
-	if loaded_save == null:
-		return _failure("save slot %d is not valid JSON data" % (slot + 1))
-	var validation: Dictionary = Gen2SaveValidator.validate(loaded_save, data)
-	if not validation["ok"]:
-		return _failure("save slot %d: %s" % [slot + 1, validation["message"]])
-	return {
-		"ok": true, "message": "", "save": loaded_save,
-		"migrated": bool(migration.get("migrated", false)),
-	}
+
+	var primary_result: Dictionary = {}
+	if has_primary:
+		primary_result = _load_copy(path, slot, data)
+		if primary_result["ok"]:
+			primary_result["recovered"] = false
+			return primary_result
+	if has_backup:
+		var backup_result: Dictionary = _load_copy(backup, slot, data)
+		if backup_result["ok"]:
+			backup_result["recovered"] = true
+			return backup_result
+		if not has_primary:
+			return backup_result
+	return primary_result
 
 
 static func slots_for(game_id: StringName, rom_sha1: String, data: GameData) -> Array:
@@ -147,7 +159,86 @@ static func ensure_development_save(data: GameData, slot: int = 0) -> Dictionary
 static func delete_slot(game_id: StringName, rom_sha1: String, slot: int) -> bool:
 	if not exists(game_id, rom_sha1, slot):
 		return false
-	return DirAccess.remove_absolute(path_for(game_id, rom_sha1, slot)) == OK
+	var removed: bool = false
+	for path: String in [
+		path_for(game_id, rom_sha1, slot), backup_path_for(game_id, rom_sha1, slot)
+	]:
+		if FileAccess.file_exists(path) and DirAccess.remove_absolute(path) == OK:
+			removed = true
+	return removed
+
+
+static func _write_file(target: String, document: String) -> Dictionary:
+	var temporary: String = "%s.tmp" % target
+	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null:
+		return _failure("could not open the save for writing")
+	file.store_string(document)
+	file.flush()
+	var write_error: Error = file.get_error()
+	file.close()
+	if write_error != OK or DirAccess.rename_absolute(temporary, target) != OK:
+		DirAccess.remove_absolute(temporary)
+		return _failure("could not finish writing the save")
+	return {"ok": true, "message": ""}
+
+
+static func _load_copy(path: String, slot: int, data: GameData) -> Dictionary:
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return _failure("save slot %d could not be opened" % (slot + 1))
+	var text: String = file.get_as_text()
+	file.close()
+	var container: Dictionary = _unwrap(text)
+	if not container["ok"]:
+		return _failure("save slot %d: %s" % [slot + 1, container["message"]])
+	var parser := JSON.new()
+	var parse_error: Error = parser.parse(String(container["payload"]))
+	if parse_error != OK:
+		return _failure("save slot %d is not valid JSON data" % (slot + 1))
+	var raw: Variant = parser.data
+	var migration: Dictionary = Gen2SaveData.migrate_dict(raw)
+	if not bool(migration.get("ok", false)):
+		return _failure("save slot %d: %s" % [slot + 1, migration.get("message", "unsupported save format")])
+	var loaded_save: Gen2SaveData = Gen2SaveData.from_dict(migration["data"])
+	if loaded_save == null:
+		return _failure("save slot %d is not valid JSON data" % (slot + 1))
+	var validation: Dictionary = Gen2SaveValidator.validate(loaded_save, data)
+	if not validation["ok"]:
+		return _failure("save slot %d: %s" % [slot + 1, validation["message"]])
+	return {
+		"ok": true, "message": "", "save": loaded_save,
+		"migrated": bool(migration.get("migrated", false)),
+	}
+
+
+static func _wrap(payload: String) -> String:
+	return "%s %d %d\n%s" % [CONTAINER_PREFIX, CONTAINER_VERSION, _checksum(payload), payload]
+
+
+## Returns the payload of a slot file. A file without the header line predates
+## the container and is accepted unchecked.
+static func _unwrap(text: String) -> Dictionary:
+	if not text.begins_with("%s " % CONTAINER_PREFIX):
+		return {"ok": true, "payload": text, "message": ""}
+	var break_index: int = text.find("\n")
+	if break_index < 0:
+		return {"ok": false, "payload": "", "message": "the save header is incomplete"}
+	var header: PackedStringArray = text.substr(0, break_index).split(" ", false)
+	var payload: String = text.substr(break_index + 1)
+	if header.size() != 3 or not header[2].is_valid_int() or int(header[1]) != CONTAINER_VERSION:
+		return {"ok": false, "payload": "", "message": "unsupported save container"}
+	if int(header[2]) != _checksum(payload):
+		return {"ok": false, "payload": "", "message": "the save data failed its checksum"}
+	return {"ok": true, "payload": payload, "message": ""}
+
+
+## `Checksum` in engine/menus/save.asm: a wrapping 16-bit sum of every byte.
+static func _checksum(payload: String) -> int:
+	var sum: int = 0
+	for byte: int in payload.to_utf8_buffer():
+		sum = (sum + byte) & 0xFFFF
+	return sum
 
 
 static func _valid_slot(slot: int) -> bool:

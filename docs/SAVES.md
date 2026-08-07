@@ -87,6 +87,25 @@ addition to the first free PC slot; with the party and all 280 box slots
 occupied the transaction refuses before consuming an item or ball, leaving save
 and world state unchanged.
 
+## Slot durability
+
+A slot is two files. `Gen2SaveStore.save()` writes `slot_N.json` complete, then
+copies it to `slot_N.json.bak`, following the cartridge's primary-then-backup
+order in `_SaveGameData`. Each file begins with a header line carrying a 16-bit
+additive checksum over its JSON payload, the algorithm `Checksum` uses in
+`engine/menus/save.asm`, so a truncated or altered copy is refused rather than
+loaded. Neither write depends on rename atomicity, which Godot does not provide
+on Windows.
+
+A load takes the primary and falls back to the backup on any failure: a missing
+file, a bad header or checksum, invalid JSON, a failed migration or a validator
+rejection. When both fail, the primary's message is reported. A slot counts as
+occupied while either copy exists, so a lost primary cannot present itself as an
+empty slot that a new game would overwrite. Unlike `TryLoadSaveFile`, a load
+never repairs the weak copy, because drawing the slot menu loads all three
+slots; the next save rewrites both. Slots written before the header existed load
+unchecked.
+
 ## Original Generation 2 shape
 
 The model follows stable Crystal source fields. `box_struct` contains species,
