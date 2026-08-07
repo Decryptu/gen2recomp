@@ -523,7 +523,51 @@ const OFFSET_GROWTH_RATE: int = 22
 ## Packed nibbles, one egg group per half.
 const OFFSET_EGG_GROUPS: int = 23
 const OFFSET_TMHM: int = 24
+## Eight bytes of learnable flags, one bit per TM/HM/tutor number, indexed by the
+## entry's own zero-based place in TMHMMoves. Sixty-four bits for sixty numbers,
+## so the top four are always clear.
 const TMHM_BYTES: int = 8
+
+## data/moves/tmhm_moves.asm's TMHMMoves: fifty TMs, then seven HMs, then
+## Crystal's three move tutors, then a zero terminator. Indexed by TMNUM, which
+## is one-based, so entry n-1 is TM/HM number n. The first fifty-seven bytes are
+## identical between the pins; only Crystal's tutor rows follow.
+const TMHM_TM_COUNT: int = 50
+const TMHM_HM_COUNT: int = 7
+## constants/item_constants.asm. TM01 is $bf and HM01 $f3, but the run is not
+## contiguous: ITEM_C3 and ITEM_DC are dummy items inside it, which is why
+## GetTMHMNumber skips them rather than subtracting.
+const ITEM_TM01: int = 0xBF
+const ITEM_HM01: int = 0xF3
+const ITEM_DUMMY_TM04_05: int = 0xC3
+const ITEM_DUMMY_TM28_29: int = 0xDC
+
+
+## engine/items/items.asm's GetTMHMNumber: the one-based TM/HM number an item id
+## carries, or 0 when [param item] is not one. The two dummy items in the range
+## have no number of their own and answer 0 as well.
+static func tmhm_number_for_item(item: int, count: int) -> int:
+	if item < ITEM_TM01 or item == ITEM_DUMMY_TM04_05 or item == ITEM_DUMMY_TM28_29:
+		return 0
+	var value: int = item
+	if value >= ITEM_DUMMY_TM04_05:
+		if value >= ITEM_DUMMY_TM28_29:
+			value -= 1
+		value -= 1
+	var number: int = value - ITEM_TM01 + 1
+	return number if number >= 1 and number <= count else 0
+
+
+## GetNumberedTMHM, the inverse: the item id a one-based TM/HM number carries.
+static func item_for_tmhm_number(number: int, count: int) -> int:
+	if number < 1 or number > count:
+		return 0
+	var value: int = number
+	if value >= ITEM_DUMMY_TM04_05 - (ITEM_TM01 - 1):
+		if value >= ITEM_DUMMY_TM28_29 - (ITEM_TM01 - 1) - 1:
+			value += 1
+		value += 1
+	return value + ITEM_TM01 - 1
 
 ## Byte positions within a 7-byte move entry.
 ## The animation is the move's own number, which is what makes the table
@@ -552,6 +596,8 @@ const GOLD_SILVER: Dictionary = {
 	"world_trades": 0xFCC24,
 	"world_trade_count": 6,
 	"move_data": 0x41AFE,
+	"tmhm_moves": 0x11A66,
+	"tmhm_move_count": 57,
 	"evos_attacks": 0x427BD,
 	"type_names": 0x509AE,
 	"type_matchups": 0x34D01,
@@ -676,6 +722,8 @@ const CRYSTAL: Dictionary = {
 	"world_trades": 0xFCE58,
 	"world_trade_count": 7,
 	"move_data": 0x41AFB,
+	"tmhm_moves": 0x1167A,
+	"tmhm_move_count": 60,
 	"evos_attacks": 0x425B1,
 	"type_names": 0x5097B,
 	"type_matchups": 0x34BB1,

@@ -150,6 +150,147 @@ func test_item_with_no_effect_is_not_consumed() -> void:
 	assert_eq(_world.state.item_quantity(0x09), before_quantity)
 
 
+## TM01 and HM04 in this fixture's cache. The party's first member learns both,
+## the second learns neither, so one save covers compatibility both ways.
+const TM_ITEM: int = 0xBF
+const HM_ITEM: int = 0xF6
+const TM_MOVE: int = 0xDF
+const HM_MOVE: int = 0x46
+
+
+func _add_tmhm_metadata() -> void:
+	var table: Array = []
+	for index: int in RomLayout.TMHM_TM_COUNT + RomLayout.TMHM_HM_COUNT:
+		table.append(0x60 + index)
+	table[0] = TM_MOVE
+	table[RomLayout.TMHM_TM_COUNT + 3] = HM_MOVE
+	RomCache.write_json(RomCache.tmhm_moves_path(Fixture.directory()), table)
+
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		var flags: Array = []
+		flags.resize(RomLayout.TMHM_BYTES)
+		for index: int in flags.size():
+			flags[index] = 0
+		if int(raw["number"]) == _save.party[0].species:
+			# TMNUM 1 (TM01) and 54 (HM04), bit index TMNUM - 1 from the low bit.
+			flags[0] = 0x01
+			flags[6] = 0x20
+		raw["tmhm"] = flags
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
+
+	var moves: Array = RomCache.read_json(RomCache.moves_path(Fixture.directory()))
+	for raw: Dictionary in moves:
+		if int(raw["number"]) in [TM_MOVE, HM_MOVE]:
+			raw["pp"] = 15
+	RomCache.write_json(RomCache.moves_path(Fixture.directory()), moves)
+
+	# The fixture's item table stops short of the TM/HM range, and the save
+	# validator rejects a world holding an item the cache does not know, so the
+	# rows have to exist before either can sit in the bag.
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	while items.size() < HM_ITEM:
+		var number: int = items.size() + 1
+		items.append({
+			"number": number, "name": "TM%02d" % number,
+			"permissions": 0, "pocket": Gen2WorldPack.TYPE_TM_HM,
+			"field_menu": 0, "battle_menu": 0, "status_mask": 0, "heal_amount": 0,
+		})
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+
+	_data = GameData.open_directory(Fixture.directory())
+	_world.data = _data
+
+
+func _teachable_save() -> Gen2SaveMon:
+	_add_tmhm_metadata()
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.moves = [1, 0, 0, 0]
+	mon.pp = [10, 0, 0, 0]
+	return mon
+
+
+## LearnMove writes the move into the first empty slot and its PP from
+## Moves + MOVE_PP, so a freshly taught move arrives at full PP. TeachTMHM
+## returns straight after IsHM, so an HM is never consumed.
+func test_teaching_an_hm_fills_the_first_empty_slot_and_keeps_the_hm() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(int(result["move"]), HM_MOVE)
+	assert_eq(int(result["slot"]), 1)
+	assert_eq(int(result["pp"]), 15)
+	assert_false(bool(result["consumed"]))
+	# _copy_save() rebuilds the party from the candidate, so the committed mon is
+	# a new object and the one held before the call is stale.
+	var taught: Gen2SaveMon = _save.party[0]
+	assert_eq(taught.moves[1], HM_MOVE)
+	assert_eq(taught.pp[1], 15)
+	assert_eq(taught.moves[0], mon.moves[0], "the slot already in use is untouched")
+	assert_eq(_world.state.item_quantity(HM_ITEM), 1)
+
+
+## ConsumeTM runs for a TM, after IsHM lets it through.
+func test_teaching_a_tm_consumes_it() -> void:
+	_teachable_save()
+	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 2}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, false)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_true(bool(result["consumed"]))
+	assert_eq(_world.state.item_quantity(TM_ITEM), 1)
+
+
+## The refusal order is CanLearnTMHMMove, then KnowsMove, then LearnMove's slot
+## search. Each answers before anything is written.
+func test_teaching_refuses_an_incompatible_species_without_writing() -> void:
+	_teachable_save()
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	var before: Dictionary = _save.to_dict()
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 1, false)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"not_compatible")
+	assert_eq(_save.to_dict(), before)
+	assert_eq(_world.state.item_quantity(HM_ITEM), 1)
+
+
+func test_teaching_refuses_a_move_the_mon_already_knows() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [HM_MOVE, 0, 0, 0]
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"already_knows_move")
+	assert_eq(_world.state.item_quantity(HM_ITEM), 1)
+
+
+## Where the source opens ForgetMove, which does not exist here.
+func test_teaching_refuses_a_full_moveset_rather_than_replacing_one() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [1, 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, false)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"moveset_full")
+	assert_eq(mon.moves, [1, 2, 3, 4])
+
+
+func test_teaching_refuses_an_item_that_is_not_a_tm_or_hm_and_an_absent_one() -> void:
+	_teachable_save()
+	_world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	assert_eq(
+		Gen2WorldPartyHost.teach_tm_hm(_world, _save, 0x12, 0, false)["reason"],
+		&"not_a_tm_hm"
+	)
+	# ConvertCurItemIntoCurTMHM is reached only from the pocket, so an item the
+	# bag does not hold fails on the quantity first.
+	assert_eq(
+		Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, false)["reason"],
+		&"insufficient_item_quantity"
+	)
+
+
 func test_master_ball_captures_a_wild_mon_and_records_catch_metadata() -> void:
 	var wild: Gen2BattleMon = Gen2BattleMon.create(
 		_data, 25, 5, _data.moves_at_level(25, 5), 0x1234

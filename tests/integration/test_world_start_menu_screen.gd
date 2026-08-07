@@ -130,6 +130,151 @@ func test_pack_lists_a_granted_item() -> void:
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
 
+## HM04 with its real item number, plus the TM/HM table and the flag bit that
+## lets the development save's first party member learn it.
+const HM_ITEM: int = 0xF6
+const HM_MOVE: int = 0x46
+
+
+func _write_tmhm_item(learnable: bool = true) -> void:
+	var table: Array = []
+	for index: int in RomLayout.TMHM_TM_COUNT + RomLayout.TMHM_HM_COUNT:
+		table.append(0x60 + index)
+	table[RomLayout.TMHM_TM_COUNT + 3] = HM_MOVE
+	RomCache.write_json(RomCache.tmhm_moves_path(Fixture.directory()), table)
+
+	var moves: Array = RomCache.read_json(RomCache.moves_path(Fixture.directory()))
+	for raw: Dictionary in moves:
+		if int(raw.get("number", 0)) == HM_MOVE:
+			raw["name"] = "STRENGTH"
+			raw["pp"] = 15
+	RomCache.write_json(RomCache.moves_path(Fixture.directory()), moves)
+
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	while items.size() < HM_ITEM:
+		items.append({
+			"number": items.size() + 1, "name": "HM%02d" % items.size(),
+			"permissions": 0, "pocket": Gen2WorldPack.TYPE_TM_HM,
+			"field_menu": 0, "battle_menu": 0, "status_mask": 0, "heal_amount": 0,
+		})
+	(items[HM_ITEM - 1] as Dictionary)["name"] = "HM04"
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		var flags: Array = []
+		flags.resize(RomLayout.TMHM_BYTES)
+		for index: int in flags.size():
+			flags[index] = 0
+		if learnable:
+			# TMNUM 54, so bit 53: byte 6, bit 5 from the low end.
+			flags[6] = 0x20
+		raw["tmhm"] = flags
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
+	_data = GameData.open_directory(Fixture.directory())
+
+
+## Opens the pack on the TM/HM pocket with HM04 in the bag and the cursor on it.
+## _write_tmhm_item() has to have run before the world screen was built, since
+## the screen keeps the GameData it was handed.
+func _open_tmhm_pack() -> Gen2StartMenuScreen:
+	_world_screen._world.state.apply_changes({}, {}, {"items": {HM_ITEM: 1}})
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PACK)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	var pockets: Array = host.get("_pack_pockets")
+	for index: int in pockets.size():
+		if int((pockets[index] as Dictionary)["pocket"]) == Gen2WorldPack.TYPE_TM_HM:
+			host.set("_pack_pocket_index", index)
+			break
+	host.set("_pack_cursor", 0)
+	return host
+
+
+## engine/items/pack.asm gives the TM/HM pocket its own USE, which runs
+## AskTeachTMHM rather than reaching UseItem's jumptable.
+func test_tmhm_use_asks_before_teaching_and_a_yes_teaches_the_move() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
+	var save: Gen2SaveData = _world_screen._injected_save
+	assert_false(save.party[0].moves.has(HM_MOVE))
+
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TEACH)
+	assert_eq(
+		String(host.get("_teach_prompt")["text"]),
+		"Booted up an HM. It contained STRENGTH. Teach STRENGTH to a #MON?"
+	)
+
+	## Yes is the prompt's default cursor position, matching YesNoBox.
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
+
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_true(bool(host.get("_pack_result_ok")), String(host.get("_pack_result")))
+	assert_true(save.party[0].moves.has(HM_MOVE))
+	## IsHM returns before ConsumeTM, so the HM stays in the bag.
+	assert_eq(_world_screen._world.state.item_quantity(HM_ITEM), 1)
+
+
+## The yes/no is a real refusal, not decoration: no leaves the party alone.
+func test_tmhm_use_declined_teaches_nothing() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
+	var save: Gen2SaveData = _world_screen._injected_save
+
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TEACH)
+
+	host.handle_key(KEY_DOWN)
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_false(save.party[0].moves.has(HM_MOVE))
+
+
+## CanLearnTMHMMove is the first thing TeachTMHM asks, and its refusal is
+## TMHMNotCompatibleText rather than a silent no-op.
+func test_tmhm_use_reports_an_incompatible_species() -> void:
+	_write_tmhm_item(false)
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
+	var save: Gen2SaveData = _world_screen._injected_save
+
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+	host.handle_key(KEY_ENTER)
+	await get_tree().process_frame
+
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_false(bool(host.get("_pack_result_ok")))
+	assert_true(
+		String(host.get("_pack_result")).contains("not compatible"),
+		String(host.get("_pack_result"))
+	)
+	assert_false(save.party[0].moves.has(HM_MOVE))
+
+
 func test_pokegear_reaches_the_existing_phone_list() -> void:
 	await _open_world()
 	_world_screen._world.state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEGEAR)

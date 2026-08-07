@@ -54,9 +54,11 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > errand, Sudowoodo, the Burned Tower beasts and Morty to the Fog Badge, and on
 > through the Dance Theatre's Kimono Girls for HM03 Surf, Routes 38 and 39, the
 > Olivine Lighthouse, Routes 40 and 41 surfed to Cianwood for the SecretPotion,
-> and Jasmine to the Mineral Badge, then east across Route 42's lakes to
-> Mahogany, the Lake of Rage's Red Gyarados and Lance, the Rocket hideout's
-> three floors and Pryce to the Glacier Badge.
+> and Jasmine to the Mineral Badge, catching a Geodude in Union Cave on the way
+> and teaching it HM04 Strength to push Cianwood Gym's boulders aside for the
+> Storm Badge, then east across Route 42's lakes to Mahogany, the Lake of Rage's
+> Red Gyarados and Lance, the Rocket hideout's three floors and Pryce to the
+> Glacier Badge.
 > Missing: full story state, dex, trainer card, options, the remaining
 > special-call branches and story-driven permanent contacts.
 
@@ -101,6 +103,7 @@ to check without writing.
 | Learnsets | All 251 species' level-up moves in cartridge order |
 | Evolutions | Every evolution and method/requirements |
 | Moves | Names, power, type, accuracy, PP, effect and chance |
+| TM/HM moves | The 57 Gold/Silver or 60 Crystal TM, HM and move-tutor rows, which is what turns a TM in the bag into a move |
 | Items, types | 255 item names, prices, effects, menus, pockets, healing metadata and 28 type names |
 | NPC trades | Gold/Silver six-row or Crystal seven-row records with requested/offered species, DVs, held item and OT data |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
@@ -194,6 +197,7 @@ Headless tools, all against a real imported cache:
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |
+| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, and the whole species compatibility census, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction

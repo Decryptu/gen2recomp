@@ -22,6 +22,9 @@ var directory: String = ""
 
 var _species: Array = []
 var _moves: Array = []
+## TMHMMoves in TMNUM order, restored to integers because JSON reads them back
+## as floats.
+var _tmhm_moves: Array[int] = []
 var _items: Array = []
 var _world_trades: Array = []
 var _types: Array = []
@@ -86,6 +89,7 @@ static func open_directory(path: String) -> GameData:
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
+	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
 	data._world_trades = data._read_array(RomCache.world_trades_path(path))
 	data._types = data._read_array(RomCache.types_path(path))
@@ -464,6 +468,29 @@ func _rows(entry: Dictionary, key: String, fields: Array) -> Array:
 
 func move(number: int) -> Dictionary:
 	return _entry(_moves, number - 1)
+
+
+## Every TM/HM/tutor move in TMNUM order, so index n-1 is TM/HM number n.
+func tmhm_moves() -> Array[int]:
+	return _tmhm_moves.duplicate()
+
+
+## GetTMHMMove: the move one TM/HM number teaches, or 0 when the number is not
+## one this cartridge carries.
+func tmhm_move(number: int) -> int:
+	if number < 1 or number > _tmhm_moves.size():
+		return 0
+	return _tmhm_moves[number - 1]
+
+
+## CanLearnTMHMMove's own scan of TMHMMoves for wPutativeTMHMMove: the one-based
+## number that teaches [param move], or 0. The source takes the first match, so
+## this does too.
+func tmhm_number_for_move(move_number: int) -> int:
+	if move_number <= 0:
+		return 0
+	var found: int = _tmhm_moves.find(move_number)
+	return found + 1 if found >= 0 else 0
 
 
 func item(number: int) -> Dictionary:
@@ -935,6 +962,13 @@ func _audio() -> Dictionary:
 func _read_array(path: String) -> Array:
 	var value: Variant = RomCache.read_json(path)
 	return value if value is Array else []
+
+
+func _read_int_array(path: String) -> Array[int]:
+	var out: Array[int] = []
+	for value: Variant in _read_array(path):
+		out.append(int(value))
+	return out
 
 
 func _entry(rows: Array, index: int) -> Dictionary:
