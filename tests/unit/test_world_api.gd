@@ -1996,6 +1996,37 @@ func test_checkpoke_answers_the_party_summary_species_and_fails_without_one() ->
 	assert_eq(failed[0]["reason"], &"missing_party_summary")
 
 
+func test_disappear_writes_the_object_flag_the_same_script_can_check() -> void:
+	# TeamRocketBaseB2F's third Electrode disappears itself and then checks all
+	# three electrode events before running the script that ends the hideout, so
+	# the flag has to be readable inside the same script the way Script_disappear
+	# writes it.
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6380"] = [
+		Gen2WorldScript.raw_opcode(0x6D, true), 2, # disappear, first object
+		Gen2WorldScript.CHECKEVENT, 0, 0,
+		Gen2WorldScript.IFTRUE, 0x90, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6390"] = [Gen2WorldScript.SETEVENT, 44, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var flag: int = (world.objects[0] as Gen2WorldObject).event_flag
+	assert_gt(flag, 0, "the fixture's first object needs an event flag")
+	scripts["48:6380"][3] = flag & 0xFF
+	scripts["48:6380"][4] = flag >> 8
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+	var reloaded: GameData = GameData.open_directory(_directory)
+	var checked: Gen2WorldAPI = Gen2WorldAPI.open(reloaded, 1, 1, Vector2i(7, 6))
+	checked.current_map.events["coord_events"][0]["script"] = 0x6380
+	var result: Array = checked.dispatch_script_events()
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_true(checked.event_flag_active(flag), JSON.stringify(result))
+	assert_true(checked.event_flag_active(44), JSON.stringify(result))
+
+
 func test_talking_to_a_beaten_trainer_clears_the_just_battled_flag_first() -> void:
 	# LoadTrainer_continue clears wRunningTrainerBattleScript for every trainer
 	# encounter (home/trainers.asm), so an after-battle script only stops at

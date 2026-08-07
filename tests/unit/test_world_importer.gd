@@ -33,3 +33,37 @@ func test_trainer_record_decodes_the_source_fields_and_after_script_pointer() ->
 	assert_eq(record["win_text"], {"bank": bank, "address": 0x7010})
 	assert_eq(record["loss_text"], {"bank": bank, "address": 0x7020})
 	assert_eq(record["after_script"], 0x600C)
+
+
+func test_a_conditional_background_event_collects_the_script_behind_it() -> void:
+	# BGEVENT_IFSET and BGEVENT_IFNOTSET point at a four-byte conditional_event
+	# record, an event flag then a near script pointer, not at a script
+	# (macros/scripts/maps.asm). Giovanni's office door and the Rocket hideout's
+	# transmitter door are both reached this way.
+	var bank: int = 48
+	var record: int = 0x6100
+	var script: int = 0x6200
+	var bytes := PackedByteArray()
+	bytes.resize(RomFile.linear(bank, script) + 8)
+	var record_offset: int = RomFile.linear(bank, record)
+	bytes[record_offset] = 0x22
+	bytes[record_offset + 1] = 0x11
+	bytes[record_offset + 2] = script & 0xFF
+	bytes[record_offset + 3] = script >> 8
+	bytes[RomFile.linear(bank, script)] = Gen2WorldScript.END
+
+	var rom: RomFile = RomFile.from_bytes(bytes, RomRegistry.CRYSTAL)
+	var script_data: Dictionary = {}
+	Gen2WorldImporter._collect_conditional_bg_script(
+		rom, bank, {"type": Gen2WorldImporter.BGEVENT_IFNOTSET, "script": record},
+		script_data, {}, {}
+	)
+	assert_true(
+		script_data.has(Gen2WorldScript.pointer_key(bank, script)), JSON.stringify(script_data)
+	)
+
+	var read_only: Dictionary = {}
+	Gen2WorldImporter._collect_conditional_bg_script(
+		rom, bank, {"type": 0, "script": record}, read_only, {}, {}
+	)
+	assert_true(read_only.is_empty(), "a plain BGEVENT_READ points straight at its script")
