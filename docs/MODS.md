@@ -70,7 +70,7 @@ A registered renderer is a `Node` providing:
 Registration is refused, by name, if any of these is missing or the script is
 not a `Node`, rather than failing on the first drawn frame.
 
-Two methods are optional:
+Two methods are optional, on either renderer kind:
 
 | Method | Effect |
 |---|---|
@@ -81,6 +81,42 @@ A view built out of geometry cannot be drawn into a 160x144 buffer and then
 magnified, so the second layer is what makes a 3D or HD renderer possible at
 all. Text boxes and menus stay hardware pixels over the top: the world gains
 resolution, the interface stays a Game Boy.
+
+A world renderer has a third:
+
+| Method | Effect |
+|---|---|
+| `handle_world_input(event: InputEvent) -> bool` | Every input event the world screen did not use. Answering true consumes it |
+
+The screen claims what it needs and offers the rest, so camera pitch, first
+person and free-roam are all reachable while a movement or interaction key never
+arrives: a renderer reads world state and must not write it, and moving the
+player is writing it. Free-roam movement is the pose layer below, not this. An
+open overlay, a running script, a battle or a trainer approach takes the event
+first, exactly as it does for the screen's own keys.
+
+Implement this rather than Godot's `_input` or `_unhandled_input`. A node in the
+tree is offered events before the screen decides what it needs, so a renderer
+reading them directly races the gameplay keys instead of taking what is left of
+them.
+
+## Framing the view
+
+`Gen2WorldAPI` offers a camera; it does not impose one.
+
+| Method | Value |
+|---|---|
+| `player_position_cells() -> Vector2` | The committed cell plus any in-flight step, in walk cells |
+| `visible_origin_cells() -> Vector2` | The framed view's top-left in fractional walk cells, centred on that position and clamped to the map |
+| `visible_origin_cell() -> Vector2i` | The hardware page origin, which follows the committed cell |
+
+`player_cell` commits at the start of a step, so the hardware page origin moves a
+whole cell the instant one begins. That is what the 160x144 tile page wants and
+what a camera does not: following it pans a step early.
+`visible_origin_cells()` frames the interpolated position instead, and the two
+agree whenever no step is in flight. A renderer that frames its own view, which
+is what a free camera is, can ignore all three and read
+`player_position_cells()` and `map_size_cells()` directly.
 
 The host constructs a renderer per world, so `select_world_renderer()` can
 switch between the built-in `gen2` renderer and a mod's while the game runs.
@@ -157,7 +193,11 @@ Supported by the contract above:
   frame rate and stall cap `Gen2WorldAnimation` uses. The logical cell still
   commits at the start of the step; the fraction is presentation only and never
   reaches collision, events or the world snapshot.
-  `mods/examples/voxel_preview/` reads both.
+  `mods/examples/voxel_preview/` reads both;
+- a camera of its own, through `player_position_cells()` and
+  `visible_origin_cells()` above, without inheriting the tile page's framing;
+- steering that camera, through `handle_world_input`. `mods/examples/voxel_preview/`
+  puts pitch on `Q` and `E`, two keys the world screen does not read.
 
 What is still missing, in the order it blocks work:
 
@@ -168,17 +208,12 @@ What is still missing, in the order it blocks work:
    renderer hard-code Johto.
 2. **Interiors are not renderer-owned.** Only the overworld and battle are
    registered; a 3D interior view has no equivalent boundary here.
-3. **No camera boundary.** `Gen2WorldAPI.visible_origin_cell()` still follows
-   the committed cell rather than the interpolated one, so a free camera pans a
-   step early. A free camera needs the world to stop framing the view.
-4. **No input hook.** Camera pitch, first person and free-roam are all input a
-   mod would have to receive, and the world screen reads keys itself.
-5. **Scripted movement does not interpolate.** `applymovement` streams, and the
+3. **Scripted movement does not interpolate.** `applymovement` streams, and the
    jump, teleport and boulder step types, still place objects a whole cell at a
    time. The wandering, spinning, following, player and trainer-approach paths
    all carry the sub-cell offset.
 
-All five are presentation boundaries that do not exist yet; none of them
+All three are presentation boundaries that do not exist yet; none of them
 changes the world's own data.
 
 ## Not built yet

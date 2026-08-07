@@ -45,6 +45,20 @@ const RENDERER_SURFACE_METHOD: String = "uses_hardware_viewport"
 ## created and whenever the window changes it. Only reached by a renderer that
 ## asked for the native layer. Shared by both renderer kinds.
 const RENDERER_RESIZE_METHOD: String = "set_native_size"
+## Optional, world renderers only. Offered every input event the world screen
+## chose not to use, so a renderer can own camera pitch, first person or
+## free-roam. Answering true consumes the event.
+##
+## The screen decides first and offers what is left, so a renderer can never take
+## a movement or interaction key: a renderer reads world state and must not write
+## it, and moving the player is writing it. A renderer wanting free-roam movement
+## is the separate pose layer docs/MODS.md describes, not this.
+##
+## Implement this rather than Godot's own [method Node._input] or
+## [method Node._unhandled_input]: a node in the tree is offered events before
+## the screen decides what it needs, so reading them directly races the gameplay
+## keys instead of taking what is left.
+const RENDERER_INPUT_METHOD: String = "handle_world_input"
 ## The id of the built-in 2D renderer, which is always registered for both
 ## renderer kinds.
 const BUILT_IN_RENDERER: StringName = &"gen2"
@@ -212,6 +226,16 @@ static func renderer_uses_hardware_viewport(renderer: Node) -> bool:
 	if renderer == null or not renderer.has_method(RENDERER_SURFACE_METHOD):
 		return true
 	return bool(renderer.call(RENDERER_SURFACE_METHOD))
+
+
+## Offers [param event] to [param renderer], returning whether it was consumed.
+## See [constant RENDERER_INPUT_METHOD]; a renderer that does not take input
+## leaves every event where it was.
+static func renderer_handles_input(renderer: Node, event: InputEvent) -> bool:
+	if renderer == null or event == null \
+		or not renderer.has_method(RENDERER_INPUT_METHOD):
+		return false
+	return bool(renderer.call(RENDERER_INPUT_METHOD, event))
 
 
 ## Reads every installed mod's manifest without running any of them. The

@@ -390,9 +390,32 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			accept_event()
 			return
 		_:
+			# Everything the screen wants has been claimed above, so what reaches
+			# here is what a renderer may have a use for.
+			if Gen2ModHost.renderer_handles_input(_renderer, key):
+				accept_event()
 			return
 	move_player(direction)
 	accept_event()
+
+
+## Non-key input the screen never reads, offered to the renderer on the same
+## terms as the leftover keys: a free camera needs pointer and stick motion, and
+## the screen has no opinion about either.
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey or not _renderer_input_free():
+		return
+	if Gen2ModHost.renderer_handles_input(_renderer, event):
+		accept_event()
+
+
+## Whether the overworld itself is idle. The key path reaches the renderer only
+## after the same overlays, pauses and hosts have each refused the event.
+func _renderer_input_free() -> bool:
+	return _world != null and _battle_host == null and _service_host == null \
+		and _pc_host == null and _start_menu_host == null and _party_host == null \
+		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
+		and not _world.fishing_busy() and not _world.script_input_waiting()
 
 
 ## Public driver for screenshot tooling and scene tests.

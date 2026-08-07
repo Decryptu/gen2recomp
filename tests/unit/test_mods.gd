@@ -281,6 +281,50 @@ func uses_hardware_viewport() -> bool:
 	native.free()
 
 
+func test_a_renderer_can_take_the_input_the_screen_left_it() -> void:
+	# Camera pitch, first person and free-roam are all input a renderer has to
+	# receive, and answering false has to leave the event where it was.
+	var script := GDScript.new()
+	script.source_code = """extends Node2D
+
+var seen: Array = []
+
+func set_world(_world, _animation = null) -> void:
+	pass
+
+func set_time_of_day(_time_of_day: int) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+
+func refresh_animation() -> void:
+	pass
+
+func handle_world_input(event) -> bool:
+	seen.append(event.keycode)
+	return event.keycode == KEY_Q
+"""
+	script.reload()
+	assert_true(Gen2ModHost.instance().register_world_renderer(&"camera", script)["ok"])
+	var renderer: Node = script.new()
+	var claimed := InputEventKey.new()
+	claimed.keycode = KEY_Q
+	var declined := InputEventKey.new()
+	declined.keycode = KEY_E
+	assert_true(Gen2ModHost.renderer_handles_input(renderer, claimed))
+	assert_false(Gen2ModHost.renderer_handles_input(renderer, declined))
+	assert_eq(renderer.get("seen"), [KEY_Q, KEY_E])
+	renderer.free()
+
+	# The hook is optional: a renderer written before it existed, or one with no
+	# use for input, is never asked and consumes nothing.
+	var built_in := Gen2WorldRenderer.new()
+	assert_false(Gen2ModHost.renderer_handles_input(built_in, claimed))
+	built_in.free()
+	assert_false(Gen2ModHost.renderer_handles_input(null, claimed))
+
+
 func test_manifests_survive_reading_the_failures_recorded_after_discovery() -> void:
 	_write_manifest(_valid_manifest())
 	var host: Gen2ModHost = Gen2ModHost.instance()
