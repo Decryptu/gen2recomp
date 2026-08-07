@@ -627,7 +627,7 @@ func _story_path(data: GameData) -> Dictionary:
 
 	# The Pokemon Center nurse reads CheckPokerus and VAR_PARTYCOUNT, so the
 	# world needs the read-only party mirror before either can resolve.
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 
 	var pokecenter_warp: Dictionary = _warp_to(world.current_map, 10, 10)
 	if pokecenter_warp.is_empty():
@@ -842,7 +842,7 @@ func _hive_badge_path(
 		return {"ok": false, "path": path, "reason": "Togepi egg event did not finish"}
 	if not _party_has_egg(save):
 		return {"ok": false, "path": path, "reason": "the Togepi egg did not reach the party"}
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 
 	var leaving_pokecenter: Dictionary = _warp_step(world, 10, 5)
 	if not bool(leaving_pokecenter.get("ok", false)):
@@ -1238,7 +1238,7 @@ func _plain_badge_path(
 			"reason": "Route 34 to Goldenrod failed: %s" % goldenrod.get("reason", ""),
 		}
 
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 	var gym: Dictionary = _warp_walk(world, Vector2i(24, 7), save, random, data)
 	if not bool(gym.get("ok", false)):
 		return {
@@ -1614,7 +1614,7 @@ func _fog_badge_path(
 		world, world.dispatch_map_entry(), save, random, data
 	)
 
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 	var gym: Dictionary = _warp_walk(world, Vector2i(6, 27), save, random, data)
 	if not bool(gym.get("ok", false)):
 		return {
@@ -1829,7 +1829,7 @@ func _mineral_badge_path(
 	if not bool(second_visit.get("ok", false)):
 		return second_visit
 
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 	var gym: Dictionary = _warp_walk(world, Vector2i(10, 11), save, random, data)
 	if not bool(gym.get("ok", false)):
 		return {
@@ -2395,7 +2395,7 @@ func _glacier_badge_path(
 			world, world.dispatch_map_entry(), save, random, data
 		)
 
-	world.set_party_summary(save.party.size(), false)
+	_mirror_party(world, save)
 	var gym: Dictionary = _warp_walk(world, Vector2i(6, 13), save, random, data)
 	if not bool(gym.get("ok", false)):
 		return {
@@ -2754,6 +2754,24 @@ func _party_species(save: Gen2SaveData) -> Array:
 	for mon: Gen2SaveMon in save.party:
 		values.append({"species": mon.species, "level": mon.level, "egg": mon.is_egg})
 	return values
+
+
+## The whole read-only mirror in one call, so every leg answers VAR_PARTYCOUNT,
+## CheckPokerus, checkpoke and CheckPartyMove the same way. Pokerus is false
+## throughout: nothing on this route gives it.
+func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
+	var species: Array[int] = []
+	var moves: Array = []
+	var names: Array = []
+	for mon: Gen2SaveMon in save.party:
+		species.append(int(mon.species))
+		var mon_moves: Array = []
+		for move: int in mon.moves:
+			if move != 0:
+				mon_moves.append(move)
+		moves.append(mon_moves)
+		names.append(mon.nickname if not mon.nickname.is_empty() else "")
+	world.set_party_summary(save.party.size(), false, species, moves, names)
 
 
 func _party_has_egg(save: Gen2SaveData) -> bool:

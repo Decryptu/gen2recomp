@@ -28,6 +28,13 @@ const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
 
+## wBikeFlags' BIKEFLAGS_STRENGTH_ACTIVE_F, three engine flags ahead of the badge
+## section and so profile split the same way. Nothing in the pinned engine/ or
+## home/ ever clears it: SetStrengthFlag is the only writer, so it persists for
+## the save across maps, warps and snapshots.
+const ENGINE_STRENGTH_ACTIVE: int = 24
+const ENGINE_STRENGTH_ACTIVE_GOLD_SILVER: int = 23
+
 ## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array, and
 ## VAR_BADGES counts both bytes, not Johto alone. These are Crystal indices:
 ## pokegold's constants/engine_flags.asm has no ENGINE_MOBILE_SYSTEM, which
@@ -294,6 +301,13 @@ func bargain_merchant_closed(crystal: bool = true) -> bool:
 static func badge_flag(badge: int, crystal: bool = true) -> int:
 	var flags: Array[int] = BADGE_ENGINE_FLAGS if crystal else BADGE_ENGINE_FLAGS_GOLD_SILVER
 	return flags[badge] if badge >= 0 and badge < flags.size() else -1
+
+
+## The engine flag SetStrengthFlag sets and TryStrengthOW and
+## DoPlayerMovement.CheckStrengthBoulder read, resolved for [param crystal] the
+## way badge_flag() resolves a badge.
+static func strength_active_flag(crystal: bool = true) -> int:
+	return ENGINE_STRENGTH_ACTIVE if crystal else ENGINE_STRENGTH_ACTIVE_GOLD_SILVER
 
 
 ## Mirrors _GetVarAction's .CountBadges: a popcount over both badge bytes.

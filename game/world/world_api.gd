@@ -29,6 +29,9 @@ const STEP_FRAMES_HOP: int = STEP_FRAMES_WALK * 2
 ## calls InitStep with a direction of 0 to 3, which indexes that first row, so
 ## a wandering object steps at half the player's walking speed.
 const STEP_FRAMES_NPC_WALK: int = 16
+## MovementFunction_Strength calls InitStep with `direction | 0`, so a pushed
+## boulder indexes that same slow row and slides at a wandering NPC's speed.
+const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
 ## RandomStepDuration_Slow and _Fast mask the source random byte before storing
 ## it as the wait preceding the next movement decision.
 const IDLE_MASK_SLOW: int = 0x7F
@@ -91,6 +94,11 @@ var _pending_surf: Dictionary = {}
 ## The same for Whirlpool, which shares the source's wCutWhirlpool* slots with
 ## Cut and is cleared beside it for the same reason.
 var _pending_whirlpool: Dictionary = {}
+## The same for Strength, held while Script_UsedStrength shows its text. It names
+## no cell or block, but it is cleared with the others anyway: the source queues
+## Script_StrengthFromMenu and runs it at once, so a request cannot outlive the
+## map it was made on.
+var _pending_strength: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -337,16 +345,22 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 ## CheckPokerus special and its checkpoke consult. count must be non-negative;
 ## has_pokerus is the source's own low-nibble-nonzero check across the whole
 ## party, computed by the caller because Gen2WorldAPI does not read Gen2SaveMon
-## fields directly. [param species] mirrors `wPartySpecies` for `checkpoke`, and
-## an empty list only means no caller supplied one, so `checkpoke` fails the way
-## VAR_PARTYCOUNT does rather than answering false.
+## fields directly. [param species] mirrors `wPartySpecies` for `checkpoke`.
+## [param moves] is one move list per slot, mirroring the party's move slots for
+## `CheckPartyMove`, and [param names] one display name per slot for
+## `GetPartyNickname`; TryStrengthOW asks the first and Script_UsedStrength the
+## second. Only an absent summary fails a script-visible read; a summary whose
+## list is empty answers "not in the party", which is what the story preview's
+## own callers rely on.
 func set_party_summary(
-	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int]
+	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int],
+	moves: Array = [], names: Array = []
 ) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
 	_party_summary = {
 		"count": count, "pokerus": has_pokerus, "species": species.duplicate(),
+		"moves": moves.duplicate(true), "names": names.duplicate(),
 	}
 	return {"ok": true}
 
@@ -636,6 +650,69 @@ func complete_whirlpool() -> Dictionary:
 
 static func _whirlpool_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"whirlpool_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's StrengthFunction .TryStrength, staged the way
+## the other three are because Script_UsedStrength sets nothing until after its
+## text either.
+##
+## Unlike them, .TryStrength is a badge check and nothing else: no faced tile, no
+## block table, no player state, and no check that a boulder is even in front.
+## Its .AlreadyUsingStrength branch is annotated unreferenced in both pins, so an
+## already-active flag is not a refusal here. [param species] is the chosen party
+## member's, for SetStrengthFlag's wStrengthSpecies.
+func strength_request(species: int = 0) -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _strength_failure(&"missing_map")
+	if not _pending_strength.is_empty():
+		return _strength_failure(&"strength_in_progress")
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_PLAIN, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _strength_failure(&"badge_required")
+	_pending_strength = {
+		"ok": true,
+		"kind": &"strength_requested",
+		"move": Gen2WorldFieldMove.MOVE_STRENGTH,
+		"species": species,
+	}
+	return _pending_strength.duplicate(true)
+
+
+## Empty until strength_request() succeeds. A host shows its text while this is set.
+func pending_strength() -> Dictionary:
+	return _pending_strength.duplicate(true)
+
+
+## SetStrengthFlag: the engine flag plus wStrengthSpecies, which is only read
+## back by Script_UsedStrength's own cry. Nothing in the pinned sources ever
+## clears the flag, so this is the one write and it persists for the save.
+func complete_strength() -> Dictionary:
+	if _pending_strength.is_empty():
+		return _strength_failure(&"no_pending_strength")
+	var request: Dictionary = _pending_strength
+	_pending_strength = {}
+	state.set_engine_flag(
+		Gen2WorldState.strength_active_flag(Gen2WorldState.is_crystal_profile(data)), true
+	)
+	return {
+		"ok": true,
+		"kind": &"strength_applied",
+		"move": int(request["move"]),
+		"species": int(request["species"]),
+	}
+
+
+## Whether BIKEFLAGS_STRENGTH_ACTIVE_F is set, the single condition
+## DoPlayerMovement.CheckStrengthBoulder and TryStrengthOW both read.
+func strength_active() -> bool:
+	return state.is_engine_flag_active(
+		Gen2WorldState.strength_active_flag(Gen2WorldState.is_crystal_profile(data))
+	)
+
+
+static func _strength_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"strength_failed", "reason": reason}
 
 
 ## Rolls an encounter from the current map. Auto mode preserves the existing
@@ -2409,10 +2486,17 @@ func try_connection(direction: Vector2i) -> Dictionary:
 ## wTilePermissions computed at the player's current cell. Vector2i.ZERO skips
 ## that test for callers that only want the destination's plain permission.
 func can_walk_to(cell: Vector2i, direction: Vector2i = Vector2i.ZERO) -> bool:
+	if not _step_permission_allows(cell, direction):
+		return false
+	return object_at(cell) == null
+
+
+## .CheckLandPerms/.CheckSurfPerms alone, without .CheckNPC. Split out because
+## the source runs the two in that order and only reaches the NPC test when the
+## permission passed, which is what makes a boulder on a wall unpushable.
+func _step_permission_allows(cell: Vector2i, direction: Vector2i) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
-		return false
-	if object_at(cell) != null:
 		return false
 	if direction != Vector2i.ZERO:
 		var face: int = Gen2WorldCollision.face_mask_for_direction(direction)
@@ -2519,16 +2603,24 @@ func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
 	while _object_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
 		_object_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
 		for object: Gen2WorldObject in objects:
-			if not object.active or object.deleted or object.sprite == null \
-				or not object.movement_advances():
+			if not object.active or object.deleted or object.sprite == null:
 				continue
-			if object.tick_step():
-				changed = true
-				if not object.is_stepping():
-					# StepFunction_ContinueWalk rolls a new wait the moment the
-					# step duration reaches zero, so a wandering object pauses
-					# between steps instead of walking without stopping.
-					object.start_idle(random.randi() & IDLE_MASK_SLOW)
+			# A step in flight is drained whatever put it there, so a pushed
+			# boulder slides even though its template never decides anything.
+			# StepFunction_StrengthBoulder ends by standing the boulder back up
+			# without rolling a wait, which is why only a template that decides
+			# reaches start_idle below.
+			if object.is_stepping():
+				if object.tick_step():
+					changed = true
+					if not object.is_stepping() and object.movement_advances():
+						# StepFunction_ContinueWalk rolls a new wait the moment
+						# the step duration reaches zero, so a wandering object
+						# pauses between steps instead of walking without
+						# stopping.
+						object.start_idle(random.randi() & IDLE_MASK_SLOW)
+				continue
+			if not object.movement_advances():
 				continue
 			if object.tick_idle():
 				continue
@@ -2642,9 +2734,17 @@ func move_result(direction: Vector2i) -> Dictionary:
 	if forced_walk:
 		return _forced_step(direction, destination)
 	if not can_walk_to(destination, direction):
+		## .CheckNPC runs after .CheckLandPerms and before .TryJump, and its own
+		## comment says a movable boulder is treated the same as any NPC in front:
+		## both .bump. So a push starts the boulder and still refuses the player,
+		## and .bump returns without carry, so the ledge hop is tried afterwards
+		## exactly as it would have been.
+		var pushed: Dictionary = _try_push_boulder(direction, destination)
 		var hop: Dictionary = _try_ledge_hop(direction)
 		if not hop.is_empty():
 			return hop
+		if not pushed.is_empty():
+			return pushed
 		return {"ok": false, "kind": &"move", "reason": &"blocked"}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
@@ -2738,6 +2838,62 @@ func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
 		"from_cell": from_cell,
 		"to_map": from_map,
 		"to_cell": player_cell,
+	}
+
+
+## .CheckStrengthBoulder, then the boulder's own MovementFunction_Strength.
+##
+## The source splits these across two frames: the player's step flags the boulder
+## and bumps, and the boulder starts moving on its next movement tick. Nothing
+## observable sits between the two, because the boulder is not asked to decide
+## anything in between and the flag it carries is cleared unread by nobody, so
+## both are resolved here in one call. The player is not moved either way; the
+## caller still reports a blocked step.
+##
+## Refusals, in the source's own order: BIKEFLAGS_STRENGTH_ACTIVE_F, then a
+## boulder that is standing (OBJECT_WALKING == STANDING, so a boulder already
+## mid-push is not pushed again), then the destination the boulder would take.
+## The boulder's own cell being a pit stops it permanently
+## (MovementFunction_Strength .on_pit), which is Blackthorn Gym 2F's puzzle and
+## the only thing that reads it.
+##
+## [param destination] is the boulder's cell, already known to have refused the
+## player. Its permission is checked here because .CheckLandPerms runs before
+## .CheckNPC, so a boulder standing somewhere the player could not walk anyway is
+## never even considered.
+func _try_push_boulder(direction: Vector2i, destination: Vector2i) -> Dictionary:
+	if not strength_active():
+		return {}
+	if not _step_permission_allows(destination, direction):
+		return {}
+	var boulder: Gen2WorldObject = object_at(destination)
+	if boulder == null or not boulder.is_strength_boulder() or boulder.is_stepping():
+		return {}
+	if Gen2WorldCollision.is_pit_tile(collision_code_at(boulder.cell)):
+		return {}
+	var landing: Vector2i = boulder.cell + direction
+	# CanObjectMoveInDirection with the boulder's own flags: WONT_DELETE,
+	# FIXED_FACING, SLIDING and MOVE_ANYWHERE, palette bit STRENGTH_BOULDER and
+	# no NOCLIP or SWIMMING. That leaves the destination's land permission, both
+	# side-wall rules, and IsNPCAtCoord over the object structs, which start at
+	# the player's own. can_object_walk_to() is those four tests.
+	if not can_object_walk_to(landing, boulder, direction):
+		return {}
+	boulder.cell = landing
+	# FIXED_FACING is set on the boulder's movement data, so InitStep skips the
+	# OBJECT_DIRECTION write and the sprite keeps facing down while it slides.
+	boulder.start_step(direction, STEP_FRAMES_BOULDER_PUSH)
+	_remember_object_position(boulder)
+	return {
+		"ok": false,
+		"kind": &"move",
+		"reason": &"blocked",
+		"boulder_pushed": {
+			"index": boulder.index,
+			"from_cell": landing - direction,
+			"to_cell": landing,
+			"direction": direction,
+		},
 	}
 
 
@@ -2880,6 +3036,7 @@ func _apply_map(
 	_pending_cut.clear()
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
+	_pending_strength.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -2923,6 +3080,7 @@ func reload_current_map() -> Dictionary:
 	_pending_cut.clear()
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
+	_pending_strength.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

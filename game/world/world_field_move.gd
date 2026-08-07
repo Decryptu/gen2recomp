@@ -4,24 +4,31 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## Cut, Surf and Whirlpool are resolved here. All three follow the shape
-## CutFunction defines: check the badge, then check the faced tile, then stage a
-## change the text acknowledge commits. Strength, Waterfall, Flash and Headbutt
-## are not resolved yet.
+## Cut, Surf, Strength and Whirlpool are resolved here. Cut, Surf and Whirlpool
+## follow the shape CutFunction defines: check the badge, then check the faced
+## tile, then stage a change the text acknowledge commits. Strength is the odd
+## one, see BADGE_PLAIN. Waterfall, Flash and Headbutt are not resolved yet.
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
 ## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
 ## knows these.
 const MOVE_CUT: int = 0x0F
 const MOVE_SURF: int = 0x39
+const MOVE_STRENGTH: int = 0x46
 const MOVE_WHIRLPOOL: int = 0xFA
 
-## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf
-## and WhirlpoolFunction's .TryWhirlpool, as source badge-order indices rather
-## than flag numbers, so Gen2WorldState.badge_flag() resolves them on either
-## profile: ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold/Silver,
-## ENGINE_FOGBADGE 30 and 29, ENGINE_GLACIERBADGE 33 and 32.
+## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
+## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
+## source badge-order indices rather than flag numbers, so
+## Gen2WorldState.badge_flag() resolves them on either profile:
+## ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold/Silver, ENGINE_PLAINBADGE
+## 29 and 28, ENGINE_FOGBADGE 30 and 29, ENGINE_GLACIERBADGE 33 and 32.
 const BADGE_HIVE: int = 1
+## .TryStrength is the whole gate: CheckBadge ENGINE_PLAINBADGE and nothing
+## else. It checks no tile, no block table and no player state, unlike the other
+## three, and its .AlreadyUsingStrength branch is marked unreferenced in both
+## pins, so an already-active flag is not a refusal either.
+const BADGE_PLAIN: int = 2
 const BADGE_FOG: int = 3
 const BADGE_GLACIER: int = 6
 
@@ -38,7 +45,7 @@ const MUSIC_SURF: int = 0x21
 ## Both pins ship the same rows, so this needs no profile split. IsFieldMove
 ## decides submenu membership from this list alone, so a move stops appearing
 ## the moment it leaves it.
-const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF, MOVE_WHIRLPOOL]
+const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
 ## the six block ($12, $1a); the four grass codes are LAND_TILE and cuttable

@@ -317,6 +317,18 @@ func test_forced_action_steps_down_off_doors_stairs_and_caves() -> void:
 		)
 
 
+## home/map_objects.asm's CheckPitTile is the two codes and nothing else, so the
+## neighbouring warp codes must not answer it even though is_warp_tile() takes
+## all of them.
+func test_pit_tiles_are_the_two_source_codes() -> void:
+	assert_true(Gen2WorldCollision.is_pit_tile(0x60))
+	assert_true(Gen2WorldCollision.is_pit_tile(0x68))
+	for code: int in [0x61, 0x67, 0x69, 0x70, 0x71, 0x7B, 0x00]:
+		assert_false(Gen2WorldCollision.is_pit_tile(code), "code $%02x" % code)
+	assert_true(Gen2WorldCollision.is_warp_tile(0x60))
+	assert_true(Gen2WorldCollision.is_warp_tile(0x68))
+
+
 func _assert_forced_walk(code: int, direction: Vector2i) -> void:
 	var forced: Dictionary = Gen2WorldCollision.forced_action(code)
 	if direction == Vector2i.ZERO:

@@ -264,9 +264,16 @@ const COLL_PIT_68: int = 0x68
 ## an ordinary floor tile is inert, which is what lets a player walk over
 ## Burned Tower B1F's (10,8) instead of being sent back upstairs.
 static func is_warp_tile(collision_code: int) -> bool:
-	if collision_code == COLL_PIT or collision_code == COLL_PIT_68:
+	if is_pit_tile(collision_code):
 		return true
 	return (collision_code & 0xF0) == HI_NYBBLE_WARPS
+
+
+## home/map_objects.asm's CheckPitTile, the two codes on their own. Read by
+## is_warp_tile() above and by MovementFunction_Strength, which stops a boulder
+## standing on one for good.
+static func is_pit_tile(collision_code: int) -> bool:
+	return collision_code == COLL_PIT or collision_code == COLL_PIT_68
 
 ## .water_table, indexed by a current code's low two bits. The source masks
 ## NUM_DIRECTIONS, not seven, so every code $30-$3f reaches this table.

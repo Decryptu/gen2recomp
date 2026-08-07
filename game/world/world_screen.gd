@@ -28,6 +28,9 @@ const SFX_CUT: int = 0x1E
 ## constants/sfx_constants.asm's SFX_SURF, which is what PlayWhirlpoolSound plays
 ## (engine/events/field_moves.asm); there is no whirlpool-specific effect.
 const SFX_WHIRLPOOL: int = 0x53
+## constants/sfx_constants.asm's SFX_STRENGTH, played by MovementFunction_Strength
+## as a pushed boulder starts moving, not by the menu that sets the flag.
+const SFX_STRENGTH: int = 0x1B
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -464,6 +467,14 @@ func move_player(direction: Vector2i) -> bool:
 		return false
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
+		## A push bumps the player and starts the boulder, so the step reports
+		## blocked while the map still changed. MovementFunction_Strength plays
+		## SFX_STRENGTH here, not the menu that set the flag.
+		if movement.has("boulder_pushed"):
+			_play_sfx(SFX_STRENGTH)
+			if _renderer != null:
+				_renderer.refresh()
+			_refresh_labels()
 		return false
 	## A whirlpool spins the player rather than moving them, so nothing a completed
 	## step owes applies: no warp, no encounter, no repel step.
@@ -712,6 +723,23 @@ func preview_whirlpool_use() -> void:
 		_acknowledge_field_move_text()
 		return
 	preview_whirlpool()
+	if _party_host != null:
+		_party_host.handle_key(KEY_SPACE)
+
+
+## And for Strength, which unlike the other three needs nothing in front of the
+## player: .TryStrength checks the badge and stops. To watch a boulder actually
+## move, open the scene on a map that has one and press a direction into it after
+## the second call; Cianwood Gym (22/5) and Ice Path B1F are the reachable ones.
+func preview_strength() -> void:
+	_preview_field_move(Gen2WorldFieldMove.MOVE_STRENGTH, Gen2WorldFieldMove.BADGE_PLAIN)
+
+
+func preview_strength_use() -> void:
+	if _field_move_text:
+		_acknowledge_field_move_text()
+		return
+	preview_strength()
 	if _party_host != null:
 		_party_host.handle_key(KEY_SPACE)
 
@@ -1341,6 +1369,16 @@ func _on_party_action(action: Dictionary) -> void:
 				_show_field_move_text(_surf_refusal(StringName(surf.get("reason", &""))))
 				return
 			_show_field_move_text("%s used SURF!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_STRENGTH:
+			var strength: Dictionary = _world.strength_request(
+				_party_species(int(action.get("slot", -1)))
+			)
+			if not bool(strength.get("ok", false)):
+				_show_field_move_text(
+					_strength_refusal(StringName(strength.get("reason", &"")))
+				)
+				return
+			_show_field_move_text("%s used STRENGTH!" % String(action.get("name", "")))
 		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
 			var whirlpool: Dictionary = _world.whirlpool_request()
 			if not bool(whirlpool.get("ok", false)):
@@ -1396,6 +1434,14 @@ func _whirlpool_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## .TryStrength's only refusal is CheckBadge's, since it checks nothing else;
+## anything past it is this project's own guard, not a cartridge branch.
+func _strength_refusal(reason: StringName) -> String:
+	if reason == &"badge_required":
+		return "Sorry! A new BADGE is required."
+	return "Can't use that here."
+
+
 func _show_field_move_text(text: String) -> void:
 	_field_move_text = true
 	if _text_box != null and _text_box.font != null:
@@ -1427,13 +1473,18 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_whirlpool().is_empty():
 		_commit_field_move(_world.complete_whirlpool(), "Whirlpool")
 		return
+	if not _world.pending_strength().is_empty():
+		_commit_field_move(_world.complete_strength(), "Strength")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
 
 ## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN, Whirlpool plays SFX_SURF and Surf
-## changes the music, so each commit reports its own audio; all three redraw,
-## because each changed what the map or the player looks like.
+## changes the music, so each commit reports its own audio. Strength is the one
+## that plays nothing: Script_UsedStrength has no PlaySFX, because SFX_STRENGTH
+## belongs to the boulder that moves later, not to the flag being set. All four
+## redraw anyway, since the party overlay closed over the map.
 func _commit_field_move(applied: Dictionary, label: String) -> void:
 	if bool(applied.get("ok", false)):
 		match StringName(applied.get("kind", &"")):
@@ -1441,6 +1492,8 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 				_play_current_map_music()
 			&"whirlpool_applied":
 				_play_sfx(SFX_WHIRLPOOL)
+			&"strength_applied":
+				pass
 			_:
 				_play_sfx(SFX_CUT)
 		if _renderer != null:
@@ -1767,12 +1820,31 @@ func _refresh_party_summary() -> void:
 		return
 	var has_pokerus: bool = false
 	var species: Array[int] = []
+	var moves: Array = []
+	var names: Array = []
 	for member: Variant in save.party:
 		if member is Gen2SaveMon:
-			if (int((member as Gen2SaveMon).pokerus) & 0x0F) != 0:
+			var mon: Gen2SaveMon = member as Gen2SaveMon
+			if (int(mon.pokerus) & 0x0F) != 0:
 				has_pokerus = true
-			species.append(int((member as Gen2SaveMon).species))
-	_world.set_party_summary(save.party.size(), has_pokerus, species)
+			species.append(int(mon.species))
+			# CheckPartyMove walks every slot's four move slots; zeroes are empty
+			# slots, not moves, so they are dropped rather than searched.
+			var mon_moves: Array = []
+			for move: int in mon.moves:
+				if move != 0:
+					mon_moves.append(move)
+			moves.append(mon_moves)
+			names.append(_mon_display_name(mon))
+	_world.set_party_summary(save.party.size(), has_pokerus, species, moves, names)
+
+
+## GetPartyNickname's answer for one slot, following the party screen's own rule:
+## the stored nickname, or the species name when the save carries none.
+func _mon_display_name(mon: Gen2SaveMon) -> String:
+	if not mon.nickname.is_empty():
+		return mon.nickname
+	return String(_data.species(mon.species).get("name", "")) if _data != null else ""
 
 
 func _refresh_labels() -> void:
