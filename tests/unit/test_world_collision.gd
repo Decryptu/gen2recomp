@@ -229,3 +229,20 @@ func test_side_wall_step_blocked_matches_the_leave_and_enter_rules() -> void:
 	# A zero or diagonal direction never blocks.
 	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, 0xB1, Vector2i.ZERO))
 	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, 0xB1, Vector2i(1, 1)))
+
+
+## engine/overworld/tile_events.asm's CheckCutCollision list against the
+## permission table those codes ride on: two of the six block, four are ordinary
+## ground, and only two of the six are used by any pinned tileset.
+func test_cuttable_codes_keep_the_permissions_cut_depends_on() -> void:
+	for code: int in [0x12, 0x1A]:
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WALL_TILE,
+			"cut tree $%02x" % code
+		)
+		assert_true(Gen2WorldCollision.talks(code), "cut tree $%02x" % code)
+	for code: int in [0x10, 0x14, 0x18, 0x1C]:
+		assert_eq(
+			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.LAND_TILE,
+			"grass $%02x" % code
+		)

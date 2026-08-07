@@ -21,6 +21,10 @@ const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 ## expects a runtime request to acknowledge; a hop is movement, not a script.
 ## _play_current_map_music() below is the precedent for this shape.
 const SFX_JUMP_OVER_LEDGE: int = 0x16
+## constants/sfx_constants.asm's SFX_PLACE_PUZZLE_PIECE_DOWN, played by
+## OWCutAnimation before its sprite animation. The animation itself is not
+## rendered here; the sound is.
+const SFX_CUT: int = 0x1E
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -51,6 +55,9 @@ var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
 var _party_host: Gen2PartyScreen = null
+## Whether a field-move message is on screen waiting for its acknowledge. The
+## world is idle while it is, the same way a script text pause holds it.
+var _field_move_text: bool = false
 ## Mirrors the source's wBattleMenuCursorPosition surviving a reopen.
 var _start_menu_cursor: int = 0
 var _trainer_approach: Dictionary = {}
@@ -269,6 +276,7 @@ func _objects_may_move() -> bool:
 	return _world != null \
 		and _battle_host == null and _service_host == null and _pc_host == null \
 		and _start_menu_host == null and _party_host == null \
+		and not _field_move_text \
 		and _trainer_approach.is_empty() \
 		and not _world.script_busy() \
 		and not _world.phone_ring_active() \
@@ -293,8 +301,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	if _party_host != null:
-		if key.keycode == KEY_ESCAPE:
-			_party_host.close_embedded()
+		_party_host.handle_key(key.keycode)
+		accept_event()
+		return
+	if _field_move_text:
+		if key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+			_acknowledge_field_move_text()
 		accept_event()
 		return
 	if _start_menu_host != null:
@@ -414,6 +426,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _renderer_input_free() -> bool:
 	return _world != null and _battle_host == null and _service_host == null \
 		and _pc_host == null and _start_menu_host == null and _party_host == null \
+		and not _field_move_text \
 		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
 		and not _world.fishing_busy() and not _world.script_input_waiting()
 
@@ -422,7 +435,7 @@ func _renderer_input_free() -> bool:
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
 		or _pc_host != null or _start_menu_host != null or _party_host != null \
-		or _world.phone_ring_active() \
+		or _field_move_text or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
 	var movement: Dictionary = _world.move_result(direction)
@@ -473,7 +486,7 @@ func move_player(direction: Vector2i) -> bool:
 func interact() -> bool:
 	if _world == null or _battle_host != null or _service_host != null \
 		or _pc_host != null or _start_menu_host != null or _party_host != null \
-		or _world.phone_ring_active() or _world.fishing_busy():
+		or _field_move_text or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
 	if results.is_empty():
@@ -604,6 +617,39 @@ func preview_script_event() -> void:
 				return
 	_script_prompt = "No active script at this map's event records"
 	_refresh_labels()
+
+
+## Public screenshot driver for the party submenu's field-move entry. Grants the
+## Hive Badge and teaches the first party member Cut, then injects that save so
+## persistence stays off, the way preview_party_transaction() does.
+func preview_field_move() -> void:
+	if _world == null or _data == null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Field move preview needs a party"
+		_refresh_labels()
+		return
+	(save.party[0] as Gen2SaveMon).moves[0] = Gen2WorldFieldMove.MOVE_CUT
+	_injected_save = save
+	_world.state.set_engine_flag(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_HIVE, Gen2WorldState.is_crystal_profile(_data)
+	))
+	_open_embedded_party()
+	if _party_host == null:
+		return
+	_party_host.handle_key(KEY_SPACE)
+
+
+## The rest of that sequence, one step per call: the first chooses the submenu's
+## Cut entry and shows its message, the second acknowledges it and commits.
+func preview_field_move_use() -> void:
+	if _field_move_text:
+		_acknowledge_field_move_text()
+		return
+	preview_field_move()
+	if _party_host != null:
+		_party_host.handle_key(KEY_SPACE)
 
 
 ## Public screenshot driver for the scene-free party item transaction. It uses a
@@ -1059,6 +1105,7 @@ func _on_pc_closed(result: Dictionary) -> void:
 func _open_start_menu() -> void:
 	if _start_menu_host != null or _party_host != null or _service_host != null \
 		or _pc_host != null or _battle_host != null or _world == null or _data == null \
+		or _field_move_text \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
 		or _world.phone_ring_active() or _world.fishing_busy():
 		return
@@ -1108,6 +1155,14 @@ func _on_start_menu_closed() -> void:
 	_refresh_labels()
 
 
+## The save the embedded party view shows: the injected or selected one, or a
+## development party when neither exists.
+func _embedded_party_save() -> Gen2SaveData:
+	var save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	return save if save != null else Gen2SaveStore.create_development_save(_data, 0)
+
+
 func _open_embedded_party() -> void:
 	if _party_host != null or _world == null or _data == null:
 		return
@@ -1116,9 +1171,7 @@ func _open_embedded_party() -> void:
 		_script_prompt = "Party scene unavailable"
 		_refresh_labels()
 		return
-	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
-	if save == null:
-		save = Gen2SaveStore.create_development_save(_data, 0)
+	var save: Gen2SaveData = _embedded_party_save()
 	if save == null:
 		host.queue_free()
 		_script_prompt = "Party requires a validated save"
@@ -1130,6 +1183,7 @@ func _open_embedded_party() -> void:
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
 	host.closed.connect(_on_party_closed)
+	host.action_chosen.connect(_on_party_action)
 	_party_host = host
 	_script_prompt = "Party open"
 	_refresh_labels()
@@ -1141,6 +1195,73 @@ func _on_party_closed(_result: Dictionary) -> void:
 	if host != null:
 		host.queue_free()
 	_script_prompt = "Party closed"
+	_refresh_labels()
+
+
+## MonMenu_Cut's shape: the party menu closes first, then CutFunction runs and
+## either queues Script_Cut or pushes its own refusal text. Both refusals and
+## the success message go through the hardware text box, and the block change
+## waits for the acknowledge, matching Script_Cut showing UseCutText before it
+## calls CutDownTreeOrGrass.
+func _on_party_action(action: Dictionary) -> void:
+	var host: Gen2PartyScreen = _party_host
+	_party_host = null
+	if host != null:
+		host.queue_free()
+	if _world == null or StringName(action.get("kind", &"")) != &"field_move":
+		_refresh_labels()
+		return
+	if int(action.get("move", 0)) != Gen2WorldFieldMove.MOVE_CUT:
+		_show_field_move_text("Can't use that here.")
+		return
+	var request: Dictionary = _world.cut_request()
+	if not bool(request.get("ok", false)):
+		_show_field_move_text(_cut_refusal(StringName(request.get("reason", &""))))
+		return
+	_show_field_move_text("%s used CUT!" % String(action.get("name", "")))
+
+
+## engine/events/overworld.asm's two refusal texts, verbatim from
+## data/text/common_2.asm. A reason without a source text falls back to
+## _CantUseItemText, which is the source's own generic field-move refusal.
+func _cut_refusal(reason: StringName) -> String:
+	match reason:
+		&"badge_required":
+			return "Sorry! A new BADGE is required."
+		&"nothing_to_cut":
+			return "There's nothing to CUT here."
+	return "Can't use that here."
+
+
+func _show_field_move_text(text: String) -> void:
+	_field_move_text = true
+	if _text_box != null and _text_box.font != null:
+		_text_box.show_text(text)
+		_text_box.visible = true
+	_script_prompt = "Space/Enter: continue"
+	_refresh_labels()
+
+
+## The acknowledge that closes a field-move message. A staged Cut commits here
+## rather than when it was resolved, because Script_Cut only reaches
+## CutDownTreeOrGrass after UseCutText. A refusal has nothing staged and just
+## closes.
+func _acknowledge_field_move_text() -> void:
+	_field_move_text = false
+	if _text_box != null:
+		_text_box.visible = false
+	if _world == null or _world.pending_cut().is_empty():
+		_script_prompt = ""
+		_refresh_labels()
+		return
+	var applied: Dictionary = _world.complete_cut()
+	if bool(applied.get("ok", false)):
+		_play_sfx(SFX_CUT)
+		if _renderer != null:
+			_renderer.refresh()
+		_script_prompt = "Cut"
+	else:
+		_script_prompt = "Cut failed: %s" % String(applied.get("reason", "unknown"))
 	_refresh_labels()
 
 
@@ -1419,9 +1540,13 @@ func _play_current_map_music() -> void:
 
 
 func _play_ledge_hop_sfx() -> void:
+	_play_sfx(SFX_JUMP_OVER_LEDGE)
+
+
+func _play_sfx(index: int) -> void:
 	if _audio_player == null or _data == null:
 		return
-	var record: Dictionary = _data.world_audio(&"sfx", SFX_JUMP_OVER_LEDGE)
+	var record: Dictionary = _data.world_audio(&"sfx", index)
 	if record.is_empty():
 		return
 	_audio_player.play_record(record, &"sound", _audio_assets())

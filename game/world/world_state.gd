@@ -272,6 +272,15 @@ func bargain_merchant_closed(crystal: bool = true) -> bool:
 	return is_engine_flag_active(_merchant_closed_flag(crystal))
 
 
+## The engine flag one badge occupies on the table [param crystal] selects,
+## indexed in source badge order: 0 is ZEPHYRBADGE and 15 EARTHBADGE. Out of
+## range answers -1, which is_engine_flag_active() reads as inactive. This is
+## what a CheckBadge caller uses, so no caller indexes the two arrays itself.
+static func badge_flag(badge: int, crystal: bool = true) -> int:
+	var flags: Array[int] = BADGE_ENGINE_FLAGS if crystal else BADGE_ENGINE_FLAGS_GOLD_SILVER
+	return flags[badge] if badge >= 0 and badge < flags.size() else -1
+
+
 ## Mirrors _GetVarAction's .CountBadges: a popcount over both badge bytes.
 func badge_count(crystal: bool = true) -> int:
 	var count: int = 0

@@ -76,6 +76,10 @@ var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
 var _variable_sprites: Dictionary = {}
 var _block_overrides: Dictionary = {}
+## A resolved but uncommitted Cut, held between cut_request() and complete_cut()
+## the way Script_Cut holds wCutWhirlpool* across its writetext. Cleared with the
+## block overrides, since the block it names belongs to the loaded map.
+var _pending_cut: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -390,6 +394,79 @@ func advance_fishing() -> Dictionary:
 
 func cancel_fishing() -> Dictionary:
 	return _fishing.cancel()
+
+
+## engine/events/overworld.asm's CutFunction, staged rather than applied.
+##
+## The source order is load bearing: .CheckAble tests ENGINE_HIVEBADGE before it
+## ever looks at the tile, so a player without the badge is told about the badge
+## even while facing a cuttable tree. A match records the block, replacement and
+## animation the way CheckMapForSomethingToCut fills wCutWhirlpool*; nothing is
+## written until complete_cut(), because Script_Cut shows its text first and only
+## then calls CutDownTreeOrGrass.
+func cut_request() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _cut_failure(&"missing_map")
+	if not _pending_cut.is_empty():
+		return _cut_failure(&"cut_in_progress")
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	if not state.is_engine_flag_active(
+		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_HIVE, crystal)
+	):
+		return _cut_failure(&"badge_required")
+	var target: Vector2i = facing_cell()
+	if not Gen2WorldFieldMove.cuttable(collision_code_at(target)):
+		return _cut_failure(&"nothing_to_cut")
+	var block_cell: Vector2i = _script_block_cell(target)
+	var replacement: Dictionary = Gen2WorldFieldMove.cut_replacement(
+		current_map.tileset, block_at(block_cell.x, block_cell.y), crystal
+	)
+	if not bool(replacement.get("ok", false)):
+		return _cut_failure(&"nothing_to_cut")
+	_pending_cut = {
+		"ok": true,
+		"kind": &"cut_requested",
+		"move": Gen2WorldFieldMove.MOVE_CUT,
+		"cell": target,
+		"block_cell": block_cell,
+		"block": int(replacement["block"]),
+		"animation": int(replacement["animation"]),
+	}
+	return _pending_cut.duplicate(true)
+
+
+## Empty until cut_request() succeeds. A host shows its text while this is set.
+func pending_cut() -> Dictionary:
+	return _pending_cut.duplicate(true)
+
+
+## CutDownTreeOrGrass: writes the replacement into the loaded map's block grid.
+## change_block() already re-resolves collision through the tileset and drops the
+## override on a map change or reload, which is the cartridge's own behavior,
+## since the routine writes wOverworldMapBlocks and a map load re-reads the
+## block data from ROM. The tree regrows on the next visit.
+func complete_cut() -> Dictionary:
+	if _pending_cut.is_empty():
+		return _cut_failure(&"no_pending_cut")
+	var request: Dictionary = _pending_cut
+	_pending_cut = {}
+	var block_cell: Vector2i = request["block_cell"]
+	var changed: Dictionary = change_block(block_cell.x, block_cell.y, int(request["block"]))
+	if not bool(changed.get("ok", false)):
+		return changed
+	return {
+		"ok": true,
+		"kind": &"cut_applied",
+		"move": int(request["move"]),
+		"cell": request["cell"],
+		"block_cell": block_cell,
+		"block": int(request["block"]),
+		"animation": int(request["animation"]),
+	}
+
+
+static func _cut_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"cut_failed", "reason": reason}
 
 
 ## Rolls an encounter from the current map. Auto mode preserves the existing
@@ -2500,6 +2577,7 @@ func _apply_map(
 	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
 ) -> void:
 	_block_overrides.clear()
+	_pending_cut.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -2539,6 +2617,7 @@ func reload_current_map() -> Dictionary:
 	if current_map == null or current_tileset == null:
 		return {"ok": false, "reason": &"missing_map"}
 	_block_overrides.clear()
+	_pending_cut.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
