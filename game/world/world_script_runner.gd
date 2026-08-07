@@ -79,6 +79,12 @@ const SPECIAL_RANDOM_PHONE_MON: int = 93
 const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
 const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
 const SPECIAL_FADE_OUT_MUSIC: int = 106
+const SPECIAL_INIT_ROAM_MONS: int = 105
+## wBattleResult, which startbattle copies into wScriptVar
+## (constants/battle_constants.asm).
+const BATTLE_RESULT_WIN: int = 0
+const BATTLE_RESULT_LOSE: int = 1
+const BATTLE_RESULT_DRAW: int = 2
 const TEXT_STRING_BUFFER: int = 0x14
 const WEEKDAY_NAMES: Array[StringName] = [
 	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
@@ -416,7 +422,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		_completed = true
 		return _recovered_result(recovery as Dictionary)
 	if outcome == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
-		_script_value = 1
+		_script_value = BATTLE_RESULT_WIN
 		_events.append({
 			"type": &"battle_captured",
 			"outcome": outcome,
@@ -429,7 +435,11 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		return _fail(StringName("battle_%s" % outcome), result)
 
 	_stage_just_battled(true)
-	_script_value = 1
+	## Script_startbattle leaves `wBattleResult & ~BATTLERESULT_BITMASK` in
+	## wScriptVar, and WIN is zero there, so the eight corpus scripts that put
+	## an `iftrue` straight after `startbattle` are asking "did I not win".
+	## Catching masks its own bit off and also reads as WIN.
+	_script_value = BATTLE_RESULT_WIN
 	_events.append({
 		"type": &"battle_completed",
 		"outcome": outcome,
@@ -985,6 +995,12 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 					"ok": false, "reason": &"missing_deferred_script",
 					"bank": bank, "address": int(command.get("address", 0)),
 				}
+		0x8D:
+			## Script_warpcheck runs WarpCheck against the cell the player is
+			## standing on, so the destination is the world's to resolve, not
+			## the script's. Burned Tower's rival scene opens the hole under the
+			## player and then relies on this to drop them through it.
+			_emit_runtime_event(&"warp_check_requested", {})
 		0x93:
 			return _stage_runtime_request(&"mart_requested", {
 				"dialog": int(command.get("value", 0)),
@@ -1045,7 +1061,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			return _stage_warp_facing_request(command)
 	var handled_sources: Array = [
 		0x55, 0x56, 0x57, 0x58, 0x5B, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
-		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x98,
+		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x8D, 0x98,
 		0x8C,
 		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
 	]
@@ -1468,12 +1484,26 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
-		46, 48, 50, 51, 157:
+		46, 48, 50, 51, 94, 157, 158:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
 			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
-			## `BattleTowerFade` sits at 47, so it needs no profile split.
+			## `BattleTowerFade` sits at 47, so it needs no profile split;
+			## `LoadUsedSpritesGFX` (94) and `RefreshSprites` (158) reload the
+			## sprite set a `variablesprite` just changed.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
+		SPECIAL_INIT_ROAM_MONS:
+			## InitRoamMons seeds the roam structs with Raikou and Entei at
+			## level 40 on their starting maps. Gen2WorldAPI.open() already
+			## seeds the same imported records, and ensure_roaming_mons() keeps
+			## positions a player has already moved, so this reports rather than
+			## resetting a beast that is already loose.
+			if state != null and data != null:
+				state.ensure_roaming_mons(data.world_roaming_mons())
+			_emit_runtime_event(&"roaming_mons_initialized", {
+				"special": special,
+				"count": state.roaming_mons().size() if state != null else 0,
+			})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
 				"special": special, "kind": &"activate_fishing_swarm",

@@ -1812,6 +1812,18 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 			continue
 		var event: Dictionary = raw_event as Dictionary
 		var event_type: StringName = StringName(event.get("type", &""))
+		if event_type == &"warp_check_requested":
+			## Script_warpcheck asks whether the player is standing on a warp
+			## and takes it if so, which is how the Burned Tower rival scene
+			## drops the player through the hole it just opened. A cell with no
+			## warp answers nothing, exactly as WarpCheck's carry does.
+			var checked: Dictionary = try_warp()
+			generated.append({
+				"type": &"warp_check",
+				"taken": bool(checked.get("ok", false)),
+				"transition": checked.duplicate(true),
+			})
+			continue
 		if event_type == &"player_movement_requested":
 			generated.append_array(_apply_player_movement(event))
 			continue
@@ -2223,6 +2235,11 @@ func _apply_script_warp(request: Dictionary) -> Dictionary:
 func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	var source_warp: Dictionary = warp_at(cell)
 	if source_warp.is_empty():
+		return {}
+	## CheckWarpCollision gates every warp on the tile's own code, so a
+	## warp_event sitting on ordinary floor never fires. Burned Tower B1F's
+	## (10,8) is one, and the walk to the beasts crosses it.
+	if not Gen2WorldCollision.is_warp_tile(collision_code_at(cell)):
 		return {}
 	var target_group: int = int(source_warp.get("map_group", -1))
 	var target_number: int = int(source_warp.get("map_number", -1))

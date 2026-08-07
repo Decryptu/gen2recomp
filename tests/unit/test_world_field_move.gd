@@ -40,7 +40,13 @@ const WATER_CELL: Vector2i = Vector2i(6, 3)
 const SHORE_CELL: Vector2i = Vector2i(6, 2)
 const WALLED_WATER_CELL: Vector2i = Vector2i(0, 7)
 const WALLED_SHORE_CELL: Vector2i = Vector2i(0, 6)
+## CheckWarpCollision only fires a warp from a warp tile, so the fixture's
+## warp sources carry COLL_PIT. The second map needs a land one because no
+## warp code is a WATER_TILE, which is why the cartridge never warps out of
+## open water.
+const TRANSITION_PIT_CELL: Vector2i = Vector2i(1, 1)
 const COLL_WATER: int = 0x29
+const COLL_PIT: int = 0x60
 const COLL_DOWN_WALL: int = 0xB3
 
 ## A whirlpool in block (3,3)'s bottom-left quadrant, with the water it sits in
@@ -149,6 +155,17 @@ func _map(number: int, tileset: int) -> Dictionary:
 	# transition can land the player on either kind of tile. Destinations are
 	# one-based, so both point at the other map's only warp.
 	var warp_cell: Vector2i = SHORE_CELL if number == 1 else WATER_CELL
+	collision[warp_cell.y * 8 + warp_cell.x] = COLL_PIT if number == 1 else COLL_WATER
+	collision[TRANSITION_PIT_CELL.y * 8 + TRANSITION_PIT_CELL.x] = COLL_PIT
+	var warps: Array = [{
+		"x": warp_cell.x, "y": warp_cell.y, "destination": 1,
+		"map_group": 1, "map_number": 2 if number == 1 else 1,
+	}]
+	if number == 2:
+		warps.append({
+			"x": TRANSITION_PIT_CELL.x, "y": TRANSITION_PIT_CELL.y,
+			"destination": 1, "map_group": 1, "map_number": 1,
+		})
 	return {
 		"group": 1,
 		"number": number,
@@ -159,10 +176,7 @@ func _map(number: int, tileset: int) -> Dictionary:
 		"collision": collision,
 		"collision_width": 8,
 		"collision_height": 8,
-		"events": {"warps": [{
-			"x": warp_cell.x, "y": warp_cell.y, "destination": 1,
-			"map_group": 1, "map_number": 2 if number == 1 else 1,
-		}]},
+		"events": {"warps": warps},
 	}
 
 
@@ -369,6 +383,7 @@ func test_a_map_transition_rederives_the_player_state_from_the_landing_cell() ->
 	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
 	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_SURF)
 
+	world.player_cell = TRANSITION_PIT_CELL
 	var onto_land: Dictionary = world.try_warp()
 	assert_true(bool(onto_land.get("ok", false)), JSON.stringify(onto_land))
 	assert_eq(world.player_cell, SHORE_CELL)

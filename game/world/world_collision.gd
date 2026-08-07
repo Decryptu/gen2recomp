@@ -255,6 +255,18 @@ const COLL_DOOR: int = 0x71
 const COLL_DOOR_79: int = 0x79
 const COLL_STAIRCASE: int = 0x7A
 const COLL_CAVE: int = 0x7B
+const COLL_PIT: int = 0x60
+const COLL_PIT_68: int = 0x68
+
+
+## engine/overworld/tile_events.asm's CheckWarpCollision: a warp fires on the
+## two pit codes or on the whole $70 nybble, and nowhere else. A warp_event on
+## an ordinary floor tile is inert, which is what lets a player walk over
+## Burned Tower B1F's (10,8) instead of being sent back upstairs.
+static func is_warp_tile(collision_code: int) -> bool:
+	if collision_code == COLL_PIT or collision_code == COLL_PIT_68:
+		return true
+	return (collision_code & 0xF0) == HI_NYBBLE_WARPS
 
 ## .water_table, indexed by a current code's low two bits. The source masks
 ## NUM_DIRECTIONS, not seven, so every code $30-$3f reaches this table.
