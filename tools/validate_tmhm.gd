@@ -26,8 +26,8 @@ const EXPECTED_ENTRIES: Dictionary = {
 	&"crystal": 60,
 }
 
-## The four HM moves this project acts on, at their real TMNUMs. HM01 is 51, so
-## these also pin where the TM run ends and the HM run starts.
+## Every HM move at its real TMNUM. HM01 is 51, so these also pin where the TM
+## run ends and the HM run starts.
 const EXPECTED_HM_ROWS: Dictionary = {
 	51: 0x0F,  # HM01 CUT
 	52: 0x13,  # HM02 FLY
@@ -62,8 +62,39 @@ func _initialize() -> void:
 			continue
 		_verify_table(game_id, data)
 		_verify_item_numbers(game_id, data)
+		_verify_forget_move(game_id, data)
 		_census(game_id, data)
 	_finish()
+
+
+## home/hm_moves.asm's IsHMMove against the cartridge's own HM rows.
+##
+## The two lists are separate in the source and could drift: IsHMMove is a
+## hand-written array, TMHMMoves rows 51 to 57 are the items. ForgetMove reads
+## the first, so this checks they name the same seven moves in each real cache,
+## and that each resolves to a move the cache actually has.
+func _verify_forget_move(game_id: StringName, data: GameData) -> void:
+	var from_table: Dictionary = {}
+	for number: int in EXPECTED_HM_ROWS:
+		from_table[data.tmhm_move(number)] = true
+	_check(
+		Gen2MoveForget.HM_MOVES.size() == from_table.size(),
+		"%s: IsHMMove lists %d moves, TMHMMoves has %d HM rows." % [
+			game_id, Gen2MoveForget.HM_MOVES.size(), from_table.size(),
+		]
+	)
+	for move: int in Gen2MoveForget.HM_MOVES:
+		_check(
+			from_table.has(move),
+			"%s: IsHMMove names $%02X, which is not one of the cartridge's HM rows." % [
+				game_id, move,
+			]
+		)
+		_check(
+			not data.move(move).is_empty(),
+			"%s: IsHMMove names $%02X, which the move table does not have." % [game_id, move]
+		)
+	print("%s: IsHMMove's %d moves match the HM rows." % [game_id, Gen2MoveForget.HM_MOVES.size()])
 
 
 func _verify_table(game_id: StringName, data: GameData) -> void:

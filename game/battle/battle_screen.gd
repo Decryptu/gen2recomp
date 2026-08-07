@@ -94,6 +94,15 @@ var _capture_messages: Array[String] = []
 var _capture_terminal: bool = false
 var _capture_result: Dictionary = {}
 
+## Where a level-up's move offer has got to, following LearnMove and ForgetMove
+## (engine/pokemon/learn.asm): [code]&"ask"[/code] is AskForgetMoveText's yes/no,
+## [code]&"list"[/code] ForgetMove's own .loop, [code]&"stop"[/code]
+## LearnMove.cancel's StopLearningMoveText. Empty when nothing is pending.
+var _forget_stage: StringName = &""
+var _forget_moves: Array = []
+var _forget_cursor: int = 0
+var _forget_confirm_cursor: int = 0
+
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
 ## flags of its own to read: it falls back to [method _random_slot], same as
@@ -684,10 +693,14 @@ func _hurt(mon: Gen2BattleMon) -> void:
 func take_turn() -> void:
 	if _battle == null or _battle.is_over() or not _pending.is_empty():
 		return
+	## An unanswered move offer stops everything, the way an unanswered
+	## replacement does: KEY_A reaches here without going through
+	## [method advance].
+	if _battle.awaiting_move_learn():
+		return
 	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
 	_player_turns_taken += 1
 	_enemy_turns_taken += 1
-	_auto_decline_move_learns()
 	_show_next_event()
 
 
@@ -721,23 +734,146 @@ func _enemy_slot() -> int:
 func switch_player() -> void:
 	if _battle == null or _battle.is_over() or not _pending.is_empty():
 		return
+	if _battle.awaiting_move_learn():
+		return
 	var next: int = _next_healthy(Gen2Battle.PLAYER)
 	if next < 0:
 		return
 	_pending = _battle.take_actions(Gen2Battle.switch_to(next), Gen2Battle.use_move(0))
-	_auto_decline_move_learns()
 	_show_next_event()
 
 
-## No menu exists yet to ask which move to forget, the same gap
-## [method _random_slot] fills for which move to use, so a pending offer is
-## declined automatically and an undriven battle does not stop. [Gen2Battle]
-## still exposes the real question through
-## [method Gen2Battle.must_learn_move].
-func _auto_decline_move_learns() -> void:
-	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
-		while _battle.must_learn_move(side):
-			_pending.append_array(_battle.decline_move(side))
+## Opens LearnMove's full-slot branch, or keeps it open. Answered through
+## [method _unhandled_key_input], the same way capture ball selection is.
+##
+## Only the player side is ever queued
+## ([method Gen2Battle._offer_moves_learned_at]), so there is one stage rather
+## than one per side.
+func _open_move_learn() -> bool:
+	if _battle == null:
+		return false
+	if _forget_stage == &"":
+		if not _battle.must_learn_move(Gen2Battle.PLAYER):
+			return false
+		var offer: Dictionary = _battle.pending_learn(Gen2Battle.PLAYER)
+		var learner: Gen2BattleMon = _battle.party(Gen2Battle.PLAYER).at(int(offer["index"]))
+		if learner == null:
+			return false
+		_forget_moves = Gen2MoveForget.options(_data, learner.moves)
+		if _forget_moves.is_empty():
+			return false
+		_forget_cursor = 0
+		_forget_confirm_cursor = 0
+		_show_forget_stage(&"ask")
+	return true
+
+
+func _show_forget_stage(stage: StringName) -> void:
+	_forget_stage = stage
+	_forget_confirm_cursor = 0
+	if stage == &"list":
+		_show_forget_list()
+	else:
+		_show_forget_confirm()
+
+
+## The two yes/no boxes, which open on YES the way YesNoBox does.
+func _show_forget_confirm() -> void:
+	show_message("%s %s Left/Right: move, Space: choose" % [
+		_forget_prompt_text(),
+		">YES  NO" if _forget_confirm_cursor == 0 else " YES >NO",
+	])
+
+
+func _show_forget_list() -> void:
+	var names: PackedStringArray = []
+	for index: int in _forget_moves.size():
+		var entry: Dictionary = _forget_moves[index]
+		var name: String = String(entry.get("name", ""))
+		names.append("[%s]" % name if index == _forget_cursor else name)
+	show_message("%s %s Up/Down: move, Space: forget, B: back" % [
+		Gen2MoveForget.which_text(), " ".join(names),
+	])
+
+
+## The offer's own name fields, which [method Gen2Battle.pending_learn] carries
+## so neither is re-derived from a party that may already have changed.
+func _forget_move_name() -> String:
+	var offer: Dictionary = _battle.pending_learn(Gen2Battle.PLAYER)
+	return String(_data.move(int(offer.get("move", 0))).get("name", ""))
+
+
+func _forget_learner_name() -> String:
+	var offer: Dictionary = _battle.pending_learn(Gen2Battle.PLAYER)
+	return _name_of(int(offer.get("species", 0)))
+
+
+## The yes/no boxes and the list, in LearnMove's own order. An HM row prints
+## MoveCantForgetHMText and leaves the list open, since .hmmove is `jr .loop`.
+func _answer_forget(keycode: int) -> void:
+	## AskForgetMoveText is three paragraphs, so the box still has pages to turn.
+	## A confirm reveals and pages first, the way [method advance] does, rather
+	## than answering a question the player has not finished reading.
+	if keycode in [KEY_SPACE, KEY_ENTER] and _box != null and _box.advance():
+		return
+	match _forget_stage:
+		&"ask", &"stop":
+			match keycode:
+				KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN:
+					_forget_confirm_cursor = 1 - _forget_confirm_cursor
+					_show_forget_confirm()
+				KEY_SPACE, KEY_ENTER:
+					_confirm_forget_stage()
+		&"list":
+			match keycode:
+				KEY_UP:
+					_forget_cursor = wrapi(_forget_cursor - 1, 0, _forget_moves.size())
+					_show_forget_list()
+				KEY_DOWN:
+					_forget_cursor = wrapi(_forget_cursor + 1, 0, _forget_moves.size())
+					_show_forget_list()
+				KEY_SPACE, KEY_ENTER:
+					_confirm_forget_slot()
+				KEY_ESCAPE, KEY_B:
+					_show_forget_stage(&"stop")
+
+
+func _forget_prompt_text() -> String:
+	if _forget_stage == &"stop":
+		return Gen2MoveForget.stop_text(_forget_move_name())
+	return Gen2MoveForget.ask_text(_forget_learner_name(), _forget_move_name())
+
+
+func _confirm_forget_stage() -> void:
+	var yes: bool = _forget_confirm_cursor == 0
+	if _forget_stage == &"ask":
+		# No is YesNoBox's carry, which is LearnMove.cancel.
+		_show_forget_stage(&"list" if yes else &"stop")
+		return
+	if not yes:
+		# `jp .loop` reaches ForgetMove's ask again.
+		_show_forget_stage(&"ask")
+		return
+	_forget_stage = &""
+	_pending = _battle.decline_move(Gen2Battle.PLAYER)
+	_show_next_event()
+
+
+func _confirm_forget_slot() -> void:
+	if _forget_cursor < 0 or _forget_cursor >= _forget_moves.size():
+		return
+	var entry: Dictionary = _forget_moves[_forget_cursor]
+	if not bool(entry.get("forgettable", false)):
+		show_message("%s %s" % [
+			Gen2MoveForget.cant_forget_hm_text(), Gen2MoveForget.which_text(),
+		])
+		return
+	var events: Array = _battle.learn_move(Gen2Battle.PLAYER, int(entry.get("slot", -1)))
+	if events.is_empty():
+		return
+	_forget_stage = &""
+	_pending = events
+	_show_next_event()
 
 
 ## What a button press does. Finishes the current message if it is still
@@ -765,6 +901,10 @@ func advance() -> void:
 		return
 	if not _pending.is_empty():
 		_show_next_event()
+		return
+	## LearnMove runs inside the experience handler, before the loop asks for a
+	## replacement, so the offer is answered first.
+	if _open_move_learn():
 		return
 	if _replace_the_fallen():
 		return
@@ -1161,6 +1301,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 	var key: InputEventKey = event as InputEventKey
 	if key == null:
+		return
+
+	if _forget_stage != &"":
+		_answer_forget(key.keycode)
+		accept_event()
 		return
 
 	if _capture_selecting:

@@ -197,7 +197,7 @@ Headless tools, all against a real imported cache:
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |
-| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, and the whole species compatibility census, in all three games |
+| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction

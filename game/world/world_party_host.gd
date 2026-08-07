@@ -240,9 +240,14 @@ static func use_item(
 ##
 ## The refusal order is the source's. CanLearnTMHMMove comes first, then
 ## KnowsMove, then LearnMove's own search for an empty slot; each answers before
-## anything is written. A full moveset is where the source opens ForgetMove,
-## which does not exist here, so it is a typed refusal rather than an invented
-## replacement.
+## anything is written.
+##
+## A full moveset is where LearnMove reaches ForgetMove, which is a menu, so this
+## is called twice: once with [param forget_slot] left at -1, which is what runs
+## the two compatibility checks and answers `moveset_full` having written
+## nothing, and again with the slot the player gave up. An empty slot always
+## wins over a passed [param forget_slot], because LearnMove.loop only reaches
+## ForgetMove when its own scan finds no zero.
 ##
 ## An HM is not consumed: TeachTMHM returns straight after IsHM, so it skips both
 ## ConsumeTM and the happiness change. The happiness change a TM does make is a
@@ -252,6 +257,7 @@ static func teach_tm_hm(
 	save: Gen2SaveData,
 	item: int,
 	party_index: int,
+	forget_slot: int = -1,
 	persist: bool = true
 ) -> Dictionary:
 	if world == null or save == null or world.data == null:
@@ -275,8 +281,20 @@ static func teach_tm_hm(
 	if Gen2WorldTMHM.knows_move(mon.moves, move):
 		return _failure(&"already_knows_move", {"move": move})
 	var slot: int = Gen2WorldTMHM.first_empty_slot(mon.moves)
+	var forgot: int = 0
 	if slot < 0:
-		return _failure(&"moveset_full", {"party_index": party_index, "move": move})
+		# ForgetMove's own refusals, answering before the candidate save is built
+		# the way every refusal above them does.
+		if forget_slot < 0:
+			return _failure(&"moveset_full", {
+				"party_index": party_index, "move": move, "moves": mon.moves.duplicate(),
+			})
+		if forget_slot >= mon.moves.size():
+			return _failure(&"invalid_forget_slot", {"forget_slot": forget_slot})
+		forgot = int(mon.moves[forget_slot])
+		if Gen2MoveForget.is_hm_move(forgot):
+			return _failure(&"cannot_forget_hm", {"forget_slot": forget_slot, "forgot": forgot})
+		slot = forget_slot
 
 	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
 	if not bool(validation.get("ok", false)):
@@ -315,6 +333,7 @@ static func teach_tm_hm(
 		"party_index": party_index,
 		"move": move,
 		"slot": slot,
+		"forgot": forgot,
 		"pp": learner.pp[slot],
 		"consumed": consumed,
 	}

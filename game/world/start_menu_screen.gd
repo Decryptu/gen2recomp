@@ -16,7 +16,11 @@ signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
 
-enum Mode { LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET, PACK_RESULT, SAVE_CONFIRM }
+enum Mode {
+	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
+	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
+	PACK_RESULT, SAVE_CONFIRM,
+}
 
 ## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
 const OAK_TEXT: String = "OAK: This isn't the time to use that!"
@@ -53,6 +57,14 @@ var _pack_result_ok: bool = false
 var _teach_prompt: Dictionary = {}
 var _teach_cursor: int = 0
 var _teaching: bool = false
+
+## ForgetMove's list and the two yes/no boxes around it. The party index is held
+## because the second teach_tm_hm() call has to name the same Pokémon the first
+## one refused.
+var _forget_moves: Array = []
+var _forget_cursor: int = 0
+var _forget_party_index: int = -1
+var _forget_confirm_cursor: int = 0
 
 var _save_cursor: int = 0
 var _save_result_shown: bool = false
@@ -153,6 +165,21 @@ func _move(direction: Vector2i) -> void:
 			if direction.y != 0 or direction.x != 0:
 				_teach_cursor = 1 - _teach_cursor
 				_render_teach()
+		Mode.PACK_FORGET_ASK:
+			if direction.y != 0 or direction.x != 0:
+				_forget_confirm_cursor = 1 - _forget_confirm_cursor
+				_render_forget_ask()
+		Mode.PACK_FORGET:
+			## w2DMenuNumCols is 1, so only vertical input moves the move list.
+			if direction.y != 0 and not _forget_moves.is_empty():
+				_forget_cursor = wrapi(
+					_forget_cursor + signi(direction.y), 0, _forget_moves.size()
+				)
+				_render_forget_list()
+		Mode.PACK_STOP_LEARNING:
+			if direction.y != 0 or direction.x != 0:
+				_forget_confirm_cursor = 1 - _forget_confirm_cursor
+				_render_stop_learning()
 		Mode.PACK_TARGET:
 			if direction.y != 0 and not _party_targets().is_empty():
 				_target_cursor = wrapi(
@@ -176,6 +203,12 @@ func _confirm() -> void:
 			_confirm_item_action()
 		Mode.PACK_TEACH:
 			_confirm_teach()
+		Mode.PACK_FORGET_ASK:
+			_confirm_forget_ask()
+		Mode.PACK_FORGET:
+			_confirm_forget()
+		Mode.PACK_STOP_LEARNING:
+			_confirm_stop_learning()
 		Mode.PACK_TARGET:
 			if _teaching:
 				_teach_selected_item(_target_cursor)
@@ -195,6 +228,13 @@ func _cancel() -> void:
 			_open_list_mode()
 		Mode.PACK_ITEM, Mode.PACK_RESULT, Mode.PACK_TEACH:
 			_open_pack_mode(false)
+		## B at ForgetMove's ask is YesNoBox's no, and B in the move list is its
+		## own .cancel's scf. Both are the carry LearnMove.cancel tests.
+		Mode.PACK_FORGET_ASK, Mode.PACK_FORGET:
+			_open_stop_learning()
+		## No to "Stop learning?" is `jp .loop`, back to ForgetMove's ask.
+		Mode.PACK_STOP_LEARNING:
+			_open_forget_ask()
 		Mode.PACK_TARGET:
 			_open_item_mode()
 		Mode.SAVE_CONFIRM:
@@ -435,15 +475,124 @@ func _teach_selected_item(party_index: int) -> void:
 		return
 	var item: int = int(_teach_prompt.get("item", 0))
 	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
-		_world, _pack_save, item, party_index, _pack_persist
+		_world, _pack_save, item, party_index, -1, _pack_persist
 	)
 	_teaching = false
 	if not bool(result.get("ok", false)):
-		_show_pack_result(_teach_refusal(StringName(result.get("reason", &"")), party_index), false)
+		var reason: StringName = StringName(result.get("reason", &""))
+		# LearnMove runs after CanLearnTMHMMove and KnowsMove, so this is the one
+		# refusal that opens a menu instead of ending the USE.
+		if reason == &"moveset_full":
+			var details: Dictionary = result.get("details", {})
+			_forget_party_index = party_index
+			_forget_moves = Gen2MoveForget.options(_data, details.get("moves", []))
+			if not _forget_moves.is_empty():
+				_open_forget_ask()
+				return
+		_show_pack_result(_teach_refusal(reason, party_index), false)
 		return
-	_show_pack_result("%s learned %s!" % [
-		_target_name(party_index), String(_teach_prompt.get("move_name", "")),
+	_show_pack_result(Gen2MoveForget.learned_text(
+		_target_name(party_index), String(_teach_prompt.get("move_name", ""))
+	), true)
+
+
+## ForgetMove's own AskForgetMoveText yes/no, which it prints before the list.
+func _open_forget_ask() -> void:
+	_mode = Mode.PACK_FORGET_ASK
+	_forget_confirm_cursor = 0
+	_status.text = ""
+	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_render_forget_ask()
+
+
+func _render_forget_ask() -> void:
+	_title.text = "TEACH"
+	_summary.text = Gen2MoveForget.ask_text(
+		_target_name(_forget_party_index), String(_teach_prompt.get("move_name", ""))
+	)
+	_render_options([{"label": "YES"}, {"label": "NO"}], _forget_confirm_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
+	)
+
+
+func _confirm_forget_ask() -> void:
+	if _forget_confirm_cursor != 0:
+		_open_stop_learning()
+		return
+	_open_forget_list()
+
+
+## ForgetMove's .loop: MoveAskForgetText over the moves ListMoves drew. The
+## cartridge's list is plain move names, so an HM is not marked here; it answers
+## on confirm, the way .hmmove does.
+func _open_forget_list() -> void:
+	_mode = Mode.PACK_FORGET
+	_forget_cursor = 0
+	_status.text = ""
+	_footer.text = "Up/Down: move    Space/Enter: forget    Esc: back"
+	_render_forget_list()
+
+
+func _render_forget_list() -> void:
+	_title.text = "FORGET"
+	_summary.text = Gen2MoveForget.which_text()
+	_render_options(_forget_moves, _forget_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("name", ""))
+	)
+
+
+## The answer TeachTMHM is called a second time with. An HM keeps the list open
+## behind MoveCantForgetHMText, since .hmmove is `jr .loop` and not a cancel.
+func _confirm_forget() -> void:
+	if _forget_cursor < 0 or _forget_cursor >= _forget_moves.size():
+		return
+	var entry: Dictionary = _forget_moves[_forget_cursor]
+	if not bool(entry.get("forgettable", false)):
+		_status.text = Gen2MoveForget.cant_forget_hm_text()
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
+		_world, _pack_save, int(_teach_prompt.get("item", 0)), _forget_party_index,
+		int(entry.get("slot", -1)), _pack_persist
+	)
+	if not bool(result.get("ok", false)):
+		_show_pack_result(
+			_teach_refusal(StringName(result.get("reason", &"")), _forget_party_index), false
+		)
+		return
+	var name: String = _target_name(_forget_party_index)
+	_show_pack_result("%s %s" % [
+		Gen2MoveForget.forgot_text(name, String(entry.get("name", ""))),
+		Gen2MoveForget.learned_text(name, String(_teach_prompt.get("move_name", ""))),
 	], true)
+
+
+## LearnMove.cancel, reached from the ask's no and from B in the list alike.
+func _open_stop_learning() -> void:
+	_mode = Mode.PACK_STOP_LEARNING
+	_forget_confirm_cursor = 0
+	_status.text = ""
+	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_render_stop_learning()
+
+
+func _render_stop_learning() -> void:
+	_title.text = "TEACH"
+	_summary.text = Gen2MoveForget.stop_text(String(_teach_prompt.get("move_name", "")))
+	_render_options([{"label": "YES"}, {"label": "NO"}], _forget_confirm_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
+	)
+
+
+## Yes ends the offer with DidNotLearnMoveText; no is `jp .loop`, which reaches
+## ForgetMove's ask again.
+func _confirm_stop_learning() -> void:
+	if _forget_confirm_cursor != 0:
+		_open_forget_ask()
+		return
+	_show_pack_result(Gen2MoveForget.did_not_learn_text(
+		_target_name(_forget_party_index), String(_teach_prompt.get("move_name", ""))
+	), false)
 
 
 func _target_name(party_index: int) -> String:
@@ -454,8 +603,9 @@ func _target_name(party_index: int) -> String:
 
 
 ## TeachTMHM's own refusals, verbatim from data/text/common_2.asm and
-## common_3.asm. A full moveset is where the source opens ForgetMove, which does
-## not exist here, so it says so rather than inventing a replacement.
+## common_3.asm. A full moveset is not among them: it opens ForgetMove's menu
+## instead, so the only way to reach the two forget-slot reasons here is a
+## revalidation failing between the two teach_tm_hm() calls.
 func _teach_refusal(reason: StringName, party_index: int) -> String:
 	var move_name: String = String(_teach_prompt.get("move_name", "that move"))
 	var name: String = _target_name(party_index)
@@ -466,8 +616,10 @@ func _teach_refusal(reason: StringName, party_index: int) -> String:
 			]
 		&"already_knows_move":
 			return "%s knows %s." % [name, move_name]
-		&"moveset_full":
-			return "%s already knows four moves. Forgetting one is not available yet." % name
+		&"cannot_forget_hm":
+			return Gen2MoveForget.cant_forget_hm_text()
+		&"invalid_forget_slot":
+			return "%s can't forget that move." % name
 		&"cannot_teach_egg":
 			return "An EGG can't learn anything."
 	return "Can't teach that: %s" % String(reason)

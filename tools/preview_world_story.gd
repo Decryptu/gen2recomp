@@ -2837,7 +2837,7 @@ func _catch_strength_mon(
 func _teach_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary:
 	var reason: String = "no party member"
 	for index: int in save.party.size():
-		var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(world, save, item, index, false)
+		var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(world, save, item, index, -1, false)
 		if bool(result.get("ok", false)):
 			return result
 		reason = String(result.get("reason", ""))
