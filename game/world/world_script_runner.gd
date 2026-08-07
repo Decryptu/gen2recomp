@@ -127,6 +127,16 @@ static func begin(
 	var trainer_phase: StringName = StringName(request.get("trainer_phase", &""))
 	var trainer: Variant = request.get("trainer", {})
 	var started: bool = false
+	if not trainer_phase.is_empty():
+		## LoadTrainer_continue clears wRunningTrainerBattleScript for every
+		## trainer encounter, talked to or seen (home/trainers.asm), and only
+		## StartBattleWithMapTrainerScript's `loadmem wRunningTrainerBattleScript,
+		## -1` sets it again. Without this the flag committed by one battle
+		## outlives it, so `endifjustbattled` ends the after-battle script on
+		## every later conversation and nothing past that command ever runs. The
+		## Rocket hideout's two password grunts are the first place on the walked
+		## route where that content is load bearing.
+		runner._stage_just_battled(false)
 	if trainer_phase == &"initial" and trainer is Dictionary:
 		started = runner._push_frame(
 			bank, address, runner._trainer_intro_script(trainer as Dictionary)
@@ -920,12 +930,10 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 						"bank": bank, "address": after_address,
 					}
 		0x65:
-			if _has_staged_just_battled or (state != null and state.just_battled()):
+			if _just_battled():
 				_frames.clear()
 		0x66:
-			_script_value = 1 if _has_staged_just_battled or (
-				state != null and state.just_battled()
-			) else 0
+			_script_value = 1 if _just_battled() else 0
 		0x73:
 			_loaded_emote = int(command.get("value", -1))
 			if _loaded_emote == 0xFF:
@@ -1730,6 +1738,16 @@ func _stage_warp_facing_request(command: Dictionary) -> Dictionary:
 	}
 	_events.append({"type": &"player_facing_requested", "facing": warp["facing"]})
 	return _stage_warp(command)
+
+
+## `wRunningTrainerBattleScript` as this script sees it: a value staged during
+## the run wins over the committed one, since a script that stages false has
+## cleared the flag for everything after it. Reading only the "has a staged
+## value" side made `endifjustbattled` true whenever anything had touched it.
+func _just_battled() -> bool:
+	if _has_staged_just_battled:
+		return _staged_just_battled
+	return state != null and state.just_battled()
 
 
 func _stage_just_battled(value: bool) -> void:

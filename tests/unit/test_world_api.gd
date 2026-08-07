@@ -1996,6 +1996,40 @@ func test_checkpoke_answers_the_party_summary_species_and_fails_without_one() ->
 	assert_eq(failed[0]["reason"], &"missing_party_summary")
 
 
+func test_talking_to_a_beaten_trainer_clears_the_just_battled_flag_first() -> void:
+	# LoadTrainer_continue clears wRunningTrainerBattleScript for every trainer
+	# encounter (home/trainers.asm), so an after-battle script only stops at
+	# endifjustbattled on the turn the battle happened. The Rocket hideout's two
+	# password grunts put their setevent past that command
+	# (maps/TeamRocketBaseB3F.asm, GruntF5Script and GruntM28Script).
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6370"] = [
+		Gen2WorldScript.raw_opcode(0x65, true), # endifjustbattled
+		Gen2WorldScript.SETEVENT, 43, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var battled: Gen2WorldState = Gen2WorldState.from_dict({"just_battled": true})
+	assert_true(battled.just_battled())
+	var talked := Gen2WorldScriptRunner.begin(data, battled, {
+		"kind": &"trainer", "bank": 48, "script": 0x6370, "trainer_phase": &"after",
+	})
+	var talked_result: Dictionary = talked.advance()
+	assert_eq(talked_result["status"], &"complete", JSON.stringify(talked_result))
+	assert_true(battled.is_event_flag_active(43), JSON.stringify(talked_result))
+
+	# A script that is not a trainer encounter still sees the committed flag.
+	var plain: Gen2WorldState = Gen2WorldState.from_dict({"just_battled": true})
+	var ordinary := Gen2WorldScriptRunner.begin(data, plain, {
+		"kind": &"test", "bank": 48, "script": 0x6370,
+	})
+	var ordinary_result: Dictionary = ordinary.advance()
+	assert_eq(ordinary_result["status"], &"complete", JSON.stringify(ordinary_result))
+	assert_false(plain.is_event_flag_active(43), JSON.stringify(ordinary_result))
+
+
 func test_crystal_opcodes_past_verbosegiveitemvar_normalize_two_lower() -> void:
 	# Crystal's stream inserts two commands pokegold does not have: farjumptext
 	# at $52 and verbosegiveitemvar at $9f (macros/scripts/events.asm). So
