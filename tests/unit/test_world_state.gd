@@ -215,3 +215,26 @@ func test_seen_species_changes_round_trip_and_commit_atomically() -> void:
 	assert_true(state.has_seen_species(25))
 	var restored := Gen2WorldState.from_dict(state.to_dict())
 	assert_true(restored.has_seen_species(25))
+
+
+## readmem/writemem/loadmem address plain WRAM bytes; only a bounded handful
+## carry script state, so the state keeps them as an address-keyed byte map.
+func test_script_memory_round_trips_and_rejects_out_of_range_bytes() -> void:
+	var state := Gen2WorldState.new()
+	assert_eq(state.script_memory(0xD1D6), 0, "an address never written reads zero")
+	var changed: Dictionary = state.apply_changes({}, {}, {"script_memory": {0xD1D6: 7}})
+	assert_true(changed["ok"])
+	assert_eq(state.script_memory(0xD1D6), 7)
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.script_memory(0xD1D6), 7)
+
+	var cleared: Dictionary = state.apply_changes({}, {}, {"script_memory": {0xD1D6: 0}})
+	assert_true(cleared["ok"])
+	assert_eq(state.script_memory(0xD1D6), 0)
+	assert_false(state.script_memory_values().has(0xD1D6))
+
+	for rejected: Dictionary in [{0xD1D6: 256}, {0xD1D6: -1}, {0: 3}]:
+		var result: Dictionary = state.apply_changes({}, {}, {"script_memory": rejected})
+		assert_false(result["ok"], JSON.stringify(rejected))
+		assert_eq(result["reason"], &"invalid_script_memory")
+	assert_eq(state.script_memory(0xD1D6), 0, "a refused transaction mutates nothing")

@@ -10,6 +10,11 @@ extends RefCounted
 signal changed
 
 const PHONE_CONTACT_CAPACITY: int = 10
+## `readmem`/`writemem`/`loadmem` address plain WRAM bytes. Only a bounded
+## handful of them carry script state (`wFarfetchdPosition`,
+## `wUndergroundSwitchPositions`, the phone rematch counters), so they are
+## kept as an address-keyed byte map rather than a WRAM image.
+const SCRIPT_MEMORY_CAPACITY: int = 64
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
 const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
@@ -74,6 +79,7 @@ var _seen_species: Dictionary = {}
 var _phone_receive_cycle: int = 0
 var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
 var _pending_special_phone_call: int = 0
+var _script_memory: Dictionary = {}
 
 
 func _init(
@@ -86,6 +92,7 @@ func _init(
 	initial_pending_special_phone_call: int = 0,
 	initial_seen_species: Dictionary = {},
 	initial_engine_flags: Dictionary = {},
+	initial_script_memory: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
 		if int(flag) >= 0 and bool(initial_event_flags[flag]):
@@ -122,6 +129,11 @@ func _init(
 	_phone_receive_cycle = clampi(initial_phone_receive_cycle, 0, PHONE_RECEIVE_DELAYS.size() - 1)
 	_phone_receive_minutes = maxi(0, initial_phone_receive_minutes)
 	_pending_special_phone_call = maxi(0, initial_pending_special_phone_call)
+	for raw_address: Variant in initial_script_memory:
+		var address: int = int(raw_address)
+		var value: int = int(initial_script_memory[raw_address]) & 0xFF
+		if address > 0 and value != 0 and _script_memory.size() < SCRIPT_MEMORY_CAPACITY:
+			_script_memory[address] = value
 
 
 ## JSON-safe representation of the mutable overworld state. Cartridge records
@@ -144,6 +156,7 @@ func to_dict() -> Dictionary:
 		"phone_receive_cycle": _phone_receive_cycle,
 		"phone_receive_minutes": _phone_receive_minutes,
 		"pending_special_phone_call": _pending_special_phone_call,
+		"script_memory": _script_memory.duplicate(),
 	}
 
 
@@ -170,6 +183,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		int(source.get("pending_special_phone_call", 0)),
 		source.get("seen_species", {}) if source.get("seen_species", {}) is Dictionary else {},
 		source.get("engine_flags", {}) if source.get("engine_flags", {}) is Dictionary else {},
+		source.get("script_memory", {}) if source.get("script_memory", {}) is Dictionary else {},
 	)
 
 
@@ -196,6 +210,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_phone_receive_cycle = restored._phone_receive_cycle
 	_phone_receive_minutes = restored._phone_receive_minutes
 	_pending_special_phone_call = restored._pending_special_phone_call
+	_script_memory = restored._script_memory.duplicate()
 	changed.emit()
 
 
@@ -375,6 +390,16 @@ func phone_receive_minutes() -> int:
 
 func pending_special_phone_call() -> int:
 	return _pending_special_phone_call
+
+
+## The byte a script memory address holds. An address never written reads zero,
+## the way the cartridge's cleared WRAM does.
+func script_memory(address: int) -> int:
+	return int(_script_memory.get(address, 0))
+
+
+func script_memory_values() -> Dictionary:
+	return _script_memory.duplicate()
 
 
 func reset_phone_receive_delay() -> void:
@@ -673,6 +698,13 @@ func apply_changes(
 	for raw_species: Variant in seen_changes:
 		if int(raw_species) <= 0:
 			return {"ok": false, "reason": &"invalid_seen_species"}
+	var memory_changes: Dictionary = runtime_changes.get("script_memory", {})
+	if not memory_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_script_memory"}
+	for raw_address: Variant in memory_changes:
+		var change_value: int = int(memory_changes[raw_address])
+		if int(raw_address) <= 0 or change_value < 0 or change_value > 0xFF:
+			return {"ok": false, "reason": &"invalid_script_memory"}
 
 	var next_flags: Dictionary = _event_flags.duplicate()
 	for raw_flag: Variant in flag_changes:
@@ -723,6 +755,16 @@ func apply_changes(
 			next_contacts.erase(contact)
 	if next_contacts.size() > PHONE_CONTACT_CAPACITY:
 		return {"ok": false, "reason": &"phone_contact_capacity"}
+	var next_script_memory: Dictionary = _script_memory.duplicate()
+	for raw_address: Variant in memory_changes:
+		var address: int = int(raw_address)
+		var value: int = int(memory_changes[raw_address])
+		if value == 0:
+			next_script_memory.erase(address)
+		else:
+			next_script_memory[address] = value
+	if next_script_memory.size() > SCRIPT_MEMORY_CAPACITY:
+		return {"ok": false, "reason": &"script_memory_capacity"}
 	var next_just_battled: bool = bool(
 		runtime_changes.get("just_battled", _just_battled)
 	)
@@ -736,7 +778,8 @@ func apply_changes(
 		or next_fishing_swarm_species != _fishing_swarm_species \
 		or next_receive_cycle != _phone_receive_cycle \
 		or next_receive_minutes != _phone_receive_minutes \
-		or next_special_phone_call != _pending_special_phone_call
+		or next_special_phone_call != _pending_special_phone_call \
+		or next_script_memory != _script_memory
 	_event_flags = next_flags
 	_engine_flags = next_engine_flags
 	_map_scenes = next_scenes
@@ -752,6 +795,7 @@ func apply_changes(
 	_phone_receive_cycle = next_receive_cycle
 	_phone_receive_minutes = next_receive_minutes
 	_pending_special_phone_call = next_special_phone_call
+	_script_memory = next_script_memory
 	if did_change:
 		changed.emit()
 	return {"ok": true, "changed": did_change}

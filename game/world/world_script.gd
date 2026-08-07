@@ -609,6 +609,11 @@ static func command_at(
 			IFEQUAL, IFNOTEQUAL, IFGREATER, IFLESS:
 				command["value"] = int(data[offset + 1])
 				command["address"] = read_u16(data, offset + 2)
+			LOADMEM:
+				## `dw address` then `db value`, the reverse of the compare
+				## commands that share its width.
+				command["address"] = read_u16(data, offset + 1)
+				command["value"] = int(data[offset + 3])
 			CHECKMAPSCENE:
 				command["map_group"] = int(data[offset + 1])
 				command["map_number"] = int(data[offset + 2])
