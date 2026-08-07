@@ -51,6 +51,19 @@ func test_word_codes_expand() -> void:
 	assert_eq(Gen2Text.decode(PackedByteArray([0xE1, 0xE2]), 0, 4), "PKMN")
 
 
+## constants/charmap.asm maps "#" to $54, so a synthesized literal writes the
+## POKé ligature the way every source text does. Spelling it out instead is legal
+## but costs three extra tiles, because $54 is below FIRST_PRINTABLE and so
+## decode-only.
+func test_hash_encodes_the_poke_ligature_the_source_charmap_names() -> void:
+	assert_eq(Gen2Text.encode("#"), PackedByteArray([0x54]))
+	assert_eq(Gen2Text.encoded_length("a #MON!"), 7)
+	assert_eq(Gen2Text.decode(Gen2Text.encode("#MON"), 0, 16), "POKéMON")
+	# Without the alias this drew UNKNOWN, the question-mark glyph.
+	assert_ne(Gen2Text.encode("#")[0], Gen2Text.UNKNOWN)
+	assert_eq(Gen2Text.encoded_length("POKéMON"), 7)
+
+
 func test_apostrophe_ligatures_expand_to_two_characters() -> void:
 	# One tile in the font, two letters on screen.
 	assert_eq(Gen2Text.decode(PackedByteArray([0x88, 0xD5]), 0, 4), "I't")
