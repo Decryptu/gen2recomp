@@ -1961,6 +1961,65 @@ func test_readvar_partycount_reads_the_set_party_summary() -> void:
 	assert_true(world.event_flag_active(41))
 
 
+func test_checkpoke_answers_the_party_summary_species_and_fails_without_one() -> void:
+	# Route 39's TrainerPokefanmDerek and Route 43's PicnickerTiffany both ask
+	# checkpoke before offering a phone number. Script_checkpoke searches
+	# wPartySpecies (engine/overworld/scripting.asm).
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6350"] = [
+		Gen2WorldScript.CHECKPOKE, 25, # PIKACHU
+		Gen2WorldScript.IFTRUE, 0x60, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6360"] = [Gen2WorldScript.SETEVENT, 42, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var carrying: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	carrying.set_party_summary(2, false, [25, 1] as Array[int])
+	carrying.current_map.events["coord_events"][0]["script"] = 0x6350
+	var found: Array = carrying.dispatch_script_events()
+	assert_eq(found[0]["status"], &"complete", JSON.stringify(found))
+	assert_true(carrying.event_flag_active(42))
+
+	var without: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	without.set_party_summary(2, false, [1, 4] as Array[int])
+	without.current_map.events["coord_events"][0]["script"] = 0x6350
+	var missing: Array = without.dispatch_script_events()
+	assert_eq(missing[0]["status"], &"complete", JSON.stringify(missing))
+	assert_false(without.event_flag_active(42))
+
+	var unset: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	unset.current_map.events["coord_events"][0]["script"] = 0x6350
+	var failed: Array = unset.dispatch_script_events()
+	assert_eq(failed[0]["status"], &"failed")
+	assert_eq(failed[0]["reason"], &"missing_party_summary")
+
+
+func test_crystal_opcodes_past_verbosegiveitemvar_normalize_two_lower() -> void:
+	# Crystal's stream inserts two commands pokegold does not have: farjumptext
+	# at $52 and verbosegiveitemvar at $9f (macros/scripts/events.asm). So
+	# Crystal is one ahead from $53 and two ahead from $a0.
+	assert_eq(Gen2WorldScript.source_opcode(0x9E, true), 0x9D) # verbosegiveitem
+	assert_eq(Gen2WorldScript.source_opcode(0xA0, true), 0x9E) # swarm
+	assert_eq(Gen2WorldScript.source_opcode(0xA1, true), 0x9F) # halloffame
+	assert_eq(Gen2WorldScript.source_opcode(0xA3, true), 0xA1) # warpfacing
+	assert_eq(Gen2WorldScript.source_opcode(0xA1, false), 0xA1)
+	assert_eq(Gen2WorldScript.raw_opcode(0x9D, true), 0x9E)
+	assert_eq(Gen2WorldScript.raw_opcode(0x9E, true), 0xA0)
+	assert_eq(Gen2WorldScript.raw_opcode(0x9F, true), 0xA1)
+	assert_eq(Gen2WorldScript.raw_opcode(0x9F, false), 0x9F)
+	# Crystal's swarm carries a flag byte pokegold's omits, so the widths differ
+	# even though both name the same command.
+	assert_eq(Gen2WorldScript.command_width(0xA0, true), 4)
+	assert_eq(Gen2WorldScript.command_width(0x9E, false), 3)
+	assert_eq(Gen2WorldScript.command_width(0x9F, true), 3) # verbosegiveitemvar
+	assert_eq(Gen2WorldScript.command_width(0xA3, true), 6) # warpfacing
+	assert_eq(Gen2WorldScript.command_name(0xA0, true), &"swarm")
+	assert_eq(Gen2WorldScript.command_name(0xA1, true), &"halloffame")
+	assert_eq(Gen2WorldScript.command_name(0x9F, true), &"verbosegiveitemvar")
+
+
 func test_readvar_partycount_fails_without_a_party_summary() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6340"] = [Gen2WorldScript.READVAR, 0x01, Gen2WorldScript.END]
@@ -2046,10 +2105,10 @@ func test_check_pokerus_special_fails_without_a_party_summary() -> void:
 func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void:
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.party_summary().is_empty())
-	assert_true(world.set_party_summary(3, true)["ok"])
-	assert_eq(world.party_summary(), {"count": 3, "pokerus": true})
+	assert_true(world.set_party_summary(3, true, [25, 1] as Array[int])["ok"])
+	assert_eq(world.party_summary(), {"count": 3, "pokerus": true, "species": [25, 1]})
 	assert_false(world.set_party_summary(-1, false)["ok"])
-	assert_eq(world.party_summary(), {"count": 3, "pokerus": true})
+	assert_eq(world.party_summary(), {"count": 3, "pokerus": true, "species": [25, 1]})
 	world.clear_party_summary()
 	assert_true(world.party_summary().is_empty())
 
@@ -2529,7 +2588,9 @@ func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
 			0x91,
 		],
 		"48:60D0": [0x33, 7, 0, 0x91],
-		"48:60E0": [0xA0, 0x91],
+		# halloffame is Crystal $a1: pokegold's $9f plus farjumptext at $52 and
+		# verbosegiveitemvar at $9f. Crystal $a0 is swarm.
+		"48:60E0": [0xA1, 0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()

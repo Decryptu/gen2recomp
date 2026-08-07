@@ -1766,11 +1766,13 @@ func _refresh_party_summary() -> void:
 		_world.clear_party_summary()
 		return
 	var has_pokerus: bool = false
+	var species: Array[int] = []
 	for member: Variant in save.party:
-		if member is Gen2SaveMon and (int((member as Gen2SaveMon).pokerus) & 0x0F) != 0:
-			has_pokerus = true
-			break
-	_world.set_party_summary(save.party.size(), has_pokerus)
+		if member is Gen2SaveMon:
+			if (int((member as Gen2SaveMon).pokerus) & 0x0F) != 0:
+				has_pokerus = true
+			species.append(int((member as Gen2SaveMon).species))
+	_world.set_party_summary(save.party.size(), has_pokerus, species)
 
 
 func _refresh_labels() -> void:

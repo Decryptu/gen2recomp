@@ -380,10 +380,27 @@ static func command_width(opcode: int, crystal_commands: bool = true) -> int:
 			return 1
 		END:
 			return 1 if crystal_commands else 0
-	var source_opcode: int = opcode
-	if crystal_commands and opcode >= 0x56:
-		source_opcode -= 1
-	return _later_command_width(source_opcode)
+	if crystal_commands:
+		var crystal_width: int = _crystal_only_command_width(opcode)
+		if crystal_width > 0:
+			return crystal_width
+	return _later_command_width(source_opcode(opcode, crystal_commands))
+
+
+## Widths for the commands Crystal has and pokegold does not, plus the one
+## command whose operands differ between them. Everything else shares
+## pokegold's table through source_opcode().
+static func _crystal_only_command_width(opcode: int) -> int:
+	match opcode:
+		0x9F: return 3 # verbosegiveitemvar: item, var
+		0xA0: return 4 # swarm: flag, map group, map number (pokegold omits the flag)
+		0xA4: return 2 # battletowertext
+		0xA5: return 3 # getlandmarkname
+		0xA6: return 3 # gettrainerclassname
+		0xA7: return 4 # getname
+		0xA8: return 2 # wait
+		0xA9: return 1 # checksave
+	return 0
 
 
 static func _later_command_width(opcode: int) -> int:
@@ -410,8 +427,16 @@ static func _later_command_width(opcode: int) -> int:
 static func _later_command_name(opcode: int, crystal_commands: bool) -> StringName:
 	if opcode < 0x55:
 		return &""
-	var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
-	match source_opcode:
+	if crystal_commands:
+		match opcode:
+			0x9F: return &"verbosegiveitemvar"
+			0xA4: return &"battletowertext"
+			0xA5: return &"getlandmarkname"
+			0xA6: return &"gettrainerclassname"
+			0xA7: return &"getname"
+			0xA8: return &"wait"
+			0xA9: return &"checksave"
+	match source_opcode(opcode, crystal_commands):
 		0x55: return &"pokepic"
 		0x56: return &"closepokepic"
 		0x57: return &"2dmenu"
@@ -492,15 +517,28 @@ static func _later_command_name(opcode: int, crystal_commands: bool) -> StringNa
 	return &""
 
 
-## Converts a Gold/Silver source opcode into the raw byte the matching game's
-## command stream uses. Crystal's raw stream shifts every opcode at or above
-## $52 up by one; below that boundary the two profiles agree. This is the
-## documented inverse of the raw-to-source normalization in
-## Gen2WorldScriptRunner._execute().
-static func raw_opcode(source_opcode: int, crystal_commands: bool = true) -> int:
-	if crystal_commands and source_opcode >= 0x52:
-		return source_opcode + 1
-	return source_opcode
+## Normalizes a raw command byte onto pokegold's numbering, which every width,
+## name and handler table here is keyed with. Crystal's stream inserts two
+## commands pokegold does not have: `farjumptext` at $52 and
+## `verbosegiveitemvar` at $9f (macros/scripts/events.asm in both pins). So
+## Crystal is one ahead from $53 and two ahead from $a0, and the commands
+## Crystal added themselves have no source opcode: callers handle those from the
+## raw byte before asking.
+##
+## The low boundary is $56 rather than $53 because every caller resolves
+## farjumptext, jumptext, waitbutton and promptbutton from the raw opcode first.
+static func source_opcode(opcode: int, crystal_commands: bool = true) -> int:
+	if not crystal_commands or opcode < 0x56:
+		return opcode
+	return opcode - 2 if opcode >= 0xA0 else opcode - 1
+
+
+## The inverse of [method source_opcode], for a caller holding a pokegold opcode
+## that needs the raw byte this profile's stream uses.
+static func raw_opcode(source_opcode_value: int, crystal_commands: bool = true) -> int:
+	if not crystal_commands or source_opcode_value < 0x52:
+		return source_opcode_value
+	return source_opcode_value + 2 if source_opcode_value >= 0x9E else source_opcode_value + 1
 
 
 ## Converts a raw SPECIAL operand into the Crystal-canonical index the runner's
@@ -672,8 +710,19 @@ static func command_at(
 			0x55:
 				if not crystal_commands:
 					command["pokemon"] = int(data[offset + 1])
-		var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
-		match source_opcode:
+		if crystal_commands:
+			match opcode:
+				0x9F: # verbosegiveitemvar
+					command["item"] = int(data[offset + 1])
+					command["variable"] = int(data[offset + 2])
+					return command
+				0xA0: # swarm, which carries a flag byte pokegold's does not
+					command["flag"] = int(data[offset + 1])
+					command["map_group"] = int(data[offset + 2])
+					command["map_number"] = int(data[offset + 3])
+					return command
+		var source: int = Gen2WorldScript.source_opcode(opcode, crystal_commands)
+		match source:
 			0x55:
 				command["pokemon"] = int(data[offset + 1])
 			0x5C:
@@ -819,8 +868,8 @@ static func scan_references(
 					texts.append({"bank": int(command["bank"]), "address": int(command["address"])})
 				else:
 					texts.append({"bank": bank, "address": int(command["address"])})
-		var source_opcode: int = opcode - 1 if crystal_commands and opcode >= 0x56 else opcode
-		match source_opcode:
+		var source: int = Gen2WorldScript.source_opcode(opcode, crystal_commands)
+		match source:
 			0x68, 0x69:
 				movements.append({"bank": bank, "address": int(command["address"])})
 			0x63:
