@@ -990,6 +990,35 @@ func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
 	)
 
 
+## Ilex Forest's Farfetch'd herding is a ten-position state machine on
+## wFarfetchdPosition, read and written with these three commands
+## (maps/IlexForest.asm).
+func test_script_memory_commands_read_write_and_commit_a_byte() -> void:
+	var address: int = 0xD1D6
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6C00"] = [
+		Gen2WorldScript.LOADMEM, address & 0xFF, address >> 8, 5,
+		Gen2WorldScript.READMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.IFEQUAL, 5, 0x10, 0x6C,
+		Gen2WorldScript.END,
+	]
+	# Reached only when the readmem answered 5: writemem then stores wScriptVar.
+	scripts["48:6C10"] = [
+		Gen2WorldScript.SETVAL, 9,
+		Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6C00,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(state.script_memory(address), 9, "the ifequal branch ran and committed")
+
+
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]

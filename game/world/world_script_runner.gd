@@ -24,6 +24,7 @@ var _staged_items: Dictionary = {}
 var _staged_money: Dictionary = {}
 var _staged_coins: int = -1
 var _staged_phone_contacts: Dictionary = {}
+var _staged_script_memory: Dictionary = {}
 var _staged_just_battled: bool = false
 var _has_staged_just_battled: bool = false
 var _staged_swarm: Dictionary = {}
@@ -602,6 +603,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			_script_value = int(command["value"])
 		Gen2WorldScript.ADDVAL:
 			_script_value += int(command["value"])
+		Gen2WorldScript.READMEM:
+			_script_value = _script_memory_value(int(command["address"]))
+		Gen2WorldScript.WRITEMEM:
+			return _stage_script_memory(int(command["address"]), _script_value)
+		Gen2WorldScript.LOADMEM:
+			return _stage_script_memory(int(command["address"]), int(command["value"]))
 		Gen2WorldScript.READVAR:
 			return _read_runtime_variable(int(command["value"]))
 		Gen2WorldScript.LOADVAR:
@@ -756,6 +763,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.SETVAL, Gen2WorldScript.ADDVAL, Gen2WorldScript.RANDOM,
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
 		Gen2WorldScript.CHECKFLAG, Gen2WorldScript.CLEARFLAG, Gen2WorldScript.SETFLAG,
+		Gen2WorldScript.READMEM,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
 		Gen2WorldScript.CHECKITEM,
@@ -1678,6 +1686,24 @@ func _stage_just_battled(value: bool) -> void:
 	_has_staged_just_battled = true
 
 
+## The byte a script memory address holds, staged writes first. Reading an
+## address never written answers zero, the way cleared WRAM does.
+func _script_memory_value(address: int) -> int:
+	if _staged_script_memory.has(address):
+		return int(_staged_script_memory[address])
+	return state.script_memory(address) if state != null else 0
+
+
+func _stage_script_memory(address: int, value: int) -> Dictionary:
+	if address <= 0:
+		return {"ok": false, "reason": &"invalid_script_memory_address", "address": address}
+	_staged_script_memory[address] = value & 0xFF
+	_emit_runtime_event(&"script_memory_changed", {
+		"address": address, "value": value & 0xFF,
+	})
+	return {"ok": true}
+
+
 func _item_quantity(item: int) -> int:
 	if _staged_items.has(item):
 		return int(_staged_items[item])
@@ -1957,6 +1983,8 @@ func _complete() -> Dictionary:
 		runtime_changes["coins"] = _staged_coins
 	if not _staged_phone_contacts.is_empty():
 		runtime_changes["phone_contacts"] = _staged_phone_contacts.duplicate()
+	if not _staged_script_memory.is_empty():
+		runtime_changes["script_memory"] = _staged_script_memory.duplicate()
 	if _has_staged_just_battled:
 		runtime_changes["just_battled"] = _staged_just_battled
 	if _has_staged_swarm:
