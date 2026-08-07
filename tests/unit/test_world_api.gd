@@ -1019,6 +1019,44 @@ func test_script_memory_commands_read_write_and_commit_a_byte() -> void:
 	assert_eq(state.script_memory(address), 9, "the ifequal branch ran and committed")
 
 
+## Burned Tower's rival scene opens the hole under the player and then relies on
+## warpcheck to drop them through it, so the command has to resolve the warp at
+## the standing cell rather than one the script names.
+func test_warpcheck_takes_the_warp_the_player_is_standing_on() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6D00"] = [0x8E, Gen2WorldScript.END] # warpcheck, raw
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 6, "y": 6, "script": 0x6D00,
+	}]
+	var before: Vector2i = world.map_id()
+
+	var results: Array = world.dispatch_script_events(Vector2i(6, 6))
+	assert_eq(results[0]["status"], &"complete", JSON.stringify(results))
+	assert_true(results[0]["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"warp_check" and bool(event.get("taken", false))
+	), JSON.stringify(results[0]["events"]))
+	assert_ne(world.map_id(), before, "the standing warp was taken")
+
+
+func test_init_roam_mons_reports_the_seeded_roaming_records() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6D10"] = [Gen2WorldScript.SPECIAL, 105, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6D10,
+	}]
+	var results: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(results[0]["status"], &"complete", JSON.stringify(results))
+	var reported: Variant = _event_value(
+		results[0]["events"], &"roaming_mons_initialized", "count"
+	)
+	assert_eq(int(reported), world.state.roaming_mons().size())
+	assert_gt(int(reported), 0, "the records the special reports are already seeded")
+
+
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]

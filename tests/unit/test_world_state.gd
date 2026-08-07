@@ -238,3 +238,17 @@ func test_script_memory_round_trips_and_rejects_out_of_range_bytes() -> void:
 		assert_false(result["ok"], JSON.stringify(rejected))
 		assert_eq(result["reason"], &"invalid_script_memory")
 	assert_eq(state.script_memory(0xD1D6), 0, "a refused transaction mutates nothing")
+
+
+## InitRoamMons seeds the roam structs, and Gen2WorldAPI.open() seeds the same
+## imported records, so re-seeding must not teleport a beast already loose.
+func test_seeding_roaming_mons_keeps_a_record_that_already_moved() -> void:
+	var initial: Array = [{"species": 243, "level": 40, "map_group": 1, "map_number": 1}]
+	var state := Gen2WorldState.new()
+	state.ensure_roaming_mons(initial)
+	assert_eq(state.roaming_mons(), initial)
+
+	var moved: Array = [{"species": 243, "level": 40, "map_group": 5, "map_number": 9}]
+	var loose: Gen2WorldState = Gen2WorldState.from_dict({"roaming_mons": moved})
+	loose.ensure_roaming_mons(initial)
+	assert_eq(loose.roaming_mons(), moved)

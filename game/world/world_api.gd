@@ -1812,6 +1812,18 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 			continue
 		var event: Dictionary = raw_event as Dictionary
 		var event_type: StringName = StringName(event.get("type", &""))
+		if event_type == &"warp_check_requested":
+			## Script_warpcheck asks whether the player is standing on a warp
+			## and takes it if so, which is how the Burned Tower rival scene
+			## drops the player through the hole it just opened. A cell with no
+			## warp answers nothing, exactly as WarpCheck's carry does.
+			var checked: Dictionary = try_warp()
+			generated.append({
+				"type": &"warp_check",
+				"taken": bool(checked.get("ok", false)),
+				"transition": checked.duplicate(true),
+			})
+			continue
 		if event_type == &"player_movement_requested":
 			generated.append_array(_apply_player_movement(event))
 			continue
