@@ -868,6 +868,97 @@ func test_side_wall_gold_profile_enter_rule_only_blocks_down() -> void:
 	RomCache.clear(gold_directory)
 
 
+func test_gold_profile_specials_normalize_onto_the_crystal_handlers() -> void:
+	# data/events/special_pointers.asm's SpecialsPointers shifts by one from
+	# BattleTowerFade at Crystal 47, and Crystal's mobile block at 109 pushes the
+	# DST entries to 166 and 167. Without the profile split these raw Gold bytes
+	# reach RestartMapMusic, ToggleMaptileDecorations and PrintDiploma instead.
+	var gold_directory: String = RomCache.directory_for(&"testworldgoldspecial", "9876543210fedcba")
+	RomCache.clear(gold_directory)
+	RomCache.prepare(gold_directory)
+	var saved_directory: String = _directory
+	_directory = gold_directory
+	_write_cache("gold")
+
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(gold_directory))
+	scripts["48:6400"] = [
+		Gen2WorldScript.SETVAL, 1,
+		Gen2WorldScript.SPECIAL, 61, 0, # HealMachineAnim
+		Gen2WorldScript.GOLD_END,
+	]
+	scripts["48:6410"] = [
+		Gen2WorldScript.SPECIAL, 108, 0, # InitialSetDSTFlag
+		Gen2WorldScript.YESORNO, Gen2WorldScript.GOLD_END,
+	]
+	scripts["48:6420"] = [
+		Gen2WorldScript.SPECIAL, 73, 0, # ToggleDecorationsVisibility
+		Gen2WorldScript.GOLD_ENDCALLBACK,
+	]
+	scripts["48:6430"] = [
+		Gen2WorldScript.SPECIAL, 110, 0, # MrChrono, absent from Crystal
+		Gen2WorldScript.GOLD_END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(gold_directory), scripts)
+	_directory = saved_directory
+
+	var data: GameData = GameData.open_directory(gold_directory)
+	assert_eq(data.id, &"gold")
+
+	var heal := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6400,
+	})
+	var heal_result: Dictionary = heal.advance()
+	assert_eq(heal_result["status"], &"complete", JSON.stringify(heal_result))
+	assert_eq(
+		_event_value(heal_result["events"], &"presentation_special_applied", "kind"),
+		&"heal_machine_anim",
+		JSON.stringify(heal_result),
+	)
+	assert_eq(
+		int(_event_value(heal_result["events"], &"presentation_special_applied", "machine_type")),
+		1,
+		JSON.stringify(heal_result),
+	)
+
+	var dst := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6410,
+		"clock": {"day": 1, "hour": 10, "minute": 5},
+	})
+	assert_eq(dst.advance()["event"]["text"], "10:05 DST,\nis that OK?")
+	assert_eq(dst.advance(true)["event"]["type"], &"choice")
+	var dst_result: Dictionary = dst.advance(true, 0)
+	assert_eq(dst_result["status"], &"complete", JSON.stringify(dst_result))
+	assert_true(dst_result["dst_enabled"])
+
+	var decoration_state := Gen2WorldState.new()
+	var decoration := Gen2WorldScriptRunner.begin(data, decoration_state, {
+		"kind": &"test", "bank": 48, "script": 0x6420,
+	})
+	var decoration_result: Dictionary = decoration.advance()
+	assert_eq(decoration_result["status"], &"complete", JSON.stringify(decoration_result))
+	assert_eq(
+		_event_value(decoration_result["events"], &"decoration_callback_applied", "kind"),
+		&"toggle_decorations_visibility",
+		JSON.stringify(decoration_result),
+	)
+	for flag: int in [
+		Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_CONSOLE,
+		Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_1,
+		Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_2,
+		Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_BIG_DOLL,
+	]:
+		assert_true(decoration_state.is_event_flag_active(flag))
+
+	var chrono := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6430,
+	})
+	var chrono_result: Dictionary = chrono.advance()
+	assert_eq(chrono_result["status"], &"failed", JSON.stringify(chrono_result))
+	assert_eq(chrono_result["reason"], &"unsupported_phone_special")
+
+	RomCache.clear(gold_directory)
+
+
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6900"] = [Gen2WorldScript.SETSCENE, 90, Gen2WorldScript.END]

@@ -89,6 +89,33 @@ func test_raw_opcode_shifts_only_at_and_above_the_farjumptext_insertion() -> voi
 	assert_eq(Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_END, true), 0x91)
 
 
+func test_special_index_normalizes_gold_silver_onto_the_crystal_table() -> void:
+	# SpecialsPointers agrees for 0-46, so Crystal is the identity everywhere and
+	# Gold/Silver is the identity below the BattleTowerFade insertion at 47.
+	for crystal_index: int in [27, 37, 62, 78, 106, 166, 168]:
+		assert_eq(Gen2WorldScript.special_index(crystal_index, true), crystal_index)
+	assert_eq(Gen2WorldScript.special_index(0, false), 0)
+	assert_eq(Gen2WorldScript.special_index(46, false), 46)
+
+	# 47-107 sit one lower on Gold/Silver: FadeOutToBlack, RestartMapMusic,
+	# HealMachineAnim, ToggleDecorationsVisibility, CheckPokerus, FadeOutMusic.
+	assert_eq(Gen2WorldScript.special_index(47, false), 48)
+	assert_eq(Gen2WorldScript.special_index(60, false), 61)
+	assert_eq(Gen2WorldScript.special_index(61, false), 62)
+	assert_eq(Gen2WorldScript.special_index(73, false), 74)
+	assert_eq(Gen2WorldScript.special_index(77, false), 78)
+	assert_eq(Gen2WorldScript.special_index(105, false), 106)
+	assert_eq(Gen2WorldScript.special_index(107, false), 108)
+
+	# Crystal's mobile block at 109-165 pushes the last three entries past it.
+	assert_eq(Gen2WorldScript.special_index(108, false), 166) # InitialSetDSTFlag
+	assert_eq(Gen2WorldScript.special_index(109, false), 167) # InitialClearDSTFlag
+	assert_eq(Gen2WorldScript.special_index(111, false), 168) # UnusedDummySpecial
+
+	# Gold/Silver 110 is MrChrono, which Crystal has no entry for at all.
+	assert_eq(Gen2WorldScript.special_index(110, false), -1)
+
+
 func test_raw_opcode_round_trips_the_trainer_intro_commands_through_command_at() -> void:
 	# Each trainer-intro command name should decode identically whether it is
 	# reached through the Gold/Silver raw byte or the shifted Crystal raw byte.
