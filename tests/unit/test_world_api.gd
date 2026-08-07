@@ -88,6 +88,15 @@ func _write_cache(game_id: String = "testworld") -> void:
 	# changes: crystal blocks entering from the west, gold does not.
 	collision[8 * 16 + 7] = 0xB1  # COLL_LEFT_WALL
 
+	# Forced-tile fixture, row 5, for DoPlayerMovement.CheckTile: a waterfall at
+	# (1,5) pushing DOWN onto open land, a door at (12,5) whose cell below is a
+	# wall, and a forced-right tile at (15,5) on the east edge, where the forced
+	# step leaves the map through the connection.
+	collision[5 * 16 + 1] = 0x33   # COLL_WATERFALL
+	collision[5 * 16 + 12] = 0x71  # COLL_DOOR
+	collision[6 * 16 + 12] = 0x07  # wall below the door
+	collision[5 * 16 + 15] = 0x41  # COLL_WALK_RIGHT
+
 	# A lone COLL_UP_WALL at (2,10), matching real Route 42 cliff cells: it
 	# blocks stepping off the edge (entering from above, moving DOWN) but not
 	# climbing it (moving UP from below), since the enter rule only tests the
@@ -3143,3 +3152,57 @@ func _event_value(
 	if index >= 0:
 		return (matches[index] as Dictionary).get(key, null) if index < matches.size() else null
 	return (matches[0] as Dictionary).get(key, null) if not matches.is_empty() else null
+
+
+## engine/overworld/player_movement.asm's DoPlayerMovement.CheckTile, which runs
+## before .CheckTurning and .TryStep and overwrites wWalkingDirection, so the
+## standing tile decides the step and the pressed direction is discarded.
+func test_a_waterfall_tile_pushes_the_player_down_whatever_is_pressed() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 5))
+	assert_eq(StringName(world.forced_movement()["kind"]), &"walk")
+	assert_eq(world.forced_movement()["direction"], Vector2i.DOWN)
+
+	var forced: Dictionary = world.move_result(Vector2i.UP)
+	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
+	assert_eq(forced["kind"], &"forced_move")
+	assert_eq(world.player_cell, Vector2i(1, 6))
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+	# Off the waterfall, ordinary movement resumes.
+	assert_eq(StringName(world.forced_movement()["kind"]), &"none")
+	assert_eq(world.move_result(Vector2i.UP)["kind"], &"move")
+
+
+func test_a_forced_step_commits_into_a_cell_an_ordinary_step_refuses() -> void:
+	# .continue_walk reaches .DoStep, which never consults permissions, so the
+	# wall below a door does not stop the step off it.
+	var world: Gen2WorldAPI = _world(Vector2i(12, 5))
+	assert_false(world.can_walk_to(Vector2i(12, 6), Vector2i.DOWN))
+	var forced: Dictionary = world.move_result(Vector2i.LEFT)
+	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
+	assert_eq(forced["kind"], &"forced_move")
+	assert_eq(world.player_cell, Vector2i(12, 6))
+
+
+func test_a_forced_step_off_the_map_edge_takes_the_connection() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(15, 5))
+	assert_eq(world.forced_movement()["direction"], Vector2i.RIGHT)
+	var forced: Dictionary = world.move_result(Vector2i.LEFT)
+	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
+	assert_eq(world.map_id(), Vector2i(1, 2))
+
+
+func test_a_forced_step_spends_a_repel_step_like_an_ordinary_one() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 5))
+	world.state.set_repel_steps(5)
+	assert_true(bool(world.move_result(Vector2i.DOWN).get("ok", false)))
+	assert_eq(world.state.repel_steps(), 4)
+
+
+## advance_forced_movement() is the no-input path, since the source polls
+## .CheckTile every frame rather than only on a press.
+func test_advance_forced_movement_moves_without_a_pressed_direction() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 5))
+	var forced: Dictionary = world.advance_forced_movement()
+	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
+	assert_eq(world.player_cell, Vector2i(1, 6))
+	assert_true(world.advance_forced_movement().is_empty())

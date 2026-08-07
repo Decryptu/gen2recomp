@@ -239,6 +239,83 @@ static func tile_permissions(
 	return permissions
 
 
+## Forced tiles: engine/overworld/player_movement.asm's DoPlayerMovement.CheckTile,
+## which runs in all three movement modes after .GetAction and before .CheckTurning,
+## .TryStep/.TrySurf and .CheckWarp. It reads the code of the cell the player
+## already stands on and overwrites wWalkingDirection, so the pressed direction is
+## discarded. A match reaches .continue_walk, whose .DoStep never consults
+## permissions, so a forced step ignores collision entirely.
+const HI_NYBBLE_CURRENT: int = 0x30
+const HI_NYBBLE_WALK: int = 0x40
+const HI_NYBBLE_WALK_ALT: int = 0x50
+const HI_NYBBLE_WARPS: int = 0x70
+const COLL_WHIRLPOOL: int = 0x24
+const COLL_WHIRLPOOL_2C: int = 0x2C
+const COLL_DOOR: int = 0x71
+const COLL_DOOR_79: int = 0x79
+const COLL_STAIRCASE: int = 0x7A
+const COLL_CAVE: int = 0x7B
+
+## .water_table, indexed by a current code's low two bits. The source masks
+## NUM_DIRECTIONS, not seven, so every code $30-$3f reaches this table.
+const CURRENT_DIRECTION: Array[Vector2i] = [
+	Vector2i.RIGHT,   # COLL_WATERFALL_RIGHT
+	Vector2i.LEFT,    # COLL_WATERFALL_LEFT
+	Vector2i.UP,      # COLL_WATERFALL_UP
+	Vector2i.DOWN,    # COLL_WATERFALL
+]
+
+## .land1_table and .land2_table, indexed by the low three bits. Vector2i.ZERO is
+## the source's STANDING, which falls through to no forced movement.
+const WALK_DIRECTION: Array[Vector2i] = [
+	Vector2i.ZERO,    # COLL_BRAKE
+	Vector2i.RIGHT,   # COLL_WALK_RIGHT
+	Vector2i.LEFT,    # COLL_WALK_LEFT
+	Vector2i.UP,      # COLL_WALK_UP
+	Vector2i.DOWN,    # COLL_WALK_DOWN
+	Vector2i.ZERO,    # COLL_BRAKE_45
+	Vector2i.ZERO,    # COLL_BRAKE_46
+	Vector2i.ZERO,    # COLL_BRAKE_47
+]
+const WALK_ALT_DIRECTION: Array[Vector2i] = [
+	Vector2i.RIGHT,   # COLL_WALK_RIGHT_ALT
+	Vector2i.LEFT,    # COLL_WALK_LEFT_ALT
+	Vector2i.UP,      # COLL_WALK_UP_ALT
+	Vector2i.DOWN,    # COLL_WALK_DOWN_ALT
+	Vector2i.ZERO,    # COLL_BRAKE_ALT
+	Vector2i.ZERO,    # COLL_BRAKE_55
+	Vector2i.ZERO,    # COLL_BRAKE_56
+	Vector2i.ZERO,    # COLL_BRAKE_57
+]
+
+## The .warps branch accepts four codes and refuses every other $7x.
+const WARP_STEP_CODES: Array[int] = [COLL_DOOR, COLL_DOOR_79, COLL_STAIRCASE, COLL_CAVE]
+
+
+## What .CheckTile does to a player standing on [param collision_code]:
+## [code]none[/code], [code]force_turn[/code] (CheckWhirlpoolTile matched, so
+## PLAYERMOVEMENT_FORCE_TURN queues Script_ForcedMovement) or [code]walk[/code]
+## with the direction the tile imposes. Branch order is the source's.
+static func forced_action(collision_code: int) -> Dictionary:
+	if collision_code < 0 or collision_code > 0xFF:
+		return {"kind": &"none"}
+	if collision_code == COLL_WHIRLPOOL or collision_code == COLL_WHIRLPOOL_2C:
+		return {"kind": &"force_turn"}
+	var direction: Vector2i = Vector2i.ZERO
+	match collision_code & 0xF0:
+		HI_NYBBLE_CURRENT:
+			direction = CURRENT_DIRECTION[collision_code & 0x03]
+		HI_NYBBLE_WALK:
+			direction = WALK_DIRECTION[collision_code & 0x07]
+		HI_NYBBLE_WALK_ALT:
+			direction = WALK_ALT_DIRECTION[collision_code & 0x07]
+		HI_NYBBLE_WARPS:
+			direction = Vector2i.DOWN if WARP_STEP_CODES.has(collision_code) else Vector2i.ZERO
+	if direction == Vector2i.ZERO:
+		return {"kind": &"none"}
+	return {"kind": &"walk", "direction": direction}
+
+
 ## Tile-collision std scripts: engine/events/std_collision.asm's
 ## CheckFacingTileForStdScript, dispatched on A once object and background events
 ## both find nothing. data/collision/collision_stdscripts.asm is byte identical

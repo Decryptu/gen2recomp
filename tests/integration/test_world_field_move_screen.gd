@@ -1,14 +1,15 @@
 extends GutTest
 
-## Scene integration for Cut and Surf: the party submenu, the field-move message
-## and the change each commits, driven through the production world screen and
-## party screen.
+## Scene integration for Cut, Surf and Whirlpool: the party submenu, the
+## field-move message and the change each commits, driven through the production
+## world screen and party screen.
 ##
 ## The shared trainer fixture is patched here rather than extended, the same way
 ## test_world_start_menu_screen.gd patches its Potion in: the map moves onto
-## TILESET_JOHTO so the real CutTreeBlockPointers rows apply, and block $5b's
-## bottom-left quadrant becomes the cut tree. The fixture's own water cell at
-## (8,7) is what Surf is driven against.
+## TILESET_JOHTO so the real CutTreeBlockPointers and WhirlpoolBlockPointers rows
+## apply, block $5b's bottom-left quadrant becomes the cut tree and block $07's
+## the whirlpool. The fixture's own water cell at (8,7) is what Surf is driven
+## against.
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
@@ -23,6 +24,12 @@ const PLAYER_CELL: Vector2i = Vector2i(2, 2)
 ## The fixture's own water cell and the land directly above it.
 const WATER_CELL: Vector2i = Vector2i(8, 7)
 const SHORE_CELL: Vector2i = Vector2i(8, 6)
+## WhirlpoolBlockPointers' only row, on the same TILESET_JOHTO the cut rows use.
+const BLOCK_WHIRLPOOL: int = 0x07
+const BLOCK_WHIRLPOOL_GONE: int = 0x36
+const WHIRLPOOL_BLOCK: Vector2i = Vector2i(1, 3)
+const WHIRLPOOL_CELL: Vector2i = Vector2i(2, 7)
+const WHIRLPOOL_STAND_CELL: Vector2i = Vector2i(2, 6)
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -49,6 +56,8 @@ func _write_cut_tree() -> void:
 			raw["name"] = "CUT"
 		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_SURF:
 			raw["name"] = "SURF"
+		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			raw["name"] = "WHIRLPOOL"
 	RomCache.write_json(RomCache.moves_path(directory), moves)
 
 	var tilesets: Array = RomCache.read_json(RomCache.world_tilesets_path(directory))
@@ -65,6 +74,7 @@ func _write_cut_tree() -> void:
 	tile_collision.fill(0)
 	# Quadrant order is top-left, top-right, bottom-left, bottom-right.
 	tile_collision[BLOCK_TREE * 4 + 2] = 0x12  # COLL_CUT_TREE
+	tile_collision[BLOCK_WHIRLPOOL * 4 + 2] = 0x24  # COLL_WHIRLPOOL
 	tileset["collision"] = tile_collision
 	RomCache.write_json(RomCache.world_tilesets_path(directory), tilesets)
 
@@ -76,8 +86,10 @@ func _write_cut_tree() -> void:
 			continue
 		var blocks: Array = raw["blocks"]
 		blocks[TREE_BLOCK.y * Fixture.MAP_WIDTH_BLOCKS + TREE_BLOCK.x] = BLOCK_TREE
+		blocks[WHIRLPOOL_BLOCK.y * Fixture.MAP_WIDTH_BLOCKS + WHIRLPOOL_BLOCK.x] = BLOCK_WHIRLPOOL
 		var collision: Array = raw["collision"]
 		collision[TREE_CELL.y * Fixture.MAP_WIDTH_CELLS + TREE_CELL.x] = 0x12
+		collision[WHIRLPOOL_CELL.y * Fixture.MAP_WIDTH_CELLS + WHIRLPOOL_CELL.x] = 0x24
 	RomCache.write_json(RomCache.world_maps_path(directory), maps)
 
 	var tiles: PackedByteArray = PackedByteArray()
@@ -129,6 +141,14 @@ func _open_world(
 
 func _open_surf_world(badge: bool = true, cell: Vector2i = SHORE_CELL) -> void:
 	await _open_world(badge, Gen2WorldFieldMove.MOVE_SURF, Gen2WorldFieldMove.BADGE_FOG, cell)
+
+
+func _open_whirlpool_world(
+	badge: bool = true, cell: Vector2i = WHIRLPOOL_STAND_CELL
+) -> void:
+	await _open_world(
+		badge, Gen2WorldFieldMove.MOVE_WHIRLPOOL, Gen2WorldFieldMove.BADGE_GLACIER, cell
+	)
 
 
 func _open_party() -> Gen2PartyScreen:
@@ -348,3 +368,62 @@ func test_cancel_closes_the_submenu_before_the_party_screen() -> void:
 	party.handle_key(KEY_ESCAPE)
 	await get_tree().process_frame
 	assert_null(_world_screen._party_host)
+
+
+func test_submenu_lists_whirlpool_for_a_mon_that_knows_it() -> void:
+	await _open_whirlpool_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["WHIRLPOOL", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
+	)
+
+
+func test_choosing_whirlpool_shows_the_message_and_defers_the_block_change() -> void:
+	await _open_whirlpool_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_null(_world_screen._party_host)
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "TESTMON used WHIRLPOOL!")
+	# Script_UsedWhirlpool reaches DisappearWhirlpool only after UseWhirlpoolText.
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL)
+	assert_eq(world.collision_code_at(WHIRLPOOL_CELL), 0x24)
+
+	_world_screen._acknowledge_field_move_text()
+	assert_false(_world_screen._field_move_text)
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL_GONE)
+	assert_ne(world.collision_code_at(WHIRLPOOL_CELL), 0x24)
+	assert_true(world.pending_whirlpool().is_empty())
+
+
+func test_whirlpool_without_the_badge_reports_the_badge_and_changes_nothing() -> void:
+	await _open_whirlpool_world(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL)
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL)
+
+
+## .FailWhirlpool calls FieldMoveFailed, so the tile refusal is _CantUseItemText
+## rather than a whirlpool-specific line the way Cut's .FailCut has one.
+func test_whirlpool_facing_nothing_reports_the_generic_refusal() -> void:
+	await _open_whirlpool_world()
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "Can't use that here.")

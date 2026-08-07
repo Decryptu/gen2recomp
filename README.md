@@ -155,9 +155,11 @@ for a fallback pairing.
 
 The world screen's start menu wires Pokemon, Pack, Pokegear, Save and Exit;
 Pokedex, Player and Options appear in their source position but do nothing yet.
-The party submenu offers Cut and Surf to a Pokemon that knows one; both show
-their message first and change the world on the acknowledge, and stepping from
-water back onto land stops surfing.
+The party submenu offers Cut, Surf and Whirlpool to a Pokemon that knows one; all
+three show their message first and change the world on the acknowledge, and
+stepping from water back onto land stops surfing. Standing on a whirlpool,
+waterfall, door, staircase or cave tile overrides the pressed direction the way
+the cartridge does.
 The imported Players House PC opens the embedded box storage screen. The host
 clock advances one game minute per real minute and crosses source day
 boundaries. `preview_emote()`, `preview_wild_encounter()`,
@@ -178,6 +180,7 @@ Headless tools, all against a real imported cache:
 | `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
 | `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree, in all three games |
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
+| `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction

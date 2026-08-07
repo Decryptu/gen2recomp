@@ -88,6 +88,9 @@ var _pending_cut: Dictionary = {}
 ## UsedSurfScript shows its text. The cell it names belongs to the loaded map,
 ## so it is cleared beside the Cut request.
 var _pending_surf: Dictionary = {}
+## The same for Whirlpool, which shares the source's wCutWhirlpool* slots with
+## Cut and is cleared beside it for the same reason.
+var _pending_whirlpool: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -557,6 +560,75 @@ func complete_surf() -> Dictionary:
 
 static func _surf_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"surf_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's WhirlpoolFunction .TryWhirlpool, staged the way
+## Cut is: TryWhirlpoolMenu fills the same wCutWhirlpool* slots, and
+## Script_UsedWhirlpool reaches DisappearWhirlpool only after UseWhirlpoolText.
+##
+## .TryWhirlpool checks ENGINE_GLACIERBADGE before the tile, the same order
+## .CheckAble has. It checks no player state at all: the source neither requires
+## nor refuses surfing, so a player facing a whirlpool from land resolves too.
+func whirlpool_request() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _whirlpool_failure(&"missing_map")
+	if not _pending_whirlpool.is_empty():
+		return _whirlpool_failure(&"whirlpool_in_progress")
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_GLACIER, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _whirlpool_failure(&"badge_required")
+	var target: Vector2i = facing_cell()
+	if not Gen2WorldFieldMove.whirlpool_tile(collision_code_at(target)):
+		return _whirlpool_failure(&"nothing_to_whirlpool")
+	var block_cell: Vector2i = _script_block_cell(target)
+	var replacement: Dictionary = Gen2WorldFieldMove.whirlpool_replacement(
+		current_map.tileset, block_at(block_cell.x, block_cell.y)
+	)
+	if not bool(replacement.get("ok", false)):
+		return _whirlpool_failure(&"nothing_to_whirlpool")
+	_pending_whirlpool = {
+		"ok": true,
+		"kind": &"whirlpool_requested",
+		"move": Gen2WorldFieldMove.MOVE_WHIRLPOOL,
+		"cell": target,
+		"block_cell": block_cell,
+		"block": int(replacement["block"]),
+		"animation": int(replacement["animation"]),
+	}
+	return _pending_whirlpool.duplicate(true)
+
+
+## Empty until whirlpool_request() succeeds. A host shows its text while this is set.
+func pending_whirlpool() -> Dictionary:
+	return _pending_whirlpool.duplicate(true)
+
+
+## DisappearWhirlpool, which writes the replacement block and re-runs
+## GetMovementPermissions exactly as CutDownTreeOrGrass does, so the override
+## dies with the loaded map and the whirlpool returns on the next visit.
+func complete_whirlpool() -> Dictionary:
+	if _pending_whirlpool.is_empty():
+		return _whirlpool_failure(&"no_pending_whirlpool")
+	var request: Dictionary = _pending_whirlpool
+	_pending_whirlpool = {}
+	var block_cell: Vector2i = request["block_cell"]
+	var changed: Dictionary = change_block(block_cell.x, block_cell.y, int(request["block"]))
+	if not bool(changed.get("ok", false)):
+		return changed
+	return {
+		"ok": true,
+		"kind": &"whirlpool_applied",
+		"move": int(request["move"]),
+		"cell": request["cell"],
+		"block_cell": block_cell,
+		"block": int(request["block"]),
+		"animation": int(request["animation"]),
+	}
+
+
+static func _whirlpool_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"whirlpool_failed", "reason": reason}
 
 
 ## Rolls an encounter from the current map. Auto mode preserves the existing
@@ -2511,9 +2583,19 @@ func move_result(direction: Vector2i) -> Dictionary:
 		return {"ok": false, "kind": &"move", "reason": &"phone_ring_active"}
 	if abs(direction.x) + abs(direction.y) != 1:
 		return {"ok": false, "kind": &"move", "reason": &"invalid_direction"}
-	var destination: Vector2i = player_cell + direction
 	if current_map == null:
 		return {"ok": false, "kind": &"move", "reason": &"missing_map"}
+	## .CheckTile runs before .CheckTurning and .TryStep/.TrySurf and overwrites
+	## wWalkingDirection, so the standing tile wins over the pressed direction.
+	var forced: Dictionary = forced_movement()
+	var forced_walk: bool = false
+	match StringName(forced.get("kind", &"none")):
+		&"force_turn":
+			return _forced_turn()
+		&"walk":
+			direction = forced["direction"]
+			forced_walk = true
+	var destination: Vector2i = player_cell + direction
 	if destination.x < 0 or destination.y < 0 \
 		or destination.x >= current_map.collision_width \
 		or destination.y >= current_map.collision_height:
@@ -2524,6 +2606,8 @@ func move_result(direction: Vector2i) -> Dictionary:
 				state.consume_repel_step()
 			return transition
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
+	if forced_walk:
+		return _forced_step(direction, destination)
 	if not can_walk_to(destination, direction):
 		var hop: Dictionary = _try_ledge_hop(direction)
 		if not hop.is_empty():
@@ -2554,6 +2638,69 @@ func move_result(direction: Vector2i) -> Dictionary:
 	return {
 		"ok": true,
 		"kind": kind,
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": from_map,
+		"to_cell": player_cell,
+	}
+
+
+## .CheckTile for the cell the player stands on: whether the tile overrides input,
+## and with what. [code]none[/code] leaves ordinary movement alone.
+func forced_movement() -> Dictionary:
+	if current_map == null:
+		return {"kind": &"none"}
+	return Gen2WorldCollision.forced_action(collision_code_at(player_cell))
+
+
+## Applies whatever the standing tile forces, with no input at all, because the
+## source polls .CheckTile every frame rather than only on a press. Empty when
+## the tile forces nothing.
+func advance_forced_movement() -> Dictionary:
+	var forced: Dictionary = forced_movement()
+	match StringName(forced.get("kind", &"none")):
+		&"force_turn":
+			return _forced_turn()
+		&"walk":
+			return move_result(forced["direction"])
+	return {}
+
+
+## PLAYERMOVEMENT_FORCE_TURN, which queues Script_ForcedMovement: it reads
+## VAR_FACING, the committed facing rather than the pressed direction, and applies
+## a stream of step_dig, turn_in and turn_head. None of those opcodes moves a cell,
+## so the whole effect is that the player is spun to face the way they came. A
+## player who surfs onto a whirlpool therefore cannot walk off it, which is the
+## cartridge's own behavior and not a gap here.
+func _forced_turn() -> Dictionary:
+	player_facing = _facing_for_direction(-_direction_for_facing(player_facing))
+	return {
+		"ok": true,
+		"kind": &"forced_turn",
+		"cell": player_cell,
+		"facing": player_facing,
+	}
+
+
+## .continue_walk: STEP_WALK through .DoStep, which never consults permissions, so
+## a forced step commits into a cell an ordinary step would refuse. It reaches
+## .CheckTile before .TrySurf, so it also never runs .ExitWater: a forced step from
+## water onto land keeps the surfing state. No shipped map places a forced tile
+## where either matters; both are kept because the source has no guard for them.
+func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	var previous_cells: Dictionary = {}
+	for index: int in objects.size():
+		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
+	player_cell = destination
+	player_facing = _facing_for_direction(direction)
+	state.consume_repel_step()
+	_advance_followers(from_cell, previous_cells)
+	_start_player_step(direction, STEP_FRAMES_WALK)
+	return {
+		"ok": true,
+		"kind": &"forced_move",
 		"from_map": from_map,
 		"from_cell": from_cell,
 		"to_map": from_map,
@@ -2699,6 +2846,7 @@ func _apply_map(
 	_block_overrides.clear()
 	_pending_cut.clear()
 	_pending_surf.clear()
+	_pending_whirlpool.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -2741,6 +2889,7 @@ func reload_current_map() -> Dictionary:
 	_block_overrides.clear()
 	_pending_cut.clear()
 	_pending_surf.clear()
+	_pending_whirlpool.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
