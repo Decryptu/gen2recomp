@@ -127,6 +127,16 @@ static func begin(
 	var trainer_phase: StringName = StringName(request.get("trainer_phase", &""))
 	var trainer: Variant = request.get("trainer", {})
 	var started: bool = false
+	if not trainer_phase.is_empty():
+		## LoadTrainer_continue clears wRunningTrainerBattleScript for every
+		## trainer encounter, talked to or seen (home/trainers.asm), and only
+		## StartBattleWithMapTrainerScript's `loadmem wRunningTrainerBattleScript,
+		## -1` sets it again. Without this the flag committed by one battle
+		## outlives it, so `endifjustbattled` ends the after-battle script on
+		## every later conversation and nothing past that command ever runs. The
+		## Rocket hideout's two password grunts are the first place on the walked
+		## route where that content is load bearing.
+		runner._stage_just_battled(false)
 	if trainer_phase == &"initial" and trainer is Dictionary:
 		started = runner._push_frame(
 			bank, address, runner._trainer_intro_script(trainer as Dictionary)
@@ -512,11 +522,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	if Gen2WorldScript.is_waitbutton(opcode, _crystal_commands()) \
 		or Gen2WorldScript.is_promptbutton(opcode, _crystal_commands()):
 		return _stage_button(command)
-	var source_opcode: int = opcode - 1 if _crystal_commands() and opcode >= 0x56 else opcode
-	var object_result: Dictionary = _execute_object_command(source_opcode, command)
+	var source: int = Gen2WorldScript.source_opcode(opcode, _crystal_commands())
+	var object_result: Dictionary = _execute_object_command(source, command)
 	if not object_result.is_empty():
 		return object_result
-	var later_result: Dictionary = _execute_later_command(source_opcode, command, bank)
+	var later_result: Dictionary = _execute_later_command(source, command, bank)
 	if not later_result.is_empty():
 		return later_result
 	if Gen2WorldScript.is_terminal(opcode, _crystal_commands()):
@@ -767,6 +777,16 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 				for key: String in cached_menu:
 					_loaded_menu[key] = cached_menu[key]
 			_emit_runtime_event(&"menu_loaded", _loaded_menu)
+		Gen2WorldScript.CHECKPOKE:
+			## Script_checkpoke sets wScriptVar from whether the species is in
+			## wPartySpecies (engine/overworld/scripting.asm). The read-only party
+			## summary is the only party this scene-free runner may read, and an
+			## absent one fails the way VAR_PARTYCOUNT does.
+			var party: Dictionary = _request.get("party", {})
+			if party.is_empty() or not party.has("species"):
+				return {"ok": false, "reason": &"missing_party_summary", "command": command}
+			var species: Array = party.get("species", [])
+			_script_value = 1 if int(command.get("value", 0)) in species else 0
 		Gen2WorldScript.GIVEPOKE, Gen2WorldScript.GIVEEGG:
 			return _stage_runtime_request(&"pokemon_requested", command)
 		Gen2WorldScript.GIVEPOKEMAIL, Gen2WorldScript.CHECKPOKEMAIL:
@@ -783,7 +803,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.READMEM,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,
-		Gen2WorldScript.CHECKITEM,
+		Gen2WorldScript.CHECKITEM, Gen2WorldScript.CHECKPOKE,
 		Gen2WorldScript.ADDCELLNUM, Gen2WorldScript.DELCELLNUM,
 		Gen2WorldScript.CHECKCELLNUM,
 		Gen2WorldScript.GOLD_FACEPLAYER, Gen2WorldScript.FACEPLAYER,
@@ -910,12 +930,10 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 						"bank": bank, "address": after_address,
 					}
 		0x65:
-			if _has_staged_just_battled or (state != null and state.just_battled()):
+			if _just_battled():
 				_frames.clear()
 		0x66:
-			_script_value = 1 if _has_staged_just_battled or (
-				state != null and state.just_battled()
-			) else 0
+			_script_value = 1 if _just_battled() else 0
 		0x73:
 			_loaded_emote = int(command.get("value", -1))
 			if _loaded_emote == 0xFF:
@@ -1491,7 +1509,7 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
-		46, 48, 49, 50, 51, 94, 157, 158:
+		46, 48, 49, 50, 51, 94, 95, 157, 158:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
 			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
@@ -1500,7 +1518,8 @@ func _execute_special(special: int) -> Dictionary:
 			## special_index() already normalizes (maps/OlivineLighthouse6F.asm's
 			## Amphy cure runs 46 then 49); `LoadUsedSpritesGFX` (94) and
 			## `RefreshSprites` (158) reload the sprite set a `variablesprite`
-			## just changed.
+			## just changed. `PlaySlowCry` (95) is the cry player with its pitch
+			## and tempo lowered, so it plays audio and reads nothing.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_INIT_ROAM_MONS:
 			## InitRoamMons seeds the roam structs with Raikou and Entei at
@@ -1719,6 +1738,16 @@ func _stage_warp_facing_request(command: Dictionary) -> Dictionary:
 	}
 	_events.append({"type": &"player_facing_requested", "facing": warp["facing"]})
 	return _stage_warp(command)
+
+
+## `wRunningTrainerBattleScript` as this script sees it: a value staged during
+## the run wins over the committed one, since a script that stages false has
+## cleared the flag for everything after it. Reading only the "has a staged
+## value" side made `endifjustbattled` true whenever anything had touched it.
+func _just_battled() -> bool:
+	if _has_staged_just_battled:
+		return _staged_just_battled
+	return state != null and state.just_battled()
 
 
 func _stage_just_battled(value: bool) -> void:

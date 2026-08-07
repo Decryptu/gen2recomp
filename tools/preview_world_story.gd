@@ -740,6 +740,10 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(mineral.get("ok", false)):
 		return mineral
 
+	var hideout: Dictionary = _rocket_hideout_path(world, save, random, data, path)
+	if not bool(hideout.get("ok", false)):
+		return hideout
+
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
 		party_summary.append({
@@ -1852,6 +1856,392 @@ func _mineral_badge_path(
 			"reason": "Jasmine failed: %s" % jasmine.get("reason", ""),
 		}
 	return {"ok": true}
+
+
+## The Mineral Badge to the Rocket hideout's two passwords. Mahogany's gym is
+## closed until the hideout under its souvenir shop is cleared
+## (`EVENT_MAHOGANY_TOWN_POKEFAN_M_BLOCKS_GYM`, `maps/MahoganyTown.asm`), and the
+## hideout only opens after Lance is met at the Lake of Rage, which is behind the
+## Red Gyarados in the middle of the water.
+##
+## The leg stops on B3F with both passwords learned. What is left of the hideout
+## needs floor shuttles this walk does not do yet: B3F's northern half, where the
+## rival, Giovanni's door and the executive are, is reachable only from B2F's own
+## northern half, which the heal room does not reach either.
+func _rocket_hideout_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 1, 14)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Olivine Gym exit warp failed"}
+	var _city_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	for leg: Dictionary in [
+		{"step": "olivine_to_route_39", "direction": "north", "group": 1, "number": 13},
+		{"step": "route_39_to_route_38", "direction": "east", "group": 1, "number": 12},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+	var to_ecruteak: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(35, 8), 4, 9
+	)
+	if not bool(to_ecruteak.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 38 back to Ecruteak failed: %s" % to_ecruteak.get("reason", ""),
+		}
+
+	var to_route_42: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(35, 26), 2, 5
+	)
+	if not bool(to_route_42.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ecruteak to Route 42 failed: %s" % to_route_42.get("reason", ""),
+		}
+	# Route 42's halves do not join on foot. Its west side ends at x=13 and its
+	# only other land exit is Mt Mortar's door at (10,5), which opens into a cave
+	# pocket of its own, so the lake is the crossing. (13,9) is the west shore and
+	# the water runs east and down to the far shore at (22,12).
+	var across_route_42: Dictionary = _surf_at(
+		world, Vector2i(13, 9), Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(across_route_42.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 surf entry failed: %s" % across_route_42.get("reason", ""),
+		}
+	var route_42_shore: Dictionary = _walk_cell_resolving(
+		world, Vector2i(22, 12), save, random, data, true
+	)
+	if not bool(route_42_shore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 landfall failed: %s" % route_42_shore.get("reason", ""),
+		}
+	# The middle strip is its own pocket: a second lake separates it from the
+	# half that reaches Mahogany, so the route takes the water twice.
+	var second_crossing: Dictionary = _surf_at(
+		world, Vector2i(33, 10), Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(second_crossing.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 second surf failed: %s" % second_crossing.get("reason", ""),
+		}
+	var route_42_far_shore: Dictionary = _walk_cell_resolving(
+		world, Vector2i(42, 9), save, random, data, true
+	)
+	path.append({
+		"step": "route_42_lake_crossing",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(route_42_far_shore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 far landfall failed: %s" % route_42_far_shore.get("reason", ""),
+		}
+	var to_mahogany: Dictionary = _walk_connection_resolving(
+		world, "east", 2, 7, save, random, data
+	)
+	var mahogany_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_42_to_mahogany",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_mahogany.get("encounters", []),
+		"run": mahogany_entry,
+	})
+	if not bool(to_mahogany.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 42 to Mahogany failed: %s" % to_mahogany.get("reason", ""),
+		}
+
+	var to_route_43: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(9, 1), 9, 5
+	)
+	if not bool(to_route_43.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Mahogany to Route 43 failed: %s" % to_route_43.get("reason", ""),
+		}
+	var to_lake: Dictionary = _walk_connection_resolving(
+		world, "north", 9, 6, save, random, data
+	)
+	var lake_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_43_to_lake_of_rage",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_lake.get("encounters", []),
+		"run": lake_entry,
+	})
+	if not bool(to_lake.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 43 to the Lake of Rage failed: %s" % to_lake.get("reason", ""),
+		}
+
+	# The shore cell north of the gramps: (20,26) is his own cell and (24,26) is
+	# Fisher Raymond's, so the walked route takes the water at (22,26).
+	var into_the_lake: Dictionary = _surf_at(
+		world, Vector2i(22, 26), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	if not bool(into_the_lake.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Lake of Rage surf entry failed: %s" % into_the_lake.get("reason", ""),
+		}
+	# RedGyarados is loadwildmon plus BATTLETYPE_FORCESHINY, not a trainer, and
+	# the Red Scale it leaves behind is what Lance appears for.
+	var gyarados: Dictionary = _talk_to_on_water(
+		world, Vector2i(18, 23), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "lake_of_rage_red_gyarados",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": gyarados.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(gyarados.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Red Gyarados failed: %s" % gyarados.get("reason", ""),
+		}
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, Vector2i(22, 26), save, random, data, true
+	)
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Lake of Rage landfall failed: %s" % ashore.get("reason", ""),
+		}
+	var lance: Dictionary = _talk_to(
+		world, Vector2i(21, 29), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "lake_of_rage_lance",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": lance.get("run", {}),
+		"mart_scene": world.state.map_scene(3, 48),
+	})
+	if not bool(lance.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Lake of Rage Lance failed: %s" % lance.get("reason", ""),
+		}
+
+	var back_to_route_43: Dictionary = _walk_connection_resolving(
+		world, "south", 9, 5, save, random, data
+	)
+	var _r43_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(back_to_route_43.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Lake of Rage back to Route 43 failed: %s" % back_to_route_43.get(
+				"reason", ""
+			),
+		}
+	var back_to_mahogany: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(9, 51), 2, 7
+	)
+	if not bool(back_to_mahogany.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 43 back to Mahogany failed: %s" % back_to_mahogany.get("reason", ""),
+		}
+
+	# MahoganyMart1F's scene 1 is Lance's Dragonite clearing the shop and the
+	# changeblock that uncovers the staircase, deferred by the scene script.
+	var mart: Dictionary = _warp_walk(world, Vector2i(11, 7), save, random, data)
+	if not bool(mart.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Mahogany Mart door unreachable: %s" % mart.get("reason", ""),
+		}
+	var stairs: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data, true
+	)
+	path.append({
+		"step": "mahogany_mart_lance_uncovers_the_stairs",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": stairs,
+	})
+	if not bool(stairs.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Mahogany Mart staircase scene did not finish: %s" % stairs.get(
+				"reason", ""
+			),
+		}
+
+	var into_the_base: Dictionary = _warp_walk(world, Vector2i(7, 3), save, random, data)
+	if not bool(into_the_base.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Rocket base staircase unreachable: %s" % into_the_base.get("reason", ""),
+		}
+	var _b1f_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	# The secret switch behind the bookshelves sets all five camera events at
+	# once, which is what stops the coord events on the way to the B2F ladder
+	# from calling two grunts each.
+	var switch: Dictionary = _talk_to(
+		world, Vector2i(19, 12), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "rocket_base_b1f_secret_switch",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": switch.get("run", {}),
+	})
+	if not bool(switch.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B1F secret switch failed: %s" % switch.get("reason", ""),
+		}
+	var to_b2f: Dictionary = _warp_walk(world, Vector2i(3, 14), save, random, data)
+	if not bool(to_b2f.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B2F ladder unreachable: %s" % to_b2f.get("reason", ""),
+		}
+	var _b2f_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var heal: Dictionary = _walk_cell_resolving(world, Vector2i(5, 14), save, random, data)
+	path.append({
+		"step": "rocket_base_b2f_lance_heals",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": heal.get("encounters", []),
+		"scene": world.state.map_scene(3, 50),
+	})
+	if not bool(heal.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B2F Lance heal failed: %s" % heal.get("reason", ""),
+		}
+
+	# The B2F ladder the heal room reaches is the far one: row 12 is a solid wall
+	# and the only way north out of the bottom section is the right-hand column.
+	var to_b3f: Dictionary = _warp_walk(world, Vector2i(27, 14), save, random, data)
+	if not bool(to_b3f.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F ladder unreachable: %s" % to_b3f.get("reason", ""),
+		}
+	# B3F's first scene defers LanceGetPasswordScript, which ends by arming the
+	# rival scene; the rival scene arms the executive.
+	var password_scene: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data, true
+	)
+	path.append({
+		"step": "rocket_base_b3f_lance_asks_for_the_password",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": password_scene,
+		"scene": world.state.map_scene(3, 51),
+	})
+	if not bool(password_scene.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "B3F Lance scene did not finish: %s" % password_scene.get("reason", ""),
+		}
+	# Both password grunts stand on the half of B3F the heal-room ladder reaches,
+	# and their after-battle scripts are what set EVENT_LEARNED_SLOWPOKETAIL and
+	# EVENT_LEARNED_RATICATE_TAIL, which the door to Giovanni's office checks.
+	for grunt: Dictionary in [
+		{"name": "slowpoketail", "cell": Vector2i(21, 8), "facing": Gen2WorldSprite.FACING_UP},
+		{"name": "raticate_tail", "cell": Vector2i(5, 15), "facing": Gen2WorldSprite.FACING_UP},
+	]:
+		var fought: Dictionary = _talk_to(
+			world, grunt["cell"], int(grunt["facing"]), save, random, data
+		)
+		if not bool(fought.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "B3F %s grunt failed: %s" % [grunt["name"], fought.get("reason", "")],
+			}
+		# The password is in the after-battle script, and that script opens with
+		# endifjustbattled, so the turn that beat the grunt ends before reaching
+		# the setevent. The source needs the second conversation, which is what
+		# actually says the password.
+		var password: Dictionary = _talk_to(
+			world, grunt["cell"], int(grunt["facing"]), save, random, data
+		)
+		path.append({
+			"step": "rocket_base_b3f_%s_grunt" % grunt["name"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"battle": fought.get("run", {}).get("battles", []),
+			"run": password.get("run", {}),
+		})
+		if not bool(password.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "B3F %s password failed: %s" % [
+					grunt["name"], password.get("reason", ""),
+				],
+			}
+	return {"ok": true}
+
+
+## _talk_to() for a target the player has to reach across water. The frontier
+## stays on water so the plan cannot step ashore partway and stop surfing.
+func _talk_to_on_water(
+	world: Gen2WorldAPI,
+	cell: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data, true)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	return {
+		"ok": bool(run.get("terminal", false)),
+		"reason": run.get("reason", ""),
+		"run": run,
+	}
 
 
 ## The lighthouse floors reached by ladder on the way up and by hole on the way

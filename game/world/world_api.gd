@@ -333,14 +333,21 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 	return {"ok": true, "mode": movement_mode}
 
 
-## Sets the read-only party mirror a queued script's VAR_PARTYCOUNT read and
-## CheckPokerus special consult. count must be non-negative; has_pokerus is the
-## source's own low-nibble-nonzero check across the whole party, computed by
-## the caller because Gen2WorldAPI does not read Gen2SaveMon fields directly.
-func set_party_summary(count: int, has_pokerus: bool) -> Dictionary:
+## Sets the read-only party mirror a queued script's VAR_PARTYCOUNT read, its
+## CheckPokerus special and its checkpoke consult. count must be non-negative;
+## has_pokerus is the source's own low-nibble-nonzero check across the whole
+## party, computed by the caller because Gen2WorldAPI does not read Gen2SaveMon
+## fields directly. [param species] mirrors `wPartySpecies` for `checkpoke`, and
+## an empty list only means no caller supplied one, so `checkpoke` fails the way
+## VAR_PARTYCOUNT does rather than answering false.
+func set_party_summary(
+	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int]
+) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
-	_party_summary = {"count": count, "pokerus": has_pokerus}
+	_party_summary = {
+		"count": count, "pokerus": has_pokerus, "species": species.duplicate(),
+	}
 	return {"ok": true}
 
 
