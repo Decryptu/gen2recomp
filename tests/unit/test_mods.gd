@@ -21,17 +21,17 @@ func after_each() -> void:
 	Gen2ModHost.reset()
 
 
-func _clear() -> void:
-	var root: DirAccess = DirAccess.open(ROOT)
-	if root == null:
+## Recursive, because an installed mod can carry nested directories and a
+## non-empty one refuses to be removed.
+func _clear(path: String = ROOT) -> void:
+	var directory: DirAccess = DirAccess.open(path)
+	if directory == null:
 		return
-	for name: String in root.get_directories():
-		var mod: DirAccess = DirAccess.open("%s/%s" % [ROOT, name])
-		if mod != null:
-			for file: String in mod.get_files():
-				DirAccess.remove_absolute("%s/%s/%s" % [ROOT, name, file])
-		DirAccess.remove_absolute("%s/%s" % [ROOT, name])
-	DirAccess.remove_absolute(ROOT)
+	for name: String in directory.get_directories():
+		_clear("%s/%s" % [path, name])
+	for file: String in directory.get_files():
+		DirAccess.remove_absolute("%s/%s" % [path, file])
+	DirAccess.remove_absolute(path)
 
 
 func _write(path: String, text: String) -> void:
@@ -353,3 +353,284 @@ func test_a_broken_mod_is_reported_and_does_not_stop_the_others() -> void:
 	var failures: Array = host.failures()
 	assert_eq(failures.size(), 1)
 	assert_eq(failures[0]["reason"], &"missing_entry_script")
+	# The reason alone cannot be reported: the launcher and the startup warning
+	# name the mod from the failure itself.
+	assert_eq(failures[0]["id"], _valid_manifest()["id"])
+	assert_true(String(failures[0]["directory"]).ends_with(_valid_manifest()["id"]))
+
+
+## Builds a zip at [param path] from { entry path: text } so an installer test
+## can describe an archive's layout in one literal.
+func _write_zip(path: String, entries: Dictionary) -> void:
+	var packer := ZIPPacker.new()
+	assert_eq(packer.open(path), OK, "could not open %s for writing" % path)
+	for entry: String in entries:
+		packer.start_file(entry)
+		packer.write_file(String(entries[entry]).to_utf8_buffer())
+		packer.close_file()
+	packer.close()
+
+
+## A distinct id from _valid_manifest(): before_each() already creates
+## ROOT/voxel, and an installer test needs a destination that does not exist.
+func _packaged_manifest() -> Dictionary:
+	var source: Dictionary = _valid_manifest()
+	source["id"] = "packaged"
+	source["name"] = "Packaged Mod"
+	return source
+
+
+func _mod_zip_entries(prefix: String = "") -> Dictionary:
+	var at: String = prefix if prefix.is_empty() else "%s/" % prefix
+	return {
+		"%smod.json" % at: JSON.stringify(_packaged_manifest()),
+		"%smod.gd" % at: "extends RefCounted\n\nfunc register(_h, _m) -> void:\n\tpass\n",
+		"%sextra/notes.txt" % at: "kept",
+	}
+
+
+func test_locate_root_accepts_a_manifest_at_the_archive_root_or_one_folder_down() -> void:
+	assert_eq(Gen2ModInstaller.locate_root(
+		PackedStringArray(["mod.json", "mod.gd"])
+	)["prefix"], "")
+	assert_eq(Gen2ModInstaller.locate_root(
+		PackedStringArray(["voxel/mod.json", "voxel/mod.gd"])
+	)["prefix"], "voxel")
+
+
+func test_locate_root_refuses_an_archive_without_exactly_one_mod() -> void:
+	# Two mods in one archive have no obvious winner.
+	var two: Dictionary = Gen2ModInstaller.locate_root(
+		PackedStringArray(["a/mod.json", "b/mod.json"])
+	)
+	assert_false(two["ok"])
+	assert_eq(two["reason"], &"archive_holds_more_than_one_folder")
+
+	var none: Dictionary = Gen2ModInstaller.locate_root(
+		PackedStringArray(["voxel/renderer.gd"])
+	)
+	assert_false(none["ok"])
+	assert_eq(none["reason"], &"archive_has_no_manifest")
+
+
+func test_is_safe_entry_refuses_paths_that_leave_the_mod_directory() -> void:
+	assert_true(Gen2ModInstaller.is_safe_entry("voxel/mod.gd", "voxel"))
+	assert_true(Gen2ModInstaller.is_safe_entry("extra/deep/file.txt", ""))
+	# A zip may name any path it likes; these would write outside the mod.
+	assert_false(Gen2ModInstaller.is_safe_entry("voxel/../../evil.gd", "voxel"))
+	assert_false(Gen2ModInstaller.is_safe_entry("../evil.gd", ""))
+	assert_false(Gen2ModInstaller.is_safe_entry("/etc/passwd", ""))
+	assert_false(Gen2ModInstaller.is_safe_entry("user://evil.gd", ""))
+	assert_false(Gen2ModInstaller.is_safe_entry("other/mod.gd", "voxel"))
+
+
+func test_installing_a_zip_writes_the_mod_and_the_host_then_loads_it() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+
+	var result: Dictionary = Gen2ModInstaller.install_zip(archive, false, &"", ROOT)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["id"], &"packaged")
+	assert_eq(int(result["files"]), 3)
+	assert_false(result["replaced"])
+	# The nested path survives the copy rather than being flattened.
+	assert_true(FileAccess.file_exists("%s/packaged/extra/notes.txt" % ROOT))
+
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"packaged"])
+
+
+func test_installing_over_an_existing_mod_needs_replace() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+	assert_true(Gen2ModInstaller.install_zip(archive, false, &"", ROOT)["ok"])
+
+	var again: Dictionary = Gen2ModInstaller.install_zip(archive, false, &"", ROOT)
+	assert_false(again["ok"])
+	assert_eq(again["reason"], &"already_installed")
+
+	var replaced: Dictionary = Gen2ModInstaller.install_zip(archive, true, &"", ROOT)
+	assert_true(replaced["ok"], JSON.stringify(replaced))
+	assert_true(replaced["replaced"])
+
+
+func test_replacing_a_mod_does_not_keep_a_file_the_new_version_dropped() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+	assert_true(Gen2ModInstaller.install_zip(archive, false, &"", ROOT)["ok"])
+	assert_true(FileAccess.file_exists("%s/packaged/extra/notes.txt" % ROOT))
+
+	var slimmer: Dictionary = _mod_zip_entries("packaged")
+	slimmer.erase("packaged/extra/notes.txt")
+	_write_zip(archive, slimmer)
+	assert_true(Gen2ModInstaller.install_zip(archive, true, &"", ROOT)["ok"])
+	assert_false(FileAccess.file_exists("%s/packaged/extra/notes.txt" % ROOT))
+
+
+func test_an_expected_id_refuses_an_archive_for_a_different_mod() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+	var result: Dictionary = Gen2ModInstaller.install_zip(archive, false, &"something_else", ROOT)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"unexpected_mod_id")
+	assert_false(DirAccess.dir_exists_absolute("%s/packaged" % ROOT))
+
+
+func test_a_refused_archive_writes_nothing() -> void:
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	var not_a_zip: String = "%s/plain.zip" % ROOT
+	_write(not_a_zip, "this is not an archive")
+	var refused: Dictionary = Gen2ModInstaller.install_zip(not_a_zip, false, &"", ROOT)
+	assert_false(refused["ok"])
+	assert_eq(refused["reason"], &"not_a_zip")
+
+	var bad_manifest: String = "%s/bad.zip" % ROOT
+	_write_zip(bad_manifest, {
+		"packaged/mod.json": JSON.stringify({
+			"id": "packaged", "name": "Packaged", "version": "1.0.0",
+			"api_version": Gen2ModManifest.API_VERSION + 1, "entry": "mod.gd",
+		}),
+		"packaged/mod.gd": "extends RefCounted\n",
+	})
+	var version: Dictionary = Gen2ModInstaller.install_zip(bad_manifest, false, &"", ROOT)
+	assert_false(version["ok"])
+	assert_eq(version["reason"], &"unsupported_api_version")
+	assert_false(DirAccess.dir_exists_absolute("%s/packaged" % ROOT))
+
+
+func test_installing_from_bytes_removes_its_staging_file() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(archive)
+
+	var result: Dictionary = Gen2ModInstaller.install_bytes(bytes, false, &"", ROOT)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_false(FileAccess.file_exists(Gen2ModInstaller.staging_path()))
+
+
+func test_uninstall_removes_the_tree_and_is_quiet_when_it_is_already_gone() -> void:
+	var archive: String = "%s/import.zip" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	_write_zip(archive, _mod_zip_entries("packaged"))
+	assert_true(Gen2ModInstaller.install_zip(archive, false, &"", ROOT)["ok"])
+
+	var removed: Dictionary = Gen2ModInstaller.uninstall(&"packaged", ROOT)
+	assert_true(removed["ok"])
+	assert_true(removed["removed"])
+	assert_false(DirAccess.dir_exists_absolute("%s/packaged" % ROOT))
+
+	var again: Dictionary = Gen2ModInstaller.uninstall(&"packaged", ROOT)
+	assert_true(again["ok"])
+	assert_false(again["removed"])
+
+
+func test_index_source_resolves_the_shapes_a_player_might_paste() -> void:
+	var expected: String = "https://someone.github.io/mods/index.json"
+	for input: String in [
+		"someone/mods",
+		"https://github.com/someone/mods",
+		"https://github.com/someone/mods.git",
+	]:
+		var resolved: Dictionary = Gen2ModIndex.resolve_source(input)
+		assert_true(resolved["ok"], input)
+		assert_eq(resolved["feed"], expected, input)
+		assert_eq(resolved["label"], "someone/mods", input)
+
+	# A site root gains the feed name; a feed file is taken as given.
+	assert_eq(
+		Gen2ModIndex.resolve_source("https://mods.example.com/")["feed"],
+		"https://mods.example.com/index.json",
+	)
+	assert_eq(
+		Gen2ModIndex.resolve_source("https://mods.example.com/feed.json")["feed"],
+		"https://mods.example.com/feed.json",
+	)
+
+
+func test_index_source_refuses_plain_http_and_nothing() -> void:
+	# http would let anyone on the path rewrite the downloads the feed hands out.
+	var insecure: Dictionary = Gen2ModIndex.resolve_source("http://mods.example.com/")
+	assert_false(insecure["ok"])
+	assert_eq(insecure["reason"], &"index_url_not_https")
+	assert_eq(Gen2ModIndex.resolve_source("   ")["reason"], &"empty_index_url")
+
+
+func _feed(mods: Array, schema: int = Gen2ModIndex.SCHEMA_VERSION) -> String:
+	return JSON.stringify({"schema_version": schema, "name": "Example", "mods": mods})
+
+
+func test_index_feed_parses_entries_and_keeps_the_listing_order() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(_feed([
+		{"id": "voxel", "name": "Voxel", "version": "2.0.0",
+		 "download": "https://example.com/voxel.zip", "description": "A view"},
+		{"id": "second", "download": "https://example.com/second.zip"},
+	]))
+	assert_true(parsed["ok"], JSON.stringify(parsed))
+	assert_eq(parsed["name"], "Example")
+	var entries: Array = parsed["entries"]
+	assert_eq(entries.size(), 2)
+	assert_eq(entries[0]["id"], &"voxel")
+	assert_eq(entries[0]["version"], "2.0.0")
+	# A row with no name falls back to its id rather than listing as blank.
+	assert_eq(entries[1]["name"], "second")
+
+
+func test_index_feed_of_an_unknown_schema_is_refused_outright() -> void:
+	# A later format may reuse a field name, so this is a gate and not a hint.
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(
+		_feed([], Gen2ModIndex.SCHEMA_VERSION + 1)
+	)
+	assert_false(parsed["ok"])
+	assert_eq(parsed["reason"], &"unsupported_index_schema")
+	assert_eq(Gen2ModIndex.parse_feed("not json")["reason"], &"index_not_json")
+
+
+func test_index_feed_drops_unusable_rows_without_losing_the_rest() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(_feed([
+		{"name": "No id at all", "download": "https://example.com/a.zip"},
+		{"id": "insecure", "download": "http://example.com/b.zip"},
+		{"id": "no download"},
+		{"id": "Bad Id", "download": "https://example.com/c.zip"},
+		{"id": "voxel", "download": "https://example.com/voxel.zip"},
+		{"id": "voxel", "download": "https://example.com/duplicate.zip"},
+	]))
+	assert_true(parsed["ok"])
+	var entries: Array = parsed["entries"]
+	assert_eq(entries.size(), 1, JSON.stringify(entries))
+	assert_eq(entries[0]["id"], &"voxel")
+	assert_eq(entries[0]["download"], "https://example.com/voxel.zip")
+
+
+func test_following_an_index_persists_it_and_never_duplicates_a_feed() -> void:
+	var store: String = "%s/indexes.json" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	# Ships following nobody: an index is the player trusting a publisher.
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+	var added: Dictionary = Gen2ModIndex.follow("someone/mods", store)
+	assert_true(added["ok"])
+	assert_true(added["added"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 1)
+	assert_eq(Gen2ModIndex.followed(store)[0]["label"], "someone/mods")
+
+	# The same feed reached by another URL shape is still the same feed.
+	var again: Dictionary = Gen2ModIndex.follow("https://github.com/someone/mods", store)
+	assert_true(again["ok"])
+	assert_false(again["added"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 1)
+
+	Gen2ModIndex.unfollow(added["feed"], store)
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+
+func test_following_a_refused_url_stores_nothing() -> void:
+	var store: String = "%s/indexes.json" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	assert_false(Gen2ModIndex.follow("http://mods.example.com/", store)["ok"])
+	assert_eq(Gen2ModIndex.followed(store).size(), 0)
