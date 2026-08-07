@@ -188,8 +188,8 @@ func _build_renderer() -> void:
 
 func _on_native_size_changed(size_pixels: Vector2i) -> void:
 	if _renderer != null \
-		and _renderer.has_method(Gen2ModHost.WORLD_RENDERER_RESIZE_METHOD):
-		_renderer.call(Gen2ModHost.WORLD_RENDERER_RESIZE_METHOD, size_pixels)
+		and _renderer.has_method(Gen2ModHost.RENDERER_RESIZE_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
 
 
 ## Switches the live view to another registered renderer without disturbing the

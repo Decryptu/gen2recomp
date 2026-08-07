@@ -80,7 +80,7 @@ func _init() -> void:
 
 
 ## This renderer is not made of hardware pixels, so it asks for the layer that is
-## not either. See Gen2ModHost.WORLD_RENDERER_SURFACE_METHOD.
+## not either. See Gen2ModHost.RENDERER_SURFACE_METHOD.
 func uses_hardware_viewport() -> bool:
 	return false
 
