@@ -170,13 +170,21 @@ func _verify_celadon_mansion_roof() -> void:
 		"crystal: roof (2,1) did not block leaving its own COLL_LEFT_WALL."
 	)
 
+	# (1,1) is the staircase landing itself, COLL_STAIRCASE, so .CheckTile answers
+	# before .TryStep ever reaches the enter rule: pressing RIGHT there steps DOWN
+	# off the staircase. The enter rule is checked directly for that reason.
 	var staircase_right := Gen2WorldAPI.open(
 		data, ROOF_GROUP, ROOF_NUMBER, Vector2i(1, 1), Gen2WorldState.new()
 	)
-	var entering_wall: Dictionary = staircase_right.move_result(Vector2i.RIGHT)
 	_check(
-		not bool(entering_wall.get("ok", false)),
+		not staircase_right.can_walk_to(Vector2i(2, 1), Vector2i.RIGHT),
 		"crystal: roof (1,1) did not block entering (2,1)'s COLL_LEFT_WALL."
+	)
+	var forced_off: Dictionary = staircase_right.move_result(Vector2i.RIGHT)
+	_check(
+		bool(forced_off.get("ok", false))
+			and staircase_right.player_cell == Vector2i(1, 2),
+		"crystal: roof (1,1) staircase did not force the player down off it."
 	)
 
 	var staircase_up := Gen2WorldAPI.open(

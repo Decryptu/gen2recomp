@@ -4,22 +4,26 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## Cut and Surf are resolved here. Both follow the shape CutFunction defines:
-## check the badge, then check the faced tile, then stage a change the text
-## acknowledge commits. Strength, Whirlpool, Waterfall, Flash and Headbutt are
-## not resolved yet.
+## Cut, Surf and Whirlpool are resolved here. All three follow the shape
+## CutFunction defines: check the badge, then check the faced tile, then stage a
+## change the text acknowledge commits. Strength, Waterfall, Flash and Headbutt
+## are not resolved yet.
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
-## CutFunction or SurfFunction, is what checks a party Pokemon knows these.
+## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
+## knows these.
 const MOVE_CUT: int = 0x0F
 const MOVE_SURF: int = 0x39
+const MOVE_WHIRLPOOL: int = 0xFA
 
-## CheckBadge's arguments in CutFunction's .CheckAble and SurfFunction's
-## .TrySurf, as source badge-order indices rather than flag numbers, so
-## Gen2WorldState.badge_flag() resolves them on either profile: ENGINE_HIVEBADGE
-## is 28 in Crystal and 27 in Gold/Silver, ENGINE_FOGBADGE 30 and 29.
+## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf
+## and WhirlpoolFunction's .TryWhirlpool, as source badge-order indices rather
+## than flag numbers, so Gen2WorldState.badge_flag() resolves them on either
+## profile: ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold/Silver,
+## ENGINE_FOGBADGE 30 and 29, ENGINE_GLACIERBADGE 33 and 32.
 const BADGE_HIVE: int = 1
 const BADGE_FOG: int = 3
+const BADGE_GLACIER: int = 6
 
 ## GetSurfType's comparison, constants/pokemon_constants.asm.
 const SPECIES_PIKACHU: int = 0x19
@@ -34,7 +38,7 @@ const MUSIC_SURF: int = 0x21
 ## Both pins ship the same rows, so this needs no profile split. IsFieldMove
 ## decides submenu membership from this list alone, so a move stops appearing
 ## the moment it leaves it.
-const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF]
+const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF, MOVE_WHIRLPOOL]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
 ## the six block ($12, $1a); the four grass codes are LAND_TILE and cuttable
@@ -137,6 +141,41 @@ static func cut_replacement(tileset: int, block: int, is_crystal: bool) -> Dicti
 	if blocks == null:
 		return {"ok": false}
 	var row: Variant = (blocks as Dictionary).get(block)
+	if row == null:
+		return {"ok": false}
+	return {"ok": true, "block": int(row[0]), "animation": int(row[1])}
+
+
+## home/map_objects.asm's CheckWhirlpoolTile, which TryWhirlpoolMenu applies to
+## the faced tile. Both codes are WATER_TILE | TALK, so the cell is reachable by
+## surfing straight onto it; what makes it an obstacle is
+## Gen2WorldCollision.forced_action(), not the permission.
+const WHIRLPOOL_COLLISIONS: Array[int] = [
+	Gen2WorldCollision.COLL_WHIRLPOOL,
+	Gen2WorldCollision.COLL_WHIRLPOOL_2C,
+]
+
+## data/collision/field_move_blocks.asm's WhirlpoolBlockPointers, byte identical
+## between the pins like CutTreeBlockPointers. It names only TILESET_JOHTO, which
+## is $01 in both games, so unlike the cut table this needs no profile split.
+const WHIRLPOOL_BLOCKS_JOHTO: Dictionary = {
+	0x07: [0x36, ANIMATION_TREE],
+}
+
+
+## CheckWhirlpoolTile: whether the faced cell's collision code is one Whirlpool
+## acts on. A match still needs a block in the tileset's list.
+static func whirlpool_tile(collision_code: int) -> bool:
+	return WHIRLPOOL_COLLISIONS.has(collision_code)
+
+
+## CheckOverworldTileArrays against WhirlpoolBlockPointers, the counterpart of
+## cut_replacement(). Both misses, absent tileset and absent block, are the
+## source's same "nothing to do" answer.
+static func whirlpool_replacement(tileset: int, block: int) -> Dictionary:
+	if tileset != TILESET_JOHTO:
+		return {"ok": false}
+	var row: Variant = WHIRLPOOL_BLOCKS_JOHTO.get(block)
 	if row == null:
 		return {"ok": false}
 	return {"ok": true, "block": int(row[0]), "animation": int(row[1])}

@@ -246,3 +246,81 @@ func test_cuttable_codes_keep_the_permissions_cut_depends_on() -> void:
 			Gen2WorldCollision.permission_for(code), Gen2WorldCollision.LAND_TILE,
 			"grass $%02x" % code
 		)
+
+
+## engine/overworld/player_movement.asm's DoPlayerMovement.CheckTile, branch for
+## branch. Its tables are indexed after a mask, not by an exact code, so most of
+## these entries have no COLL_* name and none is reachable on a pinned cartridge
+## except $24, $33 and the three warp codes.
+func test_forced_action_answers_none_on_ordinary_ground() -> void:
+	for code: int in [0x00, 0x07, 0x12, 0x18, 0x20, 0x29, 0x60, 0x91, 0xA3, 0xB0, 0xC0]:
+		assert_eq(
+			StringName(Gen2WorldCollision.forced_action(code)["kind"]), &"none",
+			"code $%02x" % code
+		)
+	for code: int in [-1, 0x100]:
+		assert_eq(StringName(Gen2WorldCollision.forced_action(code)["kind"]), &"none")
+
+
+func test_forced_action_turns_the_player_on_both_whirlpool_codes() -> void:
+	for code: int in [0x24, 0x2C]:
+		var forced: Dictionary = Gen2WorldCollision.forced_action(code)
+		assert_eq(StringName(forced["kind"]), &"force_turn", "code $%02x" % code)
+		assert_false(forced.has("direction"))
+	# Their neighbours are ordinary water.
+	for code: int in [0x23, 0x25, 0x2B, 0x2D]:
+		assert_eq(StringName(Gen2WorldCollision.forced_action(code)["kind"]), &"none")
+
+
+func test_forced_action_walks_every_current_code() -> void:
+	# .water masks NUM_DIRECTIONS, so all sixteen $3x codes index the four-entry
+	# .water_table rather than only $30-$33.
+	var expected: Array[Vector2i] = [
+		Vector2i.RIGHT, Vector2i.LEFT, Vector2i.UP, Vector2i.DOWN,
+	]
+	for code: int in range(0x30, 0x40):
+		var forced: Dictionary = Gen2WorldCollision.forced_action(code)
+		assert_eq(StringName(forced["kind"]), &"walk", "code $%02x" % code)
+		assert_eq(forced["direction"], expected[code & 0x03], "code $%02x" % code)
+	# COLL_WATERFALL, the only one of the sixteen any pinned map ships.
+	assert_eq(Gen2WorldCollision.forced_action(0x33)["direction"], Vector2i.DOWN)
+
+
+func test_forced_action_follows_both_forced_walk_tables() -> void:
+	var land1: Array[Vector2i] = [
+		Vector2i.ZERO, Vector2i.RIGHT, Vector2i.LEFT, Vector2i.UP,
+		Vector2i.DOWN, Vector2i.ZERO, Vector2i.ZERO, Vector2i.ZERO,
+	]
+	var land2: Array[Vector2i] = [
+		Vector2i.RIGHT, Vector2i.LEFT, Vector2i.UP, Vector2i.DOWN,
+		Vector2i.ZERO, Vector2i.ZERO, Vector2i.ZERO, Vector2i.ZERO,
+	]
+	for index: int in 8:
+		_assert_forced_walk(0x40 + index, land1[index])
+		_assert_forced_walk(0x50 + index, land2[index])
+	# The masks are three bits wide, so the upper half of each row aliases onto
+	# the same eight entries, as the ledge and side-wall codes do.
+	for index: int in 8:
+		_assert_forced_walk(0x48 + index, land1[index])
+		_assert_forced_walk(0x58 + index, land2[index])
+
+
+## .warps accepts four codes and lets every other $7x fall through, so a warp
+## panel or an unnamed $7x tile forces nothing.
+func test_forced_action_steps_down_off_doors_stairs_and_caves() -> void:
+	for code: int in [0x71, 0x79, 0x7A, 0x7B]:
+		_assert_forced_walk(code, Vector2i.DOWN)
+	for code: int in [0x70, 0x72, 0x73, 0x74, 0x75, 0x78, 0x7C, 0x7D, 0x7F]:
+		assert_eq(
+			StringName(Gen2WorldCollision.forced_action(code)["kind"]), &"none",
+			"code $%02x" % code
+		)
+
+
+func _assert_forced_walk(code: int, direction: Vector2i) -> void:
+	var forced: Dictionary = Gen2WorldCollision.forced_action(code)
+	if direction == Vector2i.ZERO:
+		assert_eq(StringName(forced["kind"]), &"none", "code $%02x" % code)
+		return
+	assert_eq(StringName(forced["kind"]), &"walk", "code $%02x" % code)
+	assert_eq(forced["direction"], direction, "code $%02x" % code)

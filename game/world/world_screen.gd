@@ -25,6 +25,9 @@ const SFX_JUMP_OVER_LEDGE: int = 0x16
 ## OWCutAnimation before its sprite animation. The animation itself is not
 ## rendered here; the sound is.
 const SFX_CUT: int = 0x1E
+## constants/sfx_constants.asm's SFX_SURF, which is what PlayWhirlpoolSound plays
+## (engine/events/field_moves.asm); there is no whirlpool-specific effect.
+const SFX_WHIRLPOOL: int = 0x53
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -235,6 +238,7 @@ func _process(delta: float) -> void:
 		_renderer.refresh()
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
+	_advance_forced_movement()
 	if _objects_may_move() and _world.advance_object_steps(delta, _object_random) \
 		and _renderer != null:
 		_renderer.refresh()
@@ -267,6 +271,26 @@ func _process(delta: float) -> void:
 		)
 		if bool(audio_result.get("ok", false)):
 			_show_script_results(audio_result.get("results", []))
+
+
+## .CheckTile's forced walk, which the source polls every frame with no input:
+## a waterfall pushes the player back down and a door, staircase or cave tile
+## steps them off it. The step already in progress paces it.
+##
+## PLAYERMOVEMENT_FORCE_TURN is deliberately not drained here. Its
+## Script_ForcedMovement is a queued script whose two step_dig runs pace the spin,
+## and this project renders none of that, so draining it per frame would flip the
+## facing at the frame rate. Gen2WorldAPI.move_result() answers it on the movement
+## attempt instead, which is where a player meets it.
+func _advance_forced_movement() -> void:
+	if not _objects_may_move() or _world.script_input_waiting() \
+		or _world.player_step_in_progress():
+		return
+	if StringName(_world.forced_movement().get("kind", &"none")) != &"walk":
+		return
+	var forced: Dictionary = _world.advance_forced_movement()
+	if bool(forced.get("ok", false)):
+		_after_player_move(forced)
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -441,6 +465,21 @@ func move_player(direction: Vector2i) -> bool:
 	var movement: Dictionary = _world.move_result(direction)
 	if not bool(movement.get("ok", false)):
 		return false
+	## A whirlpool spins the player rather than moving them, so nothing a completed
+	## step owes applies: no warp, no encounter, no repel step.
+	if movement.get("kind", &"") == &"forced_turn":
+		if _renderer != null:
+			_renderer.refresh()
+		_refresh_labels()
+		return true
+	return _after_player_move(movement)
+
+
+## Everything a completed step owes the rest of the screen: contextual audio, the
+## warp it may have landed on, the redraw, then sight, phone and encounter checks
+## in that order. Shared with the forced-tile path, which reaches it without a
+## key press.
+func _after_player_move(movement: Dictionary) -> bool:
 	if movement.get("kind", &"") == &"ledge_hop":
 		_play_ledge_hop_sfx()
 	## .ExitWater calls PlayMapMusic before the step, which is what drops the
@@ -451,7 +490,9 @@ func move_player(direction: Vector2i) -> bool:
 	var transition: Dictionary = movement
 	## CheckTileEvent gates warps on nothing, so surfing onto a warp tile and the
 	## step back onto land both reach one.
-	if movement.get("kind", &"") in [&"move", &"ledge_hop", &"water_move", &"exit_water"]:
+	if movement.get("kind", &"") in [
+		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
+	]:
 		transition = _world.try_warp()
 	if _renderer != null:
 		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
@@ -656,6 +697,21 @@ func preview_surf_use() -> void:
 		_acknowledge_field_move_text()
 		return
 	preview_surf()
+	if _party_host != null:
+		_party_host.handle_key(KEY_SPACE)
+
+
+## And for Whirlpool, which needs the scene opened facing a COLL_WHIRLPOOL cell:
+## Dragon's Den B1F, Route 41 or Route 27 are the only maps that carry one.
+func preview_whirlpool() -> void:
+	_preview_field_move(Gen2WorldFieldMove.MOVE_WHIRLPOOL, Gen2WorldFieldMove.BADGE_GLACIER)
+
+
+func preview_whirlpool_use() -> void:
+	if _field_move_text:
+		_acknowledge_field_move_text()
+		return
+	preview_whirlpool()
 	if _party_host != null:
 		_party_host.handle_key(KEY_SPACE)
 
@@ -1252,6 +1308,14 @@ func _on_party_action(action: Dictionary) -> void:
 				_show_field_move_text(_surf_refusal(StringName(surf.get("reason", &""))))
 				return
 			_show_field_move_text("%s used SURF!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			var whirlpool: Dictionary = _world.whirlpool_request()
+			if not bool(whirlpool.get("ok", false)):
+				_show_field_move_text(
+					_whirlpool_refusal(StringName(whirlpool.get("reason", &"")))
+				)
+				return
+			_show_field_move_text("%s used WHIRLPOOL!" % String(action.get("name", "")))
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -1290,6 +1354,15 @@ func _surf_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## .FailWhirlpool has no text of its own: it calls FieldMoveFailed, so every
+## refusal but the badge falls back to _CantUseItemText. Cut is the exception,
+## not the rule.
+func _whirlpool_refusal(reason: StringName) -> String:
+	if reason == &"badge_required":
+		return "Sorry! A new BADGE is required."
+	return "Can't use that here."
+
+
 func _show_field_move_text(text: String) -> void:
 	_field_move_text = true
 	if _text_box != null and _text_box.font != null:
@@ -1318,19 +1391,25 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_surf().is_empty():
 		_commit_field_move(_world.complete_surf(), "Surf")
 		return
+	if not _world.pending_whirlpool().is_empty():
+		_commit_field_move(_world.complete_whirlpool(), "Whirlpool")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
 
-## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN and Surf changes the music, so each
-## commit reports its own audio; both redraw, because both changed what the map
-## or the player looks like.
+## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN, Whirlpool plays SFX_SURF and Surf
+## changes the music, so each commit reports its own audio; all three redraw,
+## because each changed what the map or the player looks like.
 func _commit_field_move(applied: Dictionary, label: String) -> void:
 	if bool(applied.get("ok", false)):
-		if StringName(applied.get("kind", &"")) == &"surf_applied":
-			_play_current_map_music()
-		else:
-			_play_sfx(SFX_CUT)
+		match StringName(applied.get("kind", &"")):
+			&"surf_applied":
+				_play_current_map_music()
+			&"whirlpool_applied":
+				_play_sfx(SFX_WHIRLPOOL)
+			_:
+				_play_sfx(SFX_CUT)
 		if _renderer != null:
 			_renderer.refresh()
 		_script_prompt = label
