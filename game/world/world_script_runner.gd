@@ -619,7 +619,9 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CHECKCELLNUM:
 			_script_value = 1 if _phone_contact_registered(int(command["value"])) else 0
 		Gen2WorldScript.SPECIAL:
-			return _execute_special(int(command["value"]))
+			return _execute_special(
+				Gen2WorldScript.special_index(int(command["value"]), _crystal_commands())
+			)
 		Gen2WorldScript.RANDOM:
 			var maximum: int = int(command["value"])
 			_script_value = _random.randi_range(0, maximum - 1) if maximum > 0 else 0
@@ -1380,6 +1382,9 @@ func _clock_minute() -> int:
 	return clampi(int(clock.get("minute", 0)), 0, 59)
 
 
+## [param special] is the Crystal-canonical index from
+## Gen2WorldScript.special_index(), not the raw stream byte, so the payloads
+## below report that index on both profiles.
 func _execute_special(special: int) -> Dictionary:
 	## SPECIAL is a shared cartridge dispatch table. Phone routines are only one
 	## part of it; map callbacks and the new-game clock setup use the same table.
