@@ -5,6 +5,11 @@ extends GutTest
 
 var _launcher: Control = null
 var _scratch_path: String = "user://launcher-test-small.gbc"
+var _mod_archive: String = "user://launcher-test-mod.zip"
+
+## The launcher installs into the real user://mods, so a mod test cleans up
+## after itself whether or not it got that far.
+const PROBE_MOD_ID: StringName = &"launcher_probe"
 
 
 func after_each() -> void:
@@ -12,6 +17,8 @@ func after_each() -> void:
 		_launcher.free()
 	_launcher = null
 	DirAccess.remove_absolute(_scratch_path)
+	DirAccess.remove_absolute(_mod_archive)
+	Gen2ModInstaller.uninstall(PROBE_MOD_ID)
 
 
 func _open_launcher() -> void:
@@ -91,3 +98,49 @@ func test_the_selected_save_is_one_shared_instance_until_the_selection_changes()
 	GameRuntime.selected_game_id = previous
 	GameRuntime.selected_save_slot = previous_slot
 	GameRuntime.reload_selected_save()
+
+
+func _write_probe_mod_zip() -> void:
+	var packer := ZIPPacker.new()
+	assert_eq(packer.open(_mod_archive), OK)
+	var files: Dictionary = {
+		"%s/mod.json" % PROBE_MOD_ID: JSON.stringify({
+			"id": String(PROBE_MOD_ID), "name": "Launcher Probe", "version": "1.0.0",
+			"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		}),
+		"%s/mod.gd" % PROBE_MOD_ID:
+			"extends RefCounted\n\nfunc register(_h, _m) -> void:\n\tpass\n",
+	}
+	for entry: String in files:
+		packer.start_file(entry)
+		packer.write_file(String(files[entry]).to_utf8_buffer())
+		packer.close_file()
+	packer.close()
+
+
+func test_launcher_installs_a_mod_zip_and_lists_it_without_a_restart() -> void:
+	await _open_launcher()
+	_write_probe_mod_zip()
+
+	var result: Dictionary = _launcher.import_mod_path(_mod_archive)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["id"], PROBE_MOD_ID)
+	# Loaded into the live host, not merely written to disk.
+	assert_true(Gen2ModHost.instance().manifests().any(
+		func(manifest: Gen2ModManifest) -> bool: return manifest.id == PROBE_MOD_ID
+	))
+	assert_string_contains(_launcher.launcher_snapshot()["status"], "Launcher Probe")
+
+
+func test_launcher_reports_a_file_that_is_not_a_mod_archive() -> void:
+	await _open_launcher()
+	var file: FileAccess = FileAccess.open(_mod_archive, FileAccess.WRITE)
+	file.store_string("not an archive")
+	file.close()
+
+	var result: Dictionary = _launcher.import_mod_path(_mod_archive)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"not_a_zip")
+	var snapshot: Dictionary = _launcher.launcher_snapshot()
+	assert_eq(snapshot["status"], "That mod was not installed.")
+	assert_string_contains(snapshot["detail"], "not a .zip archive")

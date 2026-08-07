@@ -22,7 +22,11 @@ var _status_detail: Label = null
 var _progress: ProgressBar = null
 var _progress_label: Label = null
 var _file_dialog: FileDialog = null
+var _mod_dialog: FileDialog = null
+var _mod_replace_dialog: ConfirmationDialog = null
+var _mod_replace_path: String = ""
 var _mods_label: Label = null
+var _mod_button: Button = null
 var _cards: Dictionary = {}
 var _selected_game_id: StringName = &""
 var _importing: bool = false
@@ -78,6 +82,11 @@ func _build_ui() -> void:
 	_import_button.custom_minimum_size = Vector2(168, 48)
 	_import_button.pressed.connect(_open_import_dialog)
 	header.add_child(_import_button)
+
+	_mod_button = _button("Import mod", MUTED)
+	_mod_button.custom_minimum_size = Vector2(168, 48)
+	_mod_button.pressed.connect(_open_mod_dialog)
+	header.add_child(_mod_button)
 
 	var section := Label.new()
 	section.text = "CARTRIDGES"
@@ -153,6 +162,25 @@ func _build_ui() -> void:
 	_file_dialog.file_selected.connect(_on_file_selected)
 	add_child(_file_dialog)
 
+	_mod_dialog = FileDialog.new()
+	_mod_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_mod_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_mod_dialog.filters = PackedStringArray(["*.zip; Mod archive"])
+	_mod_dialog.title = "Choose a mod .zip"
+	_mod_dialog.file_selected.connect(import_mod_path)
+	add_child(_mod_dialog)
+
+	_mod_replace_dialog = ConfirmationDialog.new()
+	_mod_replace_dialog.title = "Replace mod"
+	_mod_replace_dialog.ok_button_text = "Replace"
+	_mod_replace_dialog.confirmed.connect(_on_mod_replace_confirmed)
+	add_child(_mod_replace_dialog)
+
+	# A window drop is the same import, so the OS file manager works wherever it
+	# offers one. Routing is by extension because the two imports validate very
+	# differently and neither should be handed the other's file.
+	get_window().files_dropped.connect(_on_files_dropped)
+
 	_set_status("Choose an imported game to begin.", "Your own verified cartridge dump is required.", MUTED)
 
 
@@ -173,6 +201,94 @@ func _refresh_games() -> void:
 ## Public driver used by tests and by non-interactive tooling.
 func import_rom_path(path: String) -> void:
 	_on_file_selected(path)
+
+
+## Installs a mod archive and loads it without a restart, which is safe here
+## because the launcher is the one screen that exists before any world or
+## battle has been built. Public for the same reason [method import_rom_path]
+## is: a test drives the import without going through a native dialog.
+func import_mod_path(path: String, replace: bool = false) -> Dictionary:
+	var result: Dictionary = Gen2ModInstaller.install_zip(path, replace)
+	if bool(result.get("ok", false)):
+		GameRuntime.load_mods()
+		_mods_label.text = _mods_summary()
+		_set_status(
+			"Installed %s." % result.get("name", result.get("id", "the mod")),
+			"%d files in %s." % [int(result.get("files", 0)), result.get("directory", "")],
+			SUCCESS,
+		)
+		return result
+	if StringName(result.get("reason", &"")) == &"already_installed":
+		_mod_replace_path = path
+		_mod_replace_dialog.dialog_text = (
+			"%s is already installed.\nReplace it with this archive?"
+			% result.get("detail", "That mod")
+		)
+		_mod_replace_dialog.popup_centered()
+		return result
+	_set_status(
+		"That mod was not installed.", _mod_refusal(result), ERROR
+	)
+	return result
+
+
+## The refusal reasons a player can act on, said plainly. Anything else falls
+## back to the reason itself rather than being flattened into one useless line.
+func _mod_refusal(result: Dictionary) -> String:
+	var detail: String = String(result.get("detail", ""))
+	match StringName(result.get("reason", &"")):
+		&"not_a_zip":
+			return "%s is not a .zip archive." % detail.get_file()
+		&"archive_not_found":
+			return "%s could not be read." % detail.get_file()
+		&"archive_has_no_manifest":
+			return "The archive has no %s, so it is not a mod." % Gen2ModManifest.FILENAME
+		&"archive_holds_more_than_one_folder":
+			return "The archive must hold a single mod folder."
+		&"unsupported_api_version":
+			return "That mod was built for a different host: %s." % detail
+		&"unsafe_archive_entry":
+			return "The archive tries to write outside the mod folder (%s)." % detail
+		&"archive_too_large", &"archive_too_many_entries":
+			return "That archive is too large to be a mod."
+	return "%s %s" % [result.get("reason", "refused"), detail]
+
+
+func _open_mod_dialog() -> void:
+	if _importing:
+		return
+	_set_status(
+		"Choose a mod .zip.",
+		"The archive holds one mod folder with a %s in it." % Gen2ModManifest.FILENAME,
+		MUTED,
+	)
+	_mod_dialog.popup_centered(Vector2i(920, 620))
+
+
+func _on_mod_replace_confirmed() -> void:
+	if _mod_replace_path.is_empty():
+		return
+	var path: String = _mod_replace_path
+	_mod_replace_path = ""
+	import_mod_path(path, true)
+
+
+func _on_files_dropped(files: PackedStringArray) -> void:
+	if _importing:
+		return
+	for path: String in files:
+		match path.get_extension().to_lower():
+			"zip":
+				import_mod_path(path)
+				return
+			"gb", "gbc":
+				_on_file_selected(path)
+				return
+	_set_status(
+		"Nothing to import there.",
+		"Drop a .gb or .gbc cartridge dump, or a mod .zip.",
+		MUTED,
+	)
 
 
 ## A small read-only view of the launcher state, useful for UI checks without
