@@ -17,7 +17,7 @@ func after_each() -> void:
 	RomCache.clear(_directory)
 
 
-func _write_cache() -> void:
+func _write_cache(game_id: String = "testworld") -> void:
 	RomCache.write_json(RomCache.species_path(_directory), [])
 	RomCache.write_json(RomCache.moves_path(_directory), [])
 	var items: Array = []
@@ -72,6 +72,27 @@ func _write_cache() -> void:
 	collision[2 * 16 + 14] = 0xA0  # COLL_HOP_RIGHT, landing would be x=16
 	collision[2 * 16 + 15] = 0x07  # wall right of the edge hop cell
 	collision[2 * 16 + 10] = 0x93  # COLL_PC, faced (not stood on) for std scripts
+
+	# Side-wall fixture, row 8: a COLL_RIGHT_WALL/COLL_LEFT_WALL pair at (2,8)
+	# and (3,8), matching Celadon Mansion Roof's railing. Both stay LAND_TILE
+	# permission; every surrounding cell is left at its default LAND_TILE.
+	collision[8 * 16 + 2] = 0xB0  # COLL_RIGHT_WALL
+	collision[8 * 16 + 3] = 0xB1  # COLL_LEFT_WALL
+	# A COLL_RIGHT_BUOY/COLL_LEFT_BUOY pair at (4,8) and (5,8), both
+	# WATER_TILE permission, to check the same rule while surfing.
+	collision[8 * 16 + 4] = 0xC0  # COLL_RIGHT_BUOY
+	collision[8 * 16 + 5] = 0xC1  # COLL_LEFT_BUOY
+	# An isolated COLL_LEFT_WALL at (7,8), approached from open land at
+	# (6,8): the enter rule alone, with no leave-rule wall on the standing
+	# tile to also block it. This is what the Gold/Silver profile quirk
+	# changes: crystal blocks entering from the west, gold does not.
+	collision[8 * 16 + 7] = 0xB1  # COLL_LEFT_WALL
+
+	# A lone COLL_UP_WALL at (2,10), matching real Route 42 cliff cells: it
+	# blocks stepping off the edge (entering from above, moving DOWN) but not
+	# climbing it (moving UP from below), since the enter rule only tests the
+	# DOWN handler's opposite-face condition, which COLL_UP_WALL matches.
+	collision[10 * 16 + 2] = 0xB2  # COLL_UP_WALL
 
 	var source_events: Dictionary = {
 		"bank": 48,
@@ -227,7 +248,7 @@ func _write_cache() -> void:
 
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
-		"game_id": "testworld",
+		"game_id": game_id,
 		"sha1": "0123456789abcdef",
 		"complete": true,
 	})
@@ -735,6 +756,116 @@ func test_ledge_hop_never_fires_while_surfing() -> void:
 	assert_false(result["ok"])
 	assert_eq(result["reason"], &"blocked")
 	assert_eq(world.player_cell, Vector2i(3, 2))
+
+
+func test_side_wall_blocks_leaving_the_standing_tile_only_in_its_own_direction() -> void:
+	# (2,8) is COLL_RIGHT_WALL, land permission on every side.
+	var world: Gen2WorldAPI = _world(Vector2i(2, 8))
+	var right: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(right["ok"], JSON.stringify(right))
+	assert_eq(right["reason"], &"blocked")
+	assert_eq(world.player_cell, Vector2i(2, 8))
+
+	assert_true(world.move_result(Vector2i.UP)["ok"])
+	assert_eq(world.player_cell, Vector2i(2, 7))
+
+
+func test_side_wall_does_not_block_entering_from_the_far_side() -> void:
+	# COLL_RIGHT_WALL only walls its own right edge; entering it from the
+	# west is an ordinary step, matching the mansion-roof railing you can
+	# walk up to but not cross.
+	var world: Gen2WorldAPI = _world(Vector2i(1, 8))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(world.player_cell, Vector2i(2, 8))
+
+
+func test_side_wall_pair_blocks_crossing_from_either_side() -> void:
+	# COLL_RIGHT_WALL at (2,8) and COLL_LEFT_WALL at (3,8) form a fence
+	# neither tile can cross into the other, though both are LAND_TILE.
+	var from_right_wall: Gen2WorldAPI = _world(Vector2i(2, 8))
+	var blocked_right: Dictionary = from_right_wall.move_result(Vector2i.RIGHT)
+	assert_false(blocked_right["ok"])
+	assert_eq(blocked_right["reason"], &"blocked")
+
+	var from_left_wall: Gen2WorldAPI = _world(Vector2i(3, 8))
+	var blocked_left: Dictionary = from_left_wall.move_result(Vector2i.LEFT)
+	assert_false(blocked_left["ok"])
+	assert_eq(blocked_left["reason"], &"blocked")
+
+
+func test_side_wall_blocks_surfing_the_same_way_as_walking() -> void:
+	# COLL_RIGHT_BUOY at (4,8) and COLL_LEFT_BUOY at (5,8) are WATER_TILE
+	# permission, gated by the same wTilePermissions AND as land.
+	var world: Gen2WorldAPI = _world(Vector2i(4, 8))
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	assert_eq(world.collision_permission_at(Vector2i(4, 8)), Gen2WorldCollision.WATER_TILE)
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(result["ok"], JSON.stringify(result))
+	assert_eq(result["reason"], &"blocked")
+	assert_eq(world.player_cell, Vector2i(4, 8))
+
+
+func test_can_walk_to_with_no_direction_ignores_side_walls() -> void:
+	# The position-only form (Vector2i.ZERO) keeps answering the destination's
+	# plain permission, matching every existing tool and test call site that
+	# does not go through move_result().
+	var world: Gen2WorldAPI = _world(Vector2i(2, 8))
+	assert_true(world.can_walk_to(Vector2i(3, 8)))
+	assert_true(world.can_walk_to(Vector2i(2, 8), Vector2i.ZERO))
+
+
+func test_up_wall_blocks_stepping_off_the_edge_but_not_climbing_it() -> void:
+	# (2,10) is COLL_UP_WALL: matches every real $b2 cell in the pinned
+	# caches, which blocks entering from above (walking off a cliff) while
+	# leaving the approach from below (climbing it) open, since the enter
+	# rule for COLL_UP_WALL only feeds the DOWN handler.
+	var from_above: Gen2WorldAPI = _world(Vector2i(2, 9))
+	var stepped_off: Dictionary = from_above.move_result(Vector2i.DOWN)
+	assert_false(stepped_off["ok"], JSON.stringify(stepped_off))
+	assert_eq(stepped_off["reason"], &"blocked")
+
+	var from_below: Gen2WorldAPI = _world(Vector2i(2, 11))
+	var climbed: Dictionary = from_below.move_result(Vector2i.UP)
+	assert_true(climbed["ok"], JSON.stringify(climbed))
+	assert_eq(from_below.player_cell, Vector2i(2, 10))
+
+
+func test_side_wall_enter_rule_blocks_crystal_from_the_isolated_wall() -> void:
+	# (7,8) is a lone COLL_LEFT_WALL with open land to its west at (6,8), so
+	# only the enter rule can be responsible for any block here.
+	var world: Gen2WorldAPI = _world(Vector2i(6, 8))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(result["ok"], JSON.stringify(result))
+	assert_eq(result["reason"], &"blocked")
+
+
+func test_side_wall_gold_profile_enter_rule_only_blocks_down() -> void:
+	# pokegold's .ok_right sets bit RIGHT, numerically FACE_DOWN rather than
+	# FACE_RIGHT (wFacingDirection and wWalkingDirection use transposed bit
+	# layouts), so the same isolated COLL_LEFT_WALL that blocks Crystal above
+	# does not block Gold/Silver: the bit it sets is irrelevant to a RIGHT
+	# move. No shipped Gold/Silver map has a code that reaches this branch;
+	# this pins the source's own quirk for a mod-authored one.
+	var gold_directory: String = RomCache.directory_for(&"testworldgold", "abcdef0123456789ab")
+	RomCache.clear(gold_directory)
+	RomCache.prepare(gold_directory)
+	var saved_directory: String = _directory
+	_directory = gold_directory
+	_write_cache("gold")
+	_directory = saved_directory
+
+	var data: GameData = GameData.open_directory(gold_directory)
+	assert_eq(data.id, &"gold")
+	assert_false(Gen2WorldState.is_crystal_profile(data))
+	var state: Gen2WorldState = Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 8), state)
+
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(world.player_cell, Vector2i(7, 8))
+
+	RomCache.clear(gold_directory)
 
 
 func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answers() -> void:

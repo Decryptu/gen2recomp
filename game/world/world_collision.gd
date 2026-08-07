@@ -112,7 +112,9 @@ const LEDGE_FACE_MASK: Array[int] = [
 ]
 
 
-static func _face_mask_for_direction(direction: Vector2i) -> int:
+## wFacingDirection's FACE_* bit for a cardinal [param direction], or 0 for a
+## diagonal or zero vector.
+static func face_mask_for_direction(direction: Vector2i) -> int:
 	if direction == Vector2i.UP:
 		return FACE_UP
 	if direction == Vector2i.DOWN:
@@ -133,11 +135,108 @@ static func allows_hop(collision_code: int, direction: Vector2i) -> bool:
 		return false
 	if (collision_code & 0xF0) != HI_NYBBLE_LEDGES:
 		return false
-	var face: int = _face_mask_for_direction(direction)
+	var face: int = face_mask_for_direction(direction)
 	if face == 0:
 		return false
 	var index: int = collision_code & 0x07
 	return (LEDGE_FACE_MASK[index] & face) != 0
+
+
+## Side walls and side buoys: home/map.asm's GetMovementPermissions and
+## engine/overworld/npc_movement.asm's CanObjectLeaveTile/WillObjectBumpIntoTile.
+## Unlike the ledge codes above, these stay their plain permission ($b0-$b7
+## LAND_TILE, $c0-$c7 WATER_TILE in PERMISSIONS) and additionally wall off one
+## or two of the standing tile's own edges by direction.
+const HI_NYBBLE_SIDE_WALLS: int = 0xB0
+const HI_NYBBLE_SIDE_BUOYS: int = 0xC0
+const COLL_RIGHT_WALL: int = 0xB0
+const COLL_LEFT_WALL: int = 0xB1
+const COLL_UP_WALL: int = 0xB2
+const COLL_DOWN_WALL: int = 0xB3
+const COLL_DOWN_RIGHT_WALL: int = 0xB4
+const COLL_DOWN_LEFT_WALL: int = 0xB5
+const COLL_UP_RIGHT_WALL: int = 0xB6
+const COLL_UP_LEFT_WALL: int = 0xB7
+
+## .MovementPermissionsData, entry for entry, indexed by a wall/buoy code's low
+## three bits: which of the standing tile's own edges it walls off, in FACE_*
+## terms. Numerically identical to LEDGE_FACE_MASK above; kept as its own
+## table because a ledge direction and a walled edge are different things, and
+## the source keeps them as two separate tables too.
+const SIDE_WALL_FACE_MASK: Array[int] = [
+	FACE_RIGHT,               # COLL_RIGHT_WALL/BUOY
+	FACE_LEFT,                # COLL_LEFT_WALL/BUOY
+	FACE_UP,                  # COLL_UP_WALL/BUOY
+	FACE_DOWN,                # COLL_DOWN_WALL/BUOY
+	FACE_DOWN | FACE_RIGHT,   # COLL_DOWN_RIGHT_WALL/BUOY
+	FACE_DOWN | FACE_LEFT,    # COLL_DOWN_LEFT_WALL/BUOY
+	FACE_UP | FACE_RIGHT,     # COLL_UP_RIGHT_WALL/BUOY
+	FACE_UP | FACE_LEFT,      # COLL_UP_LEFT_WALL/BUOY
+]
+
+
+## The FACE_* mask of edges [param collision_code] walls off, or 0 when it is
+## not a side-wall or side-buoy code. .CheckHiNybble ANDs against $f0 before
+## comparing, so $b8-$bf and $c8-$cf alias onto the same eight entries as
+## $b0-$b7/$c0-$c7 rather than being rejected, the same way allows_hop()
+## preserves the $a8-$af ledge alias above.
+static func side_wall_face_mask(collision_code: int) -> int:
+	if collision_code < 0 or collision_code > 0xFF:
+		return 0
+	var hi_nybble: int = collision_code & 0xF0
+	if hi_nybble != HI_NYBBLE_SIDE_WALLS and hi_nybble != HI_NYBBLE_SIDE_BUOYS:
+		return 0
+	return SIDE_WALL_FACE_MASK[collision_code & 0x07]
+
+
+## engine/overworld/npc_movement.asm's CanObjectLeaveTile (leave rule, on
+## [param from_code]) and WillObjectBumpIntoTile (enter rule, on [param
+## to_code] at the destination). Both routines index a differently bit-packed
+## table than SIDE_WALL_FACE_MASK (GetSideWallDirectionMask's DOWN_MASK/
+## UP_MASK/LEFT_MASK/RIGHT_MASK, keyed by wWalkingDirection rather than
+## wFacingDirection), but produce the identical per-code, per-direction result;
+## this reuses the FACE_* table rather than re-encoding the same rule twice.
+## Both games ship byte-identical npc_movement.asm, so unlike tile_permissions()
+## below this never takes a profile argument.
+static func side_wall_step_blocked(from_code: int, to_code: int, direction: Vector2i) -> bool:
+	var forward_face: int = face_mask_for_direction(direction)
+	if forward_face == 0:
+		return false
+	if (side_wall_face_mask(from_code) & forward_face) != 0:
+		return true
+	return (side_wall_face_mask(to_code) & face_mask_for_direction(-direction)) != 0
+
+
+## home/map.asm's GetMovementPermissions: the wTilePermissions byte for a
+## player standing on [param standing_code] with the four cardinal neighbours
+## already read. The leave rule (side_wall_face_mask of the standing code) is
+## byte-identical between both games; the enter rule (whether a neighbour's own
+## wall faces back at the player) is not. pokegold/pokecrystal diverge only in
+## .ok_down/.ok_up/.ok_right/.ok_left: crystal ORs the matching FACE_* constant
+## on a match, gold always sets bit RIGHT, numerically FACE_DOWN, since
+## wFacingDirection and wWalkingDirection use transposed bit layouts and
+## .ok_down/.ok_up/.ok_right/.ok_left were written with the latter's RIGHT by
+## mistake. Every enter-rule match therefore blocks only DOWN on Gold/Silver.
+## No shipped Gold/Silver map carries a side-wall code whose low three bits
+## differ from 2 (COLL_UP_WALL, whose own FACE_UP mask cannot match any
+## opposite-face test below), so this split changes no pinned map's
+## reachability; it stays because a mod-authored map could reach it.
+static func tile_permissions(
+	standing_code: int, up_code: int, down_code: int, left_code: int, right_code: int,
+	is_crystal: bool = true,
+) -> int:
+	var permissions: int = side_wall_face_mask(standing_code)
+	if (side_wall_face_mask(down_code) & FACE_UP) != 0:
+		# .ok_down already wants FACE_DOWN on both games, so the Gold quirk is
+		# not observable here even though .Down shares the same shape.
+		permissions |= FACE_DOWN
+	if (side_wall_face_mask(up_code) & FACE_DOWN) != 0:
+		permissions |= FACE_UP if is_crystal else FACE_DOWN
+	if (side_wall_face_mask(right_code) & FACE_LEFT) != 0:
+		permissions |= FACE_RIGHT if is_crystal else FACE_DOWN
+	if (side_wall_face_mask(left_code) & FACE_RIGHT) != 0:
+		permissions |= FACE_LEFT if is_crystal else FACE_DOWN
+	return permissions
 
 
 ## Tile-collision std scripts: engine/events/std_collision.asm's

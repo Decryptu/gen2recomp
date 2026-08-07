@@ -80,3 +80,152 @@ func test_tile_collision_std_index_answers_missing_for_untabled_codes() -> void:
 	assert_eq(Gen2WorldCollision.tile_collision_std_index(0x00, true), -1)
 	assert_eq(Gen2WorldCollision.tile_collision_std_index(0x07, false), -1)
 	assert_eq(Gen2WorldCollision.tile_collision_std_index(0xA0, true), -1)
+
+
+## home/map.asm's .MovementPermissionsData, recounted per code (constants/
+## collision_constants.asm's COLL_*_WALL/BUOY names). $c0-$c7 share the table.
+func test_side_wall_face_mask_matches_movement_permissions_data() -> void:
+	var expected: Dictionary = {
+		0xB0: Gen2WorldCollision.FACE_RIGHT,
+		0xB1: Gen2WorldCollision.FACE_LEFT,
+		0xB2: Gen2WorldCollision.FACE_UP,
+		0xB3: Gen2WorldCollision.FACE_DOWN,
+		0xB4: Gen2WorldCollision.FACE_DOWN | Gen2WorldCollision.FACE_RIGHT,
+		0xB5: Gen2WorldCollision.FACE_DOWN | Gen2WorldCollision.FACE_LEFT,
+		0xB6: Gen2WorldCollision.FACE_UP | Gen2WorldCollision.FACE_RIGHT,
+		0xB7: Gen2WorldCollision.FACE_UP | Gen2WorldCollision.FACE_LEFT,
+	}
+	for wall_code: int in expected:
+		var buoy_code: int = wall_code + 0x10
+		assert_eq(
+			Gen2WorldCollision.side_wall_face_mask(wall_code), expected[wall_code],
+			"$%02X" % wall_code
+		)
+		assert_eq(
+			Gen2WorldCollision.side_wall_face_mask(buoy_code), expected[wall_code],
+			"$%02X" % buoy_code
+		)
+
+
+func test_side_wall_face_mask_refuses_non_wall_non_buoy_codes() -> void:
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0x00), 0)
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0xA0), 0)
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(-1), 0)
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0x100), 0)
+
+
+func test_side_wall_face_mask_aliases_b8_to_bf_and_c8_to_cf() -> void:
+	# .CheckHiNybble ANDs against $f0 before comparing, so $b8 shares $b0's
+	# hi nybble and aliases onto the same entry, mirroring the $a8-$af ledge
+	# alias allows_hop() already preserves.
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0xB8), Gen2WorldCollision.FACE_RIGHT)
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0xBF), Gen2WorldCollision.FACE_UP | Gen2WorldCollision.FACE_LEFT)
+	assert_eq(Gen2WorldCollision.side_wall_face_mask(0xC8), Gen2WorldCollision.FACE_RIGHT)
+
+
+func test_side_wall_codes_keep_their_plain_permission() -> void:
+	for code: int in range(0xB0, 0xB8):
+		assert_eq(Gen2WorldCollision.permission_for(code), Gen2WorldCollision.LAND_TILE, "$%02X" % code)
+	for code: int in range(0xC0, 0xC8):
+		assert_eq(Gen2WorldCollision.permission_for(code), Gen2WorldCollision.WATER_TILE, "$%02X" % code)
+
+
+## home/map.asm's GetMovementPermissions, crystal profile: .ok_down/.ok_up/
+## .ok_right/.ok_left OR their own FACE_* constant on a match.
+func test_tile_permissions_crystal_blocks_the_matching_face_per_neighbor() -> void:
+	var open_code: int = 0x00
+	# Standing tile itself walls off FACE_RIGHT (leave rule).
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(0xB0, open_code, open_code, open_code, open_code, true),
+		Gen2WorldCollision.FACE_RIGHT
+	)
+	# Neighbour below is COLL_UP_WALL ($b2): its own mask includes FACE_UP,
+	# so entering it from above (moving DOWN) is blocked.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, 0xB2, open_code, open_code, true),
+		Gen2WorldCollision.FACE_DOWN
+	)
+	# Neighbour above is COLL_DOWN_WALL ($b3): blocks moving UP into it.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, 0xB3, open_code, open_code, open_code, true),
+		Gen2WorldCollision.FACE_UP
+	)
+	# Neighbour to the right is COLL_LEFT_WALL ($b1): blocks moving RIGHT.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, open_code, open_code, 0xB1, true),
+		Gen2WorldCollision.FACE_RIGHT
+	)
+	# Neighbour to the left is COLL_RIGHT_WALL ($b0): blocks moving LEFT.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, open_code, 0xB0, open_code, true),
+		Gen2WorldCollision.FACE_LEFT
+	)
+	# Standing on a diagonal code (leave rule) blocks both faces it names.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(0xB4, open_code, open_code, open_code, open_code, true),
+		Gen2WorldCollision.FACE_DOWN | Gen2WorldCollision.FACE_RIGHT
+	)
+	# A DOWN_LEFT neighbour below the player (mask FACE_DOWN|FACE_LEFT) does
+	# not contain FACE_UP, the opposite of DOWN, so entering it from above is
+	# not blocked by the enter rule.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, 0xB5, open_code, open_code, true),
+		0
+	)
+
+
+## pokegold/home/map.asm's .ok_down/.ok_up/.ok_right/.ok_left all set bit
+## RIGHT (numerically FACE_DOWN), so every enter-rule match blocks only DOWN.
+## No shipped Gold/Silver map exercises this: every real $bx/$cx cell in those
+## caches has low three bits 2 (COLL_UP_WALL), which only ever feeds the
+## down-neighbor check anyway, so the crystal and gold results already agree
+## there. This pins the source's own divergence for a mod-authored map.
+func test_tile_permissions_gold_silver_enter_rule_always_sets_face_down() -> void:
+	var open_code: int = 0x00
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, 0xB3, open_code, open_code, open_code, false),
+		Gen2WorldCollision.FACE_DOWN
+	)
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, open_code, open_code, 0xB1, false),
+		Gen2WorldCollision.FACE_DOWN
+	)
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, open_code, 0xB0, open_code, false),
+		Gen2WorldCollision.FACE_DOWN
+	)
+	# The leave rule is unaffected: standing on a wall code still walls off
+	# its own real face on both games.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(0xB1, open_code, open_code, open_code, open_code, false),
+		Gen2WorldCollision.FACE_LEFT
+	)
+	# The down-neighbor case already matches FACE_DOWN on crystal too, so it
+	# does not by itself distinguish the two profiles.
+	assert_eq(
+		Gen2WorldCollision.tile_permissions(open_code, open_code, 0xB2, open_code, open_code, false),
+		Gen2WorldCollision.FACE_DOWN
+	)
+
+
+## engine/overworld/npc_movement.asm's CanObjectLeaveTile and
+## WillObjectBumpIntoTile, byte-identical between both pinned repositories.
+func test_side_wall_step_blocked_matches_the_leave_and_enter_rules() -> void:
+	var open_code: int = 0x00
+	# Leaving a RIGHT_WALL tile moving RIGHT is blocked (leave rule).
+	assert_true(Gen2WorldCollision.side_wall_step_blocked(0xB0, open_code, Vector2i.RIGHT))
+	# Leaving the same tile moving LEFT, UP or DOWN is not.
+	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, open_code, Vector2i.LEFT))
+	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, open_code, Vector2i.UP))
+	# Entering a LEFT_WALL tile from the west (moving RIGHT) is blocked
+	# (enter rule: the destination's own mask contains FACE_LEFT, the
+	# opposite of RIGHT).
+	assert_true(Gen2WorldCollision.side_wall_step_blocked(open_code, 0xB1, Vector2i.RIGHT))
+	assert_false(Gen2WorldCollision.side_wall_step_blocked(open_code, 0xB1, Vector2i.LEFT))
+	# A RIGHT_WALL/LEFT_WALL pair blocks crossing in both directions even
+	# though both tiles are plain LAND_TILE permission.
+	assert_true(Gen2WorldCollision.side_wall_step_blocked(0xB0, 0xB1, Vector2i.RIGHT))
+	assert_true(Gen2WorldCollision.side_wall_step_blocked(0xB1, 0xB0, Vector2i.LEFT))
+	# A zero or diagonal direction never blocks.
+	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, 0xB1, Vector2i.ZERO))
+	assert_false(Gen2WorldCollision.side_wall_step_blocked(0xB0, 0xB1, Vector2i(1, 1)))

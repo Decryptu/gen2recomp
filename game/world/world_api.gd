@@ -824,7 +824,7 @@ func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Di
 	var object: Gen2WorldObject = objects[object_index]
 	var destination: Vector2i = object.cell + direction
 	object.apply_direction(direction)
-	if not can_object_walk_to(destination, object):
+	if not can_object_walk_to(destination, object, direction):
 		return {
 			"ok": false, "reason": &"movement_blocked",
 			"object_index": object_index, "cell": destination,
@@ -1045,6 +1045,23 @@ func collision_code_at(cell: Vector2i) -> int:
 
 func collision_permission_at(cell: Vector2i) -> int:
 	return Gen2WorldCollision.permission_for(collision_code_at(cell))
+
+
+## home/map.asm's GetMovementPermissions for a player standing at [param cell]:
+## the standing code's own walled edges plus each neighbour's wall facing back,
+## profile-split per Gen2WorldCollision.tile_permissions(). A neighbour outside
+## the map answers -1, which side_wall_face_mask() treats as no wall; the
+## cartridge would read a border block there, but callers already refuse an
+## out-of-map destination before this matters.
+func tile_permissions_at(cell: Vector2i) -> int:
+	return Gen2WorldCollision.tile_permissions(
+		collision_code_at(cell),
+		collision_code_at(cell + Vector2i.UP),
+		collision_code_at(cell + Vector2i.DOWN),
+		collision_code_at(cell + Vector2i.LEFT),
+		collision_code_at(cell + Vector2i.RIGHT),
+		Gen2WorldState.is_crystal_profile(data),
+	)
 
 
 ## Returns the raw warp record at a cell, or an empty Dictionary when the
@@ -1745,7 +1762,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			object.apply_direction(direction)
 			var destination: Vector2i = object.cell + direction
-			if can_object_walk_to(destination, object):
+			if can_object_walk_to(destination, object, direction):
 				object.cell = destination
 			else:
 				generated.append({
@@ -1820,7 +1837,7 @@ func _apply_player_movement(event: Dictionary) -> Array:
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			player_facing = _facing_for_direction(direction)
 			var destination: Vector2i = player_cell + direction
-			if can_walk_to(destination):
+			if can_walk_to(destination, direction):
 				player_cell = destination
 			else:
 				generated.append({
@@ -2089,12 +2106,20 @@ func try_connection(direction: Vector2i) -> Dictionary:
 	}
 
 
-func can_walk_to(cell: Vector2i) -> bool:
+## [param direction] is the attempted movement direction, matching
+## .CheckLandPerms/.CheckSurfPerms ANDing wFacingDirection against
+## wTilePermissions computed at the player's current cell. Vector2i.ZERO skips
+## that test for callers that only want the destination's plain permission.
+func can_walk_to(cell: Vector2i, direction: Vector2i = Vector2i.ZERO) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
 	if object_at(cell) != null:
 		return false
+	if direction != Vector2i.ZERO:
+		var face: int = Gen2WorldCollision.face_mask_for_direction(direction)
+		if face != 0 and (tile_permissions_at(player_cell) & face) != 0:
+			return false
 	var permission: int = collision_permission_at(cell)
 	if movement_mode == MOVEMENT_SURF:
 		var current_permission: int = collision_permission_at(player_cell)
@@ -2104,11 +2129,21 @@ func can_walk_to(cell: Vector2i) -> bool:
 	return permission == Gen2WorldCollision.LAND_TILE
 
 
-func can_object_walk_to(cell: Vector2i, moving: Gen2WorldObject) -> bool:
+## [param direction] matches CanObjectMoveInDirection's CanObjectLeaveTile
+## (moving's own cell) and WillObjectBumpIntoTile (the destination) side-wall
+## checks; Vector2i.ZERO skips them for callers that only want the destination
+## permission and occupancy.
+func can_object_walk_to(
+	cell: Vector2i, moving: Gen2WorldObject, direction: Vector2i = Vector2i.ZERO
+) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
 	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != Gen2WorldCollision.LAND_TILE:
+		return false
+	if direction != Vector2i.ZERO and Gen2WorldCollision.side_wall_step_blocked(
+		collision_code_at(moving.cell), collision_code_at(cell), direction
+	):
 		return false
 	for object: Gen2WorldObject in objects:
 		if object != moving and object.active and not object.deleted \
@@ -2154,7 +2189,8 @@ func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenera
 	if direction == Vector2i.ZERO:
 		return false
 	var destination: Vector2i = object.cell + direction
-	if not object.can_leave_to(destination) or not can_object_walk_to(destination, object):
+	if not object.can_leave_to(destination) \
+		or not can_object_walk_to(destination, object, direction):
 		# _RandomWalkContinue's .new_duration branch: a blocked object keeps its
 		# cell and waits again before trying another direction.
 		object.start_idle(random.randi() & IDLE_MASK_SLOW)
@@ -2262,7 +2298,7 @@ func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictiona
 		else:
 			direction = Vector2i(0, signi(delta.y))
 		var destination: Vector2i = follower.cell + direction
-		if can_object_walk_to(destination, follower):
+		if can_object_walk_to(destination, follower, direction):
 			follower.cell = destination
 			follower.apply_direction(direction)
 			# A follower keeps pace with the player, so it takes the player's
@@ -2295,7 +2331,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 				state.consume_repel_step()
 			return transition
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
-	if not can_walk_to(destination):
+	if not can_walk_to(destination, direction):
 		var hop: Dictionary = _try_ledge_hop(direction)
 		if not hop.is_empty():
 			return hop
