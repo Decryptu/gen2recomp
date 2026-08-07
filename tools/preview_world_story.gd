@@ -723,6 +723,10 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(hive.get("ok", false)):
 		return hive
 
+	var plain: Dictionary = _plain_badge_path(world, save, random, data, path)
+	if not bool(plain.get("ok", false)):
+		return plain
+
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
 		party_summary.append({
@@ -1016,6 +1020,276 @@ func _hive_badge_path(
 	})
 	if not bool(bugsy_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Bugsy event did not finish"}
+	return {"ok": true}
+
+
+## The herding chain in maps/IlexForest.asm's IlexForestFarfetchdScript. Each
+## row is the Farfetch'd cell, the cell to face it from, and the facing that
+## takes the fall-through branch; every other facing at that position is an
+## explicit `ifequal` that sends it backwards. Position 1 accepts any facing and
+## `wFarfetchdPosition` starts at zero, which reaches the same label because no
+## `ifequal` matches.
+const FARFETCHD_HERD: Array = [
+	[Vector2i(14, 31), Vector2i(14, 32), Gen2WorldSprite.FACING_UP],
+	[Vector2i(15, 25), Vector2i(15, 26), Gen2WorldSprite.FACING_UP],
+	[Vector2i(20, 24), Vector2i(20, 23), Gen2WorldSprite.FACING_DOWN],
+	[Vector2i(29, 22), Vector2i(28, 22), Gen2WorldSprite.FACING_RIGHT],
+	[Vector2i(28, 31), Vector2i(28, 30), Gen2WorldSprite.FACING_DOWN],
+	[Vector2i(24, 35), Vector2i(25, 35), Gen2WorldSprite.FACING_LEFT],
+	[Vector2i(22, 31), Vector2i(22, 32), Gen2WorldSprite.FACING_UP],
+	[Vector2i(15, 29), Vector2i(15, 28), Gen2WorldSprite.FACING_DOWN],
+	[Vector2i(10, 35), Vector2i(11, 35), Gen2WorldSprite.FACING_LEFT],
+]
+
+## Ilex Forest's cuttable tree, the only way from the forest's southern half to
+## the Route 34 exit (maps/IlexForest.blk; tools/validate_cut.gd pins the cell).
+const ILEX_CUT_TREE: Vector2i = Vector2i(8, 25)
+const ILEX_CUT_APPROACH: Vector2i = Vector2i(8, 26)
+
+
+## Azalea Town to the Plain Badge. Cut is the gate: HM01 comes from Ilex
+## Forest's charcoal master, who only appears once Farfetch'd has been herded
+## the whole way round, and the tree he unlocks is the only way north.
+func _plain_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 8, 7)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Azalea Gym exit warp failed"}
+	var _azalea_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var azalea_gate: Dictionary = _warp_walk(world, Vector2i(2, 10), save, random, data)
+	if not bool(azalea_gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ilex Forest gate unreachable: %s" % azalea_gate.get("reason", ""),
+		}
+	var _gate_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var forest: Dictionary = _warp_step(world, 3, 52)
+	if not bool(forest.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Ilex Forest warp failed"}
+	var forest_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "azalea_to_ilex_forest",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": forest_entry,
+	})
+
+	var herded: Array = []
+	for index: int in FARFETCHD_HERD.size():
+		var row: Array = FARFETCHD_HERD[index]
+		var approach: Vector2i = row[1]
+		var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+		if not bool(walked.get("ok", false)):
+			path.append({"step": "ilex_forest_farfetchd", "herded": herded})
+			return {
+				"ok": false, "path": path,
+				"reason": "Farfetch'd position %d unreachable at %s: %s" % [
+					index + 1, approach, walked.get("reason", ""),
+				],
+			}
+		world.player_facing = int(row[2])
+		var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+		herded.append({
+			"position": index + 1,
+			"from": _cell_value_from_vector(approach),
+			"memory": world.state.script_memory_values(),
+			"terminal": bool(run.get("terminal", false)),
+			"reason": run.get("reason", ""),
+		})
+		if not bool(run.get("terminal", false)):
+			path.append({"step": "ilex_forest_farfetchd", "herded": herded})
+			return {
+				"ok": false, "path": path,
+				"reason": "Farfetch'd position %d did not finish: %s" % [
+					index + 1, run.get("reason", ""),
+				],
+			}
+	path.append({
+		"step": "ilex_forest_farfetchd",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"herded": herded,
+		"event_flags": world.state.event_flags().size(),
+	})
+
+	# The charcoal master is object 2 at (5,28), hidden by
+	# EVENT_ILEX_FOREST_CHARCOAL_MASTER until the last herding step appears him.
+	var walked_to_master: Dictionary = _walk_cell_resolving(
+		world, Vector2i(5, 29), save, random, data
+	)
+	if not bool(walked_to_master.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "charcoal master unreachable: %s" % walked_to_master.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var cut_gift: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "ilex_forest_hm01_cut",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": cut_gift,
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(cut_gift.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "HM01 handoff did not finish"}
+
+	var walked_to_tree: Dictionary = _walk_cell_resolving(
+		world, ILEX_CUT_APPROACH, save, random, data
+	)
+	if not bool(walked_to_tree.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ilex cut tree unreachable: %s" % walked_to_tree.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var cut_request: Dictionary = world.cut_request()
+	var cut_applied: Dictionary = world.complete_cut() if bool(cut_request.get("ok", false)) else {}
+	path.append({
+		"step": "ilex_forest_cut_tree",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"request": cut_request.get("kind", cut_request.get("reason", "")),
+		"applied": cut_applied.get("kind", cut_applied.get("reason", "")),
+		"walkable_after": world.can_walk_to(ILEX_CUT_TREE),
+	})
+	if not bool(cut_applied.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "cut failed: %s" % cut_request.get(
+				"reason", cut_applied.get("reason", "")
+			),
+		}
+
+	var forest_exit: Dictionary = _warp_walk(world, Vector2i(1, 5), save, random, data)
+	if not bool(forest_exit.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ilex Forest north exit unreachable: %s" % forest_exit.get("reason", ""),
+		}
+	var north_gate_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "ilex_forest_to_route_34_gate",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": forest_exit.get("encounters", []),
+		"run": north_gate_entry,
+	})
+
+	var route34: Dictionary = _warp_step(world, 11, 1)
+	if not bool(route34.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Route 34 warp failed"}
+	var route34_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_34_entry",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": route34_entry,
+	})
+
+	var goldenrod: Dictionary = _walk_connection_resolving(
+		world, "north", 11, 2, save, random, data
+	)
+	var goldenrod_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_34_to_goldenrod",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": goldenrod.get("encounters", []),
+		"run": goldenrod_entry,
+	})
+	if not bool(goldenrod.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 34 to Goldenrod failed: %s" % goldenrod.get("reason", ""),
+		}
+
+	world.set_party_summary(save.party.size(), false)
+	var gym: Dictionary = _warp_walk(world, Vector2i(24, 7), save, random, data)
+	if not bool(gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod Gym door unreachable: %s" % gym.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+
+	# Whitney is object 0 at (8,3). Beating her sets EVENT_MADE_WHITNEY_CRY and
+	# she refuses the badge; the coord event at (8,5) under
+	# SCENE_GOLDENRODGYM_WHITNEY_STOPS_CRYING is what clears it, so the badge
+	# needs a step back onto that cell and a second interaction.
+	var walked_to_whitney: Dictionary = _walk_cell_resolving(
+		world, Vector2i(8, 4), save, random, data
+	)
+	if not bool(walked_to_whitney.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Whitney approach failed: %s" % walked_to_whitney.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var whitney_fight: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "goldenrod_gym_whitney_battle",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"encounters": walked_to_whitney.get("encounters", []),
+		"run": whitney_fight,
+		"scene": world.state.map_scene(11, 3),
+	})
+	if not bool(whitney_fight.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Whitney battle did not finish"}
+
+	var crying: Dictionary = _walk_cell_resolving(world, Vector2i(8, 5), save, random, data)
+	path.append({
+		"step": "goldenrod_gym_whitney_stops_crying",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": crying.get("encounters", []),
+		"scene": world.state.map_scene(11, 3),
+	})
+	if not bool(crying.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Whitney crying scene failed: %s" % crying.get("reason", ""),
+		}
+
+	var walked_back: Dictionary = _walk_cell_resolving(
+		world, Vector2i(8, 4), save, random, data
+	)
+	if not bool(walked_back.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Whitney second approach failed: %s" % walked_back.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var badge_run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "goldenrod_gym_plain_badge",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": badge_run,
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+	})
+	if not bool(badge_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Plain Badge event did not finish"}
 	return {"ok": true}
 
 
