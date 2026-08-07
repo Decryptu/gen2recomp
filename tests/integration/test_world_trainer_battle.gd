@@ -546,6 +546,47 @@ func test_zephyr_badge_survives_a_snapshot_save_and_reload() -> void:
 	assert_true(restored.state.is_engine_flag_active(Gen2WorldState.ENGINE_ZEPHYRBADGE))
 
 
+## The Togepi egg joins the party before Route 32 opens, so every trainer after
+## it fights with an egg in a party slot.
+func test_a_trainer_battle_fights_and_writes_back_with_an_egg_in_the_party() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	# Built the way Gen2WorldPartyHost's GIVEEGG builds one, so the save
+	# validator sees a consistent level and experience.
+	var egg: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(
+		Gen2BattleMon.create(_data, Fixture.TRAINER_SPECIES, 5, [BattleFixture.TACKLE])
+	)
+	egg.is_egg = true
+	egg.hp = 0
+	egg.nickname = "EGG"
+	save.party.append(egg)
+
+	await _trigger_trainer()
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host, "an egg in the party must not refuse the battle")
+	assert_eq(host.battle_snapshot()["world_battle_active"], true)
+
+	for _hit: int in 12:
+		host.hurt_enemy()
+	host.finish()
+	host.advance()
+	assert_eq(host.battle_snapshot()["message"], "YOU WON.")
+	host.finish()
+	host.advance()
+	await get_tree().process_frame
+	assert_true(_world_screen.world_snapshot()["just_battled"])
+
+	var written: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, save.slot,
+		Gen2SaveBattleAdapter.to_battle_party(_data, save), "", save
+	)
+	assert_not_null(written)
+	assert_eq(written.party.size(), 2)
+	assert_false((written.party[0] as Gen2SaveMon).is_egg)
+	assert_true((written.party[1] as Gen2SaveMon).is_egg)
+	assert_eq((written.party[1] as Gen2SaveMon).nickname, "EGG")
+
+
 func _event_value(events: Array, event_type: StringName, key: String) -> Variant:
 	for event: Dictionary in events:
 		if event.get("type", &"") == event_type:

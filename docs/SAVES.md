@@ -21,8 +21,10 @@ Save format version 2 stores:
   flag;
 - imported-save and party-transaction identity fields: OT ID, nickname, OT,
   happiness, Pokerus and caught data;
-- `is_egg` for received eggs. Eggs remain in the party model but the battle
-  adapter rejects them until hatch behavior exists.
+- `is_egg` for received eggs. An egg keeps its party slot and is skipped when
+  the battle party is built, matching the cartridge refusing it as a combatant
+  rather than removing it; the writeback puts it back in the same slot. Hatch
+  behavior does not exist yet.
 
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, Fly, Dig, Rollout and rampage, is never
