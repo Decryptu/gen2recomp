@@ -50,21 +50,70 @@ skipped. One broken mod does not stop the others and does not stop the game.
 `user://mods/` and press `V` in the overworld. It reads the same collision,
 block and palette data the 2D view reads and extrudes geometry from it.
 
-## Where `user://mods/` is
+## Installing
+
+The launcher takes a `.zip` on every platform, through **Import mod** or by
+dropping the archive on the window where the OS offers that. The archive holds
+one mod, at its root or in a single folder:
+
+```
+voxel_preview.zip
+  voxel_preview/
+    mod.json
+    mod.gd
+```
+
+An archive is refused whole if it has no `mod.json`, holds more than one mod
+folder, declares another `api_version`, or names a path that would write outside
+its own folder. Nothing is written until all of that passes, so a refusal leaves
+what is already installed untouched. Reimporting a mod that is present asks
+first, and replacing one removes files the new version dropped rather than
+leaving them behind.
 
 Mods load the same way in an exported build as in the editor: the entry script
 is plain GDScript read at runtime, even though the game's own scripts ship as
-binary tokens.
+binary tokens. An installed mod loads immediately, without a restart.
 
-| Platform | Path | Reachable by the player |
-|---|---|---|
-| Linux, macOS, Windows | the platform's `app_userdata/gen2recomp/mods` | Yes |
-| iOS | the app's `Documents/mods` | Yes: the export sets `UIFileSharingEnabled` |
-| Android | `/data/data/<package>/files/mods` | **No**, internal app storage |
+`user://mods/` is the platform's `app_userdata/gen2recomp/mods` on desktop, the
+app's `Documents/mods` on iOS (reachable in the Files app, since the export sets
+`UIFileSharingEnabled`), and internal app storage on Android, where the system
+file picker is how an archive gets in.
 
-Android has no route for installing a mod yet, and its shared storage is not
-readable by the app. Until that changes, an Android mod has to be placed with
-`adb`.
+## Publishing an index
+
+An index is a JSON feed listing mods that stay in their authors' own
+repositories. Anyone can publish one, and the game follows none until a player
+adds it, because following an index is trusting whoever publishes it.
+
+```json
+{
+  "schema_version": 1,
+  "name": "Example mods",
+  "mods": [
+    {
+      "id": "voxel_preview",
+      "name": "Voxel Preview",
+      "version": "1.0.0",
+      "description": "Draws the map as geometry.",
+      "download": "https://example.com/voxel_preview-1.0.0.zip"
+    }
+  ]
+}
+```
+
+`schema_version` must be exactly the version the build reads, because a later
+format may reuse a field name for something else. Feeds and downloads are https
+only: over plain http anyone on the path could rewrite where a download points.
+A row with no `id`, no usable `download`, or an id that is not a legal mod id is
+dropped, and the rest of the listing still works.
+
+Pasting `owner/repo`, the repository page, a site root or the feed file all
+resolve to the same feed, `https://<owner>.github.io/<repo>/index.json` for a
+GitHub slug.
+
+A listed mod installs through the same path an imported `.zip` does, and its
+manifest id must match the one the feed advertised, so a listing grants a mod
+nothing that picking the same file by hand would not.
 
 ## Replacing the world renderer
 
