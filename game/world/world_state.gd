@@ -532,11 +532,20 @@ func map_scenes() -> Dictionary:
 	return _map_scenes.duplicate()
 
 
+## Every entry point for a roaming record funnels through here: the constructor,
+## ensure_roaming_mons(), restore() and roaming_mons(). The importer writes these
+## four fields as integers, but a cache or snapshot round-trips through JSON,
+## where they come back as floats, so they are normalized once on the way in
+## rather than at each read.
 func _copy_roaming_mons(source: Array) -> Array:
 	var out: Array = []
 	for raw: Variant in source:
 		if raw is Dictionary:
-			out.append((raw as Dictionary).duplicate(true))
+			var mon: Dictionary = (raw as Dictionary).duplicate(true)
+			for field: String in ["species", "level", "map_group", "map_number"]:
+				if mon.has(field):
+					mon[field] = int(mon[field])
+			out.append(mon)
 	return out
 
 

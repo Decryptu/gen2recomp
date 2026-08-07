@@ -1960,6 +1960,13 @@ func _object_script_world(script_bytes: Array) -> Gen2WorldAPI:
 	return Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6), Gen2WorldState.new())
 
 
+func test_roaming_records_are_integers_rather_than_json_floats() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
+	var mon: Dictionary = world.roaming_mons()[0]
+	for field: String in ["species", "level", "map_group", "map_number"]:
+		assert_eq(typeof(mon[field]), TYPE_INT, "%s must be an int" % field)
+
+
 func test_roaming_mons_move_on_map_setup_and_not_on_elapsed_time() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var random := RandomNumberGenerator.new()
