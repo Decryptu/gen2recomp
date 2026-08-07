@@ -17,9 +17,17 @@ extends SubViewportContainer
 const CELL_SIZE: float = 1.0
 const WALL_HEIGHT: float = 1.0
 const WATER_DEPTH: float = -0.25
-## How far back and above the player the camera sits. Roughly the pitch the
-## overworld reads at while still showing the extrusion.
-const CAMERA_OFFSET := Vector3(0.0, 9.0, 7.5)
+## How far from the player the camera sits, and the angle above the horizon it
+## starts at: together the (0, 9, 7.5) offset this view used before the pitch
+## was steerable. Roughly what the overworld reads at while still showing the
+## extrusion.
+const CAMERA_DISTANCE: float = 11.715
+const CAMERA_PITCH_DEGREES: float = 50.19
+## Q and E walk the pitch between a near-flat and a near-overhead camera. The
+## screen does not read either key, which is the only reason this view is
+## allowed to.
+const CAMERA_PITCH_STEP: float = 5.0
+const CAMERA_PITCH_LIMITS := Vector2(10.0, 88.0)
 ## Light colour per time of day, in the order Gen2WorldPalette names them.
 const DAY_LIGHT: Array[Color] = [
 	Color(1.0, 0.94, 0.86), Color(1.0, 1.0, 0.98),
@@ -34,6 +42,7 @@ var _terrain: MeshInstance3D = null
 var _player: MeshInstance3D = null
 var _objects: Node3D = null
 var _time_of_day: int = 0
+var _camera_pitch: float = CAMERA_PITCH_DEGREES
 
 
 func _init() -> void:
@@ -112,26 +121,56 @@ func refresh_animation() -> void:
 	pass
 
 
+## Camera pitch, which is input the world screen has no use for and therefore
+## hands over. See Gen2ModHost.RENDERER_INPUT_METHOD: a movement or interaction
+## key never arrives here, because the screen claims those first.
+func handle_world_input(event: InputEvent) -> bool:
+	var key := event as InputEventKey
+	if key == null or not key.pressed:
+		return false
+	match key.keycode:
+		KEY_Q:
+			_set_camera_pitch(_camera_pitch - CAMERA_PITCH_STEP)
+		KEY_E:
+			_set_camera_pitch(_camera_pitch + CAMERA_PITCH_STEP)
+		_:
+			return false
+	return true
+
+
+func camera_pitch() -> float:
+	return _camera_pitch
+
+
+func _set_camera_pitch(degrees: float) -> void:
+	_camera_pitch = clampf(degrees, CAMERA_PITCH_LIMITS.x, CAMERA_PITCH_LIMITS.y)
+	refresh()
+
+
 func refresh() -> void:
 	if _world == null or _camera == null:
 		return
 	var here: Vector3 = _player_position()
 	_player.position = here + Vector3(0.0, 0.6, 0.0)
-	_camera.position = here + CAMERA_OFFSET
+	_camera.position = here + _camera_offset()
 	_camera.look_at(here, Vector3.UP)
 	_rebuild_objects()
+
+
+func _camera_offset() -> Vector3:
+	var pitch: float = deg_to_rad(_camera_pitch)
+	return Vector3(0.0, sin(pitch), cos(pitch)) * CAMERA_DISTANCE
 
 
 func _cell_center(cell: Vector2i) -> Vector3:
 	return Vector3(float(cell.x) * CELL_SIZE, 0.0, float(cell.y) * CELL_SIZE)
 
 
-## player_cell plus its in-flight walk step's fractional offset, so the box
-## and camera ease into a new cell instead of snapping the way they did
-## before Gen2WorldAPI carried any sub-cell presentation state.
+## The committed cell plus its in-flight step, so the box and camera ease into a
+## new cell instead of snapping. Gen2WorldAPI composes the two.
 func _player_position() -> Vector3:
-	var offset: Vector2 = _world.player_step_offset_cells()
-	return _cell_center(_world.player_cell) + Vector3(offset.x, 0.0, offset.y) * CELL_SIZE
+	var position: Vector2 = _world.player_position_cells()
+	return Vector3(position.x * CELL_SIZE, 0.0, position.y * CELL_SIZE)
 
 
 ## One solid per walk cell, extruded by what the cell's collision permission

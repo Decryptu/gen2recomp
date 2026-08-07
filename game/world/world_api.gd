@@ -221,6 +221,32 @@ func player_view_cell() -> Vector2i:
 	return player_cell - visible_origin_cell()
 
 
+## The player's presentation position in walk cells: the committed cell plus any
+## in-flight step. A renderer that frames its own view reads this instead of
+## composing player_cell and player_step_offset_cells() itself. player_cell
+## stays the authoritative logical cell.
+func player_position_cells() -> Vector2:
+	return Vector2(player_cell) + player_step_offset_cells()
+
+
+## The framed view's top-left in fractional walk cells.
+##
+## visible_origin_cell() is the hardware page origin: it follows the committed
+## cell, so it moves a whole cell the instant a step starts. A camera that is not
+## drawing a tile page would pan a step early on that, so this frames the
+## interpolated position with the same centring and map clamp. With no step in
+## flight the two agree.
+func visible_origin_cells() -> Vector2:
+	if current_map == null:
+		return Vector2.ZERO
+	var size: Vector2i = map_size_cells()
+	var position: Vector2 = player_position_cells()
+	return Vector2(
+		clampf(position.x - floorf(float(VIEW_CELLS.x) / 2.0), 0.0, float(maxi(0, size.x - VIEW_CELLS.x))),
+		clampf(position.y - floorf(float(VIEW_CELLS.y) / 2.0), 0.0, float(maxi(0, size.y - VIEW_CELLS.y)))
+	)
+
+
 ## The committed cell in pixels, offset by any in-flight walk step so a
 ## renderer can draw the approach to it. player_cell itself never carries
 ## this offset; collision, events and the snapshot never see it.

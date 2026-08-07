@@ -1008,6 +1008,40 @@ func test_player_walk_step_starts_a_cell_behind_and_never_moves_the_committed_ce
 	)
 
 
+func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
+	var world: Gen2WorldAPI = _world()
+	# Standing still, the hardware page origin and the camera agree.
+	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
+	assert_eq(world.visible_origin_cell(), Vector2i(3, 2))
+	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+
+	assert_true(world.move(Vector2i.LEFT))
+	# The page origin follows the committed cell, so it moves at once. The player
+	# has not visibly left the old cell yet, and the camera stays with them.
+	assert_eq(world.visible_origin_cell(), Vector2i(2, 2))
+	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
+	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+
+	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
+	assert_eq(world.visible_origin_cells(), Vector2(2.875, 2.0))
+
+	# The step lands on the committed cell, where the two agree again.
+	assert_true(world.advance_player_step(1000.0))
+	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
+	assert_false(world.player_step_in_progress())
+	assert_eq(world.player_position_cells(), Vector2(7.0, 6.0))
+	assert_eq(world.visible_origin_cells(), Vector2(world.visible_origin_cell()))
+
+
+func test_the_interpolated_camera_origin_clamps_to_the_map_like_the_page_does() -> void:
+	var corner: Gen2WorldAPI = _world(Vector2i(15, 11))
+	assert_eq(corner.visible_origin_cell(), Vector2i(6, 3))
+	assert_eq(corner.visible_origin_cells(), Vector2(6.0, 3.0))
+	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
+	assert_eq(top_left.visible_origin_cells(), Vector2.ZERO)
+
+
 func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.move(Vector2i.LEFT))
