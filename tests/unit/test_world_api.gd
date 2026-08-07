@@ -896,6 +896,102 @@ func test_strength_push_refuses_a_boulder_standing_on_a_pit() -> void:
 	assert_eq(_boulder_at(world, Vector2i(6, 6)).cell, Vector2i(6, 6))
 
 
+## The fixture's warp at (6,6) is on COLL_PIT, which is exactly what a stone
+## table needs: HandleStoneQueue wants a boulder standing on a pit that is also
+## a warp event. Writes the queue the way a MAPCALLBACK_CMDQUEUE would, then
+## pushes a boulder onto it from the north.
+func _stone_table_world(rows: Array, boulder_at: Vector2i = Vector2i(6, 5)) -> Gen2WorldAPI:
+	RomCache.write_json(RomCache.world_command_queues_path(_directory), {
+		"48:6200": {
+			"bank": 48, "address": 0x6200,
+			"type": Gen2WorldScript.CMDQUEUE_STONETABLE,
+			"data_address": 0x6205, "rows": rows,
+		},
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6210": [Gen2WorldScript.SETEVENT, 24, 0, Gen2WorldScript.END],
+	})
+	var world: Gen2WorldAPI = _boulder_world(boulder_at + Vector2i.UP, boulder_at)
+	world.apply_command_queue_write(48, 0x6200)
+	return world
+
+
+## The warp at (6,6) is the map's first, so HandleStoneQueue's one-based count
+## makes it warp 1. The boulder appended by _boulder_world() is the second
+## object, so its object_const_def id is 3.
+const STONE_WARP: int = 1
+const STONE_OBJECT: int = 3
+const STONE_SCRIPT: int = 0x6210
+
+
+## CmdQueue_StoneTable then HandleStoneQueue, all five tests passing at once: a
+## Strength boulder, standing, on a pit, on a warp, named by a written row.
+func test_a_boulder_pushed_onto_a_stone_table_warp_queues_its_fall_script() -> void:
+	var world: Gen2WorldAPI = _stone_table_world([
+		{"warp": STONE_WARP, "object": STONE_OBJECT, "script": STONE_SCRIPT},
+	])
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+
+	assert_true(result.has("boulder_pushed"), JSON.stringify(result))
+	assert_eq(result["boulder_pushed"]["to_cell"], Vector2i(6, 6))
+	assert_eq(int(result["boulder_pushed"]["fall_script"]), STONE_SCRIPT)
+	## The row's script is queued, not run behind the caller's back.
+	var pumped: Array = world.run_event_queue(false)
+	assert_eq(pumped.size(), 1)
+	assert_eq(pumped[0]["status"], &"complete")
+	assert_true(world.event_flag_active(24))
+
+
+## The warp id is matched, not merely the fact of a warp: a row naming a
+## different one leaves the push an ordinary push.
+func test_a_stone_table_row_for_another_warp_does_not_fire() -> void:
+	var world: Gen2WorldAPI = _stone_table_world([
+		{"warp": STONE_WARP + 1, "object": STONE_OBJECT, "script": STONE_SCRIPT},
+	])
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result.has("boulder_pushed"))
+	assert_false(result["boulder_pushed"].has("fall_script"), JSON.stringify(result))
+
+
+## And so is the object id, which is an object_const_def constant and so two
+## more than the map's own index.
+func test_a_stone_table_row_for_another_boulder_does_not_fire() -> void:
+	var world: Gen2WorldAPI = _stone_table_world([
+		{"warp": STONE_WARP, "object": STONE_OBJECT + 1, "script": STONE_SCRIPT},
+	])
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result.has("boulder_pushed"))
+	assert_false(result["boulder_pushed"].has("fall_script"), JSON.stringify(result))
+
+
+## A boulder pushed onto ordinary floor is not on a warp at all, so the queue
+## never answers however many rows it holds.
+func test_a_boulder_pushed_onto_open_floor_fires_no_stone_table() -> void:
+	var world: Gen2WorldAPI = _stone_table_world([
+		{"warp": STONE_WARP, "object": STONE_OBJECT, "script": STONE_SCRIPT},
+	], BOULDER_CELL)
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result.has("boulder_pushed"))
+	assert_false(result["boulder_pushed"].has("fall_script"), JSON.stringify(result))
+
+
+## HandleStoneQueue reads the queue that was written, so a map whose callback
+## never ran has none and nothing falls.
+func test_no_stone_table_fires_without_a_written_queue() -> void:
+	var world: Gen2WorldAPI = _boulder_world(Vector2i(6, 4), Vector2i(6, 5))
+	assert_true(world.command_queues().is_empty())
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result.has("boulder_pushed"))
+	assert_false(result["boulder_pushed"].has("fall_script"))
+
+
+## The one-based index .check_on_warp counts, and zero for a cell with no warp.
+func test_warp_index_is_one_based_and_zero_off_a_warp() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(7, 6))
+	assert_eq(world.warp_index_at(Vector2i(6, 6)), 1)
+	assert_eq(world.warp_index_at(Vector2i(7, 6)), 0)
+
+
 ## A boulder already sliding is not STANDING, which is .CheckStrengthBoulder's
 ## second test, so a second press does not chain it another cell.
 func test_strength_push_refuses_a_boulder_already_mid_push() -> void:

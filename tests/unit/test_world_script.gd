@@ -299,3 +299,62 @@ func test_command_parser_reads_scripted_overworld_feature_operands() -> void:
 	assert_true(delete_queue["ok"])
 	assert_eq(delete_queue["name"], &"delcmdqueue")
 	assert_eq(delete_queue["value"], 2)
+
+
+## macros/scripts/maps.asm's `cmdqueue`: a type byte, a two-byte data pointer,
+## then two filler bytes. A null type is the empty slot the cartridge leaves
+## behind, not a queue.
+func test_command_queue_entry_decodes_type_and_pointer() -> void:
+	var entry: Dictionary = Gen2WorldScript.decode_command_queue_entry(
+		PackedByteArray([Gen2WorldScript.CMDQUEUE_STONETABLE, 0x30, 0x57, 0, 0])
+	)
+	assert_true(entry["ok"])
+	assert_eq(entry["type"], Gen2WorldScript.CMDQUEUE_STONETABLE)
+	assert_eq(entry["address"], 0x5730)
+
+	assert_false(Gen2WorldScript.decode_command_queue_entry(
+		PackedByteArray([Gen2WorldScript.CMDQUEUE_NULL, 0x30, 0x57, 0, 0])
+	)["ok"])
+	assert_false(Gen2WorldScript.decode_command_queue_entry(
+		PackedByteArray([2, 0x30])
+	)["ok"])
+
+
+## `stonetable warp_id, object_id, script` is four bytes a row, ending at a $ff
+## warp id. Blackthorn Gym 2F's own three rows, verbatim.
+func test_stone_table_decodes_rows_until_the_terminator() -> void:
+	var table: Dictionary = Gen2WorldScript.decode_stone_table(PackedByteArray([
+		5, 4, 0x3D, 0x57,
+		3, 5, 0x42, 0x57,
+		4, 6, 0x47, 0x57,
+		0xFF,
+	]))
+	assert_true(table["ok"])
+	assert_eq(table["bytes"], 13)
+	var rows: Array = table["rows"]
+	assert_eq(rows.size(), 3)
+	assert_eq(rows[0], {"warp": 5, "object": 4, "script": 0x573D})
+	assert_eq(rows[1], {"warp": 3, "object": 5, "script": 0x5742})
+	assert_eq(rows[2], {"warp": 4, "object": 6, "script": 0x5747})
+
+
+## Without a terminator the bytes are not a table, so the importer skips them
+## rather than keeping however many rows happened to parse.
+func test_stone_table_refuses_an_unterminated_run() -> void:
+	assert_false(Gen2WorldScript.decode_stone_table(
+		PackedByteArray([5, 4, 0x3D, 0x57, 3, 5])
+	)["ok"])
+	assert_true(Gen2WorldScript.decode_stone_table(PackedByteArray([0xFF]))["ok"])
+
+
+## writecmdqueue points at data rather than script, so the reference scan has to
+## report it separately or the recursive walk would try to run the queue.
+func test_reference_scan_reports_command_queue_pointers() -> void:
+	## Crystal opcode $7d, the profile-normalised writecmdqueue.
+	var references: Dictionary = Gen2WorldScript.scan_references(
+		PackedByteArray([0x7D, 0x2B, 0x57, 0x91]), 48, 0x6000, true
+	)
+	var queues: Array = references["command_queues"]
+	assert_eq(queues.size(), 1)
+	assert_eq(queues[0], {"bank": 48, "address": 0x572B})
+	assert_true(references["scripts"].is_empty())

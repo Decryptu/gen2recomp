@@ -85,6 +85,10 @@ static func import_to_cache(
 		result["movements"],
 	):
 		return {"ok": false, "message": "Could not write overworld movement data."}
+	if not RomCache.write_json(
+		RomCache.world_command_queues_path(directory), result["command_queues"]
+	):
+		return {"ok": false, "message": "Could not write overworld command queue data."}
 
 	var graphics: Dictionary = result["graphics"]
 	for number: int in graphics:
@@ -174,6 +178,12 @@ static func read_world(
 	if not bool(standard_result.get("ok", false)):
 		return standard_result
 
+	var queue_result: Dictionary = _read_command_queues(
+		rom, script_data, text_data, movement_data
+	)
+	if not bool(queue_result.get("ok", false)):
+		return queue_result
+
 	return {
 		"ok": true,
 		"maps": maps,
@@ -181,6 +191,7 @@ static func read_world(
 		"standard_scripts": standard_result["scripts"],
 		"text": text_data,
 		"movements": movement_data,
+		"command_queues": queue_result["queues"],
 		"tilesets": tilesets,
 		"graphics": graphics,
 		"palettes": palettes["groups"],
@@ -189,6 +200,110 @@ static func read_world(
 		"sprite_palettes": sprites["palettes"],
 		"sprite_graphics": sprites["graphics"],
 	}
+
+
+## The `cmdqueue` payloads, as a second pass over the scripts already collected.
+##
+## A `writecmdqueue` operand points at data, not at script, so the recursive
+## walk in _collect_script() cannot follow it the way it follows a call: the
+## bytes there are a queue entry, and behind that a stone table. Both are read
+## here, and each table row's own script is collected like any other.
+##
+## Only Blackthorn Gym 2F and Ice Path B1F write a queue, and both write a
+## CMDQUEUE_STONETABLE, so an entry of any other type is kept for its pointer
+## and left undecoded rather than guessed at.
+##
+## A pointer that does not resolve is skipped, not fatal. Scripts are collected
+## as fixed slices, so a slice that runs past its own end can decode stray bytes
+## as a `writecmdqueue`; the corpus counts already treat that as expected. What
+## keeps this honest is `tools/validate_command_queues.gd`, which asserts the two
+## real tables against the pinned sources rather than trusting the scan.
+static func _read_command_queues(
+	rom: RomFile, script_data: Dictionary, text_data: Dictionary, movement_data: Dictionary
+) -> Dictionary:
+	var queues: Dictionary = {}
+	for key: Variant in script_data:
+		var parts: PackedStringArray = String(key).split(":")
+		if parts.size() != 2:
+			continue
+		var bytes: PackedByteArray = PackedByteArray(script_data[key])
+		var references: Dictionary = Gen2WorldScript.scan_references(
+			bytes, int(parts[0]), 0, rom.id == &"crystal"
+		)
+		for reference: Dictionary in references.get("command_queues", []):
+			_read_command_queue(
+				rom, int(reference["bank"]), int(reference["address"]),
+				queues, script_data, text_data, movement_data
+			)
+	return {"ok": true, "queues": queues}
+
+
+static func _read_command_queue(
+	rom: RomFile,
+	bank: int,
+	address: int,
+	queues: Dictionary,
+	script_data: Dictionary,
+	text_data: Dictionary,
+	movement_data: Dictionary,
+) -> void:
+	var key: String = Gen2WorldScript.pointer_key(bank, address)
+	if queues.has(key) or not _valid_cpu_address(address):
+		return
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0 or not rom.in_bounds(offset, Gen2WorldScript.CMDQUEUE_ENTRY_SIZE):
+		return
+	var entry: Dictionary = Gen2WorldScript.decode_command_queue_entry(
+		rom.slice(offset, Gen2WorldScript.CMDQUEUE_ENTRY_SIZE)
+	)
+	if not bool(entry.get("ok", false)):
+		return
+	var record: Dictionary = {
+		"bank": bank,
+		"address": address,
+		"type": int(entry["type"]),
+		"data_address": int(entry["address"]),
+	}
+	if int(entry["type"]) == Gen2WorldScript.CMDQUEUE_STONETABLE:
+		var rows: Array = _read_stone_table(
+			rom, bank, int(entry["address"]), script_data, text_data, movement_data
+		)
+		if rows.is_empty():
+			return
+		record["rows"] = rows
+	queues[key] = record
+
+
+## The `stonetable` behind a CMDQUEUE_STONETABLE entry, or an empty Array when
+## the bytes there are not one.
+static func _read_stone_table(
+	rom: RomFile,
+	bank: int,
+	address: int,
+	script_data: Dictionary,
+	text_data: Dictionary,
+	movement_data: Dictionary,
+) -> Array:
+	if not _valid_cpu_address(address):
+		return []
+	var offset: int = _far_offset(rom, {"bank": bank, "address": address})
+	if offset < 0 or not rom.in_bounds(offset, 1):
+		return []
+	var span: int = Gen2WorldScript.STONETABLE_ROW_SIZE * Gen2WorldScript.MAX_STONETABLE_ROWS + 1
+	var decoded: Dictionary = Gen2WorldScript.decode_stone_table(
+		rom.slice(offset, mini(span, rom.size() - offset))
+	)
+	if not bool(decoded.get("ok", false)):
+		return []
+	var rows: Array = decoded["rows"]
+	for row: Dictionary in rows:
+		if not _valid_cpu_address(int(row["script"])):
+			return []
+	for row: Dictionary in rows:
+		_collect_script(
+			rom, bank, int(row["script"]), script_data, text_data, movement_data
+		)
+	return rows
 
 
 ## JUMPSTD and CALLSTD address a profile-specific far-pointer table. These

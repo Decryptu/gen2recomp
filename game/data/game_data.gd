@@ -48,6 +48,7 @@ var _world_scripts: Dictionary = {}
 var _world_standard_scripts: Dictionary = {}
 var _world_text: Dictionary = {}
 var _world_movements: Dictionary = {}
+var _world_command_queues: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_encounters: Dictionary = {}
 var _world_palettes: Array = []
@@ -259,6 +260,15 @@ func world_movement(bank: int, address: int) -> PackedByteArray:
 	return _payload_bytes(
 		_movements().get(Gen2WorldScript.pointer_key(bank, address), []), _blob("movements")
 	)
+
+
+## The decoded `cmdqueue` a `writecmdqueue` at this pointer writes. Empty when
+## the cartridge has none there, which is every map but two.
+func world_command_queue(bank: int, address: int) -> Dictionary:
+	var value: Variant = _command_queues().get(
+		Gen2WorldScript.pointer_key(bank, address), {}
+	)
+	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
 
 
 ## One decoded tileset's metatile and collision tables, or null if absent.
@@ -849,6 +859,8 @@ func _section_json_path(section: String) -> String:
 			return RomCache.world_text_path(directory)
 		"movements":
 			return RomCache.world_movements_path(directory)
+		"command_queues":
+			return RomCache.world_command_queues_path(directory)
 		"audio":
 			return RomCache.world_audio_path(directory)
 	return ""
@@ -891,6 +903,14 @@ func _movements() -> Dictionary:
 	if _claim_section("movements"):
 		_world_movements = _read_section(RomCache.world_movements_path(directory), false)
 	return _world_movements
+
+
+func _command_queues() -> Dictionary:
+	if _claim_section("command_queues"):
+		_world_command_queues = _read_section(
+			RomCache.world_command_queues_path(directory), false
+		)
+	return _world_command_queues
 
 
 func _tilesets() -> Dictionary:
