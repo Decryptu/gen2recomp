@@ -56,6 +56,8 @@ func _write_cut_tree() -> void:
 			raw["name"] = "CUT"
 		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_SURF:
 			raw["name"] = "SURF"
+		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_STRENGTH:
+			raw["name"] = "STRENGTH"
 		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_WHIRLPOOL:
 			raw["name"] = "WHIRLPOOL"
 	RomCache.write_json(RomCache.moves_path(directory), moves)
@@ -368,6 +370,58 @@ func test_cancel_closes_the_submenu_before_the_party_screen() -> void:
 	party.handle_key(KEY_ESCAPE)
 	await get_tree().process_frame
 	assert_null(_world_screen._party_host)
+
+
+func _open_strength_world(badge: bool = true) -> void:
+	await _open_world(
+		badge, Gen2WorldFieldMove.MOVE_STRENGTH, Gen2WorldFieldMove.BADGE_PLAIN
+	)
+
+
+func test_submenu_lists_strength_for_a_mon_that_knows_it() -> void:
+	await _open_strength_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["STRENGTH", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
+	)
+
+
+## .TryStrength checks the badge and stops, so the entry resolves facing open
+## floor with no boulder in sight, and the flag waits for the acknowledge the way
+## Cut's block change does.
+func test_choosing_strength_shows_the_message_and_defers_the_flag() -> void:
+	await _open_strength_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_null(_world_screen._party_host)
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "TESTMON used STRENGTH!")
+	assert_false(world.strength_active())
+
+	_world_screen._acknowledge_field_move_text()
+	assert_false(_world_screen._field_move_text)
+	assert_true(world.strength_active())
+	assert_true(world.pending_strength().is_empty())
+
+
+func test_strength_without_the_badge_reports_the_badge_and_changes_nothing() -> void:
+	await _open_strength_world(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_key(KEY_SPACE)
+	party.handle_key(KEY_SPACE)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
+	_world_screen._acknowledge_field_move_text()
+	assert_false(world.strength_active())
 
 
 func test_submenu_lists_whirlpool_for_a_mon_that_knows_it() -> void:

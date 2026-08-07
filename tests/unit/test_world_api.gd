@@ -772,6 +772,152 @@ func test_ledge_hop_never_fires_while_surfing() -> void:
 	assert_eq(world.player_cell, Vector2i(3, 2))
 
 
+## Puts one SPRITEMOVEDATA_STRENGTH_BOULDER on [param at] and reloads, so the
+## shared fixture's own object list is untouched by every other test here.
+## ReadObjectEvents rebuilds from map data on a reload, which is what makes this
+## the same path a real map load takes.
+func _boulder_world(
+	start: Vector2i, at: Vector2i, strength: bool = true, surfing: bool = false
+) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = _world(start)
+	if strength:
+		world.state.set_engine_flag(Gen2WorldState.strength_active_flag(
+			Gen2WorldState.is_crystal_profile(world.data)
+		))
+	world.current_map.events["objects"].append({
+		"sprite": 1, "x": at.x, "y": at.y,
+		"movement": Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER, "event_flag": 0xFFFF,
+	})
+	if surfing:
+		world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	world.reload_current_map()
+	return world
+
+
+func _boulder_at(world: Gen2WorldAPI, cell: Vector2i) -> Gen2WorldObject:
+	return world.object_at(cell)
+
+
+## Column x=11 is open land from y=0 to the map's south edge, so a push there
+## meets nothing but the rule under test.
+const BOULDER_STAND: Vector2i = Vector2i(11, 4)
+const BOULDER_CELL: Vector2i = Vector2i(11, 5)
+const BOULDER_LANDING: Vector2i = Vector2i(11, 6)
+
+
+## .CheckNPC's own comment: a movable boulder is treated the same as an NPC in
+## front, so both bump. The boulder advances a cell, the player does not, and the
+## step still reports blocked.
+func test_strength_push_moves_the_boulder_and_bumps_the_player() -> void:
+	var world: Gen2WorldAPI = _boulder_world(BOULDER_STAND, BOULDER_CELL)
+	var boulder: Gen2WorldObject = _boulder_at(world, BOULDER_CELL)
+	assert_not_null(boulder)
+
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_false(result["ok"], JSON.stringify(result))
+	assert_eq(result["reason"], &"blocked")
+	assert_eq(world.player_cell, BOULDER_STAND)
+	assert_true(result.has("boulder_pushed"), JSON.stringify(result))
+	assert_eq(result["boulder_pushed"]["from_cell"], BOULDER_CELL)
+	assert_eq(result["boulder_pushed"]["to_cell"], BOULDER_LANDING)
+	assert_eq(boulder.cell, BOULDER_LANDING)
+	assert_null(_boulder_at(world, BOULDER_CELL))
+
+
+## MovementFunction_Strength calls InitStep with `direction | 0`, the slow
+## StepVectors row: 16 frames. The cell commits when the step starts, so only the
+## drawn offset trails, and the boulder never rolls a wait afterwards because
+## StepFunction_StrengthBoulder just stands it back up.
+func test_strength_push_slides_the_boulder_over_the_slow_step_duration() -> void:
+	var world: Gen2WorldAPI = _boulder_world(BOULDER_STAND, BOULDER_CELL)
+	world.move_result(Vector2i.DOWN)
+	var boulder: Gen2WorldObject = _boulder_at(world, BOULDER_LANDING)
+	assert_not_null(boulder)
+	assert_true(boulder.is_stepping())
+	assert_eq(boulder.step_frames_total, Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH)
+
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH:
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+	assert_false(boulder.is_stepping())
+	assert_false(boulder.is_idle())
+	assert_eq(boulder.cell, BOULDER_LANDING)
+
+
+## The flag is the first thing .CheckStrengthBoulder tests, so without it the
+## boulder is an ordinary blocking object.
+func test_strength_push_refuses_without_the_active_flag() -> void:
+	var world: Gen2WorldAPI = _boulder_world(BOULDER_STAND, BOULDER_CELL, false)
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"blocked")
+	assert_false(result.has("boulder_pushed"))
+	assert_eq(_boulder_at(world, BOULDER_CELL).cell, BOULDER_CELL)
+
+
+## CanObjectMoveInDirection: WillObjectBumpIntoWater refuses a landing cell that
+## is not LAND_TILE, and WillObjectBumpIntoSomeoneElse refuses an occupied one.
+func test_strength_push_refuses_a_landing_cell_the_boulder_cannot_take() -> void:
+	# (2,2) is a wall directly above the boulder at (2,3).
+	var walled: Gen2WorldAPI = _boulder_world(Vector2i(2, 4), Vector2i(2, 3))
+	var into_wall: Dictionary = walled.move_result(Vector2i.UP)
+	assert_false(into_wall.has("boulder_pushed"), JSON.stringify(into_wall))
+	assert_eq(_boulder_at(walled, Vector2i(2, 3)).cell, Vector2i(2, 3))
+
+	# The shared fixture's own object stands at (5,6), so a boulder at (5,5)
+	# pushed DOWN has nowhere to land.
+	var occupied: Gen2WorldAPI = _boulder_world(Vector2i(5, 4), Vector2i(5, 5))
+	assert_not_null(occupied.object_at(Vector2i(5, 6)))
+	var into_object: Dictionary = occupied.move_result(Vector2i.DOWN)
+	assert_false(into_object.has("boulder_pushed"), JSON.stringify(into_object))
+	assert_eq(_boulder_at(occupied, Vector2i(5, 5)).cell, Vector2i(5, 5))
+
+
+## .CheckLandPerms runs before .CheckNPC, so a boulder standing where the player
+## could not walk anyway is never even considered: the leave rule on the player's
+## own COLL_RIGHT_WALL cell refuses first.
+func test_strength_push_refuses_when_the_step_itself_is_walled_off() -> void:
+	var world: Gen2WorldAPI = _boulder_world(Vector2i(2, 8), Vector2i(3, 8))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(result["ok"])
+	assert_false(result.has("boulder_pushed"), JSON.stringify(result))
+	assert_eq(_boulder_at(world, Vector2i(3, 8)).cell, Vector2i(3, 8))
+
+
+## MovementFunction_Strength .on_pit stops a boulder for good before it ever
+## reads BOULDER_MOVING. Blackthorn Gym 2F is the only map that reaches it. The
+## pit is LAND_TILE, so nothing else here would have refused.
+func test_strength_push_refuses_a_boulder_standing_on_a_pit() -> void:
+	var world: Gen2WorldAPI = _boulder_world(Vector2i(6, 5), Vector2i(6, 6))
+	assert_true(Gen2WorldCollision.is_pit_tile(world.collision_code_at(Vector2i(6, 6))))
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_false(result.has("boulder_pushed"), JSON.stringify(result))
+	assert_eq(_boulder_at(world, Vector2i(6, 6)).cell, Vector2i(6, 6))
+
+
+## A boulder already sliding is not STANDING, which is .CheckStrengthBoulder's
+## second test, so a second press does not chain it another cell.
+func test_strength_push_refuses_a_boulder_already_mid_push() -> void:
+	var world: Gen2WorldAPI = _boulder_world(BOULDER_STAND, BOULDER_CELL)
+	assert_true(world.move_result(Vector2i.DOWN).has("boulder_pushed"))
+	var again: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_false(again.has("boulder_pushed"), JSON.stringify(again))
+	assert_eq(_boulder_at(world, BOULDER_LANDING).cell, BOULDER_LANDING)
+
+
+## .TrySurf calls the same .CheckNPC and .CheckStrengthBoulder checks no player
+## state, so a surfing player stepping onto a land cell pushes the boulder on it.
+func test_strength_push_works_while_surfing_onto_land() -> void:
+	# (4,8) is COLL_RIGHT_BUOY, water permission, with land below at (4,9).
+	var world: Gen2WorldAPI = _boulder_world(
+		Vector2i(4, 8), Vector2i(4, 9), true, true
+	)
+	var result: Dictionary = world.move_result(Vector2i.DOWN)
+	assert_true(result.has("boulder_pushed"), JSON.stringify(result))
+	assert_eq(_boulder_at(world, Vector2i(4, 10)).cell, Vector2i(4, 10))
+
+
 func test_side_wall_blocks_leaving_the_standing_tile_only_in_its_own_direction() -> void:
 	# (2,8) is COLL_RIGHT_WALL, land permission on every side.
 	var world: Gen2WorldAPI = _world(Vector2i(2, 8))
@@ -1153,6 +1299,121 @@ func test_interact_dispatches_a_tile_collision_std_script_when_nothing_else_answ
 	assert_false(results.is_empty())
 	assert_eq(results[0]["status"], &"complete", JSON.stringify(results[0]))
 	assert_eq(world.state.map_scene(1, 1), 90)
+
+
+## A world facing a boulder whose script is `jumpstd StrengthBoulderScript`, the
+## shape every boulder object in every map has. No standard-script entry is
+## written for index 14 on purpose: the intercept must answer before the table is
+## ever consulted, because the real entry is `farsjump AskStrengthScript` and
+## that script's first command is a `callasm` this runner cannot execute.
+func _boulder_script_world(
+	moves: Array, badge: bool = true, strength: bool = false
+) -> Gen2WorldAPI:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6100"] = [Gen2WorldScript.JUMPSTD, 14, 0]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+	var world: Gen2WorldAPI = _world(Vector2i(11, 4))
+	var crystal: bool = Gen2WorldState.is_crystal_profile(world.data)
+	if badge:
+		world.state.set_engine_flag(
+			Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_PLAIN, crystal)
+		)
+	if strength:
+		world.state.set_engine_flag(Gen2WorldState.strength_active_flag(crystal))
+	world.current_map.events["objects"].append({
+		"sprite": 1, "x": 11, "y": 5,
+		"movement": Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER,
+		"script": 0x6100, "event_flag": 0xFFFF,
+	})
+	world.reload_current_map()
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	world.set_party_summary(1, false, [25] as Array[int], moves, ["CHIKORITA"])
+	return world
+
+
+## TryStrengthOW answers 1 when CheckPartyMove finds nothing or the badge is
+## missing, and AskStrengthScript's `.DontMeetRequirements` shows
+## BouldersMayMoveText for it.
+func test_boulder_script_reports_no_strength_without_the_move_or_the_badge() -> void:
+	var no_move: Gen2WorldAPI = _boulder_script_world([[]])
+	var without_move: Array = no_move.interact()
+	assert_eq(without_move[0]["status"], &"waiting", JSON.stringify(without_move[0]))
+	assert_eq(
+		String(without_move[0]["event"]["text"]),
+		Gen2WorldScriptRunner.STRENGTH_MAY_MOVE_TEXT
+	)
+	assert_eq(no_move.run_event_queue(true)[0]["status"], &"complete")
+	assert_false(no_move.strength_active())
+
+	var no_badge: Gen2WorldAPI = _boulder_script_world(
+		[[Gen2WorldFieldMove.MOVE_STRENGTH]], false
+	)
+	var without_badge: Array = no_badge.interact()
+	assert_eq(
+		String(without_badge[0]["event"]["text"]),
+		Gen2WorldScriptRunner.STRENGTH_MAY_MOVE_TEXT
+	)
+	assert_false(no_badge.strength_active())
+
+
+## TryStrengthOW answers 2 once the flag is set, and `.AlreadyUsedStrength` shows
+## BouldersMoveText without asking again.
+func test_boulder_script_reports_boulders_already_movable() -> void:
+	var world: Gen2WorldAPI = _boulder_script_world(
+		[[Gen2WorldFieldMove.MOVE_STRENGTH]], true, true
+	)
+	var results: Array = world.interact()
+	assert_eq(
+		String(results[0]["event"]["text"]),
+		Gen2WorldScriptRunner.STRENGTH_BOULDERS_MOVE_TEXT
+	)
+	assert_eq(world.run_event_queue(true)[0]["status"], &"complete")
+	assert_true(world.strength_active())
+
+
+## TryStrengthOW answers 0, so `.AskStrength` opens the yes/no. A yes runs
+## Script_UsedStrength: SetStrengthFlag, then its two texts.
+func test_boulder_script_asks_and_a_yes_sets_the_flag() -> void:
+	var world: Gen2WorldAPI = _boulder_script_world([[Gen2WorldFieldMove.MOVE_STRENGTH]])
+	var asked: Array = world.interact()
+	assert_eq(
+		String(asked[0]["event"]["text"]), Gen2WorldScriptRunner.STRENGTH_ASK_TEXT
+	)
+	assert_false(world.strength_active())
+
+	var choice: Array = world.run_event_queue(true)
+	assert_eq(StringName(choice[0]["event"]["type"]), &"choice")
+	assert_eq(choice[0]["event"]["choices"], [&"yes", &"no"])
+
+	var used: Array = world.run_event_queue(true, 0)
+	assert_eq(String(used[0]["event"]["text"]), "CHIKORITA used\nSTRENGTH!")
+
+	var boulders: Array = world.run_event_queue(true)
+	assert_eq(String(boulders[0]["event"]["text"]), "CHIKORITA can\nmove boulders.")
+
+	assert_eq(world.run_event_queue(true)[0]["status"], &"complete")
+	assert_true(world.strength_active())
+
+
+## A no falls through to closetext/end, so nothing is committed.
+func test_boulder_script_leaves_the_flag_clear_on_a_no() -> void:
+	var world: Gen2WorldAPI = _boulder_script_world([[Gen2WorldFieldMove.MOVE_STRENGTH]])
+	world.interact()
+	world.run_event_queue(true)
+	var refused: Array = world.run_event_queue(true, 1)
+	assert_eq(refused[0]["status"], &"complete", JSON.stringify(refused[0]))
+	assert_false(world.strength_active())
+
+
+## CheckPartyMove has nothing to read without the mirror, so the script fails
+## rather than answering "nobody knows it", the way VAR_PARTYCOUNT does.
+func test_boulder_script_fails_without_a_party_summary() -> void:
+	var world: Gen2WorldAPI = _boulder_script_world([[Gen2WorldFieldMove.MOVE_STRENGTH]])
+	world.clear_party_summary()
+	var results: Array = world.interact()
+	assert_eq(results[0]["status"], &"failed", JSON.stringify(results[0]))
+	assert_eq(results[0]["reason"], &"missing_party_summary")
 
 
 func test_interact_finds_no_tile_collision_script_for_an_untabled_code() -> void:
@@ -2170,10 +2431,16 @@ func test_check_pokerus_special_fails_without_a_party_summary() -> void:
 func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void:
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.party_summary().is_empty())
-	assert_true(world.set_party_summary(3, true, [25, 1] as Array[int])["ok"])
-	assert_eq(world.party_summary(), {"count": 3, "pokerus": true, "species": [25, 1]})
+	assert_true(world.set_party_summary(
+		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"]
+	)["ok"])
+	var expected: Dictionary = {
+		"count": 3, "pokerus": true, "species": [25, 1],
+		"moves": [[0x46], []], "names": ["PIKA", "BULBASAUR"],
+	}
+	assert_eq(world.party_summary(), expected)
 	assert_false(world.set_party_summary(-1, false)["ok"])
-	assert_eq(world.party_summary(), {"count": 3, "pokerus": true, "species": [25, 1]})
+	assert_eq(world.party_summary(), expected)
 	world.clear_party_summary()
 	assert_true(world.party_summary().is_empty())
 

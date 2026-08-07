@@ -19,6 +19,11 @@ const MOVEMENT_SPINRANDOM_FAST: int = 10
 const MOVEMENT_PLAYER: int = 11
 const MOVEMENT_FOLLOW: int = 19
 const MOVEMENT_SCRIPTED: int = 20
+## SPRITEMOVEDATA_STRENGTH_BOULDER. The constants file's comment column is hex,
+## which is why this is $19 and not 19: 19 is SPRITEMOVEDATA_FOLLOWING ($13)
+## above. A boulder decides nothing on its own, so it is deliberately in neither
+## movement_supported() nor movement_advances(); it only reacts to a push.
+const MOVEMENT_STRENGTH_BOULDER: int = 0x19
 const MOVEMENT_SWIM_WANDER: int = 0x24
 
 const OBJECTTYPE_SCRIPT: int = 0
@@ -100,6 +105,13 @@ func initial_facing() -> int:
 			return Gen2WorldSprite.FACING_RIGHT
 		_:
 			return Gen2WorldSprite.FACING_DOWN
+
+
+## The source's own test in DoPlayerMovement.CheckStrengthBoulder: OBJECT_PALETTE
+## bit STRENGTH_BOULDER, which data/sprites/map_objects.asm sets on exactly the
+## SPRITEMOVEDATA_STRENGTH_BOULDER row, so the movement template answers it.
+func is_strength_boulder() -> bool:
+	return movement == MOVEMENT_STRENGTH_BOULDER
 
 
 func movement_supported() -> bool:

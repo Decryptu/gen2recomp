@@ -216,6 +216,19 @@ func _surf_world(badge: bool = true, stand: Vector2i = SHORE_CELL) -> Gen2WorldA
 	return world
 
 
+## A world on the shore with the Plain Badge on whichever engine flag table the
+## opened cache selects. Strength needs nothing in front of the player, so the
+## start cell only has to be somewhere ordinary.
+func _strength_world(badge: bool = true) -> Gen2WorldAPI:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	if badge:
+		state.set_engine_flag(Gen2WorldState.badge_flag(
+			Gen2WorldFieldMove.BADGE_PLAIN, Gen2WorldState.is_crystal_profile(data)
+		))
+	return Gen2WorldAPI.open(data, 1, 1, SHORE_CELL, state)
+
+
 ## A world beside the whirlpool and facing it, surfing, with the Glacier Badge on
 ## whichever engine flag table the opened cache selects.
 func _whirlpool_world(badge: bool = true) -> Gen2WorldAPI:
@@ -231,18 +244,106 @@ func _whirlpool_world(badge: bool = true) -> Gen2WorldAPI:
 	return world
 
 
-func test_cut_surf_and_whirlpool_are_the_field_moves_the_submenu_offers() -> void:
+func test_cut_surf_strength_and_whirlpool_are_the_field_moves_the_submenu_offers() -> void:
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_CUT))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SURF))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_STRENGTH))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_WHIRLPOOL))
 	assert_eq(Gen2WorldFieldMove.MOVE_CUT, 0x0F)
 	assert_eq(Gen2WorldFieldMove.MOVE_SURF, 0x39)
+	assert_eq(Gen2WorldFieldMove.MOVE_STRENGTH, 0x46)
 	assert_eq(Gen2WorldFieldMove.MOVE_WHIRLPOOL, 0xFA)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, STRENGTH, FLASH,
-	# WATERFALL, HEADBUTT.
-	for move: int in [0x13, 0x46, 0x94, 0x7F, 0x1D]:
+	# submenu would offer an entry nothing answers: FLY, FLASH, WATERFALL,
+	# HEADBUTT.
+	for move: int in [0x13, 0x94, 0x7F, 0x1D]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
+
+
+## .TryStrength is CheckBadge ENGINE_PLAINBADGE and nothing else, so a request
+## made facing open floor with no boulder anywhere resolves. That is the whole
+## difference from Cut, Surf and Whirlpool.
+func test_strength_request_checks_the_plain_badge_and_nothing_else() -> void:
+	var world: Gen2WorldAPI = _strength_world()
+	world.player_cell = Vector2i(1, 1)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var request: Dictionary = world.strength_request(25)
+	assert_true(request["ok"], JSON.stringify(request))
+	assert_eq(StringName(request["kind"]), &"strength_requested")
+	assert_eq(int(request["move"]), Gen2WorldFieldMove.MOVE_STRENGTH)
+	assert_eq(int(request["species"]), 25)
+	assert_eq(world.pending_strength(), request)
+
+
+func test_strength_request_refuses_without_the_plain_badge() -> void:
+	var world: Gen2WorldAPI = _strength_world(false)
+	var request: Dictionary = world.strength_request()
+	assert_false(request["ok"])
+	assert_eq(StringName(request["kind"]), &"strength_failed")
+	assert_eq(StringName(request["reason"]), &"badge_required")
+	assert_true(world.pending_strength().is_empty())
+
+
+## The badge flag is profile split, so a Crystal-numbered write must not satisfy
+## a Gold/Silver .TryStrength, the way the Cut and Surf cases check theirs.
+func test_strength_request_refuses_the_other_profiles_badge_flag() -> void:
+	_gold_profile()
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_PLAIN, true))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(1, 1), state)
+	assert_eq(StringName(world.strength_request()["reason"]), &"badge_required")
+
+
+## SetStrengthFlag is the only writer of BIKEFLAGS_STRENGTH_ACTIVE_F in the
+## pinned sources, and Script_UsedStrength reaches it only after its text, so
+## nothing is set until the commit.
+func test_complete_strength_sets_the_flag_only_after_the_request() -> void:
+	var world: Gen2WorldAPI = _strength_world()
+	var crystal: bool = Gen2WorldState.is_crystal_profile(world.data)
+	assert_false(world.strength_active())
+
+	assert_eq(StringName(world.complete_strength()["reason"]), &"no_pending_strength")
+	assert_false(world.strength_active())
+
+	assert_true(world.strength_request(25)["ok"])
+	assert_false(world.strength_active())
+
+	var applied: Dictionary = world.complete_strength()
+	assert_true(applied["ok"], JSON.stringify(applied))
+	assert_eq(StringName(applied["kind"]), &"strength_applied")
+	assert_eq(int(applied["species"]), 25)
+	assert_true(world.strength_active())
+	assert_true(world.state.is_engine_flag_active(
+		Gen2WorldState.strength_active_flag(crystal)
+	))
+	assert_true(world.pending_strength().is_empty())
+
+
+## Nothing clears the flag, so it has to outlive the map reload and the warp that
+## drop every staged field-move request.
+func test_strength_stays_active_across_a_map_reload_and_a_warp() -> void:
+	var world: Gen2WorldAPI = _strength_world()
+	assert_true(world.strength_request()["ok"])
+	assert_true(world.complete_strength()["ok"])
+
+	world.reload_current_map()
+	assert_true(world.strength_active())
+
+	world.player_cell = SHORE_CELL
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_true(world.strength_active())
+
+
+## A staged request dies with the loaded map beside the other three, because
+## Script_StrengthFromMenu runs the moment it is queued.
+func test_pending_strength_is_dropped_by_a_map_reload() -> void:
+	var world: Gen2WorldAPI = _strength_world()
+	assert_true(world.strength_request()["ok"])
+	world.reload_current_map()
+	assert_true(world.pending_strength().is_empty())
+	assert_false(world.strength_active())
 
 
 func test_surf_sprite_follows_get_surf_type() -> void:

@@ -58,6 +58,44 @@ func test_badge_count_matches_active_flags_across_both_bytes() -> void:
 	assert_eq(kanto_only.badge_count(), 1)
 
 
+## BIKEFLAGS_STRENGTH_ACTIVE_F sits three flags ahead of ENGINE_ZEPHYRBADGE, so
+## it carries the same one-index profile shift the badges do, and it must not be
+## confused with a badge in either direction.
+func test_strength_active_flag_is_profile_split_and_is_not_a_badge() -> void:
+	assert_eq(Gen2WorldState.strength_active_flag(true), 24)
+	assert_eq(Gen2WorldState.strength_active_flag(false), 23)
+	assert_eq(
+		Gen2WorldState.strength_active_flag(true),
+		Gen2WorldState.badge_flag(0, true) - 3
+	)
+	assert_eq(
+		Gen2WorldState.strength_active_flag(false),
+		Gen2WorldState.badge_flag(0, false) - 3
+	)
+
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.strength_active_flag(true))
+	assert_true(state.is_engine_flag_active(Gen2WorldState.strength_active_flag(true)))
+	assert_false(state.is_engine_flag_active(Gen2WorldState.strength_active_flag(false)))
+	assert_eq(state.badge_count(true), 0)
+	assert_eq(state.badge_count(false), 0)
+
+
+## Nothing in the pinned engine/ or home/ ever clears BIKEFLAGS_STRENGTH_ACTIVE_F,
+## and engine flags serialize with the world snapshot, so the flag has to outlive
+## a round trip and the map-reload reset that clears temporary event flags.
+func test_strength_active_flag_survives_round_trip_and_map_reload() -> void:
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.strength_active_flag(true))
+	state.set_event_flag(0, true)
+
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(state.to_dict())
+	assert_true(restored.is_engine_flag_active(Gen2WorldState.strength_active_flag(true)))
+	restored.reset_map_reload_flags()
+	assert_true(restored.is_engine_flag_active(Gen2WorldState.strength_active_flag(true)))
+	assert_false(restored.is_event_flag_active(0))
+
+
 ## pokegold's engine flag table has no ENGINE_MOBILE_SYSTEM entry ahead of the
 ## badge section, so every pokegold badge sits one index lower than the same
 ## symbol in pokecrystal's constants/engine_flags.asm. A Crystal-numbered

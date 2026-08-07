@@ -129,5 +129,27 @@ func test_only_deciding_templates_advance_on_their_own() -> void:
 		Gen2WorldObject.MOVEMENT_STILL, Gen2WorldObject.MOVEMENT_FIXED_DOWN,
 		Gen2WorldObject.MOVEMENT_FIXED_UP, Gen2WorldObject.MOVEMENT_FIXED_LEFT,
 		Gen2WorldObject.MOVEMENT_FIXED_RIGHT,
+		Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER,
 	]:
 		assert_false(_object(movement).movement_advances(), "movement %d stands" % movement)
+
+
+## SPRITEMOVEDATA_STRENGTH_BOULDER is $19, and the constants file's comment
+## column is hex: reading it as decimal 19 would collide with
+## SPRITEMOVEDATA_FOLLOWING. A boulder reacts to a push and decides nothing on
+## its own, so it stays out of both template sets.
+func test_strength_boulder_is_a_hex_template_that_never_decides() -> void:
+	assert_eq(Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER, 0x19)
+	assert_ne(Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER, Gen2WorldObject.MOVEMENT_FOLLOW)
+	var boulder: Gen2WorldObject = _object(Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER)
+	assert_true(boulder.is_strength_boulder())
+	assert_false(boulder.movement_supported())
+	assert_false(boulder.movement_advances())
+	assert_eq(boulder.next_direction(RandomNumberGenerator.new()), Vector2i.ZERO)
+	for movement: int in [
+		Gen2WorldObject.MOVEMENT_STILL, Gen2WorldObject.MOVEMENT_FOLLOW,
+		Gen2WorldObject.MOVEMENT_WANDER,
+	]:
+		assert_false(
+			_object(movement).is_strength_boulder(), "movement %d is not a boulder" % movement
+		)

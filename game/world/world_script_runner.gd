@@ -80,6 +80,23 @@ const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
 const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
 const SPECIAL_FADE_OUT_MUSIC: int = 106
 const SPECIAL_INIT_ROAM_MONS: int = 105
+## StrengthBoulderScript's index in StdScripts (engine/events/std_scripts.asm),
+## the same 14 in both pins despite the tables being 52 and 46 long. Every
+## boulder object in every map reaches Strength through `jumpstd` on it.
+const STD_STRENGTH_BOULDER: int = 14
+## TryStrengthOW's three wScriptVar answers. `.already_using` names the branch
+## taken when `bit` sets Z, that is when the flag is still *clear*, so 0 is the
+## value that asks and 2 the value that reports the flag already set.
+const STRENGTH_OW_ASK: int = 0
+const STRENGTH_OW_UNABLE: int = 1
+const STRENGTH_OW_ALREADY_ACTIVE: int = 2
+## data/text/common_2.asm. Synthesized rather than decoded because the script
+## that shows them is reached only through `callasm`, which has no runner; see
+## _stage_strength_boulder().
+const STRENGTH_ASK_TEXT: String = \
+	"A #MON may be\nable to move this.\n\nWant to use\nSTRENGTH?"
+const STRENGTH_MAY_MOVE_TEXT: String = "A #MON may be\nable to move this."
+const STRENGTH_BOULDERS_MOVE_TEXT: String = "Boulders may now\nbe moved!"
 ## wBattleResult, which startbattle copies into wScriptVar
 ## (constants/battle_constants.asm).
 const BATTLE_RESULT_WIN: int = 0
@@ -197,6 +214,34 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 				_script_value = 1
 				return advance()
 			_stage_day_of_week_menu()
+			return _waiting_result()
+		## AskStrengthScript's `.AskStrength`: opentext, writetext, yesorno. The
+		## text pause is acknowledged first, then the choice is offered.
+		if pending_type == &"text" and _pending.get("special", &"") == &"strength_ask":
+			_pending = {
+				"type": &"choice",
+				"command": &"yesorno",
+				"choices": [&"yes", &"no"],
+				"special": &"strength_ask",
+				"slot": int(_pending.get("slot", -1)),
+				"source": _request.duplicate(true),
+			}
+			return _waiting_result()
+		if pending_type == &"choice" and _pending.get("special", &"") == &"strength_ask":
+			if choice < 0:
+				return _waiting_result()
+			var chosen_slot: int = int(_pending.get("slot", -1))
+			_pending = {}
+			## `iftrue Script_UsedStrength`, and a no falls to closetext/end.
+			_script_value = 1 if choice == 0 else 0
+			if choice != 0:
+				return _complete()
+			_stage_strength_used(chosen_slot)
+			return _waiting_result()
+		## Script_UsedStrength's second writetext, _MoveBoulderText.
+		if pending_type == &"text" and _pending.get("special", &"") == &"strength_used":
+			var used_name: String = String(_pending.get("name", "#MON"))
+			_stage_internal_text("%s can\nmove boulders." % used_name, true)
 			return _waiting_result()
 		if pending_type in [&"choice", &"menu"]:
 			if choice < 0:
@@ -583,6 +628,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.IFLESS:
 			return _branch(_script_value < int(command["value"]), bank, int(command["address"]))
 		Gen2WorldScript.JUMPSTD:
+			if int(command["address"]) == STD_STRENGTH_BOULDER:
+				return _stage_strength_boulder()
 			var jump_standard: Dictionary = _standard_script(int(command["address"]))
 			if jump_standard.is_empty():
 				return {
@@ -595,6 +642,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 				jump_standard["data"]
 			)
 		Gen2WorldScript.CALLSTD:
+			if int(command["address"]) == STD_STRENGTH_BOULDER:
+				return _stage_strength_boulder()
 			var call_standard: Dictionary = _standard_script(int(command["address"]))
 			if call_standard.is_empty():
 				return {
@@ -781,9 +830,10 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			## Script_checkpoke sets wScriptVar from whether the species is in
 			## wPartySpecies (engine/overworld/scripting.asm). The read-only party
 			## summary is the only party this scene-free runner may read, and an
-			## absent one fails the way VAR_PARTYCOUNT does.
+			## absent one fails the way VAR_PARTYCOUNT does. A summary carrying an
+			## empty species list answers 0, not a failure.
 			var party: Dictionary = _request.get("party", {})
-			if party.is_empty() or not party.has("species"):
+			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "command": command}
 			var species: Array = party.get("species", [])
 			_script_value = 1 if int(command.get("value", 0)) in species else 0
@@ -1848,6 +1898,84 @@ func _emit_object_event(event_type: StringName, values: Dictionary) -> void:
 	for key: Variant in values:
 		event[key] = values[key]
 	_events.append(event)
+
+
+## engine/events/overworld.asm's AskStrengthScript, synthesized.
+##
+## StrengthBoulderScript is `farsjump AskStrengthScript`, whose first command is
+## `callasm TryStrengthOW`. `callasm` has no runner here and its operand is a
+## link-time address absent from the pinned disassemblies, so the seam sits on
+## the standard-script index instead, which is 14 in both pins and verified by
+## the imported table. The synthesized body is the same shape trainer object
+## dispatch takes: source sequence, project metadata.
+##
+## Every branch of AskStrengthScript terminates, so this never returns to a
+## caller and jumpstd and callstd resolve alike.
+func _stage_strength_boulder() -> Dictionary:
+	var party: Dictionary = _request.get("party", {})
+	if party.is_empty():
+		return {"ok": false, "reason": &"missing_party_summary", "standard_index": STD_STRENGTH_BOULDER}
+	var slot: int = _party_slot_with_move(Gen2WorldFieldMove.MOVE_STRENGTH)
+	var has_badge: bool = _engine_flag_active(
+		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_PLAIN, _crystal_commands())
+	)
+	if slot < 0 or not has_badge:
+		_script_value = STRENGTH_OW_UNABLE
+		return _stage_internal_text(STRENGTH_MAY_MOVE_TEXT, true)
+	if _engine_flag_active(Gen2WorldState.strength_active_flag(_crystal_commands())):
+		_script_value = STRENGTH_OW_ALREADY_ACTIVE
+		return _stage_internal_text(STRENGTH_BOULDERS_MOVE_TEXT, true)
+	_script_value = STRENGTH_OW_ASK
+	_pending = {
+		"type": &"text",
+		"text": STRENGTH_ASK_TEXT,
+		"internal_text": true,
+		"special": &"strength_ask",
+		"slot": slot,
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = false
+	return {"ok": true}
+
+
+## CheckPartyMove: the first slot whose move list carries [param move], or -1.
+## The mirror's per-slot lists are the only party this scene-free runner reads.
+func _party_slot_with_move(move: int) -> int:
+	var moves: Array = _request.get("party", {}).get("moves", [])
+	for slot: int in moves.size():
+		if moves[slot] is Array and (moves[slot] as Array).has(move):
+			return slot
+	return -1
+
+
+## SetStrengthFlag plus Script_UsedStrength's two texts. The cry and its three
+## frame pause are presentation the runner does not own, so the two writetexts
+## become two pauses back to back, which is what a reader sees either way.
+func _stage_strength_used(slot: int) -> Dictionary:
+	_staged_engine_flags[Gen2WorldState.strength_active_flag(_crystal_commands())] = true
+	var names: Array = _request.get("party", {}).get("names", [])
+	var name: String = String(names[slot]) if slot >= 0 and slot < names.size() else "#MON"
+	_pending = {
+		"type": &"text",
+		"text": "%s used\nSTRENGTH!" % name,
+		"internal_text": true,
+		"special": &"strength_used",
+		"name": name,
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = false
+	return {"ok": true}
+
+
+func _stage_internal_text(text: String, finish_after: bool) -> Dictionary:
+	_pending = {
+		"type": &"text",
+		"text": text,
+		"internal_text": true,
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = finish_after
+	return {"ok": true}
 
 
 func _stage_button(command: Dictionary) -> Dictionary:

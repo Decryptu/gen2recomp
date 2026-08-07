@@ -250,5 +250,12 @@ static func _encodings() -> Dictionary:
 		if not out.has(text):
 			out[text] = code
 
+	# constants/charmap.asm maps "#" to $54, the POKé ligature, which is how every
+	# source text writes it. Encode only: decoding $54 stays "POKé", so a round
+	# trip through the cartridge's own shorthand is not silently rewritten.
+	# Without this a synthesized literal such as "a #MON!" encodes "#" as UNKNOWN
+	# and draws a question mark.
+	out["#"] = 0x54
+
 	_codes = out
 	return _codes
