@@ -727,6 +727,10 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(plain.get("ok", false)):
 		return plain
 
+	var fog: Dictionary = _fog_badge_path(world, save, random, data, path)
+	if not bool(fog.get("ok", false)):
+		return fog
+
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
 		party_summary.append({
@@ -1293,6 +1297,413 @@ func _plain_badge_path(
 	return {"ok": true}
 
 
+## Goldenrod to the Fog Badge. Two errands gate it: the SquirtBottle needs
+## Floria found on Route 36 and then talked to in the flower shop, and Morty is
+## absent until the Burned Tower's beasts are released.
+func _fog_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var leaving_gym: Dictionary = _warp_step(world, 11, 2)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Goldenrod Gym exit warp failed"}
+	var _city_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var to_route_35: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(19, 1), 10, 2
+	)
+	if not bool(to_route_35.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod to Route 35 failed: %s" % to_route_35.get("reason", ""),
+		}
+	var first_cut: Dictionary = _cut_at(
+		world, Vector2i(17, 7), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	if not bool(first_cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 cut tree failed: %s" % first_cut.get("reason", ""),
+		}
+	var route36_leg: Dictionary = _walk_connection_resolving(
+		world, "north", 10, 3, save, random, data
+	)
+	var route36_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "goldenrod_to_route_36",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": route36_leg.get("encounters", []),
+		"run": route36_entry,
+	})
+	if not bool(route36_leg.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 to Route 36 failed: %s" % route36_leg.get("reason", ""),
+		}
+
+	# Floria stands at (33,12) once entering Goldenrod cleared
+	# EVENT_FLORIA_AT_SUDOWOODO; talking to her sets EVENT_MET_FLORIA and moves
+	# her to the flower shop.
+	var floria: Dictionary = _talk_to(
+		world, Vector2i(33, 13), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_36_floria",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": floria.get("run", {}),
+	})
+	if not bool(floria.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 36 Floria failed: %s" % floria.get("reason", ""),
+		}
+
+	var back_to_35: Dictionary = _walk_connection_resolving(
+		world, "south", 10, 2, save, random, data
+	)
+	var _r35_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(back_to_35.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 36 back to Route 35 failed: %s" % back_to_35.get("reason", ""),
+		}
+	var south_cut: Dictionary = _cut_at(
+		world, Vector2i(17, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	if not bool(south_cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 southbound cut failed: %s" % south_cut.get("reason", ""),
+		}
+	var back_to_city: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(9, 33), 11, 2
+	)
+	if not bool(back_to_city.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 back to Goldenrod failed: %s" % back_to_city.get("reason", ""),
+		}
+
+	var shop: Dictionary = _warp_walk(world, Vector2i(29, 5), save, random, data)
+	if not bool(shop.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "flower shop unreachable: %s" % shop.get("reason", ""),
+		}
+	var _shop_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var shop_floria: Dictionary = _talk_to(
+		world, Vector2i(5, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	if not bool(shop_floria.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "flower shop Floria failed: %s" % shop_floria.get("reason", ""),
+		}
+	var bottle: Dictionary = _talk_to(
+		world, Vector2i(2, 5), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "goldenrod_flower_shop_squirtbottle",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"floria_run": shop_floria.get("run", {}),
+		"run": bottle.get("run", {}),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(bottle.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "SquirtBottle handoff failed: %s" % bottle.get("reason", ""),
+		}
+
+	var leaving_shop: Dictionary = _warp_step(world, 11, 2)
+	if not bool(leaving_shop.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "flower shop exit warp failed"}
+	var _city_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var to_35_again: Dictionary = _gate_leg(
+		world, save, random, data, Vector2i(19, 1), 10, 2
+	)
+	if not bool(to_35_again.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Goldenrod to Route 35 again failed: %s" % to_35_again.get("reason", ""),
+		}
+	var second_cut: Dictionary = _cut_at(
+		world, Vector2i(17, 7), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	if not bool(second_cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 cut tree again failed: %s" % second_cut.get("reason", ""),
+		}
+	var route36_again: Dictionary = _walk_connection_resolving(
+		world, "north", 10, 3, save, random, data
+	)
+	var _r36_again: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(route36_again.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 35 to Route 36 again failed: %s" % route36_again.get("reason", ""),
+		}
+
+	# SudowoodoScript answers checkitem SQUIRTBOTTLE from a facing interaction,
+	# not from the pack, and the wild battle it starts is what clears the tree
+	# blocking Route 37.
+	var sudowoodo: Dictionary = _talk_to(
+		world, Vector2i(35, 10), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_36_sudowoodo",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": sudowoodo.get("run", {}),
+	})
+	if not bool(sudowoodo.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Sudowoodo failed: %s" % sudowoodo.get("reason", ""),
+		}
+
+	for leg: Dictionary in [
+		{"step": "route_36_to_route_37", "group": 10, "number": 4},
+		{"step": "route_37_to_ecruteak", "group": 4, "number": 9},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "north", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	# The gym is closed until the Burned Tower beasts are released: its scene 0
+	# is SCENE_ECRUTEAKGYM_FORCED_TO_LEAVE and a gramps stands on the entrance.
+	var tower: Dictionary = _warp_walk(world, Vector2i(5, 5), save, random, data)
+	if not bool(tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Burned Tower door unreachable: %s" % tower.get("reason", ""),
+		}
+	var eusine: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	path.append({
+		"step": "burned_tower_meet_eusine",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": eusine,
+	})
+	if not bool(eusine.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Burned Tower entry did not finish"}
+
+	# The rival scene ends by opening the hole under the player and taking it
+	# with warpcheck, so the map after this step is the basement.
+	var rival: Dictionary = _walk_cell_resolving(world, Vector2i(11, 9), save, random, data)
+	var fell: bool = world.current_map != null \
+		and world.current_map.group == 3 and world.current_map.number == 14
+	path.append({
+		"step": "burned_tower_rival_battle",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": rival.get("encounters", []),
+		"fell_through_the_hole": fell,
+	})
+	if not fell:
+		return {
+			"ok": false, "path": path,
+			"reason": "Burned Tower rival scene did not drop the player: %s" % rival.get(
+				"reason", ""
+			),
+		}
+	var basement_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	var beasts: Dictionary = _walk_cell_resolving(world, Vector2i(10, 6), save, random, data)
+	path.append({
+		"step": "burned_tower_release_the_beasts",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": basement_entry.get("statuses", []),
+		"encounters": beasts.get("encounters", []),
+		"roaming": world.state.roaming_mons(),
+		"gym_scene": world.state.map_scene(4, 7),
+	})
+	if not bool(beasts.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "beast release failed: %s" % beasts.get("reason", ""),
+		}
+
+	# ReleaseTheBeasts appears Eusine at (10,12), which is the single cell of
+	# the corridor south, so the way out is through him: his script has him
+	# leave once the player has talked to him.
+	var eusine_basement: Dictionary = _talk_to(
+		world, Vector2i(10, 11), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "burned_tower_eusine_leaves",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": eusine_basement.get("run", {}),
+	})
+	if not bool(eusine_basement.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "basement Eusine failed: %s" % eusine_basement.get("reason", ""),
+		}
+
+	# ReleaseTheBeasts changeblocks the ladder in at walk-cell (6,14), which is
+	# the block holding (7,15); the hole the player fell through is not a way
+	# back up.
+	var out_of_basement: Dictionary = _warp_walk(world, Vector2i(7, 15), save, random, data)
+	if not bool(out_of_basement.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Burned Tower ladder unreachable: %s" % out_of_basement.get("reason", ""),
+		}
+	var _tower_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var out_of_tower: Dictionary = _warp_walk(world, Vector2i(9, 15), save, random, data)
+	if not bool(out_of_tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Burned Tower exit unreachable: %s" % out_of_tower.get("reason", ""),
+		}
+	var _ecruteak_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	world.set_party_summary(save.party.size(), false)
+	var gym: Dictionary = _warp_walk(world, Vector2i(6, 27), save, random, data)
+	if not bool(gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Ecruteak Gym door unreachable: %s" % gym.get("reason", ""),
+		}
+	var gym_entry: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+
+	# The gym floor is thirty holes that warp back to the entrance, so the walk
+	# to Morty at (5,1) is the maze itself; the BFS refuses a warp cell that is
+	# not its target, which is what keeps it on the invisible floor.
+	var morty: Dictionary = _talk_to(
+		world, Vector2i(5, 2), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "ecruteak_gym_morty",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"entry_statuses": gym_entry.get("statuses", []),
+		"run": morty.get("run", {}),
+		"badge_count": world.state.badge_count(),
+		"engine_flags": world.state.engine_flags(),
+	})
+	if not bool(morty.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Morty failed: %s" % morty.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Walks to a gate door, takes it, and takes the gate's own warp to
+## [param group]/[param number] on the far side.
+func _gate_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	door: Vector2i,
+	group: int,
+	number: int,
+) -> Dictionary:
+	var walked: Dictionary = _warp_walk(world, door, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	var _gate_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var crossed: Dictionary = _warp_step(world, group, number)
+	if not bool(crossed.get("ok", false)):
+		return {"ok": false, "reason": "gate warp to %d/%d failed" % [group, number]}
+	var _far_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	return {"ok": true}
+
+
+## Cuts the tree the given cell faces. Route 35's only way past row 6 is the
+## cut tree at (17,6), and the override dies with the map load, so the walked
+## route cuts it again on every crossing exactly as a player would.
+func _cut_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var request: Dictionary = world.cut_request()
+	if not bool(request.get("ok", false)):
+		return {"ok": false, "reason": "cut refused: %s" % request.get("reason", "")}
+	var applied: Dictionary = world.complete_cut()
+	if not bool(applied.get("ok", false)):
+		return {"ok": false, "reason": "cut failed: %s" % applied.get("reason", "")}
+	return {"ok": true, "cell": applied.get("cell", approach)}
+
+
+## Walks to [param cell], faces [param facing] and drains the interaction.
+func _talk_to(
+	world: Gen2WorldAPI,
+	cell: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	return {
+		"ok": bool(run.get("terminal", false)),
+		"reason": run.get("reason", ""),
+		"run": run,
+	}
+
+
 ## Places the player on this map's warp to [param group]/[param number] and
 ## takes it. Used where the destination warp is the step, not the walk.
 func _warp_step(world: Gen2WorldAPI, group: int, number: int) -> Dictionary:
@@ -1618,8 +2029,19 @@ func _walk_to_connection(
 ## Returns (-1, -1) when neither applies, so a BFS frontier can use it as one
 ## reachability test. Replaying the recorded direction through
 ## world.move_result() performs the same hop, so no separate replay step exists.
-func _reachable_step(world: Gen2WorldAPI, cell: Vector2i, step: Vector2i) -> Vector2i:
+func _reachable_step(
+	world: Gen2WorldAPI, cell: Vector2i, step: Vector2i,
+	warp_target: Vector2i = Vector2i(-1, -1),
+) -> Vector2i:
 	var direct: Vector2i = cell + step
+	# Stepping onto a warp tile takes it, so a walked route can only cross one
+	# by leaving the map there. The BFS treats it as a wall unless it is the
+	# cell it was asked to reach, which is what makes Ecruteak Gym's thirty
+	# holes a maze instead of open floor. A warp_event on ordinary floor is
+	# inert, as CheckWarpCollision has it, so it is not a wall.
+	if direct != warp_target and not world.warp_at(direct).is_empty() \
+		and Gen2WorldCollision.is_warp_tile(world.collision_code_at(direct)):
+		return Vector2i(-1, -1)
 	# move_result() calls can_walk_to() with the direction, which reads the
 	# leave/enter wall mask at the player's own cell; from a BFS frontier that
 	# has to be anchored on the frontier cell instead, or the plan crosses walls
@@ -1684,13 +2106,20 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 			found = true
 			break
 		for direction: Vector2i in directions:
-			var next: Vector2i = _reachable_step(world, cell, direction)
+			var next: Vector2i = _reachable_step(world, cell, direction, target)
 			if next.x < 0 or previous.has(next):
 				continue
 			previous[next] = {"cell": cell, "direction": direction}
 			frontier.append(next)
 	if not found:
-		return {"ok": false, "reason": "unreachable target", "target": _cell_value_from_vector(target)}
+		return {
+			"ok": false,
+			"reason": "target %s unreachable from %s (collision $%02x, walkable %s)" % [
+				target, world.player_cell, world.collision_code_at(target),
+				world.can_walk_to(target),
+			],
+			"target": _cell_value_from_vector(target),
+		}
 	var steps: Array[Vector2i] = []
 	var cursor: Vector2i = target
 	while cursor != world.player_cell:

@@ -2236,6 +2236,11 @@ func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	var source_warp: Dictionary = warp_at(cell)
 	if source_warp.is_empty():
 		return {}
+	## CheckWarpCollision gates every warp on the tile's own code, so a
+	## warp_event sitting on ordinary floor never fires. Burned Tower B1F's
+	## (10,8) is one, and the walk to the beasts crosses it.
+	if not Gen2WorldCollision.is_warp_tile(collision_code_at(cell)):
+		return {}
 	var target_group: int = int(source_warp.get("map_group", -1))
 	var target_number: int = int(source_warp.get("map_number", -1))
 	var target_map: Gen2WorldMap = data.world_map(target_group, target_number) if data != null else null

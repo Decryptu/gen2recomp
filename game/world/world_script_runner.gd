@@ -80,6 +80,11 @@ const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
 const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
 const SPECIAL_FADE_OUT_MUSIC: int = 106
 const SPECIAL_INIT_ROAM_MONS: int = 105
+## wBattleResult, which startbattle copies into wScriptVar
+## (constants/battle_constants.asm).
+const BATTLE_RESULT_WIN: int = 0
+const BATTLE_RESULT_LOSE: int = 1
+const BATTLE_RESULT_DRAW: int = 2
 const TEXT_STRING_BUFFER: int = 0x14
 const WEEKDAY_NAMES: Array[StringName] = [
 	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
@@ -417,7 +422,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		_completed = true
 		return _recovered_result(recovery as Dictionary)
 	if outcome == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
-		_script_value = 1
+		_script_value = BATTLE_RESULT_WIN
 		_events.append({
 			"type": &"battle_captured",
 			"outcome": outcome,
@@ -430,7 +435,11 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		return _fail(StringName("battle_%s" % outcome), result)
 
 	_stage_just_battled(true)
-	_script_value = 1
+	## Script_startbattle leaves `wBattleResult & ~BATTLERESULT_BITMASK` in
+	## wScriptVar, and WIN is zero there, so the eight corpus scripts that put
+	## an `iftrue` straight after `startbattle` are asking "did I not win".
+	## Catching masks its own bit off and also reads as WIN.
+	_script_value = BATTLE_RESULT_WIN
 	_events.append({
 		"type": &"battle_completed",
 		"outcome": outcome,
