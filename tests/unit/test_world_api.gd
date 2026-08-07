@@ -1759,6 +1759,76 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
 
+## home/map.asm's map load calls ReadObjectEvents, which clears the object
+## structs and re-reads every object event from ROM, so the coordinates
+## moveobject wrote into wMapObjects
+## (engine/overworld/scripting.asm's Script_moveobject through
+## CopyDECoordsToMapObject) do not outlive the loaded map. A MAPCALLBACK_OBJECTS
+## callback re-applies them when its own condition still holds.
+func test_scripted_object_position_does_not_survive_a_map_change() -> void:
+	var world: Gen2WorldAPI = _object_script_world([0x72, 2, 3, 4, Gen2WorldScript.END])
+	assert_eq(world.objects[0].cell, Vector2i(5, 6))
+	var moved: Array = world.dispatch_script_events()
+	assert_eq(moved[0]["status"], &"complete", JSON.stringify(moved[0]))
+	assert_eq(world.objects[0].cell, Vector2i(3, 4))
+
+	world.player_cell = Vector2i(6, 6)
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.map_id(), Vector2i(1, 1))
+	assert_eq(world.objects[0].cell, Vector2i(5, 6))
+
+
+func test_scripted_object_facing_does_not_survive_a_map_change() -> void:
+	var world: Gen2WorldAPI = _object_script_world([
+		0x76, 2, Gen2WorldSprite.FACING_RIGHT, Gen2WorldScript.END,
+	])
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.objects[0].facing, Gen2WorldSprite.FACING_RIGHT)
+
+	world.player_cell = Vector2i(6, 6)
+	assert_true(world.try_warp()["ok"])
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.objects[0].facing, Gen2WorldSprite.FACING_DOWN)
+
+
+## reloadmapafterbattle reloads the live records without the map load that
+## rebuilds them from the cache, so a trainer written to its post-approach cell
+## still answers there.
+func test_scripted_object_position_survives_a_reload_of_the_same_map() -> void:
+	var world: Gen2WorldAPI = _object_script_world([0x72, 2, 3, 4, Gen2WorldScript.END])
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.objects[0].cell, Vector2i(3, 4))
+	assert_true(world.reload_current_map()["ok"])
+	assert_eq(world.objects[0].cell, Vector2i(3, 4))
+
+
+## disappear writes an event flag rather than a map-object coordinate, and the
+## cartridge does persist event flags, so visibility is not cleared with the
+## position and facing overrides.
+func test_object_visibility_override_survives_a_map_change() -> void:
+	var world: Gen2WorldAPI = _object_script_world([0x6E, 2, Gen2WorldScript.END])
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_false(world.objects[0].active)
+
+	world.player_cell = Vector2i(6, 6)
+	assert_true(world.try_warp()["ok"])
+	assert_true(world.try_warp()["ok"])
+	assert_false(world.objects[0].active)
+
+
+## Opens map 1/1 standing on the coordinate event at (7, 6) with
+## [param script_bytes] behind it, so a test can drive one object command.
+func _object_script_world(script_bytes: Array) -> Gen2WorldAPI:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6220"] = script_bytes
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6220
+	return Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6), Gen2WorldState.new())
+
+
 func test_roaming_mons_move_on_map_setup_and_not_on_elapsed_time() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var random := RandomNumberGenerator.new()

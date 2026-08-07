@@ -66,6 +66,11 @@ var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
 var _object_visibility_overrides: Dictionary = {}
+## Live cells and facings written by moveobject, turnobject, followers and the
+## trainer approach. The cartridge keeps the same values in wMapObjects, which
+## a map load rebuilds from ROM, so these do not outlive the loaded map; see
+## _apply_map(). Visibility is not one of them, because disappear/appear write
+## event flags, which the cartridge does persist.
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
@@ -2439,6 +2444,18 @@ func _apply_map(
 	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
 ) -> void:
 	_block_overrides.clear()
+	# home/map.asm's map load calls ReadObjectEvents, which calls
+	# ClearObjectStructs and re-reads every object event from ROM. moveobject
+	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table
+	# (engine/overworld/scripting.asm's Script_moveobject through
+	# CopyDECoordsToMapObject), so a scripted position never survives a map
+	# load; a MAPCALLBACK_OBJECTS callback re-applies it when its own condition
+	# still holds. Keeping these overrides across a map change left objects
+	# where an earlier visit had put them: ElmsLabMoveElmCallback moves Elm to
+	# (3, 4) while the scene is SCENE_ELMSLAB_MEET_ELM, and the story then
+	# found nothing to talk to at his authored (5, 2) on returning.
+	_object_position_overrides.clear()
+	_object_facing_overrides.clear()
 	state.reset_map_reload_flags()
 	current_map = target_map
 	current_tileset = target_tileset

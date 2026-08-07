@@ -461,7 +461,7 @@ func _story_path(data: GameData) -> Dictionary:
 	if bool(walked_to_elm.get("ok", false)):
 		world.player_facing = Gen2WorldSprite.FACING_UP
 		elm_events = world.interact()
-	var elm_run: Dictionary = _drain_story(world, elm_events, save, random, data)
+	var elm_run: Dictionary = _drain_story(world, elm_events, save, random, data, true)
 	path.append({
 		"step": "elm_lab_mystery_egg_return",
 		"map": _map_value(world),
@@ -479,7 +479,7 @@ func _story_path(data: GameData) -> Dictionary:
 		balls_events = walked_to_balls.get("events", [])
 		if not balls_events.is_empty():
 			break
-	var balls_run: Dictionary = _drain_story(world, balls_events, save, random, data)
+	var balls_run: Dictionary = _drain_story(world, balls_events, save, random, data, true)
 	path.append({
 		"step": "elm_lab_aide_pokeballs",
 		"map": _map_value(world),
@@ -491,24 +491,98 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(balls_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Aide Poke Ball event did not finish"}
 
-	# Route 30 and Route 31 both cross one-way ledges, which this project now
-	# hops (Gen2WorldCollision.allows_hop, wired into _reachable_step below),
-	# and the northward corridor at Route 30 x=6..7 is plain floor the whole
-	# way to the map's north edge. The walk is still not driven here because
-	# _reachable_step resolves occupancy through Gen2WorldAPI.can_walk_to(),
-	# which refuses any cell holding an active object: Route 30 puts four
-	# objects on the single passable cell of its row 25 chokepoint at x=5,
-	# sealing the corridor for a static search even though those NPCs move at
-	# runtime. Ignoring occupancy the same search reaches the north edge, so
-	# the terrain and the hops are not what stops it; see
-	# tools/validate_ledge_hops.gd, which asserts exactly that. The badge
-	# slice this preview exists to exercise is the Pokemon Center and Violet
-	# Gym scripts, so the world reopens directly in Violet City on the same
-	# mutable state rather than waiting on transient-object pathfinding.
-	var violet_world: Gen2WorldAPI = Gen2WorldAPI.open(data, 10, 5, Vector2i(31, 25), world.state)
-	if violet_world == null:
-		return {"ok": false, "path": path, "reason": "missing Violet City map"}
-	world = violet_world
+	# Route 30's corridor north is sealed until ElmAfterTheftScript's
+	# setevent EVENT_ROUTE_30_BATTLE hides the two objects standing on it
+	# (maps/Route30.asm, maps/ElmsLab.asm; CheckObjectFlag in
+	# engine/overworld/map_objects_2.asm masks an object whose flag is set).
+	# The Mystery Egg return above is what sets it, so the route walks from
+	# here on the same world and state.
+	var lab_exit_warp: Dictionary = _warp_to(world.current_map, 24, 4)
+	if lab_exit_warp.is_empty():
+		return {"ok": false, "path": path, "reason": "missing Elm lab exit warp"}
+	world.player_cell = Vector2i(lab_exit_warp["x"], lab_exit_warp["y"])
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Elm lab exit warp failed"}
+	var departure_entry: Array = world.dispatch_map_entry()
+	var departure_run: Dictionary = _drain_story(world, departure_entry, save, random, data)
+	path.append({
+		"step": "new_bark_departure",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": departure_run,
+	})
+	if not bool(departure_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "New Bark departure entry did not finish"}
+
+	var legs: Array = [
+		{"step": "new_bark_to_route_29_north", "direction": "west", "group": 24, "number": 3},
+		{"step": "route_29_to_cherrygrove_north", "direction": "west", "group": 26, "number": 3},
+		{"step": "cherrygrove_to_route_30_north", "direction": "north", "group": 26, "number": 1},
+		{"step": "route_30_to_route_31", "direction": "north", "group": 26, "number": 2},
+	]
+	for leg: Dictionary in legs:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var leg_entry: Array = world.dispatch_map_entry()
+		var leg_run: Dictionary = _drain_story(world, leg_entry, save, random, data)
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"transition": _transition_value(walked.get("transition", {})),
+			"encounters": walked.get("encounters", []),
+			"run": leg_run,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+		if not bool(leg_run.get("terminal", false)):
+			return {"ok": false, "path": path, "reason": "%s entry did not finish" % leg["step"]}
+
+	# Route 31 reaches Violet City through Route31VioletGate, not through its
+	# west map connection: the map's four westmost cell columns are wall on
+	# every row, so no walkable west edge exists (maps/Route31.asm's
+	# warp_event 4, 6 and maps/Route31VioletGate.asm's warp_event 0, 4).
+	var gate_walk: Dictionary = _walk_cell_resolving(world, Vector2i(4, 6), save, random, data)
+	path.append({
+		"step": "route_31_to_violet_gate",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": gate_walk.get("encounters", []),
+	})
+	if not bool(gate_walk.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 31 gate approach failed: %s" % gate_walk.get("reason", ""),
+		}
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Route 31 Violet gate warp failed"}
+	var gate_entry: Array = world.dispatch_map_entry()
+	var gate_run: Dictionary = _drain_story(world, gate_entry, save, random, data)
+	path.append({
+		"step": "violet_gate_entry",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": gate_run,
+	})
+	if not bool(gate_run.get("terminal", false)):
+		return {"ok": false, "path": path, "reason": "Violet gate entry did not finish"}
+
+	var city_side: Dictionary = _walk_cell_resolving(world, Vector2i(0, 4), save, random, data)
+	if not bool(city_side.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Violet gate west exit unreachable: %s" % city_side.get("reason", ""),
+		}
+	transition = world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Violet gate to Violet City warp failed"}
 	var violet_entry: Array = world.dispatch_map_entry()
 	var violet_entry_run: Dictionary = _drain_story(world, violet_entry, save, random, data)
 	path.append({
@@ -587,13 +661,27 @@ func _story_path(data: GameData) -> Dictionary:
 	})
 
 	# Falkner is object 0 at block (5,1); facing up from (5,2) matches the
-	# source's faceplayer interaction cell.
+	# source's faceplayer interaction cell. The gym's two Bird Keepers stand
+	# on sight lines across the way to him, so they are fought on the approach
+	# exactly as they are on the cartridge.
 	var falkner_events: Array = []
-	var walked_to_falkner: Dictionary = _walk_to_story_cell(world, Vector2i(5, 2))
-	if bool(walked_to_falkner.get("ok", false)):
-		world.player_facing = Gen2WorldSprite.FACING_UP
-		falkner_events = world.interact()
-	var falkner_run: Dictionary = _drain_story(world, falkner_events, save, random, data)
+	var walked_to_falkner: Dictionary = _walk_cell_resolving(
+		world, Vector2i(5, 2), save, random, data
+	)
+	path.append({
+		"step": "violet_gym_bird_keepers",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": walked_to_falkner.get("encounters", []),
+	})
+	if not bool(walked_to_falkner.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Falkner approach failed: %s" % walked_to_falkner.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	falkner_events = world.interact()
+	var falkner_run: Dictionary = _drain_story(world, falkner_events, save, random, data, true)
 	path.append({
 		"step": "violet_gym_falkner",
 		"map": _map_value(world),
@@ -629,13 +717,30 @@ func _party_hp(save: Gen2SaveData) -> Array:
 	return values
 
 
+## Runs a dispatched event list to its terminal state. [param require_events]
+## is set by a step whose whole point is that an imported script ran: without
+## it an empty [param initial] drains in zero iterations and reports terminal,
+## so a step that silently found nothing to talk to passes. Map-entry steps
+## leave it false, since a map with no entry callback legitimately dispatches
+## nothing.
 func _drain_story(
 	world: Gen2WorldAPI,
 	initial: Array,
 	save: Gen2SaveData = null,
 	random: RandomNumberGenerator = null,
 	data: GameData = null,
+	require_events: bool = false,
 ) -> Dictionary:
+	if require_events and initial.is_empty():
+		return {
+			"statuses": [],
+			"waits": 0,
+			"pending_trace": [],
+			"battles": [],
+			"terminal": false,
+			"reason": "no events dispatched",
+			"details": "",
+		}
 	var results: Array = initial.duplicate(true)
 	var statuses: Array = _statuses(results)
 	var waits: int = 0
@@ -643,6 +748,8 @@ func _drain_story(
 	var last_details: String = ""
 	var pending_trace: Array[String] = []
 	var battles: Array = []
+	var catch_tutorials: int = 0
+	var approaches: Array = []
 	for result: Dictionary in results:
 		if not bool(result.get("ok", false)):
 			last_reason = String(result.get("reason", "script_failed"))
@@ -707,6 +814,65 @@ func _drain_story(
 					"ok": true,
 					"outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
 				})
+			elif request_kind == &"trainer_approach_requested":
+				# Route 30's trainers see the player on the corridor north, so
+				# the walked route runs the source presentation: shock emote for
+				# TRAINER_SHOCK_FRAMES, then one slow step per planned cell,
+				# then the facing update, before the seen text resumes. The
+				# same order tools/validate_crystal_route30_trainer.gd checks.
+				var approach_values: Dictionary = request.get("values", {})
+				var approach_index: int = int(approach_values.get("object_index", -1))
+				var raw_direction: Variant = approach_values.get("direction", Vector2i.ZERO)
+				var approach_direction: Vector2i = (
+					raw_direction if raw_direction is Vector2i else Vector2i.ZERO
+				)
+				var plan: Dictionary = world.start_trainer_approach(
+					approach_index, approach_direction,
+					int(approach_values.get("distance", 0))
+				)
+				if not bool(plan.get("ok", false)):
+					last_reason = String(plan.get("reason", "trainer approach plan failed"))
+					last_details = JSON.stringify(plan)
+					break
+				for _frame: int in int(plan.get("emote_frames", 0)):
+					world.tick()
+				var approach_failed: bool = false
+				for path_step: Vector2i in plan.get("path", []):
+					var stepped: Dictionary = world.advance_trainer_approach_step(
+						approach_index, path_step
+					)
+					if not bool(stepped.get("ok", false)):
+						last_reason = String(stepped.get("reason", "trainer approach step failed"))
+						last_details = JSON.stringify(stepped)
+						approach_failed = true
+						break
+				if approach_failed:
+					break
+				var faced: Dictionary = world.finish_trainer_approach(approach_index)
+				if not bool(faced.get("ok", false)):
+					last_reason = String(faced.get("reason", "trainer approach finish failed"))
+					last_details = JSON.stringify(faced)
+					break
+				approaches.append({
+					"object_index": approach_index,
+					"path": plan.get("path", []).size(),
+				})
+				results = world.complete_runtime_request({
+					"ok": true,
+					"object_index": approach_index,
+					"path": plan.get("path", []),
+				})
+			elif request_kind == &"catch_tutorial_requested":
+				# ElmAfterTheftScript sets SCENE_ROUTE29_CATCH_TUTORIAL, so this
+				# is on the route from here on. The source guarantees the ball,
+				# and Gen2WorldScriptRunner refuses any other outcome, so the
+				# only valid completion is OUTCOME_CAUGHT. It changes no
+				# persistent party, PC or ball state.
+				catch_tutorials += 1
+				results = world.complete_runtime_request({
+					"ok": true,
+					"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
+				})
 			elif request_kind == &"audio_requested":
 				results = world.complete_runtime_request({"ok": true})
 			else:
@@ -733,6 +899,8 @@ func _drain_story(
 		"waits": waits,
 		"pending_trace": pending_trace,
 		"battles": battles,
+		"catch_tutorials": catch_tutorials,
+		"approaches": approaches,
 		"terminal": last_reason.is_empty() \
 			and not world.script_input_waiting() and world.pending_runtime_request().is_empty(),
 		"reason": last_reason,
@@ -783,7 +951,7 @@ func _walk_to_connection(
 		var moved: Dictionary = world.move_result(step)
 		if not bool(moved.get("ok", false)):
 			return {"ok": false, "reason": "walk step failed", "step": step}
-		var events: Array = world.dispatch_script_events(world.player_cell)
+		var events: Array = _dispatch_after_step(world)
 		if not events.is_empty():
 			return {"ok": false, "reason": "connection walk hit a scripted event", "events": events}
 	var transition: Dictionary = world.move_result(_connection_direction(direction_name))
@@ -849,7 +1017,7 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 	if world == null or world.current_map == null:
 		return {"ok": false, "reason": "missing world"}
 	if world.player_cell == target:
-		return {"ok": true, "events": world.dispatch_script_events(target)}
+		return {"ok": true, "events": _dispatch_after_step(world, target)}
 	var frontier: Array[Vector2i] = [world.player_cell]
 	var previous: Dictionary = {world.player_cell: {"cell": Vector2i(-1, -1), "direction": Vector2i.ZERO}}
 	var directions: Array[Vector2i] = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
@@ -878,10 +1046,102 @@ func _walk_to_story_cell(world: Gen2WorldAPI, target: Vector2i) -> Dictionary:
 		var moved: Dictionary = world.move_result(direction)
 		if not bool(moved.get("ok", false)):
 			return {"ok": false, "reason": "walk step failed", "step": direction}
-		events = world.dispatch_script_events(world.player_cell)
+		events = _dispatch_after_step(world)
 		if not events.is_empty():
 			break
 	return {"ok": true, "steps": steps.size(), "events": events}
+
+
+## The order Gen2WorldScreen uses after a successful step: a trainer who can
+## see the player answers before the cell's own scripts. A walked route past
+## Route 30's trainers reaches nothing otherwise, since sight is queued by
+## dispatch_sight_events() and never by dispatch_script_events().
+func _dispatch_after_step(world: Gen2WorldAPI, cell: Vector2i = Vector2i(-1, -1)) -> Array:
+	var sight: Array = world.dispatch_sight_events()
+	if not sight.is_empty():
+		return sight
+	return world.dispatch_script_events(cell if cell.x >= 0 else world.player_cell)
+
+
+## Walks toward a connection edge, resolving anything met on the way and
+## resuming from wherever the walk stopped. Route 30 puts two trainers on the
+## corridor north, and a trainer who sees the player interrupts the walk, so a
+## single _walk_to_connection() call cannot carry the route on its own.
+func _walk_connection_resolving(
+	world: Gen2WorldAPI,
+	direction_name: String,
+	target_group: int,
+	target_number: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var runs: Array = []
+	for _attempt: int in 8:
+		var walked: Dictionary = _walk_to_connection(
+			world, direction_name, target_group, target_number
+		)
+		if bool(walked.get("ok", false)):
+			walked["encounters"] = runs
+			return walked
+		var events: Array = walked.get("events", [])
+		if events.is_empty():
+			walked["encounters"] = runs
+			return walked
+		var run: Dictionary = _drain_story(world, events, save, random, data, true)
+		runs.append({
+			"cell": _cell_value(world),
+			"statuses": run.get("statuses", []),
+			"battles": run.get("battles", []),
+		})
+		if not bool(run.get("terminal", false)):
+			return {
+				"ok": false,
+				"reason": "encounter on the way to the %s connection did not finish" % direction_name,
+				"encounters": runs,
+				"details": run.get("reason", ""),
+			}
+	return {"ok": false, "reason": "connection walk did not settle", "encounters": runs}
+
+
+## The _walk_to_story_cell() counterpart of _walk_connection_resolving().
+func _walk_cell_resolving(
+	world: Gen2WorldAPI,
+	target: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var runs: Array = []
+	for _attempt: int in 8:
+		var walked: Dictionary = _walk_to_story_cell(world, target)
+		if not bool(walked.get("ok", false)):
+			walked["encounters"] = runs
+			return walked
+		var events: Array = walked.get("events", [])
+		if events.is_empty() and world.player_cell == target:
+			walked["encounters"] = runs
+			return walked
+		if events.is_empty():
+			return {
+				"ok": false,
+				"reason": "walk stopped short of %s" % target,
+				"encounters": runs,
+			}
+		var run: Dictionary = _drain_story(world, events, save, random, data, true)
+		runs.append({
+			"cell": _cell_value(world),
+			"statuses": run.get("statuses", []),
+			"battles": run.get("battles", []),
+		})
+		if not bool(run.get("terminal", false)):
+			return {
+				"ok": false,
+				"reason": "encounter on the way to %s did not finish" % target,
+				"encounters": runs,
+				"details": run.get("reason", ""),
+			}
+	return {"ok": false, "reason": "walk to %s did not settle" % target, "encounters": runs}
 
 
 func _warp_to(map: Gen2WorldMap, group: int, number: int) -> Dictionary:
