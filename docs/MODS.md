@@ -63,8 +63,8 @@ Two example mods are in `mods/examples/`, to copy into `user://mods/`:
 
 ## Installing
 
-The launcher takes a `.zip` on every platform, through **Import mod** or by
-dropping the archive on the window where the OS offers that. The archive holds
+The launcher takes a `.zip` on every platform, through **Install** on its mods
+page or by dropping the archive on the window where the OS offers that. The archive holds
 one mod, at its root or in a single folder:
 
 ```

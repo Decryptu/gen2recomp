@@ -1,246 +1,106 @@
 extends Control
 
-## The launcher: cartridge discovery, ROM import and entry into a development
-## battle. It owns presentation and workflow, while the ROM and cache layers
-## remain responsible for verification and decoding.
+## The launcher: a shelf of cartridges, plus the mods, settings and about pages
+## reachable from the dock under it.
+##
+## It owns presentation and workflow, while the ROM and cache layers remain
+## responsible for verification and decoding. Everything it draws is built in
+## code from [Gen2LauncherShell] and the cards under it, so changing the
+## appearance is a rebuild rather than a repaint.
 
-const BACKGROUND: Color = Color("#09111f")
-const PANEL: Color = Color("#14233a")
-const PANEL_SELECTED: Color = Color("#1d3352")
-const BORDER: Color = Color("#2d4566")
-const BORDER_SELECTED: Color = Color("#f3c969")
-const TEXT: Color = Color("#f4f7fb")
-const MUTED: Color = Color("#9eacc0")
-const ACCENT: Color = Color("#f3c969")
-const SUCCESS: Color = Color("#7bd89a")
-const ERROR: Color = Color("#ef8a8a")
+var _palette: Gen2LauncherTheme = null
+var _shell: Gen2LauncherShell = null
+var _shelf: Gen2ShelfPage = null
+var _mods: Gen2ModsPage = null
+var _settings: Gen2SettingsPage = null
+var _about: Gen2AboutPage = null
 
-var _cards_container: HBoxContainer = null
-var _import_button: Button = null
-var _status_label: Label = null
-var _status_detail: Label = null
-var _progress: ProgressBar = null
-var _progress_label: Label = null
 var _file_dialog: FileDialog = null
 var _mod_dialog: FileDialog = null
-var _mod_replace_dialog: ConfirmationDialog = null
-var _mod_replace_path: String = ""
-var _mods_label: Label = null
-var _mod_button: Button = null
-var _index_button: Button = null
 var _index_dialog: Gen2ModIndexDialog = null
-var _settings_dialog: Gen2SettingsDialog = null
-var _mods_dialog: Gen2ModsDialog = null
-var _manage_dialog: AcceptDialog = null
-var _manage_body: VBoxContainer = null
 var _update_http: HTTPRequest = null
-var _cards: Dictionary = {}
-var _selected_game_id: StringName = &""
+
 var _importing: bool = false
+var _selected_game_id: StringName = &""
 ## The game a re-import is replacing, so a cache is only overwritten by a dump
 ## of the cartridge it already holds.
 var _reimport_game_id: StringName = &""
+var _status: Dictionary = {"title": "", "detail": ""}
 
 
 func _ready() -> void:
-	_build_ui()
+	_palette = Gen2LauncherTheme.active()
+	_build()
 	_print_allowlist()
 	_refresh_games()
 
 
-func _build_ui() -> void:
-	var background := ColorRect.new()
-	background.color = BACKGROUND
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
+## Rebuilt whole when the appearance changes, which is the only way a launcher
+## drawn entirely in code can switch palette without every widget growing a
+## repaint path of its own.
+func _build() -> void:
+	for child: Node in get_children():
+		remove_child(child)
+		child.queue_free()
+	theme = _palette.control_theme()
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 64)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_right", 64)
-	margin.add_theme_constant_override("margin_bottom", 24)
-	add_child(margin)
+	_shell = Gen2LauncherShell.create(_palette)
+	add_child(_shell)
 
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 18)
-	margin.add_child(content)
+	var appearance: Gen2LauncherButton = Gen2LauncherButton.icon_only(
+		_palette,
+		&"moon" if not _palette.is_dark() else &"sun",
+		Gen2LauncherButton.Variant.NEUTRAL,
+	)
+	appearance.tooltip_text = "Switch appearance"
+	appearance.pressed.connect(_toggle_appearance)
+	_shell.add_action(appearance)
 
-	var header := VBoxContainer.new()
-	header.add_theme_constant_override("separation", 12)
-	content.add_child(header)
+	_shelf = Gen2ShelfPage.create(_palette, _shell.compact)
+	_shelf.insert_requested.connect(_open_import_dialog)
+	_shelf.play_requested.connect(_launch_game)
+	_shelf.manage_requested.connect(_open_manage_sheet)
+	_shelf.selection_changed.connect(_on_cartridge_selected)
+	_shell.add_page(&"shelf", "Play", &"shelf", _shelf)
 
-	var heading := VBoxContainer.new()
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_theme_constant_override("separation", 4)
-	header.add_child(heading)
+	_mods = Gen2ModsPage.create(_palette)
+	_mods.install_requested.connect(_open_mod_dialog)
+	_mods.index_requested.connect(_open_index_dialog)
+	_shell.add_page(&"mods", "Mods", &"mods", _mods)
 
-	var title := Label.new()
-	title.text = "gen2recomp"
-	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 30)
-	heading.add_child(title)
+	_settings = Gen2SettingsPage.create(_palette)
+	_settings.appearance_changed.connect(_reload_appearance)
+	_shell.add_page(&"settings", "Settings", &"settings", _settings)
 
-	var subtitle := Label.new()
-	subtitle.text = "Generation 2, rebuilt for Godot"
-	subtitle.add_theme_color_override("font_color", MUTED)
-	subtitle.add_theme_font_size_override("font_size", 16)
-	heading.add_child(subtitle)
+	_about = Gen2AboutPage.create(_palette)
+	_about.update_check_requested.connect(check_for_updates)
+	_shell.add_page(&"about", "About", &"about", _about)
 
-	# Wrapping, because the row outgrew the window once the settings, mods and
-	# update actions joined it.
-	var toolbar := HFlowContainer.new()
-	toolbar.add_theme_constant_override("h_separation", 12)
-	toolbar.add_theme_constant_override("v_separation", 8)
-	header.add_child(toolbar)
+	_shell.page_selected.connect(_on_page_selected)
+	_build_dialogs()
+	_on_page_selected(_shell.current_page())
+	# A message survives a palette rebuild; a launcher with nothing to report
+	# shows nothing at all.
+	if not String(_status["title"]).is_empty():
+		_set_status(&"info", String(_status["title"]), String(_status["detail"]))
 
-	_import_button = _button("Import ROM", ACCENT)
-	_import_button.custom_minimum_size = Vector2(168, 48)
-	_import_button.pressed.connect(_open_import_dialog)
-	toolbar.add_child(_import_button)
 
-	_mod_button = _button("Import mod", MUTED)
-	_mod_button.custom_minimum_size = Vector2(168, 48)
-	_mod_button.pressed.connect(_open_mod_dialog)
-	toolbar.add_child(_mod_button)
-
-	_index_button = _button("Mod index", MUTED)
-	_index_button.custom_minimum_size = Vector2(168, 48)
-	_index_button.pressed.connect(_open_index_dialog)
-	toolbar.add_child(_index_button)
-
-	var mods_button: Button = _button("Mods", MUTED)
-	mods_button.custom_minimum_size = Vector2(120, 48)
-	mods_button.pressed.connect(_open_mods_dialog)
-	toolbar.add_child(mods_button)
-
-	var settings_button: Button = _button("Settings", MUTED)
-	settings_button.custom_minimum_size = Vector2(120, 48)
-	settings_button.pressed.connect(_open_settings_dialog)
-	toolbar.add_child(settings_button)
-
-	var updates_button: Button = _button("Check for updates", MUTED)
-	updates_button.custom_minimum_size = Vector2(180, 48)
-	updates_button.pressed.connect(check_for_updates)
-	toolbar.add_child(updates_button)
-
-	var section := Label.new()
-	section.text = "CARTRIDGES"
-	section.add_theme_color_override("font_color", ACCENT)
-	section.add_theme_font_size_override("font_size", 13)
-	content.add_child(section)
-
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 250)
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(scroll)
-
-	_cards_container = HBoxContainer.new()
-	_cards_container.add_theme_constant_override("separation", 16)
-	_cards_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_cards_container.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	scroll.add_child(_cards_container)
-
-	var status_panel := PanelContainer.new()
-	status_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 10))
-	status_panel.custom_minimum_size = Vector2(0, 62)
-	content.add_child(status_panel)
-
-	var status_box := VBoxContainer.new()
-	status_box.add_theme_constant_override("separation", 4)
-	status_panel.add_child(status_box)
-
-	_status_label = Label.new()
-	_status_label.add_theme_color_override("font_color", TEXT)
-	_status_label.add_theme_font_size_override("font_size", 16)
-	status_box.add_child(_status_label)
-
-	_status_detail = Label.new()
-	_status_detail.add_theme_color_override("font_color", MUTED)
-	_status_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_box.add_child(_status_detail)
-
-	_progress = ProgressBar.new()
-	_progress.max_value = 100.0
-	_progress.show_percentage = false
-	_progress.visible = false
-	_progress.custom_minimum_size = Vector2(0, 8)
-	status_box.add_child(_progress)
-
-	_progress_label = Label.new()
-	_progress_label.add_theme_color_override("font_color", MUTED)
-	_progress_label.visible = false
-	status_box.add_child(_progress_label)
-
-	var footer := Label.new()
-	footer.text = "Choose a cartridge, then create or load a validated player save."
-	footer.add_theme_color_override("font_color", MUTED)
-	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	content.add_child(footer)
-
-	_mods_label = Label.new()
-	_mods_label.add_theme_color_override("font_color", MUTED)
-	_mods_label.add_theme_font_size_override("font_size", 13)
-	_mods_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_mods_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_mods_label.text = _mods_summary()
-	content.add_child(_mods_label)
-
-	_file_dialog = FileDialog.new()
-	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_file_dialog.filters = PackedStringArray([
-		"*.gb; Game Boy ROM",
-		"*.gbc; Game Boy Color ROM",
-	])
-	_file_dialog.title = "Choose a Gold, Silver, or Crystal ROM"
-	# Android's own picker is the only one that returns a readable file: the app
-	# declares no storage permission, so a path the built-in browser lists still
-	# fails to open. The system picker grants access to the one file chosen.
-	_file_dialog.use_native_dialog = DisplayServer.has_feature(
-		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
+func _build_dialogs() -> void:
+	_file_dialog = _picker(
+		"Choose a cartridge dump",
+		PackedStringArray(["*.gbc; Cartridge dump", "*.gb; Cartridge dump"]),
 	)
 	_file_dialog.file_selected.connect(_on_file_selected)
-	add_child(_file_dialog)
 
-	_mod_dialog = FileDialog.new()
-	_mod_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	_mod_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_mod_dialog.filters = PackedStringArray(["*.zip; Mod archive"])
-	_mod_dialog.title = "Choose a mod .zip"
-	_mod_dialog.use_native_dialog = _file_dialog.use_native_dialog
-	_mod_dialog.file_selected.connect(import_mod_path)
-	add_child(_mod_dialog)
-
-	_mod_replace_dialog = ConfirmationDialog.new()
-	_mod_replace_dialog.title = "Replace mod"
-	_mod_replace_dialog.ok_button_text = "Replace"
-	_mod_replace_dialog.confirmed.connect(_on_mod_replace_confirmed)
-	add_child(_mod_replace_dialog)
+	_mod_dialog = _picker("Choose a mod .zip", PackedStringArray(["*.zip; Mod archive"]))
+	_mod_dialog.file_selected.connect(func(path: String) -> void: import_mod_path(path))
 
 	_index_dialog = Gen2ModIndexDialog.new()
+	_index_dialog.theme = _palette.control_theme()
 	_index_dialog.mod_installed.connect(_on_index_mod_installed)
 	add_child(_index_dialog)
 
-	_settings_dialog = Gen2SettingsDialog.new()
-	add_child(_settings_dialog)
-
-	_mods_dialog = Gen2ModsDialog.new()
-	_mods_dialog.mods_changed.connect(func() -> void: _mods_label.text = _mods_summary())
-	add_child(_mods_dialog)
-
-	_manage_dialog = AcceptDialog.new()
-	_manage_dialog.ok_button_text = "Close"
-	_manage_body = VBoxContainer.new()
-	_manage_body.custom_minimum_size = Vector2(460, 0)
-	_manage_dialog.add_child(_manage_body)
-	add_child(_manage_dialog)
-
-	# Created once and reused. The check only ever runs from the button: it
-	# reaches a third party and says this build exists, so it is the player's
-	# act and never a side effect of opening the launcher.
+	# Created once and reused. The check only ever runs from the button.
 	_update_http = HTTPRequest.new()
 	_update_http.request_completed.connect(_on_update_response)
 	add_child(_update_http)
@@ -248,23 +108,72 @@ func _build_ui() -> void:
 	# A window drop is the same import, so the OS file manager works wherever it
 	# offers one. Routing is by extension because the two imports validate very
 	# differently and neither should be handed the other's file.
-	get_window().files_dropped.connect(_on_files_dropped)
+	var window: Window = get_window()
+	if not window.files_dropped.is_connected(_on_files_dropped):
+		window.files_dropped.connect(_on_files_dropped)
 
-	_set_status("Choose an imported game to begin.", "Your own verified cartridge dump is required.", MUTED)
+
+func _picker(title: String, filters: PackedStringArray) -> FileDialog:
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.filters = filters
+	dialog.title = title
+	# Android's own picker is the only one that returns a readable file: the app
+	# declares no storage permission, so a path the built-in browser lists still
+	# fails to open. The system picker grants access to the one file chosen.
+	dialog.use_native_dialog = DisplayServer.has_feature(
+		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
+	)
+	dialog.theme = _palette.control_theme()
+	add_child(dialog)
+	return dialog
+
+
+func _toggle_appearance() -> void:
+	var options: Gen2Options = Gen2OptionsStore.current()
+	options.ui_theme = _palette.other_mode()
+	Gen2OptionsStore.save(options)
+	_reload_appearance()
+
+
+func _reload_appearance() -> void:
+	_palette = Gen2LauncherTheme.active()
+	_build()
+	_refresh_games()
+
+
+func _on_cartridge_selected(game_id: StringName) -> void:
+	if _shell.current_page() == &"shelf":
+		_shell.set_tint(_palette.tint_for(game_id))
+
+
+## Only the shelf is lit in a cartridge's colour. Behind a page of cards the same
+## wash reads as a stain rather than as light.
+func _on_page_selected(id: StringName) -> void:
+	_shell.set_tint(
+		_palette.tint_for(_shelf.selected_id()) if id == &"shelf" else Color(1, 1, 1, 0)
+	)
 
 
 func _refresh_games() -> void:
-	for child: Node in _cards_container.get_children():
-		child.free()
-	_cards.clear()
-
 	for game_id: StringName in RomRegistry.ORDER:
 		var data: GameData = GameData.open(game_id)
-		var card: PanelContainer = _create_game_card(game_id, data)
-		_cards_container.add_child(card)
-		_cards[game_id] = card
+		_shelf.set_slot_state(game_id, data != null, _cartridge_detail(game_id, data))
+	_shelf.set_busy(_importing)
 
-	_update_import_controls()
+
+func _cartridge_detail(game_id: StringName, data: GameData) -> String:
+	if data == null:
+		return ""
+	var slots: Array = Gen2SaveStore.slots_for(game_id, data.sha1, data)
+	var ready_slots: int = 0
+	for row: Dictionary in slots:
+		if row["valid"]:
+			ready_slots += 1
+	if slots.is_empty():
+		return "Ready. No saves yet"
+	return "Ready. %d save%s" % [ready_slots, "" if ready_slots == 1 else "s"]
 
 
 ## Public driver used by tests and by non-interactive tooling.
@@ -280,39 +189,39 @@ func import_mod_path(path: String, replace: bool = false) -> Dictionary:
 	var result: Dictionary = Gen2ModInstaller.install_zip(path, replace)
 	if bool(result.get("ok", false)):
 		GameRuntime.load_mods()
-		_mods_label.text = _mods_summary()
+		_mods.refresh()
 		_set_status(
+			&"success",
 			"Installed %s." % result.get("name", result.get("id", "the mod")),
 			"%d files in %s." % [int(result.get("files", 0)), result.get("directory", "")],
-			SUCCESS,
 		)
 		return result
 	if StringName(result.get("reason", &"")) == &"already_installed":
-		_mod_replace_path = path
-		_mod_replace_dialog.dialog_text = (
-			"%s is already installed.\nReplace it with this archive?"
-			% result.get("detail", "That mod")
-		)
-		_mod_replace_dialog.popup_centered()
+		_confirm_mod_replace(path, String(result.get("detail", "That mod")))
 		return result
-	_set_status(
-		"That mod was not installed.", _mod_refusal(result), ERROR
-	)
+	_set_status(&"error", "That mod was not installed.", Gen2ModRefusal.text(result))
 	return result
 
 
-func _mod_refusal(result: Dictionary) -> String:
-	return Gen2ModRefusal.text(result)
+func _confirm_mod_replace(path: String, name: String) -> void:
+	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(_palette, "Replace mod")
+	sheet.body().add_child(Gen2LauncherUI.muted(
+		_palette, "%s is already installed. Replace it with this archive?" % name
+	))
+	var replace: Gen2LauncherButton = Gen2LauncherButton.create(
+		_palette, "Replace", Gen2LauncherButton.Variant.PRIMARY
+	)
+	replace.pressed.connect(func() -> void:
+		sheet.close()
+		import_mod_path(path, true)
+	)
+	sheet.add_action(replace)
+	sheet.open(self)
 
 
 func _open_mod_dialog() -> void:
 	if _importing:
 		return
-	_set_status(
-		"Choose a mod .zip.",
-		"The archive holds one mod folder with a %s in it." % Gen2ModManifest.FILENAME,
-		MUTED,
-	)
 	_mod_dialog.popup_centered(Vector2i(920, 620))
 
 
@@ -323,97 +232,93 @@ func _open_index_dialog() -> void:
 	_index_dialog.popup_centered(Vector2i(720, 560))
 
 
-func _open_settings_dialog() -> void:
-	if _importing:
-		return
-	_settings_dialog.popup_centered()
-
-
-func _open_mods_dialog() -> void:
-	if _importing:
-		return
-	_mods_dialog.refresh()
-	_mods_dialog.popup_centered(Vector2i(640, 420))
-
-
 ## Asks the release API what the latest version is. Public so a test can drive
 ## the request path without a button press.
 func check_for_updates() -> void:
 	if _importing or _update_http == null:
 		return
-	_set_status("Checking for updates...", Gen2UpdateCheck.RELEASES_API, MUTED)
+	_about.set_update_result("Checking...", _palette.muted)
+	_set_status(&"busy", "Checking for updates...", Gen2UpdateCheck.RELEASES_API)
 	var headers: PackedStringArray = PackedStringArray([
 		"Accept: application/vnd.github+json",
 	])
 	if _update_http.request(Gen2UpdateCheck.RELEASES_API, headers) != OK:
-		_set_status("The update check could not start.", "No request was made.", ERROR)
+		_set_status(&"error", "The update check could not start.", "No request was made.")
 
 
 func _on_update_response(
 	result: int, code: int, _headers: PackedStringArray, body: PackedByteArray
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS:
-		_set_status(
-			"The update check did not reach the network.",
-			"This build is %s." % Gen2UpdateCheck.current_version(),
-			ERROR,
-		)
+		var offline: String = "This build is %s." % Gen2UpdateCheck.current_version()
+		_about.set_update_result("The check did not reach the network.", _palette.error)
+		_set_status(&"error", "The update check did not reach the network.", offline)
 		return
 	var status: Dictionary = Gen2UpdateCheck.status_for(code, body.get_string_from_utf8())
-	var colour: Color = MUTED
+	var kind: StringName = &"info"
+	var colour: Color = _palette.muted
 	match int(status["status"]):
 		Gen2UpdateCheck.Status.UPDATE_AVAILABLE:
-			colour = ACCENT
+			kind = &"info"
+			colour = _palette.accent
 		Gen2UpdateCheck.Status.UP_TO_DATE:
-			colour = SUCCESS
+			kind = &"success"
+			colour = _palette.success
 		Gen2UpdateCheck.Status.UNREADABLE:
-			colour = ERROR
-	_set_status(
-		Gen2UpdateCheck.describe(status),
-		String(status.get("url", Gen2UpdateCheck.RELEASES_PAGE)),
-		colour,
-	)
+			kind = &"error"
+			colour = _palette.error
+	var message: String = Gen2UpdateCheck.describe(status)
+	_about.set_update_result(message, colour)
+	_set_status(kind, message, String(status.get("url", Gen2UpdateCheck.RELEASES_PAGE)))
 
 
-func _open_manage_dialog(game_id: StringName) -> void:
+func _open_manage_sheet(game_id: StringName) -> void:
 	if _importing:
 		return
 	var data: GameData = GameData.open(game_id)
-	_manage_dialog.title = "Manage %s" % RomRegistry.title_for(game_id)
-	for child: Node in _manage_body.get_children():
-		child.queue_free()
-
-	var state := Label.new()
-	state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	state.text = (
-		"The cartridge for this game is imported and verified."
-		if data != null else "No cache exists for this game yet."
+	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(
+		_palette, RomRegistry.title_for(game_id)
 	)
-	_manage_body.add_child(state)
-
-	var directory := Label.new()
-	directory.text = RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
-	directory.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_manage_body.add_child(directory)
-
-	var reimport: Button = _button("Re-import ROM" if data != null else "Import ROM", ACCENT)
-	reimport.pressed.connect(func() -> void:
-		_reimport_game_id = game_id
-		_manage_dialog.hide()
-		_open_import_dialog()
+	var body: VBoxContainer = sheet.body()
+	body.add_child(Gen2LauncherUI.muted(
+		_palette,
+		"This cartridge is imported and verified." if data != null
+		else "No cache exists for this cartridge yet.",
+	))
+	var directory: Label = Gen2LauncherUI.muted(
+		_palette, RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
 	)
-	_manage_body.add_child(reimport)
+	directory.add_theme_color_override("font_color", _palette.faint)
+	body.add_child(directory)
 
 	if data != null:
-		var open_folder: Button = _button("Open cache folder", TEXT)
+		var open_folder: Gen2LauncherButton = Gen2LauncherButton.create(
+			_palette, "Open cache folder", Gen2LauncherButton.Variant.NEUTRAL, &"folder"
+		)
 		open_folder.pressed.connect(func() -> void: _open_cache_folder(game_id))
-		_manage_body.add_child(open_folder)
+		body.add_child(open_folder)
+		var delete: Gen2LauncherButton = Gen2LauncherButton.create(
+			_palette, "Delete cache", Gen2LauncherButton.Variant.DANGER, &"trash"
+		)
+		delete.pressed.connect(func() -> void:
+			sheet.close()
+			_delete_cache(game_id)
+		)
+		body.add_child(delete)
 
-		var delete: Button = _button("Delete cache", ERROR)
-		delete.pressed.connect(func() -> void: _delete_cache(game_id))
-		_manage_body.add_child(delete)
-
-	_manage_dialog.popup_centered()
+	var reimport: Gen2LauncherButton = Gen2LauncherButton.create(
+		_palette,
+		"Re-import" if data != null else "Import",
+		Gen2LauncherButton.Variant.PRIMARY,
+		&"download",
+	)
+	reimport.pressed.connect(func() -> void:
+		_reimport_game_id = game_id
+		sheet.close()
+		_open_import_dialog()
+	)
+	sheet.add_action(reimport)
+	sheet.open(self)
 
 
 func _open_cache_folder(game_id: StringName) -> void:
@@ -427,26 +332,20 @@ func _delete_cache(game_id: StringName) -> void:
 	RomCache.clear(RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id)))
 	if _selected_game_id == game_id:
 		_selected_game_id = &""
-	_manage_dialog.hide()
+	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
+	if seated != null and seated.imported:
+		await seated.play_eject()
 	_set_status(
+		&"info",
 		"Removed the %s cache." % RomRegistry.title_for(game_id),
 		"Your saves were not touched. Import the cartridge again to play.",
-		MUTED,
 	)
 	_refresh_games()
 
 
 func _on_index_mod_installed(_id: StringName) -> void:
 	GameRuntime.load_mods()
-	_mods_label.text = _mods_summary()
-
-
-func _on_mod_replace_confirmed() -> void:
-	if _mod_replace_path.is_empty():
-		return
-	var path: String = _mod_replace_path
-	_mod_replace_path = ""
-	import_mod_path(path, true)
+	_mods.refresh()
 
 
 func _on_files_dropped(files: PackedStringArray) -> void:
@@ -461,9 +360,9 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 				_on_file_selected(path)
 				return
 	_set_status(
+		&"error",
 		"Nothing to import there.",
 		"Drop a .gb or .gbc cartridge dump, or a mod .zip.",
-		MUTED,
 	)
 
 
@@ -480,100 +379,72 @@ func launcher_snapshot() -> Dictionary:
 			"save_slots": Gen2SaveStore.slots_for(game_id, data.sha1, data) if data != null else [],
 		}
 	return {
-		"status": _status_label.text if _status_label != null else "",
-		"detail": _status_detail.text if _status_detail != null else "",
+		"status": String(_status["title"]),
+		"detail": String(_status["detail"]),
 		"importing": _importing,
+		"page": String(_shell.current_page()) if _shell != null else "",
+		"theme": String(_palette.mode),
 		"games": games,
 	}
 
 
-func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
-	var imported: bool = data != null
-	var selected: bool = game_id == _selected_game_id
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(300, 218)
-	card.add_theme_stylebox_override(
-		"panel", _panel_style(PANEL_SELECTED if selected else PANEL, BORDER_SELECTED if selected else BORDER, 10)
-	)
-
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 8)
-	card.add_child(body)
-
-	var title := Label.new()
-	title.text = RomRegistry.title_for(game_id)
-	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 22)
-	body.add_child(title)
-
-	var revision := Label.new()
-	revision.text = _revision_for(game_id)
-	revision.add_theme_color_override("font_color", MUTED)
-	body.add_child(revision)
-
-	var separator := HSeparator.new()
-	separator.add_theme_color_override("separator", BORDER)
-	body.add_child(separator)
-
-	var state := Label.new()
-	state.text = "CACHE READY" if imported else "NOT IMPORTED"
-	state.add_theme_color_override("font_color", SUCCESS if imported else ACCENT)
-	state.add_theme_font_size_override("font_size", 13)
-	body.add_child(state)
-
-	var detail := Label.new()
-	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	detail.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	detail.add_theme_color_override("font_color", MUTED)
-	if imported:
-		detail.text = "%d species, %d trainer classes\nCache format %d\n%s" % [
-			data.species_count(), data.trainer_count(), RomCache.FORMAT_VERSION,
-			_save_slot_detail(game_id, data),
-		]
-	else:
-		detail.text = "Bring your own verified dump.\nThe filename does not matter."
-	body.add_child(detail)
-
-	var actions := HBoxContainer.new()
-	body.add_child(actions)
-
-	var action := _button("Open save slots" if imported else "Choose ROM", ACCENT if imported else TEXT)
-	action.custom_minimum_size = Vector2(0, 38)
-	action.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	action.pressed.connect(_on_game_action.bind(game_id, imported))
-	actions.add_child(action)
-
-	var manage := _button("Manage", MUTED)
-	manage.custom_minimum_size = Vector2(90, 38)
-	manage.pressed.connect(_open_manage_dialog.bind(game_id))
-	actions.add_child(manage)
-
-	return card
+## Opens one of the launcher's pages by id. Public so a preview or a test can
+## photograph a page without clicking its navigation entry.
+func select_page(id: StringName) -> void:
+	if _shell != null:
+		_shell.select(id)
 
 
-func _on_game_action(game_id: StringName, imported: bool) -> void:
+## Preview seam: shows the shelf as if these cartridges were imported, so the
+## empty and full states can be photographed on one machine. Changes nothing on
+## disk and is never called by the launcher itself.
+func preview_slot_states(states: Dictionary) -> void:
+	for game_id: StringName in RomRegistry.ORDER:
+		var imported: bool = bool(states.get(String(game_id), false))
+		_shelf.set_slot_state(game_id, imported, "Ready. 2 saves" if imported else "")
+
+
+## Preview seam: switches appearance without writing the options file.
+func preview_theme(wanted: StringName) -> void:
+	_palette = Gen2LauncherTheme.for_mode(wanted)
+	_build()
+	_refresh_games()
+
+
+## Seats the cartridge, then opens its save slots. The animation runs before the
+## scene change so the sound and the movement both finish on this screen.
+func _launch_game(game_id: StringName) -> void:
 	if _importing:
 		return
-	if imported and GameData.open(game_id) != null:
-		_launch_game(game_id)
-	else:
-		_open_import_dialog()
-
-
-func _launch_game(game_id: StringName) -> void:
 	var data: GameData = GameData.open(game_id)
-	if data == null or not GameRuntime.select_game(game_id):
-		_set_status("Could not select %s." % RomRegistry.title_for(game_id), "The registry did not recognise that game.", ERROR)
+	if data == null:
+		_open_import_dialog()
+		return
+	if not GameRuntime.select_game(game_id):
+		_set_status(
+			&"error",
+			"Could not select %s." % RomRegistry.title_for(game_id),
+			"The registry did not recognise that cartridge.",
+		)
 		return
 	_selected_game_id = game_id
-	_set_status("Opening %s." % RomRegistry.title_for(game_id), "Choose a save slot or import an original cartridge save.", SUCCESS)
+	_set_status(&"success", "Starting %s." % RomRegistry.title_for(game_id), "")
+	_shelf.set_busy(true)
+	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
+	if seated != null:
+		await seated.play_start()
+	await _shell.flash()
 	get_tree().change_scene_to_file.call_deferred("res://game/save/save_screen.tscn")
 
 
-func _open_import_dialog() -> void:
+func _open_import_dialog(_game_id: StringName = &"") -> void:
 	if _importing:
 		return
-	_set_status("Choose a ROM dump.", "The importer identifies the game by SHA-1, never by filename.", MUTED)
+	_set_status(
+		&"info",
+		"Choose a cartridge dump.",
+		"The importer identifies the cartridge by SHA-1, never by filename.",
+	)
 	_file_dialog.popup_centered(Vector2i(920, 620))
 
 
@@ -581,21 +452,18 @@ func _on_file_selected(path: String) -> void:
 	if _importing:
 		return
 	_importing = true
-	_update_import_controls()
-	_progress.visible = true
-	_progress_label.visible = true
-	_progress.value = 0.0
-	_progress_label.text = "Checking cartridge..."
-	_set_status("Verifying cartridge...", path.get_file(), MUTED)
+	_shelf.set_busy(true)
+	_shell.toast().set_progress(true, 0.0)
+	_set_status(&"busy", "Verifying cartridge...", path.get_file())
 
 	var identity: Dictionary = RomVerifier.identify(path)
 	if identity["status"] != RomVerifier.Status.OK:
 		_finish_import(false, String(identity["message"]))
 		return
 
-	# A re-import replaces one game's cache, so it only accepts that game's own
-	# dump. Without this, choosing the wrong file from the manage dialog would
-	# quietly import a different cartridge instead of saying so.
+	# A re-import replaces one cartridge's cache, so it only accepts that
+	# cartridge's own dump. Without this, choosing the wrong file from the
+	# manage sheet would quietly import a different one instead of saying so.
 	if not _reimport_game_id.is_empty() and StringName(identity["id"]) != _reimport_game_id:
 		var wanted: StringName = _reimport_game_id
 		_reimport_game_id = &""
@@ -610,7 +478,7 @@ func _on_file_selected(path: String) -> void:
 		_finish_import(false, "The verified cartridge could not be read.")
 		return
 
-	_progress_label.text = "Checking table layout..."
+	_set_status(&"busy", "Checking table layout...", path.get_file())
 	var layout_check: Dictionary = RomImporter.verify_layout(rom)
 	if not layout_check["ok"]:
 		_finish_import(false, String(layout_check["message"]))
@@ -625,83 +493,39 @@ func _on_file_selected(path: String) -> void:
 	var game_id: StringName = identity["id"]
 	GameRuntime.select_game(game_id)
 	_selected_game_id = game_id
-	_finish_import(true, "Imported %s. %d species and %d trainer classes are ready." % [
-		identity["message"], int(result["species"]), int(result["trainers"]),
+	_finish_import(true, "%d species and %d trainer classes are ready." % [
+		int(result["species"]), int(result["trainers"]),
 	])
 	_refresh_games()
+	_shelf.focus_game(game_id)
+	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
+	if seated != null:
+		seated.play_insert()
 
 
 func _on_import_progress(stage: String, done: int, total: int) -> void:
 	if total > 0:
-		_progress.value = float(done) / float(total) * 100.0
-	_progress_label.text = "%s, %d/%d" % [stage.capitalize(), done, total]
+		_shell.toast().set_progress(true, float(done) / float(total) * 100.0)
+	_set_status(&"busy", "%s, %d/%d" % [stage.capitalize(), done, total], "")
 
 
 func _finish_import(success: bool, message: String) -> void:
 	_importing = false
-	_update_import_controls()
-	_progress.visible = false
-	_progress_label.visible = false
-	_set_status("Import complete." if success else "Import stopped.", message, SUCCESS if success else ERROR)
+	_shelf.set_busy(false)
+	_shell.toast().set_progress(false)
+	if not success:
+		Gen2LauncherAudio.play(&"error")
+	_set_status(
+		&"success" if success else &"error",
+		"Import complete." if success else "Import stopped.",
+		message,
+	)
 
 
-func _update_import_controls() -> void:
-	if _import_button != null:
-		_import_button.disabled = _importing
-	for card: PanelContainer in _cards.values():
-		var body: VBoxContainer = card.get_child(0)
-		var actions: HBoxContainer = body.get_child(body.get_child_count() - 1)
-		for button: Button in actions.get_children():
-			button.disabled = _importing
-
-
-func _set_status(title: String, detail: String, colour: Color) -> void:
-	if _status_label == null:
-		return
-	_status_label.text = title
-	_status_label.add_theme_color_override("font_color", colour)
-	_status_detail.text = detail
-
-
-func _revision_for(game_id: StringName) -> String:
-	var row: Dictionary = RomRegistry.lookup(RomRegistry.sha1_for(game_id))
-	return String(row.get("revision", "Supported cartridge"))
-
-
-func _save_slot_detail(game_id: StringName, data: GameData) -> String:
-	var slots: Array = Gen2SaveStore.slots_for(game_id, data.sha1, data)
-	var ready_slots: int = 0
-	var incompatible: int = 0
-	for row: Dictionary in slots:
-		if row["valid"]:
-			ready_slots += 1
-		elif row["exists"]:
-			incompatible += 1
-	if slots.is_empty():
-		return "No saves yet"
-	if incompatible > 0:
-		return "Saves: %d ready, %d unreadable" % [ready_slots, incompatible]
-	return "Saves: %d ready" % ready_slots
-
-
-## What the mod host found, said in one line. A refused mod is named with its
-## reason rather than silently missing, which is the whole point of reading a
-## manifest without running the mod behind it.
-func _mods_summary() -> String:
-	var host: Gen2ModHost = Gen2ModHost.instance()
-	var names: Array[String] = []
-	for manifest: Gen2ModManifest in host.manifests():
-		names.append(manifest.name)
-	var failures: Array = host.failures()
-	if names.is_empty() and failures.is_empty():
-		return "No mods installed. Put one in %s to load it at start." % Gen2ModHost.ROOT
-	var line: String = "Mods: %s" % (", ".join(names) if not names.is_empty() else "none loaded")
-	for failure: Dictionary in failures:
-		line += "   %s refused (%s)" % [
-			failure.get("directory", failure.get("id", "?")),
-			failure.get("reason", "unknown"),
-		]
-	return line
+func _set_status(kind: StringName, title: String, detail: String) -> void:
+	_status = {"title": title, "detail": detail}
+	if _shell != null:
+		_shell.toast().show_message(kind, title, detail)
 
 
 func _print_allowlist() -> void:
@@ -710,25 +534,3 @@ func _print_allowlist() -> void:
 		lines.append("  %-8s %s" % [RomRegistry.title_for(id), RomRegistry.sha1_for(id)])
 	print("gen2recomp supported cartridges:")
 	print("\n".join(lines))
-
-
-func _button(text: String, colour: Color) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.add_theme_color_override("font_color", colour)
-	button.add_theme_color_override("font_hover_color", Color.WHITE)
-	button.add_theme_font_size_override("font_size", 14)
-	return button
-
-
-func _panel_style(fill: Color, line: Color, radius: int) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = fill
-	style.border_color = line
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(radius)
-	style.content_margin_left = 20
-	style.content_margin_top = 18
-	style.content_margin_right = 20
-	style.content_margin_bottom = 18
-	return style

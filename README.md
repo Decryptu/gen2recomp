@@ -150,8 +150,16 @@ Smoke test the main scene:
 godot --headless --path . --quit-after 30
 ```
 
-The launcher lists Gold, Silver and Crystal cache status, imports a selected
-ROM, and opens its save screen: validated save slots created as you need them,
+The launcher is a shelf of three cartridges, one per supported game, with the
+selected one standing at full size in the middle. A bay you have not imported
+yet is drawn in the cartridge's own outline: drop a dump onto it, or click it to
+browse. An import seats the cartridge with a sound, and playing presses it home
+again before the game opens. Left and right move along the shelf; mods, settings
+and about are the round buttons in the dock underneath. The whole launcher has a
+light and a dark appearance, following `ui_theme` in the options file, and the
+same layout works on a phone.
+
+Play opens the save screen: validated save slots created as you need them,
 naming, export and import, `.sav` import, party inspection and the development
 battle, plus a save editor for party, boxes, bag, flags, position and dex that
 cannot produce a save the game will not load. A new game starts with an empty
@@ -160,10 +168,14 @@ scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
 Continue enters the overworld and F5 saves its map, inventory, event and clock
 snapshot. See [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
 
-It also carries settings, split into the cartridge's own OPTION values and
-application ones; a mod list where each mod can be switched off without being
-uninstalled; per-cartridge re-import, cache folder and cache deletion; and a
-release check that runs only when you ask for it.
+Settings are split into appearance, application values and the cartridge's own
+OPTION values. The mods page lists each mod with a switch that turns it off
+without uninstalling it. The button beside Play carries re-import, the cache
+folder and cache deletion, and the about page holds the release check, which
+runs only when you ask for it.
+
+Icons come from [Lucide](https://lucide.dev). See
+[docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
 
 Development scenes:
 
