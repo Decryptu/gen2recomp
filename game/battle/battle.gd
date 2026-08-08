@@ -306,6 +306,13 @@ var time_of_day: int = Gen2WorldPalette.TIME_DAY
 ## battle and for any class carrying `NO_ITEM` twice.
 var enemy_items: Array[int] = []
 
+## `wPlayerUsedMoves`: the distinct moves the Pokémon the player currently has
+## out has thrown, oldest first, which is the only thing the switch AI has to go
+## on about what it is facing. `NewBattleMonStatus` clears it on every player
+## send-out, so it describes the Pokémon rather than the battle, and
+## `UpdateUsedMoves` keeps at most four, dropping the oldest.
+var player_used_moves: Array[int] = []
+
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
 var _fled: bool = false
@@ -643,6 +650,11 @@ func send_out(side: int, index: int) -> Array:
 	if not current.send_out(index):
 		return events
 	_clear_trapping()
+	# `NewBattleMonStatus`, which clears the used-move list beside the rest of
+	# the incoming Pokémon's volatile state. The enemy's send-out leaves it
+	# alone: the list describes what the player has shown, not what it is facing.
+	if side == PLAYER:
+		player_used_moves = []
 
 	# Nothing is called back after a faint, so the first half of the pair is only
 	# there when there was somebody to call back.
@@ -657,6 +669,17 @@ func send_out(side: int, index: int) -> Array:
 	})
 	(_participants[side] as Dictionary)[index] = true
 	return events
+
+
+## `UpdateUsedMoves`: a move the player throws is remembered once, and the list
+## holds four. A fifth distinct move drops the oldest rather than being ignored,
+## which is why this is a queue rather than a set with a cap.
+func _record_used_move(move_number: int) -> void:
+	if move_number == 0 or player_used_moves.has(move_number):
+		return
+	player_used_moves.append(move_number)
+	if player_used_moves.size() > Gen2BattleMon.MAX_MOVES:
+		player_used_moves.remove_at(0)
 
 
 ## Ends the whole trapping relationship, on both sides at once.
@@ -1360,6 +1383,9 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 		or Gen2Substatus.has(active_substatus, Gen2Substatus.ROLLOUT)
 		or Gen2Substatus.has(active_substatus, Gen2Substatus.RAMPAGING)
 	) and move_number != 0
+
+	if side == PLAYER:
+		_record_used_move(move_number)
 
 	# Whether the Pokémon can move at all is asked before the effect is looked up,
 	# which is the cartridge's arrangement: every move goes through it, so no

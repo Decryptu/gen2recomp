@@ -2422,3 +2422,43 @@ func test_a_class_with_no_items_carries_none_into_the_battle() -> void:
 	)
 	battle.load_trainer_items(0)
 	assert_eq(battle.enemy_items, [] as Array[int])
+
+
+## `UpdateUsedMoves`: what the player has thrown is remembered once each, and
+## `NewBattleMonStatus` empties the list when the player sends somebody else in.
+func test_the_players_used_moves_are_remembered_once_and_cleared_on_a_switch() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.THUNDERBOLT]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])), _rng, true
+	)
+
+	battle.take_turn(0, 0)
+	battle.take_turn(1, 0)
+	battle.take_turn(0, 0)
+
+	assert_eq(battle.player_used_moves, [Fixture.TACKLE, Fixture.THUNDERBOLT] as Array[int])
+
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+
+	assert_eq(battle.player_used_moves, [] as Array[int], "the list describes the Pokemon")
+
+
+## The enemy's own send-out leaves the list alone: it records what the player has
+## shown, not what it is being shown to.
+func test_an_enemy_switch_leaves_the_used_move_list_alone() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])),
+		Gen2Party.create([
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		]), _rng, true
+	)
+
+	battle.take_turn(0, 0)
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.switch_to(1))
+
+	assert_eq(battle.player_used_moves, [Fixture.TACKLE] as Array[int])
