@@ -129,7 +129,7 @@ static func _validate_mon(
 	)
 	if mon.hp < 0 or mon.hp > max_hp:
 		return _failure("%s has invalid HP" % subject)
-	if not _valid_status(mon.status):
+	if not is_valid_status(mon.status):
 		return _failure("%s has invalid status" % subject)
 
 	if mon.moves.size() != Gen2SaveMon.MAX_MOVES or mon.pp.size() != Gen2SaveMon.MAX_MOVES:
@@ -159,7 +159,9 @@ static func _validate_mon(
 	return {"ok": true, "message": ""}
 
 
-static func _valid_status(status: int) -> bool:
+## Public because [Gen2SaveEditor] refuses the same statuses this rejects, and
+## one of the two having its own copy is how they drift apart.
+static func is_valid_status(status: int) -> bool:
 	if status < 0 or (status & ~Gen2Status.ANY) != 0:
 		return false
 	var flags: int = status & (Gen2Status.POISON | Gen2Status.BURN | Gen2Status.FREEZE | Gen2Status.PARALYSIS)

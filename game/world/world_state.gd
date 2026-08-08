@@ -534,6 +534,17 @@ func seen_species() -> Dictionary:
 	return _seen_species.duplicate()
 
 
+## Clearing drops the entry rather than storing false, so the dictionary holds
+## only what has been seen and round-trips through a snapshot unchanged.
+func set_species_seen(species: int, seen: bool = true) -> void:
+	if species <= 0:
+		return
+	if seen:
+		_seen_species[species] = true
+	else:
+		_seen_species.erase(species)
+
+
 ## Advances each active roaming Pokémon using the source's connected-map
 ## selection. A zero in the source's five-bit mask performs a random jump to a
 ## roaming map; otherwise the low two bits select one of the current row's
