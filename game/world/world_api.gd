@@ -471,6 +471,18 @@ func facing_cell() -> Vector2i:
 	return player_cell + _direction_for_facing(player_facing)
 
 
+## The cell CheckFacingObject searches, which is the faced one doubled away when
+## the tile between is a counter (`engine/overworld/npc_movement.asm`). A mart
+## clerk, a gym receptionist and the Radio Tower's Radio Card woman are all
+## talked to across one.
+func object_facing_cell() -> Vector2i:
+	var direction: Vector2i = _direction_for_facing(player_facing)
+	var faced: Vector2i = player_cell + direction
+	if Gen2WorldCollision.is_counter(collision_code_at(faced)):
+		return faced + direction
+	return faced
+
+
 func fishing_request(
 	rod: StringName,
 	random: RandomNumberGenerator = null,
@@ -1771,7 +1783,10 @@ func interact() -> Array:
 	var events: Array = []
 	## TryObjectEvent runs before TryBGEvent in the cartridge event loop. Keep
 	## that order even though events_at() exposes the cache's source order.
-	for event: Dictionary in _active_events_at(target):
+	## Only the object half looks across a counter: CheckFacingBGEvent and
+	## TryTileCollisionEvent both read the plain GetFacingTileCoord, which is
+	## what keeps a Pokemon Center PC on the counter itself reachable.
+	for event: Dictionary in _active_events_at(object_facing_cell()):
 		if event.get("kind", &"") == &"objects" and event.has("script"):
 			events.append(event)
 	for event: Dictionary in _active_events_at(target):

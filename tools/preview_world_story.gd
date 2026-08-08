@@ -64,6 +64,19 @@ const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
 ## cell that reaches Blackthorn Gym's door (`maps/BlackthornCity.asm`).
 const EVENT_CLEARED_RADIO_TOWER: int = 33
 const EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM: int = 1763
+## `RadioTower1FRadioCardWomanScript` on (12,6), standing up. She and the two
+## men beside her are sealed in the lobby's own 8x2 desk pocket, so she is not
+## reached but talked to across the `$90` counter on (12,5) from (12,4), which
+## is what CheckFacingObject's doubled distance is for. She is hidden by
+## EVENT_GOLDENROD_CITY_CIVILIANS, which the boss script clears, so the card is
+## taken on the way back down and not before (`maps/RadioTower1F.asm`,
+## `maps/RadioTower5F.asm`).
+const RADIO_CARD_WOMAN_FACE: Vector2i = Vector2i(12, 4)
+## Her quiz is six `yesorno`s: the offer, then five questions whose accepted
+## answers are yes, yes, no, yes, no, because questions three and five branch to
+## `.WrongAnswer` on `iftrue` where the others branch on `iffalse`. Zero-based,
+## the way DRAGON_SHRINE_ANSWERS is.
+const RADIO_CARD_ANSWERS: Array[int] = [0, 0, 0, 1, 0, 1]
 ## The Blackthorn Gym boulders' own object event flags, which
 ## `BlackthornGym1FBouldersCallback` reads back as `changeblock`s on 1F.
 const EVENT_BOULDER_IN_BLACKTHORN_GYM_1: int = 1798
@@ -513,6 +526,73 @@ const BADGE_SOUL: int = 12
 const EVENT_BEAT_JANINE: int = 1225
 const FUCHSIA_GYM_TRAINER_FLAGS: Array[int] = [1303, 1306, 1154, 1054]
 const EVENT_GOT_TM06_TOXIC: int = 221
+
+## Fuchsia back to Vermilion, which is four connections and one gate, not the
+## walk back through Lavender and Saffron the route came by: Route 12 connects
+## west onto Route 11 and Route 11 west onto Vermilion City
+## (`data/maps/attributes.asm`), and `maps/Route11.asm` declares no warps at
+## all, so nothing on that pair is gated. `maps/FuchsiaGym.asm` warps 1 and 2
+## both land on Fuchsia's warp 3.
+const FUCHSIA_GYM_EXIT: Vector2i = Vector2i(4, 17)
+## `maps/FuchsiaCity.asm` warp 8, the east half of the Route 15 gate pair.
+const FUCHSIA_ROUTE_15_GATE_DOOR: Vector2i = Vector2i(37, 22)
+const ROUTE_11_NUMBER: int = 2
+
+## Vermilion's Snorlax. The whole chain is pinned and checked against the cache
+## by `tools/validate_radio.gd`, which is where these values are explained; only
+## the cells the walk needs are repeated here.
+##
+## `maps/VermilionCity.asm` object 4 is a BIG_OBJECT filling (34,8) to (35,9),
+## and the cave mouth on (34,7) is sealed until it moves.
+##
+## The route arrives from Route 11, not from the port, and that lands it inside
+## the eight-cell pocket the Snorlax's own body seals off the city's east edge:
+## (36..39, 8) and (36..39, 9), measured against the cache. So the walk uses
+## (36,9) facing left, which is the last of `SnorlaxAwake.ProximityCoords` and
+## the only kind of cell an eastbound player ever has. Three of those five
+## coordinates sit in pockets like this one, which is why the source lists all
+## five rather than only the two the port side can stand on.
+const SNORLAX_TALK: Vector2i = Vector2i(36, 9)
+const DIGLETTS_CAVE_MOUTH: Vector2i = Vector2i(34, 7)
+## `engine/pokegear/pokegear.asm` RadioChannels: 20.0, the Poke Flute channel.
+const KNOB_POKE_FLUTE: int = 78
+const EVENT_FOUGHT_SNORLAX: int = 1872
+const EVENT_VERMILION_CITY_SNORLAX: int = 1904
+
+## Diglett's Cave, the one door into west Kanto (`maps/DiglettsCave.asm`).
+##
+## Three walkable regions, not one tunnel, so it is crossed by warps: the
+## Vermilion entrance sits in a 14-cell room whose only ladder is (5,31); that
+## lands on (17,33) in the 99-cell middle, which reaches the second ladder on
+## (3,3); and that lands on (17,3) in a 15-cell room holding the Route 2 door.
+## Measured against the cache, not read off the warp table, since the table
+## alone does not say which cells share a region.
+const DIGLETTS_CAVE_GROUP: int = 3
+const DIGLETTS_CAVE_NUMBER: int = 84
+const DIGLETTS_CAVE_CHAIN: Array[Vector2i] = [
+	Vector2i(5, 31), Vector2i(3, 3), Vector2i(15, 5),
+]
+
+## Route 2 and Pewter City. The cave lands in a 125-cell pocket closed by two
+## cut trees, and the northern one on (5,8) is the only one that opens the rest
+## of the route; cutting it reaches 469 cells and both the Pewter and the
+## Viridian crossing (`tools/validate_radio.gd` checks both counts).
+const ROUTE_2_GROUP: int = 23
+const ROUTE_2_NUMBER: int = 1
+const ROUTE_2_CUT_APPROACH: Vector2i = Vector2i(5, 9)
+const PEWTER_GROUP: int = 14
+const PEWTER_CITY_NUMBER: int = 2
+## `maps/PewterCity.asm` warp 2, and its own NEWMAP flypoint callback.
+const PEWTER_GYM_DOOR: Vector2i = Vector2i(16, 17)
+const ENGINE_FLYPOINT_PEWTER: int = 55
+## `maps/PewterGym.asm`: Brock on (5,1), faced from the cell below. Camper Jerry
+## on (2,5) watches three cells east along row 5, which the walk up column 5
+## crosses, so his battle is unavoidable. Beating Brock sets his flag too.
+const BROCK_FACE: Vector2i = Vector2i(5, 2)
+const BADGE_BOULDER: int = 8
+const EVENT_BEAT_BROCK: int = 1221
+const EVENT_BEAT_CAMPER_JERRY: int = 1067
+
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
 
@@ -3144,14 +3224,44 @@ func _radio_tower_boss(
 	if not world.event_flag_active(EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM):
 		return {"ok": false, "path": path, "reason": "Blackthorn Gym is still sealed"}
 
+	# The descent stops on 1F rather than running straight out of the door,
+	# because the boss script above just cleared EVENT_GOLDENROD_CITY_CIVILIANS
+	# (`maps/RadioTower5F.asm`) and the Radio Card woman is one of the objects
+	# that flag hides.
 	var descended: Dictionary = _warp_chain(
 		world, save, random, data,
-		[Vector2i(12, 0), Vector2i(17, 0), Vector2i(0, 0), Vector2i(15, 0), Vector2i(2, 7)]
+		[Vector2i(12, 0), Vector2i(17, 0), Vector2i(0, 0), Vector2i(15, 0)]
 	)
 	if not bool(descended.get("ok", false)):
 		return {
 			"ok": false, "path": path,
 			"reason": "Radio Tower return descent failed: %s" % descended.get("reason", ""),
+		}
+
+	var card: Dictionary = _talk_to(
+		world, RADIO_CARD_WOMAN_FACE, Gen2WorldSprite.FACING_DOWN,
+		save, random, data, RADIO_CARD_ANSWERS
+	)
+	path.append({
+		"step": "radio_tower_radio_card",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"radio_card": world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD),
+		"run": card.get("run", {}),
+	})
+	if not bool(card.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Radio Card quiz did not finish: %s" % card.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD):
+		return {"ok": false, "path": path, "reason": "ENGINE_RADIO_CARD was not set"}
+
+	var out_of_tower: Dictionary = _warp_chain(world, save, random, data, [Vector2i(2, 7)])
+	if not bool(out_of_tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Radio Tower failed: %s" % out_of_tower.get("reason", ""),
 		}
 	return {"ok": true}
 
@@ -5970,6 +6080,248 @@ func _fuchsia_leg(
 			"ok": false, "path": path,
 			"reason": "Janine set %d of her four trainer flags" % disguised,
 		}
+	return _pewter_leg(world, save, random, data, path)
+
+
+## Fuchsia Gym back to Vermilion, through Diglett's Cave to Route 2, and up to
+## Pewter Gym for the Boulder Badge.
+##
+## The order is forced. Measured against a real Crystal cache, a walk out of
+## Cerulean reaches 91 maps and none of Route 3, Route 4's main region, Mount
+## Moon, Route 2, Viridian, Pallet, Cinnabar, Route 20 or Seafoam Gym, and
+## Fuchsia's own south edge is sealed the other way while
+## EVENT_CINNABAR_ROCKS_CLEARED is clear. Diglett's Cave is the one door into
+## west Kanto, and the Snorlax on top of it is the lock.
+##
+## What opens that lock is the radio, which is why the Goldenrod leg now takes
+## the Radio Card: `SnorlaxAwake` answers only while the Poke Flute channel is
+## the track in `wMapMusic`, and a station's music id is neither sentinel
+## `ExitPokegearRadio_HandleMusic` restores on, so it survives the Pokegear
+## closing. `tools/validate_radio.gd` owns that whole chain and the Route 2
+## counts behind it.
+func _pewter_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [FUCHSIA_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Fuchsia Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var to_route_15: Dictionary = _gate_leg(
+		world, save, random, data, FUCHSIA_ROUTE_15_GATE_DOOR, FUCHSIA_GROUP, ROUTE_15_NUMBER
+	)
+	path.append({
+		"step": "route_15_eastbound",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_route_15.get("encounters", []),
+	})
+	if not bool(to_route_15.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 15 gate east failed: %s" % to_route_15.get("reason", ""),
+		}
+
+	var northbound: Array = [
+		{"step": "route_14_northbound", "direction": "east", "group": FUCHSIA_GROUP,
+			"number": ROUTE_14_NUMBER},
+		{"step": "route_13_northbound", "direction": "north", "group": FUCHSIA_GROUP,
+			"number": ROUTE_13_NUMBER},
+		{"step": "route_12_northbound", "direction": "north", "group": LAVENDER_GROUP,
+			"number": ROUTE_12_NUMBER},
+		{"step": "route_11_westbound", "direction": "west", "group": VERMILION_GROUP,
+			"number": ROUTE_11_NUMBER},
+		{"step": "vermilion_return", "direction": "west", "group": VERMILION_GROUP,
+			"number": VERMILION_CITY_NUMBER},
+	]
+	for leg: Dictionary in northbound:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var snorlax: Dictionary = _wake_snorlax(world, save, random, data, path)
+	if not bool(snorlax.get("ok", false)):
+		return snorlax
+
+	var through_cave: Dictionary = _warp_chain(
+		world, save, random, data, [DIGLETTS_CAVE_MOUTH] + DIGLETTS_CAVE_CHAIN
+	)
+	path.append({
+		"step": "digletts_cave",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+	})
+	if not bool(through_cave.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Diglett's Cave failed: %s" % through_cave.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(ROUTE_2_GROUP, ROUTE_2_NUMBER):
+		return {"ok": false, "path": path, "reason": "the cave did not come out on Route 2"}
+
+	# The sixth site the route cuts without a party member that knows CUT, which
+	# is open work item 9 and not this leg's to fix.
+	var cut: Dictionary = _cut_at(
+		world, ROUTE_2_CUT_APPROACH, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_2_cut",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": cut.get("encounters", []),
+	})
+	if not bool(cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 2's cut tree failed: %s" % cut.get("reason", ""),
+		}
+
+	var to_pewter: Dictionary = _walk_connection_resolving(
+		world, "north", PEWTER_GROUP, PEWTER_CITY_NUMBER, save, random, data
+	)
+	var pewter_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "pewter_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER),
+		"encounters": to_pewter.get("encounters", []),
+		"run": pewter_entry,
+	})
+	if not bool(to_pewter.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to Pewter failed: %s" % to_pewter.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER):
+		return {"ok": false, "path": path, "reason": "Pewter's flypoint callback did not run"}
+
+	return _pewter_gym_leg(world, save, random, data, path)
+
+
+## Vermilion's Snorlax, which is the only thing between the walked route and
+## west Kanto.
+##
+## Tuning is the whole interaction: `SnorlaxAwake` compares `wMapMusic` against
+## the Poke Flute channel and takes its false branch otherwise, so the dial is
+## moved to 20.0 and the Pokegear closed before it is talked to. The card the
+## dial needs is `ENGINE_RADIO_CARD`, taken on the Goldenrod leg, and the region
+## check behind the station needs `ENGINE_EXPN_CARD`, taken on the Lavender one.
+func _wake_snorlax(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	if not world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD):
+		return {"ok": false, "path": path, "reason": "the route reached the Snorlax with no radio card"}
+
+	var walked: Dictionary = _walk_cell_resolving(world, SNORLAX_TALK, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to the Snorlax failed: %s" % walked.get("reason", ""),
+		}
+	var tuned: Dictionary = world.tune_radio(KNOB_POKE_FLUTE)
+	world.close_radio()
+	if not bool(tuned.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "20.0 answered no station: %s" % tuned.get("reason", ""),
+		}
+
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "vermilion_snorlax",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"map_music": world.state.map_music(),
+		"fought_snorlax": world.event_flag_active(EVENT_FOUGHT_SNORLAX),
+		"vermilion_city_snorlax": world.event_flag_active(EVENT_VERMILION_CITY_SNORLAX),
+		"cave_mouth_open": world.object_at(DIGLETTS_CAVE_MOUTH) == null,
+		"encounters": walked.get("encounters", []),
+		"run": run,
+	})
+	if not bool(run.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Snorlax script did not finish: %s" % run.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_FOUGHT_SNORLAX):
+		return {"ok": false, "path": path, "reason": "the Snorlax was not fought"}
+	if not world.event_flag_active(EVENT_VERMILION_CITY_SNORLAX):
+		return {"ok": false, "path": path, "reason": "the Snorlax did not disappear"}
+	return {"ok": true}
+
+
+## Pewter Gym and the Boulder Badge. `maps/PewterGym.asm` declares neither a
+## scene nor a callback, so Brock answers as soon as he is faced, and his own
+## script sets Camper Jerry's flag whether or not Jerry was fought.
+func _pewter_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [PEWTER_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Pewter Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var brock: Dictionary = _talk_to(
+		world, BROCK_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_BOULDER, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "pewter_gym_brock",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"boulder_badge": world.state.is_engine_flag_active(badge),
+		"beat_brock": world.event_flag_active(EVENT_BEAT_BROCK),
+		"beat_camper_jerry": world.event_flag_active(EVENT_BEAT_CAMPER_JERRY),
+		"encounters": brock.get("encounters", []),
+		"run": brock,
+	})
+	if not bool(brock.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Brock did not finish: %s" % brock.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_BOULDERBADGE was not set"}
+	if not world.event_flag_active(EVENT_BEAT_CAMPER_JERRY):
+		return {"ok": false, "path": path, "reason": "Brock did not set Camper Jerry's flag"}
 	return {"ok": true}
 
 
@@ -7122,6 +7474,8 @@ func _whirlpool_at(
 
 
 ## Walks to [param cell], faces [param facing] and drains the interaction.
+## [param answers] is passed through to _drain_story() for an NPC who asks, the
+## way the Radio Card woman's five-question quiz does.
 func _talk_to(
 	world: Gen2WorldAPI,
 	cell: Vector2i,
@@ -7129,12 +7483,15 @@ func _talk_to(
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
+	answers: Array[int] = [],
 ) -> Dictionary:
 	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data)
 	if not bool(walked.get("ok", false)):
 		return walked
 	world.player_facing = facing
-	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	var run: Dictionary = _drain_story(
+		world, world.interact(), save, random, data, true, answers
+	)
 	return {
 		"ok": bool(run.get("terminal", false)),
 		"reason": run.get("reason", ""),

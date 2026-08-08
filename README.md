@@ -237,13 +237,14 @@ Headless tools, all against a real imported cache:
 | `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs, in all three games |
 | `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it, in all three games |
 | `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian, in all three games |
+| `validate_pewter.gd` | Fuchsia's gate out and the five ungated connections back to Vermilion, the eight-cell pocket the Snorlax seals off the Route 11 crossing, Diglett's Cave's three regions and two ladders, Route 2's crossing onto Pewter once its tree is cut, and Pewter City's one south corridor and the gym sight line it owes, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route: Johto, the Hall of Fame, and Kanto as far as Fuchsia
+# the full walked route: Johto, the Hall of Fame, and Kanto as far as Pewter
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 

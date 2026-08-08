@@ -73,6 +73,11 @@ func _write_cache(game_id: String = "testworld") -> void:
 	collision[2 * 16 + 15] = 0x07  # wall right of the edge hop cell
 	collision[2 * 16 + 10] = 0x93  # COLL_PC, faced (not stood on) for std scripts
 
+	# Counter fixture, row 9: CheckFacingObject doubles the facing distance over
+	# a counter, so an object on (13,10) is talked to from (13,8) across this
+	# cell. (11,9) is left at LAND_TILE as the control for the same geometry.
+	collision[9 * 16 + 13] = 0x90  # COLL_COUNTER
+
 	# Side-wall fixture, row 8: a COLL_RIGHT_WALL/COLL_LEFT_WALL pair at (2,8)
 	# and (3,8), matching Celadon Mansion Roof's railing. Both stay LAND_TILE
 	# permission; every surrounding cell is left at its default LAND_TILE.
@@ -1575,6 +1580,50 @@ func test_interact_finds_no_tile_collision_script_for_an_untabled_code() -> void
 	world.player_facing = Gen2WorldSprite.FACING_LEFT
 	assert_eq(world.collision_code_at(world.facing_cell()), 0)
 	assert_eq(world.interact(), [])
+
+
+## A world with a scripted object two cells ahead of [param stand], for
+## CheckFacingObject's counter rule.
+func _counter_world(stand: Vector2i) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = _world(stand)
+	world.current_map.events["objects"].append({
+		"sprite": 1, "x": stand.x, "y": stand.y + 2,
+		"script": 0x6040, "event_flag": 0xFFFF,
+	})
+	world.reload_current_map()
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	return world
+
+
+## CheckFacingObject doubles the facing distance when the faced tile is a
+## counter, which is how a mart clerk or the Radio Tower's Radio Card woman is
+## talked to from outside the desk they stand behind.
+func test_interact_reaches_an_object_across_a_counter() -> void:
+	var world: Gen2WorldAPI = _counter_world(Vector2i(13, 8))
+	assert_eq(world.collision_code_at(world.facing_cell()), Gen2WorldCollision.COLL_COUNTER)
+	assert_eq(world.object_facing_cell(), Vector2i(13, 10))
+	var results: Array = world.interact()
+	assert_false(results.is_empty())
+	assert_eq(results[0]["status"], &"complete", JSON.stringify(results[0]))
+	assert_eq(world.state.map_scene(1, 1), 3)
+
+
+## The same geometry without a counter answers nothing: the doubling is the
+## counter's, not a general two-cell reach.
+func test_interact_does_not_reach_an_object_two_cells_away_without_a_counter() -> void:
+	var world: Gen2WorldAPI = _counter_world(Vector2i(11, 8))
+	assert_eq(world.collision_code_at(world.facing_cell()), 0)
+	assert_eq(world.object_facing_cell(), Vector2i(11, 9))
+	assert_eq(world.interact(), [])
+
+
+## $98 ships in CheckCounterTile's pair but no map uses it. Both codes answer.
+func test_counter_codes_are_the_pinned_pair() -> void:
+	assert_true(Gen2WorldCollision.is_counter(Gen2WorldCollision.COLL_COUNTER))
+	assert_true(Gen2WorldCollision.is_counter(Gen2WorldCollision.COLL_COUNTER_98))
+	assert_eq(Gen2WorldCollision.COLL_COUNTER, 0x90)
+	assert_eq(Gen2WorldCollision.COLL_COUNTER_98, 0x98)
+	assert_false(Gen2WorldCollision.is_counter(Gen2WorldCollision.COLL_PC))
 
 
 func test_tile_collision_std_index_is_profile_split_for_pc_only() -> void:
