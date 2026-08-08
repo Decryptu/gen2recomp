@@ -7389,14 +7389,16 @@ func _reachable_step(
 	return landing
 
 
+## Whether a step off [param cell] would really cross, rather than whether the
+## cell sits on the edge. A connection spans only part of its edge, so an edge
+## cell the connected map does not reach resolves to nothing and the walk that
+## settled on it would fail with no useful reason. `Gen2WorldAPI` owns the span
+## arithmetic; asking it keeps the plan and the replayed walk on one answer.
 func _is_connection_edge(world: Gen2WorldAPI, cell: Vector2i, direction_name: String) -> bool:
-	var size: Vector2i = world.map_size_cells()
-	match direction_name:
-		"north": return cell.y == 0
-		"south": return cell.y == size.y - 1
-		"west": return cell.x == 0
-		"east": return cell.x == size.x - 1
-	return false
+	var resolved: Dictionary = world.connection_target(
+		cell, _connection_direction(direction_name)
+	)
+	return bool(resolved.get("ok", false))
 
 
 func _connection_direction(direction_name: String) -> Vector2i:

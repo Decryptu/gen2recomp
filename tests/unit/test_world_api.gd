@@ -2980,6 +2980,38 @@ func test_connected_edge_step_refuses_a_wall_on_the_target_map() -> void:
 	assert_eq(world.player_cell, Vector2i(15, 4))
 
 
+## A connection spans only part of its edge, so an edge cell the connected map
+## does not reach resolves to nothing. connection_target() answers that without
+## moving anyone, which is what a walk planner needs before it settles on a cell.
+func test_connection_target_reports_the_span_without_moving_the_player() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	(source.connections[0] as Dictionary)["y_offset"] = 6
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 0))
+
+	var inside: Dictionary = world.connection_target(Vector2i(15, 0), Vector2i.RIGHT)
+	assert_true(inside["ok"])
+	assert_eq(inside["map_group"], 1)
+	assert_eq(inside["map_number"], 2)
+	assert_eq(inside["cell"], Vector2i(0, 6))
+
+	var outside: Dictionary = world.connection_target(Vector2i(15, 6), Vector2i.RIGHT)
+	assert_false(outside["ok"])
+	assert_eq(outside["reason"], &"invalid_target_cell")
+
+	var inland: Dictionary = world.connection_target(Vector2i(8, 6), Vector2i.RIGHT)
+	assert_false(inland["ok"])
+	assert_eq(inland["reason"], &"not_at_edge")
+
+	assert_true(world.connection_target(Vector2i(0, 6), Vector2i.LEFT).is_empty())
+
+	assert_eq(world.map_id(), Vector2i(1, 1))
+	assert_eq(world.player_cell, Vector2i(15, 0))
+	# The step itself lands where the plan said it would.
+	assert_true(world.move_result(Vector2i.RIGHT)["ok"])
+	assert_eq(world.player_cell, Vector2i(0, 6))
+
+
 func test_connection_requires_the_player_to_be_on_the_requested_edge() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Dictionary = world.try_connection(Vector2i.RIGHT)
