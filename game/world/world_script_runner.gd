@@ -73,6 +73,14 @@ const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_HEAL_MACHINE_ANIM: int = 62
 const SPECIAL_CHECK_POKERUS: int = 78
+## SnorlaxAwake, 96 in Crystal and 95 in Gold/Silver, which special_index()
+## already normalizes. Its five proximity coordinates are the cells the source
+## lists, in its own x,y order (engine/events/specials.asm's .ProximityCoords),
+## and are the same in both pins.
+const SPECIAL_SNORLAX_AWAKE: int = 96
+const SNORLAX_PROXIMITY_CELLS: Array[Vector2i] = [
+	Vector2i(33, 8), Vector2i(34, 10), Vector2i(35, 10), Vector2i(36, 8), Vector2i(36, 9),
+]
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
@@ -1587,6 +1595,16 @@ func _execute_special(special: int) -> Dictionary:
 			if party.is_empty():
 				return {"ok": false, "reason": &"missing_party_summary", "special": special}
 			_script_value = 1 if bool(party.get("pokerus", false)) else 0
+		SPECIAL_SNORLAX_AWAKE:
+			## Two reads and nothing else: the track in wMapMusic and the cell the
+			## player stands on. The Poke Flute channel reaches wMapMusic through
+			## StartRadioStation and stays there because closing the Pokegear
+			## restores the map's music only for its two sentinel ids.
+			var standing: Variant = _request.get("player_cell", Vector2i(-1, -1))
+			var cell: Vector2i = standing if standing is Vector2i else Vector2i(-1, -1)
+			_script_value = 1 if state != null \
+				and state.map_music() == Gen2WorldRadio.MUSIC_POKE_FLUTE_CHANNEL \
+				and cell in SNORLAX_PROXIMITY_CELLS else 0
 		46, 48, 49, 50, 51, 94, 95, 157, 158:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.

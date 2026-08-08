@@ -10,6 +10,9 @@ extends RefCounted
 signal changed
 
 const PHONE_CONTACT_CAPACITY: int = 10
+## constants/music_constants.asm. `wMapMusic` starts here and TryRestartMapMusic
+## puts it back when a map asks not to restart its own track.
+const MUSIC_NONE: int = 0
 ## `readmem`/`writemem`/`loadmem` address plain WRAM bytes. Only a bounded
 ## handful of them carry script state (`wFarfetchdPosition`,
 ## `wUndergroundSwitchPositions`, the phone rematch counters), so they are
@@ -25,6 +28,16 @@ const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## lower there.
 const ENGINE_CREDITS_SKIP: int = 15
 const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
+## The three wPokegearFlags/wStatusFlags bits the radio card reads
+## (data/events/engine_flags.asm). Only the last is profile split, since it sits
+## in the wStatusFlags2 run after Crystal's extra entry.
+const ENGINE_RADIO_CARD: int = 0
+const ENGINE_MAP_CARD: int = 1
+const ENGINE_PHONE_CARD: int = 2
+const ENGINE_EXPN_CARD: int = 3
+const ENGINE_ROCKET_SIGNAL: int = 14
+const ENGINE_ROCKETS_IN_RADIO_TOWER: int = 19
+const ENGINE_ROCKETS_IN_RADIO_TOWER_GOLD_SILVER: int = 18
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
 
@@ -87,6 +100,13 @@ var _phone_receive_cycle: int = 0
 var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
 var _pending_special_phone_call: int = 0
 var _script_memory: Dictionary = {}
+## `wMapMusic`, `wRadioTuningKnob` and `wCurRadioLine`. The music is state rather
+## than something derived from the current map because `PlayMapMusic` writes it
+## and compares against it, and because a tuned radio station overwrites it and
+## survives the Pokegear closing. `SnorlaxAwake` reads exactly that byte.
+var _map_music: int = MUSIC_NONE
+var _radio_knob: int = Gen2WorldRadio.KNOB_MIN
+var _radio_channel: int = -1
 
 
 func _init(
@@ -164,6 +184,9 @@ func to_dict() -> Dictionary:
 		"phone_receive_minutes": _phone_receive_minutes,
 		"pending_special_phone_call": _pending_special_phone_call,
 		"script_memory": _script_memory.duplicate(),
+		"map_music": _map_music,
+		"radio_knob": _radio_knob,
+		"radio_channel": _radio_channel,
 	}
 
 
@@ -174,7 +197,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		return Gen2WorldState.new()
 	var source: Dictionary = raw
 	var swarm: Vector2i = _vector_from_value(source.get("swarm_map", [-1, -1]))
-	return Gen2WorldState.new(
+	var restored: Gen2WorldState = Gen2WorldState.new(
 		source.get("event_flags", {}) if source.get("event_flags", {}) is Dictionary else {},
 		source.get("map_scenes", {}) if source.get("map_scenes", {}) is Dictionary else {},
 		source.get("items", {}) if source.get("items", {}) is Dictionary else {},
@@ -192,6 +215,13 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		source.get("engine_flags", {}) if source.get("engine_flags", {}) is Dictionary else {},
 		source.get("script_memory", {}) if source.get("script_memory", {}) is Dictionary else {},
 	)
+	## Absent in a state written before the radio existed. Zero is the same
+	## MUSIC_NONE a fresh state starts on, and the next map load writes the real
+	## track, so an old save needs no migration.
+	restored._map_music = maxi(0, int(source.get("map_music", MUSIC_NONE)))
+	restored.set_radio_knob(int(source.get("radio_knob", Gen2WorldRadio.KNOB_MIN)))
+	restored._radio_channel = int(source.get("radio_channel", -1))
+	return restored
 
 
 ## Restores the mutable state after a host transaction could not be persisted.
@@ -218,6 +248,9 @@ func restore_from_dict(raw: Variant) -> void:
 	_phone_receive_minutes = restored._phone_receive_minutes
 	_pending_special_phone_call = restored._pending_special_phone_call
 	_script_memory = restored._script_memory.duplicate()
+	_map_music = restored._map_music
+	_radio_knob = restored._radio_knob
+	_radio_channel = restored._radio_channel
 	changed.emit()
 
 
@@ -460,6 +493,58 @@ func set_pending_special_phone_call(call_id: int) -> bool:
 
 func just_battled() -> bool:
 	return _just_battled
+
+
+## `wMapMusic`: the track that is playing, not the track the current map asks
+## for. The two differ whenever a radio station is tuned.
+func map_music() -> int:
+	return _map_music
+
+
+func set_map_music(music: int) -> void:
+	var next_music: int = maxi(0, music)
+	if next_music == _map_music:
+		return
+	_map_music = next_music
+	changed.emit()
+
+
+## PlayMapMusic: a map that asks for the track already playing does not restart
+## it, which is what makes crossing a route boundary one continuous piece and
+## what keeps a tuned station playing across a map reload. Answers whether the
+## track changed, so a caller knows whether to restart playback.
+func play_map_music(music: int) -> bool:
+	if maxi(0, music) == _map_music:
+		return false
+	set_map_music(music)
+	return true
+
+
+func radio_knob() -> int:
+	return _radio_knob
+
+
+## Clamped and snapped to the source's own two-step dial.
+func set_radio_knob(knob: int) -> void:
+	var next_knob: int = clampi(knob, Gen2WorldRadio.KNOB_MIN, Gen2WorldRadio.KNOB_MAX)
+	next_knob -= next_knob % Gen2WorldRadio.KNOB_STEP
+	if next_knob == _radio_knob:
+		return
+	_radio_knob = next_knob
+	changed.emit()
+
+
+## `wCurRadioLine`, or -1 while the dial sits on dead air.
+func radio_channel() -> int:
+	return _radio_channel
+
+
+func set_radio_channel(channel: int) -> void:
+	var next_channel: int = channel if channel >= 0 else -1
+	if next_channel == _radio_channel:
+		return
+	_radio_channel = next_channel
+	changed.emit()
 
 
 func repel_steps() -> int:

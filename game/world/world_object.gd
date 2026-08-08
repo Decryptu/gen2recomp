@@ -25,6 +25,15 @@ const MOVEMENT_SCRIPTED: int = 20
 ## movement_supported() nor movement_advances(); it only reacts to a push.
 const MOVEMENT_STRENGTH_BOULDER: int = 0x19
 const MOVEMENT_SWIM_WANDER: int = 0x24
+## The three rows data/sprites/map_objects.asm gives BIG_OBJECT in their palette
+## flags. Only two objects in either game use one: the player's bedroom big doll
+## and Vermilion City's Snorlax. BIGDOLLASYM is referenced by no map.
+const MOVEMENT_BIGDOLLSYM: int = 0x15
+const MOVEMENT_BIGDOLLASYM: int = 0x20
+const MOVEMENT_BIGDOLL: int = 0x21
+## WillObjectIntersectBigObject's own two, commented "big doll width" and
+## "big doll height".
+const BIG_OBJECT_SIZE: int = 2
 
 const OBJECTTYPE_SCRIPT: int = 0
 const OBJECTTYPE_ITEMBALL: int = 1
@@ -121,6 +130,23 @@ func is_strength_boulder() -> bool:
 ## Union Cave B2F's Lapras uses that row, in either game.
 func is_swimming() -> bool:
 	return movement == MOVEMENT_SWIM_WANDER
+
+
+## OBJECT_PALETTE bit BIG_OBJECT. Same shape again: the movement template
+## answers it, and three rows carry it.
+func is_big_object() -> bool:
+	return movement in [MOVEMENT_BIGDOLLSYM, MOVEMENT_BIGDOLLASYM, MOVEMENT_BIGDOLL]
+
+
+## WillObjectIntersectBigObject: a big object fills a two-by-two square anchored
+## on its own cell, so it blocks four cells and can be faced from any of them.
+## Every other object is the single cell IsNPCAtCoord compares against.
+func occupies(target: Vector2i) -> bool:
+	if not is_big_object():
+		return cell == target
+	var offset: Vector2i = target - cell
+	return offset.x >= 0 and offset.x < BIG_OBJECT_SIZE \
+		and offset.y >= 0 and offset.y < BIG_OBJECT_SIZE
 
 
 func movement_supported() -> bool:
