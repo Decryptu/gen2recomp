@@ -173,11 +173,15 @@ Pokedex, Player and Options appear in their source position but do nothing yet.
 The Pack opens each item's own source submenu and can use one: a Potion asks
 which Pokemon and heals it, a Repel sets its step count, and GIVE, TOSS and SEL
 keep their source position marked unavailable.
-The party submenu offers Cut, Surf and Whirlpool to a Pokemon that knows one; all
-three show their message first and change the world on the acknowledge, and
-stepping from water back onto land stops surfing. Standing on a whirlpool,
-waterfall, door, staircase or cave tile overrides the pressed direction the way
-the cartridge does.
+The party submenu offers Cut, Surf, Strength, Whirlpool and Waterfall to a
+Pokemon that knows one; all five show their message first and change the world
+on the acknowledge, and stepping from water back onto land stops surfing. A
+Waterfall climb runs the whole column in one command and ends on the first cell
+above it that is not a waterfall. Standing on a whirlpool, waterfall, door,
+staircase or cave tile overrides the pressed direction the way the cartridge
+does, which is also how a waterfall is ridden back down.
+Poké Balls on the ground are picked up by facing them: an item ball's pointer is
+item data rather than a script, so it is decoded and its item received.
 The imported Players House PC opens the embedded box storage screen. The host
 clock advances one game minute per real minute and crosses source day
 boundaries. `preview_emote()`, `preview_wild_encounter()`,
@@ -204,14 +208,15 @@ Headless tools, all against a real imported cache:
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
 | `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
-| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls channels that need Waterfall, in all three games |
+| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down, in all three games |
+| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro and reaching the bag, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending on Route 27's Kanto landfall
+# the full walked route, ending at the Indigo Plateau Pokemon Center
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 

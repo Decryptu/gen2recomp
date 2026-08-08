@@ -28,16 +28,29 @@ const WALK_RESOLVE_ATTEMPTS: int = 16
 
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
 const ITEM_HM_STRENGTH: int = 0xF6
+const ITEM_HM_WATERFALL: int = 0xF9
+## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
+## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
+## four neighbours are wall, so (30,7) facing right is the only approach.
+const HM07_APPROACH: Vector2i = Vector2i(30, 7)
+## constants/mart_constants.asm's MART_BLACKTHORN, which
+## BlackthornMartClerkScript names. Its stock is the cartridge's
+## (`data/items/marts.asm` MartBlackthorn), and it sells no Poké Balls at all.
+## How many balls the route buys is its own choice, not the cartridge's; five
+## Great Balls is what the source start money covers.
+const MART_BLACKTHORN: int = 17
+const GREAT_BALLS_BOUGHT: int = 5
 ## The two Radio Tower keys, from the same hex comment column.
 const ITEM_CARD_KEY: int = 0x7F
 const ITEM_BASEMENT_KEY: int = 0x85
 ## ENGINE_STORMBADGE's place in source badge order, for Gen2WorldState.badge_flag().
 const BADGE_STORM: int = 5
 
-## How many forced Union Cave encounters the route may roll looking for a
-## STRENGTH-capable catch. Its own five Poké Balls are the real limit; this only
-## bounds the rolls that find nothing worth throwing at.
-const CATCH_ATTEMPTS: int = 64
+## How many forced encounters the route may roll looking for a catch that can
+## learn the move it needs. The bag is the real limit; this only bounds the
+## rolls that find nothing worth throwing at, and Dragon's Den answers with a
+## Dratini about one roll in ten.
+const CATCH_ATTEMPTS: int = 256
 
 ## Mahogany Town, whose map scene and merchant flag are what open the east exit
 ## onto Route 44 (`data/maps/maps.asm`).
@@ -130,7 +143,7 @@ const OBJECT_STEP_FRAME_BUDGET: int = 64
 ## 3 to 6) are shortcuts into B2F Mahogany side, which the walk already reaches
 ## through warp 2.
 const ICE_PATH_DOORS: Array = [
-	{"step": "route_44_to_ice_path_1f", "cell": Vector2i(56, 7)},
+	{"step": "route_44_to_ice_path_1f", "cell": Vector2i(56, 7), "hm07": true},
 	{"step": "ice_path_1f_to_b1f", "cell": Vector2i(37, 5)},
 	{"step": "ice_path_b1f_to_b2f_mahogany", "cell": Vector2i(17, 3)},
 	{"step": "ice_path_b2f_mahogany_to_b3f", "cell": Vector2i(9, 11)},
@@ -143,6 +156,45 @@ const ICE_PATH_DOORS: Array = [
 ## Route 27's landfall from New Bark Town, which is also the
 ## `SCENE_ROUTE27_FIRST_STEP_INTO_KANTO` coord pair (`maps/Route27.asm`).
 const ROUTE_27_LANDFALL: Vector2i = Vector2i(18, 10)
+
+## Tohjo Falls, west to east (`maps/TohjoFalls.asm`, `maps/Route27.asm`). The
+## two mouths are Route 27 cells; everything between them is inside the cave.
+##
+## The west door lands on (13,15) in an eight-cell pocket whose only water is to
+## the left, so the surf starts on (10,14). The climb's foot is (8,12), directly
+## below the four-cell `COLL_WATERFALL` column at x 8, and the descent's top is
+## (18,5) on the pool, directly above the east column.
+const TOHJO_WEST_MOUTH: Vector2i = Vector2i(26, 5)
+const TOHJO_WEST_SHORE: Vector2i = Vector2i(10, 14)
+const TOHJO_CLIMB_FOOT: Vector2i = Vector2i(8, 12)
+const TOHJO_DESCENT_TOP: Vector2i = Vector2i(18, 5)
+const TOHJO_EAST_LANDFALL: Vector2i = Vector2i(22, 14)
+const TOHJO_EAST_DOOR: Vector2i = Vector2i(25, 15)
+## The tallest waterfall either game ships is four cells, so this only has to
+## outlast a stuck forced step rather than bound a real column.
+const WATERFALL_RIDE_LIMIT: int = 32
+
+## constants/event_flags.asm. `VictoryRoadRivalNext` sets it before loading the
+## RIVAL1 party, so it is what says the Victory Road scene really ran.
+const EVENT_RIVAL_VICTORY_ROAD: int = 1730
+## `PlateauRivalBattle1`/`2` open on this, a Kanto event the walked route never
+## reaches, so the plateau coord event falls straight to PlateauRivalScriptDone.
+const EVENT_BEAT_RIVAL_IN_MT_MOON: int = 793
+## ENGINE_FLYPOINT_INDIGO_PLATEAU, set by Route23FlypointCallback on map entry.
+const ENGINE_FLYPOINT_INDIGO_PLATEAU: int = 64
+
+## Victory Road's regions, in the order its warp maze joins them
+## (`maps/VictoryRoad.asm`). The internal warps are pairs, so warp 2 at (1,49)
+## arrives on warp 3 at (1,35) and warp 4 at (13,31) on warp 5 at (13,17). The
+## fourth region, behind (0,11) and (0,27), is a dead end and is not walked.
+## The cell below `PlateauRivalBattle1`'s coord event, which is stepped onto
+## from here (`maps/IndigoPlateauPokecenter1F.asm`).
+const PLATEAU_RIVAL_APPROACH: Vector2i = Vector2i(16, 5)
+
+const VICTORY_ROAD_LADDERS: Array = [
+	{"step": "victory_road_first_ladder", "cell": Vector2i(1, 49)},
+	{"step": "victory_road_second_ladder", "cell": Vector2i(13, 31)},
+]
 
 
 func _initialize() -> void:
@@ -232,7 +284,16 @@ func _home_path(data: GameData) -> Array:
 
 
 func _story_path(data: GameData) -> Dictionary:
-	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 24, 7, Vector2i.ZERO)
+	# The walked route is a new game, so it starts on the new game's own world
+	# state rather than a bare one: Gen2WorldSpawn is what the launcher hands the
+	# screen, and its SPAWN_HOME record carries the source start money. Without
+	# it the route reaches Blackthorn with nothing to spend.
+	var spawn: Gen2WorldSnapshot = Gen2WorldSpawn.new_game_snapshot(data)
+	if spawn == null:
+		return {"ok": false, "reason": "missing new-game spawn"}
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 24, 7, Vector2i.ZERO, spawn.world_state
+	)
 	if world == null:
 		return {"ok": false, "reason": "missing home map"}
 	var save: Gen2SaveData = Gen2SaveStore.create_new_game(data, 0, "ASH")
@@ -1021,7 +1082,10 @@ func _hive_badge_path(
 		"run": union_entry,
 	})
 
-	var caught: Dictionary = _catch_strength_mon(world, save, random, data, path)
+	var caught: Dictionary = _catch_field_move_mon(
+		world, save, random, data, path,
+		Gen2WorldFieldMove.MOVE_STRENGTH, "union_cave_catch_for_strength"
+	)
 	if not bool(caught.get("ok", false)):
 		return caught
 
@@ -3150,6 +3214,28 @@ func _rising_badge_path(
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
+	# The mart before the gym, because the Dragon's Den catch on the way back out
+	# needs more balls than Elm's aide gave and Blackthorn is the last town the
+	# route stands in before it.
+	var mart_trip: Dictionary = _warp_chain(world, save, random, data, [Vector2i(15, 29)])
+	if not bool(mart_trip.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Mart unreachable: %s" % mart_trip.get("reason", ""),
+		}
+	var bought: Dictionary = _buy_great_balls(world, save, data, path, GREAT_BALLS_BOUGHT)
+	if not bool(bought.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Mart failed: %s" % bought.get("reason", ""),
+		}
+	var out_of_mart: Dictionary = _warp_chain(world, save, random, data, [Vector2i(2, 7)])
+	if not bool(out_of_mart.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn Mart exit failed: %s" % out_of_mart.get("reason", ""),
+		}
+
 	var gym: Dictionary = _blackthorn_gym_leg(world, save, random, data, path)
 	if not bool(gym.get("ok", false)):
 		return gym
@@ -3388,22 +3474,18 @@ func _dragon_shrine_leg(
 	return {"ok": true}
 
 
-## The Dragon Shrine back to New Bark Town and the first step into Kanto, on the
-## same world, state and save.
+## The Dragon Shrine to Indigo Plateau, on the same world, state and save.
 ##
-## This is where the walked route stops, and Route 27 is the wall. Its landfall
-## region reaches no map edge and no other land: row 5 is a solid cliff apart
-## from the two Tohjo Falls mouths, and both are `COLL_CAVE`, whose `.CheckTile`
-## `.warps` branch forces DOWN, so a player leaving either mouth always steps
-## south of it and the block north of the cliff can never be entered. The only
-## crossing of the channel east of the landfall starts in the pocket south of
-## the east mouth, and that pocket is reached only by leaving Tohjo Falls there,
-## which means crossing the cave. The cave cannot be crossed: its two lower
-## channels reach the pool that feeds them only by climbing `COLL_WATERFALL`
-## cells. Route 26, the Victory Road Gate badge check, Victory Road and Indigo
-## Plateau are all behind that climb, so they need HM07 and a Waterfall field
-## move. `tools/validate_route_27.gd` pins every census behind this, in all
-## three games, and `HANDOFF.md` open work has what has to land first.
+## `VictoryRoadGate`'s coord event at (10,11) is a `readvar VAR_BADGES` against
+## `NUM_JOHTO_BADGES - 1`, so it is the first script on the walked route that
+## reads the badge count back, and the eighth badge is what opens the leg.
+##
+## Route 27 is the reason this leg waited on Waterfall. Its Kanto landfall sits
+## in a region that reaches no map edge, and the only crossing of the channel
+## east of it starts in a pocket reached solely by leaving Tohjo Falls there.
+## The cave in turn is two lower channels that reach the pool feeding them only
+## by climbing `COLL_WATERFALL` cells. `tools/validate_route_27.gd` pins all of
+## it.
 ##
 ## Appends to [param path] and answers only ok or the failure.
 func _kanto_approach_path(
@@ -3417,7 +3499,15 @@ func _kanto_approach_path(
 	if not bool(departure.get("ok", false)):
 		return departure
 
-	return _kanto_approach(world, save, random, data, path)
+	var kanto: Dictionary = _kanto_approach(world, save, random, data, path)
+	if not bool(kanto.get("ok", false)):
+		return kanto
+
+	var gate: Dictionary = _victory_road_gate_leg(world, save, random, data, path)
+	if not bool(gate.get("ok", false)):
+		return gate
+
+	return _victory_road_leg(world, save, random, data, path)
 
 
 ## The Dragon Shrine back to New Bark Town.
@@ -3473,6 +3563,33 @@ func _blackthorn_departure(
 			"ok": false, "path": path,
 			"reason": "Dragon's Den return surf failed: %s" % entered.get("reason", ""),
 		}
+
+	# The Rising Badge is in, so WATERFALL is usable from here on, and this is
+	# the water it can be learned on: Dragon's Den B1F's own table is the only
+	# one the walked route surfs that carries a species which learns it
+	# (`data/wild/johto_water.asm` DRATINI, against MAGIKARP in the other two
+	# slots). None of the party can.
+	var dratini: Dictionary = _catch_field_move_mon(
+		world, save, random, data, path,
+		Gen2WorldFieldMove.MOVE_WATERFALL, "dragons_den_catch_for_waterfall"
+	)
+	if not bool(dratini.get("ok", false)):
+		return dratini
+	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_WATERFALL)
+	_mirror_party(world, save)
+	path.append({
+		"step": "dragons_den_teach_waterfall",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"party": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "WATERFALL could not be taught: %s" % taught.get("reason", ""),
+		}
+
 	var cleared: Dictionary = _whirlpool_at(
 		world, Vector2i(10, 21), Gen2WorldSprite.FACING_UP, save, random, data
 	)
@@ -3590,13 +3707,20 @@ func _blackthorn_departure(
 	return {"ok": true}
 
 
-## New Bark Town to Route 27's landfall, which is as far east as the route goes.
+## New Bark Town to Route 26, along Route 27 and through Tohjo Falls.
 ##
 ## New Bark's east column is wall except the four water rows 6 to 9, so leaving
 ## town east is a crossing rather than a step. The far side is still water, so
 ## one water-only walk comes ashore on ROUTE_27_LANDFALL, one of the two
 ## `SCENE_ROUTE27_FIRST_STEP_INTO_KANTO` coord cells, and the scene runs on
-## arrival. _kanto_approach_path() has why the walk stops here.
+## arrival.
+##
+## From there the way east is the cave, twice over. Row 5 of Route 27 is solid
+## cliff apart from Tohjo Falls' two mouths, and both are `COLL_CAVE`, whose
+## `.CheckTile` `.warps` branch forces a step DOWN: a player leaving either
+## mouth always ends south of it. So the west mouth is entered from the
+## landfall's region, the cave is crossed, and the east mouth drops the player
+## into the pocket whose own shore is the channel across to Route 26's edge.
 func _kanto_approach(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -3640,13 +3764,370 @@ func _kanto_approach(
 			"ok": false, "path": path,
 			"reason": "Route 27 landfall failed: %s" % ashore.get("reason", ""),
 		}
-	if world.player_cell != ROUTE_27_LANDFALL:
+
+	var cave: Dictionary = _tohjo_falls_leg(world, save, random, data, path)
+	if not bool(cave.get("ok", false)):
+		return cave
+
+	# The east mouth's forced step already put the player in the pocket. Row 4's
+	# eastern strip is walled off from the rest of Route 27, so (46,4) is the
+	# landfall and rows 10 and 11 are the only land cells on the Route 26 edge a
+	# walk can leave by.
+	var channel: Dictionary = _surf_at(
+		world, Vector2i(39, 6), Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(channel.get("ok", false)):
 		return {
 			"ok": false, "path": path,
-			"reason": "the Kanto scene left the player on %s" % world.player_cell,
+			"reason": "Route 27 channel surf failed: %s" % channel.get("reason", ""),
+		}
+	var landed: Dictionary = _walk_cell_resolving(
+		world, Vector2i(46, 4), save, random, data, true
+	)
+	if not bool(landed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 27 channel landfall failed: %s" % landed.get("reason", ""),
+		}
+	var to_route_26: Dictionary = _walk_connection_resolving(
+		world, "east", 24, 1, save, random, data
+	)
+	var route_26_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_27_to_route_26",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+		"encounters": to_route_26.get("encounters", []),
+		"run": route_26_entry,
+	})
+	if not bool(to_route_26.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 27 to Route 26 failed: %s" % to_route_26.get("reason", ""),
 		}
 	return {"ok": true}
 
+
+## Tohjo Falls, west mouth to east mouth, which is one Waterfall climb and one
+## ride back down.
+##
+## The cave is three water bodies joined only by its waterfalls. From the west
+## door's landing the surf runs west and north to the foot of the x 8 to 11
+## column; the climb ends on the pool above it, still on water. The east
+## waterfall is then ridden down rather than climbed: stepping onto its top cell
+## leaves the player standing on a `COLL_WATERFALL`, and `.CheckTile` takes over
+## from there, which is `advance_forced_movement()` here.
+func _tohjo_falls_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_cave: Dictionary = _warp_chain(world, save, random, data, [TOHJO_WEST_MOUTH])
+	if not bool(into_cave.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls entrance failed: %s" % into_cave.get("reason", ""),
+		}
+
+	var entered: Dictionary = _surf_at(
+		world, TOHJO_WEST_SHORE, Gen2WorldSprite.FACING_LEFT, save, random, data
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls surf entry failed: %s" % entered.get("reason", ""),
+		}
+	var climbed: Dictionary = _waterfall_at(
+		world, TOHJO_CLIMB_FOOT, save, random, data
+	)
+	path.append({
+		"step": "tohjo_falls_climb",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": climbed,
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(climbed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls climb failed: %s" % climbed.get("reason", ""),
+		}
+
+	var descent: Dictionary = _ride_waterfall_down(
+		world, save, random, data, TOHJO_DESCENT_TOP
+	)
+	path.append({
+		"step": "tohjo_falls_descent",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"steps": descent.get("steps", 0),
+	})
+	if not bool(descent.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls descent failed: %s" % descent.get("reason", ""),
+		}
+
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, TOHJO_EAST_LANDFALL, save, random, data, true
+	)
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls landfall failed: %s" % ashore.get("reason", ""),
+		}
+	var out_of_cave: Dictionary = _warp_chain(world, save, random, data, [TOHJO_EAST_DOOR])
+	path.append({
+		"step": "tohjo_falls_east_mouth",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+	})
+	if not bool(out_of_cave.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Tohjo Falls exit failed: %s" % out_of_cave.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Climbs the waterfall the given water cell faces, the way _cut_at() cuts:
+## request then commit, since Script_UsedWaterfall reaches its first step only
+## after _UseWaterfallText's waitbutton. The whole column is one commit.
+func _waterfall_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data, true)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var request: Dictionary = world.waterfall_request()
+	if not bool(request.get("ok", false)):
+		return {"ok": false, "reason": "waterfall refused: %s" % request.get("reason", "")}
+	var applied: Dictionary = world.complete_waterfall()
+	if not bool(applied.get("ok", false)):
+		return {"ok": false, "reason": "waterfall failed: %s" % applied.get("reason", "")}
+	return applied
+
+
+## Steps onto a waterfall's top cell and lets `.CheckTile` carry the player down
+## it. Going down needs no move and no badge: the tile does it, which is why the
+## project has had the layer since the forced-tile work and only the climb was
+## missing.
+func _ride_waterfall_down(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	top: Vector2i,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, top, save, random, data, true)
+	if not bool(walked.get("ok", false)):
+		return walked
+	var stepped: Dictionary = world.move_result(Vector2i.DOWN)
+	if not bool(stepped.get("ok", false)):
+		return {"ok": false, "reason": "the descent's first step refused"}
+	var steps: int = 1
+	for _frame: int in WATERFALL_RIDE_LIMIT:
+		var forced: Dictionary = world.advance_forced_movement()
+		if forced.is_empty():
+			return {"ok": true, "steps": steps}
+		if not bool(forced.get("ok", false)):
+			return {"ok": false, "reason": "forced step refused", "steps": steps}
+		steps += 1
+	return {"ok": false, "reason": "the descent did not settle", "steps": steps}
+
+
+## Route 26's heal house and the Victory Road Gate badge check.
+##
+## The gate is not walked with _gate_leg(): that helper reaches the far warp
+## with _warp_step(), which assigns the cell rather than walking to it, and the
+## badge check is a coord event at (10,11) that only a real walk can meet.
+func _victory_road_gate_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	_mirror_party(world, save)
+
+	# Route26HealHouseTeacherScript is an unconditional HealParty, the one heal
+	# on this leg that is not a Pokemon Center nurse.
+	for mon: Gen2SaveMon in save.party:
+		mon.hp = 1
+	var into_house: Dictionary = _warp_chain(world, save, random, data, [Vector2i(15, 57)])
+	if not bool(into_house.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 26 heal house entrance failed: %s" % into_house.get("reason", ""),
+		}
+	var healed: Dictionary = _talk_to(
+		world, Vector2i(2, 4), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_26_heal_house",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": healed.get("run", {}),
+		"party_hp_after": _party_hp(save),
+	})
+	if not bool(healed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 26 heal house failed: %s" % healed.get("reason", ""),
+		}
+	var out_of_house: Dictionary = _warp_chain(world, save, random, data, [Vector2i(2, 7)])
+	if not bool(out_of_house.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 26 heal house exit failed: %s" % out_of_house.get("reason", ""),
+		}
+
+	var into_gate: Dictionary = _warp_chain(world, save, random, data, [Vector2i(7, 5)])
+	if not bool(into_gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Victory Road Gate entrance failed: %s" % into_gate.get("reason", ""),
+		}
+	var checked: Dictionary = _walk_cell_resolving(
+		world, Vector2i(10, 11), save, random, data
+	)
+	path.append({
+		"step": "victory_road_gate_badge_check",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"badge_count": world.state.badge_count(),
+		"encounters": checked.get("encounters", []),
+	})
+	if not bool(checked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Victory Road Gate badge check failed: %s" % checked.get("reason", ""),
+		}
+	# The officer's refusal branch is an applymovement that steps the player back
+	# down, so staying on (10,11) is what says the eighth badge was accepted.
+	if world.player_cell != Vector2i(10, 11):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gate turned the player back at %s" % world.player_cell,
+		}
+	return {"ok": true}
+
+
+## Victory Road and Route 23 to the Indigo Plateau Pokemon Center.
+##
+## Victory Road is a warp maze, not one floor: the gate's entrance region
+## reaches only the ladder at (1,49), whose pair lands on (1,35) in a second
+## region, whose ladder at (13,31) lands on (13,17) in the third. Only that
+## third region holds the rival's coord event and the exit to Route 23.
+func _victory_road_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_road: Dictionary = _warp_chain(world, save, random, data, [Vector2i(9, 0)])
+	if not bool(into_road.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Victory Road entrance failed: %s" % into_road.get("reason", ""),
+		}
+
+	for ladder: Dictionary in VICTORY_ROAD_LADDERS:
+		var climbed: Dictionary = _warp_chain(world, save, random, data, [ladder["cell"]])
+		path.append({
+			"step": String(ladder["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+		})
+		if not bool(climbed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [ladder["step"], climbed.get("reason", "")],
+			}
+
+	# The rival's own cell, walked rather than left to the path to the exit: the
+	# coord event pair is (12,8) and (13,8), and a walk that happened to route
+	# around both would skip the battle without saying so.
+	var rival: Dictionary = _walk_cell_resolving(world, Vector2i(13, 8), save, random, data)
+	path.append({
+		"step": "victory_road_rival",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": rival.get("encounters", []),
+		"beat_rival": world.event_flag_active(EVENT_RIVAL_VICTORY_ROAD),
+	})
+	if not bool(rival.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Victory Road rival failed: %s" % rival.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_RIVAL_VICTORY_ROAD):
+		return {"ok": false, "path": path, "reason": "the Victory Road rival did not appear"}
+
+	var to_plateau: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(13, 5), Vector2i(9, 5)]
+	)
+	if not bool(to_plateau.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Indigo Plateau unreachable: %s" % to_plateau.get("reason", ""),
+		}
+
+	# PlateauRivalBattle1 and 2 open on EVENT_BEAT_RIVAL_IN_MT_MOON, which this
+	# route never reaches, so the coord event runs to PlateauRivalScriptDone and
+	# no second rival battle happens here.
+	#
+	# That branch ends without a `setscene`, so the coord event stays armed and
+	# answers again every time the player stands on it. The cell is stepped onto
+	# once rather than walked to, because a resolving walk would re-dispatch it
+	# until it ran out of attempts.
+	var approach: Dictionary = _walk_cell_resolving(
+		world, PLATEAU_RIVAL_APPROACH, save, random, data
+	)
+	if not bool(approach.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Indigo Plateau approach failed: %s" % approach.get("reason", ""),
+		}
+	var stepped: Dictionary = world.move_result(Vector2i.UP)
+	var plateau: Dictionary = {"ok": bool(stepped.get("ok", false))}
+	if bool(plateau.get("ok", false)):
+		var fired: Array = _dispatch_after_step(world)
+		var run: Dictionary = _drain_story(world, fired, save, random, data, true)
+		plateau = {
+			"ok": bool(run.get("terminal", false)),
+			"reason": run.get("reason", ""),
+			"encounters": [{"cell": _cell_value(world), "statuses": run.get("statuses", []),
+				"battles": run.get("battles", [])}],
+		}
+	path.append({
+		"step": "indigo_plateau_pokecenter",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": plateau.get("encounters", []),
+		"mt_moon_rival": world.event_flag_active(EVENT_BEAT_RIVAL_IN_MT_MOON),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_INDIGO_PLATEAU),
+		"badge_count": world.state.badge_count(),
+	})
+	if not bool(plateau.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Indigo Plateau Pokemon Center failed: %s" % plateau.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_INDIGO_PLATEAU):
+		return {"ok": false, "path": path, "reason": "the Indigo Plateau flypoint was not set"}
+	return {"ok": true}
 
 
 ## _push_boulder_at() for a boulder that may land on a `stonetable` pit: the
@@ -3751,6 +4232,28 @@ func _blackthorn_path(
 				"ok": false, "path": path,
 				"reason": "%s failed: %s" % [door["step"], walked.get("reason", "")],
 			}
+		if not bool(door.get("hm07", false)):
+			continue
+		# HM07 is an item ball on the 1F region the Route 44 door opens into,
+		# and nothing else in either game gives WATERFALL. It is taken in
+		# passing, before the staircase the next door takes.
+		var picked_up: Dictionary = _talk_to(
+			world, HM07_APPROACH, Gen2WorldSprite.FACING_RIGHT, save, random, data
+		)
+		path.append({
+			"step": "ice_path_1f_hm07",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": picked_up.get("run", {}),
+			"items": _named_items(data, world.state.items()),
+		})
+		if not bool(picked_up.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "HM07 pickup failed: %s" % picked_up.get("reason", ""),
+			}
+		if world.state.item_quantity(ITEM_HM_WATERFALL) <= 0:
+			return {"ok": false, "path": path, "reason": "HM07 did not reach the bag"}
 
 	path.append({
 		"step": "blackthorn_city_arrival",
@@ -4080,44 +4583,98 @@ func _push_boulder_at(
 	}
 
 
-## Catches something in Union Cave that can learn STRENGTH, which is the only
-## way this route ever gets one: the starter is still unevolved by Olivine and
-## Chikorita, Cyndaquil and Totodile all learn it only after evolving
-## (data/pokemon/base_stats/*.asm). Union Cave 1F's own table carries Geodude and
-## Onix, which both can.
+## BlackthornMartClerkScript's `pokemart MARTTYPE_STANDARD, MART_BLACKTHORN`,
+## bought from headlessly the way _teach_hm() teaches: through the same host the
+## service overlay drives, rather than through the overlay.
+##
+## The route needs this once. Elm's aide gives five Poké Balls, Union Cave's
+## Geodude costs one, and Dratini is a far lower catch rate than Geodude, so the
+## four left do not land it. Blackthorn is the last town the route stands in
+## before the Dragon's Den, and its stock is the cartridge's: MartBlackthorn
+## sells no Poké Balls, so what the route buys is Great Balls: they are the
+## cheapest ball it stocks, and the source start money buys five of them against
+## two Ultra Balls.
+func _buy_great_balls(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	data: GameData,
+	path: Array,
+	quantity: int,
+) -> Dictionary:
+	var resolved: Dictionary = Gen2WorldMartHost.resolve_mart(
+		data, Gen2WorldMartHost.MARTTYPE_STANDARD, MART_BLACKTHORN, false, world.state
+	)
+	if not bool(resolved.get("ok", false)):
+		return {
+			"ok": false,
+			"reason": "Blackthorn mart did not resolve: %s" % resolved.get("reason", ""),
+		}
+	var bought: Dictionary = Gen2WorldMartHost.purchase(
+		world, save, resolved.get("mart", {}),
+		Gen2WorldPartyHost.ITEM_GREAT_BALL, quantity, false
+	)
+	path.append({
+		"step": "blackthorn_mart_great_balls",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"balls": world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL),
+		"money": world.state.money(),
+	})
+	if not bool(bought.get("ok", false)):
+		return {"ok": false, "reason": "purchase refused: %s" % bought.get("reason", "")}
+	return {"ok": true}
+
+
+## Catches something on the current map that can learn [param move], which is
+## how this route gets both of the HMs its own party cannot take.
+##
+## Neither is optional. The starter is still unevolved by Olivine and Chikorita,
+## Cyndaquil and Totodile all learn STRENGTH only after evolving, so Union Cave
+## 1F's Geodude and Onix are the first catch; none of the party learns WATERFALL
+## at all, so Dragon's Den B1F's Dratini is the second
+## (`data/pokemon/base_stats/*.asm`, `data/wild/johto_water.asm`).
 ##
 ## The walk itself never rolls a wild encounter, so this forces one, checks the
 ## species against CanLearnTMHMMove and throws a Poké Ball, retrying until the
 ## bag runs out. Both rolls come from the route's seeded generator, so the answer
 ## is the same on every run.
-func _catch_strength_mon(
+func _catch_field_move_mon(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
 	path: Array,
+	move: int,
+	step: String,
 ) -> Dictionary:
 	var attempts: Array = []
 	var caught: Dictionary = {}
 	for _attempt: int in CATCH_ATTEMPTS:
-		if world.state.item_quantity(Gen2WorldPartyHost.ITEM_POKE_BALL) <= 0:
+		var ball: int = _best_ball(world)
+		if ball <= 0:
 			break
 		var encounter: Dictionary = world.encounter_request(random, true)
 		if encounter.is_empty():
 			break
 		var species: int = int(encounter.get("pokemon", 0))
 		var level: int = int(encounter.get("level", 0))
-		if not Gen2WorldTMHM.can_learn(data, species, Gen2WorldFieldMove.MOVE_STRENGTH):
+		if not Gen2WorldTMHM.can_learn(data, species, move):
 			attempts.append({"species": species, "level": level, "thrown": false})
 			continue
 		var wild: Gen2BattleMon = Gen2BattleMon.create(
 			data, species, level, data.moves_at_level(species, level), random.randi() & 0xFFFF
 		)
+		# CatchMon reads the wild's current HP, and this tool simulates no wild
+		# battle, the same way _drain_story() answers every trainer battle with a
+		# win rather than fighting it. So the throw is made at the one HP a
+		# player would have brought it to. Union Cave's Geodude lands at full HP
+		# on a catch rate of 255; Dratini's is far lower and does not.
+		wild.hp = 1
 		var throw_result: Dictionary = Gen2WorldPartyHost.capture_wild(
-			world, save, wild, Gen2WorldPartyHost.ITEM_POKE_BALL, random, 0, false
+			world, save, wild, ball, random, 0, false
 		)
 		attempts.append({
-			"species": species, "level": level, "thrown": true,
+			"species": species, "level": level, "thrown": true, "ball": ball,
 			"caught": bool(throw_result.get("caught", false)),
 			"reason": throw_result.get("reason", ""),
 		})
@@ -4126,7 +4683,7 @@ func _catch_strength_mon(
 			break
 	_mirror_party(world, save)
 	path.append({
-		"step": "union_cave_catch_for_strength",
+		"step": step,
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"attempts": attempts,
@@ -4136,7 +4693,7 @@ func _catch_strength_mon(
 	if caught.is_empty():
 		return {
 			"ok": false, "path": path,
-			"reason": "no STRENGTH-capable catch in %d encounters" % attempts.size(),
+			"reason": "no catch that learns move %d in %d encounters" % [move, attempts.size()],
 		}
 	return {"ok": true}
 
@@ -4153,6 +4710,18 @@ func _teach_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary
 			return result
 		reason = String(result.get("reason", ""))
 	return {"ok": false, "reason": reason}
+
+
+## GetBallIndex's order in reverse: the best ball still in the bag, or -1 when
+## none is. Master Balls never reach this route.
+func _best_ball(world: Gen2WorldAPI) -> int:
+	for ball: int in [
+		Gen2WorldPartyHost.ITEM_ULTRA_BALL, Gen2WorldPartyHost.ITEM_GREAT_BALL,
+		Gen2WorldPartyHost.ITEM_POKE_BALL,
+	]:
+		if world.state.item_quantity(ball) > 0:
+			return ball
+	return -1
 
 
 func _party_moves(save: Gen2SaveData) -> Array:

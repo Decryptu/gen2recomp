@@ -77,13 +77,13 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 	assert_false(Gen2MoveForget.is_hm_move(0))
 
 
-## The overworld's field-move list is a different, shorter question: Fly, Flash
-## and Waterfall are HMs that this project does not act on, and forgetting is
-## gated on all seven regardless.
+## The overworld's field-move list is a different, shorter question: Fly and
+## Flash are HMs that this project does not act on, and forgetting is gated on
+## all seven regardless.
 func test_the_hm_list_is_wider_than_the_overworld_field_moves() -> void:
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
 		assert_true(Gen2MoveForget.is_hm_move(move), "field move %d" % move)
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 4)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 5)
 	assert_true(Gen2MoveForget.is_hm_move(0x13), "FLY is an HM with no field effect here")
 	assert_false(Gen2WorldFieldMove.FIELD_MOVES.has(0x13))
 

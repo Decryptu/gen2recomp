@@ -56,6 +56,13 @@ const WHIRLPOOL_BLOCK: Vector2i = Vector2i(3, 3)
 const WHIRLPOOL_STAND_CELL: Vector2i = Vector2i(6, 6)
 const COLL_WHIRLPOOL: int = 0x24
 
+## A two-cell waterfall column in x=2, with the water a surfing player climbs
+## from below it and floor above it, so the climb ends ashore and
+## CheckUpdatePlayerSprite has something to restore walking on.
+const WATERFALL_STAND_CELL: Vector2i = Vector2i(2, 7)
+const WATERFALL_CELLS: Array[Vector2i] = [Vector2i(2, 6), Vector2i(2, 5)]
+const WATERFALL_LANDING_CELL: Vector2i = Vector2i(2, 4)
+
 var _directory: String = ""
 
 
@@ -151,6 +158,9 @@ func _map(number: int, tileset: int) -> Dictionary:
 	collision[WALLED_WATER_CELL.y * 8 + WALLED_WATER_CELL.x] = COLL_WATER
 	collision[WHIRLPOOL_CELL.y * 8 + WHIRLPOOL_CELL.x] = COLL_WHIRLPOOL
 	collision[WHIRLPOOL_STAND_CELL.y * 8 + WHIRLPOOL_STAND_CELL.x] = COLL_WATER
+	collision[WATERFALL_STAND_CELL.y * 8 + WATERFALL_STAND_CELL.x] = COLL_WATER
+	for waterfall_cell: Vector2i in WATERFALL_CELLS:
+		collision[waterfall_cell.y * 8 + waterfall_cell.x] = Gen2WorldCollision.COLL_WATERFALL
 	# A warp pair between the shore and the water cell of the other map, so a map
 	# transition can land the player on either kind of tile. Destinations are
 	# one-based, so both point at the other map's only warp.
@@ -244,19 +254,20 @@ func _whirlpool_world(badge: bool = true) -> Gen2WorldAPI:
 	return world
 
 
-func test_cut_surf_strength_and_whirlpool_are_the_field_moves_the_submenu_offers() -> void:
+func test_the_five_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_CUT))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SURF))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_STRENGTH))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_WHIRLPOOL))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_WATERFALL))
 	assert_eq(Gen2WorldFieldMove.MOVE_CUT, 0x0F)
 	assert_eq(Gen2WorldFieldMove.MOVE_SURF, 0x39)
 	assert_eq(Gen2WorldFieldMove.MOVE_STRENGTH, 0x46)
 	assert_eq(Gen2WorldFieldMove.MOVE_WHIRLPOOL, 0xFA)
+	assert_eq(Gen2WorldFieldMove.MOVE_WATERFALL, 0x7F)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, FLASH, WATERFALL,
-	# HEADBUTT.
-	for move: int in [0x13, 0x94, 0x7F, 0x1D]:
+	# submenu would offer an entry nothing answers: FLY, FLASH, HEADBUTT.
+	for move: int in [0x13, 0x94, 0x1D]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 
@@ -846,3 +857,128 @@ func test_the_whirlpool_traps_a_player_until_it_is_removed() -> void:
 	assert_true(bool(world.move_result(Vector2i.DOWN).get("ok", false)))
 	assert_eq(world.player_cell, WHIRLPOOL_CELL)
 	assert_eq(world.forced_movement()["kind"], &"none")
+
+
+## A world in the water below the waterfall column, facing up, with the Rising
+## Badge on whichever engine flag table the opened cache selects.
+func _waterfall_world(badge: bool = true) -> Gen2WorldAPI:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	if badge:
+		state.set_engine_flag(Gen2WorldState.badge_flag(
+			Gen2WorldFieldMove.BADGE_RISING, Gen2WorldState.is_crystal_profile(data)
+		))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WATERFALL_STAND_CELL, state)
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	return world
+
+
+func test_waterfall_tile_carries_both_check_waterfall_tile_codes() -> void:
+	for code: int in [Gen2WorldCollision.COLL_WATERFALL, Gen2WorldCollision.COLL_CURRENT_DOWN]:
+		assert_true(Gen2WorldFieldMove.waterfall_tile(code), "code $%02x" % code)
+	for code: int in [0x00, COLL_WATER, COLL_WHIRLPOOL, 0x32]:
+		assert_false(Gen2WorldFieldMove.waterfall_tile(code), "code $%02x" % code)
+
+
+func test_waterfall_request_checks_the_badge_before_the_tile() -> void:
+	var world: Gen2WorldAPI = _waterfall_world(false)
+	var refused: Dictionary = world.waterfall_request()
+	assert_false(bool(refused.get("ok", true)))
+	assert_eq(refused["reason"], &"badge_required")
+	assert_true(world.pending_waterfall().is_empty())
+
+
+func test_waterfall_request_reads_the_gold_silver_badge_flag() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var state := Gen2WorldState.new()
+	# The other profile's number is not this profile's badge.
+	state.set_engine_flag(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_RISING, not crystal
+	))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WATERFALL_STAND_CELL, state)
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(world.waterfall_request()["reason"], &"badge_required")
+
+
+## CheckMapCanWaterfall tests the facing before the tile, and only FACE_UP passes.
+func test_waterfall_request_refuses_every_facing_but_up() -> void:
+	for facing: int in [
+		Gen2WorldSprite.FACING_DOWN, Gen2WorldSprite.FACING_LEFT,
+		Gen2WorldSprite.FACING_RIGHT,
+	]:
+		var world: Gen2WorldAPI = _waterfall_world()
+		world.player_facing = facing
+		assert_eq(world.waterfall_request()["reason"], &"wrong_facing", "facing %d" % facing)
+
+
+func test_waterfall_request_refuses_a_tile_that_is_not_a_waterfall() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	world.player_cell = WHIRLPOOL_STAND_CELL
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(world.waterfall_request()["reason"], &"nothing_to_climb")
+
+
+## .TryWaterfall reads no player state, so walking is not a refusal, the same
+## way .TryWhirlpool has it.
+func test_waterfall_request_resolves_from_land_too() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_WALK)
+	assert_true(bool(world.waterfall_request().get("ok", false)))
+
+
+func test_waterfall_request_stages_without_moving_the_player() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	var staged: Dictionary = world.waterfall_request()
+	assert_true(bool(staged.get("ok", false)), JSON.stringify(staged))
+	assert_eq(staged["kind"], &"waterfall_requested")
+	assert_eq(staged["cell"], WATERFALL_CELLS[0])
+	# Script_UsedWaterfall steps only after _UseWaterfallText's waitbutton.
+	assert_eq(world.player_cell, WATERFALL_STAND_CELL)
+	assert_eq(world.pending_waterfall()["cell"], WATERFALL_CELLS[0])
+
+
+## .CheckContinueWaterfall repeats the step while the cell stood on is still a
+## waterfall, so a two-cell column is one command and three steps.
+func test_complete_waterfall_climbs_the_whole_column_in_one_command() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	assert_true(bool(world.waterfall_request().get("ok", false)))
+	var applied: Dictionary = world.complete_waterfall()
+	assert_true(bool(applied.get("ok", false)), JSON.stringify(applied))
+	assert_eq(applied["kind"], &"waterfall_applied")
+	assert_eq(applied["cell"], WATERFALL_LANDING_CELL)
+	assert_eq(int(applied["steps"]), WATERFALL_CELLS.size() + 1)
+	assert_eq(world.player_cell, WATERFALL_LANDING_CELL)
+	assert_true(world.pending_waterfall().is_empty())
+
+
+## The landing re-derives the player state the way a warp does, so a climb that
+## ends on land puts the surfer back on foot.
+func test_complete_waterfall_restores_walking_when_it_lands_ashore() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+	assert_true(bool(world.waterfall_request().get("ok", false)))
+	var applied: Dictionary = world.complete_waterfall()
+	assert_eq(applied["movement_mode"], Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)
+
+
+func test_complete_waterfall_without_a_request_refuses() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	var refused: Dictionary = world.complete_waterfall()
+	assert_false(bool(refused.get("ok", true)))
+	assert_eq(refused["reason"], &"no_pending_waterfall")
+
+
+## The request names a cell on the loaded map, so a map change drops it the way
+## the other four are dropped.
+func test_a_map_change_clears_a_pending_waterfall() -> void:
+	var world: Gen2WorldAPI = _waterfall_world()
+	assert_true(bool(world.waterfall_request().get("ok", false)))
+	# Map 1's only warp is the shore pit; TRANSITION_PIT_CELL belongs to map 2.
+	world.player_cell = SHORE_CELL
+	assert_true(bool(world.try_warp().get("ok", false)))
+	assert_true(world.pending_waterfall().is_empty())

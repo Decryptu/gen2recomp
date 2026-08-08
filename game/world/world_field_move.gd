@@ -7,7 +7,7 @@ extends RefCounted
 ## Cut, Surf, Strength and Whirlpool are resolved here. Cut, Surf and Whirlpool
 ## follow the shape CutFunction defines: check the badge, then check the faced
 ## tile, then stage a change the text acknowledge commits. Strength is the odd
-## one, see BADGE_PLAIN. Waterfall, Flash and Headbutt are not resolved yet.
+## one, see BADGE_PLAIN. Flash and Headbutt are not resolved yet.
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
 ## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
@@ -16,6 +16,7 @@ const MOVE_CUT: int = 0x0F
 const MOVE_SURF: int = 0x39
 const MOVE_STRENGTH: int = 0x46
 const MOVE_WHIRLPOOL: int = 0xFA
+const MOVE_WATERFALL: int = 0x7F
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -31,6 +32,9 @@ const BADGE_HIVE: int = 1
 const BADGE_PLAIN: int = 2
 const BADGE_FOG: int = 3
 const BADGE_GLACIER: int = 6
+## WaterfallFunction's .TryWaterfall, whose CheckBadge argument is
+## ENGINE_RISINGBADGE: 34 in Crystal and 33 in Gold/Silver.
+const BADGE_RISING: int = 7
 
 ## GetSurfType's comparison, constants/pokemon_constants.asm.
 const SPECIES_PIKACHU: int = 0x19
@@ -45,7 +49,9 @@ const MUSIC_SURF: int = 0x21
 ## Both pins ship the same rows, so this needs no profile split. IsFieldMove
 ## decides submenu membership from this list alone, so a move stops appearing
 ## the moment it leaves it.
-const FIELD_MOVES: Array[int] = [MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL]
+const FIELD_MOVES: Array[int] = [
+	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL,
+]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
 ## the six block ($12, $1a); the four grass codes are LAND_TILE and cuttable
@@ -186,3 +192,20 @@ static func whirlpool_replacement(tileset: int, block: int) -> Dictionary:
 	if row == null:
 		return {"ok": false}
 	return {"ok": true, "block": int(row[0]), "animation": int(row[1])}
+
+
+## home/map_objects.asm's CheckWaterfallTile, which CheckMapCanWaterfall applies
+## to wTileUp. COLL_CURRENT_DOWN is in the table beside COLL_WATERFALL and is
+## marked unused in both pins; it is kept because the source compares both and a
+## list of interesting codes that quietly drops one is how a table rots.
+const WATERFALL_COLLISIONS: Array[int] = [
+	Gen2WorldCollision.COLL_WATERFALL,
+	Gen2WorldCollision.COLL_CURRENT_DOWN,
+]
+
+
+## CheckWaterfallTile: whether [param collision_code] is one Waterfall climbs.
+## Unlike Cut and Whirlpool this needs no block table, because Waterfall changes
+## no block. It moves the player and nothing else.
+static func waterfall_tile(collision_code: int) -> bool:
+	return WATERFALL_COLLISIONS.has(collision_code)

@@ -99,6 +99,9 @@ var _pending_whirlpool: Dictionary = {}
 ## Script_StrengthFromMenu and runs it at once, so a request cannot outlive the
 ## map it was made on.
 var _pending_strength: Dictionary = {}
+## The same for Waterfall, held while Script_UsedWaterfall shows its text. It
+## names the faced cell, so it is cleared with the loaded map like the rest.
+var _pending_waterfall: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -650,6 +653,93 @@ func complete_whirlpool() -> Dictionary:
 
 static func _whirlpool_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"whirlpool_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's WaterfallFunction .TryWaterfall, staged the way
+## the other four are: Script_UsedWaterfall shows _UseWaterfallText and waits on
+## its button before the first climbing step, so nothing moves until the commit.
+##
+## .TryWaterfall is CheckBadge ENGINE_RISINGBADGE, then CheckMapCanWaterfall,
+## which is two tests and no more: `wPlayerDirection & $c` must be FACE_UP, and
+## wTileUp must satisfy CheckWaterfallTile. It reads no player state, so like
+## .TryWhirlpool it neither requires nor refuses surfing, and its refusal is
+## FieldMoveFailed's generic _CantUseItemText rather than a move-specific line.
+func waterfall_request() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _waterfall_failure(&"missing_map")
+	if not _pending_waterfall.is_empty():
+		return _waterfall_failure(&"waterfall_in_progress")
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_RISING, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _waterfall_failure(&"badge_required")
+	## CheckMapCanWaterfall tests the facing before the tile, and only FACE_UP
+	## passes: a waterfall faced from any other direction is not climbable even
+	## though the same cell would answer the tile test.
+	if player_facing != Gen2WorldSprite.FACING_UP:
+		return _waterfall_failure(&"wrong_facing")
+	var target: Vector2i = facing_cell()
+	if not Gen2WorldFieldMove.waterfall_tile(collision_code_at(target)):
+		return _waterfall_failure(&"nothing_to_climb")
+	_pending_waterfall = {
+		"ok": true,
+		"kind": &"waterfall_requested",
+		"move": Gen2WorldFieldMove.MOVE_WATERFALL,
+		"cell": target,
+	}
+	return _pending_waterfall.duplicate(true)
+
+
+## Empty until waterfall_request() succeeds. A host shows its text while this is set.
+func pending_waterfall() -> Dictionary:
+	return _pending_waterfall.duplicate(true)
+
+
+## Script_UsedWaterfall's loop: `applymovement PLAYER, .WaterfallStep` is one
+## `turn_waterfall UP`, and `.CheckContinueWaterfall` repeats it while the cell
+## the player now stands on still answers CheckWaterfallTile. So the climb ends
+## on the first cell above the column that is not a waterfall, however tall it
+## is, and the whole run is one command rather than a step the caller paces.
+##
+## Each step is an applymovement, so it consults no collision, spends no repel
+## step and rolls no encounter, exactly as complete_surf()'s single slow_step
+## does. The landing does re-derive the player state, the way a warp does:
+## CheckUpdatePlayerSprite keeps surfing on water and restores walking anywhere
+## else, which is what puts a climber ashore on the ledge above.
+func complete_waterfall() -> Dictionary:
+	if _pending_waterfall.is_empty():
+		return _waterfall_failure(&"no_pending_waterfall")
+	var request: Dictionary = _pending_waterfall
+	_pending_waterfall = {}
+	var size: Vector2i = map_size_cells()
+	var cell: Vector2i = player_cell
+	var climbed: int = 0
+	## The column is bounded by the map, and MAX_CLIMB is that bound rather than
+	## a guess: a stream that never left a waterfall would otherwise not end.
+	while climbed < size.y:
+		var next: Vector2i = cell + Vector2i.UP
+		if next.y < 0:
+			return _waterfall_failure(&"climb_left_the_map")
+		cell = next
+		climbed += 1
+		if not Gen2WorldFieldMove.waterfall_tile(collision_code_at(cell)):
+			break
+	if climbed <= 0 or Gen2WorldFieldMove.waterfall_tile(collision_code_at(cell)):
+		return _waterfall_failure(&"climb_did_not_finish")
+	player_cell = cell
+	_apply_map_setup_player_state()
+	return {
+		"ok": true,
+		"kind": &"waterfall_applied",
+		"move": int(request["move"]),
+		"cell": cell,
+		"steps": climbed,
+		"movement_mode": movement_mode,
+	}
+
+
+static func _waterfall_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"waterfall_failed", "reason": reason}
 
 
 ## engine/events/overworld.asm's StrengthFunction .TryStrength, staged the way
@@ -1794,7 +1884,45 @@ func _enqueue_script_events(events: Array) -> void:
 		var trainer_request: Dictionary = _trainer_request_for_event(event)
 		if not trainer_request.is_empty():
 			request = trainer_request
+		var item_ball_request: Dictionary = _item_ball_request_for_event(event)
+		if not item_ball_request.is_empty():
+			request = item_ball_request
 		_enqueue_script(request)
+
+
+## ObjectEventTypeArray's `.itemball` (engine/overworld/events.asm): an item
+## ball's script pointer is not a script. The two bytes it points at are the
+## `itemball` macro's `db item, quantity`, copied into `wItemBallData`, and what
+## runs is PLAYEREVENT_ITEMBALL's FindItemInBallScript. Decoding them here is
+## what keeps the runner from parsing item data as opcodes.
+func _item_ball_request_for_event(event: Dictionary) -> Dictionary:
+	if event.get("kind", &"") != &"objects" or current_map == null or data == null:
+		return {}
+	var object_index: int = int(event.get("object_index", -1))
+	if object_index < 0 or object_index >= objects.size():
+		return {}
+	var object: Gen2WorldObject = objects[object_index]
+	if object.object_type != Gen2WorldObject.OBJECTTYPE_ITEMBALL:
+		return {}
+	var pointer: int = int(event.get("script", object.event_script))
+	if pointer <= 0:
+		return {}
+	var bank: int = int(current_map.events.get("bank", 0))
+	var raw: PackedByteArray = data.world_script(bank, pointer)
+	if raw.size() < 2 or int(raw[0]) <= 0:
+		return {}
+	return {
+		"kind": &"item_ball",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": object.cell,
+		"bank": bank,
+		"script": pointer,
+		"object_index": object.index,
+		"event": event.duplicate(true),
+		"item": int(raw[0]),
+		"quantity": maxi(1, int(raw[1])),
+	}
 
 
 func _trainer_request_for_event(event: Dictionary) -> Dictionary:
@@ -3116,6 +3244,7 @@ func _apply_map(
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
 	_pending_strength.clear()
+	_pending_waterfall.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -3160,6 +3289,7 @@ func reload_current_map() -> Dictionary:
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
 	_pending_strength.clear()
+	_pending_waterfall.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

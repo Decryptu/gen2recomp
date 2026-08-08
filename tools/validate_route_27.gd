@@ -9,13 +9,16 @@ extends SceneTree
 ## between the pins; `Route27.blk` is not, so its land census is profile split
 ## while every water figure happens to match.
 ##
-## The claim being pinned is a negative one, and negative claims rot quietly.
-## Route 27's landfall region reaches no map edge; the only crossing of the
-## channel east of it starts in a pocket that can only be left through Tohjo
-## Falls; and the cave's two lower channels reach each other only over
+## Two halves. The first is geometry, and it is why this leg waited on
+## Waterfall: Route 27's landfall region reaches no map edge; the only crossing
+## of the channel east of it starts in a pocket that can only be left through
+## Tohjo Falls; and the cave's two lower channels reach each other only over
 ## `COLL_WATERFALL` cells, which `.CheckTile` will only ever step a player down.
-## So Route 26 and everything past it need HM07 and a Waterfall field move. When
-## one lands, this tool is what says so.
+##
+## The second is the way through, now that there is one. With the Rising Badge
+## the climb at the foot of the west column reaches the pool in a single
+## commit, and the east column is ridden back down by the same forced-tile rule
+## that made it a wall in the first place.
 ##
 ##   Godot --headless -s res://tools/validate_route_27.gd
 
@@ -60,9 +63,19 @@ const WEST_CHANNEL_CELLS: int = 40
 const EAST_CHANNEL_CELLS: int = 34
 const POOL_CELLS: int = 144
 ## TILESET_CAVE block $2c is four WATERFALL quadrants and the cave writes ten of
-## them (`data/tilesets/cave_collision.asm`). COLL_WATERFALL is $33.
-const COLL_WATERFALL: int = 0x33
+## them (`data/tilesets/cave_collision.asm`).
 const WATERFALL_CELLS: int = 40
+
+## The crossing itself. The west column's foot is the water directly below it and
+## its top the first pool cell above; the east column is entered from the pool
+## and ridden to the water below it. Both counts include the step onto the
+## column, which is what Script_UsedWaterfall's loop does before its first check.
+const CLIMB_FOOT: Vector2i = Vector2i(8, 12)
+const CLIMB_TOP: Vector2i = Vector2i(8, 7)
+const CLIMB_STEPS: int = 5
+const DESCENT_TOP: Vector2i = Vector2i(18, 5)
+const DESCENT_BOTTOM: Vector2i = Vector2i(18, 10)
+const DESCENT_STEPS: int = 5
 
 const STEPS: Array[Vector2i] = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
 
@@ -78,6 +91,7 @@ func _initialize() -> void:
 			continue
 		_verify_route_27(data, game_id)
 		_verify_tohjo_falls(data, game_id)
+		_verify_waterfall_crossing(data, game_id)
 	_finish()
 
 
@@ -168,7 +182,7 @@ func _verify_tohjo_falls(data: GameData, game_id: StringName) -> void:
 	var waterfalls: int = 0
 	for y: int in size.y:
 		for x: int in size.x:
-			if world.collision_code_at(Vector2i(x, y)) == COLL_WATERFALL:
+			if world.collision_code_at(Vector2i(x, y)) == Gen2WorldCollision.COLL_WATERFALL:
 				waterfalls += 1
 	_check(
 		waterfalls == WATERFALL_CELLS,
@@ -199,6 +213,109 @@ func _verify_tohjo_falls(data: GameData, game_id: StringName) -> void:
 	_check(
 		pool.has(WEST_CHANNEL) and pool.has(EAST_CHANNEL),
 		"%s: Tohjo Falls' pool does not fall into both channels." % game_id
+	)
+
+
+## Drives the crossing the geometry above forbids without Waterfall: climb the
+## west column, ride the east one down, and end on the water the east door's
+## land region touches.
+func _verify_waterfall_crossing(data: GameData, game_id: StringName) -> void:
+	var world: Gen2WorldAPI = _open(data, TOHJO_FALLS[game_id], CLIMB_FOOT)
+	if world == null:
+		_fail("%s: Tohjo Falls is missing." % game_id)
+		return
+	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	# .TryWaterfall is CheckBadge before CheckMapCanWaterfall, so the badge is
+	# the first refusal and the other profile's flag number is not this one's.
+	_check(
+		StringName(world.waterfall_request().get("reason", &"")) == &"badge_required",
+		"%s: the climb resolved without the Rising Badge." % game_id
+	)
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	world.state.set_engine_flag(
+		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_RISING, not crystal)
+	)
+	_check(
+		StringName(world.waterfall_request().get("reason", &"")) == &"badge_required",
+		"%s: the climb read the other profile's badge flag." % game_id
+	)
+	world.state.set_engine_flag(
+		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_RISING, crystal)
+	)
+
+	# CheckMapCanWaterfall passes only on FACE_UP, whatever the tile answers.
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_check(
+		StringName(world.waterfall_request().get("reason", &"")) == &"wrong_facing",
+		"%s: the climb resolved while facing away from the column." % game_id
+	)
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	var staged: Dictionary = world.waterfall_request()
+	if not _check(
+		bool(staged.get("ok", false)) and world.player_cell == CLIMB_FOOT,
+		"%s: the climb did not stage from %s: %s" % [
+			game_id, CLIMB_FOOT, staged.get("reason", ""),
+		]
+	):
+		return
+	var climbed: Dictionary = world.complete_waterfall()
+	_check(
+		bool(climbed.get("ok", false)) and climbed.get("cell", Vector2i.ZERO) == CLIMB_TOP,
+		"%s: the climb ended on %s, not the pinned %s." % [
+			game_id, climbed.get("cell", Vector2i.ZERO), CLIMB_TOP,
+		]
+	)
+	# The whole column is one command: Script_UsedWaterfall loops until the cell
+	# stood on is no longer a waterfall.
+	_check(
+		int(climbed.get("steps", 0)) == CLIMB_STEPS,
+		"%s: the climb took %d steps, not the pinned %d." % [
+			game_id, int(climbed.get("steps", 0)), CLIMB_STEPS,
+		]
+	)
+	_check(
+		_swim(world, world.player_cell).has(DESCENT_TOP),
+		"%s: the pool does not reach the east column from the climb's landing." % game_id
+	)
+
+	# Down needs no move and no badge: stepping onto the column leaves the
+	# player standing on a COLL_WATERFALL and .CheckTile does the rest.
+	world.player_cell = DESCENT_TOP
+	var down: Dictionary = world.move_result(Vector2i.DOWN)
+	if not _check(
+		bool(down.get("ok", false)),
+		"%s: the step onto the east column refused." % game_id
+	):
+		return
+	var rode: int = 1
+	for _step: int in 32:
+		var forced: Dictionary = world.advance_forced_movement()
+		if forced.is_empty():
+			break
+		if not _check(
+			bool(forced.get("ok", false)),
+			"%s: a forced step down the east column refused." % game_id
+		):
+			return
+		rode += 1
+	_check(
+		world.player_cell == DESCENT_BOTTOM,
+		"%s: the descent ended on %s, not the pinned %s." % [
+			game_id, world.player_cell, DESCENT_BOTTOM,
+		]
+	)
+	_check(
+		rode == DESCENT_STEPS,
+		"%s: the descent took %d steps, not the pinned %d." % [
+			game_id, rode, DESCENT_STEPS,
+		]
+	)
+	_check(
+		_swim(world, world.player_cell).has(EAST_CHANNEL),
+		"%s: the descent did not land in the east channel." % game_id
 	)
 
 
@@ -274,7 +391,7 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS route 27: the landfall is sealed and Tohjo Falls needs Waterfall.")
+		print("PASS route 27: the landfall is sealed and Waterfall is the way through.")
 		quit(0)
 		return
 	for failure: String in _failures:
