@@ -627,6 +627,20 @@ static func _stat_sequences() -> Dictionary:
 	return out
 
 
+## The cartridge's own table, built once. It is a constant answer to a constant
+## question, and [method sequence_for] is asked it on every move of every turn,
+## so rebuilding forty-odd lists and the five stat runs per attack was work
+## nobody read.
+static var _cached_sequences: Dictionary = {}
+## Effect bytes a mod added, kept apart from the cartridge's so
+## [method reset_registry] can drop them without rebuilding the table.
+static var _registered_sequences: Dictionary = {}
+## Command name to handler, for a step the engine does not have.
+static var _registered_commands: Dictionary = {}
+## What claimed each effect byte and command name, so a conflict names both mods.
+static var _registry_owners: Dictionary = {}
+
+
 ## Effect bytes that do something other than [constant NORMAL_HIT]. An effect
 ## that is not in here is an ordinary attack, which is what most of the table is
 ## and what an effect nobody has written yet falls back to.
@@ -679,12 +693,131 @@ static func _sequences() -> Dictionary:
 	return out
 
 
+## The cartridge's table, built on the first ask and kept.
+static func _table() -> Dictionary:
+	if _cached_sequences.is_empty():
+		_cached_sequences = _sequences()
+	return _cached_sequences
+
+
 ## The commands a move with this effect byte is made of.
+##
+## A registered effect wins over the cartridge's, which is what lets a mod
+## rewrite one as well as add one. [method register_effect] is where that is
+## refused for the effects the engine relies on reading back off a turn.
 static func sequence_for(effect: int) -> Array:
-	return _sequences().get(effect, NORMAL_HIT)
+	if _registered_sequences.has(effect):
+		return _registered_sequences[effect]
+	return _table().get(effect, NORMAL_HIT)
 
 
 ## Whether an effect has a list of its own yet, which is what separates a move
 ## that is fully implemented from one that is standing in as an ordinary attack.
 static func is_written(effect: int) -> bool:
-	return _sequences().has(effect)
+	return _registered_sequences.has(effect) or _table().has(effect)
+
+
+## Effect bytes whose command reads the byte back off the turn to decide what it
+## is: the multi-hit count, the four fixed-damage figures, Rollout's multiplier
+## and Selfdestruct's halved Defense all work that way. Rewriting one would make
+## its own command answer for a list it is no longer in, so these are refused
+## rather than left to fail at the point of use.
+const RESERVED_EFFECTS: Array[int] = [
+	MULTI_HIT, DOUBLE_HIT, TWINEEDLE, SUPER_FANG, STATIC_DAMAGE, LEVEL_DAMAGE,
+	PSYWAVE, ROLLOUT, SELFDESTRUCT,
+]
+
+
+## Registers the command list a move carrying [param effect] runs.
+##
+## Every step named has to be one the engine knows or one already registered
+## through [method register_command], so a list that would push an error mid-turn
+## is refused here, where the mod's id is still in hand.
+static func register_effect(id: StringName, effect: int, commands: Array) -> Dictionary:
+	if effect < 0 or effect > 0xFF:
+		return {"ok": false, "reason": &"invalid_effect", "detail": str(effect)}
+	if RESERVED_EFFECTS.has(effect):
+		return {"ok": false, "reason": &"reserved_effect", "detail": str(effect)}
+	if commands.is_empty():
+		return {"ok": false, "reason": &"empty_effect", "detail": str(effect)}
+	var unknown: Array[String] = []
+	for command: Variant in commands:
+		if not _command_exists(StringName(command)):
+			unknown.append(String(command))
+	if not unknown.is_empty():
+		return {
+			"ok": false, "reason": &"unknown_effect_command",
+			"detail": "%d: %s" % [effect, ", ".join(unknown)],
+		}
+	var claim: Dictionary = _claim(&"effect", id, effect)
+	if not bool(claim.get("ok", false)):
+		return claim
+	var sequence: Array = []
+	for command: Variant in commands:
+		sequence.append(StringName(command))
+	_registered_sequences[effect] = sequence
+	return {"ok": true, "effect": effect}
+
+
+## Registers a step a command list may name, run with the [Gen2Turn] the way
+## every built-in step is.
+##
+## The engine's own commands are tried first, so a registration cannot shadow
+## [constant Gen2EffectCommands.APPLY_DAMAGE] and quietly change what every move
+## in the game does.
+static func register_command(
+	id: StringName, command: StringName, handler: Callable
+) -> Dictionary:
+	if String(command).is_empty():
+		return {"ok": false, "reason": &"invalid_effect_command"}
+	if not handler.is_valid():
+		return {"ok": false, "reason": &"invalid_effect_handler", "detail": String(command)}
+	if Gen2EffectCommands.is_engine_command(command):
+		return {"ok": false, "reason": &"reserved_effect_command", "detail": String(command)}
+	var claim: Dictionary = _claim(&"command", id, command)
+	if not bool(claim.get("ok", false)):
+		return claim
+	_registered_commands[command] = handler
+	return {"ok": true, "command": command}
+
+
+## Runs a registered command, answering whether there was one.
+## [method Gen2EffectCommands.run] reaches this only after its own match has
+## refused the name.
+static func run_registered_command(command: StringName, turn: Gen2Turn) -> bool:
+	var handler: Variant = _registered_commands.get(command, null)
+	if not handler is Callable:
+		return false
+	(handler as Callable).call(turn)
+	return true
+
+
+## Drops every registered effect and command. [method Gen2ModHost.reset] calls
+## this; the cartridge's own table is untouched, since nothing can change it.
+static func reset_registry() -> void:
+	_registered_sequences = {}
+	_registered_commands = {}
+	_registry_owners = {}
+
+
+## Whether [param command] is a step something can run: one the engine has, or
+## one a mod registered before naming it in a list.
+static func _command_exists(command: StringName) -> bool:
+	return Gen2EffectCommands.is_engine_command(command) \
+		or _registered_commands.has(command)
+
+
+## One effect byte or command name, one mod, for the same reason
+## [method Gen2ContentOverlay._claim] holds: load order must not decide which of
+## two mods a move belongs to.
+static func _claim(kind: StringName, id: StringName, key: Variant) -> Dictionary:
+	var owners: Dictionary = _registry_owners.get(kind, {})
+	var owner: StringName = StringName(owners.get(key, &""))
+	if owner != &"" and owner != id:
+		return {
+			"ok": false, "reason": &"duplicate_move_effect",
+			"detail": "%s %s: %s and %s" % [kind, key, owner, id],
+		}
+	owners[key] = id
+	_registry_owners[kind] = owners
+	return {"ok": true}

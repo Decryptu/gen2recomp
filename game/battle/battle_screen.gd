@@ -1066,6 +1066,7 @@ func _next_healthy(side: int) -> int:
 func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
+		Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
 		_apply_event(event)
 		var text: String = _describe(event)
 		if not text.is_empty():

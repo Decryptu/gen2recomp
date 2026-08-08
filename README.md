@@ -43,8 +43,11 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   through a validated candidate save; a full party routes into the first free
 >   box slot and full storage refuses atomically. Format 1 saves migrate without
 >   inventing a world position.
-> - **Mods.** A mod under `user://mods/` can register a replacement world
->   renderer, which is what a 3D or HD view needs.
+> - **Mods.** A mod under `user://mods/` can add a species, move, item or trainer
+>   class, rebalance one the cartridge shipped, register a move effect and the
+>   steps it is built from, watch the world and battle event channels, add a menu
+>   entry, and replace the world or battle renderer, which is what a 3D or HD
+>   view needs.
 >
 > The real-data story preview walks the Crystal route from Elm's lab through
 > Route 29, Cherrygrove, Route 30 and Mr. Pokémon's Mystery Egg event to the
@@ -253,8 +256,8 @@ marts, phone calls and audio requests.
 | `tests/` | GUT unit and integration tests |
 | `tools/` | Headless developer scripts |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
-| `game/mods/` | Mod manifest and host |
-| `mods/examples/` | Example mods to copy into `user://mods/` |
+| `game/mods/` | Mod manifest, host, installer and refusal wording |
+| `mods/examples/` | Example mods to copy into `user://mods/`: a world renderer and a content mod |
 | `docs/` | Contributor notes |
 
 ## Platforms

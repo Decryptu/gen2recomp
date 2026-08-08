@@ -70,9 +70,16 @@ const BUILT_IN_RENDERER: StringName = &"gen2"
 const MENU_START: StringName = &"start_menu"
 const MENU_PACK_POCKET: StringName = &"pack_pocket"
 const MENU_IDS: Array[StringName] = [MENU_START, MENU_PACK_POCKET]
+
+## The event channels a mod may watch. Both carry the typed dictionaries the
+## engine already produces, published where the screen reads them, so a
+## subscriber sees exactly the events a player sees and in the same order.
+const CHANNEL_WORLD: StringName = &"world"
+const CHANNEL_BATTLE: StringName = &"battle"
+const CHANNELS: Array[StringName] = [CHANNEL_WORLD, CHANNEL_BATTLE]
 ## Pocket type numbers 1 to 4 are the cartridge's ITEM, KEY_ITEM, BALL and TM_HM,
 ## so a registered pocket has to claim a number above them, the same reservation
-## the content overlay will need for species and item numbers.
+## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER] makes for content.
 const FIRST_MOD_POCKET: int = 5
 
 static var _instance: Gen2ModHost = null
@@ -83,6 +90,7 @@ var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
 var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
 var _menu_entries: Dictionary = {}
+var _subscribers: Dictionary = {}
 var _failures: Array = []
 
 
@@ -104,6 +112,8 @@ static func instance() -> Gen2ModHost:
 ## for a launcher that reloads the mod list.
 static func reset() -> void:
 	_instance = null
+	Gen2ContentOverlay.reset()
+	Gen2MoveEffect.reset_registry()
 
 
 ## Registers a world renderer under [param id].
@@ -222,6 +232,91 @@ func menu_entries(menu: StringName) -> Array:
 	return entries.duplicate(true)
 
 
+## Adds a species, move, item or trainer class the cartridge does not have.
+##
+## [param number] has to be at or above
+## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER], and [param row] is a partial
+## row: whatever it leaves out comes from the kind's defaults. Everything a
+## species carries is on that row, so a defined Pokémon's learnset, evolutions
+## and TM compatibility are fields rather than separate registrations.
+func register_content(
+	kind: StringName, id: StringName, number: int, row: Dictionary
+) -> Dictionary:
+	return Gen2ContentOverlay.shared().define(kind, id, number, row)
+
+
+## Changes named fields of a row the cartridge does have: a move's power, a
+## species' types, an item's price. Dictionary fields merge, so patching one stat
+## leaves the other five alone.
+func patch_content(
+	kind: StringName, id: StringName, number: int, fields: Dictionary
+) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(kind, id, number, fields)
+
+
+## The overlay every opened [GameData] reads through, for a launcher listing what
+## a mod changed before the player starts.
+func content_overlay() -> Gen2ContentOverlay:
+	return Gen2ContentOverlay.shared()
+
+
+## Watches one of [constant CHANNELS]. [param handler] is called with each event
+## dictionary as it reaches the screen showing it.
+##
+## Reading only. A subscriber is handed a copy, so writing to it changes nothing,
+## and there is no return value the engine reads: observation cannot make two
+## mods fight over the same state, which is what makes this safe to hand out
+## before any mutation hook exists.
+func subscribe(channel: StringName, id: StringName, handler: Callable) -> Dictionary:
+	if not CHANNELS.has(channel):
+		return {"ok": false, "reason": &"unknown_channel", "detail": String(channel)}
+	if String(id).is_empty():
+		return {"ok": false, "reason": &"invalid_subscriber", "detail": String(channel)}
+	if not handler.is_valid():
+		return {"ok": false, "reason": &"invalid_subscriber_handler", "detail": String(id)}
+	var handlers: Dictionary = _subscribers.get(channel, {})
+	if handlers.has(id):
+		return {"ok": false, "reason": &"duplicate_subscriber", "detail": String(id)}
+	handlers[id] = handler
+	_subscribers[channel] = handlers
+	return {"ok": true, "id": id}
+
+
+func unsubscribe(channel: StringName, id: StringName) -> void:
+	(_subscribers.get(channel, {}) as Dictionary).erase(id)
+
+
+## Hands [param event] to whoever is watching [param channel].
+##
+## Static and null-safe on the instance, because this sits on the path every
+## battle event and every world result takes: a game with no mods must not build
+## a host, or copy an event, to publish to nobody.
+static func publish(channel: StringName, event: Dictionary) -> void:
+	if _instance == null:
+		return
+	var handlers: Dictionary = _instance._subscribers.get(channel, {})
+	if handlers.is_empty():
+		return
+	for id: StringName in handlers.keys():
+		var handler: Callable = handlers[id]
+		if handler.is_valid():
+			handler.call(event.duplicate(true))
+
+
+## Adds a move effect, as the list of commands a move carrying [param effect]
+## runs. See [Gen2MoveEffect] for the lists the cartridge's own effects use and
+## [Gen2EffectCommands] for the steps one is built from.
+func register_move_effect(id: StringName, effect: int, commands: Array) -> Dictionary:
+	return Gen2MoveEffect.register_effect(id, effect, commands)
+
+
+## Adds a step a move effect's list can name, as a Callable taking the
+## [Gen2Turn]. Registered commands are tried after the engine's own, so a mod
+## cannot shadow [constant Gen2EffectCommands.APPLY_DAMAGE] with something else.
+func register_effect_command(id: StringName, command: StringName, handler: Callable) -> Dictionary:
+	return Gen2MoveEffect.register_command(id, command, handler)
+
+
 func _register(
 	registry: Dictionary, methods: Array[String], id: StringName, script: Script,
 	label: String,
@@ -247,6 +342,11 @@ func _register(
 			"ok": false, "reason": &"renderer_missing_methods",
 			"detail": "%s: %s" % [id, ", ".join(missing)],
 		}
+	# Two mods claiming one renderer id is a conflict a player wants named, the
+	# same way two claiming a menu entry id is. Silently keeping the last loaded
+	# would leave the earlier mod installed, listed and drawing nothing.
+	if registry.has(id):
+		return {"ok": false, "reason": &"duplicate_renderer", "detail": String(id)}
 	registry[id] = {
 		"script": script,
 		"label": label if not label.is_empty() else String(id),

@@ -1261,7 +1261,7 @@ func test_switching_out_clears_attract_disable_and_encore() -> void:
 		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])],
 		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
 	)
-	battle.player.substatus |= Gen2Substatus.ATTRACTED | Gen2Substatus.DISABLED | Gen2Substatus.ENCORED
+	battle.player.substatus |= Gen2Substatus.ATTRACTED | Gen2Substatus.ENCORED
 	battle.player.disabled_slot = 0
 	battle.player.disable_turns = 3
 	battle.player.encored_slot = 0

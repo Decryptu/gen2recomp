@@ -10,9 +10,42 @@ extends RefCounted
 ##
 ## The Japanese cartridges reuse most of this range for kana. They are not in
 ## [RomRegistry], and this table would decode them into nonsense.
+##
+## A byte does not name a character on its own. `constants/charmap.asm` maps the
+## $60 to $7F run twice over, once from `gfx/font/font.png` and again from
+## `gfx/font/font_battle_extra.png` under its own "Actual characters" heading,
+## and $6e three times; the byte means whichever strip the hardware last loaded
+## into video memory. Every entry point here takes the strip, defaulting to the
+## main font, which is what all but the battle and Hall of Fame screens have up.
 
 const TERMINATOR: int = 0x50
 const SPACE: int = 0x7F
+
+## Which strip is loaded. [constant FONT_MAIN] is `_LoadStandardFont`'s;
+## [constant FONT_BATTLE_EXTRA] is what `_LoadFontsBattleExtra` leaves behind,
+## which `engine/events/halloffame.asm` calls before it prints a panel.
+const FONT_MAIN: StringName = &"main"
+const FONT_BATTLE_EXTRA: StringName = &"battle_extra"
+
+## The run `_LoadFontsBattleExtra` overwrites: twenty-five tiles from $60, which
+## is `ld hl, vTiles2 tile $60` and `lb bc, BANK(FontBattleExtra), 25`. Outside
+## it the main font is still up, so letters, digits and the box-drawing codes
+## mean what they always did.
+const BATTLE_EXTRA_FIRST_CODE: int = 0x60
+const BATTLE_EXTRA_LAST_CODE: int = 0x78
+
+## What that run says. The rest of it is the HP bar's fill levels and the two HUD
+## borders, which are graphics rather than characters, so a code in the run and
+## not in here has no character at all: falling back to the main font's would
+## decode $75 as an ellipsis when the tile in memory is a piece of a bar.
+const BATTLE_EXTRA_CHARACTERS: Dictionary = {
+	0x6E: "<LV>",
+	0x70: "<DO>",
+	0x71: "◀",
+	0x72: "『",
+	0x73: "<ID>",
+	0x74: "№",
+}
 
 ## The lowest code the font has a tile for. Everything below it is a space, a
 ## border, a control code or a name substituted at print time, so it is also the
@@ -34,11 +67,14 @@ const MAX_LIGATURE: int = 2
 
 static var _table: Dictionary = {}
 static var _codes: Dictionary = {}
+static var _battle_extra_codes: Dictionary = {}
 
 
 ## Decodes bytes from [param offset] up to a terminator or [param max_length]
 ## characters, whichever comes first.
-static func decode(data: PackedByteArray, offset: int, max_length: int) -> String:
+static func decode(
+	data: PackedByteArray, offset: int, max_length: int, font: StringName = FONT_MAIN
+) -> String:
 	var out: String = ""
 	for i: int in max_length:
 		var at: int = offset + i
@@ -47,7 +83,7 @@ static func decode(data: PackedByteArray, offset: int, max_length: int) -> Strin
 		var byte: int = data[at]
 		if byte == TERMINATOR:
 			break
-		out += character(byte)
+		out += character(byte, font)
 	return out
 
 
@@ -93,8 +129,12 @@ static func decode_sequence(
 ##
 ## Anything the font cannot draw becomes [constant UNKNOWN] rather than being
 ## dropped, like an unrecognised byte on the way in.
-static func encode(text: String) -> PackedByteArray:
-	var codes: Dictionary = _encodings()
+## [param font] adds the strip's own single characters. Its bracketed markers
+## (`<LV>`, `<ID>`, `<DO>`) stay decode-only, the way `<PLAYER>` and the word
+## codes already are: a marker is not a character someone types, and the callers
+## that place one place the code itself.
+static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArray:
+	var codes: Dictionary = _encodings() if font == FONT_MAIN else _battle_extra_encodings()
 	var out: PackedByteArray = PackedByteArray()
 	var at: int = 0
 
@@ -118,11 +158,16 @@ static func encode(text: String) -> PackedByteArray:
 
 ## How many tiles a string occupies, which is not its length: a ligature is two
 ## characters in one tile, so anything laying text out has to ask.
-static func encoded_length(text: String) -> int:
-	return encode(text).size()
+static func encoded_length(text: String, font: StringName = FONT_MAIN) -> int:
+	return encode(text, font).size()
 
 
-static func character(byte: int) -> String:
+static func character(byte: int, font: StringName = FONT_MAIN) -> String:
+	if font == FONT_BATTLE_EXTRA \
+		and byte >= BATTLE_EXTRA_FIRST_CODE and byte <= BATTLE_EXTRA_LAST_CODE:
+		# The run this strip owns answers only from its own table, never from the
+		# main font's meaning for the same byte.
+		return BATTLE_EXTRA_CHARACTERS.get(byte, "<%02X>" % byte)
 	var table: Dictionary = _characters()
 	if table.has(byte):
 		return table[byte]
@@ -269,3 +314,27 @@ static func _encodings() -> Dictionary:
 
 	_codes = out
 	return _codes
+
+
+## The main font's encodings with the battle-extra run replaced.
+##
+## The main table's entries for $60 to $78 are dropped rather than kept
+## alongside: with that strip loaded there is no tile drawing an ellipsis, so
+## encoding one would place a byte that draws part of an HP bar.
+static func _battle_extra_encodings() -> Dictionary:
+	if not _battle_extra_codes.is_empty():
+		return _battle_extra_codes
+
+	var out: Dictionary = {}
+	var main: Dictionary = _encodings()
+	for text: String in main:
+		var code: int = main[text]
+		if code < BATTLE_EXTRA_FIRST_CODE or code > BATTLE_EXTRA_LAST_CODE:
+			out[text] = code
+	for code: int in BATTLE_EXTRA_CHARACTERS:
+		var character_text: String = BATTLE_EXTRA_CHARACTERS[code]
+		if character_text.length() <= MAX_LIGATURE:
+			out[character_text] = code
+
+	_battle_extra_codes = out
+	return _battle_extra_codes

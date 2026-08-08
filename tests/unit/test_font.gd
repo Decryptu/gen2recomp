@@ -9,6 +9,10 @@ extends GutTest
 const SHEET_TILES: int = 3
 const WIDTH: int = SHEET_TILES * Gen2Font.TILE
 
+const BATTLE_EXTRA_WIDTH: int = RomLayout.BATTLE_FONT_TILES * Gen2Font.TILE
+## Not [constant Gen2Tiles.INK], so a pixel says which strip it came from.
+const BATTLE_EXTRA_INK: int = 2
+
 var _directory: String = ""
 var _font: Gen2Font = null
 
@@ -37,6 +41,13 @@ func _write_cache() -> void:
 	frames.fill(Gen2Tiles.INK)
 	RomCache.write_indices(RomCache.tile_path(_directory, "frames"), frames)
 
+	# The battle-extra strip, filled with a different index so a glyph taken
+	# from it cannot be mistaken for one taken from the main font.
+	var battle_extra: PackedByteArray = PackedByteArray()
+	battle_extra.resize(BATTLE_EXTRA_WIDTH * Gen2Font.TILE)
+	battle_extra.fill(BATTLE_EXTRA_INK)
+	RomCache.write_indices(RomCache.tile_path(_directory, "battle_font"), battle_extra)
+
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "fontgame",
@@ -50,6 +61,10 @@ func _write_cache() -> void:
 			"frames": {
 				"width": RomLayout.FRAME_TILES * Gen2Font.TILE, "height": Gen2Font.TILE,
 				"tiles": RomLayout.FRAME_TILES, "first_code": RomLayout.FRAME_FIRST_CODE,
+			},
+			"battle_font": {
+				"width": BATTLE_EXTRA_WIDTH, "height": Gen2Font.TILE,
+				"tiles": RomLayout.BATTLE_FONT_TILES, "first_code": 0,
 			},
 		},
 	})
@@ -142,3 +157,46 @@ func test_a_frame_that_was_never_cached_draws_nothing() -> void:
 	_font.draw_frame_code(7, RomLayout.FRAME_FIRST_CODE, into, Gen2Font.TILE, 0, 0)
 	assert_eq(into.count(0), into.size())
 	assert_eq(_font.frame_count(), 1, "this cache holds one")
+
+
+## _LoadFontsBattleExtra replaces $60 to $78 and leaves the rest of video memory
+## alone, so which sheet a code addresses depends on the strip and the run.
+
+func test_a_battle_extra_code_is_drawn_from_that_strip() -> void:
+	var into: PackedByteArray = _canvas(1)
+	# $74 is № there, at tile $74 - $60 within the sheet.
+	_font.draw_code(0x74, into, Gen2Font.TILE, 0, 0, Gen2Text.FONT_BATTLE_EXTRA)
+	assert_eq(into[0], BATTLE_EXTRA_INK)
+
+
+func test_the_same_code_draws_nothing_with_the_main_font_loaded() -> void:
+	# The main font sheet starts at $80, so $74 is below it and has no tile.
+	var into: PackedByteArray = _canvas(1)
+	_font.draw_code(0x74, into, Gen2Font.TILE, 0, 0)
+	assert_eq(into[0], 0)
+
+
+func test_letters_still_come_from_the_main_font_under_the_battle_strip() -> void:
+	var into: PackedByteArray = _canvas(1)
+	_font.draw_code(
+		RomLayout.FONT_FIRST_CODE, into, Gen2Font.TILE, 0, 0, Gen2Text.FONT_BATTLE_EXTRA
+	)
+	assert_eq(into[0], Gen2Tiles.INK, "$80 is outside the run that load replaces")
+
+
+func test_a_cache_without_the_battle_strip_refuses_that_run_rather_than_guessing() -> void:
+	# A cache written before anything read this strip: the main font still works
+	# and the other run draws nothing, rather than reaching into the wrong sheet.
+	var manifest: Dictionary = RomCache.read_manifest(_directory)
+	(manifest["tiles"] as Dictionary).erase("battle_font")
+	RomCache.write_json(RomCache.manifest_path(_directory), manifest)
+
+	var font: Gen2Font = Gen2Font.from_data(GameData.open_directory(_directory))
+	assert_not_null(font)
+	assert_false(font.has_battle_extra())
+	var into: PackedByteArray = _canvas(1)
+	font.draw_code(0x74, into, Gen2Font.TILE, 0, 0, Gen2Text.FONT_BATTLE_EXTRA)
+	assert_eq(into[0], 0)
+	# And the letters it does have still draw.
+	font.draw_code(RomLayout.FONT_FIRST_CODE, into, Gen2Font.TILE, 0, 0)
+	assert_eq(into[0], Gen2Tiles.INK)

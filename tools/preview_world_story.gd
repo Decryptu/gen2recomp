@@ -398,6 +398,19 @@ func _story_path(data: GameData) -> Dictionary:
 	save.world = world.snapshot()
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
+	# Every map load advances the roaming beasts, and an unset schedule_random
+	# makes Gen2WorldState.advance_roaming() randomize() one of its own, which is
+	# what world_screen.gd:153 sets on the real path. Without this the route's
+	# reported roaming positions differ run to run while the rest is identical,
+	# so the walk cannot be diffed against itself.
+	#
+	# Its own generator, not the route's: the schedule rolls once per map load,
+	# and drawing them from the same stream would shift every encounter and catch
+	# behind them. That separation is the whole point of Gen2WorldAPI keeping
+	# three.
+	var schedule_random := RandomNumberGenerator.new()
+	schedule_random.seed = 11
+	world.schedule_random = schedule_random
 	var path: Array = []
 
 	# The bedroom's MAPCALLBACK_NEWMAP is what runs InitializeEventsScript
@@ -4467,6 +4480,7 @@ func _kanto_crossing_path(
 	)
 	if spawned == null:
 		return {"ok": false, "path": path, "reason": "the post-credits spawn map is missing"}
+	spawned.schedule_random = world.schedule_random
 	_mirror_party(spawned, save)
 	var entry: Dictionary = _drain_story(
 		spawned, spawned.dispatch_map_entry(), save, random, data
