@@ -149,6 +149,9 @@ const FOCUS_ENERGY_MOVE: int = 273
 ## The highest move number this table fills. Grown as new moves are added.
 const MAX_MOVE: int = THUNDER_ALWAYS_PARALYZES
 const BERRY_ITEM: int = 0xAD
+
+## The highest item number this table fills.
+const MAX_ITEM: int = 174
 ## The Smoke Ball and its held effect, both the cartridge's own numbers
 ## (constants/item_constants.asm, constants/item_data_constants.asm). It is the
 ## one item running reads.
@@ -167,6 +170,12 @@ const QUICK_CLAW: int = 73
 const KINGS_ROCK: int = 82
 const BRIGHTPOWDER: int = 3
 const FOCUS_BAND: int = 119
+const LEFTOVERS: int = 146
+const GOLD_BERRY: int = 174
+const MYSTERYBERRY: int = 150
+const PSNCUREBERRY: int = 74
+const MIRACLEBERRY: int = 109
+const BITTER_BERRY: int = 83
 
 ## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
 ## species' own ratio here can be checked against pret's own base stats rather
@@ -440,18 +449,25 @@ const HELD_ITEMS: Dictionary = {
 	KINGS_ROCK: ["KING'S ROCK", Gen2HeldItem.FLINCH, 30],
 	BRIGHTPOWDER: ["BRIGHTPOWDER", Gen2HeldItem.BRIGHTPOWDER, 20],
 	FOCUS_BAND: ["FOCUS BAND", Gen2HeldItem.FOCUS_BAND, 30],
+	# The berries, with the HP each of the two restoring ones puts back. The
+	# plain BERRY at [constant BERRY_ITEM] is the ten-point one.
+	LEFTOVERS: ["LEFTOVERS", Gen2HeldItem.LEFTOVERS, 10],
+	BERRY_ITEM: ["BERRY", Gen2HeldItem.BERRY, 10],
+	GOLD_BERRY: ["GOLD BERRY", Gen2HeldItem.BERRY, 30],
+	MYSTERYBERRY: ["MYSTERYBERRY", Gen2HeldItem.RESTORE_PP, 0],
+	PSNCUREBERRY: ["PSNCUREBERRY", Gen2HeldItem.HEAL_POISON, 0],
+	MIRACLEBERRY: ["MIRACLEBERRY", Gen2HeldItem.HEAL_STATUS, 0],
+	BITTER_BERRY: ["BITTER BERRY", Gen2HeldItem.HEAL_CONFUSION, 0],
 }
 
 
 static func _items() -> Array:
 	var out: Array = []
-	for number: int in range(1, BERRY_ITEM + 1):
+	for number: int in range(1, MAX_ITEM + 1):
 		var held: Array = HELD_ITEMS.get(number, [])
 		out.append({
 			"number": number,
-			"name": "BERRY" if number == BERRY_ITEM else (
-				String(held[0]) if not held.is_empty() else "ITEM%d" % number
-			),
+			"name": String(held[0]) if not held.is_empty() else "ITEM%d" % number,
 			"effect": int(held[1]) if not held.is_empty() else 0,
 			"parameter": int(held[2]) if not held.is_empty() else 0,
 		})

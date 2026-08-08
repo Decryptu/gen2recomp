@@ -866,6 +866,11 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 		"name": Gen2Status.name_of(defender.status),
 	})
 
+	# Every status-inflicting command calls `UseHeldStatusHealingItem` on the
+	# Pokémon it just afflicted, so a berry answers at once rather than waiting
+	# for the end of the turn.
+	turn.battle.use_status_berry(turn.target, turn.events)
+
 
 ## Poisons the target the way [constant POISON_TARGET] does, and starts the
 ## counter that makes it Toxic rather than an ordinary poison: see
@@ -884,6 +889,7 @@ static func _toxic_target(turn: Gen2Turn) -> void:
 	turn.emit(Gen2Battle.STATUS_INFLICTED, {
 		"target": turn.target, "status": defender.status, "name": &"toxic",
 	})
+	turn.battle.use_status_berry(turn.target, turn.events)
 
 
 ## Sets the target flinching, for [constant CHECK_STATUS] to catch on its turn.
@@ -919,6 +925,10 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	# Not [constant Gen2Battle.STATUS_INFLICTED]: that event's [code]status[/code]
 	# field is the status byte, and confusion never touches it.
 	turn.emit(Gen2Battle.CONFUSE_INFLICTED, {"target": turn.target})
+
+	# `BattleCommand_Confuse` reaches `UseConfusionHealingItem` the moment the
+	# confusion lands, the same way a status berry answers a status.
+	turn.battle.use_confusion_berry(turn.target, turn.events)
 
 
 ## Heals the attacker for half of what the hit calculated, at least one.

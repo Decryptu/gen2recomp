@@ -139,6 +139,17 @@ const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 const ENCORE_INFLICTED: StringName = &"encore_inflicted"
 const ENCORE_ENDED: StringName = &"encore_ended"
 
+## What a held item gave back between turns. Leftovers keeps its own event
+## because its line is the cartridge's own "recovered with", while a berry says
+## "recovered using a"; [constant RECOVERED_USING_ITEM] covers both the HP berry
+## and the status berries, which share `UseOpponentItem` and its text.
+## [code]item[/code] on all four is what did it, and on the three consumable ones
+## it is the number the Pokémon no longer holds.
+const RECOVERED_WITH_ITEM: StringName = &"recovered_with_item"
+const RECOVERED_USING_ITEM: StringName = &"recovered_using_item"
+const RESTORED_PP: StringName = &"restored_pp"
+const ITEM_HEALED_CONFUSION: StringName = &"item_healed_confusion"
+
 ## A Focus Band held the Pokémon on one hit point through what would have
 ## finished it. [code]item[/code] is what did it, since the cartridge's line
 ## names the item rather than the effect.
@@ -697,6 +708,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	_residual_damage(acting, events)
 	_tick_weather(events)
 	_tick_wrap(events)
+	_tick_held_items(events)
 	_tick_encore(acting, events)
 	_award_experience(events)
 
@@ -833,6 +845,127 @@ func _tick_wrap(events: Array) -> void:
 		})
 		if current.is_fainted():
 			events.append({"type": FAINTED, "side": side})
+
+
+## The leftovers block of `HandleBetweenTurnEffects`: `HandleLeftovers`,
+## `HandleMysteryberry` and then `HandleHealingItems`, after the wrap tick and
+## before Encore.
+##
+## The three do not agree on an order. The first two are `SetPlayerTurn` then
+## `SetEnemyTurn` reading `GetUserItem`, so the player is handled first; the
+## third is the same two calls reading `GetOpponentItem`, so the enemy is. The
+## two skipped between them, `HandleDefrost` and `HandleSafeguard`/`HandleScreens`,
+## are not item effects.
+func _tick_held_items(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		_use_leftovers(side, events)
+	for side: int in [PLAYER, ENEMY]:
+		_use_pp_berry(side, events)
+	for side: int in [ENEMY, PLAYER]:
+		use_hp_berry(side, events)
+		use_status_berry(side, events)
+		use_confusion_berry(side, events)
+
+
+## `HandleLeftovers`: a sixteenth back every turn, and nothing at all on a
+## Pokémon already at full health.
+func _use_leftovers(side: int, events: Array) -> void:
+	var holder: Gen2BattleMon = mon(side)
+	if holder.is_fainted() or holder.hp >= holder.max_hp():
+		return
+	if _held_effect(holder) != Gen2HeldItem.LEFTOVERS:
+		return
+
+	var healed: int = holder.heal(Gen2HeldItem.leftovers_healing(holder.max_hp()))
+	events.append({
+		"type": RECOVERED_WITH_ITEM, "side": side, "item": holder.item,
+		"amount": healed, "hp": holder.hp, "max_hp": holder.max_hp(),
+	})
+
+
+## `HandleMysteryberry`: five points back into the first move that ran out, or
+## one for Sketch. It is consumed by its own code rather than through
+## `ConsumeHeldItem`, which is why it is not on `ConsumableEffects`.
+func _use_pp_berry(side: int, events: Array) -> void:
+	var holder: Gen2BattleMon = mon(side)
+	if holder.is_fainted() or _held_effect(holder) != Gen2HeldItem.RESTORE_PP:
+		return
+
+	for slot: int in holder.moves.size():
+		if int(holder.moves[slot]) == 0:
+			break
+		if holder.pp_left(slot) > 0:
+			continue
+
+		var move_number: int = int(holder.moves[slot])
+		var restored: int = Gen2HeldItem.restored_pp(move_number)
+		holder.pp[slot] = holder.pp_left(slot) + restored
+		var used: int = holder.item
+		holder.item = 0
+		events.append({
+			"type": RESTORED_PP, "side": side, "item": used,
+			"slot": slot, "move": move_number, "amount": restored,
+		})
+		return
+
+
+## `HandleHPHealingItem`: a Berry, Gold Berry or Berry Juice puts its own
+## parameter back once the holder is strictly under half health, and is spent.
+func use_hp_berry(side: int, events: Array) -> bool:
+	var holder: Gen2BattleMon = mon(side)
+	if holder.is_fainted() or _held_effect(holder) != Gen2HeldItem.BERRY:
+		return false
+	if not Gen2HeldItem.wants_hp_berry(holder.hp, holder.max_hp()):
+		return false
+
+	var healed: int = holder.heal(Gen2HeldItem.parameter_of(data, holder.item))
+	var used: int = holder.item
+	holder.item = 0
+	events.append({
+		"type": RECOVERED_USING_ITEM, "side": side, "item": used,
+		"amount": healed, "hp": holder.hp, "max_hp": holder.max_hp(),
+	})
+	return true
+
+
+## `UseHeldStatusHealingItem`, which is reached both from here and from the
+## moment a status lands: the berry answers immediately rather than waiting for
+## the end of the turn.
+func use_status_berry(side: int, events: Array) -> bool:
+	var holder: Gen2BattleMon = mon(side)
+	if holder.status == Gen2Status.NONE:
+		return false
+	if not Gen2HeldItem.heals_status(_held_effect(holder), holder.status):
+		return false
+
+	# The status byte and nothing else: `UseHeldStatusHealingItem` clears
+	# `wBattleMonStatus` and never touches `SUBSTATUS_TOXIC`, so a Pokémon cured
+	# of a Toxic keeps the flag that makes its next poison ramp.
+	# [member Gen2BattleMon.toxic_counter] is that flag and that counter folded
+	# into one, so leaving it alone is what keeps the two in step.
+	holder.status = Gen2Status.NONE
+	var used: int = holder.item
+	holder.item = 0
+	events.append({"type": RECOVERED_USING_ITEM, "side": side, "item": used})
+	return true
+
+
+## `UseConfusionHealingItem`. A Miracleberry answers for this as well as for the
+## status byte, but it is spent by whichever came first, which is why the two are
+## separate calls rather than one.
+func use_confusion_berry(side: int, events: Array) -> bool:
+	var holder: Gen2BattleMon = mon(side)
+	if not Gen2Substatus.has(holder.substatus, Gen2Substatus.CONFUSED):
+		return false
+	if not Gen2HeldItem.heals_confusion(_held_effect(holder)):
+		return false
+
+	holder.substatus &= ~Gen2Substatus.CONFUSED
+	holder.confusion_turns = 0
+	var used: int = holder.item
+	holder.item = 0
+	events.append({"type": ITEM_HEALED_CONFUSION, "side": side, "item": used})
+	return true
 
 
 ## Encore's countdown, once a turn rather than once a side's move: `HandleEncore`

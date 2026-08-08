@@ -129,6 +129,61 @@ const CRITICAL_LEVELS: int = 1
 ## own parameter byte, so a parameter of 30 is 30 in 256.
 const CHANCE_RANGE: int = 256
 
+## What Leftovers gives back each turn, `GetSixteenthMaxHP`'s at-least-one
+## sixteenth. Its own parameter is not read.
+const LEFTOVERS_DIVISOR: int = 16
+
+## What Mysteryberry puts back into the first move that ran out, and the one move
+## it puts back less into. Sketch is by number, and the cartridge's own comment
+## calls it a lousy hack.
+const RESTORED_PP: int = 5
+const SKETCH_RESTORED_PP: int = 1
+const SKETCH: int = 166
+
+## `HeldStatusHealingEffects` (data/battle/held_heal_status.asm): which status
+## each berry answers for. Miracleberry's row is every status at once, and Bitter
+## Berry is not here at all because confusion is not a status.
+const STATUS_HEALS: Dictionary = {
+	HEAL_POISON: Gen2Status.POISON,
+	HEAL_FREEZE: Gen2Status.FREEZE,
+	HEAL_BURN: Gen2Status.BURN,
+	HEAL_SLEEP: Gen2Status.SLEEP_MASK,
+	HEAL_PARALYZE: Gen2Status.PARALYSIS,
+	HEAL_STATUS: Gen2Status.ANY,
+}
+
+
+## Whether an effect is a berry that answers for [param status].
+##
+## `UseHeldStatusHealingItem` clears the whole status byte rather than the masked
+## bit, which is the same thing while one status is all a Pokémon can carry.
+static func heals_status(effect: int, status: int) -> bool:
+	return (int(STATUS_HEALS.get(effect, 0)) & status) != 0
+
+
+## Whether an effect is one of the two berries that answer for confusion:
+## `UseConfusionHealingItem` takes Bitter Berry and Miracleberry alike.
+static func heals_confusion(effect: int) -> bool:
+	return effect == HEAL_CONFUSION or effect == HEAL_STATUS
+
+
+## `HandleHPHealingItem`'s own condition, which is strictly under half rather
+## than at or under it: the cartridge doubles the current HP and returns unless
+## it comes in below the maximum.
+static func wants_hp_berry(hp: int, max_hp: int) -> bool:
+	return hp * 2 < max_hp
+
+
+## What Leftovers restores.
+static func leftovers_healing(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / LEFTOVERS_DIVISOR, 1)
+
+
+## How much PP Mysteryberry puts back into [param move_number].
+static func restored_pp(move_number: int) -> int:
+	return SKETCH_RESTORED_PP if move_number == SKETCH else RESTORED_PP
+
 
 ## The held effect of [param item], or [constant NONE]. The item's own
 ## [code]effect[/code] field is `ITEMATTR_EFFECT`.
