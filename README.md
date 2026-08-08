@@ -229,7 +229,7 @@ Headless tools, all against a real imported cache:
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending in the Hall of Fame
+# the full walked route: Johto, the Hall of Fame, and Kanto as far as Lavender
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
