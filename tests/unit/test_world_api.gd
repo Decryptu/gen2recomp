@@ -2737,11 +2737,11 @@ func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.party_summary().is_empty())
 	assert_true(world.set_party_summary(
-		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"]
+		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"], [false, true]
 	)["ok"])
 	var expected: Dictionary = {
 		"count": 3, "pokerus": true, "species": [25, 1],
-		"moves": [[0x46], []], "names": ["PIKA", "BULBASAUR"],
+		"moves": [[0x46], []], "names": ["PIKA", "BULBASAUR"], "eggs": [false, true],
 	}
 	assert_eq(world.party_summary(), expected)
 	assert_false(world.set_party_summary(-1, false)["ok"])
@@ -4133,6 +4133,11 @@ func test_surf_request_refuses_a_facing_object_on_crystal_only() -> void:
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
 	world.objects[0].cell = Vector2i(8, 7)
 	assert_not_null(world.object_at(Vector2i(8, 7)))
+	# CheckPartyMove runs before CheckFacingObject, so the party has to know Surf
+	# for the object test to be the one that answers.
+	world.set_party_summary(
+		1, false, [1] as Array[int], [[Gen2WorldFieldMove.MOVE_SURF]], ["MON"], [false]
+	)
 	assert_eq(world.surf_request()["reason"], &"cannot_surf")
 
 	var gold_directory: String = RomCache.directory_for(&"testworldsurfgold", "abcdef0123456789cd")
@@ -4153,6 +4158,9 @@ func test_surf_request_refuses_a_facing_object_on_crystal_only() -> void:
 	gold_world.player_facing = Gen2WorldSprite.FACING_DOWN
 	gold_world.objects[0].cell = Vector2i(8, 7)
 	assert_not_null(gold_world.object_at(Vector2i(8, 7)))
+	gold_world.set_party_summary(
+		1, false, [1] as Array[int], [[Gen2WorldFieldMove.MOVE_SURF]], ["MON"], [false]
+	)
 	assert_true(bool(gold_world.surf_request().get("ok", false)))
 	RomCache.clear(gold_directory)
 

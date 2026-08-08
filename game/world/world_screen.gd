@@ -2004,6 +2004,7 @@ func _refresh_party_summary() -> void:
 	var species: Array[int] = []
 	var moves: Array = []
 	var names: Array = []
+	var eggs: Array = []
 	for member: Variant in save.party:
 		if member is Gen2SaveMon:
 			var mon: Gen2SaveMon = member as Gen2SaveMon
@@ -2018,7 +2019,8 @@ func _refresh_party_summary() -> void:
 					mon_moves.append(move)
 			moves.append(mon_moves)
 			names.append(_mon_display_name(mon))
-	_world.set_party_summary(save.party.size(), has_pokerus, species, moves, names)
+			eggs.append(mon.is_egg)
+	_world.set_party_summary(save.party.size(), has_pokerus, species, moves, names, eggs)
 
 
 ## GetPartyNickname's answer for one slot, following the party screen's own rule:

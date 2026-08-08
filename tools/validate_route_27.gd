@@ -323,6 +323,7 @@ func _open(data: GameData, id: Array, cell: Vector2i) -> Gen2WorldAPI:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, id[0], id[1], cell, Gen2WorldState.new())
 	if world == null:
 		return null
+	_field_move_party(world)
 	var _entry: Array = world.dispatch_map_entry()
 	for _step: int in 8:
 		if world.pending_script_input().is_empty():
@@ -398,3 +399,13 @@ func _finish() -> void:
 		printerr(failure)
 	printerr("FAIL route 27: %d problems." % _failures.size())
 	quit(1)
+
+
+## CheckPartyMove gates every field move, and this file is about the map rather
+## than the party, so every world it opens carries one member that knows all
+## five. The route preview is where a real party earning them is proved.
+func _field_move_party(world: Gen2WorldAPI) -> void:
+	world.set_party_summary(
+		1, false, [1] as Array[int], [Gen2WorldFieldMove.FIELD_MOVES.duplicate()],
+		["MON"], [false]
+	)

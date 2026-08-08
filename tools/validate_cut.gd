@@ -124,6 +124,7 @@ func _verify_ilex_forest(game_id: StringName, data: GameData, crystal: bool) -> 
 	):
 		return
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_field_move_party(world)
 
 	var tileset: int = world.current_map.tileset
 	var expected_tileset: int = Gen2WorldFieldMove.TILESET_FOREST_CRYSTAL if crystal \
@@ -207,6 +208,7 @@ func _verify_ilex_forest(game_id: StringName, data: GameData, crystal: bool) -> 
 		data, ILEX_GROUP, number, ILEX_TREE_CELL + Vector2i.UP, unbadged
 	)
 	unbadged_world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_field_move_party(unbadged_world)
 	_check(
 		StringName(unbadged_world.cut_request().get("reason", &"")) == &"badge_required",
 		"%s: Ilex Forest allowed Cut without engine flag %d." % [game_id, badge]
@@ -218,6 +220,7 @@ func _verify_ilex_forest(game_id: StringName, data: GameData, crystal: bool) -> 
 		data, ILEX_GROUP, number, ILEX_TREE_CELL + Vector2i.UP, wrong
 	)
 	wrong_world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_field_move_party(wrong_world)
 	_check(
 		StringName(wrong_world.cut_request().get("reason", &"")) == &"badge_required",
 		"%s: Ilex Forest accepted the other profile's Hive Badge flag." % game_id
@@ -242,3 +245,14 @@ func _finish() -> void:
 	for message: String in _failures:
 		print("FAIL %s" % message)
 	quit(1)
+
+
+## CheckPartyMove gates every field move, and these files are about the tables
+## and the map rather than the party, so every world they open carries one
+## member that knows all five. The route preview is where a real party earning
+## them is proved.
+func _field_move_party(world: Gen2WorldAPI) -> void:
+	world.set_party_summary(
+		1, false, [1] as Array[int], [Gen2WorldFieldMove.FIELD_MOVES.duplicate()],
+		["MON"], [false]
+	)

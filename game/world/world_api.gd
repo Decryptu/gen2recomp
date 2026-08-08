@@ -430,17 +430,42 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 ## second. Only an absent summary fails a script-visible read; a summary whose
 ## list is empty answers "not in the party", which is what the story preview's
 ## own callers rely on.
+## [param eggs] marks which slots are eggs, because `CheckPartyMove` skips them:
+## an egg carries the moves it will hatch with and would otherwise answer for a
+## move no usable party member knows.
 func set_party_summary(
 	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int],
-	moves: Array = [], names: Array = []
+	moves: Array = [], names: Array = [], eggs: Array = []
 ) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
 	_party_summary = {
 		"count": count, "pokerus": has_pokerus, "species": species.duplicate(),
 		"moves": moves.duplicate(true), "names": names.duplicate(),
+		"eggs": eggs.duplicate(),
 	}
 	return {"ok": true}
+
+
+## CheckPartyMove (`engine/events/overworld.asm`): the first party slot whose own
+## move list carries [param move], or -1 when none does. Eggs are skipped, empty
+## and terminator slots end the walk, and the answer is the slot index the source
+## leaves in `wCurPartyMon`.
+##
+## Every field move is gated on this. The party submenu reaches `CutFunction` and
+## friends only for a mon that knows the move, and the overworld prompts
+## (`TryCutOW`, `TrySurfOW`, `TryWhirlpoolOW`, `TryWaterfallOW`, `TryStrengthOW`)
+## each call `CheckPartyMove` themselves, so there is no path in either game that
+## uses a field move the party does not know.
+func party_slot_with_move(move: int) -> int:
+	var moves: Array = _party_summary.get("moves", [])
+	var eggs: Array = _party_summary.get("eggs", [])
+	for slot: int in moves.size():
+		if slot < eggs.size() and bool(eggs[slot]):
+			continue
+		if moves[slot] is Array and (moves[slot] as Array).has(move):
+			return slot
+	return -1
 
 
 ## Clears the mirror so a stale count cannot answer a later read after the
@@ -533,6 +558,10 @@ func cut_request() -> Dictionary:
 		return _cut_failure(&"missing_map")
 	if not _pending_cut.is_empty():
 		return _cut_failure(&"cut_in_progress")
+	## TryCutOW asks CheckPartyMove before the badge; the submenu path cannot
+	## reach here without the move at all.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_CUT) < 0:
+		return _cut_failure(&"move_not_known")
 	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
 	if not state.is_engine_flag_active(
 		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_HIVE, crystal)
@@ -614,6 +643,10 @@ func surf_request(species: int = 0) -> Dictionary:
 		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, crystal)
 	):
 		return _surf_failure(&"badge_required")
+	## Surf is the one move whose overworld prompt asks CheckPartyMove after the
+	## badge rather than before it (`TrySurfOW`).
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_SURF) < 0:
+		return _surf_failure(&"move_not_known")
 	if movement_mode == MOVEMENT_SURF:
 		return _surf_failure(&"already_surfing")
 	var target: Vector2i = facing_cell()
@@ -685,6 +718,9 @@ func whirlpool_request() -> Dictionary:
 		return _whirlpool_failure(&"missing_map")
 	if not _pending_whirlpool.is_empty():
 		return _whirlpool_failure(&"whirlpool_in_progress")
+	## TryWhirlpoolOW asks CheckPartyMove before the badge.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_WHIRLPOOL) < 0:
+		return _whirlpool_failure(&"move_not_known")
 	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
 		Gen2WorldFieldMove.BADGE_GLACIER, Gen2WorldState.is_crystal_profile(data)
 	)):
@@ -756,6 +792,9 @@ func waterfall_request() -> Dictionary:
 		return _waterfall_failure(&"missing_map")
 	if not _pending_waterfall.is_empty():
 		return _waterfall_failure(&"waterfall_in_progress")
+	## TryWaterfallOW asks CheckPartyMove before the badge.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_WATERFALL) < 0:
+		return _waterfall_failure(&"move_not_known")
 	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
 		Gen2WorldFieldMove.BADGE_RISING, Gen2WorldState.is_crystal_profile(data)
 	)):

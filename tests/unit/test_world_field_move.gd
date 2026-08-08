@@ -196,9 +196,19 @@ func _gold_profile() -> void:
 	RomCache.write_json(RomCache.manifest_path(_directory), manifest)
 
 
+## The one thing every field move is gated on besides its badge: a party member
+## that knows it (`CheckPartyMove`). One non-egg slot carrying [param move] is
+## what the party submenu guarantees on the real path, so the fixtures set it,
+## and each move's own case drives the empty party for the refusal.
+func _knowing_party(world: Gen2WorldAPI, move: int) -> void:
+	world.set_party_summary(
+		1, false, [1] as Array[int], [[move]], ["MON"], [false]
+	)
+
+
 ## A world standing above the cut tree and facing it, with the Hive Badge set on
 ## whichever engine flag table the opened cache selects.
-func _world(map_number: int = 1, badge: bool = true) -> Gen2WorldAPI:
+func _world(map_number: int = 1, badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()
 	if badge:
@@ -209,12 +219,16 @@ func _world(map_number: int = 1, badge: bool = true) -> Gen2WorldAPI:
 		data, 1, map_number, TREE_CELL + Vector2i.UP, state
 	)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	if knows:
+		_knowing_party(world, Gen2WorldFieldMove.MOVE_CUT)
 	return world
 
 
 ## A world standing on the shore facing the water, with the Fog Badge set on
 ## whichever engine flag table the opened cache selects.
-func _surf_world(badge: bool = true, stand: Vector2i = SHORE_CELL) -> Gen2WorldAPI:
+func _surf_world(
+	badge: bool = true, stand: Vector2i = SHORE_CELL, knows: bool = true
+) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()
 	if badge:
@@ -223,6 +237,8 @@ func _surf_world(badge: bool = true, stand: Vector2i = SHORE_CELL) -> Gen2WorldA
 		))
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, stand, state)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	if knows:
+		_knowing_party(world, Gen2WorldFieldMove.MOVE_SURF)
 	return world
 
 
@@ -241,7 +257,7 @@ func _strength_world(badge: bool = true) -> Gen2WorldAPI:
 
 ## A world beside the whirlpool and facing it, surfing, with the Glacier Badge on
 ## whichever engine flag table the opened cache selects.
-func _whirlpool_world(badge: bool = true) -> Gen2WorldAPI:
+func _whirlpool_world(badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()
 	if badge:
@@ -251,6 +267,8 @@ func _whirlpool_world(badge: bool = true) -> Gen2WorldAPI:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WHIRLPOOL_STAND_CELL, state)
 	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	if knows:
+		_knowing_party(world, Gen2WorldFieldMove.MOVE_WHIRLPOOL)
 	return world
 
 
@@ -395,6 +413,7 @@ func test_surf_request_reads_the_gold_silver_badge_flag() -> void:
 	state.set_engine_flag(Gen2WorldState.ENGINE_FOGBADGE)
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, SHORE_CELL, state)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_SURF)
 	assert_eq(world.surf_request()["reason"], &"badge_required")
 
 	state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, false))
@@ -608,9 +627,53 @@ func test_cut_request_reads_the_gold_silver_badge_flag() -> void:
 		data, 1, 1, TREE_CELL + Vector2i.UP, state
 	)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_CUT)
 	assert_eq(world.cut_request()["reason"], &"badge_required")
 
 	state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_HIVE, false))
+	assert_true(bool(world.cut_request().get("ok", false)))
+
+
+## CheckPartyMove, which every one of the four gates on. TryCutOW,
+## TryWhirlpoolOW and TryWaterfallOW ask it before their badge; TrySurfOW asks it
+## after. An empty party answers the same way a party without the move does,
+## because neither can reach the move on any source path.
+func test_each_field_move_refuses_a_party_that_does_not_know_it() -> void:
+	assert_eq(_world(1, true, false).cut_request()["reason"], &"move_not_known")
+	assert_eq(
+		_surf_world(true, SHORE_CELL, false).surf_request()["reason"], &"move_not_known"
+	)
+	assert_eq(_whirlpool_world(true, false).whirlpool_request()["reason"], &"move_not_known")
+	assert_eq(_waterfall_world(true, false).waterfall_request()["reason"], &"move_not_known")
+
+
+## The refusal order the overworld prompts use: Cut, Whirlpool and Waterfall
+## report the missing move even when the badge is missing too, and Surf reports
+## the missing badge first.
+func test_the_party_move_check_runs_before_the_badge_except_for_surf() -> void:
+	assert_eq(_world(1, false, false).cut_request()["reason"], &"move_not_known")
+	assert_eq(_whirlpool_world(false, false).whirlpool_request()["reason"], &"move_not_known")
+	assert_eq(_waterfall_world(false, false).waterfall_request()["reason"], &"move_not_known")
+	assert_eq(
+		_surf_world(false, SHORE_CELL, false).surf_request()["reason"], &"badge_required"
+	)
+
+
+## An egg carries the moves it will hatch with, and CheckPartyMove skips it.
+func test_an_egg_that_would_hatch_with_the_move_does_not_answer_for_it() -> void:
+	var world: Gen2WorldAPI = _world(1, true, false)
+	world.set_party_summary(
+		1, false, [1] as Array[int], [[Gen2WorldFieldMove.MOVE_CUT]], ["EGG"], [true]
+	)
+	assert_eq(world.cut_request()["reason"], &"move_not_known")
+	assert_eq(world.party_slot_with_move(Gen2WorldFieldMove.MOVE_CUT), -1)
+
+	world.set_party_summary(
+		2, false, [1, 2] as Array[int],
+		[[Gen2WorldFieldMove.MOVE_CUT], [Gen2WorldFieldMove.MOVE_CUT]],
+		["EGG", "MON"], [true, false]
+	)
+	assert_eq(world.party_slot_with_move(Gen2WorldFieldMove.MOVE_CUT), 1)
 	assert_true(bool(world.cut_request().get("ok", false)))
 
 
@@ -750,6 +813,7 @@ func test_whirlpool_request_reads_the_gold_silver_badge_flag() -> void:
 	state.set_engine_flag(Gen2WorldState.ENGINE_GLACIERBADGE)
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WHIRLPOOL_STAND_CELL, state)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_WHIRLPOOL)
 	assert_eq(world.whirlpool_request()["reason"], &"badge_required")
 
 	state.set_engine_flag(Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_GLACIER, false))
@@ -772,6 +836,7 @@ func test_whirlpool_request_refuses_a_tileset_without_a_block_list() -> void:
 	))
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 2, WHIRLPOOL_STAND_CELL, state)
 	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_WHIRLPOOL)
 	assert_true(Gen2WorldFieldMove.whirlpool_tile(world.collision_code_at(WHIRLPOOL_CELL)))
 	assert_eq(world.whirlpool_request()["reason"], &"nothing_to_whirlpool")
 
@@ -861,7 +926,7 @@ func test_the_whirlpool_traps_a_player_until_it_is_removed() -> void:
 
 ## A world in the water below the waterfall column, facing up, with the Rising
 ## Badge on whichever engine flag table the opened cache selects.
-func _waterfall_world(badge: bool = true) -> Gen2WorldAPI:
+func _waterfall_world(badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	var data: GameData = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()
 	if badge:
@@ -871,6 +936,8 @@ func _waterfall_world(badge: bool = true) -> Gen2WorldAPI:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WATERFALL_STAND_CELL, state)
 	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
 	world.player_facing = Gen2WorldSprite.FACING_UP
+	if knows:
+		_knowing_party(world, Gen2WorldFieldMove.MOVE_WATERFALL)
 	return world
 
 
@@ -900,6 +967,7 @@ func test_waterfall_request_reads_the_gold_silver_badge_flag() -> void:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, WATERFALL_STAND_CELL, state)
 	world.set_movement_mode(Gen2WorldAPI.MOVEMENT_SURF)
 	world.player_facing = Gen2WorldSprite.FACING_UP
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_WATERFALL)
 	assert_eq(world.waterfall_request()["reason"], &"badge_required")
 
 

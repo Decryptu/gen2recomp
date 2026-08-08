@@ -27,8 +27,19 @@ const SPECIALCALL_ASSISTANT: int = 3
 const WALK_RESOLVE_ATTEMPTS: int = 16
 
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
+## `maps/Route32.asm` warp 1 and `maps/Route32Pokecenter1F.asm` warp 1, the
+## fishing guru on (1,4) faced from below, and the nearest shore cell the rod is
+## cast from: (10,42) faces water on (9,42) and sits in the same region as the
+## Pokemon Center door.
+const ROUTE_32_POKECENTER_DOOR: Vector2i = Vector2i(11, 73)
+const ROUTE_32_POKECENTER_EXIT: Vector2i = Vector2i(3, 7)
+const FISHING_GURU_FACE: Vector2i = Vector2i(1, 5)
+const ROUTE_32_SHORE: Vector2i = Vector2i(10, 42)
+
 const ITEM_HM_CUT: int = 0xF3
+const ITEM_HM_SURF: int = 0xF5
 const ITEM_HM_STRENGTH: int = 0xF6
+const ITEM_HM_WHIRLPOOL: int = 0xF8
 const ITEM_HM_WATERFALL: int = 0xF9
 ## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
 ## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
@@ -41,6 +52,9 @@ const HM07_APPROACH: Vector2i = Vector2i(30, 7)
 ## Great Balls is what the source start money covers.
 const MART_BLACKTHORN: int = 17
 const GREAT_BALLS_BOUGHT: int = 5
+## `maps/BlackthornMart.asm` object 1 on (1,3), standing right behind the
+## counter on (2,3), so it is talked to from (3,3) facing left.
+const BLACKTHORN_MART_CLERK_FACE: Vector2i = Vector2i(3, 3)
 ## The two Radio Tower keys, from the same hex comment column.
 const ITEM_CARD_KEY: int = 0x7F
 const ITEM_BASEMENT_KEY: int = 0x85
@@ -1595,6 +1609,10 @@ func _hive_badge_path(
 			"reason": "Violet City to Route 32 failed: %s" % route32_leg.get("reason", ""),
 		}
 
+	var rod: Dictionary = _route_32_old_rod(world, save, random, data, path)
+	if not bool(rod.get("ok", false)):
+		return rod
+
 	# Route 32's south edge does connect to Route 33, but that lands in the
 	# plaza north of Route 33's wall row, whose only exit is the Union Cave
 	# warp. The cartridge's own path is Route 32 (6,79) into Union Cave 1F and
@@ -2482,6 +2500,23 @@ func _mineral_badge_path(
 			"reason": "HM03 handoff failed: %s" % surf_guy.get("reason", ""),
 		}
 
+	# Taught here, two legs before Route 40's south edge asks for it. The Ilex
+	# Forest Psyduck is the only party member CanLearnTMHMMove accepts.
+	var surf_taught: Dictionary = _teach_hm(world, save, ITEM_HM_SURF)
+	_mirror_party(world, save)
+	path.append({
+		"step": "dance_theater_teach_surf",
+		"map": _map_value(world),
+		"taught": surf_taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(surf_taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned SURF: %s" % surf_taught.get("reason", ""),
+		}
+
 	var leaving_theater: Dictionary = _warp_step(world, 4, 9)
 	if not bool(leaving_theater.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "Dance Theater exit warp failed"}
@@ -3145,6 +3180,25 @@ func _glacier_badge_path(
 				],
 			}
 
+	# The third Electrode brings Lance back with HM06, and it is taught here for
+	# the same reason Surf is taught in the Dance Theater: Dragon's Den B1F's
+	# whirlpool is several legs away, and the only party member
+	# CanLearnTMHMMove accepts for WHIRLPOOL is the Ilex Forest Psyduck.
+	var whirlpool_taught: Dictionary = _teach_hm(world, save, ITEM_HM_WHIRLPOOL)
+	_mirror_party(world, save)
+	path.append({
+		"step": "rocket_base_b2f_teach_whirlpool",
+		"map": _map_value(world),
+		"taught": whirlpool_taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(whirlpool_taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned WHIRLPOOL: %s" % whirlpool_taught.get("reason", ""),
+		}
+
 	# Out the way the route came in. Clearing the base hides the grunts, so the
 	# walk back is not the one that came down.
 	for ladder: Dictionary in [
@@ -3807,7 +3861,9 @@ func _rising_badge_path(
 			"ok": false, "path": path,
 			"reason": "Blackthorn Mart unreachable: %s" % mart_trip.get("reason", ""),
 		}
-	var bought: Dictionary = _buy_great_balls(world, save, data, path, GREAT_BALLS_BOUGHT)
+	var bought: Dictionary = _buy_great_balls(
+		world, save, random, data, path, GREAT_BALLS_BOUGHT
+	)
 	if not bool(bought.get("ok", false)):
 		return {
 			"ok": false, "path": path,
@@ -7586,9 +7642,7 @@ func _push_boulder_at(
 	}
 
 
-## BlackthornMartClerkScript's `pokemart MARTTYPE_STANDARD, MART_BLACKTHORN`,
-## bought from headlessly the way _teach_hm() teaches: through the same host the
-## service overlay drives, rather than through the overlay.
+## BlackthornMartClerkScript, talked to across its own counter.
 ##
 ## The route needs this once. Elm's aide gives five Poké Balls, Union Cave's
 ## Geodude costs one, and Dratini is a far lower catch rate than Geodude, so the
@@ -7597,24 +7651,27 @@ func _push_boulder_at(
 ## sells no Poké Balls, so what the route buys is Great Balls: they are the
 ## cheapest ball it stocks, and the source start money buys five of them against
 ## two Ultra Balls.
+##
+## The clerk stands on (1,3) behind the `$90` counter on (2,3), so this is a
+## CheckFacingObject doubled reach like the Radio Card woman's, and the buying
+## itself happens inside the clerk's own `pokemart` pause rather than beside it.
 func _buy_great_balls(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
+	random: RandomNumberGenerator,
 	data: GameData,
 	path: Array,
 	quantity: int,
 ) -> Dictionary:
-	var resolved: Dictionary = Gen2WorldMartHost.resolve_mart(
-		data, Gen2WorldMartHost.MARTTYPE_STANDARD, MART_BLACKTHORN, false, world.state
+	var walked: Dictionary = _walk_cell_resolving(
+		world, BLACKTHORN_MART_CLERK_FACE, save, random, data
 	)
-	if not bool(resolved.get("ok", false)):
-		return {
-			"ok": false,
-			"reason": "Blackthorn mart did not resolve: %s" % resolved.get("reason", ""),
-		}
-	var bought: Dictionary = Gen2WorldMartHost.purchase(
-		world, save, resolved.get("mart", {}),
-		Gen2WorldPartyHost.ITEM_GREAT_BALL, quantity, false
+	if not bool(walked.get("ok", false)):
+		return {"ok": false, "reason": "the mart clerk is unreachable: %s" % walked.get("reason", "")}
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var run: Dictionary = _drain_story(
+		world, world.interact(), save, random, data, true, [],
+		{"item": Gen2WorldPartyHost.ITEM_GREAT_BALL, "quantity": quantity}
 	)
 	path.append({
 		"step": "blackthorn_mart_great_balls",
@@ -7622,10 +7679,88 @@ func _buy_great_balls(
 		"cell": _cell_value(world),
 		"balls": world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL),
 		"money": world.state.money(),
+		"purchases": run.get("purchases", []),
+		"run": run,
 	})
-	if not bool(bought.get("ok", false)):
-		return {"ok": false, "reason": "purchase refused: %s" % bought.get("reason", "")}
+	if not bool(run.get("terminal", false)):
+		return {"ok": false, "reason": "the mart clerk did not finish: %s" % run.get("reason", "")}
+	if world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL) < quantity:
+		return {"ok": false, "reason": "the Great Balls did not reach the bag"}
 	return {"ok": true}
+
+
+## Route 32's Pokemon Center for the OLD ROD, and then the shore below it for
+## what the rod is here to catch.
+##
+## This is the route's answer to Surf and Whirlpool, and it has to be a rod
+## rather than a walk. Every grass wild in reach before Route 40's south edge
+## that CanLearnTMHMMove accepts for SURF is night only except Slowpoke Well's
+## Slowpoke, and Slowpoke does not take WHIRLPOOL at all; the walked route runs
+## on the new game's own 06:00 clock, so a night slot is not something it can
+## honestly reach. Route 32's own Old Rod row is the one time-independent source
+## of a mon that takes both, at Tentacool on the last threshold
+## (`data/wild/fish.asm`).
+##
+## `Route32Pokecenter1FFishingGuruScript` gates the rod on its own yes/no and
+## then `verbosegiveitem OLD_ROD`, which is what `Gen2WorldInventory.owns_rod()`
+## reads back.
+func _route_32_old_rod(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_center: Dictionary = _warp_chain(
+		world, save, random, data, [ROUTE_32_POKECENTER_DOOR]
+	)
+	if not bool(into_center.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 32 Pokemon Center door failed: %s" % into_center.get("reason", ""),
+		}
+	var guru: Dictionary = _talk_to(
+		world, FISHING_GURU_FACE, Gen2WorldSprite.FACING_UP,
+		save, random, data, [0] as Array[int]
+	)
+	path.append({
+		"step": "route_32_fishing_guru_old_rod",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"old_rod": world.state.item_quantity(Gen2WorldInventory.ITEM_OLD_ROD) > 0,
+		"run": guru.get("run", {}),
+	})
+	if not bool(guru.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the fishing guru did not finish: %s" % guru.get("reason", ""),
+		}
+	if world.state.item_quantity(Gen2WorldInventory.ITEM_OLD_ROD) <= 0:
+		return {"ok": false, "path": path, "reason": "the OLD ROD did not reach the bag"}
+
+	var outside: Dictionary = _warp_chain(
+		world, save, random, data, [ROUTE_32_POKECENTER_EXIT]
+	)
+	if not bool(outside.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Route 32 Pokemon Center failed: %s" % outside.get("reason", ""),
+		}
+
+	var walked: Dictionary = _walk_cell_resolving(
+		world, ROUTE_32_SHORE, save, random, data
+	)
+	if not bool(walked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 32's shore is unreachable: %s" % walked.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	return _catch_field_move_mon(
+		world, save, random, data, path,
+		Gen2WorldFieldMove.MOVE_SURF, "route_32_fish_for_surf",
+		Gen2WorldEncounter.METHOD_OLD_ROD
+	)
 
 
 ## Catches something on the current map that can learn [param move], which is
@@ -7649,6 +7784,7 @@ func _catch_field_move_mon(
 	path: Array,
 	move: int,
 	step: String,
+	method: StringName = &"auto",
 ) -> Dictionary:
 	var attempts: Array = []
 	var caught: Dictionary = {}
@@ -7656,7 +7792,7 @@ func _catch_field_move_mon(
 		var ball: int = _best_ball(world)
 		if ball <= 0:
 			break
-		var encounter: Dictionary = world.encounter_request(random, true)
+		var encounter: Dictionary = world.encounter_request(random, true, method)
 		if encounter.is_empty():
 			break
 		var species: int = int(encounter.get("pokemon", 0))
@@ -7999,6 +8135,7 @@ func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
 	var species: Array[int] = []
 	var moves: Array = []
 	var names: Array = []
+	var eggs: Array = []
 	for mon: Gen2SaveMon in save.party:
 		species.append(int(mon.species))
 		var mon_moves: Array = []
@@ -8007,7 +8144,8 @@ func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
 				mon_moves.append(move)
 		moves.append(mon_moves)
 		names.append(mon.nickname if not mon.nickname.is_empty() else "")
-	world.set_party_summary(save.party.size(), false, species, moves, names)
+		eggs.append(mon.is_egg)
+	world.set_party_summary(save.party.size(), false, species, moves, names, eggs)
 
 
 func _party_has_egg(save: Gen2SaveData) -> bool:
@@ -8052,8 +8190,13 @@ func _drain_story(
 	data: GameData = null,
 	require_events: bool = false,
 	answers: Array[int] = [],
+	purchase: Dictionary = {},
 ) -> Dictionary:
 	var pending_answers: Array[int] = answers.duplicate()
+	## What to buy if a `pokemart` opens while this drain runs. Cleared once it
+	## is spent, so one standing order buys once.
+	var pending_purchase: Dictionary = purchase.duplicate()
+	var purchases: Array = []
 	if require_events and initial.is_empty():
 		return {
 			"statuses": [],
@@ -8210,6 +8353,35 @@ func _drain_story(
 					"ok": true,
 					"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
 				})
+			elif request_kind == &"mart_requested":
+				# `pokemart` is a runtime pause the same way a battle is, so the
+				# clerk's own script is what opens the mart and the caller's
+				# standing order is what buys from it. Gen2WorldHost resolves the
+				# dialog and mart id off the request exactly as the service
+				# screen does.
+				var mart_host: Dictionary = Gen2WorldHost.resolve_runtime_request(world, request)
+				if not bool(mart_host.get("ok", false)):
+					last_reason = String(mart_host.get("reason", "mart host failed"))
+					last_details = JSON.stringify(mart_host)
+					break
+				var mart: Dictionary = mart_host.get("data", {}).get("mart", {})
+				if not pending_purchase.is_empty():
+					var bought: Dictionary = Gen2WorldMartHost.purchase(
+						world, save, mart, int(pending_purchase.get("item", 0)),
+						int(pending_purchase.get("quantity", 0)), false
+					)
+					purchases.append({
+						"item": int(pending_purchase.get("item", 0)),
+						"quantity": int(pending_purchase.get("quantity", 0)),
+						"ok": bool(bought.get("ok", false)),
+						"reason": bought.get("reason", ""),
+					})
+					if not bool(bought.get("ok", false)):
+						last_reason = String(bought.get("reason", "purchase refused"))
+						last_details = JSON.stringify(bought)
+						break
+					pending_purchase = {}
+				results = world.complete_runtime_request({"ok": true})
 			elif request_kind == &"audio_requested":
 				results = world.complete_runtime_request({"ok": true})
 			else:
@@ -8237,6 +8409,7 @@ func _drain_story(
 		"waits": waits,
 		"pending_trace": pending_trace,
 		"battles": battles,
+		"purchases": purchases,
 		"catch_tutorials": catch_tutorials,
 		"hall_of_fame": hall_of_fame,
 		"approaches": approaches,

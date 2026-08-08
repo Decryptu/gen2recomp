@@ -163,6 +163,7 @@ func _verify_new_bark_town(game_id: StringName, data: GameData, crystal: bool) -
 	):
 		return
 	world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	_field_move_party(world)
 
 	var shore_code: int = world.collision_code_at(SHORE_CELL)
 	_check(
@@ -245,6 +246,7 @@ func _verify_new_bark_town(game_id: StringName, data: GameData, crystal: bool) -
 		data, NEW_BARK_GROUP, NEW_BARK_NUMBER, SHORE_CELL, Gen2WorldState.new()
 	)
 	unbadged_world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	_field_move_party(unbadged_world)
 	_check(
 		StringName(unbadged_world.surf_request().get("reason", &"")) == &"badge_required",
 		"%s: New Bark Town allowed Surf without engine flag %d." % [game_id, badge]
@@ -256,6 +258,7 @@ func _verify_new_bark_town(game_id: StringName, data: GameData, crystal: bool) -
 		data, NEW_BARK_GROUP, NEW_BARK_NUMBER, SHORE_CELL, wrong
 	)
 	wrong_world.player_facing = Gen2WorldSprite.FACING_RIGHT
+	_field_move_party(wrong_world)
 	_check(
 		StringName(wrong_world.surf_request().get("reason", &"")) == &"badge_required",
 		"%s: New Bark Town accepted the other profile's Fog Badge flag." % game_id
@@ -357,3 +360,14 @@ func _finish() -> void:
 	for message: String in _failures:
 		print("FAIL %s" % message)
 	quit(1)
+
+
+## CheckPartyMove gates every field move, and this file is about the tables and
+## the map rather than the party, so every world it opens carries one member
+## that knows all five. The route preview is where a real party earning them is
+## proved.
+func _field_move_party(world: Gen2WorldAPI) -> void:
+	world.set_party_summary(
+		1, false, [1] as Array[int], [Gen2WorldFieldMove.FIELD_MOVES.duplicate()],
+		["MON"], [false]
+	)
