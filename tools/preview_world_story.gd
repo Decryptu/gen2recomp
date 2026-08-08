@@ -269,6 +269,56 @@ const SHIP_GRANDPA_APPROACH: Vector2i = Vector2i(25, 5)
 ## `.CanArrive` wants EVENT_FAST_SHIP_FOUND_GIRL instead.
 const EVENT_FAST_SHIP_FIRST_TIME: int = 48
 
+## The rest of the Fast Ship group, and the interior crossing's own cells.
+## `constants/map_constants.asm`; every number and flag below is identical in
+## both pins, and the five maps' event tables are byte identical.
+const FAST_SHIP_B1F_NUMBER: int = 7
+const FAST_SHIP_NE_CABIN_NUMBER: int = 4
+const FAST_SHIP_CAPTAIN_CABIN_NUMBER: int = 6
+const VERMILION_PORT_NUMBER: int = 2
+
+## 1F is three regions, not one deck: the boarding cell, the 132-cell deck, and
+## a 25-cell west wing holding the captain's cabin door and the B1F west stairs.
+## The sailor on (14,7) walls the deck off from the wing for good, so B1F is the
+## only way over (`maps/FastShip1F.asm` object_event 14, 7).
+const SHIP_1F_TO_B1F_EAST: Vector2i = Vector2i(30, 14)
+const SHIP_1F_TO_NE_CABIN: Vector2i = Vector2i(19, 8)
+const SHIP_1F_TO_CAPTAIN_CABIN: Vector2i = Vector2i(3, 13)
+const SHIP_1F_SAILOR_FACE: Vector2i = Vector2i(25, 3)
+
+## B1F's east region is 18 cells: columns 30 and 31 from row 7 down to row 15.
+## The two sailors stand on (30,6) and (31,6) and the coord events below them
+## toggle which one does, so the corridor north is sealed while the map scene is
+## SCENE_FASTSHIPB1F_SAILOR_BLOCKS (`maps/FastShipB1F.asm`). The approach is the
+## cell below the east coord event: stepping onto (31,7) is what runs it, and a
+## resolving walk aimed at (31,7) would re-dispatch it until it ran out.
+const SHIP_B1F_TO_1F_EAST: Vector2i = Vector2i(31, 13)
+const SHIP_B1F_TO_1F_WEST: Vector2i = Vector2i(5, 11)
+const SHIP_B1F_SAILOR_APPROACH: Vector2i = Vector2i(31, 8)
+const SCENE_FASTSHIPB1F_NOOP: int = 1
+
+## `maps/FastShipCabins_NNW_NNE_NE.asm`'s lazy sailor on (4,26), faced from
+## below, and the NE cabin's own door back to 1F.
+const SHIP_NE_CABIN_DOOR: Vector2i = Vector2i(2, 24)
+const SHIP_LAZY_SAILOR_FACE: Vector2i = Vector2i(4, 27)
+
+## The captain's cabin is the third section of
+## `maps/FastShipCabins_SE_SSE_CaptainsCabin.asm`, reached from 1F's west wing.
+## The granddaughter stands on (2,25) with wall on three sides, so she is faced
+## from (1,25). `SSAquaCaptainsCabinWarpsToGrandpasCabinMovement` then carries
+## the player one cell right and six up, through five rows of wall, onto (2,19),
+## which is the grandpa cabin's own door back to 1F's east deck.
+const SHIP_GRANDDAUGHTER_FACE: Vector2i = Vector2i(1, 25)
+const SHIP_GRANDPA_CABIN_DOOR: Vector2i = Vector2i(2, 19)
+
+## constants/event_flags.asm, same numbers in both pins.
+const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
+const EVENT_FAST_SHIP_FOUND_GIRL: int = 50
+const EVENT_FAST_SHIP_LAZY_SAILOR: int = 51
+const EVENT_FAST_SHIP_INFORMED_ABOUT_LAZY_SAILOR: int = 52
+const EVENT_GOT_METAL_COAT_FROM_GRANDPA: int = 113
+const EVENT_FAST_SHIP_NE_CABIN_SAILOR: int = 1837
+
 ## New Bark Town to Olivine City. Map connections except where a `gate` cell is
 ## named, which is the door of a gate building whose far warp is the join
 ## (`data/maps/attributes.asm`, `maps/Route31.asm`, `maps/EcruteakCity.asm`).
@@ -4707,6 +4757,235 @@ func _ss_aqua_worried_grandpa(
 			"ok": false, "path": path,
 			"reason": "the grandpa scene failed: %s" % scene.get("reason", ""),
 		}
+	return _ss_aqua_interior(world, save, random, data, path)
+
+
+## The crossing itself: the B1F sailors, the errand that stands them down, the
+## west wing they were sealing off, and the gangway at Vermilion.
+func _ss_aqua_interior(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var informed: Dictionary = _ss_aqua_b1f_sailor(world, save, random, data, path)
+	if not bool(informed.get("ok", false)):
+		return informed
+	var found: Dictionary = _ss_aqua_lazy_sailor(world, save, random, data, path)
+	if not bool(found.get("ok", false)):
+		return found
+	var docked: Dictionary = _ss_aqua_granddaughter(world, save, random, data, path)
+	if not bool(docked.get("ok", false)):
+		return docked
+	return _ss_aqua_disembark(world, save, random, data, path)
+
+
+## B1F's on-duty sailor, who is the only thing that reveals the lazy one.
+##
+## `FastShipB1FSailorScript` reaches its `clearevent
+## EVENT_FAST_SHIP_CABINS_NNW_NNE_NE_SAILOR` only with FIRST_TIME, LAZY_SAILOR
+## and INFORMED all clear, which is exactly the outbound first trip. Stepping
+## onto the coord event first is not optional: `FastShipB1FSailorBlocksRight`
+## moves the visible sailor onto the player's own column, so the sailor being
+## talked to is on (31,6) whichever one started there.
+func _ss_aqua_b1f_sailor(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var below: Dictionary = _warp_chain(world, save, random, data, [SHIP_1F_TO_B1F_EAST])
+	if not bool(below.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the stairs down to B1F failed: %s" % below.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(FAST_SHIP_GROUP, FAST_SHIP_B1F_NUMBER):
+		return {"ok": false, "path": path, "reason": "the stairs ended on %s" % [_map_value(world)]}
+
+	var approach: Dictionary = _walk_cell_resolving(
+		world, SHIP_B1F_SAILOR_APPROACH, save, random, data
+	)
+	if not bool(approach.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk up B1F's east corridor failed: %s" % approach.get("reason", ""),
+		}
+	var stepped: Dictionary = world.move_result(Vector2i.UP)
+	var blocked: Dictionary = {"ok": false, "reason": "the step onto the coord event refused"}
+	if bool(stepped.get("ok", false)):
+		blocked = _drain_story(world, _dispatch_after_step(world), save, random, data, true)
+		blocked["ok"] = bool(blocked.get("terminal", false))
+	if not bool(blocked.get("ok", false)):
+		path.append({"step": "ss_aqua_b1f_sailor_blocks", "run": blocked})
+		return {
+			"ok": false, "path": path,
+			"reason": "the sailor block scene failed: %s" % blocked.get("reason", ""),
+		}
+
+	# Interacted in place rather than through _talk_to(): its walk would aim at
+	# the coord event cell the player is already standing on and re-dispatch it
+	# until it ran out of attempts.
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	var talked: Dictionary = {
+		"ok": bool(run.get("terminal", false)), "reason": run.get("reason", ""), "run": run,
+	}
+	path.append({
+		"step": "ss_aqua_b1f_sailor",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"informed": world.event_flag_active(EVENT_FAST_SHIP_INFORMED_ABOUT_LAZY_SAILOR),
+		"lazy_sailor_visible": not world.event_flag_active(EVENT_FAST_SHIP_NE_CABIN_SAILOR),
+	})
+	if not bool(talked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the on-duty sailor did not finish: %s" % talked.get("reason", ""),
+		}
+	if world.event_flag_active(EVENT_FAST_SHIP_NE_CABIN_SAILOR):
+		return {"ok": false, "path": path, "reason": "the lazy sailor is still hidden"}
+	return {"ok": true}
+
+
+## The lazy sailor in the NE cabin, whose own script stands the B1F pair down.
+##
+## `FastShipLazySailorScript` is a trainer battle inside an OBJECTTYPE_SCRIPT
+## object, and its tail is what matters here: `setevent
+## EVENT_FAST_SHIP_LAZY_SAILOR` and `setmapscene FAST_SHIP_B1F,
+## SCENE_FASTSHIPB1F_NOOP`, which retires both coord events for good.
+func _ss_aqua_lazy_sailor(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_cabin: Dictionary = _warp_chain(
+		world, save, random, data, [SHIP_B1F_TO_1F_EAST, SHIP_1F_TO_NE_CABIN]
+	)
+	if not bool(to_cabin.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the NE cabin door failed: %s" % to_cabin.get("reason", ""),
+		}
+	var talked: Dictionary = _talk_to(
+		world, SHIP_LAZY_SAILOR_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "ss_aqua_lazy_sailor",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"lazy_sailor": world.event_flag_active(EVENT_FAST_SHIP_LAZY_SAILOR),
+		"b1f_scene": world.state.map_scene(FAST_SHIP_GROUP, FAST_SHIP_B1F_NUMBER),
+		"run": talked,
+	})
+	if not bool(talked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the lazy sailor did not finish: %s" % talked.get("reason", ""),
+		}
+	if world.state.map_scene(FAST_SHIP_GROUP, FAST_SHIP_B1F_NUMBER) != SCENE_FASTSHIPB1F_NOOP:
+		return {"ok": false, "path": path, "reason": "B1F's sailor-block scene did not retire"}
+	return {"ok": true}
+
+
+## West past the stood-down sailors to the captain's cabin, and the docking the
+## granddaughter's scene runs.
+##
+## With the scene retired the coord events are inert, so the sailor left standing
+## on (31,6) leaves (30,6) open and B1F's west stairs are reachable. The
+## granddaughter's own scene is the way back east: it walks the player through
+## the wall onto the grandpa cabin's door, which opens onto the deck.
+func _ss_aqua_granddaughter(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var westward: Dictionary = _warp_chain(world, save, random, data, [
+		SHIP_NE_CABIN_DOOR, SHIP_1F_TO_B1F_EAST, SHIP_B1F_TO_1F_WEST,
+		SHIP_1F_TO_CAPTAIN_CABIN,
+	])
+	if not bool(westward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the crossing to the captain's cabin failed: %s" % westward.get("reason", ""),
+		}
+	var talked: Dictionary = _talk_to(
+		world, SHIP_GRANDDAUGHTER_FACE, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	path.append({
+		"step": "ss_aqua_granddaughter",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"arrived": world.event_flag_active(EVENT_FAST_SHIP_HAS_ARRIVED),
+		"found_girl": world.event_flag_active(EVENT_FAST_SHIP_FOUND_GIRL),
+		"metal_coat": world.event_flag_active(EVENT_GOT_METAL_COAT_FROM_GRANDPA),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(talked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the granddaughter scene did not finish: %s" % talked.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_FAST_SHIP_HAS_ARRIVED):
+		return {"ok": false, "path": path, "reason": "the ship never docked"}
+	if world.player_cell != SHIP_GRANDPA_CABIN_DOOR:
+		return {
+			"ok": false, "path": path,
+			"reason": "the scene left the player on %s, not the grandpa cabin's door" % [
+				_cell_value(world),
+			],
+		}
+	return {"ok": true}
+
+
+## The gangway. `FastShip1FSailor1Script`'s `.Arrived` branch needs
+## EVENT_FAST_SHIP_HAS_ARRIVED and DESTINATION_OLIVINE clear, which the Olivine
+## boarding cleared; it warps to Vermilion Port itself after `setmapscene
+## VERMILION_PORT, SCENE_VERMILIONPORT_LEAVE_SHIP`, so the deferred landfall
+## scene runs inside the same drain.
+func _ss_aqua_disembark(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_deck: Dictionary = _warp_chain(
+		world, save, random, data, [SHIP_GRANDPA_CABIN_DOOR]
+	)
+	if not bool(to_deck.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the grandpa cabin door failed: %s" % to_deck.get("reason", ""),
+		}
+	var talked: Dictionary = _talk_to(
+		world, SHIP_1F_SAILOR_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "ss_aqua_vermilion_landfall",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"first_time": world.event_flag_active(EVENT_FAST_SHIP_FIRST_TIME),
+		"run": talked,
+	})
+	if not bool(talked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gangway sailor did not finish: %s" % talked.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(FAST_SHIP_GROUP, VERMILION_PORT_NUMBER):
+		return {
+			"ok": false, "path": path,
+			"reason": "the crossing ended on %s, not Vermilion Port" % [_map_value(world)],
+		}
+	if not world.event_flag_active(EVENT_FAST_SHIP_FIRST_TIME):
+		return {"ok": false, "path": path, "reason": "the landfall scene did not run"}
 	return {"ok": true}
 
 

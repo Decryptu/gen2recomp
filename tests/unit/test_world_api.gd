@@ -2952,6 +2952,42 @@ func test_script_applymovement_executes_imported_object_and_player_streams() -> 
 	assert_eq(world.player_cell, Vector2i(7, 5))
 
 
+## Every step command reaches NormalStep (engine/overworld/movement.asm), which
+## only calls InitStep and never reads a permission, so a scripted step walks
+## through a wall. The S.S. Aqua's granddaughter scene is built on it.
+func test_script_movement_steps_through_a_wall_the_way_normal_step_does() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 0, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	assert_false(world.can_walk_to(Vector2i(9, 6)), "the fixture wall moved")
+	var results: Array = world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	assert_eq(world.player_cell, Vector2i(9, 6))
+
+
+func test_script_movement_still_refuses_a_step_off_the_map() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 0, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 6))
+	var results: Array = world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	assert_eq(world.player_cell, Vector2i(15, 6))
+
+
 func test_follow_command_moves_the_follower_after_a_player_step() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
 		"48:6080": [0x70, 2, 0, 0x91],

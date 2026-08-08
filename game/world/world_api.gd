@@ -2344,7 +2344,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			object.apply_direction(direction)
 			var destination: Vector2i = object.cell + direction
-			if can_object_walk_to(destination, object, direction):
+			if _cell_in_bounds(destination):
 				object.cell = destination
 			else:
 				generated.append({
@@ -2385,6 +2385,14 @@ func _apply_object_movement(event: Dictionary) -> Array:
 	return generated
 
 
+## A scripted step commits its cell without a permission check: every step
+## command reaches `NormalStep` (`engine/overworld/movement.asm`), whose
+## `InitStep`/`GetNextTile` (`engine/overworld/map_objects.asm`) only compute the
+## vector, and the movement command set has no collision toggle. Walking through
+## walls is what several cutscenes are built on, the S.S. Aqua's
+## `SSAquaCaptainsCabinWarpsToGrandpasCabinMovement` among them: it crosses five
+## wall rows to carry the player from the captain's cabin into the grandpa's.
+## Only the map bounds still refuse.
 func _apply_player_movement(event: Dictionary) -> Array:
 	var generated: Array = []
 	var map_group: int = int(event.get("map_group", -1))
@@ -2419,7 +2427,7 @@ func _apply_player_movement(event: Dictionary) -> Array:
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			player_facing = _facing_for_direction(direction)
 			var destination: Vector2i = player_cell + direction
-			if can_walk_to(destination, direction):
+			if _cell_in_bounds(destination):
 				player_cell = destination
 			else:
 				generated.append({
@@ -2451,6 +2459,13 @@ func _movement_direction(direction: int) -> Vector2i:
 		3:
 			return Vector2i.RIGHT
 	return Vector2i.ZERO
+
+
+func _cell_in_bounds(cell: Vector2i) -> bool:
+	if current_map == null:
+		return false
+	return cell.x >= 0 and cell.y >= 0 \
+		and cell.x < current_map.collision_width and cell.y < current_map.collision_height
 
 
 func _object_key(map_group: int, map_number: int, object_index: int) -> String:
