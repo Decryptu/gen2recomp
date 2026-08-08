@@ -73,6 +73,10 @@ const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_HEAL_MACHINE_ANIM: int = 62
 const SPECIAL_CHECK_POKERUS: int = 78
+## ProfOaksPCBoot, 101 in Crystal and 100 in Gold/Silver, which special_index()
+## already normalizes. Oak's Kanto script reaches it on every branch
+## (maps/OaksLab.asm's `.CheckPokedex`).
+const SPECIAL_PROF_OAKS_PC_BOOT: int = 101
 ## SnorlaxAwake, 96 in Crystal and 95 in Gold/Silver, which special_index()
 ## already normalizes. Its five proximity coordinates are the cells the source
 ## lists, in its own x,y order (engine/events/specials.asm's .ProximityCoords),
@@ -1166,6 +1170,13 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x9F:
 			_staged_engine_flags[Gen2WorldState.ENGINE_HALL_OF_FAME] = true
 			_events.append({"type": &"hall_of_fame_requested"})
+		0xA0:
+			## Script_credits farcalls RedCredits and then falls into
+			## Script_endall the way Script_halloffame does
+			## (engine/overworld/scripting.asm's ReturnFromCredits). No flag and
+			## no state: presentation only, and both call sites are followed by
+			## the source's own `end`, so this runs on rather than stopping.
+			_events.append({"type": &"credits_requested"})
 		0xA1:
 			return _stage_warp_facing_request(command)
 	var handled_sources: Array = [
@@ -1173,6 +1184,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x8D, 0x98,
 		0x8C,
 		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
+		0xA0,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -1589,6 +1601,14 @@ func _execute_special(special: int) -> Dictionary:
 			_emit_runtime_event(&"presentation_special_applied", {
 				"special": special, "kind": &"heal_machine_anim",
 				"machine_type": _script_value,
+			})
+		SPECIAL_PROF_OAKS_PC_BOOT:
+			## engine/events/prof_oaks_pc.asm's ProfOaksPCBoot prints, counts the
+			## set bits in wPokedexSeen and wPokedexCaught for the rating, plays
+			## the rating's sound and waits for A or B. No dex is modelled and
+			## nothing is written.
+			_emit_runtime_event(&"presentation_special_applied", {
+				"special": special, "kind": &"prof_oaks_pc_boot",
 			})
 		SPECIAL_CHECK_POKERUS:
 			var party: Dictionary = _request.get("party", {})

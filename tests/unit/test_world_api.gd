@@ -3379,6 +3379,95 @@ func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
 	))
 
 
+## Script_credits farcalls RedCredits and falls into the same Script_endall tail
+## as Script_halloffame (engine/overworld/scripting.asm's ReturnFromCredits), so
+## it commits nothing. maps/SilverCaveRoom3.asm's Red is its one call site.
+func test_credits_is_a_presentation_boundary_that_commits_no_flag() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# credits is Crystal $a2: pokegold's $a0 plus farjumptext at $52 and
+	# verbosegiveitemvar at $9f.
+	scripts["48:6100"] = [0xA2, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6100,
+	})
+
+	var result: Dictionary = runner.advance()
+
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_false(state.hall_of_fame())
+	assert_eq(state.engine_flags().size(), 0)
+	assert_eq(result["events"].filter(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"credits_requested"
+	).size(), 1)
+
+
+## ProfOaksPCBoot prints, counts the set bits in wPokedexSeen and wPokedexCaught
+## and waits for a button (engine/events/prof_oaks_pc.asm). Oak's Kanto script
+## reaches it on every branch, including the one that opens Mt. Silver.
+func test_prof_oaks_pc_boot_is_presentation_and_writes_nothing() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6110"] = [Gen2WorldScript.SPECIAL, 101, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6110,
+	})
+
+	var result: Dictionary = runner.advance()
+
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(state.event_flags().size(), 0)
+	assert_eq(state.engine_flags().size(), 0)
+	assert_true(result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"presentation_special_applied" \
+			and event.get("kind", &"") == &"prof_oaks_pc_boot"
+	), JSON.stringify(result["events"]))
+
+
+## constants/event_flags.asm, the flag Oak sets on the sixteen-badge branch.
+const EVENT_OPENED_MT_SILVER: int = 1871
+
+
+## maps/OaksLab.asm's Oak reads VAR_BADGES and opens Mt. Silver only on
+## `ifequal NUM_BADGES`, which is NUM_JOHTO_BADGES + NUM_KANTO_BADGES = 16
+## (constants/ram_constants.asm). Eight badges take `.Complain` instead, so the
+## count has to span both badge bytes for the walk west to be earned.
+func test_oaks_lab_opens_mt_silver_only_on_all_sixteen_badges() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6120"] = [
+		Gen2WorldScript.READVAR, 0x07,
+		Gen2WorldScript.IFEQUAL, 16, 0x30, 0x61,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6130"] = [
+		Gen2WorldScript.SETEVENT, EVENT_OPENED_MT_SILVER & 0xFF,
+		EVENT_OPENED_MT_SILVER >> 8, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	for badges: int in [8, 16]:
+		var state := Gen2WorldState.new()
+		for badge: int in range(badges):
+			state.set_engine_flag(Gen2WorldState.badge_flag(badge))
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": 0x6120,
+		})
+
+		var result: Dictionary = runner.advance()
+
+		assert_eq(result["status"], &"complete", JSON.stringify(result))
+		assert_eq(state.badge_count(), badges)
+		assert_eq(
+			state.is_event_flag_active(EVENT_OPENED_MT_SILVER), badges == 16,
+			"%d badges" % badges
+		)
+
+
 ## LancesRoomLanceScript ends on `warpfacing UP, HALL_OF_FAME, 4, 13`, and the
 ## Hall of Fame's own scene is what runs `halloffame`. A map scene queued by a
 ## warp is picked up by the same run_event_queue() loop that took the warp, so
