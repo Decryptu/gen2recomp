@@ -1816,9 +1816,23 @@ func _resume_after(advanced: Dictionary) -> Array:
 
 ## Starts each queued script in turn and stops at the first one that waits for
 ## the host.
+##
+## A warp applied while resuming a host request leaves the destination's map
+## scene pending exactly as one applied inside [method run_event_queue] does, so
+## this has to pick it up too. Boarding the S.S. Aqua is where that shows:
+## `OlivinePortSailorAtGangwayScript` warps mid-script and the ship's own
+## `FastShip1FEnterShipScript` is what walks the player away from the door, so
+## dropping it left the player boxed in against the sailor who blocks it.
 func _drain_script_queue() -> Array:
 	var results: Array = []
-	while _active_script == null and not _script_queue.is_empty():
+	while _active_script == null:
+		if _script_queue.is_empty():
+			if not _map_entry_scene_pending:
+				break
+			_map_entry_scene_pending = false
+			_queue_map_scene()
+			if _script_queue.is_empty():
+				break
 		var request: Dictionary = _script_queue.pop_front()
 		_active_script = Gen2WorldScriptRunner.begin(
 			data, state, request, Callable(self, "_validate_script_warp"),

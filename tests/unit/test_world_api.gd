@@ -3227,6 +3227,37 @@ func test_a_warpfacing_runs_the_target_map_scene_in_the_same_event_queue() -> vo
 	))
 
 
+## The same handoff, but with the warp reached from a host request rather than a
+## text pause: `OlivinePortSailorAtGangwayScript` plays a sound and then warps
+## onto the S.S. Aqua, so the ship's entry scene resumes through
+## complete_runtime_request() instead of run_event_queue(). Dropping the pending
+## scene there left the player standing in the ship's doorway.
+func test_a_warp_taken_while_resuming_a_host_request_still_runs_the_map_scene() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# playsound, then warp to map 1/2. Raw Crystal: playsound $85, warp $3c.
+	scripts["48:6400"] = [0x85, 0x1C, 0x00, 0x3C, 1, 2, 2, 2, Gen2WorldScript.END]
+	scripts["48:6410"] = [0x8D, 0x20, 0x64, Gen2WorldScript.END]
+	scripts["48:6420"] = [Gen2WorldScript.SETEVENT, 41, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var target_map: Gen2WorldMap = data.world_map(1, 2)
+	target_map.scripts["callbacks"] = []
+	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6410}]
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6400
+	var results: Array = world.dispatch_script_events()
+	assert_false(world.pending_runtime_request().is_empty(), "the sound should be pending")
+
+	results = world.complete_runtime_request({"ok": true})
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_true(
+		world.event_flag_active(41),
+		"the destination's map scene did not run on the resume"
+	)
+	assert_false(results.is_empty())
+
+
 func test_the_source_random_command_rolls_on_the_injected_generator() -> void:
 	# RANDOM 4, then set one of four event flags by the value it rolled.
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
