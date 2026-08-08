@@ -471,6 +471,25 @@ const EVENT_TRAINERS_IN_CERULEAN_GYM: int = 1903
 ## The three swimmer flags `CeruleanGymMistyScript` sets itself, and her own.
 const EVENT_BEAT_MISTY: int = 1222
 const CERULEAN_GYM_TRAINER_FLAGS: Array[int] = [1017, 1018, 1448]
+
+## Lavender Town, reached back through Saffron. Route 5's own warp to its gate,
+## then Saffron's east exit, which is a third gate building
+## (`maps/SaffronCity.asm` warp 14 to ROUTE_8_SAFFRON_GATE, itself in the
+## LAVENDER group). Route 8 then connects straight onto Lavender.
+const ROUTE_5_GATE_DOOR: Vector2i = Vector2i(8, 17)
+const SAFFRON_ROUTE_8_GATE_DOOR: Vector2i = Vector2i(39, 22)
+const LAVENDER_GROUP: int = 18
+const ROUTE_8_NUMBER: int = 1
+const LAVENDER_TOWN_NUMBER: int = 4
+const LAV_RADIO_TOWER_1F_NUMBER: int = 12
+const ENGINE_FLYPOINT_LAVENDER: int = 59
+## `maps/LavenderTown.asm` warp 7, and the gentleman inside on (9,1). He is the
+## one thing on this leg the errand behind it unlocks: `ENGINE_EXPN_CARD` is
+## three in both pins, sitting in wPokegearFlags ahead of the Crystal-only
+## ENGINE_MOBILE_SYSTEM, so it needs no profile split.
+const LAVENDER_RADIO_TOWER_DOOR: Vector2i = Vector2i(14, 5)
+const RADIO_TOWER_GENTLEMAN_FACE: Vector2i = Vector2i(9, 2)
+const ENGINE_EXPN_CARD: int = 3
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
 
@@ -5693,6 +5712,115 @@ func _cerulean_gym_leg(
 			"ok": false, "path": path,
 			"reason": "Misty set %d of her three swimmer flags" % trainers_beaten,
 		}
+	return _lavender_leg(world, save, random, data, path)
+
+
+## Cerulean Gym back through Saffron to Lavender Town and the Kanto Radio Tower.
+##
+## Two gate buildings and one open connection, the same shape as the walk that
+## reached Cerulean, run in reverse and then east: Route 5's own warp at (8,17)
+## into the Saffron gate, Saffron's warp 14 into the Route 8 gate, and Route 8's
+## single east crossing at (39,8) onto Lavender's (0,8). No cut tree and no
+## errand stand in the way of the town itself; Route 8's five trainers are the
+## only thing between the gate and the crossing, and just one of them, Super Nerd
+## Tom, cannot be routed around. The three bikers watch the corridor west of the
+## route's eight `$a3` hop-down ledges, and the eastbound walk hops off row 6
+## onto row 8 east of them, so it never enters a line they cover.
+##
+## What the leg is for is the EXPN CARD. `LavRadioTower1FGentlemanScript` gates it
+## on `EVENT_RETURNED_MACHINE_PART`, which the Cerulean errand already set, so
+## this is the second time a Kanto opener sat before its gate rather than behind
+## it: the tower is off the air until the Power Plant runs, and the card is what
+## eventually answers `special SnorlaxAwake` on Route 11.
+func _lavender_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Cerulean Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+	var southward: Dictionary = _walk_connection_resolving(
+		world, "south", SAFFRON_GROUP, ROUTE_5_NUMBER, save, random, data
+	)
+	var _route_5_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(southward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk south to Route 5 failed: %s" % southward.get("reason", ""),
+		}
+	var to_saffron: Dictionary = _gate_leg(
+		world, save, random, data, ROUTE_5_GATE_DOOR, SAFFRON_GROUP, SAFFRON_CITY_NUMBER
+	)
+	if not bool(to_saffron.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 5 gate south failed: %s" % to_saffron.get("reason", ""),
+		}
+	var to_route_8: Dictionary = _gate_leg(
+		world, save, random, data, SAFFRON_ROUTE_8_GATE_DOOR, LAVENDER_GROUP, ROUTE_8_NUMBER
+	)
+	path.append({"step": "route_8", "map": _map_value(world), "cell": _cell_value(world)})
+	if not bool(to_route_8.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 8 gate failed: %s" % to_route_8.get("reason", ""),
+		}
+
+	var eastward: Dictionary = _walk_connection_resolving(
+		world, "east", LAVENDER_GROUP, LAVENDER_TOWN_NUMBER, save, random, data
+	)
+	var town_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "lavender_town",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_LAVENDER),
+		"encounters": eastward.get("encounters", []),
+		"run": town_entry,
+	})
+	if not bool(eastward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk east to Lavender failed: %s" % eastward.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_LAVENDER):
+		return {"ok": false, "path": path, "reason": "Lavender's flypoint callback did not run"}
+
+	var into_tower: Dictionary = _warp_chain(
+		world, save, random, data, [LAVENDER_RADIO_TOWER_DOOR]
+	)
+	if not bool(into_tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Radio Tower door failed: %s" % into_tower.get("reason", ""),
+		}
+	var gentleman: Dictionary = _talk_to(
+		world, RADIO_TOWER_GENTLEMAN_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "lavender_radio_tower_expn_card",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"expn_card": world.state.is_engine_flag_active(ENGINE_EXPN_CARD),
+		"run": gentleman,
+	})
+	if not bool(gentleman.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Radio Tower gentleman did not finish: %s" % gentleman.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_EXPN_CARD):
+		return {"ok": false, "path": path, "reason": "ENGINE_EXPN_CARD was not set"}
 	return {"ok": true}
 
 

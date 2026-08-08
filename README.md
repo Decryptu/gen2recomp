@@ -222,13 +222,14 @@ Headless tools, all against a real imported cache:
 | `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina, in all three games |
 | `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines, in all three games |
 | `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it, in all three games |
+| `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending in the Hall of Fame
+# the full walked route: Johto, the Hall of Fame, and Kanto as far as Lavender
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
