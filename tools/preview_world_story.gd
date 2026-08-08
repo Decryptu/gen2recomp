@@ -311,6 +311,34 @@ const SHIP_LAZY_SAILOR_FACE: Vector2i = Vector2i(4, 27)
 const SHIP_GRANDDAUGHTER_FACE: Vector2i = Vector2i(1, 25)
 const SHIP_GRANDPA_CABIN_DOOR: Vector2i = Vector2i(2, 19)
 
+## Vermilion City (12/3) and its gym (12/11), the first Kanto maps the route
+## walks. `maps/VermilionPortPassage.asm` is two regions joined by its own stair
+## pair ((3,2) to (15,4)), the way Olivine's passage is, so the walk from the
+## dock to the city takes three warps.
+const VERMILION_GROUP: int = 12
+const VERMILION_CITY_NUMBER: int = 3
+const VERMILION_GYM_NUMBER: int = 11
+const VERMILION_PORT_EXIT: Vector2i = Vector2i(9, 5)
+const VERMILION_PASSAGE_STAIRS: Vector2i = Vector2i(3, 2)
+const VERMILION_PASSAGE_EXIT: Vector2i = Vector2i(15, 0)
+## `maps/VermilionCity.asm` warp 7, entered from below: the row above it is the
+## mart block's wall, so (10,20) is its only approach.
+const VERMILION_GYM_DOOR: Vector2i = Vector2i(10, 19)
+## And the gym's whole yard, 42 cells of it, is walled off from the rest of the
+## city by one `COLL_CUT_TREE` ($12) on (13,18). Cutting it is the only way in,
+## so this is the first Kanto cell the route has to open rather than walk.
+const VERMILION_GYM_TREE_APPROACH: Vector2i = Vector2i(13, 17)
+## `maps/VermilionGym.asm` puts Surge on (5,2) behind the pillar grid, faced
+## from the cell below. The gym has no scene scripts and no callbacks: unlike
+## its Gen 1 self it is open from the door, and the three trainers are sight
+## lines across the grid rather than a gate.
+const SURGE_FACE: Vector2i = Vector2i(5, 3)
+## ENGINE_THUNDERBADGE's place in source badge order, for
+## Gen2WorldState.badge_flag(), and the flypoint the city's own NEWMAP callback
+## sets (`constants/engine_flags.asm`).
+const BADGE_THUNDER: int = 10
+const ENGINE_FLYPOINT_VERMILION: int = 58
+
 ## constants/event_flags.asm, same numbers in both pins.
 const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
 const EVENT_FAST_SHIP_FOUND_GIRL: int = 50
@@ -4558,6 +4586,10 @@ func _kanto_crossing_path(
 	var crossing: Dictionary = _ss_aqua_crossing(spawned, save, random, data, path)
 	if not bool(crossing.get("ok", false)):
 		return crossing
+
+	var thunder: Dictionary = _thunder_badge_path(spawned, save, random, data, path)
+	if not bool(thunder.get("ok", false)):
+		return thunder
 	return {"ok": true, "world": spawned}
 
 
@@ -4941,6 +4973,89 @@ func _ss_aqua_granddaughter(
 				_cell_value(world),
 			],
 		}
+	return {"ok": true}
+
+
+## The Vermilion Port dock to the Thunder Badge, the route's first Kanto leg.
+##
+## Nothing gates it. `VermilionGym_MapScripts` declares neither a scene nor a
+## callback, so the gym is open from the door and Surge answers as soon as he is
+## faced; `VermilionGymSurgeScript` is his own `checkflag ENGINE_THUNDERBADGE`,
+## the battle, and the three trainer flags he sets whether they were fought or
+## not.
+func _thunder_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_city: Dictionary = _warp_chain(
+		world, save, random, data,
+		[VERMILION_PORT_EXIT, VERMILION_PASSAGE_STAIRS, VERMILION_PASSAGE_EXIT]
+	)
+	if not bool(to_city.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk up from the dock failed: %s" % to_city.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(VERMILION_GROUP, VERMILION_CITY_NUMBER):
+		return {
+			"ok": false, "path": path,
+			"reason": "the passage ended on %s, not Vermilion City" % [_map_value(world)],
+		}
+	path.append({
+		"step": "vermilion_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_VERMILION),
+	})
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_VERMILION):
+		return {"ok": false, "path": path, "reason": "the city's flypoint callback did not run"}
+
+	var tree: Dictionary = _cut_at(
+		world, VERMILION_GYM_TREE_APPROACH, Gen2WorldSprite.FACING_DOWN,
+		save, random, data
+	)
+	path.append({
+		"step": "vermilion_gym_tree",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"cut": tree.get("cell", []),
+	})
+	if not bool(tree.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gym yard's tree failed: %s" % tree.get("reason", ""),
+		}
+
+	var to_gym: Dictionary = _warp_chain(world, save, random, data, [VERMILION_GYM_DOOR])
+	if not bool(to_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gym door failed: %s" % to_gym.get("reason", ""),
+		}
+	var surge: Dictionary = _talk_to(
+		world, SURGE_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "vermilion_gym_surge",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"thunder_badge": world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+			BADGE_THUNDER, Gen2WorldState.is_crystal_profile(data)
+		)),
+		"run": surge,
+	})
+	if not bool(surge.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Lt. Surge did not finish: %s" % surge.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		BADGE_THUNDER, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return {"ok": false, "path": path, "reason": "ENGINE_THUNDERBADGE was not set"}
 	return {"ok": true}
 
 
@@ -5790,6 +5905,10 @@ func _talk_to(
 	return {
 		"ok": bool(run.get("terminal", false)),
 		"reason": run.get("reason", ""),
+		# Anything met on the way, which for a gym is the trainers between the
+		# door and the leader. Reported rather than dropped: the walk resolves
+		# them, so without this a fought battle leaves no trace in the path.
+		"encounters": walked.get("encounters", []),
 		"run": run,
 	}
 
