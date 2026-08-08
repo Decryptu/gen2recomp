@@ -12,6 +12,9 @@ const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
+## constants/sprite_constants.asm's first real id, and what GetMonSprite answers
+## for a variable sprite no script has assigned yet.
+const SPRITE_CHRIS: int = 1
 const TRAINER_SHOCK_EMOTE: int = 0
 const TRAINER_SHOCK_FRAMES: int = 30
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
@@ -3619,6 +3622,16 @@ func _load_objects() -> void:
 		var sprite_number: int = int(_variable_sprites.get(
 			source_sprite_number, source_sprite_number
 		))
+		## GetMonSprite's `.Variable` branch reads wVariableSprites and falls
+		## through to `.NoBreedmon` when the slot is still zero, which answers
+		## SPRITE_CHRIS (1) rather than nothing
+		## (engine/overworld/overworld.asm). So an object whose variable sprite
+		## no script has assigned yet is drawn, occupies its cell and is
+		## talkable. Copycat's House 2F is where it matters: SPRITE_COPYCAT is
+		## $fb and only the Copycat's own script assigns it, so without this she
+		## could not be reached to run it.
+		if sprite_number >= Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE:
+			sprite_number = SPRITE_CHRIS
 		var sprite: Gen2WorldSprite = data.overworld_sprite(sprite_number)
 		var object_event: Dictionary = value.duplicate(true)
 		object_event["sprite"] = sprite_number

@@ -735,6 +735,9 @@ static func command_at(
 					command["map_group"] = int(data[offset + 2])
 					command["map_number"] = int(data[offset + 3])
 					return command
+				0xA8: # wait, in units of six frames
+					command["value"] = int(data[offset + 1])
+					return command
 		var source: int = Gen2WorldScript.source_opcode(opcode, crystal_commands)
 		match source:
 			0x55:
@@ -790,7 +793,7 @@ static func command_at(
 				command["block"] = int(data[offset + 3])
 			0x7C, 0x7E, 0x8C, 0x8E, 0x94, 0x97, 0x9B:
 				command["address"] = read_u16(data, offset + 1)
-			0x7D:
+			0x7D, 0x89:
 				command["value"] = int(data[offset + 1])
 			0x80:
 				command["value"] = read_u16(data, offset + 1)
