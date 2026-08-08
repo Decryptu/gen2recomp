@@ -95,9 +95,10 @@ const OVER: StringName = &"over"
 ## reads the player's party structure, so a trainer's Pokémon are the reason for
 ## this, never the recipient.
 const EXP_GAINED: StringName = &"exp_gained"
-## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], split among
-## [constant Gen2Battle] participants the way [method Gen2Experience.stat_exp_gain]
-## splits them, none of it the same number as [constant EXP_GAINED].
+## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], out of the same
+## divided block [constant EXP_GAINED]'s award came from: see
+## [method Gen2Experience.shared_block]. Divided by the same count, but a base
+## stat rather than a figure the level formula has been through.
 const STAT_EXP_GAINED: StringName = &"stat_exp_gained"
 ## A level gained from the experience just awarded. [code]old_stats[/code] and
 ## [code]new_stats[/code] are both [Gen2BattleMon.stats], so a screen can show
@@ -1021,34 +1022,72 @@ func _award_experience(events: Array) -> void:
 			_give_experience_for(mon(ENEMY), events)
 
 
-## Splits the exp and the stat exp [param defeated] is worth among every
-## [constant PLAYER] party index that has fought since it was sent in, then
-## resets that set to whoever is left standing: the next enemy Pokémon, if the
-## trainer has one, starts its own participant count fresh.
+## Splits what [param defeated] is worth between everyone owed a share, then
+## resets the participant set to whoever is left standing: the next enemy
+## Pokémon, if the trainer has one, starts its own participant count fresh.
+##
+## `UpdateFaintedPlayerMon` awards in two passes when anything alive is holding
+## an Exp. Share. The block is halved once, then that same halved block is split
+## among the participants, and split again among the holders, so each group
+## divides half of it. A Pokémon that both fought and holds one is in both
+## passes and is awarded twice.
 func _give_experience_for(defeated: Gen2BattleMon, events: Array) -> void:
 	var participants: Array = (_participants[PLAYER] as Dictionary).keys()
-	if not participants.is_empty():
-		var award: int = Gen2Experience.award_for(
-			defeated.level, defeated.base_exp(), is_trainer_battle
-		)
-		var stat_gains: Dictionary = Gen2Experience.stat_exp_gain(
-			defeated.base_stat_exp_shape(), participants.size()
-		)
-		for index: int in participants:
-			var learner: Gen2BattleMon = party(PLAYER).at(int(index))
-			if learner != null and not learner.is_fainted():
-				_give_experience_to(learner, int(index), award, stat_gains, events)
+	var holders: Array = _exp_share_holders()
+	var halved: bool = not holders.is_empty()
+
+	_award_share(defeated, participants, halved, false, events)
+	_award_share(defeated, holders, halved, true, events)
 
 	_participants[PLAYER] = {party(PLAYER).active: true}
 
 
+## One of the two passes: the block divided among [param recipients], then handed
+## to each of them that is still standing.
+func _award_share(
+	defeated: Gen2BattleMon, recipients: Array, halved: bool, by_exp_share: bool, events: Array
+) -> void:
+	if recipients.is_empty():
+		return
+	var block: Dictionary = Gen2Experience.shared_block(
+		defeated.base_stat_exp_shape(), defeated.base_exp(), halved, recipients.size()
+	)
+	var award: int = Gen2Experience.award_for(
+		defeated.level, int(block["base_exp"]), is_trainer_battle
+	)
+	var stat_gains: Dictionary = block["stats"]
+	for index: int in recipients:
+		var learner: Gen2BattleMon = party(PLAYER).at(int(index))
+		if learner != null and not learner.is_fainted():
+			_give_experience_to(learner, int(index), award, stat_gains, by_exp_share, events)
+
+
+## `IsAnyMonHoldingExpShare`: every living party index carrying one, in party
+## order. A fainted holder is skipped and does not count towards the split, the
+## same test the routine makes before it looks at the item at all.
+func _exp_share_holders() -> Array:
+	var out: Array = []
+	var party_side: Gen2Party = party(PLAYER)
+	for index: int in party_side.size():
+		var member: Gen2BattleMon = party_side.at(index)
+		if member != null and not member.is_fainted() \
+				and member.item == Gen2Experience.EXP_SHARE_ITEM:
+			out.append(index)
+	return out
+
+
 func _give_experience_to(
-	learner: Gen2BattleMon, index: int, award: int, stat_gains: Dictionary, events: Array
+	learner: Gen2BattleMon, index: int, award: int, stat_gains: Dictionary,
+	by_exp_share: bool, events: Array
 ) -> void:
 	learner.gain_exp(award)
 	events.append({
 		"type": EXP_GAINED, "side": PLAYER, "index": index,
 		"species": learner.species, "amount": award, "exp": learner.exp,
+		# Which of the two passes this came from. The cartridge prints the same
+		# line either way; this is here so a Pokémon that is in both passes can
+		# be told apart from one awarded twice for any other reason.
+		"exp_share": by_exp_share,
 	})
 
 	learner.gain_stat_exp(stat_gains)
