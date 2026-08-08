@@ -5,7 +5,13 @@ extends RefCounted
 ## cartridge-derived data and has a different lifecycle.
 
 const ROOT: String = "user://save_slots"
-const SLOT_COUNT: int = 3
+## Slots are created on demand rather than preallocated, so this is only a
+## ceiling: it keeps a slot number a bounded, validatable thing and stops a
+## runaway caller filling the directory. Slot files are still `slot_N.json`,
+## so the three slots written before this stay exactly where they were.
+const MAX_SLOTS: int = 99
+const SLOT_PREFIX: String = "slot_"
+const SLOT_SUFFIX: String = ".json"
 const BACKUP_SUFFIX: String = ".bak"
 const CONTAINER_PREFIX: String = "#gen2save"
 const CONTAINER_VERSION: int = 1
@@ -16,8 +22,14 @@ const STARTER_SPECIES: Array[int] = [152, 155, 158]
 const STARTER_ITEM: int = 0xAD
 
 
+static func directory_for(game_id: StringName, rom_sha1: String) -> String:
+	return "%s/%s_%s" % [ROOT, String(game_id), rom_sha1.substr(0, 8)]
+
+
 static func path_for(game_id: StringName, rom_sha1: String, slot: int) -> String:
-	return "%s/%s_%s/slot_%d.json" % [ROOT, String(game_id), rom_sha1.substr(0, 8), slot]
+	return "%s/%s%d%s" % [
+		directory_for(game_id, rom_sha1), SLOT_PREFIX, slot, SLOT_SUFFIX
+	]
 
 
 static func backup_path_for(game_id: StringName, rom_sha1: String, slot: int) -> String:
@@ -85,21 +97,144 @@ static func load_result(game_id: StringName, rom_sha1: String, slot: int, data: 
 	return primary_result
 
 
+## The slots that exist, in slot order. Unlike the fixed-count version this
+## returns nothing for a game with no saves, so a caller draws what is there
+## and offers to create the rest.
 static func slots_for(game_id: StringName, rom_sha1: String, data: GameData) -> Array:
 	var out: Array = []
-	for slot: int in SLOT_COUNT:
+	for slot: int in occupied_slots(game_id, rom_sha1):
 		var row: Dictionary = {
 			"slot": slot,
-			"exists": exists(game_id, rom_sha1, slot),
+			"exists": true,
 			"valid": false,
+			"label": "",
+			"player_name": "",
 			"message": "Empty",
 		}
-		if row["exists"]:
-			var result: Dictionary = load_result(game_id, rom_sha1, slot, data)
-			row["valid"] = bool(result["ok"])
-			row["message"] = "Ready" if result["ok"] else String(result["message"])
+		var result: Dictionary = load_result(game_id, rom_sha1, slot, data)
+		row["valid"] = bool(result["ok"])
+		row["message"] = "Ready" if result["ok"] else String(result["message"])
+		if result["ok"]:
+			var loaded: Gen2SaveData = result["save"]
+			row["label"] = loaded.label
+			row["player_name"] = loaded.player_name
 		out.append(row)
 	return out
+
+
+## Slot numbers with a primary or backup copy on disk, ascending. Reads the
+## directory rather than probing every number, so an empty game costs one
+## listing instead of MAX_SLOTS existence checks.
+static func occupied_slots(game_id: StringName, rom_sha1: String) -> Array[int]:
+	var found: Array[int] = []
+	var directory: String = directory_for(game_id, rom_sha1)
+	if not DirAccess.dir_exists_absolute(directory):
+		return found
+	for file_name: String in DirAccess.get_files_at(directory):
+		var slot: int = _slot_from_file_name(file_name)
+		if slot >= 0 and not found.has(slot):
+			found.append(slot)
+	found.sort()
+	return found
+
+
+## Accepts the backup copy too, so a slot whose primary was lost still counts
+## as occupied, matching [method exists].
+static func _slot_from_file_name(file_name: String) -> int:
+	var name: String = file_name
+	if name.ends_with(BACKUP_SUFFIX):
+		name = name.substr(0, name.length() - BACKUP_SUFFIX.length())
+	if not name.begins_with(SLOT_PREFIX) or not name.ends_with(SLOT_SUFFIX):
+		return -1
+	var digits: String = name.substr(
+		SLOT_PREFIX.length(), name.length() - SLOT_PREFIX.length() - SLOT_SUFFIX.length()
+	)
+	if not digits.is_valid_int():
+		return -1
+	var slot: int = int(digits)
+	return slot if _valid_slot(slot) else -1
+
+
+## The lowest unused slot number, or -1 when the ceiling is reached. Reusing a
+## freed number rather than always counting up keeps a player who deletes and
+## recreates from drifting towards the cap.
+static func next_free_slot(game_id: StringName, rom_sha1: String) -> int:
+	var used: Array[int] = occupied_slots(game_id, rom_sha1)
+	for slot: int in MAX_SLOTS:
+		if not used.has(slot):
+			return slot
+	return -1
+
+
+## Renames a slot in place. The label lives in the save itself rather than a
+## sidecar, so an exported file carries its own name.
+static func rename_slot(
+	game_id: StringName, rom_sha1: String, slot: int, new_label: String, data: GameData
+) -> Dictionary:
+	var trimmed: String = new_label.strip_edges()
+	if trimmed.length() > Gen2SaveData.MAX_LABEL:
+		return _failure("a slot name is at most %d characters" % Gen2SaveData.MAX_LABEL)
+	var result: Dictionary = load_result(game_id, rom_sha1, slot, data)
+	if not result["ok"]:
+		return result
+	var loaded: Gen2SaveData = result["save"]
+	loaded.label = trimmed
+	return save(loaded, data)
+
+
+## Copies the primary slot file to a player-chosen path. The container header
+## goes with it, so an exported file is exactly what [method import_slot]
+## expects back and is checksum-checked on the way in.
+static func export_slot(
+	game_id: StringName, rom_sha1: String, slot: int, target_path: String
+) -> Dictionary:
+	if not exists(game_id, rom_sha1, slot):
+		return _failure("save slot %d is empty" % (slot + 1))
+	var source: String = path_for(game_id, rom_sha1, slot)
+	if not FileAccess.file_exists(source):
+		source = backup_path_for(game_id, rom_sha1, slot)
+	var reader: FileAccess = FileAccess.open(source, FileAccess.READ)
+	if reader == null:
+		return _failure("the save could not be read for export")
+	var document: String = reader.get_as_text()
+	reader.close()
+	var written: Dictionary = _write_file(target_path, document)
+	if not written["ok"]:
+		return _failure("the save could not be written to %s" % target_path)
+	return {"ok": true, "message": "", "path": target_path}
+
+
+## Reads an exported file into the next free slot. The file is validated
+## against the selected cache before anything is written, and its recorded
+## game and cartridge must match, so one cartridge's save cannot land under
+## another's.
+static func import_slot(source_path: String, data: GameData) -> Dictionary:
+	if data == null:
+		return _failure("no cartridge cache is selected")
+	var reader: FileAccess = FileAccess.open(source_path, FileAccess.READ)
+	if reader == null:
+		return _failure("that file could not be read")
+	var text: String = reader.get_as_text()
+	reader.close()
+	var container: Dictionary = _unwrap(text)
+	if not container["ok"]:
+		return _failure(String(container["message"]))
+	var parser := JSON.new()
+	if parser.parse(String(container["payload"])) != OK:
+		return _failure("that file is not valid save data")
+	var candidate: Gen2SaveData = Gen2SaveData.from_dict(parser.data)
+	if candidate == null:
+		return _failure("that file is not valid save data")
+	if candidate.game_id != data.id or candidate.rom_sha1 != data.sha1:
+		return _failure("that save belongs to a different cartridge")
+	var slot: int = next_free_slot(data.id, data.sha1)
+	if slot < 0:
+		return _failure("every save slot is in use")
+	candidate.slot = slot
+	var result: Dictionary = save(candidate, data)
+	if not result["ok"]:
+		return result
+	return {"ok": true, "message": "", "slot": slot, "save": candidate}
 
 
 ## Creates the same deterministic development party the old battle screen used,
@@ -242,7 +377,7 @@ static func _checksum(payload: String) -> int:
 
 
 static func _valid_slot(slot: int) -> bool:
-	return slot >= 0 and slot < SLOT_COUNT
+	return slot >= 0 and slot < MAX_SLOTS
 
 
 static func _failure(message: String) -> Dictionary:

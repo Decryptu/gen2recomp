@@ -52,9 +52,9 @@ func set_data(data: GameData) -> void:
 		_refresh()
 
 
-## Selects one of the three project slots.
+## Selects a project slot by number.
 func select_slot(slot: int) -> bool:
-	if slot < 0 or slot >= Gen2SaveStore.SLOT_COUNT:
+	if slot < 0 or slot >= Gen2SaveStore.MAX_SLOTS:
 		return false
 	_selected_slot = slot
 	_new_game_visible = false
@@ -64,9 +64,28 @@ func select_slot(slot: int) -> bool:
 
 ## Opens the new-game form for a slot. Existing slots require confirmation
 ## through the button-driven path, while tests and tools may call this directly.
+## Without a slot, an unselected screen falls back to a fresh one, which is the
+## only thing a game with no saves at all can mean.
 func open_new_game(slot: int = -1) -> bool:
 	if slot >= 0 and not select_slot(slot):
 		return false
+	if slot < 0 and _selected_slot < 0 and not open_new_slot():
+		return false
+	_new_game_visible = true
+	_refresh_details()
+	return true
+
+
+## Targets the next unused slot, the "new save slot" action. Fails only when
+## every slot number is taken.
+func open_new_slot() -> bool:
+	if _data == null:
+		return false
+	var slot: int = Gen2SaveStore.next_free_slot(_data.id, _data.sha1)
+	if slot < 0:
+		_set_status("No new slot is available.", "Delete a save to free one.", ERROR)
+		return false
+	_selected_slot = slot
 	_new_game_visible = true
 	_refresh_details()
 	return true
@@ -76,6 +95,13 @@ func open_new_game(slot: int = -1) -> bool:
 func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
 	if _data == null:
 		_set_status("New game unavailable.", "No imported cartridge cache is selected.", ERROR)
+		return false
+	# Nothing is selected when the game has no saves at all, and a new game is
+	# then unambiguously a new slot.
+	if _selected_slot < 0:
+		_selected_slot = Gen2SaveStore.next_free_slot(_data.id, _data.sha1)
+	if _selected_slot < 0:
+		_set_status("New game was not created.", "Every save slot is in use.", ERROR)
 		return false
 	var created: Gen2SaveData = Gen2SaveStore.create_new_game(
 		_data, _selected_slot, player_name
@@ -272,8 +298,10 @@ func _refresh() -> void:
 		_set_status("No cartridge cache is ready.", "Return to the launcher and import a supported ROM.", ERROR)
 		return
 	_slots = Gen2SaveStore.slots_for(_data.id, _data.sha1, _data)
-	if _selected_slot < 0 or _selected_slot >= _slots.size():
-		_selected_slot = 0
+	# Slots are created on demand, so a slot number is no longer its own index
+	# in this list and a game with no saves has no selectable slot at all.
+	if _row_for(_selected_slot).is_empty():
+		_selected_slot = int(_slots[0]["slot"]) if not _slots.is_empty() else -1
 	_slots_section.visible = not _new_game_visible
 	_slot_scroll.visible = not _new_game_visible
 	_refresh_slot_cards()
@@ -326,9 +354,9 @@ func _refresh_details() -> void:
 	_slot_scroll.visible = not _new_game_visible
 	for child: Node in _details_box.get_children():
 		child.free()
-	if _data == null or _slots.is_empty():
+	var row: Dictionary = _row_for(_selected_slot)
+	if _data == null or row.is_empty():
 		return
-	var row: Dictionary = _slots[_selected_slot]
 	var heading := Label.new()
 	heading.text = "SLOT %d" % (_selected_slot + 1)
 	heading.add_theme_color_override("font_color", TEXT)
@@ -505,18 +533,29 @@ func _back_to_launcher() -> void:
 	get_tree().change_scene_to_file.call_deferred("res://game/main/main.tscn")
 
 
+## The listed row for a slot number, or an empty dictionary when that slot has
+## no save. [member _slots] holds only occupied slots, so this is a search
+## rather than an index.
+func _row_for(slot: int) -> Dictionary:
+	if slot < 0:
+		return {}
+	for row: Dictionary in _slots:
+		if int(row["slot"]) == slot:
+			return row
+	return {}
+
+
 func _load_selected_save() -> Gen2SaveData:
-	if _data == null or _selected_slot < 0 or _selected_slot >= _slots.size():
-		return null
-	var row: Dictionary = _slots[_selected_slot]
-	if not row["valid"]:
+	var row: Dictionary = _row_for(_selected_slot)
+	if _data == null or row.is_empty() or not row["valid"]:
 		return null
 	var result: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, _selected_slot, _data)
 	return result["save"] if result["ok"] else null
 
 
 func _slot_exists() -> bool:
-	return _selected_slot >= 0 and _selected_slot < _slots.size() and bool(_slots[_selected_slot]["exists"])
+	var row: Dictionary = _row_for(_selected_slot)
+	return not row.is_empty() and bool(row["exists"])
 
 
 func _slot_state(row: Dictionary) -> String:

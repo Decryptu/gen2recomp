@@ -491,7 +491,9 @@ func _save_slot_detail(game_id: StringName, data: GameData) -> String:
 			ready_slots += 1
 		elif row["exists"]:
 			incompatible += 1
-	var detail: String = "%d/%d slots ready" % [ready_slots, Gen2SaveStore.SLOT_COUNT]
+	if slots.is_empty():
+		return "No saves yet"
+	var detail: String = "%d of %d saves ready" % [ready_slots, slots.size()]
 	if incompatible > 0:
 		detail += ", %d incompatible" % incompatible
 	return detail

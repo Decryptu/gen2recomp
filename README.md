@@ -151,8 +151,9 @@ godot --headless --path . --quit-after 30
 ```
 
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
-ROM, and opens its save screen: three validated slots, `.sav` import, party
-inspection and the development battle. A new game starts with an empty party at
+ROM, and opens its save screen: validated save slots created as you need them,
+naming, export and import, `.sav` import, party inspection and the development
+battle. A new game starts with an empty party at
 the Crystal home spawn with source starting money; Elm's imported lab scripts
 offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry. Continue enters
 the overworld and F5 saves its map, inventory, event and clock snapshot. See

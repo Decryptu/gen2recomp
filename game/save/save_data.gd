@@ -7,10 +7,14 @@ extends RefCounted
 ## the wrong cartridge cache. The schema is versioned so a future save shape
 ## can be refused or migrated deliberately instead of being guessed at.
 
-const FORMAT_VERSION: int = 2
+const FORMAT_VERSION: int = 3
 const LEGACY_FORMAT_VERSION: int = 1
 const MAX_PARTY: int = Gen2Party.MAX_SIZE
 const MAX_PLAYER_NAME: int = 10
+## The player's own name for the slot, which the cartridge had no concept of:
+## it held one save and named it after the player. Empty means fall back to
+## [member player_name], so a slot always has something to show.
+const MAX_LABEL: int = 24
 const BOX_COUNT: int = 14
 const BOX_CAPACITY: int = Gen2SaveBox.CAPACITY
 
@@ -19,6 +23,7 @@ var game_id: StringName = &""
 var rom_sha1: String = ""
 var slot: int = -1
 var player_name: String = ""
+var label: String = ""
 var party: Array = []
 var boxes: Array = []
 var world: Gen2WorldSnapshot = null
@@ -43,6 +48,7 @@ func to_dict() -> Dictionary:
 		"rom_sha1": rom_sha1,
 		"slot": slot,
 		"player_name": player_name,
+		"label": label,
 		"party": saved_party,
 		"boxes": saved_boxes,
 		"world": world.to_dict() if world != null else {},
@@ -64,6 +70,7 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	out.rom_sha1 = String(source.get("rom_sha1", ""))
 	out.slot = int(source.get("slot", -1))
 	out.player_name = String(source.get("player_name", ""))
+	out.label = String(source.get("label", ""))
 	var raw_party: Variant = source.get("party", [])
 	if raw_party is Array:
 		for raw_mon: Variant in raw_party as Array:
@@ -89,9 +96,12 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	return out
 
 
-## Converts the previous project save shape into the current schema. Version 1
-## had no PC-box field, so migration adds empty boxes and preserves every
-## existing party/world field. A missing world snapshot remains missing.
+## Converts an older project save shape into the current schema, one version
+## step at a time so a version 1 file reaches the current one through every
+## step rather than skipping to it. Each step adds only what its version
+## lacked; a missing world snapshot stays missing throughout.
+##
+## Version 1 had no PC-box field. Version 2 had no slot label.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -99,19 +109,25 @@ static func migrate_dict(raw: Variant) -> Dictionary:
 	var version: int = int(source.get("format_version", -1))
 	if version == FORMAT_VERSION:
 		return {"ok": true, "data": source.duplicate(true), "migrated": false}
-	if version != LEGACY_FORMAT_VERSION:
+	if version < LEGACY_FORMAT_VERSION or version > FORMAT_VERSION:
 		return {"ok": false, "message": "unsupported save format %d" % version}
 	var migrated: Dictionary = source.duplicate(true)
+	if version < 2 and not migrated.has("boxes"):
+		migrated["boxes"] = _empty_boxes()
+	if version < 3 and not migrated.has("label"):
+		migrated["label"] = ""
 	migrated["format_version"] = FORMAT_VERSION
-	if not migrated.has("boxes"):
-		var empty_boxes: Array = []
-		for _box_index: int in BOX_COUNT:
-			var empty_slots: Array = []
-			for _slot: int in BOX_CAPACITY:
-				empty_slots.append(null)
-			empty_boxes.append(empty_slots)
-		migrated["boxes"] = empty_boxes
 	return {"ok": true, "data": migrated, "migrated": true}
+
+
+static func _empty_boxes() -> Array:
+	var empty_boxes: Array = []
+	for _box_index: int in BOX_COUNT:
+		var empty_slots: Array = []
+		for _slot: int in BOX_CAPACITY:
+			empty_slots.append(null)
+		empty_boxes.append(empty_slots)
+	return empty_boxes
 
 
 func first_empty_box_slot() -> Dictionary:
@@ -159,6 +175,7 @@ func copy_from(source: Gen2SaveData) -> bool:
 	rom_sha1 = copied.rom_sha1
 	slot = copied.slot
 	player_name = copied.player_name
+	label = copied.label
 	party = copied.party
 	boxes = copied.boxes
 	world = copied.world
