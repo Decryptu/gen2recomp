@@ -76,6 +76,18 @@ const STAT_CHANGE_FAILED: StringName = &"stat_change_failed"
 ## nobody to call back, and the screen has one sentence to say rather than two.
 const WITHDREW: StringName = &"withdrew"
 const SENT_OUT: StringName = &"sent_out"
+## The player got away. `how` says which branch answered: [code]&"battle_type"[/code]
+## for the two types that always escape, [code]&"item"[/code] for the Smoke Ball,
+## [code]&"speed"[/code] for the plain comparison, [code]&"odds"[/code] for the
+## accumulated odds and [code]&"roll"[/code] for the last random check.
+const FLED: StringName = &"fled"
+## The roll came up short. The turn is spent and the enemy still acts, which is
+## `.cant_escape_2` setting `wBattlePlayerAction` to `BATTLEPLAYERACTION_USEITEM`.
+const RUN_FAILED: StringName = &"run_failed"
+## Running was refused outright, which costs no turn at all: `BattleMenu_Run`
+## reopens the menu. `reason` is [code]&"trainer"[/code] or
+## [code]&"battle_type"[/code].
+const RUN_BLOCKED: StringName = &"run_blocked"
 const OVER: StringName = &"over"
 
 ## Experience, once the fainted Pokémon's opponent has somebody to award it to.
@@ -143,6 +155,38 @@ const MIST_PROTECTED: StringName = &"mist_protected"
 ## action rather than a move number.
 const ACTION_MOVE: StringName = &"move"
 const ACTION_SWITCH: StringName = &"switch"
+## Running is settled before the turn rather than inside it, because
+## `BattleMenu_Run` runs at menu time: a successful run ends the battle before
+## either side moves, and a refusal the player can do nothing about sends them
+## back to the menu with no turn spent at all.
+const ACTION_RUN: StringName = &"run"
+
+## `wBattleType`. Only the values `TryToRunAwayFromBattle` branches on are named;
+## everything else reaches the ordinary speed check.
+const BATTLETYPE_NORMAL: int = 0
+const BATTLETYPE_DEBUG: int = 2
+const BATTLETYPE_CONTEST: int = 6
+const BATTLETYPE_FORCESHINY: int = 7
+const BATTLETYPE_TRAP: int = 9
+const BATTLETYPE_CELEBI: int = 11
+const BATTLETYPE_SUICUNE: int = 12
+## The two lists it reads them against, in source order.
+const ALWAYS_ESCAPES: Array[int] = [BATTLETYPE_DEBUG, BATTLETYPE_CONTEST]
+const NEVER_ESCAPES: Array[int] = [
+	BATTLETYPE_TRAP, BATTLETYPE_CELEBI, BATTLETYPE_FORCESHINY, BATTLETYPE_SUICUNE,
+]
+
+## `HELD_ESCAPE` (constants/item_data_constants.asm), the Smoke Ball's held
+## effect, which is imported as an item's own `effect` field.
+const HELD_ESCAPE: int = 72
+
+## `TryToRunAwayFromBattle`'s own arithmetic. The odds are
+## `player_speed * 32 / ((enemy_speed / 4) & $ff)`, then 30 per attempt after the
+## first, and anything over a byte gets away without a roll.
+const FLEE_SPEED_MULTIPLIER: int = 32
+const FLEE_ENEMY_SPEED_SHIFT: int = 2
+const FLEE_ATTEMPT_BONUS: int = 30
+const FLEE_ODDS_RANGE: int = 256
 
 ## Priority runs from 0 to 3 and most moves are 1, so a move can go below the
 ## ordinary as well as above it. The values are keyed by the move's effect byte,
@@ -169,6 +213,19 @@ var rng: RandomNumberGenerator = null
 ## trainer battle. A wild encounter (the default, and every existing caller's
 ## meaning before this field existed) never sets it.
 var is_trainer_battle: bool = false
+
+## `wBattleType`, which only running reads so far. A `loadvar VAR_BATTLETYPE`
+## before `startbattle` is what sets it on the world path; everything else is
+## BATTLETYPE_NORMAL.
+var battle_type: int = BATTLETYPE_NORMAL
+
+## `wNumFleeAttempts`. Every failed run raises the odds behind the next one, and
+## choosing FIGHT clears it again, which is `BattleMenu_Fight`'s own `xor a`.
+var flee_attempts: int = 0
+
+## Set once the player has run. The battle is over with no winner, which is the
+## DRAW `wBattleResult` the cartridge writes.
+var _fled: bool = false
 
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
@@ -248,6 +305,10 @@ static func switch_to(index: int) -> Dictionary:
 	return {"type": ACTION_SWITCH, "index": index}
 
 
+static func run_away() -> Dictionary:
+	return {"type": ACTION_RUN}
+
+
 func party(side: int) -> Gen2Party:
 	return parties[side]
 
@@ -288,7 +349,74 @@ func last_damage_taken(side: int) -> Dictionary:
 ## A battle is lost when a whole party is down, not when the Pokémon that is out
 ## has fainted. One of those is a defeat and the other is a Pokémon to replace.
 func is_over() -> bool:
-	return party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
+	return _fled or party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
+
+
+## Whether the player has run from this battle. The parties are both still
+## standing, so [method is_over] alone does not say which ending it was.
+func has_fled() -> bool:
+	return _fled
+
+
+## `TryToRunAwayFromBattle`, resolved without spending anything.
+##
+## Answers `outcome`: [code]&"fled"[/code], [code]&"failed"[/code] for the roll
+## that came up short and costs the turn, or [code]&"blocked"[/code] for a
+## refusal that costs nothing. `how` or `reason` says which branch answered.
+##
+## Two of the source's checks are missing rather than passing, and they are the
+## two whose state this engine does not keep: `SUBSTATUS_CANT_RUN` (Mean Look and
+## Spider Web) and `wPlayerWrapCount` (the trapping moves). Neither effect is
+## implemented, so there is nothing to read; both belong here the day they are.
+func run_odds() -> Dictionary:
+	if battle_type in ALWAYS_ESCAPES:
+		return {"outcome": &"fled", "how": &"battle_type", "battle_type": battle_type}
+	if battle_type in NEVER_ESCAPES:
+		return {"outcome": &"blocked", "reason": &"battle_type", "battle_type": battle_type}
+	if is_trainer_battle:
+		return {"outcome": &"blocked", "reason": &"trainer"}
+
+	var runner: Gen2BattleMon = mon(PLAYER)
+	var chaser: Gen2BattleMon = mon(ENEMY)
+	if _held_effect(runner) == HELD_ESCAPE:
+		return {"outcome": &"fled", "how": &"item", "item": runner.item}
+
+	# wNumFleeAttempts rises before the arithmetic reads it, so the first attempt
+	# counts as one and the bonus loop below runs one fewer time than that.
+	var attempts: int = flee_attempts + 1
+	var speed: int = runner.stat("speed")
+	var enemy_speed: int = chaser.stat("speed")
+	if speed >= enemy_speed:
+		return {"outcome": &"fled", "how": &"speed", "attempts": attempts}
+
+	# The divisor is one byte of enemy_speed >> 2, so a fast enough enemy wraps
+	# it to zero and the run simply succeeds. That is the cartridge's own
+	# `and a; jr z, .can_escape`, not a guard against dividing by zero.
+	var divisor: int = (enemy_speed >> FLEE_ENEMY_SPEED_SHIFT) & 0xFF
+	if divisor == 0:
+		return {"outcome": &"fled", "how": &"speed", "attempts": attempts}
+
+	# The dividend is the low sixteen bits of the product, which is what taking
+	# hProduct + 2 and + 3 leaves behind.
+	var odds: int = ((speed * FLEE_SPEED_MULTIPLIER) & 0xFFFF) / divisor
+	if odds > 0xFF:
+		return {"outcome": &"fled", "how": &"odds", "odds": odds, "attempts": attempts}
+	for _bonus: int in attempts - 1:
+		odds += FLEE_ATTEMPT_BONUS
+		if odds > 0xFF:
+			return {"outcome": &"fled", "how": &"odds", "odds": odds, "attempts": attempts}
+	return {
+		"outcome": &"roll", "odds": odds, "attempts": attempts,
+		"range": FLEE_ODDS_RANGE,
+	}
+
+
+## The held effect of whatever [param battler] is carrying, or zero. The item's
+## own `effect` field is `ItemAttributes`' held effect byte.
+func _held_effect(battler: Gen2BattleMon) -> int:
+	if battler == null or battler.item <= 0 or data == null:
+		return 0
+	return int(data.item(battler.item).get("effect", 0))
 
 
 ## Whoever is still standing, or null if the battle is not over. Both sides can
@@ -296,6 +424,9 @@ func is_over() -> bool:
 ## and there is nobody, so this answers null for that too.
 func winner() -> Variant:
 	if not is_over():
+		return null
+	# Running is a DRAW: both parties are still standing and nobody beat anybody.
+	if _fled:
 		return null
 	if party(PLAYER).is_wiped() and party(ENEMY).is_wiped():
 		return null
@@ -433,6 +564,36 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		return events
 	reset_damage_taken()
 
+	if _is_run(player_action):
+		var attempt: Dictionary = run_odds()
+		var outcome: StringName = StringName(attempt.get("outcome", &"roll"))
+		if outcome == &"roll":
+			# BattleRandom against the accumulated odds. The comparison is
+			# `cp b; jr nc`, so the odds getting away on a tie is the source's.
+			flee_attempts += 1
+			var rolled: int = rng.randi_range(0, FLEE_ODDS_RANGE - 1)
+			attempt["roll"] = rolled
+			outcome = &"fled" if int(attempt["odds"]) >= rolled else &"failed"
+			attempt["how"] = &"roll"
+		elif outcome != &"blocked":
+			flee_attempts += 1
+		if outcome == &"fled":
+			_fled = true
+			events.append(_run_event(FLED, attempt))
+			events.append({"type": OVER, "winner": winner(), "fled": true})
+			return events
+		if outcome == &"blocked":
+			# BattleMenu_Run's `jp BattleMenu`: nothing was spent, so no residual
+			# damage and no enemy move either.
+			events.append(_run_event(RUN_BLOCKED, attempt))
+			return events
+		events.append(_run_event(RUN_FAILED, attempt))
+
+	# BattleMenu_Fight clears wNumFleeAttempts, so the odds a run has built up
+	# survive only a run followed by another run.
+	if StringName(player_action.get("type", ACTION_MOVE)) == ACTION_MOVE:
+		flee_attempts = 0
+
 	var actions: Dictionary = {PLAYER: player_action, ENEMY: enemy_action}
 	var chosen: Dictionary = {
 		PLAYER: _move_for_action(PLAYER, player_action),
@@ -441,6 +602,8 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 
 	var acting: Array = order(chosen, actions)
 	for side: int in acting:
+		if _is_run(actions[side]):
+			continue
 		if _is_switch(actions[side]):
 			events.append_array(send_out(side, int(actions[side].get("index", -1))))
 			continue
@@ -612,11 +775,24 @@ static func _is_switch(action: Dictionary) -> bool:
 	return StringName(action.get("type", ACTION_MOVE)) == ACTION_SWITCH
 
 
+static func _is_run(action: Dictionary) -> bool:
+	return StringName(action.get("type", ACTION_MOVE)) == ACTION_RUN
+
+
+## The event a run attempt produces, carrying whatever branch answered it.
+func _run_event(type: StringName, attempt: Dictionary) -> Dictionary:
+	var out: Dictionary = attempt.duplicate(true)
+	out.erase("outcome")
+	out["type"] = type
+	out["side"] = PLAYER
+	return out
+
+
 ## The move an action commits a side to, which is nothing at all for a switch.
 ## Struggle stands in there so that the order can be worked out without a special
 ## case; a switching side never reaches the point of using it.
 func _move_for_action(side: int, action: Dictionary) -> int:
-	if _is_switch(action):
+	if _is_switch(action) or _is_run(action):
 		return Gen2Damage.STRUGGLE
 	return move_for(side, int(action.get("slot", 0)))
 
@@ -666,7 +842,11 @@ func move_for(side: int, slot: int) -> int:
 ## The cartridge weighs a held Quick Claw between priority and speed; no held
 ## items exist here yet.
 func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
-	var player_switching: bool = _is_switch(actions.get(PLAYER, {}))
+	# A failed run is settled before the enemy moves, the way a switch is: the
+	# cartridge spends the turn as BATTLEPLAYERACTION_USEITEM, which resolves at
+	# once and leaves the enemy's move behind it.
+	var player_switching: bool = _is_switch(actions.get(PLAYER, {})) \
+		or _is_run(actions.get(PLAYER, {}))
 	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {}))
 	if player_switching or enemy_switching:
 		return _sides(player_switching)

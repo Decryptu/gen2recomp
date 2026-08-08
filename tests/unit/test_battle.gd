@@ -1303,3 +1303,183 @@ func test_focus_energy_reaches_the_damage_calc_of_a_real_turn() -> void:
 	)
 	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, with_boost)
 	assert_true(with_boost.critical, "the same roll lands once Focus Energy raises the rate")
+
+
+## `TryToRunAwayFromBattle`'s speed comparison, which is the whole check when
+## the runner is at least as fast: `CompareBytes` then `jr nc, .can_escape`, so a
+## tie gets away too.
+func test_a_runner_at_least_as_fast_as_the_wild_always_gets_away() -> void:
+	for pair: Array in [
+		[Fixture.PIKACHU, Fixture.GEODUDE],
+		[Fixture.GEODUDE, Fixture.GEODUDE],
+	]:
+		var battle: Gen2Battle = _battle(
+			_mon(int(pair[0]), 50, [Fixture.TACKLE]),
+			_mon(int(pair[1]), 50, [Fixture.TACKLE])
+		)
+
+		var attempt: Dictionary = battle.run_odds()
+
+		assert_eq(attempt["outcome"], &"fled", JSON.stringify(attempt))
+		assert_eq(attempt["how"], &"speed")
+
+
+## The odds themselves: `player_speed * 32 / ((enemy_speed / 4) & $ff)`, then
+## thirty per attempt after the first. The fixture's mon carry maximum DVs, so
+## Geodude at level 50 has 40 Speed and Pikachu 110, and the first attempt is
+## `1280 / 27`, which is 47.
+func test_the_flee_odds_are_the_source_arithmetic_and_rise_per_attempt() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+
+	for expected: Array in [[0, 47], [1, 77], [2, 107], [3, 137]]:
+		battle.flee_attempts = int(expected[0])
+
+		var attempt: Dictionary = battle.run_odds()
+
+		assert_eq(attempt["outcome"], &"roll", JSON.stringify(attempt))
+		assert_eq(int(attempt["odds"]), int(expected[1]), "after %d attempts" % int(expected[0]))
+		assert_eq(int(attempt["attempts"]), int(expected[0]) + 1)
+
+	# Once the bonus carries the odds past a byte the roll never happens, which
+	# is the source's `jr c, .can_escape` out of the loop.
+	battle.flee_attempts = 8
+
+	var certain: Dictionary = battle.run_odds()
+
+	assert_eq(certain["outcome"], &"fled", JSON.stringify(certain))
+	assert_eq(certain["how"], &"odds")
+
+
+## A trainer battle refuses outright and costs nothing: `BattleMenu_Run` prints
+## `BattleText_TheresNoEscapeFromTrainerBattle` and jumps back to `BattleMenu`,
+## so no turn is spent and the enemy does not move.
+func test_a_trainer_battle_refuses_the_run_and_spends_no_turn() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.of(_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])),
+		_rng, true
+	)
+	var before: int = battle.mon(Gen2Battle.PLAYER).hp
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.run_away(), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(_of_type(events, Gen2Battle.RUN_BLOCKED).size(), 1, JSON.stringify(events))
+	assert_eq(events[0]["reason"], &"trainer")
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 0, "the enemy moved anyway")
+	assert_eq(battle.mon(Gen2Battle.PLAYER).hp, before)
+	assert_false(battle.is_over())
+	assert_eq(battle.flee_attempts, 0, "a refusal is not an attempt")
+
+
+## The four battle types that cannot be escaped and the two that always can
+## (`wBattleType`, checked before anything else).
+func test_the_battle_type_decides_before_speed_does() -> void:
+	for row: Array in [
+		[Gen2Battle.BATTLETYPE_TRAP, &"blocked"],
+		[Gen2Battle.BATTLETYPE_CELEBI, &"blocked"],
+		[Gen2Battle.BATTLETYPE_FORCESHINY, &"blocked"],
+		[Gen2Battle.BATTLETYPE_SUICUNE, &"blocked"],
+		[Gen2Battle.BATTLETYPE_DEBUG, &"fled"],
+		[Gen2Battle.BATTLETYPE_CONTEST, &"fled"],
+	]:
+		# A matchup the speed check would refuse, so the type is what answered.
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		)
+		battle.battle_type = int(row[0])
+
+		var attempt: Dictionary = battle.run_odds()
+
+		assert_eq(attempt["outcome"], StringName(row[1]), "battle type %d" % int(row[0]))
+		assert_eq(attempt["battle_type"], int(row[0]))
+
+
+## The Smoke Ball is checked before the odds are, so it gets away from anything.
+func test_the_smoke_ball_escapes_whatever_the_speeds_are() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	assert_eq(battle.run_odds()["outcome"], &"roll", "the matchup has to be one that rolls")
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.SMOKE_BALL
+
+	var attempt: Dictionary = battle.run_odds()
+
+	assert_eq(attempt["outcome"], &"fled", JSON.stringify(attempt))
+	assert_eq(attempt["how"], &"item")
+	assert_eq(int(attempt["item"]), Fixture.SMOKE_BALL)
+
+
+## Getting away ends the battle with nobody having won, which is the DRAW the
+## cartridge writes into `wBattleResult`.
+func test_getting_away_ends_the_battle_with_no_winner() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.run_away(), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(_of_type(events, Gen2Battle.FLED).size(), 1, JSON.stringify(events))
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 0, "the wild moved anyway")
+	assert_true(battle.is_over())
+	assert_true(battle.has_fled())
+	assert_null(battle.winner())
+	assert_false(battle.party(Gen2Battle.PLAYER).is_wiped(), "nobody was beaten")
+	assert_false(battle.party(Gen2Battle.ENEMY).is_wiped())
+
+
+## Choosing FIGHT clears the attempts the runs before it built up, which is
+## `BattleMenu_Fight`'s own `xor a` on `wNumFleeAttempts`.
+func test_fighting_clears_the_odds_a_run_had_built_up() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.flee_attempts = 4
+	assert_eq(int(battle.run_odds()["odds"]), 167)
+
+	var _events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(battle.flee_attempts, 0)
+	assert_eq(int(battle.run_odds()["odds"]), 47, "the odds went back to a first attempt")
+
+
+## A roll that comes up short spends the turn: `.cant_escape_2` sets
+## `wBattlePlayerAction` to `BATTLEPLAYERACTION_USEITEM`, so the player does
+## nothing and the wild attacks anyway. The attempt still counts, which is what
+## raises the odds behind the next one.
+##
+## Seeded rather than arranged, because the roll really is a roll: the odds here
+## are 47 out of 256, so most seeds fail and this one is only pinning which.
+func test_a_failed_run_costs_the_turn_and_the_wild_still_attacks() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.rng.seed = 12345
+	assert_eq(int(battle.run_odds()["odds"]), 47, "the matchup has to be one that rolls")
+	var before: int = battle.mon(Gen2Battle.PLAYER).hp
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.run_away(), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(_of_type(events, Gen2Battle.RUN_FAILED).size(), 1, JSON.stringify(events))
+	assert_eq(_of_type(events, Gen2Battle.FLED).size(), 0)
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1, "the wild did not attack")
+	assert_lt(battle.mon(Gen2Battle.PLAYER).hp, before, "the turn was not spent")
+	assert_false(battle.is_over())
+	assert_eq(battle.flee_attempts, 1)
+	assert_eq(int(battle.run_odds()["odds"]), 77, "the failed attempt did not raise the odds")

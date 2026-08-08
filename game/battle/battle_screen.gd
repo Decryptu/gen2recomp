@@ -727,6 +727,19 @@ func _enemy_slot() -> int:
 	)
 
 
+## Tries to run, which is `BattleMenu_Run` and settles before the turn does.
+##
+## Offered in a trainer battle too, because the cartridge offers it there and
+## answers with its own refusal rather than greying the entry out.
+func run_from_battle() -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	if _battle.awaiting_move_learn():
+		return
+	_pending = _battle.take_actions(Gen2Battle.run_away(), Gen2Battle.use_move(_enemy_slot()))
+	_show_next_event()
+
+
 ## Swaps the player's Pokémon for the next one that is standing, as a turn.
 ##
 ## The enemy attacks while it happens, because a switch is not free: this is the
@@ -909,7 +922,9 @@ func advance() -> void:
 	if _replace_the_fallen():
 		return
 	if _battle != null and _battle.is_over():
-		if _world_battle_active:
+		if _world_battle_active and not _battle.has_fled():
+			# A run shows neither a win nor a loss text and blacks nobody out:
+			# `wBattleResult` is DRAW and the party is still standing.
 			if _show_world_battle_terminal_text():
 				return
 			if _battle.winner() != Gen2Battle.PLAYER and not _world_battle_recovery_shown:
@@ -952,9 +967,13 @@ func _finish_world_battle() -> void:
 		return
 	var winner: Variant = _battle.winner()
 	var outcome: StringName = (
-		Gen2WorldBattleAdapter.OUTCOME_WON
-		if winner == Gen2Battle.PLAYER
-		else Gen2WorldBattleAdapter.OUTCOME_LOST
+		Gen2WorldBattleAdapter.OUTCOME_RAN
+		if _battle.has_fled()
+		else (
+			Gen2WorldBattleAdapter.OUTCOME_WON
+			if winner == Gen2Battle.PLAYER
+			else Gen2WorldBattleAdapter.OUTCOME_LOST
+		)
 	)
 	var result: Dictionary = {
 		"ok": true,
@@ -1240,7 +1259,26 @@ func _describe(event: Dictionary) -> String:
 			return "%s is getting pumped!" % _battler_name(side)
 		Gen2Battle.MIST_PROTECTED:
 			return "%s's stat drop was blocked by mist!" % _battler_name(int(event["target"]))
+		Gen2Battle.FLED:
+			# BattleText_UserFledUsingAStringBuffer1 is the Smoke Ball's own
+			# line; every other branch reaches BattleText_GotAwaySafely.
+			if StringName(event.get("how", &"")) == &"item":
+				return "%s fled using a %s!" % [
+					_battler_name(Gen2Battle.PLAYER),
+					_data.item_name(int(event.get("item", 0))),
+				]
+			return "Got away safely!"
+		Gen2Battle.RUN_FAILED:
+			return "Can't escape!"
+		Gen2Battle.RUN_BLOCKED:
+			if StringName(event.get("reason", &"")) == &"trainer":
+				return "No! There's no running from a trainer battle!"
+			return "Can't escape!"
 		Gen2Battle.OVER:
+			# A run is a draw with both parties standing, and the line before
+			# this one already said so.
+			if bool(event.get("fled", false)):
+				return ""
 			# Both sides can go down in the same turn, through recoil or a burn,
 			# and then there is nobody to declare.
 			if event["winner"] == null:
@@ -1343,6 +1381,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			take_turn()
 		KEY_W:
 			switch_player()
+		KEY_R:
+			run_from_battle()
 		KEY_SPACE, KEY_ENTER:
 			advance()
 		KEY_V:
