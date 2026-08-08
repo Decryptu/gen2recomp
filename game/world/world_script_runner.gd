@@ -97,6 +97,11 @@ const STRENGTH_ASK_TEXT: String = \
 	"A #MON may be\nable to move this.\n\nWant to use\nSTRENGTH?"
 const STRENGTH_MAY_MOVE_TEXT: String = "A #MON may be\nable to move this."
 const STRENGTH_BOULDERS_MOVE_TEXT: String = "Boulders may now\nbe moved!"
+## data/text/common_2.asm's _FoundItemText, less its <PLAYER>; see
+## _stage_item_ball(). The source line break sits before the item name.
+const FOUND_ITEM_TEXT: String = "Found\n%s!"
+## The `disappear LAST_TALKED` operand (constants/map_object_constants.asm).
+const LAST_TALKED: int = 0xFE
 ## wBattleResult, which startbattle copies into wScriptVar
 ## (constants/battle_constants.asm).
 const BATTLE_RESULT_WIN: int = 0
@@ -166,6 +171,14 @@ static func begin(
 		## approaches.
 		runner._trainer_intro_approach_pending = request.get("direction", Vector2i.ZERO) \
 			in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
+	elif StringName(request.get("kind", &"")) == &"item_ball":
+		## The pointer is item data, not code, so the frame that stands in for it
+		## is a bare `end` and _stage_item_ball() replays FindItemInBallScript.
+		started = runner._push_frame(bank, address, PackedByteArray([
+			Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_END, runner._crystal_commands())
+		]))
+		if started:
+			runner._stage_item_ball()
 	else:
 		started = runner._push_frame(bank, address)
 	if not started:
@@ -1945,6 +1958,43 @@ func _stage_strength_boulder() -> Dictionary:
 	}
 	_finish_after_pending = false
 	return {"ok": true}
+
+
+## engine/events/misc_scripts.asm's FindItemInBallScript, synthesized.
+##
+## An item ball's script pointer is not code: it is the `itemball` macro's
+## `db item, quantity`, which `ObjectEventTypeArray.itemball` copies into
+## wItemBallData before raising PLAYEREVENT_ITEMBALL. So the seam is the object
+## type, not a script address, and Gen2WorldAPI hands the two decoded bytes over
+## as an item_ball request. The script's own first command is `callasm
+## .TryReceiveItem` and both its texts are engine text rather than map text, so
+## the body is replayed here the way AskStrengthScript's is.
+##
+## Source order is receive, `disappear LAST_TALKED`, then the text, so the ball
+## is already gone when the box is drawn. `itemnotify` is the `item_changed`
+## event _stage_item_delta() emits.
+##
+## Two boundaries. `.no_room` cannot be reached: ReceiveItem refuses on a full
+## pocket and this project models per-item counts with no pocket capacity. And
+## `_FoundItemText` names <PLAYER>, which the scene-free runner has no route to,
+## the way the strength texts have none either.
+func _stage_item_ball() -> Dictionary:
+	var item: int = int(_request.get("item", 0))
+	var quantity: int = maxi(1, int(_request.get("quantity", 1)))
+	if item <= 0:
+		return _fail(&"invalid_item_ball", {"item": item, "quantity": quantity})
+	_stage_item_delta(item, quantity)
+	_emit_object_event(&"object_visibility", {
+		"object_index": _last_talked_object_index, "active": false,
+	})
+	_emit_object_event(&"object_event_flag", {
+		"object_index": _last_talked_object_index, "active": true,
+	})
+	_stage_object_event_flag(LAST_TALKED, true)
+	var item_name: String = data.item_name(item) if data != null else ""
+	if item_name.is_empty():
+		item_name = "ITEM"
+	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, true)
 
 
 ## CheckPartyMove: the first slot whose move list carries [param move], or -1.

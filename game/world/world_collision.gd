@@ -251,6 +251,11 @@ const HI_NYBBLE_WALK_ALT: int = 0x50
 const HI_NYBBLE_WARPS: int = 0x70
 const COLL_WHIRLPOOL: int = 0x24
 const COLL_WHIRLPOOL_2C: int = 0x2C
+## The two codes home/map_objects.asm's CheckWaterfallTile compares. The second
+## is marked unused in both pins and kept for the same reason the whole
+## permission table is: the source compares it.
+const COLL_WATERFALL: int = 0x33
+const COLL_CURRENT_DOWN: int = 0x3B
 const COLL_DOOR: int = 0x71
 const COLL_DOOR_79: int = 0x79
 const COLL_STAIRCASE: int = 0x7A

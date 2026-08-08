@@ -4064,3 +4064,57 @@ func test_advance_forced_movement_moves_without_a_pressed_direction() -> void:
 	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
 	assert_eq(world.player_cell, Vector2i(1, 6))
 	assert_true(world.advance_forced_movement().is_empty())
+
+
+## ObjectEventTypeArray's `.itemball` copies `db item, quantity` into
+## wItemBallData rather than running it, so the pointer must never reach the
+## script runner as code.
+func test_an_item_ball_is_dispatched_from_its_two_data_bytes() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# itemball ITEM3, 2. Byte $02 is `iffalse` and $91 `end`, so a runner that
+	# parsed these as code would branch, not hand over an item.
+	scripts["48:6030"] = [3, 2, 0x91]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+	var world: Gen2WorldAPI = _world(Vector2i(5, 5))
+	var ball: Gen2WorldObject = world.objects[0]
+	ball.object_type = Gen2WorldObject.OBJECTTYPE_ITEMBALL
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+	var results: Array = world.interact()
+	assert_eq(results.size(), 1, JSON.stringify(results))
+	assert_eq(results[0]["source"]["kind"], &"item_ball")
+	assert_eq(results[0]["source"]["item"], 3)
+	assert_eq(results[0]["source"]["quantity"], 2)
+	# FindItemInBallScript receives before it shows anything, and the text names
+	# the item off the imported table, whose lookup is one-based like the source's.
+	assert_eq(results[0]["status"], &"waiting", JSON.stringify(results[0]))
+	assert_eq(results[0]["event"]["text"], "Found\n%s!" % _item_name(3))
+
+	var finished: Array = world.run_event_queue(true)
+	assert_eq(finished[0]["status"], &"complete", JSON.stringify(finished[0]))
+	assert_eq(world.state.items().get(3, 0), 2)
+	# `disappear LAST_TALKED` writes the ball's own event flag, so it stays gone.
+	assert_true(world.event_flag_active(7))
+	assert_false((world.objects[0] as Gen2WorldObject).active)
+
+
+func test_an_item_ball_with_no_item_byte_fails_instead_of_running_data() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6030"] = [0, 0, 0x91]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+	var world: Gen2WorldAPI = _world(Vector2i(5, 5))
+	var ball: Gen2WorldObject = world.objects[0]
+	ball.object_type = Gen2WorldObject.OBJECTTYPE_ITEMBALL
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+	# A zero item is not an item ball the cache can answer, so the typed request
+	# is not built and the object falls back to its own pointer.
+	var results: Array = world.interact()
+	assert_eq(results.size(), 1, JSON.stringify(results))
+	assert_ne(results[0]["source"]["kind"], &"item_ball")
+
+
+func _item_name(number: int) -> String:
+	return GameData.open_directory(_directory).item_name(number)

@@ -31,6 +31,9 @@ const SFX_WHIRLPOOL: int = 0x53
 ## constants/sfx_constants.asm's SFX_STRENGTH, played by MovementFunction_Strength
 ## as a pushed boulder starts moving, not by the menu that sets the flag.
 const SFX_STRENGTH: int = 0x1B
+## constants/sfx_constants.asm's SFX_BUBBLEBEAM, which Script_UsedWaterfall plays
+## after its text and before the first climbing step.
+const SFX_WATERFALL: int = 0x51
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -1451,6 +1454,14 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used WHIRLPOOL!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_WATERFALL:
+			var waterfall: Dictionary = _world.waterfall_request()
+			if not bool(waterfall.get("ok", false)):
+				_show_field_move_text(
+					_waterfall_refusal(StringName(waterfall.get("reason", &"")))
+				)
+				return
+			_show_field_move_text("%s used WATERFALL!" % String(action.get("name", "")))
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -1498,6 +1509,15 @@ func _whirlpool_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## .TryWaterfall refuses through FieldMoveFailed, whose text is the generic
+## _CantUseItemText, so only the badge has a line of its own; CheckMapCanWaterfall
+## has no message at all.
+func _waterfall_refusal(reason: StringName) -> String:
+	if reason == &"badge_required":
+		return "Sorry! A new BADGE is required."
+	return "Can't use that here."
+
+
 ## .TryStrength's only refusal is CheckBadge's, since it checks nothing else;
 ## anything past it is this project's own guard, not a cartridge branch.
 func _strength_refusal(reason: StringName) -> String:
@@ -1540,15 +1560,19 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_strength().is_empty():
 		_commit_field_move(_world.complete_strength(), "Strength")
 		return
+	if not _world.pending_waterfall().is_empty():
+		_commit_field_move(_world.complete_waterfall(), "Waterfall")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
 
-## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN, Whirlpool plays SFX_SURF and Surf
-## changes the music, so each commit reports its own audio. Strength is the one
-## that plays nothing: Script_UsedStrength has no PlaySFX, because SFX_STRENGTH
-## belongs to the boulder that moves later, not to the flag being set. All four
-## redraw anyway, since the party overlay closed over the map.
+## Cut plays SFX_PLACE_PUZZLE_PIECE_DOWN, Whirlpool plays SFX_SURF, Waterfall
+## plays SFX_BUBBLEBEAM and Surf changes the music, so each commit reports its
+## own audio. Strength is the one that plays nothing: Script_UsedStrength has no
+## PlaySFX, because SFX_STRENGTH belongs to the boulder that moves later, not to
+## the flag being set. All five redraw anyway, since the party overlay closed
+## over the map.
 func _commit_field_move(applied: Dictionary, label: String) -> void:
 	if bool(applied.get("ok", false)):
 		match StringName(applied.get("kind", &"")):
@@ -1558,6 +1582,8 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 				_play_sfx(SFX_WHIRLPOOL)
 			&"strength_applied":
 				pass
+			&"waterfall_applied":
+				_play_sfx(SFX_WATERFALL)
 			_:
 				_play_sfx(SFX_CUT)
 		if _renderer != null:
