@@ -29,9 +29,17 @@ var _mods_label: Label = null
 var _mod_button: Button = null
 var _index_button: Button = null
 var _index_dialog: Gen2ModIndexDialog = null
+var _settings_dialog: Gen2SettingsDialog = null
+var _mods_dialog: Gen2ModsDialog = null
+var _manage_dialog: AcceptDialog = null
+var _manage_body: VBoxContainer = null
+var _update_http: HTTPRequest = null
 var _cards: Dictionary = {}
 var _selected_game_id: StringName = &""
 var _importing: bool = false
+## The game a re-import is replacing, so a cache is only overwritten by a dump
+## of the cartridge it already holds.
+var _reimport_game_id: StringName = &""
 
 
 func _ready() -> void:
@@ -50,17 +58,17 @@ func _build_ui() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 64)
-	margin.add_theme_constant_override("margin_top", 46)
+	margin.add_theme_constant_override("margin_top", 30)
 	margin.add_theme_constant_override("margin_right", 64)
-	margin.add_theme_constant_override("margin_bottom", 42)
+	margin.add_theme_constant_override("margin_bottom", 24)
 	add_child(margin)
 
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 18)
 	margin.add_child(content)
 
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 20)
+	var header := VBoxContainer.new()
+	header.add_theme_constant_override("separation", 12)
 	content.add_child(header)
 
 	var heading := VBoxContainer.new()
@@ -71,7 +79,7 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "gen2recomp"
 	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 38)
+	title.add_theme_font_size_override("font_size", 30)
 	heading.add_child(title)
 
 	var subtitle := Label.new()
@@ -80,20 +88,42 @@ func _build_ui() -> void:
 	subtitle.add_theme_font_size_override("font_size", 16)
 	heading.add_child(subtitle)
 
+	# Wrapping, because the row outgrew the window once the settings, mods and
+	# update actions joined it.
+	var toolbar := HFlowContainer.new()
+	toolbar.add_theme_constant_override("h_separation", 12)
+	toolbar.add_theme_constant_override("v_separation", 8)
+	header.add_child(toolbar)
+
 	_import_button = _button("Import ROM", ACCENT)
 	_import_button.custom_minimum_size = Vector2(168, 48)
 	_import_button.pressed.connect(_open_import_dialog)
-	header.add_child(_import_button)
+	toolbar.add_child(_import_button)
 
 	_mod_button = _button("Import mod", MUTED)
 	_mod_button.custom_minimum_size = Vector2(168, 48)
 	_mod_button.pressed.connect(_open_mod_dialog)
-	header.add_child(_mod_button)
+	toolbar.add_child(_mod_button)
 
 	_index_button = _button("Mod index", MUTED)
 	_index_button.custom_minimum_size = Vector2(168, 48)
 	_index_button.pressed.connect(_open_index_dialog)
-	header.add_child(_index_button)
+	toolbar.add_child(_index_button)
+
+	var mods_button: Button = _button("Mods", MUTED)
+	mods_button.custom_minimum_size = Vector2(120, 48)
+	mods_button.pressed.connect(_open_mods_dialog)
+	toolbar.add_child(mods_button)
+
+	var settings_button: Button = _button("Settings", MUTED)
+	settings_button.custom_minimum_size = Vector2(120, 48)
+	settings_button.pressed.connect(_open_settings_dialog)
+	toolbar.add_child(settings_button)
+
+	var updates_button: Button = _button("Check for updates", MUTED)
+	updates_button.custom_minimum_size = Vector2(180, 48)
+	updates_button.pressed.connect(check_for_updates)
+	toolbar.add_child(updates_button)
 
 	var section := Label.new()
 	section.text = "CARTRIDGES"
@@ -102,7 +132,7 @@ func _build_ui() -> void:
 	content.add_child(section)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 216)
+	scroll.custom_minimum_size = Vector2(0, 250)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(scroll)
@@ -115,7 +145,7 @@ func _build_ui() -> void:
 
 	var status_panel := PanelContainer.new()
 	status_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 10))
-	status_panel.custom_minimum_size = Vector2(0, 78)
+	status_panel.custom_minimum_size = Vector2(0, 62)
 	content.add_child(status_panel)
 
 	var status_box := VBoxContainer.new()
@@ -193,6 +223,27 @@ func _build_ui() -> void:
 	_index_dialog = Gen2ModIndexDialog.new()
 	_index_dialog.mod_installed.connect(_on_index_mod_installed)
 	add_child(_index_dialog)
+
+	_settings_dialog = Gen2SettingsDialog.new()
+	add_child(_settings_dialog)
+
+	_mods_dialog = Gen2ModsDialog.new()
+	_mods_dialog.mods_changed.connect(func() -> void: _mods_label.text = _mods_summary())
+	add_child(_mods_dialog)
+
+	_manage_dialog = AcceptDialog.new()
+	_manage_dialog.ok_button_text = "Close"
+	_manage_body = VBoxContainer.new()
+	_manage_body.custom_minimum_size = Vector2(460, 0)
+	_manage_dialog.add_child(_manage_body)
+	add_child(_manage_dialog)
+
+	# Created once and reused. The check only ever runs from the button: it
+	# reaches a third party and says this build exists, so it is the player's
+	# act and never a side effect of opening the launcher.
+	_update_http = HTTPRequest.new()
+	_update_http.request_completed.connect(_on_update_response)
+	add_child(_update_http)
 
 	# A window drop is the same import, so the OS file manager works wherever it
 	# offers one. Routing is by extension because the two imports validate very
@@ -272,6 +323,119 @@ func _open_index_dialog() -> void:
 	_index_dialog.popup_centered(Vector2i(720, 560))
 
 
+func _open_settings_dialog() -> void:
+	if _importing:
+		return
+	_settings_dialog.popup_centered()
+
+
+func _open_mods_dialog() -> void:
+	if _importing:
+		return
+	_mods_dialog.refresh()
+	_mods_dialog.popup_centered(Vector2i(640, 420))
+
+
+## Asks the release API what the latest version is. Public so a test can drive
+## the request path without a button press.
+func check_for_updates() -> void:
+	if _importing or _update_http == null:
+		return
+	_set_status("Checking for updates...", Gen2UpdateCheck.RELEASES_API, MUTED)
+	var headers: PackedStringArray = PackedStringArray([
+		"Accept: application/vnd.github+json",
+	])
+	if _update_http.request(Gen2UpdateCheck.RELEASES_API, headers) != OK:
+		_set_status("The update check could not start.", "No request was made.", ERROR)
+
+
+func _on_update_response(
+	result: int, code: int, _headers: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_set_status(
+			"The update check did not reach the network.",
+			"This build is %s." % Gen2UpdateCheck.current_version(),
+			ERROR,
+		)
+		return
+	var status: Dictionary = Gen2UpdateCheck.status_for(code, body.get_string_from_utf8())
+	var colour: Color = MUTED
+	match int(status["status"]):
+		Gen2UpdateCheck.Status.UPDATE_AVAILABLE:
+			colour = ACCENT
+		Gen2UpdateCheck.Status.UP_TO_DATE:
+			colour = SUCCESS
+		Gen2UpdateCheck.Status.UNREADABLE:
+			colour = ERROR
+	_set_status(
+		Gen2UpdateCheck.describe(status),
+		String(status.get("url", Gen2UpdateCheck.RELEASES_PAGE)),
+		colour,
+	)
+
+
+func _open_manage_dialog(game_id: StringName) -> void:
+	if _importing:
+		return
+	var data: GameData = GameData.open(game_id)
+	_manage_dialog.title = "Manage %s" % RomRegistry.title_for(game_id)
+	for child: Node in _manage_body.get_children():
+		child.queue_free()
+
+	var state := Label.new()
+	state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	state.text = (
+		"The cartridge for this game is imported and verified."
+		if data != null else "No cache exists for this game yet."
+	)
+	_manage_body.add_child(state)
+
+	var directory := Label.new()
+	directory.text = RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
+	directory.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_manage_body.add_child(directory)
+
+	var reimport: Button = _button("Re-import ROM" if data != null else "Import ROM", ACCENT)
+	reimport.pressed.connect(func() -> void:
+		_reimport_game_id = game_id
+		_manage_dialog.hide()
+		_open_import_dialog()
+	)
+	_manage_body.add_child(reimport)
+
+	if data != null:
+		var open_folder: Button = _button("Open cache folder", TEXT)
+		open_folder.pressed.connect(func() -> void: _open_cache_folder(game_id))
+		_manage_body.add_child(open_folder)
+
+		var delete: Button = _button("Delete cache", ERROR)
+		delete.pressed.connect(func() -> void: _delete_cache(game_id))
+		_manage_body.add_child(delete)
+
+	_manage_dialog.popup_centered()
+
+
+func _open_cache_folder(game_id: StringName) -> void:
+	var directory: String = RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
+	OS.shell_open(ProjectSettings.globalize_path(directory))
+
+
+## Removes the decoded cartridge data and nothing else. Saves live under their
+## own root, so deleting a cache costs an import and no player progress.
+func _delete_cache(game_id: StringName) -> void:
+	RomCache.clear(RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id)))
+	if _selected_game_id == game_id:
+		_selected_game_id = &""
+	_manage_dialog.hide()
+	_set_status(
+		"Removed the %s cache." % RomRegistry.title_for(game_id),
+		"Your saves were not touched. Import the cartridge again to play.",
+		MUTED,
+	)
+	_refresh_games()
+
+
 func _on_index_mod_installed(_id: StringName) -> void:
 	GameRuntime.load_mods()
 	_mods_label.text = _mods_summary()
@@ -327,7 +491,7 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 	var imported: bool = data != null
 	var selected: bool = game_id == _selected_game_id
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(300, 202)
+	card.custom_minimum_size = Vector2(300, 218)
 	card.add_theme_stylebox_override(
 		"panel", _panel_style(PANEL_SELECTED if selected else PANEL, BORDER_SELECTED if selected else BORDER, 10)
 	)
@@ -339,7 +503,7 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 	var title := Label.new()
 	title.text = RomRegistry.title_for(game_id)
 	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 26)
+	title.add_theme_font_size_override("font_size", 22)
 	body.add_child(title)
 
 	var revision := Label.new()
@@ -359,7 +523,7 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 
 	var detail := Label.new()
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	detail.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	detail.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	detail.add_theme_color_override("font_color", MUTED)
 	if imported:
 		detail.text = "%d species, %d trainer classes\nCache format %d\n%s" % [
@@ -370,10 +534,19 @@ func _create_game_card(game_id: StringName, data: GameData) -> PanelContainer:
 		detail.text = "Bring your own verified dump.\nThe filename does not matter."
 	body.add_child(detail)
 
+	var actions := HBoxContainer.new()
+	body.add_child(actions)
+
 	var action := _button("Open save slots" if imported else "Choose ROM", ACCENT if imported else TEXT)
 	action.custom_minimum_size = Vector2(0, 38)
+	action.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	action.pressed.connect(_on_game_action.bind(game_id, imported))
-	body.add_child(action)
+	actions.add_child(action)
+
+	var manage := _button("Manage", MUTED)
+	manage.custom_minimum_size = Vector2(90, 38)
+	manage.pressed.connect(_open_manage_dialog.bind(game_id))
+	actions.add_child(manage)
 
 	return card
 
@@ -420,6 +593,18 @@ func _on_file_selected(path: String) -> void:
 		_finish_import(false, String(identity["message"]))
 		return
 
+	# A re-import replaces one game's cache, so it only accepts that game's own
+	# dump. Without this, choosing the wrong file from the manage dialog would
+	# quietly import a different cartridge instead of saying so.
+	if not _reimport_game_id.is_empty() and StringName(identity["id"]) != _reimport_game_id:
+		var wanted: StringName = _reimport_game_id
+		_reimport_game_id = &""
+		_finish_import(false, "That dump is %s, not %s." % [
+			RomRegistry.title_for(StringName(identity["id"])), RomRegistry.title_for(wanted),
+		])
+		return
+	_reimport_game_id = &""
+
 	var rom: RomFile = RomFile.open_verified(path)
 	if rom == null:
 		_finish_import(false, "The verified cartridge could not be read.")
@@ -465,8 +650,9 @@ func _update_import_controls() -> void:
 		_import_button.disabled = _importing
 	for card: PanelContainer in _cards.values():
 		var body: VBoxContainer = card.get_child(0)
-		var action: Button = body.get_child(body.get_child_count() - 1)
-		action.disabled = _importing
+		var actions: HBoxContainer = body.get_child(body.get_child_count() - 1)
+		for button: Button in actions.get_children():
+			button.disabled = _importing
 
 
 func _set_status(title: String, detail: String, colour: Color) -> void:
@@ -493,10 +679,9 @@ func _save_slot_detail(game_id: StringName, data: GameData) -> String:
 			incompatible += 1
 	if slots.is_empty():
 		return "No saves yet"
-	var detail: String = "%d of %d saves ready" % [ready_slots, slots.size()]
 	if incompatible > 0:
-		detail += ", %d incompatible" % incompatible
-	return detail
+		return "Saves: %d ready, %d unreadable" % [ready_slots, incompatible]
+	return "Saves: %d ready" % ready_slots
 
 
 ## What the mod host found, said in one line. A refused mod is named with its
