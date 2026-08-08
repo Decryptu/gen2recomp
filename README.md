@@ -196,6 +196,7 @@ Headless tools, all against a real imported cache:
 |---|---|
 | `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
+| `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
 | `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
