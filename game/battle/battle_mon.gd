@@ -266,7 +266,15 @@ const GENDER_NONE: StringName = &"genderless"
 
 
 func gender() -> StringName:
-	var ratio: int = int(data.species(species).get("gender_ratio", GENDER_UNKNOWN))
+	return gender_for(data, species, dvs)
+
+
+## The same answer for a Pokémon that is not in a battle, so the Hall of Fame's
+## induction panel reads the rule from here rather than restating it.
+static func gender_for(data_source: GameData, species_number: int, mon_dvs: int) -> StringName:
+	var ratio: int = int(
+		data_source.species(species_number).get("gender_ratio", GENDER_UNKNOWN)
+	)
 	if ratio == GENDER_UNKNOWN:
 		return GENDER_NONE
 	if ratio == GENDER_F0:
@@ -274,7 +282,7 @@ func gender() -> StringName:
 	if ratio == GENDER_F100:
 		return GENDER_FEMALE
 
-	var combined: int = (Gen2Stats.attack_dv(dvs) << 4) | Gen2Stats.speed_dv(dvs)
+	var combined: int = (Gen2Stats.attack_dv(mon_dvs) << 4) | Gen2Stats.speed_dv(mon_dvs)
 	return GENDER_MALE if combined < ratio else GENDER_FEMALE
 
 

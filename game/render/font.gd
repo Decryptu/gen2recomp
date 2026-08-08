@@ -101,6 +101,53 @@ func draw_frame_code(
 	blit_slot(_frames, _frame_width, slot, into, into_width, at_x, at_y)
 
 
+## A whole box border, [param columns] by [param rows] tiles with its top-left
+## at [param at_x]/[param at_y] in pixels. The right-hand side reuses the same
+## vertical tile as the left and the bottom edge reuses the top's horizontal: a
+## frame is six tiles, not eight, and the two it does not have are the two the
+## hardware never needed.
+func draw_box(
+	frame: int,
+	into: PackedByteArray,
+	into_width: int,
+	at_x: int,
+	at_y: int,
+	columns: int,
+	rows: int
+) -> void:
+	if columns < 2 or rows < 2:
+		return
+	var right: int = at_x + (columns - 1) * TILE
+	var bottom: int = at_y + (rows - 1) * TILE
+	var vertical: int = RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_VERTICAL
+	var horizontal: int = RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_HORIZONTAL
+
+	draw_frame_code(
+		frame, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_LEFT,
+		into, into_width, at_x, at_y
+	)
+	draw_frame_code(
+		frame, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_RIGHT,
+		into, into_width, right, at_y
+	)
+	draw_frame_code(
+		frame, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_BOTTOM_LEFT,
+		into, into_width, at_x, bottom
+	)
+	draw_frame_code(
+		frame, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_BOTTOM_RIGHT,
+		into, into_width, right, bottom
+	)
+	for column: int in range(1, columns - 1):
+		var x: int = at_x + column * TILE
+		draw_frame_code(frame, horizontal, into, into_width, x, at_y)
+		draw_frame_code(frame, horizontal, into, into_width, x, bottom)
+	for row: int in range(1, rows - 1):
+		var y: int = at_y + row * TILE
+		draw_frame_code(frame, vertical, into, into_width, at_x, y)
+		draw_frame_code(frame, vertical, into, into_width, right, y)
+
+
 ## Copies one tile out of a strip, clipped to the destination. Clipping rather
 ## than refusing, because a text box that runs off the edge of the screen should
 ## look wrong at the edge and be right everywhere else.

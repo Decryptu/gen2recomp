@@ -167,39 +167,8 @@ func _redraw() -> void:
 	size = Vector2(width, height)
 
 
-## The border, as the characters $79 to $7E. The right-hand side reuses the same
-## vertical tile as the left and the bottom edge reuses the top's horizontal:
-## a frame is six tiles, not eight, and the two it does not have are the two the
-## hardware never needed.
 func _draw_border(indices: PackedByteArray, width: int) -> void:
-	var right: int = (columns - 1) * TILE
-	var bottom: int = (rows - 1) * TILE
-	var vertical: int = RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_VERTICAL
-	var horizontal: int = RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_HORIZONTAL
-
-	font.draw_frame_code(
-		frame_style, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_LEFT, indices, width, 0, 0
-	)
-	font.draw_frame_code(
-		frame_style, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_RIGHT,
-		indices, width, right, 0
-	)
-	font.draw_frame_code(
-		frame_style, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_BOTTOM_LEFT,
-		indices, width, 0, bottom
-	)
-	font.draw_frame_code(
-		frame_style, RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_BOTTOM_RIGHT,
-		indices, width, right, bottom
-	)
-
-	for column: int in range(1, columns - 1):
-		font.draw_frame_code(frame_style, horizontal, indices, width, column * TILE, 0)
-		font.draw_frame_code(frame_style, horizontal, indices, width, column * TILE, bottom)
-
-	for row: int in range(1, rows - 1):
-		font.draw_frame_code(frame_style, vertical, indices, width, 0, row * TILE)
-		font.draw_frame_code(frame_style, vertical, indices, width, right, row * TILE)
+	font.draw_box(frame_style, indices, width, 0, 0, columns, rows)
 
 
 func _draw_lines(indices: PackedByteArray, width: int) -> void:

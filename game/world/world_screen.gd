@@ -34,6 +34,9 @@ const SFX_STRENGTH: int = 0x1B
 ## constants/sfx_constants.asm's SFX_BUBBLEBEAM, which Script_UsedWaterfall plays
 ## after its text and before the first climbing step.
 const SFX_WATERFALL: int = 0x51
+## constants/music_constants.asm, which AnimateHallOfFame plays over the whole
+## induction.
+const MUSIC_HALL_OF_FAME: int = 20
 
 @export var map_group: int = 24
 @export var map_number: int = 3
@@ -64,6 +67,7 @@ var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
 var _party_host: Gen2PartyScreen = null
+var _hall_of_fame_host: Gen2HallOfFameScreen = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -262,6 +266,7 @@ func _process(delta: float) -> void:
 			_update_time_of_day()
 			if _service_host == null and _battle_host == null and _pc_host == null \
 				and _start_menu_host == null and _party_host == null \
+				and _hall_of_fame_host == null \
 				and not _world.script_input_waiting():
 				var phone_schedule: Dictionary = _world.advance_phone_schedule(
 					ticks.size(), _encounter_random
@@ -306,6 +311,7 @@ func _objects_may_move() -> bool:
 	return _world != null \
 		and _battle_host == null and _service_host == null and _pc_host == null \
 		and _start_menu_host == null and _party_host == null \
+		and _hall_of_fame_host == null \
 		and not _field_move_text \
 		and _trainer_approach.is_empty() \
 		and not _world.script_busy() \
@@ -323,6 +329,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	if _world.phone_ring_active():
+		accept_event()
+		return
+	## Before the PC and the party overlay because the Hall of Fame is the one
+	## overlay a script opens with nothing behind it: there is no map to go back
+	## to until it has finished, and it takes no cancel.
+	if _hall_of_fame_host != null:
+		_hall_of_fame_host.handle_key(key.keycode)
 		accept_event()
 		return
 	if _pc_host != null:
@@ -456,7 +469,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _renderer_input_free() -> bool:
 	return _world != null and _battle_host == null and _service_host == null \
 		and _pc_host == null and _start_menu_host == null and _party_host == null \
-		and not _field_move_text \
+		and _hall_of_fame_host == null and not _field_move_text \
 		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
 		and not _world.fishing_busy() and not _world.script_input_waiting()
 
@@ -465,6 +478,7 @@ func _renderer_input_free() -> bool:
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _world.fishing_busy() or _service_host != null \
 		or _pc_host != null or _start_menu_host != null or _party_host != null \
+		or _hall_of_fame_host != null \
 		or _field_move_text or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
@@ -547,6 +561,7 @@ func _after_player_move(movement: Dictionary) -> bool:
 func interact() -> bool:
 	if _world == null or _battle_host != null or _service_host != null \
 		or _pc_host != null or _start_menu_host != null or _party_host != null \
+		or _hall_of_fame_host != null \
 		or _field_move_text or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
@@ -1304,13 +1319,71 @@ func _on_pc_closed(result: Dictionary) -> void:
 	_refresh_labels()
 
 
+## Opens the induction sequence `halloffame` asks for. Public so the screenshot
+## tool and the scene tests can reach it without replaying the whole route.
+##
+## The party is the active save's, so an injected or development save inducts
+## whatever it is carrying. A cache with no font answers nothing rather than
+## drawing an empty screen.
+func open_hall_of_fame() -> void:
+	if _hall_of_fame_host != null or _world == null or _data == null:
+		return
+	var save: Gen2SaveData = _active_party_save()
+	if save == null:
+		_script_prompt = "Hall of Fame needs a save"
+		_refresh_labels()
+		return
+	var pages: Array = Gen2HallOfFame.pages(_data, save)
+	## No anchor preset: this is a child of the 160x144 Gen2Screen and sizes
+	## itself in native pixels, the way the story picture does.
+	var host := Gen2HallOfFameScreen.new()
+	host.set_context(_data, pages)
+	host.closed.connect(_on_hall_of_fame_closed)
+	_hall_of_fame_host = host
+	_screen.display(host)
+	if _hall_of_fame_host == null:
+		## set_context() with nothing to show closes on _ready(), which runs as
+		## soon as the node enters the tree.
+		return
+	_play_hall_of_fame_music()
+	_script_prompt = "Hall of Fame"
+	_refresh_labels()
+
+
+## HallOfFame calls SaveGameData before the animation, so the record is written
+## whether or not the player watches it. This writes at the end instead: the
+## screen owns no save state, and the snapshot it would write mid-sequence is
+## the same one.
+func _on_hall_of_fame_closed() -> void:
+	var host: Gen2HallOfFameScreen = _hall_of_fame_host
+	_hall_of_fame_host = null
+	if host != null:
+		host.queue_free()
+	var written: Dictionary = persist_world_snapshot()
+	_script_prompt = "Hall of Fame recorded" if bool(written.get("ok", false)) \
+		else "Hall of Fame not saved: %s" % String(written.get("reason", "unknown"))
+	_play_current_map_music()
+	if _renderer != null:
+		_renderer.refresh()
+	_refresh_labels()
+
+
+func _play_hall_of_fame_music() -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.world_audio(&"music", MUSIC_HALL_OF_FAME)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
 ## Public driver for screenshot tooling and scene tests, mirroring
 ## _open_pc_host()'s shape. The Enter/Tab key branch in
 ## _unhandled_key_input() is the normal path.
 func _open_start_menu() -> void:
 	if _start_menu_host != null or _party_host != null or _service_host != null \
 		or _pc_host != null or _battle_host != null or _world == null or _data == null \
-		or _field_move_text \
+		or _hall_of_fame_host != null or _field_move_text \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
 		or _world.phone_ring_active() or _world.fishing_busy():
 		return
@@ -1706,7 +1779,12 @@ func _show_script_results(results: Array) -> void:
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
 		for result_event: Dictionary in result.get("events", []):
-			if result_event.get("type", &"") == &"pokemon_picture_requested":
+			if result_event.get("type", &"") == &"hall_of_fame_requested":
+				## An event, not a runtime request: `halloffame` commits its flag
+				## and runs on, and the source's own `end` is the next command,
+				## so nothing is waiting to be resumed when this opens.
+				open_hall_of_fame()
+			elif result_event.get("type", &"") == &"pokemon_picture_requested":
 				_show_story_picture(int(result_event.get("pokemon", 0)))
 			elif result_event.get("type", &"") == &"pokemon_picture_closed":
 				_hide_story_picture()
