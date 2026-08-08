@@ -61,13 +61,19 @@ const ROUTE_44_BALLS: Dictionary = {
 ## is the one that shows the gate working in both directions.
 const ROUTE_45: Array = [5, 8]
 const CERULEAN_GYM: Array = [7, 6]
+## Both records sit on water, which is the point of each: the machine part is
+## the one the Route 24 grunt says he dropped in the gym pool, faced from the
+## bank above it, and Route 45's PP Up is out in the river with no land cell
+## adjacent at all, so it is reached surfing. `surfing` says which.
 const HIDDEN_ITEMS: Array[Dictionary] = [
 	{
 		"map": ROUTE_45, "cell": Vector2i(13, 80), "from": Vector2i(13, 81),
+		"facing": Gen2WorldSprite.FACING_UP, "surfing": true,
 		"item": 0x3E, "flag": 175,   # PP_UP, EVENT_ROUTE_45_HIDDEN_PP_UP
 	},
 	{
-		"map": CERULEAN_GYM, "cell": Vector2i(3, 8), "from": Vector2i(3, 9),
+		"map": CERULEAN_GYM, "cell": Vector2i(3, 8), "from": Vector2i(3, 7),
+		"facing": Gen2WorldSprite.FACING_DOWN, "surfing": false,
 		"item": 0x80, "flag": 251,   # MACHINE_PART, EVENT_FOUND_MACHINE_PART_IN_CERULEAN_GYM
 	},
 ]
@@ -183,7 +189,15 @@ func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
 		if world == null:
 			_fail("%s: map %s is missing." % [game_id, entry["map"]])
 			continue
-		world.player_facing = Gen2WorldSprite.FACING_UP
+		world.player_facing = int(entry["facing"])
+		if bool(entry["surfing"]):
+			world.movement_mode = Gen2WorldAPI.MOVEMENT_SURF
+		_check(
+			world.can_walk_to(entry["from"]),
+			"%s: %s is not a cell the hidden item on %s can be faced from%s." % [
+				game_id, entry["from"], cell, " while surfing" if entry["surfing"] else "",
+			]
+		)
 
 		# Set, the record is closed; this is the state the machine part ships in.
 		world.set_event_flag(flag)
