@@ -190,6 +190,24 @@ const TRAP_TARGET: StringName = &"traptarget"
 ## [constant Gen2Substatus.CANT_RUN] documents.
 const ARENA_TRAP: StringName = &"arenatrap"
 
+## The three moves that change the sky, each for [constant Gen2Weather.TURNS].
+## Only Sandstorm refuses to re-set its own weather; Rain Dance and Sunny Day
+## restart their count without failing, which is the cartridge's own asymmetry.
+const START_RAIN: StringName = &"startrain"
+const START_SUN: StringName = &"startsun"
+const START_SANDSTORM: StringName = &"startsandstorm"
+
+## Thunder's own accuracy, replacing the move's byte for this turn only: half in
+## sun, and certain in rain. The rain half is redundant with
+## [constant CHECK_HIT]'s own always-hits branch, which the cartridge says so
+## itself.
+const THUNDER_ACCURACY: StringName = &"thunderaccuracy"
+
+## Solarbeam in sun: `BattleCommand_SkipSunCharge` skips past the charge command
+## exactly as `checkcharge` does on a release turn, so the beam fires the turn it
+## is chosen.
+const SKIP_SUN_CHARGE: StringName = &"skipsuncharge"
+
 ## Raises and lowers a stat by one stage or two, named as the cartridge names
 ## them and in [constant Gen2BattleMon.STAGED_STATS] plus
 ## [constant Gen2BattleMon.STAGED_ODDS] order, which is also the order the effect
@@ -279,6 +297,10 @@ const STAT_DOWN_FAIL_TEXT: StringName = &"statdownfailtext"
 ## Recoil is a quarter of the damage dealt, never less than one, and it is the
 ## same quarter for every move that has it rather than a figure per move.
 const RECOIL_DIVISOR: int = 4
+
+## What [constant THUNDER_ACCURACY] leaves behind in sun: the cartridge's
+## `50 percent + 1`, one past the `x * 255 / 100` the rest of the engine uses.
+const THUNDER_SUN_ACCURACY: int = 128
 
 ## The two moves a frozen Pokémon can use, which thaw it in the using. Flame
 ## Wheel and Sacred Fire, by move number.
@@ -400,6 +422,16 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_trap_target(turn)
 		ARENA_TRAP:
 			_arena_trap(turn)
+		START_RAIN:
+			_start_weather(turn, Gen2Weather.RAIN)
+		START_SUN:
+			_start_weather(turn, Gen2Weather.SUN)
+		START_SANDSTORM:
+			_start_weather(turn, Gen2Weather.SANDSTORM)
+		THUNDER_ACCURACY:
+			_thunder_accuracy(turn)
+		SKIP_SUN_CHARGE:
+			_skip_sun_charge(turn)
 		ALL_STATS_UP:
 			_all_stats_up(turn)
 		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
@@ -446,7 +478,8 @@ static func _damage_calc(turn: Gen2Turn) -> void:
 		turn.attacker(), turn.defender(), turn.move, turn.rng(),
 		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
 		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
-		rollout_multiplier
+		rollout_multiplier,
+		turn.battle.weather
 	)
 	turn.damage = int(result["damage"])
 	turn.critical = bool(result["critical"])
@@ -494,8 +527,15 @@ static func _check_hit(turn: Gen2Turn) -> void:
 			turn.end()
 		return
 
+	# `.ThunderRain`, ahead of the stat modifiers and the roll: Thunder never
+	# misses in rain, whatever either side's accuracy and evasion say.
+	if turn.effect() == Gen2MoveEffect.THUNDER \
+		and turn.battle.weather == Gen2Weather.RAIN:
+		return
+
 	var chance: int = Gen2Accuracy.chance(
-		int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
+		turn.accuracy if turn.accuracy >= 0 \
+			else int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
 		turn.attacker().stage("accuracy"), turn.defender().stage("evasion")
 	)
 	if Gen2Accuracy.rolls_hit(turn.rng(), chance):
@@ -764,6 +804,11 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
 		return
 
+	# `BattleCommand_FreezeTarget` refuses outright in sun. It is the only one of
+	# the five statuses the weather has anything to say about.
+	if flag == Gen2Status.FREEZE and turn.battle.weather == Gen2Weather.SUN:
+		return
+
 	if flag == Gen2Status.SLEEP_MASK:
 		defender.status = Gen2Status.roll_sleep(turn.rng())
 	else:
@@ -865,7 +910,8 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 	for hit: int in hits:
 		if hit > 0:
 			var result: Dictionary = Gen2Damage.calculate(
-				attacker, defender, turn.move, turn.rng(), focus_energy
+				attacker, defender, turn.move, turn.rng(), focus_energy,
+				false, 1, turn.battle.weather
 			)
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
@@ -992,6 +1038,9 @@ static func _charge_move(turn: Gen2Turn) -> void:
 		mon.substatus &= ~Gen2Substatus.CHARGING
 		mon.substatus &= ~(Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
 		mon.charged_move = 0
+		return
+
+	if turn.skip_charge:
 		return
 
 	mon.substatus |= Gen2Substatus.CHARGING
@@ -1253,6 +1302,46 @@ static func _arena_trap(turn: Gen2Turn) -> void:
 
 	attacker.substatus |= Gen2Substatus.CANT_RUN
 	turn.emit(Gen2Battle.CANT_ESCAPE_SET, {"target": turn.target})
+
+
+## Sets the weather for [constant Gen2Weather.TURNS], the turn it is used
+## counting as the first.
+##
+## Only `BattleCommand_StartSandstorm` has a `.failed` branch, and it fails
+## against its own weather alone: Sunny Day in sun and Rain Dance in rain both
+## restart the count and print their line again, and either of them replaces a
+## Sandstorm outright.
+static func _start_weather(turn: Gen2Turn, weather: int) -> void:
+	if weather == Gen2Weather.SANDSTORM and turn.battle.weather == Gen2Weather.SANDSTORM:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	turn.battle.weather = weather
+	turn.battle.weather_turns = Gen2Weather.TURNS
+	turn.emit(Gen2Battle.WEATHER_STARTED, {"weather": weather})
+
+
+## Thunder's accuracy for this turn: `50 percent + 1` (128) in sun, and
+## `100 percent` (255) in rain.
+##
+## Written on the turn rather than on the move, because the cartridge writes it
+## into `wPlayerMoveStruct`, a per-turn copy, while [member Gen2Turn.move] is the
+## cached row every future Thunder would read.
+static func _thunder_accuracy(turn: Gen2Turn) -> void:
+	match turn.battle.weather:
+		Gen2Weather.SUN:
+			turn.accuracy = THUNDER_SUN_ACCURACY
+		Gen2Weather.RAIN:
+			turn.accuracy = Gen2Accuracy.ALWAYS_HITS
+
+
+## Solarbeam in sun, which is a one-turn move: the charge is skipped the way
+## `checkcharge` skips it on a release turn. A release turn reaches
+## [method _charge_move]'s own charging branch first, so this only ever answers
+## for the turn a charge would have started.
+static func _skip_sun_charge(turn: Gen2Turn) -> void:
+	if turn.battle.weather == Gen2Weather.SUN:
+		turn.skip_charge = true
 
 
 ## Moves one stat by one command's worth, and writes down who it happened to and

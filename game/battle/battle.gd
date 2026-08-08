@@ -139,6 +139,15 @@ const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 const ENCORE_INFLICTED: StringName = &"encore_inflicted"
 const ENCORE_ENDED: StringName = &"encore_ended"
 
+## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
+## [Gen2Weather] value, so a screen names it without being told twice.
+## [constant WEATHER_CONTINUES] is the line printed on every turn the weather
+## survives, which is the same turn a Sandstorm's damage lands on.
+const WEATHER_STARTED: StringName = &"weather_started"
+const WEATHER_CONTINUES: StringName = &"weather_continues"
+const WEATHER_ENDED: StringName = &"weather_ended"
+const HURT_BY_SANDSTORM: StringName = &"hurt_by_sandstorm"
+
 ## Bind, Wrap, Fire Spin, Clamp and Whirlpool: the target was bound, lost a
 ## sixteenth of its health to the binding, or was let go. [code]move[/code] on all
 ## three is the move that did it, which is what the cartridge's own texts name
@@ -241,6 +250,12 @@ var battle_type: int = BATTLETYPE_NORMAL
 ## `wNumFleeAttempts`. Every failed run raises the odds behind the next one, and
 ## choosing FIGHT clears it again, which is `BattleMenu_Fight`'s own `xor a`.
 var flee_attempts: int = 0
+
+## `wBattleWeather` and `wWeatherCount`. One of each for the whole battle rather
+## than one per side, and neither survives it: nothing outside a battle has
+## weather, so a fresh [Gen2Battle] starts clear.
+var weather: int = Gen2Weather.NONE
+var weather_turns: int = 0
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
@@ -679,6 +694,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		_act(side, slot, move_for(side, slot), events)
 
 	_residual_damage(acting, events)
+	_tick_weather(events)
 	_tick_wrap(events)
 	_tick_encore(acting, events)
 	_award_experience(events)
@@ -724,6 +740,52 @@ func _residual_damage(acting: Array, events: Array) -> void:
 			"side": side,
 			"status": current.status,
 			"name": Gen2Status.name_of(current.status),
+			"amount": taken,
+			"hp": current.hp,
+			"max_hp": current.max_hp(),
+		})
+		if current.is_fainted():
+			events.append({"type": FAINTED, "side": side})
+
+
+## `HandleWeather`: one turn off the count, the line that goes with it, and a
+## Sandstorm's eighth off whoever it can reach.
+##
+## Ahead of [method _tick_wrap] because `HandleBetweenTurnEffects` runs weather
+## before wrap. The countdown happens before the message, so the turn the count
+## reaches zero prints the ending line and deals no Sandstorm damage; the turn
+## the weather was set counts as one of its own, since `HandleWeather` runs on
+## that turn too.
+##
+## Player first whoever moved first, the same `SetPlayerTurn` then
+## `SetEnemyTurn` [method _tick_wrap] follows.
+func _tick_weather(events: Array) -> void:
+	if not Gen2Weather.is_active(weather):
+		return
+
+	weather_turns -= 1
+	if weather_turns <= 0:
+		var ended: int = weather
+		weather = Gen2Weather.NONE
+		weather_turns = 0
+		events.append({"type": WEATHER_ENDED, "weather": ended})
+		return
+
+	events.append({"type": WEATHER_CONTINUES, "weather": weather})
+	if weather != Gen2Weather.SANDSTORM:
+		return
+
+	for side: int in [PLAYER, ENEMY]:
+		var current: Gen2BattleMon = mon(side)
+		if current.is_fainted():
+			continue
+		if not Gen2Weather.hits_in_sandstorm(current.types(), current.substatus):
+			continue
+
+		var taken: int = current.take_damage(Gen2Weather.sandstorm_damage(current.max_hp()))
+		events.append({
+			"type": HURT_BY_SANDSTORM,
+			"side": side,
 			"amount": taken,
 			"hp": current.hp,
 			"max_hp": current.max_hp(),

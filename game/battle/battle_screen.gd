@@ -68,6 +68,25 @@ const BIND: int = 20
 const WRAP: int = 35
 const CLAMP: int = 128
 
+## The three lines each weather has, which are the cartridge's own and are keyed
+## by the weather rather than by the move: `HandleWeather`'s `.WeatherMessages`
+## and `.WeatherEndedMessages`, plus each setter's own.
+const WEATHER_STARTED_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "A downpour started!",
+	Gen2Weather.SUN: "The sunlight got bright!",
+	Gen2Weather.SANDSTORM: "A SANDSTORM brewed!",
+}
+const WEATHER_CONTINUES_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "Rain continues to fall.",
+	Gen2Weather.SUN: "The sunlight is strong.",
+	Gen2Weather.SANDSTORM: "The SANDSTORM rages.",
+}
+const WEATHER_ENDED_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "The rain stopped.",
+	Gen2Weather.SUN: "The sunlight faded.",
+	Gen2Weather.SANDSTORM: "The SANDSTORM subsided.",
+}
+
 var _data: GameData = null
 var _injected_data: GameData = null
 ## Whatever the mod host supplies. Typed as Node because a registered renderer
@@ -1261,6 +1280,14 @@ func _describe(event: Dictionary) -> String:
 			return "%s got an encore!" % _battler_name(int(event["target"]))
 		Gen2Battle.ENCORE_ENDED:
 			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.WEATHER_STARTED:
+			return WEATHER_STARTED_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.WEATHER_CONTINUES:
+			return WEATHER_CONTINUES_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.WEATHER_ENDED:
+			return WEATHER_ENDED_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.HURT_BY_SANDSTORM:
+			return "The SANDSTORM hits %s!" % _battler_name(side)
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

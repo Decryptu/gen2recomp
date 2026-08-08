@@ -106,7 +106,7 @@ const FLY_MOVE: int = 19
 const DIG_MOVE: int = 91
 const GUST_MOVE: int = 16
 const WHIRLWIND_MOVE: int = 18
-const THUNDER_MOVE: int = 9
+const THUNDER_MOVE: int = 87
 const TWISTER_MOVE: int = 239
 const EARTHQUAKE_MOVE: int = 89
 const FISSURE_MOVE: int = 90
@@ -142,6 +142,14 @@ const ENCORE: int = 90
 ## and Whirlpool carry the first; Mean Look and Spider Web the second.
 const TRAP_TARGET: int = 42
 const MEAN_LOOK: int = 106
+
+## The three weather moves and the two moves that read the weather back.
+## [constant SOLARBEAM] is already above, since it was a two-turn move before it
+## was a weather one.
+const SANDSTORM: int = 115
+const RAIN_DANCE: int = 136
+const SUNNY_DAY: int = 137
+const THUNDER: int = 152
 
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
@@ -456,6 +464,62 @@ const TRAP_TARGET_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## The three weather moves, which are the shortest lists in the game: announce,
+## spend, change the sky. None of them rolls accuracy, so the 90% Rain Dance and
+## Sunny Day carry and Sandstorm's 100% are all never read.
+const START_RAIN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_RAIN,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const START_SUN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_SUN,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const START_SANDSTORM_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_SANDSTORM,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Thunder: a paralysis chance behind the hit, with its own accuracy step ahead
+## of the roll. Without that step Thunder would be an ordinary attack, which is
+## what it was here before the weather existed to read.
+const THUNDER_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.THUNDER_ACCURACY,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.PARALYZE_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Solarbeam: [constant CHARGE_SEQUENCE] with the sun's own way out in front of
+## the charge, exactly where `skipsuncharge` sits in front of `charge`.
+const SOLARBEAM_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SKIP_SUN_CHARGE,
+	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
 ## Mean Look and Spider Web, which are four commands and no accuracy roll:
 ## `MeanLook` has no `checkhit`, so the 100% both moves carry in the move table
 ## is never consulted and neither one can miss.
@@ -693,7 +757,7 @@ static func _sequences() -> Dictionary:
 		CONFUSE: CONFUSE_SEQUENCE,
 		RECHARGE_HIT: RECHARGE_HIT_SEQUENCE,
 		RAZOR_WIND: CHARGE_SEQUENCE,
-		SOLARBEAM: CHARGE_SEQUENCE,
+		SOLARBEAM: SOLARBEAM_SEQUENCE,
 		FLY_OR_DIG: CHARGE_SEQUENCE,
 		SKY_ATTACK: SKY_ATTACK_SEQUENCE,
 		SKULL_BASH: SKULL_BASH_SEQUENCE,
@@ -710,6 +774,10 @@ static func _sequences() -> Dictionary:
 		ENCORE: ENCORE_SEQUENCE,
 		TRAP_TARGET: TRAP_TARGET_SEQUENCE,
 		MEAN_LOOK: MEAN_LOOK_SEQUENCE,
+		RAIN_DANCE: START_RAIN_SEQUENCE,
+		SUNNY_DAY: START_SUN_SEQUENCE,
+		SANDSTORM: START_SANDSTORM_SEQUENCE,
+		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DRAIN_SEQUENCE,
 		MULTI_HIT: MULTI_HIT_SEQUENCE,

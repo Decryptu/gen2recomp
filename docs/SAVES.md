@@ -28,7 +28,7 @@ Save format version 2 stores:
 
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, trapping, Fly, Dig, Rollout and rampage,
-is never saved. The validator checks the selected `GameData`. Slots live under
+is never saved, and neither is the battle's own weather. The validator checks the selected `GameData`. Slots live under
 `user://save_slots` per game revision and are created on demand rather than
 preallocated, up to `Gen2SaveStore.MAX_SLOTS`; a slot number is still its file
 name, so slots written before this stay where they were. Each save carries its

@@ -66,7 +66,7 @@ const EXPLOSION: int = 153
 const FLY: int = 19
 const MIRROR_COAT: int = 243
 const GUST: int = 16
-const THUNDER: int = 9
+const THUNDER: int = 87
 const TWISTER: int = 239
 const EARTHQUAKE: int = 89
 const FISSURE: int = 90
@@ -79,6 +79,14 @@ const MAGNITUDE: int = 222
 const WRAP: int = 35
 const BIND: int = 20
 const MEAN_LOOK: int = 212
+
+## The three weather moves, at their real numbers with the real bytes. Solarbeam
+## needs no entry of its own: [constant SOLARBEAM] above already carries the
+## effect, and nothing about the sun reads a move number.
+const RAIN_DANCE: int = 240
+const SUNNY_DAY: int = 241
+const SANDSTORM: int = 201
+const THUNDER_ALWAYS_PARALYZES: int = 274
 
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
@@ -128,7 +136,7 @@ const MIST_MOVE: int = 272
 const FOCUS_ENERGY_MOVE: int = 273
 
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = FOCUS_ENERGY_MOVE
+const MAX_MOVE: int = THUNDER_ALWAYS_PARALYZES
 const BERRY_ITEM: int = 0xAD
 ## The Smoke Ball and its held effect, both the cartridge's own numbers
 ## (constants/item_constants.asm, constants/item_data_constants.asm). It is the
@@ -303,7 +311,7 @@ static func _moves() -> Array:
 		FLY: ["FLY", 70, FLYING, 242, 15, Gen2MoveEffect.FLY_OR_DIG, 0],
 		DIG: ["DIG", 100, GROUND, 255, 10, Gen2MoveEffect.FLY_OR_DIG, 0],
 		GUST: ["GUST", 40, FLYING, 255, 35, 0, 0],
-		THUNDER: ["THUNDER", 120, ELECTRIC, 179, 10, Gen2MoveEffect.PARALYZE_HIT, 0],
+		THUNDER: ["THUNDER", 120, ELECTRIC, 178, 10, Gen2MoveEffect.THUNDER, 76],
 		TWISTER: ["TWISTER", 40, DRAGON, 255, 20, Gen2MoveEffect.FLINCH_HIT, 0],
 		EARTHQUAKE: ["EARTHQUAKE", 100, GROUND, 255, 10, 0, 0],
 		FISSURE: ["FISSURE", 0, GROUND, 76, 5, Gen2MoveEffect.OHKO, 0],
@@ -340,6 +348,15 @@ static func _moves() -> Array:
 		ATTRACT_MOVE: ["ATTRACT", 0, NORMAL, 255, 15, Gen2MoveEffect.ATTRACT, 0],
 		MIST_MOVE: ["MIST", 0, NORMAL, 255, 30, Gen2MoveEffect.MIST, 0],
 		FOCUS_ENERGY_MOVE: ["FOCUS ENERGY", 0, NORMAL, 255, 30, Gen2MoveEffect.FOCUS_ENERGY, 0],
+		RAIN_DANCE: ["RAIN DANCE", 0, WATER, 229, 5, Gen2MoveEffect.RAIN_DANCE, 0],
+		SUNNY_DAY: ["SUNNY DAY", 0, FIRE, 229, 5, Gen2MoveEffect.SUNNY_DAY, 0],
+		SANDSTORM: ["SANDSTORM", 0, ROCK, 255, 10, Gen2MoveEffect.SANDSTORM, 0],
+		# Thunder with a paralysis chance the roll cannot fail, so the secondary
+		# behind its own effect can be seen without a seed. The accuracy byte is
+		# still the real 178, since that is what the weather rewrites.
+		THUNDER_ALWAYS_PARALYZES: [
+			"THUNDER", 120, ELECTRIC, 178, 10, Gen2MoveEffect.THUNDER, 256,
+		],
 		# Real rows, accuracy bytes included: Wrap and Bind can miss, so a test
 		# that needs one to land raises the attacker's accuracy stage rather than
 		# pretending either move always hits. Mean Look really is 255, and its

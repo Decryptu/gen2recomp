@@ -33,6 +33,17 @@ func _battle() -> Gen2Battle:
 	)
 
 
+## The default enemy is a Geodude, which is Ground and so immune to Electric.
+## Anything testing Thunder needs a target it can actually reach.
+func _electric_battle() -> Gen2Battle:
+	return Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		Gen2BattleMon.create(_data, Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		_rng
+	)
+
+
 func _turn(battle: Gen2Battle, move_number: int = Fixture.TACKLE) -> Gen2Turn:
 	return Gen2Turn.create(
 		battle, Gen2Battle.PLAYER, 0, move_number, _data.move(move_number), []
@@ -1316,6 +1327,168 @@ func test_a_knocked_out_target_is_never_bound() -> void:
 	assert_true(battle.enemy.is_fainted())
 	assert_eq(battle.enemy.trapped_turns, 0)
 	assert_true(_first(turn.events, Gen2Battle.TRAPPED).is_empty())
+
+
+## The three weather moves are three commands and a terminator each, with no
+## accuracy step: Rain Dance and Sunny Day carry 90% and neither ever rolls it.
+func test_the_weather_moves_have_their_cartridge_sequences() -> void:
+	for effect: int in [
+		Gen2MoveEffect.RAIN_DANCE, Gen2MoveEffect.SUNNY_DAY, Gen2MoveEffect.SANDSTORM
+	]:
+		var sequence: Array = Gen2MoveEffect.sequence_for(effect)
+		assert_true(Gen2MoveEffect.is_written(effect), "effect %d" % effect)
+		assert_eq(sequence.size(), 4, "effect %d" % effect)
+		assert_false(sequence.has(Gen2EffectCommands.CHECK_HIT), "effect %d rolls" % effect)
+
+
+func test_each_weather_move_sets_its_own_weather_for_five_turns() -> void:
+	for pair: Array in [
+		[Fixture.RAIN_DANCE, Gen2Weather.RAIN],
+		[Fixture.SUNNY_DAY, Gen2Weather.SUN],
+		[Fixture.SANDSTORM, Gen2Weather.SANDSTORM],
+	]:
+		var battle: Gen2Battle = _battle()
+
+		var turn: Gen2Turn = _run_move(battle, int(pair[0]))
+
+		assert_eq(battle.weather, int(pair[1]), JSON.stringify(turn.events))
+		assert_eq(battle.weather_turns, Gen2Weather.TURNS)
+		assert_eq(int(_first(turn.events, Gen2Battle.WEATHER_STARTED)["weather"]), int(pair[1]))
+
+
+## Only `BattleCommand_StartSandstorm` has a failure branch, and only against its
+## own weather. Sunny Day in sun restarts the count instead.
+func test_only_sandstorm_refuses_to_set_its_own_weather_again() -> void:
+	var sandy: Gen2Battle = _battle()
+	sandy.weather = Gen2Weather.SANDSTORM
+	sandy.weather_turns = 2
+
+	var refused: Gen2Turn = _run_move(sandy, Fixture.SANDSTORM)
+
+	assert_eq(sandy.weather_turns, 2, "the count was restarted")
+	assert_false(_first(refused.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+	var sunny: Gen2Battle = _battle()
+	sunny.weather = Gen2Weather.SUN
+	sunny.weather_turns = 2
+
+	var restarted: Gen2Turn = _run_move(sunny, Fixture.SUNNY_DAY)
+
+	assert_eq(sunny.weather_turns, Gen2Weather.TURNS)
+	assert_true(_first(restarted.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+## Either of the other two replaces a Sandstorm outright: neither one checks the
+## weather at all before writing it.
+func test_rain_and_sun_replace_a_sandstorm() -> void:
+	for pair: Array in [
+		[Fixture.RAIN_DANCE, Gen2Weather.RAIN], [Fixture.SUNNY_DAY, Gen2Weather.SUN]
+	]:
+		var battle: Gen2Battle = _battle()
+		battle.weather = Gen2Weather.SANDSTORM
+		battle.weather_turns = 3
+
+		_run_move(battle, int(pair[0]))
+
+		assert_eq(battle.weather, int(pair[1]))
+		assert_eq(battle.weather_turns, Gen2Weather.TURNS)
+
+
+## `BattleCommand_ThunderAccuracy` writes `wPlayerMoveStruct + MOVE_ACC`, a
+## per-turn copy, which is why this lands on the turn and not on the move.
+func test_thunder_takes_its_accuracy_from_the_weather() -> void:
+	for pair: Array in [
+		[Gen2Weather.NONE, -1], [Gen2Weather.SANDSTORM, -1],
+		[Gen2Weather.SUN, Gen2EffectCommands.THUNDER_SUN_ACCURACY],
+		[Gen2Weather.RAIN, Gen2Accuracy.ALWAYS_HITS],
+	]:
+		var battle: Gen2Battle = _electric_battle()
+		battle.weather = int(pair[0])
+		var turn: Gen2Turn = _turn(battle, Fixture.THUNDER)
+
+		Gen2EffectCommands.run(Gen2EffectCommands.THUNDER_ACCURACY, turn)
+
+		assert_eq(turn.accuracy, int(pair[1]), "weather %d" % int(pair[0]))
+		assert_eq(int(_data.move(Fixture.THUNDER)["accuracy"]), 178, "the cached row was written")
+
+
+## `.ThunderRain` sits among `CheckHit`'s always-hit branches, ahead of the stat
+## modifiers, so evasion cannot take it away either.
+func test_thunder_cannot_miss_in_rain() -> void:
+	var battle: Gen2Battle = _electric_battle()
+	battle.weather = Gen2Weather.RAIN
+	battle.enemy.change_stage("evasion", 6)
+
+	for _attempt: int in 20:
+		var turn: Gen2Turn = _turn(battle, Fixture.THUNDER)
+		Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+		assert_false(turn.missed)
+
+
+## Thunder is a paralysing move through its own effect byte, not through
+## `EFFECT_PARALYZE_HIT`, which is why it did nothing but damage until the
+## weather gave the effect a reason to exist.
+func test_thunder_paralyses_behind_its_own_effect() -> void:
+	var battle: Gen2Battle = _electric_battle()
+	battle.weather = Gen2Weather.RAIN
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.THUNDER_ALWAYS_PARALYZES)
+
+	assert_false(turn.missed, JSON.stringify(turn.events))
+	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.PARALYSIS))
+
+
+## `BattleCommand_SkipSunCharge` skips past the charge command the way
+## `checkcharge` does, so Solarbeam fires the turn it is chosen.
+func test_solarbeam_skips_its_charge_turn_in_sun() -> void:
+	var sunny: Gen2Battle = _battle()
+	sunny.weather = Gen2Weather.SUN
+
+	var fired: Gen2Turn = _run_move(sunny, Fixture.SOLARBEAM)
+
+	assert_false(Gen2Substatus.has(sunny.player.substatus, Gen2Substatus.CHARGING))
+	assert_eq(sunny.player.charged_move, 0)
+	assert_false(_first(fired.events, Gen2Battle.HIT).is_empty(), JSON.stringify(fired.events))
+
+	var plain: Gen2Battle = _battle()
+
+	var charging: Gen2Turn = _run_move(plain, Fixture.SOLARBEAM)
+
+	assert_true(Gen2Substatus.has(plain.player.substatus, Gen2Substatus.CHARGING))
+	assert_false(_first(charging.events, Gen2Battle.CHARGING_UP).is_empty())
+
+
+## Sun that arrives while a Solarbeam is already charging does not strand it:
+## `checkcharge` runs ahead of `skipsuncharge` and answers the release turn
+## first, which is [method Gen2EffectCommands._charge_move]'s own first branch.
+func test_sun_arriving_mid_charge_still_releases_the_beam() -> void:
+	var battle: Gen2Battle = _battle()
+
+	_run_move(battle, Fixture.SOLARBEAM)
+	battle.weather = Gen2Weather.SUN
+
+	var released: Gen2Turn = _run_move(battle, Fixture.SOLARBEAM, true)
+
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CHARGING))
+	assert_false(_first(released.events, Gen2Battle.HIT).is_empty(), JSON.stringify(released.events))
+
+
+## `BattleCommand_FreezeTarget` returns in sun, before it has written anything.
+func test_nothing_freezes_in_sun() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.weather = Gen2Weather.SUN
+	var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.FREEZE_TARGET, turn)
+
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+
+	battle.weather = Gen2Weather.RAIN
+	var wet: Gen2Turn = _turn(battle, Fixture.TACKLE)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.FREEZE_TARGET, wet)
+
+	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.FREEZE))
 
 
 func _of_type(events: Array, type: StringName) -> Array:
