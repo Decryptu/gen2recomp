@@ -450,6 +450,10 @@ const POWER_PLANT_MANAGER_FACE: Vector2i = Vector2i(14, 11)
 ## `maps/CeruleanCity.asm` warp 5 and the gym's own exit.
 const CERULEAN_GYM_DOOR: Vector2i = Vector2i(30, 23)
 const CERULEAN_GYM_EXIT: Vector2i = Vector2i(4, 15)
+## `maps/CeruleanGym.asm`: Misty on (5,3), faced from the pool's north bank.
+## ENGINE_CASCADEBADGE's place in source badge order.
+const MISTY_FACE: Vector2i = Vector2i(5, 4)
+const BADGE_CASCADE: int = 9
 ## The MACHINE_PART the Route 24 grunt says he dropped in the gym pool. Its own
 ## cell is water, so it is faced from the bank directly above it.
 const MACHINE_PART_APPROACH: Vector2i = Vector2i(3, 7)
@@ -464,6 +468,9 @@ const EVENT_RETURNED_MACHINE_PART: int = 201
 const EVENT_MET_MANAGER_AT_POWER_PLANT: int = 202
 const EVENT_RESTORED_POWER_TO_KANTO: int = 205
 const EVENT_TRAINERS_IN_CERULEAN_GYM: int = 1903
+## The three swimmer flags `CeruleanGymMistyScript` sets itself, and her own.
+const EVENT_BEAT_MISTY: int = 1222
+const CERULEAN_GYM_TRAINER_FLAGS: Array[int] = [1017, 1018, 1448]
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
 
@@ -5575,13 +5582,6 @@ func _cerulean_approach_path(
 ## the pool, the pool holds the MACHINE_PART, the manager takes it back, and only
 ## Route 25's date puts Misty in her gym. Two of those steps are at the plant, so
 ## the river is ridden twice each way.
-##
-## The walk stops with Misty in her gym and unfought. Her three swimmers stand on
-## the pool, and `can_object_walk_to()` accepts LAND_TILE only, so a swimmer that
-## sees the player cannot complete the source approach and the sight request
-## fails with `movement_blocked`. `CanObjectMoveInDirection` branches on
-## SWIMMING_F and calls WillObjectBumpIntoLand instead, but nothing imports which
-## sprites swim, so the branch has no input yet.
 func _machine_part_errand(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -5632,6 +5632,67 @@ func _machine_part_errand(
 		return {"ok": false, "path": path, "reason": "the machine part was not handed over"}
 	if world.event_flag_active(EVENT_TRAINERS_IN_CERULEAN_GYM):
 		return {"ok": false, "path": path, "reason": "Misty is still hidden"}
+	return _cerulean_gym_leg(world, save, random, data, path)
+
+
+## Misty, once the errand has put her in her gym.
+##
+## The gym is a pool with the leader on an island, and its trainers are what the
+## walk has to answer: Swimmer Diana watches the one row every route to Misty
+## crosses, and Swimmers Parker and Briana watch the pool's two alternative
+## columns, so one of the pair is met whichever way round it goes. All three stand
+## on water and walk over it to reach the player, which the cartridge allows
+## because `SeenByTrainerScript` is `applymovementlasttalked` and its steps reach
+## `NormalStep`, checking no permission. `tools/validate_cerulean.gd` pins the
+## geometry and each approach.
+##
+## Misty herself sets all three of their beaten flags along with her own, the way
+## Surge, Erika and Sabrina do, so they are reported rather than gated on.
+func _cerulean_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Cerulean Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+	var misty: Dictionary = _talk_to(
+		world, MISTY_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_CASCADE, Gen2WorldState.is_crystal_profile(data)
+	)
+	var trainers_beaten: int = 0
+	for flag: int in CERULEAN_GYM_TRAINER_FLAGS:
+		if world.event_flag_active(flag):
+			trainers_beaten += 1
+	path.append({
+		"step": "cerulean_gym_misty",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"cascade_badge": world.state.is_engine_flag_active(badge),
+		"beat_misty": world.event_flag_active(EVENT_BEAT_MISTY),
+		"swimmer_flags": trainers_beaten,
+		"swimmers_fought": misty.get("encounters", []),
+		"run": misty,
+	})
+	if not bool(misty.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Misty did not finish: %s" % misty.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_CASCADEBADGE was not set"}
+	if trainers_beaten != CERULEAN_GYM_TRAINER_FLAGS.size():
+		return {
+			"ok": false, "path": path,
+			"reason": "Misty set %d of her three swimmer flags" % trainers_beaten,
+		}
 	return {"ok": true}
 
 

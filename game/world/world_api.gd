@@ -14,9 +14,9 @@ const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
 const TRAINER_SHOCK_EMOTE: int = 0
 const TRAINER_SHOCK_FRAMES: int = 30
-const TRAINER_SLOW_STEP_FRAMES: int = 16
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
-## duration for ordinary player walking (engine/overworld/map_objects.asm).
+## duration for ordinary player walking (engine/overworld/map_objects.asm). The
+## trainer approach shares it: see advance_trainer_approach_step().
 const STEP_FRAMES_WALK: int = 8
 ## A ledge hop is two chained STEP_WALK-duration cells back to back
 ## (engine/overworld/map_objects.asm's StepFunction_PlayerJump: .initjump/
@@ -1223,7 +1223,7 @@ func start_trainer_approach(
 	object.set_emote(TRAINER_SHOCK_EMOTE, true, TRAINER_SHOCK_FRAMES)
 	plan["emote_id"] = TRAINER_SHOCK_EMOTE
 	plan["emote_frames"] = TRAINER_SHOCK_FRAMES
-	plan["step_frames"] = TRAINER_SLOW_STEP_FRAMES
+	plan["step_frames"] = STEP_FRAMES_WALK
 	return plan
 
 
@@ -1255,22 +1255,33 @@ func trainer_approach_plan(
 	}
 
 
-## Applies one source slow-step from an already validated approach plan and
-## starts that object's presentation offset for the pacing caller to consume;
-## the object's cell is already the destination when this returns.
+## Applies one step from an already validated approach plan and starts that
+## object's presentation offset for the pacing caller to consume; the object's
+## cell is already the destination when this returns.
+##
+## Only the map bounds refuse, as in _apply_object_movement(): the approach is
+## `applymovementlasttalked wMovementBuffer` (engine/events/trainer_scripts.asm)
+## and its steps reach NormalStep (engine/overworld/movement.asm), which never
+## calls CanObjectMoveInDirection. That is what walks Cerulean Gym's swimmers
+## over their own pool.
+##
+## STEP_FRAMES_WALK, not the slow row: TrainerWalkToPlayer passes 1 in d and
+## `.GetPathToPlayer`'s `push de`/`pop af` hands it to
+## ComputePathToWalkToPlayer, whose `ld b, a` selects `.MovementData`'s `step`
+## row (engine/overworld/player_object.asm, home/movement.asm).
 func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Dictionary:
 	if current_map == null or object_index < 0 or object_index >= objects.size():
 		return {"ok": false, "reason": &"invalid_trainer_object"}
 	var object: Gen2WorldObject = objects[object_index]
 	var destination: Vector2i = object.cell + direction
 	object.apply_direction(direction)
-	if not can_object_walk_to(destination, object, direction):
+	if not _cell_in_bounds(destination):
 		return {
 			"ok": false, "reason": &"movement_blocked",
 			"object_index": object_index, "cell": destination,
 		}
 	object.cell = destination
-	object.start_step(direction, TRAINER_SLOW_STEP_FRAMES)
+	object.start_step(direction, STEP_FRAMES_WALK)
 	var key: String = _object_key(current_map.group, current_map.number, object_index)
 	_object_position_overrides[key] = object.cell
 	_object_facing_overrides[key] = object.facing
@@ -2966,6 +2977,10 @@ func _remember_object_position(object: Gen2WorldObject) -> void:
 	_object_facing_overrides[key] = object.facing
 
 
+## Follower steps commit on the map bounds alone, for the same reason a scripted
+## step and a trainer approach do: MovementFunction_Follow is HandleMovementData
+## over the queued leader commands (engine/overworld/map_objects.asm), so every
+## one of them lands in NormalStep and never reaches CanObjectMoveInDirection.
 func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictionary) -> void:
 	var relations: Array = []
 	for key: String in _object_followers:
@@ -3010,11 +3025,12 @@ func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictiona
 		else:
 			direction = Vector2i(0, signi(delta.y))
 		var destination: Vector2i = follower.cell + direction
-		if can_object_walk_to(destination, follower, direction):
+		if _cell_in_bounds(destination):
 			follower.cell = destination
 			follower.apply_direction(direction)
-			# A follower keeps pace with the player, so it takes the player's
-			# own walk duration rather than the slower wandering one.
+			# The player's own walk duration, not the slower wandering one:
+			# QueueFollowerFirstStep queues `movement_step` and the queue after
+			# it holds the leader's own command bytes.
 			follower.start_step(direction, STEP_FRAMES_WALK)
 			var override_key: String = _object_key(
 				current_map.group, current_map.number, follower_index

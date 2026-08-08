@@ -3522,6 +3522,48 @@ func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
 	assert_eq(after_battle[0]["source"]["script"], 0x6040)
 
 
+## The approach is `applymovementlasttalked wMovementBuffer`, so every step
+## reaches NormalStep (engine/overworld/movement.asm) and no permission stands
+## between a seen trainer and the cell beside the player. Cerulean Gym is what
+## needs it: its three swimmers stand on the pool.
+func test_trainer_approach_crosses_water_a_wandering_object_could_not() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 5))
+	var trainer: Gen2WorldObject = world.objects[0]
+	trainer.cell = Vector2i(8, 8)
+	trainer.object_type = Gen2WorldObject.OBJECTTYPE_TRAINER
+	assert_eq(world.collision_permission_at(Vector2i(8, 7)), Gen2WorldCollision.WATER_TILE)
+	assert_false(world.can_object_walk_to(Vector2i(8, 7), trainer, Vector2i.UP))
+
+	var plan: Dictionary = world.trainer_approach_plan(0, Vector2i.UP, 3)
+	assert_true(plan["ok"], JSON.stringify(plan))
+	assert_eq(plan["target_cell"], Vector2i(8, 6))
+	assert_eq(plan["path"], [Vector2i.UP, Vector2i.UP])
+
+	var crossed: Dictionary = world.advance_trainer_approach_step(0, Vector2i.UP)
+	assert_true(crossed["ok"], JSON.stringify(crossed))
+	assert_eq(trainer.cell, Vector2i(8, 7))
+	# TrainerWalkToPlayer passes 1 to ComputePathToWalkToPlayer, which selects
+	# `step` rather than `slow_step`: StepVectors' normal row, 8 frames.
+	assert_eq(trainer.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK)
+	assert_true(world.advance_trainer_approach_step(0, Vector2i.UP)["ok"])
+	assert_eq(trainer.cell, Vector2i(8, 6))
+
+
+## Only GetNextTile's own bounds refuse, the same limit _apply_object_movement()
+## keeps for a scripted step.
+func test_trainer_approach_step_refuses_only_outside_the_map() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 5))
+	var trainer: Gen2WorldObject = world.objects[0]
+	trainer.cell = Vector2i(8, 0)
+	trainer.object_type = Gen2WorldObject.OBJECTTYPE_TRAINER
+
+	var refused: Dictionary = world.advance_trainer_approach_step(0, Vector2i.UP)
+	assert_false(refused["ok"])
+	assert_eq(refused["reason"], &"movement_blocked")
+	assert_eq(refused["cell"], Vector2i(8, -1))
+	assert_eq(trainer.cell, Vector2i(8, 0))
+
+
 ## StartBattleWithMapTrainerScript (engine/events/trainer_scripts.asm) falls
 ## through into AlreadyBeatenTrainerScript's scripttalkafter with
 ## wRunningTrainerBattleScript set, so the after-battle script runs at once and

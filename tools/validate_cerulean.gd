@@ -25,6 +25,12 @@ extends SceneTree
 ## 56 and 57 and come out in Route 10 North's own lake, one step from the
 ## plant's shore.
 ##
+## The gym behind that errand is a pool. Its three swimmers stand on the water,
+## and the walk to Misty cannot avoid Diana's sight line or both of the other
+## two, so the badge needs approaches that cross water. They do, because
+## SeenByTrainerScript is `applymovementlasttalked` and NormalStep consults no
+## permission.
+##
 ##   Godot --headless --path . -s res://tools/validate_cerulean.gd
 
 const GAME_IDS: Array[StringName] = [&"gold", &"silver", &"crystal"]
@@ -55,6 +61,32 @@ const CERULEAN_GYM_DOOR: Vector2i = Vector2i(30, 23)
 const CERULEAN_GYM_APPROACH: Vector2i = Vector2i(30, 24)
 const CERULEAN_EAST_EDGE: Vector2i = Vector2i(39, 22)
 const ROUTE_9_FROM_CERULEAN: Vector2i = Vector2i(0, 4)
+
+## Cerulean Gym: the door's landing, Misty and the cell she is faced from, and
+## the grunt whose own scene clears him off the ladder column.
+const CERULEAN_GYM_CELLS: Vector2i = Vector2i(10, 16)
+const CERULEAN_GYM_LANDING: Vector2i = Vector2i(4, 15)
+const MISTY_CELL: Vector2i = Vector2i(5, 3)
+const MISTY_FACE: Vector2i = Vector2i(5, 4)
+const EVENT_CERULEAN_GYM_ROCKET: int = 1901
+const EVENT_TRAINERS_IN_CERULEAN_GYM: int = 1903
+const CERULEAN_GYM_HIDDEN_OBJECTS: int = 5
+## The three swimmers, as object index, cell, sight range, the cell each sees the
+## player on, where its approach stops, the sight direction and its beaten flag.
+## Every stopping cell is water, which is the point: the pool is what the
+## approach crosses. Briana's is her own cell, since a sight distance of one
+## gives TrainerWalkToPlayer an empty movement buffer.
+const GYM_SWIMMERS: Array = [
+	[4, Vector2i(8, 9), 3, Vector2i(5, 9), Vector2i(6, 9), Vector2i.LEFT, 1448],
+	[2, Vector2i(4, 6), 3, Vector2i(7, 6), Vector2i(6, 6), Vector2i.RIGHT, 1017],
+	[3, Vector2i(1, 9), 1, Vector2i(2, 9), Vector2i(1, 9), Vector2i.RIGHT, 1018],
+]
+## Diana's is the one sight line no walk to Misty can avoid. Parker's and
+## Briana's guard the pool's two alternative columns, so shutting either leaves
+## the other open while shutting both seals Misty off: one of the pair is always
+## fought, whichever way round the pool the walk goes.
+const GYM_SIGHT_UNAVOIDABLE: Array[int] = [2]
+const GYM_SIGHT_ALTERNATIVES: Array[int] = [4, 3]
 
 ## Route 9's entry pocket, its one blocking tree, and what cutting it opens.
 ## $12 is CheckCutCollision's tree; the four grass codes on this route are
@@ -109,6 +141,7 @@ func _initialize() -> void:
 			continue
 		_verify_route_5_gate(data, game_id)
 		_verify_cerulean(data, game_id)
+		_verify_cerulean_gym(data, game_id)
 		_verify_route_9_dead_end(data, game_id)
 		_verify_power_plant_is_reached_by_river(data, game_id)
 	_finish()
@@ -189,22 +222,207 @@ func _verify_cerulean(data: GameData, game_id: StringName) -> void:
 		]
 	)
 
-	# The gym's own four hide-flagged objects, which is what makes the badge an
-	# errand rather than a walk.
-	var gym: Gen2WorldAPI = _open(data, CERULEAN_GROUP, CERULEAN_GYM, Vector2i(4, 15))
+	print("%s cerulean: one east crossing onto Route 9." % game_id)
+
+
+## The gym, which is a pool with three swimmers standing on it.
+##
+## Five of its six objects hide behind EVENT_TRAINERS_IN_CERULEAN_GYM, which is
+## what makes the badge an errand; the sixth is the grunt, whose own scene takes
+## him off the ladder column. The load-bearing part is the last: no walk to Misty
+## avoids Diana's sight line or both of the other two, and every approach stops
+## on water that `can_object_walk_to()` refuses. They resolve anyway, because
+## SeenByTrainerScript is `applymovementlasttalked` and every step in that buffer
+## reaches NormalStep, which consults no permission at all.
+func _verify_cerulean_gym(data: GameData, game_id: StringName) -> void:
+	var gym: Gen2WorldAPI = _open(data, CERULEAN_GROUP, CERULEAN_GYM, CERULEAN_GYM_LANDING)
 	if gym == null:
 		return
-	var hidden: int = 0
-	for row: Dictionary in gym.current_map.events.get("objects", []):
-		if int(row.get("event_flag", -1)) == 1903:
-			hidden += 1
 	_check(
-		hidden == 5,
-		"%s: %d Cerulean Gym objects hide behind EVENT_TRAINERS_IN_CERULEAN_GYM, not 5." % [
-			game_id, hidden,
+		gym.map_size_cells() == CERULEAN_GYM_CELLS,
+		"%s: Cerulean Gym is %s cells, not the pinned %s." % [
+			game_id, gym.map_size_cells(), CERULEAN_GYM_CELLS,
 		]
 	)
-	print("%s cerulean: one east crossing, and a gym of five objects behind one hide flag." % game_id)
+	var hidden: int = 0
+	for row: Dictionary in gym.current_map.events.get("objects", []):
+		if int(row.get("event_flag", -1)) == EVENT_TRAINERS_IN_CERULEAN_GYM:
+			hidden += 1
+	_check(
+		hidden == CERULEAN_GYM_HIDDEN_OBJECTS,
+		"%s: %d gym objects hide behind EVENT_TRAINERS_IN_CERULEAN_GYM, not %d." % [
+			game_id, hidden, CERULEAN_GYM_HIDDEN_OBJECTS,
+		]
+	)
+	_check(
+		gym.collision_permission_at(MISTY_CELL) == Gen2WorldCollision.LAND_TILE
+			and (gym.objects[1] as Gen2WorldObject).cell == MISTY_CELL,
+		"%s: Misty does not stand on land at %s." % [game_id, MISTY_CELL]
+	)
+	for swimmer: Array in GYM_SWIMMERS:
+		var object: Gen2WorldObject = gym.objects[swimmer[0]]
+		_check(
+			object.cell == swimmer[1] and object.sight_range == swimmer[2]
+				and object.object_type == Gen2WorldObject.OBJECTTYPE_TRAINER,
+			"%s: swimmer %d is %s with sight %d, not %s with %d." % [
+				game_id, swimmer[0], object.cell, object.sight_range, swimmer[1], swimmer[2],
+			]
+		)
+		# Misty sets all three herself, the way Surge, Erika and Sabrina do.
+		_check(
+			int(object.trainer_data.get("event_flag", -1)) == int(swimmer[6]),
+			"%s: swimmer %d's beaten flag is %s, not %d." % [
+				game_id, swimmer[0], object.trainer_data.get("event_flag", -1), swimmer[6],
+			]
+		)
+		for cell: Vector2i in [swimmer[1], swimmer[4]]:
+			_check(
+				gym.collision_permission_at(cell) == Gen2WorldCollision.WATER_TILE,
+				"%s: %s is not water, so swimmer %d proves nothing." % [
+					game_id, cell, swimmer[0],
+				]
+			)
+		_check(
+			not gym.can_object_walk_to(swimmer[4], object, swimmer[5]),
+			"%s: swimmer %d could wander onto %s, so the approach is not the check."
+				% [game_id, swimmer[0], swimmer[4]]
+		)
+
+	# The grunt is gone by the time the badge is walked, so the walk is measured
+	# with his flag set, the way the errand leaves it.
+	var walked: Gen2WorldAPI = _open_gym_after_the_grunt(data)
+	if walked == null:
+		return
+	var region: Dictionary = _region(walked, CERULEAN_GYM_LANDING)
+	_check(
+		region.has(MISTY_FACE),
+		"%s: the gym door cannot reach %s, so Misty cannot be faced." % [game_id, MISTY_FACE]
+	)
+	# Which sight lines a walk to Misty cannot route around, checked by shutting
+	# seen cells rather than by naming a path.
+	var alternatives: Dictionary = {}
+	for swimmer: Array in GYM_SWIMMERS:
+		var avoidable: bool = _region(walked, CERULEAN_GYM_LANDING, {swimmer[3]: true}).has(
+			MISTY_FACE
+		)
+		if int(swimmer[0]) in GYM_SIGHT_ALTERNATIVES:
+			alternatives[swimmer[3]] = true
+		_check(
+			avoidable == (int(swimmer[0]) not in GYM_SIGHT_UNAVOIDABLE),
+			"%s: shutting swimmer %d's %s %s Misty, which is the wrong way round." % [
+				game_id, swimmer[0], swimmer[3],
+				"still reaches" if avoidable else "seals off",
+			]
+		)
+		# Every one of the three is seen from its own cell, avoidable or not, so
+		# the sight lines themselves are pinned either way, and each approach is
+		# driven whether or not the walk has to take it.
+		var probe: Gen2WorldAPI = _open_gym_after_the_grunt(data, swimmer[3])
+		if probe == null:
+			continue
+		var sight: Array = probe.dispatch_sight_events()
+		_check(
+			not sight.is_empty() and int(
+				(sight[0].get("source", {}) as Dictionary).get("object_index", -1)
+			) == int(swimmer[0]),
+			"%s: swimmer %d does not see the player on %s." % [
+				game_id, swimmer[0], swimmer[3],
+			]
+		)
+		_verify_swimmer_approach(data, game_id, swimmer)
+	_check(
+		not _region(walked, CERULEAN_GYM_LANDING, alternatives).has(MISTY_FACE),
+		"%s: Misty is reachable past both %s, so neither swimmer has to be fought."
+			% [game_id, alternatives.keys()]
+	)
+	print(
+		"%s cerulean gym: a pool, five hidden objects, three approaches over it and Diana unavoidable."
+		% game_id
+	)
+
+
+## One swimmer's whole sight-to-approach sequence, driven through the runtime the
+## world screen and the story preview both use.
+func _verify_swimmer_approach(data: GameData, game_id: StringName, swimmer: Array) -> void:
+	var index: int = int(swimmer[0])
+	var world: Gen2WorldAPI = _open_gym_after_the_grunt(data, swimmer[3])
+	if world == null:
+		return
+	var swimmer_object: Gen2WorldObject = world.objects[index]
+	var sight: Array = world.dispatch_sight_events()
+	if not _check(
+		not sight.is_empty(),
+		"%s: nobody sees the player on %s." % [game_id, swimmer[3]]
+	):
+		return
+	var source: Dictionary = sight[0].get("source", {})
+	_check(
+		int(source.get("object_index", -1)) == index
+			and int(source.get("distance", -1)) == int(swimmer[2])
+			and source.get("direction", Vector2i.ZERO) == swimmer[5],
+		"%s: %s is seen as %s, not by swimmer %d at distance %d facing %s." % [
+			game_id, swimmer[3], source, index, swimmer[2], swimmer[5],
+		]
+	)
+	var approach: Array = world.complete_runtime_request({"ok": true, "audio_played": false})
+	_check(
+		not approach.is_empty() and StringName(
+			((approach[0].get("event", {}) as Dictionary).get("request", {}) as Dictionary)
+				.get("kind", &"")
+		) == &"trainer_approach_requested",
+		"%s: swimmer %d's encounter music did not reach the approach request."
+			% [game_id, index]
+	)
+	var plan: Dictionary = world.start_trainer_approach(index, swimmer[5], int(swimmer[2]))
+	if not _check(
+		bool(plan.get("ok", false)),
+		"%s: swimmer %d's approach plan failed: %s" % [game_id, index, plan]
+	):
+		return
+	_check(
+		plan.get("target_cell", Vector2i.ZERO) == swimmer[4],
+		"%s: swimmer %d stops on %s, not %s." % [
+			game_id, index, plan.get("target_cell", Vector2i.ZERO), swimmer[4],
+		]
+	)
+	for step_direction: Vector2i in plan.get("path", []):
+		var step: Dictionary = world.advance_trainer_approach_step(index, step_direction)
+		if not _check(
+			bool(step.get("ok", false)),
+			"%s: swimmer %d's step %s failed: %s" % [game_id, index, step_direction, step]
+		):
+			return
+		_check(
+			swimmer_object.step_frames_total == Gen2WorldAPI.STEP_FRAMES_WALK,
+			"%s: swimmer %d steps over %d frames, not %d." % [
+				game_id, index, swimmer_object.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK,
+			]
+		)
+	_check(
+		swimmer_object.cell == swimmer[4],
+		"%s: swimmer %d ended on %s, not %s." % [
+			game_id, index, swimmer_object.cell, swimmer[4],
+		]
+	)
+	_check(
+		bool(world.finish_trainer_approach(index).get("ok", false)),
+		"%s: swimmer %d's approach could not finish." % [game_id, index]
+	)
+
+
+func _open_gym_after_the_grunt(
+	data: GameData, cell: Vector2i = CERULEAN_GYM_LANDING
+) -> Gen2WorldAPI:
+	var state := Gen2WorldState.new()
+	state.set_event_flag(EVENT_CERULEAN_GYM_ROCKET, true)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, CERULEAN_GROUP, CERULEAN_GYM, cell, state
+	)
+	if world == null:
+		_fail("Cerulean Gym is missing.")
+		return null
+	var _entry: Array = world.dispatch_map_entry()
+	return world
 
 
 ## Route 9's entry pocket, and the fact that its one cut tree opens onto a yard
@@ -497,7 +715,12 @@ func _crossings(
 ## Ledge hops included, mirroring `tools/preview_world_story.gd`'s
 ## _reachable_step(): a region drawn without them would claim walls that a real
 ## walk can cross, which is exactly the mistake these counts are here to catch.
-func _region(world: Gen2WorldAPI, start: Vector2i) -> Dictionary:
+##
+## [param closed] cells are treated as unwalkable, which is how an unavoidable
+## cell is proved: shut it and see what stops being reachable.
+func _region(
+	world: Gen2WorldAPI, start: Vector2i, closed: Dictionary = {}
+) -> Dictionary:
 	var seen: Dictionary = {start: true}
 	var frontier: Array[Vector2i] = [start]
 	var size: Vector2i = world.map_size_cells()
@@ -513,7 +736,7 @@ func _region(world: Gen2WorldAPI, start: Vector2i) -> Dictionary:
 				next = cell + direction * 2
 				if next.x < 0 or next.y < 0 or next.x >= size.x or next.y >= size.y:
 					continue
-			if seen.has(next):
+			if seen.has(next) or closed.has(next):
 				continue
 			seen[next] = true
 			frontier.append(next)
@@ -532,7 +755,7 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS cerulean: the Route 5 gate, the city's one east crossing and the river into the Power Plant verified.")
+		print("PASS cerulean: the Route 5 gate, the city's one east crossing, the river into the Power Plant and the gym's pool verified.")
 		quit(0)
 		return
 	for failure: String in _failures:
