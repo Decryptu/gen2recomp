@@ -3428,6 +3428,109 @@ func test_prof_oaks_pc_boot_is_presentation_and_writes_nothing() -> void:
 	), JSON.stringify(result["events"]))
 
 
+## `wait` is one of the commands Crystal added, so it has no pokegold opcode and
+## has to be answered from the raw byte. Script_wait delays its operand times six
+## frames and reads nothing; the two Magnet Train stations are its only call
+## sites in either pin.
+func test_wait_is_timing_only_and_reports_its_frame_count() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6140"] = [0xA8, 20, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6140,
+	})
+
+	var result: Dictionary = runner.advance()
+
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(state.event_flags().size(), 0)
+	assert_true(result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"script_timing_requested" \
+			and event.get("kind", &"") == &"wait" \
+			and int(event.get("frames", 0)) == 120
+	), JSON.stringify(result["events"]))
+
+
+## Script_newloadmap sets hMapEntryMethod and re-enters the map, then yields
+## rather than ending: StopScript only clears SCRIPT_RUNNING in wScriptFlags, so
+## the commands after it still run. FallIntoMapScript's pitfall animation is the
+## proof (engine/overworld/events.asm).
+func test_newloadmap_carries_its_entry_method_and_does_not_end_the_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# newloadmap is Crystal $8a: pokegold's $89 plus farjumptext at $52.
+	scripts["48:6150"] = [
+		0x8A, 0xF9, Gen2WorldScript.SETEVENT, 44, 0, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6150,
+	})
+
+	var result: Dictionary = runner.advance()
+
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_true(result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"map_entry_method_requested" \
+			and int(event.get("method", 0)) == 0xF9
+	), JSON.stringify(result["events"]))
+	assert_true(state.is_event_flag_active(44), "the command after newloadmap ran")
+
+
+## MagnetTrain is scroll positions, graphics, music and a VBlank cutscene. It
+## reads wScriptVar for the direction, which a preceding SETVAL loads, and
+## writes nothing the overworld can observe.
+func test_magnet_train_special_reports_its_direction_and_writes_nothing() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	for row: Array in [["48:6160", 1], ["48:6170", 0]]:
+		scripts[row[0]] = [
+			Gen2WorldScript.SETVAL, int(row[1]),
+			Gen2WorldScript.SPECIAL, 35, 0, Gen2WorldScript.END,
+		]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	for row: Array in [["48:6160", 0x6160, true], ["48:6170", 0x6170, false]]:
+		var state := Gen2WorldState.new()
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": int(row[1]),
+		})
+
+		var result: Dictionary = runner.advance()
+
+		assert_eq(result["status"], &"complete", JSON.stringify(result))
+		assert_eq(state.event_flags().size(), 0)
+		assert_eq(state.engine_flags().size(), 0)
+		assert_true(result["events"].any(func(event: Dictionary) -> bool:
+			return event.get("type", &"") == &"presentation_special_applied" \
+				and event.get("kind", &"") == &"magnet_train" \
+				and bool(event.get("to_goldenrod", false)) == bool(row[2])
+		), JSON.stringify(result["events"]))
+
+
+## GetMonSprite's `.Variable` branch reads wVariableSprites and falls through to
+## `.NoBreedmon` when the slot is still zero, which answers SPRITE_CHRIS rather
+## than nothing (engine/overworld/overworld.asm). Copycat's House 2F is where it
+## matters: SPRITE_COPYCAT is $fb and only her own script assigns it, so without
+## the fallback she could not be reached to run it.
+func test_an_unassigned_variable_sprite_still_occupies_and_is_talkable() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var objects: Array = world.current_map.events["objects"]
+	objects[0]["sprite"] = Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE + 0x0B
+	objects[0]["x"] = 7
+	objects[0]["y"] = 5
+	world.reload_current_map()
+
+	var standing: Gen2WorldObject = world.object_at(Vector2i(7, 5))
+
+	assert_not_null(standing, "an unassigned variable sprite left the cell empty")
+	assert_false(world.can_walk_to(Vector2i(7, 5)), "it did not occupy its cell")
+
+
 ## constants/event_flags.asm, the flag Oak sets on the sixteen-badge branch.
 const EVENT_OPENED_MT_SILVER: int = 1871
 

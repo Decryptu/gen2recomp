@@ -384,6 +384,54 @@ const SAFFRON_CITY_NUMBER: int = 2
 const SAFFRON_GYM_NUMBER: int = 4
 const SAFFRON_GYM_DOOR: Vector2i = Vector2i(34, 3)
 
+## The lost-doll errand and the Magnet Train it pays for. `maps/SaffronCity.asm`
+## warp 8 is the Copycat's house, warp 12 the Route 6 gate and warp 6 the train
+## station; `maps/VermilionCity.asm` warp 3 is the Pokemon Fan Club.
+##
+## The order is the cartridge's own. `PokemonFanClubClefairyGuyScript` reads
+## EVENT_MET_COPYCAT_FOUND_OUT_ABOUT_LOST_ITEM before he parts with the doll, and
+## only `Copycat`'s `.TalkAboutLostItem` sets it, which itself needs
+## EVENT_RETURNED_MACHINE_PART from the Power Plant. So the Copycat is visited
+## first, empty-handed, and the walk to Vermilion is what the visit buys.
+const SAFFRON_COPYCAT_HOUSE_DOOR: Vector2i = Vector2i(9, 11)
+const COPYCAT_HOUSE_STAIRS_UP: Vector2i = Vector2i(2, 0)
+const COPYCAT_HOUSE_STAIRS_DOWN: Vector2i = Vector2i(3, 0)
+const COPYCAT_HOUSE_EXIT: Vector2i = Vector2i(2, 7)
+## She is a variable sprite only her own script assigns, so she stands here with
+## no sprite of her own until the first talk runs `variablesprite`.
+const COPYCAT_FACE: Vector2i = Vector2i(5, 3)
+const SAFFRON_ROUTE_6_GATE_DOOR: Vector2i = Vector2i(16, 33)
+const ROUTE_6_GATE_SOUTH_DOOR: Vector2i = Vector2i(4, 7)
+const VERMILION_FAN_CLUB_DOOR: Vector2i = Vector2i(7, 13)
+const FAN_CLUB_EXIT: Vector2i = Vector2i(2, 7)
+const CLEFAIRY_GUY_FACE: Vector2i = Vector2i(1, 3)
+const EVENT_MET_COPYCAT_FOUND_OUT_ABOUT_LOST_ITEM: int = 207
+const EVENT_RETURNED_LOST_ITEM_TO_COPYCAT: int = 208
+const EVENT_GOT_PASS_FROM_COPYCAT: int = 209
+const EVENT_GOT_LOST_ITEM_FROM_FAN_CLUB: int = 210
+## `constants/item_constants.asm`.
+const ITEM_LOST_ITEM: int = 0x82
+const ITEM_PASS: int = 0x86
+
+## Both Magnet Train stations are two regions with no seam: the lobby is rows 10
+## to 17, the platform rows 2 to 8, and row 9 is solid between them. The officer
+## stands inside that solid row on (9,9) and is talked to across it, and his
+## script's `applymovement` is the only thing that ever puts the player on the
+## platform, because a scripted step ignores collision. It ends on the train door
+## and `warpcheck` takes it.
+const SAFFRON_TRAIN_STATION_DOOR: Vector2i = Vector2i(8, 3)
+const SAFFRON_TRAIN_STATION_EXIT: Vector2i = Vector2i(8, 17)
+const TRAIN_OFFICER_FACE: Vector2i = Vector2i(9, 10)
+const TRAIN_LANDING: Vector2i = Vector2i(11, 5)
+## The arrival coord event is live on both stations, so it is stepped onto and
+## drained rather than walked to.
+const TRAIN_ARRIVAL_COORD: Vector2i = Vector2i(11, 6)
+const GOLDENROD_GROUP: int = 11
+const GOLDENROD_MAGNET_TRAIN_STATION_NUMBER: int = 7
+const SAFFRON_MAGNET_TRAIN_STATION_NUMBER: int = 9
+## `yesorno` answers, zero-based the way RADIO_CARD_ANSWERS is: yes boards.
+const BOARD_THE_TRAIN: Array[int] = [0]
+
 ## `maps/SaffronGym.asm` is nine rooms walled off from each other, joined only by
 ## fifteen pairs of self-warps. Sabrina's room holds exactly one pad, warp 32 on
 ## (11,9), and the only pad that reaches it is warp 17 on (1,5), so the way in is
@@ -6103,6 +6151,10 @@ func _lavender_leg(
 			"ok": false, "path": path,
 			"reason": "the Route 5 gate south failed: %s" % to_saffron.get("reason", ""),
 		}
+	var errand: Dictionary = _magnet_train_leg(world, save, random, data, path)
+	if not bool(errand.get("ok", false)):
+		return errand
+
 	var to_route_8: Dictionary = _gate_leg(
 		world, save, random, data, SAFFRON_ROUTE_8_GATE_DOOR, LAVENDER_GROUP, ROUTE_8_NUMBER
 	)
@@ -6161,6 +6213,301 @@ func _lavender_leg(
 	if not world.state.is_engine_flag_active(ENGINE_EXPN_CARD):
 		return {"ok": false, "path": path, "reason": "ENGINE_EXPN_CARD was not set"}
 	return _fuchsia_leg(world, save, random, data, path)
+
+
+## The lost-doll errand and the Magnet Train, run from Saffron City.
+##
+## An errand rather than a walk, and the one leg on the route whose order the
+## cartridge fixes rather than the geography: the Fan Club's Clefairy guy reads
+## EVENT_MET_COPYCAT_FOUND_OUT_ABOUT_LOST_ITEM before he parts with the doll, and
+## only the Copycat sets it, so she is visited first with nothing to give her.
+## Her own branch needs EVENT_RETURNED_MACHINE_PART, which the Cerulean leg set
+## at the Power Plant, so this is the third Kanto opener that sat before its gate.
+##
+## The ride itself never touches the platform on foot. Each station is two
+## regions with row 9 solid between them; the officer stands inside that row and
+## is talked to across it, and his script's `applymovement` walks the player over
+## the wall onto the train door, because a scripted step ignores collision. The
+## `warpcheck` after it takes the door, and the arrival coord event on the far
+## station is stepped onto rather than walked to, since it is live.
+func _magnet_train_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var met: Dictionary = _copycat_visit(world, save, random, data, path, "met")
+	if not bool(met.get("ok", false)):
+		return met
+	if not world.event_flag_active(EVENT_MET_COPYCAT_FOUND_OUT_ABOUT_LOST_ITEM):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Copycat did not mention the lost doll",
+		}
+
+	var to_vermilion: Dictionary = _saffron_vermilion_walk(
+		world, save, random, data, path, "south"
+	)
+	if not bool(to_vermilion.get("ok", false)):
+		return to_vermilion
+
+	var doll: Dictionary = _fan_club_doll(world, save, random, data, path)
+	if not bool(doll.get("ok", false)):
+		return doll
+
+	var back_to_saffron: Dictionary = _saffron_vermilion_walk(
+		world, save, random, data, path, "north"
+	)
+	if not bool(back_to_saffron.get("ok", false)):
+		return back_to_saffron
+
+	var pass_given: Dictionary = _copycat_visit(world, save, random, data, path, "pass")
+	if not bool(pass_given.get("ok", false)):
+		return pass_given
+	if world.state.item_quantity(ITEM_PASS) <= 0:
+		return {"ok": false, "path": path, "reason": "the PASS did not reach the bag"}
+
+	return _magnet_train_ride(world, save, random, data, path)
+
+
+## Copycat's House, twice: once to hear about the doll and once to hand it back.
+func _copycat_visit(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	stage: String,
+) -> Dictionary:
+	var upstairs: Dictionary = _warp_chain(
+		world, save, random, data, [SAFFRON_COPYCAT_HOUSE_DOOR, COPYCAT_HOUSE_STAIRS_UP]
+	)
+	if not bool(upstairs.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Copycat's house stairs failed: %s" % upstairs.get("reason", ""),
+		}
+	var copycat: Dictionary = _talk_to(
+		world, COPYCAT_FACE, Gen2WorldSprite.FACING_LEFT, save, random, data
+	)
+	path.append({
+		"step": "copycat_%s" % stage,
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"met_copycat": world.event_flag_active(EVENT_MET_COPYCAT_FOUND_OUT_ABOUT_LOST_ITEM),
+		"returned_lost_item": world.event_flag_active(EVENT_RETURNED_LOST_ITEM_TO_COPYCAT),
+		"got_pass": world.event_flag_active(EVENT_GOT_PASS_FROM_COPYCAT),
+		"lost_item": world.state.item_quantity(ITEM_LOST_ITEM),
+		"pass": world.state.item_quantity(ITEM_PASS),
+		"run": copycat.get("run", {}),
+	})
+	if not bool(copycat.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Copycat did not finish: %s" % copycat.get("reason", ""),
+		}
+	var downstairs: Dictionary = _warp_chain(
+		world, save, random, data, [COPYCAT_HOUSE_STAIRS_DOWN, COPYCAT_HOUSE_EXIT]
+	)
+	if not bool(downstairs.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Copycat's house failed: %s" % downstairs.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Saffron to Vermilion and back, which is one gate building and one connection
+## each way. [param heading] is "south" for the walk down and "north" for the
+## return.
+func _saffron_vermilion_walk(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	heading: String,
+) -> Dictionary:
+	var southbound: bool = heading == "south"
+	if southbound:
+		var out_of_saffron: Dictionary = _gate_leg(
+			world, save, random, data, SAFFRON_ROUTE_6_GATE_DOOR,
+			ROUTE_6_GROUP, ROUTE_6_NUMBER
+		)
+		if not bool(out_of_saffron.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the Route 6 gate south failed: %s" % out_of_saffron.get("reason", ""),
+			}
+
+	var walked: Dictionary = _walk_connection_resolving(
+		world, "south" if southbound else "north",
+		VERMILION_GROUP if southbound else ROUTE_6_GROUP,
+		VERMILION_CITY_NUMBER if southbound else ROUTE_6_NUMBER,
+		save, random, data
+	)
+	var entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "vermilion_for_the_doll" if southbound else "route_6_northbound",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": walked.get("encounters", []),
+		"run": entry,
+	})
+	if not bool(walked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk %s along Route 6 failed: %s" % [
+				heading, walked.get("reason", ""),
+			],
+		}
+	if southbound:
+		return {"ok": true}
+
+	var into_saffron: Dictionary = _gate_leg(
+		world, save, random, data, ROUTE_6_SAFFRON_GATE_DOOR,
+		SAFFRON_GROUP, SAFFRON_CITY_NUMBER
+	)
+	path.append({
+		"step": "saffron_return",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": into_saffron.get("encounters", []),
+	})
+	if not bool(into_saffron.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 6 gate north failed: %s" % into_saffron.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## The Pokemon Fan Club, where the doll is.
+func _fan_club_doll(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var inside: Dictionary = _warp_chain(
+		world, save, random, data, [VERMILION_FAN_CLUB_DOOR]
+	)
+	if not bool(inside.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Fan Club door failed: %s" % inside.get("reason", ""),
+		}
+	var guy: Dictionary = _talk_to(
+		world, CLEFAIRY_GUY_FACE, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	path.append({
+		"step": "fan_club_lost_item",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"got_lost_item": world.event_flag_active(EVENT_GOT_LOST_ITEM_FROM_FAN_CLUB),
+		"lost_item": world.state.item_quantity(ITEM_LOST_ITEM),
+		"run": guy.get("run", {}),
+	})
+	if not bool(guy.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Clefairy guy did not finish: %s" % guy.get("reason", ""),
+		}
+	if world.state.item_quantity(ITEM_LOST_ITEM) <= 0:
+		return {"ok": false, "path": path, "reason": "the LOST ITEM did not reach the bag"}
+	var out: Dictionary = _warp_chain(world, save, random, data, [FAN_CLUB_EXIT])
+	if not bool(out.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Fan Club exit failed: %s" % out.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Saffron to Goldenrod and straight back, which is the same officer twice.
+func _magnet_train_ride(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_station: Dictionary = _warp_chain(
+		world, save, random, data, [SAFFRON_TRAIN_STATION_DOOR]
+	)
+	if not bool(into_station.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Saffron station door failed: %s" % into_station.get("reason", ""),
+		}
+
+	for ride: Dictionary in [
+		{"step": "magnet_train_to_goldenrod", "group": GOLDENROD_GROUP,
+			"number": GOLDENROD_MAGNET_TRAIN_STATION_NUMBER},
+		{"step": "magnet_train_to_saffron", "group": SAFFRON_GROUP,
+			"number": SAFFRON_MAGNET_TRAIN_STATION_NUMBER},
+	]:
+		var boarded: Dictionary = _talk_to(
+			world, TRAIN_OFFICER_FACE, Gen2WorldSprite.FACING_UP,
+			save, random, data, BOARD_THE_TRAIN
+		)
+		var run: Dictionary = boarded.get("run", {})
+		path.append({
+			"step": ride["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": run,
+		})
+		if not bool(boarded.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [ride["step"], boarded.get("reason", "")],
+			}
+		if world.map_id() != Vector2i(int(ride["group"]), int(ride["number"])):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s left the player on %s" % [ride["step"], world.map_id()],
+			}
+		if world.player_cell != TRAIN_LANDING:
+			return {
+				"ok": false, "path": path,
+				"reason": "%s landed on %s, not the train door %s" % [
+					ride["step"], world.player_cell, TRAIN_LANDING,
+				],
+			}
+
+		# The arrival coord event is still armed, so it is stepped onto and
+		# drained rather than targeted with a resolving walk.
+		var arrival: Dictionary = _coord_event_step(
+			world, TRAIN_LANDING, TRAIN_ARRIVAL_COORD, save, random, data
+		)
+		path.append({
+			"step": "%s_arrival" % ride["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": arrival.get("run", {}),
+		})
+		if not bool(arrival.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the %s arrival scene failed: %s" % [
+					ride["step"], arrival.get("reason", ""),
+				],
+			}
+
+	var out_of_station: Dictionary = _warp_chain(
+		world, save, random, data, [SAFFRON_TRAIN_STATION_EXIT]
+	)
+	if not bool(out_of_station.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Saffron station exit failed: %s" % out_of_station.get("reason", ""),
+		}
+	return {"ok": true}
 
 
 ## Lavender Town south to Fuchsia City and the Soul Badge.

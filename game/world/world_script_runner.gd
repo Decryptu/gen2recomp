@@ -73,6 +73,10 @@ const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_HEAL_MACHINE_ANIM: int = 62
 const SPECIAL_CHECK_POKERUS: int = 78
+## MagnetTrain, the ride's cutscene. wScriptVar picks the direction, which a
+## preceding SETVAL loads: TRUE for Saffron to Goldenrod, FALSE for the return
+## (maps/SaffronMagnetTrainStation.asm, maps/GoldenrodMagnetTrainStation.asm).
+const SPECIAL_MAGNET_TRAIN: int = 35
 ## ProfOaksPCBoot, 101 in Crystal and 100 in Gold/Silver, which special_index()
 ## already normalizes. Oak's Kanto script reaches it on every branch
 ## (maps/OaksLab.asm's `.CheckPokedex`).
@@ -602,6 +606,17 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	if Gen2WorldScript.is_waitbutton(opcode, _crystal_commands()) \
 		or Gen2WorldScript.is_promptbutton(opcode, _crystal_commands()):
 		return _stage_button(command)
+	if opcode == 0xA8 and _crystal_commands():
+		## `wait` is one of the commands Crystal added, so it has no pokegold
+		## opcode to resolve through and has to answer from the raw byte.
+		## Script_wait delays its operand times six frames and reads nothing.
+		## The two Magnet Train stations are its only call sites in either pin.
+		_emit_runtime_event(&"script_timing_requested", {
+			"kind": &"wait",
+			"value": int(command.get("value", 0)),
+			"frames": int(command.get("value", 0)) * 6,
+		})
+		return {"ok": true}
 	var source: int = Gen2WorldScript.source_opcode(opcode, _crystal_commands())
 	var object_result: Dictionary = _execute_object_command(source, command)
 	if not object_result.is_empty():
@@ -1108,6 +1123,18 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 					"ok": false, "reason": &"missing_deferred_script",
 					"bank": bank, "address": int(command.get("address", 0)),
 				}
+		0x89:
+			## Script_newloadmap sets hMapEntryMethod and re-enters the current
+			## map. It yields rather than ending: StopScript only clears
+			## SCRIPT_RUNNING in wScriptFlags, so the commands after it run, as
+			## FallIntoMapScript's pitfall animation shows
+			## (engine/overworld/events.asm). The re-entry itself is already
+			## queued here, because the `warpcheck` before it took a warp and
+			## every map change queues its own callbacks, so what is left to
+			## carry is the entry method the transition is drawn with.
+			_emit_runtime_event(&"map_entry_method_requested", {
+				"method": int(command.get("value", 0)),
+			})
 		0x8D:
 			## Script_warpcheck runs WarpCheck against the cell the player is
 			## standing on, so the destination is the world's to resolve, not
@@ -1184,7 +1211,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x8D, 0x98,
 		0x8C,
 		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
-		0xA0,
+		0xA0, 0x89,
 	]
 	if source_opcode in handled_sources:
 		return {"ok": true}
@@ -1601,6 +1628,15 @@ func _execute_special(special: int) -> Dictionary:
 			_emit_runtime_event(&"presentation_special_applied", {
 				"special": special, "kind": &"heal_machine_anim",
 				"machine_type": _script_value,
+			})
+		SPECIAL_MAGNET_TRAIN:
+			## engine/events/magnet_train.asm's MagnetTrain is scroll positions,
+			## graphics, music and a VBlank cutscene handler. It reads
+			## wScriptVar for the direction and writes nothing the overworld can
+			## observe; the warp itself is the `warpcheck` that follows it.
+			_emit_runtime_event(&"presentation_special_applied", {
+				"special": special, "kind": &"magnet_train",
+				"to_goldenrod": _script_value != 0,
 			})
 		SPECIAL_PROF_OAKS_PC_BOOT:
 			## engine/events/prof_oaks_pc.asm's ProfOaksPCBoot prints, counts the
