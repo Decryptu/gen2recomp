@@ -1208,6 +1208,116 @@ func test_mist_protected_gets_its_own_message_not_the_generic_fail() -> void:
 	assert_true(_first(turn.events, Gen2Battle.STAT_CHANGE_FAILED).is_empty())
 
 
+## `TrapTarget` is `NormalHit` with `traptarget` where `kingsrock` sits, behind
+## the faint check; `MeanLook` is four commands with no `checkhit` at all, so
+## neither Mean Look nor Spider Web can miss despite the 100% both carry.
+func test_the_two_trapping_effects_have_their_cartridge_sequences() -> void:
+	var trap: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.TRAP_TARGET)
+	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.TRAP_TARGET))
+	assert_eq(trap.size(), Gen2MoveEffect.NORMAL_HIT.size() + 1)
+	assert_lt(
+		trap.find(Gen2EffectCommands.CHECK_FAINT),
+		trap.find(Gen2EffectCommands.TRAP_TARGET)
+	)
+
+	var mean_look: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.MEAN_LOOK)
+	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.MEAN_LOOK))
+	assert_eq(mean_look, [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.ARENA_TRAP,
+		Gen2EffectCommands.END_MOVE,
+	])
+
+
+func test_a_trapping_move_binds_its_target_for_three_to_six_turns() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.WRAP)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.TRAP_TARGET, turn)
+
+	assert_between(
+		battle.enemy.trapped_turns,
+		Gen2Substatus.MIN_TRAP_TURNS, Gen2Substatus.MAX_TRAP_TURNS
+	)
+	assert_eq(battle.enemy.trapping_move, Fixture.WRAP)
+	assert_eq(int(_first(turn.events, Gen2Battle.TRAPPED)["move"]), Fixture.WRAP)
+
+
+## `BattleCommand_TrapTarget` returns on an already-bound target without
+## printing anything, so the second move neither re-rolls the counter nor takes
+## the first move's place, and it is not a "But it failed!" either.
+func test_a_second_trapping_move_leaves_an_already_bound_target_alone() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.trapped_turns = 4
+	battle.enemy.trapping_move = Fixture.WRAP
+	var turn: Gen2Turn = _turn(battle, Fixture.BIND)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.TRAP_TARGET, turn)
+
+	assert_eq(battle.enemy.trapped_turns, 4)
+	assert_eq(battle.enemy.trapping_move, Fixture.WRAP)
+	assert_true(turn.events.is_empty())
+
+
+## The flag goes on the user, which is the whole reason `TryToRunAwayFromBattle`
+## reads `wEnemySubStatus5` to refuse the player.
+func test_mean_look_flags_its_user_rather_than_its_target() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.MEAN_LOOK)
+
+	Gen2EffectCommands.run(Gen2EffectCommands.ARENA_TRAP, turn)
+
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.CANT_RUN))
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.CANT_RUN))
+	assert_false(_first(turn.events, Gen2Battle.CANT_ESCAPE_SET).is_empty())
+
+
+func test_mean_look_fails_against_a_hidden_target_and_on_a_second_use() -> void:
+	var flying: Gen2Battle = _battle()
+	flying.enemy.substatus |= Gen2Substatus.FLYING
+	var first: Gen2Turn = _turn(flying, Fixture.MEAN_LOOK)
+	Gen2EffectCommands.run(Gen2EffectCommands.ARENA_TRAP, first)
+	assert_false(Gen2Substatus.has(flying.player.substatus, Gen2Substatus.CANT_RUN))
+	assert_false(_first(first.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+	# The "already trapped" check is the user's own flag, so a second Mean Look
+	# from the same Pokémon is what fails.
+	var again: Gen2Battle = _battle()
+	again.player.substatus |= Gen2Substatus.CANT_RUN
+	var second: Gen2Turn = _turn(again, Fixture.MEAN_LOOK)
+	Gen2EffectCommands.run(Gen2EffectCommands.ARENA_TRAP, second)
+	assert_false(_first(second.events, Gen2Battle.MOVE_FAILED).is_empty())
+
+
+## Every secondary effect sits behind `checkfaint` in `data/moves/effects.asm`,
+## and `BattleCommand_CheckFaint` ends on `jp EndMoveEffect`, so a knocked out
+## target is never left burned, poisoned, flinching or confused either.
+func test_a_knocked_out_target_takes_no_secondary_effect() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 1
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.EMBER_BURNS)
+
+	assert_true(battle.enemy.is_fainted())
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+	assert_true(_first(turn.events, Gen2Battle.STATUS_INFLICTED).is_empty())
+
+
+## `BattleCommand_CheckFaint` ends on `jp EndMoveEffect`, so nothing the
+## cartridge places behind it reaches a target that has already gone down.
+func test_a_knocked_out_target_is_never_bound() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 1
+	battle.player.change_stage("accuracy", 6)
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.WRAP)
+
+	assert_true(battle.enemy.is_fainted())
+	assert_eq(battle.enemy.trapped_turns, 0)
+	assert_true(_first(turn.events, Gen2Battle.TRAPPED).is_empty())
+
+
 func _of_type(events: Array, type: StringName) -> Array:
 	return events.filter(func(event: Dictionary) -> bool: return event["type"] == type)
 

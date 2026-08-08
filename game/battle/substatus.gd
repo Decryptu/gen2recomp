@@ -43,6 +43,13 @@ const CURLED: int = 1 << 11
 const ROLLOUT: int = 1 << 12
 const RAMPAGING: int = 1 << 13
 
+## `SUBSTATUS_CANT_RUN`, what Mean Look and Spider Web leave behind. It sits on
+## the Pokémon that used the move rather than the one that cannot leave:
+## `BattleCommand_ArenaTrap` sets `BATTLE_VARS_SUBSTATUS5`, the user's own, and
+## `TryToRunAwayFromBattle` refuses the player by reading `wEnemySubStatus5`.
+## The cartridge's name is kept for that reason.
+const CANT_RUN: int = 1 << 14
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as
@@ -74,6 +81,17 @@ const MAX_DISABLE: int = 8
 ## reroll on the low end: two bits of a random byte, plus three.
 const MIN_ENCORE: int = 3
 const MAX_ENCORE: int = 6
+
+## How long `BattleCommand_TrapTarget` binds a target: `BattleRandom` masked to
+## two bits and then incremented three times, so three to six. The landing turn's
+## own `HandleWrap` spends one of them without dealing damage, which is why the
+## source comments the same roll as two to five turns.
+const MIN_TRAP_TURNS: int = 3
+const MAX_TRAP_TURNS: int = 6
+
+## What a bound Pokémon loses each turn, `GetSixteenthMaxHP`'s at-least-one
+## sixteenth (engine/battle/core.asm).
+const TRAP_DIVISOR: int = 16
 
 ## Whether an attracted Pokémon is too smitten to move, out of 256: the
 ## cartridge's own 128 in 256, a coin flip, rolled fresh every turn it tries to
@@ -129,3 +147,14 @@ static func roll_encore(rng: RandomNumberGenerator) -> int:
 ## Whether an attracted Pokémon is too smitten to move this turn.
 static func rolls_attract_immobile(rng: RandomNumberGenerator) -> bool:
 	return rng.randi_range(0, CHANCE_RANGE - 1) < ATTRACT_IMMOBILE_CHANCE
+
+
+## How long a newly bound Pokémon stays bound.
+static func roll_trap_turns(rng: RandomNumberGenerator) -> int:
+	return rng.randi_range(MIN_TRAP_TURNS, MAX_TRAP_TURNS)
+
+
+## What one turn of being bound costs.
+static func trap_damage(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / TRAP_DIVISOR, 1)
