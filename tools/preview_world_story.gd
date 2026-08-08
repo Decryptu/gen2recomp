@@ -5434,16 +5434,14 @@ func _celadon_gym_leg(
 ## Celadon Gym to Cerulean City, by way of Saffron and Route 5.
 ##
 ## Two gate buildings and one open connection. Cerulean is as far as this walk
-## goes: the Cascade Badge is an errand, not a cell, and the errand is not on
-## this side of Kanto. Misty and her three swimmers all carry
-## EVENT_TRAINERS_IN_CERULEAN_GYM as their hide flag and `InitializeEventsScript`
-## sets it, so the gym stays empty until `Route25MistyDate1Script` clears it;
-## that scene is armed by the gym's own grunt, who is armed by the Power Plant
-## manager. And the Power Plant is not reachable from here: Cerulean's east edge
-## crosses on one cell into a fourteen-cell pocket of Route 9, whose own cut tree
-## opens only onto the Route 10 Pokecenter's fenced yard, and the plant's door
-## sits in a region with no map edge at all. `tools/validate_cerulean.gd` pins
-## all of it. The way in is Route 8 and Lavender, which is the leg after this.
+## goes: the Cascade Badge is an errand, not a cell. Misty and her three swimmers
+## all carry EVENT_TRAINERS_IN_CERULEAN_GYM as their hide flag and
+## `InitializeEventsScript` sets it, so the gym stays empty until
+## `Route25MistyDate1Script` clears it; that scene is armed by the gym's own
+## grunt, who is armed by the Power Plant manager. The plant is not walked to
+## either: it sits in a region with no map edge and no walkable neighbour, and
+## the way in is Route 9's river, which the same cut that opens the route also
+## opens the shore of. `tools/validate_cerulean.gd` pins all of it.
 func _cerulean_approach_path(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
