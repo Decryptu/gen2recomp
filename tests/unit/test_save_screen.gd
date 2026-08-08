@@ -214,3 +214,37 @@ func test_pc_storage_can_commit_in_memory_without_writing_slot() -> void:
 	assert_eq(save.party.size(), 1)
 	assert_not_null(save.boxes[0].slots[0])
 	assert_false(Gen2SaveStore.exists(_data.id, _data.sha1, save.slot))
+
+
+## Slot management. The store's own rules are covered by test_save_slots.gd;
+## these check the screen reaches them and reports what happened.
+func test_the_screen_opens_a_new_slot_at_the_lowest_free_number() -> void:
+	var write: Dictionary = Gen2SaveStore.save(_save(), _data)
+	assert_true(write["ok"], write["message"])
+	await _open_save_screen()
+
+	assert_true(_screen.open_new_slot())
+	assert_eq(
+		_screen.save_screen_snapshot()["selected_slot"], 0,
+		"slot 1 is taken, so the new one is slot 0",
+	)
+
+
+func test_creating_a_new_game_with_nothing_selected_takes_a_free_slot() -> void:
+	await _open_save_screen()
+	assert_eq(_screen.save_screen_snapshot()["selected_slot"], -1)
+
+	assert_true(_screen.create_new_game("ASH"))
+	assert_true(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
+
+
+func test_renaming_from_the_screen_reaches_the_slot() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	await _open_save_screen()
+	assert_true(_screen.select_slot(1))
+
+	assert_true(Gen2SaveStore.rename_slot(_data.id, _data.sha1, 1, "Run two", _data)["ok"])
+	_screen.set_data(_data)
+
+	var rows: Array = _screen.save_screen_snapshot()["slots"]
+	assert_eq(rows[0]["label"], "Run two")

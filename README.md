@@ -153,11 +153,17 @@ godot --headless --path . --quit-after 30
 The launcher lists Gold, Silver and Crystal cache status, imports a selected
 ROM, and opens its save screen: validated save slots created as you need them,
 naming, export and import, `.sav` import, party inspection and the development
-battle. A new game starts with an empty party at
-the Crystal home spawn with source starting money; Elm's imported lab scripts
-offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry. Continue enters
-the overworld and F5 saves its map, inventory, event and clock snapshot. See
-[docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
+battle, plus a save editor for party, boxes, bag, flags, position and dex that
+cannot produce a save the game will not load. A new game starts with an empty
+party at the Crystal home spawn with source starting money; Elm's imported lab
+scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
+Continue enters the overworld and F5 saves its map, inventory, event and clock
+snapshot. See [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
+
+It also carries settings, split into the cartridge's own OPTION values and
+application ones; a mod list where each mod can be switched off without being
+uninstalled; per-cartridge re-import, cache folder and cache deletion; and a
+release check that runs only when you ask for it.
 
 Development scenes:
 
