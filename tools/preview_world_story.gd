@@ -233,6 +233,59 @@ const EVENT_BEAT_CHAMPION_LANCE: int = 1468
 ## `warpfacing UP, HALL_OF_FAME, 4, 13` is the last command of the champion
 ## scene, so the player never walks Lance's own exit door.
 const HALL_OF_FAME_ARRIVAL: Vector2i = Vector2i(4, 13)
+## New Bark Town and the spawn `SpawnAfterE4` picks, from
+## `data/maps/spawn_points.asm`'s `spawn NEW_BARK_TOWN, 13, 6`.
+const NEW_BARK_GROUP: int = 24
+const NEW_BARK_NUMBER: int = 4
+const POST_CREDITS_SPAWN: Vector2i = Vector2i(13, 6)
+## `maps/NewBarkTown.asm`'s lab door, and Elm's own cell faced from below
+## (`maps/ElmsLab.asm` object_event 5, 2).
+const NEW_BARK_ELMS_LAB_DOOR: Vector2i = Vector2i(6, 3)
+const ELM_FACE_CELL: Vector2i = Vector2i(5, 3)
+const ELMS_LAB_DOOR: Vector2i = Vector2i(4, 11)
+const EVENT_GOT_SS_TICKET_FROM_ELM: int = 36
+
+## The Fast Ship group (`constants/map_constants.asm`'s 15th `newgroup`) and the
+## passage Olivine reaches its dock through.
+const FAST_SHIP_GROUP: int = 15
+const FAST_SHIP_1F_NUMBER: int = 3
+## `maps/OlivineCity.asm` warp 10, then the passage. The passage is two regions
+## joined by its own stair pair ((15,4) to (3,2)), not one corridor, so the walk
+## to the dock takes three warps rather than one.
+const OLIVINE_PORT_DOOR: Vector2i = Vector2i(19, 27)
+const OLIVINE_PASSAGE_STAIRS: Vector2i = Vector2i(15, 4)
+const OLIVINE_PASSAGE_EXIT: Vector2i = Vector2i(3, 14)
+## `maps/OlivinePort.asm`'s coord event on (7,15). The passage door is north of
+## it and the dock runs south, so the cell before it is (7,14): a walk aimed
+## past the event crosses it mid-step, boards on the drain's default yes and
+## leaves the walk looking for its target on the ship.
+const PORT_BOARDING_APPROACH: Vector2i = Vector2i(7, 14)
+## `maps/FastShip1F.asm`'s grandpa coord pair on row 6, approached from the
+## north: the entry scene leaves the player on (25,3) and the coord event is the
+## first thing south of that, so the cell before it is (25,5).
+const SHIP_GRANDPA_APPROACH: Vector2i = Vector2i(25, 5)
+## constants/event_flags.asm. `maps/VermilionPort.asm` is the only place that
+## sets FIRST_TIME, so it is still clear on the outbound crossing and
+## `.CanArrive` wants EVENT_FAST_SHIP_FOUND_GIRL instead.
+const EVENT_FAST_SHIP_FIRST_TIME: int = 48
+
+## New Bark Town to Olivine City. Map connections except where a `gate` cell is
+## named, which is the door of a gate building whose far warp is the join
+## (`data/maps/attributes.asm`, `maps/Route31.asm`, `maps/EcruteakCity.asm`).
+const KANTO_RETURN_LEGS: Array = [
+	{"step": "new_bark_to_route_29", "direction": "west", "group": 24, "number": 3},
+	{"step": "route_29_to_cherrygrove", "direction": "west", "group": 26, "number": 3},
+	{"step": "cherrygrove_to_route_30", "direction": "north", "group": 26, "number": 1},
+	{"step": "route_30_to_route_31", "direction": "north", "group": 26, "number": 2},
+	{"step": "route_31_to_violet", "gate": Vector2i(4, 6), "group": 10, "number": 5},
+	{"step": "violet_to_route_36", "direction": "west", "group": 10, "number": 3},
+	{"step": "route_36_to_route_37", "direction": "north", "group": 10, "number": 4},
+	{"step": "route_37_to_ecruteak", "direction": "north", "group": 4, "number": 9},
+	{"step": "ecruteak_to_route_38", "gate": Vector2i(0, 18), "group": 1, "number": 12},
+	{"step": "route_38_to_route_39", "direction": "west", "group": 1, "number": 13},
+	{"step": "route_39_to_olivine", "direction": "south", "group": 1, "number": 14},
+]
+
 ## The flags `HallOfFameEnterScript` writes before `halloffame`.
 const EVENT_BEAT_ELITE_FOUR: int = 68
 const EVENT_TELEPORT_GUY: int = 1916
@@ -981,6 +1034,15 @@ func _story_path(data: GameData) -> Dictionary:
 	var kanto: Dictionary = _kanto_approach_path(world, save, random, data, path)
 	if not bool(kanto.get("ok", false)):
 		return kanto
+
+	# PostCreditsSpawn is a map load, not a step, so the leg after the Hall of
+	# Fame runs on its own world; everything below reads the returned one.
+	var crossing: Dictionary = _kanto_crossing_path(world, save, random, data, path)
+	if not bool(crossing.get("ok", false)):
+		return crossing
+	var crossed: Variant = crossing.get("world", null)
+	if crossed is Gen2WorldAPI:
+		world = crossed
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -4383,6 +4445,257 @@ func _hall_of_fame_leg(
 	return {"ok": true}
 
 
+## The Hall of Fame to Kanto: the post-credits spawn, Elm's S.S. Ticket, the
+## walk back to Olivine, the S.S. Aqua and landfall in Vermilion City.
+##
+## This leg starts on a new world. `SpawnAfterE4` (`engine/menus/intro_menu.asm`)
+## answers the next Continue with SPAWN_NEW_BARK and MAPSETUP_WARP, so the
+## cartridge does not walk out of the Hall of Fame either; it reloads the map.
+## The state and the save carry over, which is what makes the flags the Hall of
+## Fame just set visible to Elm.
+##
+## Returns the world it built, since everything after it runs there.
+func _kanto_crossing_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var spawned: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, NEW_BARK_GROUP, NEW_BARK_NUMBER, POST_CREDITS_SPAWN, world.state
+	)
+	if spawned == null:
+		return {"ok": false, "path": path, "reason": "the post-credits spawn map is missing"}
+	_mirror_party(spawned, save)
+	var entry: Dictionary = _drain_story(
+		spawned, spawned.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "post_credits_spawn",
+		"map": _map_value(spawned),
+		"cell": _cell_value(spawned),
+		"hall_of_fame": spawned.state.hall_of_fame(),
+	})
+	if not bool(entry.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the New Bark respawn did not settle: %s" % entry.get("reason", ""),
+		}
+
+	var ticket: Dictionary = _elm_ss_ticket(spawned, save, random, data, path)
+	if not bool(ticket.get("ok", false)):
+		return ticket
+
+	var westward: Dictionary = _walk_west_to_olivine(spawned, save, random, data, path)
+	if not bool(westward.get("ok", false)):
+		return westward
+
+	var crossing: Dictionary = _ss_aqua_crossing(spawned, save, random, data, path)
+	if not bool(crossing.get("ok", false)):
+		return crossing
+	return {"ok": true, "world": spawned}
+
+
+## Olivine Port to Vermilion City on the S.S. Aqua.
+##
+## The Hall of Fame is what opens this: `HallOfFameEnterScript` sets
+## EVENT_OLIVINE_PORT_SPRITES_BEFORE_HALL_OF_FAME and clears the `AFTER` one, and
+## the sailor those flags swap is the one standing on the port's own coord event
+## at (7,15). Before the Hall of Fame he blocks it.
+##
+## The first crossing is the granddaughter's: `.CanArrive` in
+## `maps/FastShipCabins_SW_SSW_NW.asm` wants EVENT_FAST_SHIP_FOUND_GIRL or
+## EVENT_FAST_SHIP_FIRST_TIME, and neither is set on the way out, so the ship
+## only docks once `SSAquaMetalCoatAndDocking` has run. The bed is not needed;
+## that script sets both the arrival and the found-girl flags itself.
+func _ss_aqua_crossing(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_port: Dictionary = _warp_chain(
+		world, save, random, data,
+		[OLIVINE_PORT_DOOR, OLIVINE_PASSAGE_STAIRS, OLIVINE_PASSAGE_EXIT]
+	)
+	if not bool(to_port.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Olivine Port unreachable: %s" % to_port.get("reason", ""),
+		}
+
+	# The coord event is stepped onto rather than walked to: a resolving walk
+	# would re-dispatch it, and the boarding it starts answers a yes/no.
+	var approach: Dictionary = _walk_cell_resolving(
+		world, PORT_BOARDING_APPROACH, save, random, data
+	)
+	if not bool(approach.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gangway approach failed: %s" % approach.get("reason", ""),
+		}
+	var stepped: Dictionary = world.move_result(Vector2i.DOWN)
+	var boarded: Dictionary = {"ok": false, "reason": "the step onto the gangway refused"}
+	if bool(stepped.get("ok", false)):
+		# OlivinePortWalkUpToShipScript's yesorno, then OlivinePortAskTicketText's
+		# promptbutton and the checkitem that reads the ticket out of the bag.
+		boarded = _drain_story(
+			world, _dispatch_after_step(world), save, random, data, true, [0] as Array[int]
+		)
+		boarded["ok"] = bool(boarded.get("terminal", false))
+	path.append({
+		"step": "olivine_port_boarding",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": boarded,
+	})
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "boarding the S.S. Aqua failed: %s" % boarded.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(FAST_SHIP_GROUP, FAST_SHIP_1F_NUMBER):
+		return {
+			"ok": false, "path": path,
+			"reason": "boarding ended on %s, not the ship" % [_map_value(world)],
+		}
+
+	return _ss_aqua_worried_grandpa(world, save, random, data, path)
+
+
+## New Bark Town back to Olivine City, the way the route first walked it, in
+## reverse where it overlaps and forward where it does not.
+##
+## Two of the joins are gate buildings rather than map connections: Route 31's
+## west edge is wall on every row, so `Route31VioletGate` is the only way into
+## Violet City, and Ecruteak's west exit is `Route38EcruteakGate`.
+func _walk_west_to_olivine(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_lab: Dictionary = _warp_chain(world, save, random, data, [ELMS_LAB_DOOR])
+	if not bool(out_of_lab.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Elm's lab failed: %s" % out_of_lab.get("reason", ""),
+		}
+
+	for stage: Dictionary in KANTO_RETURN_LEGS:
+		var walked: Dictionary
+		if stage.has("gate"):
+			walked = _gate_leg(
+				world, save, random, data, stage["gate"],
+				int(stage["group"]), int(stage["number"])
+			)
+		else:
+			walked = _walk_connection_resolving(
+				world, String(stage["direction"]), int(stage["group"]),
+				int(stage["number"]), save, random, data
+			)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(stage["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [stage["step"], walked.get("reason", "")],
+			}
+		if not bool(entry.get("terminal", false)):
+			return {"ok": false, "path": path, "reason": "%s entry did not finish" % stage["step"]}
+	return {"ok": true}
+
+
+## Elm's lab, for the ticket he only offers once the Elite Four is beaten.
+##
+## `ProfElmScript` reads `EVENT_BEAT_ELITE_FOUR` before anything else it could
+## give, so this is the first thing he answers with now
+## (`maps/ElmsLab.asm`'s ElmGiveTicketScript).
+func _elm_ss_ticket(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_lab: Dictionary = _warp_chain(
+		world, save, random, data, [NEW_BARK_ELMS_LAB_DOOR]
+	)
+	if not bool(into_lab.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Elm's lab door failed: %s" % into_lab.get("reason", ""),
+		}
+	var talked: Dictionary = _talk_to(
+		world, ELM_FACE_CELL, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "elms_lab_ss_ticket",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"ticket": world.event_flag_active(EVENT_GOT_SS_TICKET_FROM_ELM),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(talked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Elm did not finish: %s" % talked.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_GOT_SS_TICKET_FROM_ELM):
+		return {"ok": false, "path": path, "reason": "Elm did not hand over the S.S. Ticket"}
+	return {"ok": true}
+
+
+## The worried grandpa on 1F, which is where the walked route stops.
+##
+## `WorriedGrandpaSceneLeft` is a coord event on the pair below the ship's
+## entrance and it retires itself with `setscene SCENE_FASTSHIP1F_NOOP`, so it is
+## stepped onto once rather than walked to.
+func _ss_aqua_worried_grandpa(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var approach: Dictionary = _walk_cell_resolving(
+		world, SHIP_GRANDPA_APPROACH, save, random, data
+	)
+	if not bool(approach.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to the grandpa scene failed: %s" % approach.get("reason", ""),
+		}
+	var stepped: Dictionary = world.move_result(Vector2i.DOWN)
+	var scene: Dictionary = {"ok": false, "reason": "the step onto the grandpa cell refused"}
+	if bool(stepped.get("ok", false)):
+		scene = _drain_story(world, _dispatch_after_step(world), save, random, data, true)
+		scene["ok"] = bool(scene.get("terminal", false))
+	path.append({
+		"step": "ss_aqua_worried_grandpa",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"first_time": world.event_flag_active(EVENT_FAST_SHIP_FIRST_TIME),
+	})
+	if not bool(scene.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the grandpa scene failed: %s" % scene.get("reason", ""),
+		}
+	return {"ok": true}
+
+
 ## _push_boulder_at() for a boulder that may land on a `stonetable` pit: the
 ## fall script is queued by the push that commits the cell, and the boulder
 ## needs its own slide finished before the next push can reach it.
@@ -5645,9 +5958,9 @@ func _walk_to_story_cell(
 	if not found:
 		return {
 			"ok": false,
-			"reason": "target %s unreachable from %s (collision $%02x, walkable %s)" % [
-				target, world.player_cell, world.collision_code_at(target),
-				world.can_walk_to(target),
+			"reason": "target %s unreachable from %s on %s (collision $%02x, walkable %s)" % [
+				target, world.player_cell, _map_value(world),
+				world.collision_code_at(target), world.can_walk_to(target),
 			],
 			"target": _cell_value_from_vector(target),
 		}
