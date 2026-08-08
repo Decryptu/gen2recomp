@@ -1,8 +1,8 @@
 extends SceneTree
 
-## Verifies the walk north from Saffron to Cerulean City, and pins why the
-## Cascade Badge's own errand is not reachable from there, against freshly
-## imported real caches for both command profiles.
+## Verifies the walk north from Saffron to Cerulean City and the way from there
+## to the Power Plant, against freshly imported real caches for both command
+## profiles.
 ##
 ## Expected values come from the pinned pokecrystal and pokegold sources:
 ## maps/SaffronCity.asm, maps/Route5SaffronGate.asm, maps/Route5.asm,
@@ -14,12 +14,16 @@ extends SceneTree
 ## `InitializeEventsScript` sets it, so the gym is empty until
 ## `Route25MistyDate1Script` clears it; that scene is armed by the gym's own
 ## grunt, and the grunt by `PowerPlantManager`. So the badge waits on the Power
-## Plant, and the Power Plant is not on Cerulean's side of Kanto: the city's east
-## edge crosses on one cell into a fourteen-cell pocket of Route 9, whose only
-## cut tree opens onto the Route 10 Pokecenter's fenced yard and nothing else,
-## and the plant's own door sits in a region with no map edge at all, reached
-## across two cells of water from Route 10 North's southern half. That half is
-## entered from Route 10 South, which is Lavender's own connection.
+## Plant, and the plant is not walked to: Cerulean's east edge crosses on one
+## cell into a fourteen-cell pocket of Route 9 whose one cut tree opens 368 cells
+## reaching a single south crossing, and what that lands in is a yard holding
+## nothing but the Route 10 Pokecenter. The plant's own door sits in a region
+## with no map edge and no walkable neighbour, and Route 10 North's southern half
+## cannot even enter the water beside it, because row 14 is a buoy line whose own
+## permission walls its north face. The way in is Route 9's river, whose shore
+## the same cut opens: sixty cells of water that meet the south edge on columns
+## 56 and 57 and come out in Route 10 North's own lake, one step from the
+## plant's shore.
 ##
 ##   Godot --headless --path . -s res://tools/validate_cerulean.gd
 
@@ -69,14 +73,30 @@ const ROUTE_10_FROM_ROUTE_9: Vector2i = Vector2i(14, 0)
 const POKECENTER_YARD_CELLS: int = 37
 const ROUTE_10_POKECENTER_DOOR: Vector2i = Vector2i(11, 1)
 
-## The plant's own door, the cell it is entered from, and the water between that
-## cell and the southern half of the map.
+## The plant's own door and the cell it is entered from. The pocket both sit in
+## has no map edge and no walkable neighbour, so the way in is the river.
 const POWER_PLANT_DOOR: Vector2i = Vector2i(3, 9)
 const POWER_PLANT_APPROACH: Vector2i = Vector2i(3, 10)
 const POWER_PLANT_POCKET_CELLS: int = 28
 const ROUTE_10_SOUTH_HALF: Vector2i = Vector2i(0, 17)
 const ROUTE_10_SOUTH_HALF_CELLS: int = 153
-const POWER_PLANT_SHORE_CELLS: int = 13
+## Route 10 North's row 14 is a `$b2` buoy line whose own permission walls its
+## north face, so the southern half cannot enter that water at all. Every legal
+## surf entry on the map is inside the plant's pocket, facing out of it.
+const BUOY_ROW: int = 14
+const BUOY_CODE: int = 0xB2
+const BUOY_UP_WALL: int = 4
+## Route 9's river, entered off the shore the cut opens, and where it comes out.
+const ROUTE_9_SHORE: Vector2i = Vector2i(42, 4)
+const ROUTE_9_RIVER_HEAD: Vector2i = Vector2i(42, 3)
+const ROUTE_9_RIVER_CELLS: int = 60
+const ROUTE_9_RIVER_MOUTH: Array[int] = [56, 57]
+## Which is Route 10 North's own water, the connection offset being 20.
+const ROUTE_10_LAKE_HEAD: Vector2i = Vector2i(16, 0)
+const ROUTE_10_LAKE_CELLS: int = 56
+const POWER_PLANT_LANDING: Vector2i = Vector2i(3, 12)
+## ENGINE_FOGBADGE's place in source badge order, which `.TrySurf` wants first.
+const BADGE_FOG: int = 3
 
 var _failures: PackedStringArray = []
 
@@ -90,7 +110,7 @@ func _initialize() -> void:
 		_verify_route_5_gate(data, game_id)
 		_verify_cerulean(data, game_id)
 		_verify_route_9_dead_end(data, game_id)
-		_verify_power_plant_is_water_locked(data, game_id)
+		_verify_power_plant_is_reached_by_river(data, game_id)
 	_finish()
 
 
@@ -260,10 +280,12 @@ func _verify_route_9_dead_end(data: GameData, game_id: StringName) -> void:
 	])
 
 
-## The plant's door sits in a region with no map edge. It is entered across two
-## cells of water from the southern half of Route 10 North, which is Route 10
-## South's own connection and therefore Lavender's side of Kanto.
-func _verify_power_plant_is_water_locked(data: GameData, game_id: StringName) -> void:
+## The plant's door sits in a region with no map edge and no walkable neighbour.
+## It is not reached from Route 10 North's southern half either: row 14 is a
+## `$b2` buoy line whose own permission walls its north face, so no cell down
+## there can enter the water. The way in is Route 9's river, which the same cut
+## that opens the route also opens the shore of.
+func _verify_power_plant_is_reached_by_river(data: GameData, game_id: StringName) -> void:
 	var world: Gen2WorldAPI = _open(data, CERULEAN_GROUP, ROUTE_10_NORTH, ROUTE_10_SOUTH_HALF)
 	if world == null:
 		return
@@ -294,7 +316,6 @@ func _verify_power_plant_is_water_locked(data: GameData, game_id: StringName) ->
 			game_id, edges,
 		]
 	)
-
 	var southern: Dictionary = _region(world, ROUTE_10_SOUTH_HALF)
 	_check(
 		southern.size() == ROUTE_10_SOUTH_HALF_CELLS,
@@ -302,47 +323,137 @@ func _verify_power_plant_is_water_locked(data: GameData, game_id: StringName) ->
 			game_id, southern.size(), ROUTE_10_SOUTH_HALF_CELLS,
 		]
 	)
-	# The crossing itself: a shore cell whose two cells of water end on the pocket.
-	var shores: Array[Vector2i] = []
-	for cell: Vector2i in southern:
-		if world.collision_permission_at(cell + Vector2i.UP) != Gen2WorldCollision.WATER_TILE:
-			continue
-		if pocket.has(cell + Vector2i.UP * 3):
-			shores.append(cell)
+
+	# The buoy line, and the fact that it leaves the southern half no way in.
+	for x: int in range(2, size.x - 2):
+		var cell := Vector2i(x, BUOY_ROW)
+		if not _check(
+			world.collision_code_at(cell) == BUOY_CODE,
+			"%s: %s is $%02X, not the pinned buoy $%02X." % [
+				game_id, cell, world.collision_code_at(cell), BUOY_CODE,
+			]
+		):
+			break
+		if not _check(
+			(world.tile_permissions_at(cell) & BUOY_UP_WALL) != 0,
+			"%s: the buoy on %s does not wall its north face." % [game_id, cell]
+		):
+			break
 	_check(
-		shores.size() == POWER_PLANT_SHORE_CELLS,
-		"%s: %d shore cells surf onto the Power Plant's region, not the pinned %d." % [
-			game_id, shores.size(), POWER_PLANT_SHORE_CELLS,
+		_surf_entries(data, CERULEAN_GROUP, ROUTE_10_NORTH, southern).is_empty(),
+		"%s: Route 10 North's southern half can enter the water; the buoys should refuse it." % game_id
+	)
+
+	# The river is the way, and the cut is what opens its shore.
+	var route: Gen2WorldAPI = _open(data, CERULEAN_GROUP, ROUTE_9, ROUTE_9_FROM_CERULEAN)
+	if route == null:
+		return
+	route.state.set_engine_flag(Gen2WorldState.badge_flag(
+		BADGE_HIVE, Gen2WorldState.is_crystal_profile(data)
+	))
+	route.player_cell = ROUTE_9_TREE_APPROACH
+	route.player_facing = Gen2WorldSprite.FACING_RIGHT
+	if not _check(
+		bool(route.cut_request().get("ok", false))
+			and bool(route.complete_cut().get("ok", false)),
+		"%s: Route 9's tree refused the cut." % game_id
+	):
+		return
+	var opened: Dictionary = _region(route, ROUTE_9_TREE_APPROACH)
+	_check(
+		opened.has(ROUTE_9_SHORE),
+		"%s: the cut does not open Route 9's shore on %s." % [game_id, ROUTE_9_SHORE]
+	)
+	var entries: Array = _surf_entries(data, CERULEAN_GROUP, ROUTE_9, opened, true)
+	_check(
+		not entries.is_empty(),
+		"%s: nothing in Route 9's opened region can enter the river." % game_id
+	)
+	var river: Dictionary = _water(route, ROUTE_9_RIVER_HEAD)
+	_check(
+		river.size() == ROUTE_9_RIVER_CELLS,
+		"%s: Route 9's river is %d cells, not the pinned %d." % [
+			game_id, river.size(), ROUTE_9_RIVER_CELLS,
 		]
 	)
-	# And the southern half is Route 10 South's, which is Lavender's connection.
-	var crossed: Array = _crossings(
-		data, CERULEAN_GROUP, ROUTE_10_NORTH, world, "south", ROUTE_10_SOUTH_HALF
+	var mouth: Array[int] = []
+	for x: int in route.map_size_cells().x:
+		if river.has(Vector2i(x, route.map_size_cells().y - 1)):
+			mouth.append(x)
+	_check(
+		mouth == ROUTE_9_RIVER_MOUTH,
+		"%s: the river meets the south edge on %s, not the pinned %s." % [
+			game_id, mouth, ROUTE_9_RIVER_MOUTH,
+		]
+	)
+
+	# And what it comes out into reaches the pocket's own shore.
+	var lake: Dictionary = _water(world, ROUTE_10_LAKE_HEAD)
+	_check(
+		lake.size() == ROUTE_10_LAKE_CELLS,
+		"%s: Route 10 North's water is %d cells, not the pinned %d." % [
+			game_id, lake.size(), ROUTE_10_LAKE_CELLS,
+		]
 	)
 	_check(
-		not crossed.is_empty(),
-		"%s: Route 10 North's southern half does not reach Route 10 South." % game_id
+		lake.has(POWER_PLANT_LANDING) and pocket.has(POWER_PLANT_LANDING + Vector2i.UP),
+		"%s: the water does not reach the Power Plant's own shore." % game_id
 	)
-	for entry: Array in crossed:
-		_check(
-			entry[1] == Vector2i(LAVENDER_GROUP, ROUTE_10_SOUTH),
-			"%s: %s crosses south onto %s, not Route 10 South." % [game_id, entry[0], entry[1]]
-		)
-	var lavender: Gen2WorldAPI = _open(data, LAVENDER_GROUP, ROUTE_10_SOUTH, Vector2i(6, 2))
-	if lavender == null:
-		return
-	var joins: Array[StringName] = []
-	for connection: Dictionary in lavender.current_map.connections:
-		if int(connection.get("map_group", -1)) == LAVENDER_GROUP \
-			and int(connection.get("map_number", -1)) == LAVENDER_TOWN:
-			joins.append(StringName(connection.get("direction", "")))
-	_check(
-		joins == [&"south"],
-		"%s: Route 10 South joins Lavender %s, not south alone." % [game_id, joins]
-	)
-	print("%s power plant: a %d-cell island reached by %d shore cells, from Lavender's side." % [
-		game_id, pocket.size(), shores.size(),
+	print("%s power plant: a %d-cell island, no shore entry past the buoys, and a %d-cell river in." % [
+		game_id, pocket.size(), river.size(),
 	])
+
+
+## Every [cell, facing] in [param region] that `.TrySurf` accepts, with the Fog
+## Badge granted and, for Route 9, its own tree already cut.
+func _surf_entries(
+	data: GameData, group: int, number: int, region: Dictionary, cut_route_9: bool = false,
+) -> Array:
+	var facings: Dictionary = {
+		Vector2i.UP: Gen2WorldSprite.FACING_UP, Vector2i.DOWN: Gen2WorldSprite.FACING_DOWN,
+		Vector2i.LEFT: Gen2WorldSprite.FACING_LEFT, Vector2i.RIGHT: Gen2WorldSprite.FACING_RIGHT,
+	}
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var out: Array = []
+	for cell: Vector2i in region:
+		for direction: Vector2i in facings:
+			var state := Gen2WorldState.new()
+			state.set_engine_flag(Gen2WorldState.badge_flag(BADGE_FOG, crystal))
+			state.set_engine_flag(Gen2WorldState.badge_flag(BADGE_HIVE, crystal))
+			var world: Gen2WorldAPI = Gen2WorldAPI.open(data, group, number, cell, state)
+			if world == null:
+				continue
+			var _entry: Array = world.dispatch_map_entry()
+			if cut_route_9:
+				world.player_cell = ROUTE_9_TREE_APPROACH
+				world.player_facing = Gen2WorldSprite.FACING_RIGHT
+				var _staged: Dictionary = world.cut_request()
+				var _done: Dictionary = world.complete_cut()
+				world.player_cell = cell
+			world.player_facing = int(facings[direction])
+			if bool(world.surf_request().get("ok", false)):
+				out.append([cell, direction])
+	return out
+
+
+## The water body [param start] belongs to. Surfing crosses water only, so this
+## is the frontier a ride is planned on.
+func _water(world: Gen2WorldAPI, start: Vector2i) -> Dictionary:
+	var size: Vector2i = world.map_size_cells()
+	var seen: Dictionary = {start: true}
+	var frontier: Array[Vector2i] = [start]
+	while not frontier.is_empty():
+		var cell: Vector2i = frontier.pop_front()
+		for direction: Vector2i in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
+			var next: Vector2i = cell + direction
+			if next.x < 0 or next.y < 0 or next.x >= size.x or next.y >= size.y:
+				continue
+			if seen.has(next) \
+				or world.collision_permission_at(next) != Gen2WorldCollision.WATER_TILE:
+				continue
+			seen[next] = true
+			frontier.append(next)
+	return seen
 
 
 func _open(data: GameData, group: int, number: int, cell: Vector2i) -> Gen2WorldAPI:
@@ -421,7 +532,7 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS cerulean: the Route 5 gate, the city's one east crossing and the water-locked Power Plant verified.")
+		print("PASS cerulean: the Route 5 gate, the city's one east crossing and the river into the Power Plant verified.")
 		quit(0)
 		return
 	for failure: String in _failures:

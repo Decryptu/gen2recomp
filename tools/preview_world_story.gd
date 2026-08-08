@@ -423,6 +423,49 @@ const ROUTE_5_NUMBER: int = 1
 const CERULEAN_GROUP: int = 7
 const CERULEAN_CITY_NUMBER: int = 17
 const ENGINE_FLYPOINT_CERULEAN: int = 56
+const CERULEAN_GYM_NUMBER: int = 6
+const ROUTE_9_NUMBER: int = 13
+const ROUTE_10_NORTH_NUMBER: int = 14
+const POWER_PLANT_NUMBER: int = 10
+const ROUTE_24_NUMBER: int = 15
+const ROUTE_25_NUMBER: int = 16
+
+## Route 9 is sealed from Cerulean's own crossing by one COLL_CUT_TREE on (5,8),
+## faced from (4,8) heading east and from (6,8) heading back west. The same cut
+## opens the shore on (42,4), which is the only way to the Power Plant: the
+## plant's region has no map edge and no walkable neighbour, and Route 10
+## North's own southern shore is behind a buoy line that walls its north face.
+const ROUTE_9_CUT_EAST_APPROACH: Vector2i = Vector2i(4, 8)
+const ROUTE_9_CUT_WEST_APPROACH: Vector2i = Vector2i(6, 8)
+const ROUTE_9_SHORE: Vector2i = Vector2i(42, 4)
+## `maps/Route10North.asm` warp 2, the cell the river lands on beside it, and the
+## plant's own door back out.
+const POWER_PLANT_SHORE: Vector2i = Vector2i(3, 11)
+const POWER_PLANT_DOOR: Vector2i = Vector2i(3, 9)
+const POWER_PLANT_EXIT: Vector2i = Vector2i(2, 17)
+## `maps/PowerPlant.asm`: the manager on (14,10). The guard's phone call on
+## (5,12) is armed by his first talk and crossed by the walk back out, so it
+## needs no cell of its own here.
+const POWER_PLANT_MANAGER_FACE: Vector2i = Vector2i(14, 11)
+## `maps/CeruleanCity.asm` warp 5 and the gym's own exit.
+const CERULEAN_GYM_DOOR: Vector2i = Vector2i(30, 23)
+const CERULEAN_GYM_EXIT: Vector2i = Vector2i(4, 15)
+## The MACHINE_PART the Route 24 grunt says he dropped in the gym pool. Its own
+## cell is water, so it is faced from the bank directly above it.
+const MACHINE_PART_APPROACH: Vector2i = Vector2i(3, 7)
+## `maps/Route24.asm`'s only object, and Route 25's date coord events. (43,7) is
+## the one neighbour of (42,7) that is neither the other half of the pair nor
+## wall.
+const ROUTE_24_ROCKET_FACE: Vector2i = Vector2i(8, 8)
+const ROUTE_25_DATE_COORD: Vector2i = Vector2i(42, 7)
+const ROUTE_25_DATE_APPROACH: Vector2i = Vector2i(43, 7)
+## constants/event_flags.asm, same numbers in both pins.
+const EVENT_RETURNED_MACHINE_PART: int = 201
+const EVENT_MET_MANAGER_AT_POWER_PLANT: int = 202
+const EVENT_RESTORED_POWER_TO_KANTO: int = 205
+const EVENT_TRAINERS_IN_CERULEAN_GYM: int = 1903
+## constants/item_constants.asm.
+const ITEM_MACHINE_PART: int = 0x80
 
 ## constants/event_flags.asm, same numbers in both pins.
 const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
@@ -5434,16 +5477,14 @@ func _celadon_gym_leg(
 ## Celadon Gym to Cerulean City, by way of Saffron and Route 5.
 ##
 ## Two gate buildings and one open connection. Cerulean is as far as this walk
-## goes: the Cascade Badge is an errand, not a cell, and the errand is not on
-## this side of Kanto. Misty and her three swimmers all carry
-## EVENT_TRAINERS_IN_CERULEAN_GYM as their hide flag and `InitializeEventsScript`
-## sets it, so the gym stays empty until `Route25MistyDate1Script` clears it;
-## that scene is armed by the gym's own grunt, who is armed by the Power Plant
-## manager. And the Power Plant is not reachable from here: Cerulean's east edge
-## crosses on one cell into a fourteen-cell pocket of Route 9, whose own cut tree
-## opens only onto the Route 10 Pokecenter's fenced yard, and the plant's door
-## sits in a region with no map edge at all. `tools/validate_cerulean.gd` pins
-## all of it. The way in is Route 8 and Lavender, which is the leg after this.
+## goes: the Cascade Badge is an errand, not a cell. Misty and her three swimmers
+## all carry EVENT_TRAINERS_IN_CERULEAN_GYM as their hide flag and
+## `InitializeEventsScript` sets it, so the gym stays empty until
+## `Route25MistyDate1Script` clears it; that scene is armed by the gym's own
+## grunt, who is armed by the Power Plant manager. The plant is not walked to
+## either: it sits in a region with no map edge and no walkable neighbour, and
+## the way in is Route 9's river, which the same cut that opens the route also
+## opens the shore of. `tools/validate_cerulean.gd` pins all of it.
 func _cerulean_approach_path(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -5523,7 +5564,388 @@ func _cerulean_approach_path(
 		}
 	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CERULEAN):
 		return {"ok": false, "path": path, "reason": "Cerulean's flypoint callback did not run"}
+	return _machine_part_errand(world, save, random, data, path)
+
+
+## Cerulean City through the errand the Cascade Badge waits on.
+##
+## The first Kanto badge whose gate is an errand rather than a cell, and the
+## errand runs in the order the cartridge forces: the Power Plant manager arms
+## the gym, the gym's grunt arms Route 24 and Route 25, Route 24's grunt names
+## the pool, the pool holds the MACHINE_PART, the manager takes it back, and only
+## Route 25's date puts Misty in her gym. Two of those steps are at the plant, so
+## the river is ridden twice each way.
+##
+## The walk stops with Misty in her gym and unfought. Her three swimmers stand on
+## the pool, and `can_object_walk_to()` accepts LAND_TILE only, so a swimmer that
+## sees the player cannot complete the source approach and the sight request
+## fails with `movement_blocked`. `CanObjectMoveInDirection` branches on
+## SWIMMING_F and calls WillObjectBumpIntoLand instead, but nothing imports which
+## sprites swim, so the branch has no input yet.
+func _machine_part_errand(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var met: Dictionary = _power_plant_visit(world, save, random, data, path, "manager")
+	if not bool(met.get("ok", false)):
+		return met
+	if not world.event_flag_active(EVENT_MET_MANAGER_AT_POWER_PLANT):
+		return {"ok": false, "path": path, "reason": "the manager did not arm the gym"}
+
+	# Entering the gym is what runs the grunt scene; nothing has to be faced.
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_DOOR])
+	path.append({
+		"step": "cerulean_gym_grunt",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": into_gym,
+	})
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Cerulean Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Cerulean Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var north: Dictionary = _route_24_and_25(world, save, random, data, path)
+	if not bool(north.get("ok", false)):
+		return north
+
+	var part: Dictionary = _cerulean_machine_part(world, save, random, data, path)
+	if not bool(part.get("ok", false)):
+		return part
+
+	var returned: Dictionary = _power_plant_visit(
+		world, save, random, data, path, "machine_part"
+	)
+	if not bool(returned.get("ok", false)):
+		return returned
+	if not world.event_flag_active(EVENT_RETURNED_MACHINE_PART):
+		return {"ok": false, "path": path, "reason": "the machine part was not handed over"}
+	if world.event_flag_active(EVENT_TRAINERS_IN_CERULEAN_GYM):
+		return {"ok": false, "path": path, "reason": "Misty is still hidden"}
 	return {"ok": true}
+
+
+## Cerulean to the Power Plant and back, which is the river both ways.
+func _power_plant_visit(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	step: String,
+) -> Dictionary:
+	var out: Dictionary = _power_plant_crossing(world, save, random, data, path, false)
+	if not bool(out.get("ok", false)):
+		return out
+	var manager: Dictionary = _talk_to(
+		world, POWER_PLANT_MANAGER_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	# The manager's first talk arms the guard's phone call on (5,12), and the walk
+	# back toward the door crosses it, so the scene is drained on the way out
+	# rather than aimed at. `scene` is `SCENE_POWERPLANT_GUARD_GETS_PHONE_CALL`
+	# while it is still pending and back to NOOP once it has run.
+	path.append({
+		"step": "power_plant_%s" % step,
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"met_manager": world.event_flag_active(EVENT_MET_MANAGER_AT_POWER_PLANT),
+		"returned": world.event_flag_active(EVENT_RETURNED_MACHINE_PART),
+		"power_restored": world.event_flag_active(EVENT_RESTORED_POWER_TO_KANTO),
+		"scene": world.state.map_scene(CERULEAN_GROUP, POWER_PLANT_NUMBER),
+		"run": manager,
+	})
+	if not bool(manager.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Power Plant manager did not finish: %s" % manager.get("reason", ""),
+		}
+	var home: Dictionary = _power_plant_crossing(world, save, random, data, path, true)
+	if not bool(home.get("ok", false)):
+		return home
+	if world.state.map_scene(CERULEAN_GROUP, POWER_PLANT_NUMBER) != 0:
+		return {
+			"ok": false, "path": path,
+			"reason": "the guard's phone call is still pending after the walk out",
+		}
+	return {"ok": true}
+
+
+## The crossing itself, in either direction. Outbound it is the east connection,
+## Route 9's tree, its shore, the river south into Route 10 North's lake, the
+## landing beside the plant and the plant's own door; the return is that
+## reversed, with the tree cut again because the map load regrew it.
+func _power_plant_crossing(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	returning: bool,
+) -> Dictionary:
+	var label: String = "return" if returning else "outbound"
+	if returning:
+		var outside: Dictionary = _warp_chain(world, save, random, data, [POWER_PLANT_EXIT])
+		if not bool(outside.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "leaving the Power Plant failed: %s" % outside.get("reason", ""),
+			}
+
+	# Each leg is an optional surf entry, the connection walk, an optional landing
+	# on the far side, then an optional cut and an optional surf entry for the
+	# leg after it. The tree is cut from whichever bank the crossing arrives on.
+	var legs: Array = [
+		{"direction": "east", "number": ROUTE_9_NUMBER, "water": false,
+			"cut": ROUTE_9_CUT_EAST_APPROACH, "cut_facing": Gen2WorldSprite.FACING_RIGHT,
+			"surf": ROUTE_9_SHORE, "surf_facing": Gen2WorldSprite.FACING_UP},
+		{"direction": "south", "number": ROUTE_10_NORTH_NUMBER, "water": true,
+			"ashore": POWER_PLANT_SHORE},
+	]
+	if returning:
+		legs = [
+			{"direction": "north", "number": ROUTE_9_NUMBER, "water": true,
+				"enter": POWER_PLANT_SHORE, "enter_facing": Gen2WorldSprite.FACING_DOWN,
+				"ashore": ROUTE_9_SHORE,
+				"cut": ROUTE_9_CUT_WEST_APPROACH, "cut_facing": Gen2WorldSprite.FACING_LEFT},
+			{"direction": "west", "number": CERULEAN_CITY_NUMBER, "water": false},
+		]
+	for leg: Dictionary in legs:
+		if leg.has("enter"):
+			var boarded: Dictionary = _surf_at(
+				world, leg["enter"], int(leg["enter_facing"]), save, random, data
+			)
+			if not bool(boarded.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "the %s surf entry (%s) failed: %s" % [
+						leg["enter"], label, boarded.get("reason", ""),
+					],
+				}
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), CERULEAN_GROUP, int(leg["number"]),
+			save, random, data, bool(leg["water"])
+		)
+		var _entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": "power_plant_%s_%s" % [label, leg["direction"]],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the %s crossing (%s) failed: %s" % [
+					leg["direction"], label, walked.get("reason", ""),
+				],
+			}
+		if leg.has("ashore"):
+			# The far side of a surfed connection is still water. One water-only
+			# walk to a named shore cell ends on .ExitWater.
+			var ashore: Dictionary = _walk_cell_resolving(
+				world, leg["ashore"], save, random, data, true
+			)
+			if not bool(ashore.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "landing on %s (%s) failed: %s" % [
+						leg["ashore"], label, ashore.get("reason", ""),
+					],
+				}
+		if leg.has("cut"):
+			var tree: Dictionary = _cut_at(
+				world, leg["cut"], int(leg["cut_facing"]), save, random, data
+			)
+			if not bool(tree.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "Route 9's tree (%s) failed: %s" % [label, tree.get("reason", "")],
+				}
+		if leg.has("surf"):
+			var entered: Dictionary = _surf_at(
+				world, leg["surf"], int(leg["surf_facing"]), save, random, data
+			)
+			if not bool(entered.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "the %s surf entry (%s) failed: %s" % [
+						leg["surf"], label, entered.get("reason", ""),
+					],
+				}
+	if returning:
+		return {"ok": true}
+	var door: Dictionary = _warp_chain(world, save, random, data, [POWER_PLANT_DOOR])
+	if not bool(door.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Power Plant door failed: %s" % door.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Route 24's grunt, who names the pool, and Route 25's date, whose own
+## `clearevent` is the only thing that puts Misty in her gym.
+func _route_24_and_25(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_24: Dictionary = _walk_connection_resolving(
+		world, "north", CERULEAN_GROUP, ROUTE_24_NUMBER, save, random, data
+	)
+	var _entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(to_24.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk north to Route 24 failed: %s" % to_24.get("reason", ""),
+		}
+	var grunt: Dictionary = _talk_to(
+		world, ROUTE_24_ROCKET_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_24_rocket",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": grunt,
+	})
+	if not bool(grunt.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 24 grunt did not finish: %s" % grunt.get("reason", ""),
+		}
+
+	var to_25: Dictionary = _walk_connection_resolving(
+		world, "north", CERULEAN_GROUP, ROUTE_25_NUMBER, save, random, data
+	)
+	var _r25: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if not bool(to_25.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk north to Route 25 failed: %s" % to_25.get("reason", ""),
+		}
+	var date: Dictionary = _coord_event_step(
+		world, ROUTE_25_DATE_APPROACH, ROUTE_25_DATE_COORD, save, random, data
+	)
+	path.append({
+		"step": "route_25_misty_date",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"gym_trainers_hidden": world.event_flag_active(EVENT_TRAINERS_IN_CERULEAN_GYM),
+		"run": date,
+	})
+	if not bool(date.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Misty date did not finish: %s" % date.get("reason", ""),
+		}
+	if world.event_flag_active(EVENT_TRAINERS_IN_CERULEAN_GYM):
+		return {"ok": false, "path": path, "reason": "the date did not empty the gym's hide flag"}
+
+	for number: int in [ROUTE_24_NUMBER, CERULEAN_CITY_NUMBER]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "south", CERULEAN_GROUP, number, save, random, data
+		)
+		var _back: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk back south failed: %s" % walked.get("reason", ""),
+			}
+	return {"ok": true}
+
+
+## The pool the Route 24 grunt names: a BGEVENT_ITEM whose own cell is water, so
+## it is faced from the bank above rather than stood on.
+func _cerulean_machine_part(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gym door failed: %s" % into_gym.get("reason", ""),
+		}
+	var found: Dictionary = _talk_to(
+		world, MACHINE_PART_APPROACH, Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "cerulean_gym_machine_part",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"in_bag": int(world.state.items().get(ITEM_MACHINE_PART, 0)),
+		"run": found,
+	})
+	if not bool(found.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the hidden machine part did not finish: %s" % found.get("reason", ""),
+		}
+	if int(world.state.items().get(ITEM_MACHINE_PART, 0)) < 1:
+		return {"ok": false, "path": path, "reason": "the machine part did not reach the bag"}
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [CERULEAN_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the gym with the part failed: %s" % out_of_gym.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## Runs the coord event on [param cell], whichever way the walk gets there.
+##
+## Open work item 15: a resolving walk aimed at a live coord event re-dispatches
+## its own target and never settles, so the target is [param approach] and the
+## last step is a plain move_result(). But the walk to that approach can cross
+## the event's own cell first and resolve it on the way, which is what both of
+## this leg's coord events do, so a walk that already ran something counts.
+func _coord_event_step(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	cell: Vector2i,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	var resolved: Array = walked.get("encounters", [])
+	if world.player_cell == cell or not resolved.is_empty():
+		return {"ok": true, "on_the_way": true, "encounters": resolved}
+	var direction: Vector2i = cell - world.player_cell
+	if absi(direction.x) + absi(direction.y) != 1:
+		return {"ok": false, "reason": "%s does not neighbour %s" % [approach, cell]}
+	var moved: Dictionary = world.move_result(direction)
+	if not bool(moved.get("ok", false)):
+		return {"ok": false, "reason": "the step onto %s was refused" % cell}
+	var run: Dictionary = _drain_story(
+		world, _dispatch_after_step(world), save, random, data, true
+	)
+	return {"ok": bool(run.get("terminal", false)), "reason": run.get("reason", ""), "run": run}
 
 
 ## The gangway. `FastShip1FSailor1Script`'s `.Arrived` branch needs
