@@ -213,10 +213,84 @@ func _init(
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
 	_load_objects()
+	_apply_map_music()
 
 
 func map_id() -> Vector2i:
 	return Vector2i(current_map.group, current_map.number) if current_map != null else Vector2i(-1, -1)
+
+
+## GetWorldMapLocation: the current map's own landmark. LANDMARK_SPECIAL means
+## the map borrows the landmark of the one the player warped in from, which only
+## the six Cable Club rooms do; none of them is implemented, so the fallback has
+## no caller and is deliberately not modelled.
+func landmark() -> int:
+	return current_map.location if current_map != null else Gen2WorldRadio.LANDMARK_SPECIAL
+
+
+## GetMapMusic_MaybeSpecial: SpecialMapMusic answers first, so a surfing player
+## carries MUSIC_SURF across map loads and warps. Its Bug Contest branch has no
+## counterpart here, since no contest timer exists.
+func map_music_track() -> int:
+	if movement_mode == MOVEMENT_SURF:
+		return Gen2WorldFieldMove.MUSIC_SURF
+	return current_map.music if current_map != null else Gen2WorldState.MUSIC_NONE
+
+
+## PlayMapMusic on map entry. Answers whether the track actually changed, which
+## is both the source's own "do not restart the same piece" rule and what keeps
+## a tuned radio station playing until the player leaves the map.
+func _apply_map_music() -> bool:
+	return state.play_map_music(map_music_track())
+
+
+## The WRAM facts RadioChannels reads before it answers a knob position.
+func radio_context() -> Dictionary:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var tower: int = Gen2WorldState.ENGINE_ROCKETS_IN_RADIO_TOWER if crystal \
+		else Gen2WorldState.ENGINE_ROCKETS_IN_RADIO_TOWER_GOLD_SILVER
+	return {
+		"landmark": landmark(),
+		"crystal": crystal,
+		"expn_card": state.is_engine_flag_active(Gen2WorldState.ENGINE_EXPN_CARD),
+		"rocket_signal": state.is_engine_flag_active(Gen2WorldState.ENGINE_ROCKET_SIGNAL),
+		"rockets_in_radio_tower": state.is_engine_flag_active(tower),
+		"time_of_day": int(world_clock().get("time_of_day", Gen2WorldRadio.TIME_MORNING)),
+	}
+
+
+## The station the dial currently sits on, without changing anything.
+func radio_station() -> Dictionary:
+	return Gen2WorldRadio.station_for(state.radio_knob(), radio_context())
+
+
+## Moves the dial and loads whatever station answers, which is
+## UpdateRadioStation plus the LoadStation_ call it jumps to and
+## StartRadioStation's music commit.
+##
+## A station's own music id is neither ENTER_MAP_MUSIC nor RESTART_MAP_MUSIC, so
+## ExitPokegearRadio_HandleMusic takes neither branch when the Pokegear closes
+## and the tuned track stays in `wMapMusic`. That is the whole mechanism behind
+## the Poke Flute channel waking Snorlax.
+func tune_radio(knob: int) -> Dictionary:
+	state.set_radio_knob(knob)
+	var tuned: Dictionary = radio_station()
+	if not bool(tuned.get("ok", false)):
+		# NoRadioStation: no channel, and the map's own music comes back.
+		state.set_radio_channel(-1)
+		state.set_map_music(map_music_track())
+		return tuned
+	state.set_radio_channel(int(tuned["channel"]))
+	state.set_map_music(int(tuned["music"]))
+	return tuned
+
+
+## Closing the radio card. ExitPokegearRadio_HandleMusic restores the map's own
+## music only for the two sentinels; a real station id falls through both, so
+## whatever was tuned keeps playing.
+func close_radio() -> void:
+	if state.radio_channel() < 0:
+		state.set_map_music(map_music_track())
 
 
 func snapshot() -> Gen2WorldSnapshot:
@@ -1343,9 +1417,12 @@ func visible_objects() -> Array:
 	return out
 
 
+## IsNPCAtCoord, which is both the collision test and the interaction lookup.
+## A big object answers for any of the four cells it fills, which is what makes
+## Vermilion's Snorlax talkable from the cells SnorlaxAwake lists.
 func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 	for object: Gen2WorldObject in objects:
-		if object.cell != cell or object.deleted or (visible_only and not object.active):
+		if not object.occupies(cell) or object.deleted or (visible_only and not object.active):
 			continue
 		if object.sprite != null:
 			return object
@@ -1877,7 +1954,9 @@ func _active_events_at(cell: Vector2i) -> Array:
 		return out
 	var rows: Array = current_map.events.get("objects", [])
 	for object: Gen2WorldObject in objects:
-		if not object.active or object.cell != cell \
+		# occupies() rather than the cell, so a big object answers from any of
+		# the four it fills the way IsNPCAtCoord does.
+		if not object.active or not object.occupies(cell) \
 			or object.index < 0 or object.index >= rows.size() \
 			or not rows[object.index] is Dictionary:
 			continue
@@ -2111,6 +2190,11 @@ func _enqueue_script(request: Dictionary) -> void:
 		request["environment"] = current_map.environment
 	if not request.has("facing"):
 		request["facing"] = player_facing
+	if not request.has("player_cell"):
+		## `wXCoord`/`wYCoord`. Distinct from "cell", which is whichever cell the
+		## script hangs off: a background event's faced tile or an object's own
+		## square. SnorlaxAwake wants where the player is standing.
+		request["player_cell"] = player_cell
 	if not request.has("party") and not _party_summary.is_empty():
 		request["party"] = _party_summary.duplicate()
 	if not request.has("object_event_flags"):
@@ -3435,6 +3519,10 @@ func _apply_map(
 	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
 	# player who stands still does not watch them cross Johto.
 	_last_schedule = advance_schedule(schedule_random)
+	# PlayMapMusic runs in map setup, so leaving a map is what ends a tuned radio
+	# station: its own track is not this map's, so the comparison fails and the
+	# map's music wins.
+	_apply_map_music()
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
 

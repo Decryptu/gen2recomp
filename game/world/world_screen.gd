@@ -1421,7 +1421,7 @@ func _on_start_menu_action(kind: StringName) -> void:
 		Gen2WorldStartMenu.ITEM_POKEMON:
 			_open_embedded_party()
 		Gen2WorldStartMenu.ITEM_POKEGEAR:
-			_open_phone_list()
+			_open_pokegear()
 	_refresh_labels()
 
 
@@ -1664,11 +1664,22 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 
 
 func _open_phone_list() -> void:
+	_open_service_overlay(&"phone_list")
+
+
+## The Pokegear's own card list, which is what the start menu's POKEGEAR entry
+## reaches. The phone list is one card behind it, not the whole device.
+func _open_pokegear() -> void:
+	_open_service_overlay(&"pokegear")
+
+
+func _open_service_overlay(kind: StringName) -> void:
 	if _service_host != null or _world == null or _data == null:
 		return
+	var label: String = "Pokegear" if kind == &"pokegear" else "Phone list"
 	var host: Gen2WorldServiceScreen = SERVICE_SCENE.instantiate() as Gen2WorldServiceScreen
 	if host == null:
-		_script_prompt = "Phone scene unavailable"
+		_script_prompt = "%s scene unavailable" % label
 		_refresh_labels()
 		return
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1676,14 +1687,16 @@ func _open_phone_list() -> void:
 	add_child(host)
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	var persist: bool = save != null and _injected_save == null
-	if not host.open_phone_list(_world, _data, save, persist):
+	var opened: bool = host.open_pokegear(_world, _data, save, persist) if kind == &"pokegear" \
+		else host.open_phone_list(_world, _data, save, persist)
+	if not opened:
 		host.queue_free()
-		_script_prompt = "Phone list unavailable"
+		_script_prompt = "%s unavailable" % label
 		_refresh_labels()
 		return
 	host.completed.connect(_on_service_completed)
 	_service_host = host
-	_script_prompt = "Phone list open"
+	_script_prompt = "%s open" % label
 	_refresh_labels()
 
 
@@ -1692,6 +1705,9 @@ func _on_service_completed(results: Array) -> void:
 	_service_host = null
 	if host != null:
 		host.queue_free()
+	# The radio card writes wMapMusic, so what plays after the Pokegear closes is
+	# whichever station was left tuned, or the map's own track when none was.
+	_play_current_map_music()
 	_show_script_results(results)
 
 
@@ -1934,14 +1950,15 @@ func _audio_assets() -> Dictionary:
 	}
 
 
-## PlayMapMusic: SpecialMapMusic answers first, so a surfing player carries
-## MUSIC_SURF across map loads, warps and the step back onto land.
+## Plays whatever `wMapMusic` currently holds. `Gen2WorldAPI` owns the write,
+## following PlayMapMusic and its SpecialMapMusic surf override on map entry, so
+## the track a tuned radio station left there survives until the player leaves
+## the map. Restarting a piece that is already playing is a presentation
+## difference from the source, which compares before it restarts.
 func _play_current_map_music() -> void:
 	if _audio_player == null or _data == null or _world == null or _world.current_map == null:
 		return
-	var track: int = Gen2WorldFieldMove.MUSIC_SURF \
-		if _world.movement_mode == Gen2WorldAPI.MOVEMENT_SURF \
-		else _world.current_map.music
+	var track: int = _world.state.map_music()
 	var record: Dictionary = _data.world_audio(&"music", track)
 	if record.is_empty():
 		return

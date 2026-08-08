@@ -165,7 +165,7 @@ Development scenes:
 | `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
 | `game/battle/battle_screen.tscn` | `A` turn, Space events, `W` switch, left/right matchup, `S`/`D` damage either side; in wild battles `B` opens the ball selector, left/right changes ball, Space throws |
-| `game/world/world_screen.tscn` | arrows/WASD move, Space or `Z` confirms, `F` fishes while facing water with an owned rod, `P` opens the phone list, `Enter`/`Tab` opens the start menu, `Esc` closes an overlay, `V` cycles world renderers, F5 saves |
+| `game/world/world_screen.tscn` | arrows/WASD move, Space or `Z` confirms, `F` fishes while facing water with an owned rod, `P` opens the phone list directly, `Enter`/`Tab` opens the start menu and its Pokegear entry the whole device, `Esc` closes an overlay, `V` cycles world renderers, F5 saves |
 
 Battle-screen moves are random and a full move set declines the learn offer; use
 `show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`
@@ -173,6 +173,11 @@ for a fallback pairing.
 
 The world screen's start menu wires Pokemon, Pack, Pokegear, Save and Exit;
 Pokedex, Player and Options appear in their source position but do nothing yet.
+Pokegear opens its card list, in the source's clock, map, phone, radio order and
+showing only cards the player owns; the map card keeps its position marked
+unavailable. The radio card tunes with left and right over the cartridge's own
+two-step dial, and a tuned station keeps playing after the Pokegear closes,
+which is how the Poke Flute channel wakes Vermilion's Snorlax.
 The Pack opens each item's own source submenu and can use one: a Potion asks
 which Pokemon and heals it, a Repel sets its step count, and GIVE, TOSS and SEL
 keep their source position marked unavailable.
@@ -224,13 +229,14 @@ Headless tools, all against a real imported cache:
 | `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it, in all three games |
 | `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs, in all three games |
 | `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it, in all three games |
+| `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route: Johto, the Hall of Fame, and Kanto as far as Lavender
+# the full walked route: Johto, the Hall of Fame, and Kanto as far as Fuchsia
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
