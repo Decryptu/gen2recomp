@@ -373,6 +373,42 @@ const SABRINA_FACE: Vector2i = Vector2i(9, 9)
 const BADGE_MARSH: int = 13
 const ENGINE_FLYPOINT_SAFFRON: int = 60
 
+## Every pad is one half of a bidirectional pair, so the way out of Sabrina's
+## room is SAFFRON_GYM_MAZE reversed: each landing shares a room with the next
+## pad, and the last one is the entrance room the exit warps sit in.
+const SAFFRON_GYM_MAZE_OUT: Array[Vector2i] = [
+	Vector2i(11, 9),   # warp 32 -> 17 (1,5)
+	Vector2i(5, 5),    # warp 21 -> 6 (1,11)
+	Vector2i(5, 11),   # warp 27 -> 12 (5,17)
+	Vector2i(5, 15),   # warp 26 -> 11 (15,17)
+	Vector2i(19, 17),  # warp 18 -> 3 (11,15), the entrance room
+]
+const SAFFRON_GYM_EXIT: Vector2i = Vector2i(8, 17)
+
+## Route 7 and Celadon City. Saffron connects west to Route 7
+## (`data/maps/attributes.asm`) but the crossing is `ROUTE_7_SAFFRON_GATE`, the
+## way Route 6's is; Route 7's own west edge is a real open connection into
+## Celadon, so that half needs no gate.
+const CELADON_GROUP: int = 21
+const ROUTE_7_NUMBER: int = 1
+const CELADON_CITY_NUMBER: int = 4
+const CELADON_GYM_NUMBER: int = 21
+const SAFFRON_ROUTE_7_GATE_DOOR: Vector2i = Vector2i(0, 24)
+## Celadon ships exactly one `COLL_CUT_TREE` ($12), on (28,35), and it is the
+## only seam between the 619-cell city and the 70-cell gym yard. Cut is the
+## price of this badge the way it was of the Thunder Badge.
+const CELADON_GYM_TREE_APPROACH: Vector2i = Vector2i(28, 34)
+## `maps/CeladonGym.asm` declares neither a scene nor a callback, so Erika
+## answers as soon as she is faced. Her four trainers are sight lines across the
+## flower beds: the twins on (4,10)/(5,10) and Beauty Julia on (3,5) each watch
+## a whole row's only gap, and row 8's four cells are covered by Picnicker Tanya
+## and Lass Michelle between them, so three of the five fights are unavoidable.
+const CELADON_GYM_DOOR: Vector2i = Vector2i(10, 29)
+const ERIKA_FACE: Vector2i = Vector2i(5, 4)
+## ENGINE_RAINBOWBADGE's place in source badge order, and Celadon's flypoint.
+const BADGE_RAINBOW: int = 11
+const ENGINE_FLYPOINT_CELADON: int = 61
+
 ## constants/event_flags.asm, same numbers in both pins.
 const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
 const EVENT_FAST_SHIP_FOUND_GIRL: int = 50
@@ -380,6 +416,7 @@ const EVENT_FAST_SHIP_LAZY_SAILOR: int = 51
 const EVENT_FAST_SHIP_INFORMED_ABOUT_LAZY_SAILOR: int = 52
 const EVENT_GOT_METAL_COAT_FROM_GRANDPA: int = 113
 const EVENT_FAST_SHIP_NE_CABIN_SAILOR: int = 1837
+const EVENT_GOT_TM19_GIGA_DRAIN: int = 220
 
 ## New Bark Town to Olivine City. Map connections except where a `gate` cell is
 ## named, which is the door of a gate building whose far warp is the join
@@ -4628,6 +4665,10 @@ func _kanto_crossing_path(
 	var marsh: Dictionary = _marsh_badge_path(spawned, save, random, data, path)
 	if not bool(marsh.get("ok", false)):
 		return marsh
+
+	var rainbow: Dictionary = _rainbow_badge_path(spawned, save, random, data, path)
+	if not bool(rainbow.get("ok", false)):
+		return rainbow
 	return {"ok": true, "world": spawned}
 
 
@@ -5229,6 +5270,145 @@ func _saffron_gym_leg(
 		BADGE_MARSH, Gen2WorldState.is_crystal_profile(data)
 	)):
 		return {"ok": false, "path": path, "reason": "ENGINE_MARSHBADGE was not set"}
+	return {"ok": true}
+
+
+## Saffron Gym to the Rainbow Badge, by way of Route 7 and Celadon City.
+##
+## The maze is walked back out pad for pad, since every pad is one half of a
+## bidirectional pair. Saffron's west edge is a connection into Route 7 the way
+## its south one is into Route 6, and carries no more traffic: the crossing is
+## `ROUTE_7_SAFFRON_GATE`. Route 7's own west edge is the open half, a real
+## connection onto Celadon City, and the gate that replaces it is inside the
+## city: one cut tree seals the whole gym yard.
+func _rainbow_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var pads: Array = []
+	for pad: Vector2i in SAFFRON_GYM_MAZE_OUT:
+		var stepped: Dictionary = _warp_walk(world, pad, save, random, data)
+		pads.append({
+			"pad": _cell_value_from_vector(pad),
+			"landed": _cell_value(world),
+			"encounters": stepped.get("encounters", []),
+		})
+		if not bool(stepped.get("ok", false)):
+			path.append({"step": "saffron_gym_exit", "pads": pads})
+			return {
+				"ok": false, "path": path,
+				"reason": "the maze pad on %s failed: %s" % [pad, stepped.get("reason", "")],
+			}
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [SAFFRON_GYM_EXIT])
+	path.append({
+		"step": "saffron_gym_exit",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"pads": pads,
+	})
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Saffron Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var gate: Dictionary = _gate_leg(
+		world, save, random, data, SAFFRON_ROUTE_7_GATE_DOOR,
+		CELADON_GROUP, ROUTE_7_NUMBER
+	)
+	path.append({"step": "route_7", "map": _map_value(world), "cell": _cell_value(world)})
+	if not bool(gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 7 gate failed: %s" % gate.get("reason", ""),
+		}
+
+	var westward: Dictionary = _walk_connection_resolving(
+		world, "west", CELADON_GROUP, CELADON_CITY_NUMBER, save, random, data
+	)
+	var city_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "celadon_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CELADON),
+		"encounters": westward.get("encounters", []),
+		"run": city_entry,
+	})
+	if not bool(westward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk west to Celadon failed: %s" % westward.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CELADON):
+		return {"ok": false, "path": path, "reason": "Celadon's flypoint callback did not run"}
+
+	return _celadon_gym_leg(world, save, random, data, path)
+
+
+## The yard's tree, then Erika.
+##
+## Cutting (28,35) is what joins the city to the gym yard at all. The walk to
+## Erika crosses three sight lines it cannot route around, so the trainers the
+## walk resolves are reported with her.
+func _celadon_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var tree: Dictionary = _cut_at(
+		world, CELADON_GYM_TREE_APPROACH, Gen2WorldSprite.FACING_DOWN,
+		save, random, data
+	)
+	path.append({
+		"step": "celadon_gym_tree",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"cut": tree.get("cell", []),
+	})
+	if not bool(tree.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gym yard's tree failed: %s" % tree.get("reason", ""),
+		}
+
+	var to_gym: Dictionary = _warp_chain(world, save, random, data, [CELADON_GYM_DOOR])
+	if not bool(to_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gym door failed: %s" % to_gym.get("reason", ""),
+		}
+	var erika: Dictionary = _talk_to(
+		world, ERIKA_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "celadon_gym_erika",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"rainbow_badge": world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+			BADGE_RAINBOW, Gen2WorldState.is_crystal_profile(data)
+		)),
+		# Set behind Erika's own verbosegiveitem, so it is what says the TM
+		# offer finished rather than being refused.
+		"giga_drain": world.event_flag_active(EVENT_GOT_TM19_GIGA_DRAIN),
+		"run": erika,
+	})
+	if not bool(erika.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Erika did not finish: %s" % erika.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		BADGE_RAINBOW, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return {"ok": false, "path": path, "reason": "ENGINE_RAINBOWBADGE was not set"}
 	return {"ok": true}
 
 
