@@ -221,7 +221,7 @@ Headless tools, all against a real imported cache:
 | `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback, in all three games |
 | `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina, in all three games |
 | `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines, in all three games |
-| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, and the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, in all three games |
+| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
