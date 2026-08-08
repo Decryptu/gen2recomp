@@ -204,13 +204,14 @@ Headless tools, all against a real imported cache:
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
 | `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
+| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls channels that need Waterfall, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending at the Glacier Badge
+# the full walked route, ending on Route 27's Kanto landfall
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 

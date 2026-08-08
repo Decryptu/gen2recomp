@@ -140,6 +140,10 @@ const ICE_PATH_DOORS: Array = [
 	{"step": "ice_path_1f_to_blackthorn", "cell": Vector2i(36, 27)},
 ]
 
+## Route 27's landfall from New Bark Town, which is also the
+## `SCENE_ROUTE27_FIRST_STEP_INTO_KANTO` coord pair (`maps/Route27.asm`).
+const ROUTE_27_LANDFALL: Vector2i = Vector2i(18, 10)
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -869,6 +873,10 @@ func _story_path(data: GameData) -> Dictionary:
 	var rising: Dictionary = _rising_badge_path(world, save, random, data, path)
 	if not bool(rising.get("ok", false)):
 		return rising
+
+	var kanto: Dictionary = _kanto_approach_path(world, save, random, data, path)
+	if not bool(kanto.get("ok", false)):
+		return kanto
 
 	var party_summary: Array = []
 	for mon: Gen2SaveMon in save.party:
@@ -3378,6 +3386,267 @@ func _dragon_shrine_leg(
 	)):
 		return {"ok": false, "path": path, "reason": "the Rising Badge was not given"}
 	return {"ok": true}
+
+
+## The Dragon Shrine back to New Bark Town and the first step into Kanto, on the
+## same world, state and save.
+##
+## This is where the walked route stops, and Route 27 is the wall. Its landfall
+## region reaches no map edge and no other land: row 5 is a solid cliff apart
+## from the two Tohjo Falls mouths, and both are `COLL_CAVE`, whose `.CheckTile`
+## `.warps` branch forces DOWN, so a player leaving either mouth always steps
+## south of it and the block north of the cliff can never be entered. The only
+## crossing of the channel east of the landfall starts in the pocket south of
+## the east mouth, and that pocket is reached only by leaving Tohjo Falls there,
+## which means crossing the cave. The cave cannot be crossed: its two lower
+## channels reach the pool that feeds them only by climbing `COLL_WATERFALL`
+## cells. Route 26, the Victory Road Gate badge check, Victory Road and Indigo
+## Plateau are all behind that climb, so they need HM07 and a Waterfall field
+## move. `tools/validate_route_27.gd` pins every census behind this, in all
+## three games, and `HANDOFF.md` open work has what has to land first.
+##
+## Appends to [param path] and answers only ok or the failure.
+func _kanto_approach_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var departure: Dictionary = _blackthorn_departure(world, save, random, data, path)
+	if not bool(departure.get("ok", false)):
+		return departure
+
+	return _kanto_approach(world, save, random, data, path)
+
+
+## The Dragon Shrine back to New Bark Town.
+##
+## The way out of the den is the way in reversed, and the whirlpool with it:
+## `complete_whirlpool()` is a transient block override, so the warp to the
+## shrine restored (10,20) and the water south of it reaches the shrine's
+## landfall and nothing else.
+##
+## Blackthorn's own exit is south, not west: Route 45 into Route 46 into the
+## Route 29 gate. Route 46 is walked downhill only. Its ledges leave the region
+## around the gate cells reaching no map edge at all, so a route that tried to
+## climb it from Route 29 would stop; entered from Route 45's west edge it
+## reaches the gate.
+func _blackthorn_departure(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var to_den: Dictionary = _warp_chain(world, save, random, data, [Vector2i(4, 9)])
+	if not bool(to_den.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon Shrine exit failed: %s" % to_den.get("reason", ""),
+		}
+
+	# The shrine armed SCENE_DRAGONSDENB1F_CLAIR_GIVES_TM (maps/DragonShrine.asm),
+	# so B1F's coord event at (19,30), one cell below the warp back, is Clair's
+	# TM24 gift. It is on the way out whether or not the walk asks for it.
+	var clair_tm: Dictionary = _walk_cell_resolving(
+		world, Vector2i(19, 30), save, random, data
+	)
+	path.append({
+		"step": "dragons_den_clair_tm",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": clair_tm.get("encounters", []),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(clair_tm.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Clair's TM scene failed: %s" % clair_tm.get("reason", ""),
+		}
+
+	var entered: Dictionary = _surf_at(
+		world, Vector2i(14, 31), Gen2WorldSprite.FACING_LEFT, save, random, data
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den return surf failed: %s" % entered.get("reason", ""),
+		}
+	var cleared: Dictionary = _whirlpool_at(
+		world, Vector2i(10, 21), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "dragons_den_whirlpool_return",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": cleared,
+	})
+	if not bool(cleared.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den return whirlpool failed: %s" % cleared.get("reason", ""),
+		}
+	var back_ashore: Dictionary = _walk_cell_resolving(
+		world, Vector2i(10, 7), save, random, data, true
+	)
+	path.append({
+		"step": "dragons_den_return_crossing",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(back_ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den return crossing failed: %s" % back_ashore.get("reason", ""),
+		}
+
+	var to_town: Dictionary = _warp_chain(
+		world, save, random, data, [Vector2i(20, 3), Vector2i(5, 13), Vector2i(3, 5)]
+	)
+	if not bool(to_town.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den exit failed: %s" % to_town.get("reason", ""),
+		}
+
+	# The den door's shore is still an island: the town's $b2 fence line and its
+	# one-way $a3 ledges wall off every land route, so the lake is crossed back
+	# the way it was crossed in.
+	var crossing: Dictionary = _lake_crossing(
+		world, save, random, data,
+		Vector2i(20, 3), Gen2WorldSprite.FACING_DOWN, Vector2i(22, 12)
+	)
+	path.append({
+		"step": "blackthorn_lake_crossing_return",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(crossing.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blackthorn return crossing failed: %s" % crossing.get("reason", ""),
+		}
+
+	for leg: Dictionary in [
+		{"step": "blackthorn_to_route_45", "direction": "south", "group": 5, "number": 8},
+		{"step": "route_45_to_route_46", "direction": "west", "group": 5, "number": 9},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": String(leg["step"]),
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	# Route 46's south connection to Route 29 exists in the map attributes but
+	# the gate building stands on it: Route 29's north edge is unreachable from
+	# inside the map, and its (27,1) is the gate's own warp.
+	var gate: Dictionary = _gate_leg(world, save, random, data, Vector2i(7, 33), 24, 3)
+	path.append({
+		"step": "route_46_to_route_29_gate",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+	})
+	if not bool(gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 29 gate failed: %s" % gate.get("reason", ""),
+		}
+
+	var to_new_bark: Dictionary = _walk_connection_resolving(
+		world, "east", 24, 4, save, random, data
+	)
+	var new_bark_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_29_to_new_bark_town",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_new_bark.get("encounters", []),
+		"run": new_bark_entry,
+	})
+	if not bool(to_new_bark.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 29 to New Bark failed: %s" % to_new_bark.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## New Bark Town to Route 27's landfall, which is as far east as the route goes.
+##
+## New Bark's east column is wall except the four water rows 6 to 9, so leaving
+## town east is a crossing rather than a step. The far side is still water, so
+## one water-only walk comes ashore on ROUTE_27_LANDFALL, one of the two
+## `SCENE_ROUTE27_FIRST_STEP_INTO_KANTO` coord cells, and the scene runs on
+## arrival. _kanto_approach_path() has why the walk stops here.
+func _kanto_approach(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var entered: Dictionary = _surf_at(
+		world, Vector2i(17, 8), Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "New Bark surf entry failed: %s" % entered.get("reason", ""),
+		}
+	var crossed: Dictionary = _walk_connection_resolving(
+		world, "east", 24, 2, save, random, data, true
+	)
+	var entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var ashore: Dictionary = {}
+	if bool(crossed.get("ok", false)):
+		ashore = _walk_cell_resolving(world, ROUTE_27_LANDFALL, save, random, data, true)
+	path.append({
+		"step": "new_bark_town_to_route_27",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+		"encounters": crossed.get("encounters", []),
+		"landfall_encounters": ashore.get("encounters", []),
+		"run": entry,
+	})
+	if not bool(crossed.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "New Bark to Route 27 failed: %s" % crossed.get("reason", ""),
+		}
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 27 landfall failed: %s" % ashore.get("reason", ""),
+		}
+	if world.player_cell != ROUTE_27_LANDFALL:
+		return {
+			"ok": false, "path": path,
+			"reason": "the Kanto scene left the player on %s" % world.player_cell,
+		}
+	return {"ok": true}
+
 
 
 ## _push_boulder_at() for a boulder that may land on a `stonetable` pit: the
