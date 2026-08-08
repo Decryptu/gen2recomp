@@ -183,8 +183,10 @@ Waterfall climb runs the whole column in one command and ends on the first cell
 above it that is not a waterfall. Standing on a whirlpool, waterfall, door,
 staircase or cave tile overrides the pressed direction the way the cartridge
 does, which is also how a waterfall is ridden back down.
-Poké Balls on the ground are picked up by facing them: an item ball's pointer is
-item data rather than a script, so it is decoded and its item received.
+Poké Balls on the ground are picked up by facing them, and so are the items
+hidden in scenery: neither an item ball's pointer nor a hidden item's is a
+script, so each is decoded and its item received. A hidden item answers only
+while its own event flag is clear, and picking it up is what sets that flag.
 The imported Players House PC opens the embedded box storage screen. The host
 clock advances one game minute per real minute and crosses source day
 boundaries. `preview_emote()`, `preview_wild_encounter()`,
@@ -213,12 +215,13 @@ Headless tools, all against a real imported cache:
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
 | `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
 | `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down, in all three games |
-| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro and reaching the bag, in all three games |
+| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro, and Route 45's PP Up and Cerulean Gym's machine part from the `hiddenitem` macro, all reaching the bag once, in all three games |
 | `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit, in all three games |
 | `validate_ss_aqua.gd` | the S.S. Aqua's B1F sailors and the coord events that toggle them, 1F's deck and west wing, the lazy sailor and the granddaughter, and the corridor before and after the errand that opens it, in all three games |
 | `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback, in all three games |
 | `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina, in all three games |
 | `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines, in all three games |
+| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, and the Power Plant's edgeless region and the shore cells that surf to it, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction

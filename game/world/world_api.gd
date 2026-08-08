@@ -40,6 +40,7 @@ const IDLE_MASK_FAST: int = 0x1F
 ## Crystal background event types from script_constants.asm. READ and the four
 ## facing variants point directly at a script. IFSET and IFNOTSET point at a
 ## four-byte conditional record containing an event flag and script pointer.
+## ITEM points at the `hiddenitem` macro's three bytes rather than at code.
 const BGEVENT_READ: int = 0
 const BGEVENT_UP: int = 1
 const BGEVENT_DOWN: int = 2
@@ -1901,6 +1902,9 @@ func _enqueue_script_events(events: Array) -> void:
 		var item_ball_request: Dictionary = _item_ball_request_for_event(event)
 		if not item_ball_request.is_empty():
 			request = item_ball_request
+		var hidden_item_request: Dictionary = _hidden_item_request_for_event(event)
+		if not hidden_item_request.is_empty():
+			request = hidden_item_request
 		_enqueue_script(request)
 
 
@@ -1939,6 +1943,51 @@ func _item_ball_request_for_event(event: Dictionary) -> Dictionary:
 	}
 
 
+## `.itemifset`'s own record (engine/overworld/events.asm): a BGEVENT_ITEM
+## pointer is not a script either. The three bytes it points at are the
+## `hiddenitem` macro's `dwb event, item`, copied into wHiddenItemData before
+## HiddenItemScript runs, so the flag comes first as a little-endian word and
+## the item last. Decoding them here is what keeps the runner from parsing item
+## data as opcodes, exactly as _item_ball_request_for_event() does.
+func _hidden_item_record(event: Dictionary) -> Dictionary:
+	if data == null or current_map == null:
+		return {"ok": false, "reason": &"missing_bg_event_context"}
+	var pointer: int = int(event.get("script", 0))
+	if pointer <= 0:
+		return {"ok": false, "reason": &"invalid_hidden_item", "pointer": pointer}
+	var raw: PackedByteArray = data.world_script(
+		int(current_map.events.get("bank", 0)), pointer
+	)
+	if raw.size() < 3 or int(raw[2]) <= 0:
+		return {"ok": false, "reason": &"invalid_hidden_item", "pointer": pointer}
+	return {
+		"ok": true,
+		"flag": int(raw[0]) | (int(raw[1]) << 8),
+		"item": int(raw[2]),
+	}
+
+
+func _hidden_item_request_for_event(event: Dictionary) -> Dictionary:
+	if event.get("kind", &"") != &"bg_events" or current_map == null:
+		return {}
+	if int(event.get("type", -1)) != BGEVENT_ITEM:
+		return {}
+	var record: Dictionary = _hidden_item_record(event)
+	if not bool(record.get("ok", false)):
+		return {}
+	return {
+		"kind": &"hidden_item",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": Vector2i(int(event.get("x", 0)), int(event.get("y", 0))),
+		"bank": int(current_map.events.get("bank", 0)),
+		"script": int(event.get("script", 0)),
+		"event": event.duplicate(true),
+		"item": int(record["item"]),
+		"flag": int(record["flag"]),
+	}
+
+
 func _trainer_request_for_event(event: Dictionary) -> Dictionary:
 	if event.get("kind", &"") != &"objects" or current_map == null:
 		return {}
@@ -1974,7 +2023,9 @@ func _trainer_request_for_event(event: Dictionary) -> Dictionary:
 func _bg_event_interacts(event: Dictionary) -> bool:
 	var event_type: int = int(event.get("type", -1))
 	match event_type:
-		BGEVENT_READ, BGEVENT_IFSET, BGEVENT_IFNOTSET:
+		## `.itemifset` checks its flag and reads; unlike `.up`/`.down`/`.left`/
+		## `.right` it never looks at wPlayerDirection.
+		BGEVENT_READ, BGEVENT_IFSET, BGEVENT_IFNOTSET, BGEVENT_ITEM:
 			return true
 		BGEVENT_UP:
 			return player_facing == Gen2WorldSprite.FACING_UP
@@ -1989,6 +2040,11 @@ func _bg_event_interacts(event: Dictionary) -> bool:
 
 func _bg_event_condition_active(event: Dictionary) -> bool:
 	var event_type: int = int(event.get("type", -1))
+	## `.itemifset` opens with CheckBGEventFlag and `jp nz, .dontread`, so a
+	## hidden item answers only while its own flag is still clear.
+	if event_type == BGEVENT_ITEM:
+		var hidden: Dictionary = _hidden_item_record(event)
+		return bool(hidden.get("ok", false)) and not event_flag_active(int(hidden["flag"]))
 	if event_type not in [BGEVENT_IFSET, BGEVENT_IFNOTSET]:
 		return true
 	var conditional: Dictionary = _bg_event_condition(event)
@@ -2023,6 +2079,10 @@ func _script_address_for_event(event: Dictionary) -> int:
 			return -1
 		return int(_bg_event_condition(event).get("script", -1))
 	if event_type in [BGEVENT_READ, BGEVENT_UP, BGEVENT_DOWN, BGEVENT_RIGHT, BGEVENT_LEFT]:
+		return int(event.get("script", 0))
+	## An ITEM pointer is item data, not code; the address only has to be
+	## non-zero for _enqueue_script() to take the request built beside it.
+	if event_type == BGEVENT_ITEM and _bg_event_condition_active(event):
 		return int(event.get("script", 0))
 	return -1
 

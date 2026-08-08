@@ -408,6 +408,21 @@ const ERIKA_FACE: Vector2i = Vector2i(5, 4)
 ## ENGINE_RAINBOWBADGE's place in source badge order, and Celadon's flypoint.
 const BADGE_RAINBOW: int = 11
 const ENGINE_FLYPOINT_CELADON: int = 61
+## The gym's own exit, and the tree faced from the yard side, the way Vermilion's
+## pair is: leaving reloads the city and regrows the tree behind the player.
+const CELADON_GYM_EXIT: Vector2i = Vector2i(4, 17)
+const CELADON_GYM_TREE_RETURN: Vector2i = Vector2i(27, 35)
+## `maps/Route7.asm` warp 1, the gate door taken back east into Saffron.
+const ROUTE_7_GATE_DOOR: Vector2i = Vector2i(15, 6)
+
+## Route 5 and Cerulean City. Saffron's north exit is a gate building too
+## (`maps/SaffronCity.asm` warp 9 to ROUTE_5_SAFFRON_GATE); north of it Route 5
+## connects straight onto Cerulean (`data/maps/attributes.asm`).
+const SAFFRON_ROUTE_5_GATE_DOOR: Vector2i = Vector2i(18, 3)
+const ROUTE_5_NUMBER: int = 1
+const CERULEAN_GROUP: int = 7
+const CERULEAN_CITY_NUMBER: int = 17
+const ENGINE_FLYPOINT_CERULEAN: int = 56
 
 ## constants/event_flags.asm, same numbers in both pins.
 const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
@@ -4669,6 +4684,10 @@ func _kanto_crossing_path(
 	var rainbow: Dictionary = _rainbow_badge_path(spawned, save, random, data, path)
 	if not bool(rainbow.get("ok", false)):
 		return rainbow
+
+	var cerulean: Dictionary = _cerulean_approach_path(spawned, save, random, data, path)
+	if not bool(cerulean.get("ok", false)):
+		return cerulean
 	return {"ok": true, "world": spawned}
 
 
@@ -5409,6 +5428,101 @@ func _celadon_gym_leg(
 		BADGE_RAINBOW, Gen2WorldState.is_crystal_profile(data)
 	)):
 		return {"ok": false, "path": path, "reason": "ENGINE_RAINBOWBADGE was not set"}
+	return {"ok": true}
+
+
+## Celadon Gym to Cerulean City, by way of Saffron and Route 5.
+##
+## Two gate buildings and one open connection. Cerulean is as far as this walk
+## goes: the Cascade Badge is an errand, not a cell, and the errand is not on
+## this side of Kanto. Misty and her three swimmers all carry
+## EVENT_TRAINERS_IN_CERULEAN_GYM as their hide flag and `InitializeEventsScript`
+## sets it, so the gym stays empty until `Route25MistyDate1Script` clears it;
+## that scene is armed by the gym's own grunt, who is armed by the Power Plant
+## manager. And the Power Plant is not reachable from here: Cerulean's east edge
+## crosses on one cell into a fourteen-cell pocket of Route 9, whose own cut tree
+## opens only onto the Route 10 Pokecenter's fenced yard, and the plant's door
+## sits in a region with no map edge at all. `tools/validate_cerulean.gd` pins
+## all of it. The way in is Route 8 and Lavender, which is the leg after this.
+func _cerulean_approach_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [CELADON_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Celadon Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+	var regrown: Dictionary = _cut_at(
+		world, CELADON_GYM_TREE_RETURN, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(regrown.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the regrown gym tree failed: %s" % regrown.get("reason", ""),
+		}
+
+	var eastward: Dictionary = _walk_connection_resolving(
+		world, "east", CELADON_GROUP, ROUTE_7_NUMBER, save, random, data
+	)
+	var _route_7_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "celadon_to_route_7",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": eastward.get("encounters", []),
+	})
+	if not bool(eastward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk east to Route 7 failed: %s" % eastward.get("reason", ""),
+		}
+
+	var to_saffron: Dictionary = _gate_leg(
+		world, save, random, data, ROUTE_7_GATE_DOOR, SAFFRON_GROUP, SAFFRON_CITY_NUMBER
+	)
+	if not bool(to_saffron.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 7 gate east failed: %s" % to_saffron.get("reason", ""),
+		}
+	var to_route_5: Dictionary = _gate_leg(
+		world, save, random, data, SAFFRON_ROUTE_5_GATE_DOOR, SAFFRON_GROUP, ROUTE_5_NUMBER
+	)
+	path.append({"step": "route_5", "map": _map_value(world), "cell": _cell_value(world)})
+	if not bool(to_route_5.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 5 gate failed: %s" % to_route_5.get("reason", ""),
+		}
+
+	var northward: Dictionary = _walk_connection_resolving(
+		world, "north", CERULEAN_GROUP, CERULEAN_CITY_NUMBER, save, random, data
+	)
+	var city_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "cerulean_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CERULEAN),
+		"encounters": northward.get("encounters", []),
+		"run": city_entry,
+	})
+	if not bool(northward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk north to Cerulean failed: %s" % northward.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CERULEAN):
+		return {"ok": false, "path": path, "reason": "Cerulean's flypoint callback did not run"}
 	return {"ok": true}
 
 

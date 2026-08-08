@@ -4235,5 +4235,79 @@ func test_an_item_ball_with_no_item_byte_fails_instead_of_running_data() -> void
 	assert_ne(results[0]["source"]["kind"], &"item_ball")
 
 
+## `.itemifset` copies the `hiddenitem` macro's `dwb event, item` into
+## wHiddenItemData rather than running it, so a BGEVENT_ITEM pointer must never
+## reach the runner as code either. The flag comes first, little-endian.
+func test_a_hidden_item_is_dispatched_from_its_three_data_bytes() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# hiddenitem ITEM3, EVENT 20. Byte $14 is a real opcode, so a runner that
+	# parsed this as code would run it instead of handing over an item.
+	scripts["48:61A0"] = [20, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61A0},
+	]
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	var results: Array = world.interact()
+	assert_eq(results.size(), 1, JSON.stringify(results))
+	assert_eq(results[0]["source"]["kind"], &"hidden_item")
+	assert_eq(results[0]["source"]["item"], 3)
+	assert_eq(results[0]["source"]["flag"], 20)
+	assert_eq(results[0]["status"], &"waiting", JSON.stringify(results[0]))
+	# _PlayerFoundItemText is _FoundItemText's wording, so both share one string.
+	assert_eq(results[0]["event"]["text"], "Found\n%s!" % _item_name(3))
+
+	var finished: Array = world.run_event_queue(true)
+	assert_eq(finished[0]["status"], &"complete", JSON.stringify(finished[0]))
+	assert_eq(world.state.items().get(3, 0), 1)
+	# `callasm SetMemEvent` writes the record's own flag, not an object's.
+	assert_true(world.event_flag_active(20))
+
+
+## CheckBGEventFlag then `jp nz, .dontread`: the record answers only while its
+## flag is clear, which is what stops a hidden item being picked up twice.
+func test_a_hidden_item_answers_only_while_its_flag_is_clear() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61A8"] = [21, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61A8},
+	]
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	world.set_event_flag(21)
+	assert_true(world.interact().is_empty())
+
+	world.clear_event_flag(21)
+	assert_eq(world.interact().size(), 1)
+	assert_eq(world.run_event_queue(true)[0]["status"], &"complete")
+	assert_eq(world.state.items().get(3, 0), 1)
+	# And the flag it just wrote closes it again, so a second A press is inert.
+	assert_true(world.interact().is_empty())
+	assert_eq(world.state.items().get(3, 0), 1)
+
+
+func test_a_hidden_item_with_no_item_byte_fails_instead_of_running_data() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61B0"] = [22, 0, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61B0},
+	]
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	# A zero item is not a record the cache can answer, so nothing is dispatched
+	# rather than the three bytes being run as opcodes.
+	assert_true(world.interact().is_empty())
+	assert_false(world.event_flag_active(22))
+
+
 func _item_name(number: int) -> String:
 	return GameData.open_directory(_directory).item_name(number)
