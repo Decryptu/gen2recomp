@@ -2848,13 +2848,21 @@ func _step_permission_allows(cell: Vector2i, direction: Vector2i) -> bool:
 ## (moving's own cell) and WillObjectBumpIntoTile (the destination) side-wall
 ## checks; Vector2i.ZERO skips them for callers that only want the destination
 ## permission and occupancy.
+##
+## A swimming object wants the opposite permission: CanObjectMoveInDirection
+## (engine/overworld/npc_movement.asm) branches on OBJECT_PALETTE's SWIMMING bit
+## into WillObjectBumpIntoLand, which refuses anything but WATER_TILE, where the
+## not-swimming branch's WillObjectBumpIntoWater refuses anything but LAND_TILE.
+## Everything after that branch is shared, so only the permission differs.
 func can_object_walk_to(
 	cell: Vector2i, moving: Gen2WorldObject, direction: Vector2i = Vector2i.ZERO
 ) -> bool:
 	if current_map == null or cell.x < 0 or cell.y < 0 \
 		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
 		return false
-	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != Gen2WorldCollision.LAND_TILE:
+	var wanted: int = Gen2WorldCollision.WATER_TILE if moving.is_swimming() \
+		else Gen2WorldCollision.LAND_TILE
+	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != wanted:
 		return false
 	if direction != Vector2i.ZERO and Gen2WorldCollision.side_wall_step_blocked(
 		collision_code_at(moving.cell), collision_code_at(cell), direction

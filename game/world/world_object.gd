@@ -114,6 +114,15 @@ func is_strength_boulder() -> bool:
 	return movement == MOVEMENT_STRENGTH_BOULDER
 
 
+## OBJECT_PALETTE bit SWIMMING, which CanObjectMoveInDirection reads to pick
+## WillObjectBumpIntoLand over WillObjectBumpIntoWater. Same shape as
+## is_strength_boulder(): data/sprites/map_objects.asm sets the bit on exactly the
+## SPRITEMOVEDATA_SWIM_WANDER row, so the movement template answers it. Only
+## Union Cave B2F's Lapras uses that row, in either game.
+func is_swimming() -> bool:
+	return movement == MOVEMENT_SWIM_WANDER
+
+
 func movement_supported() -> bool:
 	return movement in [
 		MOVEMENT_STILL, MOVEMENT_WANDER, MOVEMENT_SPINRANDOM_SLOW,

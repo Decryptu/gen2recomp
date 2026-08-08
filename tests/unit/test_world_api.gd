@@ -107,6 +107,12 @@ func _write_cache(game_id: String = "testworld") -> void:
 	# warp cells carry COLL_PIT: walkable, immediate and not a forced tile.
 	collision[6 * 16 + 6] = 0x60   # COLL_PIT under the warp at (6,6)
 
+	# A two-cell pond on row 11 for SPRITEMOVEDATA_SWIM_WANDER, which needs a
+	# water cell to stand on and another to step to. Everything around it stays
+	# at the default LAND_TILE, which is what a swimming object must refuse.
+	collision[11 * 16 + 11] = 0x29  # COLL_WATER
+	collision[11 * 16 + 12] = 0x29  # COLL_WATER
+
 	var source_events: Dictionary = {
 		"bank": 48,
 		"warps": [{
@@ -1855,6 +1861,55 @@ func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
 	assert_false(object.is_stepping())
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
 	assert_eq(abs(object.cell.x - start.x) + abs(object.cell.y - start.y), 1)
+
+
+## CanObjectMoveInDirection's swimming branch: WillObjectBumpIntoLand refuses
+## anything but WATER_TILE, where the not-swimming branch's
+## WillObjectBumpIntoWater refuses anything but LAND_TILE.
+func test_a_swimming_object_wants_water_where_every_other_object_wants_land() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	object.cell = Vector2i(11, 11)
+	object.initial_cell = object.cell
+	assert_eq(world.collision_permission_at(Vector2i(12, 11)), Gen2WorldCollision.WATER_TILE)
+	assert_eq(world.collision_permission_at(Vector2i(11, 10)), Gen2WorldCollision.LAND_TILE)
+
+	assert_false(object.is_swimming())
+	assert_true(world.can_object_walk_to(Vector2i(11, 10), object, Vector2i.UP))
+	assert_false(world.can_object_walk_to(Vector2i(12, 11), object, Vector2i.RIGHT))
+
+	object.movement = Gen2WorldObject.MOVEMENT_SWIM_WANDER
+	assert_true(object.is_swimming())
+	assert_true(world.can_object_walk_to(Vector2i(12, 11), object, Vector2i.RIGHT))
+	assert_false(world.can_object_walk_to(Vector2i(11, 10), object, Vector2i.UP))
+
+
+## SPRITEMOVEDATA_SWIM_WANDER was already listed as supported and advancing, so
+## before the permission split it was asked to decide every frame and refused
+## every frame. Its radius still holds: the source's own bug doc says swimming
+## NPCs ignore it, but at these two pins both branches of
+## CanObjectMoveInDirection reach the same HasObjectReachedMovementLimit.
+func test_a_swim_wander_object_moves_across_its_pond_within_its_radius() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	object.cell = Vector2i(11, 11)
+	object.initial_cell = object.cell
+	object.movement = Gen2WorldObject.MOVEMENT_SWIM_WANDER
+	object.x_radius = 1
+	object.y_radius = 1
+	var random := RandomNumberGenerator.new()
+	random.seed = 90210
+
+	var visited: Dictionary = {object.cell: true}
+	for _frame: int in 1024:
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		visited[object.cell] = true
+	assert_eq(
+		visited.keys().size(), 2,
+		"a swimming object should reach both pond cells and neither bank: %s" % [visited.keys()]
+	)
+	assert_true(visited.has(Vector2i(11, 11)))
+	assert_true(visited.has(Vector2i(12, 11)))
 
 
 func test_wander_object_waits_its_rolled_idle_before_deciding_again() -> void:

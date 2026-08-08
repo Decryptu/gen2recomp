@@ -38,6 +38,18 @@ const EXPECTED_CENSUS: Dictionary = {
 	&"crystal": [2116, 66],
 }
 
+## The one object in either game that swims. `data/sprites/map_objects.asm` sets
+## the SWIMMING palette bit on the SPRITEMOVEDATA_SWIM_WANDER row alone, and
+## `maps/UnionCaveB2F.asm` is the only map that uses it, so this census is the
+## whole population of CanObjectMoveInDirection's swimming branch.
+const UNION_CAVE_GROUP: int = 3
+const UNION_CAVE_B2F_CRYSTAL: int = 39
+const UNION_CAVE_B2F_GOLD_SILVER: int = 31
+const LAPRAS_CELL := Vector2i(11, 31)
+const LAPRAS_RADIUS: int = 1
+const SWIM_OBJECT_CENSUS: int = 1
+const LAPRAS_STEP_FRAME_BUDGET: int = 16384
+
 var _failures: PackedStringArray = []
 
 
@@ -52,6 +64,7 @@ func _initialize() -> void:
 		_verify_surf_music(game_id, data)
 		_census(game_id, data)
 		_verify_new_bark_town(game_id, data, crystal)
+		_verify_swimming_objects(game_id, data, crystal)
 	_finish()
 
 
@@ -249,6 +262,83 @@ func _verify_new_bark_town(game_id: StringName, data: GameData, crystal: bool) -
 	)
 
 
+## Union Cave B2F's Lapras, the whole of CanObjectMoveInDirection's swimming
+## branch. It stands on water no other movement template could occupy, and its
+## own `1, 1` radius still holds: the pins' bug doc says a swimming NPC ignores
+## its radius, but at these two commits both branches reach the same
+## HasObjectReachedMovementLimit, so the project keeps the limit.
+func _verify_swimming_objects(game_id: StringName, data: GameData, crystal: bool) -> void:
+	var swimmers: Array = []
+	for map: Gen2WorldMap in data.world_maps():
+		for row: Dictionary in map.events.get("objects", []):
+			if int(row.get("movement", 0)) == Gen2WorldObject.MOVEMENT_SWIM_WANDER:
+				swimmers.append([Vector2i(map.group, map.number), Vector2i(
+					int(row.get("x", -1)), int(row.get("y", -1))
+				)])
+	var number: int = UNION_CAVE_B2F_CRYSTAL if crystal else UNION_CAVE_B2F_GOLD_SILVER
+	_check(
+		swimmers.size() == SWIM_OBJECT_CENSUS
+			and swimmers[0] == [Vector2i(UNION_CAVE_GROUP, number), LAPRAS_CELL],
+		"%s: the swimming objects are %s, not one Lapras on %d/%d %s." % [
+			game_id, swimmers, UNION_CAVE_GROUP, number, LAPRAS_CELL,
+		]
+	)
+	if swimmers.size() != SWIM_OBJECT_CENSUS:
+		return
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, UNION_CAVE_GROUP, number, Vector2i.ZERO, Gen2WorldState.new()
+	)
+	if world == null:
+		_fail("%s: Union Cave B2F is missing." % game_id)
+		return
+	var lapras: Gen2WorldObject = world.object_at(LAPRAS_CELL)
+	if not _check(
+		lapras != null and lapras.is_swimming(),
+		"%s: %s does not hold a swimming object." % [game_id, LAPRAS_CELL]
+	):
+		return
+	_check(
+		world.collision_permission_at(LAPRAS_CELL) == Gen2WorldCollision.WATER_TILE,
+		"%s: the Lapras does not stand on water." % game_id
+	)
+	_check(
+		lapras.x_radius == LAPRAS_RADIUS and lapras.y_radius == LAPRAS_RADIUS,
+		"%s: the Lapras carries radius %d,%d, not the pinned %d,%d." % [
+			game_id, lapras.x_radius, lapras.y_radius, LAPRAS_RADIUS, LAPRAS_RADIUS,
+		]
+	)
+
+	# Every water cell its radius allows, and nothing else: the permission split
+	# and the movement limit are both load bearing, so the reachable set is the
+	# assertion rather than "it moved at all".
+	var allowed: Dictionary = {}
+	for y: int in range(LAPRAS_CELL.y - LAPRAS_RADIUS, LAPRAS_CELL.y + LAPRAS_RADIUS + 1):
+		for x: int in range(LAPRAS_CELL.x - LAPRAS_RADIUS, LAPRAS_CELL.x + LAPRAS_RADIUS + 1):
+			var cell := Vector2i(x, y)
+			if world.collision_permission_at(cell) == Gen2WorldCollision.WATER_TILE:
+				allowed[cell] = true
+	var random := RandomNumberGenerator.new()
+	random.seed = 17
+	var visited: Dictionary = {lapras.cell: true}
+	for _frame: int in LAPRAS_STEP_FRAME_BUDGET:
+		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		visited[lapras.cell] = true
+	var reached: Array = visited.keys()
+	var expected: Array = allowed.keys()
+	reached.sort()
+	expected.sort()
+	_check(
+		reached == expected,
+		"%s: the Lapras reached %s, not every water cell in its radius %s." % [
+			game_id, reached, expected,
+		]
+	)
+	print("%s: one swimming object, and it crosses all %d water cells its radius allows." % [
+		game_id, expected.size(),
+	])
+
+
 func _check(condition: bool, message: String) -> bool:
 	if not condition:
 		_fail(message)
@@ -261,7 +351,7 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS surf: sprites, music, the cell census and New Bark Town verified.")
+		print("PASS surf: sprites, music, the cell census, New Bark Town and the one swimming object verified.")
 		quit(0)
 		return
 	for message: String in _failures:
