@@ -52,11 +52,16 @@ const MAX_EXP: int = 0xFFFFFF
 ## [code]"special"[/code] entry rather than two.
 const STAT_EXP_KEYS: Array = ["hp", "attack", "defense", "speed", "special"]
 
-## Awarding exp divides a base stat by the participant count, and the
-## cartridge's own routine skips the division outright rather than dividing by
-## one, which matters because the division truncates: a single participant
-## keeps the whole base stat rather than losing a remainder to the floor.
+## Awarding exp divides the block by the recipient count, and the cartridge's
+## own routine skips the division outright rather than dividing by one, which
+## matters because the division truncates: a single recipient keeps the whole
+## byte rather than losing a remainder to the floor.
 const MIN_PARTICIPANTS_TO_SPLIT: int = 2
+
+## Exp. Share, checked by item number rather than by held effect, the way
+## `IsAnyMonHoldingExpShare` checks it and the way Thick Club and Light Ball are
+## checked in [Gen2HeldItem]. It carries no `ITEMATTR_EFFECT` at all.
+const EXP_SHARE_ITEM: int = 39
 
 ## A trainer battle multiplies the award by 1.5, truncating, computed as
 ## [code]value + floor(value / 2)[/code] rather than multiply-by-3-divide-by-2:
@@ -107,12 +112,15 @@ static func level_for_exp(growth_rate: int, experience_points: int) -> int:
 
 
 ## What a Pokémon of [param defeated_level] and [param defeated_base_exp] is
-## worth, before it is split among anyone: [code]floor(base_exp * level / 7)[/code],
-## then a trainer battle's own 1.5x on top.
+## worth to one recipient: [code]floor(base_exp * level / 7)[/code], then a
+## trainer battle's own 1.5x on top.
 ##
-## Not divided by participant count: that is the stat experience's rule.
-## [code]GiveExperiencePoints[/code] hands every participant this full figure and
-## only divides the *base stats* feeding [method stat_exp_gain].
+## [param defeated_base_exp] is the base experience *after*
+## [method shared_block] has divided it. The split is not a separate step
+## applied to the award: `wEnemyMonBaseExp` sits inside the same seven-byte block
+## as the base stats and `.EvenlyDivideExpAmongParticipants` divides all of it in
+## one loop, before `GiveExperiencePoints` reads the byte back. Dividing the
+## award instead would truncate in the wrong place.
 static func award_for(defeated_level: int, defeated_base_exp: int, is_trainer_battle: bool) -> int:
 	@warning_ignore("integer_division")
 	var award: int = (defeated_base_exp * defeated_level) / 7
@@ -135,12 +143,43 @@ static func _boost(value: int) -> int:
 ## [param participants], each share truncated on its own rather than the total
 ## truncated once: the cartridge divides per stat, not once combined.
 static func stat_exp_gain(defeated_stats: Dictionary, participants: int) -> Dictionary:
-	var count: int = maxi(participants, 1)
-	var out: Dictionary = {}
+	return shared_block(defeated_stats, 0, false, participants)["stats"]
+
+
+## The seven-byte block `wEnemyMonBaseStats` to `wEnemyMonEnd`, shared out.
+##
+## The five base stats and the base experience live in one run of bytes and are
+## always divided together, in one loop, which is why this answers for both at
+## once rather than leaving the award to be divided separately afterwards. The
+## catch rate is the seventh byte and is divided with them; nothing reads it
+## after a faint, so it is not carried here.
+##
+## [param halved] is the Exp. Share pass of `UpdateFaintedPlayerMon`: every byte
+## is halved before any division, once, however many holders there are, and
+## whether or not this particular share is the holders' one. [param recipients]
+## is how many mons this block is being split between, and a lone recipient
+## skips the division rather than dividing by one.
+static func shared_block(
+	defeated_stats: Dictionary, defeated_base_exp: int, halved: bool, recipients: int
+) -> Dictionary:
+	var stats: Dictionary = {}
 	for key: String in STAT_EXP_KEYS:
-		var base: int = int(defeated_stats.get(key, 0))
-		if count >= MIN_PARTICIPANTS_TO_SPLIT:
-			@warning_ignore("integer_division")
-			base = base / count
-		out[key] = base
-	return out
+		stats[key] = _shared_byte(int(defeated_stats.get(key, 0)), halved, recipients)
+	return {
+		"stats": stats,
+		"base_exp": _shared_byte(defeated_base_exp, halved, recipients),
+	}
+
+
+## One byte of the block: halved for Exp. Share, then divided among however many
+## are sharing it, each truncating on its own.
+static func _shared_byte(value: int, halved: bool, recipients: int) -> int:
+	var byte: int = value
+	if halved:
+		@warning_ignore("integer_division")
+		byte = byte / 2
+	var count: int = maxi(recipients, 1)
+	if count >= MIN_PARTICIPANTS_TO_SPLIT:
+		@warning_ignore("integer_division")
+		byte = byte / count
+	return byte

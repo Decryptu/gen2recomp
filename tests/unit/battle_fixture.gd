@@ -188,6 +188,11 @@ const PSNCUREBERRY: int = 74
 const MIRACLEBERRY: int = 109
 const BITTER_BERRY: int = 83
 
+## Exp. Share, at its real number. It carries no held effect at all: the routine
+## that finds it checks the item number, so the default row is the whole of what
+## the fixture needs.
+const EXP_SHARE: int = 39
+
 ## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
 ## species' own ratio here can be checked against pret's own base stats rather
 ## than against this file. Bulbasaur and Charmander are really 12.5% female;

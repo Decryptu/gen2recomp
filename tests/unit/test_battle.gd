@@ -905,10 +905,14 @@ func test_a_trainer_battle_adds_the_experience_bonus() -> void:
 	assert_eq(_first(events, Gen2Battle.EXP_GAINED)["amount"], 67)
 
 
-func test_experience_is_not_divided_among_participants_but_stat_experience_is() -> void:
-	# Geodude, base exp 86, at level 20: floor(86*20/7) = 245, the same number
-	# for every participant. Its own base stats (40/80/100/20/30), split two
-	# ways, truncated per stat, are the only thing that divides.
+## Base experience is the seventh byte of the same block as the base stats, and
+## `.EvenlyDivideExpAmongParticipants` divides the whole block in one loop before
+## `GiveExperiencePoints` reads any of it. So the award divides too, and it
+## divides at the base-exp byte rather than at the finished figure.
+func test_experience_and_stat_experience_both_divide_among_participants() -> void:
+	# Geodude, base exp 86, at level 20, two participants: the byte becomes
+	# floor(86/2) = 43, and the award is floor(43*20/7) = 122. Its own base stats
+	# (40/80/100/20/30) are split the same two ways in the same loop.
 	var battle: Gen2Battle = Gen2Battle.create_parties(
 		_data,
 		Gen2Party.create([
@@ -923,7 +927,8 @@ func test_experience_is_not_divided_among_participants_but_stat_experience_is() 
 	var gains: Array = _of_type(events, Gen2Battle.EXP_GAINED)
 	assert_eq(gains.size(), 2, "both the lead and the one switched in")
 	for gain: Dictionary in gains:
-		assert_eq(gain["amount"], 245, "full, unsplit, for every participant")
+		assert_eq(gain["amount"], 122, "half the base exp byte, then the formula")
+		assert_false(bool(gain["exp_share"]), "earned by fighting, not by holding")
 
 	var stat_gains: Array = _of_type(events, Gen2Battle.STAT_EXP_GAINED)
 	assert_eq(stat_gains.size(), 2)
@@ -2213,3 +2218,125 @@ func test_recover_reaches_the_turn_loop_with_the_numbers_a_screen_needs() -> voi
 	@warning_ignore("integer_division")
 	assert_eq(int(restored["hp"]), 1 + pikachu.max_hp() / 2)
 	assert_lt(pikachu.hp, int(restored["hp"]))
+
+
+## Exp. Share. `UpdateFaintedPlayerMon` halves the block once, then splits that
+## halved block among the participants and again among the holders, so each
+## group is dividing half of it.
+func test_an_exp_share_halves_the_fighters_award_and_pays_the_bench() -> void:
+	# Bulbasaur, base exp 64, at level 5. Halved: floor(64/2) = 32, one
+	# participant and one holder, so neither pass divides again. The award each
+	# way is floor(32*5/7) = 22, against the 45 an unshared faint pays.
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT]),
+			_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])), _rng
+	)
+	battle.party(Gen2Battle.PLAYER).at(1).item = Fixture.EXP_SHARE
+
+	var gains: Array = _of_type(battle.take_turn(0, 0), Gen2Battle.EXP_GAINED)
+
+	assert_eq(gains.size(), 2, "the fighter and the holder")
+	assert_eq(gains[0]["index"], 0)
+	assert_eq(gains[0]["amount"], 22, "half of what it would have earned alone")
+	assert_false(bool(gains[0]["exp_share"]))
+	assert_eq(gains[1]["index"], 1)
+	assert_eq(gains[1]["amount"], 22)
+	assert_true(bool(gains[1]["exp_share"]), "earned by holding")
+
+
+## A Pokémon that both fought and holds one is in both passes, and the cartridge
+## awards it twice rather than merging the two shares.
+func test_a_fighter_holding_the_exp_share_is_paid_by_both_passes() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT]),
+		_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])
+	)
+	battle.player.item = Fixture.EXP_SHARE
+	var before: int = battle.player.exp
+
+	var gains: Array = _of_type(battle.take_turn(0, 0), Gen2Battle.EXP_GAINED)
+
+	assert_eq(gains.size(), 2, "once for fighting and once for holding")
+	assert_eq(gains[0]["amount"], 22)
+	assert_eq(gains[1]["amount"], 22)
+	assert_false(bool(gains[0]["exp_share"]))
+	assert_true(bool(gains[1]["exp_share"]))
+	# Two halves back to a whole, which is not the same as never having halved:
+	# 22 + 22 is 44, one short of the 45 a lone unshared winner takes.
+	assert_eq(battle.player.exp - before, 44)
+
+
+## `IsAnyMonHoldingExpShare` checks HP before it looks at the item, so a fainted
+## holder neither collects nor counts towards the split, and with no living
+## holder left nothing is halved at all.
+func test_a_fainted_exp_share_holder_neither_collects_nor_halves() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT]),
+			_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])), _rng
+	)
+	var bench: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	bench.item = Fixture.EXP_SHARE
+	bench.hp = 0
+
+	var gains: Array = _of_type(battle.take_turn(0, 0), Gen2Battle.EXP_GAINED)
+
+	assert_eq(gains.size(), 1, "only the fighter")
+	assert_eq(gains[0]["amount"], 45, "the full award, nothing halved")
+
+
+## Two holders split the halved block between them, on top of the participants
+## splitting their own copy of it.
+func test_two_exp_share_holders_split_their_half() -> void:
+	# Geodude, base exp 86, at level 20. Halved: 43. One participant takes it
+	# whole, floor(43*20/7) = 122; two holders take floor(43/2) = 21 each, which
+	# is floor(21*20/7) = 60.
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 100, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])), _rng
+	)
+	battle.party(Gen2Battle.PLAYER).at(1).item = Fixture.EXP_SHARE
+	battle.party(Gen2Battle.PLAYER).at(2).item = Fixture.EXP_SHARE
+	battle.enemy.hp = 1
+
+	var gains: Array = _of_type(battle.take_turn(0, 0), Gen2Battle.EXP_GAINED)
+
+	assert_eq(gains.size(), 3)
+	assert_eq(gains[0]["amount"], 122, "the lone participant, on the halved block")
+	assert_eq(gains[1]["amount"], 60)
+	assert_eq(gains[2]["amount"], 60)
+
+
+## The stat experience rides the same seven bytes, so it is halved and split by
+## exactly the same arithmetic.
+func test_an_exp_share_halves_the_stat_experience_too() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 100, [Fixture.THUNDERBOLT]),
+			_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE])), _rng
+	)
+	battle.party(Gen2Battle.PLAYER).at(1).item = Fixture.EXP_SHARE
+
+	var stat_gains: Array = _of_type(battle.take_turn(0, 0), Gen2Battle.STAT_EXP_GAINED)
+
+	assert_eq(stat_gains.size(), 2)
+	for gain: Dictionary in stat_gains:
+		# Bulbasaur's 45/49/49/45/65, each byte halved on its own.
+		assert_eq(gain["gains"], {
+			"hp": 22, "attack": 24, "defense": 24, "speed": 22, "special": 32,
+		})

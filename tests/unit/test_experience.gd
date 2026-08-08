@@ -114,3 +114,46 @@ func test_stat_exp_split_truncates_per_stat_not_on_the_total() -> void:
 	assert_eq(out["hp"], 15)
 	assert_eq(out["attack"], 16, "49 / 3 truncated")
 	assert_eq(out["special"], 21, "65 / 3 truncated")
+
+
+## The block is the five base stats and the base experience together, because
+## the cartridge keeps them in one run of bytes and divides all of them in one
+## loop before reading any of them back.
+func test_the_shared_block_divides_base_exp_alongside_the_base_stats() -> void:
+	var defeated: Dictionary = {
+		"hp": 45, "attack": 49, "defense": 49, "speed": 45, "special": 65,
+	}
+
+	var alone: Dictionary = Gen2Experience.shared_block(defeated, 64, false, 1)
+	assert_eq(alone["base_exp"], 64, "one recipient skips the division entirely")
+	assert_eq(alone["stats"], defeated)
+
+	var split: Dictionary = Gen2Experience.shared_block(defeated, 64, false, 3)
+	assert_eq(split["base_exp"], 21, "64 / 3 truncated")
+	assert_eq(split["stats"]["attack"], 16)
+
+
+## Exp. Share halves every byte once, before any division, and the halving
+## truncates on its own so it is not the same as dividing by twice as many.
+func test_halving_for_an_exp_share_truncates_before_the_split() -> void:
+	var defeated: Dictionary = {
+		"hp": 45, "attack": 49, "defense": 49, "speed": 45, "special": 65,
+	}
+
+	var halved: Dictionary = Gen2Experience.shared_block(defeated, 65, true, 1)
+	assert_eq(halved["base_exp"], 32, "65 / 2 truncated")
+	assert_eq(halved["stats"]["attack"], 24, "49 / 2 truncated")
+
+	var halved_and_split: Dictionary = Gen2Experience.shared_block(defeated, 65, true, 2)
+	assert_eq(halved_and_split["base_exp"], 16, "floor(floor(65/2)/2)")
+	assert_eq(halved_and_split["stats"]["special"], 16)
+
+
+func test_stat_exp_gain_still_answers_for_the_stats_alone() -> void:
+	var defeated: Dictionary = {
+		"hp": 40, "attack": 45, "defense": 40, "speed": 56, "special": 35,
+	}
+	assert_eq(
+		Gen2Experience.stat_exp_gain(defeated, 2),
+		Gen2Experience.shared_block(defeated, 0, false, 2)["stats"]
+	)

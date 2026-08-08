@@ -325,7 +325,7 @@ func base_exp() -> int:
 	return int(data.species(species).get("base_exp", 0))
 
 
-## The five base stats [Gen2Experience.stat_exp_gain] wants when this Pokémon is
+## The five base stats [Gen2Experience.shared_block] wants when this Pokémon is
 ## the one fainting, keyed like [member stat_exp]. Special Attack's base value
 ## fills the shared [code]"special"[/code] slot, never Special Defense's: see
 ## [constant Gen2Experience.STAT_EXP_KEYS].
