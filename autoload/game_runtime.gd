@@ -69,7 +69,7 @@ func selected_data() -> GameData:
 
 
 func select_save_slot(game_id: StringName, slot: int) -> bool:
-	if slot < 0 or slot >= Gen2SaveStore.SLOT_COUNT:
+	if slot < 0 or slot >= Gen2SaveStore.MAX_SLOTS:
 		return false
 	if not select_game(game_id):
 		return false

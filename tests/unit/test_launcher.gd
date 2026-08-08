@@ -68,7 +68,7 @@ func test_runtime_selection_accepts_registry_games_and_rejects_unknown_ids() -> 
 	assert_eq(GameRuntime.selected_save_slot, 1)
 	assert_false(GameRuntime.select_game(&"not_a_game"))
 	assert_eq(GameRuntime.selected_game_id, RomRegistry.CRYSTAL)
-	assert_false(GameRuntime.select_save_slot(RomRegistry.CRYSTAL, Gen2SaveStore.SLOT_COUNT))
+	assert_false(GameRuntime.select_save_slot(RomRegistry.CRYSTAL, Gen2SaveStore.MAX_SLOTS))
 	assert_eq(GameRuntime.selected_save_slot, 1)
 
 	GameRuntime.selected_game_id = previous

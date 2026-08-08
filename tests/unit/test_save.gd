@@ -25,7 +25,7 @@ func after_each() -> void:
 
 func _clear_saves() -> void:
 	var game_id: StringName = _data.id if _data != null else &"savetest"
-	for slot: int in Gen2SaveStore.SLOT_COUNT:
+	for slot: int in Gen2SaveStore.MAX_SLOTS:
 		var path: String = Gen2SaveStore.path_for(game_id, "0123456789abcdef", slot)
 		for copy: String in [path, "%s.bak" % path, "%s.tmp" % path, "%s.bak.tmp" % path]:
 			if FileAccess.file_exists(copy):

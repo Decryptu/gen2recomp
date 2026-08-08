@@ -28,20 +28,26 @@ Save format version 2 stores:
 
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, Fly, Dig, Rollout and rampage, is never
-saved. The validator checks the selected `GameData`; three JSON slots exist per
-game revision under `user://save_slots`. Box names, current-box UI state and
-cartridge SRAM box placement are intentionally outside this model.
+saved. The validator checks the selected `GameData`. Slots live under
+`user://save_slots` per game revision and are created on demand rather than
+preallocated, up to `Gen2SaveStore.MAX_SLOTS`; a slot number is still its file
+name, so slots written before this stay where they were. Each save carries its
+own `label`, the player's name for the slot, so an exported file names itself;
+an empty label means fall back to the player name. Box names, current-box UI
+state and cartridge SRAM box placement are intentionally outside this model.
 
-Version 1 project saves migrate in memory by adding fourteen empty boxes. The
-migration preserves a missing world snapshot as missing; it does not invent a
-map, player position or event state. The next successful save writes version 2.
+Older project saves migrate in memory one version step at a time: version 1
+gains fourteen empty boxes, version 2 gains an empty label. Migration preserves
+a missing world snapshot as missing; it does not invent a map, player position
+or event state. The next successful save writes version 3.
 
 ## Player flow
 
 The launcher selects an imported cache and opens `game/save/save_screen.tscn`.
-It shows three slots as `EMPTY`, `READY` or `INCOMPATIBLE`, and rejects failed
-`.sav` imports before calling `Gen2SaveStore.save`, so partial data cannot
-replace a slot.
+It lists the slots that exist as `READY` or `INCOMPATIBLE`, offers a new one at
+the lowest free number, and rejects failed `.sav` imports before calling
+`Gen2SaveStore.save`, so partial data cannot replace a slot. A game with no
+saves lists none and has nothing selected.
 
 New games accept up to ten encoded characters and start with an empty party,
 matching Crystal's new-game initialization. When the source home map exists,
@@ -104,9 +110,13 @@ file, a bad header or checksum, invalid JSON, a failed migration or a validator
 rejection. When both fail, the primary's message is reported. A slot counts as
 occupied while either copy exists, so a lost primary cannot present itself as an
 empty slot that a new game would overwrite. Unlike `TryLoadSaveFile`, a load
-never repairs the weak copy, because drawing the slot menu loads all three
-slots; the next save rewrites both. Slots written before the header existed load
-unchecked.
+never repairs the weak copy, because drawing the slot menu loads every slot;
+the next save rewrites both. Slots written before the header existed load
+unchecked, which is also how an exported file with no header is accepted.
+
+Export copies a slot file verbatim, header included. Import reads one back,
+refuses a save recorded against another cartridge, and lands it in the lowest
+free slot with that number written into the copy.
 
 ## Original Generation 2 shape
 

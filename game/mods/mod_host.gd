@@ -431,10 +431,13 @@ func failures() -> Array:
 ## Runs each discovered mod's entry script, which registers what it provides.
 ##
 ## A mod that will not load is reported and skipped: one broken mod must not
-## stop the others, and it must not stop the game starting.
+## stop the others, and it must not stop the game starting. A mod the player
+## switched off is skipped silently and is not a failure.
 func load_discovered() -> Array:
 	var loaded: Array = []
 	for id: StringName in _manifests:
+		if not Gen2ModState.is_enabled(id):
+			continue
 		var result: Dictionary = load_mod(_manifests[id])
 		if bool(result.get("ok", false)):
 			loaded.append(id)

@@ -196,7 +196,7 @@ static func _validate_request(
 		return _failure("unsupported cartridge game %s" % game_id)
 	if RomRegistry.sha1_for(game_id) != rom_sha1:
 		return _failure("the save belongs to an unsupported cartridge revision")
-	if slot < 0 or slot >= Gen2SaveStore.SLOT_COUNT:
+	if slot < 0 or slot >= Gen2SaveStore.MAX_SLOTS:
 		return _failure("save slot %d is out of range" % slot)
 	if raw.size() < SRAM_SIZE:
 		return _failure("cartridge save is shorter than 32 KiB")
