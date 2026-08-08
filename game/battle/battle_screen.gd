@@ -135,8 +135,6 @@ var _forget_confirm_cursor: int = 0
 ## flags of its own to read: it falls back to [method _random_slot], same as
 ## before this existed. Reset by both, set only by [method show_trainer].
 var _enemy_trainer_class: int = 0
-var _enemy_turns_taken: int = 0
-var _player_turns_taken: int = 0
 
 var _enemy: int = 1
 var _player: int = 1
@@ -225,8 +223,6 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = 0
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), _party_from(_enemy, _enemy_level), _rng
 	)
@@ -271,8 +267,6 @@ func show_trainer(
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = trainer_class
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), enemy_party, _rng, true
 	)
@@ -314,8 +308,6 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = 0
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_player = player_lead.species
 	_player_level = player_lead.level
 	_enemy = enemy_lead.species
@@ -363,8 +355,6 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = prepared["battle"]
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
@@ -726,8 +716,6 @@ func take_turn() -> void:
 	if _battle.awaiting_move_learn():
 		return
 	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
-	_player_turns_taken += 1
-	_enemy_turns_taken += 1
 	_show_next_event()
 
 
@@ -750,7 +738,8 @@ func _enemy_slot() -> int:
 	var weights: int = int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
 	return Gen2BattleAI.choose_slot(
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
-		_enemy_turns_taken, _player_turns_taken
+		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
+		_battle.weather
 	)
 
 

@@ -1887,3 +1887,44 @@ func test_a_fresh_battle_has_no_weather() -> void:
 	)
 	assert_eq(battle.weather, Gen2Weather.NONE)
 	assert_eq(battle.weather_turns, 0)
+
+
+## `BattleCommand_DoTurn` counts the turn behind the same charging check that
+## decides whether PP is spent, so a two-turn release counts once, on the turn
+## the move was chosen, and a switch starts the count again.
+func test_a_pokemon_counts_the_turns_it_has_actually_acted_on() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.SOLARBEAM, Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])]
+	)
+	var acting: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	assert_eq(acting.turns_taken, 0, "nothing has happened yet")
+
+	battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 1)
+
+	# The charge turn counts; the release turn is the same turn continuing.
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 2)
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 2, "the release spent no turn of its own")
+
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(battle.mon(Gen2Battle.PLAYER).turns_taken, 0, "a fresh Pokémon has acted on none")
+
+
+## The increment sits ahead of the Struggle check, so a Pokémon with nothing left
+## still counts the turns it spends struggling.
+func test_struggling_counts_as_a_turn_even_though_it_spends_no_pp() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var struggling: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	struggling.pp[0] = 0
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(battle.move_for(Gen2Battle.PLAYER, 0), Gen2Damage.STRUGGLE)
+	assert_eq(struggling.turns_taken, 1)

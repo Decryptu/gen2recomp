@@ -464,6 +464,11 @@ static func _used_move_text(turn: Gen2Turn) -> void:
 static func _do_turn(turn: Gen2Turn) -> void:
 	if turn.locked:
 		return
+
+	# "If we've gotten this far, this counts as a turn", ahead of the Struggle
+	# check, so Struggle counts even though it spends nothing.
+	turn.attacker().turns_taken += 1
+
 	if turn.slot >= 0 and turn.move_number != Gen2Damage.STRUGGLE:
 		turn.attacker().spend_pp(turn.slot)
 
