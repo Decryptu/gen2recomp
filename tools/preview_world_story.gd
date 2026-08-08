@@ -27,6 +27,7 @@ const SPECIALCALL_ASSISTANT: int = 3
 const WALK_RESOLVE_ATTEMPTS: int = 16
 
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
+const ITEM_HM_CUT: int = 0xF3
 const ITEM_HM_STRENGTH: int = 0xF6
 const ITEM_HM_WATERFALL: int = 0xF9
 ## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
@@ -592,6 +593,85 @@ const BROCK_FACE: Vector2i = Vector2i(5, 2)
 const BADGE_BOULDER: int = 8
 const EVENT_BEAT_BROCK: int = 1221
 const EVENT_BEAT_CAMPER_JERRY: int = 1067
+## `maps/PewterGym.asm` warps 1 and 2, both back onto Pewter's warp 2.
+const PEWTER_GYM_EXIT: Vector2i = Vector2i(4, 13)
+
+## South from Pewter to Cinnabar: Route 2, Viridian City, Route 1, Pallet Town,
+## Route 21 and Cinnabar Island are six plain connections with no gate building
+## and no door on any of them (`data/maps/attributes.asm`, and neither Route 1
+## nor Route 21 declares a warp at all). Coming back onto Route 2 from Pewter
+## lands in its main region, which already holds the Viridian crossing, so the
+## cut tree is not on this half of the walk.
+const VIRIDIAN_CITY_NUMBER: int = 3
+const PALLET_GROUP: int = 13
+const ROUTE_1_NUMBER: int = 1
+const PALLET_TOWN_NUMBER: int = 2
+const ENGINE_FLYPOINT_VIRIDIAN: int = 54
+const ENGINE_FLYPOINT_PALLET: int = 53
+
+## Pallet Town's own pond is the route's way south: its south edge is sixteen
+## cells of water on x=4 to 7, and the land beside it is (4,13). Everything from
+## there to Seafoam Gym's door is surfed.
+const PALLET_SURF_APPROACH: Vector2i = Vector2i(4, 13)
+const SEAFOAM_GROUP: int = 6
+const ROUTE_21_NUMBER: int = 7
+const CINNABAR_ISLAND_NUMBER: int = 8
+const ROUTE_20_NUMBER: int = 6
+const SEAFOAM_GYM_NUMBER: int = 4
+
+## Cinnabar Island is two land regions with no seam between them, so which cell
+## the crossing lands on decides whether Blue is reachable at all. Route 21's
+## south edge is water from x=1 to 14, and Cinnabar's row 0 is water on x=1 to 3
+## and land on x=11 to 18: crossing on the eastern half exits the water into an
+## 89-cell region that reaches neither Blue nor the Pokecenter, so the walk stays
+## on the water down the island's west side and lands on (4,10) instead, in the
+## 51-cell region that holds both.
+const CINNABAR_LANDING: Vector2i = Vector2i(4, 10)
+## `maps/CinnabarIsland.asm` object 1 on (9,6), walled on three sides, so (8,6)
+## facing right is its only approach. `CinnabarIslandBlue` is what clears
+## EVENT_VIRIDIAN_GYM_BLUE and so the only thing that opens Viridian Gym.
+const BLUE_FACE: Vector2i = Vector2i(8, 6)
+const EVENT_VIRIDIAN_GYM_BLUE: int = 1910
+const ENGINE_FLYPOINT_CINNABAR: int = 63
+
+## Cinnabar's east edge is one cell, (19,16), and it is water, so the leg surfs
+## again from the same shore it landed on. `Route20ClearRocksCallback` is a
+## MAPCALLBACK_NEWMAP, so arriving is what sets EVENT_CINNABAR_ROCKS_CLEARED and
+## unseals Fuchsia's south edge; nothing on the route walks that way, but the
+## flag is the reason this leg comes before Viridian's.
+const CINNABAR_SURF_APPROACH: Vector2i = Vector2i(4, 10)
+const EVENT_CINNABAR_ROCKS_CLEARED: int = 215
+## Route 20's island cluster, landed on from the east and not the west. The
+## channel on x=26 and 27 that runs up the island's west shore is walled off from
+## the open sea on every side: column 25 is wall from row 2 to 13, row 1 closes it
+## above and row 13's own eleven wall cells close it below. The east shore is
+## open water, so (41,8) is the landfall and (38,7) the `$7b` cave tile that
+## warps into the gym.
+const ROUTE_20_LANDING: Vector2i = Vector2i(41, 8)
+const SEAFOAM_GYM_DOOR: Vector2i = Vector2i(38, 7)
+## `maps/SeafoamGym.asm`: Blaine on (5,2) inside a 13-cell cave, faced from the
+## cell below. His script `appear`s the gym guide, which is a `clearevent` on the
+## guide's own hide flag, and it runs only on the branch a won battle takes.
+const BLAINE_FACE: Vector2i = Vector2i(5, 3)
+const BADGE_VOLCANO: int = 14
+const EVENT_BEAT_BLAINE: int = 1227
+const EVENT_SEAFOAM_GYM_GYM_GUIDE: int = 1911
+## `maps/SeafoamGym.asm` warp 1, back onto the Route 20 cave tile.
+const SEAFOAM_GYM_EXIT: Vector2i = Vector2i(5, 5)
+## The island's east shore again, surfed from rather than landed on.
+const ROUTE_20_SURF_APPROACH: Vector2i = Vector2i(41, 8)
+## Pallet's pond from the sea side: the same sixteen cells, landed on at (4,13).
+const PALLET_LANDING: Vector2i = Vector2i(4, 13)
+
+## Viridian Gym, the last badge on the walked route. `maps/ViridianGym.asm`
+## declares neither a scene nor a callback and ships no trainer: both its objects
+## are hidden by EVENT_VIRIDIAN_GYM_BLUE, so the gym is empty until Cinnabar's
+## Blue clears it, and that is the whole gate.
+const VIRIDIAN_GYM_NUMBER: int = 4
+const VIRIDIAN_GYM_DOOR: Vector2i = Vector2i(32, 7)
+const BLUE_GYM_FACE: Vector2i = Vector2i(5, 4)
+const BADGE_EARTH: int = 15
+const EVENT_BEAT_BLUE: int = 1228
 
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
@@ -1817,6 +1897,26 @@ func _plain_badge_path(
 	})
 	if not bool(cut_gift.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "HM01 handoff did not finish"}
+
+	# And taught, not just carried. The starter is the only line in this party
+	# that CanLearnTMHMMove accepts for CUT, and HM01 arrives here, one walk
+	# before the first tree, so this is the earliest the route can be honest
+	# about the move. `teach_tm_hm()` is the same transaction the pack's USE
+	# reaches, the way _olivine_cafe_hm04() teaches STRENGTH.
+	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_CUT)
+	_mirror_party(world, save)
+	path.append({
+		"step": "ilex_forest_teach_cut",
+		"map": _map_value(world),
+		"taught": taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned CUT: %s" % taught.get("reason", ""),
+		}
 
 	var walked_to_tree: Dictionary = _walk_cell_resolving(
 		world, ILEX_CUT_APPROACH, save, random, data
@@ -6322,6 +6422,356 @@ func _pewter_gym_leg(
 		return {"ok": false, "path": path, "reason": "ENGINE_BOULDERBADGE was not set"}
 	if not world.event_flag_active(EVENT_BEAT_CAMPER_JERRY):
 		return {"ok": false, "path": path, "reason": "Brock did not set Camper Jerry's flag"}
+	return _cinnabar_leg(world, save, random, data, path)
+
+
+## Pewter Gym south to Cinnabar Island and east to Seafoam Gym's Volcano Badge.
+##
+## Six plain connections carry the walk down the west coast, and then it is water
+## the rest of the way: Pallet's own pond is the last land, and Route 21,
+## Cinnabar's west side and Route 20 are all surfed. Two things make this leg the
+## one that has to come before Viridian's. Blue stands on Cinnabar until he is
+## talked to, and `CinnabarIslandBlue` is the only `clearevent` for
+## EVENT_VIRIDIAN_GYM_BLUE in either pin; and `Route20ClearRocksCallback` is a
+## MAPCALLBACK_NEWMAP, so simply arriving on Route 20 sets
+## EVENT_CINNABAR_ROCKS_CLEARED and takes the six `$7a` wall blocks off Route 19.
+func _cinnabar_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [PEWTER_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Pewter Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var southbound: Array = [
+		{"step": "route_2_southbound", "group": ROUTE_2_GROUP, "number": ROUTE_2_NUMBER},
+		{"step": "viridian_city", "group": ROUTE_2_GROUP, "number": VIRIDIAN_CITY_NUMBER,
+			"flypoint": ENGINE_FLYPOINT_VIRIDIAN},
+		{"step": "route_1", "group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "pallet_town", "group": PALLET_GROUP, "number": PALLET_TOWN_NUMBER,
+			"flypoint": ENGINE_FLYPOINT_PALLET},
+	]
+	for leg: Dictionary in southbound:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "south", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		var step: Dictionary = {
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		}
+		if leg.has("flypoint"):
+			step["flypoint"] = world.state.is_engine_flag_active(int(leg["flypoint"]))
+		path.append(step)
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+		if leg.has("flypoint") \
+			and not world.state.is_engine_flag_active(int(leg["flypoint"])):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s's flypoint callback did not run" % leg["step"],
+			}
+
+	var boarded: Dictionary = _surf_at(
+		world, PALLET_SURF_APPROACH, Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "pallet_pond_surf",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": boarded.get("encounters", []),
+	})
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Pallet's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+
+	for leg: Dictionary in [
+		{"step": "route_21", "number": ROUTE_21_NUMBER},
+		{"step": "cinnabar_island", "number": CINNABAR_ISLAND_NUMBER},
+	]:
+		var surfed: Dictionary = _walk_connection_resolving(
+			world, "south", SEAFOAM_GROUP, int(leg["number"]), save, random, data, true
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": surfed.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(surfed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the surf to %s failed: %s" % [leg["step"], surfed.get("reason", "")],
+			}
+
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, CINNABAR_LANDING, save, random, data, true
+	)
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "landing on Cinnabar failed: %s" % ashore.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR):
+		return {"ok": false, "path": path, "reason": "Cinnabar's flypoint callback did not run"}
+
+	var blue: Dictionary = _talk_to(
+		world, BLUE_FACE, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	path.append({
+		"step": "cinnabar_blue",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR),
+		"viridian_gym_blue": world.event_flag_active(EVENT_VIRIDIAN_GYM_BLUE),
+		"encounters": blue.get("encounters", []),
+		"run": blue.get("run", {}),
+	})
+	if not bool(blue.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not finish: %s" % blue.get("reason", ""),
+		}
+	if world.event_flag_active(EVENT_VIRIDIAN_GYM_BLUE):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not clear EVENT_VIRIDIAN_GYM_BLUE",
+		}
+
+	return _seafoam_gym_leg(world, save, random, data, path)
+
+
+## Cinnabar east to Route 20 and Blaine's cave.
+func _seafoam_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var boarded: Dictionary = _surf_at(
+		world, CINNABAR_SURF_APPROACH, Gen2WorldSprite.FACING_LEFT, save, random, data
+	)
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Cinnabar's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+	var eastbound: Dictionary = _walk_connection_resolving(
+		world, "east", SEAFOAM_GROUP, ROUTE_20_NUMBER, save, random, data, true
+	)
+	var entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_20",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"cinnabar_rocks_cleared": world.event_flag_active(EVENT_CINNABAR_ROCKS_CLEARED),
+		"encounters": eastbound.get("encounters", []),
+		"run": entry,
+	})
+	if not bool(eastbound.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the surf to Route 20 failed: %s" % eastbound.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_CINNABAR_ROCKS_CLEARED):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route20ClearRocksCallback did not run",
+		}
+
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, ROUTE_20_LANDING, save, random, data, true
+	)
+	path.append({
+		"step": "route_20_landfall",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": ashore.get("encounters", []),
+	})
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "landing on Route 20 failed: %s" % ashore.get("reason", ""),
+		}
+
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [SEAFOAM_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Seafoam Gym mouth failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var blaine: Dictionary = _talk_to(
+		world, BLAINE_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_VOLCANO, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "seafoam_gym_blaine",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"volcano_badge": world.state.is_engine_flag_active(badge),
+		"beat_blaine": world.event_flag_active(EVENT_BEAT_BLAINE),
+		# `appear SEAFOAMGYM_GYM_GUIDE` is a clearevent on the guide's own hide
+		# flag, and it sits on the branch only a won battle reaches.
+		"gym_guide_hidden": world.event_flag_active(EVENT_SEAFOAM_GYM_GYM_GUIDE),
+		"encounters": blaine.get("encounters", []),
+		"run": blaine.get("run", {}),
+	})
+	if not bool(blaine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blaine did not finish: %s" % blaine.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_VOLCANOBADGE was not set"}
+	return _viridian_leg(world, save, random, data, path)
+
+
+## Seafoam Gym back up the coast to Viridian Gym and the Earth Badge.
+##
+## The way back is the way down reversed, water included: Route 20's east shore,
+## Cinnabar, Route 21 and Pallet's own pond, then three connections north. The
+## gym at the end has no puzzle and no trainer in it. Both its objects carry
+## EVENT_VIRIDIAN_GYM_BLUE as their hide flag, so before Cinnabar the building is
+## empty and after it Blue is simply standing there.
+func _viridian_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [SEAFOAM_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Seafoam Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+	var boarded: Dictionary = _surf_at(
+		world, ROUTE_20_SURF_APPROACH, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 20's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+
+	var northbound: Array = [
+		{"step": "cinnabar_return", "direction": "west", "number": CINNABAR_ISLAND_NUMBER},
+		{"step": "route_21_northbound", "direction": "north", "number": ROUTE_21_NUMBER},
+		{"step": "pallet_return", "direction": "north", "number": PALLET_TOWN_NUMBER,
+			"group": PALLET_GROUP, "ashore": PALLET_LANDING},
+	]
+	for leg: Dictionary in northbound:
+		var surfed: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg.get("group", SEAFOAM_GROUP)),
+			int(leg["number"]), save, random, data, true
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": surfed.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(surfed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the surf to %s failed: %s" % [leg["step"], surfed.get("reason", "")],
+			}
+		if leg.has("ashore"):
+			var ashore: Dictionary = _walk_cell_resolving(
+				world, leg["ashore"], save, random, data, true
+			)
+			if not bool(ashore.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "landing on %s failed: %s" % [
+						leg["ashore"], ashore.get("reason", ""),
+					],
+				}
+
+	for leg: Dictionary in [
+		{"step": "route_1_northbound", "group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "viridian_return", "group": ROUTE_2_GROUP, "number": VIRIDIAN_CITY_NUMBER},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "north", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [VIRIDIAN_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Viridian Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var blue: Dictionary = _talk_to(
+		world, BLUE_GYM_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_EARTH, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "viridian_gym_blue",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"earth_badge": world.state.is_engine_flag_active(badge),
+		"beat_blue": world.event_flag_active(EVENT_BEAT_BLUE),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
+		"encounters": blue.get("encounters", []),
+		"run": blue.get("run", {}),
+	})
+	if not bool(blue.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not finish: %s" % blue.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_EARTHBADGE was not set"}
 	return {"ok": true}
 
 
