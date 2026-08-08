@@ -13,6 +13,14 @@ is cartridge content through `GameData` or live world state through
 exists, creating `user://mods/` when it is absent. The launcher lists what
 loaded and names anything it refused.
 
+A mod can be switched off without uninstalling it. `Gen2ModState` keeps the
+disabled ids in `user://mods_disabled.json`, and only `load_discovered()`
+consults them: a disabled mod is still discovered and still listed, it just
+does not run, and that is not a refusal. Disabled ids are stored rather than
+enabled ones, so a newly installed mod runs without an entry being written for
+it and a damaged file means everything runs rather than nothing. Uninstalling
+drops the id, so reinstalling later does not find it silently off.
+
 ## Layout
 
 ```
