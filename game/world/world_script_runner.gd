@@ -171,14 +171,18 @@ static func begin(
 		## approaches.
 		runner._trainer_intro_approach_pending = request.get("direction", Vector2i.ZERO) \
 			in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
-	elif StringName(request.get("kind", &"")) == &"item_ball":
-		## The pointer is item data, not code, so the frame that stands in for it
-		## is a bare `end` and _stage_item_ball() replays FindItemInBallScript.
+	elif StringName(request.get("kind", &"")) in [&"item_ball", &"hidden_item"]:
+		## Neither pointer is code, so the frame that stands in for it is a bare
+		## `end` and the staging call replays FindItemInBallScript or
+		## HiddenItemScript.
 		started = runner._push_frame(bank, address, PackedByteArray([
 			Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_END, runner._crystal_commands())
 		]))
 		if started:
-			runner._stage_item_ball()
+			if StringName(request.get("kind", &"")) == &"item_ball":
+				runner._stage_item_ball()
+			else:
+				runner._stage_hidden_item()
 	else:
 		started = runner._push_frame(bank, address)
 	if not started:
@@ -1991,6 +1995,34 @@ func _stage_item_ball() -> Dictionary:
 		"object_index": _last_talked_object_index, "active": true,
 	})
 	_stage_object_event_flag(LAST_TALKED, true)
+	var item_name: String = data.item_name(item) if data != null else ""
+	if item_name.is_empty():
+		item_name = "ITEM"
+	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, true)
+
+
+## HiddenItemScript, the BGEVENT_ITEM half of the same source area. The pointer
+## is the `hiddenitem` macro's `dwb event, item`, which `.itemifset` copies into
+## wHiddenItemData, so Gen2WorldAPI hands the decoded flag and item over the way
+## it hands over an item ball's two bytes.
+##
+## The differences from _stage_item_ball() are the flag and the object. There is
+## no object to hide, since the item is a background event rather than a ball,
+## and the flag `callasm SetMemEvent` writes is the record's own rather than the
+## object's. `_PlayerFoundItemText` is `_FoundItemText`'s wording, so the two
+## share FOUND_ITEM_TEXT and its <PLAYER> boundary.
+##
+## The source writes the text before `giveitem` and sets the flag after it. The
+## order is unobservable here: `.bag_full` needs ReceiveItem to refuse, and this
+## project models per-item counts with no pocket capacity, exactly as
+## FindItemInBallScript's own `.no_room` cannot be reached.
+func _stage_hidden_item() -> Dictionary:
+	var item: int = int(_request.get("item", 0))
+	var flag: int = int(_request.get("flag", -1))
+	if item <= 0 or flag < 0:
+		return _fail(&"invalid_hidden_item", {"item": item, "flag": flag})
+	_stage_item_delta(item, 1)
+	_staged_flags[flag] = true
 	var item_name: String = data.item_name(item) if data != null else ""
 	if item_name.is_empty():
 		item_name = "ITEM"

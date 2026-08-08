@@ -1,18 +1,20 @@
 extends SceneTree
 
-## Verifies `OBJECTTYPE_ITEMBALL` dispatch against freshly imported real caches,
-## for both command profiles.
+## Verifies `OBJECTTYPE_ITEMBALL` and `BGEVENT_ITEM` dispatch against freshly
+## imported real caches, for both command profiles.
 ##
 ## Expected values come from the pinned pokecrystal and pokegold sources:
-## `engine/overworld/events.asm`'s `ObjectEventTypeArray.itemball`,
-## `engine/events/misc_scripts.asm`'s `FindItemInBallScript`, and the
-## `itemball` macro in `macros/scripts/maps.asm`.
+## `engine/overworld/events.asm`'s `ObjectEventTypeArray.itemball` and
+## `.itemifset`, `engine/events/misc_scripts.asm`'s `FindItemInBallScript`,
+## `engine/events/hidden_item.asm`'s `HiddenItemScript`, and the `itemball` and
+## `hiddenitem` macros in `macros/scripts/maps.asm`.
 ##
-## The point of pinning it is that an item ball's script pointer is not a
-## script. It addresses `db item, quantity`, and before this dispatch existed
-## `interact()` handed those two bytes to the runner as opcodes. Ice Path 1F's
-## HM07 is the one that matters most: nothing else in either game gives
-## Waterfall.
+## The point of pinning both is that neither pointer is a script. A ball's
+## addresses `db item, quantity` and a hidden item's `dwb event, item`, and
+## before these dispatches existed `interact()` handed those bytes to the runner
+## as opcodes. Two of them matter most: Ice Path 1F's HM07, since nothing else in
+## either game gives Waterfall, and Cerulean Gym's MACHINE_PART, since nothing
+## else opens the Power Plant and with it the Cascade Badge.
 ##
 ##   Godot --headless -s res://tools/validate_item_balls.gd
 
@@ -52,6 +54,24 @@ const ROUTE_44_BALLS: Dictionary = {
 	],
 }
 
+## The two hidden items this drives. Both map ids and both flag numbers are the
+## same in either pin. Route 45's PP Up starts pickable; Cerulean Gym's machine
+## part starts behind a flag `InitializeEventsScript` sets
+## (`engine/events/std_scripts.asm`), which the Power Plant manager clears, so it
+## is the one that shows the gate working in both directions.
+const ROUTE_45: Array = [5, 8]
+const CERULEAN_GYM: Array = [7, 6]
+const HIDDEN_ITEMS: Array[Dictionary] = [
+	{
+		"map": ROUTE_45, "cell": Vector2i(13, 80), "from": Vector2i(13, 81),
+		"item": 0x3E, "flag": 175,   # PP_UP, EVENT_ROUTE_45_HIDDEN_PP_UP
+	},
+	{
+		"map": CERULEAN_GYM, "cell": Vector2i(3, 8), "from": Vector2i(3, 9),
+		"item": 0x80, "flag": 251,   # MACHINE_PART, EVENT_FOUND_MACHINE_PART_IN_CERULEAN_GYM
+	},
+]
+
 var _failures: PackedStringArray = []
 
 
@@ -63,6 +83,7 @@ func _initialize() -> void:
 			continue
 		_verify_hm07(data, game_id)
 		_verify_route_44(data, game_id)
+		_verify_hidden_items(data, game_id)
 	_finish()
 
 
@@ -150,6 +171,64 @@ func _verify_route_44(data: GameData, game_id: StringName) -> void:
 		)
 
 
+## The BGEVENT_ITEM half. `.itemifset` reads only while the record's flag is
+## clear, and `callasm SetMemEvent` is what sets it, so one pickup is all a
+## hidden item ever gives.
+func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
+	for entry: Dictionary in HIDDEN_ITEMS:
+		var cell: Vector2i = entry["cell"]
+		var item: int = int(entry["item"])
+		var flag: int = int(entry["flag"])
+		var world: Gen2WorldAPI = _open(data, entry["map"], entry["from"])
+		if world == null:
+			_fail("%s: map %s is missing." % [game_id, entry["map"]])
+			continue
+		world.player_facing = Gen2WorldSprite.FACING_UP
+
+		# Set, the record is closed; this is the state the machine part ships in.
+		world.set_event_flag(flag)
+		_check(
+			world.interact().is_empty(),
+			"%s: the hidden item on %s answered with its flag %d set." % [game_id, cell, flag]
+		)
+		world.clear_event_flag(flag)
+
+		var results: Array = world.interact()
+		if not _check(
+			results.size() == 1
+				and StringName(results[0].get("source", {}).get("kind", &"")) == &"hidden_item",
+			"%s: the hidden item on %s did not dispatch." % [game_id, cell]
+		):
+			continue
+		var request: Dictionary = results[0].get("source", {})
+		_check(
+			int(request.get("item", 0)) == item and int(request.get("flag", -1)) == flag,
+			"%s: %s carries item $%02x flag %d, not the pinned $%02x and %d." % [
+				game_id, cell, int(request.get("item", 0)), int(request.get("flag", -1)),
+				item, flag,
+			]
+		)
+		_check(
+			StringName(results[0].get("status", &"")) == &"waiting",
+			"%s: the hidden item on %s did not pause on its found-item text." % [game_id, cell]
+		)
+		var finished: Array = world.run_event_queue(true)
+		_check(
+			not finished.is_empty()
+				and StringName(finished[0].get("status", &"")) == &"complete",
+			"%s: the hidden item on %s did not finish." % [game_id, cell]
+		)
+		_check(
+			int(world.state.items().get(item, 0)) == 1 and world.event_flag_active(flag),
+			"%s: %s did not reach the bag, or its flag was not written." % [game_id, cell]
+		)
+		# And the flag it just wrote closes it, so a second A press gives nothing.
+		_check(
+			world.interact().is_empty() and int(world.state.items().get(item, 0)) == 1,
+			"%s: the hidden item on %s can be picked up twice." % [game_id, cell]
+		)
+
+
 func _open(data: GameData, id: Array, cell: Vector2i) -> Gen2WorldAPI:
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, id[0], id[1], cell, Gen2WorldState.new())
 	if world == null:
@@ -174,7 +253,7 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS item balls: HM07 and Route 44's balls decode and are received.")
+		print("PASS item balls: HM07, Route 44's balls and both hidden items decode and are received.")
 		quit(0)
 		return
 	for failure: String in _failures:
