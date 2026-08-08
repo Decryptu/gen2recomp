@@ -161,6 +161,7 @@ const NORMAL_HIT: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -173,6 +174,7 @@ const COUNTER_SEQUENCE: Array = [
 	Gen2EffectCommands.COUNTER,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -182,6 +184,7 @@ const MIRROR_COAT_SEQUENCE: Array = [
 	Gen2EffectCommands.MIRROR_COAT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -196,6 +199,7 @@ const SELFDESTRUCT_SEQUENCE: Array = [
 	Gen2EffectCommands.SELFDESTRUCT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -211,6 +215,7 @@ const RECOIL_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.RECOIL,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -300,6 +305,7 @@ const CHARGE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -315,6 +321,7 @@ const RAMPAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -330,6 +337,7 @@ const ROLLOUT_SEQUENCE: Array = [
 	Gen2EffectCommands.ROLLOUT_POWER,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -362,6 +370,7 @@ const SKY_ATTACK_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.FLINCH_TARGET,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -379,6 +388,7 @@ const SKULL_BASH_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.DEFENSE_UP,
 	Gen2EffectCommands.STAT_UP_MESSAGE,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -517,6 +527,7 @@ const SOLARBEAM_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -541,6 +552,7 @@ const MULTI_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -556,6 +568,7 @@ const TWINEEDLE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.EFFECT_CHANCE,
 	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.POISON_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -565,6 +578,22 @@ const TWINEEDLE_SEQUENCE: Array = [
 ## [constant Gen2EffectCommands.CHECK_HIT] rather than in a step of its own,
 ## the same place the real cartridge's shared accuracy check puts it.
 const DRAIN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.DRAIN_TARGET,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Dream Eater is the same list without the King's Rock step, which is the one
+## thing `DreamEater` and `LeechHit` do not share. The two shared a sequence here
+## until the item existed to tell them apart.
+const DREAM_EATER_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.DAMAGE_CALC,
@@ -591,6 +620,7 @@ const FIXED_DAMAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -779,7 +809,7 @@ static func _sequences() -> Dictionary:
 		SANDSTORM: START_SANDSTORM_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
-		DREAM_EATER: DRAIN_SEQUENCE,
+		DREAM_EATER: DREAM_EATER_SEQUENCE,
 		MULTI_HIT: MULTI_HIT_SEQUENCE,
 		DOUBLE_HIT: MULTI_HIT_SEQUENCE,
 		TWINEEDLE: TWINEEDLE_SEQUENCE,

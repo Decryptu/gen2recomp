@@ -1928,3 +1928,264 @@ func test_struggling_counts_as_a_turn_even_though_it_spends_no_pp() -> void:
 
 	assert_eq(battle.move_for(Gen2Battle.PLAYER, 0), Gen2Damage.STRUGGLE)
 	assert_eq(struggling.turns_taken, 1)
+
+
+## `DetermineMoveOrder`'s `.equal_priority` block: a Quick Claw is rolled after
+## priority and before speed, so it turns over a matchup the speeds had already
+## settled.
+func test_a_quick_claw_can_beat_a_faster_pokemon_to_the_punch() -> void:
+	var claimed: int = 0
+	for seed: int in 200:
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		)
+		battle.rng.seed = seed
+		battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+
+		if battle.order({Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE})[0] \
+			== Gen2Battle.PLAYER:
+			claimed += 1
+
+	assert_between(claimed, 25, 70, "roughly sixty in 256 across two hundred seeds")
+
+
+## Priority is settled first, so no claw carries a Quick Attack.
+func test_a_quick_claw_never_overrides_priority() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+	for seed: int in 50:
+		battle.rng.seed = seed
+		# Counter is priority 0 against Tackle's 1, so the player is last however
+		# the claw rolls.
+		var acting: Array = battle.order({
+			Gen2Battle.PLAYER: Fixture.COUNTER, Gen2Battle.ENEMY: Fixture.TACKLE,
+		})
+		assert_eq(acting[0], Gen2Battle.ENEMY)
+
+
+## `.both_have_quick_claw` rolls the enemy's first outside a link battle, and the
+## player's only after it has come up short.
+func test_two_quick_claws_roll_the_enemys_first() -> void:
+	var enemy_first: int = 0
+	var player_first: int = 0
+	for seed: int in 300:
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+		)
+		battle.rng.seed = seed
+		battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+		battle.mon(Gen2Battle.ENEMY).item = Fixture.QUICK_CLAW
+
+		if battle.order({
+			Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE,
+		})[0] == Gen2Battle.ENEMY:
+			enemy_first += 1
+		else:
+			player_first += 1
+
+	# Pikachu is faster, so it leads on speed whenever neither claw fires. The
+	# enemy can only lead through its own claw, which is the point.
+	assert_gt(enemy_first, 0, "the enemy's claw has to be able to fire")
+	assert_gt(player_first, enemy_first, "and it is the rarer of the two")
+
+
+## With no claw anywhere the order is the speed comparison it always was.
+func test_no_quick_claw_leaves_the_order_to_speed() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	for seed: int in 30:
+		battle.rng.seed = seed
+		assert_eq(
+			battle.order({
+				Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE,
+			})[0],
+			Gen2Battle.ENEMY
+		)
+
+
+## `HandleLeftovers`: a sixteenth back every turn, and nothing on a Pokémon
+## already at full health.
+func test_leftovers_gives_back_a_sixteenth_a_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.LEFTOVERS
+	var expected: int = Gen2HeldItem.leftovers_healing(holder.max_hp())
+
+	var full: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(_of_type(full, Gen2Battle.RECOVERED_WITH_ITEM).size(), 0, "already at full health")
+
+	holder.hp = holder.max_hp() - expected - 5
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var healed: Dictionary = _first(events, Gen2Battle.RECOVERED_WITH_ITEM)
+
+	assert_false(healed.is_empty(), JSON.stringify(events))
+	assert_eq(int(healed["amount"]), expected)
+	assert_eq(int(healed["item"]), Fixture.LEFTOVERS, "and it is not spent")
+	assert_eq(holder.item, Fixture.LEFTOVERS)
+
+
+## `HandleHPHealingItem` wants the holder strictly under half, and the berry is
+## spent when it fires: `UseOpponentItem` reaches `ConsumeHeldItem`.
+func test_a_berry_fires_under_half_health_and_is_spent() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.GOLD_BERRY
+
+	@warning_ignore("integer_division")
+	holder.hp = holder.max_hp() / 2
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(holder.item, Fixture.GOLD_BERRY, "half is not under half")
+
+	holder.hp = 10
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var used: Dictionary = _first(events, Gen2Battle.RECOVERED_USING_ITEM)
+
+	assert_false(used.is_empty(), JSON.stringify(events))
+	assert_eq(int(used["amount"]), 30, "the Gold Berry's own parameter")
+	assert_eq(holder.hp, 40)
+	assert_eq(holder.item, 0, "spent")
+
+
+## `HandleMysteryberry` refills the first move that ran out, five points or one
+## for Sketch, and spends itself doing it.
+func test_mysteryberry_refills_the_first_empty_move() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL, Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.MYSTERYBERRY
+	holder.pp[1] = 0
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var restored: Dictionary = _first(events, Gen2Battle.RESTORED_PP)
+
+	assert_false(restored.is_empty(), JSON.stringify(events))
+	assert_eq(int(restored["slot"]), 1)
+	assert_eq(holder.pp_left(1), Gen2HeldItem.RESTORED_PP)
+	assert_eq(holder.item, 0, "spent")
+
+
+## `UseHeldStatusHealingItem` answers the moment the status lands rather than
+## waiting for the end of the turn.
+func test_a_status_berry_answers_the_moment_the_status_lands() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.THUNDER_WAVE]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.ENEMY)
+	holder.item = Fixture.MIRACLEBERRY
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var types: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+
+	assert_eq(holder.status, Gen2Status.NONE)
+	assert_eq(holder.item, 0)
+	assert_lt(
+		types.find(Gen2Battle.STATUS_INFLICTED), types.find(Gen2Battle.RECOVERED_USING_ITEM),
+		"the berry answers behind the status, not at the end of the turn"
+	)
+	# And the enemy still got its move: the berry costs nothing.
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 2)
+
+
+## A berry that answers for one status says nothing about another.
+func test_a_status_berry_only_answers_for_its_own_status() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.PSNCUREBERRY
+	holder.status = Gen2Status.BURN
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(holder.status, Gen2Status.BURN, "a poison berry is no use against a burn")
+	assert_eq(holder.item, Fixture.PSNCUREBERRY)
+
+	holder.status = Gen2Status.POISON
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(holder.status, Gen2Status.NONE)
+	assert_eq(holder.item, 0)
+
+
+## `UseConfusionHealingItem` takes Bitter Berry and Miracleberry alike, and the
+## Miracleberry is spent by whichever of the two came first: the status byte is
+## read before the confusion, so a Pokémon carrying both keeps the confusion.
+func test_a_miracleberry_answers_only_one_of_a_status_and_a_confusion() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.MIRACLEBERRY
+	holder.status = Gen2Status.BURN
+	holder.substatus |= Gen2Substatus.CONFUSED
+	holder.confusion_turns = 4
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(holder.status, Gen2Status.NONE, "the status went first")
+	assert_true(Gen2Substatus.has(holder.substatus, Gen2Substatus.CONFUSED))
+	assert_eq(holder.item, 0)
+
+
+func test_a_bitter_berry_clears_a_confusion() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var holder: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	holder.item = Fixture.BITTER_BERRY
+	holder.substatus |= Gen2Substatus.CONFUSED
+	holder.confusion_turns = 4
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(events, Gen2Battle.ITEM_HEALED_CONFUSION).is_empty())
+	assert_false(Gen2Substatus.has(holder.substatus, Gen2Substatus.CONFUSED))
+	assert_eq(holder.confusion_turns, 0)
+	assert_eq(holder.item, 0)
+
+
+## `HandleLeftovers` and `HandleMysteryberry` read `GetUserItem` after
+## `SetPlayerTurn`, so the player is handled first; `HandleHealingItems` reads
+## `GetOpponentItem` after the same call, so the enemy is.
+func test_the_between_turn_items_do_not_agree_on_an_order() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		battle.mon(side).hp = 10
+
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.LEFTOVERS
+	battle.mon(Gen2Battle.ENEMY).item = Fixture.LEFTOVERS
+	var leftovers: Array = _of_type(
+		battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0)),
+		Gen2Battle.RECOVERED_WITH_ITEM
+	)
+	assert_eq(leftovers.size(), 2)
+	assert_eq(int(leftovers[0]["side"]), Gen2Battle.PLAYER)
+
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.GOLD_BERRY
+	battle.mon(Gen2Battle.ENEMY).item = Fixture.GOLD_BERRY
+	var berries: Array = _of_type(
+		battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0)),
+		Gen2Battle.RECOVERED_USING_ITEM
+	)
+	assert_eq(berries.size(), 2)
+	assert_eq(int(berries[0]["side"]), Gen2Battle.ENEMY, "the healing items go the other way")
