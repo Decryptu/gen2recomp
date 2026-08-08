@@ -72,6 +72,14 @@ const EARTHQUAKE: int = 89
 const FISSURE: int = 90
 const MAGNITUDE: int = 222
 
+## The two trapping effects, at their real move numbers because the landing text
+## is chosen by number rather than by effect. Wrap and Bind are one effect apart
+## from each other only in that text, which is what makes the pair enough to see
+## that an already-bound target keeps the move that bound it.
+const WRAP: int = 35
+const BIND: int = 20
+const MEAN_LOOK: int = 212
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -332,6 +340,13 @@ static func _moves() -> Array:
 		ATTRACT_MOVE: ["ATTRACT", 0, NORMAL, 255, 15, Gen2MoveEffect.ATTRACT, 0],
 		MIST_MOVE: ["MIST", 0, NORMAL, 255, 30, Gen2MoveEffect.MIST, 0],
 		FOCUS_ENERGY_MOVE: ["FOCUS ENERGY", 0, NORMAL, 255, 30, Gen2MoveEffect.FOCUS_ENERGY, 0],
+		# Real rows, accuracy bytes included: Wrap and Bind can miss, so a test
+		# that needs one to land raises the attacker's accuracy stage rather than
+		# pretending either move always hits. Mean Look really is 255, and its
+		# sequence never rolls it anyway.
+		WRAP: ["WRAP", 15, NORMAL, 216, 20, Gen2MoveEffect.TRAP_TARGET, 0],
+		BIND: ["BIND", 15, NORMAL, 191, 20, Gen2MoveEffect.TRAP_TARGET, 0],
+		MEAN_LOOK: ["MEAN LOOK", 0, NORMAL, 255, 5, Gen2MoveEffect.MEAN_LOOK, 0],
 	}
 
 	var out: Array = []

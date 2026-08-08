@@ -139,6 +139,25 @@ const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 const ENCORE_INFLICTED: StringName = &"encore_inflicted"
 const ENCORE_ENDED: StringName = &"encore_ended"
 
+## Bind, Wrap, Fire Spin, Clamp and Whirlpool: the target was bound, lost a
+## sixteenth of its health to the binding, or was let go. [code]move[/code] on all
+## three is the move that did it, which is what the cartridge's own texts name
+## through `wStringBuffer1`. The release carries no damage, because the turn the
+## counter reaches zero costs nothing.
+const TRAPPED: StringName = &"trapped"
+const HURT_BY_TRAP: StringName = &"hurt_by_trap"
+const RELEASED_FROM_TRAP: StringName = &"released_from_trap"
+
+## Mean Look and Spider Web landed. Set on the user, cleared by any send-out;
+## a second one from the same user is [constant MOVE_FAILED].
+const CANT_ESCAPE_SET: StringName = &"cant_escape_set"
+
+## A switch `TryPlayerSwitch` refused, which costs nothing at all: it prints
+## `BattleText_MonCantBeRecalled` and jumps back to `BattleMenuPKMN_Loop`, so no
+## turn is spent and the enemy does not move. The same shape as
+## [constant RUN_BLOCKED].
+const SWITCH_BLOCKED: StringName = &"switch_blocked"
+
 ## Mist and Focus Energy, set on the user. Both fail with [constant MOVE_FAILED]
 ## on a second use rather than silently re-applying.
 const MIST_SET: StringName = &"mist_set"
@@ -364,10 +383,11 @@ func has_fled() -> bool:
 ## that came up short and costs the turn, or [code]&"blocked"[/code] for a
 ## refusal that costs nothing. `how` or `reason` says which branch answered.
 ##
-## Two of the source's checks are missing rather than passing, and they are the
-## two whose state this engine does not keep: `SUBSTATUS_CANT_RUN` (Mean Look and
-## Spider Web) and `wPlayerWrapCount` (the trapping moves). Neither effect is
-## implemented, so there is nothing to read; both belong here the day they are.
+## Both trapping checks are refusals that cost nothing rather than failed rolls:
+## `.cant_escape` prints and returns without writing
+## `BATTLEPLAYERACTION_USEITEM`, so `BattleMenu_Run` falls through to
+## `jp BattleMenu`. Only `.cant_escape_2`, the roll that came up short, spends
+## the turn.
 func run_odds() -> Dictionary:
 	if battle_type in ALWAYS_ESCAPES:
 		return {"outcome": &"fled", "how": &"battle_type", "battle_type": battle_type}
@@ -378,6 +398,15 @@ func run_odds() -> Dictionary:
 
 	var runner: Gen2BattleMon = mon(PLAYER)
 	var chaser: Gen2BattleMon = mon(ENEMY)
+
+	# Both ahead of the Smoke Ball, which is the source's order, so a trapped
+	# holder does not walk out on the item either. The flag is read off whoever
+	# is doing the trapping and the counter off whoever is bound.
+	if Gen2Substatus.has(chaser.substatus, Gen2Substatus.CANT_RUN):
+		return {"outcome": &"blocked", "reason": &"cant_run"}
+	if runner.trapped_turns > 0:
+		return {"outcome": &"blocked", "reason": &"trapped", "move": runner.trapping_move}
+
 	if _held_effect(runner) == HELD_ESCAPE:
 		return {"outcome": &"fled", "how": &"item", "item": runner.item}
 
@@ -531,6 +560,7 @@ func send_out(side: int, index: int) -> Array:
 	var withdrawing: bool = not current.active_mon().is_fainted()
 	if not current.send_out(index):
 		return events
+	_clear_trapping()
 
 	# Nothing is called back after a faint, so the first half of the pair is only
 	# there when there was somebody to call back.
@@ -545,6 +575,32 @@ func send_out(side: int, index: int) -> Array:
 	})
 	(_participants[side] as Dictionary)[index] = true
 	return events
+
+
+## Ends the whole trapping relationship, on both sides at once.
+##
+## `NewBattleMonStatus` and `NewEnemyMonStatus` each clear both wrap counters and
+## the opponent's `SUBSTATUS_CANT_RUN` beside their own substatus block, so a
+## send-out by either side frees the other as well.
+## [method Gen2BattleMon.reset_volatile] cannot answer for that on its own: it
+## runs on the Pokémon leaving, and half of this state lives on the one staying.
+func _clear_trapping() -> void:
+	for side: int in [PLAYER, ENEMY]:
+		var battler: Gen2BattleMon = mon(side)
+		battler.trapped_turns = 0
+		battler.trapping_move = 0
+		battler.substatus &= ~Gen2Substatus.CANT_RUN
+
+
+## Whether `TryPlayerSwitch` would refuse to recall the player's Pokémon: it is
+## bound, or the opponent is holding it with Mean Look or Spider Web.
+##
+## Player-only, as the cartridge's is. `AI_Switch` makes no such check, so the
+## enemy switches out of either one, and that asymmetry is the cartridge's rather
+## than an omission here.
+func switch_blocked() -> bool:
+	return mon(PLAYER).trapped_turns > 0 \
+		or Gen2Substatus.has(mon(ENEMY).substatus, Gen2Substatus.CANT_RUN)
 
 
 ## Both sides act, and the turn plays out. Returns the events in the order they
@@ -562,6 +618,16 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
 		return events
+
+	# Settled before anything is spent, because `TryPlayerSwitch` runs at menu
+	# time: the refusal jumps back to `BattleMenuPKMN_Loop` with no turn taken.
+	if _is_switch(player_action) and switch_blocked():
+		events.append({
+			"type": SWITCH_BLOCKED, "side": PLAYER,
+			"index": party(PLAYER).active, "species": mon(PLAYER).species,
+		})
+		return events
+
 	reset_damage_taken()
 
 	if _is_run(player_action):
@@ -613,6 +679,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		_act(side, slot, move_for(side, slot), events)
 
 	_residual_damage(acting, events)
+	_tick_wrap(events)
 	_tick_encore(acting, events)
 	_award_experience(events)
 
@@ -657,6 +724,46 @@ func _residual_damage(acting: Array, events: Array) -> void:
 			"side": side,
 			"status": current.status,
 			"name": Gen2Status.name_of(current.status),
+			"amount": taken,
+			"hp": current.hp,
+			"max_hp": current.max_hp(),
+		})
+		if current.is_fainted():
+			events.append({"type": FAINTED, "side": side})
+
+
+## `HandleWrap`: one turn off each bound Pokémon's counter, and a sixteenth of
+## its health with it.
+##
+## Between [method _residual_damage] and [method _tick_encore] because
+## `HandleBetweenTurnEffects` runs future sight, weather, wrap and perish song
+## before its leftovers block and `HandleEncore` last, while poison and burn are
+## taken inside each side's own move well ahead of any of it.
+##
+## Always the player first, whoever moved first: unlike `ResidualDamage`, which
+## runs inside a turn and so follows it, `HandleWrap` is `SetPlayerTurn` then
+## `SetEnemyTurn` outside a link battle.
+##
+## The turn the counter reaches zero is the release and costs nothing, which is
+## why the rolled three to six turns are two to five turns of damage.
+func _tick_wrap(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		var current: Gen2BattleMon = mon(side)
+		if current.is_fainted() or current.trapped_turns <= 0:
+			continue
+
+		var move_number: int = current.trapping_move
+		current.trapped_turns -= 1
+		if current.trapped_turns <= 0:
+			current.trapping_move = 0
+			events.append({"type": RELEASED_FROM_TRAP, "side": side, "move": move_number})
+			continue
+
+		var taken: int = current.take_damage(Gen2Substatus.trap_damage(current.max_hp()))
+		events.append({
+			"type": HURT_BY_TRAP,
+			"side": side,
+			"move": move_number,
 			"amount": taken,
 			"hp": current.hp,
 			"max_hp": current.max_hp(),

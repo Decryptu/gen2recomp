@@ -265,6 +265,16 @@ func _faint(mon: Gen2BattleMon) -> void:
 	mon.take_damage(mon.max_hp())
 
 
+## Holds the player where it stands, the two ways the cartridge can: Mean Look's
+## flag on whoever cast it, or a binding move's counter on whoever it caught.
+func _hold(battle: Gen2Battle, held_by: StringName) -> void:
+	if held_by == &"mean_look":
+		battle.mon(Gen2Battle.ENEMY).substatus |= Gen2Substatus.CANT_RUN
+		return
+	battle.mon(Gen2Battle.PLAYER).trapped_turns = 3
+	battle.mon(Gen2Battle.PLAYER).trapping_move = Fixture.WRAP
+
+
 func test_a_battle_is_not_over_while_a_party_still_has_somebody() -> void:
 	var battle: Gen2Battle = _party_battle(
 		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
@@ -1483,3 +1493,243 @@ func test_a_failed_run_costs_the_turn_and_the_wild_still_attacks() -> void:
 	assert_false(battle.is_over())
 	assert_eq(battle.flee_attempts, 1)
 	assert_eq(int(battle.run_odds()["odds"]), 77, "the failed attempt did not raise the odds")
+
+
+## `.cant_escape` prints and returns without writing
+## `BATTLEPLAYERACTION_USEITEM`, so `BattleMenu_Run` falls through to
+## `jp BattleMenu`: unlike the roll that comes up short, neither trapping check
+## spends the turn or counts as an attempt.
+func test_a_trapped_runner_is_refused_without_spending_the_turn() -> void:
+	for held_by: StringName in [&"mean_look", &"wrap"]:
+		# A matchup that would otherwise get away on speed alone, so the refusal
+		# is the only thing that can be answering.
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+		)
+		_hold(battle, held_by)
+		var before: int = battle.mon(Gen2Battle.PLAYER).hp
+
+		var events: Array = battle.take_actions(
+			Gen2Battle.run_away(), Gen2Battle.use_move(0)
+		)
+
+		assert_eq(_of_type(events, Gen2Battle.RUN_BLOCKED).size(), 1, JSON.stringify(events))
+		assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 0, "the wild attacked anyway")
+		assert_eq(battle.mon(Gen2Battle.PLAYER).hp, before)
+		assert_eq(battle.flee_attempts, 0)
+		assert_false(battle.has_fled())
+
+
+## Both checks sit ahead of the Smoke Ball in `TryToRunAwayFromBattle`, so
+## holding one is no way out of either.
+func test_the_smoke_ball_does_not_carry_a_trapped_runner_out() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.SMOKE_BALL
+	assert_eq(battle.run_odds()["how"], &"item", "the item has to be the answer without a trap")
+
+	battle.mon(Gen2Battle.PLAYER).trapped_turns = 3
+
+	var attempt: Dictionary = battle.run_odds()
+
+	assert_eq(attempt["outcome"], &"blocked", JSON.stringify(attempt))
+	assert_eq(attempt["reason"], &"trapped")
+
+
+## `TryPlayerSwitch` refuses at menu time and jumps back to
+## `BattleMenuPKMN_Loop`, so the refusal is free: no switch, no enemy move.
+func test_a_trapped_pokemon_cannot_be_recalled() -> void:
+	for held_by: StringName in [&"mean_look", &"wrap"]:
+		var battle: Gen2Battle = _party_battle(
+			[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+			[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+		)
+		_hold(battle, held_by)
+		var before: int = battle.mon(Gen2Battle.PLAYER).hp
+
+		var events: Array = battle.take_actions(
+			Gen2Battle.switch_to(1), Gen2Battle.use_move(0)
+		)
+
+		assert_eq(_of_type(events, Gen2Battle.SWITCH_BLOCKED).size(), 1, JSON.stringify(events))
+		assert_eq(_of_type(events, Gen2Battle.SENT_OUT).size(), 0)
+		assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 0, "the enemy moved anyway")
+		assert_eq(battle.party(Gen2Battle.PLAYER).active, 0)
+		assert_eq(battle.mon(Gen2Battle.PLAYER).hp, before)
+
+
+## `AI_Switch` makes neither check, so the asymmetry is the cartridge's: only the
+## player is held.
+func test_the_enemy_switches_out_of_a_trap_the_player_could_not_leave() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.mon(Gen2Battle.ENEMY).trapped_turns = 3
+	battle.mon(Gen2Battle.PLAYER).substatus |= Gen2Substatus.CANT_RUN
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
+	)
+
+	assert_eq(_of_type(events, Gen2Battle.SENT_OUT).size(), 1, JSON.stringify(events))
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1)
+
+
+## `HandleWrap` decrements before it looks, so the turn the counter reaches zero
+## is the release and costs nothing. Three to six turns of counter are two to
+## five turns of damage, which is what the source comments.
+func test_being_bound_costs_a_sixteenth_a_turn_until_the_release() -> void:
+	for counter: int in range(
+		Gen2Substatus.MIN_TRAP_TURNS, Gen2Substatus.MAX_TRAP_TURNS + 1
+	):
+		# Growl both sides, so nothing but the binding takes any health and the
+		# battle cannot end partway through the count.
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+		)
+		var bound: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+		var expected: int = Gen2Substatus.trap_damage(bound.max_hp())
+		bound.trapped_turns = counter
+		bound.trapping_move = Fixture.WRAP
+
+		var hurt: int = 0
+		var released: int = 0
+		for _turn: int in counter:
+			var events: Array = battle.take_actions(
+				Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+			)
+			for event: Dictionary in _of_type(events, Gen2Battle.HURT_BY_TRAP):
+				if int(event["side"]) == Gen2Battle.PLAYER:
+					hurt += 1
+					assert_eq(int(event["amount"]), expected)
+					assert_eq(int(event["move"]), Fixture.WRAP)
+			for event: Dictionary in _of_type(events, Gen2Battle.RELEASED_FROM_TRAP):
+				if int(event["side"]) == Gen2Battle.PLAYER:
+					released += 1
+					assert_eq(int(event["move"]), Fixture.WRAP)
+
+		assert_eq(hurt, counter - 1, "a counter of %d is %d turns of damage" % [
+			counter, counter - 1
+		])
+		assert_eq(released, 1, "a counter of %d was never released" % counter)
+		assert_eq(bound.trapped_turns, 0)
+		assert_eq(bound.trapping_move, 0)
+
+
+## `HandleBetweenTurnEffects` runs wrap after the poison and burn each side took
+## inside its own move, and `HandleEncore` after all of it.
+func test_the_wrap_tick_sits_between_the_status_damage_and_encore() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var bound: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	bound.status = Gen2Status.POISON
+	bound.trapped_turns = 3
+	bound.trapping_move = Fixture.WRAP
+	bound.encored_slot = 0
+	bound.encore_turns = 1
+	bound.substatus |= Gen2Substatus.ENCORED
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+	var types: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+
+	assert_lt(
+		types.find(Gen2Battle.HURT_BY_STATUS), types.find(Gen2Battle.HURT_BY_TRAP)
+	)
+	assert_lt(
+		types.find(Gen2Battle.HURT_BY_TRAP), types.find(Gen2Battle.ENCORE_ENDED)
+	)
+
+
+## `HandleWrap` is `SetPlayerTurn` then `SetEnemyTurn` outside a link battle, so
+## it does not follow the order the two sides moved in the way `ResidualDamage`,
+## which runs inside a turn, does.
+func test_the_wrap_tick_is_always_the_player_first() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		battle.mon(side).trapped_turns = 3
+		battle.mon(side).trapping_move = Fixture.WRAP
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+	var hurt: Array = _of_type(events, Gen2Battle.HURT_BY_TRAP)
+
+	assert_eq(_first(events, Gen2Battle.USED_MOVE)["side"], Gen2Battle.ENEMY, "the enemy is faster")
+	assert_eq(hurt.size(), 2)
+	assert_eq(int(hurt[0]["side"]), Gen2Battle.PLAYER)
+	assert_eq(int(hurt[1]["side"]), Gen2Battle.ENEMY)
+
+
+## `NewBattleMonStatus` and `NewEnemyMonStatus` each clear both wrap counters and
+## the opponent's `SUBSTATUS_CANT_RUN`, so a send-out by either side ends the
+## whole relationship rather than only its own half.
+func test_a_send_out_frees_both_sides_of_a_trap() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	battle.mon(Gen2Battle.ENEMY).trapped_turns = 3
+	battle.mon(Gen2Battle.ENEMY).trapping_move = Fixture.WRAP
+	battle.mon(Gen2Battle.ENEMY).substatus |= Gen2Substatus.CANT_RUN
+	# The player is the one leaving, and the enemy's half of the state is the
+	# half [method Gen2BattleMon.reset_volatile] cannot reach.
+	battle.mon(Gen2Battle.PLAYER).substatus |= Gen2Substatus.CANT_RUN
+
+	battle.send_out(Gen2Battle.PLAYER, 1)
+
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		assert_eq(battle.mon(side).trapped_turns, 0)
+		assert_eq(battle.mon(side).trapping_move, 0)
+		assert_false(Gen2Substatus.has(battle.mon(side).substatus, Gen2Substatus.CANT_RUN))
+
+
+## Being bound stops a Pokémon leaving, not moving: `HandleWrap` takes the
+## sixteenth and nothing in `CheckStatus` reads the counter at all.
+func test_being_bound_does_not_stop_the_bound_pokemon_moving() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.mon(Gen2Battle.PLAYER).trapped_turns = 3
+	battle.mon(Gen2Battle.PLAYER).trapping_move = Fixture.WRAP
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 2, JSON.stringify(events))
+
+
+## A Pokémon that goes down to the binding faints there, the same shape a burn
+## or a poison already has.
+func test_a_pokemon_can_faint_to_the_binding() -> void:
+	# Growl both sides, so the binding is the only thing that can take the last
+	# point of health.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var bound: Gen2BattleMon = battle.mon(Gen2Battle.ENEMY)
+	bound.hp = 1
+	bound.trapped_turns = 3
+	bound.trapping_move = Fixture.WRAP
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+
+	assert_false(_first(events, Gen2Battle.HURT_BY_TRAP).is_empty(), JSON.stringify(events))
+	assert_true(bound.is_fainted())
+	assert_true(battle.is_over())

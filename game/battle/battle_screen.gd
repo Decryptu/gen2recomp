@@ -60,6 +60,14 @@ const STAT_NAMES: Dictionary = {
 	"evasion": "EVASIVENESS",
 }
 
+## The three trapping moves whose landing line spells the move out, since
+## `BattleCommand_TrapTarget`'s `.Traps` table writes them into the text rather
+## than reading a name buffer. Fire Spin and Whirlpool share the line that names
+## nothing, so neither needs a number here.
+const BIND: int = 20
+const WRAP: int = 35
+const CLAMP: int = 128
+
 var _data: GameData = null
 var _injected_data: GameData = null
 ## Whatever the mod host supplies. Typed as Node because a registered renderer
@@ -1253,6 +1261,20 @@ func _describe(event: Dictionary) -> String:
 			return "%s got an encore!" % _battler_name(int(event["target"]))
 		Gen2Battle.ENCORE_ENDED:
 			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.TRAPPED:
+			return _trapped_text(event)
+		Gen2Battle.HURT_BY_TRAP:
+			return "%s's hurt by %s!" % [
+				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.RELEASED_FROM_TRAP:
+			return "%s was released from %s!" % [
+				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.CANT_ESCAPE_SET:
+			return "%s can't escape now!" % _battler_name(int(event["target"]))
+		Gen2Battle.SWITCH_BLOCKED:
+			return "%s can't be recalled!" % _battler_name(side)
 		Gen2Battle.MIST_SET:
 			return "%s is shrouded in mist!" % _battler_name(side)
 		Gen2Battle.FOCUS_ENERGY_SET:
@@ -1290,6 +1312,24 @@ func _describe(event: Dictionary) -> String:
 ## The sentence for a stat that actually moved. Ancientpower's [code]"all"[/code]
 ## reads as one sentence about the Pokémon rather than five about its stats,
 ## because that is the one thing the event says that a single stat's does not.
+## The sentence a trapping move lands with, which is a per-move line rather than
+## one sentence with the move's name in it: `BattleCommand_TrapTarget`'s `.Traps`
+## table names five texts, three of which spell the move out and two of which do
+## not name it at all. A move number the table does not know cannot happen, since
+## those five are the whole of `EFFECT_TRAP_TARGET`.
+func _trapped_text(event: Dictionary) -> String:
+	var who: String = _battler_name(int(event["target"]))
+	var user: String = _battler_name(int(event["side"]))
+	match int(event["move"]):
+		BIND:
+			return "%s used BIND on %s!" % [user, who]
+		WRAP:
+			return "%s was WRAPPED by %s!" % [who, user]
+		CLAMP:
+			return "%s was CLAMPED by %s!" % [who, user]
+	return "%s was trapped!" % who
+
+
 func _stat_changed_text(event: Dictionary) -> String:
 	var who: String = _battler_name(int(event["target"]))
 	if String(event["stat"]) == "all":

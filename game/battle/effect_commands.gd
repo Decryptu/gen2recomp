@@ -178,6 +178,18 @@ const MIST: StringName = &"mist"
 ## switch. Fails, without re-applying, on a second use.
 const FOCUS_ENERGY: StringName = &"focusenergy"
 
+## Binds the target for a rolled number of turns: it can neither run nor be
+## recalled, and loses a sixteenth of its health at the end of each of them.
+## Nothing here stops it moving, which is the Generation 2 rule. A target that is
+## already bound is left alone without a failure message, since
+## `BattleCommand_TrapTarget` simply returns.
+const TRAP_TARGET: StringName = &"traptarget"
+
+## Mean Look and Spider Web: the target can neither run nor be recalled, with no
+## counter and no damage behind it. The flag goes on the user, which is what
+## [constant Gen2Substatus.CANT_RUN] documents.
+const ARENA_TRAP: StringName = &"arenatrap"
+
 ## Raises and lowers a stat by one stage or two, named as the cartridge names
 ## them and in [constant Gen2BattleMon.STAGED_STATS] plus
 ## [constant Gen2BattleMon.STAGED_ODDS] order, which is also the order the effect
@@ -384,6 +396,10 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_mist(turn)
 		FOCUS_ENERGY:
 			_focus_energy(turn)
+		TRAP_TARGET:
+			_trap_target(turn)
+		ARENA_TRAP:
+			_arena_trap(turn)
 		ALL_STATS_UP:
 			_all_stats_up(turn)
 		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
@@ -596,10 +612,22 @@ static func _recoil(turn: Gen2Turn) -> void:
 
 
 ## The defender first, then the attacker, which is the order they can go down in.
+##
+## A defender that went down ends the move: `BattleCommand_CheckFaint` finishes
+## on `jp EndMoveEffect`, so the steps the cartridge places behind it, which is
+## every secondary status and [constant TRAP_TARGET], never run against something
+## that has already fainted. The attacker going down to its own recoil ends
+## nothing, because the cartridge tests only the opponent's HP here.
+##
+## The commands behind it keep their own fainted-target check as well, since the
+## lists that have no faint step at all, Twineedle's among them, can still reach
+## one through [constant MULTI_HIT].
 static func _check_faint(turn: Gen2Turn) -> void:
 	for side: int in [turn.target, turn.side]:
 		if turn.battle.mon(side).is_fainted():
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
+	if turn.battle.mon(turn.target).is_fainted():
+		turn.end()
 
 
 ## CantMove on the cartridge cancels a pending two-turn move, Rollout or
@@ -1186,6 +1214,45 @@ static func _focus_energy(turn: Gen2Turn) -> void:
 
 	mon.substatus |= Gen2Substatus.FOCUS_ENERGY
 	turn.emit(Gen2Battle.FOCUS_ENERGY_SET)
+
+
+## Binds the target for three to six turns, of which
+## [method Gen2Battle._tick_wrap] spends the first without damage.
+##
+## `BattleCommand_TrapTarget`'s own three refusals, in its order: a missed move,
+## a target that is already bound, and a target behind a Substitute. The first is
+## structural here, since [method _check_hit] ends the move before this step is
+## reached, and the third has nothing to read until Substitute exists. An
+## already-bound target is silent rather than a [constant Gen2Battle.MOVE_FAILED],
+## because the cartridge returns without printing anything.
+static func _trap_target(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.trapped_turns > 0:
+		return
+
+	defender.trapped_turns = Gen2Substatus.roll_trap_turns(turn.rng())
+	defender.trapping_move = turn.move_number
+	turn.emit(Gen2Battle.TRAPPED, {
+		"target": turn.target, "move": turn.move_number, "turns": defender.trapped_turns,
+	})
+
+
+## Stops the target running or being recalled for as long as the user stays out.
+##
+## `BattleCommand_ArenaTrap` fails against a target that is flying or
+## underground (`CheckHiddenOpponent`) and against one already held, and the
+## check for "already held" is the user's own flag rather than the target's: two
+## Mean Looks from the same Pokémon is what fails, not a Mean Look on a target
+## the opponent's previous Pokémon had already caught.
+static func _arena_trap(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	if _is_hidden(turn.defender().substatus) \
+		or Gen2Substatus.has(attacker.substatus, Gen2Substatus.CANT_RUN):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	attacker.substatus |= Gen2Substatus.CANT_RUN
+	turn.emit(Gen2Battle.CANT_ESCAPE_SET, {"target": turn.target})
 
 
 ## Moves one stat by one command's worth, and writes down who it happened to and

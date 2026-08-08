@@ -138,6 +138,11 @@ const FOCUS_ENERGY: int = 47
 const ATTRACT: int = 120
 const ENCORE: int = 90
 
+## The two trapping effects, numbered the same way. Bind, Wrap, Fire Spin, Clamp
+## and Whirlpool carry the first; Mean Look and Spider Web the second.
+const TRAP_TARGET: int = 42
+const MEAN_LOOK: int = 106
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
@@ -436,6 +441,31 @@ const ENCORE_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## An ordinary attack that binds what it hits: `TrapTarget` is `NormalHit` with
+## `traptarget` in `kingsrock`'s place, behind the faint check, so a knocked out
+## target is never bound.
+const TRAP_TARGET_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.TRAP_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Mean Look and Spider Web, which are four commands and no accuracy roll:
+## `MeanLook` has no `checkhit`, so the 100% both moves carry in the move table
+## is never consulted and neither one can miss.
+const MEAN_LOOK_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.ARENA_TRAP,
+	Gen2EffectCommands.END_MOVE,
+]
+
 ## [constant MULTI_HIT] and [constant DOUBLE_HIT]: the accuracy roll happens
 ## once, the way the cartridge's own script checks it before the loop that
 ## repeats the hit even starts, and everything from the critical roll onward
@@ -678,6 +708,8 @@ static func _sequences() -> Dictionary:
 		DISABLE: DISABLE_SEQUENCE,
 		ATTRACT: ATTRACT_SEQUENCE,
 		ENCORE: ENCORE_SEQUENCE,
+		TRAP_TARGET: TRAP_TARGET_SEQUENCE,
+		MEAN_LOOK: MEAN_LOOK_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DRAIN_SEQUENCE,
 		MULTI_HIT: MULTI_HIT_SEQUENCE,

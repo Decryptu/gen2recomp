@@ -100,6 +100,13 @@ var encored_slot: int = -1
 ## How many turns [member encored_slot] stays locked.
 var encore_turns: int = 0
 
+## `wPlayerWrapCount` and `wPlayerTrappingMove`: how many turns this Pokémon
+## stays bound by Bind, Wrap, Fire Spin, Clamp or Whirlpool, and which of them
+## bound it. On the Pokémon that is trapped rather than the one that trapped it,
+## which is the side `BattleCommand_TrapTarget` writes.
+var trapped_turns: int = 0
+var trapping_move: int = 0
+
 ## The move this Pokémon last used, by move number, or zero for none: what
 ## Disable and Encore both search a target's own move list for. The cartridge's
 ## own `wLastPlayerMove`/`wLastEnemyMove` clear on a switch exactly the way this
@@ -243,6 +250,8 @@ func reset_volatile() -> void:
 	disable_turns = 0
 	encored_slot = -1
 	encore_turns = 0
+	trapped_turns = 0
+	trapping_move = 0
 	last_move_used = 0
 
 
