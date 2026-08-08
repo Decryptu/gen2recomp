@@ -251,13 +251,14 @@ Headless tools, all against a real imported cache:
 | `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian, in all three games |
 | `validate_pewter.gd` | Fuchsia's gate out and the five ungated connections back to Vermilion, the eight-cell pocket the Snorlax seals off the Route 11 crossing, Diglett's Cave's three regions and two ladders, Route 2's crossing onto Pewter once its tree is cut, and Pewter City's one south corridor and the gym sight line it owes, in all three games |
 | `validate_cinnabar.gd` | the four connections from Pewter down to Pallet, Pallet's pond and the south edge that only crosses while surfing, Route 21's sea, Cinnabar's two seamless land regions and which crossing reaches Blue, Route 20's sealed west channel and the east landfall behind it, Seafoam Gym, and Viridian Gym's two objects behind one event flag, in all three games |
+| `validate_mt_silver.gd` | the nine doors from Viridian Gym to Silver Cave Room 3, Viridian's west connection and Route 28's, Oak's lab, the Victory Road Gate's three regions and the black belt standing in each of the two cells that join them across all four flag combinations, Silver Cave Outside and its flypoint, the Pokecenter counter, each cave room as one region, and Red behind his own hide flag, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route: Johto, the Hall of Fame, and every Kanto gym
+# the full walked route: Johto, the Hall of Fame, every Kanto gym, and Red
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 

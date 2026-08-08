@@ -686,6 +686,56 @@ const VIRIDIAN_GYM_DOOR: Vector2i = Vector2i(32, 7)
 const BLUE_GYM_FACE: Vector2i = Vector2i(5, 4)
 const BADGE_EARTH: int = 15
 const EVENT_BEAT_BLUE: int = 1228
+const VIRIDIAN_GYM_EXIT: Vector2i = Vector2i(4, 17)
+
+## Mt. Silver. Every step past the gate is a warp or a connection, so the leg
+## needs only the map the walk west crosses onto (`constants/map_constants.asm`,
+## `data/maps/attributes.asm`). The three cave rooms are the one place the
+## profiles renumber, 74 to 76 in Crystal and 66 to 68 in Gold and Silver, which
+## is why `tools/validate_mt_silver.gd` splits them and this Crystal-only walk
+## does not name them at all.
+const SILVER_GROUP: int = 19
+const SILVER_CAVE_OUTSIDE_NUMBER: int = 2
+const ROUTE_22_NUMBER: int = 2
+## `maps/SilverCaveOutside.asm`'s MAPCALLBACK_NEWMAP, the leg's one flypoint.
+const ENGINE_FLYPOINT_SILVER_CAVE: int = 76
+
+## Pallet Town and Oak's lab. `maps/OaksLab.asm`'s Oak reads VAR_BADGES and takes
+## `.OpenMtSilver` only on `ifequal NUM_BADGES`, which is sixteen
+## (`constants/ram_constants.asm`), so this errand is the last badge's own
+## reward. Every branch then falls into `.CheckPokedex` and its
+## `special ProfOaksPCBoot`.
+const OAKS_LAB_DOOR: Vector2i = Vector2i(12, 11)
+const OAKS_LAB_EXIT: Vector2i = Vector2i(4, 11)
+const OAK_FACE: Vector2i = Vector2i(4, 3)
+const EVENT_TALKED_TO_OAK_IN_KANTO: int = 225
+const EVENT_OPENED_MT_SILVER: int = 1871
+
+## The Victory Road Gate is three regions joined by two single cells, and a black
+## belt stands in each (`maps/VictoryRoadGate.asm`). The right belt on (12,5)
+## joins the corridor to the Route 22 arm and is hidden by EVENT_FOUGHT_SNORLAX,
+## which `_wake_snorlax()` already set; the left belt on (7,5) joins it to the
+## Route 28 arm and is hidden by EVENT_OPENED_MT_SILVER. Oak is therefore the
+## gate on Mt. Silver, not a courtesy, and `tools/validate_mt_silver.gd` pins all
+## four flag combinations.
+const ROUTE_22_GATE_DOOR: Vector2i = Vector2i(13, 5)
+const GATE_WEST_DOOR: Vector2i = Vector2i(1, 7)
+
+## Silver Cave. Every room is one region, so each ladder is walked to directly.
+const SILVER_CAVE_POKECENTER_DOOR: Vector2i = Vector2i(23, 19)
+const SILVER_CAVE_POKECENTER_EXIT: Vector2i = Vector2i(3, 7)
+## The counter tile below the nurse is not walkable, the same as every other
+## Pokemon Center on the route, so she is faced from a cell placed directly.
+const SILVER_CAVE_NURSE_STAND: Vector2i = Vector2i(3, 2)
+const SILVER_CAVE_MOUTH: Vector2i = Vector2i(18, 11)
+const SILVER_CAVE_ROOM_1_LADDER: Vector2i = Vector2i(15, 1)
+const SILVER_CAVE_ROOM_2_LADDER: Vector2i = Vector2i(11, 5)
+## Red's own hide flag is EVENT_RED_IN_MT_SILVER, already pinned below for the
+## Hall of Fame that clears it.
+const RED_FACE: Vector2i = Vector2i(9, 11)
+## `data/trainers/parties.asm`: trainer class RED ($3f) with one party, which
+## `loadtrainer`'s one-based operand reaches as index 0.
+const TRAINER_CLASS_RED: int = 63
 
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
@@ -6828,6 +6878,308 @@ func _viridian_leg(
 		}
 	if not world.state.is_engine_flag_active(badge):
 		return {"ok": false, "path": path, "reason": "ENGINE_EARTHBADGE was not set"}
+	return _mt_silver_leg(world, save, random, data, path)
+
+
+## Viridian Gym to Red, which is Oak's errand and then a walk west.
+##
+## The sixteenth badge is what opens this leg and Oak is what spends it:
+## `maps/OaksLab.asm` takes `.OpenMtSilver` only on `ifequal NUM_BADGES`, so the
+## walk goes south to Pallet before it goes west. That is not a courtesy call.
+## The Victory Road Gate is three regions joined by two single cells and a black
+## belt stands in each, so EVENT_OPENED_MT_SILVER is the one thing that joins
+## the corridor to the Route 28 arm, exactly as EVENT_FOUGHT_SNORLAX joins it to
+## the Route 22 arm the leg arrives through. `tools/validate_mt_silver.gd` pins
+## all four combinations.
+##
+## Red himself is the route's second presentation boundary: his script ends on
+## `credits`, which commits nothing and emits one event, the way `halloffame`
+## does. `disappear` then sets EVENT_RED_IN_MT_SILVER again, so the room the
+## Hall of Fame opened closes behind the walk.
+func _mt_silver_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [VIRIDIAN_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Viridian Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	for leg: Dictionary in [
+		{"step": "route_1_southbound", "group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "pallet_town_return", "group": PALLET_GROUP, "number": PALLET_TOWN_NUMBER},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "south", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var oak: Dictionary = _oaks_lab_errand(world, save, random, data, path)
+	if not bool(oak.get("ok", false)):
+		return oak
+
+	for leg: Dictionary in [
+		{"step": "route_1_northbound", "direction": "north",
+			"group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "viridian_northbound", "direction": "north",
+			"group": ROUTE_2_GROUP, "number": VIRIDIAN_CITY_NUMBER},
+		{"step": "route_22_westbound", "direction": "west",
+			"group": ROUTE_2_GROUP, "number": ROUTE_22_NUMBER},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var through_gate: Dictionary = _warp_chain(
+		world, save, random, data, [ROUTE_22_GATE_DOOR, GATE_WEST_DOOR]
+	)
+	path.append({
+		"step": "victory_road_gate_west_arm",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"opened_mt_silver": world.event_flag_active(EVENT_OPENED_MT_SILVER),
+		"fought_snorlax": world.event_flag_active(EVENT_FOUGHT_SNORLAX),
+	})
+	if not bool(through_gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the gate's west arm failed: %s" % through_gate.get("reason", ""),
+		}
+
+	var westbound: Dictionary = _walk_connection_resolving(
+		world, "west", SILVER_GROUP, SILVER_CAVE_OUTSIDE_NUMBER, save, random, data
+	)
+	var outside_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "silver_cave_outside",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_SILVER_CAVE),
+		"encounters": westbound.get("encounters", []),
+		"run": outside_entry,
+	})
+	if not bool(westbound.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk onto Silver Cave Outside failed: %s" % westbound.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_SILVER_CAVE):
+		return {
+			"ok": false, "path": path,
+			"reason": "SilverCaveOutsideFlypointCallback did not run",
+		}
+
+	var healed: Dictionary = _silver_cave_heal(world, save, random, data, path)
+	if not bool(healed.get("ok", false)):
+		return healed
+
+	return _silver_cave_rooms(world, save, random, data, path)
+
+
+## Oak's lab, which is the only thing that opens Mt. Silver. The sixteen-badge
+## branch sets EVENT_OPENED_MT_SILVER and then falls into `.CheckPokedex`, whose
+## `special ProfOaksPCBoot` is presentation and writes nothing.
+func _oaks_lab_errand(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_lab: Dictionary = _warp_chain(world, save, random, data, [OAKS_LAB_DOOR])
+	if not bool(into_lab.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Oak's lab door failed: %s" % into_lab.get("reason", ""),
+		}
+	var badges: int = world.state.badge_count(Gen2WorldState.is_crystal_profile(data))
+	var oak: Dictionary = _talk_to(
+		world, OAK_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "oaks_lab_opens_mt_silver",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"badge_count": badges,
+		"talked_to_oak": world.event_flag_active(EVENT_TALKED_TO_OAK_IN_KANTO),
+		"opened_mt_silver": world.event_flag_active(EVENT_OPENED_MT_SILVER),
+		"run": oak.get("run", {}),
+	})
+	if not bool(oak.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Oak did not finish: %s" % oak.get("reason", ""),
+		}
+	if badges != 16:
+		return {
+			"ok": false, "path": path,
+			"reason": "Oak was asked with %d badges, not sixteen" % badges,
+		}
+	if not world.event_flag_active(EVENT_OPENED_MT_SILVER):
+		return {"ok": false, "path": path, "reason": "EVENT_OPENED_MT_SILVER was not set"}
+	var out_of_lab: Dictionary = _warp_chain(world, save, random, data, [OAKS_LAB_EXIT])
+	if not bool(out_of_lab.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Oak's lab exit failed: %s" % out_of_lab.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## The last heal before Red. The nurse stands behind a counter the walk cannot
+## step onto, so the approach cell is placed rather than walked to.
+func _silver_cave_heal(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_center: Dictionary = _warp_chain(
+		world, save, random, data, [SILVER_CAVE_POKECENTER_DOOR]
+	)
+	if not bool(into_center.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Mt. Silver Pokecenter door failed: %s" % into_center.get("reason", ""),
+		}
+	_mirror_party(world, save)
+	for mon: Gen2SaveMon in save.party:
+		mon.hp = 1
+	world.player_cell = SILVER_CAVE_NURSE_STAND
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var nurse: Dictionary = _drain_story(
+		world, world.interact(), save, random, data, true
+	)
+	path.append({
+		"step": "silver_cave_pokecenter_nurse",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": nurse,
+		"party_hp_after": _party_hp(save),
+	})
+	if not bool(nurse.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Mt. Silver nurse did not finish: %s" % nurse.get("reason", ""),
+		}
+	var out_of_center: Dictionary = _warp_chain(
+		world, save, random, data, [SILVER_CAVE_POKECENTER_EXIT]
+	)
+	if not bool(out_of_center.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Mt. Silver Pokecenter exit failed: %s" % out_of_center.get("reason", ""),
+		}
+	return {"ok": true}
+
+
+## The three rooms and Red. Every room is one region, so each ladder is walked
+## to directly; `tools/validate_mt_silver.gd` is what says so.
+func _silver_cave_rooms(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	for leg: Dictionary in [
+		{"step": "silver_cave_room_1", "cell": SILVER_CAVE_MOUTH},
+		{"step": "silver_cave_room_2", "cell": SILVER_CAVE_ROOM_1_LADDER},
+		{"step": "silver_cave_room_3", "cell": SILVER_CAVE_ROOM_2_LADDER},
+	]:
+		var climbed: Dictionary = _warp_chain(world, save, random, data, [leg["cell"]])
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+		})
+		if not bool(climbed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the ladder to %s failed: %s" % [
+					leg["step"], climbed.get("reason", ""),
+				],
+			}
+
+	_mirror_party(world, save)
+	var red: Dictionary = _talk_to(
+		world, RED_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var run: Dictionary = red.get("run", {})
+	path.append({
+		"step": "silver_cave_red",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"battles": run.get("battles", []),
+		"credits": int(run.get("credits", 0)),
+		"red_hidden_again": world.event_flag_active(EVENT_RED_IN_MT_SILVER),
+		"party_hp_after": _party_hp(save),
+		"encounters": red.get("encounters", []),
+		"run": run,
+	})
+	if not bool(red.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Red did not finish: %s" % red.get("reason", ""),
+		}
+	var battles: Array = run.get("battles", [])
+	if battles.size() != 1 \
+		or int((battles[0] as Dictionary).get("trainer_class", 0)) != TRAINER_CLASS_RED:
+		return {
+			"ok": false, "path": path,
+			"reason": "Red's script fought %s, not one battle as class %d" % [
+				JSON.stringify(battles), TRAINER_CLASS_RED,
+			],
+		}
+	if int(run.get("credits", 0)) != 1:
+		return {
+			"ok": false, "path": path,
+			"reason": "Red's script emitted %d credits events, not one" % int(
+				run.get("credits", 0)
+			),
+		}
+	# disappear sets the hide flag the Hall of Fame cleared, so the room closes
+	# behind the walk the way the cartridge closes it.
+	if not world.event_flag_active(EVENT_RED_IN_MT_SILVER):
+		return {"ok": false, "path": path, "reason": "EVENT_RED_IN_MT_SILVER was not set again"}
 	return {"ok": true}
 
 
@@ -8216,6 +8568,7 @@ func _drain_story(
 	var battles: Array = []
 	var catch_tutorials: int = 0
 	var hall_of_fame: int = _hall_of_fame_events(results)
+	var credits: int = _credits_events(results)
 	var approaches: Array = []
 	for result: Dictionary in results:
 		if not bool(result.get("ok", false)):
@@ -8391,6 +8744,7 @@ func _drain_story(
 			break
 		statuses.append_array(_statuses(results))
 		hall_of_fame += _hall_of_fame_events(results)
+		credits += _credits_events(results)
 		waits += 1
 		for result: Dictionary in results:
 			if not bool(result.get("ok", false)):
@@ -8412,6 +8766,7 @@ func _drain_story(
 		"purchases": purchases,
 		"catch_tutorials": catch_tutorials,
 		"hall_of_fame": hall_of_fame,
+		"credits": credits,
 		"approaches": approaches,
 		"terminal": last_reason.is_empty() \
 			and not world.script_input_waiting() and world.pending_runtime_request().is_empty(),
@@ -8755,9 +9110,19 @@ func _statuses(results: Array) -> Array[String]:
 ## event on the route with no screen behind it. Counted so the walk can say the
 ## boundary was reached rather than only that the flag is set.
 func _hall_of_fame_events(results: Array) -> int:
+	return _presentation_events(results, &"hall_of_fame_requested")
+
+
+## `credits` is the same kind of boundary, reached once by Red
+## (`maps/SilverCaveRoom3.asm`).
+func _credits_events(results: Array) -> int:
+	return _presentation_events(results, &"credits_requested")
+
+
+func _presentation_events(results: Array, type: StringName) -> int:
 	var count: int = 0
 	for result: Dictionary in results:
 		for event: Dictionary in result.get("events", []):
-			if StringName(event.get("type", &"")) == &"hall_of_fame_requested":
+			if StringName(event.get("type", &"")) == type:
 				count += 1
 	return count
