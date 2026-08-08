@@ -180,12 +180,21 @@ const TYPE_POINTER_SIZE: int = 2
 ## physical types are not a contiguous run of nine.
 const TYPE_NORMAL: int = 0x00
 const TYPE_FIGHTING: int = 0x01
+const TYPE_FLYING: int = 0x02
+const TYPE_POISON: int = 0x03
 const TYPE_GROUND: int = 0x04
 const TYPE_ROCK: int = 0x05
+const TYPE_BUG: int = 0x07
 const TYPE_GHOST: int = 0x08
 const TYPE_STEEL: int = 0x09
 const TYPE_FIRE: int = 0x14
 const TYPE_WATER: int = 0x15
+const TYPE_GRASS: int = 0x16
+const TYPE_ELECTRIC: int = 0x17
+const TYPE_PSYCHIC: int = 0x18
+const TYPE_ICE: int = 0x19
+const TYPE_DRAGON: int = 0x1A
+const TYPE_DARK: int = 0x1B
 
 ## The longest move and item name in these games is twelve characters. This is
 ## the runaway guard for a terminator walk, not a field width.

@@ -16,6 +16,17 @@ const CHARMANDER: int = 4
 const BULBASAUR: int = 1
 const MAGCARGO: int = 219
 
+## The three species a held item singles out by number: Cubone and Marowak for
+## Thick Club, Ditto for Metal Powder. Pikachu is already above and is Light
+## Ball's. Real numbers and real base stats, since the point of each of them is
+## that the number is what the cartridge checks.
+const CUBONE: int = 104
+const MAROWAK: int = 105
+const DITTO: int = 132
+
+## The highest species number this table fills.
+const MAX_SPECIES: int = MAGCARGO
+
 const TACKLE: int = 33
 const EMBER: int = 52
 const THUNDERBOLT: int = 85
@@ -144,6 +155,19 @@ const BERRY_ITEM: int = 0xAD
 const SMOKE_BALL: int = 0x6A
 const HELD_ESCAPE: int = 72
 
+## The held items the battle reads, at their real numbers with the real held
+## effect and parameter bytes off the cartridge. Thick Club and Light Ball carry
+## no held effect at all: `SpeciesItemBoost` checks them by number.
+const MAGNET: int = 108
+const THICK_CLUB: int = 118
+const LIGHT_BALL: int = 163
+const METAL_POWDER: int = 35
+const SCOPE_LENS: int = 140
+const QUICK_CLAW: int = 73
+const KINGS_ROCK: int = 82
+const BRIGHTPOWDER: int = 3
+const FOCUS_BAND: int = 119
+
 ## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
 ## species' own ratio here can be checked against pret's own base stats rather
 ## than against this file. Bulbasaur and Charmander are really 12.5% female;
@@ -236,10 +260,22 @@ static func _species() -> Array:
 			"MAGCARGO", [50, 50, 120, 30, 80, 80], [FIRE, ROCK],
 			Gen2Experience.GROWTH_MEDIUM_FAST, 154, [], GENDER_F50,
 		],
+		CUBONE: [
+			"CUBONE", [50, 50, 95, 35, 40, 50], [GROUND, GROUND],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 87, [], GENDER_F50,
+		],
+		MAROWAK: [
+			"MAROWAK", [60, 80, 110, 45, 50, 80], [GROUND, GROUND],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 124, [], GENDER_F50,
+		],
+		DITTO: [
+			"DITTO", [48, 48, 48, 48, 48, 48], [NORMAL, NORMAL],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 61, [], GENDER_UNKNOWN,
+		],
 	}
 
 	var out: Array = []
-	for number: int in range(1, MAGCARGO + 1):
+	for number: int in range(1, MAX_SPECIES + 1):
 		var entry: Array = known.get(number, [
 			"FILLER", [10, 10, 10, 10, 10, 10], [NORMAL, NORMAL],
 			Gen2Experience.GROWTH_MEDIUM_FAST, 64, [], GENDER_UNKNOWN,
@@ -389,17 +425,35 @@ static func _types() -> Array:
 	return out
 
 
+## `ITEMATTR_EFFECT` and `ITEMATTR_PARAM` for the items a battle reads, keyed by
+## item number with the real bytes: name, held effect, parameter.
+const HELD_ITEMS: Dictionary = {
+	SMOKE_BALL: ["SMOKE BALL", HELD_ESCAPE, 0],
+	# 61 is HELD_ELECTRIC_BOOST, twelfth in the run that starts at
+	# HELD_NORMAL_BOOST. Every one of the seventeen carries a parameter of 10.
+	MAGNET: ["MAGNET", 61, 10],
+	THICK_CLUB: ["THICK CLUB", 0, 0],
+	LIGHT_BALL: ["LIGHT BALL", 0, 0],
+	METAL_POWDER: ["METAL POWDER", Gen2HeldItem.METAL_POWDER, 10],
+	SCOPE_LENS: ["SCOPE LENS", Gen2HeldItem.CRITICAL_UP, 0],
+	QUICK_CLAW: ["QUICK CLAW", Gen2HeldItem.QUICK_CLAW, 60],
+	KINGS_ROCK: ["KING'S ROCK", Gen2HeldItem.FLINCH, 30],
+	BRIGHTPOWDER: ["BRIGHTPOWDER", Gen2HeldItem.BRIGHTPOWDER, 20],
+	FOCUS_BAND: ["FOCUS BAND", Gen2HeldItem.FOCUS_BAND, 30],
+}
+
+
 static func _items() -> Array:
 	var out: Array = []
 	for number: int in range(1, BERRY_ITEM + 1):
+		var held: Array = HELD_ITEMS.get(number, [])
 		out.append({
 			"number": number,
 			"name": "BERRY" if number == BERRY_ITEM else (
-				"SMOKE BALL" if number == SMOKE_BALL else "ITEM%d" % number
+				String(held[0]) if not held.is_empty() else "ITEM%d" % number
 			),
-			# ItemAttributes' held effect byte, which the importer keeps as
-			# `effect`. Only the Smoke Ball's is load bearing so far.
-			"effect": HELD_ESCAPE if number == SMOKE_BALL else 0,
+			"effect": int(held[1]) if not held.is_empty() else 0,
+			"parameter": int(held[2]) if not held.is_empty() else 0,
 		})
 	return out
 

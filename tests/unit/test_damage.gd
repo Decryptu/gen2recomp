@@ -257,3 +257,111 @@ func test_struggle_is_outside_the_weather_as_well() -> void:
 		false, 1, Gen2Weather.SUN
 	)
 	assert_eq(int(sunny["damage"]), int(plain["damage"]))
+
+
+## `TypeBoostItems`: the item boost lands on the finished base damage, before
+## the critical multiplier and so before the cap, the weather, STAB and the
+## matchup, which is where `PlayerAttackDamage` applies it.
+##
+## Pikachu's Thunderbolt on Bulbasaur is 27 without one. A Magnet takes the base
+## 34 to 37 before the +2, so 39, then STAB 58, then halved by Grass to 29.
+func test_a_type_boosting_item_lifts_a_move_of_its_own_type() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	assert_eq(int(_hit(attacker, defender, Fixture.THUNDERBOLT)["damage"]), 27)
+
+	attacker.item = Fixture.MAGNET
+
+	assert_eq(int(_hit(attacker, defender, Fixture.THUNDERBOLT)["damage"]), 29)
+
+
+## The row has to match the type as well as the effect, so a Magnet does nothing
+## for a Normal move.
+func test_a_type_boosting_item_does_nothing_for_another_type() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var plain: int = int(_hit(attacker, defender, Fixture.TACKLE)["damage"])
+
+	attacker.item = Fixture.MAGNET
+
+	assert_eq(int(_hit(attacker, defender, Fixture.TACKLE)["damage"]), plain)
+
+
+## `LightBallBoost` sits on the special branch and `ThickClubBoost` on the
+## physical one, so each doubles the stat its own branch had already chosen and
+## neither touches the other.
+func test_light_ball_doubles_pikachus_special_attack_and_nothing_else() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var special: int = int(_hit(pikachu, defender, Fixture.THUNDERBOLT)["damage"])
+	var physical: int = int(_hit(pikachu, defender, Fixture.TACKLE)["damage"])
+
+	pikachu.item = Fixture.LIGHT_BALL
+
+	assert_gt(int(_hit(pikachu, defender, Fixture.THUNDERBOLT)["damage"]), special)
+	assert_eq(int(_hit(pikachu, defender, Fixture.TACKLE)["damage"]), physical)
+
+	# And nothing at all on anybody else.
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE)
+	var others: int = int(_hit(geodude, defender, Fixture.THUNDERBOLT)["damage"])
+	geodude.item = Fixture.LIGHT_BALL
+	assert_eq(int(_hit(geodude, defender, Fixture.THUNDERBOLT)["damage"]), others)
+
+
+## `SpeciesItemBoost` answers for two species, not one: Thick Club works on
+## Marowak as well as Cubone, and only on a physical move.
+func test_thick_club_doubles_attack_for_cubone_and_marowak_only() -> void:
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	for pair: Array in [
+		[Fixture.CUBONE, true], [Fixture.MAROWAK, true], [Fixture.GEODUDE, false]
+	]:
+		var attacker: Gen2BattleMon = _mon(int(pair[0]))
+		var plain: int = int(_hit(attacker, defender, Fixture.TACKLE)["damage"])
+		attacker.item = Fixture.THICK_CLUB
+		var held: int = int(_hit(attacker, defender, Fixture.TACKLE)["damage"])
+		if bool(pair[1]):
+			assert_gt(held, plain, "species %d" % int(pair[0]))
+		else:
+			assert_eq(held, plain, "species %d" % int(pair[0]))
+
+
+## `DittoMetalPowder` is half again on whichever defence the hit was read
+## against, and only for a Ditto holding it.
+func test_metal_powder_is_half_again_on_a_dittos_defence() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var ditto: Gen2BattleMon = _mon(Fixture.DITTO)
+	var plain: int = int(_hit(attacker, ditto, Fixture.TACKLE)["damage"])
+
+	ditto.item = Fixture.METAL_POWDER
+
+	assert_lt(int(_hit(attacker, ditto, Fixture.TACKLE)["damage"]), plain)
+
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE)
+	var others: int = int(_hit(attacker, geodude, Fixture.TACKLE)["damage"])
+	geodude.item = Fixture.METAL_POWDER
+	assert_eq(int(_hit(attacker, geodude, Fixture.TACKLE)["damage"]), others)
+
+
+## The Scope Lens is one more critical level, added after the move's own two and
+## Focus Energy's one, in `BattleCommand_Critical`'s own order.
+func test_the_scope_lens_is_one_more_critical_level() -> void:
+	assert_eq(Gen2Damage.critical_level(Fixture.TACKLE, false, true), 1)
+	assert_eq(Gen2Damage.critical_level(Fixture.TACKLE, true, true), 2)
+	assert_eq(
+		Gen2Damage.critical_level(Fixture.SLASH, true, true), 4,
+		"a high-critical move is two of its own"
+	)
+
+
+func test_the_scope_lens_makes_criticals_more_common() -> void:
+	var rng := RandomNumberGenerator.new()
+	var plain: int = 0
+	var lensed: int = 0
+	for seed: int in 2000:
+		rng.seed = seed
+		if Gen2Damage.roll_critical(_data.move(Fixture.TACKLE), rng):
+			plain += 1
+		rng.seed = seed
+		if Gen2Damage.roll_critical(_data.move(Fixture.TACKLE), rng, false, true):
+			lensed += 1
+	assert_gt(lensed, plain * 3 / 2, "level 1 is 32 in 256 against level 0's 17")

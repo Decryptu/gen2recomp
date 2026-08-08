@@ -203,6 +203,12 @@ const START_SANDSTORM: StringName = &"startsandstorm"
 ## itself.
 const THUNDER_ACCURACY: StringName = &"thunderaccuracy"
 
+## King's Rock, at the tail of every ordinary attack's list. It is a chance out
+## of the item's own parameter and it is not a secondary effect: no
+## [constant EFFECT_CHANCE] gates it, and the moves that carry their own flinch
+## do not have this step at all.
+const KINGS_ROCK: StringName = &"kingsrock"
+
 ## Solarbeam in sun: `BattleCommand_SkipSunCharge` skips past the charge command
 ## exactly as `checkcharge` does on a release turn, so the beam fires the turn it
 ## is chosen.
@@ -432,6 +438,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_thunder_accuracy(turn)
 		SKIP_SUN_CHARGE:
 			_skip_sun_charge(turn)
+		KINGS_ROCK:
+			_kings_rock(turn)
 		ALL_STATS_UP:
 			_all_stats_up(turn)
 		STAT_UP_MESSAGE, STAT_DOWN_MESSAGE:
@@ -543,6 +551,15 @@ static func _check_hit(turn: Gen2Turn) -> void:
 			else int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
 		turn.attacker().stage("accuracy"), turn.defender().stage("evasion")
 	)
+
+	# `.BrightPowder`, after the stat modifiers and before the roll: the item's
+	# own parameter comes straight off the accuracy, floored at zero rather than
+	# allowed to wrap. A chance of exactly 255 is the one that skips the roll, so
+	# taking anything off it puts the move back on the dice.
+	var powder: Gen2BattleMon = turn.defender()
+	if Gen2HeldItem.effect_of(turn.data(), powder.item) == Gen2HeldItem.BRIGHTPOWDER:
+		chance = maxi(chance - Gen2HeldItem.parameter_of(turn.data(), powder.item), 0)
+
 	if Gen2Accuracy.rolls_hit(turn.rng(), chance):
 		return
 	turn.missed = true
@@ -552,6 +569,12 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		turn.end()
 
 
+## Takes the damage off, and reports what was actually taken.
+##
+## `BattleCommand_ApplyDamage` rolls the defender's Focus Band before it does,
+## and a band that fires calls `BattleCommand_FalseSwipe`, which is what leaves
+## the Pokémon on one hit point. The roll happens whether or not the hit would
+## have been lethal, and only the survival shows.
 static func _apply_damage(turn: Gen2Turn) -> void:
 	if turn.missed or turn.damage <= 0:
 		return
@@ -559,6 +582,24 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 	turn.battle.record_damage_taken(
 		turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
 	)
+
+	var band: bool = Gen2HeldItem.effect_of(turn.data(), defender.item) == Gen2HeldItem.FOCUS_BAND \
+		and Gen2HeldItem.rolls_under(
+			turn.rng(), Gen2HeldItem.parameter_of(turn.data(), defender.item)
+		)
+	if band and turn.damage >= defender.hp:
+		turn.dealt = defender.take_damage(defender.hp - 1)
+		turn.emit(Gen2Battle.HIT, {
+			"target": turn.target,
+			"amount": turn.dealt,
+			"critical": turn.critical,
+			"effectiveness": turn.effectiveness,
+			"hp": defender.hp,
+			"max_hp": defender.max_hp(),
+		})
+		turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
+		return
+
 	turn.dealt = defender.take_damage(turn.damage)
 	turn.emit(Gen2Battle.HIT, {
 		"target": turn.target,
@@ -1347,6 +1388,25 @@ static func _thunder_accuracy(turn: Gen2Turn) -> void:
 static func _skip_sun_charge(turn: Gen2Turn) -> void:
 	if turn.battle.weather == Gen2Weather.SUN:
 		turn.skip_charge = true
+
+
+## `BattleCommand_HeldFlinch`: a King's Rock on the attacker makes an ordinary
+## attack flinch, out of the item's own parameter.
+##
+## The `wAttackMissed` guard is structural here, since [method _check_hit] ends
+## the move on a miss and [method _check_faint] ends it on a KO, so this step is
+## only ever reached by a hit that left the target standing. The Substitute check
+## has nothing to read yet.
+static func _kings_rock(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	if Gen2HeldItem.effect_of(turn.data(), attacker.item) != Gen2HeldItem.FLINCH:
+		return
+	if not Gen2HeldItem.rolls_under(
+		turn.rng(), Gen2HeldItem.parameter_of(turn.data(), attacker.item)
+	):
+		return
+
+	turn.defender().substatus |= Gen2Substatus.FLINCHED
 
 
 ## Moves one stat by one command's worth, and writes down who it happened to and

@@ -1277,6 +1277,10 @@ func _describe(event: Dictionary) -> String:
 			return WEATHER_ENDED_TEXT.get(int(event["weather"]), "")
 		Gen2Battle.HURT_BY_SANDSTORM:
 			return "The SANDSTORM hits %s!" % _battler_name(side)
+		Gen2Battle.ENDURED:
+			return "%s hung on with %s!" % [
+				_battler_name(int(event["target"])), _data.item_name(int(event["item"])),
+			]
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

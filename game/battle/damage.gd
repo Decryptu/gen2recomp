@@ -66,10 +66,12 @@ static func calculate(
 	damage_multiplier: int = 1,
 	weather: int = Gen2Weather.NONE
 ) -> Dictionary:
+	var scope_lens: bool = attacker != null \
+		and Gen2HeldItem.effect_of(attacker.data, attacker.item) == Gen2HeldItem.CRITICAL_UP
 	return calculate_with(
 		attacker, defender, move,
-		roll_critical(move, rng, focus_energy), roll_variation(rng), defense_halved,
-		damage_multiplier, weather
+		roll_critical(move, rng, focus_energy, scope_lens),
+		roll_variation(rng), defense_halved, damage_multiplier, weather
 	)
 
 
@@ -123,6 +125,17 @@ static func calculate_with(
 	var damage: int = base_damage(
 		attacker.level, power, _attack_stat(attacker, defender, move_type, critical), defense
 	)
+
+	# The type-boosting items land here, on the finished base damage and ahead of
+	# the critical multiplier, which is where `PlayerAttackDamage` applies them:
+	# after the divide by fifty and before `.CriticalMultiplier`. Struggle reaches
+	# this too, because that routine has no Struggle check of its own.
+	var boost: int = Gen2HeldItem.effect_of(data, attacker.item)
+	if Gen2HeldItem.boosts_type(boost, move_type):
+		damage = Gen2HeldItem.apply_type_boost(
+			damage, Gen2HeldItem.parameter_of(data, attacker.item)
+		)
+
 	if critical:
 		damage *= CRITICAL_MULTIPLIER
 	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
@@ -190,21 +203,29 @@ static func apply_variation(damage: int, variation: int) -> int:
 ## Whether this hit is a critical, at the critical level the move and the
 ## attacker's state add up to.
 static func roll_critical(
-	move: Dictionary, rng: RandomNumberGenerator, focus_energy: bool = false
+	move: Dictionary, rng: RandomNumberGenerator, focus_energy: bool = false,
+	scope_lens: bool = false
 ) -> bool:
 	if int(move.get("power", 0)) <= 0:
 		return false
 	return rng.randi_range(0, 255) < CRITICAL_CHANCES[
-		critical_level(int(move.get("number", 0)), focus_energy)
+		critical_level(int(move.get("number", 0)), focus_energy, scope_lens)
 	]
 
 
-static func critical_level(move_number: int, focus_energy: bool = false) -> int:
+## The critical level a hit is rolled at: two for a high-critical move, one for
+## Focus Energy, one for the Scope Lens, in the order `BattleCommand_Critical`
+## adds them.
+static func critical_level(
+	move_number: int, focus_energy: bool = false, scope_lens: bool = false
+) -> int:
 	var level: int = 0
 	if HIGH_CRITICAL_MOVES.has(move_number):
 		level += 2
 	if focus_energy:
 		level += FOCUS_ENERGY_LEVELS
+	if scope_lens:
+		level += Gen2HeldItem.CRITICAL_LEVELS
 	return mini(level, CRITICAL_CHANCES.size() - 1)
 
 
@@ -242,22 +263,33 @@ static func is_physical(move_type: int) -> bool:
 	return move_type < RomLayout.SPECIAL_TYPES_START
 
 
+## The attacking stat, doubled if the attacker is one of the two species holding
+## the item that answers for it: `ThickClubBoost` sits on the physical branch and
+## `LightBallBoost` on the special one, both after the stat has been chosen and
+## before it is truncated.
 static func _attack_stat(
 	attacker: Gen2BattleMon, defender: Gen2BattleMon, move_type: int, critical: bool
 ) -> int:
-	var key: String = "attack" if is_physical(move_type) else "sp_attack"
-	if _ignores_stages(attacker, defender, move_type, critical):
-		return attacker.unmodified_stat(key)
-	return attacker.stat(key)
+	var physical: bool = is_physical(move_type)
+	var key: String = "attack" if physical else "sp_attack"
+	var out: int = attacker.unmodified_stat(key) \
+		if _ignores_stages(attacker, defender, move_type, critical) else attacker.stat(key)
+	if Gen2HeldItem.doubles_attack(attacker.species, attacker.item, physical):
+		out *= 2
+	return out
 
 
+## The defending stat, half again if `DittoMetalPowder` answers: the Pokémon
+## being hit is a Ditto holding Metal Powder.
 static func _defense_stat(
 	attacker: Gen2BattleMon, defender: Gen2BattleMon, move_type: int, critical: bool
 ) -> int:
 	var key: String = "defense" if is_physical(move_type) else "sp_defense"
-	if _ignores_stages(attacker, defender, move_type, critical):
-		return defender.unmodified_stat(key)
-	return defender.stat(key)
+	var out: int = defender.unmodified_stat(key) \
+		if _ignores_stages(attacker, defender, move_type, critical) else defender.stat(key)
+	if Gen2HeldItem.boosts_defence(defender.species, defender.item):
+		out = Gen2HeldItem.metal_powder_defence(out)
+	return out
 
 
 ## A critical hit ignores both sides' stages, but only when they are working

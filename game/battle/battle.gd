@@ -139,6 +139,11 @@ const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 const ENCORE_INFLICTED: StringName = &"encore_inflicted"
 const ENCORE_ENDED: StringName = &"encore_ended"
 
+## A Focus Band held the Pokémon on one hit point through what would have
+## finished it. [code]item[/code] is what did it, since the cartridge's line
+## names the item rather than the effect.
+const ENDURED: StringName = &"endured"
+
 ## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
 ## [Gen2Weather] value, so a screen names it without being told twice.
 ## [constant WEATHER_CONTINUES] is the line printed on every turn the weather
@@ -203,10 +208,6 @@ const ALWAYS_ESCAPES: Array[int] = [BATTLETYPE_DEBUG, BATTLETYPE_CONTEST]
 const NEVER_ESCAPES: Array[int] = [
 	BATTLETYPE_TRAP, BATTLETYPE_CELEBI, BATTLETYPE_FORCESHINY, BATTLETYPE_SUICUNE,
 ]
-
-## `HELD_ESCAPE` (constants/item_data_constants.asm), the Smoke Ball's held
-## effect, which is imported as an item's own `effect` field.
-const HELD_ESCAPE: int = 72
 
 ## `TryToRunAwayFromBattle`'s own arithmetic. The odds are
 ## `player_speed * 32 / ((enemy_speed / 4) & $ff)`, then 30 per attempt after the
@@ -422,7 +423,7 @@ func run_odds() -> Dictionary:
 	if runner.trapped_turns > 0:
 		return {"outcome": &"blocked", "reason": &"trapped", "move": runner.trapping_move}
 
-	if _held_effect(runner) == HELD_ESCAPE:
+	if _held_effect(runner) == Gen2HeldItem.ESCAPE:
 		return {"outcome": &"fled", "how": &"item", "item": runner.item}
 
 	# wNumFleeAttempts rises before the arithmetic reads it, so the first attempt
@@ -458,9 +459,9 @@ func run_odds() -> Dictionary:
 ## The held effect of whatever [param battler] is carrying, or zero. The item's
 ## own `effect` field is `ItemAttributes`' held effect byte.
 func _held_effect(battler: Gen2BattleMon) -> int:
-	if battler == null or battler.item <= 0 or data == null:
-		return 0
-	return int(data.item(battler.item).get("effect", 0))
+	if battler == null:
+		return Gen2HeldItem.NONE
+	return Gen2HeldItem.effect_of(data, battler.item)
 
 
 ## Whoever is still standing, or null if the battle is not over. Both sides can
@@ -1025,12 +1026,48 @@ func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
 	if player_priority != enemy_priority:
 		return _sides(player_priority > enemy_priority)
 
+	var claw: Variant = _quick_claw()
+	if claw != null:
+		return _sides(bool(claw))
+
 	var player_speed: int = player.stat("speed")
 	var enemy_speed: int = enemy.stat("speed")
 	if player_speed != enemy_speed:
 		return _sides(player_speed > enemy_speed)
 
 	return _sides(rng.randi_range(0, 255) < 128)
+
+
+## `DetermineMoveOrder`'s `.equal_priority` block: whether a Quick Claw settles
+## the turn before the speeds are looked at.
+##
+## Answers true for the player going first, false for the enemy, and null for
+## "the claw said nothing", which is what falls through to speed. The order is
+## the cartridge's: the player's claw is rolled first and only reaches the
+## enemy's when the player has none, and when both sides carry one the enemy's
+## roll is taken first outside a link battle.
+func _quick_claw() -> Variant:
+	var player_claw: bool = _held_effect(mon(PLAYER)) == Gen2HeldItem.QUICK_CLAW
+	var enemy_claw: bool = _held_effect(mon(ENEMY)) == Gen2HeldItem.QUICK_CLAW
+	if not player_claw and not enemy_claw:
+		return null
+
+	if player_claw and not enemy_claw:
+		return true if _claw_fires(mon(PLAYER)) else null
+	if enemy_claw and not player_claw:
+		return false if _claw_fires(mon(ENEMY)) else null
+
+	# `.both_have_quick_claw`: two rolls, the enemy's read first, and the player
+	# only wins on its own roll after the enemy's has already come up short.
+	if _claw_fires(mon(ENEMY)):
+		return false
+	if _claw_fires(mon(PLAYER)):
+		return true
+	return null
+
+
+func _claw_fires(battler: Gen2BattleMon) -> bool:
+	return Gen2HeldItem.rolls_under(rng, Gen2HeldItem.parameter_of(data, battler.item))
 
 
 func _sides(player_first: bool) -> Array:

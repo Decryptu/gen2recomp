@@ -1928,3 +1928,83 @@ func test_struggling_counts_as_a_turn_even_though_it_spends_no_pp() -> void:
 
 	assert_eq(battle.move_for(Gen2Battle.PLAYER, 0), Gen2Damage.STRUGGLE)
 	assert_eq(struggling.turns_taken, 1)
+
+
+## `DetermineMoveOrder`'s `.equal_priority` block: a Quick Claw is rolled after
+## priority and before speed, so it turns over a matchup the speeds had already
+## settled.
+func test_a_quick_claw_can_beat_a_faster_pokemon_to_the_punch() -> void:
+	var claimed: int = 0
+	for seed: int in 200:
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		)
+		battle.rng.seed = seed
+		battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+
+		if battle.order({Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE})[0] \
+			== Gen2Battle.PLAYER:
+			claimed += 1
+
+	assert_between(claimed, 25, 70, "roughly sixty in 256 across two hundred seeds")
+
+
+## Priority is settled first, so no claw carries a Quick Attack.
+func test_a_quick_claw_never_overrides_priority() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+	for seed: int in 50:
+		battle.rng.seed = seed
+		# Counter is priority 0 against Tackle's 1, so the player is last however
+		# the claw rolls.
+		var acting: Array = battle.order({
+			Gen2Battle.PLAYER: Fixture.COUNTER, Gen2Battle.ENEMY: Fixture.TACKLE,
+		})
+		assert_eq(acting[0], Gen2Battle.ENEMY)
+
+
+## `.both_have_quick_claw` rolls the enemy's first outside a link battle, and the
+## player's only after it has come up short.
+func test_two_quick_claws_roll_the_enemys_first() -> void:
+	var enemy_first: int = 0
+	var player_first: int = 0
+	for seed: int in 300:
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+		)
+		battle.rng.seed = seed
+		battle.mon(Gen2Battle.PLAYER).item = Fixture.QUICK_CLAW
+		battle.mon(Gen2Battle.ENEMY).item = Fixture.QUICK_CLAW
+
+		if battle.order({
+			Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE,
+		})[0] == Gen2Battle.ENEMY:
+			enemy_first += 1
+		else:
+			player_first += 1
+
+	# Pikachu is faster, so it leads on speed whenever neither claw fires. The
+	# enemy can only lead through its own claw, which is the point.
+	assert_gt(enemy_first, 0, "the enemy's claw has to be able to fire")
+	assert_gt(player_first, enemy_first, "and it is the rarer of the two")
+
+
+## With no claw anywhere the order is the speed comparison it always was.
+func test_no_quick_claw_leaves_the_order_to_speed() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	for seed: int in 30:
+		battle.rng.seed = seed
+		assert_eq(
+			battle.order({
+				Gen2Battle.PLAYER: Fixture.TACKLE, Gen2Battle.ENEMY: Fixture.TACKLE,
+			})[0],
+			Gen2Battle.ENEMY
+		)

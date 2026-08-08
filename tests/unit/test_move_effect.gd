@@ -847,10 +847,19 @@ func test_twineedle_hits_twice_then_rolls_poison_once_for_both() -> void:
 	assert_eq(_of_type(turn.events, Gen2Battle.STATUS_INFLICTED).size(), 1, "once, not per hit")
 
 
-func test_drain_sequences_share_one_list_gated_by_check_hit() -> void:
+## The two lists differ in exactly one step: `LeechHit` ends on `kingsrock` and
+## `DreamEater` does not, which is the only thing separating them in
+## `data/moves/effects.asm`. Everything else about Dream Eater, including the
+## sleep gate, is [constant Gen2EffectCommands.CHECK_HIT]'s.
+func test_the_two_drain_lists_differ_only_in_the_kings_rock_step() -> void:
 	var leech: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.LEECH_HIT)
 	var dream_eater: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DREAM_EATER)
-	assert_eq(leech, dream_eater)
+	assert_true(leech.has(Gen2EffectCommands.KINGS_ROCK))
+	assert_false(dream_eater.has(Gen2EffectCommands.KINGS_ROCK))
+	assert_eq(
+		leech.filter(func(c: StringName) -> bool: return c != Gen2EffectCommands.KINGS_ROCK),
+		dream_eater
+	)
 	assert_true(leech.has(Gen2EffectCommands.DRAIN_TARGET))
 	assert_lt(
 		leech.find(Gen2EffectCommands.APPLY_DAMAGE), leech.find(Gen2EffectCommands.DRAIN_TARGET),
@@ -1225,7 +1234,8 @@ func test_mist_protected_gets_its_own_message_not_the_generic_fail() -> void:
 func test_the_two_trapping_effects_have_their_cartridge_sequences() -> void:
 	var trap: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.TRAP_TARGET)
 	assert_true(Gen2MoveEffect.is_written(Gen2MoveEffect.TRAP_TARGET))
-	assert_eq(trap.size(), Gen2MoveEffect.NORMAL_HIT.size() + 1)
+	assert_eq(trap.size(), Gen2MoveEffect.NORMAL_HIT.size(), "one step swapped, none added")
+	assert_false(trap.has(Gen2EffectCommands.KINGS_ROCK))
 	assert_lt(
 		trap.find(Gen2EffectCommands.CHECK_FAINT),
 		trap.find(Gen2EffectCommands.TRAP_TARGET)
@@ -1500,3 +1510,125 @@ func _first(events: Array, type: StringName) -> Dictionary:
 		if event["type"] == type:
 			return event
 	return {}
+
+
+## `.BrightPowder` comes off the accuracy after the stat modifiers and before the
+## roll, floored at zero. Twenty off a move that always hit is the whole point:
+## 255 is the one chance that skips the roll, so anything taken off it puts the
+## move back on the dice.
+func test_brightpowder_takes_its_parameter_off_the_accuracy() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.item = Fixture.BRIGHTPOWDER
+
+	var missed: int = 0
+	for seed: int in 200:
+		battle.rng.seed = seed
+		var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+		Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+		if turn.missed:
+			missed += 1
+
+	assert_gt(missed, 0, "a 255 move can miss behind BrightPowder")
+	assert_lt(missed, 40, "twenty in 255, not more")
+
+	battle.enemy.item = 0
+	for seed: int in 50:
+		battle.rng.seed = seed
+		var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+		Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
+		assert_false(turn.missed, "and without it the same move never misses")
+
+
+## `BattleCommand_HeldFlinch` is a chance out of the item's own parameter and is
+## not a secondary effect: nothing gates it on the move's own chance byte.
+func test_kings_rock_flinches_out_of_its_own_parameter() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.item = Fixture.KINGS_ROCK
+
+	var flinched: int = 0
+	for seed: int in 256:
+		battle.rng.seed = seed
+		battle.enemy.substatus = Gen2Substatus.NONE
+		var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+		Gen2EffectCommands.run(Gen2EffectCommands.KINGS_ROCK, turn)
+		if Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.FLINCHED):
+			flinched += 1
+
+	assert_between(flinched, 10, 60, "roughly thirty in 256 across 256 seeds")
+
+	battle.player.item = 0
+	battle.enemy.substatus = Gen2Substatus.NONE
+	Gen2EffectCommands.run(Gen2EffectCommands.KINGS_ROCK, _turn(battle, Fixture.TACKLE))
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.FLINCHED))
+
+
+## `kingsrock` sits at the tail of every ordinary attack and on none of the moves
+## that carry a flinch of their own, which is the whole of the difference between
+## `NormalHit` and `FlinchHit`.
+func test_only_the_lists_the_cartridge_gives_kings_rock_have_it() -> void:
+	for effect: int in [
+		Gen2MoveEffect.LEECH_HIT, Gen2MoveEffect.SELFDESTRUCT, Gen2MoveEffect.RECOIL_HIT,
+		Gen2MoveEffect.MULTI_HIT, Gen2MoveEffect.TWINEEDLE, Gen2MoveEffect.SUPER_FANG,
+		Gen2MoveEffect.ROLLOUT, Gen2MoveEffect.SKULL_BASH, Gen2MoveEffect.SOLARBEAM,
+		Gen2MoveEffect.COUNTER, Gen2MoveEffect.MIRROR_COAT, Gen2MoveEffect.RAMPAGE,
+		Gen2MoveEffect.SKY_ATTACK, Gen2MoveEffect.RAZOR_WIND, Gen2MoveEffect.FLY_OR_DIG,
+	]:
+		assert_true(
+			Gen2MoveEffect.sequence_for(effect).has(Gen2EffectCommands.KINGS_ROCK),
+			"effect %d should carry it" % effect
+		)
+
+	for effect: int in [
+		Gen2MoveEffect.DREAM_EATER, Gen2MoveEffect.OHKO, Gen2MoveEffect.TRAP_TARGET,
+		Gen2MoveEffect.RECHARGE_HIT, Gen2MoveEffect.THUNDER, Gen2MoveEffect.DEFENSE_CURL,
+		Gen2MoveEffect.FLINCH_HIT, Gen2MoveEffect.BURN_HIT, Gen2MoveEffect.MEAN_LOOK,
+		Gen2MoveEffect.RAIN_DANCE,
+	]:
+		assert_false(
+			Gen2MoveEffect.sequence_for(effect).has(Gen2EffectCommands.KINGS_ROCK),
+			"effect %d should not" % effect
+		)
+
+	# PoisonMultiHit puts it ahead of its own poison, not behind it.
+	var twineedle: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.TWINEEDLE)
+	assert_lt(
+		twineedle.find(Gen2EffectCommands.KINGS_ROCK),
+		twineedle.find(Gen2EffectCommands.POISON_TARGET)
+	)
+
+
+## `BattleCommand_ApplyDamage`'s Focus Band branch calls `BattleCommand_FalseSwipe`,
+## which is what leaves the Pokémon on one hit point rather than none.
+func test_a_focus_band_can_hold_a_pokemon_on_one_hit_point() -> void:
+	var survived: int = 0
+	for seed: int in 200:
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed
+		battle.enemy.item = Fixture.FOCUS_BAND
+		battle.enemy.hp = 1
+		var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+		turn.damage = 500
+		Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+		if not battle.enemy.is_fainted():
+			survived += 1
+			assert_eq(battle.enemy.hp, 1)
+			assert_false(_first(turn.events, Gen2Battle.ENDURED).is_empty())
+
+	assert_between(survived, 5, 50, "roughly thirty in 256")
+
+
+## The roll only shows on a hit that would have finished the Pokémon: anything it
+## survives anyway takes its damage in full.
+func test_a_focus_band_changes_nothing_about_a_hit_that_was_not_lethal() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.item = Fixture.FOCUS_BAND
+	var before: int = battle.enemy.hp
+
+	for seed: int in 50:
+		battle.rng.seed = seed
+		battle.enemy.hp = before
+		var turn: Gen2Turn = _turn(battle, Fixture.TACKLE)
+		turn.damage = 5
+		Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+		assert_eq(battle.enemy.hp, before - 5)
+		assert_true(_first(turn.events, Gen2Battle.ENDURED).is_empty())
