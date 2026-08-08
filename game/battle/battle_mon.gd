@@ -107,6 +107,13 @@ var encore_turns: int = 0
 var trapped_turns: int = 0
 var trapping_move: int = 0
 
+## `wPlayerTurnsTaken`: how many turns this Pokémon has actually acted on since
+## it came out. `BattleCommand_DoTurn` is the one place it rises, behind the same
+## charging check that decides whether PP is spent, so a two-turn release does
+## not count twice and Struggle does count. Zeroed on a switch, which is what
+## makes "the first turn of this Pokémon" a question the AI can ask.
+var turns_taken: int = 0
+
 ## The move this Pokémon last used, by move number, or zero for none: what
 ## Disable and Encore both search a target's own move list for. The cartridge's
 ## own `wLastPlayerMove`/`wLastEnemyMove` clear on a switch exactly the way this
@@ -252,6 +259,7 @@ func reset_volatile() -> void:
 	encore_turns = 0
 	trapped_turns = 0
 	trapping_move = 0
+	turns_taken = 0
 	last_move_used = 0
 
 

@@ -190,3 +190,70 @@ func test_selfdestruct_halves_defense_before_the_formula() -> void:
 		attacker, defender, move, false, Gen2Damage.MAX_VARIATION, true
 	)
 	assert_gt(int(halved["damage"]), int(ordinary["damage"]))
+
+
+## `DoWeatherModifiers` runs at the top of `BattleCommand_Stab`, ahead of both
+## STAB and the matchup, so its tenths compound with everything after it rather
+## than scaling the finished figure.
+##
+## Charmander's Ember on Bulbasaur, both level 50 with perfect DVs: 80 Sp.Atk
+## against 85 Sp.Def, so 22 * 40 * 80 / 85 / 50 = 16, +2 = 18. Sun
+## takes that to 27 before STAB makes it 40 and Grass doubles it to 80; rain
+## takes it to 9, then 13 and 26. Without weather it is 18, 27 and 54.
+func test_the_weather_multiplies_before_stab_and_the_matchup() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.CHARMANDER)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	for pair: Array in [
+		[Gen2Weather.NONE, 54], [Gen2Weather.SUN, 80], [Gen2Weather.RAIN, 26],
+		[Gen2Weather.SANDSTORM, 54],
+	]:
+		var hit: Dictionary = Gen2Damage.calculate_with(
+			attacker, defender, _data.move(Fixture.EMBER), false, Gen2Damage.MAX_VARIATION,
+			false, 1, int(pair[0])
+		)
+		assert_eq(int(hit["damage"]), int(pair[1]), "weather %d" % int(pair[0]))
+
+
+## The type table answers first and the effect table only when it did not, which
+## is how Solarbeam's Grass row and its own effect row stay out of each other's
+## way.
+func test_the_weather_reads_the_type_table_before_the_move_table() -> void:
+	assert_eq(
+		Gen2Weather.damage_modifier(
+			Gen2Weather.RAIN, RomLayout.TYPE_WATER, Gen2MoveEffect.SOLARBEAM
+		),
+		Gen2Weather.BOOSTED,
+		"a Water Solarbeam does not exist, but the type row still wins"
+	)
+	assert_eq(
+		Gen2Weather.damage_modifier(Gen2Weather.RAIN, 22, Gen2MoveEffect.SOLARBEAM),
+		Gen2Weather.WEAKENED
+	)
+	assert_eq(
+		Gen2Weather.damage_modifier(Gen2Weather.SUN, 22, Gen2MoveEffect.SOLARBEAM),
+		Gen2Weather.UNCHANGED,
+		"the move table has no sun row"
+	)
+
+
+## `.Update` floors a modified hit at one and answers `$FFFF` past two bytes.
+func test_a_weakened_hit_never_rounds_away_to_nothing() -> void:
+	assert_eq(Gen2Weather.apply_damage_modifier(1, Gen2Weather.WEAKENED), 1)
+	assert_eq(
+		Gen2Weather.apply_damage_modifier(0xFFFF, Gen2Weather.BOOSTED), Gen2Weather.MAX_DAMAGE
+	)
+
+
+## Struggle leaves `BattleCommand_Stab` on its first two instructions, so the
+## weather never reaches it any more than STAB or the chart does.
+func test_struggle_is_outside_the_weather_as_well() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.CHARMANDER)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var plain: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, _data.move(Fixture.STRUGGLE), false, Gen2Damage.MAX_VARIATION
+	)
+	var sunny: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, _data.move(Fixture.STRUGGLE), false, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.SUN
+	)
+	assert_eq(int(sunny["damage"]), int(plain["damage"]))

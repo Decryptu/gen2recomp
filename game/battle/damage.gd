@@ -63,12 +63,13 @@ static func calculate(
 	rng: RandomNumberGenerator,
 	focus_energy: bool = false,
 	defense_halved: bool = false,
-	damage_multiplier: int = 1
+	damage_multiplier: int = 1,
+	weather: int = Gen2Weather.NONE
 ) -> Dictionary:
 	return calculate_with(
 		attacker, defender, move,
 		roll_critical(move, rng, focus_energy), roll_variation(rng), defense_halved,
-		damage_multiplier
+		damage_multiplier, weather
 	)
 
 
@@ -86,7 +87,8 @@ static func calculate_with(
 	critical: bool,
 	variation: int,
 	defense_halved: bool = false,
-	damage_multiplier: int = 1
+	damage_multiplier: int = 1,
+	weather: int = Gen2Weather.NONE
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
@@ -125,9 +127,16 @@ static func calculate_with(
 		damage *= CRITICAL_MULTIPLIER
 	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
 
-	# Struggle returns before both of these, so it is neither boosted by the
-	# attacker's type nor stopped by the defender's.
+	# Struggle returns before all of these: `BattleCommand_Stab` is where the
+	# weather, the attacker's type and the defender's are read, and its first two
+	# instructions send Struggle straight back out.
 	if number != STRUGGLE:
+		# `DoWeatherModifiers` runs at the top of that same command, ahead of
+		# STAB and of the matchup.
+		damage = Gen2Weather.apply_damage_modifier(damage, Gen2Weather.damage_modifier(
+			weather, move_type, int(move.get("effect", -1))
+		))
+
 		if attacker.types().has(move_type):
 			out["stab"] = true
 			@warning_ignore("integer_division")

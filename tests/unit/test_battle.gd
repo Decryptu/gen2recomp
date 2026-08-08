@@ -1733,3 +1733,198 @@ func test_a_pokemon_can_faint_to_the_binding() -> void:
 	assert_false(_first(events, Gen2Battle.HURT_BY_TRAP).is_empty(), JSON.stringify(events))
 	assert_true(bound.is_fainted())
 	assert_true(battle.is_over())
+
+
+## `HandleWeather` decrements before it prints, so a count of five is four turns
+## of weather and a fifth that ends it, the turn the move was used counting as
+## the first of them.
+func test_weather_lasts_five_turns_counting_the_one_that_set_it() -> void:
+	# Rain Dance in the first slot and Growl in the second, because a second Rain
+	# Dance would restart the count rather than let it run down.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.RAIN_DANCE, Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+
+	var setting: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(setting, Gen2Battle.WEATHER_STARTED).is_empty(), JSON.stringify(setting))
+	assert_eq(_of_type(setting, Gen2Battle.WEATHER_CONTINUES).size(), 1, "the setting turn ticks")
+	assert_eq(battle.weather_turns, Gen2Weather.TURNS - 1)
+
+	var continued: int = 0
+	for _turn: int in 10:
+		var events: Array = battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+		continued += _of_type(events, Gen2Battle.WEATHER_CONTINUES).size()
+		if not _first(events, Gen2Battle.WEATHER_ENDED).is_empty():
+			break
+
+	assert_eq(continued, Gen2Weather.TURNS - 2, "four turns of rain in all, then the ending")
+	assert_eq(battle.weather, Gen2Weather.NONE)
+	assert_eq(battle.weather_turns, 0)
+
+
+## The turn the count reaches zero prints the ending line and nothing else, so a
+## Sandstorm's last turn costs no health.
+func test_the_turn_a_sandstorm_ends_deals_no_damage() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = 1
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(events, Gen2Battle.WEATHER_ENDED).is_empty(), JSON.stringify(events))
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_SANDSTORM).size(), 0)
+
+
+## `.SandstormDamage` exempts Rock, Ground and Steel and nothing else. Flying is
+## not among them, and neither is a Pokémon in mid-Fly: only Dig hides from it.
+func test_a_sandstorm_takes_an_eighth_from_whoever_it_can_reach() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = Gen2Weather.TURNS
+	var exposed: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	var expected: int = Gen2Weather.sandstorm_damage(exposed.max_hp())
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var hurt: Array = _of_type(events, Gen2Battle.HURT_BY_SANDSTORM)
+
+	assert_eq(hurt.size(), 1, "the Rock/Ground Geodude was hit too: %s" % JSON.stringify(events))
+	assert_eq(int(hurt[0]["side"]), Gen2Battle.PLAYER)
+	assert_eq(int(hurt[0]["amount"]), expected)
+
+
+func test_only_dig_hides_a_pokemon_from_a_sandstorm() -> void:
+	for pair: Array in [
+		[Gen2Substatus.UNDERGROUND, 0], [Gen2Substatus.FLYING, 1], [Gen2Substatus.NONE, 1],
+	]:
+		var battle: Gen2Battle = _battle(
+			_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+		)
+		battle.weather = Gen2Weather.SANDSTORM
+		battle.weather_turns = Gen2Weather.TURNS
+		battle.mon(Gen2Battle.PLAYER).substatus |= int(pair[0])
+
+		var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+		assert_eq(
+			_of_type(events, Gen2Battle.HURT_BY_SANDSTORM).size(), int(pair[1]),
+			"substatus %d" % int(pair[0])
+		)
+
+
+## `HandleBetweenTurnEffects` is future sight, weather, wrap, perish song, then
+## the leftovers block, with `HandleEncore` last.
+func test_the_weather_tick_sits_between_the_status_damage_and_the_wrap_tick() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = Gen2Weather.TURNS
+	var caught: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	caught.status = Gen2Status.POISON
+	caught.trapped_turns = 3
+	caught.trapping_move = Fixture.WRAP
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var types: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+
+	assert_lt(types.find(Gen2Battle.HURT_BY_STATUS), types.find(Gen2Battle.WEATHER_CONTINUES))
+	assert_lt(types.find(Gen2Battle.WEATHER_CONTINUES), types.find(Gen2Battle.HURT_BY_SANDSTORM))
+	assert_lt(types.find(Gen2Battle.HURT_BY_SANDSTORM), types.find(Gen2Battle.HURT_BY_TRAP))
+
+
+## The same `SetPlayerTurn` then `SetEnemyTurn` the wrap tick follows.
+func test_the_sandstorm_hits_the_player_first_whoever_moved_first() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = Gen2Weather.TURNS
+	# Neither of these two is exempt, so both take it: Geodude is the exempt one
+	# and it is not in this battle.
+	battle.parties[Gen2Battle.PLAYER] = Gen2Party.of(_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL]))
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var hurt: Array = _of_type(events, Gen2Battle.HURT_BY_SANDSTORM)
+
+	assert_eq(_first(events, Gen2Battle.USED_MOVE)["side"], Gen2Battle.ENEMY, "the enemy is faster")
+	assert_eq(hurt.size(), 2, JSON.stringify(events))
+	assert_eq(int(hurt[0]["side"]), Gen2Battle.PLAYER)
+	assert_eq(int(hurt[1]["side"]), Gen2Battle.ENEMY)
+
+
+func test_a_pokemon_can_faint_to_a_sandstorm() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = Gen2Weather.TURNS
+	battle.mon(Gen2Battle.ENEMY).hp = 1
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(events, Gen2Battle.HURT_BY_SANDSTORM).is_empty(), JSON.stringify(events))
+	assert_true(battle.mon(Gen2Battle.ENEMY).is_fainted())
+	assert_true(battle.is_over())
+
+
+## A battle carries its own sky and nothing outside one has weather at all.
+func test_a_fresh_battle_has_no_weather() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	assert_eq(battle.weather, Gen2Weather.NONE)
+	assert_eq(battle.weather_turns, 0)
+
+
+## `BattleCommand_DoTurn` counts the turn behind the same charging check that
+## decides whether PP is spent, so a two-turn release counts once, on the turn
+## the move was chosen, and a switch starts the count again.
+func test_a_pokemon_counts_the_turns_it_has_actually_acted_on() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.SOLARBEAM, Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])]
+	)
+	var acting: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	assert_eq(acting.turns_taken, 0, "nothing has happened yet")
+
+	battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 1)
+
+	# The charge turn counts; the release turn is the same turn continuing.
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 2)
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(acting.turns_taken, 2, "the release spent no turn of its own")
+
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(battle.mon(Gen2Battle.PLAYER).turns_taken, 0, "a fresh Pokémon has acted on none")
+
+
+## The increment sits ahead of the Struggle check, so a Pokémon with nothing left
+## still counts the turns it spends struggling.
+func test_struggling_counts_as_a_turn_even_though_it_spends_no_pp() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var struggling: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	struggling.pp[0] = 0
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(battle.move_for(Gen2Battle.PLAYER, 0), Gen2Damage.STRUGGLE)
+	assert_eq(struggling.turns_taken, 1)

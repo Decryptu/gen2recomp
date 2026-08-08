@@ -193,7 +193,7 @@ func test_setup_only_ever_encourages_a_stat_up_move_on_the_first_turn() -> void:
 	for seed: int in 100:
 		_rng.seed = seed
 		var scores: Array = [20, 20, 20, 20]
-		Gen2BattleAI._apply_setup(scores, pikachu, geodude, _data, _rng, 0, 5)
+		Gen2BattleAI._apply_setup(scores, pikachu, geodude, _data, _rng, 0, 5, Gen2Weather.NONE)
 		if scores[0] < 20:
 			encouraged = true
 		elif scores[0] == 20:
@@ -207,7 +207,7 @@ func test_setup_only_ever_encourages_a_stat_up_move_on_the_first_turn() -> void:
 	for seed: int in 100:
 		_rng.seed = seed
 		var scores: Array = [20, 20, 20, 20]
-		Gen2BattleAI._apply_setup(scores, pikachu, geodude, _data, _rng, 3, 5)
+		Gen2BattleAI._apply_setup(scores, pikachu, geodude, _data, _rng, 3, 5, Gen2Weather.NONE)
 		assert_true(scores[0] >= 20, "a stat-up move past turn one is never encouraged")
 		if scores[0] > 20:
 			discouraged_late = true
@@ -220,14 +220,18 @@ func test_opportunist_only_discourages_stall_moves_once_hp_is_low() -> void:
 
 	# Full HP: Opportunist has nothing to say.
 	var scores: Array = [20, 20, 20, 20]
-	Gen2BattleAI._apply_opportunist(scores, pikachu, geodude, _data, _rng, 0, 0)
+	Gen2BattleAI._apply_opportunist(
+		scores, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE
+	)
 	assert_eq(scores, [20, 20, 20, 20], "a healthy mon has no reason to stop stalling")
 
 	# Well below a quarter: Swords Dance (a stall move by number) is
 	# discouraged without a roll involved.
 	pikachu.hp = 1
 	scores = [20, 20, 20, 20]
-	Gen2BattleAI._apply_opportunist(scores, pikachu, geodude, _data, _rng, 0, 0)
+	Gen2BattleAI._apply_opportunist(
+		scores, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE
+	)
 	assert_eq(scores[0], 21)
 	assert_eq(scores[1], 20, "Tackle is not a stall move and is left alone")
 
@@ -303,3 +307,172 @@ func test_basic_discourages_mist_and_focus_energy_used_a_second_time() -> void:
 			pikachu2, geodude, _data, RomLayout.AI_BASIC, _rng
 		)
 		assert_eq(slot, 1, "a second Focus Energy fails without re-applying")
+
+
+## `AI_Redundant`'s `.RainDance`, `.SunnyDay` and `.Sandstorm`: a move that would
+## set weather already up is a wasted turn and starts ten points behind.
+func test_basic_discourages_setting_weather_that_is_already_up() -> void:
+	for pair: Array in [
+		[Fixture.RAIN_DANCE, Gen2Weather.RAIN],
+		[Fixture.SUNNY_DAY, Gen2Weather.SUN],
+		[Fixture.SANDSTORM, Gen2Weather.SANDSTORM],
+	]:
+		var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [int(pair[0]), Fixture.TACKLE])
+		var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+		for seed: int in 5:
+			_rng.seed = seed
+			var slot: int = Gen2BattleAI.choose_slot(
+				pikachu, charmander, _data, RomLayout.AI_BASIC, _rng, 0, 0, int(pair[1])
+			)
+			assert_eq(slot, 1, "move %d under its own weather" % int(pair[0]))
+
+
+## `.MeanLook` reads the user's own `SUBSTATUS_CANT_RUN`, so it is the enemy
+## having already used it that makes a second one redundant.
+func test_basic_discourages_a_second_mean_look_from_the_same_pokemon() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.MEAN_LOOK, Fixture.TACKLE])
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	pikachu.substatus |= Gen2Substatus.CANT_RUN
+	for seed: int in 5:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, charmander, _data, RomLayout.AI_BASIC, _rng), 1
+		)
+
+
+## `AI_Smart_Solarbeam`: greatly encouraged in sun, greatly discouraged in rain.
+## Both are chances, so the check is that each outcome is reachable and that the
+## other one is not.
+func test_smart_reads_the_weather_for_solarbeam() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SOLARBEAM, Fixture.TACKLE])
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+
+	var sunny: Array = []
+	var rainy: Array = []
+	for seed: int in 40:
+		_rng.seed = seed
+		sunny.append(Gen2BattleAI.choose_slot(
+			pikachu, charmander, _data, RomLayout.AI_SMART, _rng, 0, 0, Gen2Weather.SUN
+		))
+		_rng.seed = seed
+		rainy.append(Gen2BattleAI.choose_slot(
+			pikachu, charmander, _data, RomLayout.AI_SMART, _rng, 0, 0, Gen2Weather.RAIN
+		))
+
+	assert_gt(sunny.count(0), rainy.count(0), "sun has to prefer Solarbeam more often than rain")
+	assert_gt(sunny.count(0), 0)
+	assert_gt(rainy.count(1), 0)
+
+
+## `AI_Smart_Thunder`: 90% to discourage it in sun, where its accuracy halves,
+## and nothing at all in rain, where the accuracy step has already answered.
+func test_smart_discourages_thunder_in_sun_only() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.THUNDER, Fixture.TACKLE])
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+
+	var discouraged: int = 0
+	for seed: int in 40:
+		_rng.seed = seed
+		if Gen2BattleAI.choose_slot(
+			pikachu, charmander, _data, RomLayout.AI_SMART, _rng, 0, 0, Gen2Weather.SUN
+		) == 1:
+			discouraged += 1
+
+	assert_gt(discouraged, 20, "sun has to push Thunder aside most of the time")
+
+	for seed: int in 10:
+		_rng.seed = seed
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(
+			scores, pikachu, charmander, _data, _rng, 0, 0, Gen2Weather.RAIN
+		)
+		assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE, "rain says nothing about Thunder")
+
+
+## `AI_Smart_Sandstorm` greatly discourages it against a target the sand cannot
+## reach, which is the same three types the damage itself exempts.
+func test_smart_will_not_raise_a_sandstorm_against_a_rock_type() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SANDSTORM, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	for seed: int in 10:
+		_rng.seed = seed
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(scores, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE)
+		assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE + 2)
+
+
+## `AI_Smart_RainDance` reads the target's types first: Rain Dance would suit a
+## Water target, so it is worth three points against it, and it would hurt a
+## Fire one, so it is worth two the other way.
+func test_smart_weighs_rain_dance_by_the_targets_type() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.RAIN_DANCE, Fixture.TACKLE])
+	for pair: Array in [[Fixture.MAGCARGO, -2], [Fixture.BULBASAUR, 3]]:
+		var target: Gen2BattleMon = _mon(int(pair[0]), 50, [Fixture.TACKLE])
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(scores, pikachu, target, _data, _rng, 0, 0, Gen2Weather.NONE)
+		assert_eq(
+			int(scores[0]), Gen2BattleAI.DEFAULT_SCORE + int(pair[1]),
+			"species %d" % int(pair[0])
+		)
+
+
+## `AI_Smart_WeatherMove`: with no reason to want the weather, three points
+## against, however neutral the target's types are.
+func test_smart_will_not_set_weather_it_has_no_move_for() -> void:
+	var barren: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.RAIN_DANCE, Fixture.TACKLE])
+	var bulbasaur: Gen2BattleMon = _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])
+	var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+	Gen2BattleAI._apply_smart(scores, barren, bulbasaur, _data, _rng, 0, 0, Gen2Weather.NONE)
+	assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE + 3)
+
+	# Thunder is on `RainDanceMoves`, so the same Pokémon with it in a slot no
+	# longer wastes the turn. `AIHasMoveInArray` reads the slot, not its PP.
+	var armed: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.RAIN_DANCE, Fixture.TACKLE, Fixture.THUNDER]
+	)
+	armed.pp[2] = 0
+	var reasons: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE, 0]
+	Gen2BattleAI._apply_smart(reasons, armed, bulbasaur, _data, _rng, 0, 0, Gen2Weather.NONE)
+	assert_lt(int(reasons[0]), Gen2BattleAI.DEFAULT_SCORE + 3)
+
+
+## `AI_Smart_TrapTarget`: 50% against a target already bound, and the encourage
+## branch needs the user above a quarter of its own health.
+func test_smart_will_not_bind_a_target_twice() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.WRAP, Fixture.TACKLE])
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	charmander.trapped_turns = 3
+
+	var raised: int = 0
+	for seed: int in 40:
+		_rng.seed = seed
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(scores, pikachu, charmander, _data, _rng, 0, 0, Gen2Weather.NONE)
+		assert_gte(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE, "a bound target is never encouraged")
+		if int(scores[0]) > Gen2BattleAI.DEFAULT_SCORE:
+			raised += 1
+
+	assert_between(raised, 10, 30, "roughly half of forty")
+
+
+func test_smart_binds_a_fresh_target_but_not_on_its_last_legs() -> void:
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+
+	var healthy: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.WRAP, Fixture.TACKLE])
+	var lowered: int = 0
+	for seed: int in 40:
+		_rng.seed = seed
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(scores, healthy, charmander, _data, _rng, 0, 0, Gen2Weather.NONE)
+		if int(scores[0]) < Gen2BattleAI.DEFAULT_SCORE:
+			lowered += 1
+	assert_gt(lowered, 0, "a fresh target is worth binding")
+
+	# `AICheckEnemyQuarterHP` gates the encouragement on the user's own health.
+	var spent: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.WRAP, Fixture.TACKLE])
+	spent.hp = 1
+	for seed: int in 20:
+		_rng.seed = seed
+		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
+		Gen2BattleAI._apply_smart(scores, spent, charmander, _data, _rng, 0, 0, Gen2Weather.NONE)
+		assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE, "nothing to hold it there with")

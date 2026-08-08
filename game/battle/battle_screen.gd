@@ -68,6 +68,25 @@ const BIND: int = 20
 const WRAP: int = 35
 const CLAMP: int = 128
 
+## The three lines each weather has, which are the cartridge's own and are keyed
+## by the weather rather than by the move: `HandleWeather`'s `.WeatherMessages`
+## and `.WeatherEndedMessages`, plus each setter's own.
+const WEATHER_STARTED_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "A downpour started!",
+	Gen2Weather.SUN: "The sunlight got bright!",
+	Gen2Weather.SANDSTORM: "A SANDSTORM brewed!",
+}
+const WEATHER_CONTINUES_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "Rain continues to fall.",
+	Gen2Weather.SUN: "The sunlight is strong.",
+	Gen2Weather.SANDSTORM: "The SANDSTORM rages.",
+}
+const WEATHER_ENDED_TEXT: Dictionary = {
+	Gen2Weather.RAIN: "The rain stopped.",
+	Gen2Weather.SUN: "The sunlight faded.",
+	Gen2Weather.SANDSTORM: "The SANDSTORM subsided.",
+}
+
 var _data: GameData = null
 var _injected_data: GameData = null
 ## Whatever the mod host supplies. Typed as Node because a registered renderer
@@ -116,8 +135,6 @@ var _forget_confirm_cursor: int = 0
 ## flags of its own to read: it falls back to [method _random_slot], same as
 ## before this existed. Reset by both, set only by [method show_trainer].
 var _enemy_trainer_class: int = 0
-var _enemy_turns_taken: int = 0
-var _player_turns_taken: int = 0
 
 var _enemy: int = 1
 var _player: int = 1
@@ -206,8 +223,6 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = 0
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), _party_from(_enemy, _enemy_level), _rng
 	)
@@ -252,8 +267,6 @@ func show_trainer(
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = trainer_class
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), enemy_party, _rng, true
 	)
@@ -295,8 +308,6 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = 0
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_player = player_lead.species
 	_player_level = player_lead.level
 	_enemy = enemy_lead.species
@@ -344,8 +355,6 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
-	_enemy_turns_taken = 0
-	_player_turns_taken = 0
 	_battle = prepared["battle"]
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
@@ -707,8 +716,6 @@ func take_turn() -> void:
 	if _battle.awaiting_move_learn():
 		return
 	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
-	_player_turns_taken += 1
-	_enemy_turns_taken += 1
 	_show_next_event()
 
 
@@ -731,7 +738,8 @@ func _enemy_slot() -> int:
 	var weights: int = int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
 	return Gen2BattleAI.choose_slot(
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
-		_enemy_turns_taken, _player_turns_taken
+		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
+		_battle.weather
 	)
 
 
@@ -1261,6 +1269,14 @@ func _describe(event: Dictionary) -> String:
 			return "%s got an encore!" % _battler_name(int(event["target"]))
 		Gen2Battle.ENCORE_ENDED:
 			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.WEATHER_STARTED:
+			return WEATHER_STARTED_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.WEATHER_CONTINUES:
+			return WEATHER_CONTINUES_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.WEATHER_ENDED:
+			return WEATHER_ENDED_TEXT.get(int(event["weather"]), "")
+		Gen2Battle.HURT_BY_SANDSTORM:
+			return "The SANDSTORM hits %s!" % _battler_name(side)
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

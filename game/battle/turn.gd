@@ -47,6 +47,17 @@ var ended: bool = false
 ## spending again on the turn the attack actually lands.
 var locked: bool = false
 
+## The accuracy byte this move is rolled against, or -1 for the move's own.
+## `wPlayerMoveStruct` is a per-turn copy the cartridge is free to write into;
+## [member move] is the cached row, so what would be a write there is this
+## instead. Only [method Gen2EffectCommands._thunder_accuracy] sets it.
+var accuracy: int = -1
+
+## Set by [method Gen2EffectCommands._skip_sun_charge] so
+## [method Gen2EffectCommands._charge_move] locks nothing in: Solarbeam in sun is
+## a one-turn move.
+var skip_charge: bool = false
+
 ## Set when a secondary effect's roll came up short. It is not the same as
 ## [member ended]: the move has happened and its damage stands, and only what was
 ## behind the roll is skipped.
