@@ -347,6 +347,11 @@ static func forced_action(collision_code: int) -> Dictionary:
 ## is not: PCScript is 49 in Crystal and 43 in Gold/Silver, because Crystal's
 ## table carries six extra phone entries earlier. Every other entry was recounted
 ## in both and lands on the same index.
+## CheckCounterTile (`home/map_objects.asm`). $98 ships in the table but no map
+## uses it.
+const COLL_COUNTER: int = 0x90
+const COLL_COUNTER_98: int = 0x98
+
 const COLL_BOOKSHELF: int = 0x91
 const COLL_PC: int = 0x93
 const COLL_RADIO: int = 0x94
@@ -377,6 +382,12 @@ const TILE_COLLISION_STD_INDEX_GOLD_SILVER: Dictionary = {
 	COLL_WINDOW: 8,           # WindowScript
 	COLL_INCENSE_BURNER: 5,   # IncenseBurnerScript
 }
+
+
+## CheckCounterTile. A counter is what CheckFacingObject doubles the facing
+## distance over, so an NPC behind one is talked to across it.
+static func is_counter(collision_code: int) -> bool:
+	return collision_code in [COLL_COUNTER, COLL_COUNTER_98]
 
 
 ## The std-script index [param collision_code] dispatches to on A, or -1 when

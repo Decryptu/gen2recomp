@@ -430,17 +430,42 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 ## second. Only an absent summary fails a script-visible read; a summary whose
 ## list is empty answers "not in the party", which is what the story preview's
 ## own callers rely on.
+## [param eggs] marks which slots are eggs, because `CheckPartyMove` skips them:
+## an egg carries the moves it will hatch with and would otherwise answer for a
+## move no usable party member knows.
 func set_party_summary(
 	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int],
-	moves: Array = [], names: Array = []
+	moves: Array = [], names: Array = [], eggs: Array = []
 ) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
 	_party_summary = {
 		"count": count, "pokerus": has_pokerus, "species": species.duplicate(),
 		"moves": moves.duplicate(true), "names": names.duplicate(),
+		"eggs": eggs.duplicate(),
 	}
 	return {"ok": true}
+
+
+## CheckPartyMove (`engine/events/overworld.asm`): the first party slot whose own
+## move list carries [param move], or -1 when none does. Eggs are skipped, empty
+## and terminator slots end the walk, and the answer is the slot index the source
+## leaves in `wCurPartyMon`.
+##
+## Every field move is gated on this. The party submenu reaches `CutFunction` and
+## friends only for a mon that knows the move, and the overworld prompts
+## (`TryCutOW`, `TrySurfOW`, `TryWhirlpoolOW`, `TryWaterfallOW`, `TryStrengthOW`)
+## each call `CheckPartyMove` themselves, so there is no path in either game that
+## uses a field move the party does not know.
+func party_slot_with_move(move: int) -> int:
+	var moves: Array = _party_summary.get("moves", [])
+	var eggs: Array = _party_summary.get("eggs", [])
+	for slot: int in moves.size():
+		if slot < eggs.size() and bool(eggs[slot]):
+			continue
+		if moves[slot] is Array and (moves[slot] as Array).has(move):
+			return slot
+	return -1
 
 
 ## Clears the mirror so a stale count cannot answer a later read after the
@@ -469,6 +494,18 @@ func fishing_busy() -> bool:
 
 func facing_cell() -> Vector2i:
 	return player_cell + _direction_for_facing(player_facing)
+
+
+## The cell CheckFacingObject searches, which is the faced one doubled away when
+## the tile between is a counter (`engine/overworld/npc_movement.asm`). A mart
+## clerk, a gym receptionist and the Radio Tower's Radio Card woman are all
+## talked to across one.
+func object_facing_cell() -> Vector2i:
+	var direction: Vector2i = _direction_for_facing(player_facing)
+	var faced: Vector2i = player_cell + direction
+	if Gen2WorldCollision.is_counter(collision_code_at(faced)):
+		return faced + direction
+	return faced
 
 
 func fishing_request(
@@ -521,6 +558,10 @@ func cut_request() -> Dictionary:
 		return _cut_failure(&"missing_map")
 	if not _pending_cut.is_empty():
 		return _cut_failure(&"cut_in_progress")
+	## TryCutOW asks CheckPartyMove before the badge; the submenu path cannot
+	## reach here without the move at all.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_CUT) < 0:
+		return _cut_failure(&"move_not_known")
 	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
 	if not state.is_engine_flag_active(
 		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_HIVE, crystal)
@@ -602,6 +643,10 @@ func surf_request(species: int = 0) -> Dictionary:
 		Gen2WorldState.badge_flag(Gen2WorldFieldMove.BADGE_FOG, crystal)
 	):
 		return _surf_failure(&"badge_required")
+	## Surf is the one move whose overworld prompt asks CheckPartyMove after the
+	## badge rather than before it (`TrySurfOW`).
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_SURF) < 0:
+		return _surf_failure(&"move_not_known")
 	if movement_mode == MOVEMENT_SURF:
 		return _surf_failure(&"already_surfing")
 	var target: Vector2i = facing_cell()
@@ -673,6 +718,9 @@ func whirlpool_request() -> Dictionary:
 		return _whirlpool_failure(&"missing_map")
 	if not _pending_whirlpool.is_empty():
 		return _whirlpool_failure(&"whirlpool_in_progress")
+	## TryWhirlpoolOW asks CheckPartyMove before the badge.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_WHIRLPOOL) < 0:
+		return _whirlpool_failure(&"move_not_known")
 	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
 		Gen2WorldFieldMove.BADGE_GLACIER, Gen2WorldState.is_crystal_profile(data)
 	)):
@@ -744,6 +792,9 @@ func waterfall_request() -> Dictionary:
 		return _waterfall_failure(&"missing_map")
 	if not _pending_waterfall.is_empty():
 		return _waterfall_failure(&"waterfall_in_progress")
+	## TryWaterfallOW asks CheckPartyMove before the badge.
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_WATERFALL) < 0:
+		return _waterfall_failure(&"move_not_known")
 	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
 		Gen2WorldFieldMove.BADGE_RISING, Gen2WorldState.is_crystal_profile(data)
 	)):
@@ -1771,7 +1822,10 @@ func interact() -> Array:
 	var events: Array = []
 	## TryObjectEvent runs before TryBGEvent in the cartridge event loop. Keep
 	## that order even though events_at() exposes the cache's source order.
-	for event: Dictionary in _active_events_at(target):
+	## Only the object half looks across a counter: CheckFacingBGEvent and
+	## TryTileCollisionEvent both read the plain GetFacingTileCoord, which is
+	## what keeps a Pokemon Center PC on the counter itself reachable.
+	for event: Dictionary in _active_events_at(object_facing_cell()):
 		if event.get("kind", &"") == &"objects" and event.has("script"):
 			events.append(event)
 	for event: Dictionary in _active_events_at(target):

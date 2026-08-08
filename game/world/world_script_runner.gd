@@ -2049,9 +2049,14 @@ func _stage_hidden_item() -> Dictionary:
 
 ## CheckPartyMove: the first slot whose move list carries [param move], or -1.
 ## The mirror's per-slot lists are the only party this scene-free runner reads.
+## Eggs are skipped, the way the source's own `cp EGG` branch skips them.
 func _party_slot_with_move(move: int) -> int:
-	var moves: Array = _request.get("party", {}).get("moves", [])
+	var party: Dictionary = _request.get("party", {})
+	var moves: Array = party.get("moves", [])
+	var eggs: Array = party.get("eggs", [])
 	for slot: int in moves.size():
+		if slot < eggs.size() and bool(eggs[slot]):
+			continue
 		if moves[slot] is Array and (moves[slot] as Array).has(move):
 			return slot
 	return -1

@@ -27,7 +27,19 @@ const SPECIALCALL_ASSISTANT: int = 3
 const WALK_RESOLVE_ATTEMPTS: int = 16
 
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
+## `maps/Route32.asm` warp 1 and `maps/Route32Pokecenter1F.asm` warp 1, the
+## fishing guru on (1,4) faced from below, and the nearest shore cell the rod is
+## cast from: (10,42) faces water on (9,42) and sits in the same region as the
+## Pokemon Center door.
+const ROUTE_32_POKECENTER_DOOR: Vector2i = Vector2i(11, 73)
+const ROUTE_32_POKECENTER_EXIT: Vector2i = Vector2i(3, 7)
+const FISHING_GURU_FACE: Vector2i = Vector2i(1, 5)
+const ROUTE_32_SHORE: Vector2i = Vector2i(10, 42)
+
+const ITEM_HM_CUT: int = 0xF3
+const ITEM_HM_SURF: int = 0xF5
 const ITEM_HM_STRENGTH: int = 0xF6
+const ITEM_HM_WHIRLPOOL: int = 0xF8
 const ITEM_HM_WATERFALL: int = 0xF9
 ## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
 ## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
@@ -40,6 +52,9 @@ const HM07_APPROACH: Vector2i = Vector2i(30, 7)
 ## Great Balls is what the source start money covers.
 const MART_BLACKTHORN: int = 17
 const GREAT_BALLS_BOUGHT: int = 5
+## `maps/BlackthornMart.asm` object 1 on (1,3), standing right behind the
+## counter on (2,3), so it is talked to from (3,3) facing left.
+const BLACKTHORN_MART_CLERK_FACE: Vector2i = Vector2i(3, 3)
 ## The two Radio Tower keys, from the same hex comment column.
 const ITEM_CARD_KEY: int = 0x7F
 const ITEM_BASEMENT_KEY: int = 0x85
@@ -64,6 +79,19 @@ const EVENT_MAHOGANY_POKEFAN_M_BLOCKS_EAST: int = 1878
 ## cell that reaches Blackthorn Gym's door (`maps/BlackthornCity.asm`).
 const EVENT_CLEARED_RADIO_TOWER: int = 33
 const EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM: int = 1763
+## `RadioTower1FRadioCardWomanScript` on (12,6), standing up. She and the two
+## men beside her are sealed in the lobby's own 8x2 desk pocket, so she is not
+## reached but talked to across the `$90` counter on (12,5) from (12,4), which
+## is what CheckFacingObject's doubled distance is for. She is hidden by
+## EVENT_GOLDENROD_CITY_CIVILIANS, which the boss script clears, so the card is
+## taken on the way back down and not before (`maps/RadioTower1F.asm`,
+## `maps/RadioTower5F.asm`).
+const RADIO_CARD_WOMAN_FACE: Vector2i = Vector2i(12, 4)
+## Her quiz is six `yesorno`s: the offer, then five questions whose accepted
+## answers are yes, yes, no, yes, no, because questions three and five branch to
+## `.WrongAnswer` on `iftrue` where the others branch on `iffalse`. Zero-based,
+## the way DRAGON_SHRINE_ANSWERS is.
+const RADIO_CARD_ANSWERS: Array[int] = [0, 0, 0, 1, 0, 1]
 ## The Blackthorn Gym boulders' own object event flags, which
 ## `BlackthornGym1FBouldersCallback` reads back as `changeblock`s on 1F.
 const EVENT_BOULDER_IN_BLACKTHORN_GYM_1: int = 1798
@@ -513,6 +541,152 @@ const BADGE_SOUL: int = 12
 const EVENT_BEAT_JANINE: int = 1225
 const FUCHSIA_GYM_TRAINER_FLAGS: Array[int] = [1303, 1306, 1154, 1054]
 const EVENT_GOT_TM06_TOXIC: int = 221
+
+## Fuchsia back to Vermilion, which is four connections and one gate, not the
+## walk back through Lavender and Saffron the route came by: Route 12 connects
+## west onto Route 11 and Route 11 west onto Vermilion City
+## (`data/maps/attributes.asm`), and `maps/Route11.asm` declares no warps at
+## all, so nothing on that pair is gated. `maps/FuchsiaGym.asm` warps 1 and 2
+## both land on Fuchsia's warp 3.
+const FUCHSIA_GYM_EXIT: Vector2i = Vector2i(4, 17)
+## `maps/FuchsiaCity.asm` warp 8, the east half of the Route 15 gate pair.
+const FUCHSIA_ROUTE_15_GATE_DOOR: Vector2i = Vector2i(37, 22)
+const ROUTE_11_NUMBER: int = 2
+
+## Vermilion's Snorlax. The whole chain is pinned and checked against the cache
+## by `tools/validate_radio.gd`, which is where these values are explained; only
+## the cells the walk needs are repeated here.
+##
+## `maps/VermilionCity.asm` object 4 is a BIG_OBJECT filling (34,8) to (35,9),
+## and the cave mouth on (34,7) is sealed until it moves.
+##
+## The route arrives from Route 11, not from the port, and that lands it inside
+## the eight-cell pocket the Snorlax's own body seals off the city's east edge:
+## (36..39, 8) and (36..39, 9), measured against the cache. So the walk uses
+## (36,9) facing left, which is the last of `SnorlaxAwake.ProximityCoords` and
+## the only kind of cell an eastbound player ever has. Three of those five
+## coordinates sit in pockets like this one, which is why the source lists all
+## five rather than only the two the port side can stand on.
+const SNORLAX_TALK: Vector2i = Vector2i(36, 9)
+const DIGLETTS_CAVE_MOUTH: Vector2i = Vector2i(34, 7)
+## `engine/pokegear/pokegear.asm` RadioChannels: 20.0, the Poke Flute channel.
+const KNOB_POKE_FLUTE: int = 78
+const EVENT_FOUGHT_SNORLAX: int = 1872
+const EVENT_VERMILION_CITY_SNORLAX: int = 1904
+
+## Diglett's Cave, the one door into west Kanto (`maps/DiglettsCave.asm`).
+##
+## Three walkable regions, not one tunnel, so it is crossed by warps: the
+## Vermilion entrance sits in a 14-cell room whose only ladder is (5,31); that
+## lands on (17,33) in the 99-cell middle, which reaches the second ladder on
+## (3,3); and that lands on (17,3) in a 15-cell room holding the Route 2 door.
+## Measured against the cache, not read off the warp table, since the table
+## alone does not say which cells share a region.
+const DIGLETTS_CAVE_GROUP: int = 3
+const DIGLETTS_CAVE_NUMBER: int = 84
+const DIGLETTS_CAVE_CHAIN: Array[Vector2i] = [
+	Vector2i(5, 31), Vector2i(3, 3), Vector2i(15, 5),
+]
+
+## Route 2 and Pewter City. The cave lands in a 125-cell pocket closed by two
+## cut trees, and the northern one on (5,8) is the only one that opens the rest
+## of the route; cutting it reaches 469 cells and both the Pewter and the
+## Viridian crossing (`tools/validate_radio.gd` checks both counts).
+const ROUTE_2_GROUP: int = 23
+const ROUTE_2_NUMBER: int = 1
+const ROUTE_2_CUT_APPROACH: Vector2i = Vector2i(5, 9)
+const PEWTER_GROUP: int = 14
+const PEWTER_CITY_NUMBER: int = 2
+## `maps/PewterCity.asm` warp 2, and its own NEWMAP flypoint callback.
+const PEWTER_GYM_DOOR: Vector2i = Vector2i(16, 17)
+const ENGINE_FLYPOINT_PEWTER: int = 55
+## `maps/PewterGym.asm`: Brock on (5,1), faced from the cell below. Camper Jerry
+## on (2,5) watches three cells east along row 5, which the walk up column 5
+## crosses, so his battle is unavoidable. Beating Brock sets his flag too.
+const BROCK_FACE: Vector2i = Vector2i(5, 2)
+const BADGE_BOULDER: int = 8
+const EVENT_BEAT_BROCK: int = 1221
+const EVENT_BEAT_CAMPER_JERRY: int = 1067
+## `maps/PewterGym.asm` warps 1 and 2, both back onto Pewter's warp 2.
+const PEWTER_GYM_EXIT: Vector2i = Vector2i(4, 13)
+
+## South from Pewter to Cinnabar: Route 2, Viridian City, Route 1, Pallet Town,
+## Route 21 and Cinnabar Island are six plain connections with no gate building
+## and no door on any of them (`data/maps/attributes.asm`, and neither Route 1
+## nor Route 21 declares a warp at all). Coming back onto Route 2 from Pewter
+## lands in its main region, which already holds the Viridian crossing, so the
+## cut tree is not on this half of the walk.
+const VIRIDIAN_CITY_NUMBER: int = 3
+const PALLET_GROUP: int = 13
+const ROUTE_1_NUMBER: int = 1
+const PALLET_TOWN_NUMBER: int = 2
+const ENGINE_FLYPOINT_VIRIDIAN: int = 54
+const ENGINE_FLYPOINT_PALLET: int = 53
+
+## Pallet Town's own pond is the route's way south: its south edge is sixteen
+## cells of water on x=4 to 7, and the land beside it is (4,13). Everything from
+## there to Seafoam Gym's door is surfed.
+const PALLET_SURF_APPROACH: Vector2i = Vector2i(4, 13)
+const SEAFOAM_GROUP: int = 6
+const ROUTE_21_NUMBER: int = 7
+const CINNABAR_ISLAND_NUMBER: int = 8
+const ROUTE_20_NUMBER: int = 6
+const SEAFOAM_GYM_NUMBER: int = 4
+
+## Cinnabar Island is two land regions with no seam between them, so which cell
+## the crossing lands on decides whether Blue is reachable at all. Route 21's
+## south edge is water from x=1 to 14, and Cinnabar's row 0 is water on x=1 to 3
+## and land on x=11 to 18: crossing on the eastern half exits the water into an
+## 89-cell region that reaches neither Blue nor the Pokecenter, so the walk stays
+## on the water down the island's west side and lands on (4,10) instead, in the
+## 51-cell region that holds both.
+const CINNABAR_LANDING: Vector2i = Vector2i(4, 10)
+## `maps/CinnabarIsland.asm` object 1 on (9,6), walled on three sides, so (8,6)
+## facing right is its only approach. `CinnabarIslandBlue` is what clears
+## EVENT_VIRIDIAN_GYM_BLUE and so the only thing that opens Viridian Gym.
+const BLUE_FACE: Vector2i = Vector2i(8, 6)
+const EVENT_VIRIDIAN_GYM_BLUE: int = 1910
+const ENGINE_FLYPOINT_CINNABAR: int = 63
+
+## Cinnabar's east edge is one cell, (19,16), and it is water, so the leg surfs
+## again from the same shore it landed on. `Route20ClearRocksCallback` is a
+## MAPCALLBACK_NEWMAP, so arriving is what sets EVENT_CINNABAR_ROCKS_CLEARED and
+## unseals Fuchsia's south edge; nothing on the route walks that way, but the
+## flag is the reason this leg comes before Viridian's.
+const CINNABAR_SURF_APPROACH: Vector2i = Vector2i(4, 10)
+const EVENT_CINNABAR_ROCKS_CLEARED: int = 215
+## Route 20's island cluster, landed on from the east and not the west. The
+## channel on x=26 and 27 that runs up the island's west shore is walled off from
+## the open sea on every side: column 25 is wall from row 2 to 13, row 1 closes it
+## above and row 13's own eleven wall cells close it below. The east shore is
+## open water, so (41,8) is the landfall and (38,7) the `$7b` cave tile that
+## warps into the gym.
+const ROUTE_20_LANDING: Vector2i = Vector2i(41, 8)
+const SEAFOAM_GYM_DOOR: Vector2i = Vector2i(38, 7)
+## `maps/SeafoamGym.asm`: Blaine on (5,2) inside a 13-cell cave, faced from the
+## cell below. His script `appear`s the gym guide, which is a `clearevent` on the
+## guide's own hide flag, and it runs only on the branch a won battle takes.
+const BLAINE_FACE: Vector2i = Vector2i(5, 3)
+const BADGE_VOLCANO: int = 14
+const EVENT_BEAT_BLAINE: int = 1227
+const EVENT_SEAFOAM_GYM_GYM_GUIDE: int = 1911
+## `maps/SeafoamGym.asm` warp 1, back onto the Route 20 cave tile.
+const SEAFOAM_GYM_EXIT: Vector2i = Vector2i(5, 5)
+## The island's east shore again, surfed from rather than landed on.
+const ROUTE_20_SURF_APPROACH: Vector2i = Vector2i(41, 8)
+## Pallet's pond from the sea side: the same sixteen cells, landed on at (4,13).
+const PALLET_LANDING: Vector2i = Vector2i(4, 13)
+
+## Viridian Gym, the last badge on the walked route. `maps/ViridianGym.asm`
+## declares neither a scene nor a callback and ships no trainer: both its objects
+## are hidden by EVENT_VIRIDIAN_GYM_BLUE, so the gym is empty until Cinnabar's
+## Blue clears it, and that is the whole gate.
+const VIRIDIAN_GYM_NUMBER: int = 4
+const VIRIDIAN_GYM_DOOR: Vector2i = Vector2i(32, 7)
+const BLUE_GYM_FACE: Vector2i = Vector2i(5, 4)
+const BADGE_EARTH: int = 15
+const EVENT_BEAT_BLUE: int = 1228
+
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
 
@@ -1435,6 +1609,10 @@ func _hive_badge_path(
 			"reason": "Violet City to Route 32 failed: %s" % route32_leg.get("reason", ""),
 		}
 
+	var rod: Dictionary = _route_32_old_rod(world, save, random, data, path)
+	if not bool(rod.get("ok", false)):
+		return rod
+
 	# Route 32's south edge does connect to Route 33, but that lands in the
 	# plaza north of Route 33's wall row, whose only exit is the Union Cave
 	# warp. The cartridge's own path is Route 32 (6,79) into Union Cave 1F and
@@ -1737,6 +1915,26 @@ func _plain_badge_path(
 	})
 	if not bool(cut_gift.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "HM01 handoff did not finish"}
+
+	# And taught, not just carried. The starter is the only line in this party
+	# that CanLearnTMHMMove accepts for CUT, and HM01 arrives here, one walk
+	# before the first tree, so this is the earliest the route can be honest
+	# about the move. `teach_tm_hm()` is the same transaction the pack's USE
+	# reaches, the way _olivine_cafe_hm04() teaches STRENGTH.
+	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_CUT)
+	_mirror_party(world, save)
+	path.append({
+		"step": "ilex_forest_teach_cut",
+		"map": _map_value(world),
+		"taught": taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned CUT: %s" % taught.get("reason", ""),
+		}
 
 	var walked_to_tree: Dictionary = _walk_cell_resolving(
 		world, ILEX_CUT_APPROACH, save, random, data
@@ -2300,6 +2498,23 @@ func _mineral_badge_path(
 		return {
 			"ok": false, "path": path,
 			"reason": "HM03 handoff failed: %s" % surf_guy.get("reason", ""),
+		}
+
+	# Taught here, two legs before Route 40's south edge asks for it. The Ilex
+	# Forest Psyduck is the only party member CanLearnTMHMMove accepts.
+	var surf_taught: Dictionary = _teach_hm(world, save, ITEM_HM_SURF)
+	_mirror_party(world, save)
+	path.append({
+		"step": "dance_theater_teach_surf",
+		"map": _map_value(world),
+		"taught": surf_taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(surf_taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned SURF: %s" % surf_taught.get("reason", ""),
 		}
 
 	var leaving_theater: Dictionary = _warp_step(world, 4, 9)
@@ -2965,6 +3180,25 @@ func _glacier_badge_path(
 				],
 			}
 
+	# The third Electrode brings Lance back with HM06, and it is taught here for
+	# the same reason Surf is taught in the Dance Theater: Dragon's Den B1F's
+	# whirlpool is several legs away, and the only party member
+	# CanLearnTMHMMove accepts for WHIRLPOOL is the Ilex Forest Psyduck.
+	var whirlpool_taught: Dictionary = _teach_hm(world, save, ITEM_HM_WHIRLPOOL)
+	_mirror_party(world, save)
+	path.append({
+		"step": "rocket_base_b2f_teach_whirlpool",
+		"map": _map_value(world),
+		"taught": whirlpool_taught.get("ok", false),
+		"species": _party_species(save),
+		"moves": _party_moves(save),
+	})
+	if not bool(whirlpool_taught.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "no party member learned WHIRLPOOL: %s" % whirlpool_taught.get("reason", ""),
+		}
+
 	# Out the way the route came in. Clearing the base hides the grunts, so the
 	# walk back is not the one that came down.
 	for ladder: Dictionary in [
@@ -3144,14 +3378,44 @@ func _radio_tower_boss(
 	if not world.event_flag_active(EVENT_BLACKTHORN_SUPER_NERD_BLOCKS_GYM):
 		return {"ok": false, "path": path, "reason": "Blackthorn Gym is still sealed"}
 
+	# The descent stops on 1F rather than running straight out of the door,
+	# because the boss script above just cleared EVENT_GOLDENROD_CITY_CIVILIANS
+	# (`maps/RadioTower5F.asm`) and the Radio Card woman is one of the objects
+	# that flag hides.
 	var descended: Dictionary = _warp_chain(
 		world, save, random, data,
-		[Vector2i(12, 0), Vector2i(17, 0), Vector2i(0, 0), Vector2i(15, 0), Vector2i(2, 7)]
+		[Vector2i(12, 0), Vector2i(17, 0), Vector2i(0, 0), Vector2i(15, 0)]
 	)
 	if not bool(descended.get("ok", false)):
 		return {
 			"ok": false, "path": path,
 			"reason": "Radio Tower return descent failed: %s" % descended.get("reason", ""),
+		}
+
+	var card: Dictionary = _talk_to(
+		world, RADIO_CARD_WOMAN_FACE, Gen2WorldSprite.FACING_DOWN,
+		save, random, data, RADIO_CARD_ANSWERS
+	)
+	path.append({
+		"step": "radio_tower_radio_card",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"radio_card": world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD),
+		"run": card.get("run", {}),
+	})
+	if not bool(card.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Radio Card quiz did not finish: %s" % card.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD):
+		return {"ok": false, "path": path, "reason": "ENGINE_RADIO_CARD was not set"}
+
+	var out_of_tower: Dictionary = _warp_chain(world, save, random, data, [Vector2i(2, 7)])
+	if not bool(out_of_tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Radio Tower failed: %s" % out_of_tower.get("reason", ""),
 		}
 	return {"ok": true}
 
@@ -3597,7 +3861,9 @@ func _rising_badge_path(
 			"ok": false, "path": path,
 			"reason": "Blackthorn Mart unreachable: %s" % mart_trip.get("reason", ""),
 		}
-	var bought: Dictionary = _buy_great_balls(world, save, data, path, GREAT_BALLS_BOUGHT)
+	var bought: Dictionary = _buy_great_balls(
+		world, save, random, data, path, GREAT_BALLS_BOUGHT
+	)
 	if not bool(bought.get("ok", false)):
 		return {
 			"ok": false, "path": path,
@@ -5970,6 +6236,598 @@ func _fuchsia_leg(
 			"ok": false, "path": path,
 			"reason": "Janine set %d of her four trainer flags" % disguised,
 		}
+	return _pewter_leg(world, save, random, data, path)
+
+
+## Fuchsia Gym back to Vermilion, through Diglett's Cave to Route 2, and up to
+## Pewter Gym for the Boulder Badge.
+##
+## The order is forced. Measured against a real Crystal cache, a walk out of
+## Cerulean reaches 91 maps and none of Route 3, Route 4's main region, Mount
+## Moon, Route 2, Viridian, Pallet, Cinnabar, Route 20 or Seafoam Gym, and
+## Fuchsia's own south edge is sealed the other way while
+## EVENT_CINNABAR_ROCKS_CLEARED is clear. Diglett's Cave is the one door into
+## west Kanto, and the Snorlax on top of it is the lock.
+##
+## What opens that lock is the radio, which is why the Goldenrod leg now takes
+## the Radio Card: `SnorlaxAwake` answers only while the Poke Flute channel is
+## the track in `wMapMusic`, and a station's music id is neither sentinel
+## `ExitPokegearRadio_HandleMusic` restores on, so it survives the Pokegear
+## closing. `tools/validate_radio.gd` owns that whole chain and the Route 2
+## counts behind it.
+func _pewter_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [FUCHSIA_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Fuchsia Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var to_route_15: Dictionary = _gate_leg(
+		world, save, random, data, FUCHSIA_ROUTE_15_GATE_DOOR, FUCHSIA_GROUP, ROUTE_15_NUMBER
+	)
+	path.append({
+		"step": "route_15_eastbound",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": to_route_15.get("encounters", []),
+	})
+	if not bool(to_route_15.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 15 gate east failed: %s" % to_route_15.get("reason", ""),
+		}
+
+	var northbound: Array = [
+		{"step": "route_14_northbound", "direction": "east", "group": FUCHSIA_GROUP,
+			"number": ROUTE_14_NUMBER},
+		{"step": "route_13_northbound", "direction": "north", "group": FUCHSIA_GROUP,
+			"number": ROUTE_13_NUMBER},
+		{"step": "route_12_northbound", "direction": "north", "group": LAVENDER_GROUP,
+			"number": ROUTE_12_NUMBER},
+		{"step": "route_11_westbound", "direction": "west", "group": VERMILION_GROUP,
+			"number": ROUTE_11_NUMBER},
+		{"step": "vermilion_return", "direction": "west", "group": VERMILION_GROUP,
+			"number": VERMILION_CITY_NUMBER},
+	]
+	for leg: Dictionary in northbound:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var snorlax: Dictionary = _wake_snorlax(world, save, random, data, path)
+	if not bool(snorlax.get("ok", false)):
+		return snorlax
+
+	var through_cave: Dictionary = _warp_chain(
+		world, save, random, data, [DIGLETTS_CAVE_MOUTH] + DIGLETTS_CAVE_CHAIN
+	)
+	path.append({
+		"step": "digletts_cave",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+	})
+	if not bool(through_cave.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Diglett's Cave failed: %s" % through_cave.get("reason", ""),
+		}
+	if world.map_id() != Vector2i(ROUTE_2_GROUP, ROUTE_2_NUMBER):
+		return {"ok": false, "path": path, "reason": "the cave did not come out on Route 2"}
+
+	# The sixth site the route cuts without a party member that knows CUT, which
+	# is open work item 9 and not this leg's to fix.
+	var cut: Dictionary = _cut_at(
+		world, ROUTE_2_CUT_APPROACH, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "route_2_cut",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": cut.get("encounters", []),
+	})
+	if not bool(cut.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 2's cut tree failed: %s" % cut.get("reason", ""),
+		}
+
+	var to_pewter: Dictionary = _walk_connection_resolving(
+		world, "north", PEWTER_GROUP, PEWTER_CITY_NUMBER, save, random, data
+	)
+	var pewter_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "pewter_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER),
+		"encounters": to_pewter.get("encounters", []),
+		"run": pewter_entry,
+	})
+	if not bool(to_pewter.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to Pewter failed: %s" % to_pewter.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER):
+		return {"ok": false, "path": path, "reason": "Pewter's flypoint callback did not run"}
+
+	return _pewter_gym_leg(world, save, random, data, path)
+
+
+## Vermilion's Snorlax, which is the only thing between the walked route and
+## west Kanto.
+##
+## Tuning is the whole interaction: `SnorlaxAwake` compares `wMapMusic` against
+## the Poke Flute channel and takes its false branch otherwise, so the dial is
+## moved to 20.0 and the Pokegear closed before it is talked to. The card the
+## dial needs is `ENGINE_RADIO_CARD`, taken on the Goldenrod leg, and the region
+## check behind the station needs `ENGINE_EXPN_CARD`, taken on the Lavender one.
+func _wake_snorlax(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	if not world.state.is_engine_flag_active(Gen2WorldState.ENGINE_RADIO_CARD):
+		return {"ok": false, "path": path, "reason": "the route reached the Snorlax with no radio card"}
+
+	var walked: Dictionary = _walk_cell_resolving(world, SNORLAX_TALK, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to the Snorlax failed: %s" % walked.get("reason", ""),
+		}
+	var tuned: Dictionary = world.tune_radio(KNOB_POKE_FLUTE)
+	world.close_radio()
+	if not bool(tuned.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "20.0 answered no station: %s" % tuned.get("reason", ""),
+		}
+
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	path.append({
+		"step": "vermilion_snorlax",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"map_music": world.state.map_music(),
+		"fought_snorlax": world.event_flag_active(EVENT_FOUGHT_SNORLAX),
+		"vermilion_city_snorlax": world.event_flag_active(EVENT_VERMILION_CITY_SNORLAX),
+		"cave_mouth_open": world.object_at(DIGLETTS_CAVE_MOUTH) == null,
+		"encounters": walked.get("encounters", []),
+		"run": run,
+	})
+	if not bool(run.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Snorlax script did not finish: %s" % run.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_FOUGHT_SNORLAX):
+		return {"ok": false, "path": path, "reason": "the Snorlax was not fought"}
+	if not world.event_flag_active(EVENT_VERMILION_CITY_SNORLAX):
+		return {"ok": false, "path": path, "reason": "the Snorlax did not disappear"}
+	return {"ok": true}
+
+
+## Pewter Gym and the Boulder Badge. `maps/PewterGym.asm` declares neither a
+## scene nor a callback, so Brock answers as soon as he is faced, and his own
+## script sets Camper Jerry's flag whether or not Jerry was fought.
+func _pewter_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [PEWTER_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Pewter Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var brock: Dictionary = _talk_to(
+		world, BROCK_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_BOULDER, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "pewter_gym_brock",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"boulder_badge": world.state.is_engine_flag_active(badge),
+		"beat_brock": world.event_flag_active(EVENT_BEAT_BROCK),
+		"beat_camper_jerry": world.event_flag_active(EVENT_BEAT_CAMPER_JERRY),
+		"encounters": brock.get("encounters", []),
+		"run": brock,
+	})
+	if not bool(brock.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Brock did not finish: %s" % brock.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_BOULDERBADGE was not set"}
+	if not world.event_flag_active(EVENT_BEAT_CAMPER_JERRY):
+		return {"ok": false, "path": path, "reason": "Brock did not set Camper Jerry's flag"}
+	return _cinnabar_leg(world, save, random, data, path)
+
+
+## Pewter Gym south to Cinnabar Island and east to Seafoam Gym's Volcano Badge.
+##
+## Six plain connections carry the walk down the west coast, and then it is water
+## the rest of the way: Pallet's own pond is the last land, and Route 21,
+## Cinnabar's west side and Route 20 are all surfed. Two things make this leg the
+## one that has to come before Viridian's. Blue stands on Cinnabar until he is
+## talked to, and `CinnabarIslandBlue` is the only `clearevent` for
+## EVENT_VIRIDIAN_GYM_BLUE in either pin; and `Route20ClearRocksCallback` is a
+## MAPCALLBACK_NEWMAP, so simply arriving on Route 20 sets
+## EVENT_CINNABAR_ROCKS_CLEARED and takes the six `$7a` wall blocks off Route 19.
+func _cinnabar_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [PEWTER_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Pewter Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+
+	var southbound: Array = [
+		{"step": "route_2_southbound", "group": ROUTE_2_GROUP, "number": ROUTE_2_NUMBER},
+		{"step": "viridian_city", "group": ROUTE_2_GROUP, "number": VIRIDIAN_CITY_NUMBER,
+			"flypoint": ENGINE_FLYPOINT_VIRIDIAN},
+		{"step": "route_1", "group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "pallet_town", "group": PALLET_GROUP, "number": PALLET_TOWN_NUMBER,
+			"flypoint": ENGINE_FLYPOINT_PALLET},
+	]
+	for leg: Dictionary in southbound:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "south", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		var step: Dictionary = {
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		}
+		if leg.has("flypoint"):
+			step["flypoint"] = world.state.is_engine_flag_active(int(leg["flypoint"]))
+		path.append(step)
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+		if leg.has("flypoint") \
+			and not world.state.is_engine_flag_active(int(leg["flypoint"])):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s's flypoint callback did not run" % leg["step"],
+			}
+
+	var boarded: Dictionary = _surf_at(
+		world, PALLET_SURF_APPROACH, Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "pallet_pond_surf",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": boarded.get("encounters", []),
+	})
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Pallet's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+
+	for leg: Dictionary in [
+		{"step": "route_21", "number": ROUTE_21_NUMBER},
+		{"step": "cinnabar_island", "number": CINNABAR_ISLAND_NUMBER},
+	]:
+		var surfed: Dictionary = _walk_connection_resolving(
+			world, "south", SEAFOAM_GROUP, int(leg["number"]), save, random, data, true
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": surfed.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(surfed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the surf to %s failed: %s" % [leg["step"], surfed.get("reason", "")],
+			}
+
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, CINNABAR_LANDING, save, random, data, true
+	)
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "landing on Cinnabar failed: %s" % ashore.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR):
+		return {"ok": false, "path": path, "reason": "Cinnabar's flypoint callback did not run"}
+
+	var blue: Dictionary = _talk_to(
+		world, BLUE_FACE, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	path.append({
+		"step": "cinnabar_blue",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR),
+		"viridian_gym_blue": world.event_flag_active(EVENT_VIRIDIAN_GYM_BLUE),
+		"encounters": blue.get("encounters", []),
+		"run": blue.get("run", {}),
+	})
+	if not bool(blue.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not finish: %s" % blue.get("reason", ""),
+		}
+	if world.event_flag_active(EVENT_VIRIDIAN_GYM_BLUE):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not clear EVENT_VIRIDIAN_GYM_BLUE",
+		}
+
+	return _seafoam_gym_leg(world, save, random, data, path)
+
+
+## Cinnabar east to Route 20 and Blaine's cave.
+func _seafoam_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var boarded: Dictionary = _surf_at(
+		world, CINNABAR_SURF_APPROACH, Gen2WorldSprite.FACING_LEFT, save, random, data
+	)
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Cinnabar's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+	var eastbound: Dictionary = _walk_connection_resolving(
+		world, "east", SEAFOAM_GROUP, ROUTE_20_NUMBER, save, random, data, true
+	)
+	var entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "route_20",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"cinnabar_rocks_cleared": world.event_flag_active(EVENT_CINNABAR_ROCKS_CLEARED),
+		"encounters": eastbound.get("encounters", []),
+		"run": entry,
+	})
+	if not bool(eastbound.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the surf to Route 20 failed: %s" % eastbound.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_CINNABAR_ROCKS_CLEARED):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route20ClearRocksCallback did not run",
+		}
+
+	var ashore: Dictionary = _walk_cell_resolving(
+		world, ROUTE_20_LANDING, save, random, data, true
+	)
+	path.append({
+		"step": "route_20_landfall",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": ashore.get("encounters", []),
+	})
+	if not bool(ashore.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "landing on Route 20 failed: %s" % ashore.get("reason", ""),
+		}
+
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [SEAFOAM_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Seafoam Gym mouth failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var blaine: Dictionary = _talk_to(
+		world, BLAINE_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_VOLCANO, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "seafoam_gym_blaine",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"volcano_badge": world.state.is_engine_flag_active(badge),
+		"beat_blaine": world.event_flag_active(EVENT_BEAT_BLAINE),
+		# `appear SEAFOAMGYM_GYM_GUIDE` is a clearevent on the guide's own hide
+		# flag, and it sits on the branch only a won battle reaches.
+		"gym_guide_hidden": world.event_flag_active(EVENT_SEAFOAM_GYM_GYM_GUIDE),
+		"encounters": blaine.get("encounters", []),
+		"run": blaine.get("run", {}),
+	})
+	if not bool(blaine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blaine did not finish: %s" % blaine.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_VOLCANOBADGE was not set"}
+	return _viridian_leg(world, save, random, data, path)
+
+
+## Seafoam Gym back up the coast to Viridian Gym and the Earth Badge.
+##
+## The way back is the way down reversed, water included: Route 20's east shore,
+## Cinnabar, Route 21 and Pallet's own pond, then three connections north. The
+## gym at the end has no puzzle and no trainer in it. Both its objects carry
+## EVENT_VIRIDIAN_GYM_BLUE as their hide flag, so before Cinnabar the building is
+## empty and after it Blue is simply standing there.
+func _viridian_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(world, save, random, data, [SEAFOAM_GYM_EXIT])
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Seafoam Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+	var boarded: Dictionary = _surf_at(
+		world, ROUTE_20_SURF_APPROACH, Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	if not bool(boarded.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 20's surf entry failed: %s" % boarded.get("reason", ""),
+		}
+
+	var northbound: Array = [
+		{"step": "cinnabar_return", "direction": "west", "number": CINNABAR_ISLAND_NUMBER},
+		{"step": "route_21_northbound", "direction": "north", "number": ROUTE_21_NUMBER},
+		{"step": "pallet_return", "direction": "north", "number": PALLET_TOWN_NUMBER,
+			"group": PALLET_GROUP, "ashore": PALLET_LANDING},
+	]
+	for leg: Dictionary in northbound:
+		var surfed: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg.get("group", SEAFOAM_GROUP)),
+			int(leg["number"]), save, random, data, true
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": surfed.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(surfed.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the surf to %s failed: %s" % [leg["step"], surfed.get("reason", "")],
+			}
+		if leg.has("ashore"):
+			var ashore: Dictionary = _walk_cell_resolving(
+				world, leg["ashore"], save, random, data, true
+			)
+			if not bool(ashore.get("ok", false)):
+				return {
+					"ok": false, "path": path,
+					"reason": "landing on %s failed: %s" % [
+						leg["ashore"], ashore.get("reason", ""),
+					],
+				}
+
+	for leg: Dictionary in [
+		{"step": "route_1_northbound", "group": PALLET_GROUP, "number": ROUTE_1_NUMBER},
+		{"step": "viridian_return", "group": ROUTE_2_GROUP, "number": VIRIDIAN_CITY_NUMBER},
+	]:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, "north", int(leg["group"]), int(leg["number"]), save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [VIRIDIAN_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Viridian Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+
+	var blue: Dictionary = _talk_to(
+		world, BLUE_GYM_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_EARTH, Gen2WorldState.is_crystal_profile(data)
+	)
+	path.append({
+		"step": "viridian_gym_blue",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"earth_badge": world.state.is_engine_flag_active(badge),
+		"beat_blue": world.event_flag_active(EVENT_BEAT_BLUE),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
+		"encounters": blue.get("encounters", []),
+		"run": blue.get("run", {}),
+	})
+	if not bool(blue.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Blue did not finish: %s" % blue.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_EARTHBADGE was not set"}
 	return {"ok": true}
 
 
@@ -6784,9 +7642,7 @@ func _push_boulder_at(
 	}
 
 
-## BlackthornMartClerkScript's `pokemart MARTTYPE_STANDARD, MART_BLACKTHORN`,
-## bought from headlessly the way _teach_hm() teaches: through the same host the
-## service overlay drives, rather than through the overlay.
+## BlackthornMartClerkScript, talked to across its own counter.
 ##
 ## The route needs this once. Elm's aide gives five Poké Balls, Union Cave's
 ## Geodude costs one, and Dratini is a far lower catch rate than Geodude, so the
@@ -6795,24 +7651,27 @@ func _push_boulder_at(
 ## sells no Poké Balls, so what the route buys is Great Balls: they are the
 ## cheapest ball it stocks, and the source start money buys five of them against
 ## two Ultra Balls.
+##
+## The clerk stands on (1,3) behind the `$90` counter on (2,3), so this is a
+## CheckFacingObject doubled reach like the Radio Card woman's, and the buying
+## itself happens inside the clerk's own `pokemart` pause rather than beside it.
 func _buy_great_balls(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
+	random: RandomNumberGenerator,
 	data: GameData,
 	path: Array,
 	quantity: int,
 ) -> Dictionary:
-	var resolved: Dictionary = Gen2WorldMartHost.resolve_mart(
-		data, Gen2WorldMartHost.MARTTYPE_STANDARD, MART_BLACKTHORN, false, world.state
+	var walked: Dictionary = _walk_cell_resolving(
+		world, BLACKTHORN_MART_CLERK_FACE, save, random, data
 	)
-	if not bool(resolved.get("ok", false)):
-		return {
-			"ok": false,
-			"reason": "Blackthorn mart did not resolve: %s" % resolved.get("reason", ""),
-		}
-	var bought: Dictionary = Gen2WorldMartHost.purchase(
-		world, save, resolved.get("mart", {}),
-		Gen2WorldPartyHost.ITEM_GREAT_BALL, quantity, false
+	if not bool(walked.get("ok", false)):
+		return {"ok": false, "reason": "the mart clerk is unreachable: %s" % walked.get("reason", "")}
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var run: Dictionary = _drain_story(
+		world, world.interact(), save, random, data, true, [],
+		{"item": Gen2WorldPartyHost.ITEM_GREAT_BALL, "quantity": quantity}
 	)
 	path.append({
 		"step": "blackthorn_mart_great_balls",
@@ -6820,10 +7679,88 @@ func _buy_great_balls(
 		"cell": _cell_value(world),
 		"balls": world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL),
 		"money": world.state.money(),
+		"purchases": run.get("purchases", []),
+		"run": run,
 	})
-	if not bool(bought.get("ok", false)):
-		return {"ok": false, "reason": "purchase refused: %s" % bought.get("reason", "")}
+	if not bool(run.get("terminal", false)):
+		return {"ok": false, "reason": "the mart clerk did not finish: %s" % run.get("reason", "")}
+	if world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL) < quantity:
+		return {"ok": false, "reason": "the Great Balls did not reach the bag"}
 	return {"ok": true}
+
+
+## Route 32's Pokemon Center for the OLD ROD, and then the shore below it for
+## what the rod is here to catch.
+##
+## This is the route's answer to Surf and Whirlpool, and it has to be a rod
+## rather than a walk. Every grass wild in reach before Route 40's south edge
+## that CanLearnTMHMMove accepts for SURF is night only except Slowpoke Well's
+## Slowpoke, and Slowpoke does not take WHIRLPOOL at all; the walked route runs
+## on the new game's own 06:00 clock, so a night slot is not something it can
+## honestly reach. Route 32's own Old Rod row is the one time-independent source
+## of a mon that takes both, at Tentacool on the last threshold
+## (`data/wild/fish.asm`).
+##
+## `Route32Pokecenter1FFishingGuruScript` gates the rod on its own yes/no and
+## then `verbosegiveitem OLD_ROD`, which is what `Gen2WorldInventory.owns_rod()`
+## reads back.
+func _route_32_old_rod(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_center: Dictionary = _warp_chain(
+		world, save, random, data, [ROUTE_32_POKECENTER_DOOR]
+	)
+	if not bool(into_center.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 32 Pokemon Center door failed: %s" % into_center.get("reason", ""),
+		}
+	var guru: Dictionary = _talk_to(
+		world, FISHING_GURU_FACE, Gen2WorldSprite.FACING_UP,
+		save, random, data, [0] as Array[int]
+	)
+	path.append({
+		"step": "route_32_fishing_guru_old_rod",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"old_rod": world.state.item_quantity(Gen2WorldInventory.ITEM_OLD_ROD) > 0,
+		"run": guru.get("run", {}),
+	})
+	if not bool(guru.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the fishing guru did not finish: %s" % guru.get("reason", ""),
+		}
+	if world.state.item_quantity(Gen2WorldInventory.ITEM_OLD_ROD) <= 0:
+		return {"ok": false, "path": path, "reason": "the OLD ROD did not reach the bag"}
+
+	var outside: Dictionary = _warp_chain(
+		world, save, random, data, [ROUTE_32_POKECENTER_EXIT]
+	)
+	if not bool(outside.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Route 32 Pokemon Center failed: %s" % outside.get("reason", ""),
+		}
+
+	var walked: Dictionary = _walk_cell_resolving(
+		world, ROUTE_32_SHORE, save, random, data
+	)
+	if not bool(walked.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Route 32's shore is unreachable: %s" % walked.get("reason", ""),
+		}
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	return _catch_field_move_mon(
+		world, save, random, data, path,
+		Gen2WorldFieldMove.MOVE_SURF, "route_32_fish_for_surf",
+		Gen2WorldEncounter.METHOD_OLD_ROD
+	)
 
 
 ## Catches something on the current map that can learn [param move], which is
@@ -6847,6 +7784,7 @@ func _catch_field_move_mon(
 	path: Array,
 	move: int,
 	step: String,
+	method: StringName = &"auto",
 ) -> Dictionary:
 	var attempts: Array = []
 	var caught: Dictionary = {}
@@ -6854,7 +7792,7 @@ func _catch_field_move_mon(
 		var ball: int = _best_ball(world)
 		if ball <= 0:
 			break
-		var encounter: Dictionary = world.encounter_request(random, true)
+		var encounter: Dictionary = world.encounter_request(random, true, method)
 		if encounter.is_empty():
 			break
 		var species: int = int(encounter.get("pokemon", 0))
@@ -7122,6 +8060,8 @@ func _whirlpool_at(
 
 
 ## Walks to [param cell], faces [param facing] and drains the interaction.
+## [param answers] is passed through to _drain_story() for an NPC who asks, the
+## way the Radio Card woman's five-question quiz does.
 func _talk_to(
 	world: Gen2WorldAPI,
 	cell: Vector2i,
@@ -7129,12 +8069,15 @@ func _talk_to(
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
+	answers: Array[int] = [],
 ) -> Dictionary:
 	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data)
 	if not bool(walked.get("ok", false)):
 		return walked
 	world.player_facing = facing
-	var run: Dictionary = _drain_story(world, world.interact(), save, random, data, true)
+	var run: Dictionary = _drain_story(
+		world, world.interact(), save, random, data, true, answers
+	)
 	return {
 		"ok": bool(run.get("terminal", false)),
 		"reason": run.get("reason", ""),
@@ -7192,6 +8135,7 @@ func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
 	var species: Array[int] = []
 	var moves: Array = []
 	var names: Array = []
+	var eggs: Array = []
 	for mon: Gen2SaveMon in save.party:
 		species.append(int(mon.species))
 		var mon_moves: Array = []
@@ -7200,7 +8144,8 @@ func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
 				mon_moves.append(move)
 		moves.append(mon_moves)
 		names.append(mon.nickname if not mon.nickname.is_empty() else "")
-	world.set_party_summary(save.party.size(), false, species, moves, names)
+		eggs.append(mon.is_egg)
+	world.set_party_summary(save.party.size(), false, species, moves, names, eggs)
 
 
 func _party_has_egg(save: Gen2SaveData) -> bool:
@@ -7245,8 +8190,13 @@ func _drain_story(
 	data: GameData = null,
 	require_events: bool = false,
 	answers: Array[int] = [],
+	purchase: Dictionary = {},
 ) -> Dictionary:
 	var pending_answers: Array[int] = answers.duplicate()
+	## What to buy if a `pokemart` opens while this drain runs. Cleared once it
+	## is spent, so one standing order buys once.
+	var pending_purchase: Dictionary = purchase.duplicate()
+	var purchases: Array = []
 	if require_events and initial.is_empty():
 		return {
 			"statuses": [],
@@ -7403,6 +8353,35 @@ func _drain_story(
 					"ok": true,
 					"outcome": Gen2WorldBattleAdapter.OUTCOME_CAUGHT,
 				})
+			elif request_kind == &"mart_requested":
+				# `pokemart` is a runtime pause the same way a battle is, so the
+				# clerk's own script is what opens the mart and the caller's
+				# standing order is what buys from it. Gen2WorldHost resolves the
+				# dialog and mart id off the request exactly as the service
+				# screen does.
+				var mart_host: Dictionary = Gen2WorldHost.resolve_runtime_request(world, request)
+				if not bool(mart_host.get("ok", false)):
+					last_reason = String(mart_host.get("reason", "mart host failed"))
+					last_details = JSON.stringify(mart_host)
+					break
+				var mart: Dictionary = mart_host.get("data", {}).get("mart", {})
+				if not pending_purchase.is_empty():
+					var bought: Dictionary = Gen2WorldMartHost.purchase(
+						world, save, mart, int(pending_purchase.get("item", 0)),
+						int(pending_purchase.get("quantity", 0)), false
+					)
+					purchases.append({
+						"item": int(pending_purchase.get("item", 0)),
+						"quantity": int(pending_purchase.get("quantity", 0)),
+						"ok": bool(bought.get("ok", false)),
+						"reason": bought.get("reason", ""),
+					})
+					if not bool(bought.get("ok", false)):
+						last_reason = String(bought.get("reason", "purchase refused"))
+						last_details = JSON.stringify(bought)
+						break
+					pending_purchase = {}
+				results = world.complete_runtime_request({"ok": true})
 			elif request_kind == &"audio_requested":
 				results = world.complete_runtime_request({"ok": true})
 			else:
@@ -7430,6 +8409,7 @@ func _drain_story(
 		"waits": waits,
 		"pending_trace": pending_trace,
 		"battles": battles,
+		"purchases": purchases,
 		"catch_tutorials": catch_tutorials,
 		"hall_of_fame": hall_of_fame,
 		"approaches": approaches,
