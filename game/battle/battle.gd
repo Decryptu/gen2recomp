@@ -165,6 +165,13 @@ const WEATHER_CONTINUES: StringName = &"weather_continues"
 const WEATHER_ENDED: StringName = &"weather_ended"
 const HURT_BY_SANDSTORM: StringName = &"hurt_by_sandstorm"
 
+## A trainer spent one of its two items on whoever it has out. [code]item[/code]
+## is what was spent and [code]effect[/code] is [method Gen2AIItems.apply]'s own
+## answer, so a screen can follow the bar or the stage without asking the battle
+## again. The cartridge prints one line for all thirteen ("<TRAINER> used ITEM on
+## <MON>"), which is why there is one event rather than thirteen.
+const TRAINER_USED_ITEM: StringName = &"trainer_used_item"
+
 ## The heal family. [constant HP_RESTORED] carries the user's `hp` and `max_hp`
 ## so a screen moves the bar without reading the battle back;
 ## [constant HP_ALREADY_FULL] is `BattleCommand_Heal`'s own refusal, which costs
@@ -216,6 +223,11 @@ const ACTION_SWITCH: StringName = &"switch"
 ## either side moves, and a refusal the player can do nothing about sends them
 ## back to the menu with no turn spent at all.
 const ACTION_RUN: StringName = &"run"
+## A trainer reaching into its bag, which is `AI_TryItem`'s own action. It costs
+## the turn and is settled ahead of it: `AI_SwitchOrTryItem` sets
+## `wEnemyGoesFirst`, so the item lands before the player's move whatever the
+## speeds say. Only the enemy ever uses one; the player's pack is the overworld's.
+const ACTION_ITEM: StringName = &"item"
 
 ## `wBattleType`. Only the values `TryToRunAwayFromBattle` branches on are named;
 ## everything else reaches the ordinary speed check.
@@ -287,6 +299,12 @@ var weather_turns: int = 0
 ## numbers [Gen2WorldPalette] already uses, so the overworld's value is written
 ## here unmapped. A battle nobody told stands at midday.
 var time_of_day: int = Gen2WorldPalette.TIME_DAY
+
+## `wEnemyTrainerItem1` and `wEnemyTrainerItem2`: the two items this trainer
+## class may spend, one copy for the whole battle. Each is removed as it is
+## spent, which is the cartridge's own `xor a; ld [de], a`. Empty for a wild
+## battle and for any class carrying `NO_ITEM` twice.
+var enemy_items: Array[int] = []
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
@@ -372,6 +390,24 @@ static func switch_to(index: int) -> Dictionary:
 
 static func run_away() -> Dictionary:
 	return {"type": ACTION_RUN}
+
+
+static func use_item(item: int) -> Dictionary:
+	return {"type": ACTION_ITEM, "item": item}
+
+
+## Fills [member enemy_items] from a trainer class's own attributes, the way
+## `LoadEnemyMon`'s caller copies `TRNATTR_ITEM1` and `TRNATTR_ITEM2` into the
+## two working slots. `NO_ITEM` is zero and is not carried.
+func load_trainer_items(trainer_class: int) -> void:
+	enemy_items = []
+	if data == null or trainer_class <= 0:
+		return
+	var attributes: Dictionary = data.trainer_attributes(trainer_class)
+	for key: String in ["item1", "item2"]:
+		var item: int = int(attributes.get(key, 0))
+		if item != 0:
+			enemy_items.append(item)
 
 
 func party(side: int) -> Gen2Party:
@@ -719,6 +755,9 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		if _is_switch(actions[side]):
 			events.append_array(send_out(side, int(actions[side].get("index", -1))))
 			continue
+		if _is_item(actions[side]):
+			_use_trainer_item(side, int(actions[side].get("item", 0)), events)
+			continue
 		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
 			break
 		var slot: int = effective_slot(side, int(actions[side].get("slot", 0)))
@@ -1062,6 +1101,27 @@ func _award_share(
 			_give_experience_to(learner, int(index), award, stat_gains, by_exp_share, events)
 
 
+## Spends one of the trainer's two items, which costs the turn.
+##
+## The item is gone whether or not it changed anything: `AI_TryItem` clears the
+## slot the moment a check said yes, and the checks are what decide that, not
+## the effect. Bide, Fury Cutter, Protect, Rage and `wLastEnemyCounterMove` are
+## cleared alongside it on the cartridge. Of those only the counter move exists
+## here, and [method reset_damage_taken] has already cleared it at the top of
+## this action pair, so there is nothing left for a clear here to do.
+func _use_trainer_item(side: int, item: int, events: Array) -> void:
+	if item == 0:
+		return
+	enemy_items.erase(item)
+	var user: Gen2BattleMon = mon(side)
+	var effect: Dictionary = Gen2AIItems.apply(user, item)
+	events.append({
+		"type": TRAINER_USED_ITEM, "side": side, "item": item,
+		"species": user.species, "effect": effect,
+		"hp": user.hp, "max_hp": user.max_hp(),
+	})
+
+
 ## `IsAnyMonHoldingExpShare`: every living party index carrying one, in party
 ## order. A fainted holder is skipped and does not count towards the split, the
 ## same test the routine makes before it looks at the item at all.
@@ -1139,6 +1199,10 @@ static func _is_run(action: Dictionary) -> bool:
 	return StringName(action.get("type", ACTION_MOVE)) == ACTION_RUN
 
 
+static func _is_item(action: Dictionary) -> bool:
+	return StringName(action.get("type", ACTION_MOVE)) == ACTION_ITEM
+
+
 ## The event a run attempt produces, carrying whatever branch answered it.
 func _run_event(type: StringName, attempt: Dictionary) -> Dictionary:
 	var out: Dictionary = attempt.duplicate(true)
@@ -1152,7 +1216,7 @@ func _run_event(type: StringName, attempt: Dictionary) -> Dictionary:
 ## Struggle stands in there so that the order can be worked out without a special
 ## case; a switching side never reaches the point of using it.
 func _move_for_action(side: int, action: Dictionary) -> int:
-	if _is_switch(action) or _is_run(action):
+	if _is_switch(action) or _is_run(action) or _is_item(action):
 		return Gen2Damage.STRUGGLE
 	return move_for(side, int(action.get("slot", 0)))
 
@@ -1207,7 +1271,10 @@ func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
 	# once and leaves the enemy's move behind it.
 	var player_switching: bool = _is_switch(actions.get(PLAYER, {})) \
 		or _is_run(actions.get(PLAYER, {}))
-	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {}))
+	# An enemy item is `wEnemyGoesFirst` for the same reason an enemy switch is,
+	# and both lose to a player switch, which was settled at menu time.
+	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {})) \
+		or _is_item(actions.get(ENEMY, {}))
 	if player_switching or enemy_switching:
 		return _sides(player_switching)
 

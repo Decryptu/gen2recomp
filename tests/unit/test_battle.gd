@@ -2340,3 +2340,85 @@ func test_an_exp_share_halves_the_stat_experience_too() -> void:
 		assert_eq(gain["gains"], {
 			"hp": 22, "attack": 24, "defense": 24, "speed": 22, "special": 32,
 		})
+
+
+## A trainer's item is an action rather than a move: it costs the turn, it lands
+## before the player's move whatever the speeds say, and the item is gone.
+func test_a_trainer_item_resolves_before_the_players_move_and_is_spent() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 100, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])), _rng, true
+	)
+	battle.enemy_items = [Gen2AIItems.MAX_POTION]
+	battle.enemy.hp = 1
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_item(Gen2AIItems.MAX_POTION)
+	)
+
+	var used: Dictionary = _first(events, Gen2Battle.TRAINER_USED_ITEM)
+	assert_false(used.is_empty(), JSON.stringify(events))
+	assert_eq(int(used["side"]), Gen2Battle.ENEMY)
+	assert_eq(int(used["item"]), Gen2AIItems.MAX_POTION)
+	assert_eq(battle.enemy_items, [] as Array[int], "spent, and gone for the rest of the battle")
+	# Pikachu at 100 outspeeds a level 50 Geodude, and the item still went first:
+	# the heal is in the events before the hit that follows it.
+	assert_lt(
+		events.find(used),
+		events.find(_first(events, Gen2Battle.HIT)),
+		"the item beat a faster Pokemon to the turn"
+	)
+	# Healed to full, then hit once, so it is neither at 1 nor at its maximum.
+	assert_gt(battle.enemy.hp, 1)
+
+
+## The enemy's item costs it the turn: nothing of its own is thrown that turn.
+func test_a_trainer_using_an_item_does_not_also_attack() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 100, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])), _rng, true
+	)
+	battle.enemy_items = [Gen2AIItems.X_ATTACK]
+	var before: int = battle.player.hp
+
+	battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_item(Gen2AIItems.X_ATTACK)
+	)
+
+	assert_eq(battle.player.hp, before, "the enemy spent its turn on the bag")
+	assert_eq(battle.enemy.stage("attack"), 1)
+
+
+## An X Accuracy makes everything the holder throws land, checked ahead of the
+## stat modifiers and the roll.
+func test_an_x_accuracy_makes_the_enemys_moves_stop_missing() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.SUPERSONIC])), _rng, true
+	)
+	# Evasion at the top would otherwise make Supersonic miss most of the time.
+	battle.player.change_stage("evasion", Gen2Stats.MAX_STAGE)
+	Gen2AIItems.apply(battle.enemy, Gen2AIItems.X_ACCURACY)
+
+	var landed: int = 0
+	for seed: int in 32:
+		battle.rng.seed = seed
+		battle.player.substatus = Gen2Substatus.NONE
+		battle.player.confusion_turns = 0
+		# Both back to full, or Geodude faints partway through; and its PP back,
+		# or it runs Supersonic dry around turn twenty and Struggles instead.
+		battle.player.hp = battle.player.max_hp()
+		battle.enemy.hp = battle.enemy.max_hp()
+		battle.enemy.restore_pp()
+		var events: Array = battle.take_turn(0, 0)
+		if not _first(events, Gen2Battle.CONFUSE_INFLICTED).is_empty():
+			landed += 1
+	assert_eq(landed, 32, "an X Accuracy skips the roll entirely")
+
+
+func test_a_class_with_no_items_carries_none_into_the_battle() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.load_trainer_items(0)
+	assert_eq(battle.enemy_items, [] as Array[int])

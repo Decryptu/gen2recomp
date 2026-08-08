@@ -85,6 +85,41 @@ const SANDSTORM_IMMUNE_TYPES: Array = Gen2Weather.SANDSTORM_EXEMPT_TYPES
 const RESIDUAL_MOVE_NUMBERS: Array = [54, 73, 77, 78, 86, 116, 117, 139, 144, 160, 164, 191]
 
 
+## What the enemy does with its turn: reach for an item, or use a move.
+##
+## `AI_SwitchOrTryItem`, which runs before the turn and settles ahead of it. The
+## switch half is not written yet, so every path through here that the cartridge
+## would answer with a switch reaches `DontSwitch` and its item check instead.
+##
+## Answers a [Gen2Battle] action dictionary. [param item_switch_flags] is the
+## class's own [constant RomLayout.ATTR_AI_ITEM_SWITCH] word, and
+## [param move_slot] is what [method choose_slot] already picked, used when
+## nothing else is worth doing.
+static func choose_action(
+	battle: Gen2Battle, item_switch_flags: int, move_slot: int, rng: RandomNumberGenerator
+) -> Dictionary:
+	if _can_try_item(battle):
+		var item: int = Gen2AIItems.choose(
+			battle.mon(Gen2Battle.ENEMY), battle.enemy_items, item_switch_flags,
+			battle.mon(Gen2Battle.ENEMY).turns_taken, rng
+		)
+		if item != 0:
+			return Gen2Battle.use_item(item)
+	return Gen2Battle.use_move(move_slot)
+
+
+## The gates `AI_SwitchOrTryItem` and `AI_TryItem` share before either half runs:
+## a real trainer, something in the bag, and a lead that is worth spending it on.
+##
+## `CheckEnemyLockedIn` is not among them for items: it stops the *switch* half,
+## and the cartridge falls through to `DontSwitch` in that case, which still
+## tries an item. The wrap and Mean Look checks are the same shape.
+static func _can_try_item(battle: Gen2Battle) -> bool:
+	return battle.is_trainer_battle \
+		and not battle.enemy_items.is_empty() \
+		and Gen2AIItems.is_highest_level(battle.party(Gen2Battle.ENEMY))
+
+
 ## Picks a move slot for [param attacker] to use against [param defender], the
 ## way [param ai_move_weights] (a trainer class's own
 ## [constant RomLayout.ATTR_AI_MOVE_WEIGHTS]) says to score it.
