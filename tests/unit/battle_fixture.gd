@@ -122,6 +122,11 @@ const FOCUS_ENERGY_MOVE: int = 273
 ## The highest move number this table fills. Grown as new moves are added.
 const MAX_MOVE: int = FOCUS_ENERGY_MOVE
 const BERRY_ITEM: int = 0xAD
+## The Smoke Ball and its held effect, both the cartridge's own numbers
+## (constants/item_constants.asm, constants/item_data_constants.asm). It is the
+## one item running reads.
+const SMOKE_BALL: int = 0x6A
+const HELD_ESCAPE: int = 72
 
 ## Gender ratios, the published bytes: `x percent = floor(x * 255 / 100)`, so a
 ## species' own ratio here can be checked against pret's own base stats rather
@@ -357,7 +362,12 @@ static func _items() -> Array:
 	for number: int in range(1, BERRY_ITEM + 1):
 		out.append({
 			"number": number,
-			"name": "BERRY" if number == BERRY_ITEM else "ITEM%d" % number,
+			"name": "BERRY" if number == BERRY_ITEM else (
+				"SMOKE BALL" if number == SMOKE_BALL else "ITEM%d" % number
+			),
+			# ItemAttributes' held effect byte, which the importer keeps as
+			# `effect`. Only the Smoke Ball's is load bearing so far.
+			"effect": HELD_ESCAPE if number == SMOKE_BALL else 0,
 		})
 	return out
 

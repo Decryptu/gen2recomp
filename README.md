@@ -29,9 +29,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   font, text-box borders, the battle HUD, maps, overworld menus, 34 mart
 >   lists, phone contacts, special calls and music/SFX pointers. A scene-free
 >   host resolves all of it without reopening the ROM.
-> - **Battles.** Parties, switching, stats, damage, accuracy, turn order, status
->   and substatus effects, trainer AI, experience, levelling, move learning and
->   capture input on a real 160x144 screen.
+> - **Battles.** Parties, switching, running, stats, damage, accuracy, turn
+>   order, status and substatus effects, trainer AI, experience, levelling, move
+>   learning and capture input on a real 160x144 screen.
 > - **Overworld.** Real maps, map connections, script requests, trainer battles
 >   with imported win/loss text, map reloads, save-safe blackout recovery,
 >   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
@@ -183,7 +183,7 @@ Development scenes:
 |---|---|
 | `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
-| `game/battle/battle_screen.tscn` | `A` turn, Space events, `W` switch, left/right matchup, `S`/`D` damage either side; in wild battles `B` opens the ball selector, left/right changes ball, Space throws |
+| `game/battle/battle_screen.tscn` | `A` turn, Space events, `W` switch, `R` run, left/right matchup, `S`/`D` damage either side; in wild battles `B` opens the ball selector, left/right changes ball, Space throws |
 | `game/world/world_screen.tscn` | arrows/WASD move, Space or `Z` confirms, `F` fishes while facing water with an owned rod, `P` opens the phone list directly, `Enter`/`Tab` opens the start menu and its Pokegear entry the whole device, `Esc` closes an overlay, `V` cycles world renderers, F5 saves |
 
 Battle-screen moves are random and a full move set declines the learn offer; use

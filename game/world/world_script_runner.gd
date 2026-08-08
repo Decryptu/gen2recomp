@@ -532,6 +532,21 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		})
 		_pending = {}
 		return advance()
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_RAN:
+		## `.can_escape` writes DRAW into wBattleResult, and the script carries
+		## on: `reloadmapafterbattle` only branches on LOSE. The eight corpus
+		## scripts that `iftrue` straight after `startbattle` are asking "did I
+		## not win", and a run answers yes.
+		_stage_just_battled(true)
+		_script_value = BATTLE_RESULT_DRAW
+		_events.append({
+			"type": &"battle_completed",
+			"outcome": outcome,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
 	if outcome != Gen2WorldBattleAdapter.OUTCOME_WON:
 		return _fail(StringName("battle_%s" % outcome), result)
 

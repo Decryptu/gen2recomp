@@ -61,6 +61,10 @@ static func prepare(
 	)
 	if battle == null:
 		return _failure(&"battle_setup_failed")
+	# wBattleType, which a `loadvar VAR_BATTLETYPE` before `startbattle` sets.
+	# Running is the only thing that reads it so far, and four of its values are
+	# what make Celebi, Suicune and the Rocket trap battles inescapable.
+	battle.battle_type = int(values.get("battle_type", Gen2Battle.BATTLETYPE_NORMAL))
 
 	return {
 		"ok": true,

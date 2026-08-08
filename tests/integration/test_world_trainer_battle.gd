@@ -642,3 +642,60 @@ func _install_story_slice() -> void:
 	object["object_type"] = Gen2WorldObject.OBJECTTYPE_SCRIPT
 	object["script"] = STORY_OBJECT
 	object["event_flag"] = STORY_EVENT_FLAG
+
+
+## Running from a real wild encounter, through the production overlay: the
+## battle ends with nobody having won, the party is untouched, and the world
+## comes back rather than blacking out.
+##
+## The player's Pokémon is faster than the fixture's wild one, so
+## `TryToRunAwayFromBattle`'s speed comparison answers and no roll happens.
+func test_running_from_a_wild_encounter_returns_to_the_world_without_a_loss() -> void:
+	await _open_world()
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	var party_before: int = host._battle.party(Gen2Battle.PLAYER).at(0).hp
+
+	host.run_from_battle()
+
+	assert_true(host._battle.has_fled())
+	assert_null(host._battle.winner())
+	assert_eq(host.battle_snapshot()["message"], "Got away safely!")
+	assert_eq(host._battle.party(Gen2Battle.PLAYER).at(0).hp, party_before)
+
+	host.finish()
+	host.advance()
+	host.finish()
+	host.advance()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_null(_battle_host(), "the overlay stayed open after the run")
+	var world: Dictionary = _world_screen.world_snapshot()
+	assert_eq(world["map"], Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
+
+
+## A trainer battle answers the same request with its own refusal, and the
+## overlay stays open with both sides where they were: `BattleMenu_Run` reopens
+## the menu rather than spending the turn.
+func test_a_trainer_battle_refuses_the_run_and_the_overlay_stays_open() -> void:
+	await _open_world()
+	await _trigger_trainer()
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	var enemy_before: int = host._battle.mon(Gen2Battle.ENEMY).hp
+	var player_before: int = host._battle.mon(Gen2Battle.PLAYER).hp
+
+	host.run_from_battle()
+
+	assert_false(host._battle.has_fled())
+	assert_false(host._battle.is_over())
+	assert_eq(
+		host.battle_snapshot()["message"],
+		"No! There's no running from a trainer battle!"
+	)
+	assert_eq(host._battle.mon(Gen2Battle.ENEMY).hp, enemy_before)
+	assert_eq(host._battle.mon(Gen2Battle.PLAYER).hp, player_before, "the turn was spent")
+	assert_not_null(_battle_host())
