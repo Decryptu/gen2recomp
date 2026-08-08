@@ -2107,6 +2107,14 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 				"transition": checked.duplicate(true),
 			})
 			continue
+		if event_type == &"player_facing_requested":
+			## Script_warpfacing writes the player's facing before the warp, and
+			## the map load never touches it, so the facing outlives the
+			## transition. Lance's room is where it shows: `warpfacing UP` is
+			## what the player enters the Hall of Fame already facing.
+			player_facing = int(event.get("facing", player_facing))
+			generated.append({"type": &"player_facing", "facing": player_facing})
+			continue
 		if event_type == &"player_movement_requested":
 			generated.append_array(_apply_player_movement(event))
 			continue

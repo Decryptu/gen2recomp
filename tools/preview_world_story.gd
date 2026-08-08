@@ -196,6 +196,49 @@ const VICTORY_ROAD_LADDERS: Array = [
 	{"step": "victory_road_second_ladder", "cell": Vector2i(13, 31)},
 ]
 
+## The Elite Four, in the order their doors join them. Every map is in the
+## INDIGO group (16); `maps/IndigoPlateauPokecenter1F.asm` warp 4 at (14,3) is
+## the only way in and each room's exit pair leads to the next.
+##
+## The four rooms share one shape. `<Room>DoorLocksBehindYouScript` walks the
+## player four cells north of the arrival warp and walls the entrance, the boss
+## stands on (5,7) and is faced from (5,8), and beating them opens the exit
+## block over (4,2)/(5,2). Lance's room is taller and is not talked to at all:
+## its coord events on (4,5) and (5,5) run the approach and the champion scene.
+const ELITE_FOUR_ROOM_ARRIVAL: Vector2i = Vector2i(5, 17)
+const ELITE_FOUR_ROOM_BOSS_FACE: Vector2i = Vector2i(5, 8)
+const ELITE_FOUR_ROOM_EXIT: Vector2i = Vector2i(5, 2)
+## Four `step UP` (`<Room>_EnterMovement`), so the scene settles here.
+const ELITE_FOUR_ENTER_STEPS: int = 4
+const INDIGO_PLATEAU_ELITE_FOUR_DOOR: Vector2i = Vector2i(14, 3)
+
+## constants/event_flags.asm, the same numbers in both pins. Each room sets its
+## own entrance flag on entry and its exit flag when its boss falls.
+const ELITE_FOUR_ROOMS: Array = [
+	{"step": "wills_room", "number": 3, "beat": 1464, "entrance": 777, "exit": 778},
+	{"step": "kogas_room", "number": 4, "beat": 1465, "entrance": 779, "exit": 780},
+	{"step": "brunos_room", "number": 5, "beat": 1466, "entrance": 781, "exit": 782},
+	{"step": "karens_room", "number": 6, "beat": 1467, "entrance": 783, "exit": 784},
+]
+
+## Lance's room (16/7) and the Hall of Fame (16/8).
+const LANCES_ROOM_NUMBER: int = 7
+const HALL_OF_FAME_NUMBER: int = 8
+const LANCES_ROOM_ARRIVAL: Vector2i = Vector2i(5, 23)
+## The coord event pair is (4,5) and (5,5); the walk stops below the right one
+## and steps onto it, because a resolving walk would re-dispatch the cell.
+const LANCE_APPROACH: Vector2i = Vector2i(5, 6)
+const EVENT_LANCES_ROOM_ENTRANCE_CLOSED: int = 785
+const EVENT_BEAT_CHAMPION_LANCE: int = 1468
+## `warpfacing UP, HALL_OF_FAME, 4, 13` is the last command of the champion
+## scene, so the player never walks Lance's own exit door.
+const HALL_OF_FAME_ARRIVAL: Vector2i = Vector2i(4, 13)
+## The flags `HallOfFameEnterScript` writes before `halloffame`.
+const EVENT_BEAT_ELITE_FOUR: int = 68
+const EVENT_TELEPORT_GUY: int = 1916
+const EVENT_RIVAL_SPROUT_TOWER: int = 1732
+const EVENT_RED_IN_MT_SILVER: int = 1890
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -3507,7 +3550,11 @@ func _kanto_approach_path(
 	if not bool(gate.get("ok", false)):
 		return gate
 
-	return _victory_road_leg(world, save, random, data, path)
+	var road: Dictionary = _victory_road_leg(world, save, random, data, path)
+	if not bool(road.get("ok", false)):
+		return road
+
+	return _elite_four_leg(world, save, random, data, path)
 
 
 ## The Dragon Shrine back to New Bark Town.
@@ -4127,6 +4174,212 @@ func _victory_road_leg(
 		}
 	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_INDIGO_PLATEAU):
 		return {"ok": false, "path": path, "reason": "the Indigo Plateau flypoint was not set"}
+	return {"ok": true}
+
+
+## The Indigo Plateau Pokemon Center to the Hall of Fame.
+##
+## The five rooms are one corridor with a door between each pair, and no heal
+## anywhere in it. `_drain_story()` answers every battle with a win, so what
+## this walks is the doors, the scenes and the flags, not five fights a party
+## survived.
+##
+## `IndigoPlateauPokecenter1FPrepareElite4Callback` has already run on the
+## Pokemon Center's own map entry: it sets all six scenes and clears the twelve
+## room flags, so each room arrives on its `_LOCK_DOOR` scene.
+func _elite_four_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var entered: Dictionary = _warp_chain(
+		world, save, random, data, [INDIGO_PLATEAU_ELITE_FOUR_DOOR]
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Elite Four door failed: %s" % entered.get("reason", ""),
+		}
+
+	for room: Dictionary in ELITE_FOUR_ROOMS:
+		var settled: Vector2i = ELITE_FOUR_ROOM_ARRIVAL \
+			+ Vector2i(0, -ELITE_FOUR_ENTER_STEPS)
+		if world.player_cell != settled:
+			return {
+				"ok": false, "path": path,
+				"reason": "%s left the player on %s, not %s" % [
+					room["step"], world.player_cell, settled,
+				],
+			}
+		if not world.event_flag_active(int(room["entrance"])):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s did not lock its entrance" % room["step"],
+			}
+
+		var boss: Dictionary = _talk_to(
+			world, ELITE_FOUR_ROOM_BOSS_FACE, Gen2WorldSprite.FACING_UP,
+			save, random, data
+		)
+		path.append({
+			"step": room["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"entrance_closed": world.event_flag_active(int(room["entrance"])),
+			"beaten": world.event_flag_active(int(room["beat"])),
+			"exit_open": world.event_flag_active(int(room["exit"])),
+			"battles": boss.get("run", {}).get("battles", []),
+		})
+		if not bool(boss.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "%s failed: %s" % [room["step"], boss.get("reason", "")],
+			}
+		if not world.event_flag_active(int(room["beat"])):
+			return {"ok": false, "path": path, "reason": "%s was not beaten" % room["step"]}
+		if not world.event_flag_active(int(room["exit"])):
+			return {"ok": false, "path": path, "reason": "%s did not open its exit" % room["step"]}
+
+		var onward: Dictionary = _warp_chain(
+			world, save, random, data, [ELITE_FOUR_ROOM_EXIT]
+		)
+		if not bool(onward.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the door out of %s failed: %s" % [
+					room["step"], onward.get("reason", ""),
+				],
+			}
+
+	var lance: Dictionary = _lances_room_leg(world, save, random, data, path)
+	if not bool(lance.get("ok", false)):
+		return lance
+	return _hall_of_fame_leg(
+		world, save, random, data, path, int(lance.get("hall_of_fame", 0))
+	)
+
+
+## Lance's room. Nothing here is talked to: `LancesRoomDoorLocksBehindYouScript`
+## sets SCENE_LANCESROOM_APPROACH_LANCE, which arms the coord events on (4,5)
+## and (5,5), and stepping onto one runs the approach, the battle and the whole
+## champion scene through to `warpfacing UP, HALL_OF_FAME, 4, 13`.
+##
+## The cell is stepped onto rather than walked to, the way the Plateau rival
+## coord event is: a resolving walk would re-dispatch it until it ran out of
+## attempts.
+func _lances_room_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var settled: Vector2i = LANCES_ROOM_ARRIVAL + Vector2i(0, -ELITE_FOUR_ENTER_STEPS)
+	if world.map_id() != Vector2i(16, LANCES_ROOM_NUMBER) or world.player_cell != settled:
+		return {
+			"ok": false, "path": path,
+			"reason": "Lance's room started on %s %s, not 16/%d %s" % [
+				_map_value(world), world.player_cell, LANCES_ROOM_NUMBER, settled,
+			],
+		}
+	if not world.event_flag_active(EVENT_LANCES_ROOM_ENTRANCE_CLOSED):
+		return {"ok": false, "path": path, "reason": "Lance's room did not lock its entrance"}
+
+	var approach: Dictionary = _walk_cell_resolving(
+		world, LANCE_APPROACH, save, random, data
+	)
+	if not bool(approach.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk to Lance failed: %s" % approach.get("reason", ""),
+		}
+	var stepped: Dictionary = world.move_result(Vector2i.UP)
+	var champion: Dictionary = {"ok": false, "reason": "the step onto the coord event refused"}
+	if bool(stepped.get("ok", false)):
+		champion = _drain_story(
+			world, _dispatch_after_step(world), save, random, data, true
+		)
+		champion["ok"] = bool(champion.get("terminal", false))
+	path.append({
+		"step": "lances_room",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"beat_lance": world.event_flag_active(EVENT_BEAT_CHAMPION_LANCE),
+		"battles": champion.get("battles", []),
+	})
+	if not bool(champion.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the champion scene failed: %s" % champion.get("reason", ""),
+		}
+	if not world.event_flag_active(EVENT_BEAT_CHAMPION_LANCE):
+		return {"ok": false, "path": path, "reason": "Lance was not beaten"}
+	if world.map_id() != Vector2i(16, HALL_OF_FAME_NUMBER):
+		return {
+			"ok": false, "path": path,
+			"reason": "the champion scene ended on %s, not the Hall of Fame" % [
+				_map_value(world),
+			],
+		}
+	return {"ok": true, "hall_of_fame": int(champion.get("hall_of_fame", 0))}
+
+
+## The Hall of Fame. `warpfacing` lands here mid-script, and a map scene queued
+## by a warp is picked up by the same run_event_queue() loop that took the warp,
+## so SCENE_HALLOFFAME_ENTER usually runs inside the champion drain and this
+## step's own dispatch finds nothing left. [param carried] is that drain's count
+## of the one event this leg exists to reach.
+##
+## `halloffame` is a presentation boundary: it commits ENGINE_HALL_OF_FAME and
+## emits `hall_of_fame_requested`, which no screen answers yet.
+func _hall_of_fame_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+	carried: int,
+) -> Dictionary:
+	var run: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	var presentations: int = carried + int(run.get("hall_of_fame", 0))
+	path.append({
+		"step": "hall_of_fame",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"beat_elite_four": world.event_flag_active(EVENT_BEAT_ELITE_FOUR),
+		"teleport_guy": world.event_flag_active(EVENT_TELEPORT_GUY),
+		"red_in_mt_silver": world.event_flag_active(EVENT_RED_IN_MT_SILVER),
+		"hall_of_fame_events": presentations,
+		"hall_of_fame_flag": world.state.hall_of_fame(),
+		"badge_count": world.state.badge_count(),
+	})
+	if not bool(run.get("terminal", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Hall of Fame scene failed: %s" % run.get("reason", ""),
+		}
+	for flag: int in [EVENT_BEAT_ELITE_FOUR, EVENT_TELEPORT_GUY, EVENT_RIVAL_SPROUT_TOWER]:
+		if not world.event_flag_active(flag):
+			return {
+				"ok": false, "path": path,
+				"reason": "the Hall of Fame did not set event flag %d" % flag,
+			}
+	if world.event_flag_active(EVENT_RED_IN_MT_SILVER):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Hall of Fame did not clear EVENT_RED_IN_MT_SILVER",
+		}
+	if presentations != 1:
+		return {
+			"ok": false, "path": path,
+			"reason": "halloffame emitted %d presentation events, not one" % presentations,
+		}
+	if not world.state.hall_of_fame():
+		return {"ok": false, "path": path, "reason": "ENGINE_HALL_OF_FAME was not set"}
 	return {"ok": true}
 
 
@@ -5054,6 +5307,7 @@ func _drain_story(
 	var pending_trace: Array[String] = []
 	var battles: Array = []
 	var catch_tutorials: int = 0
+	var hall_of_fame: int = _hall_of_fame_events(results)
 	var approaches: Array = []
 	for result: Dictionary in results:
 		if not bool(result.get("ok", false)):
@@ -5199,6 +5453,7 @@ func _drain_story(
 		if results.is_empty():
 			break
 		statuses.append_array(_statuses(results))
+		hall_of_fame += _hall_of_fame_events(results)
 		waits += 1
 		for result: Dictionary in results:
 			if not bool(result.get("ok", false)):
@@ -5218,6 +5473,7 @@ func _drain_story(
 		"pending_trace": pending_trace,
 		"battles": battles,
 		"catch_tutorials": catch_tutorials,
+		"hall_of_fame": hall_of_fame,
 		"approaches": approaches,
 		"terminal": last_reason.is_empty() \
 			and not world.script_input_waiting() and world.pending_runtime_request().is_empty(),
@@ -5553,3 +5809,15 @@ func _statuses(results: Array) -> Array[String]:
 	for result: Dictionary in results:
 		out.append(String(result.get("status", "")))
 	return out
+
+
+## `halloffame` commits ENGINE_HALL_OF_FAME and emits this, the one presentation
+## event on the route with no screen behind it. Counted so the walk can say the
+## boundary was reached rather than only that the flag is set.
+func _hall_of_fame_events(results: Array) -> int:
+	var count: int = 0
+	for result: Dictionary in results:
+		for event: Dictionary in result.get("events", []):
+			if StringName(event.get("type", &"")) == &"hall_of_fame_requested":
+				count += 1
+	return count

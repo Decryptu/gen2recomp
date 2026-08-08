@@ -3191,6 +3191,42 @@ func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
 	))
 
 
+## LancesRoomLanceScript ends on `warpfacing UP, HALL_OF_FAME, 4, 13`, and the
+## Hall of Fame's own scene is what runs `halloffame`. A map scene queued by a
+## warp is picked up by the same run_event_queue() loop that took the warp, so
+## both happen inside one drain and the presentation event surfaces on the
+## warping dispatch's results rather than on a later dispatch_map_entry().
+##
+## The facing is the other half: Script_warpfacing writes it before the warp and
+## nothing in the map load clears it.
+func test_a_warpfacing_runs_the_target_map_scene_in_the_same_event_queue() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# Raw Crystal bytes: warpfacing is source $a1, sdefer $8c, halloffame $9f.
+	scripts["48:6300"] = [0xA3, Gen2WorldSprite.FACING_UP, 1, 2, 2, 2, Gen2WorldScript.END]
+	scripts["48:6310"] = [0x8D, 0x20, 0x63, Gen2WorldScript.END]
+	scripts["48:6320"] = [Gen2WorldScript.SETEVENT, 31, 0, 0xA1, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var target_map: Gen2WorldMap = data.world_map(1, 2)
+	target_map.scripts["callbacks"] = []
+	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6310}]
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.current_map.events["coord_events"][0]["script"] = 0x6300
+	var results: Array = world.dispatch_script_events()
+
+	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_eq(world.player_cell, Vector2i(2, 2))
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_UP)
+	assert_true(world.event_flag_active(31))
+	assert_true(world.state.hall_of_fame())
+	assert_true(results.any(func(result: Dictionary) -> bool:
+		return result.get("events", []).any(func(event: Dictionary) -> bool:
+			return event.get("type", &"") == &"hall_of_fame_requested"
+		)
+	))
+
+
 func test_the_source_random_command_rolls_on_the_injected_generator() -> void:
 	# RANDOM 4, then set one of four event flags by the value it rolled.
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {

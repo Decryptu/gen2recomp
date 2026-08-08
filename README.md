@@ -210,13 +210,14 @@ Headless tools, all against a real imported cache:
 | `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
 | `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down, in all three games |
 | `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro and reaching the bag, in all three games |
+| `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
 # bedroom PC and the bedroom-to-town warp chain
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
-# the full walked route, ending at the Indigo Plateau Pokemon Center
+# the full walked route, ending in the Hall of Fame
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
