@@ -488,8 +488,31 @@ const ENGINE_FLYPOINT_LAVENDER: int = 59
 ## three in both pins, sitting in wPokegearFlags ahead of the Crystal-only
 ## ENGINE_MOBILE_SYSTEM, so it needs no profile split.
 const LAVENDER_RADIO_TOWER_DOOR: Vector2i = Vector2i(14, 5)
+const LAVENDER_RADIO_TOWER_EXIT: Vector2i = Vector2i(2, 7)
 const RADIO_TOWER_GENTLEMAN_FACE: Vector2i = Vector2i(9, 2)
 const ENGINE_EXPN_CARD: int = 3
+
+## Fuchsia City, four connected routes south of Lavender with one gate at the
+## end (`data/maps/attributes.asm`, `maps/Route15.asm` warps 1 and 2 into
+## `ROUTE_15_FUCHSIA_GATE`). Routes 13, 14 and 15 are in the FUCHSIA group.
+const ROUTE_12_NUMBER: int = 2
+const FUCHSIA_GROUP: int = 17
+const ROUTE_13_NUMBER: int = 1
+const ROUTE_14_NUMBER: int = 2
+const ROUTE_15_NUMBER: int = 3
+const FUCHSIA_CITY_NUMBER: int = 5
+const FUCHSIA_GYM_NUMBER: int = 8
+const ROUTE_15_GATE_DOOR: Vector2i = Vector2i(2, 4)
+const ENGINE_FLYPOINT_FUCHSIA: int = 62
+## `maps/FuchsiaCity.asm` warp 3, and Janine on (1,10) inside her own maze.
+const FUCHSIA_GYM_DOOR: Vector2i = Vector2i(8, 27)
+const JANINE_FACE: Vector2i = Vector2i(1, 9)
+const BADGE_SOUL: int = 12
+## `FuchsiaGymJanineScript` sets her own flag and all four of her disguised
+## trainers', then hands over TM06 through its own `verbosegiveitem`.
+const EVENT_BEAT_JANINE: int = 1225
+const FUCHSIA_GYM_TRAINER_FLAGS: Array[int] = [1303, 1306, 1154, 1054]
+const EVENT_GOT_TM06_TOXIC: int = 221
 ## constants/item_constants.asm.
 const ITEM_MACHINE_PART: int = 0x80
 
@@ -5821,6 +5844,132 @@ func _lavender_leg(
 		}
 	if not world.state.is_engine_flag_active(ENGINE_EXPN_CARD):
 		return {"ok": false, "path": path, "reason": "ENGINE_EXPN_CARD was not set"}
+	return _fuchsia_leg(world, save, random, data, path)
+
+
+## Lavender Town south to Fuchsia City and the Soul Badge.
+##
+## The longest open walk in Kanto and the first leg since Vermilion with no
+## errand in it at all: Routes 12, 13, 14 and 15 are four plain connections, and
+## the only door is `ROUTE_15_FUCHSIA_GATE` at the end. What it costs is
+## trainers, eighteen of them, and `tools/validate_fuchsia.gd` measures which
+## ones a walk owes rather than guessing: on this profile only Route 13's
+## Pokefan Joshua and Hiker Kenny stand where shutting their sight line seals the
+## way south. The other three routes can be crossed without meeting anyone, and
+## Route 12, Route 14 and Route 15 are all profile splits, so Gold and Silver
+## owe a different set.
+##
+## The gym is a maze rather than a puzzle with a gate: 128 walkable cells behind
+## the door, and Janine on (1,10) reachable from (1,9). Her four disguised
+## trainers are `OBJECTTYPE_SCRIPT`, so nothing sees the player and none of them
+## has to be fought; `FuchsiaGymJanineScript` sets all four beaten flags itself
+## along with `ENGINE_SOULBADGE`, and hands over TM06 through its own
+## `verbosegiveitem`.
+func _fuchsia_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_tower: Dictionary = _warp_chain(
+		world, save, random, data, [LAVENDER_RADIO_TOWER_EXIT]
+	)
+	if not bool(out_of_tower.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving the Radio Tower failed: %s" % out_of_tower.get("reason", ""),
+		}
+
+	var southbound: Array = [
+		{"step": "route_12", "direction": "south", "group": LAVENDER_GROUP,
+			"number": ROUTE_12_NUMBER},
+		{"step": "route_13", "direction": "south", "group": FUCHSIA_GROUP,
+			"number": ROUTE_13_NUMBER},
+		{"step": "route_14", "direction": "south", "group": FUCHSIA_GROUP,
+			"number": ROUTE_14_NUMBER},
+		{"step": "route_15", "direction": "west", "group": FUCHSIA_GROUP,
+			"number": ROUTE_15_NUMBER},
+	]
+	for leg: Dictionary in southbound:
+		var walked: Dictionary = _walk_connection_resolving(
+			world, String(leg["direction"]), int(leg["group"]), int(leg["number"]),
+			save, random, data
+		)
+		var entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		path.append({
+			"step": leg["step"],
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": walked.get("encounters", []),
+			"run": entry,
+		})
+		if not bool(walked.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
+			}
+
+	var to_city: Dictionary = _gate_leg(
+		world, save, random, data, ROUTE_15_GATE_DOOR, FUCHSIA_GROUP, FUCHSIA_CITY_NUMBER
+	)
+	path.append({
+		"step": "fuchsia_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_FUCHSIA),
+		"encounters": to_city.get("encounters", []),
+	})
+	if not bool(to_city.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Route 15 gate failed: %s" % to_city.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_FUCHSIA):
+		return {"ok": false, "path": path, "reason": "Fuchsia's flypoint callback did not run"}
+
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [FUCHSIA_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Fuchsia Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+	var janine: Dictionary = _talk_to(
+		world, JANINE_FACE, Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	var badge: int = Gen2WorldState.badge_flag(
+		BADGE_SOUL, Gen2WorldState.is_crystal_profile(data)
+	)
+	var disguised: int = 0
+	for flag: int in FUCHSIA_GYM_TRAINER_FLAGS:
+		if world.event_flag_active(flag):
+			disguised += 1
+	path.append({
+		"step": "fuchsia_gym_janine",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"soul_badge": world.state.is_engine_flag_active(badge),
+		"beat_janine": world.event_flag_active(EVENT_BEAT_JANINE),
+		"disguised_flags": disguised,
+		# Set behind her own verbosegiveitem, so it says the TM offer finished
+		# rather than being refused.
+		"toxic": world.event_flag_active(EVENT_GOT_TM06_TOXIC),
+		"run": janine,
+	})
+	if not bool(janine.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Janine did not finish: %s" % janine.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(badge):
+		return {"ok": false, "path": path, "reason": "ENGINE_SOULBADGE was not set"}
+	if disguised != FUCHSIA_GYM_TRAINER_FLAGS.size():
+		return {
+			"ok": false, "path": path,
+			"reason": "Janine set %d of her four trainer flags" % disguised,
+		}
 	return {"ok": true}
 
 
@@ -6885,11 +7034,17 @@ func _gate_leg(
 	)
 	var crossed: Dictionary = _warp_step(world, group, number)
 	if not bool(crossed.get("ok", false)):
-		return {"ok": false, "reason": "gate warp to %d/%d failed" % [group, number]}
+		return {
+			"ok": false,
+			"reason": "gate warp to %d/%d failed" % [group, number],
+			"encounters": walked.get("encounters", []),
+		}
 	var _far_entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
-	return {"ok": true}
+	# Anything the walk to the door resolved on the way, which for a route with
+	# trainers on it is a battle the leg would otherwise leave no trace of.
+	return {"ok": true, "encounters": walked.get("encounters", [])}
 
 
 ## Cuts the tree the given cell faces. Route 35's only way past row 6 is the
@@ -7389,14 +7544,16 @@ func _reachable_step(
 	return landing
 
 
+## Whether a step off [param cell] would really cross, rather than whether the
+## cell sits on the edge. A connection spans only part of its edge, so an edge
+## cell the connected map does not reach resolves to nothing and the walk that
+## settled on it would fail with no useful reason. `Gen2WorldAPI` owns the span
+## arithmetic; asking it keeps the plan and the replayed walk on one answer.
 func _is_connection_edge(world: Gen2WorldAPI, cell: Vector2i, direction_name: String) -> bool:
-	var size: Vector2i = world.map_size_cells()
-	match direction_name:
-		"north": return cell.y == 0
-		"south": return cell.y == size.y - 1
-		"west": return cell.x == 0
-		"east": return cell.x == size.x - 1
-	return false
+	var resolved: Dictionary = world.connection_target(
+		cell, _connection_direction(direction_name)
+	)
+	return bool(resolved.get("ok", false))
 
 
 func _connection_direction(direction_name: String) -> Vector2i:

@@ -223,6 +223,7 @@ Headless tools, all against a real imported cache:
 | `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines, in all three games |
 | `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it, in all three games |
 | `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs, in all three games |
+| `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
