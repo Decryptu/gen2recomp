@@ -2189,3 +2189,27 @@ func test_the_between_turn_items_do_not_agree_on_an_order() -> void:
 	)
 	assert_eq(berries.size(), 2)
 	assert_eq(int(berries[0]["side"]), Gen2Battle.ENEMY, "the healing items go the other way")
+
+
+## The heal family through a whole turn rather than a bare command: Recover
+## reaches the caller's event list with the numbers a screen draws from.
+func test_recover_reaches_the_turn_loop_with_the_numbers_a_screen_needs() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.RECOVER])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])
+	var battle: Gen2Battle = _battle(pikachu, geodude)
+	pikachu.hp = 1
+
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+	)
+
+	var restored: Dictionary = _first(events, Gen2Battle.HP_RESTORED)
+	assert_false(restored.is_empty(), JSON.stringify(events))
+	assert_eq(int(restored["side"]), Gen2Battle.PLAYER)
+	assert_eq(int(restored["max_hp"]), pikachu.max_hp())
+	# The event carries what the bar read at the moment of the heal, not what is
+	# left at the end of the turn: Pikachu is the faster of the two, so Geodude's
+	# attack lands after this and takes some of it straight back.
+	@warning_ignore("integer_division")
+	assert_eq(int(restored["hp"]), 1 + pikachu.max_hp() / 2)
+	assert_lt(pikachu.hp, int(restored["hp"]))

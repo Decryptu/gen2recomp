@@ -476,3 +476,30 @@ func test_smart_binds_a_fresh_target_but_not_on_its_last_legs() -> void:
 		var scores: Array = [Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE]
 		Gen2BattleAI._apply_smart(scores, spent, charmander, _data, _rng, 0, 0, Gen2Weather.NONE)
 		assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE, "nothing to hold it there with")
+
+
+## `AI_Smart_Heal`, which the three time-based heals are labels on too: the AI
+## reads its own health, and a healthy AI would rather attack.
+func test_smart_heal_is_discouraged_while_the_ai_is_healthy() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.RECOVER, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_SMART, _rng
+		)
+		assert_eq(slot, 1, "healing a full bar is wasted")
+
+
+## Below a quarter it is greatly encouraged nine times in ten, which is enough
+## to win against a plain attack on most seeds.
+func test_smart_heal_is_encouraged_once_the_ai_is_nearly_out() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.MORNING_SUN, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var chose_heal: int = 0
+	for seed: int in 20:
+		_rng.seed = seed
+		pikachu.hp = 1
+		if Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_SMART, _rng) == 0:
+			chose_heal += 1
+	assert_gt(chose_heal, 10, "the 90% branch should dominate twenty seeds")

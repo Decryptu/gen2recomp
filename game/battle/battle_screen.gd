@@ -112,6 +112,10 @@ var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
 var _world_battle_recovery: Dictionary = {}
 var _last_message: String = ""
+## What the overworld clock said when the battle started, for the three heals
+## that read it. Only the world path supplies one; the development drivers below
+## leave [Gen2Battle] at its own midday default.
+var _time_of_day: int = Gen2WorldPalette.TIME_DAY
 var _capture_balls: Array[int] = []
 var _capture_quantities: Dictionary = {}
 var _capture_ball_index: int = 0
@@ -356,6 +360,7 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_source_save = save
 	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
 	_battle = prepared["battle"]
+	_battle.time_of_day = _time_of_day
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
 	_player = player_party_ready.active_mon().species
@@ -510,6 +515,13 @@ func battle_snapshot() -> Dictionary:
 		"capture_balls": _capture_balls.duplicate(),
 		"capture_quantities": _capture_quantities.duplicate(),
 	}
+
+
+## Supplies the battle with the overworld's own clock reading, which Morning Sun,
+## Synthesis and Moonlight are the only things to read. Set before the request is
+## started; a battle begun without it stands at midday.
+func set_time_of_day(value: int) -> void:
+	_time_of_day = value
 
 
 ## Supplies the wild battle with the supported balls currently owned by the
@@ -1117,7 +1129,7 @@ func _apply_event(event: Dictionary) -> void:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
-		Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF:
+		Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF, Gen2Battle.HP_RESTORED:
 			if int(event["side"]) == Gen2Battle.ENEMY:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
@@ -1269,6 +1281,14 @@ func _describe(event: Dictionary) -> String:
 			return "%s got an encore!" % _battler_name(int(event["target"]))
 		Gen2Battle.ENCORE_ENDED:
 			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.HP_RESTORED:
+			return "%s regained health!" % _battler_name(side)
+		Gen2Battle.HP_ALREADY_FULL:
+			return "%s's HP is full!" % _battler_name(side)
+		Gen2Battle.WENT_TO_SLEEP:
+			return "%s went to sleep!" % _battler_name(side)
+		Gen2Battle.RESTED:
+			return "%s fell asleep and became healthy!" % _battler_name(side)
 		Gen2Battle.WEATHER_STARTED:
 			return WEATHER_STARTED_TEXT.get(int(event["weather"]), "")
 		Gen2Battle.WEATHER_CONTINUES:

@@ -197,6 +197,11 @@ const START_RAIN: StringName = &"startrain"
 const START_SUN: StringName = &"startsun"
 const START_SANDSTORM: StringName = &"startsandstorm"
 
+## Recover, Softboiled, Milk Drink and Rest, and separately the three heals that
+## read the clock. Both refuse at full HP, and both spend the turn doing it.
+const HEAL: StringName = &"heal"
+const TIMED_HEAL: StringName = &"timedheal"
+
 ## Thunder's own accuracy, replacing the move's byte for this turn only: half in
 ## sun, and certain in rain. The rain half is redundant with
 ## [constant CHECK_HIT]'s own always-hits branch, which the cartridge says so
@@ -307,6 +312,21 @@ const RECOIL_DIVISOR: int = 4
 ## What [constant THUNDER_ACCURACY] leaves behind in sun: the cartridge's
 ## `50 percent + 1`, one past the `x * 255 / 100` the rest of the engine uses.
 const THUNDER_SUN_ACCURACY: int = 128
+
+## `.Multipliers`, the four fractions a time-based heal indexes, in its own
+## order. The fourth row is the whole bar and is [method _heal_fraction]'s
+## fallthrough, so it needs no name of its own.
+const HEAL_EIGHTH: int = 0
+const HEAL_QUARTER: int = 1
+const HEAL_HALF: int = 2
+
+## The time of day each of the three asks for: `MORN_F`, `DAY_F` and `NITE_F`,
+## the three labels `BattleCommand_TimeBasedHealContinue` is entered at.
+const HEAL_TIMES: Dictionary = {
+	Gen2MoveEffect.MORNING_SUN: Gen2WorldPalette.TIME_MORNING,
+	Gen2MoveEffect.SYNTHESIS: Gen2WorldPalette.TIME_DAY,
+	Gen2MoveEffect.MOONLIGHT: Gen2WorldPalette.TIME_NIGHT,
+}
 
 ## The two moves a frozen Pokémon can use, which thaw it in the using. Flame
 ## Wheel and Sacred Fire, by move number.
@@ -434,6 +454,10 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_start_weather(turn, Gen2Weather.SUN)
 		START_SANDSTORM:
 			_start_weather(turn, Gen2Weather.SANDSTORM)
+		HEAL:
+			_heal(turn)
+		TIMED_HEAL:
+			_timed_heal(turn)
 		THUNDER_ACCURACY:
 			_thunder_accuracy(turn)
 		SKIP_SUN_CHARGE:
@@ -1375,6 +1399,78 @@ static func _start_weather(turn: Gen2Turn, weather: int) -> void:
 	turn.battle.weather = weather
 	turn.battle.weather_turns = Gen2Weather.TURNS
 	turn.emit(Gen2Battle.WEATHER_STARTED, {"weather": weather})
+
+
+## `BattleCommand_Heal`: Recover, Softboiled and Milk Drink take back half the
+## maximum; Rest takes back all of it and pays for that with two turns asleep.
+##
+## The full-HP refusal is checked before anything else, so Rest at full health
+## fails and stays awake even when there is a status sitting on it that sleeping
+## would have cleared. Rest writes `REST_SLEEP_TURNS + 1` over the whole status
+## byte rather than into the sleep bits, which is why it is the one move that
+## cures a burn or a paralysis, and it clears Toxic's ramp with it.
+static func _heal(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	if attacker.hp >= attacker.max_hp():
+		turn.emit(Gen2Battle.HP_ALREADY_FULL)
+		return
+
+	var is_rest: bool = turn.move_number == Gen2MoveEffect.REST_MOVE
+	if is_rest:
+		var had_status: bool = Gen2Status.is_afflicted(attacker.status)
+		attacker.toxic_counter = 0
+		attacker.status = Gen2Status.REST_SLEEP_TURNS + 1
+		turn.emit(Gen2Battle.RESTED if had_status else Gen2Battle.WENT_TO_SLEEP)
+
+	@warning_ignore("integer_division")
+	var amount: int = attacker.max_hp() if is_rest else maxi(attacker.max_hp() / 2, 1)
+	attacker.heal(amount)
+	turn.emit(Gen2Battle.HP_RESTORED, {
+		"hp": attacker.hp, "max_hp": attacker.max_hp(),
+	})
+
+
+## `BattleCommand_TimeBasedHealContinue`: Morning Sun, Synthesis and Moonlight.
+##
+## Half the maximum by default. One step down the table outside the move's own
+## time of day, which is the cartridge's real rule: matching the clock buys
+## nothing, missing it costs. Then one step up in sun, or one step down in any
+## other weather, so the worst case is an eighth and the best is the whole bar.
+## Link battles skip the time step; there are none here.
+static func _timed_heal(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	if attacker.hp >= attacker.max_hp():
+		turn.emit(Gen2Battle.HP_ALREADY_FULL)
+		return
+
+	var index: int = HEAL_HALF
+	if turn.battle.time_of_day != HEAL_TIMES.get(turn.effect(), Gen2WorldPalette.TIME_DAY):
+		index -= 1
+	if Gen2Weather.is_active(turn.battle.weather):
+		index += 1 if turn.battle.weather == Gen2Weather.SUN else -1
+
+	attacker.heal(_heal_fraction(attacker.max_hp(), index))
+	turn.emit(Gen2Battle.HP_RESTORED, {
+		"hp": attacker.hp, "max_hp": attacker.max_hp(),
+	})
+
+
+## One row of `.Multipliers`. `GetEighthMaxHP` halves `GetQuarterMaxHP`'s answer
+## rather than dividing the maximum by eight, so its own floor of one is applied
+## twice and a two-HP Pokémon is healed for one either way.
+static func _heal_fraction(max_hp: int, index: int) -> int:
+	match index:
+		HEAL_EIGHTH:
+			@warning_ignore("integer_division")
+			return maxi(maxi(max_hp / 4, 1) / 2, 1)
+		HEAL_QUARTER:
+			@warning_ignore("integer_division")
+			return maxi(max_hp / 4, 1)
+		HEAL_HALF:
+			@warning_ignore("integer_division")
+			return maxi(max_hp / 2, 1)
+		_:
+			return max_hp
 
 
 ## Thunder's accuracy for this turn: `50 percent + 1` (128) in sun, and

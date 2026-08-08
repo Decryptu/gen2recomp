@@ -34,6 +34,11 @@ const ANY: int = SLEEP_MASK | POISON | BURN | FREEZE | PARALYSIS
 const MIN_SLEEP: int = 2
 const MAX_SLEEP: int = 7
 
+## Rest does not roll: it writes `REST_SLEEP_TURNS + 1`
+## (constants/battle_constants.asm) over the whole byte, so the sleeper loses
+## two turns and every other status goes with it.
+const REST_SLEEP_TURNS: int = 2
+
 ## Burn halves the Attack and paralysis quarters the Speed, both to a minimum of
 ## one, and both are shifts rather than divisions on the hardware.
 const BURN_ATTACK_SHIFT: int = 1

@@ -415,6 +415,9 @@ static func _apply_smart(
 				)
 			Gen2MoveEffect.TRAP_TARGET:
 				_smart_trap_target(scores, slot, attacker, defender, def_turns, rng)
+			Gen2MoveEffect.HEAL, Gen2MoveEffect.MORNING_SUN, Gen2MoveEffect.SYNTHESIS, \
+			Gen2MoveEffect.MOONLIGHT:
+				_smart_heal(scores, slot, attacker, rng)
 
 
 ## `AI_Smart_Solarbeam`: 80% to encourage it greatly in sun, where it needs no
@@ -603,6 +606,21 @@ static func _smart_hyper_beam(
 	if _skip_50_50(rng):
 		return
 	_encourage(scores, slot, 1)
+
+
+## `AI_Smart_Heal`, which `AI_Smart_MorningSun`, `AI_Smart_Synthesis` and
+## `AI_Smart_Moonlight` are all labels on: 90% to encourage it greatly below a
+## quarter health, discourage it above half, and nothing in between. The AI reads
+## its own health here, never the player's.
+static func _smart_heal(
+	scores: Array, slot: int, attacker: Gen2BattleMon, rng: RandomNumberGenerator
+) -> void:
+	if not _above_quarter(attacker):
+		if not _roll(rng, 10):
+			_encourage(scores, slot, 2)
+		return
+	if _above_half(attacker):
+		_discourage(scores, slot, 1)
 
 
 static func _smart_belly_drum(scores: Array, slot: int, attacker: Gen2BattleMon) -> void:

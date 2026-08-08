@@ -116,6 +116,9 @@ const PETAL_DANCE_MOVE: int = 80
 const OUTRAGE_MOVE: int = 200
 const ROLLOUT_MOVE: int = 205
 const DEFENSE_CURL_MOVE: int = 111
+## Rest, kept here for the same reason Fly and Dig are: four moves share
+## [constant HEAL] and `BattleCommand_Heal` tells this one apart by number.
+const REST_MOVE: int = 156
 
 ## None of the three needs any state this file has not already grown for
 ## something else: [Gen2BattleMon.reset_stages] for Haze,
@@ -142,6 +145,15 @@ const ENCORE: int = 90
 ## and Whirlpool carry the first; Mean Look and Spider Web the second.
 const TRAP_TARGET: int = 42
 const MEAN_LOOK: int = 106
+
+## The heal family. [constant HEAL] is Recover, Softboiled, Milk Drink and Rest
+## sharing `BattleCommand_Heal`; the other three are one command,
+## `BattleCommand_TimeBasedHealContinue`, entered at three different labels that
+## differ only in the time of day they ask for.
+const HEAL: int = 32
+const MORNING_SUN: int = 132
+const SYNTHESIS: int = 133
+const MOONLIGHT: int = 134
 
 ## The three weather moves and the two moves that read the weather back.
 ## [constant SOLARBEAM] is already above, since it was a two-turn move before it
@@ -471,6 +483,28 @@ const TRAP_TARGET_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.TRAP_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## The heal family, the same four-step shape as the weather moves: announce,
+## spend, heal. Neither list rolls accuracy, so the 100% every one of the seven
+## carries is never read. The cartridge's own lists open with `checkobedience`,
+## which this engine does not model and no other list here carries either.
+const HEAL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.HEAL,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Morning Sun, Synthesis and Moonlight share one list as they share one command:
+## the time of day each wants is read back off the effect byte, the way
+## [constant Gen2EffectCommands.FIXED_DAMAGE] reads which of its four figures it
+## is.
+const TIME_HEAL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.TIMED_HEAL,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -804,6 +838,10 @@ static func _sequences() -> Dictionary:
 		ENCORE: ENCORE_SEQUENCE,
 		TRAP_TARGET: TRAP_TARGET_SEQUENCE,
 		MEAN_LOOK: MEAN_LOOK_SEQUENCE,
+		HEAL: HEAL_SEQUENCE,
+		MORNING_SUN: TIME_HEAL_SEQUENCE,
+		SYNTHESIS: TIME_HEAL_SEQUENCE,
+		MOONLIGHT: TIME_HEAL_SEQUENCE,
 		RAIN_DANCE: START_RAIN_SEQUENCE,
 		SUNNY_DAY: START_SUN_SEQUENCE,
 		SANDSTORM: START_SANDSTORM_SEQUENCE,
@@ -848,13 +886,14 @@ static func is_written(effect: int) -> bool:
 
 
 ## Effect bytes whose command reads the byte back off the turn to decide what it
-## is: the multi-hit count, the four fixed-damage figures, Rollout's multiplier
-## and Selfdestruct's halved Defense all work that way. Rewriting one would make
-## its own command answer for a list it is no longer in, so these are refused
-## rather than left to fail at the point of use.
+## is: the multi-hit count, the four fixed-damage figures, Rollout's multiplier,
+## Selfdestruct's halved Defense and the three time-based heals' time of day all
+## work that way. Rewriting one would make its own command answer for a list it
+## is no longer in, so these are refused rather than left to fail at the point of
+## use.
 const RESERVED_EFFECTS: Array[int] = [
 	MULTI_HIT, DOUBLE_HIT, TWINEEDLE, SUPER_FANG, STATIC_DAMAGE, LEVEL_DAMAGE,
-	PSYWAVE, ROLLOUT, SELFDESTRUCT,
+	PSYWAVE, ROLLOUT, SELFDESTRUCT, MORNING_SUN, SYNTHESIS, MOONLIGHT,
 ]
 
 
