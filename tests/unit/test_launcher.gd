@@ -41,6 +41,31 @@ func test_launcher_lists_every_supported_game() -> void:
 		assert_false(row["selected"])
 
 
+func test_launcher_opens_on_the_shelf_and_moves_between_its_pages() -> void:
+	await _open_launcher()
+	assert_eq(_launcher.launcher_snapshot()["page"], "shelf")
+	for page: String in ["mods", "settings", "about", "shelf"]:
+		_launcher.select_page(StringName(page))
+		assert_eq(_launcher.launcher_snapshot()["page"], page)
+	# An unknown id leaves the current page alone rather than blanking it.
+	_launcher.select_page(&"nowhere")
+	assert_eq(_launcher.launcher_snapshot()["page"], "shelf")
+
+
+func test_switching_appearance_rebuilds_the_launcher_and_keeps_its_status() -> void:
+	await _open_launcher()
+	var before: Dictionary = _launcher.launcher_snapshot()
+	assert_eq(before["theme"], "light")
+
+	_launcher.preview_theme(&"dark")
+	var after: Dictionary = _launcher.launcher_snapshot()
+	assert_eq(after["theme"], "dark")
+	# The shelf is rebuilt whole, so the message on it has to be carried over.
+	assert_eq(after["status"], before["status"])
+	assert_eq(after["detail"], before["detail"])
+	assert_eq(after["page"], before["page"])
+
+
 func test_launcher_reports_a_rejected_rom_without_importing() -> void:
 	await _open_launcher()
 	var file: FileAccess = FileAccess.open(_scratch_path, FileAccess.WRITE)

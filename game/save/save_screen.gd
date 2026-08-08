@@ -6,18 +6,11 @@ extends Control
 ## The screen only coordinates validated save data. Original SRAM bytes enter
 ## through [Gen2SramAdapter], and project slots are written through
 ## [Gen2SaveStore], so no control here needs to know a cartridge offset.
+##
+## It is the launcher's second screen and shares its frame: same shell, same
+## soft surfaces, same palette.
 
-const BACKGROUND: Color = Color("#09111f")
-const PANEL: Color = Color("#14233a")
-const PANEL_SELECTED: Color = Color("#1d3352")
-const BORDER: Color = Color("#2d4566")
-const BORDER_SELECTED: Color = Color("#f3c969")
-const TEXT: Color = Color("#f4f7fb")
-const MUTED: Color = Color("#9eacc0")
-const ACCENT: Color = Color("#f3c969")
-const SUCCESS: Color = Color("#7bd89a")
-const ERROR: Color = Color("#ef8a8a")
-
+var _palette: Gen2LauncherTheme = null
 var _data: GameData = null
 var _data_override: GameData = null
 var _selected_slot: int = 0
@@ -26,21 +19,22 @@ var _slots: Array = []
 var _pending_replace_action: StringName = &""
 var _pending_import_path: String = ""
 
-var _slots_container: HBoxContainer = null
-var _slots_section: Label = null
-var _slot_scroll: ScrollContainer = null
+var _shell: Gen2LauncherShell = null
+var _page: VBoxContainer = null
+var _slots_container: HFlowContainer = null
+var _slots_section: Control = null
 var _details_box: VBoxContainer = null
+var _status_icon: Gen2LauncherIcon = null
 var _status_label: Label = null
 var _status_detail: Label = null
 var _name_input: LineEdit = null
-var _confirm_dialog: ConfirmationDialog = null
-var _delete_dialog: ConfirmationDialog = null
 var _export_dialog: FileDialog = null
 var _slot_import_dialog: FileDialog = null
 var _file_dialog: FileDialog = null
 
 
 func _ready() -> void:
+	_palette = Gen2LauncherTheme.active()
 	_data = _data_override if _data_override != null else _resolve_data()
 	_build_ui()
 	_refresh()
@@ -86,7 +80,7 @@ func open_new_slot() -> bool:
 		return false
 	var slot: int = Gen2SaveStore.next_free_slot(_data.id, _data.sha1)
 	if slot < 0:
-		_set_status("No new slot is available.", "Delete a save to free one.", ERROR)
+		_set_status(&"error", "No new slot is available.", "Delete a save to free one.")
 		return false
 	_selected_slot = slot
 	_new_game_visible = true
@@ -97,37 +91,35 @@ func open_new_slot() -> bool:
 ## Creates and validates a new-game save in the selected slot.
 func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
 	if _data == null:
-		_set_status("New game unavailable.", "No imported cartridge cache is selected.", ERROR)
+		_set_status(&"error", "New game unavailable.", "No imported cartridge cache is selected.")
 		return false
 	# Nothing is selected when the game has no saves at all, and a new game is
 	# then unambiguously a new slot.
 	if _selected_slot < 0:
 		_selected_slot = Gen2SaveStore.next_free_slot(_data.id, _data.sha1)
 	if _selected_slot < 0:
-		_set_status("New game was not created.", "Every save slot is in use.", ERROR)
+		_set_status(&"error", "New game was not created.", "Every save slot is in use.")
 		return false
 	var created: Gen2SaveData = Gen2SaveStore.create_new_game(
 		_data, _selected_slot, player_name
 	)
 	if created == null:
 		_set_status(
-			"New game was not created.",
-			"Enter a name of ten characters or fewer.",
-			ERROR
+			&"error", "New game was not created.", "Enter a name of ten characters or fewer."
 		)
 		return false
 	var result: Dictionary = Gen2SaveStore.save(created, _data)
 	if not result["ok"]:
-		_set_status("New game was not saved.", String(result["message"]), ERROR)
+		_set_status(&"error", "New game was not saved.", String(result["message"]))
 		return false
 	# The slot now holds a different save than the one the runtime is sharing.
 	GameRuntime.reload_selected_save()
 	_new_game_visible = false
 	_refresh()
 	_set_status(
+		&"success",
 		"New game created in slot %d." % (_selected_slot + 1),
-		"Professor Elm's starter is waiting in the lab.",
-		SUCCESS
+		"A starter is waiting in the lab.",
 	)
 	return true
 
@@ -136,35 +128,35 @@ func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
 ## import never reaches [Gen2SaveStore.save], so the previous slot remains.
 func import_sav_path(path: String, slot: int = -1) -> bool:
 	if _data == null:
-		_set_status("Save import unavailable.", "No imported cartridge cache is selected.", ERROR)
+		_set_status(&"error", "Save import unavailable.", "No imported cartridge cache is selected.")
 		return false
 	if slot >= 0 and not select_slot(slot):
 		return false
 	if not FileAccess.file_exists(path):
-		_set_status("Save import failed.", "The selected file could not be opened.", ERROR)
+		_set_status(&"error", "Save import failed.", "The selected file could not be opened.")
 		return false
 	var raw: PackedByteArray = FileAccess.get_file_as_bytes(path)
 	if raw.is_empty():
-		_set_status("Save import failed.", "The selected file is empty.", ERROR)
+		_set_status(&"error", "Save import failed.", "The selected file is empty.")
 		return false
 	var imported: Dictionary = Gen2SramAdapter.import_bytes(
 		_data.id, _data.sha1, _selected_slot, raw, _data
 	)
 	if not imported["ok"]:
-		_set_status("Save import rejected.", String(imported["message"]), ERROR)
+		_set_status(&"error", "Save import rejected.", String(imported["message"]))
 		return false
 	var save: Gen2SaveData = imported["save"]
 	var result: Dictionary = Gen2SaveStore.save(save, _data)
 	if not result["ok"]:
-		_set_status("Save import failed.", String(result["message"]), ERROR)
+		_set_status(&"error", "Save import failed.", String(result["message"]))
 		return false
 	GameRuntime.reload_selected_save()
 	_new_game_visible = false
 	_refresh()
 	_set_status(
+		&"success",
 		"Save imported into slot %d." % (_selected_slot + 1),
 		"The cartridge copy was %s and passed validation." % String(imported["copy"]),
-		SUCCESS
 	)
 	return true
 
@@ -188,149 +180,115 @@ func _resolve_data() -> GameData:
 
 
 func _build_ui() -> void:
-	var background := ColorRect.new()
-	background.color = BACKGROUND
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
+	theme = _palette.control_theme()
+	_shell = Gen2LauncherShell.create(_palette)
+	add_child(_shell)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 56)
-	margin.add_theme_constant_override("margin_top", 38)
-	margin.add_theme_constant_override("margin_right", 56)
-	margin.add_theme_constant_override("margin_bottom", 34)
-	add_child(margin)
-
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 16)
-	margin.add_child(content)
-
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 18)
-	content.add_child(header)
-
-	var heading := VBoxContainer.new()
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_theme_constant_override("separation", 3)
-	header.add_child(heading)
-	var title := Label.new()
-	title.text = "SAVE DATA"
-	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 32)
-	heading.add_child(title)
-	var subtitle := Label.new()
-	subtitle.text = _data.title() if _data != null else "No cartridge selected"
-	subtitle.add_theme_color_override("font_color", MUTED)
-	subtitle.add_theme_font_size_override("font_size", 16)
-	heading.add_child(subtitle)
-
-	var back := _button("Back to cartridges", TEXT)
-	back.custom_minimum_size = Vector2(190, 44)
+	var back: Gen2LauncherButton = Gen2LauncherButton.create(
+		_palette, "Shelf", Gen2LauncherButton.Variant.QUIET, &"back"
+	)
 	back.pressed.connect(_back_to_launcher)
-	header.add_child(back)
+	_shell.add_action(back)
 
-	_slots_section = Label.new()
-	var section: Label = _slots_section
-	section.text = "SAVE SLOTS"
-	section.add_theme_color_override("font_color", ACCENT)
-	section.add_theme_font_size_override("font_size", 13)
-	content.add_child(section)
+	_page = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
+	var head: VBoxContainer = Gen2LauncherUI.column(2)
+	_page.add_child(head)
+	head.add_child(Gen2LauncherUI.title(
+		_palette, "Save data", Gen2LauncherTheme.FONT_DISPLAY
+	))
+	head.add_child(Gen2LauncherUI.muted(
+		_palette, _data.title() if _data != null else "No cartridge selected"
+	))
 
-	_slot_scroll = ScrollContainer.new()
-	var slot_scroll: ScrollContainer = _slot_scroll
-	slot_scroll.custom_minimum_size = Vector2(0, 154)
-	slot_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(slot_scroll)
-	_slots_container = HBoxContainer.new()
-	_slots_container.add_theme_constant_override("separation", 16)
+	_slots_section = Gen2LauncherUI.caption(_palette, "Slots")
+	_page.add_child(_slots_section)
+	_slots_container = HFlowContainer.new()
+	_slots_container.add_theme_constant_override("h_separation", Gen2LauncherUI.GAP_MD)
+	_slots_container.add_theme_constant_override("v_separation", Gen2LauncherUI.GAP_MD)
 	_slots_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_slots_container.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	slot_scroll.add_child(_slots_container)
+	_page.add_child(_slots_container)
 
-	var details_panel := PanelContainer.new()
-	details_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	details_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 10))
-	content.add_child(details_panel)
-	var detail_scroll := ScrollContainer.new()
-	detail_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	details_panel.add_child(detail_scroll)
-	_details_box = VBoxContainer.new()
-	_details_box.add_theme_constant_override("separation", 10)
+	var details: ScrollContainer = ScrollContainer.new()
+	details.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	details.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page.add_child(details)
+	_details_box = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
 	_details_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	detail_scroll.add_child(_details_box)
+	details.add_child(_details_box)
 
-	var status_panel := PanelContainer.new()
-	status_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 10))
-	status_panel.custom_minimum_size = Vector2(0, 54)
-	content.add_child(status_panel)
-	var status_box := VBoxContainer.new()
-	status_box.add_theme_constant_override("separation", 3)
-	status_panel.add_child(status_box)
-	_status_label = Label.new()
-	_status_label.add_theme_color_override("font_color", TEXT)
-	_status_label.add_theme_font_size_override("font_size", 16)
-	status_box.add_child(_status_label)
-	_status_detail = Label.new()
-	_status_detail.add_theme_color_override("font_color", MUTED)
-	_status_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_box.add_child(_status_detail)
+	_page.add_child(_build_status())
+	_shell.add_page(&"saves", "Saves", &"save", _page)
 
-	_file_dialog = FileDialog.new()
-	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_file_dialog.filters = PackedStringArray(["*.sav; Game Boy save file", "*; All files"])
-	_file_dialog.title = "Choose an original Gold, Silver, or Crystal save"
+	_file_dialog = _picker(
+		"Choose an original cartridge save",
+		FileDialog.FILE_MODE_OPEN_FILE,
+		PackedStringArray(["*.sav; Cartridge save", "*; All files"]),
+	)
 	_file_dialog.file_selected.connect(_on_file_selected)
-	add_child(_file_dialog)
-
-	_confirm_dialog = ConfirmationDialog.new()
-	_confirm_dialog.title = "Replace save slot?"
-	_confirm_dialog.confirmed.connect(_on_replace_confirmed)
-	add_child(_confirm_dialog)
-
-	_delete_dialog = ConfirmationDialog.new()
-	_delete_dialog.title = "Delete save slot?"
-	_delete_dialog.ok_button_text = "Delete"
-	_delete_dialog.confirmed.connect(_delete_selected_slot)
-	add_child(_delete_dialog)
-
-	_export_dialog = FileDialog.new()
-	_export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-	_export_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_export_dialog.filters = PackedStringArray(["*.json; gen2recomp save"])
-	_export_dialog.title = "Export this save slot"
-	_export_dialog.use_native_dialog = _file_dialog.use_native_dialog
+	_export_dialog = _picker(
+		"Export this save slot",
+		FileDialog.FILE_MODE_SAVE_FILE,
+		PackedStringArray(["*.json; gen2recomp save"]),
+	)
 	_export_dialog.file_selected.connect(_export_selected_slot)
-	add_child(_export_dialog)
-
-	_slot_import_dialog = FileDialog.new()
-	_slot_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	_slot_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_slot_import_dialog.filters = PackedStringArray(["*.json; gen2recomp save"])
-	_slot_import_dialog.title = "Import a gen2recomp save"
-	_slot_import_dialog.use_native_dialog = _file_dialog.use_native_dialog
+	_slot_import_dialog = _picker(
+		"Import a gen2recomp save",
+		FileDialog.FILE_MODE_OPEN_FILE,
+		PackedStringArray(["*.json; gen2recomp save"]),
+	)
 	_slot_import_dialog.file_selected.connect(_import_slot_file)
-	add_child(_slot_import_dialog)
 
 	_set_status(
+		&"info",
 		"Select a save slot.",
 		"Create a new game, continue a validated save, or import an original cartridge save.",
-		MUTED
 	)
+
+
+func _build_status() -> Gen2LauncherCard:
+	var panel: Gen2LauncherCard = Gen2LauncherCard.well(_palette, Gen2LauncherTheme.RADIUS_MD, 16)
+	var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
+	panel.add_child(line)
+	_status_icon = Gen2LauncherIcon.create(&"about", 20.0, _palette.muted)
+	_status_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(_status_icon)
+	var text: VBoxContainer = Gen2LauncherUI.column(1)
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_child(text)
+	_status_label = Gen2LauncherUI.body(_palette, "")
+	text.add_child(_status_label)
+	_status_detail = Gen2LauncherUI.muted(_palette, "")
+	text.add_child(_status_detail)
+	return panel
+
+
+func _picker(title: String, mode: FileDialog.FileMode, filters: PackedStringArray) -> FileDialog:
+	var dialog := FileDialog.new()
+	dialog.file_mode = mode
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.filters = filters
+	dialog.title = title
+	dialog.use_native_dialog = DisplayServer.has_feature(
+		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
+	)
+	dialog.theme = _palette.control_theme()
+	add_child(dialog)
+	return dialog
 
 
 func _refresh() -> void:
 	if _data == null:
-		_set_status("No cartridge cache is ready.", "Return to the launcher and import a supported ROM.", ERROR)
+		_set_status(
+			&"error",
+			"No cartridge cache is ready.",
+			"Return to the shelf and import a supported dump.",
+		)
 		return
 	_slots = Gen2SaveStore.slots_for(_data.id, _data.sha1, _data)
 	# Slots are created on demand, so a slot number is no longer its own index
 	# in this list and a game with no saves has no selectable slot at all.
 	if _row_for(_selected_slot).is_empty():
 		_selected_slot = int(_slots[0]["slot"]) if not _slots.is_empty() else -1
-	_slots_section.visible = not _new_game_visible
-	_slot_scroll.visible = not _new_game_visible
 	_refresh_slot_cards()
 	_refresh_details()
 
@@ -338,143 +296,139 @@ func _refresh() -> void:
 func _refresh_slot_cards() -> void:
 	for child: Node in _slots_container.get_children():
 		child.free()
+	_slots_section.visible = not _new_game_visible
+	_slots_container.visible = not _new_game_visible
+
 	for row: Dictionary in _slots:
-		var slot: int = int(row["slot"])
-		var selected: bool = slot == _selected_slot
-		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(250, 146)
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.add_theme_stylebox_override(
-			"panel", _panel_style(PANEL_SELECTED if selected else PANEL, BORDER_SELECTED if selected else BORDER, 10)
-		)
-		_slots_container.add_child(card)
-		var body := VBoxContainer.new()
-		body.add_theme_constant_override("separation", 7)
-		card.add_child(body)
-		var title := Label.new()
-		title.text = "SLOT %d" % (slot + 1)
-		title.add_theme_color_override("font_color", TEXT)
-		title.add_theme_font_size_override("font_size", 21)
-		body.add_child(title)
-		var state := Label.new()
-		state.text = _slot_state(row)
-		state.add_theme_color_override("font_color", _slot_state_color(row))
-		state.add_theme_font_size_override("font_size", 14)
-		body.add_child(state)
-		var message := Label.new()
-		message.text = _slot_message(row)
-		message.add_theme_color_override("font_color", MUTED)
-		message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		message.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		body.add_child(message)
-		var select := _button("Selected" if selected else "Select slot", ACCENT if selected else TEXT)
-		select.custom_minimum_size = Vector2(0, 34)
-		select.disabled = selected
-		select.pressed.connect(select_slot.bind(slot))
-		body.add_child(select)
+		_slots_container.add_child(_slot_card(row))
+
+	var add: Gen2LauncherButton = Gen2LauncherButton.create(
+		_palette, "New slot", Gen2LauncherButton.Variant.NEUTRAL, &"plus"
+	)
+	add.custom_minimum_size = Vector2(160, 92)
+	add.pressed.connect(func() -> void: open_new_slot())
+	_slots_container.add_child(add)
+
+
+func _slot_card(row: Dictionary) -> Control:
+	var slot: int = int(row["slot"])
+	var selected: bool = slot == _selected_slot
+	var card: Gen2LauncherCard = (
+		Gen2LauncherCard.selected(_palette, Gen2LauncherTheme.RADIUS_MD, 16) if selected
+		else Gen2LauncherCard.create(_palette, Gen2LauncherTheme.RADIUS_MD, 16)
+	)
+	card.custom_minimum_size = Vector2(216, 92)
+	var button := Button.new()
+	button.flat = true
+	button.focus_mode = Control.FOCUS_ALL
+	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	button.pressed.connect(select_slot.bind(slot))
+	card.add_child(button)
+
+	var column: VBoxContainer = Gen2LauncherUI.column(2)
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(column)
+	var top: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	column.add_child(top)
+	var heading: Label = Gen2LauncherUI.body(_palette, "Slot %d" % (slot + 1))
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(heading)
+	var state: Label = Gen2LauncherUI.caption(_palette, _slot_state(row))
+	state.add_theme_color_override("font_color", _slot_state_color(row))
+	top.add_child(state)
+	var label: String = String(row.get("label", ""))
+	column.add_child(Gen2LauncherUI.muted(
+		_palette, label if not label.is_empty() else _slot_message(row)
+	))
+	return card
 
 
 func _refresh_details() -> void:
 	if _details_box == null:
 		return
 	_slots_section.visible = not _new_game_visible
-	_slot_scroll.visible = not _new_game_visible
+	_slots_container.visible = not _new_game_visible
 	for child: Node in _details_box.get_children():
 		child.free()
 	var row: Dictionary = _row_for(_selected_slot)
 	if _data == null or row.is_empty():
 		return
-	var heading := Label.new()
-	heading.text = "SLOT %d" % (_selected_slot + 1)
-	heading.add_theme_color_override("font_color", TEXT)
-	heading.add_theme_font_size_override("font_size", 24)
-	_details_box.add_child(heading)
-	var state := Label.new()
-	state.text = _slot_state(row)
+
+	var panel: Gen2LauncherCard = Gen2LauncherCard.create(_palette, Gen2LauncherTheme.RADIUS_MD, 22)
+	_details_box.add_child(panel)
+	var body: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
+	panel.add_child(body)
+
+	var head: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
+	body.add_child(head)
+	var heading: Label = Gen2LauncherUI.title(_palette, "Slot %d" % (_selected_slot + 1))
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(heading)
+	var state: Label = Gen2LauncherUI.caption(_palette, _slot_state(row))
 	state.add_theme_color_override("font_color", _slot_state_color(row))
-	_details_box.add_child(state)
+	state.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(state)
 
 	if _new_game_visible:
-		_build_new_game_form()
+		_build_new_game_form(body)
 		return
 
 	var save: Gen2SaveData = _load_selected_save()
 	if save != null:
-		var player := Label.new()
-		player.text = "Player: %s" % save.player_name
-		player.add_theme_color_override("font_color", MUTED)
-		_details_box.add_child(player)
-		_add_party_summary(save)
-		var actions := HBoxContainer.new()
-		actions.add_theme_constant_override("separation", 10)
-		_details_box.add_child(actions)
-		var continue_button := _button("Continue", ACCENT)
-		continue_button.pressed.connect(_continue_selected)
-		actions.add_child(continue_button)
-		var party_button := _button("Open party", TEXT)
-		party_button.pressed.connect(_open_party)
-		actions.add_child(party_button)
-		var import_button := _button("Import .sav", TEXT)
-		import_button.pressed.connect(_request_import)
-		actions.add_child(import_button)
-		var replace_button := _button("Replace", TEXT)
-		replace_button.pressed.connect(_request_new_game)
-		actions.add_child(replace_button)
-		_add_slot_management()
+		body.add_child(Gen2LauncherUI.muted(_palette, "Player: %s" % save.player_name))
+		var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+		body.add_child(actions)
+		actions.add_child(_action("Continue", Gen2LauncherButton.Variant.PRIMARY, &"play", _continue_selected))
+		actions.add_child(_action("Party", Gen2LauncherButton.Variant.NEUTRAL, &"", _open_party))
+		actions.add_child(_action("Import .sav", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_import))
+		actions.add_child(_action("Replace", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_new_game))
+		_add_party_summary(body, save)
+		_add_slot_management(body)
 		return
 
-	var message := Label.new()
-	message.text = _slot_message(row)
-	message.add_theme_color_override("font_color", MUTED)
-	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_details_box.add_child(message)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 10)
-	_details_box.add_child(actions)
-	var new_button := _button("New game", ACCENT)
-	new_button.pressed.connect(_request_new_game)
-	actions.add_child(new_button)
-	var import_button := _button("Import .sav", TEXT)
-	import_button.pressed.connect(_request_import)
-	actions.add_child(import_button)
-	_add_slot_management()
+	body.add_child(Gen2LauncherUI.muted(_palette, _slot_message(row)))
+	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	body.add_child(actions)
+	actions.add_child(_action("New game", Gen2LauncherButton.Variant.PRIMARY, &"plus", _request_new_game))
+	actions.add_child(_action("Import .sav", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_import))
+	_add_slot_management(body)
 
 
-## Naming, export, deletion and the editor. Kept in its own row below the play
-## actions, because these are about the slot as a file rather than the game in
-## it, and only the last of them is reversible.
-func _add_slot_management() -> void:
-	var name_row := HBoxContainer.new()
-	name_row.add_theme_constant_override("separation", 10)
-	_details_box.add_child(name_row)
+## Naming, export, deletion and the editor. Kept below the play actions,
+## because these are about the slot as a file rather than the game in it, and
+## only the last of them is reversible.
+func _add_slot_management(body: VBoxContainer) -> void:
+	body.add_child(Gen2LauncherUI.caption(_palette, "This slot as a file"))
+	var name_row: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	body.add_child(name_row)
 	var name_input := LineEdit.new()
 	name_input.placeholder_text = "Slot name"
 	name_input.max_length = Gen2SaveData.MAX_LABEL
 	name_input.text = String(_row_for(_selected_slot).get("label", ""))
 	name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_row.add_child(name_input)
-	var rename_button := _button("Rename", TEXT)
-	rename_button.pressed.connect(func() -> void: _rename_slot(name_input.text))
-	name_row.add_child(rename_button)
+	name_row.add_child(_action("Rename", Gen2LauncherButton.Variant.NEUTRAL, &"", func() -> void:
+		_rename_slot(name_input.text)
+	))
 
-	var file_row := HBoxContainer.new()
-	file_row.add_theme_constant_override("separation", 10)
-	_details_box.add_child(file_row)
-	var edit_button := _button("Edit save", ACCENT)
-	edit_button.pressed.connect(_open_editor)
-	file_row.add_child(edit_button)
-	var export_button := _button("Export", TEXT)
-	export_button.pressed.connect(func() -> void: _export_dialog.popup_centered(Vector2i(900, 600)))
-	file_row.add_child(export_button)
-	var import_button := _button("Import save", TEXT)
-	import_button.pressed.connect(func() -> void: _slot_import_dialog.popup_centered(Vector2i(900, 600)))
-	file_row.add_child(import_button)
-	var delete_button := _button("Delete slot", ERROR)
-	delete_button.pressed.connect(_request_delete)
-	file_row.add_child(delete_button)
-	var new_slot_button := _button("New slot", TEXT)
-	new_slot_button.pressed.connect(func() -> void: open_new_slot())
-	file_row.add_child(new_slot_button)
+	var file_row: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	body.add_child(file_row)
+	file_row.add_child(_action("Edit save", Gen2LauncherButton.Variant.NEUTRAL, &"settings", _open_editor))
+	file_row.add_child(_action("Export", Gen2LauncherButton.Variant.NEUTRAL, &"", func() -> void:
+		_export_dialog.popup_centered(Vector2i(900, 600))
+	))
+	file_row.add_child(_action("Import", Gen2LauncherButton.Variant.NEUTRAL, &"", func() -> void:
+		_slot_import_dialog.popup_centered(Vector2i(900, 600))
+	))
+	file_row.add_child(_action("Delete", Gen2LauncherButton.Variant.DANGER, &"trash", _request_delete))
+
+
+func _action(
+	label: String, variant: Gen2LauncherButton.Variant, glyph: StringName, handler: Callable
+) -> Gen2LauncherButton:
+	var button: Gen2LauncherButton = Gen2LauncherButton.create(_palette, label, variant, glyph)
+	button.pressed.connect(handler)
+	return button
 
 
 func _rename_slot(label: String) -> void:
@@ -484,24 +438,44 @@ func _rename_slot(label: String) -> void:
 		_data.id, _data.sha1, _selected_slot, label, _data
 	)
 	if not result["ok"]:
-		_set_status("The slot was not renamed.", String(result["message"]), ERROR)
+		_set_status(&"error", "The slot was not renamed.", String(result["message"]))
 		return
-	_set_status("Renamed slot %d." % (_selected_slot + 1), label, SUCCESS)
+	_set_status(&"success", "Renamed slot %d." % (_selected_slot + 1), label)
 	_refresh()
 
 
 func _request_delete() -> void:
 	if not _slot_exists():
 		return
-	_delete_dialog.dialog_text = "Delete slot %d? This cannot be undone." % (_selected_slot + 1)
-	_delete_dialog.popup_centered()
+	_confirm(
+		"Delete slot %d?" % (_selected_slot + 1),
+		"This cannot be undone.",
+		"Delete",
+		_delete_selected_slot,
+	)
+
+
+## A modal card rather than an OS dialog, so a confirmation looks the same on
+## every platform the launcher runs on.
+func _confirm(title: String, message: String, action: String, handler: Callable) -> void:
+	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(_palette, title)
+	sheet.body().add_child(Gen2LauncherUI.muted(_palette, message))
+	var confirm: Gen2LauncherButton = Gen2LauncherButton.create(
+		_palette, action, Gen2LauncherButton.Variant.PRIMARY
+	)
+	confirm.pressed.connect(func() -> void:
+		sheet.close()
+		handler.call()
+	)
+	sheet.add_action(confirm)
+	sheet.open(self)
 
 
 func _delete_selected_slot() -> void:
 	if _data == null or not Gen2SaveStore.delete_slot(_data.id, _data.sha1, _selected_slot):
-		_set_status("The slot was not deleted.", "Nothing was removed.", ERROR)
+		_set_status(&"error", "The slot was not deleted.", "Nothing was removed.")
 		return
-	_set_status("Deleted slot %d." % (_selected_slot + 1), "", MUTED)
+	_set_status(&"info", "Deleted slot %d." % (_selected_slot + 1), "")
 	_selected_slot = -1
 	GameRuntime.reload_selected_save()
 	_refresh()
@@ -512,89 +486,79 @@ func _export_selected_slot(path: String) -> void:
 		_data.id, _data.sha1, _selected_slot, path
 	)
 	if not result["ok"]:
-		_set_status("The save was not exported.", String(result["message"]), ERROR)
+		_set_status(&"error", "The save was not exported.", String(result["message"]))
 		return
-	_set_status("Exported slot %d." % (_selected_slot + 1), path, SUCCESS)
+	_set_status(&"success", "Exported slot %d." % (_selected_slot + 1), path)
 
 
 func _import_slot_file(path: String) -> void:
 	var result: Dictionary = Gen2SaveStore.import_slot(path, _data)
 	if not result["ok"]:
-		_set_status("That save was not imported.", String(result["message"]), ERROR)
+		_set_status(&"error", "That save was not imported.", String(result["message"]))
 		return
 	_selected_slot = int(result["slot"])
-	_set_status("Imported into slot %d." % (_selected_slot + 1), path, SUCCESS)
+	_set_status(&"success", "Imported into slot %d." % (_selected_slot + 1), path)
 	_refresh()
 
 
 func _open_editor() -> void:
 	if _data == null or not GameRuntime.select_save_slot(_data.id, _selected_slot):
-		_set_status("The editor could not open.", "Select a readable slot first.", ERROR)
+		_set_status(&"error", "The editor could not open.", "Select a readable slot first.")
 		return
 	get_tree().change_scene_to_file.call_deferred("res://game/save/save_editor_screen.tscn")
 
 
-func _build_new_game_form() -> void:
-	var prompt := Label.new()
-	prompt.text = "Enter a name. Professor Elm's starter is waiting in the lab."
-	prompt.add_theme_color_override("font_color", MUTED)
-	prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_details_box.add_child(prompt)
+func _build_new_game_form(body: VBoxContainer) -> void:
+	body.add_child(Gen2LauncherUI.muted(
+		_palette, "Enter a name. A starter is waiting in the lab."
+	))
 	_name_input = LineEdit.new()
 	_name_input.placeholder_text = "Player name"
 	_name_input.max_length = Gen2SaveData.MAX_PLAYER_NAME
 	_name_input.custom_minimum_size = Vector2(0, 42)
-	_details_box.add_child(_labeled_control("PLAYER NAME", _name_input))
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 10)
-	_details_box.add_child(actions)
-	var create_button := _button("Create save", ACCENT)
-	create_button.pressed.connect(_create_from_form)
-	actions.add_child(create_button)
-	var cancel_button := _button("Cancel", TEXT)
-	cancel_button.pressed.connect(_cancel_new_game)
-	actions.add_child(cancel_button)
+	body.add_child(Gen2LauncherUI.caption(_palette, "Player name"))
+	body.add_child(_name_input)
+	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	body.add_child(actions)
+	actions.add_child(_action("Create save", Gen2LauncherButton.Variant.PRIMARY, &"check", _create_from_form))
+	actions.add_child(_action("Cancel", Gen2LauncherButton.Variant.NEUTRAL, &"", _cancel_new_game))
 
 
-func _add_party_summary(save: Gen2SaveData) -> void:
-	var label := Label.new()
-	label.text = "PARTY"
-	label.add_theme_color_override("font_color", ACCENT)
-	label.add_theme_font_size_override("font_size", 12)
-	_details_box.add_child(label)
+func _add_party_summary(body: VBoxContainer, save: Gen2SaveData) -> void:
+	body.add_child(Gen2LauncherUI.caption(_palette, "Party"))
+	var grid := HFlowContainer.new()
+	grid.add_theme_constant_override("h_separation", Gen2LauncherUI.GAP_SM)
+	grid.add_theme_constant_override("v_separation", Gen2LauncherUI.GAP_SM)
+	body.add_child(grid)
 	for index: int in Gen2SaveData.MAX_PARTY:
-		var row := PanelContainer.new()
-		row.add_theme_stylebox_override("panel", _panel_style(Color("#102039"), BORDER, 6))
-		_details_box.add_child(row)
-		var content := VBoxContainer.new()
-		content.add_theme_constant_override("separation", 2)
-		row.add_child(content)
+		var cell: Gen2LauncherCard = Gen2LauncherCard.well(_palette, Gen2LauncherTheme.RADIUS_SM, 12)
+		cell.custom_minimum_size = Vector2(196, 0)
+		grid.add_child(cell)
+		var column: VBoxContainer = Gen2LauncherUI.column(1)
+		cell.add_child(column)
 		if index >= save.party.size():
-			var empty := Label.new()
-			empty.text = "%d. Empty" % (index + 1)
-			empty.add_theme_color_override("font_color", MUTED)
-			content.add_child(empty)
+			column.add_child(Gen2LauncherUI.muted(_palette, "%d. Empty" % (index + 1)))
 			continue
 		var mon: Gen2SaveMon = save.party[index]
 		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
-		var name := Label.new()
-		name.text = "%d. %s" % [index + 1, _display_name(mon)]
-		name.add_theme_color_override("font_color", TEXT)
-		content.add_child(name)
-		var details := Label.new()
-		details.text = "Lv.%d    HP %d/%d    %s" % [
+		column.add_child(Gen2LauncherUI.body(
+			_palette, "%d. %s" % [index + 1, _display_name(mon)]
+		))
+		column.add_child(Gen2LauncherUI.muted(_palette, "Lv.%d   HP %d/%d   %s" % [
 			mon.level, mon.hp, battle_mon.max_hp(), _status_name(mon.status)
-		]
-		details.add_theme_color_override("font_color", MUTED)
-		content.add_child(details)
+		]))
 
 
 func _request_new_game() -> void:
 	if _slot_exists():
 		_pending_replace_action = &"new_game"
 		_pending_import_path = ""
-		_confirm_dialog.dialog_text = "Replace slot %d with a new game?" % (_selected_slot + 1)
-		_confirm_dialog.popup_centered()
+		_confirm(
+			"Replace slot %d?" % (_selected_slot + 1),
+			"The save in it is overwritten by a new game.",
+			"Replace",
+			_on_replace_confirmed,
+		)
 		return
 	open_new_game()
 
@@ -607,8 +571,12 @@ func _on_file_selected(path: String) -> void:
 	if _slot_exists():
 		_pending_replace_action = &"import"
 		_pending_import_path = path
-		_confirm_dialog.dialog_text = "Replace slot %d with this cartridge save?" % (_selected_slot + 1)
-		_confirm_dialog.popup_centered()
+		_confirm(
+			"Replace slot %d?" % (_selected_slot + 1),
+			"The save in it is overwritten by this cartridge save.",
+			"Replace",
+			_on_replace_confirmed,
+		)
 		return
 	import_sav_path(path)
 
@@ -638,8 +606,14 @@ func _continue_selected() -> void:
 	if _data == null or _load_selected_save() == null:
 		return
 	if not GameRuntime.select_save_slot(_data.id, _selected_slot):
-		_set_status("Could not select save slot.", "The selected cartridge is not in the registry.", ERROR)
+		_set_status(
+			&"error",
+			"Could not select save slot.",
+			"The selected cartridge is not in the registry.",
+		)
 		return
+	Gen2LauncherAudio.play(&"power")
+	await _shell.flash(0.35)
 	get_tree().change_scene_to_file.call_deferred("res://game/world/world_screen.tscn")
 
 
@@ -647,7 +621,11 @@ func _open_party() -> void:
 	if _data == null or _load_selected_save() == null:
 		return
 	if not GameRuntime.select_save_slot(_data.id, _selected_slot):
-		_set_status("Could not select save slot.", "The selected cartridge is not in the registry.", ERROR)
+		_set_status(
+			&"error",
+			"Could not select save slot.",
+			"The selected cartridge is not in the registry.",
+		)
 		return
 	get_tree().change_scene_to_file.call_deferred("res://game/save/party_screen.tscn")
 
@@ -683,8 +661,8 @@ func _slot_exists() -> bool:
 
 func _slot_state(row: Dictionary) -> String:
 	if not row["exists"]:
-		return "EMPTY"
-	return "READY" if row["valid"] else "INCOMPATIBLE"
+		return "Empty"
+	return "Ready" if row["valid"] else "Unreadable"
 
 
 func _slot_message(row: Dictionary) -> String:
@@ -695,8 +673,8 @@ func _slot_message(row: Dictionary) -> String:
 
 func _slot_state_color(row: Dictionary) -> Color:
 	if not row["exists"]:
-		return ACCENT
-	return SUCCESS if row["valid"] else ERROR
+		return _palette.muted
+	return _palette.success if row["valid"] else _palette.error
 
 
 func _display_name(mon: Gen2SaveMon) -> String:
@@ -716,43 +694,20 @@ func _status_name(status: int) -> String:
 	return "OK" if name.is_empty() else String(name).to_upper()
 
 
-func _set_status(title: String, detail: String, colour: Color) -> void:
+func _set_status(kind: StringName, title: String, detail: String) -> void:
 	if _status_label == null:
 		return
 	_status_label.text = title
-	_status_label.add_theme_color_override("font_color", colour)
 	_status_detail.text = detail
-
-
-func _labeled_control(label_text: String, control: Control) -> VBoxContainer:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 3)
-	var label := Label.new()
-	label.text = label_text
-	label.add_theme_color_override("font_color", ACCENT)
-	label.add_theme_font_size_override("font_size", 12)
-	box.add_child(label)
-	box.add_child(control)
-	return box
-
-
-func _button(text: String, colour: Color) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.add_theme_color_override("font_color", colour)
-	button.add_theme_color_override("font_hover_color", Color.WHITE)
-	button.add_theme_font_size_override("font_size", 14)
-	return button
-
-
-func _panel_style(fill: Color, line: Color, radius: int) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = fill
-	style.border_color = line
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(radius)
-	style.content_margin_left = 18
-	style.content_margin_top = 14
-	style.content_margin_right = 18
-	style.content_margin_bottom = 14
-	return style
+	var colour: Color = _palette.text
+	var glyph: StringName = &"about"
+	match kind:
+		&"success":
+			colour = _palette.success
+			glyph = &"check"
+		&"error":
+			colour = _palette.error
+			glyph = &"warning"
+			Gen2LauncherAudio.play(&"error")
+	_status_label.add_theme_color_override("font_color", colour)
+	_status_icon.set_glyph(glyph, 18.0, colour)

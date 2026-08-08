@@ -51,6 +51,7 @@ const MAX_VOLUME: int = 10
 const VIDEO_MODES: Array[StringName] = [&"windowed", &"fullscreen", &"borderless"]
 const GAME_SPEEDS: Array[StringName] = [&"normal", &"double", &"half"]
 const FPS_CHOICES: Array[int] = [30, 60, 120, 144, 0]
+const UI_THEMES: Array[StringName] = [&"light", &"dark"]
 
 # Cartridge block.
 var text_speed: int = 1
@@ -68,6 +69,7 @@ var sfx_volume: int = 7
 var video_mode: StringName = &"windowed"
 var max_fps: int = 60
 var game_speed: StringName = &"normal"
+var ui_theme: StringName = &"light"
 
 
 ## The cartridge block as the bytes the hardware kept, `DefaultOptions` order.
@@ -141,6 +143,7 @@ func to_dict() -> Dictionary:
 		"video_mode": String(video_mode),
 		"max_fps": max_fps,
 		"game_speed": String(game_speed),
+		"ui_theme": String(ui_theme),
 	}
 
 
@@ -167,6 +170,7 @@ static func parse(raw: Variant) -> Gen2Options:
 	options.sfx_volume = clampi(int(row.get("sfx_volume", 7)), 0, MAX_VOLUME)
 	options.video_mode = _one_of(row.get("video_mode", ""), VIDEO_MODES)
 	options.game_speed = _one_of(row.get("game_speed", ""), GAME_SPEEDS)
+	options.ui_theme = _one_of(row.get("ui_theme", ""), UI_THEMES)
 	var fps: int = int(row.get("max_fps", 60))
 	options.max_fps = fps if FPS_CHOICES.has(fps) else 60
 	return options
