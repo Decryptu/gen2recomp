@@ -2692,6 +2692,21 @@ func try_connection(direction: Vector2i) -> Dictionary:
 			"from_cell": player_cell,
 			"direction": direction_name,
 		}
+	## A connected step is still a step. The cartridge copies the connection strip
+	## into the same block buffer the current map lives in, so `GetTileCollision`
+	## reads the neighbour's real collision and `.CheckLandPerms` refuses a wall
+	## across an edge exactly as it does inside one. Without this the edge itself
+	## was the only test, and Route 6's northwest corner walked into (10,35) of
+	## Saffron City, a wall cell with no walkable neighbour at all.
+	if not _connection_step_allows(target_map, target_cell, direction):
+		return {
+			"ok": false,
+			"kind": &"connection",
+			"reason": &"blocked_target_cell",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"direction": direction_name,
+		}
 
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
@@ -2716,6 +2731,26 @@ func can_walk_to(cell: Vector2i, direction: Vector2i = Vector2i.ZERO) -> bool:
 	if not _step_permission_allows(cell, direction):
 		return false
 	return object_at(cell) == null
+
+
+## _step_permission_allows() for a cell on a map that is not loaded yet: the
+## leave-side face mask still reads the current map, the destination permission
+## the connected one. No block override can apply to a map this world has not
+## drawn, so the map's own collision is exact.
+func _connection_step_allows(
+	target_map: Gen2WorldMap, target_cell: Vector2i, direction: Vector2i
+) -> bool:
+	var face: int = Gen2WorldCollision.face_mask_for_direction(direction)
+	if face != 0 and (tile_permissions_at(player_cell) & face) != 0:
+		return false
+	var permission: int = Gen2WorldCollision.permission_for(
+		target_map.collision_at(target_cell.x, target_cell.y)
+	)
+	if movement_mode == MOVEMENT_SURF:
+		if collision_permission_at(player_cell) == Gen2WorldCollision.WATER_TILE:
+			return permission in [Gen2WorldCollision.LAND_TILE, Gen2WorldCollision.WATER_TILE]
+		return permission == Gen2WorldCollision.WATER_TILE
+	return permission == Gen2WorldCollision.LAND_TILE
 
 
 ## .CheckLandPerms/.CheckSurfPerms alone, without .CheckNPC. Split out because

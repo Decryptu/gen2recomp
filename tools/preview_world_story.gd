@@ -338,6 +338,40 @@ const SURGE_FACE: Vector2i = Vector2i(5, 3)
 ## sets (`constants/engine_flags.asm`).
 const BADGE_THUNDER: int = 10
 const ENGINE_FLYPOINT_VERMILION: int = 58
+## The gym's own exit, and the tree faced from the yard side. Leaving the gym
+## reloads the city, which regrows the tree behind the player, so the way out is
+## cut a second time exactly as the way in was.
+const VERMILION_GYM_EXIT: Vector2i = Vector2i(4, 17)
+const VERMILION_GYM_TREE_RETURN: Vector2i = Vector2i(13, 19)
+
+## Route 6 and Saffron City. Vermilion connects north to Route 6
+## (`data/maps/attributes.asm`), but Saffron is entered through
+## `ROUTE_6_SAFFRON_GATE` rather than a connection, the way Violet and Ecruteak
+## are on the Johto legs.
+const ROUTE_6_GROUP: int = 12
+const ROUTE_6_NUMBER: int = 1
+const ROUTE_6_SAFFRON_GATE_DOOR: Vector2i = Vector2i(6, 1)
+const SAFFRON_GROUP: int = 25
+const SAFFRON_CITY_NUMBER: int = 2
+const SAFFRON_GYM_NUMBER: int = 4
+const SAFFRON_GYM_DOOR: Vector2i = Vector2i(34, 3)
+
+## `maps/SaffronGym.asm` is nine rooms walled off from each other, joined only by
+## fifteen pairs of self-warps. Sabrina's room holds exactly one pad, warp 32 on
+## (11,9), and the only pad that reaches it is warp 17 on (1,5), so the way in is
+## a fixed chain rather than anything a walk can plan: the entrance room's only
+## pad, then one pad per room until the corner room that holds warp 17.
+const SAFFRON_GYM_MAZE: Array[Vector2i] = [
+	Vector2i(11, 15),  # warp 3 -> 18 (19,17)
+	Vector2i(15, 17),  # warp 11 -> 26 (5,15)
+	Vector2i(5, 17),   # warp 12 -> 27 (5,11)
+	Vector2i(1, 11),   # warp 6 -> 21 (5,5)
+	Vector2i(1, 5),    # warp 17 -> 32 (11,9), Sabrina's room
+]
+const SABRINA_FACE: Vector2i = Vector2i(9, 9)
+## ENGINE_MARSHBADGE's place in source badge order, and Saffron's own flypoint.
+const BADGE_MARSH: int = 13
+const ENGINE_FLYPOINT_SAFFRON: int = 60
 
 ## constants/event_flags.asm, same numbers in both pins.
 const EVENT_FAST_SHIP_HAS_ARRIVED: int = 49
@@ -4590,6 +4624,10 @@ func _kanto_crossing_path(
 	var thunder: Dictionary = _thunder_badge_path(spawned, save, random, data, path)
 	if not bool(thunder.get("ok", false)):
 		return thunder
+
+	var marsh: Dictionary = _marsh_badge_path(spawned, save, random, data, path)
+	if not bool(marsh.get("ok", false)):
+		return marsh
 	return {"ok": true, "world": spawned}
 
 
@@ -5056,6 +5094,141 @@ func _thunder_badge_path(
 		BADGE_THUNDER, Gen2WorldState.is_crystal_profile(data)
 	)):
 		return {"ok": false, "path": path, "reason": "ENGINE_THUNDERBADGE was not set"}
+	return {"ok": true}
+
+
+## Vermilion Gym to the Marsh Badge, by way of Route 6 and Saffron City.
+##
+## The gym exit reloads the city, so the yard's tree has grown back and is cut a
+## second time from the inside. Saffron is then a gate crossing rather than a
+## connection, and its own gym is a warp maze: nine rooms with no doors between
+## them, joined by fifteen pairs of self-warps, walked as the fixed chain
+## SAFFRON_GYM_MAZE names.
+func _marsh_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var out_of_gym: Dictionary = _warp_chain(
+		world, save, random, data, [VERMILION_GYM_EXIT]
+	)
+	if not bool(out_of_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "leaving Vermilion Gym failed: %s" % out_of_gym.get("reason", ""),
+		}
+	var regrown: Dictionary = _cut_at(
+		world, VERMILION_GYM_TREE_RETURN, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	if not bool(regrown.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the regrown gym tree failed: %s" % regrown.get("reason", ""),
+		}
+
+	var northward: Dictionary = _walk_connection_resolving(
+		world, "north", ROUTE_6_GROUP, ROUTE_6_NUMBER, save, random, data
+	)
+	var route_6_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	path.append({
+		"step": "vermilion_to_route_6",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"encounters": northward.get("encounters", []),
+		"run": route_6_entry,
+	})
+	if not bool(northward.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the walk north to Route 6 failed: %s" % northward.get("reason", ""),
+		}
+
+	var gate: Dictionary = _gate_leg(
+		world, save, random, data, ROUTE_6_SAFFRON_GATE_DOOR,
+		SAFFRON_GROUP, SAFFRON_CITY_NUMBER
+	)
+	path.append({
+		"step": "saffron_city",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_SAFFRON),
+	})
+	if not bool(gate.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Saffron gate failed: %s" % gate.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_SAFFRON):
+		return {"ok": false, "path": path, "reason": "Saffron's flypoint callback did not run"}
+
+	return _saffron_gym_leg(world, save, random, data, path)
+
+
+## The warp maze, then Sabrina.
+##
+## Every pad is one half of a bidirectional pair, so a wrong one is recoverable
+## rather than fatal, but only warp 17 reaches Sabrina's room at all. The walk
+## between pads is ordinary: within a room the floor is open, and the BFS treats
+## every other pad as a wall, which is what keeps it from wandering onto one.
+func _saffron_gym_leg(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var into_gym: Dictionary = _warp_chain(world, save, random, data, [SAFFRON_GYM_DOOR])
+	if not bool(into_gym.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Saffron Gym door failed: %s" % into_gym.get("reason", ""),
+		}
+	var pads: Array = []
+	for pad: Vector2i in SAFFRON_GYM_MAZE:
+		var stepped: Dictionary = _warp_walk(world, pad, save, random, data)
+		pads.append({
+			"pad": _cell_value_from_vector(pad),
+			"landed": _cell_value(world),
+			"encounters": stepped.get("encounters", []),
+		})
+		if not bool(stepped.get("ok", false)):
+			path.append({"step": "saffron_gym_maze", "pads": pads})
+			return {
+				"ok": false, "path": path,
+				"reason": "the maze pad on %s failed: %s" % [pad, stepped.get("reason", "")],
+			}
+	path.append({
+		"step": "saffron_gym_maze",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"pads": pads,
+	})
+
+	var sabrina: Dictionary = _talk_to(
+		world, SABRINA_FACE, Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "saffron_gym_sabrina",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"marsh_badge": world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+			BADGE_MARSH, Gen2WorldState.is_crystal_profile(data)
+		)),
+		"run": sabrina,
+	})
+	if not bool(sabrina.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Sabrina did not finish: %s" % sabrina.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		BADGE_MARSH, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return {"ok": false, "path": path, "reason": "ENGINE_MARSHBADGE was not set"}
 	return {"ok": true}
 
 

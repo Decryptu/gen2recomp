@@ -2909,6 +2909,22 @@ func test_connected_edge_step_translates_the_player_and_reloads_the_target_map()
 	assert_eq(world.player_cell, Vector2i(15, 6))
 
 
+## The cartridge copies the connection strip into the same block buffer the
+## current map lives in, so `.CheckLandPerms` reads the neighbour's real
+## collision and refuses a wall across an edge exactly as it does inside one.
+func test_connected_edge_step_refuses_a_wall_on_the_target_map() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	target.collision[4 * target.collision_width + 0] = 0x07
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 4))
+	var result: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_false(result["ok"])
+	assert_eq(result["kind"], &"connection")
+	assert_eq(result["reason"], &"blocked_target_cell")
+	assert_eq(world.map_id(), Vector2i(1, 1))
+	assert_eq(world.player_cell, Vector2i(15, 4))
+
+
 func test_connection_requires_the_player_to_be_on_the_requested_edge() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
 	var result: Dictionary = world.try_connection(Vector2i.RIGHT)

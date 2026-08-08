@@ -217,6 +217,7 @@ Headless tools, all against a real imported cache:
 | `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit, in all three games |
 | `validate_ss_aqua.gd` | the S.S. Aqua's B1F sailors and the coord events that toggle them, 1F's deck and west wing, the lazy sailor and the granddaughter, and the corridor before and after the errand that opens it, in all three games |
 | `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback, in all three games |
+| `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina, in all three games |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
