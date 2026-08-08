@@ -1632,3 +1632,204 @@ func test_a_focus_band_changes_nothing_about_a_hit_that_was_not_lethal() -> void
 		Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
 		assert_eq(battle.enemy.hp, before - 5)
 		assert_true(_first(turn.events, Gen2Battle.ENDURED).is_empty())
+
+
+## The heal family. `BattleCommand_Heal` for the four that just heal, and
+## `BattleCommand_TimeBasedHealContinue` for the three that read the clock and
+## the sky.
+func test_recover_takes_back_half_the_maximum() -> void:
+	var battle: Gen2Battle = _battle()
+	var mon: Gen2BattleMon = battle.player
+	mon.hp = 1
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.RECOVER)
+
+	@warning_ignore("integer_division")
+	assert_eq(mon.hp, 1 + mon.max_hp() / 2)
+	assert_false(_first(turn.events, Gen2Battle.HP_RESTORED).is_empty())
+
+
+func test_a_heal_at_full_health_fails_and_costs_the_turn() -> void:
+	var battle: Gen2Battle = _battle()
+	var mon: Gen2BattleMon = battle.player
+	var before: int = mon.hp
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.SOFTBOILED)
+
+	assert_eq(mon.hp, before)
+	assert_false(_first(turn.events, Gen2Battle.HP_ALREADY_FULL).is_empty())
+	assert_true(_first(turn.events, Gen2Battle.HP_RESTORED).is_empty())
+
+
+## Rest is the whole bar rather than half, which is what the move number buys:
+## the other three moves on this effect byte run the same command.
+func test_rest_fills_the_bar_where_milk_drink_takes_half() -> void:
+	var rested: Gen2Battle = _battle()
+	rested.player.hp = 1
+	var sleeping: Gen2Turn = _run_move(rested, Fixture.REST)
+
+	assert_eq(rested.player.hp, rested.player.max_hp())
+	assert_eq(Gen2Status.sleep_turns(rested.player.status), Gen2Status.REST_SLEEP_TURNS + 1)
+	assert_false(_first(sleeping.events, Gen2Battle.WENT_TO_SLEEP).is_empty())
+
+	var milk: Gen2Battle = _battle()
+	milk.player.hp = 1
+
+	_run_move(milk, Fixture.MILK_DRINK)
+
+	@warning_ignore("integer_division")
+	assert_eq(milk.player.hp, 1 + milk.player.max_hp() / 2)
+	assert_eq(Gen2Status.sleep_turns(milk.player.status), 0, "only Rest sleeps")
+
+
+## Rest writes its counter over the whole status byte, so it is the one move in
+## the game that cures a burn, and it clears Toxic's ramp with it.
+func test_rest_clears_every_other_status_and_the_toxic_ramp() -> void:
+	var battle: Gen2Battle = _battle()
+	var mon: Gen2BattleMon = battle.player
+	mon.hp = 1
+	mon.status = Gen2Status.POISON
+	mon.toxic_counter = 4
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.REST)
+
+	assert_false(Gen2Status.has(mon.status, Gen2Status.POISON))
+	assert_eq(mon.toxic_counter, 0)
+	assert_eq(Gen2Status.sleep_turns(mon.status), Gen2Status.REST_SLEEP_TURNS + 1)
+	# "fell asleep and became healthy" rather than "went to sleep", chosen on
+	# whether there was a status to clear.
+	assert_false(_first(turn.events, Gen2Battle.RESTED).is_empty())
+	assert_true(_first(turn.events, Gen2Battle.WENT_TO_SLEEP).is_empty())
+
+
+## The full-HP refusal is checked before the Rest branch, so a burned Pokémon at
+## full health neither sleeps nor loses the burn.
+func test_rest_at_full_health_fails_without_sleeping() -> void:
+	var battle: Gen2Battle = _battle()
+	var mon: Gen2BattleMon = battle.player
+	mon.status = Gen2Status.BURN
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.REST)
+
+	assert_eq(mon.status, Gen2Status.BURN, "the burn survives")
+	assert_eq(Gen2Status.sleep_turns(mon.status), 0)
+	assert_false(_first(turn.events, Gen2Battle.HP_ALREADY_FULL).is_empty())
+
+
+## Half by default, and matching the move's own time of day buys nothing: it is
+## missing it that costs a step. `BattleCommand_TimeBasedHealContinue` skips its
+## `dec c` when `wTimeOfDay` equals the label's own `MORN_F`/`DAY_F`/`NITE_F`.
+func test_a_timed_heal_is_half_in_its_own_time_and_a_quarter_outside_it() -> void:
+	var morning: Gen2Battle = _battle()
+	morning.time_of_day = Gen2WorldPalette.TIME_MORNING
+	morning.player.hp = 1
+
+	_run_move(morning, Fixture.MORNING_SUN)
+
+	@warning_ignore("integer_division")
+	assert_eq(morning.player.hp, 1 + morning.player.max_hp() / 2)
+
+	var midday: Gen2Battle = _battle()
+	midday.time_of_day = Gen2WorldPalette.TIME_DAY
+	midday.player.hp = 1
+
+	_run_move(midday, Fixture.MORNING_SUN)
+
+	@warning_ignore("integer_division")
+	assert_eq(midday.player.hp, 1 + midday.player.max_hp() / 4)
+
+
+## Synthesis asks for the day and Moonlight for the night, which is the only
+## thing separating the three moves.
+func test_synthesis_and_moonlight_ask_for_their_own_times() -> void:
+	var day: Gen2Battle = _battle()
+	day.time_of_day = Gen2WorldPalette.TIME_DAY
+	day.player.hp = 1
+
+	_run_move(day, Fixture.SYNTHESIS)
+
+	@warning_ignore("integer_division")
+	assert_eq(day.player.hp, 1 + day.player.max_hp() / 2)
+
+	var night: Gen2Battle = _battle()
+	night.time_of_day = Gen2WorldPalette.TIME_NIGHT
+	night.player.hp = 1
+
+	_run_move(night, Fixture.MOONLIGHT)
+
+	@warning_ignore("integer_division")
+	assert_eq(night.player.hp, 1 + night.player.max_hp() / 2)
+
+
+## Sun is one step up the table and any other weather one step down, never two:
+## `.Weather` increments first and only then takes two off for a sky that is not
+## the sun.
+func test_sun_doubles_a_timed_heal_and_rain_or_sand_halves_it() -> void:
+	var sunny: Gen2Battle = _battle()
+	sunny.time_of_day = Gen2WorldPalette.TIME_MORNING
+	sunny.weather = Gen2Weather.SUN
+	sunny.player.hp = 1
+
+	_run_move(sunny, Fixture.MORNING_SUN)
+
+	assert_eq(sunny.player.hp, sunny.player.max_hp(), "the whole bar")
+
+	for weather: int in [Gen2Weather.RAIN, Gen2Weather.SANDSTORM]:
+		var battle: Gen2Battle = _battle()
+		battle.time_of_day = Gen2WorldPalette.TIME_MORNING
+		battle.weather = weather
+		battle.player.hp = 1
+
+		_run_move(battle, Fixture.MORNING_SUN)
+
+		@warning_ignore("integer_division")
+		assert_eq(battle.player.hp, 1 + battle.player.max_hp() / 4, str(weather))
+
+
+## The floor of the table, reached only by missing both the time and the sun.
+func test_the_wrong_time_in_the_rain_heals_an_eighth() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.time_of_day = Gen2WorldPalette.TIME_NIGHT
+	battle.weather = Gen2Weather.RAIN
+	battle.player.hp = 1
+
+	_run_move(battle, Fixture.MORNING_SUN)
+
+	@warning_ignore("integer_division")
+	assert_eq(battle.player.hp, 1 + maxi(battle.player.max_hp() / 4, 1) / 2)
+
+
+## `GetEighthMaxHP` halves `GetQuarterMaxHP`'s answer rather than dividing by
+## eight, and both apply their own floor of one, so the smallest heal in the game
+## is still one hit point.
+func test_the_smallest_timed_heal_is_still_one_hit_point() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.time_of_day = Gen2WorldPalette.TIME_NIGHT
+	battle.weather = Gen2Weather.RAIN
+	battle.player.stats["hp"] = 2
+	battle.player.hp = 1
+
+	_run_move(battle, Fixture.MORNING_SUN)
+
+	assert_eq(battle.player.hp, 2)
+
+
+func test_a_timed_heal_at_full_health_fails() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.time_of_day = Gen2WorldPalette.TIME_MORNING
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.MORNING_SUN)
+
+	assert_eq(battle.player.hp, battle.player.max_hp())
+	assert_false(_first(turn.events, Gen2Battle.HP_ALREADY_FULL).is_empty())
+
+
+func test_the_heal_family_has_its_cartridge_sequences() -> void:
+	for effect: int in [
+		Gen2MoveEffect.HEAL, Gen2MoveEffect.MORNING_SUN,
+		Gen2MoveEffect.SYNTHESIS, Gen2MoveEffect.MOONLIGHT,
+	]:
+		assert_true(Gen2MoveEffect.is_written(effect), str(effect))
+		# Announce, spend, heal, end: no accuracy roll, and no obedience check,
+		# which this engine does not model on any list.
+		assert_eq(Gen2MoveEffect.sequence_for(effect).size(), 4, str(effect))

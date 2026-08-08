@@ -146,6 +146,17 @@ const ATTRACT_MOVE: int = 271
 const MIST_MOVE: int = 272
 const FOCUS_ENERGY_MOVE: int = 273
 
+## The heal family at its real move numbers. Rest has to be real, because
+## `BattleCommand_Heal` tells it from the other three by number; the rest are
+## real for company, and all seven fit under [constant MAX_MOVE] already.
+const RECOVER: int = 105
+const SOFTBOILED: int = 135
+const REST: int = 156
+const MILK_DRINK: int = 208
+const MORNING_SUN: int = 234
+const SYNTHESIS: int = 235
+const MOONLIGHT: int = 236
+
 ## The highest move number this table fills. Grown as new moves are added.
 const MAX_MOVE: int = THUNDER_ALWAYS_PARALYZES
 const BERRY_ITEM: int = 0xAD
@@ -409,6 +420,16 @@ static func _moves() -> Array:
 		WRAP: ["WRAP", 15, NORMAL, 216, 20, Gen2MoveEffect.TRAP_TARGET, 0],
 		BIND: ["BIND", 15, NORMAL, 191, 20, Gen2MoveEffect.TRAP_TARGET, 0],
 		MEAN_LOOK: ["MEAN LOOK", 0, NORMAL, 255, 5, Gen2MoveEffect.MEAN_LOOK, 0],
+		# The heal family, real rows: no power, 100% accuracy, and Rest the only
+		# one of the seven that is not Normal or Grass. None of the four lists
+		# rolls accuracy, so the byte is never read.
+		RECOVER: ["RECOVER", 0, NORMAL, 255, 20, Gen2MoveEffect.HEAL, 0],
+		SOFTBOILED: ["SOFTBOILED", 0, NORMAL, 255, 10, Gen2MoveEffect.HEAL, 0],
+		REST: ["REST", 0, PSYCHIC_TYPE, 255, 10, Gen2MoveEffect.HEAL, 0],
+		MILK_DRINK: ["MILK DRINK", 0, NORMAL, 255, 10, Gen2MoveEffect.HEAL, 0],
+		MORNING_SUN: ["MORNING SUN", 0, NORMAL, 255, 5, Gen2MoveEffect.MORNING_SUN, 0],
+		SYNTHESIS: ["SYNTHESIS", 0, GRASS, 255, 5, Gen2MoveEffect.SYNTHESIS, 0],
+		MOONLIGHT: ["MOONLIGHT", 0, NORMAL, 255, 5, Gen2MoveEffect.MOONLIGHT, 0],
 	}
 
 	var out: Array = []

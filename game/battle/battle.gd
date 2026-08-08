@@ -164,6 +164,17 @@ const WEATHER_CONTINUES: StringName = &"weather_continues"
 const WEATHER_ENDED: StringName = &"weather_ended"
 const HURT_BY_SANDSTORM: StringName = &"hurt_by_sandstorm"
 
+## The heal family. [constant HP_RESTORED] carries the user's `hp` and `max_hp`
+## so a screen moves the bar without reading the battle back;
+## [constant HP_ALREADY_FULL] is `BattleCommand_Heal`'s own refusal, which costs
+## the turn. Rest's two lines are separate events rather than one with a flag,
+## because the cartridge chooses between them on whether there was a status to
+## clear and a screen should not have to know that rule.
+const HP_RESTORED: StringName = &"hp_restored"
+const HP_ALREADY_FULL: StringName = &"hp_already_full"
+const WENT_TO_SLEEP: StringName = &"went_to_sleep"
+const RESTED: StringName = &"rested"
+
 ## Bind, Wrap, Fire Spin, Clamp and Whirlpool: the target was bound, lost a
 ## sixteenth of its health to the binding, or was let go. [code]move[/code] on all
 ## three is the move that did it, which is what the cartridge's own texts name
@@ -268,6 +279,13 @@ var flee_attempts: int = 0
 ## weather, so a fresh [Gen2Battle] starts clear.
 var weather: int = Gen2Weather.NONE
 var weather_turns: int = 0
+
+## `wTimeOfDay`, which only the three time-based heals read. It holds
+## `MORN_F`/`DAY_F`/`NITE_F` (engine/rtc/rtc.asm, `GetTimeOfDay`), the bit
+## indices 0/1/2 rather than the shifted flags, and those are the same three
+## numbers [Gen2WorldPalette] already uses, so the overworld's value is written
+## here unmapped. A battle nobody told stands at midday.
+var time_of_day: int = Gen2WorldPalette.TIME_DAY
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.

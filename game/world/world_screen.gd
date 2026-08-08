@@ -1078,6 +1078,7 @@ func _start_battle_request(request: Dictionary) -> void:
 	_active_battle_persist = save != null and _injected_save == null
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
+	host.set_time_of_day(time_of_day)
 	if _world != null and not tutorial:
 		host.set_capture_balls(
 			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
