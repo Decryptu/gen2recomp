@@ -28,7 +28,11 @@ const CONFUSED: int = 1 << 0
 const FLINCHED: int = 1 << 1
 const RECHARGING: int = 1 << 2
 const CHARGING: int = 1 << 3
-const DISABLED: int = 1 << 4
+## Bit 4 was a DISABLED flag. The cartridge has none: `wDisabledMove` and
+## `wPlayerDisableCount` are the whole of it, which is what
+## [member Gen2BattleMon.disabled_slot] and [member Gen2BattleMon.disable_turns]
+## already are, and every reader tested those rather than the flag. It is left
+## unused rather than reassigned so a bit number keeps meaning what it did.
 const ATTRACTED: int = 1 << 5
 const ENCORED: int = 1 << 6
 const MIST: int = 1 << 7

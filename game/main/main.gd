@@ -250,26 +250,8 @@ func import_mod_path(path: String, replace: bool = false) -> Dictionary:
 	return result
 
 
-## The refusal reasons a player can act on, said plainly. Anything else falls
-## back to the reason itself rather than being flattened into one useless line.
 func _mod_refusal(result: Dictionary) -> String:
-	var detail: String = String(result.get("detail", ""))
-	match StringName(result.get("reason", &"")):
-		&"not_a_zip":
-			return "%s is not a .zip archive." % detail.get_file()
-		&"archive_not_found":
-			return "%s could not be read." % detail.get_file()
-		&"archive_has_no_manifest":
-			return "The archive has no %s, so it is not a mod." % Gen2ModManifest.FILENAME
-		&"archive_holds_more_than_one_folder":
-			return "The archive must hold a single mod folder."
-		&"unsupported_api_version":
-			return "That mod was built for a different host: %s." % detail
-		&"unsafe_archive_entry":
-			return "The archive tries to write outside the mod folder (%s)." % detail
-		&"archive_too_large", &"archive_too_many_entries":
-			return "That archive is too large to be a mod."
-	return "%s %s" % [result.get("reason", "refused"), detail]
+	return Gen2ModRefusal.text(result)
 
 
 func _open_mod_dialog() -> void:

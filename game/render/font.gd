@@ -7,10 +7,17 @@ extends RefCounted
 ## width, and a character code is already the tile number that draws it. Nothing
 ## is measured or kerned; indices are copied into a buffer at multiples of eight.
 ##
-## Both sheets are one row of tiles ([method Gen2Tiles.decode_1bpp_strip]), so a
+## Every sheet is one row of tiles ([method Gen2Tiles.decode_1bpp_strip]), so a
 ## code is a horizontal offset and nothing else. A code with no tile draws
 ## nothing rather than a placeholder, which is what the space at $7F is and what
 ## the hardware does.
+##
+## Three sheets, because the hardware has three loaded at once and one of them
+## changes. The main font covers $80 upward and the frames $79 to $7E in both
+## strips; `_LoadFontsBattleExtra` replaces $60 to $78, which is where `№`,
+## `<ID>` and `<LV>` live. Which of the two is up is [Gen2Text]'s font argument,
+## carried through to the tile it addresses, so a caller says which screen it is
+## drawing rather than which sheet a byte came from.
 ##
 ## Node-free: it writes into an index buffer, not the screen, so a whole text box
 ## can be laid out and checked headless.
@@ -26,6 +33,10 @@ var _frames: PackedByteArray = PackedByteArray()
 var _frame_width: int = 0
 var _frame_first_code: int = RomLayout.FRAME_FIRST_CODE
 var _frame_tiles: int = 0
+
+var _battle_extra: PackedByteArray = PackedByteArray()
+var _battle_extra_width: int = 0
+var _battle_extra_tiles: int = 0
 
 
 ## Reads both sheets out of a cache, or null if that cache has no font in it.
@@ -49,6 +60,13 @@ static func from_data(data: GameData) -> Gen2Font:
 	out._frame_first_code = int(frames.get("first_code", RomLayout.FRAME_FIRST_CODE))
 	out._frame_tiles = int(frames.get("tiles", 0))
 
+	# Optional: a font with no battle-extra strip draws the main run and refuses
+	# the other, which is what a cache written before this was read back holds.
+	var battle_extra: Dictionary = data.tile_sheet("battle_font")
+	out._battle_extra = data.tile_indices("battle_font")
+	out._battle_extra_width = int(battle_extra.get("width", 0))
+	out._battle_extra_tiles = int(battle_extra.get("tiles", 0))
+
 	return out if out.is_usable() else null
 
 
@@ -63,11 +81,30 @@ func frame_count() -> int:
 	return _frame_tiles / RomLayout.FRAME_TILES
 
 
+## Whether the battle-extra strip was in the cache this was read from.
+func has_battle_extra() -> bool:
+	return _battle_extra_width > 0 and _battle_extra_tiles > 0
+
+
 ## Draws one character code at a tile position, in pixels from the top left.
 ## A code with no tile draws nothing, which is what a space is.
+##
+## [param font] says which strip is loaded. Under
+## [constant Gen2Text.FONT_BATTLE_EXTRA] a code in $60 to $78 comes off the
+## battle-extra sheet; everything else comes off the main font either way,
+## because that load replaces only those tiles.
 func draw_code(
-	code: int, into: PackedByteArray, into_width: int, at_x: int, at_y: int
+	code: int, into: PackedByteArray, into_width: int, at_x: int, at_y: int,
+	font: StringName = Gen2Text.FONT_MAIN
 ) -> void:
+	if font == Gen2Text.FONT_BATTLE_EXTRA \
+		and code >= Gen2Text.BATTLE_EXTRA_FIRST_CODE \
+		and code <= Gen2Text.BATTLE_EXTRA_LAST_CODE:
+		var within: int = code - RomLayout.BATTLE_FONT_FIRST_CODE
+		if within < 0 or within >= _battle_extra_tiles:
+			return
+		blit_slot(_battle_extra, _battle_extra_width, within, into, into_width, at_x, at_y)
+		return
 	var slot: int = code - _first_code
 	if slot < 0 or slot >= _glyph_tiles:
 		return
@@ -78,11 +115,12 @@ func draw_code(
 ## tile. Returns how many tiles were drawn, which is not the string's length
 ## when it contains a ligature.
 func draw_text(
-	text: String, into: PackedByteArray, into_width: int, at_x: int, at_y: int
+	text: String, into: PackedByteArray, into_width: int, at_x: int, at_y: int,
+	font: StringName = Gen2Text.FONT_MAIN
 ) -> int:
-	var codes: PackedByteArray = Gen2Text.encode(text)
+	var codes: PackedByteArray = Gen2Text.encode(text, font)
 	for i: int in codes.size():
-		draw_code(codes[i], into, into_width, at_x + i * TILE, at_y)
+		draw_code(codes[i], into, into_width, at_x + i * TILE, at_y, font)
 	return codes.size()
 
 

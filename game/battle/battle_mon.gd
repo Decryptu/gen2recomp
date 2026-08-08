@@ -87,8 +87,8 @@ var rampage_move: int = 0
 var toxic_counter: int = 0
 
 ## Which move slot Disable has locked, or -1 for none: -1 rather than 0 so
-## "nothing disabled" is never confusable with the first slot. Meaningful only
-## while [constant Gen2Substatus.DISABLED] is set.
+## "nothing disabled" is never confusable with the first slot, and so this alone
+## answers whether anything is disabled, the way `wDisabledMove` does.
 var disabled_slot: int = -1
 ## How many turns [member disabled_slot] stays locked.
 var disable_turns: int = 0

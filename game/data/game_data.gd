@@ -20,6 +20,10 @@ var id: StringName = &""
 var sha1: String = ""
 var directory: String = ""
 
+## Mod content, consulted ahead of the cached tables by [method _content]. Null
+## for a [GameData] built by hand, which is what a fixture does.
+var _overlay: Gen2ContentOverlay = null
+
 var _species: Array = []
 var _moves: Array = []
 ## TMHMMoves in TMNUM order, restored to integers because JSON reads them back
@@ -82,6 +86,7 @@ static func open_directory(path: String) -> GameData:
 
 	var manifest: Dictionary = RomCache.read_manifest(path)
 	var data := GameData.new()
+	data._overlay = Gen2ContentOverlay.shared()
 	data.directory = path
 	data.id = StringName(manifest.get("game_id", ""))
 	data.sha1 = String(manifest.get("sha1", ""))
@@ -113,6 +118,10 @@ func title() -> String:
 	return RomRegistry.title_for(id)
 
 
+## How many species the cartridge carried, which is not how many exist: mod
+## content is numbered above the cartridge's range and enumerated through
+## [method Gen2ContentOverlay.defined_numbers]. Callers here wrap and iterate
+## over the cartridge's own run, and a mod number is not part of it.
 func species_count() -> int:
 	return _species.size()
 
@@ -423,7 +432,7 @@ func world_tileset_indices(number: int) -> PackedByteArray:
 ## One species by Pokédex number, or an empty Dictionary if there is no such
 ## number. Out of range is a question, not a crash: a mod may well ask.
 func species(number: int) -> Dictionary:
-	return _entry(_species, number - 1)
+	return _content(Gen2ContentOverlay.KIND_SPECIES, _species, number)
 
 
 ## A species' level-up moves, in the cartridge's own order, as
@@ -477,7 +486,7 @@ func _rows(entry: Dictionary, key: String, fields: Array) -> Array:
 
 
 func move(number: int) -> Dictionary:
-	return _entry(_moves, number - 1)
+	return _content(Gen2ContentOverlay.KIND_MOVE, _moves, number)
 
 
 ## Every TM/HM/tutor move in TMNUM order, so index n-1 is TM/HM number n.
@@ -504,7 +513,7 @@ func tmhm_number_for_move(move_number: int) -> int:
 
 
 func item(number: int) -> Dictionary:
-	return _entry(_items, number - 1)
+	return _content(Gen2ContentOverlay.KIND_ITEM, _items, number)
 
 
 func item_name(number: int) -> String:
@@ -628,7 +637,7 @@ func trainer_count() -> int:
 ## player, who is a class in the cartridge's tables and has no pic, so the cache
 ## does not carry an entry for them.
 func trainer(number: int) -> Dictionary:
-	return _entry(_trainers, number - 1)
+	return _content(Gen2ContentOverlay.KIND_TRAINER, _trainers, number)
 
 
 func trainer_name(number: int) -> String:
@@ -995,6 +1004,28 @@ func _entry(rows: Array, index: int) -> Dictionary:
 	if index < 0 or index >= rows.size():
 		return {}
 	return rows[index]
+
+
+## One numbered content row, with the mod overlay consulted first.
+##
+## The chokepoint species, moves, items and trainers all read through, and so the
+## one place that has to know a mod may have added or changed one. Everything
+## carried on a species row rides along: a defined species has a learnset,
+## evolutions and TM flags because [method learnset], [method evolutions] and the
+## TM/HM gate all read them back off this row.
+##
+## Numbering is one-based, the cartridge's own; see [Gen2ContentOverlay].
+func _content(kind: StringName, rows: Array, number: int) -> Dictionary:
+	var base: Dictionary = _entry(rows, number - 1)
+	if _overlay == null or _overlay.is_empty():
+		return base
+	return _overlay.resolve(kind, number, base)
+
+
+## Replaces the mod content this cache answers with. For a tool or a test that
+## needs content of its own without touching the shared overlay.
+func set_content_overlay(overlay: Gen2ContentOverlay) -> void:
+	_overlay = overlay
 
 
 func _service_row(

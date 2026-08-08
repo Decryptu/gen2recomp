@@ -1,0 +1,231 @@
+extends GutTest
+
+## The three registries a mod reaches that are not a renderer: move effects,
+## effect commands and the read-only event channel. Each is checked for what it
+## lets a mod add and for what it refuses to let one take over.
+
+const Fixture := preload("res://tests/unit/battle_fixture.gd")
+const MOD: StringName = &"testmod"
+## An effect byte no cartridge move carries, so registering it cannot change a
+## move already in the table.
+const NEW_EFFECT: int = 0xF0
+
+var _directory: String = ""
+var _data: GameData = null
+var _ran: Array = []
+var _seen: Array = []
+
+
+func before_each() -> void:
+	Gen2ModHost.reset()
+	_directory = RomCache.directory_for(&"registrytest", "0123456789abcdef")
+	_data = Fixture.build(_directory)
+	_ran = []
+	_seen = []
+
+
+func after_each() -> void:
+	RomCache.clear(_directory)
+	Gen2ModHost.reset()
+
+
+func _note(turn: Gen2Turn) -> void:
+	_ran.append(turn.move_number)
+
+
+func _watch(event: Dictionary) -> void:
+	_seen.append(event)
+
+
+func test_a_registered_command_runs_inside_a_real_move_sequence() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.register_effect_command(MOD, &"marker", _note).get("ok", false)))
+	assert_true(bool(host.register_move_effect(MOD, NEW_EFFECT, [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		&"marker",
+		Gen2EffectCommands.END_MOVE,
+	]).get("ok", false)))
+
+	assert_eq(Gen2MoveEffect.sequence_for(NEW_EFFECT).size(), 4)
+	assert_true(Gen2MoveEffect.is_written(NEW_EFFECT))
+
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		RandomNumberGenerator.new()
+	)
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
+	)
+	for command: StringName in Gen2MoveEffect.sequence_for(NEW_EFFECT):
+		Gen2EffectCommands.run(command, turn)
+	assert_eq(_ran, [Fixture.TACKLE], "the registered step ran with the turn")
+
+
+func test_a_registration_cannot_shadow_a_step_every_move_depends_on() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		StringName(host.register_effect_command(
+			MOD, Gen2EffectCommands.APPLY_DAMAGE, _note
+		)["reason"]),
+		&"reserved_effect_command"
+	)
+	# And the stat commands are engine steps too, not just the shared ones.
+	assert_eq(
+		StringName(host.register_effect_command(
+			MOD, Gen2EffectCommands.ATTACK_UP, _note
+		)["reason"]),
+		&"reserved_effect_command"
+	)
+
+
+func test_an_effect_naming_a_step_nobody_wrote_is_refused_at_registration() -> void:
+	# Refused here, where the mod's id is in hand, rather than pushing an error
+	# in the middle of a turn.
+	var result: Dictionary = Gen2ModHost.instance().register_move_effect(MOD, NEW_EFFECT, [
+		Gen2EffectCommands.USED_MOVE_TEXT, &"nosuchstep",
+	])
+	assert_eq(StringName(result["reason"]), &"unknown_effect_command")
+	assert_false(Gen2MoveEffect.is_written(NEW_EFFECT))
+
+
+func test_effects_whose_command_reads_the_byte_back_are_not_replaceable() -> void:
+	for effect: int in Gen2MoveEffect.RESERVED_EFFECTS:
+		assert_eq(
+			StringName(Gen2ModHost.instance().register_move_effect(
+				MOD, effect, [Gen2EffectCommands.END_MOVE]
+			)["reason"]),
+			&"reserved_effect", "effect %d" % effect
+		)
+
+
+func test_a_registered_effect_replaces_the_cartridge_list_and_reset_restores_it() -> void:
+	var before: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.SLEEP)
+	assert_true(bool(Gen2ModHost.instance().register_move_effect(
+		MOD, Gen2MoveEffect.SLEEP, [Gen2EffectCommands.END_MOVE]
+	).get("ok", false)))
+	assert_eq(Gen2MoveEffect.sequence_for(Gen2MoveEffect.SLEEP).size(), 1)
+	Gen2ModHost.reset()
+	assert_eq(Gen2MoveEffect.sequence_for(Gen2MoveEffect.SLEEP), before)
+
+
+func test_two_mods_claiming_one_effect_is_refused() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_move_effect(MOD, NEW_EFFECT, [Gen2EffectCommands.END_MOVE])
+	assert_eq(
+		StringName(host.register_move_effect(
+			&"othermod", NEW_EFFECT, [Gen2EffectCommands.END_MOVE]
+		)["reason"]),
+		&"duplicate_move_effect"
+	)
+
+
+func test_a_subscriber_sees_published_events_and_cannot_write_through_them() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.subscribe(Gen2ModHost.CHANNEL_BATTLE, MOD, _watch).get("ok", false)))
+	var event: Dictionary = {"type": Gen2Battle.HIT, "damage": 12}
+	Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
+	assert_eq(_seen.size(), 1)
+	assert_eq(int(_seen[0]["damage"]), 12)
+	# The subscriber holds a copy, so writing to it reaches nothing.
+	(_seen[0] as Dictionary)["damage"] = 999
+	assert_eq(int(event["damage"]), 12)
+	# And the other channel is a different conversation.
+	Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, {"status": &"waiting"})
+	assert_eq(_seen.size(), 1)
+
+
+func test_unsubscribing_and_unknown_channels() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		StringName(host.subscribe(&"nowhere", MOD, _watch)["reason"]), &"unknown_channel"
+	)
+	assert_eq(
+		StringName(host.subscribe(
+			Gen2ModHost.CHANNEL_WORLD, MOD, Callable()
+		)["reason"]),
+		&"invalid_subscriber_handler"
+	)
+	host.subscribe(Gen2ModHost.CHANNEL_WORLD, MOD, _watch)
+	assert_eq(
+		StringName(host.subscribe(Gen2ModHost.CHANNEL_WORLD, MOD, _watch)["reason"]),
+		&"duplicate_subscriber"
+	)
+	host.unsubscribe(Gen2ModHost.CHANNEL_WORLD, MOD)
+	Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, {"status": &"waiting"})
+	assert_eq(_seen.size(), 0)
+
+
+func test_publishing_with_no_host_built_does_nothing() -> void:
+	# The publish call sits on the path every battle event takes, so a game with
+	# no mods must not build a host to publish to nobody.
+	Gen2ModHost.reset()
+	Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, {"type": Gen2Battle.HIT})
+	assert_eq(_seen.size(), 0)
+
+
+func test_two_mods_claiming_one_renderer_id_is_named_rather_than_silently_won() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		StringName(host.register_world_renderer(
+			Gen2ModHost.BUILT_IN_RENDERER, Gen2WorldRenderer
+		)["reason"]),
+		&"duplicate_renderer"
+	)
+	assert_eq(
+		StringName(host.register_battle_renderer(
+			Gen2ModHost.BUILT_IN_RENDERER, Gen2BattleRenderer
+		)["reason"]),
+		&"duplicate_renderer"
+	)
+
+
+func test_the_shipped_example_mod_registers_everything_it_documents() -> void:
+	# mods/examples/new_content/ is the reference a mod author copies, so it is
+	# run here rather than only read: a registration it gets wrong would be
+	# refused silently and the example would teach the refusal.
+	var manifest: Dictionary = Gen2ModManifest.read("res://mods/examples/new_content")
+	assert_true(bool(manifest.get("ok", false)), "example manifest reads")
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.load_mod(manifest["manifest"]).get("ok", false)))
+
+	var overlay: Gen2ContentOverlay = host.content_overlay()
+	assert_false(overlay.is_empty())
+	assert_eq(
+		overlay.defined_numbers(Gen2ContentOverlay.KIND_SPECIES),
+		[Gen2ContentOverlay.FIRST_MOD_NUMBER] as Array[int]
+	)
+	# Its move names an effect it registered itself, so the effect resolves to
+	# the list rather than falling back to an ordinary attack.
+	var move: Dictionary = overlay.resolve(
+		Gen2ContentOverlay.KIND_MOVE, Gen2ContentOverlay.FIRST_MOD_NUMBER, {}
+	)
+	assert_true(Gen2MoveEffect.is_written(int(move["effect"])))
+	assert_true(Gen2MoveEffect.sequence_for(int(move["effect"])).has(
+		Gen2EffectCommands.RECOIL
+	))
+	# And its patch reaches a cartridge row without replacing the rest of it.
+	var pikachu: Dictionary = overlay.resolve(
+		Gen2ContentOverlay.KIND_SPECIES, 25,
+		{"name": "PIKACHU", "stats": {"hp": 35, "speed": 90}}
+	)
+	assert_eq(int(pikachu["stats"]["speed"]), 110)
+	assert_eq(int(pikachu["stats"]["hp"]), 35)
+	assert_eq(String(pikachu["name"]), "PIKACHU")
+
+
+func test_every_refusal_reason_the_mod_layer_produces_has_player_wording() -> void:
+	# The launcher and the index dialog share one table now; a reason worded in
+	# neither used to show as a raw StringName through whichever screen met it.
+	for reason: StringName in [
+		&"not_a_zip", &"unsafe_archive_entry", &"unsupported_api_version",
+		&"unsupported_index_schema", &"already_installed", &"duplicate_renderer",
+		&"duplicate_content", &"reserved_effect_command", &"missing_entry_script",
+	]:
+		var text: String = Gen2ModRefusal.text({"reason": reason, "detail": "x/y.zip"})
+		assert_false(text.begins_with(String(reason)), "worded: %s" % reason)
+		assert_false(text.is_empty())
+	# An unworded reason still names something a search finds.
+	assert_string_contains(Gen2ModRefusal.text({"reason": &"brand_new"}), "brand_new")

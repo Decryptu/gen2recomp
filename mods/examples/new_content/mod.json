@@ -1,0 +1,8 @@
+{
+	"id": "new_content",
+	"name": "New Content Example",
+	"version": "1.0.0",
+	"api_version": 1,
+	"entry": "mod.gd",
+	"description": "Adds a species, a move and a move effect, rebalances a cartridge one, and watches the world and battle event channels. The reference for everything a mod can register that is not a renderer."
+}

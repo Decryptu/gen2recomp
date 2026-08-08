@@ -46,9 +46,12 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 A mod that fails to load is reported through `Gen2ModHost.failures()` and
 skipped. One broken mod does not stop the others and does not stop the game.
 
-`mods/examples/voxel_preview/` is a working renderer: copy it into
-`user://mods/` and press `V` in the overworld. It reads the same collision,
-block and palette data the 2D view reads and extrudes geometry from it.
+Two example mods are in `mods/examples/`, to copy into `user://mods/`:
+
+| Mod | Shows |
+|---|---|
+| `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it |
+| `new_content/` | A species, a move, a move effect, two rebalancing patches and both event channels |
 
 ## Installing
 
@@ -114,6 +117,95 @@ GitHub slug.
 A listed mod installs through the same path an imported `.zip` does, and its
 manifest id must match the one the feed advertised, so a listing grants a mod
 nothing that picking the same file by hand would not.
+
+## Adding content
+
+`mods/examples/new_content/` registers a species, a move, a move effect and two
+rebalancing patches, and watches both event channels. Copy it and read it beside
+this section.
+
+A content number is per kind and starts at `Gen2ContentOverlay.FIRST_MOD_NUMBER`,
+which is 256. Every cartridge number fits in a byte, so a number that does not is
+unambiguously not the cartridge's, and a mod's own numbers mean the same thing on
+Gold, Silver and Crystal. Four kinds are reachable: `KIND_SPECIES`, `KIND_MOVE`,
+`KIND_ITEM` and `KIND_TRAINER`. Types are not, because the matchup lookup keys on
+the type count and a twenty-ninth type would renumber every pair in the chart.
+
+```gdscript
+host.register_content(Gen2ContentOverlay.KIND_SPECIES, manifest.id, 256, {
+	"name": "VOLTLING",
+	"stats": {"speed": 115},
+	"learnset": [{"level": 1, "move": 33}, {"level": 36, "move": 85}],
+})
+```
+
+A definition is partial. Whatever it leaves out comes from the kind's defaults,
+which exist because readers index these rows directly: `palette.normal` and
+`front_tiles` are read without asking whether they are there, so a definition
+that omitted either would crash the reader rather than draw wrong.
+
+Everything a species carries is a field on the one row, so a learnset, an
+evolution and TM compatibility are part of the definition rather than three more
+registrations. The engine then reads them the way it reads Pikachu's, because
+every content read in the game goes through one place, `GameData._content()`.
+
+`patch_content()` changes a row the cartridge does have. Only the fields named
+change, and a Dictionary field merges, so patching one stat leaves the other five
+alone. A patch of a number this cartridge lacks changes nothing rather than
+inventing a row, which is what keeps a mod that patches Crystal's MYSTICALMAN
+from conjuring one on Gold.
+
+Two mods claiming one number is refused and named, rather than decided by load
+order. `Gen2ContentOverlay.owner_of()` says which mod won a number.
+
+What content does not get: a pic. The atlases are decoded from the cartridge and
+hold its own 251 slots, so a defined species draws nothing until a renderer draws
+it. `Gen2SramAdapter` cannot export a mod species to a real `.sav` either, since
+the cartridge stores a species in one byte; the project's own save is JSON and
+carries them fine.
+
+## Adding a move effect
+
+A move's effect byte is a number until something answers for it.
+`Gen2MoveEffect` holds the cartridge's lists and `Gen2EffectCommands` the steps
+one is built from; a registration is a list of those steps.
+
+```gdscript
+host.register_move_effect(manifest.id, 0xF0, [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.RECOIL,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+])
+```
+
+A list naming a step nobody wrote is refused at registration, where the mod's id
+is still in hand, rather than pushing an error in the middle of a turn.
+`register_effect_command()` adds a step of your own, as a Callable taking the
+`Gen2Turn`; it cannot take a name the engine already uses, so a registration can
+never quietly change what every move in the game does.
+
+A registered effect replaces the cartridge's list for that byte, which is how a
+mod rewrites Sleep rather than only adding to the table.
+`Gen2MoveEffect.RESERVED_EFFECTS` is the exception: the multi-hit, fixed-damage,
+Rollout and Selfdestruct bytes are read back off the turn by their own commands,
+so replacing one would leave that command answering for a list it is no longer
+in.
+
+## Watching what happens
+
+`subscribe(channel, id, handler)` on `Gen2ModHost.CHANNEL_WORLD` or
+`CHANNEL_BATTLE` calls `handler` with each event dictionary as the screen showing
+it reads it, so a subscriber sees what the player sees, in that order.
+
+Reading only. The handler is given a copy and nothing reads its return value:
+observation cannot make two mods fight over the same state, which is what makes
+this safe to hand out before any mutation hook exists. Events are published from
+the screens, so a headless tool or a test driving the engine directly fires none.
 
 ## Replacing the world renderer
 
@@ -309,8 +401,8 @@ silently winning.
 
 ## Not built yet
 
-Semver ranges and inter-mod dependencies, per-mod save data, hooks beyond the
-renderer and menu entries, and `.zip`/`.pck` packs through
-`ProjectSettings.load_resource_pack()`. Evaluate
+Semver ranges and inter-mod dependencies, per-mod save data, art for mod content,
+mutation hooks on the event channels, entries in the party submenu or the mart,
+and `.zip`/`.pck` packs through `ProjectSettings.load_resource_pack()`. Evaluate
 [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) before
 expanding the loader itself.

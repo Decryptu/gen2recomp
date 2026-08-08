@@ -279,10 +279,29 @@ const THAWING_MOVES: Array = [172, 221]
 const ENCORE_EXCLUDED_MOVES: Array = [119, 227]
 
 
+## Every step name this file answers to, read off its own constants so the list
+## cannot drift from the match below.
+static var _engine_commands: Dictionary = {}
+
+
+## Whether [param command] is one of the engine's own steps. What
+## [method Gen2MoveEffect.register_command] refuses a mod, so a registration can
+## never shadow a step every move in the game depends on.
+static func is_engine_command(command: StringName) -> bool:
+	if _engine_commands.is_empty():
+		var constants: Dictionary = Gen2EffectCommands.new().get_script().get_script_constant_map()
+		for value: Variant in constants.values():
+			if value is StringName:
+				_engine_commands[value] = true
+	return _engine_commands.has(command)
+
+
 ## Runs one command against [param turn].
 ##
 ## An unknown command is an error, not a no-op: a sequence naming a step nobody
 ## wrote would otherwise play out as a move that quietly does less than it says.
+## A mod's own step is reached through [Gen2MoveEffect]'s registry, after this
+## match has refused the name.
 static func run(command: StringName, turn: Gen2Turn) -> void:
 	match command:
 		USED_MOVE_TEXT:
@@ -374,7 +393,7 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 		_:
 			if STAT_COMMANDS.has(command):
 				_stat_change(command, turn)
-			else:
+			elif not Gen2MoveEffect.run_registered_command(command, turn):
 				push_error("No such effect command: %s" % command)
 
 
@@ -1083,7 +1102,6 @@ static func _disable(turn: Gen2Turn) -> void:
 
 	defender.disabled_slot = slot
 	defender.disable_turns = Gen2Substatus.roll_disable(turn.rng())
-	defender.substatus |= Gen2Substatus.DISABLED
 	turn.emit(Gen2Battle.DISABLE_INFLICTED, {
 		"target": turn.target, "slot": slot, "move": last_move,
 	})

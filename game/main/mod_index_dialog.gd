@@ -287,23 +287,5 @@ func _set_status(text: String, colour: Color) -> void:
 	_status.add_theme_color_override("font_color", colour)
 
 
-## Refusals a player can act on. Anything else shows the reason itself rather
-## than being flattened into one unhelpful line.
 func _reason_text(result: Dictionary) -> String:
-	var detail: String = String(result.get("detail", ""))
-	match StringName(result.get("reason", &"")):
-		&"empty_index_url":
-			return "Enter an index address first."
-		&"index_url_not_https":
-			return "An index must be an https address."
-		&"index_not_json":
-			return "That address did not return an index."
-		&"unsupported_index_schema":
-			return "That index uses format %s; this build reads %d." % [
-				detail, Gen2ModIndex.SCHEMA_VERSION,
-			]
-		&"unexpected_mod_id":
-			return "the download is a different mod (%s)" % detail
-		&"already_installed":
-			return "it is already installed"
-	return "%s %s" % [result.get("reason", "refused"), detail]
+	return Gen2ModRefusal.text(result)

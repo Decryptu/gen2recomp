@@ -349,6 +349,11 @@ const FRAME_BOTTOM_RIGHT: int = 5
 ## and are the boxes a name and a level sit in, one shape for the enemy's and one
 ## for the player's. The exp bar is 2bpp and is seven fill levels and two ends.
 const BATTLE_FONT_TILES: int = 32
+## Where `_LoadFontsBattleExtra` puts its first tile: `ld hl, vTiles2 tile $60`.
+## Its twenty-five tiles cover $60 to $78, so a code in that run addresses this
+## strip rather than the main font while it is loaded, which is what
+## [constant Gen2Text.FONT_BATTLE_EXTRA] names.
+const BATTLE_FONT_FIRST_CODE: int = 0x60
 const ENEMY_HUD_TILES: int = 4
 const PLAYER_HUD_TILES: int = 6
 const EXP_BAR_TILES: int = 9

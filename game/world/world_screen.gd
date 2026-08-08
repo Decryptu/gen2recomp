@@ -264,10 +264,7 @@ func _process(delta: float) -> void:
 		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
 		if not ticks.is_empty():
 			_update_time_of_day()
-			if _service_host == null and _battle_host == null and _pc_host == null \
-				and _start_menu_host == null and _party_host == null \
-				and _hall_of_fame_host == null \
-				and not _world.script_input_waiting():
+			if not _overlay_open() and not _world.script_input_waiting():
 				var phone_schedule: Dictionary = _world.advance_phone_schedule(
 					ticks.size(), _encounter_random
 				)
@@ -304,14 +301,21 @@ func _advance_forced_movement() -> void:
 		_after_player_move(forced)
 
 
+## Whether any embedded screen is up. Every overlay is named here and nowhere
+## else: the six callers below each need a different set of the other pauses, but
+## they all need this one, and adding an overlay to five of six lists by hand is
+## what the Cut and Hall of Fame work each paid for once.
+func _overlay_open() -> bool:
+	return _battle_host != null or _service_host != null or _pc_host != null \
+		or _start_menu_host != null or _party_host != null \
+		or _hall_of_fame_host != null
+
+
 ## Wandering objects keep to themselves while anything else owns the world. A
 ## script may be moving those same objects, a trainer approach paces its own
 ## object by call count, and an overlay hides the map entirely.
 func _objects_may_move() -> bool:
-	return _world != null \
-		and _battle_host == null and _service_host == null and _pc_host == null \
-		and _start_menu_host == null and _party_host == null \
-		and _hall_of_fame_host == null \
+	return _world != null and not _overlay_open() \
 		and not _field_move_text \
 		and _trainer_approach.is_empty() \
 		and not _world.script_busy() \
@@ -467,18 +471,14 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Whether the overworld itself is idle. The key path reaches the renderer only
 ## after the same overlays, pauses and hosts have each refused the event.
 func _renderer_input_free() -> bool:
-	return _world != null and _battle_host == null and _service_host == null \
-		and _pc_host == null and _start_menu_host == null and _party_host == null \
-		and _hall_of_fame_host == null and not _field_move_text \
+	return _world != null and not _overlay_open() and not _field_move_text \
 		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
 		and not _world.fishing_busy() and not _world.script_input_waiting()
 
 
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
-	if _world == null or _world.fishing_busy() or _service_host != null \
-		or _pc_host != null or _start_menu_host != null or _party_host != null \
-		or _hall_of_fame_host != null \
+	if _world == null or _overlay_open() or _world.fishing_busy() \
 		or _field_move_text or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
@@ -559,9 +559,7 @@ func _after_player_move(movement: Dictionary) -> bool:
 
 ## Public driver for the production NPC/object interaction path.
 func interact() -> bool:
-	if _world == null or _battle_host != null or _service_host != null \
-		or _pc_host != null or _start_menu_host != null or _party_host != null \
-		or _hall_of_fame_host != null \
+	if _world == null or _overlay_open() \
 		or _field_move_text or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
@@ -1381,9 +1379,7 @@ func _play_hall_of_fame_music() -> void:
 ## _open_pc_host()'s shape. The Enter/Tab key branch in
 ## _unhandled_key_input() is the normal path.
 func _open_start_menu() -> void:
-	if _start_menu_host != null or _party_host != null or _service_host != null \
-		or _pc_host != null or _battle_host != null or _world == null or _data == null \
-		or _hall_of_fame_host != null or _field_move_text \
+	if _world == null or _data == null or _overlay_open() or _field_move_text \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
 		or _world.phone_ring_active() or _world.fishing_busy():
 		return
@@ -1707,6 +1703,7 @@ func _show_script_results(results: Array) -> void:
 	var recovered: bool = false
 	var recovery_prompt: String = ""
 	for result: Dictionary in results:
+		Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, result)
 		if result.has("clock"):
 			clock_changed = true
 		var status: StringName = StringName(result.get("status", &""))

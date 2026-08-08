@@ -172,3 +172,58 @@ func test_control_codes_are_decode_only() -> void:
 func test_a_space_encodes_even_though_the_font_has_no_tile_for_it() -> void:
 	assert_eq(Gen2Text.encode(" "), PackedByteArray([Gen2Text.SPACE]))
 	assert_true(Gen2Text.SPACE < Gen2Text.FIRST_PRINTABLE, "so it draws nothing")
+
+
+## constants/charmap.asm maps $60 to $7f twice over, once from the main font and
+## again from font_battle_extra, and $6e three times. A byte means whichever
+## strip the hardware last loaded, so the codec has to be told which.
+
+func test_the_main_font_keeps_its_quotes_and_ellipsis() -> void:
+	assert_eq(Gen2Text.decode(PackedByteArray([0x72, 0x73, 0x74, 0x75]), 0, 10), "“”·…")
+
+
+func test_the_battle_extra_strip_gives_the_same_bytes_its_own_glyphs() -> void:
+	# halloffame.asm calls LoadFontsBattleExtra before printing a panel, which is
+	# what makes № and <ID> real tiles there.
+	assert_eq(
+		Gen2Text.decode(
+			PackedByteArray([0x73, 0x74]), 0, 10, Gen2Text.FONT_BATTLE_EXTRA
+		),
+		"<ID>№"
+	)
+	assert_eq(Gen2Text.character(0x6E, Gen2Text.FONT_BATTLE_EXTRA), "<LV>")
+	assert_eq(Gen2Text.character(0x72, Gen2Text.FONT_BATTLE_EXTRA), "『")
+
+
+func test_the_battle_extra_run_does_not_fall_back_to_the_main_font() -> void:
+	# $75 is an ellipsis in the main font; with the other strip loaded that tile
+	# is part of an HP bar, so it has no character rather than the main one's.
+	assert_eq(Gen2Text.character(0x75, Gen2Text.FONT_BATTLE_EXTRA), "<75>")
+
+
+func test_letters_and_frames_are_the_same_under_either_strip() -> void:
+	# _LoadFontsBattleExtra replaces $60 to $78 and nothing else.
+	for font: StringName in [Gen2Text.FONT_MAIN, Gen2Text.FONT_BATTLE_EXTRA]:
+		assert_eq(Gen2Text.decode(_encode("AB"), 0, 10, font), "AB", String(font))
+		assert_eq(Gen2Text.character(0x79, font), "┌", String(font))
+		assert_eq(Gen2Text.character(0xF6, font), "0", String(font))
+
+
+func test_encoding_follows_the_loaded_strip() -> void:
+	assert_eq(Gen2Text.encode("№", Gen2Text.FONT_BATTLE_EXTRA), PackedByteArray([0x74]))
+	# The main font has no such glyph, so it draws a question mark rather than a
+	# byte that means something else there.
+	assert_eq(Gen2Text.encode("№"), PackedByteArray([Gen2Text.UNKNOWN]))
+	# And an ellipsis is encodable only where a tile draws one.
+	assert_eq(Gen2Text.encode("…"), PackedByteArray([0x75]))
+	assert_eq(
+		Gen2Text.encode("…", Gen2Text.FONT_BATTLE_EXTRA), PackedByteArray([Gen2Text.UNKNOWN])
+	)
+
+
+func test_bracketed_markers_stay_decode_only_under_either_strip() -> void:
+	# <ID> and <LV> are names for tiles, not text someone types, the same way
+	# <PLAYER> is. A caller that wants one places the code.
+	assert_eq(
+		Gen2Text.encode("<ID>", Gen2Text.FONT_BATTLE_EXTRA).size(), 4, "no ligature for a marker"
+	)

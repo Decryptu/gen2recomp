@@ -118,3 +118,52 @@ func _has_ink(indices: PackedByteArray, box: Rect2i) -> bool:
 			if at < indices.size() and indices[at] != 0:
 				return true
 	return false
+
+
+## The panel's columns are DisplayHOFMon's own. They were one tile right of it
+## while plain words stood in for the glyphs the battle-extra strip carries, so
+## the positions are pinned rather than left to the next reader to notice.
+func test_the_panel_sits_on_the_source_columns() -> void:
+	assert_eq(Gen2HallOfFamePage.DEX_LABEL, Vector2i(1, 13), "hlcoord 1, 13")
+	assert_eq(Gen2HallOfFamePage.DEX_NUMBER, Vector2i(3, 13), "hlcoord 3, 13")
+	assert_eq(Gen2HallOfFamePage.SPECIES_NAME, Vector2i(7, 13), "hlcoord 7, 13")
+	assert_eq(Gen2HallOfFamePage.GENDER, Vector2i(18, 13), "hlcoord 18, 13")
+	assert_eq(Gen2HallOfFamePage.NICKNAME_SLASH, Vector2i(8, 14), "hlcoord 8, 14")
+	assert_eq(Gen2HallOfFamePage.LEVEL, Vector2i(1, 16), "hlcoord 1, 16")
+	assert_eq(Gen2HallOfFamePage.OT_LABEL, Vector2i(7, 16), "hlcoord 7, 16")
+	assert_eq(Gen2HallOfFamePage.OT_NUMBER, Vector2i(10, 16), "hlcoord 10, 16")
+	# And the glyphs it places are the charmap's, read under the strip
+	# halloffame.asm loads before printing any of this.
+	assert_eq(Gen2HallOfFamePage.FONT, Gen2Text.FONT_BATTLE_EXTRA)
+	assert_eq(
+		Gen2Text.character(Gen2HallOfFamePage.CODE_NUMERO, Gen2HallOfFamePage.FONT), "№"
+	)
+	assert_eq(Gen2Text.character(Gen2HallOfFamePage.CODE_ID, Gen2HallOfFamePage.FONT), "<ID>")
+	assert_eq(Gen2Text.character(Gen2HallOfFamePage.CODE_LEVEL, Gen2HallOfFamePage.FONT), "<LV>")
+	assert_eq(Gen2Text.character(Gen2HallOfFamePage.CODE_DOT), ".")
+	assert_eq(Gen2Text.character(Gen2HallOfFamePage.CODE_SLASH), "/")
+
+
+## The three glyphs stood in as words before, so the columns they occupy are
+## what proves they are drawn now: the dex label is two tiles, not three, and
+## column 6 is the blank the source leaves before the name.
+func test_the_dex_row_draws_two_label_tiles_and_leaves_column_six_blank() -> void:
+	var page_renderer: Gen2HallOfFamePage = Gen2HallOfFamePage.from_data(_data)
+	assert_not_null(page_renderer)
+	var pages: Array = Gen2HallOfFame.pages(_data, _save([1]))
+	var indices: PackedByteArray = page_renderer.draw(pages[0])
+	# The fixture fills each sheet with an index of its own, so a drawn pixel
+	# says which strip it came from: 1 is battle_font, 3 is the main font.
+	assert_eq(_index_at(indices, Vector2i(1, 13)), 1, "№ comes off the battle strip")
+	assert_eq(_index_at(indices, Vector2i(2, 13)), 3, "the dot is a main-font code")
+	assert_eq(_index_at(indices, Vector2i(6, 13)), 0, "the blank before the name")
+	assert_eq(_index_at(indices, Vector2i(7, 13)), 3, "the name starts at 7")
+	assert_eq(_index_at(indices, Vector2i(1, 16)), 1, "the level symbol")
+	assert_eq(_index_at(indices, Vector2i(7, 16)), 1, "<ID>")
+	assert_eq(_index_at(indices, Vector2i(8, 16)), 1, "№")
+
+
+## The palette index of a tile's top-left pixel.
+func _index_at(indices: PackedByteArray, tile: Vector2i) -> int:
+	var at: int = tile.y * TILE * Gen2Screen.WIDTH + tile.x * TILE
+	return indices[at] if at < indices.size() else -1
