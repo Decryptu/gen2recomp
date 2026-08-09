@@ -41,6 +41,9 @@ const ITEM_HM_SURF: int = 0xF5
 const ITEM_HM_STRENGTH: int = 0xF6
 const ITEM_HM_WHIRLPOOL: int = 0xF8
 const ITEM_HM_WATERFALL: int = 0xF9
+## TM08, the `add_tm ROCK_SMASH` row in the same file. Gold and Silver need it
+## to finish the Burned Tower; no Crystal leg does.
+const ITEM_TM_ROCK_SMASH: int = 0xC7
 ## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
 ## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
 ## four neighbours are wall, so (30,7) facing right is the only approach.
@@ -2041,7 +2044,7 @@ func _plain_badge_path(
 	# before the first tree, so this is the earliest the route can be honest
 	# about the move. `teach_tm_hm()` is the same transaction the pack's USE
 	# reaches, the way _olivine_cafe_hm04() teaches STRENGTH.
-	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_CUT)
+	var taught: Dictionary = _teach_tm_hm(world, save, ITEM_HM_CUT)
 	_mirror_party(world, save)
 	path.append({
 		"step": "ilex_forest_teach_cut",
@@ -2204,23 +2207,16 @@ func _plain_badge_path(
 	return {"ok": true}
 
 
-## Goldenrod to the Fog Badge. Two errands gate it: the SquirtBottle needs
-## Floria found on Route 36 and then talked to in the flower shop, and Morty is
-## absent until the Burned Tower's beasts are released.
-func _fog_badge_path(
+## Goldenrod City to Route 36, through the Route 35 gate and the cut tree that
+## is Route 35's only way past row 6. Crystal walks it twice, once to meet
+## Floria and once to reach Sudowoodo; Gold and Silver only ever walk it once.
+func _goldenrod_to_route_36(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
-	var leaving_gym: Dictionary = _warp_step(world, 11, 2)
-	if not bool(leaving_gym.get("ok", false)):
-		return {"ok": false, "path": path, "reason": "Goldenrod Gym exit warp failed"}
-	var _city_entry: Dictionary = _drain_story(
-		world, world.dispatch_map_entry(), save, random, data
-	)
-
 	var to_route_35: Dictionary = _gate_leg(
 		world, save, random, data, Vector2i(19, 1), 10, 2
 	)
@@ -2229,80 +2225,50 @@ func _fog_badge_path(
 			"ok": false, "path": path,
 			"reason": "Goldenrod to Route 35 failed: %s" % to_route_35.get("reason", ""),
 		}
-	var first_cut: Dictionary = _cut_at(
+	var tree: Dictionary = _cut_at(
 		world, Vector2i(17, 7), Gen2WorldSprite.FACING_UP, save, random, data
 	)
-	if not bool(first_cut.get("ok", false)):
+	if not bool(tree.get("ok", false)):
 		return {
 			"ok": false, "path": path,
-			"reason": "Route 35 cut tree failed: %s" % first_cut.get("reason", ""),
+			"reason": "Route 35 cut tree failed: %s" % tree.get("reason", ""),
 		}
-	var route36_leg: Dictionary = _walk_connection_resolving(
+	var leg: Dictionary = _walk_connection_resolving(
 		world, "north", 10, 3, save, random, data
 	)
-	var route36_entry: Dictionary = _drain_story(
+	var entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
 	path.append({
 		"step": "goldenrod_to_route_36",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"encounters": route36_leg.get("encounters", []),
-		"run": route36_entry,
+		"encounters": leg.get("encounters", []),
+		"run": entry,
 	})
-	if not bool(route36_leg.get("ok", false)):
+	if not bool(leg.get("ok", false)):
 		return {
 			"ok": false, "path": path,
-			"reason": "Route 35 to Route 36 failed: %s" % route36_leg.get("reason", ""),
+			"reason": "Route 35 to Route 36 failed: %s" % leg.get("reason", ""),
 		}
+	return {"ok": true}
 
-	# Floria stands at (33,12) once entering Goldenrod cleared
-	# EVENT_FLORIA_AT_SUDOWOODO; talking to her sets EVENT_MET_FLORIA and moves
-	# her to the flower shop.
-	var floria: Dictionary = _talk_to(
-		world, Vector2i(33, 13), Gen2WorldSprite.FACING_UP, save, random, data
-	)
-	path.append({
-		"step": "route_36_floria",
-		"map": _map_value(world),
-		"cell": _cell_value(world),
-		"run": floria.get("run", {}),
-	})
-	if not bool(floria.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 36 Floria failed: %s" % floria.get("reason", ""),
-		}
 
-	var back_to_35: Dictionary = _walk_connection_resolving(
-		world, "south", 10, 2, save, random, data
-	)
-	var _r35_entry: Dictionary = _drain_story(
-		world, world.dispatch_map_entry(), save, random, data
-	)
-	if not bool(back_to_35.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 36 back to Route 35 failed: %s" % back_to_35.get("reason", ""),
-		}
-	var south_cut: Dictionary = _cut_at(
-		world, Vector2i(17, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
-	)
-	if not bool(south_cut.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 35 southbound cut failed: %s" % south_cut.get("reason", ""),
-		}
-	var back_to_city: Dictionary = _gate_leg(
-		world, save, random, data, Vector2i(9, 33), 11, 2
-	)
-	if not bool(back_to_city.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 35 back to Goldenrod failed: %s" % back_to_city.get("reason", ""),
-		}
-
-	var shop: Dictionary = _warp_walk(world, Vector2i(29, 5), save, random, data)
+## The flower shop errand, entered from Goldenrod City and left back onto it.
+## The door is the one cell of it the two profiles disagree on, `(29,5)` in
+## pokecrystal and `(33,5)` in pokegold (`maps/GoldenrodCity.asm`). Floria is
+## only spoken to on Crystal, where `FlowerShopTeacherScript` reads the flag
+## that conversation sets.
+func _goldenrod_flower_shop(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var door: Vector2i = Vector2i(29, 5) if crystal else Vector2i(33, 5)
+	var shop: Dictionary = _warp_walk(world, door, save, random, data)
 	if not bool(shop.get("ok", false)):
 		return {
 			"ok": false, "path": path,
@@ -2311,14 +2277,16 @@ func _fog_badge_path(
 	var _shop_entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
-	var shop_floria: Dictionary = _talk_to(
-		world, Vector2i(5, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
-	)
-	if not bool(shop_floria.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "flower shop Floria failed: %s" % shop_floria.get("reason", ""),
-		}
+	var shop_floria: Dictionary = {}
+	if crystal:
+		shop_floria = _talk_to(
+			world, Vector2i(5, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
+		)
+		if not bool(shop_floria.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "flower shop Floria failed: %s" % shop_floria.get("reason", ""),
+			}
 	var bottle: Dictionary = _talk_to(
 		world, Vector2i(2, 5), Gen2WorldSprite.FACING_UP, save, random, data
 	)
@@ -2335,40 +2303,100 @@ func _fog_badge_path(
 			"ok": false, "path": path,
 			"reason": "SquirtBottle handoff failed: %s" % bottle.get("reason", ""),
 		}
-
 	var leaving_shop: Dictionary = _warp_step(world, 11, 2)
 	if not bool(leaving_shop.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "flower shop exit warp failed"}
 	var _city_again: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
-	var to_35_again: Dictionary = _gate_leg(
-		world, save, random, data, Vector2i(19, 1), 10, 2
-	)
-	if not bool(to_35_again.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Goldenrod to Route 35 again failed: %s" % to_35_again.get("reason", ""),
-		}
-	var second_cut: Dictionary = _cut_at(
-		world, Vector2i(17, 7), Gen2WorldSprite.FACING_UP, save, random, data
-	)
-	if not bool(second_cut.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 35 cut tree again failed: %s" % second_cut.get("reason", ""),
-		}
-	var route36_again: Dictionary = _walk_connection_resolving(
-		world, "north", 10, 3, save, random, data
-	)
-	var _r36_again: Dictionary = _drain_story(
+	return {"ok": true}
+
+
+## Goldenrod to the Fog Badge. Two errands gate it: the SquirtBottle, whose
+## shape is the leg's one profile split, and Morty, who is absent until the
+## Burned Tower's beasts are released.
+##
+## Crystal spends the bottle on a round trip. `Route36FloriaScript` has to be
+## met on Route 36 first (EVENT_MET_FLORIA), then talked to again in the shop
+## (EVENT_TALKED_TO_FLORIA_AT_FLOWER_SHOP), and only then does
+## `FlowerShopTeacherScript` reach its `verbosegiveitem SQUIRTBOTTLE`. Gold and
+## Silver ship no Floria on Route 36 at all (`maps/Route36.asm`) and their
+## teacher is `checkflag ENGINE_PLAINBADGE` and nothing else
+## (`maps/GoldenrodFlowerShop.asm`), so the badge the walk already holds is the
+## whole gate and the trip north before the shop buys nothing. The shop's own
+## Floria wanders there and gates nothing either.
+func _fog_badge_path(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var leaving_gym: Dictionary = _warp_step(world, 11, 2)
+	if not bool(leaving_gym.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Goldenrod Gym exit warp failed"}
+	var _city_entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
-	if not bool(route36_again.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Route 35 to Route 36 again failed: %s" % route36_again.get("reason", ""),
-		}
+
+	if crystal:
+		var north: Dictionary = _goldenrod_to_route_36(world, save, random, data, path)
+		if not bool(north.get("ok", false)):
+			return north
+
+		# Floria stands at (33,12) once entering Goldenrod cleared
+		# EVENT_FLORIA_AT_SUDOWOODO; talking to her sets EVENT_MET_FLORIA and
+		# moves her to the flower shop.
+		var floria: Dictionary = _talk_to(
+			world, Vector2i(33, 13), Gen2WorldSprite.FACING_UP, save, random, data
+		)
+		path.append({
+			"step": "route_36_floria",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": floria.get("run", {}),
+		})
+		if not bool(floria.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 36 Floria failed: %s" % floria.get("reason", ""),
+			}
+
+		var back_to_35: Dictionary = _walk_connection_resolving(
+			world, "south", 10, 2, save, random, data
+		)
+		var _r35_entry: Dictionary = _drain_story(
+			world, world.dispatch_map_entry(), save, random, data
+		)
+		if not bool(back_to_35.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 36 back to Route 35 failed: %s" % back_to_35.get("reason", ""),
+			}
+		var south_cut: Dictionary = _cut_at(
+			world, Vector2i(17, 5), Gen2WorldSprite.FACING_DOWN, save, random, data
+		)
+		if not bool(south_cut.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 35 southbound cut failed: %s" % south_cut.get("reason", ""),
+			}
+		var back_to_city: Dictionary = _gate_leg(
+			world, save, random, data, Vector2i(9, 33), 11, 2
+		)
+		if not bool(back_to_city.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 35 back to Goldenrod failed: %s" % back_to_city.get("reason", ""),
+			}
+
+	var errand: Dictionary = _goldenrod_flower_shop(world, save, random, data, path)
+	if not bool(errand.get("ok", false)):
+		return errand
+	var to_sudowoodo: Dictionary = _goldenrod_to_route_36(world, save, random, data, path)
+	if not bool(to_sudowoodo.get("ok", false)):
+		return to_sudowoodo
 
 	# SudowoodoScript answers checkitem SQUIRTBOTTLE from a facing interaction,
 	# not from the pack, and the wild battle it starts is what clears the tree
@@ -2387,6 +2415,36 @@ func _fog_badge_path(
 			"ok": false, "path": path,
 			"reason": "Sudowoodo failed: %s" % sudowoodo.get("reason", ""),
 		}
+
+	if not crystal:
+		# `Route36RockSmashGuyScript` stands on (44,9) in both pins and hands
+		# TM08 over once EVENT_FOUGHT_SUDOWOODO is set, which the step above just
+		# did. Only Gold and Silver come back for it, because only their Burned
+		# Tower has a rock in the way; the Crystal route never needs the move and
+		# is left as it was.
+		var rock_smash_guy: Dictionary = _talk_to(
+			world, Vector2i(44, 10), Gen2WorldSprite.FACING_UP, save, random, data
+		)
+		if not bool(rock_smash_guy.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Route 36 Rock Smash guy failed: %s" % rock_smash_guy.get("reason", ""),
+			}
+		var rock_smash_taught: Dictionary = _teach_tm_hm(world, save, ITEM_TM_ROCK_SMASH)
+		_mirror_party(world, save)
+		path.append({
+			"step": "route_36_teach_rock_smash",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": rock_smash_guy.get("run", {}),
+			"items": _named_items(data, world.state.items()),
+			"party": _party_moves(save),
+		})
+		if not bool(rock_smash_taught.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "TM08 could not be taught: %s" % rock_smash_taught.get("reason", ""),
+			}
 
 	for leg: Dictionary in [
 		{"step": "route_36_to_route_37", "group": 10, "number": 4},
@@ -2419,40 +2477,81 @@ func _fog_badge_path(
 			"ok": false, "path": path,
 			"reason": "Burned Tower door unreachable: %s" % tower.get("reason", ""),
 		}
-	var eusine: Dictionary = _drain_story(world, world.dispatch_map_entry(), save, random, data)
+	# Crystal's entry is Eusine's; Gold and Silver put the rival battle itself on
+	# entry, as `BurnedTower1FRivalBattleScene`'s `sdefer`.
+	var entry_run: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
 	path.append({
-		"step": "burned_tower_meet_eusine",
+		"step": "burned_tower_entry",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"run": eusine,
+		"run": entry_run,
 	})
-	if not bool(eusine.get("terminal", false)):
+	if not bool(entry_run.get("terminal", false)):
 		return {"ok": false, "path": path, "reason": "Burned Tower entry did not finish"}
 
-	# The rival scene ends by opening the hole under the player and taking it
-	# with warpcheck, so the map after this step is the basement.
-	var rival: Dictionary = _walk_cell_resolving(world, Vector2i(11, 9), save, random, data)
-	var fell: bool = world.current_map != null \
-		and world.current_map.group == 3 and world.current_map.number == 14
-	path.append({
-		"step": "burned_tower_rival_battle",
-		"map": _map_value(world),
-		"cell": _cell_value(world),
-		"encounters": rival.get("encounters", []),
-		"fell_through_the_hole": fell,
-	})
-	if not fell:
-		return {
-			"ok": false, "path": path,
-			"reason": "Burned Tower rival scene did not drop the player: %s" % rival.get(
-				"reason", ""
-			),
-		}
+	if crystal:
+		# The rival scene ends by opening the hole under the player and taking it
+		# with warpcheck, so the map after this step is the basement.
+		var rival: Dictionary = _walk_cell_resolving(world, Vector2i(11, 9), save, random, data)
+		var fell: bool = world.current_map != null \
+			and world.current_map.group == 3 and world.current_map.number == 14
+		path.append({
+			"step": "burned_tower_rival_battle",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": rival.get("encounters", []),
+			"fell_through_the_hole": fell,
+		})
+		if not fell:
+			return {
+				"ok": false, "path": path,
+				"reason": "Burned Tower rival scene did not drop the player: %s" % rival.get(
+					"reason", ""
+				),
+			}
+	else:
+		# Gold and Silver open no hole under the player. Their 1F is a dungeon
+		# in its own right: the twelve pits pokecrystal keeps and comments as
+		# inaccessible leftovers are real here, and the rock on (4,3) is the
+		# single cell joining the door to the rest of the floor. Smashing it is
+		# what opens the way, which is why Rock Smash is load bearing on these
+		# two profiles and on neither Crystal leg.
+		var rock: Dictionary = _rock_smash_at(
+			world, Vector2i(4, 4), Gen2WorldSprite.FACING_UP, save, random, data
+		)
+		path.append({
+			"step": "burned_tower_smash_rock",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounter": rock.get("encounter", {}),
+		})
+		if not bool(rock.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Burned Tower rock failed: %s" % rock.get("reason", ""),
+			}
+		# Pit 3 on (10,7) is the only one that lands in the basement region the
+		# beasts are in.
+		var hole: Dictionary = _warp_walk(world, Vector2i(10, 7), save, random, data)
+		path.append({
+			"step": "burned_tower_hole_to_basement",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": hole.get("encounters", []),
+		})
+		if not bool(hole.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Burned Tower hole unreachable: %s" % hole.get("reason", ""),
+			}
 	var basement_entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
 
-	var beasts: Dictionary = _walk_cell_resolving(world, Vector2i(10, 6), save, random, data)
+	var beast_cell: Vector2i = Vector2i(10, 6) if crystal else Vector2i(9, 5)
+	var beasts: Dictionary = _walk_cell_resolving(world, beast_cell, save, random, data)
 	path.append({
 		"step": "burned_tower_release_the_beasts",
 		"map": _map_value(world),
@@ -2468,27 +2567,34 @@ func _fog_badge_path(
 			"reason": "beast release failed: %s" % beasts.get("reason", ""),
 		}
 
-	# ReleaseTheBeasts appears Eusine at (10,12), which is the single cell of
-	# the corridor south, so the way out is through him: his script has him
-	# leave once the player has talked to him.
-	var eusine_basement: Dictionary = _talk_to(
-		world, Vector2i(10, 11), Gen2WorldSprite.FACING_DOWN, save, random, data
-	)
-	path.append({
-		"step": "burned_tower_eusine_leaves",
-		"map": _map_value(world),
-		"cell": _cell_value(world),
-		"run": eusine_basement.get("run", {}),
-	})
-	if not bool(eusine_basement.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "basement Eusine failed: %s" % eusine_basement.get("reason", ""),
-		}
+	if crystal:
+		# ReleaseTheBeasts appears Eusine at (10,12), which is the single cell of
+		# the corridor south, so the way out is through him: his script has him
+		# leave once the player has talked to him. Gold and Silver ship no Eusine
+		# anywhere in the tower.
+		var eusine_basement: Dictionary = _talk_to(
+			world, Vector2i(10, 11), Gen2WorldSprite.FACING_DOWN, save, random, data
+		)
+		path.append({
+			"step": "burned_tower_eusine_leaves",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": eusine_basement.get("run", {}),
+		})
+		if not bool(eusine_basement.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "basement Eusine failed: %s" % eusine_basement.get("reason", ""),
+			}
 
-	# ReleaseTheBeasts changeblocks the ladder in at walk-cell (6,14), which is
-	# the block holding (7,15); the hole the player fell through is not a way
-	# back up.
+	# (7,15) is the only cell on either profile's basement that `try_warp()` will
+	# fire on, since `CheckWarpCollision` gates a warp on its own tile code and
+	# every other warp_event down here sits on plain floor or on a ledge. Crystal
+	# reaches it because `BurnedTowerB1FLadderCallback` changeblocks the ladder in
+	# at walk-cell (6,14), the block holding (7,15), once the beasts are out. Gold
+	# and Silver ship no such callback and no hole under the player: the way out
+	# of the beasts' region is the ledge run south from (10,8), which the walk's
+	# own hop handling takes on its way to the same ladder.
 	var out_of_basement: Dictionary = _warp_walk(world, Vector2i(7, 15), save, random, data)
 	if not bool(out_of_basement.get("ok", false)):
 		return {
@@ -2622,7 +2728,7 @@ func _mineral_badge_path(
 
 	# Taught here, two legs before Route 40's south edge asks for it. The Ilex
 	# Forest Psyduck is the only party member CanLearnTMHMMove accepts.
-	var surf_taught: Dictionary = _teach_hm(world, save, ITEM_HM_SURF)
+	var surf_taught: Dictionary = _teach_tm_hm(world, save, ITEM_HM_SURF)
 	_mirror_party(world, save)
 	path.append({
 		"step": "dance_theater_teach_surf",
@@ -2797,6 +2903,7 @@ func _glacier_badge_path(
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
 	var mahogany_mart: Vector2i = _map_id(data, &"MAHOGANY_MART_1F")
 	var rocket_b2f: Vector2i = _map_id(data, &"TEAM_ROCKET_BASE_B2F")
 	var rocket_b3f: Vector2i = _map_id(data, &"TEAM_ROCKET_BASE_B3F")
@@ -3111,9 +3218,12 @@ func _glacier_badge_path(
 	# Both password grunts stand on the half of B3F the heal-room ladder reaches,
 	# and their after-battle scripts are what set EVENT_LEARNED_SLOWPOKETAIL and
 	# EVENT_LEARNED_RATICATE_TAIL, which the door to Giovanni's office checks.
+	# The Raticate-tail grunt stands one cell further south in pokegold, so the
+	# cell it is faced from moves with it; the Slowpoke-tail one does not move.
+	var raticate_tail_from: Vector2i = Vector2i(5, 15) if crystal else Vector2i(5, 16)
 	for grunt: Dictionary in [
 		{"name": "slowpoketail", "cell": Vector2i(21, 8), "facing": Gen2WorldSprite.FACING_UP},
-		{"name": "raticate_tail", "cell": Vector2i(5, 15), "facing": Gen2WorldSprite.FACING_UP},
+		{"name": "raticate_tail", "cell": raticate_tail_from, "facing": Gen2WorldSprite.FACING_UP},
 	]:
 		var fought: Dictionary = _talk_to(
 			world, grunt["cell"], int(grunt["facing"]), save, random, data
@@ -3307,7 +3417,7 @@ func _glacier_badge_path(
 	# the same reason Surf is taught in the Dance Theater: Dragon's Den B1F's
 	# whirlpool is several legs away, and the only party member
 	# CanLearnTMHMMove accepts for WHIRLPOOL is the Ilex Forest Psyduck.
-	var whirlpool_taught: Dictionary = _teach_hm(world, save, ITEM_HM_WHIRLPOOL)
+	var whirlpool_taught: Dictionary = _teach_tm_hm(world, save, ITEM_HM_WHIRLPOOL)
 	_mirror_party(world, save)
 	path.append({
 		"step": "rocket_base_b2f_teach_whirlpool",
@@ -4342,7 +4452,7 @@ func _blackthorn_departure(
 	)
 	if not bool(dratini.get("ok", false)):
 		return dratini
-	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_WATERFALL)
+	var taught: Dictionary = _teach_tm_hm(world, save, ITEM_HM_WATERFALL)
 	_mirror_party(world, save)
 	path.append({
 		"step": "dragons_den_teach_waterfall",
@@ -8185,7 +8295,7 @@ func _olivine_cafe_hm04(
 	var sailor: Dictionary = _talk_to(
 		world, Vector2i(4, 4), Gen2WorldSprite.FACING_UP, save, random, data
 	)
-	var taught: Dictionary = _teach_hm(world, save, ITEM_HM_STRENGTH)
+	var taught: Dictionary = _teach_tm_hm(world, save, ITEM_HM_STRENGTH)
 	_mirror_party(world, save)
 	path.append({
 		"step": "olivine_cafe_hm04_strength",
@@ -8561,11 +8671,11 @@ func _catch_field_move_mon(
 	return {"ok": true}
 
 
-## TeachTMHM against the first party member the HM will take, which is what
+## TeachTMHM against the first party member the machine will take, which is what
 ## ChooseMonToLearnTMHM leaves the player to pick. Compatibility, a known move
 ## and a full moveset are all real refusals, so the walk tries each slot in party
 ## order and reports the last reason when none of them can learn it.
-func _teach_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary:
+func _teach_tm_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary:
 	var reason: String = "no party member"
 	for index: int in save.party.size():
 		var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(world, save, item, index, -1, false)
@@ -8607,14 +8717,18 @@ func _cianwood_crossing(
 	returning: bool,
 ) -> Dictionary:
 	var label: String = "return" if returning else "outbound"
-	# Route 40 (12,13) and Cianwood (27,41) are the two shores this leg uses: each
-	# is a plain floor cell whose neighbour in `facing` is COLL_WATER, and neither
-	# carries one of the SMASHABLE_ROCK objects Route 40 puts on its beach.
+	# The two shores this leg uses are each a plain floor cell whose neighbour in
+	# `facing` is COLL_WATER and which carries none of the SMASHABLE_ROCK objects
+	# Route 40 puts on its beach. Cianwood's (27,41) is one on both profiles;
+	# Route 40's beach is not, because `maps/Route40.blk` differs between the
+	# pins and Crystal's (12,13) is open water on Gold and Silver.
+	var route_40_shore: Vector2i = Vector2i(12, 13) \
+		if Gen2WorldState.is_crystal_profile(data) else Vector2i(12, 11)
 	var legs: Array = [
 		{"step": "olivine_to_route_40", "direction": "west", "group": 22, "number": 1,
 			"water": false},
 		{"step": "route_40_to_route_41", "direction": "south", "group": 22, "number": 2,
-			"water": true, "surf": Vector2i(12, 13), "facing": Gen2WorldSprite.FACING_DOWN},
+			"water": true, "surf": route_40_shore, "facing": Gen2WorldSprite.FACING_DOWN},
 		{"step": "route_41_to_cianwood", "direction": "west", "group": 22, "number": 3,
 			"water": true, "ashore": Vector2i(27, 41)},
 	]
@@ -8623,7 +8737,7 @@ func _cianwood_crossing(
 			{"step": "cianwood_to_route_41", "direction": "east", "group": 22, "number": 2,
 				"water": true, "surf": Vector2i(27, 41), "facing": Gen2WorldSprite.FACING_RIGHT},
 			{"step": "route_41_to_route_40", "direction": "north", "group": 22, "number": 1,
-				"water": true, "ashore": Vector2i(12, 13)},
+				"water": true, "ashore": route_40_shore},
 			{"step": "route_40_to_olivine", "direction": "east", "group": 1, "number": 14,
 				"water": false},
 		]
@@ -8707,6 +8821,31 @@ func _gate_leg(
 	# Anything the walk to the door resolved on the way, which for a route with
 	# trainers on it is a battle the leg would otherwise leave no trace of.
 	return {"ok": true, "encounters": walked.get("encounters", [])}
+
+
+## Smashes the rock the given cell faces, the way _cut_at() cuts. Unlike a cut
+## tree the rock is an object, so `complete_rock_smash()` deletes it and rolls
+## `RockMonEncounter` in the same call; the walk reports whatever came out
+## rather than fighting it.
+func _rock_smash_at(
+	world: Gen2WorldAPI,
+	approach: Vector2i,
+	facing: int,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+) -> Dictionary:
+	var walked: Dictionary = _walk_cell_resolving(world, approach, save, random, data)
+	if not bool(walked.get("ok", false)):
+		return walked
+	world.player_facing = facing
+	var request: Dictionary = world.rock_smash_request()
+	if not bool(request.get("ok", false)):
+		return {"ok": false, "reason": "rock smash refused: %s" % request.get("reason", "")}
+	var applied: Dictionary = world.complete_rock_smash(random)
+	if not bool(applied.get("ok", false)):
+		return {"ok": false, "reason": "rock smash failed: %s" % applied.get("reason", "")}
+	return {"ok": true, "encounter": applied.get("encounter", {})}
 
 
 ## Cuts the tree the given cell faces. Route 35's only way past row 6 is the
