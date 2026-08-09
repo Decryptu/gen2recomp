@@ -48,6 +48,11 @@ const PARALYSIS_SPEED_SHIFT: int = 2
 const PARALYSIS_CHANCE: int = 64
 const CHANCE_RANGE: int = 256
 
+## `HandleDefrost`'s own `cp 10 percent`, which is 25 and not 26: the `percent`
+## macro (macros/data.asm) is `* $ff / 100`, so ten of them truncate to 25 out of
+## 256 rather than to a tenth of the range.
+const THAW_CHANCE: int = 25
+
 ## Burn and poison cost an eighth of the maximum, never less than one.
 const RESIDUAL_DIVISOR: int = 8
 
@@ -92,6 +97,13 @@ static func roll_sleep(rng: RandomNumberGenerator) -> int:
 ## Whether a paralysed Pokémon cannot move this turn.
 static func rolls_full_paralysis(rng: RandomNumberGenerator) -> bool:
 	return rng.randi_range(0, CHANCE_RANGE - 1) < PARALYSIS_CHANCE
+
+
+## Whether a frozen Pokémon thaws on its own at the end of a turn, which is
+## `HandleDefrost`'s roll. Without it a freeze is permanent, the way Generation
+## 1's is; this is the whole of what makes Generation 2's temporary.
+static func rolls_thaw(rng: RandomNumberGenerator) -> bool:
+	return rng.randi_range(0, CHANCE_RANGE - 1) < THAW_CHANCE
 
 
 ## The Attack a burned Pokémon attacks with, and the Speed a paralysed one moves

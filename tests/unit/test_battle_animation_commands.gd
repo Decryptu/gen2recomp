@@ -28,13 +28,25 @@ func after_each() -> void:
 	RomCache.clear(_directory)
 
 
-func _battle(player_moves: Array, enemy_moves: Array = [Fixture.TACKLE]) -> Gen2Battle:
+## Charmander is the default target, and is Fire/Fire. A burn test has to name
+## another: `CheckMoveTypeMatchesTarget` refuses to burn a target that shares the
+## move's type, so Ember cannot burn a Charmander at all. Geodude is Rock/Ground
+## and can be burned, frozen or poisoned by anything here.
+func _battle(
+	player_moves: Array, enemy_moves: Array = [Fixture.TACKLE],
+	enemy_species: int = Fixture.CHARMANDER
+) -> Gen2Battle:
 	return Gen2Battle.create(
 		_data,
 		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, player_moves),
-		Gen2BattleMon.create(_data, Fixture.CHARMANDER, 50, enemy_moves),
+		Gen2BattleMon.create(_data, enemy_species, 50, enemy_moves),
 		_rng
 	)
+
+
+## The default battle with a target nothing here is immune to.
+func _burnable_battle(player_moves: Array) -> Gen2Battle:
+	return _battle(player_moves, [Fixture.TACKLE], Fixture.GEODUDE)
 
 
 func _run_move(battle: Gen2Battle, move_number: int, side: int = Gen2Battle.PLAYER) -> Array:
@@ -159,7 +171,7 @@ func test_a_secondary_status_does_not_play_the_move_a_second_time() -> void:
 	# `BattleCommand_BurnTarget` has no `AnimateCurrentMove`: the move that
 	# carried it played its own `moveanim` already. What follows it is the status
 	# animation, not the move again.
-	var events: Array = _run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
+	var events: Array = _run_move(_burnable_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
 	var animations: Array = _animations(events)
 	assert_eq(animations.size(), 2)
 	assert_eq(int(animations[0]["index"]), Fixture.EMBER_BURNS)
@@ -216,7 +228,9 @@ func test_each_secondary_status_plays_its_own_animation_on_the_target() -> void:
 		Fixture.BODY_SLAM_ALWAYS_PARALYZES: Gen2BattleAnimPlayer.ANIM_PAR,
 	}
 	for move: int in expected:
-		var events: Array = _run_move(_battle([move]), move)
+		# Geodude for all four: Rock/Ground shares a type with none of these
+		# moves and is not Poison-type, so no status here is refused outright.
+		var events: Array = _run_move(_burnable_battle([move]), move)
 		var animations: Array = _animations(events)
 		assert_eq(animations.size(), 2, "move %d plays its own and the status's" % move)
 		assert_eq(int(animations[1]["index"]), int(expected[move]))
@@ -232,7 +246,7 @@ func test_a_status_animation_plays_on_the_target_rather_than_the_user() -> void:
 	# The two `BattleCommand_SwitchTurn` calls `PlayOpponentBattleAnim` wraps
 	# `PlayBattleAnim` in: `hBattleTurn` is inverted for its length.
 	var player: Array = _animations(
-		_run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
+		_run_move(_burnable_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
 	)
 	assert_false(bool(player[0]["enemy_turn"]), "the move plays on the user")
 	assert_true(bool(player[1]["enemy_turn"]), "the status plays on the target")
@@ -247,7 +261,7 @@ func test_a_status_animation_plays_on_the_target_rather_than_the_user() -> void:
 
 func test_a_status_animation_runs_before_the_line_that_reports_it() -> void:
 	# `PlayOpponentBattleAnim`, `RefreshBattleHuds`, then `StdBattleTextbox`.
-	var events: Array = _run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
+	var events: Array = _run_move(_burnable_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
 	var animations: Array = _animations(events)
 	assert_eq(animations.size(), 2)
 	assert_lt(
@@ -320,7 +334,7 @@ func test_a_freeze_refused_by_the_sun_plays_nothing() -> void:
 
 
 func test_a_status_refused_by_one_already_there_plays_nothing() -> void:
-	var battle: Gen2Battle = _battle([Fixture.EMBER_BURNS])
+	var battle: Gen2Battle = _burnable_battle([Fixture.EMBER_BURNS])
 	battle.enemy.status = Gen2Status.PARALYSIS
 	assert_eq(_animations(_run_move(battle, Fixture.EMBER_BURNS)).size(), 1)
 
@@ -328,7 +342,7 @@ func test_a_status_refused_by_one_already_there_plays_nothing() -> void:
 func test_a_status_animation_carries_the_param_the_move_left() -> void:
 	# `PlayOpponentBattleAnim` never writes `wBattleAnimParam`, so the status
 	# animation reads whatever the move's own animation put there.
-	var battle: Gen2Battle = _battle([Fixture.EMBER_BURNS])
+	var battle: Gen2Battle = _burnable_battle([Fixture.EMBER_BURNS])
 	battle.battle_anim_param = 1
 	var animations: Array = _animations(_run_move(battle, Fixture.EMBER_BURNS))
 	assert_eq(int(animations[0]["param"]), 0, "moveanim clears it")

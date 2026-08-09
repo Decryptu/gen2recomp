@@ -1814,7 +1814,10 @@ func _describe(event: Dictionary) -> String:
 		Gen2Battle.WOKE_UP:
 			return "%s woke up!" % _battler_name(side)
 		Gen2Battle.THAWED:
-			return "%s thawed out!" % _battler_name(side)
+			# `WasDefrostedText` and `DefrostedOpponentText` are the same line
+			# under two names, differing only in whether it is the user or the
+			# target that is named.
+			return "%s was defrosted!" % _battler_name(side)
 		Gen2Battle.STATUS_INFLICTED:
 			return "%s %s" % [
 				_battler_name(int(event["target"])),

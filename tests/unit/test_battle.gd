@@ -450,7 +450,8 @@ func test_a_frozen_pokemon_does_not_move() -> void:
 	battle.player.status = Gen2Status.FREEZE
 	var events: Array = battle.take_turn(0, 0)
 	assert_eq(_first(events, Gen2Battle.CANNOT_MOVE)["reason"], &"freeze")
-	assert_eq(battle.player.status, Gen2Status.FREEZE, "and stays frozen")
+	# Whether it is still frozen afterwards is `HandleDefrost`'s roll and belongs
+	# to the thaw tests below, not to this one.
 
 
 func test_flame_wheel_is_used_through_a_freeze_and_thaws_it() -> void:
@@ -465,6 +466,155 @@ func test_flame_wheel_is_used_through_a_freeze_and_thaws_it() -> void:
 	assert_eq(_of_type(events, Gen2Battle.THAWED).size(), 1)
 	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 0)
 	assert_eq(battle.player.status, Gen2Status.NONE)
+
+
+func test_a_freeze_thaws_on_its_own_before_long() -> void:
+	# `HandleDefrost` is the whole of what makes a Generation 2 freeze temporary.
+	# Bounded rather than seeded: 25 in 256 a turn means holding out for 300 turns
+	# is a one-in-ten-trillion event, so this cannot go the other way by luck.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.player.status = Gen2Status.FREEZE
+	var thawed_on: int = -1
+	for turn: int in 300:
+		var events: Array = battle.take_turn(0, 0)
+		if not _of_type(events, Gen2Battle.THAWED).is_empty():
+			thawed_on = turn
+			break
+	assert_gt(thawed_on, -1, "a freeze does not last forever")
+	assert_eq(battle.player.status, Gen2Status.NONE)
+
+
+func test_a_pokemon_frozen_this_turn_does_not_thaw_on_the_same_turn() -> void:
+	# `wEnemyJustGotFrozen`, which `HandleDefrost` reads before it rolls. No seed
+	# is involved: the flag refuses before `BattleRandom` is reached at all.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.ICE_BEAM_ALWAYS_FREEZES]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.FREEZE, "the freeze landed")
+	assert_eq(_of_type(events, Gen2Battle.THAWED).size(), 0)
+
+
+func test_the_just_frozen_flag_only_holds_for_the_turn_that_set_it() -> void:
+	# Slot 1 is Growl, so the turns after the freeze do no damage: the target has
+	# to survive long enough to be given the chance to thaw.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.ICE_BEAM_ALWAYS_FREEZES, Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.FREEZE)
+	var thawed_on: int = -1
+	for turn: int in 300:
+		if not _of_type(battle.take_turn(1, 0), Gen2Battle.THAWED).is_empty():
+			thawed_on = turn
+			break
+	assert_gt(thawed_on, -1, "the flag is cleared at the top of every turn")
+
+
+func test_a_turn_with_nobody_frozen_rolls_nothing_for_thawing() -> void:
+	# `bit FRZ` comes before `BattleRandom`, so adding the defrost tick did not
+	# move any other roll in the game along.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.rng.seed = 99
+	battle.take_turn(0, 0)
+	var with_no_freeze: int = battle.rng.state
+
+	var again: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	again.rng.seed = 99
+	again.take_turn(0, 0)
+	assert_eq(int(again.rng.state), with_no_freeze)
+
+
+func test_a_fire_type_is_not_burned_by_a_fire_move() -> void:
+	# `CheckMoveTypeMatchesTarget`, which compares the move's type against the
+	# target's two. Charmander is Fire/Fire and Ember is Fire.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.EMBER_BURNS]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+
+
+func test_a_normal_move_burns_anything_it_hits() -> void:
+	# `.normal` returns non-zero without comparing anything, which is Tri
+	# Attack's case: a Normal-type move matches no target type at all.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.BODY_SLAM_ALWAYS_PARALYZES]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.PARALYSIS, "an Electric-type is still paralysed")
+
+
+func test_a_poison_type_is_not_poisoned_by_anything() -> void:
+	# `CheckIfTargetIsPoisonType` compares the target against POISON itself
+	# rather than against the move's type, so it refuses whatever the move is.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SLUDGE_BOMB_ALWAYS_POISONS]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.NONE, "Bulbasaur is Grass/Poison")
+
+
+func test_a_non_poison_type_is_still_poisoned() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.SLUDGE_BOMB_ALWAYS_POISONS]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.POISON)
+
+
+func test_a_poison_type_is_not_badly_poisoned_either() -> void:
+	# Toxic is `BattleCommand_Poison` with a different tail, so the same
+	# `CheckIfTargetIsPoisonType` refuses it.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TOXIC]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.GROWL])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+	assert_eq(battle.enemy.toxic_counter, 0)
+
+
+func test_a_burn_move_defrosts_a_frozen_target_instead_of_burning_it() -> void:
+	# `BattleCommand_BurnTarget`'s `jp nz, Defrost`: the target already carries a
+	# status, so the burn cannot land, and a freeze is cleared rather than kept.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.EMBER_BURNS]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.enemy.status = Gen2Status.FREEZE
+	var events: Array = battle.take_turn(0, 0)
+	var thawed: Dictionary = _first(events, Gen2Battle.THAWED)
+	assert_false(thawed.is_empty(), "the target was defrosted")
+	assert_eq(int(thawed["side"]), Gen2Battle.ENEMY, "the target, not the user")
+	assert_eq(battle.enemy.status, Gen2Status.NONE, "and not burned either")
+
+
+func test_a_burn_move_leaves_any_other_status_on_the_target() -> void:
+	# `Defrost`'s own `and 1 << FRZ / ret z`: only a freeze is cleared.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.EMBER_BURNS]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+	battle.enemy.status = Gen2Status.PARALYSIS
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.THAWED).size(), 0)
+	assert_eq(battle.enemy.status, Gen2Status.PARALYSIS)
 
 
 func test_a_burn_takes_an_eighth_at_the_end_of_the_turn() -> void:
