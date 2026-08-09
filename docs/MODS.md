@@ -401,7 +401,7 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 ```
 
 A start-menu entry without a handler still appears, marked unavailable, which is
-what Pokedex, Player and Options already do. A pocket's number has to be at or
+what Pokedex and Player already do. A pocket's number has to be at or
 above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one

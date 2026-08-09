@@ -59,7 +59,7 @@ func test_full_list_matches_the_source_item_order_when_every_gate_is_open() -> v
 	])
 
 
-func test_pack_pokemon_pokegear_save_and_exit_are_available_player_and_option_are_not() -> void:
+func test_every_entry_but_pokedex_and_player_is_available() -> void:
 	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(1, true, true)
 	var available_by_kind: Dictionary = {}
 	for entry: Dictionary in menu.items():
@@ -69,9 +69,9 @@ func test_pack_pokemon_pokegear_save_and_exit_are_available_player_and_option_ar
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_POKEGEAR])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_SAVE])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_EXIT])
+	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_OPTION])
 	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_POKEDEX])
 	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_PLAYER])
-	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_OPTION])
 
 
 func test_quit_never_appears_because_this_project_has_no_bug_contest() -> void:

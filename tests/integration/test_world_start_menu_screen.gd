@@ -13,6 +13,10 @@ func before_each() -> void:
 	_data = Fixture.build()
 	_write_pack_item()
 	_data = GameData.open_directory(Fixture.directory())
+	## The OPTION menu writes through Gen2OptionsStore, so the file and the
+	## shared instance both start clean.
+	Gen2OptionsStore.forget_cached()
+	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
 
 
 func after_each() -> void:
@@ -20,6 +24,8 @@ func after_each() -> void:
 		_world_screen.free()
 		_world_screen = null
 	RomCache.clear(Fixture.directory())
+	Gen2OptionsStore.forget_cached()
+	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
 
 
 ## Item 7 carries POTION's real ItemAttributes row, so the pack builds the
@@ -602,3 +608,58 @@ func test_an_item_with_no_field_menu_reports_oaks_refusal() -> void:
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_eq(String(host.get("_pack_result")), Gen2StartMenuScreen.OAK_TEXT)
 	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+
+## StartMenu_Option's farcall Option, as a mode on this screen.
+func _open_options_menu() -> Gen2StartMenuScreen:
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_OPTION)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.OPTIONS)
+	return host
+
+
+func test_option_is_available_and_opens_the_option_menu() -> void:
+	var host: Gen2StartMenuScreen = await _open_options_menu()
+	var menu: Gen2WorldOptionsMenu = host.get("_options_menu")
+	assert_eq(menu.size(), Gen2WorldOptionsMenu.NUM_OPTIONS)
+	assert_eq(menu.cursor, Gen2WorldOptionsMenu.OPT_TEXT_SPEED)
+
+
+func test_a_change_reaches_the_shared_options_and_the_file() -> void:
+	var host: Gen2StartMenuScreen = await _open_options_menu()
+	var menu: Gen2WorldOptionsMenu = host.get("_options_menu")
+	menu.cursor = Gen2WorldOptionsMenu.OPT_BATTLE_STYLE
+	assert_false(Gen2OptionsStore.current().battle_style_set)
+	host.handle_button(Gen2Button.RIGHT)
+	assert_true(Gen2OptionsStore.current().battle_style_set)
+
+	Gen2OptionsStore.forget_cached()
+	assert_true(Gen2OptionsStore.current().battle_style_set)
+
+
+## Every other handler reads left and right alone, so A on a value row does
+## nothing and the menu stays open.
+func test_a_on_a_value_row_changes_nothing_and_cancel_returns_to_the_list() -> void:
+	var host: Gen2StartMenuScreen = await _open_options_menu()
+	var menu: Gen2WorldOptionsMenu = host.get("_options_menu")
+	menu.cursor = Gen2WorldOptionsMenu.OPT_SOUND
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.OPTIONS)
+	assert_false(Gen2OptionsStore.current().stereo)
+
+	menu.cursor = Gen2WorldOptionsMenu.OPT_CANCEL
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
+
+
+## _Option.joypad_loop exits on PAD_B from any row.
+func test_b_returns_to_the_list_from_a_value_row() -> void:
+	var host: Gen2StartMenuScreen = await _open_options_menu()
+	(host.get("_options_menu") as Gen2WorldOptionsMenu).cursor = Gen2WorldOptionsMenu.OPT_FRAME
+	host.handle_button(Gen2Button.B)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
+	assert_not_null(_world_screen._start_menu_host)
