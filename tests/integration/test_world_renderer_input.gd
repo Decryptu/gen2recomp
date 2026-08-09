@@ -71,36 +71,39 @@ func _open_world_with_renderer() -> Node:
 	return _world_screen._renderer
 
 
+## Both codes, the way a real key event arrives: bindings match on the physical
+## one so a layout that does not spell WASD keeps the d-pad in those positions.
 func _press(keycode: Key) -> InputEventKey:
 	var key := InputEventKey.new()
 	key.keycode = keycode
+	key.physical_keycode = keycode
 	key.pressed = true
 	return key
 
 
-func test_a_renderer_receives_the_keys_the_screen_does_not_use() -> void:
+func test_a_renderer_receives_the_input_the_screen_does_not_use() -> void:
 	var renderer: Node = await _open_world_with_renderer()
 	assert_true(renderer.has_method(Gen2ModHost.RENDERER_INPUT_METHOD))
-	_world_screen._unhandled_key_input(_press(KEY_Q))
+	_world_screen._unhandled_input(_press(KEY_Q))
 	assert_eq(renderer.get("seen"), [KEY_Q])
 
 
-func test_a_renderer_never_receives_a_movement_or_interaction_key() -> void:
+func test_a_renderer_never_receives_a_movement_or_interaction_button() -> void:
 	var renderer: Node = await _open_world_with_renderer()
 	var before: Vector2i = _world_screen._world.player_cell
-	_world_screen._unhandled_key_input(_press(KEY_RIGHT))
-	_world_screen._unhandled_key_input(_press(KEY_SPACE))
+	_world_screen._unhandled_input(_press(KEY_RIGHT))
+	_world_screen._unhandled_input(_press(KEY_SPACE))
 	# The screen claimed both: the player moved, and neither key was offered on.
 	assert_ne(_world_screen._world.player_cell, before)
 	assert_eq(renderer.get("seen"), [])
 
 
-func test_an_open_overlay_keeps_leftover_keys_from_the_renderer() -> void:
+func test_an_open_overlay_keeps_leftover_input_from_the_renderer() -> void:
 	var renderer: Node = await _open_world_with_renderer()
 	_world_screen._open_start_menu()
 	await get_tree().process_frame
 	assert_not_null(_world_screen._start_menu_host)
-	_world_screen._unhandled_key_input(_press(KEY_Q))
+	_world_screen._unhandled_input(_press(KEY_Q))
 	assert_eq(renderer.get("seen"), [])
 
 
@@ -115,4 +118,4 @@ func test_a_renderer_without_the_hook_leaves_the_screen_unchanged() -> void:
 	await get_tree().process_frame
 	# The built-in renderer takes no input, so an unused key stays unused.
 	assert_false(_world_screen._renderer.has_method(Gen2ModHost.RENDERER_INPUT_METHOD))
-	_world_screen._unhandled_key_input(_press(KEY_Q))
+	_world_screen._unhandled_input(_press(KEY_Q))

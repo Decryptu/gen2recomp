@@ -52,6 +52,13 @@ const VIDEO_MODES: Array[StringName] = [&"windowed", &"fullscreen", &"borderless
 const GAME_SPEEDS: Array[StringName] = [&"normal", &"double", &"half"]
 const FPS_CHOICES: Array[int] = [30, 60, 120, 144, 0]
 const UI_THEMES: Array[StringName] = [&"light", &"dark"]
+## `auto` shows the on-screen controller while the player is using the
+## touchscreen and hides it the moment they press a key or a pad. `never` is for
+## a phone with a controller attached; [Gen2TapGesture] is the way back from it.
+const TOUCH_AUTO: StringName = &"auto"
+const TOUCH_ALWAYS: StringName = &"always"
+const TOUCH_NEVER: StringName = &"never"
+const TOUCH_MODES: Array[StringName] = [TOUCH_AUTO, TOUCH_ALWAYS, TOUCH_NEVER]
 
 # Cartridge block.
 var text_speed: int = 1
@@ -70,6 +77,12 @@ var video_mode: StringName = &"windowed"
 var max_fps: int = 60
 var game_speed: StringName = &"normal"
 var ui_theme: StringName = &"light"
+## Button bindings, in the shape [Gen2InputActions] stores. Held as data rather
+## than as an [InputMap] state so the file is the whole scheme and nothing has
+## to read the engine back to know what the player chose.
+var controls: Dictionary = Gen2InputActions.defaults()
+var touch_mode: StringName = TOUCH_AUTO
+var touch_layout: Gen2TouchLayout = Gen2TouchLayout.new()
 
 
 ## The cartridge block as the bytes the hardware kept, `DefaultOptions` order.
@@ -144,6 +157,9 @@ func to_dict() -> Dictionary:
 		"max_fps": max_fps,
 		"game_speed": String(game_speed),
 		"ui_theme": String(ui_theme),
+		"controls": Gen2InputActions.to_dict(controls),
+		"touch_mode": String(touch_mode),
+		"touch_layout": touch_layout.to_dict(),
 	}
 
 
@@ -173,6 +189,9 @@ static func parse(raw: Variant) -> Gen2Options:
 	options.ui_theme = _one_of(row.get("ui_theme", ""), UI_THEMES)
 	var fps: int = int(row.get("max_fps", 60))
 	options.max_fps = fps if FPS_CHOICES.has(fps) else 60
+	options.controls = Gen2InputActions.sanitize(row.get("controls"))
+	options.touch_mode = _one_of(row.get("touch_mode", ""), TOUCH_MODES)
+	options.touch_layout = Gen2TouchLayout.parse(row.get("touch_layout"))
 	return options
 
 

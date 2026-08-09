@@ -802,7 +802,7 @@ func switch_player() -> void:
 
 
 ## Opens LearnMove's full-slot branch, or keeps it open. Answered through
-## [method _unhandled_key_input], the same way capture ball selection is.
+## [method _handle_button], the same way capture ball selection is.
 ##
 ## Only the player side is ever queued
 ## ([method Gen2Battle._offer_moves_learned_at]), so there is one stage rather
@@ -868,31 +868,30 @@ func _forget_learner_name() -> String:
 
 ## The yes/no boxes and the list, in LearnMove's own order. An HM row prints
 ## MoveCantForgetHMText and leaves the list open, since .hmmove is `jr .loop`.
-func _answer_forget(keycode: int) -> void:
+func _answer_forget(button: int) -> void:
 	## AskForgetMoveText is three paragraphs, so the box still has pages to turn.
 	## A confirm reveals and pages first, the way [method advance] does, rather
 	## than answering a question the player has not finished reading.
-	if keycode in [KEY_SPACE, KEY_ENTER] and _box != null and _box.advance():
+	if button == Gen2Button.A and _box != null and _box.advance():
 		return
 	match _forget_stage:
 		&"ask", &"stop":
-			match keycode:
-				KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN:
-					_forget_confirm_cursor = 1 - _forget_confirm_cursor
-					_show_forget_confirm()
-				KEY_SPACE, KEY_ENTER:
-					_confirm_forget_stage()
+			if Gen2Button.is_direction(button):
+				_forget_confirm_cursor = 1 - _forget_confirm_cursor
+				_show_forget_confirm()
+			elif button == Gen2Button.A:
+				_confirm_forget_stage()
 		&"list":
-			match keycode:
-				KEY_UP:
+			match button:
+				Gen2Button.UP:
 					_forget_cursor = wrapi(_forget_cursor - 1, 0, _forget_moves.size())
 					_show_forget_list()
-				KEY_DOWN:
+				Gen2Button.DOWN:
 					_forget_cursor = wrapi(_forget_cursor + 1, 0, _forget_moves.size())
 					_show_forget_list()
-				KEY_SPACE, KEY_ENTER:
+				Gen2Button.A:
 					_confirm_forget_slot()
-				KEY_ESCAPE, KEY_B:
+				Gen2Button.B:
 					_show_forget_stage(&"stop")
 
 
@@ -1454,62 +1453,81 @@ func _read_hp() -> void:
 	)
 
 
-func _unhandled_key_input(event: InputEvent) -> void:
-	if not is_ready() or not event.is_pressed():
+## The cartridge's own controls first, then the development drivers that stand
+## in for a battle menu this screen does not have yet.
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_ready():
 		return
-
-	var key: InputEventKey = event as InputEventKey
-	if key == null:
+	var button: int = Gen2Button.pressed_in(event)
+	if button != Gen2Button.NONE:
+		if _handle_button(button):
+			accept_event()
 		return
-
-	if _forget_stage != &"":
-		_answer_forget(key.keycode)
+	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
-		return
+
+
+func _handle_button(button: int) -> bool:
+	if _forget_stage != &"":
+		_answer_forget(button)
+		return true
 
 	if _capture_selecting:
-		match key.keycode:
-			KEY_RIGHT:
+		match button:
+			Gen2Button.RIGHT:
 				select_capture_ball(_capture_ball_index + 1)
-			KEY_LEFT:
+			Gen2Button.LEFT:
 				select_capture_ball(_capture_ball_index - 1)
-			KEY_SPACE, KEY_ENTER:
+			Gen2Button.A:
 				throw_capture_ball()
-			KEY_ESCAPE:
+			Gen2Button.B:
 				_clear_capture_action()
 				show_message("Choose an action.")
 			_:
-				return
-		accept_event()
-		return
+				return false
+		return true
 
-	if key.keycode == KEY_B and _is_wild_battle():
+	## B opens ball selection and closes it again. The source reaches a ball
+	## through the PACK, which this screen has no menu for yet; until it does,
+	## the one button with nothing else to do here carries it.
+	if button == Gen2Button.B and _is_wild_battle():
 		begin_capture()
-		accept_event()
-		return
+		return true
+	if button == Gen2Button.A:
+		advance()
+		return true
+	return false
 
+
+## Development drivers for a screen with no battle menu: they take a turn, hurt
+## a side, switch, run and step through species. Debug builds only, and off the
+## keys a button is bound to, so nothing here competes with a real control.
+func _handle_debug_key(event: InputEvent) -> bool:
+	if not Gen2DebugKeys.enabled():
+		return false
+	var key: InputEventKey = event as InputEventKey
+	if key == null:
+		return false
 	match key.keycode:
-		KEY_RIGHT:
+		KEY_BRACKETRIGHT:
 			next_enemy()
-		KEY_LEFT:
+		KEY_BRACKETLEFT:
 			next_player()
-		KEY_D:
+		KEY_H:
 			hurt_enemy()
-		KEY_S:
+		KEY_G:
 			hurt_player()
-		KEY_A:
+		KEY_T:
 			take_turn()
-		KEY_W:
+		KEY_Y:
 			switch_player()
 		KEY_R:
 			run_from_battle()
-		KEY_SPACE, KEY_ENTER:
-			advance()
 		KEY_V:
 			cycle_battle_renderer()
 		_:
-			return
-	accept_event()
+			return false
+	return true
 
 
 func _wrap_species(number: int) -> int:

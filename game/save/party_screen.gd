@@ -41,7 +41,7 @@ var _player_label: Label = null
 var _status: Label = null
 var _storage_button: Button = null
 var _battle_button: Button = null
-## The keyboard cursor and per-mon submenu. Reachable only through handle_key(),
+## The cursor and per-mon submenu. Reachable only through handle_button(),
 ## which only the world screen calls, so the standalone save-screen view keeps
 ## its mouse-driven behavior unchanged.
 var _member_cursor: int = 0
@@ -140,25 +140,25 @@ func _party_size() -> int:
 	return _save.party.size() if _save != null else 0
 
 
-## Keyboard driver for the embedded overworld view, mirroring
-## Gen2StartMenuScreen.handle_key's key lists. Returns whether the key was used.
-func handle_key(keycode: int) -> bool:
+## Button driver for the embedded overworld view, mirroring
+## Gen2StartMenuScreen.handle_button. Returns whether the button was used.
+func handle_button(button: int) -> bool:
 	if _party_size() == 0:
-		if keycode in [KEY_ESCAPE, KEY_X, KEY_B]:
+		if button == Gen2Button.B:
 			close_embedded()
 			return true
 		return false
-	match keycode:
-		KEY_UP, KEY_W:
+	match button:
+		Gen2Button.UP:
 			_move_cursor(-1)
 			return true
-		KEY_DOWN, KEY_S:
+		Gen2Button.DOWN:
 			_move_cursor(1)
 			return true
-		KEY_SPACE, KEY_ENTER, KEY_Z:
+		Gen2Button.A:
 			_confirm()
 			return true
-		KEY_ESCAPE, KEY_X, KEY_B:
+		Gen2Button.B:
 			_cancel()
 			return true
 	return false

@@ -122,24 +122,15 @@ func cursor() -> int:
 	return _menu.cursor if _menu != null else 0
 
 
-func handle_key(keycode: int) -> bool:
-	match keycode:
-		KEY_UP, KEY_W:
-			_move(Vector2i.UP)
-			return true
-		KEY_DOWN, KEY_S:
-			_move(Vector2i.DOWN)
-			return true
-		KEY_LEFT, KEY_A:
-			_move(Vector2i.LEFT)
-			return true
-		KEY_RIGHT, KEY_D:
-			_move(Vector2i.RIGHT)
-			return true
-		KEY_SPACE, KEY_ENTER, KEY_Z:
+func handle_button(button: int) -> bool:
+	if Gen2Button.is_direction(button):
+		_move(Gen2Button.vector(button))
+		return true
+	match button:
+		Gen2Button.A:
 			_confirm()
 			return true
-		KEY_ESCAPE, KEY_X, KEY_B:
+		Gen2Button.B:
 			_cancel()
 			return true
 	return false

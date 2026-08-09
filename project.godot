@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameRuntime="*res://autoload/game_runtime.gd"
+InputRuntime="*res://autoload/input_runtime.gd"
 
 [display]
 

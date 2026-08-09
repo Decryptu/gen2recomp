@@ -75,11 +75,11 @@ func test_a_key_walks_the_pages_and_the_last_one_closes_the_overlay() -> void:
 	await get_tree().process_frame
 	assert_eq(_host().remaining(), 2)
 
-	_host().handle_key(KEY_Z)
+	_host().handle_button(Gen2Button.A)
 	assert_eq(StringName(_host().current_page()["kind"]), Gen2HallOfFame.PAGE_PLAYER)
 	assert_eq(_host().remaining(), 1)
 
-	_host().handle_key(KEY_Z)
+	_host().handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_null(_world_screen._hall_of_fame_host)
 	assert_true(_world_screen.move_player(Vector2i.DOWN))
@@ -91,7 +91,7 @@ func test_an_unrelated_key_does_not_advance_a_page() -> void:
 	_world_screen.open_hall_of_fame()
 	await get_tree().process_frame
 	var before: int = _host().remaining()
-	assert_false(_host().handle_key(KEY_ESCAPE))
+	assert_false(_host().handle_button(Gen2Button.B))
 	assert_eq(_host().remaining(), before)
 
 
@@ -104,8 +104,8 @@ func test_closing_the_overlay_writes_the_world_snapshot() -> void:
 	save.world = null
 	_world_screen.open_hall_of_fame()
 	await get_tree().process_frame
-	_host().handle_key(KEY_Z)
-	_host().handle_key(KEY_Z)
+	_host().handle_button(Gen2Button.A)
+	_host().handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_null(_world_screen._hall_of_fame_host)
 	assert_not_null(save.world)

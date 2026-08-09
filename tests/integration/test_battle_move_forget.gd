@@ -85,9 +85,9 @@ func _drain_box() -> void:
 		pass
 
 
-func _press(keycode: int) -> void:
+func _press(button: int) -> void:
 	await _drain_box()
-	_screen._answer_forget(keycode)
+	_screen._answer_forget(button)
 	await get_tree().process_frame
 
 
@@ -117,13 +117,13 @@ func test_choosing_a_slot_forgets_that_move_and_learns_the_offered_one() -> void
 	var battle: Gen2Battle = _screen.get("_battle")
 	await _advance_to_offer()
 
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "list")
 	assert_eq((_screen.get("_forget_moves") as Array).size(), 4)
 
 	## Slot 1 is Ember, an ordinary move.
-	await _press(KEY_DOWN)
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "", "the offer is answered")
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
 	assert_eq(battle.player.moves[1], BattleFixture.SLASH)
@@ -136,13 +136,13 @@ func test_an_hm_row_is_refused_and_the_list_stays_open() -> void:
 	await _open_with_full_moveset(MOVE_SURF)
 	var battle: Gen2Battle = _screen.get("_battle")
 	await _advance_to_offer()
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "list")
 
 	## Slot 2 is SURF.
-	await _press(KEY_DOWN)
-	await _press(KEY_DOWN)
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
 
 	assert_eq(_stage(), "list", "the list stays open")
 	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
@@ -161,11 +161,11 @@ func test_refusing_reaches_stop_learning_and_declines_the_move() -> void:
 	await _advance_to_offer()
 	var before: Array = battle.player.moves.duplicate()
 
-	await _press(KEY_RIGHT)
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.RIGHT)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "stop")
 
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "")
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
 	assert_eq(battle.player.moves, before, "nothing was forgotten")
@@ -177,12 +177,12 @@ func test_declining_to_stop_returns_to_the_ask() -> void:
 	var battle: Gen2Battle = _screen.get("_battle")
 	await _advance_to_offer()
 
-	await _press(KEY_RIGHT)
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.RIGHT)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "stop")
 
-	await _press(KEY_RIGHT)
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.RIGHT)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "ask")
 	assert_true(battle.must_learn_move(Gen2Battle.PLAYER))
 	assert_eq(_screen.get("_forget_confirm_cursor"), 0, "YesNoBox reopens on YES")
@@ -197,7 +197,7 @@ func test_a_confirm_pages_the_prompt_before_answering_it() -> void:
 
 	var box: Gen2TextBox = _screen.get("_box")
 	assert_true(box.advance(), "the prompt still has pages to turn")
-	_screen._answer_forget(KEY_SPACE)
+	_screen._answer_forget(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(_stage(), "ask", "the press turned a page rather than answering")
 
@@ -206,8 +206,8 @@ func test_a_confirm_pages_the_prompt_before_answering_it() -> void:
 func test_backing_out_of_the_list_reaches_stop_learning() -> void:
 	await _open_with_full_moveset()
 	await _advance_to_offer()
-	await _press(KEY_SPACE)
+	await _press(Gen2Button.A)
 	assert_eq(_stage(), "list")
 
-	await _press(KEY_B)
+	await _press(Gen2Button.B)
 	assert_eq(_stage(), "stop")

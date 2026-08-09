@@ -155,27 +155,18 @@ func open_pokegear(
 	return true
 
 
-## Parent screens route keys here so the service overlay owns input while open.
-func handle_key(keycode: int) -> bool:
+## Parent screens route buttons here so the service overlay owns input while open.
+func handle_button(button: int) -> bool:
 	if not is_active():
 		return false
-	match keycode:
-		KEY_UP, KEY_W:
-			_move_direction(Vector2i.UP)
-			return true
-		KEY_DOWN, KEY_S:
-			_move_direction(Vector2i.DOWN)
-			return true
-		KEY_LEFT, KEY_A:
-			_move_direction(Vector2i.LEFT)
-			return true
-		KEY_RIGHT, KEY_D:
-			_move_direction(Vector2i.RIGHT)
-			return true
-		KEY_SPACE, KEY_ENTER, KEY_Z:
+	if Gen2Button.is_direction(button):
+		_move_direction(Gen2Button.vector(button))
+		return true
+	match button:
+		Gen2Button.A:
 			_confirm()
 			return true
-		KEY_ESCAPE, KEY_X, KEY_B:
+		Gen2Button.B:
 			_cancel()
 			return true
 	return false

@@ -70,9 +70,9 @@ func test_exit_closes_the_menu_and_restores_movement() -> void:
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	## EXIT is the source's guaranteed last entry.
 	while host.cursor() < host.get("_menu").size() - 1:
-		host.handle_key(KEY_DOWN)
+		host.handle_button(Gen2Button.DOWN)
 	assert_eq(host.get("_menu").selected_kind(), Gen2WorldStartMenu.ITEM_EXIT)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_null(_world_screen._start_menu_host)
 	assert_true(_world_screen._objects_may_move())
@@ -83,7 +83,7 @@ func test_cancel_closes_the_menu_the_same_as_exit() -> void:
 	_world_screen._open_start_menu()
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
-	host.handle_key(KEY_ESCAPE)
+	host.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_null(_world_screen._start_menu_host)
 	assert_true(_world_screen._objects_may_move())
@@ -97,7 +97,7 @@ func test_pokemon_opens_the_embedded_party_screen_and_returns() -> void:
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	assert_true(_kinds(host).has(Gen2WorldStartMenu.ITEM_POKEMON))
 	_select(host, Gen2WorldStartMenu.ITEM_POKEMON)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_null(_world_screen._start_menu_host)
 	var party: Gen2PartyScreen = _world_screen._party_host
@@ -115,7 +115,7 @@ func test_pack_lists_a_granted_item() -> void:
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_PACK)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 	var items_pocket: Dictionary = host.get("_pack_pockets")[0]
@@ -125,7 +125,7 @@ func test_pack_lists_a_granted_item() -> void:
 	assert_eq(items[0]["item"], 7)
 	assert_eq(items[0]["quantity"], 1)
 
-	host.handle_key(KEY_ESCAPE)
+	host.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
@@ -183,7 +183,7 @@ func _open_tmhm_pack() -> Gen2StartMenuScreen:
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_PACK)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	var pockets: Array = host.get("_pack_pockets")
 	for index: int in pockets.size():
@@ -203,10 +203,10 @@ func test_tmhm_use_asks_before_teaching_and_a_yes_teaches_the_move() -> void:
 	var save: Gen2SaveData = _world_screen._injected_save
 	assert_false(save.party[0].moves.has(HM_MOVE))
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TEACH)
@@ -216,11 +216,11 @@ func test_tmhm_use_asks_before_teaching_and_a_yes_teaches_the_move() -> void:
 	)
 
 	## Yes is the prompt's default cursor position, matching YesNoBox.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_true(bool(host.get("_pack_result_ok")), String(host.get("_pack_result")))
@@ -236,14 +236,14 @@ func test_tmhm_use_declined_teaches_nothing() -> void:
 	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
 	var save: Gen2SaveData = _world_screen._injected_save
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TEACH)
 
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 	assert_false(save.party[0].moves.has(HM_MOVE))
@@ -257,13 +257,13 @@ func test_tmhm_use_reports_an_incompatible_species() -> void:
 	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
 	var save: Gen2SaveData = _world_screen._injected_save
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
@@ -288,13 +288,13 @@ func _fill_moveset(with_hm: bool = true) -> Gen2SaveMon:
 ## list and then LearnMove.
 func _reach_forget_ask() -> Gen2StartMenuScreen:
 	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	return host
 
@@ -313,15 +313,15 @@ func test_a_full_moveset_opens_forget_move_and_a_choice_replaces_that_slot() -> 
 	)
 
 	## Yes is YesNoBox's default, which opens the list.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
 	assert_eq((host.get("_forget_moves") as Array).size(), 4)
 
 	## Slot 2, past the HM, is an ordinary move.
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_true(bool(host.get("_pack_result_ok")), String(host.get("_pack_result")))
@@ -336,11 +336,11 @@ func test_choosing_an_hm_row_refuses_and_keeps_the_list_open() -> void:
 	await _open_world()
 	_fill_moveset()
 	var host: Gen2StartMenuScreen = await _reach_forget_ask()
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET, "the list stays open")
@@ -356,8 +356,8 @@ func test_refusing_to_forget_reaches_stop_learning_and_teaches_nothing() -> void
 	_fill_moveset()
 	var host: Gen2StartMenuScreen = await _reach_forget_ask()
 
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
 	assert_true(
@@ -365,7 +365,7 @@ func test_refusing_to_forget_reaches_stop_learning_and_teaches_nothing() -> void
 		String(host.get("_summary").text)
 	)
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_false(bool(host.get("_pack_result_ok")))
@@ -386,13 +386,13 @@ func test_declining_to_stop_returns_to_the_forget_ask() -> void:
 	_fill_moveset()
 	var host: Gen2StartMenuScreen = await _reach_forget_ask()
 
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
 
-	host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
 	## YesNoBox opens on YES every time it is opened.
@@ -405,11 +405,11 @@ func test_backing_out_of_the_move_list_reaches_stop_learning() -> void:
 	await _open_world()
 	_fill_moveset()
 	var host: Gen2StartMenuScreen = await _reach_forget_ask()
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
 
-	host.handle_key(KEY_ESCAPE)
+	host.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
 
@@ -422,7 +422,7 @@ func test_pokegear_reaches_the_existing_phone_list() -> void:
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	assert_true(_kinds(host).has(Gen2WorldStartMenu.ITEM_POKEGEAR))
 	_select(host, Gen2WorldStartMenu.ITEM_POKEGEAR)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_null(_world_screen._start_menu_host)
 	assert_not_null(_world_screen._service_host)
@@ -444,17 +444,17 @@ func test_save_writes_a_snapshot_to_the_injected_save_without_touching_disk() ->
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_SAVE)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_CONFIRM)
 	## Yes is the confirm menu's default cursor position.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(save.world.map_id, expected.map_id)
 	assert_eq(save.world.player_cell, expected.player_cell)
 	assert_true(save.world.world_state.is_event_flag_active(MARKER_FLAG))
 	## Continue returns to the list without reopening a fresh menu instance.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
@@ -506,7 +506,7 @@ func _select(host: Gen2StartMenuScreen, kind: StringName) -> void:
 	var menu: Gen2WorldStartMenu = host.get("_menu")
 	var guard: int = menu.size() + 1
 	while menu.selected_kind() != kind and guard > 0:
-		host.handle_key(KEY_DOWN)
+		host.handle_button(Gen2Button.DOWN)
 		guard -= 1
 	assert_eq(menu.selected_kind(), kind)
 
@@ -523,14 +523,14 @@ func _open_pack_with_a_hurt_party() -> Gen2StartMenuScreen:
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_PACK)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	return host
 
 
 func test_choosing_an_item_opens_the_source_submenu() -> void:
 	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
 	var labels: Array = []
 	for entry: Dictionary in host.get("_item_actions"):
@@ -540,8 +540,8 @@ func test_choosing_an_item_opens_the_source_submenu() -> void:
 	# QUIT returns to the pocket list, keeping the cursor the source restores.
 	while StringName((host.get("_item_actions")[host.get("_item_cursor")] as Dictionary)
 		.get("action", &"")) != Gen2WorldPack.ACTION_QUIT:
-		host.handle_key(KEY_DOWN)
-	host.handle_key(KEY_ENTER)
+		host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 
 
@@ -549,21 +549,21 @@ func test_use_on_a_party_item_asks_which_mon_then_heals_and_spends_it() -> void:
 	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
 	var save: Gen2SaveData = _world_screen.get("_injected_save")
 	var before: int = (save.party[0] as Gen2SaveMon).hp
-	host.handle_key(KEY_ENTER)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
 	# Nothing has changed until the target is chosen.
 	assert_eq((save.party[0] as Gen2SaveMon).hp, before)
 	assert_eq(_world_screen._world.state.item_quantity(7), 1)
 
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_eq((save.party[0] as Gen2SaveMon).hp, before + 15)
 	assert_eq(_world_screen._world.state.item_quantity(7), 0)
 	assert_eq(String(host.get("_pack_result")), "POTION restored 15 HP.")
 
 	# The spent item leaves the pocket on the way back.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 	assert_eq(((host.get("_pack_pockets")[0] as Dictionary)["items"] as Array).size(), 0)
 
@@ -574,11 +574,11 @@ func test_using_an_item_with_nothing_to_do_reports_it_and_spends_nothing() -> vo
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_PACK)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	host.handle_key(KEY_ENTER)
-	host.handle_key(KEY_ENTER)
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_eq(String(host.get("_pack_result")), "It won't have any effect.")
 	assert_eq(_world_screen._world.state.item_quantity(7), 1)
@@ -596,9 +596,9 @@ func test_an_item_with_no_field_menu_reports_oaks_refusal() -> void:
 	_data = GameData.open_directory(Fixture.directory())
 
 	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	# CANT_TOSS with CANT_SELECT clear is MenuHeader_UnusableKeyItem: USE stays.
-	host.handle_key(KEY_ENTER)
+	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
 	assert_eq(String(host.get("_pack_result")), Gen2StartMenuScreen.OAK_TEXT)
 	assert_eq(_world_screen._world.state.item_quantity(7), 1)

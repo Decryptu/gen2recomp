@@ -58,10 +58,10 @@ func current_page() -> Dictionary:
 	return _pages[_index]
 
 
-## A, Space or Enter moves on, matching every other text pause in the overworld.
-## There is no way back: the cartridge's panels do not rewind either.
-func handle_key(keycode: int) -> bool:
-	if keycode not in [KEY_Z, KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
+## A moves on, matching every other text pause in the overworld. There is no way
+## back: the cartridge's panels do not rewind either.
+func handle_button(button: int) -> bool:
+	if button != Gen2Button.A:
 		return false
 	advance()
 	return true
