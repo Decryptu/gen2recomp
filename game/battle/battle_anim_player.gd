@@ -77,6 +77,17 @@ const AFTER_ANIM_ENEMY_STAT_DOWN: int = 0x110 - BATTLE_AFTERANIMS
 const AFTER_ANIM_PLAYER_DAMAGE: int = 0x112 - BATTLE_AFTERANIMS
 const AFTER_ANIM_WOBBLE: int = 0x113 - BATTLE_AFTERANIMS
 
+## The status animations `PlayOpponentBattleAnim` plays on the target, past
+## `wFXAnimID`'s low byte and so reached by `BattleAnimRunScript`'s `.not_move`
+## branch. Only these five of the non-move block are named, because only these
+## five have a caller: `constants/move_constants.asm`'s `ANIM_SLP` and `ANIM_SAP`
+## sit among them and nothing in either pin ever asks for one.
+const ANIM_CONFUSED: int = 0x103
+const ANIM_BRN: int = 0x105
+const ANIM_PSN: int = 0x106
+const ANIM_FRZ: int = 0x108
+const ANIM_PAR: int = 0x109
+
 var _data: Gen2BattleAnimData = null
 var _script: Gen2BattleAnimScript = null
 var _anim_index: int = 0

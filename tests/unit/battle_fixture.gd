@@ -45,6 +45,16 @@ const EMBER_BURNS: int = 92
 const NEVER_BURNS: int = 93
 const FLAME_WHEEL: int = 172
 
+## The other three secondary statuses, each on a real row with a chance the roll
+## cannot fail, so all four `*Target` commands can be reached without a seed.
+## Burn already has [constant EMBER_BURNS]; sleep has no secondary shape, since
+## `EFFECT_SLEEP` is the whole of every move that carries it. Invented numbers
+## and `_ALWAYS` names, the way [constant THUNDER_ALWAYS_PARALYZES] is one: the
+## chance is the only byte that is not the cartridge's.
+const SLUDGE_BOMB_ALWAYS_POISONS: int = 275
+const ICE_BEAM_ALWAYS_FREEZES: int = 276
+const BODY_SLAM_ALWAYS_PARALYZES: int = 277
+
 ## The stat-changing moves, in the shapes the effect bytes come in: a pure raise,
 ## a pure drop, a raise on hit, and a drop on hit that always rolls or never
 ## does, the same trick [constant EMBER_BURNS] and [constant NEVER_BURNS] already
@@ -158,7 +168,7 @@ const SYNTHESIS: int = 235
 const MOONLIGHT: int = 236
 
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = THUNDER_ALWAYS_PARALYZES
+const MAX_MOVE: int = BODY_SLAM_ALWAYS_PARALYZES
 const BERRY_ITEM: int = 0xAD
 
 ## The highest item number this table fills.
@@ -212,6 +222,7 @@ const WATER: int = 0x15
 const GRASS: int = 0x16
 const ELECTRIC: int = 0x17
 const PSYCHIC_TYPE: int = 0x18
+const ICE: int = 0x19
 const POISON: int = 0x03
 const FLYING: int = 0x02
 const DRAGON: int = 0x1A
@@ -365,6 +376,17 @@ static func _moves() -> Array:
 		EMBER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 256],
 		NEVER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
 		FLAME_WHEEL: ["FLAME WHEEL", 60, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
+		# The other three secondary statuses, power, type and PP as the cartridge
+		# has them and only the chance forced past failing.
+		SLUDGE_BOMB_ALWAYS_POISONS: [
+			"SLUDGE BOMB", 90, POISON, 255, 10, Gen2MoveEffect.POISON_HIT, 256,
+		],
+		ICE_BEAM_ALWAYS_FREEZES: [
+			"ICE BEAM", 95, ICE, 255, 10, Gen2MoveEffect.FREEZE_HIT, 256,
+		],
+		BODY_SLAM_ALWAYS_PARALYZES: [
+			"BODY SLAM", 85, NORMAL, 255, 15, Gen2MoveEffect.PARALYZE_HIT, 256,
+		],
 		# Attack up by two, on the user, with no roll to miss.
 		SWORDS_DANCE: ["SWORDS DANCE", 0, NORMAL, 255, 30, Gen2MoveEffect.STAT_UP_2_BASE, 0],
 		# Defense down by two, on the foe, which can still miss.

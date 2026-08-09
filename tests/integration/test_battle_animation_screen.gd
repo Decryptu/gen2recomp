@@ -110,6 +110,28 @@ func test_the_battle_scene_option_skips_the_move_animation() -> void:
 	assert_false(hidden)
 
 
+func test_a_status_animation_leaves_the_hud_up() -> void:
+	# `BattleAnimRunScript` takes `.not_move` on an id past `wFXAnimID`'s low
+	# byte, which skips `BattleAnimClearHud` and `BattleAnimRestoreHuds` alike,
+	# so a status animation leaves the panels where they are. The move id in
+	# [method test_a_move_animation_takes_the_hud_off_and_puts_it_back] is the
+	# same event with the same battle-scene setting and does take them off, so
+	# the id is what decides.
+	await _open_battle()
+	_screen._begin_animation(_animation_event({
+		"index": Gen2BattleAnimPlayer.ANIM_BRN,
+		"after_anim": Gen2BattleAnimPlayer.AFTER_ANIM_NONE,
+		"enemy_turn": true,
+	}))
+	var hidden: bool = false
+	var guard: int = 4000
+	while _screen.animation_running() and guard > 0:
+		hidden = hidden or not bool(_screen.animation_snapshot()["hud_visible"])
+		_screen.advance_frame()
+		guard -= 1
+	assert_false(hidden, ".not_move reaches neither hud call")
+
+
 func test_the_tilemap_is_the_battle_it_is_seeded_from() -> void:
 	await _open_battle()
 	var map: PackedByteArray = _screen._bg_map
