@@ -67,6 +67,7 @@ var _script_prompt: String = ""
 var _story_picture_backdrop: ColorRect = null
 var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
+var _trainer_card_host: Gen2TrainerCardScreen = null
 ## Leftover of a frame the play timer has not counted yet.
 var _game_time_seconds: float = 0.0
 var _service_host: Gen2WorldServiceScreen = null
@@ -357,7 +358,7 @@ func _advance_held_direction(delta: float) -> void:
 func _overlay_open() -> bool:
 	return _battle_host != null or _service_host != null or _pc_host != null \
 		or _start_menu_host != null or _party_host != null \
-		or _hall_of_fame_host != null
+		or _hall_of_fame_host != null or _trainer_card_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -417,6 +418,8 @@ func _handle_button(button: int) -> bool:
 		if button == Gen2Button.A:
 			_acknowledge_field_move_text()
 		return true
+	if _trainer_card_host != null:
+		return _trainer_card_host.handle_button(button)
 	if _start_menu_host != null:
 		return _start_menu_host.handle_button(button)
 	if _service_host != null:
@@ -1494,6 +1497,37 @@ func _on_start_menu_action(kind: StringName) -> void:
 			_open_embedded_party()
 		Gen2WorldStartMenu.ITEM_POKEGEAR:
 			_open_pokegear()
+		Gen2WorldStartMenu.ITEM_PLAYER:
+			_open_trainer_card()
+	_refresh_labels()
+
+
+## `StartMenu_Status`'s `farcall TrainerCard`. Its own B returns to the
+## overworld, which is where the source's own `ret` lands too.
+func _open_trainer_card() -> void:
+	if _trainer_card_host != null or _data == null:
+		return
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var host := Gen2TrainerCardScreen.new()
+	if not host.open(_data, _world, save):
+		host.free()
+		_script_prompt = "The trainer card needs a save and a cache that carries it"
+		_refresh_labels()
+		return
+	host.z_index = 10
+	add_child(host)
+	host.closed.connect(_on_trainer_card_closed)
+	_trainer_card_host = host
+	_script_prompt = "Trainer card open"
+	_refresh_labels()
+
+
+func _on_trainer_card_closed() -> void:
+	var host: Gen2TrainerCardScreen = _trainer_card_host
+	_trainer_card_host = null
+	if host != null:
+		host.queue_free()
+	_script_prompt = "Trainer card closed"
 	_refresh_labels()
 
 

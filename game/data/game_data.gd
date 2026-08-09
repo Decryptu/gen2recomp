@@ -41,6 +41,7 @@ var _foresight_matchups: Dictionary = {}
 var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
+var _card_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
 ## Group and number to the map's position in [member _world_maps]. Warps,
@@ -93,6 +94,7 @@ static func open_directory(path: String) -> GameData:
 	data._atlases = manifest.get("atlases", {})
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
+	data._card_palettes = manifest.get("card_palettes", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -669,6 +671,30 @@ func bar_palette(name: String) -> PackedColorArray:
 		Gen2Palette.from_packed(int(stored[0])),
 		Gen2Palette.from_packed(int(stored[1])),
 	]))
+
+
+## One of `_CGB_TrainerCard`'s eight background palettes, expanded the way
+## `LoadPalette_White_Col1_Col2_Black` expands a trainer class pair.
+func card_palette(slot: int) -> PackedColorArray:
+	var stored: Variant = _card_palettes.get("background", [])
+	if not stored is Array or slot < 0 or slot >= (stored as Array).size():
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	var pair: Array = (stored as Array)[slot]
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int(pair[0])),
+		Gen2Palette.from_packed(int(pair[1])),
+	]))
+
+
+## `PREDEFPAL_CGB_BADGE`, stored whole rather than as a pair.
+func card_badge_palette() -> PackedColorArray:
+	var stored: Variant = _card_palettes.get("badge", [])
+	if not stored is Array or (stored as Array).size() < RomLayout.CARD_BADGE_PALETTE_COLORS:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	var colors := PackedColorArray()
+	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
 
 
 ## Which HP bar palette a bar of [param lit] pixels is drawn in. The colour

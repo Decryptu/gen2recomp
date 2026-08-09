@@ -663,3 +663,41 @@ func test_b_returns_to_the_list_from_a_value_row() -> void:
 	host.handle_button(Gen2Button.B)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 	assert_not_null(_world_screen._start_menu_host)
+
+
+## `StartMenu_Status`'s `farcall TrainerCard`, as an overlay the world screen
+## owns the way it owns the party screen.
+func test_player_opens_the_trainer_card_and_b_returns_to_the_overworld() -> void:
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PLAYER)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_null(_world_screen._start_menu_host)
+	var card: Gen2TrainerCardScreen = _world_screen._trainer_card_host
+	assert_not_null(card)
+	assert_eq(card.current_page(), Gen2TrainerCard.PAGE_1)
+	assert_false(_world_screen.move_player(Vector2i.RIGHT), "the card blocks the overworld")
+
+	## Right reaches the badge page, and B leaves from there.
+	card.handle_button(Gen2Button.RIGHT)
+	assert_eq(card.current_page(), Gen2TrainerCard.PAGE_2)
+	card.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_null(_world_screen._trainer_card_host)
+	assert_true(_world_screen._objects_may_move())
+
+
+## The play timer is the save's, and it counts hardware frames of the world
+## running rather than host seconds.
+func test_the_play_timer_counts_while_the_world_runs() -> void:
+	await _open_world()
+	## The fixture drives an injected save, which is the one the timer counts on
+	## too: _advance_game_time() prefers it exactly as the card does.
+	var save: Gen2SaveData = _world_screen._injected_save
+	assert_not_null(save)
+	save.game_time = Gen2GameTime.new()
+	_world_screen._advance_game_time(Gen2WorldAnimation.FRAME_SECONDS * 3.0)
+	assert_eq(save.game_time.frames, 3)

@@ -11,7 +11,7 @@ extends Control
 ## Gen2WorldServiceScreen owns a mart mode beside its menu mode.
 
 ## Emitted for an available entry this screen does not own itself
-## (Pokemon, Pokegear); the caller opens the matching screen.
+## (Pokemon, Pokegear, Player); the caller opens the matching screen.
 signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
@@ -264,7 +264,8 @@ func _confirm_list() -> void:
 			_open_options_mode()
 		Gen2WorldStartMenu.ITEM_EXIT:
 			closed.emit()
-		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR:
+		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR, \
+		Gen2WorldStartMenu.ITEM_PLAYER:
 			action_chosen.emit(_menu.selected_kind())
 		_:
 			# A Gen2ModHost-registered entry. Its handler is what made it

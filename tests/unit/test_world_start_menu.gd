@@ -5,8 +5,8 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 ## engine/menus/start_menu.asm's StartMenu.SetUpMenuItems gating, reproduced
 ## as data: Pokedex behind wStatusFlags/STATUSFLAGS_POKEDEX_F, Pokemon behind
 ## a non-zero party count, Pokegear behind wPokegearFlags/POKEGEAR_OBTAINED_F,
-## everything else always present. Pokedex, Player and Options are always
-## built but marked unavailable since this project has none of the three yet.
+## everything else always present. Pokedex is always built but marked
+## unavailable, since this project has no dex yet.
 
 
 func _kinds(menu: Gen2WorldStartMenu) -> Array:
@@ -59,7 +59,7 @@ func test_full_list_matches_the_source_item_order_when_every_gate_is_open() -> v
 	])
 
 
-func test_every_entry_but_pokedex_and_player_is_available() -> void:
+func test_every_entry_but_pokedex_is_available() -> void:
 	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(1, true, true)
 	var available_by_kind: Dictionary = {}
 	for entry: Dictionary in menu.items():
@@ -70,8 +70,8 @@ func test_every_entry_but_pokedex_and_player_is_available() -> void:
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_SAVE])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_EXIT])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_OPTION])
+	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_PLAYER])
 	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_POKEDEX])
-	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_PLAYER])
 
 
 func test_quit_never_appears_because_this_project_has_no_bug_contest() -> void:
@@ -152,8 +152,8 @@ func test_a_registered_entry_lands_before_exit() -> void:
 	Gen2ModHost.reset()
 
 
-## An entry with no handler still appears, marked unavailable, the way Pokedex,
-## Player and Options do.
+## An entry with no handler still appears, marked unavailable, the way Pokedex
+## does.
 func test_a_registered_entry_without_a_handler_is_unavailable() -> void:
 	Gen2ModHost.reset()
 	Gen2ModHost.instance().register_menu_entry(
