@@ -123,6 +123,10 @@ var _pending_rock_smash: Dictionary = {}
 ## its party. GetTreeScore is the only reader; -1 means no save has set one,
 ## which refuses rather than scoring against an invented zero.
 var _player_id: int = -1
+## wPlayerGender's PLAYERGENDER_FEMALE_F, mirrored from the save the way the
+## trainer ID is. Crystal only: pokegold ships no KrisStateSprites, so a Gold or
+## Silver world stays male whatever a caller sets.
+var _player_female: bool = false
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -1179,6 +1183,31 @@ func set_player_id(player_id: int) -> Dictionary:
 
 func player_id() -> int:
 	return _player_id
+
+
+## `GetPlayerSprite`'s table choice, mirrored from the save. Setting it re-runs
+## the PLAYER_NORMAL lookup, which is what a map load does, so a world already
+## open picks the new sprite up without waiting for a warp.
+func set_player_gender(female: bool) -> Dictionary:
+	_player_female = female and Gen2WorldState.is_crystal_profile(data)
+	if movement_mode == MOVEMENT_WALK:
+		player_sprite_number = _walking_sprite()
+	return {"ok": true, "female": _player_female}
+
+
+func player_female() -> bool:
+	return _player_female
+
+
+## `InitPlayerObject` writes the palette onto the player object rather than
+## reading the sprite's own default row, so the renderer is told which one.
+func player_palette() -> int:
+	return Gen2WorldSprite.player_palette(_player_female)
+
+
+## ChrisStateSprites' or KrisStateSprites' PLAYER_NORMAL row.
+func _walking_sprite() -> int:
+	return Gen2WorldSprite.player_normal_sprite(_player_female)
 
 
 ## Clears the mirror, the counterpart of clear_party_summary().
@@ -3655,7 +3684,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	var kind: StringName = &"move"
 	if exiting_water:
 		movement_mode = MOVEMENT_WALK
-		player_sprite_number = Gen2WorldSprite.SPRITE_PLAYER
+		player_sprite_number = _walking_sprite()
 		kind = &"exit_water"
 	elif movement_mode == MOVEMENT_SURF:
 		kind = &"water_move"
@@ -3943,7 +3972,7 @@ func _apply_map_setup_player_state() -> void:
 		return
 	if movement_mode == MOVEMENT_SURF:
 		movement_mode = MOVEMENT_WALK
-		player_sprite_number = Gen2WorldSprite.SPRITE_PLAYER
+		player_sprite_number = _walking_sprite()
 
 
 func _apply_map(

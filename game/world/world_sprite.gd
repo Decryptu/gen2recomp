@@ -15,13 +15,37 @@ const FACING_UP: int = 1
 const FACING_LEFT: int = 2
 const FACING_RIGHT: int = 3
 
-## data/sprites/player_sprites.asm's ChrisStateSprites, the wPlayerState to
-## sprite lookup GetPlayerSprite walks. Identical in both pins, and the numbers
-## themselves (constants/sprite_constants.asm) agree too. KrisStateSprites is not
-## reproduced because this project has no gender model.
+## data/sprites/player_sprites.asm's ChrisStateSprites and KrisStateSprites, the
+## wPlayerState to sprite lookup GetPlayerSprite walks. ChrisStateSprites is
+## identical in both pins and the numbers themselves
+## (constants/sprite_constants.asm) agree too; pokegold ships no KrisStateSprites
+## at all, which is why the female rows are Crystal only.
+##
+## The two tables differ in their PLAYER_NORMAL and PLAYER_BIKE rows and share
+## PLAYER_SURF and PLAYER_SURF_PIKA, so surfing looks the same either way.
 const SPRITE_PLAYER: int = 0x01
+const SPRITE_PLAYER_BIKE: int = 0x02
 const SPRITE_SURFING_PIKACHU: int = 0x34
 const SPRITE_SURF: int = 0x53
+const SPRITE_KRIS: int = 0x60
+const SPRITE_KRIS_BIKE: int = 0x61
+
+## constants/sprite_data_constants.asm. `InitPlayerObject` writes one of these
+## onto the player object rather than taking the sprite's own default row, and
+## the female branch is the only thing that chooses between them.
+const PAL_NPC_RED: int = 8
+const PAL_NPC_BLUE: int = 9
+
+
+## `GetPlayerSprite`'s PLAYER_NORMAL row. The bike rows exist in both tables but
+## no bike does, so nothing asks for them yet.
+static func player_normal_sprite(female: bool) -> int:
+	return SPRITE_KRIS if female else SPRITE_PLAYER
+
+
+## `InitPlayerObject`'s `ln e, PAL_NPC_RED` and its female branch.
+static func player_palette(female: bool) -> int:
+	return PAL_NPC_BLUE if female else PAL_NPC_RED
 
 var number: int = 0
 var address: int = 0

@@ -3,6 +3,11 @@ extends Control
 
 signal battle_finished(result: Dictionary)
 signal capture_requested(ball: int)
+## `LoadEnemyMon`'s own `wPokedexSeen` write (engine/battle/core.asm:6407). Every
+## enemy sent out sets it, a trainer's party as much as a wild, so this is the
+## event rather than the battle result. The host owns the flag, since the battle
+## engine is scene-free and holds no world state.
+signal enemy_seen(species: int)
 
 ## Owns the battle, the events and the text box; decides nothing about how they
 ## are drawn. A [Gen2Battle] resolves the turn and answers with events; this
@@ -1157,6 +1162,7 @@ func _apply_event(event: Dictionary) -> void:
 			# here does. The level is part of that: a trainer's own party is not
 			# all one level the way the invented one used to be.
 			if int(event["side"]) == Gen2Battle.ENEMY:
+				enemy_seen.emit(int(event["species"]))
 				_enemy = int(event["species"])
 				_enemy_level = int(event["level"])
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
