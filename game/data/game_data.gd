@@ -68,6 +68,7 @@ var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
 var _world_phone: Dictionary = {}
 var _world_audio: Dictionary = {}
+var _battle_anims_section: Dictionary = {}
 ## Which of the sections above have been read. A section that is genuinely empty
 ## is indistinguishable from one that has not been read yet, so the answer is
 ## recorded rather than inferred from the value.
@@ -405,6 +406,98 @@ func world_encounter_count(method: StringName) -> int:
 	var table_name: String = "water" if method == &"surf" else String(method)
 	var table: Variant = _encounters().get(table_name, {})
 	return (table as Dictionary).size() if table is Dictionary else 0
+
+
+## One battle animation region: the cached bytes plus the bank and address the
+## cartridge holds them at, so an in-bank pointer resolves by subtraction.
+##
+## [param name] is `scripts`, `objects`, `framesets` or `oam_sets`. Answers
+## [code]{ bank, address, count, data }[/code], empty when the section is absent
+## or the name is not one of the four.
+func battle_anim_region(name: StringName) -> Dictionary:
+	var value: Variant = _battle_anims().get(String(name), null)
+	if not value is Dictionary:
+		return {}
+	var region: Dictionary = value
+	return {
+		"bank": int(region.get("bank", -1)),
+		"address": int(region.get("address", -1)),
+		"count": int(region.get("count", 0)),
+		"data": _payload_bytes(region, _blob("battle_anims")),
+	}
+
+
+## Where one animation's script starts, as the cartridge addresses it, or -1
+## when the index is outside `BattleAnimations`.
+##
+## The table is the first bytes of the scripts region, so this reads it rather
+## than a copy: index 0 is `BattleAnim_Dummy` and the rest are move numbers.
+func battle_anim_address(index: int) -> int:
+	var region: Dictionary = battle_anim_region(&"scripts")
+	if region.is_empty() or index < 0 or index >= int(region["count"]):
+		return -1
+	var data: PackedByteArray = region["data"]
+	var at: int = index * 2
+	if at + 2 > data.size():
+		return -1
+	return data[at] | (data[at + 1] << 8)
+
+
+## One `battleanimobj` row as
+## [code]{ flags, y_fix, frameset, function, palette, gfx }[/code], empty when
+## the index is outside `BattleAnimObjects`.
+func battle_anim_object(index: int) -> Dictionary:
+	var region: Dictionary = battle_anim_region(&"objects")
+	if region.is_empty() or index < 0 or index >= int(region["count"]):
+		return {}
+	var data: PackedByteArray = region["data"]
+	var at: int = index * RomLayout.BATTLE_ANIM_OBJECT_SIZE
+	if at + RomLayout.BATTLE_ANIM_OBJECT_SIZE > data.size():
+		return {}
+	return {
+		"flags": data[at + Gen2BattleAnimImporter.OBJECT_FLAGS],
+		"y_fix": data[at + Gen2BattleAnimImporter.OBJECT_Y_FIX],
+		"frameset": data[at + Gen2BattleAnimImporter.OBJECT_FRAMESET],
+		"function": data[at + Gen2BattleAnimImporter.OBJECT_FUNCTION],
+		"palette": data[at + Gen2BattleAnimImporter.OBJECT_PALETTE],
+		"gfx": data[at + Gen2BattleAnimImporter.OBJECT_GFX],
+	}
+
+
+## One `AnimObjGFX` row as [code]{ tiles, bank, address, sheet }[/code]. `sheet`
+## is false for the three rows that name no graphics: index 0, which no
+## `anim_*gfx` reaches, and the two `NULL` rows the battler-graphics commands
+## fill in from the battler's own pic.
+func battle_anim_gfx(index: int) -> Dictionary:
+	var rows: Variant = _battle_anims().get("object_gfx", [])
+	if not rows is Array or index < 0 or index >= (rows as Array).size():
+		return {}
+	var row: Variant = (rows as Array)[index]
+	if not row is Dictionary:
+		return {}
+	return {
+		"tiles": int((row as Dictionary).get("tiles", 0)),
+		"bank": int((row as Dictionary).get("bank", 0)),
+		"address": int((row as Dictionary).get("address", 0)),
+		"sheet": bool((row as Dictionary).get("sheet", false)),
+	}
+
+
+func battle_anim_gfx_count() -> int:
+	var rows: Variant = _battle_anims().get("object_gfx", [])
+	return (rows as Array).size() if rows is Array else 0
+
+
+## Indexed pixels for one decompressed `AnimObjGFX` sheet, loaded on demand.
+func battle_anim_gfx_indices(index: int) -> PackedByteArray:
+	var key: String = "battle_anim_gfx/%d" % index
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(
+		RomCache.battle_anim_gfx_path(directory, index)
+	)
+	_indices[key] = data
+	return data
 
 
 ## Metadata for one cartridge overworld sprite, indexed by the source sprite
@@ -1007,6 +1100,8 @@ func _section_json_path(section: String) -> String:
 			return RomCache.world_command_queues_path(directory)
 		"audio":
 			return RomCache.world_audio_path(directory)
+		"battle_anims":
+			return RomCache.battle_anims_path(directory)
 	return ""
 
 
@@ -1121,6 +1216,12 @@ func _audio() -> Dictionary:
 	if _claim_section("audio"):
 		_world_audio = _read_section(RomCache.world_audio_path(directory), false)
 	return _world_audio
+
+
+func _battle_anims() -> Dictionary:
+	if _claim_section("battle_anims"):
+		_battle_anims_section = _read_section(RomCache.battle_anims_path(directory), false)
+	return _battle_anims_section
 
 
 func _read_array(path: String) -> Array:

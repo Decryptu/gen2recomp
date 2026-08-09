@@ -90,6 +90,7 @@ func _write_cache(complete: bool = true) -> void:
 	RomCache.write_json(RomCache.dex_orders_path(_directory), {
 		"new": _dex_order(true), "alpha": _dex_order(false),
 	})
+	_write_battle_anims()
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testgame",
@@ -105,6 +106,46 @@ func _write_cache(complete: bool = true) -> void:
 		},
 		"complete": complete,
 	})
+
+
+## Two animation regions, the way the importer writes them: a pointer table with
+## its bodies immediately after it, addressed by the region's own base.
+##
+## The script region holds two entries, one at $4004 and one at $4005, and the
+## bodies are `anim_ret` and `anim_inc_var, anim_ret`. The object region is one
+## `battleanimobj` row.
+const _ANIM_BASE: int = 0x4000
+const _ANIM_BANK: int = 0x32
+
+
+func _write_battle_anims() -> void:
+	RomCache.write_section(
+		RomCache.battle_anims_path(_directory),
+		RomCache.blob_path(RomCache.battle_anims_path(_directory)),
+		{
+			"scripts": {
+				"bank": _ANIM_BANK, "address": _ANIM_BASE, "count": 2,
+				"bytes": [0x04, 0x40, 0x05, 0x40, 0xFF, 0xFA, 0xFF],
+			},
+			"objects": {
+				"bank": _ANIM_BANK, "address": _ANIM_BASE, "count": 1,
+				"bytes": [0x01, 0xFF, 0x02, 0x03, 0x04, 0x05],
+			},
+			"object_gfx": [
+				{"tiles": 0, "bank": 0x21, "address": 0x4A2E, "sheet": false},
+				{"tiles": 1, "bank": 0x21, "address": 0x4A2E, "sheet": true},
+			],
+		}
+	)
+	RomCache.write_indices(
+		RomCache.battle_anim_gfx_path(_directory, 1), _blank_tile()
+	)
+
+
+func _blank_tile() -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(Gen2Tiles.TILE_PIXELS)
+	return out
 
 
 ## A full-length order table, since GameData drops one that is not: the two
@@ -166,6 +207,17 @@ func test_a_missing_cache_does_not_open() -> void:
 	assert_null(GameData.open_directory("user://nothing_here"))
 
 
+## A cache written by an older importer is discarded rather than migrated, which
+## is what a format bump is for. Written against the version rather than a
+## number so the next bump does not have to edit this.
+func test_a_cache_from_an_older_format_does_not_open() -> void:
+	_write_cache()
+	var manifest: Dictionary = RomCache.read_manifest(_directory)
+	manifest["format_version"] = RomCache.FORMAT_VERSION - 1
+	RomCache.write_json(RomCache.manifest_path(_directory), manifest)
+	assert_null(GameData.open_directory(_directory))
+
+
 func test_numbers_come_back_as_ints_not_floats() -> void:
 	# JSON has one number type. Coercing here, once, is the whole reason this
 	# class exists rather than callers reading the JSON themselves.
@@ -204,6 +256,66 @@ func test_world_service_records_are_read_from_the_cache() -> void:
 	assert_eq(data.world_service_counts(), {
 		"menus": 1, "marts": 1, "phone_contacts": 1, "music": 1, "sfx": 1, "cries": 0,
 	})
+
+
+## A region comes back with its bank and address, so an in-bank pointer resolves
+## by subtraction, and its bytes come out of the section blob rather than the
+## JSON.
+func test_a_battle_anim_region_carries_its_own_base_address() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var region: Dictionary = data.battle_anim_region(&"scripts")
+	assert_eq(int(region["bank"]), _ANIM_BANK)
+	assert_eq(int(region["address"]), _ANIM_BASE)
+	assert_eq(int(region["count"]), 2)
+	assert_eq((region["data"] as PackedByteArray).size(), 7)
+	assert_true(data.battle_anim_region(&"nothing").is_empty())
+
+
+## The pointer table is the first bytes of the scripts region rather than a copy
+## beside it, which is what makes a cached address and the bytes it names one
+## thing.
+func test_a_battle_anim_address_is_read_out_of_the_region_itself() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.battle_anim_address(0), 0x4004)
+	assert_eq(data.battle_anim_address(1), 0x4005)
+	assert_eq(data.battle_anim_address(2), -1, "past the table")
+	assert_eq(data.battle_anim_address(-1), -1)
+
+	var region: Dictionary = data.battle_anim_region(&"scripts")
+	var script := Gen2BattleAnimScript.create(
+		region["data"], int(region["address"]), data.battle_anim_address(1)
+	)
+	var ran: Array = script.advance_frame()
+	assert_eq(ran.size(), 2)
+	assert_eq(ran[1]["name"], Gen2BattleAnimScript.RET)
+	assert_eq(script.variable(), 1)
+	assert_true(script.finished())
+
+
+func test_a_battle_anim_object_row_reads_back_as_ints() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.battle_anim_object(0), {
+		"flags": 1, "y_fix": 0xFF, "frameset": 2, "function": 3, "palette": 4, "gfx": 5,
+	})
+	assert_true(data.battle_anim_object(1).is_empty(), "past the table")
+
+
+## Only the rows that name graphics have a sheet: index 0 is the slot no
+## `anim_*gfx` reaches, and the two `NULL` rows belong to the battler-graphics
+## commands.
+func test_only_the_rows_with_graphics_carry_a_sheet() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.battle_anim_gfx_count(), 2)
+	assert_false(bool(data.battle_anim_gfx(0)["sheet"]))
+	assert_eq(data.battle_anim_gfx(1), {
+		"tiles": 1, "bank": 0x21, "address": 0x4A2E, "sheet": true,
+	})
+	assert_eq(data.battle_anim_gfx_indices(1).size(), Gen2Tiles.TILE_PIXELS)
+	assert_true(data.battle_anim_gfx(2).is_empty())
 
 
 func test_a_matchup_the_chart_does_not_list_is_neutral() -> void:

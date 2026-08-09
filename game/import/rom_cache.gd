@@ -45,6 +45,8 @@ const WORLD_MENUS: String = "world_menus.json"
 const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
 const WORLD_AUDIO: String = "world_audio.json"
+const BATTLE_ANIMS: String = "battle_anims.json"
+const BATTLE_ANIM_GFX_DIR: String = "battle_anim_gfx"
 
 ## The key a payload span is stored under, and how many numbers it holds. A
 ## cartridge byte run written inline as JSON decimals costs about four bytes on
@@ -57,7 +59,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 28
+const FORMAT_VERSION: int = 29
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -182,6 +184,18 @@ static func world_audio_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_AUDIO]
 
 
+## The battle animation scripts and the four tables their objects are built
+## from, each as a whole cartridge region; see [Gen2BattleAnimImporter].
+static func battle_anims_path(directory: String) -> String:
+	return "%s/%s" % [directory, BATTLE_ANIMS]
+
+
+## One decompressed `AnimObjGFX` sheet, by its own table index. Kept out of the
+## JSON for the reason every other tile strip is: it is pixels, not records.
+static func battle_anim_gfx_path(directory: String, number: int) -> String:
+	return "%s/%s/%02d.idx" % [directory, BATTLE_ANIM_GFX_DIR, number]
+
+
 static func pic_path(directory: String, name: String) -> String:
 	return "%s/%s/%s.idx" % [directory, PICS_DIR, name]
 
@@ -203,7 +217,9 @@ static func overworld_sprite_path(directory: String, number: int) -> String:
 
 
 static func prepare(directory: String) -> bool:
-	for sub: String in [PICS_DIR, TILES_DIR, WORLD_TILES_DIR, OVERWORLD_SPRITES_DIR]:
+	for sub: String in [
+		PICS_DIR, TILES_DIR, WORLD_TILES_DIR, OVERWORLD_SPRITES_DIR, BATTLE_ANIM_GFX_DIR,
+	]:
 		if DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, sub]) != OK:
 			return false
 	return true
