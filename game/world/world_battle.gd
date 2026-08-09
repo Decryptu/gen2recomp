@@ -41,6 +41,13 @@ static func prepare(
 			var wild_mon: Gen2BattleMon = Gen2BattleMon.create(
 				data, species, level, data.moves_at_level(species, level)
 			)
+			# LoadEnemyMon's .TreeMon branch: a headbutt encounter whose species
+			# is in CheckSleepingTreeMon's list for the current time of day
+			# enters asleep for TREEMON_SLEEP_TURNS. The caller answers the list
+			# question, since only it knows the time of day and the profile;
+			# Gold and Silver never say true, having neither routine nor data.
+			if wild_mon != null and bool(values.get("asleep", false)):
+				wild_mon.status = Gen2WorldTreemon.SLEEP_TURNS
 			enemy_party = Gen2Party.of(wild_mon)
 		&"trainer":
 			trainer_class = int(values.get("trainer_group", 0))

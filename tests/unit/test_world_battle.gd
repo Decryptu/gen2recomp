@@ -82,6 +82,39 @@ func test_wild_request_builds_a_one_mon_enemy_party() -> void:
 	assert_eq((prepared["battle"] as Gen2Battle).enemy.species, SPECIES_TWO)
 
 
+## LoadEnemyMon's .TreeMon branch: a headbutt encounter whose species is in
+## CheckSleepingTreeMon's list for the current time of day enters asleep for
+## TREEMON_SLEEP_TURNS. The list question is answered before this boundary,
+## since only the caller knows the time of day and the profile.
+func test_a_tree_battle_starts_the_wild_asleep_only_when_it_is_told_to() -> void:
+	var asleep: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data,
+		{"kind": &"battle_requested", "values": {
+			"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5,
+			"battle_type": Gen2Battle.BATTLETYPE_TREE, "asleep": true,
+		}},
+		_player_party(), RandomNumberGenerator.new()
+	)
+	assert_true(asleep["ok"])
+	var sleeping: Gen2Battle = asleep["battle"]
+	assert_eq(sleeping.battle_type, Gen2Battle.BATTLETYPE_TREE)
+	assert_eq(sleeping.enemy.status, Gen2WorldTreemon.SLEEP_TURNS)
+	assert_true(Gen2Status.is_asleep(sleeping.enemy.status))
+
+	# A tree battle against an unlisted species, and Gold and Silver's every
+	# tree battle, say false and start awake.
+	var awake: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data,
+		{"kind": &"battle_requested", "values": {
+			"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5,
+			"battle_type": Gen2Battle.BATTLETYPE_TREE, "asleep": false,
+		}},
+		_player_party(), RandomNumberGenerator.new()
+	)
+	assert_true(awake["ok"])
+	assert_eq((awake["battle"] as Gen2Battle).enemy.status, Gen2Status.NONE)
+
+
 func test_trainer_request_uses_the_source_party_and_trainer_battle_rules() -> void:
 	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
 		_data,

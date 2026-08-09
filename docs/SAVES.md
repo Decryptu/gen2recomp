@@ -38,10 +38,18 @@ own `label`, the player's name for the slot, so an exported file names itself;
 an empty label means fall back to the player name. Box names, current-box UI
 state and cartridge SRAM box placement are intentionally outside this model.
 
+Each save also carries `player_id`, the cartridge's own `wPlayerID`. It is
+rolled once when a game starts, read from SRAM on import and written back on
+export, and `GetTreeScore` is what reads it: half of a headbutt tree's
+encounter tier comes from the trainer ID. The rest of the trainer card, gender
+and play time, is not modelled.
+
 Older project saves migrate in memory one version step at a time: version 1
-gains fourteen empty boxes, version 2 gains an empty label. Migration preserves
-a missing world snapshot as missing; it does not invent a map, player position
-or event state. The next successful save writes version 3.
+gains fourteen empty boxes, version 2 gains an empty label, version 3 gains a
+zero `player_id`. Migration preserves a missing world snapshot as missing; it
+does not invent a map, player position or event state, and it does not roll an
+ID, since that would change an existing save's headbutt encounters. The next
+successful save writes version 4.
 
 ## Player flow
 

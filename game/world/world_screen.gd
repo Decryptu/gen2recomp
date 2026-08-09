@@ -34,6 +34,10 @@ const SFX_STRENGTH: int = 0x1B
 ## constants/sfx_constants.asm's SFX_BUBBLEBEAM, which Script_UsedWaterfall plays
 ## after its text and before the first climbing step.
 const SFX_WATERFALL: int = 0x51
+## constants/sfx_constants.asm's SFX_SANDSTORM, which is what ShakeHeadbuttTree
+## plays (engine/events/field_moves.asm). SFX_HEADBUTT is a battle-move effect
+## and is referenced by nothing in either pin's overworld code.
+const SFX_HEADBUTT_TREE: int = 0x6D
 ## constants/music_constants.asm, which AnimateHallOfFame plays over the whole
 ## induction.
 const MUSIC_HALL_OF_FAME: int = 20
@@ -1567,6 +1571,15 @@ func _on_party_action(action: Dictionary) -> void:
 				_show_field_move_text(_flash_refusal(StringName(flash.get("reason", &""))))
 				return
 			_show_field_move_text("%s used FLASH!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_HEADBUTT:
+			var headbutt: Dictionary = _world.headbutt_request()
+			if not bool(headbutt.get("ok", false)):
+				_show_field_move_text(
+					_headbutt_refusal(StringName(headbutt.get("reason", &"")))
+				)
+				return
+			## _UseHeadbuttText is "did a HEADBUTT!", not the "used" the other five share.
+			_show_field_move_text("%s did a HEADBUTT!" % String(action.get("name", "")))
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -1631,6 +1644,13 @@ func _flash_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## TryHeadbuttFromMenu refuses through FieldMoveFailed, so every refusal is
+## _CantUseItemText. There is no badge branch to add one: Headbutt is gated on
+## CheckPartyMove and the faced tile alone.
+func _headbutt_refusal(_reason: StringName) -> String:
+	return "Can't use that here."
+
+
 ## .TryStrength's only refusal is CheckBadge's, since it checks nothing else;
 ## anything past it is this project's own guard, not a cartridge branch.
 func _strength_refusal(reason: StringName) -> String:
@@ -1679,6 +1699,9 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_flash().is_empty():
 		_commit_field_move(_world.complete_flash(), "Flash")
 		return
+	if not _world.pending_headbutt().is_empty():
+		_commit_field_move(_world.complete_headbutt(_encounter_random), "Headbutt")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
@@ -1709,14 +1732,35 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 					_renderer.set_time_of_day(_render_time_of_day())
 				if _animation != null:
 					_animation.configure(_world, _render_time_of_day())
+			&"headbutt_applied":
+				_play_sfx(SFX_HEADBUTT_TREE)
 			_:
 				_play_sfx(SFX_CUT)
 		if _renderer != null:
 			_renderer.refresh()
 		_script_prompt = label
+		if StringName(applied.get("kind", &"")) == &"headbutt_applied":
+			_finish_headbutt(applied)
+			return
 	else:
 		_script_prompt = "%s failed: %s" % [label, String(applied.get("reason", "unknown"))]
 	_refresh_labels()
+
+
+## HeadbuttScript after ShakeHeadbuttTree: TreeMonEncounter either sets
+## wScriptVar and reaches startbattle, or falls to .no_battle, which is
+## HeadbuttNothingText and a waitbutton. The tree is unchanged either way.
+func _finish_headbutt(applied: Dictionary) -> void:
+	var encounter: Variant = applied.get("encounter", {})
+	if not encounter is Dictionary or (encounter as Dictionary).is_empty():
+		_show_field_move_text("Nope. Nothing…")
+		return
+	_refresh_labels()
+	_start_battle_request({
+		"kind": &"battle_requested",
+		"values": (encounter as Dictionary)["values"],
+		"encounter": (encounter as Dictionary).duplicate(true),
+	})
 
 
 func _open_phone_list() -> void:
@@ -2055,7 +2099,11 @@ func _refresh_party_summary() -> void:
 	var save: Gen2SaveData = _active_party_save()
 	if save == null:
 		_world.clear_party_summary()
+		_world.clear_player_id()
 		return
+	## wPlayerID rides the same refresh: it belongs to the save, and
+	## GetTreeScore reads it the way VAR_PARTYCOUNT reads the party mirror.
+	_world.set_player_id(save.player_id)
 	var has_pokerus: bool = false
 	var species: Array[int] = []
 	var moves: Array = []

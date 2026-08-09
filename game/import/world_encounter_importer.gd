@@ -51,6 +51,25 @@ const _ROAM_ANCHORS: Dictionary = {
 	"last": [5, 9],
 }
 
+## The first and last TreeMonMaps rows and the whole of RockMonMaps, as
+## `(group, number, set)`. The set numbers differ between the profiles because
+## the TREEMON_SET_* order does: Crystal's ILEX_FOREST is FOREST 6 where
+## Gold and Silver's is FOREST 1 (constants/pokemon_data_constants.asm).
+const _TREEMON_ANCHORS: Dictionary = {
+	"gold": {
+		"tree_first": [24, 1, 1], "tree_last": [3, 44, 1],
+		"rock": [[22, 3, 3], [22, 1, 3], [3, 70, 3], [3, 32, 3]],
+	},
+	"silver": {
+		"tree_first": [24, 1, 1], "tree_last": [3, 44, 1],
+		"rock": [[22, 3, 3], [22, 1, 3], [3, 70, 3], [3, 32, 3]],
+	},
+	"crystal": {
+		"tree_first": [24, 1, 4], "tree_last": [3, 52, 6],
+		"rock": [[22, 3, 7], [22, 1, 7], [3, 78, 7], [3, 40, 7]],
+	},
+}
+
 
 static func verify_layout(rom: RomFile) -> Dictionary:
 	var result: Dictionary = read_world_encounters(rom, RomLayout.for_id(rom.id))
@@ -75,6 +94,9 @@ static func import_to_cache(
 		"swarm_water": int(result["counts"]["swarm_water"]),
 		"fish_groups": int(result["counts"]["fish_groups"]),
 		"roam_maps": int(result["counts"]["roam_maps"]),
+		"tree_maps": int(result["counts"]["tree_maps"]),
+		"rock_maps": int(result["counts"]["rock_maps"]),
+		"treemon_sets": int(result["counts"]["treemon_sets"]),
 	}
 
 
@@ -115,6 +137,9 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 	var roam_result: Dictionary = _read_roaming_maps(rom, layout, wild_layout)
 	if not bool(roam_result.get("ok", false)):
 		return roam_result
+	var treemon_result: Dictionary = read_treemons(rom, layout, wild_layout)
+	if not bool(treemon_result.get("ok", false)):
+		return treemon_result
 
 	return {
 		"ok": true,
@@ -125,6 +150,7 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 			"swarm_water": swarm_water,
 			"fishing": fish_result["fishing"],
 			"roaming": roam_result["roaming"],
+			"treemons": treemon_result["treemons"],
 			"probabilities": {
 				"grass": RomLayout.WILD_GRASS_PROBABILITIES,
 				"water": RomLayout.WILD_WATER_PROBABILITIES,
@@ -137,6 +163,9 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 			"swarm_water": swarm_water.size(),
 			"fish_groups": int(fish_result["count"]),
 			"roam_maps": int(roam_result["count"]),
+			"tree_maps": int(treemon_result["tree_maps"]),
+			"rock_maps": int(treemon_result["rock_maps"]),
+			"treemon_sets": int(treemon_result["sets"]),
 		},
 	}
 
@@ -393,6 +422,203 @@ static func _read_roaming_maps(
 			"map_number": number,
 		})
 	return {"ok": true, "count": rows.size(), "roaming": {"maps": rows, "mons": mons}}
+
+
+## TreeMonMaps, RockMonMaps and the TreeMons pointer table
+## (engine/events/treemons.asm, data/wild/treemon_maps.asm, treemons.asm),
+## plus Crystal's AsleepTreeMons* lists. All three tables live in one bank, so
+## a set pointer resolves against the pointer table's own bank.
+##
+## Several pointers alias one address in both profiles: Crystal's NONE and its
+## trailing unused entry both point at CANYON's bytes, and pokegold stacks
+## NONE, UNUSED and CITY on one label. That is the source's own shape, so
+## repeated addresses are kept rather than deduplicated.
+## Public because the whole-cartridge fixture the other readers would need to
+## be tested through is impractical: the anchors below are real cartridge rows.
+static func read_treemons(
+	rom: RomFile, layout: Dictionary, configured: Dictionary
+) -> Dictionary:
+	var pointer_offset: int = int(configured.get("treemon_sets", -1))
+	var set_count: int = int(configured.get("treemon_set_count", -1))
+	if pointer_offset < 0 or set_count < 1:
+		return _error("Treemon set layout is incomplete.")
+	var bank: int = RomLayout.bank_of(pointer_offset)
+
+	var tree_maps: Dictionary = _read_treemon_maps(rom, layout, configured, "tree")
+	if not bool(tree_maps.get("ok", false)):
+		return tree_maps
+	var rock_maps: Dictionary = _read_treemon_maps(rom, layout, configured, "rock")
+	if not bool(rock_maps.get("ok", false)):
+		return rock_maps
+
+	var sets: Array = []
+	for index: int in set_count:
+		var at: int = pointer_offset + index * 2
+		if not rom.in_bounds(at, 2):
+			return _error("Treemon set pointer %d is outside the ROM." % index)
+		var pointer: int = rom.u16le(at)
+		if pointer < 0x4000 or pointer > 0x7FFF:
+			return _error("Treemon set %d has an invalid pointer." % index)
+		var parsed: Dictionary = _read_treemon_set(rom, RomFile.linear(bank, pointer), index)
+		if not bool(parsed.get("ok", false)):
+			return parsed
+		sets.append({"common": parsed["common"], "rare": parsed["rare"]})
+
+	var anchor_check: Dictionary = _validate_treemon_anchors(
+		rom.id, tree_maps["rows"], rock_maps["rows"]
+	)
+	if not bool(anchor_check.get("ok", false)):
+		return anchor_check
+
+	var asleep: Dictionary = _read_asleep_treemons(rom, configured)
+	if not bool(asleep.get("ok", false)):
+		return asleep
+
+	return {
+		"ok": true,
+		"tree_maps": (tree_maps["rows"] as Array).size(),
+		"rock_maps": (rock_maps["rows"] as Array).size(),
+		"sets": sets.size(),
+		"treemons": {
+			"tree_maps": tree_maps["rows"],
+			"rock_maps": rock_maps["rows"],
+			"sets": sets,
+			"asleep": asleep["lists"],
+		},
+	}
+
+
+## GetTreeMonSet's table: `(group, number, set)` triples up to a $FF group byte.
+static func _read_treemon_maps(
+	rom: RomFile, layout: Dictionary, configured: Dictionary, kind: String
+) -> Dictionary:
+	var offset: int = int(configured.get("%s_maps" % kind, -1))
+	var expected_count: int = int(configured.get("%s_map_count" % kind, -1))
+	if offset < 0 or expected_count < 1:
+		return _error("Treemon %s map layout is incomplete." % kind)
+	var rows: Array = []
+	var at: int = offset
+	while true:
+		if not rom.in_bounds(at):
+			return _error("Treemon %s map table has no sentinel." % kind)
+		if rom.u8(at) == RomLayout.TREEMON_TABLE_END:
+			break
+		if rows.size() >= expected_count:
+			return _error("Treemon %s map table exceeds its verified count." % kind)
+		if not rom.in_bounds(at, RomLayout.TREEMON_MAP_RECORD_SIZE):
+			return _error("Treemon %s map record is outside the ROM." % kind)
+		var group: int = rom.u8(at)
+		var number: int = rom.u8(at + 1)
+		var map_check: Dictionary = _validate_map(layout, group, number, "%s_maps" % kind)
+		if not bool(map_check.get("ok", false)):
+			return map_check
+		rows.append({
+			"map_group": group,
+			"map_number": number,
+			"set": rom.u8(at + 2),
+		})
+		at += RomLayout.TREEMON_MAP_RECORD_SIZE
+	if rows.size() != expected_count:
+		return _error("Treemon %s map table has %d rows, expected %d." % [
+			kind, rows.size(), expected_count,
+		])
+	return {"ok": true, "rows": rows}
+
+
+## One set: a common table, then a rare one when the bytes after the common
+## terminator parse as one. TreeMonSet_Rock ships no rare table in either pin
+## and is followed by unrelated bytes, which fail the percentage and slot
+## guards; that set is recorded with an empty rare half rather than refused.
+## Only GetTreeMon's RARE branch reads the rare half, and nothing routes ROCK
+## through it: RockMonEncounter calls SelectTreeMon directly.
+static func _read_treemon_set(rom: RomFile, offset: int, index: int) -> Dictionary:
+	var common: Dictionary = _read_treemon_table(rom, offset, index)
+	if not bool(common.get("ok", false)):
+		return common
+	var rare: Dictionary = _read_treemon_table(rom, int(common["end"]), index)
+	return {
+		"ok": true,
+		"common": common["rows"],
+		"rare": rare["rows"] if bool(rare.get("ok", false)) else [],
+	}
+
+
+## SelectTreeMon's table: `db %, species, level` rows up to a $FF percentage.
+static func _read_treemon_table(rom: RomFile, offset: int, index: int) -> Dictionary:
+	var rows: Array = []
+	var at: int = offset
+	for _row: int in RomLayout.TREEMON_MAX_ROWS:
+		if not rom.in_bounds(at):
+			return _error("Treemon set %d is outside the ROM." % index)
+		if rom.u8(at) == RomLayout.TREEMON_TABLE_END:
+			if rows.is_empty():
+				return _error("Treemon set %d has an empty table." % index)
+			return {"ok": true, "rows": rows, "end": at + 1}
+		if not rom.in_bounds(at, 3):
+			return _error("Treemon set %d row is outside the ROM." % index)
+		var percent: int = rom.u8(at)
+		if percent < 1 or percent > 100:
+			return _error("Treemon set %d has an invalid percentage." % index)
+		var slot: Dictionary = _slot(rom.u8(at + 2), rom.u8(at + 1))
+		if not bool(slot.get("ok", false)):
+			return _error("Treemon set %d has an invalid slot." % index)
+		slot.erase("ok")
+		slot["percent"] = percent
+		rows.append(slot)
+		at += 3
+	return _error("Treemon set %d has no sentinel." % index)
+
+
+## AsleepTreeMonsNite, AsleepTreeMonsDay and AsleepTreeMonsMorn: species lists
+## ending in $FF. Only Crystal ships them, so an absent layout entry is the
+## Gold and Silver answer rather than a failure.
+static func _read_asleep_treemons(rom: RomFile, configured: Dictionary) -> Dictionary:
+	var offsets: Variant = configured.get("asleep_treemons", null)
+	if not offsets is Dictionary:
+		return _error("Asleep treemon layout is missing.")
+	var lists: Dictionary = {}
+	for key: String in ["morn", "day", "nite"]:
+		var offset: int = int((offsets as Dictionary).get(key, -1))
+		if offset < 0:
+			continue
+		var species: Array = []
+		var at: int = offset
+		for _row: int in RomLayout.ASLEEP_TREEMON_MAX_ROWS:
+			if not rom.in_bounds(at):
+				return _error("Asleep treemon list %s is outside the ROM." % key)
+			var value: int = rom.u8(at)
+			if value == RomLayout.ASLEEP_TREEMON_TABLE_END:
+				break
+			if value < 1 or value > RomLayout.SPECIES_COUNT:
+				return _error("Asleep treemon list %s names an invalid species." % key)
+			species.append(value)
+			at += 1
+		if species.is_empty():
+			return _error("Asleep treemon list %s is empty." % key)
+		lists[key] = species
+	return {"ok": true, "lists": lists}
+
+
+static func _validate_treemon_anchors(
+	game_id: StringName, tree_rows: Array, rock_rows: Array
+) -> Dictionary:
+	var anchors: Variant = _TREEMON_ANCHORS.get(String(game_id), null)
+	if not anchors is Dictionary:
+		return _error("No treemon anchors for %s." % game_id)
+	var expected: Dictionary = anchors
+	if _treemon_triple(tree_rows[0]) != expected["tree_first"] \
+		or _treemon_triple(tree_rows[-1]) != expected["tree_last"]:
+		return _error("Treemon map table has unexpected anchors.")
+	var rock: Array = []
+	for row: Dictionary in rock_rows:
+		rock.append(_treemon_triple(row))
+	if rock != expected["rock"]:
+		return _error("Rock treemon map table has unexpected anchors.")
+	return {"ok": true}
+
+
+static func _treemon_triple(row: Dictionary) -> Array:
+	return [int(row["map_group"]), int(row["map_number"]), int(row["set"])]
 
 
 static func _validate_fishing_anchors(groups: Array, time_groups: Array) -> Dictionary:

@@ -1380,6 +1380,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_swarm_water_encounter_count": int(encounters["swarm_water"]),
 		"world_fishing_group_count": int(encounters["fish_groups"]),
 		"world_roam_map_count": int(encounters["roam_maps"]),
+		"world_tree_map_count": int(encounters["tree_maps"]),
+		"world_rock_map_count": int(encounters["rock_maps"]),
+		"world_treemon_set_count": int(encounters["treemon_sets"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
 		"world_menu_count": int(services["menus"]),
 		"world_mart_count": int(services["marts"]),
@@ -1413,6 +1416,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["swarm_water_encounters"] = int(encounters["swarm_water"])
 	result["fishing_groups"] = int(encounters["fish_groups"])
 	result["roam_maps"] = int(encounters["roam_maps"])
+	result["tree_maps"] = int(encounters["tree_maps"])
+	result["rock_maps"] = int(encounters["rock_maps"])
+	result["treemon_sets"] = int(encounters["treemon_sets"])
 	result["overworld_sprites"] = int(world["overworld_sprites"])
 	result["menus"] = int(services["menus"])
 	result["marts"] = int(services["marts"])
@@ -1427,7 +1433,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
 		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
 		+ "%d water encounter maps, %d swarm grass maps, %d swarm water maps, "
-		+ "%d fishing groups, %d roaming maps and %d overworld sprites, "
+		+ "%d fishing groups, %d roaming maps, %d headbutt tree maps "
+		+ "and %d overworld sprites, "
 		+ "%d menus, %d marts, %d phone contacts, %d phone script resources, "
 		+ "%d music tracks and %d sound effects, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
@@ -1436,6 +1443,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		int(encounters["grass"]), int(encounters["water"]),
 		int(encounters["swarm_grass"]), int(encounters["swarm_water"]),
 		int(encounters["fish_groups"]), int(encounters["roam_maps"]),
+		int(encounters["tree_maps"]),
 		int(world["overworld_sprites"]),
 		int(services["menus"]), int(services["marts"]), int(services["phone_contacts"]),
 		int(services["phone_scripts"]),

@@ -20,6 +20,9 @@ const CONTAINER_VERSION: int = 1
 const STARTER_LEVEL: int = 5
 const STARTER_SPECIES: Array[int] = [152, 155, 158]
 const STARTER_ITEM: int = 0xAD
+## The development save's wPlayerID. Any fixed value would do; this one is not
+## a multiple of ten, so GetTreeScore's OTID half is not degenerate.
+const DEVELOPMENT_PLAYER_ID: int = 0x1A2B
 
 
 static func directory_for(game_id: StringName, rom_sha1: String) -> String:
@@ -250,9 +253,14 @@ static func create_development_save(data: GameData, slot: int) -> Gen2SaveData:
 		if mon == null:
 			return null
 		members.append(mon)
-	return Gen2SaveBattleAdapter.from_battle_party(
+	var development: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		data.id, data.sha1, slot, Gen2Party.create(members), "PLAYER"
 	)
+	if development != null:
+		## Fixed rather than rolled, so a preview or a test that reads
+		## GetTreeScore through this save reproduces itself.
+		development.player_id = DEVELOPMENT_PLAYER_ID
+	return development
 
 
 ## Creates the source-shaped Crystal new-game save. Crystal initializes an
@@ -260,18 +268,28 @@ static func create_development_save(data: GameData, slot: int) -> Gen2SaveData:
 ## script creates the first party member later. The optional fourth argument
 ## remains accepted for callers from the earlier development launcher, but it
 ## is deliberately ignored so a new save cannot skip the story handoff.
+##
+## [param random] rolls wPlayerID. It is the one roll in this project that is
+## an identity rather than a game event, so an absent generator randomizes here
+## instead of being refused; pass one when a run has to reproduce itself, since
+## GetTreeScore reads the result.
 static func create_new_game(
-	data: GameData, slot: int, player_name: String, _starter_species: int = -1
+	data: GameData, slot: int, player_name: String, _starter_species: int = -1,
+	random: RandomNumberGenerator = null
 ) -> Gen2SaveData:
 	if data == null or not _valid_slot(slot):
 		return null
 	if player_name.is_empty() or Gen2Text.encoded_length(player_name) > Gen2SaveData.MAX_PLAYER_NAME:
 		return null
+	var generator := random if random != null else RandomNumberGenerator.new()
+	if random == null:
+		generator.randomize()
 	var new_save := Gen2SaveData.new()
 	new_save.game_id = data.id
 	new_save.rom_sha1 = data.sha1
 	new_save.slot = slot
 	new_save.player_name = player_name
+	new_save.player_id = generator.randi_range(0, 0xFFFF)
 	new_save.world = Gen2WorldSpawn.new_game_snapshot(data)
 	return new_save
 

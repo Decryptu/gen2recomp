@@ -11,11 +11,16 @@ const METHOD_SURF: StringName = &"surf"
 const METHOD_OLD_ROD: StringName = &"old_rod"
 const METHOD_GOOD_ROD: StringName = &"good_rod"
 const METHOD_SUPER_ROD: StringName = &"super_rod"
+## TreeMonEncounter's own method. Unlike the five above it reads no rate, no
+## slot table and no repel step, so nothing in resolve() handles it: it is a
+## name for the request a headbutt produces.
+const METHOD_HEADBUTT: StringName = &"headbutt"
 
 const SOURCE_NORMAL: StringName = &"normal"
 const SOURCE_SWARM: StringName = &"swarm"
 const SOURCE_ROAMING: StringName = &"roaming"
 const SOURCE_FISHING: StringName = &"fishing"
+const SOURCE_TREE: StringName = &"tree"
 
 
 static func resolve(

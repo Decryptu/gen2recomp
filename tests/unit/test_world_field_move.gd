@@ -63,6 +63,12 @@ const WATERFALL_STAND_CELL: Vector2i = Vector2i(2, 7)
 const WATERFALL_CELLS: Array[Vector2i] = [Vector2i(2, 6), Vector2i(2, 5)]
 const WATERFALL_LANDING_CELL: Vector2i = Vector2i(2, 4)
 
+## A headbutt tree in block (0,1)'s bottom-left quadrant. COLL_HEADBUTT_TREE is
+## WALL_TILE | TALK like the cut tree, so it blocks and is faced.
+const BLOCK_HEADBUTT_TREE: int = 0x40
+const HEADBUTT_CELL: Vector2i = Vector2i(0, 3)
+const HEADBUTT_STAND_CELL: Vector2i = Vector2i(0, 2)
+
 ## constants/map_data_constants.asm: ROUTE and TOWN are the two
 ## `ResetFlashIfOutOfCave` treats as outdoors; DUNGEON is not one of them.
 const ENVIRONMENT_TOWN: int = 1
@@ -108,12 +114,48 @@ func _write_cache() -> void:
 	for number: int in [TILESET_CUTTABLE, TILESET_NO_ENTRY]:
 		RomCache.write_indices(RomCache.world_tile_path(_directory, number), pixels)
 
+	RomCache.write_json(RomCache.world_encounters_path(_directory), {
+		"grass": {}, "water": {}, "swarm_grass": {}, "swarm_water": {},
+		"fishing": {"groups": [], "time_groups": []},
+		"roaming": {"maps": [], "mons": []},
+		"treemons": {
+			"tree_maps": [
+				{"map_group": 1, "map_number": 1, "set": TREEMON_SET},
+				{"map_group": 1, "map_number": 3, "set": TREEMON_SET_CITY},
+			],
+			"rock_maps": [],
+			"sets": _treemon_sets(),
+			"asleep": {"morn": [ASLEEP_SPECIES], "day": [ASLEEP_SPECIES], "nite": []},
+		},
+	})
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testfieldmove",
 		"sha1": "0123456789abcdef",
 		"complete": true,
 	})
+
+
+## The fixture's only populated set, at a Crystal-legal number. Set 5 is
+## TREEMON_SET_CITY on Gold and Silver, which their own GetTreeMons refuses;
+## the cache here is not profile-tagged, so the refusal is checked through
+## Gen2WorldTreemon directly in test_world_treemon.gd.
+const TREEMON_SET: int = 1
+const TREEMON_SET_CITY: int = 5
+const TREEMON_SPECIES: int = 21
+const TREEMON_RARE_SPECIES: int = 214
+## One of the fixture's asleep species, so a tree encounter can be asserted
+## both ways without depending on which row the roll lands on.
+const ASLEEP_SPECIES: int = 21
+
+
+func _treemon_sets() -> Array:
+	var empty: Dictionary = {"common": [], "rare": []}
+	var populated: Dictionary = {
+		"common": [{"percent": 100, "species": TREEMON_SPECIES, "level": 10}],
+		"rare": [{"percent": 100, "species": TREEMON_RARE_SPECIES, "level": 10}],
+	}
+	return [empty, populated, empty, empty, empty, populated]
 
 
 func _tileset(number: int) -> Dictionary:
@@ -138,6 +180,7 @@ func _tileset(number: int) -> Dictionary:
 		collision[BLOCK_WHIRLPOOL * 4 + quadrant] = COLL_WATER
 		collision[BLOCK_WHIRLPOOL_GONE * 4 + quadrant] = COLL_WATER
 	collision[BLOCK_WHIRLPOOL * 4 + 2] = COLL_WHIRLPOOL
+	collision[BLOCK_HEADBUTT_TREE * 4 + 2] = Gen2WorldCollision.COLL_HEADBUTT_TREE
 	return {
 		"number": number,
 		"block_count": BLOCK_COUNT,
@@ -156,6 +199,7 @@ func _map(number: int, tileset: int, palette: int = 0, environment: int = 0) -> 
 	blocks[1 * 4 + 3] = BLOCK_WATER
 	blocks[3 * 4 + 0] = BLOCK_WALLED_SHORE
 	blocks[WHIRLPOOL_BLOCK.y * 4 + WHIRLPOOL_BLOCK.x] = BLOCK_WHIRLPOOL
+	blocks[1 * 4 + 0] = BLOCK_HEADBUTT_TREE
 	var collision: Array = []
 	collision.resize(64)
 	for index: int in collision.size():
@@ -167,6 +211,7 @@ func _map(number: int, tileset: int, palette: int = 0, environment: int = 0) -> 
 	collision[WALLED_WATER_CELL.y * 8 + WALLED_WATER_CELL.x] = COLL_WATER
 	collision[WHIRLPOOL_CELL.y * 8 + WHIRLPOOL_CELL.x] = COLL_WHIRLPOOL
 	collision[WHIRLPOOL_STAND_CELL.y * 8 + WHIRLPOOL_STAND_CELL.x] = COLL_WATER
+	collision[HEADBUTT_CELL.y * 8 + HEADBUTT_CELL.x] = Gen2WorldCollision.COLL_HEADBUTT_TREE
 	collision[WATERFALL_STAND_CELL.y * 8 + WATERFALL_STAND_CELL.x] = COLL_WATER
 	for waterfall_cell: Vector2i in WATERFALL_CELLS:
 		collision[waterfall_cell.y * 8 + waterfall_cell.x] = Gen2WorldCollision.COLL_WATERFALL
@@ -283,7 +328,7 @@ func _whirlpool_world(badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	return world
 
 
-func test_the_six_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
+func test_the_seven_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_CUT))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SURF))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_STRENGTH))
@@ -294,11 +339,14 @@ func test_the_six_resolved_moves_are_the_field_moves_the_submenu_offers() -> voi
 	assert_eq(Gen2WorldFieldMove.MOVE_STRENGTH, 0x46)
 	assert_eq(Gen2WorldFieldMove.MOVE_WHIRLPOOL, 0xFA)
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLASH))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_HEADBUTT))
 	assert_eq(Gen2WorldFieldMove.MOVE_WATERFALL, 0x7F)
 	assert_eq(Gen2WorldFieldMove.MOVE_FLASH, 0x94)
+	assert_eq(Gen2WorldFieldMove.MOVE_HEADBUTT, 0x1D)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY and HEADBUTT.
-	for move: int in [0x13, 0x1D]:
+	# submenu would offer an entry nothing answers: FLY, DIG, TELEPORT,
+	# SOFTBOILED, ROCK_SMASH, MILK_DRINK and SWEET_SCENT.
+	for move: int in [0x13, 0x5B, 0x64, 0x87, 0xF9, 0xD0, 0xE6]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 
@@ -1172,3 +1220,134 @@ func test_the_map_palette_byte_decides_how_much_the_clock_matters() -> void:
 			Gen2WorldPalette.map_time_of_day(Gen2WorldPalette.PALETTE_DARK, clock, true),
 			Gen2WorldPalette.TIME_NIGHT
 		)
+
+
+## TryHeadbuttOW is CheckPartyMove and nothing else, and TryHeadbuttFromMenu is
+## the faced tile and nothing else. No badge is involved anywhere, which is what
+## separates Headbutt from the other six.
+func test_headbutt_needs_the_move_and_a_tree_and_no_badge_at_all() -> void:
+	var world: Gen2WorldAPI = _headbutt_world()
+	var request: Dictionary = world.headbutt_request()
+	assert_true(bool(request.get("ok", false)), String(request.get("reason", "")))
+	assert_eq(request["kind"], &"headbutt_requested")
+	assert_eq(request["cell"], HEADBUTT_CELL)
+	assert_eq(int(request["move"]), Gen2WorldFieldMove.MOVE_HEADBUTT)
+
+
+func test_headbutt_refuses_without_the_move_or_a_tree() -> void:
+	var unknowing: Gen2WorldAPI = _headbutt_world(false)
+	var refused: Dictionary = unknowing.headbutt_request()
+	assert_false(bool(refused.get("ok", false)))
+	assert_eq(refused["reason"], &"move_not_known")
+
+	var world: Gen2WorldAPI = _headbutt_world()
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var no_tree: Dictionary = world.headbutt_request()
+	assert_false(bool(no_tree.get("ok", false)))
+	assert_eq(no_tree["reason"], &"nothing_to_headbutt")
+
+
+## The roll belongs to the commit, because HeadbuttScript reaches
+## TreeMonEncounter only after UseHeadbuttText.
+func test_the_headbutt_request_rolls_nothing_and_changes_no_block() -> void:
+	var world: Gen2WorldAPI = _headbutt_world()
+	var before: int = world.block_at(0, 1)
+	assert_true(bool(world.headbutt_request().get("ok", false)))
+	assert_eq(world.block_at(0, 1), before, "the tree is not replaced")
+	assert_false(world.pending_headbutt().is_empty())
+	var second: Dictionary = world.headbutt_request()
+	assert_eq(second["reason"], &"headbutt_in_progress")
+
+
+## A map TreeMonMaps does not name has no set, which GetTreeMonSet answers with
+## no carry: the commit still applies, as HeadbuttScript's .no_battle branch.
+func test_a_map_without_a_treemon_set_headbutts_to_nothing() -> void:
+	var world: Gen2WorldAPI = _headbutt_world(true, 2)
+	assert_true(bool(world.headbutt_request().get("ok", false)))
+	var applied: Dictionary = world.complete_headbutt(_random())
+	assert_true(bool(applied.get("ok", false)))
+	assert_eq(applied["kind"], &"headbutt_applied")
+	assert_true((applied["encounter"] as Dictionary).is_empty())
+
+
+## A populated set resolves to the wild-battle shape the other encounter paths
+## return, carrying BATTLETYPE_TREE and the sleep answer with it.
+func test_a_populated_set_headbutts_into_a_tree_battle() -> void:
+	var world: Gen2WorldAPI = _headbutt_world()
+	# The fixture's cell scores against a chosen ID so the tier is fixed: the
+	# faced cell (0,3) is wPlayerMapX/Y (4,7), and 7 * 5 + 4 = 39, 39 / 5 = 7.
+	assert_eq(Gen2WorldTreemon.coord_score(HEADBUTT_CELL), 7)
+	world.set_player_id(7)
+	var encounter: Dictionary = {}
+	for seed_value: int in 20:
+		var world_attempt: Gen2WorldAPI = _headbutt_world()
+		world_attempt.set_player_id(7)
+		assert_true(bool(world_attempt.headbutt_request().get("ok", false)))
+		var applied: Dictionary = world_attempt.complete_headbutt(_random(seed_value))
+		encounter = applied["encounter"]
+		if not encounter.is_empty():
+			break
+	assert_false(encounter.is_empty(), "a RARE score meets its 80 percent threshold")
+	assert_eq(int(encounter["pokemon"]), TREEMON_RARE_SPECIES, "an equal score reads the rare table")
+	assert_eq(int(encounter["score"]), Gen2WorldTreemon.SCORE_RARE)
+	assert_eq(encounter["method"], Gen2WorldEncounter.METHOD_HEADBUTT)
+	assert_eq(encounter["source"], Gen2WorldEncounter.SOURCE_TREE)
+	assert_eq(int(encounter["values"]["battle_type"]), Gen2Battle.BATTLETYPE_TREE)
+
+
+## GetTreeScore reads wPlayerID, so a world no save has answered for refuses
+## rather than scoring against an invented zero.
+func test_completing_a_headbutt_refuses_without_a_player_id_or_a_generator() -> void:
+	var world: Gen2WorldAPI = _headbutt_world()
+	world.clear_player_id()
+	assert_true(bool(world.headbutt_request().get("ok", false)))
+	var refused: Dictionary = world.complete_headbutt(_random())
+	assert_false(bool(refused.get("ok", false)))
+	assert_eq(refused["reason"], &"missing_player_id")
+
+	var second: Gen2WorldAPI = _headbutt_world()
+	assert_true(bool(second.headbutt_request().get("ok", false)))
+	assert_eq(second.complete_headbutt(null)["reason"], &"missing_generator")
+
+
+func test_completing_a_headbutt_that_was_never_requested_is_refused() -> void:
+	assert_eq(
+		_headbutt_world().complete_headbutt(_random())["reason"], &"no_pending_headbutt"
+	)
+
+
+## CheckSleepingTreeMon is answered off the map's own time of day, and the
+## fixture's morning list carries the common species but not the rare one.
+func test_the_sleep_answer_follows_the_time_of_day_list() -> void:
+	var world: Gen2WorldAPI = _headbutt_world()
+	world.object_time_of_day = Gen2WorldPalette.TIME_MORNING
+	assert_true(Gen2WorldTreemon.starts_asleep(
+		ASLEEP_SPECIES, world.data.asleep_treemons(Gen2WorldPalette.TIME_MORNING)
+	))
+	assert_false(Gen2WorldTreemon.starts_asleep(
+		TREEMON_RARE_SPECIES, world.data.asleep_treemons(Gen2WorldPalette.TIME_MORNING)
+	))
+	# The fixture's night list is empty, which is the Gold and Silver shape.
+	assert_false(Gen2WorldTreemon.starts_asleep(
+		ASLEEP_SPECIES, world.data.asleep_treemons(Gen2WorldPalette.TIME_NIGHT)
+	))
+
+
+func _random(seed_value: int = 3) -> RandomNumberGenerator:
+	var generator := RandomNumberGenerator.new()
+	generator.seed = seed_value
+	return generator
+
+
+## A world standing above the headbutt tree and facing it. No badge is set on
+## any table, which is the point: Headbutt has no badge gate.
+func _headbutt_world(knows: bool = true, map_number: int = 1) -> Gen2WorldAPI:
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, map_number, HEADBUTT_STAND_CELL, Gen2WorldState.new()
+	)
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	world.set_player_id(0)
+	if knows:
+		_knowing_party(world, Gen2WorldFieldMove.MOVE_HEADBUTT)
+	return world

@@ -77,13 +77,19 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 	assert_false(Gen2MoveForget.is_hm_move(0))
 
 
-## The overworld's field-move list is a different, shorter question: Fly and
-## Flash are HMs that this project does not act on, and forgetting is gated on
-## all seven regardless.
-func test_the_hm_list_is_wider_than_the_overworld_field_moves() -> void:
+## The overworld's field-move list is a different question, and neither list
+## contains the other. Fly is an HM this project does not act on; Headbutt is a
+## TM it does, so it is a field move that ForgetMove will happily forget.
+func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 7)
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
+		if move == Gen2WorldFieldMove.MOVE_HEADBUTT:
+			continue
 		assert_true(Gen2MoveForget.is_hm_move(move), "field move %d" % move)
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 6)
+	assert_false(
+		Gen2MoveForget.is_hm_move(Gen2WorldFieldMove.MOVE_HEADBUTT),
+		"HEADBUTT is TM02, so IsHMMove does not protect it"
+	)
 	assert_true(Gen2MoveForget.is_hm_move(0x13), "FLY is an HM with no field effect here")
 	assert_false(Gen2WorldFieldMove.FIELD_MOVES.has(0x13))
 

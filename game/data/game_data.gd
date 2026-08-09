@@ -342,6 +342,59 @@ func world_roaming_mons() -> Array:
 	return mons.duplicate(true) if mons is Array else []
 
 
+## GetTreeMonSet against TreeMonMaps or RockMonMaps: the treemon set number for
+## a map, or 0 for a map neither table names. Set 0 is TREEMON_SET_NONE, which
+## GetTreeMons refuses anyway, so a miss and a NONE row answer alike.
+func treemon_set_for_map(group: int, number: int, rock: bool = false) -> int:
+	var treemons: Variant = _encounters().get("treemons", {})
+	if not treemons is Dictionary:
+		return 0
+	var rows: Variant = (treemons as Dictionary).get("rock_maps" if rock else "tree_maps", [])
+	if not rows is Array:
+		return 0
+	for row: Variant in rows as Array:
+		if not row is Dictionary:
+			continue
+		if int((row as Dictionary).get("map_group", 0)) == group \
+			and int((row as Dictionary).get("map_number", 0)) == number:
+			return int((row as Dictionary).get("set", 0))
+	return 0
+
+
+## GetTreeMons: one set's common and rare tables by set number. The caller
+## applies the profile's own set limit first; this answers the raw table.
+func treemon_set(index: int) -> Dictionary:
+	var treemons: Variant = _encounters().get("treemons", {})
+	if not treemons is Dictionary:
+		return {}
+	var sets: Variant = (treemons as Dictionary).get("sets", [])
+	if not sets is Array or index < 0 or index >= (sets as Array).size():
+		return {}
+	var value: Variant = (sets as Array)[index]
+	return value.duplicate(true) if value is Dictionary else {}
+
+
+## CheckSleepingTreeMon's list for one time of day. Empty on Gold and Silver,
+## which import no such lists because pokegold ships none.
+func asleep_treemons(time_of_day: int) -> Array:
+	var treemons: Variant = _encounters().get("treemons", {})
+	if not treemons is Dictionary:
+		return []
+	var asleep: Variant = (treemons as Dictionary).get("asleep", {})
+	if not asleep is Dictionary:
+		return []
+	var key: String = Gen2WorldTreemon.asleep_list_key(time_of_day)
+	var value: Variant = (asleep as Dictionary).get(key, [])
+	if not value is Array:
+		return []
+	# Restored to integers because JSON reads them back as floats, and this is
+	# the one treemon list a caller searches by value rather than by index.
+	var species: Array[int] = []
+	for entry: Variant in value as Array:
+		species.append(int(entry))
+	return species
+
+
 func world_encounter_count(method: StringName) -> int:
 	var table_name: String = "water" if method == &"surf" else String(method)
 	var table: Variant = _encounters().get(table_name, {})

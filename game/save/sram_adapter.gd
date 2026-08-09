@@ -19,6 +19,9 @@ const MON_NAME_LENGTH: int = 11
 const PP_MASK: int = 0x3F
 const PP_UP_MASK: int = 0xC0
 
+## `player_id` is wPlayerID, the two big-endian bytes wPlayerData opens with in
+## both pins (ram/wram.asm), which is why it shares an address with
+## `primary_data_start`.
 const LAYOUTS: Dictionary = {
 	"gold": {
 		"primary_check_1": 0x2008,
@@ -29,6 +32,7 @@ const LAYOUTS: Dictionary = {
 		"backup_check_1": 0x7E38,
 		"backup_checksum": 0x7E6D,
 		"backup_check_2": 0x7E6F,
+		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x288A,
 		"backup_segments": [
@@ -55,6 +59,7 @@ const LAYOUTS: Dictionary = {
 		"backup_check_1": 0x7E38,
 		"backup_checksum": 0x7E6D,
 		"backup_check_2": 0x7E6F,
+		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x288A,
 		"backup_segments": [
@@ -83,6 +88,7 @@ const LAYOUTS: Dictionary = {
 		"backup_data_end": 0x1D83,
 		"backup_checksum": 0x1F0D,
 		"backup_check_2": 0x1F0F,
+		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x2865,
 		"backup_segments": [
@@ -275,6 +281,7 @@ static func _read_save(
 	save.rom_sha1 = rom_sha1
 	save.slot = slot
 	save.player_name = Gen2Text.decode_fixed(raw, int(layout["player_name"]), NAME_LENGTH)
+	save.player_id = _read_u16_be(raw, int(layout["player_id"]))
 
 	var species_start: int = party_start + 1
 	var terminator: int = int(raw[species_start + count])
@@ -332,6 +339,7 @@ static func _read_mon(raw: PackedByteArray, start: int) -> Gen2SaveMon:
 
 static func _write_save(raw: PackedByteArray, save: Gen2SaveData, data: GameData, layout: Dictionary) -> void:
 	_write_fixed_text(raw, int(layout["player_name"]), NAME_LENGTH, save.player_name)
+	_write_u16_be(raw, int(layout["player_id"]), save.player_id)
 	var party_start: int = int(layout["party"])
 	raw[party_start] = save.party.size()
 	var species_start: int = party_start + 1
