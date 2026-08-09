@@ -28,6 +28,9 @@ const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## lower there.
 const ENGINE_CREDITS_SKIP: int = 15
 const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
+## The one entry pokegold does not ship, and so the index every profile split in
+## this table is measured from. See engine_flag().
+const ENGINE_MOBILE_SYSTEM: int = 16
 ## The three wPokegearFlags/wStatusFlags bits the radio card reads
 ## (data/events/engine_flags.asm). Only the last is profile split, since it sits
 ## in the wStatusFlags2 run after Crystal's extra entry.
@@ -361,6 +364,19 @@ func bargain_merchant_closed(crystal: bool = true) -> bool:
 static func badge_flag(badge: int, crystal: bool = true) -> int:
 	var flags: Array[int] = BADGE_ENGINE_FLAGS if crystal else BADGE_ENGINE_FLAGS_GOLD_SILVER
 	return flags[badge] if badge >= 0 and badge < flags.size() else -1
+
+
+## [param crystal_index] resolved onto the table [param crystal] selects. The
+## two tables differ only in that pokegold ships no ENGINE_MOBILE_SYSTEM, so
+## everything past that one index sits one lower there. The named pairs above
+## are this same shift written out for the flags a runtime path reads; a caller
+## holding a Crystal index and no pair asks here. ENGINE_MOBILE_SYSTEM itself
+## answers -1 off Crystal, which is_engine_flag_active() reads as inactive,
+## since Gold and Silver have no flag to map it onto.
+static func engine_flag(crystal_index: int, crystal: bool = true) -> int:
+	if crystal or crystal_index < ENGINE_MOBILE_SYSTEM:
+		return crystal_index
+	return crystal_index - 1 if crystal_index > ENGINE_MOBILE_SYSTEM else -1
 
 
 ## The engine flag SetStrengthFlag sets and TryStrengthOW and

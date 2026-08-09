@@ -862,6 +862,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 				int(_request.get("map_group", 0)), int(_request.get("map_number", 0))
 			)
 			_staged_scenes[map_key] = int(command["scene"])
+		Gen2WorldScript.CHECKVER:
+			## Script_checkver answers GS_VERSION, which
+			## `constants/misc_constants.asm` defines as 0 for Gold and 1 for
+			## Silver; pokecrystal defines it 0 unconditionally.
+			_script_value = 1 if data != null and data.id == &"silver" else 0
 		Gen2WorldScript.SETVAL:
 			_script_value = int(command["value"])
 		Gen2WorldScript.ADDVAL:
@@ -1037,6 +1042,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	var handled_base: Array = [
 		Gen2WorldScript.CHECKMAPSCENE, Gen2WorldScript.SETMAPSCENE,
 		Gen2WorldScript.CHECKSCENE, Gen2WorldScript.SETSCENE,
+		Gen2WorldScript.CHECKVER,
 		Gen2WorldScript.SETVAL, Gen2WorldScript.ADDVAL, Gen2WorldScript.RANDOM,
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
 		Gen2WorldScript.CHECKFLAG, Gen2WorldScript.CLEARFLAG, Gen2WorldScript.SETFLAG,

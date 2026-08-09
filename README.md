@@ -49,7 +49,7 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   entry, and replace the world or battle renderer, which is what a 3D or HD
 >   view needs.
 >
-> The real-data story preview walks the Crystal route from Elm's lab through
+> The real-data story preview walks all three cartridges from Elm's lab through
 > Route 29, Cherrygrove, Route 30 and Mr. Pokémon's Mystery Egg event to the
 > Zephyr Badge, then on through the Togepi egg, Route 32, Union Cave, Route 33,
 > Kurt and Slowpoke Well to the Hive Badge, and through Ilex Forest's Farfetch'd
@@ -63,8 +63,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Red Gyarados and Lance, the Rocket hideout's three floors and Pryce to the
 > Glacier Badge, back west for the Goldenrod Radio Tower's basement and card
 > keys and its Rocket boss, then Route 44 and the Ice Path to Blackthorn, its
-> gym's boulder puzzle and Clair, and the Dragon Shrine's quiz for the Rising
-> Badge.
+> gym's boulder puzzle and Clair, and the Rising Badge: the Dragon Shrine's quiz
+> on Crystal, the Dragon's Den ball Clair follows you to on Gold and Silver.
+> Kanto follows, all sixteen badges and Red on Mt. Silver.
 > Missing: full story state, the dex, the remaining special-call branches and
 > story-driven permanent contacts.
 
