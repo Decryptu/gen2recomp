@@ -239,8 +239,9 @@ cartridge's own graphics with its badge pages and its play timer.
 Pokedex lists the species in the cartridge's own NEW, OLD and A to Z orders,
 showing a name once seen and a caught mark once caught, and opens each seen
 species' entry with its category, height, weight and both description pages.
-SELECT changes the order; the mode is saved. Its SEARCH screen, the Unown dex
-and the entry screen's AREA, CRY and PRNT buttons are not built.
+SELECT changes the order and the mode is saved; START searches by one or two
+types over the species already caught. The Unown dex and the entry screen's
+AREA, CRY and PRNT buttons are not built.
 Pokegear opens its card list, in the source's clock, map, phone, radio order and
 showing only cards the player owns; the map card keeps its position marked
 unavailable. The radio card tunes with left and right over the cartridge's own

@@ -752,3 +752,51 @@ func test_the_chosen_dex_mode_survives_closing_the_dex() -> void:
 	_world_screen._open_pokedex()
 	var reopened: Gen2PokedexScreen = _world_screen._pokedex_host
 	assert_eq(reopened.get("_dex").mode, RomLayout.DEXMODE_OLD)
+
+
+## `Pokedex_UpdateMainScreen`'s START reaches the search screen, and its CANCEL
+## row comes back to the listing.
+func test_the_dex_search_screen_opens_from_the_listing_and_cancels_back() -> void:
+	await _open_world()
+	var state: Gen2WorldState = _world_screen._world.state
+	state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	assert_not_null(dex)
+
+	dex.handle_button(Gen2Button.START)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.SEARCH)
+
+	## Down twice reaches BEGIN SEARCH and once more CANCEL, which leaves.
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.LIST)
+	assert_eq(dex.get("_dex").listing_height, Gen2Pokedex.LISTING_HEIGHT)
+
+
+## A search with a caught species behind it reaches the results screen, and B
+## returns through the search screen with the main listing put back.
+func test_a_dex_search_reaches_its_results_and_back() -> void:
+	await _open_world()
+	var state: Gen2WorldState = _world_screen._world.state
+	state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	state.set_species_caught(Fixture.TRAINER_SPECIES)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	var model: Gen2Pokedex = dex.get("_dex")
+
+	dex.handle_button(Gen2Button.START)
+	## The fixture's species are all NORMAL, which is the row the screen opens on.
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.SEARCH_RESULTS)
+	assert_eq(model.search_result_count, 1)
+	assert_eq(model.listing_height, Gen2Pokedex.SEARCH_RESULTS_HEIGHT)
+	assert_eq(model.selected_species(), Fixture.TRAINER_SPECIES)
+
+	dex.handle_button(Gen2Button.B)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.SEARCH)
+	assert_eq(model.search_type_1, 1, "the search screen re-initialises its rows")
