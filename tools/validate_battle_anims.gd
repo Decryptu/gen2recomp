@@ -98,7 +98,70 @@ func _initialize() -> void:
 		_verify_palettes(game_id, data)
 		_verify_gfx(game_id, data)
 		_run_every_animation(game_id, data)
+		_play_every_animation(game_id, data)
 	_finish()
+
+
+## Every animation played through [Gen2BattleAnimPlayer], which is the script
+## plus the object pool, the tile window and the shadow OAM.
+##
+## Nothing here asserts what an animation looks like; what it pins is that all
+## 278 spawn, step and retire their objects inside the cartridge's own limits,
+## and it prints the inventory of what is still to build.
+func _play_every_animation(game_id: StringName, data: GameData) -> void:
+	var anims: Gen2BattleAnimData = Gen2BattleAnimData.from_game_data(data)
+	if not _check(anims != null, "%s: no battle animation data in the cache." % game_id):
+		return
+	var objects: int = 0
+	var sprites: int = 0
+	var leaked: int = 0
+	var functions: Dictionary = {}
+	var effects: Dictionary = {}
+	for index: int in anims.count(&"scripts"):
+		for enemy_turn: bool in [false, true]:
+			var player: Gen2BattleAnimPlayer = Gen2BattleAnimPlayer.create(
+				anims, index, enemy_turn
+			)
+			if not _check(
+				player != null, "%s: animation %d would not start." % [game_id, index]
+			):
+				continue
+			var frames: int = 0
+			while player.advance_frame() and frames < MAX_FRAMES:
+				frames += 1
+				objects = maxi(objects, player.objects().size())
+				sprites = maxi(sprites, player.sprites().size())
+			_check(
+				not player.failed(),
+				"%s: animation %d ran off its region." % [game_id, index]
+			)
+			# Every object the script spawns should be gone by the end, either
+			# through its own `oamdelete` or through `anim_incobj`. One that is
+			# not is an object whose motion callback would have retired it.
+			leaked = maxi(leaked, player.objects().size())
+			var missing: Dictionary = player.unimplemented()
+			for id: int in missing["functions"]:
+				functions[id] = int(functions.get(id, 0)) + 1
+			for id: int in missing["bg_effects"]:
+				effects[id] = int(effects.get(id, 0)) + 1
+	_check(
+		objects <= Gen2BattleAnimPlayer.MAX_OBJECTS,
+		"%s: %d objects at once, past the %d slots." % [
+			game_id, objects, Gen2BattleAnimPlayer.MAX_OBJECTS,
+		]
+	)
+	_check(
+		sprites <= Gen2BattleAnimPlayer.MAX_SPRITES,
+		"%s: %d sprites at once, past the hardware's %d." % [
+			game_id, sprites, Gen2BattleAnimPlayer.MAX_SPRITES,
+		]
+	)
+	print("%s: played %d animations both ways; at most %d objects and %d sprites at once." % [
+		game_id, anims.count(&"scripts"), objects, sprites,
+	])
+	print("%s: still to build, %d motion callbacks and %d bg effects; at most %d objects still live at the end." % [
+		game_id, functions.size(), effects.size(), leaked,
+	])
 
 
 func _verify_regions(game_id: StringName, data: GameData) -> void:
