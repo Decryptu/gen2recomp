@@ -54,6 +54,13 @@ const STAB_DENOMINATOR: int = 2
 ## there is no STAB and no matchup, and it is never a critical.
 const CONFUSION_POWER: int = 40
 
+## `TruncateHL_BC` holds the attack in `hl` and the defense in `bc` and shifts
+## both right by two until each fits in a byte, flooring each at one. The pair is
+## shifted together, so the ratio survives and the magnitude does not, which is
+## what the formula's own multiply by the attack then reads.
+const STAT_BYTE_MAX: int = 0xFF
+const TRUNCATE_SHIFT: int = 4
+
 
 ## A hit, rolled. Returns what [method calculate_with] returns.
 static func calculate(
@@ -64,14 +71,16 @@ static func calculate(
 	focus_energy: bool = false,
 	defense_halved: bool = false,
 	damage_multiplier: int = 1,
-	weather: int = Gen2Weather.NONE
+	weather: int = Gen2Weather.NONE,
+	defender_screens: int = Gen2Screens.NONE
 ) -> Dictionary:
 	var scope_lens: bool = attacker != null \
 		and Gen2HeldItem.effect_of(attacker.data, attacker.item) == Gen2HeldItem.CRITICAL_UP
 	return calculate_with(
 		attacker, defender, move,
 		roll_critical(move, rng, focus_energy, scope_lens),
-		roll_variation(rng), defense_halved, damage_multiplier, weather
+		roll_variation(rng), defense_halved, damage_multiplier, weather,
+		defender_screens
 	)
 
 
@@ -90,7 +99,8 @@ static func calculate_with(
 	variation: int,
 	defense_halved: bool = false,
 	damage_multiplier: int = 1,
-	weather: int = Gen2Weather.NONE
+	weather: int = Gen2Weather.NONE,
+	defender_screens: int = Gen2Screens.NONE
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
@@ -118,13 +128,19 @@ static func calculate_with(
 				break
 		return out
 
-	var defense: int = _defense_stat(attacker, defender, move_type, critical)
+	# `TruncateHL_BC` runs at the end of `damagestats`, so the pair reaches
+	# `BattleCommand_DamageCalc` already byte-sized and Selfdestruct's halving
+	# lands on the truncated value rather than the raw one.
+	var truncated: Array = truncate_stats(
+		_attack_stat(attacker, defender, move_type, critical),
+		_defense_stat(attacker, defender, move_type, critical, defender_screens),
+		Gen2WorldState.is_crystal_profile(attacker.data)
+	)
+	var defense: int = int(truncated[1])
 	if defense_halved:
 		@warning_ignore("integer_division")
 		defense = maxi(defense / 2, 1)
-	var damage: int = base_damage(
-		attacker.level, power, _attack_stat(attacker, defender, move_type, critical), defense
-	)
+	var damage: int = base_damage(attacker.level, power, int(truncated[0]), defense)
 
 	# The type-boosting items land here, on the finished base damage and ahead of
 	# the critical multiplier, which is where `PlayerAttackDamage` applies them:
@@ -182,6 +198,9 @@ static func calculate_with(
 ##
 ## A defense of zero would divide by zero on the hardware too, so the cartridge
 ## floors it at one and so does this.
+##
+## [param attack] and [param defense] arrive already truncated by
+## [method truncate_stats]; nothing here shifts them again.
 static func base_damage(level: int, power: int, attack: int, defense: int) -> int:
 	@warning_ignore("integer_division")
 	var out: int = level * 2 / 5 + 2
@@ -189,6 +208,33 @@ static func base_damage(level: int, power: int, attack: int, defense: int) -> in
 	@warning_ignore("integer_division")
 	out = out / maxi(defense, 1) / 50
 	return out
+
+
+## `TruncateHL_BC`: the attack and the defense shifted right together, two bits
+## at a time, until both fit in a byte, each flooring at one rather than at zero.
+##
+## Not cosmetic, and not a ratio: `base_damage` multiplies by the attack before
+## it divides by the defense, so shifting both changes the answer. A Reflect
+## doubling a 200 Defense to 400 is the common way past a byte, which is why this
+## and the screens landed together, but a +6 stage, a Thick Club or a Light Ball
+## reach it without one.
+##
+## [param crystal] is the single-player fix. `.finish` re-checks and loops back
+## only when `wLinkMode` is not `LINK_COLOSSEUM`; pokegold has no such check at
+## all, so on Gold and Silver one pass is all a value gets and anything still
+## over a byte wraps, which is `docs/bugs_and_glitches.md`'s "Reflect and Light
+## Screen can make (Special) Defense wrap around above 1024".
+static func truncate_stats(attack: int, defense: int, crystal: bool = true) -> Array:
+	var out_attack: int = attack
+	var out_defense: int = defense
+	while out_attack > STAT_BYTE_MAX or out_defense > STAT_BYTE_MAX:
+		@warning_ignore("integer_division")
+		out_defense = maxi(out_defense / TRUNCATE_SHIFT, 1)
+		@warning_ignore("integer_division")
+		out_attack = maxi(out_attack / TRUNCATE_SHIFT, 1)
+		if not crystal:
+			break
+	return [out_attack & STAT_BYTE_MAX, out_defense & STAT_BYTE_MAX]
 
 
 ## The random spread, applied last. A hit of one is left alone: there is nothing
@@ -237,8 +283,23 @@ static func roll_variation(rng: RandomNumberGenerator) -> int:
 ## against its own Defense, with the stages and any burn applied exactly as an
 ## ordinary physical hit would read them, but no STAB, no type matchup and no
 ## critical, because the hit is not really an attack at all.
-static func confusion_damage(mon: Gen2BattleMon, rng: RandomNumberGenerator) -> int:
-	var damage: int = base_damage(mon.level, CONFUSION_POWER, mon.stat("attack"), mon.stat("defense"))
+##
+## [param screens] is the confused Pokémon's own side's, which is the side being
+## hit: `HitSelfInConfusion` picks `wPlayerScreens` for the player's turn and
+## doubles the Defense off it exactly as `PlayerAttackDamage` does, so a Reflect
+## halves what confusion takes out of the Pokémon that put it up.
+static func confusion_damage(
+	mon: Gen2BattleMon, rng: RandomNumberGenerator, screens: int = Gen2Screens.NONE
+) -> int:
+	var defense: int = mon.stat("defense")
+	if Gen2Screens.has(screens, Gen2Screens.REFLECT):
+		defense *= Gen2Screens.DEFENCE_MULTIPLIER
+	var truncated: Array = truncate_stats(
+		mon.stat("attack"), defense, Gen2WorldState.is_crystal_profile(mon.data)
+	)
+	var damage: int = base_damage(
+		mon.level, CONFUSION_POWER, int(truncated[0]), int(truncated[1])
+	)
 	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
 	return apply_variation(damage, roll_variation(rng))
 
@@ -279,14 +340,24 @@ static func _attack_stat(
 	return out
 
 
-## The defending stat, half again if `DittoMetalPowder` answers: the Pokémon
-## being hit is a Ditto holding Metal Powder.
+## The defending stat, doubled by the defender's own screen and half again if
+## `DittoMetalPowder` answers: the Pokémon being hit is a Ditto holding Metal
+## Powder.
+##
+## The screen is applied to the boosted stat and only there. `PlayerAttackDamage`
+## doubles the pair before `CheckDamageStatsCritical`, and a critical that
+## reaches `.thickclub`'s no-carry branch reloads the unmodified stat over it, so
+## the same critical that ignores the defender's stages ignores its screen with
+## them.
 static func _defense_stat(
-	attacker: Gen2BattleMon, defender: Gen2BattleMon, move_type: int, critical: bool
+	attacker: Gen2BattleMon, defender: Gen2BattleMon, move_type: int, critical: bool,
+	defender_screens: int = Gen2Screens.NONE
 ) -> int:
 	var key: String = "defense" if is_physical(move_type) else "sp_defense"
-	var out: int = defender.unmodified_stat(key) \
-		if _ignores_stages(attacker, defender, move_type, critical) else defender.stat(key)
+	var ignores: bool = _ignores_stages(attacker, defender, move_type, critical)
+	var out: int = defender.unmodified_stat(key) if ignores else defender.stat(key)
+	if not ignores and Gen2Screens.doubles_defence(defender_screens, move_type):
+		out *= Gen2Screens.DEFENCE_MULTIPLIER
 	if Gen2HeldItem.boosts_defence(defender.species, defender.item):
 		out = Gen2HeldItem.metal_powder_defence(out)
 	return out

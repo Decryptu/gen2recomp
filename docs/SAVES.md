@@ -28,7 +28,8 @@ Save format version 2 stores:
 
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, trapping, Fly, Dig, Rollout and rampage,
-is never saved, and neither is the battle's own weather. A held item is not
+is never saved, and neither is the battle's own weather or its screens. A held
+item is not
 volatile: a berry eaten in a battle is gone from the party afterwards.
 The validator checks the selected `GameData`. Slots live under
 `user://save_slots` per game revision and are created on demand rather than

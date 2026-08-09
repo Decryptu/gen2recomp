@@ -197,6 +197,21 @@ const START_RAIN: StringName = &"startrain"
 const START_SUN: StringName = &"startsun"
 const START_SANDSTORM: StringName = &"startsandstorm"
 
+## `BattleCommand_Screen`, which is Light Screen and Reflect both: one command
+## that reads the move's own effect byte to decide which bit it is setting.
+## Fails, without restarting the count, on a second use of the same one.
+const SCREEN: StringName = &"screen"
+
+## `BattleCommand_Safeguard`, the same shape a side at a time: sets the flag for
+## [constant Gen2Screens.TURNS] and fails on a second use.
+const SAFEGUARD: StringName = &"safeguard"
+
+## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
+## moves that carry it end on `SafeguardProtectText`; the six secondary effects
+## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
+## is why that is a check inside each of them rather than a step of its own.
+const CHECK_SAFEGUARD: StringName = &"checksafeguard"
+
 ## Recover, Softboiled, Milk Drink and Rest, and separately the three heals that
 ## read the clock. Both refuse at full HP, and both spend the turn doing it.
 const HEAL: StringName = &"heal"
@@ -479,6 +494,12 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_start_weather(turn, Gen2Weather.SUN)
 		START_SANDSTORM:
 			_start_weather(turn, Gen2Weather.SANDSTORM)
+		SCREEN:
+			_screen(turn)
+		SAFEGUARD:
+			_safeguard(turn)
+		CHECK_SAFEGUARD:
+			_check_safeguard(turn)
 		HEAL:
 			_heal(turn)
 		TIMED_HEAL:
@@ -551,7 +572,8 @@ static func _damage_calc(turn: Gen2Turn) -> void:
 		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
 		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
 		rollout_multiplier,
-		turn.battle.weather
+		turn.battle.weather,
+		turn.battle.screens[turn.target]
 	)
 	turn.damage = int(result["damage"])
 	turn.critical = bool(result["critical"])
@@ -859,7 +881,9 @@ static func _check_status(turn: Gen2Turn) -> void:
 			turn.emit(Gen2Battle.CONFUSED)
 			if Gen2Substatus.rolls_confusion_hit(turn.rng()):
 				_cancel_charge(mon)
-				var dealt: int = mon.take_damage(Gen2Damage.confusion_damage(mon, turn.rng()))
+				var dealt: int = mon.take_damage(Gen2Damage.confusion_damage(
+					mon, turn.rng(), turn.battle.screens[turn.side]
+				))
 				turn.emit(Gen2Battle.HURT_ITSELF, {
 					"amount": dealt, "hp": mon.hp, "max_hp": mon.max_hp(),
 				})
@@ -933,6 +957,12 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 		return
 
 	if turn.failed_chance:
+		return
+
+	# `SafeCheckSafeguard`, last of the four `*Target` commands' checks and behind
+	# `wEffectFailed`. Nothing is said: a Safeguard stops a secondary status the
+	# way a held item does, and only `BattleCommand_CheckSafeguard` speaks.
+	if _safeguard_refuses(turn, turn.target):
 		return
 
 	if _status_move_animates(turn, flag):
@@ -1065,6 +1095,11 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	if turn.failed_chance:
 		return
 
+	# `BattleCommand_ConfuseTarget`'s own `SafeCheckSafeguard`, ahead of the
+	# substitute and already-confused checks and silent like the four statuses'.
+	if _safeguard_refuses(turn, turn.target):
+		return
+
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.is_fainted() or Gen2Substatus.has(defender.substatus, Gen2Substatus.CONFUSED):
 		return
@@ -1128,7 +1163,7 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 		if hit > 0:
 			var result: Dictionary = Gen2Damage.calculate(
 				attacker, defender, turn.move, turn.rng(), focus_energy,
-				false, 1, turn.battle.weather
+				false, 1, turn.battle.weather, turn.battle.screens[turn.target]
 			)
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
@@ -1317,8 +1352,12 @@ static func _rampage(turn: Gen2Turn) -> void:
 		if mon.rampage_turns <= 0:
 			mon.substatus &= ~Gen2Substatus.RAMPAGING
 			mon.rampage_move = 0
-			mon.confusion_turns = Gen2Substatus.roll_rampage_confusion(turn.rng())
-			mon.substatus |= Gen2Substatus.CONFUSED
+			# `BattleCommand_Rampage` switches turn around its own
+			# `SafeCheckSafeguard` and back, so the Safeguard that matters is the
+			# rampaging Pokémon's own: it is the one about to be confused.
+			if not _safeguard_refuses(turn, turn.side):
+				mon.confusion_turns = Gen2Substatus.roll_rampage_confusion(turn.rng())
+				mon.substatus |= Gen2Substatus.CONFUSED
 		return
 
 	mon.substatus |= Gen2Substatus.RAMPAGING
@@ -1556,6 +1595,60 @@ static func _start_weather(turn: Gen2Turn, weather: int) -> void:
 	turn.battle.weather_turns = Gen2Weather.TURNS
 	_animate_current_move(turn)
 	turn.emit(Gen2Battle.WEATHER_STARTED, {"weather": weather})
+
+
+## `BattleCommand_Screen`: Light Screen and Reflect, one command told apart by
+## the move's own effect byte.
+##
+## The flag goes on the user's side, which is the side being defended, and
+## survives every switch that side makes. A second use fails outright rather than
+## restarting the count, the way Sandstorm does and Rain Dance does not.
+static func _screen(turn: Gen2Turn) -> void:
+	var flag: int = Gen2Screens.LIGHT_SCREEN \
+		if turn.effect() == Gen2MoveEffect.LIGHT_SCREEN else Gen2Screens.REFLECT
+	var counts: Dictionary = turn.battle.light_screen_turns \
+		if flag == Gen2Screens.LIGHT_SCREEN else turn.battle.reflect_turns
+	_raise_screen(turn, flag, counts)
+
+
+## `BattleCommand_Safeguard`, which is [method _screen] with one bit and one
+## count of its own.
+static func _safeguard(turn: Gen2Turn) -> void:
+	_raise_screen(turn, Gen2Screens.SAFEGUARD, turn.battle.safeguard_turns)
+
+
+## The half all three share: refuse if it is already up, otherwise set the bit,
+## load the count and say so.
+static func _raise_screen(turn: Gen2Turn, flag: int, counts: Dictionary) -> void:
+	if Gen2Screens.has(turn.battle.screens[turn.side], flag):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	turn.battle.screens[turn.side] |= flag
+	counts[turn.side] = Gen2Screens.TURNS
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.SCREEN_SET, {"screen": flag})
+
+
+## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status
+## move outright, with `SafeguardProtectText` and the move ended.
+##
+## `wAttackMissed` is set before the text, so everything behind this in the list
+## is skipped and the move counts as a miss for whatever reads that back.
+static func _check_safeguard(turn: Gen2Turn) -> void:
+	if not Gen2Screens.has(turn.battle.screens[turn.target], Gen2Screens.SAFEGUARD):
+		return
+	turn.missed = true
+	turn.emit(Gen2Battle.SAFEGUARD_PROTECTED, {"target": turn.target})
+	turn.end()
+
+
+## `SafeCheckSafeguard`: the quiet half, which every secondary status effect asks
+## before it writes anything. Reads the side opposite whoever is acting, so a
+## rampage confusing its own user has to ask about the user's side and the
+## caller switches turn around it the way `BattleCommand_Rampage` does.
+static func _safeguard_refuses(turn: Gen2Turn, side: int) -> bool:
+	return Gen2Screens.has(turn.battle.screens[side], Gen2Screens.SAFEGUARD)
 
 
 ## `BattleCommand_Heal`: Recover, Softboiled and Milk Drink take back half the

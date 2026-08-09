@@ -109,6 +109,13 @@ const SUNNY_DAY: int = 241
 const SANDSTORM: int = 201
 const THUNDER_ALWAYS_PARALYZES: int = 274
 
+## The three screens, real numbers off `data/moves/moves.asm`. All three are
+## powerless status moves whose accuracy is never rolled, the same shape the
+## weather rows above have.
+const LIGHT_SCREEN: int = 113
+const REFLECT: int = 115
+const SAFEGUARD: int = 219
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -453,6 +460,9 @@ static func _moves() -> Array:
 		RAIN_DANCE: ["RAIN DANCE", 0, WATER, 229, 5, Gen2MoveEffect.RAIN_DANCE, 0],
 		SUNNY_DAY: ["SUNNY DAY", 0, FIRE, 229, 5, Gen2MoveEffect.SUNNY_DAY, 0],
 		SANDSTORM: ["SANDSTORM", 0, ROCK, 255, 10, Gen2MoveEffect.SANDSTORM, 0],
+		LIGHT_SCREEN: ["LIGHT SCREEN", 0, PSYCHIC_TYPE, 255, 30, Gen2MoveEffect.LIGHT_SCREEN, 0],
+		REFLECT: ["REFLECT", 0, PSYCHIC_TYPE, 255, 20, Gen2MoveEffect.REFLECT, 0],
+		SAFEGUARD: ["SAFEGUARD", 0, NORMAL, 255, 25, Gen2MoveEffect.SAFEGUARD, 0],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.

@@ -169,6 +169,17 @@ const WEATHER_CONTINUES: StringName = &"weather_continues"
 const WEATHER_ENDED: StringName = &"weather_ended"
 const HURT_BY_SANDSTORM: StringName = &"hurt_by_sandstorm"
 
+## Reflect, Light Screen and Safeguard going up and running out.
+## [code]screen[/code] on all three is the [Gen2Screens] flag, so one pair of
+## events covers the three moves. [constant SCREEN_SET] carries the side that put
+## it up, which is also the side it protects; [constant SCREEN_FADED] the side it
+## is leaving. [constant SAFEGUARD_PROTECTED] is `BattleCommand_CheckSafeguard`'s
+## own line, the one a status move gets when it is refused outright rather than
+## quietly, and it carries the `target` it failed against.
+const SCREEN_SET: StringName = &"screen_set"
+const SCREEN_FADED: StringName = &"screen_faded"
+const SAFEGUARD_PROTECTED: StringName = &"safeguard_protected"
+
 ## A trainer spent one of its two items on whoever it has out. [code]item[/code]
 ## is what was spent and [code]effect[/code] is [method Gen2AIItems.apply]'s own
 ## answer, so a screen can follow the bar or the stage without asking the battle
@@ -311,6 +322,14 @@ var flee_attempts: int = 0
 ## weather, so a fresh [Gen2Battle] starts clear.
 var weather: int = Gen2Weather.NONE
 var weather_turns: int = 0
+
+## `wPlayerScreens`/`wEnemyScreens` and the three counters beside each, keyed by
+## side. Field state, not Pokémon state: nothing clears these on a switch, so a
+## Reflect outlives whoever put it up and only its own count ends it.
+var screens: Dictionary = {PLAYER: Gen2Screens.NONE, ENEMY: Gen2Screens.NONE}
+var light_screen_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
+var reflect_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
+var safeguard_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
 
 ## `wTimeOfDay`, which only the three time-based heals read. It holds
 ## `MORN_F`/`DAY_F`/`NITE_F` (engine/rtc/rtc.asm, `GetTimeOfDay`), the bit
@@ -975,14 +994,16 @@ func _tick_wrap(events: Array) -> void:
 ## `SetEnemyTurn` reading `GetUserItem`, so the player is handled first; the
 ## third is the same two calls reading `GetOpponentItem`, so the enemy is.
 ## `HandleDefrost` runs between the second and the third and is not an item
-## effect at all; `HandleSafeguard` and `HandleScreens` sit behind it and are
-## still out, since neither has a screens byte to read.
+## effect at all; `HandleSafeguard` and `HandleScreens` sit behind it in that
+## order, and are not item effects either.
 func _tick_held_items(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		_use_leftovers(side, events)
 	for side: int in [PLAYER, ENEMY]:
 		_use_pp_berry(side, events)
 	_tick_defrost(events)
+	_tick_safeguard(events)
+	_tick_screens(events)
 	for side: int in [ENEMY, PLAYER]:
 		use_hp_berry(side, events)
 		use_status_berry(side, events)
@@ -1012,6 +1033,51 @@ func _tick_defrost(events: Array) -> void:
 		# else.
 		current.status = Gen2Status.NONE
 		events.append({"type": THAWED, "side": side})
+
+
+## `HandleSafeguard`: one turn off each side's count, and the line when it runs
+## out. Player first, then enemy, the same order [method _tick_defrost] uses and
+## for the same reason: the branch that reverses them is the link one.
+##
+## The count is read only while the flag is up, so a side without a Safeguard
+## rolls nothing and prints nothing.
+func _tick_safeguard(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		if not Gen2Screens.has(screens[side], Gen2Screens.SAFEGUARD):
+			continue
+		safeguard_turns[side] = int(safeguard_turns[side]) - 1
+		if int(safeguard_turns[side]) > 0:
+			continue
+		screens[side] &= ~Gen2Screens.SAFEGUARD
+		safeguard_turns[side] = 0
+		events.append({
+			"type": SCREEN_FADED, "side": side, "screen": Gen2Screens.SAFEGUARD,
+		})
+
+
+## `HandleScreens`: Light Screen before Reflect on each side, which is the order
+## `.TickScreens` tests the two bits in, and the player's side before the
+## enemy's.
+##
+## Unlike Safeguard there is no shared count: `wPlayerLightScreenCount` and the
+## Reflect count beside it are separate bytes, so a side can hold both at once
+## and lose them on different turns.
+func _tick_screens(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		for row: Array in [
+			[Gen2Screens.LIGHT_SCREEN, light_screen_turns],
+			[Gen2Screens.REFLECT, reflect_turns],
+		]:
+			var flag: int = int(row[0])
+			var counts: Dictionary = row[1]
+			if not Gen2Screens.has(screens[side], flag):
+				continue
+			counts[side] = int(counts[side]) - 1
+			if int(counts[side]) > 0:
+				continue
+			screens[side] &= ~flag
+			counts[side] = 0
+			events.append({"type": SCREEN_FADED, "side": side, "screen": flag})
 
 
 ## `HandleLeftovers`: a sixteenth back every turn, and nothing at all on a
