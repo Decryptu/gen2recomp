@@ -1226,6 +1226,60 @@ func test_gold_profile_specials_normalize_onto_the_crystal_handlers() -> void:
 	RomCache.clear(gold_directory)
 
 
+## Script_checkver answers GS_VERSION into wScriptVar, which
+## constants/misc_constants.asm defines as 0 for Gold and 1 for Silver;
+## pokecrystal defines it 0 unconditionally. RadioTower5FRocketBossScript is the
+## one script on the walked route that reads it, and its `iftrue` is what
+## chooses the Silver Wing over the Rainbow Wing, so the two profiles have to
+## disagree here and Crystal has to answer with Gold. The opcode is $18 in both
+## pins, below raw_opcode()'s $52 shift, so only `end` is profile split.
+func test_checkver_answers_the_cartridges_own_gs_version() -> void:
+	var address: int = 0xD1D8
+	for row: Array in [
+		["gold", 0, "0f1e2d3c4b5a6978"],
+		["silver", 1, "69780f1e2d3c4b5a"],
+		["", 0, ""],
+	]:
+		var game_id: String = String(row[0])
+		var expected: int = int(row[1])
+		var crystal: bool = game_id.is_empty()
+		var directory: String = _directory
+		var saved_directory: String = _directory
+		if not crystal:
+			directory = RomCache.directory_for(
+				StringName("testworldver%s" % game_id), String(row[2])
+			)
+			RomCache.clear(directory)
+			RomCache.prepare(directory)
+			_directory = directory
+			_write_cache(game_id)
+			_directory = saved_directory
+
+		var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+		scripts["48:6B00"] = [
+			Gen2WorldScript.CHECKVER,
+			Gen2WorldScript.WRITEMEM, address & 0xFF, address >> 8,
+			Gen2WorldScript.END if crystal else Gen2WorldScript.GOLD_END,
+		]
+		RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+
+		var data: GameData = GameData.open_directory(directory)
+		var state := Gen2WorldState.new()
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": 0x6B00,
+		})
+		var result: Dictionary = runner.advance()
+		assert_eq(result["status"], &"complete", JSON.stringify(result))
+		## Written rather than branched on, so the value itself is pinned: an
+		## `iftrue` would pass for any non-zero answer.
+		assert_eq(
+			state.script_memory(address), expected,
+			"checkver on %s" % (game_id if not crystal else "crystal"),
+		)
+		if not crystal:
+			RomCache.clear(directory)
+
+
 func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
 	# Slowpoke Well's cleared script runs FadeOutToWhite before HealParty
 	# (maps/SlowpokeWellB1F.asm, TrainerGruntM1). It is index 46 in both pins,
