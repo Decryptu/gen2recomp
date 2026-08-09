@@ -345,14 +345,20 @@ func _blit_sprite(into: Image, sprite: Dictionary) -> void:
 
 
 ## The eight pixels by eight of one animation tile, found through the window
-## [method Gen2BattleAnimPlayer.tiles] describes: which imported sheet each tile
-## of the window came from, counted from `BATTLEANIM_BASE_TILE`.
+## [method Gen2BattleAnimPlayer.tiles] describes, counted from
+## `BATTLEANIM_BASE_TILE`.
+##
+## A window tile is either an imported sheet's or one of the battle's own two
+## pictures, which is what `anim_battlergfx_1row` and `..._2row` put there so an
+## effect can move a battler as objects.
 func _sprite_tile(tile: int) -> PackedByteArray:
 	var window: Array = _view.get("anim_tiles", [])
 	var at: int = tile - Gen2BattleAnimObject.BASE_TILE
 	if at < 0 or at >= window.size() or not window[at] is Dictionary:
 		return PackedByteArray()
 	var entry: Dictionary = window[at]
+	if entry.has("battler_tile"):
+		return _battler_tile(int(entry["battler_tile"]))
 	var strip: PackedByteArray = _data.battle_anim_gfx_indices(int(entry["gfx"]))
 	var index: int = int(entry["tile"])
 	var width: int = strip.size() / TILE if strip.size() > 0 else 0
@@ -365,6 +371,32 @@ func _sprite_tile(tile: int) -> PackedByteArray:
 		var from: int = row * width + index * TILE
 		for column: int in TILE:
 			out[row * TILE + column] = strip[from + column]
+	return out
+
+
+## One tile of `vTiles2`, out of the same padded boxes the tilemap is drawn
+## from, so a battler moved as objects is the picture that was on the field.
+func _battler_tile(vram: int) -> PackedByteArray:
+	var enemy: bool = vram < Gen2BattleScreenMap.PLAYER_BASE_TILE
+	var side: int = Gen2BattleScreenMap.ENEMY_SIDE if enemy \
+		else Gen2BattleScreenMap.PLAYER_SIDE
+	var base: int = Gen2BattleScreenMap.ENEMY_BASE_TILE if enemy \
+		else Gen2BattleScreenMap.PLAYER_BASE_TILE
+	var pixels: PackedByteArray = _enemy_pixels if enemy else _player_pixels
+	var index: int = vram - base
+	var box: int = side * TILE
+	if index < 0 or index >= side * side or pixels.size() < box * box:
+		return PackedByteArray()
+
+	@warning_ignore("integer_division")
+	var left: int = (index / side) * TILE
+	var top: int = (index % side) * TILE
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(TILE * TILE)
+	for row: int in TILE:
+		var from: int = (top + row) * box + left
+		for column: int in TILE:
+			out[row * TILE + column] = pixels[from + column]
 	return out
 
 

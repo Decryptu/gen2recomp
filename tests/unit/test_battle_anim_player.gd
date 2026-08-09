@@ -61,6 +61,55 @@ func _player(body: Array, rows: int = 2, function: int = 0) -> Gen2BattleAnimPla
 	return Gen2BattleAnimPlayer.create(_data(body, rows, function), 0)
 
 
+## `BattleAnimCmd_BattlerGFX_2Row` ($da) puts two rows of each battler's own
+## picture into the top of the window, so an effect can lift a battler off the
+## tilemap and move it as objects. Three effects do, `BattleBGEffect_Tackle`
+## among them, and until the command existed they drew whatever sheet happened
+## to sit at window tile zero.
+func test_battler_graphics_put_both_pictures_at_the_top_of_the_window() -> void:
+	var player: Gen2BattleAnimPlayer = _player([0xDA] + RET)
+	player.advance_frame()
+	var window: Array = player.tiles()
+
+	# `($80 - 6 * 2 - 7 * 2) - BATTLEANIM_BASE_TILE` and `($80 - 6 * 2) - ...`.
+	var enemy_at: int = 53
+	var player_at: int = 67
+	# The enemy's bottom two rows, a column at a time, stepping the source by the
+	# picture's own height.
+	assert_eq(window[enemy_at], {"battler_tile": 0x05})
+	assert_eq(window[enemy_at + 1], {"battler_tile": 0x06})
+	assert_eq(window[enemy_at + 2], {"battler_tile": 0x0C})
+	assert_eq(window[enemy_at + 13], {"battler_tile": 0x30})
+	# The player's top two, from its own base tile.
+	assert_eq(window[player_at], {"battler_tile": 0x31})
+	assert_eq(window[player_at + 1], {"battler_tile": 0x32})
+	assert_eq(window[player_at + 11], {"battler_tile": 0x50})
+	# It fills the window exactly to the top and no further.
+	assert_eq(window.size(), Gen2BattleAnimPlayer.MAX_TILES)
+
+
+## The one-row variant copies the enemy's last row and the player's first, and
+## sits seven tiles further up the window.
+func test_the_one_row_variant_copies_a_row_of_each() -> void:
+	var player: Gen2BattleAnimPlayer = _player([0xD9] + RET)
+	player.advance_frame()
+	var window: Array = player.tiles()
+	assert_eq(window[66], {"battler_tile": 0x06})
+	assert_eq(window[72], {"battler_tile": 0x30})
+	assert_eq(window[73], {"battler_tile": 0x31})
+	assert_eq(window[78], {"battler_tile": 0x4F})
+
+
+## `anim_1gfx` claims the front of the tile dict, so a battler-graphics command
+## behind it takes the next two slots rather than overwriting it.
+func test_battler_graphics_take_the_first_free_dict_slot() -> void:
+	var player: Gen2BattleAnimPlayer = _player([0xD1, 0x01, 0xDA] + RET)
+	player.advance_frame()
+	var window: Array = player.tiles()
+	assert_eq(window[0], {"gfx": 1, "tile": 0})
+	assert_eq(window[53], {"battler_tile": 0x05})
+
+
 ## Ten spawns fill the pool and an eleventh finds no slot, which is
 ## `QueueBattleAnimation` returning carry and the command doing nothing with it.
 func test_the_pool_holds_ten_objects_and_refuses_an_eleventh() -> void:
