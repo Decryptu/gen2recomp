@@ -99,8 +99,12 @@ imported caller/callee script at the same transaction boundary. Audio stays
 behind bounded decoder, renderer and player layers.
 
 `world_start_menu.gd` models `engine/menus/start_menu.asm`'s item list: source
-Pokedex/Pokemon/Pokegear gating, the `STATICMENU_WRAP` cursor, and Pokedex
-built in its source position marked unavailable rather than omitted.
+Pokedex/Pokemon/Pokegear gating and the `STATICMENU_WRAP` cursor.
+`pokedex.gd` models `engine/pokedex/pokedex.asm`'s listing: the three orderings
+`Pokedex_OrderMonsByMode` builds, `.FindLastSeen`'s listing end, `.PrintEntry`'s
+per-row decision and `Pokedex_ListingHandleDPadInput`'s cursor and paging walk.
+`pokedex_screen.gd` is its listing, entry and OPTION states; the entry's two
+measurements go through `_PrintNum`'s own blanking rather than a format string.
 `world_options_menu.gd` models `engine/menus/options_menu.asm` over
 [Gen2Options], seven value rows plus CANCEL, and leaves persistence to
 `Gen2OptionsStore`. `trainer_card.gd` and `render/trainer_card_page.gd` are

@@ -68,6 +68,11 @@ var _story_picture_backdrop: ColorRect = null
 var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
 var _trainer_card_host: Gen2TrainerCardScreen = null
+var _pokedex_host: Gen2PokedexScreen = null
+## `wPrevDexEntry`, which is plain WRAM rather than saved data: it survives the
+## dex closing and reopening for as long as the game runs, the way the start
+## menu cursor below survives its own screen.
+var _pokedex_prev_entry: int = 0
 ## Leftover of a frame the play timer has not counted yet.
 var _game_time_seconds: float = 0.0
 var _service_host: Gen2WorldServiceScreen = null
@@ -361,7 +366,8 @@ func _advance_held_direction(delta: float) -> void:
 func _overlay_open() -> bool:
 	return _battle_host != null or _service_host != null or _pc_host != null \
 		or _start_menu_host != null or _party_host != null \
-		or _hall_of_fame_host != null or _trainer_card_host != null
+		or _hall_of_fame_host != null or _trainer_card_host != null \
+		or _pokedex_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -421,6 +427,8 @@ func _handle_button(button: int) -> bool:
 		if button == Gen2Button.A:
 			_acknowledge_field_move_text()
 		return true
+	if _pokedex_host != null:
+		return _pokedex_host.handle_button(button)
 	if _trainer_card_host != null:
 		return _trainer_card_host.handle_button(button)
 	if _start_menu_host != null:
@@ -1502,6 +1510,37 @@ func _on_start_menu_action(kind: StringName) -> void:
 			_open_pokegear()
 		Gen2WorldStartMenu.ITEM_PLAYER:
 			_open_trainer_card()
+		Gen2WorldStartMenu.ITEM_POKEDEX:
+			_open_pokedex()
+	_refresh_labels()
+
+
+## `StartMenu_Pokedex`'s `farcall Pokedex`. Its own B returns to the overworld,
+## which is where DEXSTATE_EXIT lands too.
+func _open_pokedex() -> void:
+	if _pokedex_host != null or _data == null:
+		return
+	var host := Gen2PokedexScreen.new()
+	if not host.open(_data, _world, _pokedex_prev_entry):
+		host.free()
+		_script_prompt = "The Pokedex needs a cache that carries its entries"
+		_refresh_labels()
+		return
+	host.z_index = 10
+	add_child(host)
+	host.closed.connect(_on_pokedex_closed)
+	_pokedex_host = host
+	_script_prompt = "Pokedex open"
+	_refresh_labels()
+
+
+func _on_pokedex_closed() -> void:
+	var host: Gen2PokedexScreen = _pokedex_host
+	_pokedex_host = null
+	if host != null:
+		_pokedex_prev_entry = host.previous_entry()
+		host.queue_free()
+	_script_prompt = "Pokedex closed"
 	_refresh_labels()
 
 

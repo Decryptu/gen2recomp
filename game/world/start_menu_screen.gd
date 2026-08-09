@@ -5,13 +5,14 @@ extends Control
 ## window-resolution Control panel consistent with the mart, phone and PC
 ## storage overlays rather than the hardware `menu_coords` box.
 ##
-## Pokemon and Pokegear are screens the world already owns (Gen2PartyScreen, the
-## phone list on Gen2WorldServiceScreen), so this only reports the choice through
+## Pokedex, Pokemon and Pokegear are screens the world already owns
+## (Gen2PokedexScreen, Gen2PartyScreen, the phone list on
+## Gen2WorldServiceScreen), so this only reports the choice through
 ## [signal action_chosen]. Pack and Save live here as internal modes, the way
 ## Gen2WorldServiceScreen owns a mart mode beside its menu mode.
 
 ## Emitted for an available entry this screen does not own itself
-## (Pokemon, Pokegear, Player); the caller opens the matching screen.
+## (Pokedex, Pokemon, Pokegear, Player); the caller opens the matching screen.
 signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
@@ -264,8 +265,8 @@ func _confirm_list() -> void:
 			_open_options_mode()
 		Gen2WorldStartMenu.ITEM_EXIT:
 			closed.emit()
-		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR, \
-		Gen2WorldStartMenu.ITEM_PLAYER:
+		Gen2WorldStartMenu.ITEM_POKEDEX, Gen2WorldStartMenu.ITEM_POKEMON, \
+		Gen2WorldStartMenu.ITEM_POKEGEAR, Gen2WorldStartMenu.ITEM_PLAYER:
 			action_chosen.emit(_menu.selected_kind())
 		_:
 			# A Gen2ModHost-registered entry. Its handler is what made it

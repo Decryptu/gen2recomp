@@ -400,8 +400,8 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 	})
 ```
 
-A start-menu entry without a handler still appears, marked unavailable, which is
-what Pokedex already does. A pocket's number has to be at or
+A start-menu entry without a handler still appears, marked unavailable. A
+pocket's number has to be at or
 above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one
@@ -411,6 +411,10 @@ silently winning.
 
 Semver ranges and inter-mod dependencies, per-mod save data, art for mod content,
 mutation hooks on the event channels, entries in the party submenu or the mart,
-and `.zip`/`.pck` packs through `ProjectSettings.load_resource_pack()`. Evaluate
+and `.zip`/`.pck` packs through `ProjectSettings.load_resource_pack()`. A mod
+species does not appear in the Pokedex either: both dex order tables are
+cartridge data of exactly 251 entries, and nothing splices `defined_numbers()`
+into them, though a mod species that replaces a cartridge one does carry its own
+dex entry. Evaluate
 [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) before
 expanding the loader itself.

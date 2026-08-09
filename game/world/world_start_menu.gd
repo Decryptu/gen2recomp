@@ -8,10 +8,8 @@ extends RefCounted
 ## Pokemon behind a non-zero wPartyCount, Pokegear behind
 ## wPokegearFlags/POKEGEAR_OBTAINED_F.
 ##
-## This project has no dex, so Pokedex is still built in its source position and
-## marked unavailable rather than omitted, keeping the list shape stable for when
-## it arrives. QUIT never appears because its Bug Contest and link-mode gate is
-## never true here.
+## QUIT never appears because its Bug Contest and link-mode gate is never true
+## here.
 ##
 ## Entries registered on `Gen2ModHost` are spliced in ahead of EXIT, so a mod can
 ## add a screen without reordering or removing anything the cartridge shipped.
@@ -47,7 +45,7 @@ const GATE_POKEGEAR: StringName = &"pokegear"
 ## question. EXIT stays last: it is what closes the menu, and the source never
 ## puts anything after it.
 const SOURCE_ENTRIES: Array[Dictionary] = [
-	{"kind": ITEM_POKEDEX, "label": "Pokedex", "available": false, "gate": GATE_POKEDEX},
+	{"kind": ITEM_POKEDEX, "label": "Pokedex", "available": true, "gate": GATE_POKEDEX},
 	{"kind": ITEM_POKEMON, "label": "Pokemon", "available": true, "gate": GATE_PARTY},
 	{"kind": ITEM_PACK, "label": "Pack", "available": true, "gate": &""},
 	{"kind": ITEM_POKEGEAR, "label": "Pokegear", "available": true, "gate": GATE_POKEGEAR},

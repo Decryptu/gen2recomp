@@ -322,3 +322,57 @@ func test_a_fixed_bank_still_addresses_inside_the_cartridge() -> void:
 		for stored: int in range(0x10, 0x40):
 			var bank: int = RomLayout.fix_pic_bank(layout, stored)
 			assert_lt(RomFile.linear(bank, 0x7FFF), RomRegistry.EXPECTED_SIZE)
+
+
+## GetDexEntryPointer picks the bank from the species number rather than the
+## pointer: `(species - 1) >> 6`, so each of the four sections covers 64 species
+## and the last covers the 59 that are left.
+func test_dex_entry_banks_change_every_sixty_four_species() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var banks: Array = (layout["pokedex"] as Dictionary)["entry_banks"]
+		assert_eq(banks.size(), RomLayout.DEX_ENTRY_BANK_COUNT, "%s bank count" % id)
+		for boundary: Array in [[1, 0], [64, 0], [65, 1], [128, 1], [129, 2], [192, 2],
+			[193, 3], [RomLayout.SPECIES_COUNT, 3]]:
+			assert_eq(
+				RomLayout.dex_entry_bank(layout, int(boundary[0])),
+				int(banks[int(boundary[1])]),
+				"%s species %d" % [id, int(boundary[0])]
+			)
+
+
+func test_dex_entry_pointers_are_one_based_and_two_bytes_wide() -> void:
+	var layout: Dictionary = RomLayout.for_id(RomRegistry.CRYSTAL)
+	var table: int = int((layout["pokedex"] as Dictionary)["entry_pointers"])
+	assert_eq(RomLayout.dex_entry_pointer_offset(layout, 1), table)
+	assert_eq(
+		RomLayout.dex_entry_pointer_offset(layout, 2),
+		table + RomLayout.DEX_ENTRY_POINTER_SIZE
+	)
+
+
+## A dex entry address is bank-local, so the flat offset is its bank's base plus
+## the address's position within the window.
+func test_a_dex_entry_address_resolves_into_its_own_bank() -> void:
+	var layout: Dictionary = RomLayout.for_id(RomRegistry.CRYSTAL)
+	var bank: int = RomLayout.dex_entry_bank(layout, 1)
+	assert_eq(
+		RomLayout.dex_entry_offset(layout, 1, 0x5695),
+		bank * RomFile.BANK_SIZE + 0x1695
+	)
+
+
+## Every Pokedex table has to sit inside the dump like the flat offsets do; the
+## nested Dictionary keeps them out of that check, so they are checked here.
+func test_pokedex_tables_land_inside_a_cartridge() -> void:
+	for id: StringName in RomRegistry.ORDER:
+		var pokedex: Dictionary = RomLayout.for_id(id)["pokedex"]
+		for key: String in ["entry_pointers", "order_new", "order_alpha"]:
+			assert_between(
+				int(pokedex[key]), 0, RomRegistry.EXPECTED_SIZE - 1, "%s.%s" % [id, key]
+			)
+		for bank: int in pokedex["entry_banks"]:
+			assert_between(
+				bank * RomFile.BANK_SIZE, 0, RomRegistry.EXPECTED_SIZE - 1,
+				"%s bank %d" % [id, bank]
+			)

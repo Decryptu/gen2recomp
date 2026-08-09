@@ -68,6 +68,23 @@ const TRAINER_ATTR_FIRST_AI_ITEM_SWITCH: int = RomLayout.CONTEXT_USE | RomLayout
 ## [method Gen2Stats.pack_dvs] packs a DV word.
 const TRAINER_DVS_FIRST: int = 0x9A77
 
+## What the first and last Pokedex entries are known to say, independently of
+## the cartridge: the published category, height as decimal feet and inches, and
+## weight in tenths of a pound. All three dumps agree on every one of these;
+## it is the description text, not the measurements, that differs between them.
+const DEX_FIRST_CATEGORY: String = "SEED"
+const DEX_FIRST_HEIGHT: int = 204
+const DEX_FIRST_WEIGHT: int = 150
+const DEX_LAST_CATEGORY: String = "TIMETRAVEL"
+const DEX_LAST_HEIGHT: int = 200
+const DEX_LAST_WEIGHT: int = 110
+
+## The species each order table opens with, known from pret's
+## `NewPokedexOrder` (Chikorita, the first of the new dex) and
+## `AlphabeticalPokedexOrder` (Abra).
+const DEX_ORDER_NEW_FIRST: int = 152
+const DEX_ORDER_ALPHA_FIRST: int = 63
+
 var _lz: Gen2Lz = Gen2Lz.new()
 
 
@@ -198,6 +215,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var evos_attacks: Dictionary = verify_evos_attacks(rom, layout)
 	if not evos_attacks["ok"]:
 		return evos_attacks
+
+	var pokedex: Dictionary = verify_pokedex(rom, layout)
+	if not pokedex["ok"]:
+		return pokedex
 
 	var font: Dictionary = verify_font(rom, layout)
 	if not font["ok"]:
@@ -416,6 +437,60 @@ static func read_evos_attacks(rom: RomFile, layout: Dictionary, species: int) ->
 	return {"evolutions": evolutions, "learnset": learnset}
 
 
+## Walks one species' Pokedex entry (data/pokemon/dex_entries.asm).
+##
+## Returns { category, height, weight, pages }, empty if the pointer or the walk
+## left the cartridge. [code]pages[/code] is always
+## [constant RomLayout.DEX_ENTRY_PAGES] strings.
+##
+## Height and weight are the cartridge's own numbers rather than converted
+## measurements: height is decimal digits of feet and inches and weight is tenths
+## of a pound, and `DisplayDexEntry` prints both by punctuating the digits. A
+## zero in either is the source's own "no measurement" and is kept, since
+## `.skip_height` and `.skip_weight` leave the row blank rather than printing a
+## zero.
+static func read_dex_entry(rom: RomFile, layout: Dictionary, species: int) -> Dictionary:
+	var table: int = RomLayout.dex_entry_pointer_offset(layout, species)
+	if not rom.in_bounds(table, RomLayout.DEX_ENTRY_POINTER_SIZE):
+		return {}
+
+	# The pointer carries no bank; the bank is chosen by species number, so the
+	# address still has to be one the switchable window can hold.
+	var address: int = rom.u16le(table)
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return {}
+
+	var data: PackedByteArray = rom.bytes()
+	var at: int = RomLayout.dex_entry_offset(layout, species, address)
+	if not rom.in_bounds(at):
+		return {}
+
+	var category: String = Gen2Text.decode(
+		data, at, RomLayout.DEX_ENTRY_MAX_CATEGORY_LENGTH
+	)
+	at = Gen2Text.terminated_end(data, at, RomLayout.DEX_ENTRY_MAX_CATEGORY_LENGTH)
+
+	var measurements: int = RomLayout.DEX_ENTRY_MEASUREMENT_BYTES * 2
+	if not rom.in_bounds(at, measurements):
+		return {}
+	var height: int = rom.u16le(at)
+	var weight: int = rom.u16le(at + RomLayout.DEX_ENTRY_MEASUREMENT_BYTES)
+	at += measurements
+
+	# The page break is the terminator itself (macros/scripts/text.asm's `page`
+	# is `db "@"`), so the two pages are simply two consecutive runs.
+	var pages: PackedStringArray = PackedStringArray()
+	for page: int in RomLayout.DEX_ENTRY_PAGES:
+		if not rom.in_bounds(at):
+			return {}
+		pages.append(Gen2Text.decode(data, at, RomLayout.DEX_ENTRY_MAX_PAGE_LENGTH))
+		at = Gen2Text.terminated_end(data, at, RomLayout.DEX_ENTRY_MAX_PAGE_LENGTH)
+	if at > rom.size():
+		return {}
+
+	return {"category": category, "height": height, "weight": weight, "pages": pages}
+
+
 ## The evolution and learnset table, checked species by species.
 ##
 ## Nothing says which species an entry belongs to, so the shape is checked: 251
@@ -576,6 +651,106 @@ static func _verify_known_evos_attacks(entries: Array) -> Dictionary:
 					STAT_EVOLUTION_SPECIES, int(evolution["method"]),
 				],
 			}
+
+	return {"ok": true, "message": ""}
+
+
+## One of the two orderings `Pokedex_OrderMonsByMode` reads
+## (data/pokemon/dex_order_new.asm, dex_order_alpha.asm), as species numbers.
+## Empty if the table is outside the cartridge.
+static func read_dex_order(rom: RomFile, layout: Dictionary, key: String) -> PackedInt32Array:
+	var pokedex: Dictionary = layout["pokedex"]
+	var at: int = int(pokedex.get(key, -1))
+	if not rom.in_bounds(at, RomLayout.SPECIES_COUNT):
+		return PackedInt32Array()
+	var out: PackedInt32Array = PackedInt32Array()
+	for index: int in RomLayout.SPECIES_COUNT:
+		out.append(rom.u8(at + index))
+	return out
+
+
+## The Pokedex entries and the two order tables.
+##
+## The entries have no self-identifying field, so they are checked the way the
+## palettes are: every one of the 251 has to walk to a category and two pages
+## without leaving the cartridge, and the two ends have to say what they are
+## independently known to say. A pointer table that is one entry out still walks
+## into readable text, which is why the measurements are checked and not just
+## the strings.
+##
+## Each order table has to be a permutation of the whole species range. That is
+## a stronger check than a range check: a run of legal species numbers elsewhere
+## in the bank would pass the latter, and only the real table has every species
+## exactly once.
+static func verify_pokedex(rom: RomFile, layout: Dictionary) -> Dictionary:
+	if not layout.has("pokedex"):
+		return {"ok": false, "message": "No Pokedex offsets for this game."}
+
+	var entries: Array = []
+	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		var entry: Dictionary = read_dex_entry(rom, layout, species)
+		if entry.is_empty():
+			return {
+				"ok": false,
+				"message": "Pokedex entry %d does not read as an entry." % species,
+			}
+		if String(entry["category"]).is_empty():
+			return {"ok": false, "message": "Pokedex entry %d has no category." % species}
+		var pages: PackedStringArray = entry["pages"]
+		for page: int in pages.size():
+			if pages[page].is_empty():
+				return {
+					"ok": false,
+					"message": "Pokedex entry %d has an empty page %d." % [species, page + 1],
+				}
+		entries.append(entry)
+
+	var first: Dictionary = entries[0]
+	if String(first["category"]) != DEX_FIRST_CATEGORY \
+		or int(first["height"]) != DEX_FIRST_HEIGHT \
+		or int(first["weight"]) != DEX_FIRST_WEIGHT:
+		return {
+			"ok": false,
+			"message": "Pokedex entry 1: expected %s %d %d, read %s %d %d." % [
+				DEX_FIRST_CATEGORY, DEX_FIRST_HEIGHT, DEX_FIRST_WEIGHT,
+				String(first["category"]), int(first["height"]), int(first["weight"]),
+			],
+		}
+
+	var last: Dictionary = entries[RomLayout.SPECIES_COUNT - 1]
+	if String(last["category"]) != DEX_LAST_CATEGORY \
+		or int(last["height"]) != DEX_LAST_HEIGHT \
+		or int(last["weight"]) != DEX_LAST_WEIGHT:
+		return {
+			"ok": false,
+			"message": "Pokedex entry %d: expected %s %d %d, read %s %d %d." % [
+				RomLayout.SPECIES_COUNT, DEX_LAST_CATEGORY, DEX_LAST_HEIGHT, DEX_LAST_WEIGHT,
+				String(last["category"]), int(last["height"]), int(last["weight"]),
+			],
+		}
+
+	for order: Array in [
+		["order_new", DEX_ORDER_NEW_FIRST], ["order_alpha", DEX_ORDER_ALPHA_FIRST],
+	]:
+		var key: String = order[0]
+		var species_numbers: PackedInt32Array = read_dex_order(rom, layout, key)
+		if species_numbers.size() != RomLayout.SPECIES_COUNT:
+			return {"ok": false, "message": "Dex order table %s is outside the ROM." % key}
+		if species_numbers[0] != int(order[1]):
+			return {
+				"ok": false,
+				"message": "Dex order table %s: expected species %d first, read %d." % [
+					key, int(order[1]), species_numbers[0],
+				],
+			}
+		var seen: Dictionary = {}
+		for number: int in species_numbers:
+			if number < 1 or number > RomLayout.SPECIES_COUNT or seen.has(number):
+				return {
+					"ok": false,
+					"message": "Dex order table %s is not a permutation: %d." % [key, number],
+				}
+			seen[number] = true
 
 	return {"ok": true, "message": ""}
 
@@ -1302,6 +1477,11 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not write the font."
 		return result
 
+	var dex_orders: Dictionary = _import_dex_orders(rom, layout)
+	if dex_orders.is_empty():
+		result["message"] = "Dex order tables are outside the cartridge."
+		return result
+
 	var moves: Array = _import_moves(rom, layout, on_progress)
 	var tmhm_moves: Array = _import_tmhm_moves(rom, layout)
 	if tmhm_moves.is_empty():
@@ -1337,6 +1517,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.tmhm_moves_path(directory), tmhm_moves):
 		result["message"] = "Could not write TM/HM move data."
+		return result
+	if not RomCache.write_json(RomCache.dex_orders_path(directory), dex_orders):
+		result["message"] = "Could not write dex order data."
 		return result
 	if not RomCache.write_json(RomCache.items_path(directory), items):
 		result["message"] = "Could not write item data."
@@ -1472,6 +1655,7 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 		var egg_groups: int = rom.u8(stats + RomLayout.OFFSET_EGG_GROUPS)
 		var palette: int = RomLayout.palette_offset(layout, species)
 		var evos_attacks: Dictionary = read_evos_attacks(rom, layout, species)
+		var dex: Dictionary = read_dex_entry(rom, layout, species)
 
 		out.append({
 			"number": species,
@@ -1506,6 +1690,15 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 			"evolutions": evos_attacks.get("evolutions", []),
 			"learnset": evos_attacks.get("learnset", []),
 			"front_tiles": [dimensions & 0x0F, dimensions >> 4],
+			# The Pokedex entry. On the species rather than in a table of its
+			# own because it is asked for by species number and nothing else,
+			# the same reason the learnset lives here.
+			"dex": {
+				"category": dex.get("category", ""),
+				"height": int(dex.get("height", 0)),
+				"weight": int(dex.get("weight", 0)),
+				"pages": Array(dex.get("pages", PackedStringArray())),
+			},
 			"palette": {
 				"normal": [rom.u16le(palette), rom.u16le(palette + 2)],
 				"shiny": [rom.u16le(palette + 4), rom.u16le(palette + 6)],
@@ -1516,6 +1709,20 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 			on_progress.call("species", species, RomLayout.SPECIES_COUNT)
 
 	return out
+
+
+## The two dex orderings, keyed by the mode that reads each. Empty on any layout
+## failure, which the caller reports rather than caching a half table.
+##
+## The third ordering, DEXMODE_OLD, has no table: `.OldMode` counts from 1 to
+## 251, so storing it would be storing the species range twice.
+func _import_dex_orders(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var new_order: PackedInt32Array = read_dex_order(rom, layout, "order_new")
+	var alpha_order: PackedInt32Array = read_dex_order(rom, layout, "order_alpha")
+	if new_order.size() != RomLayout.SPECIES_COUNT \
+		or alpha_order.size() != RomLayout.SPECIES_COUNT:
+		return {}
+	return {"new": Array(new_order), "alpha": Array(alpha_order)}
 
 
 func _import_moves(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Array:

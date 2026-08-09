@@ -258,6 +258,43 @@ const MAX_MATCHUPS: int = 256
 const PHYSICAL_TYPES_END: int = 0x09
 const SPECIAL_TYPES_START: int = 0x14
 
+## One Pokedex entry (data/pokemon/dex_entries.asm): a terminated category
+## string, then height and weight as little-endian words, then two terminated
+## description pages.
+##
+## The page break is the terminator itself, not a code of its own: `MACRO page`
+## in macros/scripts/text.asm is `db "@", \#`, so an entry ends after the second
+## terminated run rather than at the first.
+##
+## Height is decimal digits of feet and inches (204 is 2'04") and weight is
+## tenths of a pound (150 is 15.0 lb), which is why both are stored raw and
+## formatted at draw time rather than converted here.
+const DEX_ENTRY_PAGES: int = 2
+const DEX_ENTRY_MEASUREMENT_BYTES: int = 2
+## Runaway guard for a page walk, well past the longest entry in any of the
+## three dumps (the longest measured is under 200 bytes).
+const DEX_ENTRY_MAX_PAGE_LENGTH: int = 256
+## The category is at most twelve characters, the same guard the move and item
+## name walks use.
+const DEX_ENTRY_MAX_CATEGORY_LENGTH: int = MAX_NAME_LENGTH
+
+## Pointers are two bytes and bank-local, and the bank is chosen by species
+## rather than stored: GetDexEntryPointer (engine/pokedex/pokedex_2.asm) rotates
+## `species - 1` twice and masks to NUM_DEX_ENTRY_BANKS bits, which is
+## `(species - 1) >> 6`. The four sections are species 1-64, 65-128, 129-192 and
+## 193-251.
+const DEX_ENTRY_POINTER_SIZE: int = 2
+const DEX_ENTRY_BANK_SPECIES: int = 64
+const DEX_ENTRY_BANK_COUNT: int = 4
+
+## The three orderings Pokedex_OrderMonsByMode builds, as constants/ram_constants.asm
+## numbers them. UNOWN is the fourth mode and is not one of these: it lists Unown
+## forms rather than species, from its own table.
+const DEXMODE_NEW: int = 0
+const DEXMODE_OLD: int = 1
+const DEXMODE_ABC: int = 2
+const DEXMODE_UNOWN: int = 3
+
 ## Evolutions and level-up moves are one table, not two. A species' entry lists
 ## its evolutions, then a zero byte, then its level-up moves as level and move
 ## pairs, then another zero byte. One pointer answers both questions, which is
@@ -686,6 +723,19 @@ const GOLD_SILVER: Dictionary = {
 		"right_corner": -1,
 		"badge_palette": 0xA385,
 	},
+	# Pokedex. Located by encoding Bulbasaur's known category and published
+	# height and weight ("SEED", 204, 150) and matching the bytes, then finding
+	# the only 251-pointer run whose four 64-species groups each ascend and
+	# restart. Both order tables were located by encoding the pinned
+	# data/pokemon/dex_order_*.asm species lists whole. Nested for the same
+	# reason trainer_card is.
+	"pokedex": {
+		"entry_pointers": 0x44360,
+		# BANK("Pokedex Entries 001-064") through 193-251.
+		"entry_banks": [0x68, 0x69, 0x6A, 0x6B],
+		"order_alpha": 0x40C65,
+		"order_new": 0x40D60,
+	},
 	"trainer_pic_pointers": 0x80000,
 	"trainer_palettes": 0xB53D,
 	"trainer_class_names": 0x1B0955,
@@ -832,6 +882,16 @@ const CRYSTAL: Dictionary = {
 		"badges": 0x26043,
 		"right_corner": 0x265C3,
 		"badge_palette": 0x9F16,
+	},
+	# Pokedex; see the Gold and Silver block above for how these were located.
+	# Both order tables sit at the same offsets in all three dumps; the entries
+	# and their banks do not, and Gold and Silver do not even share description
+	# text with each other, so every profile is read from its own cartridge.
+	"pokedex": {
+		"entry_pointers": 0x44378,
+		"entry_banks": [0x60, 0x6E, 0x73, 0x74],
+		"order_alpha": 0x40C65,
+		"order_new": 0x40D60,
 	},
 	"trainer_pic_pointers": 0x128000,
 	"trainer_palettes": 0xB0CE,
@@ -984,6 +1044,25 @@ static func species_name_offset(layout: Dictionary, species: int) -> int:
 
 static func base_stats_offset(layout: Dictionary, species: int) -> int:
 	return int(layout["base_stats"]) + (species - 1) * BASE_STATS_SIZE
+
+
+static func dex_entry_pointer_offset(layout: Dictionary, species: int) -> int:
+	var pokedex: Dictionary = layout["pokedex"]
+	return int(pokedex["entry_pointers"]) + (species - 1) * DEX_ENTRY_POINTER_SIZE
+
+
+## The bank a species' Pokedex entry lives in, by
+## `GetDexEntryPointer`'s `(species - 1) >> 6`.
+static func dex_entry_bank(layout: Dictionary, species: int) -> int:
+	var pokedex: Dictionary = layout["pokedex"]
+	var banks: Array = pokedex["entry_banks"]
+	return int(banks[(species - 1) / DEX_ENTRY_BANK_SPECIES])
+
+
+## Where a species' Pokedex entry starts in the dump, given the bank-local
+## [param address] read from the table.
+static func dex_entry_offset(layout: Dictionary, species: int, address: int) -> int:
+	return RomFile.linear(dex_entry_bank(layout, species), address)
 
 
 ## The palette table carries a leading entry before Bulbasaur, so unlike every

@@ -701,3 +701,54 @@ func test_the_play_timer_counts_while_the_world_runs() -> void:
 	save.game_time = Gen2GameTime.new()
 	_world_screen._advance_game_time(Gen2WorldAnimation.FRAME_SECONDS * 3.0)
 	assert_eq(save.game_time.frames, 3)
+
+
+## `StartMenu_Pokedex`'s `farcall Pokedex`, as an overlay the world screen owns
+## the way it owns the trainer card.
+func test_pokedex_opens_from_the_start_menu_and_b_returns_to_the_overworld() -> void:
+	await _open_world()
+	_world_screen._world.state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	_world_screen._world.state.set_species_seen(Fixture.TRAINER_SPECIES)
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_POKEDEX)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_null(_world_screen._start_menu_host)
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	assert_not_null(dex)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.LIST)
+	assert_false(_world_screen.move_player(Vector2i.RIGHT), "the dex blocks the overworld")
+
+	## SELECT reaches the OPTION screen, and B comes back to the listing.
+	dex.handle_button(Gen2Button.SELECT)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.OPTION)
+	dex.handle_button(Gen2Button.B)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.LIST)
+
+	dex.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_null(_world_screen._pokedex_host)
+	assert_true(_world_screen._objects_may_move())
+
+
+## A mode chosen on the OPTION screen is written back to wLastDexMode, which is
+## saved player data, so the next opening starts there.
+func test_the_chosen_dex_mode_survives_closing_the_dex() -> void:
+	await _open_world()
+	var state: Gen2WorldState = _world_screen._world.state
+	state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	assert_not_null(dex)
+	dex.handle_button(Gen2Button.SELECT)
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(state.last_dex_mode(), RomLayout.DEXMODE_OLD)
+	dex.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+
+	_world_screen._open_pokedex()
+	var reopened: Gen2PokedexScreen = _world_screen._pokedex_host
+	assert_eq(reopened.get("_dex").mode, RomLayout.DEXMODE_OLD)

@@ -5,8 +5,7 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 ## engine/menus/start_menu.asm's StartMenu.SetUpMenuItems gating, reproduced
 ## as data: Pokedex behind wStatusFlags/STATUSFLAGS_POKEDEX_F, Pokemon behind
 ## a non-zero party count, Pokegear behind wPokegearFlags/POKEGEAR_OBTAINED_F,
-## everything else always present. Pokedex is always built but marked
-## unavailable, since this project has no dex yet.
+## everything else always present.
 
 
 func _kinds(menu: Gen2WorldStartMenu) -> Array:
@@ -39,14 +38,14 @@ func test_pokegear_appears_only_with_the_source_engine_flag() -> void:
 	assert_true(_kinds(with_flag).has(Gen2WorldStartMenu.ITEM_POKEGEAR))
 
 
-func test_pokedex_appears_only_with_the_source_engine_flag_and_stays_unavailable() -> void:
+func test_pokedex_appears_only_with_the_source_engine_flag() -> void:
 	var without: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
 	assert_false(_kinds(without).has(Gen2WorldStartMenu.ITEM_POKEDEX))
 	var with_flag: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, true, false)
 	assert_true(_kinds(with_flag).has(Gen2WorldStartMenu.ITEM_POKEDEX))
 	for entry: Dictionary in with_flag.items():
 		if entry.get("kind") == Gen2WorldStartMenu.ITEM_POKEDEX:
-			assert_false(entry.get("available"))
+			assert_true(entry.get("available"))
 
 
 func test_full_list_matches_the_source_item_order_when_every_gate_is_open() -> void:
@@ -59,7 +58,7 @@ func test_full_list_matches_the_source_item_order_when_every_gate_is_open() -> v
 	])
 
 
-func test_every_entry_but_pokedex_is_available() -> void:
+func test_every_entry_the_gates_admit_is_available() -> void:
 	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(1, true, true)
 	var available_by_kind: Dictionary = {}
 	for entry: Dictionary in menu.items():
@@ -71,7 +70,7 @@ func test_every_entry_but_pokedex_is_available() -> void:
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_EXIT])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_OPTION])
 	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_PLAYER])
-	assert_false(available_by_kind[Gen2WorldStartMenu.ITEM_POKEDEX])
+	assert_true(available_by_kind[Gen2WorldStartMenu.ITEM_POKEDEX])
 
 
 func test_quit_never_appears_because_this_project_has_no_bug_contest() -> void:
@@ -152,8 +151,7 @@ func test_a_registered_entry_lands_before_exit() -> void:
 	Gen2ModHost.reset()
 
 
-## An entry with no handler still appears, marked unavailable, the way Pokedex
-## does.
+## An entry with no handler still appears, marked unavailable.
 func test_a_registered_entry_without_a_handler_is_unavailable() -> void:
 	Gen2ModHost.reset()
 	Gen2ModHost.instance().register_menu_entry(
