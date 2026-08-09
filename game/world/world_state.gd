@@ -96,6 +96,10 @@ var _swarm_map: Vector2i = Vector2i(-1, -1)
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
 var _seen_species: Dictionary = {}
+## wPokedexCaught, the second half of `SetSeenAndCaughtMon`. Kept beside the
+## seen array rather than derived from the party, because the cartridge's own
+## flag survives releasing, trading away or boxing the Pokemon that set it.
+var _caught_species: Dictionary = {}
 var _phone_receive_cycle: int = 0
 var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
 var _pending_special_phone_call: int = 0
@@ -126,6 +130,7 @@ func _init(
 	initial_seen_species: Dictionary = {},
 	initial_engine_flags: Dictionary = {},
 	initial_script_memory: Dictionary = {},
+	initial_caught_species: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
 		if int(flag) >= 0 and bool(initial_event_flags[flag]):
@@ -158,6 +163,12 @@ func _init(
 	for raw_species: Variant in initial_seen_species:
 		if int(raw_species) > 0 and bool(initial_seen_species[raw_species]):
 			_seen_species[int(raw_species)] = true
+	## Caught implies seen, the way `SetSeenAndCaughtMon` falls through, so a
+	## restored state cannot hold a caught species it has not seen.
+	for raw_species: Variant in initial_caught_species:
+		if int(raw_species) > 0 and bool(initial_caught_species[raw_species]):
+			_caught_species[int(raw_species)] = true
+			_seen_species[int(raw_species)] = true
 	_just_battled = initial_just_battled
 	_phone_receive_cycle = clampi(initial_phone_receive_cycle, 0, PHONE_RECEIVE_DELAYS.size() - 1)
 	_phone_receive_minutes = maxi(0, initial_phone_receive_minutes)
@@ -186,6 +197,7 @@ func to_dict() -> Dictionary:
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
 		"seen_species": _seen_species.duplicate(),
+		"caught_species": _caught_species.duplicate(),
 		"phone_receive_cycle": _phone_receive_cycle,
 		"phone_receive_minutes": _phone_receive_minutes,
 		"pending_special_phone_call": _pending_special_phone_call,
@@ -220,6 +232,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		source.get("seen_species", {}) if source.get("seen_species", {}) is Dictionary else {},
 		source.get("engine_flags", {}) if source.get("engine_flags", {}) is Dictionary else {},
 		source.get("script_memory", {}) if source.get("script_memory", {}) is Dictionary else {},
+		source.get("caught_species", {}) if source.get("caught_species", {}) is Dictionary else {},
 	)
 	## Absent in a state written before the radio existed. Zero is the same
 	## MUSIC_NONE a fresh state starts on, and the next map load writes the real
@@ -250,6 +263,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
 	_seen_species = restored._seen_species.duplicate()
+	_caught_species = restored._caught_species.duplicate()
 	_phone_receive_cycle = restored._phone_receive_cycle
 	_phone_receive_minutes = restored._phone_receive_minutes
 	_pending_special_phone_call = restored._pending_special_phone_call
@@ -636,6 +650,36 @@ func roaming_mons_on(map_group: int, map_number: int) -> Array:
 	return out
 
 
+func has_caught_species(species: int) -> bool:
+	return species > 0 and bool(_caught_species.get(species, false))
+
+
+func caught_species() -> Dictionary:
+	return _caught_species.duplicate()
+
+
+## `CountSetBits` over wPokedexCaught, which is the number the trainer card
+## prints and `_GetVarAction`'s dex-count variables read.
+func caught_count() -> int:
+	return _caught_species.size()
+
+
+func seen_count() -> int:
+	return _seen_species.size()
+
+
+## `SetSeenAndCaughtMon` sets the caught flag and then falls through into
+## `SetSeenMon`, so catching also marks seen and no caller does both.
+func set_species_caught(species: int, caught: bool = true) -> void:
+	if species <= 0:
+		return
+	if caught:
+		_caught_species[species] = true
+		set_species_seen(species, true)
+	else:
+		_caught_species.erase(species)
+
+
 func has_seen_species(species: int) -> bool:
 	return species > 0 and bool(_seen_species.get(species, false))
 
@@ -833,6 +877,12 @@ func apply_changes(
 	for raw_species: Variant in seen_changes:
 		if int(raw_species) <= 0:
 			return {"ok": false, "reason": &"invalid_seen_species"}
+	var caught_changes: Dictionary = runtime_changes.get("caught_species", {})
+	if not caught_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_caught_species"}
+	for raw_species: Variant in caught_changes:
+		if int(raw_species) <= 0:
+			return {"ok": false, "reason": &"invalid_caught_species"}
 	var memory_changes: Dictionary = runtime_changes.get("script_memory", {})
 	if not memory_changes is Dictionary:
 		return {"ok": false, "reason": &"invalid_script_memory"}
@@ -881,6 +931,14 @@ func apply_changes(
 			next_seen_species[species] = true
 		else:
 			next_seen_species.erase(species)
+	var next_caught_species: Dictionary = _caught_species.duplicate()
+	for raw_species: Variant in caught_changes:
+		var caught_species_number: int = int(raw_species)
+		if bool(caught_changes[raw_species]):
+			next_caught_species[caught_species_number] = true
+			next_seen_species[caught_species_number] = true
+		else:
+			next_caught_species.erase(caught_species_number)
 	var next_contacts: Dictionary = _phone_contacts.duplicate()
 	for raw_contact: Variant in phone_changes:
 		var contact: int = int(raw_contact)
@@ -909,6 +967,7 @@ func apply_changes(
 		or next_items != _items or next_money != _money or next_coins != _coins \
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
 		or next_seen_species != _seen_species \
+		or next_caught_species != _caught_species \
 		or next_repel_steps != _repel_steps or next_swarm_map != _swarm_map \
 		or next_fishing_swarm_species != _fishing_swarm_species \
 		or next_receive_cycle != _phone_receive_cycle \
@@ -921,6 +980,7 @@ func apply_changes(
 	_items = next_items
 	_money = next_money
 	_seen_species = next_seen_species
+	_caught_species = next_caught_species
 	_coins = next_coins
 	_phone_contacts = next_contacts
 	_just_battled = next_just_battled

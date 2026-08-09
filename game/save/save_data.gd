@@ -7,7 +7,7 @@ extends RefCounted
 ## the wrong cartridge cache. The schema is versioned so a future save shape
 ## can be refused or migrated deliberately instead of being guessed at.
 
-const FORMAT_VERSION: int = 4
+const FORMAT_VERSION: int = 5
 const LEGACY_FORMAT_VERSION: int = 1
 const MAX_PARTY: int = Gen2Party.MAX_SIZE
 const MAX_PLAYER_NAME: int = 10
@@ -18,6 +18,11 @@ const MAX_LABEL: int = 24
 const BOX_COUNT: int = 14
 const BOX_CAPACITY: int = Gen2SaveBox.CAPACITY
 
+## `constants/wram_constants.asm`: `PLAYERGENDER_FEMALE_F` is bit 0 of
+## wPlayerGender, so the whole byte is 0 for Chris and 1 for Kris.
+const GENDER_MALE: int = 0
+const GENDER_FEMALE: int = 1
+
 var format_version: int = FORMAT_VERSION
 var game_id: StringName = &""
 var rom_sha1: String = ""
@@ -27,6 +32,12 @@ var player_name: String = ""
 ## when a game starts and never changed after; GetTreeScore is the first thing
 ## in this project to read it.
 var player_id: int = 0
+## wPlayerGender, whose bit 0 is `PLAYERGENDER_FEMALE_F`. Crystal only: pokegold
+## ships no wPlayerGender and no KrisStateSprites, so a Gold or Silver player is
+## always male and nothing reads this there.
+var gender: int = GENDER_MALE
+## wGameTimeHours .. wGameTimeFrames, the play timer the trainer card prints.
+var game_time: Gen2GameTime = null
 var label: String = ""
 var party: Array = []
 var boxes: Array = []
@@ -35,6 +46,7 @@ var boxes_shape_valid: bool = true
 
 
 func _init() -> void:
+	game_time = Gen2GameTime.new()
 	for _box_index: int in BOX_COUNT:
 		boxes.append(Gen2SaveBox.new())
 
@@ -53,6 +65,8 @@ func to_dict() -> Dictionary:
 		"slot": slot,
 		"player_name": player_name,
 		"player_id": player_id,
+		"gender": gender,
+		"game_time": game_time.to_dict() if game_time != null else Gen2GameTime.new().to_dict(),
 		"label": label,
 		"party": saved_party,
 		"boxes": saved_boxes,
@@ -76,6 +90,8 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	out.slot = int(source.get("slot", -1))
 	out.player_name = String(source.get("player_name", ""))
 	out.player_id = int(source.get("player_id", 0)) & 0xFFFF
+	out.gender = GENDER_FEMALE if int(source.get("gender", GENDER_MALE)) & 1 else GENDER_MALE
+	out.game_time = Gen2GameTime.parse(source.get("game_time", {}))
 	out.label = String(source.get("label", ""))
 	var raw_party: Variant = source.get("party", [])
 	if raw_party is Array:
@@ -110,6 +126,8 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## Version 1 had no PC-box field. Version 2 had no slot label. Version 3 had no
 ## player trainer ID; it migrates to zero rather than being invented, since a
 ## rolled ID would silently change the headbutt encounters of an existing save.
+## Version 4 had neither gender nor a play timer; both migrate to the value a
+## new game starts with, male and 0:00, since neither can be recovered.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -126,6 +144,11 @@ static func migrate_dict(raw: Variant) -> Dictionary:
 		migrated["label"] = ""
 	if version < 4 and not migrated.has("player_id"):
 		migrated["player_id"] = 0
+	if version < 5:
+		if not migrated.has("gender"):
+			migrated["gender"] = GENDER_MALE
+		if not migrated.has("game_time"):
+			migrated["game_time"] = Gen2GameTime.new().to_dict()
 	migrated["format_version"] = FORMAT_VERSION
 	return {"ok": true, "data": migrated, "migrated": true}
 
@@ -186,6 +209,8 @@ func copy_from(source: Gen2SaveData) -> bool:
 	slot = copied.slot
 	player_name = copied.player_name
 	player_id = copied.player_id
+	gender = copied.gender
+	game_time = copied.game_time
 	label = copied.label
 	party = copied.party
 	boxes = copied.boxes

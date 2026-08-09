@@ -1392,6 +1392,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_music_count": int(services["music"]),
 		"world_sfx_count": int(services["sfx"]),
 		"bar_palettes": _import_bar_palettes(rom, layout),
+		"card_palettes": _import_card_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
 		"complete": true,
@@ -1759,6 +1760,26 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `_CGB_TrainerCard`'s palettes: its eight background slots, each a trainer
+## class pair `LoadPalette_White_Col1_Col2_Black` expands, and the badge object
+## palette it takes from `PredefPals` whole.
+##
+## Slot 0 is trainer class 0, the player, whose pair sits in the class table but
+## whose class the pic tables skip, so this is the only place it is read.
+func _import_card_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var background: Array = []
+	for trainer_class: int in RomLayout.CARD_PALETTE_CLASSES:
+		var entry: int = RomLayout.trainer_palette_offset(layout, trainer_class)
+		background.append([
+			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
+		])
+	var badge: Array = []
+	var badge_entry: int = int((layout["trainer_card"] as Dictionary)["badge_palette"])
+	for index: int in RomLayout.CARD_BADGE_PALETTE_COLORS:
+		badge.append(rom.u16le(badge_entry + index * Gen2Palette.COLOR_BYTES))
+	return {"background": background, "badge": badge}
+
+
 ## Decodes the fixed tile sheets: the font, the eight text box borders and the
 ## battle HUD's graphics, each as one strip of tiles.
 ##
@@ -1772,6 +1793,7 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 ## borders 1bpp, battle graphics 2bpp.
 func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
+	var card: Dictionary = layout["trainer_card"]
 	var sheets: Dictionary = {
 		"font": {
 			"offset": RomLayout.font_offset(layout),
@@ -1809,7 +1831,57 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"first_code": 0,
 			"bits": 2,
 		},
+		"card_status": {
+			"offset": int(card["status"]),
+			"tiles": RomLayout.CARD_STATUS_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"card_leaders": {
+			"offset": int(card["leaders"]),
+			"tiles": RomLayout.CARD_LEADER_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"card_badges": {
+			"offset": int(card["badges"]),
+			"tiles": RomLayout.CARD_BADGE_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"card_frame": {
+			"offset": int(card["frame"]),
+			"tiles": RomLayout.CARD_FRAME_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"card_pic_male": {
+			"offset": int(card["pic_male"]),
+			"tiles": RomLayout.CARD_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+			"columns": RomLayout.CARD_PIC_COLUMNS,
+			"column_major": bool(card["pic_columns"]),
+		},
 	}
+	## Crystal only: pokegold ships neither a Kris pic nor the right corner, and
+	## says so with the -1 every layout uses for data a profile does not carry.
+	if int(card["pic_female"]) >= 0:
+		sheets["card_pic_female"] = {
+			"offset": int(card["pic_female"]),
+			"tiles": RomLayout.CARD_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+			"columns": RomLayout.CARD_PIC_COLUMNS,
+			"column_major": bool(card["pic_columns"]),
+		}
+	if int(card["right_corner"]) >= 0:
+		sheets["card_right_corner"] = {
+			"offset": int(card["right_corner"]),
+			"tiles": RomLayout.CARD_RIGHT_CORNER_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
 
 	var written: Dictionary = {}
 	var done: int = 0
@@ -1838,7 +1910,42 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 static func _decode_strip(data: PackedByteArray, sheet: Dictionary) -> PackedByteArray:
 	if int(sheet["bits"]) == 1:
 		return Gen2Tiles.decode_1bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
-	return Gen2Tiles.decode_2bpp_strip(data, int(sheet["offset"]), int(sheet["tiles"]))
+	var strip: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, int(sheet["offset"]), int(sheet["tiles"])
+	)
+	## Only the card pic carries a column count, and only Crystal stores it that
+	## way; Gold and Silver hold the same picture row-major already.
+	var columns: int = int(sheet.get("columns", 0))
+	if columns <= 0 or not bool(sheet.get("column_major", false)):
+		return strip
+	return _rows_from_columns(strip, columns, int(sheet["tiles"]) / columns)
+
+
+## Crystal's card pic is stored column-major, since `PlaceGraphic` fills down
+## each column and its PNG is converted with `--columns`. Gold and Silver store
+## the same picture row-major for their own inline loop. This turns the first
+## into the second, so a screen reads one order on both profiles.
+static func _rows_from_columns(
+	strip: PackedByteArray, columns: int, rows: int
+) -> PackedByteArray:
+	var tile_pixels: int = Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT
+	if strip.size() < columns * rows * tile_pixels:
+		return strip
+	var out := PackedByteArray()
+	out.resize(strip.size())
+	var width: int = columns * Gen2Tiles.TILE_WIDTH
+	for column: int in columns:
+		for row: int in rows:
+			var source_tile: int = column * rows + row
+			var target_tile: int = row * columns + column
+			for y: int in Gen2Tiles.TILE_HEIGHT:
+				for x: int in Gen2Tiles.TILE_WIDTH:
+					var from: int = source_tile * Gen2Tiles.TILE_WIDTH \
+						+ y * (strip.size() / Gen2Tiles.TILE_HEIGHT) + x
+					var to: int = target_tile * Gen2Tiles.TILE_WIDTH \
+						+ y * (strip.size() / Gen2Tiles.TILE_HEIGHT) + x
+					out[to] = strip[from]
+	return out
 
 
 func _import_pics(

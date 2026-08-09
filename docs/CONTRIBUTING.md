@@ -99,13 +99,17 @@ imported caller/callee script at the same transaction boundary. Audio stays
 behind bounded decoder, renderer and player layers.
 
 `world_start_menu.gd` models `engine/menus/start_menu.asm`'s item list: source
-Pokedex/Pokemon/Pokegear gating, the `STATICMENU_WRAP` cursor, and Pokedex and
-Player built in their source position marked unavailable rather than omitted.
+Pokedex/Pokemon/Pokegear gating, the `STATICMENU_WRAP` cursor, and Pokedex
+built in its source position marked unavailable rather than omitted.
 `world_options_menu.gd` models `engine/menus/options_menu.asm` over
 [Gen2Options], seven value rows plus CANCEL, and leaves persistence to
-`Gen2OptionsStore`. `world_pack.gd` groups owned items into the four cartridge pockets by
-the item type byte `GameData` imports under the confusingly-named `pocket`
-field; it is presentation only, item counts stay a flat map on `Gen2WorldState`
+`Gen2OptionsStore`. `trainer_card.gd` and `render/trainer_card_page.gd` are
+`engine/menus/trainer_card.asm`: the page keeps the cartridge's own VRAM window
+and writes tile numbers into a map, since the card is a tilemap screen rather
+than a text one, and `trainer_card_screen.gd` colours it through
+`_CGB_TrainerCard`'s palettes and draws the badge objects over it.
+`world_pack.gd` groups owned items into the four cartridge pockets by the item
+type byte `GameData` imports under the confusingly-named `pocket` field; it is presentation only, item counts stay a flat map on `Gen2WorldState`
 and pocket capacities are not enforced. `start_menu_screen.gd` is the overlay,
 owning Pack, a Save confirmation and the OPTION menu as internal modes the way
 `world_service_screen.gd` owns a mart mode, and delegating Pokemon and Pokegear

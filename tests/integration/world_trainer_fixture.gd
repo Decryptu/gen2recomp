@@ -258,6 +258,16 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"player_hud": [RomLayout.PLAYER_HUD_TILES, 3],
 		"font": [RomLayout.FONT_TILES, 3],
 		"frames": [RomLayout.FRAME_COUNT * RomLayout.FRAME_TILES, 3],
+		## The trainer card's own sheets. Flat fills like the rest of these: the
+		## card's layout is what a test checks, and real artwork would say
+		## nothing about it.
+		"card_status": [RomLayout.CARD_STATUS_TILES, 1],
+		"card_leaders": [RomLayout.CARD_LEADER_TILES, 2],
+		"card_badges": [RomLayout.CARD_BADGE_TILES, 3],
+		"card_frame": [RomLayout.CARD_FRAME_TILES, 1],
+		"card_pic_male": [RomLayout.CARD_PIC_TILES, 2],
+		"card_pic_female": [RomLayout.CARD_PIC_TILES, 3],
+		"card_right_corner": [RomLayout.CARD_RIGHT_CORNER_TILES, 1],
 	}
 	for name: String in sheet_tiles:
 		var tile_count: int = int(sheet_tiles[name][0])
@@ -273,6 +283,13 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			"bits": 1,
 		}
 	manifest["tiles"] = sheets
+	manifest["card_palettes"] = {
+		"background": [
+			[0x7FFF, 0x0000], [0x001F, 0x0000], [0x03E0, 0x0000], [0x7C00, 0x0000],
+			[0x7FE0, 0x0000], [0x03FF, 0x0000], [0x7C1F, 0x0000], [0x4210, 0x0000],
+		],
+		"badge": [0x7FFF, 0x5ABA, 0x49EF, 0x0000],
+	}
 	manifest["bar_palettes"] = {
 		"hp_green": [0x02E0, 0x02E0],
 		"hp_yellow": [0x02BF, 0x02BF],

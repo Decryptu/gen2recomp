@@ -381,6 +381,38 @@ const ENEMY_HUD_TILES: int = 4
 const PLAYER_HUD_TILES: int = 6
 const EXP_BAR_TILES: int = 9
 
+## The trainer card's own graphics (engine/menus/trainer_card.asm).
+##
+## `CardStatusGFX` is six tiles but `_Option`'s page 1 asks for 86, running
+## straight on into `LeaderGFX`, so the strip page 1 loads is those 86 tiles from
+## the card_status offset. Pages 2 and 3 load 86 from the leaders offset, which
+## overlaps it; both are imported, because that is what each page draws.
+##
+## The pic is a 5x7 picture. Crystal stores it column-major (`--columns` plus
+## `PlaceGraphic`, which fills down each column) and Gold and Silver row-major
+## (their own inline `.row`/`.col` loop), so the importer reorders Crystal's into
+## the picture and both profiles reach the screen the same way.
+const CARD_STATUS_TILES: int = 86
+const CARD_LEADER_TILES: int = 86
+const CARD_BADGE_TILES: int = 44
+const CARD_RIGHT_CORNER_TILES: int = 1
+const CARD_FRAME_TILES: int = 6
+const CARD_PIC_COLUMNS: int = 5
+const CARD_PIC_ROWS: int = 7
+const CARD_PIC_TILES: int = CARD_PIC_COLUMNS * CARD_PIC_ROWS
+
+## `_CGB_TrainerCard`'s eight background palettes, as the trainer classes it
+## reads them from, in its own call order. Slot 0 is the player's own class,
+## which is why the cache carries a class the trainer tables otherwise skip;
+## slot 1 is Falkner's, which the source's own comment marks as Kris's card
+## palette and which Clair borrows further down.
+const CARD_PALETTE_CLASSES: Array[int] = [0, 1, 3, 2, 4, 7, 6, 5]
+
+## `PREDEFPAL_CGB_BADGE` (gfx/sgb/predef.pal), the object palette every badge
+## sprite is drawn with. Four colours rather than a pair, since a predef palette
+## is stored whole.
+const CARD_BADGE_PALETTE_COLORS: int = 4
+
 ## The four palettes a battle draws its bars with: the HP bar in green, yellow
 ## or red depending on how much is left, and the exp bar in blue. They are two
 ## colours each like a species' palette, white and black being implied, and they
@@ -636,6 +668,24 @@ const GOLD_SILVER: Dictionary = {
 	"enemy_hud": 0xF8BB2,
 	"player_hud": 0xF8BD2,
 	"exp_bar": 0xF8C02,
+	# Trainer card. Located by converting the pinned gfx/trainer_card PNGs and
+	# matching the bytes in the cartridge; the run is contiguous and
+	# self-consistent, status running straight into the two leader copies and
+	# then the two badge copies. Nested, the way wild_encounters is, so the -1
+	# for what a profile does not ship stays out of the flat offset checks.
+	"trainer_card": {
+		# Gold and Silver ship no Kris pic and no right corner, and store the
+		# card pic row-major rather than in columns.
+		"pic_male": 0x2547F,
+		"pic_female": -1,
+		"pic_columns": false,
+		"frame": 0x256AF,
+		"status": 0x2570F,
+		"leaders": 0x2576F,
+		"badges": 0x2622F,
+		"right_corner": -1,
+		"badge_palette": 0xA385,
+	},
 	"trainer_pic_pointers": 0x80000,
 	"trainer_palettes": 0xB53D,
 	"trainer_class_names": 0x1B0955,
@@ -769,6 +819,20 @@ const CRYSTAL: Dictionary = {
 	"enemy_hud": 0xF8AC0,
 	"player_hud": 0xF8AE0,
 	"exp_bar": 0xF8B10,
+	# Trainer card; see the Gold and Silver block above for how these were
+	# located. Crystal splits the card pic in two by gender and stores both
+	# column-major, and adds the one-tile right corner Gold and Silver lack.
+	"trainer_card": {
+		"pic_male": 0x88365,
+		"pic_female": 0x88595,
+		"pic_columns": true,
+		"frame": 0x887C5,
+		"status": 0x25523,
+		"leaders": 0x25583,
+		"badges": 0x26043,
+		"right_corner": 0x265C3,
+		"badge_palette": 0x9F16,
+	},
 	"trainer_pic_pointers": 0x128000,
 	"trainer_palettes": 0xB0CE,
 	"trainer_class_names": 0x2C1EF,

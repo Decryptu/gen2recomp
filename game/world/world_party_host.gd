@@ -86,6 +86,9 @@ static func complete_runtime_request(
 		)
 
 	var before: Gen2WorldSnapshot = world.snapshot()
+	## After the snapshot, so a refused transaction rolls the dex flag back with
+	## everything else the request wrote.
+	_register_caught(world, int(transaction.get("register_caught", 0)))
 	var completion_result: Dictionary = {
 		"ok": true,
 		"script_value": int(transaction.get("script_value", 0)),
@@ -388,6 +391,10 @@ static func capture_wild(
 				"ball": ball, "outcome": outcome,
 			})
 	var before: Gen2WorldSnapshot = world.snapshot()
+	## After the snapshot the rollback below restores, so a refused candidate
+	## save takes the dex flag back with the ball.
+	if bool(outcome.get("caught", false)):
+		_register_caught(world, wild.species)
 	var next_quantity: int = world.state.item_quantity(ball) - 1
 	var item_result: Dictionary = world.state.apply_changes({}, {}, {"items": {ball: next_quantity}})
 	if not bool(item_result.get("ok", false)):
@@ -494,6 +501,7 @@ static func _apply_party_request(
 		candidate.party[requested_index] = received
 		return {
 			"ok": true, "accepted": true, "script_value": 1,
+			"register_caught": received.species,
 			"summary": {
 				"kind": &"trade", "accepted": true, "trade_id": trade_id,
 				"given_species": requested.species,
@@ -503,8 +511,12 @@ static func _apply_party_request(
 	return {"ok": false, "reason": &"unsupported_party_request"}
 
 
+## `AddPartyMon`'s `.registerpokedex`, which an egg never reaches: the source
+## checks `cp EGG` first and jumps past `SetSeenAndCaughtMon`, so a Pokemon is
+## unknown to the dex until it hatches.
 static func _append_mon(
-	candidate: Gen2SaveData, mon: Gen2SaveMon, script_value: int, summary: Dictionary
+	candidate: Gen2SaveData, mon: Gen2SaveMon,
+	script_value: int, summary: Dictionary
 ) -> Dictionary:
 	var destination: Dictionary = candidate.add_party_or_box(mon)
 	if not bool(destination.get("ok", false)):
@@ -515,10 +527,20 @@ static func _append_mon(
 		}
 	return {
 		"ok": true, "accepted": true, "script_value": script_value,
+		"register_caught": 0 if StringName(summary.get("kind", &"")) == &"egg" else mon.species,
 		"summary": summary.merged({
 			"accepted": true, "destination": destination.duplicate(true),
 		}),
 	}
+
+
+## `SetSeenAndCaughtMon`. Written straight onto the live state rather than
+## staged, the way the ball count is, and always after the caller has taken its
+## rollback snapshot so a refused save takes the flag back too.
+static func _register_caught(world: Gen2WorldAPI, species: int) -> void:
+	if world == null or world.state == null or species <= 0:
+		return
+	world.state.set_species_caught(species)
 
 
 static func _new_mon(

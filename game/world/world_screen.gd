@@ -67,6 +67,9 @@ var _script_prompt: String = ""
 var _story_picture_backdrop: ColorRect = null
 var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
+var _trainer_card_host: Gen2TrainerCardScreen = null
+## Leftover of a frame the play timer has not counted yet.
+var _game_time_seconds: float = 0.0
 var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
@@ -181,6 +184,9 @@ func _build_world() -> void:
 	_play_current_map_music()
 	_text_box = Gen2TextBox.new()
 	_text_box.font = Gen2Font.from_data(_data)
+	## wTextboxFrame, which `Textbox` reads on every box it draws and the OPTION
+	## menu's FRAME row writes.
+	_text_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
 	_text_box.reveal_speed = 0.0
 	_text_box.place_at_bottom()
 	_text_box.visible = false
@@ -263,6 +269,7 @@ func cycle_world_renderer() -> Dictionary:
 
 
 func _process(delta: float) -> void:
+	_advance_game_time(delta)
 	if _animation != null and _animation.advance(delta) and _renderer != null:
 		_renderer.refresh_animation()
 	if _world != null and _world.advance_player_step(delta) and _renderer != null:
@@ -354,7 +361,7 @@ func _advance_held_direction(delta: float) -> void:
 func _overlay_open() -> bool:
 	return _battle_host != null or _service_host != null or _pc_host != null \
 		or _start_menu_host != null or _party_host != null \
-		or _hall_of_fame_host != null
+		or _hall_of_fame_host != null or _trainer_card_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -414,6 +421,8 @@ func _handle_button(button: int) -> bool:
 		if button == Gen2Button.A:
 			_acknowledge_field_move_text()
 		return true
+	if _trainer_card_host != null:
+		return _trainer_card_host.handle_button(button)
 	if _start_menu_host != null:
 		return _start_menu_host.handle_button(button)
 	if _service_host != null:
@@ -655,6 +664,33 @@ func persist_world_snapshot() -> Dictionary:
 	if _injected_save != null:
 		return {"ok": true, "kind": &"world_snapshot_saved", "save": save}
 	return Gen2SaveStore.save(save, _data)
+
+
+## `GameTimer`, one call per hardware frame. The play timer belongs to the save
+## rather than to the world, since the cartridge keeps it in wPlayerData.
+##
+## Two source gates decide whether it counts, and neither is `_overlay_open()`:
+## a battle, the pack and the start menu all keep counting. `wGameTimerPaused`
+## is cleared for `Script_halloffame` alone (engine/overworld/scripting.asm:2318)
+## and `wGameLogicPaused` is set by Bill's PC (engine/pokemon/bills_pc.asm:2000)
+## and by saving, which costs no frames here.
+##
+## Catch-up is capped the way [method Gen2WorldAnimation.advance] caps it, so a
+## stalled host cannot hand the timer a minute of frames at once.
+func _advance_game_time(delta: float) -> void:
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	if save == null or save.game_time == null:
+		return
+	if _hall_of_fame_host != null or _pc_host != null:
+		return
+	_game_time_seconds += minf(
+		delta, Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
+	)
+	var frames: int = int(_game_time_seconds / Gen2WorldAnimation.FRAME_SECONDS)
+	if frames <= 0:
+		return
+	_game_time_seconds -= float(frames) * Gen2WorldAnimation.FRAME_SECONDS
+	save.game_time.advance_frames(frames)
 
 
 ## Deterministic driver for tests and screenshot tooling. The live scene uses
@@ -1122,11 +1158,19 @@ func _start_battle_request(request: Dictionary) -> void:
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
 	host.battle_finished.connect(_on_battle_finished)
+	host.enemy_seen.connect(_on_enemy_seen)
 	if not tutorial:
 		host.capture_requested.connect(_on_capture_requested)
 	_battle_host = host
 	_script_prompt = "Battle in progress"
 	_refresh_labels()
+
+
+## `LoadEnemyMon`'s dex write. The flag lands on live world state, so the next
+## snapshot carries it exactly as the cartridge's next save does.
+func _on_enemy_seen(species: int) -> void:
+	if _world != null and _world.state != null:
+		_world.state.set_species_seen(species)
 
 
 func _on_capture_requested(ball: int) -> void:
@@ -1456,6 +1500,37 @@ func _on_start_menu_action(kind: StringName) -> void:
 			_open_embedded_party()
 		Gen2WorldStartMenu.ITEM_POKEGEAR:
 			_open_pokegear()
+		Gen2WorldStartMenu.ITEM_PLAYER:
+			_open_trainer_card()
+	_refresh_labels()
+
+
+## `StartMenu_Status`'s `farcall TrainerCard`. Its own B returns to the
+## overworld, which is where the source's own `ret` lands too.
+func _open_trainer_card() -> void:
+	if _trainer_card_host != null or _data == null:
+		return
+	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
+	var host := Gen2TrainerCardScreen.new()
+	if not host.open(_data, _world, save):
+		host.free()
+		_script_prompt = "The trainer card needs a save and a cache that carries it"
+		_refresh_labels()
+		return
+	host.z_index = 10
+	add_child(host)
+	host.closed.connect(_on_trainer_card_closed)
+	_trainer_card_host = host
+	_script_prompt = "Trainer card open"
+	_refresh_labels()
+
+
+func _on_trainer_card_closed() -> void:
+	var host: Gen2TrainerCardScreen = _trainer_card_host
+	_trainer_card_host = null
+	if host != null:
+		host.queue_free()
+	_script_prompt = "Trainer card closed"
 	_refresh_labels()
 
 
@@ -2188,6 +2263,7 @@ func _refresh_party_summary() -> void:
 	## wPlayerID rides the same refresh: it belongs to the save, and
 	## GetTreeScore reads it the way VAR_PARTYCOUNT reads the party mirror.
 	_world.set_player_id(save.player_id)
+	_world.set_player_gender(save.gender == Gen2SaveData.GENDER_FEMALE)
 	var has_pokerus: bool = false
 	var species: Array[int] = []
 	var moves: Array = []

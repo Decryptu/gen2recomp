@@ -150,7 +150,7 @@ func _draw() -> void:
 
 	var player: Vector2i = _world.player_pixel_position()
 	var player_texture: Texture2D = _actor_texture(
-		_world.player_sprite(), 0, _world.player_facing, 0
+		_world.player_sprite(), _world.player_palette(), _world.player_facing, 0
 	)
 	if player_texture != null:
 		draw_texture(player_texture, Vector2(player))
