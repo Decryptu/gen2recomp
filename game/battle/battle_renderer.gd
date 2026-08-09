@@ -1,27 +1,47 @@
 class_name Gen2BattleRenderer
 extends Control
 
-## Draws the battle field: two pics, two status panels, two HP bars and the exp
-## bar, at the positions the hardware puts them. It does not own the battle;
-## call [method set_battle_data] once, then [method set_view] whenever the
-## screen has new display values to show.
+## Draws the battle field: two pics, two status panels, two HP bars, the exp bar
+## and whatever a battle animation is putting over them. It does not own the
+## battle; call [method set_battle_data] once, then [method set_view] whenever
+## the screen has new display values to show.
+##
+## The pics are drawn through `wTilemap` rather than placed at a corner, because
+## that map is what a battle animation edits: `BattleBGEffect_HideMon` blanks a
+## battler's box, `..._RemoveMon` shifts it a column at a time and the pic-resize
+## script stamps smaller arrangements of the same tiles over it. The screen owns
+## the map and hands it in; a tile id is the hardware's, `$00` up for the enemy's
+## front pic and `$31` up for the player's back pic.
 ##
 ## Panels compose into one screen-sized index buffer drawn over the pics with
 ## index 0 transparent: a panel is a shape on a white field, drawn into the
 ## background layer on hardware, so the pics show through everything that is not
 ## ink.
 ##
-## Every layer here is part of that one background plane, so a scroll applies to
-## all of them alike: [member Gen2BattleIntro] hands the screen a per-scanline
-## offset and each layer is scrolled through [Gen2Raster] by the same one. That
-## is the same answer as scrolling a single merged buffer would give, and it
-## keeps a palette per layer, which the hardware's per-tile palettes need.
-
-## Where the two pics sit, in tiles.
-const ENEMY_PIC: Vector2i = Vector2i(12, 0)
-const PLAYER_PIC: Vector2i = Vector2i(2, 6)
+## Every background layer is part of one plane, so a scroll applies to all of
+## them alike: the view hands over a per-scanline offset and each layer is
+## scrolled through [Gen2Raster] by the same one. The animation's own objects are
+## not part of that plane and do not scroll, the way OAM does not.
 
 const TILE: int = Gen2Font.TILE
+
+## Where each picture sits and which tile ids are its own: see
+## [Gen2BattleScreenMap], which the screen builds the map with.
+const COLUMNS: int = Gen2BattleScreenMap.COLUMNS
+const ROWS: int = Gen2BattleScreenMap.ROWS
+
+## The background map is 256 pixels each way against the screen's 160 by 144, so
+## a scroll wraps and blank is what comes in.
+const MAP_WIDTH: int = 256
+const MAP_HEIGHT: int = 256
+
+## `%11100100`, the DMG palette byte that maps every colour to itself.
+const PALETTE_IDENTITY: int = 0xE4
+
+## OAM attribute bits, as [Gen2BattleAnimObject] writes them.
+const OAM_YFLIP: int = 1 << 6
+const OAM_XFLIP: int = 1 << 5
+const OAM_PALETTE: int = 0x07
 
 ## The white the hardware fills the battle background with.
 const BACKGROUND: Color = Color.WHITE
@@ -36,6 +56,14 @@ var _panels: TextureRect = null
 var _enemy_bar: TextureRect = null
 var _player_bar: TextureRect = null
 var _exp_bar: TextureRect = null
+var _sprites: TextureRect = null
+
+## One 56x56 and one 48x48 index buffer, the two pics padded out to their own
+## boxes, rebuilt only when the species drawn changes.
+var _enemy_pixels: PackedByteArray = PackedByteArray()
+var _player_pixels: PackedByteArray = PackedByteArray()
+var _enemy_pixels_species: int = -1
+var _player_pixels_species: int = -1
 
 
 ## Reads what it draws with out of the cache and builds its layers. Answers
@@ -58,6 +86,7 @@ func set_battle_data(data: GameData) -> bool:
 	_enemy_bar = _new_layer()
 	_player_bar = _new_layer()
 	_exp_bar = _new_layer()
+	_sprites = _new_layer()
 	return true
 
 
@@ -73,42 +102,140 @@ func refresh() -> void:
 	if _hud == null:
 		return
 
-	_draw_pic(
-		_enemy_pic, _data.species_pic(int(_view.get("enemy_species", 0))),
-		_data.palette(int(_view.get("enemy_species", 0))), ENEMY_PIC
+	_draw_pics()
+	_draw_panels()
+	_draw_sprites()
+
+
+## Both pics, each read out of the tilemap so an animation that blanked, shifted
+## or resized one is what shows.
+func _draw_pics() -> void:
+	var map: PackedByteArray = _bg_map()
+	_ensure_pixels()
+
+	_show_layer(
+		_enemy_pic,
+		_pic_layer(map, Gen2BattleScreenMap.ENEMY_BASE_TILE, Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels),
+		_battler_palette(int(_view.get("enemy_species", 0)), Gen2BattleAnimBackground.PAL_BG_ENEMY)
 	)
 	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
 	# after `BattleIntroSlidingPics` has returned, so it is not on the map to be
 	# scrolled and is simply not there yet.
 	if bool(_view.get("player_pic_visible", true)):
-		_draw_pic(
-			_player_pic, _data.species_pic(int(_view.get("player_species", 0)), true),
-			_data.palette(int(_view.get("player_species", 0))), PLAYER_PIC
+		_show_layer(
+			_player_pic,
+			_pic_layer(map, Gen2BattleScreenMap.PLAYER_BASE_TILE, Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels),
+			_battler_palette(
+				int(_view.get("player_species", 0)), Gen2BattleAnimBackground.PAL_BG_PLAYER
+			)
 		)
 	else:
 		_player_pic.texture = null
-	_draw_panels()
 
 
-## A pic is drawn into a screen-sized layer rather than a rectangle placed at
-## its own corner, because a scroll wraps at the background map's width and so
-## needs to know where the screen ends.
-func _draw_pic(
-	into: TextureRect, pic: Dictionary, palette: PackedColorArray, at: Vector2i
-) -> void:
-	if into == null or pic.is_empty():
-		return
+## The tilemap the animation edits, or the plain one both pics sit in when the
+## view carries none.
+func _bg_map() -> PackedByteArray:
+	var supplied: Variant = _view.get("bg_map", null)
+	if supplied is PackedByteArray \
+			and (supplied as PackedByteArray).size() == COLUMNS * ROWS:
+		return supplied
+	return Gen2BattleScreenMap.seeded()
 
-	var image: Image = Gen2PicImage.from_atlas(
-		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic, palette
-	)
-	var layer: Image = Image.create_empty(
-		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, image.get_format()
-	)
-	layer.blit_rect(
-		image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i(at.x * TILE, at.y * TILE)
-	)
-	_show_image(into, layer)
+
+## One screen-sized index buffer holding every cell of [param map] whose tile id
+## falls inside this pic's own run, drawn from the pic's padded box. A tile is
+## `base + column * side + row`, which is the column-major order `PlaceGraphic`
+## walks and `.BGSquares` indexes.
+func _pic_layer(
+	map: PackedByteArray, base: int, side: int, pixels: PackedByteArray
+) -> PackedByteArray:
+	var out: PackedByteArray = _new_buffer()
+	var box: int = side * TILE
+	if pixels.size() < box * box:
+		return out
+	for row: int in ROWS:
+		for column: int in COLUMNS:
+			var tile: int = int(map[row * COLUMNS + column]) - base
+			if tile < 0 or tile >= side * side:
+				continue
+			@warning_ignore("integer_division")
+			var source_x: int = (tile / side) * TILE
+			var source_y: int = (tile % side) * TILE
+			for line: int in TILE:
+				var from: int = (source_y + line) * box + source_x
+				var to: int = (row * TILE + line) * Gen2Screen.WIDTH + column * TILE
+				for x: int in TILE:
+					out[to + x] = pixels[from + x]
+	return out
+
+
+## The two pics as index buffers padded out to their own boxes, so a tile id
+## indexes a fixed grid whatever size the species' own pic is.
+func _ensure_pixels() -> void:
+	var enemy: int = int(_view.get("enemy_species", 0))
+	if enemy != _enemy_pixels_species:
+		_enemy_pixels = _padded_pic(_data.species_pic(enemy), Gen2BattleScreenMap.ENEMY_SIDE)
+		_enemy_pixels_species = enemy
+	var player: int = int(_view.get("player_species", 0))
+	if player != _player_pixels_species:
+		_player_pixels = _padded_pic(_data.species_pic(player, true), Gen2BattleScreenMap.PLAYER_SIDE)
+		_player_pixels_species = player
+
+
+func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
+	var box: int = side * TILE
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(box * box)
+	if pic.is_empty():
+		return out
+
+	var atlas: Dictionary = _data.atlas(String(pic["atlas"]))
+	var indices: PackedByteArray = _data.atlas_indices(String(pic["atlas"]))
+	var cell: int = int(atlas.get("cell", 0))
+	var columns: int = int(atlas.get("columns", 0))
+	var atlas_width: int = int(atlas.get("width", 0))
+	var slot: int = int(pic.get("slot", -1))
+	if cell <= 0 or columns <= 0 or atlas_width <= 0 or slot < 0:
+		return out
+
+	var width: int = mini(int(pic.get("width", cell)), mini(cell, box))
+	var height: int = mini(int(pic.get("height", cell)), mini(cell, box))
+	var left: int = (slot % columns) * cell
+	@warning_ignore("integer_division")
+	var top: int = (slot / columns) * cell
+	for y: int in height:
+		var from: int = (top + y) * atlas_width + left
+		if from + width > indices.size():
+			break
+		for x: int in width:
+			out[y * box + x] = indices[from + x]
+	return out
+
+
+## A battler pic's own palette, permuted by whatever DMG byte the animation's
+## last `BattleAnimRequestPals` left on that palette slot.
+func _battler_palette(species: int, slot: int) -> PackedColorArray:
+	return _remap(_data.palette(species), _palette_map("bg_palette_maps", slot))
+
+
+## `CopyPals`: colour [param index] of the result is colour
+## [code](byte >> index * 2) & 3[/code] of the pristine palette, which is why a
+## remap never compounds.
+static func _remap(palette: PackedColorArray, dmg: int) -> PackedColorArray:
+	if palette.size() < Gen2Palette.COLORS_PER_PIC or dmg == PALETTE_IDENTITY:
+		return palette
+	var out := PackedColorArray()
+	for index: int in Gen2Palette.COLORS_PER_PIC:
+		out.append(palette[(dmg >> (index * 2)) & 3])
+	return out
+
+
+func _palette_map(key: String, slot: int) -> int:
+	var maps: Variant = _view.get(key, null)
+	if not maps is PackedByteArray or slot < 0 or slot >= (maps as PackedByteArray).size():
+		return PALETTE_IDENTITY
+	return int((maps as PackedByteArray)[slot])
 
 
 ## The panels, and then each bar over them in its own colour.
@@ -116,7 +243,18 @@ func _draw_pic(
 ## The hardware gives every background tile its own palette, so a green HP bar
 ## sits in a panel of black text without either being separate. Here that is one
 ## buffer per palette, which is why the bars are drawn apart from the panels.
+##
+## `BattleAnimClearHud` takes all four off the map for the length of a move
+## animation and `BattleAnimRestoreHuds` puts them back, which is what
+## `hud_visible` is.
 func _draw_panels() -> void:
+	if not bool(_view.get("hud_visible", true)):
+		_panels.texture = null
+		_enemy_bar.texture = null
+		_player_bar.texture = null
+		_exp_bar.texture = null
+		return
+
 	var enemy_hp: int = int(_view.get("enemy_hp", 0))
 	var enemy_max_hp: int = int(_view.get("enemy_max_hp", 0))
 	var player_hp: int = int(_view.get("player_hp", 0))
@@ -149,6 +287,138 @@ func _draw_panels() -> void:
 	_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
 
 
+## `wShadowOAM` as the animation left it: up to forty sprites, each eight by
+## eight, in the order they were written, so a later one draws over an earlier.
+##
+## Objects are not part of the background plane and take no scroll. Index 0 is
+## transparent, which is what OAM's own colour 0 is.
+func _draw_sprites() -> void:
+	var sprites: Array = _view.get("anim_sprites", [])
+	if sprites.is_empty():
+		_sprites.texture = null
+		return
+
+	var image: Image = Image.create_empty(
+		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8
+	)
+	for entry: Variant in sprites:
+		if entry is Dictionary:
+			_blit_sprite(image, entry as Dictionary)
+	_sprites.texture = ImageTexture.create_from_image(image)
+	_sprites.size = image.get_size()
+	_sprites.position = Vector2.ZERO
+
+
+## One OAM entry. The stored y and x are the hardware's, which subtracts sixteen
+## and eight, so a zero in either is off screen rather than at the corner.
+func _blit_sprite(into: Image, sprite: Dictionary) -> void:
+	var pixels: PackedByteArray = _sprite_tile(int(sprite.get("tile", 0)))
+	if pixels.is_empty():
+		return
+	var attributes: int = int(sprite.get("attributes", 0))
+	var palette: PackedColorArray = _remap(
+		_object_palette(attributes & OAM_PALETTE),
+		_palette_map("ob_palette_maps", attributes & OAM_PALETTE)
+	)
+	var lookup: Image = Gen2PicImage.from_indices(pixels, TILE, TILE, palette, true)
+	if (attributes & OAM_XFLIP) != 0:
+		lookup.flip_x()
+	if (attributes & OAM_YFLIP) != 0:
+		lookup.flip_y()
+
+	var left: int = int(sprite.get("x", 0)) - 8
+	var top: int = int(sprite.get("y", 0)) - 16
+	var clip: Rect2i = Rect2i(0, 0, TILE, TILE)
+	if left < 0:
+		clip.position.x = -left
+		clip.size.x += left
+		left = 0
+	if top < 0:
+		clip.position.y = -top
+		clip.size.y += top
+		top = 0
+	clip.size.x = mini(clip.size.x, Gen2Screen.WIDTH - left)
+	clip.size.y = mini(clip.size.y, Gen2Screen.HEIGHT - top)
+	if clip.size.x <= 0 or clip.size.y <= 0:
+		return
+	into.blend_rect(lookup, clip, Vector2i(left, top))
+
+
+## The eight pixels by eight of one animation tile, found through the window
+## [method Gen2BattleAnimPlayer.tiles] describes, counted from
+## `BATTLEANIM_BASE_TILE`.
+##
+## A window tile is either an imported sheet's or one of the battle's own two
+## pictures, which is what `anim_battlergfx_1row` and `..._2row` put there so an
+## effect can move a battler as objects.
+func _sprite_tile(tile: int) -> PackedByteArray:
+	var window: Array = _view.get("anim_tiles", [])
+	var at: int = tile - Gen2BattleAnimObject.BASE_TILE
+	if at < 0 or at >= window.size() or not window[at] is Dictionary:
+		return PackedByteArray()
+	var entry: Dictionary = window[at]
+	if entry.has("battler_tile"):
+		return _battler_tile(int(entry["battler_tile"]))
+	var strip: PackedByteArray = _data.battle_anim_gfx_indices(int(entry["gfx"]))
+	var index: int = int(entry["tile"])
+	var width: int = strip.size() / TILE if strip.size() > 0 else 0
+	if width <= 0 or (index + 1) * TILE > width:
+		return PackedByteArray()
+
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(TILE * TILE)
+	for row: int in TILE:
+		var from: int = row * width + index * TILE
+		for column: int in TILE:
+			out[row * TILE + column] = strip[from + column]
+	return out
+
+
+## One tile of `vTiles2`, out of the same padded boxes the tilemap is drawn
+## from, so a battler moved as objects is the picture that was on the field.
+func _battler_tile(vram: int) -> PackedByteArray:
+	var enemy: bool = vram < Gen2BattleScreenMap.PLAYER_BASE_TILE
+	var side: int = Gen2BattleScreenMap.ENEMY_SIDE if enemy \
+		else Gen2BattleScreenMap.PLAYER_SIDE
+	var base: int = Gen2BattleScreenMap.ENEMY_BASE_TILE if enemy \
+		else Gen2BattleScreenMap.PLAYER_BASE_TILE
+	var pixels: PackedByteArray = _enemy_pixels if enemy else _player_pixels
+	var index: int = vram - base
+	var box: int = side * TILE
+	if index < 0 or index >= side * side or pixels.size() < box * box:
+		return PackedByteArray()
+
+	@warning_ignore("integer_division")
+	var left: int = (index / side) * TILE
+	var top: int = (index % side) * TILE
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(TILE * TILE)
+	for row: int in TILE:
+		var from: int = (top + row) * box + left
+		for column: int in TILE:
+			out[row * TILE + column] = pixels[from + column]
+	return out
+
+
+## `PAL_BATTLE_OB_*`. Slots 0 and 1 are the two battlers' own rather than
+## `BattleObjectPals` rows, which is what `_CGB_BattleScreenLayout` fills them
+## with.
+func _object_palette(slot: int) -> PackedColorArray:
+	return _data.battle_object_palette(
+		slot,
+		_battler_pair(int(_view.get("enemy_species", 0))),
+		_battler_pair(int(_view.get("player_species", 0)))
+	)
+
+
+func _battler_pair(species: int) -> Array:
+	var entry: Dictionary = _data.species(species)
+	if entry.is_empty():
+		return []
+	var stored: Variant = (entry.get("palette", {}) as Dictionary).get("normal", [])
+	return stored if stored is Array else []
+
+
 func _new_layer() -> TextureRect:
 	var out := TextureRect.new()
 	# Nearest, or the integer-scaled viewport is undone on the last hop.
@@ -175,11 +445,14 @@ func _show_layer(
 
 ## One background layer, scrolled by whatever the view is asking for. An empty
 ## or absent offset list is a background sitting still, which is every frame
-## outside the intro.
+## outside the intro and outside an animation that opened a scanline window.
 func _show_image(into: TextureRect, image: Image) -> void:
+	var rows: PackedInt32Array = PackedInt32Array(_view.get("raster_scy", []))
+	if not rows.is_empty():
+		image = Gen2Raster.scroll_rows(image, rows, MAP_HEIGHT)
 	var offsets: PackedInt32Array = PackedInt32Array(_view.get("raster_scx", []))
 	if not offsets.is_empty():
-		image = Gen2Raster.scroll(image, offsets, Gen2BattleIntro.MAP_WIDTH)
+		image = Gen2Raster.scroll(image, offsets, MAP_WIDTH)
 	into.texture = ImageTexture.create_from_image(image)
 	into.size = image.get_size()
 	into.position = Vector2.ZERO

@@ -303,9 +303,11 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 
 `view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
 `enemy_level`, `player_level`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
-`player_max_hp`, `exp_pixels`, `raster_scx` and `player_pic_visible`: plain
-values read out of a resolved battle event, never the battle engine itself, the
-same rule `Gen2BattleScreen`'s own setters already followed. `exp_pixels` is a
+`player_max_hp`, `exp_pixels`, `raster_scx`, `raster_scy`, `player_pic_visible`,
+`bg_map`, `bg_palette_maps`, `ob_palette_maps`, `anim_sprites`, `anim_tiles` and
+`hud_visible`: plain values read out of a resolved battle event, never the
+battle engine itself, the same rule `Gen2BattleScreen`'s own setters already
+followed. `exp_pixels` is a
 count out of 64, which is `PlaceExpBar`'s own unit; the exp bar is never a
 ratio, because `CalcExpBar` has already done the division and rounded it the
 cartridge's way.
@@ -320,7 +322,30 @@ that operation and is what the built-in renderer applies to each of its layers;
 a renderer that ignores the field simply draws no slide. `player_pic_visible`
 is false for exactly that stretch, because `InitBattleDisplay` places the
 player's back pic with `PlaceGraphic` only after `BattleIntroSlidingPics` has
-returned, so during the slide it is not on the map to be scrolled.
+returned, so during the slide it is not on the map to be scrolled. `raster_scy`
+is the same thing vertically, which only a battle animation ever asks for;
+`Gen2Raster.scroll_rows(image, offsets, 256)` is that operation.
+
+The last six fields are the battle animation layer. `bg_map` is `wTilemap`, a
+20 by 18 grid of tile ids naming which tile of which battler's picture sits in
+each cell: `$00` up is the enemy's front pic and `$31` up the player's back pic,
+each `base + column * side + row`, and everything else is blank. A renderer
+draws the two pictures out of that map rather than at a fixed corner, because
+the map is what a battle animation edits, and `Gen2BattleScreenMap` is where the
+constants and the plain seeding live. `bg_palette_maps` and `ob_palette_maps`
+are eight DMG palette bytes each: colour `i` of palette `n` is drawn as colour
+`(byte >> i * 2) & 3` of whatever the battle loaded, which is `CopyPals`. A
+renderer that ignores all of it draws a battle with no animation in it.
+
+`anim_sprites` is `wShadowOAM` as the animation left it, up to forty
+`{ y, x, tile, attributes }` entries with the hardware's own byte values: OAM
+subtracts sixteen and eight, so a `y` or `x` of zero is off screen, and the
+attributes carry the x and y flips and the object palette slot. `anim_tiles`
+says where each tile of the animation window came from, as
+`{ gfx, tile }` counted from `Gen2BattleAnimObject.BASE_TILE`, so an OAM tile id
+below that base is not an animation tile at all. `hud_visible` is false for the
+length of a move animation, which is `BattleAnimClearHud` taking the panels and
+both bars off the map and `BattleAnimRestoreHuds` putting them back.
 
 The two HP values and `exp_pixels` are the *drawn* ones, not the committed ones:
 a hit drains the bar over roughly a second the way the cartridge does, an award

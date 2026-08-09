@@ -224,7 +224,11 @@ static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dict
 				sound = data.world_audio(&"sfx", address)
 			return sound
 		&"cry":
-			return data.world_audio(&"cries", int(values.get("cry_id", -1)))
+			# `Script_cry`'s operand is a species, not a cry index: it reaches
+			# `PlayMonCry`, whose own `GetCryIndex` is the species less one into
+			# `PokemonCries`. Only the low byte of the two the command carries is
+			# kept, the way the source pushes the first and discards the second.
+			return data.species_cry(int(values.get("species", -1)) & 0xFF)
 		&"warp_sound":
 			var collision: int = int(values.get("collision", -1))
 			var warp_sfx: int = 0x23

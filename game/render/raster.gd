@@ -59,3 +59,26 @@ static func _scroll_run(
 		out.blit_rect(
 			source, Rect2i(0, row, wrapped, run), Vector2i(map_width - offset, row)
 		)
+
+
+## The same thing vertically, which is what `hLYOverride*` pointed at `rSCY`
+## produces: each scanline reads its own row of the map.
+##
+## The map is [param map_height] tall against the image's own height and
+## everything past what was drawn is blank, exactly as [method scroll]'s columns
+## are, so a row that wraps past the drawn image comes back blank.
+static func scroll_rows(
+	source: Image, offsets: PackedInt32Array, map_height: int
+) -> Image:
+	var width: int = source.get_width()
+	var height: int = source.get_height()
+	if width <= 0 or height <= 0 or map_height <= 0 or offsets.size() < height:
+		return source
+
+	var out: Image = Image.create_empty(width, height, false, source.get_format())
+	for row: int in height:
+		var from: int = posmod(row + offsets[row], map_height)
+		if from >= height:
+			continue
+		out.blit_rect(source, Rect2i(0, from, width, 1), Vector2i(0, row))
+	return out

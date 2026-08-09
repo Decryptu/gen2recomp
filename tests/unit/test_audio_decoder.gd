@@ -85,6 +85,46 @@ func test_cry_header_runs_commands_before_square_and_noise_notes() -> void:
 	assert_eq(decoded["duration_frames"], 3)
 
 
+## `_PlayCry`'s two parameters, which `PlayCry` reads out of `PokemonCries`
+## before it: the pitch offset lands on the note frequency and the length is the
+## channel tempo `SetNoteDuration` multiplies by.
+func test_a_cry_takes_its_pitch_and_length_from_the_species_row() -> void:
+	var record := {
+		"address": 0x7000,
+		"cry_pitch": 0x20,
+		"cry_length": 0x200,
+		"bytes": [
+			0x44, 0x06, 0x70, 0x07, 0x0D, 0x70,
+			0xDE, 0x1B, 1, 0xF8, 0x20, 0x03, 0xFF,
+			2, 0xA1, 0x6C, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record, &"cry")
+	assert_true(decoded["ok"])
+	var note: Dictionary = decoded["tracks"][0]["events"][0]
+	assert_eq(note["frequency"], 0x0320 + 0x20)
+	# Twice the neutral $100 tempo is twice the length.
+	assert_eq(note["duration_frames"], 4)
+	# `_PlayCry` writes no tempo for CHAN4, so the noise track keeps its own.
+	assert_eq(decoded["tracks"][1]["events"][0]["duration_frames"], 3)
+
+
+## `rAUDxHIGH` keeps three frequency bits, so a sum past $7ff wraps rather than
+## clipping. Bulbasaur's own 128 takes its first notes over.
+func test_a_cry_pitch_past_eleven_bits_wraps_the_way_the_register_does() -> void:
+	var record := {
+		"address": 0x7000,
+		"cry_pitch": 128,
+		"bytes": [
+			0x04, 0x03, 0x70,
+			1, 0xF8, 0xC0, 0x07, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record, &"cry")
+	assert_true(decoded["ok"])
+	assert_eq(decoded["tracks"][0]["events"][0]["frequency"], (0x07C0 + 128) & 0x7FF)
+
+
 func test_truncated_audio_is_refused_with_a_structured_reason() -> void:
 	var decoded: Dictionary = Decoder.decode({"bytes": [0x00, 0x00]})
 	assert_false(decoded["ok"])

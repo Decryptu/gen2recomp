@@ -50,6 +50,15 @@ const MAX_TILES: int = 128 - Gen2BattleAnimObject.BASE_TILE
 ## `wBattleAnimFlags` bits (constants/ram_constants.asm).
 const FLAG_KEEP_SPRITES: int = 1 << 3
 
+## The two `AnimObjGFX` rows that hold no sheet of their own: the battler
+## graphics commands fill them in from whichever picture is on the field.
+const GFX_PLAYERHEAD: int = 0x28
+const GFX_ENEMYFEET: int = 0x29
+
+## `vTiles0`, the object tile bank the animation window sits at the end of.
+## `BattleAnimCmd_BattlerGFX_*` counts its destinations back from the top of it.
+const OBJECT_TILES: int = 0x80
+
 ## `NUM_BG_EFFECTS`: five background effects run at once, and a sixth is simply
 ## not queued, the way an eleventh object is not spawned.
 const MAX_BG_EFFECTS: int = Gen2BattleAnimBgEffects.MAX_EFFECTS
@@ -57,6 +66,16 @@ const MAX_BG_EFFECTS: int = Gen2BattleAnimBgEffects.MAX_EFFECTS
 ## `ROLLOUT`, the move `Rollout_FillLYOverridesBackup` and `.playframe`'s own
 ## frame-delay branch both check `wFXAnimID` against.
 const ROLLOUT: int = 0xCD
+
+## `BATTLE_AFTERANIMS` (constants/move_constants.asm) and the four offsets from
+## it a battle command writes into `wBattleAfterAnim`. The byte stored is the
+## offset; `BattleAnimRunScript` adds the base back to reach the animation.
+const BATTLE_AFTERANIMS: int = 0x10E
+const AFTER_ANIM_NONE: int = 0
+const AFTER_ANIM_ENEMY_DAMAGE: int = 0x10F - BATTLE_AFTERANIMS
+const AFTER_ANIM_ENEMY_STAT_DOWN: int = 0x110 - BATTLE_AFTERANIMS
+const AFTER_ANIM_PLAYER_DAMAGE: int = 0x112 - BATTLE_AFTERANIMS
+const AFTER_ANIM_WOBBLE: int = 0x113 - BATTLE_AFTERANIMS
 
 var _data: Gen2BattleAnimData = null
 var _script: Gen2BattleAnimScript = null
@@ -73,6 +92,10 @@ var _tile_dict: Array = []
 var _tiles: Array = []
 var _keep_sprites: bool = false
 var _sprites: Array = []
+## What the last frame's `RunBattleAnimCommand` ran, for the caller that owns
+## the things the interpreter does not: `anim_sound` and `anim_cry` have to
+## reach an audio player, and this layer has none.
+var _frame_commands: Array = []
 var _unimplemented: Dictionary = {}
 ## `wActiveBGEffects`: five `battle_bg_effect` slots.
 var _bg_effects: Array[Gen2BattleAnimBgEffect] = []
@@ -204,11 +227,22 @@ func sprites() -> Array:
 	return _sprites
 
 
-## Which graphics sheet each tile of the animation window currently holds, as
-## [code]{ gfx, tile }[/code] indexed from [constant Gen2BattleAnimObject.BASE_TILE].
-## An OAM tile id below that base is not an animation tile at all.
+## What each tile of the animation window currently holds, indexed from
+## [constant Gen2BattleAnimObject.BASE_TILE]. An OAM tile id below that base is
+## not an animation tile at all.
+##
+## Two shapes: [code]{ gfx, tile }[/code] is a tile of an imported sheet, and
+## [code]{ battler_tile }[/code] a tile of `vTiles2`, which is where the battle's
+## own two pictures live, in the numbering [Gen2BattleScreenMap] uses. Only
+## `anim_battlergfx_1row` and `..._2row` produce the second.
 func tiles() -> Array:
 	return _tiles
+
+
+## The commands the last [method advance_frame] ran, each
+## [code]{ name, byte, operands }[/code] as [Gen2BattleAnimScript] reports them.
+func frame_commands() -> Array:
+	return _frame_commands
 
 
 ## The live objects, for a caller that wants more than their sprites.
@@ -259,12 +293,17 @@ func advance_frame() -> bool:
 ## `RunBattleAnimCommand`, plus the commands that reach past the interpreter into
 ## the objects and the tile window.
 func _run_commands() -> void:
-	for command: Dictionary in _script.advance_frame():
+	_frame_commands = _script.advance_frame()
+	for command: Dictionary in _frame_commands:
 		match command["name"]:
 			Gen2BattleAnimScript.OBJ:
 				_queue_object(command["operands"])
 			&"gfx_1", &"gfx_2", &"gfx_3", &"gfx_4", &"gfx_5":
 				_load_graphics(command["operands"])
+			&"battler_gfx_1row":
+				_load_battler_graphics(1)
+			&"battler_gfx_2row":
+				_load_battler_graphics(2)
 			&"inc_obj":
 				var target: Gen2BattleAnimObject = _object_with_index(
 					int((command["operands"] as Array)[0])
@@ -338,6 +377,72 @@ func _load_graphics(operands: Array) -> void:
 			_tiles.resize(maxi(_tiles.size(), next_tile + tile + 1))
 			_tiles[next_tile + tile] = {"gfx": int(gfx), "tile": tile}
 		next_tile += count
+
+
+## `BattleAnimCmd_BattlerGFX_1Row` and `..._2Row`: one or two rows of each
+## battler's own picture copied into the top of the animation window, so an
+## effect can lift a battler's feet or head off the tilemap and move them as
+## objects. Three of the bg effects do exactly that, `BattleBGEffect_Tackle`
+## among them.
+##
+## The two dict entries are crosswise with what is copied: the entry named
+## `PLAYERHEAD` holds the enemy's rows and the one named `ENEMYFEET` the
+## player's. The object rows are crossed the same way, since
+## `BATTLE_ANIM_OBJ_ENEMYFEET_*` names `BATTLE_ANIM_GFX_PLAYERHEAD`, so the two
+## cancel and each object draws its own battler. Both crossings are the
+## cartridge's and neither is tidied, the same answer `$d9` and `$da` already
+## get.
+##
+## The window tiles these fill do not name an imported sheet: they name a tile of
+## `vTiles2`, which is where the battle's own two pictures live, in the numbering
+## [Gen2BattleScreenMap] already writes into the tilemap.
+func _load_battler_graphics(rows: int) -> void:
+	var slot: int = _free_tile_dict_slot()
+	if slot < 0 or slot + 1 >= TILE_DICT_ENTRIES:
+		return
+
+	var enemy_tiles: int = Gen2BattleScreenMap.ENEMY_SIDE * rows
+	var player_tiles: int = Gen2BattleScreenMap.PLAYER_SIDE * rows
+	var first: int = (OBJECT_TILES - player_tiles - enemy_tiles) \
+		- Gen2BattleAnimObject.BASE_TILE
+	var second: int = (OBJECT_TILES - player_tiles) - Gen2BattleAnimObject.BASE_TILE
+	_tile_dict[slot] = {"gfx": GFX_PLAYERHEAD, "tile": first}
+	_tile_dict[slot + 1] = {"gfx": GFX_ENEMYFEET, "tile": second}
+
+	# The enemy's bottom rows, then the player's top ones, each column of the
+	# picture contributing `rows` tiles: `.LoadFeet` steps the source by the
+	# picture's own height and the destination by what it just copied.
+	_copy_battler_rows(
+		first, rows, Gen2BattleScreenMap.ENEMY_SIDE,
+		Gen2BattleScreenMap.ENEMY_BASE_TILE + Gen2BattleScreenMap.ENEMY_SIDE - rows
+	)
+	_copy_battler_rows(
+		second, rows, Gen2BattleScreenMap.PLAYER_SIDE,
+		Gen2BattleScreenMap.PLAYER_BASE_TILE
+	)
+
+
+## One picture's rows into the window. Both pictures are square, so the source
+## stride is the same [param side] the column count is.
+func _copy_battler_rows(at: int, rows: int, side: int, source: int) -> void:
+	for column: int in side:
+		for row: int in rows:
+			var window: int = at + column * rows + row
+			if window < 0 or window >= MAX_TILES:
+				continue
+			_tiles.resize(maxi(_tiles.size(), window + 1))
+			_tiles[window] = {"battler_tile": source + column * side + row}
+
+
+## The first tile dict slot nothing has claimed. `BattleAnimCmd_BattlerGFX_*`
+## walks the dict for a zero graphics id rather than starting at the front, which
+## is what lets it sit behind an `anim_1gfx`.
+func _free_tile_dict_slot() -> int:
+	for slot: int in TILE_DICT_ENTRIES:
+		var entry: Variant = _tile_dict[slot]
+		if not entry is Dictionary or int((entry as Dictionary).get("gfx", 0)) == 0:
+			return slot
+	return -1
 
 
 ## `GetBattleAnimTileOffset`: where in the window a graphics id was loaded, or

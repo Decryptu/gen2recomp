@@ -19,6 +19,10 @@ signal enemy_seen(species: int)
 ## [Gen2ModHost] constructs, and the text box stays hardware pixels over it, as
 ## menus do over the world renderer.
 
+## `anim_sound` and `anim_cry` have to reach a player, and a battle had none:
+## this is the world screen's own route (`game/world/world_screen.gd`).
+const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
+
 ## What is on screen before a caller says otherwise: the first battle a player
 ## of Gold or Silver is likely to have.
 const DEFAULT_ENEMY: int = 16
@@ -194,6 +198,21 @@ var _exp: int = 0
 
 var _box: Gen2TextBox = null
 
+## `wTilemap` as this battle leaves it, which is what an animation edits and
+## what the renderer draws both pictures out of.
+var _bg_map: PackedByteArray = Gen2BattleScreenMap.seeded()
+
+## The animation layer. `_anim` is the running `RunBattleAnimScript`, `_plan`
+## the rest of `PlayBattleAnim`'s own framing waiting behind it, and `_anim_data`
+## the imported tables, opened once.
+var _anim_data: Gen2BattleAnimData = null
+var _anim: Gen2BattleAnimPlayer = null
+var _anim_plan: Array = []
+var _anim_delay: int = 0
+var _anim_event: Dictionary = {}
+var _anim_hud_hidden: bool = false
+var _audio_player: Gen2AudioPlayer = null
+
 @onready var _screen: Gen2Screen = %Screen
 
 
@@ -215,7 +234,7 @@ func _process(delta: float) -> void:
 ## [method advance_frame] so a test or a screenshot driver can settle the screen
 ## without waiting on real time.
 func frames_running() -> bool:
-	return bars_animating() or _intro != null
+	return bars_animating() or _intro != null or animation_running()
 
 
 ## One hardware frame of everything that counts them. Public through
@@ -223,7 +242,8 @@ func frames_running() -> bool:
 ## driver can settle either without waiting on real time.
 func advance_frame() -> bool:
 	var moved: bool = advance_intro()
-	return advance_bars() or moved
+	moved = advance_bars() or moved
+	return advance_animation() or moved
 
 
 func _ready() -> void:
@@ -233,6 +253,11 @@ func _ready() -> void:
 	_build_renderer()
 	if not _renderer_ready:
 		return
+
+	_audio_player = AUDIO_PLAYER_SCRIPT.new()
+	_audio_player.name = "AudioPlayer"
+	add_child(_audio_player)
+	_anim_data = Gen2BattleAnimData.from_game_data(_data)
 
 	_box = Gen2TextBox.new()
 	_box.font = Gen2Font.from_data(_data)
@@ -578,6 +603,7 @@ func intro_running() -> bool:
 ## it there. Every caller that has just built a battle reaches this, which is the
 ## same order the source uses, `InitBattleDisplay` before `BattleStartMessage`.
 func _init_battle_display() -> void:
+	_reseed_bg_map()
 	set_hp(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
 		_battle.player.hp, _battle.player.max_hp()
@@ -646,6 +672,242 @@ func advance_bars() -> bool:
 		# point, so the pump runs on to the event that carries it.
 		_show_next_event()
 	return moved
+
+
+# ------------------------------------------------- battle animations ----
+
+## `_PlayBattleAnim`'s own framing, as steps the screen walks a frame at a time.
+## Each is a dictionary carrying its own `kind`; the delays are
+## `BattleAnimDelayFrame` counts and `script` is `RunBattleAnimScript`.
+const ANIM_DELAY: StringName = &"delay"
+const ANIM_SCRIPT: StringName = &"script"
+const ANIM_CLEAR_HUD: StringName = &"clear_hud"
+const ANIM_RESTORE_HUD: StringName = &"restore_hud"
+const ANIM_WAIT_SFX: StringName = &"wait_sfx"
+const ANIM_HIT_SOUND: StringName = &"hit_sound"
+const ANIM_APPEAR_USER: StringName = &"appear_user"
+
+## `wFXAnimID` is a word: an id past this is not a move and skips the whole
+## battle-scene, hud and after-anim half of `BattleAnimRunScript`.
+const ANIM_MOVE_LIMIT: int = 0x100
+
+## `PlayHitSound`'s three effects, by their `constants/sfx_constants.asm`
+## numbers, which are the same in both pins.
+const SFX_NOT_VERY_EFFECTIVE: int = 0xAB
+const SFX_DAMAGE: int = 0xAC
+const SFX_SUPER_EFFECTIVE: int = 0xAD
+
+
+## Whether an animation, or any of the delays `PlayBattleAnim` wraps it in, is
+## still running.
+func animation_running() -> bool:
+	return _anim != null or not _anim_plan.is_empty() or _anim_delay > 0
+
+
+## One hardware frame of the animation. Public so a test or a screenshot driver
+## can settle or step one without waiting on real time.
+func advance_animation() -> bool:
+	if not animation_running():
+		return false
+	if _anim_delay > 0:
+		_anim_delay -= 1
+		return true
+	if _anim != null:
+		if _anim.advance_frame() and not _anim.finished():
+			_after_anim_frame()
+			return true
+		_end_script()
+		return true
+	_run_next_anim_step()
+	return true
+
+
+## `PlayFXAnimID`: three frames of delay, then `PlayBattleAnim`. Builds the whole
+## of `_PlayBattleAnim` and `BattleAnimRunScript` as a step list, since the parts
+## of it that spend frames have to be spent one rendered frame at a time.
+func _begin_animation(event: Dictionary) -> void:
+	_anim_event = event
+	_anim_plan = []
+
+	var index: int = int(event.get("index", 0))
+	var after: int = int(event.get("after_anim", 0))
+	var is_move: bool = index < ANIM_MOVE_LIMIT
+
+	# `PlayFXAnimID`'s own `ld c, 3 / call DelayFrames`, then `_PlayBattleAnim`'s
+	# six, `BattleAnimAssignPals`/`..._RequestPals` and one more. The two pal
+	# calls write nothing here: the palettes an animation remaps are the battle's
+	# own and are read back off the background every frame.
+	_step(ANIM_DELAY, {"frames": 3 + 6 + 1})
+
+	if is_move:
+		if Gen2OptionsStore.current().battle_scene:
+			_step(ANIM_CLEAR_HUD, {})
+			_step(ANIM_SCRIPT, {"index": index})
+			# `xor a / ldh [hSCX] / ldh [hSCY]`, a delay, then the huds.
+			_step(ANIM_DELAY, {"frames": 1})
+			_step(ANIM_RESTORE_HUD, {})
+		if after != 0:
+			_step(ANIM_WAIT_SFX, {})
+			_step(ANIM_HIT_SOUND, {})
+			_step(ANIM_SCRIPT, {
+				"index": after + Gen2BattleAnimPlayer.BATTLE_AFTERANIMS,
+			})
+	else:
+		_step(ANIM_WAIT_SFX, {})
+		_step(ANIM_HIT_SOUND, {})
+		_step(ANIM_SCRIPT, {"index": index})
+
+	# `hBGMapMode = 1`, three delays and `WaitSFX`.
+	_step(ANIM_DELAY, {"frames": 3})
+	_step(ANIM_WAIT_SFX, {})
+	if bool(event.get("restore_user_pic", false)):
+		_step(ANIM_APPEAR_USER, {})
+	_run_next_anim_step()
+
+
+func _step(kind: StringName, values: Dictionary) -> void:
+	var entry: Dictionary = values.duplicate()
+	entry["kind"] = kind
+	_anim_plan.append(entry)
+
+
+func _run_next_anim_step() -> void:
+	while not _anim_plan.is_empty():
+		var step: Dictionary = _anim_plan.pop_front()
+		match StringName(step["kind"]):
+			ANIM_DELAY:
+				_anim_delay = int(step["frames"])
+				return
+			ANIM_CLEAR_HUD:
+				# `BattleAnimClearHud`: a delay, the hud off the map, then three
+				# more while the map reaches VRAM.
+				_anim_hud_hidden = true
+				_anim_delay = 4
+				_push_view()
+				return
+			ANIM_RESTORE_HUD:
+				_anim_hud_hidden = false
+				_anim_delay = 4
+				_push_view()
+				return
+			ANIM_WAIT_SFX:
+				if _audio_player != null and _audio_player.effect_playing():
+					_anim_plan.push_front(step)
+					_anim_delay = 1
+					return
+			ANIM_HIT_SOUND:
+				_play_hit_sound()
+			ANIM_SCRIPT:
+				if _start_script(int(step["index"])):
+					return
+			ANIM_APPEAR_USER:
+				# `AppearUserLowerSub`, which Fly and Dig reach after the
+				# animation: the user's own picture stamped back into the map it
+				# was taken out of.
+				Gen2BattleScreenMap.stamp(
+					_bg_map, not bool(_anim_event.get("enemy_turn", false))
+				)
+				_push_view()
+	_anim = null
+	_anim_event = {}
+	_push_view()
+
+
+## `RunBattleAnimScript`, which is `ClearBattleAnims` and then a frame loop. The
+## tilemap the battle is showing is what the effects edit, so it goes in here and
+## comes back out at the end.
+## A cache carrying no animation layer answers with no player, and the step is
+## skipped rather than the whole framing: the delays and the hud belong to the
+## screen, not to the data.
+func _start_script(index: int) -> bool:
+	if _anim_data == null:
+		return false
+	_anim = Gen2BattleAnimPlayer.create(
+		_anim_data, index, bool(_anim_event.get("enemy_turn", false)),
+		int(_anim_event.get("param", 0))
+	)
+	if _anim == null:
+		return false
+	_anim.background().set_bg_map(_bg_map)
+	_after_anim_frame()
+	return true
+
+
+## What one `.playframe` produced: the sounds its commands asked for, and the
+## video state for the renderer.
+func _after_anim_frame() -> void:
+	for command: Dictionary in _anim.frame_commands():
+		match StringName(command["name"]):
+			Gen2BattleAnimScript.SOUND:
+				_play_anim_sound(int((command["operands"] as Array)[1]))
+			Gen2BattleAnimScript.CRY:
+				_play_anim_cry()
+	_push_view()
+
+
+func _end_script() -> void:
+	if _anim != null:
+		_bg_map = _anim.background().bg_map.duplicate()
+	_anim = null
+	_run_next_anim_step()
+
+
+## `BattleAnimCmd_Sound`'s second operand, which is the SFX id `PlayStereoSFX`
+## is given. The first is the track and panning mask, which this project has no
+## stereo field to spend.
+func _play_anim_sound(sfx: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.world_audio(&"sfx", sfx)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"sound", _audio_assets())
+
+
+## `BattleAnimCmd_Cry`: whichever battler `hBattleTurn` names, at its own
+## `PokemonCries` pitch and length plus the command's own `.CryData` row.
+func _play_anim_cry() -> void:
+	if _audio_player == null or _data == null:
+		return
+	var enemy_turn: bool = bool(_anim_event.get("enemy_turn", false))
+	var record: Dictionary = _data.species_cry(_enemy if enemy_turn else _player)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"cry", _audio_assets())
+
+
+## `PlayHitSound`: only the two damage after-anims have one, and which of the
+## three it is comes off `wTypeModifier`.
+func _play_hit_sound() -> void:
+	var after: int = int(_anim_event.get("after_anim", 0))
+	if after != Gen2BattleAnimPlayer.AFTER_ANIM_ENEMY_DAMAGE \
+			and after != Gen2BattleAnimPlayer.AFTER_ANIM_PLAYER_DAMAGE:
+		return
+	var effectiveness: int = int(_anim_event.get("effectiveness", RomLayout.MATCHUP_EFFECTIVE))
+	if effectiveness == 0:
+		return
+	var sfx: int = SFX_DAMAGE
+	if effectiveness > RomLayout.MATCHUP_EFFECTIVE:
+		sfx = SFX_SUPER_EFFECTIVE
+	elif effectiveness < RomLayout.MATCHUP_EFFECTIVE:
+		sfx = SFX_NOT_VERY_EFFECTIVE
+	_play_anim_sound(sfx)
+
+
+func _audio_assets() -> Dictionary:
+	if _data == null:
+		return {}
+	return {
+		"wave_samples": _data.world_audio_asset(&"wave_samples"),
+		"drumkits": _data.world_audio_asset(&"drumkits"),
+	}
+
+
+## The two pictures put back where a battle draws them, which every send-out and
+## every fresh battle does. `ClearBattleAnims` never touches the map, so a Fly
+## that took a picture off it leaves it off until something stamps it back.
+func _reseed_bg_map() -> void:
+	_bg_map = Gen2BattleScreenMap.seeded()
 
 
 ## How full the exp bar is, in `PlaceExpBar`'s own pixels. The committed value:
@@ -731,6 +993,22 @@ func show_message(text: String) -> void:
 	_last_message = text
 	if _box != null:
 		_box.show_text(text)
+
+
+## What the animation layer is doing right now, for a scene test or a screenshot
+## driver: which animation, whose turn it is, whether a script is actually
+## running (a battle scene turned off spends the delays and runs none), and how
+## much it is drawing.
+func animation_snapshot() -> Dictionary:
+	return {
+		"running": animation_running(),
+		"playing": _anim != null,
+		"index": int(_anim_event.get("index", 0)),
+		"enemy_turn": bool(_anim_event.get("enemy_turn", false)),
+		"after_anim": int(_anim_event.get("after_anim", 0)),
+		"sprites": (_anim.sprites() as Array).size() if _anim != null else 0,
+		"hud_visible": not _anim_hud_hidden,
+	}
 
 
 ## Compact state for scene tests and screenshot drivers. It reports the message
@@ -969,6 +1247,18 @@ func take_turn() -> void:
 	_show_next_event()
 
 
+## The same turn with both slots named rather than rolled, so a test or a
+## screenshot driver can photograph one chosen animation instead of whichever
+## move a random slot picked. Development only, like [method hurt_enemy].
+func take_turn_with(player_slot: int, enemy_slot: int) -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	_pending = _battle.take_actions(
+		Gen2Battle.use_move(player_slot), Gen2Battle.use_move(enemy_slot)
+	)
+	_show_next_event()
+
+
 func _random_slot(side: int) -> int:
 	var mon: Gen2BattleMon = _battle.mon(side)
 	var usable: Array = []
@@ -1191,6 +1481,10 @@ func advance() -> void:
 	## would pop the next event and the held line would never be shown.
 	if bars_animating():
 		return
+	## An animation is a run of unconditional delays, the way the intro is, so a
+	## press during one reaches nothing.
+	if animation_running():
+		return
 	if _box.advance():
 		return
 	if _capture_selecting or _capture_waiting:
@@ -1382,6 +1676,14 @@ func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
 		Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
+		if StringName(event["type"]) == Gen2Battle.ANIMATION:
+			## The engine has already resolved; this event is the frames the
+			## screen owes for it, and nothing behind it is shown until they are
+			## spent. `PlayFXAnimID` blocks the same way.
+			_begin_animation(event)
+			if animation_running():
+				return
+			continue
 		_apply_event(event)
 		var text: String = _describe(event)
 		if not text.is_empty():
@@ -1450,6 +1752,7 @@ func _apply_event_state(event: Dictionary) -> void:
 				_player = int(event["species"])
 				_player_level = int(event["level"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+			_reseed_bg_map()
 			_refresh_exp_bar()
 		Gen2Battle.EXP_GAINED:
 			# Never [constant Gen2Battle.ENEMY]: see the event's own doc comment.
@@ -1894,16 +2197,66 @@ func _push_view() -> void:
 		## sitting still. `PlaceGraphic` puts the player's back pic up only after
 		## the slide has returned, so during it there is nothing to draw there.
 		"raster_scx": _raster_offsets(),
+		"raster_scy": _raster_rows(),
 		"player_pic_visible": _intro == null,
+		## `wTilemap` and the video state an animation writes over it.
+		"bg_map": _bg_map,
+		"bg_palette_maps": _background_maps(&"bg"),
+		"ob_palette_maps": _background_maps(&"ob"),
+		"anim_sprites": _anim.sprites() if _anim != null else [],
+		"anim_tiles": _anim.tiles() if _anim != null else [],
+		"hud_visible": not _anim_hud_hidden,
 	})
 	if _box != null:
 		_box.raster_scx = _box_raster_offsets()
 
 
-## The background scroll for the whole screen, which only the intro ever asks
-## for.
+## The background scroll for the whole screen: the intro's own bands, or an
+## animation's `hSCX` plus whatever its scanline table is writing over it.
 func _raster_offsets() -> PackedInt32Array:
-	return PackedInt32Array() if _intro == null else _intro.offsets()
+	if _intro != null:
+		return _intro.offsets()
+	return _anim_raster(Gen2BattleAnimBackground.LCDC_SCX)
+
+
+## The same vertically, which only an animation ever asks for: `hSCY` and a
+## scanline table pointed at `rSCY`.
+func _raster_rows() -> PackedInt32Array:
+	return _anim_raster(Gen2BattleAnimBackground.LCDC_SCY)
+
+
+## One axis of the animation's scroll, per scanline.
+##
+## The whole-screen `hSCX`/`hSCY` is the base, and the scanline table replaces it
+## on every line while `hLCDCPointer` names that axis' register. A table pointed
+## at `rBGP` reaches nothing here: `UpdatePals` never touches that register on the
+## Color hardware, which is the branch this project builds.
+func _anim_raster(register: int) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	if _anim == null:
+		return out
+	var background: Gen2BattleAnimBackground = _anim.background()
+	var base: int = background.scx if register == Gen2BattleAnimBackground.LCDC_SCX \
+		else background.scy
+	var windowed: bool = background.lcdc_pointer == register
+	if base == 0 and not windowed:
+		return out
+	out.resize(Gen2BattleAnimBackground.SCREEN_LINES)
+	for line: int in Gen2BattleAnimBackground.SCREEN_LINES:
+		out[line] = int(background.ly_overrides[line]) if windowed else base
+	return out
+
+
+## The eight DMG bytes `BattleAnimRequestPals` left on one set of palettes, or
+## the identity permutation while no animation is running.
+func _background_maps(kind: StringName) -> PackedByteArray:
+	if _anim != null:
+		var background: Gen2BattleAnimBackground = _anim.background()
+		return background.bg_palette_maps if kind == &"bg" else background.ob_palette_maps
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(Gen2BattleAnimBackground.PALETTE_COUNT)
+	out.fill(Gen2BattleAnimBackground.PALETTE_IDENTITY)
+	return out
 
 
 ## The same scroll, narrowed to the rows the text box occupies. A box is drawn

@@ -1529,9 +1529,21 @@ func _open_pokedex() -> void:
 	host.z_index = 10
 	add_child(host)
 	host.closed.connect(_on_pokedex_closed)
+	host.cry_requested.connect(_on_pokedex_cry_requested)
 	_pokedex_host = host
 	_script_prompt = "Pokedex open"
 	_refresh_labels()
+
+
+## The entry screen's CRY button. `PlayCry` is an effect, not music, so it goes
+## through the same player a script's `cry` command does.
+func _on_pokedex_cry_requested(species: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.species_cry(species)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"cry", _audio_assets())
 
 
 func _on_pokedex_closed() -> void:
