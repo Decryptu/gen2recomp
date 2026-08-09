@@ -261,7 +261,7 @@ func _open_list_mode() -> void:
 	_title.text = "MENU"
 	_summary.text = ""
 	_status.text = ""
-	_footer.text = "Arrows: move    Space/Enter: choose    Esc: close"
+	_footer.text = "D-pad: move    A: choose    B: close"
 	_render_list()
 
 
@@ -286,7 +286,7 @@ func _open_pack_mode(reset: bool = true) -> void:
 	_pack_pocket_index = clampi(_pack_pocket_index, 0, maxi(_pack_pockets.size() - 1, 0))
 	_pack_cursor = clampi(_pack_cursor, 0, maxi(_current_pocket_items().size() - 1, 0))
 	_status.text = ""
-	_footer.text = "Left/Right: pocket    Up/Down: move    Space/Enter: choose    Esc: back"
+	_footer.text = "Left and right: pocket    Up and down: move    A: choose    B: back"
 	_render_pack()
 
 
@@ -347,7 +347,7 @@ func _open_item_mode() -> void:
 	_item_cursor = 0
 	_status.text = ""
 	_summary.text = String(item.get("name", ""))
-	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_item_menu()
 
 
@@ -435,7 +435,7 @@ func _open_teach_mode(item: int) -> void:
 	_teach_cursor = 0
 	_mode = Mode.PACK_TEACH
 	_status.text = ""
-	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_teach()
 
 
@@ -492,7 +492,7 @@ func _open_forget_ask() -> void:
 	_mode = Mode.PACK_FORGET_ASK
 	_forget_confirm_cursor = 0
 	_status.text = ""
-	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_forget_ask()
 
 
@@ -520,7 +520,7 @@ func _open_forget_list() -> void:
 	_mode = Mode.PACK_FORGET
 	_forget_cursor = 0
 	_status.text = ""
-	_footer.text = "Up/Down: move    Space/Enter: forget    Esc: back"
+	_footer.text = "Up and down: move    A: forget    B: back"
 	_render_forget_list()
 
 
@@ -563,7 +563,7 @@ func _open_stop_learning() -> void:
 	_mode = Mode.PACK_STOP_LEARNING
 	_forget_confirm_cursor = 0
 	_status.text = ""
-	_footer.text = "Up/Down: move    Space/Enter: choose    Esc: back"
+	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_stop_learning()
 
 
@@ -620,7 +620,7 @@ func _open_target_mode() -> void:
 	_mode = Mode.PACK_TARGET
 	_target_cursor = clampi(_target_cursor, 0, maxi(_party_targets().size() - 1, 0))
 	_status.text = ""
-	_footer.text = "Up/Down: move    Space/Enter: use    Esc: back"
+	_footer.text = "Up and down: move    A: use    B: back"
 	_render_targets()
 
 
@@ -684,7 +684,7 @@ func _show_pack_result(message: String, ok: bool) -> void:
 	_mode = Mode.PACK_RESULT
 	_pack_result = message
 	_pack_result_ok = ok
-	_footer.text = "Space/Enter: continue"
+	_footer.text = "A: continue"
 	_render_pack_result()
 
 
@@ -702,7 +702,7 @@ func _open_save_confirm_mode() -> void:
 	_title.text = "SAVE"
 	_summary.text = "Save your progress?"
 	_status.text = ""
-	_footer.text = "Arrows: choose    Space/Enter: confirm    Esc: cancel"
+	_footer.text = "D-pad: choose    A: confirm    B: cancel"
 	_render_save_confirm()
 
 

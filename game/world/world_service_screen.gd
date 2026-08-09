@@ -229,7 +229,7 @@ func _open_menu(input: Dictionary) -> void:
 	_title.text = "MENU"
 	_summary.text = String(input.get("command", input.get("menu_kind", "Choose an option")))
 	_status.text = ""
-	_footer.text = "Arrows: move    Space/Enter: choose    Esc: cancel"
+	_footer.text = "D-pad: move    A: choose    B: cancel"
 	_render_options()
 
 
@@ -242,8 +242,8 @@ func _open_mart(mart: Dictionary) -> void:
 	_title.text = String(mart.get("label", "MART"))
 	_summary.text = "Money: %d" % _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT)
 	_status.text = "One of each item per visit." if StringName(mart.get("variant", &"")) == &"bargain" \
-		else "Select an item. Left/Right changes quantity."
-	_footer.text = "Arrows: move/quantity    Space/Enter: buy    Esc: leave"
+		else "Select an item. Left and right change the quantity."
+	_footer.text = "D-pad: move and quantity    A: buy    B: leave"
 	_render_options()
 
 
@@ -269,7 +269,7 @@ func _open_phone(request: Dictionary, data: Dictionary) -> void:
 		_status.text = "This call will use the cartridge out-of-area script."
 	elif bool(data.get("phone", {}).get("same_map", false)):
 		_status.text = "This call will use the cartridge same-map script."
-	_footer.text = "Space/Enter: continue    Esc: hang up"
+	_footer.text = "A: continue    B: hang up"
 	_render_options(["Continue"])
 
 
@@ -279,7 +279,7 @@ func _open_phone_list() -> void:
 	_title.text = "PHONE"
 	_summary.text = "Registered numbers"
 	_status.text = "Choose a contact to call." if not _phone_entries.is_empty() else "No registered numbers."
-	_footer.text = "Arrows: move    Space/Enter: call    Esc: close"
+	_footer.text = "D-pad: move    A: call    B: close"
 	_render_options()
 
 
@@ -290,7 +290,7 @@ func _open_pokegear_cards() -> void:
 	var clock: Dictionary = _world.world_clock()
 	_summary.text = "%02d:%02d" % [int(clock.get("hour", 0)), int(clock.get("minute", 0))]
 	_status.text = "Choose a card."
-	_footer.text = "Arrows: move    Space/Enter: open    Esc: close"
+	_footer.text = "D-pad: move    A: open    B: close"
 	_render_options()
 
 
@@ -301,7 +301,7 @@ func _open_radio() -> void:
 	_cursor = 0
 	_title.text = "RADIO"
 	_refresh_radio()
-	_footer.text = "Left/Right: tune    Esc: close"
+	_footer.text = "Left and right: tune    B: close"
 
 
 func _refresh_radio() -> void:
@@ -342,7 +342,7 @@ func _open_audio(request: Dictionary, record: Dictionary) -> void:
 		int(record.get("byte_count", 0)),
 	]
 	_status.text = "Playback backend: %s" % String(playback.get("backend", "unavailable"))
-	_footer.text = "Space/Enter: continue    Esc: stop"
+	_footer.text = "A: continue    B: stop"
 	_render_options(["Continue"])
 
 

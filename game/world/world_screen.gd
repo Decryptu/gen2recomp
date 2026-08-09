@@ -1074,7 +1074,7 @@ func start_fishing(force_encounter: bool = false) -> Dictionary:
 		_script_prompt = "Fishing failed: %s" % String(result.get("reason", "unknown"))
 		_refresh_labels()
 		return result
-	_script_prompt = "Cast %s. Space: wait" % String(result.get("rod_label", "ROD"))
+	_script_prompt = "Cast %s. A: wait" % String(result.get("rod_label", "ROD"))
 	_refresh_labels()
 	return result
 
@@ -1088,7 +1088,7 @@ func _handle_fishing_result(result: Dictionary) -> void:
 		&"fishing_no_bite":
 			_script_prompt = "Nothing was hooked. F: cast again"
 		&"fishing_bite":
-			_script_prompt = "A bite! Space: reel in"
+			_script_prompt = "A bite! Press A to reel in"
 		&"battle_requested":
 			_start_battle_request(result)
 			return
@@ -1644,7 +1644,7 @@ func _show_field_move_text(text: String) -> void:
 	if _text_box != null and _text_box.font != null:
 		_text_box.show_text(text)
 		_text_box.visible = true
-	_script_prompt = "Space/Enter: continue"
+	_script_prompt = "A: continue"
 	_refresh_labels()
 
 
@@ -1791,11 +1791,11 @@ func _show_script_results(results: Array) -> void:
 			if event_type == &"text" and _text_box != null and _text_box.font != null:
 				_text_box.show_text(String(event.get("text", "")))
 				_text_box.visible = true
-				_script_prompt = "Space/Enter: advance text"
+				_script_prompt = "A: advance text"
 			elif event_type == &"button":
 				if _text_box != null:
 					_text_box.visible = true
-				_script_prompt = "Space/Enter: continue script"
+				_script_prompt = "A: continue script"
 			elif event_type in [&"choice", &"menu"]:
 				_open_service_host()
 				break
@@ -1823,7 +1823,7 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) in [
 					&"pokemon_requested", &"trade_requested",
 				]:
-					_script_prompt = "Party transaction: Space to confirm"
+					_script_prompt = "Party transaction: press A to confirm"
 					continue
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
@@ -1839,7 +1839,7 @@ func _show_script_results(results: Array) -> void:
 					if not audio_results.is_empty():
 						_show_script_results(audio_results)
 					break
-				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
+				_script_prompt = "Runtime request: %s, press A to acknowledge" % String(
 					request.get("kind", "effect")
 				)
 		elif status == &"recovered":
@@ -2112,7 +2112,7 @@ func _refresh_labels() -> void:
 			ball_labels.append("%s x%d" % [_data.item_name(ball), _world.state.item_quantity(ball)])
 	var balls: String = ", ".join(ball_labels) if not ball_labels.is_empty() else "none"
 	var clock_text: String = "%02d:%02d" % [_clock.hour, _clock.minute] if _clock != null else "--:--"
-	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
+	_hint.text = "the d-pad moves one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
 	_hint.text += "    time %s    rods: %s    balls: %s    P: phone    F5: save" % [clock_text, owned, balls]

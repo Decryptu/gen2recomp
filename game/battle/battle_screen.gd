@@ -626,7 +626,7 @@ func complete_capture(result: Dictionary) -> Dictionary:
 
 func _show_capture_selection() -> void:
 	show_message(
-		"Choose %s x%d. Left/Right: select, Space: throw"
+		"Choose %s x%d. Left and right: select, A: throw"
 		% [_item_name(_selected_capture_ball()), _capture_quantity(_selected_capture_ball())]
 	)
 
@@ -837,7 +837,7 @@ func _show_forget_stage(stage: StringName) -> void:
 
 ## The two yes/no boxes, which open on YES the way YesNoBox does.
 func _show_forget_confirm() -> void:
-	show_message("%s %s Left/Right: move, Space: choose" % [
+	show_message("%s %s Left and right: move, A: choose" % [
 		_forget_prompt_text(),
 		">YES  NO" if _forget_confirm_cursor == 0 else " YES >NO",
 	])
@@ -849,7 +849,7 @@ func _show_forget_list() -> void:
 		var entry: Dictionary = _forget_moves[index]
 		var name: String = String(entry.get("name", ""))
 		names.append("[%s]" % name if index == _forget_cursor else name)
-	show_message("%s %s Up/Down: move, Space: forget, B: back" % [
+	show_message("%s %s Up and down: move, A: forget, B: back" % [
 		Gen2MoveForget.which_text(), " ".join(names),
 	])
 
