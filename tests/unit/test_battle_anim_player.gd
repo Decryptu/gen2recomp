@@ -199,17 +199,22 @@ func test_keepsprites_keeps_the_sprites_and_takes_their_colour() -> void:
 
 
 ## What the animation asked for and did not get is reported rather than passed
-## over, so a caller can tell a whole animation from one missing its motion.
-func test_an_unbuilt_callback_or_bg_effect_is_reported() -> void:
+## over, so a caller can tell a whole animation from one missing its background.
+##
+## A callback past the jumptable is reported the same way. The importer refuses
+## such a row, so only a hand-built object reaches it.
+func test_an_unbuilt_bg_effect_or_an_unknown_callback_is_reported() -> void:
 	var player: Gen2BattleAnimPlayer = _player(
-		SPAWN + [0xF0, 0x22, 0x00, 0x00, 0x00] + [0x01] + RET, 2, 0x09
+		SPAWN + [0xF0, 0x22, 0x00, 0x00, 0x00] + [0x01] + RET,
+		2, Gen2BattleAnimImporter.FUNCTION_COUNT
 	)
 	player.advance_frame()
 	var missing: Dictionary = player.unimplemented()
-	assert_eq(missing["functions"], [0x09])
+	assert_eq(missing["functions"], [Gen2BattleAnimImporter.FUNCTION_COUNT])
 	assert_eq(missing["bg_effects"], [0x22])
 
-	var whole: Gen2BattleAnimPlayer = _player(SPAWN + [0x01] + RET)
+	# Callback 9 is `BattleAnimFunc_Shake`, which is built and moves the object.
+	var whole: Gen2BattleAnimPlayer = _player(SPAWN + [0x01] + RET, 2, 0x09)
 	whole.advance_frame()
 	assert_eq(whole.unimplemented(), {"bg_effects": [], "functions": []})
 

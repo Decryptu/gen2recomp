@@ -59,7 +59,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 30
+const FORMAT_VERSION: int = 31
 
 
 static func directory_for(id: StringName, sha1: String) -> String:

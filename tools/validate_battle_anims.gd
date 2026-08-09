@@ -82,6 +82,12 @@ const EXPECTED_GFX_TILES: int = 659
 ## Well past the longest shipped animation, which is 365 frames.
 const MAX_FRAMES: int = 4096
 
+## The `BattleAnimSineWave` entry that pins the table as imported: a quarter turn
+## is sin(pi/2), which `sine_table 32` evaluates to a full $0100. Any eight-bit
+## re-derivation answers $00ff here and is wrong by one everywhere it is used.
+const SINE_QUARTER: int = 16
+const SINE_ONE: int = 0x0100
+
 var _failures: PackedStringArray = []
 
 
@@ -92,6 +98,7 @@ func _initialize() -> void:
 			_fail("%s cache is unavailable. Import roms/%s.gbc first." % [game_id, game_id])
 			continue
 		_verify_regions(game_id, data)
+		_verify_sine(game_id, data)
 		_verify_pound(game_id, data)
 		_verify_profile_split(game_id, data)
 		_verify_objects(game_id, data)
@@ -135,9 +142,10 @@ func _play_every_animation(game_id: StringName, data: GameData) -> void:
 				not player.failed(),
 				"%s: animation %d ran off its region." % [game_id, index]
 			)
-			# Every object the script spawns should be gone by the end, either
-			# through its own `oamdelete` or through `anim_incobj`. One that is
-			# not is an object whose motion callback would have retired it.
+			# How many objects are still standing at the top-level `anim_ret`.
+			# Not expected to be zero: `PlayBattleAnim` returns with the structs
+			# as they are and the next animation's `ClearBattleAnims` zeroes
+			# them, so an object nothing retired outlives its own script.
 			leaked = maxi(leaked, player.objects().size())
 			var missing: Dictionary = player.unimplemented()
 			for id: int in missing["functions"]:
@@ -154,6 +162,12 @@ func _play_every_animation(game_id: StringName, data: GameData) -> void:
 		sprites <= Gen2BattleAnimPlayer.MAX_SPRITES,
 		"%s: %d sprites at once, past the hardware's %d." % [
 			game_id, sprites, Gen2BattleAnimPlayer.MAX_SPRITES,
+		]
+	)
+	_check(
+		functions.is_empty(),
+		"%s: %d motion callbacks are still unbuilt: %s." % [
+			game_id, functions.size(), functions.keys(),
 		]
 	)
 	print("%s: played %d animations both ways; at most %d objects and %d sprites at once." % [
@@ -183,6 +197,37 @@ func _verify_regions(game_id: StringName, data: GameData) -> void:
 		game_id,
 		int(data.battle_anim_region(&"scripts")["count"]),
 		(data.battle_anim_region(&"scripts")["data"] as PackedByteArray).size(),
+	])
+
+
+## `BattleAnimSineWave` as it was imported, and the one entry that says it was
+## imported rather than derived: sin(pi/2) is a full $0100 and not $00ff.
+func _verify_sine(game_id: StringName, data: GameData) -> void:
+	var table: PackedByteArray = data.battle_anim_sine()
+	if not _check(
+		table.size() == RomLayout.BATTLE_ANIM_SINE_BYTES,
+		"%s: sine table holds %d bytes, not %d." % [
+			game_id, table.size(), RomLayout.BATTLE_ANIM_SINE_BYTES,
+		]
+	):
+		return
+	for index: int in table.size():
+		if not _check(
+			table[index] == int(RomLayout.BATTLE_ANIM_SINE_WAVE[index]),
+			"%s: sine byte %d is $%02X, not the pinned $%02X." % [
+				game_id, index, table[index], int(RomLayout.BATTLE_ANIM_SINE_WAVE[index]),
+			]
+		):
+			return
+	var anims: Gen2BattleAnimData = Gen2BattleAnimData.create({}, [], table)
+	_check(
+		anims.sine_word(SINE_QUARTER) == SINE_ONE,
+		"%s: sine quarter turn is $%04X, not the $%04X only the cartridge's own table gives." % [
+			game_id, anims.sine_word(SINE_QUARTER), SINE_ONE,
+		]
+	)
+	print("%s: %d-sample sine table, quarter turn $%04X." % [
+		game_id, RomLayout.BATTLE_ANIM_SINE_SAMPLES, anims.sine_word(SINE_QUARTER),
 	])
 
 

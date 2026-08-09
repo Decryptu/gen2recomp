@@ -445,6 +445,15 @@ func battle_anim_address(index: int) -> int:
 	return data[at] | (data[at + 1] << 8)
 
 
+## `BattleAnimSineWave` as its own 64 cartridge bytes, or empty when the section
+## is absent. Thirty-two little-endian words, read rather than computed.
+func battle_anim_sine() -> PackedByteArray:
+	var value: Variant = _battle_anims().get("sine", null)
+	if not value is Dictionary:
+		return PackedByteArray()
+	return _payload_bytes(value, _blob("battle_anims"))
+
+
 ## One `battleanimobj` row as
 ## [code]{ flags, y_fix, frameset, function, palette, gfx }[/code], empty when
 ## the index is outside `BattleAnimObjects`.

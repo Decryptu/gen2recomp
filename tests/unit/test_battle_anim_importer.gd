@@ -21,6 +21,7 @@ const FRAMESET_STREAM: int = 0x6200
 const OAM_SETS: int = 0x6400
 const OAM_SPRITES: int = 0x6800
 const OBJECT_GFX: int = 0x7000
+const SINE: int = 0x7400
 ## Somewhere inside the dump for an `AnimObjGFX` row to point at. Nothing
 ## decompresses it: only `import_to_cache` reads the stream.
 const GFX_DATA: int = 0x0100
@@ -36,6 +37,7 @@ func before_each() -> void:
 	_write_framesets()
 	_write_oam_sets()
 	_write_object_gfx()
+	_write_sine()
 
 
 ## A plausible `BattleAnimations`: POUND at entry 1 and a bare `anim_ret`
@@ -86,6 +88,11 @@ func _write_object_gfx() -> void:
 		_word(row + Gen2BattleAnimImporter.GFX_POINTER + 1, GFX_DATA)
 
 
+func _write_sine() -> void:
+	for index: int in RomLayout.BATTLE_ANIM_SINE_BYTES:
+		_dump[SINE + index] = RomLayout.BATTLE_ANIM_SINE_WAVE[index]
+
+
 func _word(at: int, value: int) -> void:
 	_dump[at] = value & 0xFF
 	_dump[at + 1] = (value >> 8) & 0xFF
@@ -99,6 +106,7 @@ func _layout() -> Dictionary:
 			"framesets": FRAMESETS,
 			"oam_sets": OAM_SETS,
 			"object_gfx": OBJECT_GFX,
+			"sine": SINE,
 		},
 	}
 
@@ -116,6 +124,24 @@ func test_a_plausible_layer_verifies() -> void:
 	assert_eq(int(result["counts"]["objects"]), RomLayout.BATTLE_ANIM_OBJECT_COUNT)
 	assert_eq(int(result["counts"]["framesets"]), RomLayout.BATTLE_ANIM_FRAMESET_COUNT)
 	assert_eq(int(result["counts"]["oam_sets"]), RomLayout.BATTLE_ANIM_OAM_SET_COUNT)
+
+
+## The sine table is stored as the cartridge's own bytes, quarter turn included:
+## $0100 is what says it was read rather than derived in eight bits.
+func test_the_sine_table_keeps_its_sixteen_bit_quarter_turn() -> void:
+	var bytes: Array = _read()["anims"]["sine"]["bytes"]
+	assert_eq(bytes.size(), RomLayout.BATTLE_ANIM_SINE_BYTES)
+	assert_eq(int(bytes[32]), 0x00)
+	assert_eq(int(bytes[33]), 0x01)
+
+
+## Sixty-four identical bytes appear several times in a dump, so the values are
+## the whole check for this offset.
+func test_a_sine_table_of_the_wrong_shape_fails() -> void:
+	_dump[SINE + 33] = 0x00
+	var result: Dictionary = _read()
+	assert_false(bool(result["ok"]))
+	assert_string_contains(String(result["message"]), "sine table byte 33")
 
 
 ## The region runs from the table to the end of the last body it reaches, and

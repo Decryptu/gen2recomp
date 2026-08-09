@@ -137,6 +137,10 @@ static func read_battle_anims(rom: RomFile, layout: Dictionary) -> Dictionary:
 	if not bool(scripts.get("ok", false)):
 		return scripts
 
+	var sine: Dictionary = _read_sine(rom, int(anim_layout["sine"]))
+	if not bool(sine.get("ok", false)):
+		return sine
+
 	var framesets: Dictionary = _read_framesets(rom, int(anim_layout["framesets"]))
 	if not bool(framesets.get("ok", false)):
 		return framesets
@@ -162,6 +166,7 @@ static func read_battle_anims(rom: RomFile, layout: Dictionary) -> Dictionary:
 			"framesets": framesets["region"],
 			"oam_sets": oam_sets["region"],
 			"object_gfx": object_gfx["rows"],
+			"sine": sine["region"],
 		},
 		"counts": {
 			"scripts": RomLayout.BATTLE_ANIM_SCRIPT_COUNT,
@@ -278,6 +283,26 @@ static func _walk_body(bank_bytes: PackedByteArray, address: int) -> Dictionary:
 		if command["name"] == Gen2BattleAnimScript.RET:
 			break
 	return {"ok": true, "end": at, "targets": targets}
+
+
+## `BattleAnimSineWave`, the table `BattleAnim_Sine` reads.
+##
+## The bytes are the check as well as the content: 64 identical bytes appear
+## several times in a dump, so the offset is only trustworthy against the values,
+## and this is the one copy in the animation bank.
+static func _read_sine(rom: RomFile, table: int) -> Dictionary:
+	if not rom.in_bounds(table, RomLayout.BATTLE_ANIM_SINE_BYTES):
+		return {"ok": false, "message": "Battle animation sine table is outside the cartridge."}
+	var data: PackedByteArray = rom.slice(table, RomLayout.BATTLE_ANIM_SINE_BYTES)
+	for index: int in RomLayout.BATTLE_ANIM_SINE_BYTES:
+		if data[index] != RomLayout.BATTLE_ANIM_SINE_WAVE[index]:
+			return {
+				"ok": false,
+				"message": "Battle animation sine table byte %d is $%02X, expected $%02X." % [
+					index, data[index], RomLayout.BATTLE_ANIM_SINE_WAVE[index],
+				],
+			}
+	return {"ok": true, "region": {"bytes": _bytes_of(data)}}
 
 
 ## `BattleAnimObjects`, whose rows carry no pointers, so the region is the table
