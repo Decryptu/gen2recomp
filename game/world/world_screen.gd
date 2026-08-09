@@ -203,7 +203,16 @@ func _build_renderer() -> void:
 		_screen.native_size_changed.connect(_on_native_size_changed)
 		_on_native_size_changed(_screen.native_size())
 	_renderer.set_world(_world, _animation)
-	_renderer.set_time_of_day(time_of_day)
+	_renderer.set_time_of_day(_render_time_of_day())
+
+
+## What the renderer actually draws with, which is not always the clock: a dark
+## cave stays dark until Flash is used and looks like night afterwards. See
+## [method Gen2WorldPalette.map_time_of_day].
+func _render_time_of_day() -> int:
+	if _world == null:
+		return time_of_day
+	return _world.map_time_of_day()
 
 
 func _on_native_size_changed(size_pixels: Vector2i) -> void:
@@ -658,7 +667,7 @@ func _update_time_of_day() -> void:
 	if _animation != null:
 		_animation.configure(_world, time_of_day)
 	if _renderer != null:
-		_renderer.set_time_of_day(time_of_day)
+		_renderer.set_time_of_day(_render_time_of_day())
 
 
 ## Public screenshot driver for the scripted emote state and renderer path.
@@ -1532,6 +1541,12 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used WATERFALL!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_FLASH:
+			var flash: Dictionary = _world.flash_request()
+			if not bool(flash.get("ok", false)):
+				_show_field_move_text(_flash_refusal(StringName(flash.get("reason", &""))))
+				return
+			_show_field_move_text("%s used FLASH!" % String(action.get("name", "")))
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -1588,6 +1603,14 @@ func _waterfall_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## .CheckUseFlash has no refusal text of its own for a lit map: it reaches
+## FieldMoveFailed, which is _CantUseItemText. Only the badge has a line.
+func _flash_refusal(reason: StringName) -> String:
+	if reason == &"badge_required":
+		return "Sorry! A new BADGE is required."
+	return "Can't use that here."
+
+
 ## .TryStrength's only refusal is CheckBadge's, since it checks nothing else;
 ## anything past it is this project's own guard, not a cartridge branch.
 func _strength_refusal(reason: StringName) -> String:
@@ -1633,6 +1656,9 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_waterfall().is_empty():
 		_commit_field_move(_world.complete_waterfall(), "Waterfall")
 		return
+	if not _world.pending_flash().is_empty():
+		_commit_field_move(_world.complete_flash(), "Flash")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
@@ -1641,8 +1667,8 @@ func _acknowledge_field_move_text() -> void:
 ## plays SFX_BUBBLEBEAM and Surf changes the music, so each commit reports its
 ## own audio. Strength is the one that plays nothing: Script_UsedStrength has no
 ## PlaySFX, because SFX_STRENGTH belongs to the boulder that moves later, not to
-## the flag being set. All five redraw anyway, since the party overlay closed
-## over the map.
+## the flag being set, and neither does Flash. All six redraw anyway, since the
+## party overlay closed over the map.
 func _commit_field_move(applied: Dictionary, label: String) -> void:
 	if bool(applied.get("ok", false)):
 		match StringName(applied.get("kind", &"")):
@@ -1654,6 +1680,15 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 				pass
 			&"waterfall_applied":
 				_play_sfx(SFX_WATERFALL)
+			&"flash_used":
+				# BlindingFlash has no sound of its own: it fades to white,
+				# swaps the palette set and fades back. The palette is the whole
+				# of what changed, so the renderer is told the new row rather
+				# than just asked to redraw.
+				if _renderer != null:
+					_renderer.set_time_of_day(_render_time_of_day())
+				if _animation != null:
+					_animation.configure(_world, _render_time_of_day())
 			_:
 				_play_sfx(SFX_CUT)
 		if _renderer != null:
@@ -1835,7 +1870,7 @@ func _show_script_results(results: Array) -> void:
 			_world.reload_current_map()
 			_animation.configure(_world, time_of_day)
 			_renderer.set_world(_world, _animation)
-			_renderer.set_time_of_day(time_of_day)
+			_renderer.set_time_of_day(_render_time_of_day())
 			_play_current_map_music()
 		else:
 			_renderer.refresh()

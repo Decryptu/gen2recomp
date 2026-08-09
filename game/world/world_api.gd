@@ -106,6 +106,7 @@ var _pending_strength: Dictionary = {}
 ## The same for Waterfall, held while Script_UsedWaterfall shows its text. It
 ## names the faced cell, so it is cleared with the loaded map like the rest.
 var _pending_waterfall: Dictionary = {}
+var _pending_flash: Dictionary = {}
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -869,6 +870,69 @@ func complete_waterfall() -> Dictionary:
 
 static func _waterfall_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"waterfall_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's FlashFunction .CheckUseFlash, staged the way the
+## other five are.
+##
+## Flash is the one field move that checks no tile at all. Its whole test is the
+## badge and then whether this map is a dark one, which is the map header's own
+## palette byte rather than anything under the player. The Aerodactyl chamber's
+## `SpecialAerodactylChamber` branch, which lets Flash be used in a lit room
+## there, is a Ruins of Alph puzzle that is not implemented, so the palette is
+## the only way through here.
+func flash_request() -> Dictionary:
+	if current_map == null:
+		return _flash_failure(&"missing_map")
+	if not _pending_flash.is_empty():
+		return _flash_failure(&"flash_in_progress")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_FLASH) < 0:
+		return _flash_failure(&"move_not_known")
+	## The badge is checked before the map, so a player without it is told about
+	## the badge even standing in the dark.
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_ZEPHYR, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _flash_failure(&"badge_required")
+	if not Gen2WorldPalette.is_dark(current_map.palette):
+		return _flash_failure(&"not_dark")
+	if state.used_flash():
+		return _flash_failure(&"already_lit")
+	_pending_flash = {
+		"ok": true,
+		"kind": &"flash_requested",
+		"move": Gen2WorldFieldMove.MOVE_FLASH,
+	}
+	return _pending_flash.duplicate(true)
+
+
+## Empty until flash_request() succeeds. A host shows its text while this is set.
+func pending_flash() -> Dictionary:
+	return _pending_flash.duplicate(true)
+
+
+## `BlindingFlash`, which Script_UseFlash reaches only after its text: the flag
+## goes on and every palette the map draws with changes with it.
+func complete_flash() -> Dictionary:
+	if _pending_flash.is_empty():
+		return _flash_failure(&"no_pending_flash")
+	_pending_flash = {}
+	state.set_used_flash(true)
+	return {"ok": true, "kind": &"flash_used", "time_of_day": map_time_of_day()}
+
+
+static func _flash_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"flash_failed", "reason": reason}
+
+
+## Which palette row the current map draws with, once its own header byte, the
+## clock and the Flash flag have all had their say.
+func map_time_of_day() -> int:
+	if current_map == null:
+		return Gen2WorldPalette.TIME_MORNING
+	return Gen2WorldPalette.map_time_of_day(
+		current_map.palette, object_time_of_day, state.used_flash()
+	)
 
 
 ## engine/events/overworld.asm's StrengthFunction .TryStrength, staged the way
@@ -3564,6 +3628,9 @@ func _apply_map(
 	_object_position_overrides.clear()
 	_object_facing_overrides.clear()
 	state.reset_map_reload_flags()
+	# ResetFlashIfOutOfCave, which runs in map setup: stepping out into a route
+	# or a town puts the light out, and a cave to cave doorway does not.
+	state.clear_flash_if_outdoors(target_map.environment)
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
