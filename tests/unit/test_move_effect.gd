@@ -527,7 +527,10 @@ func test_charge_move_locks_the_user_in_and_says_so() -> void:
 	assert_true(Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING))
 	assert_eq(mon.charged_move, Fixture.SOLARBEAM)
 	assert_true(turn.ended)
-	assert_eq(_first(turn.events, Gen2Battle.CHARGING_UP)["side"], Gen2Battle.PLAYER)
+	var event: Dictionary = _first(turn.events, Gen2Battle.CHARGING_UP)
+	assert_eq(event["side"], Gen2Battle.PLAYER)
+	## `.UsedText` picks its line by move number, so the move travels with it.
+	assert_eq(int(event["move"]), Fixture.SOLARBEAM)
 
 
 func test_charge_move_releases_on_the_second_call_and_lets_the_rest_run() -> void:
@@ -1833,3 +1836,25 @@ func test_the_heal_family_has_its_cartridge_sequences() -> void:
 		# Announce, spend, heal, end: no accuracy roll, and no obedience check,
 		# which this engine does not model on any list.
 		assert_eq(Gen2MoveEffect.sequence_for(effect).size(), 4, str(effect))
+
+
+## `BattleCommand_Charge.UsedText` names six moves by number, and Fly and Dig do
+## not share a sentence although they share an effect byte.
+func test_each_two_turn_move_has_its_own_charge_line() -> void:
+	var text: Dictionary = Gen2BattleScreen.CHARGE_TEXT
+	assert_eq(text[Gen2MoveEffect.RAZOR_WIND_MOVE], "made a whirlwind!")
+	assert_eq(text[Gen2MoveEffect.SOLARBEAM_MOVE], "took in sunlight!")
+	assert_eq(text[Gen2MoveEffect.SKULL_BASH_MOVE], "lowered its head!")
+	assert_eq(text[Gen2MoveEffect.SKY_ATTACK_MOVE], "is glowing!")
+	assert_eq(text[Gen2MoveEffect.FLY_MOVE], "flew up high!")
+	assert_eq(text[Gen2MoveEffect.DIG_MOVE], "dug a hole!")
+	assert_ne(
+		text[Gen2MoveEffect.FLY_MOVE], text[Gen2MoveEffect.DIG_MOVE],
+		"one effect byte, two sentences"
+	)
+
+
+## `.UsedText`'s Dig branch is the only one of the six with no `jr z` behind it,
+## so it is what a move reaching that dispatch without matching prints.
+func test_the_charge_line_falls_through_to_dig() -> void:
+	assert_eq(Gen2BattleScreen.CHARGE_DUG, Gen2BattleScreen.CHARGE_TEXT[Gen2MoveEffect.DIG_MOVE])

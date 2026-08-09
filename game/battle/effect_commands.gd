@@ -1135,7 +1135,9 @@ static func _charge_move(turn: Gen2Turn) -> void:
 			mon.substatus |= Gen2Substatus.FLYING
 		elif turn.move_number == Gen2MoveEffect.DIG_MOVE:
 			mon.substatus |= Gen2Substatus.UNDERGROUND
-	turn.emit(Gen2Battle.CHARGING_UP)
+	## `.UsedText` picks its line by move number rather than by effect, so the
+	## move travels with the event and the screen owns the wording.
+	turn.emit(Gen2Battle.CHARGING_UP, {"move": turn.move_number})
 	turn.end()
 
 
