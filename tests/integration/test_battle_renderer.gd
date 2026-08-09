@@ -126,3 +126,50 @@ func uses_hardware_viewport() -> bool:
 	# Hardware pixels live inside the SubViewport; a renderer that opted out of
 	# that must not end up there.
 	assert_false(_battle_screen._renderer.get_parent() is SubViewport)
+
+
+## `NormalHit` runs `applydamage` before `criticaltext` and `supereffectivetext`,
+## and `DoEnemyDamage` ends with `predef AnimateHPBar`, so the bar drains first
+## and the line describing the hit waits for it.
+func test_a_hit_drains_the_bar_before_it_says_what_the_hit_was() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	_battle_screen.set_hp(48, 48, 40, 40)
+
+	_battle_screen._pending = [{
+		"type": Gen2Battle.HIT, "side": Gen2Battle.PLAYER, "target": Gen2Battle.ENEMY,
+		"hp": 24, "max_hp": 48, "critical": false,
+		"effectiveness": RomLayout.MATCHUP_SUPER_EFFECTIVE,
+	}]
+	_battle_screen._show_next_event()
+
+	assert_true(_battle_screen.bars_animating(), "the bar is still on its way down")
+	assert_ne(
+		_battle_screen.battle_snapshot()["message"], "It's super effective!",
+		"and the line has not been printed yet"
+	)
+	assert_eq(int(_battle_screen.get("_enemy_hp")), 24, "the committed HP is already there")
+
+	## A press during the animation is swallowed, the way AnimateHPBar's own
+	## blocking loop swallows one.
+	_battle_screen.advance()
+	assert_true(_battle_screen.bars_animating())
+
+	var guard: int = 4000
+	while _battle_screen.bars_animating() and guard > 0:
+		_battle_screen.advance_bars()
+		guard -= 1
+	assert_eq(_battle_screen.battle_snapshot()["message"], "It's super effective!")
+
+
+## A Pokemon coming out gets its bar drawn rather than drained: the maximum
+## moved under it, so it is not the same bar.
+func test_a_new_pokemon_does_not_animate_its_bar_up() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	_battle_screen.set_hp(10, 48, 40, 40)
+	_battle_screen._apply_event({
+		"type": Gen2Battle.SENT_OUT, "side": Gen2Battle.ENEMY,
+		"species": 155, "level": 7, "hp": 30, "max_hp": 30,
+	})
+	assert_false(_battle_screen.bars_animating())

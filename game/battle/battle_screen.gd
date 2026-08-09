@@ -137,6 +137,14 @@ var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
 var _world_battle_recovery: Dictionary = {}
 var _last_message: String = ""
+## A running [Gen2HpBarAnimation] per side. A side with no entry is not moving.
+var _bars: Dictionary = {}
+## The text the event pump produced while a bar was still draining. The source
+## prints it after the bar arrives, since `applydamage` runs before
+## `criticaltext` and `supereffectivetext`.
+var _held_message: String = ""
+## Leftover of a hardware frame the bars have not counted yet.
+var _bar_elapsed: float = 0.0
 ## What the overworld clock said when the battle started, for the three heals
 ## that read it. Only the world path supplies one; the development drivers below
 ## leave [Gen2Battle] at its own midday default.
@@ -178,6 +186,19 @@ var _exp: float = 0.0
 var _box: Gen2TextBox = null
 
 @onready var _screen: Gen2Screen = %Screen
+
+
+## Bars drain on hardware frames, not on rendered ones, the same reason
+## [Gen2WorldAnimation] paces the overworld that way: the two-frame step
+## `HPBarAnim_BGMapUpdate` waits is a hardware frame count.
+func _process(delta: float) -> void:
+	if _bars.is_empty():
+		_bar_elapsed = 0.0
+		return
+	_bar_elapsed += delta
+	while _bar_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and not _bars.is_empty():
+		_bar_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+		advance_bars()
 
 
 func _ready() -> void:
@@ -490,12 +511,74 @@ func _party_from(species: int, level: int) -> Gen2Party:
 
 
 ## Both HP totals, for a caller that has its own numbers.
+## The committed HP, which is what [method battle_snapshot] and every caller
+## that places state reads. It does not animate on its own: `AnimateHPBar` is
+## called by `DoEnemyDamage` and its siblings, not by every write to
+## `wBattleMonHP`, so the bar is started by the events that mean damage or
+## healing and this snaps.
 func set_hp(enemy: int, enemy_max: int, player: int, player_max: int) -> void:
+	if enemy != _enemy_hp or enemy_max != _enemy_max_hp:
+		_bars.erase(Gen2Battle.ENEMY)
+	if player != _player_hp or player_max != _player_max_hp:
+		_bars.erase(Gen2Battle.PLAYER)
 	_enemy_hp = enemy
 	_enemy_max_hp = enemy_max
 	_player_hp = player
 	_player_max_hp = player_max
 	_push_view()
+
+
+## Begins a bar animation from [param from_hp] to the HP now committed for
+## [param side], which is what an event meaning damage or healing does after it
+## has written the new value.
+##
+## A maximum that moved under the bar is not the same bar draining: a Pokemon
+## coming out gets its bar drawn at once, the way `LoadHPBar` puts one up.
+func _start_bar(side: int, from_hp: int, from_max: int) -> void:
+	var to_hp: int = _enemy_hp if side == Gen2Battle.ENEMY else _player_hp
+	var max_hp: int = _enemy_max_hp if side == Gen2Battle.ENEMY else _player_max_hp
+	if max_hp != from_max or from_hp == to_hp:
+		return
+	var animation: Gen2HpBarAnimation = Gen2HpBarAnimation.create(from_hp, to_hp, max_hp)
+	if animation.finished():
+		return
+	_bars[side] = animation
+	_push_view()
+
+
+## What the bar for [param side] is drawing: the animation's value while one is
+## running, and the committed HP otherwise.
+func _drawn_hp(side: int) -> int:
+	var animation: Gen2HpBarAnimation = _bars.get(side, null)
+	if animation == null:
+		return _enemy_hp if side == Gen2Battle.ENEMY else _player_hp
+	return animation.hp()
+
+
+## Whether any bar is still moving, which is what holds the next message back.
+func bars_animating() -> bool:
+	return not _bars.is_empty()
+
+
+## One hardware frame of every running bar. Public so a test or a screenshot
+## driver can settle the bars without waiting on real time.
+func advance_bars() -> bool:
+	if _bars.is_empty():
+		return false
+	var moved: bool = false
+	for side: int in _bars.keys():
+		var animation: Gen2HpBarAnimation = _bars[side]
+		if animation.advance_frame():
+			moved = true
+		if animation.finished():
+			_bars.erase(side)
+	if moved:
+		_push_view()
+	if _bars.is_empty() and not _held_message.is_empty():
+		var text: String = _held_message
+		_held_message = ""
+		show_message(text)
+	return moved
 
 
 ## How full the exp bar is, from nothing to a level's worth.
@@ -966,6 +1049,11 @@ func _confirm_forget_slot() -> void:
 func advance() -> void:
 	if _box == null:
 		return
+	## A bar the source is still animating has not printed its message yet, so
+	## there is nothing for a press to advance past. Without this the press
+	## would pop the next event and the held line would never be shown.
+	if bars_animating():
+		return
 	if _box.advance():
 		return
 	if _capture_selecting or _capture_waiting:
@@ -1160,11 +1248,40 @@ func _show_next_event() -> void:
 		_apply_event(event)
 		var text: String = _describe(event)
 		if not text.is_empty():
-			show_message(text)
+			## `applydamage` animates the bar and only then does `criticaltext`
+			## print, so a message caused by an event that moved a bar waits for
+			## it rather than racing it.
+			if bars_animating():
+				_held_message = text
+			else:
+				show_message(text)
 			return
 
 
+## The events that mean a bar moved rather than a bar was placed: each is a
+## point where the source reaches `AnimateHPBar` through `DoEnemyDamage`,
+## `DoPlayerDamage` or one of the heal commands. `SENT_OUT` is deliberately not
+## among them, because that bar is drawn rather than drained.
+const HP_BAR_EVENTS: Array[StringName] = [
+	Gen2Battle.HIT, Gen2Battle.RECOIL, Gen2Battle.DRAINED, Gen2Battle.OHKO,
+	Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF, Gen2Battle.HP_RESTORED,
+	Gen2Battle.TRAINER_USED_ITEM,
+]
+
+
 func _apply_event(event: Dictionary) -> void:
+	var before_enemy: int = _enemy_hp
+	var before_enemy_max: int = _enemy_max_hp
+	var before_player: int = _player_hp
+	var before_player_max: int = _player_max_hp
+	_apply_event_state(event)
+	if not HP_BAR_EVENTS.has(StringName(event["type"])):
+		return
+	_start_bar(Gen2Battle.ENEMY, before_enemy, before_enemy_max)
+	_start_bar(Gen2Battle.PLAYER, before_player, before_player_max)
+
+
+func _apply_event_state(event: Dictionary) -> void:
 	match event["type"]:
 		Gen2Battle.HIT, Gen2Battle.RECOIL, Gen2Battle.DRAINED, Gen2Battle.OHKO:
 			var target: int = int(event.get("target", event["side"]))
@@ -1621,8 +1738,11 @@ func _push_view() -> void:
 		"enemy_species": _enemy, "player_species": _player,
 		"enemy_name": _name_of(_enemy), "player_name": _name_of(_player),
 		"enemy_level": _enemy_level, "player_level": _player_level,
-		"enemy_hp": _enemy_hp, "enemy_max_hp": _enemy_max_hp,
-		"player_hp": _player_hp, "player_max_hp": _player_max_hp,
+		## The bars draw whatever the animation is on rather than the committed
+		## HP, which is what makes them drain. Everything else, including
+		## [method battle_snapshot], keeps reading the committed value.
+		"enemy_hp": _drawn_hp(Gen2Battle.ENEMY), "enemy_max_hp": _enemy_max_hp,
+		"player_hp": _drawn_hp(Gen2Battle.PLAYER), "player_max_hp": _player_max_hp,
 		"exp_fraction": _exp,
 	})
 
