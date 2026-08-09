@@ -4,10 +4,12 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## Cut, Surf, Strength and Whirlpool are resolved here. Cut, Surf and Whirlpool
-## follow the shape CutFunction defines: check the badge, then check the faced
-## tile, then stage a change the text acknowledge commits. Strength is the odd
-## one, see BADGE_PLAIN. Flash and Headbutt are not resolved yet.
+## Cut, Surf, Strength, Whirlpool, Waterfall and Flash are resolved here. Cut,
+## Surf and Whirlpool follow the shape CutFunction defines: check the badge, then
+## check the faced tile, then stage a change the text acknowledge commits.
+## Strength is the odd one, see BADGE_PLAIN; Flash checks the map rather than a
+## tile, see [method Gen2WorldPalette.is_dark]. Headbutt is not resolved yet: it
+## needs treemon encounter data the importer does not read.
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
 ## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
@@ -17,6 +19,7 @@ const MOVE_SURF: int = 0x39
 const MOVE_STRENGTH: int = 0x46
 const MOVE_WHIRLPOOL: int = 0xFA
 const MOVE_WATERFALL: int = 0x7F
+const MOVE_FLASH: int = 0x94
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -35,6 +38,10 @@ const BADGE_GLACIER: int = 6
 ## WaterfallFunction's .TryWaterfall, whose CheckBadge argument is
 ## ENGINE_RISINGBADGE: 34 in Crystal and 33 in Gold/Silver.
 const BADGE_RISING: int = 7
+## FlashFunction's .CheckUseFlash, whose CheckBadge argument is
+## ENGINE_ZEPHYRBADGE: 27 in Crystal and 26 in Gold/Silver. It is the first
+## badge, so Flash is gated on the least of the eight.
+const BADGE_ZEPHYR: int = 0
 
 ## GetSurfType's comparison, constants/pokemon_constants.asm.
 const SPECIES_PIKACHU: int = 0x19
@@ -50,7 +57,7 @@ const MUSIC_SURF: int = 0x21
 ## decides submenu membership from this list alone, so a move stops appearing
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
-	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL,
+	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

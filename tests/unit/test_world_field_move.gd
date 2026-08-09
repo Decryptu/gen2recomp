@@ -63,6 +63,11 @@ const WATERFALL_STAND_CELL: Vector2i = Vector2i(2, 7)
 const WATERFALL_CELLS: Array[Vector2i] = [Vector2i(2, 6), Vector2i(2, 5)]
 const WATERFALL_LANDING_CELL: Vector2i = Vector2i(2, 4)
 
+## constants/map_data_constants.asm: ROUTE and TOWN are the two
+## `ResetFlashIfOutOfCave` treats as outdoors; DUNGEON is not one of them.
+const ENVIRONMENT_TOWN: int = 1
+const ENVIRONMENT_DUNGEON: int = 7
+
 var _directory: String = ""
 
 
@@ -90,6 +95,10 @@ func _write_cache() -> void:
 	])
 	RomCache.write_json(RomCache.world_maps_path(_directory), [
 		_map(1, TILESET_CUTTABLE), _map(2, TILESET_NO_ENTRY),
+		# A third map that is a dark cave, for Flash: PALETTE_DARK with the
+		# DUNGEON environment, which is what keeps the light on when the player
+		# walks from it into another cave room.
+		_map(3, TILESET_CUTTABLE, Gen2WorldPalette.PALETTE_DARK, ENVIRONMENT_DUNGEON),
 	])
 
 	var pixels := PackedByteArray()
@@ -138,7 +147,7 @@ func _tileset(number: int) -> Dictionary:
 	}
 
 
-func _map(number: int, tileset: int) -> Dictionary:
+func _map(number: int, tileset: int, palette: int = 0, environment: int = 0) -> Dictionary:
 	var blocks: Array = []
 	for index: int in 16:
 		blocks.append(BLOCK_FLOOR)
@@ -180,6 +189,8 @@ func _map(number: int, tileset: int) -> Dictionary:
 		"group": 1,
 		"number": number,
 		"tileset": tileset,
+		"palette": palette,
+		"environment": environment,
 		"width_blocks": 4,
 		"height_blocks": 4,
 		"blocks": blocks,
@@ -272,7 +283,7 @@ func _whirlpool_world(badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	return world
 
 
-func test_the_five_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
+func test_the_six_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_CUT))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SURF))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_STRENGTH))
@@ -282,10 +293,12 @@ func test_the_five_resolved_moves_are_the_field_moves_the_submenu_offers() -> vo
 	assert_eq(Gen2WorldFieldMove.MOVE_SURF, 0x39)
 	assert_eq(Gen2WorldFieldMove.MOVE_STRENGTH, 0x46)
 	assert_eq(Gen2WorldFieldMove.MOVE_WHIRLPOOL, 0xFA)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLASH))
 	assert_eq(Gen2WorldFieldMove.MOVE_WATERFALL, 0x7F)
+	assert_eq(Gen2WorldFieldMove.MOVE_FLASH, 0x94)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, FLASH, HEADBUTT.
-	for move: int in [0x13, 0x94, 0x1D]:
+	# submenu would offer an entry nothing answers: FLY and HEADBUTT.
+	for move: int in [0x13, 0x1D]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 
@@ -1050,3 +1063,112 @@ func test_a_map_change_clears_a_pending_waterfall() -> void:
 	world.player_cell = SHORE_CELL
 	assert_true(bool(world.try_warp().get("ok", false)))
 	assert_true(world.pending_waterfall().is_empty())
+
+
+## Flash. `.CheckUseFlash` checks the badge and then the map's own palette byte,
+## and nothing else: it is the one field move that never looks at a tile.
+func _flash_world(with_badge: bool = true, map_number: int = 3) -> Gen2WorldAPI:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	if with_badge:
+		state.set_engine_flag(Gen2WorldState.badge_flag(
+			Gen2WorldFieldMove.BADGE_ZEPHYR, Gen2WorldState.is_crystal_profile(data)
+		))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, map_number, Vector2i(1, 1), state)
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_FLASH)
+	return world
+
+
+func test_flash_request_needs_the_zephyr_badge_before_it_looks_at_the_map() -> void:
+	var world: Gen2WorldAPI = _flash_world(false)
+
+	var refused: Dictionary = world.flash_request()
+
+	assert_false(bool(refused.get("ok", true)))
+	assert_eq(refused["reason"], &"badge_required", "the badge, even standing in the dark")
+	assert_true(world.pending_flash().is_empty())
+
+
+func test_flash_request_reads_the_gold_silver_badge_flag() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_ZEPHYR, not crystal
+	))
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 3, Vector2i(1, 1), state)
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_FLASH)
+
+	assert_eq(world.flash_request()["reason"], &"badge_required")
+
+
+## A map that is not PALETTE_DARK reaches FieldMoveFailed, whatever is under the
+## player: map 1 is an ordinary outdoor map.
+func test_flash_refuses_on_a_map_that_is_not_dark() -> void:
+	var world: Gen2WorldAPI = _flash_world(true, 1)
+
+	assert_eq(world.flash_request()["reason"], &"not_dark")
+
+
+func test_flash_lights_the_cave_and_only_on_the_acknowledge() -> void:
+	var world: Gen2WorldAPI = _flash_world()
+
+	assert_eq(world.map_time_of_day(), Gen2WorldPalette.TIME_DARK)
+	var staged: Dictionary = world.flash_request()
+	assert_true(bool(staged["ok"]))
+	assert_false(world.state.used_flash(), "nothing changes until the text is answered")
+	assert_eq(world.map_time_of_day(), Gen2WorldPalette.TIME_DARK)
+
+	var applied: Dictionary = world.complete_flash()
+
+	assert_true(bool(applied["ok"]))
+	assert_true(world.state.used_flash())
+	# A lit cave is drawn as night, not as day: the cartridge swaps DARKNESS_PALSET
+	# for a night palset rather than for the clock's own.
+	assert_eq(world.map_time_of_day(), Gen2WorldPalette.TIME_NIGHT)
+	assert_true(world.pending_flash().is_empty())
+
+
+func test_flash_refuses_a_second_time_in_the_same_cave() -> void:
+	var world: Gen2WorldAPI = _flash_world()
+	world.flash_request()
+	world.complete_flash()
+
+	assert_eq(world.flash_request()["reason"], &"already_lit")
+
+
+## `ResetFlashIfOutOfCave`: only a route or a town puts the light out, so walking
+## between two cave rooms keeps it.
+func test_the_light_survives_a_cave_door_and_dies_outdoors() -> void:
+	var state := Gen2WorldState.new()
+
+	state.set_used_flash(true)
+	state.clear_flash_if_outdoors(ENVIRONMENT_DUNGEON)
+	assert_true(state.used_flash(), "a dungeon is not outdoors")
+
+	state.clear_flash_if_outdoors(ENVIRONMENT_TOWN)
+	assert_false(state.used_flash())
+
+
+## `ReplaceTimeOfDayPals`' brightness table: only PALETTE_AUTO lets the clock
+## decide, and PALETTE_DARK ignores it in both states.
+func test_the_map_palette_byte_decides_how_much_the_clock_matters() -> void:
+	for clock: int in [
+		Gen2WorldPalette.TIME_MORNING, Gen2WorldPalette.TIME_DAY, Gen2WorldPalette.TIME_NIGHT,
+	]:
+		assert_eq(
+			Gen2WorldPalette.map_time_of_day(Gen2WorldPalette.PALETTE_AUTO, clock), clock,
+			"AUTO is the clock, unchanged"
+		)
+		assert_eq(
+			Gen2WorldPalette.map_time_of_day(Gen2WorldPalette.PALETTE_NITE, clock),
+			Gen2WorldPalette.TIME_NIGHT, "a NITE map is night at noon"
+		)
+		assert_eq(
+			Gen2WorldPalette.map_time_of_day(Gen2WorldPalette.PALETTE_DARK, clock),
+			Gen2WorldPalette.TIME_DARK
+		)
+		assert_eq(
+			Gen2WorldPalette.map_time_of_day(Gen2WorldPalette.PALETTE_DARK, clock, true),
+			Gen2WorldPalette.TIME_NIGHT
+		)

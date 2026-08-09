@@ -104,6 +104,12 @@ var _script_memory: Dictionary = {}
 ## than something derived from the current map because `PlayMapMusic` writes it
 ## and compares against it, and because a tuned radio station overwrites it and
 ## survives the Pokegear closing. `SnorlaxAwake` reads exactly that byte.
+## `wStatusFlags`' `STATUSFLAGS_FLASH_F`. Its own byte on the cartridge rather
+## than an engine flag, and it does not survive walking out into the open:
+## `ResetFlashIfOutOfCave` clears it on entering a ROUTE or a TOWN, so a lit cave
+## goes dark again the moment the player leaves and comes back.
+var _used_flash: bool = false
+
 var _map_music: int = MUSIC_NONE
 var _radio_knob: int = Gen2WorldRadio.KNOB_MIN
 var _radio_channel: int = -1
@@ -497,6 +503,25 @@ func just_battled() -> bool:
 
 ## `wMapMusic`: the track that is playing, not the track the current map asks
 ## for. The two differ whenever a radio station is tuned.
+func used_flash() -> bool:
+	return _used_flash
+
+
+## `BlindingFlash`'s own `set STATUSFLAGS_FLASH_F`.
+func set_used_flash(value: bool) -> void:
+	if _used_flash == value:
+		return
+	_used_flash = value
+	changed.emit()
+
+
+## `ResetFlashIfOutOfCave`, called on entering a map: only a route or a town puts
+## the light out, so walking from one cave room into another keeps it.
+func clear_flash_if_outdoors(environment: int) -> void:
+	if Gen2WorldPhoneHost.is_outside_environment(environment):
+		set_used_flash(false)
+
+
 func map_music() -> int:
 	return _map_music
 

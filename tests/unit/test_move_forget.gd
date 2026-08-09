@@ -83,7 +83,7 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 func test_the_hm_list_is_wider_than_the_overworld_field_moves() -> void:
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
 		assert_true(Gen2MoveForget.is_hm_move(move), "field move %d" % move)
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 5)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 6)
 	assert_true(Gen2MoveForget.is_hm_move(0x13), "FLY is an HM with no field effect here")
 	assert_false(Gen2WorldFieldMove.FIELD_MOVES.has(0x13))
 

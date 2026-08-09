@@ -13,6 +13,47 @@ const TIME_DAY: int = 1
 const TIME_NIGHT: int = 2
 const TIME_DARK: int = 3
 
+## `wMapTimeOfDay`, the low nibble of the map header's seventh byte and already
+## on [member Gen2WorldMap.palette]. It says which of the four rows above a map
+## uses, and whether the clock gets a say at all.
+const PALETTE_AUTO: int = 0
+const PALETTE_DAY: int = 1
+const PALETTE_NITE: int = 2
+const PALETTE_MORN: int = 3
+const PALETTE_DARK: int = 4
+
+## `.BrightnessLevels`, one row per [constant PALETTE_AUTO] and its four
+## neighbours, read by the clock's own time of day. The cartridge packs each row
+## into a byte two bits at a time and `GetTimePalette` picks the pair back out;
+## the byte is not kept here because nothing else reads it.
+const BRIGHTNESS_LEVELS: Array = [
+	[TIME_MORNING, TIME_DAY, TIME_NIGHT, TIME_DARK],
+	[TIME_DAY, TIME_DAY, TIME_DAY, TIME_DAY],
+	[TIME_NIGHT, TIME_NIGHT, TIME_NIGHT, TIME_NIGHT],
+	[TIME_MORNING, TIME_MORNING, TIME_MORNING, TIME_MORNING],
+	[TIME_DARK, TIME_DARK, TIME_DARK, TIME_DARK],
+]
+
+
+## Which of the four palette rows a map draws with right now.
+##
+## `ReplaceTimeOfDayPals` and `GetTimePalette` together. A
+## [constant PALETTE_DARK] map is the only one the clock cannot reach: it is
+## [constant TIME_DARK] until Flash has been used and [constant TIME_NIGHT]
+## afterwards, which is why a lit cave still looks like a cave.
+static func map_time_of_day(
+	map_palette: int, clock_time_of_day: int, used_flash: bool = false
+) -> int:
+	if map_palette == PALETTE_DARK:
+		return TIME_NIGHT if used_flash else TIME_DARK
+	var row: Array = BRIGHTNESS_LEVELS[clampi(map_palette, 0, BRIGHTNESS_LEVELS.size() - 1)]
+	return int(row[clampi(clock_time_of_day, 0, row.size() - 1)])
+
+
+## Whether a map is one of the caves Flash is for.
+static func is_dark(map_palette: int) -> bool:
+	return map_palette == PALETTE_DARK
+
 const PALETTE_ROWS: Array = [
 	[
 		[0, 1, 2, 40, 4, 5, 6, 7],
