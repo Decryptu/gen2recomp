@@ -248,8 +248,11 @@ back onto land stops surfing. The last two have no badge behind them: for
 Headbutt, facing a tree and knowing the move is the whole gate, and the
 acknowledge rolls the tree's own encounter, which on Crystal can arrive asleep.
 Rock Smash asks the faced object rather than the ground, and a smashed rock is
-gone until the map reloads unless it carries an event flag. It can also be
-reached by talking to the rock, which asks first. A
+gone until the map reloads unless it carries an event flag.
+Facing something and pressing A is the other way to all of them: a cut tree, a
+whirlpool, a waterfall, a headbutt tree and open water each offer their move and
+ask before using it, in the cartridge's own order, and each refuses in the
+cartridge's own words or, for Headbutt and Surf, says nothing at all. A
 Waterfall climb runs the whole column in one command and ends on the first cell
 above it that is not a waterfall. Standing on a whirlpool, waterfall, door,
 staircase or cave tile overrides the pressed direction the way the cartridge
@@ -278,6 +281,7 @@ Headless tools, all against a real imported cache:
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
 | `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
 | `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree, in all three games |
+| `validate_field_move_prompts.gd` | the faced-tile prompt chain, both gates and all three answers for Cut, Surf and Headbutt, in all three games |
 | `validate_rock_smash.gd` | the rock map table, the smashable-rock census and its one flagged rock, and Cianwood City's rock, in all three games |
 | `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree, in all three games |
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |

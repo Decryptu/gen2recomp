@@ -1936,6 +1936,12 @@ func _show_script_results(results: Array) -> void:
 				## and runs on, and the source's own `end` is the next command,
 				## so nothing is waiting to be resumed when this opens.
 				open_hall_of_fame()
+			elif result_event.get("type", &"") == &"field_move_confirmed":
+				## `iftrue Script_Cut` and its four counterparts. The move is the
+				## host's, and it is the same staged request and acknowledge the
+				## party submenu reaches, so the two ways in stay one path.
+				_use_prompted_field_move(int(result_event.get("move", 0)),
+					int(result_event.get("slot", -1)))
 			elif result_event.get("type", &"") == &"pokemon_picture_requested":
 				_show_story_picture(int(result_event.get("pokemon", 0)))
 			elif result_event.get("type", &"") == &"pokemon_picture_closed":
@@ -1978,6 +1984,45 @@ func _show_script_results(results: Array) -> void:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+
+
+## The yes half of an Ask*Script. Each move's own request is what decides
+## whether anything happens, exactly as in the submenu path; the difference is
+## that a refusal here is silent, because AskCutScript's `.CheckMap` failure
+## falls straight to `closetext` with no text of its own.
+func _use_prompted_field_move(move: int, slot: int) -> void:
+	if _world == null:
+		return
+	var requested: Dictionary = {}
+	var label: String = ""
+	match move:
+		Gen2WorldFieldMove.MOVE_CUT:
+			requested = _world.cut_request()
+			label = "used CUT!"
+		Gen2WorldFieldMove.MOVE_SURF:
+			requested = _world.surf_request(_party_species(slot))
+			label = "used SURF!"
+		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			requested = _world.whirlpool_request()
+			label = "used WHIRLPOOL!"
+		Gen2WorldFieldMove.MOVE_WATERFALL:
+			requested = _world.waterfall_request()
+			label = "used WATERFALL!"
+		Gen2WorldFieldMove.MOVE_HEADBUTT:
+			requested = _world.headbutt_request()
+			label = "did a HEADBUTT!"
+	if not bool(requested.get("ok", false)):
+		return
+	_show_field_move_text("%s %s" % [_prompted_field_move_name(slot), label])
+
+
+## GetPartyNickname, which every one of these scripts calls before its own text.
+func _prompted_field_move_name(slot: int) -> String:
+	var save: Gen2SaveData = _active_party_save()
+	if save == null or slot < 0 or slot >= save.party.size():
+		return "#MON"
+	var member: Variant = save.party[slot]
+	return _mon_display_name(member as Gen2SaveMon) if member is Gen2SaveMon else "#MON"
 
 
 func _show_story_picture(species: int) -> void:

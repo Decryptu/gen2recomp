@@ -42,6 +42,11 @@ const TREEMON_SPECIES: int = Fixture.TRAINER_SPECIES
 ## A smashable rock and the cell the player stands on to face it. The rock is a
 ## map object, not a tile, which is the whole difference from a headbutt tree:
 ## TryRockSmashFromMenu asks GetFacingObject rather than the collision byte.
+## A two-cell waterfall column with water below it, so the climb has somewhere
+## to start and CheckMapCanWaterfall has a facing to check.
+const WATERFALL_STAND_CELL: Vector2i = Vector2i(4, 7)
+const WATERFALL_CELL: Vector2i = Vector2i(4, 6)
+const WATERFALL_TOP_CELL: Vector2i = Vector2i(4, 5)
 const ROCK_CELL: Vector2i = Vector2i(9, 3)
 const ROCK_STAND_CELL: Vector2i = Vector2i(9, 2)
 const ROCK_OBJECT_INDEX: int = 1
@@ -123,6 +128,10 @@ func _write_cut_tree() -> void:
 		collision[WHIRLPOOL_CELL.y * Fixture.MAP_WIDTH_CELLS + WHIRLPOOL_CELL.x] = 0x24
 		collision[HEADBUTT_CELL.y * Fixture.MAP_WIDTH_CELLS + HEADBUTT_CELL.x] = \
 			Gen2WorldCollision.COLL_HEADBUTT_TREE
+		collision[WATERFALL_STAND_CELL.y * Fixture.MAP_WIDTH_CELLS + WATERFALL_STAND_CELL.x] = 0x29
+		for waterfall_cell: Vector2i in [WATERFALL_CELL, WATERFALL_TOP_CELL]:
+			collision[waterfall_cell.y * Fixture.MAP_WIDTH_CELLS + waterfall_cell.x] = \
+				Gen2WorldCollision.COLL_WATERFALL
 		# A second object beside the fixture's trainer, carrying the rock's own
 		# movement byte and the fixture's only sprite. Its event flag is -1, the
 		# way fifteen of the sixteen real rocks are, so smashing it lasts only
@@ -902,3 +911,172 @@ func test_a_flagged_rock_stays_smashed_across_a_reload() -> void:
 	(world.objects[ROCK_OBJECT_INDEX] as Gen2WorldObject).event_flag = ROCK_EVENT_FLAG
 	world.set_object_time(world.object_hour, world.object_time_of_day)
 	assert_null(world.object_at(ROCK_CELL), "a set event flag keeps it hidden")
+
+
+## TryTileCollisionEvent's five field-move branches: facing a cut tree and
+## pressing A asks before cutting, which is the way the cartridge teaches every
+## one of these. The party submenu is the other way in and both end in the same
+## staged request.
+func test_facing_a_cut_tree_asks_before_cutting() -> void:
+	await _open_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	assert_false(world.can_walk_to(TREE_CELL))
+
+	var opened: Array = world.interact()
+	assert_eq(opened[0]["status"], &"waiting", JSON.stringify(opened))
+	assert_string_contains(String(opened[0]["event"]["text"]), "This tree can be")
+	assert_string_contains(String(opened[0]["event"]["text"]), "Want to use CUT?")
+
+	var asked: Array = world.run_event_queue(true)
+	assert_eq(asked[0]["event"]["type"], &"choice", JSON.stringify(asked))
+	_world_screen._show_script_results(world.choose_script_input(0))
+	assert_eq(_shown_text(), "TESTMON used CUT!")
+	# Script_Cut still only writes the block after UseCutText.
+	assert_eq(world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE)
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE_CUT)
+	assert_true(world.can_walk_to(TREE_CELL))
+
+
+## `iffalse .declined` is closetext and end: no is no, and nothing is staged.
+func test_declining_the_cut_prompt_leaves_the_tree_standing() -> void:
+	await _open_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	world.interact()
+	world.run_event_queue(true)
+	var declined: Array = world.choose_script_input(1)
+	assert_eq(declined[0]["status"], &"complete", JSON.stringify(declined))
+	assert_true(world.pending_cut().is_empty())
+	assert_eq(world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE)
+
+
+## TryCutOW checks CheckPartyMove and then the badge, and a failure of either
+## reaches CantCutScript, whose _CanCutText says the tree could be cut without
+## offering to. There is no yes/no behind it.
+func test_a_cut_tree_without_the_badge_only_reports_that_it_can_be_cut() -> void:
+	await _open_world(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_eq(String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.CUT_CAN_TEXT)
+	var after: Array = world.run_event_queue(true)
+	assert_eq(after[0]["status"], &"complete", JSON.stringify(after))
+	assert_eq(world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE)
+
+
+## The same branch reached without the move at all, which is CheckPartyMove
+## failing first.
+func test_a_cut_tree_without_the_move_reports_the_same_text() -> void:
+	await _open_world(true, Gen2WorldFieldMove.MOVE_SURF, Gen2WorldFieldMove.BADGE_HIVE)
+	var opened: Array = _world_screen._world.interact()
+	assert_eq(String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.CUT_CAN_TEXT)
+
+
+## `.headbutt` is CheckPartyMove and nothing else, and its failure is
+## `.noevent`: no text, no choice, nothing at all.
+func test_facing_a_headbutt_tree_asks_and_without_the_move_says_nothing() -> void:
+	await _open_headbutt_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_string_contains(String(opened[0]["event"]["text"]), "Want to HEADBUTT")
+	var asked: Array = world.run_event_queue(true)
+	assert_eq(asked[0]["event"]["type"], &"choice")
+
+	await _open_world(true, Gen2WorldFieldMove.MOVE_CUT, Gen2WorldFieldMove.BADGE_HIVE,
+		HEADBUTT_STAND_CELL)
+	var silent: Array = _world_screen._world.interact()
+	assert_eq(silent[0]["status"], &"complete", JSON.stringify(silent))
+	assert_eq(
+		silent[0]["events"], [],
+		"TryHeadbuttOW answers no carry, so the player event ends with nothing shown"
+	)
+
+
+## `.surf` is the fallback branch every other tile reaches, and it is silent on
+## every failure: no badge, no move and no water each end the player event with
+## nothing shown.
+func test_facing_water_asks_to_surf_and_is_silent_without_the_badge() -> void:
+	await _open_surf_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_eq(String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.SURF_ASK_TEXT)
+	_world_screen._show_script_results(world.run_event_queue(true))
+	_world_screen._show_script_results(world.choose_script_input(0))
+	assert_eq(_shown_text(), "TESTMON used SURF!")
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
+
+	await _open_surf_world(false)
+	var quiet: Array = _world_screen._world.interact()
+	assert_eq(quiet[0]["status"], &"complete", JSON.stringify(quiet))
+	assert_eq(
+		quiet[0]["events"], [],
+		"TrySurfOW quits with no carry when the badge is missing"
+	)
+
+
+## A wall is not a surf prompt, and neither is anything else that is not water:
+## `.surf` reads GetTilePermission before it reads anything else.
+func test_facing_a_plain_wall_offers_no_prompt_at_all() -> void:
+	await _open_world()
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(_world_screen._world.interact(), [])
+
+
+## TryWhirlpoolOW checks the party, the badge and then TryWhirlpoolMenu, and any
+## of the three failing reaches Script_MightyWhirlpool rather than an offer.
+func test_facing_a_whirlpool_asks_before_dispelling_it() -> void:
+	await _open_whirlpool_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_eq(String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.WHIRLPOOL_ASK_TEXT)
+	world.run_event_queue(true)
+	_world_screen._show_script_results(world.choose_script_input(0))
+	assert_eq(_shown_text(), "TESTMON used WHIRLPOOL!")
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL)
+	_world_screen._acknowledge_field_move_text()
+	assert_eq(world.block_at(WHIRLPOOL_BLOCK.x, WHIRLPOOL_BLOCK.y), BLOCK_WHIRLPOOL_GONE)
+
+
+func test_a_whirlpool_without_the_badge_reports_that_a_mon_may_pass_it() -> void:
+	await _open_whirlpool_world(false)
+	var opened: Array = _world_screen._world.interact()
+	assert_eq(
+		String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.WHIRLPOOL_MAY_PASS_TEXT
+	)
+	var after: Array = _world_screen._world.run_event_queue(true)
+	assert_eq(after[0]["status"], &"complete", "no yes/no follows the refusal")
+
+
+## CheckMapCanWaterfall is two tests and no more: the facing must be up and the
+## tile above must be a waterfall. Facing it from the side is the refusal, not
+## the offer, which is why the prompt carries the facing question and the badge
+## does not answer it.
+func test_facing_a_waterfall_asks_only_when_facing_up() -> void:
+	await _open_waterfall_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_eq(String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.WATERFALL_ASK_TEXT)
+	world.run_event_queue(true)
+	_world_screen._show_script_results(world.choose_script_input(0))
+	assert_eq(_shown_text(), "TESTMON used WATERFALL!")
+	_world_screen._acknowledge_field_move_text()
+	# The climb runs the whole column and ends on the first cell above it that
+	# is not a waterfall, which is one past the top of the two.
+	assert_eq(world.player_cell, WATERFALL_TOP_CELL + Vector2i.UP)
+
+
+func test_a_waterfall_without_the_badge_reports_a_huge_waterfall() -> void:
+	await _open_waterfall_world(false)
+	var opened: Array = _world_screen._world.interact()
+	assert_eq(
+		String(opened[0]["event"]["text"]), Gen2WorldScriptRunner.WATERFALL_HUGE_TEXT
+	)
+
+
+func _open_waterfall_world(badge: bool = true) -> void:
+	await _open_world(
+		badge, Gen2WorldFieldMove.MOVE_WATERFALL, Gen2WorldFieldMove.BADGE_RISING,
+		WATERFALL_STAND_CELL
+	)
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	_world_screen._world.movement_mode = Gen2WorldAPI.MOVEMENT_SURF

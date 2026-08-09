@@ -134,6 +134,27 @@ const ROCK_SMASH_EARTHQUAKE: int = 84
 ## constants/sfx_constants.asm, whose comment column is hex. RockSmashScript
 ## plays the boulder's own sound rather than one of its own.
 const SFX_STRENGTH: int = 0x1B
+
+## data/text/common_2.asm, for the five Ask*Scripts TryTileCollisionEvent
+## reaches. Synthesized rather than decoded for the reason AskStrengthScript's
+## are: each is reached through `CallScript` on a link-time address, so there is
+## no pointer in the pins to follow. All five are byte identical between them.
+const CUT_ASK_TEXT: String = "This tree can be\nCUT!\n\nWant to use CUT?"
+const CUT_CAN_TEXT: String = "This tree can be\nCUT!"
+const SURF_ASK_TEXT: String = "The water is calm.\nWant to SURF?"
+const WHIRLPOOL_ASK_TEXT: String = \
+	"A whirlpool is in\nthe way.\n\nWant to use\nWHIRLPOOL?"
+const WHIRLPOOL_MAY_PASS_TEXT: String = \
+	"It's a vicious\nwhirlpool!\n\nA #MON may be\nable to pass it."
+const WATERFALL_ASK_TEXT: String = "Do you want to use\nWATERFALL?"
+const WATERFALL_HUGE_TEXT: String = "Wow, it's a huge\nwaterfall."
+const HEADBUTT_ASK_TEXT: String = \
+	"A #MON could be\nin this tree.\n\nWant to HEADBUTT\nit?"
+## A field-move prompt has no source address to push a frame at, since
+## CallScript's operand is a link-time one the pins do not resolve. The bare
+## `end` frame still has to sit in the CPU's switchable window for _push_frame,
+## so it is put at its base; nothing ever reads the address back.
+const FIELD_MOVE_PROMPT_FRAME: int = RomFile.BANK_SIZE
 ## data/text/common_2.asm's _FoundItemText, less its <PLAYER>; see
 ## _stage_item_ball(). The source line break sits before the item name.
 const FOUND_ITEM_TEXT: String = "Found\n%s!"
@@ -208,6 +229,18 @@ static func begin(
 		## approaches.
 		runner._trainer_intro_approach_pending = request.get("direction", Vector2i.ZERO) \
 			in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
+	elif StringName(request.get("kind", &"")) == &"field_move_prompt":
+		## TryTileCollisionEvent's five field-move branches each reach an
+		## Ask*Script through CallScript on a link-time address, so there is no
+		## pointer to push and the frame that stands in for one is a bare `end`,
+		## exactly as an item ball's is.
+		started = runner._push_frame(
+			bank, FIELD_MOVE_PROMPT_FRAME, PackedByteArray([
+				Gen2WorldScript.raw_opcode(Gen2WorldScript.GOLD_END, runner._crystal_commands())
+			])
+		)
+		if started:
+			runner._stage_field_move_prompt()
 	elif StringName(request.get("kind", &"")) in [&"item_ball", &"hidden_item"]:
 		## Neither pointer is code, so the frame that stands in for it is a bare
 		## `end` and the staging call replays FindItemInBallScript or
@@ -297,6 +330,34 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			var used_name: String = String(_pending.get("name", "#MON"))
 			_stage_internal_text("%s can\nmove boulders." % used_name, true)
 			return _waiting_result()
+		## The five Ask*Scripts TryTileCollisionEvent reaches, all one shape:
+		## opentext, writetext, yesorno, iftrue <the move>, closetext, end.
+		if pending_type == &"text" and _pending.get("special", &"") == &"field_move_ask":
+			_pending = {
+				"type": &"choice",
+				"command": &"yesorno",
+				"choices": [&"yes", &"no"],
+				"special": &"field_move_ask",
+				"move": int(_pending.get("move", 0)),
+				"slot": int(_pending.get("slot", -1)),
+				"source": _request.duplicate(true),
+			}
+			return _waiting_result()
+		if pending_type == &"choice" and _pending.get("special", &"") == &"field_move_ask":
+			if choice < 0:
+				return _waiting_result()
+			var asked_move: int = int(_pending.get("move", 0))
+			var asked_slot: int = int(_pending.get("slot", -1))
+			_pending = {}
+			_script_value = 1 if choice == 0 else 0
+			if choice == 0:
+				## `iftrue Script_Cut` and its four counterparts. The move
+				## itself belongs to the host, which owns the staged request
+				## and the commit the party submenu already reaches.
+				_emit_runtime_event(&"field_move_confirmed", {
+					"move": asked_move, "slot": asked_slot,
+				})
+			return _complete()
 		## AskRockSmashScript, the same opentext/writetext/yesorno shape.
 		if pending_type == &"text" and _pending.get("special", &"") == &"rock_smash_ask":
 			_pending = {
@@ -2211,6 +2272,95 @@ func _stage_strength_used(slot: int) -> Dictionary:
 	}
 	_finish_after_pending = false
 	return {"ok": true}
+
+
+## engine/overworld/events.asm's TryTileCollisionEvent, from `.cut` on: the five
+## field-move branches a faced tile can reach, each of which is a `Try*OW` gate
+## and then an `Ask*Script`. Synthesized for the reason AskStrengthScript is,
+## and dispatched on the request kind rather than a standard-script index
+## because these are reached through `CallScript` rather than `jumpstd`.
+##
+## Which move the tile offers is [Gen2WorldAPI]'s answer, since only it can read
+## the map; so is `tile_ok`, the tile-shaped half of the gate that
+## TryWhirlpoolMenu and CheckMapCanWaterfall own. What is left here is the party
+## and the badge, which is what this runner already reads for the boulder.
+##
+## Three of the five have a refusal text and two do not: TryHeadbuttOW and
+## TrySurfOW return no carry and the player event ends with nothing shown.
+func _stage_field_move_prompt() -> Dictionary:
+	var party: Dictionary = _request.get("party", {})
+	if party.is_empty():
+		return {"ok": false, "reason": &"missing_party_summary", "kind": &"field_move_prompt"}
+	var move: int = int(_request.get("move", 0))
+	var slot: int = _party_slot_with_move(move)
+	var badge: int = _field_move_prompt_badge(move)
+	var allowed: bool = slot >= 0
+	if allowed and badge >= 0:
+		allowed = _engine_flag_active(
+			Gen2WorldState.badge_flag(badge, _crystal_commands())
+		)
+	if allowed and not bool(_request.get("tile_ok", true)):
+		allowed = false
+	if not allowed:
+		var refusal: String = _field_move_prompt_refusal(move)
+		if refusal.is_empty():
+			## `.noevent`: TryHeadbuttOW and TrySurfOW answer no carry, so the
+			## player event ends and nothing is shown at all.
+			_script_value = 0
+			return _complete()
+		return _stage_internal_text(refusal, true)
+	_pending = {
+		"type": &"text",
+		"text": _field_move_prompt_ask(move),
+		"internal_text": true,
+		"special": &"field_move_ask",
+		"move": move,
+		"slot": slot,
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = false
+	return {"ok": true}
+
+
+## Each Try*OW's own CheckEngineFlag argument, as a badge-order index, or -1 for
+## the one that checks none. TryHeadbuttOW is CheckPartyMove and nothing else.
+func _field_move_prompt_badge(move: int) -> int:
+	match move:
+		Gen2WorldFieldMove.MOVE_CUT:
+			return Gen2WorldFieldMove.BADGE_HIVE
+		Gen2WorldFieldMove.MOVE_SURF:
+			return Gen2WorldFieldMove.BADGE_FOG
+		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			return Gen2WorldFieldMove.BADGE_GLACIER
+		Gen2WorldFieldMove.MOVE_WATERFALL:
+			return Gen2WorldFieldMove.BADGE_RISING
+	return -1
+
+
+func _field_move_prompt_ask(move: int) -> String:
+	match move:
+		Gen2WorldFieldMove.MOVE_CUT:
+			return CUT_ASK_TEXT
+		Gen2WorldFieldMove.MOVE_SURF:
+			return SURF_ASK_TEXT
+		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			return WHIRLPOOL_ASK_TEXT
+		Gen2WorldFieldMove.MOVE_WATERFALL:
+			return WATERFALL_ASK_TEXT
+	return HEADBUTT_ASK_TEXT
+
+
+## CantCutScript, Script_MightyWhirlpool and Script_CantDoWaterfall. Headbutt
+## and Surf have none, which is what the empty String means.
+func _field_move_prompt_refusal(move: int) -> String:
+	match move:
+		Gen2WorldFieldMove.MOVE_CUT:
+			return CUT_CAN_TEXT
+		Gen2WorldFieldMove.MOVE_WHIRLPOOL:
+			return WHIRLPOOL_MAY_PASS_TEXT
+		Gen2WorldFieldMove.MOVE_WATERFALL:
+			return WATERFALL_HUGE_TEXT
+	return ""
 
 
 ## engine/events/overworld.asm's AskRockSmashScript, synthesized for the same
