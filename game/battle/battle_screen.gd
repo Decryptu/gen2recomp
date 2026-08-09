@@ -1296,7 +1296,8 @@ func _enemy_slot() -> int:
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
 		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
 		_battle.weather,
-		_battle.screens[Gen2Battle.ENEMY], _battle.screens[Gen2Battle.PLAYER]
+		_battle.screens[Gen2Battle.ENEMY], _battle.screens[Gen2Battle.PLAYER],
+		Gen2AISwitch.has_bench(_battle), Gen2AISwitch.matchup_score(_battle)
 	)
 
 
@@ -1979,6 +1980,13 @@ func _describe(event: Dictionary) -> String:
 			)
 		Gen2Battle.SAFEGUARD_PROTECTED:
 			return "%s is protected by SAFEGUARD!" % _battler_name(int(event["target"]))
+		Gen2Battle.PERISH_SONG_STARTED:
+			# StartPerishText names neither Pokémon, since the song caught both.
+			return "Both #MON will faint in 3 turns!"
+		Gen2Battle.PERISH_COUNT:
+			return "%s's PERISH count is %d!" % [
+				_battler_name(side), int(event["count"]),
+			]
 		Gen2Battle.MIST_SET:
 			return "%s is shrouded in mist!" % _battler_name(side)
 		Gen2Battle.FOCUS_ENERGY_SET:

@@ -116,6 +116,10 @@ const LIGHT_SCREEN: int = 113
 const REFLECT: int = 115
 const SAFEGUARD: int = 219
 
+## Perish Song, the same shape again: a real move number, no power, and an
+## accuracy its own sequence never rolls.
+const PERISH_SONG: int = 195
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -463,6 +467,7 @@ static func _moves() -> Array:
 		LIGHT_SCREEN: ["LIGHT SCREEN", 0, PSYCHIC_TYPE, 255, 30, Gen2MoveEffect.LIGHT_SCREEN, 0],
 		REFLECT: ["REFLECT", 0, PSYCHIC_TYPE, 255, 20, Gen2MoveEffect.REFLECT, 0],
 		SAFEGUARD: ["SAFEGUARD", 0, NORMAL, 255, 25, Gen2MoveEffect.SAFEGUARD, 0],
+		PERISH_SONG: ["PERISH SONG", 0, NORMAL, 255, 5, Gen2MoveEffect.PERISH_SONG, 0],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.

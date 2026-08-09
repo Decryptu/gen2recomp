@@ -217,3 +217,61 @@ func test_a_wild_battle_never_switches_or_uses_an_item() -> void:
 	var action: Dictionary = Gen2BattleAI.choose_action(battle, OFTEN, 0, _rng)
 
 	assert_eq(StringName(action["type"]), Gen2Battle.ACTION_MOVE)
+
+
+## `CheckAbleToSwitch` opens on Perish Song, ahead of every matchup check: with
+## one turn left on the count the AI leaves at [constant Gen2AISwitch.TIER_HIGH]
+## however well the fight is going, since staying is death.
+func test_the_last_turn_of_perish_song_forces_a_switch() -> void:
+	var battle: Gen2Battle = _comfortable()
+	battle.enemy.substatus |= Gen2Substatus.PERISH
+	battle.enemy.perish_count = 1
+
+	var choice: Dictionary = Gen2AISwitch.evaluate(battle)
+
+	assert_eq(int(choice["tier"]), Gen2AISwitch.TIER_HIGH, "the comfort check is never reached")
+	assert_eq(int(choice["index"]), 1, "the one Pokémon behind it")
+
+
+## Only a count of exactly one qualifies. Two is early enough to keep fighting,
+## so the matchup half decides as usual.
+func test_perish_song_with_two_turns_left_leaves_the_matchup_to_decide() -> void:
+	var battle: Gen2Battle = _comfortable()
+	battle.enemy.substatus |= Gen2Substatus.PERISH
+	battle.enemy.perish_count = 2
+
+	assert_eq(int(Gen2AISwitch.evaluate(battle)["tier"]), 0, "still comfortable, so it stays")
+
+
+## `.not_2`: with no super-effective answer on the bench the tier is unchanged
+## and the shortlist is discarded, the mask walk taking the lowest party index
+## still standing.
+func test_perish_song_without_a_good_answer_takes_the_lowest_alive_slot() -> void:
+	# Neither bench Pokémon has anything super effective against the Pikachu
+	# that is out, and the first of them is on one hit point, so the quarter-HP
+	# and resistance scans cannot be what chose it.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, [Fixture.THUNDERBOLT]),
+		[
+			_mon(Fixture.CHARMANDER, [Fixture.GROWL]),
+			_mon(Fixture.BULBASAUR, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, [Fixture.TACKLE]),
+		]
+	)
+	battle.party(Gen2Battle.ENEMY).at(1).hp = 1
+	battle.enemy.substatus |= Gen2Substatus.PERISH
+	battle.enemy.perish_count = 1
+
+	var choice: Dictionary = Gen2AISwitch.evaluate(battle)
+
+	assert_eq(int(choice["tier"]), Gen2AISwitch.TIER_HIGH)
+	assert_eq(int(choice["index"]), 1, "the lowest index alive, hurt or not")
+
+
+## The flag without the count, and the count without the flag, are both nothing:
+## the source reads the count only behind `bit SUBSTATUS_PERISH`.
+func test_a_perish_count_without_the_flag_changes_nothing() -> void:
+	var battle: Gen2Battle = _comfortable()
+	battle.enemy.perish_count = 1
+
+	assert_eq(int(Gen2AISwitch.evaluate(battle)["tier"]), 0)

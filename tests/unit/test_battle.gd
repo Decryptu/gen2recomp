@@ -2766,3 +2766,144 @@ func test_safeguard_runs_down_and_stops_protecting() -> void:
 
 	assert_eq(_of_type(after, Gen2Battle.SAFEGUARD_PROTECTED).size(), 0)
 	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.PARALYSIS))
+
+
+## `BattleCommand_PerishSong` names `wPlayerSubStatus1` and `wEnemySubStatus1`
+## rather than the user and the target, so the singer is caught by its own song.
+## The count is four and the first tick spends one of them, which is why the
+## line promises three turns.
+func test_perish_song_catches_both_sides_and_starts_at_three() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(_of_type(events, Gen2Battle.PERISH_SONG_STARTED).size(), 1, JSON.stringify(events))
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		assert_true(
+			Gen2Substatus.has(battle.mon(side).substatus, Gen2Substatus.PERISH),
+			"side %d heard it" % side,
+		)
+		assert_eq(battle.mon(side).perish_count, 3)
+
+	var counted: Array = _of_type(events, Gen2Battle.PERISH_COUNT)
+	assert_eq(counted.size(), 2, "both sides are counted down, player first")
+	assert_eq(counted[0]["side"], Gen2Battle.PLAYER)
+	assert_eq(counted[0]["count"], 3)
+	assert_eq(counted[1]["side"], Gen2Battle.ENEMY)
+
+
+## `.failed` is reached only when both sides already carry the flag: the song
+## fails outright rather than restarting either count.
+func test_perish_song_fails_when_both_are_already_counting_down() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var again: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(again, Gen2Battle.MOVE_FAILED).is_empty(), JSON.stringify(again))
+	assert_eq(_of_type(again, Gen2Battle.PERISH_SONG_STARTED).size(), 0)
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		assert_eq(battle.mon(side).perish_count, 2, "the second song reset nothing")
+
+
+## `.ok` sets the flag on each side that lacks it and leaves the count of a side
+## that already has one alone, so the two clocks stay out of step.
+func test_perish_song_catches_only_the_side_that_missed_it() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.enemy.substatus |= Gen2Substatus.PERISH
+	battle.enemy.perish_count = 2
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(events, Gen2Battle.PERISH_SONG_STARTED).is_empty(), JSON.stringify(events))
+	assert_eq(battle.player.perish_count, 3, "the singer starts a fresh four")
+	assert_eq(battle.enemy.perish_count, 1, "the count already running is not restarted")
+
+
+## The zero tick clears the flag and empties the HP word outright, which is not
+## damage: nothing rolls, nothing is a fraction of anything, and both sides go
+## down on the same turn end.
+func test_perish_song_finishes_both_on_the_fourth_turn_end() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+
+	var last: Array = []
+	for turn: int in 4:
+		last = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	var counted: Array = _of_type(last, Gen2Battle.PERISH_COUNT)
+	assert_eq(counted.size(), 2)
+	assert_eq(counted[0]["count"], 0, "the line prints on the tick that kills too")
+	assert_eq(_of_type(last, Gen2Battle.FAINTED).size(), 2, JSON.stringify(last))
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		assert_eq(battle.mon(side).hp, 0)
+		assert_true(battle.mon(side).is_fainted())
+		assert_false(Gen2Substatus.has(battle.mon(side).substatus, Gen2Substatus.PERISH))
+
+
+## `NewBattleMonStatus` clears all five substatus bytes on a send-out, so the
+## Pokémon that comes in has heard nothing. The count behind the flag goes with
+## it, which is what [method Gen2BattleMon.reset_volatile] is for.
+func test_a_switch_escapes_perish_song() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.create([
+			_mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG]),
+			_mon(Fixture.BULBASAUR, 50, [Fixture.GROWL]),
+		]),
+		Gen2Party.of(_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])), _rng, true
+	)
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var switching: Array = battle.take_actions(
+		Gen2Battle.switch_to(1), Gen2Battle.use_move(0)
+	)
+
+	assert_false(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PERISH),
+		"the Pokémon sent out never heard the song",
+	)
+	assert_eq(battle.player.perish_count, 0)
+	var counted: Array = _of_type(switching, Gen2Battle.PERISH_COUNT)
+	assert_eq(counted.size(), 1, "only the enemy is still counting")
+	assert_eq(counted[0]["side"], Gen2Battle.ENEMY)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.PERISH))
+
+
+## `HandleBetweenTurnEffects` runs `HandleWrap`, then `HandlePerishSong`, then
+## its leftovers block, of which `HandleSafeguard` is a part.
+func test_perish_song_ticks_after_wrap_and_before_the_leftovers_block() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.substatus |= Gen2Substatus.PERISH
+	battle.player.perish_count = 3
+	battle.player.trapped_turns = 3
+	battle.player.trapping_move = Fixture.WRAP
+	battle.screens[Gen2Battle.PLAYER] = Gen2Screens.SAFEGUARD
+	battle.safeguard_turns[Gen2Battle.PLAYER] = 1
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var order: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+
+	assert_true(order.has(Gen2Battle.HURT_BY_TRAP), JSON.stringify(events))
+	assert_true(order.has(Gen2Battle.SCREEN_FADED), JSON.stringify(events))
+	assert_lt(
+		order.find(Gen2Battle.HURT_BY_TRAP), order.find(Gen2Battle.PERISH_COUNT),
+		"the wrap tick comes first",
+	)
+	assert_lt(
+		order.find(Gen2Battle.PERISH_COUNT), order.find(Gen2Battle.SCREEN_FADED),
+		"the leftovers block, Safeguard included, comes after",
+	)

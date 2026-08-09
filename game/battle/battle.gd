@@ -180,6 +180,14 @@ const SCREEN_SET: StringName = &"screen_set"
 const SCREEN_FADED: StringName = &"screen_faded"
 const SAFEGUARD_PROTECTED: StringName = &"safeguard_protected"
 
+## Perish Song. [constant PERISH_SONG_STARTED] is `StartPerishText`, which names
+## both Pokémon rather than either side, so its [code]side[/code] is only whoever
+## sang. [constant PERISH_COUNT] carries the [code]side[/code] it is counting down
+## and the [code]count[/code] just reached, including the zero that kills, since
+## `HandlePerishSong` prints on every tick.
+const PERISH_SONG_STARTED: StringName = &"perish_song_started"
+const PERISH_COUNT: StringName = &"perish_count"
+
 ## A trainer spent one of its two items on whoever it has out. [code]item[/code]
 ## is what was spent and [code]effect[/code] is [method Gen2AIItems.apply]'s own
 ## answer, so a screen can follow the bar or the stage without asking the battle
@@ -847,6 +855,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	_residual_damage(acting, events)
 	_tick_weather(events)
 	_tick_wrap(events)
+	_tick_perish(events)
 	_tick_held_items(events)
 	_tick_encore(acting, events)
 	_award_experience(events)
@@ -984,6 +993,35 @@ func _tick_wrap(events: Array) -> void:
 		})
 		if current.is_fainted():
 			events.append({"type": FAINTED, "side": side})
+
+
+## `HandlePerishSong`: one off each side's count, said out loud, and whoever
+## reaches zero is finished where it stands.
+##
+## Behind [method _tick_wrap] and ahead of the leftovers block, which is where
+## `HandleBetweenTurnEffects` calls it, and player first for the same reason
+## every other handler here is: the order that reverses them is the link one.
+##
+## The line prints on every tick including the last, since `HandlePerishSong`
+## decrements, prints, and only then looks at whether the count came out zero.
+## The kill is `xor a` straight into the HP word rather than damage, so nothing
+## about it is a sixteenth of anything and no held item can answer it.
+func _tick_perish(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		var current: Gen2BattleMon = mon(side)
+		if current.is_fainted():
+			continue
+		if not Gen2Substatus.has(current.substatus, Gen2Substatus.PERISH):
+			continue
+
+		current.perish_count -= 1
+		events.append({"type": PERISH_COUNT, "side": side, "count": current.perish_count})
+		if current.perish_count > 0:
+			continue
+
+		current.substatus &= ~Gen2Substatus.PERISH
+		current.hp = 0
+		events.append({"type": FAINTED, "side": side})
 
 
 ## The leftovers block of `HandleBetweenTurnEffects`: `HandleLeftovers`,

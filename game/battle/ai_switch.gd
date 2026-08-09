@@ -14,12 +14,6 @@ extends RefCounted
 ## every scan keeps party order, and every place the cartridge converts a mask to
 ## an index it takes the lowest index set, which is what every scan here answers
 ## with too.
-##
-## One branch is missing. `CheckAbleToSwitch` opens with a Perish Song check that
-## switches at [constant TIER_HIGH] whatever the matchups say, and Perish Song is
-## not implemented, so nothing here can reach that tier. The tier and its three
-## chances are still named, because they are what the source's three frequency
-## routines are each a third of.
 
 ## `BASE_AI_SWITCH_SCORE`, where [method matchup_score] starts before anything
 ## nudges it.
@@ -91,6 +85,10 @@ static func evaluate(battle: Gen2Battle) -> Dictionary:
 	if alive.is_empty():
 		return _stay()
 
+	var perish: Dictionary = _perish_choice(battle, alive)
+	if not perish.is_empty():
+		return perish
+
 	if matchup_score(battle) >= COMFORTABLE_SCORE:
 		return _stay()
 
@@ -101,6 +99,32 @@ static func evaluate(battle: Gen2Battle) -> Dictionary:
 			return _counter_choice(battle, immune)
 
 	return _no_counter_choice(battle, alive)
+
+
+## `CheckAbleToSwitch`'s opening branch: the turn before Perish Song finishes
+## the Pokémon that is out, get somebody else in. Empty means the branch did not
+## apply and the matchup half decides instead.
+##
+## Only a count of exactly one qualifies. Two is too early and zero has already
+## killed, so a Pokémon that will survive the song is left to fight.
+##
+## The tier is [constant TIER_HIGH] either way, which is the whole point of the
+## branch: what the shortlist changes is who comes in, not how much the AI wants
+## the switch. With a super-effective answer standing it is that Pokémon; without
+## one, `.not_2` walks the alive mask from the top and takes the first bit, which
+## is the lowest party index still standing, shortlist or no shortlist.
+static func _perish_choice(battle: Gen2Battle, alive: Array) -> Dictionary:
+	var enemy: Gen2BattleMon = battle.mon(Gen2Battle.ENEMY)
+	if not Gen2Substatus.has(enemy.substatus, Gen2Substatus.PERISH):
+		return {}
+	if enemy.perish_count != 1:
+		return {}
+
+	var shortlist: Array = _resisting(battle, _at_least_quarter_hp(battle, alive))
+	var best: Dictionary = _best_answer(battle, shortlist)
+	if int(best["quality"]) == 2:
+		return {"tier": TIER_HIGH, "index": int(best["index"])}
+	return {"tier": TIER_HIGH, "index": int(alive[0])}
 
 
 ## `.no_perish`'s tail, and `.no_last_counter_move`: the AI is losing the type
@@ -223,6 +247,12 @@ static func _enemy_move_adjustment(
 	if threat < WEIGHT_SUPER_EFFECTIVE:
 		return 0
 	return 1
+
+
+## `FindAliveEnemyMons`' carry flag, which is the only part of it three of the
+## smart-scoring handlers want: whether the AI has anybody left to send in.
+static func has_bench(battle: Gen2Battle) -> bool:
+	return not _alive_others(battle).is_empty()
 
 
 ## `FindAliveEnemyMons`: every party index still standing except the one that is

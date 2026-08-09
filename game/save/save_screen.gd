@@ -167,6 +167,10 @@ func save_screen_snapshot() -> Dictionary:
 		"game_id": String(_data.id) if _data != null else "",
 		"selected_slot": _selected_slot,
 		"new_game": _new_game_visible,
+		# Whether the name form is actually on screen, which is not the same
+		# question as whether it was asked for: a details pane that refused to
+		# draw leaves the flag up and the form absent.
+		"new_game_form": is_instance_valid(_name_input),
 		"status": _status_label.text if _status_label != null else "",
 		"detail": _status_detail.text if _status_detail != null else "",
 		"slots": _slots.duplicate(true),
@@ -350,9 +354,14 @@ func _refresh_details() -> void:
 	_slots_container.visible = not _new_game_visible
 	for child: Node in _details_box.get_children():
 		child.free()
-	var row: Dictionary = _row_for(_selected_slot)
-	if _data == null or row.is_empty():
+	if _data == null or _selected_slot < 0:
 		return
+	# A slot targeted for a new game has no row yet, since slots_for answers only
+	# what is on disk. Describing it as empty is what lets the form open on it;
+	# bailing here is what kept the "New slot" button from doing anything.
+	var row: Dictionary = _row_for(_selected_slot)
+	if row.is_empty():
+		row = Gen2SaveStore.empty_slot_row(_selected_slot)
 
 	var panel: Gen2LauncherCard = Gen2LauncherCard.create(_palette, Gen2LauncherTheme.RADIUS_MD, 22)
 	_details_box.add_child(panel)
@@ -391,7 +400,10 @@ func _refresh_details() -> void:
 	body.add_child(actions)
 	actions.add_child(_action("New game", Gen2LauncherButton.Variant.PRIMARY, &"plus", _request_new_game))
 	actions.add_child(_action("Import .sav", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_import))
-	_add_slot_management(body)
+	# Renaming, exporting or deleting a slot with no file behind it can only
+	# report failure, so a free slot is offered none of it.
+	if bool(row["exists"]):
+		_add_slot_management(body)
 
 
 ## Naming, export, deletion and the editor. Kept below the play actions,
@@ -521,7 +533,7 @@ func _build_new_game_form(body: VBoxContainer) -> void:
 	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
 	body.add_child(actions)
 	actions.add_child(_action("Create save", Gen2LauncherButton.Variant.PRIMARY, &"check", _create_from_form))
-	actions.add_child(_action("Cancel", Gen2LauncherButton.Variant.NEUTRAL, &"", _cancel_new_game))
+	actions.add_child(_action("Cancel", Gen2LauncherButton.Variant.NEUTRAL, &"", cancel_new_game))
 
 
 func _add_party_summary(body: VBoxContainer, save: Gen2SaveData) -> void:
@@ -593,11 +605,14 @@ func _on_replace_confirmed() -> void:
 
 
 func _create_from_form() -> void:
-	if _name_input != null:
+	# The field belongs to a details pane that is rebuilt whole, so the reference
+	# outlives the node it points at.
+	if is_instance_valid(_name_input):
 		create_new_game(_name_input.text)
 
 
-func _cancel_new_game() -> void:
+## Closes the new-game form, leaving the slot it was opened on selected.
+func cancel_new_game() -> void:
 	_new_game_visible = false
 	_refresh_details()
 

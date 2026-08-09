@@ -177,6 +177,10 @@ const LIGHT_SCREEN: int = 35
 const REFLECT: int = 65
 const SAFEGUARD: int = 124
 
+## Perish Song, which is neither a screen nor a status: a count on each Pokémon
+## on the field that a switch escapes.
+const PERISH_SONG: int = 114
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
@@ -582,6 +586,15 @@ const SAFEGUARD_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## Perish Song, the same four steps again. Its own accuracy byte is 100 and no
+## list step rolls against it, so the song never misses.
+const PERISH_SONG_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.PERISH_SONG,
+	Gen2EffectCommands.END_MOVE,
+]
+
 ## Thunder: a paralysis chance behind the hit, with its own accuracy step ahead
 ## of the roll. Without that step Thunder would be an ordinary attack, which is
 ## what it was here before the weather existed to read.
@@ -906,6 +919,7 @@ static func _sequences() -> Dictionary:
 		LIGHT_SCREEN: SCREEN_SEQUENCE,
 		REFLECT: SCREEN_SEQUENCE,
 		SAFEGUARD: SAFEGUARD_SEQUENCE,
+		PERISH_SONG: PERISH_SONG_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

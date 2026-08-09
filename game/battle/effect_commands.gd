@@ -203,6 +203,10 @@ const SCREEN: StringName = &"screen"
 ## [constant Gen2Screens.TURNS] and fails on a second use.
 const SAFEGUARD: StringName = &"safeguard"
 
+## `BattleCommand_PerishSong`: the song both sides hear, whoever sang it. Fails
+## only when both are already counting down.
+const PERISH_SONG: StringName = &"perishsong"
+
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
 ## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
@@ -495,6 +499,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_screen(turn)
 		SAFEGUARD:
 			_safeguard(turn)
+		PERISH_SONG:
+			_perish_song(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -1625,6 +1631,35 @@ static func _raise_screen(turn: Gen2Turn, flag: int, counts: Dictionary) -> void
 	counts[turn.side] = Gen2Screens.TURNS
 	_animate_current_move(turn)
 	turn.emit(Gen2Battle.SCREEN_SET, {"screen": flag})
+
+
+## `BattleCommand_PerishSong`: four turns on the clock for both Pokémon on the
+## field, whichever of them sang.
+##
+## The one command that names `wPlayerSubStatus1` and `wEnemySubStatus1` outright
+## instead of the user and the target, so it reads the same either way round. A
+## side already counting down is left with the count it has rather than given a
+## fresh four, and the move fails only when that is true of both.
+static func _perish_song(turn: Gen2Turn) -> void:
+	var battle: Gen2Battle = turn.battle
+	var already: Dictionary = {}
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		already[side] = Gen2Substatus.has(
+			battle.mon(side).substatus, Gen2Substatus.PERISH
+		)
+	if bool(already[Gen2Battle.PLAYER]) and bool(already[Gen2Battle.ENEMY]):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
+		if bool(already[side]):
+			continue
+		var hearer: Gen2BattleMon = battle.mon(side)
+		hearer.substatus |= Gen2Substatus.PERISH
+		hearer.perish_count = Gen2Substatus.PERISH_TURNS
+
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.PERISH_SONG_STARTED)
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status
