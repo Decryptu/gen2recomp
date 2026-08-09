@@ -81,6 +81,9 @@ var _encounter_random := RandomNumberGenerator.new()
 ## encounters and script results however long the player stands watching.
 var _object_random := RandomNumberGenerator.new()
 var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
+## Paces the held-direction poll at the hardware's frame rate rather than the
+## host's. See [method _advance_held_direction].
+var _walk_accumulator: float = 0.0
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -88,6 +91,11 @@ var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 
 
 func _ready() -> void:
+	# The map and cell readout and the shortcut legend are scaffolding, and they
+	# are also the two things standing between the player and a full screen on a
+	# phone. Same flag as the shortcuts they describe.
+	_caption.visible = Gen2DebugKeys.enabled()
+	_hint.visible = Gen2DebugKeys.enabled()
 	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	_build_world()
 
@@ -258,6 +266,7 @@ func _process(delta: float) -> void:
 	if _world != null and _world.tick() and _renderer != null:
 		_renderer.refresh()
 	_advance_forced_movement()
+	_advance_held_direction(delta)
 	if _objects_may_move() and _world.advance_object_steps(delta, _object_random) \
 		and _renderer != null:
 		_renderer.refresh()
@@ -310,6 +319,30 @@ func _advance_forced_movement() -> void:
 		_after_player_move(forced)
 
 
+## Walking goes on while a direction is held, whatever is holding it: a key, a
+## stick, a d-pad or a thumb on the on-screen controller.
+##
+## Polled rather than driven by repeated events, because the rate a held key
+## repeats at belongs to the operating system and has nothing to do with the
+## hardware. The poll runs once per hardware frame, which is what the source
+## did, and [method move_player] refuses while a step is still in flight, which
+## is what turns sixty polls a second into one step every sixteen frames.
+func _advance_held_direction(delta: float) -> void:
+	_walk_accumulator = minf(
+		_walk_accumulator + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
+	)
+	if _walk_accumulator < Gen2WorldAnimation.FRAME_SECONDS:
+		return
+	_walk_accumulator = fmod(_walk_accumulator, Gen2WorldAnimation.FRAME_SECONDS)
+	if not _objects_may_move() or _world.script_input_waiting() \
+		or _world.player_step_in_progress():
+		return
+	var direction: int = Gen2InputRuntime.instance().held_direction()
+	if direction != Gen2Button.NONE:
+		move_player(Gen2Button.vector(direction))
+
+
 ## Whether any embedded screen is up. Every overlay is named here and nowhere
 ## else: the six callers below each need a different set of the other pauses, but
 ## they all need this one, and adding an overlay to five of six lists by hand is
@@ -332,153 +365,140 @@ func _objects_may_move() -> bool:
 		and not _world.fishing_busy()
 
 
-func _unhandled_key_input(event: InputEvent) -> void:
-	if _world == null or _battle_host != null or not event.is_pressed():
+## Every control the cartridge had arrives here as a [Gen2Button], whichever
+## device produced it. What is left over is a development shortcut or something
+## only a renderer could want.
+func _unhandled_input(event: InputEvent) -> void:
+	if _world == null or _battle_host != null:
 		return
-	var key: InputEventKey = event as InputEventKey
-	if key == null:
+	var button: int = Gen2Button.pressed_in(event)
+	if button != Gen2Button.NONE:
+		if _handle_button(button):
+			accept_event()
 		return
-	if not _trainer_approach.is_empty():
+	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
 		return
-	if _world.phone_ring_active():
+	# Everything the screen wants has been claimed above, so what reaches here is
+	# what a renderer may have a use for: a free camera needs pointer and stick
+	# motion, and the screen has no opinion about either.
+	if _renderer_input_free() and Gen2ModHost.renderer_handles_input(_renderer, event):
 		accept_event()
-		return
+
+
+## Routes one button to whatever owns the screen, and reports whether anything
+## took it. A pause that owns the world swallows every button rather than
+## refusing the ones it has no use for, which is what keeps a stray press from
+## reaching the map behind it.
+func _handle_button(button: int) -> bool:
+	if not _trainer_approach.is_empty() or _world.phone_ring_active():
+		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
 	## to until it has finished, and it takes no cancel.
 	if _hall_of_fame_host != null:
-		_hall_of_fame_host.handle_key(key.keycode)
-		accept_event()
-		return
+		_hall_of_fame_host.handle_button(button)
+		return true
 	if _pc_host != null:
-		if key.keycode == KEY_ESCAPE:
+		if button == Gen2Button.B:
 			_pc_host.close_embedded()
-		accept_event()
-		return
+		return true
 	if _party_host != null:
-		_party_host.handle_key(key.keycode)
-		accept_event()
-		return
+		_party_host.handle_button(button)
+		return true
 	if _field_move_text:
-		if key.keycode in [KEY_SPACE, KEY_ENTER, KEY_Z]:
+		if button == Gen2Button.A:
 			_acknowledge_field_move_text()
-		accept_event()
-		return
+		return true
 	if _start_menu_host != null:
-		if _start_menu_host.handle_key(key.keycode):
-			accept_event()
-		return
+		return _start_menu_host.handle_button(button)
 	if _service_host != null:
-		if _service_host.handle_key(key.keycode):
-			accept_event()
+		return _service_host.handle_button(button)
+	if _world.fishing_busy():
+		if button == Gen2Button.A:
+			_handle_fishing_result(_world.advance_fishing())
+		return true
+	if _world.script_input_waiting():
+		if button == Gen2Button.A:
+			_advance_script_pause()
+		return true
+	match button:
+		Gen2Button.A:
+			return interact()
+		Gen2Button.START:
+			_open_start_menu()
+			return true
+	if Gen2Button.is_direction(button):
+		move_player(Gen2Button.vector(button))
+		return true
+	return false
+
+
+## The A press that clears whatever a running script is waiting on.
+func _advance_script_pause() -> void:
+	if _text_box != null and _text_box.visible:
+		_advance_script_input()
 		return
-	if _world.fishing_busy() and key.keycode in [KEY_SPACE, KEY_Z]:
-		_handle_fishing_result(_world.advance_fishing())
-		accept_event()
+	if StringName(_world.pending_script_input().get("type", &"")) in [&"choice", &"menu"]:
+		_script_prompt = "Host choice required: call choose_script_input(choice)"
+		_refresh_labels()
 		return
-	if _world.script_input_waiting() and key.keycode in [KEY_SPACE, KEY_Z]:
-		if _text_box != null and _text_box.visible:
-			_advance_script_input()
-		elif StringName(_world.pending_script_input().get("type", &"")) in [
-			&"choice", &"menu",
-		]:
-			_script_prompt = "Host choice required: call choose_script_input(choice)"
-			_refresh_labels()
-		elif not _world.pending_runtime_request().is_empty():
-			var pending_request: Dictionary = _world.pending_runtime_request()
-			if StringName(pending_request.get("kind", &"")) == &"audio_requested":
-				var audio_results: Array = _handle_audio_request(pending_request)
-				if not audio_results.is_empty():
-					_show_script_results(audio_results)
-				accept_event()
-				return
-			var pending_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
-			var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
-				_world, {"ok": true}, pending_save,
-				_injected_save == null, _encounter_random
-			)
-			if bool(host_result.get("ok", false)):
-				_show_script_results(host_result.get("results", []))
-			else:
-				_script_prompt = "Host unavailable: %s" % String(
-					host_result.get("reason", "unknown")
-				)
-				_refresh_labels()
-		else:
-			_show_script_results(_world.run_event_queue(true))
-		accept_event()
+	if _world.pending_runtime_request().is_empty():
+		_show_script_results(_world.run_event_queue(true))
 		return
-	if key.keycode in [KEY_SPACE, KEY_Z]:
-		if interact():
-			accept_event()
+	var pending_request: Dictionary = _world.pending_runtime_request()
+	if StringName(pending_request.get("kind", &"")) == &"audio_requested":
+		var audio_results: Array = _handle_audio_request(pending_request)
+		if not audio_results.is_empty():
+			_show_script_results(audio_results)
 		return
-	var direction := Vector2i.ZERO
+	var pending_save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true}, pending_save, _injected_save == null, _encounter_random
+	)
+	if bool(host_result.get("ok", false)):
+		_show_script_results(host_result.get("results", []))
+		return
+	_script_prompt = "Host unavailable: %s" % String(host_result.get("reason", "unknown"))
+	_refresh_labels()
+
+
+## Scaffolding that reaches parts of the world no cartridge control does: the
+## rods, the phone list, the renderer switch and a snapshot write. Debug builds
+## only, so a shipped game offers exactly the eight buttons the hardware had.
+## Every method behind them stays public, which is how the preview tools drive
+## the same paths without a key press.
+func _handle_debug_key(event: InputEvent) -> bool:
+	if not Gen2DebugKeys.enabled():
+		return false
+	var key: InputEventKey = event as InputEventKey
+	if key == null:
+		return false
 	match key.keycode:
-		KEY_UP, KEY_W:
-			direction = Vector2i.UP
-		KEY_DOWN, KEY_S:
-			direction = Vector2i.DOWN
-		KEY_LEFT, KEY_A:
-			direction = Vector2i.LEFT
-		KEY_RIGHT, KEY_D:
-			direction = Vector2i.RIGHT
 		KEY_1:
 			select_fishing_rod(0)
-			accept_event()
-			return
 		KEY_2:
 			select_fishing_rod(1)
-			accept_event()
-			return
 		KEY_3:
 			select_fishing_rod(2)
-			accept_event()
-			return
 		KEY_F:
 			start_fishing()
-			accept_event()
-			return
 		KEY_P:
 			_open_phone_list()
-			accept_event()
-			return
-		KEY_ENTER, KEY_TAB:
-			_open_start_menu()
-			accept_event()
-			return
 		KEY_V:
 			cycle_world_renderer()
-			accept_event()
-			return
 		KEY_F5:
 			var saved: Dictionary = persist_world_snapshot()
 			_script_prompt = "World saved" if bool(saved.get("ok", false)) else "Save failed"
 			_refresh_labels()
-			accept_event()
-			return
 		_:
-			# Everything the screen wants has been claimed above, so what reaches
-			# here is what a renderer may have a use for.
-			if Gen2ModHost.renderer_handles_input(_renderer, key):
-				accept_event()
-			return
-	move_player(direction)
-	accept_event()
+			return false
+	return true
 
 
-## Non-key input the screen never reads, offered to the renderer on the same
-## terms as the leftover keys: a free camera needs pointer and stick motion, and
-## the screen has no opinion about either.
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey or not _renderer_input_free():
-		return
-	if Gen2ModHost.renderer_handles_input(_renderer, event):
-		accept_event()
-
-
-## Whether the overworld itself is idle. The key path reaches the renderer only
-## after the same overlays, pauses and hosts have each refused the event.
+## Whether the overworld itself is idle. An event reaches the renderer only
+## after the same overlays, pauses and hosts have each refused it.
 func _renderer_input_free() -> bool:
 	return _world != null and not _overlay_open() and not _field_move_text \
 		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
@@ -718,7 +738,7 @@ func preview_field_move_use() -> void:
 		return
 	preview_field_move()
 	if _party_host != null:
-		_party_host.handle_key(KEY_SPACE)
+		_party_host.handle_button(Gen2Button.A)
 
 
 ## The same pair for Surf. The scene must be opened on a map where the player
@@ -734,7 +754,7 @@ func preview_surf_use() -> void:
 		return
 	preview_surf()
 	if _party_host != null:
-		_party_host.handle_key(KEY_SPACE)
+		_party_host.handle_button(Gen2Button.A)
 
 
 ## And for Whirlpool, which needs the scene opened facing a COLL_WHIRLPOOL cell:
@@ -749,7 +769,7 @@ func preview_whirlpool_use() -> void:
 		return
 	preview_whirlpool()
 	if _party_host != null:
-		_party_host.handle_key(KEY_SPACE)
+		_party_host.handle_button(Gen2Button.A)
 
 
 ## And for Strength, which unlike the other three needs nothing in front of the
@@ -766,7 +786,7 @@ func preview_strength_use() -> void:
 		return
 	preview_strength()
 	if _party_host != null:
-		_party_host.handle_key(KEY_SPACE)
+		_party_host.handle_button(Gen2Button.A)
 
 
 func _preview_field_move(move: int, badge: int) -> void:
@@ -785,7 +805,7 @@ func _preview_field_move(move: int, badge: int) -> void:
 	_open_embedded_party()
 	if _party_host == null:
 		return
-	_party_host.handle_key(KEY_SPACE)
+	_party_host.handle_button(Gen2Button.A)
 
 
 ## Public screenshot driver for the scene-free party item transaction. It uses a
@@ -830,7 +850,7 @@ func preview_pack_use() -> void:
 	if _world == null or _data == null:
 		return
 	if _start_menu_host != null:
-		_start_menu_host.handle_key(KEY_SPACE)
+		_start_menu_host.handle_button(Gen2Button.A)
 		return
 	var save: Gen2SaveData = _embedded_party_save()
 	if save == null or save.party.is_empty():
@@ -844,8 +864,8 @@ func preview_pack_use() -> void:
 	if _start_menu_host == null:
 		return
 	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_key(KEY_DOWN)
-	_start_menu_host.handle_key(KEY_SPACE)
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	_start_menu_host.handle_button(Gen2Button.A)
 
 
 ## Public screenshot driver for ForgetMove. It fills the first party member's
@@ -860,7 +880,7 @@ func preview_move_forget() -> void:
 	if _world == null or _data == null:
 		return
 	if _start_menu_host != null:
-		_start_menu_host.handle_key(KEY_SPACE)
+		_start_menu_host.handle_button(Gen2Button.A)
 		return
 	var save: Gen2SaveData = _embedded_party_save()
 	if save == null or save.party.is_empty():
@@ -883,13 +903,13 @@ func preview_move_forget() -> void:
 	if _start_menu_host == null:
 		return
 	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_key(KEY_DOWN)
-	_start_menu_host.handle_key(KEY_SPACE)
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	_start_menu_host.handle_button(Gen2Button.A)
 	# The pack opens on the ITEM pocket, and the granted item is in the TM/HM
 	# one. The guard bounds the walk in case no such pocket is built.
 	var guard: int = Gen2WorldPack.POCKET_ORDER.size() + 1
 	while guard > 0 and _previewed_pocket() != Gen2WorldPack.TYPE_TM_HM:
-		_start_menu_host.handle_key(KEY_RIGHT)
+		_start_menu_host.handle_button(Gen2Button.RIGHT)
 		guard -= 1
 
 
@@ -1054,7 +1074,7 @@ func start_fishing(force_encounter: bool = false) -> Dictionary:
 		_script_prompt = "Fishing failed: %s" % String(result.get("reason", "unknown"))
 		_refresh_labels()
 		return result
-	_script_prompt = "Cast %s. Space: wait" % String(result.get("rod_label", "ROD"))
+	_script_prompt = "Cast %s. A: wait" % String(result.get("rod_label", "ROD"))
 	_refresh_labels()
 	return result
 
@@ -1068,7 +1088,7 @@ func _handle_fishing_result(result: Dictionary) -> void:
 		&"fishing_no_bite":
 			_script_prompt = "Nothing was hooked. F: cast again"
 		&"fishing_bite":
-			_script_prompt = "A bite! Space: reel in"
+			_script_prompt = "A bite! Press A to reel in"
 		&"battle_requested":
 			_start_battle_request(result)
 			return
@@ -1386,8 +1406,8 @@ func _play_hall_of_fame_music() -> void:
 
 
 ## Public driver for screenshot tooling and scene tests, mirroring
-## _open_pc_host()'s shape. The Enter/Tab key branch in
-## _unhandled_key_input() is the normal path.
+## _open_pc_host()'s shape. The START branch in _handle_button() is the normal
+## path.
 func _open_start_menu() -> void:
 	if _world == null or _data == null or _overlay_open() or _field_move_text \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
@@ -1624,7 +1644,7 @@ func _show_field_move_text(text: String) -> void:
 	if _text_box != null and _text_box.font != null:
 		_text_box.show_text(text)
 		_text_box.visible = true
-	_script_prompt = "Space/Enter: continue"
+	_script_prompt = "A: continue"
 	_refresh_labels()
 
 
@@ -1771,11 +1791,11 @@ func _show_script_results(results: Array) -> void:
 			if event_type == &"text" and _text_box != null and _text_box.font != null:
 				_text_box.show_text(String(event.get("text", "")))
 				_text_box.visible = true
-				_script_prompt = "Space/Enter: advance text"
+				_script_prompt = "A: advance text"
 			elif event_type == &"button":
 				if _text_box != null:
 					_text_box.visible = true
-				_script_prompt = "Space/Enter: continue script"
+				_script_prompt = "A: continue script"
 			elif event_type in [&"choice", &"menu"]:
 				_open_service_host()
 				break
@@ -1803,7 +1823,7 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) in [
 					&"pokemon_requested", &"trade_requested",
 				]:
-					_script_prompt = "Party transaction: Space to confirm"
+					_script_prompt = "Party transaction: press A to confirm"
 					continue
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
@@ -1819,7 +1839,7 @@ func _show_script_results(results: Array) -> void:
 					if not audio_results.is_empty():
 						_show_script_results(audio_results)
 					break
-				_script_prompt = "Runtime request: %s, press Space to acknowledge" % String(
+				_script_prompt = "Runtime request: %s, press A to acknowledge" % String(
 					request.get("kind", "effect")
 				)
 		elif status == &"recovered":
@@ -2092,7 +2112,7 @@ func _refresh_labels() -> void:
 			ball_labels.append("%s x%d" % [_data.item_name(ball), _world.state.item_quantity(ball)])
 	var balls: String = ", ".join(ball_labels) if not ball_labels.is_empty() else "none"
 	var clock_text: String = "%02d:%02d" % [_clock.hour, _clock.minute] if _clock != null else "--:--"
-	_hint.text = "arrows/WASD move one 16px cell    raw collision %02X" % [
+	_hint.text = "the d-pad moves one 16px cell    raw collision %02X" % [
 		_world.collision_code_at(_world.player_cell),
 	]
 	_hint.text += "    time %s    rods: %s    balls: %s    P: phone    F5: save" % [clock_text, owned, balls]

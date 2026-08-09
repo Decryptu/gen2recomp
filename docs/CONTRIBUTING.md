@@ -142,6 +142,7 @@ the contract and why a renderer must not write world state.
 |---|---|
 | `render/pic_image.gd` | Colour indices plus palette to `Image` |
 | `render/gen2_screen.gd` | 160x144 viewport and integer scaling |
+| `render/game_frame.gd` | Where the screen and the on-screen controller sit |
 | `render/font.gd` | Character codes to glyph tiles |
 | `render/text_layout.gd` | Strings to box lines and pages |
 | `render/text_box.gd` | Bordered text window |
@@ -160,6 +161,41 @@ tile number. Measure with `Gen2Text.encoded_length()`, not `String.length()`:
 apostrophe ligatures and PK/MN take two characters but one glyph. `$7F` is a
 blank below the font and unknown codes are no-ops. Runtime wrapping honors
 explicit newlines because cartridge author-time breaks cannot support mod text.
+
+### Input and controls
+
+Every screen that reads the cartridge's controls speaks one vocabulary. Never
+match a keycode in a screen: match a `Gen2Button`.
+
+| File | Role |
+|---|---|
+| `input/button.gd` | The eight hardware buttons and their actions |
+| `input/input_actions.gd` | Bindings as data, and installing them in the `InputMap` |
+| `input/input_device.gd` | Which device an event came from |
+| `input/touch_layout.gd` | Where the on-screen groups sit, and what a point presses |
+| `input/touch_pad.gd` | The on-screen controller |
+| `input/tap_gesture.gd` | The taps that bring hidden controls back |
+| `input/focus_guard.gd` | The first control a pad lands on |
+| `input/debug_keys.gd` | Whether the development shortcuts are live |
+| `autoload/input_runtime.gd` | The live scheme, the active device, the controller stack |
+
+A screen reads a press with `Gen2Button.pressed_in(event)` and a held direction
+with `Gen2InputRuntime.instance().held_direction()`, polled rather than driven by
+key repeat. An embedded host takes `handle_button(button)`; there is no keycode
+entry point, so a test presses a button rather than a key.
+
+Reach the runtime with `Gen2InputRuntime.instance()`, not the `InputRuntime`
+global: a script handed to `-s` compiles before the tree that owns the autoloads
+exists, so a preview tool naming a screen by type would fail to load it. The
+same reason `Gen2WorldScreen` reaches GameRuntime by path.
+
+A key binds by physical keycode, so a d-pad on WASD stays under the same four
+fingers on a layout that spells them differently; describe one with
+`Gen2InputActions.describe()`, which asks the platform what is printed there.
+
+Anything that is not one of the eight buttons goes behind
+`Gen2DebugKeys.enabled()`, and keeps a public method beside it so the preview
+tools reach the same path without a key press.
 
 ### Battle engine
 
@@ -299,6 +335,8 @@ godot --path . -s res://tools/screenshot.gd -- res://game/render/text_viewer.tsc
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 24 hurt_player 3
 godot --path . -s res://tools/screenshot.gd -- res://game/battle/battle_screen.tscn /tmp/shot.png 40 advance 26
 godot --path . -s res://tools/preview_world_services.gd -- /tmp/world-mart.png
+godot --path . --resolution 480x960 -s res://tools/preview_controls.gd -- /tmp/portrait.png
+godot --path . --resolution 1152x648 -s res://tools/preview_controls.gd -- /tmp/landscape.png
 ```
 
 An optional `<method> <times> [int arg]` drives a scene before capture. Keep

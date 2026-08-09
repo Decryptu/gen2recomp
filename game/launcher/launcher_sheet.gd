@@ -13,6 +13,9 @@ var _theme: Gen2LauncherTheme = null
 var _body: VBoxContainer = null
 var _actions: HBoxContainer = null
 var _card: Gen2LauncherCard = null
+## What had focus before the sheet opened, so closing puts it back rather than
+## stranding a pad with nothing selected.
+var _restore_focus: Control = null
 
 
 static func create(palette: Gen2LauncherTheme, title: String) -> Gen2LauncherSheet:
@@ -77,9 +80,16 @@ func add_action(button: Control) -> void:
 ## Opens over [param host]. The card scales rather than moves, because the
 ## [CenterContainer] holding it owns its position and would undo a slide.
 func open(host: Control) -> void:
+	var viewport: Viewport = host.get_viewport()
+	_restore_focus = viewport.gui_get_focus_owner() if viewport != null else null
 	host.add_child(self)
 	modulate.a = 0.0
 	await get_tree().process_frame
+	# The sheet is modal, so focus goes into it whatever the player is using: a
+	# pad needs it to navigate and a keyboard needs it for the cancel below.
+	var first: Control = Gen2FocusGuard.first_focusable(_card)
+	if first != null:
+		first.grab_focus()
 	_card.pivot_offset = _card.size * 0.5
 	_card.scale = Vector2(0.96, 0.96)
 	var tween: Tween = create_tween()
@@ -91,11 +101,16 @@ func open(host: Control) -> void:
 
 
 func close() -> void:
+	if _restore_focus != null and is_instance_valid(_restore_focus):
+		_restore_focus.grab_focus()
 	closed.emit()
 	queue_free()
 
 
-func _gui_input(event: InputEvent) -> void:
+## Unhandled rather than [method Control._gui_input], which only ever reaches the
+## focused control: the sheet itself never holds focus, so a cancel pressed on a
+## button inside it would have gone nowhere.
+func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		accept_event()
 		close()

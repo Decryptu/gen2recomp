@@ -33,6 +33,7 @@ var _entries: Array[Dictionary] = []
 var _buttons: Dictionary = {}
 var _page_nodes: Dictionary = {}
 var _current: StringName = &""
+var _focus: Gen2FocusGuard = null
 
 
 static func create(palette: Gen2LauncherTheme) -> Gen2LauncherShell:
@@ -96,6 +97,7 @@ func _build() -> void:
 
 	resized.connect(_apply_layout)
 	_apply_layout()
+	_focus = Gen2FocusGuard.attach(self)
 
 
 func _brand() -> HBoxContainer:
@@ -168,6 +170,10 @@ func select(id: StringName) -> void:
 		label.add_theme_color_override(
 			"font_color", theme_palette.accent if key == id else theme_palette.faint
 		)
+	# A page that has just been hidden takes its focus with it, so the new one
+	# needs somewhere for a pad to land.
+	if _focus != null:
+		_focus.refresh.call_deferred()
 	page_selected.emit(id)
 
 

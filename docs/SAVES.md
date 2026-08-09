@@ -69,8 +69,9 @@ discarded.
 Overworld writeback is transactional. A confirmed win saves after result
 messages finish; a loss never overwrites the slot, and the host validates and
 reconstructs the source save party before returning blackout recovery. Continue
-enters the overworld only with a validated snapshot; F5 writes map, player,
-items, currency, events, source engine flags and schedule state through
+enters the overworld only with a validated snapshot; the start menu's SAVE
+writes map, player, items, currency, events, source engine flags and schedule
+state through
 `Gen2SaveStore`, with item and currency references checked against the selected
 cache. Daily engine flags reset when the saved world day changes while story
 flags such as Hall of Fame persist. Saves without a snapshot keep the configured

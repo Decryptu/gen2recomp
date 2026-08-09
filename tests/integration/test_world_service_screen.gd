@@ -114,13 +114,13 @@ func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 	assert_not_null(host)
 	assert_eq(host._title.text, "MART")
 	assert_eq(host.selected_index(), 0)
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.A))
 	assert_eq(_world_screen._world.state.money(), 380)
 	assert_eq(_world_screen._world.state.item_quantity(7), 2)
 	assert_true(host.is_active())
 
-	assert_true(host.handle_key(KEY_DOWN))
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.DOWN))
+	assert_true(host.handle_button(Gen2Button.A))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
@@ -132,14 +132,14 @@ func test_mart_overlay_purchases_the_selected_quantity() -> void:
 
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_true(host.handle_key(KEY_RIGHT))
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.RIGHT))
+	assert_true(host.handle_button(Gen2Button.A))
 	assert_eq(_world_screen._world.state.money(), 260)
 	assert_eq(_world_screen._world.state.item_quantity(7), 3)
 	assert_true(host.is_active())
 
-	assert_true(host.handle_key(KEY_DOWN))
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.DOWN))
+	assert_true(host.handle_button(Gen2Button.A))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
@@ -155,7 +155,7 @@ func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 	assert_not_null(host)
 	assert_eq(host._title.text, "MENU")
 	assert_eq(host.selected_index(), 0)
-	assert_true(host.handle_key(KEY_ESCAPE))
+	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
@@ -177,11 +177,11 @@ func test_two_dimensional_menu_uses_cached_grid_and_default_cursor() -> void:
 	assert_eq(grid.columns, 2)
 	assert_eq(grid.get_child_count(), 4)
 
-	assert_true(host.handle_key(KEY_LEFT))
+	assert_true(host.handle_button(Gen2Button.LEFT))
 	assert_eq(host.selected_index(), 0)
-	assert_true(host.handle_key(KEY_DOWN))
+	assert_true(host.handle_button(Gen2Button.DOWN))
 	assert_eq(host.selected_index(), 2)
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.A))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
@@ -225,7 +225,7 @@ func test_phone_list_shows_registered_numbers_and_can_close() -> void:
 	assert_eq(host._title.text, "PHONE")
 	assert_eq(host._summary.text, "Registered numbers")
 	assert_eq(host.selected_index(), 0)
-	assert_true(host.handle_key(KEY_ESCAPE))
+	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 
@@ -242,7 +242,7 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	await get_tree().process_frame
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_true(host.handle_key(KEY_ENTER))
+	assert_true(host.handle_button(Gen2Button.A))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.phone_ring_active())

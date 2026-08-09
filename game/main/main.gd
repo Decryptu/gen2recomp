@@ -68,7 +68,7 @@ func _build() -> void:
 	_mods.index_requested.connect(_open_index_dialog)
 	_shell.add_page(&"mods", "Mods", &"mods", _mods)
 
-	_settings = Gen2SettingsPage.create(_palette)
+	_settings = Gen2SettingsPage.create(_palette, self)
 	_settings.appearance_changed.connect(_reload_appearance)
 	_shell.add_page(&"settings", "Settings", &"settings", _settings)
 

@@ -100,7 +100,7 @@ func refresh() -> void:
 	await _open_battle()
 	assert_false(_battle_screen.is_ready())
 	# Input must stay inert rather than crash on a renderer that never armed.
-	_battle_screen._unhandled_key_input(InputEventKey.new())
+	_battle_screen._unhandled_input(InputEventKey.new())
 
 
 func test_a_renderer_choosing_the_native_layer_lands_on_the_screens_native_layer() -> void:

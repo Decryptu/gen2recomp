@@ -165,11 +165,12 @@ battle, plus a save editor for party, boxes, bag, flags, position and dex that
 cannot produce a save the game will not load. A new game starts with an empty
 party at the Crystal home spawn with source starting money; Elm's imported lab
 scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
-Continue enters the overworld and F5 saves its map, inventory, event and clock
-snapshot. See [docs/SAVES.md](docs/SAVES.md) for the save and SRAM contract.
+Continue enters the overworld, and the start menu's SAVE writes its map,
+inventory, event and clock snapshot. See [docs/SAVES.md](docs/SAVES.md) for the
+save and SRAM contract.
 
-Settings are split into appearance, application values and the cartridge's own
-OPTION values. The mods page lists each mod with a switch that turns it off
+Settings are split into appearance, application values, controls and the
+cartridge's own OPTION values. The mods page lists each mod with a switch that turns it off
 without uninstalling it. The button beside Play carries re-import, the cache
 folder and cache deletion, and the about page holds the release check, which
 runs only when you ask for it.
@@ -177,14 +178,54 @@ runs only when you ask for it.
 Icons come from [Lucide](https://lucide.dev). See
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
 
-Development scenes:
+## Controls
+
+The games are played with the eight buttons the hardware had. A key, a
+controller and the on-screen buttons all produce the same eight, so nothing in
+the game knows or cares which one you used.
+
+| Button | Keyboard | Controller |
+|---|---|---|
+| Up, Down, Left, Right | Arrows, WASD | D-pad, left stick |
+| A | `Z`, Space | Bottom face button |
+| B | `X`, Escape | Right face button |
+| START | Enter | Start |
+| SELECT | Backspace, Shift | Back |
+
+Keys are bound to positions rather than letters, so WASD stays under the same
+four fingers on a layout that spells them differently; the settings page shows
+each binding as the key actually printed on it. Every button can be rebound
+there, and carries as many keys and controller buttons as you like.
+
+Any controller Godot recognises works without setup, and the launcher is fully
+navigable with one: the focus ring appears as soon as you touch a pad or a key
+and stays out of the way of a mouse.
+
+On a touchscreen the launcher is used directly, with no on-screen buttons over
+it. The games draw a d-pad, A, B, START and SELECT instead, which appear while
+you are using the touchscreen and step aside the moment you press a key or a
+controller. Settings can pin them on, turn them off for a phone with a
+controller attached, and arrange them: drag each group where your thumbs are and
+set the size and opacity, separately for upright and sideways. If you turn them
+off and need them back, tap the game screen three times quickly.
+
+The screen fills whatever window or device it is given, in either orientation.
+Upright puts the game at the top with the buttons in the space underneath;
+sideways centres the game and puts the buttons in the margins either side.
+
+Development scenes and shortcuts:
 
 | Scene | Keys |
 |---|---|
 | `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
-| `game/battle/battle_screen.tscn` | `A` turn, Space events, `W` switch, `R` run, left/right matchup, `S`/`D` damage either side; in wild battles `B` opens the ball selector, left/right changes ball, Space throws |
-| `game/world/world_screen.tscn` | arrows/WASD move, Space or `Z` confirms, `F` fishes while facing water with an owned rod, `P` opens the phone list directly, `Enter`/`Tab` opens the start menu and its Pokegear entry the whole device, `Esc` closes an overlay, `V` cycles world renderers, F5 saves |
+| `game/battle/battle_screen.tscn` | `T` turn, A advances events, `Y` switch, `R` run, `[`/`]` matchup, `G`/`H` damage either side; in wild battles B opens the ball selector, left/right changes ball, A throws |
+| `game/world/world_screen.tscn` | `F` fishes while facing water with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone list directly, `V` cycles world renderers, F5 writes a snapshot |
+
+Everything in that table other than the cartridge's own buttons is debug-build
+only, along with the map and cell readout above and below the screen. A release
+export offers the eight buttons and nothing else; the methods behind each
+shortcut stay public, which is how `tools/preview_*.gd` drives them.
 
 Battle-screen moves are random and a full move set declines the learn offer; use
 `show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`

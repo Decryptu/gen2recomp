@@ -179,15 +179,15 @@ func test_submenu_lists_cut_only_for_a_mon_that_knows_it() -> void:
 	await _open_world()
 	var party: Gen2PartyScreen = await _open_party()
 	assert_not_null(party)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
 	var first: Dictionary = party.submenu_snapshot()
 	assert_true(bool(first["open"]))
 	# GetMonSubmenuItems walks the move slots first, so a field move leads.
 	assert_eq(_labels(first["items"]), ["CUT", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"])
 
-	party.handle_key(KEY_ESCAPE)
-	party.handle_key(KEY_DOWN)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.B)
+	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
 	assert_eq(
 		_labels(party.submenu_snapshot()["items"]),
 		["STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
@@ -210,8 +210,8 @@ func test_choosing_cut_shows_the_message_and_defers_the_block_change() -> void:
 	var world: Gen2WorldAPI = _world_screen._world
 	assert_false(world.can_walk_to(TREE_CELL))
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_null(_world_screen._party_host)
@@ -237,8 +237,8 @@ func test_cut_without_the_badge_reports_the_badge_and_changes_nothing() -> void:
 	await _open_world(false)
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_true(_world_screen._field_move_text)
@@ -252,8 +252,8 @@ func test_cut_facing_nothing_reports_the_source_refusal() -> void:
 	await _open_world()
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "There's nothing to CUT here.")
@@ -265,7 +265,7 @@ func test_cut_facing_nothing_reports_the_source_refusal() -> void:
 func test_submenu_lists_surf_for_a_mon_that_knows_it() -> void:
 	await _open_surf_world()
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
 	assert_eq(
 		_labels(party.submenu_snapshot()["items"]),
 		["SURF", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
@@ -276,8 +276,8 @@ func test_choosing_surf_shows_the_message_and_defers_entering_the_water() -> voi
 	await _open_surf_world()
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_null(_world_screen._party_host)
@@ -301,8 +301,8 @@ func test_stepping_back_onto_land_stops_surfing_through_the_screen() -> void:
 	await _open_surf_world()
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	_world_screen._acknowledge_field_move_text()
 	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_SURF)
@@ -321,8 +321,8 @@ func test_surf_without_the_badge_reports_the_badge_and_changes_nothing() -> void
 	await _open_surf_world(false)
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
@@ -335,8 +335,8 @@ func test_surf_facing_land_reports_the_source_refusal() -> void:
 	await _open_surf_world()
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "You can't SURF here.")
@@ -352,8 +352,8 @@ func test_surf_while_already_surfing_reports_the_source_refusal() -> void:
 	world.player_cell = WATER_CELL
 	world.player_facing = Gen2WorldSprite.FACING_UP
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "You're already SURFING.")
@@ -362,12 +362,12 @@ func test_surf_while_already_surfing_reports_the_source_refusal() -> void:
 func test_cancel_closes_the_submenu_before_the_party_screen() -> void:
 	await _open_world()
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
 	assert_true(bool(party.submenu_snapshot()["open"]))
-	party.handle_key(KEY_ESCAPE)
+	party.handle_button(Gen2Button.B)
 	assert_false(bool(party.submenu_snapshot()["open"]))
 	assert_not_null(_world_screen._party_host)
-	party.handle_key(KEY_ESCAPE)
+	party.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_null(_world_screen._party_host)
 
@@ -381,7 +381,7 @@ func _open_strength_world(badge: bool = true) -> void:
 func test_submenu_lists_strength_for_a_mon_that_knows_it() -> void:
 	await _open_strength_world()
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
 	assert_eq(
 		_labels(party.submenu_snapshot()["items"]),
 		["STRENGTH", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
@@ -396,8 +396,8 @@ func test_choosing_strength_shows_the_message_and_defers_the_flag() -> void:
 	var world: Gen2WorldAPI = _world_screen._world
 	world.player_facing = Gen2WorldSprite.FACING_UP
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_null(_world_screen._party_host)
@@ -415,8 +415,8 @@ func test_strength_without_the_badge_reports_the_badge_and_changes_nothing() -> 
 	await _open_strength_world(false)
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
@@ -427,7 +427,7 @@ func test_strength_without_the_badge_reports_the_badge_and_changes_nothing() -> 
 func test_submenu_lists_whirlpool_for_a_mon_that_knows_it() -> void:
 	await _open_whirlpool_world()
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
 	assert_eq(
 		_labels(party.submenu_snapshot()["items"]),
 		["WHIRLPOOL", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
@@ -438,8 +438,8 @@ func test_choosing_whirlpool_shows_the_message_and_defers_the_block_change() -> 
 	await _open_whirlpool_world()
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_null(_world_screen._party_host)
@@ -460,8 +460,8 @@ func test_whirlpool_without_the_badge_reports_the_badge_and_changes_nothing() ->
 	await _open_whirlpool_world(false)
 	var world: Gen2WorldAPI = _world_screen._world
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "Sorry! A new BADGE is required.")
@@ -476,8 +476,8 @@ func test_whirlpool_facing_nothing_reports_the_generic_refusal() -> void:
 	await _open_whirlpool_world()
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
 	var party: Gen2PartyScreen = await _open_party()
-	party.handle_key(KEY_SPACE)
-	party.handle_key(KEY_SPACE)
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "Can't use that here.")

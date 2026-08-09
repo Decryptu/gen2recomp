@@ -76,9 +76,16 @@ func viewport() -> SubViewport:
 	return _viewport
 
 
-## The largest whole number of window pixels per hardware pixel that still fits.
+## The largest whole number of window pixels per hardware pixel that fits in an
+## area. Public because [Gen2GameFrame] has to know how tall the screen will be
+## before it can decide what is left for the on-screen controller, and two
+## copies of this arithmetic would eventually disagree.
+static func fit_factor(area: Vector2) -> int:
+	return maxi(1, mini(int(area.x) / WIDTH, int(area.y) / HEIGHT))
+
+
 func _fit() -> void:
-	var factor: int = maxi(1, mini(int(size.x) / WIDTH, int(size.y) / HEIGHT))
+	var factor: int = fit_factor(size)
 	var drawn := Vector2(WIDTH * factor, HEIGHT * factor)
 
 	_container.stretch_shrink = factor

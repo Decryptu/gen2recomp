@@ -37,6 +37,10 @@ func _ready() -> void:
 	_save = _save_override if _save_override != null else _resolve_save()
 	_build_ui()
 	_refresh()
+	# Not while embedded in the overworld: the world screen routes buttons here
+	# itself, and a focus ring appearing over the map would be the map's.
+	if not _embedded:
+		Gen2FocusGuard.attach(self)
 
 
 ## Supplies the cache/save context. Embedded overworld use can keep the same
