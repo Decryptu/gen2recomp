@@ -103,8 +103,11 @@ Pokedex/Pokemon/Pokegear gating and the `STATICMENU_WRAP` cursor.
 `pokedex.gd` models `engine/pokedex/pokedex.asm`'s listing: the three orderings
 `Pokedex_OrderMonsByMode` builds, `.FindLastSeen`'s listing end, `.PrintEntry`'s
 per-row decision and `Pokedex_ListingHandleDPadInput`'s cursor and paging walk.
-`pokedex_screen.gd` is its listing, entry and OPTION states; the entry's two
-measurements go through `_PrintNum`'s own blanking rather than a format string.
+It also models `Pokedex_SearchForMons`, whose two type rows wrap differently and
+whose passes filter the listing in place, so two types narrow rather than widen.
+`pokedex_screen.gd` is its listing, entry, OPTION, SEARCH and results states;
+the entry's two measurements go through `_PrintNum`'s own blanking rather than a
+format string.
 `world_options_menu.gd` models `engine/menus/options_menu.asm` over
 [Gen2Options], seven value rows plus CANCEL, and leaves persistence to
 `Gen2OptionsStore`. `trainer_card.gd` and `render/trainer_card_page.gd` are

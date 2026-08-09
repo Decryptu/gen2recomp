@@ -10,14 +10,15 @@ extends Control
 ## tile-accurate listing with. Every rule the screen obeys is [Gen2Pokedex]'s,
 ## which is the source's own.
 ##
-## Three of the source's six states are here: the listing, the entry screen and
-## the OPTION screen. SEARCH, its results and the Unown dex are not, so START on
-## the listing does nothing rather than opening a screen that is not built.
+## Five of the source's six states are here: the listing, the entry screen, the
+## OPTION screen, SEARCH and its results. The Unown dex is not, so the OPTION
+## screen draws `.NoUnownModeArrowCursorData`'s three rows, which is what the
+## cartridge draws while `wUnlockedUnownMode` is clear.
 
 ## Emitted on B from the listing, which is where `DEXSTATE_EXIT` lands.
 signal closed
 
-enum Mode { LIST, ENTRY, OPTION }
+enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS }
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -93,12 +94,14 @@ func handle_button(button: int) -> bool:
 			return _handle_entry(button)
 		Mode.OPTION:
 			return _handle_option(button)
+		Mode.SEARCH:
+			return _handle_search(button)
+		Mode.SEARCH_RESULTS:
+			return _handle_search_results(button)
 	return false
 
 
-## `Pokedex_UpdateMainScreen`. START would open SEARCH, which is not built, so
-## it is answered as handled and does nothing rather than reaching a screen that
-## is not there.
+## `Pokedex_UpdateMainScreen`.
 func _handle_list(button: int) -> bool:
 	match button:
 		Gen2Button.B:
@@ -113,6 +116,7 @@ func _handle_list(button: int) -> bool:
 			_open_option_mode()
 			return true
 		Gen2Button.START:
+			_open_search_mode()
 			return true
 	if _dex.move_listing(button):
 		_render_list()
@@ -180,8 +184,11 @@ func _exit() -> void:
 	closed.emit()
 
 
+## `Pokedex_InitMainScreen`, whose own `ld a, 7` is what puts the listing height
+## back after the search results screen has set it to four.
 func _open_list_mode() -> void:
 	_mode = Mode.LIST
+	_dex.listing_height = Gen2Pokedex.LISTING_HEIGHT
 	_title.text = "#DEX"
 	_footer.text = "D-pad: move    A: entry    SELECT: option    B: close"
 	_status.text = ""
@@ -209,6 +216,120 @@ func _open_option_mode() -> void:
 		if int(_mode_rows[index]["mode"]) == _dex.mode:
 			_option_cursor = index
 	_render_option()
+
+
+## `Pokedex_UpdateSearchScreen`: up and down move the four rows, left and right
+## change a type on the two rows that carry one, A takes the row, and START or B
+## both cancel back to the listing.
+func _handle_search(button: int) -> bool:
+	match button:
+		Gen2Button.B, Gen2Button.START:
+			_open_list_mode()
+			return true
+		Gen2Button.A:
+			_confirm_search_row()
+			return true
+		Gen2Button.UP, Gen2Button.DOWN:
+			var next: int = _dex.search_cursor + (1 if button == Gen2Button.DOWN else -1)
+			_dex.search_cursor = clampi(next, 0, Gen2Pokedex.SEARCH_ROWS.size() - 1)
+			_render_search()
+			return true
+		Gen2Button.LEFT, Gen2Button.RIGHT:
+			if _dex.move_search_type(button):
+				_render_search()
+			return true
+	return false
+
+
+## `.MenuActionJumptable`: A on either type row steps it the way right does, A on
+## BEGIN SEARCH runs the search, and A on CANCEL leaves.
+func _confirm_search_row() -> void:
+	match _dex.search_cursor:
+		Gen2Pokedex.SEARCH_ROW_TYPE_1, Gen2Pokedex.SEARCH_ROW_TYPE_2:
+			_dex.move_search_type(Gen2Button.RIGHT)
+			_render_search()
+		Gen2Pokedex.SEARCH_ROW_BEGIN:
+			if _dex.begin_search() > 0:
+				_open_search_results_mode()
+				return
+			## `.MenuAction_BeginSearch`'s no-result branch redraws the search
+			## screen under its own message rather than leaving it.
+			_render_search()
+			_status.text = Gen2Pokedex.TYPE_NOT_FOUND_TEXT
+			_status.add_theme_color_override("font_color", MUTED)
+		Gen2Pokedex.SEARCH_ROW_CANCEL:
+			_open_list_mode()
+
+
+## `Pokedex_UpdateSearchResultsScreen`: the same listing walk as the main screen
+## over four rows instead of seven, A opens an entry and B goes back to SEARCH.
+func _handle_search_results(button: int) -> bool:
+	match button:
+		Gen2Button.B:
+			_dex.leave_search_results()
+			_open_search_mode()
+			return true
+		Gen2Button.A:
+			if _dex.can_open_entry():
+				_dex.open_entry()
+				_open_entry_mode()
+			return true
+	if _dex.move_listing(button):
+		_render_search_results()
+	return Gen2Button.is_direction(button)
+
+
+## `Pokedex_InitSearchScreen`, which resets both type rows every time.
+##
+## Coming back from the results screen resets them too: `.return_to_search_screen`
+## jumps to DEXSTATE_SEARCH_SCR, and that jumptable entry is this Init rather
+## than its Update, so the search is not remembered.
+func _open_search_mode() -> void:
+	_mode = Mode.SEARCH
+	_dex.open_search()
+	_title.text = "SEARCH"
+	_status.text = ""
+	_footer.text = "D-pad: move    Left/Right: type    A: choose    B: back"
+	_render_search()
+
+
+## `Pokedex_InitSearchResultsScreen`, whose own `ld a, 4` is the shorter listing.
+func _open_search_results_mode() -> void:
+	_mode = Mode.SEARCH_RESULTS
+	_dex.listing_height = Gen2Pokedex.SEARCH_RESULTS_HEIGHT
+	_title.text = "SEARCH RESULTS"
+	_status.text = ""
+	_footer.text = "D-pad: move    A: entry    B: back"
+	_render_search_results()
+
+
+func _render_search() -> void:
+	_summary.text = ""
+	_render_rows(Gen2Pokedex.SEARCH_ROWS, func(row: String) -> String:
+		match row:
+			Gen2Pokedex.SEARCH_ROWS[Gen2Pokedex.SEARCH_ROW_TYPE_1]:
+				return "%s  %s" % [row, _dex.search_type_name(_dex.search_type_1)]
+			Gen2Pokedex.SEARCH_ROWS[Gen2Pokedex.SEARCH_ROW_TYPE_2]:
+				return "%s  %s" % [row, _dex.search_type_name(_dex.search_type_2)]
+		return row
+	, _dex.search_cursor)
+
+
+## `.BottomWindowText` and `Pokedex_PlaceSearchResultsTypeStrings`: the count and
+## the types it was found for sit under the listing.
+func _render_search_results() -> void:
+	var types: String = _dex.search_type_name(_dex.search_type_1)
+	if _dex.search_type_2 != Gen2Pokedex.SEARCH_TYPE_NONE:
+		types += "/%s" % _dex.search_type_name(_dex.search_type_2)
+	_summary.text = "%s    %3d FOUND!" % [types, _dex.search_result_count]
+	_render_rows(_dex.rows(), func(row: Dictionary) -> String:
+		if bool(row["empty"]):
+			return ""
+		var symbol: String = CAUGHT_SYMBOL if bool(row["caught"]) else UNCAUGHT_SYMBOL
+		var number: String = String(row["number"])
+		var prefix: String = "%s " % number if not number.is_empty() else ""
+		return "%s%s%s" % [prefix, symbol, String(row["name"])]
+	)
 
 
 ## The listing, plus the SEEN and OWN totals `Pokedex_DrawMainScreenBG` prints
@@ -249,12 +370,16 @@ func _render_option() -> void:
 	_summary.text = String(_mode_rows[_option_cursor]["description"])
 
 
-func _render_rows(values: Array, label_for: Callable) -> void:
+## [param row_cursor] is the highlighted row; the listing screens pass the
+## dex's own cursor and the two form screens pass theirs.
+func _render_rows(values: Array, label_for: Callable, row_cursor: int = -1) -> void:
 	if _options == null:
 		return
 	for child: Node in _options.get_children():
 		child.queue_free()
-	var cursor: int = _dex.cursor if _mode == Mode.LIST else _option_cursor
+	var cursor: int = row_cursor
+	if cursor < 0:
+		cursor = _option_cursor if _mode == Mode.OPTION else _dex.cursor
 	for index: int in values.size():
 		var label := Label.new()
 		var text: String = label_for.call(values[index])

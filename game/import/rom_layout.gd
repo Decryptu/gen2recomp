@@ -137,7 +137,11 @@ const AUDIO_WAVE_SAMPLE_BYTES: int = 16
 const AUDIO_DRUMKIT_COUNT: int = 6
 const AUDIO_DRUMKIT_SAMPLE_COUNT: int = 13
 const AUDIO_DRUMKIT_BYTES: int = 0x174
-const AUDIO_CRY_COUNT: int = 67
+## `NUM_CRIES`, which is 68 rather than 67: constants/cry_constants.asm runs
+## CRY_NIDORAN_M through CRY_DONPHAN inclusive. The pointer table's own last
+## entry is CRY_DONPHAN and the next three bytes are already the SFX table, so a
+## count of 67 dropped exactly one cry, the one species 232 asks for.
+const AUDIO_CRY_COUNT: int = 68
 
 ## The overworld palette file contains 42 four-colour groups: morning, day,
 ## night and dark outdoor groups, the indoor group, and the two animated water

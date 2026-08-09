@@ -376,3 +376,15 @@ func test_pokedex_tables_land_inside_a_cartridge() -> void:
 				bank * RomFile.BANK_SIZE, 0, RomRegistry.EXPECTED_SIZE - 1,
 				"%s bank %d" % [id, bank]
 			)
+
+
+## constants/cry_constants.asm runs CRY_NIDORAN_M through CRY_DONPHAN
+## inclusive, so NUM_CRIES is 68. A count of 67 dropped CRY_DONPHAN, which is
+## the cry species 232 asks for and the last entry before the SFX table.
+func test_the_cry_table_carries_every_cry_constant() -> void:
+	assert_eq(RomLayout.AUDIO_CRY_COUNT, 68)
+	for id: StringName in RomRegistry.ORDER:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var last: int = int(layout["cry_pointers"]) \
+			+ (RomLayout.AUDIO_CRY_COUNT - 1) * RomLayout.AUDIO_POINTER_SIZE
+		assert_lt(last + RomLayout.AUDIO_POINTER_SIZE, RomRegistry.EXPECTED_SIZE, "%s" % id)

@@ -5,8 +5,8 @@ extends RefCounted
 ##
 ## The dex is the one screen that needs all 251 species: the order tables are
 ## that long and [method Gen2Pokedex.order_by_mode] fills the whole listing, so
-## the battle fixture's short table cannot stand in. Names and entry text are
-## generated rather than published values, since nothing here checks content
+## the battle fixture's short table cannot stand in. Names, types and entry text
+## are generated rather than published values, since nothing here checks content
 ## against a cartridge; [method RomImporter.verify_pokedex] does that.
 
 const GAME_ID: StringName = &"pokedexfixture"
@@ -33,6 +33,17 @@ static func alpha_order() -> Array:
 
 static func species_name(number: int) -> String:
 	return "MON%03d" % number
+
+
+## Species cycle through the search order's own types, so a search for the type
+## at a given search position has a known set of species behind it: species N
+## carries SEARCH_TYPES[(N - 1) % 17] in both slots, except the multiples of ten,
+## which carry FIRE in the second slot so a two-type search has something to
+## find.
+static func types_for(number: int) -> Array:
+	var first: int = Gen2Pokedex.SEARCH_TYPES[(number - 1) % Gen2Pokedex.SEARCH_TYPES.size()]
+	var second: int = RomLayout.TYPE_FIRE if number % 10 == 0 else first
+	return [first, second]
 
 
 static func directory() -> String:
@@ -64,6 +75,7 @@ static func _species() -> Array:
 		out.append({
 			"number": number,
 			"name": species_name(number),
+			"types": types_for(number),
 			"dex": {
 				"category": "CAT%03d" % number,
 				"height": number,

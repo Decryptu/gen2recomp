@@ -13,10 +13,12 @@ extends RefCounted
 ## `.OldMode` counts from 1. Seen and caught come from [Gen2WorldState], which
 ## already keeps both arrays.
 
-## `wDexListingHeight` as the main screen sets it (`ld a, 7`). The search results
-## screen sets its own, which is why this is the listing's height rather than the
-## model's.
+## What each screen writes to `wDexListingHeight`: the main screen `ld a, 7` and
+## the search results screen `ld a, 4`. It is WRAM the source rewrites per
+## screen, so [member listing_height] carries it and these are only the two
+## values written to it.
 const LISTING_HEIGHT: int = 7
+const SEARCH_RESULTS_HEIGHT: int = 4
 
 ## What `.PrintEntry` draws instead of a name for a species that has not been
 ## seen (`.NameNotSeen`).
@@ -58,6 +60,42 @@ const MODE_ROWS: Array[Dictionary] = [
 ## rebuilds the order.
 const CHANGING_MODES_TEXT: String = "Changing modes.\nPlease wait."
 
+## `PokedexTypeSearchConversionTable` (data/types/search_types.asm), which is
+## what turns a search row's 1-based position into a real type number. Its order
+## is the cartridge's own and is not the type numbering: FIRE follows NORMAL
+## because the search screen lists the special types first.
+##
+## Kept as named constants rather than imported, the way the matchup multipliers
+## are: all seventeen entries are types [RomLayout] already names, and the table
+## is identical in both pins.
+const SEARCH_TYPES: Array[int] = [
+	RomLayout.TYPE_NORMAL, RomLayout.TYPE_FIRE, RomLayout.TYPE_WATER,
+	RomLayout.TYPE_GRASS, RomLayout.TYPE_ELECTRIC, RomLayout.TYPE_ICE,
+	RomLayout.TYPE_FIGHTING, RomLayout.TYPE_POISON, RomLayout.TYPE_GROUND,
+	RomLayout.TYPE_FLYING, RomLayout.TYPE_PSYCHIC, RomLayout.TYPE_BUG,
+	RomLayout.TYPE_ROCK, RomLayout.TYPE_GHOST, RomLayout.TYPE_DRAGON,
+	RomLayout.TYPE_DARK, RomLayout.TYPE_STEEL,
+]
+## `NUM_TYPES`, which is [constant SEARCH_TYPES]' own length and the highest
+## value either search row takes.
+const SEARCH_TYPE_MAX: int = 17
+## `PokedexTypeSearchStrings`' first entry, which is the row's "no type chosen"
+## and the only value the second row can hold that the first cannot.
+const SEARCH_TYPE_NONE: int = 0
+const SEARCH_TYPE_NONE_NAME: String = "----"
+
+## `Pokedex_UpdateSearchScreen.ArrowCursorData`'s four rows. The two type rows
+## are the ones left and right change, which is `Pokedex_UpdateSearchMonType`'s
+## own `cp 2` check.
+const SEARCH_ROW_TYPE_1: int = 0
+const SEARCH_ROW_TYPE_2: int = 1
+const SEARCH_ROW_BEGIN: int = 2
+const SEARCH_ROW_CANCEL: int = 3
+const SEARCH_ROWS: Array[String] = ["TYPE1", "TYPE2", "BEGIN SEARCH!!", "CANCEL"]
+
+## `Pokedex_DisplayTypeNotFoundMessage`'s own text.
+const TYPE_NOT_FOUND_TEXT: String = "The specified type\nwas not found."
+
 var mode: int = RomLayout.DEXMODE_NEW
 ## `wDexListingScrollOffset` and `wDexListingCursor`. The selected row is their
 ## sum, which is what `Pokedex_GetSelectedMon` adds.
@@ -68,13 +106,30 @@ var cursor: int = 0
 var listing_end: int = 0
 ## `wPokedexStatus`, the description page the entry screen is showing.
 var page: int = PAGE_1
+## `wDexListingHeight`, how many rows the screen currently on top draws.
+var listing_height: int = LISTING_HEIGHT
 ## `wPrevDexEntry`. Plain WRAM0 rather than saved data, so it survives the dex
 ## closing and reopening within a session and is zero on boot; the caller owns it
 ## for exactly that reason, the way the world screen owns the start menu cursor.
 var prev_entry: int = 0
 
+## `wDexSearchMonType1` and `wDexSearchMonType2`, as 1-based positions in
+## [constant SEARCH_TYPES]. `Pokedex_InitSearchScreen` opens on `NORMAL + 1`,
+## which is position 1, and leaves the second row on
+## [constant SEARCH_TYPE_NONE].
+var search_type_1: int = 1
+var search_type_2: int = SEARCH_TYPE_NONE
+## `wDexArrowCursorPosIndex` while the search screen is up.
+var search_cursor: int = SEARCH_ROW_TYPE_1
+## `wDexSearchResultCount`.
+var search_result_count: int = 0
+
 var _data: GameData = null
 var _state: Gen2WorldState = null
+## `wDexListingScrollOffsetBackup`, `wDexListingCursorBackup` and
+## `wPrevDexEntryBackup`, which `.show_search_results` fills so leaving the
+## results screen puts the main listing back exactly where it was.
+var _listing_backup: Dictionary = {}
 ## `wPokedexOrder`, always [constant RomLayout.SPECIES_COUNT] long. ABC mode
 ## zero-fills its tail, and a zero is what `.PrintEntry` draws nothing for.
 var _order: PackedInt32Array = PackedInt32Array()
@@ -155,13 +210,13 @@ func init_cursor_position() -> void:
 	if prev_entry <= 0 or prev_entry > RomLayout.SPECIES_COUNT:
 		return
 	var index: int = 0
-	if listing_end >= LISTING_HEIGHT + 1:
-		for step: int in listing_end - LISTING_HEIGHT:
+	if listing_end >= listing_height + 1:
+		for step: int in listing_end - listing_height:
 			if _order[index] == prev_entry:
 				return
 			index += 1
 			scroll += 1
-	for step: int in LISTING_HEIGHT:
+	for step: int in listing_height:
 		if index < _order.size() and _order[index] == prev_entry:
 			return
 		index += 1
@@ -186,7 +241,7 @@ func selected_species() -> int:
 ## mode prints one.
 func rows() -> Array:
 	var out: Array = []
-	for index: int in LISTING_HEIGHT:
+	for index: int in listing_height:
 		var at: int = scroll + index
 		var species: int = _order[at] if at >= 0 and at < _order.size() else 0
 		var seen: bool = _has_seen(species)
@@ -223,7 +278,7 @@ func move_listing(button: int) -> bool:
 			return _move_cursor_up()
 		Gen2Button.DOWN:
 			return _move_cursor_down()
-	if LISTING_HEIGHT >= listing_end:
+	if listing_height >= listing_end:
 		return false
 	match button:
 		Gen2Button.LEFT:
@@ -252,7 +307,7 @@ func _move_cursor_down() -> bool:
 	var next: int = cursor + 1
 	if next >= listing_end:
 		return false
-	if next < LISTING_HEIGHT:
+	if next < listing_height:
 		cursor = next
 		return true
 	if next + scroll >= listing_end:
@@ -266,7 +321,7 @@ func _move_cursor_down() -> bool:
 func _move_up_one_page() -> bool:
 	if scroll == 0:
 		return false
-	scroll = scroll - LISTING_HEIGHT if scroll >= LISTING_HEIGHT else 0
+	scroll = scroll - listing_height if scroll >= listing_height else 0
 	return true
 
 
@@ -277,11 +332,11 @@ func _move_up_one_page() -> bool:
 ## exactly as one that runs past `wDexListingEnd` does. The wrap is kept because
 ## it is the comparison, not an accident of it.
 func _move_down_one_page() -> bool:
-	var reach: int = LISTING_HEIGHT * 2 + scroll
+	var reach: int = listing_height * 2 + scroll
 	if reach > 0xFF or reach >= listing_end:
-		scroll = listing_end - LISTING_HEIGHT
+		scroll = listing_end - listing_height
 	else:
-		scroll += LISTING_HEIGHT
+		scroll += listing_height
 	return true
 
 
@@ -424,6 +479,117 @@ func change_mode(next_mode: int) -> bool:
 	cursor = 0
 	init_cursor_position()
 	return true
+
+
+## `Pokedex_InitSearchScreen`, which resets both rows every time the screen is
+## opened rather than remembering the last search.
+func open_search() -> void:
+	search_type_1 = 1
+	search_type_2 = SEARCH_TYPE_NONE
+	search_cursor = SEARCH_ROW_TYPE_1
+
+
+## What `Pokedex_PlaceTypeString` prints for a search row: the imported type name
+## for a chosen type, and `PokedexTypeSearchStrings`' first entry for the second
+## row's empty value. The strings table is the type names padded to a fixed
+## width, so the name itself is what a row says.
+func search_type_name(value: int) -> String:
+	if value <= SEARCH_TYPE_NONE or value > SEARCH_TYPES.size():
+		return SEARCH_TYPE_NONE_NAME
+	return _data.type_name(SEARCH_TYPES[value - 1]) if _data != null else ""
+
+
+## `Pokedex_UpdateSearchMonType`, which reads left and right on the two type rows
+## only and answers whether the value changed.
+##
+## The two rows wrap differently, and deliberately: the first row runs 1 to
+## NUM_TYPES and can never be empty, while the second wraps through
+## [constant SEARCH_TYPE_NONE] as well, which is the only way to search on one
+## type after choosing two.
+func move_search_type(button: int) -> bool:
+	if search_cursor > SEARCH_ROW_TYPE_2:
+		return false
+	match button:
+		Gen2Button.RIGHT:
+			_step_search_type(1)
+			return true
+		Gen2Button.LEFT:
+			_step_search_type(-1)
+			return true
+	return false
+
+
+func _step_search_type(delta: int) -> void:
+	var first: bool = search_cursor == SEARCH_ROW_TYPE_1
+	var value: int = search_type_1 if first else search_type_2
+	var lowest: int = 1 if first else SEARCH_TYPE_NONE
+	if delta > 0:
+		value = lowest if value >= SEARCH_TYPE_MAX else value + 1
+	else:
+		value = SEARCH_TYPE_MAX if value <= lowest else value - 1
+	if first:
+		search_type_1 = value
+	else:
+		search_type_2 = value
+
+
+## `Pokedex_SearchForMons` plus `.MenuAction_BeginSearch`'s answer to it.
+##
+## Each chosen type filters the listing in place and the second row is applied
+## first, so choosing two types finds the species carrying both rather than
+## either. A species has to have been *caught*, not merely seen: `.Search`
+## checks `Pokedex_CheckCaught`.
+##
+## Answers the number of results. Zero leaves the listing rebuilt by mode, which
+## is what `.MenuAction_BeginSearch` does before showing its own not-found text;
+## anything else moves the listing onto the results and backs up what it
+## replaced.
+func begin_search() -> int:
+	search_result_count = 0
+	if search_type_2 != SEARCH_TYPE_NONE:
+		_filter_by_type(search_type_2)
+	if search_type_1 != SEARCH_TYPE_NONE:
+		_filter_by_type(search_type_1)
+	if search_result_count == 0:
+		order_by_mode()
+		return 0
+	_listing_backup = {"scroll": scroll, "cursor": cursor, "prev_entry": prev_entry}
+	listing_end = search_result_count
+	scroll = 0
+	cursor = 0
+	return search_result_count
+
+
+## One `.Search` pass: the order is rewritten from its own front, keeping the
+## caught species that carry [param value]'s type in either slot and zero-filling
+## what is left behind.
+func _filter_by_type(value: int) -> void:
+	var wanted: int = SEARCH_TYPES[value - 1]
+	var kept: int = 0
+	for index: int in _order.size():
+		var species: int = _order[index]
+		if species == 0 or not _has_caught(species):
+			continue
+		var types: Array = _data.species(species).get("types", []) if _data != null else []
+		if types.size() < 2 or (int(types[0]) != wanted and int(types[1]) != wanted):
+			continue
+		_order[kept] = species
+		kept += 1
+	for index: int in range(kept, _order.size()):
+		_order[index] = 0
+	search_result_count = kept
+
+
+## `.return_to_search_screen`: the three backups go back and the listing is then
+## rebuilt by mode, so the search screen is reached with the main listing exactly
+## as it was. `wDexListingHeight` is not put back here, because the source never
+## does: each screen's own Init writes it.
+func leave_search_results() -> void:
+	scroll = int(_listing_backup.get("scroll", 0))
+	cursor = int(_listing_backup.get("cursor", 0))
+	prev_entry = int(_listing_backup.get("prev_entry", 0))
+	_listing_backup = {}
+	order_by_mode()
 
 
 func _has_seen(species: int) -> bool:

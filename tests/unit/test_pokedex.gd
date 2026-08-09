@@ -296,3 +296,133 @@ func test_the_screen_counts_seen_and_owned() -> void:
 	var dex: Gen2Pokedex = _dex([1, 2, 3], [1])
 	assert_eq(dex.seen_count(), 3)
 	assert_eq(dex.caught_count(), 1)
+
+
+## `Pokedex_InitSearchScreen` opens on NORMAL with the second row empty, and
+## does so every time rather than remembering the last search.
+func test_the_search_screen_opens_on_normal_with_no_second_type() -> void:
+	var dex: Gen2Pokedex = _dex([1])
+	dex.search_type_1 = 9
+	dex.search_type_2 = 4
+	dex.open_search()
+	assert_eq(dex.search_type_1, 1)
+	assert_eq(dex.search_type_2, Gen2Pokedex.SEARCH_TYPE_NONE)
+	assert_eq(dex.search_cursor, Gen2Pokedex.SEARCH_ROW_TYPE_1)
+
+
+## `PokedexTypeSearchConversionTable`'s order is the search screen's, not the
+## type numbering: FIRE follows NORMAL.
+func test_the_search_order_is_the_conversion_tables_own() -> void:
+	assert_eq(Gen2Pokedex.SEARCH_TYPES.size(), Gen2Pokedex.SEARCH_TYPE_MAX)
+	assert_eq(Gen2Pokedex.SEARCH_TYPES[0], RomLayout.TYPE_NORMAL)
+	assert_eq(Gen2Pokedex.SEARCH_TYPES[1], RomLayout.TYPE_FIRE)
+	assert_eq(Gen2Pokedex.SEARCH_TYPES[Gen2Pokedex.SEARCH_TYPE_MAX - 1], RomLayout.TYPE_STEEL)
+
+
+## `Pokedex_UpdateSearchMonType` reads left and right on the two type rows only.
+func test_the_type_rows_are_the_only_ones_left_and_right_change() -> void:
+	var dex: Gen2Pokedex = _dex([1])
+	dex.search_cursor = Gen2Pokedex.SEARCH_ROW_BEGIN
+	assert_false(dex.move_search_type(Gen2Button.RIGHT))
+	dex.search_cursor = Gen2Pokedex.SEARCH_ROW_TYPE_1
+	assert_true(dex.move_search_type(Gen2Button.RIGHT))
+	assert_eq(dex.search_type_1, 2)
+
+
+## The two rows wrap differently: the first never empties, and the second wraps
+## through the empty value, which is the only way back to a one-type search.
+func test_the_first_row_never_empties_and_the_second_wraps_through_empty() -> void:
+	var dex: Gen2Pokedex = _dex([1])
+	dex.search_cursor = Gen2Pokedex.SEARCH_ROW_TYPE_1
+	dex.move_search_type(Gen2Button.LEFT)
+	assert_eq(dex.search_type_1, Gen2Pokedex.SEARCH_TYPE_MAX, "1 wraps to the last type")
+	dex.move_search_type(Gen2Button.RIGHT)
+	assert_eq(dex.search_type_1, 1, "and back round to the first, never to none")
+
+	dex.search_cursor = Gen2Pokedex.SEARCH_ROW_TYPE_2
+	assert_eq(dex.search_type_2, Gen2Pokedex.SEARCH_TYPE_NONE)
+	dex.move_search_type(Gen2Button.LEFT)
+	assert_eq(dex.search_type_2, Gen2Pokedex.SEARCH_TYPE_MAX)
+	dex.move_search_type(Gen2Button.RIGHT)
+	assert_eq(dex.search_type_2, Gen2Pokedex.SEARCH_TYPE_NONE, "the second row can empty again")
+
+
+## A row prints the imported type name, and the empty value prints
+## PokedexTypeSearchStrings' own first entry.
+func test_a_search_row_names_its_type() -> void:
+	var dex: Gen2Pokedex = _dex([1])
+	assert_eq(dex.search_type_name(Gen2Pokedex.SEARCH_TYPE_NONE), Gen2Pokedex.SEARCH_TYPE_NONE_NAME)
+	assert_eq(dex.search_type_name(1), _data.type_name(RomLayout.TYPE_NORMAL))
+
+
+## `.Search` checks Pokedex_CheckCaught, so a species that has only been seen is
+## not a result.
+func test_a_search_finds_caught_species_only() -> void:
+	# Species 1 and 18 are both the fixture's first search type; only 1 is caught.
+	var dex: Gen2Pokedex = _dex([1, 18], [1], RomLayout.DEXMODE_OLD)
+	dex.search_type_1 = 1
+	assert_eq(dex.begin_search(), 1)
+	assert_eq(dex.rows()[0]["species"], 1)
+
+
+## Two chosen types filter one after the other, so the result carries both.
+func test_two_types_narrow_the_search_rather_than_widening_it() -> void:
+	var caught: Array = []
+	for number: int in range(1, 41):
+		caught.append(number)
+	var dex: Gen2Pokedex = _dex(caught, caught, RomLayout.DEXMODE_OLD)
+	# Species 20 is the fixture's third search type with FIRE second; species 3
+	# is that same first type without it.
+	dex.search_type_1 = 3
+	var one_type: int = dex.begin_search()
+	dex.leave_search_results()
+
+	dex.search_type_1 = 3
+	dex.search_type_2 = 2
+	var two_types: int = dex.begin_search()
+	assert_lt(two_types, one_type, "the second type narrows the result")
+	assert_eq(dex.rows()[0]["species"], 20)
+
+
+## A search that finds nothing rebuilds the listing by mode rather than leaving
+## it filtered, which is what `.MenuAction_BeginSearch` does before its message.
+func test_a_search_with_no_results_leaves_the_listing_whole() -> void:
+	var dex: Gen2Pokedex = _dex([1], [], RomLayout.DEXMODE_OLD)
+	dex.search_type_1 = 1
+	assert_eq(dex.begin_search(), 0)
+	assert_eq(dex.rows()[0]["species"], 1, "the listing is the mode's own again")
+	assert_eq(dex.listing_end, 1)
+
+
+## `.show_search_results` backs the listing up and `.return_to_search_screen`
+## puts it back.
+func test_leaving_the_results_restores_the_listing_exactly() -> void:
+	var caught: Array = []
+	for number: int in range(1, 41):
+		caught.append(number)
+	var dex: Gen2Pokedex = _dex(caught, caught, RomLayout.DEXMODE_OLD)
+	dex.scroll = 12
+	dex.cursor = 3
+	dex.prev_entry = 15
+	dex.search_type_1 = 1
+	assert_gt(dex.begin_search(), 0)
+	assert_eq(dex.scroll, 0, "the results open at the top")
+	assert_eq(dex.cursor, 0)
+
+	dex.leave_search_results()
+	assert_eq(dex.scroll, 12)
+	assert_eq(dex.cursor, 3)
+	assert_eq(dex.prev_entry, 15)
+	assert_eq(dex.listing_end, 40, "and the listing is the mode's own again")
+
+
+## The results screen draws four rows rather than seven (`ld a, 4`).
+func test_the_results_listing_is_four_rows() -> void:
+	var caught: Array = []
+	for number: int in range(1, 41):
+		caught.append(number)
+	var dex: Gen2Pokedex = _dex(caught, caught, RomLayout.DEXMODE_OLD)
+	dex.search_type_1 = 1
+	dex.begin_search()
+	dex.listing_height = Gen2Pokedex.SEARCH_RESULTS_HEIGHT
+	assert_eq(dex.rows().size(), 4)
