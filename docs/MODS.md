@@ -303,15 +303,18 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 
 `view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
 `enemy_level`, `player_level`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
-`player_max_hp` and `exp_fraction`: plain values read out of a resolved battle
+`player_max_hp` and `exp_pixels`: plain values read out of a resolved battle
 event, never the battle engine itself, the same rule `Gen2BattleScreen`'s own
-setters already followed.
+setters already followed. `exp_pixels` is a count out of 64, which is
+`PlaceExpBar`'s own unit; the exp bar is never a ratio, because `CalcExpBar` has
+already done the division and rounded it the cartridge's way.
 
-The two HP values are the *drawn* ones, not the committed ones: a hit drains the
-bar over roughly a second the way the cartridge does, and `set_view` is called
-again on every step of that drain. A renderer that wants the bar to move needs
-no work; one that wants the final number should wait for the drain to end rather
-than reading the view, since mid-drain it is deliberately not the real HP.
+The two HP values and `exp_pixels` are the *drawn* ones, not the committed ones:
+a hit drains the bar over roughly a second the way the cartridge does, an award
+fills the exp bar over one, and `set_view` is called again on every step of
+either. A renderer that wants a bar to move needs no work; one that wants the
+final number should wait for the animation to end rather than reading the view,
+since mid-animation it is deliberately not the real value.
 
 Registration uses the same refusal rules as a world renderer, and shares both
 optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`

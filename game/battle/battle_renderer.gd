@@ -126,7 +126,7 @@ func _draw_panels() -> void:
 	_show_layer(_player_bar, player, _hp_palette(player_hp, player_max_hp))
 
 	var gained: PackedByteArray = _new_buffer()
-	_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, float(_view.get("exp_fraction", 0.0)))
+	_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, int(_view.get("exp_pixels", 0)))
 	_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
 
 
