@@ -87,6 +87,25 @@ func test_full_paralysis_is_about_a_quarter_of_the_time() -> void:
 	assert_between(stopped, 400, 600, "64 in 256, which is a quarter")
 
 
+func test_thawing_is_about_a_tenth_of_the_time() -> void:
+	var thawed: int = 0
+	for _roll: int in 2000:
+		if Gen2Status.rolls_thaw(_rng):
+			thawed += 1
+	assert_between(thawed, 130, 260, "25 in 256, just under a tenth")
+
+
+func test_the_thaw_chance_is_the_truncated_percent_macro() -> void:
+	# `cp 10 percent`, and `percent` is `* $ff / 100` (macros/data.asm): 2550/100
+	# truncates to 25. So the roll is 25 out of 256, a shade under a tenth rather
+	# than the 26 a rounded tenth of the range would give.
+	assert_eq(Gen2Status.THAW_CHANCE, 25)
+	assert_lt(
+		float(Gen2Status.THAW_CHANCE) / Gen2Status.CHANCE_RANGE, 0.1,
+		"under a tenth, not over"
+	)
+
+
 func test_the_name_of_a_status_is_what_is_on_it() -> void:
 	assert_eq(Gen2Status.name_of(Gen2Status.BURN), &"burn")
 	assert_eq(Gen2Status.name_of(Gen2Status.POISON), &"poison")

@@ -906,17 +906,33 @@ static func _effect_chance(turn: Gen2Turn) -> void:
 ## One status at a time: a Pokémon that already has something on its byte is
 ## refused rather than added to, and so is one whose type makes it immune. A
 ## sleep is rolled for how long it lasts; the rest are a flag.
+##
+## The checks are in the four `*Target` commands' own order, which every one of
+## them shares: the target's existing status, the weather, its type, and only
+## then `wEffectFailed`. Ordering `wEffectFailed` last is not cosmetic, because
+## the first step is the one that does something besides refuse: a burn whose
+## roll failed still reaches `Defrost`.
 static func _status_target(turn: Gen2Turn, flag: int) -> void:
-	if turn.failed_chance:
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.is_fainted():
 		return
 
-	var defender: Gen2BattleMon = turn.defender()
-	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
+	if Gen2Status.is_afflicted(defender.status):
+		# `BattleCommand_BurnTarget` is the one that does not simply return here:
+		# its `jp nz, Defrost` thaws a frozen target instead.
+		if flag == Gen2Status.BURN:
+			_defrost(turn, defender)
 		return
 
 	# `BattleCommand_FreezeTarget` refuses outright in sun. It is the only one of
 	# the five statuses the weather has anything to say about.
 	if flag == Gen2Status.FREEZE and turn.battle.weather == Gen2Weather.SUN:
+		return
+
+	if _status_type_refuses(turn, flag):
+		return
+
+	if turn.failed_chance:
 		return
 
 	if _status_move_animates(turn, flag):
@@ -946,6 +962,55 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 	# for the end of the turn.
 	turn.battle.use_status_berry(turn.target, turn.events)
 
+	# `BattleCommand_FreezeTarget`'s own tail, and behind the berry the way the
+	# source puts it behind `UseHeldStatusHealingItem`'s `ret nz`: a freeze a
+	# berry has already cured never sets the flag, so it does not stop a thaw
+	# that is no longer needed.
+	if flag == Gen2Status.FREEZE \
+		and Gen2Status.has(defender.status, Gen2Status.FREEZE):
+		turn.battle.mark_just_got_frozen(turn.target)
+
+
+## Whether the target's own type refuses this status, which two of the five ask
+## and three do not.
+##
+## Poison asks `CheckIfTargetIsPoisonType`, which compares the target's two types
+## against POISON itself rather than against the move's: a Poison-type is refused
+## whatever poisons it. Burn and freeze ask `CheckMoveTypeMatchesTarget`, which
+## compares the *move's* type against the target's two, so a Fire-type shrugs off
+## a Fire-type burn and an Ice-type an Ice-type freeze. Its `.normal` branch
+## returns non-zero without comparing anything, so a Normal-type move matches
+## nobody and Tri Attack can burn and freeze anything.
+##
+## Sleep and paralysis ask neither, which is why a Ground-type is paralysed by
+## Body Slam and an Electric-type by Thunder Wave: the type immunities those two
+## statuses have are a later generation's.
+static func _status_type_refuses(turn: Gen2Turn, flag: int) -> bool:
+	var types: Array = turn.defender().types()
+	if flag == Gen2Status.POISON:
+		return types.has(RomLayout.TYPE_POISON)
+	if flag != Gen2Status.BURN and flag != Gen2Status.FREEZE:
+		return false
+
+	var move_type: int = int(turn.move.get("type", RomLayout.TYPE_NORMAL))
+	if move_type == RomLayout.TYPE_NORMAL:
+		return false
+	return types.has(move_type)
+
+
+## `Defrost`, which `BattleCommand_BurnTarget` jumps to instead of returning when
+## the target already carries a status. Only a freeze is cleared; any other
+## status reaches its own `ret z` and stays.
+##
+## So a Fire-type move with a burn behind it thaws whoever it hits, and it does
+## so before `wEffectFailed` is read, which means the burn's own roll failing
+## does not stop the thaw.
+static func _defrost(turn: Gen2Turn, defender: Gen2BattleMon) -> void:
+	if not Gen2Status.has(defender.status, Gen2Status.FREEZE):
+		return
+	defender.status = Gen2Status.NONE
+	turn.emit(Gen2Battle.THAWED, {"side": turn.target})
+
 
 ## Poisons the target the way [constant POISON_TARGET] does, and starts the
 ## counter that makes it Toxic rather than an ordinary poison: see
@@ -957,6 +1022,12 @@ static func _toxic_target(turn: Gen2Turn) -> void:
 
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
+		return
+
+	# Toxic is `BattleCommand_Poison` with a different branch at the end, so it
+	# passes that command's own `CheckIfTargetIsPoisonType` on the way in: a
+	# Poison-type is no more badly poisoned than ordinarily poisoned.
+	if _status_type_refuses(turn, Gen2Status.POISON):
 		return
 
 	# `BattleCommand_Poison`'s `.toxic` branch reaches the same `.apply_poison`,

@@ -46,6 +46,10 @@ const OHKO: StringName = &"ohko"
 ## [code]&"recharge"[/code].
 const CANNOT_MOVE: StringName = &"cannot_move"
 const WOKE_UP: StringName = &"woke_up"
+## A freeze cleared, from any of the three places one is. `side` is whoever
+## thawed, not whoever acted: the user through a Flame Wheel or Sacred Fire, the
+## target through `BattleCommand_BurnTarget`'s `Defrost`, or either through
+## `HandleDefrost`'s end-of-turn roll.
 const THAWED: StringName = &"thawed"
 ## A status put on a Pokémon, and a slice taken off by one it already had.
 const STATUS_INFLICTED: StringName = &"status_inflicted"
@@ -334,6 +338,13 @@ var player_used_moves: Array[int] = []
 ## its low bit from whatever the last hit left.
 var battle_anim_param: int = 0
 
+## `wPlayerJustGotFrozen` and `wEnemyJustGotFrozen`, keyed by side: whether this
+## side was frozen during the turn now ending. `HandleDefrost` refuses to thaw
+## one that was, so a freeze always costs its target at least the turn it landed
+## on. Cleared at the top of every turn, the way `BattleTurn.loop` clears both
+## bytes before either side chooses.
+var _just_got_frozen: Dictionary = {PLAYER: false, ENEMY: false}
+
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
 var _fled: bool = false
@@ -448,6 +459,12 @@ func mon(side: int) -> Gen2BattleMon:
 
 func opponent_of(side: int) -> int:
 	return ENEMY if side == PLAYER else PLAYER
+
+
+## `BattleCommand_FreezeTarget`'s own tail, which writes the flag on the side it
+## just froze so [method _tick_defrost] leaves that one alone this turn.
+func mark_just_got_frozen(side: int) -> void:
+	_just_got_frozen[side] = true
 
 
 ## Clears the damage that Counter and Mirror Coat are allowed to remember.
@@ -755,6 +772,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		return events
 
 	reset_damage_taken()
+	_just_got_frozen = {PLAYER: false, ENEMY: false}
 
 	if _is_run(player_action):
 		var attempt: Dictionary = run_odds()
@@ -955,18 +973,45 @@ func _tick_wrap(events: Array) -> void:
 ##
 ## The three do not agree on an order. The first two are `SetPlayerTurn` then
 ## `SetEnemyTurn` reading `GetUserItem`, so the player is handled first; the
-## third is the same two calls reading `GetOpponentItem`, so the enemy is. The
-## two skipped between them, `HandleDefrost` and `HandleSafeguard`/`HandleScreens`,
-## are not item effects.
+## third is the same two calls reading `GetOpponentItem`, so the enemy is.
+## `HandleDefrost` runs between the second and the third and is not an item
+## effect at all; `HandleSafeguard` and `HandleScreens` sit behind it and are
+## still out, since neither has a screens byte to read.
 func _tick_held_items(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		_use_leftovers(side, events)
 	for side: int in [PLAYER, ENEMY]:
 		_use_pp_berry(side, events)
+	_tick_defrost(events)
 	for side: int in [ENEMY, PLAYER]:
 		use_hp_berry(side, events)
 		use_status_berry(side, events)
 		use_confusion_berry(side, events)
+
+
+## `HandleDefrost`: each frozen side thaws on its own roll at the end of a turn,
+## which is the only thing that makes a Generation 2 freeze temporary. Without
+## it a freeze lasts until a Flame Wheel, a Sacred Fire or an item, which is
+## Generation 1's rule.
+##
+## Player first, then enemy: the branch that reverses them is the
+## `USING_EXTERNAL_CLOCK` one, and this project has no link play. Nothing is
+## rolled for a side that is not frozen, since `bit FRZ` comes before
+## `BattleRandom`, so a battle with no freeze in it draws no randomness here.
+func _tick_defrost(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		var current: Gen2BattleMon = mon(side)
+		if not Gen2Status.has(current.status, Gen2Status.FREEZE):
+			continue
+		if bool(_just_got_frozen[side]):
+			continue
+		if not Gen2Status.rolls_thaw(rng):
+			continue
+		# `xor a / ld [wBattleMonStatus], a` clears the whole byte rather than
+		# the bit, which is the same thing: a freeze is never on it with anything
+		# else.
+		current.status = Gen2Status.NONE
+		events.append({"type": THAWED, "side": side})
 
 
 ## `HandleLeftovers`: a sixteenth back every turn, and nothing at all on a
