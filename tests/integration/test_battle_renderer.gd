@@ -32,6 +32,16 @@ func _open_battle() -> void:
 	await get_tree().process_frame
 
 
+## `BattleIntroSlidingPics` runs before `BattleStartMessage`, so a battle says
+## and does nothing until the pics are in place. In play the screen's own frames
+## spend that; a test driving events without it would drive them into the slide.
+func _settle_intro() -> void:
+	var guard: int = 4000
+	while _battle_screen.intro_running() and guard > 0:
+		_battle_screen.advance_frame()
+		guard -= 1
+
+
 func _stub_script(body: String) -> GDScript:
 	var script := GDScript.new()
 	script.source_code = body
@@ -134,6 +144,7 @@ func uses_hardware_viewport() -> bool:
 func test_a_hit_drains_the_bar_before_it_says_what_the_hit_was() -> void:
 	await _open_battle()
 	_battle_screen.show_matchup(16, 155, 7, 9)
+	_settle_intro()
 	_battle_screen.set_hp(48, 48, 40, 40)
 
 	_battle_screen._pending = [{
@@ -182,6 +193,7 @@ func test_a_new_pokemon_does_not_animate_its_bar_up() -> void:
 func test_experience_says_its_line_first_and_the_level_line_after_the_bar() -> void:
 	await _open_battle()
 	_battle_screen.show_matchup(16, 155, 7, 9)
+	_settle_intro()
 
 	var mon: Gen2BattleMon = _battle_screen._battle.player
 	var rate: int = mon.growth_rate()
@@ -266,3 +278,55 @@ func test_a_benched_gainer_animates_no_bar() -> void:
 		"species": mon.species, "amount": 40, "exp": mon.exp, "exp_share": true,
 	})
 	assert_false(_battle_screen.bars_animating())
+
+
+## `InitBattleDisplay` runs `BattleIntroSlidingPics` and only then does
+## `BattleStartMessage` say anything, so a battle opens on an empty box with the
+## background sliding, and the player's back pic is not on the map at all until
+## `PlaceGraphic` puts it there after the slide.
+func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	_battle_screen.show_message("Wild PIDGEY appeared!")
+
+	assert_true(_battle_screen.intro_running())
+	assert_eq(String(_battle_screen.battle_snapshot()["message"]), "", "the box is empty")
+
+	var view: Dictionary = _battle_screen._renderer._view
+	assert_false(bool(view["player_pic_visible"]), "the back pic is not placed yet")
+	var offsets: PackedInt32Array = PackedInt32Array(view["raster_scx"])
+	assert_eq(offsets.size(), Gen2Screen.HEIGHT)
+	assert_ne(offsets[0], 0, "and the background is somewhere else entirely")
+
+	# The slide is a run of unconditional `DelayFrame`s with nothing reading a
+	# button, so a press does nothing at all.
+	_battle_screen.advance()
+	assert_true(_battle_screen.intro_running())
+
+	_settle_intro()
+	assert_eq(
+		String(_battle_screen.battle_snapshot()["message"]), "Wild PIDGEY appeared!",
+		"the start message waited for the slide"
+	)
+	var settled: Dictionary = _battle_screen._renderer._view
+	assert_true(bool(settled["player_pic_visible"]))
+	assert_true(PackedInt32Array(settled["raster_scx"]).is_empty(), "and nothing is scrolled")
+
+
+## The text box is drawn into the background plane like everything else, so
+## Gold and Silver's lead frame, which puts the whole screen at the starting
+## offset, takes the box with it.
+func test_the_text_box_is_scrolled_with_the_rest_of_the_background() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+
+	var box: Gen2TextBox = _battle_screen._box
+	assert_eq(box.raster_scx.size(), box.rows * Gen2Font.TILE)
+	var offsets: PackedInt32Array = PackedInt32Array(
+		_battle_screen._renderer._view["raster_scx"]
+	)
+	var top: int = Gen2TextBox.STANDARD_TOP * Gen2Font.TILE
+	assert_eq(box.raster_scx[0], offsets[top], "the box takes its own rows of the scroll")
+
+	_settle_intro()
+	assert_true(box.raster_scx.is_empty())

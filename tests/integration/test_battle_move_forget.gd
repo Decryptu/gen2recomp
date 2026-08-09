@@ -63,12 +63,13 @@ func _open_with_full_moveset(third_move: int = BattleFixture.THUNDERBOLT) -> voi
 ## Presses through every queued event until the offer opens, which is what a
 ## player pressing A does.
 ## A draining HP bar swallows a press, the way `AnimateHPBar`'s own loop does,
-## so the bar is walked to its end before the next one. In play the screen's
-## frames do this; a test that pressed without it would stall on the first hit.
+## and so does the opening slide, so both are walked to their end before the
+## next press. In play the screen's frames do this; a test that pressed without
+## it would stall on the intro and then on the first hit.
 func _settle_bars() -> void:
 	var guard: int = 4000
-	while _screen.bars_animating() and guard > 0:
-		_screen.advance_bars()
+	while _screen.frames_running() and guard > 0:
+		_screen.advance_frame()
 		guard -= 1
 
 

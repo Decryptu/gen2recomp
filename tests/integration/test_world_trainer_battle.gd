@@ -66,10 +66,20 @@ func _trigger_trainer() -> void:
 	assert_not_null(_battle_host())
 
 
+## The battle overlay, with its opening slide walked to the end.
+##
+## `BattleIntroSlidingPics` runs before `BattleStartMessage`, so a battle says
+## nothing until the pics are in place. In play the screen's own frames spend
+## that; a test that read the box without it would read an empty one.
 func _battle_host() -> Gen2BattleScreen:
 	for child: Node in _world_screen.get_children():
 		if child is Gen2BattleScreen:
-			return child as Gen2BattleScreen
+			var host: Gen2BattleScreen = child as Gen2BattleScreen
+			var guard: int = 4000
+			while host.frames_running() and guard > 0:
+				host.advance_frame()
+				guard -= 1
+			return host
 	return null
 
 

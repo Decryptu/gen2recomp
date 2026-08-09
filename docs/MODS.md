@@ -303,11 +303,24 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 
 `view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
 `enemy_level`, `player_level`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
-`player_max_hp` and `exp_pixels`: plain values read out of a resolved battle
-event, never the battle engine itself, the same rule `Gen2BattleScreen`'s own
-setters already followed. `exp_pixels` is a count out of 64, which is
-`PlaceExpBar`'s own unit; the exp bar is never a ratio, because `CalcExpBar` has
-already done the division and rounded it the cartridge's way.
+`player_max_hp`, `exp_pixels`, `raster_scx` and `player_pic_visible`: plain
+values read out of a resolved battle event, never the battle engine itself, the
+same rule `Gen2BattleScreen`'s own setters already followed. `exp_pixels` is a
+count out of 64, which is `PlaceExpBar`'s own unit; the exp bar is never a
+ratio, because `CalcExpBar` has already done the division and rounded it the
+cartridge's way.
+
+`raster_scx` is the background's own horizontal scroll, one value per scanline
+in the order the hardware draws them, and empty whenever the background is
+sitting still, which is every frame outside the opening slide. An offset is a
+distance to look *right* into a background map 256 pixels wide against the
+screen's 160, so a larger one puts the drawn content further left and the map's
+blank columns wrap in behind it. `Gen2Raster.scroll(image, offsets, 256)` is
+that operation and is what the built-in renderer applies to each of its layers;
+a renderer that ignores the field simply draws no slide. `player_pic_visible`
+is false for exactly that stretch, because `InitBattleDisplay` places the
+player's back pic with `PlaceGraphic` only after `BattleIntroSlidingPics` has
+returned, so during the slide it is not on the map to be scrolled.
 
 The two HP values and `exp_pixels` are the *drawn* ones, not the committed ones:
 a hit drains the bar over roughly a second the way the cartridge does, an award
