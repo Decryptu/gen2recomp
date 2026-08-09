@@ -36,6 +36,14 @@ const TILE: int = Gen2Font.TILE
 ## Tiles per second while a page is revealing. The games run this off the frame
 ## counter; a rate is the same thing said in a way that does not assume 60 Hz.
 @export var reveal_speed: float = 30.0
+## Per-scanline background offsets for the box's own rows, empty when the
+## background is sitting still. A box is drawn into the background plane like
+## everything else, so a routine that scrolls the plane scrolls the box with it;
+## see [Gen2Raster].
+@export var raster_scx: PackedInt32Array = PackedInt32Array():
+	set(value):
+		raster_scx = value
+		_redraw()
 @export var columns: int = STANDARD_COLUMNS
 @export var rows: int = STANDARD_ROWS
 @export_range(0, 7) var frame_style: int = 0
@@ -163,6 +171,8 @@ func _redraw() -> void:
 		indices, width, height,
 		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
 	)
+	if not raster_scx.is_empty():
+		image = Gen2Raster.scroll(image, raster_scx, Gen2BattleIntro.MAP_WIDTH)
 	texture = ImageTexture.create_from_image(image)
 	size = Vector2(width, height)
 

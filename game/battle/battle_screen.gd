@@ -141,12 +141,18 @@ var _last_message: String = ""
 var _bars: Dictionary = {}
 ## The running [Gen2ExpBarAnimation], or null when the exp bar is not filling.
 var _exp_bar: Gen2ExpBarAnimation = null
+## The running [Gen2BattleIntro], or null once the pics have slid into place.
+var _intro: Gen2BattleIntro = null
+## What `BattleStartMessage` will say. It is held for the whole slide, because
+## `InitBattleDisplay` returns before it is called and the box drawn before the
+## slide is an empty one.
+var _intro_message: String = ""
 ## The text the event pump produced while a bar was still draining. The source
 ## prints it after the bar arrives, since `applydamage` runs before
 ## `criticaltext` and `supereffectivetext`.
 var _held_message: String = ""
-## Leftover of a hardware frame the bars have not counted yet.
-var _bar_elapsed: float = 0.0
+## Leftover of a hardware frame the bars and the intro have not counted yet.
+var _frame_elapsed: float = 0.0
 ## What the overworld clock said when the battle started, for the three heals
 ## that read it. Only the world path supplies one; the development drivers below
 ## leave [Gen2Battle] at its own midday default.
@@ -191,17 +197,33 @@ var _box: Gen2TextBox = null
 @onready var _screen: Gen2Screen = %Screen
 
 
-## Bars drain on hardware frames, not on rendered ones, the same reason
-## [Gen2WorldAnimation] paces the overworld that way: the two-frame step
-## `HPBarAnim_BGMapUpdate` waits is a hardware frame count.
+## Bars drain and the intro slides on hardware frames, not on rendered ones, the
+## same reason [Gen2WorldAnimation] paces the overworld that way: the two-frame
+## step `HPBarAnim_BGMapUpdate` waits and `BattleIntroSlidingPics`' own
+## `DelayFrame` are both hardware frame counts.
 func _process(delta: float) -> void:
-	if not bars_animating():
-		_bar_elapsed = 0.0
+	if not frames_running():
+		_frame_elapsed = 0.0
 		return
-	_bar_elapsed += delta
-	while _bar_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and bars_animating():
-		_bar_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
-		advance_bars()
+	_frame_elapsed += delta
+	while _frame_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and frames_running():
+		_frame_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+		advance_frame()
+
+
+## Whether anything is counting hardware frames right now. Public with
+## [method advance_frame] so a test or a screenshot driver can settle the screen
+## without waiting on real time.
+func frames_running() -> bool:
+	return bars_animating() or _intro != null
+
+
+## One hardware frame of everything that counts them. Public through
+## [method advance_bars] and [method advance_intro] so a test or a screenshot
+## driver can settle either without waiting on real time.
+func advance_frame() -> bool:
+	var moved: bool = advance_intro()
+	return advance_bars() or moved
 
 
 func _ready() -> void:
@@ -284,11 +306,7 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	if _battle == null:
 		return
 
-	set_hp(
-		_battle.enemy.hp, _battle.enemy.max_hp(),
-		_battle.player.hp, _battle.player.max_hp()
-	)
-	_refresh_exp_bar()
+	_init_battle_display()
 
 
 ## Puts the player against one of a trainer class's own trainers, built from the
@@ -329,11 +347,7 @@ func show_trainer(
 		return
 	_battle.load_trainer_items(trainer_class)
 
-	set_hp(
-		_battle.enemy.hp, _battle.enemy.max_hp(),
-		_battle.player.hp, _battle.player.max_hp()
-	)
-	_refresh_exp_bar()
+	_init_battle_display()
 
 	var trainer: Dictionary = _data.trainer_party(trainer_class, index)
 	show_message("%s %s wants to fight!" % [
@@ -372,11 +386,7 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	if _battle == null:
 		_save_slot = -1
 		return false
-	set_hp(
-		_battle.enemy.hp, _battle.enemy.max_hp(),
-		_battle.player.hp, _battle.player.max_hp()
-	)
-	_refresh_exp_bar()
+	_init_battle_display()
 	return true
 
 
@@ -420,11 +430,7 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_player_level = player_party_ready.active_mon().level
 	_enemy = enemy_party_ready.active_mon().species
 	_enemy_level = enemy_party_ready.active_mon().level
-	set_hp(
-		_battle.enemy.hp, _battle.enemy.max_hp(),
-		_battle.player.hp, _battle.player.max_hp()
-	)
-	_refresh_exp_bar()
+	_init_battle_display()
 
 	if _world_battle_tutorial:
 		show_message("Gotcha! %s was caught!" % _name_of(_enemy))
@@ -563,6 +569,46 @@ func bars_animating() -> bool:
 	return not _bars.is_empty() or _exp_bar != null
 
 
+## Whether the two pics are still sliding into place.
+func intro_running() -> bool:
+	return _intro != null
+
+
+## `InitBattleDisplay`: the display a battle opens with, and the slide that puts
+## it there. Every caller that has just built a battle reaches this, which is the
+## same order the source uses, `InitBattleDisplay` before `BattleStartMessage`.
+func _init_battle_display() -> void:
+	set_hp(
+		_battle.enemy.hp, _battle.enemy.max_hp(),
+		_battle.player.hp, _battle.player.max_hp()
+	)
+	_refresh_exp_bar()
+	_intro = Gen2BattleIntro.for_data(_data)
+	_intro_message = ""
+	_push_view()
+
+
+## One hardware frame of the intro. Public so a test or a screenshot driver can
+## settle it without waiting on real time.
+func advance_intro() -> bool:
+	if _intro == null:
+		return false
+	if not _intro.advance_frame():
+		return false
+	if _intro.finished():
+		# `InitBattleDisplay`'s own `xor a` / `ldh [hSCX], a` after the call, and
+		# then `BattleStartMessage`.
+		_intro = null
+		_push_view()
+		if not _intro_message.is_empty():
+			var text: String = _intro_message
+			_intro_message = ""
+			show_message(text)
+		return true
+	_push_view()
+	return true
+
+
 ## One hardware frame of every running bar. Public so a test or a screenshot
 ## driver can settle the bars without waiting on real time.
 func advance_bars() -> bool:
@@ -676,6 +722,12 @@ func _start_exp_bar(event: Dictionary, from_pixels: int) -> void:
 
 
 func show_message(text: String) -> void:
+	# `BattleStartMessage` is called after `InitBattleDisplay` returns, so
+	# nothing is said while the pics are still sliding: the box drawn before the
+	# slide is an empty one.
+	if _intro != null:
+		_intro_message = text
+		return
 	_last_message = text
 	if _box != null:
 		_box.show_text(text)
@@ -1120,6 +1172,10 @@ func _confirm_forget_slot() -> void:
 ## starts a turn when there is nothing left to say.
 func advance() -> void:
 	if _box == null:
+		return
+	## `BattleIntroSlidingPics` is a run of unconditional `DelayFrame`s with
+	## nothing reading a button, so a press during the slide does nothing at all.
+	if _intro != null:
 		return
 	## The exp bar stopped at a level boundary is under `.LoopLevels`' own
 	## `StdBattleTextbox`, which blocks on a button: this press is that button,
@@ -1834,7 +1890,30 @@ func _push_view() -> void:
 		"enemy_hp": _drawn_hp(Gen2Battle.ENEMY), "enemy_max_hp": _enemy_max_hp,
 		"player_hp": _drawn_hp(Gen2Battle.PLAYER), "player_max_hp": _player_max_hp,
 		"exp_pixels": _drawn_exp(),
+		## The background's own scroll, a value per scanline, empty when it is
+		## sitting still. `PlaceGraphic` puts the player's back pic up only after
+		## the slide has returned, so during it there is nothing to draw there.
+		"raster_scx": _raster_offsets(),
+		"player_pic_visible": _intro == null,
 	})
+	if _box != null:
+		_box.raster_scx = _box_raster_offsets()
+
+
+## The background scroll for the whole screen, which only the intro ever asks
+## for.
+func _raster_offsets() -> PackedInt32Array:
+	return PackedInt32Array() if _intro == null else _intro.offsets()
+
+
+## The same scroll, narrowed to the rows the text box occupies. A box is drawn
+## into the background plane like everything else, so `Textbox`'s own rows move
+## with whatever moves the plane.
+func _box_raster_offsets() -> PackedInt32Array:
+	if _intro == null:
+		return PackedInt32Array()
+	var top: int = Gen2TextBox.STANDARD_TOP * Gen2Font.TILE
+	return _intro.offsets().slice(top, top + _box.rows * Gen2Font.TILE)
 
 
 func _name_of(species: int) -> String:

@@ -10,6 +10,12 @@ extends Control
 ## index 0 transparent: a panel is a shape on a white field, drawn into the
 ## background layer on hardware, so the pics show through everything that is not
 ## ink.
+##
+## Every layer here is part of that one background plane, so a scroll applies to
+## all of them alike: [member Gen2BattleIntro] hands the screen a per-scanline
+## offset and each layer is scrolled through [Gen2Raster] by the same one. That
+## is the same answer as scrolling a single merged buffer would give, and it
+## keeps a palette per layer, which the hardware's per-tile palettes need.
 
 ## Where the two pics sit, in tiles.
 const ENEMY_PIC: Vector2i = Vector2i(12, 0)
@@ -71,13 +77,22 @@ func refresh() -> void:
 		_enemy_pic, _data.species_pic(int(_view.get("enemy_species", 0))),
 		_data.palette(int(_view.get("enemy_species", 0))), ENEMY_PIC
 	)
-	_draw_pic(
-		_player_pic, _data.species_pic(int(_view.get("player_species", 0)), true),
-		_data.palette(int(_view.get("player_species", 0))), PLAYER_PIC
-	)
+	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
+	# after `BattleIntroSlidingPics` has returned, so it is not on the map to be
+	# scrolled and is simply not there yet.
+	if bool(_view.get("player_pic_visible", true)):
+		_draw_pic(
+			_player_pic, _data.species_pic(int(_view.get("player_species", 0)), true),
+			_data.palette(int(_view.get("player_species", 0))), PLAYER_PIC
+		)
+	else:
+		_player_pic.texture = null
 	_draw_panels()
 
 
+## A pic is drawn into a screen-sized layer rather than a rectangle placed at
+## its own corner, because a scroll wraps at the background map's width and so
+## needs to know where the screen ends.
 func _draw_pic(
 	into: TextureRect, pic: Dictionary, palette: PackedColorArray, at: Vector2i
 ) -> void:
@@ -87,9 +102,13 @@ func _draw_pic(
 	var image: Image = Gen2PicImage.from_atlas(
 		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic, palette
 	)
-	into.texture = ImageTexture.create_from_image(image)
-	into.size = image.get_size()
-	into.position = Vector2(at.x * TILE, at.y * TILE)
+	var layer: Image = Image.create_empty(
+		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, image.get_format()
+	)
+	layer.blit_rect(
+		image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i(at.x * TILE, at.y * TILE)
+	)
+	_show_image(into, layer)
 
 
 ## The panels, and then each bar over them in its own colour.
@@ -149,11 +168,21 @@ func _new_buffer() -> PackedByteArray:
 func _show_layer(
 	into: TextureRect, indices: PackedByteArray, palette: PackedColorArray
 ) -> void:
-	var image: Image = Gen2PicImage.from_indices(
+	_show_image(into, Gen2PicImage.from_indices(
 		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, palette, true
-	)
+	))
+
+
+## One background layer, scrolled by whatever the view is asking for. An empty
+## or absent offset list is a background sitting still, which is every frame
+## outside the intro.
+func _show_image(into: TextureRect, image: Image) -> void:
+	var offsets: PackedInt32Array = PackedInt32Array(_view.get("raster_scx", []))
+	if not offsets.is_empty():
+		image = Gen2Raster.scroll(image, offsets, Gen2BattleIntro.MAP_WIDTH)
 	into.texture = ImageTexture.create_from_image(image)
 	into.size = image.get_size()
+	into.position = Vector2.ZERO
 
 
 ## An HP bar is green, yellow or red by how much of it is lit rather than by the
