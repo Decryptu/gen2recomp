@@ -2612,3 +2612,157 @@ func test_an_enemy_switch_leaves_the_used_move_list_alone() -> void:
 	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.switch_to(1))
 
 	assert_eq(battle.player_used_moves, [Fixture.TACKLE] as Array[int])
+
+
+## `BattleCommand_Screen` sets the bit on the user's own side and loads five,
+## and `HandleScreens` takes one off on that same turn, so a Reflect covers the
+## turn it went up and four more.
+func test_a_screen_lasts_five_turns_counting_the_one_that_set_it() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.REFLECT, Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+
+	var setting: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(_first(setting, Gen2Battle.SCREEN_SET)["screen"], Gen2Screens.REFLECT)
+	assert_true(Gen2Screens.has(battle.screens[Gen2Battle.PLAYER], Gen2Screens.REFLECT))
+	assert_eq(battle.reflect_turns[Gen2Battle.PLAYER], Gen2Screens.TURNS - 1)
+	assert_eq(battle.screens[Gen2Battle.ENEMY], Gen2Screens.NONE, "one side only")
+
+	var faded: Dictionary = {}
+	var turns: int = 0
+	for _turn: int in 10:
+		var events: Array = battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+		turns += 1
+		faded = _first(events, Gen2Battle.SCREEN_FADED)
+		if not faded.is_empty():
+			break
+
+	assert_eq(turns, Gen2Screens.TURNS - 1, "four more turns after the one that set it")
+	assert_eq(faded["screen"], Gen2Screens.REFLECT)
+	assert_eq(battle.screens[Gen2Battle.PLAYER], Gen2Screens.NONE)
+	assert_eq(battle.reflect_turns[Gen2Battle.PLAYER], 0)
+
+
+## Reflect and Light Screen have counts of their own rather than sharing one, so
+## a side can hold both and lose them on different turns.
+func test_the_two_screens_run_down_separately() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.REFLECT, Fixture.LIGHT_SCREEN, Fixture.GROWL]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+
+	assert_eq(battle.reflect_turns[Gen2Battle.PLAYER], Gen2Screens.TURNS - 2)
+	assert_eq(battle.light_screen_turns[Gen2Battle.PLAYER], Gen2Screens.TURNS - 1)
+	assert_true(Gen2Screens.has(
+		battle.screens[Gen2Battle.PLAYER], Gen2Screens.REFLECT | Gen2Screens.LIGHT_SCREEN
+	))
+
+	var reflect_fell_on: int = -1
+	var light_screen_fell_on: int = -1
+	for turn: int in 8:
+		var events: Array = battle.take_actions(Gen2Battle.use_move(2), Gen2Battle.use_move(0))
+		for event: Dictionary in _of_type(events, Gen2Battle.SCREEN_FADED):
+			if int(event["screen"]) == Gen2Screens.REFLECT:
+				reflect_fell_on = turn
+			else:
+				light_screen_fell_on = turn
+
+	assert_eq(reflect_fell_on, 2)
+	assert_eq(light_screen_fell_on, 3, "one turn behind, the turn it was put up later")
+
+
+## A second use fails outright rather than restarting the count, which is
+## `BattleCommand_Screen`'s `.failed` branch and not Rain Dance's behaviour.
+func test_a_second_screen_fails_without_restarting_the_count() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.REFLECT]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])
+	)
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var again: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(again, Gen2Battle.MOVE_FAILED).is_empty(), JSON.stringify(again))
+	assert_eq(_of_type(again, Gen2Battle.SCREEN_SET).size(), 0)
+	assert_eq(battle.reflect_turns[Gen2Battle.PLAYER], Gen2Screens.TURNS - 2)
+
+
+## The screen belongs to the side, not to the Pokémon: nothing clears it on a
+## switch, which is the whole difference between it and a [Gen2Substatus] flag.
+func test_a_screen_outlives_the_pokemon_that_put_it_up() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.create([
+			_mon(Fixture.PIKACHU, 50, [Fixture.REFLECT]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.GROWL])), _rng, true
+	)
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+
+	assert_true(Gen2Screens.has(battle.screens[Gen2Battle.PLAYER], Gen2Screens.REFLECT))
+
+
+## `BattleCommand_CheckSafeguard` is the loud half: the move is refused with
+## `SafeguardProtectText` and ends there.
+func test_safeguard_refuses_a_status_move_and_says_so() -> void:
+	# Pikachu is the faster of the two, so the veil goes up on its own turn
+	# first and the status move is tried against it on the next.
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL, Fixture.THUNDER_WAVE]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.SAFEGUARD])
+	)
+
+	var raising: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var events: Array = battle.take_actions(Gen2Battle.use_move(1), Gen2Battle.use_move(0))
+
+	assert_eq(_first(raising, Gen2Battle.SCREEN_SET)["screen"], Gen2Screens.SAFEGUARD)
+	var protected: Dictionary = _first(events, Gen2Battle.SAFEGUARD_PROTECTED)
+	assert_false(protected.is_empty(), JSON.stringify(events))
+	assert_eq(protected["target"], Gen2Battle.ENEMY)
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+
+
+## `SafeCheckSafeguard` is the quiet half: a secondary status is refused with
+## nothing said, because only the four moves carrying `checksafeguard` speak.
+func test_safeguard_refuses_a_secondary_status_silently() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.EMBER_BURNS]),
+		_mon(Fixture.BULBASAUR, 50, [Fixture.GROWL])
+	)
+	battle.screens[Gen2Battle.ENEMY] = Gen2Screens.SAFEGUARD
+	battle.safeguard_turns[Gen2Battle.ENEMY] = Gen2Screens.TURNS
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(_of_type(events, Gen2Battle.STATUS_INFLICTED).size(), 0, JSON.stringify(events))
+	assert_eq(_of_type(events, Gen2Battle.SAFEGUARD_PROTECTED).size(), 0, "nothing is said")
+	assert_eq(battle.enemy.status, Gen2Status.NONE)
+	assert_false(_first(events, Gen2Battle.HIT).is_empty(), "the hit itself still lands")
+
+
+## `HandleSafeguard` runs ahead of `HandleScreens` and off a count of its own.
+func test_safeguard_runs_down_and_stops_protecting() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.THUNDER_WAVE]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.screens[Gen2Battle.ENEMY] = Gen2Screens.SAFEGUARD
+	battle.safeguard_turns[Gen2Battle.ENEMY] = 1
+
+	var ending: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_false(_first(ending, Gen2Battle.SAFEGUARD_PROTECTED).is_empty(), "still up this turn")
+	assert_eq(_first(ending, Gen2Battle.SCREEN_FADED)["screen"], Gen2Screens.SAFEGUARD)
+	assert_eq(battle.screens[Gen2Battle.ENEMY], Gen2Screens.NONE)
+
+	var after: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+
+	assert_eq(_of_type(after, Gen2Battle.SAFEGUARD_PROTECTED).size(), 0)
+	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.PARALYSIS))

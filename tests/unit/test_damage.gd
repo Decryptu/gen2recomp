@@ -365,3 +365,116 @@ func test_the_scope_lens_makes_criticals_more_common() -> void:
 		if Gen2Damage.roll_critical(_data.move(Fixture.TACKLE), rng, false, true):
 			lensed += 1
 	assert_gt(lensed, plain * 3 / 2, "level 1 is 32 in 256 against level 0's 17")
+
+
+## The screen doubles the defending stat inside the formula rather than halving
+## the finished damage, so it lands before the divide and before STAB.
+##
+## Pikachu's Thunderbolt on Bulbasaur is 22 * 95 * 70 / 85 / 50 = 34 without
+## one; with Reflect the defence is 170, giving 17, then +2 = 19, x1.5 STAB = 28
+## and halved by Grass = 14. Reflect is the physical screen, so a special move
+## reads Light Screen and nothing else.
+func test_light_screen_doubles_the_special_defence_a_special_move_divides_by() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var move: Dictionary = _data.move(Fixture.THUNDERBOLT)
+
+	var bare: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION
+	)
+	var screened: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.LIGHT_SCREEN
+	)
+	var wrong_screen: Dictionary = Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.REFLECT
+	)
+
+	assert_eq(bare["damage"], 27)
+	assert_eq(screened["damage"], 14)
+	assert_eq(wrong_screen["damage"], 27, "the physical screen guards nothing special")
+
+
+func test_reflect_is_the_physical_screen_and_light_screen_guards_nothing_physical() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.GEODUDE)
+	var defender: Gen2BattleMon = _mon(Fixture.CHARMANDER)
+	var move: Dictionary = _data.move(Fixture.TACKLE)
+
+	var bare: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION
+	)["damage"])
+	var reflected: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.REFLECT
+	)["damage"])
+	var light: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, false, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.LIGHT_SCREEN
+	)["damage"])
+
+	assert_lt(reflected, bare)
+	assert_eq(light, bare)
+
+
+## `PlayerAttackDamage` doubles the pair before `CheckDamageStatsCritical`, and
+## the no-carry branch reloads the unmodified stat over it, so the same critical
+## that ignores the defender's stages ignores its screen with them. A critical
+## against a defender whose stages are no better than the attacker's keeps both.
+func test_a_critical_that_ignores_the_stages_ignores_the_screen_with_them() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var move: Dictionary = _data.move(Fixture.THUNDERBOLT)
+
+	# Nothing has moved, so the two stages are equal and the critical takes the
+	# `.specialcrit` branch that discards the screen.
+	var critical_bare: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, true, Gen2Damage.MAX_VARIATION
+	)["damage"])
+	var critical_screened: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, true, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.LIGHT_SCREEN
+	)["damage"])
+
+	assert_eq(critical_screened, critical_bare, "the critical went through the screen")
+
+	# Raise the attacker's own stage so `CheckDamageStatsCritical` carries and
+	# keeps the loaded pair, screen included.
+	attacker.change_stage("sp_attack", 2)
+	var kept_bare: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, true, Gen2Damage.MAX_VARIATION
+	)["damage"])
+	var kept_screened: int = int(Gen2Damage.calculate_with(
+		attacker, defender, move, true, Gen2Damage.MAX_VARIATION,
+		false, 1, Gen2Weather.NONE, Gen2Screens.LIGHT_SCREEN
+	)["damage"])
+
+	assert_lt(kept_screened, kept_bare, "this critical kept the screen")
+
+
+## `TruncateHL_BC` shifts the attack and the defence together, two bits at a
+## time, until both fit in a byte, flooring each at one. A screened defence is
+## the common way past a byte.
+func test_truncate_stats_shifts_both_until_each_fits_in_a_byte() -> void:
+	assert_eq(Gen2Damage.truncate_stats(200, 255), [200, 255], "nothing to do")
+	assert_eq(Gen2Damage.truncate_stats(100, 400), [25, 100], "one pass of four")
+	assert_eq(Gen2Damage.truncate_stats(999, 999), [249, 249])
+	# Three passes: 5000 to 1250 to 312 to 78, and the partner floors at one
+	# rather than at zero on the first of them, which is `inc c`.
+	assert_eq(Gen2Damage.truncate_stats(3, 5000), [1, 78], "the floor is one, not zero")
+	assert_eq(Gen2Damage.truncate_stats(1, 1), [1, 1])
+
+
+## The single-player fix is Crystal's alone: pokegold has no `wLinkMode` check at
+## all, so one pass is all a value gets there and anything still over a byte
+## wraps. `docs/bugs_and_glitches.md` calls it "Reflect and Light Screen can make
+## (Special) Defense wrap around above 1024".
+func test_gold_and_silver_wrap_a_screened_defence_above_1024() -> void:
+	# 1200 / 4 is 300, which does not fit; Crystal shifts again to 75, Gold keeps
+	# 300 and hands back its low byte, 44.
+	assert_eq(Gen2Damage.truncate_stats(100, 1200, true), [6, 75])
+	assert_eq(Gen2Damage.truncate_stats(100, 1200, false), [25, 44])
+	# Under the threshold the two agree, since one pass is enough for both.
+	assert_eq(
+		Gen2Damage.truncate_stats(100, 1000, true), Gen2Damage.truncate_stats(100, 1000, false)
+	)

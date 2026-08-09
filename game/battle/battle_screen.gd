@@ -116,6 +116,22 @@ const WEATHER_ENDED_TEXT: Dictionary = {
 	Gen2Weather.SANDSTORM: "The SANDSTORM subsided.",
 }
 
+## The two lines each screen has. The set lines are `BattleCommand_Screen`'s and
+## `BattleCommand_Safeguard`'s own, which describe the stat rather than the
+## screen. The faded lines are `HandleScreens`', and they name the side rather
+## than the Pokémon: `.Copy` fills `wStringBuffer1` with "Your" or "Enemy" ahead
+## of " #MON's", which is the wording that fits a screen outliving whoever put it
+## up. `HandleSafeguard`'s is the odd one and is a plain `<USER>`.
+const SCREEN_SET_TEXT: Dictionary = {
+	Gen2Screens.LIGHT_SCREEN: "%s's SPCL.DEF rose!",
+	Gen2Screens.REFLECT: "%s's DEFENSE rose!",
+	Gen2Screens.SAFEGUARD: "%s's covered by a veil!",
+}
+const SCREEN_FADED_TEXT: Dictionary = {
+	Gen2Screens.LIGHT_SCREEN: "%s's LIGHT SCREEN fell!",
+	Gen2Screens.REFLECT: "%s's REFLECT faded!",
+}
+
 var _data: GameData = null
 var _injected_data: GameData = null
 ## Whatever the mod host supplies. Typed as Node because a registered renderer
@@ -1279,7 +1295,8 @@ func _enemy_slot() -> int:
 	return Gen2BattleAI.choose_slot(
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
 		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
-		_battle.weather
+		_battle.weather,
+		_battle.screens[Gen2Battle.ENEMY], _battle.screens[Gen2Battle.PLAYER]
 	)
 
 
@@ -1951,6 +1968,17 @@ func _describe(event: Dictionary) -> String:
 			return "%s can't escape now!" % _battler_name(int(event["target"]))
 		Gen2Battle.SWITCH_BLOCKED:
 			return "%s can't be recalled!" % _battler_name(side)
+		Gen2Battle.SCREEN_SET:
+			return SCREEN_SET_TEXT.get(int(event["screen"]), "") % _battler_name(side)
+		Gen2Battle.SCREEN_FADED:
+			var faded: int = int(event["screen"])
+			if faded == Gen2Screens.SAFEGUARD:
+				return "%s's SAFEGUARD faded!" % _battler_name(side)
+			return SCREEN_FADED_TEXT.get(faded, "") % (
+				"Enemy #MON" if side == Gen2Battle.ENEMY else "Your #MON"
+			)
+		Gen2Battle.SAFEGUARD_PROTECTED:
+			return "%s is protected by SAFEGUARD!" % _battler_name(int(event["target"]))
 		Gen2Battle.MIST_SET:
 			return "%s is shrouded in mist!" % _battler_name(side)
 		Gen2Battle.FOCUS_ENERGY_SET:

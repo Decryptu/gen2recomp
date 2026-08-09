@@ -200,9 +200,9 @@ never quietly change what every move in the game does.
 A registered effect replaces the cartridge's list for that byte, which is how a
 mod rewrites Sleep rather than only adding to the table.
 `Gen2MoveEffect.RESERVED_EFFECTS` is the exception: the multi-hit, fixed-damage,
-Rollout, Selfdestruct and time-based heal bytes are read back off the turn by
-their own commands, so replacing one would leave that command answering for a
-list it is no longer in.
+Rollout, Selfdestruct, time-based heal and the two screen bytes are read back off
+the turn by their own commands, so replacing one would leave that command
+answering for a list it is no longer in.
 
 ## Watching what happens
 

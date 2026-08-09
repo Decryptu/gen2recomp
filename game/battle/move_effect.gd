@@ -170,6 +170,13 @@ const RAIN_DANCE: int = 136
 const SUNNY_DAY: int = 137
 const THUNDER: int = 152
 
+## The three side-of-the-field screens. Light Screen and Reflect share
+## `BattleCommand_Screen`, which tells them apart by this byte, so the two are
+## one command and two lists that read the same.
+const LIGHT_SCREEN: int = 35
+const REFLECT: int = 65
+const SAFEGUARD: int = 124
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
@@ -250,6 +257,7 @@ const SLEEP_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.SLEEP_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -260,6 +268,7 @@ const POISON_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.POISON_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -272,6 +281,7 @@ const TOXIC_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.TOXIC_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -285,6 +295,7 @@ const PARALYZE_SEQUENCE: Array = [
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.PARALYZE_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -295,6 +306,7 @@ const CONFUSE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.CONFUSE_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -549,6 +561,24 @@ const START_SANDSTORM_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.START_SANDSTORM,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## The three screens, which are the weather moves' shape with a different
+## command. `LightScreen:` and `Reflect:` are one label with two entries in
+## `data/moves/effects.asm`, so both point here; none of the three rolls
+## accuracy.
+const SCREEN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SCREEN,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const SAFEGUARD_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SAFEGUARD,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -873,6 +903,9 @@ static func _sequences() -> Dictionary:
 		RAIN_DANCE: START_RAIN_SEQUENCE,
 		SUNNY_DAY: START_SUN_SEQUENCE,
 		SANDSTORM: START_SANDSTORM_SEQUENCE,
+		LIGHT_SCREEN: SCREEN_SEQUENCE,
+		REFLECT: SCREEN_SEQUENCE,
+		SAFEGUARD: SAFEGUARD_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,
@@ -922,6 +955,7 @@ static func is_written(effect: int) -> bool:
 const RESERVED_EFFECTS: Array[int] = [
 	MULTI_HIT, DOUBLE_HIT, TWINEEDLE, SUPER_FANG, STATIC_DAMAGE, LEVEL_DAMAGE,
 	PSYWAVE, ROLLOUT, SELFDESTRUCT, MORNING_SUN, SYNTHESIS, MOONLIGHT,
+	LIGHT_SCREEN, REFLECT,
 ]
 
 
