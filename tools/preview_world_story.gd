@@ -4072,10 +4072,12 @@ func _lake_crossing(
 
 ## Blackthorn City to the Rising Badge, on the same world, state and save.
 ##
-## The badge is not Clair's. `BlackthornGymClairScript` sets only
+## The badge is not won in the gym. `BlackthornGymClairScript` sets only
 ## `EVENT_BEAT_CLAIR` and swaps the two Blackthorn gramps so the Dragon's Den
-## door at (20,1) opens; `maps/DragonShrine.asm` is what runs
-## `setflag ENGINE_RISINGBADGE`, at the end of the elder's five-question quiz.
+## door at (20,1) opens. `maps/DragonShrine.asm` is what runs
+## `setflag ENGINE_RISINGBADGE` on Crystal, at the end of the elder's
+## five-question quiz; Gold and Silver have no shrine and put the same line in
+## `DragonsDenB1FDragonFangScript` (`maps/DragonsDenB1F.asm`).
 ##
 ## Appends to [param path] and answers only ok or the failure.
 func _rising_badge_path(
@@ -4274,6 +4276,9 @@ func _dragon_shrine_leg(
 			"reason": "Dragon's Den B1F unreachable: %s" % to_den.get("reason", ""),
 		}
 
+	if not Gen2WorldState.is_crystal_profile(data):
+		return _dragons_den_dragon_fang(world, save, random, data, path)
+
 	# B1F is a lake with the shrine on its far shore: the ladder's own land
 	# region has 271 cells and none of them touch the shrine, whose only landfall
 	# from the water is (14,31). The whirlpool on (10,20) sits in the way.
@@ -4347,6 +4352,92 @@ func _dragon_shrine_leg(
 	return {"ok": true}
 
 
+## Dragon's Den B1F's DRAGON_FANG ball, which is where Gold and Silver keep the
+## Rising Badge.
+##
+## pokegold ships no DRAGON_SHRINE map: `maps/DragonsDenB1F.asm` has one warp
+## rather than two and no coord event, and blocks (7..11, 13..15) of its `.blk`
+## wall the shrine mouth off, which is the whole difference between the two
+## grids. `DragonsDenB1FDragonFangScript` is the errand instead: the ball on
+## (35,16) gives the fang, then Clair walks in, runs `setflag ENGINE_RISINGBADGE`
+## and hands over TM24 in the same conversation Crystal splits between the elder
+## and a later coord event.
+##
+## The ball's land strip is (34..35, 16..21) and touches no other land, so the
+## lake is the only way onto it and (34,22) is its one shore: the water west of
+## the strip is a pocket of its own, sealed off by the COLL_BUOY column on
+## (30, 16..19), which `data/collision/collision_permissions.asm` gives
+## WALL_TILE. The whirlpool on (10,20) is on this route as much as on Crystal's,
+## since it is the only cell joining the ladder's own lake to the southern one.
+func _dragons_den_dragon_fang(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	random: RandomNumberGenerator,
+	data: GameData,
+	path: Array,
+) -> Dictionary:
+	var entered: Dictionary = _surf_at(
+		world, Vector2i(10, 7), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	if not bool(entered.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den surf entry failed: %s" % entered.get("reason", ""),
+		}
+	var cleared: Dictionary = _whirlpool_at(
+		world, Vector2i(10, 19), Gen2WorldSprite.FACING_DOWN, save, random, data
+	)
+	path.append({
+		"step": "dragons_den_whirlpool",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": cleared,
+	})
+	if not bool(cleared.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den whirlpool failed: %s" % cleared.get("reason", ""),
+		}
+	var crossing: Dictionary = _walk_cell_resolving(
+		world, Vector2i(34, 21), save, random, data, true
+	)
+	path.append({
+		"step": "dragons_den_crossing",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"movement_mode": String(world.movement_mode),
+	})
+	if not bool(crossing.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Dragon's Den crossing failed: %s" % crossing.get("reason", ""),
+		}
+
+	# Faced from the west, so `readvar VAR_FACING` takes the script's RIGHT
+	# branch and Clair walks up the strip from (34,21) rather than (35,22).
+	var fang: Dictionary = _talk_to(
+		world, Vector2i(34, 16), Gen2WorldSprite.FACING_RIGHT, save, random, data
+	)
+	path.append({
+		"step": "dragons_den_dragon_fang",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"run": fang.get("run", {}),
+		"badge_count": world.state.badge_count(false),
+		"items": _named_items(data, world.state.items()),
+	})
+	if not bool(fang.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "the Dragon Fang handoff failed: %s" % fang.get("reason", ""),
+		}
+	if not world.state.is_engine_flag_active(
+		Gen2WorldState.badge_flag(BADGE_RISING, false)
+	):
+		return {"ok": false, "path": path, "reason": "the Rising Badge was not given"}
+	return {"ok": true}
+
+
 ## The Dragon Shrine to Indigo Plateau, on the same world, state and save.
 ##
 ## `VictoryRoadGate`'s coord event at (10,11) is a `readvar VAR_BADGES` against
@@ -4387,12 +4478,13 @@ func _kanto_approach_path(
 	return _elite_four_leg(world, save, random, data, path)
 
 
-## The Dragon Shrine back to New Bark Town.
+## The Dragon's Den back to New Bark Town.
 ##
-## The way out of the den is the way in reversed, and the whirlpool with it:
-## `complete_whirlpool()` is a transient block override, so the warp to the
-## shrine restored (10,20) and the water south of it reaches the shrine's
-## landfall and nothing else.
+## The way out is the way in reversed. Crystal clears the whirlpool twice:
+## `complete_whirlpool()` is a transient block override, so the warp into the
+## shrine restored (10,20), and the water south of it reaches the shrine's
+## landfall and nothing else. Gold and Silver enter no map in between, so their
+## first clear still holds.
 ##
 ## Blackthorn's own exit is south, not west: Route 45 into Route 46 into the
 ## Route 29 gate. Route 46 is walked downhill only. Its ledges leave the region
@@ -4406,34 +4498,39 @@ func _blackthorn_departure(
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
-	var to_den: Dictionary = _warp_chain(world, save, random, data, [Vector2i(4, 9)])
-	if not bool(to_den.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Dragon Shrine exit failed: %s" % to_den.get("reason", ""),
-		}
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	if crystal:
+		var to_den: Dictionary = _warp_chain(world, save, random, data, [Vector2i(4, 9)])
+		if not bool(to_den.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Dragon Shrine exit failed: %s" % to_den.get("reason", ""),
+			}
 
-	# The shrine armed SCENE_DRAGONSDENB1F_CLAIR_GIVES_TM (maps/DragonShrine.asm),
-	# so B1F's coord event at (19,30), one cell below the warp back, is Clair's
-	# TM24 gift. It is on the way out whether or not the walk asks for it.
-	var clair_tm: Dictionary = _walk_cell_resolving(
-		world, Vector2i(19, 30), save, random, data
-	)
-	path.append({
-		"step": "dragons_den_clair_tm",
-		"map": _map_value(world),
-		"cell": _cell_value(world),
-		"encounters": clair_tm.get("encounters", []),
-		"items": _named_items(data, world.state.items()),
-	})
-	if not bool(clair_tm.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Clair's TM scene failed: %s" % clair_tm.get("reason", ""),
-		}
+		# The shrine armed SCENE_DRAGONSDENB1F_CLAIR_GIVES_TM
+		# (maps/DragonShrine.asm), so B1F's coord event at (19,30), one cell below
+		# the warp back, is Clair's TM24 gift. It is on the way out whether or not
+		# the walk asks for it. Gold and Silver spent both on the Dragon Fang ball.
+		var clair_tm: Dictionary = _walk_cell_resolving(
+			world, Vector2i(19, 30), save, random, data
+		)
+		path.append({
+			"step": "dragons_den_clair_tm",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"encounters": clair_tm.get("encounters", []),
+			"items": _named_items(data, world.state.items()),
+		})
+		if not bool(clair_tm.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Clair's TM scene failed: %s" % clair_tm.get("reason", ""),
+			}
 
 	var entered: Dictionary = _surf_at(
-		world, Vector2i(14, 31), Gen2WorldSprite.FACING_LEFT, save, random, data
+		world, Vector2i(14, 31) if crystal else Vector2i(34, 21),
+		Gen2WorldSprite.FACING_LEFT if crystal else Gen2WorldSprite.FACING_DOWN,
+		save, random, data
 	)
 	if not bool(entered.get("ok", false)):
 		return {
@@ -4467,20 +4564,21 @@ func _blackthorn_departure(
 			"reason": "WATERFALL could not be taught: %s" % taught.get("reason", ""),
 		}
 
-	var cleared: Dictionary = _whirlpool_at(
-		world, Vector2i(10, 21), Gen2WorldSprite.FACING_UP, save, random, data
-	)
-	path.append({
-		"step": "dragons_den_whirlpool_return",
-		"map": _map_value(world),
-		"cell": _cell_value(world),
-		"run": cleared,
-	})
-	if not bool(cleared.get("ok", false)):
-		return {
-			"ok": false, "path": path,
-			"reason": "Dragon's Den return whirlpool failed: %s" % cleared.get("reason", ""),
-		}
+	if crystal:
+		var cleared: Dictionary = _whirlpool_at(
+			world, Vector2i(10, 21), Gen2WorldSprite.FACING_UP, save, random, data
+		)
+		path.append({
+			"step": "dragons_den_whirlpool_return",
+			"map": _map_value(world),
+			"cell": _cell_value(world),
+			"run": cleared,
+		})
+		if not bool(cleared.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "Dragon's Den return whirlpool failed: %s" % cleared.get("reason", ""),
+			}
 	var back_ashore: Dictionary = _walk_cell_resolving(
 		world, Vector2i(10, 7), save, random, data, true
 	)
@@ -4994,7 +5092,7 @@ func _victory_road_leg(
 		"cell": _cell_value(world),
 		"encounters": plateau.get("encounters", []),
 		"mt_moon_rival": world.event_flag_active(EVENT_BEAT_RIVAL_IN_MT_MOON),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_INDIGO_PLATEAU),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_INDIGO_PLATEAU),
 		"badge_count": world.state.badge_count(),
 	})
 	if not bool(plateau.get("ok", false)):
@@ -5002,7 +5100,7 @@ func _victory_road_leg(
 			"ok": false, "path": path,
 			"reason": "Indigo Plateau Pokemon Center failed: %s" % plateau.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_INDIGO_PLATEAU):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_INDIGO_PLATEAU):
 		return {"ok": false, "path": path, "reason": "the Indigo Plateau flypoint was not set"}
 	return {"ok": true}
 
@@ -5697,9 +5795,9 @@ func _thunder_badge_path(
 		"step": "vermilion_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_VERMILION),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_VERMILION),
 	})
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_VERMILION):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_VERMILION):
 		return {"ok": false, "path": path, "reason": "the city's flypoint callback did not run"}
 
 	var tree: Dictionary = _cut_at(
@@ -5806,14 +5904,14 @@ func _marsh_badge_path(
 		"step": "saffron_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_SAFFRON),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_SAFFRON),
 	})
 	if not bool(gate.get("ok", false)):
 		return {
 			"ok": false, "path": path,
 			"reason": "the Saffron gate failed: %s" % gate.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_SAFFRON):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_SAFFRON):
 		return {"ok": false, "path": path, "reason": "Saffron's flypoint callback did not run"}
 
 	return _saffron_gym_leg(world, save, random, data, path)
@@ -5946,7 +6044,7 @@ func _rainbow_badge_path(
 		"step": "celadon_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CELADON),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_CELADON),
 		"encounters": westward.get("encounters", []),
 		"run": city_entry,
 	})
@@ -5955,7 +6053,7 @@ func _rainbow_badge_path(
 			"ok": false, "path": path,
 			"reason": "the walk west to Celadon failed: %s" % westward.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CELADON):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_CELADON):
 		return {"ok": false, "path": path, "reason": "Celadon's flypoint callback did not run"}
 
 	return _celadon_gym_leg(world, save, random, data, path)
@@ -6101,7 +6199,7 @@ func _cerulean_approach_path(
 		"step": "cerulean_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CERULEAN),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_CERULEAN),
 		"encounters": northward.get("encounters", []),
 		"run": city_entry,
 	})
@@ -6110,7 +6208,7 @@ func _cerulean_approach_path(
 			"ok": false, "path": path,
 			"reason": "the walk north to Cerulean failed: %s" % northward.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CERULEAN):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_CERULEAN):
 		return {"ok": false, "path": path, "reason": "Cerulean's flypoint callback did not run"}
 	return _machine_part_errand(world, save, random, data, path)
 
@@ -6310,7 +6408,7 @@ func _lavender_leg(
 		"step": "lavender_town",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_LAVENDER),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_LAVENDER),
 		"encounters": eastward.get("encounters", []),
 		"run": town_entry,
 	})
@@ -6319,7 +6417,7 @@ func _lavender_leg(
 			"ok": false, "path": path,
 			"reason": "the walk east to Lavender failed: %s" % eastward.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_LAVENDER):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_LAVENDER):
 		return {"ok": false, "path": path, "reason": "Lavender's flypoint callback did not run"}
 
 	var into_tower: Dictionary = _warp_chain(
@@ -6717,7 +6815,7 @@ func _fuchsia_leg(
 		"step": "fuchsia_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_FUCHSIA),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_FUCHSIA),
 		"encounters": to_city.get("encounters", []),
 	})
 	if not bool(to_city.get("ok", false)):
@@ -6725,7 +6823,7 @@ func _fuchsia_leg(
 			"ok": false, "path": path,
 			"reason": "the Route 15 gate failed: %s" % to_city.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_FUCHSIA):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_FUCHSIA):
 		return {"ok": false, "path": path, "reason": "Fuchsia's flypoint callback did not run"}
 
 	var into_gym: Dictionary = _warp_chain(world, save, random, data, [FUCHSIA_GYM_DOOR])
@@ -6896,7 +6994,7 @@ func _pewter_leg(
 		"step": "pewter_city",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_PEWTER),
 		"encounters": to_pewter.get("encounters", []),
 		"run": pewter_entry,
 	})
@@ -6905,7 +7003,7 @@ func _pewter_leg(
 			"ok": false, "path": path,
 			"reason": "the walk to Pewter failed: %s" % to_pewter.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_PEWTER):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_PEWTER):
 		return {"ok": false, "path": path, "reason": "Pewter's flypoint callback did not run"}
 
 	return _pewter_gym_leg(world, save, random, data, path)
@@ -7060,7 +7158,7 @@ func _cinnabar_leg(
 			"run": entry,
 		}
 		if leg.has("flypoint"):
-			step["flypoint"] = world.state.is_engine_flag_active(int(leg["flypoint"]))
+			step["flypoint"] = _engine_flag_set(world, data, int(leg["flypoint"]))
 		path.append(step)
 		if not bool(walked.get("ok", false)):
 			return {
@@ -7068,7 +7166,7 @@ func _cinnabar_leg(
 				"reason": "the walk to %s failed: %s" % [leg["step"], walked.get("reason", "")],
 			}
 		if leg.has("flypoint") \
-			and not world.state.is_engine_flag_active(int(leg["flypoint"])):
+			and not _engine_flag_set(world, data, int(leg["flypoint"])):
 			return {
 				"ok": false, "path": path,
 				"reason": "%s's flypoint callback did not run" % leg["step"],
@@ -7120,7 +7218,7 @@ func _cinnabar_leg(
 			"ok": false, "path": path,
 			"reason": "landing on Cinnabar failed: %s" % ashore.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_CINNABAR):
 		return {"ok": false, "path": path, "reason": "Cinnabar's flypoint callback did not run"}
 
 	var blue: Dictionary = _talk_to(
@@ -7130,7 +7228,7 @@ func _cinnabar_leg(
 		"step": "cinnabar_blue",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_CINNABAR),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_CINNABAR),
 		"viridian_gym_blue": world.event_flag_active(EVENT_VIRIDIAN_GYM_BLUE),
 		"encounters": blue.get("encounters", []),
 		"run": blue.get("run", {}),
@@ -7473,7 +7571,7 @@ func _mt_silver_leg(
 		"step": "silver_cave_outside",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"flypoint": world.state.is_engine_flag_active(ENGINE_FLYPOINT_SILVER_CAVE),
+		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_SILVER_CAVE),
 		"encounters": westbound.get("encounters", []),
 		"run": outside_entry,
 	})
@@ -7482,7 +7580,7 @@ func _mt_silver_leg(
 			"ok": false, "path": path,
 			"reason": "the walk onto Silver Cave Outside failed: %s" % westbound.get("reason", ""),
 		}
-	if not world.state.is_engine_flag_active(ENGINE_FLYPOINT_SILVER_CAVE):
+	if not _engine_flag_set(world, data, ENGINE_FLYPOINT_SILVER_CAVE):
 		return {
 			"ok": false, "path": path,
 			"reason": "SilverCaveOutsideFlypointCallback did not run",
@@ -9370,6 +9468,14 @@ func _reachable_step(
 	if direct != warp_target and not world.warp_at(direct).is_empty() \
 		and Gen2WorldCollision.is_warp_tile(world.collision_code_at(direct)):
 		return Vector2i(-1, -1)
+	# A whirlpool traps rather than moves: .CheckTile answers
+	# PLAYERMOVEMENT_FORCE_TURN for the cell the player stands on, so a plan that
+	# crosses one never leaves it. Dragon's Den B1F's (10,20) is the first cell on
+	# a walked route where the shortest path runs through one.
+	if direct != warp_target and StringName(Gen2WorldCollision.forced_action(
+		world.collision_code_at(direct)
+	).get("kind", &"none")) == &"force_turn":
+		return Vector2i(-1, -1)
 	# move_result() calls can_walk_to() with the direction, which reads the
 	# leave/enter wall mask at the player's own cell; from a BFS frontier that
 	# has to be anchored on the frontier cell instead, or the plan crosses walls
@@ -9571,6 +9677,16 @@ func _walk_cell_resolving(
 				"details": run.get("reason", ""),
 			}
 	return {"ok": false, "reason": "walk to %s did not settle" % target, "encounters": runs}
+
+
+## An engine flag named by its Crystal index, read on the profile's own table.
+## Every ENGINE_FLYPOINT_* constant here is a Crystal index and all of them sit
+## past ENGINE_MOBILE_SYSTEM, so on Gold and Silver every one of them is a cell
+## lower; `Gen2WorldState.engine_flag()` owns that shift.
+func _engine_flag_set(world: Gen2WorldAPI, data: GameData, crystal_index: int) -> bool:
+	return world.state.is_engine_flag_active(Gen2WorldState.engine_flag(
+		crystal_index, Gen2WorldState.is_crystal_profile(data)
+	))
 
 
 ## The [constant MAP_IDS] row for [param name] on this cartridge's profile.
