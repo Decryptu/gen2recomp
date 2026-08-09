@@ -661,6 +661,7 @@ func _battle_dump() -> PackedByteArray:
 	_write_hud(data, int(_layout["enemy_hud"]), RomLayout.ENEMY_HUD_TILES)
 	_write_hud(data, int(_layout["player_hud"]), RomLayout.PLAYER_HUD_TILES)
 	_write_bar_palettes(data)
+	_write_battle_object_palettes(data)
 	return data
 
 
@@ -668,13 +669,27 @@ func _battle_dump() -> PackedByteArray:
 func _write_bar_palettes(data: PackedByteArray) -> void:
 	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
 		var at: int = RomLayout.bar_palette_offset(_layout, index)
-		var wanted: Array = RomLayout.BAR_PALETTES[index]
-		for colour: int in wanted.size():
-			var packed: int = int(wanted[colour])
-			_write(
-				data, at + colour * Gen2Palette.COLOR_BYTES,
-				PackedByteArray([packed & 0xFF, packed >> 8])
-			)
+		_write_palette(data, at, RomLayout.BAR_PALETTES[index])
+
+
+## The six `BattleObjectPals`, checked the same way and for the same reason.
+func _write_battle_object_palettes(data: PackedByteArray) -> void:
+	var at: int = int(_layout["battle_object_palettes"])
+	for index: int in RomLayout.BATTLE_OBJECT_PALETTES_STORED:
+		_write_palette(
+			data,
+			at + index * RomLayout.BATTLE_OBJECT_PALETTE_COLORS * Gen2Palette.COLOR_BYTES,
+			RomLayout.BATTLE_OBJECT_PALETTES[index]
+		)
+
+
+func _write_palette(data: PackedByteArray, at: int, colours: Array) -> void:
+	for colour: int in colours.size():
+		var packed: int = int(colours[colour])
+		_write(
+			data, at + colour * Gen2Palette.COLOR_BYTES,
+			PackedByteArray([packed & 0xFF, packed >> 8])
+		)
 
 
 ## Fill levels as 2bpp tiles, each one two pixels fuller than the last.
@@ -710,6 +725,16 @@ func _write_hud(data: PackedByteArray, at: int, tiles: int) -> void:
 func test_battle_graphics_that_count_up_verify() -> void:
 	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(_battle_dump()), _layout)
 	assert_true(result["ok"], result["message"])
+
+
+## A palette table one table out still decodes into colours, so the check is the
+## values rather than the shape.
+func test_a_battle_object_palette_that_is_not_the_pinned_one_fails() -> void:
+	var data: PackedByteArray = _battle_dump()
+	data[int(_layout["battle_object_palettes"])] = 0x00
+	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(String(result["message"]), "Battle object palette gray")
 
 
 func test_a_bar_whose_levels_do_not_climb_fails() -> void:

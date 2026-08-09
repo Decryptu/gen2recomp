@@ -104,6 +104,7 @@ func _write_cache(complete: bool = true) -> void:
 		"tiles": {
 			"font": {"width": 2, "height": 2, "tiles": 1, "first_code": 0x80},
 		},
+		"battle_object_palettes": _battle_object_palettes(),
 		"complete": complete,
 	})
 
@@ -140,6 +141,16 @@ func _write_battle_anims() -> void:
 	RomCache.write_indices(
 		RomCache.battle_anim_gfx_path(_directory, 1), _blank_tile()
 	)
+
+
+## `BattleObjectPals` verbatim, since the accessor's whole job is to hand the
+## cartridge's own colours back unchanged.
+func _battle_object_palettes() -> Dictionary:
+	var out: Dictionary = {}
+	for index: int in RomLayout.BATTLE_OBJECT_PALETTES_STORED:
+		out[RomLayout.BATTLE_OBJECT_PALETTE_NAMES[index]] = \
+			RomLayout.BATTLE_OBJECT_PALETTES[index]
+	return out
 
 
 func _blank_tile() -> PackedByteArray:
@@ -316,6 +327,38 @@ func test_only_the_rows_with_graphics_carry_a_sheet() -> void:
 	})
 	assert_eq(data.battle_anim_gfx_indices(1).size(), Gen2Tiles.TILE_PIXELS)
 	assert_true(data.battle_anim_gfx(2).is_empty())
+
+
+## Six of the eight object palettes are table rows; the first two are whoever is
+## on the field, which is why they are passed in rather than looked up.
+func test_the_first_two_object_palettes_come_from_the_battlers() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var enemy: Array = [0x1234, 0x5678]
+	var player: Array = [0x0C63, 0x1084]
+	assert_eq(data.battle_object_palette(0, enemy, player)[1], Gen2Palette.from_packed(0x1234))
+	assert_eq(data.battle_object_palette(1, enemy, player)[1], Gen2Palette.from_packed(0x0C63))
+	# Without a pair there is nothing to draw with, so it falls back rather than
+	# reading the table's first row and colouring the mon wrong.
+	assert_eq(data.battle_object_palette(0), Gen2Palette.pic_palette(
+		PackedColorArray([Color.WHITE, Color.BLACK])
+	))
+
+
+func test_a_stored_object_palette_is_four_colours() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var gray: PackedColorArray = data.battle_object_palette(
+		RomLayout.BATTLE_OBJECT_PALETTE_FIRST_STORED
+	)
+	assert_eq(gray.size(), RomLayout.BATTLE_OBJECT_PALETTE_COLORS)
+	assert_eq(gray[0], Gen2Palette.from_packed(0x7FFF))
+	assert_ne(gray, data.battle_object_palette(RomLayout.BATTLE_OBJECT_PALETTE_COUNT - 1))
+	assert_eq(
+		data.battle_object_palette(RomLayout.BATTLE_OBJECT_PALETTE_COUNT).size(),
+		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK])).size(),
+		"a ninth palette falls back rather than reading past the table"
+	)
 
 
 func test_a_matchup_the_chart_does_not_list_is_neutral() -> void:

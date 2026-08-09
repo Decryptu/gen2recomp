@@ -95,6 +95,7 @@ func _initialize() -> void:
 		_verify_pound(game_id, data)
 		_verify_profile_split(game_id, data)
 		_verify_objects(game_id, data)
+		_verify_palettes(game_id, data)
 		_verify_gfx(game_id, data)
 		_run_every_animation(game_id, data)
 	_finish()
@@ -197,6 +198,43 @@ func _verify_objects(game_id: StringName, data: GameData) -> void:
 		used_gfx[int(row["gfx"])] = true
 	print("%s: %d objects reference %d of the %d graphics rows." % [
 		game_id, count, used_gfx.size(), data.battle_anim_gfx_count(),
+	])
+
+
+## The eight palettes an object row can name. Only six are table rows; slots 0
+## and 1 are whoever is on the field, so they are asked for with a pair and must
+## answer with it rather than with the table.
+func _verify_palettes(game_id: StringName, data: GameData) -> void:
+	var enemy: Array = [0x1234, 0x5678]
+	var player: Array = [0x0C63, 0x1084]
+	_check(
+		data.battle_object_palette(0, enemy, player)[1]
+			== Gen2Palette.from_packed(enemy[0]),
+		"%s: PAL_BATTLE_OB_ENEMY did not come from the battler's own pair." % game_id
+	)
+	_check(
+		data.battle_object_palette(1, enemy, player)[1]
+			== Gen2Palette.from_packed(player[0]),
+		"%s: PAL_BATTLE_OB_PLAYER did not come from the battler's own pair." % game_id
+	)
+	for index: int in RomLayout.BATTLE_OBJECT_PALETTES_STORED:
+		var slot: int = index + RomLayout.BATTLE_OBJECT_PALETTE_FIRST_STORED
+		var colors: PackedColorArray = data.battle_object_palette(slot)
+		var wanted: Array = RomLayout.BATTLE_OBJECT_PALETTES[index]
+		if not _check(
+			colors.size() == RomLayout.BATTLE_OBJECT_PALETTE_COLORS,
+			"%s: object palette %d has %d colours." % [game_id, slot, colors.size()]
+		):
+			continue
+		for colour: int in wanted.size():
+			_check(
+				colors[colour] == Gen2Palette.from_packed(int(wanted[colour])),
+				"%s: object palette %d colour %d is not the pinned $%04X." % [
+					game_id, slot, colour, int(wanted[colour]),
+				]
+			)
+	print("%s: %d object palettes, plus the two the battlers supply." % [
+		game_id, RomLayout.BATTLE_OBJECT_PALETTES_STORED,
 	])
 
 

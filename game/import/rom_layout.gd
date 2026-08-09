@@ -487,6 +487,37 @@ const BATTLE_ANIM_GFX_SIZE: int = 4
 const BATTLE_ANIM_GFX_FIRST_SHEET: int = 1
 const BATTLE_ANIM_GFX_LAST_SHEET: int = 39
 
+## The eight `PAL_BATTLE_OB_*` object palettes an animation object's palette byte
+## indexes, and which of them the cartridge stores.
+##
+## Only six are stored. `_CGB_BattleScreenLayout` (engine/gfx/cgb_layouts.asm)
+## copies `BattleObjectPals` into `wOBPals1` from slot 2 on, four colours each,
+## and fills slots 0 and 1 from the two battlers' own two-colour palettes through
+## `LoadPalette_White_Col1_Col2_Black`, so `PAL_BATTLE_OB_ENEMY` and
+## `PAL_BATTLE_OB_PLAYER` are whoever is on the field rather than table rows.
+const BATTLE_OBJECT_PALETTE_COUNT: int = 8
+const BATTLE_OBJECT_PALETTE_FIRST_STORED: int = 2
+const BATTLE_OBJECT_PALETTES_STORED: int = 6
+const BATTLE_OBJECT_PALETTE_COLORS: int = 4
+
+## The names the cache keys them by, in the cartridge's own order from
+## `PAL_BATTLE_OB_GRAY` on (constants/battle_anim_constants.asm).
+const BATTLE_OBJECT_PALETTE_NAMES: Array = [
+	"gray", "yellow", "red", "green", "blue", "brown",
+]
+
+## What those palettes hold, the way [constant BAR_PALETTES] pins the bars':
+## content known independently of the offset, so the values are the check.
+## `gfx/battle_anims/battle_anims.pal`, as packed 15-bit colours.
+const BATTLE_OBJECT_PALETTES: Array = [
+	[0x7FFF, 0x6739, 0x35AD, 0x0000],
+	[0x7FFF, 0x1FFF, 0x061F, 0x0000],
+	[0x7FFF, 0x627F, 0x195E, 0x0000],
+	[0x7FFF, 0x072C, 0x01C5, 0x0000],
+	[0x7FFF, 0x7D88, 0x7C81, 0x0000],
+	[0x7FFF, 0x1E58, 0x0DF4, 0x0000],
+]
+
 ## The four palettes a battle draws its bars with: the HP bar in green, yellow
 ## or red depending on how much is left, and the exp bar in blue. They are two
 ## colours each like a species' palette, white and black being implied, and they
@@ -786,6 +817,10 @@ const GOLD_SILVER: Dictionary = {
 		"oam_sets": 0xCEDF3,
 		"object_gfx": 0xCFC3B,
 	},
+	# BattleObjectPals (engine/gfx/color.asm). Located by matching the pinned
+	# gfx/battle_anims/battle_anims.pal whole; the hit is unique, and the
+	# identically sized unused table beside it does not match.
+	"battle_object_palettes": 0x9C09,
 	"trainer_pic_pointers": 0x80000,
 	"trainer_palettes": 0xB53D,
 	"trainer_class_names": 0x1B0955,
@@ -953,6 +988,7 @@ const CRYSTAL: Dictionary = {
 		"oam_sets": 0xCEEAE,
 		"object_gfx": 0xCFCF6,
 	},
+	"battle_object_palettes": 0x979C,
 	"trainer_pic_pointers": 0x128000,
 	"trainer_palettes": 0xB0CE,
 	"trainer_class_names": 0x2C1EF,
