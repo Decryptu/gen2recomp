@@ -20,6 +20,7 @@ const OBJECT_FIELDS: Array[StringName] = [
 var _regions: Dictionary = {}
 var _gfx: Array = []
 var _sine: PackedByteArray = PackedByteArray()
+var _profile: StringName = &"crystal"
 
 
 ## Built from a cache. Returns null when the cache carries no animation layer,
@@ -36,17 +37,26 @@ static func from_game_data(data: GameData) -> Gen2BattleAnimData:
 	var gfx: Array = []
 	for index: int in data.battle_anim_gfx_count():
 		gfx.append(data.battle_anim_gfx(index))
-	return create(regions, gfx, data.battle_anim_sine())
+	return create(regions, gfx, data.battle_anim_sine(), data.id)
 
 
 static func create(
-	regions: Dictionary, gfx: Array, sine: PackedByteArray = PackedByteArray()
+	regions: Dictionary, gfx: Array, sine: PackedByteArray = PackedByteArray(),
+	profile: StringName = &"crystal"
 ) -> Gen2BattleAnimData:
 	var out := Gen2BattleAnimData.new()
 	out._regions = regions
 	out._gfx = gfx
 	out._sine = sine
+	out._profile = profile
 	return out
+
+
+## Which cartridge this came from. Only the bg effect table reads it, and only
+## because pokegold's is one entry shorter than Crystal's; nothing else in the
+## layer is profile split.
+func profile() -> StringName:
+	return _profile
 
 
 ## One `BattleAnimSineWave` word, which is the amplitude `BattleAnim_Sine`

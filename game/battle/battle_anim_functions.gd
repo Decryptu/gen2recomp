@@ -76,9 +76,8 @@ const FRAMESET_PARALYZED_FLIPPED: int = 0x6E
 const FRAMESET_SPEED_LINE_1: int = 0x81
 const FRAMESET_THUNDER_WAVE_EXTRA: int = 0x35
 
-## `LOW(rSCY)`, which is what Surf puts in `hLCDCPointer` so its scanline window
-## scrolls the background vertically.
-const LCDC_POINTER_SCY: int = 0x42
+## `LOW(rSCY)`: Surf's scanline window scrolls the background vertically.
+const LCDC_POINTER_SCY: int = Gen2BattleAnimBackground.LCDC_SCY
 
 
 ## `DoBattleAnimFrame`. Answers false when [param object]'s callback is outside
@@ -191,6 +190,16 @@ static func _reinit(object: Gen2BattleAnimObject, frameset: int) -> void:
 ## `sra`, which keeps the sign bit rather than shifting a zero in.
 static func _sra(value: int) -> int:
 	return ((value >> 1) | (value & 0x80)) & 0xFF
+
+
+## `BattleAnim_Sine_e` and `..._Cosine_e`, the far-callable pair
+## `BattleBGEffects_Sine` reaches, so a bg effect scales with the same table.
+static func sine_of(data: Gen2BattleAnimData, a: int, d: int) -> int:
+	return _sine(data, a, d)
+
+
+static func cosine_of(data: Gen2BattleAnimData, a: int, d: int) -> int:
+	return _cosine(data, a, d)
 
 
 ## `BattleAnim_Sine`: [code]a = d * sin(a * pi/32)[/code], as the high byte of
@@ -561,16 +570,17 @@ static func _bubble_rise(object: Gen2BattleAnimObject) -> void:
 static func _surf(
 	player: Gen2BattleAnimPlayer, data: Gen2BattleAnimData, object: Gen2BattleAnimObject
 ) -> void:
+	var background: Gen2BattleAnimBackground = player.background()
 	match object.jumptable_index:
 		0:
 			_inc(object)
-			player.lcdc_pointer = LCDC_POINTER_SCY
-			player.ly_override_start = 0x58
-			player.ly_override_end = 0x5E
+			background.lcdc_pointer = LCDC_POINTER_SCY
+			background.ly_override_start = 0x58
+			background.ly_override_end = 0x5E
 		1:
 			if object.y < object.param:
 				_inc(object)
-				player.ly_override_start = 0
+				background.ly_override_start = 0
 				return
 			object.y = (object.y - 1) & 0xFF
 			var wave: int = _sine(data, object.var1, 0x10)
@@ -578,7 +588,7 @@ static func _surf(
 			var line: int = ((wave + object.y) & 0xFF) - 0x10
 			if line < 0:
 				return
-			player.ly_override_start = line
+			background.ly_override_start = line
 			object.x_offset = (object.x_offset + 1) & 0x7
 			object.var1 = (object.var1 + 2) & 0xFF
 		2:
@@ -589,11 +599,11 @@ static func _surf(
 				var below: int = object.y - 0x10
 				if below < 0:
 					return
-				player.ly_override_start = below
+				background.ly_override_start = below
 				return
-			player.lcdc_pointer = 0
-			player.ly_override_start = 0
-			player.ly_override_end = 0
+			background.lcdc_pointer = 0
+			background.ly_override_start = 0
+			background.ly_override_end = 0
 			object.deinit()
 		4:
 			object.deinit()
@@ -1360,15 +1370,15 @@ static func _sky_attack(player: Gen2BattleAnimPlayer, object: Gen2BattleAnimObje
 			_step_to_target(object, 0x4)
 
 
-## `.SkyAttack_CyclePalette`, which flashes `wOBP0`. That register is a DMG
-## object palette, so on the Color hardware the write lands and shows nothing;
-## it is kept because dropping it would lose the one thing this state does.
+## `.SkyAttack_CyclePalette`, which flashes `wOBP0`. `BattleAnimRequestPals`
+## watches that byte, so on the Color hardware the write becomes a remap of the
+## two object palettes from `PAL_BATTLE_OB_GRAY` on.
 static func _sky_attack_palette(
 	player: Gen2BattleAnimPlayer, object: Gen2BattleAnimObject
 ) -> void:
 	var phase: int = object.var2 & 0x7
 	object.var2 = (object.var2 + 1) & 0xFF
-	player.obp0 = SKY_ATTACK_PALS[phase >> 1] & object.var1
+	player.background().obp0 = SKY_ATTACK_PALS[phase >> 1] & object.var1
 
 
 static func _growth_swords_dance(
