@@ -231,12 +231,16 @@ Battle-screen moves are random and a full move set declines the learn offer; use
 `show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`
 for a fallback pairing.
 
-The world screen's start menu wires Pokemon, Pack, Pokegear, Player, Save,
-Options and Exit; only Pokedex appears in its source position without doing
-anything yet. Options is the cartridge's own seven-row OPTION screen over the
-same values the launcher's settings edit, so the two can never disagree, and
-Player is the trainer card, drawn from the cartridge's own graphics with its
-badge pages and its play timer.
+The world screen's start menu wires every source entry: Pokedex, Pokemon, Pack,
+Pokegear, Player, Save, Options and Exit. Options is the cartridge's own
+seven-row OPTION screen over the same values the launcher's settings edit, so
+the two can never disagree, and Player is the trainer card, drawn from the
+cartridge's own graphics with its badge pages and its play timer.
+Pokedex lists the species in the cartridge's own NEW, OLD and A to Z orders,
+showing a name once seen and a caught mark once caught, and opens each seen
+species' entry with its category, height, weight and both description pages.
+SELECT changes the order; the mode is saved. Its SEARCH screen, the Unown dex
+and the entry screen's AREA, CRY and PRNT buttons are not built.
 Pokegear opens its card list, in the source's clock, map, phone, radio order and
 showing only cards the player owns; the map card keeps its position marked
 unavailable. The radio card tunes with left and right over the cartridge's own

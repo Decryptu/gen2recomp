@@ -290,3 +290,21 @@ func test_seeding_roaming_mons_keeps_a_record_that_already_moved() -> void:
 	var loose: Gen2WorldState = Gen2WorldState.from_dict({"roaming_mons": moved})
 	loose.ensure_roaming_mons(initial)
 	assert_eq(loose.roaming_mons(), moved)
+
+
+## `wLastDexMode` sits in the saved player data, so it survives a snapshot the
+## way the radio knob beside it does.
+func test_the_last_dex_mode_round_trips() -> void:
+	var state := Gen2WorldState.new()
+	assert_eq(state.last_dex_mode(), RomLayout.DEXMODE_NEW, "a fresh state opens on NEW")
+	state.set_last_dex_mode(RomLayout.DEXMODE_ABC)
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.last_dex_mode(), RomLayout.DEXMODE_ABC)
+
+
+## DEXMODE_UNOWN is the Unown dex rather than a listing order, and never becomes
+## wCurDexMode, so it is refused rather than stored.
+func test_the_unown_dex_is_not_a_listing_mode() -> void:
+	var state := Gen2WorldState.new()
+	state.set_last_dex_mode(RomLayout.DEXMODE_UNOWN)
+	assert_eq(state.last_dex_mode(), RomLayout.DEXMODE_NEW)

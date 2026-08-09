@@ -113,11 +113,22 @@ static func decode_sequence(
 		if at < 0 or at >= data.size():
 			break
 		out.append(decode(data, at, max_length))
-		var end: int = at
-		while end < data.size() and data[end] != TERMINATOR and end - at < max_length:
-			end += 1
-		at = end + 1
+		at = terminated_end(data, at, max_length)
 	return out
+
+
+## The offset just past the terminator of the string at [param offset].
+##
+## What a caller needs to read the field that follows a variable-length string:
+## a Pokedex entry's height sits directly after its category, and its second
+## description page directly after its first. [param max_length] is the same
+## runaway guard [method decode_sequence] uses, and a walk that hits it, or the
+## end of the data, still answers one past where it stopped rather than looping.
+static func terminated_end(data: PackedByteArray, offset: int, max_length: int) -> int:
+	var end: int = offset
+	while end < data.size() and data[end] != TERMINATOR and end - offset < max_length:
+		end += 1
+	return end + 1
 
 
 ## Turns a string into the codes that draw it, one code per tile.

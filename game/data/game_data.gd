@@ -29,6 +29,9 @@ var _moves: Array = []
 ## TMHMMoves in TMNUM order, restored to integers because JSON reads them back
 ## as floats.
 var _tmhm_moves: Array[int] = []
+## The two cached dex orderings, by the key each mode reads, restored to
+## integers because JSON reads them back as floats.
+var _dex_orders: Dictionary = {}
 var _items: Array = []
 var _world_trades: Array = []
 var _types: Array = []
@@ -98,6 +101,7 @@ static func open_directory(path: String) -> GameData:
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
+	data._load_dex_orders(RomCache.dex_orders_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
 	data._world_trades = data._read_array(RomCache.world_trades_path(path))
 	data._types = data._read_array(RomCache.types_path(path))
@@ -509,6 +513,58 @@ func learnset(number: int) -> Array:
 ## [constant RomLayout.EVOLVE_STAT].
 func evolutions(number: int) -> Array:
 	return _rows(species(number), "evolutions", ["method", "parameter", "condition", "target"])
+
+
+## A species' Pokedex entry as { category, height, weight, pages }, or an empty
+## Dictionary if there is no such number.
+##
+## [code]height[/code] and [code]weight[/code] are the cartridge's own numbers,
+## not measurements: see [method RomImporter.read_dex_entry]. [code]pages[/code]
+## is the two description pages, in order. It goes through [method species] so a
+## mod that replaces a species replaces its dex entry with it.
+func dex_entry(number: int) -> Dictionary:
+	var entry: Variant = species(number).get("dex", {})
+	if not entry is Dictionary or (entry as Dictionary).is_empty():
+		return {}
+	var dex: Dictionary = entry
+	var pages: PackedStringArray = PackedStringArray()
+	for page: Variant in dex.get("pages", []):
+		pages.append(String(page))
+	return {
+		"category": String(dex.get("category", "")),
+		"height": int(dex.get("height", 0)),
+		"weight": int(dex.get("weight", 0)),
+		"pages": pages,
+	}
+
+
+## data/pokemon/dex_order_new.asm, the order DEXMODE_NEW lists species in.
+func dex_order_new() -> PackedInt32Array:
+	return _dex_orders.get("new", PackedInt32Array())
+
+
+## data/pokemon/dex_order_alpha.asm, the order DEXMODE_ABC filters down to the
+## species that have been seen.
+func dex_order_alpha() -> PackedInt32Array:
+	return _dex_orders.get("alpha", PackedInt32Array())
+
+
+## Both order tables, coerced out of JSON's single number type once on open. A
+## table that is missing or the wrong length is dropped rather than half-kept:
+## an order with a hole in it would list a species number of zero, which
+## `.PrintEntry` treats as the end of the list.
+func _load_dex_orders(path: String) -> void:
+	var raw: Variant = RomCache.read_json(path)
+	if not raw is Dictionary:
+		return
+	for key: String in ["new", "alpha"]:
+		var value: Variant = (raw as Dictionary).get(key, [])
+		if not value is Array or (value as Array).size() != RomLayout.SPECIES_COUNT:
+			continue
+		var order: PackedInt32Array = PackedInt32Array()
+		for number: Variant in value as Array:
+			order.append(int(number))
+		_dex_orders[key] = order
 
 
 ## The moves a Pokémon of this species is created knowing at [param level].

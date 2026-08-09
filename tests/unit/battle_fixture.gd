@@ -239,6 +239,7 @@ static func build(directory: String) -> GameData:
 	RomCache.prepare(directory)
 
 	RomCache.write_json(RomCache.species_path(directory), _species())
+	RomCache.write_json(RomCache.dex_orders_path(directory), _dex_orders())
 	RomCache.write_json(RomCache.moves_path(directory), _moves())
 	RomCache.write_json(RomCache.items_path(directory), _items())
 	RomCache.write_json(RomCache.types_path(directory), _types())
@@ -319,9 +320,27 @@ static func _species() -> Array:
 			"base_exp": entry[4],
 			"gender_ratio": entry[6],
 			"front_tiles": [7, 7],
+			"dex": {
+				"category": "%s MON" % entry[0],
+				"height": 204,
+				"weight": 150,
+				"pages": ["page one", "page two"],
+			},
 			"palette": {"normal": [0x1234, 0x5678], "shiny": [0x0C63, 0x1084]},
 		})
 	return out
+
+
+## Both dex order tables, which every real cache carries and the Pokedex refuses
+## to open without. The species range stands in for NewPokedexOrder, since
+## nothing here checks a listing against the cartridge's own order.
+static func _dex_orders() -> Dictionary:
+	var forward: Array = []
+	var backward: Array = []
+	for number: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		forward.append(number)
+		backward.append(RomLayout.SPECIES_COUNT + 1 - number)
+	return {"new": forward, "alpha": backward}
 
 
 static func _moves() -> Array:

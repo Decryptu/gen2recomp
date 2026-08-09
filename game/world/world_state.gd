@@ -117,6 +117,10 @@ var _used_flash: bool = false
 var _map_music: int = MUSIC_NONE
 var _radio_knob: int = Gen2WorldRadio.KNOB_MIN
 var _radio_channel: int = -1
+## `wLastDexMode`, which sits in the saved player data beside `wPokegearFlags`
+## and `wRadioTuningKnob` rather than in the Pokedex's own cleared block: the
+## dex takes its mode from here on opening and writes the mode back on exit.
+var _last_dex_mode: int = RomLayout.DEXMODE_NEW
 
 
 func _init(
@@ -205,6 +209,7 @@ func to_dict() -> Dictionary:
 		"map_music": _map_music,
 		"radio_knob": _radio_knob,
 		"radio_channel": _radio_channel,
+		"last_dex_mode": _last_dex_mode,
 	}
 
 
@@ -240,6 +245,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	restored._map_music = maxi(0, int(source.get("map_music", MUSIC_NONE)))
 	restored.set_radio_knob(int(source.get("radio_knob", Gen2WorldRadio.KNOB_MIN)))
 	restored._radio_channel = int(source.get("radio_channel", -1))
+	restored.set_last_dex_mode(int(source.get("last_dex_mode", RomLayout.DEXMODE_NEW)))
 	return restored
 
 
@@ -271,6 +277,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_map_music = restored._map_music
 	_radio_knob = restored._radio_knob
 	_radio_channel = restored._radio_channel
+	_last_dex_mode = restored._last_dex_mode
 	changed.emit()
 
 
@@ -564,6 +571,22 @@ func radio_knob() -> int:
 
 
 ## Clamped and snapped to the source's own two-step dial.
+func last_dex_mode() -> int:
+	return _last_dex_mode
+
+
+## `.exit`'s `ld a, [wCurDexMode]; ld [wLastDexMode], a`. A mode outside the
+## three the listing can be in is refused rather than stored: the fourth,
+## DEXMODE_UNOWN, is the Unown dex, which never becomes `wCurDexMode`.
+func set_last_dex_mode(mode: int) -> void:
+	if mode not in [
+		RomLayout.DEXMODE_NEW, RomLayout.DEXMODE_OLD, RomLayout.DEXMODE_ABC,
+	] or mode == _last_dex_mode:
+		return
+	_last_dex_mode = mode
+	changed.emit()
+
+
 func set_radio_knob(knob: int) -> void:
 	var next_knob: int = clampi(knob, Gen2WorldRadio.KNOB_MIN, Gen2WorldRadio.KNOB_MAX)
 	next_knob -= next_knob % Gen2WorldRadio.KNOB_STEP

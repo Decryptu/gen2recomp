@@ -87,6 +87,9 @@ func _write_cache(complete: bool = true) -> void:
 		"music": [{"index": 0, "bank": 1, "address": 0x4000}],
 		"sfx": [{"index": 0, "bank": 2, "address": 0x4000}],
 	})
+	RomCache.write_json(RomCache.dex_orders_path(_directory), {
+		"new": _dex_order(true), "alpha": _dex_order(false),
+	})
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testgame",
@@ -102,6 +105,15 @@ func _write_cache(complete: bool = true) -> void:
 		},
 		"complete": complete,
 	})
+
+
+## A full-length order table, since GameData drops one that is not: the two
+## differ only in direction, which is enough to tell them apart.
+func _dex_order(forward: bool) -> Array:
+	var out: Array = []
+	for number: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		out.append(number if forward else RomLayout.SPECIES_COUNT + 1 - number)
+	return out
 
 
 func _matchup(
@@ -128,6 +140,12 @@ func _species(number: int, name: String, normal: int, shiny: int) -> Dictionary:
 			"method": RomLayout.EVOLVE_LEVEL, "parameter": 16, "condition": 0, "target": 2,
 		}],
 		"learnset": [{"level": 1, "move": 33}, {"level": 4, "move": 45}],
+		"dex": {
+			"category": "SEED",
+			"height": 204,
+			"weight": 150,
+			"pages": ["page one", "page two"],
+		},
 	}
 
 
@@ -454,3 +472,32 @@ func test_a_species_knows_what_its_level_says_it_knows() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	assert_eq(data.moves_at_level(1, 1), [33], "the move at level 4 is not learned yet")
 	assert_eq(data.moves_at_level(1, 4), [33, 45])
+
+
+## The dex entry travels on the species, so a number with no species has none.
+func test_a_dex_entry_comes_back_with_its_numbers_coerced() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var entry: Dictionary = data.dex_entry(1)
+	assert_eq(String(entry["category"]), "SEED")
+	assert_eq(int(entry["height"]), 204)
+	assert_eq(int(entry["weight"]), 150)
+	assert_eq(Array(entry["pages"] as PackedStringArray), ["page one", "page two"])
+	assert_true(data.dex_entry(999).is_empty(), "no species, no entry")
+
+
+func test_both_dex_order_tables_come_back_as_species_numbers() -> void:
+	_write_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.dex_order_new().size(), RomLayout.SPECIES_COUNT)
+	assert_eq(data.dex_order_new()[0], 1)
+	assert_eq(data.dex_order_alpha()[0], RomLayout.SPECIES_COUNT)
+
+
+## A table that is not the full species range would list a species number of
+## zero, which the listing treats as its end, so it is dropped whole.
+func test_a_short_dex_order_table_is_dropped() -> void:
+	_write_cache()
+	RomCache.write_json(RomCache.dex_orders_path(_directory), {"new": [1, 2, 3]})
+	var data: GameData = GameData.open_directory(_directory)
+	assert_true(data.dex_order_new().is_empty())
