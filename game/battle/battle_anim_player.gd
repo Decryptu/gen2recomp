@@ -58,6 +58,16 @@ const MAX_BG_EFFECTS: int = Gen2BattleAnimBgEffects.MAX_EFFECTS
 ## frame-delay branch both check `wFXAnimID` against.
 const ROLLOUT: int = 0xCD
 
+## `BATTLE_AFTERANIMS` (constants/move_constants.asm) and the four offsets from
+## it a battle command writes into `wBattleAfterAnim`. The byte stored is the
+## offset; `BattleAnimRunScript` adds the base back to reach the animation.
+const BATTLE_AFTERANIMS: int = 0x10E
+const AFTER_ANIM_NONE: int = 0
+const AFTER_ANIM_ENEMY_DAMAGE: int = 0x10F - BATTLE_AFTERANIMS
+const AFTER_ANIM_ENEMY_STAT_DOWN: int = 0x110 - BATTLE_AFTERANIMS
+const AFTER_ANIM_PLAYER_DAMAGE: int = 0x112 - BATTLE_AFTERANIMS
+const AFTER_ANIM_WOBBLE: int = 0x113 - BATTLE_AFTERANIMS
+
 var _data: Gen2BattleAnimData = null
 var _script: Gen2BattleAnimScript = null
 var _anim_index: int = 0
@@ -73,6 +83,10 @@ var _tile_dict: Array = []
 var _tiles: Array = []
 var _keep_sprites: bool = false
 var _sprites: Array = []
+## What the last frame's `RunBattleAnimCommand` ran, for the caller that owns
+## the things the interpreter does not: `anim_sound` and `anim_cry` have to
+## reach an audio player, and this layer has none.
+var _frame_commands: Array = []
 var _unimplemented: Dictionary = {}
 ## `wActiveBGEffects`: five `battle_bg_effect` slots.
 var _bg_effects: Array[Gen2BattleAnimBgEffect] = []
@@ -211,6 +225,12 @@ func tiles() -> Array:
 	return _tiles
 
 
+## The commands the last [method advance_frame] ran, each
+## [code]{ name, byte, operands }[/code] as [Gen2BattleAnimScript] reports them.
+func frame_commands() -> Array:
+	return _frame_commands
+
+
 ## The live objects, for a caller that wants more than their sprites.
 func objects() -> Array:
 	var out: Array = []
@@ -259,7 +279,8 @@ func advance_frame() -> bool:
 ## `RunBattleAnimCommand`, plus the commands that reach past the interpreter into
 ## the objects and the tile window.
 func _run_commands() -> void:
-	for command: Dictionary in _script.advance_frame():
+	_frame_commands = _script.advance_frame()
+	for command: Dictionary in _frame_commands:
 		match command["name"]:
 			Gen2BattleAnimScript.OBJ:
 				_queue_object(command["operands"])

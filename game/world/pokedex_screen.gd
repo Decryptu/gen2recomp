@@ -18,6 +18,10 @@ extends Control
 ## Emitted on B from the listing, which is where `DEXSTATE_EXIT` lands.
 signal closed
 
+## Emitted by the entry screen's CRY button, since this screen owns no audio
+## player: the overworld's own answers it, the way it answers a script's cry.
+signal cry_requested(species: int)
+
 enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS }
 
 const PANEL: Color = Color("#14233a")
@@ -32,6 +36,13 @@ const ACCENT: Color = Color("#f3c969")
 const CAUGHT_SYMBOL: String = "*"
 const UNCAUGHT_SYMBOL: String = " "
 
+## `DexEntryScreen_ArrowCursorData`'s four positions, in its own order. AREA
+## wants a town map and PRNT a printer, neither of which is imported, so both are
+## drawn and refuse.
+const ENTRY_BUTTONS: Array[String] = ["PAGE", "AREA", "CRY", "PRNT"]
+const ENTRY_BUTTON_PAGE: int = 0
+const ENTRY_BUTTON_CRY: int = 2
+
 var _dex: Gen2Pokedex = null
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
@@ -39,6 +50,9 @@ var _mode: Mode = Mode.LIST
 ## The OPTION screen's own cursor (`wDexArrowCursorPosIndex`), which opens on
 ## the row matching the current mode.
 var _option_cursor: int = 0
+## The entry screen's own `wDexArrowCursorPosIndex`, which
+## `Pokedex_ReinitDexEntryScreen` puts back on PAGE for each new entry.
+var _entry_cursor: int = 0
 var _mode_rows: Array = []
 
 var _title: Label = null
@@ -135,14 +149,38 @@ func _handle_entry(button: int) -> bool:
 			_open_list_mode()
 			return true
 		Gen2Button.A:
-			_dex.toggle_page()
+			_entry_action()
+			return true
+		Gen2Button.LEFT, Gen2Button.RIGHT:
+			## `DexEntryScreen_ArrowCursorData` allows left and right only, over
+			## four positions, and stops at either end.
+			var next: int = _entry_cursor + (1 if button == Gen2Button.RIGHT else -1)
+			_entry_cursor = clampi(next, 0, ENTRY_BUTTONS.size() - 1)
 			_render_entry()
 			return true
 		Gen2Button.UP, Gen2Button.DOWN:
 			if _dex.step_entry(button):
+				## `Pokedex_ReinitDexEntryScreen` calls `Pokedex_InitArrowCursor`,
+				## so a new entry opens on PAGE whatever the last one ended on.
+				_entry_cursor = 0
 				_render_entry()
 			return true
 	return false
+
+
+## `DexEntryScreen_MenuActionJumptable`. PAGE and CRY are built; `.Area` needs a
+## town map and `.Print` a printer, and both do nothing rather than refusing out
+## loud, since the cartridge's own row has no refusal for them either.
+func _entry_action() -> void:
+	match _entry_cursor:
+		ENTRY_BUTTON_PAGE:
+			_dex.toggle_page()
+			_render_entry()
+		ENTRY_BUTTON_CRY:
+			## `.Cry` is `GetCryIndex` and `PlayCry`, which is the species number
+			## less one straight into `PokemonCries`, not a lookup through the
+			## cry table: the row and the species share an index.
+			cry_requested.emit(_dex.selected_species())
 
 
 ## `Pokedex_UpdateOptionScreen`: SELECT and B both return to the listing, and A
@@ -197,7 +235,7 @@ func _open_list_mode() -> void:
 
 func _open_entry_mode() -> void:
 	_mode = Mode.ENTRY
-	_footer.text = "A: page    Up/Down: entry    B: back"
+	_entry_cursor = 0
 	_status.text = ""
 	_render_entry()
 
@@ -361,6 +399,12 @@ func _render_entry() -> void:
 	for line: String in String(entry["text"]).split("\n"):
 		_add_line(line)
 	_status.text = "P.%d" % (int(entry["page"]) + 1) if bool(entry["caught"]) else ""
+	var buttons: PackedStringArray = PackedStringArray()
+	for index: int in ENTRY_BUTTONS.size():
+		buttons.append(
+			("[%s]" if index == _entry_cursor else " %s ") % ENTRY_BUTTONS[index]
+		)
+	_footer.text = "%s   Left/Right: button   A: choose   B: back" % " ".join(buttons)
 
 
 func _render_option() -> void:

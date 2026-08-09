@@ -57,6 +57,8 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	assert_eq(audio["sfx"][0]["address"], int(_layout["sfx_first_address"]))
 	assert_eq((audio["cries"] as Array).size(), RomLayout.AUDIO_CRY_COUNT)
 	assert_eq(audio["cries"][0]["address"], int(_layout["cry_first_address"]))
+	assert_eq((audio["mon_cries"] as Array).size(), RomLayout.MON_CRY_COUNT)
+	assert_eq(audio["mon_cries"][0], {"index": 15, "pitch": 128, "length": 129})
 	assert_eq(audio["wave_samples"]["sample_count"], RomLayout.AUDIO_WAVE_SAMPLE_COUNT)
 	assert_eq(audio["drumkits"]["byte_count"], RomLayout.AUDIO_DRUMKIT_BYTES)
 	assert_gt(audio["music"][0]["byte_count"], 0)
@@ -178,6 +180,19 @@ func _write_audio(data: PackedByteArray) -> void:
 		var address: int = int(_layout["cry_first_address"]) + index
 		_write_far(data, cry_table + index * 3, int(_layout["cry_first_bank"]), address)
 		data[RomFile.linear(int(_layout["cry_first_bank"]), address)] = 0xFF
+	_write_mon_cries(data)
+
+
+## `PokemonCries`. The importer pins five rows by value, so the fixture writes
+## those five and leaves the rest silent.
+func _write_mon_cries(data: PackedByteArray) -> void:
+	var table: int = int(_layout["mon_cries"])
+	for species: int in RomLayout.MON_CRY_COUNT:
+		var at: int = table + species * RomLayout.MON_CRY_ROW_SIZE
+		var row: Array = RomLayout.MON_CRY_PINS.get(species + 1, [0, 0, 0])
+		_write_u16(data, at, int(row[0]))
+		_write_u16(data, at + 2, int(row[1]))
+		_write_u16(data, at + 4, int(row[2]))
 
 
 func _write_menu(data: PackedByteArray) -> void:

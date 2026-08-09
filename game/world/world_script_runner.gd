@@ -1231,7 +1231,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x82:
 			_emit_runtime_event(&"map_music_restart_disabled", {})
 		0x83:
-			return _stage_audio_request(&"cry", {"cry_id": int(command.get("value", 0))})
+			return _stage_audio_request(&"cry", {"species": int(command.get("value", 0))})
 		0x84:
 			return _stage_audio_request(&"sound", {"address": int(command.get("value", 0))})
 		0x85:

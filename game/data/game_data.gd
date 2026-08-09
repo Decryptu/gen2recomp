@@ -232,6 +232,38 @@ func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionar
 	return {}
 
 
+## `PokemonCries`' row for one species: which cry stream it plays and the
+## `wCryPitch`/`wCryLength` it plays it at. An empty answer is a species outside
+## the table, which is what a mod's own number is.
+func mon_cry(species: int) -> Dictionary:
+	var rows: Variant = _audio().get("mon_cries", [])
+	if not rows is Array or species < 1 or species > (rows as Array).size():
+		return {}
+	var row: Variant = (rows as Array)[species - 1]
+	if not row is Dictionary:
+		return {}
+	return {
+		"index": int((row as Dictionary).get("index", 0)),
+		"pitch": int((row as Dictionary).get("pitch", 0)),
+		"length": int((row as Dictionary).get("length", 0)),
+	}
+
+
+## The cry one species plays, which is `PlayCry`'s own two steps: the
+## `PokemonCries` row, then the stream it names, with the row's pitch and length
+## carried on the record so `_PlayCry`'s modulation reaches the decoder.
+func species_cry(species: int) -> Dictionary:
+	var row: Dictionary = mon_cry(species)
+	if row.is_empty():
+		return {}
+	var record: Dictionary = world_audio(&"cries", int(row["index"]))
+	if record.is_empty():
+		return {}
+	record["cry_pitch"] = int(row["pitch"])
+	record["cry_length"] = int(row["length"])
+	return record
+
+
 func world_audio_asset(kind: StringName) -> Dictionary:
 	var value: Variant = _audio().get(String(kind), {})
 	return _coerce_service_dictionary(value, _blob("audio"))

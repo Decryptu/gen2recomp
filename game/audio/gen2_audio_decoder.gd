@@ -95,7 +95,17 @@ static func _decode_music(
 	}
 
 
+## `_PlayCry`'s two parameters, which `PlayCry` reads out of `PokemonCries`
+## before it. Without them a cry is the raw stream, and most species share a
+## stream: Ivysaur and Venusaur are both CRY_BULBASAUR.
+##
+## `wCryPitch` is `CHANNEL_PITCH_OFFSET`, added to the note frequency once per
+## note; `wCryLength` is `CHANNEL_TEMPO`, which `SetNoteDuration` multiplies by.
+## Both are read off the record, so a caller that supplies neither still gets
+## the stream at its own speed.
 static func _decode_cry(record: Dictionary, bytes: PackedByteArray) -> Dictionary:
+	var pitch: int = int(record.get("cry_pitch", 0))
+	var length: int = int(record.get("cry_length", 0))
 	var origin: int = int(record.get("data_address", record.get("address", 0)))
 	var header_at: int = int(record.get("address", 0)) - origin
 	if header_at < 0 or header_at >= bytes.size():
@@ -115,7 +125,8 @@ static func _decode_cry(record: Dictionary, bytes: PackedByteArray) -> Dictionar
 		if stream_at < 0 or stream_at >= bytes.size():
 			return _failure(&"audio_channel_pointer_outside_record")
 		var track_result: Dictionary = _decode_track(
-			bytes, stream_at, channel_id, &"cry", origin, {}
+			bytes, stream_at, channel_id, &"cry", origin, {},
+			{"cry_pitch": pitch, "cry_length": length}
 		)
 		if not bool(track_result.get("ok", false)):
 			return track_result
@@ -138,7 +149,7 @@ static func _decode_cry(record: Dictionary, bytes: PackedByteArray) -> Dictionar
 
 static func _decode_track(
 	bytes: PackedByteArray, start: int, channel_id: int, request_kind: StringName,
-	origin: int, assets: Dictionary
+	origin: int, assets: Dictionary, cry: Dictionary = {}
 ) -> Dictionary:
 	var state: Dictionary = {
 		"at": start,
@@ -163,6 +174,12 @@ static func _decode_track(
 	var events: Array = []
 	var warnings: Array[StringName] = []
 	var hardware_channel: int = ((channel_id - 1) % 4) + 1
+	# `_PlayCry` writes `wCryLength` into `CHANNEL_TEMPO` for every channel below
+	# CHAN4 and skips the noise channel outright, so its notes keep the neutral
+	# tempo above.
+	if hardware_channel != 4 and int(cry.get("cry_length", 0)) > 0:
+		state["tempo"] = int(cry["cry_length"]) & 0xFFFF
+	state["pitch_offset"] = int(cry.get("cry_pitch", 0)) & 0xFFFF
 	var looped: bool = false
 	while int(state["steps"]) < MAX_STEPS and events.size() < MAX_EVENTS:
 		state["steps"] = int(state["steps"]) + 1
@@ -280,6 +297,13 @@ static func _decode_fixed_note(
 	var frequency: int = bytes[at + 1]
 	if hardware_channel != 4:
 		frequency |= bytes[at + 2] << 8
+		# `HandleTrackVibrato`'s `SOUND_PITCH_OFFSET` branch adds the offset to
+		# `wCurTrackFrequency`, which is a per-update copy, so it lands on the
+		# note once rather than compounding. `rAUDxHIGH` keeps three frequency
+		# bits, so a sum past $7ff wraps rather than clipping: Bulbasaur's own
+		# 128 takes its first two notes over and they come out low.
+		if frequency != 0:
+			frequency = (frequency + int(state.get("pitch_offset", 0))) & 0x7FF
 	at += bytes_after_length
 	var duration: int = _set_note_duration(state, length)
 	var event: Dictionary = {

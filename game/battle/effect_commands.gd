@@ -219,6 +219,31 @@ const KINGS_ROCK: StringName = &"kingsrock"
 ## is chosen.
 const SKIP_SUN_CHARGE: StringName = &"skipsuncharge"
 
+## The move's own animation, and the damage flash `BattleAnimRunScript` chains
+## off `wBattleAfterAnim` behind it.
+##
+## `BattleCommand_MoveAnim` is `lowersub`, `moveanimnosub`, `raisesub`. Both subs
+## return at once without `SUBSTATUS_SUBSTITUTE`, which this engine does not
+## have, so the two names are one command here.
+const MOVE_ANIM: StringName = &"moveanim"
+const MOVE_ANIM_NO_SUB: StringName = &"moveanimnosub"
+
+## The animation a stat move plays, between the change and its message.
+## `BattleCommand_StatUpAnim` uses one animation for both sides;
+## `..._StatDownAnim` picks `ANIM_ENEMY_STAT_DOWN` on the player's turn and
+## `ANIM_WOBBLE` on the enemy's. Neither is skipped by a change that failed:
+## `RaiseStat` sets `wFailedMessage`, not `wAttackMissed`, so a stat already at
+## its ceiling animates and then says it will not go higher.
+const STAT_UP_ANIM: StringName = &"statupanim"
+const STAT_DOWN_ANIM: StringName = &"statdownanim"
+
+## The five effects `BattleCommand_MoveAnimNoSub` alternates `wBattleAnimParam`
+## for instead of clearing it. Conversion and Triple Kick are named for the
+## record and are not written, so no move reaches those two.
+const ALTERNATING_ANIM_EFFECTS: Array[int] = [
+	Gen2MoveEffect.MULTI_HIT, Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE,
+]
+
 ## Raises and lowers a stat by one stage or two, named as the cartridge names
 ## them and in [constant Gen2BattleMon.STAGED_STATS] plus
 ## [constant Gen2BattleMon.STAGED_ODDS] order, which is also the order the effect
@@ -462,6 +487,16 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_thunder_accuracy(turn)
 		SKIP_SUN_CHARGE:
 			_skip_sun_charge(turn)
+		MOVE_ANIM, MOVE_ANIM_NO_SUB:
+			_move_anim(turn)
+		STAT_UP_ANIM:
+			_stat_change_anim(turn, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
+		STAT_DOWN_ANIM:
+			_stat_change_anim(
+				turn,
+				Gen2BattleAnimPlayer.AFTER_ANIM_ENEMY_STAT_DOWN if turn.side == Gen2Battle.PLAYER
+					else Gen2BattleAnimPlayer.AFTER_ANIM_WOBBLE
+			)
 		KINGS_ROCK:
 			_kings_rock(turn)
 		ALL_STATS_UP:
@@ -884,6 +919,9 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 	if flag == Gen2Status.FREEZE and turn.battle.weather == Gen2Weather.SUN:
 		return
 
+	if _status_move_animates(turn, flag):
+		_animate_current_move(turn)
+
 	if flag == Gen2Status.SLEEP_MASK:
 		defender.status = Gen2Status.roll_sleep(turn.rng())
 	else:
@@ -913,6 +951,8 @@ static func _toxic_target(turn: Gen2Turn) -> void:
 	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
 		return
 
+	# `BattleCommand_Poison`'s `.toxic` branch reaches the same `.apply_poison`.
+	_animate_current_move(turn)
 	defender.status |= Gen2Status.POISON
 	defender.toxic_counter = 1
 	turn.emit(Gen2Battle.STATUS_INFLICTED, {
@@ -947,6 +987,11 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.is_fainted() or Gen2Substatus.has(defender.substatus, Gen2Substatus.CONFUSED):
 		return
+
+	# `BattleCommand_FinishConfusingTarget`'s `.got_effect` skips the animation
+	# for the three effects that already played one of their own.
+	if turn.effect() != Gen2MoveEffect.CONFUSE_HIT:
+		_animate_current_move(turn)
 
 	defender.substatus |= Gen2Substatus.CONFUSED
 	defender.confusion_turns = Gen2Substatus.roll_confusion(turn.rng())
@@ -1001,6 +1046,11 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
 			turn.effectiveness = int(result["effectiveness"])
+
+		# `moveanimnosub` sits inside the source loop, after `clearmissdamage`
+		# and before `applydamage`, so every hit animates and only the last one
+		# carries the damage flash.
+		_multi_hit_anim(turn, hit == hits - 1)
 
 		turn.dealt = defender.take_damage(turn.damage)
 		turn.battle.record_damage_taken(
@@ -1094,6 +1144,9 @@ static func _ohko(turn: Gen2Turn) -> void:
 		turn.end()
 		return
 
+	# `OHKOHit` is `ohko, moveanim, failuretext, applydamage`: this command owns
+	# the roll and the damage both, so the animation sits between them here.
+	_move_anim(turn)
 	turn.battle.record_damage_taken(
 		turn.target, turn.side, turn.move_number, turn.effect(), 0xFFFF
 	)
@@ -1198,6 +1251,7 @@ static func _curl(turn: Gen2Turn) -> void:
 static func _haze(turn: Gen2Turn) -> void:
 	turn.battle.mon(Gen2Battle.PLAYER).reset_stages()
 	turn.battle.mon(Gen2Battle.ENEMY).reset_stages()
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.STAGES_CLEARED)
 
 
@@ -1213,6 +1267,7 @@ static func _belly_drum(turn: Gen2Turn) -> void:
 		turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {"target": turn.side, "stat": "attack", "by": 6})
 		return
 
+	_animate_current_move(turn)
 	@warning_ignore("integer_division")
 	mon.take_damage(mon.max_hp() / 2)
 	mon.change_stage("attack", Gen2Stats.MAX_STAGE - stage)
@@ -1237,6 +1292,7 @@ static func _psych_up(turn: Gen2Turn) -> void:
 
 	for key: String in keys:
 		attacker.stages[key] = int(defender.stages.get(key, 0))
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.STAGES_COPIED)
 
 
@@ -1266,6 +1322,7 @@ static func _disable(turn: Gen2Turn) -> void:
 
 	defender.disabled_slot = slot
 	defender.disable_turns = Gen2Substatus.roll_disable(turn.rng())
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.DISABLE_INFLICTED, {
 		"target": turn.target, "slot": slot, "move": last_move,
 	})
@@ -1299,6 +1356,7 @@ static func _encore(turn: Gen2Turn) -> void:
 	defender.encored_slot = slot
 	defender.encore_turns = Gen2Substatus.roll_encore(turn.rng())
 	defender.substatus |= Gen2Substatus.ENCORED
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.ENCORE_INFLICTED, {"target": turn.target, "slot": slot, "move": last_move})
 
 
@@ -1321,6 +1379,7 @@ static func _attract(turn: Gen2Turn) -> void:
 		return
 
 	defender.substatus |= Gen2Substatus.ATTRACTED
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.ATTRACT_INFLICTED, {"target": turn.target})
 
 
@@ -1335,6 +1394,7 @@ static func _mist(turn: Gen2Turn) -> void:
 		return
 
 	mon.substatus |= Gen2Substatus.MIST
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.MIST_SET)
 
 
@@ -1349,6 +1409,7 @@ static func _focus_energy(turn: Gen2Turn) -> void:
 		return
 
 	mon.substatus |= Gen2Substatus.FOCUS_ENERGY
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.FOCUS_ENERGY_SET)
 
 
@@ -1388,6 +1449,7 @@ static func _arena_trap(turn: Gen2Turn) -> void:
 		return
 
 	attacker.substatus |= Gen2Substatus.CANT_RUN
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.CANT_ESCAPE_SET, {"target": turn.target})
 
 
@@ -1405,6 +1467,7 @@ static func _start_weather(turn: Gen2Turn, weather: int) -> void:
 
 	turn.battle.weather = weather
 	turn.battle.weather_turns = Gen2Weather.TURNS
+	_animate_current_move(turn)
 	turn.emit(Gen2Battle.WEATHER_STARTED, {"weather": weather})
 
 
@@ -1431,6 +1494,7 @@ static func _heal(turn: Gen2Turn) -> void:
 
 	@warning_ignore("integer_division")
 	var amount: int = attacker.max_hp() if is_rest else maxi(attacker.max_hp() / 2, 1)
+	_animate_current_move(turn)
 	attacker.heal(amount)
 	turn.emit(Gen2Battle.HP_RESTORED, {
 		"hp": attacker.hp, "max_hp": attacker.max_hp(),
@@ -1456,6 +1520,7 @@ static func _timed_heal(turn: Gen2Turn) -> void:
 	if Gen2Weather.is_active(turn.battle.weather):
 		index += 1 if turn.battle.weather == Gen2Weather.SUN else -1
 
+	_animate_current_move(turn)
 	attacker.heal(_heal_fraction(attacker.max_hp(), index))
 	turn.emit(Gen2Battle.HP_RESTORED, {
 		"hp": attacker.hp, "max_hp": attacker.max_hp(),
@@ -1501,6 +1566,95 @@ static func _thunder_accuracy(turn: Gen2Turn) -> void:
 static func _skip_sun_charge(turn: Gen2Turn) -> void:
 	if turn.battle.weather == Gen2Weather.SUN:
 		turn.skip_charge = true
+
+
+## `PlayFXAnimID`. Nothing is drawn here: the animation is written down as an
+## event at its own place in the turn and the screen is what spends frames on it.
+static func _play_fx_anim(
+	turn: Gen2Turn, index: int, after_anim: int, restore_user_pic: bool = false
+) -> void:
+	turn.emit(Gen2Battle.ANIMATION, {
+		"index": index,
+		"param": turn.battle.battle_anim_param,
+		"after_anim": after_anim,
+		"enemy_turn": turn.side == Gen2Battle.ENEMY,
+		"effectiveness": turn.effectiveness,
+		"restore_user_pic": restore_user_pic,
+	})
+
+
+## `BattleCommand_MoveAnimNoSub`: the damage flash aimed at whoever was hit, the
+## animation param cleared or alternated, and then the move's own animation.
+##
+## A miss falls to `BattleCommand_MoveDelay` and plays nothing. That branch is
+## structural here rather than reached: [method _check_hit] ends the move, so no
+## list gets this far after one.
+static func _move_anim(turn: Gen2Turn) -> void:
+	if turn.missed:
+		return
+	turn.battle.battle_anim_param = 0
+	_play_fx_anim(
+		turn, turn.move_number, _damage_after_anim(turn),
+		turn.move_number in [Gen2MoveEffect.FLY_MOVE, Gen2MoveEffect.DIG_MOVE]
+	)
+
+
+## `.alternate_anim`, the branch the five multi-hit effects take instead of
+## clearing the param: the low bit is flipped, and the damage flash is kept only
+## for the hit `wPlayerRolloutCount`/`wEnemyRolloutCount` says is the last one,
+## so a multi-hit flashes once rather than per hit.
+static func _multi_hit_anim(turn: Gen2Turn, last_hit: bool) -> void:
+	turn.battle.battle_anim_param = (turn.battle.battle_anim_param & 1) ^ 1
+	_play_fx_anim(
+		turn, turn.move_number,
+		_damage_after_anim(turn) if last_hit else Gen2BattleAnimPlayer.AFTER_ANIM_NONE
+	)
+
+
+## `ANIM_ENEMY_DAMAGE` on the player's turn, `ANIM_PLAYER_DAMAGE` on the
+## enemy's, both as offsets from `BATTLE_AFTERANIMS`.
+static func _damage_after_anim(turn: Gen2Turn) -> int:
+	return Gen2BattleAnimPlayer.AFTER_ANIM_ENEMY_DAMAGE if turn.side == Gen2Battle.PLAYER \
+		else Gen2BattleAnimPlayer.AFTER_ANIM_PLAYER_DAMAGE
+
+
+## `BattleCommand_StatUpDownAnim`, which both stat anim commands fall into: the
+## after-anim its caller chose, the param cleared, and the move's animation.
+static func _stat_change_anim(turn: Gen2Turn, after_anim: int) -> void:
+	if turn.missed:
+		return
+	turn.battle.battle_anim_param = 0
+	_play_fx_anim(turn, turn.move_number, after_anim)
+
+
+## Which of the five status commands carries an `AnimateCurrentMove` of its own.
+##
+## `BattleCommand_SleepTarget`, `..._Poison` and `..._Paralyze` are the status
+## moves' own commands and do; `..._PoisonTarget`, `..._ParalyzeTarget`,
+## `..._BurnTarget` and `..._FreezeTarget` are the secondary-effect commands and
+## do not, since the move that carried them has already played its `moveanim`.
+## One command serves both here, so the effect byte is what tells them apart.
+static func _status_move_animates(turn: Gen2Turn, flag: int) -> bool:
+	match flag:
+		Gen2Status.SLEEP_MASK:
+			return true
+		Gen2Status.POISON:
+			return turn.effect() == Gen2MoveEffect.POISON
+		Gen2Status.PARALYSIS:
+			return turn.effect() == Gen2MoveEffect.PARALYZE
+	return false
+
+
+## `AnimateCurrentMove`, which is `LoadMoveAnim` between a `lowersub` and a
+## `raisesub`: the move's own animation with `wBattleAfterAnim` cleared, so no
+## damage flash follows it.
+##
+## Not a list command. Fifteen commands call it from inside their own bodies,
+## and it is the whole animation of every move whose effect list carries no
+## animation command at all. `wBattleAnimParam` is pushed across the sub calls
+## rather than cleared, so whatever the last animation left stands.
+static func _animate_current_move(turn: Gen2Turn) -> void:
+	_play_fx_anim(turn, turn.move_number, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
 
 
 ## `BattleCommand_HeldFlinch`: a King's Rock on the attacker makes an ordinary

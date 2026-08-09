@@ -143,6 +143,26 @@ const AUDIO_DRUMKIT_BYTES: int = 0x174
 ## count of 67 dropped exactly one cry, the one species 232 asks for.
 const AUDIO_CRY_COUNT: int = 68
 
+## `PokemonCries` (data/pokemon/cries.asm): `mon_cry index, pitch, length` per
+## species, six bytes a row. 255 rows, not 251: the table pads to `$ff` with four
+## silent CRY_NIDORAN_M rows the way the pic tables pad.
+##
+## The table is what makes a cry per species rather than per stream: Ivysaur and
+## Venusaur both play CRY_BULBASAUR and differ only in these two words.
+const MON_CRY_COUNT: int = 255
+const MON_CRY_ROW_SIZE: int = 6
+
+## Rows pinned by value rather than by shape, since 255 six-byte rows of the
+## right shape sit in more than one place. Species number to
+## `[index, pitch, length]`, read off `data/pokemon/cries.asm`.
+const MON_CRY_PINS: Dictionary = {
+	1: [15, 128, 129],
+	2: [15, 32, 256],
+	3: [15, 0, 320],
+	251: [55, 330, 273],
+	252: [0, 0, 0],
+}
+
 ## The overworld palette file contains 42 four-colour groups: morning, day,
 ## night and dark outdoor groups, the indoor group, and the two animated water
 ## groups. Palette maps use two nibbles per tile and reserve sixteen bytes for
@@ -892,6 +912,7 @@ const GOLD_SILVER: Dictionary = {
 	"cry_pointers": 0xE9192,
 	"cry_first_bank": 0x3C,
 	"cry_first_address": 0x743D,
+	"mon_cries": 0xF2747,
 	"wave_samples": 0xE8DB2,
 	"wave_samples_bank": 0x3A,
 	"wave_samples_address": 0x4DB2,
@@ -1061,6 +1082,7 @@ const CRYSTAL: Dictionary = {
 	"cry_pointers": 0xE91B0,
 	"cry_first_bank": 0x3C,
 	"cry_first_address": 0x747D,
+	"mon_cries": 0xF2787,
 	"wave_samples": 0xE8DB2,
 	"wave_samples_bank": 0x3A,
 	"wave_samples_address": 0x4DB2,

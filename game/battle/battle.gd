@@ -213,6 +213,18 @@ const FOCUS_ENERGY_SET: StringName = &"focus_energy_set"
 ## screen that read this as the generic failure would say the wrong thing.
 const MIST_PROTECTED: StringName = &"mist_protected"
 
+## `PlayFXAnimID`: one animation for the screen to spend frames on.
+##
+## The engine has resolved by the time the screen draws, so this sits at its own
+## index in the returned list and the ordering stays the cartridge's rather than
+## the screen's, the same shape [Gen2HpBarAnimation] already has.
+##
+## Carries `index` (`wFXAnimID`), `param` (`wBattleAnimParam`), `after_anim`
+## (`wBattleAfterAnim`, zero for none), `enemy_turn` (`hBattleTurn`),
+## `effectiveness` (`wTypeModifier`, which `PlayHitSound` reads) and
+## `restore_user_pic`, the `AppearUserLowerSub` that follows Fly and Dig.
+const ANIMATION: StringName = &"animation"
+
 ## What a side does with its turn. Switching is not a move with a very high
 ## priority: it is settled before priority is looked at, which is why it is an
 ## action rather than a move number.
@@ -315,6 +327,12 @@ var enemy_items: Array[int] = []
 ## send-out, so it describes the Pokémon rather than the battle, and
 ## `UpdateUsedMoves` keeps at most four, dropping the oldest.
 var player_used_moves: Array[int] = []
+
+## `wBattleAnimParam`, the animation's own input byte. Battle state rather than
+## turn state, because it sits outside the run `ClearBattleAnims` zeroes: almost
+## every animation command clears it, and the five multi-hit effects alternate
+## its low bit from whatever the last hit left.
+var battle_anim_param: int = 0
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.

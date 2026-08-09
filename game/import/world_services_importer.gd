@@ -74,6 +74,7 @@ static func import_to_cache(
 		"music": (result["audio"].get("music", []) as Array).size(),
 		"sfx": (result["audio"].get("sfx", []) as Array).size(),
 		"cries": (result["audio"].get("cries", []) as Array).size(),
+		"mon_cries": (result["audio"].get("mon_cries", []) as Array).size(),
 	}
 
 
@@ -337,6 +338,9 @@ static func _read_audio(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var assets: Dictionary = _read_audio_assets(rom, layout)
 	if not bool(assets.get("ok", false)):
 		return assets
+	var mon_cries: Dictionary = _read_mon_cries(rom, layout)
+	if not bool(mon_cries.get("ok", false)):
+		return mon_cries
 
 	var rows: Array = music_result["rows"] + sfx_result["rows"] + cry_result["rows"]
 	for row: Dictionary in rows:
@@ -357,10 +361,38 @@ static func _read_audio(rom: RomFile, layout: Dictionary) -> Dictionary:
 			"music": music_result["rows"],
 			"sfx": sfx_result["rows"],
 			"cries": cry_result["rows"],
+			"mon_cries": mon_cries["rows"],
 			"wave_samples": assets["wave_samples"],
 			"drumkits": assets["drumkits"],
 		},
 	}
+
+
+## `PokemonCries`: the cry a species asks for and the pitch offset and length it
+## asks for it at. Pinned by value, since the shape alone does not locate it.
+static func _read_mon_cries(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var table: int = int(layout.get("mon_cries", -1))
+	var span: int = RomLayout.MON_CRY_COUNT * RomLayout.MON_CRY_ROW_SIZE
+	if table < 0 or not rom.in_bounds(table, span):
+		return _error("Pokemon cry table is outside the cartridge.")
+	var rows: Array = []
+	for species: int in RomLayout.MON_CRY_COUNT:
+		var at: int = table + species * RomLayout.MON_CRY_ROW_SIZE
+		var row: Dictionary = {
+			"index": rom.u16le(at),
+			"pitch": rom.u16le(at + 2),
+			"length": rom.u16le(at + 4),
+		}
+		if int(row["index"]) >= RomLayout.AUDIO_CRY_COUNT:
+			return _error("Pokemon cry row %d names cry %d." % [species + 1, int(row["index"])])
+		rows.append(row)
+	for number: Variant in RomLayout.MON_CRY_PINS:
+		var pin: Array = RomLayout.MON_CRY_PINS[number]
+		var found: Dictionary = rows[int(number) - 1]
+		if int(found["index"]) != int(pin[0]) or int(found["pitch"]) != int(pin[1]) \
+				or int(found["length"]) != int(pin[2]):
+			return _error("Pokemon cry row %d does not match the pinned values." % int(number))
+	return {"ok": true, "rows": rows}
 
 
 static func _audio_data_window(rom: RomFile, row: Dictionary) -> Dictionary:
