@@ -12,11 +12,9 @@ extends Control
 ## more than one finger is normal here: a thumb walking while the other presses
 ## A is two live touches, and the GUI layer only ever tracks one pointer.
 ##
-## In edit mode nothing is pressed and a drag moves a cluster instead, which is
-## what the settings page arranges a layout with.
-
-## Emitted after a drag in edit mode, with the layout already updated.
-signal layout_changed()
+## In edit mode nothing is pressed and a drag moves a cluster instead. The
+## layout handed to [method set_layout] is edited in place, which is how the
+## settings page arranges the live one and has nothing to copy back.
 
 const FILL: Color = Color(1.0, 1.0, 1.0, 0.14)
 const FILL_PRESSED: Color = Color(1.0, 1.0, 1.0, 0.42)
@@ -212,7 +210,6 @@ func _edit_pointer(index: int, point: Vector2, pressed: bool) -> void:
 	if not pressed:
 		if _dragging != &"" and index == _drag_index:
 			_dragging = &""
-			layout_changed.emit()
 		return
 	if _dragging != &"":
 		return

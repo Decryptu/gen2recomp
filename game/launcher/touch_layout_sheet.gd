@@ -44,12 +44,11 @@ func _build() -> void:
 
 	_pad = Gen2TouchPad.new()
 	_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_pad)
-	# Set after the pad is in the tree: entering is what reads the stored layout,
-	# and this hands it the live one to edit in place.
+	# The live layout, not a copy: a drag edits the options object directly, so
+	# there is nothing to write back when the editor closes.
 	_pad.set_layout(_options.touch_layout)
 	_pad.set_edit_mode(true)
-	_pad.layout_changed.connect(_on_layout_changed)
+	add_child(_pad)
 
 	add_child(_toolbar())
 	resized.connect(_refresh_orientation)
@@ -91,7 +90,6 @@ func _toolbar() -> Control:
 		func(value: int) -> void:
 			_options.touch_layout.scale = float(value) / SCALE_STEPS
 			_pad.queue_redraw()
-			_on_layout_changed()
 	)))
 	column.add_child(Gen2LauncherUI.field(_theme, "Opacity", Gen2LauncherUI.slider(
 		_theme,
@@ -101,7 +99,6 @@ func _toolbar() -> Control:
 		func(value: int) -> void:
 			_options.touch_layout.opacity = float(value) / OPACITY_STEPS
 			_pad.queue_redraw()
-			_on_layout_changed()
 	)))
 	return host
 
@@ -121,15 +118,14 @@ func open(host: Control) -> void:
 	host.add_child(self)
 
 
+## The layout being edited is the live one, so nothing has to be copied back.
+## Writing it is the caller's, on [signal closed]: a slider dragged across its
+## track would otherwise be one disk write per pixel.
 func close() -> void:
 	_pad.set_edit_mode(false)
+	Gen2InputRuntime.instance().apply_options(_options)
 	closed.emit()
 	queue_free()
-
-
-func _on_layout_changed() -> void:
-	Gen2OptionsStore.save(_options)
-	Gen2InputRuntime.instance().apply_options(_options)
 
 
 func _unhandled_input(event: InputEvent) -> void:
