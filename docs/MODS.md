@@ -307,6 +307,12 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 event, never the battle engine itself, the same rule `Gen2BattleScreen`'s own
 setters already followed.
 
+The two HP values are the *drawn* ones, not the committed ones: a hit drains the
+bar over roughly a second the way the cartridge does, and `set_view` is called
+again on every step of that drain. A renderer that wants the bar to move needs
+no work; one that wants the final number should wait for the drain to end rather
+than reading the view, since mid-drain it is deliberately not the real HP.
+
 Registration uses the same refusal rules as a world renderer, and shares both
 optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`
 cycle, bound in `Gen2BattleScreen` the way `Gen2WorldScreen` binds it.

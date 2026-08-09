@@ -62,10 +62,21 @@ func _open_with_full_moveset(third_move: int = BattleFixture.THUNDERBOLT) -> voi
 
 ## Presses through every queued event until the offer opens, which is what a
 ## player pressing A does.
+## A draining HP bar swallows a press, the way `AnimateHPBar`'s own loop does,
+## so the bar is walked to its end before the next one. In play the screen's
+## frames do this; a test that pressed without it would stall on the first hit.
+func _settle_bars() -> void:
+	var guard: int = 4000
+	while _screen.bars_animating() and guard > 0:
+		_screen.advance_bars()
+		guard -= 1
+
+
 func _advance_to_offer(limit: int = 40) -> void:
 	for _press: int in limit:
 		if String(_screen.get("_forget_stage")) != "":
 			return
+		_settle_bars()
 		_screen.finish()
 		_screen.advance()
 		await get_tree().process_frame
@@ -86,6 +97,7 @@ func _drain_box() -> void:
 
 
 func _press(button: int) -> void:
+	_settle_bars()
 	await _drain_box()
 	_screen._answer_forget(button)
 	await get_tree().process_frame
