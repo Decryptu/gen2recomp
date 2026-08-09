@@ -104,6 +104,13 @@ const MIRROR_COAT: int = 0x90
 ## one effect byte, while the charge command still has to tell them apart.
 const FLY_MOVE: int = 19
 const DIG_MOVE: int = 91
+## The other four moves `BattleCommand_Charge.UsedText` names by number, kept
+## beside Fly and Dig for the same reason: the charge text is chosen by move
+## rather than by effect, and Fly and Dig already share an effect byte.
+const RAZOR_WIND_MOVE: int = 13
+const SKY_ATTACK_MOVE: int = 143
+const SKULL_BASH_MOVE: int = 130
+const SOLARBEAM_MOVE: int = 76
 const GUST_MOVE: int = 16
 const WHIRLWIND_MOVE: int = 18
 const THUNDER_MOVE: int = 87

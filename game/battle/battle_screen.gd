@@ -51,6 +51,26 @@ const INFLICTED: Dictionary = {
 	&"paralysis": "is paralyzed!",
 }
 
+## What a two-turn move says on its charge turn, from
+## `BattleCommand_Charge.UsedText` (data/text/common_2.asm), which picks its line
+## by move number rather than by effect: Fly and Dig share an effect byte and do
+## not share a sentence.
+##
+## The source's own `line` is a line break in a fixed-width box rather than part
+## of the sentence, so these read as one flowing string the way every other
+## message here does.
+const CHARGE_TEXT: Dictionary = {
+	Gen2MoveEffect.RAZOR_WIND_MOVE: "made a whirlwind!",
+	Gen2MoveEffect.SOLARBEAM_MOVE: "took in sunlight!",
+	Gen2MoveEffect.SKULL_BASH_MOVE: "lowered its head!",
+	Gen2MoveEffect.SKY_ATTACK_MOVE: "is glowing!",
+	Gen2MoveEffect.FLY_MOVE: "flew up high!",
+	Gen2MoveEffect.DIG_MOVE: "dug a hole!",
+}
+## `.UsedText`'s own fallthrough: the Dig branch is the only one of the six with
+## no `jr z` behind it, so a move that is none of the other five prints its line.
+const CHARGE_DUG: String = "dug a hole!"
+
 ## The word the games print for a stat, keyed the way [Gen2BattleMon] keeps the
 ## stat itself. A key the engine grows later shows up here as its own snake_case
 ## name in capitals rather than as a wrong word, the same fallback
@@ -1245,9 +1265,9 @@ func _describe(event: Dictionary) -> String:
 		Gen2Battle.HURT_ITSELF:
 			return "It hurt itself in its confusion!"
 		Gen2Battle.CHARGING_UP:
-			# The real games print a line of the move's own, which nothing here has
-			# a source for yet; this is the one sentence every two-turn move shares.
-			return "%s is charging up its power!" % _battler_name(side)
+			return "%s %s" % [
+				_battler_name(side), CHARGE_TEXT.get(int(event.get("move", 0)), CHARGE_DUG),
+			]
 		Gen2Battle.STAGES_CLEARED:
 			return "All stat changes were eliminated!"
 		Gen2Battle.STAGES_COPIED:
