@@ -81,6 +81,7 @@ func set_edit_mode(editing: bool) -> void:
 	_edit_mode = editing
 	release_all()
 	_dragging = &""
+	_on_touch_controls_changed(Gen2InputRuntime.instance().touch_controls_shown())
 	queue_redraw()
 
 

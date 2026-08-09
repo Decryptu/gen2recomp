@@ -35,6 +35,7 @@ func _ready() -> void:
 	if _editor == null:
 		_open_selected_slot()
 	_refresh()
+	Gen2FocusGuard.attach(self)
 
 
 ## Opens an explicit save. Tests and tools use this instead of relying on

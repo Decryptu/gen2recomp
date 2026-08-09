@@ -16,12 +16,16 @@ const PRINTER_LABELS: Array[String] = ["Lightest", "Lighter", "Normal", "Darker"
 var _theme: Gen2LauncherTheme = null
 var _options: Gen2Options = null
 var _saved: Label = null
+## Where a modal opens. The launcher root rather than this page, so a sheet
+## covers the dock as well and is not clipped by the settings scroll.
+var _host: Control = null
 
 
-static func create(palette: Gen2LauncherTheme) -> Gen2SettingsPage:
+static func create(palette: Gen2LauncherTheme, host: Control = null) -> Gen2SettingsPage:
 	var page := Gen2SettingsPage.new()
 	page._theme = palette
 	page._options = Gen2OptionsStore.current()
+	page._host = host
 	page._build()
 	return page
 
@@ -88,6 +92,17 @@ func _build() -> void:
 			_persist()
 	)))
 
+	var controls: VBoxContainer = _card(column, "Controls")
+	var section: Gen2ControlsSection = Gen2ControlsSection.create(
+		_theme, _options, _host if _host != null else self
+	)
+	section.changed.connect(func() -> void:
+		_persist()
+		Gen2InputRuntime.instance().apply_options(_options)
+	)
+	section.arrange_requested.connect(_open_touch_layout)
+	controls.add_child(section)
+
 	var game: VBoxContainer = _card(column, "In game")
 	game.add_child(Gen2LauncherUI.muted(
 		_theme, "These are the cartridge's own OPTION menu, kept as the same bytes."
@@ -132,6 +147,12 @@ func _build() -> void:
 			_options.printer_brightness = index
 			_persist()
 	)))
+
+
+func _open_touch_layout() -> void:
+	var sheet: Gen2TouchLayoutSheet = Gen2TouchLayoutSheet.create(_theme, _options)
+	sheet.closed.connect(_persist)
+	sheet.open(_host if _host != null else self)
 
 
 func _card(host: VBoxContainer, name: String) -> VBoxContainer:
