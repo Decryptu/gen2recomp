@@ -139,6 +139,8 @@ var _world_battle_recovery: Dictionary = {}
 var _last_message: String = ""
 ## A running [Gen2HpBarAnimation] per side. A side with no entry is not moving.
 var _bars: Dictionary = {}
+## The running [Gen2ExpBarAnimation], or null when the exp bar is not filling.
+var _exp_bar: Gen2ExpBarAnimation = null
 ## The text the event pump produced while a bar was still draining. The source
 ## prints it after the bar arrives, since `applydamage` runs before
 ## `criticaltext` and `supereffectivetext`.
@@ -181,7 +183,8 @@ var _enemy_hp: int = 0
 var _enemy_max_hp: int = 0
 var _player_hp: int = 0
 var _player_max_hp: int = 0
-var _exp: float = 0.0
+## The committed exp bar, in `PlaceExpBar`'s pixels.
+var _exp: int = 0
 
 var _box: Gen2TextBox = null
 
@@ -192,11 +195,11 @@ var _box: Gen2TextBox = null
 ## [Gen2WorldAnimation] paces the overworld that way: the two-frame step
 ## `HPBarAnim_BGMapUpdate` waits is a hardware frame count.
 func _process(delta: float) -> void:
-	if _bars.is_empty():
+	if not bars_animating():
 		_bar_elapsed = 0.0
 		return
 	_bar_elapsed += delta
-	while _bar_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and not _bars.is_empty():
+	while _bar_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and bars_animating():
 		_bar_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
 		advance_bars()
 
@@ -557,13 +560,13 @@ func _drawn_hp(side: int) -> int:
 
 ## Whether any bar is still moving, which is what holds the next message back.
 func bars_animating() -> bool:
-	return not _bars.is_empty()
+	return not _bars.is_empty() or _exp_bar != null
 
 
 ## One hardware frame of every running bar. Public so a test or a screenshot
 ## driver can settle the bars without waiting on real time.
 func advance_bars() -> bool:
-	if _bars.is_empty():
+	if not bars_animating():
 		return false
 	var moved: bool = false
 	for side: int in _bars.keys():
@@ -572,18 +575,42 @@ func advance_bars() -> bool:
 			moved = true
 		if animation.finished():
 			_bars.erase(side)
+
+	var boundary: bool = false
+	if _exp_bar != null:
+		if _exp_bar.advance_frame():
+			moved = true
+		boundary = _exp_bar.segment_finished()
+		if _exp_bar.finished():
+			_exp_bar = null
+			# The levels crossed on the way did not touch the committed count, so
+			# the end of the walk is where it catches up.
+			_refresh_exp_bar()
+
 	if moved:
 		_push_view()
-	if _bars.is_empty() and not _held_message.is_empty():
+
+	if not _held_message.is_empty() and _bars.is_empty():
 		var text: String = _held_message
 		_held_message = ""
 		show_message(text)
+	elif boundary and _exp_bar != null:
+		# The bar has reached the end of the level it was filling and stopped
+		# there. `.LoopLevels` prints its grew-to-level line at exactly this
+		# point, so the pump runs on to the event that carries it.
+		_show_next_event()
 	return moved
 
 
-## How full the exp bar is, from nothing to a level's worth.
-func set_exp(fraction: float) -> void:
-	_exp = clampf(fraction, 0.0, 1.0)
+## How full the exp bar is, in `PlaceExpBar`'s own pixels. The committed value:
+## the animation below draws its own while it runs, the way the HP bars do, and
+## a write that moves the committed count cancels it for the same reason
+## [method set_hp] cancels a drain.
+func set_exp(pixels: int) -> void:
+	var value: int = clampi(pixels, 0, Gen2ExpBarAnimation.LENGTH_PX)
+	if value != _exp:
+		_exp_bar = null
+	_exp = value
 	_push_view()
 
 
@@ -593,14 +620,59 @@ func set_exp(fraction: float) -> void:
 ## number behind it.
 func _refresh_exp_bar() -> void:
 	if _battle == null or _battle.player == null:
-		set_exp(0.0)
+		set_exp(0)
+		return
+
+	var mon: Gen2BattleMon = _battle.player
+	set_exp(Gen2ExpBarAnimation.pixels_for(mon.growth_rate(), mon.level, mon.exp))
+
+
+## What the exp bar is drawing: the animation's pixels while one runs, and the
+## committed count otherwise.
+func _drawn_exp() -> int:
+	return _exp if _exp_bar == null else _exp_bar.pixels()
+
+
+## Begins the fill [param event]'s award earns, which is `AnimateExpBar`, from
+## the [param from_pixels] the bar stood at before the award was committed.
+##
+## The segments are read out of the events still queued behind this one: one
+## ending at the end of the bar per level this gain crosses, then the partial
+## fill `.FinishExpBar` computes from the exp and level the gain settled on.
+##
+## Two of the routine's own guards return before any of that, and both are kept:
+## a gainer who is not the Pokémon on the field animates nothing
+## (`wCurPartyMon` against `wCurBattleMon`), and neither does one already at
+## `MAX_LEVEL`.
+func _start_exp_bar(event: Dictionary, from_pixels: int) -> void:
+	_exp_bar = null
+	if _battle == null or _battle.player == null:
+		return
+
+	var index: int = int(event["index"])
+	if index != _battle.party(Gen2Battle.PLAYER).active:
 		return
 
 	var mon: Gen2BattleMon = _battle.player
 	var rate: int = mon.growth_rate()
-	var floor_exp: int = Gen2Experience.total_exp_at(rate, mon.level)
-	var span: int = Gen2Experience.total_exp_at(rate, mon.level + 1) - floor_exp
-	set_exp(float(mon.exp - floor_exp) / float(span) if span > 0 else 1.0)
+	# Only this award's own level-ups: a second [constant Gen2Battle.EXP_GAINED]
+	# behind it is the Exp. Share pass, and its levels belong to its own bar.
+	var levels: int = 0
+	for queued: Dictionary in _pending:
+		var kind: StringName = StringName(queued["type"])
+		if kind == Gen2Battle.EXP_GAINED:
+			break
+		if kind == Gen2Battle.GREW_LEVEL and int(queued["index"]) == index:
+			levels += 1
+	if mon.level - levels >= Gen2Experience.MAX_LEVEL:
+		return
+
+	var targets: Array[int] = []
+	for _level: int in levels:
+		targets.append(Gen2ExpBarAnimation.LENGTH_PX)
+	targets.append(Gen2ExpBarAnimation.pixels_for(rate, mon.level, mon.exp))
+	_exp_bar = Gen2ExpBarAnimation.create(from_pixels, targets)
+	_push_view()
 
 
 func show_message(text: String) -> void:
@@ -1049,6 +1121,15 @@ func _confirm_forget_slot() -> void:
 func advance() -> void:
 	if _box == null:
 		return
+	## The exp bar stopped at a level boundary is under `.LoopLevels`' own
+	## `StdBattleTextbox`, which blocks on a button: this press is that button,
+	## and it lets the loop run on into the next level's fill rather than
+	## advancing the battle.
+	if _exp_bar != null and _exp_bar.paused():
+		if _box.advance():
+			return
+		_exp_bar.resume()
+		return
 	## A bar the source is still animating has not printed its message yet, so
 	## there is nothing for a press to advance past. Without this the press
 	## would pop the next event and the held line would never be shown.
@@ -1251,7 +1332,7 @@ func _show_next_event() -> void:
 			## `applydamage` animates the bar and only then does `criticaltext`
 			## print, so a message caused by an event that moved a bar waits for
 			## it rather than racing it.
-			if bars_animating():
+			if not _bars.is_empty():
 				_held_message = text
 			else:
 				show_message(text)
@@ -1274,7 +1355,11 @@ func _apply_event(event: Dictionary) -> void:
 	var before_enemy_max: int = _enemy_max_hp
 	var before_player: int = _player_hp
 	var before_player_max: int = _player_max_hp
+	var before_exp: int = _exp
 	_apply_event_state(event)
+	if StringName(event["type"]) == Gen2Battle.EXP_GAINED:
+		_start_exp_bar(event, before_exp)
+		return
 	if not HP_BAR_EVENTS.has(StringName(event["type"])):
 		return
 	_start_bar(Gen2Battle.ENEMY, before_enemy, before_enemy_max)
@@ -1321,10 +1406,15 @@ func _apply_event_state(event: Dictionary) -> void:
 			# only moves when the index that grew is the one currently active: a
 			# benched participant can level up too, and this screen has no bench
 			# to show it on.
+			# The bar itself is not recomputed here: `.LoopLevels` is inside
+			# `AnimateExpBar`, so from the award until the walk ends the animation
+			# owns the bar and [method advance_bars] commits the real count when
+			# it arrives.
 			if int(event["index"]) == _battle.party(Gen2Battle.PLAYER).active:
 				_player_level = int(event["new_level"])
 				_push_view()
-			_refresh_exp_bar()
+			if _exp_bar == null:
+				_refresh_exp_bar()
 
 
 ## An event as a sentence, or an empty string for one there is nothing to say
@@ -1743,7 +1833,7 @@ func _push_view() -> void:
 		## [method battle_snapshot], keeps reading the committed value.
 		"enemy_hp": _drawn_hp(Gen2Battle.ENEMY), "enemy_max_hp": _enemy_max_hp,
 		"player_hp": _drawn_hp(Gen2Battle.PLAYER), "player_max_hp": _player_max_hp,
-		"exp_fraction": _exp,
+		"exp_pixels": _drawn_exp(),
 	})
 
 

@@ -181,6 +181,40 @@ func test_the_hp_bar_fill_is_drawn_apart_from_the_panel() -> void:
 	assert_eq(_ink_in_row(empty, Gen2BattleHud.ENEMY_BAR.y), 0, "a fainted bar draws nothing")
 
 
+## `PlaceExpBar` takes a pixel count in `b`, walks eight tiles filling whole
+## ones and draws the remainder as a partial. It is never a ratio: `CalcExpBar`
+## has already divided.
+func test_the_exp_bar_is_drawn_from_a_pixel_count() -> void:
+	_write_cache()
+	var hud: Gen2BattleHud = Gen2BattleHud.from_data(_data())
+	var length: int = Gen2BattleHud.EXP_BAR_TILES * Gen2BattleHud.TILE
+
+	var empty: PackedByteArray = PackedByteArray()
+	empty.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
+	hud.draw_exp_bar(empty, Gen2Screen.WIDTH, 0)
+	assert_eq(_ink_in_row(empty, Gen2BattleHud.PLAYER_EXP.y), 0, "no exp draws nothing")
+
+	var part: PackedByteArray = PackedByteArray()
+	part.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
+	hud.draw_exp_bar(part, Gen2Screen.WIDTH, length / 2)
+
+	var full: PackedByteArray = PackedByteArray()
+	full.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
+	hud.draw_exp_bar(full, Gen2Screen.WIDTH, length)
+
+	var part_ink: int = _ink_in_row(part, Gen2BattleHud.PLAYER_EXP.y)
+	var full_ink: int = _ink_in_row(full, Gen2BattleHud.PLAYER_EXP.y)
+	assert_ne(part_ink, 0)
+	assert_gt(full_ink, part_ink, "a fuller bar is more ink")
+
+	var over: PackedByteArray = PackedByteArray()
+	over.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
+	hud.draw_exp_bar(over, Gen2Screen.WIDTH, length * 2)
+	assert_eq(
+		_ink_in_row(over, Gen2BattleHud.PLAYER_EXP.y), full_ink, "the bar stops at its own end"
+	)
+
+
 ## Lit pixels in one row of tiles.
 func _ink_in_row(screen: PackedByteArray, row: int) -> int:
 	var out: int = 0

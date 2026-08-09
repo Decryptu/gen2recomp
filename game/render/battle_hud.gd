@@ -149,9 +149,13 @@ func draw_hp_bar(
 
 ## The exp bar, whose ends are the HP bar's own tiles and whose partial fills
 ## are the only thing its own sheet is for.
-func draw_exp_bar(into: PackedByteArray, width: int, fraction: float) -> void:
+##
+## [param pixels] is `PlaceExpBar`'s own `b`: the bar is a pixel count, never a
+## ratio, because `CalcExpBar` has already done the division and rounded it the
+## cartridge's way.
+func draw_exp_bar(into: PackedByteArray, width: int, pixels: int) -> void:
 	var length: int = EXP_BAR_TILES * TILE
-	var lit: int = clampi(int(fraction * float(length)), 0, length)
+	var lit: int = clampi(pixels, 0, length)
 	var left: int = PLAYER_EXP.x * TILE
 	var top: int = PLAYER_EXP.y * TILE
 

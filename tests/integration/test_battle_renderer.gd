@@ -173,3 +173,96 @@ func test_a_new_pokemon_does_not_animate_its_bar_up() -> void:
 		"species": 155, "level": 7, "hp": 30, "max_hp": 30,
 	})
 	assert_false(_battle_screen.bars_animating())
+
+
+## `Text_MonGainedExpPoint` is printed before `call AnimateExpBar`, so the EXP.
+## Points line leads its bar; `BattleText_StringBuffer1GrewToLevel` is printed
+## inside `.LoopLevels` once that level's segment has reached the end of the bar,
+## so the level line waits for it.
+func test_experience_says_its_line_first_and_the_level_line_after_the_bar() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+
+	var mon: Gen2BattleMon = _battle_screen._battle.player
+	var rate: int = mon.growth_rate()
+	var index: int = _battle_screen._battle.party(Gen2Battle.PLAYER).active
+	mon.exp = Gen2Experience.total_exp_at(rate, mon.level)
+	_battle_screen._refresh_exp_bar()
+	assert_eq(int(_battle_screen.get("_exp")), 0, "the bar starts at the level's own threshold")
+
+	# What `_give_experience_to` does to the Pokemon before it describes it: an
+	# award that carries it over the next level.
+	var award: int = Gen2Experience.total_exp_at(rate, mon.level + 1) - mon.exp + 4
+	var grown: int = mon.level + 1
+	mon.gain_exp(award)
+	mon.level_up()
+
+	_battle_screen._pending = [
+		{
+			"type": Gen2Battle.EXP_GAINED, "side": Gen2Battle.PLAYER, "index": index,
+			"species": mon.species, "amount": award, "exp": mon.exp, "exp_share": false,
+		},
+		{
+			"type": Gen2Battle.GREW_LEVEL, "side": Gen2Battle.PLAYER, "index": index,
+			"species": mon.species, "old_level": grown - 1, "new_level": grown,
+			"old_stats": {}, "new_stats": {},
+		},
+	]
+
+	_battle_screen._show_next_event()
+	assert_true(_battle_screen.bars_animating(), "the bar is filling")
+	assert_string_contains(
+		String(_battle_screen.battle_snapshot()["message"]), "EXP. Points",
+		"and its own line is already on screen"
+	)
+
+	# A press during the fill is swallowed, the way AnimateExpBar's own blocking
+	# loop swallows one.
+	_battle_screen.advance()
+	assert_true(_battle_screen.bars_animating())
+
+	# The first segment ends at the end of the bar, where the level line is
+	# printed and the walk stops for the button that dismisses it.
+	var guard: int = 4000
+	while not _battle_screen._exp_bar.paused() and guard > 0:
+		_battle_screen.advance_bars()
+		guard -= 1
+	assert_gt(guard, 0, "the bar reached the end of the level")
+	assert_eq(
+		_battle_screen._exp_bar.pixels(), Gen2ExpBarAnimation.LENGTH_PX,
+		"and it is sitting there full"
+	)
+	assert_string_contains(
+		String(_battle_screen.battle_snapshot()["message"]), "grew to level",
+		"the level line waited for the bar to reach the end"
+	)
+
+	_battle_screen._box.advance()
+	_battle_screen.advance()
+	assert_false(_battle_screen._exp_bar.paused(), "the press let the next fill start")
+
+	guard = 4000
+	while _battle_screen.bars_animating() and guard > 0:
+		_battle_screen.advance_bars()
+		guard -= 1
+	assert_gt(guard, 0, "the walk ended")
+	assert_eq(
+		int(_battle_screen.get("_exp")),
+		Gen2ExpBarAnimation.pixels_for(rate, mon.level, mon.exp),
+		"and the committed count caught up when it did"
+	)
+
+
+## `AnimateExpBar` returns before it touches the bar when the gainer is not the
+## Pokemon on the field, which is every Exp. Share holder on the bench.
+func test_a_benched_gainer_animates_no_bar() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	var mon: Gen2BattleMon = _battle_screen._battle.player
+	var benched: int = _battle_screen._battle.party(Gen2Battle.PLAYER).active + 1
+
+	_battle_screen._apply_event({
+		"type": Gen2Battle.EXP_GAINED, "side": Gen2Battle.PLAYER, "index": benched,
+		"species": mon.species, "amount": 40, "exp": mon.exp, "exp_share": true,
+	})
+	assert_false(_battle_screen.bars_animating())
