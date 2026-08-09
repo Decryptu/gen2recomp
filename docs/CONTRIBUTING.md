@@ -47,7 +47,7 @@ keep rules separate from content and receive an injected
 | `world_services_importer.gd` | Menus, marts, phone records, audio pointers, cries and shared waveforms |
 | `rom_importer.gd` | Orchestration and layout checks |
 
-Raw cartridge byte runs do not go into JSON. A decimal array costs about four
+Raw cartridge byte runs do not go into JSON: a decimal array costs about four
 bytes on disk per cartridge byte and about twenty-six resident once parsed into
 an Array of Variants, which made scripts, text and audio 96 MB of a 100 MB
 cache. Write them with `RomCache.write_payload_map()` when the run is a whole
@@ -67,8 +67,7 @@ engine-facing cartridge-content API; it owns the cache and converts JSON's
 single numeric type back to `int`. `game/data/learnset.gd` stays beside it
 because Pokémon can be created outside battle. Do not sort learnsets: filling a
 new Pokémon stops at the first move above its level, while levelling reads every
-entry at the newly reached level. Muk is out of order in all three games, so
-these operations intentionally differ.
+entry at the newly reached level, and Muk is out of order in all three games.
 
 `game/save/` owns project saves, not cartridge data. Keep its versioned model,
 validator, store and battle adapter scene-free; it validates against `GameData`
@@ -78,9 +77,9 @@ snapshot. Party-owned world transactions update a candidate save and live
 snapshot together and restore both on a failed write; `Gen2SaveStorage` applies
 the same boundary to explicit box transfers, and `box_screen.gd` owns selection
 and presentation only. Box names, current-box UI state and cartridge SRAM
-placement stay outside the model until their source ownership is verified. The
-SRAM adapter is a separate, checksum-aware boundary and remains party-focused
-for the same reason.
+placement stay outside the model until their source ownership is verified; the
+checksum-aware SRAM adapter is a separate boundary and stays party-focused for
+the same reason.
 
 `game/world/` separates request resolution from UI. `world_api.gd`,
 `world_host.gd` and scene-free service helpers validate imported map records,
@@ -116,9 +115,10 @@ and writes tile numbers into a map, since the card is a tilemap screen rather
 than a text one, and `trainer_card_screen.gd` colours it through
 `_CGB_TrainerCard`'s palettes and draws the badge objects over it.
 `world_pack.gd` groups owned items into the four cartridge pockets by the item
-type byte `GameData` imports under the confusingly-named `pocket` field; it is presentation only, item counts stay a flat map on `Gen2WorldState`
-and pocket capacities are not enforced. `start_menu_screen.gd` is the overlay,
-owning Pack, a Save confirmation and the OPTION menu as internal modes the way
+type byte `GameData` imports under the confusingly-named `pocket` field. It is
+presentation only: item counts stay a flat map on `Gen2WorldState` and pocket
+capacities are not enforced. `start_menu_screen.gd` is the overlay, owning Pack,
+a Save confirmation and the OPTION menu as internal modes the way
 `world_service_screen.gd` owns a mart mode, and delegating Pokemon and Pokegear
 to the existing screens. `Gen2PartyScreen` and `Gen2BoxScreen` share one
 embedded-mode shape, a `set_context(..., embedded)` flag and a `closed(result)`
@@ -199,8 +199,8 @@ entry point, so a test presses a button rather than a key.
 
 Reach the runtime with `Gen2InputRuntime.instance()`, not the `InputRuntime`
 global: a script handed to `-s` compiles before the tree that owns the autoloads
-exists, so a preview tool naming a screen by type would fail to load it. The
-same reason `Gen2WorldScreen` reaches GameRuntime by path.
+exists, so a preview tool naming a screen by type would fail to load it.
+`Gen2WorldScreen` reaches GameRuntime by path for the same reason.
 
 A key binds by physical keycode, so a d-pad on WASD stays under the same four
 fingers on a layout that spells them differently; describe one with
@@ -400,6 +400,5 @@ says or argue at length that a decision was right. A source symbol plus a
 one-line reason is the target.
 
 State each fact once, where it is enforced, and link rather than repeat: source
-findings and constants near the code, contracts in `docs/`, current status in
-the project's own status notes. When something changes, replace the old text
-instead of appending a correction to it.
+findings and constants near the code, contracts in `docs/`. When something
+changes, replace the old text instead of appending a correction to it.

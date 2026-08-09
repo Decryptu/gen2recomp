@@ -6,12 +6,9 @@ extends RefCounted
 ## A move is a short program, not a switch case: the cartridge keeps a command
 ## list per effect and runs it in order. An ordinary attack announces the move,
 ## spends the PP, works out damage, rolls the hit, applies it and checks for a
-## faint; every other move is that list with steps added, removed or replaced.
-##
-## Keeping the shape is what makes the rest of Generation 2 additive: a burn is
-## an appended command, a move that cannot miss is a list without the roll, a
-## two-turn move is a list that ends early the first time. None of it reaches
-## [Gen2Battle], which only knows how to run a list.
+## faint; every other move is that list with steps added, removed or replaced, so
+## a burn is an appended command and a move that cannot miss is a list without
+## the roll. None of it reaches [Gen2Battle], which only knows how to run a list.
 ##
 ## The names are the cartridge's, so a sequence reads against
 ## [code]data/moves/effects.asm[/code] line for line. [Gen2MoveEffect] holds the

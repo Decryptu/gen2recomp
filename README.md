@@ -49,23 +49,14 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   entry, and replace the world or battle renderer, which is what a 3D or HD
 >   view needs.
 >
-> The real-data story preview walks all three cartridges from Elm's lab through
-> Route 29, Cherrygrove, Route 30 and Mr. Pokémon's Mystery Egg event to the
-> Zephyr Badge, then on through the Togepi egg, Route 32, Union Cave, Route 33,
-> Kurt and Slowpoke Well to the Hive Badge, and through Ilex Forest's Farfetch'd
-> hunt, HM01 Cut, Route 34 and Whitney to the Plain Badge, then the SquirtBottle
-> errand, Sudowoodo, the Burned Tower beasts and Morty to the Fog Badge, and on
-> through the Dance Theatre's Kimono Girls for HM03 Surf, Routes 38 and 39, the
-> Olivine Lighthouse, Routes 40 and 41 surfed to Cianwood for the SecretPotion,
-> and Jasmine to the Mineral Badge, catching a Geodude in Union Cave on the way
-> and teaching it HM04 Strength to push Cianwood Gym's boulders aside for the
-> Storm Badge, then east across Route 42's lakes to Mahogany, the Lake of Rage's
-> Red Gyarados and Lance, the Rocket hideout's three floors and Pryce to the
-> Glacier Badge, back west for the Goldenrod Radio Tower's basement and card
-> keys and its Rocket boss, then Route 44 and the Ice Path to Blackthorn, its
-> gym's boulder puzzle and Clair, and the Rising Badge: the Dragon Shrine's quiz
-> on Crystal, the Dragon's Den ball Clair follows you to on Gold and Silver.
-> Kanto follows, all sixteen badges and Red on Mt. Silver.
+> The real-data story preview walks all three cartridges end to end, from Elm's
+> lab to Red on Mt. Silver: every Johto badge with the errand behind it (the
+> Mystery Egg, Slowpoke Well, HM01 Cut and the Farfetch'd hunt, the
+> SquirtBottle and Sudowoodo, HM03 Surf from the Kimono Girls, the SecretPotion,
+> a Union Cave Geodude taught HM04 Strength for Cianwood Gym's boulders, the
+> Lake of Rage, both Rocket hideouts, Blackthorn's boulder puzzle, and the
+> Rising Badge by Crystal's Dragon Shrine quiz or Gold and Silver's Dragon's Den
+> ball), then Kanto, all sixteen badges and Red.
 > Missing: full story state, the dex, the remaining special-call branches and
 > story-driven permanent contacts.
 
@@ -152,14 +143,12 @@ Smoke test the main scene:
 godot --headless --path . --quit-after 30
 ```
 
-The launcher is a shelf of three cartridges, one per supported game, with the
-selected one standing at full size in the middle. A bay you have not imported
-yet is drawn in the cartridge's own outline: drop a dump onto it, or click it to
-browse. An import seats the cartridge with a sound, and playing presses it home
-again before the game opens. Left and right move along the shelf; mods, settings
-and about are the round buttons in the dock underneath. The whole launcher has a
-light and a dark appearance, following `ui_theme` in the options file, and the
-same layout works on a phone.
+The launcher is a shelf of three cartridges, the selected one at full size in
+the middle. An unimported bay is drawn in the cartridge's own outline: drop a
+dump onto it, or click it to browse. Left and right move along the shelf; mods,
+settings and about are the round buttons in the dock underneath. It has a light
+and a dark appearance, following `ui_theme` in the options file, and the same
+layout works on a phone.
 
 Play opens the save screen: validated save slots created as you need them,
 naming, export and import, `.sav` import, party inspection and the development
@@ -172,10 +161,9 @@ inventory, event and clock snapshot. See [docs/SAVES.md](docs/SAVES.md) for the
 save and SRAM contract.
 
 Settings are split into appearance, application values, controls and the
-cartridge's own OPTION values. The mods page lists each mod with a switch that turns it off
-without uninstalling it. The button beside Play carries re-import, the cache
-folder and cache deletion, and the about page holds the release check, which
-runs only when you ask for it.
+cartridge's own OPTION values. The mods page can switch a mod off without
+uninstalling it. The button beside Play carries re-import, the cache folder and
+cache deletion; the about page holds the on-demand release check.
 
 Icons come from [Lucide](https://lucide.dev). See
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
@@ -184,7 +172,7 @@ Icons come from [Lucide](https://lucide.dev). See
 
 The games are played with the eight buttons the hardware had. A key, a
 controller and the on-screen buttons all produce the same eight, so nothing in
-the game knows or cares which one you used.
+the game knows which one you used.
 
 | Button | Keyboard | Controller |
 |---|---|---|
@@ -197,23 +185,23 @@ the game knows or cares which one you used.
 Keys are bound to positions rather than letters, so WASD stays under the same
 four fingers on a layout that spells them differently; the settings page shows
 each binding as the key actually printed on it. Every button can be rebound
-there, and carries as many keys and controller buttons as you like.
+there, with as many keys and controller buttons as you like.
 
 Any controller Godot recognises works without setup, and the launcher is fully
-navigable with one: the focus ring appears as soon as you touch a pad or a key
-and stays out of the way of a mouse.
+navigable with one: the focus ring appears on the first pad or key press and
+stays out of a mouse's way.
 
-On a touchscreen the launcher is used directly, with no on-screen buttons over
+The launcher is used directly on a touchscreen, with no on-screen buttons over
 it. The games draw a d-pad, A, B, START and SELECT instead, which appear while
-you are using the touchscreen and step aside the moment you press a key or a
-controller. Settings can pin them on, turn them off for a phone with a
-controller attached, and arrange them: drag each group where your thumbs are and
-set the size and opacity, separately for upright and sideways. If you turn them
-off and need them back, tap the game screen three times quickly.
+you are touching the screen and step aside on the next key or controller press.
+Settings can pin them on, turn them off for a phone with a controller attached,
+and arrange them: drag each group under your thumbs and set the size and
+opacity, separately for upright and sideways. Three quick taps on the game
+screen brings them back.
 
 The screen fills whatever window or device it is given, in either orientation.
-Upright puts the game at the top with the buttons in the space underneath;
-sideways centres the game and puts the buttons in the margins either side.
+Upright puts the game at the top with the buttons underneath; sideways centres
+the game and puts the buttons in the margins either side.
 
 Development scenes and shortcuts:
 
@@ -234,24 +222,27 @@ Battle-screen moves are random and a full move set declines the learn offer; use
 for a fallback pairing.
 
 The world screen's start menu wires every source entry: Pokedex, Pokemon, Pack,
-Pokegear, Player, Save, Options and Exit. Options is the cartridge's own
-seven-row OPTION screen over the same values the launcher's settings edit, so
-the two can never disagree, and Player is the trainer card, drawn from the
-cartridge's own graphics with its badge pages and its play timer.
-Pokedex lists the species in the cartridge's own NEW, OLD and A to Z orders,
-showing a name once seen and a caught mark once caught, and opens each seen
-species' entry with its category, height, weight and both description pages.
-SELECT changes the order and the mode is saved; START searches by one or two
-types over the species already caught. The Unown dex and the entry screen's
-AREA, CRY and PRNT buttons are not built.
-Pokegear opens its card list, in the source's clock, map, phone, radio order and
-showing only cards the player owns; the map card keeps its position marked
-unavailable. The radio card tunes with left and right over the cartridge's own
-two-step dial, and a tuned station keeps playing after the Pokegear closes,
-which is how the Poke Flute channel wakes Vermilion's Snorlax.
-The Pack opens each item's own source submenu and can use one: a Potion asks
-which Pokemon and heals it, a Repel sets its step count, and GIVE, TOSS and SEL
-keep their source position marked unavailable.
+Pokegear, Player, Save, Options and Exit.
+
+- **Options** is the cartridge's own seven-row OPTION screen over the same
+  values the launcher's settings edit, so the two can never disagree.
+- **Player** is the trainer card, drawn from the cartridge's own graphics with
+  its badge pages and play timer.
+- **Pokedex** lists species in the cartridge's NEW, OLD and A to Z orders,
+  showing a name once seen and a caught mark once caught, and opens each seen
+  species' entry with its category, height, weight and both description pages.
+  SELECT changes the order and the mode is saved; START searches by one or two
+  types over species already caught. The Unown dex and the entry screen's AREA,
+  CRY and PRNT buttons are not built.
+- **Pokegear** opens its card list in the source's clock, map, phone, radio
+  order, showing only owned cards; the map card keeps its position marked
+  unavailable. The radio card tunes with left and right over the cartridge's
+  two-step dial, and a tuned station keeps playing after the Pokegear closes,
+  which is how the Poke Flute channel wakes Vermilion's Snorlax.
+- **Pack** opens each item's own source submenu and can use one: a Potion asks
+  which Pokemon and heals it, a Repel sets its step count. GIVE, TOSS and SEL
+  keep their source position marked unavailable.
+
 The party submenu offers Cut, Surf, Strength, Whirlpool, Waterfall, Flash,
 Headbutt and Rock Smash to a Pokemon that knows one; all eight show their
 message first and change the world on the acknowledge, and stepping from water
@@ -260,18 +251,20 @@ Headbutt, facing a tree and knowing the move is the whole gate, and the
 acknowledge rolls the tree's own encounter, which on Crystal can arrive asleep.
 Rock Smash asks the faced object rather than the ground, and a smashed rock is
 gone until the map reloads unless it carries an event flag.
+
 Facing something and pressing A is the other way to all of them: a cut tree, a
 whirlpool, a waterfall, a headbutt tree and open water each offer their move and
-ask before using it, in the cartridge's own order, and each refuses in the
-cartridge's own words or, for Headbutt and Surf, says nothing at all. A
-Waterfall climb runs the whole column in one command and ends on the first cell
-above it that is not a waterfall. Standing on a whirlpool, waterfall, door,
-staircase or cave tile overrides the pressed direction the way the cartridge
-does, which is also how a waterfall is ridden back down.
+ask before using it, in the cartridge's own order, refusing in the cartridge's
+own words or, for Headbutt and Surf, saying nothing at all. A Waterfall climb
+runs the whole column in one command and ends on the first cell above it that is
+not a waterfall. Standing on a whirlpool, waterfall, door, staircase or cave
+tile overrides the pressed direction as the cartridge does, which is also how a
+waterfall is ridden back down.
+
 Poké Balls on the ground are picked up by facing them, and so are the items
-hidden in scenery: neither an item ball's pointer nor a hidden item's is a
-script, so each is decoded and its item received. A hidden item answers only
-while its own event flag is clear, and picking it up is what sets that flag.
+hidden in scenery: neither pointer is a script, so each is decoded and its item
+received. A hidden item answers only while its own event flag is clear, and
+picking it up sets that flag.
 The imported Players House PC opens the embedded box storage screen. The host
 clock advances one game minute per real minute and crosses source day
 boundaries. `preview_emote()`, `preview_wild_encounter()`,
@@ -280,7 +273,8 @@ boundaries. `preview_emote()`, `preview_wild_encounter()`,
 `preview_party_transaction()` drive their live paths; the API also exposes
 swarm/roaming updates, repel countdowns and a JSON-safe snapshot.
 
-Headless tools, all against a real imported cache:
+Headless tools, all against a real imported cache. Every `validate_*.gd` runs
+all three games unless its row says otherwise:
 
 | Tool | Checks |
 |---|---|
@@ -288,37 +282,37 @@ Headless tools, all against a real imported cache:
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
-| `validate_story_map_ids.gd` | the four maps the story route names by id rather than by cell, each against the map its number holds on the other profile, in all three games |
+| `validate_story_map_ids.gd` | the four maps the story route names by id rather than by cell, each against the map its number holds on the other profile |
 | `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
 | `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
-| `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree, in all three games |
-| `validate_field_move_prompts.gd` | the faced-tile prompt chain, both gates and all three answers for Cut, Surf and Headbutt, in all three games |
-| `validate_rock_smash.gd` | the rock map table, the smashable-rock census and its one flagged rock, and Cianwood City's rock, in all three games |
-| `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree, in all three games |
-| `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
-| `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
-| `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |
-| `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches, in all three games |
-| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census, in all three games |
-| `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
-| `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |
-| `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall, in all three games |
-| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down, in all three games |
-| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro, and Route 45's PP Up and Cerulean Gym's machine part from the `hiddenitem` macro, all reaching the bag once, in all three games |
-| `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit, in all three games |
-| `validate_ss_aqua.gd` | the S.S. Aqua's B1F sailors and the coord events that toggle them, 1F's deck and west wing, the lazy sailor and the granddaughter, and the corridor before and after the errand that opens it, in all three games |
-| `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback, in all three games |
-| `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina, in all three games |
-| `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines, in all three games |
-| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it, in all three games |
-| `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs, in all three games |
-| `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it, in all three games |
-| `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian, in all three games |
-| `validate_pewter.gd` | Fuchsia's gate out and the five ungated connections back to Vermilion, the eight-cell pocket the Snorlax seals off the Route 11 crossing, Diglett's Cave's three regions and two ladders, Route 2's crossing onto Pewter once its tree is cut, and Pewter City's one south corridor and the gym sight line it owes, in all three games |
-| `validate_cinnabar.gd` | the four connections from Pewter down to Pallet, Pallet's pond and the south edge that only crosses while surfing, Route 21's sea, Cinnabar's two seamless land regions and which crossing reaches Blue, Route 20's sealed west channel and the east landfall behind it, Seafoam Gym, and Viridian Gym's two objects behind one event flag, in all three games |
-| `validate_magnet_train.gd` | the twelve doors over the lost-doll errand and both rides, the Copycat standing in her cell before any script has assigned her variable sprite, the Fan Club's Clefairy guy and the doll behind his own flag, and both Magnet Train stations as a lobby and a platform with no walkable seam between them, in all three games |
-| `validate_mt_silver.gd` | the nine doors from Viridian Gym to Silver Cave Room 3, Viridian's west connection and Route 28's, Oak's lab, the Victory Road Gate's three regions and the black belt standing in each of the two cells that join them across all four flag combinations, Silver Cave Outside and its flypoint, the Pokecenter counter, each cave room as one region, and Red behind his own hide flag, in all three games |
+| `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree |
+| `validate_field_move_prompts.gd` | the faced-tile prompt chain, both gates and all three answers for Cut, Surf and Headbutt |
+| `validate_rock_smash.gd` | the rock map table, the smashable-rock census and its one flagged rock, and Cianwood City's rock |
+| `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree |
+| `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore |
+| `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool |
+| `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
+| `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
+| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
+| `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
+| `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse |
+| `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall |
+| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down |
+| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro, and Route 45's PP Up and Cerulean Gym's machine part from the `hiddenitem` macro, all reaching the bag once |
+| `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit |
+| `validate_ss_aqua.gd` | the S.S. Aqua's B1F sailors and the coord events that toggle them, 1F's deck and west wing, the lazy sailor and the granddaughter, and the corridor before and after the errand that opens it |
+| `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback |
+| `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina |
+| `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines |
+| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it |
+| `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs |
+| `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it |
+| `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian |
+| `validate_pewter.gd` | Fuchsia's gate out and the five ungated connections back to Vermilion, the eight-cell pocket the Snorlax seals off the Route 11 crossing, Diglett's Cave's three regions and two ladders, Route 2's crossing onto Pewter once its tree is cut, and Pewter City's one south corridor and the gym sight line it owes |
+| `validate_cinnabar.gd` | the four connections from Pewter down to Pallet, Pallet's pond and the south edge that only crosses while surfing, Route 21's sea, Cinnabar's two seamless land regions and which crossing reaches Blue, Route 20's sealed west channel and the east landfall behind it, Seafoam Gym, and Viridian Gym's two objects behind one event flag |
+| `validate_magnet_train.gd` | the twelve doors over the lost-doll errand and both rides, the Copycat standing in her cell before any script has assigned her variable sprite, the Fan Club's Clefairy guy and the doll behind his own flag, and both Magnet Train stations as a lobby and a platform with no walkable seam between them |
+| `validate_mt_silver.gd` | the nine doors from Viridian Gym to Silver Cave Room 3, Viridian's west connection and Route 28's, Oak's lab, the Victory Road Gate's three regions and the black belt standing in each of the two cells that join them across all four flag combinations, Silver Cave Outside and its flypoint, the Pokecenter counter, each cave room as one region, and Red behind his own hide flag |
 
 ```bash
 # Crystal map 3/19: block edits, hidden object, facing interaction
