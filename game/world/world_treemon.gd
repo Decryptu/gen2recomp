@@ -1,13 +1,15 @@
 class_name Gen2WorldTreemon
 extends RefCounted
 
-## The headbutt-tree encounter roll (engine/events/treemons.asm).
+## The headbutt-tree and rock-smash encounter rolls
+## (engine/events/treemons.asm), which share their tables.
 ##
 ## TreeMonEncounter is four questions in order: does this map have a treemon
 ## set, does that set exist under this profile's limit, does GetTreeMon's score
 ## and roll produce an encounter, and which row does SelectTreeMon land on.
 ## Only the last two are random; the first two are table lookups the caller
-## resolves through [GameData].
+## resolves through [GameData]. RockMonEncounter is the same two lookups over
+## RockMonMaps and then one flat roll, see [method rock_encounter].
 ##
 ## The generator is required rather than defaulted, so nothing here can roll on
 ## an uninjected generator the way advance_roaming() still can.
@@ -34,6 +36,11 @@ const ENCOUNTER_THRESHOLDS: Dictionary = {
 	SCORE_GOOD: 5,
 	SCORE_RARE: 8,
 }
+
+## RockMonEncounter's own threshold, commented "40% chance of an encounter" in
+## both pins. It is a flat chance rather than one of three, because nothing
+## scores a rock.
+const ROCK_ENCOUNTER_THRESHOLD: int = 4
 
 ## CheckSleepingTreeMon's status turns for a tree encounter that starts asleep
 ## (constants/battle_constants.asm's TREEMON_SLEEP_TURNS).
@@ -116,6 +123,37 @@ static func resolve(
 	selected["score"] = tier
 	selected["encounter_roll"] = encounter_roll
 	return selected
+
+
+## RockMonEncounter, which is the same tables and a much shorter question:
+## GetTreeMonSet over RockMonMaps, GetTreeMons, then a flat 40 percent
+## `RandomRange(10)` under 4 and `SelectTreeMon` on the common table. It calls
+## SelectTreeMon directly rather than GetTreeMon, so there is no score, no
+## trainer ID and no rare table, which is why TreeMonSet_Rock can ship without
+## one. It also writes no wBattleType, so a smashed rock is an ordinary wild
+## battle and CheckSleepingTreeMon never looks at it.
+static func rock_encounter(
+	set_record: Dictionary, random: RandomNumberGenerator
+) -> Dictionary:
+	if set_record.is_empty() or random == null:
+		return {}
+	var encounter_roll: int = random.randi_range(0, 9)
+	if not rock_encounter_allowed(encounter_roll):
+		return {}
+	var table: Variant = set_record.get("common", [])
+	if not table is Array or (table as Array).is_empty():
+		return {}
+	var selected: Dictionary = select_at(table as Array, random.randi_range(0, 99))
+	if selected.is_empty():
+		return {}
+	selected["encounter_roll"] = encounter_roll
+	return selected
+
+
+## RockMonEncounter's `cp 4` against its RandomRange(10), kept apart from the
+## roll the way the tree thresholds are.
+static func rock_encounter_allowed(roll: int) -> bool:
+	return roll < ROCK_ENCOUNTER_THRESHOLD
 
 
 ## GetTreeMon's per-tier comparison against its RandomRange(10) result, kept

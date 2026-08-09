@@ -153,3 +153,26 @@ func test_strength_boulder_is_a_hex_template_that_never_decides() -> void:
 		assert_false(
 			_object(movement).is_strength_boulder(), "movement %d is not a boulder" % movement
 		)
+
+
+## TryRockSmashFromMenu's whole test after GetFacingObject: the faced object's
+## MAPOBJECT_MOVEMENT byte against SPRITEMOVEDATA_SMASHABLE_ROCK. The boulder
+## is the row directly after it, so the two must not be confused.
+func test_a_smashable_rock_is_answered_by_its_movement_byte() -> void:
+	assert_eq(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK, 0x18)
+	assert_true(_object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK).is_smashable_rock())
+	assert_false(_object(Gen2WorldObject.MOVEMENT_STRENGTH_BOULDER).is_smashable_rock())
+	assert_false(_object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK).is_strength_boulder())
+	assert_false(_object().is_smashable_rock())
+	# The rock's own row carries no palette flag, so it is none of the three
+	# questions the palette bits answer.
+	assert_false(_object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK).is_big_object())
+	assert_false(_object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK).is_swimming())
+
+
+## A rock decides nothing on its own, exactly like the boulder: it is in neither
+## template set, so no per-frame driver ever asks it to move.
+func test_a_smashable_rock_is_in_neither_movement_set() -> void:
+	var rock: Gen2WorldObject = _object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK)
+	assert_false(rock.movement_supported())
+	assert_false(rock.movement_advances())

@@ -21,6 +21,7 @@ const MOVE_WHIRLPOOL: int = 0xFA
 const MOVE_WATERFALL: int = 0x7F
 const MOVE_FLASH: int = 0x94
 const MOVE_HEADBUTT: int = 0x1D
+const MOVE_ROCK_SMASH: int = 0xF9
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -59,7 +60,7 @@ const MUSIC_SURF: int = 0x21
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
-	MOVE_HEADBUTT,
+	MOVE_HEADBUTT, MOVE_ROCK_SMASH,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

@@ -218,3 +218,43 @@ func test_resolve_draws_both_rolls_and_stays_inside_the_table() -> void:
 		)
 		found[int(result["species"])] = true
 	assert_gt(found.size(), 0, "forty seeds produce at least one encounter")
+
+
+## RockMonEncounter is a flat 40 percent rather than one of three tiers: `ld a,
+## 10 / call RandomRange / cp 4`, so a roll under 4 passes and nothing scores.
+func test_the_rock_threshold_is_flat_and_has_no_tier() -> void:
+	assert_eq(Gen2WorldTreemon.ROCK_ENCOUNTER_THRESHOLD, 4)
+	for roll: int in 4:
+		assert_true(Gen2WorldTreemon.rock_encounter_allowed(roll), "roll %d passes" % roll)
+	for roll: int in range(4, 10):
+		assert_false(Gen2WorldTreemon.rock_encounter_allowed(roll), "roll %d fails" % roll)
+
+
+## RockMonEncounter calls SelectTreeMon directly rather than GetTreeMon, so it
+## never reads a rare table. TreeMonSet_Rock ships none, and a rock set that did
+## would still be ignored.
+func test_a_rock_encounter_only_ever_reads_the_common_table() -> void:
+	var found: Dictionary = {}
+	for seed_value: int in 40:
+		var generator := RandomNumberGenerator.new()
+		generator.seed = seed_value
+		var result: Dictionary = Gen2WorldTreemon.rock_encounter(SET, generator)
+		if result.is_empty():
+			continue
+		assert_between(int(result["encounter_roll"]), 0, 3, "only rolls under 4 resolve")
+		assert_true(
+			int(result["species"]) in [21, 22],
+			"a rock reads the common table, never the rare one"
+		)
+		assert_false(result.has("score"), "nothing scores a rock")
+		found[int(result["species"])] = true
+	assert_gt(found.size(), 0, "forty seeds produce at least one rock encounter")
+
+
+func test_a_rock_encounter_refuses_without_a_generator_or_a_set() -> void:
+	assert_true(Gen2WorldTreemon.rock_encounter(SET, null).is_empty())
+	assert_true(Gen2WorldTreemon.rock_encounter({}, _seeded()).is_empty())
+	assert_true(
+		Gen2WorldTreemon.rock_encounter({"common": [], "rare": RARE}, _seeded()).is_empty(),
+		"an empty common table is no encounter, whatever the rare half holds"
+	)

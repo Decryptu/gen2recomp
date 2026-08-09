@@ -1580,6 +1580,14 @@ func _on_party_action(action: Dictionary) -> void:
 				return
 			## _UseHeadbuttText is "did a HEADBUTT!", not the "used" the other five share.
 			_show_field_move_text("%s did a HEADBUTT!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_ROCK_SMASH:
+			var rock_smash: Dictionary = _world.rock_smash_request()
+			if not bool(rock_smash.get("ok", false)):
+				_show_field_move_text(
+					_rock_smash_refusal(StringName(rock_smash.get("reason", &"")))
+				)
+				return
+			_show_field_move_text("%s used ROCK SMASH!" % String(action.get("name", "")))
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -1644,6 +1652,13 @@ func _flash_refusal(reason: StringName) -> String:
 	return "Can't use that here."
 
 
+## TryRockSmashFromMenu refuses through FieldMoveFailed too, so its only text is
+## the generic one. AskRockSmashScript's _MaySmashText belongs to the other
+## path, where the runner owns it.
+func _rock_smash_refusal(_reason: StringName) -> String:
+	return "Can't use that here."
+
+
 ## TryHeadbuttFromMenu refuses through FieldMoveFailed, so every refusal is
 ## _CantUseItemText. There is no badge branch to add one: Headbutt is gated on
 ## CheckPartyMove and the faced tile alone.
@@ -1702,6 +1717,9 @@ func _acknowledge_field_move_text() -> void:
 	if not _world.pending_headbutt().is_empty():
 		_commit_field_move(_world.complete_headbutt(_encounter_random), "Headbutt")
 		return
+	if not _world.pending_rock_smash().is_empty():
+		_commit_field_move(_world.complete_rock_smash(_encounter_random), "Rock Smash")
+		return
 	_script_prompt = ""
 	_refresh_labels()
 
@@ -1734,6 +1752,8 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 					_animation.configure(_world, _render_time_of_day())
 			&"headbutt_applied":
 				_play_sfx(SFX_HEADBUTT_TREE)
+			&"rock_smash_applied":
+				_play_sfx(SFX_STRENGTH)
 			_:
 				_play_sfx(SFX_CUT)
 		if _renderer != null:
@@ -1741,6 +1761,9 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 		_script_prompt = label
 		if StringName(applied.get("kind", &"")) == &"headbutt_applied":
 			_finish_headbutt(applied)
+			return
+		if StringName(applied.get("kind", &"")) == &"rock_smash_applied":
+			_finish_rock_smash(applied)
 			return
 	else:
 		_script_prompt = "%s failed: %s" % [label, String(applied.get("reason", "unknown"))]
@@ -1754,6 +1777,22 @@ func _finish_headbutt(applied: Dictionary) -> void:
 	var encounter: Variant = applied.get("encounter", {})
 	if not encounter is Dictionary or (encounter as Dictionary).is_empty():
 		_show_field_move_text("Nope. Nothing…")
+		return
+	_refresh_labels()
+	_start_battle_request({
+		"kind": &"battle_requested",
+		"values": (encounter as Dictionary)["values"],
+		"encounter": (encounter as Dictionary).duplicate(true),
+	})
+
+
+## RockSmashScript after the rock is gone: RockMonEncounter either reaches
+## startbattle or the script ends. Unlike Headbutt there is no nothing-text,
+## because `.done` is a bare `end`.
+func _finish_rock_smash(applied: Dictionary) -> void:
+	var encounter: Variant = applied.get("encounter", {})
+	if not encounter is Dictionary or (encounter as Dictionary).is_empty():
+		_refresh_labels()
 		return
 	_refresh_labels()
 	_start_battle_request({

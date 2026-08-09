@@ -2,9 +2,9 @@ extends GutTest
 
 ## ForgetMove's table and list against a synthetic cache built for this file.
 ##
-## The load-bearing part is the HM list: it is seven moves, not the four
-## [constant Gen2WorldFieldMove.FIELD_MOVES] this project acts on in the
-## overworld, and getting that wrong would let a player forget Fly or Flash.
+## The load-bearing part is the HM list: it is seven moves, which is neither a
+## subset nor a superset of the [constant Gen2WorldFieldMove.FIELD_MOVES] this
+## project acts on, and getting it wrong would let a player forget Fly or Flash.
 
 ## home/hm_moves.asm's IsHMMove.HMMoves with the names
 ## constants/move_constants.asm gives them, in source order.
@@ -78,18 +78,25 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 
 
 ## The overworld's field-move list is a different question, and neither list
-## contains the other. Fly is an HM this project does not act on; Headbutt is a
-## TM it does, so it is a field move that ForgetMove will happily forget.
+## contains the other. Fly is an HM this project does not act on; Headbutt and
+## Rock Smash are TMs it does, so they are field moves ForgetMove will happily
+## forget.
+const TM_FIELD_MOVES: Array[int] = [
+	Gen2WorldFieldMove.MOVE_HEADBUTT, Gen2WorldFieldMove.MOVE_ROCK_SMASH,
+]
+
+
 func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 7)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 8)
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
-		if move == Gen2WorldFieldMove.MOVE_HEADBUTT:
+		if TM_FIELD_MOVES.has(move):
 			continue
 		assert_true(Gen2MoveForget.is_hm_move(move), "field move %d" % move)
-	assert_false(
-		Gen2MoveForget.is_hm_move(Gen2WorldFieldMove.MOVE_HEADBUTT),
-		"HEADBUTT is TM02, so IsHMMove does not protect it"
-	)
+	for move: int in TM_FIELD_MOVES:
+		assert_false(
+			Gen2MoveForget.is_hm_move(move),
+			"TM02 HEADBUTT and TM08 ROCK SMASH are not protected by IsHMMove"
+		)
 	assert_true(Gen2MoveForget.is_hm_move(0x13), "FLY is an HM with no field effect here")
 	assert_false(Gen2WorldFieldMove.FIELD_MOVES.has(0x13))
 

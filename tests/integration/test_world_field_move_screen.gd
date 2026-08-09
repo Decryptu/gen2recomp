@@ -39,6 +39,20 @@ const HEADBUTT_CELL: Vector2i = Vector2i(6, 3)
 const HEADBUTT_STAND_CELL: Vector2i = Vector2i(6, 2)
 const TREEMON_SET: int = 1
 const TREEMON_SPECIES: int = Fixture.TRAINER_SPECIES
+## A smashable rock and the cell the player stands on to face it. The rock is a
+## map object, not a tile, which is the whole difference from a headbutt tree:
+## TryRockSmashFromMenu asks GetFacingObject rather than the collision byte.
+const ROCK_CELL: Vector2i = Vector2i(9, 3)
+const ROCK_STAND_CELL: Vector2i = Vector2i(9, 2)
+const ROCK_OBJECT_INDEX: int = 1
+## RockMonMaps names the same map, with the ROCK set at its Crystal number.
+const ROCK_SET: int = 7
+## The rock's own script, which every real rock has: `jumpstd SmashRockScript`.
+const ROCK_SCRIPT: int = 0x6400
+const STD_SMASH_ROCK: int = 15
+## Any permanent flag: the fixture's rock carries -1 like the real ones, so a
+## test that wants Mt. Moon Square's behavior gives it one.
+const ROCK_EVENT_FLAG: int = 900
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -71,6 +85,8 @@ func _write_cut_tree() -> void:
 			raw["name"] = "WHIRLPOOL"
 		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_HEADBUTT:
 			raw["name"] = "HEADBUTT"
+		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_ROCK_SMASH:
+			raw["name"] = "ROCK SMASH"
 	RomCache.write_json(RomCache.moves_path(directory), moves)
 
 	var tilesets: Array = RomCache.read_json(RomCache.world_tilesets_path(directory))
@@ -107,6 +123,18 @@ func _write_cut_tree() -> void:
 		collision[WHIRLPOOL_CELL.y * Fixture.MAP_WIDTH_CELLS + WHIRLPOOL_CELL.x] = 0x24
 		collision[HEADBUTT_CELL.y * Fixture.MAP_WIDTH_CELLS + HEADBUTT_CELL.x] = \
 			Gen2WorldCollision.COLL_HEADBUTT_TREE
+		# A second object beside the fixture's trainer, carrying the rock's own
+		# movement byte and the fixture's only sprite. Its event flag is -1, the
+		# way fifteen of the sixteen real rocks are, so smashing it lasts only
+		# as long as the loaded map.
+		(raw["events"]["objects"] as Array).append({
+			"sprite": Fixture.TRAINER_SPRITE,
+			"x": ROCK_CELL.x, "y": ROCK_CELL.y,
+			"movement": Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK,
+			"x_radius": 0, "y_radius": 0, "hour_1": -1, "hour_2": -1, "palette": 0,
+			"object_type": Gen2WorldObject.OBJECTTYPE_SCRIPT,
+			"sight_range": 0, "script": ROCK_SCRIPT, "event_flag": 0xFFFF,
+		})
 	RomCache.write_json(RomCache.world_maps_path(directory), maps)
 
 	# TreeMonMaps and one populated set, patched into the fixture's own
@@ -120,17 +148,34 @@ func _write_cut_tree() -> void:
 			"map_number": Fixture.MAP_NUMBER,
 			"set": TREEMON_SET,
 		}],
-		"rock_maps": [],
+		"rock_maps": [{
+			"map_group": Fixture.MAP_GROUP,
+			"map_number": Fixture.MAP_NUMBER,
+			"set": ROCK_SET,
+		}],
 		"sets": [
 			{"common": [], "rare": []},
 			{
 				"common": [{"percent": 100, "species": TREEMON_SPECIES, "level": 5}],
 				"rare": [{"percent": 100, "species": TREEMON_SPECIES, "level": 5}],
 			},
+			{"common": [], "rare": []},
+			{"common": [], "rare": []},
+			{"common": [], "rare": []},
+			{"common": [], "rare": []},
+			{"common": [], "rare": []},
+			## TreeMonSet_Rock's own shape: a common table and no rare one.
+			{"common": [{"percent": 100, "species": TREEMON_SPECIES, "level": 5}], "rare": []},
 		],
 		"asleep": {"morn": [], "day": [], "nite": []},
 	}
 	RomCache.write_json(RomCache.world_encounters_path(directory), encounters)
+
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, ROCK_SCRIPT)] = [
+		Gen2WorldScript.JUMPSTD, STD_SMASH_ROCK, 0,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
 
 	var tiles: PackedByteArray = PackedByteArray()
 	tiles.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
@@ -155,6 +200,11 @@ func _open_world(
 	badge_index: int = Gen2WorldFieldMove.BADGE_HIVE,
 	cell: Vector2i = PLAYER_CELL,
 ) -> void:
+	# A test that opens a second world frees the first here rather than leaking
+	# it: after_each() only ever sees the last one.
+	if is_instance_valid(_world_screen):
+		_world_screen.free()
+		_world_screen = null
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
@@ -635,3 +685,220 @@ func _open_headbutt_world(badge: bool = true) -> void:
 		badge, Gen2WorldFieldMove.MOVE_HEADBUTT, Gen2WorldFieldMove.BADGE_HIVE,
 		HEADBUTT_STAND_CELL
 	)
+
+
+func test_submenu_lists_rock_smash_for_a_mon_that_knows_it() -> void:
+	await _open_rock_smash_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["ROCK SMASH", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
+	)
+
+
+## RockSmashScript reaches `disappear LAST_TALKED` and RockMonEncounter only
+## after UseRockSmashText, so the rock is still there while the message is up.
+func test_choosing_rock_smash_shows_the_message_and_defers_the_rock() -> void:
+	await _open_rock_smash_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	assert_false(world.can_walk_to(ROCK_CELL), "an active object blocks its cell")
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "TESTMON used ROCK SMASH!")
+	assert_false(world.pending_rock_smash().is_empty())
+	assert_not_null(world.object_at(ROCK_CELL), "the rock is still there")
+	assert_false(world.can_walk_to(ROCK_CELL))
+
+	_world_screen._encounter_random.seed = 4
+	_world_screen._acknowledge_field_move_text()
+	await get_tree().process_frame
+	assert_true(world.pending_rock_smash().is_empty())
+	assert_null(world.object_at(ROCK_CELL), "disappear LAST_TALKED deleted it")
+	assert_true(world.can_walk_to(ROCK_CELL), "and its cell is walkable")
+
+
+## Rock Smash asks no badge and no tile: the faced object's movement byte is the
+## whole question, so facing away refuses even standing beside the rock.
+func test_rock_smash_needs_no_badge_and_refuses_when_facing_no_rock() -> void:
+	await _open_rock_smash_world(false)
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(_shown_text(), "TESTMON used ROCK SMASH!", "no badge is involved")
+	_world_screen._acknowledge_field_move_text()
+
+	await _open_rock_smash_world()
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	var facing_away: Gen2PartyScreen = await _open_party()
+	facing_away.handle_button(Gen2Button.A)
+	facing_away.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(_shown_text(), "Can't use that here.")
+	_world_screen._acknowledge_field_move_text()
+	assert_not_null(_world_screen._world.object_at(ROCK_CELL), "and the rock stays")
+
+
+## RockMonEncounter is a flat 40 percent: seed 2's first RandomRange(10) is 0,
+## which passes, and seed 4's is 7, which does not. The rock goes either way,
+## because the disappear is before the roll.
+func test_a_passed_rock_roll_opens_a_battle_and_a_failed_one_does_not() -> void:
+	await _open_rock_smash_world()
+	await _rock_smash_with(2)
+	assert_not_null(_world_screen._battle_host, "a roll under 4 reaches startbattle")
+	var battle: Gen2Battle = _world_screen._battle_host._battle
+	assert_eq(battle.party(Gen2Battle.ENEMY).active_mon().species, TREEMON_SPECIES)
+	# RockMonEncounter writes no wBattleType, unlike TreeMonEncounter.
+	assert_eq(battle.battle_type, Gen2Battle.BATTLETYPE_NORMAL)
+	assert_null(_world_screen._world.object_at(ROCK_CELL))
+
+	await _open_rock_smash_world()
+	await _rock_smash_with(4)
+	assert_null(_world_screen._battle_host, "a roll of 4 or more is no encounter")
+	assert_null(_world_screen._world.object_at(ROCK_CELL), "and the rock is gone anyway")
+
+
+## Chooses ROCK SMASH from the submenu and acknowledges its text with the roll
+## pinned, the way _headbutt_with() does.
+func _rock_smash_with(seed_value: int) -> void:
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	_world_screen._encounter_random.seed = seed_value
+	_world_screen._acknowledge_field_move_text()
+	await get_tree().process_frame
+
+
+func _open_rock_smash_world(badge: bool = true) -> void:
+	await _open_world(
+		badge, Gen2WorldFieldMove.MOVE_ROCK_SMASH, Gen2WorldFieldMove.BADGE_HIVE,
+		ROCK_STAND_CELL
+	)
+
+
+## The other half of Rock Smash, and the half Headbutt does not have: talking to
+## the rock. Every rock's script is `jumpstd SmashRockScript`, whose body is
+## `farsjump AskRockSmashScript`, so the runner answers standard-script index 15
+## with the synthesized ask the way it answers 14 with the boulder's.
+func test_talking_to_a_rock_asks_and_then_smashes_it() -> void:
+	await _open_rock_smash_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	# RockMonEncounter rolls on the script's own generator. Seed 4's first
+	# RandomRange(10) is 7, which is 4 or more, so this run takes `.done` and
+	# the script ends instead of waiting on a battle.
+	world.script_random = RandomNumberGenerator.new()
+	world.script_random.seed = 4
+
+	var opened: Array = world.interact()
+	assert_eq(opened[0]["status"], &"waiting", JSON.stringify(opened))
+	assert_string_contains(String(opened[0]["event"]["text"]), "This rock looks")
+
+	# opentext, writetext, yesorno: the text is acknowledged, then the choice.
+	var asked: Array = world.run_event_queue(true)
+	assert_eq(asked[0]["event"]["type"], &"choice", JSON.stringify(asked))
+	var used: Array = world.choose_script_input(0)
+	assert_string_contains(String(used[0]["event"]["text"]), "used")
+	assert_not_null(world.object_at(ROCK_CELL), "the rock is still there mid-script")
+
+	# closetext, WaitSFX and playsound SFX_STRENGTH, which the host answers
+	# before the earthquake, the disappear and the roll.
+	var sound: Array = world.run_event_queue(true)
+	assert_eq(
+		sound[0]["event"]["request"]["kind"], &"audio_requested", JSON.stringify(sound)
+	)
+	# Answered on the world rather than through Gen2WorldHost, which would want
+	# audio data this synthetic cache does not carry.
+	var completed: Array = world.complete_runtime_request({"ok": true})
+	assert_eq(completed[0]["status"], &"complete", JSON.stringify(completed))
+	assert_true(
+		_has_event(completed[0]["events"], &"screen_shake_requested"),
+		"earthquake 84 is reported"
+	)
+	assert_null(world.object_at(ROCK_CELL), "disappear LAST_TALKED took the rock")
+	assert_true(world.can_walk_to(ROCK_CELL))
+
+
+## The same path with a roll that passes: `readmem wTempWildMonSpecies` is
+## non-zero, so the script reaches randomwildmon and startbattle instead of
+## ending, and the rock is gone either way.
+func test_a_talked_rock_that_rolls_an_encounter_asks_for_a_battle() -> void:
+	await _open_rock_smash_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	# Seed 2's first RandomRange(10) is 0, which is under 4.
+	world.script_random = RandomNumberGenerator.new()
+	world.script_random.seed = 2
+
+	world.interact()
+	world.run_event_queue(true)
+	world.choose_script_input(0)
+	world.run_event_queue(true)
+	var after_sound: Array = world.complete_runtime_request({"ok": true})
+	assert_eq(after_sound[0]["status"], &"waiting", JSON.stringify(after_sound))
+	var request: Dictionary = after_sound[0]["event"]["request"]
+	assert_eq(request["kind"], &"battle_requested")
+	assert_eq(int(request["values"]["pokemon"]), TREEMON_SPECIES)
+	assert_eq(request["values"]["kind"], &"wild")
+
+
+## `HasRockSmash` is CheckPartyMove and nothing else, so a party without the
+## move is told _MaySmashText and never offered the choice.
+func test_talking_to_a_rock_without_the_move_only_reports_it() -> void:
+	await _open_world(
+		true, Gen2WorldFieldMove.MOVE_CUT, Gen2WorldFieldMove.BADGE_HIVE, ROCK_STAND_CELL
+	)
+	var world: Gen2WorldAPI = _world_screen._world
+	var opened: Array = world.interact()
+	assert_string_contains(String(opened[0]["event"]["text"]), "Maybe a #MON")
+	var after: Array = world.run_event_queue(true)
+	assert_eq(after[0]["status"], &"complete", JSON.stringify(after))
+	assert_not_null(world.object_at(ROCK_CELL), "and the rock is untouched")
+
+
+## Whether a result's event list carries one type, for the presentation
+## requests a script reports rather than performs.
+func _has_event(events: Array, type: StringName) -> bool:
+	for event: Variant in events:
+		if event is Dictionary and StringName((event as Dictionary).get("type", &"")) == type:
+			return true
+	return false
+
+
+## `disappear` is DeleteObjectStruct plus ApplyEventActionAppearDisappear, and
+## the second half writes nothing when the object's event flag is `-1`. A map
+## load runs ReadObjectEvents and rebuilds every object, so an unflagged rock
+## comes back and only a flagged one stays smashed. Fifteen of the sixteen real
+## rocks are unflagged; Mt. Moon Square's is the exception.
+func test_an_unflagged_rock_comes_back_on_a_map_reload() -> void:
+	await _open_rock_smash_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	await _rock_smash_with(4)
+	assert_null(world.object_at(ROCK_CELL))
+
+	world.reload_current_map()
+	assert_not_null(world.object_at(ROCK_CELL), "the rock is back")
+	assert_false(world.can_walk_to(ROCK_CELL), "and it blocks again")
+
+
+## The same rock given an event flag stays smashed, which is what gates
+## Mt. Moon Square's Clefairy dance.
+func test_a_flagged_rock_stays_smashed_across_a_reload() -> void:
+	await _open_rock_smash_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var rock: Gen2WorldObject = world.objects[ROCK_OBJECT_INDEX]
+	rock.event_flag = ROCK_EVENT_FLAG
+	assert_true(bool(world.smash_object(ROCK_OBJECT_INDEX).get("ok", false)))
+	assert_true(world.state.is_event_flag_active(ROCK_EVENT_FLAG))
+
+	# The cache's own record still carries -1, so the reloaded object needs the
+	# flag put back on it the way the cartridge's map data carries it.
+	world.reload_current_map()
+	(world.objects[ROCK_OBJECT_INDEX] as Gen2WorldObject).event_flag = ROCK_EVENT_FLAG
+	world.set_object_time(world.object_hour, world.object_time_of_day)
+	assert_null(world.object_at(ROCK_CELL), "a set event flag keeps it hidden")

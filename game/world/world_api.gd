@@ -106,12 +106,19 @@ var _pending_strength: Dictionary = {}
 ## The same for Waterfall, held while Script_UsedWaterfall shows its text. It
 ## names the faced cell, so it is cleared with the loaded map like the rest.
 var _pending_waterfall: Dictionary = {}
+## The same for Flash. It names no cell or block, but it is cleared with the
+## others so a request left unacknowledged across a map load cannot refuse every
+## later Flash with flash_in_progress.
 var _pending_flash: Dictionary = {}
 ## The same for Headbutt, held while HeadbuttScript shows UseHeadbuttText. It
 ## names the faced tree, so it is cleared with the loaded map like the rest;
 ## the encounter behind it is only rolled on the commit, since TreeMonEncounter
 ## runs after that text.
 var _pending_headbutt: Dictionary = {}
+## The same for Rock Smash, held while RockSmashScript shows UseRockSmashText.
+## It names the faced rock's object index, so it is cleared with the loaded map
+## like the rest.
+var _pending_rock_smash: Dictionary = {}
 ## wPlayerID, mirrored from the selected save the way _party_summary mirrors
 ## its party. GetTreeScore is the only reader; -1 means no save has set one,
 ## which refuses rather than scoring against an invented zero.
@@ -1041,6 +1048,123 @@ func _treemon_encounter(cell: Vector2i, random: RandomNumberGenerator) -> Dictio
 
 static func _headbutt_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"headbutt_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's TryRockSmashFromMenu, staged the way the other
+## six are: RockSmashScript reaches RockMonEncounter only after
+## UseRockSmashText, so the roll and the rock both belong to the commit.
+##
+## Rock Smash asks neither a badge nor a tile. `GetFacingObject` is
+## `CheckFacingObject` and then the faced object's own `MAPOBJECT_MOVEMENT`
+## byte, compared against `SPRITEMOVEDATA_SMASHABLE_ROCK`, so the question is
+## which object is in front rather than what the ground is. That is also why it
+## reads the doubled counter cell the way `interact()` does: it is the same
+## `CheckFacingObject`.
+func rock_smash_request() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _rock_smash_failure(&"missing_map")
+	if not _pending_rock_smash.is_empty():
+		return _rock_smash_failure(&"rock_smash_in_progress")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_ROCK_SMASH) < 0:
+		return _rock_smash_failure(&"move_not_known")
+	var target: Vector2i = object_facing_cell()
+	var rock: Gen2WorldObject = object_at(target)
+	if rock == null or not rock.is_smashable_rock():
+		return _rock_smash_failure(&"nothing_to_smash")
+	_pending_rock_smash = {
+		"ok": true,
+		"kind": &"rock_smash_requested",
+		"move": Gen2WorldFieldMove.MOVE_ROCK_SMASH,
+		"cell": target,
+		"object_index": rock.index,
+	}
+	return _pending_rock_smash.duplicate(true)
+
+
+## Empty until rock_smash_request() succeeds.
+func pending_rock_smash() -> Dictionary:
+	return _pending_rock_smash.duplicate(true)
+
+
+## RockSmashScript after its text: `disappear LAST_TALKED` and then
+## `RockMonEncounter`. The rock goes whether or not anything comes out of it,
+## because the disappear is before the roll.
+func complete_rock_smash(random: RandomNumberGenerator) -> Dictionary:
+	if _pending_rock_smash.is_empty():
+		return _rock_smash_failure(&"no_pending_rock_smash")
+	if random == null:
+		return _rock_smash_failure(&"missing_generator")
+	if data == null or current_map == null:
+		return _rock_smash_failure(&"missing_map")
+	var request: Dictionary = _pending_rock_smash
+	_pending_rock_smash = {}
+	var object_index: int = int(request["object_index"])
+	smash_object(object_index)
+	return {
+		"ok": true,
+		"kind": &"rock_smash_applied",
+		"move": int(request["move"]),
+		"cell": request["cell"],
+		"object_index": object_index,
+		"encounter": _rock_encounter(random),
+	}
+
+
+## `Script_disappear`: `DeleteObjectStruct` plus
+## `ApplyEventActionAppearDisappear`, which writes the object's own event flag
+## only when it has one. Fifteen of the sixteen rocks carry `-1`, so they are
+## gone until the map reloads and back on the next visit; Mt. Moon Square's
+## carries `EVENT_MT_MOON_SQUARE_ROCK`, so that one stays smashed, which is what
+## gates the Clefairy dance.
+func smash_object(object_index: int) -> Dictionary:
+	if current_map == null or object_index < 0 or object_index >= objects.size():
+		return {"ok": false, "reason": &"missing_object"}
+	var object: Gen2WorldObject = objects[object_index]
+	## DeleteObjectStruct only, with no visibility override behind it: a map
+	## load runs ReadObjectEvents and rebuilds every object from map data, so
+	## what survives a reload is the event flag and nothing else.
+	object.deleted = true
+	object.active = false
+	if object.event_flag > 0:
+		state.set_event_flag(object.event_flag, true)
+	return {"ok": true, "object_index": object_index, "event_flag": object.event_flag}
+
+
+## RockMonEncounter over the imported RockMonMaps and the ROCK set. Unlike a
+## tree it carries no BATTLETYPE_TREE, so nothing about it can start asleep.
+func _rock_encounter(random: RandomNumberGenerator) -> Dictionary:
+	var set_number: int = data.treemon_set_for_map(
+		current_map.group, current_map.number, true
+	)
+	if not Gen2WorldTreemon.set_is_usable(
+		set_number, Gen2WorldState.is_crystal_profile(data)
+	):
+		return {}
+	var resolved: Dictionary = Gen2WorldTreemon.rock_encounter(
+		data.treemon_set(set_number), random
+	)
+	if resolved.is_empty():
+		return {}
+	var species: int = int(resolved["species"])
+	var level: int = int(resolved["level"])
+	return {
+		"kind": &"wild_encounter_requested",
+		"method": Gen2WorldEncounter.METHOD_ROCK_SMASH,
+		"source": Gen2WorldEncounter.SOURCE_ROCK,
+		"pokemon": species,
+		"level": level,
+		"map": map_id(),
+		"cell": player_cell,
+		"movement": movement_mode,
+		"treemon_set": set_number,
+		"encounter_roll": int(resolved["encounter_roll"]),
+		"slot_roll": int(resolved["slot_roll"]),
+		"values": {"kind": &"wild", "pokemon": species, "level": level},
+	}
+
+
+static func _rock_smash_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"rock_smash_failed", "reason": reason}
 
 
 ## Mirrors the selected save's wPlayerID, the way set_party_summary() mirrors
@@ -2244,6 +2368,12 @@ func _enqueue_script_events(events: Array) -> void:
 			"script": script_address,
 			"event": event.duplicate(true),
 		}
+		# hLastTalked, which GetFacingObject writes before an object's script
+		# runs. Without it every `disappear LAST_TALKED` in an ordinary object
+		# script resolves to object -1: the trainer and item-ball requests below
+		# carry their own, so only the plain object case was missing one.
+		if event.get("kind", &"") == &"objects" and event.has("object_index"):
+			request["object_index"] = int(event["object_index"])
 		var trainer_request: Dictionary = _trainer_request_for_event(event)
 		if not trainer_request.is_empty():
 			request = trainer_request
@@ -3755,6 +3885,8 @@ func _apply_map(
 	_pending_strength.clear()
 	_pending_waterfall.clear()
 	_pending_headbutt.clear()
+	_pending_rock_smash.clear()
+	_pending_flash.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -3808,6 +3940,8 @@ func reload_current_map() -> Dictionary:
 	_pending_strength.clear()
 	_pending_waterfall.clear()
 	_pending_headbutt.clear()
+	_pending_rock_smash.clear()
+	_pending_flash.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

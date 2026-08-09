@@ -15,12 +15,15 @@ const METHOD_SUPER_ROD: StringName = &"super_rod"
 ## slot table and no repel step, so nothing in resolve() handles it: it is a
 ## name for the request a headbutt produces.
 const METHOD_HEADBUTT: StringName = &"headbutt"
+## RockMonEncounter's own method, which reads no rate and no slot table either.
+const METHOD_ROCK_SMASH: StringName = &"rock_smash"
 
 const SOURCE_NORMAL: StringName = &"normal"
 const SOURCE_SWARM: StringName = &"swarm"
 const SOURCE_ROAMING: StringName = &"roaming"
 const SOURCE_FISHING: StringName = &"fishing"
 const SOURCE_TREE: StringName = &"tree"
+const SOURCE_ROCK: StringName = &"rock"
 
 
 static func resolve(
