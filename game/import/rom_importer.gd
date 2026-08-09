@@ -892,6 +892,25 @@ static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictiona
 					],
 				}
 
+	# `BattleObjectPals`, checked the same way and for the same reason: a palette
+	# table one table out still decodes into colours.
+	for index: int in RomLayout.BATTLE_OBJECT_PALETTES_STORED:
+		var wanted: Array = RomLayout.BATTLE_OBJECT_PALETTES[index]
+		for colour: int in wanted.size():
+			var read: int = rom.u16le(
+				int(layout["battle_object_palettes"])
+					+ (index * RomLayout.BATTLE_OBJECT_PALETTE_COLORS + colour)
+					* Gen2Palette.COLOR_BYTES
+			)
+			if read != int(wanted[colour]):
+				return {
+					"ok": false,
+					"message": "Battle object palette %s colour %d: expected $%04X, read $%04X." % [
+						RomLayout.BATTLE_OBJECT_PALETTE_NAMES[index], colour,
+						wanted[colour], read,
+					],
+				}
+
 	var battle_font: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
 		data, int(layout["battle_font"]), RomLayout.BATTLE_FONT_TILES
 	)
@@ -1596,6 +1615,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
+		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
 		"complete": true,
@@ -1988,6 +2008,27 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 		out[RomLayout.BAR_PALETTE_NAMES[index]] = [
 			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
 		]
+	return out
+
+
+## The six `BattleObjectPals` an animation object is drawn with, four colours
+## each rather than a pair, since `_CGB_BattleScreenLayout` copies them in whole.
+##
+## Slots 0 and 1 are not here and are not table rows: the layout fills them from
+## the two battlers' own palettes, so an object asking for either is asking for
+## whoever is on the field.
+func _import_battle_object_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	var entry: int = int(layout["battle_object_palettes"])
+	for index: int in RomLayout.BATTLE_OBJECT_PALETTES_STORED:
+		var colors: Array = []
+		for color: int in RomLayout.BATTLE_OBJECT_PALETTE_COLORS:
+			colors.append(rom.u16le(
+				entry
+					+ (index * RomLayout.BATTLE_OBJECT_PALETTE_COLORS + color)
+					* Gen2Palette.COLOR_BYTES
+			))
+		out[RomLayout.BATTLE_OBJECT_PALETTE_NAMES[index]] = colors
 	return out
 
 

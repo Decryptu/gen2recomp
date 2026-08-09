@@ -45,6 +45,7 @@ var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
+var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
 ## Group and number to the map's position in [member _world_maps]. Warps,
@@ -99,6 +100,7 @@ static func open_directory(path: String) -> GameData:
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
+	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -833,6 +835,40 @@ func card_palette(slot: int) -> PackedColorArray:
 		Gen2Palette.from_packed(int(pair[0])),
 		Gen2Palette.from_packed(int(pair[1])),
 	]))
+
+
+## One of the eight `PAL_BATTLE_OB_*` object palettes an animation object is
+## drawn with, whole.
+##
+## Slots 0 and 1 are the two battlers' own and are not in the table:
+## `_CGB_BattleScreenLayout` fills them from whoever is on the field, so a caller
+## passes those two in as [param enemy] and [param player] pairs. Everything from
+## `PAL_BATTLE_OB_GRAY` on is `BattleObjectPals`, four colours each.
+func battle_object_palette(
+	slot: int, enemy: Array = [], player: Array = []
+) -> PackedColorArray:
+	if slot < 0 or slot >= RomLayout.BATTLE_OBJECT_PALETTE_COUNT:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	if slot < RomLayout.BATTLE_OBJECT_PALETTE_FIRST_STORED:
+		# `LoadPalette_White_Col1_Col2_Black` over the battler's own pair.
+		var pair: Array = enemy if slot == 0 else player
+		if pair.size() < 2:
+			return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		return Gen2Palette.pic_palette(PackedColorArray([
+			Gen2Palette.from_packed(int(pair[0])),
+			Gen2Palette.from_packed(int(pair[1])),
+		]))
+	var name: String = RomLayout.BATTLE_OBJECT_PALETTE_NAMES[
+		slot - RomLayout.BATTLE_OBJECT_PALETTE_FIRST_STORED
+	]
+	var stored: Variant = _battle_object_palettes.get(name, null)
+	if not stored is Array \
+			or (stored as Array).size() < RomLayout.BATTLE_OBJECT_PALETTE_COLORS:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	var colors := PackedColorArray()
+	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
 
 
 ## `PREDEFPAL_CGB_BADGE`, stored whole rather than as a pair.
