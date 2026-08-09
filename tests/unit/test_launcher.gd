@@ -16,6 +16,10 @@ func after_each() -> void:
 	if is_instance_valid(_launcher):
 		_launcher.free()
 	_launcher = null
+	# A palette change rebuilds the launcher by detaching the old shell and
+	# queueing it, so freeing the root leaves that one pending until a frame
+	# runs the deletion queue.
+	await get_tree().process_frame
 	DirAccess.remove_absolute(_scratch_path)
 	DirAccess.remove_absolute(_mod_archive)
 	Gen2ModInstaller.uninstall(PROBE_MOD_ID)

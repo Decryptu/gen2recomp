@@ -31,6 +31,9 @@ const CROSS_ARM: float = 0.36
 const MOUSE_TOUCH_INDEX: int = -1
 
 var _layout: Gen2TouchLayout = Gen2TouchLayout.new()
+## Whether a caller handed one over. The settings preview edits the live layout
+## object, so entering the tree must not swap it for the stored one.
+var _layout_given: bool = false
 var _edit_mode: bool = false
 ## Touch index to the button it is on. A finger sliding off one button onto
 ## another swaps which, so the d-pad can be rolled around without lifting.
@@ -53,7 +56,8 @@ func _ready() -> void:
 	# The pad is drawn over the game and must never take a click away from it.
 	# Touches arrive through _input, which does not go through this filter.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_layout(Gen2InputRuntime.instance().touch_layout())
+	if not _layout_given:
+		_layout = Gen2InputRuntime.instance().touch_layout()
 	Gen2InputRuntime.instance().touch_controls_changed.connect(_on_touch_controls_changed)
 	_on_touch_controls_changed(Gen2InputRuntime.instance().touch_controls_shown())
 
@@ -67,6 +71,7 @@ func _exit_tree() -> void:
 
 func set_layout(layout: Gen2TouchLayout) -> void:
 	_layout = layout if layout != null else Gen2TouchLayout.new()
+	_layout_given = true
 	queue_redraw()
 
 
