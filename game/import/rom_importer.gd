@@ -260,6 +260,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not services["ok"]:
 		return services
 
+	var battle_anims: Dictionary = Gen2BattleAnimImporter.verify_layout(rom)
+	if not battle_anims["ok"]:
+		return battle_anims
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -1445,6 +1449,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"phone_scripts": 0,
 		"music": 0,
 		"sfx": 0,
+		"battle_anims": 0,
+		"battle_anim_gfx_tiles": 0,
 		"elapsed_ms": 0,
 	}
 
@@ -1507,6 +1513,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	)
 	if not bool(services.get("ok", false)):
 		result["message"] = String(services.get("message", "Could not import world service data."))
+		return result
+	var battle_anims: Dictionary = Gen2BattleAnimImporter.import_to_cache(rom, layout, directory)
+	if not bool(battle_anims.get("ok", false)):
+		result["message"] = String(
+			battle_anims.get("message", "Could not import battle animation data.")
+		)
 		return result
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
@@ -1574,6 +1586,14 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_phone_script_count": int(services["phone_scripts"]),
 		"world_music_count": int(services["music"]),
 		"world_sfx_count": int(services["sfx"]),
+		"battle_anim_script_count": int(battle_anims["scripts"]),
+		"battle_anim_object_count": int(battle_anims["objects"]),
+		"battle_anim_frameset_count": int(battle_anims["framesets"]),
+		"battle_anim_oam_set_count": int(battle_anims["oam_sets"]),
+		"battle_anim_gfx": {
+			"sheets": int(battle_anims["gfx_sheets"]),
+			"tiles": int(battle_anims["gfx_tiles"]),
+		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"atlases": pics,
@@ -1611,6 +1631,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["phone_scripts"] = int(services["phone_scripts"])
 	result["music"] = int(services["music"])
 	result["sfx"] = int(services["sfx"])
+	result["battle_anims"] = int(battle_anims["scripts"])
+	result["battle_anim_gfx_tiles"] = int(battle_anims["gfx_tiles"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
@@ -1621,6 +1643,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		+ "and %d overworld sprites, "
 		+ "%d menus, %d marts, %d phone contacts, %d phone script resources, "
 		+ "%d music tracks and %d sound effects, "
+		+ "%d battle animations over %d graphics tiles, "
 		+ "%d evolutions and %d level-up moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
@@ -1632,6 +1655,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		int(services["menus"]), int(services["marts"]), int(services["phone_contacts"]),
 		int(services["phone_scripts"]),
 		int(services["music"]), int(services["sfx"]),
+		int(battle_anims["scripts"]), int(battle_anims["gfx_tiles"]),
 		evolutions, learnset_moves, result["elapsed_ms"],
 	]
 	return result

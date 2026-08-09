@@ -454,6 +454,39 @@ const CARD_PALETTE_CLASSES: Array[int] = [0, 1, 3, 2, 4, 7, 6, 5]
 ## is stored whole.
 const CARD_BADGE_PALETTE_COLORS: int = 4
 
+## The battle animation data layer: the per-move scripts and the four tables the
+## objects they spawn are built from.
+##
+## Every one of the five is stored as a contiguous region rather than entry by
+## entry, because each is a pointer table immediately followed by the data it
+## points at, and every pointer inside it is bank-local. Keeping the region whole
+## means a cached address resolves by subtraction and the bytes are the
+## cartridge's own; see [Gen2BattleAnimImporter].
+##
+## `BattleAnimations` (data/moves/animations.asm) is indexed by move number, so
+## entry 0 is `BattleAnim_Dummy` and 1 is `BattleAnim_Pound`. Entries past
+## [constant MOVE_COUNT] are the four the table pads to $100 with and then the
+## non-move animations, which `wFXAnimID`'s high byte reaches.
+const BATTLE_ANIM_SCRIPT_COUNT: int = 278
+const BATTLE_ANIM_OBJECT_COUNT: int = 188
+const BATTLE_ANIM_OBJECT_SIZE: int = 6
+const BATTLE_ANIM_FRAMESET_COUNT: int = 185
+const BATTLE_ANIM_OAM_SET_COUNT: int = 216
+const BATTLE_ANIM_OAM_SET_SIZE: int = 4
+## `dbsprite`: y, x, tile, attributes.
+const BATTLE_ANIM_OAM_SPRITE_SIZE: int = 4
+## `AnimObjGFX` is `const_def 1`, so index 0 is a slot no `anim_*gfx` names and
+## the table is one longer than [code]NUM_BATTLE_ANIM_GFX[/code].
+const BATTLE_ANIM_GFX_COUNT: int = 42
+const BATTLE_ANIM_GFX_SIZE: int = 4
+## `AnimObjGFX`'s last two rows are `anim_obj_gfx 1, NULL`:
+## `BATTLE_ANIM_GFX_PLAYERHEAD` and `..._ENEMYFEET` are written into
+## `wBattleAnimTileDict` by `BattleAnimCmd_BattlerGFX_1Row`/`_2Row` off the
+## battler's own pic, and are named by no `anim_*gfx` command, so neither row
+## has a sheet to decode.
+const BATTLE_ANIM_GFX_FIRST_SHEET: int = 1
+const BATTLE_ANIM_GFX_LAST_SHEET: int = 39
+
 ## The four palettes a battle draws its bars with: the HP bar in green, yellow
 ## or red depending on how much is left, and the exp bar in blue. They are two
 ## colours each like a species' palette, white and black being implied, and they
@@ -740,6 +773,19 @@ const GOLD_SILVER: Dictionary = {
 		"order_alpha": 0x40C65,
 		"order_new": 0x40D60,
 	},
+	# Battle animations. `BattleAnimations` was located by matching
+	# `BattleAnim_Pound` whole (d1 01 e0 01 31 d0 08 88 38 00 06 d0 01 88 38 00
+	# 10 ff), then finding the run of 278 in-bank pointers whose second entry is
+	# its address; the other four tables were located by assembling the pinned
+	# data/battle_anims files and matching the bytes. Each hit is unique in the
+	# dump. Nested for the same reason trainer_card is.
+	"battle_anims": {
+		"scripts": 0xC900A,
+		"objects": 0xCCAA5,
+		"framesets": 0xCE7A3,
+		"oam_sets": 0xCEDF3,
+		"object_gfx": 0xCFC3B,
+	},
 	"trainer_pic_pointers": 0x80000,
 	"trainer_palettes": 0xB53D,
 	"trainer_class_names": 0x1B0955,
@@ -896,6 +942,16 @@ const CRYSTAL: Dictionary = {
 		"entry_banks": [0x60, 0x6E, 0x73, 0x74],
 		"order_alpha": 0x40C65,
 		"order_new": 0x40D60,
+	},
+	# Battle animations; see the Gold and Silver block above for how these were
+	# located. All five tables sit in the same two banks in every dump and only
+	# the addresses within them move.
+	"battle_anims": {
+		"scripts": 0xC906F,
+		"objects": 0xCCB56,
+		"framesets": 0xCE85E,
+		"oam_sets": 0xCEEAE,
+		"object_gfx": 0xCFCF6,
 	},
 	"trainer_pic_pointers": 0x128000,
 	"trainer_palettes": 0xB0CE,
