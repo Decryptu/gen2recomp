@@ -231,8 +231,10 @@ Battle-screen moves are random and a full move set declines the learn offer; use
 `show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`
 for a fallback pairing.
 
-The world screen's start menu wires Pokemon, Pack, Pokegear, Save and Exit;
-Pokedex, Player and Options appear in their source position but do nothing yet.
+The world screen's start menu wires Pokemon, Pack, Pokegear, Save, Options and
+Exit; Pokedex and Player appear in their source position but do nothing yet.
+Options is the cartridge's own seven-row OPTION screen over the same values the
+launcher's settings edit, so the two can never disagree.
 Pokegear opens its card list, in the source's clock, map, phone, radio order and
 showing only cards the player owns; the map card keeps its position marked
 unavailable. The radio card tunes with left and right over the cartridge's own

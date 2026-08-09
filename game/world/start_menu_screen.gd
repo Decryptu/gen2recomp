@@ -19,7 +19,7 @@ signal closed
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
 	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
-	PACK_RESULT, SAVE_CONFIRM,
+	PACK_RESULT, SAVE_CONFIRM, OPTIONS,
 }
 
 ## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
@@ -68,6 +68,8 @@ var _forget_confirm_cursor: int = 0
 
 var _save_cursor: int = 0
 var _save_result_shown: bool = false
+
+var _options_menu: Gen2WorldOptionsMenu = null
 
 var _title: Label = null
 var _summary: Label = null
@@ -181,6 +183,13 @@ func _move(direction: Vector2i) -> void:
 			if not _save_result_shown and (direction.x != 0 or direction.y != 0):
 				_save_cursor = 1 - _save_cursor
 				_render_save_confirm()
+		Mode.OPTIONS:
+			if direction.y != 0:
+				_options_menu.move(direction.y)
+				_render_options_menu()
+			elif direction.x != 0 and _options_menu.adjust(direction.x):
+				_persist_options()
+				_render_options_menu()
 
 
 func _confirm() -> void:
@@ -209,6 +218,10 @@ func _confirm() -> void:
 			_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
 			_confirm_save()
+		## Options_Cancel is the only handler that reads A.
+		Mode.OPTIONS:
+			if _options_menu.is_cancel():
+				_open_list_mode()
 
 
 func _cancel() -> void:
@@ -230,6 +243,9 @@ func _cancel() -> void:
 			_open_item_mode()
 		Mode.SAVE_CONFIRM:
 			_open_list_mode()
+		## `_Option.joypad_loop` exits on PAD_START | PAD_B from any row.
+		Mode.OPTIONS:
+			_open_list_mode()
 
 
 func _confirm_list() -> void:
@@ -244,6 +260,8 @@ func _confirm_list() -> void:
 			_open_pack_mode()
 		Gen2WorldStartMenu.ITEM_SAVE:
 			_open_save_confirm_mode()
+		Gen2WorldStartMenu.ITEM_OPTION:
+			_open_options_mode()
 		Gen2WorldStartMenu.ITEM_EXIT:
 			closed.emit()
 		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR:
@@ -271,6 +289,37 @@ func _render_list() -> void:
 	_render_options(_menu.items(), _menu.cursor, func(entry: Dictionary) -> String:
 		var label: String = String(entry.get("label", ""))
 		return label if bool(entry.get("available", false)) else "%s (unavailable)" % label
+	)
+
+
+## `StartMenu_Option`'s `farcall Option`. The model edits the shared
+## [Gen2OptionsStore] object, so the launcher's settings card and this menu can
+## never disagree about a value, which is the same reason the cartridge block
+## exists at all.
+func _open_options_mode() -> void:
+	_mode = Mode.OPTIONS
+	_options_menu = Gen2WorldOptionsMenu.build(Gen2OptionsStore.current())
+	_title.text = "OPTION"
+	_summary.text = ""
+	_status.text = ""
+	_footer.text = "Up and down: move    Left and right: change    B: back"
+	_render_options_menu()
+
+
+## Written on every change, matching the launcher card and the cartridge, which
+## commits each press to `wOptions` rather than on the way out.
+func _persist_options() -> void:
+	if Gen2OptionsStore.save(_options_menu.options()):
+		return
+	_status.text = "The options file could not be written."
+	_status.add_theme_color_override("font_color", ERROR)
+
+
+func _render_options_menu() -> void:
+	_render_options(_options_menu.rows(), _options_menu.cursor, func(row: Dictionary) -> String:
+		var value: String = String(row.get("value", ""))
+		var label: String = String(row.get("label", ""))
+		return label if value.is_empty() else "%s    %s" % [label, value]
 	)
 
 
