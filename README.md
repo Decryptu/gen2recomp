@@ -241,9 +241,12 @@ which is how the Poke Flute channel wakes Vermilion's Snorlax.
 The Pack opens each item's own source submenu and can use one: a Potion asks
 which Pokemon and heals it, a Repel sets its step count, and GIVE, TOSS and SEL
 keep their source position marked unavailable.
-The party submenu offers Cut, Surf, Strength, Whirlpool and Waterfall to a
-Pokemon that knows one; all five show their message first and change the world
-on the acknowledge, and stepping from water back onto land stops surfing. A
+The party submenu offers Cut, Surf, Strength, Whirlpool, Waterfall, Flash and
+Headbutt to a Pokemon that knows one; all seven show their message first and
+change the world on the acknowledge, and stepping from water back onto land
+stops surfing. Headbutt is the one with no badge behind it: facing a tree and
+knowing the move is the whole gate, and the acknowledge rolls the tree's own
+encounter, which on Crystal can arrive asleep. A
 Waterfall climb runs the whole column in one command and ends on the first cell
 above it that is not a waterfall. Standing on a whirlpool, waterfall, door,
 staircase or cave tile overrides the pressed direction the way the cartridge
@@ -272,6 +275,7 @@ Headless tools, all against a real imported cache:
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
 | `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
 | `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree, in all three games |
+| `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree, in all three games |
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |

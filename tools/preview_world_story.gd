@@ -920,7 +920,12 @@ func _story_path(data: GameData) -> Dictionary:
 	)
 	if world == null:
 		return {"ok": false, "reason": "missing home map"}
-	var save: Gen2SaveData = Gen2SaveStore.create_new_game(data, 0, "ASH")
+	# wPlayerID is rolled at new game, and GetTreeScore reads it, so the route
+	# pins it with a generator of its own rather than letting create_new_game()
+	# randomize one and make the run differ from itself.
+	var identity_random := RandomNumberGenerator.new()
+	identity_random.seed = 23
+	var save: Gen2SaveData = Gen2SaveStore.create_new_game(data, 0, "ASH", -1, identity_random)
 	if save == null:
 		return {"ok": false, "reason": "could not create source-shaped new game"}
 	save.world = world.snapshot()

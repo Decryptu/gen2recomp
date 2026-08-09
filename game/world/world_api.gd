@@ -107,6 +107,15 @@ var _pending_strength: Dictionary = {}
 ## names the faced cell, so it is cleared with the loaded map like the rest.
 var _pending_waterfall: Dictionary = {}
 var _pending_flash: Dictionary = {}
+## The same for Headbutt, held while HeadbuttScript shows UseHeadbuttText. It
+## names the faced tree, so it is cleared with the loaded map like the rest;
+## the encounter behind it is only rolled on the commit, since TreeMonEncounter
+## runs after that text.
+var _pending_headbutt: Dictionary = {}
+## wPlayerID, mirrored from the selected save the way _party_summary mirrors
+## its party. GetTreeScore is the only reader; -1 means no save has set one,
+## which refuses rather than scoring against an invented zero.
+var _player_id: int = -1
 var _command_queues: Dictionary = {}
 var _next_command_queue_id: int = 0
 var _fishing: Gen2WorldFishing = Gen2WorldFishing.new()
@@ -923,6 +932,134 @@ func complete_flash() -> Dictionary:
 
 static func _flash_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"flash_failed", "reason": reason}
+
+
+## engine/events/overworld.asm's TryHeadbuttOW and TryHeadbuttFromMenu, staged
+## the way the other five are: HeadbuttScript reaches TreeMonEncounter only
+## after UseHeadbuttText, so the roll belongs to the commit and not to this.
+##
+## Headbutt is the one field move with no badge at all: TryHeadbuttOW is
+## CheckPartyMove and nothing else, and TryHeadbuttFromMenu is the faced tile
+## and nothing else. Its refusal is FieldMoveFailed's generic _CantUseItemText.
+func headbutt_request() -> Dictionary:
+	if current_map == null or current_tileset == null:
+		return _headbutt_failure(&"missing_map")
+	if not _pending_headbutt.is_empty():
+		return _headbutt_failure(&"headbutt_in_progress")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_HEADBUTT) < 0:
+		return _headbutt_failure(&"move_not_known")
+	var target: Vector2i = facing_cell()
+	if not Gen2WorldFieldMove.headbutt_tile(collision_code_at(target)):
+		return _headbutt_failure(&"nothing_to_headbutt")
+	_pending_headbutt = {
+		"ok": true,
+		"kind": &"headbutt_requested",
+		"move": Gen2WorldFieldMove.MOVE_HEADBUTT,
+		"cell": target,
+	}
+	return _pending_headbutt.duplicate(true)
+
+
+## Empty until headbutt_request() succeeds. A host shows its text while this is
+## set, exactly as it does for the other staged moves.
+func pending_headbutt() -> Dictionary:
+	return _pending_headbutt.duplicate(true)
+
+
+## TreeMonEncounter: the map's treemon set, then GetTreeMons' profile limit,
+## then GetTreeMon's score and rolls. A miss is HeadbuttScript's .no_battle
+## branch, which is HeadbuttNothingText and no battle, so it is an applied
+## result with an empty encounter rather than a failure.
+##
+## The tree is not changed and the map is not touched: unlike Cut and
+## Whirlpool, ShakeHeadbuttTree is an animation over a block that stays.
+func complete_headbutt(random: RandomNumberGenerator) -> Dictionary:
+	if _pending_headbutt.is_empty():
+		return _headbutt_failure(&"no_pending_headbutt")
+	if random == null:
+		return _headbutt_failure(&"missing_generator")
+	if data == null or current_map == null:
+		return _headbutt_failure(&"missing_map")
+	if _player_id < 0:
+		return _headbutt_failure(&"missing_player_id")
+	var request: Dictionary = _pending_headbutt
+	_pending_headbutt = {}
+	var cell: Vector2i = request["cell"]
+	var encounter: Dictionary = _treemon_encounter(cell, random)
+	return {
+		"ok": true,
+		"kind": &"headbutt_applied",
+		"move": int(request["move"]),
+		"cell": cell,
+		"encounter": encounter,
+	}
+
+
+## GetTreeMonSet, GetTreeMons and GetTreeMon over the imported tables. Returns
+## the wild-battle shape the other encounter paths return, so a host opens a
+## headbutt battle exactly as it opens a grass one.
+func _treemon_encounter(cell: Vector2i, random: RandomNumberGenerator) -> Dictionary:
+	var set_number: int = data.treemon_set_for_map(current_map.group, current_map.number)
+	if not Gen2WorldTreemon.set_is_usable(
+		set_number, Gen2WorldState.is_crystal_profile(data)
+	):
+		return {}
+	var resolved: Dictionary = Gen2WorldTreemon.resolve(
+		data.treemon_set(set_number), cell, _player_id, random
+	)
+	if resolved.is_empty():
+		return {}
+	var species: int = int(resolved["species"])
+	var level: int = int(resolved["level"])
+	var asleep: bool = Gen2WorldTreemon.starts_asleep(
+		species, data.asleep_treemons(object_time_of_day)
+	)
+	return {
+		"kind": &"wild_encounter_requested",
+		"method": Gen2WorldEncounter.METHOD_HEADBUTT,
+		"source": Gen2WorldEncounter.SOURCE_TREE,
+		"pokemon": species,
+		"level": level,
+		"map": map_id(),
+		"cell": player_cell,
+		"facing_cell": cell,
+		"movement": movement_mode,
+		"treemon_set": set_number,
+		"score": int(resolved["score"]),
+		"encounter_roll": int(resolved["encounter_roll"]),
+		"slot_roll": int(resolved["slot_roll"]),
+		"asleep": asleep,
+		"values": {
+			"kind": &"wild",
+			"pokemon": species,
+			"level": level,
+			"battle_type": Gen2Battle.BATTLETYPE_TREE,
+			"asleep": asleep,
+		},
+	}
+
+
+static func _headbutt_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"headbutt_failed", "reason": reason}
+
+
+## Mirrors the selected save's wPlayerID, the way set_party_summary() mirrors
+## its party. Gen2WorldAPI owns no save, so this stays optional and unset
+## refuses rather than scoring against zero.
+func set_player_id(player_id: int) -> Dictionary:
+	if player_id < 0 or player_id > 0xFFFF:
+		return {"ok": false, "reason": &"invalid_player_id", "player_id": player_id}
+	_player_id = player_id
+	return {"ok": true}
+
+
+func player_id() -> int:
+	return _player_id
+
+
+## Clears the mirror, the counterpart of clear_party_summary().
+func clear_player_id() -> void:
+	_player_id = -1
 
 
 ## Which palette row the current map draws with, once its own header byte, the
@@ -3617,6 +3754,7 @@ func _apply_map(
 	_pending_whirlpool.clear()
 	_pending_strength.clear()
 	_pending_waterfall.clear()
+	_pending_headbutt.clear()
 	# home/map.asm's map load calls ReadObjectEvents, which calls
 	# ClearObjectStructs and re-reads every object event from ROM. moveobject
 	# writes MAPOBJECT_X_COORD/Y_COORD in that same rebuilt table, so a scripted
@@ -3669,6 +3807,7 @@ func reload_current_map() -> Dictionary:
 	_pending_whirlpool.clear()
 	_pending_strength.clear()
 	_pending_waterfall.clear()
+	_pending_headbutt.clear()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

@@ -235,6 +235,9 @@ const BATTLETYPE_NORMAL: int = 0
 const BATTLETYPE_DEBUG: int = 2
 const BATTLETYPE_CONTEST: int = 6
 const BATTLETYPE_FORCESHINY: int = 7
+## What TreeMonEncounter writes before a headbutt battle. CheckSleepingTreeMon
+## is the only thing that reads it.
+const BATTLETYPE_TREE: int = 8
 const BATTLETYPE_TRAP: int = 9
 const BATTLETYPE_CELEBI: int = 11
 const BATTLETYPE_SUICUNE: int = 12

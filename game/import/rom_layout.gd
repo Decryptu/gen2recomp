@@ -80,6 +80,17 @@ const FISH_MAX_ENTRIES: int = 8
 const ROAM_MAP_COUNT: int = 16
 const ROAM_TABLE_END: int = 0xFF
 
+## TreeMonMaps and RockMonMaps are `(group, number, set)` triples ending in $FF.
+## TreeMons is a pointer table into the same bank; each set is one or two
+## `db %, species, level` tables, each ending in $FF. Sizes are never assumed:
+## TreeMonSet_Rock ships a common table and no rare one, and pokegold's shared
+## None/Unused/City set is five rows where every other set is six.
+const TREEMON_MAP_RECORD_SIZE: int = 3
+const TREEMON_TABLE_END: int = 0xFF
+const TREEMON_MAX_ROWS: int = 16
+const ASLEEP_TREEMON_TABLE_END: int = 0xFF
+const ASLEEP_TREEMON_MAX_ROWS: int = 16
+
 ## The cartridge compares an 8-bit random value directly with these encoded
 ## percentage thresholds when it varies a surfing encounter's level. The
 ## values are the source's integer `$FF / 100 * percent` expressions.
@@ -717,6 +728,13 @@ const GOLD_SILVER: Dictionary = {
 			{"species": 0xF4, "level": 40, "map_group": 10, "map_number": 4},
 			{"species": 0xF5, "level": 40, "map_group": 1, "map_number": 12},
 		],
+		"tree_maps": 0xBA3E6,
+		"tree_map_count": 34,
+		"rock_maps": 0xBA44D,
+		"rock_map_count": 4,
+		"treemon_sets": 0xBA470,
+		"treemon_set_count": 6,
+		"asleep_treemons": {},
 	},
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
@@ -846,6 +864,15 @@ const CRYSTAL: Dictionary = {
 			{"species": 0xF3, "level": 40, "map_group": 2, "map_number": 5},
 			{"species": 0xF4, "level": 40, "map_group": 10, "map_number": 4},
 		],
+		"tree_maps": 0xB825E,
+		"tree_map_count": 34,
+		"rock_maps": 0xB82C5,
+		"rock_map_count": 4,
+		"treemon_sets": 0xB82E8,
+		"treemon_set_count": 9,
+		# CheckSleepingTreeMon and data/wild/treemons_asleep.asm are Crystal
+		# only; pokegold ships neither. File order is Nite, Day, Morn.
+		"asleep_treemons": {"nite": 0x3EB5D, "day": 0x3EB69, "morn": 0x3EB6F},
 	},
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.

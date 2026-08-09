@@ -256,6 +256,13 @@ const COLL_WHIRLPOOL_2C: int = 0x2C
 ## permission table is: the source compares it.
 const COLL_WATERFALL: int = 0x33
 const COLL_CURRENT_DOWN: int = 0x3B
+## home/map_objects.asm's CheckHeadbuttTreeTile, the same shape: the second code
+## is marked unused in both pins and kept because the source compares it. Both
+## are WALL_TILE | TALK in data/collision/collision_permissions.asm, exactly
+## like the two cut-tree codes, so the tree blocks and is faced rather than
+## stood on.
+const COLL_HEADBUTT_TREE: int = 0x15
+const COLL_HEADBUTT_TREE_1D: int = 0x1D
 const COLL_DOOR: int = 0x71
 const COLL_DOOR_79: int = 0x79
 const COLL_STAIRCASE: int = 0x7A

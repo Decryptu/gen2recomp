@@ -170,6 +170,23 @@ func test_new_game_starts_empty_until_the_elm_lab_handoff() -> void:
 	assert_true(validation["ok"], validation["message"])
 
 
+## wPlayerID is rolled once when the game starts. The generator is injectable
+## so a run that has to reproduce itself can pin it; GetTreeScore reads the
+## result, so an unpinned one would move every headbutt tier.
+func test_a_new_game_rolls_a_player_id_and_a_seeded_generator_pins_it() -> void:
+	var generator := RandomNumberGenerator.new()
+	generator.seed = 99
+	var first: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 1, "ASH", -1, generator)
+	generator.seed = 99
+	var second: Gen2SaveData = Gen2SaveStore.create_new_game(_data, 1, "ASH", -1, generator)
+	assert_eq(first.player_id, second.player_id)
+	assert_between(first.player_id, 0, 0xFFFF)
+	# The whole two bytes survive the round trip, unlike a value clamped to a
+	# byte or dropped by to_dict().
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(first.to_dict())
+	assert_eq(restored.player_id, first.player_id)
+
+
 func test_development_save_has_a_valid_default_player_name() -> void:
 	var result: Dictionary = Gen2SaveStore.ensure_development_save(_data, 2)
 	assert_true(result["ok"], result["message"])
@@ -402,6 +419,7 @@ func _raw_cartridge(game_id: StringName, data: GameData) -> PackedByteArray:
 	var save: Gen2SaveData = _adapter_save(data)
 	raw[int(layout["player_name"])] = 0x80
 	_write_fixed_raw_text(raw, int(layout["player_name"]), 11, save.player_name)
+	_write_u16_raw(raw, int(layout["player_id"]), SRAM_PLAYER_ID)
 	var party_start: int = int(layout["party"])
 	raw[party_start] = save.party.size()
 	for index: int in 6:
@@ -507,6 +525,11 @@ func _raw_checksum(raw: PackedByteArray, segments: Array) -> int:
 	return total
 
 
+## wPlayerID, the two big-endian bytes wPlayerData opens with, which is why it
+## shares an address with the layout's primary_data_start.
+const SRAM_PLAYER_ID: int = 0xBEEF
+
+
 func test_a_gold_sram_import_reads_the_primary_party_and_fields() -> void:
 	var data: GameData = _adapter_data(RomRegistry.GOLD)
 	var raw: PackedByteArray = _raw_cartridge(RomRegistry.GOLD, data)
@@ -521,6 +544,7 @@ func test_a_gold_sram_import_reads_the_primary_party_and_fields() -> void:
 	assert_eq(save.party.size(), 2)
 	assert_eq((save.party[0] as Gen2SaveMon).nickname, "SPARKY")
 	assert_eq((save.party[0] as Gen2SaveMon).ot_id, 0)
+	assert_eq(save.player_id, SRAM_PLAYER_ID)
 	assert_eq((save.party[0] as Gen2SaveMon).hp, (_save().party[0] as Gen2SaveMon).hp)
 
 
@@ -583,6 +607,7 @@ func test_export_updates_both_copies_and_preserves_trailing_bytes() -> void:
 	raw[0x2500] = 0x77
 	var save: Gen2SaveData = _adapter_save(data)
 	save.player_name = "BLUE"
+	save.player_id = 0x1234
 	var export_result: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
 	assert_true(export_result["ok"], export_result["message"])
 	var output: PackedByteArray = export_result["raw"]
@@ -594,6 +619,7 @@ func test_export_updates_both_copies_and_preserves_trailing_bytes() -> void:
 	)
 	assert_true(imported["ok"], imported["message"])
 	assert_eq((imported["save"] as Gen2SaveData).player_name, "BLUE")
+	assert_eq((imported["save"] as Gen2SaveData).player_id, 0x1234)
 	output[0x2009] ^= 0x01
 	var backup_import: Dictionary = Gen2SramAdapter.import_bytes(
 		RomRegistry.GOLD, data.sha1, 0, output, data

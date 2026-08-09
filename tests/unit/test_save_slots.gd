@@ -183,16 +183,35 @@ func test_a_version_two_save_migrates_by_gaining_an_empty_label() -> void:
 	assert_eq(migration["data"]["label"], "")
 
 
-func test_a_version_one_save_gains_both_boxes_and_a_label() -> void:
+func test_a_version_one_save_gains_boxes_a_label_and_a_player_id() -> void:
 	var raw: Dictionary = _write_slot(0).to_dict()
 	raw["format_version"] = 1
 	raw.erase("boxes")
 	raw.erase("label")
+	raw.erase("player_id")
 
 	var migration: Dictionary = Gen2SaveData.migrate_dict(raw)
 	assert_true(migration["ok"], migration.get("message", ""))
 	assert_eq((migration["data"]["boxes"] as Array).size(), Gen2SaveData.BOX_COUNT)
 	assert_eq(migration["data"]["label"], "")
+	assert_eq(migration["data"]["player_id"], 0)
+
+
+## Version 3 had no wPlayerID. It migrates to zero rather than to a rolled
+## value: inventing one would silently change an existing save's headbutt
+## encounters, since GetTreeScore reads it.
+func test_a_version_three_save_migrates_by_gaining_a_zero_player_id() -> void:
+	var raw: Dictionary = _write_slot(0).to_dict()
+	raw["format_version"] = 3
+	raw.erase("player_id")
+
+	var migration: Dictionary = Gen2SaveData.migrate_dict(raw)
+	assert_true(migration["ok"], migration.get("message", ""))
+	assert_true(migration["migrated"])
+	assert_eq(migration["data"]["player_id"], 0)
+	var loaded: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	assert_not_null(loaded)
+	assert_eq(loaded.player_id, 0)
 
 
 func test_a_save_from_a_later_format_is_refused_rather_than_guessed_at() -> void:

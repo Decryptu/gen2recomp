@@ -30,6 +30,15 @@ const BLOCK_WHIRLPOOL_GONE: int = 0x36
 const WHIRLPOOL_BLOCK: Vector2i = Vector2i(1, 3)
 const WHIRLPOOL_CELL: Vector2i = Vector2i(2, 7)
 const WHIRLPOOL_STAND_CELL: Vector2i = Vector2i(2, 6)
+## A headbutt tree in block (3,1)'s bottom-left quadrant, with the standing cell
+## directly above it. The set behind it is populated, so a commit can reach a
+## battle; the score is fixed by the cell and the save's own wPlayerID.
+const BLOCK_HEADBUTT_TREE: int = 0x40
+const HEADBUTT_BLOCK: Vector2i = Vector2i(3, 1)
+const HEADBUTT_CELL: Vector2i = Vector2i(6, 3)
+const HEADBUTT_STAND_CELL: Vector2i = Vector2i(6, 2)
+const TREEMON_SET: int = 1
+const TREEMON_SPECIES: int = Fixture.TRAINER_SPECIES
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -60,6 +69,8 @@ func _write_cut_tree() -> void:
 			raw["name"] = "STRENGTH"
 		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_WHIRLPOOL:
 			raw["name"] = "WHIRLPOOL"
+		elif int(raw.get("number", 0)) == Gen2WorldFieldMove.MOVE_HEADBUTT:
+			raw["name"] = "HEADBUTT"
 	RomCache.write_json(RomCache.moves_path(directory), moves)
 
 	var tilesets: Array = RomCache.read_json(RomCache.world_tilesets_path(directory))
@@ -77,6 +88,7 @@ func _write_cut_tree() -> void:
 	# Quadrant order is top-left, top-right, bottom-left, bottom-right.
 	tile_collision[BLOCK_TREE * 4 + 2] = 0x12  # COLL_CUT_TREE
 	tile_collision[BLOCK_WHIRLPOOL * 4 + 2] = 0x24  # COLL_WHIRLPOOL
+	tile_collision[BLOCK_HEADBUTT_TREE * 4 + 2] = Gen2WorldCollision.COLL_HEADBUTT_TREE
 	tileset["collision"] = tile_collision
 	RomCache.write_json(RomCache.world_tilesets_path(directory), tilesets)
 
@@ -89,10 +101,36 @@ func _write_cut_tree() -> void:
 		var blocks: Array = raw["blocks"]
 		blocks[TREE_BLOCK.y * Fixture.MAP_WIDTH_BLOCKS + TREE_BLOCK.x] = BLOCK_TREE
 		blocks[WHIRLPOOL_BLOCK.y * Fixture.MAP_WIDTH_BLOCKS + WHIRLPOOL_BLOCK.x] = BLOCK_WHIRLPOOL
+		blocks[HEADBUTT_BLOCK.y * Fixture.MAP_WIDTH_BLOCKS + HEADBUTT_BLOCK.x] = BLOCK_HEADBUTT_TREE
 		var collision: Array = raw["collision"]
 		collision[TREE_CELL.y * Fixture.MAP_WIDTH_CELLS + TREE_CELL.x] = 0x12
 		collision[WHIRLPOOL_CELL.y * Fixture.MAP_WIDTH_CELLS + WHIRLPOOL_CELL.x] = 0x24
+		collision[HEADBUTT_CELL.y * Fixture.MAP_WIDTH_CELLS + HEADBUTT_CELL.x] = \
+			Gen2WorldCollision.COLL_HEADBUTT_TREE
 	RomCache.write_json(RomCache.world_maps_path(directory), maps)
+
+	# TreeMonMaps and one populated set, patched into the fixture's own
+	# encounter cache rather than added to the shared fixture.
+	var encounters: Dictionary = RomCache.read_json(
+		RomCache.world_encounters_path(directory)
+	)
+	encounters["treemons"] = {
+		"tree_maps": [{
+			"map_group": Fixture.MAP_GROUP,
+			"map_number": Fixture.MAP_NUMBER,
+			"set": TREEMON_SET,
+		}],
+		"rock_maps": [],
+		"sets": [
+			{"common": [], "rare": []},
+			{
+				"common": [{"percent": 100, "species": TREEMON_SPECIES, "level": 5}],
+				"rare": [{"percent": 100, "species": TREEMON_SPECIES, "level": 5}],
+			},
+		],
+		"asleep": {"morn": [], "day": [], "nite": []},
+	}
+	RomCache.write_json(RomCache.world_encounters_path(directory), encounters)
 
 	var tiles: PackedByteArray = PackedByteArray()
 	tiles.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
@@ -481,3 +519,119 @@ func test_whirlpool_facing_nothing_reports_the_generic_refusal() -> void:
 	await get_tree().process_frame
 
 	assert_eq(_shown_text(), "Can't use that here.")
+
+
+func test_submenu_lists_headbutt_for_a_mon_that_knows_it() -> void:
+	await _open_headbutt_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["HEADBUTT", "STATS", "SWITCH", "MOVE", "ITEM", "CANCEL"]
+	)
+
+
+## HeadbuttScript reaches TreeMonEncounter only after UseHeadbuttText, so the
+## roll waits for the acknowledge exactly as Cut's block change does. The text
+## is "did a HEADBUTT!", not the "used" the other five share.
+func test_choosing_headbutt_shows_the_message_and_defers_the_roll() -> void:
+	await _open_headbutt_world()
+	var world: Gen2WorldAPI = _world_screen._world
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "TESTMON did a HEADBUTT!")
+	assert_false(world.pending_headbutt().is_empty())
+	assert_false(_world_screen.move_player(Vector2i.RIGHT))
+	# The tree is not a block the move replaces, unlike Cut's and Whirlpool's.
+	assert_eq(world.block_at(HEADBUTT_BLOCK.x, HEADBUTT_BLOCK.y), BLOCK_HEADBUTT_TREE)
+
+	_world_screen._acknowledge_field_move_text()
+	assert_true(world.pending_headbutt().is_empty())
+	assert_eq(world.block_at(HEADBUTT_BLOCK.x, HEADBUTT_BLOCK.y), BLOCK_HEADBUTT_TREE)
+	assert_false(world.can_walk_to(HEADBUTT_CELL), "the tree still blocks")
+
+
+## Headbutt has no badge at all: TryHeadbuttOW is CheckPartyMove and nothing
+## else. The same world with no badge flags set still reaches its message.
+func test_headbutt_needs_no_badge() -> void:
+	await _open_headbutt_world(false)
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(_shown_text(), "TESTMON did a HEADBUTT!")
+
+
+func test_headbutt_facing_nothing_reports_the_generic_refusal() -> void:
+	await _open_headbutt_world()
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+
+	assert_eq(_shown_text(), "Can't use that here.")
+	_world_screen._acknowledge_field_move_text()
+	assert_true(_world_screen._world.pending_headbutt().is_empty())
+
+
+## The commit is either .no_battle's HeadbuttNothingText or a wild battle, and
+## which one is fixed once the score and the roll are: the faced cell (6,3) is
+## wPlayerMapX/Y (10,7), so 7 * 11 + 10 = 87, 87 / 5 = 17 and 17 % 10 = 7. An
+## ID scoring 7 is the equal case, which is RARE and passes on a roll under 8.
+func test_a_rare_score_that_passes_its_roll_opens_the_tree_battle() -> void:
+	await _open_headbutt_world()
+	assert_eq(Gen2WorldTreemon.coord_score(HEADBUTT_CELL), 7)
+	await _headbutt_with(7, 1)
+
+	assert_not_null(_world_screen._battle_host, "a passed RARE roll reaches startbattle")
+	var battle: Gen2Battle = _world_screen._battle_host._battle
+	var enemy: Gen2BattleMon = battle.party(Gen2Battle.ENEMY).active_mon()
+	assert_eq(enemy.species, TREEMON_SPECIES)
+	assert_eq(battle.battle_type, Gen2Battle.BATTLETYPE_TREE)
+	# The fixture's lists are empty, which is the Gold and Silver shape, so
+	# nothing enters asleep here.
+	assert_eq(enemy.status, Gen2Status.NONE)
+
+
+## The same tree with an ID two below the coordinate score is BAD, whose whole
+## threshold is a roll of zero, so the same seed falls to .no_battle.
+func test_a_bad_score_that_fails_its_roll_prints_the_nothing_text() -> void:
+	await _open_headbutt_world()
+	await _headbutt_with(2, 1)
+
+	assert_null(_world_screen._battle_host)
+	assert_true(_world_screen._field_move_text)
+	assert_eq(_shown_text(), "Nope. Nothing…")
+
+
+## Chooses HEADBUTT from the submenu and acknowledges its text, with the score
+## and the roll both pinned.
+func _headbutt_with(player_id: int, seed_value: int) -> void:
+	# On the save rather than on the world: _refresh_party_summary() mirrors the
+	# save's own wPlayerID onto the world every time it runs, so a value written
+	# straight to the world would be overwritten before the commit.
+	_world_screen._injected_save.player_id = player_id
+	_world_screen._refresh_party_summary()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	# Seeded here rather than before the submenu: the screen's own frames draw
+	# from the same generator, and only the roll behind the acknowledge is
+	# being pinned.
+	_world_screen._encounter_random.seed = seed_value
+	_world_screen._acknowledge_field_move_text()
+	await get_tree().process_frame
+
+
+func _open_headbutt_world(badge: bool = true) -> void:
+	await _open_world(
+		badge, Gen2WorldFieldMove.MOVE_HEADBUTT, Gen2WorldFieldMove.BADGE_HIVE,
+		HEADBUTT_STAND_CELL
+	)

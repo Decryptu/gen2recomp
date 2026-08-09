@@ -4,12 +4,12 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## Cut, Surf, Strength, Whirlpool, Waterfall and Flash are resolved here. Cut,
-## Surf and Whirlpool follow the shape CutFunction defines: check the badge, then
-## check the faced tile, then stage a change the text acknowledge commits.
-## Strength is the odd one, see BADGE_PLAIN; Flash checks the map rather than a
-## tile, see [method Gen2WorldPalette.is_dark]. Headbutt is not resolved yet: it
-## needs treemon encounter data the importer does not read.
+## All seven overworld field moves are resolved here. Cut, Surf and Whirlpool
+## follow the shape CutFunction defines: check the badge, then check the faced
+## tile, then stage a change the text acknowledge commits. Strength is the odd
+## one, see BADGE_PLAIN; Flash checks the map rather than a tile, see
+## [method Gen2WorldPalette.is_dark]; Headbutt checks a tile and no badge at
+## all, and its roll lives in [Gen2WorldTreemon].
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
 ## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
@@ -20,6 +20,7 @@ const MOVE_STRENGTH: int = 0x46
 const MOVE_WHIRLPOOL: int = 0xFA
 const MOVE_WATERFALL: int = 0x7F
 const MOVE_FLASH: int = 0x94
+const MOVE_HEADBUTT: int = 0x1D
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -58,6 +59,7 @@ const MUSIC_SURF: int = 0x21
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
+	MOVE_HEADBUTT,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
@@ -216,3 +218,19 @@ const WATERFALL_COLLISIONS: Array[int] = [
 ## no block. It moves the player and nothing else.
 static func waterfall_tile(collision_code: int) -> bool:
 	return WATERFALL_COLLISIONS.has(collision_code)
+
+
+## home/map_objects.asm's CheckHeadbuttTreeTile, applied to the faced tile by
+## both TryHeadbuttFromMenu and the overworld A-press in
+## engine/overworld/events.asm.
+const HEADBUTT_COLLISIONS: Array[int] = [
+	Gen2WorldCollision.COLL_HEADBUTT_TREE,
+	Gen2WorldCollision.COLL_HEADBUTT_TREE_1D,
+]
+
+
+## CheckHeadbuttTreeTile: whether [param collision_code] is a headbutt tree.
+## Like Waterfall this needs no block table, because a headbutt changes no
+## block: ShakeHeadbuttTree is an animation and the tree is still there after.
+static func headbutt_tile(collision_code: int) -> bool:
+	return HEADBUTT_COLLISIONS.has(collision_code)

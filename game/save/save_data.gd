@@ -7,7 +7,7 @@ extends RefCounted
 ## the wrong cartridge cache. The schema is versioned so a future save shape
 ## can be refused or migrated deliberately instead of being guessed at.
 
-const FORMAT_VERSION: int = 3
+const FORMAT_VERSION: int = 4
 const LEGACY_FORMAT_VERSION: int = 1
 const MAX_PARTY: int = Gen2Party.MAX_SIZE
 const MAX_PLAYER_NAME: int = 10
@@ -23,6 +23,10 @@ var game_id: StringName = &""
 var rom_sha1: String = ""
 var slot: int = -1
 var player_name: String = ""
+## wPlayerID, the two bytes wPlayerData opens with in both pins. Rolled once
+## when a game starts and never changed after; GetTreeScore is the first thing
+## in this project to read it.
+var player_id: int = 0
 var label: String = ""
 var party: Array = []
 var boxes: Array = []
@@ -48,6 +52,7 @@ func to_dict() -> Dictionary:
 		"rom_sha1": rom_sha1,
 		"slot": slot,
 		"player_name": player_name,
+		"player_id": player_id,
 		"label": label,
 		"party": saved_party,
 		"boxes": saved_boxes,
@@ -70,6 +75,7 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	out.rom_sha1 = String(source.get("rom_sha1", ""))
 	out.slot = int(source.get("slot", -1))
 	out.player_name = String(source.get("player_name", ""))
+	out.player_id = int(source.get("player_id", 0)) & 0xFFFF
 	out.label = String(source.get("label", ""))
 	var raw_party: Variant = source.get("party", [])
 	if raw_party is Array:
@@ -101,7 +107,9 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## step rather than skipping to it. Each step adds only what its version
 ## lacked; a missing world snapshot stays missing throughout.
 ##
-## Version 1 had no PC-box field. Version 2 had no slot label.
+## Version 1 had no PC-box field. Version 2 had no slot label. Version 3 had no
+## player trainer ID; it migrates to zero rather than being invented, since a
+## rolled ID would silently change the headbutt encounters of an existing save.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -116,6 +124,8 @@ static func migrate_dict(raw: Variant) -> Dictionary:
 		migrated["boxes"] = _empty_boxes()
 	if version < 3 and not migrated.has("label"):
 		migrated["label"] = ""
+	if version < 4 and not migrated.has("player_id"):
+		migrated["player_id"] = 0
 	migrated["format_version"] = FORMAT_VERSION
 	return {"ok": true, "data": migrated, "migrated": true}
 
@@ -175,6 +185,7 @@ func copy_from(source: Gen2SaveData) -> bool:
 	rom_sha1 = copied.rom_sha1
 	slot = copied.slot
 	player_name = copied.player_name
+	player_id = copied.player_id
 	label = copied.label
 	party = copied.party
 	boxes = copied.boxes
