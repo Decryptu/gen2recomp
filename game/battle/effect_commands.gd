@@ -570,6 +570,11 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		and turn.battle.weather == Gen2Weather.RAIN:
 		return
 
+	# `.XAccuracy`, immediately after it: an X Accuracy makes everything the
+	# holder throws land, for the rest of the time it is out.
+	if Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.X_ACCURACY):
+		return
+
 	var chance: int = Gen2Accuracy.chance(
 		turn.accuracy if turn.accuracy >= 0 \
 			else int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),

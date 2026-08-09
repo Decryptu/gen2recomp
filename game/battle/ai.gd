@@ -85,6 +85,65 @@ const SANDSTORM_IMMUNE_TYPES: Array = Gen2Weather.SANDSTORM_EXEMPT_TYPES
 const RESIDUAL_MOVE_NUMBERS: Array = [54, 73, 77, 78, 86, 116, 117, 139, 144, 160, 164, 191]
 
 
+## What the enemy does with its turn: pull its Pokémon out, reach for an item, or
+## use a move.
+##
+## `AI_SwitchOrTryItem`, which runs before the turn and settles ahead of it.
+## Switching is considered first and an item only when it is refused, which is
+## the cartridge's `DontSwitch` fallthrough rather than a separate decision.
+##
+## Answers a [Gen2Battle] action dictionary. [param item_switch_flags] is the
+## class's own [constant RomLayout.ATTR_AI_ITEM_SWITCH] word, and
+## [param move_slot] is what [method choose_slot] already picked, used when
+## nothing else is worth doing.
+static func choose_action(
+	battle: Gen2Battle, item_switch_flags: int, move_slot: int, rng: RandomNumberGenerator
+) -> Dictionary:
+	if not battle.is_trainer_battle:
+		return Gen2Battle.use_move(move_slot)
+
+	# `CheckEnemyLockedIn`, which returns out of the whole routine: a Pokémon
+	# mid-charge, mid-rampage or recharging neither switches nor is handed an
+	# item.
+	if _locked_in(battle.mon(Gen2Battle.ENEMY)):
+		return Gen2Battle.use_move(move_slot)
+
+	if _can_leave(battle):
+		var switch: Dictionary = Gen2AISwitch.decide(battle, item_switch_flags, rng)
+		if bool(switch["switch"]):
+			return Gen2Battle.switch_to(int(switch["index"]))
+
+	if not battle.enemy_items.is_empty() \
+			and Gen2AIItems.is_highest_level(battle.party(Gen2Battle.ENEMY)):
+		var item: int = Gen2AIItems.choose(
+			battle.mon(Gen2Battle.ENEMY), battle.enemy_items, item_switch_flags,
+			battle.mon(Gen2Battle.ENEMY).turns_taken, rng
+		)
+		if item != 0:
+			return Gen2Battle.use_item(item)
+
+	return Gen2Battle.use_move(move_slot)
+
+
+## The two things that jump straight to `DontSwitch` without stopping the item
+## half: a Mean Look the player landed, and a wrap the enemy is caught in.
+static func _can_leave(battle: Gen2Battle) -> bool:
+	if Gen2Substatus.has(battle.mon(Gen2Battle.PLAYER).substatus, Gen2Substatus.CANT_RUN):
+		return false
+	return battle.mon(Gen2Battle.ENEMY).trapped_turns <= 0
+
+
+## `CheckEnemyLockedIn`. Bide is not implemented and so is not among these.
+static func _locked_in(mon: Gen2BattleMon) -> bool:
+	for flag: int in [
+		Gen2Substatus.RECHARGING, Gen2Substatus.CHARGING,
+		Gen2Substatus.RAMPAGING, Gen2Substatus.ROLLOUT,
+	]:
+		if Gen2Substatus.has(mon.substatus, flag):
+			return true
+	return false
+
+
 ## Picks a move slot for [param attacker] to use against [param defender], the
 ## way [param ai_move_weights] (a trainer class's own
 ## [constant RomLayout.ATTR_AI_MOVE_WEIGHTS]) says to score it.

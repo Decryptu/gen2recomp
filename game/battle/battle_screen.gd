@@ -276,6 +276,7 @@ func show_trainer(
 	)
 	if _battle == null:
 		return
+	_battle.load_trainer_items(trainer_class)
 
 	set_hp(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
@@ -361,6 +362,7 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
 	_battle = prepared["battle"]
 	_battle.time_of_day = _time_of_day
+	_battle.load_trainer_items(_enemy_trainer_class)
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
 	_player = player_party_ready.active_mon().species
@@ -727,7 +729,9 @@ func take_turn() -> void:
 	## [method advance].
 	if _battle.awaiting_move_learn():
 		return
-	_pending = _battle.take_turn(_random_slot(Gen2Battle.PLAYER), _enemy_slot())
+	_pending = _battle.take_actions(
+		Gen2Battle.use_move(_random_slot(Gen2Battle.PLAYER)), _enemy_action()
+	)
 	_show_next_event()
 
 
@@ -755,6 +759,19 @@ func _enemy_slot() -> int:
 	)
 
 
+## What the enemy does with the turn, which is a move unless its trainer reaches
+## into the bag first. `show_matchup`'s invented pairing is not one of the
+## cartridge's trainers, so it has no class flags and never uses an item.
+func _enemy_action() -> Dictionary:
+	var slot: int = _enemy_slot()
+	if _enemy_trainer_class == 0:
+		return Gen2Battle.use_move(slot)
+	var flags: int = int(
+		_data.trainer_attributes(_enemy_trainer_class).get("ai_item_switch", 0)
+	)
+	return Gen2BattleAI.choose_action(_battle, flags, slot, _rng)
+
+
 ## Tries to run, which is `BattleMenu_Run` and settles before the turn does.
 ##
 ## Offered in a trainer battle too, because the cartridge offers it there and
@@ -764,7 +781,7 @@ func run_from_battle() -> void:
 		return
 	if _battle.awaiting_move_learn():
 		return
-	_pending = _battle.take_actions(Gen2Battle.run_away(), Gen2Battle.use_move(_enemy_slot()))
+	_pending = _battle.take_actions(Gen2Battle.run_away(), _enemy_action())
 	_show_next_event()
 
 
@@ -780,7 +797,7 @@ func switch_player() -> void:
 	var next: int = _next_healthy(Gen2Battle.PLAYER)
 	if next < 0:
 		return
-	_pending = _battle.take_actions(Gen2Battle.switch_to(next), Gen2Battle.use_move(0))
+	_pending = _battle.take_actions(Gen2Battle.switch_to(next), _enemy_action())
 	_show_next_event()
 
 
@@ -1129,7 +1146,8 @@ func _apply_event(event: Dictionary) -> void:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
-		Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF, Gen2Battle.HP_RESTORED:
+		Gen2Battle.HURT_BY_STATUS, Gen2Battle.HURT_ITSELF, Gen2Battle.HP_RESTORED, \
+			Gen2Battle.TRAINER_USED_ITEM:
 			if int(event["side"]) == Gen2Battle.ENEMY:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
@@ -1281,6 +1299,12 @@ func _describe(event: Dictionary) -> String:
 			return "%s got an encore!" % _battler_name(int(event["target"]))
 		Gen2Battle.ENCORE_ENDED:
 			return "%s's encore ended!" % _battler_name(side)
+		Gen2Battle.TRAINER_USED_ITEM:
+			# `EnemyUsedOnText`, one line for all thirteen: the trainer's own
+			# name is not in the event, so the class is all this can say.
+			return "Enemy used %s on %s!" % [
+				_data.item_name(int(event["item"])), _battler_name(side),
+			]
 		Gen2Battle.HP_RESTORED:
 			return "%s regained health!" % _battler_name(side)
 		Gen2Battle.HP_ALREADY_FULL:

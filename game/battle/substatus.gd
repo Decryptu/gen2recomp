@@ -50,6 +50,12 @@ const RAMPAGING: int = 1 << 13
 ## The cartridge's name is kept for that reason.
 const CANT_RUN: int = 1 << 14
 
+## `SUBSTATUS_X_ACCURACY`, what an X Accuracy leaves on whoever used it: every
+## move that Pokémon uses hits, checked in `CheckHit` ahead of the stat
+## modifiers and the roll. Nothing clears it but a send-out, and only a trainer's
+## AI sets it here, since the player's pack has no X items yet.
+const X_ACCURACY: int = 1 << 15
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as
