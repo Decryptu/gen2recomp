@@ -2168,9 +2168,75 @@ func interact() -> Array:
 	## background event answered (engine/overworld/events.asm PlayerEvents).
 	var tile_request: Dictionary = _tile_collision_script_request(target)
 	if tile_request.is_empty():
+		## The rest of TryTileCollisionEvent: the five field-move branches, in
+		## the source's own order, each of which is a Try*OW gate and an ask.
+		tile_request = _field_move_prompt_request(target)
+	if tile_request.is_empty():
 		return []
 	_enqueue_script(tile_request)
 	return run_event_queue(false)
+
+
+## TryTileCollisionEvent from `.cut` on. The faced tile picks the branch, in the
+## source's order: a cut tree, then a whirlpool, then a waterfall, then a
+## headbutt tree, and `.surf` as the fallback any other tile reaches.
+##
+## Only the tile-shaped half of each gate is answered here, because only this
+## layer can read the map: whether the branch applies at all, and for Whirlpool
+## and Waterfall whether TryWhirlpoolMenu and CheckMapCanWaterfall would pass.
+## The party and the badge belong to the runner, which replays the Ask*Script.
+##
+## `.surf` is the one branch that is silent rather than refused when its own
+## tile checks fail: TrySurfOW answers no carry and the player event ends, so an
+## ordinary wall produces no request at all.
+func _field_move_prompt_request(cell: Vector2i) -> Dictionary:
+	if current_map == null or current_tileset == null or data == null:
+		return {}
+	var collision: int = collision_code_at(cell)
+	var move: int = 0
+	var tile_ok: bool = true
+	if Gen2WorldFieldMove.cut_tree_tile(collision):
+		move = Gen2WorldFieldMove.MOVE_CUT
+	elif Gen2WorldFieldMove.whirlpool_tile(collision):
+		move = Gen2WorldFieldMove.MOVE_WHIRLPOOL
+		tile_ok = bool(Gen2WorldFieldMove.whirlpool_replacement(
+			current_map.tileset, block_at(_script_block_cell(cell).x, _script_block_cell(cell).y)
+		).get("ok", false))
+	elif Gen2WorldFieldMove.waterfall_tile(collision):
+		move = Gen2WorldFieldMove.MOVE_WATERFALL
+		## CheckMapCanWaterfall is the facing and the tile above, which is this
+		## cell only when the player faces up.
+		tile_ok = player_facing == Gen2WorldSprite.FACING_UP
+	elif Gen2WorldFieldMove.headbutt_tile(collision):
+		move = Gen2WorldFieldMove.MOVE_HEADBUTT
+	elif _surf_prompt_applies(cell):
+		move = Gen2WorldFieldMove.MOVE_SURF
+	if move == 0:
+		return {}
+	return {
+		"kind": &"field_move_prompt",
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": cell,
+		"bank": 0,
+		"script": 0,
+		"move": move,
+		"tile_ok": tile_ok,
+	}
+
+
+## TrySurfOW's own checks, less the badge and the party the runner makes: not
+## already surfing, facing water, and CheckDirection's face mask. The bike flag
+## is not modelled, since nothing in this project sets one.
+func _surf_prompt_applies(cell: Vector2i) -> bool:
+	if movement_mode == MOVEMENT_SURF:
+		return false
+	if collision_permission_at(cell) != Gen2WorldCollision.WATER_TILE:
+		return false
+	var face: int = Gen2WorldCollision.face_mask_for_direction(
+		_direction_for_facing(player_facing)
+	)
+	return face == 0 or (tile_permissions_at(player_cell) & face) == 0
 
 
 ## engine/events/std_collision.asm's CheckFacingTileForStdScript. Keyed by the
@@ -2566,7 +2632,12 @@ func _script_address_for_event(event: Dictionary) -> int:
 
 
 func _enqueue_script(request: Dictionary) -> void:
-	if int(request.get("script", 0)) <= 0:
+	## A field-move prompt is the one queued request with no address of its own:
+	## the source reaches its Ask*Script through CallScript on a link-time
+	## address the pins do not resolve, so the runner synthesizes the body from
+	## the request kind the way it does for an item ball.
+	if int(request.get("script", 0)) <= 0 \
+		and StringName(request.get("kind", &"")) != &"field_move_prompt":
 		return
 	if not request.has("collision"):
 		var cell_value: Variant = request.get("cell", player_cell)

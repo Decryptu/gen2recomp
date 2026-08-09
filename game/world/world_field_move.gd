@@ -143,6 +143,17 @@ static func cuttable(collision_code: int) -> bool:
 	return CUTTABLE_COLLISIONS.has(collision_code)
 
 
+## home/map_objects.asm's CheckCutTreeTile, which is the two tree codes alone.
+## TryTileCollisionEvent's `.cut` branch reads this rather than
+## CheckCutCollision, so pressing A at tall grass offers nothing while the party
+## submenu's CUT still cuts it.
+const CUT_TREE_COLLISIONS: Array[int] = [0x12, 0x1A]
+
+
+static func cut_tree_tile(collision_code: int) -> bool:
+	return CUT_TREE_COLLISIONS.has(collision_code)
+
+
 ## The tileset-to-block-list mapping for one profile. Kept as a function rather
 ## than two constants so the shared lists above stay single-sourced.
 static func _cut_tables(is_crystal: bool) -> Dictionary:
