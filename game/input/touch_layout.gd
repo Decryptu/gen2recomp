@@ -1,7 +1,7 @@
 class_name Gen2TouchLayout
 extends RefCounted
 
-## Where the on-screen controller's three clusters sit, how big they are and how
+## Where the on-screen controller's four clusters sit, how big they are and how
 ## much of the screen they hide.
 ##
 ## Geometry only: [Gen2TouchPad] draws and reads touches, and this answers where
@@ -16,13 +16,21 @@ extends RefCounted
 
 const GROUP_PAD: StringName = &"pad"
 const GROUP_FACE: StringName = &"face"
-const GROUP_MENU: StringName = &"menu"
-const GROUPS: Array[StringName] = [GROUP_PAD, GROUP_FACE, GROUP_MENU]
+const GROUP_START: StringName = &"start"
+const GROUP_SELECT: StringName = &"select"
+const GROUPS: Array[StringName] = [GROUP_PAD, GROUP_FACE, GROUP_START, GROUP_SELECT]
 
 const GROUP_LABELS: Dictionary = {
 	GROUP_PAD: "D-pad",
 	GROUP_FACE: "A and B",
-	GROUP_MENU: "START and SELECT",
+	GROUP_START: "START",
+	GROUP_SELECT: "SELECT",
+}
+
+## The one button each single-button group carries.
+const GROUP_BUTTONS: Dictionary = {
+	GROUP_START: Gen2Button.START,
+	GROUP_SELECT: Gen2Button.SELECT,
 }
 
 const ORIENTATION_PORTRAIT: StringName = &"portrait"
@@ -37,7 +45,6 @@ const FACE_DIAMETER: float = 84.0
 ## Centre-to-centre along the diagonal A and B sit on, so they never touch.
 const FACE_SPACING: float = 104.0
 const MENU_SIZE: Vector2 = Vector2(96.0, 38.0)
-const MENU_SPACING: float = 108.0
 
 ## Inside this fraction of the d-pad's half-width nothing is pressed, so a thumb
 ## resting dead centre does not pick an arbitrary direction.
@@ -48,18 +55,22 @@ const MAX_SCALE: float = 1.8
 const MIN_OPACITY: float = 0.2
 const MAX_OPACITY: float = 1.0
 
-## Thumb-reachable corners in each orientation. Landscape puts the clusters hard
-## against the edges, since the hardware screen sits centred between them.
+## Thumb-reachable corners in each orientation. Portrait has the whole strip
+## under the screen, so START and SELECT sit together along the bottom of it.
+## Landscape keeps everything hard against the two edges, because the middle is
+## where the hardware screen is.
 const DEFAULT_ANCHORS: Dictionary = {
 	ORIENTATION_PORTRAIT: {
-		GROUP_PAD: Vector2(0.24, 0.52),
-		GROUP_FACE: Vector2(0.76, 0.52),
-		GROUP_MENU: Vector2(0.50, 0.88),
+		GROUP_PAD: Vector2(0.24, 0.50),
+		GROUP_FACE: Vector2(0.76, 0.50),
+		GROUP_SELECT: Vector2(0.38, 0.88),
+		GROUP_START: Vector2(0.62, 0.88),
 	},
 	ORIENTATION_LANDSCAPE: {
-		GROUP_PAD: Vector2(0.12, 0.62),
-		GROUP_FACE: Vector2(0.88, 0.62),
-		GROUP_MENU: Vector2(0.50, 0.92),
+		GROUP_PAD: Vector2(0.12, 0.55),
+		GROUP_FACE: Vector2(0.88, 0.55),
+		GROUP_SELECT: Vector2(0.12, 0.90),
+		GROUP_START: Vector2(0.88, 0.90),
 	},
 }
 
@@ -119,8 +130,8 @@ func group_size(group: StringName) -> Vector2:
 			return Vector2(PAD_SIZE, PAD_SIZE) * scale
 		GROUP_FACE:
 			return Vector2(FACE_SPACING + FACE_DIAMETER, FACE_SPACING + FACE_DIAMETER) * scale
-		GROUP_MENU:
-			return Vector2(MENU_SPACING + MENU_SIZE.x, MENU_SIZE.y) * scale
+		GROUP_START, GROUP_SELECT:
+			return MENU_SIZE * scale
 	return Vector2.ZERO
 
 
@@ -144,12 +155,8 @@ func button_rects(area: Rect2) -> Dictionary:
 	rects[Gen2Button.A] = Rect2(
 		Vector2(face.position.x, face.position.y + face.size.y - diameter), Vector2(diameter, diameter)
 	)
-	var menu: Rect2 = group_rect(GROUP_MENU, area)
-	var pill: Vector2 = MENU_SIZE * scale
-	rects[Gen2Button.SELECT] = Rect2(menu.position, pill)
-	rects[Gen2Button.START] = Rect2(
-		Vector2(menu.position.x + menu.size.x - pill.x, menu.position.y), pill
-	)
+	for group: StringName in GROUP_BUTTONS:
+		rects[GROUP_BUTTONS[group]] = group_rect(group, area)
 	return rects
 
 

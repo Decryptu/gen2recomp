@@ -8,7 +8,7 @@ extends RefCounted
 ## touchscreen it is not using, and a laptop with a touchscreen has one the
 ## player touches once an hour. Only the device actually in use should decide
 ## whether on-screen controls are drawn or a focus ring is shown, so
-## [InputRuntime] keeps the last answer this gives and publishes it.
+## [Gen2InputRuntime] keeps the last answer this gives and publishes it.
 
 const KEYBOARD: StringName = &"keyboard"
 const MOUSE: StringName = &"mouse"

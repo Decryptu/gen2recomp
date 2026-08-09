@@ -91,6 +91,11 @@ var _walk_accumulator: float = 0.0
 
 
 func _ready() -> void:
+	# The map and cell readout and the shortcut legend are scaffolding, and they
+	# are also the two things standing between the player and a full screen on a
+	# phone. Same flag as the shortcuts they describe.
+	_caption.visible = Gen2DebugKeys.enabled()
+	_hint.visible = Gen2DebugKeys.enabled()
 	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	_build_world()
 
@@ -333,7 +338,7 @@ func _advance_held_direction(delta: float) -> void:
 	if not _objects_may_move() or _world.script_input_waiting() \
 		or _world.player_step_in_progress():
 		return
-	var direction: int = InputRuntime.held_direction()
+	var direction: int = Gen2InputRuntime.instance().held_direction()
 	if direction != Gen2Button.NONE:
 		move_player(Gen2Button.vector(direction))
 

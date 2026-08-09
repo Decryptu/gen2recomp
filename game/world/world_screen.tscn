@@ -1,7 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://game/world/world_screen.gd" id="1"]
 [ext_resource type="PackedScene" path="res://game/render/gen2_screen.tscn" id="2"]
+[ext_resource type="Script" path="res://game/render/game_frame.gd" id="3"]
+[ext_resource type="Script" path="res://game/input/touch_pad.gd" id="4"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
 bg_color = Color(0.0352941, 0.0666667, 0.121569, 1)
@@ -24,31 +26,56 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
 
-[node name="Layout" type="VBoxContainer" parent="."]
+[node name="Frame" type="Control" parent="."]
+unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 12
+mouse_filter = 2
+script = ExtResource("3")
 
-[node name="Caption" type="Label" parent="Layout"]
+[node name="Screen" parent="Frame" instance=ExtResource("2")]
 unique_name_in_owner = true
-layout_mode = 2
+layout_mode = 0
+anchors_preset = 0
+anchor_right = 0.0
+anchor_bottom = 0.0
+grow_horizontal = 1
+grow_vertical = 1
+
+[node name="TouchPad" type="Control" parent="Frame"]
+unique_name_in_owner = true
+layout_mode = 0
+mouse_filter = 2
+script = ExtResource("4")
+
+[node name="Caption" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 28.0
+grow_horizontal = 2
+mouse_filter = 2
 theme_override_colors/font_color = Color(0.956863, 0.968627, 0.984314, 1)
 theme_override_font_sizes/font_size = 20
 text = "loading"
 horizontal_alignment = 1
 
-[node name="Screen" parent="Layout" instance=ExtResource("2")]
+[node name="Hint" type="Label" parent="."]
 unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="Hint" type="Label" parent="Layout"]
-unique_name_in_owner = true
-layout_mode = 2
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -44.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
 theme_override_colors/font_color = Color(0.619608, 0.67451, 0.752941, 1)
 theme_override_font_sizes/font_size = 14
 text = ""

@@ -1,3 +1,4 @@
+class_name Gen2InputRuntime
 extends Node
 
 ## The live control scheme, and which device the player is actually using.
@@ -9,11 +10,16 @@ extends Node
 ## asks: what decides whether an on-screen d-pad is drawn is whether the player
 ## is touching the screen right now.
 ##
-## Screens read this; only the settings page writes to it.
+## Screens read this; only the settings page writes to it. They reach it through
+## [method instance] rather than through the `InputRuntime` global, for the same
+## reason [Gen2WorldScreen] reaches GameRuntime by path: a script handed to
+## Godot's `-s` is compiled before the tree that owns the autoloads exists, so a
+## preview tool that names a screen by type would fail to load it.
 
 signal device_changed(kind: StringName)
-## The effective answer, after both the setting and the active device. A screen
-## that draws the controller listens for this rather than polling.
+## The effective answer, after both the setting and the active device. Also
+## emitted when the frontmost controller changes, since that changes which pad
+## should be drawing even though the setting has not moved.
 signal touch_controls_changed(shown: bool)
 ## A rebind landed. What is bound has already been installed in the [InputMap]
 ## by the time this arrives; a screen only needs it to redraw a legend.
@@ -28,6 +34,24 @@ var _touch_shown: bool = false
 ## directions at once is normal play, not an error: a player turning a corner
 ## presses the next one before releasing the last.
 var _direction_order: Array[int] = []
+## Every on-screen controller in the tree, innermost last. A battle opened over
+## the map puts a second one on screen, and only the top of this stack may draw
+## or read a finger.
+## Typed as Control rather than as the pad, which keeps this script off the one
+## that draws it: the pad has to name this class, and two class names that name
+## each other do not compile.
+var _pads: Array[Control] = []
+
+## The autoload, cached after the first lookup.
+static var _instance: Gen2InputRuntime = null
+
+
+static func instance() -> Gen2InputRuntime:
+	if _instance == null:
+		var loop: SceneTree = Engine.get_main_loop() as SceneTree
+		if loop != null:
+			_instance = loop.root.get_node_or_null("/root/InputRuntime") as Gen2InputRuntime
+	return _instance
 
 
 func _ready() -> void:
@@ -90,6 +114,27 @@ func reveal_touch_controls() -> bool:
 	_set_device(Gen2InputDevice.TOUCH)
 	_refresh_touch_controls()
 	return true
+
+
+## Registers an on-screen controller as the frontmost one. The last to enter
+## the tree is the one in front, which is what an overlay opened over a screen
+## already is.
+func claim_touch_pad(pad: Control) -> void:
+	if pad == null or _pads.has(pad):
+		return
+	_pads.append(pad)
+	touch_controls_changed.emit(_touch_shown)
+
+
+func release_touch_pad(pad: Control) -> void:
+	if not _pads.has(pad):
+		return
+	_pads.erase(pad)
+	touch_controls_changed.emit(_touch_shown)
+
+
+func active_touch_pad() -> Control:
+	return _pads.back() if not _pads.is_empty() else null
 
 
 ## Presses a button from something that is not a device: the on-screen
