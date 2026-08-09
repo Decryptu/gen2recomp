@@ -79,6 +79,15 @@ const BODY_SLAM_BG_EFFECTS: Dictionary = {
 const EXPECTED_GFX_SHEETS: int = 39
 const EXPECTED_GFX_TILES: int = 659
 
+## `NUM_BATTLE_BG_EFFECTS` in each pin, and the id the two lists part company on.
+## pokegold ships no `BATTLE_BG_EFFECT_BODY_SLAM`, so from here its own list runs
+## one lower and `..._ROLLOUT` sits at $2d rather than $2e.
+const BG_EFFECTS_CRYSTAL: int = 54
+const BG_EFFECTS_GOLD: int = 53
+const BODY_SLAM_EFFECT: int = 0x25
+const ROLLOUT_EFFECT_CRYSTAL: int = 0x2E
+const ROLLOUT_EFFECT_GOLD: int = 0x2D
+
 ## Well past the longest shipped animation, which is 365 frames.
 const MAX_FRAMES: int = 4096
 
@@ -124,6 +133,11 @@ func _play_every_animation(game_id: StringName, data: GameData) -> void:
 	var leaked: int = 0
 	var functions: Dictionary = {}
 	var effects: Dictionary = {}
+	var live: int = 0
+	var reached: int = 0
+	var windows: int = 0
+	var remaps: int = 0
+	var edits: int = 0
 	for index: int in anims.count(&"scripts"):
 		for enemy_turn: bool in [false, true]:
 			var player: Gen2BattleAnimPlayer = Gen2BattleAnimPlayer.create(
@@ -133,11 +147,24 @@ func _play_every_animation(game_id: StringName, data: GameData) -> void:
 				player != null, "%s: animation %d would not start." % [game_id, index]
 			):
 				continue
+			var blank: PackedByteArray = player.background().bg_map.duplicate()
+			var opened: bool = false
+			var remapped: bool = false
 			var frames: int = 0
 			while player.advance_frame() and frames < MAX_FRAMES:
 				frames += 1
 				objects = maxi(objects, player.objects().size())
 				sprites = maxi(sprites, player.sprites().size())
+				live = maxi(live, player.bg_effects().size())
+				reached += player.bg_effects().size()
+				opened = opened \
+					or player.background().lcdc_pointer != 0 \
+					or player.background().scx != 0 \
+					or player.background().scy != 0
+				remapped = remapped or player.background().palettes_dirty
+			windows += 1 if opened else 0
+			remaps += 1 if remapped else 0
+			edits += 1 if player.background().bg_map != blank else 0
 			_check(
 				not player.failed(),
 				"%s: animation %d ran off its region." % [game_id, index]
@@ -170,6 +197,21 @@ func _play_every_animation(game_id: StringName, data: GameData) -> void:
 			game_id, functions.size(), functions.keys(),
 		]
 	)
+	_check(
+		effects.is_empty(),
+		"%s: %d bg effects are still unbuilt: %s." % [
+			game_id, effects.size(), effects.keys(),
+		]
+	)
+	_check(
+		reached > 0 and windows > 0 and remaps > 0 and edits > 0,
+		"%s: the bg effects ran but produced nothing: %d queued, %d scanline windows, %d palette remaps, %d tilemap edits." % [
+			game_id, reached, windows, remaps, edits,
+		]
+	)
+	print("%s: %d bg effect slots used at once; %d animations opened a scanline window, %d remapped a palette, %d edited the tilemap." % [
+		game_id, live, windows, remaps, edits,
+	])
 	print("%s: played %d animations both ways; at most %d objects and %d sprites at once." % [
 		game_id, anims.count(&"scripts"), objects, sprites,
 	])
@@ -265,6 +307,35 @@ func _verify_profile_split(game_id: StringName, data: GameData) -> void:
 	_verify_bg_effects(
 		game_id, data, "BODY SLAM", BODY_SLAM_INDEX, BODY_SLAM_BG_EFFECTS[game_id]
 	)
+	_verify_bg_effect_table(game_id)
+
+
+## The other half of that split: the same id names a different effect in the two
+## games from $25 on, so the two `BattleBGEffects` tables are kept whole and
+## nothing is normalised between them.
+func _verify_bg_effect_table(game_id: StringName) -> void:
+	var names: Array[StringName] = Gen2BattleAnimBgEffects.names_for(game_id)
+	var crystal: bool = game_id == &"crystal"
+	_check(
+		names.size() == (BG_EFFECTS_CRYSTAL if crystal else BG_EFFECTS_GOLD),
+		"%s: the bg effect table is %d long." % [game_id, names.size()]
+	)
+	_check(
+		names[BODY_SLAM_EFFECT] == (&"body_slam" if crystal else &"wobble_mon"),
+		"%s: bg effect $%02X is %s." % [game_id, BODY_SLAM_EFFECT, names[BODY_SLAM_EFFECT]]
+	)
+	_check(
+		names[ROLLOUT_EFFECT_CRYSTAL if crystal else ROLLOUT_EFFECT_GOLD] == &"rollout",
+		"%s: BATTLE_BG_EFFECT_ROLLOUT is not where the constants put it." % game_id
+	)
+	for id: int in BODY_SLAM_EFFECT:
+		_check(
+			names[id] == Gen2BattleAnimBgEffects.EFFECTS_CRYSTAL[id],
+			"%s: bg effect $%02X differs below the split." % [game_id, id]
+		)
+	print("%s: %d bg effects, $%02X is %s." % [
+		game_id, names.size(), BODY_SLAM_EFFECT, names[BODY_SLAM_EFFECT],
+	])
 
 
 func _verify_bg_effects(

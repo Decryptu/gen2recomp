@@ -200,15 +200,15 @@ func test_a_sound_wave_is_mirrored_on_the_enemys_turn() -> void:
 func test_surf_opens_and_closes_its_scanline_window() -> void:
 	var object: Gen2BattleAnimObject = _object(0x0D, 0x40, 0x60, 0x30)
 	_run(object)
-	assert_eq(_player.lcdc_pointer, Gen2BattleAnimFunctions.LCDC_POINTER_SCY)
-	assert_eq(_player.ly_override_start, 0x58)
-	assert_eq(_player.ly_override_end, 0x5E)
+	assert_eq(_player.background().lcdc_pointer, Gen2BattleAnimFunctions.LCDC_POINTER_SCY)
+	assert_eq(_player.background().ly_override_start, 0x58)
+	assert_eq(_player.background().ly_override_end, 0x5E)
 
 	object.jumptable_index = 3
 	object.y = 0x70
 	_run(object)
-	assert_eq(_player.lcdc_pointer, 0)
-	assert_eq(_player.ly_override_end, 0)
+	assert_eq(_player.background().lcdc_pointer, 0)
+	assert_eq(_player.background().ly_override_end, 0)
 	assert_false(object.active())
 
 
@@ -219,11 +219,11 @@ func test_sky_attack_cycles_the_dmg_object_palette() -> void:
 	_run(object)
 	assert_eq(object.var1, 0xF0, "the player's side")
 	_run(object)
-	assert_eq(_player.obp0, 0xF0)
+	assert_eq(_player.background().obp0, 0xF0)
 	_run(object)
-	assert_eq(_player.obp0, 0xF0)
+	assert_eq(_player.background().obp0, 0xF0)
 	_run(object)
-	assert_eq(_player.obp0, 0xA0, "$aa masked by the side's own byte")
+	assert_eq(_player.background().obp0, 0xA0, "$aa masked by the side's own byte")
 
 
 ## `BattleAnimFunc_RockSmash` writes the frameset straight into the struct rather

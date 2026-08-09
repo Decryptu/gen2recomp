@@ -13,10 +13,9 @@ extends RefCounted
 ## answers with sprites, a tile window and the palette each sprite wants, and
 ## whoever is drawing decides what that looks like.
 ##
-## One of `.playframe`'s five steps is not here yet and is named rather than
-## quietly skipped: `_ExecuteBGEffects`. [method unimplemented] reports what an
-## animation asked for and did not get, so a caller can tell one that ran whole
-## from one that ran without its background.
+## All five of `.playframe`'s steps are here. [method unimplemented] reports what
+## an animation asked for and did not get, which cartridge data no longer
+## produces and a hand-built region still can.
 
 ## `NUM_BATTLE_ANIM_STRUCTS`: ten slots, and an eleventh object is simply not
 ## spawned.
@@ -51,8 +50,12 @@ const MAX_TILES: int = 128 - Gen2BattleAnimObject.BASE_TILE
 ## `wBattleAnimFlags` bits (constants/ram_constants.asm).
 const FLAG_KEEP_SPRITES: int = 1 << 3
 
-## `ROLLOUT`, whose animation runs without waiting a frame while its own bg
-## effect is active.
+## `NUM_BG_EFFECTS`: five background effects run at once, and a sixth is simply
+## not queued, the way an eleventh object is not spawned.
+const MAX_BG_EFFECTS: int = Gen2BattleAnimBgEffects.MAX_EFFECTS
+
+## `ROLLOUT`, the move `Rollout_FillLYOverridesBackup` and `.playframe`'s own
+## frame-delay branch both check `wFXAnimID` against.
 const ROLLOUT: int = 0xCD
 
 var _data: Gen2BattleAnimData = null
@@ -71,23 +74,20 @@ var _tiles: Array = []
 var _keep_sprites: bool = false
 var _sprites: Array = []
 var _unimplemented: Dictionary = {}
+## `wActiveBGEffects`: five `battle_bg_effect` slots.
+var _bg_effects: Array[Gen2BattleAnimBgEffect] = []
+## The video state the bg effects and `BattleAnimFunc_Surf` share.
+var _background: Gen2BattleAnimBackground = null
 
 ## `wCurItem`, which `GetBallAnimPal` reads to colour a thrown ball. Nothing but
 ## a ball animation asks, and an item that is not a ball falls out of
 ## `BallColors` on its own terminator.
 var cur_item: int = 0
 
-## `wOBP0`, the DMG object palette `BattleAnimFunc_SkyAttack` flashes. Kept
-## because the write is the whole of that state; the Color hardware draws
-## objects from `wOBPals1` instead, so nothing shows.
-var obp0: int = 0
-
-## `hLCDCPointer`, `hLYOverrideStart` and `hLYOverrideEnd`: the scanline window
-## `BattleAnimFunc_Surf` opens over `rSCY` and hands back when the wave has
-## crossed the screen. It is the only callback that reaches the raster.
-var lcdc_pointer: int = 0
-var ly_override_start: int = 0
-var ly_override_end: int = 0
+## `wPlayerSubStatus3` and `wEnemySubStatus3`'s Fly and Dig bits, which three bg
+## effects check before they touch a battler that is not on the field.
+var player_off_field: bool = false
+var enemy_off_field: bool = false
 
 
 ## Starts [param index] of `BattleAnimations`. Answers null when the cache has no
@@ -114,6 +114,10 @@ static func create(
 	# empty on each animation rather than carrying over from the last one.
 	player._objects.resize(MAX_OBJECTS)
 	player._tile_dict.resize(TILE_DICT_ENTRIES)
+	player._bg_effects.resize(MAX_BG_EFFECTS)
+	for slot: int in MAX_BG_EFFECTS:
+		player._bg_effects[slot] = Gen2BattleAnimBgEffect.new()
+	player._background = Gen2BattleAnimBackground.new()
 	player._script = Gen2BattleAnimScript.create(
 		region["data"], int(region["address"]), address, param
 	)
@@ -128,6 +132,59 @@ func enemy_turn() -> bool:
 ## The imported tables the callbacks resolve their sine and framesets through.
 func data() -> Gen2BattleAnimData:
 	return _data
+
+
+## Which cartridge this animation came from, which only the bg effect table asks.
+func profile() -> StringName:
+	return _data.profile()
+
+
+## `wFXAnimID`, which two routines compare against `ROLLOUT`.
+func anim_index() -> int:
+	return _anim_index
+
+
+## The video state the background effects write: scanline tables, screen scroll,
+## palette remaps and the tilemap.
+func background() -> Gen2BattleAnimBackground:
+	return _background
+
+
+## The live `wActiveBGEffects` slots, for a caller that wants more than the
+## screen they produced.
+func bg_effects() -> Array:
+	var out: Array = []
+	for effect: Gen2BattleAnimBgEffect in _bg_effects:
+		if effect.active():
+			out.append(effect)
+	return out
+
+
+## `BGEffect_CheckFlyDigStatus`: whether the battler on [param player_side] is
+## off the field mid-Fly or mid-Dig, which is what stops three effects touching
+## a picture that is not there.
+func fly_dig_status(player_side: bool) -> bool:
+	return player_off_field if player_side else enemy_off_field
+
+
+## `wLastAnimObjectIndex` stepped on without an object being built, which is what
+## a battler-object effect does when the battler is off the field.
+func bump_object_index() -> void:
+	_last_object_index = (_last_object_index + 1) & 0xFF
+
+
+## `_QueueBattleAnimation`, which a battler-object effect calls with the same
+## four values `anim_obj` supplies.
+func queue_object(row: int, x: int, y: int, param: int) -> void:
+	_queue_object([row, x, y, param])
+
+
+## `wAnimObject1YOffset`, which `BattleBGEffect_Rollout` writes straight into the
+## first struct whether or not a live object is standing in it.
+func set_first_object_y_offset(value: int) -> void:
+	if _objects[0] == null:
+		_objects[0] = Gen2BattleAnimObject.new()
+	_objects[0].y_offset = value & 0xFF
 
 
 func finished() -> bool:
@@ -176,21 +233,24 @@ func unimplemented() -> Dictionary:
 	return out
 
 
-## One hardware frame of `.playframe`: the script, then the bg effects, then
-## every object. Answers whether the animation is still running.
+## One hardware frame of `.playframe`, in its own order: the script, the bg
+## effects, every object, the scanline table and the palettes. Answers whether
+## the animation is still running.
+##
+## `.playframe` skips its own `BattleAnimDelayFrame` while Rollout's bg effect is
+## live, because that effect waits a frame itself. Both paths spend exactly one
+## frame, so a player stepped once per frame runs its body once either way and
+## there is nothing here for the check to decide.
 func advance_frame() -> bool:
 	if finished():
 		_finish()
 		return false
 
-	# `.playframe` runs its body again without waiting a frame while Rollout's
-	# own bg effect is up, which is what makes that animation twice as quick.
-	for _repeat: int in 2:
-		_run_commands()
-		_execute_bg_effects()
-		_update_oam()
-		if not _rollout_running():
-			break
+	_run_commands()
+	_execute_bg_effects()
+	_update_oam()
+	_background.push_ly_overrides()
+	_background.request_pals()
 	if finished():
 		_finish()
 	return true
@@ -221,9 +281,22 @@ func _run_commands() -> void:
 			&"keep_sprites":
 				_keep_sprites = true
 			&"bg_effect":
-				_note(&"bg_effects", int((command["operands"] as Array)[0]))
+				_queue_bg_effect(command["operands"])
 			&"inc_bg_effect":
-				_note(&"bg_effects", int((command["operands"] as Array)[0]))
+				var live: Gen2BattleAnimBgEffect = _bg_effect_with_id(
+					int((command["operands"] as Array)[0])
+				)
+				if live != null:
+					live.jumptable_index = (live.jumptable_index + 1) & 0xFF
+			&"bgp":
+				_background.bgp = int((command["operands"] as Array)[0])
+			&"obp0":
+				_background.obp0 = int((command["operands"] as Array)[0])
+			&"obp1":
+				_background.obp1 = int((command["operands"] as Array)[0])
+			&"reset_obp0":
+				# `hSGB`'s $f0 is the branch the Color hardware does not take.
+				_background.obp0 = 0xE0
 
 
 ## `QueueBattleAnimation`: the first free slot, or nothing at all. The index
@@ -294,18 +367,33 @@ func _clear_objects() -> void:
 			_objects[slot].deinit()
 
 
-## `_ExecuteBGEffects`. The effects themselves are not built; the ids the script
-## asked for are recorded by [method _run_commands] as it reads them.
+## `QueueBGEffect`: the first free slot, or nothing at all. Unlike an object, a
+## refused effect leaves no trace: there is no index counter to step on.
+func _queue_bg_effect(operands: Array) -> void:
+	for slot: int in MAX_BG_EFFECTS:
+		if _bg_effects[slot].active():
+			continue
+		_bg_effects[slot] = Gen2BattleAnimBgEffect.create(
+			int(operands[0]), int(operands[1]), int(operands[2]), int(operands[3])
+		)
+		return
+
+
+func _bg_effect_with_id(id: int) -> Gen2BattleAnimBgEffect:
+	for effect: Gen2BattleAnimBgEffect in _bg_effects:
+		if effect.id == id:
+			return effect
+	return null
+
+
+## `_ExecuteBGEffects`: every live slot in order. An id past this profile's own
+## table is reported rather than run, which cartridge data never produces.
 func _execute_bg_effects() -> void:
-	pass
-
-
-## `.playframe`'s Rollout check: the frame delay is skipped while
-## `BATTLE_BG_EFFECT_ROLLOUT` is one of the five live effects. No effect is live
-## until they are built, so this answers false the way it does for every other
-## animation.
-func _rollout_running() -> bool:
-	return false
+	for effect: Gen2BattleAnimBgEffect in _bg_effects:
+		if not effect.active():
+			continue
+		if not Gen2BattleAnimBgEffects.run(self, effect):
+			_note(&"bg_effects", effect.id)
 
 
 ## `BattleAnim_UpdateOAM_All`: every live object stepped and drawn, in slot
