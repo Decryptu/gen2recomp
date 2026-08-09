@@ -820,6 +820,22 @@ const EVENT_TELEPORT_GUY: int = 1916
 const EVENT_RIVAL_SPROUT_TOWER: int = 1732
 const EVENT_RED_IN_MT_SILVER: int = 1890
 
+## Maps this walk names by id rather than by cell, where the two profiles
+## disagree (`constants/map_constants.asm`). A map number counts from its
+## group's first entry, so a map pokegold does not ship shifts every later
+## number in that group: group 3 runs eight lower from `UNION_CAVE_1F` on,
+## because pokecrystal inserts eight Ruins of Alph word and item rooms, and
+## group 11 shifts around `GOLDENROD_POKECENTER_1F` and the absent
+## `GOLDENROD_DEPT_STORE_ROOF`. Only the ids this walk resolves are listed;
+## everything else it reaches is found by the cell it stands on, which no
+## renumbering moves.
+const MAP_IDS: Dictionary = {
+	&"ILEX_FOREST": {&"crystal": Vector2i(3, 52), &"gold": Vector2i(3, 44)},
+	&"MAHOGANY_MART_1F": {&"crystal": Vector2i(3, 48), &"gold": Vector2i(3, 40)},
+	&"TEAM_ROCKET_BASE_B2F": {&"crystal": Vector2i(3, 50), &"gold": Vector2i(3, 42)},
+	&"TEAM_ROCKET_BASE_B3F": {&"crystal": Vector2i(3, 51), &"gold": Vector2i(3, 43)},
+}
+
 
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
@@ -1946,7 +1962,8 @@ func _plain_badge_path(
 	var _gate_entry: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
-	var forest: Dictionary = _warp_step(world, 3, 52)
+	var ilex: Vector2i = _map_id(data, &"ILEX_FOREST")
+	var forest: Dictionary = _warp_step(world, ilex.x, ilex.y)
 	if not bool(forest.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "Ilex Forest warp failed"}
 	var forest_entry: Dictionary = _drain_story(
@@ -2780,6 +2797,9 @@ func _glacier_badge_path(
 	data: GameData,
 	path: Array,
 ) -> Dictionary:
+	var mahogany_mart: Vector2i = _map_id(data, &"MAHOGANY_MART_1F")
+	var rocket_b2f: Vector2i = _map_id(data, &"TEAM_ROCKET_BASE_B2F")
+	var rocket_b3f: Vector2i = _map_id(data, &"TEAM_ROCKET_BASE_B3F")
 	var leaving_gym: Dictionary = _warp_step(world, 1, 14)
 	if not bool(leaving_gym.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "Olivine Gym exit warp failed"}
@@ -2959,7 +2979,7 @@ func _glacier_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": lance.get("run", {}),
-		"mart_scene": world.state.map_scene(3, 48),
+		"mart_scene": world.state.map_scene(mahogany_mart.x, mahogany_mart.y),
 	})
 	if not bool(lance.get("ok", false)):
 		return {
@@ -3055,7 +3075,7 @@ func _glacier_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"encounters": heal.get("encounters", []),
-		"scene": world.state.map_scene(3, 50),
+		"scene": world.state.map_scene(rocket_b2f.x, rocket_b2f.y),
 	})
 	if not bool(heal.get("ok", false)):
 		return {
@@ -3081,7 +3101,7 @@ func _glacier_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": password_scene,
-		"scene": world.state.map_scene(3, 51),
+		"scene": world.state.map_scene(rocket_b3f.x, rocket_b3f.y),
 	})
 	if not bool(password_scene.get("terminal", false)):
 		return {
@@ -3151,7 +3171,7 @@ func _glacier_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"encounters": rival.get("encounters", []),
-		"scene": world.state.map_scene(3, 51),
+		"scene": world.state.map_scene(rocket_b3f.x, rocket_b3f.y),
 	})
 	if not bool(rival.get("ok", false)):
 		return {
@@ -3180,7 +3200,7 @@ func _glacier_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"encounters": executive.get("encounters", []),
-		"scene": world.state.map_scene(3, 51),
+		"scene": world.state.map_scene(rocket_b3f.x, rocket_b3f.y),
 	})
 	if not bool(executive.get("ok", false)):
 		return {
@@ -3245,13 +3265,13 @@ func _glacier_badge_path(
 	# electrodes, so the walk is expected not to reach its own target: what says
 	# the executive happened is the scene moving on.
 	var boss_f: Dictionary = _walk_cell_resolving(world, Vector2i(14, 11), save, random, data)
-	var electrodes_armed: bool = world.state.map_scene(3, 50) == 2
+	var electrodes_armed: bool = world.state.map_scene(rocket_b2f.x, rocket_b2f.y) == 2
 	path.append({
 		"step": "rocket_base_b2f_executive",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"encounters": boss_f.get("encounters", []),
-		"scene": world.state.map_scene(3, 50),
+		"scene": world.state.map_scene(rocket_b2f.x, rocket_b2f.y),
 	})
 	if not electrodes_armed:
 		return {
@@ -9412,6 +9432,12 @@ func _walk_cell_resolving(
 				"details": run.get("reason", ""),
 			}
 	return {"ok": false, "reason": "walk to %s did not settle" % target, "encounters": runs}
+
+
+## The [constant MAP_IDS] row for [param name] on this cartridge's profile.
+func _map_id(data: GameData, name: StringName) -> Vector2i:
+	var row: Dictionary = MAP_IDS[name]
+	return row[&"crystal"] if Gen2WorldState.is_crystal_profile(data) else row[&"gold"]
 
 
 func _warp_to(map: Gen2WorldMap, group: int, number: int) -> Dictionary:
