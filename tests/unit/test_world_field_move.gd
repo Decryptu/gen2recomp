@@ -328,7 +328,7 @@ func _whirlpool_world(badge: bool = true, knows: bool = true) -> Gen2WorldAPI:
 	return world
 
 
-func test_the_seven_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
+func test_the_eight_resolved_moves_are_the_field_moves_the_submenu_offers() -> void:
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_CUT))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SURF))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_STRENGTH))
@@ -340,13 +340,15 @@ func test_the_seven_resolved_moves_are_the_field_moves_the_submenu_offers() -> v
 	assert_eq(Gen2WorldFieldMove.MOVE_WHIRLPOOL, 0xFA)
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLASH))
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_HEADBUTT))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_ROCK_SMASH))
 	assert_eq(Gen2WorldFieldMove.MOVE_WATERFALL, 0x7F)
 	assert_eq(Gen2WorldFieldMove.MOVE_FLASH, 0x94)
 	assert_eq(Gen2WorldFieldMove.MOVE_HEADBUTT, 0x1D)
+	assert_eq(Gen2WorldFieldMove.MOVE_ROCK_SMASH, 0xF9)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
 	# submenu would offer an entry nothing answers: FLY, DIG, TELEPORT,
-	# SOFTBOILED, ROCK_SMASH, MILK_DRINK and SWEET_SCENT.
-	for move: int in [0x13, 0x5B, 0x64, 0x87, 0xF9, 0xD0, 0xE6]:
+	# SOFTBOILED, MILK_DRINK and SWEET_SCENT.
+	for move: int in [0x13, 0x5B, 0x64, 0x87, 0xD0, 0xE6]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 

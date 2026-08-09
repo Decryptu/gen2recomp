@@ -24,6 +24,11 @@ const MOVEMENT_SCRIPTED: int = 20
 ## above. A boulder decides nothing on its own, so it is deliberately in neither
 ## movement_supported() nor movement_advances(); it only reacts to a push.
 const MOVEMENT_STRENGTH_BOULDER: int = 0x19
+## SPRITEMOVEDATA_SMASHABLE_ROCK, the row directly below the boulder and in
+## neither template set for the same reason: a rock decides nothing and only
+## reacts to being smashed. Its flags1 are the boulder's, minus the palette bit
+## and plus USE_OBP1, so nothing but the movement byte tells the two apart.
+const MOVEMENT_SMASHABLE_ROCK: int = 0x18
 const MOVEMENT_SWIM_WANDER: int = 0x24
 ## The three rows data/sprites/map_objects.asm gives BIG_OBJECT in their palette
 ## flags. Only two objects in either game use one: the player's bedroom big doll
@@ -121,6 +126,14 @@ func initial_facing() -> int:
 ## SPRITEMOVEDATA_STRENGTH_BOULDER row, so the movement template answers it.
 func is_strength_boulder() -> bool:
 	return movement == MOVEMENT_STRENGTH_BOULDER
+
+
+## TryRockSmashFromMenu's own test: GetFacingObject hands MAPOBJECT_MOVEMENT
+## back in `d` and the whole check is `cp SPRITEMOVEDATA_SMASHABLE_ROCK`. Unlike
+## the three below it that is the source asking the movement byte directly
+## rather than a palette flag the row happens to carry.
+func is_smashable_rock() -> bool:
+	return movement == MOVEMENT_SMASHABLE_ROCK
 
 
 ## OBJECT_PALETTE bit SWIMMING, which CanObjectMoveInDirection reads to pick

@@ -47,6 +47,10 @@ var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
 var _loaded_emote: int = -1
 var _trainer_intro_approach_pending: bool = false
+## Set while RockSmashScript's `playsound SFX_STRENGTH` is out with the host, so
+## its acknowledge continues into the earthquake, the disappear and the roll.
+## The same shape _trainer_intro_approach_pending has for encounter music.
+var _rock_smash_after_sound: bool = false
 var _battle_setup: Dictionary = {}
 var _loaded_battle_type: int = -1
 var _phone_context: Dictionary = {}
@@ -100,6 +104,10 @@ const SPECIAL_INIT_ROAM_MONS: int = 105
 ## the same 14 in both pins despite the tables being 52 and 46 long. Every
 ## boulder object in every map reaches Strength through `jumpstd` on it.
 const STD_STRENGTH_BOULDER: int = 14
+## SmashRockScript's index, directly after the boulder's and the same 15 in both
+## pins. Every rock object in every map reaches Rock Smash through `jumpstd` on
+## it, exactly as every boulder reaches Strength through 14.
+const STD_SMASH_ROCK: int = 15
 ## TryStrengthOW's three wScriptVar answers. `.already_using` names the branch
 ## taken when `bit` sets Z, that is when the flag is still *clear*, so 0 is the
 ## value that asks and 2 the value that reports the flag already set.
@@ -113,6 +121,19 @@ const STRENGTH_ASK_TEXT: String = \
 	"A #MON may be\nable to move this.\n\nWant to use\nSTRENGTH?"
 const STRENGTH_MAY_MOVE_TEXT: String = "A #MON may be\nable to move this."
 const STRENGTH_BOULDERS_MOVE_TEXT: String = "Boulders may now\nbe moved!"
+## data/text/common_2.asm again, for AskRockSmashScript. `HasRockSmash` answers
+## 1 when CheckPartyMove fails, which is the `ifequal 1, .no` that reaches
+## _MaySmashText; anything else asks.
+const ROCK_SMASH_ASK_TEXT: String = \
+	"This rock looks\nbreakable.\n\nWant to use ROCK\nSMASH?"
+const ROCK_SMASH_MAY_SMASH_TEXT: String = "Maybe a #MON\ncan break this."
+const ROCK_SMASH_USED_TEXT: String = "%s used\nROCK SMASH!"
+## Script_earthquake's operand in RockSmashScript, kept because the runner
+## reports the request rather than shaking anything.
+const ROCK_SMASH_EARTHQUAKE: int = 84
+## constants/sfx_constants.asm, whose comment column is hex. RockSmashScript
+## plays the boulder's own sound rather than one of its own.
+const SFX_STRENGTH: int = 0x1B
 ## data/text/common_2.asm's _FoundItemText, less its <PLAYER>; see
 ## _stage_item_ball(). The source line break sits before the item name.
 const FOUND_ITEM_TEXT: String = "Found\n%s!"
@@ -275,6 +296,36 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		if pending_type == &"text" and _pending.get("special", &"") == &"strength_used":
 			var used_name: String = String(_pending.get("name", "#MON"))
 			_stage_internal_text("%s can\nmove boulders." % used_name, true)
+			return _waiting_result()
+		## AskRockSmashScript, the same opentext/writetext/yesorno shape.
+		if pending_type == &"text" and _pending.get("special", &"") == &"rock_smash_ask":
+			_pending = {
+				"type": &"choice",
+				"command": &"yesorno",
+				"choices": [&"yes", &"no"],
+				"special": &"rock_smash_ask",
+				"slot": int(_pending.get("slot", -1)),
+				"source": _request.duplicate(true),
+			}
+			return _waiting_result()
+		if pending_type == &"choice" and _pending.get("special", &"") == &"rock_smash_ask":
+			if choice < 0:
+				return _waiting_result()
+			var smash_slot: int = int(_pending.get("slot", -1))
+			_pending = {}
+			## `iftrue RockSmashScript`, and a no falls to closetext/end.
+			_script_value = 1 if choice == 0 else 0
+			if choice != 0:
+				return _complete()
+			_stage_rock_smash_used(smash_slot)
+			return _waiting_result()
+		## RockSmashScript's `closetext`, `special WaitSFX` and
+		## `playsound SFX_STRENGTH`. The rest of the script waits on the sound
+		## the way a trainer's approach waits on its encounter music.
+		if pending_type == &"text" and _pending.get("special", &"") == &"rock_smash_used":
+			_pending = {}
+			_rock_smash_after_sound = true
+			_stage_audio_request(&"sound", {"address": SFX_STRENGTH})
 			return _waiting_result()
 		if pending_type in [&"choice", &"menu"]:
 			if choice < 0:
@@ -460,10 +511,16 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		var approach_after_audio: bool = kind == &"audio_requested" \
 			and StringName((request.get("values", {}) as Dictionary).get("kind", &"")) \
 			== &"encounter_music" and _trainer_intro_approach_pending
+		var smash_after_sound: bool = kind == &"audio_requested" \
+			and StringName((request.get("values", {}) as Dictionary).get("kind", &"")) \
+			== &"sound" and _rock_smash_after_sound
 		_pending = {}
 		if approach_after_audio:
 			_trainer_intro_approach_pending = false
 			_stage_trainer_approach()
+		if smash_after_sound:
+			_rock_smash_after_sound = false
+			_stage_rock_smashed()
 		return advance()
 	if kind == &"rival_name_requested":
 		if not bool(result.get("ok", false)):
@@ -695,6 +752,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.JUMPSTD:
 			if int(command["address"]) == STD_STRENGTH_BOULDER:
 				return _stage_strength_boulder()
+			if int(command["address"]) == STD_SMASH_ROCK:
+				return _stage_smash_rock()
 			var jump_standard: Dictionary = _standard_script(int(command["address"]))
 			if jump_standard.is_empty():
 				return {
@@ -709,6 +768,8 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CALLSTD:
 			if int(command["address"]) == STD_STRENGTH_BOULDER:
 				return _stage_strength_boulder()
+			if int(command["address"]) == STD_SMASH_ROCK:
+				return _stage_smash_rock()
 			var call_standard: Dictionary = _standard_script(int(command["address"]))
 			if call_standard.is_empty():
 				return {
@@ -2150,6 +2211,101 @@ func _stage_strength_used(slot: int) -> Dictionary:
 	}
 	_finish_after_pending = false
 	return {"ok": true}
+
+
+## engine/events/overworld.asm's AskRockSmashScript, synthesized for the same
+## reason AskStrengthScript is: SmashRockScript is `farsjump AskRockSmashScript`
+## and its first command is `callasm HasRockSmash`, whose operand is a link-time
+## address absent from the pins. The seam is the standard-script index, 15 in
+## both.
+##
+## `HasRockSmash` is CheckPartyMove and nothing else, so unlike the boulder
+## there is no badge and no already-active flag to check: the whole gate is
+## whether a party member knows ROCK SMASH.
+func _stage_smash_rock() -> Dictionary:
+	var party: Dictionary = _request.get("party", {})
+	if party.is_empty():
+		return {"ok": false, "reason": &"missing_party_summary", "standard_index": STD_SMASH_ROCK}
+	var slot: int = _party_slot_with_move(Gen2WorldFieldMove.MOVE_ROCK_SMASH)
+	if slot < 0:
+		return _stage_internal_text(ROCK_SMASH_MAY_SMASH_TEXT, true)
+	_pending = {
+		"type": &"text",
+		"text": ROCK_SMASH_ASK_TEXT,
+		"internal_text": true,
+		"special": &"rock_smash_ask",
+		"slot": slot,
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = false
+	return {"ok": true}
+
+
+## RockSmashScript's `callasm GetPartyNickname` and `writetext UseRockSmashText`.
+func _stage_rock_smash_used(slot: int) -> Dictionary:
+	var names: Array = _request.get("party", {}).get("names", [])
+	var name: String = String(names[slot]) if slot >= 0 and slot < names.size() else "#MON"
+	_pending = {
+		"type": &"text",
+		"text": ROCK_SMASH_USED_TEXT % name,
+		"internal_text": true,
+		"special": &"rock_smash_used",
+		"source": _request.duplicate(true),
+	}
+	_finish_after_pending = false
+	return {"ok": true}
+
+
+## Everything RockSmashScript does after its text: `playsound SFX_STRENGTH`,
+## `earthquake 84`, the rock's own one-command movement, `disappear LAST_TALKED`
+## and then RockMonEncounter. The sound and the shake are reported as events,
+## the way the runner reports every other presentation request.
+##
+## `readmem wTempWildMonSpecies` and `iffalse .done` are what test the roll, so
+## a species of zero ends the script and anything else reaches `randomwildmon`,
+## `startbattle` and `reloadmapafterbattle`.
+func _stage_rock_smashed() -> void:
+	_emit_runtime_event(&"earthquake_requested", {"duration": ROCK_SMASH_EARTHQUAKE})
+	## `disappear LAST_TALKED` is DeleteObjectStruct plus
+	## ApplyEventActionAppearDisappear. The delete is reported as
+	## `object_deleted` rather than a visibility override, so a rock with no
+	## event flag is back on the next map load exactly as the cartridge's is;
+	## the flag half is what makes Mt. Moon Square's stay smashed.
+	_emit_object_event(&"object_deleted", {
+		"object_index": _last_talked_object_index,
+	})
+	_emit_object_event(&"object_event_flag", {
+		"object_index": _last_talked_object_index, "active": true,
+	})
+	_stage_object_event_flag(LAST_TALKED, true)
+	var encounter: Dictionary = _rock_encounter()
+	if encounter.is_empty():
+		## `readmem wTempWildMonSpecies` then `iffalse .done`, and `.done` is
+		## `end`. Clearing the frames is what reaching that end looks like here.
+		_script_value = 0
+		_frames.clear()
+		return
+	_battle_setup = _new_battle_setup({
+		"kind": &"wild",
+		"pokemon": int(encounter["species"]),
+		"level": int(encounter["level"]),
+	})
+	_emit_runtime_event(&"battle_setup_changed", _battle_setup)
+	_emit_runtime_event(&"battle_map_reload_requested", {"requested": true})
+	_stage_runtime_request(&"battle_requested", _battle_request_values())
+
+
+## RockMonEncounter over the imported RockMonMaps and the ROCK set, rolled on
+## this invocation's own generator like every other roll the runner makes.
+func _rock_encounter() -> Dictionary:
+	if data == null:
+		return {}
+	var group: int = int(_request.get("map_group", -1))
+	var number: int = int(_request.get("map_number", -1))
+	var set_number: int = data.treemon_set_for_map(group, number, true)
+	if not Gen2WorldTreemon.set_is_usable(set_number, _crystal_commands()):
+		return {}
+	return Gen2WorldTreemon.rock_encounter(data.treemon_set(set_number), _random)
 
 
 func _stage_internal_text(text: String, finish_after: bool) -> Dictionary:
