@@ -13,11 +13,10 @@ extends RefCounted
 ## answers with sprites, a tile window and the palette each sprite wants, and
 ## whoever is drawing decides what that looks like.
 ##
-## Two of `.playframe`'s five steps are not here yet and are named rather than
-## quietly skipped: `_ExecuteBGEffects`, and the per-object motion callback
-## `DoBattleAnimFrame` dispatches. [method unimplemented] reports both, so a
-## caller can tell an animation that ran whole from one that ran without its
-## motion.
+## One of `.playframe`'s five steps is not here yet and is named rather than
+## quietly skipped: `_ExecuteBGEffects`. [method unimplemented] reports what an
+## animation asked for and did not get, so a caller can tell one that ran whole
+## from one that ran without its background.
 
 ## `NUM_BATTLE_ANIM_STRUCTS`: ten slots, and an eleventh object is simply not
 ## spawned.
@@ -73,6 +72,23 @@ var _keep_sprites: bool = false
 var _sprites: Array = []
 var _unimplemented: Dictionary = {}
 
+## `wCurItem`, which `GetBallAnimPal` reads to colour a thrown ball. Nothing but
+## a ball animation asks, and an item that is not a ball falls out of
+## `BallColors` on its own terminator.
+var cur_item: int = 0
+
+## `wOBP0`, the DMG object palette `BattleAnimFunc_SkyAttack` flashes. Kept
+## because the write is the whole of that state; the Color hardware draws
+## objects from `wOBPals1` instead, so nothing shows.
+var obp0: int = 0
+
+## `hLCDCPointer`, `hLYOverrideStart` and `hLYOverrideEnd`: the scanline window
+## `BattleAnimFunc_Surf` opens over `rSCY` and hands back when the wave has
+## crossed the screen. It is the only callback that reaches the raster.
+var lcdc_pointer: int = 0
+var ly_override_start: int = 0
+var ly_override_end: int = 0
+
 
 ## Starts [param index] of `BattleAnimations`. Answers null when the cache has no
 ## such animation, which is what an unimported layer looks like.
@@ -102,6 +118,16 @@ static func create(
 		region["data"], int(region["address"]), address, param
 	)
 	return player
+
+
+## `hBattleTurn`, which two callbacks and the enemy-side coordinate fix read.
+func enemy_turn() -> bool:
+	return _enemy_turn
+
+
+## The imported tables the callbacks resolve their sine and framesets through.
+func data() -> Gen2BattleAnimData:
+	return _data
 
 
 func finished() -> bool:
@@ -305,18 +331,13 @@ func _update_oam() -> void:
 		_sprites.append_array(sprites)
 
 
-## `DoBattleAnimFrame`: the object's own motion callback.
-##
-## `BattleAnimFunc_Null` is here because it is not a no-op: it deletes the object
-## once something has bumped its jumptable index, which is how `anim_incobj` ends
-## an object the script spawned. The other seventy-eight are not built and are
-## reported by [method unimplemented].
+## `DoBattleAnimFrame`: the object's own motion callback, in
+## [Gen2BattleAnimFunctions]. A callback outside the jumptable is reported rather
+## than run, which the importer's own range check makes unreachable from a
+## cartridge and a hand-built object can still ask for.
 func _do_battle_anim_frame(object: Gen2BattleAnimObject) -> void:
-	if object.function != 0:
+	if not Gen2BattleAnimFunctions.run(self, object):
 		_note(&"functions", object.function)
-		return
-	if object.jumptable_index == 1:
-		object.deinit()
 
 
 ## `BattleAnim_ClearOAM`. Keeping the sprites does not keep their colours: every

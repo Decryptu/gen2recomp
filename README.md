@@ -121,7 +121,7 @@ to check without writing.
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
 | World services | Referenced menus, mart inventories, phone contacts, special calls, bounded scripts/text, music, SFX, cries and shared waveform assets |
-| Battle animations | All 278 animation scripts, the 188 objects, 185 framesets and 216 OAM sets they are drawn from, and 39 decompressed graphics sheets |
+| Battle animations | All 278 animation scripts, the 188 objects, 185 framesets and 216 OAM sets they are drawn from, 39 decompressed graphics sheets and the sine table the motion callbacks scale with |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
 rendering needs no duplicate images.
@@ -297,7 +297,7 @@ Headless tools, all against a real imported cache:
 | `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore, in all three games |
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool, in all three games |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push, in all three games |
-| `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, and the 39 graphics sheets, in all three games |
+| `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, and the 39 graphics sheets, in all three games |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census, in all three games |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script, in all three games |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse, in all three games |

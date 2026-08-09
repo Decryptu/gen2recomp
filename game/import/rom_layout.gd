@@ -487,6 +487,24 @@ const BATTLE_ANIM_GFX_SIZE: int = 4
 const BATTLE_ANIM_GFX_FIRST_SHEET: int = 1
 const BATTLE_ANIM_GFX_LAST_SHEET: int = 39
 
+## `BattleAnimSineWave`, the 32-word table `BattleAnim_Sine` and `..._Cosine`
+## multiply an amplitude by (engine/battle_anims/functions.asm). It sits in the
+## same bank as the four tables above, immediately before `BattleAnimFrameData`.
+const BATTLE_ANIM_SINE_SAMPLES: int = 32
+const BATTLE_ANIM_SINE_BYTES: int = BATTLE_ANIM_SINE_SAMPLES * 2
+
+## What that table holds, pinned the way [constant BAR_PALETTES] pins the bars'
+## colours: the values are the check for the offset. It is `sine_table 32`, which
+## rgbasm evaluates at assembly time, and entry 16 is why it is imported rather
+## than re-derived: sin(pi/2) is 1.0, which lands on $0100 and not the $00FF an
+## eight-bit derivation produces. The same 64 bytes are in all three dumps.
+const BATTLE_ANIM_SINE_WAVE: Array[int] = [
+	0x00, 0x00, 0x19, 0x00, 0x32, 0x00, 0x4A, 0x00, 0x62, 0x00, 0x79, 0x00, 0x8E, 0x00, 0xA2, 0x00,
+	0xB5, 0x00, 0xC6, 0x00, 0xD5, 0x00, 0xE2, 0x00, 0xED, 0x00, 0xF5, 0x00, 0xFB, 0x00, 0xFF, 0x00,
+	0x00, 0x01, 0xFF, 0x00, 0xFB, 0x00, 0xF5, 0x00, 0xED, 0x00, 0xE2, 0x00, 0xD5, 0x00, 0xC6, 0x00,
+	0xB5, 0x00, 0xA2, 0x00, 0x8E, 0x00, 0x79, 0x00, 0x62, 0x00, 0x4A, 0x00, 0x32, 0x00, 0x19, 0x00,
+]
+
 ## The eight `PAL_BATTLE_OB_*` object palettes an animation object's palette byte
 ## indexes, and which of them the cartridge stores.
 ##
@@ -809,10 +827,14 @@ const GOLD_SILVER: Dictionary = {
 	# 10 ff), then finding the run of 278 in-bank pointers whose second entry is
 	# its address; the other four tables were located by assembling the pinned
 	# data/battle_anims files and matching the bytes. Each hit is unique in the
-	# dump. Nested for the same reason trainer_card is.
+	# dump. `sine` is the one that is not: the same 64 bytes appear four or five
+	# times per dump, so it was located from `calc_sine_wave`'s own operand, the
+	# `ld hl` at the end of the copy sharing this bank with the four tables, and
+	# only that hit lies in the bank. Nested for the same reason trainer_card is.
 	"battle_anims": {
 		"scripts": 0xC900A,
 		"objects": 0xCCAA5,
+		"sine": 0xCE6C4,
 		"framesets": 0xCE7A3,
 		"oam_sets": 0xCEDF3,
 		"object_gfx": 0xCFC3B,
@@ -984,6 +1006,7 @@ const CRYSTAL: Dictionary = {
 	"battle_anims": {
 		"scripts": 0xC906F,
 		"objects": 0xCCB56,
+		"sine": 0xCE77F,
 		"framesets": 0xCE85E,
 		"oam_sets": 0xCEEAE,
 		"object_gfx": 0xCFCF6,

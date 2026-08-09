@@ -19,6 +19,7 @@ const OBJECT_FIELDS: Array[StringName] = [
 
 var _regions: Dictionary = {}
 var _gfx: Array = []
+var _sine: PackedByteArray = PackedByteArray()
 
 
 ## Built from a cache. Returns null when the cache carries no animation layer,
@@ -35,14 +36,27 @@ static func from_game_data(data: GameData) -> Gen2BattleAnimData:
 	var gfx: Array = []
 	for index: int in data.battle_anim_gfx_count():
 		gfx.append(data.battle_anim_gfx(index))
-	return create(regions, gfx)
+	return create(regions, gfx, data.battle_anim_sine())
 
 
-static func create(regions: Dictionary, gfx: Array) -> Gen2BattleAnimData:
+static func create(
+	regions: Dictionary, gfx: Array, sine: PackedByteArray = PackedByteArray()
+) -> Gen2BattleAnimData:
 	var out := Gen2BattleAnimData.new()
 	out._regions = regions
 	out._gfx = gfx
+	out._sine = sine
 	return out
+
+
+## One `BattleAnimSineWave` word, which is the amplitude `BattleAnim_Sine`
+## multiplies. Entry 16 is $0100, so the table is not eight-bit and is read
+## rather than derived. Out of range answers zero, the way [method byte_at] does.
+func sine_word(index: int) -> int:
+	var at: int = index * 2
+	if at < 0 or at + 2 > _sine.size():
+		return 0
+	return _sine[at] | (_sine[at + 1] << 8)
 
 
 func region(name: StringName) -> Dictionary:
