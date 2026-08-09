@@ -15,8 +15,8 @@ func before_each() -> void:
 	_data = GameData.open_directory(Fixture.directory())
 	## The OPTION menu writes through Gen2OptionsStore, so the file and the
 	## shared instance both start clean.
-	Gen2OptionsStore.forget_cached()
-	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func after_each() -> void:
@@ -24,8 +24,8 @@ func after_each() -> void:
 		_world_screen.free()
 		_world_screen = null
 	RomCache.clear(Fixture.directory())
-	Gen2OptionsStore.forget_cached()
-	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 ## Item 7 carries POTION's real ItemAttributes row, so the pack builds the
@@ -637,7 +637,7 @@ func test_a_change_reaches_the_shared_options_and_the_file() -> void:
 	host.handle_button(Gen2Button.RIGHT)
 	assert_true(Gen2OptionsStore.current().battle_style_set)
 
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 	assert_true(Gen2OptionsStore.current().battle_style_set)
 
 

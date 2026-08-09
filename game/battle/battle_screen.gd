@@ -170,6 +170,8 @@ func _ready() -> void:
 
 	_box = Gen2TextBox.new()
 	_box.font = Gen2Font.from_data(_data)
+	## wTextboxFrame: a battle's own boxes are drawn with the player's frame too.
+	_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
 	_screen.display(_box)
 	_box.place_at_bottom()
 

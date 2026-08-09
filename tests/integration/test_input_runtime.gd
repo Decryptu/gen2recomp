@@ -15,7 +15,7 @@ func after_each() -> void:
 		_runtime.release(button)
 	await get_tree().process_frame
 	_runtime.apply_options(Gen2Options.new())
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 
 
 ## Two frames: one for the synthesised event to reach the input state, one for

@@ -24,7 +24,7 @@ func after_each() -> void:
 	if _pad != null and is_instance_valid(_pad):
 		_pad.release_all()
 	Gen2InputRuntime.instance().apply_options(Gen2Options.new())
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 
 
 func _touch(index: int, at: Vector2, pressed: bool) -> void:

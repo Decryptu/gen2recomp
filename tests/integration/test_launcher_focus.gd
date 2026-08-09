@@ -18,7 +18,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 
 
 func _use(event: InputEvent) -> void:

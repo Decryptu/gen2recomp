@@ -9,8 +9,27 @@ extends RefCounted
 ## afford that, which is why it keeps the heavier scheme.
 
 const PATH: String = "user://options.json"
+## Where a test writes instead. The suite shares `user://` with the game, so
+## without this a headless GUT run would reset the developer's own settings and
+## key bindings; [method use_test_path] is what a test calls to redirect it.
+const TEST_PATH: String = "user://options_test.json"
 
 static var _cached: Gen2Options = null
+static var _path: String = PATH
+
+
+## The file in use. Tests redirect it; nothing in the game does.
+static func path() -> String:
+	return _path
+
+
+## Points the store at [constant TEST_PATH] and drops the shared object, so a
+## test neither reads nor overwrites the real options file. It stays pointed
+## there for the rest of the run on purpose: a later test that forgets to call
+## this then reads the test file rather than the developer's own.
+static func use_test_path() -> void:
+	_path = TEST_PATH
+	_cached = null
 
 
 ## The live options. Read once, then shared, so callers can hold the object and
@@ -22,9 +41,9 @@ static func current() -> Gen2Options:
 
 
 static func load_options() -> Gen2Options:
-	if not FileAccess.file_exists(PATH):
+	if not FileAccess.file_exists(_path):
 		return Gen2Options.new()
-	var file: FileAccess = FileAccess.open(PATH, FileAccess.READ)
+	var file: FileAccess = FileAccess.open(_path, FileAccess.READ)
 	if file == null:
 		return Gen2Options.new()
 	var text: String = file.get_as_text()
@@ -38,16 +57,10 @@ static func load_options() -> Gen2Options:
 
 
 static func save(options: Gen2Options) -> bool:
-	var file: FileAccess = FileAccess.open(PATH, FileAccess.WRITE)
+	var file: FileAccess = FileAccess.open(_path, FileAccess.WRITE)
 	if file == null:
 		return false
 	file.store_string(JSON.stringify(options.to_dict(), "\t"))
 	file.close()
 	_cached = options
 	return true
-
-
-## Drops the shared object so the next [method current] reads the file again.
-## Tests need this; nothing in the game does.
-static func forget_cached() -> void:
-	_cached = null

@@ -63,9 +63,10 @@ const FONT: StringName = Gen2Text.FONT_BATTLE_EXTRA
 const PLAYER_BOX: Rect2i = Rect2i(0, 2, 11, 10)
 const PLAYER_NAME: Vector2i = Vector2i(2, 4)
 
-## `Textbox` draws with wTextboxFrame, whose new-game value is the first frame.
-## The options screen that lets a player change it does not exist yet.
-const FRAME_STYLE: int = 0
+## `Textbox` draws with wTextboxFrame, which the in-game OPTION menu's FRAME row
+## and the launcher's settings both write, so the panel is drawn in whichever
+## frame the player chose rather than always the first.
+var frame_style: int = 0
 
 var font: Gen2Font = null
 
@@ -76,6 +77,7 @@ static func from_data(data: GameData) -> Gen2HallOfFamePage:
 		return null
 	var out := Gen2HallOfFamePage.new()
 	out.font = glyphs
+	out.frame_style = Gen2OptionsStore.current().textbox_frame
 	return out
 
 
@@ -151,7 +153,7 @@ func _gender_glyph(gender: StringName) -> String:
 
 func _box(indices: PackedByteArray, width: int, box: Rect2i) -> void:
 	font.draw_box(
-		FRAME_STYLE, indices, width,
+		frame_style, indices, width,
 		box.position.x * TILE, box.position.y * TILE, box.size.x, box.size.y
 	)
 

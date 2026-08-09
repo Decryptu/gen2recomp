@@ -7,8 +7,8 @@ const DEFAULT_OPTIONS_BYTES: Array[int] = [0x03, 0x00, 0x00, 0x01, 0x40, 0x01, 0
 
 
 func after_each() -> void:
-	Gen2OptionsStore.forget_cached()
-	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func test_defaults_match_the_source_default_options_table() -> void:
@@ -134,7 +134,7 @@ func test_saving_then_loading_keeps_both_blocks() -> void:
 	options.max_fps = 120
 	assert_true(Gen2OptionsStore.save(options))
 
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 	var loaded: Gen2Options = Gen2OptionsStore.load_options()
 	assert_false(loaded.battle_scene)
 	assert_eq(loaded.textbox_frame, 3)
@@ -144,18 +144,18 @@ func test_saving_then_loading_keeps_both_blocks() -> void:
 
 
 func test_a_missing_file_loads_defaults() -> void:
-	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
-	Gen2OptionsStore.forget_cached()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
+	Gen2OptionsStore.use_test_path()
 
 	var loaded: Gen2Options = Gen2OptionsStore.load_options()
 	assert_eq(loaded.to_source_bytes(), Gen2Options.new().to_source_bytes())
 
 
 func test_a_damaged_file_loads_defaults_rather_than_failing() -> void:
-	var file: FileAccess = FileAccess.open(Gen2OptionsStore.PATH, FileAccess.WRITE)
+	var file: FileAccess = FileAccess.open(Gen2OptionsStore.path(), FileAccess.WRITE)
 	file.store_string("{ this is not json")
 	file.close()
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 
 	var loaded: Gen2Options = Gen2OptionsStore.load_options()
 	assert_eq(loaded.to_source_bytes(), Gen2Options.new().to_source_bytes())
@@ -166,5 +166,5 @@ func test_current_shares_one_object_until_forgotten() -> void:
 	first.music_volume = 1
 	assert_eq(Gen2OptionsStore.current().music_volume, 1)
 
-	Gen2OptionsStore.forget_cached()
+	Gen2OptionsStore.use_test_path()
 	assert_eq(Gen2OptionsStore.current().music_volume, 7)

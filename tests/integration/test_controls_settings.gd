@@ -26,8 +26,8 @@ func after_each() -> void:
 		open_sheet.close()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	Gen2OptionsStore.forget_cached()
-	DirAccess.remove_absolute(Gen2OptionsStore.PATH)
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 	Gen2InputRuntime.instance().apply_options(Gen2Options.new())
 
 

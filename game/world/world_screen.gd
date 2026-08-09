@@ -184,6 +184,9 @@ func _build_world() -> void:
 	_play_current_map_music()
 	_text_box = Gen2TextBox.new()
 	_text_box.font = Gen2Font.from_data(_data)
+	## wTextboxFrame, which `Textbox` reads on every box it draws and the OPTION
+	## menu's FRAME row writes.
+	_text_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
 	_text_box.reveal_speed = 0.0
 	_text_box.place_at_bottom()
 	_text_box.visible = false
