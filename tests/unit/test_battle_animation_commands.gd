@@ -1,12 +1,14 @@
 extends GutTest
 
-## The four routes a move's animation reaches the screen by.
+## The five routes an animation reaches the screen by.
 ##
 ## `moveanim` and `moveanimnosub` sit in the effect lists, `statupanim` and
 ## `statdownanim` between a stat change and its message, and `AnimateCurrentMove`
-## inside individual command bodies rather than in any list at all. All four
-## write the same event, since the engine is scene-free and the screen is what
-## spends the frames.
+## inside individual command bodies rather than in any list at all. Those four
+## are the move's own animation. `PlayOpponentBattleAnim` is the fifth and is
+## not: five secondary-effect commands play a status animation on the target,
+## with `hBattleTurn` inverted for its length. All five write the same event,
+## since the engine is scene-free and the screen is what spends the frames.
 
 const Fixture := preload("res://tests/unit/battle_fixture.gd")
 
@@ -153,11 +155,15 @@ func test_a_status_move_with_no_animation_command_still_animates() -> void:
 	assert_eq(int(animations[0]["after_anim"]), Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
 
 
-func test_a_secondary_paralysis_does_not_animate_a_second_time() -> void:
-	# `BattleCommand_ParalyzeTarget` has no `AnimateCurrentMove`: the move that
-	# carried it played its own `moveanim` already.
+func test_a_secondary_status_does_not_play_the_move_a_second_time() -> void:
+	# `BattleCommand_BurnTarget` has no `AnimateCurrentMove`: the move that
+	# carried it played its own `moveanim` already. What follows it is the status
+	# animation, not the move again.
 	var events: Array = _run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
-	assert_eq(_animations(events).size(), 1)
+	var animations: Array = _animations(events)
+	assert_eq(animations.size(), 2)
+	assert_eq(int(animations[0]["index"]), Fixture.EMBER_BURNS)
+	assert_eq(int(animations[1]["index"]), Gen2BattleAnimPlayer.ANIM_BRN)
 
 
 func test_a_multi_hit_animates_every_hit_and_flashes_only_the_last() -> void:
@@ -196,3 +202,148 @@ func test_haze_animates_from_inside_its_own_command() -> void:
 		_index_of(events, Gen2Battle.ANIMATION), _index_of(events, Gen2Battle.STAGES_CLEARED),
 		"AnimateCurrentMove runs before EliminatedStatsText"
 	)
+
+
+## `PlayOpponentBattleAnim`, the fifth route.
+
+func test_each_secondary_status_plays_its_own_animation_on_the_target() -> void:
+	# The four `*Target` commands that reach `PlayOpponentBattleAnim`, with the
+	# ids `constants/move_constants.asm` gives them.
+	var expected: Dictionary = {
+		Fixture.EMBER_BURNS: Gen2BattleAnimPlayer.ANIM_BRN,
+		Fixture.SLUDGE_BOMB_ALWAYS_POISONS: Gen2BattleAnimPlayer.ANIM_PSN,
+		Fixture.ICE_BEAM_ALWAYS_FREEZES: Gen2BattleAnimPlayer.ANIM_FRZ,
+		Fixture.BODY_SLAM_ALWAYS_PARALYZES: Gen2BattleAnimPlayer.ANIM_PAR,
+	}
+	for move: int in expected:
+		var events: Array = _run_move(_battle([move]), move)
+		var animations: Array = _animations(events)
+		assert_eq(animations.size(), 2, "move %d plays its own and the status's" % move)
+		assert_eq(int(animations[1]["index"]), int(expected[move]))
+		# `PlayOpponentBattleAnim` clears `wBattleAfterAnim`, so no damage flash
+		# chains off a status animation.
+		assert_eq(
+			int(animations[1]["after_anim"]), Gen2BattleAnimPlayer.AFTER_ANIM_NONE
+		)
+		assert_false(bool(animations[1]["restore_user_pic"]))
+
+
+func test_a_status_animation_plays_on_the_target_rather_than_the_user() -> void:
+	# The two `BattleCommand_SwitchTurn` calls `PlayOpponentBattleAnim` wraps
+	# `PlayBattleAnim` in: `hBattleTurn` is inverted for its length.
+	var player: Array = _animations(
+		_run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
+	)
+	assert_false(bool(player[0]["enemy_turn"]), "the move plays on the user")
+	assert_true(bool(player[1]["enemy_turn"]), "the status plays on the target")
+
+	var enemy: Array = _animations(_run_move(
+		_battle([Fixture.TACKLE], [Fixture.EMBER_BURNS]),
+		Fixture.EMBER_BURNS, Gen2Battle.ENEMY
+	))
+	assert_true(bool(enemy[0]["enemy_turn"]))
+	assert_false(bool(enemy[1]["enemy_turn"]))
+
+
+func test_a_status_animation_runs_before_the_line_that_reports_it() -> void:
+	# `PlayOpponentBattleAnim`, `RefreshBattleHuds`, then `StdBattleTextbox`.
+	var events: Array = _run_move(_battle([Fixture.EMBER_BURNS]), Fixture.EMBER_BURNS)
+	var animations: Array = _animations(events)
+	assert_eq(animations.size(), 2)
+	assert_lt(
+		_index_of(events, Gen2Battle.STATUS_INFLICTED),
+		events.size(),
+		"the burn landed"
+	)
+	var last: int = -1
+	for index: int in events.size():
+		if StringName(events[index]["type"]) == Gen2Battle.ANIMATION:
+			last = index
+	assert_lt(last, _index_of(events, Gen2Battle.STATUS_INFLICTED))
+
+
+func test_the_status_moves_own_commands_play_no_second_animation() -> void:
+	# `BattleCommand_SleepTarget` ends at `AnimateCurrentMove`;
+	# `BattleCommand_Poison`'s `.apply_poison` and `BattleCommand_Paralyze` are
+	# `AnimateCurrentMove` and the status. None of the three reaches
+	# `PlayOpponentBattleAnim`, so `ANIM_SLP` is played by nothing at all.
+	for move: int in [
+		Fixture.SLEEP_POWDER, Fixture.POISON_POWDER, Fixture.THUNDER_WAVE
+	]:
+		var animations: Array = _animations(_run_move(_battle([move]), move))
+		assert_eq(animations.size(), 1, "move %d animates once" % move)
+		assert_eq(int(animations[0]["index"]), move)
+
+
+func test_toxic_animates_from_its_own_command_and_plays_no_status_animation() -> void:
+	# `.toxic` reaches the same `.apply_poison` the ordinary branch does.
+	var animations: Array = _animations(_run_move(_battle([Fixture.TOXIC]), Fixture.TOXIC))
+	assert_eq(animations.size(), 1)
+	assert_eq(int(animations[0]["index"]), Fixture.TOXIC)
+
+
+func test_a_confusion_animates_on_its_target_whichever_way_it_was_reached() -> void:
+	# `BattleCommand_FinishConfusingTarget` plays `ANIM_CONFUSED` past
+	# `.got_effect`, so both shapes reach it. Supersonic adds its own
+	# `AnimateCurrentMove` in front; Confusion's `moveanim` is what it skips for.
+	var supersonic: Array = _animations(
+		_run_move(_battle([Fixture.SUPERSONIC]), Fixture.SUPERSONIC)
+	)
+	assert_eq(supersonic.size(), 2)
+	assert_eq(int(supersonic[0]["index"]), Fixture.SUPERSONIC)
+	assert_eq(int(supersonic[1]["index"]), Gen2BattleAnimPlayer.ANIM_CONFUSED)
+	assert_true(bool(supersonic[1]["enemy_turn"]))
+
+	var confusion: Array = _animations(
+		_run_move(_battle([Fixture.CONFUSION_ALWAYS]), Fixture.CONFUSION_ALWAYS)
+	)
+	assert_eq(confusion.size(), 2)
+	assert_eq(int(confusion[0]["index"]), Fixture.CONFUSION_ALWAYS)
+	assert_eq(int(confusion[1]["index"]), Gen2BattleAnimPlayer.ANIM_CONFUSED)
+
+
+func test_a_confusion_that_does_not_land_plays_no_status_animation() -> void:
+	var battle: Gen2Battle = _battle([Fixture.SUPERSONIC])
+	battle.enemy.substatus |= Gen2Substatus.CONFUSED
+	assert_eq(_animations(_run_move(battle, Fixture.SUPERSONIC)).size(), 0)
+
+
+func test_a_freeze_refused_by_the_sun_plays_nothing() -> void:
+	# `BattleCommand_FreezeTarget` returns on `WEATHER_SUN` before the status is
+	# set, so the animation behind it is never reached.
+	var battle: Gen2Battle = _battle([Fixture.ICE_BEAM_ALWAYS_FREEZES])
+	battle.weather = Gen2Weather.SUN
+	battle.weather_turns = Gen2Weather.TURNS
+	var animations: Array = _animations(_run_move(battle, Fixture.ICE_BEAM_ALWAYS_FREEZES))
+	assert_eq(animations.size(), 1)
+	assert_eq(int(animations[0]["index"]), Fixture.ICE_BEAM_ALWAYS_FREEZES)
+
+
+func test_a_status_refused_by_one_already_there_plays_nothing() -> void:
+	var battle: Gen2Battle = _battle([Fixture.EMBER_BURNS])
+	battle.enemy.status = Gen2Status.PARALYSIS
+	assert_eq(_animations(_run_move(battle, Fixture.EMBER_BURNS)).size(), 1)
+
+
+func test_a_status_animation_carries_the_param_the_move_left() -> void:
+	# `PlayOpponentBattleAnim` never writes `wBattleAnimParam`, so the status
+	# animation reads whatever the move's own animation put there.
+	var battle: Gen2Battle = _battle([Fixture.EMBER_BURNS])
+	battle.battle_anim_param = 1
+	var animations: Array = _animations(_run_move(battle, Fixture.EMBER_BURNS))
+	assert_eq(int(animations[0]["param"]), 0, "moveanim clears it")
+	assert_eq(int(animations[1]["param"]), 0)
+	assert_eq(battle.battle_anim_param, 0)
+
+
+func test_every_status_animation_is_past_the_move_ids() -> void:
+	# `BattleAnimRunScript` tells a move from a status animation by
+	# `wFXAnimID`'s high byte, so all five must sit past it or they would take
+	# the hud-and-after-anim branch instead.
+	for index: int in [
+		Gen2BattleAnimPlayer.ANIM_CONFUSED, Gen2BattleAnimPlayer.ANIM_BRN,
+		Gen2BattleAnimPlayer.ANIM_PSN, Gen2BattleAnimPlayer.ANIM_FRZ,
+		Gen2BattleAnimPlayer.ANIM_PAR,
+	]:
+		assert_gt(index, 0xFF)
+		assert_lt(index, RomLayout.BATTLE_ANIM_SCRIPT_COUNT)

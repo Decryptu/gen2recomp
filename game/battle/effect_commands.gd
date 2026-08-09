@@ -927,6 +927,14 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 	else:
 		defender.status |= flag
 
+	# The status is on before the animation plays, which is the order all four
+	# `*Target` commands use: the status bit, `UpdateOpponentInParty` and any
+	# `Apply*Effect` call, then `PlayOpponentBattleAnim`, then `RefreshBattleHuds`
+	# and the text.
+	var opponent_anim: int = _status_target_anim(turn, flag)
+	if opponent_anim >= 0:
+		_play_opponent_battle_anim(turn, opponent_anim)
+
 	turn.emit(Gen2Battle.STATUS_INFLICTED, {
 		"target": turn.target,
 		"status": defender.status,
@@ -951,7 +959,9 @@ static func _toxic_target(turn: Gen2Turn) -> void:
 	if defender.is_fainted() or Gen2Status.is_afflicted(defender.status):
 		return
 
-	# `BattleCommand_Poison`'s `.toxic` branch reaches the same `.apply_poison`.
+	# `BattleCommand_Poison`'s `.toxic` branch reaches the same `.apply_poison`,
+	# so Toxic animates from inside the command and never reaches
+	# `PlayOpponentBattleAnim`: no `ANIM_PSN` follows it.
 	_animate_current_move(turn)
 	defender.status |= Gen2Status.POISON
 	defender.toxic_counter = 1
@@ -988,13 +998,19 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	if defender.is_fainted() or Gen2Substatus.has(defender.substatus, Gen2Substatus.CONFUSED):
 		return
 
-	# `BattleCommand_FinishConfusingTarget`'s `.got_effect` skips the animation
-	# for the three effects that already played one of their own.
+	defender.substatus |= Gen2Substatus.CONFUSED
+	defender.confusion_turns = Gen2Substatus.roll_confusion(turn.rng())
+
+	# `BattleCommand_FinishConfusingTarget`'s `.got_effect` skips the move's own
+	# animation for the three effects that already played one. Only
+	# `EFFECT_CONFUSE_HIT` is checked, because `EFFECT_SNORE` and
+	# `EFFECT_SWAGGER` are unwritten and no move here carries either.
 	if turn.effect() != Gen2MoveEffect.CONFUSE_HIT:
 		_animate_current_move(turn)
 
-	defender.substatus |= Gen2Substatus.CONFUSED
-	defender.confusion_turns = Gen2Substatus.roll_confusion(turn.rng())
+	# Unconditional, and past `.got_effect`: a confusion animates on its target
+	# whichever way the move reached here.
+	_play_opponent_battle_anim(turn, Gen2BattleAnimPlayer.ANIM_CONFUSED)
 
 	# Not [constant Gen2Battle.STATUS_INFLICTED]: that event's [code]status[/code]
 	# field is the status byte, and confusion never touches it.
@@ -1570,17 +1586,40 @@ static func _skip_sun_charge(turn: Gen2Turn) -> void:
 
 ## `PlayFXAnimID`. Nothing is drawn here: the animation is written down as an
 ## event at its own place in the turn and the screen is what spends frames on it.
+##
+## [param on_opponent] is `PlayOpponentBattleAnim`'s pair of
+## `BattleCommand_SwitchTurn` calls: the same event with `hBattleTurn` inverted
+## for the length of the animation, so it plays on the target rather than on
+## whoever is acting.
 static func _play_fx_anim(
-	turn: Gen2Turn, index: int, after_anim: int, restore_user_pic: bool = false
+	turn: Gen2Turn, index: int, after_anim: int, restore_user_pic: bool = false,
+	on_opponent: bool = false
 ) -> void:
+	var enemy_turn: bool = turn.side == Gen2Battle.ENEMY
 	turn.emit(Gen2Battle.ANIMATION, {
 		"index": index,
 		"param": turn.battle.battle_anim_param,
 		"after_anim": after_anim,
-		"enemy_turn": turn.side == Gen2Battle.ENEMY,
+		"enemy_turn": enemy_turn != on_opponent,
 		"effectiveness": turn.effectiveness,
 		"restore_user_pic": restore_user_pic,
 	})
+
+
+## `PlayOpponentBattleAnim`, the fifth route an animation reaches the screen by
+## and the only one that is not the move's own: `wFXAnimID` set from `de`,
+## `wBattleAfterAnim` cleared, and `PlayBattleAnim` run between two
+## `BattleCommand_SwitchTurn` calls.
+##
+## `wBattleAnimParam` is not written, so whatever the move's own animation left
+## stands, the way it does across [method _animate_current_move].
+##
+## Five commands call it, all secondary-effect ones, and all five ids are past
+## `wFXAnimID`'s low byte: `BattleAnimRunScript` therefore takes `.not_move`,
+## which skips `CheckBattleScene`, both hud calls and the after-anim. A status
+## animation plays with the battle-scene option turned off.
+static func _play_opponent_battle_anim(turn: Gen2Turn, index: int) -> void:
+	_play_fx_anim(turn, index, Gen2BattleAnimPlayer.AFTER_ANIM_NONE, false, true)
 
 
 ## `BattleCommand_MoveAnimNoSub`: the damage flash aimed at whoever was hit, the
@@ -1643,6 +1682,34 @@ static func _status_move_animates(turn: Gen2Turn, flag: int) -> bool:
 		Gen2Status.PARALYSIS:
 			return turn.effect() == Gen2MoveEffect.PARALYZE
 	return false
+
+
+## Which status animation `PlayOpponentBattleAnim` plays on the target, or -1.
+##
+## The four secondary-effect commands each play one, and the primary status
+## moves' own commands play none: `BattleCommand_SleepTarget` ends at
+## `AnimateCurrentMove`, `BattleCommand_Poison`'s `.apply_poison` is
+## `AnimateCurrentMove`, `PoisonOpponent`, `RefreshBattleHuds`, and
+## `BattleCommand_Paralyze` the same. Toxic reaches that same `.apply_poison`, so
+## [method _toxic_target] plays none either.
+##
+## That makes this the exact inverse of [method _status_move_animates] rather
+## than a second rule: burn and freeze have no status move of their own to be the
+## primary shape of, and sleep is the one status whose primary command is the
+## only shape there is.
+static func _status_target_anim(turn: Gen2Turn, flag: int) -> int:
+	if _status_move_animates(turn, flag):
+		return -1
+	match flag:
+		Gen2Status.POISON:
+			return Gen2BattleAnimPlayer.ANIM_PSN
+		Gen2Status.BURN:
+			return Gen2BattleAnimPlayer.ANIM_BRN
+		Gen2Status.FREEZE:
+			return Gen2BattleAnimPlayer.ANIM_FRZ
+		Gen2Status.PARALYSIS:
+			return Gen2BattleAnimPlayer.ANIM_PAR
+	return -1
 
 
 ## `AnimateCurrentMove`, which is `LoadMoveAnim` between a `lowersub` and a
