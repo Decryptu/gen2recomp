@@ -2,6 +2,11 @@ extends GutTest
 
 ## World state has a JSON-safe representation independent of the map cache.
 
+## ENGINE_FLYPOINT_VERMILION's Crystal index (constants/engine_flags.asm). Named
+## here rather than on Gen2WorldState because nothing in game/ reads a flypoint;
+## the story walk does, and it holds Crystal indices.
+const FLYPOINT_VERMILION: int = 58
+
 
 func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	var state := Gen2WorldState.new(
@@ -164,6 +169,54 @@ func test_is_crystal_profile_matches_the_game_id_and_defaults_true_for_no_data()
 	var silver_data := GameData.new()
 	silver_data.id = &"silver"
 	assert_false(Gen2WorldState.is_crystal_profile(silver_data))
+
+
+## engine_flag() is the same one-index shift the named *_GOLD_SILVER constants
+## spell out, for a caller holding a Crystal index and no pair. The three named
+## pairs are what pin the shift's direction here: a derived answer that
+## disagreed with any of them would be wrong in the same way twice.
+func test_engine_flag_maps_a_crystal_index_onto_the_gold_silver_table() -> void:
+	for index: int in [0, 3, 4, 15, Gen2WorldState.ENGINE_MOBILE_SYSTEM - 1]:
+		assert_eq(Gen2WorldState.engine_flag(index, true), index)
+		assert_eq(Gen2WorldState.engine_flag(index, false), index)
+
+	## ENGINE_MOBILE_SYSTEM is the entry pokegold does not ship, so it maps onto
+	## nothing there; -1 is what is_engine_flag_active() reads as inactive.
+	assert_eq(
+		Gen2WorldState.engine_flag(Gen2WorldState.ENGINE_MOBILE_SYSTEM, true),
+		Gen2WorldState.ENGINE_MOBILE_SYSTEM
+	)
+	assert_eq(
+		Gen2WorldState.engine_flag(Gen2WorldState.ENGINE_MOBILE_SYSTEM, false), -1
+	)
+
+	for pair: Array in [
+		[Gen2WorldState.ENGINE_ROCKETS_IN_RADIO_TOWER,
+			Gen2WorldState.ENGINE_ROCKETS_IN_RADIO_TOWER_GOLD_SILVER],
+		[Gen2WorldState.ENGINE_STRENGTH_ACTIVE,
+			Gen2WorldState.ENGINE_STRENGTH_ACTIVE_GOLD_SILVER],
+		[Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED,
+			Gen2WorldState.ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER],
+	]:
+		assert_eq(Gen2WorldState.engine_flag(pair[0], true), pair[0])
+		assert_eq(Gen2WorldState.engine_flag(pair[0], false), pair[1])
+
+	for badge: int in Gen2WorldState.BADGE_ENGINE_FLAGS.size():
+		assert_eq(
+			Gen2WorldState.engine_flag(Gen2WorldState.badge_flag(badge, true), false),
+			Gen2WorldState.badge_flag(badge, false)
+		)
+
+	## The read a caller actually makes: a Crystal index resolved on the Gold
+	## table must find a Gold write and miss a Crystal one.
+	var state := Gen2WorldState.new()
+	state.set_engine_flag(Gen2WorldState.engine_flag(FLYPOINT_VERMILION, false))
+	assert_true(state.is_engine_flag_active(
+		Gen2WorldState.engine_flag(FLYPOINT_VERMILION, false)
+	))
+	assert_false(state.is_engine_flag_active(
+		Gen2WorldState.engine_flag(FLYPOINT_VERMILION, true)
+	))
 
 
 func test_badge_flags_survive_round_trip_and_daily_or_map_reload_resets() -> void:

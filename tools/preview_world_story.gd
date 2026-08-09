@@ -570,6 +570,9 @@ const LAVENDER_RADIO_TOWER_DOOR: Vector2i = Vector2i(14, 5)
 const LAVENDER_RADIO_TOWER_EXIT: Vector2i = Vector2i(2, 7)
 const RADIO_TOWER_GENTLEMAN_FACE: Vector2i = Vector2i(9, 2)
 const ENGINE_EXPN_CARD: int = 3
+## `MeetMomScript`'s own `setflag ENGINE_POKEGEAR`, four in both pins and so in
+## wPokegearFlags with the card above, which is what says the scene really ran.
+const ENGINE_POKEGEAR: int = 4
 
 ## Fuchsia City, four connected routes south of Lavender with one gate at the
 ## end (`data/maps/attributes.asm`, `maps/Route15.asm` warps 1 and 2 into
@@ -991,21 +994,36 @@ func _story_path(data: GameData) -> Dictionary:
 		return {"ok": false, "reason": "stair warp failed", "transition": _transition_value(transition)}
 	path.append({"map": _map_value(world), "cell": _cell_value(world)})
 
-	var mom_results: Array = []
-	for event_cell: Vector2i in [Vector2i(8, 4), Vector2i(9, 4)]:
-		world.player_cell = event_cell
-		mom_results = world.dispatch_script_events(event_cell)
-		if not mom_results.is_empty():
-			break
-	var mom_run: Dictionary = _drain_story(world, mom_results, save, random)
+	# The stair warp lands on (9,0) and the two profiles run Mom from opposite
+	# ends (`maps/PlayersHouse1F.asm`). Gold and Silver ship no coord event at
+	# all: scene 0 is `PlayersHouse1FMeetMomScene`, an `sdefer MeetMomScript`, and
+	# the script's own first command walks the player downstairs. Crystal's two
+	# scene scripts are noops and its `(8,4)`/`(9,4)` coord events are the
+	# trigger, so there the walk has to go down to one.
+	var mom_run: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	if Gen2WorldState.is_crystal_profile(data):
+		var stepped: Dictionary = _coord_event_step(
+			world, Vector2i(9, 3), Vector2i(9, 4), save, random, data
+		)
+		if not bool(stepped.get("ok", false)):
+			return {
+				"ok": false, "path": path,
+				"reason": "the Mom coord event failed: %s" % stepped.get("reason", ""),
+			}
+		mom_run = stepped.get("run", mom_run)
 	path.append({
 		"step": "players_house_1f_mom",
 		"trigger_cell": _cell_value(world),
 		"run": mom_run,
+		"pokegear": world.state.is_engine_flag_active(ENGINE_POKEGEAR),
 		"clock": world.world_clock(),
 		"dst_enabled": world.daylight_saving_time_enabled(),
 		"engine_flags": world.state.engine_flags(),
 	})
+	if not world.state.is_engine_flag_active(ENGINE_POKEGEAR):
+		return {"ok": false, "path": path, "reason": "Mom never handed over the Pokegear"}
 
 	var town_warp: Dictionary = _warp_to(world.current_map, 24, 4)
 	if town_warp.is_empty():
