@@ -35,7 +35,11 @@ const CAVE_MOUTH: Vector2i = Vector2i(34, 7)
 const SNORLAX_CELL: Vector2i = Vector2i(34, 8)
 const SNORLAX_OBJECT: int = 4
 const TALK_FROM: Vector2i = Vector2i(34, 10)
-const CITY_CELLS: int = 319
+## One cell fewer than this pin held until 2026-08-10, for the reason
+## `tools/validate_celadon.gd`'s own count records: (26,7) carries a
+## `SPRITE_MACHOP` object, which this build cannot draw and which used to be
+## walked through as well.
+const CITY_CELLS: int = 318
 
 ## engine/events/specials.asm's SnorlaxAwake.ProximityCoords, in source order:
 ## every walkable cell adjacent to the two-by-two body, which its own comments

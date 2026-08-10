@@ -63,7 +63,13 @@ var event_script: int = 0
 var event_flag: int = 0
 var trainer_data: Dictionary = {}
 var facing: int = Gen2WorldSprite.FACING_DOWN
+## The `Facings` frame this object is drawn on, 0 to 3: two standing and two
+## walking. Derived from step_frame; see walk_frame().
 var frame: int = 0
+## OBJECT_STEP_FRAME. `SetFacingStepAction` (engine/overworld/map_object_action.asm)
+## increments it once per hardware frame of a step and masks it to four bits, and
+## the drawn frame is its two high bits, so the drawing changes every four frames.
+var step_frame: int = 0
 var active: bool = false
 var deleted: bool = false
 var emote_id: int = -1
@@ -75,6 +81,16 @@ var emote_remaining: int = 0
 var step_direction: Vector2i = Vector2i.ZERO
 var step_frames_total: int = 0
 var step_frames_remaining: int = 0
+## The rest of a scripted movement stream, still to be drawn. An applymovement
+## commits every cell of its path at once, so the whole path is behind the
+## committed cell until these drain; each entry is one `{direction, frames}`
+## step of it, in stream order.
+var queued_steps: Array = []
+## True while the trail above belongs to a script rather than to the movement
+## templates, which is what tells the two drivers apart:
+## Gen2WorldAPI.advance_object_steps() decides movement and is refused while a
+## script runs, advance_scripted_steps() only draws and is not.
+var scripted_steps: bool = false
 ## Frames this object waits before its movement template decides again. The
 ## source keeps this in OBJECT_STEP_DURATION while the object sits in
 ## STEP_TYPE_SLEEP (engine/overworld/map_objects.asm, StepFunction_Sleep).
@@ -263,6 +279,23 @@ func tick_emote() -> bool:
 ## caller-side so a slow trainer approach and an ordinary walk can share this
 ## helper without this class knowing which one is running.
 func start_step(direction: Vector2i, frames: int) -> void:
+	queued_steps.clear()
+	scripted_steps = false
+	_begin_step(direction, frames)
+
+
+## Adds one step of a scripted stream to the trail. The first one starts at
+## once and the rest wait their turn, so a five-step applymovement is drawn as
+## five steps rather than as one arrival.
+func queue_step(direction: Vector2i, frames: int) -> void:
+	scripted_steps = true
+	if step_frames_remaining > 0:
+		queued_steps.append({"direction": direction, "frames": maxi(0, frames)})
+		return
+	_begin_step(direction, frames)
+
+
+func _begin_step(direction: Vector2i, frames: int) -> void:
 	step_direction = direction
 	step_frames_total = maxi(0, frames)
 	step_frames_remaining = step_frames_total
@@ -274,12 +307,32 @@ func start_step(direction: Vector2i, frames: int) -> void:
 func tick_step() -> bool:
 	if step_frames_remaining <= 0:
 		return false
+	advance_walk_frame()
 	step_frames_remaining -= 1
+	if step_frames_remaining <= 0:
+		if queued_steps.is_empty():
+			scripted_steps = false
+		else:
+			var next: Dictionary = queued_steps.pop_front()
+			_begin_step(next["direction"], int(next["frames"]))
 	return true
 
 
 func is_stepping() -> bool:
 	return step_frames_remaining > 0
+
+
+## One hardware frame of `SetFacingStepAction`. The counter is never cleared
+## here: `EndSpriteMovement` is what zeroes it on the cartridge, and every step
+## duration is a multiple of four, so a stopped object is already standing on
+## frame 0 or 2 without one. Frames 1 and 3 are the two walking drawings.
+func advance_walk_frame() -> void:
+	step_frame = (step_frame + 1) & 0x0F
+	frame = walk_frame()
+
+
+func walk_frame() -> int:
+	return (step_frame >> 2) & 3
 
 
 ## Starts the wait a movement template takes before deciding again. The source
@@ -305,20 +358,23 @@ func is_idle() -> bool:
 ## Pixel offset from the committed cell back toward where the step began,
 ## shrinking to zero as step_frames_remaining reaches zero.
 func step_offset(cell_pixels: int) -> Vector2i:
-	if step_frames_remaining <= 0 or step_frames_total <= 0:
-		return Vector2i.ZERO
-	var behind: int = int(round(
-		float(step_frames_remaining) / float(step_frames_total) * float(cell_pixels)
-	))
-	return Vector2i(-step_direction.x, -step_direction.y) * behind
+	var offset: Vector2 = step_offset_cells() * float(cell_pixels)
+	return Vector2i(int(round(offset.x)), int(round(offset.y)))
 
 
-## The same offset in fractional walk cells, from one cell behind the committed
-## cell down to zero. A renderer that does not think in hardware pixels reads
+## The same offset in fractional walk cells, from where the sprite is drawn back
+## to the committed cell. A renderer that does not think in hardware pixels reads
 ## this instead of step_offset(), exactly as a renderer reads the player's
 ## Gen2WorldAPI.player_step_offset_cells().
+##
+## One in-flight step is at most a cell behind. A scripted stream commits its
+## whole path at once, so its trail is as many cells behind as it has left to
+## draw.
 func step_offset_cells() -> Vector2:
-	if step_frames_remaining <= 0 or step_frames_total <= 0:
-		return Vector2.ZERO
-	var fraction: float = float(step_frames_remaining) / float(step_frames_total)
-	return Vector2(-step_direction.x, -step_direction.y) * fraction
+	var behind := Vector2.ZERO
+	for entry: Dictionary in queued_steps:
+		behind -= Vector2(entry["direction"] as Vector2i)
+	if step_frames_remaining > 0 and step_frames_total > 0:
+		behind -= Vector2(step_direction) \
+			* (float(step_frames_remaining) / float(step_frames_total))
+	return behind

@@ -282,6 +282,8 @@ all three games unless its row says otherwise:
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
+| `preview_collision.gd <game> <group> <number> <png>` | one whole map as drawn, with every walk cell's permission checkerboarded over it: red is wall, blue is water. For a report that the player can stand where they should not |
+| `preview_overworld_sprites.gd <game> <png>` | every overworld sprite in a cache as one contact sheet, four facings across by four frames down, for eyeballing offsets, mirroring and frame order |
 | `validate_story_map_ids.gd` | the four maps the story route names by id rather than by cell, each against the map its number holds on the other profile |
 | `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |

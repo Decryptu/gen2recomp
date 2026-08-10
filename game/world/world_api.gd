@@ -35,6 +35,25 @@ const STEP_FRAMES_NPC_WALK: int = 16
 ## MovementFunction_Strength calls InitStep with `direction | 0`, so a pushed
 ## boulder indexes that same slow row and slides at a wandering NPC's speed.
 const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
+## StepVectors' fast row: 4 pixels per frame for 4 frames, which the bike-speed
+## movement commands reach through `STEP_BIKE`.
+const STEP_FRAMES_FAST: int = 4
+## How long each scripted step command takes, from the `STEP_*` speed it passes
+## to `InitStep` (engine/overworld/movement.asm) and that row of `StepVectors`.
+## `turn_step` is the one that indexes no row: `TurnStep` sets STEP_TYPE_TURN,
+## whose two halves are two frames each (`StepFunction_Turn`).
+const SCRIPTED_STEP_FRAMES: Dictionary = {
+	&"turn_step": 4,
+	&"slow_step": STEP_FRAMES_NPC_WALK,
+	&"step": STEP_FRAMES_WALK,
+	&"big_step": STEP_FRAMES_FAST,
+	&"slow_slide_step": STEP_FRAMES_NPC_WALK,
+	&"slide_step": STEP_FRAMES_WALK,
+	&"fast_slide_step": STEP_FRAMES_FAST,
+	&"slow_jump_step": STEP_FRAMES_NPC_WALK,
+	&"jump_step": STEP_FRAMES_WALK,
+	&"fast_jump_step": STEP_FRAMES_FAST,
+}
 ## RandomStepDuration_Slow and _Fast mask the source random byte before storing
 ## it as the wait preceding the next movement decision.
 const IDLE_MASK_SLOW: int = 0x7F
@@ -152,9 +171,17 @@ var _player_step_direction: Vector2i = Vector2i.ZERO
 var _player_step_frames_total: int = 0
 var _player_step_frames_remaining: int = 0
 var _player_step_accumulator: float = 0.0
+## The rest of a scripted movement stream the player still has to be drawn
+## walking, the way Gen2WorldObject.queued_steps holds an object's.
+var _player_queued_steps: Array = []
+## The player's own OBJECT_STEP_FRAME. See Gen2WorldObject.step_frame.
+var _player_step_frame: int = 0
 ## Real time banked toward the next hardware frame of object movement, held
 ## beside the player's own accumulator so the two stay in phase after a stall.
 var _object_step_accumulator: float = 0.0
+## The same for the presentation trail a scripted movement leaves, which is
+## drained by its own driver because that one runs while a script does.
+var _scripted_step_accumulator: float = 0.0
 ## Read-only mirror of the selected save's party, refreshed by the screen
 ## whenever the save or party changes. Gen2WorldAPI does not own a save, so
 ## this stays optional; a script that reads it while empty fails rather than
@@ -390,14 +417,40 @@ func player_step_in_progress() -> bool:
 ## from 1.0 cell behind player_cell down to zero, so a renderer that does not
 ## think in hardware pixels (a 3D or free-roam mod) can still smooth against
 ## it without reverse-engineering CELL_PIXELS.
+##
+## A scripted movement commits its whole path at once, so while its trail drains
+## this is as many cells behind as the player has left to be drawn walking.
 func player_step_offset_cells() -> Vector2:
-	if _player_step_frames_remaining <= 0 or _player_step_frames_total <= 0:
-		return Vector2.ZERO
-	var fraction: float = float(_player_step_frames_remaining) / float(_player_step_frames_total)
-	return Vector2(-_player_step_direction.x, -_player_step_direction.y) * fraction
+	var behind := Vector2.ZERO
+	for entry: Dictionary in _player_queued_steps:
+		behind -= Vector2(entry["direction"] as Vector2i)
+	if _player_step_frames_remaining > 0 and _player_step_frames_total > 0:
+		behind -= Vector2(_player_step_direction) \
+			* (float(_player_step_frames_remaining) / float(_player_step_frames_total))
+	return behind
+
+
+## The player's `Facings` frame, 0 to 3. `Gen2WorldObject.walk_frame()` for an
+## object; the player's own step is paced here rather than on a record.
+func player_walk_frame() -> int:
+	return (_player_step_frame >> 2) & 3
 
 
 func _start_player_step(direction: Vector2i, frames: int) -> void:
+	_player_queued_steps.clear()
+	_begin_player_step(direction, frames)
+
+
+## One step of a scripted stream, behind whatever the player is already walking.
+## See Gen2WorldObject.queue_step().
+func _queue_player_step(direction: Vector2i, frames: int) -> void:
+	if _player_step_frames_remaining > 0:
+		_player_queued_steps.append({"direction": direction, "frames": maxi(0, frames)})
+		return
+	_begin_player_step(direction, frames)
+
+
+func _begin_player_step(direction: Vector2i, frames: int) -> void:
 	_player_step_direction = direction
 	_player_step_frames_total = maxi(0, frames)
 	_player_step_frames_remaining = _player_step_frames_total
@@ -408,6 +461,8 @@ func _clear_player_step() -> void:
 	_player_step_frames_total = 0
 	_player_step_frames_remaining = 0
 	_player_step_accumulator = 0.0
+	_player_queued_steps.clear()
+	_player_step_frame = 0
 
 
 ## Advances the player's walk-step offset by real elapsed time, at
@@ -426,7 +481,11 @@ func advance_player_step(delta: float) -> bool:
 	while _player_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS \
 		and _player_step_frames_remaining > 0:
 		_player_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+		_player_step_frame = (_player_step_frame + 1) & 0x0F
 		_player_step_frames_remaining -= 1
+		if _player_step_frames_remaining <= 0 and not _player_queued_steps.is_empty():
+			var next: Dictionary = _player_queued_steps.pop_front()
+			_begin_player_step(next["direction"], int(next["frames"]))
 		changed = true
 	return changed
 
@@ -1817,10 +1876,29 @@ func event_flag_active(flag: int) -> bool:
 	return state.is_event_flag_active(flag)
 
 
+## The objects a renderer can draw: active, not deleted, and with graphics this
+## build imported. Drawing is the only thing that may ask for a sprite; see
+## [method active_objects] for everything else.
 func visible_objects() -> Array:
 	var out: Array = []
 	for object: Gen2WorldObject in objects:
 		if object.active and not object.deleted and object.sprite != null:
+			out.append(object)
+	return out
+
+
+## Every object that is really there, whether or not this build can draw it.
+##
+## `ReadObjectEvents` builds `wMapObjects` from the map's own event data and
+## `LoadSpriteGFX` fills VRAM afterwards, so on the cartridge an object exists
+## before, and independently of, its graphics. Collision, interaction, sight and
+## NPC movement all walk the object table and none of them asks what loaded.
+## Keeping the two apart here is what stops a missing sprite from quietly
+## deleting an object out of the world as well as off the screen.
+func active_objects() -> Array:
+	var out: Array = []
+	for object: Gen2WorldObject in objects:
+		if object.active and not object.deleted:
 			out.append(object)
 	return out
 
@@ -1832,8 +1910,7 @@ func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 	for object: Gen2WorldObject in objects:
 		if not object.occupies(cell) or object.deleted or (visible_only and not object.active):
 			continue
-		if object.sprite != null:
-			return object
+		return object
 	return null
 
 
@@ -2979,16 +3056,17 @@ func _apply_object_movement(event: Dictionary) -> Array:
 		if kind == &"turn_away":
 			object.apply_direction(-_movement_direction(int(command.get("direction", 0))))
 			continue
-		if kind in [
-			&"turn_step", &"slow_step", &"step", &"big_step", &"slow_slide_step",
-			&"slide_step", &"fast_slide_step", &"slow_jump_step", &"jump_step",
-			&"fast_jump_step",
-		]:
+		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			object.apply_direction(direction)
 			var destination: Vector2i = object.cell + direction
 			if _cell_in_bounds(destination):
 				object.cell = destination
+				# The cell commits here, as it does for every other step in this
+				# runtime; only the drawing trails. A stream applies in one call,
+				# so the whole path is queued and drawn a step at a time by
+				# advance_scripted_steps().
+				object.queue_step(direction, int(SCRIPTED_STEP_FRAMES[kind]))
 			else:
 				generated.append({
 					"type": &"movement_blocked", "object_index": object_index,
@@ -3062,16 +3140,13 @@ func _apply_player_movement(event: Dictionary) -> Array:
 			var away: Vector2i = -_movement_direction(int(command.get("direction", 0)))
 			player_facing = _facing_for_direction(away)
 			continue
-		if kind in [
-			&"turn_step", &"slow_step", &"step", &"big_step", &"slow_slide_step",
-			&"slide_step", &"fast_slide_step", &"slow_jump_step", &"jump_step",
-			&"fast_jump_step",
-		]:
+		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			player_facing = _facing_for_direction(direction)
 			var destination: Vector2i = player_cell + direction
 			if _cell_in_bounds(destination):
 				player_cell = destination
+				_queue_player_step(direction, int(SCRIPTED_STEP_FRAMES[kind]))
 			else:
 				generated.append({
 					"type": &"movement_blocked", "player": true, "cell": destination,
@@ -3449,7 +3524,7 @@ func can_object_walk_to(
 		return false
 	for object: Gen2WorldObject in objects:
 		if object != moving and object.active and not object.deleted \
-			and object.sprite != null and object.cell == cell:
+			and object.cell == cell:
 			return false
 	return cell != player_cell
 
@@ -3523,7 +3598,12 @@ func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
 	while _object_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
 		_object_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
 		for object: Gen2WorldObject in objects:
-			if not object.active or object.deleted or object.sprite == null:
+			if not object.active or object.deleted:
+				continue
+			# A scripted trail belongs to advance_scripted_steps(), which runs
+			# while a script does. Draining it here as well would walk it at
+			# twice the speed on every frame both drivers run.
+			if object.scripted_steps:
 				continue
 			# A step in flight is drained whatever put it there, so a pushed
 			# boulder slides even though its template never decides anything.
@@ -3550,6 +3630,37 @@ func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
 				changed = true
 			elif object.facing != facing_before:
 				_remember_object_position(object)
+				changed = true
+	return changed
+
+
+## Drains the presentation trail an `applymovement` left on the objects it moved,
+## and nothing else.
+##
+## Separate from [method advance_object_steps] because that one decides movement
+## and a caller stops calling it while a script runs, which is exactly when a
+## scripted stream needs drawing. This decides nothing, rolls nothing and writes
+## no cell: every cell the stream names committed when it was applied. Returns
+## true when something a renderer draws moved.
+func advance_scripted_steps(delta: float) -> bool:
+	if delta <= 0.0 or objects.is_empty():
+		return false
+	var walking: Array = []
+	for object: Gen2WorldObject in objects:
+		if object.scripted_steps and not object.deleted:
+			walking.append(object)
+	if walking.is_empty():
+		_scripted_step_accumulator = 0.0
+		return false
+	_scripted_step_accumulator = minf(
+		_scripted_step_accumulator + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
+	)
+	var changed: bool = false
+	while _scripted_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
+		_scripted_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+		for object: Gen2WorldObject in walking:
+			if object.tick_step():
 				changed = true
 	return changed
 
@@ -4007,8 +4118,9 @@ func _apply_map(
 	_apply_map_setup_player_state()
 	_clear_player_step()
 	# _load_objects() rebuilds every record, so in-flight object steps end with
-	# the objects that owned them; only the shared frame accumulator survives.
+	# the objects that owned them; only the shared frame accumulators survive.
 	_object_step_accumulator = 0.0
+	_scripted_step_accumulator = 0.0
 	_load_objects()
 	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
 	# player who stands still does not watch them cross Johto.
@@ -4102,7 +4214,7 @@ func _find_sight_request() -> Dictionary:
 	var bank: int = int(current_map.events.get("bank", 0))
 	var rows: Array = current_map.events.get("objects", [])
 	for object: Gen2WorldObject in objects:
-		if not object.active or object.sprite == null \
+		if not object.active \
 			or object.object_type != Gen2WorldObject.OBJECTTYPE_TRAINER \
 			or object.sight_range <= 0 or object.event_script <= 0:
 			continue

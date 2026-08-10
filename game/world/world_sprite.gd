@@ -15,6 +15,11 @@ const FACING_UP: int = 1
 const FACING_LEFT: int = 2
 const FACING_RIGHT: int = 3
 
+## Tiles in one half of a walking or standing sprite's strip: three facings of
+## four. It is what `OverworldSprites` records as the whole length, because
+## `GetUsedSprite` copies that many twice; see [method frame_tile_offset].
+const WALKING_HALF_TILES: int = 12
+
 ## data/sprites/player_sprites.asm's ChrisStateSprites and KrisStateSprites, the
 ## wPlayerState to sprite lookup GetPlayerSprite walks. ChrisStateSprites is
 ## identical in both pins and the numbers themselves
@@ -74,16 +79,42 @@ func is_walking() -> bool:
 	return sprite_type == TYPE_WALKING
 
 
-## Returns the first tile of a 4-tile frame in the source strip. The original
-## data has down, up and left facings in four-frame groups; right reuses left
-## with a horizontal flip in the renderer.
+## Returns the first tile of a 4-tile frame in the source strip.
+##
+## A walking sprite's strip is two halves of twelve tiles: down, up and left
+## standing, then the same three walking. `GetUsedSprite`
+## (engine/overworld/overworld.asm) copies the first half to `vTiles0` and the
+## second to `vTiles1`, which is the `$80` the walking rows of `Facings`
+## (data/sprites/facings.asm) add to the object's own base tile.
+##
+## `Facings` gives each direction four frames: 0 and 2 are the standing drawing,
+## 1 and 3 the walking one. Right reuses left, flipped by the renderer, and so
+## does frame 3 of down and up: `FacingStepDown3` is `FacingStepDown1` with
+## `OAM_XFLIP` on every tile and its two columns swapped.
 func frame_tile_offset(facing: int, frame: int) -> int:
 	if tiles <= 4 or sprite_type == TYPE_STILL:
 		return 0
 	var facing_index: int = clampi(facing, FACING_DOWN, FACING_RIGHT)
 	if facing_index == FACING_RIGHT:
 		facing_index = FACING_LEFT
-	return facing_index * 4 + clampi(frame, 0, 3)
+	var offset: int = facing_index * 4
+	if is_walking_frame(frame) and tiles >= WALKING_HALF_TILES * 2:
+		offset += WALKING_HALF_TILES
+	return offset
+
+
+## Whether [param frame] is one of the two walking drawings rather than one of
+## the two standing ones.
+static func is_walking_frame(frame: int) -> bool:
+	return (clampi(frame, 0, 3) & 1) == 1
+
+
+## Whether the whole 16x16 image is mirrored: right always is, since it reuses
+## left, and so is frame 3 of down and up.
+static func frame_is_mirrored(facing: int, frame: int) -> bool:
+	if facing == FACING_RIGHT:
+		return true
+	return clampi(frame, 0, 3) == 3 and facing in [FACING_DOWN, FACING_UP]
 
 
 ## Composes one 16x16 object image from the source's horizontal tile strip.
@@ -118,6 +149,6 @@ static func image_for(
 					color.a = 0.0
 				image.set_pixel(destination_x + x, destination_y + y, color)
 
-	if facing == FACING_RIGHT:
+	if frame_is_mirrored(facing, frame):
 		image.flip_x()
 	return image

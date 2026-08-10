@@ -177,6 +177,10 @@ var _frame_elapsed: float = 0.0
 ## that read it. Only the world path supplies one; the development drivers below
 ## leave [Gen2Battle] at its own midday default.
 var _time_of_day: int = Gen2WorldPalette.TIME_DAY
+## Where the battle is being fought, for a renderer that draws the place rather
+## than a white field. Null unless the caller supplied one; see
+## [method set_world_context].
+var _world_context: Gen2BattleWorldContext = null
 var _capture_balls: Array[int] = []
 var _capture_quantities: Dictionary = {}
 var _capture_ball_index: int = 0
@@ -1052,6 +1056,21 @@ func battle_snapshot() -> Dictionary:
 ## started; a battle begun without it stands at midday.
 func set_time_of_day(value: int) -> void:
 	_time_of_day = value
+
+
+## Supplies where the battle is being fought, for a renderer that stages it on
+## the map. Set before the scene enters the tree, the way the data source is:
+## the renderer is built in _ready() and is handed this straight after
+## [method Gen2BattleRenderer.set_battle_data]. Nothing in the battle itself
+## reads it.
+func set_world_context(context: Gen2BattleWorldContext) -> void:
+	_world_context = context
+	_push_world_context()
+
+
+## What a renderer was handed, or null for a battle started outside the world.
+func world_context() -> Gen2BattleWorldContext:
+	return _world_context
 
 
 ## Supplies the wild battle with the supported balls currently owned by the
@@ -2185,7 +2204,19 @@ func _build_renderer() -> void:
 		_screen.native_size_changed.connect(_on_native_size_changed)
 		_on_native_size_changed(_screen.native_size())
 	_renderer_ready = bool(_renderer.set_battle_data(_data))
+	_push_world_context()
 	_push_view()
+
+
+## Hands the renderer where the battle is being fought, when the caller supplied
+## it and the renderer asked for it. After set_battle_data() and before the first
+## view, so a renderer that builds the place once has it before it draws; a
+## renderer swapped in mid-battle gets it again here.
+func _push_world_context() -> void:
+	if not _renderer_ready or _world_context == null:
+		return
+	if _renderer.has_method(Gen2ModHost.RENDERER_WORLD_CONTEXT_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_WORLD_CONTEXT_METHOD, _world_context)
 
 
 func _on_native_size_changed(size_pixels: Vector2i) -> void:

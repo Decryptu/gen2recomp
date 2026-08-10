@@ -59,7 +59,12 @@ const GYM_DOOR_APPROACH: Vector2i = Vector2i(10, 30)
 const GYM_TREE: Vector2i = Vector2i(28, 35)
 const GYM_TREE_APPROACH: Vector2i = Vector2i(28, 34)
 const GYM_TREE_RETURN: Vector2i = Vector2i(27, 35)
-const CITY_CELLS: int = 619
+## One cell fewer than this pin held until 2026-08-10. The cell is (27,11),
+## where `maps/CeladonCity.asm` stands a `SPRITE_POLIWAG` object: a Pokemon
+## sprite, which this build cannot draw yet, and which stopped occupying its
+## cell as well until Gen2WorldAPI.object_at() was separated from
+## visible_objects(). It blocks on the cartridge, so 618 is the real count.
+const CITY_CELLS: int = 618
 const GYM_YARD_CELLS: int = 70
 
 ## engine/overworld/tile_events.asm's CheckCutCollision entry for a tree, the

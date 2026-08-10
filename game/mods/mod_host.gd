@@ -45,6 +45,12 @@ const RENDERER_SURFACE_METHOD: String = "uses_hardware_viewport"
 ## created and whenever the window changes it. Only reached by a renderer that
 ## asked for the native layer. Shared by both renderer kinds.
 const RENDERER_RESIZE_METHOD: String = "set_native_size"
+## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
+## per battle, before the first [code]set_view[/code], when the battle was
+## entered from the world. It is where the fight is happening: a renderer staging
+## it on the map needs that, and one drawing the cartridge's white field ignores
+## it. A development battle started outside the world passes null.
+const RENDERER_WORLD_CONTEXT_METHOD: String = "set_world_context"
 ## Optional, world renderers only. Offered every input event the world screen
 ## chose not to use, so a renderer can own camera pitch, first person or
 ## free-roam. Answering true consumes the event.

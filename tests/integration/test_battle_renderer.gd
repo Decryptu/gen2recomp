@@ -92,6 +92,65 @@ func refresh() -> void:
 	assert_eq(int(view.get("player_max_hp", -1)), 4)
 
 
+## Where the fight is happening, for a renderer that stages it on the map. It is
+## optional on both sides: the screen only calls a renderer that defines it, and
+## a battle started outside the world supplies none.
+func test_a_registered_renderer_is_handed_the_world_the_battle_was_entered_from() -> void:
+	var script: GDScript = _stub_script("""extends Control
+
+var context = null
+
+func set_battle_data(_data) -> bool:
+	return true
+
+func set_world_context(value) -> void:
+	context = value
+
+func set_view(_view: Dictionary) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+""")
+	assert_true(Gen2ModHost.instance().register_battle_renderer(&"staged", script)["ok"])
+	assert_true(Gen2ModHost.instance().select_battle_renderer(&"staged")["ok"])
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(_data, 1, 1, Vector2i(4, 4))
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	_battle_screen = packed.instantiate() as Gen2BattleScreen
+	_battle_screen.set_data(_data)
+	_battle_screen.set_world_context(
+		Gen2BattleWorldContext.capture(world, Gen2WorldPalette.TIME_NIGHT)
+	)
+	add_child(_battle_screen)
+	await get_tree().process_frame
+
+	assert_true(_battle_screen.is_ready())
+	var context: Gen2BattleWorldContext = _battle_screen._renderer.get("context")
+	assert_not_null(context, "the renderer defines the method, so it is called")
+	assert_eq(context.map_id, Vector2i(1, 1))
+	assert_eq(context.player_cell, Vector2i(4, 4))
+	assert_eq(context.player_facing, Gen2WorldSprite.FACING_LEFT)
+	assert_eq(context.time_of_day, Gen2WorldPalette.TIME_NIGHT)
+
+
+## The built-in renderer defines no such method and must still come up: the
+## cartridge's battle is a white field and has no place in it.
+func test_the_built_in_renderer_ignores_a_world_context() -> void:
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(_data, 1, 1, Vector2i(4, 4))
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	_battle_screen = packed.instantiate() as Gen2BattleScreen
+	_battle_screen.set_data(_data)
+	_battle_screen.set_world_context(Gen2BattleWorldContext.capture(world, 0))
+	add_child(_battle_screen)
+	await get_tree().process_frame
+
+	assert_true(_battle_screen.is_ready())
+	assert_false(_battle_screen._renderer.has_method("set_world_context"))
+	assert_not_null(_battle_screen.world_context())
+
+
 func test_a_renderer_reporting_missing_data_leaves_the_screen_not_ready() -> void:
 	var script: GDScript = _stub_script("""extends Control
 
