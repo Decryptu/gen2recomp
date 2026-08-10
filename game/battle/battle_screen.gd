@@ -1953,6 +1953,18 @@ func _describe(event: Dictionary) -> String:
 			return "%s went to sleep!" % _battler_name(side)
 		Gen2Battle.RESTED:
 			return "%s fell asleep and became healthy!" % _battler_name(side)
+		Gen2Battle.BELL_CHIMED:
+			# `BellChimedText` names nobody, since the bell was heard by a party
+			# rather than by a Pokémon.
+			return "A bell chimed!"
+		Gen2Battle.NOTHING_HAPPENED:
+			return "But nothing happened."
+		Gen2Battle.MAGNITUDE:
+			return "Magnitude %d!" % int(event["magnitude"])
+		Gen2Battle.PRESENT_REFUSED:
+			return "%s refused the gift!" % _battler_name(int(event["target"]))
+		Gen2Battle.CRASHED:
+			return "%s kept going and crashed!" % _battler_name(side)
 		Gen2Battle.WEATHER_STARTED:
 			return WEATHER_STARTED_TEXT.get(int(event["weather"]), "")
 		Gen2Battle.WEATHER_CONTINUES:

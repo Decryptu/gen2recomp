@@ -206,6 +206,26 @@ const HP_ALREADY_FULL: StringName = &"hp_already_full"
 const WENT_TO_SLEEP: StringName = &"went_to_sleep"
 const RESTED: StringName = &"rested"
 
+## Heal Bell, whose text names nobody: `BellChimedText` is one line about a bell
+## and the party it cleared is the acting side's.
+const BELL_CHIMED: StringName = &"bell_chimed"
+
+## Splash, and the one line it exists to print.
+const NOTHING_HAPPENED: StringName = &"nothing_happened"
+
+## Magnitude, which says which of the seven it rolled before it lands.
+## [code]magnitude[/code] is the number in the line, 4 to 10, not the power.
+const MAGNITUDE: StringName = &"magnitude"
+
+## Present's fourth row against a target that is already at full health.
+## [code]target[/code] is who refused, since `PresentFailedText` names them.
+const PRESENT_REFUSED: StringName = &"present_refused"
+
+## A missed Jump Kick or Hi Jump Kick, which costs its user an eighth of the
+## damage it would have dealt. Carries the user's own `hp` and `max_hp`, the way
+## [constant RECOIL] does, so a screen moves the bar without asking again.
+const CRASHED: StringName = &"crashed"
+
 ## Bind, Wrap, Fire Spin, Clamp and Whirlpool: the target was bound, lost a
 ## sixteenth of its health to the binding, or was let go. [code]move[/code] on all
 ## three is the move that did it, which is what the cartridge's own texts name

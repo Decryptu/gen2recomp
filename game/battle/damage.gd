@@ -6,11 +6,14 @@ extends RefCounted
 ## Every step truncates and the steps are not commutative, so this is a sequence,
 ## not an expression: rearranging it changes the answer. Type matchups apply one
 ## type at a time with a truncation between, the critical multiplier lands before
-## the cap and minimum, Rollout's after type but before variation, and the random
-## spread after everything.
+## the cap and minimum, and the random spread after everything.
 ##
-## [method calculate] rolls the critical and the spread and hands both to the
-## deterministic [method calculate_with], which is what a test should target.
+## The cartridge spends four commands on it, and this file is those four:
+## [method damage_stats], [method damage_calc], [method stab_damage] and
+## [method apply_variation]. [Gen2EffectCommands] runs them one at a time,
+## because half a dozen effects write something between two of them.
+## [method calculate] and [method calculate_with] are the composition, for a
+## caller that wants a whole hit and has no list to put steps in.
 ## [constant MAX_VARIATION] with no critical is the highest a hit can go, the
 ## number a damage calculator quotes.
 
@@ -70,7 +73,6 @@ static func calculate(
 	rng: RandomNumberGenerator,
 	focus_energy: bool = false,
 	defense_halved: bool = false,
-	damage_multiplier: int = 1,
 	weather: int = Gen2Weather.NONE,
 	defender_screens: int = Gen2Screens.NONE
 ) -> Dictionary:
@@ -79,8 +81,7 @@ static func calculate(
 	return calculate_with(
 		attacker, defender, move,
 		roll_critical(move, rng, focus_energy, scope_lens),
-		roll_variation(rng), defense_halved, damage_multiplier, weather,
-		defender_screens
+		roll_variation(rng), defense_halved, weather, defender_screens
 	)
 
 
@@ -107,7 +108,6 @@ static func calculate_with(
 	critical: bool,
 	variation: int,
 	defense_halved: bool = false,
-	damage_multiplier: int = 1,
 	weather: int = Gen2Weather.NONE,
 	defender_screens: int = Gen2Screens.NONE
 ) -> Dictionary:
@@ -132,9 +132,6 @@ static func calculate_with(
 	out["immune"] = stabbed["immune"]
 	out["effectiveness"] = stabbed["effectiveness"]
 	damage = int(stabbed["damage"])
-
-	if damage_multiplier > 1:
-		damage = mini(damage * damage_multiplier, 0xFFFF)
 
 	out["damage"] = apply_variation(damage, variation)
 	return out
@@ -377,6 +374,117 @@ static func confusion_damage(
 	)
 	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
 	return apply_variation(damage, roll_variation(rng))
+
+
+## `MagnitudePower` (`data/moves/magnitude_power.asm`), as [threshold, power,
+## magnitude number]. One byte is rolled and the first row whose threshold is at
+## or above it wins, so the thresholds are cumulative rather than per-row odds.
+## `percent` is `* $ff / 100` and truncates, which is why 5 percent + 1 is 13 and
+## not 14.
+const MAGNITUDE_POWER: Array = [
+	[13, 10, 4], [38, 30, 5], [89, 50, 6], [166, 70, 7],
+	[217, 90, 8], [242, 110, 9], [255, 150, 10],
+]
+
+## `PresentPower` (`data/moves/present_power.asm`), read the same way, with the
+## `-1` terminator standing for the fourth outcome: no hit at all, and a quarter
+## of the target's health back instead. The terminator is tested before the
+## comparison, so every roll above the last threshold reaches it.
+const PRESENT_POWER: Array = [[102, 40], [179, 80], [204, 120]]
+
+## `FlailReversalPower` (`data/moves/flail_reversal_power.asm`), as
+## [hp bar pixels, power] with `HP_BAR_LENGTH_PX` at 48. The index is how many
+## of those 48 pixels of health are left, so the emptier the bar the earlier the
+## walk stops and the harder the hit.
+const FLAIL_REVERSAL_POWER: Array = [
+	[1, 200], [4, 150], [9, 100], [16, 80], [32, 40], [48, 20],
+]
+
+## `HP_BAR_LENGTH_PX`, which Flail and Reversal measure in rather than in a
+## percentage.
+const HP_BAR_LENGTH_PX: int = 48
+
+## Return and Frustration: `happiness * 10 / 25`, and the same over 255 minus the
+## happiness (`engine/battle/move_effects/return.asm`, `.../frustration.asm`).
+##
+## The two zero ends are the cartridge's own bug and are kept: a Return from a
+## Pokémon that hates its trainer and a Frustration from one that loves it both
+## work out to a power of zero, which `damagecalc` then refuses outright.
+const HAPPINESS_NUMERATOR: int = 10
+const HAPPINESS_DENOMINATOR: int = 25
+const HAPPINESS_MAX: int = 255
+
+
+## The row of [constant MAGNITUDE_POWER] a rolled byte lands on.
+static func magnitude_row(roll: int) -> Array:
+	for row: Array in MAGNITUDE_POWER:
+		if int(row[0]) >= roll:
+			return row
+	return MAGNITUDE_POWER[MAGNITUDE_POWER.size() - 1]
+
+
+## The power a rolled byte gives Present, or -1 for the row that heals instead.
+static func present_power(roll: int) -> int:
+	for row: Array in PRESENT_POWER:
+		if int(row[0]) >= roll:
+			return int(row[1])
+	return -1
+
+
+## `BattleCommand_HappinessPower` and `..._FrustrationPower`.
+static func happiness_power(happiness: int, inverted: bool = false) -> int:
+	var value: int = HAPPINESS_MAX - happiness if inverted else happiness
+	@warning_ignore("integer_division")
+	return value * HAPPINESS_NUMERATOR / HAPPINESS_DENOMINATOR
+
+
+## Flail and Reversal's power, from how much of the health bar is left.
+##
+## The index is `hp * 48 / max_hp`, except that a maximum over a byte is divided
+## down first: `.reversal` shifts the product and the divisor right two bits each
+## before the divide, because the routine's divisor is one byte wide. Both are
+## integer divisions and the second loses the low bits of each, which is the
+## cartridge's answer rather than an approximation of it.
+static func flail_reversal_power(hp: int, max_hp: int) -> int:
+	if max_hp <= 0:
+		return int(FLAIL_REVERSAL_POWER[0][1])
+	var product: int = hp * HP_BAR_LENGTH_PX
+	var divisor: int = max_hp
+	if max_hp > STAT_BYTE_MAX:
+		product >>= 2
+		divisor >>= 2
+	@warning_ignore("integer_division")
+	var index: int = product / maxi(divisor, 1)
+	for row: Array in FLAIL_REVERSAL_POWER:
+		if int(row[0]) >= index:
+			return int(row[1])
+	return int(FLAIL_REVERSAL_POWER[FLAIL_REVERSAL_POWER.size() - 1][1])
+
+
+## `HiddenPowerDamage`: the move's type and power, both out of the user's DVs.
+##
+## Returns { type, power }. The power takes the top bit of each of the four DVs
+## into a nibble, multiplies by five, adds the Special DV's low two bits, halves
+## and adds 31. The type is the Defense DV's low two bits under the Attack DV's,
+## stepped over `BIRD` and over the ten unused numbers between Steel and Fire.
+static func hidden_power(dvs: int) -> Dictionary:
+	var attack: int = Gen2Stats.attack_dv(dvs)
+	var defense: int = Gen2Stats.defense_dv(dvs)
+	var speed: int = Gen2Stats.speed_dv(dvs)
+	var special: int = Gen2Stats.special_dv(dvs)
+
+	var tops: int = (attack & 8) | ((defense & 8) >> 1) \
+		| ((speed & 8) >> 2) | ((special & 8) >> 3)
+	@warning_ignore("integer_division")
+	var power: int = (tops * 5 + (special & 3)) / 2 + 31
+
+	var move_type: int = (defense & 3) | ((attack & 3) << 2)
+	move_type += 1
+	if move_type >= RomLayout.TYPE_BIRD:
+		move_type += 1
+	if move_type >= RomLayout.TYPE_UNUSED_START:
+		move_type += RomLayout.TYPE_UNUSED_END - RomLayout.TYPE_UNUSED_START
+	return {"type": move_type, "power": power}
 
 
 ## Psywave: a random amount from one up to but excluding one and a half times the

@@ -83,6 +83,37 @@ func _run_move(
 	return turn
 
 
+## The same run from the other side of the field, for a move whose whole point is
+## what it leaves on the Pokémon opposite.
+func _run_enemy_move(battle: Gen2Battle, move_number: int) -> Gen2Turn:
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.ENEMY, 0, move_number, _data.move(move_number), []
+	)
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
+	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
+		if turn.ended:
+			break
+		Gen2EffectCommands.run(command, turn)
+	return turn
+
+
+## A battle whose player side has a bench, which only Heal Bell needs: it is the
+## one move that reaches past the Pokémon on the field.
+func _party_battle() -> Gen2Battle:
+	return Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.HEAL_BELL]),
+			Gen2BattleMon.create(_data, Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+			Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE]),
+		]),
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		]),
+		_rng
+	)
+
+
 func test_an_effect_nobody_has_written_is_an_ordinary_attack() -> void:
 	# Most of the table is, and so is every effect still waiting to be written,
 	# which is why a move with one behaves rather than doing nothing.
@@ -613,16 +644,39 @@ func test_rollout_counts_hits_and_forces_the_move_without_spending_more_pp() -> 
 	assert_gt(first.damage, 0)
 
 
-func test_rollout_multiplier_is_applied_before_variation() -> void:
+func test_rollout_doubles_between_the_matchup_and_the_spread() -> void:
+	# `rolloutpower` is both halves of Rollout, the count and the doubling, and
+	# sits after `stab` and the hit check: the doubling lands on the matched-up
+	# damage and the spread is taken from the doubled figure.
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.ROLLOUT)
+	assert_lt(
+		sequence.find(Gen2EffectCommands.STAB),
+		sequence.find(Gen2EffectCommands.ROLLOUT_POWER)
+	)
+	assert_lt(
+		sequence.find(Gen2EffectCommands.ROLLOUT_POWER),
+		sequence.find(Gen2EffectCommands.DAMAGE_VARIATION)
+	)
+
+	# One doubling is spent doing nothing, which is `inc [hl]` then `dec b`: the
+	# first hit is worth its own power and the fifth sixteen times it.
 	var battle: Gen2Battle = _battle()
-	var move: Dictionary = _data.move(Fixture.ROLLOUT)
-	var plain: Dictionary = Gen2Damage.calculate_with(
-		battle.player, battle.enemy, move, false, Gen2Damage.MAX_VARIATION
-	)
-	var doubled: Dictionary = Gen2Damage.calculate_with(
-		battle.player, battle.enemy, move, false, Gen2Damage.MAX_VARIATION, false, 2
-	)
-	assert_eq(int(doubled["damage"]), int(plain["damage"]) * 2)
+	for pair: Array in [[1, 1], [2, 2], [3, 4], [4, 8], [5, 16]]:
+		battle.player.rollout_count = int(pair[0]) - 1
+		battle.player.substatus |= Gen2Substatus.ROLLOUT
+		var turn: Gen2Turn = _turn(battle, Fixture.ROLLOUT)
+		turn.damage = 100
+		Gen2EffectCommands.run(Gen2EffectCommands.ROLLOUT_POWER, turn)
+		assert_eq(turn.damage, 100 * int(pair[1]), "hit %d" % int(pair[0]))
+
+
+func test_defense_curl_is_worth_one_more_doubling_to_a_rollout() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.substatus |= Gen2Substatus.CURLED
+	var turn: Gen2Turn = _turn(battle, Fixture.ROLLOUT)
+	turn.damage = 100
+	Gen2EffectCommands.run(Gen2EffectCommands.ROLLOUT_POWER, turn)
+	assert_eq(turn.damage, 200, "the first hit of a curled Rollout is already two")
 
 
 func test_rollout_ends_on_a_miss_or_immunity() -> void:
@@ -946,8 +1000,8 @@ func test_the_four_fixed_damage_effects_share_one_list() -> void:
 
 func test_level_damage_deals_exactly_the_users_level() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.LEVEL_DAMAGE_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.RESET_TYPE_MATCHUP, turn)
 	assert_eq(turn.damage, turn.attacker().level)
 	assert_false(turn.critical, "constant damage never criticals")
 	assert_eq(turn.effectiveness, RomLayout.MATCHUP_EFFECTIVE, "no effectiveness line for it either")
@@ -955,8 +1009,8 @@ func test_level_damage_deals_exactly_the_users_level() -> void:
 
 func test_static_damage_deals_exactly_the_moves_own_power() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.STATIC_DAMAGE_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.RESET_TYPE_MATCHUP, turn)
 	assert_eq(turn.damage, 20, "Sonicboom's own power in the fixture")
 
 
@@ -964,8 +1018,8 @@ func test_super_fang_halves_the_targets_current_hp() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 51
 	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.RESET_TYPE_MATCHUP, turn)
 	assert_eq(turn.damage, 25, "floored, not rounded")
 
 
@@ -973,8 +1027,8 @@ func test_super_fang_never_deals_less_than_one() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 1
 	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.RESET_TYPE_MATCHUP, turn)
 	assert_eq(turn.damage, 1)
 
 
@@ -985,8 +1039,8 @@ func test_psywave_stays_inside_its_own_range() -> void:
 	var upper: int = level / 2 + level
 	for seed_value: int in range(1, 21):
 		_rng.seed = seed_value
-		Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 		Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
+		Gen2EffectCommands.run(Gen2EffectCommands.RESET_TYPE_MATCHUP, turn)
 		assert_between(turn.damage, 1, upper - 1, "seed %d" % seed_value)
 
 
@@ -1871,3 +1925,554 @@ func test_each_two_turn_move_has_its_own_charge_line() -> void:
 ## so it is what a move reaching that dispatch without matching prints.
 func test_the_charge_line_falls_through_to_dig() -> void:
 	assert_eq(Gen2BattleScreen.CHARGE_DUG, Gen2BattleScreen.CHARGE_TEXT[Gen2MoveEffect.DIG_MOVE])
+
+
+## The effects whose whole job is a number the move table does not hold. Every
+## one of these moves ships with a power of 1 or 10 and is worthless until the
+## step that fills it in runs, so the arithmetic is what the tests are about.
+
+func test_return_and_frustration_read_the_happiness_from_either_end() -> void:
+	# `happiness * 10 / 25`, truncating, and 255 minus it for Frustration.
+	assert_eq(Gen2Damage.happiness_power(0), 0)
+	assert_eq(Gen2Damage.happiness_power(70), 28)
+	assert_eq(Gen2Damage.happiness_power(255), 102)
+	assert_eq(Gen2Damage.happiness_power(255, true), 0)
+	assert_eq(Gen2Damage.happiness_power(0, true), 102)
+	assert_eq(Gen2Damage.happiness_power(70, true), 74)
+
+
+func test_the_two_ends_that_deal_nothing_are_the_cartridges_own_bug() -> void:
+	# `BattleCommand_HappinessPower` is commented as a bug in the source and is
+	# reproduced rather than fixed: a power of zero is refused by `damagecalc`,
+	# so a hated Pokémon's Return does nothing at all.
+	var battle: Gen2Battle = _battle()
+	battle.player.happiness = 0
+	var turn: Gen2Turn = _run_move(battle, Fixture.RETURN)
+	assert_eq(turn.power_override, 0)
+	assert_eq(turn.damage, 0)
+
+
+func test_return_off_a_normal_happiness_is_a_real_hit() -> void:
+	var battle: Gen2Battle = _battle()
+	assert_eq(battle.player.happiness, Gen2BattleMon.BASE_HAPPINESS)
+	var turn: Gen2Turn = _run_move(battle, Fixture.RETURN)
+	assert_eq(turn.power_override, 28)
+	assert_gt(turn.damage, 2, "a power of 28 is not a power of 1")
+
+
+func test_the_magnitude_table_is_the_cartridges_own_thresholds() -> void:
+	# `percent` truncates, so `5 percent + 1` is 13 and `15 percent` is 38. The
+	# first row whose threshold is at or above the roll wins.
+	for pair: Array in [
+		[0, 10, 4], [13, 10, 4], [14, 30, 5], [38, 30, 5], [39, 50, 6],
+		[89, 50, 6], [90, 70, 7], [166, 70, 7], [167, 90, 8], [217, 90, 8],
+		[218, 110, 9], [242, 110, 9], [243, 150, 10], [255, 150, 10],
+	]:
+		var row: Array = Gen2Damage.magnitude_row(int(pair[0]))
+		assert_eq(int(row[1]), int(pair[1]), "power at roll %d" % int(pair[0]))
+		assert_eq(int(row[2]), int(pair[2]), "number at roll %d" % int(pair[0]))
+
+
+func test_magnitude_says_which_one_it_rolled_before_it_lands() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.MAGNITUDE)
+	var said: Dictionary = _first(turn.events, Gen2Battle.MAGNITUDE)
+	assert_false(said.is_empty(), "the line is printed")
+	assert_between(int(said["magnitude"]), 4, 10)
+	assert_lt(
+		turn.events.find(said), turn.events.size(),
+		"and before whatever the hit did"
+	)
+	assert_gt(turn.power_override, 1, "the stored power of 1 was overwritten")
+
+
+func test_the_flail_table_is_read_off_how_much_health_is_left() -> void:
+	# `HP_BAR_LENGTH_PX` is 48, so the index is 48ths of the bar and the emptier
+	# it is the earlier the walk stops.
+	for pair: Array in [
+		[1, 48, 200], [2, 48, 150], [4, 48, 150], [5, 48, 100], [9, 48, 100],
+		[10, 48, 80], [16, 48, 80], [17, 48, 40], [32, 48, 40], [33, 48, 20],
+		[48, 48, 20],
+	]:
+		assert_eq(
+			Gen2Damage.flail_reversal_power(int(pair[0]), int(pair[1])),
+			int(pair[2]), "%d of %d" % [int(pair[0]), int(pair[1])]
+		)
+
+
+func test_a_maximum_over_a_byte_divides_both_sides_down_first() -> void:
+	# `.reversal` shifts the product and the divisor right two bits each before
+	# the divide, because the routine's divisor is one byte wide. The answer is
+	# the cartridge's, not a rounding of the exact one.
+	assert_eq(Gen2Damage.flail_reversal_power(300, 300), 20, "a full bar is weakest")
+	assert_eq(Gen2Damage.flail_reversal_power(1, 300), 200, "and an empty one strongest")
+	assert_eq(Gen2Damage.flail_reversal_power(150, 300), 40)
+
+
+func test_flail_at_deaths_door_hits_far_harder_than_at_full_health() -> void:
+	var healthy: Gen2Battle = _battle()
+	var healthy_turn: Gen2Turn = _run_move(healthy, Fixture.FLAIL)
+
+	var hurt: Gen2Battle = _battle()
+	hurt.player.hp = 1
+	var hurt_turn: Gen2Turn = _run_move(hurt, Fixture.FLAIL)
+
+	assert_eq(healthy_turn.power_override, 20)
+	assert_eq(hurt_turn.power_override, 200)
+	assert_gt(hurt_turn.damage, healthy_turn.damage)
+
+
+func test_reversal_keeps_the_matchup_the_constant_damage_moves_throw_away() -> void:
+	# Its list carries `stab` where the other four carry `resettypematchup`, so
+	# Flail is the one branch of `constantdamage` whose effectiveness is real.
+	# Normal against Geodude's Rock is half.
+	assert_true(
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.REVERSAL).has(Gen2EffectCommands.STAB)
+	)
+	assert_false(
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.LEVEL_DAMAGE).has(Gen2EffectCommands.STAB)
+	)
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.FLAIL)
+	assert_eq(turn.effectiveness, RomLayout.MATCHUP_NOT_VERY_EFFECTIVE)
+
+
+func test_hidden_power_reads_a_type_and_a_power_out_of_the_dvs() -> void:
+	# Perfect DVs are 15 across, so every top bit is set and every low pair is 3:
+	# the nibble is %1111, power is (15 * 5 + 3) / 2 + 31 = 70, and the type is
+	# 3 | (3 << 2) = 15, then 16 past Normal, 17 past BIRD and 27 past the ten
+	# unused, which is Dark: the flawless Hidden Power every guide names.
+	var perfect: Dictionary = Gen2Damage.hidden_power(Gen2BattleMon.PERFECT_DVS)
+	assert_eq(int(perfect["power"]), 70)
+	assert_eq(int(perfect["type"]), RomLayout.TYPE_DARK)
+
+	# All zero: the nibble is 0, power is 0 / 2 + 31 = 31, and the type is 0,
+	# which becomes 1 on the skip past Normal.
+	var empty: Dictionary = Gen2Damage.hidden_power(0)
+	assert_eq(int(empty["power"]), 31)
+	assert_eq(int(empty["type"]), RomLayout.TYPE_FIGHTING)
+
+
+func test_hidden_powers_type_steps_over_bird_and_the_unused_run() -> void:
+	# No DV pair can produce either, which is the whole reason for the two skips.
+	for attack: int in range(0, 16):
+		for defense: int in range(0, 16):
+			var dvs: int = Gen2Stats.pack_dvs(attack, defense, 0, 0)
+			var resolved: int = int(Gen2Damage.hidden_power(dvs)["type"])
+			assert_ne(resolved, RomLayout.TYPE_NORMAL, "never Normal")
+			assert_ne(resolved, RomLayout.TYPE_BIRD, "never BIRD")
+			assert_false(
+				resolved >= RomLayout.TYPE_UNUSED_START
+					and resolved < RomLayout.TYPE_UNUSED_END,
+				"never one of the ten unused"
+			)
+
+
+func test_hidden_power_runs_damagestats_off_the_type_it_chose() -> void:
+	# Its list carries no `damagestats`: the command runs it once the type is
+	# known, because whether the move is physical or special follows from it.
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.HIDDEN_POWER)
+	assert_false(sequence.has(Gen2EffectCommands.DAMAGE_STATS))
+	assert_lt(
+		sequence.find(Gen2EffectCommands.HIDDEN_POWER),
+		sequence.find(Gen2EffectCommands.DAMAGE_CALC)
+	)
+
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.HIDDEN_POWER)
+	assert_eq(turn.type_override, RomLayout.TYPE_DARK)
+	assert_eq(turn.power_override, 70)
+	assert_gt(turn.attack_stat, 0, "the stats were picked after the type was")
+
+
+func test_the_present_table_has_three_hits_and_a_heal() -> void:
+	for pair: Array in [
+		[0, 40], [102, 40], [103, 80], [179, 80], [180, 120], [204, 120],
+		[205, -1], [255, -1],
+	]:
+		assert_eq(
+			Gen2Damage.present_power(int(pair[0])), int(pair[1]),
+			"roll %d" % int(pair[0])
+		)
+
+
+func test_presents_fourth_row_heals_the_target_a_quarter() -> void:
+	# The source switches turn around the heal, so `RegainedHealthText` names the
+	# Pokémon that got the present rather than the one that gave it.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 1
+	var found: bool = false
+	for seed_value: int in range(1, 60):
+		_rng.seed = seed_value
+		battle.enemy.hp = 1
+		var turn: Gen2Turn = _run_move(battle, Fixture.PRESENT)
+		var restored: Dictionary = _first(turn.events, Gen2Battle.HP_RESTORED)
+		if restored.is_empty():
+			continue
+		found = true
+		assert_eq(int(restored["side"]), Gen2Battle.ENEMY, "the target regained it")
+		@warning_ignore("integer_division")
+		var quarter: int = maxi(battle.enemy.max_hp() / 4, 1)
+		assert_eq(int(restored["amount"]), quarter)
+		assert_eq(battle.enemy.hp, 1 + quarter)
+		break
+	assert_true(found, "one roll in five reaches the heal row")
+
+
+func test_a_present_to_a_target_at_full_health_is_refused() -> void:
+	var battle: Gen2Battle = _battle()
+	var found: bool = false
+	for seed_value: int in range(1, 60):
+		_rng.seed = seed_value
+		battle.enemy.hp = battle.enemy.max_hp()
+		var turn: Gen2Turn = _run_move(battle, Fixture.PRESENT)
+		var refused: Dictionary = _first(turn.events, Gen2Battle.PRESENT_REFUSED)
+		if refused.is_empty():
+			continue
+		found = true
+		assert_eq(int(refused["target"]), Gen2Battle.ENEMY)
+		assert_eq(battle.enemy.hp, battle.enemy.max_hp(), "and nothing was healed")
+		break
+	assert_true(found, "the same one roll in five")
+
+
+func test_fury_cutter_doubles_once_per_consecutive_hit_and_stops_at_sixteen() -> void:
+	# Driven a command at a time rather than through whole moves: the spread
+	# turns each figure into a range, and what is being checked here is the
+	# doubling itself, which is exact.
+	var battle: Gen2Battle = _battle()
+	for pair: Array in [[1, 1], [2, 2], [3, 4], [4, 8], [5, 16], [6, 16], [9, 16]]:
+		battle.player.fury_cutter_count = int(pair[0]) - 1
+		var turn: Gen2Turn = _turn(battle, Fixture.FURY_CUTTER)
+		turn.damage = 100
+		Gen2EffectCommands.run(Gen2EffectCommands.FURY_CUTTER, turn)
+		assert_eq(battle.player.fury_cutter_count, int(pair[0]), "hit %d" % int(pair[0]))
+		assert_eq(turn.damage, 100 * int(pair[1]), "worth %dx" % int(pair[1]))
+
+
+func test_a_run_of_fury_cutters_really_does_get_stronger() -> void:
+	# The stored 95% is overridden so every one of the five connects: a miss is
+	# the other test, and one here would put the count back to nothing.
+	var battle: Gen2Battle = _battle()
+	var seen: Array = []
+	for run: int in 5:
+		battle.enemy.hp = battle.enemy.max_hp()
+		var turn: Gen2Turn = _run_move(
+			battle, Fixture.FURY_CUTTER, false, {"accuracy": 255}
+		)
+		seen.append(turn.damage)
+	assert_eq(battle.player.fury_cutter_count, 5, "every one of them connected")
+	for step: int in 4:
+		assert_gt(int(seen[step + 1]), int(seen[step]), "hit %d" % (step + 2))
+	assert_gt(int(seen[4]), int(seen[0]) * 8, "the fifth is worth sixteen firsts")
+
+
+func test_a_missed_fury_cutter_starts_the_count_again() -> void:
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.FURY_CUTTER, false, {"accuracy": 255})
+	assert_eq(battle.player.fury_cutter_count, 1)
+	# An accuracy of nothing, so the roll cannot land. The list runs on past the
+	# miss, which is what `furycutter` is doing there rather than behind
+	# `moveanim` with the rest of the damage steps.
+	var missed: Gen2Turn = _run_move(battle, Fixture.FURY_CUTTER, false, {"accuracy": 0})
+	assert_true(missed.missed)
+	assert_eq(battle.player.fury_cutter_count, 0)
+
+
+func test_a_switch_takes_the_fury_cutter_count_with_it() -> void:
+	# `NewBattleMonStatus` zeroes it on a send-out, which is what
+	# [method Gen2BattleMon.reset_volatile] mirrors.
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.FURY_CUTTER, false, {"accuracy": 255})
+	assert_eq(battle.player.fury_cutter_count, 1)
+	battle.player.reset_volatile()
+	assert_eq(battle.player.fury_cutter_count, 0)
+
+
+func test_triple_kick_is_three_kicks_each_worth_one_more() -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.TRIPLE_KICK)
+	assert_lt(
+		sequence.find(Gen2EffectCommands.DAMAGE_CALC),
+		sequence.find(Gen2EffectCommands.TRIPLE_KICK),
+		"the multiply is on the calculated figure"
+	)
+	assert_lt(
+		sequence.find(Gen2EffectCommands.TRIPLE_KICK),
+		sequence.find(Gen2EffectCommands.STAB),
+		"and before the matchup, not after it"
+	)
+
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.TRIPLE_KICK)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_STATS, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	var one_kick: int = turn.damage
+	for kick: int in 3:
+		turn.damage = one_kick
+		turn.battle.battle_anim_param = kick
+		Gen2EffectCommands.run(Gen2EffectCommands.TRIPLE_KICK, turn)
+		assert_eq(turn.damage, one_kick * (kick + 1), "kick %d" % (kick + 1))
+		Gen2EffectCommands.run(Gen2EffectCommands.KICK_COUNTER, turn)
+	assert_eq(turn.battle.battle_anim_param, 3, "and the counter walked all three")
+
+
+func test_false_swipe_leaves_the_target_standing_on_one() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 3
+	var turn: Gen2Turn = _run_move(battle, Fixture.FALSE_SWIPE)
+	assert_eq(battle.enemy.hp, 1)
+	assert_false(battle.enemy.is_fainted())
+
+
+func test_false_swipe_leaves_a_hit_it_could_not_have_killed_alone() -> void:
+	var battle: Gen2Battle = _battle()
+	var full: int = battle.enemy.max_hp()
+	var turn: Gen2Turn = _run_move(battle, Fixture.FALSE_SWIPE)
+	assert_lt(battle.enemy.hp, full, "it still hurts")
+	assert_gt(battle.enemy.hp, 1, "and was not cut down to one")
+
+
+func test_heal_bell_clears_the_whole_of_the_users_party() -> void:
+	var battle: Gen2Battle = _party_battle()
+	for mon: Gen2BattleMon in battle.party(Gen2Battle.PLAYER).mons:
+		mon.status = Gen2Status.PARALYSIS
+	battle.enemy.status = Gen2Status.PARALYSIS
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.HEAL_BELL)
+	assert_false(_first(turn.events, Gen2Battle.BELL_CHIMED).is_empty())
+	for mon: Gen2BattleMon in battle.party(Gen2Battle.PLAYER).mons:
+		assert_eq(mon.status, Gen2Status.NONE, "every slot, not only the one out")
+	assert_eq(battle.enemy.status, Gen2Status.PARALYSIS, "and nobody else's party")
+
+
+func test_heal_bell_needs_no_stat_recalculation() -> void:
+	# The source's trailing `CalcPlayerStats` has no counterpart here, because a
+	# burn and a paralysis are applied when a stat is read rather than baked into
+	# a copy. This is what says that stays true.
+	var battle: Gen2Battle = _party_battle()
+	var healthy: int = battle.player.stat("attack")
+	battle.player.status = Gen2Status.BURN
+	assert_lt(battle.player.stat("attack"), healthy, "a burn halves it")
+	_run_move(battle, Fixture.HEAL_BELL)
+	assert_eq(battle.player.stat("attack"), healthy, "and the bell gives it back")
+
+
+func test_heal_bell_clears_the_toxic_ramp_with_the_poison() -> void:
+	var battle: Gen2Battle = _party_battle()
+	battle.player.status = Gen2Status.POISON
+	battle.player.toxic_counter = 4
+	_run_move(battle, Fixture.HEAL_BELL)
+	assert_eq(battle.player.status, Gen2Status.NONE)
+	assert_eq(battle.player.toxic_counter, 0)
+
+
+func test_snore_fails_awake_and_lands_asleep() -> void:
+	var awake: Gen2Battle = _battle()
+	var awake_turn: Gen2Turn = _run_move(awake, Fixture.SNORE)
+	assert_false(_first(awake_turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+	assert_eq(awake.enemy.hp, awake.enemy.max_hp(), "and did nothing")
+
+	var asleep: Gen2Battle = _battle()
+	# Set the sleep counter high enough that `CheckPlayerTurn` does not wake it
+	# on the way in, which is what would otherwise cost the turn.
+	asleep.player.status = 3
+	var asleep_turn: Gen2Turn = _run_move(asleep, Fixture.SNORE)
+	assert_true(_first(asleep_turn.events, Gen2Battle.MOVE_FAILED).is_empty())
+	assert_lt(asleep.enemy.hp, asleep.enemy.max_hp())
+
+
+func test_tri_attack_reaches_all_three_statuses_and_no_fourth() -> void:
+	var seen: Dictionary = {}
+	for seed_value: int in range(1, 200):
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed_value
+		var turn: Gen2Turn = _run_move(battle, Fixture.TRI_ATTACK)
+		var inflicted: Dictionary = _first(turn.events, Gen2Battle.STATUS_INFLICTED)
+		if inflicted.is_empty():
+			continue
+		seen[battle.enemy.status] = true
+	assert_true(seen.has(Gen2Status.PARALYSIS), "paralysis")
+	assert_true(seen.has(Gen2Status.FREEZE), "freeze")
+	assert_true(seen.has(Gen2Status.BURN), "burn")
+	assert_eq(seen.size(), 3, "and nothing else")
+
+
+func test_flame_wheel_thaws_its_user_only_once_the_hit_has_landed() -> void:
+	# `CheckPlayerTurn` lets the move happen and clears no bit: the thaw is the
+	# `defrost` step, which sits behind `applydamage` in the list.
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.FLAME_WHEEL)
+	assert_lt(
+		sequence.find(Gen2EffectCommands.APPLY_DAMAGE),
+		sequence.find(Gen2EffectCommands.DEFROST)
+	)
+	assert_eq(
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.SACRED_FIRE), sequence,
+		"and Sacred Fire is the same list"
+	)
+
+	var battle: Gen2Battle = _battle()
+	battle.player.status = Gen2Status.FREEZE
+	var turn: Gen2Turn = _run_move(battle, Fixture.FLAME_WHEEL)
+	assert_eq(battle.player.status, Gen2Status.NONE)
+	assert_eq(_of_type(turn.events, Gen2Battle.THAWED).size(), 1)
+
+
+func test_a_flame_wheel_that_never_connects_leaves_its_user_frozen() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.status = Gen2Status.FREEZE
+	battle.enemy.change_stage("evasion", 6)
+	battle.player.change_stage("accuracy", -6)
+	var turn: Gen2Turn = _run_move(battle, Fixture.FLAME_WHEEL)
+	assert_eq(_of_type(turn.events, Gen2Battle.MISSED).size(), 1)
+	assert_eq(battle.player.status, Gen2Status.FREEZE, "still frozen solid")
+
+
+func test_splash_says_nothing_happened_and_means_it() -> void:
+	var battle: Gen2Battle = _battle()
+	var before: int = battle.enemy.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.SPLASH)
+	assert_false(_first(turn.events, Gen2Battle.NOTHING_HAPPENED).is_empty())
+	assert_eq(battle.enemy.hp, before)
+	assert_eq(turn.damage, 0)
+
+
+func test_swift_lands_through_an_evasion_nothing_else_could() -> void:
+	# `EFFECT_ALWAYS_HIT` points at `NormalHit`: one comparison inside the hit
+	# check is the whole of it, which is why Swift carries a stored accuracy of
+	# 100 and never rolls it.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.change_stage("evasion", 6)
+	battle.player.change_stage("accuracy", -6)
+	for attempt: int in 10:
+		battle.enemy.hp = battle.enemy.max_hp()
+		var turn: Gen2Turn = _run_move(battle, Fixture.SWIFT)
+		assert_false(turn.missed, "attempt %d" % attempt)
+
+
+func test_a_missed_jump_kick_costs_its_user_an_eighth_of_the_miss() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.change_stage("evasion", 6)
+	battle.player.change_stage("accuracy", -6)
+	var before: int = battle.player.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.JUMP_KICK)
+	assert_true(turn.missed)
+	var crashed: Dictionary = _first(turn.events, Gen2Battle.CRASHED)
+	assert_false(crashed.is_empty(), "and it hurt")
+	assert_eq(int(crashed["amount"]), maxi(turn.damage >> 3, 1))
+	assert_eq(battle.player.hp, before - int(crashed["amount"]))
+
+
+func test_a_jump_kick_that_connects_costs_nothing() -> void:
+	var battle: Gen2Battle = _battle()
+	var before: int = battle.player.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.JUMP_KICK)
+	assert_false(turn.missed)
+	assert_true(_first(turn.events, Gen2Battle.CRASHED).is_empty())
+	assert_eq(battle.player.hp, before)
+
+
+func test_steel_wing_is_the_raise_on_hit_run_that_was_missing() -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DEFENSE_UP_HIT)
+	assert_true(sequence.has(Gen2EffectCommands.DEFENSE_UP))
+	assert_true(sequence.has(Gen2EffectCommands.STAT_UP_MESSAGE))
+	# The same list as the Attack raise-on-hit run, one command apart, which is
+	# what says the run's seventh member was the only thing missing.
+	var attack_run: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.ATTACK_UP_HIT)
+	assert_eq(sequence.size(), attack_run.size())
+	assert_eq(
+		sequence.find(Gen2EffectCommands.DEFENSE_UP),
+		attack_run.find(Gen2EffectCommands.ATTACK_UP)
+	)
+
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.STEEL_WING, false, {"effect_chance": 256})
+	assert_eq(battle.player.stage("defense"), 1)
+
+
+func test_gust_and_earthquake_double_against_a_target_out_of_sight() -> void:
+	var flying: Gen2Battle = _battle()
+	flying.player.substatus |= Gen2Substatus.FLYING
+	var against_flier: Gen2Turn = _run_enemy_move(flying, Fixture.GUST)
+	var plain: Gen2Battle = _battle()
+	var against_ground: Gen2Turn = _run_enemy_move(plain, Fixture.GUST)
+	assert_gt(against_flier.damage, against_ground.damage)
+
+
+func test_neither_gust_nor_earthquake_carries_a_kings_rock() -> void:
+	# The two lists really do leave `kingsrock` out, which is the only thing
+	# separating them from `NormalHit` besides the doubling.
+	for effect: int in [Gen2MoveEffect.GUST, Gen2MoveEffect.EARTHQUAKE]:
+		var sequence: Array = Gen2MoveEffect.sequence_for(effect)
+		assert_false(sequence.has(Gen2EffectCommands.KINGS_ROCK), str(effect))
+		assert_true(sequence.has(Gen2EffectCommands.DOUBLE_DAMAGE))
+
+
+func test_the_doubling_lands_behind_the_spread_rather_than_in_front_of_it() -> void:
+	for effect: int in [
+		Gen2MoveEffect.GUST, Gen2MoveEffect.EARTHQUAKE, Gen2MoveEffect.TWISTER,
+		Gen2MoveEffect.STOMP,
+	]:
+		var sequence: Array = Gen2MoveEffect.sequence_for(effect)
+		assert_lt(
+			sequence.find(Gen2EffectCommands.DAMAGE_VARIATION),
+			sequence.find(Gen2EffectCommands.DOUBLE_DAMAGE), str(effect)
+		)
+
+
+func test_minimize_is_what_makes_a_stomp_hurt_twice_as_much() -> void:
+	var battle: Gen2Battle = _battle()
+	assert_false(battle.enemy.minimized)
+	_run_enemy_move(battle, Fixture.MINIMIZE)
+	assert_true(battle.enemy.minimized, "the flag is set off the move number")
+
+	var plain: Gen2Battle = _battle()
+	var against_plain: Gen2Turn = _run_move(plain, Fixture.STOMP)
+	var against_small: Gen2Turn = _run_move(battle, Fixture.STOMP)
+	assert_gt(against_small.damage, against_plain.damage)
+
+
+func test_a_switch_takes_the_minimize_flag_with_it() -> void:
+	var battle: Gen2Battle = _battle()
+	_run_enemy_move(battle, Fixture.MINIMIZE)
+	assert_true(battle.enemy.minimized)
+	battle.enemy.reset_volatile()
+	assert_false(battle.enemy.minimized)
+
+
+func test_swagger_raises_the_targets_attack_and_confuses_it() -> void:
+	# The two `switchturn` pairs are what put the ordinary `attackup2` on the
+	# other side of the field.
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.SWAGGER)
+	assert_eq(battle.enemy.stage("attack"), 2, "the target's, not the user's")
+	assert_eq(battle.player.stage("attack"), 0)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.CONFUSED))
+	assert_eq(turn.side, Gen2Battle.PLAYER, "and the turn was put back")
+
+
+func test_switch_turn_is_its_own_inverse() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle)
+	Gen2EffectCommands.run(Gen2EffectCommands.SWITCH_TURN, turn)
+	assert_eq(turn.side, Gen2Battle.ENEMY)
+	assert_eq(turn.target, Gen2Battle.PLAYER)
+	Gen2EffectCommands.run(Gen2EffectCommands.SWITCH_TURN, turn)
+	assert_eq(turn.side, Gen2Battle.PLAYER)
+	assert_eq(turn.target, Gen2Battle.ENEMY)
+
+
+func test_every_effect_this_tranche_wrote_has_a_list_of_its_own() -> void:
+	for effect: int in [
+		Gen2MoveEffect.ALWAYS_HIT, Gen2MoveEffect.TRI_ATTACK,
+		Gen2MoveEffect.JUMP_KICK, Gen2MoveEffect.SPLASH, Gen2MoveEffect.SNORE,
+		Gen2MoveEffect.REVERSAL, Gen2MoveEffect.FALSE_SWIPE,
+		Gen2MoveEffect.HEAL_BELL, Gen2MoveEffect.TRIPLE_KICK,
+		Gen2MoveEffect.FLAME_WHEEL, Gen2MoveEffect.SACRED_FIRE,
+		Gen2MoveEffect.SWAGGER, Gen2MoveEffect.FURY_CUTTER,
+		Gen2MoveEffect.RETURN, Gen2MoveEffect.PRESENT,
+		Gen2MoveEffect.FRUSTRATION, Gen2MoveEffect.MAGNITUDE,
+		Gen2MoveEffect.HIDDEN_POWER, Gen2MoveEffect.DEFENSE_UP_HIT,
+		Gen2MoveEffect.TWISTER, Gen2MoveEffect.STOMP, Gen2MoveEffect.GUST,
+		Gen2MoveEffect.EARTHQUAKE,
+	]:
+		assert_true(Gen2MoveEffect.is_written(effect), "effect %d" % effect)
