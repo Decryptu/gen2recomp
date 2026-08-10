@@ -285,6 +285,13 @@ and each action runs inside an open/close pair that clears the mover's own
 Destiny Bond in front and the opponent's Protect, Endure and Destiny Bond behind;
 the player's pair runs on every action and the enemy's only on a move.
 
+`Gen2Battle.send_out` is the one entrance, and a command can call it: Whirlwind
+and Roar drag the target's side out through it, and `BreakAttraction` inside it
+clears the flag on both sides rather than only the incoming Pokémon's. In a wild
+battle the same two moves end the battle instead, through
+`Gen2Battle.force_out`, which is `wForcedSwitch` and `SetBattleDraw` together
+and leaves both parties standing with no winner.
+
 Switches happen before priority, so the incoming Pokémon takes the other
 side's move. A fainted replacement is caller policy: the turn stops at
 `must_replace` until `send_out`. A full moveset similarly uses

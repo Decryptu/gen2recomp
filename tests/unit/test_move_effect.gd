@@ -3350,3 +3350,161 @@ func test_selfdestruct_clears_the_targets_destiny_bond_before_it_lands() -> void
 		_of_type(turn.events, Gen2Battle.TOOK_DOWN_WITH_IT).size(), 0,
 		"the bond was cleared, so nothing collected"
 	)
+
+
+## Whirlwind and Roar: one effect byte, two endings.
+##
+## `_run_move` leaves [member Gen2Battle.enemy_goes_first] false, which is the
+## player having moved first, and the trainer half refuses that outright. Every
+## trainer case below therefore sets it, which is what priority 0 does in a real
+## turn anyway.
+func _trainer_battle(player: Array, enemy: Array) -> Gen2Battle:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.create(player), Gen2Party.create(enemy), _rng, true
+	)
+	battle.enemy_goes_first = true
+	return battle
+
+
+func _party_of(species: Array) -> Array:
+	var out: Array = []
+	for number: int in species:
+		out.append(Gen2BattleMon.create(_data, number, 50, [Fixture.TACKLE]))
+	return out
+
+
+func test_a_force_switch_drags_out_a_standing_party_member() -> void:
+	var battle: Gen2Battle = _trainer_battle(
+		_party_of([Fixture.PIKACHU]),
+		_party_of([Fixture.GEODUDE, Fixture.CHARMANDER])
+	)
+	var turn: Gen2Turn = _run_move(battle, Fixture.WHIRLWIND)
+
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1, "the other member is out")
+	assert_eq(_of_type(turn.events, Gen2Battle.DRAGGED_OUT).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0)
+
+
+## `DraggedOutText` is printed once the replacement is out and before it walks
+## into anything, so the three events are in that order.
+func test_the_dragged_out_line_sits_between_the_entrance_and_the_spikes() -> void:
+	var battle: Gen2Battle = _trainer_battle(
+		_party_of([Fixture.PIKACHU]),
+		_party_of([Fixture.GEODUDE, Fixture.CHARMANDER])
+	)
+	battle.screens[Gen2Battle.ENEMY] |= Gen2Screens.SPIKES
+	var types: Array = []
+	for event: Dictionary in _run_move(battle, Fixture.WHIRLWIND).events:
+		types.append(StringName(event["type"]))
+
+	assert_lt(types.find(Gen2Battle.SENT_OUT), types.find(Gen2Battle.DRAGGED_OUT))
+	assert_lt(types.find(Gen2Battle.DRAGGED_OUT), types.find(Gen2Battle.HURT_BY_SPIKES))
+
+
+## `FindAliveEnemyMons` and `CheckPlayerHasMonToSwitchTo`: a lone Pokemon, or a
+## bench that is all down, has nothing to drag out.
+func test_a_force_switch_fails_with_nobody_left_to_drag_out() -> void:
+	var lone: Gen2Battle = _trainer_battle(
+		_party_of([Fixture.PIKACHU]), _party_of([Fixture.GEODUDE])
+	)
+	assert_eq(_of_type(_run_move(lone, Fixture.WHIRLWIND).events,
+		Gen2Battle.MOVE_FAILED).size(), 1, "a lone Pokemon")
+
+	var downed: Gen2Battle = _trainer_battle(
+		_party_of([Fixture.PIKACHU]),
+		_party_of([Fixture.GEODUDE, Fixture.CHARMANDER])
+	)
+	var bench: Gen2BattleMon = downed.party(Gen2Battle.ENEMY).at(1)
+	bench.take_damage(bench.max_hp())
+	assert_eq(_of_type(_run_move(downed, Fixture.WHIRLWIND).events,
+		Gen2Battle.MOVE_FAILED).size(), 1, "a bench that is all down")
+
+
+## The went-first gate: both halves of the source refuse unless the opponent
+## moved first, so a force switch that somehow moved first does nothing.
+func test_a_force_switch_that_moved_first_does_nothing() -> void:
+	var battle: Gen2Battle = _trainer_battle(
+		_party_of([Fixture.PIKACHU]),
+		_party_of([Fixture.GEODUDE, Fixture.CHARMANDER])
+	)
+	battle.enemy_goes_first = false
+	var turn: Gen2Turn = _run_move(battle, Fixture.WHIRLWIND)
+
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 0, "nobody moved")
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## Only the target's side is dragged out, and only ever to somebody standing.
+func test_a_force_switch_only_ever_picks_a_standing_member_of_the_targets_party() -> void:
+	for seed_value: int in 60:
+		var battle: Gen2Battle = _trainer_battle(
+			_party_of([Fixture.PIKACHU, Fixture.CHARMANDER]),
+			_party_of([Fixture.GEODUDE, Fixture.CHARMANDER, Fixture.BULBASAUR])
+		)
+		battle.rng.seed = seed_value
+		var fainted: Gen2BattleMon = battle.party(Gen2Battle.ENEMY).at(1)
+		fainted.take_damage(fainted.max_hp())
+		_run_move(battle, Fixture.ROAR)
+
+		assert_eq(battle.party(Gen2Battle.ENEMY).active, 2, "the only one standing")
+		assert_eq(battle.party(Gen2Battle.PLAYER).active, 0, "the user's side never moves")
+
+
+## Against a wild the battle ends instead, with nobody beaten. A user at or above
+## the target's level always succeeds, so this needs no seed.
+func test_a_force_switch_ends_a_wild_battle_as_a_draw() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.WHIRLWIND)
+
+	assert_true(battle.is_over())
+	assert_true(battle.was_forced_out())
+	assert_eq(battle.forced_out_side(), Gen2Battle.ENEMY)
+	assert_null(battle.winner(), "SetBattleDraw: nobody beat anybody")
+	assert_false(battle.player.is_fainted())
+	assert_false(battle.enemy.is_fainted())
+	assert_eq(_of_type(turn.events, Gen2Battle.BLOWN_AWAY).size(), 1)
+
+
+## Roar and Whirlwind are the same effect and differ only in that line.
+func test_roar_and_whirlwind_print_different_lines() -> void:
+	var roared: Gen2Turn = _run_move(_battle(), Fixture.ROAR)
+	assert_eq(_of_type(roared.events, Gen2Battle.FLED_IN_FEAR).size(), 1)
+	assert_eq(_of_type(roared.events, Gen2Battle.BLOWN_AWAY).size(), 0)
+
+	var blown: Gen2Turn = _run_move(_battle(), Fixture.WHIRLWIND)
+	assert_eq(_of_type(blown.events, Gen2Battle.BLOWN_AWAY).size(), 1)
+	assert_eq(_of_type(blown.events, Gen2Battle.FLED_IN_FEAR).size(), 0)
+
+
+## Below the target's level it goes on the dice, and a quarter of the target's
+## level is the share that fails. A level 4 user against a level 50 target fails
+## whenever the roll lands under 12, out of the 55 it is drawn from.
+func test_a_weaker_user_rolls_against_a_quarter_of_the_targets_level() -> void:
+	var failures: int = 0
+	var samples: int = 200
+	for seed_value: int in samples:
+		var battle: Gen2Battle = Gen2Battle.create(
+			_data,
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 4, [Fixture.TACKLE]),
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_rng
+		)
+		battle.rng.seed = seed_value
+		if _of_type(_run_move(battle, Fixture.WHIRLWIND).events,
+			Gen2Battle.MOVE_FAILED).size() > 0:
+			failures += 1
+
+	var expected: int = samples * 12 / 55
+	assert_almost_eq(failures, expected, expected / 3,
+		"roughly twelve of the fifty-five values it can draw")
+
+
+## And the four scripted encounters refuse before any of that is asked.
+func test_the_four_scripted_battle_types_refuse_a_force_switch() -> void:
+	for battle_type: int in Gen2EffectCommands.FORCE_SWITCH_REFUSED_TYPES:
+		var battle: Gen2Battle = _battle()
+		battle.battle_type = battle_type
+		var turn: Gen2Turn = _run_move(battle, Fixture.WHIRLWIND)
+
+		assert_false(battle.is_over(), "battle type %d" % battle_type)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)

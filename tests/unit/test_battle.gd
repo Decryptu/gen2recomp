@@ -3294,3 +3294,64 @@ func test_a_trainer_item_empties_both_counters() -> void:
 
 	assert_eq(battle.enemy.protect_count, 0)
 	assert_eq(battle.enemy.fury_cutter_count, 0)
+
+
+## Whirlwind and Roar through a whole turn, which is where the went-first gate
+## stops being something a test has to arrange: priority 0 puts them second.
+func test_a_trainers_roar_drags_the_players_pokemon_out() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.ROAR])), _rng, true
+	)
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_true(battle.enemy_goes_first == false, "Pikachu outspeeds Geodude")
+	assert_eq(
+		battle.party(Gen2Battle.PLAYER).active, 1,
+		"Roar is priority 0, so it moved second and the gate passed: %s" % JSON.stringify(events)
+	)
+	assert_eq(_of_type(events, Gen2Battle.DRAGGED_OUT).size(), 1)
+	assert_false(battle.is_over())
+
+
+## The same move in a wild battle ends it rather than switching anybody, and the
+## parties are left exactly as they stood.
+func test_a_wild_roar_ends_the_battle_with_both_sides_standing() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.ROAR])
+	)
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_true(battle.is_over())
+	assert_true(battle.was_forced_out())
+	assert_false(battle.has_fled(), "it was not the player's own decision")
+	assert_eq(battle.forced_out_side(), Gen2Battle.PLAYER)
+	assert_null(battle.winner())
+	assert_eq(_of_type(events, Gen2Battle.FLED_IN_FEAR).size(), 1)
+	assert_false(_first(events, Gen2Battle.OVER).is_empty())
+	assert_false(battle.player.is_fainted())
+	assert_false(battle.enemy.is_fainted())
+
+
+## `BreakAttraction` runs on every entrance and clears the flag on both sides,
+## not only the incoming Pokemon's: whoever was in love has nothing left to be in
+## love with.
+func test_a_switch_breaks_attraction_on_both_sides() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.player.substatus |= Gen2Substatus.ATTRACTED
+	battle.enemy.substatus |= Gen2Substatus.ATTRACTED
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ATTRACTED))
+	assert_false(
+		Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED),
+		"the side that did not switch loses it too"
+	)

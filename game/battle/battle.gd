@@ -181,6 +181,22 @@ const ENDURED_HIT: StringName = &"endured_hit"
 const DESTINY_BOND_SET: StringName = &"destiny_bond_set"
 const TOOK_DOWN_WITH_IT: StringName = &"took_down_with_it"
 
+## Whirlwind and Roar against a trainer: `DraggedOutText`, printed after the
+## replacement is out and before it walks into any spikes.
+##
+## The cartridge's line is `<USER>`, which is the Pokémon that *used* the move
+## rather than the one dragged out, in both directions. That is mirrored rather
+## than corrected, so [code]side[/code] here is the user and the Pokémon dragged
+## out is the one on [code]target[/code].
+const DRAGGED_OUT: StringName = &"dragged_out"
+
+## The same pair against a wild, where the battle ends instead:
+## `FledInFearText` for Roar and `BlownAwayText` for Whirlwind, told apart by the
+## move number. [code]target[/code] is whoever left, which is the wild when the
+## player used it and the player's own Pokémon when the wild did.
+const FLED_IN_FEAR: StringName = &"fled_in_fear"
+const BLOWN_AWAY: StringName = &"blown_away"
+
 ## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
 ## [Gen2Weather] value, so a screen names it without being told twice.
 ## [constant WEATHER_CONTINUES] is the line printed on every turn the weather
@@ -378,7 +394,7 @@ const EFFECT_PRIORITIES: Dictionary = {
 	Gen2MoveEffect.PROTECT: 3,
 	Gen2MoveEffect.ENDURE: 3,
 	0x67: 2,  # Quick Attack, Extreme Speed, Mach Punch
-	0x1C: 0,  # Whirlwind and Roar
+	Gen2MoveEffect.FORCE_SWITCH: 0,
 	Gen2MoveEffect.COUNTER: 0,
 	Gen2MoveEffect.MIRROR_COAT: 0,
 }
@@ -462,6 +478,14 @@ var enemy_goes_first: bool = false
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
 var _fled: bool = false
+
+## `wForcedSwitch`, the other way a battle ends in that same DRAW: Whirlwind or
+## Roar in a wild battle blows one side out of it rather than switching anybody.
+## `BattleTurn`'s `ld a, [wForcedSwitch] / jr nz, .quit` is what ends it, and
+## `SetBattleDraw` beside it is why [method winner] answers nobody.
+var _forced_out: bool = false
+## Which side was blown out, for a screen that has to say who left.
+var _forced_out_side: int = -1
 
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
@@ -609,7 +633,31 @@ func last_damage_taken(side: int) -> Dictionary:
 ## A battle is lost when a whole party is down, not when the Pokémon that is out
 ## has fainted. One of those is a defeat and the other is a Pokémon to replace.
 func is_over() -> bool:
-	return _fled or party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
+	return _fled or _forced_out or party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
+
+
+## `wForcedSwitch` and `SetBattleDraw` together: Whirlwind or Roar blowing
+## [param side] out of a wild battle, which ends it with nobody beaten.
+##
+## Nothing is switched and nobody faints, so both parties are left exactly as
+## they stand; [method winner] answers null the way it does for a run.
+func force_out(side: int) -> void:
+	if is_over():
+		return
+	_forced_out = true
+	_forced_out_side = side
+
+
+## Which side Whirlwind or Roar blew out, or -1 if neither did.
+func forced_out_side() -> int:
+	return _forced_out_side
+
+
+## Whether Whirlwind or Roar ended this battle by blowing a side out of it.
+## Separate from [method has_fled] because the two print different lines and only
+## one of them was the player's own decision, though both are the same DRAW.
+func was_forced_out() -> bool:
+	return _forced_out
 
 
 ## Whether the player has run from this battle. The parties are both still
@@ -696,7 +744,8 @@ func winner() -> Variant:
 	if not is_over():
 		return null
 	# Running is a DRAW: both parties are still standing and nobody beat anybody.
-	if _fled:
+	# `SetBattleDraw` makes Whirlwind and Roar the same answer for the same reason.
+	if _fled or _forced_out:
 		return null
 	if party(PLAYER).is_wiped() and party(ENEMY).is_wiped():
 		return null
@@ -790,7 +839,12 @@ func decline_move(side: int) -> Array:
 ## Sends a side's [param index] out, whether as a replacement or between turns.
 ## Returns the events, which is one event or none: a switch that cannot be made
 ## is refused rather than approximated.
-func send_out(side: int, index: int) -> Array:
+##
+## [param dragged_by] is the side that used Whirlwind or Roar, or -1 for an
+## ordinary switch. It exists because `DraggedOutText` is printed between
+## `ForceEnemySwitch` and `SpikesDamage`, so the line has to land inside this
+## method rather than around it.
+func send_out(side: int, index: int, dragged_by: int = -1) -> Array:
 	var events: Array = []
 	if is_over():
 		return events
@@ -802,6 +856,11 @@ func send_out(side: int, index: int) -> Array:
 	if not current.send_out(index):
 		return events
 	_clear_trapping()
+	# `BreakAttraction`, which every entrance calls and which clears the flag on
+	# *both* sides rather than only the incoming Pokémon's: whoever the Pokémon
+	# that left was in love with is not on the field any more either.
+	mon(PLAYER).substatus &= ~Gen2Substatus.ATTRACTED
+	mon(ENEMY).substatus &= ~Gen2Substatus.ATTRACTED
 	# `NewBattleMonStatus`, which clears the used-move list beside the rest of
 	# the incoming Pokémon's volatile state. The enemy's send-out leaves it
 	# alone: the list describes what the player has shown, not what it is facing.
@@ -820,6 +879,8 @@ func send_out(side: int, index: int) -> Array:
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
 	})
 	(_participants[side] as Dictionary)[index] = true
+	if dragged_by >= 0:
+		events.append({"type": DRAGGED_OUT, "side": dragged_by, "target": side})
 	_spikes_damage(side, events)
 	return events
 

@@ -154,6 +154,12 @@ const DESTINY_BOND: int = 194
 const DETECT: int = 197
 const ENDURE: int = 203
 
+## Whirlwind and Roar, which have to be real numbers twice over: they share one
+## effect byte, and `.succeed` picks between "fled in fear" and "was blown away"
+## by comparing the move against ROAR.
+const WHIRLWIND: int = 18
+const ROAR: int = 46
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -556,6 +562,8 @@ static func _moves() -> Array:
 		DESTINY_BOND: [
 			"DESTINY BOND", 0, GHOST, 255, 5, Gen2MoveEffect.DESTINY_BOND, 0,
 		],
+		WHIRLWIND: ["WHIRLWIND", 0, NORMAL, 255, 20, Gen2MoveEffect.FORCE_SWITCH, 0],
+		ROAR: ["ROAR", 0, NORMAL, 255, 20, Gen2MoveEffect.FORCE_SWITCH, 0],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.

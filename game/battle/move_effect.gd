@@ -206,6 +206,17 @@ const ENDURE: int = 116
 ## opponent's own `BattleCommand_CheckFaint` reads it.
 const DESTINY_BOND: int = 98
 
+## Whirlwind and Roar, which are one effect byte and two endings: against a
+## trainer they drag a random party member out, and against a wild they end the
+## battle outright. Priority 0, so the user almost always moves second, which the
+## command then requires of itself.
+const FORCE_SWITCH: int = 28
+
+## Roar's own move number. `.succeed` picks between the two lines by comparing
+## the move's animation byte against `ROAR`, and every move here animates as
+## itself, so the number is what tells the pair apart.
+const ROAR_MOVE: int = 46
+
 ## `EFFECT_NORMAL_HIT` as a byte rather than [constant NORMAL_HIT]'s list:
 ## `DoSubstituteDamage` stamps it over the move's own once a doll has broken.
 const NORMAL_HIT_EFFECT: int = 0
@@ -816,6 +827,22 @@ const DESTINY_BOND_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.DESTINY_BOND,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Whirlwind and Roar. `checkhit` is the one thing in front of the command.
+##
+## The list carries no `failuretext`, so on the cartridge a missed Whirlwind
+## reaches `forceswitch`, takes `.missed` and says "But it failed!" with no miss
+## line at all. Here `checkhit` ends the move and announces the miss, which is
+## the standing `failuretext` divergence and not a second one: nothing switches
+## either way, only the line differs. Every other list without a `failuretext`,
+## `DoParalyze` among them, already reads this way.
+const FORCE_SWITCH_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.FORCE_SWITCH,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1515,6 +1542,7 @@ static func _sequences() -> Dictionary:
 		PROTECT: PROTECT_SEQUENCE,
 		ENDURE: ENDURE_SEQUENCE,
 		DESTINY_BOND: DESTINY_BOND_SEQUENCE,
+		FORCE_SWITCH: FORCE_SWITCH_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

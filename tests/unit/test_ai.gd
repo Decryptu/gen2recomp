@@ -826,3 +826,25 @@ func test_smart_discourages_destiny_bond_and_reversal_above_a_quarter() -> void:
 			int(_smart_scores(hurt, pikachu, 0)[0]), 20,
 			"and left alone under a quarter"
 		)
+
+
+## `AI_Smart_ForceSwitch`: blowing the player away is worth a point against while
+## the pairing is going well, and left alone once `CheckPlayerMoveTypeMatchups`
+## says it is not.
+func test_smart_discourages_a_force_switch_while_the_matchup_is_holding() -> void:
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.WHIRLWIND, Fixture.TACKLE])
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+
+	var scores: Array = [20, 20, 20, 20]
+	Gen2BattleAI._apply_smart(
+		scores, geodude, pikachu, _data, _rng, 0, 0, Gen2Weather.NONE,
+		Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE
+	)
+	assert_eq(int(scores[0]), 21, "a neutral pairing is no reason to blow it away")
+
+	var losing: Array = [20, 20, 20, 20]
+	Gen2BattleAI._apply_smart(
+		losing, geodude, pikachu, _data, _rng, 0, 0, Gen2Weather.NONE,
+		Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE - 1
+	)
+	assert_eq(int(losing[0]), 20, "a pairing going badly is left alone")
