@@ -119,6 +119,17 @@ const DRAINING_EFFECTS: Array[int] = [
 	Gen2MoveEffect.LEECH_HIT, Gen2MoveEffect.DREAM_EATER,
 ]
 
+## The three moves `BattleCommand_CheckHit`'s `.LockOn` names by number: a
+## locked-on target that is flying is still out of reach of the three that only
+## strike downwards.
+##
+## Fissure is named and unreachable, here and on the cartridge: `OHKOHit` carries
+## no `checkhit`, so no `EFFECT_OHKO` move ever reads the flag.
+const LOCK_ON_GROUND_MOVES: Array[int] = [
+	Gen2MoveEffect.EARTHQUAKE_MOVE, Gen2MoveEffect.FISSURE_MOVE,
+	Gen2MoveEffect.MAGNITUDE_MOVE,
+]
+
 ## Counter and Mirror Coat do not roll their own accuracy. They validate the
 ## move that just hit the user, then leave the doubled damage for APPLY_DAMAGE.
 const COUNTER: StringName = &"counter"
@@ -316,6 +327,31 @@ const FORCE_SWITCH: StringName = &"forceswitch"
 
 ## Baton Pass, which switches the side that used it and hands everything over.
 const BATON_PASS: StringName = &"batonpass"
+
+## Teleport, which takes its own user out of a wild battle and ends it as a draw.
+const TELEPORT: StringName = &"teleport"
+
+## Foresight and Lock On, the two flags one side leaves on the other for the
+## accuracy step to read. Neither is spent by the move that set it: Foresight's
+## lasts until a switch and Lock On's is spent by the next hit check against it.
+const FORESIGHT: StringName = &"foresight"
+const LOCK_ON: StringName = &"lockon"
+
+## Spite, which takes two to five PP off the slot holding the target's last move.
+const SPITE: StringName = &"spite"
+
+## Pain Split, which writes the average of the two Pokémon's health into both.
+const PAIN_SPLIT: StringName = &"painsplit"
+
+## Thief, which moves the target's held item onto a thief carrying none.
+const THIEF: StringName = &"thief"
+
+## Pursuit, which doubles the finished figure against a side that is leaving.
+const PURSUIT: StringName = &"pursuit"
+
+## Beat Up, whose own body is the `startloop`/`endloop` pair around one hit per
+## party member, as [constant MULTI_HIT]'s is around one hit per roll.
+const BEAT_UP: StringName = &"beatup"
 
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
@@ -680,6 +716,22 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_force_switch(turn)
 		BATON_PASS:
 			_baton_pass(turn)
+		TELEPORT:
+			_teleport(turn)
+		FORESIGHT:
+			_foresight(turn)
+		LOCK_ON:
+			_lock_on(turn)
+		SPITE:
+			_spite(turn)
+		PAIN_SPLIT:
+			_pain_split(turn)
+		THIEF:
+			_thief(turn)
+		PURSUIT:
+			_pursuit(turn)
+		BEAT_UP:
+			_beat_up(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -775,7 +827,8 @@ static func _damage_calc(turn: Gen2Turn) -> void:
 		turn.attacker(), int(effective.get("power", 0)),
 		turn.attack_stat, turn.defense_stat,
 		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
-		int(effective.get("type", RomLayout.TYPE_NORMAL)), turn.critical
+		int(effective.get("type", RomLayout.TYPE_NORMAL)), turn.critical,
+		turn.level_override
 	)
 
 
@@ -785,7 +838,8 @@ static func _damage_calc(turn: Gen2Turn) -> void:
 static func _stab(turn: Gen2Turn) -> void:
 	var result: Dictionary = Gen2Damage.stab_damage(
 		turn.attacker(), turn.defender(), turn.effective_move(), turn.damage,
-		turn.battle.weather
+		turn.battle.weather,
+		Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.IDENTIFIED)
 	)
 	turn.damage = int(result["damage"])
 	turn.effectiveness = int(result["effectiveness"])
@@ -1061,15 +1115,7 @@ static func _check_hit(turn: Gen2Turn) -> void:
 			turn.end()
 		return
 
-	if _is_hidden(turn.defender().substatus) \
-		and not _can_hit_hidden(turn.move_number, turn.defender().substatus):
-		turn.missed = true
-		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		_jump_kick_crash(turn)
-		if not CONTINUES_AFTER_MISS.has(turn.effect()):
-			turn.end()
-		return
-
+	# `.DreamEater`, first.
 	if turn.effect() == Gen2MoveEffect.DREAM_EATER \
 		and not Gen2Status.is_asleep(turn.defender().status):
 		turn.missed = true
@@ -1078,14 +1124,11 @@ static func _check_hit(turn: Gen2Turn) -> void:
 			turn.end()
 		return
 
-	# `.Protect`, second in `BattleCommand_CheckHit` and ahead of everything but
-	# the Dream Eater question. One gate for the whole game: 47 of the lists here
-	# carry `checkhit`, so a Protect turns away a damaging move, a status move and
-	# a stat drop alike without any of them knowing about it.
-	#
-	# The project already runs `.FlyDigMoves` in front of `.DreamEater` where the
-	# source runs it behind this, so between those three only the order of two
-	# refusal messages differs, never which of them refuses.
+	# `.Protect`, second, and ahead of everything but the Dream Eater question.
+	# One gate for the whole game: 47 of the lists here carry `checkhit`, so a
+	# Protect turns away a damaging move, a status move and a stat drop alike
+	# without any of them knowing about it. Ahead of `.LockOn`, so a Protect
+	# turns a locked-on move away *and* leaves the flag standing for the next one.
 	if Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.PROTECT):
 		turn.missed = true
 		turn.emit(Gen2Battle.PROTECTING_ITSELF, {"target": turn.target})
@@ -1101,6 +1144,33 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	if _substitute_refuses(turn) and turn.effect() in DRAINING_EFFECTS:
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
+			turn.end()
+		return
+
+	# `.LockOn`, fourth. The flag is spent on every hit check whether it was set or
+	# not, which is `res SUBSTATUS_LOCK_ON, [hl]` sitting in front of `ret z`, and
+	# it is the target's flag rather than the aimer's.
+	#
+	# A locked-on target that is flying is still missed by the three moves that
+	# only reach a target underground. `CheckHiddenOpponent` has no such list,
+	# which is `docs/bugs_and_glitches.md`'s "Lock-On and Mind Reader don't always
+	# bypass Fly and Dig": mirrored, not fixed.
+	var aimed_at: Gen2BattleMon = turn.defender()
+	var locked_on: bool = Gen2Substatus.has(aimed_at.substatus, Gen2Substatus.LOCK_ON)
+	aimed_at.substatus &= ~Gen2Substatus.LOCK_ON
+	if locked_on and not (
+		Gen2Substatus.has(aimed_at.substatus, Gen2Substatus.FLYING)
+		and LOCK_ON_GROUND_MOVES.has(turn.move_number)
+	):
+		return
+
+	# `.FlyDigMoves`, fifth, and behind the lock-on question for that reason.
+	if _is_hidden(turn.defender().substatus) \
+		and not _can_hit_hidden(turn.move_number, turn.defender().substatus):
+		turn.missed = true
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		_jump_kick_crash(turn)
 		if not CONTINUES_AFTER_MISS.has(turn.effect()):
 			turn.end()
 		return
@@ -1123,10 +1193,14 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	if turn.effect() == Gen2MoveEffect.ALWAYS_HIT:
 		return
 
+	# `.StatModifiers`, whose Foresight branch returns before it multiplies
+	# anything: an identified target whose evasion is at least the attacker's
+	# accuracy has the whole stage block skipped, and the stored byte stands.
 	var chance: int = Gen2Accuracy.chance(
 		turn.accuracy if turn.accuracy >= 0 \
 			else int(turn.move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)),
-		turn.attacker().stage("accuracy"), turn.defender().stage("evasion")
+		turn.attacker().stage("accuracy"), turn.defender().stage("evasion"),
+		Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.IDENTIFIED)
 	)
 
 	# `.BrightPowder`, after the stat modifiers and before the roll: the item's
@@ -1819,7 +1893,8 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 		if hit > 0:
 			var result: Dictionary = Gen2Damage.calculate(
 				attacker, defender, turn.effective_move(), turn.rng(), focus_energy,
-				false, turn.battle.weather, turn.battle.screens[turn.target]
+				false, turn.battle.weather, turn.battle.screens[turn.target],
+				Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
 			)
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
@@ -2738,6 +2813,278 @@ static func _baton_pass(turn: Gen2Turn) -> void:
 	turn.events.append_array(
 		battle.baton_pass_send_out(side, battle.baton_pass_target(side))
 	)
+
+
+## `BattleCommand_Teleport`: the user takes itself out of a wild battle, which
+## ends it as a draw with nobody beaten. `wForcedSwitch` and `SetBattleDraw` are
+## [method Gen2Battle.force_out], the same pair Whirlwind and Roar reach, except
+## that the side leaving is the user's rather than the target's.
+##
+## Four refusals in the source's order: the four scripted `wBattleType` values,
+## the opponent holding the user with Mean Look or Spider Web, a trainer battle,
+## and the level comparison. The comparison is `BattleCommand_ForceSwitch`'s: a
+## user at or above the other's level always gets away, and below it the roll is
+## drawn out of the two levels summed and one more and fails only under a quarter
+## of the other's level.
+##
+## The enemy's half draws that roll and then throws it away: `cp b / jr nc,
+## .run_away` falls straight into `.run_away`, so a wild Pokémon always
+## teleports. That is `docs/bugs_and_glitches.md`'s "Wild Pokémon can always
+## Teleport regardless of level difference", mirrored rather than fixed, and the
+## roll is still drawn so the generator moves the same way.
+static func _teleport(turn: Gen2Turn) -> void:
+	if FORCE_SWITCH_REFUSED_TYPES.has(turn.battle.battle_type) \
+		or Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.CANT_RUN) \
+		or turn.battle.is_trainer_battle:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	var user_level: int = turn.attacker().level
+	var other_level: int = turn.defender().level
+	if user_level < other_level:
+		var span: int = user_level + other_level + 1
+		var roll: int = turn.rng().randi_range(0, span - 1)
+		if turn.side == Gen2Battle.PLAYER and roll < other_level >> 2:
+			turn.emit(Gen2Battle.MOVE_FAILED)
+			return
+
+	turn.battle.force_out(turn.side)
+	turn.battle.battle_anim_param = FORCE_SWITCH_ANIM_PARAM
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.FLED_FROM_BATTLE)
+
+
+## `BattleCommand_Foresight`: the flag that drops the target's evasion out of the
+## accuracy sum and opens the two Ghost immunities the matchup table keeps past
+## its own `-2` marker. It sits on the target and nothing but a switch clears it.
+##
+## Two refusals: a target that is flying or underground, and one already
+## identified. Only the second is reached through the cartridge's own list, on the
+## cartridge as well as here, since `checkhit` in front of the command has already
+## turned a hidden target away. The first is kept for a registered list that
+## carries no `checkhit`.
+static func _foresight(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if _is_hidden(defender.substatus) \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.substatus |= Gen2Substatus.IDENTIFIED
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.IDENTIFIED_SET, {"target": turn.target})
+
+
+## `BattleCommand_LockOn`: Lock On and Mind Reader, one command. The flag goes on
+## the target, and [method _check_hit] spends it on the next hit check made
+## against that Pokémon, whoever makes it.
+##
+## The one refusal is a target behind a doll, and it prints
+## `PrintDidntAffect` rather than "But it failed!".
+static func _lock_on(turn: Gen2Turn) -> void:
+	if _substitute_refuses(turn):
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		return
+
+	turn.defender().substatus |= Gen2Substatus.LOCK_ON
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.TOOK_AIM)
+
+
+## `BattleCommand_Spite`: two to five PP off the slot holding the target's last
+## move, or as much as that slot has left.
+##
+## The slot is found by searching the target's own move list, the way
+## [method _disable] finds Disable's, and the guard for a move no longer in that
+## list is this project's rather than the cartridge's: `.loop` there has no bound
+## and would run off the end of the list. It is reachable only through a
+## mid-battle level up replacing a slot.
+##
+## Four refusals, all `PrintDidntAffect2`: a target that has not moved, a last
+## move of Struggle, a slot already empty of PP, and the missing slot above.
+static func _spite(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	var last_move: int = defender.last_move_used
+	if last_move == 0 or last_move == Gen2Damage.STRUGGLE:
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		return
+
+	var slot: int = defender.moves.find(last_move)
+	if slot < 0 or defender.pp_left(slot) <= 0:
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		return
+
+	var amount: int = mini(_roll_spite_pp(turn.rng()), defender.pp_left(slot))
+	defender.pp[slot] = int(defender.pp[slot]) - amount
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.PP_REDUCED, {
+		"target": turn.target, "slot": slot, "move": last_move, "amount": amount,
+	})
+
+
+## `call BattleRandom / and %11 / inc a / inc a`: two bits of a random byte and
+## two added, so two through five.
+static func _roll_spite_pp(rng: RandomNumberGenerator) -> int:
+	return rng.randi_range(0, 3) + SPITE_MIN_PP
+
+
+const SPITE_MIN_PP: int = 2
+
+
+## `BattleCommand_PainSplit`: both Pokémon end on the average of the two current
+## totals, floored, and neither goes above its own maximum.
+##
+## The health words are written by hand, so nothing stands between this and
+## either Pokémon: no doll takes it, no Focus Band fires and no Endure clamps it.
+## Both are standing when this runs, so the average is at least one and the move
+## cannot faint anybody.
+##
+## Two refusals, both `PrintDidntAffect2`: a miss, which `checkhit` has already
+## turned into an ended move, and a target behind a doll.
+static func _pain_split(turn: Gen2Turn) -> void:
+	if _substitute_refuses(turn):
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		return
+
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+	@warning_ignore("integer_division")
+	var shared: int = (attacker.hp + defender.hp) / 2
+	_animate_current_move(turn)
+	attacker.hp = mini(shared, attacker.max_hp())
+	defender.hp = mini(shared, defender.max_hp())
+	turn.emit(Gen2Battle.SHARED_PAIN, {
+		"target": turn.target,
+		"hp": attacker.hp, "max_hp": attacker.max_hp(),
+		"target_hp": defender.hp, "target_max_hp": defender.max_hp(),
+	})
+
+
+## `BattleCommand_Thief`: the target's held item, onto a thief carrying none.
+##
+## The cartridge writes both the battle struct and the party struct, because they
+## are two copies of one Pokémon; here [method Gen2Battle.mon] hands back the
+## party member itself, so one write is both and a stolen item is gone for good
+## on either side without anything extra.
+##
+## Four refusals in the source's order, every one of them silent: the thief
+## already holds something, the target holds nothing, the item is mail, and the
+## move's own chance came up short. The chance is read last, which costs nothing
+## since `effectchance` drew its roll earlier in the list.
+static func _thief(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var defender: Gen2BattleMon = turn.defender()
+	if attacker.item != 0 or defender.item == 0:
+		return
+	if Gen2HeldItem.is_mail(defender.item) or turn.failed_chance:
+		return
+
+	var stolen: int = defender.item
+	defender.item = 0
+	attacker.item = stolen
+	turn.emit(Gen2Battle.STOLE_ITEM, {"target": turn.target, "item": stolen})
+
+
+## `BattleCommand_Pursuit`: twice the finished figure against a side that is
+## leaving, saturating at a word rather than wrapping.
+##
+## The doubling is all this command is. What makes Pursuit hit the Pokémon on its
+## way out is `PursuitSwitch`, which runs the whole move in front of the switch;
+## see [method Gen2Battle.take_actions].
+static func _pursuit(turn: Gen2Turn) -> void:
+	if not turn.battle.is_switching(turn.target):
+		return
+	turn.damage = mini(turn.damage * 2, 0xFFFF)
+
+
+## `BattleCommand_BeatUp` with `startloop` and `endloop` around it: one hit per
+## member of the user's own party, in party order, each worked out from that
+## member's species base Attack and its own level.
+##
+## The loop is inside this command as [method _multi_hit]'s is inside that one,
+## because `endloop` jumps back to `critical` rather than to the top of the list:
+## `checkhit` is outside it and rolls once for the whole move.
+##
+## `damagecalc` is handed base stats rather than real ones and never sees
+## `damagestats`, so no item, no screen, no stage and no truncation touches
+## either figure. There is no `stab` either, so no same-type bonus, no weather
+## and no matchup: `CheckTurn` leaves the type modifier at `EFFECTIVE` for the
+## whole turn and `supereffectivetext` says nothing.
+##
+## `.beatup_fail` skips a member with no health or with any status at all and
+## lets the loop carry on, which is `SkipToBattleCommand buildopponentrage`, and
+## `endloop` prints no "hit N times" line for this effect (`.beat_up_2`).
+static func _beat_up(turn: Gen2Turn) -> void:
+	var battle: Gen2Battle = turn.battle
+	var party: Gen2Party = battle.party(turn.side)
+	var defender: Gen2BattleMon = turn.defender()
+
+	# `.wild`, which has no party to walk: `EnemyAttackDamage` gives the wild
+	# Pokémon one ordinary hit off its own real stats, and `endloop`'s
+	# `.check_ot_beat_up` then falls into `.only_one_beatup`. Nothing on that path
+	# ever set `wBeatUpHitAtLeastOnce`, so the hit lands and "But it failed!" is
+	# printed behind it anyway.
+	if turn.side == Gen2Battle.ENEMY and not battle.is_trainer_battle:
+		turn.emit(Gen2Battle.BEAT_UP_ATTACK, {"index": -1, "species": turn.attacker().species})
+		_damage_stats(turn)
+		_beat_up_hit(turn)
+		if defender.is_fainted():
+			_check_faint(turn)
+		else:
+			turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
+		return
+
+	var struck: bool = false
+	for index: int in party.size():
+		var member: Gen2BattleMon = party.at(index)
+		if not member.is_fainted() and member.status == Gen2Status.NONE:
+			struck = true
+			turn.emit(Gen2Battle.BEAT_UP_ATTACK, {
+				"index": index, "species": member.species,
+			})
+			turn.attack_stat = _base_stat(turn, member.species, "attack")
+			turn.defense_stat = _base_stat(turn, defender.species, "defense")
+			turn.level_override = member.level
+			turn.power_override = int(turn.move.get("power", 0))
+			_beat_up_hit(turn)
+			if defender.is_fainted():
+				_check_faint(turn)
+				turn.end()
+				return
+
+		# `.only_one_beatup`, which the whole party reaches on `cp 1`: the loop
+		# flag is cleared and the move ends outright, so `kingsrock` behind it
+		# never runs. `docs/bugs_and_glitches.md`'s "Beat Up works incorrectly
+		# with only one Pokémon in the party", mirrored rather than fixed.
+		if party.size() == 1:
+			if not struck:
+				turn.emit(Gen2Battle.MOVE_FAILED)
+			turn.end()
+			return
+
+	# `beatupfailtext`, which says nothing when any member landed a hit.
+	if not struck:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+
+
+## One pass of the loop: `critical`, `beatup`'s own numbers, `damagecalc`,
+## `damagevariation`, `moveanimnosub` and `applydamage`.
+##
+## `clearmissdamage` is structural, since the one `checkhit` sits outside the loop
+## and has already ended the move on a miss.
+static func _beat_up_hit(turn: Gen2Turn) -> void:
+	_critical(turn)
+	_damage_calc(turn)
+	_damage_variation(turn)
+	_move_anim(turn)
+	_apply_damage(turn)
+
+
+## A species' own base Attack or base Defense, which is what `GetBaseData` leaves
+## in `wBaseAttack` and `wBaseDefense` for `BattleCommand_BeatUp` to load.
+static func _base_stat(turn: Gen2Turn, species: int, key: String) -> int:
+	return int(turn.data().species(species).get("stats", {}).get(key, 0))
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status

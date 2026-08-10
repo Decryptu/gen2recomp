@@ -229,3 +229,42 @@ func test_every_refusal_reason_the_mod_layer_produces_has_player_wording() -> vo
 		assert_false(text.is_empty())
 	# An unworded reason still names something a search finds.
 	assert_string_contains(Gen2ModRefusal.text({"reason": &"brand_new"}), "brand_new")
+
+
+## The eight steps the last row of the effects table added are engine steps like
+## every other: a mod can name them in a list of its own and cannot take them over.
+func test_the_last_rows_steps_are_engine_steps_a_mod_can_name() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var steps: Array = [
+		Gen2EffectCommands.TELEPORT, Gen2EffectCommands.FORESIGHT,
+		Gen2EffectCommands.LOCK_ON, Gen2EffectCommands.SPITE,
+		Gen2EffectCommands.PAIN_SPLIT, Gen2EffectCommands.THIEF,
+		Gen2EffectCommands.PURSUIT, Gen2EffectCommands.BEAT_UP,
+	]
+	for step: StringName in steps:
+		assert_true(Gen2EffectCommands.is_engine_command(step), String(step))
+		assert_eq(
+			StringName(host.register_effect_command(MOD, step, _note)["reason"]),
+			&"reserved_effect_command", String(step)
+		)
+
+	var result: Dictionary = host.register_move_effect(MOD, NEW_EFFECT, [
+		Gen2EffectCommands.USED_MOVE_TEXT, Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.CHECK_HIT, Gen2EffectCommands.LOCK_ON,
+		Gen2EffectCommands.END_MOVE,
+	])
+	assert_true(bool(result["ok"]), JSON.stringify(result))
+	assert_true(Gen2MoveEffect.is_written(NEW_EFFECT))
+
+
+## None of the eight reads its own effect byte back, so none of them joins the
+## list a mod cannot rewrite.
+func test_the_last_rows_effects_stay_replaceable() -> void:
+	for effect: int in [
+		Gen2MoveEffect.PAIN_SPLIT, Gen2MoveEffect.LOCK_ON, Gen2MoveEffect.SPITE,
+		Gen2MoveEffect.THIEF, Gen2MoveEffect.FORESIGHT, Gen2MoveEffect.PURSUIT,
+		Gen2MoveEffect.TELEPORT, Gen2MoveEffect.BEAT_UP,
+	]:
+		assert_true(bool(Gen2ModHost.instance().register_move_effect(
+			MOD, effect, [Gen2EffectCommands.END_MOVE]
+		)["ok"]), "effect %d" % effect)

@@ -85,7 +85,10 @@ const ROLLING_KICK_ALWAYS: int = 247
 const ROLLING_KICK_NEVER: int = 248
 const CONFUSION_ALWAYS: int = 249
 const CONFUSION_NEVER: int = 250
-const SUPERSONIC: int = 251
+## Parked past every other row rather than on 251, which is Beat Up's own number
+## and is now filled with that row. Supersonic really is move 48, and this entry
+## is not it: its accuracy is forced to 255 so a confusion test needs no seed.
+const SUPERSONIC: int = 280
 const HYPER_BEAM: int = 252
 
 ## The three move families this fixture keeps at their real Generation 2 move
@@ -247,8 +250,22 @@ const MINIMIZE: int = 107
 const SPLASH: int = 150
 const SWAGGER: int = 207
 
+## The last row of the effects table, all nine at their real move numbers with
+## their real bytes. Lock On and Mind Reader have to be two numbers over one
+## effect byte the way Protect and Detect do, and Beat Up's power of 10 is the
+## whole of what its own command hands the formula.
+const TELEPORT: int = 100
+const THIEF: int = 168
+const MIND_READER: int = 170
+const SPITE: int = 180
+const FORESIGHT: int = 193
+const LOCK_ON: int = 199
+const PAIN_SPLIT: int = 220
+const PURSUIT: int = 228
+const BEAT_UP: int = 251
+
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = PSYCHIC_NEVER
+const MAX_MOVE: int = SUPERSONIC
 const BERRY_ITEM: int = 0xAD
 
 ## The highest item number this table fills.
@@ -277,6 +294,10 @@ const MYSTERYBERRY: int = 150
 const PSNCUREBERRY: int = 74
 const MIRACLEBERRY: int = 109
 const BITTER_BERRY: int = 83
+
+## `MailItems`' first entry, at its real number. The one item Thief has to leave
+## where it is, and it carries no held effect: `ItemIsMail` checks the number.
+const FLOWER_MAIL: int = 158
 
 ## Exp. Share, at its real number. It carries no held effect at all: the routine
 ## that finds it checks the item number, so the default row is the whole of what
@@ -321,11 +342,13 @@ const MATCHUPS: Array = [
 	[FIRE, GRASS, 20], [FIRE, WATER, 5], [FIRE, FIRE, 5], [FIRE, ROCK, 5],
 	[GRASS, ROCK, 20], [GRASS, GROUND, 20], [GRASS, POISON, 5], [GRASS, GRASS, 5],
 	[NORMAL, ROCK, 5], [NORMAL, STEEL, 5],
-	[FIGHTING, GHOST, 0], [PSYCHIC_TYPE, DARK, 0],
+	[PSYCHIC_TYPE, DARK, 0],
 ]
 
-## The two the cartridge keeps past the Foresight marker.
-const FORESIGHT_MATCHUPS: Array = [[NORMAL, GHOST, 0]]
+## The two the cartridge keeps past the Foresight marker, and the only place
+## either appears: `data/types/type_matchups.asm` lists Normal and Fighting
+## against Ghost after `db -2` and nowhere before it.
+const FORESIGHT_MATCHUPS: Array = [[NORMAL, GHOST, 0], [FIGHTING, GHOST, 0]]
 
 
 ## Writes a cache at [param directory] and opens it.
@@ -631,6 +654,22 @@ static func _moves() -> Array:
 		MINIMIZE: ["MINIMIZE", 0, NORMAL, 255, 20, Gen2MoveEffect.STAT_UP_BASE + 6, 0],
 		SPLASH: ["SPLASH", 0, NORMAL, 255, 40, Gen2MoveEffect.SPLASH, 0],
 		SWAGGER: ["SWAGGER", 0, NORMAL, 229, 15, Gen2MoveEffect.SWAGGER, 255],
+		# The last row of the effects table. All nine store an accuracy of 255, so
+		# `checkhit` never rolls one, and Thief's `100 percent` chance is a roll
+		# `effectchance` cannot fail.
+		TELEPORT: ["TELEPORT", 0, PSYCHIC_TYPE, 255, 20, Gen2MoveEffect.TELEPORT, 0],
+		THIEF: ["THIEF", 40, DARK, 255, 10, Gen2MoveEffect.THIEF, 256],
+		MIND_READER: [
+			"MIND READER", 0, NORMAL, 255, 5, Gen2MoveEffect.LOCK_ON, 0,
+		],
+		SPITE: ["SPITE", 0, GHOST, 255, 10, Gen2MoveEffect.SPITE, 0],
+		FORESIGHT: ["FORESIGHT", 0, NORMAL, 255, 40, Gen2MoveEffect.FORESIGHT, 0],
+		LOCK_ON: ["LOCK-ON", 0, NORMAL, 255, 5, Gen2MoveEffect.LOCK_ON, 0],
+		PAIN_SPLIT: [
+			"PAIN SPLIT", 0, NORMAL, 255, 20, Gen2MoveEffect.PAIN_SPLIT, 0,
+		],
+		PURSUIT: ["PURSUIT", 40, DARK, 255, 20, Gen2MoveEffect.PURSUIT, 0],
+		BEAT_UP: ["BEAT UP", 10, DARK, 255, 10, Gen2MoveEffect.BEAT_UP, 0],
 	}
 
 	var out: Array = []

@@ -51,6 +51,12 @@ var defense_stat: int = 0
 var power_override: int = -1
 var type_override: int = -1
 
+## The level `damagecalc` multiplies, or -1 for the attacker's own. The one field
+## here with no `wPlayerMoveStruct` counterpart: `BattleCommand_BeatUp` hands the
+## formula a party member's level in `e`, and the Pokémon on the field is only
+## one of the six it walks.
+var level_override: int = -1
+
 ## The same per-turn copy one field along, with one writer: `DoSubstituteDamage`
 ## stamps `EFFECT_NORMAL_HIT` over `wPlayerMoveStruct + MOVE_EFFECT` once a doll
 ## has broken, so the steps behind the break read an ordinary attack.

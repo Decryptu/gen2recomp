@@ -2046,6 +2046,31 @@ func _describe(event: Dictionary) -> String:
 			return "%s fled in fear!" % _battler_name(int(event["target"]))
 		Gen2Battle.BLOWN_AWAY:
 			return "%s was blown away!" % _battler_name(int(event["target"]))
+		Gen2Battle.FLED_FROM_BATTLE:
+			return "%s fled from battle!" % _battler_name(side)
+		Gen2Battle.IDENTIFIED_SET:
+			return "%s identified %s!" % [
+				_battler_name(side), _battler_name(int(event["target"])),
+			]
+		Gen2Battle.TOOK_AIM:
+			return "%s took aim!" % _battler_name(side)
+		Gen2Battle.PP_REDUCED:
+			return "%s's %s was reduced by %d!" % [
+				_battler_name(int(event["target"])),
+				String(_data.move(int(event["move"])).get("name", "")),
+				int(event["amount"]),
+			]
+		Gen2Battle.SHARED_PAIN:
+			# SharedPainText names neither Pokemon, since both were levelled.
+			return "The battlers shared pain!"
+		Gen2Battle.STOLE_ITEM:
+			return "%s stole %s from its foe!" % [
+				_battler_name(side), _data.item_name(int(event["item"])),
+			]
+		Gen2Battle.BEAT_UP_ATTACK:
+			# BeatUpAttackText names the party member that is swinging, which is
+			# only sometimes the Pokemon on the field.
+			return "%s's attack!" % _name_of(int(event["species"]))
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

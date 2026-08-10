@@ -848,3 +848,245 @@ func test_smart_discourages_a_force_switch_while_the_matchup_is_holding() -> voi
 		Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE - 1
 	)
 	assert_eq(int(losing[0]), 20, "a pairing going badly is left alone")
+
+
+## `AI_Redundant`'s `.Foresight`: identifying an already-identified target is a
+## wasted turn.
+func test_basic_discourages_foresight_against_an_identified_target() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.FORESIGHT, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus = Gen2Substatus.IDENTIFIED
+	for seed_value: int in 10:
+		_rng.seed = seed_value
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_BASIC, _rng),
+			1, "a second Foresight identifies nothing"
+		)
+
+
+## `.Teleport` is a label on `.Redundant` itself, so a trainer never throws it.
+func test_basic_always_discourages_teleport() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TELEPORT, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	for seed_value: int in 10:
+		_rng.seed = seed_value
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_BASIC, _rng),
+			1, "there is nowhere to teleport away from a trainer"
+		)
+
+
+## `AI_Types` sets `hBattleTurn` to the enemy before `BattleCheckTypeMatchup`, so
+## the flag it reads is the target's: an identified Ghost stops being immune and
+## the Normal move stops being dismissed.
+func test_types_reads_the_targets_foresight_flag() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE, Fixture.THUNDERBOLT])
+	var gastly: Gen2BattleMon = _mon(Fixture.GASTLY, 50, [Fixture.TACKLE])
+	for seed_value: int in 10:
+		_rng.seed = seed_value
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, gastly, _data, RomLayout.AI_TYPES, _rng),
+			1, "Normal cannot touch a Ghost, so the Electric move wins"
+		)
+
+	gastly.substatus = Gen2Substatus.IDENTIFIED
+	var identified: Array = _scores(pikachu, gastly, RomLayout.AI_TYPES)
+	assert_eq(int(identified[0]), Gen2BattleAI.DEFAULT_SCORE,
+		"identified, the Normal move is not dismissed any more"
+	)
+
+
+## `AI_Smart_Thief`: `add $1e` and nothing else, which puts it past every other
+## move on the list.
+func test_smart_puts_thief_thirty_points_behind() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.THIEF, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var scores: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(int(scores[0]), Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.THIEF_PENALTY)
+	assert_eq(int(scores[1]), Gen2BattleAI.DEFAULT_SCORE)
+
+
+## `AI_Smart_PainSplit`: pointless while the user is the healthier of the two,
+## which is `enemy hp * 2 > player hp` rather than a comparison of fractions.
+func test_smart_discourages_pain_split_while_the_user_is_healthier() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PAIN_SPLIT, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+
+	var healthier: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(int(healthier[0]), Gen2BattleAI.DEFAULT_SCORE + 1)
+
+	pikachu.hp = 1
+	var hurt: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(int(hurt[0]), Gen2BattleAI.DEFAULT_SCORE, "worth it once the user is behind")
+
+
+## `AI_Smart_Pursuit`: two points off against a target nearly down, and discouraged
+## against one with health left. Both branches roll, so both are sampled.
+func test_smart_pursuit_prefers_a_target_that_is_nearly_down() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PURSUIT, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.hp = 1
+
+	var encouraged: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(encouraged.has(Gen2BattleAI.DEFAULT_SCORE - 2), "the 50% that encourages")
+	assert_true(encouraged.has(Gen2BattleAI.DEFAULT_SCORE), "and the half that does not")
+
+	geodude.hp = geodude.max_hp()
+	var discouraged: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(discouraged.has(Gen2BattleAI.DEFAULT_SCORE + 1), "the 20% that discourages")
+	assert_true(discouraged.has(Gen2BattleAI.DEFAULT_SCORE))
+
+
+## `AI_Smart_Foresight`: worth it against a Ghost, which is the only target the
+## flag opens a matchup against, and almost always discouraged otherwise.
+func test_smart_foresight_wants_a_ghost() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.FORESIGHT, Fixture.TACKLE])
+	var gastly: Gen2BattleMon = _mon(Fixture.GASTLY, 50, [Fixture.TACKLE])
+	var against_ghost: Dictionary = _score_spread(pikachu, gastly, RomLayout.AI_SMART, 0)
+	assert_true(against_ghost.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var against_rock: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_false(against_rock.has(Gen2BattleAI.DEFAULT_SCORE - 2),
+		"nothing to open, so it is never encouraged"
+	)
+	assert_true(against_rock.has(Gen2BattleAI.DEFAULT_SCORE + 1), "the 92% that discourages")
+
+	# A sharply raised evasion is the other way in.
+	geodude.stages["evasion"] = 3
+	var against_evasion: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(against_evasion.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+
+
+## `AI_Smart_Spite`: below six PP is worth draining, fifteen or more is not, and a
+## target that has not moved yet is judged on speed instead.
+func test_smart_spite_reads_the_pp_of_the_move_it_would_drain() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SPITE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.last_move_used = Fixture.TACKLE
+
+	geodude.pp[0] = 5
+	var nearly_out: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(nearly_out.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+
+	geodude.pp[0] = 20
+	var plenty: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_eq(plenty.keys(), [Gen2BattleAI.DEFAULT_SCORE + 1],
+		"fifteen or more discourages without a roll"
+	)
+
+
+## A target that has not moved is judged on speed: the faster user dismisses it
+## outright, since it would never see a move to drain.
+func test_smart_spite_dismisses_itself_when_the_user_is_faster() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SPITE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var scores: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(
+		int(scores[0]),
+		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE
+	)
+
+
+## `AI_Smart_LockOn`'s `.player_locked_on`: with the target already aimed at,
+## every inaccurate move is encouraged and Lock On itself is dismissed.
+func test_smart_lock_on_dismisses_itself_once_the_target_is_aimed_at() -> void:
+	var pikachu: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.LOCK_ON, Fixture.DISABLE_MOVE, Fixture.SCREECH]
+	)
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus = Gen2Substatus.LOCK_ON
+	var scores: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+
+	assert_eq(
+		int(scores[0]),
+		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE,
+		"aiming again is wasted"
+	)
+	assert_eq(int(scores[1]), Gen2BattleAI.DEFAULT_SCORE - 2,
+		"Disable stores 140, under the 180 the threshold compares against"
+	)
+	assert_eq(int(scores[2]), Gen2BattleAI.DEFAULT_SCORE,
+		"Screech stores 216 and never needed the help"
+	)
+
+
+## The other half: aiming is worth it against a sharply raised evasion and not
+## worth a turn while the user is nearly down.
+func test_smart_lock_on_reads_health_then_evasion() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.LOCK_ON, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.stages["evasion"] = 3
+	var wanted: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(wanted.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+
+	pikachu.hp = 1
+	var nearly_down: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(int(nearly_down[0]), Gen2BattleAI.DEFAULT_SCORE + 1,
+		"below a quarter it is not worth the turn"
+	)
+
+
+## `AI_Smart_Protect`'s second test: with a guaranteed hit already lined up,
+## sitting the turn out wastes it.
+func test_smart_protect_is_discouraged_while_the_player_is_locked_on() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PROTECT, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus = Gen2Substatus.LOCK_ON
+	var spread: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+
+	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE + 2), "the two-point penalty")
+	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE), "and the 8% that skips it")
+	assert_false(spread.has(Gen2BattleAI.DEFAULT_SCORE - 1), "never encouraged")
+
+
+## `AI_Smart_Endure`'s `.no_reversal`: a guaranteed incoming hit is exactly what
+## surviving on one point is for, even with no Reversal to answer with.
+func test_smart_endure_wants_to_survive_a_locked_on_hit() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.ENDURE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	pikachu.hp = 1
+
+	var unaimed: Array = _scores(pikachu, geodude, RomLayout.AI_SMART)
+	assert_eq(int(unaimed[0]), Gen2BattleAI.DEFAULT_SCORE, "nothing to survive")
+
+	pikachu.substatus |= Gen2Substatus.LOCK_ON
+	var aimed: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(aimed.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+	assert_true(aimed.has(Gen2BattleAI.DEFAULT_SCORE), "the half that does nothing")
+
+
+## `AI_Smart_TrapTarget` encourages on five states, and two of them are the flags
+## Foresight and Nightmare leave behind.
+func test_smart_trap_target_encourages_on_a_foresight_or_a_nightmare() -> void:
+	for flag: int in [Gen2Substatus.IDENTIFIED, Gen2Substatus.NIGHTMARE]:
+		var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.WRAP, Fixture.TACKLE])
+		var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+		geodude.substatus = flag
+		var spread: Dictionary = _score_spread(
+			pikachu, geodude, RomLayout.AI_SMART, 0, 1, 1
+		)
+		assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE - 2), "flag %d" % flag)
+
+
+## One scoring pass, with the seed left where the test set it.
+func _scores(
+	attacker: Gen2BattleMon, defender: Gen2BattleMon, flags: int,
+	attacker_turns: int = 1, defender_turns: int = 1
+) -> Array:
+	return Gen2BattleAI.score_slots(
+		attacker, defender, _data, flags, _rng, attacker_turns, defender_turns
+	)
+
+
+## The set of scores one slot takes across enough seeds to see both sides of a
+## roll, for the handlers whose branches are probabilistic.
+func _score_spread(
+	attacker: Gen2BattleMon, defender: Gen2BattleMon, flags: int, slot: int,
+	attacker_turns: int = 1, defender_turns: int = 1
+) -> Dictionary:
+	var seen: Dictionary = {}
+	for seed_value: int in 60:
+		_rng.seed = seed_value
+		seen[int(_scores(attacker, defender, flags, attacker_turns, defender_turns)[slot])] = true
+	return seen

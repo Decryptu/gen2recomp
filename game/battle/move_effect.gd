@@ -225,9 +225,39 @@ const BATON_PASS: int = 127
 ## `DoSubstituteDamage` stamps it over the move's own once a doll has broken.
 const NORMAL_HIT_EFFECT: int = 0
 
-## Beat Up, named for that command's exemption list alone. The effect itself is
-## unwritten.
+## Beat Up: one hit per standing, healthy member of the user's own party, each
+## worked out from that member's base Attack and level rather than the field
+## Pokémon's. The one list with no `stab`, so no same-type bonus, no weather and
+## no matchup.
 const BEAT_UP: int = 154
+
+## Pain Split, which averages the two Pokémon's health rather than moving damage
+## across the field.
+const PAIN_SPLIT: int = 91
+
+## Lock On and Mind Reader, one byte: a flag on the *target* that makes the
+## aimer's next move connect, read and spent by
+## [method Gen2EffectCommands._check_hit].
+const LOCK_ON: int = 94
+
+## Spite, which takes two to five PP off the slot holding the target's last move.
+const SPITE: int = 100
+
+## Thief, which takes the target's held item when the thief has none of its own.
+const THIEF: int = 105
+
+## Foresight, whose flag drops the target's evasion out of the accuracy sum and
+## opens the two Ghost immunities the matchup table keeps past its own marker.
+const FORESIGHT: int = 113
+
+## Pursuit, which doubles against a side that is leaving. Two halves: the command
+## reads the switching flag, and [method Gen2Battle.take_actions] is what runs
+## this move early, in front of the switch it answers.
+const PURSUIT: int = 128
+
+## Teleport, which ends a wild battle as a draw with the user out of it. Refused
+## outright in a trainer battle, since there is nowhere to teleport away from.
+const TELEPORT: int = 153
 
 ## Swift, Faint Attack and Vital Throw, which point at `NormalHit` like any other
 ## attack: their whole difference is one comparison inside
@@ -856,6 +886,87 @@ const FORCE_SWITCH_SEQUENCE: Array = [
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.FORCE_SWITCH,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Pain Split, Lock On, Mind Reader, Spite and Foresight: four lists that are the
+## same five steps with one command swapped, which is why they are written as one
+## helper rather than four constants.
+static func _status_command_sequence(command: StringName) -> Array:
+	return [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.CHECK_HIT,
+		command,
+		Gen2EffectCommands.END_MOVE,
+	]
+
+
+## Teleport, the one of the five with no `checkhit` at all: the move spends its PP
+## and then decides for itself, out of the two levels, whether the user gets away.
+const TELEPORT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.TELEPORT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Thief: [constant NORMAL_HIT] with the move's own chance behind the roll and the
+## steal between the damage and the faint check, where `thief` sits.
+const THIEF_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.THIEF,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Pursuit: [constant NORMAL_HIT] with the doubling between the spread and the
+## roll, which is the one place the finished figure can still be multiplied.
+const PURSUIT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.PURSUIT,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Beat Up. The `startloop`/`endloop` pair is inside
+## [constant Gen2EffectCommands.BEAT_UP], as [constant Gen2EffectCommands.MULTI_HIT]
+## already holds its own, and `endloop` jumps back to `critical` rather than to
+## the top, so `checkhit` is outside the loop and rolls once for the whole move.
+##
+## No `damagestats` and no `stab`: the command loads the formula's two stats
+## itself, from base stats rather than from either Pokémon's real ones, and
+## nothing multiplies the result by a matchup. `CheckTurn` leaves `wTypeModifier`
+## at `EFFECTIVE` for the whole turn, so `supereffectivetext` says nothing.
+const BEAT_UP_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.BEAT_UP,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1557,6 +1668,14 @@ static func _sequences() -> Dictionary:
 		DESTINY_BOND: DESTINY_BOND_SEQUENCE,
 		FORCE_SWITCH: FORCE_SWITCH_SEQUENCE,
 		BATON_PASS: BATON_PASS_SEQUENCE,
+		PAIN_SPLIT: _status_command_sequence(Gen2EffectCommands.PAIN_SPLIT),
+		LOCK_ON: _status_command_sequence(Gen2EffectCommands.LOCK_ON),
+		SPITE: _status_command_sequence(Gen2EffectCommands.SPITE),
+		FORESIGHT: _status_command_sequence(Gen2EffectCommands.FORESIGHT),
+		TELEPORT: TELEPORT_SEQUENCE,
+		THIEF: THIEF_SEQUENCE,
+		PURSUIT: PURSUIT_SEQUENCE,
+		BEAT_UP: BEAT_UP_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

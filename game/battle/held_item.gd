@@ -113,6 +113,12 @@ const PIKACHU: int = 25
 const METAL_POWDER_ITEM: int = 35
 const DITTO: int = 132
 
+## `MailItems` (data/items/mail_items.asm), which `ItemIsMail` walks. Pinned here
+## rather than imported: the table has no locator, the way `RadioChannels` in
+## `game/world/world_radio.gd` has none. `BattleCommand_Thief` is its only reader,
+## and no mail model exists.
+const MAIL_ITEMS: Array[int] = [158, 181, 182, 183, 184, 185, 186, 187, 188, 189]
+
 ## What Metal Powder does to the defence it is read against: half again, floored
 ## the way the cartridge's `srl a; add c` floors it.
 const METAL_POWDER_NUMERATOR: int = 3
@@ -234,6 +240,11 @@ static func boosts_defence(species: int, item: int) -> bool:
 static func metal_powder_defence(defence: int) -> int:
 	@warning_ignore("integer_division")
 	return defence * METAL_POWDER_NUMERATOR / METAL_POWDER_DENOMINATOR
+
+
+## `ItemIsMail`: whether Thief has to leave this item where it is.
+static func is_mail(item: int) -> bool:
+	return MAIL_ITEMS.has(item)
 
 
 ## Whether a roll out of 256 came in under an item's own parameter, which is

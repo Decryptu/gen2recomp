@@ -3545,3 +3545,138 @@ func test_a_baton_pass_with_nobody_behind_it_fails() -> void:
 	)
 	assert_eq(_of_type(lone.take_turn(0, 0), Gen2Battle.MOVE_FAILED).size(), 1)
 	assert_eq(lone.awaiting_baton_pass(), -1, "and no question was asked")
+
+
+## `PursuitSwitch`, which the cartridge calls from `BattleMonEntrance` and from
+## `AI_Switch`: the side that chose Pursuit takes its whole turn in front of the
+## recall, against the Pokémon on its way out.
+func test_pursuit_hits_the_pokemon_on_its_way_out() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.PURSUIT])]
+	)
+	var leaving: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(0)
+	var events: Array = battle.take_actions(
+		Gen2Battle.switch_to(1), Gen2Battle.use_move(0)
+	)
+
+	var types: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+	assert_true(types.has(Gen2Battle.HIT), "the pursuer landed a hit")
+	assert_lt(
+		types.find(Gen2Battle.HIT), types.find(Gen2Battle.WITHDREW),
+		"in front of the recall, which is where `PursuitSwitch` sits"
+	)
+	assert_lt(leaving.hp, leaving.max_hp(), "the Pokemon that left took it")
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 1, "the switch still happened")
+	# `ld a, CANNOT_MOVE`: the pursuer has nothing left to spend this turn.
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1)
+
+
+## `wPlayerIsSwitching` is what `pursuit` reads, so the doubling only happens on
+## the turn the other side is leaving.
+func test_pursuit_doubles_only_against_a_side_that_is_leaving() -> void:
+	var against_switch: int = _pursuit_damage(true)
+	var against_move: int = _pursuit_damage(false)
+
+	assert_gt(against_switch, against_move)
+	# Twice the figure, and the spread was already applied when `pursuit` ran, so
+	# the two are exactly double with the same seed.
+	assert_eq(against_switch, against_move * 2)
+
+
+## One Pursuit against a side that either switches or stands and fights, with the
+## same seed so only the doubling can differ.
+func _pursuit_damage(switching: bool) -> int:
+	var battle: Gen2Battle = _party_battle(
+		[
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.PURSUIT])]
+	)
+	battle.rng.seed = 4242
+	var target: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(0)
+	var before: int = target.hp
+	battle.take_actions(
+		Gen2Battle.switch_to(1) if switching else Gen2Battle.use_move(0),
+		Gen2Battle.use_move(0)
+	)
+	return before - target.hp
+
+
+## `PassedBattleMonEntrance` calls no `PursuitSwitch`, so a Baton Pass is not
+## pursued even though it is a switch made from inside a move.
+func test_a_baton_pass_is_not_pursued() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[
+			_mon(Fixture.GEODUDE, 50, [Fixture.BATON_PASS]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.PURSUIT])]
+	)
+	var leaving: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(0)
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(battle.awaiting_baton_pass(), Gen2Battle.PLAYER)
+	var full: int = leaving.hp
+	battle.pass_to(1)
+
+	assert_eq(leaving.hp, full, "nothing hit it on the way out")
+
+
+## `ForcePlayerMonChoice` calls none either: a replacement after a faint is not a
+## chosen switch and nothing pursues it.
+func test_a_replacement_after_a_faint_is_not_pursued() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[
+			_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		],
+		[_mon(Fixture.PIKACHU, 50, [Fixture.PURSUIT])]
+	)
+	_faint(battle.party(Gen2Battle.PLAYER).at(0))
+	var arriving: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	battle.send_out(Gen2Battle.PLAYER, 1)
+
+	assert_eq(arriving.hp, arriving.max_hp())
+	assert_false(battle.is_switching(Gen2Battle.PLAYER),
+		"no turn is in flight, so no flag is up")
+
+
+## Teleport in a whole turn: the wild battle ends and the turn stops where it is,
+## the same shape a Whirlwind against a wild takes.
+func test_teleport_ends_the_turn_and_the_battle() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TELEPORT]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_true(battle.is_over())
+	assert_eq(battle.forced_out_side(), Gen2Battle.PLAYER)
+	assert_null(battle.winner())
+	assert_eq(_of_type(events, Gen2Battle.FLED_FROM_BATTLE).size(), 1)
+	assert_eq(_of_type(events, Gen2Battle.OVER).size(), 1)
+	# Pikachu at 50 outruns Geodude, so the enemy's own move is what does not run.
+	assert_eq(_of_type(events, Gen2Battle.USED_MOVE).size(), 1)
+
+
+## The same `ret nz` a Whirlwind against a wild reaches, which is the end-of-turn
+## tail rather than the other side's move here: Whirlwind's priority of 0 puts it
+## second against an ordinary attack, so both Pokémon have already moved.
+func test_a_wild_force_switch_skips_the_end_of_turn_tail() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.WHIRLWIND]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.weather = Gen2Weather.SANDSTORM
+	battle.weather_turns = Gen2Weather.TURNS
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_true(battle.was_forced_out())
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_SANDSTORM).size(), 0,
+		"`ResidualDamage` sits behind the `ret nz`")
+	assert_eq(battle.weather_turns, Gen2Weather.TURNS, "and so does the weather count")
+	assert_eq(_of_type(events, Gen2Battle.OVER).size(), 1)

@@ -3508,3 +3508,600 @@ func test_the_four_scripted_battle_types_refuse_a_force_switch() -> void:
 
 		assert_false(battle.is_over(), "battle type %d" % battle_type)
 		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## The last row of `data/moves/effects.asm`, which is where the count of unwritten
+## effect bytes stood before these landed.
+func test_the_last_row_of_the_effects_table_is_written() -> void:
+	for effect: int in [
+		Gen2MoveEffect.PAIN_SPLIT, Gen2MoveEffect.LOCK_ON, Gen2MoveEffect.SPITE,
+		Gen2MoveEffect.THIEF, Gen2MoveEffect.FORESIGHT, Gen2MoveEffect.PURSUIT,
+		Gen2MoveEffect.TELEPORT, Gen2MoveEffect.BEAT_UP,
+	]:
+		assert_true(Gen2MoveEffect.is_written(effect), "effect %d" % effect)
+		assert_ne(Gen2MoveEffect.sequence_for(effect), Gen2MoveEffect.NORMAL_HIT,
+			"effect %d has a list of its own" % effect)
+
+
+## Thief inserts two steps into the ordinary list and Pursuit one, each where the
+## cartridge puts it.
+func test_thief_and_pursuit_are_the_ordinary_list_with_steps_in_it() -> void:
+	var thief: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.THIEF)
+	assert_eq(thief.size(), Gen2MoveEffect.NORMAL_HIT.size() + 2)
+	# The steal is behind the damage and in front of the faint check, so a Pokémon
+	# knocked out by Thief still loses its item.
+	assert_lt(
+		thief.find(Gen2EffectCommands.APPLY_DAMAGE),
+		thief.find(Gen2EffectCommands.THIEF)
+	)
+	assert_lt(
+		thief.find(Gen2EffectCommands.THIEF),
+		thief.find(Gen2EffectCommands.CHECK_FAINT)
+	)
+
+	var pursuit: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.PURSUIT)
+	assert_eq(pursuit.size(), Gen2MoveEffect.NORMAL_HIT.size() + 1)
+	# Between the spread and the roll, which is the last point the finished figure
+	# can still be multiplied.
+	assert_lt(
+		pursuit.find(Gen2EffectCommands.DAMAGE_VARIATION),
+		pursuit.find(Gen2EffectCommands.PURSUIT)
+	)
+	assert_lt(
+		pursuit.find(Gen2EffectCommands.PURSUIT),
+		pursuit.find(Gen2EffectCommands.CHECK_HIT)
+	)
+
+
+## Beat Up carries no `damagestats` and no `stab`, which is what makes it hit for
+## base stats and never for a matchup.
+func test_beat_up_carries_neither_damage_stats_nor_stab() -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.BEAT_UP)
+	assert_false(sequence.has(Gen2EffectCommands.DAMAGE_STATS))
+	assert_false(sequence.has(Gen2EffectCommands.STAB))
+	assert_false(sequence.has(Gen2EffectCommands.CHECK_IMMUNE))
+	# One accuracy roll for the whole move: `endloop` jumps back to `critical`, so
+	# `checkhit` sits outside the loop.
+	assert_lt(
+		sequence.find(Gen2EffectCommands.CHECK_HIT),
+		sequence.find(Gen2EffectCommands.BEAT_UP)
+	)
+
+
+func test_foresight_identifies_the_target_and_refuses_a_second() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.FORESIGHT)
+
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.IDENTIFIED),
+		"the flag sits on the Pokemon that was identified")
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.IDENTIFIED))
+	assert_eq(_of_type(turn.events, Gen2Battle.IDENTIFIED_SET).size(), 1)
+
+	var again: Gen2Turn = _run_move(battle, Fixture.FORESIGHT)
+	assert_eq(_of_type(again.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## A target out of sight is not identified. Foresight's own `CheckHiddenOpponent`
+## is not what refuses it: `checkhit` sits in front of the command and sets
+## `wAttackMissed` first, which is the standing `failuretext` divergence, so the
+## line is the miss rather than "But it failed!".
+func test_foresight_refuses_a_target_that_is_out_of_sight() -> void:
+	for flag: int in [Gen2Substatus.FLYING, Gen2Substatus.UNDERGROUND]:
+		var battle: Gen2Battle = _battle()
+		battle.enemy.substatus |= flag
+		var turn: Gen2Turn = _run_move(battle, Fixture.FORESIGHT)
+
+		assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.IDENTIFIED))
+		assert_true(turn.missed)
+		assert_eq(_of_type(turn.events, Gen2Battle.MISSED).size(), 1)
+
+
+## `.StatModifiers`' Foresight branch returns before it multiplies anything, and
+## only when the evasion stage is at least the accuracy stage: it cannot undo an
+## accuracy the attacker raised.
+func test_an_identified_target_loses_the_evasion_it_had_raised() -> void:
+	var raised: int = Gen2Accuracy.chance(229, 0, 4)
+	assert_lt(raised, 229, "a raised evasion cuts a 90% move down")
+	assert_eq(Gen2Accuracy.chance(229, 0, 4, true), 229,
+		"identified, the stored byte stands")
+	# The attacker's own raise survives, since the branch is behind `jr c`.
+	assert_eq(
+		Gen2Accuracy.chance(100, 4, 0, true), Gen2Accuracy.chance(100, 4, 0),
+		"an accuracy above the evasion is multiplied either way"
+	)
+
+
+## `BattleCommand_Stab`'s matchup walk skips the rows past the `-2` marker unless
+## the target has been identified, and those two rows are Ghost's immunities.
+func test_an_identified_ghost_can_be_hit_by_normal_and_fighting() -> void:
+	for attacking: int in [Fixture.NORMAL, Fixture.FIGHTING]:
+		assert_eq(_data.type_matchup(attacking, Fixture.GHOST), 0,
+			"immune while unidentified")
+		assert_eq(
+			_data.type_matchup(attacking, Fixture.GHOST, true),
+			RomLayout.MATCHUP_EFFECTIVE,
+			"identified, the immunity is gone"
+		)
+	# Nothing else moves: Psychic against Dark is not a Ghost immunity.
+	assert_eq(_data.type_matchup(Fixture.PSYCHIC_TYPE, Fixture.DARK, true), 0)
+
+
+func test_a_tackle_reaches_an_identified_gastly() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		Gen2BattleMon.create(_data, Fixture.GASTLY, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var blocked: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+	assert_true(blocked.immune, "Normal cannot touch a Ghost")
+
+	battle.enemy.substatus |= Gen2Substatus.IDENTIFIED
+	var reaches: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+	assert_false(reaches.immune)
+	assert_gt(reaches.damage, 0)
+
+
+func test_lock_on_marks_the_target_and_the_next_hit_check_spends_it() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.LOCK_ON)
+
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON),
+		"the flag sits on the Pokemon that was aimed at")
+	assert_eq(_of_type(turn.events, Gen2Battle.TOOK_AIM).size(), 1)
+
+	# `res SUBSTATUS_LOCK_ON` runs on every hit check, set or not, so one move
+	# spends it.
+	_run_move(battle, Fixture.TACKLE)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON))
+
+
+## Mind Reader is the same effect byte and the same command.
+func test_mind_reader_is_lock_on() -> void:
+	assert_eq(
+		int(_data.move(Fixture.MIND_READER)["effect"]),
+		int(_data.move(Fixture.LOCK_ON)["effect"])
+	)
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.MIND_READER)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON))
+
+
+func test_lock_on_is_refused_by_a_substitute() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.SUBSTITUTE
+	battle.enemy.substitute_hp = 20
+	var turn: Gen2Turn = _run_move(battle, Fixture.LOCK_ON)
+
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON))
+	assert_eq(_of_type(turn.events, Gen2Battle.NO_EFFECT).size(), 1)
+
+
+## A locked-on move connects whatever the accuracy says, which is what makes an
+## otherwise unwinnable roll certain.
+func test_a_locked_on_move_cannot_miss() -> void:
+	for seed_value: int in 40:
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed_value
+		battle.enemy.substatus |= Gen2Substatus.LOCK_ON
+		# Evasion at the ceiling, which would otherwise cut a 90% move to a third.
+		battle.enemy.stages["evasion"] = 6
+		var turn: Gen2Turn = _run_move(battle, Fixture.SCREECH)
+		assert_false(turn.missed, "seed %d" % seed_value)
+
+
+## `.LockOn` names three moves that still cannot reach a target above them, and
+## `.FlyDigMoves` behind it is what turns them away.
+##
+## Only two of the three are reachable. `OHKOHit` carries no `checkhit` at all, so
+## Fissure never reads the flag and the branch naming it is source no move gets
+## to; the test below owns that half.
+func test_a_locked_on_flying_target_is_still_missed_by_the_ground_moves() -> void:
+	for move: int in [Fixture.EARTHQUAKE, Fixture.MAGNITUDE]:
+		var battle: Gen2Battle = _battle()
+		battle.enemy.substatus |= Gen2Substatus.LOCK_ON | Gen2Substatus.FLYING
+		var turn: Gen2Turn = _run_move(battle, move)
+		assert_true(turn.missed, "move %d" % move)
+
+	# The same target is reached by anything else, since the lock-on is read in
+	# front of the hidden check.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.LOCK_ON | Gen2Substatus.FLYING
+	assert_false(_run_move(battle, Fixture.TACKLE).missed)
+
+
+## Fissure's own list has no `checkhit`, so the flag it is named against is
+## neither read nor spent by it.
+func test_fissure_never_reaches_the_lock_on_read() -> void:
+	assert_false(
+		Gen2MoveEffect.sequence_for(Gen2MoveEffect.OHKO).has(Gen2EffectCommands.CHECK_HIT),
+		"`OHKOHit` rolls its own accuracy instead"
+	)
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.LOCK_ON
+	_run_move(battle, Fixture.FISSURE)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON))
+
+
+## `.Protect` is asked before `.LockOn`, so a Protect turns a locked-on move away
+## and the flag is left standing for the move behind it.
+func test_a_protect_turns_a_locked_on_move_away_without_spending_the_flag() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.LOCK_ON | Gen2Substatus.PROTECT
+	var turn: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+
+	assert_true(turn.missed)
+	assert_eq(_of_type(turn.events, Gen2Battle.PROTECTING_ITSELF).size(), 1)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LOCK_ON),
+		"`res` sits behind the Protect branch, so the flag survives it")
+
+
+func test_spite_takes_two_to_five_pp_off_the_targets_last_move() -> void:
+	var seen: Dictionary = {}
+	for seed_value: int in 60:
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed_value
+		battle.enemy.last_move_used = Fixture.TACKLE
+		var turn: Gen2Turn = _run_move(battle, Fixture.SPITE)
+
+		var event: Dictionary = _first(turn.events, Gen2Battle.PP_REDUCED)
+		var amount: int = int(event["amount"])
+		assert_between(amount, 2, 5, "seed %d" % seed_value)
+		assert_eq(int(event["slot"]), 0)
+		assert_eq(int(event["move"]), Fixture.TACKLE)
+		assert_eq(battle.enemy.pp_left(0), 35 - amount)
+		seen[amount] = true
+
+	assert_eq(seen.size(), 4, "all four of the two-bit roll's values come up")
+
+
+## `cp b / jr nc` keeps the roll only while the slot has that much: a slot with one
+## PP left loses one.
+func test_spite_clamps_to_the_pp_that_is_there() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.pp[0] = 1
+	var turn: Gen2Turn = _run_move(battle, Fixture.SPITE)
+
+	assert_eq(battle.enemy.pp_left(0), 0)
+	assert_eq(int(_first(turn.events, Gen2Battle.PP_REDUCED)["amount"]), 1)
+
+
+func test_spite_refuses_a_target_with_nothing_to_drain() -> void:
+	# Nothing used yet.
+	var fresh: Gen2Battle = _battle()
+	assert_eq(_of_type(_run_move(fresh, Fixture.SPITE).events,
+		Gen2Battle.NO_EFFECT).size(), 1)
+
+	# Struggle, which is not in any list to drain.
+	var struggled: Gen2Battle = _battle()
+	struggled.enemy.last_move_used = Gen2Damage.STRUGGLE
+	assert_eq(_of_type(_run_move(struggled, Fixture.SPITE).events,
+		Gen2Battle.NO_EFFECT).size(), 1)
+
+	# A slot already empty.
+	var spent: Gen2Battle = _battle()
+	spent.enemy.last_move_used = Fixture.TACKLE
+	spent.enemy.pp[0] = 0
+	assert_eq(_of_type(_run_move(spent, Fixture.SPITE).events,
+		Gen2Battle.NO_EFFECT).size(), 1)
+
+	# A move no longer in the list, which the cartridge's own unbounded loop would
+	# have run off the end of.
+	var replaced: Gen2Battle = _battle()
+	replaced.enemy.last_move_used = Fixture.SLASH
+	assert_eq(_of_type(_run_move(replaced, Fixture.SPITE).events,
+		Gen2Battle.NO_EFFECT).size(), 1)
+
+
+func test_pain_split_averages_both_totals() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.hp = 10
+	battle.enemy.hp = 40
+	var turn: Gen2Turn = _run_move(battle, Fixture.PAIN_SPLIT)
+
+	assert_eq(battle.player.hp, 25)
+	assert_eq(battle.enemy.hp, 25)
+	assert_eq(_of_type(turn.events, Gen2Battle.SHARED_PAIN).size(), 1)
+	# Floored, not rounded: the sixteen-bit sum is shifted right once.
+	var odd: Gen2Battle = _battle()
+	odd.player.hp = 10
+	odd.enemy.hp = 11
+	_run_move(odd, Fixture.PAIN_SPLIT)
+	assert_eq(odd.player.hp, 10)
+	assert_eq(odd.enemy.hp, 10)
+
+
+## `.EnemyShareHP`'s `jr nc, .skip` keeps the maximum when the average is past it,
+## so a Pokémon with a small maximum is filled rather than overfilled.
+func test_pain_split_clamps_each_side_to_its_own_maximum() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.GASTLY, 5, [Fixture.PAIN_SPLIT]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 80, [Fixture.TACKLE]),
+		_rng
+	)
+	var small: int = battle.player.max_hp()
+	battle.player.hp = 1
+	assert_gt(battle.enemy.hp / 2, small, "the average is past the small maximum")
+
+	_run_move(battle, Fixture.PAIN_SPLIT)
+	assert_eq(battle.player.hp, small, "filled, not overfilled")
+
+
+## The health words are written by hand, so no doll stands in the way and there is
+## nothing for one to take.
+func test_pain_split_is_refused_by_a_substitute() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.hp = 10
+	battle.enemy.substatus |= Gen2Substatus.SUBSTITUTE
+	battle.enemy.substitute_hp = 20
+	var turn: Gen2Turn = _run_move(battle, Fixture.PAIN_SPLIT)
+
+	assert_eq(battle.player.hp, 10, "nothing moved")
+	assert_eq(_of_type(turn.events, Gen2Battle.NO_EFFECT).size(), 1)
+
+
+func test_thief_takes_the_targets_item() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.item = Fixture.MAGNET
+	var turn: Gen2Turn = _run_move(battle, Fixture.THIEF)
+
+	assert_eq(battle.player.item, Fixture.MAGNET)
+	assert_eq(battle.enemy.item, 0)
+	assert_eq(int(_first(turn.events, Gen2Battle.STOLE_ITEM)["item"]), Fixture.MAGNET)
+	# The party member and the Pokemon on the field are one object here, which is
+	# what makes a stolen item gone for good.
+	assert_eq(battle.party(Gen2Battle.PLAYER).at(0).item, Fixture.MAGNET)
+
+
+func test_thief_refuses_a_thief_that_is_already_carrying_something() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.item = Fixture.LEFTOVERS
+	battle.enemy.item = Fixture.MAGNET
+	var turn: Gen2Turn = _run_move(battle, Fixture.THIEF)
+
+	assert_eq(battle.player.item, Fixture.LEFTOVERS)
+	assert_eq(battle.enemy.item, Fixture.MAGNET)
+	assert_eq(_of_type(turn.events, Gen2Battle.STOLE_ITEM).size(), 0)
+	# Silently: every one of Thief's refusals is a bare `ret`.
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0)
+
+
+func test_thief_leaves_mail_where_it_is() -> void:
+	assert_true(Gen2HeldItem.is_mail(Fixture.FLOWER_MAIL))
+	assert_false(Gen2HeldItem.is_mail(Fixture.MAGNET))
+
+	var battle: Gen2Battle = _battle()
+	battle.enemy.item = Fixture.FLOWER_MAIL
+	var turn: Gen2Turn = _run_move(battle, Fixture.THIEF)
+
+	assert_eq(battle.enemy.item, Fixture.FLOWER_MAIL)
+	assert_eq(battle.player.item, 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.STOLE_ITEM).size(), 0)
+	# The hit still landed: the steal is behind `applydamage`.
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1)
+
+
+func test_teleport_takes_its_own_user_out_of_a_wild_battle() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.TELEPORT)
+
+	assert_true(battle.is_over())
+	assert_true(battle.was_forced_out())
+	assert_eq(battle.forced_out_side(), Gen2Battle.PLAYER, "the user is who left")
+	assert_null(battle.winner(), "SetBattleDraw: nobody beat anybody")
+	assert_eq(_of_type(turn.events, Gen2Battle.FLED_FROM_BATTLE).size(), 1)
+
+
+func test_teleport_is_refused_in_a_trainer_battle() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TELEPORT])]),
+		Gen2Party.create([Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE])]),
+		_rng, true
+	)
+	var turn: Gen2Turn = _run_move(battle, Fixture.TELEPORT)
+
+	assert_false(battle.is_over())
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_teleport_is_refused_by_the_four_scripted_battle_types() -> void:
+	for battle_type: int in Gen2EffectCommands.FORCE_SWITCH_REFUSED_TYPES:
+		var battle: Gen2Battle = _battle()
+		battle.battle_type = battle_type
+		var turn: Gen2Turn = _run_move(battle, Fixture.TELEPORT)
+
+		assert_false(battle.is_over(), "battle type %d" % battle_type)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## `wEnemySubStatus5`'s own `SUBSTATUS_CANT_RUN`, which is what Mean Look and
+## Spider Web leave on the Pokemon doing the holding.
+func test_teleport_is_refused_while_the_opponent_holds_the_user() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.CANT_RUN
+	var turn: Gen2Turn = _run_move(battle, Fixture.TELEPORT)
+
+	assert_false(battle.is_over())
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## Below the other's level the player's half goes on the dice, drawn out of the two
+## levels summed and one more, and fails under a quarter of the other's level. A
+## level 4 user against a level 50 fails on the twelve values under 12, out of 55.
+func test_a_weaker_player_rolls_for_teleport() -> void:
+	var failures: int = 0
+	var samples: int = 200
+	for seed_value: int in samples:
+		var battle: Gen2Battle = Gen2Battle.create(
+			_data,
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 4, [Fixture.TELEPORT]),
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_rng
+		)
+		battle.rng.seed = seed_value
+		if _of_type(_run_move(battle, Fixture.TELEPORT).events,
+			Gen2Battle.MOVE_FAILED).size() > 0:
+			failures += 1
+
+	var expected: int = samples * 12 / 55
+	assert_almost_eq(failures, expected, expected / 3,
+		"roughly twelve of the fifty-five values it can draw")
+
+
+## `docs/bugs_and_glitches.md`: the enemy's own `jr nc, .run_away` falls into
+## `.run_away`, so the roll it draws decides nothing and a wild Pokemon always
+## teleports. The roll is still drawn.
+func test_a_wild_pokemon_always_teleports_and_still_draws_the_roll() -> void:
+	for seed_value: int in 40:
+		var battle: Gen2Battle = Gen2Battle.create(
+			_data,
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 4, [Fixture.TELEPORT]),
+			_rng
+		)
+		battle.rng.seed = seed_value
+		var before: int = battle.rng.state
+		var turn: Gen2Turn = _run_enemy_move(battle, Fixture.TELEPORT)
+
+		assert_true(battle.is_over(), "seed %d" % seed_value)
+		assert_eq(battle.forced_out_side(), Gen2Battle.ENEMY)
+		assert_eq(_of_type(turn.events, Gen2Battle.FLED_FROM_BATTLE).size(), 1)
+		assert_ne(battle.rng.state, before, "the roll is drawn and thrown away")
+
+
+## `pursuit` reads the other side's switching flag and doubles nothing without it.
+## The flag itself is [method Gen2Battle.is_switching], which only a turn in
+## flight can raise; test_battle.gd owns the switch-time half.
+func test_pursuit_doubles_nothing_outside_a_switch() -> void:
+	var battle: Gen2Battle = _battle()
+	assert_false(battle.is_switching(Gen2Battle.ENEMY),
+		"nothing is switching between turns")
+
+	var turn: Gen2Turn = _turn(battle, Fixture.PURSUIT)
+	turn.damage = 100
+	Gen2EffectCommands.run(Gen2EffectCommands.PURSUIT, turn)
+	assert_eq(turn.damage, 100)
+
+
+## One swing per party member, in party order, each named.
+func test_beat_up_swings_once_per_party_member() -> void:
+	var battle: Gen2Battle = _beat_up_battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.BEAT_UP)
+
+	var swings: Array = _of_type(turn.events, Gen2Battle.BEAT_UP_ATTACK)
+	assert_eq(swings.size(), 3)
+	assert_eq(int(swings[0]["index"]), 0)
+	assert_eq(int(swings[1]["index"]), 1)
+	assert_eq(int(swings[2]["index"]), 2)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 3)
+	# `.beat_up_2` skips `endloop`'s summary line for this effect alone.
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT_TIMES).size(), 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0)
+
+
+## `damagecalc` is handed the member's own base Attack and level and the target's
+## base Defense, none of them touched by a stage, an item or the truncation
+## `damagestats` would have done.
+func test_beat_up_uses_base_stats_and_each_members_own_level() -> void:
+	var battle: Gen2Battle = _beat_up_battle()
+	# A stage the formula must not see, since there is no `damagestats` to read it.
+	battle.player.stages["attack"] = 6
+	var turn: Gen2Turn = _run_move(battle, Fixture.BEAT_UP)
+
+	# The last member's numbers are what the turn is left holding: Bulbasaur's own
+	# base Attack of 49 at level 10, against Gastly's base Defense of 30.
+	assert_eq(turn.attack_stat, 49)
+	assert_eq(turn.defense_stat, 30)
+	assert_eq(turn.level_override, 10)
+	assert_eq(turn.power_override, 10, "the move's own power, not a stat")
+	# No `stab`, so no matchup and no immunity however the chart reads.
+	assert_eq(turn.effectiveness, RomLayout.MATCHUP_EFFECTIVE)
+	assert_false(turn.immune)
+
+
+## `.beatup_fail` skips that member's hit and lets the loop carry on.
+func test_beat_up_skips_a_fainted_or_statused_member() -> void:
+	var battle: Gen2Battle = _beat_up_battle()
+	battle.party(Gen2Battle.PLAYER).at(1).status = Gen2Status.PARALYSIS
+	battle.party(Gen2Battle.PLAYER).at(2).hp = 0
+	var turn: Gen2Turn = _run_move(battle, Fixture.BEAT_UP)
+
+	var swings: Array = _of_type(turn.events, Gen2Battle.BEAT_UP_ATTACK)
+	assert_eq(swings.size(), 1)
+	assert_eq(int(swings[0]["index"]), 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0,
+		"one member landed a hit, so `beatupfailtext` says nothing")
+
+
+func test_beat_up_says_it_failed_when_no_member_could_swing() -> void:
+	var battle: Gen2Battle = _beat_up_battle()
+	for index: int in 3:
+		battle.party(Gen2Battle.PLAYER).at(index).status = Gen2Status.PARALYSIS
+	var turn: Gen2Turn = _run_move(battle, Fixture.BEAT_UP)
+
+	assert_eq(_of_type(turn.events, Gen2Battle.BEAT_UP_ATTACK).size(), 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## `.only_one_beatup`, which `docs/bugs_and_glitches.md` records: the one hit lands
+## and then `jp EndMoveEffect` takes the rest of the list with it.
+func test_beat_up_with_one_party_member_ends_before_kings_rock() -> void:
+	var alone: Array = _commands_run(_battle(), Fixture.BEAT_UP)
+	assert_true(alone.has(Gen2EffectCommands.BEAT_UP))
+	assert_false(alone.has(Gen2EffectCommands.KINGS_ROCK),
+		"`.only_one_beatup` takes the rest of the list with it")
+
+	# A party of three falls out of the loop instead and reaches the item.
+	var party: Array = _commands_run(_beat_up_battle(), Fixture.BEAT_UP)
+	assert_true(party.has(Gen2EffectCommands.KINGS_ROCK))
+
+
+## `.wild`: no party to walk, so one ordinary hit off the wild Pokemon's own real
+## stats, and `.only_one_beatup` prints "But it failed!" behind a hit that landed.
+func test_a_wild_beat_up_swings_once_and_says_it_failed_anyway() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_enemy_move(battle, Fixture.BEAT_UP)
+
+	var swings: Array = _of_type(turn.events, Gen2Battle.BEAT_UP_ATTACK)
+	assert_eq(swings.size(), 1)
+	assert_eq(int(swings[0]["index"]), -1, "a wild Pokemon has no party slot")
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(turn.level_override, -1, "its own level, through the ordinary steps")
+	assert_gt(turn.attack_stat, 0, "`damagestats` ran, so these are real stats")
+
+
+## Three party members over two levels, against a target whose base Defense is low
+## enough for a power of 10 to show.
+func _beat_up_battle() -> Gen2Battle:
+	return Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.BEAT_UP]),
+			Gen2BattleMon.create(_data, Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+			Gen2BattleMon.create(_data, Fixture.BULBASAUR, 10, [Fixture.TACKLE]),
+		]),
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.GASTLY, 60, [Fixture.TACKLE]),
+		]),
+		_rng, true
+	)
+
+
+## Which steps a move actually reached, for the two effects that end their own
+## list part way and so leave the commands behind them unrun.
+func _commands_run(battle: Gen2Battle, move_number: int) -> Array:
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, move_number, _data.move(move_number), []
+	)
+	var ran: Array = []
+	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
+	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
+		if turn.ended:
+			break
+		ran.append(command)
+		Gen2EffectCommands.run(command, turn)
+	return ran
