@@ -113,7 +113,24 @@ func _row(manifest: Gen2ModManifest) -> Control:
 	remove.tooltip_text = "Delete this mod"
 	remove.pressed.connect(func() -> void: _delete(manifest))
 	line.add_child(remove)
+
+	# The mod's own settings, built from what it registered rather than from
+	# anything written here, so this page and the game's MODS menu are the one
+	# registration seen twice.
+	for option: Dictionary in Gen2ModHost.instance().options(manifest.id):
+		panel.add_child(_option_field(manifest.id, option))
 	return panel
+
+
+func _option_field(id: StringName, option: Dictionary) -> Control:
+	var key: StringName = StringName(option.get("key", &""))
+	return Gen2LauncherUI.field(_theme, String(option.get("label", "")), Gen2LauncherUI.segmented(
+		_theme, option.get("labels", []) as Array, int(option.get("index", 0)),
+		func(index: int) -> void:
+			var result: Dictionary = Gen2ModHost.instance().set_option_index(id, key, index)
+			if not bool(result.get("ok", false)):
+				_fail(Gen2ModRefusal.text(result))
+	))
 
 
 func _refusal(failure: Dictionary) -> Control:

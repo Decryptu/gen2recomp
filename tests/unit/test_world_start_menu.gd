@@ -160,3 +160,26 @@ func test_a_registered_entry_without_a_handler_is_unavailable() -> void:
 	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
 	assert_false(bool(menu.items()[4].get("available", false)))
 	Gen2ModHost.reset()
+
+
+## MODS is not the cartridge's, so it appears only when a mod registered a
+## setting, and it sits ahead of both the registered entries and EXIT.
+func test_mods_appears_only_for_a_mod_that_registered_a_setting() -> void:
+	Gen2ModHost.reset()
+	var without: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
+	assert_false(_kinds(without).has(Gen2WorldStartMenu.ITEM_MODS))
+
+	assert_true(bool(Gen2ModHost.instance().register_option(&"voxel", {
+		"key": "draw_distance", "label": "DISTANCE", "values": [8, 16],
+	}).get("ok", false)))
+	Gen2ModHost.instance().register_menu_entry(
+		Gen2ModHost.MENU_START, &"atlas", {"label": "Atlas"}
+	)
+	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(0, false, false)
+	assert_eq(_kinds(menu), [
+		Gen2WorldStartMenu.ITEM_PACK, Gen2WorldStartMenu.ITEM_PLAYER,
+		Gen2WorldStartMenu.ITEM_SAVE, Gen2WorldStartMenu.ITEM_OPTION,
+		Gen2WorldStartMenu.ITEM_MODS, &"atlas", Gen2WorldStartMenu.ITEM_EXIT,
+	])
+	assert_true(bool(menu.items()[4].get("available", false)))
+	Gen2ModHost.reset()

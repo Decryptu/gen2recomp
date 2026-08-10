@@ -286,8 +286,11 @@ func _ready() -> void:
 	_box.font = Gen2Font.from_data(_data)
 	## wTextboxFrame: a battle's own boxes are drawn with the player's frame too.
 	_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
+	_box.item_rect_changed.connect(_push_text_box_rect)
+	_box.visibility_changed.connect(_push_text_box_rect)
 	_screen.display(_box)
 	_box.place_at_bottom()
+	_apply_renderer_interface_style()
 
 	var world_meta: Variant = get_meta("world_battle_request", {})
 	if world_meta is Dictionary and not (world_meta as Dictionary).is_empty():
@@ -2245,6 +2248,24 @@ func _build_renderer() -> void:
 	_renderer_ready = bool(_renderer.set_battle_data(_data))
 	_push_world_context()
 	_push_view()
+	_apply_renderer_interface_style()
+
+
+## The text box over a native-layer renderer, the same seam
+## [method Gen2WorldScreen._apply_renderer_interface_style] opens on the map: the
+## renderer says how opaque the box's field should be and is told where the box
+## is, since it is the screen's box and not the renderer's.
+func _apply_renderer_interface_style() -> void:
+	if _box == null:
+		return
+	_box.field_opacity = Gen2ModHost.renderer_interface_opacity(_renderer)
+	_push_text_box_rect()
+
+
+func _push_text_box_rect() -> void:
+	if _box == null:
+		return
+	Gen2ModHost.renderer_set_text_box_rect(_renderer, _box.occupied_rect())
 
 
 ## Hands the renderer where the battle is being fought, when the caller supplied

@@ -14,6 +14,11 @@ extends SubViewportContainer
 ## It reads the world and never writes it, so the two renderers can be swapped
 ## mid-step and neither can tell the other what changed.
 
+## What mod.json declares, which is how the renderer names itself to the host
+## when it reads its own settings back.
+const MOD_ID: StringName = &"voxel_preview"
+const OPTION_PITCH: StringName = &"pitch"
+
 const CELL_SIZE: float = 1.0
 const WALL_HEIGHT: float = 1.0
 const WATER_DEPTH: float = -0.25
@@ -43,6 +48,7 @@ var _player: MeshInstance3D = null
 var _objects: Node3D = null
 var _time_of_day: int = 0
 var _camera_pitch: float = CAMERA_PITCH_DEGREES
+var _text_box_rect := Rect2i()
 
 
 func _init() -> void:
@@ -87,11 +93,46 @@ func _init() -> void:
 	_player.material_override = _material(Color("#d34a5a"))
 	_viewport.add_child(_player)
 
+	# The setting mod.gd registered, read once here and again whenever it
+	# changes, so a value picked in the start menu or the launcher reaches the
+	# camera without this view polling for it. Null means the entry script did
+	# not run, which is what a renderer loaded on its own gets.
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var pitch: Variant = host.option(MOD_ID, OPTION_PITCH)
+	if pitch != null:
+		_camera_pitch = float(pitch)
+	host.option_changed.connect(_on_option_changed)
+
 
 ## This renderer is not made of hardware pixels, so it asks for the layer that is
 ## not either. See Gen2ModHost.RENDERER_SURFACE_METHOD.
 func uses_hardware_viewport() -> bool:
 	return false
+
+
+## The cartridge draws its text box on its own white background; over this view
+## that box is a slab across the map, so the field is asked for translucent. The
+## frame and the glyphs stay opaque whatever this answers. See
+## Gen2ModHost.RENDERER_INTERFACE_OPACITY_METHOD.
+func interface_opacity() -> float:
+	return 0.75
+
+
+## Where that box is, in hardware pixels, and empty when none is on screen. This
+## view composes nothing around it and only records it; a renderer staging a
+## scene below the box reads it instead of assuming the standard six rows. See
+## Gen2ModHost.RENDERER_TEXT_BOX_METHOD.
+func set_text_box_rect(rect: Rect2i) -> void:
+	_text_box_rect = rect
+
+
+func text_box_rect() -> Rect2i:
+	return _text_box_rect
+
+
+func _on_option_changed(id: StringName, key: StringName, value: Variant) -> void:
+	if id == MOD_ID and key == OPTION_PITCH:
+		_set_camera_pitch(float(value))
 
 
 ## The container's own size is all that is set here: a stretching

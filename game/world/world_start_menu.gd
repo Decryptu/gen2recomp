@@ -33,6 +33,11 @@ const ITEM_PLAYER: StringName = &"player"
 const ITEM_SAVE: StringName = &"save"
 const ITEM_OPTION: StringName = &"option"
 const ITEM_EXIT: StringName = &"exit"
+## Not the cartridge's. Appears only when an installed mod registered a setting,
+## so a player with no mods, or none that configure anything, sees the source
+## menu exactly. It sits after OPTION and before the entries mods registered
+## themselves, which keeps both additions in one block ahead of EXIT.
+const ITEM_MODS: StringName = &"mods"
 
 ## What `SetUpMenuItems` gates each source entry on. An empty gate is always
 ## appended, matching the entries the source adds unconditionally.
@@ -83,6 +88,8 @@ static func build(
 		if not String(gate).is_empty() and not bool(passes.get(gate, false)):
 			continue
 		if entry["kind"] == ITEM_EXIT:
+			if not Gen2ModHost.instance().option_mod_ids().is_empty():
+				items.append(_entry(ITEM_MODS, "Mods", true))
 			items.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
 		items.append(_entry(
 			StringName(entry["kind"]), String(entry["label"]), bool(entry["available"])

@@ -199,9 +199,11 @@ static func uninstall(id: StringName, root: String = Gen2ModHost.ROOT) -> Dictio
 	if String(id).is_empty():
 		return _refuse(&"invalid_id", String(id))
 	var directory: String = "%s/%s" % [root, id]
-	# Drop any off switch with the mod itself, so reinstalling it later does not
-	# find it silently disabled by a decision about a mod that no longer exists.
+	# Drop any off switch and any stored settings with the mod itself, so
+	# reinstalling it later does not find it silently disabled, or configured, by
+	# a decision about a mod that no longer exists.
 	Gen2ModState.forget(id)
+	Gen2ModOptions.forget(id)
 	if not DirAccess.dir_exists_absolute(directory):
 		return {"ok": true, "id": id, "removed": false}
 	_remove_tree(directory)
