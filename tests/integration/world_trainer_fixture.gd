@@ -21,6 +21,8 @@ const SEEN_TEXT: int = 0x6FF0
 const WIN_TEXT: int = 0x7000
 const LOSS_TEXT: int = 0x7010
 const TRAINER_FLAG: int = 8
+## The fixture ships one trainer class, numbered 1, holding one trainer.
+const TRAINER_CLASS: int = 1
 const TRAINER_SPECIES: int = 16
 const TRAINER_SPRITE: int = 1
 

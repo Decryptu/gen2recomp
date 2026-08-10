@@ -65,6 +65,15 @@ const RENDERER_WORLD_CONTEXT_METHOD: String = "set_world_context"
 ## the screen decides what it needs, so reading them directly races the gameplay
 ## keys instead of taking what is left.
 const RENDERER_INPUT_METHOD: String = "handle_world_input"
+## Optional, battle renderers only. The same seam on the battle side: every event
+## [Gen2BattleScreen] did not claim, so a renderer composing its own shot can let
+## someone steer it. Answering true consumes the event.
+##
+## A [Gen2Button] never arrives here, on either side. The screen routes every one
+## of them to whatever owns it first, so a text box, the forget-move list and
+## ball selection all take their press before a renderer could see it, and what
+## is left is pointer and stick motion the screen has no opinion about.
+const RENDERER_BATTLE_INPUT_METHOD: String = "handle_battle_input"
 ## The id of the built-in 2D renderer, which is always registered for both
 ## renderer kinds.
 const BUILT_IN_RENDERER: StringName = &"gen2"
@@ -390,14 +399,23 @@ static func renderer_uses_hardware_viewport(renderer: Node) -> bool:
 	return bool(renderer.call(RENDERER_SURFACE_METHOD))
 
 
-## Offers [param event] to [param renderer], returning whether it was consumed.
-## See [constant RENDERER_INPUT_METHOD]; a renderer that does not take input
-## leaves every event where it was.
+## Offers [param event] to a world [param renderer], returning whether it was
+## consumed. See [constant RENDERER_INPUT_METHOD]; a renderer that does not take
+## input leaves every event where it was.
 static func renderer_handles_input(renderer: Node, event: InputEvent) -> bool:
-	if renderer == null or event == null \
-		or not renderer.has_method(RENDERER_INPUT_METHOD):
+	return _renderer_takes_input(renderer, RENDERER_INPUT_METHOD, event)
+
+
+## The same for a battle renderer. See
+## [constant RENDERER_BATTLE_INPUT_METHOD].
+static func renderer_handles_battle_input(renderer: Node, event: InputEvent) -> bool:
+	return _renderer_takes_input(renderer, RENDERER_BATTLE_INPUT_METHOD, event)
+
+
+static func _renderer_takes_input(renderer: Node, method: String, event: InputEvent) -> bool:
+	if renderer == null or event == null or not renderer.has_method(method):
 		return false
-	return bool(renderer.call(RENDERER_INPUT_METHOD, event))
+	return bool(renderer.call(method, event))
 
 
 ## Reads every installed mod's manifest without running any of them. The

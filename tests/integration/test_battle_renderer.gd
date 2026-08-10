@@ -151,6 +151,107 @@ func test_the_built_in_renderer_ignores_a_world_context() -> void:
 	assert_not_null(_battle_screen.world_context())
 
 
+## The battle side of Gen2WorldScreen's own renderer-input seam. A Gen2Button is
+## claimed by the screen before this and never arrives, so what a renderer is
+## offered is the motion the screen has no opinion about.
+func test_a_battle_renderer_is_offered_the_input_the_screen_did_not_claim() -> void:
+	var script: GDScript = _stub_script("""extends Control
+
+var seen: Array = []
+var consume: bool = true
+
+func set_battle_data(_data) -> bool:
+	return true
+
+func set_view(_view: Dictionary) -> void:
+	pass
+
+func refresh() -> void:
+	pass
+
+func handle_battle_input(event) -> bool:
+	seen.append(event)
+	return consume
+""")
+	assert_true(Gen2ModHost.instance().register_battle_renderer(&"steered", script)["ok"])
+	assert_true(Gen2ModHost.instance().select_battle_renderer(&"steered")["ok"])
+	await _open_battle()
+	assert_true(_battle_screen.is_ready())
+	var renderer: Node = _battle_screen._renderer
+
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(4.0, 0.0)
+	_battle_screen._unhandled_input(motion)
+	assert_eq((renderer.get("seen") as Array).size(), 1, "the renderer was not offered it")
+
+	# A button belongs to whatever owns the screen, so it never reaches here.
+	var press := InputEventAction.new()
+	press.action = Gen2Button.ACTIONS[Gen2Button.A]
+	press.pressed = true
+	_battle_screen._unhandled_input(press)
+	assert_eq((renderer.get("seen") as Array).size(), 1, "a button reached the renderer")
+
+	# Ball selection is a modal state: it means something by itself, so the
+	# renderer is not offered anything while it is up. Set directly rather than
+	# through begin_capture(), which needs a whole hosted wild battle behind it
+	# and would test that instead of this.
+	_battle_screen._capture_selecting = true
+	_battle_screen._unhandled_input(motion)
+	assert_eq((renderer.get("seen") as Array).size(), 1, "a modal state let it through")
+	_battle_screen._capture_selecting = false
+	_battle_screen._unhandled_input(motion)
+	assert_eq((renderer.get("seen") as Array).size(), 2, "and it stayed shut afterwards")
+
+
+## A renderer that defines nothing keeps working, and one that answers false
+## leaves the event where it was.
+func test_a_battle_renderer_without_the_method_changes_nothing() -> void:
+	await _open_battle()
+	assert_false(_battle_screen._renderer.has_method("handle_battle_input"))
+	var motion := InputEventMouseMotion.new()
+	_battle_screen._unhandled_input(motion)
+	assert_false(motion.is_echo(), "the built-in renderer must not crash on one")
+
+
+## `view` says what is on the field; this says who it is against, which a
+## renderer standing the opponent behind their Pokemon needs. A wild battle
+## carries class 0, the way `wOtherTrainerClass` is zero there.
+func test_the_view_names_the_trainer_the_battle_is_against() -> void:
+	var script: GDScript = _stub_script("""extends Control
+
+var last_view: Dictionary = {}
+
+func set_battle_data(_data) -> bool:
+	return true
+
+func set_view(view: Dictionary) -> void:
+	last_view = view
+
+func refresh() -> void:
+	pass
+""")
+	assert_true(Gen2ModHost.instance().register_battle_renderer(&"named", script)["ok"])
+	assert_true(Gen2ModHost.instance().select_battle_renderer(&"named")["ok"])
+	await _open_battle()
+	var renderer: Node = _battle_screen._renderer
+
+	_battle_screen.show_matchup(16, 155, 5, 5)
+	var wild: Dictionary = renderer.get("last_view")
+	assert_eq(StringName(wild.get("battle_kind", &"")), &"wild")
+	assert_eq(int(wild.get("trainer_class", -1)), 0)
+	assert_eq(String(wild.get("trainer_name", "x")), "")
+
+	_battle_screen.show_trainer(Fixture.TRAINER_CLASS, 0)
+	var trainer: Dictionary = renderer.get("last_view")
+	assert_eq(StringName(trainer.get("battle_kind", &"")), &"trainer")
+	assert_eq(int(trainer.get("trainer_class", -1)), Fixture.TRAINER_CLASS)
+	assert_eq(int(trainer.get("trainer_index", -1)), 0)
+	assert_eq(
+		String(trainer.get("trainer_name", "")),
+		String(_data.trainer_party(Fixture.TRAINER_CLASS, 0).get("name", "")),
+	)
+
+
 func test_a_renderer_reporting_missing_data_leaves_the_screen_not_ready() -> void:
 	var script: GDScript = _stub_script("""extends Control
 

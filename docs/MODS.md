@@ -302,12 +302,21 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 | `refresh()` | The renderer should redraw its current view |
 
 `view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
-`enemy_level`, `player_level`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
+`enemy_level`, `player_level`, `battle_kind`, `trainer_class`, `trainer_index`,
+`trainer_name`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
 `player_max_hp`, `exp_pixels`, `raster_scx`, `raster_scy`, `player_pic_visible`,
 `bg_map`, `bg_palette_maps`, `ob_palette_maps`, `anim_sprites`, `anim_tiles` and
 `hud_visible`: plain values read out of a resolved battle event, never the
 battle engine itself, the same rule `Gen2BattleScreen`'s own setters already
-followed. `exp_pixels` is a
+followed.
+
+`battle_kind` is `wild` or `trainer` and the three fields after it say who the
+fight is against, which the species and levels do not. A wild battle carries
+class 0, index 0 and an empty name, the way `wOtherTrainerClass` is zero there.
+A class number is what `GameData.trainer_pic()` and `trainer_name()` take, so a
+renderer standing the opponent behind their Pokémon draws the cartridge's own
+picture of them; `trainer_name` is the trainer's own name from the party record,
+not the class name. `exp_pixels` is a
 count out of 64, which is `PlaceExpBar`'s own unit; the exp bar is never a
 ratio, because `CalcExpBar` has already done the division and rounded it the
 cartridge's way.
@@ -358,11 +367,23 @@ Registration uses the same refusal rules as a world renderer, and shares both
 optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`
 cycle, bound in `Gen2BattleScreen` the way `Gen2WorldScreen` binds it.
 
-A battle renderer has one optional method of its own:
+A battle renderer has two optional methods of its own:
 
 | Method | Effect |
 |---|---|
 | `set_world_context(context: Gen2BattleWorldContext)` | Where the battle is being fought, once per battle, after `set_battle_data` and before the first view |
+| `handle_battle_input(event: InputEvent) -> bool` | Every input event the battle screen did not use. Answering true consumes it |
+
+`handle_battle_input` is `handle_world_input`'s twin and follows the same rule:
+the screen claims what it needs and offers the rest, so a renderer can steer a
+camera and can never take a gameplay press. A `Gen2Button` is routed to whatever
+owns the screen before this is reached, on both sides, so the text box, the
+forget-move list and ball selection each take their press first and what arrives
+here is pointer and stick motion. Ball selection and the forget prompt also
+withhold everything else while they are up, because a press there means
+something by itself. A draining bar, the opening slide and a move animation do
+not: none of them reads input, and a camera that stalls whenever a bar drains is
+not a camera.
 
 `view` says what is on the field and nothing about the place, which is right for
 the cartridge's white field and leaves a renderer staging the fight on the map
