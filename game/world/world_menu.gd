@@ -5,8 +5,10 @@ extends RefCounted
 ## cartridge. The screen owns labels and input; this record owns only the
 ## source selection rules and the returned option index.
 
-const STATICMENU_ENABLE_LEFT_RIGHT: int = 1 << 2
-const STATICMENU_WRAP: int = 1 << 5
+## The two flags that decide selection. [Gen2MenuBox] owns the whole set, since
+## it is the layer that reads all of them.
+const STATICMENU_ENABLE_LEFT_RIGHT: int = Gen2MenuBox.STATICMENU_ENABLE_LEFT_RIGHT
+const STATICMENU_WRAP: int = Gen2MenuBox.STATICMENU_WRAP
 
 var kind: StringName = &"vertical"
 var options: Array = []

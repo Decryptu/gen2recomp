@@ -44,11 +44,57 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_world(directory, crystal_commands)
 	_write_overworld_graphics(directory)
 	_write_battle_graphics(directory, manifest)
+	_write_name_input_chars(directory)
+	_write_intro_text(directory, crystal_commands)
 	manifest["game_id"] = String(game_id)
 	manifest["sha1"] = SHA1
 	manifest["complete"] = true
 	RomCache.write_json(RomCache.manifest_path(directory), manifest)
 	return GameData.open_directory(directory)
+
+
+## The four naming keyboards with the real block's shape and command rows, the
+## letters generated. What is under a letter key decides nothing in
+## `naming_screen.asm`; the command row and the row counts decide everything.
+static func _write_name_input_chars(directory: String) -> void:
+	var tables: Array = []
+	for table: int in RomLayout.NAME_INPUT_TABLE_ROWS.size():
+		var first: int = RomLayout.NAME_INPUT_LOWER_A if table < 2 else RomLayout.NAME_INPUT_UPPER_A
+		var rows: Array = []
+		var count: int = RomLayout.NAME_INPUT_TABLE_ROWS[table]
+		for row: int in count:
+			if row == count - 1:
+				rows.append(Array(
+					RomLayout.NAME_INPUT_COMMAND_LOWER if table < 2
+					else RomLayout.NAME_INPUT_COMMAND_UPPER
+				))
+				continue
+			var codes: Array[int] = []
+			for column: int in RomLayout.NAME_INPUT_COLUMNS:
+				codes.append(first + row * RomLayout.NAME_INPUT_COLUMNS + column)
+				if column < RomLayout.NAME_INPUT_COLUMNS - 1:
+					codes.append(Gen2Text.SPACE)
+			rows.append(codes)
+		tables.append(rows)
+	RomCache.write_json(RomCache.name_input_chars_path(directory), tables)
+
+
+## The intro's own texts, synthetic. Every rule that reads them cares only that
+## a text is there and how many pages it wraps to, so the words are stand-ins.
+## The gender text is Crystal only, the way `init_gender.asm` is: a Gold or
+## Silver fixture leaves the key out and the gender screen refuses to open.
+static func _write_intro_text(directory: String, crystal: bool) -> void:
+	var text: Dictionary = {
+		"oak_1": "Oak one.\n\nOak one page two.",
+		"oak_2": "Oak two.",
+		"oak_4": "Oak four.",
+		"oak_5": "Oak five.",
+		"oak_6": "Oak six.",
+		"oak_7": "<PLAYER>, oak seven.",
+	}
+	if crystal:
+		text["gender"] = "Are you a boy?\nOr are you a girl?"
+	RomCache.write_json(RomCache.intro_text_path(directory), text)
 
 
 static func _write_trainers(directory: String) -> void:
@@ -268,6 +314,20 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"card_pic_male": [RomLayout.CARD_PIC_TILES, 2],
 		"card_pic_female": [RomLayout.CARD_PIC_TILES, 3],
 		"card_right_corner": [RomLayout.CARD_RIGHT_CORNER_TILES, 1],
+		## LoadNamingScreenGFX's four. The cursor gets its own index so the
+		## bracket can be told from the keyboard under it.
+		"naming_border": [RomLayout.NAMING_BORDER_TILES, 1],
+		"naming_cursor": [RomLayout.NAMING_CURSOR_TILES, 2],
+		"naming_middle_line": [RomLayout.NAMING_MARKER_TILES, 1],
+		"naming_under_line": [RomLayout.NAMING_MARKER_TILES, 1],
+	}
+	## The font and the frames are the two sheets addressed by character code
+	## rather than by slot, so both need their real first code. A frames sheet
+	## left on 0 draws nothing at all, since every box-drawing code is then past
+	## the end of the strip.
+	var first_codes: Dictionary = {
+		"font": RomLayout.FONT_FIRST_CODE,
+		"frames": RomLayout.FRAME_FIRST_CODE,
 	}
 	for name: String in sheet_tiles:
 		var tile_count: int = int(sheet_tiles[name][0])
@@ -279,7 +339,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			"width": tile_count * Gen2Tiles.TILE_WIDTH,
 			"height": Gen2Tiles.TILE_HEIGHT,
 			"tiles": tile_count,
-			"first_code": RomLayout.FONT_FIRST_CODE if name == "font" else 0,
+			"first_code": int(first_codes.get(name, 0)),
 			"bits": 1,
 		}
 	manifest["tiles"] = sheets

@@ -264,7 +264,138 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not battle_anims["ok"]:
 		return battle_anims
 
+	var name_input: Dictionary = verify_name_input_chars(rom, layout)
+	if not name_input["ok"]:
+		return name_input
+
+	var intro_text: Dictionary = verify_intro_text(rom, layout)
+	if not intro_text["ok"]:
+		return intro_text
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## `data/text/common_2.asm`'s intro texts. Each is a `text_far` target, so it
+## opens with the `text` macro's own $00 and runs to a terminator, and each is
+## pinned by the first words it says: a text stream of the right shape in the
+## wrong place still walks to a terminator and still decodes into words.
+static func verify_intro_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offsets: Dictionary = layout["intro_text"]
+	for key: String in INTRO_TEXT_OPENINGS:
+		var at: int = int(offsets.get(key, -1))
+		if at < 0:
+			# Only the gender text is allowed to be absent, and only where
+			# init_gender.asm is.
+			if key == INTRO_TEXT_GENDER:
+				continue
+			return {"ok": false, "message": "Intro text %s has no offset." % key}
+		if rom.u8(at) != TEXT_MACRO_START:
+			return {
+				"ok": false,
+				"message": "Intro text %s does not open with the text macro." % key,
+			}
+		var anchor: Array = INTRO_TEXT_OPENINGS[key]
+		var opening: String = String(anchor[1])
+		var read: String = Gen2Text.decode(
+			rom.bytes(), at + 1 + int(anchor[0]), opening.length()
+		)
+		if read != opening:
+			return {
+				"ok": false,
+				"message": "Intro text %s reads \"%s\", not \"%s\"." % [key, read, opening],
+			}
+	return {"ok": true, "message": "Intro texts verified."}
+
+
+## The `text` macro's own byte, which every `text_far` target opens with.
+const TEXT_MACRO_START: int = 0x00
+const INTRO_TEXT_GENDER: String = "gender"
+## The longest of them is `_OakText7` at 192 bytes; the slice is read to its own
+## terminator, so this is only a bound on a runaway stream.
+const INTRO_TEXT_MAX_BYTES: int = 512
+
+## What each intro text opens with, as a byte to skip and the plain characters
+## after it. Short anchors, the way the species and item tables are anchored:
+## enough to say this is the right text and not enough to be a copy of it.
+## `_OakText7` opens on `<PLAYER>`, which is one byte and eight characters, so
+## its anchor starts behind it.
+const INTRO_TEXT_OPENINGS: Dictionary = {
+	"oak_1": [0, "Hello!"],
+	"oak_2": [0, "This world"],
+	"oak_4": [0, "People and"],
+	"oak_5": [0, "But we"],
+	"oak_6": [0, "Now, what"],
+	"oak_7": [1, ", are you"],
+	INTRO_TEXT_GENDER: [0, "Are you a boy?"],
+}
+
+
+## data/text/name_input_chars.asm. Nothing in the block identifies itself, so it
+## is pinned by content at both ends of every table: row 0 has to be the nine
+## letters the table opens with, and the last row has to be the command row,
+## which is what NamingScreen_GetCursorPosition reads by column. A run of text
+## bytes elsewhere in the bank passes neither.
+static func verify_name_input_chars(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int(layout.get("name_input_chars", -1))
+	if not rom.in_bounds(at, RomLayout.NAME_INPUT_BLOCK_BYTES):
+		return {"ok": false, "message": "Name input table is outside the cartridge."}
+	for table: int in RomLayout.NAME_INPUT_TABLE_ROWS.size():
+		var start: int = RomLayout.name_input_table_offset(layout, table)
+		var rows: int = RomLayout.NAME_INPUT_TABLE_ROWS[table]
+		# Tables 0 and 1 are the lower keyboards and open on "a"; 2 and 3 are the
+		# upper ones and open on "A".
+		var lower: bool = table < 2
+		var first: int = RomLayout.NAME_INPUT_LOWER_A if lower else RomLayout.NAME_INPUT_UPPER_A
+		for column: int in RomLayout.NAME_INPUT_COLUMNS:
+			var expected: int = first + column
+			var stored: int = rom.u8(start + column * RomLayout.NAME_INPUT_COLUMN_STRIDE)
+			if stored != expected:
+				return {
+					"ok": false,
+					"message": "Name input table %d letter %d is $%02X, expected $%02X." % [
+						table, column, stored, expected,
+					],
+				}
+		# The last row of every table is the command row, in the columns
+		# NamingScreen_GetCursorPosition splits on.
+		var command: int = start + (rows - 1) * RomLayout.NAME_INPUT_ROW_BYTES
+		var expected_row: Array[int] = (
+			RomLayout.NAME_INPUT_COMMAND_LOWER if lower else RomLayout.NAME_INPUT_COMMAND_UPPER
+		)
+		if Array(rom.slice(command, RomLayout.NAME_INPUT_ROW_BYTES)) != Array(expected_row):
+			return {"ok": false, "message": "Name input table %d has no command row." % table}
+
+	# LoadNamingScreenGFX's four sheets are located from the block, so what has
+	# to be checked is that the run really extends that far and that the two
+	# markers are the dashes the entry draws. Both are one 1bpp tile of two lit
+	# rows, and which rows they are is the whole difference between them.
+	var border: int = RomLayout.naming_border_offset(layout)
+	var last: int = RomLayout.naming_under_line_offset(layout)
+	if not rom.in_bounds(border, last - border + RomLayout.TILE_BYTES_1BPP):
+		return {"ok": false, "message": "Name input graphics run past the cartridge."}
+	var markers: Dictionary = {
+		RomLayout.naming_middle_line_offset(layout): NAMING_MIDDLE_LINE_ROWS,
+		RomLayout.naming_under_line_offset(layout): NAMING_UNDER_LINE_ROWS,
+	}
+	for marker: int in markers:
+		for row: int in RomLayout.TILE_BYTES_1BPP:
+			var expected_byte: int = NAMING_MARKER_INK if row in markers[marker] else 0
+			if rom.u8(marker + row) != expected_byte:
+				return {
+					"ok": false,
+					"message": "Name entry marker at $%X row %d is $%02X, expected $%02X." % [
+						marker, row, rom.u8(marker + row), expected_byte,
+					],
+				}
+	return {"ok": true, "message": "Name input tables and graphics verified."}
+
+
+## `gfx/naming_screen/middle_line.1bpp` and `underline.1bpp`: seven lit pixels
+## on two rows each, which is what tells the dash under an unreached slot from
+## the one under the next character.
+const NAMING_MARKER_INK: int = 0x7F
+const NAMING_MIDDLE_LINE_ROWS: Array[int] = [3, 4]
+const NAMING_UNDER_LINE_ROWS: Array[int] = [6, 7]
 
 
 ## Walks the type matchup chart from its offset to the terminator.
@@ -1512,6 +1643,11 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if tmhm_moves.is_empty():
 		result["message"] = "TM/HM move table is outside the cartridge or malformed."
 		return result
+	var name_input_chars: Array = _import_name_input_chars(rom, layout)
+	var intro_text: Dictionary = _import_intro_text(rom, layout)
+	if intro_text.is_empty():
+		result["message"] = "Intro text is outside the cartridge or malformed."
+		return result
 	var items: Array = _import_items(rom, layout, on_progress)
 	var trades: Array = _import_world_trades(rom, layout)
 	var types: Array = _import_types(rom, layout, on_progress)
@@ -1548,6 +1684,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.tmhm_moves_path(directory), tmhm_moves):
 		result["message"] = "Could not write TM/HM move data."
+		return result
+	if not RomCache.write_json(RomCache.name_input_chars_path(directory), name_input_chars):
+		result["message"] = "Could not write name input data."
+		return result
+	if not RomCache.write_json(RomCache.intro_text_path(directory), intro_text):
+		result["message"] = "Could not write intro text."
 		return result
 	if not RomCache.write_json(RomCache.dex_orders_path(directory), dex_orders):
 		result["message"] = "Could not write dex order data."
@@ -1818,6 +1960,44 @@ func _import_tmhm_moves(rom: RomFile, layout: Dictionary) -> Array:
 		out.append(move)
 	if int(out[RomLayout.TMHM_TM_COUNT]) != MOVE_CUT:
 		return []
+	return out
+
+
+## data/text/name_input_chars.asm's four keyboards, each a list of 17-byte rows
+## in source order. Kept as raw cartridge codes rather than decoded text: a row
+## carries PK, MN and the two gender signs, which are one byte and one glyph but
+## not one character, and the screen writes the byte itself into the name.
+func _import_name_input_chars(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	for table: int in RomLayout.NAME_INPUT_TABLE_ROWS.size():
+		var start: int = RomLayout.name_input_table_offset(layout, table)
+		var rows: Array = []
+		for row: int in RomLayout.NAME_INPUT_TABLE_ROWS[table]:
+			var at: int = start + row * RomLayout.NAME_INPUT_ROW_BYTES
+			rows.append(Array(rom.slice(at, RomLayout.NAME_INPUT_ROW_BYTES)))
+		out.append(rows)
+	return out
+
+
+## The intro texts, decoded to strings the way species names are, since each is
+## one whole value rather than a run a script indexes into. `<PLAYER>` stays a
+## marker: the screen that prints it is the one that knows the name.
+##
+## A text a profile does not ship is left out rather than stored empty, so a
+## caller can tell "Gold has no gender screen" from "the text failed to decode".
+func _import_intro_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offsets: Dictionary = layout["intro_text"]
+	var out: Dictionary = {}
+	for key: String in INTRO_TEXT_OPENINGS:
+		var at: int = int(offsets.get(key, -1))
+		if at < 0:
+			continue
+		var decoded: Dictionary = Gen2WorldScript.decode_text(
+			rom.slice(at, INTRO_TEXT_MAX_BYTES)
+		)
+		if not bool(decoded.get("ok", false)):
+			return {}
+		out[key] = String(decoded["text"])
 	return out
 
 
@@ -2126,6 +2306,33 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.CARD_FRAME_TILES,
 			"first_code": 0,
 			"bits": 2,
+		},
+		## LoadNamingScreenGFX's own four. The border and the cursor are 2bpp,
+		## the two entry markers 1bpp, and all four are located from the keyboard
+		## block they are stored beside.
+		"naming_border": {
+			"offset": RomLayout.naming_border_offset(layout),
+			"tiles": RomLayout.NAMING_BORDER_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"naming_cursor": {
+			"offset": RomLayout.naming_cursor_offset(layout),
+			"tiles": RomLayout.NAMING_CURSOR_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"naming_middle_line": {
+			"offset": RomLayout.naming_middle_line_offset(layout),
+			"tiles": RomLayout.NAMING_MARKER_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"naming_under_line": {
+			"offset": RomLayout.naming_under_line_offset(layout),
+			"tiles": RomLayout.NAMING_MARKER_TILES,
+			"first_code": 0,
+			"bits": 1,
 		},
 		"card_pic_male": {
 			"offset": int(card["pic_male"]),

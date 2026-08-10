@@ -19,6 +19,8 @@ const MANIFEST: String = "manifest.json"
 const SPECIES: String = "species.json"
 const MOVES: String = "moves.json"
 const TMHM_MOVES: String = "tmhm_moves.json"
+const NAME_INPUT_CHARS: String = "name_input_chars.json"
+const INTRO_TEXT: String = "intro_text.json"
 const DEX_ORDERS: String = "dex_orders.json"
 const ITEMS: String = "items.json"
 const WORLD_TRADES: String = "world_trades.json"
@@ -59,7 +61,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 32
+const FORMAT_VERSION: int = 33
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -80,6 +82,15 @@ static func moves_path(directory: String) -> String:
 
 static func tmhm_moves_path(directory: String) -> String:
 	return "%s/%s" % [directory, TMHM_MOVES]
+
+
+static func name_input_chars_path(directory: String) -> String:
+	return "%s/%s" % [directory, NAME_INPUT_CHARS]
+
+
+## engine/menus/intro_menu.asm's and init_gender.asm's own texts, decoded.
+static func intro_text_path(directory: String) -> String:
+	return "%s/%s" % [directory, INTRO_TEXT]
 
 
 ## The two Pokedex orderings, kept apart from the species records because an

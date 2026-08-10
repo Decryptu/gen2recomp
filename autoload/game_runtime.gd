@@ -12,6 +12,32 @@ extends Node
 var selected_game_id: StringName = &""
 var selected_save_slot: int = -1
 
+## The new game the intro is running for, before it exists on disk.
+##
+## `NewGame` reaches `InitializeWorld` only after `PlayerProfileSetup` and
+## `OakSpeech` have both returned, so there is nothing to write until the intro
+## finishes. The launcher stages the slot and the slot's own label here, the
+## intro screen adds the trainer name and gender the cartridge asks for, and
+## only then is a save built and written. Abandoning the intro leaves no file.
+var pending_new_game_slot: int = -1
+var pending_new_game_label: String = ""
+
+
+## Stages a new game for [method take_pending_new_game] to pick up.
+func begin_new_game(game_id: StringName, slot: int, label: String) -> void:
+	selected_game_id = game_id
+	pending_new_game_slot = slot
+	pending_new_game_label = label
+
+
+## The staged slot and label, cleared as it is handed over so a second read
+## cannot start the intro again.
+func take_pending_new_game() -> Dictionary:
+	var out: Dictionary = {"slot": pending_new_game_slot, "label": pending_new_game_label}
+	pending_new_game_slot = -1
+	pending_new_game_label = ""
+	return out
+
 var _save: Gen2SaveData = null
 var _save_key: String = ""
 var _loaded_mods: Array = []

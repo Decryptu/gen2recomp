@@ -88,8 +88,16 @@ func open_new_slot() -> bool:
 	return true
 
 
-## Creates and validates a new-game save in the selected slot.
-func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
+## Starts a new game in the selected slot by running the cartridge's own intro.
+##
+## Nothing is written here. `NewGame` reaches `InitializeWorld` only after
+## `PlayerProfileSetup` and `OakSpeech` have returned, so the slot is staged on
+## [GameRuntime] and [Gen2IntroScreen] writes it once the trainer has a name and
+## a gender. Abandoning the intro leaves no file behind.
+##
+## [param label] is the save file's own name, the decorative one Rename edits.
+## It is optional; the trainer's name comes from the naming screen.
+func create_new_game(label: String = "", _starter_species: int = -1) -> bool:
 	if _data == null:
 		_set_status(&"error", "New game unavailable.", "No imported cartridge cache is selected.")
 		return false
@@ -100,27 +108,16 @@ func create_new_game(player_name: String, _starter_species: int = -1) -> bool:
 	if _selected_slot < 0:
 		_set_status(&"error", "New game was not created.", "Every save slot is in use.")
 		return false
-	var created: Gen2SaveData = Gen2SaveStore.create_new_game(
-		_data, _selected_slot, player_name
-	)
-	if created == null:
+	var trimmed: String = label.strip_edges()
+	if trimmed.length() > Gen2SaveData.MAX_LABEL:
 		_set_status(
-			&"error", "New game was not created.", "Enter a name of ten characters or fewer."
+			&"error", "New game was not started.",
+			"A save name is at most %d characters." % Gen2SaveData.MAX_LABEL,
 		)
 		return false
-	var result: Dictionary = Gen2SaveStore.save(created, _data)
-	if not result["ok"]:
-		_set_status(&"error", "New game was not saved.", String(result["message"]))
-		return false
-	# The slot now holds a different save than the one the runtime is sharing.
-	GameRuntime.reload_selected_save()
+	GameRuntime.begin_new_game(_data.id, _selected_slot, trimmed)
 	_new_game_visible = false
-	_refresh()
-	_set_status(
-		&"success",
-		"New game created in slot %d." % (_selected_slot + 1),
-		"A starter is waiting in the lab.",
-	)
+	get_tree().change_scene_to_file.call_deferred("res://game/world/intro_screen.tscn")
 	return true
 
 
@@ -520,19 +517,22 @@ func _open_editor() -> void:
 	get_tree().change_scene_to_file.call_deferred("res://game/save/save_editor_screen.tscn")
 
 
+## The launcher names the save file and nothing else. The trainer is named in
+## the game, on the cartridge's own naming screen, which the intro reaches after
+## Oak's speech.
 func _build_new_game_form(body: VBoxContainer) -> void:
 	body.add_child(Gen2LauncherUI.muted(
-		_palette, "Enter a name. A starter is waiting in the lab."
+		_palette, "Name this save file. Your trainer name is chosen in the game."
 	))
 	_name_input = LineEdit.new()
-	_name_input.placeholder_text = "Player name"
-	_name_input.max_length = Gen2SaveData.MAX_PLAYER_NAME
+	_name_input.placeholder_text = "Slot name (optional)"
+	_name_input.max_length = Gen2SaveData.MAX_LABEL
 	_name_input.custom_minimum_size = Vector2(0, 42)
-	body.add_child(Gen2LauncherUI.caption(_palette, "Player name"))
+	body.add_child(Gen2LauncherUI.caption(_palette, "Save name"))
 	body.add_child(_name_input)
 	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
 	body.add_child(actions)
-	actions.add_child(_action("Create save", Gen2LauncherButton.Variant.PRIMARY, &"check", _create_from_form))
+	actions.add_child(_action("Start game", Gen2LauncherButton.Variant.PRIMARY, &"check", _create_from_form))
 	actions.add_child(_action("Cancel", Gen2LauncherButton.Variant.NEUTRAL, &"", cancel_new_game))
 
 
