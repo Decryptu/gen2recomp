@@ -81,9 +81,16 @@ static func _decode_music(
 
 	var duration: int = 0
 	var looped: bool = false
+	# Every channel of a looping stream jumps back at the same musical point,
+	# but a channel that rests through the intro reaches it first, so the
+	# earliest is the one the whole stream repeats from.
+	var loop_start: int = -1
 	for track: Dictionary in tracks:
 		duration = maxi(duration, int(track.get("end_frame", 0)))
 		looped = looped or bool(track.get("looped", false))
+		var track_loop: int = int(track.get("loop_start_frame", -1))
+		if track_loop >= 0 and (loop_start < 0 or track_loop < loop_start):
+			loop_start = track_loop
 	return {
 		"ok": true,
 		"kind": request_kind,
@@ -91,6 +98,7 @@ static func _decode_music(
 		"tracks": tracks,
 		"duration_frames": duration,
 		"looped": looped,
+		"loop_start_frame": loop_start,
 		"warnings": warnings,
 	}
 
@@ -166,6 +174,13 @@ static func _decode_track(
 		"sfx": request_kind == &"sound",
 		"drumkit": 0,
 		"condition": 0,
+		# `_InitSound` writes MAX_VOLUME ($77) to wVolume, and `GetLRTracks`
+		# leaves both outputs on until a `stereo_panning` narrows them.
+		"master_left": 7,
+		"master_right": 7,
+		"pan_left": 1,
+		"pan_right": 1,
+		"frame_at_offset": {},
 		"loop_states": {},
 		"calls": [],
 		"steps": 0,
@@ -181,6 +196,11 @@ static func _decode_track(
 		state["tempo"] = int(cry["cry_length"]) & 0xFFFF
 	state["pitch_offset"] = int(cry.get("cry_pitch", 0)) & 0xFFFF
 	var looped: bool = false
+	# Reaching MAX_FRAMES means the render budget ran out, which is not the
+	# same thing as the stream looping. Conflating the two marked every SFX
+	# as looping, and a looping stream never lets `waitsfx` finish.
+	var truncated: bool = false
+	var loop_start_frame: int = -1
 	while int(state["steps"]) < MAX_STEPS and events.size() < MAX_EVENTS:
 		state["steps"] = int(state["steps"]) + 1
 		var at: int = int(state["at"])
@@ -191,6 +211,11 @@ static func _decode_track(
 				"last_opcode": int(state.get("last_opcode", -1)),
 			})
 		var value: int = bytes[at]
+		# Where a backward jump lands is the stream's loop point, and the frame
+		# it loops back to is the frame that offset was first executed at.
+		var seen: Dictionary = state["frame_at_offset"]
+		if not seen.has(at):
+			seen[at] = int(state["time"])
 		state["last_at"] = at
 		state["last_opcode"] = value
 		state["at"] = at + 1
@@ -206,7 +231,7 @@ static func _decode_track(
 				state["at"] = int(fixed_result["at"])
 				state["time"] = int(fixed_result["time"])
 				if int(state["time"]) >= MAX_FRAMES:
-					looped = true
+					truncated = true
 					break
 				continue
 			var pitch: int = value >> 4
@@ -224,6 +249,12 @@ static func _decode_track(
 				"wave_index": int(state["volume_envelope"]) & 0x0F,
 				"frequency": 0,
 				"noise": hardware_channel == 4,
+				# `Music_Volume` and the two panning commands are mixer state, not
+				# note state, so each event carries what was in force when it began.
+				"master_left": int(state["master_left"]),
+				"master_right": int(state["master_right"]),
+				"pan_left": int(state["pan_left"]),
+				"pan_right": int(state["pan_right"]),
 			}
 			if pitch > 0:
 				state["last_pitch"] = pitch
@@ -240,7 +271,7 @@ static func _decode_track(
 				events.append(event)
 			state["time"] = mini(MAX_FRAMES, int(state["time"]) + duration)
 			if int(state["time"]) >= MAX_FRAMES:
-				looped = true
+				truncated = true
 				break
 			continue
 
@@ -258,17 +289,26 @@ static func _decode_track(
 			return command_result
 		if bool(command_result.get("looped", false)):
 			looped = true
+			var landed: int = int(command_result.get("loop_offset", -1))
+			var seen_frames: Dictionary = state["frame_at_offset"]
+			if seen_frames.has(landed):
+				loop_start_frame = int(seen_frames[landed])
+			# One pass is the whole stream: going round again only replays what
+			# the events already carry, and used to run until MAX_FRAMES.
+			break
 		for warning: StringName in command_result.get("warnings", []):
 			if not warnings.has(warning):
 				warnings.append(warning)
 		if bool(command_result.get("end", false)):
 			break
 		if int(state["time"]) >= MAX_FRAMES:
-			looped = true
+			truncated = true
 			break
 
 	if int(state["steps"]) >= MAX_STEPS or events.size() >= MAX_EVENTS:
 		warnings.append(&"audio_stream_step_limit")
+	if truncated:
+		warnings.append(&"audio_stream_frame_limit")
 	return {
 		"ok": true,
 		"track": {
@@ -277,6 +317,7 @@ static func _decode_track(
 			"events": events,
 			"end_frame": int(state["time"]),
 			"looped": looped,
+			"loop_start_frame": loop_start_frame,
 		},
 		"warnings": warnings,
 	}
@@ -318,6 +359,12 @@ static func _decode_fixed_note(
 		"wave_index": envelope & 0x0F,
 		"frequency": frequency,
 		"noise": hardware_channel == 4,
+		# `Music_Volume` and the two panning commands are mixer state, not
+		# note state, so each event carries what was in force when it began.
+		"master_left": int(state["master_left"]),
+		"master_right": int(state["master_right"]),
+		"pan_left": int(state["pan_left"]),
+		"pan_right": int(state["pan_right"]),
 	}
 	return {
 		"ok": true,
@@ -354,7 +401,11 @@ static func _command(
 		0xDA:
 			if not _has(bytes, at, 2):
 				return _failure(&"audio_tempo_truncated")
-			state["tempo"] = _u16(bytes, at)
+			# `Music_Tempo` takes the high byte first (`ld d, a` then `ld e, a`),
+			# which is what the `bigdw` in the macro means. Read little-endian,
+			# `tempo 144` decodes as $9000 and every note lasts 256 times too
+			# long, which is what drove whole streams past MAX_FRAMES.
+			state["tempo"] = _u16_be(bytes, at)
 			at += 2
 		0xDB:
 			if not _has(bytes, at, 1):
@@ -394,14 +445,32 @@ static func _command(
 				state["drumkit"] = bytes[at]
 				at += 1
 		0xE4, 0xEF:
-			args = 1
+			if not _has(bytes, at, 1):
+				return _failure(&"audio_panning_truncated")
+			# `Music_StereoPanning` and `Music_ForceStereoPanning` both AND the
+			# byte into CHANNEL_TRACKS, whose two nibbles enable the left and
+			# right output. Stereo is an option on the cartridge; this follows
+			# the forced branch, which is what the option being on means.
+			state["pan_left"] = 1 if (bytes[at] & 0xF0) != 0 else 0
+			state["pan_right"] = 1 if (bytes[at] & 0x0F) != 0 else 0
+			at += 1
 		0xE5:
 			if not _has(bytes, at, 1):
 				return _failure(&"audio_volume_truncated")
-			state["volume_envelope"] = bytes[at]
+			# `Music_Volume` writes wVolume, the master left/right level
+			# behind NR50, and never touches CHANNEL_VOLUME_ENVELOPE. Writing
+			# it into the envelope clobbered every channel's volume, since
+			# nearly every song opens on `volume 7, 7`.
+			state["master_left"] = (bytes[at] >> 4) & 0x07
+			state["master_right"] = bytes[at] & 0x07
 			at += 1
 		0xE6:
-			args = 2
+			if not _has(bytes, at, 2):
+				return _failure(&"audio_pitch_offset_truncated")
+			# `Music_PitchOffset` stores the high byte first, so the macro is
+			# `bigdw` the way `tempo` is.
+			state["pitch_offset"] = _u16_be(bytes, at)
+			at += 2
 		0xE7, 0xE8, 0xE9:
 			args = 1
 		0xEA:
@@ -441,7 +510,15 @@ static func _command(
 		0xFC:
 			if not _has(bytes, at, 2):
 				return _failure(&"audio_jump_truncated")
+			var jump_from: int = at - 1
 			at = _audio_address(_u16(bytes, at)) - int(state.get("origin", 0))
+			# A jump landing at or before the command itself never comes back,
+			# which is how a stream with no `sound_loop 0` still loops forever.
+			if at <= jump_from:
+				state["at"] = at
+				return {
+					"ok": true, "looped": true, "loop_offset": at, "warnings": warnings,
+				}
 		0xFD:
 			if not _has(bytes, at, 3):
 				return _failure(&"audio_loop_truncated")
@@ -456,13 +533,17 @@ static func _command(
 				at = loop_target - int(state.get("origin", 0))
 				if loop_count == 0:
 					state["at"] = at
-					return {"ok": true, "looped": true, "warnings": warnings}
+					return {
+						"ok": true, "looped": true, "loop_offset": at, "warnings": warnings,
+					}
 			else:
 				var remaining: int = int(loops[key])
 				if remaining < 0:
 					at = loop_target - int(state.get("origin", 0))
 					state["at"] = at
-					return {"ok": true, "looped": true, "warnings": warnings}
+					return {
+						"ok": true, "looped": true, "loop_offset": at, "warnings": warnings,
+					}
 				if remaining > 0:
 					loops[key] = remaining - 1
 					at = loop_target - int(state.get("origin", 0))
@@ -504,8 +585,12 @@ static func _frequency(octave: int, pitch: int, transpose: int) -> int:
 		return 0
 	var frequency: int = FREQUENCY_TABLE[table_index]
 	var shift: int = 7 - transposed_octave
+	# `sra d` / `rr e`, not `srl`: every table entry has bit 15 set, so the
+	# sign propagates into the eleven bits `and $7` keeps. A logical shift
+	# put octave 7 and 8 out by more than an octave; C_ at octave 8 came out
+	# at register $1f0 against the hardware's $7f0.
 	while shift > 0:
-		frequency = frequency >> 1
+		frequency = (frequency >> 1) | (frequency & 0x8000)
 		shift -= 1
 	return frequency & 0x07FF
 
@@ -577,6 +662,13 @@ static func _bytes(value: Variant) -> PackedByteArray:
 
 static func _u16(bytes: PackedByteArray, at: int) -> int:
 	return bytes[at] | (bytes[at + 1] << 8)
+
+
+## The order `tempo` and `pitch_offset` are written in: high byte first, which
+## is what `bigdw` means in the macros. Every other two-byte operand is a
+## stream pointer and little-endian.
+static func _u16_be(bytes: PackedByteArray, at: int) -> int:
+	return (bytes[at] << 8) | bytes[at + 1]
 
 
 static func _has(bytes: PackedByteArray, at: int, count: int) -> bool:

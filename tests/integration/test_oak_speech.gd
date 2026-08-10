@@ -58,8 +58,8 @@ func test_the_beats_are_the_six_texts_in_source_order() -> void:
 func test_the_pics_follow_the_routines_own_order() -> void:
 	var beats: Array = Gen2OakSpeech.beats(_data)
 	assert_eq(int(beats[0]["pic"]), Gen2OakSpeech.Pic.OAK)
-	assert_eq(int(beats[1]["pic"]), Gen2OakSpeech.Pic.WOOPER)
-	assert_eq(int(beats[2]["pic"]), Gen2OakSpeech.Pic.WOOPER)
+	assert_eq(int(beats[1]["pic"]), Gen2OakSpeech.Pic.MON)
+	assert_eq(int(beats[2]["pic"]), Gen2OakSpeech.Pic.MON)
 	assert_eq(int(beats[3]["pic"]), Gen2OakSpeech.Pic.OAK)
 	assert_eq(int(beats[4]["pic"]), Gen2OakSpeech.Pic.PLAYER)
 	assert_eq(int(beats[5]["pic"]), Gen2OakSpeech.Pic.PLAYER)

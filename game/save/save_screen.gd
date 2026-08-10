@@ -293,8 +293,12 @@ func _refresh() -> void:
 
 
 func _refresh_slot_cards() -> void:
+	# Selecting a slot is reached from a slot card's own `pressed`, so the
+	# card being replaced is still emitting. `free()` there is a use after
+	# free; detaching first keeps it out of the rebuilt list.
 	for child: Node in _slots_container.get_children():
-		child.free()
+		_slots_container.remove_child(child)
+		child.queue_free()
 	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 

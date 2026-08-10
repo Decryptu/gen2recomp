@@ -13,8 +13,9 @@ extends RefCounted
 enum Pic {
 	## `Intro_PrepTrainerPic` with wTrainerClass POKEMON_PROF.
 	OAK,
-	## `PrepMonFrontpic` with wCurSpecies WOOPER and zeroed DVs.
-	WOOPER,
+	## `PrepMonFrontpic` with zeroed DVs, on whichever species the profile
+	## shows: see [method intro_species].
+	MON,
 	## `DrawIntroPlayerPic`. The project imports neither ChrisPic nor KrisPic,
 	## so this beat draws its text and no picture; see the class comment on
 	## [Gen2OakSpeechScreen].
@@ -24,7 +25,11 @@ enum Pic {
 ## `constants/trainer_constants.asm`: POKEMON_PROF is class $0a, and its pic is
 ## in the same table every other trainer class's is.
 const POKEMON_PROF: int = 0x0A
-## `ld a, WOOPER`, the one species the speech shows.
+## The one species the speech shows, and it is not the same on both pins:
+## `OakSpeech` is `ld a, MARILL` in pokegold and `ld a, WOOPER` in
+## pokecrystal (`engine/menus/intro_menu.asm`). Numbers from
+## `constants/pokemon_constants.asm`.
+const MARILL: int = 183
 const WOOPER: int = 194
 
 ## Where `NamePlayer` sits: after `_OakText6` and before `_OakText7`. The source
@@ -51,8 +56,8 @@ static func beats(data: GameData) -> Array:
 		return []
 	var order: Array = [
 		[Pic.OAK, "oak_1"],
-		[Pic.WOOPER, "oak_2"],
-		[Pic.WOOPER, "oak_4"],
+		[Pic.MON, "oak_2"],
+		[Pic.MON, "oak_4"],
 		[Pic.OAK, "oak_5"],
 		[Pic.PLAYER, "oak_6"],
 		[Pic.PLAYER, "oak_7"],
@@ -79,3 +84,9 @@ static func resolve_name(entered: String, gender: int) -> String:
 ## because only the caller knows the name. This is that caller.
 static func with_player_name(text: String, player_name: String) -> String:
 	return text.replace("<PLAYER>", player_name)
+
+
+## Which species `OakSpeech` puts on the two middle beats. Gold and Silver show
+## a Marill where Crystal shows a Wooper.
+static func intro_species(data: GameData) -> int:
+	return WOOPER if Gen2WorldState.is_crystal_profile(data) else MARILL

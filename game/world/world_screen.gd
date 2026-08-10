@@ -2340,10 +2340,12 @@ func _refresh_party_summary() -> void:
 	if save == null:
 		_world.clear_party_summary()
 		_world.clear_player_id()
+		_world.set_player_name("")
 		return
 	## wPlayerID rides the same refresh: it belongs to the save, and
 	## GetTreeScore reads it the way VAR_PARTYCOUNT reads the party mirror.
 	_world.set_player_id(save.player_id)
+	_world.set_player_name(save.player_name)
 	_world.set_player_gender(save.gender == Gen2SaveData.GENDER_FEMALE)
 	var has_pokerus: bool = false
 	var species: Array[int] = []

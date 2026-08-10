@@ -262,8 +262,9 @@ static func _characters() -> Dictionary:
 	table[0xE1] = "PK"
 	table[0xE2] = "MN"
 
-	# Substituted from RAM when the game prints them.
-	table[0x14] = "<PLAYER>"
+	# Substituted from RAM when the game prints them. $14 is not among them:
+	# `charmap.asm` gives it no character and `CheckDict` no entry, because it
+	# is TX_STRINGBUFFER one layer up. See [Gen2TextStream].
 	table[0x38] = "<RED>"
 	table[0x39] = "<GREEN>"
 	table[0x3F] = "<ENEMY>"
@@ -273,8 +274,8 @@ static func _characters() -> Dictionary:
 	table[0x59] = "<TARGET>"
 	table[0x5A] = "<USER>"
 
-	# Line and box control.
-	table[0x16] = "\n"
+	# Line and box control. $16 is left out for the reason $14 is: to the
+	# command loop it is TX_FAR, and `CheckDict` has no `<CR>` entry.
 	table[0x22] = "\n"
 	table[0x4B] = "\n"
 	table[0x4C] = "\n"

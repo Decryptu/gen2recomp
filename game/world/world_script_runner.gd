@@ -57,6 +57,11 @@ var _phone_context: Dictionary = {}
 var _phone_started: bool = false
 var _text_buffers: Dictionary = {}
 var _rival_name: String = "???"
+## wPlayerName, mirrored from the selected save the way Gen2WorldAPI mirrors
+## wPlayerID. `<PLAYER>` is a `CheckDict` entry, so a text carrying one cannot
+## be printed without it; empty leaves the marker visible rather than inventing
+## a trainer.
+var player_name: String = ""
 ## Everything this invocation rolls: the source RANDOM command and the phone
 ## routines that pick a caller line or an unseen species. Injected like the rest
 ## of the project's randomness, so a caller can reproduce a branch; a runner
@@ -202,6 +207,7 @@ static func begin(
 	runner._reset_phone_receive_timer = bool(request.get("reset_receive_timer", false))
 	runner._last_talked_object_index = int(request.get("object_index", -1))
 	runner._last_item = int(request.get("item", 0))
+	runner.player_name = String(request.get("player_name", ""))
 	var bank: int = int(request.get("bank", 0))
 	var address: int = int(request.get("script", request.get("address", 0)))
 	var trainer_phase: StringName = StringName(request.get("trainer_phase", &""))
@@ -2528,25 +2534,24 @@ func _set_text_buffer(
 	_emit_runtime_event(&"text_buffer_changed", event)
 
 
+## The runner's own print-time context: the buffers `getstring` and
+## `verbosegiveitem` fill, and the two names a map text can name.
 func _decode_text_with_buffers(raw: PackedByteArray) -> Dictionary:
-	if raw.is_empty():
-		return {"ok": false, "reason": &"missing_text"}
-	var at: int = 1 if raw[0] == Gen2WorldScript.TEXT_START else 0
-	var out: String = ""
-	while at < raw.size():
-		var byte: int = int(raw[at])
-		if byte == Gen2WorldScript.TEXT_TERMINATOR:
-			return {"ok": true, "text": out, "bytes": at + 1}
-		if byte == TEXT_STRING_BUFFER:
-			if at + 1 >= raw.size():
-				return {"ok": false, "reason": &"truncated_text_buffer", "text": out}
-			var buffer: int = int(raw[at + 1])
-			out += String(_text_buffers.get(buffer, "<BUFFER_%d>" % buffer))
-			at += 2
-			continue
-		out += _rival_name if byte == 0x53 else Gen2Text.character(byte)
-		at += 1
-	return {"ok": false, "reason": &"missing_text_terminator", "text": out}
+	return Gen2TextStream.decode(raw, 0, text_context())
+
+
+## What `CheckDict` and `TX_STRINGBUFFER` read when this runner prints.
+func text_context() -> Dictionary:
+	var context: Dictionary = {
+		"buffers": _text_buffers,
+		"rival": _rival_name,
+	}
+	if not player_name.is_empty():
+		context["player"] = player_name
+	if data != null:
+		context["far"] = func(bank: int, address: int) -> PackedByteArray:
+			return data.world_text(bank, address)
+	return context
 
 
 func _runtime_memory_pointer(address: int) -> Dictionary:

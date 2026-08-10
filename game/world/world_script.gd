@@ -114,7 +114,10 @@ const GOLD_ENCOUNTERMUSIC: int = 0x7F
 const TEXT_START: int = 0x00
 ## World text uses the source text-command stream. $50 is a page control;
 ## $57 (done) ends the text box and $58 (prompt) pauses for a prompt.
-const TEXT_PAGE: int = 0x50
+## `<PARA>`, which waits for a press and clears the box. $50 is `@`, the
+## terminator, and reading it as a page break walked `_OakText2` straight
+## into the two texts after it.
+const TEXT_PAGE: int = 0x51
 const TEXT_TERMINATOR: int = 0x57
 const TEXT_PROMPT: int = 0x58
 
@@ -954,24 +957,8 @@ static func decode_stone_table(data: PackedByteArray) -> Dictionary:
 	return {"ok": false, "reason": &"unterminated_stone_table", "rows": rows}
 
 
-## Gen2Text codec uses $50 for fixed names, but in world text $50 is a page
-## control and must remain in the decoded stream. Unknown bytes remain visible
-## as bracketed markers instead of being discarded.
+## A world text with nothing to substitute into it. Anything carrying a name,
+## a string buffer or a `text_far` goes through [Gen2TextStream] with a
+## context; this is the bare form a tool or a fixture reads.
 static func decode_text(data: PackedByteArray) -> Dictionary:
-	if data.is_empty():
-		return {"ok": false, "reason": &"missing_text"}
-	var at: int = 1 if data[0] == TEXT_START else 0
-	var out: String = ""
-	while at < data.size():
-		var byte: int = int(data[at])
-		if byte == TEXT_TERMINATOR:
-			return {"ok": true, "text": out, "bytes": at + 1}
-		if byte == TEXT_PROMPT:
-			return {"ok": true, "text": out, "bytes": at + 1, "prompt": true}
-		if byte == TEXT_PAGE:
-			out += "\n\n"
-			at += 1
-			continue
-		out += Gen2Text.character(byte)
-		at += 1
-	return {"ok": false, "reason": &"missing_text_terminator", "text": out}
+	return Gen2TextStream.decode(data)
