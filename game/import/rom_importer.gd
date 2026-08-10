@@ -305,7 +305,38 @@ static func verify_name_input_chars(rom: RomFile, layout: Dictionary) -> Diction
 		)
 		if Array(rom.slice(command, RomLayout.NAME_INPUT_ROW_BYTES)) != Array(expected_row):
 			return {"ok": false, "message": "Name input table %d has no command row." % table}
-	return {"ok": true, "message": "Name input tables verified."}
+
+	# LoadNamingScreenGFX's four sheets are located from the block, so what has
+	# to be checked is that the run really extends that far and that the two
+	# markers are the dashes the entry draws. Both are one 1bpp tile of two lit
+	# rows, and which rows they are is the whole difference between them.
+	var border: int = RomLayout.naming_border_offset(layout)
+	var last: int = RomLayout.naming_under_line_offset(layout)
+	if not rom.in_bounds(border, last - border + RomLayout.TILE_BYTES_1BPP):
+		return {"ok": false, "message": "Name input graphics run past the cartridge."}
+	var markers: Dictionary = {
+		RomLayout.naming_middle_line_offset(layout): NAMING_MIDDLE_LINE_ROWS,
+		RomLayout.naming_under_line_offset(layout): NAMING_UNDER_LINE_ROWS,
+	}
+	for marker: int in markers:
+		for row: int in RomLayout.TILE_BYTES_1BPP:
+			var expected_byte: int = NAMING_MARKER_INK if row in markers[marker] else 0
+			if rom.u8(marker + row) != expected_byte:
+				return {
+					"ok": false,
+					"message": "Name entry marker at $%X row %d is $%02X, expected $%02X." % [
+						marker, row, rom.u8(marker + row), expected_byte,
+					],
+				}
+	return {"ok": true, "message": "Name input tables and graphics verified."}
+
+
+## `gfx/naming_screen/middle_line.1bpp` and `underline.1bpp`: seven lit pixels
+## on two rows each, which is what tells the dash under an unreached slot from
+## the one under the next character.
+const NAMING_MARKER_INK: int = 0x7F
+const NAMING_MIDDLE_LINE_ROWS: Array[int] = [3, 4]
+const NAMING_UNDER_LINE_ROWS: Array[int] = [6, 7]
 
 
 ## Walks the type matchup chart from its offset to the terminator.
@@ -2187,6 +2218,33 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.CARD_FRAME_TILES,
 			"first_code": 0,
 			"bits": 2,
+		},
+		## LoadNamingScreenGFX's own four. The border and the cursor are 2bpp,
+		## the two entry markers 1bpp, and all four are located from the keyboard
+		## block they are stored beside.
+		"naming_border": {
+			"offset": RomLayout.naming_border_offset(layout),
+			"tiles": RomLayout.NAMING_BORDER_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"naming_cursor": {
+			"offset": RomLayout.naming_cursor_offset(layout),
+			"tiles": RomLayout.NAMING_CURSOR_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"naming_middle_line": {
+			"offset": RomLayout.naming_middle_line_offset(layout),
+			"tiles": RomLayout.NAMING_MARKER_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
+		"naming_under_line": {
+			"offset": RomLayout.naming_under_line_offset(layout),
+			"tiles": RomLayout.NAMING_MARKER_TILES,
+			"first_code": 0,
+			"bits": 1,
 		},
 		"card_pic_male": {
 			"offset": int(card["pic_male"]),

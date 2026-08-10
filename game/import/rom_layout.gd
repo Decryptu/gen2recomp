@@ -1208,6 +1208,37 @@ static func fix_pic_bank(layout: Dictionary, stored: int) -> int:
 	return stored + int(layout["pic_bank_add"])
 
 
+## `LoadNamingScreenGFX`'s four sheets, which sit either side of the keyboard
+## block in `engine/menus/naming_screen.asm`'s own order: the border and the
+## cursor before it, then End, MiddleLine and UnderLine after. Nothing else is
+## between them, so each is located from the block rather than pinned again.
+## The whole 446-byte run is byte identical in all three dumps.
+const NAMING_BORDER_TILES: int = 1
+const NAMING_CURSOR_TILES: int = 2
+const NAMING_MARKER_TILES: int = 1
+const TILE_BYTES_2BPP: int = 16
+const TILE_BYTES_1BPP: int = 8
+
+
+static func naming_border_offset(layout: Dictionary) -> int:
+	return int(layout["name_input_chars"]) \
+		- (NAMING_BORDER_TILES + NAMING_CURSOR_TILES) * TILE_BYTES_2BPP
+
+
+static func naming_cursor_offset(layout: Dictionary) -> int:
+	return naming_border_offset(layout) + NAMING_BORDER_TILES * TILE_BYTES_2BPP
+
+
+## `NamingScreenGFX_End` sits first after the block and is unreferenced in both
+## pins, so the two markers the screen does draw are one and two tiles past it.
+static func naming_middle_line_offset(layout: Dictionary) -> int:
+	return int(layout["name_input_chars"]) + NAME_INPUT_BLOCK_BYTES + TILE_BYTES_1BPP
+
+
+static func naming_under_line_offset(layout: Dictionary) -> int:
+	return naming_middle_line_offset(layout) + TILE_BYTES_1BPP
+
+
 ## Where [param table] of NAME_INPUT_TABLE_ROWS starts, counted from the block
 ## in source order, since the four keyboards are stored back to back with no
 ## header between them.
