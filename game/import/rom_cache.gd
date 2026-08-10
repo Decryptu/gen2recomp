@@ -20,6 +20,7 @@ const SPECIES: String = "species.json"
 const MOVES: String = "moves.json"
 const TMHM_MOVES: String = "tmhm_moves.json"
 const NAME_INPUT_CHARS: String = "name_input_chars.json"
+const INTRO_TEXT: String = "intro_text.json"
 const DEX_ORDERS: String = "dex_orders.json"
 const ITEMS: String = "items.json"
 const WORLD_TRADES: String = "world_trades.json"
@@ -85,6 +86,11 @@ static func tmhm_moves_path(directory: String) -> String:
 
 static func name_input_chars_path(directory: String) -> String:
 	return "%s/%s" % [directory, NAME_INPUT_CHARS]
+
+
+## engine/menus/intro_menu.asm's and init_gender.asm's own texts, decoded.
+static func intro_text_path(directory: String) -> String:
+	return "%s/%s" % [directory, INTRO_TEXT]
 
 
 ## The two Pokedex orderings, kept apart from the species records because an

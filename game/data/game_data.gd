@@ -30,6 +30,7 @@ var _moves: Array = []
 ## as floats.
 var _tmhm_moves: Array[int] = []
 var _name_input_chars: Array = []
+var _intro_text: Dictionary = {}
 ## The two cached dex orderings, by the key each mode reads, restored to
 ## integers because JSON reads them back as floats.
 var _dex_orders: Dictionary = {}
@@ -106,6 +107,8 @@ static func open_directory(path: String) -> GameData:
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
 	data._name_input_chars = data._read_array(RomCache.name_input_chars_path(path))
+	var intro: Variant = RomCache.read_json(RomCache.intro_text_path(path))
+	data._intro_text = intro if intro is Dictionary else {}
 	data._load_dex_orders(RomCache.dex_orders_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
 	data._world_trades = data._read_array(RomCache.world_trades_path(path))
@@ -775,6 +778,14 @@ func name_input_chars(table: int) -> Array:
 			codes.append(int(code))
 		out.append(codes)
 	return out
+
+
+## One of the intro's own texts by its `data/text/common_2.asm` label, in the
+## keys [constant RomImporter.INTRO_TEXT_OPENINGS] names: `oak_1`, `oak_2`,
+## `oak_4` to `oak_7` and `gender`. Empty when this cartridge does not ship it,
+## which for `gender` means Gold or Silver.
+func intro_text(key: String) -> String:
+	return String(_intro_text.get(key, ""))
 
 
 func item(number: int) -> Dictionary:

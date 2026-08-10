@@ -268,7 +268,66 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not name_input["ok"]:
 		return name_input
 
+	var intro_text: Dictionary = verify_intro_text(rom, layout)
+	if not intro_text["ok"]:
+		return intro_text
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## `data/text/common_2.asm`'s intro texts. Each is a `text_far` target, so it
+## opens with the `text` macro's own $00 and runs to a terminator, and each is
+## pinned by the first words it says: a text stream of the right shape in the
+## wrong place still walks to a terminator and still decodes into words.
+static func verify_intro_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offsets: Dictionary = layout["intro_text"]
+	for key: String in INTRO_TEXT_OPENINGS:
+		var at: int = int(offsets.get(key, -1))
+		if at < 0:
+			# Only the gender text is allowed to be absent, and only where
+			# init_gender.asm is.
+			if key == INTRO_TEXT_GENDER:
+				continue
+			return {"ok": false, "message": "Intro text %s has no offset." % key}
+		if rom.u8(at) != TEXT_MACRO_START:
+			return {
+				"ok": false,
+				"message": "Intro text %s does not open with the text macro." % key,
+			}
+		var anchor: Array = INTRO_TEXT_OPENINGS[key]
+		var opening: String = String(anchor[1])
+		var read: String = Gen2Text.decode(
+			rom.bytes(), at + 1 + int(anchor[0]), opening.length()
+		)
+		if read != opening:
+			return {
+				"ok": false,
+				"message": "Intro text %s reads \"%s\", not \"%s\"." % [key, read, opening],
+			}
+	return {"ok": true, "message": "Intro texts verified."}
+
+
+## The `text` macro's own byte, which every `text_far` target opens with.
+const TEXT_MACRO_START: int = 0x00
+const INTRO_TEXT_GENDER: String = "gender"
+## The longest of them is `_OakText7` at 192 bytes; the slice is read to its own
+## terminator, so this is only a bound on a runaway stream.
+const INTRO_TEXT_MAX_BYTES: int = 512
+
+## What each intro text opens with, as a byte to skip and the plain characters
+## after it. Short anchors, the way the species and item tables are anchored:
+## enough to say this is the right text and not enough to be a copy of it.
+## `_OakText7` opens on `<PLAYER>`, which is one byte and eight characters, so
+## its anchor starts behind it.
+const INTRO_TEXT_OPENINGS: Dictionary = {
+	"oak_1": [0, "Hello!"],
+	"oak_2": [0, "This world"],
+	"oak_4": [0, "People and"],
+	"oak_5": [0, "But we"],
+	"oak_6": [0, "Now, what"],
+	"oak_7": [1, ", are you"],
+	INTRO_TEXT_GENDER: [0, "Are you a boy?"],
+}
 
 
 ## data/text/name_input_chars.asm. Nothing in the block identifies itself, so it
@@ -1585,6 +1644,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "TM/HM move table is outside the cartridge or malformed."
 		return result
 	var name_input_chars: Array = _import_name_input_chars(rom, layout)
+	var intro_text: Dictionary = _import_intro_text(rom, layout)
+	if intro_text.is_empty():
+		result["message"] = "Intro text is outside the cartridge or malformed."
+		return result
 	var items: Array = _import_items(rom, layout, on_progress)
 	var trades: Array = _import_world_trades(rom, layout)
 	var types: Array = _import_types(rom, layout, on_progress)
@@ -1624,6 +1687,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.name_input_chars_path(directory), name_input_chars):
 		result["message"] = "Could not write name input data."
+		return result
+	if not RomCache.write_json(RomCache.intro_text_path(directory), intro_text):
+		result["message"] = "Could not write intro text."
 		return result
 	if not RomCache.write_json(RomCache.dex_orders_path(directory), dex_orders):
 		result["message"] = "Could not write dex order data."
@@ -1910,6 +1976,28 @@ func _import_name_input_chars(rom: RomFile, layout: Dictionary) -> Array:
 			var at: int = start + row * RomLayout.NAME_INPUT_ROW_BYTES
 			rows.append(Array(rom.slice(at, RomLayout.NAME_INPUT_ROW_BYTES)))
 		out.append(rows)
+	return out
+
+
+## The intro texts, decoded to strings the way species names are, since each is
+## one whole value rather than a run a script indexes into. `<PLAYER>` stays a
+## marker: the screen that prints it is the one that knows the name.
+##
+## A text a profile does not ship is left out rather than stored empty, so a
+## caller can tell "Gold has no gender screen" from "the text failed to decode".
+func _import_intro_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offsets: Dictionary = layout["intro_text"]
+	var out: Dictionary = {}
+	for key: String in INTRO_TEXT_OPENINGS:
+		var at: int = int(offsets.get(key, -1))
+		if at < 0:
+			continue
+		var decoded: Dictionary = Gen2WorldScript.decode_text(
+			rom.slice(at, INTRO_TEXT_MAX_BYTES)
+		)
+		if not bool(decoded.get("ok", false)):
+			return {}
+		out[key] = String(decoded["text"])
 	return out
 
 

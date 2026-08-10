@@ -45,6 +45,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_overworld_graphics(directory)
 	_write_battle_graphics(directory, manifest)
 	_write_name_input_chars(directory)
+	_write_intro_text(directory, crystal_commands)
 	manifest["game_id"] = String(game_id)
 	manifest["sha1"] = SHA1
 	manifest["complete"] = true
@@ -76,6 +77,24 @@ static func _write_name_input_chars(directory: String) -> void:
 			rows.append(codes)
 		tables.append(rows)
 	RomCache.write_json(RomCache.name_input_chars_path(directory), tables)
+
+
+## The intro's own texts, synthetic. Every rule that reads them cares only that
+## a text is there and how many pages it wraps to, so the words are stand-ins.
+## The gender text is Crystal only, the way `init_gender.asm` is: a Gold or
+## Silver fixture leaves the key out and the gender screen refuses to open.
+static func _write_intro_text(directory: String, crystal: bool) -> void:
+	var text: Dictionary = {
+		"oak_1": "Oak one.\n\nOak one page two.",
+		"oak_2": "Oak two.",
+		"oak_4": "Oak four.",
+		"oak_5": "Oak five.",
+		"oak_6": "Oak six.",
+		"oak_7": "<PLAYER>, oak seven.",
+	}
+	if crystal:
+		text["gender"] = "Are you a boy?\nOr are you a girl?"
+	RomCache.write_json(RomCache.intro_text_path(directory), text)
 
 
 static func _write_trainers(directory: String) -> void:

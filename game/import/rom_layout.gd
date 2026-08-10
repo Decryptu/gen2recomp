@@ -829,6 +829,20 @@ const GOLD_SILVER: Dictionary = {
 	"tmhm_moves": 0x11A66,
 	"tmhm_move_count": 57,
 	"name_input_chars": 0x120B4,
+	## `data/text/common_2.asm`'s intro texts, each at its own `text_far` target.
+	## Nested the way the trainer card is, so the -1 for what Gold and Silver do
+	## not ship stays out of the flat offset checks. `_OakText3` is a bare
+	## `text_promptbutton` and carries no words, so it has no offset here.
+	"intro_text": {
+		"oak_1": 0x195624,
+		"oak_2": 0x195693,
+		"oak_4": 0x1956D3,
+		"oak_5": 0x19573F,
+		"oak_6": 0x1957B7,
+		"oak_7": 0x1957DD,
+		## `engine/menus/init_gender.asm` is Crystal only, and so is its text.
+		"gender": -1,
+	},
 	"evos_attacks": 0x427BD,
 	"type_names": 0x509AE,
 	"type_matchups": 0x34D01,
@@ -1016,6 +1030,18 @@ const CRYSTAL: Dictionary = {
 	"tmhm_moves": 0x1167A,
 	"tmhm_move_count": 60,
 	"name_input_chars": 0x11CE7,
+	## See the Gold and Silver block above. Crystal moves `_OakText6` and
+	## `_OakText7` out of the run the other four sit in, so the six are located
+	## one by one rather than walked.
+	"intro_text": {
+		"oak_1": 0x1C1D35,
+		"oak_2": 0x1C1DA4,
+		"oak_4": 0x1C1DE5,
+		"oak_5": 0x1C1E51,
+		"oak_6": 0x1C4000,
+		"oak_7": 0x1C4026,
+		"gender": 0x1C0CA3,
+	},
 	"evos_attacks": 0x425B1,
 	"type_names": 0x5097B,
 	"type_matchups": 0x34BB1,
