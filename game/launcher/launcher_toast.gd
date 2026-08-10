@@ -10,6 +10,7 @@ extends Control
 
 ## How long a message that reports no problem stays up.
 const LINGER: float = 3.6
+const ICON: float = 22.0
 
 var _theme: Gen2LauncherTheme = null
 var _card: Gen2LauncherCard = null
@@ -45,7 +46,9 @@ func _build() -> void:
 	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(centre)
 
-	_card = Gen2LauncherCard.floating(_theme, Gen2LauncherTheme.RADIUS_MD, 16, 20)
+	# A chip rather than a card: the toast lies over whatever the page is doing,
+	# so it is drawn on the opposite side of the page from everything under it.
+	_card = Gen2LauncherCard.chip(_theme, Gen2LauncherTheme.RADIUS_MD, 16, 20)
 	_card.custom_minimum_size = Vector2(360, 0)
 	# Nothing in here is clickable, so nothing in here takes a click. The card
 	# is the width of the shelf's action row and sits exactly on top of it.
@@ -56,7 +59,7 @@ func _build() -> void:
 	_card.add_child(column)
 	var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	column.add_child(line)
-	_icon = Gen2LauncherIcon.create(&"about", 18.0, _theme.muted)
+	_icon = Gen2LauncherIcon.create(&"about", ICON, _theme.on_surface)
 	_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(_icon)
 	var text: VBoxContainer = Gen2LauncherUI.column(2)
@@ -65,6 +68,7 @@ func _build() -> void:
 	_heading = Gen2LauncherUI.body(_theme, "")
 	text.add_child(_heading)
 	_detail = Gen2LauncherUI.muted(_theme, "")
+	_detail.add_theme_color_override("font_color", _theme.with_alpha(_theme.on_surface, 0.75))
 	text.add_child(_detail)
 
 	_progress = ProgressBar.new()
@@ -74,6 +78,12 @@ func _build() -> void:
 	_progress.visible = false
 	# A bar that reports progress is read, never dragged.
 	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The bar sits on the chip, so it is styled against that rather than against
+	# the page the stock theme was written for.
+	_progress.add_theme_stylebox_override(
+		"background", _theme.box(_theme.with_alpha(_theme.on_surface, 0.20), 4.0)
+	)
+	_progress.add_theme_stylebox_override("fill", _theme.box(_theme.accent, 4.0))
 	column.add_child(_progress)
 
 
@@ -83,27 +93,23 @@ func show_message(kind: StringName, heading: String, detail: String) -> void:
 	if heading.is_empty():
 		hide_message()
 		return
-	var colour: Color = _theme.muted
+	var colour: Color = _theme.on_surface
 	var glyph: StringName = &"about"
 	match kind:
 		&"success":
-			colour = _theme.success
+			colour = _theme.on_chip(_theme.success)
 			glyph = &"check"
 		&"error":
-			colour = _theme.error
+			colour = _theme.on_chip(_theme.error)
 			glyph = &"warning"
 		&"busy":
-			colour = _theme.accent
+			colour = _theme.on_chip(_theme.accent)
 			glyph = &"refresh"
-	_icon.set_glyph(glyph, 18.0, colour)
+	_icon.set_glyph(glyph, ICON, colour)
 	_heading.text = heading
 	_heading.add_theme_color_override("font_color", colour)
 	_detail.text = detail
 	_detail.visible = not detail.is_empty()
-	_card.add_theme_stylebox_override(
-		"panel",
-		_theme.padded(_theme.floating(_theme.surface, Gen2LauncherTheme.RADIUS_MD, 20), 16),
-	)
 	_raise()
 	if kind == &"error" or kind == &"busy":
 		_cancel_timer()

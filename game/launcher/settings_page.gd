@@ -38,9 +38,7 @@ func _build() -> void:
 	_saved = Gen2LauncherUI.muted(_theme, "Changes are written as you make them.")
 	head.add_child(_saved)
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	add_child(scroll)
 	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL

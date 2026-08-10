@@ -24,9 +24,7 @@ func _build() -> void:
 	add_theme_constant_override("separation", Gen2LauncherUI.GAP_LG)
 	add_child(Gen2LauncherUI.title(_theme, "About", Gen2LauncherTheme.FONT_DISPLAY))
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	add_child(scroll)
 	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL

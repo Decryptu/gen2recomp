@@ -91,8 +91,8 @@ func test_every_named_icon_rasterises_rather_than_drawing_nothing() -> void:
 func test_every_glyph_the_launcher_asks_for_is_one_the_set_draws() -> void:
 	var used: Array[StringName] = [
 		&"shelf", &"mods", &"settings", &"about", &"play", &"plus", &"back",
-		&"sun", &"moon", &"folder", &"trash", &"refresh", &"download", &"check",
-		&"warning", &"save", &"dots", &"close", &"left", &"right", &"power",
+		&"folder", &"trash", &"refresh", &"download", &"check", &"warning",
+		&"save", &"dots", &"close", &"power",
 	]
 	for glyph: StringName in used:
 		assert_true(Gen2LauncherIcon.has_glyph(glyph), String(glyph))
@@ -169,6 +169,93 @@ func test_the_selected_cartridge_stands_biggest_and_the_row_stays_centred() -> v
 		assert_lte(hero.position.x + hero.size.x, stage.size.x, "and ends on it")
 
 
+func test_every_cartridge_beside_the_selection_is_the_same_size_and_centred_on_it() -> void:
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	add_child_autofree(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = page.stage()
+
+	for index: int in RomRegistry.ORDER.size():
+		stage.select(index, false)
+		await get_tree().process_frame
+		var hero: Gen2Cartridge = stage.selected_cartridge()
+		assert_almost_eq(
+			hero.position.x + hero.size.x * 0.5, stage.size.x * 0.5, 0.5,
+			"the selection is always in the middle",
+		)
+		var side: float = -1.0
+		for other: Gen2Cartridge in _cartridges_of(stage):
+			if other == hero:
+				continue
+			if side < 0.0:
+				side = other.size.x
+			assert_almost_eq(other.size.x, side, 0.5, "one size for everything beside it")
+			assert_lt(other.size.x, hero.size.x, "and smaller than the selection")
+
+
+func test_the_carousel_turns_the_short_way_round_the_ring() -> void:
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	add_child_autofree(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = page.stage()
+	var last: int = RomRegistry.ORDER.size() - 1
+
+	# Stepping back off the first cartridge lands on the last one beside it,
+	# rather than travelling the whole row to reach it.
+	stage.select(0, false)
+	stage.step(-1)
+	assert_eq(stage.selected, last)
+	var behind: Gen2Cartridge = stage.cartridge(RomRegistry.ORDER[0])
+	await wait_seconds(0.5)
+	assert_gt(behind.position.x, stage.size.x * 0.5, "the one stepped off sits to the right")
+
+
+func test_dragging_the_row_settles_on_whatever_it_was_left_nearest() -> void:
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	add_child_autofree(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = page.stage()
+	var stride: float = stage.cartridge(RomRegistry.ORDER[0]).size.x
+
+	# Dragging left carries the row left, which brings the next cartridge in.
+	_drag(stage, -stride * 1.2)
+	await wait_seconds(0.5)
+	assert_eq(stage.selected, 1, "a full slot of travel moves on by one")
+
+	# A drag that does not reach halfway falls back to where it started.
+	_drag(stage, -stride * 0.2)
+	await wait_seconds(0.5)
+	assert_eq(stage.selected, 1, "and a short one settles back")
+
+	# A press that goes nowhere is a click, which on a neighbour selects it.
+	var neighbour: Gen2Cartridge = stage.cartridge(RomRegistry.ORDER[0])
+	_press(stage, Rect2(neighbour.position, neighbour.size).get_center())
+	assert_eq(stage.selected, 0, "clicking the one beside it chooses it")
+
+
+func test_a_scroll_pane_only_stops_a_pad_when_there_is_more_to_see() -> void:
+	var pane: Gen2LauncherScroll = Gen2LauncherScroll.create()
+	pane.size = Vector2(200, 120)
+	var column: VBoxContainer = Gen2LauncherUI.column()
+	pane.add_child(column)
+	add_child_autofree(pane)
+	var filler: Label = Gen2LauncherUI.body(_light, "x")
+	filler.custom_minimum_size = Vector2(0, 40)
+	column.add_child(filler)
+	await wait_seconds(0.2)
+	assert_eq(pane.focus_mode, Control.FOCUS_NONE, "a pane that fits is not a stop")
+	assert_true(pane.follow_focus, "and it carries a pad's focus with it either way")
+
+	var tall: Label = Gen2LauncherUI.body(_light, "y")
+	tall.custom_minimum_size = Vector2(0, 600)
+	column.add_child(tall)
+	await wait_seconds(0.2)
+	assert_eq(pane.focus_mode, Control.FOCUS_ALL, "one with more to see takes focus")
+
+
 func test_arrow_keys_move_the_selection_and_wrap() -> void:
 	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
 	add_child_autofree(page)
@@ -226,13 +313,15 @@ func test_the_toast_says_which_kind_of_message_it_is_showing() -> void:
 	toast.show_message(&"error", "Import stopped.", "That file is not a cartridge.")
 	var icon: Gen2LauncherIcon = _icon_of(toast)
 	assert_eq(icon.glyph, &"warning")
-	assert_eq(icon.tint, _light.error)
+	# The toast is a chip, so its status colours are the ones that can be read on
+	# one rather than the raw palette entries.
+	assert_eq(icon.tint, _light.on_chip(_light.error))
 	await wait_seconds(0.4)
 	assert_almost_eq(toast.modulate.a, 1.0, 0.01, "a refusal stays up")
 
 	toast.show_message(&"success", "Import complete.", "")
 	assert_eq(icon.glyph, &"check")
-	assert_eq(icon.tint, _light.success)
+	assert_eq(icon.tint, _light.on_chip(_light.success))
 
 
 func test_the_toast_hides_itself_when_there_is_nothing_to_report() -> void:
@@ -246,6 +335,36 @@ func test_the_toast_hides_itself_when_there_is_nothing_to_report() -> void:
 	toast.hide_message()
 	await wait_seconds(0.4)
 	assert_almost_eq(toast.modulate.a, 0.0, 0.01, "a quiet launcher shows nothing")
+
+
+## A press, a move and a release over the stage, which is the whole of a drag as
+## far as the carousel is concerned.
+func _drag(stage: Gen2CartridgeStage, by: float) -> void:
+	var from := Vector2(stage.size.x * 0.5, stage.size.y * 0.5)
+	stage._gui_input(_button(from, true))
+	stage._gui_input(_motion(from + Vector2(by, 0.0), Vector2(by, 0.0)))
+	stage._gui_input(_button(from + Vector2(by, 0.0), false))
+
+
+func _press(stage: Gen2CartridgeStage, at: Vector2) -> void:
+	stage._gui_input(_button(at, true))
+	stage._gui_input(_button(at, false))
+
+
+func _button(at: Vector2, pressed: bool) -> InputEventMouseButton:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = at
+	return event
+
+
+func _motion(at: Vector2, by: Vector2) -> InputEventMouseMotion:
+	var event := InputEventMouseMotion.new()
+	event.position = at
+	event.relative = by
+	event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	return event
 
 
 func _cartridges_of(stage: Gen2CartridgeStage) -> Array[Gen2Cartridge]:

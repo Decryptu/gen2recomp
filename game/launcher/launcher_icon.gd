@@ -7,10 +7,10 @@ extends TextureRect
 ## `docs/THIRD_PARTY.md`. They are stored as path data rather than as files so a
 ## glyph can be recoloured per palette without shipping one image per tint.
 
-## Lucide's own canvas, stroke width and cap style. Changing any of these makes
-## the set stop matching itself.
+## Lucide's own canvas and cap style. The stroke is a step over Lucide's own 2,
+## because these are drawn small on a phone and read as hairlines at that size.
 const GRID: int = 24
-const STROKE: float = 2.0
+const STROKE: float = 2.4
 
 ## Path data only: `fill` icons carry their outline in the same `d` attribute.
 const PATHS: Dictionary = {
@@ -29,14 +29,6 @@ const PATHS: Dictionary = {
 		+ "-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z",
 	],
 	&"about": ["M12 16v-4", "M12 8h.01"],
-	&"sun": [
-		"M12 2v2", "M12 20v2", "m4.93 4.93 1.41 1.41", "m17.66 17.66 1.41 1.41", "M2 12h2",
-		"M20 12h2", "m6.34 17.66-1.41 1.41", "m19.07 4.93-1.41 1.41",
-	],
-	&"moon": [
-		"M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c"
-		+ ".344-.215.825-.004.803.401",
-	],
 	&"folder": [
 		"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2"
 		+ " 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0"
@@ -55,8 +47,6 @@ const PATHS: Dictionary = {
 		"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4",
 		"M12 17h.01",
 	],
-	&"left": ["m15 18-6-6 6-6"],
-	&"right": ["m9 18 6-6-6-6"],
 	&"back": ["m12 19-7-7 7-7", "M19 12H5"],
 	&"close": ["M18 6 6 18", "m6 6 12 12"],
 	&"dots": ["M12 12h.01", "M19 12h.01", "M5 12h.01"],
@@ -80,7 +70,6 @@ const PATHS: Dictionary = {
 ## rather than as path data.
 const CIRCLES: Dictionary = {
 	&"about": [Vector2(12, 12), 10.0],
-	&"sun": [Vector2(12, 12), 4.0],
 }
 
 ## Rasterised once per glyph, size and tint, because the launcher rebuilds its

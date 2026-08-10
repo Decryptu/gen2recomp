@@ -39,8 +39,15 @@ func _draw() -> void:
 	var inset: float = (TRACK.y - KNOB) * 0.5
 	var travel: float = TRACK.x - KNOB - inset * 2.0
 	var centre := Vector2(inset + KNOB * 0.5 + travel * _slide, TRACK.y * 0.5)
-	draw_circle(centre, KNOB * 0.5, _theme.surface if _slide > 0.5 else _theme.surface)
+	# The knob stays light in both appearances: it rides an accent track when the
+	# switch is on, and the track is the same colour either way round the page.
+	draw_circle(centre, KNOB * 0.5, _theme.on_accent)
 	draw_circle(centre, KNOB * 0.5, _theme.with_alpha(_theme.line, 0.9), false, 1.0, true)
+	if has_focus():
+		draw_style_box(
+			_theme.box(Color(0, 0, 0, 0), TRACK.y * 0.5 + 3.0, _theme.accent, 2),
+			Rect2(Vector2(-3, -3), TRACK + Vector2(6, 6)),
+		)
 
 
 func _on_toggled(on: bool) -> void:

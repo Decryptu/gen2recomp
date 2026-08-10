@@ -47,15 +47,6 @@ func _build() -> void:
 	_shell = Gen2LauncherShell.create(_palette)
 	add_child(_shell)
 
-	var appearance: Gen2LauncherButton = Gen2LauncherButton.icon_only(
-		_palette,
-		&"moon" if not _palette.is_dark() else &"sun",
-		Gen2LauncherButton.Variant.NEUTRAL,
-	)
-	appearance.tooltip_text = "Switch appearance"
-	appearance.pressed.connect(_toggle_appearance)
-	_shell.add_action(appearance)
-
 	_shelf = Gen2ShelfPage.create(_palette, _shell.compact)
 	_shelf.insert_requested.connect(_open_import_dialog)
 	_shelf.play_requested.connect(_launch_game)
@@ -130,30 +121,31 @@ func _picker(title: String, filters: PackedStringArray) -> FileDialog:
 	return dialog
 
 
-func _toggle_appearance() -> void:
-	var options: Gen2Options = Gen2OptionsStore.current()
-	options.ui_theme = _palette.other_mode()
-	Gen2OptionsStore.save(options)
-	_reload_appearance()
-
-
 func _reload_appearance() -> void:
 	_palette = Gen2LauncherTheme.active()
 	_build()
 	_refresh_games()
 
 
-func _on_cartridge_selected(game_id: StringName) -> void:
-	if _shell.current_page() == &"shelf":
-		_shell.set_tint(_palette.tint_for(game_id))
+func _on_cartridge_selected(_game_id: StringName) -> void:
+	_refresh_backdrop()
 
 
-## Only the shelf is lit in a cartridge's colour. Behind a page of cards the same
-## wash reads as a stain rather than as light.
-func _on_page_selected(id: StringName) -> void:
-	_shell.set_tint(
-		_palette.tint_for(_shelf.selected_id()) if id == &"shelf" else Color(1, 1, 1, 0)
+## Only the shelf is dressed in a cartridge's artwork. Behind a page of cards the
+## same picture reads as a stain rather than as a backdrop.
+func _on_page_selected(_id: StringName) -> void:
+	_refresh_backdrop()
+
+
+## The selected cartridge's artwork, and only once that cartridge is imported: an
+## empty bay would otherwise advertise a game the player cannot start.
+func _refresh_backdrop() -> void:
+	var game_id: StringName = _shelf.selected_id()
+	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
+	var showing: bool = (
+		_shell.current_page() == &"shelf" and seated != null and seated.imported
 	)
+	_shell.set_backdrop_art(Gen2Cartridge.BACKDROP.get(game_id, null) if showing else null)
 
 
 func _refresh_games() -> void:
@@ -161,6 +153,7 @@ func _refresh_games() -> void:
 		var data: GameData = GameData.open(game_id)
 		_shelf.set_slot_state(game_id, data != null, _cartridge_detail(game_id, data))
 	_shelf.set_busy(_importing)
+	_refresh_backdrop()
 
 
 func _cartridge_detail(game_id: StringName, data: GameData) -> String:
@@ -402,6 +395,7 @@ func preview_slot_states(states: Dictionary) -> void:
 	for game_id: StringName in RomRegistry.ORDER:
 		var imported: bool = bool(states.get(String(game_id), false))
 		_shelf.set_slot_state(game_id, imported, "Ready. 2 saves" if imported else "")
+	_refresh_backdrop()
 
 
 ## Preview seam: switches appearance without writing the options file.

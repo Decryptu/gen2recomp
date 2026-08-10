@@ -4,16 +4,22 @@ extends Control
 ## One cartridge on the stage: an empty bay until its dump is imported, and the
 ## cartridge itself once it is.
 ##
-## The cartridge owns only presentation. Importing, verification and launching
-## all belong to the launcher that listens to these signals.
-
-signal insert_requested
-signal play_requested
+## The cartridge owns only presentation, and not even its own presses: importing,
+## verification and launching belong to the launcher, and reading a press belongs
+## to the stage, which is the only node that knows whether one became a drag.
 
 const ART: Dictionary = {
 	&"gold": preload("res://assets/cartridges/gold.webp"),
 	&"silver": preload("res://assets/cartridges/silver.webp"),
 	&"crystal": preload("res://assets/cartridges/crystal.webp"),
+}
+
+## What the launcher puts behind itself while a cartridge is selected. Only shown
+## once that cartridge is imported: an empty bay has no game to dress the page in.
+const BACKDROP: Dictionary = {
+	&"gold": preload("res://assets/launcher/bg/gold.webp"),
+	&"silver": preload("res://assets/launcher/bg/silver.webp"),
+	&"crystal": preload("res://assets/launcher/bg/crystal.webp"),
 }
 
 ## The cartridge shells are 1058 by 1201.
@@ -31,6 +37,9 @@ var _bay: Control = null
 var _bay_icon: Gen2LauncherIcon = null
 var _bay_label: Label = null
 var _hover: bool = false
+## Whether the stage is being driven by a keyboard or a pad and this is the
+## cartridge it is on. A pointer needs no ring; a pad has nothing else to go on.
+var _highlighted: bool = false
 ## The resting height the stage assigns. Animations move the cartridge relative
 ## to it, so a hop and a layout pass never fight over [member Control.position].
 var _rest: float = 0.0
@@ -61,7 +70,8 @@ func _build() -> void:
 	tooltip_text = RomRegistry.title_for(game_id)
 	mouse_entered.connect(_on_hover.bind(true))
 	mouse_exited.connect(_on_hover.bind(false))
-	gui_input.connect(_on_input)
+	# The stage owns every press on the row, because a press here is the start of
+	# a drag as often as it is a choice, and only the stage knows which it became.
 	resized.connect(_place)
 
 	_bay = Control.new()
@@ -116,6 +126,13 @@ func set_depth(distance: int) -> void:
 	queue_redraw()
 
 
+func set_highlighted(state: bool) -> void:
+	if _highlighted == state:
+		return
+	_highlighted = state
+	queue_redraw()
+
+
 func _place() -> void:
 	pivot_offset = size * 0.5
 	position.y = _rest + _hop
@@ -132,51 +149,17 @@ func rest_y() -> float:
 	return _rest
 
 
-## The contact shadow under the cartridge and, when the bay is empty, the outline
-## that says something belongs here. Drawn rather than styled so both follow the
-## cartridge's own silhouette instead of a box around it.
+## The ring that says a keyboard or a pad is on this cartridge. Nothing else is
+## drawn here: the cartridge casts no shadow, so the row reads as a carousel of
+## flat art rather than as objects standing on a shelf.
 func _draw() -> void:
-	# Only a cartridge that is actually standing there casts one. An empty bay is
-	# a hole in the shelf, not an object on it.
-	if size.x <= 0.0 or not imported:
+	if size.x <= 0.0 or not _highlighted:
 		return
-	var lift: float = 1.0 if depth == 0 else 0.62
-	# The higher the cartridge, the wider and fainter the pool under it.
-	var rise: float = clampf(absf(_hop) / (size.y * 0.7), 0.0, 1.0)
-	var width: float = size.x * lerpf(0.94, 1.30, rise)
-	var height: float = size.x * lerpf(0.17, 0.21, rise) * lift
-	var alpha: float = 0.46 * lift * lerpf(1.0, 0.30, rise)
-	# Sat low enough that most of the pool shows under the cartridge: this node
-	# draws before its own art, so anything higher is simply covered up.
-	var rect := Rect2(
-		Vector2((size.x - width) * 0.5, size.y - height * 0.34 - _hop * 0.28),
-		Vector2(width, height),
+	var pad: float = size.x * 0.05
+	draw_style_box(
+		_theme.box(Color(0, 0, 0, 0), size.x * 0.09, _theme.accent, 3),
+		Rect2(Vector2(-pad, -pad), size + Vector2(pad, pad) * 2.0),
 	)
-	draw_texture_rect(_shadow_ramp(), rect, false, _theme.with_alpha(_theme.shadow, alpha))
-
-
-## One white radial fade, stretched into whatever ellipse the contact shadow
-## needs and tinted on the way. A drawn circle would be a hard edged polygon,
-## because the vertex count follows the radius and the radius here is one.
-static var _shadow: GradientTexture2D = null
-
-
-static func _shadow_ramp() -> GradientTexture2D:
-	if _shadow != null:
-		return _shadow
-	var ramp := Gradient.new()
-	ramp.offsets = PackedFloat32Array([0.0, 0.38, 0.70, 1.0])
-	ramp.colors = PackedColorArray([
-		Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.82), Color(1, 1, 1, 0.30), Color(1, 1, 1, 0),
-	])
-	_shadow = GradientTexture2D.new()
-	_shadow.gradient = ramp
-	_shadow.fill = GradientTexture2D.FILL_RADIAL
-	_shadow.fill_from = Vector2(0.5, 0.5)
-	_shadow.fill_to = Vector2(1.0, 0.5)
-	_shadow.width = 128
-	_shadow.height = 128
-	return _shadow
 
 
 ## The empty bay is drawn in the cartridge's own silhouette rather than as a
@@ -187,7 +170,7 @@ func _draw_bay() -> void:
 	var edge: Color = _theme.accent if _hover else _theme.with_alpha(_theme.faint, 0.7)
 	var fill: Color = (
 		_theme.accent_wash(0.08) if _hover
-		else _theme.with_alpha(_theme.surface, 0.30 if _theme.is_dark() else 0.55)
+		else _theme.with_alpha(_theme.panel, 0.30 if _theme.is_dark() else 0.55)
 	)
 	var shell: PackedVector2Array = _silhouette(_bay.size)
 	_bay.draw_colored_polygon(shell, fill)
@@ -239,19 +222,6 @@ func _on_hover(entered: bool) -> void:
 	var tween: Tween = create_tween()
 	tween.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	tween.tween_property(self, "_hop", -8.0 if entered else 0.0, 0.18)
-
-
-func _on_input(event: InputEvent) -> void:
-	if event is not InputEventMouseButton:
-		return
-	var click: InputEventMouseButton = event
-	if not click.pressed or click.button_index != MOUSE_BUTTON_LEFT:
-		return
-	accept_event()
-	if imported:
-		play_requested.emit()
-	else:
-		insert_requested.emit()
 
 
 ## The cartridge dropping into its bay, played once an import succeeds.
