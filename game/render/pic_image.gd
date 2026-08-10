@@ -98,6 +98,11 @@ static func _lookup(palette: PackedColorArray, transparent_background: bool) -> 
 		out[at] = int(roundf(color.r * 255.0))
 		out[at + 1] = int(roundf(color.g * 255.0))
 		out[at + 2] = int(roundf(color.b * 255.0))
-		out[at + 3] = 0 if transparent_background and i == 0 else 255
+		# The palette's own alpha, so a caller that wants one colour translucent
+		# says so in the colour rather than needing a second flag. Every
+		# cartridge palette is opaque, since Gen2Palette.decode_color builds an
+		# opaque Color.
+		out[at + 3] = 0 if transparent_background and i == 0 \
+			else int(roundf(clampf(color.a, 0.0, 1.0) * 255.0))
 
 	return out

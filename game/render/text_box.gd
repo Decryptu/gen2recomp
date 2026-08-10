@@ -47,6 +47,19 @@ const TILE: int = Gen2Font.TILE
 @export var columns: int = STANDARD_COLUMNS
 @export var rows: int = STANDARD_ROWS
 @export_range(0, 7) var frame_style: int = 0
+## How opaque the box's field is drawn. The cartridge has no alpha and needs
+## none: it draws a box over its own white background. Over a renderer on the
+## screen's native layer that same box is a slab across the map, so a renderer
+## may ask for the field to be drawn through; see
+## [constant Gen2ModHost.RENDERER_INTERFACE_OPACITY_METHOD]. The frame's lines
+## and the glyphs are ink and stay opaque whatever this is.
+@export_range(0.0, 1.0) var field_opacity: float = 1.0:
+	set(value):
+		var next: float = clampf(value, 0.0, 1.0)
+		if is_equal_approx(next, field_opacity):
+			return
+		field_opacity = next
+		_redraw()
 
 var font: Gen2Font = null
 
@@ -127,6 +140,16 @@ func set_frame_style(style: int) -> void:
 	_redraw()
 
 
+## The rectangle the box covers, in hardware pixels, and an empty one whenever
+## nothing is drawn. A renderer composing around the box reads this rather than
+## assuming the standard twenty by six at row twelve, since a box can be any
+## size and is not always on screen.
+func occupied_rect() -> Rect2i:
+	if not visible or texture == null:
+		return Rect2i()
+	return Rect2i(Vector2i(position.floor()), Vector2i(size.floor()))
+
+
 ## Tiles of text that fit across the interior.
 func text_columns() -> int:
 	return maxi(columns - TEXT_LEFT * 2, 0)
@@ -167,9 +190,13 @@ func _redraw() -> void:
 	_draw_border(indices, width)
 	_draw_lines(indices, width)
 
+	# Index 0 is the field and index 3 the ink; 1bpp graphics have no middle
+	# colours, so the two between them are never drawn. Written out rather than
+	# taken from Gen2Palette.pic_palette because only the field carries alpha.
+	var field := Color(Color.WHITE, field_opacity)
 	var image: Image = Gen2PicImage.from_indices(
 		indices, width, height,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		PackedColorArray([field, field, Color.BLACK, Color.BLACK])
 	)
 	if not raster_scx.is_empty():
 		image = Gen2Raster.scroll(image, raster_scx, Gen2BattleIntro.MAP_WIDTH)

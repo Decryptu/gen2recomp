@@ -20,7 +20,7 @@ signal closed
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
 	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
-	PACK_RESULT, SAVE_CONFIRM, OPTIONS,
+	PACK_RESULT, SAVE_CONFIRM, OPTIONS, MODS, MOD_OPTIONS,
 }
 
 ## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
@@ -71,6 +71,14 @@ var _save_cursor: int = 0
 var _save_result_shown: bool = false
 
 var _options_menu: Gen2WorldOptionsMenu = null
+
+## The MODS entry: which mod is being configured and where each cursor sits.
+## The rows themselves are the host's registrations, read fresh on every render
+## so a value changed from the launcher is never shown stale.
+var _mod_ids: Array[StringName] = []
+var _mod_cursor: int = 0
+var _mod_id: StringName = &""
+var _mod_option_cursor: int = 0
 
 var _title: Label = null
 var _summary: Label = null
@@ -191,6 +199,21 @@ func _move(direction: Vector2i) -> void:
 			elif direction.x != 0 and _options_menu.adjust(direction.x):
 				_persist_options()
 				_render_options_menu()
+		Mode.MODS:
+			if direction.y != 0 and not _mod_ids.is_empty():
+				_mod_cursor = wrapi(_mod_cursor + signi(direction.y), 0, _mod_ids.size())
+				_render_mods()
+		Mode.MOD_OPTIONS:
+			var rows: Array = _mod_options()
+			if rows.is_empty():
+				return
+			if direction.y != 0:
+				_mod_option_cursor = wrapi(
+					_mod_option_cursor + signi(direction.y), 0, rows.size()
+				)
+				_render_mod_options()
+			elif direction.x != 0:
+				_adjust_mod_option(rows, direction.x)
 
 
 func _confirm() -> void:
@@ -223,6 +246,13 @@ func _confirm() -> void:
 		Mode.OPTIONS:
 			if _options_menu.is_cancel():
 				_open_list_mode()
+		Mode.MODS:
+			if _mod_cursor >= 0 and _mod_cursor < _mod_ids.size():
+				_open_mod_options_mode(_mod_ids[_mod_cursor])
+		## Every row is a ladder read with left and right, so A does nothing,
+		## the way it does on the cartridge's own value rows.
+		Mode.MOD_OPTIONS:
+			pass
 
 
 func _cancel() -> void:
@@ -245,8 +275,10 @@ func _cancel() -> void:
 		Mode.SAVE_CONFIRM:
 			_open_list_mode()
 		## `_Option.joypad_loop` exits on PAD_START | PAD_B from any row.
-		Mode.OPTIONS:
+		Mode.OPTIONS, Mode.MODS:
 			_open_list_mode()
+		Mode.MOD_OPTIONS:
+			_open_mods_mode()
 
 
 func _confirm_list() -> void:
@@ -263,6 +295,8 @@ func _confirm_list() -> void:
 			_open_save_confirm_mode()
 		Gen2WorldStartMenu.ITEM_OPTION:
 			_open_options_mode()
+		Gen2WorldStartMenu.ITEM_MODS:
+			_open_mods_mode()
 		Gen2WorldStartMenu.ITEM_EXIT:
 			closed.emit()
 		Gen2WorldStartMenu.ITEM_POKEDEX, Gen2WorldStartMenu.ITEM_POKEMON, \
@@ -323,6 +357,79 @@ func _render_options_menu() -> void:
 		var label: String = String(row.get("label", ""))
 		return label if value.is_empty() else "%s    %s" % [label, value]
 	)
+
+
+## The MODS entry: the mods that registered a setting, one row each. Only
+## reachable when there is at least one, which is what puts the entry in the list
+## at all.
+func _open_mods_mode() -> void:
+	_mode = Mode.MODS
+	_mod_ids = Gen2ModHost.instance().option_mod_ids()
+	_mod_cursor = clampi(_mod_cursor, 0, maxi(_mod_ids.size() - 1, 0))
+	_title.text = "MODS"
+	_summary.text = ""
+	_status.text = ""
+	_footer.text = "Up and down: move    A: choose    B: back"
+	_render_mods()
+
+
+func _render_mods() -> void:
+	_render_options(_mod_ids, _mod_cursor, func(id: StringName) -> String:
+		return _mod_name(id)
+	)
+
+
+## The name the player installed, falling back to the id for a mod registered
+## without a manifest, which is what a test or the built-in host does.
+func _mod_name(id: StringName) -> String:
+	for manifest: Gen2ModManifest in Gen2ModHost.instance().manifests():
+		if manifest.id == id:
+			return manifest.name
+	return String(id)
+
+
+func _open_mod_options_mode(id: StringName) -> void:
+	_mode = Mode.MOD_OPTIONS
+	_mod_id = id
+	_mod_option_cursor = 0
+	_title.text = _mod_name(id).to_upper()
+	_summary.text = ""
+	_status.text = ""
+	_footer.text = "Up and down: move    Left and right: change    B: back"
+	_render_mod_options()
+
+
+## Read from the host on every render rather than held, so a value the launcher
+## changed is never shown stale.
+func _mod_options() -> Array:
+	return Gen2ModHost.instance().options(_mod_id)
+
+
+func _render_mod_options() -> void:
+	_render_options(_mod_options(), _mod_option_cursor, func(row: Dictionary) -> String:
+		return "%s    %s" % [
+			String(row.get("label", "")),
+			String((row.get("labels", []) as Array)[int(row.get("index", 0))]),
+		]
+	)
+
+
+## One rung either way, wrapping the way the cartridge's own value rows do.
+## Written through the host, so the file is committed on the press and whatever
+## registered the setting hears about it at once.
+func _adjust_mod_option(rows: Array, delta: int) -> void:
+	var row: Dictionary = rows[_mod_option_cursor]
+	var values: Array = row.get("values", []) as Array
+	var next: int = wrapi(int(row.get("index", 0)) + signi(delta), 0, maxi(values.size(), 1))
+	var result: Dictionary = Gen2ModHost.instance().set_option_index(
+		_mod_id, StringName(row.get("key", &"")), next
+	)
+	if not bool(result.get("ok", false)):
+		_status.text = Gen2ModRefusal.text(result)
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	_status.text = ""
+	_render_mod_options()
 
 
 ## [param reset] false keeps the pocket and cursor, which is what returning from

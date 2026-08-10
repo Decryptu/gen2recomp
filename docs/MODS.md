@@ -58,7 +58,7 @@ Two example mods are in `mods/examples/`, to copy into `user://mods/`:
 
 | Mod | Shows |
 |---|---|
-| `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it |
+| `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it, on the native layer with a translucent text box and one registered setting |
 | `new_content/` | A species, a move, a move effect, two rebalancing patches and both event channels |
 
 ## Installing
@@ -241,11 +241,35 @@ Two methods are optional, on either renderer kind:
 |---|---|
 | `uses_hardware_viewport() -> bool` | Answering false moves the renderer off the 160x144 hardware viewport onto the screen's own rectangle at window resolution |
 | `set_native_size(size: Vector2i)` | The native layer's size in window pixels, on creation and on every window change |
+| `interface_opacity() -> float` | How opaque the screen draws the field of its own text box, 0 to 1 |
+| `set_text_box_rect(rect: Rect2i)` | Where that box is, in hardware pixels, on every change and empty when none is on screen |
 
 A view built out of geometry cannot be drawn into a 160x144 buffer and then
 magnified, so the second layer is what makes a 3D or HD renderer possible at
 all. Text boxes and menus stay hardware pixels over the top: the world gains
 resolution, the interface stays a Game Boy.
+
+The box is drawn as the cartridge draws it, which means opaque: over the white
+field that is invisible, and over a map it is a slab across the bottom third of
+the screen. `interface_opacity()` is the renderer's request for the field to be
+drawn through, and only the field. The frame's lines and the glyphs are ink and
+stay fully opaque, so nothing a renderer can ask for makes text harder to read.
+It is honoured only for a renderer that answered `uses_hardware_viewport()`
+false: one drawing in hardware pixels paints the background the box sits on, and
+a hole there would show the window behind the screen rather than the world.
+Around 0.75 is what reads well over a map.
+
+`set_text_box_rect` is the same box measured rather than styled, for a renderer
+composing around it: the standard box is twenty by six at row twelve, but a box
+can be any size and is not always up. It is pushed on every change, including
+the empty rectangle when the box goes away, and again whenever a renderer is
+swapped in mid-scene.
+
+The world's own menus are not this box. The start menu, the pack, the party and
+the PC are window-resolution panels over the whole screen with their own scrim,
+not cartridge boxes on the hardware layer, so a renderer neither sees nor styles
+them. `Gen2MenuPage` is the cartridge box path and is used by the naming and
+gender screens, neither of which is ever over a renderer.
 
 A world renderer has a third:
 
@@ -504,6 +528,46 @@ above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one
 silently winning.
+
+## Adding a setting
+
+`register_option(id, option)` describes one setting as a ladder of values. The
+game and the launcher each build a surface from that one registration, so a mod
+writes no settings screen and the two can never disagree.
+
+```gdscript
+host.register_option(manifest.id, {
+	"key": "draw_distance", "label": "DISTANCE",
+	"values": [8, 16, 24, 0], "labels": ["8", "16", "24", "FULL"],
+	"default": 16,
+})
+```
+
+| Key | Meaning |
+|---|---|
+| `key` | Addresses the setting within the mod |
+| `label` | Shown to the player |
+| `values` | The rungs, at least one. A toggle is a two-rung ladder |
+| `labels` | Optional; what each rung is shown as, defaulting to the values |
+| `default` | Optional; the rung used until the player picks one, defaulting to the first |
+
+Read it back with `host.option(id, key)`, or `option_index(id, key)` for the rung.
+A mod that has to rebuild something on a change connects to `option_changed(id,
+key, value)` rather than polling: `mods/examples/voxel_preview/` registers a
+camera setting in `mod.gd` and its renderer reads it once and then listens.
+
+The two surfaces are a **MODS** entry in the start menu, beside the pack and the
+save, and rows on that mod's card in the launcher's mods page. The entry appears
+only when at least one loaded mod registered a setting, so a player with no mods
+sees the cartridge's menu exactly.
+
+A change is committed the moment it is made, the way the cartridge's own OPTION
+menu writes each press to `wOptions`. Values live in `user://mod_options.json`,
+keyed by mod id, because a draw distance is a property of this installation and
+must not change when a save slot is loaded; per-mod *save* data is a separate
+thing and is not built. Only values are stored, never what a setting means, so a
+mod that drops a rung in a later version finds its stored value refused and its
+default used instead, and uninstalling a mod drops what it stored.
 
 ## Not built yet
 

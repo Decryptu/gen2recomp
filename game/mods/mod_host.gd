@@ -74,6 +74,21 @@ const RENDERER_INPUT_METHOD: String = "handle_world_input"
 ## ball selection all take their press before a renderer could see it, and what
 ## is left is pointer and stick motion the screen has no opinion about.
 const RENDERER_BATTLE_INPUT_METHOD: String = "handle_battle_input"
+## Optional, both renderer kinds. How opaque the screen draws the field of its
+## own text box while this renderer is on the native layer, from 0 for invisible
+## to 1 for the cartridge's own solid white. The frame's lines and the glyphs are
+## ink and stay opaque, so nothing becomes harder to read.
+##
+## Only honoured for a renderer that answered [constant
+## RENDERER_SURFACE_METHOD] false: a renderer drawing in hardware pixels paints
+## the background the box sits on, and a hole in the box would show the window
+## behind the screen rather than the map.
+const RENDERER_INTERFACE_OPACITY_METHOD: String = "interface_opacity"
+## Optional, both renderer kinds. Called with the rectangle the screen's text box
+## covers, in hardware pixels, whenever it changes, and with an empty rectangle
+## when no box is on screen. A renderer composing around the box reads this
+## instead of assuming the standard twenty by six at row twelve.
+const RENDERER_TEXT_BOX_METHOD: String = "set_text_box_rect"
 ## The id of the built-in 2D renderer, which is always registered for both
 ## renderer kinds.
 const BUILT_IN_RENDERER: StringName = &"gen2"
@@ -97,9 +112,15 @@ const CHANNELS: Array[StringName] = [CHANNEL_WORLD, CHANNEL_BATTLE]
 ## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER] makes for content.
 const FIRST_MOD_POCKET: int = 5
 
+## Emitted when a registered option's value changes, whichever surface changed
+## it. A mod that has to rebuild something on a change connects to this rather
+## than reading its options every frame.
+signal option_changed(id: StringName, key: StringName, value: Variant)
+
 static var _instance: Gen2ModHost = null
 
 var _manifests: Dictionary = {}
+var _options: Dictionary = {}
 var _world_renderers: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
@@ -245,6 +266,161 @@ func register_menu_entry(menu: StringName, id: StringName, entry: Dictionary) ->
 func menu_entries(menu: StringName) -> Array:
 	var entries: Array = _menu_entries.get(menu, [])
 	return entries.duplicate(true)
+
+
+## Adds one setting the player can change, as a ladder of values.
+##
+## [param option] needs a [code]key[/code], a [code]label[/code] and a non-empty
+## [code]values[/code] array; [code]labels[/code] is what each rung is shown as
+## and defaults to the values themselves, and [code]default[/code] is the rung
+## used until the player picks one and defaults to the first. A toggle is a
+## two-rung ladder.
+##
+## A mod describes a setting rather than drawing one: the start menu's MODS entry
+## and the launcher's mods page are both built from these registrations, so a mod
+## never writes a settings screen and the two surfaces cannot disagree.
+func register_option(id: StringName, option: Dictionary) -> Dictionary:
+	var key: StringName = StringName(option.get("key", &""))
+	if String(id).is_empty() or String(key).is_empty():
+		return {"ok": false, "reason": &"invalid_option", "detail": String(id)}
+	var label: String = String(option.get("label", ""))
+	if label.is_empty():
+		return {"ok": false, "reason": &"option_missing_label", "detail": _option_name(id, key)}
+	var values: Array = option.get("values", []) as Array
+	if values.is_empty():
+		return {"ok": false, "reason": &"option_missing_values", "detail": _option_name(id, key)}
+	var labels: Array = option.get("labels", []) as Array
+	if labels.is_empty():
+		labels = []
+		for value: Variant in values:
+			labels.append(str(value))
+	elif labels.size() != values.size():
+		return {"ok": false, "reason": &"option_labels_mismatch", "detail": _option_name(id, key)}
+	var rows: Array = _options.get(id, [])
+	for existing: Dictionary in rows:
+		if StringName(existing.get("key", &"")) == key:
+			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
+	var fallback: int = maxi(_value_index(values, option.get("default", values[0])), 0)
+	rows.append({
+		"key": key, "label": label, "values": values.duplicate(),
+		"labels": _strings(labels), "default": fallback,
+	})
+	_options[id] = rows
+	return {"ok": true, "id": id, "key": key}
+
+
+## The ids that registered at least one option, in registration order. Both
+## surfaces list these: a mod that registered none has nothing to show and is
+## deliberately absent rather than shown with an empty page.
+func option_mod_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for id: StringName in _options:
+		ids.append(id)
+	return ids
+
+
+## One mod's settings, in registration order, as
+## `{key, label, values, labels, default, index, value}` per row. `index` and
+## `value` are the live choice; the rest is what was registered.
+func options(id: StringName) -> Array:
+	var out: Array = []
+	for row: Dictionary in _options.get(id, []) as Array:
+		var index: int = _stored_index(id, row)
+		out.append({
+			"key": row["key"], "label": row["label"],
+			"values": (row["values"] as Array).duplicate(),
+			"labels": (row["labels"] as Array).duplicate(),
+			"default": row["default"], "index": index, "value": row["values"][index],
+		})
+	return out
+
+
+## What [param key] is currently set to, which is the registered default until
+## the player changes it, and null when nothing registered that key.
+func option(id: StringName, key: StringName) -> Variant:
+	var row: Dictionary = _option_row(id, key)
+	if row.is_empty():
+		return null
+	return (row["values"] as Array)[_stored_index(id, row)]
+
+
+## Which rung of the ladder [param key] is on, and -1 when nothing registered it.
+func option_index(id: StringName, key: StringName) -> int:
+	var row: Dictionary = _option_row(id, key)
+	return -1 if row.is_empty() else _stored_index(id, row)
+
+
+## Sets [param key] to [param value], which has to be one of the registered
+## values. Persisted immediately, the way the cartridge's own OPTION menu commits
+## each press, and [signal option_changed] follows the write.
+func set_option(id: StringName, key: StringName, value: Variant) -> Dictionary:
+	var row: Dictionary = _option_row(id, key)
+	if row.is_empty():
+		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	var index: int = _value_index(row["values"] as Array, value)
+	if index < 0:
+		return {"ok": false, "reason": &"invalid_option_value", "detail": _option_name(id, key)}
+	return set_option_index(id, key, index)
+
+
+## The same by rung rather than by value, which is what a menu stepping left and
+## right has in hand.
+func set_option_index(id: StringName, key: StringName, index: int) -> Dictionary:
+	var row: Dictionary = _option_row(id, key)
+	if row.is_empty():
+		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	var values: Array = row["values"] as Array
+	if index < 0 or index >= values.size():
+		return {"ok": false, "reason": &"invalid_option_value", "detail": _option_name(id, key)}
+	if not Gen2ModOptions.store(id, key, values[index]):
+		return {"ok": false, "reason": &"option_not_written", "detail": Gen2ModOptions.PATH}
+	option_changed.emit(id, key, values[index])
+	return {"ok": true, "id": id, "key": key, "index": index, "value": values[index]}
+
+
+func _option_row(id: StringName, key: StringName) -> Dictionary:
+	for row: Dictionary in _options.get(id, []) as Array:
+		if StringName(row["key"]) == key:
+			return row
+	return {}
+
+
+## The stored choice resolved against the ladder as it is registered now, so a
+## value left by an older version of the mod falls back to the default instead of
+## selecting nothing.
+func _stored_index(id: StringName, row: Dictionary) -> int:
+	var stored: Variant = Gen2ModOptions.value(id, StringName(row["key"]))
+	if stored == null:
+		return int(row["default"])
+	var index: int = _value_index(row["values"] as Array, stored)
+	return index if index >= 0 else int(row["default"])
+
+
+## Which rung carries [param value], or -1. Two numbers of the same magnitude
+## match whatever their type, because a value read back out of JSON is a float
+## where the registration wrote an int.
+static func _value_index(values: Array, value: Variant) -> int:
+	for index: int in values.size():
+		var candidate: Variant = values[index]
+		if candidate is float or candidate is int:
+			if (value is float or value is int) and is_equal_approx(
+				float(candidate), float(value)
+			):
+				return index
+		elif typeof(candidate) == typeof(value) and candidate == value:
+			return index
+	return -1
+
+
+static func _strings(values: Array) -> Array[String]:
+	var out: Array[String] = []
+	for value: Variant in values:
+		out.append(String(value))
+	return out
+
+
+static func _option_name(id: StringName, key: StringName) -> String:
+	return "%s/%s" % [id, key]
 
 
 ## Adds a species, move, item or trainer class the cartridge does not have.
@@ -410,6 +586,26 @@ static func renderer_handles_input(renderer: Node, event: InputEvent) -> bool:
 ## [constant RENDERER_BATTLE_INPUT_METHOD].
 static func renderer_handles_battle_input(renderer: Node, event: InputEvent) -> bool:
 	return _renderer_takes_input(renderer, RENDERER_BATTLE_INPUT_METHOD, event)
+
+
+## How opaque [param renderer] wants the screen's own text box field drawn. See
+## [constant RENDERER_INTERFACE_OPACITY_METHOD]; a renderer that does not ask,
+## and every renderer drawing in hardware pixels, gets the cartridge's solid 1.0.
+static func renderer_interface_opacity(renderer: Node) -> float:
+	if renderer == null or not renderer.has_method(RENDERER_INTERFACE_OPACITY_METHOD):
+		return 1.0
+	if renderer_uses_hardware_viewport(renderer):
+		return 1.0
+	return clampf(float(renderer.call(RENDERER_INTERFACE_OPACITY_METHOD)), 0.0, 1.0)
+
+
+## Tells [param renderer] where the screen's text box is, in hardware pixels. See
+## [constant RENDERER_TEXT_BOX_METHOD]; a renderer that does not ask is not
+## called.
+static func renderer_set_text_box_rect(renderer: Node, rect: Rect2i) -> void:
+	if renderer == null or not renderer.has_method(RENDERER_TEXT_BOX_METHOD):
+		return
+	renderer.call(RENDERER_TEXT_BOX_METHOD, rect)
 
 
 static func _renderer_takes_input(renderer: Node, method: String, event: InputEvent) -> bool:

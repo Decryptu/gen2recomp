@@ -195,7 +195,10 @@ func _build_world() -> void:
 	_text_box.reveal_speed = 0.0
 	_text_box.place_at_bottom()
 	_text_box.visible = false
+	_text_box.item_rect_changed.connect(_push_text_box_rect)
+	_text_box.visibility_changed.connect(_push_text_box_rect)
 	_screen.display(_text_box)
+	_apply_renderer_interface_style()
 	var entry_results: Array = _world.dispatch_map_entry()
 	if not entry_results.is_empty():
 		_show_script_results(entry_results)
@@ -227,6 +230,25 @@ func _build_renderer() -> void:
 		_on_native_size_changed(_screen.native_size())
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(_render_time_of_day())
+	_apply_renderer_interface_style()
+
+
+## The text box is the screen's, not the renderer's, and over a native-layer view
+## the cartridge's opaque white field is a slab across the map. A renderer may
+## ask for it to be drawn through, and may be told where it is so it can compose
+## around it. Both are pushed here and again whenever the box moves, resizes or
+## is shown, since a renderer swapped in mid-scene has neither.
+func _apply_renderer_interface_style() -> void:
+	if _text_box == null:
+		return
+	_text_box.field_opacity = Gen2ModHost.renderer_interface_opacity(_renderer)
+	_push_text_box_rect()
+
+
+func _push_text_box_rect() -> void:
+	if _text_box == null:
+		return
+	Gen2ModHost.renderer_set_text_box_rect(_renderer, _text_box.occupied_rect())
 
 
 ## What the renderer actually draws with, which is not always the clock: a dark
