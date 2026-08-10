@@ -292,9 +292,16 @@ battle the same two moves end the battle instead, through
 `Gen2Battle.force_out`, which is `wForcedSwitch` and `SetBattleDraw` together
 and leaves both parties standing with no winner.
 
+Baton Pass is the one move that stops a turn part way: the player's target is a
+menu the cartridge opens inside the move, so `take_actions` leaves the rest of
+the turn standing and `Gen2Battle.pass_to` finishes it, asked through
+`awaiting_baton_pass`. Everything the battle position was carrying moves with it
+(`Gen2BattleMon.capture_passed_state`, whose field list is `reset_volatile`'s
+plus the stages); `ResetBatonPassStatus` names the few things that do not.
+
 Switches happen before priority, so the incoming Pokémon takes the other
 side's move. A fainted replacement is caller policy: the turn stops at
-`must_replace` until `send_out`. A full moveset similarly uses
+`must_replace` until `send_out`, and a Baton Pass target the same way. A full moveset similarly uses
 `must_learn_move`, `learn_move` and `decline_move`; the development screen
 declines automatically.
 

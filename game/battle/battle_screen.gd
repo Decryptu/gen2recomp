@@ -1559,6 +1559,8 @@ func advance() -> void:
 	## replacement, so the offer is answered first.
 	if _open_move_learn():
 		return
+	if _answer_baton_pass():
+		return
 	if _replace_the_fallen():
 		return
 	if _battle != null and _battle.is_over():
@@ -1687,6 +1689,29 @@ func _prepare_world_battle_recovery() -> bool:
 	_world_battle_recovery = {
 		"ok": true, "source": &"save", "slot": _source_save.slot,
 	}
+	return true
+
+
+## Answers a Baton Pass that stopped the turn, and whether there was one.
+##
+## `ForcePickSwitchMonInBattle` is a menu, and this screen has none, so it takes
+## the first Pokémon standing exactly as [method _replace_the_fallen] does for a
+## faint. The engine keeps the choice open either way; what is missing is a
+## screen to make it with, not the seam.
+##
+## It is answered before a replacement, because a turn left standing here has not
+## finished and nothing behind it can be asked yet.
+func _answer_baton_pass() -> bool:
+	if _battle == null:
+		return false
+	var side: int = _battle.awaiting_baton_pass()
+	if side < 0:
+		return false
+	var next: int = _next_healthy(side)
+	if next < 0:
+		return false
+	_pending = _battle.pass_to(next)
+	_show_next_event()
 	return true
 
 

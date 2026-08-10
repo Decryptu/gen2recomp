@@ -487,6 +487,17 @@ var _forced_out: bool = false
 ## Which side was blown out, for a screen that has to say who left.
 var _forced_out_side: int = -1
 
+## The half-run turn a Baton Pass stopped, as
+## [code]{"acting": Array, "actions": Dictionary, "index": int}[/code], or empty
+## when no turn is part way through. [method _run_turn] reads it and
+## [method pass_to] is what lets it finish.
+var _pending_turn: Dictionary = {}
+
+## The side owing a Baton Pass target, or -1. `ForcePickSwitchMonInBattle` is a
+## menu the player cannot back out of, so this is answered rather than optional
+## and everything else is refused until it is.
+var _pending_baton_pass: int = -1
+
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
 
@@ -764,6 +775,98 @@ func awaiting_replacement() -> bool:
 	return must_replace(PLAYER) or must_replace(ENEMY)
 
 
+## Which side owes a Baton Pass target, or -1. The turn is standing still until
+## [method pass_to] answers, the same refusal-until-answered shape
+## [method must_replace] uses, except that this one stops a turn part way rather
+## than between two.
+func awaiting_baton_pass() -> int:
+	return _pending_baton_pass
+
+
+## Answers a pending Baton Pass by sending [param index] out, then finishes the
+## turn that was waiting on it and returns everything that happened after.
+##
+## Refuses an index the party would refuse anyway, leaving the question standing,
+## because `ForcePickSwitchMonInBattle` redisplays its list rather than accepting
+## a Pokémon that cannot come in.
+func pass_to(index: int) -> Array:
+	var side: int = _pending_baton_pass
+	if side < 0 or not party(side).can_send_out(index):
+		return []
+
+	var events: Array = []
+	_pending_baton_pass = -1
+	events.append_array(baton_pass_send_out(side, index))
+	_close_turn_bracket(side, (_pending_turn["actions"] as Dictionary)[side])
+	_pending_turn["index"] = int(_pending_turn["index"]) + 1
+	return _run_turn(events)
+
+
+## Stops the turn and asks [param side] for a Baton Pass target.
+## [method Gen2EffectCommands._baton_pass] is the only caller.
+func request_baton_pass(side: int) -> void:
+	_pending_baton_pass = side
+
+
+## `FindMonInOTPartyToSwitchIntoBattle`, which `EnemySwitch_SetMode` reaches
+## because Baton Pass zeroes `wEnemySwitchMonIndex` rather than naming anybody:
+## the AI's own type-matchup pick, asked without asking whether it wants to
+## switch at all, since the move has already decided that.
+func baton_pass_target(side: int) -> int:
+	if side == ENEMY:
+		return Gen2AISwitch.pick_target(self)
+	return party(side).first_healthy()
+
+
+## `PassedBattleMonEntrance` and the enemy's `EnemySwitch_SetMode`: an entrance
+## that keeps what it is handed.
+##
+## Neither calls `NewBattleMonStatus` or resets the stat levels, which is the
+## only difference from [method send_out] and the only reason Baton Pass exists.
+## The state is captured before the switch and put back after it, so the Pokémon
+## walking back to its ball still loses everything, exactly as it would on the
+## cartridge where none of it was ever its own.
+func baton_pass_send_out(side: int, index: int) -> Array:
+	var passed: Dictionary = mon(side).capture_passed_state()
+	var events: Array = send_out(side, index)
+	if events.is_empty():
+		return events
+	mon(side).apply_passed_state(passed)
+	_reset_baton_pass_status(side)
+	return events
+
+
+## `ResetBatonPassStatus`: the five things a pass does not carry.
+##
+## Nightmare is the odd one and is easy to get backwards. The check runs after
+## the entrance, so the sleep it reads is the *arriving* Pokémon's, not the one
+## that left: a Nightmare survives a pass only into somebody already asleep.
+##
+## Attraction and the wrap counters are cleared on *both* sides, since the
+## Pokémon that was loved or bound is not on the field any more either.
+func _reset_baton_pass_status(side: int) -> void:
+	var arriving: Gen2BattleMon = mon(side)
+	if not Gen2Status.is_asleep(arriving.status):
+		arriving.substatus &= ~Gen2Substatus.NIGHTMARE
+
+	arriving.disabled_slot = -1
+	arriving.disable_turns = 0
+
+	mon(PLAYER).substatus &= ~Gen2Substatus.ATTRACTED
+	mon(ENEMY).substatus &= ~Gen2Substatus.ATTRACTED
+
+	# `SUBSTATUS_TRANSFORMED` goes with these two and has nothing to clear yet.
+	arriving.substatus &= ~Gen2Substatus.ENCORED
+	arriving.encored_slot = -1
+	arriving.encore_turns = 0
+
+	arriving.last_move_used = 0
+
+	for each: int in [PLAYER, ENEMY]:
+		mon(each).trapped_turns = 0
+		mon(each).trapping_move = 0
+
+
 ## Whether [param side] has a move waiting on [method learn_move] or
 ## [method decline_move]: every slot already held something when a level
 ## taught it a new one, so nothing was learned without asking, the same
@@ -962,6 +1065,10 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
 		return events
+	# A turn already part way through cannot be started again: the one standing
+	# is finished by [method pass_to] and by nothing else.
+	if _pending_baton_pass >= 0:
+		return events
 
 	# Settled before anything is spent, because `TryPlayerSwitch` runs at menu
 	# time: the refusal jumps back to `BattleMenuPKMN_Loop` with no turn taken.
@@ -1013,7 +1120,22 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 
 	var acting: Array = order(chosen, actions)
 	enemy_goes_first = int(acting[0]) == ENEMY
-	for side: int in acting:
+	_pending_turn = {"acting": acting, "actions": actions, "index": 0}
+	return _run_turn(events)
+
+
+## The per-side loop and the end-of-turn tail, run from wherever the turn last
+## stopped. Ordinarily that is the beginning and it runs to the end in one call.
+##
+## Baton Pass is the one thing that stops it part way: the cartridge opens a
+## switch menu inside `DoPlayerTurn` and waits, so the turn is left standing with
+## its remaining half in [member _pending_turn] until [method pass_to] answers.
+func _run_turn(events: Array) -> Array:
+	var acting: Array = _pending_turn["acting"]
+	var actions: Dictionary = _pending_turn["actions"]
+
+	while int(_pending_turn["index"]) < acting.size():
+		var side: int = int(acting[int(_pending_turn["index"])])
 		var action: Dictionary = actions[side]
 		var moving: bool = not (_is_run(action) or _is_switch(action) or _is_item(action))
 		# The faint check is the source's own `HasPlayerFainted`/`HasEnemyFainted`
@@ -1037,8 +1159,14 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		elif moving:
 			var slot: int = effective_slot(side, int(action.get("slot", 0)))
 			_act(side, slot, move_for(side, slot), events)
+		# The move asked for a Baton Pass target and nothing behind it can happen
+		# until there is one, the bracket around it included.
+		if _pending_baton_pass >= 0:
+			return events
 		_close_turn_bracket(side, action)
+		_pending_turn["index"] = int(_pending_turn["index"]) + 1
 
+	_pending_turn = {}
 	_residual_damage(acting, events)
 	_tick_weather(events)
 	_tick_wrap(events)

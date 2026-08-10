@@ -160,6 +160,9 @@ const ENDURE: int = 203
 const WHIRLWIND: int = 18
 const ROAR: int = 46
 
+## Baton Pass, at its real number for company: nothing about it reads the number.
+const BATON_PASS: int = 226
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -564,6 +567,7 @@ static func _moves() -> Array:
 		],
 		WHIRLWIND: ["WHIRLWIND", 0, NORMAL, 255, 20, Gen2MoveEffect.FORCE_SWITCH, 0],
 		ROAR: ["ROAR", 0, NORMAL, 255, 20, Gen2MoveEffect.FORCE_SWITCH, 0],
+		BATON_PASS: ["BATON PASS", 0, NORMAL, 255, 40, Gen2MoveEffect.BATON_PASS, 0],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.

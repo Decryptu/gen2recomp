@@ -314,6 +314,9 @@ const DESTINY_BOND: StringName = &"destinybond"
 ## Whirlwind and Roar, which switch the side opposite whoever used them.
 const FORCE_SWITCH: StringName = &"forceswitch"
 
+## Baton Pass, which switches the side that used it and hands everything over.
+const BATON_PASS: StringName = &"batonpass"
+
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
 ## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
@@ -675,6 +678,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_destiny_bond(turn)
 		FORCE_SWITCH:
 			_force_switch(turn)
+		BATON_PASS:
+			_baton_pass(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -2694,6 +2699,45 @@ static func _force_switch_wild(turn: Gen2Turn) -> void:
 	var line: StringName = Gen2Battle.FLED_IN_FEAR if turn.move_number == Gen2MoveEffect.ROAR_MOVE \
 		else Gen2Battle.BLOWN_AWAY
 	turn.emit(line, {"target": turn.target})
+
+
+## `BattleCommand_BatonPass`: switch, and hand the new arrival everything the
+## position was carrying.
+##
+## The two halves differ in one thing only, and it is the reason this is the
+## first effect that cannot be resolved in one go. The enemy's target is picked
+## for it, by the same routine that picks an ordinary AI switch. The player's is
+## `ForcePickSwitchMonInBattle`, a menu opened inside the move and impossible to
+## back out of, so the turn stops here and [method Gen2Battle.pass_to] is what
+## finishes it. Committing a target before the turn would be the easy way and the
+## wrong one: a Baton Pass that moves second is picked once the opponent's move
+## has already landed, so the player chooses knowing something an earlier
+## commitment could not.
+##
+## `AnimateCurrentMove` is in front of both, which is why it runs before the
+## question rather than after the answer.
+static func _baton_pass(turn: Gen2Turn) -> void:
+	var battle: Gen2Battle = turn.battle
+	var side: int = turn.side
+
+	# `.Enemy`'s own first line: a wild Pokémon has no party behind it.
+	if side == Gen2Battle.ENEMY and not battle.is_trainer_battle:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+	# `CheckAnyOtherAlivePartyMons`, the same question `.trainer` asks of the
+	# other side before dragging anybody out.
+	if _standing_others(battle.party(side)).is_empty():
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	_animate_current_move(turn)
+
+	if side == Gen2Battle.PLAYER:
+		battle.request_baton_pass(side)
+		return
+	turn.events.append_array(
+		battle.baton_pass_send_out(side, battle.baton_pass_target(side))
+	)
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status
