@@ -2907,3 +2907,166 @@ func test_perish_song_ticks_after_wrap_and_before_the_leftovers_block() -> void:
 		order.find(Gen2Battle.PERISH_COUNT), order.find(Gen2Battle.SCREEN_FADED),
 		"the leftovers block, Safeguard included, comes after",
 	)
+
+
+## `ResidualDamage` runs poison, then Leech Seed, then Nightmare, then Curse,
+## with a `HasUserFainted` between each pair.
+func test_the_three_residuals_run_behind_poison_in_the_sources_order() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.status = Gen2Status.POISON
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED \
+		| Gen2Substatus.NIGHTMARE | Gen2Substatus.CURSE
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var order: Array = events.map(func(event: Dictionary) -> StringName: return event["type"])
+
+	assert_lt(order.find(Gen2Battle.HURT_BY_STATUS), order.find(Gen2Battle.LEECH_SEED_SAPPED))
+	assert_lt(order.find(Gen2Battle.LEECH_SEED_SAPPED), order.find(Gen2Battle.HURT_BY_NIGHTMARE))
+	assert_lt(order.find(Gen2Battle.HURT_BY_NIGHTMARE), order.find(Gen2Battle.HURT_BY_CURSE))
+
+
+## The `HasUserFainted` between them is not decoration: a Pokémon that goes down
+## to its poison pays none of the three behind it.
+func test_a_faint_to_poison_stops_the_residuals_behind_it() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.status = Gen2Status.POISON
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED | Gen2Substatus.CURSE
+	battle.player.hp = 1
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_true(battle.player.is_fainted())
+	assert_eq(_of_type(events, Gen2Battle.LEECH_SEED_SAPPED).size(), 0)
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_CURSE).size(), 0)
+
+
+## An eighth off the seeded Pokémon and the same figure onto the one opposite,
+## which `RestoreHP` caps at that one's maximum.
+func test_leech_seed_moves_an_eighth_across_the_field() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED
+	var eighth: int = Gen2Substatus.leech_seed_damage(battle.player.max_hp())
+	var sapper_full: int = battle.enemy.max_hp()
+	battle.enemy.hp = sapper_full - eighth - 5
+	var seeded_before: int = battle.player.hp
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	var sapped: Dictionary = _first(events, Gen2Battle.LEECH_SEED_SAPPED)
+
+	assert_eq(battle.player.hp, seeded_before - eighth)
+	assert_eq(battle.enemy.hp, sapper_full - 5)
+	assert_eq(int(sapped["amount"]), eighth)
+	assert_eq(int(sapped["to"]), Gen2Battle.ENEMY)
+
+
+## `SubtractHP` leaves the pre-hit health in `bc` when the eighth would have gone
+## below zero, so what the sapper takes is what the seed actually got.
+func test_leech_seed_hands_on_only_what_it_could_take() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED
+	battle.player.hp = 2
+	battle.enemy.hp = 1
+
+	var events: Array = battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_true(battle.player.is_fainted())
+	assert_eq(battle.enemy.hp, 3, "two taken, two given")
+	assert_eq(int(_first(events, Gen2Battle.LEECH_SEED_SAPPED)["to_amount"]), 2)
+
+
+func test_a_nightmare_and_a_curse_each_cost_a_quarter() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.GROWL]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.GROWL])
+	)
+	battle.player.substatus |= Gen2Substatus.NIGHTMARE
+	battle.enemy.substatus |= Gen2Substatus.CURSE
+	var player_full: int = battle.player.hp
+	var enemy_full: int = battle.enemy.hp
+
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.use_move(0))
+	assert_eq(battle.player.hp, player_full - Gen2Substatus.quarter_damage(battle.player.max_hp()))
+	assert_eq(battle.enemy.hp, enemy_full - Gen2Substatus.quarter_damage(battle.enemy.max_hp()))
+
+
+## `SpikesDamage` runs behind every entrance's own `SetPlayerTurn`, so the flag
+## read is the one lying on the side walking in.
+func test_spikes_are_paid_by_whoever_walks_onto_them() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	battle.screens[Gen2Battle.PLAYER] |= Gen2Screens.SPIKES
+
+	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
+	var entering: Gen2BattleMon = battle.player
+	assert_eq(
+		entering.hp,
+		entering.max_hp() - Gen2Screens.spikes_damage(entering.max_hp())
+	)
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_SPIKES).size(), 1)
+
+
+## Field state, so the same spikes charge every entrance rather than one.
+func test_spikes_outlive_the_pokemon_that_walked_into_them() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	battle.screens[Gen2Battle.PLAYER] |= Gen2Screens.SPIKES
+
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	var second: Array = battle.send_out(Gen2Battle.PLAYER, 0)
+	assert_eq(_of_type(second, Gen2Battle.HURT_BY_SPIKES).size(), 1)
+	assert_true(Gen2Screens.has(battle.screens[Gen2Battle.PLAYER], Gen2Screens.SPIKES))
+
+
+func test_a_flying_type_walks_over_spikes() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.HOOTHOOT, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	battle.screens[Gen2Battle.PLAYER] |= Gen2Screens.SPIKES
+
+	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(battle.player.hp, battle.player.max_hp())
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_SPIKES).size(), 0)
+
+
+## The other side's spikes are the other side's: `SpikesDamage` never reads them.
+func test_spikes_on_one_side_do_not_charge_the_other() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	battle.screens[Gen2Battle.ENEMY] |= Gen2Screens.SPIKES
+
+	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(battle.player.hp, battle.player.max_hp())
+	assert_eq(_of_type(events, Gen2Battle.HURT_BY_SPIKES).size(), 0)
+
+
+## A doll is `SUBSTATUS_SUBSTITUTE` and nothing else, so `NewBattleMonStatus`
+## zeroing the substatus block is what a switch costs it.
+func test_a_switch_leaves_the_substitute_behind() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])]
+	)
+	var leaving: Gen2BattleMon = battle.player
+	leaving.substatus |= Gen2Substatus.SUBSTITUTE
+	leaving.substitute_hp = 40
+
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_false(Gen2Substatus.has(leaving.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(leaving.substitute_hp, 0)

@@ -2473,6 +2473,576 @@ func test_every_effect_this_tranche_wrote_has_a_list_of_its_own() -> void:
 		Gen2MoveEffect.FRUSTRATION, Gen2MoveEffect.MAGNITUDE,
 		Gen2MoveEffect.HIDDEN_POWER, Gen2MoveEffect.DEFENSE_UP_HIT,
 		Gen2MoveEffect.TWISTER, Gen2MoveEffect.STOMP, Gen2MoveEffect.GUST,
-		Gen2MoveEffect.EARTHQUAKE,
+		Gen2MoveEffect.EARTHQUAKE, Gen2MoveEffect.SUBSTITUTE,
+		Gen2MoveEffect.LEECH_SEED, Gen2MoveEffect.NIGHTMARE,
+		Gen2MoveEffect.CURSE, Gen2MoveEffect.SPIKES, Gen2MoveEffect.RAPID_SPIN,
 	]:
 		assert_true(Gen2MoveEffect.is_written(effect), "effect %d" % effect)
+
+
+## A Gastly, which is the only Ghost-type this fixture has and so the only user
+## that reaches `BattleCommand_Curse`'s other branch.
+func _ghost_battle() -> Gen2Battle:
+	return Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.GASTLY, 50, [Fixture.CURSE]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+
+
+## Puts a doll in front of the enemy without running the move, for the fifteen
+## commands whose whole question is what happens when one is standing.
+func _raise_enemy_substitute(battle: Gen2Battle) -> void:
+	battle.enemy.substatus |= Gen2Substatus.SUBSTITUTE
+	battle.enemy.substitute_hp = Gen2Substatus.substitute_hp_for(battle.enemy.max_hp())
+
+
+func test_a_substitute_costs_a_quarter_of_the_users_own_maximum() -> void:
+	var battle: Gen2Battle = _battle()
+	var user: Gen2BattleMon = battle.player
+	var full: int = user.max_hp()
+	var turn: Gen2Turn = _run_move(battle, Fixture.SUBSTITUTE)
+
+	assert_eq(user.hp, full - (full >> 2))
+	assert_eq(user.substitute_hp, full >> 2)
+	assert_true(Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(int(_first(turn.events, Gen2Battle.SUBSTITUTE_MADE)["amount"]), full >> 2)
+
+
+## The cost is a bare `srl a / rr b` twice with no `GetQuarterMaxHP` behind it,
+## so it is never floored at one the way every residual in the game is.
+func test_the_substitute_cost_is_the_unfloored_shift() -> void:
+	assert_eq(Gen2Substatus.substitute_hp_for(100), 25)
+	assert_eq(Gen2Substatus.substitute_hp_for(3), 0, "no floor at one")
+	assert_eq(Gen2Substatus.quarter_damage(3), 1, "unlike every quarter that has one")
+
+
+func test_a_second_substitute_says_the_first_is_still_standing() -> void:
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.SUBSTITUTE)
+	var before: int = battle.player.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.SUBSTITUTE)
+
+	assert_eq(battle.player.hp, before, "and costs nothing")
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_ALREADY).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_MADE).size(), 0)
+
+
+## `jr c` on the borrow *or* `or e / jr z` on a result of zero, so a user sitting
+## on exactly a quarter fails rather than making a doll and fainting.
+func test_a_user_on_exactly_a_quarter_is_too_weak_to_make_one() -> void:
+	var battle: Gen2Battle = _battle()
+	var user: Gen2BattleMon = battle.player
+	user.hp = user.max_hp() >> 2
+	var turn: Gen2Turn = _run_move(battle, Fixture.SUBSTITUTE)
+
+	assert_eq(user.hp, user.max_hp() >> 2, "still standing on it")
+	assert_false(Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_TOO_WEAK).size(), 1)
+
+
+func test_one_more_than_a_quarter_is_enough() -> void:
+	var battle: Gen2Battle = _battle()
+	var user: Gen2BattleMon = battle.player
+	user.hp = (user.max_hp() >> 2) + 1
+	_run_move(battle, Fixture.SUBSTITUTE)
+
+	assert_eq(user.hp, 1)
+	assert_true(Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE))
+
+
+## The doll steps out of whatever was binding the Pokémon behind it. Its own
+## side only: nothing here frees the opponent.
+func test_making_a_substitute_frees_its_user_from_a_bind() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.trapped_turns = 4
+	battle.player.trapping_move = Fixture.WRAP
+	battle.enemy.trapped_turns = 3
+
+	_run_move(battle, Fixture.SUBSTITUTE)
+	assert_eq(battle.player.trapped_turns, 0)
+	assert_eq(battle.player.trapping_move, 0)
+	assert_eq(battle.enemy.trapped_turns, 3, "the other side's bind is not the doll's business")
+
+
+func test_a_hit_is_spent_on_the_doll_and_not_on_the_pokemon() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	# Big enough that a Tackle cannot break it, so this is about where the damage
+	# went rather than about the break.
+	battle.enemy.substitute_hp = 250
+	var before: int = battle.enemy.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+
+	assert_eq(battle.enemy.hp, before, "the real health never moves")
+	assert_lt(battle.enemy.substitute_hp, 250)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_TOOK_DAMAGE).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 0)
+	assert_eq(turn.dealt, 0)
+
+
+func test_a_doll_taken_to_exactly_zero_breaks() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var turn: Gen2Turn = _turn(battle)
+	battle.enemy.substitute_hp = 20
+	turn.damage = 20
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_FADED).size(), 1)
+
+
+func test_a_doll_taken_below_zero_breaks_and_one_short_survives() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var turn: Gen2Turn = _turn(battle)
+	battle.enemy.substitute_hp = 20
+	turn.damage = 19
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_eq(battle.enemy.substitute_hp, 1)
+
+	var second: Gen2Turn = _turn(battle)
+	second.damage = 2
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, second)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+
+
+## `ld a, [hli] / and a / jr nz, .broke`: the damage is a word against a one-byte
+## counter, so anything from 256 up breaks the doll with no arithmetic at all.
+func test_a_hit_of_two_hundred_and_fifty_six_breaks_any_doll() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.substitute_hp = 255
+	var turn: Gen2Turn = _turn(battle)
+	turn.damage = 256
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+
+
+## `xor a / ld [hl], a` over `wPlayerMoveStruct + MOVE_EFFECT`, so everything
+## behind the break reads an ordinary attack.
+func test_a_broken_doll_stamps_normal_hit_over_the_moves_effect() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.substitute_hp = 1
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.EMBER_BURNS,
+		_data.move(Fixture.EMBER_BURNS), []
+	)
+	turn.damage = 5
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_eq(turn.effect(), Gen2MoveEffect.NORMAL_HIT_EFFECT)
+
+
+## The five the source exempts, because each one's own command reads the byte
+## back to know how many hits it is partway through.
+func test_a_broken_doll_leaves_a_multi_hit_effect_alone() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.substitute_hp = 1
+	var turn: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.PLAYER, 0, Fixture.DOUBLE_HIT_MOVE,
+		_data.move(Fixture.DOUBLE_HIT_MOVE), []
+	)
+	turn.damage = 5
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_eq(turn.effect(), Gen2MoveEffect.DOUBLE_HIT)
+
+
+## `.update_damage_taken` returns before it records anything when the target has
+## a doll, which is what stops Counter answering a hit the doll took.
+func test_counter_cannot_answer_a_hit_a_doll_took() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	_run_move(battle, Fixture.TACKLE)
+
+	assert_true(battle.last_damage_taken(Gen2Battle.ENEMY).is_empty())
+
+
+## `.DrainSub`, which is the one place a Substitute reads as a miss rather than
+## as a hit that did nothing.
+func test_a_drain_move_reads_as_a_miss_against_a_doll() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var doll: int = battle.enemy.substitute_hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.DRAIN_MOVE)
+
+	assert_true(turn.missed)
+	assert_eq(battle.enemy.substitute_hp, doll, "not even the doll is touched")
+	assert_eq(_of_type(turn.events, Gen2Battle.DRAINED).size(), 0)
+
+
+func test_an_ordinary_attack_still_reaches_a_doll() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var turn: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+	assert_false(turn.missed, "only the two draining effects read as a miss")
+
+
+## `BattleCommand_EffectChance` jumps to `.failed` before `BattleRandom`, so a
+## secondary effect aimed at a doll costs no randomness at all.
+func test_a_secondary_effect_against_a_doll_draws_no_roll() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var turn: Gen2Turn = _turn(battle, Fixture.EMBER_BURNS)
+	var before: int = _rng.state
+	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
+
+	assert_true(turn.failed_chance)
+	assert_eq(_rng.state, before, "the roll was never drawn")
+
+
+func test_a_doll_refuses_a_status_a_flinch_a_confusion_and_a_bind() -> void:
+	for pair: Array in [
+		[Fixture.EMBER_BURNS, Gen2EffectCommands.BURN_TARGET],
+		[Fixture.ROLLING_KICK_ALWAYS, Gen2EffectCommands.FLINCH_TARGET],
+		[Fixture.CONFUSION_ALWAYS, Gen2EffectCommands.CONFUSE_TARGET],
+		[Fixture.WRAP, Gen2EffectCommands.TRAP_TARGET],
+	]:
+		var battle: Gen2Battle = _battle()
+		_raise_enemy_substitute(battle)
+		var turn: Gen2Turn = _turn(battle, int(pair[0]))
+		var before: int = _rng.state
+		Gen2EffectCommands.run(StringName(pair[1]), turn)
+
+		assert_eq(battle.enemy.status, Gen2Status.NONE, "move %d" % int(pair[0]))
+		assert_eq(battle.enemy.substatus & ~Gen2Substatus.SUBSTITUTE, Gen2Substatus.NONE)
+		assert_eq(battle.enemy.trapped_turns, 0)
+		assert_eq(_rng.state, before, "and none of the four rolled")
+
+
+## `BattleCommand_BurnTarget`'s `CheckSubstituteOpp` is in front of the status
+## check, so a doll stops even the thaw a burn move would otherwise have given.
+func test_a_doll_stops_a_burn_move_thawing_the_pokemon_behind_it() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.status = Gen2Status.FREEZE
+	var turn: Gen2Turn = _turn(battle, Fixture.EMBER_BURNS)
+	Gen2EffectCommands.run(Gen2EffectCommands.BURN_TARGET, turn)
+
+	assert_true(Gen2Status.has(battle.enemy.status, Gen2Status.FREEZE))
+
+
+## `BattleCommand_StatDown`'s `.DidntMiss`, and `BattleCommand_HeldFlinch`'s
+## check between the item and the roll.
+func test_a_doll_refuses_a_stat_drop_and_a_kings_rock() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	var turn: Gen2Turn = _turn(battle, Fixture.SCREECH)
+	Gen2EffectCommands.run(Gen2EffectCommands.DEFENSE_DOWN_2, turn)
+	assert_eq(battle.enemy.stage("defense"), 0)
+	assert_false(turn.stat_moved)
+
+	battle.player.item = Fixture.KINGS_ROCK
+	var rock: Gen2Turn = _turn(battle)
+	var before: int = _rng.state
+	Gen2EffectCommands.run(Gen2EffectCommands.KINGS_ROCK, rock)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.FLINCHED))
+	assert_eq(_rng.state, before)
+
+
+## The Focus Band is in front of the doll rather than behind it, so it rolls, it
+## clamps against the *real* health, and the clamped figure is what the doll
+## spends. "Hung on" is printed over a Pokémon that was never in danger.
+func test_a_focus_band_still_fires_in_front_of_a_doll() -> void:
+	var fired: int = 0
+	for seed: int in 200:
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed
+		_raise_enemy_substitute(battle)
+		battle.enemy.substitute_hp = 200
+		battle.enemy.item = Fixture.FOCUS_BAND
+		battle.enemy.hp = 10
+		var turn: Gen2Turn = _turn(battle)
+		turn.damage = 300
+		Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+		if _of_type(turn.events, Gen2Battle.ENDURED).is_empty():
+			# No band, so the word is over a byte and the doll goes outright.
+			assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.SUBSTITUTE))
+			continue
+
+		fired += 1
+		assert_eq(battle.enemy.hp, 10, "the real health never moved")
+		assert_eq(
+			battle.enemy.substitute_hp, 200 - 9,
+			"the clamp is against the real health and the doll pays the clamped figure"
+		)
+
+	assert_between(fired, 5, 50, "roughly thirty in 256")
+
+
+## Leech Seed is the one of the five that carries `checkhit`, so every test of
+## what it does behind the roll overrides its real 90% up to the 255 that skips
+## the roll entirely.
+const ALWAYS: Dictionary = {"accuracy": 255}
+
+
+func test_a_seed_lands_and_a_grass_type_shrugs_it_off() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.LEECH_SEED, false, ALWAYS)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.LEECH_SEED))
+	assert_eq(_of_type(turn.events, Gen2Battle.WAS_SEEDED).size(), 1)
+
+	var grass: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.LEECH_SEED]),
+		Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var refused: Gen2Turn = _run_move(grass, Fixture.LEECH_SEED, false, ALWAYS)
+	assert_false(Gen2Substatus.has(grass.enemy.substatus, Gen2Substatus.LEECH_SEED))
+	assert_eq(_of_type(refused.events, Gen2Battle.NO_EFFECT).size(), 1)
+
+
+func test_a_second_seed_and_a_seed_at_a_doll_both_evade() -> void:
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.LEECH_SEED, false, ALWAYS)
+	var again: Gen2Turn = _run_move(battle, Fixture.LEECH_SEED, false, ALWAYS)
+	assert_eq(_of_type(again.events, Gen2Battle.EVADED).size(), 1)
+
+	var walled: Gen2Battle = _battle()
+	_raise_enemy_substitute(walled)
+	var turn: Gen2Turn = _run_move(walled, Fixture.LEECH_SEED, false, ALWAYS)
+	assert_false(Gen2Substatus.has(walled.enemy.substatus, Gen2Substatus.LEECH_SEED))
+	assert_eq(_of_type(turn.events, Gen2Battle.EVADED).size(), 1)
+
+
+func test_a_nightmare_needs_a_sleeping_target_and_lands_once() -> void:
+	var battle: Gen2Battle = _battle()
+	var awake: Gen2Turn = _run_move(battle, Fixture.NIGHTMARE)
+	assert_eq(_of_type(awake.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+	battle.enemy.status = Gen2Status.roll_sleep(_rng)
+	var landed: Gen2Turn = _run_move(battle, Fixture.NIGHTMARE)
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.NIGHTMARE))
+	assert_eq(_of_type(landed.events, Gen2Battle.NIGHTMARE_STARTED).size(), 1)
+
+	var again: Gen2Turn = _run_move(battle, Fixture.NIGHTMARE)
+	assert_eq(_of_type(again.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_a_nightmare_is_refused_by_a_doll_and_by_a_target_out_of_sight() -> void:
+	var walled: Gen2Battle = _battle()
+	_raise_enemy_substitute(walled)
+	walled.enemy.status = Gen2Status.roll_sleep(_rng)
+	_run_move(walled, Fixture.NIGHTMARE)
+	assert_false(Gen2Substatus.has(walled.enemy.substatus, Gen2Substatus.NIGHTMARE))
+
+	var flying: Gen2Battle = _battle()
+	flying.enemy.status = Gen2Status.roll_sleep(_rng)
+	flying.enemy.substatus |= Gen2Substatus.FLYING
+	_run_move(flying, Fixture.NIGHTMARE)
+	assert_false(Gen2Substatus.has(flying.enemy.substatus, Gen2Substatus.NIGHTMARE))
+
+
+## The non-Ghost branch, which reads the *user's* own types and moves the user's
+## own three stages.
+func test_curse_trades_the_users_speed_for_its_attack_and_defense() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.CURSE)
+
+	assert_eq(battle.player.stage("speed"), -1)
+	assert_eq(battle.player.stage("attack"), 1)
+	assert_eq(battle.player.stage("defense"), 1)
+	assert_eq(battle.enemy.stage("speed"), 0, "the user's stages, never the target's")
+	assert_eq(_of_type(turn.events, Gen2Battle.STAT_CHANGED).size(), 3)
+
+
+## `.cantraise` needs *both* to be at the top, and names `StatNames`' eighth row
+## rather than either stat it looked at.
+func test_curse_fails_only_when_attack_and_defense_are_both_at_the_top() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.change_stage("attack", 6)
+	var one: Gen2Turn = _run_move(battle, Fixture.CURSE)
+	assert_eq(battle.player.stage("defense"), 1, "Defense could still rise")
+	assert_eq(_of_type(one.events, Gen2Battle.STAT_CHANGE_FAILED).size(), 0)
+
+	battle.player.change_stage("defense", 6)
+	var both: Gen2Turn = _run_move(battle, Fixture.CURSE)
+	var failed: Dictionary = _first(both.events, Gen2Battle.STAT_CHANGE_FAILED)
+	assert_eq(String(failed["stat"]), Gen2EffectCommands.CURSE_FAILED_STAT)
+	assert_eq(int(failed["by"]), 1, "so the line reads 'won't rise anymore'")
+
+
+## A Speed already at the floor says nothing and swallows nothing: `ResetMiss`
+## between the three is what keeps the two raises coming.
+func test_curse_still_raises_when_the_speed_cannot_fall() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.change_stage("speed", -6)
+	var turn: Gen2Turn = _run_move(battle, Fixture.CURSE)
+
+	assert_eq(battle.player.stage("attack"), 1)
+	assert_eq(battle.player.stage("defense"), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.STAT_CHANGED).size(), 2)
+
+
+func test_a_ghost_curse_cuts_half_its_own_health_and_lands_a_curse() -> void:
+	var battle: Gen2Battle = _ghost_battle()
+	var user: Gen2BattleMon = battle.player
+	var full: int = user.max_hp()
+	var turn: Gen2Turn = _run_move(battle, Fixture.CURSE)
+
+	assert_eq(user.hp, full - Gen2Substatus.half_damage(full))
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.CURSE))
+	assert_eq(int(_first(turn.events, Gen2Battle.CURSE_SET)["target"]), Gen2Battle.ENEMY)
+	assert_eq(battle.player.stage("attack"), 0, "the other branch never ran")
+
+
+## `GetHalfMaxHP` and `SubtractHPFromUser` with nothing between them: a Ghost on
+## less than half its maximum goes down to its own move.
+func test_a_ghost_curse_can_faint_its_own_user() -> void:
+	var battle: Gen2Battle = _ghost_battle()
+	battle.player.hp = 3
+	var turn: Gen2Turn = _run_move(battle, Fixture.CURSE)
+
+	assert_true(battle.player.is_fainted())
+	assert_true(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.CURSE))
+	assert_eq(int(_first(turn.events, Gen2Battle.FAINTED)["side"]), Gen2Battle.PLAYER)
+
+
+func test_a_ghost_curse_is_refused_twice_and_by_a_doll() -> void:
+	var battle: Gen2Battle = _ghost_battle()
+	_run_move(battle, Fixture.CURSE)
+	var before: int = battle.player.hp
+	var again: Gen2Turn = _run_move(battle, Fixture.CURSE)
+	assert_eq(battle.player.hp, before, "and it costs nothing to fail")
+	assert_eq(_of_type(again.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+	var walled: Gen2Battle = _ghost_battle()
+	_raise_enemy_substitute(walled)
+	_run_move(walled, Fixture.CURSE)
+	assert_false(Gen2Substatus.has(walled.enemy.substatus, Gen2Substatus.CURSE))
+
+
+func test_spikes_land_on_the_far_side_and_refuse_a_second_time() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.SPIKES)
+
+	assert_true(Gen2Screens.has(battle.screens[Gen2Battle.ENEMY], Gen2Screens.SPIKES))
+	assert_false(Gen2Screens.has(battle.screens[Gen2Battle.PLAYER], Gen2Screens.SPIKES))
+	assert_eq(int(_first(turn.events, Gen2Battle.SPIKES_SET)["target"]), Gen2Battle.ENEMY)
+
+	var again: Gen2Turn = _run_move(battle, Fixture.SPIKES)
+	assert_eq(_of_type(again.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## All three of `BattleCommand_ClearHazards`, in its own order, and all three on
+## the user's own side.
+func test_rapid_spin_sheds_the_seed_the_spikes_and_the_bind() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED
+	battle.screens[Gen2Battle.PLAYER] |= Gen2Screens.SPIKES
+	battle.screens[Gen2Battle.ENEMY] |= Gen2Screens.SPIKES
+	battle.player.trapped_turns = 3
+	battle.player.trapping_move = Fixture.WRAP
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.RAPID_SPIN)
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.LEECH_SEED))
+	assert_false(Gen2Screens.has(battle.screens[Gen2Battle.PLAYER], Gen2Screens.SPIKES))
+	assert_true(
+		Gen2Screens.has(battle.screens[Gen2Battle.ENEMY], Gen2Screens.SPIKES),
+		"the other side's spikes are not the spinner's business"
+	)
+	assert_eq(battle.player.trapped_turns, 0)
+	assert_eq(
+		battle.player.trapping_move, Fixture.WRAP,
+		"`clearhazards` zeroes the counter and leaves the move byte alone"
+	)
+
+	var types: Array = turn.events.map(func(event: Dictionary) -> StringName: return event["type"])
+	assert_true(types.find(Gen2Battle.SHED_LEECH_SEED) < types.find(Gen2Battle.BLEW_SPIKES))
+	assert_true(types.find(Gen2Battle.BLEW_SPIKES) < types.find(Gen2Battle.RELEASED_BY))
+
+
+## `clearhazards` sits in front of `checkfaint`, so a spin that knocks its target
+## out still clears the spinner's own side.
+func test_rapid_spin_clears_even_when_the_hit_was_lethal() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.substatus |= Gen2Substatus.LEECH_SEED
+	battle.enemy.hp = 1
+
+	var turn: Gen2Turn = _run_move(battle, Fixture.RAPID_SPIN)
+	assert_true(battle.enemy.is_fainted())
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.LEECH_SEED))
+	assert_eq(_of_type(turn.events, Gen2Battle.SHED_LEECH_SEED).size(), 1)
+
+
+## `DefenseDownHit` is the one row of the seven that rolls twice, which is what
+## lets its drop land on a Pokémon whose doll the same hit broke.
+func test_only_the_defense_drop_on_hit_carries_two_rolls() -> void:
+	for offset: int in Gen2MoveEffect.STAT_RUN_LENGTH:
+		var effect: int = Gen2MoveEffect.STAT_DOWN_HIT_BASE + offset
+		var rolls: int = Gen2MoveEffect.sequence_for(effect).count(
+			Gen2EffectCommands.EFFECT_CHANCE
+		)
+		assert_eq(rolls, 2 if effect == Gen2MoveEffect.DEFENSE_DOWN_HIT else 1,
+			"effect %d" % effect)
+
+
+## And the second roll is what clears the first one's failure, since
+## `BattleCommand_EffectChance` opens by zeroing `wEffectFailed`.
+func test_a_second_effect_chance_clears_the_first_ones_failure() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _turn(battle, Fixture.NEVER_BURNS)
+	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
+	assert_true(turn.failed_chance)
+
+	turn.move = _data.move(Fixture.EMBER_BURNS)
+	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
+	assert_false(turn.failed_chance)
+
+
+## `BattleCommand_StatDown`'s order: Mist and the stage that cannot move are both
+## settled before `wEffectFailed` is read, so each keeps its own line.
+func test_a_stat_drop_names_its_own_reason_even_when_the_roll_failed() -> void:
+	var misted: Gen2Battle = _battle()
+	misted.enemy.substatus |= Gen2Substatus.MIST
+	var turn: Gen2Turn = _turn(misted, Fixture.PSYCHIC_NEVER)
+	turn.failed_chance = true
+	Gen2EffectCommands.run(Gen2EffectCommands.SP_DEFENSE_DOWN, turn)
+	assert_true(turn.stat_mist_blocked)
+
+	var floored: Gen2Battle = _battle()
+	floored.enemy.change_stage("sp_defense", -6)
+	var bottom: Gen2Turn = _turn(floored, Fixture.PSYCHIC_NEVER)
+	bottom.failed_chance = true
+	Gen2EffectCommands.run(Gen2EffectCommands.SP_DEFENSE_DOWN, bottom)
+	assert_false(bottom.stat_mist_blocked)
+	assert_false(bottom.stat_moved)
+
+
+## `applydamage` is inside `MultiHit`'s own loop, so every hit is spent on the
+## doll and the doll can break partway through a move.
+func test_a_multi_hit_spends_every_hit_on_the_doll() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.substitute_hp = 250
+	var before: int = battle.enemy.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.DOUBLE_HIT_MOVE)
+
+	assert_eq(battle.enemy.hp, before, "the real health never moves")
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_TOOK_DAMAGE).size(), 2)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 0)
+
+
+## And a doll broken by the first hit lets the second through to the Pokémon,
+## which is only true because the effect byte survived the break.
+func test_a_doll_broken_by_the_first_hit_lets_the_second_through() -> void:
+	var battle: Gen2Battle = _battle()
+	_raise_enemy_substitute(battle)
+	battle.enemy.substitute_hp = 1
+	var before: int = battle.enemy.hp
+	var turn: Gen2Turn = _run_move(battle, Fixture.DOUBLE_HIT_MOVE)
+
+	assert_eq(_of_type(turn.events, Gen2Battle.SUBSTITUTE_FADED).size(), 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1, "the second hit lands")
+	assert_lt(battle.enemy.hp, before)
+	assert_eq(turn.effect(), Gen2MoveEffect.DOUBLE_HIT, "and the loop kept its own byte")

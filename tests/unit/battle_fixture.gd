@@ -24,6 +24,15 @@ const CUBONE: int = 104
 const MAROWAK: int = 105
 const DITTO: int = 132
 
+## The two species whose *type* is the whole point of them. `BattleCommand_Curse`
+## picks its branch off the user being a Ghost-type and `SpikesDamage` spares a
+## Flying-type, so neither rule can be reached with the eight above. Real numbers
+## and real base stats, like every other row here. Hoothoot's 163 is a species
+## number and shares nothing but its value with [constant SLASH]'s move number and
+## [constant LIGHT_BALL]'s item number.
+const GASTLY: int = 92
+const HOOTHOOT: int = 163
+
 ## The highest species number this table fills.
 const MAX_SPECIES: int = MAGCARGO
 
@@ -121,6 +130,20 @@ const SAFEGUARD: int = 219
 ## Perish Song, the same shape again: a real move number, no power, and an
 ## accuracy its own sequence never rolls.
 const PERISH_SONG: int = 195
+
+## Substitute and the three residuals, at their real move numbers with their real
+## rows. Curse has to be real twice over: `BattleCommand_Curse` reads the user's
+## own type, and the move is the only carrier of `CURSE_TYPE`. Leech Seed is the
+## one of the five that rolls accuracy, so its 90% is a real byte rather than the
+## 255 the others carry.
+const SUBSTITUTE: int = 164
+const LEECH_SEED: int = 73
+const NIGHTMARE: int = 171
+const CURSE: int = 174
+const SPIKES: int = 191
+
+## Rapid Spin, the only move that undoes any of the three.
+const RAPID_SPIN: int = 229
 
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
@@ -267,6 +290,9 @@ const POISON: int = 0x03
 const FLYING: int = 0x02
 const DRAGON: int = 0x1A
 const DARK: int = 0x1B
+## `constants/type_constants.asm`'s own `CURSE_TYPE`, which sits in the unused
+## run at 19 and belongs to exactly one move.
+const CURSE_TYPE: int = 0x13
 
 ## Only the matchups the battle tests use, not the whole chart. The chart itself
 ## is the importer's business and is tested there; what matters here is that the
@@ -348,6 +374,14 @@ static func _species() -> Array:
 		DITTO: [
 			"DITTO", [48, 48, 48, 48, 48, 48], [NORMAL, NORMAL],
 			Gen2Experience.GROWTH_MEDIUM_FAST, 61, [], GENDER_UNKNOWN,
+		],
+		GASTLY: [
+			"GASTLY", [30, 35, 30, 80, 100, 35], [GHOST, POISON],
+			Gen2Experience.GROWTH_MEDIUM_SLOW, 95, [], GENDER_F50,
+		],
+		HOOTHOOT: [
+			"HOOTHOOT", [60, 30, 30, 50, 36, 56], [NORMAL, FLYING],
+			Gen2Experience.GROWTH_MEDIUM_FAST, 58, [], GENDER_F50,
 		],
 	}
 
@@ -497,6 +531,14 @@ static func _moves() -> Array:
 		REFLECT: ["REFLECT", 0, PSYCHIC_TYPE, 255, 20, Gen2MoveEffect.REFLECT, 0],
 		SAFEGUARD: ["SAFEGUARD", 0, NORMAL, 255, 25, Gen2MoveEffect.SAFEGUARD, 0],
 		PERISH_SONG: ["PERISH SONG", 0, NORMAL, 255, 5, Gen2MoveEffect.PERISH_SONG, 0],
+		# Leech Seed's 229 is its real 90% as a byte (`x percent` is `x * 255 / 100`);
+		# the other four never roll theirs.
+		SUBSTITUTE: ["SUBSTITUTE", 0, NORMAL, 255, 10, Gen2MoveEffect.SUBSTITUTE, 0],
+		LEECH_SEED: ["LEECH SEED", 0, GRASS, 229, 10, Gen2MoveEffect.LEECH_SEED, 0],
+		NIGHTMARE: ["NIGHTMARE", 0, GHOST, 255, 15, Gen2MoveEffect.NIGHTMARE, 0],
+		CURSE: ["CURSE", 0, CURSE_TYPE, 255, 10, Gen2MoveEffect.CURSE, 0],
+		SPIKES: ["SPIKES", 0, GROUND, 255, 20, Gen2MoveEffect.SPIKES, 0],
+		RAPID_SPIN: ["RAPID SPIN", 20, NORMAL, 255, 40, Gen2MoveEffect.RAPID_SPIN, 0],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.

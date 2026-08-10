@@ -589,3 +589,81 @@ func test_smart_discourages_perish_song_only_while_the_matchup_holds() -> void:
 			left_alone = true
 	assert_true(discouraged, "a matchup worth keeping is worth not ending")
 	assert_true(left_alone)
+
+
+## `AI_Redundant.Substitute` reads `wEnemySubStatus4`, the AI's own: a second doll
+## while the first is standing is the wasted turn.
+func test_basic_treats_a_second_substitute_as_redundant() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SUBSTITUTE, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	pikachu.substatus |= Gen2Substatus.SUBSTITUTE
+
+	for seed: int in 10:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_BASIC, _rng), 1
+		)
+
+
+## `.LeechSeed` reads the target's own flag, since that is where the seed sits.
+func test_basic_treats_a_second_leech_seed_as_redundant() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.LEECH_SEED, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus |= Gen2Substatus.LEECH_SEED
+
+	for seed: int in 10:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_BASIC, _rng), 1
+		)
+
+
+## `.Spikes` reads `wPlayerScreens`, the side the spikes would land on.
+func test_basic_treats_a_second_spikes_as_redundant() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SPIKES, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+
+	for seed: int in 10:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(
+				pikachu, geodude, _data, RomLayout.AI_BASIC, _rng, 0, 0,
+				Gen2Weather.NONE, Gen2Screens.NONE, Gen2Screens.SPIKES
+			),
+			1
+		)
+
+
+## `.Nightmare` calls a target with *no* status the redundant case and stops
+## there, so a target with any status at all is left encouraged even when it is
+## awake and cannot have one. The source names that as a bug of its own and this
+## reproduces it rather than fixing it.
+func test_basic_reproduces_the_nightmare_redundancy_bug() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.NIGHTMARE, Fixture.TACKLE])
+	var awake: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+
+	for seed: int in 10:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, awake, _data, RomLayout.AI_BASIC, _rng), 1,
+			"an unstatused target really is the redundant case"
+		)
+
+	var burned: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	burned.status = Gen2Status.BURN
+	var kept: int = 0
+	for seed: int in 20:
+		_rng.seed = seed
+		if Gen2BattleAI.choose_slot(pikachu, burned, _data, RomLayout.AI_BASIC, _rng) == 0:
+			kept += 1
+	assert_gt(kept, 0, "a burn is not sleep, and the AI is not discouraged anyway")
+
+	var dreaming: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	dreaming.status = Gen2Status.BURN
+	dreaming.substatus |= Gen2Substatus.NIGHTMARE
+	for seed: int in 10:
+		_rng.seed = seed
+		assert_eq(
+			Gen2BattleAI.choose_slot(pikachu, dreaming, _data, RomLayout.AI_BASIC, _rng), 1,
+			"a target already dreaming is redundant on the second clause"
+		)

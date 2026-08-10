@@ -67,6 +67,20 @@ const X_ACCURACY: int = 1 << 15
 ## [method Gen2BattleMon.reset_volatile] is the same behavior.
 const PERISH: int = 1 << 16
 
+## `SUBSTATUS_SUBSTITUTE`, `wPlayerSubStatus4` bit 4. The doll's own hit points
+## sit beside it on [member Gen2BattleMon.substitute_hp].
+const SUBSTITUTE: int = 1 << 17
+
+## `SUBSTATUS_LEECH_SEED`, `wPlayerSubStatus4` bit 7. It sits on the Pokémon that
+## was seeded rather than on the one that seeded it, which is why
+## `BattleCommand_ClearHazards` reads the user's own flag.
+const LEECH_SEED: int = 1 << 18
+
+## `SUBSTATUS_NIGHTMARE` and `SUBSTATUS_CURSE`, `wPlayerSubStatus1` bits 0 and 1.
+## Both cost a quarter at the end of the turn and both sit on the sufferer.
+const NIGHTMARE: int = 1 << 19
+const CURSE: int = 1 << 20
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as
@@ -109,6 +123,13 @@ const MAX_TRAP_TURNS: int = 6
 ## What a bound Pokémon loses each turn, `GetSixteenthMaxHP`'s at-least-one
 ## sixteenth (engine/battle/core.asm).
 const TRAP_DIVISOR: int = 16
+
+## `GetEighthMaxHP`, `GetQuarterMaxHP` and `GetHalfMaxHP`: what Leech Seed moves
+## across the field, what a Nightmare and a Curse each cost their sufferer, and
+## what a Ghost-type Curse cuts off its own user.
+const LEECH_SEED_DIVISOR: int = 8
+const QUARTER_DIVISOR: int = 4
+const HALF_DIVISOR: int = 2
 
 ## What `BattleCommand_PerishSong` loads into each side's count. `HandlePerishSong`
 ## decrements before it prints, so the four counts printed are 3, 2, 1 and 0, and
@@ -180,3 +201,26 @@ static func roll_trap_turns(rng: RandomNumberGenerator) -> int:
 static func trap_damage(max_hp: int) -> int:
 	@warning_ignore("integer_division")
 	return maxi(max_hp / TRAP_DIVISOR, 1)
+
+
+static func leech_seed_damage(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / LEECH_SEED_DIVISOR, 1)
+
+
+static func quarter_damage(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / QUARTER_DIVISOR, 1)
+
+
+static func half_damage(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / HALF_DIVISOR, 1)
+
+
+## Not [method quarter_damage]: `BattleCommand_Substitute` shifts the maximum
+## right twice by hand and stores the low byte, with no `GetQuarterMaxHP` and so
+## no floor at one, which is why a maximum under four makes a doll with no hit
+## points at all rather than a one-point one.
+static func substitute_hp_for(max_hp: int) -> int:
+	return (max_hp >> 2) & 0xFF
