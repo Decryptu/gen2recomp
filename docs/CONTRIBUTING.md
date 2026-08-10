@@ -220,8 +220,13 @@ operations in hardware order, including truncation:
 - announced effectiveness is a separate tenths accumulator: Ember against
   Fire/Rock deals 6 but reports 2/10. Use `GameData.type_matchup` for damage
   and `type_effectiveness` for the message;
-- `Gen2Damage.calculate_with` receives critical/spread deterministically;
-  `calculate` rolls them. Hand-worked tests should target the former;
+- the formula is four steps, not one: `Gen2Damage.damage_stats`, `damage_calc`,
+  `stab_damage` and `apply_variation`, which are the cartridge's own commands and
+  are what `effect_commands.gd` runs, because Present, Triple Kick, Fury Cutter
+  and Rollout each write something between two of them.
+  `Gen2Damage.calculate_with` composes all four and receives critical/spread
+  deterministically; `calculate` rolls them. Hand-worked tests should target
+  `calculate_with`;
 - Struggle skips STAB and the type chart and has at least 1 recoil damage;
 - accuracy is a byte out of 255; stored `$FF` never rolls. Accuracy/evasion
   stages use their own rounded table, not the stat-stage table.
@@ -245,14 +250,21 @@ operations in hardware order, including truncation:
 
 Moves are command programs: `move_effect.gd` is the table,
 `effect_commands.gd` the steps, `turn.gd` the handoff and `battle.gd` the
-runner. Unimplemented effects fall back to an ordinary attack. Loops stay inside
+runner. Unimplemented effects fall back to an ordinary attack;
+`Gen2MoveEffect.is_written` is what tells the two apart. A step that needs to
+write over the move's own power or type writes `Gen2Turn.power_override` and
+`type_override` rather than the move Dictionary, which is `GameData`'s cached
+row and not a copy. Loops stay inside
 one command, as with multi-hit and all-stat changes. Drain and recoil use
 uncapped `Gen2Turn.damage`, not capped HP loss, so a move calculating 50 against
 3 HP heals 25 or costs 12/13 as the cartridge does.
 
 Status and substatus are separate. One status is allowed; several substatuses
 and counters live on `Gen2BattleMon`. `CHECK_STATUS` order is recharge, sleep,
-freeze, flinch, confusion, paralysis; waking up still permits movement.
+freeze, flinch, confusion, paralysis; waking up still permits movement. Snore
+and Sleep Talk are used through a sleep and Flame Wheel and Sacred Fire through
+a freeze, all four by move number; the thaw itself is the `defrost` step in the
+two fire moves' own lists, not the status check.
 Secondary effects roll after a hit and before applying status. `reset_volatile`
 on switch clears every flag/counter separately from `reset_stages`; Haze resets
 stages but not volatiles.
