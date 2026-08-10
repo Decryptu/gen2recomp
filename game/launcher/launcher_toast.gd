@@ -35,6 +35,10 @@ func _build() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	modulate.a = 0.0
+	# A toast that has faded out is gone, not merely transparent. Alpha alone
+	# leaves the card in the hit test over whatever the page put at the bottom
+	# of the screen, which on the shelf is Play and the cache button.
+	visible = false
 
 	var centre := CenterContainer.new()
 	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -43,7 +47,9 @@ func _build() -> void:
 
 	_card = Gen2LauncherCard.floating(_theme, Gen2LauncherTheme.RADIUS_MD, 16, 20)
 	_card.custom_minimum_size = Vector2(360, 0)
-	_card.mouse_filter = Control.MOUSE_FILTER_STOP
+	# Nothing in here is clickable, so nothing in here takes a click. The card
+	# is the width of the shelf's action row and sits exactly on top of it.
+	_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	centre.add_child(_card)
 
 	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_SM)
@@ -66,6 +72,8 @@ func _build() -> void:
 	_progress.show_percentage = false
 	_progress.custom_minimum_size = Vector2(0, 5)
 	_progress.visible = false
+	# A bar that reports progress is read, never dragged.
+	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(_progress)
 
 
@@ -116,13 +124,16 @@ func hide_message() -> void:
 	set_progress(false)
 	if not is_inside_tree():
 		modulate.a = 0.0
+		visible = false
 		return
 	_fade = _restart_fade()
 	_fade.tween_property(self, "modulate:a", 0.0, 0.20)
 	_fade.tween_property(_card, "position:y", _card.position.y + 12.0, 0.20)
+	_fade.chain().tween_callback(func() -> void: visible = false)
 
 
 func _raise() -> void:
+	visible = true
 	if _shown or not is_inside_tree():
 		modulate.a = 1.0
 		_shown = true
