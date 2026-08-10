@@ -63,8 +63,10 @@ const SWORDS_DANCE: int = 14
 const SCREECH: int = 103
 const METAL_CLAW: int = 232
 const ANCIENTPOWER: int = 246
-const PSYCHIC_LOWERS: int = 210
-const PSYCHIC_NEVER: int = 211
+## Parked above the cartridge's own numbering rather than on 210 and 211, which
+## are Fury Cutter's and Steel Wing's and are now filled with those rows.
+const PSYCHIC_LOWERS: int = 278
+const PSYCHIC_NEVER: int = 279
 
 ## The substatus moves. Flinch and confusion each in the two shapes they come
 ## in, the same [code]_ALWAYS[/code]/nothing pairing [constant EMBER_BURNS] and
@@ -178,8 +180,34 @@ const MORNING_SUN: int = 234
 const SYNTHESIS: int = 235
 const MOONLIGHT: int = 236
 
+## The effects whose whole point is a number the move table does not hold, all at
+## their real move numbers with their real rows: the power comes from the user's
+## happiness, its remaining health, its DVs, or a roll, so a synthetic row would
+## test nothing. Present is here too, since one of its four rows is not a hit at
+## all.
+const SWIFT: int = 129
+const JUMP_KICK: int = 26
+const FLAIL: int = 175
+const REVERSAL: int = 179
+const RETURN: int = 216
+const PRESENT: int = 217
+const FRUSTRATION: int = 218
+const HIDDEN_POWER: int = 237
+const FURY_CUTTER: int = 210
+const TRIPLE_KICK: int = 167
+const FALSE_SWIPE: int = 206
+const HEAL_BELL: int = 215
+const SNORE: int = 173
+const TRI_ATTACK: int = 161
+const STEEL_WING: int = 211
+const SACRED_FIRE: int = 221
+const STOMP: int = 23
+const MINIMIZE: int = 107
+const SPLASH: int = 150
+const SWAGGER: int = 207
+
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = BODY_SLAM_ALWAYS_PARALYZES
+const MAX_MOVE: int = PSYCHIC_NEVER
 const BERRY_ITEM: int = 0xAD
 
 ## The highest item number this table fills.
@@ -226,6 +254,7 @@ const NORMAL: int = 0x00
 const FIGHTING: int = 0x01
 const GROUND: int = 0x04
 const ROCK: int = 0x05
+const BUG: int = 0x07
 const GHOST: int = 0x08
 const STEEL: int = 0x09
 const FIRE: int = 0x14
@@ -386,7 +415,7 @@ static func _moves() -> Array:
 		# burn without a seed. Its opposite is a chance of zero.
 		EMBER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 256],
 		NEVER_BURNS: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
-		FLAME_WHEEL: ["FLAME WHEEL", 60, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],
+		FLAME_WHEEL: ["FLAME WHEEL", 60, FIRE, 255, 25, Gen2MoveEffect.FLAME_WHEEL, 25],
 		# The other three secondary statuses, power, type and PP as the cartridge
 		# has them and only the chance forced past failing.
 		SLUDGE_BOMB_ALWAYS_POISONS: [
@@ -423,12 +452,12 @@ static func _moves() -> Array:
 		HYPER_BEAM: ["HYPER BEAM", 150, NORMAL, 255, 5, Gen2MoveEffect.RECHARGE_HIT, 0],
 		FLY: ["FLY", 70, FLYING, 242, 15, Gen2MoveEffect.FLY_OR_DIG, 0],
 		DIG: ["DIG", 100, GROUND, 255, 10, Gen2MoveEffect.FLY_OR_DIG, 0],
-		GUST: ["GUST", 40, FLYING, 255, 35, 0, 0],
+		GUST: ["GUST", 40, FLYING, 255, 35, Gen2MoveEffect.GUST, 0],
 		THUNDER: ["THUNDER", 120, ELECTRIC, 178, 10, Gen2MoveEffect.THUNDER, 76],
-		TWISTER: ["TWISTER", 40, DRAGON, 255, 20, Gen2MoveEffect.FLINCH_HIT, 0],
-		EARTHQUAKE: ["EARTHQUAKE", 100, GROUND, 255, 10, 0, 0],
+		TWISTER: ["TWISTER", 40, DRAGON, 255, 20, Gen2MoveEffect.TWISTER, 51],
+		EARTHQUAKE: ["EARTHQUAKE", 100, GROUND, 255, 10, Gen2MoveEffect.EARTHQUAKE, 0],
 		FISSURE: ["FISSURE", 0, GROUND, 76, 5, Gen2MoveEffect.OHKO, 0],
-		MAGNITUDE: ["MAGNITUDE", 100, GROUND, 255, 30, 0, 0],
+		MAGNITUDE: ["MAGNITUDE", 1, GROUND, 255, 30, Gen2MoveEffect.MAGNITUDE, 0],
 		THRASH: ["THRASH", 90, NORMAL, 255, 20, Gen2MoveEffect.RAMPAGE, 0],
 		PETAL_DANCE: ["PETAL DANCE", 70, GRASS, 255, 20, Gen2MoveEffect.RAMPAGE, 0],
 		OUTRAGE: ["OUTRAGE", 90, DRAGON, 255, 15, Gen2MoveEffect.RAMPAGE, 0],
@@ -491,6 +520,46 @@ static func _moves() -> Array:
 		MORNING_SUN: ["MORNING SUN", 0, NORMAL, 255, 5, Gen2MoveEffect.MORNING_SUN, 0],
 		SYNTHESIS: ["SYNTHESIS", 0, GRASS, 255, 5, Gen2MoveEffect.SYNTHESIS, 0],
 		MOONLIGHT: ["MOONLIGHT", 0, NORMAL, 255, 5, Gen2MoveEffect.MOONLIGHT, 0],
+		# Real rows throughout, accuracy bytes included: `percent` is
+		# `* $ff / 100` and truncates, so 90% is 229, 95% is 242 and 100% is 255.
+		# The seven powers of 1 are the cartridge's own and are the point: a
+		# command overwrites each of them before `damagecalc` reads it, so a row
+		# that carried a plausible number would hide the step that fills it in.
+		SWIFT: ["SWIFT", 60, NORMAL, 255, 20, Gen2MoveEffect.ALWAYS_HIT, 0],
+		JUMP_KICK: ["JUMP KICK", 70, FIGHTING, 242, 25, Gen2MoveEffect.JUMP_KICK, 0],
+		FLAIL: ["FLAIL", 1, NORMAL, 255, 15, Gen2MoveEffect.REVERSAL, 0],
+		REVERSAL: ["REVERSAL", 1, FIGHTING, 255, 15, Gen2MoveEffect.REVERSAL, 0],
+		RETURN: ["RETURN", 1, NORMAL, 255, 20, Gen2MoveEffect.RETURN, 0],
+		PRESENT: ["PRESENT", 1, NORMAL, 229, 15, Gen2MoveEffect.PRESENT, 0],
+		FRUSTRATION: [
+			"FRUSTRATION", 1, NORMAL, 255, 20, Gen2MoveEffect.FRUSTRATION, 0,
+		],
+		HIDDEN_POWER: [
+			"HIDDEN POWER", 1, NORMAL, 255, 15, Gen2MoveEffect.HIDDEN_POWER, 0,
+		],
+		FURY_CUTTER: ["FURY CUTTER", 10, BUG, 242, 20, Gen2MoveEffect.FURY_CUTTER, 0],
+		TRIPLE_KICK: [
+			"TRIPLE KICK", 10, FIGHTING, 229, 10, Gen2MoveEffect.TRIPLE_KICK, 0,
+		],
+		FALSE_SWIPE: [
+			"FALSE SWIPE", 40, NORMAL, 255, 40, Gen2MoveEffect.FALSE_SWIPE, 0,
+		],
+		HEAL_BELL: ["HEAL BELL", 0, NORMAL, 255, 5, Gen2MoveEffect.HEAL_BELL, 0],
+		SNORE: ["SNORE", 40, NORMAL, 255, 15, Gen2MoveEffect.SNORE, 76],
+		TRI_ATTACK: ["TRI ATTACK", 80, NORMAL, 255, 10, Gen2MoveEffect.TRI_ATTACK, 51],
+		STEEL_WING: [
+			"STEEL WING", 70, STEEL, 229, 25, Gen2MoveEffect.DEFENSE_UP_HIT, 25,
+		],
+		SACRED_FIRE: [
+			"SACRED FIRE", 100, FIRE, 242, 5, Gen2MoveEffect.SACRED_FIRE, 127,
+		],
+		STOMP: ["STOMP", 65, NORMAL, 255, 20, Gen2MoveEffect.STOMP, 76],
+		# Minimize is the ordinary evasion-up effect, which is the whole reason
+		# `MinimizeDropSub` has to compare the move number: nothing about the
+		# effect byte tells it from Double Team.
+		MINIMIZE: ["MINIMIZE", 0, NORMAL, 255, 20, Gen2MoveEffect.STAT_UP_BASE + 6, 0],
+		SPLASH: ["SPLASH", 0, NORMAL, 255, 40, Gen2MoveEffect.SPLASH, 0],
+		SWAGGER: ["SWAGGER", 0, NORMAL, 229, 15, Gen2MoveEffect.SWAGGER, 255],
 	}
 
 	var out: Array = []

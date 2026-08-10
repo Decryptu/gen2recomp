@@ -20,10 +20,77 @@ const USED_MOVE_TEXT: StringName = &"usedmovetext"
 ## Spends the PP.
 const DO_TURN: StringName = &"doturn"
 
-## Works out what the move would do: the critical, the type matchup, the STAB and
-## the random spread. Nothing is applied here, and nothing has been rolled for
-## whether it connects.
+## The five steps a hit is worked out in, which are five commands on the
+## cartridge and not one: an effect that reaches inside the formula does so
+## between two of them. Present sets the power between [constant DAMAGE_STATS]
+## and [constant DAMAGE_CALC], Triple Kick multiplies between
+## [constant DAMAGE_CALC] and [constant STAB], and Fury Cutter and Rollout
+## between [constant STAB] and [constant DAMAGE_VARIATION]. Nothing is applied
+## by any of them, and nothing has been rolled for whether the move connects.
+const CRITICAL: StringName = &"critical"
+const DAMAGE_STATS: StringName = &"damagestats"
 const DAMAGE_CALC: StringName = &"damagecalc"
+const STAB: StringName = &"stab"
+const DAMAGE_VARIATION: StringName = &"damagevariation"
+
+## `doubleflyingdamage`, `doubleundergrounddamage` and `doubleminimizedamage`,
+## which are one routine under three gates and sit behind the spread: Gust and
+## Twister reach a target that is out of sight above, Earthquake and Magnitude
+## one below, and Stomp one that has made itself small.
+const DOUBLE_DAMAGE: StringName = &"doubledamage"
+
+## The four steps that write a power over the move's own, all of them between
+## [constant DAMAGE_STATS] and [constant DAMAGE_CALC] where the cartridge writes
+## into `wPlayerMoveStruct`. [constant HIDDEN_POWER] writes a type as well and
+## runs `damagestats` itself, which is why its list carries no `damagestats` of
+## its own.
+const HAPPINESS_POWER: StringName = &"happinesspower"
+const FRUSTRATION_POWER: StringName = &"frustrationpower"
+const GET_MAGNITUDE: StringName = &"getmagnitude"
+const HIDDEN_POWER: StringName = &"hiddenpower"
+
+## Present, which is a power table with a fourth row that heals the target
+## instead of hitting it.
+const PRESENT: StringName = &"present"
+
+## The two that multiply the finished damage: Fury Cutter between
+## [constant STAB] and [constant DAMAGE_VARIATION], Triple Kick between
+## [constant DAMAGE_CALC] and [constant STAB]. [constant KICK_COUNTER] is what
+## walks Triple Kick from one kick to the next.
+const FURY_CUTTER: StringName = &"furycutter"
+const TRIPLE_KICK: StringName = &"triplekick"
+const KICK_COUNTER: StringName = &"kickcounter"
+
+## False Swipe, which leaves the target on one hit point rather than none.
+const FALSE_SWIPE: StringName = &"falseswipe"
+
+## `resettypematchup`: the constant-damage moves' own immunity check, and the
+## reason their lists carry no `stab`. Announces nothing about effectiveness,
+## since a fixed number was never multiplied by a matchup.
+const RESET_TYPE_MATCHUP: StringName = &"resettypematchup"
+
+## Heal Bell, which clears the status of every Pokémon in the user's party.
+const HEAL_BELL: StringName = &"healbell"
+
+## Snore, which fails unless its user is asleep.
+const SNORE: StringName = &"snore"
+
+## Tri Attack's one-in-three pick between paralysis, freeze and burn.
+const TRI_STATUS_CHANCE: StringName = &"tristatuschance"
+
+## `defrost`: Flame Wheel and Sacred Fire thawing their own user. Not
+## `defrostopponent`, which is effect byte 96 and carried by no move either game
+## ships.
+const DEFROST: StringName = &"defrost"
+
+## Splash, which is the one move whose whole implementation is saying that
+## nothing happened.
+const SPLASH: StringName = &"splash"
+
+## `BattleCommand_SwitchTurn`: swaps who is acting and who is being acted on for
+## the commands between two of them. Swagger is the only list that uses it, to
+## raise the *target's* Attack with the ordinary `attackup2`.
+const SWITCH_TURN: StringName = &"switchturn"
 
 ## Ends the move if the defender cannot be touched by it at all. Separate from
 ## the roll, because an immunity is not a miss and does not read as one.
@@ -31,6 +98,20 @@ const CHECK_IMMUNE: StringName = &"checkimmune"
 
 ## Rolls whether the move connects, and ends it if it does not.
 const CHECK_HIT: StringName = &"checkhit"
+
+## The effects whose list still has work to do after a miss, and so are not
+## ended by [constant CHECK_HIT].
+##
+## `BattleCommand_CheckHit` never ends anything on the cartridge: it writes
+## `wAttackMissed` and the list runs on until `failuretext`, which is where a
+## miss is announced and the move stops. This engine has no `failuretext`, so
+## the hit check ends the move instead and these three are the lists with a
+## command between the two: Selfdestruct faints its user whether or not it
+## connected, Rollout's `rolloutpower` breaks the chain on a miss, and Fury
+## Cutter's `furycutter` puts its count back to nothing.
+const CONTINUES_AFTER_MISS: Array[int] = [
+	Gen2MoveEffect.SELFDESTRUCT, Gen2MoveEffect.ROLLOUT, Gen2MoveEffect.FURY_CUTTER,
+]
 
 ## Counter and Mirror Coat do not roll their own accuracy. They validate the
 ## move that just hit the user, then leave the doubled damage for APPLY_DAMAGE.
@@ -373,6 +454,11 @@ const HEAL_TIMES: Dictionary = {
 ## Wheel and Sacred Fire, by move number.
 const THAWING_MOVES: Array = [172, 221]
 
+## The moves a sleeping Pokémon can use, `.fast_asleep`'s own two by number:
+## Snore and Sleep Talk. Sleep Talk has no effect list yet, and is named here
+## anyway because the bypass is the sleep check's rule rather than the move's.
+const SLEEPING_MOVES: Array = [173, 214]
+
 ## What Encore refuses to lock a target into, by move number: Encore itself and
 ## Mirror Move, since forcing either to repeat means nothing. Encore on Encore
 ## locks in nothing new, and Mirror Move copies the opponent's last move rather
@@ -409,8 +495,50 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_used_move_text(turn)
 		DO_TURN:
 			_do_turn(turn)
+		CRITICAL:
+			_critical(turn)
+		DAMAGE_STATS:
+			_damage_stats(turn)
 		DAMAGE_CALC:
 			_damage_calc(turn)
+		STAB:
+			_stab(turn)
+		DAMAGE_VARIATION:
+			_damage_variation(turn)
+		DOUBLE_DAMAGE:
+			_double_damage(turn)
+		HAPPINESS_POWER:
+			_happiness_power(turn, false)
+		FRUSTRATION_POWER:
+			_happiness_power(turn, true)
+		GET_MAGNITUDE:
+			_get_magnitude(turn)
+		HIDDEN_POWER:
+			_hidden_power(turn)
+		PRESENT:
+			_present(turn)
+		FURY_CUTTER:
+			_fury_cutter(turn)
+		TRIPLE_KICK:
+			_triple_kick(turn)
+		KICK_COUNTER:
+			_kick_counter(turn)
+		FALSE_SWIPE:
+			_false_swipe(turn)
+		RESET_TYPE_MATCHUP:
+			_reset_type_matchup(turn)
+		HEAL_BELL:
+			_heal_bell(turn)
+		SNORE:
+			_snore(turn)
+		TRI_STATUS_CHANCE:
+			_tri_status_chance(turn)
+		DEFROST:
+			_defrost_user(turn)
+		SPLASH:
+			_splash(turn)
+		SWITCH_TURN:
+			_switch_turn(turn)
 		CHECK_IMMUNE:
 			_check_immune(turn)
 		CHECK_HIT:
@@ -564,26 +692,296 @@ static func _do_turn(turn: Gen2Turn) -> void:
 		turn.attacker().spend_pp(turn.slot)
 
 
+## `BattleCommand_Critical`: whether this hit is a critical, at the level the
+## move, Focus Energy and a Scope Lens add up to. A move with no power never
+## rolls, which is the routine's own `and a / ret z` on the power byte.
+static func _critical(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	turn.critical = Gen2Damage.roll_critical(
+		turn.effective_move(), turn.rng(),
+		Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY),
+		Gen2HeldItem.effect_of(turn.data(), attacker.item) == Gen2HeldItem.CRITICAL_UP
+	)
+
+
+## `BattleCommand_DamageStats`: the two stats, truncated, left on the turn for
+## [method _damage_calc] to divide with.
+static func _damage_stats(turn: Gen2Turn) -> void:
+	var stats: Array = Gen2Damage.damage_stats(
+		turn.attacker(), turn.defender(),
+		int(turn.effective_move().get("type", RomLayout.TYPE_NORMAL)),
+		turn.critical, turn.battle.screens[turn.target]
+	)
+	turn.attack_stat = int(stats[0])
+	turn.defense_stat = int(stats[1])
+
+
+## `BattleCommand_DamageCalc`: the formula over those two stats, the item, the
+## critical multiplier, the cap and the minimum.
 static func _damage_calc(turn: Gen2Turn) -> void:
-	var rollout_multiplier: int = 1
-	if turn.effect() == Gen2MoveEffect.ROLLOUT:
-		rollout_multiplier = 1 << turn.attacker().rollout_count
-		if Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.CURLED):
-			rollout_multiplier *= 2
-	var result: Dictionary = Gen2Damage.calculate(
-		turn.attacker(), turn.defender(), turn.move, turn.rng(),
-		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
+	var effective: Dictionary = turn.effective_move()
+	turn.damage = Gen2Damage.damage_calc(
+		turn.attacker(), int(effective.get("power", 0)),
+		turn.attack_stat, turn.defense_stat,
 		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
-		rollout_multiplier,
-		turn.battle.weather,
-		turn.battle.screens[turn.target]
+		int(effective.get("type", RomLayout.TYPE_NORMAL)), turn.critical
+	)
+
+
+## `BattleCommand_Stab`: the weather, the same-type bonus and the matchup. The
+## step that answers whether the target is immune, which is why a status move
+## with no `damagecalc` in its list still carries this one.
+static func _stab(turn: Gen2Turn) -> void:
+	var result: Dictionary = Gen2Damage.stab_damage(
+		turn.attacker(), turn.defender(), turn.effective_move(), turn.damage,
+		turn.battle.weather
 	)
 	turn.damage = int(result["damage"])
-	turn.critical = bool(result["critical"])
 	turn.effectiveness = int(result["effectiveness"])
 	turn.immune = bool(result["immune"])
-	if _doubles_flying_damage(turn) or _doubles_underground_damage(turn):
+
+
+## `BattleCommand_DamageVariation`: the 85% to 100% spread, last.
+##
+## Nothing below two is touched and, because the routine returns before
+## `BattleRandom`, nothing below two draws either, so a move that worked out to
+## nothing moves no generator.
+static func _damage_variation(turn: Gen2Turn) -> void:
+	if turn.damage < Gen2Damage.MIN_DAMAGE:
+		return
+	turn.damage = Gen2Damage.apply_variation(
+		turn.damage, Gen2Damage.roll_variation(turn.rng())
+	)
+
+
+## `BattleCommand_DoubleFlyingDamage`, `..._DoubleUndergroundDamage` and
+## `..._DoubleMinimizeDamage`, which are one `DoubleDamage` under three gates and
+## sit after the spread rather than before it.
+static func _double_damage(turn: Gen2Turn) -> void:
+	if _doubles_flying_damage(turn) or _doubles_underground_damage(turn) \
+		or _doubles_minimize_damage(turn):
 		turn.damage = mini(turn.damage * 2, 0xFFFF)
+
+
+## `BattleCommand_HappinessPower` and `..._FrustrationPower`, one handler because
+## the two routines differ only in reading the happiness or 255 minus it.
+static func _happiness_power(turn: Gen2Turn, inverted: bool) -> void:
+	turn.power_override = Gen2Damage.happiness_power(
+		turn.attacker().happiness, inverted
+	)
+
+
+## `BattleCommand_GetMagnitude`: one roll picks the power and the number said out
+## loud, and the line is printed before the hit rather than after it.
+static func _get_magnitude(turn: Gen2Turn) -> void:
+	var row: Array = Gen2Damage.magnitude_row(turn.rng().randi_range(0, 255))
+	turn.power_override = int(row[1])
+	turn.emit(Gen2Battle.MAGNITUDE, {"magnitude": int(row[2])})
+
+
+## `BattleCommand_HiddenPower`, which is `HiddenPowerDamage`: the user's DVs give
+## the move both its type and its power, and the routine runs `damagestats` off
+## the new type itself, which is why Hidden Power's list carries none.
+static func _hidden_power(turn: Gen2Turn) -> void:
+	if turn.missed:
+		return
+	var resolved: Dictionary = Gen2Damage.hidden_power(turn.attacker().dvs)
+	turn.type_override = int(resolved["type"])
+	turn.power_override = int(resolved["power"])
+	_damage_stats(turn)
+
+
+## `BattleCommand_Present`: three power rows and a fourth that heals the target a
+## quarter of its own maximum instead of hitting it.
+##
+## The failure checks come first and are the matchup and the accuracy roll, both
+## of which the command asks itself because `present` sits where `damagecalc`
+## would and its list carries no `failuretext` before `applydamage`. The heal is
+## the target's, not the user's: the source switches turn, measures the target's
+## maximum, switches back and calls `RestoreHP`, which reads the side opposite
+## whoever is acting, so the two switches land it on the target either way round.
+static func _present(turn: Gen2Turn) -> void:
+	var matchup: Dictionary = Gen2Damage.stab_damage(
+		turn.attacker(), turn.defender(), turn.effective_move(), 0
+	)
+	if bool(matchup["immune"]) or turn.missed:
+		turn.immune = bool(matchup["immune"])
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
+		return
+
+	var power: int = Gen2Damage.present_power(turn.rng().randi_range(0, 255))
+	if power >= 0:
+		turn.power_override = power
+		return
+
+	_animate_current_move(turn)
+	var target: Gen2BattleMon = turn.defender()
+	if target.hp >= target.max_hp():
+		turn.emit(Gen2Battle.PRESENT_REFUSED, {"target": turn.target})
+		turn.end()
+		return
+
+	# Switched around the heal the way the source is, so `RegainedHealthText`'s
+	# `<USER>` is the Pokémon that got the present rather than the one that gave
+	# it.
+	_switch_turn(turn)
+	@warning_ignore("integer_division")
+	var restored: int = target.heal(maxi(target.max_hp() / 4, 1))
+	turn.emit(Gen2Battle.HP_RESTORED, {
+		"amount": restored, "hp": target.hp, "max_hp": target.max_hp(),
+	})
+	_switch_turn(turn)
+	turn.end()
+
+
+## `BattleCommand_FuryCutter`: the damage doubled once per consecutive hit,
+## capped at five turns' worth, and the count reset by a miss.
+##
+## Sits between `stab` and `damagevariation`, so the doubling lands on the
+## matched-up damage and the spread is taken from the doubled figure.
+static func _fury_cutter(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if turn.missed:
+		mon.fury_cutter_count = 0
+		return
+
+	mon.fury_cutter_count += 1
+	for _step: int in mini(mon.fury_cutter_count, FURY_CUTTER_MAX_COUNT) - 1:
+		turn.damage = mini(turn.damage * 2, 0xFFFF)
+
+
+## The cap `cp 6 / ld b, 5` puts on the doubling, which is sixteen times the
+## first kick's damage and no more.
+const FURY_CUTTER_MAX_COUNT: int = 5
+
+
+## `BattleCommand_TripleKick`: the second kick is worth twice the first and the
+## third three times it, by adding the first kick's damage back on rather than by
+## multiplying, which is why the count is the animation parameter's.
+static func _triple_kick(turn: Gen2Turn) -> void:
+	var base: int = turn.damage
+	for _step: int in turn.battle.battle_anim_param:
+		turn.damage = mini(turn.damage + base, 0xFFFF)
+
+
+## `BattleCommand_KickCounter`, the other half: one more kick counted.
+static func _kick_counter(turn: Gen2Turn) -> void:
+	turn.battle.battle_anim_param += 1
+
+
+## `BattleCommand_FalseSwipe`: the hit is cut down to one less than what the
+## target has left, so it always survives.
+##
+## The source's other half, clearing `wCriticalHit` when it holds 2, is
+## unreachable: only `BattleCommand_OHKO` ever writes that value and False Swipe
+## is not an OHKO move.
+static func _false_swipe(turn: Gen2Turn) -> void:
+	var target: Gen2BattleMon = turn.defender()
+	if turn.damage < target.hp:
+		return
+	turn.damage = maxi(target.hp - 1, 0)
+
+
+## `BattleCommand_ResetTypeMatchup`: the constant-damage moves' own immunity
+## check, and the reason their lists carry no `stab`.
+##
+## An immune target reads as a miss here rather than as its own kind of failure,
+## which is `ResetDamage` plus `wAttackMissed`. Otherwise the matchup is flattened
+## to neutral, since a fixed number was never multiplied by one and announcing an
+## effectiveness for it would be a lie.
+static func _reset_type_matchup(turn: Gen2Turn) -> void:
+	var matchup: Dictionary = Gen2Damage.stab_damage(
+		turn.attacker(), turn.defender(), turn.effective_move(), 0
+	)
+	if bool(matchup["immune"]):
+		turn.damage = 0
+		turn.missed = true
+		turn.immune = true
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		turn.end()
+		return
+	turn.effectiveness = RomLayout.MATCHUP_EFFECTIVE
+
+
+## `BattleCommand_HealBell`: every Pokémon in the user's party loses its status,
+## the one on the field included.
+##
+## The source writes a zero over all six party status bytes whether or not there
+## is a Pokémon in the slot, so a shorter party here is the same thing. Its
+## trailing `CalcPlayerStats`/`CalcEnemyStats` has no counterpart, because a burn
+## and a paralysis are applied when a stat is read ([method Gen2BattleMon.stat])
+## rather than baked into a copy that would need rebuilding. Its
+## `res SUBSTATUS_NIGHTMARE` has none either, since no move here gives one.
+static func _heal_bell(turn: Gen2Turn) -> void:
+	for mon: Gen2BattleMon in turn.battle.party(turn.side).mons:
+		if mon == null:
+			continue
+		mon.status = Gen2Status.NONE
+		mon.toxic_counter = 0
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.BELL_CHIMED)
+
+
+## `BattleCommand_Snore`: the move fails outright unless its user is asleep,
+## which is the only way it is ever used.
+static func _snore(turn: Gen2Turn) -> void:
+	if Gen2Status.is_asleep(turn.attacker().status):
+		return
+	turn.damage = 0
+	turn.missed = true
+	turn.emit(Gen2Battle.MOVE_FAILED)
+	turn.end()
+
+
+## `BattleCommand_TriStatusChance`: one of paralysis, freeze and burn, each a
+## third of the time.
+##
+## The pick is the high nibble of a rolled byte masked to two bits, rerolled
+## while it is zero, so three of the four values are used and the fourth costs
+## another roll rather than biasing the three.
+static func _tri_status_chance(turn: Gen2Turn) -> void:
+	if turn.failed_chance:
+		return
+	var pick: int = 0
+	while pick == 0:
+		pick = (turn.rng().randi_range(0, 255) >> 4) & 0b11
+	match pick:
+		1:
+			_status_target(turn, Gen2Status.PARALYSIS)
+		2:
+			_status_target(turn, Gen2Status.FREEZE)
+		_:
+			_status_target(turn, Gen2Status.BURN)
+
+
+## `BattleCommand_Defrost`: Flame Wheel and Sacred Fire thaw whoever used them.
+##
+## The user, not the target, which is what tells this apart from the `Defrost`
+## subroutine [method _defrost] is. It clears the freeze bit rather than the
+## whole status byte, which comes to the same thing while a freeze is the only
+## status a Pokémon can be under.
+static func _defrost_user(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if not Gen2Status.has(mon.status, Gen2Status.FREEZE):
+		return
+	mon.status &= ~Gen2Status.FREEZE
+	turn.emit(Gen2Battle.THAWED)
+
+
+## `BattleCommand_Splash`, which is `AnimateCurrentMove` and
+## `PrintNothingHappened`.
+static func _splash(turn: Gen2Turn) -> void:
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.NOTHING_HAPPENED)
+
+
+## `BattleCommand_SwitchTurn`: the commands between two of these act with the
+## sides the other way round.
+static func _switch_turn(turn: Gen2Turn) -> void:
+	var was: int = turn.side
+	turn.side = turn.target
+	turn.target = was
 
 
 static func _check_immune(turn: Gen2Turn) -> void:
@@ -601,8 +999,7 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	if turn.immune:
 		turn.missed = true
 		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
-			and turn.effect() != Gen2MoveEffect.ROLLOUT:
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
 			turn.end()
 		return
 
@@ -610,8 +1007,8 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		and not _can_hit_hidden(turn.move_number, turn.defender().substatus):
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
-			and turn.effect() != Gen2MoveEffect.ROLLOUT:
+		_jump_kick_crash(turn)
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
 			turn.end()
 		return
 
@@ -619,8 +1016,7 @@ static func _check_hit(turn: Gen2Turn) -> void:
 		and not Gen2Status.is_asleep(turn.defender().status):
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-		if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
-			and turn.effect() != Gen2MoveEffect.ROLLOUT:
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
 			turn.end()
 		return
 
@@ -633,6 +1029,13 @@ static func _check_hit(turn: Gen2Turn) -> void:
 	# `.XAccuracy`, immediately after it: an X Accuracy makes everything the
 	# holder throws land, for the rest of the time it is out.
 	if Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.X_ACCURACY):
+		return
+
+	# The perfect-accuracy check, last before the stat modifiers. Swift, Faint
+	# Attack and Vital Throw all carry `NormalHit`'s ordinary list and a stored
+	# accuracy of 100; this one comparison is the whole of what makes them never
+	# miss, so it is here rather than in a list of their own.
+	if turn.effect() == Gen2MoveEffect.ALWAYS_HIT:
 		return
 
 	var chance: int = Gen2Accuracy.chance(
@@ -651,11 +1054,33 @@ static func _check_hit(turn: Gen2Turn) -> void:
 
 	if Gen2Accuracy.rolls_hit(turn.rng(), chance):
 		return
+	# `.Miss` keeps the worked-out damage for Jump Kick alone, where every other
+	# miss clears it, because `BattleCommand_FailureText` is about to take an
+	# eighth of it off the user.
 	turn.missed = true
 	turn.emit(Gen2Battle.MISSED, {"target": turn.target})
-	if turn.effect() != Gen2MoveEffect.SELFDESTRUCT \
-		and turn.effect() != Gen2MoveEffect.ROLLOUT:
+	_jump_kick_crash(turn)
+	if not CONTINUES_AFTER_MISS.has(turn.effect()):
 		turn.end()
+
+
+## The tail of `BattleCommand_FailureText`: a missed Jump Kick or Hi Jump Kick
+## costs its user an eighth of the damage it would have dealt, never less than
+## one.
+##
+## Nothing is taken when the target was immune, since the routine returns on a
+## type modifier of zero, and Jump Kick's own effect byte is what gates the whole
+## block: it points at `NormalHit` like any other move and this is the only place
+## the two are told apart.
+static func _jump_kick_crash(turn: Gen2Turn) -> void:
+	if turn.effect() != Gen2MoveEffect.JUMP_KICK or turn.immune:
+		return
+	var attacker: Gen2BattleMon = turn.attacker()
+	var crash: int = maxi(turn.damage >> 3, 1)
+	var taken: int = attacker.take_damage(crash)
+	turn.emit(Gen2Battle.CRASHED, {
+		"amount": taken, "hp": attacker.hp, "max_hp": attacker.max_hp(),
+	})
 
 
 ## Takes the damage off, and reports what was actually taken.
@@ -758,15 +1183,20 @@ static func _can_hit_hidden(move_number: int, substatus: int) -> bool:
 	return false
 
 
+## The three gates in front of `DoubleDamage`, each reading one thing about the
+## target and nothing about the move: which moves ask is the list's business, and
+## only Gust and Twister carry `doubleflyingdamage`, only Earthquake and
+## Magnitude `doubleundergrounddamage`, only Stomp `doubleminimizedamage`.
 static func _doubles_flying_damage(turn: Gen2Turn) -> bool:
-	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.FLYING) \
-		and [Gen2MoveEffect.GUST_MOVE, Gen2MoveEffect.TWISTER_MOVE].has(turn.move_number)
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.FLYING)
 
 
 static func _doubles_underground_damage(turn: Gen2Turn) -> bool:
-	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.UNDERGROUND) \
-		and [Gen2MoveEffect.EARTHQUAKE_MOVE, Gen2MoveEffect.FISSURE_MOVE,
-			Gen2MoveEffect.MAGNITUDE_MOVE].has(turn.move_number)
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.UNDERGROUND)
+
+
+static func _doubles_minimize_damage(turn: Gen2Turn) -> bool:
+	return turn.defender().minimized
 
 
 ## A quarter of [member Gen2Turn.damage], the calculated number, at least one, and
@@ -845,20 +1275,25 @@ static func _check_status(turn: Gen2Turn) -> void:
 		if Gen2Status.is_asleep(mon.status):
 			_cancel_charge(mon)
 			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"sleep"})
-			turn.end()
-			return
-		turn.emit(Gen2Battle.WOKE_UP)
+			# `.fast_asleep` prints its line and only then looks at the move:
+			# Snore and Sleep Talk are used through a sleep, so the text stands
+			# and `CantMove` is what they skip. Sleep Talk is not written yet.
+			if not SLEEPING_MOVES.has(turn.move_number):
+				turn.end()
+				return
+		else:
+			turn.emit(Gen2Battle.WOKE_UP)
 
 	if Gen2Status.has(mon.status, Gen2Status.FREEZE):
-		# Flame Wheel and Sacred Fire are used through a freeze, and thaw the
-		# Pokémon using them; nothing else in the game does.
+		# Flame Wheel and Sacred Fire are used through a freeze; nothing else in
+		# the game is. `CheckPlayerTurn` only lets the move happen and clears no
+		# bit, so the thaw itself is the `defrost` step in their own list, behind
+		# `applydamage`: a Flame Wheel that misses leaves its user frozen.
 		if not THAWING_MOVES.has(turn.move_number):
 			_cancel_charge(mon)
 			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"freeze"})
 			turn.end()
 			return
-		mon.status &= ~Gen2Status.FREEZE
-		turn.emit(Gen2Battle.THAWED)
 
 	if Gen2Substatus.has(mon.substatus, Gen2Substatus.FLINCHED):
 		_cancel_charge(mon)
@@ -1165,8 +1600,8 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 	for hit: int in hits:
 		if hit > 0:
 			var result: Dictionary = Gen2Damage.calculate(
-				attacker, defender, turn.move, turn.rng(), focus_energy,
-				false, 1, turn.battle.weather, turn.battle.screens[turn.target]
+				attacker, defender, turn.effective_move(), turn.rng(), focus_energy,
+				false, turn.battle.weather, turn.battle.screens[turn.target]
 			)
 			turn.damage = int(result["damage"])
 			turn.critical = bool(result["critical"])
@@ -1208,15 +1643,18 @@ static func _roll_multi_hit_count(rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(0, 3) + 2
 
 
-## Overwrites [constant DAMAGE_CALC] with the number these four effects deal,
-## none from the ordinary formula: [constant Gen2MoveEffect.LEVEL_DAMAGE] the
-## user's level, [constant Gen2MoveEffect.PSYWAVE] a roll of it,
+## `BattleCommand_ConstantDamage`: the whole hit, worked out without the ordinary
+## formula. [constant Gen2MoveEffect.LEVEL_DAMAGE] is the user's level,
+## [constant Gen2MoveEffect.PSYWAVE] a roll of it,
 ## [constant Gen2MoveEffect.SUPER_FANG] half the target's current HP, and
 ## [constant Gen2MoveEffect.STATIC_DAMAGE] the move's power field taken directly.
-## None criticals or announces effectiveness, since the number was never
-## multiplied by either; only the immunity from the spent
-## [constant DAMAGE_CALC] roll is kept, and [constant CHECK_IMMUNE] has already
-## acted on it.
+## None of the four criticals or announces an effectiveness, since the number was
+## never multiplied by either, and [constant RESET_TYPE_MATCHUP] behind them is
+## what says so and what answers an immunity.
+##
+## [constant Gen2MoveEffect.REVERSAL] shares the command and not that shape: it
+## sets a power and runs the formula, and its own list carries `stab` rather than
+## `resettypematchup`, so Flail against a Ghost really is super effective.
 static func _fixed_damage(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	var defender: Gen2BattleMon = turn.defender()
@@ -1229,11 +1667,19 @@ static func _fixed_damage(turn: Gen2Turn) -> void:
 		Gen2MoveEffect.SUPER_FANG:
 			@warning_ignore("integer_division")
 			turn.damage = maxi(defender.hp / 2, 1)
+		Gen2MoveEffect.REVERSAL:
+			# `.reversal` is the one branch that does not hand back a number: it
+			# picks a power off how much health is left and then runs
+			# `PlayerAttackDamage` and `BattleCommand_DamageCalc` itself, so the
+			# hit goes through the ordinary formula. Its list carries no
+			# `critical`, so the hit is never one.
+			turn.power_override = Gen2Damage.flail_reversal_power(
+				attacker.hp, attacker.max_hp()
+			)
+			_damage_stats(turn)
+			_damage_calc(turn)
 		_: # STATIC_DAMAGE: Sonicboom and Dragon Rage deal exactly their own power.
 			turn.damage = int(turn.move.get("power", 0))
-
-	turn.critical = false
-	turn.effectiveness = RomLayout.MATCHUP_EFFECTIVE
 
 
 ## How much an attacker's own level adds to an OHKO move's accuracy, doubled
@@ -1328,9 +1774,18 @@ static func _rollout_check(turn: Gen2Turn) -> void:
 		mon.rollout_count = 0
 
 
-## Rollout's power step runs after the hit check. A miss, including an immunity,
-## ends the chain. A successful fifth hit also clears the continuation flag, but
-## its count is retained until the next Rollout starts and resets it.
+## `BattleCommand_RolloutPower`, which is both halves of Rollout: the count and
+## the doubling.
+##
+## It runs after `stab` and the hit check and before `damagevariation`, so the
+## doubling lands on the matched-up damage and the spread is taken from the
+## doubled figure. A miss, including an immunity, ends the chain. A successful
+## fifth hit also clears the continuation flag, but its count is retained until
+## the next Rollout starts and resets it.
+##
+## The count is raised before the doubling and one doubling is spent doing
+## nothing, which is `inc [hl]` then `dec b / jr z`: the first hit is worth its
+## own power and the fifth sixteen times it. Defense Curl adds one more.
 static func _rollout_power(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 	if turn.missed:
@@ -1338,10 +1793,20 @@ static func _rollout_power(turn: Gen2Turn) -> void:
 		return
 
 	mon.rollout_count += 1
-	if mon.rollout_count >= 5:
+	if mon.rollout_count >= ROLLOUT_MAX_COUNT:
 		mon.substatus &= ~Gen2Substatus.ROLLOUT
 	else:
 		mon.substatus |= Gen2Substatus.ROLLOUT
+
+	var doublings: int = mon.rollout_count - 1
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CURLED):
+		doublings += 1
+	for _step: int in doublings:
+		turn.damage = mini(turn.damage * 2, 0xFFFF)
+
+
+## `MAX_ROLLOUT_COUNT`.
+const ROLLOUT_MAX_COUNT: int = 5
 
 
 ## Thrash, Petal Dance and Outrage share the rampage flag. The first turn rolls
@@ -1972,6 +2437,18 @@ static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 		return
 
 	turn.stat_moved = turn.battle.mon(side).change_stage(stat_key, amount)
+
+	# `MinimizeDropSub`, the tail of `BattleCommand_StatUp` and reached only when
+	# the raise took: the flag is set off the move being animated rather than off
+	# an effect byte, since Minimize carries the ordinary `EFFECT_EVASION_UP` and
+	# nothing else tells it from Double Team.
+	if targets_user and turn.stat_moved and turn.move_number == MINIMIZE_MOVE:
+		turn.battle.mon(side).minimized = true
+
+
+## Minimize's move number, which is the whole of what `MinimizeDropSub` compares
+## against and what makes a Stomp hurt twice as much.
+const MINIMIZE_MOVE: int = 107
 
 
 ## Ancientpower's roll: the user's five real stats, all at once, reported as one

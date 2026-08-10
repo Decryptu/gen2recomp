@@ -19,6 +19,7 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 		out.stat_exp[key] = int(mon.stat_exp.get(key, 0))
 	out.hp = mon.hp
 	out.status = mon.status
+	out.happiness = mon.happiness
 	for slot: int in Gen2SaveMon.MAX_MOVES:
 		if slot < mon.moves.size():
 			out.moves[slot] = int(mon.moves[slot])
@@ -44,6 +45,7 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 		return null
 	out.exp = saved.exp
 	out.status = saved.status
+	out.happiness = saved.happiness
 	out.pp = saved_pp
 	out.hp = clampi(saved.hp, 0, out.max_hp())
 	return out
@@ -53,6 +55,11 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 ## battle party, so they keep their own slots and the battle Pokémon fill the
 ## rest in order; the write fails rather than dropping an egg or shifting a
 ## slot when the two no longer line up.
+##
+## The fields restored off [param source_save] are the ones the battle model does
+## not carry at all. Happiness is not among them any more: Return and Frustration
+## read it, so [Gen2BattleMon] holds it and it round-trips rather than being put
+## back from before the fight.
 static func from_battle_party(
 	game_id: StringName, rom_sha1: String, slot: int, party: Gen2Party, player_name: String = "",
 	source_save: Gen2SaveData = null
@@ -101,7 +108,6 @@ static func from_battle_party(
 		fought += 1
 		if previous != null:
 			saved_mon.ot_id = previous.ot_id
-			saved_mon.happiness = previous.happiness
 			saved_mon.pokerus = previous.pokerus
 			saved_mon.caught_time = previous.caught_time
 			saved_mon.caught_gender = previous.caught_gender

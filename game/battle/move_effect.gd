@@ -181,12 +181,81 @@ const SAFEGUARD: int = 124
 ## on the field that a switch escapes.
 const PERISH_SONG: int = 114
 
+## Swift, Faint Attack and Vital Throw, which point at `NormalHit` like any other
+## attack: their whole difference is one comparison inside
+## [method Gen2EffectCommands._check_hit], so this byte has no list.
+const ALWAYS_HIT: int = 17
+
+## Jump Kick and Hi Jump Kick, the same shape: `NormalHit` plus the eighth of the
+## damage a miss costs the user, which is the tail of
+## `BattleCommand_FailureText`.
+const JUMP_KICK: int = 45
+
+## The four that write a power over the move's own. Return and Frustration read
+## the user's happiness from either end, Magnitude rolls one of seven, and Hidden
+## Power reads a power and a type out of the user's DVs.
+const RETURN: int = 121
+const FRUSTRATION: int = 123
+const MAGNITUDE: int = 126
+const HIDDEN_POWER: int = 135
+
+## Present, which is a fourth power row that heals the target instead.
+const PRESENT: int = 122
+
+## Flail and Reversal, which share [constant Gen2EffectCommands.FIXED_DAMAGE]
+## with the four constant-damage effects and are the only branch of it that runs
+## the ordinary formula: the power comes off how much health the user has left.
+const REVERSAL: int = 99
+
+## Fury Cutter and Triple Kick, the two that multiply a finished figure rather
+## than replace it.
+const FURY_CUTTER: int = 119
+const TRIPLE_KICK: int = 104
+
+## False Swipe, which leaves what it hits standing on one hit point.
+const FALSE_SWIPE: int = 101
+
+## Heal Bell, which is the only move that reaches the party behind the Pokémon on
+## the field.
+const HEAL_BELL: int = 102
+
+## Snore, Tri Attack and Splash. Snore fails unless its user is asleep, Tri
+## Attack picks one of three statuses, and Splash does nothing and says so.
+const SNORE: int = 92
+const TRI_ATTACK: int = 36
+const SPLASH: int = 85
+
+## Flame Wheel and Sacred Fire, one list: a burn chance with the user's own thaw
+## in front of the faint check.
+const FLAME_WHEEL: int = 108
+const SACRED_FIRE: int = 125
+
+## Steel Wing: the raise-on-hit run's missing seventh, since
+## [constant ATTACK_UP_HIT] and [constant ALL_STATS_UP_HIT] were the only two
+## built.
+const DEFENSE_UP_HIT: int = 138
+
+## The four that double against a target the ordinary hit would have missed or
+## barely grazed. Twister and Stomp carry a flinch chance with it; Gust and
+## Earthquake carry nothing, and are the two lists that leave `kingsrock` out.
+const TWISTER: int = 146
+const STOMP: int = 150
+const GUST: int = 149
+const EARTHQUAKE: int = 147
+
+## Swagger, the one list that raises a stat on the side it is not acting from.
+const SWAGGER: int = 118
+
 ## An ordinary attack: say it, spend it, work it out, roll it, apply it, and see
 ## who is standing. Everything else is this with steps moved.
 const NORMAL_HIT: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -227,7 +296,11 @@ const MIRROR_COAT_SEQUENCE: Array = [
 const SELFDESTRUCT_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.SELFDESTRUCT,
 	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
@@ -243,7 +316,11 @@ const SELFDESTRUCT_SEQUENCE: Array = [
 const RECOIL_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -270,7 +347,7 @@ const POISON_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHECK_HIT,
-	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.POISON_TARGET,
@@ -283,7 +360,7 @@ const TOXIC_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHECK_HIT,
-	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_SAFEGUARD,
 	Gen2EffectCommands.TOXIC_TARGET,
@@ -296,7 +373,7 @@ const TOXIC_SEQUENCE: Array = [
 const PARALYZE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
-	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.CHECK_SAFEGUARD,
@@ -322,7 +399,11 @@ const CONFUSE_SEQUENCE: Array = [
 const RECHARGE_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -341,7 +422,11 @@ const CHARGE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -359,8 +444,12 @@ const RAMPAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.RAMPAGE,
-	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
@@ -375,9 +464,13 @@ const ROLLOUT_SEQUENCE: Array = [
 	Gen2EffectCommands.ROLLOUT_CHECK,
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.ROLLOUT_POWER,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
@@ -408,7 +501,11 @@ const SKY_ATTACK_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.EFFECT_CHANCE,
@@ -427,7 +524,11 @@ const SKULL_BASH_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -512,9 +613,13 @@ const ENCORE_SEQUENCE: Array = [
 const TRAP_TARGET_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
-	Gen2EffectCommands.DAMAGE_CALC,
-	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
@@ -601,11 +706,15 @@ const PERISH_SONG_SEQUENCE: Array = [
 const THUNDER_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
-	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.THUNDER_ACCURACY,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
@@ -620,7 +729,11 @@ const SOLARBEAM_SEQUENCE: Array = [
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.SKIP_SUN_CHARGE,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -647,7 +760,11 @@ const MEAN_LOOK_SEQUENCE: Array = [
 const MULTI_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MULTI_HIT,
@@ -662,7 +779,11 @@ const MULTI_HIT_SEQUENCE: Array = [
 const TWINEEDLE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.EFFECT_CHANCE,
@@ -679,7 +800,11 @@ const TWINEEDLE_SEQUENCE: Array = [
 const DRAIN_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -696,7 +821,11 @@ const DRAIN_SEQUENCE: Array = [
 const DREAM_EATER_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
@@ -707,18 +836,20 @@ const DREAM_EATER_SEQUENCE: Array = [
 ]
 
 ## [constant SUPER_FANG], [constant STATIC_DAMAGE], [constant LEVEL_DAMAGE] and
-## [constant PSYWAVE]: one shared list, the way the cartridge shares one
-## script (`StaticDamage:`) across all four labels. [constant DAMAGE_CALC]'s
-## own roll runs first and is thrown away except for the one thing worth
-## keeping from it, whether the hit is immune at all; the real number is
-## [constant Gen2EffectCommands.FIXED_DAMAGE]'s to decide.
+## [constant PSYWAVE]: one shared list, the way the cartridge shares one script
+## (`StaticDamage:`) across all four labels.
+##
+## The shortest damaging list in the game: no critical, no stats, no formula, no
+## matchup and no spread, because the number is
+## [constant Gen2EffectCommands.FIXED_DAMAGE]'s to decide outright.
+## [constant Gen2EffectCommands.RESET_TYPE_MATCHUP] behind the hit check is what
+## answers an immunity and flattens the effectiveness none of the four earned.
 const FIXED_DAMAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
-	Gen2EffectCommands.DAMAGE_CALC,
-	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.FIXED_DAMAGE,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.RESET_TYPE_MATCHUP,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
@@ -732,9 +863,326 @@ const FIXED_DAMAGE_SEQUENCE: Array = [
 const OHKO_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
-	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.OHKO,
+	Gen2EffectCommands.END_MOVE,
+]
+
+
+## Return and Frustration, which are [constant NORMAL_HIT] with the power step
+## the cartridge writes into `wPlayerMoveStruct` between `damagestats` and
+## `damagecalc`. Two lists rather than one, because the two power steps are two
+## routines and reading the effect byte back would be the same table twice.
+const RETURN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.HAPPINESS_POWER,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const FRUSTRATION_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.FRUSTRATION_POWER,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Magnitude: the same shape again, with the doubling against a target that is
+## underground behind the spread rather than the flinch a secondary effect would
+## have there.
+const MAGNITUDE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.GET_MAGNITUDE,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.DOUBLE_DAMAGE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Hidden Power, which carries no `damagestats` of its own: the command runs it
+## once it has decided what type the move is, since the two stats depend on
+## whether that type is physical or special.
+const HIDDEN_POWER_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.HIDDEN_POWER,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Present, whose command owns the matchup and the failure itself, which is why
+## the list has no `moveanim`: three of the four rows are a hit and the fourth is
+## a heal, and each animates from inside the command.
+const PRESENT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.PRESENT,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Flail and Reversal: `constantdamage` picks the power and runs the formula, and
+## `stab` behind it is what keeps the matchup a fixed-damage move throws away.
+const REVERSAL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.FIXED_DAMAGE,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Fury Cutter, whose doubling sits between the matchup and the spread, so the
+## spread is taken from the doubled figure and a run of hits is not smoothed by
+## it.
+const FURY_CUTTER_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.FURY_CUTTER,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Triple Kick, which is a loop like the multi-hit moves and unlike them in
+## rolling its own accuracy per kick and multiplying each kick by which one it
+## is. [constant Gen2EffectCommands.TRIPLE_KICK] does the multiply and
+## [constant Gen2EffectCommands.KICK_COUNTER] walks the count on.
+const TRIPLE_KICK_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.TRIPLE_KICK,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KICK_COUNTER,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## False Swipe, whose clamp sits between the spread and the accuracy roll, so the
+## number it cuts down is the finished one.
+const FALSE_SWIPE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.FALSE_SWIPE,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Heal Bell and Splash, both four steps, and both moves whose whole effect is
+## one command.
+const HEAL_BELL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.HEAL_BELL,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const SPLASH_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SPLASH,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Snore: a flinch chance whose own command sits between the roll and the
+## animation, so a Snore used awake fails before anything is drawn.
+const SNORE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.SNORE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.FLINCH_TARGET,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Tri Attack, which is [constant NORMAL_HIT] with the three-way status roll in
+## `kingsrock`'s place and no `effectchance` step of its own: the command calls
+## it itself, which is `BattleCommand_TriStatusChance`'s own first instruction.
+const TRI_ATTACK_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.TRI_STATUS_CHANCE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Flame Wheel and Sacred Fire: a burn chance with the user's own thaw in front
+## of the faint check, which is the one place a list puts `defrost`.
+const FLAME_WHEEL_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.DEFROST,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BURN_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Gust and Earthquake: [constant NORMAL_HIT] with the doubling behind the spread
+## and no King's Rock, which the two lists really do leave out.
+const DOUBLE_DAMAGE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.DOUBLE_DAMAGE,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Twister and Stomp: the same list with the flinch chance both carry.
+const DOUBLE_DAMAGE_FLINCH_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.DOUBLE_DAMAGE,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.FLINCH_TARGET,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Swagger, the one list that acts from the other side of the field for part of
+## its run: the two-stage Attack raise is the ordinary `attackup2` with the turn
+## switched around it, so the target is raised and then confused.
+const SWAGGER_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.SWITCH_TURN,
+	Gen2EffectCommands.ATTACK_UP_2,
+	Gen2EffectCommands.SWITCH_TURN,
+	Gen2EffectCommands.STAT_UP_ANIM,
+	Gen2EffectCommands.SWITCH_TURN,
+	Gen2EffectCommands.STAT_UP_MESSAGE,
+	Gen2EffectCommands.SWITCH_TURN,
+	Gen2EffectCommands.CONFUSE_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -749,7 +1197,11 @@ static func _secondary(trailing: Array) -> Array:
 	return [
 		Gen2EffectCommands.USED_MOVE_TEXT,
 		Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.CRITICAL,
+		Gen2EffectCommands.DAMAGE_STATS,
 		Gen2EffectCommands.DAMAGE_CALC,
+		Gen2EffectCommands.STAB,
+		Gen2EffectCommands.DAMAGE_VARIATION,
 		Gen2EffectCommands.CHECK_IMMUNE,
 		Gen2EffectCommands.CHECK_HIT,
 		Gen2EffectCommands.EFFECT_CHANCE,
@@ -852,6 +1304,9 @@ static func _stat_sequences() -> Dictionary:
 	out[ATTACK_UP_HIT] = _secondary([
 		STAT_UP_COMMANDS[0], Gen2EffectCommands.STAT_UP_MESSAGE,
 	])
+	out[DEFENSE_UP_HIT] = _secondary([
+		STAT_UP_COMMANDS[1], Gen2EffectCommands.STAT_UP_MESSAGE,
+	])
 	out[ALL_STATS_UP_HIT] = _secondary([Gen2EffectCommands.ALL_STATS_UP])
 	return out
 
@@ -931,6 +1386,33 @@ static func _sequences() -> Dictionary:
 		STATIC_DAMAGE: FIXED_DAMAGE_SEQUENCE,
 		LEVEL_DAMAGE: FIXED_DAMAGE_SEQUENCE,
 		PSYWAVE: FIXED_DAMAGE_SEQUENCE,
+		# Both of these really are `NormalHit` in `effects_pointers.asm`: what
+		# makes Swift never miss and a Jump Kick hurt to miss lives inside
+		# [method Gen2EffectCommands._check_hit] rather than in a list. They are
+		# named here so [method is_written] can tell a modelled effect from one
+		# still standing in as an ordinary attack.
+		ALWAYS_HIT: NORMAL_HIT,
+		JUMP_KICK: NORMAL_HIT,
+		RETURN: RETURN_SEQUENCE,
+		FRUSTRATION: FRUSTRATION_SEQUENCE,
+		MAGNITUDE: MAGNITUDE_SEQUENCE,
+		HIDDEN_POWER: HIDDEN_POWER_SEQUENCE,
+		PRESENT: PRESENT_SEQUENCE,
+		REVERSAL: REVERSAL_SEQUENCE,
+		FURY_CUTTER: FURY_CUTTER_SEQUENCE,
+		TRIPLE_KICK: TRIPLE_KICK_SEQUENCE,
+		FALSE_SWIPE: FALSE_SWIPE_SEQUENCE,
+		HEAL_BELL: HEAL_BELL_SEQUENCE,
+		SPLASH: SPLASH_SEQUENCE,
+		SNORE: SNORE_SEQUENCE,
+		TRI_ATTACK: TRI_ATTACK_SEQUENCE,
+		FLAME_WHEEL: FLAME_WHEEL_SEQUENCE,
+		SACRED_FIRE: FLAME_WHEEL_SEQUENCE,
+		GUST: DOUBLE_DAMAGE_SEQUENCE,
+		EARTHQUAKE: DOUBLE_DAMAGE_SEQUENCE,
+		TWISTER: DOUBLE_DAMAGE_FLINCH_SEQUENCE,
+		STOMP: DOUBLE_DAMAGE_FLINCH_SEQUENCE,
+		SWAGGER: SWAGGER_SEQUENCE,
 	}
 	out.merge(_stat_sequences())
 	return out
@@ -969,7 +1451,7 @@ static func is_written(effect: int) -> bool:
 const RESERVED_EFFECTS: Array[int] = [
 	MULTI_HIT, DOUBLE_HIT, TWINEEDLE, SUPER_FANG, STATIC_DAMAGE, LEVEL_DAMAGE,
 	PSYWAVE, ROLLOUT, SELFDESTRUCT, MORNING_SUN, SYNTHESIS, MOONLIGHT,
-	LIGHT_SCREEN, REFLECT,
+	LIGHT_SCREEN, REFLECT, REVERSAL, ALWAYS_HIT, JUMP_KICK,
 ]
 
 

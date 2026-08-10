@@ -884,7 +884,7 @@ static func _estimate_damage(
 ) -> int:
 	return int(Gen2Damage.calculate_with(
 		attacker, defender, move, false, Gen2Damage.MAX_VARIATION,
-		false, 1, Gen2Weather.NONE, defender_screens
+		false, Gen2Weather.NONE, defender_screens
 	)["damage"])
 
 

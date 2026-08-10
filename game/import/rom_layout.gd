@@ -219,6 +219,13 @@ const TYPE_FLYING: int = 0x02
 const TYPE_POISON: int = 0x03
 const TYPE_GROUND: int = 0x04
 const TYPE_ROCK: int = 0x05
+## The unused physical type between Rock and Bug, and the run of ten between
+## Steel and Fire that holds only `CURSE_TYPE`. No move and no species carries
+## either, and both exist here because Hidden Power's type has to step over them
+## (`constants/type_constants.asm`, `engine/battle/hidden_power.asm`).
+const TYPE_BIRD: int = 0x06
+const TYPE_UNUSED_START: int = 0x0A
+const TYPE_UNUSED_END: int = 0x14
 const TYPE_BUG: int = 0x07
 const TYPE_GHOST: int = 0x08
 const TYPE_STEEL: int = 0x09
