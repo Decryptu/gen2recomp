@@ -131,15 +131,41 @@ func test_save_screen_marks_an_invalid_existing_slot_incompatible() -> void:
 	assert_string_contains(first["message"], "different cartridge")
 
 
-func test_save_screen_creates_a_valid_new_game() -> void:
+## The launcher no longer writes a save. `NewGame` reaches `InitializeWorld`
+## only after the intro has run, so starting one stages the slot and the label
+## and leaves the disk alone; [Gen2IntroScreen] writes it once the trainer has a
+## name.
+func test_starting_a_new_game_stages_the_slot_and_writes_nothing() -> void:
 	await _open_save_screen()
-	assert_true(_screen.create_new_game("ASH", 155))
-	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
-	assert_true(loaded["ok"], loaded["message"])
-	var save: Gen2SaveData = loaded["save"]
-	assert_eq(save.player_name, "ASH")
-	assert_eq(save.party.size(), 0)
-	assert_string_contains(_screen.save_screen_snapshot()["detail"], "starter")
+	assert_true(_screen.create_new_game("Run one"))
+	assert_false(
+		Gen2SaveStore.exists(_data.id, _data.sha1, 0),
+		"no slot on disk until the intro finishes"
+	)
+	assert_eq(GameRuntime.selected_game_id, _data.id)
+	var pending: Dictionary = GameRuntime.take_pending_new_game()
+	assert_eq(int(pending["slot"]), 0)
+	assert_eq(String(pending["label"]), "Run one")
+
+
+## The only name the launcher takes is the save's own. The field is the slot
+## label's, not the trainer's, and it accepts the label's own length rather than
+## the trainer name's ten.
+func test_the_new_game_form_asks_for_a_save_name_not_a_trainer_name() -> void:
+	await _open_save_screen()
+	assert_true(_screen.open_new_slot())
+	assert_true(_screen.save_screen_snapshot()["new_game_form"])
+	assert_true(
+		_screen.create_new_game("Second playthrough"),
+		"a label past the trainer name's limit is still accepted"
+	)
+	GameRuntime.take_pending_new_game()
+
+
+func test_a_save_name_past_its_own_limit_is_refused() -> void:
+	await _open_save_screen()
+	assert_false(_screen.create_new_game("x".repeat(Gen2SaveData.MAX_LABEL + 1)))
+	assert_eq(GameRuntime.pending_new_game_slot, -1, "nothing was staged")
 
 
 func test_save_screen_rejects_an_invalid_sram_without_creating_a_slot() -> void:
@@ -263,16 +289,16 @@ func test_a_game_with_no_saves_can_still_open_the_new_game_form() -> void:
 
 	assert_eq(snapshot["selected_slot"], 0)
 	assert_true(snapshot["new_game_form"])
-	assert_true(_screen.create_new_game("ASH"))
-	assert_true(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
+	assert_true(_screen.create_new_game())
+	assert_eq(int(GameRuntime.take_pending_new_game()["slot"]), 0)
 
 
 func test_creating_a_new_game_with_nothing_selected_takes_a_free_slot() -> void:
 	await _open_save_screen()
 	assert_eq(_screen.save_screen_snapshot()["selected_slot"], -1)
 
-	assert_true(_screen.create_new_game("ASH"))
-	assert_true(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
+	assert_true(_screen.create_new_game())
+	assert_eq(int(GameRuntime.take_pending_new_game()["slot"]), 0)
 
 
 func test_renaming_from_the_screen_reaches_the_slot() -> void:
