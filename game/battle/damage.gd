@@ -74,14 +74,15 @@ static func calculate(
 	focus_energy: bool = false,
 	defense_halved: bool = false,
 	weather: int = Gen2Weather.NONE,
-	defender_screens: int = Gen2Screens.NONE
+	defender_screens: int = Gen2Screens.NONE,
+	foresight: bool = false
 ) -> Dictionary:
 	var scope_lens: bool = attacker != null \
 		and Gen2HeldItem.effect_of(attacker.data, attacker.item) == Gen2HeldItem.CRITICAL_UP
 	return calculate_with(
 		attacker, defender, move,
 		roll_critical(move, rng, focus_energy, scope_lens),
-		roll_variation(rng), defense_halved, weather, defender_screens
+		roll_variation(rng), defense_halved, weather, defender_screens, foresight
 	)
 
 
@@ -109,7 +110,8 @@ static func calculate_with(
 	variation: int,
 	defense_halved: bool = false,
 	weather: int = Gen2Weather.NONE,
-	defender_screens: int = Gen2Screens.NONE
+	defender_screens: int = Gen2Screens.NONE,
+	foresight: bool = false
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
@@ -127,7 +129,9 @@ static func calculate_with(
 		defense_halved, move_type, critical
 	)
 
-	var stabbed: Dictionary = stab_damage(attacker, defender, move, damage, weather)
+	var stabbed: Dictionary = stab_damage(
+		attacker, defender, move, damage, weather, foresight
+	)
 	out["stab"] = stabbed["stab"]
 	out["immune"] = stabbed["immune"]
 	out["effectiveness"] = stabbed["effectiveness"]
@@ -168,6 +172,11 @@ static func damage_stats(
 ## than with the minimum two. `EFFECT_MULTI_HIT` and `EFFECT_CONVERSION` are the
 ## two the source lets past that check, because both can carry a power of zero
 ## and have it filled in by the time this runs.
+##
+## [param level] is the level the formula multiplies, or -1 for the attacker's
+## own. `BattleCommand_BeatUp` is the one caller that needs the parameter: it
+## loads `e` with a party member's level rather than the level of whoever is on
+## the field.
 static func damage_calc(
 	attacker: Gen2BattleMon,
 	power: int,
@@ -175,7 +184,8 @@ static func damage_calc(
 	defense: int,
 	defense_halved: bool,
 	move_type: int,
-	critical: bool = false
+	critical: bool = false,
+	level: int = -1
 ) -> int:
 	if attacker == null or power <= 0:
 		return 0
@@ -184,7 +194,9 @@ static func damage_calc(
 		@warning_ignore("integer_division")
 		used_defense = maxi(used_defense / 2, 1)
 
-	var damage: int = base_damage(attacker.level, power, attack, used_defense)
+	var damage: int = base_damage(
+		attacker.level if level < 0 else level, power, attack, used_defense
+	)
 
 	# The type-boosting items land here, on the finished base damage and ahead of
 	# the critical multiplier, which is where `PlayerAttackDamage` applies them:
@@ -210,12 +222,17 @@ static func damage_calc(
 ## `cp STRUGGLE / ret z` is the routine's first two instructions.
 ##
 ## Returns { damage, stab, immune, effectiveness }.
+##
+## [param foresight] is the defender's own `SUBSTATUS_IDENTIFIED`, which drops the
+## matchup rows the cartridge keeps past its `-2` marker: Normal and Fighting
+## against a Ghost stop being immunities.
 static func stab_damage(
 	attacker: Gen2BattleMon,
 	defender: Gen2BattleMon,
 	move: Dictionary,
 	damage: int,
-	weather: int = Gen2Weather.NONE
+	weather: int = Gen2Weather.NONE,
+	foresight: bool = false
 ) -> Dictionary:
 	var out: Dictionary = {
 		"damage": damage, "stab": false, "immune": false,
@@ -229,7 +246,7 @@ static func stab_damage(
 	var data: GameData = attacker.data
 	var move_type: int = int(move.get("type", RomLayout.TYPE_NORMAL))
 	var defending: Array = defender.types()
-	out["effectiveness"] = data.type_effectiveness(move_type, defending)
+	out["effectiveness"] = data.type_effectiveness(move_type, defending, foresight)
 
 	var worked: int = damage
 
@@ -249,7 +266,7 @@ static func stab_damage(
 		if applied.has(defending_type):
 			continue
 		applied.append(defending_type)
-		var multiplier: int = data.type_matchup(move_type, defending_type)
+		var multiplier: int = data.type_matchup(move_type, defending_type, foresight)
 		if multiplier == RomLayout.MATCHUP_NO_EFFECT:
 			out["immune"] = true
 			out["damage"] = 0

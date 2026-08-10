@@ -192,6 +192,33 @@ static func choose_slot(
 	has_bench: bool = false,
 	matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> int:
+	return _pick_lowest(
+		score_slots(
+			attacker, defender, data, ai_move_weights, rng,
+			attacker_turns_taken, defender_turns_taken, weather,
+			attacker_screens, defender_screens, has_bench, matchup_score
+		),
+		attacker, rng
+	)
+
+
+## What every layer named in [param ai_move_weights] leaves each of the four slots
+## at, before the argmin. The same arguments [method choose_slot] takes, and the
+## half of it a single handler can be read off.
+static func score_slots(
+	attacker: Gen2BattleMon,
+	defender: Gen2BattleMon,
+	data: GameData,
+	ai_move_weights: int,
+	rng: RandomNumberGenerator,
+	attacker_turns_taken: int = 0,
+	defender_turns_taken: int = 0,
+	weather: int = Gen2Weather.NONE,
+	attacker_screens: int = Gen2Screens.NONE,
+	defender_screens: int = Gen2Screens.NONE,
+	has_bench: bool = false,
+	matchup_score: int = Gen2AISwitch.BASE_SCORE
+) -> Array:
 	var scores: Array = []
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		scores.append(DEFAULT_SCORE if attacker.can_use(slot) else UNUSABLE_SCORE)
@@ -257,7 +284,7 @@ static func choose_slot(
 			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 
-	return _pick_lowest(scores, attacker, rng)
+	return scores
 
 
 static func _pick_lowest(scores: Array, attacker: Gen2BattleMon, rng: RandomNumberGenerator) -> int:
@@ -320,7 +347,18 @@ static func _faster(a: Gen2BattleMon, b: Gen2BattleMon) -> bool:
 ## True with roughly [param percent] chance, the cartridge's own "X percent"
 ## macro: a threshold out of 255, truncated.
 static func _roll(rng: RandomNumberGenerator, percent: int) -> bool:
-	return rng.randi_range(0, 255) < percent * 255 / 100
+	return _rolls_under(rng, percent * 255 / 100)
+
+
+## The same roll against a threshold written out rather than as a percentage.
+## `39 percent + 1` is a macro result with a byte added to it, which no percentage
+## reproduces, so the sites that use it name the number.
+static func _rolls_under(rng: RandomNumberGenerator, threshold: int) -> bool:
+	return rng.randi_range(0, 255) < threshold
+
+
+## `39 percent + 1`, which is 100. Five `AI_Smart` branches roll against it.
+const AI_39_PERCENT_PLUS_ONE: int = 100
 
 
 ## [code]AI_50_50[/code] and [code]AI_80_20[/code]: named for the "do nothing"
@@ -342,8 +380,8 @@ static func _skip_80_20(rng: RandomNumberGenerator) -> bool:
 ## reason; Leech Seed, Nightmare and Spikes read the target.
 ##
 ## `AI_Redundant`'s rows for the effects this engine does not carry yet
-## (Transform, Sleep Talk, Foresight, Teleport, Future Sight) are the remainder,
-## and read as "not redundant" because no move here reaches them.
+## (Transform, Sleep Talk, Future Sight) are the remainder, and read as "not
+## redundant" because no move here reaches them.
 static func _apply_basic(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
@@ -403,6 +441,12 @@ static func _apply_basic(
 		elif effect == Gen2MoveEffect.SPIKES:
 			# `.Spikes` reads `wPlayerScreens`, the side they would land on.
 			redundant = Gen2Screens.has(defender_screens, Gen2Screens.SPIKES)
+		elif effect == Gen2MoveEffect.FORESIGHT:
+			redundant = Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
+		elif effect == Gen2MoveEffect.TELEPORT:
+			# `.Teleport` is a label on `.Redundant` itself, so it is redundant
+			# unconditionally: a trainer's Pokémon is refused by the move anyway.
+			redundant = true
 		elif WEATHER_FOR_EFFECT.has(effect):
 			redundant = weather == int(WEATHER_FOR_EFFECT[effect])
 		if redundant:
@@ -461,7 +505,13 @@ static func _apply_types(
 			continue
 		var move: Dictionary = _move_at(attacker, data, slot)
 		var move_type: int = int(move.get("type", RomLayout.TYPE_NORMAL))
-		var effectiveness: int = data.type_effectiveness(move_type, defender.types())
+		# `AI_Types` sets `hBattleTurn` to the enemy before every
+		# `BattleCheckTypeMatchup`, so the Foresight flag it reads is the player's:
+		# the defender's from the side doing the scoring.
+		var effectiveness: int = data.type_effectiveness(
+			move_type, defender.types(),
+			Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
+		)
 
 		if effectiveness == RomLayout.MATCHUP_NO_EFFECT:
 			_discourage(scores, slot)
@@ -573,6 +623,18 @@ static func _apply_smart(
 				_smart_heal(scores, slot, attacker, rng)
 			Gen2MoveEffect.PERISH_SONG:
 				_smart_perish_song(scores, slot, defender, rng, has_bench, matchup_score)
+			Gen2MoveEffect.PAIN_SPLIT:
+				_smart_pain_split(scores, slot, attacker, defender)
+			Gen2MoveEffect.LOCK_ON:
+				_smart_lock_on(scores, slot, attacker, defender, data, rng)
+			Gen2MoveEffect.SPITE:
+				_smart_spite(scores, slot, attacker, defender, rng)
+			Gen2MoveEffect.THIEF:
+				_discourage(scores, slot, THIEF_PENALTY)
+			Gen2MoveEffect.FORESIGHT:
+				_smart_foresight(scores, slot, attacker, defender, rng)
+			Gen2MoveEffect.PURSUIT:
+				_smart_pursuit(scores, slot, defender, rng)
 
 
 ## `AI_Smart_Solarbeam`: 80% to encourage it greatly in sun, where it needs no
@@ -669,9 +731,9 @@ static func _good_weather_type(
 ## against one that is losing health anyway or has only just come out, provided
 ## the user has enough left to hold it there.
 ##
-## Two of the five states the cartridge encourages on are missing, because
-## neither exists here yet: `SUBSTATUS_IDENTIFIED` (Foresight) and
-## `SUBSTATUS_NIGHTMARE`. The other three are Toxic, Attract and Rollout.
+## The five states it encourages on are Toxic and the four bits
+## `and 1 << SUBSTATUS_IN_LOVE | 1 << SUBSTATUS_ROLLOUT | 1 << SUBSTATUS_IDENTIFIED
+## | 1 << SUBSTATUS_NIGHTMARE` tests in one instruction.
 static func _smart_trap_target(
 	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
 	def_turns: int, rng: RandomNumberGenerator
@@ -679,7 +741,9 @@ static func _smart_trap_target(
 	var worth_it: bool = defender.trapped_turns <= 0 and (
 		defender.toxic_counter > 0
 		or Gen2Substatus.has(
-			defender.substatus, Gen2Substatus.ATTRACTED | Gen2Substatus.ROLLOUT
+			defender.substatus,
+			Gen2Substatus.ATTRACTED | Gen2Substatus.ROLLOUT
+			| Gen2Substatus.IDENTIFIED | Gen2Substatus.NIGHTMARE
 		)
 		or def_turns == 0
 	)
@@ -809,21 +873,199 @@ static func _smart_perish_song(
 	_discourage(scores, slot, 1)
 
 
+## `AI_Smart_PainSplit`: pointless while the enemy is the healthier of the two,
+## which is `enemy hp * 2 > player hp` rather than a comparison of fractions.
+static func _smart_pain_split(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon
+) -> void:
+	if attacker.hp * 2 > defender.hp:
+		_discourage(scores, slot, 1)
+
+
+## `AI_Smart_LockOn`, whose two halves ask opposite questions.
+##
+## With the player already locked on, aiming again is wasted: every inaccurate
+## move the enemy knows is encouraged instead, and Lock On itself is dismissed.
+## The walk stops at the first empty slot, which is `.dismiss`.
+##
+## Without it, the ladder is health, then speed, then whether the accuracy is
+## actually a problem: a sharply raised evasion or a sharply lowered accuracy is
+## worth aiming for, a mild one is not worth a turn, and past both it comes down
+## to whether any move in the list is inaccurate enough to want the help and at
+## least neutral against the target.
+static func _smart_lock_on(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	data: GameData, rng: RandomNumberGenerator
+) -> void:
+	if Gen2Substatus.has(defender.substatus, Gen2Substatus.LOCK_ON):
+		for other: int in Gen2BattleMon.MAX_MOVES:
+			if other >= attacker.moves.size() or int(attacker.moves[other]) == 0:
+				break
+			var known: Dictionary = _move_at(attacker, data, other)
+			if int(known.get("accuracy", Gen2Accuracy.ALWAYS_HITS)) < LOCK_ON_WANTED_ACCURACY:
+				_encourage(scores, other, 2)
+		_discourage(scores, slot)
+		return
+
+	if not _above_quarter(attacker):
+		_discourage(scores, slot, 1)
+		return
+	if not _above_half(attacker) and not _faster(attacker, defender):
+		_discourage(scores, slot, 1)
+		return
+
+	# `.skip_speed_check`'s ladder, in its order: the first test that matches wins.
+	var evasion: int = defender.stage("evasion")
+	var accuracy: int = attacker.stage("accuracy")
+	var wanted: bool = evasion >= 3
+	if not wanted:
+		if evasion >= 1:
+			return
+		wanted = accuracy < -2
+	if not wanted:
+		if accuracy < 0:
+			return
+		if _lock_on_has_wanting_move(attacker, defender, data):
+			return
+		_discourage(scores, slot, 1)
+		return
+
+	if _skip_50_50(rng):
+		return
+	_encourage(scores, slot, 2)
+
+
+## `.checkmove`: whether any move in the list is inaccurate enough to want the
+## help and at least neutral against the target. Everything accurate is passed
+## over, and running out of slots, or reaching an empty one, answers no.
+static func _lock_on_has_wanting_move(
+	attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData
+) -> bool:
+	for slot: int in Gen2BattleMon.MAX_MOVES:
+		if slot >= attacker.moves.size() or int(attacker.moves[slot]) == 0:
+			return false
+		var move: Dictionary = _move_at(attacker, data, slot)
+		if int(move.get("accuracy", Gen2Accuracy.ALWAYS_HITS)) >= LOCK_ON_WANTED_ACCURACY:
+			continue
+		if data.type_effectiveness(
+			int(move.get("type", RomLayout.TYPE_NORMAL)), defender.types(),
+			Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
+		) >= RomLayout.MATCHUP_EFFECTIVE:
+			return true
+	return false
+
+
+## `cp 71 percent - 1`, which is 180: the accuracy byte at or above which a move
+## does not need the help.
+const LOCK_ON_WANTED_ACCURACY: int = 180
+
+
+## `AI_Smart_Spite`: worth it against a move the target is nearly out of, wasted
+## against one it has plenty of.
+##
+## The target has not moved yet in the first branch, so there is nothing to drain
+## and the question is only whether the enemy would get to see a move first.
+static func _smart_spite(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	rng: RandomNumberGenerator
+) -> void:
+	var last_move: int = defender.last_move_used
+	if last_move == 0:
+		if _faster(attacker, defender):
+			_discourage(scores, slot)
+			return
+		if _skip_50_50(rng):
+			return
+		_discourage(scores, slot, 1)
+		return
+
+	# `.moveloop`, which walks the target's own list and returns without scoring
+	# when the move is not in it.
+	var drained: int = defender.moves.find(last_move)
+	if drained < 0:
+		return
+
+	var left: int = defender.pp_left(drained)
+	if left < SPITE_WANTED_PP:
+		if _rolls_under(rng, AI_39_PERCENT_PLUS_ONE):
+			return
+		_encourage(scores, slot, 2)
+		return
+	if left < SPITE_PLENTY_PP and not _rolls_under(rng, AI_39_PERCENT_PLUS_ONE):
+		return
+	_discourage(scores, slot, 1)
+
+
+## `cp 6` and `cp 15`: below the first is worth draining, at or above the second
+## is not, and between them a roll decides.
+const SPITE_WANTED_PP: int = 6
+const SPITE_PLENTY_PP: int = 15
+
+
+## `AI_Smart_Thief`: `add $1e`, and nothing else. Thirty points is past every
+## other move on the list, so Thief is thrown only when there is nothing else.
+const THIEF_PENALTY: int = 30
+
+
+## `AI_Smart_Foresight`: worth it against a sharply raised evasion, a sharply
+## lowered accuracy of its own, or a Ghost, which is the only target the flag
+## opens a type matchup against. Otherwise almost always discouraged.
+static func _smart_foresight(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	rng: RandomNumberGenerator
+) -> void:
+	var wanted: bool = attacker.stage("accuracy") < -2 \
+		or defender.stage("evasion") >= 3 \
+		or defender.types().has(RomLayout.TYPE_GHOST)
+	if not wanted:
+		if _roll(rng, FORESIGHT_DISCOURAGE_SKIP_PERCENT):
+			return
+		_discourage(scores, slot, 1)
+		return
+
+	if _rolls_under(rng, AI_39_PERCENT_PLUS_ONE):
+		return
+	_encourage(scores, slot, 2)
+
+
+## `cp 8 percent; ret c`: the one-in-twelve chance the penalty is not applied, the
+## same roll [constant PROTECT_DISCOURAGE_SKIP_PERCENT] names.
+const FORESIGHT_DISCOURAGE_SKIP_PERCENT: int = 8
+
+
+## `AI_Smart_Pursuit`: worth two points against a target nearly down, discouraged
+## against one that is not, since a Pokémon with health left is unlikely to run.
+static func _smart_pursuit(
+	scores: Array, slot: int, defender: Gen2BattleMon, rng: RandomNumberGenerator
+) -> void:
+	if not _above_quarter(defender):
+		if _skip_50_50(rng):
+			return
+		_encourage(scores, slot, 2)
+		return
+	if _skip_80_20(rng):
+		return
+	_discourage(scores, slot, 1)
+
+
 ## `AI_Smart_Protect`: one ladder of tests, first match winning, and the two exits
 ## are asymmetric. `.encourage` is an 80% roll and one point off; `.discourage` is
 ## a two-point penalty that an 8% roll skips outright, and `.greatly_discourage`
 ## adds a point and falls into it, so the worst case is three.
 ##
-## The source's second test, a player that has locked on, is missing here and only
-## here: `SUBSTATUS_LOCK_ON` does not exist yet, since `EFFECT_LOCK_ON` is
-## unwritten. Its branch would `.discourage`, so the omission can only make the
-## enemy readier to protect, never less ready.
 static func _smart_protect(
 	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
 	rng: RandomNumberGenerator
 ) -> void:
 	if attacker.protect_count != 0:
 		_smart_protect_discourage(scores, slot, rng, true)
+		return
+
+	# The second test reads `wPlayerSubStatus5`, the flag a Lock On the enemy used
+	# left on the player: with a guaranteed hit already lined up, sitting the turn
+	# out wastes it.
+	if Gen2Substatus.has(defender.substatus, Gen2Substatus.LOCK_ON):
+		_smart_protect_discourage(scores, slot, rng, false)
 		return
 
 	var encourage: bool = defender.fury_cutter_count >= PROTECT_FURY_CUTTER_COUNT \
@@ -872,8 +1114,10 @@ const PROTECT_DISCOURAGE_SKIP_PERCENT: int = 8
 ##
 ## Reversal is looked for by effect rather than by move number, which is
 ## `AIHasMoveEffect`, and Flail carries the same byte, so either move answers.
-## The source's last branch, an enemy that has locked on, is absent for the same
-## reason [method _smart_protect]'s is.
+##
+## `.no_reversal` is the other reason: `wEnemySubStatus5`, the flag a Lock On the
+## *player* used left on the enemy. A guaranteed incoming hit is exactly what
+## surviving on one point is for.
 static func _smart_endure(
 	scores: Array, slot: int, attacker: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator
@@ -885,6 +1129,11 @@ static func _smart_endure(
 		_discourage(scores, slot, 1)
 		return
 	if not _has_move_effect(attacker, data, Gen2MoveEffect.REVERSAL):
+		if not Gen2Substatus.has(attacker.substatus, Gen2Substatus.LOCK_ON):
+			return
+		if _skip_50_50(rng):
+			return
+		_encourage(scores, slot, 2)
 		return
 	if _skip_80_20(rng):
 		return

@@ -81,3 +81,25 @@ func test_foresight_drops_the_stages_only_when_they_are_against_the_attacker() -
 func test_a_stage_past_the_ends_is_clamped() -> void:
 	assert_eq(Gen2Accuracy.apply_stage(100, 99), Gen2Accuracy.apply_stage(100, Gen2Stats.MAX_STAGE))
 	assert_eq(Gen2Accuracy.apply_stage(100, -99), Gen2Accuracy.apply_stage(100, Gen2Stats.MIN_STAGE))
+
+
+## `.StatModifiers`' Foresight branch: `cp b / jr c, .skip_foresight_check` puts it
+## behind a comparison, then `ret nz` returns before the multipliers, so the
+## stored byte stands and neither stage is applied.
+func test_foresight_drops_both_stages_when_the_evasion_is_the_higher() -> void:
+	# 90% cut by a +4 evasion, then the same pair identified.
+	assert_eq(Gen2Accuracy.chance(229, 0, 4), 98)
+	assert_eq(Gen2Accuracy.chance(229, 0, 4, true), 229)
+	# Equal stages still take the branch, since the comparison is "at least".
+	assert_lt(Gen2Accuracy.chance(229, 2, 2), 229)
+	assert_eq(Gen2Accuracy.chance(229, 2, 2, true), 229)
+
+
+## And it cannot undo an accuracy the attacker raised: the branch is only reached
+## when the evasion is at least the accuracy.
+func test_foresight_leaves_a_higher_accuracy_alone() -> void:
+	assert_eq(
+		Gen2Accuracy.chance(100, 4, 0, true), Gen2Accuracy.chance(100, 4, 0),
+		"the accuracy is the higher stage, so the branch is skipped"
+	)
+	assert_gt(Gen2Accuracy.chance(100, 4, 0), 100)

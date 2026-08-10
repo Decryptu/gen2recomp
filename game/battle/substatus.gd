@@ -96,6 +96,23 @@ const ENDURE: int = 1 << 22
 ## covers exactly the opponent's next move.
 const DESTINY_BOND: int = 1 << 23
 
+## `SUBSTATUS_IDENTIFIED`, `wPlayerSubStatus1` bit 3. Foresight sets it on the
+## Pokémon it identified, not on its user: `BattleCommand_Foresight` writes
+## `BATTLE_VARS_SUBSTATUS1_OPP`. Three readers, all of the target's flag:
+## `BattleCommand_CheckHit`'s `.StatModifiers`, `BattleCommand_Stab`'s matchup
+## walk and `CheckTypeMatchup`'s.
+const IDENTIFIED: int = 1 << 24
+
+## `SUBSTATUS_LOCK_ON`, `wPlayerSubStatus5` bit 5. On the Pokémon that was aimed
+## at rather than the one that aimed, so `BattleCommand_CheckHit`'s `.LockOn`
+## reads `BATTLE_VARS_SUBSTATUS5_OPP` and consumes it.
+##
+## The cartridge's other four readers are the 25% chance an AI status move fails
+## anyway (`engine/battle/effect_commands.asm`'s `.CheckAIRandomFail`,
+## `.dont_sample_failure` twice and `.ComputerMiss`). This engine models no such
+## failure, so there is nothing here for the flag to bypass.
+const LOCK_ON: int = 1 << 25
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as

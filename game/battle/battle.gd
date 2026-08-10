@@ -197,6 +197,34 @@ const DRAGGED_OUT: StringName = &"dragged_out"
 const FLED_IN_FEAR: StringName = &"fled_in_fear"
 const BLOWN_AWAY: StringName = &"blown_away"
 
+## `FledFromBattleText`: Teleport, which takes its own user out rather than the
+## other side. Named for `<USER>`, so [code]side[/code] is who left.
+const FLED_FROM_BATTLE: StringName = &"fled_from_battle"
+
+## Foresight and Lock On, whose flags sit on [code]target[/code] rather than on
+## the Pokémon that used the move. `TookAimText` names only the aimer, which is
+## why [constant TOOK_AIM] carries nothing beyond the side.
+const IDENTIFIED_SET: StringName = &"identified_set"
+const TOOK_AIM: StringName = &"took_aim"
+
+## Spite, carrying the [code]slot[/code] drained, the [code]move[/code] in it and
+## the [code]amount[/code] taken, which is the number `SpiteEffectText` prints.
+const PP_REDUCED: StringName = &"pp_reduced"
+
+## Pain Split, which names neither Pokémon. Both sides' health is on the event
+## because both moved: [code]hp[/code] is the user's and [code]target_hp[/code] the
+## other's.
+const SHARED_PAIN: StringName = &"shared_pain"
+
+## Thief, carrying the [code]item[/code] that moved. `StoleText` names the thief
+## and the item and calls the loser "its foe", so nothing else is needed.
+const STOLE_ITEM: StringName = &"stole_item"
+
+## `BeatUpAttackText`, once per party member Beat Up sends in. [code]index[/code]
+## is that member's party slot, or -1 for a wild Pokémon, which has no party and
+## swings once as itself.
+const BEAT_UP_ATTACK: StringName = &"beat_up_attack"
+
 ## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
 ## [Gen2Weather] value, so a screen names it without being told twice.
 ## [constant WEATHER_CONTINUES] is the line printed on every turn the weather
@@ -497,6 +525,12 @@ var _pending_turn: Dictionary = {}
 ## menu the player cannot back out of, so this is answered rather than optional
 ## and everything else is refused until it is.
 var _pending_baton_pass: int = -1
+
+## The side whose Pursuit already ran, in front of the switch it answered, or -1.
+## `PursuitSwitch` writes `CANNOT_MOVE` over that side's move once it has, and
+## `CheckTurn` reads the byte back and ends the turn, so the action it would have
+## taken later this turn is spent.
+var _pursuit_spent: int = -1
 
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
@@ -1120,6 +1154,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 
 	var acting: Array = order(chosen, actions)
 	enemy_goes_first = int(acting[0]) == ENEMY
+	_pursuit_spent = -1
 	_pending_turn = {"acting": acting, "actions": actions, "index": 0}
 	return _run_turn(events)
 
@@ -1153,10 +1188,11 @@ func _run_turn(events: Array) -> Array:
 			# effect, so both counters go.
 			_reset_action_counters(side, -1)
 		if _is_switch(action):
+			_pursuit_before_switch(side, actions, events)
 			events.append_array(send_out(side, int(action.get("index", -1))))
 		elif _is_item(action):
 			_use_trainer_item(side, int(action.get("item", 0)), events)
-		elif moving:
+		elif moving and side != _pursuit_spent:
 			var slot: int = effective_slot(side, int(action.get("slot", 0)))
 			_act(side, slot, move_for(side, slot), events)
 		# The move asked for a Baton Pass target and nothing behind it can happen
@@ -1164,6 +1200,14 @@ func _run_turn(events: Array) -> Array:
 		if _pending_baton_pass >= 0:
 			return events
 		_close_turn_bracket(side, action)
+		# `ld a, [wForcedSwitch] / and a / ret nz`, which `Battle_PlayerFirst` and
+		# `Battle_EnemyFirst` each ask twice, behind each side's own wrapper. A
+		# Pokémon blown or teleported out of a wild battle ends the turn where it
+		# stands: no second move, and none of the end-of-turn tail below.
+		if was_forced_out():
+			_pending_turn = {}
+			events.append({"type": OVER, "winner": winner()})
+			return events
 		_pending_turn["index"] = int(_pending_turn["index"]) + 1
 
 	_pending_turn = {}
@@ -1178,6 +1222,51 @@ func _run_turn(events: Array) -> Array:
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
 	return events
+
+
+## `wPlayerIsSwitching` and `wEnemyIsSwitching`: whether [param side] is recalling
+## a Pokémon this turn. Both are zeroed at the top of `BattleTurn`, which is what
+## rebuilding [member _pending_turn] every turn already does.
+##
+## An enemy item is not a switch here even though [method order] treats it as one
+## for ordering: `AI_TryItem` sets no flag, only `AI_Switch` does, and
+## [method Gen2EffectCommands._pursuit] is the reader.
+func is_switching(side: int) -> bool:
+	if _pending_turn.is_empty():
+		return false
+	var actions: Dictionary = _pending_turn["actions"]
+	return _is_switch(actions.get(side, {}))
+
+
+## `PursuitSwitch`, which the cartridge calls from `BattleMonEntrance` and from
+## `AI_Switch`, both in front of the recall: a side that chose Pursuit takes its
+## whole turn now, against the Pokémon on its way out, and then has nothing left
+## to spend later in the turn.
+##
+## No speed or priority test. The switch is settled first whatever the speeds, so
+## the pursuer always gets the early hit; `EFFECT_PURSUIT` carries no priority
+## entry and does not need one.
+##
+## The effect byte is read here rather than inside a command because the trigger
+## belongs to the byte rather than to the list, the same way
+## [constant EFFECT_PRIORITIES] reads bytes from outside every list.
+##
+## Called from a chosen switch only. The cartridge's two call sites are the two
+## entrances a switch action reaches; `PassedBattleMonEntrance`,
+## `PlayerPartyMonEntrance` and `ForcePlayerMonChoice` call neither, so a Baton
+## Pass and a post-faint replacement are not pursued.
+func _pursuit_before_switch(side: int, actions: Dictionary, events: Array) -> void:
+	var other: int = opponent_of(side)
+	var action: Dictionary = actions.get(other, {})
+	if _is_switch(action) or _is_run(action) or _is_item(action):
+		return
+	var slot: int = effective_slot(other, int(action.get("slot", 0)))
+	var move_number: int = move_for(other, slot)
+	if int(data.move(move_number).get("effect", -1)) != Gen2MoveEffect.PURSUIT:
+		return
+
+	_act(other, slot, move_number, events)
+	_pursuit_spent = other
 
 
 ## `CheckOpponentWentFirst`, which is `wEnemyGoesFirst XOR hBattleTurn`: whether

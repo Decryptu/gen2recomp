@@ -478,3 +478,56 @@ func test_gold_and_silver_wrap_a_screened_defence_above_1024() -> void:
 	assert_eq(
 		Gen2Damage.truncate_stats(100, 1000, true), Gen2Damage.truncate_stats(100, 1000, false)
 	)
+
+
+## `BattleCommand_Stab`'s matchup walk skips the rows past the `-2` marker unless
+## the target has been identified, and those two rows are Ghost's immunities.
+func test_foresight_opens_a_ghost_to_normal_damage() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.GASTLY)
+	var move: Dictionary = _data.move(Fixture.TACKLE)
+
+	var blocked: Dictionary = Gen2Damage.stab_damage(attacker, defender, move, 40)
+	assert_true(blocked["immune"])
+	assert_eq(blocked["damage"], 0)
+
+	var opened: Dictionary = Gen2Damage.stab_damage(
+		attacker, defender, move, 40, Gen2Weather.NONE, true
+	)
+	assert_false(opened["immune"])
+	assert_eq(opened["damage"], 40, "neutral, so the figure is untouched")
+	assert_eq(opened["effectiveness"], RomLayout.MATCHUP_EFFECTIVE)
+
+
+## Nothing else moves: the flag cancels the two Ghost rows and no other.
+func test_foresight_leaves_every_other_matchup_alone() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.GEODUDE)
+	var move: Dictionary = _data.move(Fixture.THUNDERBOLT)
+
+	var blocked: Dictionary = Gen2Damage.stab_damage(attacker, defender, move, 40)
+	var identified: Dictionary = Gen2Damage.stab_damage(
+		attacker, defender, move, 40, Gen2Weather.NONE, true
+	)
+	assert_true(blocked["immune"])
+	assert_true(identified["immune"], "Ground still shrugs off Electric")
+
+
+## `BattleCommand_BeatUp` hands `damagecalc` a party member's level in `e`, which
+## is the one figure the formula does not read off the Pokémon on the field.
+func test_damage_calc_takes_a_level_of_its_own() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU, 50)
+	# Beat Up's power of 10 against Gastly's base Defense of 30, from Pikachu's own
+	# base Attack of 55. At level 50: 22 * 10 * 55 / 30 / 50 = 8, +2 = 10.
+	assert_eq(
+		Gen2Damage.damage_calc(attacker, 10, 55, 30, false, Fixture.DARK, false, 50), 10
+	)
+	# At level 10 the first term is 4 + 2 = 6: 6 * 10 * 55 / 30 / 50 = 2, +2 = 4.
+	assert_eq(
+		Gen2Damage.damage_calc(attacker, 10, 55, 30, false, Fixture.DARK, false, 10), 4
+	)
+	# -1 is the attacker's own, which is what every other caller passes.
+	assert_eq(
+		Gen2Damage.damage_calc(attacker, 10, 55, 30, false, Fixture.DARK, false, -1),
+		Gen2Damage.damage_calc(attacker, 10, 55, 30, false, Fixture.DARK, false, 50)
+	)
