@@ -113,6 +113,12 @@ const CONTINUES_AFTER_MISS: Array[int] = [
 	Gen2MoveEffect.SELFDESTRUCT, Gen2MoveEffect.ROLLOUT, Gen2MoveEffect.FURY_CUTTER,
 ]
 
+## The two effects `BattleCommand_CheckHit`'s `.DrainSub` turns into a miss when
+## the target is behind a Substitute, and the whole of what that branch names.
+const DRAINING_EFFECTS: Array[int] = [
+	Gen2MoveEffect.LEECH_HIT, Gen2MoveEffect.DREAM_EATER,
+]
+
 ## Counter and Mirror Coat do not roll their own accuracy. They validate the
 ## move that just hit the user, then leave the doubled damage for APPLY_DAMAGE.
 const COUNTER: StringName = &"counter"
@@ -288,6 +294,16 @@ const SAFEGUARD: StringName = &"safeguard"
 ## only when both are already counting down.
 const PERISH_SONG: StringName = &"perishsong"
 
+## A doll in front of the user, the three residuals `ResidualDamage` charges, the
+## hazard `SpikesDamage` charges, and the one command that clears any of them.
+## Each handler below owns its own rules.
+const SUBSTITUTE: StringName = &"substitute"
+const LEECH_SEED: StringName = &"leechseed"
+const NIGHTMARE: StringName = &"nightmare"
+const CURSE: StringName = &"curse"
+const SPIKES: StringName = &"spikes"
+const CLEAR_HAZARDS: StringName = &"clearhazards"
+
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
 ## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
@@ -320,8 +336,8 @@ const SKIP_SUN_CHARGE: StringName = &"skipsuncharge"
 ## off `wBattleAfterAnim` behind it.
 ##
 ## `BattleCommand_MoveAnim` is `lowersub`, `moveanimnosub`, `raisesub`. Both subs
-## return at once without `SUBSTATUS_SUBSTITUTE`, which this engine does not
-## have, so the two names are one command here.
+## only drop and restore the doll's picture, which this project does not draw, so
+## the two names are one command here.
 const MOVE_ANIM: StringName = &"moveanim"
 const MOVE_ANIM_NO_SUB: StringName = &"moveanimnosub"
 
@@ -629,6 +645,18 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_safeguard(turn)
 		PERISH_SONG:
 			_perish_song(turn)
+		SUBSTITUTE:
+			_substitute(turn)
+		LEECH_SEED:
+			_leech_seed(turn)
+		NIGHTMARE:
+			_nightmare(turn)
+		CURSE:
+			_curse(turn)
+		SPIKES:
+			_spikes(turn)
+		CLEAR_HAZARDS:
+			_clear_hazards(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -984,6 +1012,13 @@ static func _switch_turn(turn: Gen2Turn) -> void:
 	turn.target = was
 
 
+## `CheckSubstituteOpp`: whether the Pokémon opposite whoever is acting is
+## standing behind a doll. Eighteen commands ask it and every one of them refuses
+## on a yes.
+static func _substitute_refuses(turn: Gen2Turn) -> bool:
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.SUBSTITUTE)
+
+
 static func _check_immune(turn: Gen2Turn) -> void:
 	if not turn.immune:
 		return
@@ -1014,6 +1049,16 @@ static func _check_hit(turn: Gen2Turn) -> void:
 
 	if turn.effect() == Gen2MoveEffect.DREAM_EATER \
 		and not Gen2Status.is_asleep(turn.defender().status):
+		turn.missed = true
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
+			turn.end()
+		return
+
+	# `.DrainSub`, third: nothing can be drained out of a doll, so the two effects
+	# that heal off what they deal read as a miss rather than as a hit that heals
+	# nothing. Every other move goes through the doll normally.
+	if _substitute_refuses(turn) and turn.effect() in DRAINING_EFFECTS:
 		turn.missed = true
 		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
 		if not CONTINUES_AFTER_MISS.has(turn.effect()):
@@ -1089,29 +1134,39 @@ static func _jump_kick_crash(turn: Gen2Turn) -> void:
 ## and a band that fires calls `BattleCommand_FalseSwipe`, which is what leaves
 ## the Pokémon on one hit point. The roll happens whether or not the hit would
 ## have been lethal, and only the survival shows.
+##
+## The band sits in front of the substitute routing, which is the source's order
+## and not a tidying opportunity: `FalseSwipe` clamps against the *real* health
+## whatever is standing in front of it, so a band can fire, cut the figure down,
+## and have the doll spend the cut figure with "hung on" printed anyway.
+## `.update_damage_taken` then returns early against a doll, which is what stops
+## Counter and Mirror Coat answering a hit it took.
 static func _apply_damage(turn: Gen2Turn) -> void:
 	if turn.missed or turn.damage <= 0:
 		return
 	var defender: Gen2BattleMon = turn.defender()
-	turn.battle.record_damage_taken(
-		turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
-	)
 
+	# Ahead of `.damage`, so everything behind reads the cut figure: what Counter
+	# remembers, what a drain heals off and what a recoil costs are all
+	# `wCurDamage` after this.
 	var band: bool = Gen2HeldItem.effect_of(turn.data(), defender.item) == Gen2HeldItem.FOCUS_BAND \
 		and Gen2HeldItem.rolls_under(
 			turn.rng(), Gen2HeldItem.parameter_of(turn.data(), defender.item)
 		)
-	if band and turn.damage >= defender.hp:
-		turn.dealt = defender.take_damage(defender.hp - 1)
-		turn.emit(Gen2Battle.HIT, {
-			"target": turn.target,
-			"amount": turn.dealt,
-			"critical": turn.critical,
-			"effectiveness": turn.effectiveness,
-			"hp": defender.hp,
-			"max_hp": defender.max_hp(),
-		})
-		turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
+	var endured: bool = band and turn.damage >= defender.hp
+	if endured:
+		turn.damage = maxi(defender.hp - 1, 0)
+
+	var behind_sub: bool = _substitute_refuses(turn)
+	if not behind_sub:
+		turn.battle.record_damage_taken(
+			turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
+		)
+
+	if behind_sub:
+		_substitute_damage(turn)
+		if endured:
+			turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
 		return
 
 	turn.dealt = defender.take_damage(turn.damage)
@@ -1123,6 +1178,45 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		"hp": defender.hp,
 		"max_hp": defender.max_hp(),
 	})
+	if endured:
+		turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
+
+
+## `DoSubstituteDamage`: the doll spends the hit and the Pokémon's own health is
+## never touched.
+##
+## The damage is a sixteen-bit word against a one-byte counter, so anything from
+## 256 up breaks the doll without arithmetic, and the subtraction breaks it on a
+## result of exactly zero as well as on a borrow. `xor a / ld [hl], a` over the
+## move's own effect byte then makes the rest of the list read as an ordinary
+## attack; five effects are exempted. `ResetDamage` closes both branches, so
+## nothing behind this applies the hit again.
+static func _substitute_damage(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	turn.emit(Gen2Battle.SUBSTITUTE_TOOK_DAMAGE, {"target": turn.target})
+
+	var broke: bool = turn.damage > 0xFF
+	if not broke:
+		# Written back before it is tested, and as the byte the cartridge leaves.
+		broke = defender.substitute_hp - turn.damage <= 0
+		defender.substitute_hp = (defender.substitute_hp - turn.damage) & 0xFF
+
+	if broke:
+		defender.substatus &= ~Gen2Substatus.SUBSTITUTE
+		turn.emit(Gen2Battle.SUBSTITUTE_FADED, {"target": turn.target})
+		if not SUBSTITUTE_KEEPS_EFFECT.has(turn.effect()):
+			turn.effect_override = Gen2MoveEffect.NORMAL_HIT_EFFECT
+
+	turn.dealt = 0
+	turn.damage = 0
+
+
+## The five whose own command reads the effect byte back to decide how many hits
+## it is partway through. Beat Up is among them and is not written here.
+const SUBSTITUTE_KEEPS_EFFECT: Array[int] = [
+	Gen2MoveEffect.MULTI_HIT, Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE,
+	Gen2MoveEffect.TRIPLE_KICK, Gen2MoveEffect.BEAT_UP,
+]
 
 
 static func _counter(turn: Gen2Turn, mirror_coat: bool) -> void:
@@ -1358,6 +1452,16 @@ static func _check_status(turn: Gen2Turn) -> void:
 ## already landed. A chance of zero never fires, which is what the cartridge's
 ## comparison does too: zero means never, not "unspecified".
 static func _effect_chance(turn: Gen2Turn) -> void:
+	# `xor a / ld [wEffectFailed], a` opens the routine, so a second
+	# `effectchance` clears what the first decided. Only `DefenseDownHit` has two.
+	turn.failed_chance = false
+
+	# `CheckSubstituteOpp` next, jumping straight to `.failed`, so a secondary
+	# effect aimed at a doll draws no roll at all.
+	if _substitute_refuses(turn):
+		turn.failed_chance = true
+		return
+
 	var chance: int = int(turn.move.get("effect_chance", 0))
 	if turn.rng().randi_range(0, Gen2Status.CHANCE_RANGE - 1) >= chance:
 		turn.failed_chance = true
@@ -1379,6 +1483,15 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 	if defender.is_fainted():
 		return
 
+	# The four secondary `*Target` commands open on `CheckSubstituteOpp`, ahead of
+	# the status check, so a doll stops even the thaw a burn would have given. The
+	# three primary commands ask after theirs. Everything between the two
+	# positions is a refusal that says nothing here, so `Defrost` is the only
+	# place the split shows.
+	var primary: bool = _status_move_animates(turn, flag)
+	if not primary and _substitute_refuses(turn):
+		return
+
 	if Gen2Status.is_afflicted(defender.status):
 		# `BattleCommand_BurnTarget` is the one that does not simply return here:
 		# its `jp nz, Defrost` thaws a frozen target instead.
@@ -1392,6 +1505,9 @@ static func _status_target(turn: Gen2Turn, flag: int) -> void:
 		return
 
 	if _status_type_refuses(turn, flag):
+		return
+
+	if primary and _substitute_refuses(turn):
 		return
 
 	if turn.failed_chance:
@@ -1498,6 +1614,11 @@ static func _toxic_target(turn: Gen2Turn) -> void:
 	if _status_type_refuses(turn, Gen2Status.POISON):
 		return
 
+	# `.dont_sample_failure`, which is where that command asks about the doll:
+	# behind the type and status checks rather than in front of them.
+	if _substitute_refuses(turn):
+		return
+
 	# `BattleCommand_Poison`'s `.toxic` branch reaches the same `.apply_poison`,
 	# so Toxic animates from inside the command and never reaches
 	# `PlayOpponentBattleAnim`: no `ANIM_PSN` follows it.
@@ -1518,6 +1639,11 @@ static func _flinch_target(turn: Gen2Turn) -> void:
 	if turn.failed_chance:
 		return
 
+	# `BattleCommand_FlinchTarget` opens on `CheckSubstituteOpp`: there is nobody
+	# to startle behind a doll.
+	if _substitute_refuses(turn):
+		return
+
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.is_fainted():
 		return
@@ -1536,6 +1662,12 @@ static func _confuse_target(turn: Gen2Turn) -> void:
 	# `BattleCommand_ConfuseTarget`'s own `SafeCheckSafeguard`, ahead of the
 	# substitute and already-confused checks and silent like the four statuses'.
 	if _safeguard_refuses(turn, turn.target):
+		return
+
+	# Where `..._ConfuseTarget` asks it. `..._Confuse` asks one step later, after
+	# the already-confused check, and both refusals are silent, so the two orders
+	# cannot be told apart here.
+	if _substitute_refuses(turn):
 		return
 
 	var defender: Gen2BattleMon = turn.defender()
@@ -1612,14 +1744,11 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 		# carries the damage flash.
 		_multi_hit_anim(turn, hit == hits - 1)
 
-		turn.dealt = defender.take_damage(turn.damage)
-		turn.battle.record_damage_taken(
-			turn.target, turn.side, turn.move_number, turn.effect(), turn.damage
-		)
-		turn.emit(Gen2Battle.HIT, {
-			"target": turn.target, "amount": turn.dealt, "critical": turn.critical,
-			"effectiveness": turn.effectiveness, "hp": defender.hp, "max_hp": defender.max_hp(),
-		})
+		# `applydamage` is inside the loop too, so each hit goes through the whole
+		# of it, Focus Band and Substitute included. That is why
+		# `DoSubstituteDamage` exempts this effect from stamping
+		# `EFFECT_NORMAL_HIT`: the loop reads the byte back on the next pass.
+		_apply_damage(turn)
 
 		if defender.is_fainted():
 			_check_faint(turn)
@@ -2013,12 +2142,16 @@ static func _focus_energy(turn: Gen2Turn) -> void:
 ## `BattleCommand_TrapTarget`'s own three refusals, in its order: a missed move,
 ## a target that is already bound, and a target behind a Substitute. The first is
 ## structural here, since [method _check_hit] ends the move before this step is
-## reached, and the third has nothing to read until Substitute exists. An
-## already-bound target is silent rather than a [constant Gen2Battle.MOVE_FAILED],
-## because the cartridge returns without printing anything.
+## reached. All three are silent rather than a
+## [constant Gen2Battle.MOVE_FAILED], because the cartridge returns without
+## printing anything. The doll check sits in front of `BattleRandom`, so a bind
+## aimed at one draws no roll.
 static func _trap_target(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
 	if defender.trapped_turns > 0:
+		return
+
+	if _substitute_refuses(turn):
 		return
 
 	defender.trapped_turns = Gen2Substatus.roll_trap_turns(turn.rng())
@@ -2125,6 +2258,175 @@ static func _perish_song(turn: Gen2Turn) -> void:
 
 	_animate_current_move(turn)
 	turn.emit(Gen2Battle.PERISH_SONG_STARTED)
+
+
+## `BattleCommand_Substitute`. Paying is exact rather than clamped, so the test is
+## a borrow *or* a result of zero: a user sitting on exactly a quarter fails
+## rather than making a doll and fainting. Success zeroes the user's own wrap
+## counter and nothing on the other side of the field.
+static func _substitute(turn: Gen2Turn) -> void:
+	var user: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE):
+		turn.emit(Gen2Battle.SUBSTITUTE_ALREADY)
+		return
+
+	# Written before the affordability test, as the source writes it: a refused
+	# Substitute leaves the byte set and the flag clear.
+	var cost: int = Gen2Substatus.substitute_hp_for(user.max_hp())
+	user.substitute_hp = cost
+	if user.hp <= cost:
+		turn.emit(Gen2Battle.SUBSTITUTE_TOO_WEAK)
+		return
+
+	user.hp -= cost
+	user.substatus |= Gen2Substatus.SUBSTITUTE
+	user.trapped_turns = 0
+	user.trapping_move = 0
+
+	# `xor a / ld [wBattleAnimParam], a` before `LoadAnim`: param 0 is the doll
+	# going up, where `lowersub` and `raisesub` pass 1 and 2.
+	turn.battle.battle_anim_param = 0
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.SUBSTITUTE_MADE, {
+		"amount": cost, "hp": user.hp, "max_hp": user.max_hp(),
+		"substitute_hp": user.substitute_hp,
+	})
+
+
+## The seed [method Gen2Battle._residual_leech_seed] reads back every turn.
+##
+## Refusals in the source's order: a Substitute and an already-seeded target both
+## say `EvadedText`, a Grass-type says `DoesntAffectText`. The missed branch in
+## front of them is structural here, since [method _check_hit] ends the move.
+## Every refusal reaches `AnimateFailedMove`, which is a forty-frame wait between
+## two doll calls and plays no animation, so only a seed that lands is drawn.
+static func _leech_seed(turn: Gen2Turn) -> void:
+	if _substitute_refuses(turn):
+		turn.emit(Gen2Battle.EVADED, {"target": turn.target})
+		return
+
+	var defender: Gen2BattleMon = turn.defender()
+	if defender.types().has(RomLayout.TYPE_GRASS):
+		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
+		return
+
+	if Gen2Substatus.has(defender.substatus, Gen2Substatus.LEECH_SEED):
+		turn.emit(Gen2Battle.EVADED, {"target": turn.target})
+		return
+
+	defender.substatus |= Gen2Substatus.LEECH_SEED
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.WAS_SEEDED, {"target": turn.target})
+
+
+## Four refusals, all `PrintButItFailed`: a target out of sight, one behind a
+## doll, one that is not asleep, and one already having a nightmare.
+static func _nightmare(turn: Gen2Turn) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if _is_hidden(defender.substatus) or _substitute_refuses(turn) \
+		or not Gen2Status.is_asleep(defender.status) \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.NIGHTMARE):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.substatus |= Gen2Substatus.NIGHTMARE
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.NIGHTMARE_STARTED, {"target": turn.target})
+
+
+## Two moves sharing a byte and telling themselves apart by the *user's* own
+## types: a Ghost curses the target for half its own maximum, everybody else
+## trades a stage of Speed for one of Attack and one of Defense.
+##
+## Those three are `LowerStat` and `BattleCommand_AttackUp`/`..._DefenseUp`, which
+## act on the user's own stages with no Mist, Substitute or `wEffectFailed` check
+## between them, so they are stage moves here rather than [method _stat_change]
+## calls. `ResetMiss` between them is what stops a Speed that could not fall from
+## swallowing the two raises.
+static func _curse(turn: Gen2Turn) -> void:
+	var user: Gen2BattleMon = turn.attacker()
+	if user.types().has(RomLayout.TYPE_GHOST):
+		_curse_ghost(turn, user)
+		return
+
+	# `.cantraise` names `GetStatName`'s eighth entry rather than either stat it
+	# just looked at: `ld b, ABILITY + 1` is what `StatNames`' "ABILITY" row exists
+	# for, and the line reads "<USER>'s ABILITY won't rise anymore!".
+	if not user.can_change_stage("attack", 1) and not user.can_change_stage("defense", 1):
+		turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {
+			"target": turn.side, "stat": CURSE_FAILED_STAT, "by": 1,
+		})
+		return
+
+	# `ld a, $1 / ld [wBattleAnimParam], a` ahead of `AnimateCurrentMove`.
+	turn.battle.battle_anim_param = 1
+	_animate_current_move(turn)
+	_curse_stage(turn, user, "speed", -1)
+	_curse_stage(turn, user, "attack", 1)
+	_curse_stage(turn, user, "defense", 1)
+
+
+static func _curse_stage(turn: Gen2Turn, user: Gen2BattleMon, key: String, by: int) -> void:
+	turn.stat_key = key
+	turn.stat_by = by
+	turn.stat_target = turn.side
+	turn.stat_mist_blocked = false
+	turn.stat_moved = user.change_stage(key, by)
+	_stat_message(turn)
+
+
+## `.ghost`: `GetHalfMaxHP` and `SubtractHPFromUser` with nothing between them, so
+## a user on less than half its maximum goes down to its own move.
+static func _curse_ghost(turn: Gen2Turn, user: Gen2BattleMon) -> void:
+	var defender: Gen2BattleMon = turn.defender()
+	if _is_hidden(defender.substatus) or _substitute_refuses(turn) \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.CURSE):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	defender.substatus |= Gen2Substatus.CURSE
+	_animate_current_move(turn)
+	var taken: int = user.take_damage(Gen2Substatus.half_damage(user.max_hp()))
+	turn.emit(Gen2Battle.CURSE_SET, {
+		"target": turn.target, "amount": taken, "hp": user.hp, "max_hp": user.max_hp(),
+	})
+
+	# `Curse:` carries no `checkfaint`: the cartridge's turn loop asks
+	# `HasPlayerFainted` behind every move, and this engine has no such step, so
+	# whoever took the health reports it, as `_residual_damage` already does.
+	if user.is_fainted():
+		turn.emit(Gen2Battle.FAINTED)
+
+
+## Field state [method Gen2Battle._spikes_damage] charges to whoever walks onto
+## it. Nothing stops it but spikes already there, and that is `FailMove` rather
+## than a quiet return.
+static func _spikes(turn: Gen2Turn) -> void:
+	if Gen2Screens.has(turn.battle.screens[turn.target], Gen2Screens.SPIKES):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	turn.battle.screens[turn.target] |= Gen2Screens.SPIKES
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.SPIKES_SET, {"target": turn.target})
+
+
+## All three are the user's own state, never the target's, and the wrap half
+## zeroes the counter without clearing [member Gen2BattleMon.trapping_move],
+## which is what the source leaves alone.
+static func _clear_hazards(turn: Gen2Turn) -> void:
+	var user: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(user.substatus, Gen2Substatus.LEECH_SEED):
+		user.substatus &= ~Gen2Substatus.LEECH_SEED
+		turn.emit(Gen2Battle.SHED_LEECH_SEED)
+
+	if Gen2Screens.has(turn.battle.screens[turn.side], Gen2Screens.SPIKES):
+		turn.battle.screens[turn.side] &= ~Gen2Screens.SPIKES
+		turn.emit(Gen2Battle.BLEW_SPIKES)
+
+	if user.trapped_turns > 0:
+		user.trapped_turns = 0
+		turn.emit(Gen2Battle.RELEASED_BY, {"target": turn.target})
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status
@@ -2391,10 +2693,14 @@ static func _animate_current_move(turn: Gen2Turn) -> void:
 ## The `wAttackMissed` guard is structural here, since [method _check_hit] ends
 ## the move on a miss and [method _check_faint] ends it on a KO, so this step is
 ## only ever reached by a hit that left the target standing. The Substitute check
-## has nothing to read yet.
+## sits between the item and the roll, exactly where `BattleCommand_HeldFlinch`
+## puts it, so a King's Rock aimed at a doll draws no roll.
 static func _kings_rock(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	if Gen2HeldItem.effect_of(turn.data(), attacker.item) != Gen2HeldItem.FLINCH:
+		return
+
+	if _substitute_refuses(turn):
 		return
 	if not Gen2HeldItem.rolls_under(
 		turn.rng(), Gen2HeldItem.parameter_of(turn.data(), attacker.item)
@@ -2415,6 +2721,11 @@ static func _kings_rock(turn: Gen2Turn) -> void:
 ## (`entry[2]` false), which is exactly what Mist blocks. A rise always targets
 ## the user and is never checked, matching [code]CheckMist[/code] gating only the
 ## "down" and "down2" effect-byte ranges.
+##
+## The order is `BattleCommand_StatDown`'s: `CheckMist`, then the stage that
+## cannot move, then `.DidntMiss`'s `CheckSubstituteOpp` and `wEffectFailed`. Each
+## sets a different `wFailedMessage`, so a drop that failed its secondary roll
+## against a Misted or already-floored target still says the specific line.
 static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 	var entry: Array = STAT_COMMANDS[command]
 	var stat_key: String = String(entry[0])
@@ -2426,14 +2737,19 @@ static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 	turn.stat_by = amount
 	turn.stat_target = side
 	turn.stat_mist_blocked = false
-
-	if turn.failed_chance:
-		turn.stat_moved = false
-		return
+	turn.stat_moved = false
 
 	if not targets_user and Gen2Substatus.has(turn.battle.mon(side).substatus, Gen2Substatus.MIST):
-		turn.stat_moved = false
 		turn.stat_mist_blocked = true
+		return
+
+	if not turn.battle.mon(side).can_change_stage(stat_key, amount):
+		return
+
+	if not targets_user and _substitute_refuses(turn):
+		return
+
+	if turn.failed_chance:
 		return
 
 	turn.stat_moved = turn.battle.mon(side).change_stage(stat_key, amount)
@@ -2449,6 +2765,10 @@ static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 ## Minimize's move number, which is the whole of what `MinimizeDropSub` compares
 ## against and what makes a Stomp hurt twice as much.
 const MINIMIZE_MOVE: int = 107
+
+## `StatNames`' eighth row, which exists only so `BattleCommand_Curse` has
+## something to name when neither of the two stats it raises can move.
+const CURSE_FAILED_STAT: String = "ability"
 
 
 ## Ancientpower's roll: the user's five real stats, all at once, reported as one

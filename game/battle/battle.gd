@@ -250,6 +250,45 @@ const SWITCH_BLOCKED: StringName = &"switch_blocked"
 const MIST_SET: StringName = &"mist_set"
 const FOCUS_ENERGY_SET: StringName = &"focus_energy_set"
 
+## Substitute. The two refusals are separate events because the cartridge chooses
+## between `HasSubstituteText` and `TooWeakSubText` on which precondition failed.
+## The last two name the Pokémon behind the doll and carry no amount, since
+## `SubTookDamageText` reports no number and the real health never moved.
+const SUBSTITUTE_MADE: StringName = &"substitute_made"
+const SUBSTITUTE_ALREADY: StringName = &"substitute_already"
+const SUBSTITUTE_TOO_WEAK: StringName = &"substitute_too_weak"
+const SUBSTITUTE_TOOK_DAMAGE: StringName = &"substitute_took_damage"
+const SUBSTITUTE_FADED: StringName = &"substitute_faded"
+
+## Leech Seed, on the Pokémon that was seeded rather than the one that seeded it.
+## [constant LEECH_SEED_SAPPED] carries the healed side under `to`, `to_amount`,
+## `to_hp` and `to_max_hp`, since one event moves health across the field.
+const WAS_SEEDED: StringName = &"was_seeded"
+const LEECH_SEED_SAPPED: StringName = &"leech_seed_sapped"
+
+## Nightmare and Curse, both quarters and both on the sufferer.
+## [constant CURSE_SET] carries the user's own `hp` after the half it cut.
+const NIGHTMARE_STARTED: StringName = &"nightmare_started"
+const HURT_BY_NIGHTMARE: StringName = &"hurt_by_nightmare"
+const CURSE_SET: StringName = &"curse_set"
+const HURT_BY_CURSE: StringName = &"hurt_by_curse"
+
+## Spikes, which are field state on the side they were scattered onto.
+const SPIKES_SET: StringName = &"spikes_set"
+const HURT_BY_SPIKES: StringName = &"hurt_by_spikes"
+
+## `BattleCommand_ClearHazards`' own three lines, all about the user's own side.
+## [constant RELEASED_BY] is not [constant RELEASED_FROM_TRAP]: `HandleWrap`'s
+## release names the move that let go and this one names the Pokémon that spun
+## out of it, so the two texts are two events.
+const SHED_LEECH_SEED: StringName = &"shed_leech_seed"
+const BLEW_SPIKES: StringName = &"blew_spikes"
+const RELEASED_BY: StringName = &"released_by"
+
+## `EvadedText`, which only `BattleCommand_LeechSeed` prints. Not
+## [constant MISSED], which is `GetFailureResultText`'s own line.
+const EVADED: StringName = &"evaded"
+
 ## A stat drop blocked by the target's own Mist. Not [constant STAT_CHANGE_FAILED]:
 ## the cartridge prints a line of its own ("It's protected by mist!") rather
 ## than the generic "won't go any lower" a drop already at its floor gets, and a
@@ -753,7 +792,33 @@ func send_out(side: int, index: int) -> Array:
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
 	})
 	(_participants[side] as Dictionary)[index] = true
+	_spikes_damage(side, events)
 	return events
+
+
+## `SpikesDamage`, which every entrance runs behind its own `SetPlayerTurn` or
+## `SetEnemyTurn`: the spikes read are the ones lying on the side walking in.
+##
+## Every reachable call site is an entrance this method already is
+## (`DetermineMoveOrder`, `PlayerPartyMonEntrance`, `EnemyPartyMonEntrance`,
+## `EnemyMonEntrance`, `ForcePlayerMonChoice`). `DoBattle`'s two run before the
+## move can have been used, and `BattleCommand_ForceSwitch`'s two belong to an
+## effect this engine does not have yet.
+func _spikes_damage(side: int, events: Array) -> void:
+	if not Gen2Screens.has(screens[side], Gen2Screens.SPIKES):
+		return
+
+	var entering: Gen2BattleMon = mon(side)
+	if entering.is_fainted() or Gen2Screens.spikes_spare(entering.types()):
+		return
+
+	var taken: int = entering.take_damage(Gen2Screens.spikes_damage(entering.max_hp()))
+	events.append({
+		"type": HURT_BY_SPIKES, "side": side, "amount": taken,
+		"hp": entering.hp, "max_hp": entering.max_hp(),
+	})
+	if entering.is_fainted():
+		events.append({"type": FAINTED, "side": side})
 
 
 ## `UpdateUsedMoves`: a move the player throws is remembered once, and the list
@@ -891,42 +956,120 @@ func take_turn(player_slot: int, enemy_slot: int) -> Array:
 	return take_actions(use_move(player_slot), use_move(enemy_slot))
 
 
-## What a burn or a poison takes at the end of the turn, from each side in the
-## order it acted.
+## `ResidualDamage`: what a burn, a poison, a Leech Seed, a Nightmare and a Curse
+## take from each side at the end of the turn, in that order and in the order the
+## sides acted.
 ##
 ## After both moves rather than after each, skipping whoever is already down, so
 ## a Pokémon that faints to its burn does so here rather than mid-move.
 ##
+## The four steps are four routines' worth of `HasUserFainted` between them: a
+## Pokémon that goes down to its poison pays neither the seed nor the nightmare.
+func _residual_damage(acting: Array, events: Array) -> void:
+	for side: int in acting:
+		if mon(side).is_fainted():
+			continue
+		_residual_status(side, events)
+		if mon(side).is_fainted():
+			continue
+		_residual_leech_seed(side, events)
+		if mon(side).is_fainted():
+			continue
+		_residual_nightmare(side, events)
+		if mon(side).is_fainted():
+			continue
+		_residual_curse(side, events)
+
+
 ## A running [member Gen2BattleMon.toxic_counter] means Toxic, which ramps
 ## instead of taking the flat eighth. The counter rises here, once a turn, so the
 ## turn it was inflicted counts as the first.
-func _residual_damage(acting: Array, events: Array) -> void:
-	for side: int in acting:
-		var current: Gen2BattleMon = mon(side)
-		if current.is_fainted():
-			continue
-		if not Gen2Status.has(current.status, Gen2Status.BURN | Gen2Status.POISON):
-			continue
+func _residual_status(side: int, events: Array) -> void:
+	var current: Gen2BattleMon = mon(side)
+	if not Gen2Status.has(current.status, Gen2Status.BURN | Gen2Status.POISON):
+		return
 
-		var amount: int
-		if Gen2Status.has(current.status, Gen2Status.POISON) and current.toxic_counter > 0:
-			amount = Gen2Status.toxic_damage(current.max_hp(), current.toxic_counter)
-			current.toxic_counter += 1
-		else:
-			amount = Gen2Status.residual_damage(current.max_hp())
+	var amount: int
+	if Gen2Status.has(current.status, Gen2Status.POISON) and current.toxic_counter > 0:
+		amount = Gen2Status.toxic_damage(current.max_hp(), current.toxic_counter)
+		current.toxic_counter += 1
+	else:
+		amount = Gen2Status.residual_damage(current.max_hp())
 
-		var taken: int = current.take_damage(amount)
-		events.append({
-			"type": HURT_BY_STATUS,
-			"side": side,
-			"status": current.status,
-			"name": Gen2Status.name_of(current.status),
-			"amount": taken,
-			"hp": current.hp,
-			"max_hp": current.max_hp(),
-		})
-		if current.is_fainted():
-			events.append({"type": FAINTED, "side": side})
+	var taken: int = current.take_damage(amount)
+	events.append({
+		"type": HURT_BY_STATUS,
+		"side": side,
+		"status": current.status,
+		"name": Gen2Status.name_of(current.status),
+		"amount": taken,
+		"hp": current.hp,
+		"max_hp": current.max_hp(),
+	})
+	if current.is_fainted():
+		events.append({"type": FAINTED, "side": side})
+
+
+## An eighth off the seeded Pokémon and onto the one across from it, capped by
+## `RestoreHP`. What is healed is what `SubtractHP` left in `bc`: the eighth
+## normally, and the seeded Pokémon's whole remaining health when the eighth
+## would have taken it below zero, so
+## [method Gen2BattleMon.take_damage]'s own answer is the figure to hand on.
+##
+## A fainted receiver cannot happen on the cartridge, where `ResidualDamage` runs
+## behind a faint check inside each side's own move; it can here, because this
+## runs once after both. Nothing is moved in that case.
+func _residual_leech_seed(side: int, events: Array) -> void:
+	var current: Gen2BattleMon = mon(side)
+	if not Gen2Substatus.has(current.substatus, Gen2Substatus.LEECH_SEED):
+		return
+
+	var sapper: Gen2BattleMon = mon(opponent_of(side))
+	var taken: int = current.take_damage(Gen2Substatus.leech_seed_damage(current.max_hp()))
+	var healed: int = 0 if sapper.is_fainted() else sapper.heal(taken)
+	events.append({
+		"type": LEECH_SEED_SAPPED,
+		"side": side,
+		"amount": taken,
+		"hp": current.hp,
+		"max_hp": current.max_hp(),
+		"to": opponent_of(side),
+		"to_amount": healed,
+		"to_hp": sapper.hp,
+		"to_max_hp": sapper.max_hp(),
+	})
+	if current.is_fainted():
+		events.append({"type": FAINTED, "side": side})
+
+
+## Nothing here asks whether the sufferer is still asleep, because waking is what
+## clears the flag.
+func _residual_nightmare(side: int, events: Array) -> void:
+	var current: Gen2BattleMon = mon(side)
+	if not Gen2Substatus.has(current.substatus, Gen2Substatus.NIGHTMARE):
+		return
+
+	var taken: int = current.take_damage(Gen2Substatus.quarter_damage(current.max_hp()))
+	events.append({
+		"type": HURT_BY_NIGHTMARE, "side": side, "amount": taken,
+		"hp": current.hp, "max_hp": current.max_hp(),
+	})
+	if current.is_fainted():
+		events.append({"type": FAINTED, "side": side})
+
+
+func _residual_curse(side: int, events: Array) -> void:
+	var current: Gen2BattleMon = mon(side)
+	if not Gen2Substatus.has(current.substatus, Gen2Substatus.CURSE):
+		return
+
+	var taken: int = current.take_damage(Gen2Substatus.quarter_damage(current.max_hp()))
+	events.append({
+		"type": HURT_BY_CURSE, "side": side, "amount": taken,
+		"hp": current.hp, "max_hp": current.max_hp(),
+	})
+	if current.is_fainted():
+		events.append({"type": FAINTED, "side": side})
 
 
 ## `HandleWeather`: one turn off the count, the line that goes with it, and a

@@ -115,6 +115,12 @@ var trapping_move: int = 0
 ## Song finishes it. Read only while [constant Gen2Substatus.PERISH] is set.
 var perish_count: int = 0
 
+## `wPlayerSubstituteHP`: what the doll in front of this Pokémon has left. Read
+## only while [constant Gen2Substatus.SUBSTITUTE] is set, which is why clearing
+## both in [method reset_volatile] matches a cartridge that clears the flag and
+## leaves the byte, the way [member perish_count] already does.
+var substitute_hp: int = 0
+
 ## `wPlayerTurnsTaken`: how many turns this Pokémon has actually acted on since
 ## it came out. `BattleCommand_DoTurn` is the one place it rises, behind the same
 ## charging check that decides whether PP is spent, so a two-turn release does
@@ -249,6 +255,16 @@ func stage(key: String) -> int:
 	return int(stages.get(key, 0))
 
 
+## Whether [method change_stage] would move anything, asked without moving it:
+## `BattleCommand_StatUp` and `..._StatDown` both settle "already at the end" on
+## the way in, ahead of the checks that refuse for another reason.
+func can_change_stage(key: String, by: int) -> bool:
+	if not STAGED_STATS.has(key) and not STAGED_ODDS.has(key):
+		return false
+	var before: int = int(stages.get(key, 0))
+	return clampi(before + by, Gen2Stats.MIN_STAGE, Gen2Stats.MAX_STAGE) != before
+
+
 ## Moves a stage, and answers whether it actually moved: at the top or the bottom
 ## the cartridge says so rather than silently doing nothing.
 func change_stage(key: String, by: int) -> bool:
@@ -285,6 +301,7 @@ func reset_volatile() -> void:
 	trapped_turns = 0
 	trapping_move = 0
 	perish_count = 0
+	substitute_hp = 0
 	turns_taken = 0
 	last_move_used = 0
 	fury_cutter_count = 0

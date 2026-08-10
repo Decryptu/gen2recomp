@@ -87,6 +87,9 @@ const STAT_NAMES: Dictionary = {
 	"sp_defense": "SP.DEF",
 	"accuracy": "ACCURACY",
 	"evasion": "EVASIVENESS",
+	# `StatNames`' eighth row, which no stat uses: `BattleCommand_Curse` names it
+	# when neither Attack nor Defense can rise.
+	"ability": "ABILITY",
 }
 
 ## The three trapping moves whose landing line spells the move out, since
@@ -2027,6 +2030,47 @@ func _describe(event: Dictionary) -> String:
 		Gen2Battle.PERISH_COUNT:
 			return "%s's PERISH count is %d!" % [
 				_battler_name(side), int(event["count"]),
+			]
+		Gen2Battle.SUBSTITUTE_MADE:
+			return "%s made a SUBSTITUTE!" % _battler_name(side)
+		Gen2Battle.SUBSTITUTE_ALREADY:
+			return "%s has a SUBSTITUTE!" % _battler_name(side)
+		Gen2Battle.SUBSTITUTE_TOO_WEAK:
+			# TooWeakSubText names nobody at all.
+			return "Too weak to make a SUBSTITUTE!"
+		Gen2Battle.SUBSTITUTE_TOOK_DAMAGE:
+			return "The SUBSTITUTE took damage for %s!" % _battler_name(int(event["target"]))
+		Gen2Battle.SUBSTITUTE_FADED:
+			return "%s's SUBSTITUTE faded!" % _battler_name(int(event["target"]))
+		Gen2Battle.WAS_SEEDED:
+			return "%s was seeded!" % _battler_name(int(event["target"]))
+		Gen2Battle.LEECH_SEED_SAPPED:
+			return "LEECH SEED saps %s!" % _battler_name(side)
+		Gen2Battle.EVADED:
+			return "%s evaded the attack!" % _battler_name(int(event["target"]))
+		Gen2Battle.NIGHTMARE_STARTED:
+			return "%s started to have a NIGHTMARE!" % _battler_name(int(event["target"]))
+		Gen2Battle.HURT_BY_NIGHTMARE:
+			return "%s has a NIGHTMARE!" % _battler_name(side)
+		Gen2Battle.CURSE_SET:
+			# PutACurseText is one text with a paragraph break in it, so the two
+			# halves are one line here rather than two events.
+			return "%s cut its own HP and put a CURSE on %s!" % [
+				_battler_name(side), _battler_name(int(event["target"])),
+			]
+		Gen2Battle.HURT_BY_CURSE:
+			return "%s's hurt by the CURSE!" % _battler_name(side)
+		Gen2Battle.SPIKES_SET:
+			return "SPIKES scattered all around %s!" % _battler_name(int(event["target"]))
+		Gen2Battle.HURT_BY_SPIKES:
+			return "%s's hurt by SPIKES!" % _battler_name(side)
+		Gen2Battle.SHED_LEECH_SEED:
+			return "%s shed LEECH SEED!" % _battler_name(side)
+		Gen2Battle.BLEW_SPIKES:
+			return "%s blew away SPIKES!" % _battler_name(side)
+		Gen2Battle.RELEASED_BY:
+			return "%s was released by %s!" % [
+				_battler_name(side), _battler_name(int(event["target"])),
 			]
 		Gen2Battle.MIST_SET:
 			return "%s is shrouded in mist!" % _battler_name(side)

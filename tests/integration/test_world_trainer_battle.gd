@@ -83,6 +83,14 @@ func _battle_host() -> Gen2BattleScreen:
 	return null
 
 
+## The wild this fixture ships, named out of the cache rather than spelled out.
+## Which species number `TRAINER_SPECIES` lands on, and so whether that row
+## carries a name of its own or the filler one, is the world fixture's business
+## and not something these four messages should pin.
+func _wild_name() -> String:
+	return String(_data.species(Fixture.TRAINER_SPECIES).get("name", ""))
+
+
 func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	await _open_world()
 	var before: Dictionary = _world_screen.world_snapshot()
@@ -296,7 +304,7 @@ func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
 	assert_not_null(host)
 	assert_true(host.is_ready())
 	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
-	assert_eq(host.battle_snapshot()["message"], "Wild FILLER appeared!")
+	assert_eq(host.battle_snapshot()["message"], "Wild %s appeared!" % _wild_name())
 
 
 func test_catch_tutorial_uses_the_real_battle_overlay_without_persistent_capture() -> void:
@@ -367,13 +375,13 @@ func test_master_ball_capture_runs_through_the_real_battle_overlay() -> void:
 		host.finish()
 		host.advance()
 
-	assert_eq(host.battle_snapshot()["message"], "Gotcha! FILLER was caught!")
+	assert_eq(host.battle_snapshot()["message"], "Gotcha! %s was caught!" % _wild_name())
 	host.finish()
 	host.advance()
 	await get_tree().process_frame
 	assert_null(_battle_host())
 	assert_eq(_world_screen._world.state.item_quantity(Gen2WorldPartyHost.ITEM_MASTER_BALL), 0)
-	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Caught FILLER")
+	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Caught %s" % _wild_name())
 
 
 func test_failed_capture_shows_break_free_and_returns_to_battle() -> void:
@@ -397,7 +405,7 @@ func test_failed_capture_shows_break_free_and_returns_to_battle() -> void:
 	for _message: int in 5:
 		host.finish()
 		host.advance()
-		if host.battle_snapshot()["message"] == "FILLER broke free!":
+		if host.battle_snapshot()["message"] == "%s broke free!" % _wild_name():
 			saw_break_free = true
 
 	assert_true(saw_break_free)

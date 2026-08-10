@@ -181,6 +181,28 @@ const SAFEGUARD: int = 124
 ## on the field that a switch escapes.
 const PERISH_SONG: int = 114
 
+## Substitute: a quarter of the user's own health standing in front of it, with
+## hit points of its own on [member Gen2BattleMon.substitute_hp]. Eighteen
+## commands ask whether one is up and every one of them refuses on a yes.
+const SUBSTITUTE: int = 79
+
+## The three residuals `ResidualDamage` charges behind burn and poison, and
+## Spikes, which is field state on [member Gen2Battle.screens] instead. Rapid Spin
+## is the only move that undoes any of them.
+const LEECH_SEED: int = 84
+const NIGHTMARE: int = 107
+const CURSE: int = 109
+const SPIKES: int = 112
+const RAPID_SPIN: int = 129
+
+## `EFFECT_NORMAL_HIT` as a byte rather than [constant NORMAL_HIT]'s list:
+## `DoSubstituteDamage` stamps it over the move's own once a doll has broken.
+const NORMAL_HIT_EFFECT: int = 0
+
+## Beat Up, named for that command's exemption list alone. The effect itself is
+## unwritten.
+const BEAT_UP: int = 154
+
 ## Swift, Faint Attack and Vital Throw, which point at `NormalHit` like any other
 ## attack: their whole difference is one comparison inside
 ## [method Gen2EffectCommands._check_hit], so this byte has no list.
@@ -697,6 +719,68 @@ const PERISH_SONG_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.PERISH_SONG,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Substitute, Nightmare, Curse and Spikes: the same four steps
+## [constant PERISH_SONG_SEQUENCE] has. None of them rolls accuracy, so the 100%
+## all four carry in the move table is never read.
+const SUBSTITUTE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SUBSTITUTE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const NIGHTMARE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.NIGHTMARE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const CURSE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CURSE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const SPIKES_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SPIKES,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## The same list with a roll in front: `LeechSeed` is the one of the five that
+## carries `checkhit`, and its 90% is the only accuracy byte among them read.
+const LEECH_SEED_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.LEECH_SEED,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## [constant NORMAL_HIT] with `clearhazards` between the damage and the faint
+## check, which is where the source puts it: a spin that knocks its target out
+## still sheds the seed, the spikes and the bind on its own side.
+const RAPID_SPIN_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CLEAR_HAZARDS,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1223,6 +1307,10 @@ const STAT_DOWN_2_BASE: int = 58
 const STAT_DOWN_HIT_BASE: int = 68
 const STAT_RUN_LENGTH: int = 7
 
+## The second of that run, `EFFECT_DEFENSE_DOWN_HIT`, which is the only one whose
+## list differs from its six neighbours.
+const DEFENSE_DOWN_HIT: int = STAT_DOWN_HIT_BASE + 1
+
 ## The two effect bytes a run does not reach. Metal Claw raises the user's
 ## Attack on a roll and Ancientpower raises all five of them, and neither sits
 ## in a run of its own: 139 falls where an eighth "down by one, on a hit" stat
@@ -1298,9 +1386,17 @@ static func _stat_sequences() -> Dictionary:
 		out[STAT_UP_2_BASE + offset] = _stat_up_sequence(STAT_UP_2_COMMANDS[offset])
 		out[STAT_DOWN_BASE + offset] = _stat_down_sequence(STAT_DOWN_COMMANDS[offset])
 		out[STAT_DOWN_2_BASE + offset] = _stat_down_sequence(STAT_DOWN_2_COMMANDS[offset])
-		out[STAT_DOWN_HIT_BASE + offset] = _secondary([
+		# `DefenseDownHit` is the one row of the seven that rolls twice, with the
+		# second roll behind `applydamage`. Nothing reads `wEffectFailed` between
+		# them, so only the second decides, and by then a doll the hit broke is
+		# gone: `docs/bugs_and_glitches.md`'s "Moves that lower Defense can do so
+		# after breaking a Substitute", kept rather than fixed.
+		var trailing: Array = [
 			STAT_DOWN_COMMANDS[offset], Gen2EffectCommands.STAT_DOWN_MESSAGE,
-		])
+		]
+		if STAT_DOWN_HIT_BASE + offset == DEFENSE_DOWN_HIT:
+			trailing.push_front(Gen2EffectCommands.EFFECT_CHANCE)
+		out[STAT_DOWN_HIT_BASE + offset] = _secondary(trailing)
 	out[ATTACK_UP_HIT] = _secondary([
 		STAT_UP_COMMANDS[0], Gen2EffectCommands.STAT_UP_MESSAGE,
 	])
@@ -1375,6 +1471,12 @@ static func _sequences() -> Dictionary:
 		REFLECT: SCREEN_SEQUENCE,
 		SAFEGUARD: SAFEGUARD_SEQUENCE,
 		PERISH_SONG: PERISH_SONG_SEQUENCE,
+		SUBSTITUTE: SUBSTITUTE_SEQUENCE,
+		LEECH_SEED: LEECH_SEED_SEQUENCE,
+		NIGHTMARE: NIGHTMARE_SEQUENCE,
+		CURSE: CURSE_SEQUENCE,
+		SPIKES: SPIKES_SEQUENCE,
+		RAPID_SPIN: RAPID_SPIN_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

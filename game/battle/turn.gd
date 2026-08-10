@@ -51,6 +51,11 @@ var defense_stat: int = 0
 var power_override: int = -1
 var type_override: int = -1
 
+## The same per-turn copy one field along, with one writer: `DoSubstituteDamage`
+## stamps `EFFECT_NORMAL_HIT` over `wPlayerMoveStruct + MOVE_EFFECT` once a doll
+## has broken, so the steps behind the break read an ordinary attack.
+var effect_override: int = -1
+
 ## What was actually taken off, which is not the same as [member damage]: a
 ## Pokémon with three hit points left takes three from a hit worth forty.
 var dealt: int = 0
@@ -127,6 +132,8 @@ func rng() -> RandomNumberGenerator:
 
 
 func effect() -> int:
+	if effect_override >= 0:
+		return effect_override
 	return int(move.get("effect", -1))
 
 

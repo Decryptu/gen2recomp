@@ -338,9 +338,12 @@ static func _skip_80_20(rng: RandomNumberGenerator) -> bool:
 ## against a locked one, Attract against a target already in love or of the same
 ## or unknown gender, and a second Mist or Focus Energy, which is why those two
 ## read the attacker rather than the defender, and a screen the attacker's own
-## side already holds. `AI_Redundant`'s one remaining row, a standing Substitute,
-## reads state this engine does not carry, so it never fires and reads as "not
-## redundant".
+## side already holds. A standing Substitute reads the attacker for the same
+## reason; Leech Seed, Nightmare and Spikes read the target.
+##
+## `AI_Redundant`'s rows for the effects this engine does not carry yet
+## (Transform, Sleep Talk, Foresight, Teleport, Future Sight) are the remainder,
+## and read as "not redundant" because no move here reaches them.
 static func _apply_basic(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
@@ -386,6 +389,20 @@ static func _apply_basic(
 			# `wEnemyScreens`, the AI's own side: a screen it already holds is
 			# the wasted turn, not one the player holds.
 			redundant = Gen2Screens.has(attacker_screens, int(SCREEN_FOR_EFFECT[effect]))
+		elif effect == Gen2MoveEffect.SUBSTITUTE:
+			# `.Substitute` reads `wEnemySubStatus4`, the AI's own.
+			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.SUBSTITUTE)
+		elif effect == Gen2MoveEffect.LEECH_SEED:
+			redundant = Gen2Substatus.has(defender.substatus, Gen2Substatus.LEECH_SEED)
+		elif effect == Gen2MoveEffect.NIGHTMARE:
+			# `.Nightmare` treats *no* status as the redundant case, so a target
+			# carrying any status stays encouraged even when it is awake and cannot
+			# have one. The source marks that as a bug; reproduced, not fixed.
+			redundant = not Gen2Status.is_afflicted(defender.status) \
+				or Gen2Substatus.has(defender.substatus, Gen2Substatus.NIGHTMARE)
+		elif effect == Gen2MoveEffect.SPIKES:
+			# `.Spikes` reads `wPlayerScreens`, the side they would land on.
+			redundant = Gen2Screens.has(defender_screens, Gen2Screens.SPIKES)
 		elif WEATHER_FOR_EFFECT.has(effect):
 			redundant = weather == int(WEATHER_FOR_EFFECT[effect])
 		if redundant:

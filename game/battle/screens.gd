@@ -32,6 +32,10 @@ const TURNS: int = 5
 ## value, before the critical-hit check that may discard it.
 const DEFENCE_MULTIPLIER: int = 2
 
+## `SpikesDamage`'s own `GetEighthMaxHP`, paid by whoever walks onto the side the
+## spikes are lying on.
+const SPIKES_DIVISOR: int = 8
+
 
 static func has(screens: int, flags: int) -> bool:
 	return screens & flags != 0
@@ -48,3 +52,14 @@ static func guarding_flag(move_type: int) -> int:
 ## its defending stat doubled.
 static func doubles_defence(screens: int, move_type: int) -> bool:
 	return has(screens, guarding_flag(move_type))
+
+
+static func spikes_damage(max_hp: int) -> int:
+	@warning_ignore("integer_division")
+	return maxi(max_hp / SPIKES_DIVISOR, 1)
+
+
+## Whether `SpikesDamage` skips the Pokémon walking in: a Flying-type in either
+## slot, and nothing else.
+static func spikes_spare(types: Array) -> bool:
+	return types.has(RomLayout.TYPE_FLYING)
