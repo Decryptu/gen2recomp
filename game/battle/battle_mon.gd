@@ -290,6 +290,40 @@ func reset_stages() -> void:
 		stages[key] = 0
 
 
+## What Baton Pass hands to whoever comes in behind it.
+##
+## On the cartridge none of this is the Pokémon's: `wPlayerSubStatus1` through
+## `5` and every counter beside them are battle-position state, and an ordinary
+## entrance clears them only because `NewBattleMonStatus` says so.
+## `PassedBattleMonEntrance` and `EnemySwitch_SetMode` do not, which is the whole
+## of what Baton Pass is. Here the same state is per-Pokémon, so it is copied
+## across instead, and `ResetBatonPassStatus` then names the few things that do
+## not survive the trip: see [method Gen2Battle._reset_baton_pass_status].
+##
+## The list is exactly [method reset_volatile]'s, plus the stages, which is why
+## the two sit together: a field added to one belongs in the other.
+const PASSED_FIELDS: Array[String] = [
+	"substatus", "confusion_turns", "charged_move", "rollout_count",
+	"rampage_turns", "rampage_move", "toxic_counter", "disabled_slot",
+	"disable_turns", "encored_slot", "encore_turns", "trapped_turns",
+	"trapping_move", "perish_count", "substitute_hp", "turns_taken",
+	"last_move_used", "fury_cutter_count", "protect_count", "minimized",
+]
+
+
+func capture_passed_state() -> Dictionary:
+	var out: Dictionary = {"stages": stages.duplicate()}
+	for key: String in PASSED_FIELDS:
+		out[key] = get(key)
+	return out
+
+
+func apply_passed_state(state: Dictionary) -> void:
+	stages = (state["stages"] as Dictionary).duplicate()
+	for key: String in PASSED_FIELDS:
+		set(key, state[key])
+
+
 ## Clears everything [Gen2Substatus] holds, and the counters that go with it.
 ## Called on a switch, alongside but separately from [method reset_stages]:
 ## Haze resets the stages on both sides without touching either one's

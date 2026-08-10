@@ -217,6 +217,10 @@ const FORCE_SWITCH: int = 28
 ## itself, so the number is what tells the pair apart.
 const ROAR_MOVE: int = 46
 
+## Baton Pass, the one effect whose player half cannot be resolved inside the
+## turn that started it.
+const BATON_PASS: int = 127
+
 ## `EFFECT_NORMAL_HIT` as a byte rather than [constant NORMAL_HIT]'s list:
 ## `DoSubstituteDamage` stamps it over the move's own once a doll has broken.
 const NORMAL_HIT_EFFECT: int = 0
@@ -827,6 +831,15 @@ const DESTINY_BOND_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.DESTINY_BOND,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Baton Pass: the command is the whole move, and `endmove` behind it does
+## nothing, which is what lets the turn stop inside it and pick up later.
+const BATON_PASS_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.BATON_PASS,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1543,6 +1556,7 @@ static func _sequences() -> Dictionary:
 		ENDURE: ENDURE_SEQUENCE,
 		DESTINY_BOND: DESTINY_BOND_SEQUENCE,
 		FORCE_SWITCH: FORCE_SWITCH_SEQUENCE,
+		BATON_PASS: BATON_PASS_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

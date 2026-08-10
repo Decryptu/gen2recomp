@@ -537,7 +537,9 @@ static func _apply_smart(
 			# `AI_Smart_ForceSwitch`: discourage blowing the player away unless
 			# `CheckPlayerMoveTypeMatchups` says the pairing is going badly, which
 			# is the same score `AI_Smart_PerishSong` reads.
-			Gen2MoveEffect.FORCE_SWITCH:
+			# `AI_Smart_BatonPass` is the same body under a second label, so the
+			# two share an arm the way Destiny Bond shares Skull Bash's.
+			Gen2MoveEffect.FORCE_SWITCH, Gen2MoveEffect.BATON_PASS:
 				if matchup_score >= Gen2AISwitch.BASE_SCORE:
 					_discourage(scores, slot, 1)
 			Gen2MoveEffect.PROTECT:

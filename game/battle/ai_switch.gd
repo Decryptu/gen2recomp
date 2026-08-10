@@ -78,6 +78,23 @@ static func decide(battle: Gen2Battle, flags: int, rng: RandomNumberGenerator) -
 	return {"switch": true, "index": int(choice["index"])}
 
 
+## `FindMonInOTPartyToSwitchIntoBattle`: who the AI would rather have in, with no
+## opinion about whether it should switch at all.
+##
+## [method decide] is the ordinary route and answers both questions at once.
+## Baton Pass is the one caller that has already settled the first, so it needs
+## the pick on its own. Nobody standing answers -1; a shortlist that resists
+## nothing falls back to the lowest index still up, which is `.not_2` walking the
+## alive mask from the top.
+static func pick_target(battle: Gen2Battle) -> int:
+	var alive: Array = _alive_others(battle)
+	if alive.is_empty():
+		return -1
+	var best: Dictionary = _best_answer(battle, alive)
+	var index: int = int(best["index"])
+	return index if index >= 0 else int(alive[0])
+
+
 ## `CheckAbleToSwitch`: how badly the AI wants out and who it would rather have
 ## in, as [code]{"tier": int, "index": int}[/code]. A tier of zero is "stay".
 static func evaluate(battle: Gen2Battle) -> Dictionary:

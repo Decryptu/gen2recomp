@@ -3355,3 +3355,193 @@ func test_a_switch_breaks_attraction_on_both_sides() -> void:
 		Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED),
 		"the side that did not switch loses it too"
 	)
+
+
+## Baton Pass, which is the first move that hands the Pokemon behind it
+## everything the position was carrying, and the first that can stop a turn part
+## way through.
+func _pass_party(moves: Array) -> Gen2Battle:
+	return _party_battle(
+		[_mon(Fixture.PIKACHU, 50, moves), _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+
+
+func test_a_players_baton_pass_stops_the_turn_until_it_is_answered() -> void:
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+	var opened: Array = battle.take_turn(0, 0)
+
+	assert_eq(battle.awaiting_baton_pass(), Gen2Battle.PLAYER)
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 0, "nobody has come in yet")
+	assert_eq(
+		_of_type(opened, Gen2Battle.HIT).size(), 0,
+		"and the enemy has not moved either: %s" % JSON.stringify(opened)
+	)
+
+	assert_eq(
+		battle.take_turn(0, 0), [] as Array,
+		"a turn already standing cannot be started again"
+	)
+
+	var finished: Array = battle.pass_to(1)
+	assert_eq(battle.awaiting_baton_pass(), -1)
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 1)
+	assert_eq(_of_type(finished, Gen2Battle.SENT_OUT).size(), 1)
+	assert_eq(
+		_of_type(finished, Gen2Battle.HIT).size(), 1,
+		"the rest of the turn ran once it was answered: %s" % JSON.stringify(finished)
+	)
+
+
+## `ForcePickSwitchMonInBattle` redisplays its list rather than taking somebody
+## who cannot come in, so a refused answer leaves the question standing.
+func test_a_refused_baton_pass_target_leaves_the_question_standing() -> void:
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+	battle.take_turn(0, 0)
+
+	var bench: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	bench.take_damage(bench.max_hp())
+	assert_eq(battle.pass_to(1), [] as Array, "a fainted target")
+	assert_eq(battle.pass_to(0), [] as Array, "the Pokemon already out")
+	assert_eq(battle.pass_to(9), [] as Array, "nobody at all")
+	assert_eq(battle.awaiting_baton_pass(), Gen2Battle.PLAYER)
+
+
+## The stat stages are the point of the move, and they are position state on the
+## cartridge rather than the Pokemon's, so they move across and the Pokemon that
+## left keeps none of them.
+func test_a_pass_carries_the_stages_and_leaves_the_passer_with_none() -> void:
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+	var passer: Gen2BattleMon = battle.player
+	passer.stages["attack"] = 4
+	passer.stages["speed"] = -2
+	battle.take_turn(0, 0)
+	battle.pass_to(1)
+
+	assert_eq(battle.player.stage("attack"), 4, "the newcomer is handed them")
+	assert_eq(battle.player.stage("speed"), -2)
+	assert_eq(passer.stage("attack"), 0, "and the passer keeps nothing")
+
+
+## So do the substatus flags and the counters beside them: a doll, a seed and a
+## perish count all survive the switch that would ordinarily end them.
+func test_a_pass_carries_the_doll_the_seed_and_the_perish_count() -> void:
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+	var passer: Gen2BattleMon = battle.player
+	passer.substatus |= (
+		Gen2Substatus.SUBSTITUTE | Gen2Substatus.LEECH_SEED | Gen2Substatus.PERISH
+	)
+	# A doll big enough to survive the Tackle that lands behind the pass, since
+	# the enemy still gets its move once the turn resumes.
+	passer.substitute_hp = 250
+	passer.perish_count = 2
+	battle.take_turn(0, 0)
+	battle.pass_to(1)
+
+	var arriving: Gen2BattleMon = battle.player
+	assert_true(Gen2Substatus.has(arriving.substatus, Gen2Substatus.SUBSTITUTE))
+	assert_lt(arriving.substitute_hp, 250, "the doll took the Tackle behind the pass")
+	assert_gt(arriving.substitute_hp, 0, "and survived it")
+	assert_true(Gen2Substatus.has(arriving.substatus, Gen2Substatus.LEECH_SEED))
+	# The count carried and then the end-of-turn tick spent one of it, which is
+	# what a count that did not carry could never do: a fresh Pokemon has none.
+	assert_true(Gen2Substatus.has(arriving.substatus, Gen2Substatus.PERISH))
+	assert_eq(arriving.perish_count, 1)
+
+
+## `ResetBatonPassStatus` names what does not survive: Disable, Encore, the last
+## move used, attraction on both sides and both wrap counters.
+func test_a_pass_drops_what_reset_baton_pass_status_names() -> void:
+	# Baton Pass is in slot 0, so the disabled slot has to be the other one:
+	# a disabled slot 0 would answer Struggle and never reach the pass at all.
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS, Fixture.TACKLE])
+	var passer: Gen2BattleMon = battle.player
+	passer.disabled_slot = 1
+	passer.disable_turns = 3
+	passer.substatus |= Gen2Substatus.ENCORED
+	passer.encored_slot = 0
+	passer.encore_turns = 2
+	passer.last_move_used = Fixture.TACKLE
+	passer.trapped_turns = 3
+	battle.enemy.trapped_turns = 3
+	battle.take_turn(0, 0)
+	battle.pass_to(1)
+
+	var arriving: Gen2BattleMon = battle.player
+	assert_eq(arriving.disabled_slot, -1)
+	assert_eq(arriving.disable_turns, 0)
+	assert_false(Gen2Substatus.has(arriving.substatus, Gen2Substatus.ENCORED))
+	assert_eq(arriving.encored_slot, -1)
+	assert_eq(arriving.last_move_used, 0)
+	assert_eq(arriving.trapped_turns, 0)
+	assert_eq(battle.enemy.trapped_turns, 0, "the wrap counters go on both sides")
+
+
+## Attraction goes with them, on both sides, and is asked of the entrance
+## directly: an attracted passer has a coin flip in front of its own move, and
+## `ResetBatonPassStatus` is what this is about rather than `CheckTurn`.
+func test_a_pass_breaks_attraction_on_both_sides() -> void:
+	var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+	battle.player.substatus |= Gen2Substatus.ATTRACTED
+	battle.enemy.substatus |= Gen2Substatus.ATTRACTED
+	battle.baton_pass_send_out(Gen2Battle.PLAYER, 1)
+
+	assert_false(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ATTRACTED),
+		"the arriving Pokemon is not handed the passer's"
+	)
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.ATTRACTED))
+
+
+## Nightmare is the one that reads the *arriving* Pokemon, because
+## `ResetBatonPassStatus` runs behind the entrance: it survives a pass only into
+## somebody already asleep.
+func test_a_nightmare_survives_a_pass_only_into_a_sleeping_pokemon() -> void:
+	for asleep: bool in [false, true]:
+		var battle: Gen2Battle = _pass_party([Fixture.BATON_PASS])
+		battle.player.substatus |= Gen2Substatus.NIGHTMARE
+		if asleep:
+			battle.party(Gen2Battle.PLAYER).at(1).status = 3
+		battle.take_turn(0, 0)
+		battle.pass_to(1)
+
+		assert_eq(
+			Gen2Substatus.has(battle.player.substatus, Gen2Substatus.NIGHTMARE), asleep,
+			"arriving asleep: %s" % asleep
+		)
+
+
+## The enemy's half needs no answer at all: its target is picked for it, so the
+## turn runs straight through.
+func test_an_enemy_baton_pass_resolves_inside_the_turn() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])),
+		Gen2Party.create([
+			_mon(Fixture.GEODUDE, 50, [Fixture.BATON_PASS]),
+			_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		]), _rng, true
+	)
+	battle.enemy.stages["defense"] = 3
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_eq(battle.awaiting_baton_pass(), -1, "nothing was asked")
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1)
+	assert_eq(battle.enemy.stage("defense"), 3, "and the stages went with it")
+	assert_false(_first(events, Gen2Battle.SENT_OUT).is_empty())
+
+
+## A wild Pokemon has no party behind it, and neither has a lone one.
+func test_a_baton_pass_with_nobody_behind_it_fails() -> void:
+	var wild: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.BATON_PASS])
+	)
+	assert_eq(_of_type(wild.take_turn(0, 0), Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(wild.awaiting_baton_pass(), -1)
+
+	var lone: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.BATON_PASS]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	assert_eq(_of_type(lone.take_turn(0, 0), Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(lone.awaiting_baton_pass(), -1, "and no question was asked")
