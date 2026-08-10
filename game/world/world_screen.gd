@@ -286,6 +286,10 @@ func _process(delta: float) -> void:
 	if _objects_may_move() and _world.advance_object_steps(delta, _object_random) \
 		and _renderer != null:
 		_renderer.refresh()
+	# Not gated on _objects_may_move(): an applymovement is drawn while the
+	# script that ran it is still going, which is when a script runs one.
+	if _world != null and _world.advance_scripted_steps(delta) and _renderer != null:
+		_renderer.refresh()
 	if not _trainer_approach.is_empty():
 		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
@@ -1156,6 +1160,10 @@ func _start_battle_request(request: Dictionary) -> void:
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
 	host.set_time_of_day(time_of_day)
+	# The clock's row is what the battle's own heals read; the drawn row is what
+	# a renderer staging the fight on this map has to match, so the context
+	# carries that one.
+	host.set_world_context(Gen2BattleWorldContext.capture(_world, _render_time_of_day()))
 	if _world != null and not tutorial:
 		host.set_capture_balls(
 			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()

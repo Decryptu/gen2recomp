@@ -105,7 +105,10 @@ func test_layout_carries_verified_world_table_shapes() -> void:
 	assert_eq(RomLayout.tileset_count(crystal), 37)
 	assert_eq(RomLayout.tileset_block_count(gold, 4), 64)
 	assert_eq(RomLayout.tileset_block_count(crystal, 31), 40)
+	# NUM_OVERWORLD_SPRITES, which is the last SPRITE_* constant's own value:
+	# pokegold ends at SPRITE_SILVER_TROPHY ($5f) and pokecrystal at
+	# SPRITE_STANDING_YOUNGSTER ($66), the three beasts among the rows between.
 	assert_eq(RomLayout.overworld_sprite_count(gold), 95)
-	assert_eq(RomLayout.overworld_sprite_count(crystal), 99)
+	assert_eq(RomLayout.overworld_sprite_count(crystal), 102)
 	assert_eq(RomLayout.overworld_sprite_offset(gold, 1), 0x147DE)
 	assert_eq(RomLayout.overworld_sprite_offset(crystal, 1), 0x14736)

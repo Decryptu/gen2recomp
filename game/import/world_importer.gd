@@ -392,11 +392,20 @@ static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Diction
 		if default_palette < 0 or default_palette >= RomLayout.OVERWORLD_SPRITE_PALETTE_COUNT:
 			return _error("Overworld sprite %d has palette %d." % [number, default_palette])
 
+		# A walking sprite's record names half its graphics. GetUsedSprite
+		# (engine/overworld/overworld.asm, identical in both pins) copies the
+		# recorded length to vTiles0 and then the same length again, from
+		# straight after it, to vTiles1: the standing drawings and the walking
+		# ones. Only a still sprite is skipped, by _DoesSpriteHaveFacings, and a
+		# standing sprite's second half is whatever follows it, which nothing
+		# ever draws because a standing sprite never steps.
+		var read_size: int = byte_size * 2 if sprite_type == Gen2WorldSprite.TYPE_WALKING \
+			else byte_size
 		var graphics_offset: int = RomFile.linear(bank, address)
-		var raw: PackedByteArray = rom.slice(graphics_offset, byte_size)
-		if raw.size() != byte_size:
+		var raw: PackedByteArray = rom.slice(graphics_offset, read_size)
+		if raw.size() != read_size:
 			return _error("Overworld sprite %d graphics are truncated." % number)
-		var tiles: int = floori(float(byte_size) / float(Gen2Tiles.TILE_BYTES))
+		var tiles: int = floori(float(read_size) / float(Gen2Tiles.TILE_BYTES))
 		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
 		if pixels.size() != tiles * Gen2Tiles.TILE_PIXELS:
 			return _error("Overworld sprite %d graphics did not decode." % number)
@@ -405,7 +414,7 @@ static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Diction
 			"number": number,
 			"address": address,
 			"bank": bank,
-			"bytes": byte_size,
+			"bytes": read_size,
 			"tiles": tiles,
 			"type": sprite_type,
 			"palette": default_palette,

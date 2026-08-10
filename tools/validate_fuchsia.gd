@@ -14,7 +14,8 @@ extends SceneTree
 ## cells in turn shows that Crystal owes two of Route 13's five and nothing at
 ## all on Routes 12, 14 and 15, while Gold and Silver owe a different set on
 ## three profile-split routes. And Fuchsia Gym is a maze rather than a gate: its
-## fifty wall cells leave 128 walkable ones, none of its six objects is an
+## fifty wall cells leave 130 walkable ones and its six objects stand on six of
+## them, so the door reaches 124; none of those six is an
 ## OBJECTTYPE_TRAINER, and Janine sets her four disguised trainers' flags herself.
 ##
 ##   Godot --headless --path . -s res://tools/validate_fuchsia.gd
@@ -71,7 +72,13 @@ const FUCHSIA_GYM_DOOR: Vector2i = Vector2i(8, 27)
 
 ## The gym: its own door, its wall count, Janine and the cell she is faced from.
 const GYM_LANDING: Vector2i = Vector2i(4, 17)
-const GYM_CELLS: int = 128
+## Collision alone leaves 130 land cells; the six objects stand on six of them
+## and the flood is `can_walk_to`, so 124 is what the door reaches. The pin was
+## 128 while Janine's four disguised trainers did not occupy anything: they carry
+## SPRITE_FUCHSIA_GYM_1 to _4, which are `SPRITE_VARS` rows no script assigns, and
+## `GetMonSprite.NoBreedmon` answers WALKING_SPRITE for an unassigned one rather
+## than nothing, so all four stand in the maze.
+const GYM_CELLS: int = 124
 const GYM_WALL_CELLS: int = 50
 const JANINE_INDEX: int = 0
 const JANINE_CELL: Vector2i = Vector2i(1, 10)

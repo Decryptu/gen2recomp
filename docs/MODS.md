@@ -358,6 +358,26 @@ Registration uses the same refusal rules as a world renderer, and shares both
 optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`
 cycle, bound in `Gen2BattleScreen` the way `Gen2WorldScreen` binds it.
 
+A battle renderer has one optional method of its own:
+
+| Method | Effect |
+|---|---|
+| `set_world_context(context: Gen2BattleWorldContext)` | Where the battle is being fought, once per battle, after `set_battle_data` and before the first view |
+
+`view` says what is on the field and nothing about the place, which is right for
+the cartridge's white field and leaves a renderer staging the fight on the map
+with nowhere to stage it. `Gen2BattleWorldContext` is that place, and it carries
+`map_id` (group and number), `tileset`, `player_cell`, `player_facing` and
+`time_of_day`, the last being the row the world was *drawn* with rather than the
+clock's, so a battle entered from an unlit cave is staged in the dark.
+
+It is a copy taken when the battle starts, not a handle on the world: a renderer
+cannot reach live world state through it, and the two screens stay independent.
+The map and tileset are numbers, which is what `GameData.world_map()` and
+`world_tileset()` take, so a renderer resolves whatever records it wants through
+the `GameData` it already has. A battle started outside the world, which is
+every development driver, supplies none and the method is not called.
+
 ## Logical world state and optional mod pose
 
 The game stays logically grid-based. The player and NPCs occupy walk cells,
@@ -406,27 +426,37 @@ Supported by the contract above:
   commits at the start of the step; the fraction is presentation only and never
   reaches collision, events or the world snapshot.
   `mods/examples/voxel_preview/` reads both;
+- scripted movement progress, on the same two calls. An `applymovement` applies
+  its whole stream at once, so every cell of the path commits together and the
+  offset is as many cells behind as there are left to draw.
+  `advance_scripted_steps(delta)` drains that trail and is the one mover a
+  screen keeps calling while a script runs, since that is when a script runs
+  one. Each step lasts its own command's duration: 16 frames for the slow
+  commands, 8 for the plain ones, 4 for the bike-speed ones;
+- a walking sprite. `Gen2WorldObject.frame` and `Gen2WorldAPI.player_walk_frame()`
+  are the cartridge's `Facings` index, 0 to 3: two standing drawings and two
+  walking ones, changing every four frames of a step the way
+  `SetFacingStepAction` does. `Gen2WorldSprite.image_for()` composes the frame,
+  and `frame_is_mirrored()` says when it is drawn flipped;
 - a camera of its own, through `player_position_cells()` and
   `visible_origin_cells()` above, without inheriting the tile page's framing;
 - steering that camera, through `handle_world_input`. `mods/examples/voxel_preview/`
   puts pitch on `Q` and `E`, two keys the world screen does not read.
 
-What is still missing, in the order it blocks work:
+What is still missing:
 
-1. **Per-tile height.** Extruded height is a guess from the collision
-   permission, which cannot tell a tree from a cliff from a building. Gen II
-   has no height data, so a renderer needs a per-block table it supplies
-   itself, and the host should let a mod attach one rather than have every
-   renderer hard-code Johto.
-2. **Interiors are not renderer-owned.** Only the overworld and battle are
-   registered; a 3D interior view has no equivalent boundary here.
-3. **Scripted movement does not interpolate.** `applymovement` streams, and the
-   jump, teleport and boulder step types, still place objects a whole cell at a
-   time. The wandering, spinning, following, player and trainer-approach paths
-   all carry the sub-cell offset.
+1. **The teleport, skyfall and dig step types.** `teleport_from`,
+   `teleport_to`, `skyfall` and `step_dig` reach the caller as a
+   `movement_command_requested` event and change nothing. None of them moves a
+   cell on the cartridge either: each is a spin, a rise or a fall over a fixed
+   count of frames (`StepFunction_TeleportFrom` and its neighbours in
+   `engine/overworld/map_objects.asm`), so each is a pose a renderer has to be
+   told about rather than an offset it can read.
 
-All three are presentation boundaries that do not exist yet; none of them
-changes the world's own data.
+**Per-block height is deliberately not a host boundary.** A renderer resolves
+shape from the collision permissions, the block grid and the tileset, all of
+which are already public, and keeps whatever table it needs beside its own
+resolver. A host-side one would be a second place for the same facts.
 
 ## Adding a menu entry
 

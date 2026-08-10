@@ -3178,6 +3178,97 @@ func test_script_movement_steps_through_a_wall_the_way_normal_step_does() -> voi
 	assert_eq(world.player_cell, Vector2i(9, 6))
 
 
+## An applymovement applies its whole stream in one call, so every cell of the
+## path commits at once and the drawing is what trails. Presentation only: the
+## cells below are already the stream's last one while the offset is still two
+## behind it.
+func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	var start: Vector2i = object.cell
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+
+	assert_eq(object.cell, start + Vector2i(2, 0), "both cells commit at once")
+	assert_eq(object.step_offset_cells(), Vector2(-2.0, 0.0), "and the drawing is behind both")
+
+	# STEP_FRAMES_WALK is 8 and MAX_CATCHUP_FRAMES caps a call at four.
+	for _call: int in 2:
+		assert_true(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "one step drawn, one to go")
+	assert_eq(object.cell, start + Vector2i(2, 0), "and no cell moved with it")
+
+	for _call: int in 2:
+		world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+	assert_false(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS))
+
+
+## The two drivers own different objects. advance_object_steps() decides
+## movement and a screen stops calling it while a script runs, which is exactly
+## when a scripted trail has to keep being drawn, so draining it there as well
+## would walk it at twice the speed.
+func test_the_movement_driver_leaves_a_scripted_trail_to_its_own_driver() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_true(object.scripted_steps)
+
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0, random)
+	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "untouched by the other driver")
+
+	assert_true(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	assert_eq(object.step_offset_cells(), Vector2(-0.5, 0.0))
+
+
+## The player's half of the same thing, plus the walk frame that goes with it.
+## OBJECT_STEP_FRAME advances once per hardware frame and its two high bits pick
+## the drawing, so the frame changes every four.
+func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6110": [0x0D, 0x0D, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 0, 0x10, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+
+	assert_eq(world.player_cell, Vector2i(7, 4), "both cells commit at once")
+	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 2.0))
+	assert_eq(world.player_walk_frame(), 0)
+
+	for _call: int in 2:
+		assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0), "one step drawn")
+	# Eight frames in, the counter is on its third drawing: stand, walk, stand.
+	assert_eq(world.player_walk_frame(), 2)
+
+	for _call: int in 2:
+		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+	assert_eq(world.player_cell, Vector2i(7, 4))
+
+
 func test_script_movement_still_refuses_a_step_off_the_map() -> void:
 	RomCache.write_json(RomCache.world_movements_path(_directory), {
 		"48:6100": [0x0F, 0x47],
@@ -3583,6 +3674,36 @@ func test_an_unassigned_variable_sprite_still_occupies_and_is_talkable() -> void
 
 	assert_not_null(standing, "an unassigned variable sprite left the cell empty")
 	assert_false(world.can_walk_to(Vector2i(7, 5)), "it did not occupy its cell")
+
+
+## `ReadObjectEvents` builds wMapObjects from map data and `LoadSpriteGFX` fills
+## VRAM afterwards, so an object exists before its graphics do and none of
+## IsNPCAtCoord, CheckFacingObject or CanObjectMoveInDirection asks what loaded.
+## A sprite this build cannot draw, a Pokemon sprite among them, therefore has to
+## keep blocking and keep answering A: Vermilion's SPRITE_MACHOP and Celadon's
+## SPRITE_POLIWAG were both walked straight through while that was not true.
+func test_an_object_whose_sprite_is_missing_still_blocks_and_is_talkable() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var objects: Array = world.current_map.events["objects"]
+	# Well past the fixture's one-sprite table, and below SPRITE_VARS, so it
+	# resolves to nothing at all rather than to the variable-sprite fallback.
+	objects[0]["sprite"] = 0x9A
+	objects[0]["x"] = 7
+	objects[0]["y"] = 5
+	world.reload_current_map()
+
+	var standing: Gen2WorldObject = world.object_at(Vector2i(7, 5))
+	assert_not_null(standing, "a missing sprite emptied the cell")
+	assert_null(standing.sprite, "and the fixture really cannot draw it")
+	assert_false(world.can_walk_to(Vector2i(7, 5)), "it did not occupy its cell")
+
+	# Drawing is the one thing that may ask for a sprite.
+	assert_eq(world.visible_objects().size(), 0)
+	assert_eq(world.active_objects().size(), 1)
+
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_false(world.interact().is_empty(), "and it could not be talked to")
 
 
 ## constants/event_flags.asm, the flag Oak sets on the sixteen-badge branch.

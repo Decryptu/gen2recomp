@@ -84,9 +84,12 @@ func _verify_surf_sprites(game_id: StringName, data: GameData) -> void:
 				game_id, number, sprite.sprite_type,
 			]
 		)
+		# Twice what sprites.asm declares: GetUsedSprite copies the recorded
+		# twelve tiles and the twelve after them, the standing drawings and the
+		# walking ones, so a walking sprite is cached whole.
 		_check(
-			sprite.tiles == 12,
-			"%s: overworld sprite %d has %d tiles, not the 12 sprites.asm declares." % [
+			sprite.tiles == Gen2WorldSprite.WALKING_HALF_TILES * 2,
+			"%s: overworld sprite %d has %d tiles, not the 24 a walking sprite draws." % [
 				game_id, number, sprite.tiles,
 			]
 		)

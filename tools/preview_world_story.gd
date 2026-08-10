@@ -1576,7 +1576,7 @@ func _story_path(data: GameData) -> Dictionary:
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": falkner_run,
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 	})
 	if not bool(falkner_run.get("terminal", false)):
@@ -1640,7 +1640,7 @@ func _story_path(data: GameData) -> Dictionary:
 		"party": party_summary,
 		"event_flags": world.state.event_flags(),
 		"map_scenes": world.state.to_dict().get("map_scenes", {}),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 	}
 
 
@@ -1926,7 +1926,7 @@ func _hive_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": bugsy_run,
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 	})
 	if not bool(bugsy_run.get("terminal", false)):
@@ -2217,7 +2217,7 @@ func _plain_badge_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": badge_run,
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 	})
 	if not bool(badge_run.get("terminal", false)):
@@ -2653,7 +2653,7 @@ func _fog_badge_path(
 		"cell": _cell_value(world),
 		"entry_statuses": gym_entry.get("statuses", []),
 		"run": morty.get("run", {}),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 	})
 	if not bool(morty.get("ok", false)):
@@ -2892,7 +2892,7 @@ func _mineral_badge_path(
 		"cell": _cell_value(world),
 		"entry_statuses": gym_entry.get("statuses", []),
 		"run": jasmine.get("run", {}),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 		"items": _named_items(data, world.state.items()),
 	})
@@ -3486,7 +3486,7 @@ func _glacier_badge_path(
 		"cell": _cell_value(world),
 		"entry_statuses": gym_entry.get("statuses", []),
 		"run": pryce.get("run", {}),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 		"items": _named_items(data, world.state.items()),
 		# The badge is not all Pryce commits. `readvar VAR_BADGES` then
@@ -4355,7 +4355,7 @@ func _dragon_shrine_leg(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": quiz,
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"answered_wrong": world.event_flag_active(EVENT_ANSWERED_DRAGON_MASTER_QUIZ_WRONG),
 	})
 	if not bool(quiz.get("terminal", false)):
@@ -4441,7 +4441,7 @@ func _dragons_den_dragon_fang(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": fang.get("run", {}),
-		"badge_count": world.state.badge_count(false),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"items": _named_items(data, world.state.items()),
 	})
 	if not bool(fang.get("ok", false)):
@@ -4998,7 +4998,7 @@ func _victory_road_gate_leg(
 		"step": "victory_road_gate_badge_check",
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"encounters": checked.get("encounters", []),
 	})
 	if not bool(checked.get("ok", false)):
@@ -5111,7 +5111,7 @@ func _victory_road_leg(
 		"encounters": plateau.get("encounters", []),
 		"mt_moon_rival": world.event_flag_active(EVENT_BEAT_RIVAL_IN_MT_MOON),
 		"flypoint": _engine_flag_set(world, data, ENGINE_FLYPOINT_INDIGO_PLATEAU),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 	})
 	if not bool(plateau.get("ok", false)):
 		return {
@@ -5301,7 +5301,7 @@ func _hall_of_fame_leg(
 		"red_in_mt_silver": world.event_flag_active(EVENT_RED_IN_MT_SILVER),
 		"hall_of_fame_events": presentations,
 		"hall_of_fame_flag": world.state.hall_of_fame(),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 	})
 	if not bool(run.get("terminal", false)):
 		return {
@@ -8269,7 +8269,7 @@ func _blackthorn_path(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"party": _party_species(save),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 	})
 	return {"ok": true}
 
@@ -8537,7 +8537,7 @@ func _storm_badge_leg(
 		"map": _map_value(world),
 		"cell": _cell_value(world),
 		"run": chuck.get("run", {}),
-		"badge_count": world.state.badge_count(),
+		"badge_count": world.state.badge_count(Gen2WorldState.is_crystal_profile(data)),
 		"engine_flags": world.state.engine_flags(),
 		"items": _named_items(data, world.state.items()),
 	})

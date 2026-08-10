@@ -76,6 +76,66 @@ func test_step_offset_starts_a_full_cell_behind_and_reaches_zero() -> void:
 	assert_false(object.tick_step())
 
 
+func test_a_queued_stream_is_drawn_a_step_at_a_time_in_stream_order() -> void:
+	var object: Gen2WorldObject = _object()
+	object.queue_step(Vector2i.RIGHT, 8)
+	object.queue_step(Vector2i.DOWN, 8)
+	assert_true(object.scripted_steps)
+	# Both cells committed when the stream applied, so the drawing starts two
+	# steps behind, and it walks them in the order the stream named them.
+	assert_eq(object.step_offset_cells(), Vector2(-1.0, -1.0))
+
+	for _frame: int in 8:
+		assert_true(object.tick_step())
+	assert_eq(object.step_offset_cells(), Vector2(0.0, -1.0), "the right step is drawn")
+
+	for _frame: int in 4:
+		assert_true(object.tick_step())
+	assert_eq(object.step_offset_cells(), Vector2(0.0, -0.5))
+
+	for _frame: int in 4:
+		assert_true(object.tick_step())
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+	assert_false(object.scripted_steps)
+	assert_false(object.tick_step())
+
+
+## An ordinary step supersedes a trail rather than joining it: the two never
+## overlap on the cartridge either, since a scripted movement owns the object
+## until its stream ends.
+func test_an_ordinary_step_replaces_a_queued_stream() -> void:
+	var object: Gen2WorldObject = _object()
+	object.queue_step(Vector2i.RIGHT, 8)
+	object.queue_step(Vector2i.RIGHT, 8)
+	object.start_step(Vector2i.LEFT, 8)
+	assert_false(object.scripted_steps)
+	assert_eq(object.step_offset_cells(), Vector2(1.0, 0.0))
+
+
+## SetFacingStepAction increments OBJECT_STEP_FRAME once per frame of a step and
+## the drawing is its two high bits, so it changes every four frames and frames
+## 1 and 3 are the two walking pictures.
+func test_the_walk_frame_changes_every_four_frames_of_a_step() -> void:
+	var object: Gen2WorldObject = _object()
+	assert_eq(object.walk_frame(), 0)
+	object.start_step(Vector2i.RIGHT, 16)
+
+	for _frame: int in 4:
+		object.tick_step()
+	assert_eq(object.walk_frame(), 1)
+	assert_eq(object.frame, 1, "and the drawn frame follows the counter")
+
+	for _frame: int in 4:
+		object.tick_step()
+	assert_eq(object.walk_frame(), 2)
+
+	for _frame: int in 8:
+		object.tick_step()
+	# Sixteen frames is one full cycle, so a slow step both starts and ends on
+	# the standing picture without anything having to clear the counter.
+	assert_eq(object.walk_frame(), 0)
+
+
 func test_step_offset_direction_matches_the_committed_movement() -> void:
 	var object: Gen2WorldObject = _object()
 	object.start_step(Vector2i.UP, 16)

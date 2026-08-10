@@ -1106,7 +1106,13 @@ const CRYSTAL: Dictionary = {
 	"tileset_palette_bank": 0x13,
 	"world_palette_offset": 0xB319,
 	"overworld_sprites": 0x14736,
-	"overworld_sprite_count": 99,
+	## NUM_OVERWORLD_SPRITES (constants/sprite_constants.asm), which is the last
+	## constant's own value: SPRITE_STANDING_YOUNGSTER is $66. Crystal's four rows
+	## past pokegold's SPRITE_SILVER_TROPHY are Kris, Kris on a bike, Kurt
+	## outside, the three beasts and the standing youngster. Reading 99 stopped at
+	## SPRITE_SUICUNE and left thirteen map objects with no sprite, which is also
+	## no collision: see Gen2WorldAPI.object_at().
+	"overworld_sprite_count": 102,
 	"overworld_sprite_palettes": 0xB469,
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
