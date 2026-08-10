@@ -56,6 +56,17 @@ const CANT_RUN: int = 1 << 14
 ## AI sets it here, since the player's pack has no X items yet.
 const X_ACCURACY: int = 1 << 15
 
+## `SUBSTATUS_PERISH`, `wPlayerSubStatus1` bit 4 on the cartridge and a bit of
+## its own here, since bit 4 of this int is the reserved one above. It sits on
+## each Pokémon that heard the song, with
+## [member Gen2BattleMon.perish_count] beside it.
+##
+## A switch cures it. `NewBattleMonStatus` and `NewEnemyMonStatus` zero all five
+## substatus bytes on a send-out and leave `wPlayerPerishCount` alone, but every
+## read of the count is behind the flag, so clearing both in
+## [method Gen2BattleMon.reset_volatile] is the same behavior.
+const PERISH: int = 1 << 16
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as
@@ -98,6 +109,11 @@ const MAX_TRAP_TURNS: int = 6
 ## What a bound Pokémon loses each turn, `GetSixteenthMaxHP`'s at-least-one
 ## sixteenth (engine/battle/core.asm).
 const TRAP_DIVISOR: int = 16
+
+## What `BattleCommand_PerishSong` loads into each side's count. `HandlePerishSong`
+## decrements before it prints, so the four counts printed are 3, 2, 1 and 0, and
+## the song's own line says three turns.
+const PERISH_TURNS: int = 4
 
 ## Whether an attracted Pokémon is too smitten to move, out of 256: the
 ## cartridge's own 128 in 256, a coin flip, rolled fresh every turn it tries to

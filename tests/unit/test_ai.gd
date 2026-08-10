@@ -503,3 +503,89 @@ func test_smart_heal_is_encouraged_once_the_ai_is_nearly_out() -> void:
 		if Gen2BattleAI.choose_slot(pikachu, geodude, _data, RomLayout.AI_SMART, _rng) == 0:
 			chose_heal += 1
 	assert_gt(chose_heal, 10, "the 90% branch should dominate twenty seeds")
+
+
+## `AI_Redundant.PerishSong` reads `wPlayerSubStatus1`, the target's own: a song
+## over a target already counting down restarts nothing, so it is a wasted turn.
+func test_basic_treats_a_second_perish_song_as_redundant() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus |= Gen2Substatus.PERISH
+
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_BASIC, _rng
+		)
+		assert_eq(slot, 1, "singing over a running count is the redundant move")
+
+
+## `.no`: with nobody left to send in, the song kills the AI too. Five points
+## against, and the only branch of the handler that rolls nothing.
+func test_smart_discourages_perish_song_with_nobody_on_the_bench() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+
+	for seed: int in 10:
+		_rng.seed = seed
+		var slot: int = Gen2BattleAI.choose_slot(
+			pikachu, geodude, _data, RomLayout.AI_SMART, _rng
+		)
+		assert_eq(slot, 1, "a lone Pokémon has no reason to start a clock on itself")
+
+
+## `.yes`: a player held by Mean Look or Spider Web cannot escape the count, so
+## the song is encouraged half the time.
+func test_smart_encourages_perish_song_against_a_player_that_cannot_run() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	geodude.substatus |= Gen2Substatus.CANT_RUN
+
+	var encouraged: bool = false
+	var left_alone: bool = false
+	for seed: int in 100:
+		_rng.seed = seed
+		var scores: Array = [20, 20, 20, 20]
+		Gen2BattleAI._apply_smart(
+			scores, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE,
+			Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE
+		)
+		if int(scores[0]) < 20:
+			encouraged = true
+		elif int(scores[0]) == 20:
+			left_alone = true
+	assert_true(encouraged, "half the time a trapped player is worth singing at")
+	assert_true(left_alone, "and half the time the coin says nothing")
+
+
+## The last branch, and the one that reads backwards: a matchup the AI is losing
+## (`CheckPlayerMoveTypeMatchups` under `BASE_AI_SWITCH_SCORE`) leaves the score
+## alone, while one it is winning is discouraged half the time.
+func test_smart_discourages_perish_song_only_while_the_matchup_holds() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.PERISH_SONG])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+
+	for seed: int in 100:
+		_rng.seed = seed
+		var losing: Array = [20, 20, 20, 20]
+		Gen2BattleAI._apply_smart(
+			losing, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE,
+			Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE - 1
+		)
+		assert_eq(int(losing[0]), 20, "a losing matchup neither rolls nor nudges")
+
+	var discouraged: bool = false
+	var left_alone: bool = false
+	for seed: int in 100:
+		_rng.seed = seed
+		var scores: Array = [20, 20, 20, 20]
+		Gen2BattleAI._apply_smart(
+			scores, pikachu, geodude, _data, _rng, 0, 0, Gen2Weather.NONE,
+			Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE
+		)
+		if int(scores[0]) > 20:
+			discouraged = true
+		elif int(scores[0]) == 20:
+			left_alone = true
+	assert_true(discouraged, "a matchup worth keeping is worth not ending")
+	assert_true(left_alone)

@@ -125,6 +125,21 @@ static func slots_for(game_id: StringName, rom_sha1: String, data: GameData) -> 
 	return out
 
 
+## The same row shape [method slots_for] returns, for a slot number with nothing
+## on disk. [method slots_for] answers only what exists, so this is what a caller
+## targeting a free slot describes it with, and it is the one row whose
+## [code]exists[/code] is false.
+static func empty_slot_row(slot: int) -> Dictionary:
+	return {
+		"slot": slot,
+		"exists": false,
+		"valid": false,
+		"label": "",
+		"player_name": "",
+		"message": "Empty",
+	}
+
+
 ## Slot numbers with a primary or backup copy on disk, ascending. Reads the
 ## directory rather than probing every number, so an empty game costs one
 ## listing instead of MAX_SLOTS existence checks.

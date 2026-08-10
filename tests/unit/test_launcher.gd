@@ -59,11 +59,15 @@ func test_launcher_opens_on_the_shelf_and_moves_between_its_pages() -> void:
 func test_switching_appearance_rebuilds_the_launcher_and_keeps_its_status() -> void:
 	await _open_launcher()
 	var before: Dictionary = _launcher.launcher_snapshot()
-	assert_eq(before["theme"], "light")
+	# Whichever appearance this machine's options file holds. Naming one would
+	# assert the tester's own preference rather than the switch.
+	var opened := StringName(before["theme"])
+	assert_true(Gen2LauncherTheme.MODES.has(opened), String(opened))
 
-	_launcher.preview_theme(&"dark")
+	var wanted: StringName = Gen2LauncherTheme.for_mode(opened).other_mode()
+	_launcher.preview_theme(wanted)
 	var after: Dictionary = _launcher.launcher_snapshot()
-	assert_eq(after["theme"], "dark")
+	assert_eq(after["theme"], String(wanted))
 	# The shelf is rebuilt whole, so the message on it has to be carried over.
 	assert_eq(after["status"], before["status"])
 	assert_eq(after["detail"], before["detail"])

@@ -224,10 +224,47 @@ func test_the_screen_opens_a_new_slot_at_the_lowest_free_number() -> void:
 	await _open_save_screen()
 
 	assert_true(_screen.open_new_slot())
+	var snapshot: Dictionary = _screen.save_screen_snapshot()
 	assert_eq(
-		_screen.save_screen_snapshot()["selected_slot"], 0,
+		snapshot["selected_slot"], 0,
 		"slot 1 is taken, so the new one is slot 0",
 	)
+	# The slot number alone is not the button working. A free slot has no row in
+	# `slots_for`, and a details pane that refuses to draw one leaves the player
+	# looking at an empty screen with no way to name a save.
+	assert_true(snapshot["new_game"], "the form is asked for")
+	assert_true(snapshot["new_game_form"], "and is actually on screen")
+
+
+## A free slot is not a file, so the four things that act on the file are not
+## offered on one. Cancelling back onto it leaves the slot described rather than
+## blank.
+func test_cancelling_a_new_slot_describes_it_instead_of_blanking_the_pane() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	await _open_save_screen()
+
+	assert_true(_screen.open_new_slot())
+	_screen.cancel_new_game()
+	var snapshot: Dictionary = _screen.save_screen_snapshot()
+
+	assert_false(snapshot["new_game"])
+	assert_false(snapshot["new_game_form"])
+	assert_eq(snapshot["selected_slot"], 0, "still pointing at the free slot")
+
+
+## The form opens on a game with no saves at all, which is the only way into a
+## first playthrough from the launcher.
+func test_a_game_with_no_saves_can_still_open_the_new_game_form() -> void:
+	await _open_save_screen()
+	assert_eq(_screen.save_screen_snapshot()["selected_slot"], -1, "nothing to select")
+
+	assert_true(_screen.open_new_slot())
+	var snapshot: Dictionary = _screen.save_screen_snapshot()
+
+	assert_eq(snapshot["selected_slot"], 0)
+	assert_true(snapshot["new_game_form"])
+	assert_true(_screen.create_new_game("ASH"))
+	assert_true(Gen2SaveStore.exists(_data.id, _data.sha1, 0))
 
 
 func test_creating_a_new_game_with_nothing_selected_takes_a_free_slot() -> void:

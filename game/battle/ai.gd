@@ -168,6 +168,14 @@ static func _locked_in(mon: Gen2BattleMon) -> bool:
 ## [param defender_screens] is the player's, which is what its Confuse row and
 ## its damage estimate read.
 ##
+## [param has_bench] and [param matchup_score] are the two routines the smart
+## layer farcalls out of a handler rather than reads off a battler:
+## `FindAliveEnemyMons`, which is whether the AI has anybody left to send, and
+## `CheckPlayerMoveTypeMatchups`, which is `wEnemyAISwitchScore` and is
+## [method Gen2AISwitch.matchup_score] here. Both are supplied the way
+## [param weather] is, since this routine scores a pairing rather than a battle;
+## the defaults are the neutral states, a lone Pokémon and an unnudged score.
+##
 ## Always returns a slot in range: [method Gen2Battle.move_for] turns an
 ## unusable slot into Struggle, so no empty-moveset case is needed here.
 static func choose_slot(
@@ -180,7 +188,9 @@ static func choose_slot(
 	defender_turns_taken: int = 0,
 	weather: int = Gen2Weather.NONE,
 	attacker_screens: int = Gen2Screens.NONE,
-	defender_screens: int = Gen2Screens.NONE
+	defender_screens: int = Gen2Screens.NONE,
+	has_bench: bool = false,
+	matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> int:
 	var scores: Array = []
 	for slot: int in Gen2BattleMon.MAX_MOVES:
@@ -190,61 +200,61 @@ static func choose_slot(
 		_apply_basic(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_SETUP:
 		_apply_setup(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_TYPES:
 		_apply_types(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_OFFENSIVE:
 		_apply_offensive(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_SMART:
 		_apply_smart(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_OPPORTUNIST:
 		_apply_opportunist(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_AGGRESSIVE:
 		_apply_aggressive(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_CAUTIOUS:
 		_apply_cautious(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_STATUS:
 		_apply_status(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 	if ai_move_weights & RomLayout.AI_RISKY:
 		_apply_risky(
 			scores, attacker, defender, data, rng,
 			attacker_turns_taken, defender_turns_taken, weather,
-			attacker_screens, defender_screens
+			attacker_screens, defender_screens, has_bench, matchup_score
 		)
 
 	return _pick_lowest(scores, attacker, rng)
@@ -334,7 +344,9 @@ static func _skip_80_20(rng: RandomNumberGenerator) -> bool:
 static func _apply_basic(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	attacker_screens: int = Gen2Screens.NONE, defender_screens: int = Gen2Screens.NONE
+	attacker_screens: int = Gen2Screens.NONE, defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -362,6 +374,10 @@ static func _apply_basic(
 			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.MIST)
 		elif effect == Gen2MoveEffect.FOCUS_ENERGY:
 			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY)
+		elif effect == Gen2MoveEffect.PERISH_SONG:
+			# `.PerishSong` reads `wPlayerSubStatus1`, the target's: a second song
+			# over one already counting down would reset nothing.
+			redundant = Gen2Substatus.has(defender.substatus, Gen2Substatus.PERISH)
 		elif effect == Gen2MoveEffect.MEAN_LOOK:
 			# `.MeanLook` reads the user's own flag, the side the trap sits on.
 			redundant = Gen2Substatus.has(attacker.substatus, Gen2Substatus.CANT_RUN)
@@ -382,7 +398,9 @@ static func _apply_basic(
 static func _apply_setup(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, atk_turns: int, def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -417,7 +435,9 @@ static func _in_run(effect: int, base: int) -> bool:
 static func _apply_types(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -453,7 +473,9 @@ static func _apply_types(
 static func _apply_offensive(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -467,7 +489,9 @@ static func _apply_offensive(
 static func _apply_smart(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, atk_turns: int, def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	has_bench: bool = false,
+	matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -515,6 +539,8 @@ static func _apply_smart(
 			Gen2MoveEffect.HEAL, Gen2MoveEffect.MORNING_SUN, Gen2MoveEffect.SYNTHESIS, \
 			Gen2MoveEffect.MOONLIGHT:
 				_smart_heal(scores, slot, attacker, rng)
+			Gen2MoveEffect.PERISH_SONG:
+				_smart_perish_song(scores, slot, defender, rng, has_bench, matchup_score)
 
 
 ## `AI_Smart_Solarbeam`: 80% to encourage it greatly in sun, where it needs no
@@ -720,6 +746,37 @@ static func _smart_heal(
 		_discourage(scores, slot, 1)
 
 
+## `AI_Smart_PerishSong`: worth singing when the player cannot leave, not worth
+## singing when the AI has nobody to leave for.
+##
+## Three branches in the source's own order. `.no`, with nobody on the bench, is
+## the only one that moves a score without a roll: five points against, since a
+## song the AI cannot walk away from kills it too. A player held by Mean Look or
+## Spider Web is `.yes`, 50% to encourage. Otherwise the AI only bothers when the
+## matchup is one it is not losing: `CheckPlayerMoveTypeMatchups` below
+## [constant Gen2AISwitch.BASE_SCORE] returns with nothing said, and at or above
+## it is 50% to discourage. Reading that as "sing when things are going badly"
+## has it backwards; the branch that says yes is the trapped one.
+static func _smart_perish_song(
+	scores: Array, slot: int, defender: Gen2BattleMon, rng: RandomNumberGenerator,
+	has_bench: bool, matchup_score: int
+) -> void:
+	if not has_bench:
+		_discourage(scores, slot, 5)
+		return
+
+	if Gen2Substatus.has(defender.substatus, Gen2Substatus.CANT_RUN):
+		if not _skip_50_50(rng):
+			_encourage(scores, slot, 1)
+		return
+
+	if matchup_score < Gen2AISwitch.BASE_SCORE:
+		return
+	if _skip_50_50(rng):
+		return
+	_discourage(scores, slot, 1)
+
+
 static func _smart_belly_drum(scores: Array, slot: int, attacker: Gen2BattleMon) -> void:
 	if attacker.stage("attack") >= 3:
 		_discourage(scores, slot, 5)
@@ -758,7 +815,9 @@ static func _smart_psych_up(
 static func _apply_opportunist(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	if _above_half(attacker):
 		return
@@ -785,7 +844,9 @@ static func _apply_opportunist(
 static func _apply_aggressive(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	var best_slot: int = -1
 	var best_damage: int = -1
@@ -837,7 +898,9 @@ static func _estimate_damage(
 static func _apply_cautious(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	if atk_turns == 0:
 		return
@@ -856,7 +919,9 @@ static func _apply_cautious(
 static func _apply_status(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):
@@ -878,7 +943,9 @@ static func _apply_status(
 static func _apply_risky(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
-	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE
+	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
+	_has_bench: bool = false,
+	_matchup_score: int = Gen2AISwitch.BASE_SCORE
 ) -> void:
 	for slot: int in Gen2BattleMon.MAX_MOVES:
 		if not attacker.can_use(slot):

@@ -107,6 +107,10 @@ var encore_turns: int = 0
 var trapped_turns: int = 0
 var trapping_move: int = 0
 
+## `wPlayerPerishCount`: how many turn ends this Pokémon has left before Perish
+## Song finishes it. Read only while [constant Gen2Substatus.PERISH] is set.
+var perish_count: int = 0
+
 ## `wPlayerTurnsTaken`: how many turns this Pokémon has actually acted on since
 ## it came out. `BattleCommand_DoTurn` is the one place it rises, behind the same
 ## charging check that decides whether PP is spent, so a two-turn release does
@@ -259,6 +263,7 @@ func reset_volatile() -> void:
 	encore_turns = 0
 	trapped_turns = 0
 	trapping_move = 0
+	perish_count = 0
 	turns_taken = 0
 	last_move_used = 0
 
