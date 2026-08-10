@@ -40,10 +40,17 @@ const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
 const STEP_FRAMES_FAST: int = 4
 ## How long each scripted step command takes, from the `STEP_*` speed it passes
 ## to `InitStep` (engine/overworld/movement.asm) and that row of `StepVectors`.
-## `turn_step` is the one that indexes no row: `TurnStep` sets STEP_TYPE_TURN,
-## whose two halves are two frames each (`StepFunction_Turn`).
+##
+## Every command here moves one cell, because every one of them reaches
+## `InitStep`: `NormalStep`, `SlideStep`, `JumpStep` and `TurningStep` all call
+## it and differ only in the `OBJECT_ACTION` they set over the top, a spin for
+## the three turning rows and a jump arc for the three jumping ones. The turning
+## rows keep the direction the command names; `turn_away` does not reverse it.
+##
+## `turn_step` is the one command that is not here: `TurnStep` sets
+## STEP_TYPE_TURN, never calls `InitStep`, and `StepFunction_Turn` is two frames
+## of standing and two of the new facing. It is filed with `turn_head` below.
 const SCRIPTED_STEP_FRAMES: Dictionary = {
-	&"turn_step": 4,
 	&"slow_step": STEP_FRAMES_NPC_WALK,
 	&"step": STEP_FRAMES_WALK,
 	&"big_step": STEP_FRAMES_FAST,
@@ -53,7 +60,13 @@ const SCRIPTED_STEP_FRAMES: Dictionary = {
 	&"slow_jump_step": STEP_FRAMES_NPC_WALK,
 	&"jump_step": STEP_FRAMES_WALK,
 	&"fast_jump_step": STEP_FRAMES_FAST,
+	&"turn_away": STEP_FRAMES_NPC_WALK,
+	&"turn_in": STEP_FRAMES_WALK,
+	&"turn_waterfall": STEP_FRAMES_FAST,
 }
+## The commands that only change a facing. `TurnHead` writes the direction and
+## stands; `TurnStep` writes it two frames in and stands for two more.
+const SCRIPTED_TURN_KINDS: Array[StringName] = [&"turn_head", &"turn_step"]
 ## RandomStepDuration_Slow and _Fast mask the source random byte before storing
 ## it as the wait preceding the next movement decision.
 const IDLE_MASK_SLOW: int = 0x7F
@@ -3050,11 +3063,8 @@ func _apply_object_movement(event: Dictionary) -> Array:
 	var object: Gen2WorldObject = objects[object_index]
 	for command: Dictionary in decoded.get("commands", []):
 		var kind: StringName = StringName(command.get("kind", &""))
-		if kind in [&"turn_head", &"turn_in", &"turn_waterfall"]:
+		if kind in SCRIPTED_TURN_KINDS:
 			object.apply_direction(_movement_direction(int(command.get("direction", 0))))
-			continue
-		if kind == &"turn_away":
-			object.apply_direction(-_movement_direction(int(command.get("direction", 0))))
 			continue
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
@@ -3131,14 +3141,10 @@ func _apply_player_movement(event: Dictionary) -> Array:
 		}]
 	for command: Dictionary in decoded.get("commands", []):
 		var kind: StringName = StringName(command.get("kind", &""))
-		if kind in [&"turn_head", &"turn_in", &"turn_waterfall"]:
+		if kind in SCRIPTED_TURN_KINDS:
 			player_facing = _facing_for_direction(
 				_movement_direction(int(command.get("direction", 0)))
 			)
-			continue
-		if kind == &"turn_away":
-			var away: Vector2i = -_movement_direction(int(command.get("direction", 0)))
-			player_facing = _facing_for_direction(away)
 			continue
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))

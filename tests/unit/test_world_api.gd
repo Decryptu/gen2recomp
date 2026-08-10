@@ -3182,6 +3182,38 @@ func test_script_movement_steps_through_a_wall_the_way_normal_step_does() -> voi
 ## path commits at once and the drawing is what trails. Presentation only: the
 ## cells below are already the stream's last one while the offset is still two
 ## behind it.
+## The four turning commands, which are not what their names suggest.
+## `TurnStep` sets STEP_TYPE_TURN and never calls `InitStep`, so it only turns;
+## `turn_away`, `turn_in` and `turn_waterfall` all reach `TurningStep`, which
+## does call it, so each steps one cell in the direction it names and only the
+## spin over the top tells them from a plain step. `turn_away` does not reverse
+## anything. `engine/events/forced_movement.asm` is the case that shows it: a
+## whirlpool spins the player, `turn_in` steps them back off the tile, and they
+## would stand on it for good if it turned in place.
+func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		# turn_step down, then turn_in up.
+		"48:6110": [0x04, 0x25, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 0, 0x10, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+
+	# turn_step faced down and moved nothing; turn_in stepped one cell up and
+	# left the player facing the way it named.
+	assert_eq(world.player_cell, Vector2i(7, 5))
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_UP)
+	# One cell of trail, at turn_in's own STEP_WALK duration.
+	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0))
+	for _call: int in 2:
+		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+
+
 func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -> void:
 	RomCache.write_json(RomCache.world_movements_path(_directory), {
 		"48:6100": [0x0F, 0x0F, 0x47],

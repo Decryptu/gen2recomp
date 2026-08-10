@@ -204,6 +204,9 @@ var _forget_confirm_cursor: int = 0
 ## flags of its own to read: it falls back to [method _random_slot], same as
 ## before this existed. Reset by both, set only by [method show_trainer].
 var _enemy_trainer_class: int = 0
+## Which trainer of that class, for the view. Both are zero in a wild battle,
+## which is what `wOtherTrainerClass` holds there too.
+var _enemy_trainer_index: int = 0
 
 var _enemy: int = 1
 var _player: int = 1
@@ -345,6 +348,7 @@ func show_matchup(enemy: int, player: int, enemy_level: int = 5, player_level: i
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = 0
+	_enemy_trainer_index = 0
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), _party_from(_enemy, _enemy_level), _rng
 	)
@@ -385,6 +389,7 @@ func show_trainer(
 	_save_written = false
 	_source_save = null
 	_enemy_trainer_class = trainer_class
+	_enemy_trainer_index = index
 	_battle = Gen2Battle.create_parties(
 		_data, _party_from(_player, _player_level), enemy_party, _rng, true
 	)
@@ -423,6 +428,7 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = 0
+	_enemy_trainer_index = 0
 	_player = player_lead.species
 	_player_level = player_lead.level
 	_enemy = enemy_lead.species
@@ -466,6 +472,7 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 	_save_written = false
 	_source_save = save
 	_enemy_trainer_class = int(prepared.get("trainer_class", 0))
+	_enemy_trainer_index = int(prepared.get("trainer_index", 0))
 	_battle = prepared["battle"]
 	_battle.time_of_day = _time_of_day
 	_battle.load_trainer_items(_enemy_trainer_class)
@@ -2117,6 +2124,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
+		return
+	# Everything the screen wants has been claimed above, so what reaches here is
+	# what a renderer may have a use for. Gen2WorldScreen offers its own renderer
+	# the same leftovers for the same reason: a renderer that composes its own
+	# shot has to be able to let someone steer it.
+	if _renderer_input_free() \
+		and Gen2ModHost.renderer_handles_battle_input(_renderer, event):
+		accept_event()
+
+
+## Whether the battle itself is idle enough to pass an event on.
+##
+## The two modal input states are the ones that mean something by themselves: the
+## forget-move prompt and ball selection. A draining bar, the opening slide and a
+## move animation are deliberately not on that list. None of them reads input,
+## and a camera that stops answering every time a bar drains is not a camera; the
+## presses they do swallow are swallowed in [method _handle_button], which runs
+## first and never reaches here.
+func _renderer_input_free() -> bool:
+	return is_ready() and _forget_stage == &"" and not _capture_selecting
 
 
 func _handle_button(button: int) -> bool:
@@ -2247,6 +2274,20 @@ func cycle_battle_renderer() -> Dictionary:
 	return select_battle_renderer(ids[posmod(at + 1, ids.size())])
 
 
+## `wild` or `trainer`, decided the way the battle itself decides it: a trainer
+## class of zero is a wild battle, which is what `wOtherTrainerClass` holds and
+## what `Gen2Battle.trainer_battle` was built from.
+func _battle_kind() -> StringName:
+	return &"trainer" if _enemy_trainer_class > 0 else &"wild"
+
+
+## The trainer's own name from the imported party record, not the class name.
+func _enemy_trainer_name() -> String:
+	if _enemy_trainer_class <= 0 or _data == null:
+		return ""
+	return String(_data.trainer_party(_enemy_trainer_class, _enemy_trainer_index).get("name", ""))
+
+
 ## Pushes the current display values to the renderer. Plain values only, never
 ## the battle engine: a turn resolves at once and is then shown an event at a
 ## time, so what is drawn deliberately lags where the battle has got to.
@@ -2257,6 +2298,15 @@ func _push_view() -> void:
 		"enemy_species": _enemy, "player_species": _player,
 		"enemy_name": _name_of(_enemy), "player_name": _name_of(_player),
 		"enemy_level": _enemy_level, "player_level": _player_level,
+		## Who the fight is against, which the values above do not say. A wild
+		## battle carries class 0 and an empty name, the way `wOtherTrainerClass`
+		## is zero there; a class is what `GameData.trainer_pic()` and
+		## `trainer_name()` take, so a renderer standing the opponent on the field
+		## draws the cartridge's own picture of them.
+		"battle_kind": _battle_kind(),
+		"trainer_class": _enemy_trainer_class,
+		"trainer_index": _enemy_trainer_index,
+		"trainer_name": _enemy_trainer_name(),
 		## The bars draw whatever the animation is on rather than the committed
 		## HP, which is what makes them drain. Everything else, including
 		## [method battle_snapshot], keeps reading the committed value.
