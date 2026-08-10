@@ -269,6 +269,14 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"card_pic_female": [RomLayout.CARD_PIC_TILES, 3],
 		"card_right_corner": [RomLayout.CARD_RIGHT_CORNER_TILES, 1],
 	}
+	## The font and the frames are the two sheets addressed by character code
+	## rather than by slot, so both need their real first code. A frames sheet
+	## left on 0 draws nothing at all, since every box-drawing code is then past
+	## the end of the strip.
+	var first_codes: Dictionary = {
+		"font": RomLayout.FONT_FIRST_CODE,
+		"frames": RomLayout.FRAME_FIRST_CODE,
+	}
 	for name: String in sheet_tiles:
 		var tile_count: int = int(sheet_tiles[name][0])
 		var indices: PackedByteArray = PackedByteArray()
@@ -279,7 +287,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			"width": tile_count * Gen2Tiles.TILE_WIDTH,
 			"height": Gen2Tiles.TILE_HEIGHT,
 			"tiles": tile_count,
-			"first_code": RomLayout.FONT_FIRST_CODE if name == "font" else 0,
+			"first_code": int(first_codes.get(name, 0)),
 			"bits": 1,
 		}
 	manifest["tiles"] = sheets
