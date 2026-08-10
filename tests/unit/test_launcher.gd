@@ -200,3 +200,45 @@ func test_index_install_requires_the_download_to_be_the_listed_mod() -> void:
 	assert_true(right["ok"], JSON.stringify(right))
 	assert_eq(right["id"], PROBE_MOD_ID)
 	assert_string_contains(dialog.status_text(), "Installed")
+
+
+## A toast with nothing to say occupies nothing: not drawn, and not in the hit
+## test either.
+func test_a_silent_toast_is_not_on_screen_at_all() -> void:
+	await _open_launcher()
+	var toast: Gen2LauncherToast = _find_toast(_launcher)
+	assert_not_null(toast)
+
+	assert_false(toast.visible, "an empty toast is gone rather than transparent")
+	toast.show_message(&"error", "Something", "happened")
+	assert_true(toast.visible)
+
+
+## And it never takes a click, shown or not. The toast is drawn over the bottom
+## centre of every launcher page, which is where the shelf puts Play and the
+## cache button; a card that stopped the mouse left both of them dead.
+func test_a_toast_never_takes_a_click_from_what_is_under_it() -> void:
+	await _open_launcher()
+	var toast: Gen2LauncherToast = _find_toast(_launcher)
+	toast.show_message(&"error", "Something", "happened")
+
+	var stopping: Array[String] = []
+	_mouse_stoppers(toast, stopping)
+	assert_eq(stopping, [] as Array[String], "nothing in a toast is clickable")
+
+
+func _mouse_stoppers(node: Node, out: Array[String]) -> void:
+	if node is Control and node.mouse_filter == Control.MOUSE_FILTER_STOP:
+		out.append("%s %s" % [node.get_class(), node.name])
+	for child: Node in node.get_children():
+		_mouse_stoppers(child, out)
+
+
+func _find_toast(node: Node) -> Gen2LauncherToast:
+	if node is Gen2LauncherToast:
+		return node
+	for child: Node in node.get_children():
+		var found: Gen2LauncherToast = _find_toast(child)
+		if found != null:
+			return found
+	return null
