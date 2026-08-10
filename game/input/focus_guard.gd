@@ -15,6 +15,11 @@ extends Node
 ## Add one to a screen with [method attach] and call [method refresh] whenever
 ## what is on that screen changes.
 
+## Where focus should land when there is somewhere better than the first control
+## in tree order. A screen whose first control is a corner toggle would otherwise
+## start a pad there rather than on what the screen is about.
+var preferred: Control = null
+
 var _root: Control = null
 
 
@@ -45,9 +50,21 @@ func refresh() -> void:
 	var viewport: Viewport = _root.get_viewport()
 	if viewport == null or viewport.gui_get_focus_owner() != null:
 		return
-	var target: Control = first_focusable(_root)
+	var target: Control = _wanted()
 	if target != null:
 		target.grab_focus()
+
+
+func _wanted() -> Control:
+	if (
+		preferred != null
+		and is_instance_valid(preferred)
+		and preferred.is_visible_in_tree()
+		and preferred.focus_mode == Control.FOCUS_ALL
+		and not _is_disabled(preferred)
+	):
+		return preferred
+	return first_focusable(_root)
 
 
 func _on_device_changed(_kind: StringName) -> void:

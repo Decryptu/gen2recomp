@@ -1,8 +1,12 @@
 class_name Gen2ShelfPage
 extends VBoxContainer
 
-## The launcher's home: the cartridge stage, the name of whatever is selected,
-## and the one or two things you can do with it.
+## The launcher's home: the cartridge carousel and the one or two things you can
+## do with whatever is in the middle of it.
+##
+## The name of the selected cartridge is written on its own button rather than
+## over it, so the page carries one label instead of three that all say the same
+## thing.
 ##
 ## The page reports what was clicked and displays what it is told. Every import,
 ## refusal and launch belongs to the launcher.
@@ -10,16 +14,15 @@ extends VBoxContainer
 signal insert_requested(game_id: StringName)
 signal play_requested(game_id: StringName)
 signal manage_requested(game_id: StringName)
-## The shell paints its backdrop in the selected cartridge's colour.
+## The shell paints its backdrop for the selected cartridge.
 signal selection_changed(game_id: StringName)
 
 var _theme: Gen2LauncherTheme = null
 var _stage: Gen2CartridgeStage = null
-var _name: Label = null
-var _detail: Label = null
 var _play: Gen2LauncherButton = null
 var _manage: Gen2LauncherButton = null
-var _dots: HBoxContainer = null
+var _previous: Gen2LauncherButton = null
+var _next: Gen2LauncherButton = null
 var _details: Dictionary = {}
 var _compact: bool = false
 
@@ -41,51 +44,44 @@ func _build() -> void:
 	_stage.play_requested.connect(func(id: StringName) -> void: play_requested.emit(id))
 	add_child(_stage)
 
-	var caption: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_XS)
-	caption.alignment = BoxContainer.ALIGNMENT_CENTER
-	add_child(caption)
-	_name = Gen2LauncherUI.title(
-		_theme, "", Gen2LauncherTheme.FONT_DISPLAY if _compact else Gen2LauncherTheme.FONT_HERO
-	)
-	_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	caption.add_child(_name)
-	_detail = Gen2LauncherUI.muted(_theme, "")
-	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	caption.add_child(_detail)
-
-	_dots = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
-	_dots.alignment = BoxContainer.ALIGNMENT_CENTER
-	caption.add_child(_dots)
-	for index: int in RomRegistry.ORDER.size():
-		var dot := Control.new()
-		dot.custom_minimum_size = Vector2(7, 7)
-		dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		dot.draw.connect(_draw_dot.bind(dot, index))
-		_dots.add_child(dot)
-
 	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(actions)
-	_play = Gen2LauncherButton.create(
-		_theme, "Play", Gen2LauncherButton.Variant.PRIMARY, &"play"
-	)
-	_play.custom_minimum_size = Vector2(168, 48)
+
+	# The two arrows are the pointer's way round the carousel. A pad and a
+	# keyboard use ui_left and ui_right on the stage itself.
+	_previous = Gen2LauncherButton.icon_only(_theme, &"left", Gen2LauncherButton.Variant.DOCK, 44.0)
+	_previous.tooltip_text = "Previous cartridge"
+	_previous.pressed.connect(func() -> void: _stage.step(-1))
+	actions.add_child(_previous)
+
+	_play = Gen2LauncherButton.create(_theme, "", Gen2LauncherButton.Variant.HERO, &"play")
+	_play.custom_minimum_size = Vector2(210, 52)
 	_play.add_theme_font_size_override("font_size", Gen2LauncherTheme.FONT_TITLE)
 	_play.sound = &"power"
-	_play.pressed.connect(func() -> void: _on_primary())
+	_play.pressed.connect(_on_primary)
 	actions.add_child(_play)
-	# Round, to match the dock rather than the pill beside it.
-	_manage = Gen2LauncherButton.icon_only(
-		_theme, &"dots", Gen2LauncherButton.Variant.DOCK, 48.0
-	)
+
+	_manage = Gen2LauncherButton.icon_only(_theme, &"dots", Gen2LauncherButton.Variant.DOCK, 44.0)
 	_manage.tooltip_text = "Cache and re-import"
 	_manage.pressed.connect(func() -> void: manage_requested.emit(_stage.selected_id()))
 	actions.add_child(_manage)
 
-	_refresh_caption()
+	_next = Gen2LauncherButton.icon_only(_theme, &"right", Gen2LauncherButton.Variant.DOCK, 44.0)
+	_next.tooltip_text = "Next cartridge"
+	_next.pressed.connect(func() -> void: _stage.step(1))
+	actions.add_child(_next)
+
+	_refresh_action()
 
 
 func stage() -> Gen2CartridgeStage:
+	return _stage
+
+
+## Where a keyboard or a pad starts on this page: the carousel, which is what the
+## page is about and what ui_left and ui_right then turn.
+func focus_target() -> Control:
 	return _stage
 
 
@@ -100,12 +96,14 @@ func selected_id() -> StringName:
 func set_slot_state(game_id: StringName, imported: bool, detail: String) -> void:
 	_details[game_id] = detail
 	_stage.set_imported(game_id, imported)
-	_refresh_caption()
+	_refresh_action()
 
 
 func set_busy(busy: bool) -> void:
 	_play.set_disabled_state(busy)
 	_manage.set_disabled_state(busy)
+	_previous.set_disabled_state(busy)
+	_next.set_disabled_state(busy)
 
 
 ## Moves the selection onto [param game_id], used after an import so the freshly
@@ -120,10 +118,13 @@ func set_compact(compact: bool) -> void:
 	if compact == _compact:
 		return
 	_compact = compact
-	_name.add_theme_font_size_override(
+	_play.custom_minimum_size = Vector2(170 if compact else 210, 46 if compact else 52)
+	_play.add_theme_font_size_override(
 		"font_size",
-		Gen2LauncherTheme.FONT_DISPLAY if compact else Gen2LauncherTheme.FONT_HERO,
+		Gen2LauncherTheme.FONT_BODY if compact else Gen2LauncherTheme.FONT_TITLE,
 	)
+	for round_button: Gen2LauncherButton in [_previous, _manage, _next]:
+		round_button.set_side(40.0 if compact else 44.0)
 
 
 func _on_primary() -> void:
@@ -135,36 +136,25 @@ func _on_primary() -> void:
 
 
 func _on_selection_changed(game_id: StringName) -> void:
-	_refresh_caption()
+	_refresh_action()
 	selection_changed.emit(game_id)
 
 
-func _refresh_caption() -> void:
+## The button carries the cartridge's name, so it says both what is selected and
+## what pressing it does.
+func _refresh_action() -> void:
 	var id: StringName = _stage.selected_id()
 	var card: Gen2Cartridge = _stage.selected_cartridge()
 	if card == null:
 		return
-	_name.text = RomRegistry.title_for(id)
-	_name.add_theme_color_override("font_color", _theme.text if card.imported else _theme.faint)
+	var title: String = RomRegistry.title_for(id)
+	_play.text = title
 	if card.imported:
-		_detail.text = String(_details.get(id, "Ready"))
-		_play.text = "Play"
 		_play.set_glyph(&"play")
 		_play.sound = &"power"
+		_play.tooltip_text = "Play %s. %s" % [title, _details.get(id, "Ready")]
 	else:
-		_detail.text = "No cartridge in this bay yet"
-		_play.text = "Add cartridge"
 		_play.set_glyph(&"download")
 		_play.sound = &"click"
+		_play.tooltip_text = "Import a %s cartridge dump" % title
 	_manage.visible = card.imported
-	for dot: Node in _dots.get_children():
-		(dot as Control).queue_redraw()
-
-
-func _draw_dot(dot: Control, index: int) -> void:
-	var chosen: bool = index == _stage.selected
-	var colour: Color = (
-		_theme.tint_for(RomRegistry.ORDER[index]) if chosen
-		else _theme.with_alpha(_theme.faint, 0.45)
-	)
-	dot.draw_circle(dot.size * 0.5, 3.5 if chosen else 3.0, colour)

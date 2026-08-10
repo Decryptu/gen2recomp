@@ -20,6 +20,10 @@ enum Variant {
 	SEGMENT,
 	## A round icon button, used along the bottom dock.
 	DOCK,
+	## The one thing a screen is for, written plainly until it is reached. It
+	## carries no colour of its own so that hover, focus and the current choice
+	## are the only accent on the page, which is what makes a pad legible.
+	HERO,
 }
 
 const ICON_SIDE: float = 18.0
@@ -34,6 +38,11 @@ var _glyph: StringName = &""
 ## Whether this is the current choice in its group. Kept here rather than on
 ## [member BaseButton.button_pressed], which only means anything to a toggle.
 var _active: bool = false
+## Whether a pointer is over the button or a pad is on it. The icon is a raster
+## rather than a themed colour, so reaching a button has to repaint rather than
+## swap a stylebox.
+var _lit: bool = false
+var _side: float = DOCK_SIDE
 
 
 static func create(
@@ -60,8 +69,15 @@ static func icon_only(
 	side: float = 42.0,
 ) -> Gen2LauncherButton:
 	var button: Gen2LauncherButton = create(theme, "", kind, glyph)
-	button.custom_minimum_size = Vector2(side, side)
+	button.set_side(side)
 	return button
+
+
+## Resizes a round or square icon button, keeping it circular.
+func set_side(side: float) -> void:
+	_side = side
+	custom_minimum_size = Vector2(side, side)
+	repaint()
 
 
 ## A round dock button with its name written underneath by the caller.
@@ -106,6 +122,10 @@ func repaint() -> void:
 	var fill: Color = _theme.surface
 	var border: Color = _theme.line
 	var ink: Color = _theme.text
+	# Reached means hovered, focused or the current choice. The three look the
+	# same on purpose: a pad moving onto a control has to read exactly as a
+	# pointer resting on it.
+	var reached: bool = _lit or _active
 
 	match variant:
 		Variant.PRIMARY:
@@ -128,17 +148,24 @@ func repaint() -> void:
 			ink = _theme.text if _active else _theme.muted
 			pad_x = 14
 			pad_y = 7
-		Variant.DOCK:
-			fill = _theme.accent_wash(0.16) if _active else _theme.surface
-			border = _theme.accent if _active else _theme.line
-			ink = _theme.accent if _active else _theme.muted
+		# A plain disc with no outline: reaching it fills it with the accent and
+		# turns the glyph white, which is the whole of the state it carries.
+		Variant.DOCK, Variant.HERO:
+			fill = _theme.accent if reached else _theme.surface
+			border = Color(0, 0, 0, 0)
+			ink = _theme.on_accent if reached else _theme.text
 
 	_style("normal", fill, border, radius, pad_x, pad_y)
 	_style("hover", _hovered(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("pressed", _pressed_fill(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("disabled", _theme.with_alpha(fill, 0.4), _theme.with_alpha(border, 0.4),
 		radius, pad_x, pad_y)
-	_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 2)
+	# The round buttons say where focus is by filling, so a ring over the fill
+	# would only be a second answer to the same question.
+	if variant == Variant.DOCK or variant == Variant.HERO:
+		_style("focus", fill, border, radius, pad_x, pad_y)
+	else:
+		_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 2)
 
 	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
 			"font_focus_color"]:
@@ -164,10 +191,10 @@ func set_disabled_state(off: bool) -> void:
 
 func _radius() -> float:
 	match variant:
-		Variant.PRIMARY, Variant.DANGER:
+		Variant.PRIMARY, Variant.DANGER, Variant.HERO:
 			return Gen2LauncherTheme.RADIUS_PILL
 		Variant.DOCK:
-			return DOCK_SIDE * 0.5
+			return _side * 0.5
 		Variant.SEGMENT:
 			return Gen2LauncherTheme.RADIUS_SM - 2.0
 	return Gen2LauncherTheme.RADIUS_SM
@@ -203,6 +230,12 @@ func _centre_pivot() -> void:
 func _on_hover(entered: bool) -> void:
 	if disabled:
 		return
+	# Focus and the pointer both count as reached, so a button the mouse has left
+	# stays lit while a pad is still on it.
+	var reached: bool = entered or has_focus() or is_hovered()
+	if reached != _lit:
+		_lit = reached
+		repaint()
 	if entered:
 		Gen2LauncherAudio.play(&"hover")
 	if variant != Variant.DOCK or not is_inside_tree():

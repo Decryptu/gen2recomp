@@ -169,6 +169,49 @@ func test_the_selected_cartridge_stands_biggest_and_the_row_stays_centred() -> v
 		assert_lte(hero.position.x + hero.size.x, stage.size.x, "and ends on it")
 
 
+func test_every_cartridge_beside_the_selection_is_the_same_size_and_centred_on_it() -> void:
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	add_child_autofree(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = page.stage()
+
+	for index: int in RomRegistry.ORDER.size():
+		stage.select(index, false)
+		await get_tree().process_frame
+		var hero: Gen2Cartridge = stage.selected_cartridge()
+		assert_almost_eq(
+			hero.position.x + hero.size.x * 0.5, stage.size.x * 0.5, 0.5,
+			"the selection is always in the middle",
+		)
+		var side: float = -1.0
+		for other: Gen2Cartridge in _cartridges_of(stage):
+			if other == hero:
+				continue
+			if side < 0.0:
+				side = other.size.x
+			assert_almost_eq(other.size.x, side, 0.5, "one size for everything beside it")
+			assert_lt(other.size.x, hero.size.x, "and smaller than the selection")
+
+
+func test_the_carousel_turns_the_short_way_round_the_ring() -> void:
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	add_child_autofree(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = page.stage()
+	var last: int = RomRegistry.ORDER.size() - 1
+
+	# Stepping back off the first cartridge lands on the last one beside it,
+	# rather than travelling the whole row to reach it.
+	stage.select(0, false)
+	stage.step(-1)
+	assert_eq(stage.selected, last)
+	var behind: Gen2Cartridge = stage.cartridge(RomRegistry.ORDER[0])
+	await wait_seconds(0.5)
+	assert_gt(behind.position.x, stage.size.x * 0.5, "the one stepped off sits to the right")
+
+
 func test_arrow_keys_move_the_selection_and_wrap() -> void:
 	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
 	add_child_autofree(page)
