@@ -209,9 +209,7 @@ func _build_ui() -> void:
 	_slots_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_page.add_child(_slots_container)
 
-	var details: ScrollContainer = ScrollContainer.new()
-	details.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	details.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var details: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	_page.add_child(details)
 	_details_box = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
 	_details_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -318,9 +318,7 @@ func _build_ui() -> void:
 	_player_label.add_theme_font_size_override("font_size", 18)
 	content.add_child(_player_label)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var scroll: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	content.add_child(scroll)
 	_cards = VBoxContainer.new()
 	_cards.add_theme_constant_override("separation", 9)

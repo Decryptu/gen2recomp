@@ -31,8 +31,8 @@ const MIN_HEIGHT: float = 130.0
 const EXILE: float = 2.6
 ## Where a cartridge has faded out completely, in slots.
 const VANISH: float = 1.34
-## How far across the stage a finger travels to turn it by one cartridge.
-const SWIPE: float = 0.12
+## How far a pointer may move while pressed and still count as a click.
+const TAP: float = 6.0
 
 var selected: int = 0
 
@@ -40,8 +40,16 @@ var _theme: Gen2LauncherTheme = null
 var _cartridges: Array[Gen2Cartridge] = []
 var _order: Array[StringName] = []
 var _tween: Tween = null
-## Distance a finger has travelled since the last cartridge it turned.
-var _swipe: float = 0.0
+## Whether a pointer has hold of the row, and what it took hold of: the position
+## the row was at and where on the stage it was grabbed.
+var _grabbed: bool = false
+var _grab_scroll: float = 0.0
+var _grab_x: float = 0.0
+## How far the pointer has moved since it took hold, which is what separates a
+## click from a drag.
+var _travel: float = 0.0
+## One slot in pixels, worked out with the layout and read back by the drag.
+var _stride: float = 1.0
 ## The carousel position in slots. Equal to [member selected] at rest and driven
 ## between the two while a step animates.
 var _scroll: float = 0.0:
@@ -68,10 +76,7 @@ func _build() -> void:
 	focus_entered.connect(_place_all)
 	focus_exited.connect(_place_all)
 	for index: int in _order.size():
-		var id: StringName = _order[index]
-		var cartridge: Gen2Cartridge = Gen2Cartridge.create(_theme, id)
-		cartridge.insert_requested.connect(func() -> void: insert_requested.emit(id))
-		cartridge.play_requested.connect(func() -> void: _on_pressed(index))
+		var cartridge: Gen2Cartridge = Gen2Cartridge.create(_theme, _order[index])
 		add_child(cartridge)
 		_cartridges.append(cartridge)
 
@@ -136,38 +141,95 @@ func _gui_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_left"):
 		accept_event()
 		step(-1)
-	elif event.is_action_pressed("ui_right"):
+		return
+	if event.is_action_pressed("ui_right"):
 		accept_event()
 		step(1)
-	elif event.is_action_pressed("ui_accept"):
+		return
+	if event.is_action_pressed("ui_accept"):
 		accept_event()
 		_on_pressed(selected)
-	elif event is InputEventScreenDrag:
-		# A swipe turns the carousel one cartridge per [constant SWIPE], measured
-		# against the stage rather than in pixels so it feels the same on a phone
-		# as on a tablet.
-		var drag: InputEventScreenDrag = event
-		_swipe += drag.relative.x
-		var threshold: float = maxf(size.x * SWIPE, 24.0)
-		if absf(_swipe) >= threshold:
-			accept_event()
-			step(-signi(int(_swipe)))
-			_swipe = 0.0
-	elif event is InputEventScreenTouch:
-		_swipe = 0.0
-	elif event is InputEventMouseButton:
-		# A wheel over the stage turns the carousel, which is what a pointer
-		# expects of a row that scrolls sideways.
-		var wheel: InputEventMouseButton = event
-		if not wheel.pressed:
-			return
-		match wheel.button_index:
-			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_LEFT:
+		return
+	if event is InputEventMouseButton:
+		_on_click(event)
+	elif event is InputEventMouseMotion and _grabbed:
+		accept_event()
+		_on_drag(event)
+
+
+## The row is dragged rather than paged: a press takes hold of it, the pointer
+## carries it, and letting go settles on whatever is nearest. Touch arrives here
+## too, since the engine emulates a mouse from it.
+func _on_click(click: InputEventMouseButton) -> void:
+	match click.button_index:
+		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_LEFT:
+			if click.pressed:
 				accept_event()
 				step(-1)
-			MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_RIGHT:
+			return
+		MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_RIGHT:
+			if click.pressed:
 				accept_event()
 				step(1)
+			return
+		MOUSE_BUTTON_LEFT:
+			pass
+		_:
+			return
+	accept_event()
+	if click.pressed:
+		_grabbed = true
+		_grab_scroll = _scroll
+		_grab_x = click.position.x
+		_travel = 0.0
+		if _tween != null and _tween.is_valid():
+			_tween.kill()
+		return
+	if not _grabbed:
+		return
+	_grabbed = false
+	# A press that went nowhere is a click on whatever it landed on. Anything
+	# further than that was a drag, and a drag chooses by where it stopped.
+	if _travel <= TAP:
+		var hit: int = _at(click.position)
+		if hit >= 0:
+			_on_pressed(hit)
+			return
+	_settle()
+
+
+func _on_drag(motion: InputEventMouseMotion) -> void:
+	_travel += absf(motion.relative.x)
+	var stride: float = maxf(_stride, 1.0)
+	# Dragging right shows what stands to the left, which is one slot per stride.
+	_scroll = _grab_scroll - (motion.position.x - _grab_x) / stride
+
+
+## Settles a dragged row on the nearest cartridge and makes that the selection.
+## The whole ring is shifted back into range at the same time, so a row dragged
+## round and round does not walk [member _scroll] away from its slot numbers.
+func _settle() -> void:
+	var ring: int = _cartridges.size()
+	var nearest: float = roundf(_scroll)
+	var index: int = posmod(int(nearest), ring)
+	_scroll -= nearest - float(index)
+	if index != selected:
+		selected = index
+		Gen2LauncherAudio.play(&"hover")
+		selection_changed.emit(selected_id())
+	_slide(float(index), true)
+
+
+## The cartridge drawn under [param point], topmost first, or -1 for the bare
+## stage between them.
+func _at(point: Vector2) -> int:
+	for child: int in range(get_child_count() - 1, -1, -1):
+		var card := get_child(child) as Gen2Cartridge
+		if card == null or not card.visible:
+			continue
+		if Rect2(card.position, card.size).has_point(point):
+			return _cartridges.find(card)
+	return -1
 
 
 func _slide(target: float, animated: bool) -> void:
@@ -209,7 +271,7 @@ func _place_all() -> void:
 		fitted = maxf(fitted, size.x * NARROW_SHARE)
 	hero_width = minf(hero_width, fitted)
 	hero_height = hero_width / Gen2Cartridge.ASPECT
-	var stride: float = hero_width * (0.5 + GAP + SIDE * 0.5)
+	_stride = hero_width * (0.5 + GAP + SIDE * 0.5)
 	var middle: Vector2 = Vector2(size.x * 0.5, size.y * 0.5)
 
 	# Furthest from the middle first, so the selected cartridge is drawn last and
@@ -237,7 +299,7 @@ func _place_all() -> void:
 		var out: float = reach if reach <= 1.0 else 1.0 + (reach - 1.0) * EXILE
 		card.size = Vector2(width, height)
 		card.set_depth(0 if reach < 0.5 else 1)
-		card.position.x = middle.x + signf(slot) * out * stride - width * 0.5
+		card.position.x = middle.x + signf(slot) * out * _stride - width * 0.5
 		card.set_rest_y(middle.y - height * 0.5)
 		card.modulate.a = clampf(
 			lerpf(1.0, DIM, minf(reach, 1.0)) * clampf((VANISH - reach) / 0.34, 0.0, 1.0), 0.0, 1.0

@@ -1,7 +1,7 @@
 class_name Gen2LauncherButton
 extends Button
 
-## Every button the launcher draws, in the five weights it uses.
+## Every button the launcher draws, in the weights it uses.
 ##
 ## Godot lays out a button's own icon and label, so the glyph is handed over as
 ## a texture rather than parked by hand. What this class adds is the palette, the
@@ -10,7 +10,7 @@ extends Button
 enum Variant {
 	## The one action a screen is about: a filled accent pill.
 	PRIMARY,
-	## A card-coloured button with a hairline.
+	## A chip that fills with the accent when it is reached.
 	NEUTRAL,
 	## No fill until hovered. Rows of these read as labels.
 	QUIET,
@@ -26,7 +26,7 @@ enum Variant {
 	HERO,
 }
 
-const ICON_SIDE: float = 18.0
+const ICON_SIDE: float = 23.0
 const DOCK_SIDE: float = 52.0
 
 var variant: Variant = Variant.NEUTRAL
@@ -73,10 +73,14 @@ static func icon_only(
 	return button
 
 
-## Resizes a round or square icon button, keeping it circular.
+## Resizes a round or square icon button, keeping it circular. A [BoxContainer]
+## stretches its children across the row, so without the shrink a disc beside a
+## taller button is drawn as an ellipse.
 func set_side(side: float) -> void:
 	_side = side
 	custom_minimum_size = Vector2(side, side)
+	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	repaint()
 
 
@@ -117,11 +121,14 @@ func repaint() -> void:
 	if _theme == null:
 		return
 	var radius: float = _radius()
-	var pad_x: int = 0 if text.is_empty() else 18
-	var pad_y: int = 10
+	# Only enough room either side of the glyph to keep it off the edge: a button
+	# is mostly icon, which is what makes one readable at a glance and at a
+	# distance.
+	var pad_x: int = 0 if text.is_empty() else 20
+	var pad_y: int = 8
 	var fill: Color = _theme.surface
-	var border: Color = _theme.line
-	var ink: Color = _theme.text
+	var border: Color = Color(0, 0, 0, 0)
+	var ink: Color = _theme.on_surface
 	# Reached means hovered, focused or the current choice. The three look the
 	# same on purpose: a pad moving onto a control has to read exactly as a
 	# pointer resting on it.
@@ -130,39 +137,35 @@ func repaint() -> void:
 	match variant:
 		Variant.PRIMARY:
 			fill = _theme.accent
-			border = Color(0, 0, 0, 0)
 			ink = _theme.on_accent
-		Variant.NEUTRAL:
-			ink = _theme.text
 		Variant.QUIET:
 			fill = _theme.accent_wash(0.13) if _active else Color(0, 0, 0, 0)
-			border = Color(0, 0, 0, 0)
 			ink = _theme.accent if _active else _theme.muted
 		Variant.DANGER:
-			fill = _theme.with_alpha(_theme.error, 0.10)
-			border = _theme.with_alpha(_theme.error, 0.35)
+			fill = _theme.with_alpha(_theme.error, 0.12)
+			border = _theme.with_alpha(_theme.error, 0.40)
 			ink = _theme.error
+		# The chosen segment is a chip in its track, so which one is chosen reads
+		# from the fill rather than from a hairline around it.
 		Variant.SEGMENT:
 			fill = _theme.surface if _active else Color(0, 0, 0, 0)
-			border = Color(0, 0, 0, 0)
-			ink = _theme.text if _active else _theme.muted
+			ink = _theme.on_surface if _active else _theme.muted
 			pad_x = 14
 			pad_y = 7
-		# A plain disc with no outline: reaching it fills it with the accent and
+		# A plain chip with no outline: reaching it fills it with the accent and
 		# turns the glyph white, which is the whole of the state it carries.
-		Variant.DOCK, Variant.HERO:
+		Variant.NEUTRAL, Variant.DOCK, Variant.HERO:
 			fill = _theme.accent if reached else _theme.surface
-			border = Color(0, 0, 0, 0)
-			ink = _theme.on_accent if reached else _theme.text
+			ink = _theme.on_accent if reached else _theme.on_surface
 
 	_style("normal", fill, border, radius, pad_x, pad_y)
 	_style("hover", _hovered(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("pressed", _pressed_fill(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("disabled", _theme.with_alpha(fill, 0.4), _theme.with_alpha(border, 0.4),
 		radius, pad_x, pad_y)
-	# The round buttons say where focus is by filling, so a ring over the fill
-	# would only be a second answer to the same question.
-	if variant == Variant.DOCK or variant == Variant.HERO:
+	# A chip says where focus is by filling, so a ring over the fill would only be
+	# a second answer to the same question.
+	if _fills_on_focus():
 		_style("focus", fill, border, radius, pad_x, pad_y)
 	else:
 		_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 2)
@@ -182,6 +185,10 @@ func repaint() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT if not text.is_empty() else HORIZONTAL_ALIGNMENT_CENTER
 	)
 	add_theme_constant_override("h_separation", 9 if not text.is_empty() else 0)
+
+
+func _fills_on_focus() -> bool:
+	return variant == Variant.NEUTRAL or variant == Variant.DOCK or variant == Variant.HERO
 
 
 func set_disabled_state(off: bool) -> void:

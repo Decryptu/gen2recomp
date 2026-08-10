@@ -89,9 +89,7 @@ func _ready() -> void:
 	_status.add_theme_color_override("font_color", MUTED)
 	root.add_child(_status)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var scroll: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	root.add_child(scroll)
 
 	_entry_list = VBoxContainer.new()

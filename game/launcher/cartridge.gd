@@ -4,11 +4,9 @@ extends Control
 ## One cartridge on the stage: an empty bay until its dump is imported, and the
 ## cartridge itself once it is.
 ##
-## The cartridge owns only presentation. Importing, verification and launching
-## all belong to the launcher that listens to these signals.
-
-signal insert_requested
-signal play_requested
+## The cartridge owns only presentation, and not even its own presses: importing,
+## verification and launching belong to the launcher, and reading a press belongs
+## to the stage, which is the only node that knows whether one became a drag.
 
 const ART: Dictionary = {
 	&"gold": preload("res://assets/cartridges/gold.webp"),
@@ -72,7 +70,8 @@ func _build() -> void:
 	tooltip_text = RomRegistry.title_for(game_id)
 	mouse_entered.connect(_on_hover.bind(true))
 	mouse_exited.connect(_on_hover.bind(false))
-	gui_input.connect(_on_input)
+	# The stage owns every press on the row, because a press here is the start of
+	# a drag as often as it is a choice, and only the stage knows which it became.
 	resized.connect(_place)
 
 	_bay = Control.new()
@@ -171,7 +170,7 @@ func _draw_bay() -> void:
 	var edge: Color = _theme.accent if _hover else _theme.with_alpha(_theme.faint, 0.7)
 	var fill: Color = (
 		_theme.accent_wash(0.08) if _hover
-		else _theme.with_alpha(_theme.surface, 0.30 if _theme.is_dark() else 0.55)
+		else _theme.with_alpha(_theme.panel, 0.30 if _theme.is_dark() else 0.55)
 	)
 	var shell: PackedVector2Array = _silhouette(_bay.size)
 	_bay.draw_colored_polygon(shell, fill)
@@ -223,19 +222,6 @@ func _on_hover(entered: bool) -> void:
 	var tween: Tween = create_tween()
 	tween.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	tween.tween_property(self, "_hop", -8.0 if entered else 0.0, 0.18)
-
-
-func _on_input(event: InputEvent) -> void:
-	if event is not InputEventMouseButton:
-		return
-	var click: InputEventMouseButton = event
-	if not click.pressed or click.button_index != MOUSE_BUTTON_LEFT:
-		return
-	accept_event()
-	if imported:
-		play_requested.emit()
-	else:
-		insert_requested.emit()
 
 
 ## The cartridge dropping into its bay, played once an import succeeds.

@@ -16,6 +16,10 @@ const LIGHT: StringName = &"light"
 const DARK: StringName = &"dark"
 const MODES: Array[StringName] = [LIGHT, DARK]
 
+## One accent in both appearances. A control that is reached looks the same
+## whichever way round the page is, which is what makes a pad legible.
+const ACCENT: Color = Color("#4756e7")
+
 const RADIUS_LG: float = 22.0
 const RADIUS_MD: float = 14.0
 const RADIUS_SM: float = 10.0
@@ -39,9 +43,16 @@ const GAME_TINTS: Dictionary = {
 var mode: StringName = LIGHT
 var backdrop_top: Color
 var backdrop_bottom: Color
-## The colour a card or a bar is filled with.
+## The chip colour: buttons, the toast, anything that reads as a solid object
+## laid on the page. It is the opposite of the page, so a control is legible
+## without an outline and a filled one says so from across the room.
 var surface: Color
-## A step back from [member surface]: tracks, wells and unselected segments.
+## What is written or drawn on [member surface].
+var on_surface: Color
+## A content card: the same side of the page as the backdrop, because the text
+## inside one is page text.
+var panel: Color
+## A step back from [member panel]: tracks, wells and unselected segments.
 var surface_alt: Color
 ## The hairline that separates one surface from another.
 var line: Color
@@ -60,35 +71,38 @@ static func for_mode(wanted: StringName) -> Gen2LauncherTheme:
 	var theme := Gen2LauncherTheme.new()
 	theme.mode = wanted if MODES.has(wanted) else LIGHT
 	if theme.mode == DARK:
-		theme.backdrop_top = Color("#1b1f27")
-		theme.backdrop_bottom = Color("#101318")
-		theme.surface = Color("#232935")
-		theme.surface_alt = Color("#1a1e27")
-		theme.line = Color("#333b4a")
+		theme.backdrop_top = Color("#1c1c1e")
+		theme.backdrop_bottom = Color("#131314")
+		theme.surface = Color("#f2f2f2")
+		theme.on_surface = Color("#333333")
+		theme.panel = Color("#232324")
+		theme.surface_alt = Color("#1a1a1b")
+		theme.line = Color("#3a3a3c")
 		theme.shadow = Color(0, 0, 0, 0.55)
-		theme.text = Color("#edf1f8")
-		theme.muted = Color("#9aa5b8")
-		theme.faint = Color("#6b7688")
-		theme.accent = Color("#8f7cf8")
-		theme.on_accent = Color("#12141a")
-		theme.success = Color("#42cf90")
-		theme.warning = Color("#e6ab4c")
-		theme.error = Color("#f2837c")
+		theme.text = Color("#f2f2f2")
+		theme.muted = Color("#a3a3a5")
+		theme.faint = Color("#76767a")
+		theme.on_accent = Color("#ffffff")
+		theme.success = Color("#43c98a")
+		theme.warning = Color("#e0a94f")
+		theme.error = Color("#ef7f79")
 	else:
-		theme.backdrop_top = Color("#f5f7fb")
-		theme.backdrop_bottom = Color("#e6eaf2")
-		theme.surface = Color("#ffffff")
-		theme.surface_alt = Color("#eef1f7")
-		theme.line = Color("#dde2ec")
-		theme.shadow = Color(0.12, 0.15, 0.20, 0.16)
-		theme.text = Color("#1f2530")
-		theme.muted = Color("#5d6778")
-		theme.faint = Color("#98a2b3")
-		theme.accent = Color("#6a5ae6")
+		theme.backdrop_top = Color("#f7f7f8")
+		theme.backdrop_bottom = Color("#eaeaec")
+		theme.surface = Color("#464445")
+		theme.on_surface = Color("#f2f2f2")
+		theme.panel = Color("#ffffff")
+		theme.surface_alt = Color("#eeeeef")
+		theme.line = Color("#dededf")
+		theme.shadow = Color(0.10, 0.10, 0.11, 0.16)
+		theme.text = Color("#252525")
+		theme.muted = Color("#5c5c5e")
+		theme.faint = Color("#909093")
 		theme.on_accent = Color("#ffffff")
 		theme.success = Color("#1c9b62")
 		theme.warning = Color("#b97c25")
-		theme.error = Color("#d2504b")
+		theme.error = Color("#cf4a45")
+	theme.accent = ACCENT
 	return theme
 
 
@@ -116,6 +130,13 @@ func accent_wash(alpha: float = 0.14) -> Color:
 	var wash: Color = accent
 	wash.a = alpha
 	return wash
+
+
+## A status colour taken far enough towards [member on_surface] to be read on a
+## chip. One rule serves both appearances, because the chip is the opposite side
+## of the page from the backdrop in each of them.
+func on_chip(colour: Color) -> Color:
+	return colour.lerp(on_surface, 0.45)
 
 
 func with_alpha(colour: Color, alpha: float) -> Color:
@@ -177,9 +198,9 @@ func control_theme() -> Theme:
 	theme.set_color("selection_color", "LineEdit", accent_wash(0.30))
 
 	for type: String in ["Button", "OptionButton", "MenuButton", "CheckBox", "CheckButton"]:
-		theme.set_stylebox("normal", type, padded(box(surface, RADIUS_SM, line), 14, 9))
+		theme.set_stylebox("normal", type, padded(box(panel, RADIUS_SM, line), 14, 9))
 		theme.set_stylebox(
-			"hover", type, padded(box(surface.lerp(accent, 0.07), RADIUS_SM, accent_wash(0.4)), 14, 9)
+			"hover", type, padded(box(panel.lerp(accent, 0.07), RADIUS_SM, accent_wash(0.4)), 14, 9)
 		)
 		theme.set_stylebox("pressed", type, padded(box(surface_alt, RADIUS_SM, line), 14, 9))
 		theme.set_stylebox(
@@ -191,13 +212,13 @@ func control_theme() -> Theme:
 		theme.set_color("font_pressed_color", type, accent)
 		theme.set_color("font_disabled_color", type, faint)
 
-	theme.set_stylebox("panel", "PopupMenu", padded(floating(surface, RADIUS_SM, 18), 8))
+	theme.set_stylebox("panel", "PopupMenu", padded(floating(panel, RADIUS_SM, 18), 8))
 	theme.set_color("font_color", "PopupMenu", text)
 	theme.set_color("font_hover_color", "PopupMenu", accent)
 	theme.set_stylebox("hover", "PopupMenu", padded(box(accent_wash(0.14), RADIUS_SM), 8, 4))
 
-	theme.set_stylebox("panel", "Panel", box(surface, RADIUS_MD, line))
-	theme.set_stylebox("panel", "PanelContainer", box(surface, RADIUS_MD, line))
+	theme.set_stylebox("panel", "Panel", box(panel, RADIUS_MD, line))
+	theme.set_stylebox("panel", "PanelContainer", box(panel, RADIUS_MD, line))
 	theme.set_stylebox("panel", "AcceptDialog", padded(box(backdrop_top, 0.0), 18))
 	theme.set_color("font_color", "Label", text)
 	theme.set_color("default_color", "RichTextLabel", text)
@@ -217,7 +238,7 @@ func control_theme() -> Theme:
 
 	theme.set_stylebox("background", "ProgressBar", box(surface_alt, 4.0))
 	theme.set_stylebox("fill", "ProgressBar", box(accent, 4.0))
-	theme.set_stylebox("panel", "Tree", box(surface, RADIUS_SM, line))
+	theme.set_stylebox("panel", "Tree", box(panel, RADIUS_SM, line))
 	theme.set_color("font_color", "Tree", text)
 	theme.set_color("separator", "HSeparator", line)
 	return theme
@@ -234,7 +255,7 @@ func _knob(fill: Color) -> ImageTexture:
 			var distance: float = Vector2(float(x) + 0.5, float(y) + 0.5).distance_to(
 				Vector2(centre, centre)
 			)
-			var colour: Color = surface if distance > centre - 3.5 else fill
+			var colour: Color = panel if distance > centre - 3.5 else fill
 			colour.a = clampf(centre - distance, 0.0, 1.0)
 			image.set_pixel(x, y, colour)
 	return ImageTexture.create_from_image(image)

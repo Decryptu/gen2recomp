@@ -50,9 +50,7 @@ func _build() -> void:
 	browse.pressed.connect(func() -> void: index_requested.emit())
 	actions.add_child(browse)
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	add_child(scroll)
 	_list = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL

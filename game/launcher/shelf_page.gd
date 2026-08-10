@@ -21,8 +21,6 @@ var _theme: Gen2LauncherTheme = null
 var _stage: Gen2CartridgeStage = null
 var _play: Gen2LauncherButton = null
 var _manage: Gen2LauncherButton = null
-var _previous: Gen2LauncherButton = null
-var _next: Gen2LauncherButton = null
 var _details: Dictionary = {}
 var _compact: bool = false
 
@@ -48,13 +46,6 @@ func _build() -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(actions)
 
-	# The two arrows are the pointer's way round the carousel. A pad and a
-	# keyboard use ui_left and ui_right on the stage itself.
-	_previous = Gen2LauncherButton.icon_only(_theme, &"left", Gen2LauncherButton.Variant.DOCK, 44.0)
-	_previous.tooltip_text = "Previous cartridge"
-	_previous.pressed.connect(func() -> void: _stage.step(-1))
-	actions.add_child(_previous)
-
 	_play = Gen2LauncherButton.create(_theme, "", Gen2LauncherButton.Variant.HERO, &"play")
 	_play.custom_minimum_size = Vector2(210, 52)
 	_play.add_theme_font_size_override("font_size", Gen2LauncherTheme.FONT_TITLE)
@@ -66,11 +57,6 @@ func _build() -> void:
 	_manage.tooltip_text = "Cache and re-import"
 	_manage.pressed.connect(func() -> void: manage_requested.emit(_stage.selected_id()))
 	actions.add_child(_manage)
-
-	_next = Gen2LauncherButton.icon_only(_theme, &"right", Gen2LauncherButton.Variant.DOCK, 44.0)
-	_next.tooltip_text = "Next cartridge"
-	_next.pressed.connect(func() -> void: _stage.step(1))
-	actions.add_child(_next)
 
 	_refresh_action()
 
@@ -102,8 +88,6 @@ func set_slot_state(game_id: StringName, imported: bool, detail: String) -> void
 func set_busy(busy: bool) -> void:
 	_play.set_disabled_state(busy)
 	_manage.set_disabled_state(busy)
-	_previous.set_disabled_state(busy)
-	_next.set_disabled_state(busy)
 
 
 ## Moves the selection onto [param game_id], used after an import so the freshly
@@ -123,8 +107,7 @@ func set_compact(compact: bool) -> void:
 		"font_size",
 		Gen2LauncherTheme.FONT_BODY if compact else Gen2LauncherTheme.FONT_TITLE,
 	)
-	for round_button: Gen2LauncherButton in [_previous, _manage, _next]:
-		round_button.set_side(40.0 if compact else 44.0)
+	_manage.set_side(40.0 if compact else 44.0)
 
 
 func _on_primary() -> void:

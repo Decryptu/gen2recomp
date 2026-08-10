@@ -1,8 +1,9 @@
 class_name Gen2LauncherShell
 extends Control
 
-## The frame every launcher screen sits in: a backdrop, a slim top bar, a page
-## host, and the row of round buttons along the bottom.
+## The frame every launcher screen sits in: a backdrop, a status bar carrying the
+## clock and the charge, a page host, and the row of round buttons along the
+## bottom.
 ##
 ## The dock is the same shape on a desktop and on a phone, so there is no
 ## breakpoint that moves the navigation from one edge to another. What changes
@@ -12,7 +13,6 @@ signal page_selected(id: StringName)
 
 ## Width below which the launcher writes smaller and pads tighter.
 const COMPACT_WIDTH: float = 820.0
-const LOGO: Texture2D = preload("res://assets/launcher/logo.png")
 ## Room kept for a message and its detail line above the page.
 const TOAST_HEIGHT: float = 84.0
 
@@ -29,6 +29,8 @@ var _art_veil: ColorRect = null
 var _art_texture: Texture2D = null
 var _art_tween: Tween = null
 var _host: MarginContainer = null
+var _clock: Label = null
+var _battery: Gen2LauncherBattery = null
 var _top_right: HBoxContainer = null
 var _pages: MarginContainer = null
 var _dock_host: CenterContainer = null
@@ -89,11 +91,24 @@ func _build() -> void:
 
 	var top: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	root.add_child(top)
-	top.add_child(_brand())
+	_clock = Gen2LauncherUI.title(theme_palette, _now(), Gen2LauncherTheme.FONT_TITLE)
+	_clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(_clock)
 	top.add_child(Gen2LauncherUI.spacer())
-	_top_right = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	_top_right = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	_top_right.alignment = BoxContainer.ALIGNMENT_END
 	top.add_child(_top_right)
+	_battery = Gen2LauncherBattery.create(theme_palette)
+	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_top_right.add_child(_battery)
+
+	# The clock is only ever read to the minute, but ticking every second keeps
+	# it from sitting a whole minute behind the one on the wall.
+	var tick := Timer.new()
+	tick.wait_time = 1.0
+	tick.autostart = true
+	tick.timeout.connect(func() -> void: _clock.text = _now())
+	add_child(tick)
 
 	_pages = MarginContainer.new()
 	_pages.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -119,28 +134,15 @@ func _build() -> void:
 	_focus = Gen2FocusGuard.attach(self)
 
 
-func _brand() -> HBoxContainer:
-	var brand: HBoxContainer = Gen2LauncherUI.row(10)
-	brand.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var mark := TextureRect.new()
-	mark.texture = LOGO
-	mark.custom_minimum_size = Vector2(30, 30)
-	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	brand.add_child(mark)
-	var wordmark := RichTextLabel.new()
-	wordmark.bbcode_enabled = true
-	wordmark.fit_content = true
-	wordmark.scroll_active = false
-	wordmark.autowrap_mode = TextServer.AUTOWRAP_OFF
-	wordmark.custom_minimum_size = Vector2(140, 0)
-	wordmark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	wordmark.add_theme_font_size_override("normal_font_size", Gen2LauncherTheme.FONT_TITLE)
-	wordmark.text = "[b]gen[color=#%s]2[/color]recomp[/b]" % theme_palette.accent.to_html(false)
-	wordmark.add_theme_color_override("default_color", theme_palette.text)
-	brand.add_child(wordmark)
-	return brand
+## The wall clock, on the twenty-four hour dial the rest of the project uses.
+func _now() -> String:
+	var clock: Dictionary = Time.get_time_dict_from_system()
+	return "%02d:%02d" % [int(clock["hour"]), int(clock["minute"])]
+
+
+## The charge indicator, so a caller with a real power reading can set it.
+func battery() -> Gen2LauncherBattery:
+	return _battery
 
 
 ## A row of plain discs on the page, with nothing behind them. A bar or a card

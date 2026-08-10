@@ -47,15 +47,6 @@ func _build() -> void:
 	_shell = Gen2LauncherShell.create(_palette)
 	add_child(_shell)
 
-	var appearance: Gen2LauncherButton = Gen2LauncherButton.icon_only(
-		_palette,
-		&"moon" if not _palette.is_dark() else &"sun",
-		Gen2LauncherButton.Variant.NEUTRAL,
-	)
-	appearance.tooltip_text = "Switch appearance"
-	appearance.pressed.connect(_toggle_appearance)
-	_shell.add_action(appearance)
-
 	_shelf = Gen2ShelfPage.create(_palette, _shell.compact)
 	_shelf.insert_requested.connect(_open_import_dialog)
 	_shelf.play_requested.connect(_launch_game)
@@ -128,13 +119,6 @@ func _picker(title: String, filters: PackedStringArray) -> FileDialog:
 	dialog.theme = _palette.control_theme()
 	add_child(dialog)
 	return dialog
-
-
-func _toggle_appearance() -> void:
-	var options: Gen2Options = Gen2OptionsStore.current()
-	options.ui_theme = _palette.other_mode()
-	Gen2OptionsStore.save(options)
-	_reload_appearance()
 
 
 func _reload_appearance() -> void:

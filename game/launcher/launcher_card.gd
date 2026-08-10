@@ -18,7 +18,7 @@ static func create(
 	padding: int = 20,
 	padding_y: int = -1,
 ) -> Gen2LauncherCard:
-	return _made(theme, theme.padded(theme.box(theme.surface, radius, theme.line), padding, padding_y))
+	return _made(theme, theme.padded(theme.box(theme.panel, radius, theme.line), padding, padding_y))
 
 
 ## A step back from the page: the track a segmented control sits in, or a strip
@@ -45,13 +45,25 @@ static func selected(
 
 ## A surface that genuinely floats: sheets, toasts and the bottom dock. Never put
 ## one inside a container that clips, because the shadow is drawn outside it.
+## A solid object laid on the page: filled in [member Gen2LauncherTheme.surface],
+## which is the opposite side of the page from everything under it. Whatever goes
+## inside is written in [member Gen2LauncherTheme.on_surface].
+static func chip(
+	theme: Gen2LauncherTheme,
+	radius: float = Gen2LauncherTheme.RADIUS_MD,
+	padding: int = 16,
+	spread: int = 20,
+) -> Gen2LauncherCard:
+	return _made(theme, theme.padded(theme.floating(theme.surface, radius, spread), padding))
+
+
 static func floating(
 	theme: Gen2LauncherTheme,
 	radius: float = Gen2LauncherTheme.RADIUS_LG,
 	padding: int = 20,
 	spread: int = 26,
 ) -> Gen2LauncherCard:
-	return _made(theme, theme.padded(theme.floating(theme.surface, radius, spread), padding))
+	return _made(theme, theme.padded(theme.floating(theme.panel, radius, spread), padding))
 
 
 static func _made(theme: Gen2LauncherTheme, style: StyleBoxFlat) -> Gen2LauncherCard:
