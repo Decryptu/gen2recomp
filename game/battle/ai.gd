@@ -534,6 +534,12 @@ static func _apply_smart(
 			Gen2MoveEffect.DESTINY_BOND:
 				if _above_quarter(attacker):
 					_discourage(scores, slot, 1)
+			# `AI_Smart_ForceSwitch`: discourage blowing the player away unless
+			# `CheckPlayerMoveTypeMatchups` says the pairing is going badly, which
+			# is the same score `AI_Smart_PerishSong` reads.
+			Gen2MoveEffect.FORCE_SWITCH:
+				if matchup_score >= Gen2AISwitch.BASE_SCORE:
+					_discourage(scores, slot, 1)
 			Gen2MoveEffect.PROTECT:
 				_smart_protect(scores, slot, attacker, defender, rng)
 			Gen2MoveEffect.ENDURE:

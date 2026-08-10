@@ -2013,6 +2013,14 @@ func _describe(event: Dictionary) -> String:
 			return "%s took down with it, %s!" % [
 				_battler_name(int(event["target"])), _battler_name(side),
 			]
+		Gen2Battle.DRAGGED_OUT:
+			# `DraggedOutText` is `<USER>`, so it names the Pokemon that used the
+			# move rather than the one dragged out. Mirrored, not corrected.
+			return "%s was dragged out!" % _battler_name(side)
+		Gen2Battle.FLED_IN_FEAR:
+			return "%s fled in fear!" % _battler_name(int(event["target"]))
+		Gen2Battle.BLOWN_AWAY:
+			return "%s was blown away!" % _battler_name(int(event["target"]))
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

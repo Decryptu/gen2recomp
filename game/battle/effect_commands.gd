@@ -311,6 +311,9 @@ const PROTECT: StringName = &"protect"
 const ENDURE: StringName = &"endure"
 const DESTINY_BOND: StringName = &"destinybond"
 
+## Whirlwind and Roar, which switch the side opposite whoever used them.
+const FORCE_SWITCH: StringName = &"forceswitch"
+
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
 ## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
@@ -670,6 +673,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_endure(turn)
 		DESTINY_BOND:
 			_destiny_bond(turn)
+		FORCE_SWITCH:
+			_force_switch(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -2576,6 +2581,119 @@ static func _destiny_bond(turn: Gen2Turn) -> void:
 	turn.attacker().substatus |= Gen2Substatus.DESTINY_BOND
 	_animate_current_move(turn)
 	turn.emit(Gen2Battle.DESTINY_BOND_SET)
+
+
+## `BattleCommand_ForceSwitch`: Whirlwind and Roar, which have two endings and
+## share almost nothing between them.
+##
+## Against a trainer the target's side switches to a random standing party
+## member. Against a wild the battle *ends*, in either direction: the wild is
+## blown out of it or the player's own Pokémon is, and `SetBattleDraw` makes both
+## a draw with nobody beaten.
+##
+## The two halves of the source, `.trainer` and `.vs_trainer`, are one routine
+## here because every difference between them is which side is read. Written out,
+## both say: the user's level against the target's, the user having moved second,
+## and a random member of the target's party.
+static func _force_switch(turn: Gen2Turn) -> void:
+	if FORCE_SWITCH_REFUSED_TYPES.has(turn.battle.battle_type) or turn.missed:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	if turn.battle.is_trainer_battle:
+		_force_switch_trainer(turn)
+		return
+	_force_switch_wild(turn)
+
+
+## The four `wBattleType` values that refuse outright, before anything else is
+## asked. All four are scripted encounters the story needs to keep on the field.
+const FORCE_SWITCH_REFUSED_TYPES: Array[int] = [
+	Gen2Battle.BATTLETYPE_FORCESHINY, Gen2Battle.BATTLETYPE_TRAP,
+	Gen2Battle.BATTLETYPE_CELEBI, Gen2Battle.BATTLETYPE_SUICUNE,
+]
+
+
+## `.trainer` and `.vs_trainer`: drag a random standing party member out.
+##
+## The went-first gate is the non-obvious half. Both branches refuse unless the
+## *opponent* moved first, which is `wEnemyGoesFirst` read from each side's own
+## point of view, so a Whirlwind that somehow moved first does nothing. Priority
+## 0 makes that rare rather than impossible: a slower opponent using Counter,
+## Mirror Coat or a force switch of its own shares the same priority.
+static func _force_switch_trainer(turn: Gen2Turn) -> void:
+	var party: Gen2Party = turn.battle.party(turn.target)
+	if _standing_others(party).is_empty():
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+	if not turn.battle.opponent_went_first(turn.side):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		return
+
+	turn.battle.battle_anim_param = FORCE_SWITCH_ANIM_PARAM
+	_animate_current_move(turn)
+	var picked: int = _roll_dragged_index(turn, party)
+	turn.events.append_array(turn.battle.send_out(turn.target, picked, turn.side))
+
+
+## `ld a, $1 / ld [wBattleAnimParam], a`, which both endings set in front of
+## their own `AnimateCurrentMove`.
+const FORCE_SWITCH_ANIM_PARAM: int = 1
+
+
+## `.random_loop_trainer`, which is a rejection sample rather than a range: three
+## bits of a random byte, rerolled while the value is past the party's end, is the
+## member already out, or is one that has fainted. `CheckAnyOtherAlivePartyMons`
+## has already answered that one of the six will do, so it terminates.
+static func _roll_dragged_index(turn: Gen2Turn, party: Gen2Party) -> int:
+	var standing: Array[int] = _standing_others(party)
+	var picked: int = party.active
+	while not standing.has(picked):
+		picked = turn.rng().randi_range(0, FORCE_SWITCH_ROLL_MASK)
+	return picked
+
+
+## `and $7`: the roll is masked to three bits, so a party is only ever reached
+## through the eight values that mask leaves.
+const FORCE_SWITCH_ROLL_MASK: int = 7
+
+
+## Every member of [param party] that is standing and is not the one out, which
+## is `CheckAnyOtherAlivePartyMons` and `FindAliveEnemyMons` both.
+static func _standing_others(party: Gen2Party) -> Array[int]:
+	var out: Array[int] = []
+	for index: int in party.size():
+		if index != party.active and not party.at(index).is_fainted():
+			out.append(index)
+	return out
+
+
+## `.wild_force_flee` and `.wild_succeed_playeristarget`, which are the same
+## comparison written twice: the user's level against the target's.
+##
+## A user at or above the target's level always succeeds. Below it, the roll is
+## drawn out of the two levels summed and one more, and it succeeds unless it
+## lands under a quarter of the target's level, so a much weaker user usually
+## fails. `srl b` twice is that quarter, and it truncates.
+static func _force_switch_wild(turn: Gen2Turn) -> void:
+	var user_level: int = turn.attacker().level
+	var target_level: int = turn.defender().level
+
+	if user_level < target_level:
+		var span: int = user_level + target_level + 1
+		var roll: int = turn.rng().randi_range(0, span - 1)
+		if roll < target_level >> 2:
+			turn.emit(Gen2Battle.MOVE_FAILED)
+			return
+
+	turn.battle.force_out(turn.target)
+	turn.battle.battle_anim_param = FORCE_SWITCH_ANIM_PARAM
+	_animate_current_move(turn)
+	# `.succeed` reads the move's animation byte back and compares it against
+	# ROAR, and every move here animates as itself.
+	var line: StringName = Gen2Battle.FLED_IN_FEAR if turn.move_number == Gen2MoveEffect.ROAR_MOVE \
+		else Gen2Battle.BLOWN_AWAY
+	turn.emit(line, {"target": turn.target})
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status
