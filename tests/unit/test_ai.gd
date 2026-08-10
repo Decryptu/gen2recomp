@@ -667,3 +667,162 @@ func test_basic_reproduces_the_nightmare_redundancy_bug() -> void:
 			Gen2BattleAI.choose_slot(pikachu, dreaming, _data, RomLayout.AI_BASIC, _rng), 1,
 			"a target already dreaming is redundant on the second clause"
 		)
+
+
+## `AI_Smart_Protect` and `AI_Smart_Endure`, both of which open on
+## `wEnemyProtectCount` and both of which are called directly, since every branch
+## of either is behind a roll.
+func _smart_scores(
+	attacker: Gen2BattleMon, defender: Gen2BattleMon, seed_value: int
+) -> Array:
+	_rng.seed = seed_value
+	var scores: Array = [20, 20, 20, 20]
+	Gen2BattleAI._apply_smart(
+		scores, attacker, defender, _data, _rng, 0, 0, Gen2Weather.NONE,
+		Gen2Screens.NONE, Gen2Screens.NONE, false, Gen2AISwitch.BASE_SCORE
+	)
+	return scores
+
+
+## How often the first slot was nudged each way over a hundred seeds, as
+## [encouraged, discouraged, untouched].
+func _smart_spread(attacker: Gen2BattleMon, defender: Gen2BattleMon) -> Array:
+	var out: Array = [0, 0, 0]
+	for seed_value: int in 100:
+		var score: int = int(_smart_scores(attacker, defender, seed_value)[0])
+		if score < 20:
+			out[0] += 1
+		elif score > 20:
+			out[1] += 1
+		else:
+			out[2] += 1
+	return out
+
+
+## `.greatly_discourage`: a Protect already used is worth three points against,
+## which only the 8% skip inside `.discourage` can soften to one.
+func test_smart_greatly_discourages_a_second_protect() -> void:
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.PROTECT, Fixture.TACKLE])
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	geodude.protect_count = 1
+
+	var spread: Array = _smart_spread(geodude, pikachu)
+	assert_eq(int(spread[0]), 0, "nothing here can encourage it")
+	assert_gt(int(spread[1]), 80, "and it is nearly always penalised")
+	assert_eq(
+		int(_smart_scores(geodude, pikachu, 0)[1]), 20,
+		"the Tackle beside it is untouched"
+	)
+
+
+## The four states that reach `.encourage`, each on its own: a boosted Fury
+## Cutter, a charged two-turn move, and a player already losing health to Toxic,
+## Leech Seed or a Curse.
+func test_smart_encourages_protect_against_something_worth_sitting_out() -> void:
+	var states: Array[Callable] = [
+		func(mon: Gen2BattleMon) -> void: mon.fury_cutter_count = 3,
+		func(mon: Gen2BattleMon) -> void: mon.substatus |= Gen2Substatus.CHARGING,
+		func(mon: Gen2BattleMon) -> void: mon.toxic_counter = 1,
+		func(mon: Gen2BattleMon) -> void: mon.substatus |= Gen2Substatus.LEECH_SEED,
+		func(mon: Gen2BattleMon) -> void: mon.substatus |= Gen2Substatus.CURSE,
+	]
+
+	for index: int in states.size():
+		var geodude: Gen2BattleMon = _mon(
+			Fixture.GEODUDE, 50, [Fixture.PROTECT, Fixture.TACKLE]
+		)
+		var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		states[index].call(pikachu)
+
+		var spread: Array = _smart_spread(geodude, pikachu)
+		assert_gt(int(spread[0]), 60, "state %d encourages roughly four times in five" % index)
+		assert_eq(int(spread[1]), 0, "and never penalises")
+
+
+## The fall-through is two refusals in one: a player not rolling at all is
+## discouraged, and so is one whose Rollout has not built up yet.
+func test_smart_discourages_protect_against_an_unboosted_rollout() -> void:
+	for count: int in [0, 2]:
+		var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.PROTECT, Fixture.TACKLE])
+		var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		if count > 0:
+			pikachu.substatus |= Gen2Substatus.ROLLOUT
+			pikachu.rollout_count = count
+
+		var spread: Array = _smart_spread(geodude, pikachu)
+		assert_eq(int(spread[0]), 0, "rollout count %d is not worth sitting out" % count)
+		assert_gt(int(spread[1]), 80)
+
+
+func test_smart_encourages_protect_against_a_boosted_rollout() -> void:
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.PROTECT, Fixture.TACKLE])
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	pikachu.substatus |= Gen2Substatus.ROLLOUT
+	pikachu.rollout_count = 3
+
+	var spread: Array = _smart_spread(geodude, pikachu)
+	assert_gt(int(spread[0]), 60, "three hits in is worth one turn of Protect")
+	assert_eq(int(spread[1]), 0)
+
+
+## `AI_Smart_Endure`: full health and a spent Protect chain are both two points
+## against, and anything above a quarter is one.
+func test_smart_discourages_endure_at_health_it_does_not_need_it() -> void:
+	var full: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.ENDURE, Fixture.TACKLE])
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	assert_eq(int(_smart_scores(full, pikachu, 0)[0]), 22, "full health is greatly discouraged")
+
+	var spent: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.ENDURE, Fixture.TACKLE])
+	spent.hp = spent.max_hp() / 8
+	spent.protect_count = 1
+	assert_eq(int(_smart_scores(spent, pikachu, 0)[0]), 22, "so is a spent chain")
+
+	var half: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.ENDURE, Fixture.TACKLE])
+	half.hp = half.max_hp() / 2
+	assert_eq(int(_smart_scores(half, pikachu, 0)[0]), 21, "above a quarter is one point")
+
+
+## Under a quarter with nothing to spend the survival on, the handler does
+## nothing at all: its last branch reads a lock-on this engine has no flag for.
+func test_smart_leaves_endure_alone_under_a_quarter_with_no_reversal() -> void:
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.ENDURE, Fixture.TACKLE])
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	geodude.hp = geodude.max_hp() / 8
+
+	var spread: Array = _smart_spread(geodude, pikachu)
+	assert_eq(int(spread[2]), 100, "untouched on every seed")
+
+
+## `AIHasMoveEffect` for `EFFECT_REVERSAL`: three points on, which is the
+## strongest single nudge either handler makes.
+func test_smart_greatly_encourages_endure_with_reversal_in_the_set() -> void:
+	var geodude: Gen2BattleMon = _mon(
+		Fixture.GEODUDE, 50, [Fixture.ENDURE, Fixture.REVERSAL]
+	)
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	geodude.hp = geodude.max_hp() / 8
+
+	var encouraged: int = 0
+	for seed_value: int in 100:
+		if int(_smart_scores(geodude, pikachu, seed_value)[0]) == 17:
+			encouraged += 1
+	assert_gt(encouraged, 60, "three points off, roughly four times in five")
+
+
+## `AI_Smart_DestinyBond` shares `AI_Smart_SkullBash`'s body, and so does
+## `AI_Smart_Reversal`: one point against while there is health to spare.
+func test_smart_discourages_destiny_bond_and_reversal_above_a_quarter() -> void:
+	for move_number: int in [Fixture.DESTINY_BOND, Fixture.REVERSAL]:
+		var healthy: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [move_number, Fixture.TACKLE])
+		var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+		assert_eq(
+			int(_smart_scores(healthy, pikachu, 0)[0]), 21,
+			"move %d is discouraged with health to spare" % move_number
+		)
+
+		var hurt: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [move_number, Fixture.TACKLE])
+		hurt.hp = hurt.max_hp() / 8
+		assert_eq(
+			int(_smart_scores(hurt, pikachu, 0)[0]), 20,
+			"and left alone under a quarter"
+		)

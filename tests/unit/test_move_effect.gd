@@ -3046,3 +3046,307 @@ func test_a_doll_broken_by_the_first_hit_lets_the_second_through() -> void:
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1, "the second hit lands")
 	assert_lt(battle.enemy.hp, before)
 	assert_eq(turn.effect(), Gen2MoveEffect.DOUBLE_HIT, "and the loop kept its own byte")
+
+
+## Protect, Detect, Endure and Destiny Bond.
+##
+## The first three are `ProtectChance` under two flags and one counter; the
+## fourth rolls nothing at all. `_run_move` leaves
+## [member Gen2Battle.enemy_goes_first] false, so the player is first and the
+## went-first gate passes unless a test says otherwise.
+func test_protect_and_detect_share_one_effect_and_one_count() -> void:
+	assert_eq(
+		int(_data.move(Fixture.DETECT).get("effect", -1)),
+		int(_data.move(Fixture.PROTECT).get("effect", -1)),
+		"one effect byte under two move numbers"
+	)
+
+	var battle: Gen2Battle = _battle()
+	_run_move(battle, Fixture.PROTECT)
+	assert_eq(battle.player.protect_count, 1)
+	_run_move(battle, Fixture.DETECT)
+	assert_eq(battle.player.protect_count, 2, "Detect counts against Protect's own ladder")
+
+
+## A count of zero cannot fail: `ld b, $ff` against a draw of 1..255 leaves no
+## value that loses.
+func test_the_first_protect_of_a_chain_always_lands() -> void:
+	for seed_value: int in range(0, 40):
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = seed_value
+		var turn: Gen2Turn = _run_move(battle, Fixture.PROTECT)
+		assert_true(
+			Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT),
+			"seed %d" % seed_value
+		)
+		assert_eq(_of_type(turn.events, Gen2Battle.PROTECTED_ITSELF).size(), 1)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0)
+
+
+## The ladder halves once per consecutive use and runs out at eight, which is the
+## one count that cannot roll at all.
+##
+## `srl b` from $ff gives 127, 63, 31, 15, 7, 3, 1 and then nothing, and the draw
+## it is compared against is 1..255, so the share that lands is the ceiling over
+## 255. The four counts checked against a figure are the four whose ceiling is
+## large enough for the sample to say anything.
+const PROTECT_LADDER_SAMPLES: int = 510
+const PROTECT_LADDER_CEILINGS: Array[int] = [255, 127, 63, 31, 15, 7, 3, 1, 0]
+
+
+func test_the_protect_ladder_halves_and_runs_out_at_eight() -> void:
+	var battle: Gen2Battle = _battle()
+	var landed: Array[int] = []
+	for count: int in PROTECT_LADDER_CEILINGS.size():
+		var hits: int = 0
+		for seed_value: int in PROTECT_LADDER_SAMPLES:
+			battle.rng.seed = seed_value
+			battle.player.protect_count = count
+			battle.player.substatus &= ~Gen2Substatus.PROTECT
+			_run_move(battle, Fixture.PROTECT)
+			if Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT):
+				hits += 1
+		landed.append(hits)
+
+	assert_eq(landed[0], PROTECT_LADDER_SAMPLES, "a ceiling of 255 against a draw of 1..255")
+	assert_eq(landed[8], 0, "the eighth shift empties the ceiling before any roll")
+	for count: int in range(1, landed.size()):
+		assert_lte(landed[count], landed[count - 1], "count %d is no likelier than %d" % [
+			count, count - 1,
+		])
+	for count: int in range(1, 5):
+		var expected: int = PROTECT_LADDER_SAMPLES * PROTECT_LADDER_CEILINGS[count] / 255
+		assert_almost_eq(
+			landed[count], expected, expected / 5,
+			"count %d lands about %d times in %d" % [count, expected, PROTECT_LADDER_SAMPLES]
+		)
+
+
+## And the count that cannot land draws nothing: `.failed` is reached before
+## `.rand`, so a chain that has run out spends no randomness.
+func test_a_protect_that_has_run_out_draws_no_randomness() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.protect_count = 8
+	var before: int = battle.rng.state
+	_run_move(battle, Fixture.PROTECT)
+	assert_eq(battle.rng.state, before)
+
+
+## A failure puts the count back to nothing, so the Protect after a failed one is
+## a first Protect again.
+func test_a_failed_protect_empties_its_own_count() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.protect_count = 8
+	var turn: Gen2Turn = _run_move(battle, Fixture.PROTECT)
+
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT))
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(battle.player.protect_count, 0)
+
+
+## `CheckOpponentWentFirst`: going second fails outright, in front of the ladder.
+func test_protect_fails_outright_for_a_side_that_moved_second() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy_goes_first = true
+	var turn: Gen2Turn = _run_move(battle, Fixture.PROTECT)
+
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT))
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+## And the Substitute it refuses is the user's own, not the target's.
+func test_protect_refuses_a_user_behind_its_own_doll() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.substatus |= Gen2Substatus.SUBSTITUTE
+	battle.player.substitute_hp = 20
+	assert_false(
+		Gen2Substatus.has(_run_move(battle, Fixture.PROTECT).battle.player.substatus,
+		Gen2Substatus.PROTECT)
+	)
+
+	var opposite: Gen2Battle = _battle()
+	opposite.enemy.substatus |= Gen2Substatus.SUBSTITUTE
+	opposite.enemy.substitute_hp = 20
+	_run_move(opposite, Fixture.PROTECT)
+	assert_true(
+		Gen2Substatus.has(opposite.player.substatus, Gen2Substatus.PROTECT),
+		"a doll on the other side is not asked about"
+	)
+
+
+## `BattleCommand_CheckHit`'s `.Protect` is one gate for every list that carries
+## `checkhit`, which is why a status move and a stat drop are turned away as
+## surely as an attack.
+##
+## Thunder Wave is run against the Charmander rather than the default Geodude:
+## `checkimmune` stands in for `failuretext` here and sits in front of
+## `checkhit`, so a Ground-type would end the move before the gate is reached.
+## That ordering is the standing divergence rather than anything about Protect.
+func test_a_protect_turns_away_an_attack_a_status_move_and_a_stat_drop() -> void:
+	for move_number: int in [Fixture.TACKLE, Fixture.THUNDER_WAVE, Fixture.GROWL]:
+		var battle: Gen2Battle = _electric_battle()
+		battle.enemy.substatus |= Gen2Substatus.PROTECT
+		var before: int = battle.enemy.hp
+		var turn: Gen2Turn = _run_move(battle, move_number)
+
+		assert_eq(
+			_of_type(turn.events, Gen2Battle.PROTECTING_ITSELF).size(), 1,
+			"move %d says so" % move_number
+		)
+		assert_eq(_of_type(turn.events, Gen2Battle.MISSED).size(), 1)
+		assert_eq(battle.enemy.hp, before)
+		assert_eq(battle.enemy.status, Gen2Status.NONE)
+		assert_eq(battle.enemy.stage("attack"), 0)
+
+
+## The refusal is printed before the miss, since `.Protect` prints inside
+## `CheckHit` and `failuretext` comes later.
+func test_the_protect_line_comes_before_the_miss() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.PROTECT
+	var types: Array = []
+	for event: Dictionary in _run_move(battle, Fixture.TACKLE).events:
+		types.append(StringName(event["type"]))
+
+	assert_lt(
+		types.find(Gen2Battle.PROTECTING_ITSELF), types.find(Gen2Battle.MISSED),
+		"protecting itself, then the attack missed"
+	)
+
+
+func test_endure_sets_its_own_flag_off_the_shared_count() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.ENDURE)
+
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ENDURE))
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT))
+	assert_eq(_of_type(turn.events, Gen2Battle.BRACED_ITSELF).size(), 1)
+	assert_eq(battle.player.protect_count, 1)
+
+	_run_move(battle, Fixture.PROTECT)
+	assert_eq(battle.player.protect_count, 2, "one ladder for all three moves")
+
+
+func test_endure_leaves_its_holder_on_one_hit_point() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.ENDURE
+	battle.enemy.hp = 12
+	var turn: Gen2Turn = _turn(battle)
+	turn.damage = 400
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_eq(battle.enemy.hp, 1)
+	assert_eq(_of_type(turn.events, Gen2Battle.ENDURED_HIT).size(), 1)
+	assert_eq(
+		_of_type(turn.events, Gen2Battle.ENDURED).size(), 0,
+		"the Focus Band's own line is a different text and did not fire"
+	)
+
+
+## `FalseSwipe` reports whether it clamped, so a hit that was never lethal says
+## nothing at all.
+func test_a_survivable_hit_against_an_enduring_target_says_nothing() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.ENDURE
+	battle.enemy.hp = 100
+	var turn: Gen2Turn = _turn(battle)
+	turn.damage = 10
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+
+	assert_eq(battle.enemy.hp, 90)
+	assert_eq(_of_type(turn.events, Gen2Battle.ENDURED_HIT).size(), 0)
+
+
+## Nothing spends the flag, so a multi-hit move is clamped on every hit rather
+## than only the first.
+func test_endure_clamps_every_hit_of_a_multi_hit_move() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.ENDURE
+	battle.enemy.hp = 1
+	var turn: Gen2Turn = _run_move(battle, Fixture.DOUBLE_HIT_MOVE)
+
+	assert_eq(battle.enemy.hp, 1, "still standing after both")
+	assert_eq(_of_type(turn.events, Gen2Battle.ENDURED_HIT).size(), 2)
+
+
+## `jr z, .focus_band`: an enduring target never reaches the band, so it draws no
+## randomness there. Counting the draws is the only way to see that.
+func test_an_enduring_target_never_rolls_its_focus_band() -> void:
+	var drawn: Dictionary = {}
+	for enduring: bool in [false, true]:
+		var battle: Gen2Battle = _battle()
+		battle.rng.seed = 99
+		battle.enemy.item = Fixture.FOCUS_BAND
+		battle.enemy.hp = 40
+		if enduring:
+			battle.enemy.substatus |= Gen2Substatus.ENDURE
+		var turn: Gen2Turn = _turn(battle)
+		turn.damage = 5
+		Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
+		drawn[enduring] = battle.rng.state
+
+	assert_ne(
+		int(drawn[false]), int(drawn[true]),
+		"the band's roll is drawn only when Endure did not answer first"
+	)
+
+
+func test_destiny_bond_goes_up_with_no_roll_and_never_fails() -> void:
+	var battle: Gen2Battle = _battle()
+	for _use: int in 3:
+		var turn: Gen2Turn = _run_move(battle, Fixture.DESTINY_BOND)
+		assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.DESTINY_BOND))
+		assert_eq(_of_type(turn.events, Gen2Battle.DESTINY_BOND_SET).size(), 1)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 0)
+	assert_eq(battle.player.protect_count, 0, "it is not on Protect's ladder")
+
+
+## `BattleCommand_CheckFaint` reads the *target's* flag, and empties the
+## attacker's health outright rather than damaging it.
+func test_destiny_bond_takes_the_attacker_down_with_its_holder() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.DESTINY_BOND
+	battle.enemy.hp = 1
+	var turn: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+
+	assert_true(battle.enemy.is_fainted())
+	assert_true(battle.player.is_fainted(), "the attacker goes with it")
+
+	var types: Array = []
+	for event: Dictionary in turn.events:
+		types.append(StringName(event["type"]))
+	assert_eq(_of_type(turn.events, Gen2Battle.TOOK_DOWN_WITH_IT).size(), 1)
+	assert_lt(
+		types.find(Gen2Battle.TOOK_DOWN_WITH_IT), types.find(Gen2Battle.FAINTED),
+		"the line comes before either faint"
+	)
+	var faints: Array = _of_type(turn.events, Gen2Battle.FAINTED)
+	assert_eq(faints.size(), 2)
+	assert_eq(int(faints[0]["side"]), Gen2Battle.ENEMY, "the holder is reported first")
+	assert_eq(int(faints[1]["side"]), Gen2Battle.PLAYER)
+
+
+func test_a_destiny_bond_holder_that_survives_takes_nobody_with_it() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.DESTINY_BOND
+	var turn: Gen2Turn = _run_move(battle, Fixture.TACKLE)
+
+	assert_false(battle.enemy.is_fainted())
+	assert_false(battle.player.is_fainted())
+	assert_eq(_of_type(turn.events, Gen2Battle.TOOK_DOWN_WITH_IT).size(), 0)
+
+
+## Selfdestruct clears the *target's* bond before its damage lands
+## (`BATTLE_VARS_SUBSTATUS5_OPP`), which is what stops an explosion being
+## answered by one.
+func test_selfdestruct_clears_the_targets_destiny_bond_before_it_lands() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.DESTINY_BOND
+	battle.enemy.hp = 1
+	var turn: Gen2Turn = _run_move(battle, Fixture.SELFDESTRUCT)
+
+	assert_true(battle.enemy.is_fainted())
+	assert_eq(
+		_of_type(turn.events, Gen2Battle.TOOK_DOWN_WITH_IT).size(), 0,
+		"the bond was cleared, so nothing collected"
+	)

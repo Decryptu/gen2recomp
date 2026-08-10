@@ -304,6 +304,13 @@ const CURSE: StringName = &"curse"
 const SPIKES: StringName = &"spikes"
 const CLEAR_HAZARDS: StringName = &"clearhazards"
 
+## Protect, Endure and Destiny Bond. The first two are one routine and one
+## counter, told apart only by the flag they set: `BattleCommand_Endure` is
+## `call ProtectChance / ret c` and nothing else.
+const PROTECT: StringName = &"protect"
+const ENDURE: StringName = &"endure"
+const DESTINY_BOND: StringName = &"destinybond"
+
 ## `BattleCommand_CheckSafeguard`, the loud half of Safeguard. The four status
 ## moves that carry it end on `SafeguardProtectText`; the six secondary effects
 ## that reach `SafeCheckSafeguard` instead are refused with nothing said, which
@@ -657,6 +664,12 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_spikes(turn)
 		CLEAR_HAZARDS:
 			_clear_hazards(turn)
+		PROTECT:
+			_protect(turn)
+		ENDURE:
+			_endure(turn)
+		DESTINY_BOND:
+			_destiny_bond(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -1055,6 +1068,23 @@ static func _check_hit(turn: Gen2Turn) -> void:
 			turn.end()
 		return
 
+	# `.Protect`, second in `BattleCommand_CheckHit` and ahead of everything but
+	# the Dream Eater question. One gate for the whole game: 47 of the lists here
+	# carry `checkhit`, so a Protect turns away a damaging move, a status move and
+	# a stat drop alike without any of them knowing about it.
+	#
+	# The project already runs `.FlyDigMoves` in front of `.DreamEater` where the
+	# source runs it behind this, so between those three only the order of two
+	# refusal messages differs, never which of them refuses.
+	if Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.PROTECT):
+		turn.missed = true
+		turn.emit(Gen2Battle.PROTECTING_ITSELF, {"target": turn.target})
+		turn.emit(Gen2Battle.MISSED, {"target": turn.target})
+		_jump_kick_crash(turn)
+		if not CONTINUES_AFTER_MISS.has(turn.effect()):
+			turn.end()
+		return
+
 	# `.DrainSub`, third: nothing can be drained out of a doll, so the two effects
 	# that heal off what they deal read as a miss rather than as a hit that heals
 	# nothing. Every other move goes through the doll normally.
@@ -1149,13 +1179,24 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 	# Ahead of `.damage`, so everything behind reads the cut figure: what Counter
 	# remembers, what a drain heals off and what a recoil costs are all
 	# `wCurDamage` after this.
-	var band: bool = Gen2HeldItem.effect_of(turn.data(), defender.item) == Gen2HeldItem.FOCUS_BAND \
+	#
+	# Endure is the front branch and the band is its `else`, which is the source's
+	# `jr z, .focus_band` and not a tidying opportunity: an enduring target never
+	# reaches the band's roll, so it draws no randomness there. Endure is read
+	# rather than spent, so every hit of a multi-hit move is clamped.
+	var enduring: bool = Gen2Substatus.has(defender.substatus, Gen2Substatus.ENDURE)
+	var band: bool = not enduring \
+		and Gen2HeldItem.effect_of(turn.data(), defender.item) == Gen2HeldItem.FOCUS_BAND \
 		and Gen2HeldItem.rolls_under(
 			turn.rng(), Gen2HeldItem.parameter_of(turn.data(), defender.item)
 		)
-	var endured: bool = band and turn.damage >= defender.hp
-	if endured:
+	# `BattleCommand_FalseSwipe` reports whether it clamped, which is what decides
+	# between the two lines; the test itself is the same for both.
+	var clamped: bool = (enduring or band) and turn.damage >= defender.hp
+	if clamped:
 		turn.damage = maxi(defender.hp - 1, 0)
+	var endured: bool = clamped and not enduring
+	var braced: bool = clamped and enduring
 
 	var behind_sub: bool = _substitute_refuses(turn)
 	if not behind_sub:
@@ -1165,6 +1206,8 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 
 	if behind_sub:
 		_substitute_damage(turn)
+		if braced:
+			turn.emit(Gen2Battle.ENDURED_HIT, {"target": turn.target})
 		if endured:
 			turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
 		return
@@ -1178,6 +1221,8 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		"hp": defender.hp,
 		"max_hp": defender.max_hp(),
 	})
+	if braced:
+		turn.emit(Gen2Battle.ENDURED_HIT, {"target": turn.target})
 	if endured:
 		turn.emit(Gen2Battle.ENDURED, {"target": turn.target, "item": defender.item})
 
@@ -1256,10 +1301,17 @@ static func _counter(turn: Gen2Turn, mirror_coat: bool) -> void:
 ## Selfdestruct's command clears the user's status and sets its HP to zero.
 ## The faint event itself remains in CHECK_FAINT so the target is still reported
 ## first when the explosion also brings it down.
+##
+## Two flags go with it, and they are on opposite sides: the user loses its own
+## Leech Seed, which nothing can read off a Pokémon at zero, and the *target*
+## loses its Destiny Bond (`BATTLE_VARS_SUBSTATUS5_OPP`), which is what stops an
+## explosion being answered by one.
 static func _selfdestruct(turn: Gen2Turn) -> void:
 	var attacker: Gen2BattleMon = turn.attacker()
 	attacker.status = Gen2Status.NONE
 	attacker.substatus &= ~(Gen2Substatus.CHARGING | Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
+	attacker.substatus &= ~Gen2Substatus.LEECH_SEED
+	turn.defender().substatus &= ~Gen2Substatus.DESTINY_BOND
 	attacker.take_damage(attacker.hp)
 
 
@@ -1322,11 +1374,35 @@ static func _recoil(turn: Gen2Turn) -> void:
 ## lists that have no faint step at all, Twineedle's among them, can still reach
 ## one through [constant MULTI_HIT].
 static func _check_faint(turn: Gen2Turn) -> void:
+	_destiny_bond_takes_user(turn)
 	for side: int in [turn.target, turn.side]:
 		if turn.battle.mon(side).is_fainted():
 			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
 	if turn.battle.mon(turn.target).is_fainted():
 		turn.end()
+
+
+## The Destiny Bond half of `BattleCommand_CheckFaint`, which is the one reader
+## of the flag and reads the *target's*, not the user's.
+##
+## The health is emptied outright rather than damaged: the source zeroes both
+## bytes of `wBattleMonHP` by hand, so no held item, no Endure and no Focus Band
+## stands between the bond and the attacker. Sitting in front of the loop below
+## is what reports the target's faint before the attacker's, which is the order
+## the source's own two `HandleMonFaint` calls take them in.
+##
+## A user already down asks nothing extra and is not exempted, because the source
+## exempts it nowhere: `recoil` runs in front of `checkfaint` in `RecoilHit`, so a
+## user that killed itself on the same hit still prints the line.
+static func _destiny_bond_takes_user(turn: Gen2Turn) -> void:
+	var target: Gen2BattleMon = turn.battle.mon(turn.target)
+	if not target.is_fainted():
+		return
+	if not Gen2Substatus.has(target.substatus, Gen2Substatus.DESTINY_BOND):
+		return
+	turn.emit(Gen2Battle.TOOK_DOWN_WITH_IT, {"target": turn.target})
+	var user: Gen2BattleMon = turn.attacker()
+	user.take_damage(user.hp)
 
 
 ## CantMove on the cartridge cancels a pending two-turn move, Rollout or
@@ -2427,6 +2503,79 @@ static func _clear_hazards(turn: Gen2Turn) -> void:
 	if user.trapped_turns > 0:
 		user.trapped_turns = 0
 		turn.emit(Gen2Battle.RELEASED_BY, {"target": turn.target})
+
+
+## `ProtectChance`, which Protect, Detect and Endure all are: three gates, then a
+## roll whose odds halve once per consecutive use. Answers whether the flag goes
+## up, and has already reported the failure when it says no.
+##
+## The two gates in front of the ladder are easy to get backwards. Going second
+## fails outright, which is what makes two Protects in one turn a question of
+## speed. And the Substitute it refuses is the *user's own*
+## (`BATTLE_VARS_SUBSTATUS4`, not `_OPP`), so a Pokémon behind its own doll cannot
+## protect; nothing about the target is asked.
+static func _protect_chance(turn: Gen2Turn) -> bool:
+	var user: Gen2BattleMon = turn.attacker()
+	if turn.battle.opponent_went_first(turn.side):
+		return _protect_failed(turn, user)
+	if Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE):
+		return _protect_failed(turn, user)
+
+	# `ld b, $ff` shifted right once per count, failing outright the moment it
+	# reaches zero: 255, 127, 63, 31, 15, 7, 3, 1, then nothing at eight.
+	var ceiling: int = 0xFF
+	for _step: int in user.protect_count:
+		ceiling >>= 1
+		if ceiling == 0:
+			return _protect_failed(turn, user)
+
+	# `.rand` rerolls a zero, so the draw is 1..255 rather than 0..255, and the
+	# comparison is on `roll - 1`. That is why a count of zero, with the ceiling
+	# still at 255, cannot fail: every one of the 255 values it can draw passes.
+	var roll: int = turn.rng().randi_range(1, PROTECT_ROLL_RANGE)
+	if roll - 1 >= ceiling:
+		return _protect_failed(turn, user)
+
+	user.protect_count += 1
+	return true
+
+
+## What the ladder draws against, `BattleRandom` with its zero rerolled away.
+const PROTECT_ROLL_RANGE: int = 0xFF
+
+
+## `.failed`: the count goes back to nothing and the move says so. The animation
+## the source plays here is `AnimateFailedMove`, which this engine spends no
+## frames on anywhere.
+static func _protect_failed(turn: Gen2Turn, user: Gen2BattleMon) -> bool:
+	user.protect_count = 0
+	turn.emit(Gen2Battle.MOVE_FAILED)
+	return false
+
+
+static func _protect(turn: Gen2Turn) -> void:
+	if not _protect_chance(turn):
+		return
+	turn.attacker().substatus |= Gen2Substatus.PROTECT
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.PROTECTED_ITSELF)
+
+
+static func _endure(turn: Gen2Turn) -> void:
+	if not _protect_chance(turn):
+		return
+	turn.attacker().substatus |= Gen2Substatus.ENDURE
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.BRACED_ITSELF)
+
+
+## `BattleCommand_DestinyBond`: the flag and the line, with nothing in front of
+## them. It rolls nothing, refuses nothing and cannot fail, which is why a second
+## use in a row is not a failure the way a second Protect can be.
+static func _destiny_bond(turn: Gen2Turn) -> void:
+	turn.attacker().substatus |= Gen2Substatus.DESTINY_BOND
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.DESTINY_BOND_SET)
 
 
 ## `BattleCommand_CheckSafeguard`: the target's own Safeguard refusing a status

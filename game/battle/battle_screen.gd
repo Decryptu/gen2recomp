@@ -1999,6 +1999,20 @@ func _describe(event: Dictionary) -> String:
 			return "%s hung on with %s!" % [
 				_battler_name(int(event["target"])), _data.item_name(int(event["item"])),
 			]
+		Gen2Battle.PROTECTED_ITSELF:
+			return "%s PROTECTED itself!" % _battler_name(side)
+		Gen2Battle.PROTECTING_ITSELF:
+			return "%s's PROTECTING itself!" % _battler_name(int(event["target"]))
+		Gen2Battle.BRACED_ITSELF:
+			return "%s braced itself!" % _battler_name(side)
+		Gen2Battle.ENDURED_HIT:
+			return "%s ENDURED the hit!" % _battler_name(int(event["target"]))
+		Gen2Battle.DESTINY_BOND_SET:
+			return "%s's trying to take its opponent with it!" % _battler_name(side)
+		Gen2Battle.TOOK_DOWN_WITH_IT:
+			return "%s took down with it, %s!" % [
+				_battler_name(int(event["target"])), _battler_name(side),
+			]
 		Gen2Battle.TRAPPED:
 			return _trapped_text(event)
 		Gen2Battle.HURT_BY_TRAP:

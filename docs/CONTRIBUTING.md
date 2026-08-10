@@ -276,6 +276,15 @@ miss/immunity or its fifth hit, and doubles with Defense Curl. Thrash, Petal
 Dance and Outrage continue for their rolled duration, then confuse. A status
 interruption cancels chains; rampage remains active after a miss.
 
+Fury Cutter's and Protect's counters are chains of a different kind: they are
+kept only while the move feeding them is the move being used, so
+`Gen2Battle._reset_action_counters` empties them on every other action, which is
+what `ParsePlayerAction` and `ParseEnemyAction` do. Protect, Detect and Endure
+share one counter. `Gen2Battle.opponent_went_first` is `CheckOpponentWentFirst`,
+and each action runs inside an open/close pair that clears the mover's own
+Destiny Bond in front and the opponent's Protect, Endure and Destiny Bond behind;
+the player's pair runs on every action and the enemy's only on a move.
+
 Switches happen before priority, so the incoming Pokémon takes the other
 side's move. A fainted replacement is caller policy: the turn stops at
 `must_replace` until `send_out`. A full moveset similarly uses
@@ -289,13 +298,14 @@ Trainer details:
   walked in class order, not sorted. Class 10 is intentionally empty because its
   pointer equals class 11. One packed DVs word covers each class's whole party;
 - `Gen2BattleAI` picks the lowest-scored move with random tie-breaking, matching
-  the result rather than the byte-level decrement race, and never switches or
-  uses items. Only implemented `AI_Smart` handlers exist; unsupported effects use
-  generic scoring, and weather-sensitive Razor Wind, Solar Beam and Fly are
-  absent;
+  the result rather than the byte-level decrement race, and switches and uses
+  items through `Gen2AISwitch` and `Gen2AIItems`. Only implemented `AI_Smart`
+  handlers exist; unsupported effects use generic scoring, and Razor Wind and the
+  Fly handlers are absent;
 - experience uses six growth curves and level 1 is zero, even for Medium Slow,
-  whose literal formula underflows. Experience is not divided among
-  participants, stat experience is, and only the player side receives it.
+  whose literal formula underflows. Experience and stat experience are both
+  divided among participants, since the division lands on the base EXP byte
+  inside the same block as the base stats, and only the player side receives it.
   Participants were sent out since the current opponent arrived, excluding
   members fainted at award time. Levels process one at a time, and a level-up
   adds the max-HP difference rather than refilling.

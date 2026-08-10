@@ -161,6 +161,14 @@ func test_every_volatile_field_clears() -> void:
 	mon.encored_slot = 2
 	mon.encore_turns = 3
 	mon.last_move_used = Fixture.TACKLE
+	mon.trapped_turns = 3
+	mon.trapping_move = Fixture.TACKLE
+	mon.perish_count = 2
+	mon.substitute_hp = 25
+	mon.turns_taken = 6
+	mon.fury_cutter_count = 4
+	mon.protect_count = 5
+	mon.minimized = true
 
 	mon.reset_volatile()
 
@@ -176,6 +184,14 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.encored_slot, -1)
 	assert_eq(mon.encore_turns, 0)
 	assert_eq(mon.last_move_used, 0)
+	assert_eq(mon.trapped_turns, 0)
+	assert_eq(mon.trapping_move, 0)
+	assert_eq(mon.perish_count, 0)
+	assert_eq(mon.substitute_hp, 0)
+	assert_eq(mon.turns_taken, 0)
+	assert_eq(mon.fury_cutter_count, 0)
+	assert_eq(mon.protect_count, 0)
+	assert_false(mon.minimized)
 
 
 ## Attract's "opposite gender" rule reads [method Gen2BattleMon.gender], which
