@@ -528,9 +528,16 @@ static func _apply_smart(
 				_smart_paralyze(scores, slot, attacker, defender, rng)
 			Gen2MoveEffect.RECHARGE_HIT: # Hyper Beam
 				_smart_hyper_beam(scores, slot, attacker, rng)
-			Gen2MoveEffect.SKULL_BASH:
+			# `AI_Smart_DestinyBond`, `AI_Smart_Reversal` and `AI_Smart_SkullBash`
+			# are one label and one body in the source, so they are one arm here.
+			Gen2MoveEffect.SKULL_BASH, Gen2MoveEffect.REVERSAL, \
+			Gen2MoveEffect.DESTINY_BOND:
 				if _above_quarter(attacker):
 					_discourage(scores, slot, 1)
+			Gen2MoveEffect.PROTECT:
+				_smart_protect(scores, slot, attacker, defender, rng)
+			Gen2MoveEffect.ENDURE:
+				_smart_endure(scores, slot, attacker, data, rng)
 			Gen2MoveEffect.BELLY_DRUM:
 				_smart_belly_drum(scores, slot, attacker)
 			Gen2MoveEffect.PSYCH_UP:
@@ -792,6 +799,103 @@ static func _smart_perish_song(
 	if _skip_50_50(rng):
 		return
 	_discourage(scores, slot, 1)
+
+
+## `AI_Smart_Protect`: one ladder of tests, first match winning, and the two exits
+## are asymmetric. `.encourage` is an 80% roll and one point off; `.discourage` is
+## a two-point penalty that an 8% roll skips outright, and `.greatly_discourage`
+## adds a point and falls into it, so the worst case is three.
+##
+## The source's second test, a player that has locked on, is missing here and only
+## here: `SUBSTATUS_LOCK_ON` does not exist yet, since `EFFECT_LOCK_ON` is
+## unwritten. Its branch would `.discourage`, so the omission can only make the
+## enemy readier to protect, never less ready.
+static func _smart_protect(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	rng: RandomNumberGenerator
+) -> void:
+	if attacker.protect_count != 0:
+		_smart_protect_discourage(scores, slot, rng, true)
+		return
+
+	var encourage: bool = defender.fury_cutter_count >= PROTECT_FURY_CUTTER_COUNT \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.CHARGING) \
+		or defender.toxic_counter > 0 \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.LEECH_SEED) \
+		or Gen2Substatus.has(defender.substatus, Gen2Substatus.CURSE)
+
+	if not encourage:
+		# The Rollout test is the fall-through, and it is two refusals in one: a
+		# player not rolling at all discourages, and one rolling under three
+		# discourages as well. Only a boosted Rollout reaches `.encourage`.
+		if not Gen2Substatus.has(defender.substatus, Gen2Substatus.ROLLOUT) \
+			or defender.rollout_count < PROTECT_ROLLOUT_COUNT:
+			_smart_protect_discourage(scores, slot, rng, false)
+			return
+
+	if _skip_80_20(rng):
+		return
+	_encourage(scores, slot, 1)
+
+
+## `cp 3` on both counts: what makes a Fury Cutter or a Rollout worth sitting out.
+const PROTECT_FURY_CUTTER_COUNT: int = 3
+const PROTECT_ROLLOUT_COUNT: int = 3
+
+
+## `.greatly_discourage` falls into `.discourage`, so the extra point is added in
+## front of the roll that can skip the other two.
+static func _smart_protect_discourage(
+	scores: Array, slot: int, rng: RandomNumberGenerator, greatly: bool
+) -> void:
+	if greatly:
+		_discourage(scores, slot, 1)
+	if _roll(rng, PROTECT_DISCOURAGE_SKIP_PERCENT):
+		return
+	_discourage(scores, slot, 2)
+
+
+## `cp 8 percent; ret c`: the one-in-twelve chance the penalty is not applied.
+const PROTECT_DISCOURAGE_SKIP_PERCENT: int = 8
+
+
+## `AI_Smart_Endure`: the same opening test as Protect, then health, then the one
+## reason to want to survive on a single point.
+##
+## Reversal is looked for by effect rather than by move number, which is
+## `AIHasMoveEffect`, and Flail carries the same byte, so either move answers.
+## The source's last branch, an enemy that has locked on, is absent for the same
+## reason [method _smart_protect]'s is.
+static func _smart_endure(
+	scores: Array, slot: int, attacker: Gen2BattleMon, data: GameData,
+	rng: RandomNumberGenerator
+) -> void:
+	if attacker.protect_count != 0 or _at_max_hp(attacker):
+		_discourage(scores, slot, 2)
+		return
+	if _above_quarter(attacker):
+		_discourage(scores, slot, 1)
+		return
+	if not _has_move_effect(attacker, data, Gen2MoveEffect.REVERSAL):
+		return
+	if _skip_80_20(rng):
+		return
+	_encourage(scores, slot, 3)
+
+
+## `AIHasMoveEffect`: whether this Pokémon knows any move carrying [param effect].
+##
+## An empty slot ends the search rather than being skipped, which is the source's
+## own `and a / jr z, .no`, and PP and Disable are not asked about at all. The
+## first costs nothing on a packed move list and is kept because the list is only
+## packed by convention.
+static func _has_move_effect(mon: Gen2BattleMon, data: GameData, effect: int) -> bool:
+	for slot: int in Gen2BattleMon.MAX_MOVES:
+		if slot >= mon.moves.size() or int(mon.moves[slot]) == 0:
+			return false
+		if _effect(_move_at(mon, data, slot)) == effect:
+			return true
+	return false
 
 
 static func _smart_belly_drum(scores: Array, slot: int, attacker: Gen2BattleMon) -> void:

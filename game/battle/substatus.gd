@@ -81,6 +81,21 @@ const LEECH_SEED: int = 1 << 18
 const NIGHTMARE: int = 1 << 19
 const CURSE: int = 1 << 20
 
+## `SUBSTATUS_PROTECT` and `SUBSTATUS_ENDURE`, `wPlayerSubStatus1` bits 2 and 5.
+## Both sit on the Pokémon that used the move, and neither is spent by the hit it
+## answers: `BattleCommand_CheckHit`'s `.Protect` and `BattleCommand_ApplyDamage`
+## only read them, so every hit of a multi-hit move is turned away or clamped.
+## What ends them is `EndOpponentProtectEndureDestinyBond`, behind the opponent's
+## own action (engine/battle/core.asm).
+const PROTECT: int = 1 << 21
+const ENDURE: int = 1 << 22
+
+## `SUBSTATUS_DESTINY_BOND`, `wPlayerSubStatus5` bit 6. On its user, and read by
+## the *opponent's* `BattleCommand_CheckFaint`, which is the only reader.
+## `EndUserDestinyBond` clears it in front of its user's own next action, so it
+## covers exactly the opponent's next move.
+const DESTINY_BOND: int = 1 << 23
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as

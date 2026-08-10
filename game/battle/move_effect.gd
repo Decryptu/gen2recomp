@@ -195,6 +195,17 @@ const CURSE: int = 109
 const SPIKES: int = 112
 const RAPID_SPIN: int = 129
 
+## Protect and Detect are one effect byte under two move numbers, and Endure is
+## the byte beside it: `BattleCommand_Endure` is `ProtectChance` and a different
+## flag. Both carry priority 3 in `MoveEffectPriorities`, which is why
+## [constant Gen2Battle.EFFECT_PRIORITIES] named them before either was written.
+const PROTECT: int = 111
+const ENDURE: int = 116
+
+## Destiny Bond, which rolls nothing and never fails: the flag goes up and the
+## opponent's own `BattleCommand_CheckFaint` reads it.
+const DESTINY_BOND: int = 98
+
 ## `EFFECT_NORMAL_HIT` as a byte rather than [constant NORMAL_HIT]'s list:
 ## `DoSubstituteDamage` stamps it over the move's own once a doll has broken.
 const NORMAL_HIT_EFFECT: int = 0
@@ -781,6 +792,30 @@ const RAPID_SPIN_SEQUENCE: Array = [
 	Gen2EffectCommands.CLEAR_HAZARDS,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Protect, Detect, Endure and Destiny Bond: four moves whose whole list is one
+## command, the shape `HEAL_SEQUENCE` above already has. None of the three rolls
+## accuracy, so the 100% each stores is never read.
+const PROTECT_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.PROTECT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const ENDURE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.ENDURE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const DESTINY_BOND_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DESTINY_BOND,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1477,6 +1512,9 @@ static func _sequences() -> Dictionary:
 		CURSE: CURSE_SEQUENCE,
 		SPIKES: SPIKES_SEQUENCE,
 		RAPID_SPIN: RAPID_SPIN_SEQUENCE,
+		PROTECT: PROTECT_SEQUENCE,
+		ENDURE: ENDURE_SEQUENCE,
+		DESTINY_BOND: DESTINY_BOND_SEQUENCE,
 		THUNDER: THUNDER_SEQUENCE,
 		LEECH_HIT: DRAIN_SEQUENCE,
 		DREAM_EATER: DREAM_EATER_SEQUENCE,

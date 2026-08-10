@@ -3070,3 +3070,227 @@ func test_a_switch_leaves_the_substitute_behind() -> void:
 	battle.send_out(Gen2Battle.PLAYER, 1)
 	assert_false(Gen2Substatus.has(leaving.substatus, Gen2Substatus.SUBSTITUTE))
 	assert_eq(leaving.substitute_hp, 0)
+
+
+## `wEnemyGoesFirst`, and the wrapper each side's action runs inside.
+##
+## [method Gen2Battle.opponent_went_first] is what Protect and Endure read, and
+## it is [method Gen2Battle.order]'s own answer rather than a second decision, so
+## every branch of the order has to leave it right.
+func test_who_went_first_is_recorded_for_every_branch_of_the_order() -> void:
+	var fast: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	fast.take_turn(0, 0)
+	assert_false(fast.enemy_goes_first, "110 Speed against 30")
+	assert_false(fast.opponent_went_first(Gen2Battle.PLAYER))
+	assert_true(fast.opponent_went_first(Gen2Battle.ENEMY))
+
+	# Priority beats speed: Protect is 3 and Tackle is 1.
+	var priority: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.PROTECT])
+	)
+	priority.take_turn(0, 0)
+	assert_true(priority.enemy_goes_first, "priority 3 beats a faster Tackle")
+
+	# A switching side is settled first whatever its speed.
+	var switching: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])]
+	)
+	switching.take_actions(Gen2Battle.use_move(0), Gen2Battle.switch_to(1))
+	assert_true(switching.enemy_goes_first, "the enemy's switch settles before the move")
+
+
+## `EndOpponentProtectEndureDestinyBond` behind the opponent's own action: a
+## Protect covers exactly one opposing move and is gone after it.
+func test_a_protect_is_cleared_by_the_move_it_turned_away() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PROTECT]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var first: Array = battle.take_turn(0, 0)
+
+	assert_eq(_of_type(first, Gen2Battle.PROTECTED_ITSELF).size(), 1)
+	assert_eq(_of_type(first, Gen2Battle.PROTECTING_ITSELF).size(), 1, "the Tackle was turned away")
+	assert_eq(_of_type(first, Gen2Battle.HIT).size(), 0)
+	assert_false(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT),
+		"and the enemy's own move cleared it behind itself"
+	)
+
+
+## The player's half of the wrapper runs on every action it spends the turn on,
+## because `DoPlayerTurn`'s `ret nz` skips only the move and not the two clears
+## around it. So a player switch ends an enemy's Protect.
+func test_a_player_switch_ends_the_enemys_protect() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	battle.enemy.substatus |= Gen2Substatus.PROTECT
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+
+	assert_false(Gen2Substatus.has(battle.enemy.substatus, Gen2Substatus.PROTECT))
+
+
+## The enemy's half is skipped outright when it switches instead of moving, which
+## is `.switched_or_used_item` jumping past `EnemyTurn_End...`. So the player's
+## own Protect outlives an enemy switch and is still up for the move after it.
+func test_a_player_protect_outlives_an_enemy_switch() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE]), _mon(Fixture.BULBASAUR, 50, [Fixture.TACKLE])]
+	)
+	battle.player.substatus |= Gen2Substatus.PROTECT
+	battle.take_actions(Gen2Battle.use_move(0), Gen2Battle.switch_to(1))
+
+	assert_true(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.PROTECT),
+		"nothing on the enemy's side of the turn clears it"
+	)
+
+
+## A bond covers exactly the opponent's next move, and the two brackets are what
+## decide which move that is.
+##
+## A user that goes first is answered on the same turn and its bond is cleared
+## behind the reply, so the interesting arrangement is the slow one: the bond
+## goes up after the opponent has already moved and is still up when the
+## opponent moves again.
+func test_a_destiny_bond_from_a_slow_user_survives_into_the_next_turn() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.GEODUDE, 50, [Fixture.DESTINY_BOND]),
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])
+	)
+	battle.take_turn(0, 0)
+	assert_true(battle.enemy_goes_first, "110 Speed against 30")
+	assert_true(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.DESTINY_BOND),
+		"the enemy had already moved, so nothing was left to clear it"
+	)
+
+	battle.player.hp = 1
+	var events: Array = battle.take_turn(0, 0)
+	assert_true(battle.player.is_fainted())
+	assert_true(battle.enemy.is_fainted(), "and the bond collected on the next move")
+	assert_eq(_of_type(events, Gen2Battle.TOOK_DOWN_WITH_IT).size(), 1)
+
+
+## A user that goes first is answered the same turn, and its own bond is cleared
+## behind the answer rather than left standing.
+func test_a_destiny_bond_from_a_fast_user_is_cleared_by_the_reply() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.DESTINY_BOND]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.take_turn(0, 0)
+
+	assert_false(battle.enemy_goes_first)
+	assert_false(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.DESTINY_BOND),
+		"the enemy's own move cleared it behind itself"
+	)
+
+
+## A switch clears all three flags and both counters, since they sit inside the
+## five substatus bytes `NewBattleMonStatus` zeroes.
+func test_a_switch_clears_the_three_flags_and_the_protect_count() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])]
+	)
+	var leaving: Gen2BattleMon = battle.player
+	leaving.substatus |= (
+		Gen2Substatus.PROTECT | Gen2Substatus.ENDURE | Gen2Substatus.DESTINY_BOND
+	)
+	leaving.protect_count = 4
+	battle.take_actions(Gen2Battle.switch_to(1), Gen2Battle.use_move(0))
+	battle.send_out(Gen2Battle.PLAYER, 0)
+
+	assert_eq(battle.player.substatus & (
+		Gen2Substatus.PROTECT | Gen2Substatus.ENDURE | Gen2Substatus.DESTINY_BOND
+	), 0)
+	assert_eq(battle.player.protect_count, 0)
+
+
+## `ParsePlayerAction`'s `cp EFFECT_FURY_CUTTER`: the chain is kept only while
+## Fury Cutter is the move being used, so any other move in between breaks it.
+func test_another_move_breaks_the_fury_cutter_chain() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.FURY_CUTTER, Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.fury_cutter_count, 1)
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.fury_cutter_count, 2, "two in a row keeps counting")
+
+	battle.take_turn(1, 0)
+	assert_eq(battle.player.fury_cutter_count, 0, "a Tackle in between resets it")
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.fury_cutter_count, 1, "so the next one starts over")
+
+
+## The same rule on Protect's own counter, and Endure does not break it because
+## the two share one.
+##
+## The shared ladder is read at the count that cannot roll rather than by
+## counting a success, so no seed decides the answer: an Endure behind a spent
+## Protect chain has to fail, where an Endure with a ladder of its own would be a
+## first use and could not.
+func test_another_move_breaks_the_protect_chain_but_endure_does_not() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.PROTECT, Fixture.TACKLE, Fixture.ENDURE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	battle.player.protect_count = 8
+	battle.take_turn(2, 0)
+	assert_false(
+		Gen2Substatus.has(battle.player.substatus, Gen2Substatus.ENDURE),
+		"Endure inherited Protect's spent ladder"
+	)
+
+	battle.take_turn(1, 0)
+	assert_eq(battle.player.protect_count, 0, "a Tackle in between resets it")
+	battle.take_turn(0, 0)
+	assert_eq(battle.player.protect_count, 1, "so the next Protect starts over and lands")
+
+
+## `.reset_bide` falls into `.locked_in`, so a failed run empties both counters
+## the way any other spent turn does.
+func test_a_failed_run_empties_both_counters() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 1, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 100, [Fixture.TACKLE])
+	)
+	battle.player.protect_count = 3
+	battle.player.fury_cutter_count = 3
+	var events: Array = battle.take_actions(Gen2Battle.run_away(), Gen2Battle.use_move(0))
+
+	assert_eq(
+		_of_type(events, Gen2Battle.RUN_FAILED).size(), 1,
+		"a level 1 Pikachu does not outrun a level 100 Geodude: %s" % JSON.stringify(events)
+	)
+	assert_eq(battle.player.protect_count, 0)
+	assert_eq(battle.player.fury_cutter_count, 0)
+
+
+## `AI_TryItem` does the same on the enemy's side.
+func test_a_trainer_item_empties_both_counters() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])), _rng, true
+	)
+	battle.enemy_items = [Gen2AIItems.MAX_POTION]
+	battle.enemy.hp = 1
+	battle.enemy.protect_count = 5
+	battle.enemy.fury_cutter_count = 5
+	battle.take_actions(
+		Gen2Battle.use_move(0), Gen2Battle.use_item(Gen2AIItems.MAX_POTION)
+	)
+
+	assert_eq(battle.enemy.protect_count, 0)
+	assert_eq(battle.enemy.fury_cutter_count, 0)

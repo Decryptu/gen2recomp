@@ -139,8 +139,16 @@ var last_move_used: int = 0
 var item: int = 0
 
 ## `wPlayerFuryCutterCount`: how many times in a row Fury Cutter has connected.
-## Zeroed on a switch and by a miss, which is `ResetFuryCutterCount`.
+## Zeroed on a switch, by a miss (`ResetFuryCutterCount`) and by choosing any
+## other move, which is `ParsePlayerAction`'s own `cp EFFECT_FURY_CUTTER`:
+## see [method Gen2Battle._reset_action_counters].
 var fury_cutter_count: int = 0
+
+## `wPlayerProtectCount`: how many times in a row this Pokémon has used Protect,
+## Detect or Endure. `ProtectChance` halves the odds once per count and refuses
+## outright at eight, and the same counter serves all three moves, so alternating
+## Protect and Endure does not reset it.
+var protect_count: int = 0
 
 ## `wPlayerMinimized`: whether this Pokémon has used Minimize since it came out,
 ## which is the whole of what Stomp's doubled damage reads. Set by
@@ -305,6 +313,7 @@ func reset_volatile() -> void:
 	turns_taken = 0
 	last_move_used = 0
 	fury_cutter_count = 0
+	protect_count = 0
 	minimized = false
 
 

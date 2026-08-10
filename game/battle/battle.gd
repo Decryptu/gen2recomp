@@ -157,8 +157,29 @@ const ITEM_HEALED_CONFUSION: StringName = &"item_healed_confusion"
 
 ## A Focus Band held the Pokémon on one hit point through what would have
 ## finished it. [code]item[/code] is what did it, since the cartridge's line
-## names the item rather than the effect.
+## names the item rather than the effect. This is `HungOnText`; Endure's own line
+## is [constant ENDURED_HIT], and the two are separate texts for separate
+## reasons, so neither stands in for the other.
 const ENDURED: StringName = &"endured"
+
+## Protect and Detect: `ProtectedItselfText` when the flag goes up, and
+## `ProtectingItselfText` on every move it then turns away, which is printed
+## ahead of that move's own [constant MISSED].
+const PROTECTED_ITSELF: StringName = &"protected_itself"
+const PROTECTING_ITSELF: StringName = &"protecting_itself"
+
+## Endure: `BracedItselfText` when the flag goes up and `EnduredText` on each hit
+## it survives. A hit can be clamped more than once a turn, since nothing spends
+## the flag.
+const BRACED_ITSELF: StringName = &"braced_itself"
+const ENDURED_HIT: StringName = &"endured_hit"
+
+## Destiny Bond: `DestinyBondEffectText` when it is used, and `TookDownWithItText`
+## when it collects. [code]target[/code] on the second is the Pokémon that went
+## down holding it; [code]side[/code] is the attacker it takes with it, and the
+## two [constant FAINTED] events follow in that order.
+const DESTINY_BOND_SET: StringName = &"destiny_bond_set"
+const TOOK_DOWN_WITH_IT: StringName = &"took_down_with_it"
 
 ## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
 ## [Gen2Weather] value, so a screen names it without being told twice.
@@ -354,12 +375,12 @@ const FLEE_ODDS_RANGE: int = 256
 ## which the cache already carries.
 const BASE_PRIORITY: int = 1
 const EFFECT_PRIORITIES: Dictionary = {
-	0x6F: 3,  # Protect
-	0x74: 3,  # Endure
+	Gen2MoveEffect.PROTECT: 3,
+	Gen2MoveEffect.ENDURE: 3,
 	0x67: 2,  # Quick Attack, Extreme Speed, Mach Punch
 	0x1C: 0,  # Whirlwind and Roar
-	0x59: 0,  # Counter
-	0x90: 0,  # Mirror Coat
+	Gen2MoveEffect.COUNTER: 0,
+	Gen2MoveEffect.MIRROR_COAT: 0,
 }
 
 ## Vital Throw is slower than everything and says so in the move itself rather
@@ -430,6 +451,13 @@ var battle_anim_param: int = 0
 ## on. Cleared at the top of every turn, the way `BattleTurn.loop` clears both
 ## bytes before either side chooses.
 var _just_got_frozen: Dictionary = {PLAYER: false, ENEMY: false}
+
+## `wEnemyGoesFirst`, written once per turn by `DetermineMoveOrder` and read by
+## `CheckOpponentWentFirst`. It is exactly what [method order] already decides, so
+## this is that answer kept rather than a second decision:
+## [method opponent_went_first] is the `wEnemyGoesFirst XOR hBattleTurn` the three
+## commands that ask are given.
+var enemy_goes_first: bool = false
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
@@ -923,19 +951,32 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	}
 
 	var acting: Array = order(chosen, actions)
+	enemy_goes_first = int(acting[0]) == ENEMY
 	for side: int in acting:
-		if _is_run(actions[side]):
-			continue
-		if _is_switch(actions[side]):
-			events.append_array(send_out(side, int(actions[side].get("index", -1))))
-			continue
-		if _is_item(actions[side]):
-			_use_trainer_item(side, int(actions[side].get("item", 0)), events)
-			continue
-		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
+		var action: Dictionary = actions[side]
+		var moving: bool = not (_is_run(action) or _is_switch(action) or _is_item(action))
+		# The faint check is the source's own `HasPlayerFainted`/`HasEnemyFainted`
+		# between the two halves of the turn, and it gates the whole of the second
+		# half rather than only its move. It is asked before the bracket below
+		# opens for that reason. A switching or item-using side is always
+		# [method order]'s first, so this is only ever asked of a move.
+		if moving and (mon(side).is_fainted() or mon(opponent_of(side)).is_fainted()):
 			break
-		var slot: int = effective_slot(side, int(actions[side].get("slot", 0)))
-		_act(side, slot, move_for(side, slot), events)
+		_open_turn_bracket(side, action)
+		if not moving:
+			# `.reset_rage` for a switch and `.reset_bide` for an item or a failed
+			# run, both of which fall into `.locked_in`'s unconditional zeroing.
+			# `AI_TryItem` does the same on the enemy's side. -1 is no move's
+			# effect, so both counters go.
+			_reset_action_counters(side, -1)
+		if _is_switch(action):
+			events.append_array(send_out(side, int(action.get("index", -1))))
+		elif _is_item(action):
+			_use_trainer_item(side, int(action.get("item", 0)), events)
+		elif moving:
+			var slot: int = effective_slot(side, int(action.get("slot", 0)))
+			_act(side, slot, move_for(side, slot), events)
+		_close_turn_bracket(side, action)
 
 	_residual_damage(acting, events)
 	_tick_weather(events)
@@ -948,6 +989,76 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
 	return events
+
+
+## `CheckOpponentWentFirst`, which is `wEnemyGoesFirst XOR hBattleTurn`: whether
+## the Pokémon opposite [param side] has already moved this turn.
+##
+## Protect and Endure both fail outright on a yes, which is what makes two
+## Protects in one turn a question of speed and what makes a Protect behind a
+## switch fail: a switching side is `.player_first` or `wEnemyGoesFirst`, so the
+## other side is always second.
+func opponent_went_first(side: int) -> bool:
+	return (side == PLAYER) == enemy_goes_first
+
+
+## `EndUserDestinyBond`, the front half of the wrapper each side's action runs
+## inside (`PlayerTurn_EndOpponentProtectEndureDestinyBond`,
+## engine/battle/core.asm). It is in front of `DoPlayerTurn`, so a Pokémon that
+## cannot move still loses the bond it put up.
+func _open_turn_bracket(side: int, action: Dictionary) -> void:
+	if not _brackets_turn(side, action):
+		return
+	mon(side).substatus &= ~Gen2Substatus.DESTINY_BOND
+
+
+## `EndOpponentProtectEndureDestinyBond`, the back half: the three flags that only
+## an opposing action ends. A Protect therefore covers exactly one opposing
+## action, and outlives the turn it was used on when it was used going second.
+func _close_turn_bracket(side: int, action: Dictionary) -> void:
+	if not _brackets_turn(side, action):
+		return
+	var other: Gen2BattleMon = mon(opponent_of(side))
+	other.substatus &= ~(
+		Gen2Substatus.PROTECT | Gen2Substatus.ENDURE | Gen2Substatus.DESTINY_BOND
+	)
+
+
+## Whether an action runs inside that wrapper, and the two sides do not agree.
+##
+## The player's runs on everything it spends the turn on: `Battle_PlayerFirst` and
+## `Battle_EnemyFirst` both call `PlayerTurn_End...` unconditionally, and
+## `DoPlayerTurn`'s own `ret nz` for a switch, an item or a failed run skips only
+## the move, not the two clears around it. The enemy's is skipped outright when
+## `AI_SwitchOrTryItem` answers, which is the `.switch_item` and
+## `.switched_or_used_item` jump past `EnemyTurn_End...`.
+##
+## So a Protect the player put up survives an enemy switch and blocks the move
+## after it, where an enemy's does not survive a player switch.
+func _brackets_turn(side: int, action: Dictionary) -> bool:
+	return side == PLAYER or not (_is_switch(action) or _is_item(action))
+
+
+## `ParsePlayerAction` and `ParseEnemyAction`: the two counters a chain keeps only
+## while the chain is the move being used. Both are zeroed unless this move is the
+## one that feeds them, and Protect and Endure share a counter, so alternating the
+## two does not reset it.
+##
+## The source has a second, unconditional reset behind `CheckPlayerLockedIn` and
+## `CheckEnemyLockedIn`, for a Pokémon locked into a recharge, a charge, a rampage
+## or a Rollout. It is not modelled separately because it can never disagree: none
+## of Fury Cutter, Protect and Endure sets any of those four flags, so a locked-in
+## Pokémon's forced move always fails the effect test below anyway.
+##
+## [param effect] is the move's own byte rather than [method Gen2Turn.effect],
+## which a broken Substitute can overwrite part way through a move that has
+## already been counted.
+func _reset_action_counters(side: int, effect: int) -> void:
+	var actor: Gen2BattleMon = mon(side)
+	if effect != Gen2MoveEffect.FURY_CUTTER:
+		actor.fury_cutter_count = 0
+	if effect != Gen2MoveEffect.PROTECT and effect != Gen2MoveEffect.ENDURE:
+		actor.protect_count = 0
 
 
 ## Both sides use a move slot, which is the common case and the whole of a battle
@@ -1462,9 +1573,11 @@ func _award_share(
 ## The item is gone whether or not it changed anything: `AI_TryItem` clears the
 ## slot the moment a check said yes, and the checks are what decide that, not
 ## the effect. Bide, Fury Cutter, Protect, Rage and `wLastEnemyCounterMove` are
-## cleared alongside it on the cartridge. Of those only the counter move exists
-## here, and [method reset_damage_taken] has already cleared it at the top of
-## this action pair, so there is nothing left for a clear here to do.
+## cleared alongside it on the cartridge. The two counters are cleared by
+## [method _reset_action_counters], which the caller runs for every action that is
+## not a move; the counter move was already cleared by
+## [method reset_damage_taken] at the top of this action pair; and Bide and Rage
+## do not exist here yet.
 func _use_trainer_item(side: int, item: int, events: Array) -> void:
 	if item == 0:
 		return
@@ -1705,6 +1818,8 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	var move: Dictionary = data.move(move_number)
 	if move.is_empty():
 		return
+
+	_reset_action_counters(side, int(move.get("effect", -1)))
 
 	var turn: Gen2Turn = Gen2Turn.create(self, side, slot, move_number, move, events)
 	# The release turn of a two-turn move, or any Rollout/rampage continuation:

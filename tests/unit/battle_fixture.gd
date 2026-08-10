@@ -145,6 +145,15 @@ const SPIKES: int = 191
 ## Rapid Spin, the only move that undoes any of the three.
 const RAPID_SPIN: int = 229
 
+## Protect, Detect, Endure and Destiny Bond, at their real move numbers. Protect
+## and Detect have to be two numbers over one effect byte, since one shared
+## [member Gen2BattleMon.protect_count] is the whole point of the pair; the other
+## two are real for company, and all four fit under [constant MAX_MOVE].
+const PROTECT: int = 182
+const DESTINY_BOND: int = 194
+const DETECT: int = 197
+const ENDURE: int = 203
+
 ## Rollout, its Defense Curl partner and the three rampage moves keep their real
 ## move numbers so the state can be forced through the same number-based path as
 ## the cartridge.
@@ -539,6 +548,14 @@ static func _moves() -> Array:
 		CURSE: ["CURSE", 0, CURSE_TYPE, 255, 10, Gen2MoveEffect.CURSE, 0],
 		SPIKES: ["SPIKES", 0, GROUND, 255, 20, Gen2MoveEffect.SPIKES, 0],
 		RAPID_SPIN: ["RAPID SPIN", 20, NORMAL, 255, 40, Gen2MoveEffect.RAPID_SPIN, 0],
+		# Real rows. All four store 100% as the 255 that skips a roll, and none of
+		# their lists rolls accuracy anyway.
+		PROTECT: ["PROTECT", 0, NORMAL, 255, 10, Gen2MoveEffect.PROTECT, 0],
+		DETECT: ["DETECT", 0, FIGHTING, 255, 5, Gen2MoveEffect.PROTECT, 0],
+		ENDURE: ["ENDURE", 0, NORMAL, 255, 10, Gen2MoveEffect.ENDURE, 0],
+		DESTINY_BOND: [
+			"DESTINY BOND", 0, GHOST, 255, 5, Gen2MoveEffect.DESTINY_BOND, 0,
+		],
 		# Thunder with a paralysis chance the roll cannot fail, so the secondary
 		# behind its own effect can be seen without a seed. The accuracy byte is
 		# still the real 178, since that is what the weather rewrites.
