@@ -264,7 +264,48 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not battle_anims["ok"]:
 		return battle_anims
 
+	var name_input: Dictionary = verify_name_input_chars(rom, layout)
+	if not name_input["ok"]:
+		return name_input
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## data/text/name_input_chars.asm. Nothing in the block identifies itself, so it
+## is pinned by content at both ends of every table: row 0 has to be the nine
+## letters the table opens with, and the last row has to be the command row,
+## which is what NamingScreen_GetCursorPosition reads by column. A run of text
+## bytes elsewhere in the bank passes neither.
+static func verify_name_input_chars(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int(layout.get("name_input_chars", -1))
+	if not rom.in_bounds(at, RomLayout.NAME_INPUT_BLOCK_BYTES):
+		return {"ok": false, "message": "Name input table is outside the cartridge."}
+	for table: int in RomLayout.NAME_INPUT_TABLE_ROWS.size():
+		var start: int = RomLayout.name_input_table_offset(layout, table)
+		var rows: int = RomLayout.NAME_INPUT_TABLE_ROWS[table]
+		# Tables 0 and 1 are the lower keyboards and open on "a"; 2 and 3 are the
+		# upper ones and open on "A".
+		var lower: bool = table < 2
+		var first: int = RomLayout.NAME_INPUT_LOWER_A if lower else RomLayout.NAME_INPUT_UPPER_A
+		for column: int in RomLayout.NAME_INPUT_COLUMNS:
+			var expected: int = first + column
+			var stored: int = rom.u8(start + column * RomLayout.NAME_INPUT_COLUMN_STRIDE)
+			if stored != expected:
+				return {
+					"ok": false,
+					"message": "Name input table %d letter %d is $%02X, expected $%02X." % [
+						table, column, stored, expected,
+					],
+				}
+		# The last row of every table is the command row, in the columns
+		# NamingScreen_GetCursorPosition splits on.
+		var command: int = start + (rows - 1) * RomLayout.NAME_INPUT_ROW_BYTES
+		var expected_row: Array[int] = (
+			RomLayout.NAME_INPUT_COMMAND_LOWER if lower else RomLayout.NAME_INPUT_COMMAND_UPPER
+		)
+		if Array(rom.slice(command, RomLayout.NAME_INPUT_ROW_BYTES)) != Array(expected_row):
+			return {"ok": false, "message": "Name input table %d has no command row." % table}
+	return {"ok": true, "message": "Name input tables verified."}
 
 
 ## Walks the type matchup chart from its offset to the terminator.
@@ -1512,6 +1553,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if tmhm_moves.is_empty():
 		result["message"] = "TM/HM move table is outside the cartridge or malformed."
 		return result
+	var name_input_chars: Array = _import_name_input_chars(rom, layout)
 	var items: Array = _import_items(rom, layout, on_progress)
 	var trades: Array = _import_world_trades(rom, layout)
 	var types: Array = _import_types(rom, layout, on_progress)
@@ -1548,6 +1590,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.tmhm_moves_path(directory), tmhm_moves):
 		result["message"] = "Could not write TM/HM move data."
+		return result
+	if not RomCache.write_json(RomCache.name_input_chars_path(directory), name_input_chars):
+		result["message"] = "Could not write name input data."
 		return result
 	if not RomCache.write_json(RomCache.dex_orders_path(directory), dex_orders):
 		result["message"] = "Could not write dex order data."
@@ -1818,6 +1863,22 @@ func _import_tmhm_moves(rom: RomFile, layout: Dictionary) -> Array:
 		out.append(move)
 	if int(out[RomLayout.TMHM_TM_COUNT]) != MOVE_CUT:
 		return []
+	return out
+
+
+## data/text/name_input_chars.asm's four keyboards, each a list of 17-byte rows
+## in source order. Kept as raw cartridge codes rather than decoded text: a row
+## carries PK, MN and the two gender signs, which are one byte and one glyph but
+## not one character, and the screen writes the byte itself into the name.
+func _import_name_input_chars(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	for table: int in RomLayout.NAME_INPUT_TABLE_ROWS.size():
+		var start: int = RomLayout.name_input_table_offset(layout, table)
+		var rows: Array = []
+		for row: int in RomLayout.NAME_INPUT_TABLE_ROWS[table]:
+			var at: int = start + row * RomLayout.NAME_INPUT_ROW_BYTES
+			rows.append(Array(rom.slice(at, RomLayout.NAME_INPUT_ROW_BYTES)))
+		out.append(rows)
 	return out
 
 

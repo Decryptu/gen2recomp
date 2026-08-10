@@ -29,6 +29,7 @@ var _moves: Array = []
 ## TMHMMoves in TMNUM order, restored to integers because JSON reads them back
 ## as floats.
 var _tmhm_moves: Array[int] = []
+var _name_input_chars: Array = []
 ## The two cached dex orderings, by the key each mode reads, restored to
 ## integers because JSON reads them back as floats.
 var _dex_orders: Dictionary = {}
@@ -104,6 +105,7 @@ static func open_directory(path: String) -> GameData:
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
+	data._name_input_chars = data._read_array(RomCache.name_input_chars_path(path))
 	data._load_dex_orders(RomCache.dex_orders_path(path))
 	data._items = data._read_array(RomCache.items_path(path))
 	data._world_trades = data._read_array(RomCache.world_trades_path(path))
@@ -757,6 +759,22 @@ func tmhm_number_for_move(move_number: int) -> int:
 		return 0
 	var found: int = _tmhm_moves.find(move_number)
 	return found + 1 if found >= 0 else 0
+
+
+## One of data/text/name_input_chars.asm's four keyboards as rows of raw
+## cartridge codes, in block order: NameInputLower, BoxNameInputLower,
+## NameInputUpper, BoxNameInputUpper. Empty when the table is missing, which the
+## caller reports rather than drawing a blank grid.
+func name_input_chars(table: int) -> Array:
+	if table < 0 or table >= _name_input_chars.size():
+		return []
+	var out: Array = []
+	for row: Variant in _name_input_chars[table]:
+		var codes: Array[int] = []
+		for code: Variant in row:
+			codes.append(int(code))
+		out.append(codes)
+	return out
 
 
 func item(number: int) -> Dictionary:

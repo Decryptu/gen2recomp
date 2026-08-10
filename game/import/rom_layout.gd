@@ -737,6 +737,33 @@ const TMHM_BYTES: int = 8
 ## identical between the pins; only Crystal's tutor rows follow.
 const TMHM_TM_COUNT: int = 50
 const TMHM_HM_COUNT: int = 7
+## data/text/name_input_chars.asm's four keyboards, one contiguous block in
+## source order with every row 17 bytes wide. The block is byte identical in all
+## three dumps, so only its offset is profile split.
+const NAME_INPUT_ROW_BYTES: int = 17
+## Rows per table, in block order: NameInputLower, BoxNameInputLower,
+## NameInputUpper, BoxNameInputUpper. A name keyboard is 5 rows and a box
+## keyboard 6, which is the whole of NamingScreen_IsTargetBox's `ld b, $5` /
+## `ld b, $6` split.
+const NAME_INPUT_TABLE_ROWS: Array[int] = [5, 6, 5, 6]
+const NAME_INPUT_BLOCK_BYTES: int = 374
+## NamingScreen_GetLastCharacter reads the keyboard by cursor column, and the
+## cursor steps two tiles at a time, so a column is every second byte of a row.
+const NAME_INPUT_COLUMNS: int = 9
+const NAME_INPUT_COLUMN_STRIDE: int = 2
+## The letter each keyboard's first row opens with, which is what pins the block.
+const NAME_INPUT_LOWER_A: int = 0xA0
+const NAME_INPUT_UPPER_A: int = 0x80
+## The last row of every table: the case switch, DEL and END, encoded.
+const NAME_INPUT_COMMAND_LOWER: Array[int] = [
+	0x94, 0x8F, 0x8F, 0x84, 0x91, 0x7F, 0x7F, 0x83, 0x84,
+	0x8B, 0x7F, 0x7F, 0x7F, 0x84, 0x8D, 0x83, 0x7F,
+]
+const NAME_INPUT_COMMAND_UPPER: Array[int] = [
+	0xAB, 0xAE, 0xB6, 0xA4, 0xB1, 0x7F, 0x7F, 0x83, 0x84,
+	0x8B, 0x7F, 0x7F, 0x7F, 0x84, 0x8D, 0x83, 0x7F,
+]
+
 ## constants/item_constants.asm. TM01 is $bf and HM01 $f3, but the run is not
 ## contiguous: ITEM_C3 and ITEM_DC are dummy items inside it, which is why
 ## GetTMHMNumber skips them rather than subtracting.
@@ -801,6 +828,7 @@ const GOLD_SILVER: Dictionary = {
 	"move_data": 0x41AFE,
 	"tmhm_moves": 0x11A66,
 	"tmhm_move_count": 57,
+	"name_input_chars": 0x120B4,
 	"evos_attacks": 0x427BD,
 	"type_names": 0x509AE,
 	"type_matchups": 0x34D01,
@@ -987,6 +1015,7 @@ const CRYSTAL: Dictionary = {
 	"move_data": 0x41AFB,
 	"tmhm_moves": 0x1167A,
 	"tmhm_move_count": 60,
+	"name_input_chars": 0x11CE7,
 	"evos_attacks": 0x425B1,
 	"type_names": 0x5097B,
 	"type_matchups": 0x34BB1,
@@ -1177,6 +1206,16 @@ static func fix_pic_bank(layout: Dictionary, stored: int) -> int:
 	if patch.has(stored):
 		return patch[stored]
 	return stored + int(layout["pic_bank_add"])
+
+
+## Where [param table] of NAME_INPUT_TABLE_ROWS starts, counted from the block
+## in source order, since the four keyboards are stored back to back with no
+## header between them.
+static func name_input_table_offset(layout: Dictionary, table: int) -> int:
+	var at: int = int(layout["name_input_chars"])
+	for before: int in table:
+		at += NAME_INPUT_TABLE_ROWS[before] * NAME_INPUT_ROW_BYTES
+	return at
 
 
 static func species_name_offset(layout: Dictionary, species: int) -> int:
