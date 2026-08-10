@@ -1444,7 +1444,7 @@ func test_switching_out_clears_attract_disable_and_encore() -> void:
 
 ## test_damage.gd confirms statistically that Focus Energy raises the rate,
 ## against [method Gen2Damage.critical_level]; this only checks the wiring, that
-## a real turn's damage calc reads the flag at all.
+## a real turn's `critical` step reads the flag at all.
 ## Seed 12, found by search, is one where the same first roll misses Tackle's
 ## critical chance at the base rate and lands it at the Focus Energy rate: one
 ## draw read two ways, which proves the flag reaches the roll directly rather
@@ -1458,7 +1458,7 @@ func test_focus_energy_reaches_the_damage_calc_of_a_real_turn() -> void:
 	var without_boost: Gen2Turn = Gen2Turn.create(
 		battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
 	)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, without_boost)
+	Gen2EffectCommands.run(Gen2EffectCommands.CRITICAL, without_boost)
 	assert_false(without_boost.critical, "the base rate misses this particular roll")
 
 	battle.rng.seed = 12
@@ -1466,7 +1466,7 @@ func test_focus_energy_reaches_the_damage_calc_of_a_real_turn() -> void:
 	var with_boost: Gen2Turn = Gen2Turn.create(
 		battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
 	)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, with_boost)
+	Gen2EffectCommands.run(Gen2EffectCommands.CRITICAL, with_boost)
 	assert_true(with_boost.critical, "the same roll lands once Focus Energy raises the rate")
 
 

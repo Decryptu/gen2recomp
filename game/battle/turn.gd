@@ -26,12 +26,30 @@ var move: Dictionary = {}
 ## [method Gen2Battle.take_actions] is handed back.
 var events: Array = []
 
-## What the damage step worked out, for the steps after it.
+## What the damage steps worked out, for the steps after them.
 var damage: int = 0
 var critical: bool = false
 var effectiveness: int = RomLayout.MATCHUP_EFFECTIVE
 var immune: bool = false
 var missed: bool = false
+
+## The truncated pair `damagestats` leaves in `b` and `c` for `damagecalc` to
+## divide with. Two commands rather than one, so Present can set the power
+## between them.
+var attack_stat: int = 0
+var defense_stat: int = 0
+
+## What a command has written over the move's own power and type, or -1 for the
+## cartridge row's own.
+##
+## `wPlayerMoveStruct` is a per-turn copy the cartridge writes into freely, so
+## `happinesspower`, `getmagnitude`, `present` and `hiddenpower` all just store a
+## byte there. [member move] is not a copy: [method GameData.move] hands back the
+## cached row itself, so writing to it would edit the move table for the rest of
+## the process. These two are that per-turn copy, read through
+## [method effective_move].
+var power_override: int = -1
+var type_override: int = -1
 
 ## What was actually taken off, which is not the same as [member damage]: a
 ## Pokémon with three hit points left takes three from a hit worth forty.
@@ -110,6 +128,22 @@ func rng() -> RandomNumberGenerator:
 
 func effect() -> int:
 	return int(move.get("effect", -1))
+
+
+## The move as the damage steps read it: the cartridge row with whatever
+## [member power_override] and [member type_override] have put over it.
+##
+## Never [member move] itself once either is set, and never a write into it: that
+## Dictionary is the cache's own row.
+func effective_move() -> Dictionary:
+	if power_override < 0 and type_override < 0:
+		return move
+	var out: Dictionary = move.duplicate()
+	if power_override >= 0:
+		out["power"] = power_override
+	if type_override >= 0:
+		out["type"] = type_override
+	return out
 
 
 ## Writes an event down. [param extra] is merged over the side, which every event

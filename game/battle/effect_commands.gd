@@ -20,10 +20,24 @@ const USED_MOVE_TEXT: StringName = &"usedmovetext"
 ## Spends the PP.
 const DO_TURN: StringName = &"doturn"
 
-## Works out what the move would do: the critical, the type matchup, the STAB and
-## the random spread. Nothing is applied here, and nothing has been rolled for
-## whether it connects.
+## The five steps a hit is worked out in, which are five commands on the
+## cartridge and not one: an effect that reaches inside the formula does so
+## between two of them. Present sets the power between [constant DAMAGE_STATS]
+## and [constant DAMAGE_CALC], Triple Kick multiplies between
+## [constant DAMAGE_CALC] and [constant STAB], and Fury Cutter and Rollout
+## between [constant STAB] and [constant DAMAGE_VARIATION]. Nothing is applied
+## by any of them, and nothing has been rolled for whether the move connects.
+const CRITICAL: StringName = &"critical"
+const DAMAGE_STATS: StringName = &"damagestats"
 const DAMAGE_CALC: StringName = &"damagecalc"
+const STAB: StringName = &"stab"
+const DAMAGE_VARIATION: StringName = &"damagevariation"
+
+## `doubleflyingdamage`, `doubleundergrounddamage` and `doubleminimizedamage`,
+## which are one routine under three gates and sit behind the spread: Gust and
+## Twister reach a target that is out of sight above, Earthquake and Magnitude
+## one below, and Stomp one that has made itself small.
+const DOUBLE_DAMAGE: StringName = &"doubledamage"
 
 ## Ends the move if the defender cannot be touched by it at all. Separate from
 ## the roll, because an immunity is not a miss and does not read as one.
@@ -409,8 +423,18 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_used_move_text(turn)
 		DO_TURN:
 			_do_turn(turn)
+		CRITICAL:
+			_critical(turn)
+		DAMAGE_STATS:
+			_damage_stats(turn)
 		DAMAGE_CALC:
 			_damage_calc(turn)
+		STAB:
+			_stab(turn)
+		DAMAGE_VARIATION:
+			_damage_variation(turn)
+		DOUBLE_DAMAGE:
+			_double_damage(turn)
 		CHECK_IMMUNE:
 			_check_immune(turn)
 		CHECK_HIT:
@@ -564,25 +588,74 @@ static func _do_turn(turn: Gen2Turn) -> void:
 		turn.attacker().spend_pp(turn.slot)
 
 
+## `BattleCommand_Critical`: whether this hit is a critical, at the level the
+## move, Focus Energy and a Scope Lens add up to. A move with no power never
+## rolls, which is the routine's own `and a / ret z` on the power byte.
+static func _critical(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	turn.critical = Gen2Damage.roll_critical(
+		turn.effective_move(), turn.rng(),
+		Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY),
+		Gen2HeldItem.effect_of(turn.data(), attacker.item) == Gen2HeldItem.CRITICAL_UP
+	)
+
+
+## `BattleCommand_DamageStats`: the two stats, truncated, left on the turn for
+## [method _damage_calc] to divide with.
+static func _damage_stats(turn: Gen2Turn) -> void:
+	var stats: Array = Gen2Damage.damage_stats(
+		turn.attacker(), turn.defender(),
+		int(turn.effective_move().get("type", RomLayout.TYPE_NORMAL)),
+		turn.critical, turn.battle.screens[turn.target]
+	)
+	turn.attack_stat = int(stats[0])
+	turn.defense_stat = int(stats[1])
+
+
+## `BattleCommand_DamageCalc`: the formula over those two stats, the item, the
+## critical multiplier, the cap and the minimum.
 static func _damage_calc(turn: Gen2Turn) -> void:
-	var rollout_multiplier: int = 1
-	if turn.effect() == Gen2MoveEffect.ROLLOUT:
-		rollout_multiplier = 1 << turn.attacker().rollout_count
-		if Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.CURLED):
-			rollout_multiplier *= 2
-	var result: Dictionary = Gen2Damage.calculate(
-		turn.attacker(), turn.defender(), turn.move, turn.rng(),
-		Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.FOCUS_ENERGY),
+	var effective: Dictionary = turn.effective_move()
+	turn.damage = Gen2Damage.damage_calc(
+		turn.attacker(), int(effective.get("power", 0)),
+		turn.attack_stat, turn.defense_stat,
 		turn.effect() == Gen2MoveEffect.SELFDESTRUCT,
-		rollout_multiplier,
-		turn.battle.weather,
-		turn.battle.screens[turn.target]
+		int(effective.get("type", RomLayout.TYPE_NORMAL)), turn.critical
+	)
+
+
+## `BattleCommand_Stab`: the weather, the same-type bonus and the matchup. The
+## step that answers whether the target is immune, which is why a status move
+## with no `damagecalc` in its list still carries this one.
+static func _stab(turn: Gen2Turn) -> void:
+	var result: Dictionary = Gen2Damage.stab_damage(
+		turn.attacker(), turn.defender(), turn.effective_move(), turn.damage,
+		turn.battle.weather
 	)
 	turn.damage = int(result["damage"])
-	turn.critical = bool(result["critical"])
 	turn.effectiveness = int(result["effectiveness"])
 	turn.immune = bool(result["immune"])
-	if _doubles_flying_damage(turn) or _doubles_underground_damage(turn):
+
+
+## `BattleCommand_DamageVariation`: the 85% to 100% spread, last.
+##
+## Nothing below two is touched and, because the routine returns before
+## `BattleRandom`, nothing below two draws either, so a move that worked out to
+## nothing moves no generator.
+static func _damage_variation(turn: Gen2Turn) -> void:
+	if turn.damage < Gen2Damage.MIN_DAMAGE:
+		return
+	turn.damage = Gen2Damage.apply_variation(
+		turn.damage, Gen2Damage.roll_variation(turn.rng())
+	)
+
+
+## `BattleCommand_DoubleFlyingDamage`, `..._DoubleUndergroundDamage` and
+## `..._DoubleMinimizeDamage`, which are one `DoubleDamage` under three gates and
+## sit after the spread rather than before it.
+static func _double_damage(turn: Gen2Turn) -> void:
+	if _doubles_flying_damage(turn) or _doubles_underground_damage(turn) \
+		or _doubles_minimize_damage(turn):
 		turn.damage = mini(turn.damage * 2, 0xFFFF)
 
 
@@ -758,15 +831,20 @@ static func _can_hit_hidden(move_number: int, substatus: int) -> bool:
 	return false
 
 
+## The three gates in front of `DoubleDamage`, each reading one thing about the
+## target and nothing about the move: which moves ask is the list's business, and
+## only Gust and Twister carry `doubleflyingdamage`, only Earthquake and
+## Magnitude `doubleundergrounddamage`, only Stomp `doubleminimizedamage`.
 static func _doubles_flying_damage(turn: Gen2Turn) -> bool:
-	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.FLYING) \
-		and [Gen2MoveEffect.GUST_MOVE, Gen2MoveEffect.TWISTER_MOVE].has(turn.move_number)
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.FLYING)
 
 
 static func _doubles_underground_damage(turn: Gen2Turn) -> bool:
-	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.UNDERGROUND) \
-		and [Gen2MoveEffect.EARTHQUAKE_MOVE, Gen2MoveEffect.FISSURE_MOVE,
-			Gen2MoveEffect.MAGNITUDE_MOVE].has(turn.move_number)
+	return Gen2Substatus.has(turn.defender().substatus, Gen2Substatus.UNDERGROUND)
+
+
+static func _doubles_minimize_damage(turn: Gen2Turn) -> bool:
+	return turn.defender().minimized
 
 
 ## A quarter of [member Gen2Turn.damage], the calculated number, at least one, and
@@ -1165,7 +1243,7 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 	for hit: int in hits:
 		if hit > 0:
 			var result: Dictionary = Gen2Damage.calculate(
-				attacker, defender, turn.move, turn.rng(), focus_energy,
+				attacker, defender, turn.effective_move(), turn.rng(), focus_energy,
 				false, 1, turn.battle.weather, turn.battle.screens[turn.target]
 			)
 			turn.damage = int(result["damage"])
@@ -1328,9 +1406,18 @@ static func _rollout_check(turn: Gen2Turn) -> void:
 		mon.rollout_count = 0
 
 
-## Rollout's power step runs after the hit check. A miss, including an immunity,
-## ends the chain. A successful fifth hit also clears the continuation flag, but
-## its count is retained until the next Rollout starts and resets it.
+## `BattleCommand_RolloutPower`, which is both halves of Rollout: the count and
+## the doubling.
+##
+## It runs after `stab` and the hit check and before `damagevariation`, so the
+## doubling lands on the matched-up damage and the spread is taken from the
+## doubled figure. A miss, including an immunity, ends the chain. A successful
+## fifth hit also clears the continuation flag, but its count is retained until
+## the next Rollout starts and resets it.
+##
+## The count is raised before the doubling and one doubling is spent doing
+## nothing, which is `inc [hl]` then `dec b / jr z`: the first hit is worth its
+## own power and the fifth sixteen times it. Defense Curl adds one more.
 static func _rollout_power(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
 	if turn.missed:
@@ -1338,10 +1425,20 @@ static func _rollout_power(turn: Gen2Turn) -> void:
 		return
 
 	mon.rollout_count += 1
-	if mon.rollout_count >= 5:
+	if mon.rollout_count >= ROLLOUT_MAX_COUNT:
 		mon.substatus &= ~Gen2Substatus.ROLLOUT
 	else:
 		mon.substatus |= Gen2Substatus.ROLLOUT
+
+	var doublings: int = mon.rollout_count - 1
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CURLED):
+		doublings += 1
+	for _step: int in doublings:
+		turn.damage = mini(turn.damage * 2, 0xFFFF)
+
+
+## `MAX_ROLLOUT_COUNT`.
+const ROLLOUT_MAX_COUNT: int = 5
 
 
 ## Thrash, Petal Dance and Outrage share the rampage flag. The first turn rolls

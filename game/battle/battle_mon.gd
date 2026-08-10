@@ -31,6 +31,10 @@ const STAGED_ODDS: Array = ["accuracy", "evasion"]
 ## see [method random_dvs].
 const PERFECT_DVS: int = 0xFFFF
 
+## `BASE_HAPPINESS` (`constants/pokemon_data_constants.asm`), what a Pokémon
+## starts at and what a wild or trainer Pokémon is given outright.
+const BASE_HAPPINESS: int = 70
+
 var data: GameData = null
 
 var species: int = 0
@@ -127,6 +131,23 @@ var last_move_used: int = 0
 ## The item this Pokémon is holding, by item number, or zero for none. Carried
 ## through from a trainer's party or a save; nothing in the engine reads it yet.
 var item: int = 0
+
+## `wPlayerFuryCutterCount`: how many times in a row Fury Cutter has connected.
+## Zeroed on a switch and by a miss, which is `ResetFuryCutterCount`.
+var fury_cutter_count: int = 0
+
+## `wPlayerMinimized`: whether this Pokémon has used Minimize since it came out,
+## which is the whole of what Stomp's doubled damage reads. Set by
+## `MinimizeDropSub` off the move being animated rather than off an effect byte,
+## since Minimize carries the ordinary `EFFECT_EVASION_UP`. Zeroed on a switch.
+var minimized: bool = false
+
+## `wBattleMonHappiness`: what Return and Frustration read for their power, and
+## the one field here that is party data rather than battle state, so a switch
+## leaves it alone. `LoadEnemyMon.Happiness` writes [constant BASE_HAPPINESS]
+## into `wEnemyMonHappiness` for every wild and trainer Pokémon, which is why
+## that is the default rather than zero.
+var happiness: int = BASE_HAPPINESS
 
 
 ## Builds a Pokémon at a level, at full health, knowing [param moves].
@@ -266,6 +287,8 @@ func reset_volatile() -> void:
 	perish_count = 0
 	turns_taken = 0
 	last_move_used = 0
+	fury_cutter_count = 0
+	minimized = false
 
 
 ## The gender the cartridge's own `GetGender` would answer, from the species'

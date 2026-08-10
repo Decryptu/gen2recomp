@@ -50,6 +50,19 @@ func _turn(battle: Gen2Battle, move_number: int = Fixture.TACKLE) -> Gen2Turn:
 	)
 
 
+## The five steps a hit is worked out in, in the order every damaging list in
+## `data/moves/effects.asm` runs them. A test that wants a damage figure wants
+## all five, since `damagecalc` on its own divides by stats `damagestats` has
+## not picked yet.
+func _run_damage_steps(turn: Gen2Turn) -> void:
+	for command: StringName in [
+		Gen2EffectCommands.CRITICAL, Gen2EffectCommands.DAMAGE_STATS,
+		Gen2EffectCommands.DAMAGE_CALC, Gen2EffectCommands.STAB,
+		Gen2EffectCommands.DAMAGE_VARIATION,
+	]:
+		Gen2EffectCommands.run(command, turn)
+
+
 func _run_move(
 	battle: Gen2Battle,
 	move_number: int,
@@ -309,7 +322,7 @@ func test_every_event_carries_the_side_that_caused_it() -> void:
 
 func test_the_damage_step_writes_down_what_the_step_after_it_reads() -> void:
 	var turn: Gen2Turn = _turn(_battle())
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	_run_damage_steps(turn)
 	assert_gt(turn.damage, 0, "Tackle off a level 50 Pikachu does something")
 	assert_eq(turn.dealt, 0, "nothing has been applied yet")
 
@@ -324,7 +337,7 @@ func test_what_is_dealt_is_what_was_there_to_take() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 3
 	var turn: Gen2Turn = _turn(battle)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	_run_damage_steps(turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, turn)
 	assert_eq(turn.dealt, 3)
 	assert_eq(battle.enemy.hp, 0)
@@ -430,7 +443,7 @@ func test_confuse_hit_is_the_secondary_shape_and_confuse_is_the_status_shape() -
 
 	var status_move: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.CONFUSE)
 	assert_true(status_move.has(Gen2EffectCommands.CONFUSE_TARGET))
-	assert_false(status_move.has(Gen2EffectCommands.DAMAGE_CALC), "no power, so no matchup step")
+	assert_false(status_move.has(Gen2EffectCommands.STAB), "no power, so no matchup step")
 
 
 func test_confuse_target_sets_the_flag_and_rolls_a_duration() -> void:
@@ -803,7 +816,7 @@ func test_multi_hit_and_double_hit_share_one_command() -> void:
 
 func test_double_hit_always_hits_exactly_twice() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.DOUBLE_HIT_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	_run_damage_steps(turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 2)
 	assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), 2)
@@ -815,7 +828,7 @@ func test_multi_hit_lands_between_two_and_five_times() -> void:
 	for seed_value: int in range(1, 21):
 		_rng.seed = seed_value
 		var turn: Gen2Turn = _turn(_battle(), Fixture.MULTI_HIT_MOVE)
-		Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+		_run_damage_steps(turn)
 		Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
 		var hits: int = _of_type(turn.events, Gen2Battle.HIT).size()
 		assert_between(hits, 2, 5, "seed %d" % seed_value)
@@ -828,7 +841,7 @@ func test_multi_hit_stops_and_says_nothing_once_the_target_is_down() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 1
 	var turn: Gen2Turn = _turn(battle, Fixture.MULTI_HIT_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	_run_damage_steps(turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1, "the one hit that finished it")
 	assert_eq(_first(turn.events, Gen2Battle.HIT_TIMES), {})
@@ -838,7 +851,7 @@ func test_multi_hit_stops_and_says_nothing_once_the_target_is_down() -> void:
 
 func test_twineedle_hits_twice_then_rolls_poison_once_for_both() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.TWINEEDLE_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	_run_damage_steps(turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
@@ -927,13 +940,13 @@ func test_the_four_fixed_damage_effects_share_one_list() -> void:
 	assert_lt(
 		sequences[0].find(Gen2EffectCommands.CHECK_IMMUNE),
 		sequences[0].find(Gen2EffectCommands.FIXED_DAMAGE),
-		"the roll DAMAGE_CALC already made is only kept for whether it is immune"
+		"the matchup STAB worked out is only kept for whether it is immune"
 	)
 
 
 func test_level_damage_deals_exactly_the_users_level() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.LEVEL_DAMAGE_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
 	assert_eq(turn.damage, turn.attacker().level)
 	assert_false(turn.critical, "constant damage never criticals")
@@ -942,7 +955,7 @@ func test_level_damage_deals_exactly_the_users_level() -> void:
 
 func test_static_damage_deals_exactly_the_moves_own_power() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.STATIC_DAMAGE_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
 	assert_eq(turn.damage, 20, "Sonicboom's own power in the fixture")
 
@@ -951,7 +964,7 @@ func test_super_fang_halves_the_targets_current_hp() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 51
 	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
 	assert_eq(turn.damage, 25, "floored, not rounded")
 
@@ -960,7 +973,7 @@ func test_super_fang_never_deals_less_than_one() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 1
 	var turn: Gen2Turn = _turn(battle, Fixture.SUPER_FANG_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 	Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
 	assert_eq(turn.damage, 1)
 
@@ -972,7 +985,7 @@ func test_psywave_stays_inside_its_own_range() -> void:
 	var upper: int = level / 2 + level
 	for seed_value: int in range(1, 21):
 		_rng.seed = seed_value
-		Gen2EffectCommands.run(Gen2EffectCommands.DAMAGE_CALC, turn)
+		Gen2EffectCommands.run(Gen2EffectCommands.STAB, turn)
 		Gen2EffectCommands.run(Gen2EffectCommands.FIXED_DAMAGE, turn)
 		assert_between(turn.damage, 1, upper - 1, "seed %d" % seed_value)
 

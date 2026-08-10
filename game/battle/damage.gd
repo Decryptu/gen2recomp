@@ -86,6 +86,15 @@ static func calculate(
 
 ## A hit with both rolls decided. Deterministic, and the whole of the formula.
 ##
+## The cartridge spends four commands on what this composes in one, and every
+## effect that reaches inside the formula does so between two of them: Present
+## sets the power between [method damage_stats] and [method damage_calc], Triple
+## Kick multiplies between [method damage_calc] and [method stab_damage], Fury
+## Cutter and Rollout between [method stab_damage] and [method apply_variation].
+## So the four are what the effect commands call and this is the composition,
+## kept because a caller wanting a whole hit at once (the AI, a test) should not
+## have to know the order.
+##
 ## Returns { damage, critical, effectiveness, stab, immune }.
 ## [code]effectiveness[/code] is in tenths and is the announced number, not always
 ## the one damage used: see [method GameData.type_effectiveness].
@@ -106,90 +115,156 @@ static func calculate_with(
 		"damage": 0, "critical": critical, "effectiveness": RomLayout.MATCHUP_EFFECTIVE,
 		"stab": false, "immune": false,
 	}
-	var power: int = int(move.get("power", 0))
-	var move_type: int = int(move.get("type", RomLayout.TYPE_NORMAL))
-	var number: int = int(move.get("number", 0))
 	if attacker == null or defender == null:
 		return out
 
-	var data: GameData = attacker.data
-	var defending: Array = defender.types()
-	if number != STRUGGLE:
-		out["effectiveness"] = data.type_effectiveness(move_type, defending)
-
-	if power <= 0:
-		# A move with no power is not a failed attack, it is a move that does
-		# something else. The matchup is still worked out: the battle announces
-		# it either way, and an immunity stops a status move exactly as it stops
-		# an attack (Thunder Wave against Ground, Poison Powder against Steel).
-		for defending_type: int in defending:
-			if data.type_matchup(move_type, defending_type) == RomLayout.MATCHUP_NO_EFFECT:
-				out["immune"] = true
-				break
-		return out
-
-	# `TruncateHL_BC` runs at the end of `damagestats`, so the pair reaches
-	# `BattleCommand_DamageCalc` already byte-sized and Selfdestruct's halving
-	# lands on the truncated value rather than the raw one.
-	var truncated: Array = truncate_stats(
-		_attack_stat(attacker, defender, move_type, critical),
-		_defense_stat(attacker, defender, move_type, critical, defender_screens),
-		Gen2WorldState.is_crystal_profile(attacker.data)
+	var move_type: int = int(move.get("type", RomLayout.TYPE_NORMAL))
+	var stats: Array = damage_stats(
+		attacker, defender, move_type, critical, defender_screens
 	)
-	var defense: int = int(truncated[1])
-	if defense_halved:
-		@warning_ignore("integer_division")
-		defense = maxi(defense / 2, 1)
-	var damage: int = base_damage(attacker.level, power, int(truncated[0]), defense)
+	var damage: int = damage_calc(
+		attacker, int(move.get("power", 0)), int(stats[0]), int(stats[1]),
+		defense_halved, move_type, critical
+	)
 
-	# The type-boosting items land here, on the finished base damage and ahead of
-	# the critical multiplier, which is where `PlayerAttackDamage` applies them:
-	# after the divide by fifty and before `.CriticalMultiplier`. Struggle reaches
-	# this too, because that routine has no Struggle check of its own.
-	var boost: int = Gen2HeldItem.effect_of(data, attacker.item)
-	if Gen2HeldItem.boosts_type(boost, move_type):
-		damage = Gen2HeldItem.apply_type_boost(
-			damage, Gen2HeldItem.parameter_of(data, attacker.item)
-		)
-
-	if critical:
-		damage *= CRITICAL_MULTIPLIER
-	damage = mini(damage, DAMAGE_CAP) + MIN_DAMAGE
-
-	# Struggle returns before all of these: `BattleCommand_Stab` is where the
-	# weather, the attacker's type and the defender's are read, and its first two
-	# instructions send Struggle straight back out.
-	if number != STRUGGLE:
-		# `DoWeatherModifiers` runs at the top of that same command, ahead of
-		# STAB and of the matchup.
-		damage = Gen2Weather.apply_damage_modifier(damage, Gen2Weather.damage_modifier(
-			weather, move_type, int(move.get("effect", -1))
-		))
-
-		if attacker.types().has(move_type):
-			out["stab"] = true
-			@warning_ignore("integer_division")
-			damage = damage * STAB_NUMERATOR / STAB_DENOMINATOR
-
-		var applied: Array = []
-		for defending_type: int in defending:
-			if applied.has(defending_type):
-				continue
-			applied.append(defending_type)
-			var multiplier: int = data.type_matchup(move_type, defending_type)
-			if multiplier == RomLayout.MATCHUP_NO_EFFECT:
-				out["immune"] = true
-				out["damage"] = 0
-				return out
-			# One type at a time, truncating between them, and never down to
-			# nothing: a hit that has landed cannot be rounded away.
-			@warning_ignore("integer_division")
-			damage = maxi(damage * multiplier / RomLayout.MATCHUP_EFFECTIVE, 1)
+	var stabbed: Dictionary = stab_damage(attacker, defender, move, damage, weather)
+	out["stab"] = stabbed["stab"]
+	out["immune"] = stabbed["immune"]
+	out["effectiveness"] = stabbed["effectiveness"]
+	damage = int(stabbed["damage"])
 
 	if damage_multiplier > 1:
 		damage = mini(damage * damage_multiplier, 0xFFFF)
 
 	out["damage"] = apply_variation(damage, variation)
+	return out
+
+
+## `BattleCommand_DamageStats`, whose two halves are `PlayerAttackDamage` and
+## `EnemyAttackDamage`: pick the attacking and defending stats, apply the items
+## and the defender's screen, and hand the pair to `TruncateHL_BC`.
+##
+## Returns [attack, defense], already byte-sized, which is why Selfdestruct's
+## halving in [method damage_calc] lands on the truncated value rather than the
+## raw one.
+static func damage_stats(
+	attacker: Gen2BattleMon,
+	defender: Gen2BattleMon,
+	move_type: int,
+	critical: bool,
+	defender_screens: int = Gen2Screens.NONE
+) -> Array:
+	if attacker == null or defender == null:
+		return [1, 1]
+	return truncate_stats(
+		_attack_stat(attacker, defender, move_type, critical),
+		_defense_stat(attacker, defender, move_type, critical, defender_screens),
+		Gen2WorldState.is_crystal_profile(attacker.data)
+	)
+
+
+## `BattleCommand_DamageCalc`: Selfdestruct's halved defense, the formula, the
+## type-boosting item, the critical multiplier, the cap and the minimum.
+##
+## A power of zero returns without writing anything, which is the routine's own
+## `ret z`, so a status move reaches [method stab_damage] with no damage rather
+## than with the minimum two. `EFFECT_MULTI_HIT` and `EFFECT_CONVERSION` are the
+## two the source lets past that check, because both can carry a power of zero
+## and have it filled in by the time this runs.
+static func damage_calc(
+	attacker: Gen2BattleMon,
+	power: int,
+	attack: int,
+	defense: int,
+	defense_halved: bool,
+	move_type: int,
+	critical: bool = false
+) -> int:
+	if attacker == null or power <= 0:
+		return 0
+	var used_defense: int = defense
+	if defense_halved:
+		@warning_ignore("integer_division")
+		used_defense = maxi(used_defense / 2, 1)
+
+	var damage: int = base_damage(attacker.level, power, attack, used_defense)
+
+	# The type-boosting items land here, on the finished base damage and ahead of
+	# the critical multiplier, which is where `PlayerAttackDamage` applies them:
+	# after the divide by fifty and before `.CriticalMultiplier`. Struggle reaches
+	# this too, because that routine has no Struggle check of its own.
+	var boost: int = Gen2HeldItem.effect_of(attacker.data, attacker.item)
+	if Gen2HeldItem.boosts_type(boost, move_type):
+		damage = Gen2HeldItem.apply_type_boost(
+			damage, Gen2HeldItem.parameter_of(attacker.data, attacker.item)
+		)
+
+	if critical:
+		damage *= CRITICAL_MULTIPLIER
+	return mini(damage, DAMAGE_CAP) + MIN_DAMAGE
+
+
+## `BattleCommand_Stab`: the weather, the same-type bonus and the type matchup,
+## in that order, over whatever damage [method damage_calc] left.
+##
+## Runs for a move with no power too, and has to: `DoPoison` and `DoParalyze`
+## both carry `stab` and no `damagecalc`, which is how Thunder Wave learns it has
+## no effect on a Ground type. Struggle returns before any of it, since
+## `cp STRUGGLE / ret z` is the routine's first two instructions.
+##
+## Returns { damage, stab, immune, effectiveness }.
+static func stab_damage(
+	attacker: Gen2BattleMon,
+	defender: Gen2BattleMon,
+	move: Dictionary,
+	damage: int,
+	weather: int = Gen2Weather.NONE
+) -> Dictionary:
+	var out: Dictionary = {
+		"damage": damage, "stab": false, "immune": false,
+		"effectiveness": RomLayout.MATCHUP_EFFECTIVE,
+	}
+	if attacker == null or defender == null:
+		return out
+	if int(move.get("number", 0)) == STRUGGLE:
+		return out
+
+	var data: GameData = attacker.data
+	var move_type: int = int(move.get("type", RomLayout.TYPE_NORMAL))
+	var defending: Array = defender.types()
+	out["effectiveness"] = data.type_effectiveness(move_type, defending)
+
+	var worked: int = damage
+
+	# `DoWeatherModifiers` runs at the top of the command, ahead of STAB and of
+	# the matchup.
+	worked = Gen2Weather.apply_damage_modifier(worked, Gen2Weather.damage_modifier(
+		weather, move_type, int(move.get("effect", -1))
+	))
+
+	if attacker.types().has(move_type):
+		out["stab"] = true
+		@warning_ignore("integer_division")
+		worked = worked * STAB_NUMERATOR / STAB_DENOMINATOR
+
+	var applied: Array = []
+	for defending_type: int in defending:
+		if applied.has(defending_type):
+			continue
+		applied.append(defending_type)
+		var multiplier: int = data.type_matchup(move_type, defending_type)
+		if multiplier == RomLayout.MATCHUP_NO_EFFECT:
+			out["immune"] = true
+			out["damage"] = 0
+			return out
+		# One type at a time, truncating between them, and never down to nothing:
+		# a hit that has landed cannot be rounded away. A move with no power
+		# stays at nothing, since every step here is a multiply.
+		if worked > 0:
+			@warning_ignore("integer_division")
+			worked = maxi(worked * multiplier / RomLayout.MATCHUP_EFFECTIVE, 1)
+
+	out["damage"] = worked
 	return out
 
 
