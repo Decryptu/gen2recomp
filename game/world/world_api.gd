@@ -1967,13 +1967,7 @@ func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 func block_at(block_x: int, block_y: int) -> int:
 	if current_map == null:
 		return 0
-	# Every drawn tile asks this, so the key is only built when a changeblock has
-	# actually put an override on the loaded map.
-	if not _block_overrides.is_empty():
-		var key: String = _block_key(current_map, block_x, block_y)
-		if _block_overrides.has(key):
-			return int(_block_overrides[key])
-	return current_map.block_at(block_x, block_y)
+	return _map_block_at(current_map, block_x, block_y)
 
 
 func change_block(block_x: int, block_y: int, block: int) -> Dictionary:
@@ -2156,11 +2150,97 @@ func tile_indices_in_window(origin: Vector2i, size: Vector2i) -> PackedInt32Arra
 func drawn_block_at(block_x: int, block_y: int) -> int:
 	if current_map == null:
 		return 0
-	if block_x < 0 or block_y < 0 \
-		or block_x >= current_map.width_blocks or block_y >= current_map.height_blocks:
+	var block: int = -1
+	if block_x >= 0 and block_y >= 0 \
+		and block_x < current_map.width_blocks and block_y < current_map.height_blocks:
+		block = block_at(block_x, block_y)
+	else:
+		block = _connected_drawn_block_at(block_x, block_y)
+	if block < 0:
 		return current_map.border_block
-	var block: int = block_at(block_x, block_y)
 	return current_map.border_block if block == 0 else block
+
+
+## Reads the three-block connection padding assembled by FillMapConnections.
+## Its north, south, west, east call order matters at overlapping corners, so
+## records are checked backwards and the later east/west strip wins there.
+func _connected_drawn_block_at(block_x: int, block_y: int) -> int:
+	if data == null:
+		return -1
+	for index: int in range(current_map.connections.size() - 1, -1, -1):
+		var connection: Dictionary = current_map.connections[index]
+		var direction: String = String(connection.get("direction", ""))
+		if not _block_is_in_connection_strip(block_x, block_y, direction, connection):
+			continue
+		var target: Gen2WorldMap = data.world_map(
+			int(connection.get("map_group", -1)),
+			int(connection.get("map_number", -1)),
+		)
+		if target == null:
+			continue
+		var target_cell := Vector2i(block_x, block_y)
+		match direction:
+			"north":
+				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
+				target_cell.y += target.height_blocks
+			"south":
+				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
+				target_cell.y -= current_map.height_blocks
+			"west":
+				target_cell.x += target.width_blocks
+				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
+			"east":
+				target_cell.x -= current_map.width_blocks
+				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
+			_:
+				continue
+		if target_cell.x < 0 or target_cell.y < 0 \
+			or target_cell.x >= target.width_blocks or target_cell.y >= target.height_blocks:
+			continue
+		return _map_block_at(target, target_cell.x, target_cell.y)
+	return -1
+
+
+func _block_is_in_connection_strip(
+	block_x: int, block_y: int, direction: String, connection: Dictionary
+) -> bool:
+	var in_padding: bool = false
+	match direction:
+		"north":
+			in_padding = block_y >= -3 and block_y < 0
+		"south":
+			in_padding = block_y >= current_map.height_blocks \
+				and block_y < current_map.height_blocks + 3
+		"west":
+			in_padding = block_x >= -3 and block_x < 0
+		"east":
+			in_padding = block_x >= current_map.width_blocks \
+				and block_x < current_map.width_blocks + 3
+	if not in_padding:
+		return false
+
+	# The macro stores `_len - _src`, not merely the target map dimension.
+	# Respecting the byte is what reproduces the exact partial strip when a map
+	# is offset far enough that either its source or destination begins in the
+	# three-block padding. Zero supports old hand-built caches that predate the
+	# imported record fields; target bounds still constrain those below.
+	var length: int = int(connection.get("length", 0))
+	if length <= 0:
+		return true
+	var horizontal: bool = direction == "north" or direction == "south"
+	var stored_offset: int = int(connection.get("x_offset" if horizontal else "y_offset", 0))
+	var map_offset_blocks: int = -floori(float(stored_offset) / 2.0)
+	var destination_start: int = maxi(map_offset_blocks, -3)
+	var along: int = block_x if horizontal else block_y
+	return along >= destination_start and along < destination_start + length
+
+
+func _map_block_at(map: Gen2WorldMap, block_x: int, block_y: int) -> int:
+	if not _block_overrides.is_empty():
+		var key: String = _block_key(map, block_x, block_y)
+		if _block_overrides.has(key):
+			return int(_block_overrides[key])
+	return map.block_at(block_x, block_y)
 
 
 ## The raw cartridge permission byte at a walk cell.

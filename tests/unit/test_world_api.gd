@@ -153,6 +153,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_EAST,
 		"connections": [{
 			"direction": "east", "map_group": 1, "map_number": 2,
+			"length": 6, "target_width_blocks": 8,
 			"x_offset": 0, "y_offset": 0,
 		}],
 		"scripts": {
@@ -176,6 +177,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_WEST,
 		"connections": [{
 			"direction": "west", "map_group": 1, "map_number": 1,
+			"length": 6, "target_width_blocks": 8,
 			"x_offset": 0, "y_offset": 0,
 		}],
 		"scripts": {
@@ -5051,6 +5053,80 @@ func test_the_page_draws_border_block_past_the_edge_of_the_map() -> void:
 		world.drawn_block_at(0, world.current_map.height_blocks), 1,
 		"south of the map is border block"
 	)
+
+
+## FillMapConnections copies three real block rows or columns into the padded
+## block buffer. The renderer must see those bytes before falling back to the
+## current map's border block.
+func test_the_page_draws_connected_map_strips_past_each_edge() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	target.blocks.fill(0)
+	var connection: Dictionary = source.connections[0]
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+
+	connection["direction"] = "north"
+	target.blocks[5 * target.width_blocks + 2] = 1
+	assert_eq(world.drawn_block_at(2, -1), 1)
+	assert_eq(world.drawn_block_at(2, -4), source.border_block, "north strip is three blocks")
+
+	connection["direction"] = "south"
+	target.blocks[2] = 1
+	assert_eq(world.drawn_block_at(2, source.height_blocks), 1)
+	assert_eq(
+		world.drawn_block_at(2, source.height_blocks + 3), source.border_block,
+		"south strip is three blocks",
+	)
+
+	connection["direction"] = "west"
+	target.blocks[2 * target.width_blocks + 7] = 1
+	assert_eq(world.drawn_block_at(-1, 2), 1)
+	assert_eq(world.drawn_block_at(-4, 2), source.border_block, "west strip is three blocks")
+
+	connection["direction"] = "east"
+	target.blocks[2 * target.width_blocks] = 1
+	assert_eq(world.drawn_block_at(source.width_blocks, 2), 1)
+	assert_eq(
+		world.drawn_block_at(source.width_blocks + 3, 2), source.border_block,
+		"east strip is three blocks",
+	)
+
+
+func test_connection_strip_offsets_map_source_padding_to_target_blocks() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	target.blocks.fill(0)
+	target.blocks[2 * target.width_blocks] = 1
+	var connection: Dictionary = source.connections[0]
+	connection["direction"] = "east"
+	connection["y_offset"] = 4
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 0))
+
+	assert_eq(world.drawn_block_at(source.width_blocks, 0), 1)
+	assert_eq(
+		world.drawn_block_at(source.width_blocks, target.height_blocks - 2),
+		source.border_block,
+		"the connection ends when its translated target coordinate leaves the map",
+	)
+	target.blocks[3 * target.width_blocks] = 1
+	connection["length"] = 1
+	assert_eq(
+		world.drawn_block_at(source.width_blocks, 1), source.border_block,
+		"the copied strip stops at the record's own length even inside the target map",
+	)
+
+
+func test_a_zero_block_in_a_connection_strip_uses_the_current_border() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	source.border_block = 1
+	target.blocks[2 * target.width_blocks] = 0
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 4))
+
+	assert_eq(world.drawn_block_at(source.width_blocks, 2), 1)
 
 
 func test_a_zero_block_is_drawn_as_border_but_still_collides_as_zero() -> void:
