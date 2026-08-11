@@ -439,7 +439,14 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 	_player_level = player_lead.level
 	_enemy = enemy_lead.species
 	_enemy_level = enemy_lead.level
-	_battle = Gen2Battle.create_parties(_data, player_party, enemy_party, _rng)
+	var badge_mask: int = 0
+	if save.world != null and save.world.world_state != null:
+		badge_mask = save.world.world_state.badge_mask(
+			Gen2WorldState.is_crystal_profile(_data)
+		)
+	_battle = Gen2Battle.create_parties(
+		_data, player_party, enemy_party, _rng, false, badge_mask
+	)
 	if _battle == null:
 		_save_slot = -1
 		return false
@@ -449,7 +456,9 @@ func show_saved_party(save: Gen2SaveData) -> bool:
 
 ## Starts a battle requested by the scene-free overworld runtime. The caller
 ## keeps the world API alive while this screen owns the battle presentation.
-func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
+func start_world_battle(
+	request: Dictionary, save: Gen2SaveData = null, player_badges: int = -1
+) -> bool:
 	_clear_capture_action()
 	if _data == null or not is_ready():
 		_emit_world_battle_failure(&"missing_battle_data")
@@ -458,7 +467,16 @@ func start_world_battle(request: Dictionary, save: Gen2SaveData = null) -> bool:
 		Gen2SaveBattleAdapter.to_battle_party(_data, save)
 		if save != null else Gen2WorldBattleAdapter.fallback_party(_data)
 	)
-	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(_data, request, player_party, _rng)
+	var crystal: bool = Gen2WorldState.is_crystal_profile(_data)
+	var badge_mask: int = player_badges
+	if badge_mask < 0 and save != null and save.world != null \
+		and save.world.world_state != null:
+		badge_mask = save.world.world_state.badge_mask(crystal)
+	if badge_mask < 0:
+		badge_mask = 0
+	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data, request, player_party, _rng, badge_mask
+	)
 	if not bool(prepared.get("ok", false)):
 		_emit_world_battle_failure(
 			StringName(prepared.get("reason", &"battle_setup_failed")),
@@ -555,7 +573,9 @@ func _start_world_battle_from_meta(meta: Variant) -> void:
 	var values: Dictionary = meta as Dictionary
 	var save_value: Variant = values.get("save", null)
 	var save: Gen2SaveData = save_value if save_value is Gen2SaveData else null
-	start_world_battle(values.get("request", {}), save)
+	start_world_battle(
+		values.get("request", {}), save, int(values.get("player_badges", -1))
+	)
 
 
 func _emit_world_battle_failure(reason: StringName, details: Dictionary = {}) -> void:

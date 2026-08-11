@@ -460,6 +460,10 @@ var is_trainer_battle: bool = false
 ## BATTLETYPE_NORMAL.
 var battle_type: int = BATTLETYPE_NORMAL
 
+## Earned player badges as source-order bits. Zero is the battle-safe default
+## for wild fixtures and development matchups without a world save.
+var player_badge_mask: int = 0
+
 ## `wNumFleeAttempts`. Every failed run raises the odds behind the next one, and
 ## choosing FIGHT clears it again, which is `BattleMenu_Fight`'s own `xor a`.
 var flee_attempts: int = 0
@@ -598,7 +602,8 @@ static func create_parties(
 	player_party: Gen2Party,
 	enemy_party: Gen2Party,
 	generator: RandomNumberGenerator,
-	trainer_battle: bool = false
+	trainer_battle: bool = false,
+	player_badges: int = 0
 ) -> Gen2Battle:
 	if game_data == null or player_party == null or enemy_party == null:
 		return null
@@ -610,7 +615,9 @@ static func create_parties(
 	out.parties = {PLAYER: player_party, ENEMY: enemy_party}
 	out.rng = generator if generator != null else RandomNumberGenerator.new()
 	out.is_trainer_battle = trainer_battle
+	out.player_badge_mask = player_badges & 0xFFFF
 	out._participants = {PLAYER: {player_party.active: true}, ENEMY: {enemy_party.active: true}}
+	out._apply_player_badges()
 	return out
 
 
@@ -631,6 +638,19 @@ static func create(
 ## What a side asks for with its turn.
 static func use_move(slot: int) -> Dictionary:
 	return {"type": ACTION_MOVE, "slot": slot}
+
+
+func set_player_badges(mask: int) -> void:
+	player_badge_mask = mask & 0xFFFF
+	_apply_player_badges()
+
+
+func _apply_player_badges() -> void:
+	if parties.is_empty():
+		return
+	var current: Gen2BattleMon = mon(PLAYER)
+	if current != null:
+		current.set_badge_boosts(player_badge_mask)
 
 
 static func switch_to(index: int) -> Dictionary:
@@ -906,7 +926,7 @@ func baton_pass_target(side: int) -> int:
 ## cartridge where none of it was ever its own.
 func baton_pass_send_out(side: int, index: int) -> Array:
 	var passed: Dictionary = mon(side).capture_passed_state()
-	var events: Array = send_out(side, index)
+	var events: Array = send_out(side, index, -1, true)
 	if events.is_empty():
 		return events
 	mon(side).apply_passed_state(passed)
@@ -1025,7 +1045,9 @@ func decline_move(side: int) -> Array:
 ## ordinary switch. It exists because `DraggedOutText` is printed between
 ## `ForceEnemySwitch` and `SpikesDamage`, so the line has to land inside this
 ## method rather than around it.
-func send_out(side: int, index: int, dragged_by: int = -1) -> Array:
+func send_out(
+	side: int, index: int, dragged_by: int = -1, preserve_counter_moves: bool = false
+) -> Array:
 	var events: Array = []
 	if is_over():
 		return events
@@ -1034,9 +1056,17 @@ func send_out(side: int, index: int, dragged_by: int = -1) -> Array:
 	var leaving: int = current.active
 	var leaving_species: int = current.active_mon().species
 	var withdrawing: bool = not current.active_mon().is_fainted()
+	if side == PLAYER and current.active_mon() != null:
+		current.active_mon().clear_badge_boosts()
 	if not current.send_out(index):
 		return events
+	if side == PLAYER:
+		_apply_player_badges()
 	_clear_trapping()
+	if not preserve_counter_moves:
+		# NewBattleMonStatus/NewEnemyMonStatus clear both counter-move words.
+		mon(PLAYER).last_counter_move = 0
+		mon(ENEMY).last_counter_move = 0
 	# `BreakAttraction`, which every entrance calls and which clears the flag on
 	# *both* sides rather than only the incoming Pokémon's: whoever the Pokémon
 	# that left was in love with is not on the field any more either.

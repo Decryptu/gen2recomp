@@ -340,6 +340,41 @@ func test_basic_discourages_a_second_mean_look_from_the_same_pokemon() -> void:
 		)
 
 
+## `AI_Smart_MeanLook`: a healthy user with a bench wants the trap against a
+## costly target state, while a low-health user or a lone user dismisses it.
+func test_smart_mean_look_reads_health_bench_and_target_state() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.MEAN_LOOK, Fixture.TACKLE])
+	var charmander: Gen2BattleMon = _mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+
+	var lone: Array = [20, 20, 20, 20]
+	Gen2BattleAI._apply_smart(
+		lone, pikachu, charmander, _data, _rng, 0, 0, Gen2Weather.NONE,
+		Gen2Screens.NONE, Gen2Screens.NONE, false, Gen2AISwitch.BASE_SCORE
+	)
+	assert_eq(int(lone[0]), 30, "a lone user cannot leave behind a Mean Look")
+
+	pikachu.hp = pikachu.max_hp() / 4
+	var hurt: Array = [20, 20, 20, 20]
+	Gen2BattleAI._apply_smart(
+		hurt, pikachu, charmander, _data, _rng, 0, 0, Gen2Weather.NONE,
+		Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE
+	)
+	assert_eq(int(hurt[0]), 30, "a user below half health should not trap")
+
+	pikachu.hp = pikachu.max_hp()
+	charmander.substatus |= Gen2Substatus.IDENTIFIED
+	var wanted: Dictionary = {}
+	for seed_value: int in 60:
+		_rng.seed = seed_value
+		var scores: Array = [20, 20, 20, 20]
+		Gen2BattleAI._apply_smart(
+			scores, pikachu, charmander, _data, _rng, 0, 0, Gen2Weather.NONE,
+			Gen2Screens.NONE, Gen2Screens.NONE, true, Gen2AISwitch.BASE_SCORE - 1
+		)
+		wanted[int(scores[0])] = true
+	assert_true(wanted.has(17), "an identified target reaches Mean Look's strong branch")
+
+
 ## `AI_Smart_Solarbeam`: greatly encouraged in sun, greatly discouraged in rain.
 ## Both are chances, so the check is that each outcome is reachable and that the
 ## other one is not.
@@ -963,7 +998,7 @@ func test_smart_foresight_wants_a_ghost() -> void:
 func test_smart_spite_reads_the_pp_of_the_move_it_would_drain() -> void:
 	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.SPITE, Fixture.TACKLE])
 	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
-	geodude.last_move_used = Fixture.TACKLE
+	geodude.last_counter_move = Fixture.TACKLE
 
 	geodude.pp[0] = 5
 	var nearly_out: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
@@ -1112,11 +1147,11 @@ func test_smart_mirror_move_uses_speed_and_the_useful_move_table() -> void:
 		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE,
 		"a faster user cannot mirror a move it has not seen"
 	)
-	slow.last_move_used = Fixture.THUNDERBOLT
+	slow.last_counter_move = Fixture.THUNDERBOLT
 	var useful: Dictionary = _score_spread(fast, slow, RomLayout.AI_SMART, 0)
 	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 1))
 	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 2))
-	slow.last_move_used = Fixture.TACKLE
+	slow.last_counter_move = Fixture.TACKLE
 	assert_eq(
 		int(_scores(fast, slow, RomLayout.AI_SMART)[0]),
 		Gen2BattleAI.DEFAULT_SCORE,
@@ -1133,7 +1168,7 @@ func test_smart_mimic_waits_for_a_move_then_values_a_useful_one() -> void:
 	)
 	# Sleep Powder is in UsefulMoves and is super-effective against both of
 	# Geodude's types in the fixture, so both source 50% rolls are reachable.
-	slow.last_move_used = Fixture.SLEEP_POWDER
+	slow.last_counter_move = Fixture.SLEEP_POWDER
 	var useful: Dictionary = _score_spread(fast, slow, RomLayout.AI_SMART, 0)
 	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE))
 	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 1))
@@ -1156,7 +1191,7 @@ func test_smart_conversion2_reproduces_the_source_last_move_bug() -> void:
 		Gen2BattleAI.DEFAULT_SCORE,
 		"with no remembered move the fixture's undefined lookup leaves it alone"
 	)
-	geodude.last_move_used = Fixture.TACKLE
+	geodude.last_counter_move = Fixture.TACKLE
 	var spread: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
 	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE + 1), "the 90% discouragement")
 	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE), "and the 10% that skips it")

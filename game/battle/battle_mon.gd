@@ -57,6 +57,10 @@ var hp: int = 0
 var stats: Dictionary = {}
 var stages: Dictionary = {}
 
+## Active-battle badge effects. These never enter the persistent party record.
+var badge_stat_boosts: Dictionary = {}
+var badge_type_boost_mask: int = 0
+
 ## The status byte, as the cartridge packs it: see [Gen2Status]. It survives a
 ## switch and a battle, unlike a stage, which is why it sits with the health
 ## rather than with them.
@@ -133,6 +137,10 @@ var turns_taken: int = 0
 ## own `wLastPlayerMove`/`wLastEnemyMove` clear on a switch exactly the way this
 ## does, since a freshly sent-out Pokémon has not used a move yet.
 var last_move_used: int = 0
+
+## The separate `wLast*CounterMove` word used by copied moves, PP-draining
+## effects, counter moves and the switch AI. Encore reads last_move_used.
+var last_counter_move: int = 0
 
 ## Mimic replaces one battle move but not the party move behind it. The source
 ## keeps those in separate structs; this model keeps the original row here so a
@@ -254,6 +262,52 @@ func recalculate() -> void:
 	hp = mini(hp, max_hp())
 
 
+## Installs the source's single-player badge effects on this active mon.
+func set_badge_boosts(mask: int) -> void:
+	badge_stat_boosts = {}
+	if mask & (1 << 0):
+		badge_stat_boosts["attack"] = true
+	if mask & (1 << 2):
+		badge_stat_boosts["speed"] = true
+	if mask & (1 << 4):
+		badge_stat_boosts["defense"] = true
+	if mask & (1 << 6):
+		badge_stat_boosts["sp_attack"] = true
+		# The source intends Glacier to raise both Special stats, but its
+		# second check uses the value left in A by the Special Attack boost.
+		# That makes the Special Defense boost appear only for unboosted
+		# Special Attack values 206..432 or 661 and above.
+		var unboosted_special: int = int(stats.get("sp_attack", 0))
+		if (unboosted_special >= 206 and unboosted_special <= 432) \
+			or unboosted_special >= 661:
+			badge_stat_boosts["sp_defense"] = true
+
+	badge_type_boost_mask = 0
+	var types: Array[int] = [
+		RomLayout.TYPE_FLYING, RomLayout.TYPE_BUG, RomLayout.TYPE_NORMAL,
+		RomLayout.TYPE_GHOST, RomLayout.TYPE_STEEL, RomLayout.TYPE_FIGHTING,
+		RomLayout.TYPE_ICE, RomLayout.TYPE_DRAGON, RomLayout.TYPE_ROCK,
+		RomLayout.TYPE_WATER, RomLayout.TYPE_ELECTRIC, RomLayout.TYPE_GRASS,
+		RomLayout.TYPE_POISON, RomLayout.TYPE_PSYCHIC, RomLayout.TYPE_FIRE,
+		RomLayout.TYPE_GROUND,
+	]
+	for badge: int in types.size():
+		if mask & (1 << badge):
+			badge_type_boost_mask |= 1 << types[badge]
+
+
+func clear_badge_boosts() -> void:
+	badge_stat_boosts = {}
+	badge_type_boost_mask = 0
+
+
+func _badge_boosted(value: int, key: String) -> int:
+	if not badge_stat_boosts.has(key):
+		return value
+	@warning_ignore("integer_division")
+	return mini(value + maxi(value / 8, 1), Gen2Stats.MAX_STAT_VALUE)
+
+
 func _stat(
 	base: Dictionary, key: String, dv: int, exp_key: String, is_hp: bool = false
 ) -> int:
@@ -270,7 +324,7 @@ func _stat(
 ## stages did, which is why a critical hit reading [method unmodified_stat] is
 ## free of the burn as well as the stages.
 func stat(key: String) -> int:
-	var value: int = int(stats.get(key, 0))
+	var value: int = _badge_boosted(int(stats.get(key, 0)), key)
 	if not STAGED_STATS.has(key):
 		return value
 
@@ -285,7 +339,7 @@ func stat(key: String) -> int:
 ## A stat with no stage applied, which is what a critical hit uses when the
 ## stages would work against the attacker.
 func unmodified_stat(key: String) -> int:
-	return int(stats.get(key, 0))
+	return _badge_boosted(int(stats.get(key, 0)), key)
 
 
 func stage(key: String) -> int:
@@ -345,6 +399,7 @@ const PASSED_FIELDS: Array[String] = [
 	"disable_turns", "encored_slot", "encore_turns", "trapped_turns",
 	"trapping_move", "perish_count", "substitute_hp", "turns_taken",
 	"last_move_used", "fury_cutter_count", "protect_count", "minimized",
+	"last_counter_move",
 ]
 
 
@@ -386,6 +441,7 @@ func reset_volatile() -> void:
 	substitute_hp = 0
 	turns_taken = 0
 	last_move_used = 0
+	last_counter_move = 0
 	fury_cutter_count = 0
 	protect_count = 0
 	bide_turns = 0

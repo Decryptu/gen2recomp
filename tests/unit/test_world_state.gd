@@ -75,6 +75,18 @@ func test_badge_count_matches_active_flags_across_both_bytes() -> void:
 	assert_eq(kanto_only.badge_count(), 1)
 
 
+func test_badge_mask_follows_source_order_on_both_profiles() -> void:
+	var crystal := Gen2WorldState.new()
+	crystal.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE)
+	crystal.set_engine_flag(Gen2WorldState.ENGINE_EARTHBADGE)
+	assert_eq(crystal.badge_mask(), (1 << 0) | (1 << 15))
+
+	var gold := Gen2WorldState.new()
+	gold.set_engine_flag(Gen2WorldState.ENGINE_ZEPHYRBADGE - 1)
+	gold.set_engine_flag(Gen2WorldState.ENGINE_EARTHBADGE - 1)
+	assert_eq(gold.badge_mask(false), (1 << 0) | (1 << 15))
+
+
 ## BIKEFLAGS_STRENGTH_ACTIVE_F sits three flags ahead of ENGINE_ZEPHYRBADGE, so
 ## it carries the same one-index profile shift the badges do, and it must not be
 ## confused with a badge in either direction.

@@ -47,7 +47,7 @@ func _comfortable() -> Gen2Battle:
 		[_mon(Fixture.GEODUDE, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, [Fixture.TACKLE])]
 	)
 	battle.player_used_moves = [Fixture.THUNDERBOLT] as Array[int]
-	battle.player.last_move_used = Fixture.THUNDERBOLT
+	battle.player.last_counter_move = Fixture.THUNDERBOLT
 	return battle
 
 
@@ -65,7 +65,7 @@ func _wants_out() -> Gen2Battle:
 		]
 	)
 	battle.player_used_moves = [Fixture.THUNDERBOLT] as Array[int]
-	battle.player.last_move_used = Fixture.THUNDERBOLT
+	battle.player.last_counter_move = Fixture.THUNDERBOLT
 	return battle
 
 
@@ -104,6 +104,21 @@ func test_the_score_reads_what_the_player_has_actually_thrown() -> void:
 	# Ground type is two on.
 	assert_eq(Gen2AISwitch.matchup_score(burning), Gen2AISwitch.BASE_SCORE - 1)
 	assert_eq(Gen2AISwitch.matchup_score(immune), Gen2AISwitch.BASE_SCORE + 2)
+
+
+## Foresight is the target's matchup flag, including inside the switch AI's
+## scans: Normal is immune to a fresh Gastly but neutral once it is identified.
+func test_switch_matchups_honor_the_targets_foresight_flag() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, [Fixture.TACKLE]),
+		[_mon(Fixture.GASTLY, [Fixture.TACKLE]), _mon(Fixture.CHARMANDER, [Fixture.TACKLE])]
+	)
+	battle.player_used_moves = [Fixture.TACKLE] as Array[int]
+	var fresh: int = Gen2AISwitch.matchup_score(battle)
+	battle.enemy.substatus |= Gen2Substatus.IDENTIFIED
+	var identified: int = Gen2AISwitch.matchup_score(battle)
+	assert_eq(fresh, Gen2AISwitch.BASE_SCORE + 2)
+	assert_eq(identified, Gen2AISwitch.BASE_SCORE)
 
 
 ## With nothing thrown yet, `.unknown_moves` assumes the player will attack with

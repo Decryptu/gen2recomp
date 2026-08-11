@@ -109,7 +109,7 @@ static func evaluate(battle: Gen2Battle) -> Dictionary:
 	if matchup_score(battle) >= COMFORTABLE_SCORE:
 		return _stay()
 
-	var last_move: int = battle.mon(Gen2Battle.PLAYER).last_move_used
+	var last_move: int = battle.mon(Gen2Battle.PLAYER).last_counter_move
 	if last_move != 0:
 		var immune: Array = _immune_to(battle, last_move)
 		if not immune.is_empty():
@@ -199,7 +199,10 @@ static func matchup_score(battle: Gen2Battle) -> int:
 			if seen.has(attacking):
 				continue
 			seen.append(attacking)
-			if battle.data.type_effectiveness(attacking, enemy.types()) >= SUPER_EFFECTIVE:
+			if battle.data.type_effectiveness(
+				attacking, enemy.types(),
+				Gen2Substatus.has(enemy.substatus, Gen2Substatus.IDENTIFIED)
+			) >= SUPER_EFFECTIVE:
 				score -= 1
 	else:
 		score += _used_move_adjustment(battle, used, enemy)
@@ -218,8 +221,9 @@ static func _used_move_adjustment(battle: Gen2Battle, used: Array, enemy: Gen2Ba
 		if int(move.get("power", 0)) <= 0:
 			continue
 		var matchup: int = battle.data.type_effectiveness(
-			int(move.get("type", 0)), enemy.types()
-		)
+				int(move.get("type", 0)), enemy.types(),
+				Gen2Substatus.has(enemy.substatus, Gen2Substatus.IDENTIFIED)
+			)
 		if matchup >= SUPER_EFFECTIVE:
 			return -1
 		if matchup == 0:
@@ -245,7 +249,8 @@ static func _enemy_move_adjustment(
 		if int(move.get("power", 0)) <= 0:
 			continue
 		var matchup: int = battle.data.type_effectiveness(
-			int(move.get("type", 0)), player.types()
+			int(move.get("type", 0)), player.types(),
+			Gen2Substatus.has(player.substatus, Gen2Substatus.IDENTIFIED)
 		)
 		if matchup == 0:
 			continue
@@ -317,7 +322,7 @@ static func _resisting(battle: Gen2Battle, candidates: Array) -> Array:
 	var player: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
 	var attacking: Array = []
 
-	var last_move: int = player.last_move_used
+	var last_move: int = player.last_counter_move
 	if last_move != 0:
 		var move: Dictionary = battle.data.move(last_move)
 		if int(move.get("power", 0)) > 0:
@@ -332,7 +337,10 @@ static func _resisting(battle: Gen2Battle, candidates: Array) -> Array:
 			continue
 		var safe: bool = true
 		for attacking_type: int in attacking:
-			if battle.data.type_effectiveness(attacking_type, member.types()) >= SUPER_EFFECTIVE:
+			if battle.data.type_effectiveness(
+				attacking_type, member.types(),
+				Gen2Substatus.has(member.substatus, Gen2Substatus.IDENTIFIED)
+			) >= SUPER_EFFECTIVE:
 				safe = false
 				break
 		if safe:
@@ -363,7 +371,8 @@ static func _best_answer(battle: Gen2Battle, candidates: Array) -> Dictionary:
 			if int(move.get("power", 0)) <= 0:
 				continue
 			var matchup: int = battle.data.type_effectiveness(
-				int(move.get("type", 0)), player.types()
+				int(move.get("type", 0)), player.types(),
+				Gen2Substatus.has(player.substatus, Gen2Substatus.IDENTIFIED)
 			)
 			if matchup < RomLayout.MATCHUP_EFFECTIVE:
 				continue
@@ -397,7 +406,10 @@ static func _immune_to(battle: Gen2Battle, move_number: int) -> Array:
 		var member: Gen2BattleMon = party.at(index)
 		if member == null or member.is_fainted():
 			continue
-		if battle.data.type_effectiveness(attacking, member.types()) == 0:
+		if battle.data.type_effectiveness(
+			attacking, member.types(),
+			Gen2Substatus.has(member.substatus, Gen2Substatus.IDENTIFIED)
+		) == 0:
 			out.append(index)
 	return out
 
