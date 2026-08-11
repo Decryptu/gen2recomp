@@ -118,6 +118,7 @@ const LOCK_ON: int = 1 << 25
 ## counters on [Gen2BattleMon].
 const BIDE: int = 1 << 26
 const RAGE: int = 1 << 27
+const TRANSFORMED: int = 1 << 28
 
 const NONE: int = 0
 

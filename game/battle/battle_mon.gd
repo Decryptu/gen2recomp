@@ -147,6 +147,10 @@ var mimic_original_pp: int = 0
 ## override with every other field-only change.
 var battle_types: Array[int] = []
 
+## Transform edits the active battle struct while the party struct stays put.
+## This backup is the latter: switching and save writeback restore/read it.
+var transform_original: Dictionary = {}
+
 ## The item this Pokémon is holding, by item number, or zero for none. Carried
 ## through from a trainer's party or a save; nothing in the engine reads it yet.
 var item: int = 0
@@ -295,13 +299,21 @@ func can_change_stage(key: String, by: int) -> bool:
 	if not STAGED_STATS.has(key) and not STAGED_ODDS.has(key):
 		return false
 	var before: int = int(stages.get(key, 0))
-	return clampi(before + by, Gen2Stats.MIN_STAGE, Gen2Stats.MAX_STAGE) != before
+	var after: int = clampi(before + by, Gen2Stats.MIN_STAGE, Gen2Stats.MAX_STAGE)
+	if after == before:
+		return false
+	# RaiseStat moves the stage, recalculates, then puts the stage back and fails
+	# when the real stat has reached MAX_STAT_VALUE.
+	if by > 0 and STAGED_STATS.has(key) \
+			and Gen2Stats.apply_stage(int(stats.get(key, 0)), after) >= Gen2Stats.MAX_STAT_VALUE:
+		return false
+	return true
 
 
 ## Moves a stage, and answers whether it actually moved: at the top or the bottom
 ## the cartridge says so rather than silently doing nothing.
 func change_stage(key: String, by: int) -> bool:
-	if not STAGED_STATS.has(key) and not STAGED_ODDS.has(key):
+	if not can_change_stage(key, by):
 		return false
 	var before: int = int(stages.get(key, 0))
 	var after: int = clampi(before + by, Gen2Stats.MIN_STAGE, Gen2Stats.MAX_STAGE)
@@ -354,6 +366,7 @@ func apply_passed_state(state: Dictionary) -> void:
 ## Haze resets the stages on both sides without touching either one's
 ## volatiles, so the two have to stay two calls rather than become one.
 func reset_volatile() -> void:
+	restore_transform()
 	restore_mimic()
 	battle_types = []
 	substatus = Gen2Substatus.NONE
@@ -380,6 +393,56 @@ func reset_volatile() -> void:
 	bide_move = 0
 	rage_count = 0
 	minimized = false
+
+
+func transform_into(target: Gen2BattleMon) -> bool:
+	if target == null or Gen2Substatus.has(target.substatus, Gen2Substatus.TRANSFORMED):
+		return false
+	if transform_original.is_empty():
+		transform_original = {
+			"species": species, "dvs": dvs, "moves": moves.duplicate(),
+			"pp": pp.duplicate(), "stats": stats.duplicate(),
+			"stages": stages.duplicate(), "battle_types": battle_types.duplicate(),
+		}
+	species = target.species
+	dvs = target.dvs
+	moves = target.moves.duplicate()
+	pp = []
+	for move_number: int in moves:
+		pp.append(1 if move_number == 166 else 5) # Sketch is the source exception.
+	for key: String in ["attack", "defense", "speed", "sp_attack", "sp_defense"]:
+		stats[key] = int(target.stats.get(key, stats.get(key, 1)))
+	stages = target.stages.duplicate()
+	battle_types.clear()
+	for type_number: int in target.types():
+		battle_types.append(type_number)
+	disabled_slot = -1
+	disable_turns = 0
+	substatus |= Gen2Substatus.TRANSFORMED
+	return true
+
+
+func restore_transform() -> void:
+	if transform_original.is_empty():
+		return
+	species = int(transform_original["species"])
+	dvs = int(transform_original["dvs"])
+	moves = (transform_original["moves"] as Array).duplicate()
+	pp = (transform_original["pp"] as Array).duplicate()
+	stats = (transform_original["stats"] as Dictionary).duplicate()
+	stages = (transform_original["stages"] as Dictionary).duplicate()
+	battle_types.clear()
+	for type_number: int in transform_original["battle_types"]:
+		battle_types.append(type_number)
+	transform_original = {}
+
+
+func persistent_species() -> int:
+	return int(transform_original.get("species", species))
+
+
+func persistent_dvs() -> int:
+	return int(transform_original.get("dvs", dvs))
 
 
 ## The gender the cartridge's own `GetGender` would answer, from the species'
@@ -584,12 +647,18 @@ func mimic_move(slot: int, move: int) -> bool:
 
 
 func persistent_move(slot: int) -> int:
+	if not transform_original.is_empty():
+		var original_moves: Array = transform_original.get("moves", [])
+		return int(original_moves[slot]) if slot >= 0 and slot < original_moves.size() else 0
 	if slot == mimicked_slot:
 		return mimic_original_move
 	return int(moves[slot]) if slot >= 0 and slot < moves.size() else 0
 
 
 func persistent_pp(slot: int) -> int:
+	if not transform_original.is_empty():
+		var original_pp: Array = transform_original.get("pp", [])
+		return int(original_pp[slot]) if slot >= 0 and slot < original_pp.size() else 0
 	if slot == mimicked_slot:
 		return mimic_original_pp
 	return pp_left(slot)

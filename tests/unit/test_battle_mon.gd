@@ -131,6 +131,14 @@ func test_a_stage_at_the_end_of_its_range_reports_that_it_did_not_move() -> void
 	assert_eq(mon.stage("attack"), Gen2Stats.MAX_STAGE)
 
 
+func test_a_stage_that_would_leave_the_real_stat_at_999_is_put_back() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	mon.stats["attack"] = 800
+	assert_false(mon.can_change_stage("attack", 1))
+	assert_false(mon.change_stage("attack", 1))
+	assert_eq(mon.stage("attack"), 0)
+
+
 func test_hp_has_no_stage() -> void:
 	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
 	assert_false(mon.change_stage("hp", 2))

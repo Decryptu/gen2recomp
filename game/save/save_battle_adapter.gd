@@ -9,11 +9,11 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 	if mon == null:
 		return null
 	var out := Gen2SaveMon.new()
-	out.species = mon.species
+	out.species = mon.persistent_species()
 	out.item = mon.item
 	out.level = mon.level
 	out.exp = mon.exp
-	out.dvs = mon.dvs
+	out.dvs = mon.persistent_dvs()
 	out.stat_exp = {}
 	for key: String in Gen2SaveMon.STAT_EXP_KEYS:
 		out.stat_exp[key] = int(mon.stat_exp.get(key, 0))
@@ -21,11 +21,10 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 	out.status = mon.status
 	out.happiness = mon.happiness
 	for slot: int in Gen2SaveMon.MAX_MOVES:
-		if slot < mon.moves.size():
-			# Mimic edits only the battle move struct. Sketch edits the party
-			# move too, so it needs no exception here.
-			out.moves[slot] = mon.persistent_move(slot)
-			out.pp[slot] = mon.persistent_pp(slot)
+		# Mimic and Transform edit only the battle move struct. Sketch edits the
+		# party move too, so it needs no exception here.
+		out.moves[slot] = mon.persistent_move(slot)
+		out.pp[slot] = mon.persistent_pp(slot)
 	return out
 
 

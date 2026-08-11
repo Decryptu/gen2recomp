@@ -57,6 +57,10 @@ const BIDE_MOVE: int = 117
 const RAGE_MOVE: int = 99
 const FUTURE_SIGHT: int = 148
 const FUTURE_SIGHT_MOVE: int = 248
+const PAY_DAY: int = 34
+const TRANSFORM: int = 57
+const PAY_DAY_MOVE: int = 6
+const TRANSFORM_MOVE: int = 144
 
 ## Real move numbers read by the called-move commands.
 const METRONOME_MOVE: int = 118
@@ -414,6 +418,32 @@ const FUTURE_SIGHT_SEQUENCE: Array = [
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.FUTURE_SIGHT,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const PAY_DAY_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.PAY_DAY,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const TRANSFORM_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.TRANSFORM,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1844,6 +1874,8 @@ static func _sequences() -> Dictionary:
 		BIDE: BIDE_SEQUENCE,
 		RAGE: RAGE_SEQUENCE,
 		FUTURE_SIGHT: FUTURE_SIGHT_SEQUENCE,
+		PAY_DAY: PAY_DAY_SEQUENCE,
+		TRANSFORM: TRANSFORM_SEQUENCE,
 		SNORE: SNORE_SEQUENCE,
 		TRI_ATTACK: TRI_ATTACK_SEQUENCE,
 		FLAME_WHEEL: FLAME_WHEEL_SEQUENCE,
