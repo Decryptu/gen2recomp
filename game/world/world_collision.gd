@@ -321,6 +321,16 @@ const WALK_ALT_DIRECTION: Array[Vector2i] = [
 
 ## The .warps branch accepts four codes and refuses every other $7x.
 const WARP_STEP_CODES: Array[int] = [COLL_DOOR, COLL_DOOR_79, COLL_STAIRCASE, COLL_CAVE]
+## CheckWarpFacingDown's complete list. It is broader than WARP_STEP_CODES:
+## RefreshPlayerSprite uses it only to choose the initial drawing direction,
+## while .CheckTile forces a downward step for four codes above.
+const SPAWN_FACING_DOWN_CODES: Array[int] = [
+	COLL_DOOR, COLL_DOOR_79, COLL_STAIRCASE, 0x73, COLL_CAVE, 0x74, 0x7C, 0x75, 0x7D,
+]
+
+
+static func faces_down_on_spawn(collision_code: int) -> bool:
+	return SPAWN_FACING_DOWN_CODES.has(collision_code)
 
 
 ## What .CheckTile does to a player standing on [param collision_code]:

@@ -3405,7 +3405,10 @@ func _apply_script_warp(request: Dictionary) -> Dictionary:
 	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset)
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
-	_apply_map(target_map, target_tileset, cell)
+	var custom_facing: bool = request.has("facing")
+	if custom_facing:
+		player_facing = int(request["facing"])
+	_apply_map(target_map, target_tileset, cell, custom_facing)
 	return {
 		"ok": true,
 		"kind": &"warp",
@@ -4271,7 +4274,10 @@ func _apply_map_setup_player_state() -> void:
 
 
 func _apply_map(
-	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
+	target_map: Gen2WorldMap,
+	target_tileset: Gen2WorldTileset,
+	target_cell: Vector2i,
+	custom_facing: bool = false,
 ) -> void:
 	_block_overrides.clear()
 	_pending_cut.clear()
@@ -4299,6 +4305,14 @@ func _apply_map(
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
+	# RefreshPlayerSprite calls CheckWarpFacingDown, then applies a scripted
+	# PLAYERSPRITESETUP_CUSTOM_FACING override last. This makes a staircase entry
+	# face its automatic downward exit instead of retaining the direction used on
+	# the previous map.
+	if not custom_facing and Gen2WorldCollision.faces_down_on_spawn(
+		collision_code_at(player_cell)
+	):
+		player_facing = Gen2WorldSprite.FACING_DOWN
 	_apply_map_setup_player_state()
 	_clear_player_step()
 	# _load_objects() rebuilds every record, so in-flight object steps end with

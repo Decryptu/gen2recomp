@@ -2684,6 +2684,11 @@ func _stage_warp(command: Dictionary) -> Dictionary:
 		"x": int(command["x"]),
 		"y": int(command["y"]),
 	}
+	# Script_warpfacing sets PLAYERSPRITESETUP_CUSTOM_FACING_F before falling
+	# through Script_warp. Carry the same marker through map setup so the normal
+	# destination-tile facing rule cannot overwrite it.
+	if command.has("facing"):
+		request["facing"] = int(command["facing"])
 	if warp_validator.is_valid():
 		var validation: Variant = warp_validator.call(
 			request["map_group"], request["map_number"], Vector2i(request["x"], request["y"])

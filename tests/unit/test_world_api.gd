@@ -2980,6 +2980,24 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
 
+func test_a_staircase_warp_faces_and_steps_the_player_out() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	var landing := Vector2i(2, 2)
+	target.collision[landing.y * target.collision_width + landing.x] = 0x7A
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 6))
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.player_cell, landing)
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+	assert_eq(world.forced_movement()["direction"], Vector2i.DOWN)
+	var step: Dictionary = world.advance_forced_movement()
+	assert_true(step["ok"], JSON.stringify(step))
+	assert_eq(world.player_cell, landing + Vector2i.DOWN)
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+
+
 ## home/map.asm's map load calls ReadObjectEvents, which clears the object
 ## structs and re-reads every object event from ROM, so the coordinates
 ## moveobject wrote into wMapObjects
@@ -3879,6 +3897,7 @@ func test_a_warpfacing_runs_the_target_map_scene_in_the_same_event_queue() -> vo
 	var target_map: Gen2WorldMap = data.world_map(1, 2)
 	target_map.scripts["callbacks"] = []
 	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6310}]
+	target_map.collision[2 * target_map.collision_width + 2] = 0x7A
 
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	world.current_map.events["coord_events"][0]["script"] = 0x6300
