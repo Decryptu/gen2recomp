@@ -22,8 +22,10 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 	out.happiness = mon.happiness
 	for slot: int in Gen2SaveMon.MAX_MOVES:
 		if slot < mon.moves.size():
-			out.moves[slot] = int(mon.moves[slot])
-			out.pp[slot] = mon.pp_left(slot)
+			# Mimic edits only the battle move struct. Sketch edits the party
+			# move too, so it needs no exception here.
+			out.moves[slot] = mon.persistent_move(slot)
+			out.pp[slot] = mon.persistent_pp(slot)
 	return out
 
 

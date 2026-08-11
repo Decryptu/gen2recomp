@@ -39,6 +39,28 @@ const RECOIL_HIT: int = 48
 const POISON: int = 66
 const PARALYZE: int = 67
 
+## The three effects that replace the move being executed and restart the
+## effect interpreter. Mirror Move takes the opponent's last move, Metronome
+## samples the full move table with its source exclusions, and Sleep Talk
+## samples the user's own set while asleep. Their command implementations share
+## [member Gen2Turn.called_move_number] and the restart loop in [Gen2Battle].
+const MIRROR_MOVE: int = 9
+const CONVERSION: int = 30
+const MIMIC: int = 82
+const METRONOME: int = 83
+const CONVERSION_2: int = 93
+const SKETCH: int = 95
+const SLEEP_TALK: int = 97
+
+## Real move numbers read by the called-move commands.
+const METRONOME_MOVE: int = 118
+const MIRROR_MOVE_MOVE: int = 119
+const CONVERSION_MOVE: int = 160
+const MIMIC_MOVE: int = 102
+const SKETCH_MOVE: int = 166
+const CONVERSION_2_MOVE: int = 176
+const SLEEP_TALK_MOVE: int = 214
+
 ## Two to five hits, the cartridge's own weighted roll
 ## ([method Gen2EffectCommands._roll_multi_hit_count]); and exactly two, always,
 ## for [constant DOUBLE_HIT]. Both point at the one command,
@@ -1335,6 +1357,61 @@ const SPLASH_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
+## Each is the source's four-step wrapper. The last command is normally never
+## reached on success because the called-move command restarts the interpreter;
+## it remains in the list for the same reason it does in `effects.asm`, to end a
+## failed call normally.
+const MIRROR_MOVE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.MIRROR_MOVE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const MIMIC_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MIMIC,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const METRONOME_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.METRONOME,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const SLEEP_TALK_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SLEEP_TALK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const SKETCH_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.SKETCH,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const CONVERSION_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CONVERSION,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const CONVERSION_2_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CONVERSION_2,
+	Gen2EffectCommands.END_MOVE,
+]
+
 ## Snore: a flinch chance whose own command sits between the roll and the
 ## animation, so a Snore used awake fails before anything is drawn.
 const SNORE_SEQUENCE: Array = [
@@ -1705,6 +1782,13 @@ static func _sequences() -> Dictionary:
 		FALSE_SWIPE: FALSE_SWIPE_SEQUENCE,
 		HEAL_BELL: HEAL_BELL_SEQUENCE,
 		SPLASH: SPLASH_SEQUENCE,
+		MIRROR_MOVE: MIRROR_MOVE_SEQUENCE,
+		CONVERSION: CONVERSION_SEQUENCE,
+		MIMIC: MIMIC_SEQUENCE,
+		METRONOME: METRONOME_SEQUENCE,
+		CONVERSION_2: CONVERSION_2_SEQUENCE,
+		SKETCH: SKETCH_SEQUENCE,
+		SLEEP_TALK: SLEEP_TALK_SEQUENCE,
 		SNORE: SNORE_SEQUENCE,
 		TRI_ATTACK: TRI_ATTACK_SEQUENCE,
 		FLAME_WHEEL: FLAME_WHEEL_SEQUENCE,

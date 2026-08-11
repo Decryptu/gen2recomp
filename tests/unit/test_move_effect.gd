@@ -4059,6 +4059,269 @@ func test_beat_up_with_one_party_member_ends_before_kings_rock() -> void:
 	assert_true(party.has(Gen2EffectCommands.KINGS_ROCK))
 
 
+func test_the_called_and_copy_move_effects_have_their_source_wrappers() -> void:
+	var rows: Dictionary = {
+		Gen2MoveEffect.MIRROR_MOVE: Gen2EffectCommands.MIRROR_MOVE,
+		Gen2MoveEffect.CONVERSION: Gen2EffectCommands.CONVERSION,
+		Gen2MoveEffect.MIMIC: Gen2EffectCommands.MIMIC,
+		Gen2MoveEffect.METRONOME: Gen2EffectCommands.METRONOME,
+		Gen2MoveEffect.CONVERSION_2: Gen2EffectCommands.CONVERSION_2,
+		Gen2MoveEffect.SKETCH: Gen2EffectCommands.SKETCH,
+		Gen2MoveEffect.SLEEP_TALK: Gen2EffectCommands.SLEEP_TALK,
+	}
+	for effect: int in rows:
+		var sequence: Array = Gen2MoveEffect.sequence_for(effect)
+		assert_true(Gen2MoveEffect.is_written(effect), "effect %d" % effect)
+		assert_eq(sequence[sequence.size() - 2], rows[effect], "effect %d" % effect)
+
+
+func test_metronome_calls_an_allowed_move_without_spending_its_pp() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.METRONOME]),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var before_pp: int = battle.player.pp_left(0)
+	var events: Array = battle.take_turn(0, 0)
+	var used: Array = _of_type(events, Gen2Battle.USED_MOVE)
+	assert_gte(used.size(), 3)
+	assert_eq(int(used[0]["move"]), Fixture.METRONOME)
+	var called: int = int(used[1]["move"])
+	assert_false(Gen2EffectCommands.METRONOME_EXCEPTS.has(called))
+	assert_false(battle.player.moves.has(called))
+	assert_eq(battle.player.pp_left(0), before_pp - 1)
+	assert_eq(battle.player.turns_taken, 1, "the called move is not a second turn")
+	assert_eq(battle.player.last_move_used, 0, "ClearLastMove survives the nested used text")
+
+
+func test_mirror_move_replays_the_faster_opponents_move() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.MIRROR_MOVE]),
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var enemy_before: int = battle.enemy.hp
+	var mirror_pp: int = battle.player.pp_left(0)
+	var events: Array = battle.take_turn(0, 0)
+	var used: Array = _of_type(events, Gen2Battle.USED_MOVE)
+	assert_eq(used.size(), 3)
+	assert_eq(int(used[0]["move"]), Fixture.TACKLE)
+	assert_eq(int(used[1]["move"]), Fixture.MIRROR_MOVE)
+	assert_eq(int(used[2]["move"]), Fixture.TACKLE)
+	assert_lt(battle.enemy.hp, enemy_before)
+	assert_eq(battle.player.pp_left(0), mirror_pp - 1)
+	assert_eq(battle.player.last_move_used, 0)
+
+
+func test_mirror_move_refuses_a_move_the_user_already_knows() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.PIKACHU, 50, [Fixture.MIRROR_MOVE, Fixture.TACKLE]
+		),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	battle.enemy.last_move_used = Fixture.TACKLE
+	var turn: Gen2Turn = _turn(battle, Fixture.MIRROR_MOVE)
+	Gen2EffectCommands.run(Gen2EffectCommands.MIRROR_MOVE, turn)
+	assert_true(turn.ended)
+	assert_eq(turn.called_move_number, 0)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_sleep_talk_calls_an_empty_pp_move_while_still_asleep() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.PIKACHU, 50, [Fixture.SLEEP_TALK, Fixture.TACKLE]
+		),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	battle.player.status = 3
+	battle.player.pp[1] = 0
+	var sleep_talk_pp: int = battle.player.pp_left(0)
+	var before: int = battle.enemy.hp
+	var events: Array = battle.take_turn(0, 0)
+	var used: Array = _of_type(events, Gen2Battle.USED_MOVE)
+	assert_eq(int(used[0]["move"]), Fixture.SLEEP_TALK)
+	assert_eq(int(used[1]["move"]), Fixture.TACKLE)
+	assert_lt(battle.enemy.hp, before)
+	assert_eq(battle.player.pp_left(0), sleep_talk_pp - 1)
+	assert_eq(battle.player.pp_left(1), 0, "the called move spends no PP")
+	assert_eq(_of_type(events, Gen2Battle.CANNOT_MOVE).size(), 1, "fast asleep is still said")
+
+
+func test_sleep_talk_fails_awake_or_without_an_allowed_move() -> void:
+	for status: int in [Gen2Status.NONE, 3]:
+		var moves: Array = (
+			[Fixture.SLEEP_TALK] if status == Gen2Status.NONE
+			else [Fixture.SLEEP_TALK, Fixture.FLY]
+		)
+		var battle: Gen2Battle = Gen2Battle.create(
+			_data,
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, moves),
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_rng
+		)
+		battle.player.status = status
+		var events: Array = battle.take_turn(0, 0)
+		assert_eq(_of_type(events, Gen2Battle.MOVE_FAILED).size(), 1, "status %d" % status)
+
+
+func test_mimic_replaces_only_the_active_battle_move_with_five_pp() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.MIMIC]),
+			Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.GROWL]),
+		]),
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		]),
+		_rng
+	)
+	var events: Array = battle.take_turn(0, 0)
+	var mimic: Gen2BattleMon = battle.player
+	assert_eq(mimic.moves[0], Fixture.TACKLE)
+	assert_eq(mimic.pp_left(0), 5)
+	assert_eq(mimic.persistent_move(0), Fixture.MIMIC)
+	assert_eq(mimic.persistent_pp(0), 9, "Mimic itself still spent one PP")
+	assert_eq(_of_type(events, Gen2Battle.MIMIC_LEARNED).size(), 1)
+	var saved: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(mimic)
+	assert_eq(saved.moves[0], Fixture.MIMIC)
+	assert_eq(saved.pp[0], 9)
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(battle.party(Gen2Battle.PLAYER).at(0).moves[0], Fixture.MIMIC)
+	assert_eq(battle.party(Gen2Battle.PLAYER).at(0).pp_left(0), 9)
+
+
+func test_sketch_replaces_the_party_move_at_the_copied_moves_base_pp() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.SKETCH]),
+		Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(battle.player.moves[0], Fixture.TACKLE)
+	assert_eq(battle.player.pp_left(0), int(_data.move(Fixture.TACKLE)["pp"]))
+	assert_eq(battle.player.persistent_move(0), Fixture.TACKLE)
+	assert_eq(_of_type(events, Gen2Battle.SKETCHED_MOVE).size(), 1)
+	var saved: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(battle.player)
+	assert_eq(saved.moves[0], Fixture.TACKLE)
+	assert_eq(saved.pp[0], int(_data.move(Fixture.TACKLE)["pp"]))
+
+
+func test_mimic_and_sketch_refuse_invalid_or_already_known_moves() -> void:
+	for number: int in [Fixture.MIMIC, Fixture.SKETCH]:
+		var battle: Gen2Battle = Gen2Battle.create(
+			_data,
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [number, Fixture.TACKLE]),
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+			_rng
+		)
+		battle.enemy.last_move_used = Fixture.TACKLE
+		var turn: Gen2Turn = _turn(battle, number)
+		Gen2EffectCommands.run(
+			Gen2EffectCommands.MIMIC if number == Fixture.MIMIC else Gen2EffectCommands.SKETCH,
+			turn
+		)
+		assert_true(turn.ended, "move %d" % number)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1, "move %d" % number)
+
+
+func test_sketch_is_refused_by_the_targets_substitute() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.SKETCH]
+	battle.player.pp = [1]
+	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.substatus = Gen2Substatus.SUBSTITUTE
+	var turn: Gen2Turn = _turn(battle, Fixture.SKETCH)
+	Gen2EffectCommands.run(Gen2EffectCommands.SKETCH, turn)
+	assert_eq(battle.player.moves[0], Fixture.SKETCH)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_conversion_takes_a_different_type_from_the_users_moves() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.PIKACHU, 50,
+			[Fixture.CONVERSION, Fixture.TACKLE, Fixture.THUNDERBOLT]
+		),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION)
+	assert_eq(battle.player.types(), [Fixture.NORMAL, Fixture.NORMAL])
+	assert_eq(_of_type(turn.events, Gen2Battle.TYPE_CHANGED).size(), 1)
+	assert_eq(int(_first(turn.events, Gen2Battle.TYPE_CHANGED)["type_number"]), Fixture.NORMAL)
+
+
+func test_conversion_fails_when_every_move_matches_a_current_type() -> void:
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data,
+		Gen2BattleMon.create(
+			_data, Fixture.HOOTHOOT, 50, [Fixture.CONVERSION, Fixture.TACKLE]
+		),
+		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		_rng
+	)
+	var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION)
+	assert_eq(battle.player.types(), [Fixture.NORMAL, Fixture.FLYING])
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_conversion2_picks_a_type_that_resists_the_last_move() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.CONVERSION_2]
+	battle.player.pp = [30]
+	battle.enemy.last_move_used = Fixture.TACKLE
+	var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION_2)
+	var picked: int = int(battle.player.types()[0])
+	assert_lt(
+		_data.type_effectiveness(Fixture.NORMAL, [picked, picked]),
+		RomLayout.MATCHUP_EFFECTIVE
+	)
+	assert_eq(battle.player.types()[1], picked)
+	assert_eq(_of_type(turn.events, Gen2Battle.TYPE_CHANGED).size(), 1)
+
+
+func test_conversion2_refuses_no_move_and_curse_type() -> void:
+	for last_move: int in [0, Fixture.CURSE]:
+		var battle: Gen2Battle = _battle()
+		battle.player.moves = [Fixture.CONVERSION_2]
+		battle.player.pp = [30]
+		battle.enemy.last_move_used = last_move
+		var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION_2)
+		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1, "move %d" % last_move)
+
+
+func test_a_switch_restores_species_types_after_conversion() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.PIKACHU, 50, [Fixture.CONVERSION]),
+			Gen2BattleMon.create(_data, Fixture.BULBASAUR, 50, [Fixture.TACKLE]),
+		]),
+		Gen2Party.create([
+			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
+		]),
+		_rng
+	)
+	_run_move(battle, Fixture.CONVERSION)
+	assert_eq(battle.player.types(), [Fixture.NORMAL, Fixture.NORMAL])
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(
+		battle.party(Gen2Battle.PLAYER).at(0).types(),
+		[Fixture.ELECTRIC, Fixture.ELECTRIC]
+	)
+
+
 ## `.wild`: no party to walk, so one ordinary hit off the wild Pokemon's own real
 ## stats, and `.only_one_beatup` prints "But it failed!" behind a hit that landed.
 func test_a_wild_beat_up_swings_once_and_says_it_failed_anyway() -> void:

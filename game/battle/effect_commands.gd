@@ -87,6 +87,43 @@ const DEFROST: StringName = &"defrost"
 ## nothing happened.
 const SPLASH: StringName = &"splash"
 
+## Commands for the called-, copied- and type-changing move families. The three
+## called moves ask [Gen2Battle] to restart the effect interpreter through
+## [member Gen2Turn.called_move_number].
+const MIRROR_MOVE: StringName = &"mirrormove"
+const MIMIC: StringName = &"mimic"
+const METRONOME: StringName = &"metronome"
+const SKETCH: StringName = &"sketch"
+const SLEEP_TALK: StringName = &"sleeptalk"
+const CONVERSION: StringName = &"conversion"
+const CONVERSION_2: StringName = &"conversion2"
+
+const CURSE_TYPE: int = 0x13
+## Conversion2's accepted random type bytes: the physical run including BIRD,
+## then the special run. The padding from $0a through $13 and everything at or
+## beyond $1c is rejected by the source loop.
+const CONVERSION_2_TYPES: Array[int] = [
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+	0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
+]
+
+## `MetronomeExcepts`, move numbers rather than effects. The caller's own move
+## set is checked separately, exactly as `CheckUserMove` does after this table.
+const METRONOME_EXCEPTS: Array[int] = [
+	0, Gen2MoveEffect.METRONOME_MOVE, Gen2Damage.STRUGGLE,
+	Gen2MoveEffect.SKETCH_MOVE, Gen2MoveEffect.MIMIC_MOVE, 68, 243,
+	182, 197, 203, 194, Gen2MoveEffect.SLEEP_TALK_MOVE, 168,
+]
+
+## `.check_two_turn_move`, the six effect bytes Sleep Talk resamples. Bide is
+## included even before its own effect body is implemented because the source
+## refuses it by effect, not by capability.
+const SLEEP_TALK_EXCLUDED_EFFECTS: Array[int] = [
+	Gen2MoveEffect.SKULL_BASH, Gen2MoveEffect.RAZOR_WIND,
+	Gen2MoveEffect.SKY_ATTACK, Gen2MoveEffect.SOLARBEAM,
+	Gen2MoveEffect.FLY_OR_DIG, 26,
+]
+
 ## `BattleCommand_SwitchTurn`: swaps who is acting and who is being acted on for
 ## the commands between two of them. Swagger is the only list that uses it, to
 ## raise the *target's* Attack with the ordinary `attackup2`.
@@ -602,6 +639,20 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_defrost_user(turn)
 		SPLASH:
 			_splash(turn)
+		MIRROR_MOVE:
+			_mirror_move(turn)
+		MIMIC:
+			_mimic(turn)
+		METRONOME:
+			_metronome(turn)
+		SKETCH:
+			_sketch(turn)
+		SLEEP_TALK:
+			_sleep_talk(turn)
+		CONVERSION:
+			_conversion(turn)
+		CONVERSION_2:
+			_conversion_2(turn)
 		SWITCH_TURN:
 			_switch_turn(turn)
 		CHECK_IMMUNE:
@@ -775,7 +826,11 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 ## This always records the move announced, differing only in that one narrow
 ## interaction.
 static func _used_move_text(turn: Gen2Turn) -> void:
-	turn.attacker().last_move_used = turn.move_number
+	# `ResetTurn` raises the temporary charging byte before entering the called
+	# list. `UsedMoveText` still prints that move, but its `CheckUserIsCharging`
+	# branch leaves both last-move bytes clear.
+	if not turn.called:
+		turn.attacker().last_move_used = turn.move_number
 	turn.emit(Gen2Battle.USED_MOVE, {"move": turn.move_number})
 
 
@@ -784,7 +839,7 @@ static func _used_move_text(turn: Gen2Turn) -> void:
 ## does the release turn of a two-turn move: the PP for it went on the charge
 ## turn, which is what [member Gen2Turn.locked] means here.
 static func _do_turn(turn: Gen2Turn) -> void:
-	if turn.locked:
+	if turn.locked or turn.called:
 		return
 
 	# "If we've gotten this far, this counts as a turn", ahead of the Struggle
@@ -1079,6 +1134,196 @@ static func _defrost_user(turn: Gen2Turn) -> void:
 static func _splash(turn: Gen2Turn) -> void:
 	_animate_current_move(turn)
 	turn.emit(Gen2Battle.NOTHING_HAPPENED)
+
+
+## `ClearLastMove`, shared by the called- and copied-move commands. The source
+## clears both of the user's last-move bytes before it decides whether the call
+## can succeed, so a failed call clears the remembered move too.
+static func _clear_last_move_for_call(turn: Gen2Turn) -> void:
+	turn.attacker().last_move_used = 0
+
+
+static func _fail_called_move(turn: Gen2Turn) -> void:
+	turn.emit(Gen2Battle.MOVE_FAILED)
+	turn.end()
+
+
+## `BattleCommand_MirrorMove`: copy the opponent's last counter move, unless it
+## is empty or already appears in the user's own set. The latter is the source's
+## perhaps-surprising `CheckUserMove / jr nz, .use` branch.
+static func _mirror_move(turn: Gen2Turn) -> void:
+	_clear_last_move_for_call(turn)
+	var copied: int = turn.defender().last_move_used
+	if copied == 0 or turn.attacker().moves.has(copied) \
+		or turn.data().move(copied).is_empty():
+		_fail_called_move(turn)
+		return
+	turn.called_move_number = copied
+
+
+## `BattleCommand_Mimic`: replace the Mimic slot in the active battle struct,
+## give the copy five PP, and leave the party move untouched. A switch restores
+## the original through [method Gen2BattleMon.reset_volatile].
+static func _mimic(turn: Gen2Turn) -> void:
+	_clear_last_move_for_call(turn)
+	var copied: int = turn.defender().last_move_used
+	var slot: int = turn.attacker().moves.find(Gen2MoveEffect.MIMIC_MOVE)
+	if copied == 0 or copied == Gen2Damage.STRUGGLE or slot < 0 \
+		or turn.attacker().moves.has(copied) or turn.data().move(copied).is_empty():
+		_fail_called_move(turn)
+		return
+	if not turn.attacker().mimic_move(slot, copied):
+		_fail_called_move(turn)
+		return
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.MIMIC_LEARNED, {"move": copied, "slot": slot})
+
+
+## `BattleCommand_Metronome`: byte rejection over the cartridge's 251 moves,
+## then the exact exception table and the user's own set. The real table always
+## leaves candidates; the guard only keeps a malformed modded cache from
+## spinning forever.
+static func _metronome(turn: Gen2Turn) -> void:
+	_clear_last_move_for_call(turn)
+	_animate_current_move(turn)
+	for _attempt: int in 4096:
+		var picked: int = turn.rng().randi_range(0, 255)
+		if picked <= 0 or picked > RomLayout.MOVE_COUNT:
+			continue
+		if METRONOME_EXCEPTS.has(picked) or turn.attacker().moves.has(picked):
+			continue
+		if turn.data().move(picked).is_empty():
+			continue
+		turn.called_move_number = picked
+		return
+	_fail_called_move(turn)
+
+
+## `BattleCommand_SleepTalk`: while still asleep, sample one of the four move
+## slots by the low two bits of a random byte. Empty slots, Sleep Talk itself,
+## the disabled move and the six two-turn effects are resampled. PP is not read:
+## the cartridge can call a move whose own PP is empty.
+static func _sleep_talk(turn: Gen2Turn) -> void:
+	_clear_last_move_for_call(turn)
+	var attacker: Gen2BattleMon = turn.attacker()
+	if not Gen2Status.is_asleep(attacker.status):
+		_fail_called_move(turn)
+		return
+
+	var disabled_move: int = 0
+	if attacker.disabled_slot >= 0 and attacker.disabled_slot < attacker.moves.size():
+		disabled_move = int(attacker.moves[attacker.disabled_slot])
+	var candidates: Array[int] = []
+	for slot: int in Gen2BattleMon.MAX_MOVES:
+		if slot >= attacker.moves.size():
+			break
+		var number: int = int(attacker.moves[slot])
+		if number == 0:
+			break
+		var move: Dictionary = turn.data().move(number)
+		if number == turn.move_number or number == disabled_move or move.is_empty():
+			continue
+		if SLEEP_TALK_EXCLUDED_EFFECTS.has(int(move.get("effect", -1))):
+			continue
+		candidates.append(number)
+	if candidates.is_empty():
+		_fail_called_move(turn)
+		return
+
+	_animate_current_move(turn)
+	for _attempt: int in 4096:
+		var slot: int = turn.rng().randi_range(0, 255) & 0b11
+		if slot >= attacker.moves.size():
+			continue
+		var picked: int = int(attacker.moves[slot])
+		if candidates.has(picked):
+			turn.called_move_number = picked
+			return
+	_fail_called_move(turn)
+
+
+## `BattleCommand_Sketch`: the same last-move validation as Mimic, plus the
+## target's Substitute refusal, then a permanent replacement carrying the
+## copied move's base PP. Link battles and Transform have no runtime model yet;
+## neither can reach this command in the current engine.
+static func _sketch(turn: Gen2Turn) -> void:
+	_clear_last_move_for_call(turn)
+	var copied: int = turn.defender().last_move_used
+	var slot: int = turn.attacker().moves.find(Gen2MoveEffect.SKETCH_MOVE)
+	if _substitute_refuses(turn) or copied == 0 or copied == Gen2Damage.STRUGGLE \
+		or slot < 0 or turn.attacker().moves.has(copied) \
+		or turn.data().move(copied).is_empty():
+		_fail_called_move(turn)
+		return
+	if not turn.attacker().replace_move(slot, copied):
+		_fail_called_move(turn)
+		return
+	_animate_current_move(turn)
+	turn.emit(Gen2Battle.SKETCHED_MOVE, {"move": copied, "slot": slot})
+
+
+## `BattleCommand_Conversion`: collect the type byte of each move the user
+## knows, then sample a slot until it differs from both current types and is not
+## CURSE_TYPE. Duplicate move types remain duplicate entries, preserving the
+## source's slot-weighted roll.
+static func _conversion(turn: Gen2Turn) -> void:
+	var attacker: Gen2BattleMon = turn.attacker()
+	var current: Array = attacker.types()
+	var move_types: Array[int] = []
+	for slot: int in Gen2BattleMon.MAX_MOVES:
+		if slot >= attacker.moves.size() or int(attacker.moves[slot]) == 0:
+			break
+		var move: Dictionary = turn.data().move(int(attacker.moves[slot]))
+		if move.is_empty():
+			break
+		move_types.append(int(move.get("type", RomLayout.TYPE_NORMAL)))
+	var has_candidate: bool = false
+	for move_type: int in move_types:
+		if move_type != CURSE_TYPE and not current.has(move_type):
+			has_candidate = true
+			break
+	if not has_candidate:
+		_fail_called_move(turn)
+		return
+	for _attempt: int in 4096:
+		var slot: int = turn.rng().randi_range(0, 255) & 0b11
+		if slot >= move_types.size():
+			continue
+		var picked: int = move_types[slot]
+		if picked == CURSE_TYPE or current.has(picked):
+			continue
+		attacker.set_battle_type(picked)
+		_animate_current_move(turn)
+		turn.emit(Gen2Battle.TYPE_CHANGED, {"type_number": picked})
+		return
+	_fail_called_move(turn)
+
+
+## `BattleCommand_Conversion2`: read the opponent's last move type, then sample
+## the cartridge's disjoint type-number runs until one resists or ignores it.
+## Both active type bytes become the answer.
+static func _conversion_2(turn: Gen2Turn) -> void:
+	var last_move: int = turn.defender().last_move_used
+	var move: Dictionary = turn.data().move(last_move)
+	if last_move == 0 or move.is_empty():
+		_fail_called_move(turn)
+		return
+	var attacking_type: int = int(move.get("type", CURSE_TYPE))
+	if attacking_type == CURSE_TYPE:
+		_fail_called_move(turn)
+		return
+	_animate_current_move(turn)
+	for _attempt: int in 4096:
+		var picked: int = turn.rng().randi_range(0, 255) & 0x1F
+		if not CONVERSION_2_TYPES.has(picked):
+			continue
+		if turn.data().type_effectiveness(attacking_type, [picked, picked]) \
+			>= RomLayout.MATCHUP_EFFECTIVE:
+			continue
+		turn.attacker().set_battle_type(picked)
+		turn.emit(Gen2Battle.TYPE_CHANGED, {"type_number": picked})
+		return
+	_fail_called_move(turn)
 
 
 ## `BattleCommand_SwitchTurn`: the commands between two of these act with the
@@ -1531,7 +1776,7 @@ static func _check_status(turn: Gen2Turn) -> void:
 			turn.emit(Gen2Battle.CANNOT_MOVE, {"reason": &"sleep"})
 			# `.fast_asleep` prints its line and only then looks at the move:
 			# Snore and Sleep Talk are used through a sleep, so the text stands
-			# and `CantMove` is what they skip. Sleep Talk is not written yet.
+			# and `CantMove` is what they skip.
 			if not SLEEPING_MOVES.has(turn.move_number):
 				turn.end()
 				return

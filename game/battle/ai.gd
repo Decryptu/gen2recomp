@@ -82,6 +82,12 @@ const WEATHER_FOR_EFFECT: Dictionary = {
 const RAIN_DANCE_MOVE_NUMBERS: Array = [55, 56, 57, 61, 87, 127, 128, 145, 152, 190, 250]
 const SUNNY_DAY_MOVE_NUMBERS: Array = [7, 52, 53, 83, 126, 221, 234, 235]
 
+## `UsefulMoves`, the source table Mirror Move consults before its two
+## encouragement rolls.
+const USEFUL_MOVE_NUMBERS: Array[int] = [
+	38, 47, 53, 56, 57, 58, 59, 63, 79, 85, 87, 89, 92, 94, 95, 105, 126, 135, 162,
+]
+
 ## `.SandstormImmuneTypes`, which is the same three types the damage itself
 ## exempts.
 const SANDSTORM_IMMUNE_TYPES: Array = Gen2Weather.SANDSTORM_EXEMPT_TYPES
@@ -380,7 +386,7 @@ static func _skip_80_20(rng: RandomNumberGenerator) -> bool:
 ## reason; Leech Seed, Nightmare and Spikes read the target.
 ##
 ## `AI_Redundant`'s rows for the effects this engine does not carry yet
-## (Transform, Sleep Talk, Future Sight) are the remainder, and read as "not
+## (Transform and Future Sight) are the remainder, and read as "not
 ## redundant" because no move here reaches them.
 static func _apply_basic(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
@@ -447,6 +453,9 @@ static func _apply_basic(
 			# `.Teleport` is a label on `.Redundant` itself, so it is redundant
 			# unconditionally: a trainer's Pokémon is refused by the move anyway.
 			redundant = true
+		elif effect == Gen2MoveEffect.SLEEP_TALK:
+			# `.SleepTalk` shares Snore's row: awake means the move is wasted.
+			redundant = not Gen2Status.is_asleep(attacker.status)
 		elif WEATHER_FOR_EFFECT.has(effect):
 			redundant = weather == int(WEATHER_FOR_EFFECT[effect])
 		if redundant:
@@ -564,6 +573,12 @@ static func _apply_smart(
 		if not attacker.can_use(slot):
 			continue
 		match _effect(_move_at(attacker, data, slot)):
+			Gen2MoveEffect.MIRROR_MOVE:
+				_smart_mirror_move(scores, slot, attacker, defender, rng)
+			Gen2MoveEffect.MIMIC:
+				_smart_mimic(scores, slot, attacker, defender, data, rng)
+			Gen2MoveEffect.CONVERSION_2:
+				_smart_conversion_2(scores, slot, defender, rng)
 			Gen2MoveEffect.SLEEP:
 				if not _skip_50_50(rng):
 					_encourage(scores, slot, 2)
@@ -635,6 +650,85 @@ static func _apply_smart(
 				_smart_foresight(scores, slot, attacker, defender, rng)
 			Gen2MoveEffect.PURSUIT:
 				_smart_pursuit(scores, slot, defender, rng)
+			Gen2MoveEffect.SLEEP_TALK:
+				_smart_sleep_talk(scores, slot, attacker)
+
+
+## `AI_Smart_MirrorMove`: without a remembered player move, a faster AI
+## dismisses Mirror Move because it will act before seeing one. A useful
+## remembered move gets one 50% encouragement and, when the AI is faster, a
+## second 90% encouragement.
+static func _smart_mirror_move(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	rng: RandomNumberGenerator
+) -> void:
+	var copied: int = defender.last_move_used
+	if copied == 0:
+		if _faster(attacker, defender):
+			_discourage(scores, slot)
+		return
+	if not USEFUL_MOVE_NUMBERS.has(copied):
+		return
+	if not _skip_50_50(rng):
+		_encourage(scores, slot, 1)
+	if _faster(attacker, defender) and not _rolls_under(rng, 25):
+		_encourage(scores, slot, 1)
+
+
+## `AI_Smart_Mimic`: wait for a move when slower, dismiss the blind attempt
+## when faster, and only copy above half health. A resisted last move is
+## discouraged; a super-effective or source-listed useful one gets its own 50%
+## encouragement.
+static func _smart_mimic(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	data: GameData, rng: RandomNumberGenerator
+) -> void:
+	var copied: int = defender.last_move_used
+	if copied == 0:
+		if _faster(attacker, defender):
+			_discourage(scores, slot)
+		else:
+			_discourage(scores, slot, 1)
+		return
+	if not _above_half(attacker):
+		_discourage(scores, slot, 1)
+		return
+	var move: Dictionary = data.move(copied)
+	if move.is_empty():
+		return
+	var effectiveness: int = data.type_effectiveness(
+		int(move.get("type", RomLayout.TYPE_NORMAL)), defender.types(),
+		Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
+	)
+	if effectiveness < RomLayout.MATCHUP_EFFECTIVE:
+		_discourage(scores, slot, 1)
+		return
+	if effectiveness > RomLayout.MATCHUP_EFFECTIVE and not _skip_50_50(rng):
+		_encourage(scores, slot, 1)
+	if USEFUL_MOVE_NUMBERS.has(copied) and not _skip_50_50(rng):
+		_encourage(scores, slot, 1)
+
+
+## `AI_Smart_Snore` and `AI_Smart_SleepTalk` are one source body. A sleep count
+## of one wakes before the move and is discouraged; every other value gets the
+## smart layer's encouragement. The basic layer independently discourages the
+## awake case, leaving it a bad choice overall as on the cartridge.
+static func _smart_sleep_talk(scores: Array, slot: int, attacker: Gen2BattleMon) -> void:
+	if (attacker.status & Gen2Status.SLEEP_MASK) == 1:
+		_discourage(scores, slot, 3)
+	else:
+		_encourage(scores, slot, 3)
+
+
+## `AI_Smart_Conversion2`'s documented bug: once the player has a remembered
+## move, the smart layer almost always discourages the very response designed
+## for it. The no-last-move branch reads past move zero in the cartridge; this
+## model leaves that undefined lookup neutral rather than inventing ROM bytes.
+static func _smart_conversion_2(
+	scores: Array, slot: int, defender: Gen2BattleMon, rng: RandomNumberGenerator
+) -> void:
+	if defender.last_move_used != 0 and not _rolls_under(rng, 25):
+		_discourage(scores, slot, 1)
 
 
 ## `AI_Smart_Solarbeam`: 80% to encourage it greatly in sun, where it needs no
