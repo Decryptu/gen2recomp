@@ -1958,6 +1958,16 @@ func _describe(event: Dictionary) -> String:
 			]
 		Gen2Battle.MOVE_FAILED:
 			return "But it failed!"
+		Gen2Battle.BIDE_STORING:
+			return "%s is storing energy!" % _battler_name(side)
+		Gen2Battle.BIDE_UNLEASHED:
+			return "%s unleashed energy!" % _battler_name(side)
+		Gen2Battle.RAGE_BUILDING:
+			return "%s's RAGE is building!" % _battler_name(int(event["target"]))
+		Gen2Battle.FUTURE_SIGHT_SET:
+			return "%s foresaw an attack!" % _battler_name(side)
+		Gen2Battle.FUTURE_SIGHT_HIT:
+			return "%s was hit by FUTURE SIGHT!" % _battler_name(int(event["target"]))
 		Gen2Battle.MIMIC_LEARNED:
 			return "%s learned %s!" % [
 				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),

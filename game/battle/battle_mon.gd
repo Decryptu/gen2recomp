@@ -163,6 +163,18 @@ var fury_cutter_count: int = 0
 ## Protect and Endure does not reset it.
 var protect_count: int = 0
 
+## Bide reuses the rollout-count byte on the cartridge, but is separate here so
+## the two effects cannot corrupt each other. Damage is the saturating
+## `w*DamageTaken` word accumulated while the flag is set.
+var bide_turns: int = 0
+var bide_damage: int = 0
+var bide_move: int = 0
+
+## Rage's zero-based damage multiplier counter. A hit received while Rage is
+## active increments it up to $ff; the next Rage hit deals counter + 1 times
+## its calculated damage.
+var rage_count: int = 0
+
 ## `wPlayerMinimized`: whether this Pokémon has used Minimize since it came out,
 ## which is the whole of what Stomp's doubled damage reads. Set by
 ## `MinimizeDropSub` off the move being animated rather than off an effect byte,
@@ -363,6 +375,10 @@ func reset_volatile() -> void:
 	last_move_used = 0
 	fury_cutter_count = 0
 	protect_count = 0
+	bide_turns = 0
+	bide_damage = 0
+	bide_move = 0
+	rage_count = 0
 	minimized = false
 
 

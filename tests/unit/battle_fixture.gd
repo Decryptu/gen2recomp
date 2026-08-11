@@ -49,6 +49,9 @@ const SKETCH: int = 166
 const CONVERSION: int = 160
 const CONVERSION_2: int = 176
 const SLEEP_TALK: int = 214
+const BIDE: int = 117
+const RAGE: int = 99
+const FUTURE_SIGHT: int = 248
 
 ## The status moves, in the two shapes they come in. Thunder Wave and Sleep
 ## Powder are the status and nothing else; Ember Burns and Flame Wheel are
@@ -89,7 +92,7 @@ const PSYCHIC_NEVER: int = 279
 ## [constant NEVER_BURNS] use so a test can have one without a seed; Hyper Beam
 ## for recharge, since nothing else in this table needs it.
 const ROLLING_KICK_ALWAYS: int = 247
-const ROLLING_KICK_NEVER: int = 248
+const ROLLING_KICK_NEVER: int = 281
 const CONFUSION_ALWAYS: int = 249
 const CONFUSION_NEVER: int = 250
 ## Parked past every other row rather than on 251, which is Beat Up's own number
@@ -272,7 +275,7 @@ const PURSUIT: int = 228
 const BEAT_UP: int = 251
 
 ## The highest move number this table fills. Grown as new moves are added.
-const MAX_MOVE: int = SUPERSONIC
+const MAX_MOVE: int = ROLLING_KICK_NEVER
 const BERRY_ITEM: int = 0xAD
 
 ## The highest item number this table fills.
@@ -497,6 +500,9 @@ static func _moves() -> Array:
 		CONVERSION: ["CONVERSION", 0, NORMAL, 255, 30, Gen2MoveEffect.CONVERSION, 0],
 		CONVERSION_2: ["CONVERSION2", 0, NORMAL, 255, 30, Gen2MoveEffect.CONVERSION_2, 0],
 		SLEEP_TALK: ["SLEEP TALK", 0, NORMAL, 255, 10, Gen2MoveEffect.SLEEP_TALK, 0],
+		BIDE: ["BIDE", 0, NORMAL, 255, 10, Gen2MoveEffect.BIDE, 0],
+		RAGE: ["RAGE", 20, NORMAL, 255, 20, Gen2MoveEffect.RAGE, 0],
+		FUTURE_SIGHT: ["FUTURE SIGHT", 80, PSYCHIC_TYPE, 255, 15, Gen2MoveEffect.FUTURE_SIGHT, 0],
 		THUNDER_WAVE: ["THUNDERWAVE", 0, ELECTRIC, 255, 20, Gen2MoveEffect.PARALYZE, 0],
 		SLEEP_POWDER: ["SLEEP POWDER", 0, GRASS, 255, 15, Gen2MoveEffect.SLEEP, 0],
 		POISON_POWDER: ["POISONPOWDER", 0, POISON, 255, 35, Gen2MoveEffect.POISON, 0],

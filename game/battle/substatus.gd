@@ -113,6 +113,12 @@ const IDENTIFIED: int = 1 << 24
 ## failure, so there is nothing here for the flag to bypass.
 const LOCK_ON: int = 1 << 25
 
+## `SUBSTATUS_BIDE` and `SUBSTATUS_RAGE`. Both are cleared by switching or by
+## choosing another action; their counters live beside the other volatile
+## counters on [Gen2BattleMon].
+const BIDE: int = 1 << 26
+const RAGE: int = 1 << 27
+
 const NONE: int = 0
 
 ## How many turns a confused Pokémon stays that way, rolled the same shape as
