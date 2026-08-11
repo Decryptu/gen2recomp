@@ -95,6 +95,7 @@ static func from_battle_party(
 			out.boxes.append(Gen2SaveBox.new())
 		if source_save.world != null:
 			out.world = Gen2WorldSnapshot.from_dict(source_save.world.to_dict())
+		out.mods = source_save.mods.duplicate(true)
 	var fought: int = 0
 	var slot_count: int = source_save.party.size() if egg_count > 0 else party.mons.size()
 	for index: int in slot_count:

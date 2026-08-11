@@ -44,6 +44,21 @@ func _write_manifest(source: Dictionary) -> void:
 	_write("%s/mod.json" % _directory, JSON.stringify(source))
 
 
+func _write_dependency_mod(
+	directory: String, id: String, version: String, dependencies: Dictionary = {}
+) -> void:
+	DirAccess.make_dir_recursive_absolute(directory)
+	_write("%s/mod.json" % directory, JSON.stringify({
+		"id": id, "name": id.capitalize(), "version": version,
+		"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		"dependencies": dependencies,
+	}))
+	_write("%s/mod.gd" % directory, """extends RefCounted
+func register(host, manifest) -> void:
+	host.register_menu_entry(host.MENU_START, manifest.id, {\"label\": manifest.name})
+""")
+
+
 func _valid_manifest() -> Dictionary:
 	return {
 		"id": "voxel",
@@ -69,6 +84,81 @@ func test_a_manifest_built_for_another_host_is_refused() -> void:
 	source["api_version"] = Gen2ModManifest.API_VERSION + 1
 	_write_manifest(source)
 	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"unsupported_api_version")
+
+
+func test_manifest_versions_and_dependency_ranges_are_validated_before_code_runs() -> void:
+	var source: Dictionary = _valid_manifest()
+	source["version"] = "one"
+	assert_eq(
+		Gen2ModManifest.from_dictionary(source, _directory)["reason"],
+		&"invalid_mod_version"
+	)
+	source["version"] = "1.0.0"
+	source["dependencies"] = {"core": ">=1.0 <2.0"}
+	assert_eq(
+		Gen2ModManifest.from_dictionary(source, _directory)["reason"],
+		&"invalid_dependency_range"
+	)
+
+
+func test_dependencies_load_before_the_mod_that_requires_them() -> void:
+	_write_dependency_mod("%s/dep_core" % ROOT, "core", "1.5.0")
+	_write_dependency_mod("%s/addon" % ROOT, "addon", "2.0.0", {"core": "^1.2.0"})
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"core", &"addon"])
+	assert_eq(host.menu_entries(Gen2ModHost.MENU_START).size(), 2)
+
+
+func test_missing_and_incompatible_dependencies_are_named_and_not_loaded() -> void:
+	_write_dependency_mod("%s/missing_addon" % ROOT, "addon", "1.0.0", {"missing": "*"})
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [])
+	assert_eq(StringName(host.failures()[-1]["reason"]), &"missing_dependency")
+
+	Gen2ModHost.reset()
+	_clear()
+	_write_dependency_mod("%s/old_core" % ROOT, "core", "1.0.0")
+	_write_dependency_mod("%s/addon" % ROOT, "addon", "1.0.0", {"core": ">=2.0.0"})
+	host = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"core"])
+	assert_eq(StringName(host.failures()[-1]["reason"]), &"incompatible_dependency")
+
+
+func test_dependency_cycles_refuse_every_member_without_running_either() -> void:
+	_write_dependency_mod("%s/one" % ROOT, "one", "1.0.0", {"two": "*"})
+	_write_dependency_mod("%s/two" % ROOT, "two", "1.0.0", {"one": "*"})
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [])
+	var reasons: Array = host.failures().map(func(row: Dictionary) -> StringName:
+		return StringName(row.get("reason", &""))
+	)
+	assert_eq(reasons.count(&"dependency_cycle"), 2)
+
+
+func test_a_manifest_is_the_capability_for_only_its_own_save_namespace() -> void:
+	_write_dependency_mod("%s/save_owner" % ROOT, "save_owner", "1.0.0")
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var found: Array = host.discover(ROOT)
+	var manifest: Gen2ModManifest = null
+	for candidate: Gen2ModManifest in found:
+		if candidate.id == &"save_owner":
+			manifest = candidate
+	assert_not_null(manifest)
+	var save := Gen2SaveData.new()
+	assert_true(host.write_save_data(manifest, save, {"chapter": 3})["ok"])
+	assert_eq(host.read_save_data(manifest, save), {"chapter": 3})
+
+	var impostor := Gen2ModManifest.new()
+	impostor.id = &"save_owner"
+	assert_eq(
+		host.write_save_data(impostor, save, {"chapter": 9})["reason"],
+		&"unknown_mod_save_owner"
+	)
+	assert_eq(save.mod_data(&"save_owner"), {"chapter": 3})
 
 
 func test_an_entry_that_leaves_the_mod_directory_is_refused() -> void:

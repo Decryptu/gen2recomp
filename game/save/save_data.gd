@@ -7,7 +7,7 @@ extends RefCounted
 ## the wrong cartridge cache. The schema is versioned so a future save shape
 ## can be refused or migrated deliberately instead of being guessed at.
 
-const FORMAT_VERSION: int = 5
+const FORMAT_VERSION: int = 6
 const LEGACY_FORMAT_VERSION: int = 1
 const MAX_PARTY: int = Gen2Party.MAX_SIZE
 const MAX_PLAYER_NAME: int = 10
@@ -42,6 +42,9 @@ var label: String = ""
 var party: Array = []
 var boxes: Array = []
 var world: Gen2WorldSnapshot = null
+## Per-slot, per-mod JSON objects. Installation-wide options stay in their own
+## user file; this namespace travels with the save.
+var mods: Dictionary = {}
 var boxes_shape_valid: bool = true
 
 
@@ -71,6 +74,7 @@ func to_dict() -> Dictionary:
 		"party": saved_party,
 		"boxes": saved_boxes,
 		"world": world.to_dict() if world != null else {},
+		"mods": mods.duplicate(true),
 	}
 
 
@@ -115,6 +119,13 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 	var raw_world: Variant = source.get("world", {})
 	if raw_world is Dictionary and not (raw_world as Dictionary).is_empty():
 		out.world = Gen2WorldSnapshot.from_dict(raw_world)
+	var raw_mods: Variant = source.get("mods", {})
+	if raw_mods is Dictionary:
+		for raw_id: Variant in raw_mods:
+			var id: String = String(raw_id)
+			var value: Variant = raw_mods[raw_id]
+			if _valid_mod_id(id) and value is Dictionary:
+				out.mods[StringName(id)] = (value as Dictionary).duplicate(true)
 	return out
 
 
@@ -128,6 +139,7 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## rolled ID would silently change the headbutt encounters of an existing save.
 ## Version 4 had neither gender nor a play timer; both migrate to the value a
 ## new game starts with, male and 0:00, since neither can be recovered.
+## Version 5 had no per-mod namespace.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -149,6 +161,8 @@ static func migrate_dict(raw: Variant) -> Dictionary:
 			migrated["gender"] = GENDER_MALE
 		if not migrated.has("game_time"):
 			migrated["game_time"] = Gen2GameTime.new().to_dict()
+	if version < 6 and not migrated.has("mods"):
+		migrated["mods"] = {}
 	migrated["format_version"] = FORMAT_VERSION
 	return {"ok": true, "data": migrated, "migrated": true}
 
@@ -215,5 +229,30 @@ func copy_from(source: Gen2SaveData) -> bool:
 	party = copied.party
 	boxes = copied.boxes
 	world = copied.world
+	mods = copied.mods.duplicate(true)
 	boxes_shape_valid = copied.boxes_shape_valid
 	return true
+
+
+func mod_data(id: StringName) -> Dictionary:
+	var value: Variant = mods.get(id, {})
+	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
+
+
+func set_mod_data(id: StringName, value: Dictionary) -> Dictionary:
+	if not _valid_mod_id(String(id)):
+		return {"ok": false, "reason": &"invalid_mod_save_id"}
+	var encoded: String = JSON.stringify(value)
+	if encoded.to_utf8_buffer().size() > 65536:
+		return {"ok": false, "reason": &"mod_save_too_large"}
+	if value.is_empty():
+		mods.erase(id)
+	else:
+		mods[id] = value.duplicate(true)
+	return {"ok": true, "id": id}
+
+
+static func _valid_mod_id(id: String) -> bool:
+	var regex := RegEx.new()
+	regex.compile("^[a-z0-9][a-z0-9_-]*$")
+	return regex.search(id) != null

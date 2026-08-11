@@ -23,6 +23,8 @@ var version: String = ""
 var api_version: int = 0
 var entry: String = ""
 var description: String = ""
+## Required mod ids to accepted semantic-version ranges.
+var dependencies: Dictionary = {}
 ## Absolute path of the directory the manifest was read from.
 var directory: String = ""
 
@@ -55,6 +57,10 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 	manifest.api_version = int(source.get("api_version", 0))
 	manifest.entry = String(source.get("entry", ""))
 	manifest.description = String(source.get("description", ""))
+	var raw_dependencies: Variant = source.get("dependencies", {})
+	if not raw_dependencies is Dictionary:
+		return _refuse(&"invalid_dependencies", String(manifest.id))
+	manifest.dependencies = (raw_dependencies as Dictionary).duplicate()
 
 	var regex := RegEx.new()
 	regex.compile(ID_PATTERN)
@@ -65,6 +71,15 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 			&"unsupported_api_version",
 			"mod declares %d, host provides %d" % [manifest.api_version, API_VERSION]
 		)
+	if not Gen2ModVersion.valid_version(manifest.version):
+		return _refuse(&"invalid_mod_version", manifest.version)
+	for raw_id: Variant in manifest.dependencies:
+		var dependency_id: String = String(raw_id)
+		var wanted: String = String(manifest.dependencies[raw_id])
+		if regex.search(dependency_id) == null or dependency_id == String(manifest.id):
+			return _refuse(&"invalid_dependency", dependency_id)
+		if not Gen2ModVersion.valid_range(wanted):
+			return _refuse(&"invalid_dependency_range", "%s %s" % [dependency_id, wanted])
 	if manifest.entry.is_empty():
 		return _refuse(&"missing_entry", String(manifest.id))
 	# An entry is a path inside the mod's own directory. Anything that climbs
@@ -90,6 +105,7 @@ func summary() -> Dictionary:
 		"version": version,
 		"description": description,
 		"directory": directory,
+		"dependencies": dependencies.duplicate(),
 	}
 
 

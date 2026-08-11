@@ -629,7 +629,12 @@ func discover(root: String = ROOT) -> Array:
 			var result: Dictionary = Gen2ModManifest.read("%s/%s" % [root, name])
 			if bool(result.get("ok", false)):
 				var manifest: Gen2ModManifest = result["manifest"]
-				_manifests[manifest.id] = manifest
+				if _manifests.has(manifest.id):
+					_failures.append(_dependency_refusal(
+						manifest, &"duplicate_mod_id", String(manifest.id)
+					))
+				else:
+					_manifests[manifest.id] = manifest
 			else:
 				result["directory"] = name
 				_failures.append(result)
@@ -648,6 +653,29 @@ func failures() -> Array:
 	return _failures.duplicate(true)
 
 
+## A mod may read and replace only its own slot namespace. The exact manifest
+## object handed to register() is the capability; inventing another object with
+## the same id grants nothing.
+func read_save_data(manifest: Gen2ModManifest, save: Gen2SaveData) -> Dictionary:
+	if not _owns_manifest(manifest) or save == null:
+		return {}
+	return save.mod_data(manifest.id)
+
+
+func write_save_data(
+	manifest: Gen2ModManifest, save: Gen2SaveData, value: Dictionary
+) -> Dictionary:
+	if not _owns_manifest(manifest):
+		return {"ok": false, "reason": &"unknown_mod_save_owner"}
+	if save == null:
+		return {"ok": false, "reason": &"missing_mod_save"}
+	return save.set_mod_data(manifest.id, value)
+
+
+func _owns_manifest(manifest: Gen2ModManifest) -> bool:
+	return manifest != null and _manifests.get(manifest.id) == manifest
+
+
 ## Runs each discovered mod's entry script, which registers what it provides.
 ##
 ## A mod that will not load is reported and skipped: one broken mod must not
@@ -655,15 +683,92 @@ func failures() -> Array:
 ## switched off is skipped silently and is not a failure.
 func load_discovered() -> Array:
 	var loaded: Array = []
-	for id: StringName in _manifests:
-		if not Gen2ModState.is_enabled(id):
-			continue
-		var result: Dictionary = load_mod(_manifests[id])
-		if bool(result.get("ok", false)):
-			loaded.append(id)
-		else:
-			_failures.append(result)
+	var pending: Array[StringName] = []
+	var failed: Dictionary = {}
+	for raw_id: Variant in _manifests:
+		var id := StringName(raw_id)
+		if Gen2ModState.is_enabled(id):
+			pending.append(id)
+	pending.sort()
+
+	# Refuse unsatisfied declarations before running any entry code.
+	for id: StringName in pending.duplicate():
+		var manifest: Gen2ModManifest = _manifests[id]
+		for raw_dependency: Variant in manifest.dependencies:
+			var dependency := StringName(raw_dependency)
+			if not _manifests.has(dependency):
+				_failures.append(_dependency_refusal(
+					manifest, &"missing_dependency", String(dependency)
+				))
+				failed[id] = true
+				pending.erase(id)
+				break
+			if not Gen2ModState.is_enabled(dependency):
+				_failures.append(_dependency_refusal(
+					manifest, &"dependency_disabled", String(dependency)
+				))
+				failed[id] = true
+				pending.erase(id)
+				break
+			var installed: Gen2ModManifest = _manifests[dependency]
+			var wanted: String = String(manifest.dependencies[raw_dependency])
+			if not Gen2ModVersion.matches(installed.version, wanted):
+				_failures.append(_dependency_refusal(
+					manifest, &"incompatible_dependency",
+					"%s %s (installed %s)" % [dependency, wanted, installed.version]
+				))
+				failed[id] = true
+				pending.erase(id)
+				break
+
+	while not pending.is_empty():
+		var progressed: bool = false
+		for id: StringName in pending.duplicate():
+			var manifest: Gen2ModManifest = _manifests[id]
+			var waiting: bool = false
+			var broken: StringName = &""
+			for raw_dependency: Variant in manifest.dependencies:
+				var dependency := StringName(raw_dependency)
+				if failed.has(dependency):
+					broken = dependency
+					break
+				if not loaded.has(dependency):
+					waiting = true
+			if broken != &"":
+				_failures.append(_dependency_refusal(
+					manifest, &"dependency_failed", String(broken)
+				))
+				failed[id] = true
+				pending.erase(id)
+				progressed = true
+				continue
+			if waiting:
+				continue
+			var result: Dictionary = load_mod(manifest)
+			if bool(result.get("ok", false)):
+				loaded.append(id)
+			else:
+				_failures.append(result)
+				failed[id] = true
+			pending.erase(id)
+			progressed = true
+		if not progressed:
+			for id: StringName in pending:
+				var manifest: Gen2ModManifest = _manifests[id]
+				_failures.append(_dependency_refusal(
+					manifest, &"dependency_cycle", String(id)
+				))
+			break
 	return loaded
+
+
+func _dependency_refusal(
+	manifest: Gen2ModManifest, reason: StringName, detail: String
+) -> Dictionary:
+	return {
+		"ok": false, "reason": reason, "detail": detail,
+		"id": manifest.id, "directory": manifest.directory,
+	}
 
 
 ## Refusals carry the id as well as the reason, because a manifest that parsed
