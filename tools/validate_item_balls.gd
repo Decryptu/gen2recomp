@@ -201,8 +201,13 @@ func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
 
 		# Set, the record is closed; this is the state the machine part ships in.
 		world.set_event_flag(flag)
+		# The machine part is on a water tile. Once its BGEVENT_ITEM is closed,
+		# TryTileCollisionEvent legitimately falls through to the Surf prompt, so
+		# emptiness is not the source contract here. Check that the hidden-item
+		# branch itself is absent instead.
+		var closed_results: Array = world.interact()
 		_check(
-			world.interact().is_empty(),
+			_find_kind(closed_results, &"hidden_item").is_empty(),
 			"%s: the hidden item on %s answered with its flag %d set." % [game_id, cell, flag]
 		)
 		world.clear_event_flag(flag)
@@ -236,9 +241,12 @@ func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
 			int(world.state.items().get(item, 0)) == 1 and world.event_flag_active(flag),
 			"%s: %s did not reach the bag, or its flag was not written." % [game_id, cell]
 		)
-		# And the flag it just wrote closes it, so a second A press gives nothing.
+		# And the flag it just wrote closes it. A water tile may still answer with
+		# Surf, but it must never enqueue the hidden item a second time.
+		var repeated_results: Array = world.interact()
 		_check(
-			world.interact().is_empty() and int(world.state.items().get(item, 0)) == 1,
+			_find_kind(repeated_results, &"hidden_item").is_empty()
+				and int(world.state.items().get(item, 0)) == 1,
 			"%s: the hidden item on %s can be picked up twice." % [game_id, cell]
 		)
 
@@ -259,6 +267,14 @@ func _check(condition: bool, message: String) -> bool:
 	if not condition:
 		_fail(message)
 	return condition
+
+
+func _find_kind(results: Array, kind: StringName) -> Array:
+	var matching: Array = []
+	for result: Dictionary in results:
+		if StringName(result.get("source", {}).get("kind", &"")) == kind:
+			matching.append(result)
+	return matching
 
 
 func _fail(message: String) -> void:

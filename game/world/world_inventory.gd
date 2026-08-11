@@ -76,6 +76,13 @@ func set_item_quantity(item: int, quantity: int) -> Dictionary:
 		return _failure(&"unknown_item")
 	if quantity < 0:
 		return _failure(&"invalid_item_quantity")
+	var current: int = item_quantity(item)
+	if quantity > current:
+		var receive: Dictionary = Gen2WorldPack.receive_check(
+			data, state.items(), item, quantity - current
+		)
+		if not bool(receive.get("ok", false)):
+			return receive
 	var result: Dictionary = state.apply_changes({}, {}, {"items": {item: quantity}})
 	if not bool(result.get("ok", false)):
 		return result

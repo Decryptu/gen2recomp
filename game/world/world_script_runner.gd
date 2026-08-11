@@ -163,6 +163,7 @@ const FIELD_MOVE_PROMPT_FRAME: int = RomFile.BANK_SIZE
 ## data/text/common_2.asm's _FoundItemText, less its <PLAYER>; see
 ## _stage_item_ball(). The source line break sits before the item name.
 const FOUND_ITEM_TEXT: String = "Found\n%s!"
+const NO_SPACE_ITEM_TEXT: String = "Found\n%s!\n\nBut you have\nno space left."
 ## The `disappear LAST_TALKED` operand (constants/map_object_constants.asm).
 const LAST_TALKED: int = 0xFE
 ## wBattleResult, which startbattle copies into wScriptVar
@@ -1503,6 +1504,18 @@ func _stage_item_delta(item: int, delta: int) -> Dictionary:
 			"item": item, "quantity": abs(delta), "available": current,
 		})
 		return {"ok": true}
+	if delta > 0 and data != null and state != null:
+		var owned: Dictionary = state.items()
+		for staged_item: Variant in _staged_items:
+			owned[int(staged_item)] = int(_staged_items[staged_item])
+		var receive: Dictionary = Gen2WorldPack.receive_check(data, owned, item, delta)
+		if not bool(receive.get("ok", false)):
+			_script_value = 0
+			_emit_runtime_event(&"item_change_rejected", {
+				"item": item, "quantity": delta, "available": receive.get("available", 0),
+				"reason": receive.get("reason", &"item_receive_rejected"),
+			})
+			return {"ok": true, "accepted": false, "reason": receive.get("reason", &"item_receive_rejected")}
 	_staged_items[item] = next
 	_script_value = 1
 	_emit_runtime_event(&"item_changed", {
@@ -2271,16 +2284,17 @@ func _stage_strength_boulder() -> Dictionary:
 ## is already gone when the box is drawn. `itemnotify` is the `item_changed`
 ## event _stage_item_delta() emits.
 ##
-## Two boundaries. `.no_room` cannot be reached: ReceiveItem refuses on a full
-## pocket and this project models per-item counts with no pocket capacity. And
-## `_FoundItemText` names <PLAYER>, which the scene-free runner has no route to,
-## the way the strength texts have none either.
+## The receive seam preserves the source's no-room branch without committing
+## the item, hiding the ball, or setting its event flag.
 func _stage_item_ball() -> Dictionary:
 	var item: int = int(_request.get("item", 0))
 	var quantity: int = maxi(1, int(_request.get("quantity", 1)))
 	if item <= 0:
 		return _fail(&"invalid_item_ball", {"item": item, "quantity": quantity})
-	_stage_item_delta(item, quantity)
+	var received: Dictionary = _stage_item_delta(item, quantity)
+	if not bool(received.get("accepted", true)):
+		var no_space_name: String = data.item_name(item) if data != null else "ITEM"
+		return _stage_internal_text(NO_SPACE_ITEM_TEXT % no_space_name, true)
 	_emit_object_event(&"object_visibility", {
 		"object_index": _last_talked_object_index, "active": false,
 	})
@@ -2306,15 +2320,17 @@ func _stage_item_ball() -> Dictionary:
 ## share FOUND_ITEM_TEXT and its <PLAYER> boundary.
 ##
 ## The source writes the text before `giveitem` and sets the flag after it. The
-## order is unobservable here: `.bag_full` needs ReceiveItem to refuse, and this
-## project models per-item counts with no pocket capacity, exactly as
-## FindItemInBallScript's own `.no_room` cannot be reached.
+## A full pocket leaves both the item and the event flag untouched, then shows
+## the source's no-space branch in one scene-free text pause.
 func _stage_hidden_item() -> Dictionary:
 	var item: int = int(_request.get("item", 0))
 	var flag: int = int(_request.get("flag", -1))
 	if item <= 0 or flag < 0:
 		return _fail(&"invalid_hidden_item", {"item": item, "flag": flag})
-	_stage_item_delta(item, 1)
+	var received: Dictionary = _stage_item_delta(item, 1)
+	if not bool(received.get("accepted", true)):
+		var no_space_name: String = data.item_name(item) if data != null else "ITEM"
+		return _stage_internal_text(NO_SPACE_ITEM_TEXT % no_space_name, true)
 	_staged_flags[flag] = true
 	var item_name: String = data.item_name(item) if data != null else ""
 	if item_name.is_empty():
