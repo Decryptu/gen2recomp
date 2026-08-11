@@ -526,5 +526,5 @@ func _print_allowlist() -> void:
 	var lines: PackedStringArray = []
 	for id: StringName in RomRegistry.ORDER:
 		lines.append("  %-8s %s" % [RomRegistry.title_for(id), RomRegistry.sha1_for(id)])
-	print("gen2recomp supported cartridges:")
+	print("pokerecomp supported cartridges:")
 	print("\n".join(lines))

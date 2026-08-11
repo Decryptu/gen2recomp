@@ -10,8 +10,8 @@ extends RefCounted
 ## The check never runs on its own. It reaches a third party and reports that
 ## this build exists, so it happens when the player asks and not before.
 
-const RELEASES_API: String = "https://api.github.com/repos/Decryptu/gen2recomp/releases/latest"
-const RELEASES_PAGE: String = "https://github.com/Decryptu/gen2recomp/releases"
+const RELEASES_API: String = "https://api.github.com/repos/Decryptu/pokerecomp/releases/latest"
+const RELEASES_PAGE: String = "https://github.com/Decryptu/pokerecomp/releases"
 ## A release document is metadata. Anything larger is not one.
 const MAX_RESPONSE_BYTES: int = 1024 * 1024
 
@@ -116,7 +116,7 @@ static func describe(result: Dictionary) -> String:
 	var current: String = String(result.get("current", ""))
 	match int(result.get("status", Status.UNREADABLE)):
 		Status.UP_TO_DATE:
-			return "gen2recomp %s is the latest release." % current
+			return "pokerecomp %s is the latest release." % current
 		Status.UPDATE_AVAILABLE:
 			return "Version %s is available. This build is %s." % [
 				result.get("version", "?"), current
