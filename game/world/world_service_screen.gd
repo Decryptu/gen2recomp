@@ -16,7 +16,7 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
-enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP }
+enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK }
 
 ## engine/pokegear/pokegear.asm's card order. Each is behind its own
 ## wPokegearFlags bit, named here by the engine flag that carries it, since that
@@ -297,6 +297,39 @@ func _open_pokegear_cards() -> void:
 	_render_options()
 
 
+## The source clock card clears its inner box, prints the weekday and renders a
+## 12-hour clock with the AM/PM label. The host keeps the card list as its
+## navigation shell, then presents the card as its own read-only page.
+func _open_clock_card() -> void:
+	_mode = MODE.CLOCK
+	_cursor = 0
+	_title.text = "CLOCK"
+	var clock: Dictionary = _world.world_clock()
+	var hour24: int = int(clock.get("hour", 0))
+	var hour12: int = hour24 % 12
+	if hour12 == 0:
+		hour12 = 12
+	var period: String = "AM" if hour24 < 12 else "PM"
+	var weekday: String = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][
+		posmod(int(clock.get("day", 0)), 7)
+	]
+	_summary.text = "%s\n\n%02d:%02d %s" % [
+		weekday, hour12, int(clock.get("minute", 0)), period,
+	]
+	_status.text = "Time of day: %s" % _time_of_day_label(hour24)
+	_status.add_theme_color_override("font_color", TEXT)
+	_footer.text = "B: back to cards"
+	_render_options(["CLOCK CARD"])
+
+
+func _time_of_day_label(hour24: int) -> String:
+	if hour24 < Gen2WorldClock.MORN_START or hour24 >= Gen2WorldClock.NITE_START:
+		return "NIGHT"
+	if hour24 < Gen2WorldClock.DAY_START:
+		return "MORNING"
+	return "DAY"
+
+
 func _open_town_map(from_request: bool) -> void:
 	_mode = MODE.TOWN_MAP
 	_town_map_from_request = from_request
@@ -463,12 +496,9 @@ func _confirm() -> void:
 				_phone_entries = _world.registered_phone_contacts()
 				_open_phone_list()
 			&"clock":
-				_status.text = "Day %d, %02d:%02d" % [
-					int(_world.world_clock().get("day", 0)),
-					int(_world.world_clock().get("hour", 0)),
-					int(_world.world_clock().get("minute", 0)),
-				]
-				_status.add_theme_color_override("font_color", TEXT)
+				_open_clock_card()
+		return
+	if _mode == MODE.CLOCK:
 		return
 	if _mode == MODE.RADIO:
 		return
@@ -492,6 +522,8 @@ func _cancel() -> void:
 		_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0, "cancelled": true})
 	elif _mode == MODE.RADIO:
 		_world.close_radio()
+		_open_pokegear_cards()
+	elif _mode == MODE.CLOCK:
 		_open_pokegear_cards()
 	elif _mode == MODE.POKEGEAR:
 		_mode = -1
