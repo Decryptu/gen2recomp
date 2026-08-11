@@ -440,9 +440,9 @@ static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dict
 
 	var lz := Gen2Lz.new()
 	var raw_graphics: PackedByteArray = lz.decompress(rom.bytes(), gfx_offset)
-	var expected_graphics: int = RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_BYTES
-	if lz.failed or raw_graphics.size() < expected_graphics:
-		return _error("Tileset %d graphics decoded to %d bytes, expected at least %d." % [number, raw_graphics.size(), expected_graphics])
+	var block_bytes: int = RomLayout.TILESET_BLOCK_TILES * Gen2Tiles.TILE_BYTES
+	if lz.failed or raw_graphics.size() < block_bytes:
+		return _error("Tileset %d graphics decoded to %d bytes, expected at least %d." % [number, raw_graphics.size(), block_bytes])
 
 	var meta_size: int = block_count * RomLayout.TILESET_META_BYTES_PER_BLOCK
 	var collision_size: int = block_count * RomLayout.TILESET_COLLISION_BYTES_PER_BLOCK
@@ -473,8 +473,30 @@ static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dict
 		"palette_map_pointer": rom.u16le(table + 13),
 		"palette_map": Array(palette_map),
 		"animation_commands": animation["commands"],
-		"pixels": Gen2Tiles.decode_2bpp_strip(raw_graphics, 0, RomLayout.TILESET_TILE_COUNT),
+		"pixels": _tileset_strip(raw_graphics),
 	}
+
+
+## One tileset's graphics as a 224-tile indexed strip addressed by the metatile
+## byte itself: see [constant RomLayout.TILESET_TILE_COUNT] for the layout.
+static func _tileset_strip(raw_graphics: PackedByteArray) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
+	var block_bytes: int = RomLayout.TILESET_BLOCK_TILES * Gen2Tiles.TILE_BYTES
+	var row_pixels: int = RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_WIDTH
+	var block_pixels: int = RomLayout.TILESET_BLOCK_TILES * Gen2Tiles.TILE_WIDTH
+	for block: int in 2:
+		var at: int = block * block_bytes
+		if raw_graphics.size() < at + block_bytes:
+			break
+		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+			raw_graphics, at, RomLayout.TILESET_BLOCK_TILES
+		)
+		var left: int = block * RomLayout.TILESET_BLOCK_STRIDE * Gen2Tiles.TILE_WIDTH
+		for y: int in Gen2Tiles.TILE_HEIGHT:
+			for x: int in block_pixels:
+				out[y * row_pixels + left + x] = pixels[y * block_pixels + x]
+	return out
 
 
 static func _read_world_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:

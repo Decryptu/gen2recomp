@@ -81,6 +81,39 @@ func test_tileset_palette_map_reads_low_nibble_first() -> void:
 	assert_eq(tileset.palette_index(5), 6)
 
 
+func test_a_block_names_the_second_graphics_block_and_a_placeholder_names_nothing() -> void:
+	var meta: Array = []
+	meta.resize(16)
+	meta.fill(0)
+	meta[0] = 211
+	meta[1] = 0xFF
+	var tileset := Gen2WorldTileset.from_cache({
+		"number": 7,
+		"block_count": 1,
+		"meta": meta,
+	})
+
+	assert_eq(tileset.tile_count, RomLayout.TILESET_TILE_COUNT)
+	assert_eq(tileset.tile_index(0, 0), 211)
+	assert_eq(tileset.tile_index(0, 1), 0)
+
+
+func test_a_second_block_palette_nibble_drops_the_vram_bank_bit() -> void:
+	var palette_map: Array = []
+	palette_map.resize(RomLayout.WORLD_PALETTE_MAP_BYTES)
+	palette_map.fill(0)
+	palette_map[64] = 0x0B
+	palette_map[111] = 0xC0
+	var tileset := Gen2WorldTileset.from_cache({
+		"number": 2,
+		"block_count": 1,
+		"palette_map": palette_map,
+	})
+
+	assert_eq(tileset.palette_index(128), 3)
+	assert_eq(tileset.palette_index(223), 4)
+
+
 func test_world_palette_environment_rows_match_the_cartridge_table() -> void:
 	assert_eq(
 		Gen2WorldPalette.palette_slots(Gen2WorldMap.new().environment, Gen2WorldPalette.TIME_MORNING),

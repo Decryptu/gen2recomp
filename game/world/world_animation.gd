@@ -35,8 +35,8 @@ var _frame_seconds: float = 0.0
 var _changed: bool = false
 ## Which tiles a run of commands rewrote, and whether a palette row moved. A
 ## renderer that keeps a texture only has to redo these tiles: the sequence
-## touches one or two of the ninety-six per frame, and a palette change is the
-## only thing that invalidates the rest.
+## touches one or two tiles per frame, and a palette change is the only thing
+## that invalidates the rest.
 var _changed_tiles: Dictionary = {}
 var _palette_changed: bool = false
 

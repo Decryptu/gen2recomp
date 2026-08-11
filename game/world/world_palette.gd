@@ -114,10 +114,10 @@ static func palette_slots(environment: int, time_of_day: int) -> Array:
 
 ## One palette per tile of [param tileset], in tile order.
 ##
-## A tileset's ninety-six tiles share eight palette slots, so the eight are
-## resolved once and the same one is handed to every tile that uses it. This runs
-## again on every frame an animated tileset changes a tile, and building
-## ninety-six copies of eight palettes was most of that frame's cost.
+## Every tile of the strip shares eight palette slots, so the eight are resolved
+## once and the same one is handed to every tile that uses it. This runs again on
+## every frame an animated tileset changes a tile, and building one palette copy
+## per tile was most of that frame's cost.
 static func tile_palettes(
 	data: GameData,
 	map: Gen2WorldMap,

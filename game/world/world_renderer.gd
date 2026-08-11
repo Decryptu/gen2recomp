@@ -39,8 +39,8 @@ func set_time_of_day(time_of_day: int) -> void:
 
 ## Repaints the tiles the last animation frame rewrote.
 ##
-## The sequence touches one or two of a tileset's ninety-six tiles per frame, so
-## recolouring the whole strip was almost all of the frame's cost. A palette
+## The sequence touches one or two of a tileset's tiles per frame, so recolouring
+## the whole strip was almost all of the frame's cost. A palette
 ## command is the exception: it changes every tile drawn with that row, so it
 ## still rebuilds.
 func refresh_animation() -> void:

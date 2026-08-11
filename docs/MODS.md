@@ -289,6 +289,25 @@ tree is offered events before the screen decides what it needs, so a renderer
 reading them directly races the gameplay keys instead of taking what is left of
 them.
 
+### The tileset atlas
+
+`GameData.world_tileset_indices(number)` is one tileset's graphics as a single
+indexed strip, `Gen2WorldTileset.tile_count` tiles wide and eight tall, one byte
+of colour index per pixel. Every number a block can name indexes it directly:
+`Gen2WorldTileset.tile_index(block, tile)` is the strip slot, and
+`Gen2WorldPalette.tile_palettes()` answers one palette per slot in the same
+order.
+
+The cartridge loads a tileset's graphics as two blocks of 96 tiles into separate
+VRAM banks, and a metatile byte with the high bit set names the second. The strip
+carries both, at the cartridge's own numbering: block 0 at 0 to 95, block 1 at
+128 to 223, and the 32 tiles between them are the font's, always blank here. A
+tileset that ships only one block leaves 128 to 223 blank. Nothing needs to know
+which block a tile came from; the number is enough.
+
+`Gen2WorldAnimation` rewrites slots in this strip, so a renderer texturing from
+it follows water and flowers without knowing an animation ran.
+
 ## Framing the view
 
 `Gen2WorldAPI` offers a camera; it does not impose one.
