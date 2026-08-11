@@ -16,16 +16,14 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
-enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO }
+enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP }
 
 ## engine/pokegear/pokegear.asm's card order. Each is behind its own
 ## wPokegearFlags bit, named here by the engine flag that carries it, since that
-## is what the state holds. The clock card needs no flag. The map card is listed
-## where the source puts it and marked unavailable, the way the pack keeps GIVE,
-## TOSS and SEL: no town map is imported, so there is nothing to draw.
+## is what the state holds. The clock card needs no flag.
 const POKEGEAR_CARDS: Array[Dictionary] = [
 	{"card": &"clock", "name": "CLOCK"},
-	{"card": &"map", "name": "MAP", "flag": Gen2WorldState.ENGINE_MAP_CARD, "unavailable": true},
+	{"card": &"map", "name": "MAP", "flag": Gen2WorldState.ENGINE_MAP_CARD},
 	{"card": &"phone", "name": "PHONE", "flag": Gen2WorldState.ENGINE_PHONE_CARD},
 	{"card": &"radio", "name": "RADIO", "flag": Gen2WorldState.ENGINE_RADIO_CARD},
 ]
@@ -48,6 +46,8 @@ var _mart_quantity: int = 1
 var _mart_purchased: bool = false
 var _phone_entries: Array = []
 var _pokegear_cards: Array = []
+var _town_map: Gen2TownMapScreen = null
+var _town_map_from_request: bool = false
 
 var _title: Label = null
 var _summary: Label = null
@@ -86,6 +86,9 @@ func open_pending(
 		_show_error("No pending service request.")
 		return false
 	_request = request
+	if StringName(request.get("kind", &"")) == &"town_map_requested":
+		_open_town_map(true)
+		return true
 	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world, request)
 	if not bool(resolved.get("ok", false)):
 		_show_error("Service unavailable: %s" % String(resolved.get("reason", "unknown")))
@@ -294,6 +297,34 @@ func _open_pokegear_cards() -> void:
 	_render_options()
 
 
+func _open_town_map(from_request: bool) -> void:
+	_mode = MODE.TOWN_MAP
+	_town_map_from_request = from_request
+	_title.visible = false
+	_summary.visible = false
+	_options.visible = false
+	_status.visible = false
+	_footer.visible = false
+	_town_map = Gen2TownMapScreen.new()
+	_town_map.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_town_map.z_index = 5
+	add_child(_town_map)
+	_town_map.closed.connect(_on_town_map_closed)
+	_town_map.open(_world.landmark(), Gen2WorldState.is_crystal_profile(_data))
+
+
+func _on_town_map_closed() -> void:
+	if _town_map != null:
+		_town_map.queue_free()
+		_town_map = null
+	if _town_map_from_request:
+		_town_map_from_request = false
+		_finish_runtime({"ok": true, "script_value": 1})
+		return
+	_mode = -1
+	completed.emit([])
+
+
 ## The radio card. Left and right are the tuning knob, which is the whole of the
 ## card's input: the source has no confirm on a station.
 func _open_radio() -> void:
@@ -357,6 +388,9 @@ func _move_cursor(delta: int) -> void:
 
 
 func _move_direction(direction: Vector2i) -> void:
+	if _mode == MODE.TOWN_MAP and _town_map != null:
+		_town_map.handle_button(Gen2Button.from_vector(direction))
+		return
 	if _mode == MODE.MENU and _menu != null:
 		if _menu.move(direction):
 			_cursor = _menu.selected_index()
@@ -421,6 +455,8 @@ func _confirm() -> void:
 			_status.add_theme_color_override("font_color", ERROR)
 			return
 		match StringName(card.get("card", &"")):
+			&"map":
+				_open_town_map(false)
 			&"radio":
 				_open_radio()
 			&"phone":
@@ -468,6 +504,8 @@ func _cancel() -> void:
 			_open_pokegear_cards()
 	elif _mode in [MODE.PHONE, MODE.AUDIO]:
 		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
+	elif _mode == MODE.TOWN_MAP and _town_map != null:
+		_town_map.close()
 
 
 func _finish_input(choice: int) -> void:
