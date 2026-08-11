@@ -30,6 +30,8 @@ var _moves: Array = []
 ## as floats.
 var _tmhm_moves: Array[int] = []
 var _name_input_chars: Array = []
+## StringBufferPointers as WRAM addresses, in `text_buffer` argument order.
+var _string_buffer_pointers: Array[int] = []
 var _intro_text: Dictionary = {}
 ## The two cached dex orderings, by the key each mode reads, restored to
 ## integers because JSON reads them back as floats.
@@ -107,6 +109,7 @@ static func open_directory(path: String) -> GameData:
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
 	data._name_input_chars = data._read_array(RomCache.name_input_chars_path(path))
+	data._string_buffer_pointers = data._read_int_array(RomCache.text_buffers_path(path))
 	var intro: Variant = RomCache.read_json(RomCache.intro_text_path(path))
 	data._intro_text = intro if intro is Dictionary else {}
 	data._load_dex_orders(RomCache.dex_orders_path(path))
@@ -782,6 +785,21 @@ func name_input_chars(table: int) -> Array:
 			codes.append(int(code))
 		out.append(codes)
 	return out
+
+
+## Which `text_buffer` argument a `TX_RAM` address names, or -1 for an address
+## this cartridge does not use as a string buffer.
+##
+## `TextCommand_RAM` prints from a raw WRAM pointer while `getstring` and
+## `verbosegiveitem` fill buffers by number, so a runner that only knows the
+## numbers cannot answer a `text_ram`. StringBufferPointers is the way across.
+func string_buffer_for_address(address: int) -> int:
+	return _string_buffer_pointers.find(address)
+
+
+## StringBufferPointers as read from this dump, in `text_buffer` argument order.
+func string_buffer_addresses() -> Array[int]:
+	return _string_buffer_pointers.duplicate()
 
 
 ## One of the intro's own texts by its `data/text/common_2.asm` label, in the

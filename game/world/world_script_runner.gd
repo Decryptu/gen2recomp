@@ -1337,7 +1337,18 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x9C:
 			_script_value = 1 if _current_special_phone_call() != 0 else 0
 		0x9D:
-			return _stage_item_delta(int(command.get("item", 0)), int(command.get("quantity", 1)))
+			## Script_verbosegiveitem is Script_giveitem plus `CurItemName` and a
+			## CopyConvertedText into STRING_BUFFER_4, which is what GiveItemScript's
+			## _ReceivedItemText then prints as `text_ram wStringBuffer4`. Staging
+			## the item without filling the buffer leaves that text unresolved.
+			var verbose_item: int = int(command.get("item", 0))
+			_set_text_buffer(
+				RomLayout.STRING_BUFFER_4,
+				data.item_name(verbose_item) if data != null else "",
+				&"item_name",
+				{"item": verbose_item}
+			)
+			return _stage_item_delta(verbose_item, int(command.get("quantity", 1)))
 		0x9E:
 			return _stage_runtime_request(&"swarm_requested", {
 				"map_group": int(command.get("map_group", 0)),
@@ -2544,6 +2555,7 @@ func _decode_text_with_buffers(raw: PackedByteArray) -> Dictionary:
 func text_context() -> Dictionary:
 	var context: Dictionary = {
 		"buffers": _text_buffers,
+		"ram": _text_buffer_ram(),
 		"rival": _rival_name,
 	}
 	if not player_name.is_empty():
@@ -2552,6 +2564,24 @@ func text_context() -> Dictionary:
 		context["far"] = func(bank: int, address: int) -> PackedByteArray:
 			return data.world_text(bank, address)
 	return context
+
+
+## The buffers this runner filled, keyed the way `TextCommand_RAM` asks for them.
+##
+## `getstring` and `verbosegiveitem` fill buffers by `text_buffer` number, but a
+## `text_ram` names the same storage by its WRAM address, so the item texts read
+## through StringBufferPointers rather than the number. Addresses come from the
+## cartridge, since Gold and Crystal put the buffers in different places.
+func _text_buffer_ram() -> Dictionary:
+	if data == null or _text_buffers.is_empty():
+		return {}
+	var addresses: Array[int] = data.string_buffer_addresses()
+	var out: Dictionary = {}
+	for buffer: Variant in _text_buffers:
+		var index: int = int(buffer)
+		if index >= 0 and index < addresses.size():
+			out[addresses[index]] = _text_buffers[buffer]
+	return out
 
 
 func _runtime_memory_pointer(address: int) -> Dictionary:
