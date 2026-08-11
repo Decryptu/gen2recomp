@@ -3335,6 +3335,38 @@ func test_script_applymovement_executes_imported_object_and_player_streams() -> 
 	assert_eq(world.player_cell, Vector2i(7, 5))
 
 
+func test_script_movement_publishes_source_shake_effects() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x55, 16, 0x47],
+		"48:6110": [0x56, 0x47],
+		"48:6120": [0x57, 0, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [
+			0x69, 0, 0x00, 0x61,
+			0x69, 2, 0x10, 0x61,
+			0x69, 2, 0x20, 0x61,
+			0x91,
+		],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var results: Array = world.dispatch_script_events()
+	assert_eq(results.size(), 1)
+	assert_eq(results[0]["status"], &"complete")
+	var events: Array = results[0]["events"]
+	var types: Array[StringName] = []
+	for event: Dictionary in events:
+		types.append(StringName(event.get("type", &"")))
+	assert_true(types.has(&"screen_shake_requested"))
+	assert_true(types.has(&"tree_shake_requested"))
+	assert_true(types.has(&"rock_smash_effect_requested"))
+	for event: Dictionary in events:
+		if event.get("type", &"") == &"screen_shake_requested":
+			assert_eq(event["strength"], 16)
+
+
 ## Every step command reaches NormalStep (engine/overworld/movement.asm), which
 ## only calls InitStep and never reads a permission, so a scripted step walks
 ## through a wall. The S.S. Aqua's granddaughter scene is built on it.

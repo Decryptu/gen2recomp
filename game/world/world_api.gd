@@ -3267,6 +3267,18 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				object.set_emote(object.emote_id, false)
 			&"step_stop":
 				break
+			&"tree_shake":
+				generated.append({
+					"type": &"tree_shake_requested",
+					"object_index": object_index,
+					"cell": object.cell,
+				})
+			&"rock_smash":
+				generated.append({
+					"type": &"rock_smash_effect_requested",
+					"object_index": object_index,
+					"cell": object.cell,
+				})
 			&"step_sleep", &"set_sliding", &"remove_sliding", &"fix_facing", &"remove_fixed_facing":
 				pass
 			_:
@@ -3330,6 +3342,13 @@ func _apply_player_movement(event: Dictionary) -> Array:
 			continue
 		if kind in [&"step_end", &"step_stop"]:
 			break
+		if kind == &"step_shake":
+			generated.append({
+				"type": &"screen_shake_requested",
+				"strength": int(command.get("value", 0)),
+				"source": &"player_movement",
+			})
+			continue
 		if kind in [
 			&"step_sleep", &"step_wait_end", &"set_sliding", &"remove_sliding",
 			&"fix_facing", &"remove_fixed_facing",

@@ -254,6 +254,26 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
 
 
+func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void:
+	await _open_world()
+	_world_screen._world.set_world_clock(3, 0, 7)
+	_world_screen._clock.day = 3
+	_world_screen._clock.hour = 0
+	_world_screen._clock.minute = 7
+	_world_screen._open_pokegear()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CLOCK)
+	assert_true(host._summary.text.contains("WEDNESDAY"))
+	assert_true(host._summary.text.contains("12:07 AM"))
+	assert_true(host._status.text.contains("NIGHT"))
+	assert_true(host.handle_button(Gen2Button.B))
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
+
+
 func test_audio_request_decodes_and_starts_the_runtime_player() -> void:
 	_write_audio_request()
 	_data = GameData.open_directory(Fixture.directory())

@@ -9548,12 +9548,16 @@ func _named_items(data: GameData, items: Dictionary) -> Dictionary:
 ## _walk_to_connection() does, except that [param target] is always allowed: a
 ## landfall names one land cell and the step onto it is .ExitWater.
 func _walk_to_story_cell(
-	world: Gen2WorldAPI, target: Vector2i, water_only: bool = false
+	world: Gen2WorldAPI, target: Vector2i, water_only: bool = false,
+	dispatch_target_events: bool = true
 ) -> Dictionary:
 	if world == null or world.current_map == null:
 		return {"ok": false, "reason": "missing world"}
 	if world.player_cell == target:
-		return {"ok": true, "events": _dispatch_after_step(world, target)}
+		return {
+			"ok": true,
+			"events": _dispatch_after_step(world, target) if dispatch_target_events else [],
+		}
 	var frontier: Array[Vector2i] = [world.player_cell]
 	var previous: Dictionary = {world.player_cell: {"cell": Vector2i(-1, -1), "direction": Vector2i.ZERO}}
 	var directions: Array[Vector2i] = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
@@ -9665,8 +9669,11 @@ func _walk_cell_resolving(
 	water_only: bool = false,
 ) -> Dictionary:
 	var runs: Array = []
+	var dispatch_target_events: bool = true
 	for _attempt: int in WALK_RESOLVE_ATTEMPTS:
-		var walked: Dictionary = _walk_to_story_cell(world, target, water_only)
+		var walked: Dictionary = _walk_to_story_cell(
+			world, target, water_only, dispatch_target_events
+		)
 		if not bool(walked.get("ok", false)):
 			walked["encounters"] = runs
 			return walked
@@ -9693,6 +9700,9 @@ func _walk_cell_resolving(
 				"encounters": runs,
 				"details": run.get("reason", ""),
 			}
+		if world.player_cell == target:
+			return {"ok": true, "encounters": runs, "events": []}
+		dispatch_target_events = false
 	return {"ok": false, "reason": "walk to %s did not settle" % target, "encounters": runs}
 
 
