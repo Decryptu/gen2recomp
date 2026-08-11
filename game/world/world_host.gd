@@ -45,6 +45,12 @@ static func complete_runtime_request(
 		}
 	if kind in [&"battle_requested", &"swarm_requested"]:
 		return {"ok": true, "handled": true, "results": world.complete_runtime_request(result)}
+	if kind == &"town_map_requested":
+		return {
+			"ok": true,
+			"handled": true,
+			"results": world.complete_runtime_request(result),
+		}
 	var resolved: Dictionary = resolve_runtime_request(world, request)
 	if not resolved.is_empty():
 		if not bool(resolved.get("ok", false)):
@@ -124,6 +130,8 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"party_host_unavailable"
 		&"party_heal_requested":
 			return &"party_host_unavailable"
+		&"town_map_requested":
+			return &"town_map_host_unavailable"
 	return &"runtime_host_unavailable"
 
 

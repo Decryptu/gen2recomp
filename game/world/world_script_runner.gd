@@ -77,6 +77,9 @@ const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
 const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
 const SPECIAL_POKEMON_CENTER_PC: int = 28
 const SPECIAL_PLAYERS_HOUSE_PC: int = 29
+## OverworldTownMap, engine/events/special_pointers.asm index 38. The source
+## describedecoration path reaches this special only for a town-map poster.
+const SPECIAL_OVERWORLD_TOWN_MAP: int = 38
 const SPECIAL_SET_DAY_OF_WEEK: int = 37
 const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
@@ -343,6 +346,21 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			var used_name: String = String(_pending.get("name", "#MON"))
 			_stage_internal_text("%s can\nmove boulders." % used_name, true)
 			return _waiting_result()
+		## describedecoration is a local script in the cartridge. Its text must be
+		## acknowledged before the one decoration that needs a host, the town map,
+		## calls OverworldTownMap. Keeping this continuation on the text pause
+		## preserves the source's opentext/waitbutton/special/closetext/end order.
+		if pending_type == &"text" and _pending.has("special_after_text"):
+			var decoration_special: int = int(_pending.get("special_after_text", -1))
+			_pending = {}
+			_finish_after_pending = false
+			var special_result: Dictionary = _execute_special(decoration_special)
+			if not bool(special_result.get("ok", false)):
+				return _fail(
+					StringName(special_result.get("reason", &"special_failed")),
+					special_result
+				)
+			return _waiting_result() if _pending else advance()
 		## The five Ask*Scripts TryTileCollisionEvent reaches, all one shape:
 		## opentext, writetext, yesorno, iftrue <the move>, closetext, end.
 		if pending_type == &"text" and _pending.get("special", &"") == &"field_move_ask":
@@ -569,7 +587,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		return advance()
 	if kind in [
 		&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested",
-		&"pc_requested", &"party_heal_requested",
+		&"pc_requested", &"party_heal_requested", &"town_map_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -1335,9 +1353,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x98:
 			_emit_runtime_event(&"phone_hangup", {})
 		0x99:
-			return _stage_runtime_request(&"decoration_requested", {
-				"value": int(command.get("value", 0)),
-			})
+			return _stage_decoration_description(int(command.get("value", 0)))
 		0x9A:
 			return _stage_runtime_request(&"fruit_tree_requested", {
 				"tree_id": int(command.get("value", 0)),
@@ -1665,6 +1681,44 @@ func _stage_runtime_request(kind: StringName, values: Dictionary) -> Dictionary:
 	return {"ok": true}
 
 
+## engine/overworld/decorations.asm's DescribeDecoration dispatch. These
+## scripts are local to the current map. They do not ask a host to interpret a
+## decoration; only the poster's DECO_TOWN_MAP branch reaches special 38.
+const DECODESC_POSTER: int = 0
+const DECODESC_LEFT_DOLL: int = 1
+const DECODESC_RIGHT_DOLL: int = 2
+const DECODESC_BIG_DOLL: int = 3
+const DECODESC_CONSOLE: int = 4
+const DECO_TOWN_MAP: int = 0x10
+const DECO_PIKACHU_POSTER: int = 0x11
+const DECO_CLEFAIRY_POSTER: int = 0x12
+const DECO_JIGGLYPUFF_POSTER: int = 0x13
+
+
+func _stage_decoration_description(description: int) -> Dictionary:
+	match description:
+		DECODESC_POSTER:
+			var poster: int = state.maptile_decoration(&"poster") if state != null else 0
+			match poster:
+				DECO_TOWN_MAP:
+					_stage_internal_text("It's a town map.", false)
+					_pending["special_after_text"] = SPECIAL_OVERWORLD_TOWN_MAP
+					return {"ok": true}
+				DECO_PIKACHU_POSTER:
+					return _stage_internal_text("It's a poster of a\ncute PIKACHU.", false)
+				DECO_CLEFAIRY_POSTER:
+					return _stage_internal_text("It's a poster of a\ncute CLEFAIRY.", false)
+				DECO_JIGGLYPUFF_POSTER:
+					return _stage_internal_text("It's a poster of a\ncute JIGGLYPUFF.", false)
+				_:
+					return {"ok": true}
+		DECODESC_BIG_DOLL:
+			return _stage_internal_text("A giant doll! It's\nfluffy and cuddly.", false)
+		DECODESC_LEFT_DOLL, DECODESC_RIGHT_DOLL, DECODESC_CONSOLE:
+			return _stage_internal_text("It's an adorable decoration.", false)
+	return _fail(&"invalid_decoration_description", {"description": description})
+
+
 func _stage_trainer_approach() -> void:
 	_stage_runtime_request(&"trainer_approach_requested", {
 		"object_index": int(_request.get("object_index", -1)),
@@ -1783,6 +1837,11 @@ func _execute_special(special: int) -> Dictionary:
 	## SPECIAL is a shared cartridge dispatch table. Phone routines are only one
 	## part of it; map callbacks and the new-game clock setup use the same table.
 	match special:
+		SPECIAL_OVERWORLD_TOWN_MAP:
+			return _stage_runtime_request(&"town_map_requested", {
+				"special": special,
+				"landmark": int(_request.get("landmark", 0)),
+			})
 		SPECIAL_PLAYERS_HOUSE_PC:
 			return _stage_runtime_request(&"pc_requested", {
 				"special": special,

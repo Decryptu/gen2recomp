@@ -267,6 +267,33 @@ func test_audio_request_decodes_and_starts_the_runtime_player() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
+func test_town_map_decoration_opens_fullscreen_and_closes_the_script_request() -> void:
+	_write_service_cache()
+	_write_request_script([
+		Gen2WorldScript.raw_opcode(0x99), 0x00, Gen2WorldScript.END,
+	], 0x6330)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	_world_screen._world.state.set_maptile_decoration(&"poster", 0x10)
+	var waiting: Array = _world_screen._world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting.size(), 1)
+	_world_screen._show_script_results(waiting)
+	await get_tree().process_frame
+
+	_world_screen._text_box.finish()
+	_world_screen._advance_script_input()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.TOWN_MAP)
+	assert_not_null(host._town_map)
+	assert_true(host._town_map.visible)
+	assert_true(host.handle_button(Gen2Button.B))
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+
+
 func _write_service_cache() -> void:
 	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
 	for raw: Dictionary in items:

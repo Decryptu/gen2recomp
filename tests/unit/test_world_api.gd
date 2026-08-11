@@ -2581,6 +2581,69 @@ func test_players_house_pc_special_is_a_host_request_and_returns_false_without_d
 	assert_true(world.pending_runtime_request().is_empty())
 
 
+func test_describedecoration_runs_locally_and_opens_only_the_town_map_host() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6440"] = [Gen2WorldScript.raw_opcode(0x99), 0x00, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	state.set_maptile_decoration(&"poster", 0x10)
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6440,
+	})
+
+	var text_pause: Dictionary = runner.advance()
+	assert_eq(text_pause["status"], &"waiting", JSON.stringify(text_pause))
+	assert_eq(text_pause["event"]["type"], &"text", JSON.stringify(text_pause))
+	assert_eq(text_pause["event"]["text"], "It's a town map.")
+	var map_pause: Dictionary = runner.advance(true)
+	assert_eq(map_pause["status"], &"waiting", JSON.stringify(map_pause))
+	assert_eq(map_pause["event"]["type"], &"runtime_request", JSON.stringify(map_pause))
+	assert_eq(map_pause["event"]["request"]["kind"], &"town_map_requested")
+	assert_ne(map_pause["event"]["request"]["kind"], &"decoration_requested")
+	var complete: Dictionary = runner.complete_runtime_request({"ok": true})
+	assert_eq(complete["status"], &"complete", JSON.stringify(complete))
+
+
+func test_other_describedecoration_variants_never_become_host_requests() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6450"] = [Gen2WorldScript.raw_opcode(0x99), 0x00, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	for decoration: int in [0x11, 0x12, 0x13]:
+		var state := Gen2WorldState.new()
+		state.set_maptile_decoration(&"poster", decoration)
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": 0x6450,
+		})
+		var text_pause: Dictionary = runner.advance()
+		assert_eq(text_pause["event"]["type"], &"text", JSON.stringify(text_pause))
+		var result: Dictionary = runner.advance(true)
+		assert_eq(result["status"], &"complete", JSON.stringify(result))
+
+
+func test_every_describedecoration_target_is_resolved_without_a_host_request() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	var addresses: Array[int] = []
+	for description: int in 5:
+		var address: int = 0x6460 + description * 0x10
+		addresses.append(address)
+		scripts["48:%04X" % address] = [
+			Gen2WorldScript.raw_opcode(0x99), description, Gen2WorldScript.END,
+		]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	for description: int in 5:
+		var state := Gen2WorldState.new()
+		state.set_maptile_decoration(&"poster", 0x11)
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": addresses[description],
+		})
+		assert_eq(runner.advance()["event"]["type"], &"text")
+		var result: Dictionary = runner.advance(true)
+		assert_eq(result["status"], &"complete", JSON.stringify(result))
+
+
 func test_pokemon_center_pc_special_stages_the_pokemon_center_mode() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6195"] = [
