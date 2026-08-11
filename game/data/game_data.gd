@@ -619,7 +619,11 @@ func world_animation_asset(name: String) -> PackedByteArray:
 	return out
 
 
-## Indexed 2bpp pixels for one tileset's 96 overworld tiles, loaded on demand.
+## Indexed 2bpp pixels for one tileset's overworld tiles, loaded on demand.
+##
+## The strip is [constant RomLayout.TILESET_TILE_COUNT] tiles wide and is indexed
+## by the metatile byte itself, so both graphics blocks are addressable; see that
+## constant for what sits where.
 func world_tileset_indices(number: int) -> PackedByteArray:
 	var key: String = "world_tiles/%d" % number
 	if _indices.has(key):

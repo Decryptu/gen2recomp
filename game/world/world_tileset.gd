@@ -35,11 +35,19 @@ static func from_cache(value: Dictionary) -> Gen2WorldTileset:
 	return out
 
 
+## Which tile of the strip one of a block's sixteen positions draws, in the
+## metatile byte's own numbering: 0..95 is the first graphics block and 128..223
+## the second. A byte past the strip is an unused block's $FF placeholder and
+## resolves to 0, so a caller can index [method GameData.world_tileset_indices]
+## with the answer.
 func tile_index(block: int, tile: int) -> int:
 	if block < 0 or block >= block_count or tile < 0 or tile >= RomLayout.MAP_BLOCK_TILE_WIDTH * RomLayout.MAP_BLOCK_TILE_WIDTH:
 		return 0
 	var at: int = block * RomLayout.TILESET_META_BYTES_PER_BLOCK + tile
-	return meta[at] if at < meta.size() else 0
+	if at >= meta.size():
+		return 0
+	var index: int = meta[at]
+	return index if index < tile_count else 0
 
 
 func collision_index(block: int, cell_x: int, cell_y: int) -> int:
@@ -49,8 +57,12 @@ func collision_index(block: int, cell_x: int, cell_y: int) -> int:
 	return collision[at] if at < collision.size() else -1
 
 
-## Palette maps store two tile assignments per byte, low nibble first. The
-## first 96 entries address the tiles loaded by the overworld renderer.
+## Which of the eight background palette slots a tile of the strip draws with.
+##
+## Palette maps store two assignments per byte, low nibble first, over the whole
+## 224-tile span. Bit 3 of a nibble is the VRAM bank the cartridge draws that
+## tile from and is dropped here: the strip is flat, so the tile number already
+## says which graphics block it came from.
 func palette_index(tile: int) -> int:
 	if tile < 0 or tile >= tile_count:
 		return 0
@@ -58,4 +70,5 @@ func palette_index(tile: int) -> int:
 	if at >= palette_map.size():
 		return 0
 	var packed: int = palette_map[at]
-	return packed & 0x0F if (tile & 1) == 0 else packed >> 4
+	var nibble: int = packed & 0x0F if (tile & 1) == 0 else packed >> 4
+	return nibble & 0x07

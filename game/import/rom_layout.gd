@@ -96,11 +96,25 @@ const ASLEEP_TREEMON_MAX_ROWS: int = 16
 ## values are the source's integer `$FF / 100 * percent` expressions.
 const WILD_SURF_LEVEL_THRESHOLDS: Array[int] = [89, 165, 216, 242]
 
-## The graphics stream supplies the 96 tiles loaded by the overworld. Metatile
-## and collision tables are shorter for tilesets that never use all 128 blocks;
-## unused metatile entries may still contain $FF placeholders.
+## The graphics stream supplies two blocks of 96 tiles: `LoadTilesetGFX`
+## (home/map.asm) copies the first to vTiles2 in VRAM bank 0 and the second to
+## vTiles5 in bank 1, at the same tile numbers. A metatile byte with the high bit
+## set names the second block, because `_LoadOverworldAttrmapPals`
+## (engine/tilesets/map_palettes.asm) reads the palette map at the full byte,
+## takes bit 3 of the nibble as the VRAM bank, then clears bit 7 of the tile
+## number. So the addressable span is 224: block 0 at 0..95, the 32 font tiles
+## `_LoadFontsExtra1` owns at 96..127, and block 1 at 128..223. The strip carries
+## all 224 with the font gap blank, so a metatile byte indexes it directly.
+##
+## Eight tilesets compress only one block; the cartridge copies whatever follows
+## into bank 1 and no block of theirs ever names it, so the import blanks it.
+## Metatile and collision tables are shorter for tilesets that never use all 128
+## blocks; unused metatile entries may still contain $FF placeholders, which is
+## why a tile number past the span resolves to 0 rather than to a read.
 const TILESET_RECORD_SIZE: int = 15
-const TILESET_TILE_COUNT: int = 96
+const TILESET_TILE_COUNT: int = 224
+const TILESET_BLOCK_TILES: int = 96
+const TILESET_BLOCK_STRIDE: int = 128
 const TILESET_META_BYTES_PER_BLOCK: int = 16
 const TILESET_COLLISION_BYTES_PER_BLOCK: int = 4
 
