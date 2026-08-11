@@ -117,11 +117,12 @@ var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
 var _object_visibility_overrides: Dictionary = {}
+var _transient_object_visibility_overrides: Dictionary = {}
 ## Live cells and facings written by moveobject, turnobject, followers and the
 ## trainer approach. The cartridge keeps the same values in wMapObjects, which
 ## a map load rebuilds from ROM, so these do not outlive the loaded map; see
-## _apply_map(). Visibility is not one of them, because disappear/appear write
-## event flags, which the cartridge does persist.
+## _apply_map(). Flagged disappear/appear visibility is persistent; flagless and
+## movement-level visibility uses a transient override cleared by map rebuild.
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
@@ -1499,6 +1500,15 @@ func advance_roaming(random: RandomNumberGenerator = null) -> Array:
 ## returned alongside it so a clock, radio event or save host can publish one
 ## coherent update without reaching into Gen2WorldState.
 func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
+	if random == null and not state.roaming_mons().is_empty():
+		return {
+			"ok": false,
+			"kind": &"world_schedule_failed",
+			"reason": &"missing_schedule_random",
+			"roaming": [],
+			"swarm_map": state.swarm_map(),
+			"fishing_swarm_species": state.fishing_swarm_species(),
+		}
 	var moved: Array = advance_roaming(random)
 	return {
 		"ok": true,
@@ -3153,6 +3163,11 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 		match event_type:
 			&"object_visibility":
 				_object_visibility_overrides[key] = bool(event.get("active", false))
+				if object_index < objects.size() \
+					and (objects[object_index] as Gen2WorldObject).event_flag <= 0:
+					_transient_object_visibility_overrides[key] = true
+				else:
+					_transient_object_visibility_overrides.erase(key)
 				reload_objects = true
 			&"object_position":
 				var cell: Variant = event.get("cell", Vector2i.ZERO)
@@ -3232,10 +3247,14 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			&"show_object":
 				object.deleted = false
 				object.active = true
-				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = true
+				var show_key: String = _object_key(map_group, map_number, object_index)
+				_object_visibility_overrides[show_key] = true
+				_transient_object_visibility_overrides[show_key] = true
 			&"hide_object":
 				object.active = false
-				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = false
+				var hide_key: String = _object_key(map_group, map_number, object_index)
+				_object_visibility_overrides[hide_key] = false
+				_transient_object_visibility_overrides[hide_key] = true
 			&"remove_object":
 				object.deleted = true
 				object.active = false
@@ -3259,6 +3278,12 @@ func _apply_object_movement(event: Dictionary) -> Array:
 	_object_position_overrides[key] = object.cell
 	_object_facing_overrides[key] = object.facing
 	return generated
+
+
+func _clear_transient_object_visibility_overrides() -> void:
+	for key: String in _transient_object_visibility_overrides:
+		_object_visibility_overrides.erase(key)
+	_transient_object_visibility_overrides.clear()
 
 
 ## A scripted step commits its cell without a permission check: every step
@@ -3665,22 +3690,60 @@ func _step_permission_allows(cell: Vector2i, direction: Vector2i) -> bool:
 func can_object_walk_to(
 	cell: Vector2i, moving: Gen2WorldObject, direction: Vector2i = Vector2i.ZERO
 ) -> bool:
-	if current_map == null or cell.x < 0 or cell.y < 0 \
-		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
+	if current_map == null or moving == null:
 		return false
+	var checked_cells: Array[Vector2i] = _object_landing_cells(moving, cell, direction)
+	for checked: Vector2i in checked_cells:
+		if checked.x < 0 or checked.y < 0 \
+			or checked.x >= current_map.collision_width \
+			or checked.y >= current_map.collision_height:
+			return false
 	var wanted: int = Gen2WorldCollision.WATER_TILE if moving.is_swimming() \
 		else Gen2WorldCollision.LAND_TILE
-	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != wanted:
-		return false
+	for checked: Vector2i in checked_cells:
+		if Gen2WorldCollision.permission_for(collision_code_at(checked)) != wanted:
+			return false
 	if direction != Vector2i.ZERO and Gen2WorldCollision.side_wall_step_blocked(
 		collision_code_at(moving.cell), collision_code_at(cell), direction
 	):
 		return false
 	for object: Gen2WorldObject in objects:
-		if object != moving and object.active and not object.deleted \
-			and object.cell == cell:
+		if object == moving or not object.active or object.deleted:
+			continue
+		for checked: Vector2i in checked_cells:
+			if object.occupies(checked):
+				return false
+	for checked: Vector2i in checked_cells:
+		if checked == player_cell:
 			return false
-	return cell != player_cell
+	return true
+
+
+## `WillObjectRemainOnWater` checks the two cells a big object newly occupies,
+## not its already occupied anchor row or column. With no movement direction a
+## caller is asking about the whole footprint, which is the useful public form.
+func _object_landing_cells(
+	moving: Gen2WorldObject, destination: Vector2i, direction: Vector2i
+) -> Array[Vector2i]:
+	if not moving.is_big_object():
+		return [destination]
+	var offsets: Array[Vector2i] = [
+		Vector2i.ZERO, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.ONE,
+	]
+	if direction == Vector2i.ZERO:
+		return offsets.map(func(offset: Vector2i) -> Vector2i: return destination + offset)
+	var previous_anchor: Vector2i = moving.cell
+	var cells: Array[Vector2i] = []
+	for offset: Vector2i in offsets:
+		var target: Vector2i = destination + offset
+		var was_occupied: bool = false
+		for previous_offset: Vector2i in offsets:
+			if target == previous_anchor + previous_offset:
+				was_occupied = true
+				break
+		if not was_occupied:
+			cells.append(target)
+	return cells
 
 
 ## Advances the movement templates whose source behavior is data-driven in this
@@ -4298,6 +4361,10 @@ func _apply_map(
 	# and the story then found nothing at his authored (5, 2) on returning.
 	_object_position_overrides.clear()
 	_object_facing_overrides.clear()
+	# `appear`/`disappear` with an object event flag persist through the source's
+	# temporary map-flag reset. Flagless visibility and movement-level show/hide
+	# are live-map changes, so only those overrides expire on a map load.
+	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
 	# ResetFlashIfOutOfCave, which runs in map setup: stepping out into a route
 	# or a town puts the light out, and a cave to cave doorway does not.
@@ -4352,6 +4419,7 @@ func reload_current_map() -> Dictionary:
 	_pending_headbutt.clear()
 	_pending_rock_smash.clear()
 	_pending_flash.clear()
+	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

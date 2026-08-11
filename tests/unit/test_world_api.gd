@@ -2029,6 +2029,23 @@ func test_a_swimming_object_wants_water_where_every_other_object_wants_land() ->
 	assert_false(world.can_object_walk_to(Vector2i(11, 10), object, Vector2i.UP))
 
 
+## WillObjectRemainOnWater's big-object branch checks the two cells newly
+## occupied by the moving edge, rather than only the destination anchor.
+func test_a_big_object_checks_both_cells_on_its_new_edge() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	object.movement = Gen2WorldObject.MOVEMENT_BIGDOLL
+	object.cell = Vector2i(10, 9)
+	object.initial_cell = object.cell
+
+	# Moving down adds (10,11) and (11,11). The fixture's latter cell is water;
+	# the old one-cell check would incorrectly accept the anchor at (10,10).
+	assert_false(world.can_object_walk_to(Vector2i(10, 10), object, Vector2i.DOWN))
+
+	world.current_map.collision[11 * world.current_map.collision_width + 11] = 0
+	assert_true(world.can_object_walk_to(Vector2i(10, 10), object, Vector2i.DOWN))
+
+
 ## SPRITEMOVEDATA_SWIM_WANDER was already listed as supported and advancing, so
 ## before the permission split it was asked to decide every frame and refused
 ## every frame. Its radius still holds: the source's own bug doc says swimming
@@ -4026,9 +4043,26 @@ func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	assert_eq(restored.state.swarm_map(), Vector2i(1, 1))
 	assert_true(restored.state.just_battled())
 	assert_true(restored.state.hall_of_fame())
-	var schedule: Dictionary = restored.advance_schedule()
+	var schedule_random := RandomNumberGenerator.new()
+	schedule_random.seed = 4046
+	var schedule: Dictionary = restored.advance_schedule(schedule_random)
 	assert_true(schedule["ok"])
 	assert_eq(schedule["kind"], &"world_schedule_updated")
+
+
+func test_schedule_refuses_active_roaming_without_a_random_stream() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var initial: Array = [{"species": 243, "level": 40, "map_group": 1, "map_number": 1}]
+	state.ensure_roaming_mons(initial)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
+
+	var result: Dictionary = world.advance_schedule()
+	assert_false(result["ok"])
+	assert_eq(result["kind"], &"world_schedule_failed")
+	assert_eq(result["reason"], &"missing_schedule_random")
+	assert_eq(result["roaming"], [])
+	assert_eq(state.roaming_mons(), initial)
 
 
 func test_world_clock_day_change_clears_daily_engine_flags() -> void:
@@ -4508,6 +4542,22 @@ func test_disappear_and_appear_update_the_object_event_flag() -> void:
 	var appeared: Array = world.dispatch_events(Vector2i(8, 6), true)
 	assert_eq(appeared[0]["status"], &"complete")
 	assert_false(world.event_flag_active(7))
+	assert_eq(world.visible_objects().size(), 1)
+
+
+func test_flagless_disappear_returns_when_the_map_rebuilds_objects() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6045"] = [Gen2WorldScript.raw_opcode(0x6D, true), 2, 0x91]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["objects"][0]["event_flag"] = 0
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6045
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+
+	var disappeared: Array = world.dispatch_script_events()
+	assert_eq(disappeared[0]["status"], &"complete", JSON.stringify(disappeared))
+	assert_eq(world.visible_objects().size(), 0)
+	assert_true(world.reload_current_map()["ok"])
 	assert_eq(world.visible_objects().size(), 1)
 
 

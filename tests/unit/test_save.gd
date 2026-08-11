@@ -450,6 +450,12 @@ func _raw_cartridge(game_id: StringName, data: GameData) -> PackedByteArray:
 	raw[int(layout["player_name"])] = 0x80
 	_write_fixed_raw_text(raw, int(layout["player_name"]), 11, save.player_name)
 	_write_u16_raw(raw, int(layout["player_id"]), SRAM_PLAYER_ID)
+	var game_time: Dictionary = layout["game_time"]
+	raw[int(game_time["cap"])] = 0xA1
+	_write_u16_raw(raw, int(game_time["hours"]), 321)
+	raw[int(game_time["minutes"])] = 45
+	raw[int(game_time["seconds"])] = 12
+	raw[int(game_time["frames"])] = 34
 	var party_start: int = int(layout["party"])
 	raw[party_start] = save.party.size()
 	for index: int in 6:
@@ -576,6 +582,37 @@ func test_a_gold_sram_import_reads_the_primary_party_and_fields() -> void:
 	assert_eq((save.party[0] as Gen2SaveMon).ot_id, 0)
 	assert_eq(save.player_id, SRAM_PLAYER_ID)
 	assert_eq((save.party[0] as Gen2SaveMon).hp, (_save().party[0] as Gen2SaveMon).hp)
+
+
+func test_sram_game_time_round_trips_both_profile_layouts() -> void:
+	for game_id: StringName in [RomRegistry.GOLD, RomRegistry.CRYSTAL]:
+		var data: GameData = _adapter_data(game_id)
+		var raw: PackedByteArray = _raw_cartridge(game_id, data)
+		var imported: Dictionary = Gen2SramAdapter.import_bytes(
+			game_id, data.sha1, 0, raw, data
+		)
+		assert_true(imported["ok"], imported["message"])
+		var source_time: Gen2GameTime = imported["save"].game_time
+		assert_eq(source_time.hours, 321, String(game_id))
+		assert_eq(source_time.minutes, 45, String(game_id))
+		assert_eq(source_time.seconds, 12, String(game_id))
+		assert_eq(source_time.frames, 34, String(game_id))
+		assert_true(source_time.capped, String(game_id))
+
+		var save: Gen2SaveData = imported["save"]
+		save.game_time = Gen2GameTime.create(999, 59, 58, 42, true)
+		var exported: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
+		assert_true(exported["ok"], exported["message"])
+		var output: PackedByteArray = exported["raw"]
+		var game_time: Dictionary = Gen2SramAdapter.LAYOUTS[String(game_id)]["game_time"]
+		assert_eq(output[int(game_time["cap"])] & 0x80, 0x80, String(game_id))
+		assert_eq(output[int(game_time["cap"])] & 1, 1, String(game_id))
+		var round_trip: Dictionary = Gen2SramAdapter.import_bytes(
+			game_id, data.sha1, 0, output, data
+		)
+		assert_true(round_trip["ok"], round_trip["message"])
+		var restored_time: Gen2GameTime = round_trip["save"].game_time
+		assert_eq(restored_time.to_dict(), save.game_time.to_dict(), String(game_id))
 
 
 func test_silver_uses_the_gold_save_layout() -> void:

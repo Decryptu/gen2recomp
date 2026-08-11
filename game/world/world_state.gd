@@ -789,9 +789,12 @@ func set_species_seen(species: int, seen: bool = true) -> void:
 func advance_roaming(map_rows: Array, random: RandomNumberGenerator = null) -> Array:
 	if _roaming_mons.is_empty() or map_rows.is_empty():
 		return []
-	var generator := random if random != null else RandomNumberGenerator.new()
+	## A schedule tick is stateful even when no mon moves: every failed attempt
+	## consumes draws. Refuse the operation without a caller-owned stream rather
+	## than introducing an unrepeatable random source inside persistent state.
 	if random == null:
-		generator.randomize()
+		return []
+	var generator: RandomNumberGenerator = random
 	var moved: Array = []
 	var changed_state: bool = false
 	for index: int in _roaming_mons.size():

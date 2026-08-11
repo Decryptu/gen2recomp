@@ -35,6 +35,10 @@ const LAYOUTS: Dictionary = {
 		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x288A,
+		"game_time": {
+			"cap": 0x2052, "hours": 0x2053, "minutes": 0x2055,
+			"seconds": 0x2056, "frames": 0x2057,
+		},
 		"backup_segments": [
 			[0x2009, 0x15C7, 0x226],
 			[0x222F, 0x3D96, 0x1AA],
@@ -62,6 +66,10 @@ const LAYOUTS: Dictionary = {
 		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x288A,
+		"game_time": {
+			"cap": 0x2052, "hours": 0x2053, "minutes": 0x2055,
+			"seconds": 0x2056, "frames": 0x2057,
+		},
 		"backup_segments": [
 			[0x2009, 0x15C7, 0x226],
 			[0x222F, 0x3D96, 0x1AA],
@@ -91,6 +99,10 @@ const LAYOUTS: Dictionary = {
 		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x2865,
+		"game_time": {
+			"cap": 0x2051, "hours": 0x2052, "minutes": 0x2054,
+			"seconds": 0x2055, "frames": 0x2056,
+		},
 		"backup_segments": [
 			[0x2009, 0x1209, 0xB7A],
 		],
@@ -282,6 +294,7 @@ static func _read_save(
 	save.slot = slot
 	save.player_name = Gen2Text.decode_fixed(raw, int(layout["player_name"]), NAME_LENGTH)
 	save.player_id = _read_u16_be(raw, int(layout["player_id"]))
+	save.game_time = _read_game_time(raw, layout["game_time"])
 
 	var species_start: int = party_start + 1
 	var terminator: int = int(raw[species_start + count])
@@ -337,9 +350,34 @@ static func _read_mon(raw: PackedByteArray, start: int) -> Gen2SaveMon:
 	return mon
 
 
+static func _read_game_time(raw: PackedByteArray, layout: Dictionary) -> Gen2GameTime:
+	var capped: bool = (int(raw[int(layout["cap"])]) & 1) != 0
+	return Gen2GameTime.create(
+		_read_u16_be(raw, int(layout["hours"])),
+		int(raw[int(layout["minutes"])]),
+		int(raw[int(layout["seconds"])]),
+		int(raw[int(layout["frames"])]),
+		capped,
+	)
+
+
+static func _write_game_time(
+	raw: PackedByteArray, layout: Dictionary, time: Gen2GameTime
+) -> void:
+	if time == null:
+		return
+	var cap: int = int(layout["cap"])
+	raw[cap] = (raw[cap] & ~1) | (1 if time.capped else 0)
+	_write_u16_be(raw, int(layout["hours"]), time.hours)
+	raw[int(layout["minutes"])] = time.minutes
+	raw[int(layout["seconds"])] = time.seconds
+	raw[int(layout["frames"])] = time.frames
+
+
 static func _write_save(raw: PackedByteArray, save: Gen2SaveData, data: GameData, layout: Dictionary) -> void:
 	_write_fixed_text(raw, int(layout["player_name"]), NAME_LENGTH, save.player_name)
 	_write_u16_be(raw, int(layout["player_id"]), save.player_id)
+	_write_game_time(raw, layout["game_time"], save.game_time)
 	var party_start: int = int(layout["party"])
 	raw[party_start] = save.party.size()
 	var species_start: int = party_start + 1
