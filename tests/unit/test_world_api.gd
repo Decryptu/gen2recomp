@@ -153,6 +153,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_EAST,
 		"connections": [{
 			"direction": "east", "map_group": 1, "map_number": 2,
+			"length": 6, "target_width_blocks": 8,
 			"x_offset": 0, "y_offset": 0,
 		}],
 		"scripts": {
@@ -176,6 +177,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"connection_flags": RomLayout.MAP_CONNECTION_FLAG_WEST,
 		"connections": [{
 			"direction": "west", "map_group": 1, "map_number": 1,
+			"length": 6, "target_width_blocks": 8,
 			"x_offset": 0, "y_offset": 0,
 		}],
 		"scripts": {
@@ -715,21 +717,25 @@ func test_expanded_tiles_follow_block_and_metatile_order() -> void:
 
 func test_visible_page_is_twenty_by_eighteen_tiles_and_centers_player() -> void:
 	var world: Gen2WorldAPI = _world()
-	assert_eq(world.visible_origin_cell(), Vector2i(3, 2))
-	assert_eq(world.player_view_cell(), Vector2i(5, 4))
-	assert_eq(world.player_pixel_position(), Vector2i(80, 64))
+	assert_eq(world.visible_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.visible_subcell_offset_cells(), Vector2i.ZERO)
+	assert_eq(world.visible_screen_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.player_view_cell(), Vector2i(4, 4))
+	assert_eq(world.player_pixel_position(), Vector2i(64, 64))
 
 	var page: PackedInt32Array = world.visible_tile_indices()
 	assert_eq(page.size(), 20 * 18)
-	assert_eq(page[0], world.tile_index_at(6, 4))
-	assert_eq(page[19], world.tile_index_at(25, 4))
+	assert_eq(page[0], world.tile_index_at(8, 4))
+	assert_eq(page[19], world.tile_index_at(27, 4))
 
 	# GetMapScreenCoords clamps nothing, so the player stays centred at a corner
 	# and the page runs off the map into border block.
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cell(), Vector2i(-5, -4))
+	assert_eq(top_left.visible_origin_cell(), Vector2i(-4, -4))
 	var bottom_right: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 7))
+	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 6))
+	assert_eq(bottom_right.visible_subcell_offset_cells(), Vector2i.ONE)
+	assert_eq(bottom_right.visible_screen_origin_cell(), Vector2i(11, 7))
 
 
 func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
@@ -1822,44 +1828,41 @@ func test_player_walk_step_starts_a_cell_behind_and_never_moves_the_committed_ce
 	assert_eq(world.player_cell, Vector2i(7, 6))
 	assert_true(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2(1.0, 0.0))
-	assert_eq(
-		world.player_pixel_position(),
-		world.player_view_cell() * Gen2WorldAPI.CELL_PIXELS + Vector2i(16, 0)
-	)
+	assert_eq(world.player_pixel_position(), Gen2WorldAPI.PLAYER_VIEW_CELL * 16)
 
 
 func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	var world: Gen2WorldAPI = _world()
 	# Standing still, the hardware page origin and the camera agree.
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
-	assert_eq(world.visible_origin_cell(), Vector2i(3, 2))
-	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+	assert_eq(world.visible_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
 	assert_true(world.move(Vector2i.LEFT))
-	# The page origin follows the committed cell, so it moves at once. The player
-	# has not visibly left the old cell yet, and the camera stays with them.
+	# Crossing an even-cell boundary moves the surrounding-page anchor by a whole
+	# block at once. The fine scroll still frames the player's presentation cell.
 	assert_eq(world.visible_origin_cell(), Vector2i(2, 2))
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
 	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
 	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(2.875, 2.0))
+	assert_eq(world.visible_origin_cells(), Vector2(3.875, 2.0))
 
 	# The step lands on the committed cell, where the two agree again.
 	assert_true(world.advance_player_step(1000.0))
 	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_position_cells(), Vector2(7.0, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(world.visible_origin_cell()))
+	assert_eq(world.visible_origin_cells(), Vector2(world.visible_screen_origin_cell()))
 
 
 func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -> void:
 	var corner: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(corner.visible_origin_cell(), Vector2i(10, 7))
-	assert_eq(corner.visible_origin_cells(), Vector2(10.0, 7.0))
+	assert_eq(corner.visible_origin_cell(), Vector2i(10, 6))
+	assert_eq(corner.visible_origin_cells(), Vector2(11.0, 7.0))
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cells(), Vector2(-5.0, -4.0))
+	assert_eq(top_left.visible_origin_cells(), Vector2(-4.0, -4.0))
 
 
 func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
@@ -1883,6 +1886,7 @@ func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> voi
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 6))
+	assert_eq(world.player_walk_frame(), 0, "SetFacingStanding restores the resting cel")
 	assert_false(world.advance_player_step(1.0))
 
 
@@ -2976,6 +2980,24 @@ func test_warp_resolves_one_based_destination_and_reloads_the_target_map() -> vo
 	assert_eq(world.player_cell, Vector2i(2, 2))
 
 
+func test_a_staircase_warp_faces_and_steps_the_player_out() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	var landing := Vector2i(2, 2)
+	target.collision[landing.y * target.collision_width + landing.x] = 0x7A
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 6))
+	world.player_facing = Gen2WorldSprite.FACING_UP
+
+	assert_true(world.try_warp()["ok"])
+	assert_eq(world.player_cell, landing)
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+	assert_eq(world.forced_movement()["direction"], Vector2i.DOWN)
+	var step: Dictionary = world.advance_forced_movement()
+	assert_true(step["ok"], JSON.stringify(step))
+	assert_eq(world.player_cell, landing + Vector2i.DOWN)
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+
+
 ## home/map.asm's map load calls ReadObjectEvents, which clears the object
 ## structs and re-reads every object event from ROM, so the coordinates
 ## moveobject wrote into wMapObjects
@@ -3374,6 +3396,7 @@ func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
 		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 4))
+	assert_eq(world.player_walk_frame(), 0, "EndSpriteMovement leaves the player standing")
 
 
 func test_script_movement_still_refuses_a_step_off_the_map() -> void:
@@ -3874,6 +3897,7 @@ func test_a_warpfacing_runs_the_target_map_scene_in_the_same_event_queue() -> vo
 	var target_map: Gen2WorldMap = data.world_map(1, 2)
 	target_map.scripts["callbacks"] = []
 	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6310}]
+	target_map.collision[2 * target_map.collision_width + 2] = 0x7A
 
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	world.current_map.events["coord_events"][0]["script"] = 0x6300
@@ -5050,6 +5074,80 @@ func test_the_page_draws_border_block_past_the_edge_of_the_map() -> void:
 		world.drawn_block_at(0, world.current_map.height_blocks), 1,
 		"south of the map is border block"
 	)
+
+
+## FillMapConnections copies three real block rows or columns into the padded
+## block buffer. The renderer must see those bytes before falling back to the
+## current map's border block.
+func test_the_page_draws_connected_map_strips_past_each_edge() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	target.blocks.fill(0)
+	var connection: Dictionary = source.connections[0]
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+
+	connection["direction"] = "north"
+	target.blocks[5 * target.width_blocks + 2] = 1
+	assert_eq(world.drawn_block_at(2, -1), 1)
+	assert_eq(world.drawn_block_at(2, -4), source.border_block, "north strip is three blocks")
+
+	connection["direction"] = "south"
+	target.blocks[2] = 1
+	assert_eq(world.drawn_block_at(2, source.height_blocks), 1)
+	assert_eq(
+		world.drawn_block_at(2, source.height_blocks + 3), source.border_block,
+		"south strip is three blocks",
+	)
+
+	connection["direction"] = "west"
+	target.blocks[2 * target.width_blocks + 7] = 1
+	assert_eq(world.drawn_block_at(-1, 2), 1)
+	assert_eq(world.drawn_block_at(-4, 2), source.border_block, "west strip is three blocks")
+
+	connection["direction"] = "east"
+	target.blocks[2 * target.width_blocks] = 1
+	assert_eq(world.drawn_block_at(source.width_blocks, 2), 1)
+	assert_eq(
+		world.drawn_block_at(source.width_blocks + 3, 2), source.border_block,
+		"east strip is three blocks",
+	)
+
+
+func test_connection_strip_offsets_map_source_padding_to_target_blocks() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	target.blocks.fill(0)
+	target.blocks[2 * target.width_blocks] = 1
+	var connection: Dictionary = source.connections[0]
+	connection["direction"] = "east"
+	connection["y_offset"] = 4
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 0))
+
+	assert_eq(world.drawn_block_at(source.width_blocks, 0), 1)
+	assert_eq(
+		world.drawn_block_at(source.width_blocks, target.height_blocks - 2),
+		source.border_block,
+		"the connection ends when its translated target coordinate leaves the map",
+	)
+	target.blocks[3 * target.width_blocks] = 1
+	connection["length"] = 1
+	assert_eq(
+		world.drawn_block_at(source.width_blocks, 1), source.border_block,
+		"the copied strip stops at the record's own length even inside the target map",
+	)
+
+
+func test_a_zero_block_in_a_connection_strip_uses_the_current_border() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var source: Gen2WorldMap = data.world_map(1, 1)
+	var target: Gen2WorldMap = data.world_map(1, 2)
+	source.border_block = 1
+	target.blocks[2 * target.width_blocks] = 0
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 4))
+
+	assert_eq(world.drawn_block_at(source.width_blocks, 2), 1)
 
 
 func test_a_zero_block_is_drawn_as_border_but_still_collides_as_zero() -> void:

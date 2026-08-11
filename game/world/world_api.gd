@@ -10,6 +10,10 @@ extends RefCounted
 const VIEW_CELLS: Vector2i = Vector2i(10, 9)
 const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
+## The overworld object coordinate used by the player sprite. The 20x18 screen
+## is not symmetrically centred around a 16x16 object: the source loads four
+## walk cells before the player on each axis (`_LoadOverworldTilemap`).
+const PLAYER_VIEW_CELL: Vector2i = Vector2i(4, 4)
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
 ## constants/sprite_constants.asm's first real id, and what GetMonSprite answers
@@ -379,23 +383,41 @@ func map_size_pixels() -> Vector2i:
 	return map_size_cells() * CELL_PIXELS
 
 
-## The page origin, which follows the player off the edge of the map.
+## The 6x5-metatile surrounding-page origin, which follows the player off the
+## edge of the map and changes only on a 2x2-walk-cell block boundary.
 ##
-## `GetMapScreenCoords` (`home/map.asm:1065`) anchors on the player's own block
-## less two metatiles and clamps nothing, so a room smaller than the viewport
-## sits centred with border block on all four sides rather than pinned to its
-## top-left corner with its floor repeating past the wall.
+## `GetMapScreenCoords` (`home/map.asm:1065`) stores
+## `floor(wXCoord / 2) - 2`, and likewise for Y, in wOverworldMapAnchor. It
+## clamps nothing. wPlayerMetatileX/Y carry the odd-cell remainder separately;
+## see [method visible_subcell_offset_cells].
 func visible_origin_cell() -> Vector2i:
 	if current_map == null:
 		return Vector2i.ZERO
 	return Vector2i(
-		player_cell.x - floori(float(VIEW_CELLS.x) / 2.0),
-		player_cell.y - floori(float(VIEW_CELLS.y) / 2.0)
+		floori(float(player_cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+			* RomLayout.MAP_BLOCK_CELL_WIDTH - PLAYER_VIEW_CELL.x,
+		floori(float(player_cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+			* RomLayout.MAP_BLOCK_CELL_WIDTH - PLAYER_VIEW_CELL.y
 	)
 
 
+## wPlayerMetatileX/Y: the walk-cell remainder within the page's leading block.
+func visible_subcell_offset_cells() -> Vector2i:
+	if current_map == null:
+		return Vector2i.ZERO
+	return Vector2i(
+		posmod(player_cell.x, RomLayout.MAP_BLOCK_CELL_WIDTH),
+		posmod(player_cell.y, RomLayout.MAP_BLOCK_CELL_WIDTH),
+	)
+
+
+## Top-left walk cell selected from the surrounding page while standing still.
+func visible_screen_origin_cell() -> Vector2i:
+	return visible_origin_cell() + visible_subcell_offset_cells()
+
+
 func player_view_cell() -> Vector2i:
-	return player_cell - visible_origin_cell()
+	return player_cell - visible_screen_origin_cell()
 
 
 ## The player's presentation position in walk cells: the committed cell plus any
@@ -406,29 +428,20 @@ func player_position_cells() -> Vector2:
 	return Vector2(player_cell) + player_step_offset_cells()
 
 
-## The framed view's top-left in fractional walk cells.
-##
-## visible_origin_cell() is the hardware page origin: it follows the committed
-## cell, so it moves a whole cell the instant a step starts. A camera that is not
-## drawing a tile page would pan a step early on that, so this frames the
-## interpolated position with the same centring. With no step in flight the two
-## agree, and neither clamps: see visible_origin_cell().
+## The framed screen's top-left in fractional walk cells. This is the page
+## anchor plus wPlayerMetatileX/Y plus the in-flight hSCX/hSCY scroll. It remains
+## unclamped, so connection and border strips can enter the viewport.
 func visible_origin_cells() -> Vector2:
 	if current_map == null:
 		return Vector2.ZERO
-	var position: Vector2 = player_position_cells()
-	return Vector2(
-		position.x - floorf(float(VIEW_CELLS.x) / 2.0),
-		position.y - floorf(float(VIEW_CELLS.y) / 2.0)
-	)
+	return player_position_cells() - Vector2(PLAYER_VIEW_CELL)
 
 
-## The committed cell in pixels, offset by any in-flight walk step so a
-## renderer can draw the approach to it. player_cell itself never carries
-## this offset; collision, events and the snapshot never see it.
+## The player's screen pixel after applying the same fine scroll as the map.
+## The hardware keeps this at PLAYER_VIEW_CELL while hSCX/hSCY move the world.
 func player_pixel_position() -> Vector2i:
-	return player_view_cell() * CELL_PIXELS + Vector2i(
-		player_step_offset_cells() * float(CELL_PIXELS)
+	return Vector2i(
+		(player_position_cells() - visible_origin_cells()) * float(CELL_PIXELS)
 	)
 
 
@@ -457,8 +470,9 @@ func player_step_offset_cells() -> Vector2:
 ## object; the player's own step is paced here rather than on a record.
 func player_walk_frame() -> int:
 	## StepFunction_Turn writes OBJECT_WALKING = STANDING for the whole four
-	## frames. A zero-direction step is that turn, never a walking pose.
-	if _player_step_direction == Vector2i.ZERO:
+	## frames. Once an ordinary step ends, SetFacingStanding selects the standing
+	## drawing even though OBJECT_STEP_FRAME itself retains its counter.
+	if _player_step_frames_remaining <= 0 or _player_step_direction == Vector2i.ZERO:
 		return 0
 	return (_player_step_frame >> 2) & 3
 
@@ -1954,13 +1968,7 @@ func object_at(cell: Vector2i, visible_only: bool = true) -> Gen2WorldObject:
 func block_at(block_x: int, block_y: int) -> int:
 	if current_map == null:
 		return 0
-	# Every drawn tile asks this, so the key is only built when a changeblock has
-	# actually put an override on the loaded map.
-	if not _block_overrides.is_empty():
-		var key: String = _block_key(current_map, block_x, block_y)
-		if _block_overrides.has(key):
-			return int(_block_overrides[key])
-	return current_map.block_at(block_x, block_y)
+	return _map_block_at(current_map, block_x, block_y)
 
 
 func change_block(block_x: int, block_y: int, block: int) -> Dictionary:
@@ -2088,29 +2096,40 @@ func tile_index_at(tile_x: int, tile_y: int) -> int:
 	return current_tileset.tile_index(block, local_tile)
 
 
-## Returns the visible 20x18 graphics-tile page in row-major order. -1 marks
-## the padding around maps smaller than the hardware viewport.
+## Returns the visible 20x18 graphics-tile page in row-major order. Map padding
+## is expanded through [method drawn_block_at], just like LoadMetatiles.
 ##
 ## This is [method tile_index_at] for 360 tiles, written out rather than called
 ## 360 times: it is on the draw path, and the per-tile call did the same block
 ## division and bounds check for every tile of the same block row.
 func visible_tile_indices() -> PackedInt32Array:
+	return tile_indices_in_window(
+		visible_screen_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH,
+		VIEW_TILES,
+	)
+
+
+## Expands an arbitrary graphics-tile window through the same block-buffer path
+## as the hardware page. The renderer requests one extra row and column while a
+## fractional hSCX/hSCY offset exposes the far edge of the screen.
+func tile_indices_in_window(origin: Vector2i, size: Vector2i) -> PackedInt32Array:
 	var out := PackedInt32Array()
-	out.resize(VIEW_TILES.x * VIEW_TILES.y)
+	if size.x <= 0 or size.y <= 0:
+		return out
+	out.resize(size.x * size.y)
 	out.fill(-1)
 	if current_map == null or current_tileset == null:
 		return out
 
-	# The origin follows the player off the map, so a tile coordinate can be
+	# The window follows the player off the map, so a tile coordinate can be
 	# negative and the block divisions have to floor rather than truncate.
-	var origin: Vector2i = visible_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH
 	var tile_width: int = RomLayout.MAP_BLOCK_TILE_WIDTH
-	for y: int in VIEW_TILES.y:
+	for y: int in size.y:
 		var tile_y: int = origin.y + y
-		var row: int = y * VIEW_TILES.x
+		var row: int = y * size.x
 		var block_y: int = floori(float(tile_y) / float(tile_width))
 		var local_row: int = posmod(tile_y, tile_width) * tile_width
-		for x: int in VIEW_TILES.x:
+		for x: int in size.x:
 			var tile_x: int = origin.x + x
 			var block: int = drawn_block_at(
 				floori(float(tile_x) / float(tile_width)), block_y
@@ -2132,11 +2151,97 @@ func visible_tile_indices() -> PackedInt32Array:
 func drawn_block_at(block_x: int, block_y: int) -> int:
 	if current_map == null:
 		return 0
-	if block_x < 0 or block_y < 0 \
-		or block_x >= current_map.width_blocks or block_y >= current_map.height_blocks:
+	var block: int = -1
+	if block_x >= 0 and block_y >= 0 \
+		and block_x < current_map.width_blocks and block_y < current_map.height_blocks:
+		block = block_at(block_x, block_y)
+	else:
+		block = _connected_drawn_block_at(block_x, block_y)
+	if block < 0:
 		return current_map.border_block
-	var block: int = block_at(block_x, block_y)
 	return current_map.border_block if block == 0 else block
+
+
+## Reads the three-block connection padding assembled by FillMapConnections.
+## Its north, south, west, east call order matters at overlapping corners, so
+## records are checked backwards and the later east/west strip wins there.
+func _connected_drawn_block_at(block_x: int, block_y: int) -> int:
+	if data == null:
+		return -1
+	for index: int in range(current_map.connections.size() - 1, -1, -1):
+		var connection: Dictionary = current_map.connections[index]
+		var direction: String = String(connection.get("direction", ""))
+		if not _block_is_in_connection_strip(block_x, block_y, direction, connection):
+			continue
+		var target: Gen2WorldMap = data.world_map(
+			int(connection.get("map_group", -1)),
+			int(connection.get("map_number", -1)),
+		)
+		if target == null:
+			continue
+		var target_cell := Vector2i(block_x, block_y)
+		match direction:
+			"north":
+				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
+				target_cell.y += target.height_blocks
+			"south":
+				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
+				target_cell.y -= current_map.height_blocks
+			"west":
+				target_cell.x += target.width_blocks
+				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
+			"east":
+				target_cell.x -= current_map.width_blocks
+				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
+			_:
+				continue
+		if target_cell.x < 0 or target_cell.y < 0 \
+			or target_cell.x >= target.width_blocks or target_cell.y >= target.height_blocks:
+			continue
+		return _map_block_at(target, target_cell.x, target_cell.y)
+	return -1
+
+
+func _block_is_in_connection_strip(
+	block_x: int, block_y: int, direction: String, connection: Dictionary
+) -> bool:
+	var in_padding: bool = false
+	match direction:
+		"north":
+			in_padding = block_y >= -3 and block_y < 0
+		"south":
+			in_padding = block_y >= current_map.height_blocks \
+				and block_y < current_map.height_blocks + 3
+		"west":
+			in_padding = block_x >= -3 and block_x < 0
+		"east":
+			in_padding = block_x >= current_map.width_blocks \
+				and block_x < current_map.width_blocks + 3
+	if not in_padding:
+		return false
+
+	# The macro stores `_len - _src`, not merely the target map dimension.
+	# Respecting the byte is what reproduces the exact partial strip when a map
+	# is offset far enough that either its source or destination begins in the
+	# three-block padding. Zero supports old hand-built caches that predate the
+	# imported record fields; target bounds still constrain those below.
+	var length: int = int(connection.get("length", 0))
+	if length <= 0:
+		return true
+	var horizontal: bool = direction == "north" or direction == "south"
+	var stored_offset: int = int(connection.get("x_offset" if horizontal else "y_offset", 0))
+	var map_offset_blocks: int = -floori(float(stored_offset) / 2.0)
+	var destination_start: int = maxi(map_offset_blocks, -3)
+	var along: int = block_x if horizontal else block_y
+	return along >= destination_start and along < destination_start + length
+
+
+func _map_block_at(map: Gen2WorldMap, block_x: int, block_y: int) -> int:
+	if not _block_overrides.is_empty():
+		var key: String = _block_key(map, block_x, block_y)
+		if _block_overrides.has(key):
+			return int(_block_overrides[key])
+	return map.block_at(block_x, block_y)
 
 
 ## The raw cartridge permission byte at a walk cell.
@@ -3300,7 +3405,10 @@ func _apply_script_warp(request: Dictionary) -> Dictionary:
 	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset)
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
-	_apply_map(target_map, target_tileset, cell)
+	var custom_facing: bool = request.has("facing")
+	if custom_facing:
+		player_facing = int(request["facing"])
+	_apply_map(target_map, target_tileset, cell, custom_facing)
 	return {
 		"ok": true,
 		"kind": &"warp",
@@ -4166,7 +4274,10 @@ func _apply_map_setup_player_state() -> void:
 
 
 func _apply_map(
-	target_map: Gen2WorldMap, target_tileset: Gen2WorldTileset, target_cell: Vector2i
+	target_map: Gen2WorldMap,
+	target_tileset: Gen2WorldTileset,
+	target_cell: Vector2i,
+	custom_facing: bool = false,
 ) -> void:
 	_block_overrides.clear()
 	_pending_cut.clear()
@@ -4194,6 +4305,14 @@ func _apply_map(
 	current_map = target_map
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
+	# RefreshPlayerSprite calls CheckWarpFacingDown, then applies a scripted
+	# PLAYERSPRITESETUP_CUSTOM_FACING override last. This makes a staircase entry
+	# face its automatic downward exit instead of retaining the direction used on
+	# the previous map.
+	if not custom_facing and Gen2WorldCollision.faces_down_on_spawn(
+		collision_code_at(player_cell)
+	):
+		player_facing = Gen2WorldSprite.FACING_DOWN
 	_apply_map_setup_player_state()
 	_clear_player_step()
 	# _load_objects() rebuilds every record, so in-flight object steps end with

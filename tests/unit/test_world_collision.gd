@@ -317,6 +317,13 @@ func test_forced_action_steps_down_off_doors_stairs_and_caves() -> void:
 		)
 
 
+func test_spawn_facing_down_uses_check_warp_facing_downs_complete_table() -> void:
+	for code: int in [0x71, 0x79, 0x7A, 0x73, 0x7B, 0x74, 0x7C, 0x75, 0x7D]:
+		assert_true(Gen2WorldCollision.faces_down_on_spawn(code), "code $%02x" % code)
+	for code: int in [0x70, 0x72, 0x76, 0x78, 0x7E, 0x7F, 0x60, 0x00]:
+		assert_false(Gen2WorldCollision.faces_down_on_spawn(code), "code $%02x" % code)
+
+
 ## home/map_objects.asm's CheckPitTile is the two codes and nothing else, so the
 ## neighbouring warp codes must not answer it even though is_warp_tile() takes
 ## all of them.
