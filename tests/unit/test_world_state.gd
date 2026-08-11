@@ -30,6 +30,18 @@ func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	assert_eq(restored.roaming_mons().size(), 1)
 
 
+func test_maptile_decorations_round_trip_and_validate_categories() -> void:
+	var state := Gen2WorldState.new()
+	assert_true(state.set_maptile_decoration(&"bed", 0x02))
+	assert_true(state.set_maptile_decoration(&"poster", 0x10))
+	assert_false(state.set_maptile_decoration(&"unknown", 1))
+	assert_false(state.set_maptile_decoration(&"bed", 0x100))
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.maptile_decoration(&"bed"), 0x02)
+	assert_eq(restored.maptile_decoration(&"poster"), 0x10)
+	assert_eq(restored.maptile_decoration(&"plant"), 0)
+
+
 func test_engine_flags_round_trip_and_daily_reset_preserves_hall_of_fame() -> void:
 	var state := Gen2WorldState.new()
 	state.set_hall_of_fame()

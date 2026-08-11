@@ -486,7 +486,7 @@ func test_phone_special_ids_match_the_source_phone_routines() -> void:
 	assert_eq(_event_value(result[0]["events"], &"phone_special_requested", "kind", 3), &"random_phone_mon")
 
 
-func test_map_decoration_specials_apply_the_default_room_state() -> void:
+func test_map_decoration_specials_stamp_the_selected_room_blocks() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6250"] = [
 		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_TOGGLE_DECORATIONS_VISIBILITY, 0,
@@ -498,12 +498,16 @@ func test_map_decoration_specials_apply_the_default_room_state() -> void:
 	]
 	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
 	var data: GameData = GameData.open_directory(_directory)
+	data.world_tileset(0).block_count = 0x26
 	var map: Gen2WorldMap = data.world_map(1, 1)
 	map.scripts["callbacks"] = [
 		{"type": 5, "script": 0x6250},
 		{"type": 1, "script": 0x6260},
 	]
-	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var state := Gen2WorldState.new()
+	state.set_maptile_decoration(&"bed", 0x02)
+	state.set_maptile_decoration(&"poster", 0x10)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6), state)
 	var result: Array = world.dispatch_map_entry()
 	assert_eq(result.size(), 2, JSON.stringify(result))
 	for callback_result: Dictionary in result:
@@ -512,7 +516,9 @@ func test_map_decoration_specials_apply_the_default_room_state() -> void:
 	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_1))
 	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_DOLL_2))
 	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_HOUSE_2F_BIG_DOLL))
-	assert_false(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_ROOM_POSTER))
+	assert_true(world.event_flag_active(Gen2WorldScriptRunner.EVENT_PLAYERS_ROOM_POSTER))
+	assert_eq(world.block_at(0, 2), 0x1B)
+	assert_eq(world.block_at(3, 0), 0x1F)
 	assert_eq(
 		_event_value(result[0]["events"], &"decoration_callback_applied", "kind"),
 		&"toggle_decorations_visibility",
@@ -523,6 +529,25 @@ func test_map_decoration_specials_apply_the_default_room_state() -> void:
 		&"toggle_maptile_decorations",
 		JSON.stringify(result),
 	)
+
+
+func test_crystal_verbosegiveitemvar_reads_kurts_quantity_without_staging_a_swarm() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6270"] = [0x9F, 1, 0x16, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6270,
+		"kurt_apricorn_quantity": 3,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(state.item_quantity(1), 3)
+	assert_eq(state.swarm_map(), Vector2i(-1, -1))
+	assert_false(result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"runtime_request"
+	))
 
 
 func test_random_unseen_wild_mon_uses_morning_rare_slots_and_seen_species() -> void:
@@ -3550,7 +3575,9 @@ func test_missing_audio_data_does_not_acknowledge_an_audio_request() -> void:
 func test_swarm_runtime_request_commits_its_map_indices_as_one_transaction() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
-		"48:60B0": [0x9F, 1, 2, 0x91],
+		# Crystal inserts verbosegiveitemvar at $9f; swarm moves to $a0 and
+		# carries the event-flag byte before its two map indices.
+		"48:60B0": [0xA0, 0, 1, 2, 0x91],
 	})
 	data = GameData.open_directory(_directory)
 	var state := Gen2WorldState.new()

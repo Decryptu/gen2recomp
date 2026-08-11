@@ -185,6 +185,12 @@ const EVENT_PLAYERS_HOUSE_2F_DOLL_1: int = 1858
 const EVENT_PLAYERS_HOUSE_2F_DOLL_2: int = 1859
 const EVENT_PLAYERS_HOUSE_2F_BIG_DOLL: int = 1860
 const VARIABLE_SPRITE_BASE: int = 0xF0
+const DECORATION_BLOCKS: Dictionary = {
+	&"bed": {0x02: 0x1B, 0x03: 0x1C, 0x04: 0x1D, 0x05: 0x1E},
+	&"carpet": {0x07: 0x08, 0x08: 0x0B, 0x09: 0x0E, 0x0A: 0x11},
+	&"plant": {0x0C: 0x20, 0x0D: 0x21, 0x0E: 0x22},
+	&"poster": {0x10: 0x1F, 0x11: 0x23, 0x12: 0x24, 0x13: 0x25},
+}
 
 
 static func begin(
@@ -756,6 +762,22 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			"frames": int(command.get("value", 0)) * 6,
 		})
 		return {"ok": true}
+	if opcode == 0x9F and _crystal_commands():
+		## Crystal inserts verbosegiveitemvar at this raw byte. Normalizing first
+		## turns it into pokegold's swarm command.
+		var quantity_result: Dictionary = _read_runtime_variable(
+			int(command.get("variable", 0))
+		)
+		if not bool(quantity_result.get("ok", false)):
+			return quantity_result
+		var variable_item: int = int(command.get("item", 0))
+		_set_text_buffer(
+			RomLayout.STRING_BUFFER_4,
+			data.item_name(variable_item) if data != null else "",
+			&"item_name",
+			{"item": variable_item}
+		)
+		return _stage_item_delta(variable_item, _script_value)
 	var source: int = Gen2WorldScript.source_opcode(opcode, _crystal_commands())
 	var object_result: Dictionary = _execute_object_command(source, command)
 	if not object_result.is_empty():
@@ -1668,6 +1690,15 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 			_script_value = int(_request.get("environment", -1))
 		0x14: # VAR_SPECIALPHONECALL
 			_script_value = _current_special_phone_call()
+		0x16: # VAR_KURT_APRICORNS
+			## _GetVarAction reads wKurtApricornQuantity. SelectApricornForKurt is
+			## the writer; its host mirrors that byte on the invocation request.
+			if not _request.has("kurt_apricorn_quantity"):
+				return {
+					"ok": false, "reason": &"missing_kurt_apricorn_quantity",
+					"variable": variable,
+				}
+			_script_value = clampi(int(_request["kurt_apricorn_quantity"]), 0, 0xFF)
 		0x17: # VAR_CALLERID
 			_script_value = int(_phone_context.get("caller_id", -1))
 		_:
@@ -1851,14 +1882,11 @@ func _execute_special(special: int) -> Dictionary:
 				"species": _script_value,
 			})
 		SPECIAL_TOGGLE_MAPTILE_DECORATIONS:
-			## A fresh project save has no imported bedroom decoration selection.
-			## Crystal's default decoration values are zero, which leaves the
-			## decoration blocks unchanged and hides the room poster.
-			_staged_flags[EVENT_PLAYERS_ROOM_POSTER] = false
+			_apply_maptile_decorations()
 			_emit_runtime_event(&"decoration_callback_applied", {
 				"special": special,
 				"kind": &"toggle_maptile_decorations",
-				"defaults": true,
+				"decorations": state.maptile_decorations() if state != null else {},
 			})
 		SPECIAL_TOGGLE_DECORATIONS_VISIBILITY:
 			## With the default zero decoration selections, ToggleDecorationVisibility
@@ -1915,6 +1943,37 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 			}
 	return {"ok": true}
+
+
+## ToggleMaptileDecorations and SetDecorationTile
+## (engine/overworld/decorations.asm). Coordinates are changeblock coordinates;
+## Gen2WorldAPI applies their padded-buffer conversion.
+func _apply_maptile_decorations() -> void:
+	var decorations: Dictionary = state.maptile_decorations() if state != null else {}
+	var bed_block: int = _decoration_block(&"bed", int(decorations.get(&"bed", 0)))
+	var plant_block: int = _decoration_block(&"plant", int(decorations.get(&"plant", 0)))
+	var poster_block: int = _decoration_block(&"poster", int(decorations.get(&"poster", 0)))
+	var carpet_block: int = _decoration_block(&"carpet", int(decorations.get(&"carpet", 0)))
+	if bed_block > 0:
+		_emit_runtime_event(&"map_block_changed", {"x": 0, "y": 4, "block": bed_block})
+	if plant_block > 0:
+		_emit_runtime_event(&"map_block_changed", {"x": 7, "y": 4, "block": plant_block})
+	if poster_block > 0:
+		_emit_runtime_event(&"map_block_changed", {"x": 6, "y": 0, "block": poster_block})
+	if carpet_block > 0:
+		for row: Dictionary in [
+			{"x": 0, "y": 0, "block": carpet_block},
+			{"x": 0, "y": 2, "block": carpet_block + 1},
+			{"x": 2, "y": 2, "block": carpet_block + 2},
+			{"x": 4, "y": 2, "block": carpet_block + 1},
+		]:
+			_emit_runtime_event(&"map_block_changed", row)
+	_staged_flags[EVENT_PLAYERS_ROOM_POSTER] = poster_block > 0
+
+
+func _decoration_block(category: StringName, decoration: int) -> int:
+	var category_blocks: Dictionary = DECORATION_BLOCKS.get(category, {})
+	return int(category_blocks.get(decoration, 0))
 
 
 func _stage_day_of_week_menu() -> void:

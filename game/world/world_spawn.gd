@@ -9,6 +9,9 @@ const PLAYERS_HOUSE_2F: int = 7
 const HOME_CELL: Vector2i = Vector2i(3, 3)
 const HOME_FACING: int = Gen2WorldSprite.FACING_DOWN
 const START_MONEY: int = 3000
+## InitDecorations (engine/overworld/decorations.asm): DECO_FEATHERY_BED and
+## DECO_TOWN_MAP. The other two maptile slots remain zero.
+const INITIAL_MAPTILE_DECORATIONS: Dictionary = {&"bed": 0x02, &"poster": 0x10}
 
 
 static func new_game_snapshot(data: GameData) -> Gen2WorldSnapshot:
@@ -26,4 +29,8 @@ static func new_game_snapshot(data: GameData) -> Gen2WorldSnapshot:
 	snapshot.player_facing = HOME_FACING
 	snapshot.movement_mode = Gen2WorldAPI.MOVEMENT_WALK
 	snapshot.world_state = Gen2WorldState.new({}, {}, {}, {0: START_MONEY})
+	for category: StringName in INITIAL_MAPTILE_DECORATIONS:
+		snapshot.world_state.set_maptile_decoration(
+			category, int(INITIAL_MAPTILE_DECORATIONS[category])
+		)
 	return snapshot

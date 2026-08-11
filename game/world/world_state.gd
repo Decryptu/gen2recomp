@@ -124,6 +124,9 @@ var _radio_channel: int = -1
 ## and `wRadioTuningKnob` rather than in the Pokedex's own cleared block: the
 ## dex takes its mode from here on opening and writes the mode back on exit.
 var _last_dex_mode: int = RomLayout.DEXMODE_NEW
+## wDecoBed, wDecoCarpet, wDecoPlant and wDecoPoster. Values are decoration
+## ids from data/decorations/decorations.asm, not the blocks they stamp.
+var _maptile_decorations: Dictionary = {}
 
 
 func _init(
@@ -138,6 +141,7 @@ func _init(
 	initial_engine_flags: Dictionary = {},
 	initial_script_memory: Dictionary = {},
 	initial_caught_species: Dictionary = {},
+	initial_maptile_decorations: Dictionary = {},
 ) -> void:
 	for flag: Variant in initial_event_flags:
 		if int(flag) >= 0 and bool(initial_event_flags[flag]):
@@ -185,6 +189,10 @@ func _init(
 		var value: int = int(initial_script_memory[raw_address]) & 0xFF
 		if address > 0 and value != 0 and _script_memory.size() < SCRIPT_MEMORY_CAPACITY:
 			_script_memory[address] = value
+	for category: StringName in [&"bed", &"carpet", &"plant", &"poster"]:
+		var decoration: int = int(initial_maptile_decorations.get(category, 0))
+		if decoration > 0 and decoration <= 0xFF:
+			_maptile_decorations[category] = decoration
 
 
 ## JSON-safe representation of the mutable overworld state. Cartridge records
@@ -213,6 +221,7 @@ func to_dict() -> Dictionary:
 		"radio_knob": _radio_knob,
 		"radio_channel": _radio_channel,
 		"last_dex_mode": _last_dex_mode,
+		"maptile_decorations": _maptile_decorations.duplicate(),
 	}
 
 
@@ -241,6 +250,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		source.get("engine_flags", {}) if source.get("engine_flags", {}) is Dictionary else {},
 		source.get("script_memory", {}) if source.get("script_memory", {}) is Dictionary else {},
 		source.get("caught_species", {}) if source.get("caught_species", {}) is Dictionary else {},
+		source.get("maptile_decorations", {}) if source.get("maptile_decorations", {}) is Dictionary else {},
 	)
 	## Absent in a state written before the radio existed. Zero is the same
 	## MUSIC_NONE a fresh state starts on, and the next map load writes the real
@@ -281,7 +291,30 @@ func restore_from_dict(raw: Variant) -> void:
 	_radio_knob = restored._radio_knob
 	_radio_channel = restored._radio_channel
 	_last_dex_mode = restored._last_dex_mode
+	_maptile_decorations = restored._maptile_decorations.duplicate()
 	changed.emit()
+
+
+func maptile_decoration(category: StringName) -> int:
+	return int(_maptile_decorations.get(category, 0))
+
+
+func maptile_decorations() -> Dictionary:
+	return _maptile_decorations.duplicate()
+
+
+func set_maptile_decoration(category: StringName, decoration: int) -> bool:
+	if category not in [&"bed", &"carpet", &"plant", &"poster"] \
+		or decoration < 0 or decoration > 0xFF:
+		return false
+	if maptile_decoration(category) == decoration:
+		return true
+	if decoration == 0:
+		_maptile_decorations.erase(category)
+	else:
+		_maptile_decorations[category] = decoration
+	changed.emit()
+	return true
 
 
 static func _vector_from_value(value: Variant) -> Vector2i:
