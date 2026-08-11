@@ -379,15 +379,18 @@ func map_size_pixels() -> Vector2i:
 	return map_size_cells() * CELL_PIXELS
 
 
+## The page origin, which follows the player off the edge of the map.
+##
+## `GetMapScreenCoords` (`home/map.asm:1065`) anchors on the player's own block
+## less two metatiles and clamps nothing, so a room smaller than the viewport
+## sits centred with border block on all four sides rather than pinned to its
+## top-left corner with its floor repeating past the wall.
 func visible_origin_cell() -> Vector2i:
 	if current_map == null:
 		return Vector2i.ZERO
-	var size: Vector2i = map_size_cells()
-	var max_x: int = maxi(0, size.x - VIEW_CELLS.x)
-	var max_y: int = maxi(0, size.y - VIEW_CELLS.y)
 	return Vector2i(
-		clampi(player_cell.x - floori(float(VIEW_CELLS.x) / 2.0), 0, max_x),
-		clampi(player_cell.y - floori(float(VIEW_CELLS.y) / 2.0), 0, max_y)
+		player_cell.x - floori(float(VIEW_CELLS.x) / 2.0),
+		player_cell.y - floori(float(VIEW_CELLS.y) / 2.0)
 	)
 
 
@@ -408,16 +411,15 @@ func player_position_cells() -> Vector2:
 ## visible_origin_cell() is the hardware page origin: it follows the committed
 ## cell, so it moves a whole cell the instant a step starts. A camera that is not
 ## drawing a tile page would pan a step early on that, so this frames the
-## interpolated position with the same centring and map clamp. With no step in
-## flight the two agree.
+## interpolated position with the same centring. With no step in flight the two
+## agree, and neither clamps: see visible_origin_cell().
 func visible_origin_cells() -> Vector2:
 	if current_map == null:
 		return Vector2.ZERO
-	var size: Vector2i = map_size_cells()
 	var position: Vector2 = player_position_cells()
 	return Vector2(
-		clampf(position.x - floorf(float(VIEW_CELLS.x) / 2.0), 0.0, float(maxi(0, size.x - VIEW_CELLS.x))),
-		clampf(position.y - floorf(float(VIEW_CELLS.y) / 2.0), 0.0, float(maxi(0, size.y - VIEW_CELLS.y)))
+		position.x - floorf(float(VIEW_CELLS.x) / 2.0),
+		position.y - floorf(float(VIEW_CELLS.y) / 2.0)
 	)
 
 
@@ -2095,28 +2097,42 @@ func visible_tile_indices() -> PackedInt32Array:
 	if current_map == null or current_tileset == null:
 		return out
 
-	# visible_origin_cell() is clamped to the map, so both coordinates below are
-	# non-negative and the block divisions are plain integer divisions.
+	# The origin follows the player off the map, so a tile coordinate can be
+	# negative and the block divisions have to floor rather than truncate.
 	var origin: Vector2i = visible_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH
 	var tile_width: int = RomLayout.MAP_BLOCK_TILE_WIDTH
-	var map_tile_width: int = current_map.width_blocks * tile_width
-	var map_tile_height: int = current_map.height_blocks * tile_width
 	for y: int in VIEW_TILES.y:
 		var tile_y: int = origin.y + y
-		if tile_y >= map_tile_height:
-			break
 		var row: int = y * VIEW_TILES.x
-		@warning_ignore("integer_division")
-		var block_y: int = tile_y / tile_width
-		var local_row: int = (tile_y % tile_width) * tile_width
+		var block_y: int = floori(float(tile_y) / float(tile_width))
+		var local_row: int = posmod(tile_y, tile_width) * tile_width
 		for x: int in VIEW_TILES.x:
 			var tile_x: int = origin.x + x
-			if tile_x >= map_tile_width:
-				break
-			@warning_ignore("integer_division")
-			var block: int = block_at(tile_x / tile_width, block_y)
-			out[row + x] = current_tileset.tile_index(block, local_row + tile_x % tile_width)
+			var block: int = drawn_block_at(
+				floori(float(tile_x) / float(tile_width)), block_y
+			)
+			out[row + x] = current_tileset.tile_index(
+				block, local_row + posmod(tile_x, tile_width)
+			)
 	return out
+
+
+## The block a tile is drawn from, which is not always the block that is there.
+##
+## `LoadMetatiles` (`home/map.asm:120`) substitutes `wMapBorderBlock` for any
+## block byte of `$00`, and the padding `ChangeMap` puts around the map is that
+## same border block wherever no connection fills it. Both are graphics only:
+## `GetCoordTileCollision` (`home/map.asm:2065`) reads the raw byte and answers
+## -1 for `$00`, which is why [method block_at] is left alone and the collision
+## path never comes through here.
+func drawn_block_at(block_x: int, block_y: int) -> int:
+	if current_map == null:
+		return 0
+	if block_x < 0 or block_y < 0 \
+		or block_x >= current_map.width_blocks or block_y >= current_map.height_blocks:
+		return current_map.border_block
+	var block: int = block_at(block_x, block_y)
+	return current_map.border_block if block == 0 else block
 
 
 ## The raw cartridge permission byte at a walk cell.

@@ -850,6 +850,7 @@ const GOLD_SILVER: Dictionary = {
 	"tmhm_moves": 0x11A66,
 	"tmhm_move_count": 57,
 	"name_input_chars": 0x120B4,
+	"string_buffer_pointers": 0x24000,
 	## `data/text/common_2.asm`'s intro texts, each at its own `text_far` target.
 	## Nested the way the trainer card is, so the -1 for what Gold and Silver do
 	## not ship stays out of the flat offset checks. `_OakText3` is a bare
@@ -1051,6 +1052,7 @@ const CRYSTAL: Dictionary = {
 	"tmhm_moves": 0x1167A,
 	"tmhm_move_count": 60,
 	"name_input_chars": 0x11CE7,
+	"string_buffer_pointers": 0x24000,
 	## See the Gold and Silver block above. Crystal moves `_OakText6` and
 	## `_OakText7` out of the run the other four sit in, so the six are located
 	## one by one rather than walked.
@@ -1300,6 +1302,32 @@ static func name_input_table_offset(layout: Dictionary, table: int) -> int:
 	for before: int in table:
 		at += NAME_INPUT_TABLE_ROWS[before] * NAME_INPUT_ROW_BYTES
 	return at
+
+
+## `data/text_buffers.asm`'s StringBufferPointers, in `text_buffer` argument
+## order: wStringBuffer3, 4, 5, then 2, 1, then the two battle nicknames. The
+## table is what turns a `TX_RAM` address back into a buffer this project fills,
+## and the addresses are WRAM, so they differ between Gold/Silver and Crystal.
+const STRING_BUFFER_POINTER_COUNT: int = 7
+const STRING_BUFFER_POINTER_SIZE: int = 2
+
+## `STRING_BUFFER_LENGTH` (`constants/script_constants.asm`). The five general
+## buffers are one contiguous run, which is what [method RomImporter.verify_layout]
+## checks the table against.
+const STRING_BUFFER_LENGTH: int = 19
+
+## Indices into the table, from the comment on `TextCommand_STRINGBUFFER`
+## (`home/text.asm:902`). Only the five general buffers are ordered by stride;
+## the two nicknames live elsewhere in WRAM.
+const STRING_BUFFER_3: int = 0
+const STRING_BUFFER_4: int = 1
+const STRING_BUFFER_5: int = 2
+const STRING_BUFFER_2: int = 3
+const STRING_BUFFER_1: int = 4
+
+
+static func string_buffer_pointer_offset(layout: Dictionary, index: int) -> int:
+	return int(layout["string_buffer_pointers"]) + index * STRING_BUFFER_POINTER_SIZE
 
 
 static func species_name_offset(layout: Dictionary, species: int) -> int:

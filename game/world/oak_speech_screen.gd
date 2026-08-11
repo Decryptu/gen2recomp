@@ -171,9 +171,11 @@ func _show_beat() -> void:
 	_show_pic(int(beat["pic"]))
 
 
-## `Intro_PrepTrainerPic` and `PrepMonFrontpic` both centre a seven-tile cell on
-## (6,4); a pic smaller than the cell sits at its bottom, the way
-## `_PrepMonFrontpic` places one.
+## `Intro_PrepTrainerPic` and `PrepMonFrontpic` both fill a seven-tile box at
+## (6,4). A pic smaller than the box is padded by `PadFrontpic`
+## (`engine/gfx/load_pics.asm`), not centred: it lays one blank tile column
+## before the pic, blank rows above it, and for a 5x5 one blank column after, so
+## the pic ends up bottom-aligned one column in.
 func _show_pic(kind: int) -> void:
 	if _pic == null:
 		return
@@ -181,24 +183,36 @@ func _show_pic(kind: int) -> void:
 	if _data == null:
 		return
 	var image: Image = null
+	var mirrored: bool = false
 	match kind:
 		Gen2OakSpeech.Pic.OAK:
 			image = _trainer_image(Gen2OakSpeech.POKEMON_PROF)
 		Gen2OakSpeech.Pic.MON:
 			# `PrepMonFrontpic` sets wBoxAlignment before `PlaceGraphic`, and
-			# `Intro_PrepTrainerPic` does not, so only this beat is reversed.
-			image = Gen2PicImage.column_reversed(
+			# `Intro_PrepTrainerPic` does not, so only this beat is mirrored.
+			mirrored = true
+			image = Gen2PicImage.x_flipped(
 				_species_image(Gen2OakSpeech.intro_species(_data))
 			)
 	if image == null:
 		return
 	_pic.texture = ImageTexture.create_from_image(image)
 	_pic.size = Vector2(image.get_size())
-	var cell: int = PIC_TILES * TILE
-	_pic.position = Vector2(
-		PIC_AT.x * TILE + (cell - image.get_width()) / 2.0,
-		PIC_AT.y * TILE + cell - image.get_height()
+	_pic.position = Vector2(PIC_AT * TILE) + Vector2(
+		_pad_columns(image.get_width() / TILE, mirrored) * TILE,
+		PIC_TILES * TILE - image.get_height()
 	)
+
+
+## Blank tile columns `PadFrontpic` leaves to the left of a pic in the 7x7 box.
+##
+## A full-width pic is padded on neither side. A narrower one takes one blank
+## column at the left, so `.right`'s column reversal leaves `PIC_TILES - 1 -
+## width` of the trailing blank on that side instead.
+static func _pad_columns(width: int, mirrored: bool) -> int:
+	if width >= PIC_TILES or width <= 0:
+		return 0
+	return PIC_TILES - 1 - width if mirrored else 1
 
 
 func _trainer_image(trainer_class: int) -> Image:

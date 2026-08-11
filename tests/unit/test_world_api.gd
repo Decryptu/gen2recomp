@@ -30,6 +30,11 @@ func _write_cache(game_id: String = "testworld") -> void:
 			"pocket": 4 if number == 6 else 1,
 		})
 	RomCache.write_json(RomCache.items_path(_directory), items)
+	# StringBufferPointers as Gold stores them, so a `text_ram` operand resolves
+	# to the buffer a script filled. Order is data/text_buffers.asm's.
+	RomCache.write_json(RomCache.text_buffers_path(_directory), [
+		0xCF91, 0xCFA4, 0xCFB7, 0xCF7E, 0xCF6B, 0xCAF6, 0xCB01,
+	])
 	RomCache.write_json(RomCache.types_path(_directory), [])
 	RomCache.write_json(RomCache.matchups_path(_directory), [])
 	RomCache.write_json(RomCache.trainers_path(_directory), [])
@@ -694,10 +699,12 @@ func test_visible_page_is_twenty_by_eighteen_tiles_and_centers_player() -> void:
 	assert_eq(page[0], world.tile_index_at(6, 4))
 	assert_eq(page[19], world.tile_index_at(25, 4))
 
+	# GetMapScreenCoords clamps nothing, so the player stays centred at a corner
+	# and the page runs off the map into border block.
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cell(), Vector2i.ZERO)
+	assert_eq(top_left.visible_origin_cell(), Vector2i(-5, -4))
 	var bottom_right: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(bottom_right.visible_origin_cell(), Vector2i(6, 3))
+	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 7))
 
 
 func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
@@ -1822,12 +1829,12 @@ func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	assert_eq(world.visible_origin_cells(), Vector2(world.visible_origin_cell()))
 
 
-func test_the_interpolated_camera_origin_clamps_to_the_map_like_the_page_does() -> void:
+func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -> void:
 	var corner: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(corner.visible_origin_cell(), Vector2i(6, 3))
-	assert_eq(corner.visible_origin_cells(), Vector2(6.0, 3.0))
+	assert_eq(corner.visible_origin_cell(), Vector2i(10, 7))
+	assert_eq(corner.visible_origin_cells(), Vector2(10.0, 7.0))
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cells(), Vector2.ZERO)
+	assert_eq(top_left.visible_origin_cells(), Vector2(-5.0, -4.0))
 
 
 func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
@@ -4937,3 +4944,98 @@ func test_a_hidden_item_with_no_item_byte_fails_instead_of_running_data() -> voi
 
 func _item_name(number: int) -> String:
 	return GameData.open_directory(_directory).item_name(number)
+
+
+## S2: `?RAM?CFA4?` was the text engine faithfully reporting an unresolved
+## pointer. `_ReceivedItemText` is `text_ram wStringBuffer4`, and nothing mapped
+## an address to the buffers the runner fills by number.
+func test_verbosegiveitem_fills_the_buffer_its_text_reads_by_address() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# verbosegiveitem item 1 x1, then end. This cache carries Crystal's stream,
+	# where verbosegiveitem is $9e rather than pokegold's $9d.
+	scripts["48:6400"] = [
+		Gen2WorldScript.raw_opcode(0x9D, true), 1, 1, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), {
+		"kind": &"script", "bank": 48, "script": 0x6400,
+	})
+	runner.advance()
+
+	var context: Dictionary = runner.text_context()
+	var ram: Dictionary = context["ram"]
+	assert_true(
+		ram.has(0xCFA4),
+		"wStringBuffer4 is what _ReceivedItemText names: %s" % JSON.stringify(ram.keys())
+	)
+	assert_eq(String(ram[0xCFA4]), data.item_name(1))
+	assert_eq(
+		String(context["buffers"][RomLayout.STRING_BUFFER_4]), data.item_name(1),
+		"the same value is still reachable by text_buffer number"
+	)
+
+
+func test_text_ram_resolves_through_the_cartridges_own_pointer_table() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# getitemname into STRING_BUFFER_1, which the table puts at $CF6B on Gold.
+	# The macro emits the item before the buffer (macros/scripts/events.asm:437).
+	scripts["48:6410"] = [
+		Gen2WorldScript.GETITEMNAME, 1, RomLayout.STRING_BUFFER_1, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), {
+		"kind": &"script", "bank": 48, "script": 0x6410,
+	})
+	runner.advance()
+
+	var ram: Dictionary = runner.text_context()["ram"]
+	assert_true(ram.has(0xCF6B), "buffer 4 is wStringBuffer1, not wStringBuffer4")
+	assert_false(ram.has(0xCFA4))
+
+
+func test_an_unfilled_buffer_contributes_no_address() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), {
+		"kind": &"script", "bank": 48, "script": 0x6400,
+	})
+
+	assert_eq(runner.text_context()["ram"], {})
+
+
+## M2: LoadMetatiles substitutes wMapBorderBlock for a block byte of $00, and the
+## padding ChangeMap puts around the map is that same block. Both are graphics
+## only, so collision still reads the raw byte.
+func test_the_page_draws_border_block_past_the_edge_of_the_map() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i.ZERO)
+	world.current_map.border_block = 1
+
+	assert_eq(world.drawn_block_at(-1, 0), 1, "west of the map is border block")
+	assert_eq(world.drawn_block_at(0, -1), 1, "north of the map is border block")
+	assert_eq(
+		world.drawn_block_at(world.current_map.width_blocks, 0), 1,
+		"east of the map is border block"
+	)
+	assert_eq(
+		world.drawn_block_at(0, world.current_map.height_blocks), 1,
+		"south of the map is border block"
+	)
+
+
+func test_a_zero_block_is_drawn_as_border_but_still_collides_as_zero() -> void:
+	var world: Gen2WorldAPI = _world()
+	world.current_map.border_block = 1
+	world.change_block(0, 0, 0)
+
+	assert_eq(world.drawn_block_at(0, 0), 1, "LoadMetatiles swaps $00 for the border")
+	assert_eq(world.block_at(0, 0), 0, "GetCoordTileCollision still reads the raw byte")
+
+
+func test_the_page_is_fully_drawn_even_when_the_map_is_smaller_than_it() -> void:
+	# Every tile answered, none left at the -1 the old clamp produced.
+	var world: Gen2WorldAPI = _world(Vector2i.ZERO)
+	var page: PackedInt32Array = world.visible_tile_indices()
+
+	assert_eq(page.size(), 20 * 18)
+	assert_false(page.has(-1), "no tile of the page is left undrawn")

@@ -272,6 +272,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not intro_text["ok"]:
 		return intro_text
 
+	var string_buffers: Dictionary = verify_string_buffer_pointers(rom, layout)
+	if not string_buffers["ok"]:
+		return string_buffers
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -335,6 +339,50 @@ const INTRO_TEXT_OPENINGS: Dictionary = {
 ## letters the table opens with, and the last row has to be the command row,
 ## which is what NamingScreen_GetCursorPosition reads by column. A run of text
 ## bytes elsewhere in the bank passes neither.
+## StringBufferPointers checked against what `ram/wram.asm` says about its
+## targets, not against an address this project chose.
+##
+## wStringBuffer1..5 are five consecutive `ds STRING_BUFFER_LENGTH` runs, so the
+## five general entries must sit one stride apart in the order
+## `data/text_buffers.asm` lists them. A wrong offset lands on unrelated words
+## and fails the stride; a right offset in the wrong dump fails the WRAM range.
+static func verify_string_buffer_pointers(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int(layout.get("string_buffer_pointers", -1))
+	var bytes: int = RomLayout.STRING_BUFFER_POINTER_COUNT * RomLayout.STRING_BUFFER_POINTER_SIZE
+	if not rom.in_bounds(at, bytes):
+		return {"ok": false, "message": "String buffer pointers are outside the cartridge."}
+
+	var pointers: Array = []
+	for index: int in RomLayout.STRING_BUFFER_POINTER_COUNT:
+		var address: int = rom.u16le(RomLayout.string_buffer_pointer_offset(layout, index))
+		if address < 0xC000 or address >= 0xE000:
+			return {
+				"ok": false,
+				"message": "String buffer %d points at $%04X, which is not WRAM." % [
+					index, address,
+				],
+			}
+		pointers.append(address)
+
+	var third: int = int(pointers[RomLayout.STRING_BUFFER_3])
+	var stride: int = RomLayout.STRING_BUFFER_LENGTH
+	var expected: Dictionary = {
+		RomLayout.STRING_BUFFER_1: third - 2 * stride,
+		RomLayout.STRING_BUFFER_2: third - stride,
+		RomLayout.STRING_BUFFER_4: third + stride,
+		RomLayout.STRING_BUFFER_5: third + 2 * stride,
+	}
+	for index: int in expected:
+		if int(pointers[index]) != int(expected[index]):
+			return {
+				"ok": false,
+				"message": "String buffer entry %d is $%04X, expected $%04X." % [
+					index, pointers[index], expected[index],
+				],
+			}
+	return {"ok": true, "pointers": pointers}
+
+
 static func verify_name_input_chars(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var at: int = int(layout.get("name_input_chars", -1))
 	if not rom.in_bounds(at, RomLayout.NAME_INPUT_BLOCK_BYTES):
@@ -1644,6 +1692,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "TM/HM move table is outside the cartridge or malformed."
 		return result
 	var name_input_chars: Array = _import_name_input_chars(rom, layout)
+	var string_buffers: Array = _import_string_buffer_pointers(rom, layout)
 	var intro_text: Dictionary = _import_intro_text(rom, layout)
 	if intro_text.is_empty():
 		result["message"] = "Intro text is outside the cartridge or malformed."
@@ -1687,6 +1736,9 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.name_input_chars_path(directory), name_input_chars):
 		result["message"] = "Could not write name input data."
+		return result
+	if not RomCache.write_json(RomCache.text_buffers_path(directory), string_buffers):
+		result["message"] = "Could not write string buffer pointers."
 		return result
 	if not RomCache.write_json(RomCache.intro_text_path(directory), intro_text):
 		result["message"] = "Could not write intro text."
@@ -1976,6 +2028,18 @@ func _import_name_input_chars(rom: RomFile, layout: Dictionary) -> Array:
 			var at: int = start + row * RomLayout.NAME_INPUT_ROW_BYTES
 			rows.append(Array(rom.slice(at, RomLayout.NAME_INPUT_ROW_BYTES)))
 		out.append(rows)
+	return out
+
+
+## StringBufferPointers as WRAM addresses, in `text_buffer` argument order.
+##
+## Stored rather than derived because the addresses move between Gold/Silver and
+## Crystal, and a `TX_RAM` operand is an address: without the table there is no
+## way back from `$CFA4` to the buffer a script filled.
+func _import_string_buffer_pointers(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	for index: int in RomLayout.STRING_BUFFER_POINTER_COUNT:
+		out.append(rom.u16le(RomLayout.string_buffer_pointer_offset(layout, index)))
 	return out
 
 
