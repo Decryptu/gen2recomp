@@ -1886,6 +1886,7 @@ func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> voi
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 6))
+	assert_eq(world.player_walk_frame(), 0, "SetFacingStanding restores the resting cel")
 	assert_false(world.advance_player_step(1.0))
 
 
@@ -3377,6 +3378,7 @@ func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
 		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 4))
+	assert_eq(world.player_walk_frame(), 0, "EndSpriteMovement leaves the player standing")
 
 
 func test_script_movement_still_refuses_a_step_off_the_map() -> void:
