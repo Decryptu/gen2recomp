@@ -88,6 +88,10 @@ var called: bool = false
 ## pending. [Gen2Battle] consumes it immediately after the command returns.
 var called_move_number: int = 0
 
+## StoreEnergy marks a Bide release so UsedMoveText is skipped, matching its
+## jump directly to `unleashenergy` in the command stream.
+var bide_release: bool = false
+
 ## The accuracy byte this move is rolled against, or -1 for the move's own.
 ## `wPlayerMoveStruct` is a per-turn copy the cartridge is free to write into;
 ## [member move] is the cached row, so what would be a write there is this

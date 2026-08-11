@@ -51,6 +51,12 @@ const METRONOME: int = 83
 const CONVERSION_2: int = 93
 const SKETCH: int = 95
 const SLEEP_TALK: int = 97
+const BIDE: int = 26
+const RAGE: int = 81
+const BIDE_MOVE: int = 117
+const RAGE_MOVE: int = 99
+const FUTURE_SIGHT: int = 148
+const FUTURE_SIGHT_MOVE: int = 248
 
 ## Real move numbers read by the called-move commands.
 const METRONOME_MOVE: int = 118
@@ -362,6 +368,52 @@ const NORMAL_HIT: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+## Bide's first command either ends a storage turn or prepares the stored
+## double-damage release. Its initial pass reaches UnleashEnergy and starts the
+## two-or-three-turn lock.
+const BIDE_SEQUENCE: Array = [
+	Gen2EffectCommands.STORE_ENERGY,
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.UNLEASH_ENERGY,
+	Gen2EffectCommands.RESET_TYPE_MATCHUP,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const RAGE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.RAGE_DAMAGE,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.RAGE,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.END_MOVE,
+]
+
+const FUTURE_SIGHT_SEQUENCE: Array = [
+	Gen2EffectCommands.CHECK_FUTURE_SIGHT,
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.FUTURE_SIGHT,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1789,6 +1841,9 @@ static func _sequences() -> Dictionary:
 		CONVERSION_2: CONVERSION_2_SEQUENCE,
 		SKETCH: SKETCH_SEQUENCE,
 		SLEEP_TALK: SLEEP_TALK_SEQUENCE,
+		BIDE: BIDE_SEQUENCE,
+		RAGE: RAGE_SEQUENCE,
+		FUTURE_SIGHT: FUTURE_SIGHT_SEQUENCE,
 		SNORE: SNORE_SEQUENCE,
 		TRI_ATTACK: TRI_ATTACK_SEQUENCE,
 		FLAME_WHEEL: FLAME_WHEEL_SEQUENCE,

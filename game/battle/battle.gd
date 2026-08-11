@@ -124,6 +124,11 @@ const MOVE_DECLINED: StringName = &"move_declined"
 ## type ([constant NO_EFFECT]). One event for all five, the "but it failed!" the
 ## cartridge shares across them.
 const MOVE_FAILED: StringName = &"move_failed"
+const BIDE_STORING: StringName = &"bide_storing"
+const BIDE_UNLEASHED: StringName = &"bide_unleashed"
+const RAGE_BUILDING: StringName = &"rage_building"
+const FUTURE_SIGHT_SET: StringName = &"future_sight_set"
+const FUTURE_SIGHT_HIT: StringName = &"future_sight_hit"
 ## Mimic and Sketch both replace their own slot with the opponent's last move,
 ## but only Sketch persists after battle. Separate events keep their two source
 ## lines distinct in the battle screen.
@@ -557,6 +562,14 @@ var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
 ## `wCurDamage` is a move-local value rather than a battle-long history.
 var _last_damage_taken: Dictionary = {PLAYER: {}, ENEMY: {}}
 
+## `wPlayerFutureSightCount/Damage` and the enemy pair. Keyed by the side that
+## foresaw the attack, so switching either active Pokémon leaves it intact and
+## the eventual target is whoever is opposite when the count reaches one.
+var _future_sight: Dictionary = {
+	PLAYER: {"count": 0, "damage": 0},
+	ENEMY: {"count": 0, "damage": 0},
+}
+
 ## Moves waiting on [method learn_move] or [method decline_move], one queue per
 ## side, FIFO: a level that teaches two moves into a full six-move team asks
 ## about both, one at a time, in the order they were learned.
@@ -665,22 +678,39 @@ func reset_damage_taken() -> void:
 	_last_damage_taken = {PLAYER: {}, ENEMY: {}}
 
 
-## Keeps the uncapped damage figure, the move that produced it and its source
-## side. The command layer calls this before HP clamping, matching the
-## cartridge's `wCurDamage` rather than the amount that happened to remain.
+## Adds the uncapped damage figure to the current action pair's saturating word.
+## `BattleCommand_ApplyDamage.update_damage_taken` is an add-with-carry capped
+## at $ffff, not an assignment. Bide accumulates the same raw word across its
+## storage window.
 func record_damage_taken(target: int, source: int, move_number: int, effect: int, amount: int) -> void:
 	if amount <= 0 or target not in [PLAYER, ENEMY] or source not in [PLAYER, ENEMY]:
 		return
+	var previous: Dictionary = _last_damage_taken.get(target, {})
+	var total: int = mini(int(previous.get("damage", 0)) + amount, 0xFFFF)
 	_last_damage_taken[target] = {
-		"damage": amount,
+		"damage": total,
 		"source": source,
 		"move": move_number,
 		"effect": effect,
 	}
+	var target_mon: Gen2BattleMon = mon(target)
+	if Gen2Substatus.has(target_mon.substatus, Gen2Substatus.BIDE):
+		target_mon.bide_damage = mini(target_mon.bide_damage + amount, 0xFFFF)
 
 
 func last_damage_taken(side: int) -> Dictionary:
 	return _last_damage_taken.get(side, {})
+
+
+func future_sight_pending(side: int) -> bool:
+	return int((_future_sight.get(side, {}) as Dictionary).get("count", 0)) > 0
+
+
+func schedule_future_sight(side: int, damage: int) -> bool:
+	if side not in [PLAYER, ENEMY] or future_sight_pending(side):
+		return false
+	_future_sight[side] = {"count": 4, "damage": clampi(damage, 0, 0xFFFF)}
+	return true
 
 
 ## A battle is lost when a whole party is down, not when the Pokémon that is out
@@ -1220,6 +1250,7 @@ func _run_turn(events: Array) -> Array:
 
 	_pending_turn = {}
 	_residual_damage(acting, events)
+	_tick_future_sight(events)
 	_tick_weather(events)
 	_tick_wrap(events)
 	_tick_perish(events)
@@ -1230,6 +1261,39 @@ func _run_turn(events: Array) -> Array:
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
 	return events
+
+
+## `HandleFutureSight`, player then enemy outside link battles. The count is
+## decremented before testing one, and the stored base damage receives its
+## spread only on impact. The ordinary hit and apply commands retain Protect,
+## Substitute, Focus Band, faint and Rage interactions.
+func _tick_future_sight(events: Array) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		var pending: Dictionary = _future_sight[side]
+		var count: int = int(pending.get("count", 0))
+		if count <= 0:
+			continue
+		count -= 1
+		pending["count"] = count
+		if count != 1:
+			continue
+		pending["count"] = 0
+		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
+			continue
+		events.append({"type": FUTURE_SIGHT_HIT, "side": side, "target": opponent_of(side)})
+		var move: Dictionary = data.move(Gen2MoveEffect.FUTURE_SIGHT_MOVE)
+		var turn: Gen2Turn = Gen2Turn.create(
+			self, side, -1, Gen2MoveEffect.FUTURE_SIGHT_MOVE, move, events
+		)
+		turn.damage = int(pending.get("damage", 0))
+		for command: StringName in [
+			Gen2EffectCommands.DAMAGE_VARIATION, Gen2EffectCommands.CHECK_HIT,
+			Gen2EffectCommands.MOVE_ANIM_NO_SUB, Gen2EffectCommands.APPLY_DAMAGE,
+			Gen2EffectCommands.CHECK_FAINT,
+		]:
+			if turn.ended:
+				break
+			Gen2EffectCommands.run(command, turn)
 
 
 ## `wPlayerIsSwitching` and `wEnemyIsSwitching`: whether [param side] is recalling
@@ -1345,6 +1409,14 @@ func _reset_action_counters(side: int, effect: int) -> void:
 		actor.fury_cutter_count = 0
 	if effect != Gen2MoveEffect.PROTECT and effect != Gen2MoveEffect.ENDURE:
 		actor.protect_count = 0
+	if effect != Gen2MoveEffect.BIDE:
+		actor.substatus &= ~Gen2Substatus.BIDE
+		actor.bide_turns = 0
+		actor.bide_damage = 0
+		actor.bide_move = 0
+	if effect != Gen2MoveEffect.RAGE:
+		actor.substatus &= ~Gen2Substatus.RAGE
+		actor.rage_count = 0
 
 
 ## Both sides use a move slot, which is the common case and the whole of a battle
@@ -2002,6 +2074,8 @@ func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.charged_move != 0:
 		return attacker.charged_move
+	if Gen2Substatus.has(attacker.substatus, Gen2Substatus.BIDE) and attacker.bide_move != 0:
+		return attacker.bide_move
 	if Gen2Substatus.has(attacker.substatus, Gen2Substatus.ROLLOUT):
 		return Gen2MoveEffect.ROLLOUT_MOVE
 	if Gen2Substatus.has(attacker.substatus, Gen2Substatus.RAMPAGING) \
@@ -2116,6 +2190,7 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 		mon(side).charged_move == move_number
 		or Gen2Substatus.has(active_substatus, Gen2Substatus.ROLLOUT)
 		or Gen2Substatus.has(active_substatus, Gen2Substatus.RAMPAGING)
+		or Gen2Substatus.has(active_substatus, Gen2Substatus.BIDE)
 	) and move_number != 0
 
 	if side == PLAYER:

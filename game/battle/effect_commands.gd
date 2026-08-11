@@ -98,6 +98,14 @@ const SLEEP_TALK: StringName = &"sleeptalk"
 const CONVERSION: StringName = &"conversion"
 const CONVERSION_2: StringName = &"conversion2"
 
+const STORE_ENERGY: StringName = &"storeenergy"
+const UNLEASH_ENERGY: StringName = &"unleashenergy"
+const RAGE: StringName = &"rage"
+const RAGE_DAMAGE: StringName = &"ragedamage"
+const BUILD_OPPONENT_RAGE: StringName = &"buildopponentrage"
+const CHECK_FUTURE_SIGHT: StringName = &"checkfuturesight"
+const FUTURE_SIGHT: StringName = &"futuresight"
+
 const CURSE_TYPE: int = 0x13
 ## Conversion2's accepted random type bytes: the physical run including BIRD,
 ## then the special run. The padding from $0a through $13 and everything at or
@@ -653,6 +661,20 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_conversion(turn)
 		CONVERSION_2:
 			_conversion_2(turn)
+		STORE_ENERGY:
+			_store_energy(turn)
+		UNLEASH_ENERGY:
+			_unleash_energy(turn)
+		RAGE:
+			_rage(turn)
+		RAGE_DAMAGE:
+			_rage_damage(turn)
+		BUILD_OPPONENT_RAGE:
+			_build_opponent_rage(turn)
+		CHECK_FUTURE_SIGHT:
+			_check_future_sight(turn)
+		FUTURE_SIGHT:
+			_future_sight(turn)
 		SWITCH_TURN:
 			_switch_turn(turn)
 		CHECK_IMMUNE:
@@ -826,6 +848,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 ## This always records the move announced, differing only in that one narrow
 ## interaction.
 static func _used_move_text(turn: Gen2Turn) -> void:
+	if turn.bide_release:
+		return
 	# `ResetTurn` raises the temporary charging byte before entering the called
 	# list. `UsedMoveText` still prints that move, but its `CheckUserIsCharging`
 	# branch leaves both last-move bytes clear.
@@ -848,6 +872,74 @@ static func _do_turn(turn: Gen2Turn) -> void:
 
 	if turn.slot >= 0 and turn.move_number != Gen2Damage.STRUGGLE:
 		turn.attacker().spend_pp(turn.slot)
+
+
+## `engine/battle/move_effects/bide.asm`: an active Bide decrements its shared
+## counter before acting. Non-final turns only say it is storing; the final one
+## doubles the saturating damage word and jumps into the release half.
+static func _store_energy(turn: Gen2Turn) -> void:
+	var user: Gen2BattleMon = turn.attacker()
+	if not Gen2Substatus.has(user.substatus, Gen2Substatus.BIDE):
+		return
+	user.bide_turns -= 1
+	if user.bide_turns > 0:
+		turn.emit(Gen2Battle.BIDE_STORING)
+		turn.end()
+		return
+	user.substatus &= ~Gen2Substatus.BIDE
+	turn.bide_release = true
+	turn.damage = mini(user.bide_damage * 2, 0xFFFF)
+	user.bide_damage = 0
+	turn.emit(Gen2Battle.BIDE_UNLEASHED)
+	if turn.damage == 0:
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
+
+
+## Starts Bide for two or three turns, using the same low-bit roll as the
+## cartridge. The release path has already been prepared by StoreEnergy.
+static func _unleash_energy(turn: Gen2Turn) -> void:
+	if turn.bide_release:
+		return
+	var user: Gen2BattleMon = turn.attacker()
+	user.substatus |= Gen2Substatus.BIDE
+	user.bide_damage = 0
+	user.bide_turns = turn.rng().randi_range(0, 1) + 2
+	user.bide_move = turn.move_number
+	turn.end()
+
+
+static func _rage(turn: Gen2Turn) -> void:
+	turn.attacker().substatus |= Gen2Substatus.RAGE
+
+
+## `BattleCommand_RageDamage`: repeat-add the original damage once per counter,
+## saturating on overflow. Zero is the ordinary one-times hit.
+static func _rage_damage(turn: Gen2Turn) -> void:
+	var base: int = turn.damage
+	turn.damage = mini(base * (turn.attacker().rage_count + 1), 0xFFFF)
+
+
+## Ordinary damage builds Rage in `_apply_damage`, where every damaging effect
+## passes. This command remains in source-shaped lists as that shared seam.
+static func _build_opponent_rage(_turn: Gen2Turn) -> void:
+	pass
+
+
+static func _check_future_sight(turn: Gen2Turn) -> void:
+	if turn.battle.future_sight_pending(turn.side):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
+
+
+## Stores damage after DamageCalc and before DamageVariation, exactly where the
+## source copies `wCurDamage` into the side's delayed word.
+static func _future_sight(turn: Gen2Turn) -> void:
+	if not turn.battle.schedule_future_sight(turn.side, turn.damage):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+	else:
+		turn.emit(Gen2Battle.FUTURE_SIGHT_SET, {"target": turn.target})
+	turn.end()
 
 
 ## `BattleCommand_Critical`: whether this hit is a critical, at the level the
@@ -1550,6 +1642,11 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		"hp": defender.hp,
 		"max_hp": defender.max_hp(),
 	})
+	if not defender.is_fainted() \
+			and Gen2Substatus.has(defender.substatus, Gen2Substatus.RAGE) \
+			and defender.rage_count < 0xFF:
+		defender.rage_count += 1
+		turn.emit(Gen2Battle.RAGE_BUILDING, {"target": turn.target})
 	if braced:
 		turn.emit(Gen2Battle.ENDURED_HIT, {"target": turn.target})
 	if endured:
@@ -1734,7 +1831,7 @@ static func _destiny_bond_takes_user(turn: Gen2Turn) -> void:
 	user.take_damage(user.hp)
 
 
-## CantMove on the cartridge cancels a pending two-turn move, Rollout or
+## CantMove on the cartridge cancels Bide, a pending two-turn move, Rollout or
 ## rampage. For Fly and Dig that also makes the user visible again, so a sleep,
 ## flinch or paralysis on the release turn cannot leave a Pokémon permanently
 ## untouchable.
@@ -1744,6 +1841,10 @@ static func _cancel_charge(mon: Gen2BattleMon) -> void:
 	mon.substatus &= ~(Gen2Substatus.ROLLOUT | Gen2Substatus.RAMPAGING)
 	mon.rampage_move = 0
 	mon.rampage_turns = 0
+	mon.substatus &= ~Gen2Substatus.BIDE
+	mon.bide_turns = 0
+	mon.bide_damage = 0
+	mon.bide_move = 0
 
 
 ## Recharge, then sleep, then freeze, then flinch, then Disable's own

@@ -4368,3 +4368,84 @@ func _commands_run(battle: Gen2Battle, move_number: int) -> Array:
 		ran.append(command)
 		Gen2EffectCommands.run(command, turn)
 	return ran
+
+
+func test_damage_taken_accumulates_and_saturates_like_the_shared_source_word() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.record_damage_taken(Gen2Battle.PLAYER, Gen2Battle.ENEMY, Fixture.TACKLE, 0, 40000)
+	battle.record_damage_taken(Gen2Battle.PLAYER, Gen2Battle.ENEMY, Fixture.TACKLE, 0, 30000)
+	assert_eq(int(battle.last_damage_taken(Gen2Battle.PLAYER)["damage"]), 0xFFFF)
+
+
+func test_bide_stores_raw_damage_then_releases_twice_the_total() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.BIDE]
+	battle.player.pp = [10]
+	var start: Gen2Turn = _run_move(battle, Fixture.BIDE)
+	assert_true(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.BIDE))
+	assert_eq(battle.player.pp[0], 9)
+	assert_eq(_of_type(start.events, Gen2Battle.HIT).size(), 0)
+
+	battle.record_damage_taken(Gen2Battle.PLAYER, Gen2Battle.ENEMY, Fixture.TACKLE, 0, 12)
+	battle.player.bide_turns = 1
+	var release: Gen2Turn = _run_move(battle, Fixture.BIDE, true)
+	var hits: Array = _of_type(release.events, Gen2Battle.HIT)
+	assert_eq(hits.size(), 1)
+	assert_eq(int(hits[0]["amount"]), 24)
+	assert_eq(battle.player.pp[0], 9, "the forced release spends no second PP")
+	assert_false(Gen2Substatus.has(battle.player.substatus, Gen2Substatus.BIDE))
+
+
+func test_bide_without_damage_fails_on_its_release() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.BIDE]
+	battle.player.pp = [10]
+	_run_move(battle, Fixture.BIDE)
+	battle.player.bide_turns = 1
+	var release: Gen2Turn = _run_move(battle, Fixture.BIDE, true)
+	assert_eq(_of_type(release.events, Gen2Battle.HIT).size(), 0)
+
+
+func test_rage_builds_when_hit_and_multiplies_its_next_attack() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.RAGE]
+	battle.player.pp = [20]
+	_run_move(battle, Fixture.RAGE)
+
+	var incoming: Gen2Turn = Gen2Turn.create(
+		battle, Gen2Battle.ENEMY, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), []
+	)
+	incoming.damage = 5
+	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, incoming)
+	assert_eq(battle.player.rage_count, 1)
+	var scaled: Gen2Turn = _turn(battle, Fixture.RAGE)
+	scaled.damage = 7
+	Gen2EffectCommands.run(Gen2EffectCommands.RAGE_DAMAGE, scaled)
+	assert_eq(scaled.damage, 14)
+
+
+func test_future_sight_stores_pre_variation_damage_and_refuses_a_second() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.FUTURE_SIGHT]
+	battle.player.pp = [15]
+	var first: Gen2Turn = _run_move(battle, Fixture.FUTURE_SIGHT)
+	assert_true(battle.future_sight_pending(Gen2Battle.PLAYER))
+	assert_gt(first.damage, 0)
+	assert_eq(_of_type(first.events, Gen2Battle.HIT).size(), 0)
+	var second: Gen2Turn = _run_move(battle, Fixture.FUTURE_SIGHT)
+	assert_eq(_of_type(second.events, Gen2Battle.MOVE_FAILED).size(), 1)
+
+
+func test_future_sight_hits_the_active_target_two_turns_later() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.moves = [Fixture.FUTURE_SIGHT]
+	battle.player.pp = [15]
+	var before: int = battle.enemy.hp
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.hp, before)
+	battle.take_turn(0, 0)
+	assert_eq(battle.enemy.hp, before)
+	var events: Array = battle.take_turn(0, 0)
+	assert_lt(battle.enemy.hp, before)
+	assert_eq(_of_type(events, Gen2Battle.FUTURE_SIGHT_HIT).size(), 1)
+	assert_false(battle.future_sight_pending(Gen2Battle.PLAYER))
