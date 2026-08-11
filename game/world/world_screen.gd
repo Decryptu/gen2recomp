@@ -558,7 +558,7 @@ func move_player(direction: Vector2i) -> bool:
 		or _field_move_text or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
 		return false
-	var movement: Dictionary = _world.move_result(direction)
+	var movement: Dictionary = _world.player_input_move(direction)
 	if not bool(movement.get("ok", false)):
 		## A push bumps the player and starts the boulder, so the step reports
 		## blocked while the map still changed. MovementFunction_Strength plays
@@ -571,6 +571,13 @@ func move_player(direction: Vector2i) -> bool:
 		return false
 	## A whirlpool spins the player rather than moving them, so nothing a completed
 	## step owes applies: no warp, no encounter, no repel step.
+	## A turn on the spot costs a facing and four frames and nothing else, so it
+	## owes none of what a completed step owes.
+	if movement.get("kind", &"") == &"turn":
+		if _renderer != null:
+			_renderer.refresh()
+		_refresh_labels()
+		return true
 	if movement.get("kind", &"") == &"forced_turn":
 		if _renderer != null:
 			_renderer.refresh()

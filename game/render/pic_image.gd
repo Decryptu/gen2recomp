@@ -106,3 +106,28 @@ static func _lookup(palette: PackedColorArray, transparent_background: bool) -> 
 			else int(roundf(clampf(color.a, 0.0, 1.0) * 255.0))
 
 	return out
+
+
+## `PlaceGraphic`'s `.right` branch, which `wBoxAlignment` selects.
+##
+## It walks the tile columns from the right rather than the left
+## (`engine/gfx/place_graphic.asm`: `dec hl` against `inc hl`), so the pic's
+## first tile column lands in the box's last. The tiles themselves are not
+## flipped, which is why this reverses eight-pixel strips rather than mirroring
+## pixels. `PrepMonFrontpic` is the one caller that sets the flag, and the Oak
+## speech is the one screen that reaches it, so the intro's Pokemon faces the
+## other way from its own front pic.
+static func column_reversed(image: Image, tile: int = 8) -> Image:
+	if image == null or tile <= 0:
+		return image
+	var columns: int = image.get_width() / tile
+	if columns <= 1:
+		return image
+	var out: Image = Image.create_empty(
+		image.get_width(), image.get_height(), false, image.get_format()
+	)
+	for column: int in columns:
+		var from := Rect2i(column * tile, 0, tile, image.get_height())
+		var to := Vector2i((columns - 1 - column) * tile, 0)
+		out.blit_rect(image, from, to)
+	return out

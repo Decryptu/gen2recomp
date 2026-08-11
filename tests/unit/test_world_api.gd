@@ -3130,6 +3130,41 @@ func test_connection_requires_the_player_to_be_on_the_requested_edge() -> void:
 	assert_eq(world.player_cell, Vector2i(8, 6))
 
 
+## `.CheckTurning` sits between `.CheckTile` and `.TryStep` in
+## `DoPlayerMovement`, and its own comment is "This also lets the player change
+## facing without moving by tapping a direction". It runs before any collision
+## check, and `StepFunction_Turn` costs four frames and no cell.
+func test_a_press_in_a_new_direction_turns_on_the_spot_before_it_walks() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(4, 4))
+	var from: Vector2i = world.player_cell
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_DOWN)
+
+	var turn: Dictionary = world.player_input_move(Vector2i.RIGHT)
+	assert_true(turn["ok"])
+	assert_eq(turn["kind"], &"turn")
+	assert_eq(world.player_facing, Gen2WorldSprite.FACING_RIGHT)
+	assert_eq(world.player_cell, from, "a turn costs no cell")
+	assert_true(world.player_step_in_progress(), "and it costs four frames")
+
+	while world.player_step_in_progress():
+		world.advance_player_step(1.0)
+	var walk: Dictionary = world.player_input_move(Vector2i.RIGHT)
+	assert_true(walk["ok"])
+	assert_ne(walk["kind"], &"turn", "the facing already agrees, so this one walks")
+	assert_eq(world.player_cell, from + Vector2i.RIGHT)
+
+
+## A scripted `applymovement` drives the object through
+## `engine/overworld/movement.asm` and never reaches `DoPlayerMovement`, so it
+## turns nothing: only the input path has the check.
+func test_a_programmatic_step_does_not_turn_first() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(4, 4))
+	var from: Vector2i = world.player_cell
+	var moved: Dictionary = world.move_result(Vector2i.RIGHT)
+	assert_true(moved["ok"])
+	assert_eq(world.player_cell, from + Vector2i.RIGHT)
+
+
 func test_invalid_directions_and_map_edges_do_not_move_player() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(0, 0))
 	assert_false(world.move(Vector2i.ZERO))

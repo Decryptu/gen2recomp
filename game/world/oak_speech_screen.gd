@@ -185,7 +185,11 @@ func _show_pic(kind: int) -> void:
 		Gen2OakSpeech.Pic.OAK:
 			image = _trainer_image(Gen2OakSpeech.POKEMON_PROF)
 		Gen2OakSpeech.Pic.MON:
-			image = _species_image(Gen2OakSpeech.intro_species(_data))
+			# `PrepMonFrontpic` sets wBoxAlignment before `PlaceGraphic`, and
+			# `Intro_PrepTrainerPic` does not, so only this beat is reversed.
+			image = Gen2PicImage.column_reversed(
+				_species_image(Gen2OakSpeech.intro_species(_data))
+			)
 	if image == null:
 		return
 	_pic.texture = ImageTexture.create_from_image(image)

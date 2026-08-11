@@ -38,6 +38,13 @@ const LINE_SPACING: int = 2
 ## `PromptText` all load it before `PromptButton` and unload it after.
 const CURSOR_CODE: int = 0xEE
 const CURSOR_COLUMN: int = 18
+## `PromptButton.blink_cursor` reads `hVBlankCounter` and `and 1 << 4`, so the
+## arrow is up for sixteen frames and the border's own '─' is back for the
+## next sixteen (`home/joypad.asm`). Counted in seconds rather than frames for
+## the reason [member reveal_speed] is a rate: the period is the same either
+## way and this does not assume 60 Hz.
+const CURSOR_BLINK_FRAMES: int = 16
+const FRAME_SECONDS: float = 1.0 / 60.0
 
 const TILE: int = Gen2Font.TILE
 
@@ -76,6 +83,7 @@ var _page: int = 0
 var _lines: Array = []
 var _tiles_on_page: int = 0
 var _shown: float = 0.0
+var _blink: float = 0.0
 
 
 func _ready() -> void:
@@ -85,12 +93,18 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _shown >= float(_tiles_on_page):
+	if _shown < float(_tiles_on_page):
+		_shown = minf(_shown + delta * reveal_speed, float(_tiles_on_page))
+		_redraw()
+		return
+	if _pages.is_empty():
 		set_process(false)
 		return
-
-	_shown = minf(_shown + delta * reveal_speed, float(_tiles_on_page))
-	_redraw()
+	# Waiting: only the arrow changes, and only when it crosses a half period.
+	var was_up: bool = _cursor_up()
+	_blink = fmod(_blink + delta, FRAME_SECONDS * float(CURSOR_BLINK_FRAMES) * 2.0)
+	if _cursor_up() != was_up:
+		_redraw()
 
 
 ## Puts the box where the games put it: flush to the left, six rows up from the
@@ -179,7 +193,8 @@ func _start_page() -> void:
 			_tiles_on_page += codes.size()
 
 	_shown = 0.0
-	set_process(reveal_speed > 0.0 and _tiles_on_page > 0)
+	_blink = 0.0
+	set_process(_tiles_on_page > 0)
 	if reveal_speed <= 0.0:
 		_shown = float(_tiles_on_page)
 	_redraw()
@@ -213,6 +228,13 @@ func _redraw() -> void:
 	size = Vector2(width, height)
 
 
+## Which half of the blink the box is in. `UnloadBlinkingCursor` puts the
+## border's '─' back rather than a blank, and the border is redrawn under the
+## arrow anyway, so the off half simply does not draw.
+func _cursor_up() -> bool:
+	return _blink < FRAME_SECONDS * float(CURSOR_BLINK_FRAMES)
+
+
 func _draw_border(indices: PackedByteArray, width: int) -> void:
 	font.draw_box(frame_style, indices, width, 0, 0, columns, rows)
 
@@ -220,7 +242,7 @@ func _draw_border(indices: PackedByteArray, width: int) -> void:
 ## The arrow, drawn only while the box is actually waiting: a page still
 ## revealing has not reached its `PromptButton` yet.
 func _draw_cursor(indices: PackedByteArray, width: int) -> void:
-	if _pages.is_empty() or is_revealing():
+	if _pages.is_empty() or is_revealing() or not _cursor_up():
 		return
 	if CURSOR_COLUMN >= columns or rows <= 0:
 		return

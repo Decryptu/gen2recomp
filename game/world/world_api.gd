@@ -38,6 +38,10 @@ const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
 ## StepVectors' fast row: 4 pixels per frame for 4 frames, which the bike-speed
 ## movement commands reach through `STEP_BIKE`.
 const STEP_FRAMES_FAST: int = 4
+## `StepFunction_Turn` (engine/overworld/map_objects.asm): two frames standing,
+## then the new facing is written and two more, so a turn on the spot costs
+## four frames and no cell.
+const STEP_FRAMES_TURN: int = 4
 ## How long each scripted step command takes, from the `STEP_*` speed it passes
 ## to `InitStep` (engine/overworld/movement.asm) and that row of `StepVectors`.
 ##
@@ -3761,6 +3765,39 @@ func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictiona
 
 ## Moves one cell or enters a neighboring map when the step leaves a connected
 ## map edge. The legacy boolean move() wrapper remains available to callers.
+## `DoPlayerMovement`, which is what a button press reaches: `.CheckTurning`
+## and then [method move_result]'s `.TryStep`.
+##
+## `.CheckTurning`'s own comment is "This also lets the player change facing
+## without moving by tapping a direction". It runs before any collision check,
+## so a direction that differs from the current facing turns on the spot even
+## into a wall, and the walk happens on the next poll, once the facing agrees.
+## It guards on `wPlayerTurningDirection`, which `.StandInPlace` clears, so a
+## turn is only ever taken from a standstill.
+##
+## Only the input path has it. `applymovement` drives an object through
+## `engine/overworld/movement.asm` and never reaches `DoPlayerMovement`, which
+## is why a scripted walk turns nothing and [method move_result] stays the
+## step on its own.
+func player_input_move(direction: Vector2i) -> Dictionary:
+	if abs(direction.x) + abs(direction.y) != 1:
+		return {"ok": false, "kind": &"move", "reason": &"invalid_direction"}
+	if player_step_in_progress():
+		return {"ok": false, "kind": &"move", "reason": &"step_in_progress"}
+	## `.CheckTile` overwrites the pressed direction, so a forced walk is not a
+	## turn however the facing sits; move_result owns that branch.
+	var forced: StringName = StringName(forced_movement().get("kind", &"none"))
+	if forced == &"none":
+		var pressed_facing: int = _facing_for_direction(direction)
+		if pressed_facing != player_facing:
+			player_facing = pressed_facing
+			_start_player_step(Vector2i.ZERO, STEP_FRAMES_TURN)
+			return {
+				"ok": true, "kind": &"turn", "facing": player_facing, "cell": player_cell,
+			}
+	return move_result(direction)
+
+
 func move_result(direction: Vector2i) -> Dictionary:
 	if phone_ring_active():
 		return {"ok": false, "kind": &"move", "reason": &"phone_ring_active"}

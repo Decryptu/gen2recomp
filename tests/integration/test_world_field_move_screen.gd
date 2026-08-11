@@ -326,7 +326,13 @@ func test_choosing_cut_shows_the_message_and_defers_the_block_change() -> void:
 	assert_false(_world_screen._field_move_text)
 	assert_eq(world.block_at(TREE_BLOCK.x, TREE_BLOCK.y), BLOCK_TREE_CUT)
 	assert_true(world.can_walk_to(TREE_CELL))
-	assert_true(_world_screen.move_player(Vector2i.DOWN))
+	## `.CheckTurning` turns on the spot first when the pressed direction is not
+	## the one faced, so the walk is the press after it.
+	_world_screen.move_player(Vector2i.DOWN)
+	while world.player_step_in_progress():
+		world.advance_player_step(1.0)
+	if world.player_cell != TREE_CELL:
+		assert_true(_world_screen.move_player(Vector2i.DOWN))
 	assert_eq(world.player_cell, TREE_CELL)
 
 
@@ -408,7 +414,13 @@ func test_stepping_back_onto_land_stops_surfing_through_the_screen() -> void:
 	# before the screen accepts input again.
 	while world.player_step_in_progress():
 		world.advance_player_step(1.0)
-	assert_true(_world_screen.move_player(Vector2i.UP))
+	## `.CheckTurning` turns on the spot first when the pressed direction is not
+	## the one faced, so the walk is the press after it.
+	_world_screen.move_player(Vector2i.UP)
+	while world.player_step_in_progress():
+		world.advance_player_step(1.0)
+	if world.player_cell != SHORE_CELL:
+		assert_true(_world_screen.move_player(Vector2i.UP))
 	assert_eq(world.player_cell, SHORE_CELL)
 	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
 	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)

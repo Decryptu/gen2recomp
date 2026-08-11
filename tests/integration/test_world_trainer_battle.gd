@@ -54,8 +54,23 @@ func _open_world(with_save: bool = false) -> void:
 	await get_tree().process_frame
 
 
+## One cell, however many presses the cartridge needs for it. The player spawns
+## facing down, so a press in any other direction is `.CheckTurning`'s turn on the
+## spot first and the walk is the press after it; a press in the direction already
+## faced walks straight away.
+func _walk_one(direction: Vector2i) -> void:
+	var before: Vector2i = _world_screen._world.player_cell
+	assert_true(_world_screen.move_player(direction))
+	for _frame: int in 16:
+		await get_tree().process_frame
+		if not _world_screen._world.player_step_in_progress():
+			break
+	if _world_screen._world.player_cell == before:
+		assert_true(_world_screen.move_player(direction))
+
+
 func _trigger_trainer() -> void:
-	assert_true(_world_screen.move_player(Vector2i.RIGHT))
+	await _walk_one(Vector2i.RIGHT)
 	for _frame: int in 80:
 		await get_tree().process_frame
 		if _battle_host() != null:
@@ -121,7 +136,7 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 ## presentation offset eases toward zero instead of snapping.
 func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 	await _open_world()
-	assert_true(_world_screen.move_player(Vector2i.RIGHT))
+	await _walk_one(Vector2i.RIGHT)
 
 	var object := _world_screen._world.objects[0] as Gen2WorldObject
 	var saw_step: bool = false
