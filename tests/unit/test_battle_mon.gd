@@ -169,6 +169,7 @@ func test_every_volatile_field_clears() -> void:
 	mon.encored_slot = 2
 	mon.encore_turns = 3
 	mon.last_move_used = Fixture.TACKLE
+	mon.last_counter_move = Fixture.THUNDERBOLT
 	mon.trapped_turns = 3
 	mon.trapping_move = Fixture.TACKLE
 	mon.perish_count = 2
@@ -192,6 +193,7 @@ func test_every_volatile_field_clears() -> void:
 	assert_eq(mon.encored_slot, -1)
 	assert_eq(mon.encore_turns, 0)
 	assert_eq(mon.last_move_used, 0)
+	assert_eq(mon.last_counter_move, 0)
 	assert_eq(mon.trapped_turns, 0)
 	assert_eq(mon.trapping_move, 0)
 	assert_eq(mon.perish_count, 0)

@@ -906,7 +906,7 @@ func baton_pass_target(side: int) -> int:
 ## cartridge where none of it was ever its own.
 func baton_pass_send_out(side: int, index: int) -> Array:
 	var passed: Dictionary = mon(side).capture_passed_state()
-	var events: Array = send_out(side, index)
+	var events: Array = send_out(side, index, -1, true)
 	if events.is_empty():
 		return events
 	mon(side).apply_passed_state(passed)
@@ -1025,7 +1025,9 @@ func decline_move(side: int) -> Array:
 ## ordinary switch. It exists because `DraggedOutText` is printed between
 ## `ForceEnemySwitch` and `SpikesDamage`, so the line has to land inside this
 ## method rather than around it.
-func send_out(side: int, index: int, dragged_by: int = -1) -> Array:
+func send_out(
+	side: int, index: int, dragged_by: int = -1, preserve_counter_moves: bool = false
+) -> Array:
 	var events: Array = []
 	if is_over():
 		return events
@@ -1037,6 +1039,10 @@ func send_out(side: int, index: int, dragged_by: int = -1) -> Array:
 	if not current.send_out(index):
 		return events
 	_clear_trapping()
+	if not preserve_counter_moves:
+		# NewBattleMonStatus/NewEnemyMonStatus clear both counter-move words.
+		mon(PLAYER).last_counter_move = 0
+		mon(ENEMY).last_counter_move = 0
 	# `BreakAttraction`, which every entrance calls and which clears the flag on
 	# *both* sides rather than only the incoming Pokémon's: whoever the Pokémon
 	# that left was in love with is not on the field any more either.

@@ -648,6 +648,8 @@ static func _apply_smart(
 				_discourage(scores, slot, THIEF_PENALTY)
 			Gen2MoveEffect.FORESIGHT:
 				_smart_foresight(scores, slot, attacker, defender, rng)
+			Gen2MoveEffect.MEAN_LOOK:
+				_smart_mean_look(scores, slot, attacker, defender, rng, has_bench, matchup_score)
 			Gen2MoveEffect.PURSUIT:
 				_smart_pursuit(scores, slot, defender, rng)
 			Gen2MoveEffect.SLEEP_TALK:
@@ -662,7 +664,7 @@ static func _smart_mirror_move(
 	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
 	rng: RandomNumberGenerator
 ) -> void:
-	var copied: int = defender.last_move_used
+	var copied: int = defender.last_counter_move
 	if copied == 0:
 		if _faster(attacker, defender):
 			_discourage(scores, slot)
@@ -683,7 +685,7 @@ static func _smart_mimic(
 	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
 	data: GameData, rng: RandomNumberGenerator
 ) -> void:
-	var copied: int = defender.last_move_used
+	var copied: int = defender.last_counter_move
 	if copied == 0:
 		if _faster(attacker, defender):
 			_discourage(scores, slot)
@@ -727,7 +729,7 @@ static func _smart_sleep_talk(scores: Array, slot: int, attacker: Gen2BattleMon)
 static func _smart_conversion_2(
 	scores: Array, slot: int, defender: Gen2BattleMon, rng: RandomNumberGenerator
 ) -> void:
-	if defender.last_move_used != 0 and not _rolls_under(rng, 25):
+	if defender.last_counter_move != 0 and not _rolls_under(rng, 25):
 		_discourage(scores, slot, 1)
 
 
@@ -1063,7 +1065,7 @@ static func _smart_spite(
 	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
 	rng: RandomNumberGenerator
 ) -> void:
-	var last_move: int = defender.last_move_used
+	var last_move: int = defender.last_counter_move
 	if last_move == 0:
 		if _faster(attacker, defender):
 			_discourage(scores, slot)
@@ -1120,6 +1122,37 @@ static func _smart_foresight(
 	if _rolls_under(rng, AI_39_PERCENT_PLUS_ONE):
 		return
 	_encourage(scores, slot, 2)
+
+
+## `AI_Smart_MeanLook`: the source only wants the trap from above half health,
+## with a live bench, or against a player who is already trapped in a costly
+## state. The Toxic branch is intentionally the cartridge's bug: it encourages
+## Mean Look because the AI's own Pokémon is badly poisoned.
+static func _smart_mean_look(
+	scores: Array, slot: int, attacker: Gen2BattleMon, defender: Gen2BattleMon,
+	rng: RandomNumberGenerator, has_bench: bool, matchup_score: int
+) -> void:
+	if attacker.hp * 2 < attacker.max_hp():
+		_discourage(scores, slot)
+		return
+	if not has_bench:
+		_discourage(scores, slot)
+		return
+
+	var strongly_wanted: bool = attacker.toxic_counter > 0 or Gen2Substatus.has(
+		defender.substatus,
+		Gen2Substatus.ATTRACTED | Gen2Substatus.ROLLOUT
+		| Gen2Substatus.IDENTIFIED | Gen2Substatus.NIGHTMARE
+	)
+	if strongly_wanted:
+		if not _skip_80_20(rng):
+			_encourage(scores, slot, 3)
+		return
+
+	# CheckPlayerMoveTypeMatchups returns 11 when the player has only resisted
+	# attacks. That is the one ordinary case where Mean Look is not discouraged.
+	if matchup_score < Gen2AISwitch.COMFORTABLE_SCORE:
+		_discourage(scores, slot, 1)
 
 
 ## `cp 8 percent; ret c`: the one-in-twelve chance the penalty is not applied, the

@@ -861,6 +861,7 @@ static func _used_move_text(turn: Gen2Turn) -> void:
 	# branch leaves both last-move bytes clear.
 	if not turn.called:
 		turn.attacker().last_move_used = turn.move_number
+		turn.attacker().last_counter_move = turn.move_number
 	turn.emit(Gen2Battle.USED_MOVE, {"move": turn.move_number})
 
 
@@ -959,6 +960,7 @@ static func _pay_day(turn: Gen2Turn) -> void:
 ## and types. HP, level, status, item and experience remain the user's.
 static func _transform(turn: Gen2Turn) -> void:
 	turn.attacker().last_move_used = 0 # ClearLastMove opens the source routine.
+	turn.attacker().last_counter_move = 0
 	if not turn.attacker().transform_into(turn.defender()):
 		turn.emit(Gen2Battle.MOVE_FAILED)
 		turn.end()
@@ -1259,6 +1261,7 @@ static func _splash(turn: Gen2Turn) -> void:
 ## can succeed, so a failed call clears the remembered move too.
 static func _clear_last_move_for_call(turn: Gen2Turn) -> void:
 	turn.attacker().last_move_used = 0
+	turn.attacker().last_counter_move = 0
 
 
 static func _fail_called_move(turn: Gen2Turn) -> void:
@@ -1271,7 +1274,7 @@ static func _fail_called_move(turn: Gen2Turn) -> void:
 ## perhaps-surprising `CheckUserMove / jr nz, .use` branch.
 static func _mirror_move(turn: Gen2Turn) -> void:
 	_clear_last_move_for_call(turn)
-	var copied: int = turn.defender().last_move_used
+	var copied: int = turn.defender().last_counter_move
 	if copied == 0 or turn.attacker().moves.has(copied) \
 		or turn.data().move(copied).is_empty():
 		_fail_called_move(turn)
@@ -1284,7 +1287,7 @@ static func _mirror_move(turn: Gen2Turn) -> void:
 ## the original through [method Gen2BattleMon.reset_volatile].
 static func _mimic(turn: Gen2Turn) -> void:
 	_clear_last_move_for_call(turn)
-	var copied: int = turn.defender().last_move_used
+	var copied: int = turn.defender().last_counter_move
 	var slot: int = turn.attacker().moves.find(Gen2MoveEffect.MIMIC_MOVE)
 	if copied == 0 or copied == Gen2Damage.STRUGGLE or slot < 0 \
 		or turn.attacker().moves.has(copied) or turn.data().move(copied).is_empty():
@@ -1366,7 +1369,7 @@ static func _sleep_talk(turn: Gen2Turn) -> void:
 ## neither can reach this command in the current engine.
 static func _sketch(turn: Gen2Turn) -> void:
 	_clear_last_move_for_call(turn)
-	var copied: int = turn.defender().last_move_used
+	var copied: int = turn.defender().last_counter_move
 	var slot: int = turn.attacker().moves.find(Gen2MoveEffect.SKETCH_MOVE)
 	if _substitute_refuses(turn) or copied == 0 or copied == Gen2Damage.STRUGGLE \
 		or slot < 0 or turn.attacker().moves.has(copied) \
@@ -1421,7 +1424,7 @@ static func _conversion(turn: Gen2Turn) -> void:
 ## the cartridge's disjoint type-number runs until one resists or ignores it.
 ## Both active type bytes become the answer.
 static func _conversion_2(turn: Gen2Turn) -> void:
-	var last_move: int = turn.defender().last_move_used
+	var last_move: int = turn.defender().last_counter_move
 	var move: Dictionary = turn.data().move(last_move)
 	if last_move == 0 or move.is_empty():
 		_fail_called_move(turn)
@@ -2557,7 +2560,7 @@ static func _psych_up(turn: Gen2Turn) -> void:
 
 
 ## Locks whichever of the target's slots holds
-## [member Gen2BattleMon.last_move_used], found by searching the target's move
+## [member Gen2BattleMon.last_counter_move], found by searching the target's move
 ## list as the cartridge does, since nothing the attacker did carries the slot.
 ##
 ## Fails silently if the target has not moved this battle, the move was Struggle,
@@ -2570,7 +2573,7 @@ static func _disable(turn: Gen2Turn) -> void:
 		turn.emit(Gen2Battle.MOVE_FAILED)
 		return
 
-	var last_move: int = defender.last_move_used
+	var last_move: int = defender.last_counter_move
 	if last_move == 0 or last_move == Gen2Damage.STRUGGLE:
 		turn.emit(Gen2Battle.MOVE_FAILED)
 		return
@@ -3280,7 +3283,7 @@ static func _lock_on(turn: Gen2Turn) -> void:
 ## move of Struggle, a slot already empty of PP, and the missing slot above.
 static func _spite(turn: Gen2Turn) -> void:
 	var defender: Gen2BattleMon = turn.defender()
-	var last_move: int = defender.last_move_used
+	var last_move: int = defender.last_counter_move
 	if last_move == 0 or last_move == Gen2Damage.STRUGGLE:
 		turn.emit(Gen2Battle.NO_EFFECT, {"target": turn.target})
 		return

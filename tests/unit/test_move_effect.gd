@@ -1106,7 +1106,8 @@ func test_disable_attract_encore_mist_and_focus_energy_have_their_own_sequences(
 
 func test_disable_locks_the_targets_own_last_move() -> void:
 	var battle: Gen2Battle = _battle()
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_move_used = Fixture.STRUGGLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
 	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
 	assert_eq(battle.enemy.disabled_slot, 0)
@@ -1124,7 +1125,7 @@ func test_disable_fails_against_a_target_that_has_not_moved_yet() -> void:
 
 func test_disable_fails_against_struggle() -> void:
 	var battle: Gen2Battle = _battle()
-	battle.enemy.last_move_used = Fixture.STRUGGLE
+	battle.enemy.last_counter_move = Fixture.STRUGGLE
 	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
 	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
 	assert_eq(battle.enemy.disabled_slot, -1)
@@ -1132,7 +1133,7 @@ func test_disable_fails_against_struggle() -> void:
 
 func test_disable_fails_against_an_already_disabled_target() -> void:
 	var battle: Gen2Battle = _battle()
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	battle.enemy.disabled_slot = 0
 	battle.enemy.disable_turns = 3
 	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
@@ -1143,7 +1144,7 @@ func test_disable_fails_against_an_already_disabled_target() -> void:
 
 func test_disable_fails_against_a_move_already_out_of_pp() -> void:
 	var battle: Gen2Battle = _battle()
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	battle.enemy.pp[0] = 0
 	var turn: Gen2Turn = _turn(battle, Fixture.DISABLE_MOVE)
 	Gen2EffectCommands.run(Gen2EffectCommands.DISABLE, turn)
@@ -1162,6 +1163,7 @@ func test_a_disabled_slot_cannot_be_used() -> void:
 func test_encore_locks_the_targets_own_last_move() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.STRUGGLE
 	var turn: Gen2Turn = _turn(battle, Fixture.ENCORE_MOVE)
 	Gen2EffectCommands.run(Gen2EffectCommands.ENCORE, turn)
 	assert_eq(battle.enemy.encored_slot, 0)
@@ -3752,7 +3754,7 @@ func test_spite_takes_two_to_five_pp_off_the_targets_last_move() -> void:
 	for seed_value: int in 60:
 		var battle: Gen2Battle = _battle()
 		battle.rng.seed = seed_value
-		battle.enemy.last_move_used = Fixture.TACKLE
+		battle.enemy.last_counter_move = Fixture.TACKLE
 		var turn: Gen2Turn = _run_move(battle, Fixture.SPITE)
 
 		var event: Dictionary = _first(turn.events, Gen2Battle.PP_REDUCED)
@@ -3770,7 +3772,7 @@ func test_spite_takes_two_to_five_pp_off_the_targets_last_move() -> void:
 ## PP left loses one.
 func test_spite_clamps_to_the_pp_that_is_there() -> void:
 	var battle: Gen2Battle = _battle()
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	battle.enemy.pp[0] = 1
 	var turn: Gen2Turn = _run_move(battle, Fixture.SPITE)
 
@@ -3786,13 +3788,13 @@ func test_spite_refuses_a_target_with_nothing_to_drain() -> void:
 
 	# Struggle, which is not in any list to drain.
 	var struggled: Gen2Battle = _battle()
-	struggled.enemy.last_move_used = Gen2Damage.STRUGGLE
+	struggled.enemy.last_counter_move = Gen2Damage.STRUGGLE
 	assert_eq(_of_type(_run_move(struggled, Fixture.SPITE).events,
 		Gen2Battle.NO_EFFECT).size(), 1)
 
 	# A slot already empty.
 	var spent: Gen2Battle = _battle()
-	spent.enemy.last_move_used = Fixture.TACKLE
+	spent.enemy.last_counter_move = Fixture.TACKLE
 	spent.enemy.pp[0] = 0
 	assert_eq(_of_type(_run_move(spent, Fixture.SPITE).events,
 		Gen2Battle.NO_EFFECT).size(), 1)
@@ -3800,7 +3802,7 @@ func test_spite_refuses_a_target_with_nothing_to_drain() -> void:
 	# A move no longer in the list, which the cartridge's own unbounded loop would
 	# have run off the end of.
 	var replaced: Gen2Battle = _battle()
-	replaced.enemy.last_move_used = Fixture.SLASH
+	replaced.enemy.last_counter_move = Fixture.SLASH
 	assert_eq(_of_type(_run_move(replaced, Fixture.SPITE).events,
 		Gen2Battle.NO_EFFECT).size(), 1)
 
@@ -4135,7 +4137,7 @@ func test_mirror_move_refuses_a_move_the_user_already_knows() -> void:
 		Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
 		_rng
 	)
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	var turn: Gen2Turn = _turn(battle, Fixture.MIRROR_MOVE)
 	Gen2EffectCommands.run(Gen2EffectCommands.MIRROR_MOVE, turn)
 	assert_true(turn.ended)
@@ -4235,7 +4237,7 @@ func test_mimic_and_sketch_refuse_invalid_or_already_known_moves() -> void:
 			Gen2BattleMon.create(_data, Fixture.GEODUDE, 50, [Fixture.TACKLE]),
 			_rng
 		)
-		battle.enemy.last_move_used = Fixture.TACKLE
+		battle.enemy.last_counter_move = Fixture.TACKLE
 		var turn: Gen2Turn = _turn(battle, number)
 		Gen2EffectCommands.run(
 			Gen2EffectCommands.MIMIC if number == Fixture.MIMIC else Gen2EffectCommands.SKETCH,
@@ -4249,7 +4251,7 @@ func test_sketch_is_refused_by_the_targets_substitute() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.player.moves = [Fixture.SKETCH]
 	battle.player.pp = [1]
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	battle.enemy.substatus = Gen2Substatus.SUBSTITUTE
 	var turn: Gen2Turn = _turn(battle, Fixture.SKETCH)
 	Gen2EffectCommands.run(Gen2EffectCommands.SKETCH, turn)
@@ -4291,7 +4293,7 @@ func test_conversion2_picks_a_type_that_resists_the_last_move() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.player.moves = [Fixture.CONVERSION_2]
 	battle.player.pp = [30]
-	battle.enemy.last_move_used = Fixture.TACKLE
+	battle.enemy.last_counter_move = Fixture.TACKLE
 	var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION_2)
 	var picked: int = int(battle.player.types()[0])
 	assert_lt(
@@ -4307,7 +4309,7 @@ func test_conversion2_refuses_no_move_and_curse_type() -> void:
 		var battle: Gen2Battle = _battle()
 		battle.player.moves = [Fixture.CONVERSION_2]
 		battle.player.pp = [30]
-		battle.enemy.last_move_used = last_move
+		battle.enemy.last_counter_move = last_move
 		var turn: Gen2Turn = _run_move(battle, Fixture.CONVERSION_2)
 		assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1, "move %d" % last_move)
 

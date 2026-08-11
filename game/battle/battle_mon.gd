@@ -134,6 +134,10 @@ var turns_taken: int = 0
 ## does, since a freshly sent-out Pokémon has not used a move yet.
 var last_move_used: int = 0
 
+## The separate `wLast*CounterMove` word used by copied moves, PP-draining
+## effects, counter moves and the switch AI. Encore reads last_move_used.
+var last_counter_move: int = 0
+
 ## Mimic replaces one battle move but not the party move behind it. The source
 ## keeps those in separate structs; this model keeps the original row here so a
 ## switch and save writeback see the party copy while the active battle sees the
@@ -345,6 +349,7 @@ const PASSED_FIELDS: Array[String] = [
 	"disable_turns", "encored_slot", "encore_turns", "trapped_turns",
 	"trapping_move", "perish_count", "substitute_hp", "turns_taken",
 	"last_move_used", "fury_cutter_count", "protect_count", "minimized",
+	"last_counter_move",
 ]
 
 
@@ -386,6 +391,7 @@ func reset_volatile() -> void:
 	substitute_hp = 0
 	turns_taken = 0
 	last_move_used = 0
+	last_counter_move = 0
 	fury_cutter_count = 0
 	protect_count = 0
 	bide_turns = 0
