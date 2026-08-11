@@ -2029,6 +2029,23 @@ func test_a_swimming_object_wants_water_where_every_other_object_wants_land() ->
 	assert_false(world.can_object_walk_to(Vector2i(11, 10), object, Vector2i.UP))
 
 
+## WillObjectRemainOnWater's big-object branch checks the two cells newly
+## occupied by the moving edge, rather than only the destination anchor.
+func test_a_big_object_checks_both_cells_on_its_new_edge() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	object.movement = Gen2WorldObject.MOVEMENT_BIGDOLL
+	object.cell = Vector2i(10, 9)
+	object.initial_cell = object.cell
+
+	# Moving down adds (10,11) and (11,11). The fixture's latter cell is water;
+	# the old one-cell check would incorrectly accept the anchor at (10,10).
+	assert_false(world.can_object_walk_to(Vector2i(10, 10), object, Vector2i.DOWN))
+
+	world.current_map.collision[11 * world.current_map.collision_width + 11] = 0
+	assert_true(world.can_object_walk_to(Vector2i(10, 10), object, Vector2i.DOWN))
+
+
 ## SPRITEMOVEDATA_SWIM_WANDER was already listed as supported and advancing, so
 ## before the permission split it was asked to decide every frame and refused
 ## every frame. Its radius still holds: the source's own bug doc says swimming

@@ -3665,22 +3665,60 @@ func _step_permission_allows(cell: Vector2i, direction: Vector2i) -> bool:
 func can_object_walk_to(
 	cell: Vector2i, moving: Gen2WorldObject, direction: Vector2i = Vector2i.ZERO
 ) -> bool:
-	if current_map == null or cell.x < 0 or cell.y < 0 \
-		or cell.x >= current_map.collision_width or cell.y >= current_map.collision_height:
+	if current_map == null or moving == null:
 		return false
+	var checked_cells: Array[Vector2i] = _object_landing_cells(moving, cell, direction)
+	for checked: Vector2i in checked_cells:
+		if checked.x < 0 or checked.y < 0 \
+			or checked.x >= current_map.collision_width \
+			or checked.y >= current_map.collision_height:
+			return false
 	var wanted: int = Gen2WorldCollision.WATER_TILE if moving.is_swimming() \
 		else Gen2WorldCollision.LAND_TILE
-	if Gen2WorldCollision.permission_for(collision_code_at(cell)) != wanted:
-		return false
+	for checked: Vector2i in checked_cells:
+		if Gen2WorldCollision.permission_for(collision_code_at(checked)) != wanted:
+			return false
 	if direction != Vector2i.ZERO and Gen2WorldCollision.side_wall_step_blocked(
 		collision_code_at(moving.cell), collision_code_at(cell), direction
 	):
 		return false
 	for object: Gen2WorldObject in objects:
-		if object != moving and object.active and not object.deleted \
-			and object.cell == cell:
+		if object == moving or not object.active or object.deleted:
+			continue
+		for checked: Vector2i in checked_cells:
+			if object.occupies(checked):
+				return false
+	for checked: Vector2i in checked_cells:
+		if checked == player_cell:
 			return false
-	return cell != player_cell
+	return true
+
+
+## `WillObjectRemainOnWater` checks the two cells a big object newly occupies,
+## not its already occupied anchor row or column. With no movement direction a
+## caller is asking about the whole footprint, which is the useful public form.
+func _object_landing_cells(
+	moving: Gen2WorldObject, destination: Vector2i, direction: Vector2i
+) -> Array[Vector2i]:
+	if not moving.is_big_object():
+		return [destination]
+	var offsets: Array[Vector2i] = [
+		Vector2i.ZERO, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.ONE,
+	]
+	if direction == Vector2i.ZERO:
+		return offsets.map(func(offset: Vector2i) -> Vector2i: return destination + offset)
+	var previous_anchor: Vector2i = moving.cell
+	var cells: Array[Vector2i] = []
+	for offset: Vector2i in offsets:
+		var target: Vector2i = destination + offset
+		var was_occupied: bool = false
+		for previous_offset: Vector2i in offsets:
+			if target == previous_anchor + previous_offset:
+				was_occupied = true
+				break
+		if not was_occupied:
+			cells.append(target)
+	return cells
 
 
 ## Advances the movement templates whose source behavior is data-driven in this
