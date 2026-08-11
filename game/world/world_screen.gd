@@ -1244,6 +1244,11 @@ func _on_battle_finished(result: Dictionary) -> void:
 		host.queue_free()
 	if _world == null:
 		return
+	var pay_day_money: int = int(result.get("pay_day_money", 0))
+	if pay_day_money > 0 and StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_WON:
+		_world.state.apply_changes({}, {}, {"money": {
+			0: mini(_world.state.money(0) + pay_day_money, Gen2WorldInventory.MAX_MONEY),
+		}})
 	var resumed: Array = _world.complete_runtime_request(result)
 	if resumed.is_empty():
 		if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:

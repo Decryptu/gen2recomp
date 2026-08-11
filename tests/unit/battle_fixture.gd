@@ -52,6 +52,8 @@ const SLEEP_TALK: int = 214
 const BIDE: int = 117
 const RAGE: int = 99
 const FUTURE_SIGHT: int = 248
+const PAY_DAY: int = 6
+const TRANSFORM: int = 144
 
 ## The status moves, in the two shapes they come in. Thunder Wave and Sleep
 ## Powder are the status and nothing else; Ember Burns and Flame Wheel are
@@ -487,6 +489,8 @@ static func _moves() -> Array:
 	# that the tests written before there were status conditions still see the
 	# plain attacks they were written against.
 	var known: Dictionary = {
+		PAY_DAY: ["PAY DAY", 40, NORMAL, 255, 20, Gen2MoveEffect.PAY_DAY, 0],
+		TRANSFORM: ["TRANSFORM", 0, NORMAL, 255, 10, Gen2MoveEffect.TRANSFORM, 0],
 		TACKLE: ["TACKLE", 35, NORMAL, 255, 35, 0, 0],
 		GROWL: ["GROWL", 0, NORMAL, 255, 40, Gen2MoveEffect.STAT_DOWN_BASE, 0],
 		EMBER: ["EMBER", 40, FIRE, 255, 25, Gen2MoveEffect.BURN_HIT, 0],

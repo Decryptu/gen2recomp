@@ -129,6 +129,8 @@ const BIDE_UNLEASHED: StringName = &"bide_unleashed"
 const RAGE_BUILDING: StringName = &"rage_building"
 const FUTURE_SIGHT_SET: StringName = &"future_sight_set"
 const FUTURE_SIGHT_HIT: StringName = &"future_sight_hit"
+const COINS_SCATTERED: StringName = &"coins_scattered"
+const TRANSFORMED: StringName = &"transformed"
 ## Mimic and Sketch both replace their own slot with the opponent's last move,
 ## but only Sketch persists after battle. Separate events keep their two source
 ## lines distinct in the battle screen.
@@ -569,6 +571,10 @@ var _future_sight: Dictionary = {
 	PLAYER: {"count": 0, "damage": 0},
 	ENEMY: {"count": 0, "damage": 0},
 }
+
+## `wPayDayMoney`, capped to its three-byte storage. Awarding it belongs to the
+## world completion boundary; the move command only scatters the coins.
+var pay_day_money: int = 0
 
 ## Moves waiting on [method learn_move] or [method decline_move], one queue per
 ## side, FIFO: a level that teaches two moves into a full six-move team asks
@@ -1210,6 +1216,7 @@ func _run_turn(events: Array) -> Array:
 	while int(_pending_turn["index"]) < acting.size():
 		var side: int = int(acting[int(_pending_turn["index"])])
 		var action: Dictionary = actions[side]
+		var action_event_start: int = events.size()
 		var moving: bool = not (_is_run(action) or _is_switch(action) or _is_item(action))
 		# The faint check is the source's own `HasPlayerFainted`/`HasEnemyFainted`
 		# between the two halves of the turn, and it gates the whole of the second
@@ -1233,6 +1240,7 @@ func _run_turn(events: Array) -> Array:
 		elif moving and side != _pursuit_spent:
 			var slot: int = effective_slot(side, int(action.get("slot", 0)))
 			_act(side, slot, move_for(side, slot), events)
+			_report_unannounced_action_faints(events, action_event_start)
 		# The move asked for a Baton Pass target and nothing behind it can happen
 		# until there is one, the bracket around it included.
 		if _pending_baton_pass >= 0:
@@ -1261,6 +1269,23 @@ func _run_turn(events: Array) -> Array:
 	if is_over():
 		events.append({"type": OVER, "winner": winner()})
 	return events
+
+
+## Core checks both battlers after every action, independently of whether that
+## effect list carried `checkfaint`. Keep effect-owned ordering where an event
+## already exists; fill only the missing report.
+func _report_unannounced_action_faints(events: Array, since: int) -> void:
+	for side: int in [PLAYER, ENEMY]:
+		if not mon(side).is_fainted():
+			continue
+		var reported: bool = false
+		for index: int in range(since, events.size()):
+			var event: Dictionary = events[index]
+			if StringName(event.get("type", &"")) == FAINTED and int(event.get("side", -1)) == side:
+				reported = true
+				break
+		if not reported:
+			events.append({"type": FAINTED, "side": side})
 
 
 ## `HandleFutureSight`, player then enemy outside link battles. The count is

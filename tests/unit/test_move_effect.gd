@@ -704,6 +704,17 @@ func test_status_interruption_cancels_rollout_without_advancing_it() -> void:
 	assert_eq(battle.player.rollout_count, 1)
 
 
+func test_sleep_talk_rollout_does_not_count_or_double_while_asleep() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.player.status = 2
+	battle.player.rollout_count = 3
+	var turn: Gen2Turn = _turn(battle, Fixture.ROLLOUT)
+	turn.damage = 11
+	Gen2EffectCommands.run(Gen2EffectCommands.ROLLOUT_POWER, turn)
+	assert_eq(turn.damage, 11)
+	assert_eq(battle.player.rollout_count, 3)
+
+
 func test_rampage_forces_its_starting_move_and_confuses_after_the_last_turn() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.player.moves = [Fixture.THRASH, Fixture.TACKLE]
@@ -4449,3 +4460,62 @@ func test_future_sight_hits_the_active_target_two_turns_later() -> void:
 	assert_lt(battle.enemy.hp, before)
 	assert_eq(_of_type(events, Gen2Battle.FUTURE_SIGHT_HIT).size(), 1)
 	assert_false(battle.future_sight_pending(Gen2Battle.PLAYER))
+
+
+func test_pay_day_scales_with_level_and_saturates_its_three_byte_total() -> void:
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.PAY_DAY)
+	assert_eq(battle.pay_day_money, battle.player.level * 2)
+	assert_eq(_of_type(turn.events, Gen2Battle.COINS_SCATTERED).size(), 1)
+	battle.pay_day_money = 0xFFFFF0
+	_run_move(battle, Fixture.PAY_DAY)
+	assert_eq(battle.pay_day_money, 0xFFFFFF)
+
+
+func test_transform_copies_the_active_battle_struct_but_not_hp_level_or_status() -> void:
+	var battle: Gen2Battle = _battle()
+	var user: Gen2BattleMon = battle.player
+	var target: Gen2BattleMon = battle.enemy
+	user.take_damage(7)
+	user.status = Gen2Status.BURN
+	target.change_stage("attack", 2)
+	var old_hp: int = user.hp
+	var old_level: int = user.level
+	var turn: Gen2Turn = _run_move(battle, Fixture.TRANSFORM)
+	assert_eq(user.species, target.species)
+	assert_eq(user.moves, target.moves)
+	assert_eq(user.pp, [5])
+	assert_eq(user.dvs, target.dvs)
+	assert_eq(user.stage("attack"), 2)
+	assert_eq(user.hp, old_hp)
+	assert_eq(user.level, old_level)
+	assert_eq(user.status, Gen2Status.BURN)
+	assert_true(Gen2Substatus.has(user.substatus, Gen2Substatus.TRANSFORMED))
+	assert_eq(_of_type(turn.events, Gen2Battle.TRANSFORMED).size(), 1)
+
+
+func test_transform_restores_party_data_on_switch_and_save_writeback() -> void:
+	var original: Gen2BattleMon = Gen2BattleMon.create(
+		_data, Fixture.PIKACHU, 50, [Fixture.TRANSFORM, Fixture.TACKLE]
+	)
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([original, Gen2BattleMon.create(_data, Fixture.BULBASAUR, 20, [Fixture.TACKLE])]),
+		Gen2Party.of(Gen2BattleMon.create(_data, Fixture.GEODUDE, 40, [Fixture.SLASH])),
+		_rng
+	)
+	_run_move(battle, Fixture.TRANSFORM)
+	var saved: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(original)
+	assert_eq(saved.species, Fixture.PIKACHU)
+	assert_eq(saved.moves.slice(0, 2), [Fixture.TRANSFORM, Fixture.TACKLE])
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_eq(original.species, Fixture.PIKACHU)
+	assert_eq(original.moves, [Fixture.TRANSFORM, Fixture.TACKLE])
+
+
+func test_transform_refuses_an_already_transformed_target() -> void:
+	var battle: Gen2Battle = _battle()
+	battle.enemy.substatus |= Gen2Substatus.TRANSFORMED
+	var turn: Gen2Turn = _run_move(battle, Fixture.TRANSFORM)
+	assert_eq(_of_type(turn.events, Gen2Battle.MOVE_FAILED).size(), 1)
+	assert_eq(battle.player.species, Fixture.PIKACHU)

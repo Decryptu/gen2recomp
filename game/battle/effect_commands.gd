@@ -105,6 +105,8 @@ const RAGE_DAMAGE: StringName = &"ragedamage"
 const BUILD_OPPONENT_RAGE: StringName = &"buildopponentrage"
 const CHECK_FUTURE_SIGHT: StringName = &"checkfuturesight"
 const FUTURE_SIGHT: StringName = &"futuresight"
+const PAY_DAY: StringName = &"payday"
+const TRANSFORM: StringName = &"transform"
 
 const CURSE_TYPE: int = 0x13
 ## Conversion2's accepted random type bytes: the physical run including BIRD,
@@ -675,6 +677,10 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_check_future_sight(turn)
 		FUTURE_SIGHT:
 			_future_sight(turn)
+		PAY_DAY:
+			_pay_day(turn)
+		TRANSFORM:
+			_transform(turn)
 		SWITCH_TURN:
 			_switch_turn(turn)
 		CHECK_IMMUNE:
@@ -940,6 +946,26 @@ static func _future_sight(turn: Gen2Turn) -> void:
 	else:
 		turn.emit(Gen2Battle.FUTURE_SIGHT_SET, {"target": turn.target})
 	turn.end()
+
+
+static func _pay_day(turn: Gen2Turn) -> void:
+	turn.battle.pay_day_money = mini(
+		turn.battle.pay_day_money + turn.attacker().level * 2, 0xFFFFFF
+	)
+	turn.emit(Gen2Battle.COINS_SCATTERED, {"amount": turn.attacker().level * 2})
+
+
+## Copies the active opponent's species, moves, DVs, five combat stats, stages
+## and types. HP, level, status, item and experience remain the user's.
+static func _transform(turn: Gen2Turn) -> void:
+	turn.attacker().last_move_used = 0 # ClearLastMove opens the source routine.
+	if not turn.attacker().transform_into(turn.defender()):
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
+		return
+	turn.emit(Gen2Battle.TRANSFORMED, {
+		"species": turn.attacker().species, "target": turn.target,
+	})
 
 
 ## `BattleCommand_Critical`: whether this hit is a critical, at the level the
@@ -2424,6 +2450,10 @@ static func _rollout_check(turn: Gen2Turn) -> void:
 ## own power and the fifth sixteen times it. Defense Curl adds one more.
 static func _rollout_power(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
+	# Sleep Talk can call Rollout while the user remains asleep. The cartridge's
+	# opening SLP_MASK check leaves both the counter and damage untouched.
+	if Gen2Status.is_asleep(mon.status):
+		return
 	if turn.missed:
 		mon.substatus &= ~Gen2Substatus.ROLLOUT
 		return

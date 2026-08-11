@@ -1592,6 +1592,15 @@ func _save_battle_result() -> bool:
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save
 	)
+	# The world host credits its live state from the completion result below;
+	# mirror the same award into the snapshot being written now so Pay Day is not
+	# lost between the battle save and that callback.
+	if save != null and save.world != null and save.world.world_state != null \
+			and _battle.pay_day_money > 0:
+		var balance: int = save.world.world_state.money(0)
+		save.world.world_state.apply_changes({}, {}, {"money": {
+			0: mini(balance + _battle.pay_day_money, Gen2WorldInventory.MAX_MONEY),
+		}})
 	var result: Dictionary = Gen2SaveStore.save(save, _data)
 	if not result["ok"]:
 		push_error("Could not save battle result: %s" % result["message"])
@@ -1624,6 +1633,8 @@ func _finish_world_battle() -> void:
 		"request": _world_battle_request.duplicate(true),
 		"save_written": _save_written,
 	}
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_WON and _battle.pay_day_money > 0:
+		result["pay_day_money"] = _battle.pay_day_money
 	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST:
 		result["recovery"] = _world_battle_recovery.duplicate(true)
 	_world_battle_completion_sent = true
@@ -2197,6 +2208,12 @@ func _describe(event: Dictionary) -> String:
 			if event["winner"] == null:
 				return "Both sides are out of Pokémon!"
 			return "%s won!" % ("The enemy" if event["winner"] == Gen2Battle.ENEMY else "Player")
+		Gen2Battle.COINS_SCATTERED:
+			return "Coins scattered everywhere!"
+		Gen2Battle.TRANSFORMED:
+			return "%s transformed into %s!" % [
+				_battler_name(side), _battler_name(int(event["target"])),
+			]
 	return ""
 
 
