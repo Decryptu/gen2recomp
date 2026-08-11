@@ -456,6 +456,10 @@ func player_step_offset_cells() -> Vector2:
 ## The player's `Facings` frame, 0 to 3. `Gen2WorldObject.walk_frame()` for an
 ## object; the player's own step is paced here rather than on a record.
 func player_walk_frame() -> int:
+	## StepFunction_Turn writes OBJECT_WALKING = STANDING for the whole four
+	## frames. A zero-direction step is that turn, never a walking pose.
+	if _player_step_direction == Vector2i.ZERO:
+		return 0
 	return (_player_step_frame >> 2) & 3
 
 

@@ -3177,9 +3177,11 @@ func test_a_press_in_a_new_direction_turns_on_the_spot_before_it_walks() -> void
 	assert_eq(world.player_facing, Gen2WorldSprite.FACING_RIGHT)
 	assert_eq(world.player_cell, from, "a turn costs no cell")
 	assert_true(world.player_step_in_progress(), "and it costs four frames")
+	assert_eq(world.player_walk_frame(), 0, "StepFunction_Turn stays standing")
 
 	while world.player_step_in_progress():
 		world.advance_player_step(1.0)
+	assert_eq(world.player_walk_frame(), 0, "the completed turn stays standing")
 	var walk: Dictionary = world.player_input_move(Vector2i.RIGHT)
 	assert_true(walk["ok"])
 	assert_ne(walk["kind"], &"turn", "the facing already agrees, so this one walks")

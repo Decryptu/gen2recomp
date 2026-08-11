@@ -556,7 +556,8 @@ func _renderer_input_free() -> bool:
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _overlay_open() or _world.fishing_busy() \
 		or _field_move_text or _world.phone_ring_active() \
-		or not _trainer_approach.is_empty() or _world.player_step_in_progress():
+		or not _trainer_approach.is_empty() or _world.script_busy() \
+		or _world.player_step_in_progress():
 		return false
 	var movement: Dictionary = _world.player_input_move(direction)
 	if not bool(movement.get("ok", false)):

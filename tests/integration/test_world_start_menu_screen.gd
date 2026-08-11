@@ -499,6 +499,9 @@ func test_start_menu_does_not_open_while_battling_fishing_or_scripted() -> void:
 	assert_true(_world_screen._world.script_busy())
 	_world_screen._open_start_menu()
 	assert_null(_world_screen._start_menu_host)
+	var before_scripted_move: Vector2i = _world_screen._world.player_cell
+	assert_false(_world_screen.move_player(Vector2i.RIGHT))
+	assert_eq(_world_screen._world.player_cell, before_scripted_move)
 
 
 func _kinds(host: Gen2StartMenuScreen) -> Array:
