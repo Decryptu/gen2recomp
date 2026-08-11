@@ -14,7 +14,7 @@ fail() {
 	echo "pre-commit: refusing to commit cartridge data." >&2
 	echo "$1" >&2
 	echo "" >&2
-	echo "gen2recomp is bring-your-own-ROM. Keep game files outside the repo." >&2
+	echo "pokerecomp is bring-your-own-ROM. Keep game files outside the repo." >&2
 	exit 1
 }
 

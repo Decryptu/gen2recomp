@@ -32,7 +32,7 @@ func _build() -> void:
 
 	var build: VBoxContainer = _card(column, "This build")
 	build.add_child(Gen2LauncherUI.body(
-		_theme, "gen2recomp %s" % Gen2UpdateCheck.current_version()
+		_theme, "pokerecomp %s" % Gen2UpdateCheck.current_version()
 	))
 	build.add_child(Gen2LauncherUI.muted(
 		_theme,

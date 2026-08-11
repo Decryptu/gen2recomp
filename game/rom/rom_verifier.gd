@@ -83,7 +83,7 @@ static func identify(path: String) -> Dictionary:
 	if row.is_empty():
 		result["status"] = Status.UNKNOWN_ROM
 		result["message"] = (
-			"Unrecognised ROM (sha1 %s). gen2recomp supports Gold, Silver and Crystal."
+			"Unrecognised ROM (sha1 %s). pokerecomp supports Gold, Silver and Crystal."
 			% sha1
 		)
 		return result

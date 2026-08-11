@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/banner.png" alt="gen2recomp" width="820">
+  <img src="assets/brand/banner.png" alt="pokerecomp" width="820">
 </p>
 
 <p align="center">
@@ -367,7 +367,7 @@ Windows, macOS, Linux, Android and iOS use GL Compatibility.
 matching export templates first, then:
 
 ```bash
-godot --headless --path . --export-release "Linux" builds/linux/gen2recomp.x86_64
+godot --headless --path . --export-release "Linux" builds/linux/pokerecomp.x86_64
 ```
 
 Tests, tools and GUT are excluded, and `roms/` and the `user://` cache are not

@@ -97,7 +97,7 @@ Mods load the same way in an exported build as in the editor: the entry script
 is plain GDScript read at runtime, even though the game's own scripts ship as
 binary tokens. An installed mod loads immediately, without a restart.
 
-`user://mods/` is the platform's `app_userdata/gen2recomp/mods` on desktop, the
+`user://mods/` is the platform's `app_userdata/pokerecomp/mods` on desktop, the
 app's `Documents/mods` on iOS (reachable in the Files app, since the export sets
 `UIFileSharingEnabled`), and internal app storage on Android, where the system
 file picker is how an archive gets in.

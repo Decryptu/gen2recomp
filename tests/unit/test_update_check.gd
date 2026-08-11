@@ -38,7 +38,7 @@ func test_a_release_document_reads_into_display_fields() -> void:
 	var release: Dictionary = Gen2UpdateCheck.parse_release(JSON.stringify({
 		"tag_name": "v0.2.0",
 		"name": "Second release",
-		"html_url": "https://github.com/Decryptu/gen2recomp/releases/tag/v0.2.0",
+		"html_url": "https://github.com/Decryptu/pokerecomp/releases/tag/v0.2.0",
 		"published_at": "2026-08-08T10:00:00Z",
 	}))
 

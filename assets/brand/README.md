@@ -1,6 +1,6 @@
 # Brand assets
 
-Use these authored assets when writing about gen2recomp in articles, package
+Use these authored assets when writing about pokerecomp in articles, package
 listings, wiki links or talks.
 
 | File | Size and use |

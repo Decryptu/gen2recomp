@@ -227,13 +227,13 @@ func _build_ui() -> void:
 	_export_dialog = _picker(
 		"Export this save slot",
 		FileDialog.FILE_MODE_SAVE_FILE,
-		PackedStringArray(["*.json; gen2recomp save"]),
+		PackedStringArray(["*.json; pokerecomp save"]),
 	)
 	_export_dialog.file_selected.connect(_export_selected_slot)
 	_slot_import_dialog = _picker(
-		"Import a gen2recomp save",
+		"Import a pokerecomp save",
 		FileDialog.FILE_MODE_OPEN_FILE,
-		PackedStringArray(["*.json; gen2recomp save"]),
+		PackedStringArray(["*.json; pokerecomp save"]),
 	)
 	_slot_import_dialog.file_selected.connect(_import_slot_file)
 
