@@ -108,26 +108,24 @@ static func _lookup(palette: PackedColorArray, transparent_background: bool) -> 
 	return out
 
 
-## `PlaceGraphic`'s `.right` branch, which `wBoxAlignment` selects.
+## What `wBoxAlignment` produces, which is a plain horizontal mirror.
 ##
-## It walks the tile columns from the right rather than the left
-## (`engine/gfx/place_graphic.asm`: `dec hl` against `inc hl`), so the pic's
-## first tile column lands in the box's last. The tiles themselves are not
-## flipped, which is why this reverses eight-pixel strips rather than mirroring
-## pixels. `PrepMonFrontpic` is the one caller that sets the flag, and the Oak
-## speech is the one screen that reaches it, so the intro's Pokemon faces the
-## other way from its own front pic.
-static func column_reversed(image: Image, tile: int = 8) -> Image:
-	if image == null or tile <= 0:
+## The flag is read twice, and only both halves together make sense of it.
+## `LoadOrientedFrontpic`'s `.x_flip` (`engine/gfx/load_pics.asm:401`) bit-
+## reverses every byte of pic data as it loads, mirroring each tile's own
+## pixels; `PlaceGraphic`'s `.right` (`engine/gfx/place_graphic.asm:30`) then
+## walks the tile columns with `dec hl` instead of `inc hl`, so the pic's first
+## tile column lands in the box's last. Reversing the columns without flipping
+## the tiles scrambles the sprite, which is what a column-strip reversal alone
+## did here.
+##
+## The two compose exactly into [method Image.flip_x]: a pixel at
+## `x = 8 * column + px` lands at `8 * (columns - 1 - column) + (7 - px)`, which
+## is `width - 1 - x`. `PrepMonFrontpic` (`home/pokemon.asm:61`) is the one
+## caller that sets the flag and the Oak speech the one screen that reaches it.
+static func x_flipped(image: Image) -> Image:
+	if image == null:
 		return image
-	var columns: int = image.get_width() / tile
-	if columns <= 1:
-		return image
-	var out: Image = Image.create_empty(
-		image.get_width(), image.get_height(), false, image.get_format()
-	)
-	for column: int in columns:
-		var from := Rect2i(column * tile, 0, tile, image.get_height())
-		var to := Vector2i((columns - 1 - column) * tile, 0)
-		out.blit_rect(image, from, to)
+	var out: Image = image.duplicate()
+	out.flip_x()
 	return out

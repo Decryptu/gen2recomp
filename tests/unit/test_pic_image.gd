@@ -111,3 +111,43 @@ func test_an_unknown_slot_yields_an_image_rather_than_an_error() -> void:
 		_atlas_indices(), _atlas(), {"slot": -1}, _palette()
 	)
 	assert_gt(image.get_width(), 0)
+
+
+## `wBoxAlignment` is both halves of the flip or it is neither. `LoadOrientedFrontpic`
+## mirrors each tile's own pixels and `PlaceGraphic`'s `.right` reverses the tile
+## column order; doing only the second scrambles the sprite.
+func test_x_flipped_mirrors_pixels_within_a_tile_not_just_tile_columns() -> void:
+	# One 8x1 strip: a single lit pixel hard against the left edge.
+	var indices: PackedByteArray = PackedByteArray([1, 0, 0, 0, 0, 0, 0, 0])
+	var image: Image = Gen2PicImage.from_indices(indices, 8, 1, _palette())
+
+	var flipped: Image = Gen2PicImage.x_flipped(image)
+
+	assert_eq(flipped.get_pixel(7, 0), RED, "the lit pixel crosses to the right edge")
+	assert_eq(
+		flipped.get_pixel(0, 0), Color.WHITE,
+		"a column-strip reversal alone would leave it where it started"
+	)
+
+
+func test_x_flipped_reverses_tile_columns_too() -> void:
+	# Two 8x1 tiles, lit only in the first.
+	var indices: PackedByteArray = PackedByteArray([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+	var image: Image = Gen2PicImage.from_indices(indices, 16, 1, _palette())
+
+	var flipped: Image = Gen2PicImage.x_flipped(image)
+
+	assert_eq(flipped.get_pixel(15, 0), RED, "the first tile lands in the last column")
+	assert_eq(flipped.get_pixel(0, 0), Color.WHITE)
+
+
+func test_x_flipped_leaves_the_source_alone() -> void:
+	var image: Image = Gen2PicImage.from_indices(PackedByteArray([1, 0]), 2, 1, _palette())
+
+	var _flipped: Image = Gen2PicImage.x_flipped(image)
+
+	assert_eq(image.get_pixel(0, 0), RED, "the caller's image is not flipped in place")
+
+
+func test_x_flipped_tolerates_a_null_image() -> void:
+	assert_null(Gen2PicImage.x_flipped(null))
