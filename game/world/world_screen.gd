@@ -59,6 +59,7 @@ var _world: Gen2WorldAPI = null
 ## only has to satisfy Gen2ModHost.WORLD_RENDERER_METHODS, not extend the 2D one.
 var _renderer: Node = null
 var _animation: Gen2WorldAnimation = null
+var _effects: Gen2WorldEffects = null
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
@@ -96,6 +97,7 @@ var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 ## Paces the held-direction poll at the hardware's frame rate rather than the
 ## host's. See [method _advance_held_direction].
 var _walk_accumulator: float = 0.0
+var _screen_base_position: Vector2 = Vector2.ZERO
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -176,6 +178,7 @@ func _build_world() -> void:
 	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
+	_effects = Gen2WorldEffects.new()
 	_world.set_world_clock(initial_day, initial_hour, initial_minute)
 	_world.set_object_time(initial_hour, time_of_day)
 	var rods: Array[StringName] = _world.available_fishing_rods()
@@ -183,6 +186,7 @@ func _build_world() -> void:
 		_selected_rod = rods[0]
 	_animation.configure(_world, time_of_day)
 	_build_renderer()
+	_screen_base_position = _screen.position
 	_audio_player = AUDIO_PLAYER_SCRIPT.new()
 	_audio_player.name = "AudioPlayer"
 	add_child(_audio_player)
@@ -297,6 +301,9 @@ func cycle_world_renderer() -> Dictionary:
 
 func _process(delta: float) -> void:
 	_advance_game_time(delta)
+	if _effects != null:
+		_effects.advance(delta)
+		_apply_world_effect_offset()
 	if _animation != null and _animation.advance(delta) and _renderer != null:
 		_renderer.refresh_animation()
 	if _world != null and _world.advance_player_step(delta) and _renderer != null:
@@ -2120,6 +2127,23 @@ func _show_script_results(results: Array) -> void:
 				_show_story_picture(int(result_event.get("pokemon", 0)))
 			elif result_event.get("type", &"") == &"pokemon_picture_closed":
 				_hide_story_picture()
+			elif result_event.get("type", &"") == &"screen_shake_requested":
+				if _effects != null:
+					_effects.start_screen_shake(
+						int(result_event.get("strength", 0)),
+						&"screen_shake",
+						result_event,
+					)
+				_apply_world_effect_offset()
+			elif result_event.get("type", &"") == &"tree_shake_requested":
+				if _effects != null:
+					_effects.start_tree_shake(result_event)
+				_apply_world_effect_offset()
+			elif result_event.get("type", &"") in [
+				&"rock_smash_effect_requested",
+				&"movement_command_requested",
+			]:
+				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
 			elif result_event.get("type", &"") == &"warp":
 				map_changed = true
 			elif result_event.get("type", &"") == &"world_clock_changed":
@@ -2158,6 +2182,13 @@ func _show_script_results(results: Array) -> void:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+
+
+func _apply_world_effect_offset() -> void:
+	if _screen == null:
+		return
+	var effect_offset: Vector2 = _effects.offset() if _effects != null else Vector2.ZERO
+	_screen.position = _screen_base_position + effect_offset
 
 
 ## The yes half of an Ask*Script. Each move's own request is what decides
