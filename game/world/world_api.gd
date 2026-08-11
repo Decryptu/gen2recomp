@@ -117,11 +117,12 @@ var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
 var _object_visibility_overrides: Dictionary = {}
+var _transient_object_visibility_overrides: Dictionary = {}
 ## Live cells and facings written by moveobject, turnobject, followers and the
 ## trainer approach. The cartridge keeps the same values in wMapObjects, which
 ## a map load rebuilds from ROM, so these do not outlive the loaded map; see
-## _apply_map(). Visibility is not one of them, because disappear/appear write
-## event flags, which the cartridge does persist.
+## _apply_map(). Flagged disappear/appear visibility is persistent; flagless and
+## movement-level visibility uses a transient override cleared by map rebuild.
 var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
@@ -3162,6 +3163,11 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 		match event_type:
 			&"object_visibility":
 				_object_visibility_overrides[key] = bool(event.get("active", false))
+				if object_index < objects.size() \
+					and (objects[object_index] as Gen2WorldObject).event_flag <= 0:
+					_transient_object_visibility_overrides[key] = true
+				else:
+					_transient_object_visibility_overrides.erase(key)
 				reload_objects = true
 			&"object_position":
 				var cell: Variant = event.get("cell", Vector2i.ZERO)
@@ -3241,10 +3247,14 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			&"show_object":
 				object.deleted = false
 				object.active = true
-				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = true
+				var show_key: String = _object_key(map_group, map_number, object_index)
+				_object_visibility_overrides[show_key] = true
+				_transient_object_visibility_overrides[show_key] = true
 			&"hide_object":
 				object.active = false
-				_object_visibility_overrides[_object_key(map_group, map_number, object_index)] = false
+				var hide_key: String = _object_key(map_group, map_number, object_index)
+				_object_visibility_overrides[hide_key] = false
+				_transient_object_visibility_overrides[hide_key] = true
 			&"remove_object":
 				object.deleted = true
 				object.active = false
@@ -3268,6 +3278,12 @@ func _apply_object_movement(event: Dictionary) -> Array:
 	_object_position_overrides[key] = object.cell
 	_object_facing_overrides[key] = object.facing
 	return generated
+
+
+func _clear_transient_object_visibility_overrides() -> void:
+	for key: String in _transient_object_visibility_overrides:
+		_object_visibility_overrides.erase(key)
+	_transient_object_visibility_overrides.clear()
 
 
 ## A scripted step commits its cell without a permission check: every step
@@ -4345,6 +4361,10 @@ func _apply_map(
 	# and the story then found nothing at his authored (5, 2) on returning.
 	_object_position_overrides.clear()
 	_object_facing_overrides.clear()
+	# `appear`/`disappear` with an object event flag persist through the source's
+	# temporary map-flag reset. Flagless visibility and movement-level show/hide
+	# are live-map changes, so only those overrides expire on a map load.
+	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
 	# ResetFlashIfOutOfCave, which runs in map setup: stepping out into a route
 	# or a town puts the light out, and a cave to cave doorway does not.
@@ -4399,6 +4419,7 @@ func reload_current_map() -> Dictionary:
 	_pending_headbutt.clear()
 	_pending_rock_smash.clear()
 	_pending_flash.clear()
+	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}

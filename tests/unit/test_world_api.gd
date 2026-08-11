@@ -4545,6 +4545,22 @@ func test_disappear_and_appear_update_the_object_event_flag() -> void:
 	assert_eq(world.visible_objects().size(), 1)
 
 
+func test_flagless_disappear_returns_when_the_map_rebuilds_objects() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6045"] = [Gen2WorldScript.raw_opcode(0x6D, true), 2, 0x91]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["objects"][0]["event_flag"] = 0
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6045
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+
+	var disappeared: Array = world.dispatch_script_events()
+	assert_eq(disappeared[0]["status"], &"complete", JSON.stringify(disappeared))
+	assert_eq(world.visible_objects().size(), 0)
+	assert_true(world.reload_current_map()["ok"])
+	assert_eq(world.visible_objects().size(), 1)
+
+
 func test_movement_remove_object_is_live_until_the_next_map_reload() -> void:
 	RomCache.write_json(RomCache.world_movements_path(_directory), {
 		"48:6120": [0x49, 0x47],
