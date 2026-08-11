@@ -76,6 +76,18 @@ var ended: bool = false
 ## spending again on the turn the attack actually lands.
 var locked: bool = false
 
+## A move entered through Metronome, Mirror Move or Sleep Talk. `ResetTurn`
+## marks the cartridge's temporary charging byte before it re-enters `DoMove`:
+## the called sequence still announces and executes, but `doturn` spends no PP
+## and does not add a second turn. This flag is that temporary byte, separate
+## from [member locked], which is a real multi-turn continuation.
+var called: bool = false
+
+## A called-move command asks the effect interpreter to replace this turn's
+## move and restart at that move's first command. Zero means no restart is
+## pending. [Gen2Battle] consumes it immediately after the command returns.
+var called_move_number: int = 0
+
 ## The accuracy byte this move is rolled against, or -1 for the move's own.
 ## `wPlayerMoveStruct` is a per-turn copy the cartridge is free to write into;
 ## [member move] is the cached row, so what would be a write there is this

@@ -1958,6 +1958,18 @@ func _describe(event: Dictionary) -> String:
 			]
 		Gen2Battle.MOVE_FAILED:
 			return "But it failed!"
+		Gen2Battle.MIMIC_LEARNED:
+			return "%s learned %s!" % [
+				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.SKETCHED_MOVE:
+			return "%s SKETCHED %s!" % [
+				_battler_name(side), String(_data.move(int(event["move"])).get("name", "")),
+			]
+		Gen2Battle.TYPE_CHANGED:
+			return "%s transformed into the %s-type!" % [
+				_battler_name(side), _data.type_name(int(event["type_number"])),
+			]
 		Gen2Battle.DISABLE_INFLICTED:
 			return "%s's %s was disabled!" % [
 				_battler_name(int(event["target"])), String(_data.move(int(event["move"])).get("name", "")),

@@ -42,6 +42,13 @@ const THUNDERBOLT: int = 85
 const SLASH: int = 163
 const STRUGGLE: int = 165
 const GROWL: int = 45
+const METRONOME: int = 118
+const MIRROR_MOVE: int = 119
+const MIMIC: int = 102
+const SKETCH: int = 166
+const CONVERSION: int = 160
+const CONVERSION_2: int = 176
+const SLEEP_TALK: int = 214
 
 ## The status moves, in the two shapes they come in. Thunder Wave and Sleep
 ## Powder are the status and nothing else; Ember Burns and Flame Wheel are
@@ -483,6 +490,13 @@ static func _moves() -> Array:
 		THUNDERBOLT: ["THUNDERBOLT", 95, ELECTRIC, 255, 15, Gen2MoveEffect.PARALYZE_HIT, 0],
 		SLASH: ["SLASH", 70, NORMAL, 255, 20, 0, 0],
 		STRUGGLE: ["STRUGGLE", 50, NORMAL, 255, 10, Gen2MoveEffect.RECOIL_HIT, 0],
+		METRONOME: ["METRONOME", 0, NORMAL, 255, 10, Gen2MoveEffect.METRONOME, 0],
+		MIRROR_MOVE: ["MIRROR MOVE", 0, FLYING, 255, 20, Gen2MoveEffect.MIRROR_MOVE, 0],
+		MIMIC: ["MIMIC", 0, NORMAL, 255, 10, Gen2MoveEffect.MIMIC, 0],
+		SKETCH: ["SKETCH", 0, NORMAL, 255, 1, Gen2MoveEffect.SKETCH, 0],
+		CONVERSION: ["CONVERSION", 0, NORMAL, 255, 30, Gen2MoveEffect.CONVERSION, 0],
+		CONVERSION_2: ["CONVERSION2", 0, NORMAL, 255, 30, Gen2MoveEffect.CONVERSION_2, 0],
+		SLEEP_TALK: ["SLEEP TALK", 0, NORMAL, 255, 10, Gen2MoveEffect.SLEEP_TALK, 0],
 		THUNDER_WAVE: ["THUNDERWAVE", 0, ELECTRIC, 255, 20, Gen2MoveEffect.PARALYZE, 0],
 		SLEEP_POWDER: ["SLEEP POWDER", 0, GRASS, 255, 15, Gen2MoveEffect.SLEEP, 0],
 		POISON_POWDER: ["POISONPOWDER", 0, POISON, 255, 35, Gen2MoveEffect.POISON, 0],

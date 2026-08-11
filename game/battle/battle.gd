@@ -124,6 +124,14 @@ const MOVE_DECLINED: StringName = &"move_declined"
 ## type ([constant NO_EFFECT]). One event for all five, the "but it failed!" the
 ## cartridge shares across them.
 const MOVE_FAILED: StringName = &"move_failed"
+## Mimic and Sketch both replace their own slot with the opponent's last move,
+## but only Sketch persists after battle. Separate events keep their two source
+## lines distinct in the battle screen.
+const MIMIC_LEARNED: StringName = &"mimic_learned"
+const SKETCHED_MOVE: StringName = &"sketched_move"
+## Conversion and Conversion2 both print `TransformedTypeText` after replacing
+## both of the user's active type bytes.
+const TYPE_CHANGED: StringName = &"type_changed"
 
 ## Disable locked a slot, and later let it go. [code]slot[/code] and
 ## [code]move[/code] on the first are the target's, read off
@@ -2117,8 +2125,36 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	# which is the cartridge's arrangement: every move goes through it, so no
 	# sequence has to remember to include it.
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
+	_run_move_effect(turn)
 
+
+## `ResetTurn`, used by Metronome, Mirror Move and Sleep Talk. A called command
+## replaces the working move and starts its command list from the beginning,
+## without running the once-per-action status gate again. A fresh [Gen2Turn]
+## gives the called move a clean move-struct copy while retaining the acting
+## side and the one shared event stream.
+func _run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
 	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
 		if turn.ended:
 			return
 		Gen2EffectCommands.run(command, turn)
+		if turn.called_move_number == 0:
+			continue
+		if depth >= 16:
+			turn.emit(MOVE_FAILED)
+			turn.end()
+			return
+		var number: int = turn.called_move_number
+		var called_move: Dictionary = data.move(number)
+		if called_move.is_empty():
+			turn.emit(MOVE_FAILED)
+			turn.end()
+			return
+		if turn.side == PLAYER:
+			_record_used_move(number)
+		var called_turn: Gen2Turn = Gen2Turn.create(
+			self, turn.side, -1, number, called_move, turn.events
+		)
+		called_turn.called = true
+		_run_move_effect(called_turn, depth + 1)
+		return

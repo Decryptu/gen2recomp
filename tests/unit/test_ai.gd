@@ -1069,6 +1069,99 @@ func test_smart_trap_target_encourages_on_a_foresight_or_a_nightmare() -> void:
 		assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE - 2), "flag %d" % flag)
 
 
+func test_basic_sleep_talk_is_redundant_only_while_awake() -> void:
+	var pikachu: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.SLEEP_TALK, Fixture.TACKLE]
+	)
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	assert_eq(
+		int(_scores(pikachu, geodude, RomLayout.AI_BASIC)[0]),
+		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE
+	)
+	pikachu.status = 3
+	assert_eq(
+		int(_scores(pikachu, geodude, RomLayout.AI_BASIC)[0]),
+		Gen2BattleAI.DEFAULT_SCORE
+	)
+
+
+func test_smart_sleep_talk_reads_the_turn_before_waking() -> void:
+	var pikachu: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.SLEEP_TALK, Fixture.TACKLE]
+	)
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	pikachu.status = 3
+	assert_eq(
+		int(_scores(pikachu, geodude, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE - 3
+	)
+	pikachu.status = 1
+	assert_eq(
+		int(_scores(pikachu, geodude, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE + 3
+	)
+
+
+func test_smart_mirror_move_uses_speed_and_the_useful_move_table() -> void:
+	var fast: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.MIRROR_MOVE, Fixture.TACKLE]
+	)
+	var slow: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	assert_eq(
+		int(_scores(fast, slow, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE,
+		"a faster user cannot mirror a move it has not seen"
+	)
+	slow.last_move_used = Fixture.THUNDERBOLT
+	var useful: Dictionary = _score_spread(fast, slow, RomLayout.AI_SMART, 0)
+	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 1))
+	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+	slow.last_move_used = Fixture.TACKLE
+	assert_eq(
+		int(_scores(fast, slow, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE,
+		"Tackle is not in UsefulMoves"
+	)
+
+
+func test_smart_mimic_waits_for_a_move_then_values_a_useful_one() -> void:
+	var fast: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.MIMIC, Fixture.TACKLE])
+	var slow: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	assert_eq(
+		int(_scores(fast, slow, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE + Gen2BattleAI.DISCOURAGE_MOVE
+	)
+	# Sleep Powder is in UsefulMoves and is super-effective against both of
+	# Geodude's types in the fixture, so both source 50% rolls are reachable.
+	slow.last_move_used = Fixture.SLEEP_POWDER
+	var useful: Dictionary = _score_spread(fast, slow, RomLayout.AI_SMART, 0)
+	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE))
+	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 1))
+	assert_true(useful.has(Gen2BattleAI.DEFAULT_SCORE - 2))
+	fast.hp = 1
+	assert_eq(
+		int(_scores(fast, slow, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE + 1,
+		"under half health is discouraged before the copied move is scored"
+	)
+
+
+func test_smart_conversion2_reproduces_the_source_last_move_bug() -> void:
+	var pikachu: Gen2BattleMon = _mon(
+		Fixture.PIKACHU, 50, [Fixture.CONVERSION_2, Fixture.TACKLE]
+	)
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	assert_eq(
+		int(_scores(pikachu, geodude, RomLayout.AI_SMART)[0]),
+		Gen2BattleAI.DEFAULT_SCORE,
+		"with no remembered move the fixture's undefined lookup leaves it alone"
+	)
+	geodude.last_move_used = Fixture.TACKLE
+	var spread: Dictionary = _score_spread(pikachu, geodude, RomLayout.AI_SMART, 0)
+	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE + 1), "the 90% discouragement")
+	assert_true(spread.has(Gen2BattleAI.DEFAULT_SCORE), "and the 10% that skips it")
+
+
 ## One scoring pass, with the seed left where the test set it.
 func _scores(
 	attacker: Gen2BattleMon, defender: Gen2BattleMon, flags: int,

@@ -134,6 +134,19 @@ var turns_taken: int = 0
 ## does, since a freshly sent-out Pokémon has not used a move yet.
 var last_move_used: int = 0
 
+## Mimic replaces one battle move but not the party move behind it. The source
+## keeps those in separate structs; this model keeps the original row here so a
+## switch and save writeback see the party copy while the active battle sees the
+## mimicked one.
+var mimicked_slot: int = -1
+var mimic_original_move: int = 0
+var mimic_original_pp: int = 0
+
+## Conversion and Conversion2 write both type bytes in the active battle
+## struct. Empty means the species row still supplies them. A switch clears the
+## override with every other field-only change.
+var battle_types: Array[int] = []
+
 ## The item this Pokémon is holding, by item number, or zero for none. Carried
 ## through from a trainer's party or a save; nothing in the engine reads it yet.
 var item: int = 0
@@ -329,6 +342,8 @@ func apply_passed_state(state: Dictionary) -> void:
 ## Haze resets the stages on both sides without touching either one's
 ## volatiles, so the two have to stay two calls rather than become one.
 func reset_volatile() -> void:
+	restore_mimic()
+	battle_types = []
 	substatus = Gen2Substatus.NONE
 	confusion_turns = 0
 	charged_move = 0
@@ -394,8 +409,14 @@ static func gender_for(data_source: GameData, species_number: int, mon_dvs: int)
 ## The two type numbers, which are the same number twice for a single-type
 ## Pokémon: the cartridge fills both slots either way.
 func types() -> Array:
+	if battle_types.size() == 2:
+		return battle_types.duplicate()
 	var entry: Array = data.species(species).get("types", [])
 	return [int(entry[0]), int(entry[1])] if entry.size() >= 2 else []
+
+
+func set_battle_type(type: int) -> void:
+	battle_types = [type, type]
 
 
 func name_text() -> String:
@@ -532,6 +553,39 @@ func replace_move(slot: int, move: int) -> bool:
 	moves[slot] = move
 	pp[slot] = int(data.move(move).get("pp", 0))
 	return true
+
+
+## Replaces Mimic for this stay on the field, with the source's fixed five PP.
+func mimic_move(slot: int, move: int) -> bool:
+	if slot < 0 or slot >= moves.size() or mimicked_slot >= 0:
+		return false
+	mimicked_slot = slot
+	mimic_original_move = int(moves[slot])
+	mimic_original_pp = pp_left(slot)
+	moves[slot] = move
+	pp[slot] = 5
+	return true
+
+
+func persistent_move(slot: int) -> int:
+	if slot == mimicked_slot:
+		return mimic_original_move
+	return int(moves[slot]) if slot >= 0 and slot < moves.size() else 0
+
+
+func persistent_pp(slot: int) -> int:
+	if slot == mimicked_slot:
+		return mimic_original_pp
+	return pp_left(slot)
+
+
+func restore_mimic() -> void:
+	if mimicked_slot >= 0 and mimicked_slot < moves.size():
+		moves[mimicked_slot] = mimic_original_move
+		pp[mimicked_slot] = mimic_original_pp
+	mimicked_slot = -1
+	mimic_original_move = 0
+	mimic_original_pp = 0
 
 
 func restore_pp() -> void:
