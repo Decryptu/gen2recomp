@@ -46,9 +46,18 @@ const KEYBOARD_TOP_BOX: int = 6
 ## The cursor steps two tiles per column and two per row, so a keyboard cell is
 ## two tiles wide even where its character is one.
 const CELL: int = 2
-## `.OAMData_TextEntryCursor`'s four sprites against
-## `.OAMData_TextEntryCursorBig`'s ten: a 2x2 bracket over a letter and a 5x2
-## one over a command, which is what makes UPPER fit inside it.
+## `.OAMData_TextEntryCursor`'s four sprites and
+## `.OAMData_TextEntryCursorBig`'s ten. `dbsprite` is
+## `db (y_tile * 8) + y_px, (x_tile * 8) + x_px` (`macros/gfx.asm`), so the
+## four sit at pixel (-1,-1), (0,-1), (-1,0) and (0,0), each 8x8 and each
+## drawing only its own top row and left column: a 9x9 outline hugging one
+## letter tile, not a 2x2 block of them. The big one runs x 0..32 in eights
+## over the same two rows, so it is 40x9 and its left edge carries no -1.
+## The z of each entry is its flip pair: bit 0 x, bit 1 y.
+const CURSOR_SPRITES: Array[Vector3i] = [
+	Vector3i(-1, -1, 0), Vector3i(0, -1, 1),
+	Vector3i(-1, 0, 2), Vector3i(0, 0, 3),
+]
 const COMMAND_CURSOR_WIDTH: int = 5
 ## `.CaseDelEnd` snaps the cursor to $00, $30 and $60, which is six tiles apart.
 const COMMAND_CURSOR_STEP: int = 6
@@ -145,15 +154,30 @@ func _cursor(indices: PackedByteArray, screen: Gen2NamingScreen) -> void:
 	_bracket(indices, at, width)
 
 
-## Four corners of the same tile flipped into place, with the edge tile running
-## between them along the top and bottom rows.
+## The same corner tile flipped into all four positions, offset by the sprite
+## pixels rather than laid on the tile grid. The command bracket runs the edge
+## tile between its two corners along both rows.
 func _bracket(indices: PackedByteArray, at: Vector2i, width: int) -> void:
+	if width <= CELL:
+		for sprite: Vector3i in CURSOR_SPRITES:
+			_blit(
+				indices, _cursor_tiles, CURSOR_CORNER_TILE, at,
+				(sprite.z & 1) != 0, (sprite.z & 2) != 0, true,
+				Vector2i(sprite.x, sprite.y),
+			)
+		return
 	for column: int in width:
-		var left_edge: bool = column == 0
 		var right_edge: bool = column == width - 1
-		var tile: int = CURSOR_CORNER_TILE if left_edge or right_edge else CURSOR_EDGE_TILE
-		_blit(indices, _cursor_tiles, tile, at + Vector2i(column, 0), right_edge, false, true)
-		_blit(indices, _cursor_tiles, tile, at + Vector2i(column, 1), right_edge, true, true)
+		var tile: int = (
+			CURSOR_CORNER_TILE if column == 0 or right_edge else CURSOR_EDGE_TILE
+		)
+		var x: int = column * TILE
+		_blit(
+			indices, _cursor_tiles, tile, at, right_edge, false, true, Vector2i(x, -1)
+		)
+		_blit(
+			indices, _cursor_tiles, tile, at, right_edge, true, true, Vector2i(x, 0)
+		)
 
 
 func _clear(map: PackedInt32Array, x: int, y: int, rows: int, columns: int) -> void:
@@ -216,7 +240,8 @@ func _load_sheet(
 ## of an object is see-through, so the letter under it stays readable.
 func _blit(
 	indices: PackedByteArray, source: Dictionary, tile: int, at: Vector2i,
-	flip_x: bool, flip_y: bool, transparent: bool = false
+	flip_x: bool, flip_y: bool, transparent: bool = false,
+	offset: Vector2i = Vector2i.ZERO
 ) -> void:
 	if not source.has(tile):
 		return
@@ -229,6 +254,10 @@ func _blit(
 			var index: int = cell[source_y * TILE + source_x]
 			if transparent and index == 0:
 				continue
-			var to: int = (at.y * TILE + y) * width + at.x * TILE + x
-			if to >= 0 and to < indices.size():
-				indices[to] = index
+			# Checked per axis: a sprite offset by -1 would otherwise wrap onto the
+			# end of the row above rather than fall off the left edge.
+			var to_x: int = at.x * TILE + offset.x + x
+			var to_y: int = at.y * TILE + offset.y + y
+			if to_x < 0 or to_x >= width or to_y < 0 or to_y >= ROWS * TILE:
+				continue
+			indices[to_y * width + to_x] = index

@@ -91,6 +91,30 @@ func test_the_page_is_drawn_at_the_hardware_size() -> void:
 	assert_eq(indices.size(), WIDTH * Gen2Screen.HEIGHT)
 
 
+## `.OAMData_TextEntryCursor` is four 8x8 sprites at pixel (-1,-1), (0,-1),
+## (-1,0) and (0,0), each drawing only its own top row and left column, so the
+## bracket is a one-pixel 9x9 ring around a single letter tile. Drawn on the tile
+## grid instead it was a 16x16 box with the letter in one quadrant.
+func test_the_letter_bracket_is_a_nine_by_nine_ring_around_one_tile() -> void:
+	var page := Gen2NamingScreenPage.from_data(GameData.open_directory(Fixture.directory()))
+	var indices: PackedByteArray = page.draw(_model(), "YOUR NAME?")
+	## `hlcoord 2, 8` puts the first letter at tile (2, 8), so the ring runs from
+	## pixel (15, 63) to (23, 71) inclusive.
+	for offset: int in range(0, 9):
+		assert_ne(indices[63 * WIDTH + 15 + offset], 0, "top edge at x %d" % (15 + offset))
+		assert_ne(indices[71 * WIDTH + 15 + offset], 0, "bottom edge at x %d" % (15 + offset))
+		assert_ne(indices[(63 + offset) * WIDTH + 15], 0, "left edge at y %d" % (63 + offset))
+		assert_ne(indices[(63 + offset) * WIDTH + 23], 0, "right edge at y %d" % (63 + offset))
+	## The ring belongs to the cursor rather than to the keyboard under it, and it
+	## steps a whole cell: both corners change when the cursor moves one column,
+	## which is what pins the -1 offset without depending on the fixture's font.
+	_screen.handle_button(Gen2Button.RIGHT)
+	var moved: PackedByteArray = page.draw(_model(), "YOUR NAME?")
+	assert_ne(moved[63 * WIDTH + 15], indices[63 * WIDTH + 15], "top-left corner moved")
+	assert_ne(moved[71 * WIDTH + 23], indices[71 * WIDTH + 23], "bottom-right corner moved")
+	assert_ne(moved[63 * WIDTH + 31], 0, "the ring is one cell to the right")
+
+
 ## The cursor is a bracket around the cell it is on, so moving it changes the
 ## page even when nothing has been typed.
 func test_moving_the_cursor_redraws_the_page() -> void:
