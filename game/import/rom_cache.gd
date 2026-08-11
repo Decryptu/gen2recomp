@@ -44,6 +44,7 @@ const WORLD_TILES_DIR: String = "world_tiles"
 const OVERWORLD_SPRITES: String = "overworld_sprites.json"
 const OVERWORLD_SPRITE_PALETTES: String = "overworld_sprite_palettes.json"
 const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
+const OVERWORLD_ICONS_DIR: String = "overworld_icons"
 const WORLD_MENUS: String = "world_menus.json"
 const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
@@ -234,9 +235,14 @@ static func overworld_sprite_path(directory: String, number: int) -> String:
 	return "%s/%s/%03d.idx" % [directory, OVERWORLD_SPRITES_DIR, number]
 
 
+static func overworld_icon_path(directory: String, number: int) -> String:
+	return "%s/%s/%02d.idx" % [directory, OVERWORLD_ICONS_DIR, number]
+
+
 static func prepare(directory: String) -> bool:
 	for sub: String in [
-		PICS_DIR, TILES_DIR, WORLD_TILES_DIR, OVERWORLD_SPRITES_DIR, BATTLE_ANIM_GFX_DIR,
+		PICS_DIR, TILES_DIR, WORLD_TILES_DIR, OVERWORLD_SPRITES_DIR, OVERWORLD_ICONS_DIR,
+		BATTLE_ANIM_GFX_DIR,
 	]:
 		if DirAccess.make_dir_recursive_absolute("%s/%s" % [directory, sub]) != OK:
 			return false

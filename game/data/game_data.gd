@@ -574,6 +574,24 @@ func overworld_sprite_indices(number: int) -> PackedByteArray:
 	return data
 
 
+## The reusable icon strip indexed by constants/icon_constants.asm.
+func overworld_icon(icon_number: int) -> Gen2WorldSprite:
+	if icon_number <= 0 or icon_number > RomLayout.MON_ICON_COUNT:
+		return null
+	return Gen2WorldSprite.from_mon_icon(icon_number)
+
+
+func overworld_icon_indices(icon_number: int) -> PackedByteArray:
+	var key: String = "overworld_icons/%d" % icon_number
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(
+		RomCache.overworld_icon_path(directory, icon_number)
+	)
+	_indices[key] = data
+	return data
+
+
 ## One of the eight overworld object palette kinds for a time-of-day group.
 ## The source's palette override bit selects the same eight rows while marking
 ## that the object event, rather than the sprite table, supplied the choice.

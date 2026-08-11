@@ -101,12 +101,19 @@ static func import_to_cache(
 			RomCache.overworld_sprite_path(directory, number), sprite_graphics[number]
 		):
 			return {"ok": false, "message": "Could not write overworld sprite %d." % number}
+	var icon_graphics: Dictionary = result["icon_graphics"]
+	for number: int in icon_graphics:
+		if not RomCache.write_indices(
+			RomCache.overworld_icon_path(directory, number), icon_graphics[number]
+		):
+			return {"ok": false, "message": "Could not write overworld icon %d." % number}
 
 	return {
 		"ok": true,
 		"maps": result["maps"].size(),
 		"tilesets": tilesets.size(),
 		"overworld_sprites": result["sprites"].size(),
+		"overworld_icons": icon_graphics.size(),
 		# The service importer scans and extends these. Handing back what was
 		# just decoded keeps them raw byte runs; reading them off disk again
 		# would hand it the spans the cache stores instead.
@@ -126,6 +133,9 @@ static func read_world(
 	var sprites: Dictionary = _read_overworld_sprites(rom, layout)
 	if not bool(sprites.get("ok", false)):
 		return sprites
+	var icons: Dictionary = _read_overworld_icons(rom, layout)
+	if not bool(icons.get("ok", false)):
+		return icons
 
 	var palettes: Dictionary = _read_world_palettes(rom, layout)
 	if not bool(palettes.get("ok", false)):
@@ -199,6 +209,7 @@ static func read_world(
 		"sprites": sprites["sprites"],
 		"sprite_palettes": sprites["palettes"],
 		"sprite_graphics": sprites["graphics"],
+		"icon_graphics": icons["graphics"],
 	}
 
 
@@ -421,6 +432,28 @@ static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Diction
 		})
 
 	return {"ok": true, "sprites": sprites, "palettes": palettes, "graphics": graphics}
+
+
+## LoadOverworldMonIcon reads the contiguous eight-tile IconPointers region.
+## The pointer table is redundant for this use: every icon is 8 tiles and the
+## source stores them in the same order as constants/icon_constants.asm.
+static func _read_overworld_icons(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout.get("overworld_icons", -1))
+	var size: int = RomLayout.MON_ICON_COUNT * RomLayout.MON_ICON_BYTES
+	if offset < 0 or not rom.in_bounds(offset, size):
+		return _error("Overworld mon icons are outside the cartridge.")
+	var graphics: Dictionary = {}
+	for number: int in range(1, RomLayout.MON_ICON_COUNT + 1):
+		var raw: PackedByteArray = rom.slice(
+			RomLayout.overworld_icon_offset(layout, number), RomLayout.MON_ICON_BYTES
+		)
+		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+			raw, 0, RomLayout.MON_ICON_TILES
+		)
+		if pixels.size() != RomLayout.MON_ICON_TILES * Gen2Tiles.TILE_PIXELS:
+			return _error("Overworld mon icon %d did not decode." % number)
+		graphics[number] = pixels
+	return {"ok": true, "graphics": graphics}
 
 
 static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dictionary:

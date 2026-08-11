@@ -131,6 +131,7 @@ func test_world_palette_environment_rows_match_the_cartridge_table() -> void:
 
 func test_layout_carries_verified_world_table_shapes() -> void:
 	var gold: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
+	var silver: Dictionary = RomLayout.for_id(RomRegistry.SILVER)
 	var crystal: Dictionary = RomLayout.for_id(RomRegistry.CRYSTAL)
 	assert_eq(RomLayout.map_count(gold), 368)
 	assert_eq(RomLayout.map_count(crystal), 388)
@@ -145,3 +146,7 @@ func test_layout_carries_verified_world_table_shapes() -> void:
 	assert_eq(RomLayout.overworld_sprite_count(crystal), 102)
 	assert_eq(RomLayout.overworld_sprite_offset(gold, 1), 0x147DE)
 	assert_eq(RomLayout.overworld_sprite_offset(crystal, 1), 0x14736)
+	assert_eq(RomLayout.MON_ICON_COUNT, 38)
+	assert_eq(RomLayout.overworld_icon_offset(gold, 1), 0x8EABE)
+	assert_eq(RomLayout.overworld_icon_offset(silver, 1), 0x8EAA4)
+	assert_eq(RomLayout.overworld_icon_offset(crystal, 1), 0x8EC0D)
