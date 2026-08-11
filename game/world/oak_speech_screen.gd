@@ -4,17 +4,10 @@ extends Control
 ## `OakSpeech` drawn: a pic above the standard text box, advanced with A, with
 ## the naming screen embedded where `NamePlayer` sits.
 ##
-## The pics are the ones the cartridge already gives this project: Oak is
-## trainer class POKEMON_PROF out of the same table every class pic comes from,
-## and Wooper is a species front pic. `DrawIntroPlayerPic`'s ChrisPic and
-## KrisPic are not imported, so the two beats either side of the naming screen
-## draw their text and no picture; the Hall of Fame's player panel has the same
-## gap for the same reason.
-##
-## Boundaries kept out on purpose, all presentation: the three palette
-## rotations, `Intro_WipeInFrontpic`, `MovePlayerPicRight`/`Left`, Wooper's cry
-## on `_OakText2`, and `ShowPlayerNamingChoices`' preset-name menu, which is a
-## cartridge table this project does not import.
+## Oak and the speech species use the ordinary imported pic tables. Gold and
+## Silver use CAL's trainer pic for the player; Crystal uses the imported raw
+## ChrisPic or KrisPic. The source preset-name menu is embedded before the
+## keyboard, and this screen owns OakSpeech's music and cry.
 
 ## Carries the name the intro settled on, already through `InitName`'s default.
 signal finished(player_name: String)
@@ -34,6 +27,9 @@ var _background: ColorRect = null
 var _pic: TextureRect = null
 var _text_box: Gen2TextBox = null
 var _naming: Gen2NamingScreenScreen = null
+var _name_menu: Gen2PlayerNameMenuScreen = null
+var _audio: Gen2AudioPlayer = null
+var _audio_started: bool = false
 
 
 ## Answers false when the cache carries no intro text, which the caller reports
@@ -46,6 +42,7 @@ func open(data: GameData, gender: int) -> bool:
 	if _beats.is_empty():
 		return false
 	if is_inside_tree():
+		_start_audio()
 		_show_beat()
 	return true
 
@@ -61,6 +58,9 @@ func _ready() -> void:
 	_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
 	add_child(_background)
 
+	_audio = Gen2AudioPlayer.new()
+	add_child(_audio)
+
 	_pic = TextureRect.new()
 	_pic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -73,6 +73,10 @@ func _ready() -> void:
 	add_child(_text_box)
 
 	if not _beats.is_empty():
+		_start_audio()
+	if _name_menu != null:
+		_show_name_choices()
+	elif not _beats.is_empty():
 		_show_beat()
 
 
@@ -91,6 +95,14 @@ func naming() -> bool:
 	return _naming != null
 
 
+func choosing_name() -> bool:
+	return _name_menu != null
+
+
+func name_choice_image() -> Image:
+	return _name_menu.image() if _name_menu != null else null
+
+
 ## The name the intro has settled on so far, empty until the naming screen
 ## closes.
 func player_name() -> String:
@@ -100,6 +112,8 @@ func player_name() -> String:
 ## A advances, the way every `PrintText` in the routine waits for one. While the
 ## naming screen is up it owns every button instead.
 func handle_button(button: int) -> bool:
+	if _name_menu != null:
+		return _name_menu.handle_button(button)
 	if _naming != null:
 		return _naming.handle_button(button)
 	if button != Gen2Button.A:
@@ -112,21 +126,48 @@ func handle_button(button: int) -> bool:
 ## the naming screen where `NamePlayer` sits, or out. A plain method as well as
 ## a key handler, so the speech can be photographed partway through.
 func advance() -> void:
-	if _naming != null or _index >= _beats.size():
+	if _naming != null or _name_menu != null or _index >= _beats.size():
 		return
 	# Every beat here is one `PrintText`, which waits at each page and again at
 	# the end, so the beat only moves on once the box has nothing left.
 	if _text_box != null and _text_box.advance():
 		return
 	var key: String = String(_beats[_index].get("key", ""))
+	if key == "oak_2":
+		_play_intro_cry()
 	if key == Gen2OakSpeech.NAME_AFTER:
-		_open_naming()
+		_open_name_menu()
 		return
 	_index += 1
 	if _index >= _beats.size():
 		finished.emit(_player_name)
 		return
 	_show_beat()
+
+
+func _open_name_menu() -> void:
+	_name_menu = Gen2PlayerNameMenuScreen.new()
+	if not _name_menu.open(_data, _gender):
+		_name_menu.free()
+		_name_menu = null
+		_open_naming()
+		return
+	_name_menu.closed.connect(_on_name_choice)
+	add_child(_name_menu)
+	# MovePlayerPicRight runs eight frames and leaves the 7x7 pic at (13,4)
+	# while MENU_BACKUP_TILES draws the name menu over the left side.
+	_show_name_choices()
+
+
+func _on_name_choice(name: String) -> void:
+	_name_menu.queue_free()
+	_name_menu = null
+	if name == "":
+		_hide_speech(true)
+		_open_naming()
+		return
+	_player_name = name
+	_resume_after_name()
 
 
 func _open_naming() -> void:
@@ -147,6 +188,12 @@ func _on_named(entered: String) -> void:
 	_player_name = Gen2OakSpeech.resolve_name(entered, _gender)
 	_naming.queue_free()
 	_naming = null
+	_resume_after_name()
+
+
+func _resume_after_name() -> void:
+	if _pic != null:
+		_pic.position.x = PIC_AT.x * TILE
 	_hide_speech(false)
 	_index += 1
 	if _index >= _beats.size():
@@ -159,6 +206,18 @@ func _hide_speech(hidden: bool) -> void:
 	for node: CanvasItem in [_background, _pic, _text_box]:
 		if node != null:
 			node.visible = not hidden
+
+
+func _show_name_choices() -> void:
+	if _pic != null:
+		if _pic.texture == null:
+			_show_pic(Gen2OakSpeech.Pic.PLAYER)
+		_pic.position.x = 13 * TILE
+		_pic.visible = true
+	if _background != null:
+		_background.visible = true
+	if _text_box != null:
+		_text_box.visible = false
 
 
 func _show_beat() -> void:
@@ -194,6 +253,8 @@ func _show_pic(kind: int) -> void:
 			image = Gen2PicImage.x_flipped(
 				_species_image(Gen2OakSpeech.intro_species(_data))
 			)
+		Gen2OakSpeech.Pic.PLAYER:
+			image = _player_image()
 	if image == null:
 		return
 	_pic.texture = ImageTexture.create_from_image(image)
@@ -233,3 +294,57 @@ func _species_image(species: int) -> Image:
 		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic,
 		_data.palette(species)
 	)
+
+
+func _player_image() -> Image:
+	if not Gen2WorldState.is_crystal_profile(_data):
+		# pokegold NamePlayer and ShrinkPlayer use trainer class CAL.
+		return _trainer_image(0x0C)
+	var sheet: String = (
+		"intro_player_female"
+		if _gender == Gen2SaveData.GENDER_FEMALE else "intro_player_male"
+	)
+	var strip: PackedByteArray = _data.tile_indices(sheet)
+	var tiles: int = RomLayout.INTRO_PLAYER_PIC_TILES
+	var tile: int = Gen2Font.TILE
+	if strip.size() < tiles * tile * tile:
+		return null
+	var width: int = RomLayout.INTRO_PLAYER_PIC_COLUMNS * tile
+	var indices := PackedByteArray()
+	indices.resize(width * RomLayout.INTRO_PLAYER_PIC_ROWS * tile)
+	var strip_width: int = tiles * tile
+	for row: int in RomLayout.INTRO_PLAYER_PIC_ROWS:
+		for column: int in RomLayout.INTRO_PLAYER_PIC_COLUMNS:
+			var source_tile: int = row * RomLayout.INTRO_PLAYER_PIC_COLUMNS + column
+			for y: int in tile:
+				for x: int in tile:
+					indices[(row * tile + y) * width + column * tile + x] = \
+						strip[y * strip_width + source_tile * tile + x]
+	return Gen2PicImage.from_indices(indices, width, width, _data.card_palette(
+		1 if _gender == Gen2SaveData.GENDER_FEMALE else 0
+	))
+
+
+func _start_audio() -> void:
+	if _audio_started or _audio == null or _data == null:
+		return
+	_audio_started = true
+	_audio.play_record(
+		_data.world_audio(&"music", Gen2OakSpeech.MUSIC_ROUTE_30), &"music",
+		_audio_assets()
+	)
+
+
+func _play_intro_cry() -> void:
+	if _audio == null or _data == null:
+		return
+	_audio.play_record(
+		_data.species_cry(Gen2OakSpeech.intro_species(_data)), &"cry", _audio_assets()
+	)
+
+
+func _audio_assets() -> Dictionary:
+	return {
+		"wave_samples": _data.world_audio_asset(&"wave_samples"),
+		"drumkits": _data.world_audio_asset(&"drumkits"),
+	}

@@ -38,6 +38,10 @@ func _at_naming() -> bool:
 	return _screen.naming()
 
 
+func _at_name_choices() -> bool:
+	return _screen.choosing_name()
+
+
 func _done() -> bool:
 	return not _finished.is_empty()
 
@@ -85,6 +89,21 @@ func test_the_player_marker_is_replaced_by_the_name() -> void:
 	assert_eq(Gen2OakSpeech.with_player_name("no marker", "ASH"), "no marker")
 
 
+func test_each_profile_uses_its_own_source_name_table() -> void:
+	assert_eq(Gen2PlayerNameChoices.options(_data, Gen2SaveData.GENDER_MALE),
+		["NEW NAME", "CHRIS", "MAT", "ALLAN", "JON"])
+	assert_eq(Gen2PlayerNameChoices.options(_data, Gen2SaveData.GENDER_FEMALE),
+		["NEW NAME", "KRIS", "AMANDA", "JUANA", "JODI"])
+	var gold: GameData = Fixture.build(&"gold")
+	var silver: GameData = Fixture.build(&"silver")
+	assert_eq(Gen2PlayerNameChoices.options(gold, Gen2SaveData.GENDER_MALE),
+		["NEW NAME", "GOLD", "HIRO", "TAYLOR", "KARL"])
+	assert_eq(Gen2PlayerNameChoices.options(silver, Gen2SaveData.GENDER_MALE),
+		["NEW NAME", "SILVER", "KAMON", "OSCAR", "MAX"])
+	RomCache.clear(Fixture.directory(&"gold"))
+	RomCache.clear(Fixture.directory(&"silver"))
+
+
 # --- the screen ---------------------------------------------------------------
 
 func test_it_opens_on_the_first_beat() -> void:
@@ -100,6 +119,26 @@ func test_pressing_through_reaches_the_naming_screen_after_oak_six() -> void:
 	assert_true(_screen.naming(), "the naming screen opened")
 	assert_eq(_screen.beat_index(), 4, "on the beat _OakText6 is")
 	assert_eq(_finished.size(), 0)
+
+
+func test_oak_six_opens_the_source_choices_before_the_keyboard() -> void:
+	_press_a_until(_at_name_choices)
+	assert_true(_screen.choosing_name())
+	assert_false(_screen.naming())
+	assert_eq(_screen.beat_index(), 4)
+	assert_false(_screen.handle_button(Gen2Button.B), "STATICMENU_DISABLE_B")
+
+
+func test_a_preset_name_skips_the_keyboard_and_resumes_the_speech() -> void:
+	_press_a_until(_at_name_choices)
+	_screen.handle_button(Gen2Button.DOWN)
+	_screen.handle_button(Gen2Button.A)
+	assert_false(_screen.choosing_name())
+	assert_false(_screen.naming())
+	assert_eq(_screen.player_name(), "CHRIS")
+	assert_eq(_screen.beat_index(), 5)
+	_press_a_until(_done)
+	assert_eq(_finished, ["CHRIS"])
 
 
 ## While the keyboard is up it owns every button, so A types rather than

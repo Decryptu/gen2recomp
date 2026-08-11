@@ -2310,6 +2310,7 @@ func _import_card_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> Dictionary:
 	var data: PackedByteArray = rom.bytes()
 	var card: Dictionary = layout["trainer_card"]
+	var intro_player: Dictionary = layout["intro_player"]
 	var sheets: Dictionary = {
 		"font": {
 			"offset": RomLayout.font_offset(layout),
@@ -2424,6 +2425,24 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.CARD_RIGHT_CORNER_TILES,
 			"first_code": 0,
 			"bits": 2,
+		}
+	if int(intro_player["pic_male"]) >= 0:
+		sheets["intro_player_male"] = {
+			"offset": int(intro_player["pic_male"]),
+			"tiles": RomLayout.INTRO_PLAYER_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+			"columns": RomLayout.INTRO_PLAYER_PIC_COLUMNS,
+			"column_major": true,
+		}
+	if int(intro_player["pic_female"]) >= 0:
+		sheets["intro_player_female"] = {
+			"offset": int(intro_player["pic_female"]),
+			"tiles": RomLayout.INTRO_PLAYER_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+			"columns": RomLayout.INTRO_PLAYER_PIC_COLUMNS,
+			"column_major": true,
 		}
 
 	var written: Dictionary = {}

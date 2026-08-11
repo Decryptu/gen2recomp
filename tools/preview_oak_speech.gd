@@ -3,7 +3,7 @@ extends SceneTree
 ## Captures Oak's speech against a real imported cache: the real trainer-class
 ## pic, the real Wooper front pic, the real font and the real text-box frame.
 ##
-##   Godot --path . -s res://tools/preview_oak_speech.gd -- crystal /tmp/oak.png [advance]
+##   Godot --path . -s res://tools/preview_oak_speech.gd -- crystal /tmp/oak.png [advance|choices|player]
 ##
 ## [advance] is how many A presses to make before the capture, so 0 is the first
 ## page of `_OakText1` and enough of them reaches the naming screen.
@@ -14,6 +14,8 @@ const SETTLE_FRAMES: int = 8
 var _screen: Gen2OakSpeechScreen = null
 var _output_path: String = ""
 var _frames: int = 0
+var _target: String = "0"
+var _prepared: bool = false
 
 
 func _initialize() -> void:
@@ -41,21 +43,49 @@ func _initialize() -> void:
 	root.add_child(_screen)
 	current_scene = _screen
 
-	for _step: int in (int(args[2]) if args.size() > 2 else 0):
-		_screen.handle_button(Gen2Button.A)
+	_target = args[2] if args.size() > 2 else "0"
+
+
+func _prepare_target() -> void:
+	if _target in ["choices", "player"]:
+		for _step: int in 200:
+			if _screen.choosing_name():
+				break
+			_screen.handle_button(Gen2Button.A)
+		if _target == "player" and _screen.choosing_name():
+			_screen.handle_button(Gen2Button.DOWN)
+			_screen.handle_button(Gen2Button.A)
+	else:
+		for _step: int in int(_target):
+			_screen.handle_button(Gen2Button.A)
 
 
 func _process(_delta: float) -> bool:
+	if not _prepared:
+		_prepared = true
+		_prepare_target()
+		_frames = 0
+		return false
 	_frames += 1
 	if _frames < SETTLE_FRAMES:
 		return false
-	var image: Image = root.get_texture().get_image()
+	var texture: ViewportTexture = root.get_texture()
+	if texture == null:
+		push_error("The active renderer cannot capture the Oak speech viewport.")
+		quit(1)
+		return true
+	var image: Image = texture.get_image()
+	if image == null:
+		push_error("The Oak speech viewport returned no image.")
+		quit(1)
+		return true
 	if image.save_png(_output_path) != OK:
 		push_error("Could not write %s" % _output_path)
 		quit(1)
 		return true
-	print("Wrote %s, beat %d of %d, naming %s" % [
+	print("Wrote %s, beat %d of %d, naming %s, choices %s" % [
 		_output_path, _screen.beat_index() + 1, _screen.beat_count(), _screen.naming(),
+		_screen.choosing_name(),
 	])
 	quit(0)
 	return true
