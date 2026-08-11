@@ -7,6 +7,8 @@ extends GutTest
 func test_the_project_declares_a_version() -> void:
 	assert_false(Gen2UpdateCheck.current_version().is_empty())
 	assert_false(Gen2UpdateCheck.parse_version(Gen2UpdateCheck.current_version()).is_empty())
+	assert_eq(Gen2UpdateCheck.current_version(), Gen2AppVersion.VERSION)
+	assert_string_contains(Gen2AppVersion.display(), Gen2AppVersion.CHANNEL)
 
 
 func test_a_tag_may_carry_a_leading_v() -> void:

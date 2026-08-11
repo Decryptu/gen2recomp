@@ -24,10 +24,10 @@ enum Status {
 }
 
 
-## The running build, from `application/config/version` in project.godot so the
-## exported binary and this check cannot disagree.
+## The running build, kept in code so the launcher can identify development
+## builds before a GitHub release exists.
 static func current_version() -> String:
-	return String(ProjectSettings.get_setting("application/config/version", "0.0.0"))
+	return Gen2AppVersion.VERSION
 
 
 ## Splits a version into comparable integers. A leading "v" is accepted because
