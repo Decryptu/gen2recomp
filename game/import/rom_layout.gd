@@ -483,6 +483,12 @@ const CARD_PIC_COLUMNS: int = 5
 const CARD_PIC_ROWS: int = 7
 const CARD_PIC_TILES: int = CARD_PIC_COLUMNS * CARD_PIC_ROWS
 
+## `DrawIntroPlayerPic`'s uncompressed 7x7 picture. Crystal stores Chris and
+## Kris column-major; Gold and Silver use CAL's normal trainer picture instead.
+const INTRO_PLAYER_PIC_COLUMNS: int = 7
+const INTRO_PLAYER_PIC_ROWS: int = 7
+const INTRO_PLAYER_PIC_TILES: int = INTRO_PLAYER_PIC_COLUMNS * INTRO_PLAYER_PIC_ROWS
+
 ## `_CGB_TrainerCard`'s eight background palettes, as the trainer classes it
 ## reads them from, in its own call order. Slot 0 is the player's own class,
 ## which is why the cache carries a class the trainer tables otherwise skip;
@@ -893,6 +899,7 @@ const GOLD_SILVER: Dictionary = {
 		"right_corner": -1,
 		"badge_palette": 0xA385,
 	},
+	"intro_player": {"pic_male": -1, "pic_female": -1},
 	# Pokedex. Located by encoding Bulbasaur's known category and published
 	# height and weight ("SEED", 204, 150) and matching the bytes, then finding
 	# the only 251-pointer run whose four 64-species groups each ascend and
@@ -1089,6 +1096,9 @@ const CRYSTAL: Dictionary = {
 		"right_corner": 0x265C3,
 		"badge_palette": 0x9F16,
 	},
+	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
+	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
+	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
 	# Pokedex; see the Gold and Silver block above for how these were located.
 	# Both order tables sit at the same offsets in all three dumps; the entries
 	# and their banks do not, and Gold and Silver do not even share description

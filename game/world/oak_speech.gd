@@ -16,9 +16,8 @@ enum Pic {
 	## `PrepMonFrontpic` with zeroed DVs, on whichever species the profile
 	## shows: see [method intro_species].
 	MON,
-	## `DrawIntroPlayerPic`. The project imports neither ChrisPic nor KrisPic,
-	## so this beat draws its text and no picture; see the class comment on
-	## [Gen2OakSpeechScreen].
+	## `DrawIntroPlayerPic`: CAL's trainer pic in Gold and Silver, and the
+	## uncompressed ChrisPic or KrisPic in Crystal.
 	PLAYER,
 }
 
@@ -34,9 +33,11 @@ const WOOPER: int = 194
 
 ## Where `NamePlayer` sits: after `_OakText6` and before `_OakText7`. The source
 ## reaches `ShowPlayerNamingChoices` first and only its NEW NAME row reaches
-## `NamingScreen`; the preset-name menu is a boundary, so this goes straight to
-## the keyboard.
+## `NamingScreen`.
 const NAME_AFTER: String = "oak_6"
+
+## `constants/music_constants.asm`: MUSIC_ROUTE_30.
+const MUSIC_ROUTE_30: int = 0x2B
 
 ## `.PlayerNameString`, which the naming screen prints above its entry.
 const NAME_PROMPT: String = "YOUR NAME?"

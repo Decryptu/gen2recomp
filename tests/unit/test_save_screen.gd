@@ -18,6 +18,10 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	# Slot refreshes detach the old cards before queueing them so a pressed card
+	# is never freed while its own signal is running. Flush that deletion queue
+	# before GUT counts objects that no longer belong to the screen tree.
+	await get_tree().process_frame
 	if is_instance_valid(_screen):
 		_screen.free()
 	_screen = null
