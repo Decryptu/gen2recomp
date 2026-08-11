@@ -10,6 +10,10 @@ extends RefCounted
 const VIEW_CELLS: Vector2i = Vector2i(10, 9)
 const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
+## The overworld object coordinate used by the player sprite. The 20x18 screen
+## is not symmetrically centred around a 16x16 object: the source loads four
+## walk cells before the player on each axis (`_LoadOverworldTilemap`).
+const PLAYER_VIEW_CELL: Vector2i = Vector2i(4, 4)
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
 ## constants/sprite_constants.asm's first real id, and what GetMonSprite answers
@@ -379,23 +383,41 @@ func map_size_pixels() -> Vector2i:
 	return map_size_cells() * CELL_PIXELS
 
 
-## The page origin, which follows the player off the edge of the map.
+## The 6x5-metatile surrounding-page origin, which follows the player off the
+## edge of the map and changes only on a 2x2-walk-cell block boundary.
 ##
-## `GetMapScreenCoords` (`home/map.asm:1065`) anchors on the player's own block
-## less two metatiles and clamps nothing, so a room smaller than the viewport
-## sits centred with border block on all four sides rather than pinned to its
-## top-left corner with its floor repeating past the wall.
+## `GetMapScreenCoords` (`home/map.asm:1065`) stores
+## `floor(wXCoord / 2) - 2`, and likewise for Y, in wOverworldMapAnchor. It
+## clamps nothing. wPlayerMetatileX/Y carry the odd-cell remainder separately;
+## see [method visible_subcell_offset_cells].
 func visible_origin_cell() -> Vector2i:
 	if current_map == null:
 		return Vector2i.ZERO
 	return Vector2i(
-		player_cell.x - floori(float(VIEW_CELLS.x) / 2.0),
-		player_cell.y - floori(float(VIEW_CELLS.y) / 2.0)
+		floori(float(player_cell.x) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+			* RomLayout.MAP_BLOCK_CELL_WIDTH - PLAYER_VIEW_CELL.x,
+		floori(float(player_cell.y) / float(RomLayout.MAP_BLOCK_CELL_WIDTH))
+			* RomLayout.MAP_BLOCK_CELL_WIDTH - PLAYER_VIEW_CELL.y
 	)
 
 
+## wPlayerMetatileX/Y: the walk-cell remainder within the page's leading block.
+func visible_subcell_offset_cells() -> Vector2i:
+	if current_map == null:
+		return Vector2i.ZERO
+	return Vector2i(
+		posmod(player_cell.x, RomLayout.MAP_BLOCK_CELL_WIDTH),
+		posmod(player_cell.y, RomLayout.MAP_BLOCK_CELL_WIDTH),
+	)
+
+
+## Top-left walk cell selected from the surrounding page while standing still.
+func visible_screen_origin_cell() -> Vector2i:
+	return visible_origin_cell() + visible_subcell_offset_cells()
+
+
 func player_view_cell() -> Vector2i:
-	return player_cell - visible_origin_cell()
+	return player_cell - visible_screen_origin_cell()
 
 
 ## The player's presentation position in walk cells: the committed cell plus any
@@ -406,29 +428,20 @@ func player_position_cells() -> Vector2:
 	return Vector2(player_cell) + player_step_offset_cells()
 
 
-## The framed view's top-left in fractional walk cells.
-##
-## visible_origin_cell() is the hardware page origin: it follows the committed
-## cell, so it moves a whole cell the instant a step starts. A camera that is not
-## drawing a tile page would pan a step early on that, so this frames the
-## interpolated position with the same centring. With no step in flight the two
-## agree, and neither clamps: see visible_origin_cell().
+## The framed screen's top-left in fractional walk cells. This is the page
+## anchor plus wPlayerMetatileX/Y plus the in-flight hSCX/hSCY scroll. It remains
+## unclamped, so connection and border strips can enter the viewport.
 func visible_origin_cells() -> Vector2:
 	if current_map == null:
 		return Vector2.ZERO
-	var position: Vector2 = player_position_cells()
-	return Vector2(
-		position.x - floorf(float(VIEW_CELLS.x) / 2.0),
-		position.y - floorf(float(VIEW_CELLS.y) / 2.0)
-	)
+	return player_position_cells() - Vector2(PLAYER_VIEW_CELL)
 
 
-## The committed cell in pixels, offset by any in-flight walk step so a
-## renderer can draw the approach to it. player_cell itself never carries
-## this offset; collision, events and the snapshot never see it.
+## The player's screen pixel after applying the same fine scroll as the map.
+## The hardware keeps this at PLAYER_VIEW_CELL while hSCX/hSCY move the world.
 func player_pixel_position() -> Vector2i:
-	return player_view_cell() * CELL_PIXELS + Vector2i(
-		player_step_offset_cells() * float(CELL_PIXELS)
+	return Vector2i(
+		(player_position_cells() - visible_origin_cells()) * float(CELL_PIXELS)
 	)
 
 
@@ -2088,29 +2101,40 @@ func tile_index_at(tile_x: int, tile_y: int) -> int:
 	return current_tileset.tile_index(block, local_tile)
 
 
-## Returns the visible 20x18 graphics-tile page in row-major order. -1 marks
-## the padding around maps smaller than the hardware viewport.
+## Returns the visible 20x18 graphics-tile page in row-major order. Map padding
+## is expanded through [method drawn_block_at], just like LoadMetatiles.
 ##
 ## This is [method tile_index_at] for 360 tiles, written out rather than called
 ## 360 times: it is on the draw path, and the per-tile call did the same block
 ## division and bounds check for every tile of the same block row.
 func visible_tile_indices() -> PackedInt32Array:
+	return tile_indices_in_window(
+		visible_screen_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH,
+		VIEW_TILES,
+	)
+
+
+## Expands an arbitrary graphics-tile window through the same block-buffer path
+## as the hardware page. The renderer requests one extra row and column while a
+## fractional hSCX/hSCY offset exposes the far edge of the screen.
+func tile_indices_in_window(origin: Vector2i, size: Vector2i) -> PackedInt32Array:
 	var out := PackedInt32Array()
-	out.resize(VIEW_TILES.x * VIEW_TILES.y)
+	if size.x <= 0 or size.y <= 0:
+		return out
+	out.resize(size.x * size.y)
 	out.fill(-1)
 	if current_map == null or current_tileset == null:
 		return out
 
-	# The origin follows the player off the map, so a tile coordinate can be
+	# The window follows the player off the map, so a tile coordinate can be
 	# negative and the block divisions have to floor rather than truncate.
-	var origin: Vector2i = visible_origin_cell() * RomLayout.MAP_BLOCK_CELL_WIDTH
 	var tile_width: int = RomLayout.MAP_BLOCK_TILE_WIDTH
-	for y: int in VIEW_TILES.y:
+	for y: int in size.y:
 		var tile_y: int = origin.y + y
-		var row: int = y * VIEW_TILES.x
+		var row: int = y * size.x
 		var block_y: int = floori(float(tile_y) / float(tile_width))
 		var local_row: int = posmod(tile_y, tile_width) * tile_width
-		for x: int in VIEW_TILES.x:
+		for x: int in size.x:
 			var tile_x: int = origin.x + x
 			var block: int = drawn_block_at(
 				floori(float(tile_x) / float(tile_width)), block_y

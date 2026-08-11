@@ -125,36 +125,49 @@ func _draw() -> void:
 	if _world == null:
 		return
 
-	var page: PackedInt32Array = _world.visible_tile_indices()
-	for y: int in Gen2WorldAPI.VIEW_TILES.y:
-		for x: int in Gen2WorldAPI.VIEW_TILES.x:
-			var tile: int = page[y * Gen2WorldAPI.VIEW_TILES.x + x]
+	var camera_pixels: Vector2 = _world.visible_origin_cells() * Gen2WorldAPI.CELL_PIXELS
+	var tile_origin := Vector2i(
+		floori(camera_pixels.x / float(Gen2Tiles.TILE_WIDTH)),
+		floori(camera_pixels.y / float(Gen2Tiles.TILE_HEIGHT)),
+	)
+	var tile_offset: Vector2 = camera_pixels - Vector2(
+		tile_origin.x * Gen2Tiles.TILE_WIDTH,
+		tile_origin.y * Gen2Tiles.TILE_HEIGHT,
+	)
+	var window_size: Vector2i = Gen2WorldAPI.VIEW_TILES + Vector2i.ONE
+	var page: PackedInt32Array = _world.tile_indices_in_window(tile_origin, window_size)
+	for y: int in window_size.y:
+		for x: int in window_size.x:
+			var tile: int = page[y * window_size.x + x]
 			if _atlas == null or tile < 0 or tile >= _world.current_tileset.tile_count:
 				continue
 			draw_texture_rect_region(
 				_atlas,
-				Rect2(Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT), Vector2(8, 8)),
+				Rect2(
+					Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT) - tile_offset,
+					Vector2(8, 8),
+				),
 				Rect2(Vector2(tile * Gen2Tiles.TILE_WIDTH, 0), Vector2(8, 8)),
 			)
 
 	var actors: Array = _world.visible_objects()
 	actors.sort_custom(_sort_objects)
 	for object: Gen2WorldObject in actors:
-		var pixel: Vector2i = (object.cell - _world.visible_origin_cell()) * Gen2WorldAPI.CELL_PIXELS \
-			+ object.step_offset(Gen2WorldAPI.CELL_PIXELS)
+		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
+			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels
 		var texture: Texture2D = _actor_texture(object.sprite, object.palette, object.facing, object.frame)
 		if texture != null:
-			draw_texture(texture, Vector2(pixel))
+			draw_texture(texture, pixel)
 		if object.emote_visible:
-			_draw_emote(object.emote_id, Vector2(pixel))
+			_draw_emote(object.emote_id, pixel)
 
-	var player: Vector2i = _world.player_pixel_position()
+	var player: Vector2 = Vector2(_world.player_pixel_position())
 	var player_texture: Texture2D = _actor_texture(
 		_world.player_sprite(), _world.player_palette(), _world.player_facing,
 		_world.player_walk_frame()
 	)
 	if player_texture != null:
-		draw_texture(player_texture, Vector2(player))
+		draw_texture(player_texture, player)
 	else:
 		var marker := Rect2(Vector2(player.x, player.y), Vector2(16, 16))
 		draw_rect(marker, PLAYER_COLOR, false, 1.0)

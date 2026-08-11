@@ -715,21 +715,25 @@ func test_expanded_tiles_follow_block_and_metatile_order() -> void:
 
 func test_visible_page_is_twenty_by_eighteen_tiles_and_centers_player() -> void:
 	var world: Gen2WorldAPI = _world()
-	assert_eq(world.visible_origin_cell(), Vector2i(3, 2))
-	assert_eq(world.player_view_cell(), Vector2i(5, 4))
-	assert_eq(world.player_pixel_position(), Vector2i(80, 64))
+	assert_eq(world.visible_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.visible_subcell_offset_cells(), Vector2i.ZERO)
+	assert_eq(world.visible_screen_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.player_view_cell(), Vector2i(4, 4))
+	assert_eq(world.player_pixel_position(), Vector2i(64, 64))
 
 	var page: PackedInt32Array = world.visible_tile_indices()
 	assert_eq(page.size(), 20 * 18)
-	assert_eq(page[0], world.tile_index_at(6, 4))
-	assert_eq(page[19], world.tile_index_at(25, 4))
+	assert_eq(page[0], world.tile_index_at(8, 4))
+	assert_eq(page[19], world.tile_index_at(27, 4))
 
 	# GetMapScreenCoords clamps nothing, so the player stays centred at a corner
 	# and the page runs off the map into border block.
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cell(), Vector2i(-5, -4))
+	assert_eq(top_left.visible_origin_cell(), Vector2i(-4, -4))
 	var bottom_right: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 7))
+	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 6))
+	assert_eq(bottom_right.visible_subcell_offset_cells(), Vector2i.ONE)
+	assert_eq(bottom_right.visible_screen_origin_cell(), Vector2i(11, 7))
 
 
 func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
@@ -1822,44 +1826,41 @@ func test_player_walk_step_starts_a_cell_behind_and_never_moves_the_committed_ce
 	assert_eq(world.player_cell, Vector2i(7, 6))
 	assert_true(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2(1.0, 0.0))
-	assert_eq(
-		world.player_pixel_position(),
-		world.player_view_cell() * Gen2WorldAPI.CELL_PIXELS + Vector2i(16, 0)
-	)
+	assert_eq(world.player_pixel_position(), Gen2WorldAPI.PLAYER_VIEW_CELL * 16)
 
 
 func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	var world: Gen2WorldAPI = _world()
 	# Standing still, the hardware page origin and the camera agree.
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
-	assert_eq(world.visible_origin_cell(), Vector2i(3, 2))
-	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+	assert_eq(world.visible_origin_cell(), Vector2i(4, 2))
+	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
 	assert_true(world.move(Vector2i.LEFT))
-	# The page origin follows the committed cell, so it moves at once. The player
-	# has not visibly left the old cell yet, and the camera stays with them.
+	# Crossing an even-cell boundary moves the surrounding-page anchor by a whole
+	# block at once. The fine scroll still frames the player's presentation cell.
 	assert_eq(world.visible_origin_cell(), Vector2i(2, 2))
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(3.0, 2.0))
+	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
 	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
 	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(2.875, 2.0))
+	assert_eq(world.visible_origin_cells(), Vector2(3.875, 2.0))
 
 	# The step lands on the committed cell, where the two agree again.
 	assert_true(world.advance_player_step(1000.0))
 	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_position_cells(), Vector2(7.0, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(world.visible_origin_cell()))
+	assert_eq(world.visible_origin_cells(), Vector2(world.visible_screen_origin_cell()))
 
 
 func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -> void:
 	var corner: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(corner.visible_origin_cell(), Vector2i(10, 7))
-	assert_eq(corner.visible_origin_cells(), Vector2(10.0, 7.0))
+	assert_eq(corner.visible_origin_cell(), Vector2i(10, 6))
+	assert_eq(corner.visible_origin_cells(), Vector2(11.0, 7.0))
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cells(), Vector2(-5.0, -4.0))
+	assert_eq(top_left.visible_origin_cells(), Vector2(-4.0, -4.0))
 
 
 func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
