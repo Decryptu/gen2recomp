@@ -369,6 +369,22 @@ func test_seeding_roaming_mons_keeps_a_record_that_already_moved() -> void:
 	assert_eq(loose.roaming_mons(), moved)
 
 
+## A missing schedule stream must be a no-op, because creating and randomizing
+## a generator here makes save-state movement depend on an invisible source.
+func test_roaming_does_not_roll_without_an_injected_generator() -> void:
+	var state := Gen2WorldState.new()
+	var initial: Array = [{"species": 243, "level": 40, "map_group": 1, "map_number": 1}]
+	state.ensure_roaming_mons(initial)
+	var rows: Array = [{
+		"map_group": 1,
+		"map_number": 1,
+		"connections": [{"map_group": 1, "map_number": 2}],
+	}]
+
+	assert_eq(state.advance_roaming(rows), [])
+	assert_eq(state.roaming_mons(), initial)
+
+
 ## `wLastDexMode` sits in the saved player data, so it survives a snapshot the
 ## way the radio knob beside it does.
 func test_the_last_dex_mode_round_trips() -> void:

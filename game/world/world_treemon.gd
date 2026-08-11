@@ -12,7 +12,7 @@ extends RefCounted
 ## RockMonMaps and then one flat roll, see [method rock_encounter].
 ##
 ## The generator is required rather than defaulted, so nothing here can roll on
-## an uninjected generator the way advance_roaming() still can.
+## an uninjected generator. The roaming scheduler follows the same rule.
 
 ## GetTreeScore's three answers (constants/pokemon_data_constants.asm).
 const SCORE_BAD: int = 0

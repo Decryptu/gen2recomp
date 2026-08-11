@@ -1499,6 +1499,15 @@ func advance_roaming(random: RandomNumberGenerator = null) -> Array:
 ## returned alongside it so a clock, radio event or save host can publish one
 ## coherent update without reaching into Gen2WorldState.
 func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
+	if random == null and not state.roaming_mons().is_empty():
+		return {
+			"ok": false,
+			"kind": &"world_schedule_failed",
+			"reason": &"missing_schedule_random",
+			"roaming": [],
+			"swarm_map": state.swarm_map(),
+			"fishing_swarm_species": state.fishing_swarm_species(),
+		}
 	var moved: Array = advance_roaming(random)
 	return {
 		"ok": true,

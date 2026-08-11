@@ -953,11 +953,10 @@ func _story_path(data: GameData) -> Dictionary:
 	save.world = world.snapshot()
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
-	# Every map load advances the roaming beasts, and an unset schedule_random
-	# makes Gen2WorldState.advance_roaming() randomize() one of its own, which is
-	# what world_screen.gd:153 sets on the real path. Without this the route's
-	# reported roaming positions differ run to run while the rest is identical,
-	# so the walk cannot be diffed against itself.
+	# Every map load advances the roaming beasts. Supply a dedicated schedule
+	# stream rather than relying on an implicit random source, as the live screen
+	# does at world_screen.gd:153. Without this the route's reported roaming
+	# positions cannot be diffed against itself.
 	#
 	# Its own generator, not the route's: the schedule rolls once per map load,
 	# and drawing them from the same stream would shift every encounter and catch

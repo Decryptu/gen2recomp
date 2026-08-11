@@ -4043,9 +4043,26 @@ func test_world_snapshot_round_trips_map_player_and_mutable_state() -> void:
 	assert_eq(restored.state.swarm_map(), Vector2i(1, 1))
 	assert_true(restored.state.just_battled())
 	assert_true(restored.state.hall_of_fame())
-	var schedule: Dictionary = restored.advance_schedule()
+	var schedule_random := RandomNumberGenerator.new()
+	schedule_random.seed = 4046
+	var schedule: Dictionary = restored.advance_schedule(schedule_random)
 	assert_true(schedule["ok"])
 	assert_eq(schedule["kind"], &"world_schedule_updated")
+
+
+func test_schedule_refuses_active_roaming_without_a_random_stream() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var initial: Array = [{"species": 243, "level": 40, "map_group": 1, "map_number": 1}]
+	state.ensure_roaming_mons(initial)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
+
+	var result: Dictionary = world.advance_schedule()
+	assert_false(result["ok"])
+	assert_eq(result["kind"], &"world_schedule_failed")
+	assert_eq(result["reason"], &"missing_schedule_random")
+	assert_eq(result["roaming"], [])
+	assert_eq(state.roaming_mons(), initial)
 
 
 func test_world_clock_day_change_clears_daily_engine_flags() -> void:
