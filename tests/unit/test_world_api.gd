@@ -586,7 +586,13 @@ func test_script_text_expands_a_source_string_buffer() -> void:
 	]
 	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
 	RomCache.write_json(RomCache.world_text_path(_directory), {
-		"48:7000": [Gen2WorldScript.TEXT_START, 0x14, 0, Gen2WorldScript.TEXT_TERMINATOR],
+		## `text_buffer 0` is a text command, so the literal before it is closed
+		## with `@` the way every `text_ram` in the pins is; without that
+		## `PlaceString` reads $14 as a character.
+		"48:7000": [
+			Gen2WorldScript.TEXT_START, Gen2TextStream.TX_END,
+			0x14, 0, Gen2TextStream.TX_END,
+		],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6240

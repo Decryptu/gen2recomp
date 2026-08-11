@@ -155,6 +155,10 @@ var _pending_rock_smash: Dictionary = {}
 ## its party. GetTreeScore is the only reader; -1 means no save has set one,
 ## which refuses rather than scoring against an invented zero.
 var _player_id: int = -1
+## wPlayerName, mirrored the same way. `<PLAYER>` is a print-time code in
+## every text that greets the player by name, so a script cannot print one
+## without it; empty leaves the marker rather than inventing a trainer.
+var _player_name: String = ""
 ## wPlayerGender's PLAYERGENDER_FEMALE_F, mirrored from the save the way the
 ## trainer ID is. Crystal only: pokegold ships no KrisStateSprites, so a Gold or
 ## Silver world stays male whatever a caller sets.
@@ -1255,6 +1259,16 @@ func set_player_id(player_id: int) -> Dictionary:
 
 func player_id() -> int:
 	return _player_id
+
+
+## Mirrors the selected save's wPlayerName, for the `<PLAYER>` code.
+func set_player_name(name: String) -> Dictionary:
+	_player_name = name.strip_edges()
+	return {"ok": true}
+
+
+func player_name() -> String:
+	return _player_name
 
 
 ## `GetPlayerSprite`'s table choice, mirrored from the save. Setting it re-runs
@@ -2775,6 +2789,8 @@ func _enqueue_script(request: Dictionary) -> void:
 		request["player_cell"] = player_cell
 	if not request.has("party") and not _party_summary.is_empty():
 		request["party"] = _party_summary.duplicate()
+	if not request.has("player_name") and not _player_name.is_empty():
+		request["player_name"] = _player_name
 	if not request.has("object_event_flags"):
 		## `disappear` and `appear` write an object's event flag where the source
 		## does, inside the script, so a later `checkevent` on the same flag sees

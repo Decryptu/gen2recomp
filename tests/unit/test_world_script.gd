@@ -205,12 +205,14 @@ func test_memcall_operands_are_runtime_addresses_not_static_script_references() 
 	assert_eq(references["scripts"].size(), 0)
 
 
-func test_text_decoder_skips_text_start_and_stops_at_source_done() -> void:
+func test_text_decoder_runs_the_command_layer_and_stops_at_source_done() -> void:
+	## TX_START, "A", <PARA>, "B", <DONE>, and one byte past the end that must
+	## not be read. <PARA> is $51; $50 is the terminator, not a page break.
 	var decoded: Dictionary = Gen2WorldScript.decode_text(
 		PackedByteArray([0x00, 0x80, Gen2WorldScript.TEXT_PAGE, 0x81, 0x57, 0x80])
 	)
 	assert_true(decoded["ok"])
-	assert_eq(decoded["text"], "A\n\nB")
+	assert_eq(decoded["text"], "A" + Gen2TextStream.PAGE_BREAK + "B")
 	assert_eq(decoded["bytes"], 5)
 
 	var missing: Dictionary = Gen2WorldScript.decode_text(PackedByteArray([0x00, 0x80]))

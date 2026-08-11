@@ -21,6 +21,10 @@ config/icon="res://icon.svg"
 GameRuntime="*res://autoload/game_runtime.gd"
 InputRuntime="*res://autoload/input_runtime.gd"
 
+[debug]
+
+file_logging/enable_file_logging=true
+
 [display]
 
 window/stretch/mode="canvas_items"

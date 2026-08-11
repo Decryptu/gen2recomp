@@ -70,9 +70,45 @@ static func paginate(lines: PackedStringArray, rows: int) -> Array:
 	return out
 
 
-## Both steps at once: the pages a string fills in a box that size.
+## Both steps at once, honouring the two waits [Gen2TextStream] marks.
+##
+## `Paragraph` clears the box and starts again at the top line, so its page
+## begins empty. `_ContText` scrolls by one line and writes at the bottom, so
+## its page begins with the line that was underneath: with a two-line box that
+## is the previous page's second line, and dropping it loses a line out of every
+## paragraph that runs past two.
 static func lay_out(text: String, columns: int, rows: int) -> Array:
-	return paginate(wrap_lines(text, columns), rows)
+	var out: Array = []
+	if rows <= 0 or columns <= 0:
+		return out
+	var page: PackedStringArray = PackedStringArray()
+	var at: int = 0
+	while at <= text.length():
+		var page_at: int = text.find(Gen2TextStream.PAGE_BREAK, at)
+		var scroll_at: int = text.find(Gen2TextStream.SCROLL_BREAK, at)
+		var stop: int = page_at
+		if stop < 0 or (scroll_at >= 0 and scroll_at < stop):
+			stop = scroll_at
+		var segment: String = text.substr(at, -1) if stop < 0 else text.substr(at, stop - at)
+		for line: String in wrap_lines(segment, columns):
+			page.append(line)
+			if page.size() == rows:
+				out.append(page)
+				page = PackedStringArray()
+		if stop < 0:
+			break
+		var scrolled: bool = stop == scroll_at
+		if not page.is_empty():
+			out.append(page)
+		page = PackedStringArray()
+		if scrolled and not out.is_empty():
+			var previous: PackedStringArray = out[out.size() - 1]
+			if not previous.is_empty():
+				page.append(previous[previous.size() - 1])
+		at = stop + 1
+	if not page.is_empty():
+		out.append(page)
+	return out
 
 
 ## The longest prefix of [param word] that fits in [param columns] tiles.

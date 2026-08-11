@@ -31,6 +31,14 @@ const TEXT_LEFT: int = 1
 const TEXT_TOP: int = 2
 const LINE_SPACING: int = 2
 
+## `LoadBlinkingCursor` writes '▼' at screen tile (18, 17) and
+## `UnloadBlinkingCursor` puts the '─' of the border back. The box's own top
+## row is 12, so that is column 18 of its bottom row, and the arrow is what
+## every wait for a button looks like: `Paragraph`, `_ContText` and
+## `PromptText` all load it before `PromptButton` and unload it after.
+const CURSOR_CODE: int = 0xEE
+const CURSOR_COLUMN: int = 18
+
 const TILE: int = Gen2Font.TILE
 
 ## Tiles per second while a page is revealing. The games run this off the frame
@@ -189,6 +197,7 @@ func _redraw() -> void:
 
 	_draw_border(indices, width)
 	_draw_lines(indices, width)
+	_draw_cursor(indices, width)
 
 	# Index 0 is the field and index 3 the ink; 1bpp graphics have no middle
 	# colours, so the two between them are never drawn. Written out rather than
@@ -206,6 +215,18 @@ func _redraw() -> void:
 
 func _draw_border(indices: PackedByteArray, width: int) -> void:
 	font.draw_box(frame_style, indices, width, 0, 0, columns, rows)
+
+
+## The arrow, drawn only while the box is actually waiting: a page still
+## revealing has not reached its `PromptButton` yet.
+func _draw_cursor(indices: PackedByteArray, width: int) -> void:
+	if _pages.is_empty() or is_revealing():
+		return
+	if CURSOR_COLUMN >= columns or rows <= 0:
+		return
+	font.draw_code(
+		CURSOR_CODE, indices, width, CURSOR_COLUMN * TILE, (rows - 1) * TILE
+	)
 
 
 func _draw_lines(indices: PackedByteArray, width: int) -> void:
