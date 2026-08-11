@@ -9,6 +9,11 @@ extends RefCounted
 const TYPE_WALKING: int = 1
 const TYPE_STANDING: int = 2
 const TYPE_STILL: int = 3
+const TYPE_MON_ICON: int = 4
+
+const BIG_SHAPE_NONE: int = 0
+const BIG_SHAPE_SYMMETRIC: int = 1
+const BIG_SHAPE_ASYMMETRIC: int = 2
 
 const FACING_DOWN: int = 0
 const FACING_UP: int = 1
@@ -34,6 +39,13 @@ const SPRITE_SURFING_PIKACHU: int = 0x34
 const SPRITE_SURF: int = 0x53
 const SPRITE_KRIS: int = 0x60
 const SPRITE_KRIS_BIKE: int = 0x61
+const SPRITE_POKEMON: int = 0x80
+
+## SpriteMons maps the 35 special object bytes to reusable IconPointers shapes.
+const MON_ICON_FOR_SPRITE: Array[int] = [
+	25, 26, 15, 24, 17, 10, 12, 31, 6, 21, 9, 30, 3, 1, 4, 9, 23, 14,
+	5, 22, 2, 18, 19, 11, 29, 16, 27, 20, 13, 8, 7, 32, 35, 34, 33,
+]
 
 ## constants/sprite_data_constants.asm. `InitPlayerObject` writes one of these
 ## onto the player object rather than taking the sprite's own default row, and
@@ -59,6 +71,7 @@ var bytes: int = 0
 var tiles: int = 0
 var sprite_type: int = TYPE_STILL
 var default_palette: int = 0
+var icon_number: int = 0
 
 
 static func from_cache(value: Dictionary) -> Gen2WorldSprite:
@@ -73,6 +86,23 @@ static func from_cache(value: Dictionary) -> Gen2WorldSprite:
 	out.sprite_type = int(value.get("type", TYPE_STILL))
 	out.default_palette = int(value.get("palette", 0))
 	return out
+
+
+static func from_mon_icon(icon: int) -> Gen2WorldSprite:
+	var out := Gen2WorldSprite.new()
+	out.number = icon
+	out.icon_number = icon
+	out.tiles = 8
+	out.bytes = out.tiles * Gen2Tiles.TILE_BYTES
+	out.sprite_type = TYPE_MON_ICON
+	return out
+
+
+static func mon_icon_for_sprite(sprite_number: int) -> int:
+	var index: int = sprite_number - SPRITE_POKEMON
+	if index < 0 or index >= MON_ICON_FOR_SPRITE.size():
+		return 0
+	return MON_ICON_FOR_SPRITE[index]
 
 
 func is_walking() -> bool:
@@ -92,7 +122,7 @@ func is_walking() -> bool:
 ## does frame 3 of down and up: `FacingStepDown3` is `FacingStepDown1` with
 ## `OAM_XFLIP` on every tile and its two columns swapped.
 func frame_tile_offset(facing: int, frame: int) -> int:
-	if tiles <= 4 or sprite_type == TYPE_STILL:
+	if tiles <= 4 or sprite_type in [TYPE_STILL, TYPE_MON_ICON]:
 		return 0
 	var facing_index: int = clampi(facing, FACING_DOWN, FACING_RIGHT)
 	if facing_index == FACING_RIGHT:
@@ -152,3 +182,64 @@ static func image_for(
 	if frame_is_mirrored(facing, frame):
 		image.flip_x()
 	return image
+
+
+## FacingsBigDollSymmetric and FacingsBigDollAsymmetric use 8x8 tiles at
+## explicit 32x32 offsets, not the ordinary four-tile 16x16 layout. The source
+## rows are in data/sprites/facings.asm; the asymmetric row has two holes and
+## two horizontally flipped tiles.
+static func big_image_for(
+	sprite: Gen2WorldSprite,
+	indices: PackedByteArray,
+	palette: PackedColorArray,
+	shape: int,
+) -> Image:
+	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	if sprite == null or shape == BIG_SHAPE_NONE:
+		return image
+	var tile_width: int = sprite.tiles
+	if tile_width <= 0 or indices.size() < tile_width * Gen2Tiles.TILE_PIXELS:
+		return image
+	var placements: Array = _big_placements(shape)
+	for placement: Array in placements:
+		var x: int = int(placement[0])
+		var y: int = int(placement[1])
+		var flip_x: bool = bool(placement[2])
+		var tile: int = int(placement[3])
+		if tile < 0 or tile >= sprite.tiles:
+			continue
+		for row: int in Gen2Tiles.TILE_HEIGHT:
+			for column: int in Gen2Tiles.TILE_WIDTH:
+				var source_x: int = column if not flip_x else 7 - column
+				var color_index: int = int(
+					indices[
+						row * tile_width * Gen2Tiles.TILE_WIDTH
+						+ tile * Gen2Tiles.TILE_WIDTH + source_x
+					]
+				)
+				var color := Color.MAGENTA
+				if color_index < palette.size():
+					color = palette[color_index]
+				if color_index == 0:
+					color.a = 0.0
+				image.set_pixel(x + column, y + row, color)
+	return image
+
+
+static func _big_placements(shape: int) -> Array:
+	if shape == BIG_SHAPE_SYMMETRIC:
+		return [
+			[0, 0, false, 0], [0, 8, false, 1], [8, 0, false, 2], [8, 8, false, 3],
+			[16, 0, false, 4], [16, 8, false, 5], [24, 0, false, 6], [24, 8, false, 7],
+			[0, 24, true, 0], [0, 16, true, 1], [8, 24, true, 2], [8, 16, true, 3],
+			[16, 24, true, 4], [16, 16, true, 5], [24, 24, true, 6], [24, 16, true, 7],
+		]
+	if shape == BIG_SHAPE_ASYMMETRIC:
+		return [
+			[0, 0, false, 0], [0, 8, false, 1], [8, 0, false, 4], [8, 8, false, 5],
+			[16, 8, false, 7], [24, 8, false, 10], [0, 24, false, 3], [0, 16, false, 2],
+			[8, 24, true, 2], [8, 16, false, 6], [16, 24, false, 9], [16, 16, false, 8],
+			[24, 24, true, 4], [24, 16, false, 11],
+		]
+	return []

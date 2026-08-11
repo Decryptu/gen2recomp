@@ -155,7 +155,9 @@ func _draw() -> void:
 	for object: Gen2WorldObject in actors:
 		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
 			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels
-		var texture: Texture2D = _actor_texture(object.sprite, object.palette, object.facing, object.frame)
+		var texture: Texture2D = _actor_texture(
+			object.sprite, object.palette, object.facing, object.frame, object.big_object_shape()
+		)
 		if texture != null:
 			draw_texture(texture, pixel)
 		if object.emote_visible:
@@ -180,16 +182,23 @@ func _actor_texture(
 	palette_override: int,
 	facing: int,
 	frame: int,
+	big_shape: int = Gen2WorldSprite.BIG_SHAPE_NONE,
 ) -> Texture2D:
 	if sprite == null or _world == null or _world.data == null:
 		return null
 	var palette: int = palette_override if palette_override != 0 else sprite.default_palette
-	var key: String = "%d:%d:%d:%d:%d" % [sprite.number, palette, facing, frame, _time_of_day]
+	var key: String = "%d:%d:%d:%d:%d:%d:%d" % [
+		sprite.sprite_type, sprite.number, palette, facing, frame, big_shape, _time_of_day,
+	]
 	if _actor_textures.has(key):
 		return _actor_textures[key]
-	var indices: PackedByteArray = _world.data.overworld_sprite_indices(sprite.number)
+	var indices: PackedByteArray = _world.data.overworld_icon_indices(sprite.icon_number) \
+		if sprite.sprite_type == Gen2WorldSprite.TYPE_MON_ICON \
+		else _world.data.overworld_sprite_indices(sprite.number)
 	var colors: PackedColorArray = _world.data.overworld_sprite_palette(palette, _time_of_day)
-	var image: Image = Gen2WorldSprite.image_for(sprite, indices, colors, facing, frame)
+	var image: Image = Gen2WorldSprite.big_image_for(sprite, indices, colors, big_shape) \
+		if big_shape != Gen2WorldSprite.BIG_SHAPE_NONE \
+		else Gen2WorldSprite.image_for(sprite, indices, colors, facing, frame)
 	var texture: Texture2D = ImageTexture.create_from_image(image)
 	_actor_textures[key] = texture
 	return texture

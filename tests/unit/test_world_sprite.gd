@@ -73,3 +73,63 @@ func test_image_composition_applies_palette_and_transparency() -> void:
 	assert_eq(image.get_pixel(1, 0), Color.RED)
 	assert_eq(image.get_pixel(2, 0), Color.BLUE)
 	assert_eq(image.get_pixel(3, 0), Color.BLACK)
+
+
+func test_symmetric_big_object_uses_the_source_sixteen_tile_layout() -> void:
+	var sprite := Gen2WorldSprite.from_cache({"number": 33, "tiles": 8, "type": 3})
+	var indices := PackedByteArray()
+	indices.resize(8 * Gen2Tiles.TILE_PIXELS)
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for tile: int in 8:
+			for x: int in Gen2Tiles.TILE_WIDTH:
+				indices[y * 8 * Gen2Tiles.TILE_WIDTH + tile * Gen2Tiles.TILE_WIDTH + x] = tile + 1
+	var palette := PackedColorArray()
+	palette.resize(9)
+	for color: int in palette.size():
+		palette[color] = Color(float(color) / 8.0, 0.0, 0.0, 1.0)
+	var image := Gen2WorldSprite.big_image_for(
+		sprite, indices, palette, Gen2WorldSprite.BIG_SHAPE_SYMMETRIC
+	)
+	assert_eq(image.get_size(), Vector2i(32, 32))
+	assert_almost_eq(image.get_pixel(1, 1).r, palette[1].r, 0.01)
+	assert_almost_eq(image.get_pixel(9, 1).r, palette[3].r, 0.01)
+	assert_almost_eq(image.get_pixel(1, 25).r, palette[1].r, 0.01)
+	assert_almost_eq(image.get_pixel(25, 25).r, palette[7].r, 0.01)
+
+
+func test_asymmetric_big_object_keeps_source_holes_and_flips() -> void:
+	var sprite := Gen2WorldSprite.from_cache({"number": 0, "tiles": 12, "type": 3})
+	var indices := PackedByteArray()
+	indices.resize(12 * Gen2Tiles.TILE_PIXELS)
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for tile: int in 12:
+			for x: int in Gen2Tiles.TILE_WIDTH:
+				indices[y * 12 * Gen2Tiles.TILE_WIDTH + tile * Gen2Tiles.TILE_WIDTH + x] = tile + 1
+	var palette := PackedColorArray()
+	palette.resize(13)
+	for color: int in palette.size():
+		palette[color] = Color(float(color) / 12.0, 0.0, 0.0, 1.0)
+	var image := Gen2WorldSprite.big_image_for(
+		sprite, indices, palette, Gen2WorldSprite.BIG_SHAPE_ASYMMETRIC
+	)
+	assert_eq(image.get_pixel(24, 0).a, 0.0)
+	assert_almost_eq(image.get_pixel(8, 24).r, palette[3].r, 0.01)
+	assert_almost_eq(image.get_pixel(15, 24).r, palette[3].r, 0.01)
+
+
+func test_pokemon_sprite_bytes_resolve_to_the_source_icon_shape() -> void:
+	assert_eq(Gen2WorldSprite.mon_icon_for_sprite(Gen2WorldSprite.SPRITE_POKEMON), 25)
+	assert_eq(Gen2WorldSprite.mon_icon_for_sprite(0x82), 15)
+	assert_eq(Gen2WorldSprite.mon_icon_for_sprite(0xA2), 33)
+	assert_eq(Gen2WorldSprite.mon_icon_for_sprite(0x7F), 0)
+
+
+func test_big_doll_shape_follows_the_source_sprite_selection() -> void:
+	var snorlax := Gen2WorldObject.from_event(0, {
+		"sprite": 33, "movement": Gen2WorldObject.MOVEMENT_BIGDOLL,
+	})
+	var onix := Gen2WorldObject.from_event(1, {
+		"sprite": 50, "movement": Gen2WorldObject.MOVEMENT_BIGDOLL,
+	})
+	assert_eq(snorlax.big_object_shape(), Gen2WorldSprite.BIG_SHAPE_SYMMETRIC)
+	assert_eq(onix.big_object_shape(), Gen2WorldSprite.BIG_SHAPE_ASYMMETRIC)
