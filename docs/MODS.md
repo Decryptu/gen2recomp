@@ -39,6 +39,14 @@ user://mods/<id>/
 | `api_version` | Must equal `Gen2ModManifest.API_VERSION` |
 | `entry` | A `.gd` path inside the mod directory |
 | `description` | Optional |
+| `dependencies` | Optional object from required mod ids to SemVer ranges |
+
+`version` is a strict `major.minor.patch` number. Dependency ranges accept an
+exact version, `*`, component wildcards such as `1.x` or `1.4.*`, comparison
+chains such as `>=1.2.0 <2.0.0`, and caret or tilde ranges such as `^1.2.3` and
+`~1.2.3`. Dependencies load first. A missing, disabled, incompatible or failed
+dependency—and every member of a dependency cycle—is refused by name before
+the dependent entry script runs.
 
 An entry that is absolute, contains `..` or is not GDScript is refused before
 anything runs. Manifests are read without executing mod code, so a launcher can
@@ -60,6 +68,10 @@ Two example mods are in `mods/examples/`, to copy into `user://mods/`:
 |---|---|
 | `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it, on the native layer with a translucent text box and one registered setting |
 | `new_content/` | A species, a move, a move effect, two rebalancing patches and both event channels |
+
+The repository examples are development material and are excluded from every
+export preset. A distributed build contains the loader but no preinstalled mod;
+players install their own copies under `user://mods/`.
 
 ## Installing
 
@@ -583,15 +595,20 @@ sees the cartridge's menu exactly.
 A change is committed the moment it is made, the way the cartridge's own OPTION
 menu writes each press to `wOptions`. Values live in `user://mod_options.json`,
 keyed by mod id, because a draw distance is a property of this installation and
-must not change when a save slot is loaded; per-mod *save* data is a separate
-thing and is not built. Only values are stored, never what a setting means, so a
+must not change when a save slot is loaded. Only values are stored, never what a setting means, so a
 mod that drops a rung in a later version finds its stored value refused and its
 default used instead, and uninstalling a mod drops what it stored.
 
+Per-slot state belongs in the save instead. A discovered manifest can use
+`host.read_save_data(manifest, save)` and
+`host.write_save_data(manifest, save, value)` to access only its own namespace.
+Both sides deep-copy dictionaries, and writes larger than 64 KiB of UTF-8 JSON
+are refused. The manifest object itself is the capability: constructing another
+manifest with the same id does not grant access to that mod's state.
+
 ## Not built yet
 
-Semver ranges and inter-mod dependencies, per-mod save data, art for mod content,
-mutation hooks on the event channels, entries in the party submenu or the mart,
+Art for mod content, mutation hooks on the event channels, entries in the party submenu or the mart,
 and `.zip`/`.pck` packs through `ProjectSettings.load_resource_pack()`. A mod
 species does not appear in the Pokedex either: both dex order tables are
 cartridge data of exactly 251 entries, and nothing splices `defined_numbers()`

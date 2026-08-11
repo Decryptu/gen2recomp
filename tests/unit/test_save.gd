@@ -211,6 +211,36 @@ func test_boxed_pokemon_round_trips_and_is_validated_against_the_cache() -> void
 	assert_eq(round_trip.boxes[2].slots[4].species, boxed.species)
 
 
+func test_per_mod_save_namespaces_round_trip_without_aliasing() -> void:
+	var save: Gen2SaveData = _save()
+	assert_true(save.set_mod_data(&"weather_plus", {
+		"seed": 42, "visits": [1, 2], "nested": {"enabled": true},
+	})["ok"])
+	var read: Dictionary = save.mod_data(&"weather_plus")
+	read["seed"] = 99
+	assert_eq(save.mod_data(&"weather_plus")["seed"], 42)
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_eq(restored.mod_data(&"weather_plus"), save.mod_data(&"weather_plus"))
+
+
+func test_mod_save_namespaces_refuse_bad_ids_and_large_documents() -> void:
+	var save: Gen2SaveData = _save()
+	assert_eq(save.set_mod_data(&"Bad Id", {"x": 1})["reason"], &"invalid_mod_save_id")
+	assert_eq(
+		save.set_mod_data(&"large", {"text": "x".repeat(65537)})["reason"],
+		&"mod_save_too_large"
+	)
+
+
+func test_format_five_migrates_to_an_empty_mod_namespace() -> void:
+	var raw: Dictionary = _save().to_dict()
+	raw["format_version"] = 5
+	raw.erase("mods")
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	assert_not_null(restored)
+	assert_eq(restored.mods, {})
+
+
 func test_a_current_save_with_the_wrong_box_shape_is_rejected() -> void:
 	var save: Gen2SaveData = _save()
 	var raw: Dictionary = save.to_dict()

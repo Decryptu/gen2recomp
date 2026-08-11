@@ -357,7 +357,7 @@ marts, phone calls and audio requests.
 | `tools/` | Headless developer scripts |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
 | `game/mods/` | Mod manifest, host, installer and refusal wording |
-| `mods/examples/` | Example mods to copy into `user://mods/`: a world renderer and a content mod |
+| `mods/examples/` | Development-only example mods to copy into `user://mods/`; excluded from exports |
 | `docs/` | Contributor notes |
 
 ## Platforms
