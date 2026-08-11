@@ -128,6 +128,11 @@ const OVERWORLD_SPRITE_PALETTE_GROUP_BYTES: int = 8
 const OVERWORLD_SPRITE_PALETTE_BYTES: int = OVERWORLD_SPRITE_PALETTE_GROUP_COUNT * OVERWORLD_SPRITE_PALETTE_GROUP_BYTES
 const OVERWORLD_SPRITE_TYPES: Array = [1, 2, 3]
 const OVERWORLD_SPRITE_PALETTE_COUNT: int = 8
+## IconPointers has one null entry followed by the 38 reusable overworld icon
+## shapes in constants/icon_constants.asm. The null entry is not graphic data.
+const MON_ICON_COUNT: int = 38
+const MON_ICON_TILES: int = 8
+const MON_ICON_BYTES: int = MON_ICON_TILES * Gen2Tiles.TILE_BYTES
 
 ## Global overworld service tables. The source keeps these apart from map data:
 ## marts are an index table of item lists, phone contacts are fixed records,
@@ -954,6 +959,7 @@ const GOLD_SILVER: Dictionary = {
 	"overworld_sprites": 0x147DE,
 	"overworld_sprite_count": 95,
 	"overworld_sprite_palettes": 0xB8AE,
+	"overworld_icons": 0x8EABE,
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
@@ -1147,6 +1153,7 @@ const CRYSTAL: Dictionary = {
 	## no collision: see Gen2WorldAPI.object_at().
 	"overworld_sprite_count": 102,
 	"overworld_sprite_palettes": 0xB469,
+	"overworld_icons": 0x8EC0D,
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
@@ -1247,6 +1254,9 @@ static func for_id(id: StringName) -> Dictionary:
 			return GOLD_SILVER
 		RomRegistry.SILVER:
 			var silver: Dictionary = GOLD_SILVER.duplicate(true)
+			# Gold and Silver share the icon format but their banks differ by ten
+			# bytes at this table.
+			silver["overworld_icons"] = 0x8EAA4
 			silver["item_attributes"] = 0x6866
 			silver["item_status_actions"] = 0xF0C5
 			silver["item_healing_hp"] = 0xF403
@@ -1437,6 +1447,11 @@ static func overworld_sprite_offset(layout: Dictionary, number: int) -> int:
 
 static func overworld_sprite_count(layout: Dictionary) -> int:
 	return int(layout.get("overworld_sprite_count", 0))
+
+
+static func overworld_icon_offset(layout: Dictionary, number: int) -> int:
+	return int(layout.get("overworld_icons", -1)) \
+		+ (number - 1) * MON_ICON_BYTES
 
 
 ## Trainer pics have no back half and no size of their own, so unlike the

@@ -16,11 +16,12 @@ func test_an_unknown_game_has_none() -> void:
 
 
 func test_gold_and_silver_share_their_common_layout() -> void:
-	# The bank map is shared, but the item tables move between the two dumps.
+	# The bank map is shared, but the item tables and the compact icon run move
+	# between the two dumps.
 	var gold: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 	var silver: Dictionary = RomLayout.for_id(RomRegistry.SILVER)
 	for key: String in gold:
-		if key in ["item_attributes", "item_status_actions", "item_healing_hp"]:
+		if key in ["item_attributes", "item_status_actions", "item_healing_hp", "overworld_icons"]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
 	assert_ne(gold["item_attributes"], silver["item_attributes"])

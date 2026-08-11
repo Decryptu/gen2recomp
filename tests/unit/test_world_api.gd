@@ -3835,9 +3835,9 @@ func test_an_object_whose_sprite_is_missing_still_blocks_and_is_talkable() -> vo
 	var data: GameData = GameData.open_directory(_directory)
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	var objects: Array = world.current_map.events["objects"]
-	# Well past the fixture's one-sprite table, and below SPRITE_VARS, so it
-	# resolves to nothing at all rather than to the variable-sprite fallback.
-	objects[0]["sprite"] = 0x9A
+	# Outside the complete SPRITE_POKEMON range and below SPRITE_VARS, so it
+	# resolves to nothing at all rather than to an icon or variable fallback.
+	objects[0]["sprite"] = 0xA3
 	objects[0]["x"] = 7
 	objects[0]["y"] = 5
 	world.reload_current_map()
@@ -4971,6 +4971,34 @@ func test_an_item_ball_with_no_item_byte_fails_instead_of_running_data() -> void
 	assert_ne(results[0]["source"]["kind"], &"item_ball")
 
 
+func test_a_full_item_pocket_keeps_an_item_ball_and_its_flag() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6030"] = [3, 1, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var items: Array = RomCache.read_json(RomCache.items_path(_directory))
+	for raw: Dictionary in items:
+		var item: int = int(raw.get("number", 0))
+		if item >= 3 and item <= 23:
+			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+	RomCache.write_json(RomCache.items_path(_directory), items)
+	var data: GameData = GameData.open_directory(_directory)
+	var owned: Dictionary = {}
+	for item: int in range(4, 24):
+		owned[item] = 1
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(5, 5), Gen2WorldState.new({}, {}, owned)
+	)
+	var ball: Gen2WorldObject = world.objects[0]
+	ball.object_type = Gen2WorldObject.OBJECTTYPE_ITEMBALL
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	assert_eq(world.interact().size(), 1)
+	var finished: Array = world.run_event_queue(true)
+	assert_eq(finished[0]["status"], &"complete")
+	assert_eq(world.state.item_quantity(3), 0)
+	assert_false(world.event_flag_active(7))
+	assert_true((world.objects[0] as Gen2WorldObject).active)
+
+
 ## `.itemifset` copies the `hiddenitem` macro's `dwb event, item` into
 ## wHiddenItemData rather than running it, so a BGEVENT_ITEM pointer must never
 ## reach the runner as code either. The flag comes first, little-endian.
@@ -5001,6 +5029,34 @@ func test_a_hidden_item_is_dispatched_from_its_three_data_bytes() -> void:
 	assert_eq(world.state.items().get(3, 0), 1)
 	# `callasm SetMemEvent` writes the record's own flag, not an object's.
 	assert_true(world.event_flag_active(20))
+
+
+func test_a_full_item_pocket_leaves_a_hidden_item_flag_clear() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61A0"] = [20, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var items: Array = RomCache.read_json(RomCache.items_path(_directory))
+	for raw: Dictionary in items:
+		var item: int = int(raw.get("number", 0))
+		if item >= 3 and item <= 23:
+			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+	RomCache.write_json(RomCache.items_path(_directory), items)
+	var data: GameData = GameData.open_directory(_directory)
+	var owned: Dictionary = {}
+	for item: int in range(4, 24):
+		owned[item] = 1
+	var world := Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 7), Gen2WorldState.new({}, {}, owned)
+	)
+	world.current_map.events["bg_events"] = [{
+		"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61A0,
+	}]
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(world.interact().size(), 1)
+	var finished: Array = world.run_event_queue(true)
+	assert_eq(finished[0]["status"], &"complete")
+	assert_eq(world.state.item_quantity(3), 0)
+	assert_false(world.event_flag_active(20))
 
 
 ## CheckBGEventFlag then `jp nz, .dontread`: the record answers only while its

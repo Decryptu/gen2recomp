@@ -131,6 +131,31 @@ func test_build_with_no_data_or_state_returns_empty() -> void:
 	assert_eq(Gen2WorldPack.build(_data, null), [])
 
 
+func test_receive_check_enforces_stack_and_pocket_capacity() -> void:
+	assert_eq(Gen2WorldPack.pocket_capacity(Gen2WorldPack.TYPE_ITEM), 20)
+	assert_eq(Gen2WorldPack.pocket_capacity(Gen2WorldPack.TYPE_BALL), 12)
+	assert_eq(Gen2WorldPack.pocket_capacity(Gen2WorldPack.TYPE_KEY_ITEM), 25)
+	var full_stack: Dictionary = Gen2WorldPack.receive_check(
+		_data, {ITEM_POTION: 99}, ITEM_POTION, 1
+	)
+	assert_false(full_stack["ok"])
+	assert_eq(full_stack["reason"], &"item_stack_full")
+
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		var item: int = int(raw.get("number", 0))
+		if item >= 5 and item <= 25:
+			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+	var data: GameData = GameData.open_directory(Fixture.directory())
+	var owned: Dictionary = {}
+	for item: int in range(5, 25):
+		owned[item] = 1
+	var pocket_full: Dictionary = Gen2WorldPack.receive_check(data, owned, 25, 1)
+	assert_false(pocket_full["ok"])
+	assert_eq(pocket_full["reason"], &"pocket_full")
+
+
 ## engine/items/pack.asm's .ItemBallsKey_LoadSubmenu picks between six headers on
 ## two inverted permission bits and the field-menu nibble. POTION is CANT_SELECT
 ## with a usable field menu, so it reaches MenuHeader_UsableItem.

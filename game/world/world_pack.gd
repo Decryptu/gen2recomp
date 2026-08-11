@@ -10,8 +10,9 @@ extends RefCounted
 ## `constants/item_data_constants.asm` names the same values
 ## `ITEM`/`KEY_ITEM`/`BALL`/`TM_HM`), which is what decides a real item's pocket.
 ## Source capacities (`MAX_ITEMS` 20, `MAX_BALLS` 12, `MAX_KEY_ITEMS` 25,
-## `MAX_PC_ITEMS` 50) are recorded but not enforced, since enforcing them would
-## change the save's item storage shape.
+## `MAX_PC_ITEMS` 50) are enforced at data-aware receive seams. The save
+## remains a flat item-to-quantity map, so one item cannot be split into two
+## 99-count stacks like the source's packed pocket arrays can.
 ##
 ## Pockets registered on `Gen2ModHost` follow the four source ones, and the item
 ## submenu below is `engine/items/pack.asm`'s own header selection.
@@ -198,3 +199,42 @@ static func pocket_for(data: GameData, item: int) -> int:
 	if data == null:
 		return 0
 	return int(data.item(item).get("pocket", 0))
+
+
+static func pocket_capacity(pocket_type: int) -> int:
+	match pocket_type:
+		TYPE_ITEM:
+			return MAX_ITEMS
+		TYPE_BALL:
+			return MAX_BALLS
+		TYPE_KEY_ITEM:
+			return MAX_KEY_ITEMS
+	return -1
+
+
+## Mirrors ReceiveItem's all-or-nothing result for the flat save model. Existing
+## stacks may grow up to MAX_ITEM_STACK; a new item also consumes one pocket
+## entry. TM/HM and unclassified fixture rows have no count limit here because
+## the source routes TMs through their separate numbered table and mods may add
+## their own pocket types.
+static func receive_check(
+	data: GameData, owned: Dictionary, item: int, quantity: int
+) -> Dictionary:
+	if data == null or item <= 0 or data.item(item).is_empty():
+		return {"ok": false, "reason": &"unknown_item"}
+	if quantity <= 0:
+		return {"ok": false, "reason": &"invalid_item_quantity"}
+	var current: int = int(owned.get(item, 0))
+	if current + quantity > MAX_ITEM_STACK:
+		return {"ok": false, "reason": &"item_stack_full", "available": MAX_ITEM_STACK - current}
+	var pocket: int = pocket_for(data, item)
+	var capacity: int = pocket_capacity(pocket)
+	if current == 0 and capacity > 0:
+		var entries: int = 0
+		for raw_item: Variant in owned:
+			if int(owned[raw_item]) <= 0 or pocket_for(data, int(raw_item)) != pocket:
+				continue
+			entries += 1
+		if entries >= capacity:
+			return {"ok": false, "reason": &"pocket_full", "pocket": pocket}
+	return {"ok": true, "quantity": current + quantity}

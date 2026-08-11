@@ -4450,7 +4450,12 @@ func _load_objects() -> void:
 		## could not be reached to run it.
 		if sprite_number >= Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE:
 			sprite_number = SPRITE_CHRIS
-		var sprite: Gen2WorldSprite = data.overworld_sprite(sprite_number)
+		var sprite: Gen2WorldSprite = null
+		var icon_number: int = Gen2WorldSprite.mon_icon_for_sprite(sprite_number)
+		if icon_number > 0:
+			sprite = data.overworld_icon(icon_number)
+		else:
+			sprite = data.overworld_sprite(sprite_number)
 		var object_event: Dictionary = value.duplicate(true)
 		object_event["sprite"] = sprite_number
 		var object: Gen2WorldObject = Gen2WorldObject.from_event(index, object_event, sprite)
