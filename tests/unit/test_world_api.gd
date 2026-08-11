@@ -699,10 +699,12 @@ func test_visible_page_is_twenty_by_eighteen_tiles_and_centers_player() -> void:
 	assert_eq(page[0], world.tile_index_at(6, 4))
 	assert_eq(page[19], world.tile_index_at(25, 4))
 
+	# GetMapScreenCoords clamps nothing, so the player stays centred at a corner
+	# and the page runs off the map into border block.
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cell(), Vector2i.ZERO)
+	assert_eq(top_left.visible_origin_cell(), Vector2i(-5, -4))
 	var bottom_right: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(bottom_right.visible_origin_cell(), Vector2i(6, 3))
+	assert_eq(bottom_right.visible_origin_cell(), Vector2i(10, 7))
 
 
 func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
@@ -1827,12 +1829,12 @@ func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	assert_eq(world.visible_origin_cells(), Vector2(world.visible_origin_cell()))
 
 
-func test_the_interpolated_camera_origin_clamps_to_the_map_like_the_page_does() -> void:
+func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -> void:
 	var corner: Gen2WorldAPI = _world(Vector2i(15, 11))
-	assert_eq(corner.visible_origin_cell(), Vector2i(6, 3))
-	assert_eq(corner.visible_origin_cells(), Vector2(6.0, 3.0))
+	assert_eq(corner.visible_origin_cell(), Vector2i(10, 7))
+	assert_eq(corner.visible_origin_cells(), Vector2(10.0, 7.0))
 	var top_left: Gen2WorldAPI = _world(Vector2i.ZERO)
-	assert_eq(top_left.visible_origin_cells(), Vector2.ZERO)
+	assert_eq(top_left.visible_origin_cells(), Vector2(-5.0, -4.0))
 
 
 func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
@@ -5000,3 +5002,40 @@ func test_an_unfilled_buffer_contributes_no_address() -> void:
 	})
 
 	assert_eq(runner.text_context()["ram"], {})
+
+
+## M2: LoadMetatiles substitutes wMapBorderBlock for a block byte of $00, and the
+## padding ChangeMap puts around the map is that same block. Both are graphics
+## only, so collision still reads the raw byte.
+func test_the_page_draws_border_block_past_the_edge_of_the_map() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i.ZERO)
+	world.current_map.border_block = 1
+
+	assert_eq(world.drawn_block_at(-1, 0), 1, "west of the map is border block")
+	assert_eq(world.drawn_block_at(0, -1), 1, "north of the map is border block")
+	assert_eq(
+		world.drawn_block_at(world.current_map.width_blocks, 0), 1,
+		"east of the map is border block"
+	)
+	assert_eq(
+		world.drawn_block_at(0, world.current_map.height_blocks), 1,
+		"south of the map is border block"
+	)
+
+
+func test_a_zero_block_is_drawn_as_border_but_still_collides_as_zero() -> void:
+	var world: Gen2WorldAPI = _world()
+	world.current_map.border_block = 1
+	world.change_block(0, 0, 0)
+
+	assert_eq(world.drawn_block_at(0, 0), 1, "LoadMetatiles swaps $00 for the border")
+	assert_eq(world.block_at(0, 0), 0, "GetCoordTileCollision still reads the raw byte")
+
+
+func test_the_page_is_fully_drawn_even_when_the_map_is_smaller_than_it() -> void:
+	# Every tile answered, none left at the -1 the old clamp produced.
+	var world: Gen2WorldAPI = _world(Vector2i.ZERO)
+	var page: PackedInt32Array = world.visible_tile_indices()
+
+	assert_eq(page.size(), 20 * 18)
+	assert_false(page.has(-1), "no tile of the page is left undrawn")
