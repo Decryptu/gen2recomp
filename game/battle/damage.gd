@@ -255,6 +255,9 @@ static func stab_damage(
 	worked = Gen2Weather.apply_damage_modifier(worked, Gen2Weather.damage_modifier(
 		weather, move_type, int(move.get("effect", -1))
 	))
+	if attacker.badge_type_boost_mask & (1 << move_type):
+		@warning_ignore("integer_division")
+		worked = mini(worked + maxi(worked / 8, 1), 0xFFFF)
 
 	if attacker.types().has(move_type):
 		out["stab"] = true

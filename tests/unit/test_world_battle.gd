@@ -82,6 +82,20 @@ func test_wild_request_builds_a_one_mon_enemy_party() -> void:
 	assert_eq((prepared["battle"] as Gen2Battle).enemy.species, SPECIES_TWO)
 
 
+func test_battle_request_carries_the_players_badge_mask() -> void:
+	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data,
+		{"kind": &"battle_requested", "values": {
+			"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5,
+		}},
+		_player_party(), RandomNumberGenerator.new(), 1 << 0
+	)
+	assert_true(prepared["ok"])
+	var battle: Gen2Battle = prepared["battle"]
+	assert_eq(battle.player_badge_mask, 1)
+	assert_gt(battle.player.stat("attack"), battle.player.stats["attack"])
+
+
 ## LoadEnemyMon's .TreeMon branch: a headbutt encounter whose species is in
 ## CheckSleepingTreeMon's list for the current time of day enters asleep for
 ## TREEMON_SLEEP_TURNS. The list question is answered before this boundary,

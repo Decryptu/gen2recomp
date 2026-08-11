@@ -204,6 +204,26 @@ func test_every_volatile_field_clears() -> void:
 	assert_false(mon.minimized)
 
 
+func test_badge_stat_boosts_are_active_battle_values_and_clear_cleanly() -> void:
+	var mon: Gen2BattleMon = Gen2BattleMon.create(_data, Fixture.PIKACHU, 50)
+	var attack: int = int(mon.stats["attack"])
+	var defense: int = int(mon.stats["defense"])
+	var speed: int = int(mon.stats["speed"])
+	var special: int = int(mon.stats["sp_attack"])
+	var special_defense: int = int(mon.stats["sp_defense"])
+
+	mon.set_badge_boosts((1 << 0) | (1 << 2) | (1 << 4) | (1 << 6))
+	assert_gt(mon.stat("attack"), attack)
+	assert_gt(mon.stat("defense"), defense)
+	assert_gt(mon.stat("speed"), speed)
+	assert_gt(mon.unmodified_stat("sp_attack"), special)
+	assert_eq(mon.unmodified_stat("sp_defense"), special_defense)
+	assert_false(mon.badge_stat_boosts.has("sp_defense"))
+	mon.clear_badge_boosts()
+	assert_eq(mon.stat("attack"), attack)
+	assert_eq(mon.badge_type_boost_mask, 0)
+
+
 ## Attract's "opposite gender" rule reads [method Gen2BattleMon.gender], which
 ## `GetGender` works out from the species ratio and the Attack and Speed DVs
 ## combined into one byte, not a coin flip. Bulbasaur is 12.5% female (ratio 31);

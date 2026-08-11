@@ -17,6 +17,7 @@ static func prepare(
 	request: Dictionary,
 	player_party: Gen2Party,
 	random: RandomNumberGenerator = null,
+	player_badges: int = 0,
 ) -> Dictionary:
 	if data == null or player_party == null or player_party.is_wiped():
 		return _failure(&"missing_player_party")
@@ -64,7 +65,7 @@ static func prepare(
 		return _failure(&"missing_enemy_party")
 	var generator := random if random != null else RandomNumberGenerator.new()
 	var battle: Gen2Battle = Gen2Battle.create_parties(
-		data, player_party, enemy_party, generator, kind == &"trainer"
+		data, player_party, enemy_party, generator, kind == &"trainer", player_badges
 	)
 	if battle == null:
 		return _failure(&"battle_setup_failed")

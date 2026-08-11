@@ -287,6 +287,18 @@ func test_a_type_boosting_item_does_nothing_for_another_type() -> void:
 	assert_eq(int(_hit(attacker, defender, Fixture.TACKLE)["damage"]), plain)
 
 
+## `DoBadgeTypeBoosts` adds one eighth after weather and before STAB. The first
+## badge is Flying, while the eleventh is Thunder, so this isolates the type
+## table from the stat table.
+func test_a_badge_boosts_its_type_before_stab() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var defender: Gen2BattleMon = _mon(Fixture.BULBASAUR)
+	var plain: int = int(_hit(attacker, defender, Fixture.THUNDERBOLT)["damage"])
+	attacker.set_badge_boosts(1 << 10)
+	assert_eq(plain, 27)
+	assert_eq(int(_hit(attacker, defender, Fixture.THUNDERBOLT)["damage"]), 30)
+
+
 ## `LightBallBoost` sits on the special branch and `ThickClubBoost` on the
 ## physical one, so each doubles the stat its own branch had already chosen and
 ## neither touches the other.

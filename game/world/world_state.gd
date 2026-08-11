@@ -428,6 +428,17 @@ func badge_count(crystal: bool = true) -> int:
 	return count
 
 
+## The source badge bytes as one mask in badge order, for the battle engine's
+## `DoBadgeTypeBoosts` and `BadgeStatBoosts` readers.
+func badge_mask(crystal: bool = true) -> int:
+	var mask: int = 0
+	var flags: Array[int] = BADGE_ENGINE_FLAGS if crystal else BADGE_ENGINE_FLAGS_GOLD_SILVER
+	for badge: int in flags.size():
+		if is_engine_flag_active(flags[badge]):
+			mask |= 1 << badge
+	return mask
+
+
 ## Clears only source daily engine flags. Story flags such as Hall of Fame
 ## survive the day boundary.
 func reset_daily_flags(crystal: bool = true) -> bool:

@@ -460,6 +460,10 @@ var is_trainer_battle: bool = false
 ## BATTLETYPE_NORMAL.
 var battle_type: int = BATTLETYPE_NORMAL
 
+## Earned player badges as source-order bits. Zero is the battle-safe default
+## for wild fixtures and development matchups without a world save.
+var player_badge_mask: int = 0
+
 ## `wNumFleeAttempts`. Every failed run raises the odds behind the next one, and
 ## choosing FIGHT clears it again, which is `BattleMenu_Fight`'s own `xor a`.
 var flee_attempts: int = 0
@@ -598,7 +602,8 @@ static func create_parties(
 	player_party: Gen2Party,
 	enemy_party: Gen2Party,
 	generator: RandomNumberGenerator,
-	trainer_battle: bool = false
+	trainer_battle: bool = false,
+	player_badges: int = 0
 ) -> Gen2Battle:
 	if game_data == null or player_party == null or enemy_party == null:
 		return null
@@ -610,7 +615,9 @@ static func create_parties(
 	out.parties = {PLAYER: player_party, ENEMY: enemy_party}
 	out.rng = generator if generator != null else RandomNumberGenerator.new()
 	out.is_trainer_battle = trainer_battle
+	out.player_badge_mask = player_badges & 0xFFFF
 	out._participants = {PLAYER: {player_party.active: true}, ENEMY: {enemy_party.active: true}}
+	out._apply_player_badges()
 	return out
 
 
@@ -631,6 +638,19 @@ static func create(
 ## What a side asks for with its turn.
 static func use_move(slot: int) -> Dictionary:
 	return {"type": ACTION_MOVE, "slot": slot}
+
+
+func set_player_badges(mask: int) -> void:
+	player_badge_mask = mask & 0xFFFF
+	_apply_player_badges()
+
+
+func _apply_player_badges() -> void:
+	if parties.is_empty():
+		return
+	var current: Gen2BattleMon = mon(PLAYER)
+	if current != null:
+		current.set_badge_boosts(player_badge_mask)
 
 
 static func switch_to(index: int) -> Dictionary:
@@ -1036,8 +1056,12 @@ func send_out(
 	var leaving: int = current.active
 	var leaving_species: int = current.active_mon().species
 	var withdrawing: bool = not current.active_mon().is_fainted()
+	if side == PLAYER and current.active_mon() != null:
+		current.active_mon().clear_badge_boosts()
 	if not current.send_out(index):
 		return events
+	if side == PLAYER:
+		_apply_player_badges()
 	_clear_trapping()
 	if not preserve_counter_moves:
 		# NewBattleMonStatus/NewEnemyMonStatus clear both counter-move words.

@@ -1198,7 +1198,12 @@ func _start_battle_request(request: Dictionary) -> void:
 		host.set_capture_balls(
 			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
 		)
-	host.set_meta("world_battle_request", {"request": request.duplicate(true), "save": save})
+	host.set_meta("world_battle_request", {
+		"request": request.duplicate(true),
+		"save": save,
+		"player_badges": _world.state.badge_mask(Gen2WorldState.is_crystal_profile(_data)) \
+			if _world != null and _world.state != null else 0,
+	})
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 10
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
