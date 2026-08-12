@@ -11,9 +11,9 @@ extends RefCounted
 
 const FIRST_MUSIC_COMMAND: int = 0xD0
 const SOUND_RETURN: int = 0xFF
-const MAX_STEPS: int = 20000
-const MAX_FRAMES: int = 60 * 60
-const MAX_EVENTS: int = 4096
+const MAX_STEPS: int = 200000
+const MAX_FRAMES: int = 60 * 60 * 30
+const MAX_EVENTS: int = 100000
 const NOTE_COUNT: int = 12
 
 ## The table is copied from pret's audio/notes.asm at import time conceptually,
@@ -165,20 +165,21 @@ static func _decode_track(
 		"duration_modifier": 0,
 		"tempo": 0x100,
 		"note_length": 1,
-		"octave": 0,
+		"octave": 4,
 		"transpose": 0,
 		"pitch_offset": 0,
+		"pitch_sweep": {},
 		"vibrato_delay": 0,
 		"vibrato_above": 0,
 		"vibrato_below": 0,
 		"vibrato_rate": 0,
 		"pitch_slide_target": -1,
 		"pitch_slide_duration": 0,
-		"volume_envelope": 0xF0,
-		"duty": 0,
+		"volume_envelope": 0xC0,
+		"duty": 2,
 		"duty_pattern": [],
 		"noise": false,
-		"sfx": request_kind == &"sound",
+		"sfx": request_kind in [&"sound", &"sfx"],
 		"sfx_priority": false,
 		"drumkit": 0,
 		"condition": 0,
@@ -269,6 +270,7 @@ static func _decode_track(
 				"pan_left": int(state["pan_left"]),
 				"pan_right": int(state["pan_right"]),
 			}
+			event["pitch_sweep"] = (state["pitch_sweep"] as Dictionary).duplicate(true)
 			if pitch > 0:
 				state["last_pitch"] = pitch
 				if hardware_channel == 4 and bool(state["noise"]):
@@ -416,6 +418,7 @@ static func _decode_fixed_note(
 		"pan_left": int(state["pan_left"]),
 		"pan_right": int(state["pan_right"]),
 	}
+	event["pitch_sweep"] = (state["pitch_sweep"] as Dictionary).duplicate(true)
 	return {
 		"ok": true,
 		"at": at,
@@ -456,6 +459,7 @@ static func _command(
 			# `tempo 144` decodes as $9000 and every note lasts 256 times too
 			# long, which is what drove whole streams past MAX_FRAMES.
 			state["tempo"] = _u16_be(bytes, at)
+			state["duration_modifier"] = 0
 			at += 2
 		0xDB:
 			if not _has(bytes, at, 1):
@@ -468,7 +472,15 @@ static func _command(
 			state["volume_envelope"] = bytes[at]
 			at += 1
 		0xDD:
-			args = 1
+			if not _has(bytes, at, 1):
+				return _failure(&"audio_pitch_sweep_truncated")
+			var sweep: int = bytes[at]
+			state["pitch_sweep"] = {
+				"pace": (sweep >> 4) & 0x07,
+				"subtract": (sweep & 0x08) != 0,
+				"shift": sweep & 0x07,
+			}
+			at += 1
 		0xDE:
 			if not _has(bytes, at, 1):
 				return _failure(&"audio_duty_pattern_truncated")
@@ -486,11 +498,11 @@ static func _command(
 				return _failure(&"audio_pitch_slide_truncated")
 			var slide_duration: int = int(bytes[at])
 			var slide_note: int = int(bytes[at + 1])
-			var slide_octave: int = 8 - ((slide_note >> 4) & 0x0F)
+			var slide_octave: int = (slide_note >> 4) & 0x0F
 			state["pitch_slide_duration"] = slide_duration
-			state["pitch_slide_target"] = _frequency(
+			state["pitch_slide_target"] = _offset_frequency(_frequency(
 				slide_octave, slide_note & 0x0F, int(state["transpose"])
-			)
+			), int(state.get("pitch_offset", 0)))
 			at += 2
 		0xE1:
 			if not _has(bytes, at, 2):
@@ -502,6 +514,11 @@ static func _command(
 			state["vibrato_above"] = (extent + 1) / 2
 			state["vibrato_below"] = extent / 2
 			state["vibrato_rate"] = vibrato_shape & 0x0F
+			if extent == 0:
+				state["vibrato_delay"] = 0
+				state["vibrato_above"] = 0
+				state["vibrato_below"] = 0
+				state["vibrato_rate"] = 0
 			at += 2
 		0xE2:
 			args = 1
@@ -520,8 +537,9 @@ static func _command(
 			# right output. Stereo is an option on the cartridge; this follows
 			# the forced branch, which is what the option being on means.
 			if opcode == 0xE4 or bool(state["stereo_enabled"]):
-				state["pan_left"] = 1 if (bytes[at] & 0xF0) != 0 else 0
-				state["pan_right"] = 1 if (bytes[at] & 0x0F) != 0 else 0
+				var track_bit: int = 1 << ((hardware_channel - 1) & 3)
+				state["pan_left"] = 1 if (bytes[at] & (track_bit << 4)) != 0 else 0
+				state["pan_right"] = 1 if (bytes[at] & track_bit) != 0 else 0
 			at += 1
 		0xE5:
 			if not _has(bytes, at, 1):
@@ -547,7 +565,6 @@ static func _command(
 				return _failure(&"audio_tempo_relative_truncated")
 			var relative: int = _signed_8(bytes[at])
 			state["tempo"] = (int(state["tempo"]) + relative) & 0xFFFF
-			state["duration_modifier"] = 0
 			at += 1
 		0xEA:
 			if not _has(bytes, at, 2):
@@ -605,13 +622,15 @@ static func _command(
 			var loops: Dictionary = state["loop_states"]
 			var key: String = str(loop_at)
 			if not loops.has(key):
-				loops[key] = loop_count - 1 if loop_count > 0 else -1
-				at = loop_target - int(state.get("origin", 0))
 				if loop_count == 0:
+					loops[key] = -1
+					at = loop_target - int(state.get("origin", 0))
 					state["at"] = at
 					return {
 						"ok": true, "looped": true, "loop_offset": at, "warnings": warnings,
 					}
+				loops[key] = loop_count
+				at = loop_target - int(state.get("origin", 0))
 			else:
 				var remaining: int = int(loops[key])
 				if remaining < 0:
@@ -620,7 +639,7 @@ static func _command(
 					return {
 						"ok": true, "looped": true, "loop_offset": at, "warnings": warnings,
 					}
-				if remaining > 0:
+				if remaining > 1:
 					loops[key] = remaining - 1
 					at = loop_target - int(state.get("origin", 0))
 				else:
@@ -648,7 +667,7 @@ static func _command(
 static func _set_note_duration(state: Dictionary, duration_code: int) -> int:
 	var units: int = duration_code + 1
 	var low_product: int = (int(state["note_length"]) * units) & 0xFF
-	var total: int = int(state["tempo"]) * low_product + int(state["duration_modifier"])
+	var total: int = (int(state["tempo"]) * low_product + int(state["duration_modifier"])) & 0xFFFF
 	var duration: int = total >> 8
 	state["duration_modifier"] = total & 0xFF
 	return maxi(duration, 1)
