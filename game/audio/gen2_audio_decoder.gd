@@ -167,6 +167,12 @@ static func _decode_track(
 		"note_length": 1,
 		"octave": 0,
 		"transpose": 0,
+		"pitch_offset": 0,
+		"vibrato_delay": 0,
+		"vibrato_extent": 0,
+		"vibrato_rate": 0,
+		"pitch_slide_target": -1,
+		"pitch_slide_duration": 0,
 		"volume_envelope": 0xF0,
 		"duty": 0,
 		"duty_pattern": [],
@@ -259,13 +265,31 @@ static func _decode_track(
 			if pitch > 0:
 				state["last_pitch"] = pitch
 				if hardware_channel == 4 and bool(state["noise"]):
-					event["noise_samples"] = _drum_sample(
+					var drum_samples: Array = _drum_sample(
 						assets, int(state["drumkit"]), pitch
 					)
+					event["noise_samples"] = drum_samples
+					var tail_frames: int = 0
+					for sample: Dictionary in drum_samples:
+						tail_frames += int(sample.get("duration_frames", 0))
+					event["tail_frames"] = tail_frames
 				else:
-					event["frequency"] = _frequency(
+					var base_frequency: int = _frequency(
 						int(state["octave"]), pitch, int(state["transpose"])
 					)
+					event["frequency"] = _offset_frequency(
+						base_frequency, int(state.get("pitch_offset", 0))
+					)
+					event["pitch_offset"] = int(state.get("pitch_offset", 0))
+					if int(state.get("vibrato_extent", 0)) > 0:
+						event["vibrato"] = {
+							"delay_frames": int(state["vibrato_delay"]),
+							"extent": int(state["vibrato_extent"]),
+							"rate": int(state["vibrato_rate"]),
+						}
+					if int(state.get("pitch_slide_target", -1)) >= 0:
+						event["pitch_slide_target"] = int(state["pitch_slide_target"])
+						event["pitch_slide_duration"] = int(state.get("pitch_slide_duration", 0))
 				events.append(event)
 			elif duration > 0:
 				events.append(event)
@@ -311,11 +335,11 @@ static func _decode_track(
 		warnings.append(&"audio_stream_frame_limit")
 	return {
 		"ok": true,
-		"track": {
+	"track": {
 			"channel": channel_id,
 			"hardware_channel": hardware_channel,
 			"events": events,
-			"end_frame": int(state["time"]),
+			"end_frame": _track_end_frame(events, int(state["time"])),
 			"looped": looped,
 			"loop_start_frame": loop_start_frame,
 		},
@@ -343,8 +367,7 @@ static func _decode_fixed_note(
 		# note once rather than compounding. `rAUDxHIGH` keeps three frequency
 		# bits, so a sum past $7ff wraps rather than clipping: Bulbasaur's own
 		# 128 takes its first two notes over and they come out low.
-		if frequency != 0:
-			frequency = (frequency + int(state.get("pitch_offset", 0))) & 0x7FF
+		frequency &= 0x7FF
 	at += bytes_after_length
 	var duration: int = _set_note_duration(state, length)
 	var event: Dictionary = {
@@ -357,7 +380,8 @@ static func _decode_fixed_note(
 		"envelope": envelope,
 		"duty": _duty_for_event(state),
 		"wave_index": envelope & 0x0F,
-		"frequency": frequency,
+		"frequency": _offset_frequency(frequency, int(state.get("pitch_offset", 0))),
+		"pitch_offset": int(state.get("pitch_offset", 0)),
 		"noise": hardware_channel == 4,
 		# `Music_Volume` and the two panning commands are mixer state, not
 		# note state, so each event carries what was in force when it began.
@@ -432,9 +456,25 @@ static func _command(
 		0xDF:
 			state["sfx"] = not bool(state.get("sfx", false))
 		0xE0:
-			args = 2
+			if not _has(bytes, at, 2):
+				return _failure(&"audio_pitch_slide_truncated")
+			var slide_duration: int = int(bytes[at]) + 1
+			var slide_note: int = int(bytes[at + 1])
+			var slide_octave: int = 8 - ((slide_note >> 4) & 0x0F)
+			state["pitch_slide_duration"] = slide_duration
+			state["pitch_slide_target"] = _frequency(
+				slide_octave, slide_note & 0x0F, int(state["transpose"])
+			)
+			at += 2
 		0xE1:
-			args = 2
+			if not _has(bytes, at, 2):
+				return _failure(&"audio_vibrato_truncated")
+			var vibrato_delay: int = bytes[at]
+			var vibrato_shape: int = bytes[at + 1]
+			state["vibrato_delay"] = vibrato_delay
+			state["vibrato_extent"] = ((vibrato_shape >> 4) + 1) / 2
+			state["vibrato_rate"] = vibrato_shape & 0x0F
+			at += 2
 		0xE2:
 			args = 1
 		0xE3, 0xF0:
@@ -469,7 +509,7 @@ static func _command(
 				return _failure(&"audio_pitch_offset_truncated")
 			# `Music_PitchOffset` stores the high byte first, so the macro is
 			# `bigdw` the way `tempo` is.
-			state["pitch_offset"] = _u16_be(bytes, at)
+			state["pitch_offset"] = _signed_16(_u16_be(bytes, at))
 			at += 2
 		0xE7, 0xE8, 0xE9:
 			args = 1
@@ -576,6 +616,26 @@ static func _set_note_duration(state: Dictionary, duration_code: int) -> int:
 	var duration: int = total >> 8
 	state["duration_modifier"] = total & 0xFF
 	return maxi(duration, 1)
+
+
+static func _offset_frequency(base: int, offset: int) -> int:
+	return (base + offset) & 0x07FF
+
+
+static func _signed_16(value: int) -> int:
+	return value - 0x10000 if (value & 0x8000) != 0 else value
+
+
+static func _track_end_frame(events: Array, source_end: int) -> int:
+	var end_frame: int = source_end
+	for event: Dictionary in events:
+		end_frame = maxi(
+			end_frame,
+			int(event.get("start_frame", 0))
+				+ int(event.get("duration_frames", 0))
+				+ int(event.get("tail_frames", 0)),
+		)
+	return end_frame
 
 
 static func _frequency(octave: int, pitch: int, transpose: int) -> int:
