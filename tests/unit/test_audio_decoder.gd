@@ -65,6 +65,20 @@ func test_sfx_starts_in_fixed_mode_then_toggle_sfx_restores_music_notes() -> voi
 	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
 
 
+func test_sfx_kind_alias_starts_in_the_same_fixed_mode_as_sound() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xDF, 0xD8, 0x01, 0xF1, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record, &"sfx")
+	assert_true(decoded["ok"])
+	assert_eq(decoded["tracks"][0]["events"].size(), 1)
+	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
+
+
 func test_sfx_priority_commands_are_carried_on_source_events() -> void:
 	var record := {
 		"address": 0x4000,
@@ -291,6 +305,61 @@ func test_audio_noise_lfsr_and_filter_state_match_across_chunks() -> void:
 			_sample_signed(full_data, 4 * Renderer.SAMPLE_RATE / 60 + index),
 			"noise chunk state at sample %d" % index,
 		)
+
+
+func test_shared_effect_steals_one_music_channel_and_restores_it() -> void:
+	var music := {
+		"ok": true, "duration_frames": 8, "tracks": [
+			{"hardware_channel": 1, "events": [{"start_frame": 0, "duration_frames": 8,
+				"pitch": 1, "frequency": 997, "volume": 15, "duty": 2}]},
+			{"hardware_channel": 2, "events": [{"start_frame": 0, "duration_frames": 8,
+				"pitch": 1, "frequency": 1200, "volume": 15, "duty": 2}]},
+		],
+	}
+	var effect := {
+		"ok": true, "duration_frames": 2, "tracks": [{"hardware_channel": 1, "events": [{
+			"start_frame": 0, "duration_frames": 2, "pitch": 1, "frequency": 1500,
+			"volume": 15, "duty": 3,
+		}]}],
+	}
+	var state: Dictionary = Renderer.create_shared_state(music)
+	var started: Dictionary = Renderer.start_effect(state, effect)
+	assert_true(started["ok"])
+	assert_eq(started["claimed_channels"], [1])
+	var first: Dictionary = Renderer.render_shared_chunk_stateful(state, 2)
+	assert_true(first["ok"])
+	assert_true(Renderer.shared_effect_playing(state) == false)
+	var status: Dictionary = Renderer.shared_status(state)
+	assert_eq(status["stolen_channels"], 1)
+	assert_eq(status["restored_channels"], 1)
+	assert_gt((state["channels"][1] as Dictionary)["music_phase"], 0.0)
+
+
+func test_shared_effect_replacement_and_chunked_render_keep_one_timeline() -> void:
+	var music := {"ok": true, "duration_frames": 8, "tracks": [{"hardware_channel": 4, "events": [{
+		"start_frame": 0, "duration_frames": 8, "pitch": 1, "frequency": 0x13,
+		"volume": 15, "noise": true,
+	}]}]}
+	var effect := {"ok": true, "duration_frames": 4, "tracks": [{"hardware_channel": 4, "events": [{
+		"start_frame": 0, "duration_frames": 4, "pitch": 1, "frequency": 0x13,
+		"volume": 15, "noise": true,
+	}]}]}
+	var full_state: Dictionary = Renderer.create_shared_state(music)
+	Renderer.start_effect(full_state, effect)
+	var full: PackedVector2Array = Renderer.render_shared_chunk_stateful(full_state, 4)["buffer"]
+	var chunked_state: Dictionary = Renderer.create_shared_state(music)
+	Renderer.start_effect(chunked_state, effect)
+	var first: PackedVector2Array = Renderer.render_shared_chunk_stateful(chunked_state, 2)["buffer"]
+	var second: PackedVector2Array = Renderer.render_shared_chunk_stateful(chunked_state, 2)["buffer"]
+	assert_eq(first.size() + second.size(), full.size())
+	for index: int in first.size():
+		assert_almost_eq(first[index].x, full[index].x, 0.000001)
+	for index: int in second.size():
+		assert_almost_eq(second[index].x, full[first.size() + index].x, 0.000001)
+	var replacement_state: Dictionary = Renderer.create_shared_state(music)
+	Renderer.start_effect(replacement_state, effect)
+	Renderer.start_effect(replacement_state, effect)
+	assert_eq(Renderer.shared_status(replacement_state)["replaced_effects"], 1)
 
 
 func _sample(data: PackedByteArray, index: int) -> int:
