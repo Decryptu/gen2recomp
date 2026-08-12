@@ -28,7 +28,7 @@ jobs:
 
       - name: Cache Godot binary
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/godot
           key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
