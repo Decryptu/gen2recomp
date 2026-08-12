@@ -27,6 +27,18 @@ func _record(bank: int, address: int = 0x4000) -> Dictionary:
 	}
 
 
+func _loop_record(bank: int) -> Dictionary:
+	return {
+		"bank": bank,
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xD8, 0x01, 0xF1, 0x11,
+			0xFC, 0x03, 0x40,
+		],
+	}
+
+
 func test_music_already_playing_is_continued_rather_than_started_again() -> void:
 	var first: Dictionary = _player.play_record(_record(2), &"map_music")
 	assert_true(first["ok"])
@@ -64,3 +76,13 @@ func test_kept_music_streams_are_bounded_and_never_drop_what_is_playing() -> voi
 		_record(Player.MUSIC_CACHE_LIMIT + 2), &"map_music"
 	)
 	assert_true(current["continued"])
+
+
+func test_generator_refill_pushes_audio_within_its_output_capacity() -> void:
+	var result: Dictionary = _player.play_record(_loop_record(99), &"map_music")
+	assert_true(result["ok"])
+	_player._service_timeline()
+	var available: int = _player._music_playback.get_frames_available()
+	var capacity: int = ceili(float(_player._music_generator.mix_rate) * _player._music_generator.buffer_length)
+	assert_gt(available, 0)
+	assert_lt(available, capacity)

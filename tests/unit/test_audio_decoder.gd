@@ -30,6 +30,12 @@ func test_music_header_and_note_duration_follow_the_cartridge_math() -> void:
 	assert_gt(track["events"][0]["frequency"], 0)
 
 
+func test_source_audio_clock_is_the_game_boy_vblank_rate() -> void:
+	assert_almost_eq(Renderer.SOURCE_FRAME_RATE, 4194304.0 / 70224.0, 0.000001)
+	var expected_samples: int = int(floor(2.0 * Renderer.SAMPLE_RATE / Renderer.SOURCE_FRAME_RATE))
+	assert_eq(Renderer.frame_sample(2), expected_samples)
+
+
 func test_counted_loop_jumps_to_the_source_pointer_and_then_exits() -> void:
 	var record := {
 		"address": 0x4000,
@@ -49,6 +55,43 @@ func test_counted_loop_jumps_to_the_source_pointer_and_then_exits() -> void:
 	assert_eq(events[3]["start_frame"], 3)
 	assert_eq(decoded["duration_frames"], 4)
 	assert_false(decoded["looped"])
+
+
+func test_restart_channel_reloads_the_target_header_and_clears_channel_state() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x06, 0x40,
+			0x00, 0x11, 0x40,
+			0xD4, 0xD8, 0x01, 0xF1, 0x11, 0xEA, 0x03, 0x40,
+			0x00, 0x00, 0x00,
+			0xD5, 0xD8, 0x02, 0xF1, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"], JSON.stringify(decoded))
+	var events: Array = decoded["tracks"][0]["events"]
+	assert_eq(events.size(), 2)
+	assert_eq(events[0]["duration_frames"], 2)
+	assert_eq(events[1]["start_frame"], 2)
+	assert_eq(events[1]["duration_frames"], 4)
+
+
+func test_global_tempo_is_inherited_by_channels_decoded_after_the_command() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x40, 0x06, 0x40, 0x00, 0x10, 0x40,
+			0xDA, 0x02, 0x00, 0xD8, 0x01, 0xF1, 0x11, 0xFF,
+			0x00, 0x00,
+			0xD8, 0x01, 0xF1, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"], JSON.stringify(decoded))
+	assert_eq(decoded["tracks"].size(), 2)
+	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 4)
+	assert_eq(decoded["tracks"][1]["events"][0]["duration_frames"], 4)
 
 
 func test_sfx_starts_in_fixed_mode_then_toggle_sfx_restores_music_notes() -> void:
@@ -74,9 +117,26 @@ func test_sfx_kind_alias_starts_in_the_same_fixed_mode_as_sound() -> void:
 		],
 	}
 	var decoded: Dictionary = Decoder.decode(record, &"sfx")
+	var sound_decoded: Dictionary = Decoder.decode(record, &"sound")
 	assert_true(decoded["ok"])
-	assert_eq(decoded["tracks"][0]["events"].size(), 1)
-	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
+	assert_eq(decoded["tracks"], sound_decoded["tracks"])
+	assert_eq(decoded["duration_frames"], sound_decoded["duration_frames"])
+
+
+func test_plural_cry_kind_aliases_the_same_fixed_stream() -> void:
+	var record := {
+		"address": 0x7000,
+		"bytes": [
+			0x44, 0x06, 0x70, 0x07, 0x0D, 0x70,
+			0xDE, 0x1B, 1, 0xF8, 0x20, 0x03, 0xFF,
+			2, 0xA1, 0x6C, 0xFF,
+		],
+	}
+	var singular: Dictionary = Decoder.decode(record, &"cry")
+	var plural: Dictionary = Decoder.decode(record, &"cries")
+	assert_true(singular["ok"])
+	assert_eq(plural["tracks"], singular["tracks"])
+	assert_eq(plural["duration_frames"], singular["duration_frames"])
 
 
 func test_sfx_priority_commands_are_carried_on_source_events() -> void:
@@ -175,7 +235,7 @@ func test_renderer_builds_a_playable_stream_from_decoded_events() -> void:
 	var rendered: Dictionary = Renderer.render(decoded)
 	assert_true(rendered["ok"])
 	assert_not_null(rendered["stream"])
-	assert_eq(rendered["stream"].data.size(), 2 * Renderer.SAMPLE_RATE * 4 / 60)
+	assert_eq(rendered["stream"].data.size(), Renderer.frame_sample(2) * 4)
 	assert_ne(rendered["stream"].data[0], 0)
 	assert_false(rendered["stream"].loop_mode == AudioStreamWAV.LOOP_FORWARD)
 
@@ -198,7 +258,7 @@ func test_renderer_resets_the_oscillator_phase_at_each_source_note() -> void:
 	assert_true(rendered["ok"])
 	var data: PackedByteArray = rendered["stream"].data
 	var first: int = _sample(data, 0)
-	var second: int = _sample(data, Renderer.SAMPLE_RATE / 60)
+	var second: int = _sample(data, Renderer.frame_sample(1))
 	assert_eq(second, first, "a new note retriggers the channel phase")
 
 
@@ -235,7 +295,7 @@ func test_renderer_exposes_bounded_chunk_buffers() -> void:
 	var chunk: Dictionary = Renderer.render_chunk(decoded, 60, 4)
 	assert_true(chunk["ok"])
 	assert_eq(chunk["frame_count"], 4)
-	assert_eq(chunk["buffer"].size(), 4 * Renderer.SAMPLE_RATE / 60)
+	assert_eq(chunk["buffer"].size(), Renderer.frame_sample(64) - Renderer.frame_sample(60))
 
 
 func test_adjacent_music_chunks_keep_a_note_continuous() -> void:
@@ -255,7 +315,7 @@ func test_adjacent_music_chunks_keep_a_note_continuous() -> void:
 	var full_data: PackedByteArray = full["stream"].data
 	var second_buffer: PackedVector2Array = second["buffer"]
 	var second_first: int = int(roundf(second_buffer[0].x * 32768.0))
-	assert_eq(second_first, _sample(full_data, 4 * Renderer.SAMPLE_RATE / 60))
+	assert_eq(second_first, _sample(full_data, Renderer.frame_sample(4)))
 
 
 func test_audio_exact_dmg_duty_patterns_are_not_thresholds() -> void:
@@ -302,7 +362,7 @@ func test_audio_noise_lfsr_and_filter_state_match_across_chunks() -> void:
 	for index: int in second_data.size():
 		assert_eq(
 			int(roundf(second_data[index].x * 32767.0)),
-			_sample_signed(full_data, 4 * Renderer.SAMPLE_RATE / 60 + index),
+			_sample_signed(full_data, Renderer.frame_sample(4) + index),
 			"noise chunk state at sample %d" % index,
 		)
 

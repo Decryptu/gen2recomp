@@ -36,7 +36,7 @@ static func decode(
 	var bytes: PackedByteArray = _bytes(record.get("bytes", []))
 	if bytes.size() < 3:
 		return _failure(&"audio_record_truncated")
-	var kind: StringName = request_kind
+	var kind: StringName = &"cry" if request_kind == &"cries" else request_kind
 	if kind == &"cry":
 		return _decode_cry(record, bytes)
 	return _decode_music(record, bytes, kind, assets)
@@ -55,6 +55,10 @@ static func _decode_music(
 		return _failure(&"audio_invalid_channel_count")
 	var tracks: Array = []
 	var warnings: Array[StringName] = []
+	# Music_Tempo and Music_TempoRelative call SetGlobalTempo. The cartridge
+	# writes that value to every channel in the current group, so a channel
+	# decoded after the command must inherit it rather than starting at $100.
+	var tempo_context: Dictionary = {"tempo": 0x100}
 	for _channel: int in channel_count:
 		if header_at + 2 >= bytes.size():
 			return _failure(&"audio_channel_header_truncated")
@@ -65,7 +69,7 @@ static func _decode_music(
 		if stream_at < 0 or stream_at >= bytes.size():
 			return _failure(&"audio_channel_pointer_outside_record")
 		var track_result: Dictionary = _decode_track(
-			bytes, stream_at, channel_id, request_kind, origin, assets
+			bytes, stream_at, channel_id, request_kind, origin, assets, {}, tempo_context
 		)
 		if not bool(track_result.get("ok", false)):
 			var details: Dictionary = track_result.get("details", {})
@@ -134,7 +138,7 @@ static func _decode_cry(record: Dictionary, bytes: PackedByteArray) -> Dictionar
 			return _failure(&"audio_channel_pointer_outside_record")
 		var track_result: Dictionary = _decode_track(
 			bytes, stream_at, channel_id, &"cry", origin, {},
-			{"cry_pitch": pitch, "cry_length": length}
+			{"cry_pitch": pitch, "cry_length": length}, {}
 		)
 		if not bool(track_result.get("ok", false)):
 			return track_result
@@ -157,13 +161,13 @@ static func _decode_cry(record: Dictionary, bytes: PackedByteArray) -> Dictionar
 
 static func _decode_track(
 	bytes: PackedByteArray, start: int, channel_id: int, request_kind: StringName,
-	origin: int, assets: Dictionary, cry: Dictionary = {}
+	origin: int, assets: Dictionary, cry: Dictionary = {}, tempo_context: Dictionary = {}
 ) -> Dictionary:
 	var state: Dictionary = {
 		"at": start,
 		"time": 0,
 		"duration_modifier": 0,
-		"tempo": 0x100,
+		"tempo": int(tempo_context.get("tempo", 0x100)),
 		"note_length": 1,
 		"octave": 4,
 		"transpose": 0,
@@ -195,6 +199,7 @@ static func _decode_track(
 		"calls": [],
 		"steps": 0,
 		"origin": origin,
+		"tempo_context": tempo_context,
 	}
 	var events: Array = []
 	var warnings: Array[StringName] = []
@@ -459,6 +464,7 @@ static func _command(
 			# `tempo 144` decodes as $9000 and every note lasts 256 times too
 			# long, which is what drove whole streams past MAX_FRAMES.
 			state["tempo"] = _u16_be(bytes, at)
+			(state["tempo_context"] as Dictionary)["tempo"] = int(state["tempo"])
 			state["duration_modifier"] = 0
 			at += 2
 		0xDB:
@@ -565,18 +571,27 @@ static func _command(
 				return _failure(&"audio_tempo_relative_truncated")
 			var relative: int = _signed_8(bytes[at])
 			state["tempo"] = (int(state["tempo"]) + relative) & 0xFFFF
+			(state["tempo_context"] as Dictionary)["tempo"] = int(state["tempo"])
 			at += 1
 		0xEA:
 			if not _has(bytes, at, 2):
 				return _failure(&"audio_restart_truncated")
-			var restart_stream: int = _audio_address(_u16(bytes, at))
+			var restart_header: int = _audio_address(_u16(bytes, at))
 			at += 2
+			var restart_header_at: int = restart_header - int(state.get("origin", 0))
+			if restart_header_at < 0 or restart_header_at + 2 >= bytes.size():
+				return _failure(&"audio_restart_header_outside_record", {
+					"header": restart_header,
+					"origin": int(state.get("origin", 0)),
+				})
+			var restart_stream: int = _audio_address(_u16(bytes, restart_header_at + 1))
 			at = restart_stream - int(state.get("origin", 0))
 			if at < 0 or at >= bytes.size():
 				return _failure(&"audio_restart_outside_record", {
 					"stream": restart_stream,
 					"origin": int(state.get("origin", 0)),
 				})
+			_reset_channel_state(state)
 		0xEB:
 			args = 2
 		0xEC:
@@ -671,6 +686,43 @@ static func _set_note_duration(state: Dictionary, duration_code: int) -> int:
 	var duration: int = total >> 8
 	state["duration_modifier"] = total & 0xFF
 	return maxi(duration, 1)
+
+
+static func _reset_channel_state(state: Dictionary) -> void:
+	# Music_RestartChannel calls LoadChannel/StartChannel, which runs
+	# ChannelInit before loading the new stream pointer. Preserve elapsed time
+	# (the restarted channel does not rewind the other channels), but clear the
+	# per-channel format, modulation, loop and mixer state it would clear on the
+	# cartridge.
+	state["duration_modifier"] = 0
+	state["tempo"] = 0x100
+	state["note_length"] = 1
+	state["octave"] = 4
+	state["transpose"] = 0
+	state["pitch_offset"] = 0
+	state["pitch_sweep"] = {}
+	state["vibrato_delay"] = 0
+	state["vibrato_above"] = 0
+	state["vibrato_below"] = 0
+	state["vibrato_rate"] = 0
+	state["pitch_slide_target"] = -1
+	state["pitch_slide_duration"] = 0
+	state["volume_envelope"] = 0xC0
+	state["duty"] = 2
+	state["duty_pattern"] = []
+	state["noise"] = false
+	state["sfx"] = false
+	state["sfx_priority"] = false
+	state["drumkit"] = 0
+	state["condition"] = 0
+	state["master_left"] = 7
+	state["master_right"] = 7
+	state["pan_left"] = 1
+	state["pan_right"] = 1
+	state["frame_at_offset"] = {}
+	state["loop_states"] = {}
+	state["calls"] = []
+	state["event_number"] = 0
 
 
 static func _offset_frequency(base: int, offset: int) -> int:

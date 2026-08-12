@@ -296,14 +296,15 @@ func test_outgoing_phone_uses_imported_same_map_and_out_of_area_scripts() -> voi
 	assert_eq(out_of_area["script"]["address"], 0x6600)
 
 
-func test_audio_host_renders_the_real_record() -> void:
+func test_audio_host_decodes_the_real_record_without_a_second_renderer() -> void:
 	var record: Dictionary = _data.world_audio(&"music", 0)
 	var result: Dictionary = Gen2WorldAudioHost.play(record, &"music")
 	assert_true(result["ok"])
 	assert_false(result["played"])
-	assert_eq(result["backend"], Gen2WorldAudioHost.BACKEND_WAV)
+	assert_eq(result["backend"], Gen2WorldAudioHost.BACKEND_DECODE_ONLY)
 	assert_true(result["ready"])
 	assert_eq(result["byte_count"], 6)
+	assert_false(result.has("stream"))
 
 
 func test_menu_input_can_be_cancelled_without_selecting_an_option() -> void:
