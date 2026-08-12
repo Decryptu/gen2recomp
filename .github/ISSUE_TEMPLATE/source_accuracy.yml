@@ -1,0 +1,93 @@
+name: Source accuracy report
+description: The game runs fine but diverges from what the original Gen 2 code does.
+labels: ["source accuracy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when nothing crashes but the behavior is wrong against the
+        cartridge: damage off by one, wrong turn order, a text box that pauses for
+        the wrong number of frames, an encounter rate that feels off.
+
+        The useful part of this report is the source reference. Behavior is
+        re-derived from the `pokecrystal` and `pokegold` disassemblies, so a
+        pointer to the routine or table you're comparing against is worth more
+        than any amount of description.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One line summary
+      description: What diverges, in a sentence.
+      placeholder: Critical hits use the base speed table but ignore the Focus Energy branch
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Which game
+      multiple: true
+      options:
+        - Gold
+        - Silver
+        - Crystal
+        - N/A
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which system
+      options:
+        - Battle
+        - Overworld
+        - Menus and items
+        - NPC and scripts
+        - Audio
+        - Graphics and palettes
+        - Saves and PC storage
+        - ROM import
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What this project does
+      description: Exact numbers where you have them. Values, frame counts, RNG seeds, party state.
+      placeholder: |
+        L20 Quilava Ember vs L18 Bellsprout, no crit: 34 damage.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the original does
+      description: How you established it. Hardware, emulator, disassembly reading, a documented table.
+      placeholder: |
+        Same setup on a real Crystal cartridge: 37 damage.
+    validations:
+      required: true
+
+  - type: input
+    id: source_ref
+    attributes:
+      label: Source reference
+      description: >
+        Path plus symbol in `pokecrystal` or `pokegold`, if you have one. This is
+        what makes the report actionable.
+      placeholder: engine/battle/effect_commands.asm, BattleCommand_DamageCalc
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, save state details, related issues. Leave blank if nothing comes to mind.
+    validations:
+      required: false

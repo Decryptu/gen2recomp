@@ -1,0 +1,56 @@
+name: ci
+
+# The ROM-free test run. CI has no cartridge and never will: no ROM bytes and
+# nothing derived from them is committed. The suite runs against the fixtures in
+# tests/, so it needs no ROM, no display and no imported cache.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.8-dev2
+
+jobs:
+  tests:
+    name: editor scan and GUT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache Godot binary
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Install Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          url="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -fsSL "$url" -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Import and resolve class_name
+        run: ~/godot/godot --headless --editor --path . --quit
+
+      - name: GUT
+        run: |
+          ~/godot/godot --headless --path . \
+            -s res://addons/gut/gut_cmdln.gd \
+            -gdir=res://tests -ginclude_subdirs -gexit
+
+      - name: Boot smoke test
+        run: ~/godot/godot --headless --path . --quit-after 30
