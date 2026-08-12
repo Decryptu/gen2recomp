@@ -108,6 +108,7 @@ const STAT_EXP_GAINED: StringName = &"stat_exp_gained"
 ## [code]new_stats[/code] are both [Gen2BattleMon.stats], so a screen can show
 ## what moved without asking the Pokémon twice.
 const GREW_LEVEL: StringName = &"grew_level"
+const EVOLVED: StringName = &"evolved"
 ## A move learned into a slot that had nothing in it, no question asked because
 ## the cartridge does not ask one when there is nowhere for the answer to go.
 const MOVE_LEARNED: StringName = &"move_learned"
@@ -2047,6 +2048,23 @@ func _give_experience_to(
 			"old_level": old_level, "new_level": learner.level,
 			"old_stats": old_stats, "new_stats": learner.stats.duplicate(),
 		})
+		var evolution: Dictionary = Gen2Evolution.level_evolution(
+			data, learner, time_of_day
+		)
+		if not evolution.is_empty():
+			var evolved: Dictionary = Gen2Evolution.evolve(
+				learner, int(evolution.get("target", 0))
+			)
+			if not evolved.is_empty():
+				events.append({
+					"type": EVOLVED, "side": PLAYER, "index": index,
+					"old_species": int(evolved["old_species"]),
+					"new_species": int(evolved["new_species"]),
+					"level": learner.level, "hp": learner.hp,
+					"max_hp": learner.max_hp(),
+				})
+		# `LearnLevelMoves` runs after the species has been replaced, so an
+		# evolved species gets its own move at the level that triggered it.
 		_offer_moves_learned_at(learner, index, learner.level, events)
 
 

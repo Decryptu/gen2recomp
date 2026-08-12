@@ -456,6 +456,10 @@ static func _species() -> Array:
 			"types": entry[2],
 			"growth_rate": entry[3],
 			"base_exp": entry[4],
+			"evolutions": [{
+				"method": RomLayout.EVOLVE_LEVEL, "parameter": 16,
+				"condition": 0, "target": 2,
+			}] if number == BULBASAUR else [],
 			"gender_ratio": entry[6],
 			"front_tiles": [7, 7],
 			"dex": {
