@@ -186,7 +186,8 @@ static func heal_party(
 
 
 ## Applies a field item to a save and the live world as one candidate transaction.
-## The current slice covers the source's HP/status/revival and repel effects.
+## The current slice covers source party item effects, including EvoStoneEffect's
+## candidate evolution and the HP delta applied by EvolvePokemon.
 static func use_item(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -233,6 +234,9 @@ static func use_item(
 		"healed": int(effect.get("healed", 0)),
 		"status_cleared": int(effect.get("status_cleared", 0)),
 		"repel_steps": int(effect.get("repel_steps", -1)),
+		"old_species": int(effect.get("old_species", 0)),
+		"new_species": int(effect.get("new_species", 0)),
+		"move_offers": effect.get("move_offers", []).duplicate(),
 	}
 
 
@@ -613,6 +617,9 @@ static func _apply_item_effect(
 	var mon: Gen2SaveMon = save.party[party_index]
 	if mon == null or mon.is_egg:
 		return {"ok": false, "reason": &"invalid_party_member"}
+	var evolution: Dictionary = _apply_item_evolution(data, mon, item)
+	if not evolution.is_empty():
+		return evolution
 	var max_hp: int = _max_hp(data, mon)
 	if item in [ITEM_REVIVE, ITEM_MAX_REVIVE]:
 		if mon.hp > 0:
@@ -637,6 +644,43 @@ static func _apply_item_effect(
 	return {
 		"ok": true, "effect": &"party_item", "healed": healed,
 		"status_cleared": cleared,
+	}
+
+
+static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -> Dictionary:
+	if item not in Gen2Evolution.STONE_ITEMS:
+		return {}
+	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(data, mon)
+	if battle_mon == null:
+		return {}
+	var row: Dictionary = Gen2Evolution.item_evolution(data, battle_mon, item)
+	if row.is_empty():
+		return {}
+	var result: Dictionary = Gen2Evolution.evolve(battle_mon, int(row.get("target", 0)))
+	if result.is_empty():
+		return {}
+	var move_offers: Array[int] = []
+	for move: int in data.moves_learned_at(battle_mon.species, battle_mon.level):
+		if battle_mon.moves.has(move):
+			continue
+		if not battle_mon.learn_move(move):
+			move_offers.append(move)
+	mon.species = battle_mon.species
+	mon.moves = [0, 0, 0, 0]
+	mon.pp = [0, 0, 0, 0]
+	for slot: int in mini(battle_mon.moves.size(), Gen2SaveMon.MAX_MOVES):
+		mon.moves[slot] = int(battle_mon.moves[slot])
+		mon.pp[slot] = int(battle_mon.pp[slot])
+	mon.exp = battle_mon.exp
+	mon.hp = battle_mon.hp
+	mon.status = battle_mon.status
+	mon.happiness = battle_mon.happiness
+	return {
+		"ok": true,
+		"effect": &"evolution",
+		"old_species": int(result["old_species"]),
+		"new_species": int(result["new_species"]),
+		"move_offers": move_offers,
 	}
 
 
