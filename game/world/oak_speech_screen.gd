@@ -30,6 +30,8 @@ var _naming: Gen2NamingScreenScreen = null
 var _name_menu: Gen2PlayerNameMenuScreen = null
 var _audio: Gen2AudioPlayer = null
 var _audio_started: bool = false
+var _presentation := Gen2IntroPresentation.new()
+var _presentation_accumulator: float = 0.0
 
 
 ## Answers false when the cache carries no intro text, which the caller reports
@@ -78,6 +80,16 @@ func _ready() -> void:
 		_show_name_choices()
 	elif not _beats.is_empty():
 		_show_beat()
+
+
+func _process(delta: float) -> void:
+	if _name_menu == null or _pic == null or _presentation.finished():
+		return
+	_presentation_accumulator += delta * Gen2IntroPresentation.FRAME_RATE
+	while _presentation_accumulator >= 1.0 and not _presentation.finished():
+		_presentation_accumulator -= 1.0
+		_presentation.advance_frame()
+		_pic.position.x = _presentation.position()
 
 
 ## Which beat is showing, zero-based, for a driver that wants to step to one.
@@ -212,7 +224,9 @@ func _show_name_choices() -> void:
 	if _pic != null:
 		if _pic.texture == null:
 			_show_pic(Gen2OakSpeech.Pic.PLAYER)
-		_pic.position.x = 13 * TILE
+		_presentation.start_slide(PIC_AT.x * TILE, 13 * TILE)
+		_presentation_accumulator = 0.0
+		_pic.position.x = _presentation.position()
 		_pic.visible = true
 	if _background != null:
 		_background.visible = true

@@ -18,9 +18,10 @@ func before_each() -> void:
 	_add_capture_metadata()
 	_add_trade_record()
 	_add_party_scripts()
+	_add_party_evolution_metadata()
 	_data = GameData.open_directory(Fixture.directory())
 	var state := Gen2WorldState.new(
-		{}, {}, {0x12: 1, 0x09: 1, 0x14: 1, 0x01: 1, 0x05: 1}
+		{}, {}, {0x08: 1, 0x12: 1, 0x09: 1, 0x14: 1, 0x01: 1, 0x05: 1}
 	)
 	_world = Gen2WorldAPI.open(_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(2, 2), state)
 	_save = Gen2SaveStore.create_development_save(_data, 0)
@@ -148,6 +149,46 @@ func test_item_with_no_effect_is_not_consumed() -> void:
 	)
 	assert_false(result["ok"])
 	assert_eq(_world.state.item_quantity(0x09), before_quantity)
+
+
+func test_moon_stone_evolves_a_party_member_and_consumes_the_item() -> void:
+	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 1, 5)
+	source.hp = maxi(source.max_hp() - 3, 1)
+	source.happiness = 80
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(source)
+	_save.party[0].nickname = "SPROUT"
+	var before_quantity: int = _world.state.item_quantity(0x08)
+	var before_hp: int = _save.party[0].hp
+	var before_max_hp: int = Gen2SaveBattleAdapter.to_battle_mon(
+		_data, _save.party[0]
+	).max_hp()
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(
+		_world, _save, 0x08, 0, false
+	)
+
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["effect"], &"evolution")
+	assert_eq(result["old_species"], 1)
+	assert_eq(result["new_species"], 2)
+	assert_eq(_save.party[0].species, 2)
+	assert_eq(_save.party[0].nickname, "SPROUT")
+	assert_eq(_world.state.item_quantity(0x08), before_quantity - 1)
+	var evolved: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, _save.party[0])
+	assert_eq(_save.party[0].hp, before_hp + evolved.max_hp() - before_max_hp)
+
+
+func _add_party_evolution_metadata() -> void:
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		if int(raw["number"]) != 1:
+			continue
+		(raw["evolutions"] as Array).append({
+			"method": RomLayout.EVOLVE_ITEM, "parameter": 0x08,
+			"condition": 0, "target": 2,
+		})
+		break
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
 
 
 ## TM01 and HM04 in this fixture's cache. The party's first member learns both,
