@@ -1,77 +1,62 @@
 class_name Gen2AudioRenderer
 extends RefCounted
 
-## Converts decoded cartridge events into a Godot AudioStreamWAV. The source
-## engine updates one channel every frame, so the renderer evaluates event state
-## at the same 60 Hz timeline and only uses the output sample rate for the
-## waveform between those state changes.
-##
-## The four channels are the DMG's own, and each is generated the way the
-## hardware register the engine writes says: rAUDxENV is a real envelope that
-## steps while a note sounds, channel 3 reads a wave pattern at half the pitch
-## the pulse channels get from the same register value, and channel 4 clocks an
-## LFSR from rAUD4POLY rather than sounding a pitch.
-##
-## Walked per event rather than per sample. A stream is a few hundred events and
-## a minute of output is over a million samples, so reading an event's fields
-## once and filling its own span is the difference between a fraction of a second
-## and the ten this used to spend building one track.
+## Stateful DMG/GBC channel renderer. A RenderState is a live hardware timeline:
+## it owns phase, noise, envelope/event cursors and the per-output analog filter.
 
 const SAMPLE_RATE: int = 22050
-## Long enough for the longest stream [Gen2AudioDecoder] will hand over, so a
-## looping track is rendered up to its own loop point rather than cut at an
-## arbitrary length and looped from the top.
 const MAX_RENDER_FRAMES: int = 60 * 60
-
-## `rAUDxENV`: hi nibble the starting volume, bit 3 the direction, lo three bits
-## the step period in 1/64ths of a second. Period 0 means the volume never moves.
 const ENVELOPE_STEPS_PER_SECOND: float = 64.0
+const MAX_NOISE_CLOCKS_PER_SAMPLE: int = 64
+const GB_CLOCK: float = 4194304.0
+# Four independent DMG channels can be simultaneously full-scale before the
+# analog stage. Keep the reference filter response but leave 6 dB of mixer
+# headroom so a valid multi-channel record never reaches the digital clamp.
+const MIX_SCALE: float = 0.25
+const HPF_CHARGE: float = pow(0.999958, GB_CLOCK / float(SAMPLE_RATE))
+const LPF_ALPHA: float = 0.8
 
-## `rAUD3LEVEL` bits 6-5, which `.load_wave_pattern` writes from the envelope's
-## hi nibble: 0 mutes, 1 is full, and 2 and 3 shift the sample right.
+## DMG wave duty patterns, indexed by NR10/NR21 duty bits. The first bit is
+## the phase-zero bit written by the hardware, not a duty threshold.
+const DUTY_PATTERNS: Array = [
+	[0, 0, 0, 0, 0, 0, 0, 1],
+	[1, 0, 0, 0, 0, 0, 0, 1],
+	[1, 0, 0, 0, 0, 1, 1, 1],
+	[0, 1, 1, 1, 1, 1, 1, 0],
+]
 const WAVE_LEVELS: Array[float] = [0.0, 1.0, 0.5, 0.25]
 
-const DUTY_CYCLES: Array[float] = [0.125, 0.25, 0.5, 0.75]
 
-## How many LFSR clocks one output sample will pay for. Channel 4 runs as fast as
-## 524288 Hz, far above the output rate, and past a few dozen clocks per sample
-## the result is indistinguishable noise; the cap keeps a drum from costing more
-## than the rest of the mix put together.
-const MAX_NOISE_CLOCKS_PER_SAMPLE: int = 32
+static func duty_pattern(duty: int) -> Array:
+	return DUTY_PATTERNS[clampi(duty, 0, 3)].duplicate()
 
-## One channel against the four mixed, which is the headroom the mix is written
-## for, times the sixteen-bit range.
-const CHANNEL_SCALE: float = 7000.0
+
+static func register_frequency(register: int, hardware_channel: int) -> float:
+	return _register_to_hz(register, hardware_channel)
 
 
 static func render(decoded: Dictionary, assets: Dictionary = {}) -> Dictionary:
 	if not bool(decoded.get("ok", false)):
 		return {"ok": false, "reason": decoded.get("reason", &"audio_decode_failed")}
-	var tracks: Array = decoded.get("tracks", [])
-	if tracks.is_empty():
+	if (decoded.get("tracks", []) as Array).is_empty():
 		return {"ok": false, "reason": &"audio_has_no_tracks"}
 	var source_frames: int = maxi(1, int(decoded.get("duration_frames", 1)))
-	var render_frames: int = mini(source_frames, MAX_RENDER_FRAMES)
-	var render_samples: int = maxi(1, render_frames * SAMPLE_RATE / 60)
-
-	var left := PackedFloat32Array()
-	var right := PackedFloat32Array()
-	left.resize(render_samples)
-	right.resize(render_samples)
-	var wave: PackedByteArray = _wave_bytes(assets)
-	for track: Dictionary in tracks:
-		_render_track(track, left, right, render_samples, wave)
-
+	var frame_count: int = mini(source_frames, MAX_RENDER_FRAMES)
+	var state: Dictionary = create_state(decoded, assets)
+	var chunk := _render_state(decoded, state, frame_count, assets)
+	if not bool(chunk.get("ok", false)):
+		return chunk
 	var data := PackedByteArray()
-	data.resize(render_samples * 4)
-	for index: int in render_samples:
-		var out_left: int = clampi(int(left[index] * CHANNEL_SCALE), -32768, 32767)
-		var out_right: int = clampi(int(right[index] * CHANNEL_SCALE), -32768, 32767)
-		var byte_at: int = index * 4
-		data[byte_at] = out_left & 0xFF
-		data[byte_at + 1] = (out_left >> 8) & 0xFF
-		data[byte_at + 2] = out_right & 0xFF
-		data[byte_at + 3] = (out_right >> 8) & 0xFF
+	var samples: PackedVector2Array = chunk["buffer"]
+	data.resize(samples.size() * 4)
+	for index: int in samples.size():
+		var left: int = clampi(int(roundf(samples[index].x * 32767.0)), -32768, 32767)
+		var right: int = clampi(int(roundf(samples[index].y * 32767.0)), -32768, 32767)
+		var at: int = index * 4
+		data[at] = left & 0xFF
+		data[at + 1] = (left >> 8) & 0xFF
+		data[at + 2] = right & 0xFF
+		data[at + 3] = (right >> 8) & 0xFF
 
 	var looped: bool = bool(decoded.get("looped", false))
 	var stream := AudioStreamWAV.new()
@@ -80,254 +65,289 @@ static func render(decoded: Dictionary, assets: Dictionary = {}) -> Dictionary:
 	stream.stereo = true
 	stream.data = data
 	if looped:
-		# Back to the stream's own loop point, not to the top: a track with an
-		# intro plays it once, the way the sound engine does.
 		var loop_frame: int = int(decoded.get("loop_start_frame", -1))
-		var loop_begin: int = 0
-		if loop_frame > 0:
-			loop_begin = clampi(loop_frame * SAMPLE_RATE / 60, 0, render_samples - 1)
+		var loop_begin: int = clampi(_frame_sample(loop_frame), 0, samples.size() - 1)
 		stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		stream.loop_begin = loop_begin
-		stream.loop_end = render_samples
+		stream.loop_end = samples.size()
 	return {
 		"ok": true,
 		"stream": stream,
-		"frame_count": render_frames,
+		"frame_count": frame_count,
 		"sample_rate": SAMPLE_RATE,
 		"looped": looped,
 		"decoded": decoded,
 	}
 
 
-## Renders only a bounded hardware-frame window. Music playback uses this seam
-## instead of allocating a complete WAV for a looping song; callers own the
-## generator cursor and may service it from real time.
-static func render_chunk(
-	decoded: Dictionary, start_frame: int, frame_count: int, assets: Dictionary = {}
+## Creates persistent channel and analog state. Call render_chunk_stateful for
+## successive buffers; the state must not be recreated at an AudioStreamGenerator
+## boundary.
+static func create_state(_decoded: Dictionary, _assets: Dictionary = {}) -> Dictionary:
+	var tracks: Array = []
+	for _track: Dictionary in _decoded.get("tracks", []):
+		tracks.append({
+			"event_index": 0,
+			"phase": 0.0,
+			"lfsr": 0x7FFF,
+			"noise_clock": 0.0,
+			"noise_row": -1,
+		})
+	return {
+		"sample_cursor": 0,
+		"tracks": tracks,
+		"hpf_left": 0.0,
+		"hpf_right": 0.0,
+		"lpf_left": 0.0,
+		"lpf_right": 0.0,
+	}
+
+
+## Renders from the current state and advances it. The returned sample count is
+## based on the exact source-frame boundaries, so 60 Hz chunks do not accumulate
+## a fractional-sample drift.
+static func render_chunk_stateful(
+	decoded: Dictionary, state: Dictionary, frame_count: int, assets: Dictionary = {}
 ) -> Dictionary:
 	if not bool(decoded.get("ok", false)):
 		return {"ok": false, "reason": decoded.get("reason", &"audio_decode_failed")}
-	var frames: int = maxi(frame_count, 1)
-	var samples: int = maxi(1, frames * SAMPLE_RATE / 60)
-	var left := PackedFloat32Array()
-	var right := PackedFloat32Array()
-	left.resize(samples)
-	right.resize(samples)
-	var wave: PackedByteArray = _wave_bytes(assets)
-	var sample_offset: int = maxi(start_frame, 0) * SAMPLE_RATE / 60
-	for track: Dictionary in decoded.get("tracks", []):
-		_render_track(track, left, right, samples, wave, sample_offset)
-	var buffer := PackedVector2Array()
-	buffer.resize(samples)
-	for index: int in samples:
-		buffer[index] = Vector2(
-			clampf(left[index] * CHANNEL_SCALE / 32768.0, -1.0, 1.0),
-			clampf(right[index] * CHANNEL_SCALE / 32768.0, -1.0, 1.0),
-		)
-	return {"ok": true, "buffer": buffer, "frame_count": frames, "sample_count": samples}
+	return _render_state(decoded, state, maxi(frame_count, 1), assets)
 
 
-static func _render_track(
-	track: Dictionary, left: PackedFloat32Array, right: PackedFloat32Array,
-	render_samples: int, wave: PackedByteArray, sample_offset: int = 0
+static func prime_state(
+	decoded: Dictionary, state: Dictionary, start_frame: int, assets: Dictionary = {}
 ) -> void:
-	var lfsr: int = 0x7FFF
-	var noise_phase: float = 0.0
-	for event: Dictionary in track.get("events", []):
-		if int(event.get("pitch", 0)) == 0:
+	var target: int = _frame_sample(maxi(start_frame, 0))
+	if target > int(state.get("sample_cursor", 0)):
+		_render_samples(decoded, state, target - int(state.get("sample_cursor", 0)), assets, false)
+
+
+## Compatibility API. It uses the same state machine and primes it from sample 0,
+## making isolated chunks mathematically identical to a full render, including
+## noise, modulation and analog filter state.
+static func render_chunk(
+	decoded: Dictionary, start_frame: int, frame_count: int, assets: Dictionary = {}
+) -> Dictionary:
+	var state: Dictionary = create_state(decoded, assets)
+	var start_sample: int = _frame_sample(maxi(start_frame, 0))
+	if start_sample > 0:
+		_render_samples(decoded, state, start_sample, assets, false)
+	return _render_state(decoded, state, maxi(frame_count, 1), assets)
+
+
+static func _render_state(
+	decoded: Dictionary, state: Dictionary, frame_count: int, assets: Dictionary
+) -> Dictionary:
+	var start_frame_sample: int = int(state.get("sample_cursor", 0))
+	var end_frame_sample: int = start_frame_sample + _frame_sample(frame_count)
+	var sample_count: int = maxi(1, end_frame_sample - start_frame_sample)
+	var samples := PackedVector2Array()
+	samples.resize(sample_count)
+	for index: int in sample_count:
+		samples[index] = _sample(decoded, state, assets)
+	return {
+		"ok": true,
+		"buffer": samples,
+		"frame_count": frame_count,
+		"sample_count": sample_count,
+	}
+
+
+static func _render_samples(
+	decoded: Dictionary, state: Dictionary, sample_count: int, assets: Dictionary,
+	keep_output: bool
+) -> PackedVector2Array:
+	var samples := PackedVector2Array()
+	if keep_output:
+		samples.resize(sample_count)
+	for index: int in sample_count:
+		var value := _sample(decoded, state, assets)
+		if keep_output:
+			samples[index] = value
+	return samples
+
+
+static func _sample(decoded: Dictionary, state: Dictionary, assets: Dictionary) -> Vector2:
+	var left: float = 0.0
+	var right: float = 0.0
+	var source_sample: int = int(state.get("sample_cursor", 0))
+	var track_states: Array = state["tracks"]
+	var tracks: Array = decoded.get("tracks", [])
+	var wave: PackedByteArray = _wave_bytes(assets)
+	for track_index: int in tracks.size():
+		var track: Dictionary = tracks[track_index]
+		var channel_state: Dictionary = track_states[track_index]
+		var event_index: int = _event_at(track, source_sample, int(channel_state["event_index"]))
+		if event_index != int(channel_state["event_index"]):
+			channel_state["event_index"] = event_index
+			channel_state["phase"] = 0.0
+			channel_state["noise_row"] = -1
+		var events: Array = track.get("events", [])
+		if event_index < 0 or event_index >= events.size():
 			continue
-		var start_frame: int = int(event.get("start_frame", 0))
-		var first: int = start_frame * SAMPLE_RATE / 60 - sample_offset
-		var last: int = mini(
-			render_samples,
-			(start_frame + int(event.get("duration_frames", 0))
-				+ int(event.get("tail_frames", 0))) * SAMPLE_RATE / 60 - sample_offset,
-		)
-		first = maxi(first, 0)
-		if first >= last or first >= render_samples:
+		var event: Dictionary = events[event_index]
+		var start_sample: int = _frame_sample(int(event.get("start_frame", 0)))
+		var age: int = maxi(0, source_sample - start_sample)
+		var duration_samples: int = _frame_sample(int(event.get("duration_frames", 0)))
+		var tail_samples: int = _frame_sample(int(event.get("tail_frames", 0)))
+		if age >= duration_samples + tail_samples or int(event.get("pitch", 0)) == 0:
 			continue
-		# NR51 routes a channel to one side, NR50 sets how loud that side is, and
-		# volume 0 is an eighth rather than silence.
 		var gain_left: float = 0.0
 		var gain_right: float = 0.0
 		if int(event.get("pan_left", 1)) != 0:
 			gain_left = (float(int(event.get("master_left", 7))) + 1.0) / 8.0
 		if int(event.get("pan_right", 1)) != 0:
 			gain_right = (float(int(event.get("master_right", 7))) + 1.0) / 8.0
-
+		var value: float = 0.0
+		var hardware: int = int(event.get("hardware_channel", 1))
+		var step: float = 0.0
 		if bool(event.get("noise", false)):
-			var noise_state: Dictionary = _render_noise(
-				event, left, right, first, last, gain_left, gain_right, lfsr, noise_phase
-			)
-			lfsr = int(noise_state["lfsr"])
-			noise_phase = float(noise_state["phase"])
-			continue
-		var hardware_channel: int = int(event.get("hardware_channel", 1))
-		# A note trigger resets the DMG oscillator. Reconstruct its phase from
-		# source age so a generator buffer boundary does not retrigger the note.
-		var event_origin: int = start_frame * SAMPLE_RATE / 60
-		var age_at_first: int = maxi(sample_offset - event_origin, 0)
-		var phase: float = fmod(
-			_event_step(event, age_at_first, hardware_channel) * float(age_at_first), 1.0
-		)
-		if hardware_channel == 3:
-			phase = _render_wave(
-				event, left, right, first, last, gain_left, gain_right, phase, wave,
-				age_at_first
-			)
+			value = _noise_sample(event, age, channel_state)
 		else:
-			phase = _render_pulse(
-				event, left, right, first, last, gain_left, gain_right, phase,
-				age_at_first
-			)
+			var register: int = _modulated_register(event, age)
+			step = _register_to_hz(register, hardware) / SAMPLE_RATE
+			var phase: float = float(channel_state["phase"])
+			if hardware == 3:
+				value = _wave_sample(event, phase, wave)
+			else:
+				var duty: int = int(event.get("duty", 0))
+				var duty_pattern: Array = DUTY_PATTERNS[clampi(duty, 0, 3)]
+				value = 1.0 if duty_pattern[int(phase * 8.0) & 7] != 0 else 0.0
+				value *= _envelope_gain(event, age)
+		if not bool(event.get("noise", false)):
+			if hardware == 3:
+				value *= WAVE_LEVELS[clampi(int(event.get("wave_level", 0)), 0, 3)]
+			channel_state["phase"] = fmod(float(channel_state["phase"]) + step, 1.0)
+		left += value * gain_left
+		right += value * gain_right
+	var output_left: float = _analog_output(left, state, true)
+	var output_right: float = _analog_output(right, state, false)
+	state["sample_cursor"] = source_sample + 1
+	return Vector2(output_left, output_right)
 
 
-static func _render_pulse(
-	event: Dictionary, left: PackedFloat32Array, right: PackedFloat32Array,
-	first: int, last: int, gain_left: float, gain_right: float, phase: float,
-	age_at_first: int
-) -> float:
-	var threshold: float = DUTY_CYCLES[clampi(int(event.get("duty", 0)), 0, 3)]
-	var envelope: int = int(event.get("envelope", 0xF0))
-	var level: int = (envelope >> 4) & 0x0F
-	var period: int = envelope & 0x07
-	var rising: bool = ((envelope >> 3) & 0x01) != 0
-	var step_samples: float = float(period) * float(SAMPLE_RATE) / ENVELOPE_STEPS_PER_SECOND
-	for index: int in range(first, last):
-		var volume: float = _envelope_level(
-			level, period, rising, step_samples, float(index - first)
-		) * 0.25
-		var sample: float = 1.0 if phase < threshold else -1.0
-		left[index] += sample * volume * gain_left
-		right[index] += sample * volume * gain_right
-		phase = fmod(phase + _event_step(event, age_at_first + index - first, 1), 1.0)
-	return phase
+static func _event_at(track: Dictionary, sample: int, hint: int) -> int:
+	var events: Array = track.get("events", [])
+	var index: int = clampi(hint, 0, events.size())
+	while index < events.size():
+		var event: Dictionary = events[index]
+		var start: int = _frame_sample(int(event.get("start_frame", 0)))
+		var end: int = _frame_sample(
+			int(event.get("start_frame", 0)) + int(event.get("duration_frames", 0))
+			+ int(event.get("tail_frames", 0))
+		)
+		if sample < start:
+			return index - 1
+		if sample < end:
+			return index
+		index += 1
+	return events.size()
 
 
-static func _render_wave(
-	event: Dictionary, left: PackedFloat32Array, right: PackedFloat32Array,
-	first: int, last: int, gain_left: float, gain_right: float, phase: float,
-	wave: PackedByteArray, age_at_first: int
-) -> float:
-	var volume: float = WAVE_LEVELS[(int(event.get("envelope", 0xF0)) >> 4) & 0x03] * 0.25
-	var base: int = clampi(int(event.get("wave_index", 0)), 0, 9) * 16
-	if volume <= 0.0 or base + 16 > wave.size():
-		for index: int in range(first, last):
-			phase = fmod(phase + _event_step(event, age_at_first + index - first, 3), 1.0)
-		return phase
-	for index: int in range(first, last):
-		var position: int = int(phase * 32.0) % 32
-		var packed: int = wave[base + position / 2]
-		var nibble: int = packed >> 4 if position % 2 == 0 else packed & 0x0F
-		var sample: float = float(nibble) / 7.5 - 1.0
-		left[index] += sample * volume * gain_left
-		right[index] += sample * volume * gain_right
-		phase = fmod(phase + _event_step(event, age_at_first + index - first, 3), 1.0)
-	return phase
-
-
-static func _event_step(event: Dictionary, sample_index: int, channel: int) -> float:
-	var frequency: float = float(int(event.get("frequency", 0)))
-	var vibrato: Dictionary = event.get("vibrato", {})
-	if not vibrato.is_empty():
-		var age: float = float(sample_index) * 60.0 / float(SAMPLE_RATE)
-		var delay: float = float(vibrato.get("delay_frames", 0))
-		var rate: float = float(vibrato.get("rate", 0))
-		if age >= delay and rate > 0.0:
-			var cycle: float = fmod((age - delay) / rate, 2.0)
-			var triangle: float = 1.0 - absf(cycle - 1.0)
-			frequency += triangle * float(vibrato.get("extent", 0))
+static func _modulated_register(event: Dictionary, age_samples: int) -> int:
+	var base: int = int(event.get("frequency", 0)) & 0x7FF
+	var age_frame: int = int(floor(float(age_samples) * 60.0 / SAMPLE_RATE))
 	var target: int = int(event.get("pitch_slide_target", -1))
 	if target >= 0:
-		var slide_frames: float = maxf(1.0, float(event.get("pitch_slide_duration", 0)))
-		var progress: float = clampf(
-			float(sample_index) * 60.0 / float(SAMPLE_RATE) / slide_frames, 0.0, 1.0
-		)
-		frequency = lerpf(frequency, float(target), progress)
-	return _register_to_hz(int(frequency) & 0x07FF, channel) / float(SAMPLE_RATE)
+		var slide_frames: int = maxi(1, int(event.get(
+			"pitch_slide_frames", event.get("pitch_slide_duration", 0))))
+		var progress_frame: int = mini(age_frame, slide_frames)
+		base = base + int(round(float(target - base) * float(progress_frame) / float(slide_frames)))
+	var vibrato: Dictionary = event.get("vibrato", {})
+	if not vibrato.is_empty():
+		var delay: int = int(vibrato.get("delay_frames", 0))
+		var rate: int = int(vibrato.get("rate", 0))
+		if age_frame >= delay and rate >= 0:
+			var toggles: int = int(floor(float(age_frame - delay + 1) / float(rate + 1)))
+			var low: int = base & 0xFF
+			var high: int = base & 0x700
+			if (toggles & 1) != 0:
+				low = mini(0xFF, low + int(vibrato.get("above", 0)))
+			else:
+				low = maxi(0, low - int(vibrato.get("below", 0)))
+			base = high | low
+	return clampi(base, 0, 0x7FF)
 
 
-## `ReadNoiseSample` walks a drum's own list of `[duration, envelope, frequency]`
-## rows, each row retriggering the channel, so the envelope restarts per row
-## rather than per note.
-static func _render_noise(
-	event: Dictionary, left: PackedFloat32Array, right: PackedFloat32Array,
-	first: int, last: int, gain_left: float, gain_right: float, lfsr: int, phase: float
-) -> Dictionary:
+static func _envelope_gain(event: Dictionary, age_samples: int) -> float:
+	var level: int = int(event.get("volume", 0))
+	var fade: int = int(event.get("fade", 0))
+	if fade != 0:
+		var seconds: float = float(age_samples) / SAMPLE_RATE
+		var steps: int = int(floor(seconds / (absf(float(fade)) / ENVELOPE_STEPS_PER_SECOND)))
+		level = maxi(0, level - steps) if fade > 0 else mini(15, level + steps)
+	return float(level) / 15.0
+
+
+static func _noise_sample(event: Dictionary, age_samples: int, channel_state: Dictionary) -> float:
 	var rows: Array = event.get("noise_samples", [])
-	if rows.is_empty():
-		rows = [{
-			"duration_frames": 0x7FFFFFFF,
-			"envelope": int(event.get("envelope", 0xF0)),
-			"frequency": int(event.get("frequency", 0)),
-		}]
-	var at: int = first
-	for row: Dictionary in rows:
-		if at >= last:
-			break
-		var row_samples: int = int(row.get("duration_frames", 1)) * SAMPLE_RATE / 60
-		var row_end: int = mini(last, at + maxi(row_samples, 1))
-		var envelope: int = int(row.get("envelope", 0xF0))
-		var level: int = (envelope >> 4) & 0x0F
-		var period: int = envelope & 0x07
-		var rising: bool = ((envelope >> 3) & 0x01) != 0
-		var step_samples: float = float(period) * float(SAMPLE_RATE) \
-			/ ENVELOPE_STEPS_PER_SECOND
-		var register: int = int(row.get("frequency", 0))
-		var narrow: bool = (register & 0x08) != 0
-		var step: float = _noise_hz(register) / float(SAMPLE_RATE)
-		for index: int in range(at, row_end):
-			var volume: float = _envelope_level(
-				level, period, rising, step_samples, float(index - at)
-			) * 0.25
-			phase += step
-			var clocks: int = mini(int(phase), MAX_NOISE_CLOCKS_PER_SAMPLE)
-			phase -= floorf(phase)
-			for _clock: int in clocks:
-				var bit: int = (lfsr ^ (lfsr >> 1)) & 1
-				lfsr = (lfsr >> 1) | (bit << 14)
-				if narrow:
-					lfsr = (lfsr & ~0x40) | (bit << 6)
-			# The DMG inverts the low bit, so a fresh $7fff LFSR starts high.
-			var sample: float = -1.0 if (lfsr & 1) != 0 else 1.0
-			left[index] += sample * volume * gain_left
-			right[index] += sample * volume * gain_right
-		at = row_end
-	return {"lfsr": lfsr, "phase": phase}
+	var row_index: int = 0
+	var row_age: int = age_samples
+	if not rows.is_empty():
+		var remaining: int = 0
+		row_index = rows.size() - 1
+		for index: int in rows.size():
+			var row_samples: int = maxi(1, _frame_sample(int(rows[index].get("duration_frames", 1))))
+			if age_samples < remaining + row_samples:
+				row_index = index
+				row_age = age_samples - remaining
+				break
+			remaining += row_samples
+		if int(channel_state["noise_row"]) != row_index:
+			channel_state["noise_row"] = row_index
+			channel_state["lfsr"] = 0x7FFF
+			channel_state["noise_clock"] = 0.0
+	var row: Dictionary = rows[row_index] if not rows.is_empty() else event
+	var parameter: int = int(row.get("frequency", event.get("frequency", 0))) & 0xFF
+	var divisor: int = 8 if (parameter & 7) == 0 else (parameter & 7) * 16
+	var shift: int = (parameter >> 4) & 0x0F
+	var clocks_per_sample: float = 0.0 if shift >= 14 else GB_CLOCK / float(divisor << shift) / SAMPLE_RATE
+	var clock: float = float(channel_state["noise_clock"]) + clocks_per_sample
+	var clocks: int = mini(int(floor(clock)), MAX_NOISE_CLOCKS_PER_SAMPLE)
+	channel_state["noise_clock"] = clock - floor(clock)
+	for _clock: int in clocks:
+		var lfsr: int = int(channel_state["lfsr"])
+		var feedback: int = (lfsr & 1) ^ ((lfsr >> 1) & 1)
+		lfsr = (lfsr >> 1) | (feedback << 14)
+		if (parameter & 8) != 0:
+			lfsr = (lfsr & ~0x40) | (feedback << 6)
+		channel_state["lfsr"] = lfsr
+	var envelope_event := event
+	if not rows.is_empty():
+		envelope_event = row
+	var value: float = 1.0 if (int(channel_state["lfsr"]) & 1) == 0 else 0.0
+	return value * _envelope_gain(envelope_event, row_age)
 
 
-## The DMG volume envelope behind rAUDxENV, run forward from the note's own
-## trigger: one level per period 64ths of a second, up or down by bit 3, stopping
-## at the ends. Period 0 holds the starting volume.
-static func _envelope_level(
-	level: int, period: int, rising: bool, step_samples: float, elapsed: float
-) -> float:
-	if period <= 0:
-		return float(level) / 15.0
-	var steps: int = int(elapsed / step_samples)
-	var value: int = mini(15, level + steps) if rising else maxi(0, level - steps)
-	return float(value) / 15.0
+static func _wave_sample(event: Dictionary, phase: float, wave: PackedByteArray) -> float:
+	var base: int = clampi(int(event.get("wave_index", 0)), 0, 9) * 16
+	if base + 16 > wave.size():
+		return 0.0
+	var position: int = int(phase * 32.0) & 31
+	var packed: int = wave[base + position / 2]
+	var nibble: int = packed >> 4 if (position & 1) == 0 else packed & 0x0F
+	return float(nibble) / 15.0
 
 
-## `f = 131072 / (2048 - x)` for the two pulse channels. Channel 3 walks its
-## thirty-two samples over two periods of the same divider, so the same register
-## value sounds an octave lower, which is what the music is written for.
+static func _analog_output(input: float, state: Dictionary, left: bool) -> float:
+	var cap_key: String = "hpf_left" if left else "hpf_right"
+	var lpf_key: String = "lpf_left" if left else "lpf_right"
+	var cap: float = float(state[cap_key])
+	var high_pass: float = input - cap
+	state[cap_key] = input - high_pass * HPF_CHARGE
+	var low_pass: float = float(state[lpf_key]) + LPF_ALPHA * (high_pass - float(state[lpf_key]))
+	state[lpf_key] = low_pass
+	return clampf(low_pass * MIX_SCALE, -1.0, 1.0)
+
+
 static func _register_to_hz(value: int, hardware_channel: int) -> float:
 	if value <= 0 or value >= 2048:
 		return 0.0
-	var numerator: float = 65536.0 if hardware_channel == 3 else 131072.0
-	return numerator / float(2048 - value)
+	return (65536.0 if hardware_channel == 3 else 131072.0) / float(2048 - value)
 
 
-## rAUD4POLY: hi nibble the shift, bit 3 the LFSR width, lo three bits the
-## divisor code, where code 0 means half.
-static func _noise_hz(value: int) -> float:
-	var shift: int = (value >> 4) & 0x0F
-	if shift > 13:
-		return 0.0
-	var code: int = value & 0x07
-	var divisor: int = 8 if code == 0 else code * 16
-	return 4194304.0 / float(divisor << shift)
+static func _frame_sample(frame: int) -> int:
+	return int(floor(float(maxi(frame, 0)) * SAMPLE_RATE / 60.0))
 
 
 static func _wave_bytes(assets: Dictionary) -> PackedByteArray:
