@@ -1,0 +1,154 @@
+name: Bug report
+description: Something is broken, wrong, or does not behave like the original game.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A screenshot is worth more than any description. If you can grab one, grab one.
+        If you genuinely can't, the details below need to be thorough enough that
+        someone can find the bug without ever seeing your screen.
+
+        If the game refuses your cartridge dump or the import fails, check
+        [roms/README.md](https://github.com/Decryptu/pokerecomp/blob/main/roms/README.md)
+        first. Never attach ROM data, save files containing it, or the import cache.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One line summary
+      description: What's broken, in a sentence.
+      placeholder: Surfing off the Route 34 coast walks the player onto land instead of stopping
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Which game were you playing
+      description: Pick every version you saw the bug in. Use N/A if it isn't game-specific.
+      multiple: true
+      options:
+        - Gold
+        - Silver
+        - Crystal
+        - N/A
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Which build are you running
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Android
+        - iOS
+        - Godot editor (from source)
+        - Multiple platforms
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mods_enabled
+    attributes:
+      label: Were any mods on
+      description: The launcher lists what loaded. Check there if you're not sure.
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
+
+  - type: input
+    id: mods_which
+    attributes:
+      label: Which mods (if any were on)
+      description: List the enabled mod ids and versions. Leave blank if none were on.
+      placeholder: nuzlocke 1.0.0, hd-world 0.3
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you downloaded, or the commit hash if you built it yourself.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: discord
+    attributes:
+      label: Discord username (optional)
+      description: >
+        So maintainers can ping you for a quick follow-up. Leave blank if you'd
+        rather keep everything on GitHub.
+      placeholder: yourname
+    validations:
+      required: false
+
+  - type: input
+    id: location
+    attributes:
+      label: Where in the game
+      description: >
+        Be specific. Route, town, building, floor, menu, battle, launcher screen.
+        If it's a map transition, say which side you came in from.
+      placeholder: Ilex Forest, north exit into Route 34
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot, or a detailed description if you couldn't take one
+      description: >
+        Drag the image straight into this box. If you couldn't get a screenshot,
+        write "no screenshot" and describe exactly what was on screen: where the
+        player sprite was, the tiles around it, any text, whether anything was
+        frozen or flickering.
+      placeholder: |
+        Drop the image here.
+
+        Or, with no screenshot:
+        Player kept the surf sprite while standing on the grass tile north of the
+        gate, facing up. No text box. Surf music kept playing instead of the
+        Route 34 track.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: Numbered steps, starting from a point someone else can get to.
+      placeholder: |
+        1. New game, get to Cherrygrove and take the Route 34 path
+        2. Surf south from the first water tile
+        3. Press A facing the shore
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+      description: If you know what the original cartridge does here, say so.
+      placeholder: Should step onto the shore tile and drop the surf sprite, facing up.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Does it happen every time or only sometimes. Did it start after a
+        specific release. Anything you were doing right before it. Console output
+        if you ran it from the editor. Leave blank if nothing comes to mind.
+    validations:
+      required: false

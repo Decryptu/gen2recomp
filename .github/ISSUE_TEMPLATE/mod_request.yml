@@ -1,0 +1,115 @@
+name: Mod request
+description: Ask for a gameplay, cosmetic, audio, or QoL change that belongs in a mod.
+labels: ["mod request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is for ideas that should ship as **mods** rather than core engine work:
+        alternate sprites, running shoes, shiny indicators, soundtrack packs,
+        rebalanced species or moves, new trainer classes, a 3D or HD world view.
+
+        A mod is interpreted GDScript under `user://mods/`. What it can reach is
+        described in [docs/MODS.md](https://github.com/Decryptu/pokerecomp/blob/main/docs/MODS.md):
+        adding or rebalancing species, moves, items and trainer classes, registering
+        move effects, watching the world and battle event channels, adding a menu
+        entry, and replacing the world or battle renderer.
+
+        Use a **Feature request** for launcher, ports, export, save tooling, or a new
+        API seam the mod layer doesn't expose yet.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One line summary
+      description: What the mod should do, in a sentence.
+      placeholder: Hold B to run at bike speed on the overworld
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Which game is this for
+      multiple: true
+      options:
+        - Gold
+        - Silver
+        - Crystal
+        - N/A
+    validations:
+      required: true
+
+  - type: input
+    id: discord
+    attributes:
+      label: Discord username (optional)
+      placeholder: yourname
+    validations:
+      required: false
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What should the mod do
+      description: >
+        The player-facing behavior. What changes, where, what does the player see or
+        press. If it toggles from Options or a START-menu entry, say so.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this worth doing as a mod
+      description: Why optional rather than core. Who wants it on, who wants vanilla left alone.
+    validations:
+      required: true
+
+  - type: textarea
+    id: how
+    attributes:
+      label: How should it work
+      description: >
+        Buttons, menus, edge cases, whether it needs new art or audio. If you know
+        which part of the mod API fits (a registry, an event channel, a renderer
+        replacement), mention it. Otherwise leave it open.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: vanilla
+    attributes:
+      label: With the mod off, is vanilla unchanged
+      options:
+        - Yes, parity when disabled
+        - No, it would replace something always-on
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Best-fit category
+      options:
+        - Gameplay / QoL
+        - Graphics / renderer
+        - Audio
+        - Balance / ruleset
+        - Content (species, moves, trainers, encounters)
+        - UI / tool
+        - Total conversion
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Reference screenshots, other projects or hacks that do it, related issues, or
+        "I'd like to try writing this myself."
+    validations:
+      required: false

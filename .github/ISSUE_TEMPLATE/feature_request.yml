@@ -1,0 +1,102 @@
+name: Feature request
+description: Ask for something new in the engine, launcher, or platform layer, not a gameplay mod.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for **engine / launcher / platform** work: ports, export targets,
+        video and control options, save tooling, import speed, mod API seams, docs.
+
+        If what you want is a gameplay, cosmetic, audio or QoL change that a mod
+        could ship (alternate sprites, running shoes, shiny indicators, soundtrack
+        packs, a 3D renderer), open a
+        **[Mod request](https://github.com/Decryptu/pokerecomp/issues/new?template=mod_request.yml)**
+        instead. If the game already does the thing but does it differently from the
+        cartridge, that's a
+        **[Source accuracy report](https://github.com/Decryptu/pokerecomp/issues/new?template=source_accuracy.yml)**.
+
+        "Can we add X" on its own is hard to act on. Say what you want, why, and how
+        you picture it working.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One line summary
+      placeholder: Add a Linux AppImage export next to the macOS and Windows builds
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Which game is this about
+      description: Pick every version it applies to. Use N/A if it isn't game-specific.
+      multiple: true
+      options:
+        - Gold
+        - Silver
+        - Crystal
+        - N/A
+    validations:
+      required: true
+
+  - type: input
+    id: discord
+    attributes:
+      label: Discord username (optional)
+      placeholder: yourname
+    validations:
+      required: false
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you want
+      description: >
+        What is it, where does it live (launcher, options, engine, export), what does
+        the player see or do. If it changes something that exists, say what it does
+        today and what it should do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this worth doing
+      description: >
+        What's annoying or missing right now. If it's just because you think it would
+        be fun, say that, it's a real answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: how
+    attributes:
+      label: How should it work
+      description: >
+        The specifics. Which menu, what happens in the edge cases. If you don't know,
+        say what you'd expect as a player and leave the rest open.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does this change how the original game plays
+      description: >
+        Both answers are fine, it just helps to know which one you're asking for.
+      options:
+        - Quality of life, original game is untouched
+        - Changes how the game plays
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Reference screenshots, how another project does it, related issues.
+    validations:
+      required: false
