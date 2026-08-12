@@ -169,7 +169,8 @@ static func _decode_track(
 		"transpose": 0,
 		"pitch_offset": 0,
 		"vibrato_delay": 0,
-		"vibrato_extent": 0,
+		"vibrato_above": 0,
+		"vibrato_below": 0,
 		"vibrato_rate": 0,
 		"pitch_slide_target": -1,
 		"pitch_slide_duration": 0,
@@ -178,6 +179,7 @@ static func _decode_track(
 		"duty_pattern": [],
 		"noise": false,
 		"sfx": request_kind == &"sound",
+		"sfx_priority": false,
 		"drumkit": 0,
 		"condition": 0,
 		# `_InitSound` writes MAX_VOLUME ($77) to wVolume, and `GetLRTracks`
@@ -186,6 +188,7 @@ static func _decode_track(
 		"master_right": 7,
 		"pan_left": 1,
 		"pan_right": 1,
+		"stereo_enabled": bool(cry.get("stereo_enabled", true)),
 		"frame_at_offset": {},
 		"loop_states": {},
 		"calls": [],
@@ -200,7 +203,7 @@ static func _decode_track(
 	# tempo above.
 	if hardware_channel != 4 and int(cry.get("cry_length", 0)) > 0:
 		state["tempo"] = int(cry["cry_length"]) & 0xFFFF
-	state["pitch_offset"] = int(cry.get("cry_pitch", 0)) & 0xFFFF
+	state["pitch_offset"] = _signed_16(int(cry.get("cry_pitch", 0)) & 0xFFFF)
 	var looped: bool = false
 	# Reaching MAX_FRAMES means the render budget ran out, which is not the
 	# same thing as the stream looping. Conflating the two marked every SFX
@@ -251,10 +254,14 @@ static func _decode_track(
 				"pitch": pitch,
 				"volume": (int(state["volume_envelope"]) >> 4) & 0x0F,
 				"envelope": int(state["volume_envelope"]),
+				"fade": _fade_value(int(state["volume_envelope"]) & 0x0F),
 				"duty": _duty_for_event(state),
+				"duty_pattern": state["duty_pattern"].duplicate(),
 				"wave_index": int(state["volume_envelope"]) & 0x0F,
+				"wave_level": (int(state["volume_envelope"]) >> 4) & 0x03,
 				"frequency": 0,
 				"noise": hardware_channel == 4,
+				"sfx_priority": bool(state["sfx_priority"]),
 				# `Music_Volume` and the two panning commands are mixer state, not
 				# note state, so each event carries what was in force when it began.
 				"master_left": int(state["master_left"]),
@@ -272,7 +279,15 @@ static func _decode_track(
 					var tail_frames: int = 0
 					for sample: Dictionary in drum_samples:
 						tail_frames += int(sample.get("duration_frames", 0))
-					event["tail_frames"] = tail_frames
+					if not drum_samples.is_empty():
+						var last: Dictionary = drum_samples[drum_samples.size() - 1]
+						var last_envelope: int = int(last.get("envelope", 0))
+						var last_fade: int = _fade_value(last_envelope & 0x0F)
+						if last_fade > 0:
+							tail_frames += maxi(0, int(ceil(
+								float((last_envelope >> 4) & 0x0F) * float(last_fade) * 60.0 / 64.0
+							)))
+						event["tail_frames"] = tail_frames
 				else:
 					var base_frequency: int = _frequency(
 						int(state["octave"]), pitch, int(state["transpose"])
@@ -281,15 +296,22 @@ static func _decode_track(
 						base_frequency, int(state.get("pitch_offset", 0))
 					)
 					event["pitch_offset"] = int(state.get("pitch_offset", 0))
-					if int(state.get("vibrato_extent", 0)) > 0:
+					if int(state.get("vibrato_above", 0)) > 0:
 						event["vibrato"] = {
 							"delay_frames": int(state["vibrato_delay"]),
-							"extent": int(state["vibrato_extent"]),
+							"above": int(state["vibrato_above"]),
+							"below": int(state["vibrato_below"]),
+							"extent": int(state["vibrato_above"]),
 							"rate": int(state["vibrato_rate"]),
 						}
 					if int(state.get("pitch_slide_target", -1)) >= 0:
 						event["pitch_slide_target"] = int(state["pitch_slide_target"])
-						event["pitch_slide_duration"] = int(state.get("pitch_slide_duration", 0))
+						event["pitch_slide_duration"] = maxi(
+							1, duration - int(state.get("pitch_slide_duration", 0)) + 1
+						)
+						event["pitch_slide_frames"] = maxi(
+							1, duration - int(state.get("pitch_slide_duration", 0))
+						)
 				events.append(event)
 			elif duration > 0:
 				events.append(event)
@@ -378,11 +400,15 @@ static func _decode_fixed_note(
 		"pitch": 1 if frequency != 0 else 0,
 		"volume": (envelope >> 4) & 0x0F,
 		"envelope": envelope,
+		"fade": _fade_value(envelope & 0x0F),
 		"duty": _duty_for_event(state),
+		"duty_pattern": state["duty_pattern"].duplicate(),
 		"wave_index": envelope & 0x0F,
+		"wave_level": (envelope >> 4) & 0x03,
 		"frequency": _offset_frequency(frequency, int(state.get("pitch_offset", 0))),
 		"pitch_offset": int(state.get("pitch_offset", 0)),
 		"noise": hardware_channel == 4,
+		"sfx_priority": bool(state["sfx_priority"]),
 		# `Music_Volume` and the two panning commands are mixer state, not
 		# note state, so each event carries what was in force when it began.
 		"master_left": int(state["master_left"]),
@@ -458,7 +484,7 @@ static func _command(
 		0xE0:
 			if not _has(bytes, at, 2):
 				return _failure(&"audio_pitch_slide_truncated")
-			var slide_duration: int = int(bytes[at]) + 1
+			var slide_duration: int = int(bytes[at])
 			var slide_note: int = int(bytes[at + 1])
 			var slide_octave: int = 8 - ((slide_note >> 4) & 0x0F)
 			state["pitch_slide_duration"] = slide_duration
@@ -472,7 +498,9 @@ static func _command(
 			var vibrato_delay: int = bytes[at]
 			var vibrato_shape: int = bytes[at + 1]
 			state["vibrato_delay"] = vibrato_delay
-			state["vibrato_extent"] = ((vibrato_shape >> 4) + 1) / 2
+			var extent: int = (vibrato_shape >> 4) & 0x0F
+			state["vibrato_above"] = (extent + 1) / 2
+			state["vibrato_below"] = extent / 2
 			state["vibrato_rate"] = vibrato_shape & 0x0F
 			at += 2
 		0xE2:
@@ -491,8 +519,9 @@ static func _command(
 			# byte into CHANNEL_TRACKS, whose two nibbles enable the left and
 			# right output. Stereo is an option on the cartridge; this follows
 			# the forced branch, which is what the option being on means.
-			state["pan_left"] = 1 if (bytes[at] & 0xF0) != 0 else 0
-			state["pan_right"] = 1 if (bytes[at] & 0x0F) != 0 else 0
+			if opcode == 0xE4 or bool(state["stereo_enabled"]):
+				state["pan_left"] = 1 if (bytes[at] & 0xF0) != 0 else 0
+				state["pan_right"] = 1 if (bytes[at] & 0x0F) != 0 else 0
 			at += 1
 		0xE5:
 			if not _has(bytes, at, 1):
@@ -511,25 +540,32 @@ static func _command(
 			# `bigdw` the way `tempo` is.
 			state["pitch_offset"] = _signed_16(_u16_be(bytes, at))
 			at += 2
-		0xE7, 0xE8, 0xE9:
+		0xE7, 0xE8:
 			args = 1
+		0xE9:
+			if not _has(bytes, at, 1):
+				return _failure(&"audio_tempo_relative_truncated")
+			var relative: int = _signed_8(bytes[at])
+			state["tempo"] = (int(state["tempo"]) + relative) & 0xFFFF
+			state["duration_modifier"] = 0
+			at += 1
 		0xEA:
 			if not _has(bytes, at, 2):
 				return _failure(&"audio_restart_truncated")
-			var restart_header: int = _audio_address(_u16(bytes, at))
+			var restart_stream: int = _audio_address(_u16(bytes, at))
 			at += 2
-			var restart_stream: int = _header_stream_offset(bytes, restart_header, int(state.get("origin", 0)))
-			if restart_stream >= 0:
-				at = restart_stream
-			else:
+			at = restart_stream - int(state.get("origin", 0))
+			if at < 0 or at >= bytes.size():
 				return _failure(&"audio_restart_outside_record", {
-					"header": restart_header,
+					"stream": restart_stream,
 					"origin": int(state.get("origin", 0)),
 				})
 		0xEB:
 			args = 2
-		0xEC, 0xED:
-			pass
+		0xEC:
+			state["sfx_priority"] = true
+		0xED:
+			state["sfx_priority"] = false
 		0xEE:
 			args = 2
 		0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9:
@@ -622,8 +658,16 @@ static func _offset_frequency(base: int, offset: int) -> int:
 	return (base + offset) & 0x07FF
 
 
+static func _fade_value(nibble: int) -> int:
+	return -(nibble & 0x07) if (nibble & 0x08) != 0 else (nibble & 0x07)
+
+
 static func _signed_16(value: int) -> int:
 	return value - 0x10000 if (value & 0x8000) != 0 else value
+
+
+static func _signed_8(value: int) -> int:
+	return value - 0x100 if (value & 0x80) != 0 else value
 
 
 static func _track_end_frame(events: Array, source_end: int) -> int:
@@ -644,15 +688,14 @@ static func _frequency(octave: int, pitch: int, transpose: int) -> int:
 	if table_index < 0 or table_index >= FREQUENCY_TABLE.size():
 		return 0
 	var frequency: int = FREQUENCY_TABLE[table_index]
+	var signed_frequency: int = frequency - 0x10000 if (frequency & 0x8000) != 0 else frequency
 	var shift: int = 7 - transposed_octave
-	# `sra d` / `rr e`, not `srl`: every table entry has bit 15 set, so the
-	# sign propagates into the eleven bits `and $7` keeps. A logical shift
-	# put octave 7 and 8 out by more than an octave; C_ at octave 8 came out
-	# at register $1f0 against the hardware's $7f0.
+	# GetFrequency performs an arithmetic 16-bit right shift (sra/rr). Keep the
+	# sign explicit because GDScript integers are wider than the cartridge word.
 	while shift > 0:
-		frequency = (frequency >> 1) | (frequency & 0x8000)
+		signed_frequency >>= 1
 		shift -= 1
-	return frequency & 0x07FF
+	return signed_frequency & 0x07FF
 
 
 static func _duty_for_event(state: Dictionary) -> int:

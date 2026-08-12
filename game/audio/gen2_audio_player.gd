@@ -25,6 +25,8 @@ var _music_playback: AudioStreamGeneratorPlayback = null
 var _music_decoded: Dictionary = {}
 var _music_assets: Dictionary = {}
 var _music_source_frame: int = 0
+var _music_render_state: Dictionary = {}
+var _music_interrupted_by_sfx: bool = false
 
 
 func _ready() -> void:
@@ -39,6 +41,10 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_service_music()
+	if _music_interrupted_by_sfx and not effect_playing():
+		_music_interrupted_by_sfx = false
+		if _music_player != null:
+			_music_player.stream_paused = false
 
 
 ## Plays one imported audio record. [param restart] forces music that is already
@@ -89,6 +95,9 @@ func play_record(
 		if stream == null:
 			return {"ok": false, "played": false, "reason": &"audio_stream_unavailable"}
 		_effect_player.stream = stream
+		if bool(prepared.get("sfx_priority", false)) and _music_player.playing:
+			_music_player.stream_paused = true
+			_music_interrupted_by_sfx = true
 		_effect_player.play()
 	prepared["played"] = true
 	return prepared
@@ -120,6 +129,8 @@ func stop_all() -> void:
 	_music_decoded = {}
 	_music_playback = null
 	_music_generator = null
+	_music_render_state = {}
+	_music_interrupted_by_sfx = false
 
 
 func effect_playing() -> bool:
@@ -178,6 +189,8 @@ func _finish_fade() -> void:
 	_music_decoded = {}
 	_music_playback = null
 	_music_generator = null
+	_music_render_state = {}
+	_music_interrupted_by_sfx = false
 
 
 func _start_music_generator(prepared: Dictionary, assets: Dictionary) -> void:
@@ -190,6 +203,7 @@ func _start_music_generator(prepared: Dictionary, assets: Dictionary) -> void:
 	_music_decoded = prepared.get("decoded", {}).duplicate(true)
 	_music_assets = assets.duplicate(true)
 	_music_source_frame = 0
+	_music_render_state = AUDIO_RENDERER.create_state(_music_decoded, _music_assets)
 	_music_player.play()
 	_music_playback = _music_player.get_stream_playback() as AudioStreamGeneratorPlayback
 
@@ -203,6 +217,12 @@ func _service_music() -> void:
 		if _music_source_frame >= duration:
 			if bool(_music_decoded.get("looped", false)):
 				_music_source_frame = maxi(0, int(_music_decoded.get("loop_start_frame", 0)))
+				_music_render_state = AUDIO_RENDERER.create_state(
+					_music_decoded, _music_assets
+				)
+				AUDIO_RENDERER.prime_state(
+					_music_decoded, _music_render_state, _music_source_frame, _music_assets
+				)
 			else:
 				_music_player.stop()
 				_music_key = ""
@@ -210,8 +230,8 @@ func _service_music() -> void:
 				_music_decoded = {}
 				return
 		var frames: int = mini(MUSIC_CHUNK_FRAMES, duration - _music_source_frame)
-		var chunk: Dictionary = AUDIO_RENDERER.render_chunk(
-			_music_decoded, _music_source_frame, frames, _music_assets
+		var chunk: Dictionary = AUDIO_RENDERER.render_chunk_stateful(
+			_music_decoded, _music_render_state, frames, _music_assets
 		)
 		if not bool(chunk.get("ok", false)):
 			push_error("Music chunk render failed: %s" % chunk.get("reason", "unknown"))

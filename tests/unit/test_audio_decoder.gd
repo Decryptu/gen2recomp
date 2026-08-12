@@ -65,6 +65,21 @@ func test_sfx_starts_in_fixed_mode_then_toggle_sfx_restores_music_notes() -> voi
 	assert_eq(decoded["tracks"][0]["events"][0]["duration_frames"], 2)
 
 
+func test_sfx_priority_commands_are_carried_on_source_events() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xD4, 0xD8, 0x01, 0xF1, 0xEC, 0x11,
+			0xED, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"])
+	assert_true(decoded["tracks"][0]["events"][0]["sfx_priority"])
+	assert_false(decoded["tracks"][0]["events"][1]["sfx_priority"])
+
+
 func test_cry_header_runs_commands_before_square_and_noise_notes() -> void:
 	var record := {
 		"address": 0x7000,
@@ -229,6 +244,60 @@ func test_adjacent_music_chunks_keep_a_note_continuous() -> void:
 	assert_eq(second_first, _sample(full_data, 4 * Renderer.SAMPLE_RATE / 60))
 
 
+func test_audio_exact_dmg_duty_patterns_are_not_thresholds() -> void:
+	assert_eq(Renderer.duty_pattern(0), [0, 0, 0, 0, 0, 0, 0, 1])
+	assert_eq(Renderer.duty_pattern(1), [1, 0, 0, 0, 0, 0, 0, 1])
+	assert_eq(Renderer.duty_pattern(2), [1, 0, 0, 0, 0, 1, 1, 1])
+	assert_eq(Renderer.duty_pattern(3), [0, 1, 1, 1, 1, 1, 1, 0])
+
+
+func test_audio_register_conversion_uses_the_channel_three_divider() -> void:
+	assert_almost_eq(Renderer.register_frequency(1000, 1), 125.0687022900763, 0.0000001)
+	assert_almost_eq(Renderer.register_frequency(1000, 3), 62.53435114503815, 0.0000001)
+
+
+func test_audio_wave_nibbles_are_unsigned_and_wave_level_can_mute() -> void:
+	var decoded: Dictionary = {
+		"ok": true, "duration_frames": 1, "tracks": [{"events": [{
+			"start_frame": 0, "duration_frames": 1, "pitch": 1,
+			"hardware_channel": 3, "frequency": 1000, "volume": 15,
+			"wave_index": 0, "wave_level": 1,
+		}]}],
+	}
+	var assets := {"wave_samples": {"bytes": [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]}}
+	var audible: Dictionary = Renderer.render(decoded, assets)
+	assert_gt(_sample(audible["stream"].data, 0), 0)
+	(decoded["tracks"][0]["events"][0] as Dictionary)["wave_level"] = 0
+	var muted: Dictionary = Renderer.render(decoded, assets)
+	assert_eq(_sample(muted["stream"].data, 0), 0)
+
+
+func test_audio_noise_lfsr_and_filter_state_match_across_chunks() -> void:
+	var decoded: Dictionary = {
+		"ok": true, "duration_frames": 8, "tracks": [{"events": [{
+			"start_frame": 0, "duration_frames": 8, "pitch": 1,
+			"hardware_channel": 4, "frequency": 0x13, "volume": 15,
+			"fade": 0,
+		}]}],
+	}
+	var full: Dictionary = Renderer.render(decoded)
+	var second: Dictionary = Renderer.render_chunk(decoded, 4, 4)
+	var full_data: PackedByteArray = full["stream"].data
+	var second_data: PackedVector2Array = second["buffer"]
+	for index: int in second_data.size():
+		assert_eq(
+			int(roundf(second_data[index].x * 32767.0)),
+			_sample_signed(full_data, 4 * Renderer.SAMPLE_RATE / 60 + index),
+			"noise chunk state at sample %d" % index,
+		)
+
+
 func _sample(data: PackedByteArray, index: int) -> int:
 	var at: int = index * 4
 	return data[at] | (data[at + 1] << 8)
+
+
+func _sample_signed(data: PackedByteArray, index: int) -> int:
+	var value: int = _sample(data, index)
+	return value - 0x10000 if (value & 0x8000) != 0 else value

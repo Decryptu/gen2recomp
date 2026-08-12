@@ -44,6 +44,15 @@ static func play(
 		"address": int(record.get("address", -1)),
 		"byte_count": byte_count,
 		"decoded": decoded,
+		"sfx_priority": _has_sfx_priority(decoded),
 		"stream": rendered["stream"],
 		"frame_count": int(rendered.get("frame_count", 0)),
 	}
+
+
+static func _has_sfx_priority(decoded: Dictionary) -> bool:
+	for track: Dictionary in decoded.get("tracks", []):
+		for event: Dictionary in track.get("events", []):
+			if bool(event.get("sfx_priority", false)):
+				return true
+	return false
