@@ -9,7 +9,10 @@ const AUDIO_DECODER := preload("res://game/audio/gen2_audio_decoder.gd")
 const AUDIO_RENDERER := preload("res://game/audio/gen2_audio_renderer.gd")
 
 const MUSIC_CACHE_LIMIT: int = 4
-const MUSIC_CHUNK_FRAMES: int = 16
+## Keep each refill below the generator's 0.25 second capacity. Sixteen source
+## frames requested 5,880 output frames against a 5,512-frame buffer, so the
+## refill loop never ran and live audio starved from startup.
+const MUSIC_CHUNK_FRAMES: int = 4
 
 var _music_player: AudioStreamPlayer = null
 var _music_key: String = ""
@@ -21,6 +24,7 @@ var _music_decoded: Dictionary = {}
 var _music_assets: Dictionary = {}
 var _music_source_frame: int = 0
 var _music_render_state: Dictionary = {}
+var _music_draining: bool = false
 
 
 func _ready() -> void:
@@ -96,13 +100,14 @@ func fade_out(frames: int = 0) -> bool:
 	if _music_player == null or not _music_player.playing:
 		return false
 	_stop_fade()
-	var seconds: float = maxf(0.01, float(frames) / 60.0)
+	var seconds: float = maxf(0.01, float(frames) / AUDIO_RENDERER.SOURCE_FRAME_RATE)
 	if frames <= 0:
 		_music_player.stop()
 		_music_player.volume_db = 0.0
 		_music_key = ""
 		_music_decoded = {}
 		_music_render_state = {}
+		_music_draining = false
 		return true
 	_fade_tween = create_tween()
 	_fade_tween.tween_property(_music_player, "volume_db", -80.0, seconds)
@@ -119,6 +124,7 @@ func stop_all() -> void:
 	_music_playback = null
 	_music_generator = null
 	_music_render_state = {}
+	_music_draining = false
 
 
 func effect_playing() -> bool:
@@ -185,6 +191,7 @@ func _finish_fade() -> void:
 	_music_playback = null
 	_music_generator = null
 	_music_render_state = {}
+	_music_draining = false
 	_fade_tween = null
 
 
@@ -204,6 +211,7 @@ func _start_music_generator(prepared: Dictionary, assets: Dictionary) -> void:
 	_music_assets = assets.duplicate(true)
 	_music_source_frame = 0
 	_music_render_state = AUDIO_RENDERER.create_shared_state(_music_decoded, _music_assets)
+	_music_draining = false
 	_music_player.play()
 	_music_playback = _music_player.get_stream_playback() as AudioStreamGeneratorPlayback
 
@@ -217,9 +225,27 @@ func _ensure_generator(assets: Dictionary) -> void:
 
 
 func _service_timeline() -> void:
-	if _music_playback == null or _music_render_state.is_empty() or _music_player == null or not _music_player.playing:
+	if _music_player == null or _music_render_state.is_empty() or not _music_player.playing:
 		return
-	var chunk_samples: int = MUSIC_CHUNK_FRAMES * AUDIO_RENDERER.SAMPLE_RATE / 60
+	if _music_playback == null:
+		_music_playback = _music_player.get_stream_playback() as AudioStreamGeneratorPlayback
+		if _music_playback == null:
+			return
+	var chunk_samples: int = ceili(
+		float(MUSIC_CHUNK_FRAMES) * AUDIO_RENDERER.SAMPLE_RATE
+		/ AUDIO_RENDERER.SOURCE_FRAME_RATE
+	)
+	var buffer_capacity: int = ceili(
+		float(_music_generator.mix_rate) * _music_generator.buffer_length
+	)
+	if _music_draining and not AUDIO_RENDERER.shared_effect_playing(_music_render_state):
+		if _music_playback.get_frames_available() >= maxi(0, buffer_capacity - 1):
+			_music_player.stop()
+			_music_key = ""
+			_music_playback = null
+			_music_render_state = {}
+			_music_draining = false
+		return
 	while _music_playback.get_frames_available() >= chunk_samples:
 		var frames: int = MUSIC_CHUNK_FRAMES
 		if not _music_decoded.is_empty():
@@ -231,11 +257,8 @@ func _service_timeline() -> void:
 				else:
 					_music_decoded = {}
 					_music_render_state["music_tracks"] = []
-					if not AUDIO_RENDERER.shared_effect_playing(_music_render_state):
-						_music_player.stop()
-						_music_key = ""
-						_music_playback = null
-						return
+					_music_draining = true
+					break
 			frames = mini(MUSIC_CHUNK_FRAMES, duration - _music_source_frame)
 		var chunk: Dictionary = AUDIO_RENDERER.render_shared_chunk_stateful(
 			_music_render_state, frames, _music_assets
@@ -248,3 +271,5 @@ func _service_timeline() -> void:
 		_music_playback.push_buffer(chunk["buffer"])
 		if not _music_decoded.is_empty():
 			_music_source_frame += frames
+		elif not AUDIO_RENDERER.shared_effect_playing(_music_render_state):
+			_music_draining = true

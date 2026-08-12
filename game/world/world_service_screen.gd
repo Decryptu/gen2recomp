@@ -405,7 +405,9 @@ func _open_audio(request: Dictionary, record: Dictionary) -> void:
 		String(kind), int(record.get("bank", -1)), int(record.get("address", -1)),
 		int(record.get("byte_count", 0)),
 	]
-	_status.text = "Playback backend: %s" % String(playback.get("backend", "unavailable"))
+	_status.text = "Audio resolved for shared runtime: %s" % String(
+		playback.get("backend", "unavailable")
+	)
 	_footer.text = "A: continue    B: stop"
 	_render_options(["Continue"])
 

@@ -9,6 +9,10 @@ const MAX_RENDER_FRAMES: int = 60 * 60 * 30
 const ENVELOPE_STEPS_PER_SECOND: float = 64.0
 const MAX_NOISE_CLOCKS_PER_SAMPLE: int = 64
 const GB_CLOCK: float = 4194304.0
+const FRAME_CLOCKS: int = 70224
+## _UpdateSound runs once per LCD VBlank, so a source frame is the DMG clock
+## divided by 70,224 clocks rather than an idealized 60 Hz.
+const SOURCE_FRAME_RATE: float = GB_CLOCK / float(FRAME_CLOCKS)
 # Four independent DMG channels can be simultaneously full-scale before the
 # analog stage. Keep the reference filter response but leave 6 dB of mixer
 # headroom so a valid multi-channel record never reaches the digital clamp.
@@ -33,6 +37,10 @@ static func duty_pattern(duty: int) -> Array:
 
 static func register_frequency(register: int, hardware_channel: int) -> float:
 	return _register_to_hz(register, hardware_channel)
+
+
+static func frame_sample(frame: int) -> int:
+	return _frame_sample(frame)
 
 
 static func render(decoded: Dictionary, assets: Dictionary = {}) -> Dictionary:
@@ -243,7 +251,7 @@ static func _sample(decoded: Dictionary, state: Dictionary, assets: Dictionary) 
 				var duty: int = int(event.get("duty", 0))
 				var duty_sequence: Variant = event.get("duty_pattern", [])
 				if duty_sequence is Array and not (duty_sequence as Array).is_empty():
-					var duty_frame: int = int(floor(float(age) * 60.0 / SAMPLE_RATE))
+					var duty_frame: int = int(floor(float(age) * SOURCE_FRAME_RATE / SAMPLE_RATE))
 					duty = int((duty_sequence as Array)[duty_frame % (duty_sequence as Array).size()])
 				var duty_pattern: Array = DUTY_PATTERNS[clampi(duty, 0, 3)]
 				value = 1.0 if duty_pattern[int(phase * 8.0) & 7] != 0 else 0.0
@@ -280,12 +288,12 @@ static func _event_at(track: Dictionary, sample: int, hint: int) -> int:
 
 static func _modulated_register(event: Dictionary, age_samples: int) -> int:
 	var base: int = int(event.get("frequency", 0)) & 0x7FF
-	var age_frame: int = int(floor(float(age_samples) * 60.0 / SAMPLE_RATE))
+	var age_frame: int = int(floor(float(age_samples) * SOURCE_FRAME_RATE / SAMPLE_RATE))
 	var sweep: Dictionary = event.get("pitch_sweep", {})
 	if not sweep.is_empty() and int(sweep.get("shift", 0)) > 0:
 		var pace: int = int(sweep.get("pace", 0))
 		if pace > 0:
-			var iterations: int = int(floor(float(age_samples) * 60.0 / SAMPLE_RATE * 128.0 / float(pace)))
+			var iterations: int = int(floor(float(age_samples) * SOURCE_FRAME_RATE / SAMPLE_RATE * 128.0 / float(pace)))
 			for _iteration: int in iterations:
 				var delta: int = base >> int(sweep.get("shift", 0))
 				base = base - delta if bool(sweep.get("subtract", false)) else base + delta
@@ -396,7 +404,7 @@ static func _register_to_hz(value: int, hardware_channel: int) -> float:
 
 
 static func _frame_sample(frame: int) -> int:
-	return int(floor(float(maxi(frame, 0)) * SAMPLE_RATE / 60.0))
+	return int(floor(float(maxi(frame, 0)) * SAMPLE_RATE / SOURCE_FRAME_RATE))
 
 
 static func _wave_bytes(assets: Dictionary) -> PackedByteArray:
@@ -669,7 +677,7 @@ static func _shared_event_sample(
 		var duty: int = int(event.get("duty", 2))
 		var sequence: Variant = event.get("duty_pattern", [])
 		if sequence is Array and not (sequence as Array).is_empty():
-			var duty_frame: int = int(floor(float(age) * 60.0 / SAMPLE_RATE))
+			var duty_frame: int = int(floor(float(age) * SOURCE_FRAME_RATE / SAMPLE_RATE))
 			duty = int((sequence as Array)[duty_frame % (sequence as Array).size()])
 		var pattern: Array = DUTY_PATTERNS[clampi(duty, 0, 3)]
 		value = 1.0 if pattern[int(phase * 8.0) & 7] != 0 else 0.0

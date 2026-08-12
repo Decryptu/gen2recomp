@@ -1,11 +1,13 @@
 class_name Gen2WorldAudioHost
 extends RefCounted
 
-## Scene-free boundary between imported audio records and the Godot playback
-## node. Decoding/rendering stays pure here, while an owning scene decides when
-## to attach the returned stream to an AudioStreamPlayer.
+## Scene-free inspection boundary for imported audio records.
+##
+## Runtime playback belongs exclusively to Gen2AudioPlayer. This host is used by
+## the service overlay to prove that a record resolves and decodes; it must not
+## create a second WAV renderer that can diverge from the shared hardware lane.
 
-const BACKEND_WAV: StringName = &"godot_audio_stream_wav"
+const BACKEND_DECODE_ONLY: StringName = &"decode_only_shared_runtime"
 
 
 static func play(
@@ -20,24 +22,15 @@ static func play(
 		return {
 			"ok": false,
 			"played": false,
-			"backend": BACKEND_WAV,
+			"backend": BACKEND_DECODE_ONLY,
 			"reason": decoded.get("reason", &"audio_decode_failed"),
-			"byte_count": byte_count,
-		}
-	var rendered: Dictionary = Gen2AudioRenderer.render(decoded, assets)
-	if not bool(rendered.get("ok", false)):
-		return {
-			"ok": false,
-			"played": false,
-			"backend": BACKEND_WAV,
-			"reason": rendered.get("reason", &"audio_render_failed"),
 			"byte_count": byte_count,
 		}
 	return {
 		"ok": true,
 		"played": false,
 		"ready": true,
-		"backend": BACKEND_WAV,
+		"backend": BACKEND_DECODE_ONLY,
 		"request_kind": request_kind,
 		"index": int(record.get("index", -1)),
 		"bank": int(record.get("bank", -1)),
@@ -45,8 +38,7 @@ static func play(
 		"byte_count": byte_count,
 		"decoded": decoded,
 		"sfx_priority": _has_sfx_priority(decoded),
-		"stream": rendered["stream"],
-		"frame_count": int(rendered.get("frame_count", 0)),
+		"frame_count": int(decoded.get("duration_frames", 0)),
 	}
 
 
