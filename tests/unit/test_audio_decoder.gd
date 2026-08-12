@@ -149,3 +149,86 @@ func test_renderer_builds_a_playable_stream_from_decoded_events() -> void:
 	assert_eq(rendered["stream"].data.size(), 2 * Renderer.SAMPLE_RATE * 4 / 60)
 	assert_ne(rendered["stream"].data[0], 0)
 	assert_false(rendered["stream"].loop_mode == AudioStreamWAV.LOOP_FORWARD)
+
+
+func test_renderer_resets_the_oscillator_phase_at_each_source_note() -> void:
+	var decoded: Dictionary = {
+		"ok": true,
+		"duration_frames": 2,
+		"looped": false,
+		"tracks": [{
+			"events": [
+				{"start_frame": 0, "duration_frames": 1, "pitch": 1,
+					"hardware_channel": 1, "frequency": 997, "envelope": 0xF0, "duty": 2},
+				{"start_frame": 1, "duration_frames": 1, "pitch": 1,
+					"hardware_channel": 1, "frequency": 997, "envelope": 0xF0, "duty": 2},
+			],
+		}],
+	}
+	var rendered: Dictionary = Renderer.render(decoded)
+	assert_true(rendered["ok"])
+	var data: PackedByteArray = rendered["stream"].data
+	var first: int = _sample(data, 0)
+	var second: int = _sample(data, Renderer.SAMPLE_RATE / 60)
+	assert_eq(second, first, "a new note retriggers the channel phase")
+
+
+func test_pitch_offset_vibrato_and_pitch_slide_are_carried_on_music_events() -> void:
+	var record := {
+		"address": 0x4000,
+		"bytes": [
+			0x00, 0x03, 0x40,
+			0xE6, 0x00, 0x02, 0xE1, 0x01, 0x24,
+			0xE0, 0x01, 0x34, 0xD4, 0xD8, 0x01, 0xF1, 0x11, 0xFF,
+		],
+	}
+	var decoded: Dictionary = Decoder.decode(record)
+	assert_true(decoded["ok"], JSON.stringify(decoded))
+	var note: Dictionary = decoded["tracks"][0]["events"][0]
+	assert_eq(note["pitch_offset"], 2)
+	assert_eq(note["frequency"], (Decoder.FREQUENCY_TABLE[1] >> 3 & 0x7FF) + 2)
+	assert_eq(note["vibrato"]["delay_frames"], 1)
+	assert_eq(note["vibrato"]["extent"], 1)
+	assert_eq(note["vibrato"]["rate"], 4)
+	assert_true(note.has("pitch_slide_target"))
+	assert_eq(note["pitch_slide_duration"], 2)
+
+
+func test_renderer_exposes_bounded_chunk_buffers() -> void:
+	var decoded: Dictionary = {
+		"ok": true,
+		"duration_frames": 120,
+		"tracks": [{"events": [{
+			"start_frame": 0, "duration_frames": 120, "pitch": 1,
+			"hardware_channel": 1, "frequency": 1000, "envelope": 0xF0, "duty": 2,
+		}]}],
+	}
+	var chunk: Dictionary = Renderer.render_chunk(decoded, 60, 4)
+	assert_true(chunk["ok"])
+	assert_eq(chunk["frame_count"], 4)
+	assert_eq(chunk["buffer"].size(), 4 * Renderer.SAMPLE_RATE / 60)
+
+
+func test_adjacent_music_chunks_keep_a_note_continuous() -> void:
+	var decoded: Dictionary = {
+		"ok": true,
+		"duration_frames": 8,
+		"tracks": [{"events": [{
+			"start_frame": 0, "duration_frames": 8, "pitch": 1,
+			"hardware_channel": 1, "frequency": 997, "envelope": 0xF0, "duty": 2,
+		}]}],
+	}
+	var first: Dictionary = Renderer.render_chunk(decoded, 0, 4)
+	var second: Dictionary = Renderer.render_chunk(decoded, 4, 4)
+	assert_true(first["ok"])
+	assert_true(second["ok"])
+	var full: Dictionary = Renderer.render(decoded)
+	var full_data: PackedByteArray = full["stream"].data
+	var second_buffer: PackedVector2Array = second["buffer"]
+	var second_first: int = int(roundf(second_buffer[0].x * 32768.0))
+	assert_eq(second_first, _sample(full_data, 4 * Renderer.SAMPLE_RATE / 60))
+
+
+func _sample(data: PackedByteArray, index: int) -> int:
+	var at: int = index * 4
+	return data[at] | (data[at + 1] << 8)
