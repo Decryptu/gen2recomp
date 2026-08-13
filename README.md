@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Godot-4.8.dev2-478CBF?style=flat-square&logo=godotengine&logoColor=white" alt="Godot 4.8.dev2">
+  <img src="https://img.shields.io/badge/Godot-4.8.dev3-478CBF?style=flat-square&logo=godotengine&logoColor=white" alt="Godot 4.8.dev3">
   <img src="https://img.shields.io/badge/GDScript-355570?style=flat-square&logo=godotengine&logoColor=white" alt="GDScript">
   <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-8f8c98?style=flat-square" alt="Platforms">
   <img src="https://img.shields.io/badge/status-early-e0a138?style=flat-square" alt="Status: early">
