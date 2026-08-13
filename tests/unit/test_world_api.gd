@@ -5632,3 +5632,96 @@ func test_the_page_is_fully_drawn_even_when_the_map_is_smaller_than_it() -> void
 
 	assert_eq(page.size(), 20 * 18)
 	assert_false(page.has(-1), "no tile of the page is left undrawn")
+
+
+## FruitTreeScript (engine/events/fruit_trees.asm) runs inline the way an item
+## ball's does: the tree's own line, then TryResetFruitTrees, CheckFruitTree and
+## the give. FRUITTREE_AZALEA_TOWN is row 20 and bears WHT_APRICORN.
+const FRUIT_TREE_AZALEA: int = 20
+const FRUIT_TREE_ITEM: int = 0x61
+
+
+func _write_fruit_tree_cache() -> void:
+	var rows: Array = []
+	for index: int in RomLayout.FRUIT_TREE_COUNT:
+		rows.append(FRUIT_TREE_ITEM if index == FRUIT_TREE_AZALEA - 1 else 0xAD)
+	RomCache.write_json(RomCache.world_fruit_trees_path(_directory), rows)
+	var items: Array = RomCache.read_json(RomCache.items_path(_directory))
+	while items.size() < FRUIT_TREE_ITEM:
+		items.append({"number": items.size() + 1, "name": "ITEM%d" % (items.size() + 1), "pocket": 1})
+	items[FRUIT_TREE_ITEM - 1] = {
+		"number": FRUIT_TREE_ITEM, "name": "WHT APRICORN", "pocket": 1,
+	}
+	RomCache.write_json(RomCache.items_path(_directory), items)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `fruittree` is $9a in pokegold's table and one byte higher in the raw
+	## Crystal stream; this fixture is a Crystal-profile cache.
+	scripts["48:6280"] = [
+		Gen2WorldScript.raw_opcode(0x9A), FRUIT_TREE_AZALEA, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+
+
+func _pick_fruit_tree(data: GameData, state: Gen2WorldState) -> Dictionary:
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6280,
+	})
+	var opened: Dictionary = runner.advance()
+	if StringName(opened.get("status", &"")) != &"waiting":
+		return opened
+	var second: Dictionary = runner.advance(true)
+	if StringName(second.get("status", &"")) != &"waiting":
+		return second
+	return runner.advance(true)
+
+
+func test_a_fruit_tree_gives_its_fruit_once_and_is_bare_until_the_day_turns() -> void:
+	_write_fruit_tree_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var all_trees: int = Gen2WorldState.engine_flag(Gen2WorldState.ENGINE_ALL_FRUIT_TREES)
+
+	var picked: Dictionary = _pick_fruit_tree(data, state)
+	assert_eq(picked["status"], &"complete", JSON.stringify(picked))
+	assert_eq(state.item_quantity(FRUIT_TREE_ITEM), 1)
+	assert_true(state.fruit_tree_picked(FRUIT_TREE_AZALEA))
+	## ResetFruitTrees sets ENGINE_ALL_FRUIT_TREES behind itself, so the refill
+	## happens on the first tree touched after the day turned and not again.
+	assert_true(state.is_engine_flag_active(all_trees))
+
+	var again: Dictionary = _pick_fruit_tree(data, state)
+	assert_eq(again["status"], &"complete", JSON.stringify(again))
+	assert_eq(state.item_quantity(FRUIT_TREE_ITEM), 1)
+
+	assert_true(state.reset_daily_flags())
+	assert_false(state.is_engine_flag_active(all_trees))
+	var tomorrow: Dictionary = _pick_fruit_tree(data, state)
+	assert_eq(tomorrow["status"], &"complete", JSON.stringify(tomorrow))
+	assert_eq(state.item_quantity(FRUIT_TREE_ITEM), 2)
+	assert_true(state.fruit_tree_picked(FRUIT_TREE_AZALEA))
+
+
+func test_a_full_stack_leaves_the_fruit_on_the_tree() -> void:
+	_write_fruit_tree_cache()
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new({}, {}, {FRUIT_TREE_ITEM: Gen2WorldPack.MAX_ITEM_STACK})
+
+	var refused: Dictionary = _pick_fruit_tree(data, state)
+	assert_eq(refused["status"], &"complete", JSON.stringify(refused))
+	assert_eq(state.item_quantity(FRUIT_TREE_ITEM), Gen2WorldPack.MAX_ITEM_STACK)
+	## The source sets the tree's flag only past `giveitem`, so a full pack
+	## leaves the fruit hanging.
+	assert_false(state.fruit_tree_picked(FRUIT_TREE_AZALEA))
+
+
+func test_the_picked_fruit_trees_survive_a_snapshot_round_trip() -> void:
+	var state := Gen2WorldState.new()
+	state.apply_changes({}, {}, {"fruit_trees": {FRUIT_TREE_AZALEA: true, 1: true}})
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(state.to_dict())
+	assert_true(restored.fruit_tree_picked(FRUIT_TREE_AZALEA))
+	assert_true(restored.fruit_tree_picked(1))
+	assert_false(restored.fruit_tree_picked(2))
+	## A tree id outside the source table is refused rather than stored.
+	var bad: Dictionary = state.apply_changes({}, {}, {"fruit_trees": {0: true}})
+	assert_false(bad["ok"])
+	assert_eq(bad["reason"], &"invalid_fruit_trees")

@@ -49,6 +49,7 @@ const WORLD_MENUS: String = "world_menus.json"
 const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
 const WORLD_AUDIO: String = "world_audio.json"
+const WORLD_FRUIT_TREES: String = "world_fruit_trees.json"
 const BATTLE_ANIMS: String = "battle_anims.json"
 const BATTLE_ANIM_GFX_DIR: String = "battle_anim_gfx"
 
@@ -63,7 +64,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 41
+const FORMAT_VERSION: int = 42
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -201,6 +202,10 @@ static func world_phone_path(directory: String) -> String:
 
 static func world_audio_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_AUDIO]
+
+
+static func world_fruit_trees_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_FRUIT_TREES]
 
 
 ## The battle animation scripts and the four tables their objects are built

@@ -1888,20 +1888,43 @@ func _hive_badge_path(
 		"run": after_well,
 	})
 
-	# The apricorn errand. Azalea Town's own fruit tree bears WHT_APRICORN
-	# (data/items/fruit_trees.asm), but `fruittree` reaches no host, so the walk
-	# puts the tree's fruit in the bag rather than picking it. See HANDOFF.
-	var picked: Dictionary = world.state.apply_changes({}, {}, {
-		"items": {APRICORN_WHT: 4},
+	var back_to_azalea: Dictionary = _warp_step(world, 8, 7)
+	if not bool(back_to_azalea.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house exit after the well failed"}
+	var _azalea_after_well: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+
+	# The apricorn errand, which is two maps. WhiteApricornTree stands on (8,2)
+	# in both pins and is the only source of the apricorn Kurt asks for, so the
+	# walk picks it rather than being handed one.
+	var tree: Dictionary = _talk_to(
+		world, Vector2i(8, 3), Gen2WorldSprite.FACING_UP, save, random, data
+	)
+	path.append({
+		"step": "azalea_white_apricorn_tree",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"apricorns": world.state.item_quantity(APRICORN_WHT),
+		"run": tree,
 	})
-	if not bool(picked.get("ok", false)):
-		return {"ok": false, "path": path, "reason": "apricorn grant failed"}
-	# Kurt1 is back at (3,2) with EVENT_CLEARED_SLOWPOKE_WELL set, and the warp
-	# already left the player on his cell. `.ClearedSlowpokeWell` hands over the
-	# LURE_BALL, then `.CheckApricorns` finds the white one and asks.
+	if not bool(tree.get("ok", false)) or world.state.item_quantity(APRICORN_WHT) != 1:
+		return {
+			"ok": false, "path": path,
+			"reason": "the white apricorn tree bore nothing: %s" % tree.get("reason", ""),
+		}
+
+	var back_to_kurt: Dictionary = _warp_step(world, 8, 4)
+	if not bool(back_to_kurt.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house re-entry failed"}
+	var _kurt_errand_entry: Dictionary = _drain_story(
+		world, world.dispatch_map_entry(), save, random, data
+	)
+	# Kurt1 is at (3,2) with EVENT_CLEARED_SLOWPOKE_WELL set. `.GotLureBall`
+	# falls through to `.CheckApricorns`, which finds the white one and asks.
 	var errand: Dictionary = _talk_to(
 		world, Vector2i(3, 3), Gen2WorldSprite.FACING_UP, save, random, data, [],
-		{"item": APRICORN_WHT, "quantity": 2}
+		{"item": APRICORN_WHT, "quantity": 1}
 	)
 	path.append({
 		"step": "kurts_apricorn_errand",
@@ -1920,13 +1943,13 @@ func _hive_badge_path(
 			"ok": false, "path": path,
 			"reason": "Kurt's apricorn errand failed: %s" % errand.get("reason", ""),
 		}
-	if world.state.kurt_apricorn_quantity() != 2 or world.state.item_quantity(APRICORN_WHT) != 2:
+	if world.state.kurt_apricorn_quantity() != 1 or world.state.item_quantity(APRICORN_WHT) != 0:
 		return {"ok": false, "path": path, "reason": "Kurt took the wrong apricorns"}
 
-	var back_to_azalea: Dictionary = _warp_step(world, 8, 7)
-	if not bool(back_to_azalea.get("ok", false)):
-		return {"ok": false, "path": path, "reason": "Kurt's house exit after the well failed"}
-	var _azalea_after_well: Dictionary = _drain_story(
+	var leaving_kurt_again: Dictionary = _warp_step(world, 8, 7)
+	if not bool(leaving_kurt_again.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "Kurt's house exit after the errand failed"}
+	var _azalea_after_errand: Dictionary = _drain_story(
 		world, world.dispatch_map_entry(), save, random, data
 	)
 	var gym_door: Dictionary = _warp_walk(world, Vector2i(10, 15), save, random, data)

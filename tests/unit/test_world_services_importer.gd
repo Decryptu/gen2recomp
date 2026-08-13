@@ -15,6 +15,7 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	_write_phone(data)
 	_write_audio(data)
 	_write_menu(data)
+	_write_fruit_trees(data)
 
 	var scripts: Dictionary = {
 		"5:7000": [
@@ -82,12 +83,70 @@ func test_mart_terminator_is_required() -> void:
 	var data := PackedByteArray()
 	data.resize(0x200000)
 	_write_marts(data)
+	_write_fruit_trees(data)
 	data[RomFile.linear(5, 0x7000) + 3] = 0x00
 	var result: Dictionary = Gen2WorldServicesImporter.read_services(
 		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
 	)
 	assert_false(result["ok"])
 	assert_true(String(result["message"]).contains("Mart 0"))
+
+
+## FruitTreeItems' own thirty rows, since the importer identifies the table by
+## the apricorn run and the four matching berries rather than by a header.
+func _write_fruit_trees(data: PackedByteArray) -> void:
+	var offset: int = int(_layout["fruit_trees"])
+	var rows: Array[int] = [
+		0xAD, 0xAD, 0xAD, 0xAD, 0x4A, 0x4A, 0x53, 0x53, 0x4E, 0x4E,
+		0x96, 0x96, 0x50, 0x50, 0x54, 0x4F,
+		0x55, 0x59, 0x63, 0x61, 0x65, 0x5D, 0x5C,
+		0xAD, 0x4A, 0x53, 0x4E, 0x50, 0x54, 0x4F,
+	]
+	for index: int in rows.size():
+		data[offset + index] = rows[index]
+
+
+func test_a_fruit_tree_table_without_its_apricorn_run_is_refused() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_marts(data)
+	_write_phone(data)
+	_write_audio(data)
+	_write_fruit_trees(data)
+	## A berry where the seventh apricorn belongs: in bounds, plausible, wrong.
+	data[int(_layout["fruit_trees"]) + 22] = 0xAD
+	var result: Dictionary = Gen2WorldServicesImporter.read_fruit_trees(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_false(result["ok"])
+	assert_true(String(result["message"]).contains("apricorns"), String(result["message"]))
+
+
+func test_a_fruit_tree_table_whose_first_berries_disagree_is_refused() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_fruit_trees(data)
+	data[int(_layout["fruit_trees"]) + 3] = 0x4A
+	var result: Dictionary = Gen2WorldServicesImporter.read_fruit_trees(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_false(result["ok"])
+	assert_true(String(result["message"]).contains("one berry"), String(result["message"]))
+
+
+func test_the_fruit_tree_table_reads_thirty_rows_in_source_order() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_fruit_trees(data)
+	var result: Dictionary = Gen2WorldServicesImporter.read_fruit_trees(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_true(result["ok"], String(result.get("message", "")))
+	var items: Array = result["items"]
+	assert_eq(items.size(), RomLayout.FRUIT_TREE_COUNT)
+	## FRUITTREE_AZALEA_TOWN is row 20 and bears the apricorn Kurt asks for.
+	assert_eq(int(items[19]), 0x61)
+	assert_eq(int(items[0]), 0xAD)
 
 
 func _write_marts(data: PackedByteArray) -> void:

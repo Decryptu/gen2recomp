@@ -42,6 +42,10 @@ static func import_to_cache(
 		return _error("Could not write world mart data.")
 	if not RomCache.write_json(RomCache.world_phone_path(directory), result["phone"]):
 		return _error("Could not write world phone data.")
+	if not RomCache.write_json(
+		RomCache.world_fruit_trees_path(directory), result["fruit_trees"]
+	):
+		return _error("Could not write world fruit tree data.")
 	if not RomCache.write_section(
 		RomCache.world_audio_path(directory),
 		RomCache.blob_path(RomCache.world_audio_path(directory)),
@@ -75,6 +79,7 @@ static func import_to_cache(
 		"sfx": (result["audio"].get("sfx", []) as Array).size(),
 		"cries": (result["audio"].get("cries", []) as Array).size(),
 		"mon_cries": (result["audio"].get("mon_cries", []) as Array).size(),
+		"fruit_trees": (result["fruit_trees"] as Array).size(),
 	}
 
 
@@ -95,6 +100,9 @@ static func read_services(
 	var audio: Dictionary = _read_audio(rom, layout)
 	if not bool(audio.get("ok", false)):
 		return audio
+	var fruit_trees: Dictionary = read_fruit_trees(rom, layout)
+	if not bool(fruit_trees.get("ok", false)):
+		return fruit_trees
 	var menus: Dictionary = _read_menus(rom, scripts, standard_scripts)
 	if not bool(menus.get("ok", false)):
 		return menus
@@ -107,6 +115,7 @@ static func read_services(
 		"marts": marts["data"],
 		"phone": phone["data"],
 		"audio": audio["data"],
+		"fruit_trees": fruit_trees["items"],
 		"phone_scripts": phone_scripts,
 	}
 
@@ -163,6 +172,40 @@ static func _read_marts(rom: RomFile, layout: Dictionary) -> Dictionary:
 			"special": special,
 		},
 	}
+
+
+## `FruitTreeItems` (`data/items/fruit_trees.asm`): thirty item bytes, one per
+## `FRUITTREE_*` constant, read by `GetFruitTreeItem` at the tree id less one.
+## No terminator and no pointer, so the count is the whole of its shape and the
+## table has to identify itself by content instead.
+static func read_fruit_trees(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout.get("fruit_trees", 0))
+	if offset <= 0 or not rom.in_bounds(offset, RomLayout.FRUIT_TREE_COUNT):
+		return _error("Fruit tree item table is outside the cartridge.")
+	var items: Array = []
+	for index: int in RomLayout.FRUIT_TREE_COUNT:
+		var item: int = rom.u8(offset + index)
+		if item <= 0 or item == RomLayout.MART_TERMINATOR:
+			return _error("Fruit tree %d holds invalid item %d." % [index + 1, item])
+		items.append(item)
+	## Rows 17 to 23 are the seven apricorns and are the only apricorns in the
+	## table, and the four Johto berry trees ahead of them all bear the same
+	## fruit. Either alone could match neighbouring data; together they do not.
+	var apricorns: Array = items.slice(
+		RomLayout.FRUIT_TREE_FIRST_APRICORN, RomLayout.FRUIT_TREE_FIRST_APRICORN + 7
+	)
+	apricorns.sort()
+	if apricorns != RomLayout.FRUIT_TREE_APRICORNS:
+		return _error("Fruit tree rows 17 to 23 are not the seven apricorns.")
+	for index: int in RomLayout.FRUIT_TREE_COUNT:
+		var is_apricorn: bool = RomLayout.FRUIT_TREE_APRICORNS.has(int(items[index]))
+		var in_run: bool = index >= RomLayout.FRUIT_TREE_FIRST_APRICORN \
+			and index < RomLayout.FRUIT_TREE_FIRST_APRICORN + 7
+		if is_apricorn != in_run:
+			return _error("Fruit tree %d breaks the apricorn run." % (index + 1))
+	if items.slice(0, 4).any(func(item: Variant) -> bool: return int(item) != int(items[0])):
+		return _error("The first four fruit trees do not share one berry.")
+	return {"ok": true, "items": items}
 
 
 static func _read_mart_list(rom: RomFile, bank: int, address: int, _priced: bool) -> Dictionary:

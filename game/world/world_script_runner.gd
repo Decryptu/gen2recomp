@@ -33,6 +33,7 @@ var _has_staged_special_phone_call: bool = false
 var _staged_special_phone_call: int = 0
 var _has_staged_kurt_apricorn_quantity: bool = false
 var _staged_kurt_apricorn_quantity: int = 0
+var _staged_fruit_trees: Dictionary = {}
 var _reset_phone_receive_timer: bool = false
 var _events: Array = []
 var _pending: Dictionary = {}
@@ -176,7 +177,17 @@ const FIELD_MOVE_PROMPT_FRAME: int = RomFile.BANK_SIZE
 ## data/text/common_2.asm's _FoundItemText, less its <PLAYER>; see
 ## _stage_item_ball(). The source line break sits before the item name.
 const FOUND_ITEM_TEXT: String = "Found\n%s!"
-const NO_SPACE_ITEM_TEXT: String = "Found\n%s!\n\nBut you have\nno space left."
+## Two source boxes, so four lines and no blank between them: the box is two
+## rows, and a blank line would spend a third page drawing nothing.
+const NO_SPACE_ITEM_TEXT: String = "Found\n%s!\nBut you have\nno space left."
+## data/text/common_1.asm's four fruit tree texts, paired the same way.
+## `_HeyItsFruitText` and `_ObtainedFruitText` are one staged text because the
+## source's `giveitem` sits between them and has nothing to show; they still
+## paginate into the two boxes the cartridge draws.
+const FRUIT_TREE_TEXT: String = "It's a fruit-\nbearing tree."
+const FRUIT_TREE_EMPTY_TEXT: String = "There's nothing\nhere…"
+const FRUIT_TREE_OBTAINED_TEXT: String = "Hey! It's\n%s!\nObtained\n%s!"
+const FRUIT_TREE_FULL_TEXT: String = "Hey! It's\n%s!\nBut the PACK is\nfull…"
 ## The `disappear LAST_TALKED` operand (constants/map_object_constants.asm).
 const LAST_TALKED: int = 0xFE
 ## wBattleResult, which startbattle copies into wScriptVar
@@ -366,6 +377,16 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			if choice != 0:
 				return _complete()
 			_stage_strength_used(chosen_slot)
+			return _waiting_result()
+		## FruitTreeScript's promptbutton, behind which its two callasms sit.
+		if pending_type == &"text" and _pending.get("special", &"") == &"fruit_tree":
+			var fruit_tree: int = int(_pending.get("tree_id", 0))
+			var fruit_item: int = int(_pending.get("item", 0))
+			_pending = {}
+			_finish_after_pending = false
+			var picked: Dictionary = _resolve_fruit_tree(fruit_tree, fruit_item)
+			if not bool(picked.get("ok", false)):
+				return _fail(StringName(picked.get("reason", &"fruit_tree_failed")), picked)
 			return _waiting_result()
 		## Script_UsedStrength's second writetext, _MoveBoulderText.
 		if pending_type == &"text" and _pending.get("special", &"") == &"strength_used":
@@ -1480,9 +1501,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 		0x99:
 			return _stage_decoration_description(int(command.get("value", 0)))
 		0x9A:
-			return _stage_runtime_request(&"fruit_tree_requested", {
-				"tree_id": int(command.get("value", 0)),
-			})
+			return _stage_fruit_tree(int(command.get("value", 0)))
 		0x9B:
 			## The cartridge uses specialphonecall to store the pending special
 			## call. Imported phone scripts also use SPECIALCALL_NONE to clear it.
@@ -2538,6 +2557,67 @@ func _stage_item_ball() -> Dictionary:
 	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, true)
 
 
+## `FruitTreeScript` (`engine/events/fruit_trees.asm`). Like an item ball it is
+## a script rather than a host request: `fruittree` is the whole of the object's
+## own script, and the routine below it is text, a flag and a `giveitem`.
+##
+## The first pause is `FruitBearingTreeText`; `TryResetFruitTrees` and
+## `CheckFruitTree` run on its acknowledge, since the source's own `callasm`s sit
+## behind the `promptbutton`.
+func _stage_fruit_tree(tree_id: int) -> Dictionary:
+	if data == null:
+		return _fail(&"missing_world_data", {"tree_id": tree_id})
+	var item: int = data.world_fruit_tree_item(tree_id)
+	if item <= 0:
+		return _fail(&"invalid_fruit_tree", {"tree_id": tree_id, "item": item})
+	_pending = {
+		"type": &"text",
+		"text": FRUIT_TREE_TEXT,
+		"internal_text": true,
+		"special": &"fruit_tree",
+		"tree_id": tree_id,
+		"item": item,
+		"source": _request.duplicate(true),
+	}
+	return {"ok": true}
+
+
+## The second half, run once the tree's own line has been acknowledged.
+func _resolve_fruit_tree(tree_id: int, item: int) -> Dictionary:
+	_stage_fruit_tree_reset()
+	if _fruit_tree_picked(tree_id):
+		return _stage_internal_text(FRUIT_TREE_EMPTY_TEXT, true)
+	var item_name: String = data.item_name(item)
+	if item_name.is_empty():
+		item_name = "FRUIT"
+	var received: Dictionary = _stage_item_delta(item, 1)
+	if not bool(received.get("accepted", true)):
+		return _stage_internal_text(FRUIT_TREE_FULL_TEXT % item_name, true)
+	## PickedFruitTree, which the source runs after the item is in the bag.
+	_staged_fruit_trees[tree_id] = true
+	return _stage_internal_text(FRUIT_TREE_OBTAINED_TEXT % [item_name, item_name], true)
+
+
+## `TryResetFruitTrees`: `ResetFruitTrees` refills every tree at once and sets
+## ENGINE_ALL_FRUIT_TREES behind itself, so it runs once per day, on whichever
+## tree the player touches first after the daily reset cleared that flag.
+func _stage_fruit_tree_reset() -> void:
+	var all_trees: int = Gen2WorldState.engine_flag(
+		Gen2WorldState.ENGINE_ALL_FRUIT_TREES, _crystal_commands()
+	)
+	if bool(_staged_engine_flags.get(all_trees, state.is_engine_flag_active(all_trees))):
+		return
+	for raw_tree: Variant in state.picked_fruit_trees():
+		_staged_fruit_trees[int(raw_tree)] = false
+	_staged_engine_flags[all_trees] = true
+
+
+func _fruit_tree_picked(tree_id: int) -> bool:
+	if _staged_fruit_trees.has(tree_id):
+		return bool(_staged_fruit_trees[tree_id])
+	return state.fruit_tree_picked(tree_id)
+
+
 ## HiddenItemScript, the BGEVENT_ITEM half of the same source area. The pointer
 ## is the `hiddenitem` macro's `dwb event, item`, which `.itemifset` copies into
 ## wHiddenItemData, so Gen2WorldAPI hands the decoded flag and item over the way
@@ -3067,6 +3147,8 @@ func _complete() -> Dictionary:
 		runtime_changes["pending_special_phone_call"] = _staged_special_phone_call
 	if _has_staged_kurt_apricorn_quantity:
 		runtime_changes["kurt_apricorn_quantity"] = _staged_kurt_apricorn_quantity
+	if not _staged_fruit_trees.is_empty():
+		runtime_changes["fruit_trees"] = _staged_fruit_trees.duplicate()
 	if not _staged_engine_flags.is_empty():
 		runtime_changes["engine_flags"] = _staged_engine_flags.duplicate()
 	if _reset_phone_receive_timer:

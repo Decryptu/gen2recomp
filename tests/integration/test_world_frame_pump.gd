@@ -110,9 +110,15 @@ func test_the_same_seed_and_frame_count_reach_the_same_world_at_any_frame_rate()
 		var screen: Gen2WorldScreen = await _open_world()
 		var delta: float = 1.0 / host_fps
 		var guard: int = 0
-		while screen._world.frame_number < 120 and guard < 4096:
+		## Pumped to just short of the frame and topped up exactly, the way
+		## tools/replay_world.gd does it, because a host frame spends two or more
+		## hardware frames at once and cannot be asked to land on a given one. A
+		## loop running to 120 lands on 121 whenever an earlier call spent an odd
+		## number, which is what made this assertion flake under load.
+		while screen._world.frame_number < 120 - 1 and guard < 4096:
 			screen._process(delta)
 			guard += 1
+		screen.advance_frames(maxi(0, 120 - screen._world.frame_number))
 		assert_eq(screen._world.frame_number, 120, "%d fps reached the frame" % host_fps)
 		snapshots.append(JSON.stringify(screen._world.snapshot().to_dict()))
 		screen.free()
