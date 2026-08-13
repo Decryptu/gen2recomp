@@ -157,11 +157,11 @@ static func damage_stats(
 ) -> Array:
 	if attacker == null or defender == null:
 		return [1, 1]
-	return truncate_stats(
+	return metal_powder_pair(defender, truncate_stats(
 		_attack_stat(attacker, defender, move_type, critical),
 		_defense_stat(attacker, defender, move_type, critical, defender_screens),
 		Gen2WorldState.is_crystal_profile(attacker.data)
-	)
+	))
 
 
 ## `BattleCommand_DamageCalc`: Selfdestruct's halved defense, the formula, the
@@ -543,9 +543,9 @@ static func _attack_stat(
 	return out
 
 
-## The defending stat, doubled by the defender's own screen and half again if
-## `DittoMetalPowder` answers: the Pokémon being hit is a Ditto holding Metal
-## Powder.
+## The defending stat, doubled by the defender's own screen. Metal Powder is not
+## here: `DittoMetalPowder` runs past `TruncateHL_BC`, on the byte, which is
+## [method metal_powder_pair].
 ##
 ## The screen is applied to the boosted stat and only there. `PlayerAttackDamage`
 ## doubles the pair before `CheckDamageStatsCritical`, and a critical that
@@ -561,9 +561,31 @@ static func _defense_stat(
 	var out: int = defender.unmodified_stat(key) if ignores else defender.stat(key)
 	if not ignores and Gen2Screens.doubles_defence(defender_screens, move_type):
 		out *= Gen2Screens.DEFENCE_MULTIPLIER
-	if Gen2HeldItem.boosts_defence(defender.species, defender.item):
-		out = Gen2HeldItem.metal_powder_defence(out)
 	return out
+
+
+## `DittoMetalPowder`, which `BattleCommand_DamageStats` calls at `.done`, after
+## `TruncateHL_BC`: the half again lands on the byte-sized defence rather than on
+## the stat it was truncated from, so a defence a screen or a stage has pushed
+## past a byte is boosted from what the shift left of it.
+##
+## Its own overflow is reproduced, not corrected. `srl a / add c` carries for a
+## byte over 170, and the recovery halves the *attack* and shifts the carry back
+## into the defence, which is `docs/bugs_and_glitches.md`'s "Metal Powder can
+## increase damage taken with boosted (Special) Defense": the attacker loses a
+## bit of attack, and the defence lands at half the boosted value rather than
+## above it.
+static func metal_powder_pair(defender: Gen2BattleMon, pair: Array) -> Array:
+	if defender == null or not Gen2HeldItem.boosts_defence(defender.species, defender.item):
+		return pair
+	var attack: int = int(pair[0])
+	var boosted: int = Gen2HeldItem.metal_powder_defence(int(pair[1]))
+	if boosted <= STAT_BYTE_MAX:
+		return [attack, boosted]
+	# `srl b`, floored at one the way the routine's own `inc b` floors it.
+	attack = maxi(attack >> 1, 1)
+	# `scf / rr c`: the carry comes back as the high bit of what is left.
+	return [attack, ((boosted & STAT_BYTE_MAX) >> 1) | ((STAT_BYTE_MAX + 1) >> 1)]
 
 
 ## A critical hit ignores both sides' stages, but only when they are working

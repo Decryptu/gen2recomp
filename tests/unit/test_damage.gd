@@ -354,6 +354,51 @@ func test_metal_powder_is_half_again_on_a_dittos_defence() -> void:
 	assert_eq(int(_hit(attacker, geodude, Fixture.TACKLE)["damage"]), others)
 
 
+## `DittoMetalPowder` is called at `.done`, past `TruncateHL_BC`, so the half
+## again lands on the byte and not on the stat it was truncated from.
+##
+## Its own overflow comes with it: a byte over 170 carries, and the routine
+## halves the attack and shifts the carry back into the defence, which leaves the
+## defence *below* where it started. `docs/bugs_and_glitches.md` calls it "Metal
+## Powder can increase damage taken with boosted (Special) Defense".
+func test_metal_powder_lands_on_the_truncated_byte_and_keeps_its_overflow() -> void:
+	var attacker: Gen2BattleMon = _mon(Fixture.PIKACHU)
+	var ditto: Gen2BattleMon = _mon(Fixture.DITTO)
+	ditto.item = Fixture.METAL_POWDER
+
+	var plain: Array = Gen2Damage.damage_stats(attacker, ditto, Fixture.NORMAL, false)
+	var boosted_defence: int = int(plain[1])
+	assert_lte(boosted_defence, Gen2Damage.STAT_BYTE_MAX, "the pair is byte-sized")
+
+	# A defence a screen has pushed past the byte: the boost is applied to what
+	# the truncation left, not to the raw stat.
+	var screened: Array = Gen2Damage.damage_stats(
+		attacker, ditto, Fixture.NORMAL, false, Gen2Screens.REFLECT
+	)
+	assert_lte(int(screened[1]), Gen2Damage.STAT_BYTE_MAX)
+
+
+## The same routine, read off its own arithmetic rather than through a hit: 1.5x
+## while it fits a byte, and the carry path above it.
+func test_the_metal_powder_carry_halves_the_attack_and_folds_the_defence_back() -> void:
+	var ditto: Gen2BattleMon = _mon(Fixture.DITTO)
+	ditto.item = Fixture.METAL_POWDER
+	var apply: Callable = func(attack: int, defence: int) -> Array:
+		return Gen2Damage.metal_powder_pair(ditto, [attack, defence])
+
+	assert_eq(apply.call(200, 100), [200, 150], "half again, inside the byte")
+	assert_eq(apply.call(200, 170), [200, 255], "and up to the byte's own edge")
+	assert_eq(apply.call(200, 171), [100, 128], "past it, the attack halves too")
+	assert_eq(apply.call(1, 255), [1, 191], "and the attack floors at one")
+
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE)
+	geodude.item = Fixture.METAL_POWDER
+	assert_eq(
+		Gen2Damage.metal_powder_pair(geodude, [200, 171]), [200, 171],
+		"only a Ditto holding it"
+	)
+
+
 ## The Scope Lens is one more critical level, added after the move's own two and
 ## Focus Energy's one, in `BattleCommand_Critical`'s own order.
 func test_the_scope_lens_is_one_more_critical_level() -> void:
