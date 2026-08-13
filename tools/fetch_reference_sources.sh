@@ -64,11 +64,9 @@ sync_source() {
     printf '%s %s\n' "$name" "$local_revision"
 }
 
-sync_source \
-    pokecrystal \
-    "$(lock_value pokecrystal_repo)" \
-    "$(lock_value pokecrystal_ref)"
-sync_source \
-    pokegold \
-    "$(lock_value pokegold_repo)" \
-    "$(lock_value pokegold_ref)"
+for source_name in $(lock_value sources); do
+    sync_source \
+        "$source_name" \
+        "$(lock_value "${source_name}_repo")" \
+        "$(lock_value "${source_name}_ref")"
+done

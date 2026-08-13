@@ -1,19 +1,22 @@
 # External source references
 
 This project uses the pret disassemblies as authoritative references when
-matching original game behavior. They are comparison sources, not project
-content. Do not copy ROMs, extracted cartridge data, or a complete external
+matching original game behavior. Ports and other recompilations are secondary:
+read them for approach, settle behavior against pret. All of them are
+comparison sources, not project content. Do not copy ROMs, extracted cartridge data, or a complete external
 checkout into the project history.
 
 ## Pinned repositories
 
 The exact revisions used by the local workflow are recorded in
-[`references.lock`](../references.lock).
+[`references.lock`](../references.lock); its `sources` line lists which
+checkouts the fetch and status scripts manage.
 
 | Game | Repository | Pinned revision | Useful areas |
 | --- | --- | --- | --- |
-| Crystal | [pret/pokecrystal](https://github.com/pret/pokecrystal) | `5593381195342e481b69a2fd4ab25e202ddcf708` | Maps, scripts, events, data, battle behavior |
-| Gold and Silver | [pret/pokegold](https://github.com/pret/pokegold) | `add1dbe018170d7f25f7b7360e8046cec6354906` | Maps, scripts, events, data, battle behavior |
+| Crystal | [pret/pokecrystal](https://github.com/pret/pokecrystal) | `8e8f7e20052a596371a77022f0392c285e51bbf1` | Maps, scripts, events, data, battle behavior |
+| Gold and Silver | [pret/pokegold](https://github.com/pret/pokegold) | `a0dad0957ac8a9ffa67e950ee3ab6715a212ded5` | Maps, scripts, events, data, battle behavior |
+| Crystal, C port | [DanZC/suiCune](https://github.com/DanZC/suiCune) | `201d70028249b3297c441be195489e579bbf231a` | Secondary reference only: a C99 rewrite of pokecrystal, useful for how a routine reads once the GameBoy hardware assumptions are removed. Behavior is settled against pret, never against this port. |
 
 The lock file is the machine-readable source of truth; revisions are pinned so
 source comparisons stay reproducible. The branch name recorded there is the
