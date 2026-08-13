@@ -1,8 +1,13 @@
 # Authoritative source repositories used for source comparison.
 # Keep exact commits here so local checkouts are reproducible.
+# `sources` drives tools/fetch_reference_sources.sh and tools/reference_status.sh.
+sources=pokecrystal pokegold suicune
 pokecrystal_repo=https://github.com/pret/pokecrystal.git
 pokecrystal_branch=master
-pokecrystal_ref=5593381195342e481b69a2fd4ab25e202ddcf708
+pokecrystal_ref=8e8f7e20052a596371a77022f0392c285e51bbf1
 pokegold_repo=https://github.com/pret/pokegold.git
 pokegold_branch=master
-pokegold_ref=add1dbe018170d7f25f7b7360e8046cec6354906
+pokegold_ref=a0dad0957ac8a9ffa67e950ee3ab6715a212ded5
+suicune_repo=https://github.com/DanZC/suiCune.git
+suicune_branch=main
+suicune_ref=201d70028249b3297c441be195489e579bbf231a

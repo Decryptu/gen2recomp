@@ -3,7 +3,7 @@ extends GutTest
 ## Gen2WorldCollision's ledge and tile-collision-std-script lookups against
 ## engine/overworld/player_movement.asm's .TryJump and
 ## engine/events/std_collision.asm's CheckFacingTileForStdScript, both from
-## pokecrystal revision 5593381195342e481b69a2fd4ab25e202ddcf708.
+## pokecrystal revision 8e8f7e20052a596371a77022f0392c285e51bbf1.
 
 
 func test_allows_hop_matches_the_ledge_table_for_every_hop_code() -> void:
@@ -57,8 +57,8 @@ func test_hop_codes_remain_land_permission() -> void:
 
 func test_tile_collision_std_index_matches_both_pinned_repositories() -> void:
 	# Recounted directly from engine/events/std_scripts.asm in both pinned
-	# revisions (pokecrystal 5593381195342e481b69a2fd4ab25e202ddcf708,
-	# pokegold add1dbe018170d7f25f7b7360e8046cec6354906): every entry but
+	# revisions (pokecrystal 8e8f7e20052a596371a77022f0392c285e51bbf1,
+	# pokegold a0dad0957ac8a9ffa67e950ee3ab6715a212ded5): every entry but
 	# PCScript lands on the same 0-based index in both games.
 	var expected_both: Dictionary = {
 		Gen2WorldCollision.COLL_BOOKSHELF: 3,

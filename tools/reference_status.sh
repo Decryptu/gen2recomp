@@ -71,13 +71,10 @@ if [[ ! -f "$LOCK_FILE" ]]; then
 fi
 
 printf 'Reference root: %s\n' "$REFERENCE_ROOT"
-print_status \
-    pokecrystal \
-    "$(lock_value pokecrystal_repo)" \
-    "$(lock_value pokecrystal_ref)" \
-    "$(lock_value pokecrystal_branch)"
-print_status \
-    pokegold \
-    "$(lock_value pokegold_repo)" \
-    "$(lock_value pokegold_ref)" \
-    "$(lock_value pokegold_branch)"
+for source_name in $(lock_value sources); do
+    print_status \
+        "$source_name" \
+        "$(lock_value "${source_name}_repo")" \
+        "$(lock_value "${source_name}_ref")" \
+        "$(lock_value "${source_name}_branch")"
+done
