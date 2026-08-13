@@ -292,6 +292,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not copyright["ok"]:
 		return copyright
 
+	var presents: Dictionary = verify_game_freak_presents(rom, layout)
+	if not presents["ok"]:
+		return presents
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -358,6 +362,251 @@ static func verify_copyright(rom: RomFile, layout: Dictionary) -> Dictionary:
 			],
 		}
 	return {"ok": true, "message": "Copyright screen verified."}
+
+
+## `gfx/splash/ditto.pal`, the palette `_CGB_GamefreakLogo` gives both object
+## palettes. Colour 2 is the pink `GameFreakDittoPaletteFade` moves to orange, so
+## the fade's first entry has to be this one.
+const PRESENTS_DITTO_COLORS: Array[int] = [0x7FFF, 0x016D, 0x7197, 0x0000]
+## `gfx/sgb/predef.pal`'s PREDEFPAL_GAMEFREAK_LOGO_OB: white, white and twice the
+## yellow `GameFreakPresents_UpdateLogoPal` rotates the logo into.
+const PRESENTS_OBJECT_COLORS: Array[int] = [0x7FFF, 0x7FFF, 0x03D9, 0x03D9]
+## The eleven `SPRITE_ANIM_OAMSET_GAMEFREAK_LOGO_*` base tiles
+## (`data/sprite_anims/oam.asm`), which is what says a 4096-byte graphic is the
+## Ditto animation rather than another sheet of the same size.
+const PRESENTS_DITTO_OAM_BASES: Array[int] = [
+	0xD0, 0xD3, 0xD6, 0x6C, 0x68, 0x64, 0x60, 0x0C, 0x08, 0x04, 0x00,
+]
+
+
+## `GameFreakPresents`' art, identified by content rather than by bounds.
+##
+## The 1bpp run is two graphics, so it is checked as two: every tile of the
+## thirteen-tile word strip carries ink, the six that spell "PRESENTS" are clear
+## across their top rows because that word sits a row lower than the one above
+## it, and the fourteenth tile - the logo's own top-left corner - is blank,
+## which is why `GameFreakPresents_PlaceGameFreak` can use it as the space in
+## "GAME FREAK". A neighbouring 1bpp run would have to be blank in exactly that
+## tile and inked in exactly the other twelve.
+static func verify_game_freak_presents(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("game_freak_presents", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No GameFreak Presents art on this cartridge."}
+	var gfx: int = int(entry.get("gfx", -1))
+	var bytes: int = RomLayout.PRESENTS_GFX_TILES * Gen2Tiles.TILE_1BPP_BYTES
+	if not rom.in_bounds(gfx, bytes):
+		return {"ok": false, "message": "The GameFreak logo graphic is outside the cartridge."}
+	# "GAME FREAK" is capitals on the top seven rows of its tiles, which is what
+	# pins the run to a byte rather than to a tile.
+	if rom.u8(gfx) == 0 or rom.u8(gfx + Gen2Tiles.TILE_1BPP_BYTES - 1) != 0:
+		return {"ok": false, "message": "The GameFreak word strip does not start on a tile."}
+	for tile: int in RomLayout.PRESENTS_WORD_TILES:
+		if not _tile_1bpp_has_ink(rom, gfx, tile):
+			return {
+				"ok": false,
+				"message": "GameFreak word tile %d is blank." % tile,
+			}
+	for index: int in RomLayout.PRESENTS_SECOND_WORD_TILES:
+		var tile: int = RomLayout.PRESENTS_SECOND_WORD_FIRST + index
+		for row: int in RomLayout.PRESENTS_SECOND_WORD_CLEAR_ROWS:
+			if rom.u8(gfx + tile * Gen2Tiles.TILE_1BPP_BYTES + row) != 0:
+				return {
+					"ok": false,
+					"message": "\"PRESENTS\" tile %d has ink on row %d." % [tile, row],
+				}
+	if _tile_1bpp_has_ink(rom, gfx, RomLayout.PRESENTS_WORD_TILES):
+		return {"ok": false, "message": "The GameFreak logo's first tile is not blank."}
+	var logo_ink: bool = false
+	for index: int in RomLayout.PRESENTS_LOGO_TILES:
+		if _tile_1bpp_has_ink(rom, gfx, RomLayout.PRESENTS_WORD_TILES + index):
+			logo_ink = true
+			break
+	if not logo_ink:
+		return {"ok": false, "message": "The GameFreak logo graphic is blank."}
+
+	var palette: Dictionary = _verify_presents_palettes(rom, entry)
+	if not palette["ok"]:
+		return palette
+	return _verify_presents_sprites(rom, entry)
+
+
+## The star and sparkle strip on Gold and Silver, the Ditto sheet on Crystal.
+## Neither profile carries the other's, and a -1 says so.
+static func _verify_presents_sprites(rom: RomFile, entry: Dictionary) -> Dictionary:
+	var stars: int = int(entry.get("stars", -1))
+	if stars >= 0:
+		if not rom.in_bounds(stars, RomLayout.PRESENTS_STARS_TILES * Gen2Tiles.TILE_BYTES):
+			return {"ok": false, "message": "The splash star graphic is outside the cartridge."}
+		# splash.asm INCBINs the stars directly behind the logo, so the two pin
+		# each other.
+		var after: int = int(entry.get("gfx", -1)) \
+			+ RomLayout.PRESENTS_GFX_TILES * Gen2Tiles.TILE_1BPP_BYTES
+		if stars != after:
+			return {
+				"ok": false,
+				"message": "The splash stars are not behind the logo graphic.",
+			}
+		for index: int in RomLayout.PRESENTS_STAR_TILES:
+			if _tile_2bpp_lit(rom, stars, index) == 0:
+				return {"ok": false, "message": "Splash star tile %d is blank." % index}
+		# `.Frameset_GSGameFreakLogoSparkle` runs its three tiles as one spark
+		# closing in on its own centre, so tile n is blank across its outer n rows
+		# top and bottom and lit on the two just inside them, and each carries
+		# fewer lit pixels than the one before.
+		var last_lit: int = Gen2Tiles.TILE_PIXELS + 1
+		for index: int in RomLayout.PRESENTS_SPARKLE_TILES:
+			var tile: int = RomLayout.PRESENTS_STAR_TILES + index
+			for row: int in Gen2Tiles.TILE_HEIGHT:
+				var edge: bool = row < index or row >= Gen2Tiles.TILE_HEIGHT - index
+				var rim: bool = row == index or row == Gen2Tiles.TILE_HEIGHT - 1 - index
+				var lit_row: bool = _row_2bpp_lit(rom, stars, tile, row)
+				if edge == lit_row or (rim and not lit_row):
+					return {
+						"ok": false,
+						"message": "Sparkle tile %d row %d does not close in." % [
+							index, row,
+						],
+					}
+			var lit: int = _tile_2bpp_lit(rom, stars, tile)
+			if lit >= last_lit:
+				return {
+					"ok": false,
+					"message": "Sparkle tile %d is not smaller than the one before." % index,
+				}
+			last_lit = lit
+		return {"ok": true, "message": "GameFreak Presents verified."}
+
+	var ditto: int = int(entry.get("ditto", -1))
+	if ditto < 0:
+		return {"ok": false, "message": "This cartridge has neither a splash star nor a Ditto."}
+	var sheet: PackedByteArray = Gen2Lz.new().decompress(rom.bytes(), ditto)
+	var wanted: int = RomLayout.PRESENTS_DITTO_TILES * Gen2Tiles.TILE_BYTES
+	if sheet.size() != wanted:
+		return {
+			"ok": false,
+			"message": "The Ditto graphic decompressed to %d bytes, wanted %d." % [
+				sheet.size(), wanted,
+			],
+		}
+	# Every `SPRITE_ANIM_OAMSET_GAMEFREAK_LOGO_*` base has to land on a drawn
+	# part of the sheet, and the sheet's own first tile is the blank corner
+	# above the Ditto.
+	if _sheet_tile_lit(sheet, 0) != 0:
+		return {"ok": false, "message": "The Ditto sheet's first tile is not blank."}
+	for base: int in PRESENTS_DITTO_OAM_BASES:
+		var ink: bool = false
+		for row: int in 6:
+			for column: int in 4:
+				var tile: int = (base + row * RomLayout.PRESENTS_DITTO_COLUMNS + column) & 0xFF
+				if _sheet_tile_lit(sheet, tile) > 0:
+					ink = true
+					break
+			if ink:
+				break
+		if not ink:
+			return {
+				"ok": false,
+				"message": "The Ditto sheet is blank at OAM base $%02X." % base,
+			}
+	return {"ok": true, "message": "GameFreak Presents verified."}
+
+
+## The object palette both profiles share, and Crystal's two Ditto palettes. The
+## fade opens on the colour the Ditto is already wearing, which is what ties the
+## two together rather than checking each alone.
+static func _verify_presents_palettes(rom: RomFile, entry: Dictionary) -> Dictionary:
+	var object_palette: int = int(entry.get("object_palette", -1))
+	var size: int = Gen2Palette.COLOR_BYTES
+	if not rom.in_bounds(object_palette, PRESENTS_OBJECT_COLORS.size() * size):
+		return {"ok": false, "message": "The splash object palette is outside the cartridge."}
+	for index: int in PRESENTS_OBJECT_COLORS.size():
+		var stored: int = rom.u16le(object_palette + index * size)
+		if stored != PRESENTS_OBJECT_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Splash object colour %d is $%04X, expected $%04X." % [
+					index, stored, PRESENTS_OBJECT_COLORS[index],
+				],
+			}
+	var ditto_palette: int = int(entry.get("ditto_palette", -1))
+	if ditto_palette < 0:
+		return {"ok": true, "message": "Splash palettes verified."}
+	if not rom.in_bounds(ditto_palette, PRESENTS_DITTO_COLORS.size() * size):
+		return {"ok": false, "message": "The Ditto palette is outside the cartridge."}
+	for index: int in PRESENTS_DITTO_COLORS.size():
+		var stored: int = rom.u16le(ditto_palette + index * size)
+		if stored != PRESENTS_DITTO_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Ditto colour %d is $%04X, expected $%04X." % [
+					index, stored, PRESENTS_DITTO_COLORS[index],
+				],
+			}
+	var fade: int = int(entry.get("ditto_fade", -1))
+	if not rom.in_bounds(fade, RomLayout.PRESENTS_DITTO_FADE_COLORS * size):
+		return {"ok": false, "message": "The Ditto fade palette is outside the cartridge."}
+	# splash.asm INCLUDEs the fade directly in front of `GameFreakLogoGFX`, so
+	# the two pin each other.
+	if fade + RomLayout.PRESENTS_DITTO_FADE_COLORS * size != int(entry.get("gfx", -1)):
+		return {
+			"ok": false,
+			"message": "The Ditto fade is not in front of the logo graphic.",
+		}
+	if rom.u16le(fade) != PRESENTS_DITTO_COLORS[RomLayout.PRESENTS_DITTO_FADE_COLOR]:
+		return {
+			"ok": false,
+			"message": "The Ditto fade does not open on the Ditto's own colour.",
+		}
+	# Pink to orange, one colour per step: blue falls and green rises the whole
+	# way, which no neighbouring palette run does for sixteen entries.
+	var last: Vector2i = Vector2i(-1, 32)
+	for index: int in RomLayout.PRESENTS_DITTO_FADE_COLORS:
+		var packed: int = rom.u16le(fade + index * size)
+		var green: int = (packed >> 5) & 0x1F
+		var blue: int = (packed >> 10) & 0x1F
+		if green < last.x or blue > last.y:
+			return {
+				"ok": false,
+				"message": "Ditto fade colour %d does not run pink to orange." % index,
+			}
+		last = Vector2i(green, blue)
+	return {"ok": true, "message": "Splash palettes verified."}
+
+
+static func _tile_1bpp_has_ink(rom: RomFile, offset: int, tile: int) -> bool:
+	for row: int in Gen2Tiles.TILE_1BPP_BYTES:
+		if rom.u8(offset + tile * Gen2Tiles.TILE_1BPP_BYTES + row) != 0:
+			return true
+	return false
+
+
+static func _tile_2bpp_lit(rom: RomFile, offset: int, tile: int) -> int:
+	var count: int = 0
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		var at: int = offset + tile * Gen2Tiles.TILE_BYTES + row * 2
+		var lit: int = rom.u8(at) | rom.u8(at + 1)
+		for bit: int in Gen2Tiles.TILE_WIDTH:
+			if lit & (1 << bit):
+				count += 1
+	return count
+
+
+static func _row_2bpp_lit(rom: RomFile, offset: int, tile: int, row: int) -> bool:
+	var at: int = offset + tile * Gen2Tiles.TILE_BYTES + row * 2
+	return (rom.u8(at) | rom.u8(at + 1)) != 0
+
+
+static func _sheet_tile_lit(sheet: PackedByteArray, tile: int) -> int:
+	var count: int = 0
+	for index: int in Gen2Tiles.TILE_BYTES:
+		var at: int = tile * Gen2Tiles.TILE_BYTES + index
+		if at >= sheet.size():
+			break
+		var byte: int = sheet[at]
+		for bit: int in 8:
+			if byte & (1 << bit):
+				count += 1
+	return count
 
 
 ## The code run at the layout's string offset, up to but not including "@".
@@ -2006,6 +2255,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
+		"presents_palettes": _import_presents_palettes(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
@@ -2520,6 +2770,39 @@ func _import_gender_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
 	return out
 
 
+## The splash's object palettes: PREDEFPAL_GAMEFREAK_LOGO_OB on every profile,
+## and on Crystal `gfx/splash/ditto.pal` with the sixteen-step fade
+## `GameFreakLogo_Transform` walks through its third colour.
+func _import_presents_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("game_freak_presents", {})
+	if entry.is_empty():
+		return {}
+	var out: Dictionary = {
+		"object": _packed_palette(
+			rom, int(entry.get("object_palette", -1)),
+			RomLayout.PRESENTS_OBJECT_PALETTE_COLORS
+		),
+	}
+	var ditto: Array = _packed_palette(
+		rom, int(entry.get("ditto_palette", -1)), RomLayout.PRESENTS_DITTO_PALETTE_COLORS
+	)
+	if not ditto.is_empty():
+		out["ditto"] = ditto
+		out["ditto_fade"] = _packed_palette(
+			rom, int(entry.get("ditto_fade", -1)), RomLayout.PRESENTS_DITTO_FADE_COLORS
+		)
+	return out
+
+
+func _packed_palette(rom: RomFile, at: int, colors: int) -> Array:
+	if at < 0:
+		return []
+	var out: Array = []
+	for index: int in colors:
+		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
 ## `CopyrightString`, as the tile codes it is. Kept as codes rather than as text
 ## because none of them is a character: `Copyright` loads its own graphic over
 ## tiles $60 and up, and the string addresses those tiles directly.
@@ -2571,6 +2854,35 @@ func _import_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `GameFreakDittoGFX`, the one LZ run in the splash. `GameFreakPresentsInit`
+## splits it over `vTiles0` and `vTiles1` as 128 tiles each, and the OAM sets
+## index the result with a stride of $10, so it is kept as one strip of 256 and
+## a page turns a tile number into a column. Empty on a profile with no Ditto.
+func _import_ditto_sheet(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int((layout.get("game_freak_presents", {}) as Dictionary).get("ditto", -1))
+	if at < 0:
+		return {}
+	var raw: PackedByteArray = _lz.decompress(rom.bytes(), at)
+	var wanted: int = RomLayout.PRESENTS_DITTO_TILES * Gen2Tiles.TILE_BYTES
+	if _lz.failed or raw.size() < wanted:
+		return {}
+	var indices: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		raw, 0, RomLayout.PRESENTS_DITTO_TILES
+	)
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	if not RomCache.write_indices(RomCache.tile_path(directory, "game_freak_ditto"), indices):
+		return {}
+	return {
+		"game_freak_ditto": {
+			"width": RomLayout.PRESENTS_DITTO_TILES * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": RomLayout.PRESENTS_DITTO_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+	}
+
+
 ## Decodes the fixed tile sheets: the font, the eight text box borders and the
 ## battle HUD's graphics, each as one strip of tiles.
 ##
@@ -2586,6 +2898,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	var data: PackedByteArray = rom.bytes()
 	var card: Dictionary = layout["trainer_card"]
 	var intro_player: Dictionary = layout["intro_player"]
+	var presents: Dictionary = layout.get("game_freak_presents", {})
 	var sheets: Dictionary = {
 		"font": {
 			"offset": RomLayout.font_offset(layout),
@@ -2682,6 +2995,15 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"first_code": RomLayout.COPYRIGHT_FIRST_CODE,
 			"bits": 2,
 		},
+		## `GameFreakLogoGFX`. Two graphics, one `Get1bpp`: the BG strings index
+		## the head of it and Gold's logo sprite the tail, so it stays the one
+		## strip the cartridge loads.
+		"game_freak_logo": {
+			"offset": int(presents.get("gfx", -1)),
+			"tiles": RomLayout.PRESENTS_GFX_TILES,
+			"first_code": 0,
+			"bits": 1,
+		},
 		"card_pic_male": {
 			"offset": int(card["pic_male"]),
 			"tiles": RomLayout.CARD_PIC_TILES,
@@ -2727,6 +3049,16 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"columns": RomLayout.INTRO_PLAYER_PIC_COLUMNS,
 			"column_major": true,
 		}
+	## `GameFreakLogoStarsGFX`, Gold and Silver's own beat. Crystal spends it on
+	## the Ditto instead and says so with a -1.
+	if int(presents.get("stars", -1)) >= 0:
+		sheets["game_freak_stars"] = {
+			"offset": int(presents["stars"]),
+			"tiles": RomLayout.PRESENTS_STARS_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+
 	var gender_screen: Dictionary = layout["gender_screen"]
 	if int(gender_screen["tile"]) >= 0:
 		sheets["gender_screen"] = {
@@ -2737,6 +3069,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 		}
 
 	var written: Dictionary = _import_shrink_pics(rom, layout)
+	written.merge(_import_ditto_sheet(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

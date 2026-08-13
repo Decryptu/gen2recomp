@@ -12,10 +12,6 @@ extends RefCounted
 const FRAME_RATE: float = 59.7275
 const COPYRIGHT_PRELUDE_FRAMES: int = 10
 const COPYRIGHT_HOLD_FRAMES: int = 100
-const PRESENTS_LOGO_FRAMES: int = 32
-const PRESENTS_WORD_FRAMES: int = 64
-const PRESENTS_HOLD_FRAMES: int = 128
-const PRESENTS_CLEANUP_FRAMES: int = 16
 const INTRO_TOTAL_FRAMES: int = 2335
 
 const PHASE_COPYRIGHT: StringName = &"copyright"
@@ -37,6 +33,12 @@ var _phase_frame: int = 0
 var _intro_scene: int = 0
 var _intro_scene_frame: int = 0
 var _intro_scene_lengths: Array[int] = []
+## `GameFreakPresentsScene` and the sprite beside it, which own every frame of
+## the presents phase. Null until that phase is entered.
+var _presents: Gen2GameFreakPresents = null
+## The `BattleAnimSineWave` the presents phase reads its motion out of, handed
+## in by the host that has a cache open.
+var _sine: Gen2BattleAnimData = null
 var _waiting_sound: StringName = &""
 var _events: Array[Dictionary] = []
 ## The phases the host can draw, empty for all of them.
@@ -51,8 +53,11 @@ func start(
 	profile: StringName = &"gold",
 	intro_scene_lengths: Array[int] = [],
 	available: Array[StringName] = [],
+	sine: Gen2BattleAnimData = null,
 ) -> void:
 	_profile = profile
+	_sine = sine
+	_presents = null
 	_intro_scene_lengths = _validated_intro_lengths(intro_scene_lengths)
 	_available = available.duplicate()
 	if not is_available(PHASE_COPYRIGHT):
@@ -170,16 +175,36 @@ func _advance_copyright() -> void:
 		_enter_after(PHASE_COPYRIGHT)
 
 
+## The presents phase spends whatever `GameFreakPresentsScene` spends: the
+## sequence is asked for a frame and the phase ends when it runs out, rather than
+## on a budget of this coordinator's own.
 func _advance_presents() -> void:
-	if _phase_frame == PRESENTS_LOGO_FRAMES:
-		_emit(&"show_image", {"id": &"game_freak"})
-		_emit(&"play_sfx", {"sfx": &"game_freak_presents"})
-	if _phase_frame == PRESENTS_LOGO_FRAMES + PRESENTS_WORD_FRAMES:
-		_emit(&"show_image", {"id": &"presents"})
-	if _phase_frame == PRESENTS_LOGO_FRAMES + PRESENTS_WORD_FRAMES + PRESENTS_HOLD_FRAMES:
-		_emit(&"hide_image", {"id": &"game_freak_presents"})
-		_emit(&"wipe", {"direction": &"out", "frames": PRESENTS_CLEANUP_FRAMES})
+	if _presents == null:
 		_enter_after(PHASE_PRESENTS)
+		return
+	_presents.advance_frame()
+	for event: Dictionary in _presents.drain_events():
+		# The sequence counts its own frames; the coordinator's are the ones a
+		# caller reads, so only the payload crosses over.
+		var values: Dictionary = event.duplicate()
+		for key: String in ["type", "frame", "scene"]:
+			values.erase(key)
+		_emit(StringName(event.get("type", &"")), values)
+	if _presents.finished():
+		_emit(&"hide_image", {"id": &"game_freak_presents"})
+		_enter_after(PHASE_PRESENTS)
+
+
+## The live sequence, so a host can read the sprites and words it is drawing.
+## Null outside the presents phase.
+func presents() -> Gen2GameFreakPresents:
+	return _presents
+
+
+## The button `.joy_loop` reads, which is the only skip in the whole splash:
+## the copyright half spends `DelayFrames` and never looks at the joypad.
+func skip_presents() -> bool:
+	return _presents != null and _presents.cancel()
 
 
 func _advance_intro() -> void:
@@ -214,8 +239,11 @@ func _enter_after(phase: StringName) -> void:
 		_phase_frame = 0
 		match next:
 			PHASE_PRESENTS:
+				# `GameFreakPresentsInit`, which loads the art and puts the
+				# Ditto or the star up before the loop's first frame.
+				_presents = Gen2GameFreakPresents.new()
+				_presents.start(_profile, _sine)
 				_emit(&"show_image", {"id": &"game_freak_presents"})
-				_emit(&"play_sfx", {"sfx": &"game_freak_logo"})
 			PHASE_INTRO_MOVIE:
 				_intro_scene = 0
 				_intro_scene_frame = 0

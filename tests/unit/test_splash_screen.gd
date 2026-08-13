@@ -1,9 +1,10 @@
 extends GutTest
 
-## `SplashScreen`'s copyright half (engine/movie/splash.asm), as the live screen
-## runs it: ten frames of blank, the screen for a hundred, and no button in
-## either. What is checked here is the pacing and the handoff, not the picture,
-## which tests/unit/test_copyright_page.gd owns.
+## `SplashScreen` (engine/movie/splash.asm) as the live screen runs it: ten
+## frames of blank, the copyright for a hundred, and then the GameFreak
+## animation. What is checked here is the pacing and the handoff, not the
+## picture, which tests/unit/test_copyright_page.gd and
+## tests/unit/test_game_freak_presents.gd own.
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
@@ -39,8 +40,11 @@ func test_the_copyright_appears_and_clears_on_the_source_frames() -> void:
 	assert_eq(_closed, 0)
 
 	_splash.advance_frames(1)
-	assert_eq(_splash.visible_image(), &"", "ClearTilemap")
-	assert_eq(_closed, 1)
+	assert_eq(
+		_splash.visible_image(), &"game_freak_presents",
+		"ClearTilemap, and then GameFreakPresentsInit"
+	)
+	assert_eq(_closed, 0, "the GameFreak animation follows it in the same screen")
 
 
 func test_it_closes_once_and_owes_no_more_frames() -> void:
@@ -49,17 +53,19 @@ func test_it_closes_once_and_owes_no_more_frames() -> void:
 		_splash.frames_left(),
 		Gen2BootCinema.COPYRIGHT_PRELUDE_FRAMES + Gen2BootCinema.COPYRIGHT_HOLD_FRAMES
 	)
-	_splash.advance_frames(500)
+	_splash.advance_frames(1000)
 	assert_eq(_closed, 1)
 	assert_eq(_splash.frames_left(), 0)
 	_splash.advance_frames(60)
 	assert_eq(_closed, 1, "a driver that keeps spending frames does not reopen it")
 
 
-## `DelayFrames` reads no joypad, so the copyright cannot be skipped. The button
-## is swallowed rather than passed on, which is what keeps a press meant for it
-## out of the screen behind.
-func test_no_button_skips_it() -> void:
+## `DelayFrames` reads no joypad, so the copyright cannot be skipped, and the
+## button is swallowed rather than passed on, which is what keeps a press meant
+## for it out of the screen behind. `.joy_loop` does read one, so the same press
+## over the GameFreak animation ends it after
+## `GameFreakPresentsEnd`'s sixteen frames.
+func test_only_the_gamefreak_half_reads_a_button() -> void:
 	assert_true(_splash.open(_data))
 	_splash.advance_frames(Gen2BootCinema.COPYRIGHT_PRELUDE_FRAMES)
 	assert_true(_splash.handle_button(Gen2Button.A))
@@ -67,6 +73,14 @@ func test_no_button_skips_it() -> void:
 	assert_true(_splash.handle_button(Gen2Button.START))
 	assert_eq(_splash.visible_image(), &"copyright")
 	assert_eq(_closed, 0)
+
+	_splash.advance_frames(Gen2BootCinema.COPYRIGHT_HOLD_FRAMES + 20)
+	assert_eq(_splash.visible_image(), &"game_freak_presents")
+	assert_true(_splash.handle_button(Gen2Button.A))
+	_splash.advance_frames(Gen2GameFreakPresents.CLEANUP_FRAMES - 1)
+	assert_eq(_closed, 0)
+	_splash.advance_frames(1)
+	assert_eq(_closed, 1)
 
 
 ## A cache with no imported splash art answers false, which is the intro

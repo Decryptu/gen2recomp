@@ -49,6 +49,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_world(directory, crystal_commands)
 	_write_overworld_graphics(directory)
 	_write_battle_graphics(directory, manifest)
+	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
 	manifest["game_id"] = String(game_id)
@@ -298,6 +299,55 @@ static func _write_overworld_graphics(directory: String) -> void:
 	sprite.resize(4 * Gen2Tiles.TILE_PIXELS)
 	sprite.fill(1)
 	RomCache.write_indices(RomCache.overworld_sprite_path(directory, TRAINER_SPRITE), sprite)
+
+
+## `GameFreakLogoGFX` and whichever object sheet the profile carries, as flat
+## fills: what a page test checks is which tile lands where, not what is in it.
+## The words below name the strip's own first tiles, so the ink index matters and
+## the picture does not.
+static func _write_splash_graphics(
+	directory: String, manifest: Dictionary, crystal: bool
+) -> void:
+	var sheets: Dictionary = manifest.get("tiles", {})
+	## The 1bpp logo carries `Gen2Tiles.INK`, since that is the only index a 1bpp
+	## graphic ever decodes to. The object sheets carry the Ditto fade's own
+	## colour, which is the one both profiles' sprites are mostly drawn in and
+	## the one `GameFreakLogo_Transform` moves.
+	var counts: Dictionary = {
+		"game_freak_logo": [RomLayout.PRESENTS_GFX_TILES, Gen2Tiles.INK],
+	}
+	if crystal:
+		counts["game_freak_ditto"] = [
+			RomLayout.PRESENTS_DITTO_TILES, RomLayout.PRESENTS_DITTO_FADE_COLOR,
+		]
+	else:
+		counts["game_freak_stars"] = [
+			RomLayout.PRESENTS_STARS_TILES, RomLayout.PRESENTS_DITTO_FADE_COLOR,
+		]
+	for name: String in counts:
+		var tile_count: int = int(counts[name][0])
+		var indices: PackedByteArray = PackedByteArray()
+		indices.resize(tile_count * Gen2Tiles.TILE_PIXELS)
+		indices.fill(int(counts[name][1]))
+		RomCache.write_indices(RomCache.tile_path(directory, name), indices)
+		sheets[name] = {
+			"width": tile_count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": tile_count,
+			"first_code": 0,
+			"bits": 1 if name == "game_freak_logo" else 2,
+		}
+	manifest["tiles"] = sheets
+	## PREDEFPAL_GAMEFREAK_LOGO_OB, and on Crystal `gfx/splash/ditto.pal` with the
+	## sixteen-step fade, all as the cartridge stores them.
+	var palettes: Dictionary = {"object": [0x7FFF, 0x7FFF, 0x03D9, 0x03D9]}
+	if crystal:
+		palettes["ditto"] = [0x7FFF, 0x016D, 0x7197, 0x0000]
+		var fade: Array = []
+		for step: int in RomLayout.PRESENTS_DITTO_FADE_COLORS:
+			fade.append(0x7197 - step)
+		palettes["ditto_fade"] = fade
+	manifest["presents_palettes"] = palettes
 
 
 static func _write_battle_graphics(directory: String, manifest: Dictionary) -> void:

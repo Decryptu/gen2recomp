@@ -533,6 +533,46 @@ const COPYRIGHT_STRING_NEXT: int = 0x4E
 const COPYRIGHT_STRING_MAX: int = 64
 const COPYRIGHT_STRING_ROWS: int = 3
 
+## `GameFreakLogoGFX` (engine/movie/splash.asm), which is two `INCBIN`s back to
+## back rather than one run: `gamefreak_presents.1bpp` and then
+## `gamefreak_logo.1bpp`. `Get1bpp` loads all 28 at once, but the halves are
+## addressed apart. The BG strings index the first thirteen plus the logo's own
+## first tile, which is blank and is the space in "GAME FREAK"; Gold's logo
+## sprite draws the fifteen.
+const PRESENTS_WORD_TILES: int = 13
+const PRESENTS_LOGO_TILES: int = 15
+const PRESENTS_GFX_TILES: int = PRESENTS_WORD_TILES + PRESENTS_LOGO_TILES
+## The six tiles of "PRESENTS", which sit a row below "GAME FREAK" and so carry
+## no ink in their top two rows.
+const PRESENTS_SECOND_WORD_FIRST: int = 7
+const PRESENTS_SECOND_WORD_TILES: int = 6
+const PRESENTS_SECOND_WORD_CLEAR_ROWS: int = 2
+
+## `GameFreakLogoStarsGFX`: `logo_star.2bpp` then `logo_sparkle.2bpp`, Gold and
+## Silver only. Crystal spends the same beat on a Ditto instead.
+const PRESENTS_STAR_TILES: int = 2
+const PRESENTS_SPARKLE_TILES: int = 3
+const PRESENTS_STARS_TILES: int = PRESENTS_STAR_TILES + PRESENTS_SPARKLE_TILES
+
+## `GameFreakDittoGFX`, one LZ run `GameFreakPresentsInit` splits over `vTiles0`
+## and `vTiles1` as 128 tiles each. The OAM sets index the result with a stride
+## of $10, so it is one 16x16 sheet.
+const PRESENTS_DITTO_COLUMNS: int = 16
+const PRESENTS_DITTO_TILES: int = PRESENTS_DITTO_COLUMNS * PRESENTS_DITTO_COLUMNS
+## `gfx/splash/ditto.pal`, which `_CGB_GamefreakLogo` loads into both object
+## palettes. Colour 0 is white and so transparent on a sprite; colour 2 is the
+## pink the fade below moves.
+const PRESENTS_DITTO_PALETTE_COLORS: int = 4
+const PRESENTS_DITTO_FADE_COLOR: int = 2
+## `GameFreakDittoPaletteFade` (`gfx/splash/ditto_fade.pal`), one colour per step
+## of `GameFreakLogo_Transform`. Crystal only.
+const PRESENTS_DITTO_FADE_COLORS: int = 16
+
+## `PREDEFPAL_GAMEFREAK_LOGO_OB`, the object palette Gold and Silver draw the
+## star, the logo and the sparkles through. It sits eight bytes in front of
+## `PREDEFPAL_GAMEFREAK_LOGO_BG`, which is the copyright screen's own palette.
+const PRESENTS_OBJECT_PALETTE_COLORS: int = 4
+
 ## `gfx/font/bg_text.pal`, PAL_BG_TEXT. Stored whole rather than as a pair: a
 ## palette fade over a text box passes through its two middle colours even
 ## though a 1bpp glyph never draws them.
@@ -963,6 +1003,21 @@ const GOLD_SILVER: Dictionary = {
 	# INCLUDEd for the credits as well, and the lower address is bank 1's, the
 	# one `Copyright` reads. Nested the way trainer_card is.
 	"copyright": {"gfx": 0xE4000, "tiles": 30, "string": 0x6513, "palette": 0xA4D5},
+	# `GameFreakPresents`. `GameFreakLogoGFX` and `GameFreakLogoStarsGFX` were
+	# located by encoding the four pinned gfx/splash PNGs as cartridge tiles and
+	# matching them; each hits once per dump and the four runs are contiguous in
+	# the order splash.asm INCBINs them. `object_palette` is
+	# PREDEFPAL_GAMEFREAK_LOGO_OB, the entry in front of the copyright screen's
+	# own. Nested the way trainer_card is, so Crystal's Ditto staying -1 here
+	# stays out of the flat offset checks.
+	"game_freak_presents": {
+		"gfx": 0xE4B81,
+		"stars": 0xE4C61,
+		"ditto": -1,
+		"ditto_palette": -1,
+		"ditto_fade": -1,
+		"object_palette": 0xA4CD,
+	},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
 	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
@@ -1174,6 +1229,21 @@ const CRYSTAL: Dictionary = {
 	},
 	# See the Gold and Silver block above for how this was located.
 	"copyright": {"gfx": 0xE4000, "tiles": 29, "string": 0x63FD, "palette": 0xA066},
+	# See the Gold and Silver block above for how these were located. Crystal
+	# ships no star or sparkle: its beat is the Ditto, whose compressed run
+	# cannot be searched for as bytes and was instead found by decompressing at
+	# every offset in the dump and keeping the one that produced the pinned
+	# gfx/splash/ditto.png exactly. Both of its palettes are unique eight- and
+	# thirty-two-byte runs, and `ditto_fade` sits directly in front of the
+	# graphic, which is where splash.asm puts it.
+	"game_freak_presents": {
+		"gfx": 0xE47CC,
+		"stars": -1,
+		"ditto": 0x109407,
+		"ditto_palette": 0x9521,
+		"ditto_fade": 0xE47AC,
+		"object_palette": 0xA05E,
+	},
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
@@ -1349,6 +1419,13 @@ static func for_id(id: StringName) -> Dictionary:
 			var copyright: Dictionary = (silver["copyright"] as Dictionary).duplicate()
 			copyright["string"] = 0x64D9
 			silver["copyright"] = copyright
+			# The splash graphics sit in the same bank on both, 440 bytes apart.
+			var presents: Dictionary = (
+				silver["game_freak_presents"] as Dictionary
+			).duplicate()
+			presents["gfx"] = 0xE49C9
+			presents["stars"] = 0xE4AA9
+			silver["game_freak_presents"] = presents
 			return silver
 		RomRegistry.CRYSTAL:
 			return CRYSTAL

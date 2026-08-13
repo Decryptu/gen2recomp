@@ -4,7 +4,7 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_intro.gd -- <game> <out.png> [what] [steps]
 ##
-## `what` is `copyright`, `gender`, `speech` or `shrink`; `steps` is how many source frames or
+## `what` is `copyright`, `presents`, `gender`, `speech` or `shrink`; `steps` is how many source frames or
 ## advances to run first, so any beat of `OakSpeech` can be photographed. Several
 ## comma-separated steps write one file each, suffixed with the step, which is
 ## how a whole fade is looked at without paying for a process per frame. The
@@ -17,6 +17,10 @@ extends SceneTree
 ## frame pixel for pixel rather than by eye.
 const WINDOW_SIZE := Vector2i(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
 const FRAMES_BEFORE_CAPTURE: int = 6
+## The copyright half in front of the GameFreak animation: `DelayFrames 10`, the
+## screen for a hundred, and the frame `SplashScreen` clears it on.
+const PRESENTS_FIRST_FRAME: int = Gen2BootCinema.COPYRIGHT_PRELUDE_FRAMES \
+	+ Gen2BootCinema.COPYRIGHT_HOLD_FRAMES
 
 var _output_path: String = ""
 var _what: String = "gender"
@@ -32,7 +36,8 @@ func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
 		push_error(
-			"Usage: preview_intro.gd -- <game> <out.png> [copyright|gender|speech|shrink] [step]"
+			"Usage: preview_intro.gd -- <game> <out.png> "
+			+ "[copyright|presents|gender|speech|shrink] [step]"
 		)
 		quit(1)
 		return
@@ -77,7 +82,7 @@ func _initialize() -> void:
 
 
 func _build(data: GameData) -> Control:
-	if _what == "copyright":
+	if _what == "copyright" or _what == "presents":
 		var splash := Gen2SplashScreen.new()
 		if not splash.open(data):
 			push_error("This cache carries no copyright screen.")
@@ -104,11 +109,14 @@ func _build(data: GameData) -> Control:
 ## gender screen `x` is cursor moves instead; in `speech` mode it is frames, so
 ## the opening fades can be stepped through without a press.
 func _drive(step: Vector2i) -> void:
-	if _what == "copyright":
-		# `SplashScreen` reads no button here, so both halves of a step are
-		# frames: the screen appears on the tenth and is cleared a hundred later.
+	if _what == "copyright" or _what == "presents":
+		# `SplashScreen` reads no button over the copyright, so both halves of a
+		# step are frames: the screen appears on the tenth and is cleared a
+		# hundred later, and the GameFreak animation runs straight on from there.
+		# `presents` counts from the frame that animation starts on.
 		var splash: Gen2SplashScreen = _screen as Gen2SplashScreen
-		while _frames_run < step.x + step.y:
+		var offset: int = PRESENTS_FIRST_FRAME if _what == "presents" else 0
+		while _frames_run < offset + step.x + step.y:
 			splash.advance_frames(1)
 			_frames_run += 1
 		return

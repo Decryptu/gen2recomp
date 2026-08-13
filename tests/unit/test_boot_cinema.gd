@@ -34,9 +34,14 @@ func test_boot_keeps_intro_music_continuous_and_opens_title_after_28_scenes() ->
 	var boot := Boot.new()
 	boot.start(&"crystal", lengths)
 	boot.drain_events()
+	# The GameFreak animation spends what `GameFreakPresentsScene` spends rather
+	# than a budget of the coordinator's, so the movie is reached by driving to
+	# it. tests/unit/test_game_freak_presents.gd pins the count itself.
 	var movie_start: Array[Dictionary] = []
-	for _frame: int in 10 + 100 + 32 + 64 + 128:
+	for _frame: int in 10 + 100 + 500:
 		movie_start.append_array(boot.advance_frame())
+		if boot.phase() == Boot.PHASE_INTRO_MOVIE:
+			break
 	assert_eq(boot.phase(), Boot.PHASE_INTRO_MOVIE)
 	assert_true(movie_start.any(func(event: Dictionary) -> bool:
 		return event["type"] == &"play_music" and event["music"] == &"gold_silver_opening"

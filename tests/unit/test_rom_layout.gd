@@ -23,7 +23,7 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	for key: String in gold:
 		if key in [
 			"item_attributes", "item_status_actions", "item_healing_hp",
-			"overworld_icons", "copyright",
+			"overworld_icons", "copyright", "game_freak_presents",
 		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
@@ -35,6 +35,16 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	assert_eq(gold_copyright["gfx"], silver_copyright["gfx"])
 	assert_eq(gold_copyright["tiles"], silver_copyright["tiles"])
 	assert_ne(gold_copyright["string"], silver_copyright["string"])
+	# The splash graphics are the same pictures 440 bytes apart in the same bank,
+	# and the object palette they are drawn through does not move at all.
+	var gold_presents: Dictionary = gold["game_freak_presents"]
+	var silver_presents: Dictionary = silver["game_freak_presents"]
+	assert_ne(gold_presents["gfx"], silver_presents["gfx"])
+	assert_eq(
+		int(gold_presents["stars"]) - int(gold_presents["gfx"]),
+		int(silver_presents["stars"]) - int(silver_presents["gfx"])
+	)
+	assert_eq(gold_presents["object_palette"], silver_presents["object_palette"])
 
 
 func test_crystal_has_its_own() -> void:

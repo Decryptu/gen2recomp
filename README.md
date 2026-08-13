@@ -113,7 +113,7 @@ to check without writing.
 | Palettes | Normal and shiny 15-bit cartridge colours |
 | Sprites | Front/back for 251 species and all 26 Unown forms |
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
-| Copyright screen | The splash graphic, its tile-code string and the GameFreak logo background palette |
+| Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -159,8 +159,10 @@ Play opens the save screen: validated save slots created as you need them,
 naming, export and import, `.sav` import, party inspection and the development
 battle, plus a save editor for party, boxes, bag, flags, position and dex that
 cannot produce a save the game will not load. A new game opens on the
-cartridge's own copyright screen, for the hundred and ten frames `SplashScreen`
-gives it, then the gender question and Oak's speech; it starts with an empty
+cartridge's own splash: the copyright screen for the hundred and ten frames
+`SplashScreen` gives it, then the GameFreak animation, which is Crystal's
+bouncing Ditto turning into the logo or Gold and Silver's star and sparkles, and
+then the gender question and Oak's speech; it starts with an empty
 party at the Crystal home spawn with source starting money, and Elm's imported
 lab scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
 Continue enters the overworld, and the start menu's SAVE writes its map,
@@ -293,7 +295,7 @@ all three games unless its row says otherwise:
 |---|---|
 | `preview_world_services.gd <png> [mart\|apricorn] [presses]` | the mart or Kurt's Apricorn overlay, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
-| `preview_intro.gd <game> <png> [copyright\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
+| `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
