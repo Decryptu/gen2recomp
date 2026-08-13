@@ -4,7 +4,7 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_intro.gd -- <game> <out.png> [what] [steps]
 ##
-## `what` is `gender`, `speech` or `shrink`; `steps` is how many source frames or
+## `what` is `copyright`, `gender`, `speech` or `shrink`; `steps` is how many source frames or
 ## advances to run first, so any beat of `OakSpeech` can be photographed. Several
 ## comma-separated steps write one file each, suffixed with the step, which is
 ## how a whole fade is looked at without paying for a process per frame. The
@@ -31,7 +31,9 @@ var _frames_run: int = 0
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
-		push_error("Usage: preview_intro.gd -- <game> <out.png> [gender|speech|shrink] [step]")
+		push_error(
+			"Usage: preview_intro.gd -- <game> <out.png> [copyright|gender|speech|shrink] [step]"
+		)
 		quit(1)
 		return
 	var game: StringName = StringName(args[0])
@@ -75,6 +77,13 @@ func _initialize() -> void:
 
 
 func _build(data: GameData) -> Control:
+	if _what == "copyright":
+		var splash := Gen2SplashScreen.new()
+		if not splash.open(data):
+			push_error("This cache carries no copyright screen.")
+			splash.free()
+			return null
+		return splash
 	if _what == "gender":
 		var gender := Gen2GenderScreen.new()
 		if not gender.open(data):
@@ -95,6 +104,14 @@ func _build(data: GameData) -> Control:
 ## gender screen `x` is cursor moves instead; in `speech` mode it is frames, so
 ## the opening fades can be stepped through without a press.
 func _drive(step: Vector2i) -> void:
+	if _what == "copyright":
+		# `SplashScreen` reads no button here, so both halves of a step are
+		# frames: the screen appears on the tenth and is cleared a hundred later.
+		var splash: Gen2SplashScreen = _screen as Gen2SplashScreen
+		while _frames_run < step.x + step.y:
+			splash.advance_frames(1)
+			_frames_run += 1
+		return
 	if _what == "gender":
 		for _press: int in step.x - _presses_run:
 			_screen.handle_button(Gen2Button.DOWN)

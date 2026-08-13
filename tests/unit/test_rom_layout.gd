@@ -21,10 +21,20 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	var gold: Dictionary = RomLayout.for_id(RomRegistry.GOLD)
 	var silver: Dictionary = RomLayout.for_id(RomRegistry.SILVER)
 	for key: String in gold:
-		if key in ["item_attributes", "item_status_actions", "item_healing_hp", "overworld_icons"]:
+		if key in [
+			"item_attributes", "item_status_actions", "item_healing_hp",
+			"overworld_icons", "copyright",
+		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
 	assert_ne(gold["item_attributes"], silver["item_attributes"])
+	# The copyright screen is the same graphic in the same place; only the
+	# string's own address moves, sixty bytes apart in bank 1.
+	var gold_copyright: Dictionary = gold["copyright"]
+	var silver_copyright: Dictionary = silver["copyright"]
+	assert_eq(gold_copyright["gfx"], silver_copyright["gfx"])
+	assert_eq(gold_copyright["tiles"], silver_copyright["tiles"])
+	assert_ne(gold_copyright["string"], silver_copyright["string"])
 
 
 func test_crystal_has_its_own() -> void:

@@ -109,6 +109,7 @@ to check without writing.
 | Palettes | Normal and shiny 15-bit cartridge colours |
 | Sprites | Front/back for 251 species and all 26 Unown forms |
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
+| Copyright screen | The splash graphic, its tile-code string and the GameFreak logo background palette |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -153,9 +154,11 @@ layout works on a phone.
 Play opens the save screen: validated save slots created as you need them,
 naming, export and import, `.sav` import, party inspection and the development
 battle, plus a save editor for party, boxes, bag, flags, position and dex that
-cannot produce a save the game will not load. A new game starts with an empty
-party at the Crystal home spawn with source starting money; Elm's imported lab
-scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
+cannot produce a save the game will not load. A new game opens on the
+cartridge's own copyright screen, for the hundred and ten frames `SplashScreen`
+gives it, then the gender question and Oak's speech; it starts with an empty
+party at the Crystal home spawn with source starting money, and Elm's imported
+lab scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
 Continue enters the overworld, and the start menu's SAVE writes its map,
 inventory, event and clock snapshot. See [docs/SAVES.md](docs/SAVES.md) for the
 save and SRAM contract.
@@ -280,7 +283,7 @@ all three games unless its row says otherwise:
 |---|---|
 | `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
-| `preview_intro.gd <game> <png> [gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
+| `preview_intro.gd <game> <png> [copyright\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. `frame` picks which one the `png` is of, so the emote, the walk and the box can each be looked at |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |

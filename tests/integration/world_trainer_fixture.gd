@@ -13,6 +13,9 @@ const MAP_GROUP: int = 1
 const MAP_NUMBER: int = 1
 const MAP_WIDTH_BLOCKS: int = 6
 const MAP_HEIGHT_BLOCKS: int = 5
+## The fixture's copyright strip, shorter than either cartridge's so a page test
+## can name every tile in it.
+const COPYRIGHT_TILES: int = 4
 const MAP_WIDTH_CELLS: int = MAP_WIDTH_BLOCKS * 2
 const MAP_HEIGHT_CELLS: int = MAP_HEIGHT_BLOCKS * 2
 const TRAINER_SCRIPT: int = 0x6100
@@ -329,6 +332,10 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		## checks is when each is drawn, not what is in it.
 		"shrink_1": [RomLayout.SHRINK_PIC_TILES, 2],
 		"shrink_2": [RomLayout.SHRINK_PIC_TILES, 1],
+		## `CopyrightGFX`, four tiles rather than the cartridge's twenty-nine:
+		## the string below names those four, and what a test checks is where
+		## each lands.
+		"copyright": [COPYRIGHT_TILES, 3],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet
@@ -337,6 +344,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 	var first_codes: Dictionary = {
 		"font": RomLayout.FONT_FIRST_CODE,
 		"frames": RomLayout.FRAME_FIRST_CODE,
+		"copyright": RomLayout.COPYRIGHT_FIRST_CODE,
 	}
 	for name: String in sheet_tiles:
 		var tile_count: int = int(sheet_tiles[name][0])
@@ -361,6 +369,16 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 	}
 	## `gfx/new_game/gender_screen.pal`'s own four colours.
 	manifest["gender_screen_palette"] = [0x7FFF, 0x7FC9, 0x7D61, 0x0000]
+	## `CopyrightString`'s shape: three `next`-separated rows of the strip's own
+	## codes, and PREDEFPAL_GAMEFREAK_LOGO_BG, whose first colour is black.
+	var copyright_string: Array = []
+	for row: int in RomLayout.COPYRIGHT_STRING_ROWS:
+		if row > 0:
+			copyright_string.append(RomLayout.COPYRIGHT_STRING_NEXT)
+		for index: int in COPYRIGHT_TILES:
+			copyright_string.append(RomLayout.COPYRIGHT_FIRST_CODE + index)
+	manifest["copyright_string"] = copyright_string
+	manifest["copyright_palette"] = [0x0000, 0x2D68, 0x56B5, 0x7FFF]
 	manifest["bar_palettes"] = {
 		"hp_green": [0x02E0, 0x02E0],
 		"hp_yellow": [0x02BF, 0x02BF],

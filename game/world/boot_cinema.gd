@@ -24,6 +24,11 @@ const PHASE_INTRO_MOVIE: StringName = &"intro_movie"
 const PHASE_TITLE: StringName = &"title"
 const PHASE_NEW_GAME: StringName = &"new_game"
 const PHASE_FINISHED: StringName = &"finished"
+## The cartridge's own order: SplashScreen's copyright and GameFreak logo, then
+## IntroSequence, then the title screen.
+const PHASE_ORDER: Array[StringName] = [
+	PHASE_COPYRIGHT, PHASE_PRESENTS, PHASE_INTRO_MOVIE, PHASE_TITLE,
+]
 
 var _profile: StringName = &"gold"
 var _phase: StringName = &""
@@ -34,11 +39,30 @@ var _intro_scene_frame: int = 0
 var _intro_scene_lengths: Array[int] = []
 var _waiting_sound: StringName = &""
 var _events: Array[Dictionary] = []
+## The phases the host can draw, empty for all of them.
+var _available: Array[StringName] = []
 
 
-func start(profile: StringName = &"gold", intro_scene_lengths: Array[int] = []) -> void:
+## [param available] names the phases the host has art for. One left out does
+## not run: the source's order is kept and what is missing is skipped, rather
+## than held on a blank screen for the frames it would have taken. Empty means
+## every phase, which is a host with the whole opening imported.
+func start(
+	profile: StringName = &"gold",
+	intro_scene_lengths: Array[int] = [],
+	available: Array[StringName] = [],
+) -> void:
 	_profile = profile
 	_intro_scene_lengths = _validated_intro_lengths(intro_scene_lengths)
+	_available = available.duplicate()
+	if not is_available(PHASE_COPYRIGHT):
+		_phase = PHASE_COPYRIGHT
+		_frame = 0
+		_phase_frame = 0
+		_waiting_sound = &""
+		_events.clear()
+		_enter_after(PHASE_COPYRIGHT)
+		return
 	_phase = PHASE_COPYRIGHT
 	_frame = 0
 	_phase_frame = 0
@@ -48,6 +72,12 @@ func start(profile: StringName = &"gold", intro_scene_lengths: Array[int] = []) 
 	_events.clear()
 	_emit(&"play_music", {"music": &"none", "restart": true})
 	_emit(&"hide_image", {"id": &"boot"})
+
+
+## Whether [param phase] is one this run draws. A phase the host named, or any
+## phase when it named none.
+func is_available(phase: StringName) -> bool:
+	return _available.is_empty() or phase in _available
 
 
 func phase() -> StringName:
@@ -137,10 +167,7 @@ func _advance_copyright() -> void:
 		_emit(&"show_image", {"id": &"copyright"})
 	if _phase_frame == COPYRIGHT_PRELUDE_FRAMES + COPYRIGHT_HOLD_FRAMES:
 		_emit(&"hide_image", {"id": &"copyright"})
-		_phase = PHASE_PRESENTS
-		_phase_frame = 0
-		_emit(&"show_image", {"id": &"game_freak_presents"})
-		_emit(&"play_sfx", {"sfx": &"game_freak_logo"})
+		_enter_after(PHASE_COPYRIGHT)
 
 
 func _advance_presents() -> void:
@@ -152,12 +179,7 @@ func _advance_presents() -> void:
 	if _phase_frame == PRESENTS_LOGO_FRAMES + PRESENTS_WORD_FRAMES + PRESENTS_HOLD_FRAMES:
 		_emit(&"hide_image", {"id": &"game_freak_presents"})
 		_emit(&"wipe", {"direction": &"out", "frames": PRESENTS_CLEANUP_FRAMES})
-		_phase = PHASE_INTRO_MOVIE
-		_phase_frame = 0
-		_intro_scene = 0
-		_intro_scene_frame = 0
-		_emit(&"play_music", {"music": &"gold_silver_opening", "restart": false})
-		_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
+		_enter_after(PHASE_PRESENTS)
 
 
 func _advance_intro() -> void:
@@ -174,12 +196,38 @@ func _advance_intro() -> void:
 	_intro_scene += 1
 	_intro_scene_frame = 0
 	if _intro_scene >= _intro_scene_lengths.size():
-		_phase = PHASE_TITLE
-		_phase_frame = 0
-		_emit(&"open_title", {"profile": _profile})
-		_emit(&"play_music", {"music": &"title", "restart": false})
+		_enter_after(PHASE_INTRO_MOVIE)
 	else:
 		_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
+
+
+## Enters the first phase after [param phase] the host can draw, with that
+## phase's own opening events, or finishes when none is left. The events a phase
+## leaves behind belong to the phase leaving, so a caller emits those first.
+func _enter_after(phase: StringName) -> void:
+	var at: int = PHASE_ORDER.find(phase)
+	for index: int in range(at + 1, PHASE_ORDER.size()):
+		var next: StringName = PHASE_ORDER[index]
+		if not is_available(next):
+			continue
+		_phase = next
+		_phase_frame = 0
+		match next:
+			PHASE_PRESENTS:
+				_emit(&"show_image", {"id": &"game_freak_presents"})
+				_emit(&"play_sfx", {"sfx": &"game_freak_logo"})
+			PHASE_INTRO_MOVIE:
+				_intro_scene = 0
+				_intro_scene_frame = 0
+				_emit(&"play_music", {"music": &"gold_silver_opening", "restart": false})
+				_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
+			PHASE_TITLE:
+				_emit(&"open_title", {"profile": _profile})
+				_emit(&"play_music", {"music": &"title", "restart": false})
+		return
+	_phase = PHASE_FINISHED
+	_phase_frame = 0
+	_emit(&"finish_intro", {})
 
 
 func _emit(type: StringName, values: Dictionary) -> void:

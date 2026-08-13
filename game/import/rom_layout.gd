@@ -504,6 +504,25 @@ const GENDER_SCREEN_PALETTE_COLORS: int = 4
 ## colour, RGB 09,30,31.
 const GENDER_SCREEN_FILL_INDEX: int = 1
 
+## `Copyright` (engine/menus/intro_menu.asm): 29 or 30 tiles requested into
+## `vTiles2 tile $60`, and `CopyrightString` placed at (2,7). The string is
+## `data/copyright.asm`, three `next`-separated rows of nothing but those tile
+## codes, so the screen is the strip plus the code run and needs no font.
+const COPYRIGHT_FIRST_CODE: int = 0x60
+const COPYRIGHT_AT: Vector2i = Vector2i(2, 7)
+## `PREDEFPAL_GAMEFREAK_LOGO_BG` (gfx/sgb/predef.pal), which `_CGB_GamefreakLogo`
+## loads before `SplashScreen` draws the copyright. Its first colour is black and
+## its last white, so the screen is white on black rather than the other way
+## round.
+const COPYRIGHT_PALETTE_COLORS: int = 4
+## `PlaceString` stops at "@", and the rows are separated by `next`.
+const COPYRIGHT_STRING_TERMINATOR: int = 0x50
+const COPYRIGHT_STRING_NEXT: int = 0x4E
+## Long enough for either pin's three rows; a run that reaches it has not found
+## its terminator and is not the string.
+const COPYRIGHT_STRING_MAX: int = 64
+const COPYRIGHT_STRING_ROWS: int = 3
+
 ## `gfx/font/bg_text.pal`, PAL_BG_TEXT. Stored whole rather than as a pair: a
 ## palette fade over a text box passes through its two middle colours even
 ## though a 1bpp glyph never draws them.
@@ -927,6 +946,13 @@ const GOLD_SILVER: Dictionary = {
 		"right_corner": -1,
 		"badge_palette": 0xA385,
 	},
+	# The copyright screen (`Copyright`, engine/menus/intro_menu.asm). The
+	# graphic was located by encoding the pinned gfx/splash/copyright.png as
+	# 2bpp and matching it, which hits once per dump; the string by assembling
+	# data/copyright.asm's own code run, which hits twice because that file is
+	# INCLUDEd for the credits as well, and the lower address is bank 1's, the
+	# one `Copyright` reads. Nested the way trainer_card is.
+	"copyright": {"gfx": 0xE4000, "tiles": 30, "string": 0x6513, "palette": 0xA4D5},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
 	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
@@ -1135,6 +1161,8 @@ const CRYSTAL: Dictionary = {
 		"right_corner": 0x265C3,
 		"badge_palette": 0x9F16,
 	},
+	# See the Gold and Silver block above for how this was located.
+	"copyright": {"gfx": 0xE4000, "tiles": 29, "string": 0x63FD, "palette": 0xA066},
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
@@ -1305,6 +1333,10 @@ static func for_id(id: StringName) -> Dictionary:
 			silver["item_attributes"] = 0x6866
 			silver["item_status_actions"] = 0xF0C5
 			silver["item_healing_hp"] = 0xF403
+			# `CopyrightString` sits in bank 1 on both, sixty bytes apart.
+			var copyright: Dictionary = (silver["copyright"] as Dictionary).duplicate()
+			copyright["string"] = 0x64D9
+			silver["copyright"] = copyright
 			return silver
 		RomRegistry.CRYSTAL:
 			return CRYSTAL

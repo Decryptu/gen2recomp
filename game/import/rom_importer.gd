@@ -288,7 +288,95 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not shrink["ok"]:
 		return shrink
 
+	var copyright: Dictionary = verify_copyright(rom, layout)
+	if not copyright["ok"]:
+		return copyright
+
 	return {"ok": true, "message": "Layout verified."}
+
+
+## `gfx/sgb/predef.pal`'s PREDEFPAL_GAMEFREAK_LOGO_BG, the palette
+## `_CGB_GamefreakLogo` loads before the copyright is drawn: black, two greys and
+## white, in that order. The eight bytes appear once in each dump, so they pin
+## themselves.
+const COPYRIGHT_COLORS: Array[int] = [0x0000, 0x2D68, 0x56B5, 0x7FFF]
+
+
+## `Copyright`'s two halves, which check each other: the string is nothing but
+## the codes the strip draws, so a run whose every code lands inside the strip,
+## whose rows are the source's three and which ends at "@" cannot be a text or
+## another graphic's neighbour. The strip itself is checked for having a lit
+## pixel in it, since a blank run of the right length would otherwise pass.
+static func verify_copyright(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("copyright", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No copyright screen on this cartridge."}
+	var tiles: int = int(entry.get("tiles", 0))
+	var gfx: int = int(entry.get("gfx", -1))
+	if tiles <= 0 or not rom.in_bounds(gfx, tiles * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The copyright graphic is outside the cartridge."}
+	var ink: bool = false
+	for index: int in tiles * Gen2Tiles.TILE_BYTES:
+		if rom.u8(gfx + index) != 0:
+			ink = true
+			break
+	if not ink:
+		return {"ok": false, "message": "The copyright graphic is blank."}
+	var codes: PackedByteArray = read_copyright_string(rom, layout)
+	if codes.is_empty():
+		return {"ok": false, "message": "The copyright string has no terminator."}
+	var rows: int = 1
+	for code: int in codes:
+		if code == RomLayout.COPYRIGHT_STRING_NEXT:
+			rows += 1
+			continue
+		if code < RomLayout.COPYRIGHT_FIRST_CODE \
+			or code >= RomLayout.COPYRIGHT_FIRST_CODE + tiles:
+			return {
+				"ok": false,
+				"message": "Copyright string code $%02X is outside its %d tiles." % [
+					code, tiles,
+				],
+			}
+	var palette: int = int(entry.get("palette", -1))
+	if not rom.in_bounds(palette, COPYRIGHT_COLORS.size() * Gen2Palette.COLOR_BYTES):
+		return {"ok": false, "message": "The copyright palette is outside the cartridge."}
+	for index: int in COPYRIGHT_COLORS.size():
+		var stored: int = rom.u16le(palette + index * Gen2Palette.COLOR_BYTES)
+		if stored != COPYRIGHT_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Copyright palette colour %d is $%04X, expected $%04X." % [
+					index, stored, COPYRIGHT_COLORS[index],
+				],
+			}
+	if rows != RomLayout.COPYRIGHT_STRING_ROWS:
+		return {
+			"ok": false,
+			"message": "The copyright string has %d rows, expected %d." % [
+				rows, RomLayout.COPYRIGHT_STRING_ROWS,
+			],
+		}
+	return {"ok": true, "message": "Copyright screen verified."}
+
+
+## The code run at the layout's string offset, up to but not including "@".
+## Empty when no terminator is reached inside the bounded window, which is what
+## a wrong offset produces.
+static func read_copyright_string(rom: RomFile, layout: Dictionary) -> PackedByteArray:
+	var entry: Dictionary = layout.get("copyright", {})
+	var at: int = int(entry.get("string", -1))
+	var out := PackedByteArray()
+	if at < 0:
+		return out
+	for index: int in RomLayout.COPYRIGHT_STRING_MAX:
+		if not rom.in_bounds(at + index, 1):
+			return PackedByteArray()
+		var code: int = rom.u8(at + index)
+		if code == RomLayout.COPYRIGHT_STRING_TERMINATOR:
+			return out
+		out.append(code)
+	return PackedByteArray()
 
 
 ## `data/text/common_2.asm`'s intro texts. Each is a `text_far` target, so it
@@ -1916,6 +2004,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
+		"copyright_string": _import_copyright_string(rom, layout),
+		"copyright_palette": _import_copyright_palette(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
@@ -2430,6 +2520,28 @@ func _import_gender_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
 	return out
 
 
+## `CopyrightString`, as the tile codes it is. Kept as codes rather than as text
+## because none of them is a character: `Copyright` loads its own graphic over
+## tiles $60 and up, and the string addresses those tiles directly.
+func _import_copyright_string(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	for code: int in read_copyright_string(rom, layout):
+		out.append(code)
+	return out
+
+
+## PREDEFPAL_GAMEFREAK_LOGO_BG, whole: the copyright screen is one 2bpp graphic
+## on a blank map, so all four of its colours are drawn.
+func _import_copyright_palette(rom: RomFile, layout: Dictionary) -> Array:
+	var at: int = int((layout.get("copyright", {}) as Dictionary).get("palette", -1))
+	if at < 0:
+		return []
+	var out: Array = []
+	for index: int in RomLayout.COPYRIGHT_PALETTE_COLORS:
+		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
 ## `ShrinkPlayer`'s two pictures, which are LZ runs rather than tile strips and
 ## are laid out by `PlaceGraphic` the way every 7x7 pic is: as one 56x56 buffer
 ## per picture, so a screen draws them the way it draws the player's own.
@@ -2561,6 +2673,14 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.NAMING_MARKER_TILES,
 			"first_code": 0,
 			"bits": 1,
+		},
+		## `Copyright`'s own strip, requested into `vTiles2 tile $60`. first_code
+		## is that $60, so the string's codes address the strip directly.
+		"copyright": {
+			"offset": int((layout["copyright"] as Dictionary)["gfx"]),
+			"tiles": int((layout["copyright"] as Dictionary)["tiles"]),
+			"first_code": RomLayout.COPYRIGHT_FIRST_CODE,
+			"bits": 2,
 		},
 		"card_pic_male": {
 			"offset": int(card["pic_male"]),
