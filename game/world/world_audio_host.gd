@@ -3,11 +3,14 @@ extends RefCounted
 
 ## Scene-free inspection boundary for imported audio records.
 ##
-## Runtime playback belongs exclusively to Gen2AudioPlayer. This host is used by
-## the service overlay to prove that a record resolves and decodes; it must not
-## create a second WAV renderer that can diverge from the shared hardware lane.
+## Runtime playback belongs exclusively to [Gen2AudioPlayer]. This host proves a
+## record resolves and that the driver can run it, by starting it on a private
+## engine and stepping a second of frames. It renders no samples, so it can
+## never become a second synthesiser that diverges from the shared lane.
 
-const BACKEND_DECODE_ONLY: StringName = &"decode_only_shared_runtime"
+const BACKEND_PROBE: StringName = &"driver_probe_shared_runtime"
+## A second of `_UpdateSound`, enough to walk past a stream's opening commands.
+const PROBE_FRAMES: int = 60
 
 
 static func play(
@@ -17,34 +20,40 @@ static func play(
 		return {"ok": false, "reason": &"audio_data_unavailable"}
 	var payload: Variant = record.get("bytes", [])
 	var byte_count: int = int(record.get("byte_count", payload.size() if payload is Array else 0))
-	var decoded: Dictionary = Gen2AudioDecoder.decode(record, request_kind, assets)
-	if not bool(decoded.get("ok", false)):
+	var engine := Gen2SoundEngine.new()
+	engine.set_assets(assets)
+	engine.init_sound()
+	var started: bool = false
+	match request_kind:
+		&"cry", &"cries", &"mon_cry":
+			started = engine.play_cry(record)
+		&"sound", &"sfx":
+			started = engine.play_sfx(record)
+		_:
+			started = engine.play_music(record)
+	if not started:
 		return {
 			"ok": false,
 			"played": false,
-			"backend": BACKEND_DECODE_ONLY,
-			"reason": decoded.get("reason", &"audio_decode_failed"),
+			"backend": BACKEND_PROBE,
+			"reason": &"audio_record_unplayable",
 			"byte_count": byte_count,
 		}
+	var frames: int = 0
+	while frames < PROBE_FRAMES and engine.any_channel_active():
+		engine.update_sound()
+		frames += 1
 	return {
 		"ok": true,
 		"played": false,
 		"ready": true,
-		"backend": BACKEND_DECODE_ONLY,
+		"backend": BACKEND_PROBE,
 		"request_kind": request_kind,
 		"index": int(record.get("index", -1)),
 		"bank": int(record.get("bank", -1)),
 		"address": int(record.get("address", -1)),
 		"byte_count": byte_count,
-		"decoded": decoded,
-		"sfx_priority": _has_sfx_priority(decoded),
-		"frame_count": int(decoded.get("duration_frames", 0)),
+		"frames": frames,
+		"still_playing": engine.any_channel_active(),
+		"sfx_priority": engine.sfx_priority != 0,
 	}
-
-
-static func _has_sfx_priority(decoded: Dictionary) -> bool:
-	for track: Dictionary in decoded.get("tracks", []):
-		for event: Dictionary in track.get("events", []):
-			if bool(event.get("sfx_priority", false)):
-				return true
-	return false

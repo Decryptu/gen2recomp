@@ -45,7 +45,7 @@ user://mods/<id>/
 exact version, `*`, component wildcards such as `1.x` or `1.4.*`, comparison
 chains such as `>=1.2.0 <2.0.0`, and caret or tilde ranges such as `^1.2.3` and
 `~1.2.3`. Dependencies load first. A missing, disabled, incompatible or failed
-dependency—and every member of a dependency cycle—is refused by name before
+dependency, and every member of a dependency cycle, is refused by name before
 the dependent entry script runs.
 
 An entry that is absolute, contains `..` or is not GDScript is refused before
