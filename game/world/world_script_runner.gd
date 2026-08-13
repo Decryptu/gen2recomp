@@ -46,6 +46,10 @@ var _failure: Dictionary = {}
 var _finish_after_pending: bool = false
 var _loaded_menu: Dictionary = {}
 var _loaded_emote: int = -1
+## wScriptDelay. `Script_pause` reuses whatever is in it when its own operand is
+## zero, which is how `Script_showemote` sets the emote's duration: it writes the
+## delay and then calls `ShowEmoteScript`, whose middle command is `pause 0`.
+var _script_delay: int = 0
 var _trainer_intro_approach_pending: bool = false
 ## Set while RockSmashScript's `playsound SFX_STRENGTH` is out with the host, so
 ## its acknowledge continues into the earthquake, the disappear and the roll.
@@ -175,6 +179,18 @@ const BATTLE_RESULT_WIN: int = 0
 const BATTLE_RESULT_LOSE: int = 1
 const BATTLE_RESULT_DRAW: int = 2
 const TEXT_STRING_BUFFER: int = 0x14
+## The two waits `ScriptEvents` spends frames in rather than asking for anything
+## (`engine/overworld/scripting.asm`). WAIT_MOVEMENT is SCRIPT_WAIT_MOVEMENT,
+## which runs until the stream an `applymovement` started clears
+## SCRIPTED_MOVEMENT_STATE_F; WAIT_FRAMES is the counted delay `Script_pause`,
+## `Script_wait` and `Script_deactivatefacing` spend. Neither takes a button, so
+## both resolve through complete_wait() rather than through advance().
+const WAIT_MOVEMENT: StringName = &"movement"
+const WAIT_FRAMES: StringName = &"frames"
+## `Script_pause` delays `DelayFrames 2` per counted unit and `Script_wait`
+## delays six.
+const PAUSE_FRAMES_PER_UNIT: int = 2
+const WAIT_FRAMES_PER_UNIT: int = 6
 const WEEKDAY_NAMES: Array[StringName] = [
 	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
 ]
@@ -287,6 +303,10 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		var pending_request: Dictionary = _pending.get("request", {})
 		if _pending.get("type", &"") == &"runtime_request" \
 			and StringName(pending_request.get("kind", &"")) == &"battle_requested":
+			return _waiting_result()
+		## Only frames end a wait, so a button press cannot: the source is inside
+		## WaitScriptMovement or a DelayFrames loop, which read no input at all.
+		if _pending.get("type", &"") == &"wait":
 			return _waiting_result()
 		if not acknowledge:
 			return _waiting_result()
@@ -482,7 +502,10 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		if _pending:
 			return _waiting_result()
 		if _completed:
-			return _complete_result()
+			## A terminal command returns _complete()'s own result, which has
+			## already drained the events; asking for a second one would hand the
+			## caller an empty list in its place.
+			return outcome if outcome.has("status") else _complete_result()
 
 	return _complete()
 
@@ -727,6 +750,36 @@ func pending_input() -> Dictionary:
 	return _pending.duplicate(true)
 
 
+## The frame wait this invocation is standing in, empty when it is not standing
+## in one. A caller spends the frames and calls [method complete_wait]; nothing
+## else ends it.
+func pending_wait() -> Dictionary:
+	if StringName(_pending.get("type", &"")) != &"wait":
+		return {}
+	return _pending.duplicate(true)
+
+
+## Resumes after the wait above. `ShowEmoteScript`'s trailing
+## `applymovementlasttalked .Hide` is the one continuation a wait carries: the
+## emote is put up by the script the source calls and taken down by the same
+## script, so the hide belongs to the end of the pause rather than to a host.
+func complete_wait() -> Dictionary:
+	if StringName(_pending.get("type", &"")) != &"wait":
+		return {
+			"ok": false, "status": &"failed", "reason": &"script_wait_not_pending",
+		}
+	var hide_emote_object: int = int(_pending.get("hide_emote_object", -1))
+	_pending = {}
+	if hide_emote_object >= 0:
+		_emit_object_event(&"object_emote", {
+			"object_index": hide_emote_object,
+			"emote_id": _loaded_emote,
+			"visible": false,
+			"duration": 0,
+		})
+	return advance()
+
+
 ## Cancels a pending menu or choice without inventing a cartridge option. The
 ## script receives zero, matching the false branch used by yes/no commands.
 func cancel_input() -> Dictionary:
@@ -778,9 +831,9 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		_emit_runtime_event(&"script_timing_requested", {
 			"kind": &"wait",
 			"value": int(command.get("value", 0)),
-			"frames": int(command.get("value", 0)) * 6,
+			"frames": int(command.get("value", 0)) * WAIT_FRAMES_PER_UNIT,
 		})
-		return {"ok": true}
+		return _stage_frame_wait(int(command.get("value", 0)) * WAIT_FRAMES_PER_UNIT)
 	if opcode == 0x9F and _crystal_commands():
 		## Crystal inserts verbosegiveitemvar at this raw byte. Normalizing first
 		## turns it into pokegold's swarm command.
@@ -1233,19 +1286,46 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				_loaded_emote = _script_value
 			_emit_runtime_event(&"emote_loaded", {"emote_id": _loaded_emote})
 		0x74:
+			## Script_showemote is `ScriptCall ShowEmoteScript`: loademote, an
+			## applymovement that shows the emote, `pause 0` over the delay this
+			## command just wrote, and an applymovement that hides it again. The two
+			## one-command movements are folded into the emote event and its hide;
+			## the pause is the wait, and it is what the operand measures.
 			var emote_id: int = int(command.get("value", _loaded_emote))
 			if emote_id == 0xFF:
 				emote_id = _loaded_emote
+			_loaded_emote = emote_id
+			## `cp LAST_TALKED / jr z` keeps hLastTalked as it was only when the
+			## operand is LAST_TALKED itself; every other id becomes the new one,
+			## which is what the two `applymovementlasttalked`s inside
+			## ShowEmoteScript then move.
+			var emote_object_id: int = int(command.get("object_id", 0))
+			if emote_object_id != LAST_TALKED:
+				_last_talked_object_index = _object_index_from_id(emote_object_id)
+			var emote_object: int = _object_index_from_id(emote_object_id)
+			_script_delay = int(command.get("value_2", 0))
 			_emit_object_event(&"object_emote", {
-				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
+				"object_index": emote_object,
 				"emote_id": emote_id,
 				"visible": true,
-				"duration": int(command.get("value_2", 0)),
+				## Zero is "until the hide", not "for no time": the source takes the
+				## emote down from ShowEmoteScript's last command, not on a counter.
+				"duration": 0,
 			})
+			return _stage_frame_wait(
+				_script_delay * PAUSE_FRAMES_PER_UNIT,
+				{"hide_emote_object": emote_object, "emote_id": emote_id}
+			)
 		0x77:
+			## Script_earthquake is `ScriptCall` on `applymovement PLAYER,
+			## wEarthquakeMovementDataBuffer`, whose stream is `step_shake n` then
+			## `step_sleep (n & %00111111)`. The shake starts and the movement wait
+			## is that sleep, since step_shake itself reaches
+			## ContinueReadingMovement without spending a frame.
 			_emit_runtime_event(&"earthquake_requested", {
 				"strength": int(command.get("value", 0)),
 			})
+			return _stage_frame_wait(int(command.get("value", 0)) & 0x3F)
 		0x78:
 			_emit_runtime_event(&"map_blocks_requested", {
 				"bank": bank, "address": int(command.get("address", 0)),
@@ -1303,10 +1383,22 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				"sprite": int(command.get("value_2", 0)),
 			})
 		0x8A, 0x8B:
+			## Both write wScriptDelay when their operand is nonzero and reuse
+			## whatever is in it when it is zero. `Script_pause` then spends
+			## `DelayFrames 2` per unit inside the command; `Script_deactivatefacing`
+			## hands the same count to SCRIPT_WAIT, which WaitScript decrements once
+			## per frame.
+			var delay_operand: int = int(command.get("value", 0))
+			if delay_operand != 0:
+				_script_delay = delay_operand
+			var delay_frames: int = _script_delay * PAUSE_FRAMES_PER_UNIT \
+				if source_opcode == 0x8A else _script_delay
 			_emit_runtime_event(&"script_timing_requested", {
 				"kind": &"pause" if source_opcode == 0x8A else &"deactivate_facing",
-				"value": int(command.get("value", 0)),
+				"value": delay_operand,
+				"frames": delay_frames,
 			})
+			return _stage_frame_wait(delay_frames)
 		0x8C:
 			if not _push_frame(bank, int(command.get("address", 0))):
 				return {
@@ -1405,11 +1497,14 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			_events.append({"type": &"credits_requested"})
 		0xA1:
 			return _stage_warp_facing_request(command)
+	## The commands whose case above falls out of the match rather than returning
+	## a result of its own. The four that now wait (`showemote`, `earthquake`,
+	## `pause` and `deactivatefacing`) return from inside it and are not here.
 	var handled_sources: Array = [
 		0x55, 0x56, 0x57, 0x58, 0x5B, 0x5C, 0x5D, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64,
-		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8A, 0x8B, 0x8D, 0x98,
+		0x65, 0x66, 0x7F, 0x81, 0x82, 0x85, 0x8D, 0x98,
 		0x8C,
-		0x6C, 0x73, 0x74, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
+		0x6C, 0x73, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x9C, 0x9F,
 		0xA0, 0x89,
 	]
 	if source_opcode in handled_sources:
@@ -1428,17 +1523,19 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 				"bank": int(_request.get("bank", 0)),
 				"address": int(command.get("address", 0)),
 			}
+			var moved_index: int = -1
 			if movement_event_type == &"object_movement_requested":
-				movement_values["object_index"] = _object_index_from_id(
-					int(command.get("object_id", 0))
-				)
+				moved_index = _object_index_from_id(int(command.get("object_id", 0)))
+				movement_values["object_index"] = moved_index
 			_emit_object_event(movement_event_type, movement_values)
+			return _stage_movement_wait({"object_index": moved_index})
 		0x69:
 			_emit_object_event(&"object_movement_requested", {
 				"object_index": _last_talked_object_index,
 				"bank": int(_request.get("bank", 0)),
 				"address": int(command.get("address", 0)),
 			})
+			return _stage_movement_wait({"object_index": _last_talked_object_index})
 		0x6A:
 			if _last_talked_object_index >= 0:
 				_emit_object_event(&"object_face_player", {
@@ -1669,6 +1766,36 @@ func _stage_phone_choice(contact: int) -> Dictionary:
 		"contact": contact,
 		"source": _request.duplicate(true),
 	}
+	return {"ok": true}
+
+
+## Holds the script until the stream an `applymovement` just queued has been
+## drawn. The cells committed when the command applied, exactly as the source
+## commits them in `InitStep`; what is left is the drawing, and the source waits
+## for it (`WaitScriptMovement`).
+func _stage_movement_wait(values: Dictionary = {}) -> Dictionary:
+	var wait: Dictionary = {
+		"type": &"wait",
+		"wait": WAIT_MOVEMENT,
+		"source": _request.duplicate(true),
+	}
+	for key: Variant in values:
+		wait[key] = values[key]
+	_pending = wait
+	return {"ok": true}
+
+
+## Holds it for a counted number of hardware frames.
+func _stage_frame_wait(frames: int, values: Dictionary = {}) -> Dictionary:
+	var wait: Dictionary = {
+		"type": &"wait",
+		"wait": WAIT_FRAMES,
+		"frames": maxi(0, frames),
+		"source": _request.duplicate(true),
+	}
+	for key: Variant in values:
+		wait[key] = values[key]
+	_pending = wait
 	return {"ok": true}
 
 
@@ -2930,7 +3057,7 @@ func _complete_result() -> Dictionary:
 	var result: Dictionary = {
 		"ok": true,
 		"status": &"complete",
-		"events": _events.duplicate(true),
+		"events": _drain_events(),
 		"source": _request.duplicate(true),
 		"warp": _staged_warp.duplicate(true),
 		"commands": _command_count,
@@ -2950,7 +3077,7 @@ func _recovered_result(recovery: Dictionary) -> Dictionary:
 	return {
 		"ok": true,
 		"status": &"recovered",
-		"events": _events.duplicate(true),
+		"events": _drain_events(),
 		"source": _request.duplicate(true),
 		"recovery": recovery.duplicate(true),
 		"commands": _command_count,
@@ -3028,12 +3155,22 @@ func _battle_request_values() -> Dictionary:
 	return out
 
 
+## The events emitted since the last result, and only those. An invocation that
+## stops four times hands each event to its caller once, because a caller applies
+## and reacts to what a result carries: repeating the list would move an object
+## twice and start a screen shake on every later pause.
+func _drain_events() -> Array:
+	var drained: Array = _events.duplicate(true)
+	_events.clear()
+	return drained
+
+
 func _waiting_result() -> Dictionary:
 	return {
 		"ok": true,
 		"status": &"waiting",
 		"event": _pending.duplicate(true),
-		"events": _events.duplicate(true),
+		"events": _drain_events(),
 		"source": _request.duplicate(true),
 		"commands": _command_count,
 	}
@@ -3051,7 +3188,7 @@ func _failure_result() -> Dictionary:
 		"status": &"failed",
 		"reason": _failure.get("reason", &"script_failed"),
 		"details": _failure.get("details", {}),
-		"events": _events.duplicate(true),
+		"events": _drain_events(),
 		"source": _request.duplicate(true),
 		"commands": _command_count,
 	}

@@ -17,6 +17,8 @@ const TEXT_DELAY_FAST: int = 1
 const TEXT_DELAY_MED: int = 3
 const TEXT_DELAY_SLOW: int = 5
 const TEXT_DELAY_MASK: int = 0b111
+## The delays above are frame counts, so a rate needs the frame.
+const FRAME_SECONDS: float = 1.0 / 60.0
 const TEXT_DELAYS: Array[int] = [TEXT_DELAY_FAST, TEXT_DELAY_MED, TEXT_DELAY_SLOW]
 
 ## Both of these read backwards: `options_menu.asm` `Options_BattleScene`
@@ -104,6 +106,22 @@ func to_source_bytes() -> PackedByteArray:
 	]
 	bytes[OFFSET_OPTIONS2] = (1 << BIT_MENU_ACCOUNT) if menu_account else 0
 	return bytes
+
+
+## Frames `PrintLetterDelay` waits between two characters: the low three bits of
+## `wOptions`, unless `wTextboxFlags`' FAST_TEXT_DELAY bit is clear, which is the
+## routine's own `.fast` branch and overrides the row with one frame
+## (`home/print_text.asm`).
+func text_delay_frames() -> int:
+	if not fast_text_delay:
+		return TEXT_DELAY_FAST
+	return TEXT_DELAYS[clampi(text_speed, 0, TEXT_DELAYS.size() - 1)]
+
+
+## The same thing as a rate, which is what a text box driven by elapsed time
+## needs: 60, 20 or 12 characters a second. See [member Gen2TextBox.reveal_speed].
+func text_reveal_speed() -> float:
+	return 1.0 / (FRAME_SECONDS * float(text_delay_frames()))
 
 
 ## Reads a cartridge block back. A short block is refused rather than padded,

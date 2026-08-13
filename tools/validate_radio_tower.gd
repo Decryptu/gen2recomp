@@ -243,6 +243,9 @@ func _open(data: GameData, id: Array, cell: Vector2i, flags: Array) -> Gen2World
 	# own callbacks have to run before anything is read off the grid.
 	var _entry: Array = world.dispatch_map_entry()
 	for _step: int in 8:
+		if not world.pending_script_wait().is_empty():
+			world.finish_script_waits()
+			continue
 		if world.pending_script_input().is_empty():
 			break
 		world.run_event_queue(true)

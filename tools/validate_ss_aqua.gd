@@ -227,6 +227,9 @@ func _drive_sealed_corridor(data: GameData, game_id: StringName) -> void:
 		):
 			return
 		for _attempt: int in 16:
+			if not world.pending_script_wait().is_empty():
+				results = world.finish_script_waits()
+				continue
 			if world.pending_script_input().is_empty():
 				break
 			results = world.run_event_queue(true)

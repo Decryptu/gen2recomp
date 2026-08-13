@@ -125,6 +125,32 @@ static func from_event(
 	return out
 
 
+## Carries the live presentation of the object this one replaces at the same
+## index on the same map: the emote it is showing, the trail it is still being
+## drawn walking, and whether a movement stream deleted it.
+##
+## The cartridge never rebuilds an object struct for any of the reasons this
+## project rebuilds a record: `ApplyObjectFacing`, `CopyDECoordsToMapObject` and
+## the variable-sprite table all write into the struct that is already there.
+## Without this, a `turnobject` between a `showemote` and its `applymovement`
+## takes the emote down and empties the trail the script is waiting on.
+func carry_presentation_from(previous: Gen2WorldObject) -> void:
+	if previous == null:
+		return
+	emote_id = previous.emote_id
+	emote_visible = previous.emote_visible
+	emote_remaining = previous.emote_remaining
+	step_direction = previous.step_direction
+	step_frames_total = previous.step_frames_total
+	step_frames_remaining = previous.step_frames_remaining
+	queued_steps = previous.queued_steps.duplicate(true)
+	scripted_steps = previous.scripted_steps
+	step_frame = previous.step_frame
+	frame = previous.frame
+	idle_frames_remaining = previous.idle_frames_remaining
+	deleted = previous.deleted
+
+
 func initial_facing() -> int:
 	match movement:
 		MOVEMENT_FIXED_UP:
@@ -310,6 +336,19 @@ func queue_step(direction: Vector2i, frames: int) -> void:
 	_begin_step(direction, frames)
 
 
+## Adds a `step_sleep` to the same trail: frames the stream spends standing.
+## STEP_TYPE_SLEEP writes STANDING into OBJECT_WALKING, so this walks nothing
+## and moves nothing, but the script waiting on the stream still waits for it.
+func queue_wait(frames: int) -> void:
+	queue_step(Vector2i.ZERO, sleep_frames(frames))
+
+
+## `StepFunction_Sleep` decrements OBJECT_STEP_DURATION before testing it, so a
+## zero-length sleep wraps a whole byte instead of ending at once.
+static func sleep_frames(length: int) -> int:
+	return length if length > 0 else 0x100
+
+
 func _begin_step(direction: Vector2i, frames: int) -> void:
 	step_direction = direction
 	step_frames_total = maxi(0, frames)
@@ -322,7 +361,8 @@ func _begin_step(direction: Vector2i, frames: int) -> void:
 func tick_step() -> bool:
 	if step_frames_remaining <= 0:
 		return false
-	advance_walk_frame()
+	if step_direction != Vector2i.ZERO:
+		advance_walk_frame()
 	step_frames_remaining -= 1
 	if step_frames_remaining <= 0:
 		if queued_steps.is_empty():

@@ -2,14 +2,15 @@ extends SceneTree
 
 ## Traces `MeetMomRightScript` through the world screen, frame by frame.
 ##
-##   Godot --headless --path . -s res://tools/preview_mom_scene.gd -- <game> [png]
+##   Godot --headless --path . -s res://tools/preview_mom_scene.gd -- <game> [png] [frame]
 ##
 ## The story walker already proves the script's own results on [Gen2WorldAPI];
 ## what it cannot say is whether the presentation runs. This drives the real
 ## screen at the source frame rate from the cell the coord event sits on and
 ## reports, per frame: the script's state, the object `applymovement` is walking,
-## and whether the text box is up. A `png` argument writes the frame the walk
-## ends on.
+## and whether the text box is up. A `png` argument writes a frame, the last one
+## traced unless a `frame` number names an earlier one, so the emote, the walk
+## and the box can each be looked at.
 ##
 ## `maps/PlayersHouse1F.asm`: the two coord events at (8,4) and (9,4) are
 ## Crystal's trigger. Gold and Silver ship none; their scene 0 is an `sdefer` of
@@ -29,6 +30,7 @@ const TRIGGER_CELL := Vector2i(9, 4)
 
 var _screen: Gen2WorldScreen = null
 var _output_path: String = ""
+var _capture_frame: int = TRACE_FRAMES
 var _frames: int = 0
 var _started: bool = false
 var _trace: Array[Dictionary] = []
@@ -37,12 +39,14 @@ var _trace: Array[Dictionary] = []
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.is_empty():
-		push_error("Usage: preview_mom_scene.gd -- <game> [out.png]")
+		push_error("Usage: preview_mom_scene.gd -- <game> [out.png] [frame]")
 		quit(1)
 		return
 	var game: StringName = StringName(args[0])
 	if args.size() > 1:
 		_output_path = args[1]
+	if args.size() > 2:
+		_capture_frame = maxi(1, int(args[2]))
 
 	var sha1: String = RomRegistry.sha1_for(game)
 	var directory: String = RomCache.directory_for(game, sha1) if not sha1.is_empty() else ""
@@ -95,6 +99,13 @@ func _sample() -> Dictionary:
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames < 3:
+		# The development caption and hint are drawn over a 160x144 window, so a
+		# capture of the game itself loses them. Done from here because the
+		# screen's own nodes are not resolved until it has run a frame.
+		for label: StringName in [&"Caption", &"Hint"]:
+			var node: CanvasItem = _screen.get_node_or_null(NodePath(label)) as CanvasItem
+			if node != null:
+				node.visible = false
 		return false
 	# The clock is the trace's, not the renderer's, so the report is the same on
 	# every run.
@@ -104,12 +115,12 @@ func _process(_delta: float) -> bool:
 		_screen.move_player(Vector2i(0, 1))
 	_screen._process(FRAME)
 	_trace.append(_sample())
-	if _frames < TRACE_FRAMES:
+	if _frames == _capture_frame and not _output_path.is_empty():
+		root.get_texture().get_image().save_png(_output_path)
+		print("Wrote %s at frame %d" % [_output_path, _frames])
+	if _frames < maxi(TRACE_FRAMES, _capture_frame):
 		return false
 	_report()
-	if not _output_path.is_empty():
-		root.get_texture().get_image().save_png(_output_path)
-		print("Wrote %s" % _output_path)
 	quit(0)
 	return true
 

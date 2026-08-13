@@ -73,6 +73,9 @@ func _verify_map(data: GameData, game_id: StringName, name: String, id: Array) -
 	# callbacks is what puts it on the world. Nothing else writes one.
 	var _entry: Array = world.dispatch_map_entry()
 	for _step: int in 8:
+		if not world.pending_script_wait().is_empty():
+			world.finish_script_waits()
+			continue
 		if world.pending_script_input().is_empty():
 			break
 		world.run_event_queue(true)
@@ -192,6 +195,9 @@ func _drive_blackthorn(data: GameData, game_id: StringName) -> void:
 
 	var results: Array = world.run_event_queue(false)
 	for _step: int in 16:
+		if not world.pending_script_wait().is_empty():
+			results = world.finish_script_waits()
+			continue
 		if world.pending_script_input().is_empty():
 			break
 		results = world.run_event_queue(true)

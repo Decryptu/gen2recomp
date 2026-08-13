@@ -302,6 +302,22 @@ func test_command_parser_reads_scripted_overworld_feature_operands() -> void:
 	assert_eq(delete_queue["name"], &"delcmdqueue")
 	assert_eq(delete_queue["value"], 2)
 
+	## Both are two bytes wide, and the operand is the delay they spend: without
+	## it every pause in the corpus read as zero.
+	var pause: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x8B, 15]), 0, true
+	)
+	assert_true(pause["ok"])
+	assert_eq(pause["name"], &"pause")
+	assert_eq(pause["value"], 15)
+
+	var deactivate: Dictionary = Gen2WorldScript.command_at(
+		PackedByteArray([0x8C, 4]), 0, true
+	)
+	assert_true(deactivate["ok"])
+	assert_eq(deactivate["name"], &"deactivatefacing")
+	assert_eq(deactivate["value"], 4)
+
 
 ## macros/scripts/maps.asm's `cmdqueue`: a type byte, a two-byte data pointer,
 ## then two filler bytes. A null type is the empty slot the cartridge leaves

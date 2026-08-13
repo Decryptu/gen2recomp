@@ -4336,7 +4336,10 @@ func _dragon_shrine_leg(
 			"reason": "Dragon's Den crossing failed: %s" % den_crossing.get("reason", ""),
 		}
 
-	var to_shrine: Dictionary = _warp_chain(world, save, random, data, [Vector2i(19, 29)])
+	# _warp_chain, not used here: it drains the destination's own map entry with
+	# default answers, and the shrine's map entry is the quiz. One entry, one
+	# quiz, driven below by this leg's own answers.
+	var to_shrine: Dictionary = _warp_walk(world, Vector2i(19, 29), save, random, data)
 	if not bool(to_shrine.get("ok", false)):
 		return {
 			"ok": false, "path": path,
@@ -9191,6 +9194,7 @@ func _drain_story(
 	var last_reason: String = ""
 	var last_details: String = ""
 	var pending_trace: Array[String] = []
+	var waits_spent: int = 0
 	var battles: Array = []
 	var catch_tutorials: int = 0
 	var hall_of_fame: int = _hall_of_fame_events(results)
@@ -9212,6 +9216,16 @@ func _drain_story(
 			results = _drain_phone_ring(world)
 			if results.is_empty():
 				last_reason = "phone ring did not finish"
+				break
+		elif input_type == &"wait":
+			## A movement or a counted delay. Nothing answers it, so the walk
+			## spends the frames the way the screen does.
+			var standing_in: Dictionary = world.pending_script_wait()
+			results = world.finish_script_waits()
+			waits_spent += 1
+			if not world.pending_script_wait().is_empty():
+				last_reason = "a script wait never ended"
+				last_details = JSON.stringify(standing_in)
 				break
 		elif input_type in [&"text", &"button"]:
 			results = world.run_event_queue(true)
@@ -9387,6 +9401,7 @@ func _drain_story(
 	return {
 		"statuses": statuses,
 		"waits": waits,
+		"waits_spent": waits_spent,
 		"pending_trace": pending_trace,
 		"battles": battles,
 		"purchases": purchases,

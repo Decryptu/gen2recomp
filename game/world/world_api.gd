@@ -200,6 +200,10 @@ var _player_step_accumulator: float = 0.0
 ## The rest of a scripted movement stream the player still has to be drawn
 ## walking, the way Gen2WorldObject.queued_steps holds an object's.
 var _player_queued_steps: Array = []
+## Whether the trail above belongs to a scripted stream rather than to a walk
+## the player asked for. Gen2WorldObject.scripted_steps for the player, and what
+## keeps an ordinary step in flight out of scripted_movement_in_progress().
+var _player_scripted_steps: bool = false
 ## The player's own OBJECT_STEP_FRAME. See Gen2WorldObject.step_frame.
 var _player_step_frame: int = 0
 ## Real time banked toward the next hardware frame of object movement, held
@@ -208,6 +212,10 @@ var _object_step_accumulator: float = 0.0
 ## The same for the presentation trail a scripted movement leaves, which is
 ## drained by its own driver because that one runs while a script does.
 var _scripted_step_accumulator: float = 0.0
+var _script_wait_accumulator: float = 0.0
+## Frames left of the counted wait a script is standing in, -1 while it is not
+## standing in one or has not started counting.
+var _script_wait_frames: int = -1
 ## Read-only mirror of the selected save's party, refreshed by the screen
 ## whenever the save or party changes. Gen2WorldAPI does not own a save, so
 ## this stays optional; a script that reads it while empty fails rather than
@@ -480,12 +488,14 @@ func player_walk_frame() -> int:
 
 func _start_player_step(direction: Vector2i, frames: int) -> void:
 	_player_queued_steps.clear()
+	_player_scripted_steps = false
 	_begin_player_step(direction, frames)
 
 
 ## One step of a scripted stream, behind whatever the player is already walking.
 ## See Gen2WorldObject.queue_step().
 func _queue_player_step(direction: Vector2i, frames: int) -> void:
+	_player_scripted_steps = true
 	if _player_step_frames_remaining > 0:
 		_player_queued_steps.append({"direction": direction, "frames": maxi(0, frames)})
 		return
@@ -504,6 +514,7 @@ func _clear_player_step() -> void:
 	_player_step_frames_remaining = 0
 	_player_step_accumulator = 0.0
 	_player_queued_steps.clear()
+	_player_scripted_steps = false
 	_player_step_frame = 0
 
 
@@ -525,9 +536,12 @@ func advance_player_step(delta: float) -> bool:
 		_player_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
 		_player_step_frame = (_player_step_frame + 1) & 0x0F
 		_player_step_frames_remaining -= 1
-		if _player_step_frames_remaining <= 0 and not _player_queued_steps.is_empty():
-			var next: Dictionary = _player_queued_steps.pop_front()
-			_begin_player_step(next["direction"], int(next["frames"]))
+		if _player_step_frames_remaining <= 0:
+			if _player_queued_steps.is_empty():
+				_player_scripted_steps = false
+			else:
+				var next: Dictionary = _player_queued_steps.pop_front()
+				_begin_player_step(next["direction"], int(next["frames"]))
 		changed = true
 	return changed
 
@@ -2390,6 +2404,14 @@ func pending_script_input() -> Dictionary:
 	return _active_script.pending_input() if _active_script != null else {}
 
 
+## The frame wait a running script is standing in, empty when it is not standing
+## in one. Distinct from [method pending_script_input] and
+## [method pending_runtime_request] because no host answers it: only frames do,
+## through [method advance_script_wait].
+func pending_script_wait() -> Dictionary:
+	return _active_script.pending_wait() if _active_script != null else {}
+
+
 ## Starts one callback type from the current map's callback table. A type of -1
 ## runs all callbacks in their stored order.
 func dispatch_callbacks(callback_type: int = -1) -> Array:
@@ -2563,7 +2585,7 @@ func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 		accept = false
 		selected_choice = -1
 		if StringName(result.get("status", &"")) == &"waiting":
-			results.append(result)
+			results.append(_apply_result_events(result))
 			break
 		results.append(_finish_script_result(result))
 		_active_script = null
@@ -2584,7 +2606,7 @@ func cancel_script_input() -> Array:
 	var results: Array = []
 	var advanced: Dictionary = _active_script.cancel_input()
 	if StringName(advanced.get("status", &"")) == &"waiting":
-		results.append(advanced)
+		results.append(_apply_result_events(advanced))
 		return results
 	results.append_array(_resume_after(advanced))
 	return results
@@ -2599,7 +2621,7 @@ func complete_runtime_request(result: Dictionary) -> Array:
 	var results: Array = []
 	var advanced: Dictionary = _active_script.complete_runtime_request(result)
 	if StringName(advanced.get("status", &"")) == &"waiting":
-		results.append(advanced)
+		results.append(_apply_result_events(advanced))
 		return results
 	if StringName(advanced.get("status", &"")) == &"recovered":
 		results.append(advanced)
@@ -2649,7 +2671,7 @@ func _drain_script_queue() -> Array:
 		)
 		var next: Dictionary = _active_script.advance()
 		if StringName(next.get("status", &"")) == &"waiting":
-			results.append(next)
+			results.append(_apply_result_events(next))
 			break
 		results.append(_finish_script_result(next) if bool(next.get("ok", false)) else next)
 		_active_script = null
@@ -3197,7 +3219,7 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 					)
 				reload_objects = true
 	if reload_objects and current_map != null:
-		_load_objects()
+		_load_objects(true)
 	return generated
 
 
@@ -3265,6 +3287,11 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				object.set_emote(object.emote_id, true)
 			&"hide_emote":
 				object.set_emote(object.emote_id, false)
+			&"step_sleep":
+				## STEP_TYPE_SLEEP counts OBJECT_STEP_DURATION down one frame at a
+				## time before the stream reads its next command, so a sleep is part
+				## of what an applymovement wait waits for.
+				object.queue_wait(int(command.get("length", 0)))
 			&"step_stop":
 				break
 			&"tree_shake":
@@ -3279,7 +3306,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 					"object_index": object_index,
 					"cell": object.cell,
 				})
-			&"step_sleep", &"set_sliding", &"remove_sliding", &"fix_facing", &"remove_fixed_facing":
+			&"set_sliding", &"remove_sliding", &"fix_facing", &"remove_fixed_facing":
 				pass
 			_:
 				generated.append({
@@ -3349,8 +3376,15 @@ func _apply_player_movement(event: Dictionary) -> Array:
 				"source": &"player_movement",
 			})
 			continue
+		if kind == &"step_sleep":
+			# The player's half of the same wait: Script_earthquake's own stream is
+			# `step_shake` and then a sleep, and the sleep is all of its duration.
+			_queue_player_step(
+				Vector2i.ZERO, Gen2WorldObject.sleep_frames(int(command.get("length", 0)))
+			)
+			continue
 		if kind in [
-			&"step_sleep", &"step_wait_end", &"set_sliding", &"remove_sliding",
+			&"step_wait_end", &"set_sliding", &"remove_sliding",
 			&"fix_facing", &"remove_fixed_facing",
 		]:
 			continue
@@ -3411,6 +3445,19 @@ func _validate_script_warp(map_group: int, map_number: int, cell: Vector2i) -> D
 	return {"ok": true}
 
 
+## Applies what a script emitted before it stopped, whether it stopped for good
+## or only to pause. A pause is a resume point rather than an ending in the
+## source: `applymovement` yields the frame it has queued the stream, and the
+## object has to be walking while the script waits for it. The runner drains its
+## own event list per result, so nothing here is applied twice.
+func _apply_result_events(result: Dictionary) -> Dictionary:
+	if not result.has("events"):
+		return result
+	for generated: Dictionary in _apply_script_object_events(result.get("events", [])):
+		result["events"].append(generated)
+	return result
+
+
 func _finish_script_result(result: Dictionary) -> Dictionary:
 	if not bool(result.get("ok", false)):
 		return result
@@ -3423,9 +3470,7 @@ func _finish_script_result(result: Dictionary) -> Dictionary:
 		)
 	if result.has("dst_enabled"):
 		set_daylight_saving_time_enabled(bool(result.get("dst_enabled", false)))
-	var generated_events: Array = _apply_script_object_events(result.get("events", []))
-	for generated: Dictionary in generated_events:
-		result["events"].append(generated)
+	_apply_result_events(result)
 	var warp: Variant = result.get("warp", {})
 	if warp is Dictionary and not (warp as Dictionary).is_empty():
 		var transition: Dictionary = _apply_script_warp(warp as Dictionary)
@@ -3899,6 +3944,88 @@ func advance_scripted_steps(delta: float) -> bool:
 			if object.tick_step():
 				changed = true
 	return changed
+
+
+## Spends the frames a script is waiting on and resumes it the frame its wait
+## ends, returning whatever that produced.
+##
+## The two waits are `ScriptEvents`'s own: SCRIPT_WAIT_MOVEMENT, which ends when
+## the stream an `applymovement` started has been drawn, and the counted delay
+## `pause`, `wait`, `deactivatefacing` and `showemote` spend. A host calls this
+## once per frame beside [method advance_scripted_steps], which is what draws
+## the movement the first one waits for.
+func advance_script_wait(delta: float) -> Array:
+	var wait: Dictionary = pending_script_wait()
+	if wait.is_empty():
+		_script_wait_accumulator = 0.0
+		_script_wait_frames = -1
+		return []
+	if StringName(wait.get("wait", &"")) == Gen2WorldScriptRunner.WAIT_MOVEMENT:
+		if scripted_movement_in_progress():
+			return []
+		return _complete_script_wait()
+	if _script_wait_frames < 0:
+		_script_wait_frames = maxi(0, int(wait.get("frames", 0)))
+		_script_wait_accumulator = 0.0
+	_script_wait_accumulator = minf(
+		_script_wait_accumulator + maxf(delta, 0.0),
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
+	)
+	while _script_wait_accumulator >= Gen2WorldAnimation.FRAME_SECONDS \
+		and _script_wait_frames > 0:
+		_script_wait_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+		_script_wait_frames -= 1
+	if _script_wait_frames > 0:
+		return []
+	return _complete_script_wait()
+
+
+## Whether anything a script set walking is still being drawn. This is
+## wStateFlags' SCRIPTED_MOVEMENT_STATE_F: one flag for all of them, cleared by
+## whichever stream reaches its own `step_end`.
+func scripted_movement_in_progress() -> bool:
+	if _player_scripted_steps and player_step_in_progress():
+		return true
+	for object: Gen2WorldObject in objects:
+		if object.scripted_steps and not object.deleted:
+			return true
+	return false
+
+
+func _complete_script_wait() -> Array:
+	_script_wait_accumulator = 0.0
+	_script_wait_frames = -1
+	if _active_script == null:
+		return []
+	var advanced: Dictionary = _active_script.complete_wait()
+	if StringName(advanced.get("status", &"")) == &"waiting":
+		return [_apply_result_events(advanced)]
+	return _resume_after(advanced)
+
+
+## One hardware frame of every presentation a script waits on, for a caller with
+## no render loop of its own: the trails and then the wait that is watching them.
+## A screen calls the three parts itself, in the order it already draws them.
+func advance_script_presentation(delta: float) -> Array:
+	advance_player_step(delta)
+	advance_scripted_steps(delta)
+	return advance_script_wait(delta)
+
+
+## Spends whole waits at the hardware frame rate until the script is no longer
+## standing in one, and returns what resuming it produced last. The entry point
+## for a headless caller that has nothing to draw; [param frame_limit] bounds a
+## wait nothing can end rather than hanging on it, so a caller checks
+## [method pending_script_wait] afterwards to tell a spent wait from a stuck one.
+func finish_script_waits(frame_limit: int = 1024) -> Array:
+	var results: Array = []
+	for _frame: int in frame_limit:
+		if pending_script_wait().is_empty():
+			break
+		var spent: Array = advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+		if not spent.is_empty():
+			results = spent
+	return results
 
 
 ## Keeps a moved or turned object's live cell and facing across the map reloads
@@ -4448,7 +4575,11 @@ func _on_world_state_changed() -> void:
 	set_object_time(object_hour, object_time_of_day)
 
 
-func _load_objects() -> void:
+## [param carry_presentation] keeps the live emote and movement trail of the
+## records being replaced, for the reloads that happen inside one visit to a map
+## rather than on the way into it. See Gen2WorldObject.carry_presentation_from().
+func _load_objects(carry_presentation: bool = false) -> void:
+	var previous: Array = objects if carry_presentation else []
 	objects = []
 	if current_map == null or data == null:
 		return
@@ -4483,6 +4614,8 @@ func _load_objects() -> void:
 			object.cell = _object_position_overrides[key]
 		if _object_facing_overrides.has(key):
 			object.facing = int(_object_facing_overrides[key])
+		if index < previous.size():
+			object.carry_presentation_from(previous[index] as Gen2WorldObject)
 		objects.append(object)
 	set_object_time(object_hour, object_time_of_day)
 

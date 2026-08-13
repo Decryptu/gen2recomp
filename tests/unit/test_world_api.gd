@@ -298,6 +298,44 @@ func _world(
 	return Gen2WorldAPI.open(data, 1, 1, start, world_state)
 
 
+## Spends the frames a script's own waits ask for and returns every result the
+## run produced, the dispatched ones first. A script that moves anything stops
+## at the movement it started, so a test that only wants the end of one drives
+## it through here rather than reading the first result.
+func _run_script(world: Gen2WorldAPI, dispatched: Array) -> Array:
+	var results: Array = dispatched.duplicate()
+	for _frame: int in 1024:
+		if world.pending_script_wait().is_empty():
+			break
+		results.append_array(
+			world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+		)
+	return results
+
+
+func _final_status(results: Array) -> StringName:
+	if results.is_empty():
+		return &""
+	return StringName((results[results.size() - 1] as Dictionary).get("status", &""))
+
+
+## Every event the whole run emitted. The runner hands each one to its caller
+## once, on the result that follows it, so a script with waits in it spreads
+## them over several results.
+func _all_events(results: Array) -> Array:
+	var events: Array = []
+	for result: Dictionary in results:
+		events.append_array(result.get("events", []))
+	return events
+
+
+func _event_types(results: Array) -> Array[StringName]:
+	var types: Array[StringName] = []
+	for event: Dictionary in _all_events(results):
+		types.append(StringName(event.get("type", &"")))
+	return types
+
+
 func _write_service_cache() -> void:
 	RomCache.write_json(RomCache.world_marts_path(_directory), {
 		"marts": [{"index": 0, "bank": 48, "address": 0x4000, "items": [7]}],
@@ -3328,9 +3366,11 @@ func test_script_applymovement_executes_imported_object_and_player_streams() -> 
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	var results: Array = world.dispatch_script_events()
-	assert_eq(results.size(), 1)
-	assert_eq(results[0]["status"], &"complete")
+	var dispatched: Array = world.dispatch_script_events()
+	assert_eq(dispatched.size(), 1)
+	assert_eq(dispatched[0]["status"], &"waiting", "the first stream holds the script")
+	assert_eq(dispatched[0]["event"]["wait"], Gen2WorldScriptRunner.WAIT_MOVEMENT)
+	assert_eq(_final_status(_run_script(world, dispatched)), &"complete")
 	assert_eq((world.objects[0] as Gen2WorldObject).cell, Vector2i(6, 6))
 	assert_eq(world.player_cell, Vector2i(7, 5))
 
@@ -3352,13 +3392,10 @@ func test_script_movement_publishes_source_shake_effects() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	var results: Array = world.dispatch_script_events()
-	assert_eq(results.size(), 1)
-	assert_eq(results[0]["status"], &"complete")
-	var events: Array = results[0]["events"]
-	var types: Array[StringName] = []
-	for event: Dictionary in events:
-		types.append(StringName(event.get("type", &"")))
+	var results: Array = _run_script(world, world.dispatch_script_events())
+	assert_eq(_final_status(results), &"complete")
+	var events: Array = _all_events(results)
+	var types: Array[StringName] = _event_types(results)
 	assert_true(types.has(&"screen_shake_requested"))
 	assert_true(types.has(&"tree_shake_requested"))
 	assert_true(types.has(&"rock_smash_effect_requested"))
@@ -3381,9 +3418,8 @@ func test_script_movement_steps_through_a_wall_the_way_normal_step_does() -> voi
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
 	assert_false(world.can_walk_to(Vector2i(9, 6)), "the fixture wall moved")
-	var results: Array = world.dispatch_script_events(Vector2i(7, 6))
-	assert_eq(results.size(), 1)
-	assert_eq(results[0]["status"], &"complete")
+	var results: Array = _run_script(world, world.dispatch_script_events(Vector2i(7, 6)))
+	assert_eq(_final_status(results), &"complete")
 	assert_eq(world.player_cell, Vector2i(9, 6))
 
 
@@ -3410,7 +3446,8 @@ func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> v
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	var dispatched: Array = world.dispatch_script_events()
+	assert_eq(dispatched[0]["status"], &"waiting", "the stream holds the script")
 
 	# turn_step faced down and moved nothing; turn_in stepped one cell up and
 	# left the player facing the way it named.
@@ -3421,6 +3458,7 @@ func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> v
 	for _call: int in 2:
 		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
+	assert_eq(_final_status(_run_script(world, dispatched)), &"complete")
 
 
 func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -> void:
@@ -3435,7 +3473,7 @@ func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	var object: Gen2WorldObject = world.objects[0]
 	var start: Vector2i = object.cell
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 
 	assert_eq(object.cell, start + Vector2i(2, 0), "both cells commit at once")
 	assert_eq(object.step_offset_cells(), Vector2(-2.0, 0.0), "and the drawing is behind both")
@@ -3450,6 +3488,153 @@ func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -
 		world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
 	assert_false(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS))
+
+
+## `Script_applymovement` sets SCRIPT_WAIT_MOVEMENT and StopScript, and
+## `WaitScriptMovement` holds the script until the stream clears
+## SCRIPTED_MOVEMENT_STATE_F, which `Movement_step_end` is what does. So the
+## command after it does not run until the object has been drawn walking, which
+## is what kept a text box off the top of Mom's walk.
+func test_applymovement_holds_the_script_until_the_trail_has_been_drawn() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		# applymovement, then the fixture text the wait must not reach.
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x4C, 0x00, 0x70, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+
+	var dispatched: Array = world.dispatch_script_events()
+	assert_eq(dispatched[0]["status"], &"waiting")
+	assert_eq(dispatched[0]["event"]["type"], &"wait")
+	assert_eq(dispatched[0]["event"]["wait"], Gen2WorldScriptRunner.WAIT_MOVEMENT)
+	assert_true(world.scripted_movement_in_progress())
+	assert_true(world.pending_runtime_request().is_empty(), "no host answers a wait")
+
+	# Two `step` commands, so the wait outlasts the first one's frames.
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		assert_true(
+			world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS).is_empty()
+		)
+	assert_false(world.pending_script_wait().is_empty(), "one step still to draw")
+	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0))
+
+	var resumed: Array = world.finish_script_waits()
+	assert_false(object.scripted_steps)
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+	assert_eq(StringName((resumed[0] as Dictionary).get("status", &"")), &"waiting")
+	assert_eq((resumed[0] as Dictionary)["event"]["text"], "AB")
+
+
+## `Movement_step_sleep_common` puts the object in STEP_TYPE_SLEEP for its own
+## count before the stream reads on, so a sleep is part of what the wait waits
+## for even though nothing moves.
+func test_a_movement_sleep_holds_the_wait_without_moving_anything() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		# step_sleep 8, step_end.
+		"48:6100": [0x45, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	var start: Vector2i = object.cell
+
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+	for _frame: int in 7:
+		world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+	assert_false(world.pending_script_wait().is_empty(), "eight frames of sleep")
+	assert_eq(object.cell, start)
+	assert_eq(object.walk_frame(), 0, "STEP_TYPE_SLEEP stands still")
+
+	assert_eq(_final_status(world.finish_script_waits()), &"complete")
+	assert_eq(object.cell, start)
+
+
+## `Script_pause` delays two frames per counted unit inside the command, and
+## `Script_deactivatefacing` hands the same count to SCRIPT_WAIT, which
+## `WaitScript` spends one a frame. Both write wScriptDelay only when their
+## operand is nonzero, which is what makes `pause 0` reuse it.
+func test_pause_and_deactivatefacing_spend_their_own_frame_counts() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# pause 3, deactivatefacing 0, end.
+	scripts["48:6160"] = [0x8B, 3, 0x8C, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6160,
+	})
+
+	assert_eq(runner.advance()["status"], &"waiting")
+	assert_eq(runner.pending_wait()["frames"], 6, "three units of two frames")
+
+	assert_eq(runner.complete_wait()["status"], &"waiting")
+	assert_eq(
+		runner.pending_wait()["frames"], 3,
+		"a zero operand reuses wScriptDelay, and WaitScript spends one a frame"
+	)
+	assert_eq(runner.complete_wait()["status"], &"complete")
+
+
+## `Script_earthquake` is `ScriptCall` on `applymovement PLAYER,
+## wEarthquakeMovementDataBuffer`, whose stream shakes and then sleeps the low
+## six bits of the operand.
+func test_earthquake_waits_out_the_sleep_its_own_movement_carries() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6170"] = [0x78, 84, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6170,
+	})
+
+	var result: Dictionary = runner.advance()
+
+	assert_eq(result["status"], &"waiting")
+	assert_eq(runner.pending_wait()["frames"], 84 & 0x3F)
+	assert_true(result["events"].any(func(event: Dictionary) -> bool:
+		return event.get("type", &"") == &"earthquake_requested" \
+			and int(event.get("strength", 0)) == 84
+	), JSON.stringify(result["events"]))
+	assert_eq(runner.complete_wait()["status"], &"complete")
+
+
+## An event is handed to its caller once. The runner drains its list on every
+## result, because the caller is what applies a movement and starts a screen
+## shake: repeating the list on the next pause would do both twice.
+func test_a_script_hands_each_event_to_its_caller_once() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# earthquake 4, pause 1, end.
+	scripts["48:6180"] = [0x78, 4, 0x8B, 1, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6180,
+	})
+
+	var shaken: Dictionary = runner.advance()
+	assert_eq(_types_of(shaken).count(&"earthquake_requested"), 1)
+
+	var paused: Dictionary = runner.complete_wait()
+	assert_eq(paused["status"], &"waiting")
+	assert_eq(
+		_types_of(paused).count(&"earthquake_requested"), 0,
+		"the shake was already delivered"
+	)
+
+
+func _types_of(result: Dictionary) -> Array[StringName]:
+	var types: Array[StringName] = []
+	for event: Dictionary in result.get("events", []):
+		types.append(StringName(event.get("type", &"")))
+	return types
 
 
 ## The two drivers own different objects. advance_object_steps() decides
@@ -3467,7 +3652,7 @@ func test_the_movement_driver_leaves_a_scripted_trail_to_its_own_driver() -> voi
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
 	var object: Gen2WorldObject = world.objects[0]
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 	assert_true(object.scripted_steps)
 
 	var random := RandomNumberGenerator.new()
@@ -3492,7 +3677,7 @@ func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 
 	assert_eq(world.player_cell, Vector2i(7, 4), "both cells commit at once")
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 2.0))
@@ -3521,10 +3706,10 @@ func test_script_movement_still_refuses_a_step_off_the_map() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(15, 6))
-	var results: Array = world.dispatch_script_events(Vector2i(7, 6))
-	assert_eq(results.size(), 1)
-	assert_eq(results[0]["status"], &"complete")
+	var results: Array = _run_script(world, world.dispatch_script_events(Vector2i(7, 6)))
+	assert_eq(_final_status(results), &"complete")
 	assert_eq(world.player_cell, Vector2i(15, 6))
+	assert_true(_event_types(results).has(&"movement_blocked"))
 
 
 func test_follow_command_moves_the_follower_after_a_player_step() -> void:
@@ -3833,13 +4018,17 @@ func test_wait_is_timing_only_and_reports_its_frame_count() -> void:
 
 	var result: Dictionary = runner.advance()
 
-	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(runner.pending_wait()["wait"], Gen2WorldScriptRunner.WAIT_FRAMES)
+	assert_eq(runner.pending_wait()["frames"], 120, "twenty units of six frames")
 	assert_eq(state.event_flags().size(), 0)
 	assert_true(result["events"].any(func(event: Dictionary) -> bool:
 		return event.get("type", &"") == &"script_timing_requested" \
 			and event.get("kind", &"") == &"wait" \
 			and int(event.get("frames", 0)) == 120
 	), JSON.stringify(result["events"]))
+	assert_eq(runner.advance(true)["status"], &"waiting", "a button does not end it")
+	assert_eq(runner.complete_wait()["status"], &"complete")
 
 
 ## Script_newloadmap sets hMapEntryMethod and re-enters the map, then yields
@@ -4666,7 +4855,9 @@ func test_movement_remove_object_is_live_until_the_next_map_reload() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6130
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	assert_eq(
+		_final_status(_run_script(world, world.dispatch_script_events())), &"complete"
+	)
 	assert_eq(world.visible_objects().size(), 0)
 
 	world.reload_current_map()
@@ -4709,19 +4900,31 @@ func test_scripted_change_block_refresh_and_command_queue_state_are_explicit() -
 	assert_eq(world.block_at(7, 1), 1)
 
 
-func test_scripted_emote_is_visible_for_its_bounded_duration() -> void:
+## Script_showemote is `ScriptCall ShowEmoteScript`, whose middle command is
+## `pause 0` over the delay this one just wrote into wScriptDelay. So the third
+## operand holds the script rather than counting down on the object, and the
+## emote comes back down from the same script's last command.
+func test_scripted_emote_holds_the_script_for_its_own_pause() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
 		"48:6150": [0x75, 1, 2, 2, 0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6150
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
-	assert_eq(world.dispatch_script_events()[0]["status"], &"complete")
+	var dispatched: Array = world.dispatch_script_events()
+	assert_eq(dispatched[0]["status"], &"waiting")
+	assert_eq(dispatched[0]["event"]["frames"], 4, "two units of two frames")
 	var object: Gen2WorldObject = world.objects[0]
 	assert_true(object.emote_visible)
 	assert_eq(object.emote_id, 1)
-	assert_false(world.tick())
-	assert_true(world.tick())
+
+	for _frame: int in 3:
+		assert_true(world.advance_script_wait(Gen2WorldAnimation.FRAME_SECONDS).is_empty())
+	assert_true(object.emote_visible, "still up while the pause runs")
+	assert_false(world.tick(), "and not on a countdown of its own")
+
+	var finished: Array = world.advance_script_wait(Gen2WorldAnimation.FRAME_SECONDS)
+	assert_eq(_final_status(finished), &"complete")
 	assert_false(object.emote_visible)
 
 
