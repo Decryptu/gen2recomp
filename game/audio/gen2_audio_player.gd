@@ -59,6 +59,7 @@ func play_record(
 	request_kind: StringName,
 	assets: Dictionary = {},
 	restart: bool = false,
+	cry_tracks: int = 0,
 ) -> Dictionary:
 	if request_kind == &"music_fadeout":
 		return {"ok": true, "played": fade_out(int(record.get("fade_time", 0)))}
@@ -83,6 +84,11 @@ func play_record(
 	var started: bool = false
 	match request_kind:
 		&"cry", &"cries", &"mon_cry":
+			# `PlayStereoCry` writes wCryTracks and puts 1 in wStereoPanningMask;
+			# `PlayMonCry2` zeroes both. Written per request rather than kept, so
+			# one battler's side cannot leak into the next cry.
+			_engine.cry_tracks = cry_tracks
+			_engine.stereo_panning_mask = 1 if cry_tracks != 0 else 0
 			started = _engine.play_cry(record)
 		&"sound", &"sfx":
 			started = _engine.play_sfx(record)
@@ -123,6 +129,21 @@ func stop_all() -> void:
 	if _player != null:
 		_player.stop()
 	_playback = null
+
+
+## `wLowHealthAlarm`'s DANGER_ON bit, which is what `PlayDanger` runs off.
+## `HandleHPPals` sets it while the player's bar is HP_RED and clears it
+## otherwise; `StopDangerSound` and `CleanUpBattleRAM` zero the byte whole,
+## which is what clearing it here does, timer and all.
+func set_low_health_alarm(on: bool) -> void:
+	if on:
+		_engine.low_health_alarm |= 1 << Gen2SoundEngine.DANGER_ON_BIT
+		return
+	_engine.low_health_alarm = 0
+
+
+func low_health_alarm() -> bool:
+	return (_engine.low_health_alarm & (1 << Gen2SoundEngine.DANGER_ON_BIT)) != 0
 
 
 ## `_CheckSFX`, which is what `waitsfx` and the battle screen wait on.

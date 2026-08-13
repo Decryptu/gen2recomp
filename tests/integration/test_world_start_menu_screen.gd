@@ -95,7 +95,7 @@ func test_cancel_closes_the_menu_the_same_as_exit() -> void:
 	assert_true(_world_screen._objects_may_move())
 
 
-func test_pokemon_opens_the_embedded_party_screen_and_returns() -> void:
+func test_pokemon_opens_the_embedded_party_screen_and_reopens_the_menu() -> void:
 	await _open_world()
 	_world_screen._world.set_party_summary(1, false)
 	_world_screen._open_start_menu()
@@ -112,6 +112,11 @@ func test_pokemon_opens_the_embedded_party_screen_and_returns() -> void:
 	party.close_embedded()
 	await get_tree().process_frame
 	assert_null(_world_screen._party_host)
+	# `StartMenu_Pokemon`'s `.return` reaches `CloseSubmenu` and returns 0, which
+	# `.MenuReturns` sends to `.Reopen`.
+	assert_not_null(_world_screen._start_menu_host, "the menu is drawn again")
+	_world_screen._start_menu_host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
 	assert_true(_world_screen._objects_may_move())
 
 
@@ -670,7 +675,7 @@ func test_b_returns_to_the_list_from_a_value_row() -> void:
 
 ## `StartMenu_Status`'s `farcall TrainerCard`, as an overlay the world screen
 ## owns the way it owns the party screen.
-func test_player_opens_the_trainer_card_and_b_returns_to_the_overworld() -> void:
+func test_player_opens_the_trainer_card_and_b_reopens_the_start_menu() -> void:
 	await _open_world()
 	_world_screen._open_start_menu()
 	await get_tree().process_frame
@@ -690,7 +695,11 @@ func test_player_opens_the_trainer_card_and_b_returns_to_the_overworld() -> void
 	card.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_null(_world_screen._trainer_card_host)
-	assert_true(_world_screen._objects_may_move())
+	# `StartMenu_Status` returns 0, which `.MenuReturns` sends to `.Reopen`.
+	assert_not_null(_world_screen._start_menu_host, "the menu is drawn again")
+	_world_screen._start_menu_host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_true(_world_screen._objects_may_move(), "and its own B is the way out")
 
 
 ## The play timer is the save's, and it counts hardware frames of the world
@@ -708,7 +717,7 @@ func test_the_play_timer_counts_while_the_world_runs() -> void:
 
 ## `StartMenu_Pokedex`'s `farcall Pokedex`, as an overlay the world screen owns
 ## the way it owns the trainer card.
-func test_pokedex_opens_from_the_start_menu_and_b_returns_to_the_overworld() -> void:
+func test_pokedex_opens_from_the_start_menu_and_b_reopens_the_start_menu() -> void:
 	await _open_world()
 	_world_screen._world.state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
 	_world_screen._world.state.set_species_seen(Fixture.TRAINER_SPECIES)
@@ -733,6 +742,10 @@ func test_pokedex_opens_from_the_start_menu_and_b_returns_to_the_overworld() -> 
 	dex.handle_button(Gen2Button.B)
 	await get_tree().process_frame
 	assert_null(_world_screen._pokedex_host)
+	# `StartMenu_Pokedex` returns 0 too.
+	assert_not_null(_world_screen._start_menu_host, "the menu is drawn again")
+	_world_screen._start_menu_host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
 	assert_true(_world_screen._objects_may_move())
 
 
