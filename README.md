@@ -31,7 +31,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   host resolves all of it without reopening the ROM.
 > - **Battles.** Parties, switching, running, stats, damage, accuracy, turn
 >   order, status and substatus effects, trainer AI, experience, levelling, move
->   learning and capture input on a real 160x144 screen.
+>   learning and capture input on a real 160x144 screen. In SHIFT a trainer's
+>   switch asks whether you want one too, and both that yes/no and the party
+>   list behind it are drawn on the hardware tile grid.
 > - **Overworld.** Real maps, map connections, script requests, trainer battles
 >   with imported win/loss text, map reloads, save-safe blackout recovery,
 >   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
@@ -228,9 +230,10 @@ only, along with the map and cell readout above and below the screen. A release
 export offers the eight buttons and nothing else; the methods behind each
 shortcut stay public, which is how `tools/preview_*.gd` drives them.
 
-Battle-screen moves are random and a full move set declines the learn offer; use
-`show_trainer(trainer_class)` for a real party and trainer AI, or `show_matchup`
-for a fallback pairing.
+Battle-screen moves are random; use `show_trainer(trainer_class)` for a real
+party and trainer AI, or `show_matchup` for a fallback pairing. A full move set,
+a trainer's switch under SHIFT and a Baton Pass each stop and ask, in the
+cartridge's own boxes.
 
 The world screen's start menu wires every source entry: Pokedex, Pokemon, Pack,
 Pokegear, Player, Save, Options and Exit.
@@ -304,6 +307,7 @@ all three games unless its row says otherwise:
 | `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
+| `preview_battle_switch.gd <game> <png> [offer\|pick] [presses]` | a real trainer's switch under SHIFT: `OfferSwitch`'s yes/no box over the field, or the party list behind it. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
 | `replay_world.gd [game ...] [frames]` | records `(frame, button)` from a run of the real world screen and replays it into a fresh world, over every map of the spawn group on each cartridge. The same seed and log must reach the same `Gen2WorldSnapshot` byte for byte, and must reach it whether the frames were pumped at 30 fps or at 144 |
 | `preview_collision.gd <game> <group> <number> <png>` | one whole map as drawn, with every walk cell's permission checkerboarded over it: red is wall, blue is water. For a report that the player can stand where they should not |
