@@ -157,10 +157,23 @@ func _apply(events: Array[Dictionary]) -> void:
 					_visible_id = &""
 			&"open_title":
 				_visible_id = &"title"
+			&"restart_opening":
+				# `TitleScreenEnd` jumps back to `IntroSequence`, which clears
+				# the screen before the copyright's own ten blank frames.
+				_visible_id = &""
 			&"title_menu":
 				# `Intro_MainMenu` is the launcher and the save screen here, so
 				# the answer this project has for the screen is New Game.
 				_cinema.select_title(&"new_game")
+			&"open_new_game":
+				# `NewGame` is the screen behind this one, so the opening is over
+				# and nothing else here spends a frame: without this the
+				# coordinator sits in its new-game phase and never finishes.
+				_cinema.finish_new_game()
+				_visible_id = &""
+				_refresh()
+				_finish()
+				return
 			&"play_sfx":
 				_play_sfx(int(event.get("sfx", 0)))
 			&"finish_intro":

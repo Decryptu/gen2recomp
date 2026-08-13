@@ -151,10 +151,11 @@ func _advance_title(held: Array) -> void:
 	match option:
 		Gen2TitleScene.OPTION_RESTART:
 			# `TitleScreenEnd` fades the music out and jumps back to
-			# `IntroSequence`, which is the whole opening again.
-			_emit(&"play_music", {"music": &"none", "restart": true})
-			_emit(&"restart_opening", {"profile": _profile})
+			# `IntroSequence`, which is the whole opening again. The restart runs
+			# first because [method start] empties the queue, and its own
+			# `play_music none` is the fade landing.
 			start(_profile, _intro_scene_lengths, _available, _sine)
+			_emit(&"restart_opening", {"profile": _profile})
 		Gen2TitleScene.OPTION_DELETE_SAVE_DATA, Gen2TitleScene.OPTION_RESET_CLOCK:
 			_emit(&"title_chord", {
 				"option": option,
