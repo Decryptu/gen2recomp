@@ -11,9 +11,10 @@ extends RefCounted
 ## bars are the screen's job.
 ##
 ## A side is a party, and a wild encounter is a party of one. The caller decides
-## which action a side takes and who replaces a fainted Pokémon: a turn that ends
-## with somebody down stops and says so through [method must_replace], and
-## nothing is sent out until [method send_out].
+## which action a side takes and answers the questions a turn stops on: one that
+## ends with somebody down says so through [method must_replace] and stands still
+## until [method replace_fallen], which is the only entry point besides
+## [method take_actions] that moves a battle on.
 
 ## The two sides, as plain numbers rather than an enum: they are dictionary keys
 ## and event payloads throughout, and an enum buys nothing where everything that
@@ -329,6 +330,10 @@ const SWITCH_BLOCKED: StringName = &"switch_blocked"
 ## `OfferSwitch`'s question, which only SHIFT ever reaches: the trainer is about
 ## to send [code]index[/code] out, and the player may change too.
 ## [method Gen2Battle.answer_switch_offer] is what closes it.
+##
+## Raised from two places, because `EnemySwitch` is: a trainer switching by
+## choice inside a turn, and a trainer replacing its own faint through
+## [method replace_fallen], where there is no turn left behind it.
 const SWITCH_OFFERED: StringName = &"switch_offered"
 
 ## Mist and Focus Energy, set on the user. Both fail with [constant MOVE_FAILED]
@@ -557,6 +562,12 @@ var _pending_switch_offer: int = -1
 ## `wOptions`' BATTLE_SHIFT bit, as the caller's own setting rather than a read
 ## of the options file: the engine is scene-free and takes its rules injected.
 var battle_style_set: bool = false
+
+## Whether `AskUseNextPokemon` has already been answered for the faint standing.
+## It is asked once: a NO whose run does not get away falls through to
+## `ForcePlayerMonChoice` rather than asking again. Cleared by the player's own
+## next entrance.
+var _use_next_answered: bool = false
 
 ## The side whose Pursuit already ran, in front of the switch it answered, or -1.
 ## `PursuitSwitch` writes `CANNOT_MOVE` over that side's move once it has, and
@@ -799,7 +810,13 @@ func has_fled() -> bool:
 ## `BATTLEPLAYERACTION_USEITEM`, so `BattleMenu_Run` falls through to
 ## `jp BattleMenu`. Only `.cant_escape_2`, the roll that came up short, spends
 ## the turn.
-func run_odds() -> Dictionary:
+##
+## [param runner_speed] is the Speed the caller hands the routine, which is not
+## always the Pokémon that is out: `BattleMenu_Run` passes `wBattleMonSpeed` and
+## `AskUseNextPokemon` passes `wPartyMon1Speed`. Below zero takes the former.
+## Everything else the run reads (the held item, the wrap counter) still comes off
+## the battle copy, since the source's `hl` covers the Speed word alone.
+func run_odds(runner_speed: int = -1) -> Dictionary:
 	if battle_type in ALWAYS_ESCAPES:
 		return {"outcome": &"fled", "how": &"battle_type", "battle_type": battle_type}
 	if battle_type in NEVER_ESCAPES:
@@ -824,7 +841,7 @@ func run_odds() -> Dictionary:
 	# wNumFleeAttempts rises before the arithmetic reads it, so the first attempt
 	# counts as one and the bonus loop below runs one fewer time than that.
 	var attempts: int = flee_attempts + 1
-	var speed: int = runner.stat("speed")
+	var speed: int = runner.stat("speed") if runner_speed < 0 else runner_speed
 	var enemy_speed: int = chaser.stat("speed")
 	if speed >= enemy_speed:
 		return {"outcome": &"fled", "how": &"speed", "attempts": attempts}
@@ -886,6 +903,128 @@ func awaiting_replacement() -> bool:
 	return must_replace(PLAYER) or must_replace(ENEMY)
 
 
+## `TryToRunAwayFromBattle` spent rather than only weighed: the odds rolled,
+## `wNumFleeAttempts` moved and the event appended. Answers the outcome, since
+## every caller has a different tail behind it.
+func _attempt_run(events: Array, runner_speed: int = -1) -> StringName:
+	var attempt: Dictionary = run_odds(runner_speed)
+	var outcome: StringName = StringName(attempt.get("outcome", &"roll"))
+	if outcome == &"roll":
+		# BattleRandom against the accumulated odds. The comparison is
+		# `cp b; jr nc`, so the odds getting away on a tie is the source's.
+		flee_attempts += 1
+		var rolled: int = rng.randi_range(0, FLEE_ODDS_RANGE - 1)
+		attempt["roll"] = rolled
+		outcome = &"fled" if int(attempt["odds"]) >= rolled else &"failed"
+		attempt["how"] = &"roll"
+	elif outcome != &"blocked":
+		flee_attempts += 1
+	match outcome:
+		&"fled":
+			_fled = true
+			events.append(_run_event(FLED, attempt))
+		&"blocked":
+			events.append(_run_event(RUN_BLOCKED, attempt))
+		_:
+			events.append(_run_event(RUN_FAILED, attempt))
+	return outcome
+
+
+## Whether `AskUseNextPokemon` has a question to put up: the player owes a
+## replacement and this is a wild battle. A trainer battle returns from the
+## routine at once, since "that decision is made for us", and the question is
+## asked once per faint. See [method answer_use_next].
+func asking_use_next() -> bool:
+	return must_replace(PLAYER) and not is_trainer_battle and not _use_next_answered
+
+
+## `AskUseNextPokemon`'s yes/no. YES leaves `ForcePlayerMonChoice` standing and
+## answers nothing; NO is `TryToRunAwayFromBattle`, which ends the battle when it
+## gets away and falls into that same forced choice when it does not.
+##
+## The Speed handed to the run is `wPartyMon1Speed`, the first party slot's, not
+## the Pokémon that just fainted: the source reads the party structure here
+## because the battle copy is a corpse.
+func answer_use_next(use_next: bool) -> Array:
+	if not asking_use_next():
+		return []
+	_use_next_answered = true
+	if use_next:
+		return []
+	var events: Array = []
+	if _attempt_run(events, _first_party_speed()) == &"fled":
+		events.append({"type": OVER, "winner": winner(), "fled": true})
+	return events
+
+
+## `wPartyMon1Speed`: the stored stat, with neither a badge boost nor a stage on
+## it, since neither is ever written back into the party structure.
+func _first_party_speed() -> int:
+	var first: Gen2BattleMon = party(PLAYER).at(0)
+	return 0 if first == null else int(first.stats.get("speed", 0))
+
+
+## Who [param side] sends out to replace a faint.
+##
+## The enemy's is `FindMonInOTPartyToSwitchIntoBattle`, the AI's own type-matchup
+## pick. The player's is asked rather than answered, so this is only the fallback
+## a caller with no opinion takes.
+func replacement_target(side: int) -> int:
+	if side == ENEMY:
+		return Gen2AISwitch.pick_target(self)
+	return party(side).first_healthy()
+
+
+## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail: whoever
+## owes a Pokémon sends one out. The entry point a faint is answered through, and
+## the one thing besides [method take_actions] that moves a battle on.
+##
+## [param index] is the player's own row out of `ForcePlayerMonChoice`, refused
+## the way the party menu refuses so the question stays standing. The enemy's is
+## never asked for.
+##
+## The order is `DoubleSwitch`'s: with both sides down the player enters first,
+## so the AI's pick is scored against whoever that turned out to be, and the
+## enemy arrives through `EnemySwitch_SetMode`, which asks nothing. Only a
+## trainer replacing on its own reaches `EnemySwitch`, whose SHIFT branch offers
+## the player a switch as well.
+func replace_fallen(index: int = -1) -> Array:
+	var events: Array = []
+	if is_over() or _pending_switch_offer >= 0 or _pending_baton_pass >= 0:
+		return events
+
+	if must_replace(PLAYER):
+		if not party(PLAYER).can_send_out(index):
+			return events
+		var doubled: bool = must_replace(ENEMY)
+		events.append_array(send_out(PLAYER, index))
+		if doubled:
+			_enemy_entrance(events, false)
+		return events
+
+	if must_replace(ENEMY):
+		_enemy_entrance(events, should_offer_switch())
+	return events
+
+
+## `EnemyPartyMonEntrance`: the trainer's own replacement, which is
+## `EnemySwitch_SetMode` when it simply walks in and `EnemySwitch` when SHIFT
+## makes it an offer first. The offer is closed by
+## [method answer_switch_offer], the same one a mid-turn switch raises.
+func _enemy_entrance(events: Array, offer: bool) -> void:
+	var target: int = replacement_target(ENEMY)
+	if target < 0:
+		return
+	if not offer:
+		events.append_array(send_out(ENEMY, target))
+		return
+	_pending_switch_offer = target
+	events.append({
+		"type": SWITCH_OFFERED, "side": PLAYER, "index": target,
+		"species": party(ENEMY).at(target).species,
+	})
+
+
 ## `CheckWhetherToAskSwitch`. In SHIFT mode a trainer's switch offers the player
 ## one too, and four things have to hold: the battle has started, the player has
 ## somebody else to send, SET is off, and the player's own Pokémon is standing.
@@ -921,6 +1060,10 @@ func answer_switch_offer(index: int = -1) -> Array:
 	events.append_array(send_out(ENEMY, enemy_index))
 	if index >= 0:
 		events.append_array(send_out(PLAYER, index))
+	# An offer raised by [method replace_fallen] has no turn behind it:
+	# `HandleEnemyMonFaint` returns as soon as both entrances are done.
+	if _pending_turn.is_empty():
+		return events
 	var actions: Dictionary = _pending_turn.get("actions", {})
 	_close_turn_bracket(ENEMY, actions.get(ENEMY, {}))
 	_pending_turn["index"] = int(_pending_turn["index"]) + 1
@@ -962,12 +1105,10 @@ func request_baton_pass(side: int) -> void:
 
 ## `FindMonInOTPartyToSwitchIntoBattle`, which `EnemySwitch_SetMode` reaches
 ## because Baton Pass zeroes `wEnemySwitchMonIndex` rather than naming anybody:
-## the AI's own type-matchup pick, asked without asking whether it wants to
-## switch at all, since the move has already decided that.
+## the same pick [method replacement_target] makes, asked without asking whether
+## the trainer wants to switch at all, since the move has already decided that.
 func baton_pass_target(side: int) -> int:
-	if side == ENEMY:
-		return Gen2AISwitch.pick_target(self)
-	return party(side).first_healthy()
+	return replacement_target(side)
 
 
 ## `PassedBattleMonEntrance` and the enemy's `EnemySwitch_SetMode`: an entrance
@@ -1131,6 +1272,8 @@ func send_out(
 	# alone: the list describes what the player has shown, not what it is facing.
 	if side == PLAYER:
 		player_used_moves = []
+		# The next faint is a fresh `AskUseNextPokemon`.
+		_use_next_answered = false
 
 	# Nothing is called back after a faint, so the first half of the pair is only
 	# there when there was somebody to call back.
@@ -1245,29 +1388,14 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	_just_got_frozen = {PLAYER: false, ENEMY: false}
 
 	if _is_run(player_action):
-		var attempt: Dictionary = run_odds()
-		var outcome: StringName = StringName(attempt.get("outcome", &"roll"))
-		if outcome == &"roll":
-			# BattleRandom against the accumulated odds. The comparison is
-			# `cp b; jr nc`, so the odds getting away on a tie is the source's.
-			flee_attempts += 1
-			var rolled: int = rng.randi_range(0, FLEE_ODDS_RANGE - 1)
-			attempt["roll"] = rolled
-			outcome = &"fled" if int(attempt["odds"]) >= rolled else &"failed"
-			attempt["how"] = &"roll"
-		elif outcome != &"blocked":
-			flee_attempts += 1
+		var outcome: StringName = _attempt_run(events)
 		if outcome == &"fled":
-			_fled = true
-			events.append(_run_event(FLED, attempt))
 			events.append({"type": OVER, "winner": winner(), "fled": true})
 			return events
 		if outcome == &"blocked":
 			# BattleMenu_Run's `jp BattleMenu`: nothing was spent, so no residual
 			# damage and no enemy move either.
-			events.append(_run_event(RUN_BLOCKED, attempt))
 			return events
-		events.append(_run_event(RUN_FAILED, attempt))
 
 	# BattleMenu_Fight clears wNumFleeAttempts, so the odds a run has built up
 	# survive only a run followed by another run.

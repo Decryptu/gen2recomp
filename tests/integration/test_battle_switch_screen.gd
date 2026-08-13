@@ -298,6 +298,130 @@ func test_the_enemys_baton_pass_is_answered_by_its_own_ai() -> void:
 	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1)
 
 
+## A faint with somebody behind it, arranged so the turn cannot go the other way:
+## Swift never rolls accuracy and one hit point cannot survive it.
+func _faint_battle(trainer: bool, faint_player: bool) -> Gen2Battle:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(BattleFixture.PIKACHU, [BattleFixture.SWIFT]),
+			_mon(BattleFixture.BULBASAUR, [BattleFixture.TACKLE]),
+		]),
+		Gen2Party.create([
+			_mon(BattleFixture.GEODUDE, [BattleFixture.SWIFT]),
+			_mon(BattleFixture.CHARMANDER, [BattleFixture.TACKLE]),
+		]),
+		_rng, trainer
+	)
+	battle.battle_style_set = false
+	if faint_player:
+		battle.player.hp = 1
+	else:
+		battle.enemy.hp = 1
+	return battle
+
+
+## `AskUseNextPokemon`: the question, then the same `lb bc, 1, 7` box
+## `OfferSwitch` uses, and a YES that falls straight into the party list.
+func test_a_wild_faint_asks_whether_to_use_the_next_pokemon() -> void:
+	var battle: Gen2Battle = _faint_battle(false, true)
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to("use_next")
+
+	assert_eq(_stage(), "use_next")
+	assert_true(
+		String(_screen.battle_snapshot()["message"]).contains("Use next"),
+		String(_screen.battle_snapshot()["message"])
+	)
+	await _read_question()
+	assert_true(_layer().visible)
+	assert_eq(_cursor(), 0, "YesNoMenuHeader opens on YES")
+
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick", "ForcePlayerMonChoice, with no press in between")
+	assert_eq(String(_screen.battle_snapshot()["switch_reason"]), "replace")
+	assert_true(bool(_screen.battle_snapshot()["switch_forced"]))
+
+
+## NO is the run, and Pikachu in the first party slot is faster than the Geodude
+## chasing it, so it gets away on speed alone.
+func test_no_runs_from_the_wild_battle_instead_of_replacing() -> void:
+	var battle: Gen2Battle = _faint_battle(false, true)
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to("use_next")
+	await _read_question()
+
+	await _press(Gen2Button.B)
+	assert_eq(_stage(), "")
+	assert_true(battle.has_fled())
+	assert_true(bool(_screen.battle_snapshot()["battle_over"]))
+
+
+## `ForcePickPartyMonInBattle` cannot be backed out of, and the row chosen is
+## what comes in. A trainer battle never asks the question above it.
+func test_a_trainer_faint_opens_a_replacement_list_with_no_way_out() -> void:
+	var battle: Gen2Battle = _faint_battle(true, true)
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to("pick")
+
+	assert_eq(String(_screen.battle_snapshot()["switch_reason"]), "replace")
+	await _press(Gen2Button.B)
+	assert_eq(_stage(), "pick", "B is swallowed")
+
+	## Two rows and CANCEL, so two presses down reach a row that refuses too.
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.DOWN)
+	assert_eq(_cursor(), 2)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick")
+
+	await _press(Gen2Button.UP)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "")
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 1)
+	assert_false(battle.awaiting_replacement())
+
+
+## The one that just fainted is refused by `CheckIfCurPartyMonIsFitToFight`, and
+## the list comes back rather than the question being answered.
+func test_the_fainted_row_is_refused_and_the_list_comes_back() -> void:
+	var battle: Gen2Battle = _faint_battle(true, true)
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to("pick")
+
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "refused")
+	assert_true(
+		String(_screen.battle_snapshot()["message"]).contains("no will to battle"),
+		String(_screen.battle_snapshot()["message"])
+	)
+	assert_true(battle.must_replace(Gen2Battle.PLAYER), "and nothing was answered")
+
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick", "the list is redrawn")
+	assert_true(bool(_screen.battle_snapshot()["switch_forced"]), "still with no way out")
+
+
+## A trainer replacing its own faint reaches `EnemySwitch`, so SHIFT asks about a
+## switch here as well, before that Pokémon is on the field.
+func test_shift_offers_a_switch_when_the_trainer_replaces_its_own_faint() -> void:
+	var battle: Gen2Battle = _faint_battle(true, false)
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to("offer")
+
+	assert_eq(_stage(), "offer")
+	assert_eq(battle.awaiting_switch_offer(), 1)
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 0, "nobody is out yet")
+
+	await _read_question()
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "")
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1)
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 0, "and the player stayed")
+
+
 ## A mod's renderer is offered the leftovers only while the screen is not asking
 ## a question of its own, the way it is for the forget prompt and ball selection.
 func test_a_renderer_is_not_offered_input_while_a_menu_is_up() -> void:

@@ -5,10 +5,14 @@ extends RefCounted
 ## (`PickSwitchMonInBattle` and `ForcePickSwitchMonInBattle`,
 ## `engine/battle/core.asm`).
 ##
-## Two callers, one list. `OfferSwitch`'s YES reaches the first, which the player
-## can back out of; Baton Pass reaches the second through
+## Three callers, one list. `OfferSwitch`'s YES reaches the first, which the
+## player can back out of; Baton Pass reaches the second through
 ## `ForcePickPartyMonInBattle`, which cannot be backed out of and answers a
-## refusal with `SFX_WRONG` and the list again.
+## refusal with `SFX_WRONG` and the list again. `ForcePlayerMonChoice`, the
+## replacement after a faint, is that same forced list one wrapper lower: it
+## stops at `ForcePickPartyMonInBattle` and so makes no `SwitchMonAlreadyOut`
+## check, which costs nothing because the slot it would refuse holds the Pokémon
+## that just fainted and `CheckIfCurPartyMonIsFitToFight` refuses it first.
 ##
 ## Both wrap `PickPartyMonInBattle`, so both make the same two checks on the row
 ## that was chosen and print the same two lines:
@@ -146,6 +150,13 @@ static func no_energy_text() -> String:
 ## `BattleText_MonIsAlreadyOut`.
 static func already_out_text(name: String) -> String:
 	return "%s is already out." % name
+
+
+## `BattleText_UseNextMon`, the question `AskUseNextPokemon` puts up over the
+## same yes/no box `OfferSwitch` uses. Wild battles only: a trainer battle
+## returns from the routine before it prints.
+static func use_next_text() -> String:
+	return "Use next PKMN?"
 
 
 ## `BattleText_EnemyIsAboutToUseWillPlayerChangeMon`, the question `OfferSwitch`

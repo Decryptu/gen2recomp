@@ -309,6 +309,179 @@ func test_sending_one_out_after_a_faint_calls_nobody_back() -> void:
 	assert_false(battle.must_replace(Gen2Battle.PLAYER))
 
 
+## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail, which is
+## the only entry point besides a turn that moves a battle on.
+func _replacement_battle(player: Array, enemy: Array, trainer: bool) -> Gen2Battle:
+	return Gen2Battle.create_parties(
+		_data, Gen2Party.create(player), Gen2Party.create(enemy), _rng, trainer
+	)
+
+
+## `AskUseNextPokemon` returns before printing in a trainer battle, since "that
+## decision is made for us".
+func test_only_a_wild_faint_asks_whether_to_use_the_next_pokemon() -> void:
+	var wild: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])], false
+	)
+	_faint(wild.player)
+	assert_true(wild.asking_use_next())
+
+	var trainer: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])], true
+	)
+	_faint(trainer.player)
+	assert_false(trainer.asking_use_next())
+	assert_eq(trainer.answer_use_next(false), [], "and there is no answer to give")
+
+
+func test_yes_answers_nothing_and_leaves_the_forced_choice_standing() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])], false
+	)
+	_faint(battle.player)
+	assert_eq(battle.answer_use_next(true), [])
+	assert_false(battle.asking_use_next(), "the question is asked once")
+	assert_true(battle.must_replace(Gen2Battle.PLAYER))
+
+
+## NO is `jp TryToRunAwayFromBattle`, and a run that gets away ends the battle in
+## the same DRAW the battle menu's own run does.
+func test_no_runs_and_getting_away_ends_the_battle() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])], false
+	)
+	_faint(battle.player)
+	var events: Array = battle.answer_use_next(false)
+	assert_eq(_first(events, Gen2Battle.FLED)["how"], &"speed")
+	assert_eq(_first(events, Gen2Battle.OVER)["winner"], null, "running is a draw")
+	assert_true(battle.has_fled())
+
+
+## `ld hl, wPartyMon1Speed`: the first party slot's, not the Pokémon that
+## fainted, whose battle copy the source is done with. Geodude is out and is
+## slower than the Magcargo chasing it, so an escape on speed alone can only have
+## been measured against the Pikachu in slot one.
+func test_the_run_after_a_faint_reads_the_first_party_slots_speed() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])],
+		[_mon(Fixture.MAGCARGO, 50, [Fixture.TACKLE])], false
+	)
+	battle.send_out(Gen2Battle.PLAYER, 1)
+	assert_lt(battle.player.stat("speed"), battle.mon(Gen2Battle.ENEMY).stat("speed"))
+	assert_gt(
+		int(battle.party(Gen2Battle.PLAYER).at(0).stats["speed"]),
+		battle.mon(Gen2Battle.ENEMY).stat("speed")
+	)
+
+	_faint(battle.player)
+	assert_eq(_first(battle.answer_use_next(false), Gen2Battle.FLED)["how"], &"speed")
+
+
+## A run that does not get away falls through to `ForcePlayerMonChoice` rather
+## than asking again.
+func test_a_failed_run_is_not_asked_a_second_time() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 5, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])],
+		[_mon(Fixture.MAGCARGO, 50, [Fixture.TACKLE])], false
+	)
+	battle.battle_type = Gen2Battle.BATTLETYPE_TRAP
+	_faint(battle.player)
+	var events: Array = battle.answer_use_next(false)
+	assert_eq(_first(events, Gen2Battle.RUN_BLOCKED)["reason"], &"battle_type")
+	assert_false(battle.has_fled())
+	assert_false(battle.asking_use_next())
+	assert_true(battle.must_replace(Gen2Battle.PLAYER))
+
+
+## The row is refused the way the party menu refuses it, so the question stays
+## standing rather than being approximated into an answer.
+func test_replacing_refuses_a_row_the_party_would_refuse() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])], true
+	)
+	_faint(battle.player)
+	assert_eq(battle.replace_fallen(0), [], "the one that just fainted")
+	assert_eq(battle.replace_fallen(9), [], "nobody at all")
+	assert_true(battle.must_replace(Gen2Battle.PLAYER))
+
+	assert_eq(_first(battle.replace_fallen(1), Gen2Battle.SENT_OUT)["index"], 1)
+	assert_false(battle.must_replace(Gen2Battle.PLAYER))
+
+
+## `FindMonInOTPartyToSwitchIntoBattle` rather than the first standing: Pikachu's
+## Thunderbolt is super effective against the Hoothoot out, and Bulbasaur ahead
+## of it in the party is not.
+func test_a_trainer_replaces_its_own_faint_with_the_ai_pick() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[_mon(Fixture.HOOTHOOT, 20, [Fixture.TACKLE])],
+		[
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 20, [Fixture.TACKLE]),
+			_mon(Fixture.PIKACHU, 20, [Fixture.THUNDERBOLT]),
+		], true
+	)
+	battle.battle_style_set = true
+	_faint(battle.enemy)
+	assert_eq(battle.replacement_target(Gen2Battle.ENEMY), 2)
+	assert_eq(_first(battle.replace_fallen(), Gen2Battle.SENT_OUT)["index"], 2)
+	assert_eq(battle.enemy.species, Fixture.PIKACHU)
+
+
+## `EnemySwitch` is what a trainer replacing on its own reaches, so SHIFT asks
+## the player about a switch here as well. With no turn behind it,
+## [method Gen2Battle.answer_switch_offer] finishes on the two entrances.
+func test_shift_offers_a_switch_when_a_trainer_replaces_its_own_faint() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 20, [Fixture.TACKLE]),
+		],
+		[
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE]),
+		], true
+	)
+	_faint(battle.enemy)
+	var offered: Array = battle.replace_fallen()
+	assert_eq(_first(offered, Gen2Battle.SWITCH_OFFERED)["index"], 1)
+	assert_eq(battle.awaiting_switch_offer(), 1)
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 0, "nobody is out yet")
+
+	var answered: Array = battle.answer_switch_offer(1)
+	assert_eq(battle.party(Gen2Battle.ENEMY).active, 1)
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 1, "the player changed too")
+	assert_eq(_of_type(answered, Gen2Battle.OVER).size(), 0, "no turn was behind it")
+
+
+## `DoubleSwitch`: the player enters first and the trainer follows through
+## `EnemySwitch_SetMode`, which asks nothing even in SHIFT.
+func test_a_double_faint_sends_the_player_in_first_and_offers_nothing() -> void:
+	var battle: Gen2Battle = _replacement_battle(
+		[
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 20, [Fixture.TACKLE]),
+		],
+		[
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+			_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE]),
+		], true
+	)
+	_faint(battle.player)
+	_faint(battle.enemy)
+
+	var sent: Array = _of_type(battle.replace_fallen(1), Gen2Battle.SENT_OUT)
+	assert_eq(sent.size(), 2)
+	assert_eq(int(sent[0]["side"]), Gen2Battle.PLAYER)
+	assert_eq(int(sent[1]["side"]), Gen2Battle.ENEMY)
+	assert_eq(battle.awaiting_switch_offer(), -1, "no offer was raised")
+	assert_false(battle.awaiting_replacement())
+
+
 func test_a_switch_between_turns_calls_one_back_and_sends_one_out() -> void:
 	var battle: Gen2Battle = _party_battle(
 		[_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])],
