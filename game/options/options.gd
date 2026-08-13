@@ -83,6 +83,11 @@ var ui_theme: StringName = &"light"
 ## than as an [InputMap] state so the file is the whole scheme and nothing has
 ## to read the engine back to know what the player chose.
 var controls: Dictionary = Gen2InputActions.defaults()
+## What the player bound a mod's own actions to, keyed by the [InputMap] action
+## name rather than by a button. Separate from [member controls] because a mod's
+## action is not one of the cartridge's eight and an uninstalled mod's leftover
+## row should be visibly not one of them.
+var mod_controls: Dictionary = {}
 var touch_mode: StringName = TOUCH_AUTO
 var touch_layout: Gen2TouchLayout = Gen2TouchLayout.new()
 
@@ -176,6 +181,7 @@ func to_dict() -> Dictionary:
 		"game_speed": String(game_speed),
 		"ui_theme": String(ui_theme),
 		"controls": Gen2InputActions.to_dict(controls),
+		"mod_controls": mod_controls.duplicate(true),
 		"touch_mode": String(touch_mode),
 		"touch_layout": touch_layout.to_dict(),
 	}
@@ -208,6 +214,7 @@ static func parse(raw: Variant) -> Gen2Options:
 	var fps: int = int(row.get("max_fps", 60))
 	options.max_fps = fps if FPS_CHOICES.has(fps) else 60
 	options.controls = Gen2InputActions.sanitize(row.get("controls"))
+	options.mod_controls = Gen2InputActions.sanitize_mod_controls(row.get("mod_controls"))
 	options.touch_mode = _one_of(row.get("touch_mode", ""), TOUCH_MODES)
 	options.touch_layout = Gen2TouchLayout.parse(row.get("touch_layout"))
 	return options

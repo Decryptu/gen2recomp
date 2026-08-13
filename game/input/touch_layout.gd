@@ -77,10 +77,25 @@ const DEFAULT_ANCHORS: Dictionary = {
 const DEFAULT_SCALE: float = 1.0
 const DEFAULT_OPACITY: float = 0.65
 
+## Where a mod's own buttons start, and how far down the column steps. Above the
+## d-pad and the face buttons in portrait, inside the left margin in landscape,
+## so the stock four keep the corners they were arranged into.
+const MOD_ANCHOR: Dictionary = {
+	ORIENTATION_PORTRAIT: Vector2(0.5, 0.14),
+	ORIENTATION_LANDSCAPE: Vector2(0.12, 0.14),
+}
+const MOD_ANCHOR_STEP: float = 0.12
+
 var scale: float = DEFAULT_SCALE
 var opacity: float = DEFAULT_OPACITY
 ## Orientation name, then group name, to a normalised centre.
 var anchors: Dictionary = {}
+## A mod's own on-screen buttons, as `{action, label}` in registration order.
+## Off unless the player switches them on: a phone player who wants a camera has
+## to be able to reach one, and a player who does not should not find their
+## screen covered by a mod's buttons.
+var mod_buttons: Array = []
+var mod_buttons_shown: bool = false
 
 
 func _init() -> void:
@@ -103,14 +118,65 @@ static func orientation_of(area: Vector2) -> StringName:
 
 func anchor(orientation: StringName, group: StringName) -> Vector2:
 	var groups: Dictionary = anchors.get(orientation, {})
-	return groups.get(group, DEFAULT_ANCHORS[orientation][group])
+	if groups.has(group):
+		return groups[group]
+	if DEFAULT_ANCHORS[orientation].has(group):
+		return DEFAULT_ANCHORS[orientation][group]
+	return _default_mod_anchor(orientation, group)
+
+
+## Where a mod's button sits before the player drags it: a column stepping down
+## from [constant MOD_ANCHOR], in the order the actions were registered.
+func _default_mod_anchor(orientation: StringName, group: StringName) -> Vector2:
+	var start: Vector2 = MOD_ANCHOR[orientation]
+	for index: int in mod_buttons.size():
+		if StringName((mod_buttons[index] as Dictionary).get("action", &"")) == group:
+			return Vector2(start.x, clampf(start.y + float(index) * MOD_ANCHOR_STEP, 0.0, 1.0))
+	return start
+
+
+## The action names a mod's buttons are placed under, which are their group
+## names too. Empty while the player has them switched off.
+func mod_groups() -> Array[StringName]:
+	var out: Array[StringName] = []
+	if not mod_buttons_shown:
+		return out
+	for entry: Dictionary in mod_buttons:
+		out.append(StringName(entry.get("action", &"")))
+	return out
+
+
+func mod_label(action: StringName) -> String:
+	for entry: Dictionary in mod_buttons:
+		if StringName(entry.get("action", &"")) == action:
+			return String(entry.get("label", ""))
+	return ""
+
+
+## Every mod button's rectangle, keyed by action name. Drawn as the same pill
+## START and SELECT use, since a mod's control is one press like theirs.
+func mod_button_rects(area: Rect2) -> Dictionary:
+	var rects: Dictionary = {}
+	for action: StringName in mod_groups():
+		rects[action] = group_rect(action, area)
+	return rects
+
+
+## The mod action a point presses, or an empty name. Asked after the eight, so a
+## mod's button placed under the d-pad never takes a step.
+func mod_action_at(point: Vector2, area: Rect2) -> StringName:
+	for action: StringName in mod_groups():
+		if (group_rect(action, area) as Rect2).has_point(point):
+			return action
+	return &""
 
 
 ## Moves a cluster. The centre is clamped so no part of it can be dragged off
 ## the area, which is the only way an options screen can hand back a layout the
 ## player cannot press.
 func set_anchor(orientation: StringName, group: StringName, centre: Vector2, area: Vector2) -> void:
-	if not ORIENTATIONS.has(orientation) or not GROUPS.has(group) or area.x <= 0.0 or area.y <= 0.0:
+	var placeable: bool = GROUPS.has(group) or mod_groups().has(group)
+	if not ORIENTATIONS.has(orientation) or not placeable or area.x <= 0.0 or area.y <= 0.0:
 		return
 	var half: Vector2 = group_size(group) * 0.5
 	var margin: Vector2 = Vector2(half.x / area.x, half.y / area.y)
@@ -132,6 +198,9 @@ func group_size(group: StringName) -> Vector2:
 			return Vector2(FACE_SPACING + FACE_DIAMETER, FACE_SPACING + FACE_DIAMETER) * scale
 		GROUP_START, GROUP_SELECT:
 			return MENU_SIZE * scale
+	# A mod's button is the same pill, since it is one press like those two.
+	if mod_groups().has(group):
+		return MENU_SIZE * scale
 	return Vector2.ZERO
 
 
@@ -191,12 +260,21 @@ func direction_at(point: Vector2, area: Rect2) -> int:
 
 
 func to_dict() -> Dictionary:
-	var stored: Dictionary = {"scale": scale, "opacity": opacity}
+	var stored: Dictionary = {
+		"scale": scale, "opacity": opacity, "mod_buttons_shown": mod_buttons_shown,
+	}
 	for orientation: StringName in ORIENTATIONS:
 		var groups: Dictionary = {}
 		for group: StringName in GROUPS:
 			var centre: Vector2 = anchor(orientation, group)
 			groups[String(group)] = [centre.x, centre.y]
+		# A mod's own placements are written beside the stock four and read back
+		# without knowing which mods are installed, so an uninstalled mod's
+		# position waits rather than being thrown away.
+		for group: StringName in (anchors.get(orientation, {}) as Dictionary):
+			if not GROUPS.has(group):
+				var centre: Vector2 = anchor(orientation, group)
+				groups[String(group)] = [centre.x, centre.y]
 		stored[String(orientation)] = groups
 	return stored
 
@@ -210,15 +288,16 @@ static func parse(raw: Variant) -> Gen2TouchLayout:
 	var stored: Dictionary = raw
 	layout.scale = clampf(float(stored.get("scale", DEFAULT_SCALE)), MIN_SCALE, MAX_SCALE)
 	layout.opacity = clampf(float(stored.get("opacity", DEFAULT_OPACITY)), MIN_OPACITY, MAX_OPACITY)
+	layout.mod_buttons_shown = bool(stored.get("mod_buttons_shown", false))
 	for orientation: StringName in ORIENTATIONS:
 		var groups: Variant = stored.get(String(orientation))
 		if groups is not Dictionary:
 			continue
-		for group: StringName in GROUPS:
-			var centre: Variant = (groups as Dictionary).get(String(group))
+		for raw_group: Variant in groups as Dictionary:
+			var centre: Variant = (groups as Dictionary)[raw_group]
 			if centre is not Array or (centre as Array).size() != 2:
 				continue
-			(layout.anchors[orientation] as Dictionary)[group] = Vector2(
+			(layout.anchors[orientation] as Dictionary)[StringName(String(raw_group))] = Vector2(
 				clampf(float((centre as Array)[0]), 0.0, 1.0),
 				clampf(float((centre as Array)[1]), 0.0, 1.0),
 			)
@@ -226,7 +305,11 @@ static func parse(raw: Variant) -> Gen2TouchLayout:
 
 
 func duplicate_layout() -> Gen2TouchLayout:
-	return Gen2TouchLayout.parse(to_dict())
+	var copy: Gen2TouchLayout = Gen2TouchLayout.parse(to_dict())
+	# Which mods registered a button is not the player's setting and is not in
+	# the file; it comes from the host and has to travel with the copy.
+	copy.mod_buttons = mod_buttons.duplicate(true)
+	return copy
 
 
 func is_default() -> bool:

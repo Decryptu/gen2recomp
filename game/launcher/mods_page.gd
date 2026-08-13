@@ -130,6 +130,16 @@ func _row(manifest: Gen2ModManifest) -> Control:
 
 func _option_field(id: StringName, option: Dictionary) -> Control:
 	var key: StringName = StringName(option.get("key", &""))
+	if StringName(option.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_BUTTON:
+		var press: Gen2LauncherButton = Gen2LauncherButton.create(
+			_theme, String(option.get("press_label", "Go")), Gen2LauncherButton.Variant.NEUTRAL
+		)
+		press.pressed.connect(func() -> void:
+			var result: Dictionary = Gen2ModHost.instance().press_option(id, key)
+			if not bool(result.get("ok", false)):
+				_fail(Gen2ModRefusal.text(result))
+		)
+		return Gen2LauncherUI.field(_theme, String(option.get("label", "")), press)
 	return Gen2LauncherUI.field(_theme, String(option.get("label", "")), Gen2LauncherUI.segmented(
 		_theme, option.get("labels", []) as Array, int(option.get("index", 0)),
 		func(index: int) -> void:

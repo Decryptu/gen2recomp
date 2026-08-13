@@ -18,6 +18,9 @@ extends SubViewportContainer
 ## when it reads its own settings back.
 const MOD_ID: StringName = &"voxel_preview"
 const OPTION_PITCH: StringName = &"pitch"
+const OPTION_RECENTRE: StringName = &"recentre"
+const ACTION_PITCH_UP: StringName = &"pitch_up"
+const ACTION_PITCH_DOWN: StringName = &"pitch_down"
 
 const CELL_SIZE: float = 1.0
 const WALL_HEIGHT: float = 1.0
@@ -102,6 +105,7 @@ func _init() -> void:
 	if pitch != null:
 		_camera_pitch = float(pitch)
 	host.option_changed.connect(_on_option_changed)
+	host.action_changed.connect(_on_action_changed)
 
 
 ## This renderer is not made of hardware pixels, so it asks for the layer that is
@@ -131,8 +135,24 @@ func text_box_rect() -> Rect2i:
 
 
 func _on_option_changed(id: StringName, key: StringName, value: Variant) -> void:
-	if id == MOD_ID and key == OPTION_PITCH:
+	if id != MOD_ID:
+		return
+	if key == OPTION_PITCH:
 		_set_camera_pitch(float(value))
+	elif key == OPTION_RECENTRE:
+		_set_camera_pitch(CAMERA_PITCH_DEGREES)
+
+
+## The mod's own controls, arriving as ids rather than as an InputEvent, so the
+## same handler serves a key, a pad button and a finger on the on-screen pad.
+func _on_action_changed(id: StringName, key: StringName, pressed: bool) -> void:
+	if id != MOD_ID or not pressed:
+		return
+	match key:
+		ACTION_PITCH_DOWN:
+			_set_camera_pitch(_camera_pitch - CAMERA_PITCH_STEP)
+		ACTION_PITCH_UP:
+			_set_camera_pitch(_camera_pitch + CAMERA_PITCH_STEP)
 
 
 ## The container's own size is all that is set here: a stretching
@@ -162,21 +182,13 @@ func refresh_animation() -> void:
 	pass
 
 
-## Camera pitch, which is input the world screen has no use for and therefore
-## hands over. See Gen2ModHost.RENDERER_INPUT_METHOD: a movement or interaction
-## key never arrives here, because the screen claims those first.
-func handle_world_input(event: InputEvent) -> bool:
-	var key := event as InputEventKey
-	if key == null or not key.pressed:
-		return false
-	match key.keycode:
-		KEY_Q:
-			_set_camera_pitch(_camera_pitch - CAMERA_PITCH_STEP)
-		KEY_E:
-			_set_camera_pitch(_camera_pitch + CAMERA_PITCH_STEP)
-		_:
-			return false
-	return true
+## The raw leftovers, for what a declared action cannot express: pointer and
+## stick motion a free camera wants. Named controls go through
+## _on_action_changed instead, since those are bindable and reach a touchscreen.
+## See Gen2ModHost.RENDERER_INPUT_METHOD: a movement or interaction key never
+## arrives here, because the screen claims those first.
+func handle_world_input(_event: InputEvent) -> bool:
+	return false
 
 
 func camera_pitch() -> float:

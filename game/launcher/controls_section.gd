@@ -39,6 +39,7 @@ func _build() -> void:
 	))
 	for button: int in Gen2Button.ALL:
 		add_child(_binding_row(button))
+	_build_mod_actions()
 
 	add_child(Gen2LauncherUI.field(_theme, "On-screen buttons", Gen2LauncherUI.segmented(
 		_theme,
@@ -67,6 +68,86 @@ func _build() -> void:
 	)
 	reset.pressed.connect(_reset)
 	actions.add_child(reset)
+
+
+## A loaded mod's own controls, in their own group under the eight. Absent
+## entirely when no mod registered one, so a player with no mods sees the page
+## they always saw.
+func _build_mod_actions() -> void:
+	var actions: Array = Gen2ModHost.instance().actions()
+	if actions.is_empty():
+		return
+	add_child(Gen2LauncherUI.muted(
+		_theme, "Mods add their own controls. These are bound the same way."
+	))
+	for action: Dictionary in actions:
+		add_child(_mod_row(action))
+	add_child(Gen2LauncherUI.field(_theme, "Mod buttons on screen", Gen2LauncherUI.segmented(
+		_theme,
+		["Off", "On"],
+		1 if _options.touch_layout.mod_buttons_shown else 0,
+		func(index: int) -> void:
+			_options.touch_layout.mod_buttons_shown = index == 1
+			changed.emit()
+	)))
+	add_child(Gen2LauncherUI.muted(
+		_theme,
+		"Off by default so a mod cannot cover the screen. Switch them on and "
+		+ "arrange them beside A and B."
+	))
+
+
+func _mod_row(action: Dictionary) -> HBoxContainer:
+	var name: StringName = action["name"]
+	var value: Label = Gen2LauncherUI.body(_theme, "")
+	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var edit: Gen2LauncherButton = Gen2LauncherButton.create(
+		_theme, "Change", Gen2LauncherButton.Variant.QUIET
+	)
+	edit.pressed.connect(func() -> void: _open_mod_editor(action))
+	var row: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	# Wider than the eight's column: a mod names a control in words rather than
+	# with a letter, so "Raise the camera" has to fit beside them.
+	var label: Label = Gen2LauncherUI.body(_theme, String(action["label"]))
+	label.custom_minimum_size = Vector2(160, 0)
+	row.add_child(label)
+	row.add_child(value)
+	row.add_child(edit)
+	_rows[name] = value
+	_refresh_mod_row(name)
+	return row
+
+
+func _refresh_mod_row(name: StringName) -> void:
+	var label: Label = _rows.get(name)
+	if label == null:
+		return
+	# What is actually bound, which is the mod's own default until the player
+	# overrides it. Reading only the override would say "Unbound" for every mod
+	# control nobody has touched.
+	label.text = describe(_mod_bindings(name))
+	label.add_theme_color_override("font_color", _theme.muted)
+
+
+func _mod_bindings(name: StringName) -> Array:
+	if _options.mod_controls.has(String(name)):
+		return _options.mod_controls[String(name)]
+	for action: Dictionary in Gen2ModHost.instance().actions():
+		if StringName(action["name"]) == name:
+			return action["default"]
+	return []
+
+
+func _open_mod_editor(action: Dictionary) -> void:
+	var name: StringName = action["name"]
+	var sheet: Gen2BindingSheet = Gen2BindingSheet.for_mod_action(
+		_theme, _options, name, String(action["label"])
+	)
+	sheet.bindings_changed.connect(func() -> void:
+		_refresh_mod_row(name)
+		changed.emit()
+	)
+	sheet.open(_host)
 
 
 func _binding_row(button: int) -> HBoxContainer:
@@ -129,7 +210,12 @@ func _open_editor(button: int) -> void:
 
 func _reset() -> void:
 	_options.controls = Gen2InputActions.defaults()
+	# A mod's own bindings go back to what it declared, which is what an empty
+	# override means: the install falls through to the registered default.
+	_options.mod_controls = {}
 	_options.touch_layout = Gen2TouchLayout.new()
 	for button: int in Gen2Button.ALL:
 		_refresh_row(button)
+	for action: Dictionary in Gen2ModHost.instance().actions():
+		_refresh_mod_row(action["name"])
 	changed.emit()

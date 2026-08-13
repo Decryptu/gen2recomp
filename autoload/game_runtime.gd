@@ -67,6 +67,11 @@ func load_mods(game_id: StringName = &"") -> Array:
 	host.set_target_game(game_id)
 	host.discover()
 	_loaded_mods = host.load_discovered()
+	# A mod registers its own controls inside its entry script, which is after the
+	# options were applied, so the InputMap gets them now rather than never.
+	var input: Gen2InputRuntime = Gen2InputRuntime.instance()
+	if input != null:
+		input.install_mod_actions()
 	for failure: Dictionary in host.failures():
 		push_warning("Mod %s was not loaded: %s (%s)" % [
 			failure.get("directory", failure.get("id", "?")),

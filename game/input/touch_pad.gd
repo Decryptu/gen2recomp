@@ -33,10 +33,11 @@ var _layout: Gen2TouchLayout = Gen2TouchLayout.new()
 ## object, so entering the tree must not swap it for the stored one.
 var _layout_given: bool = false
 var _edit_mode: bool = false
-## Touch index to the button it is on. A finger sliding off one button onto
-## another swaps which, so the d-pad can be rolled around without lifting.
+## Touch index to the [InputMap] action it is on, which is one of the eight or a
+## mod's own. A finger sliding off one button onto another swaps which, so the
+## d-pad can be rolled around without lifting.
 var _touches: Dictionary = {}
-## Button to how many touches are on it, so two thumbs on A do not release it
+## Action to how many touches are on it, so two thumbs on A do not release it
 ## when the first lifts.
 var _held: Dictionary = {}
 ## In edit mode: the group being dragged, which pointer has it, and where in it
@@ -102,6 +103,16 @@ func button_at(point: Vector2) -> int:
 	return _layout.button_at(point, area())
 
 
+## The action a point presses: one of the eight, or a mod's own button, or an
+## empty name. The eight are asked first, so a mod's button laid over the d-pad
+## costs the mod its press rather than costing the player a step.
+func action_at(point: Vector2) -> StringName:
+	var button: int = button_at(point)
+	if button != Gen2Button.NONE:
+		return Gen2Button.action(button)
+	return _layout.mod_action_at(point, area())
+
+
 ## Whether this is the controller in front. A battle opened over the map has one
 ## of its own, and the map's must neither draw behind it nor answer a finger
 ## meant for it.
@@ -153,10 +164,10 @@ func _pointer(index: int, point: Vector2, pressed: bool) -> void:
 		_edit_pointer(index, point, pressed)
 		return
 	if pressed:
-		var button: int = button_at(point)
-		if button == Gen2Button.NONE:
+		var action: StringName = action_at(point)
+		if String(action).is_empty():
 			return
-		_touches[index] = button
+		_touches[index] = action
 		_apply_held()
 		get_viewport().set_input_as_handled()
 		return
@@ -172,12 +183,12 @@ func _pointer_moved(index: int, point: Vector2) -> void:
 		return
 	if not _touches.has(index):
 		return
-	var button: int = button_at(point)
+	var action: StringName = action_at(point)
 	# Sliding off the controller entirely keeps the last button held: a thumb
 	# that drifts a few pixels past the d-pad mid-step should not stop the walk.
-	if button == Gen2Button.NONE or button == int(_touches[index]):
+	if String(action).is_empty() or action == StringName(_touches[index]):
 		return
-	_touches[index] = button
+	_touches[index] = action
 	_apply_held()
 
 
@@ -187,14 +198,14 @@ func _pointer_moved(index: int, point: Vector2) -> void:
 func _apply_held() -> void:
 	var wanted: Dictionary = {}
 	for index: int in _touches:
-		var button: int = _touches[index]
-		wanted[button] = int(wanted.get(button, 0)) + 1
-	for button: int in _held:
-		if not wanted.has(button):
-			Gen2InputRuntime.instance().release(button)
-	for button: int in wanted:
-		if not _held.has(button):
-			Gen2InputRuntime.instance().press(button)
+		var action: StringName = _touches[index]
+		wanted[action] = int(wanted.get(action, 0)) + 1
+	for action: StringName in _held:
+		if not wanted.has(action):
+			Gen2InputRuntime.instance().send_action(action, false)
+	for action: StringName in wanted:
+		if not _held.has(action):
+			Gen2InputRuntime.instance().send_action(action, true)
 	_held = wanted
 	queue_redraw()
 
@@ -213,7 +224,7 @@ func _edit_pointer(index: int, point: Vector2, pressed: bool) -> void:
 		return
 	if _dragging != &"":
 		return
-	for group: StringName in Gen2TouchLayout.GROUPS:
+	for group: StringName in _placeable_groups():
 		var rect: Rect2 = _layout.group_rect(group, area())
 		if rect.has_point(point):
 			_dragging = group
@@ -239,11 +250,16 @@ func _draw() -> void:
 	_draw_cross(_layout.group_rect(Gen2TouchLayout.GROUP_PAD, rect), alpha)
 	var rects: Dictionary = _layout.button_rects(rect)
 	for button: int in [Gen2Button.A, Gen2Button.B]:
-		_draw_round(rects[button], Gen2Button.label(button), alpha, _held.has(button))
+		_draw_round(rects[button], Gen2Button.label(button), alpha, _is_held(button))
 	for button: int in [Gen2Button.SELECT, Gen2Button.START]:
-		_draw_pill(rects[button], Gen2Button.label(button), alpha, _held.has(button))
+		_draw_pill(rects[button], Gen2Button.label(button), alpha, _is_held(button))
+	var mod_rects: Dictionary = _layout.mod_button_rects(rect)
+	for action: StringName in mod_rects:
+		_draw_pill(
+			mod_rects[action], _layout.mod_label(action), alpha, _held.has(action)
+		)
 	if _edit_mode:
-		for group: StringName in Gen2TouchLayout.GROUPS:
+		for group: StringName in _placeable_groups():
 			draw_rect(_layout.group_rect(group, rect), EDIT_TINT, false, BORDER_WIDTH)
 
 
@@ -264,7 +280,7 @@ func _draw_cross(rect: Rect2, alpha: float) -> void:
 		draw_rect(bar, _tint(FILL, alpha))
 		draw_rect(bar, _tint(BORDER, alpha), false, BORDER_WIDTH)
 	for button: int in Gen2Button.DIRECTIONS:
-		if not _held.has(button):
+		if not _is_held(button):
 			continue
 		var step: Vector2 = Vector2(Gen2Button.vector(button))
 		var span: Vector2 = Vector2(
@@ -315,6 +331,18 @@ func _draw_label(rect: Rect2, text: String, alpha: float, size_pixels: float) ->
 		height,
 		_tint(GLYPH, alpha),
 	)
+
+
+func _is_held(button: int) -> bool:
+	return _held.has(Gen2Button.action(button))
+
+
+## Every cluster a drag may move: the stock four, then a mod's own buttons while
+## the player has them switched on.
+func _placeable_groups() -> Array[StringName]:
+	var groups: Array[StringName] = Gen2TouchLayout.GROUPS.duplicate()
+	groups.append_array(_layout.mod_groups())
+	return groups
 
 
 static func _tint(colour: Color, alpha: float) -> Color:

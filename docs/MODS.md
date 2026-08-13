@@ -567,8 +567,10 @@ Supported by the contract above:
   and `frame_is_mirrored()` says when it is drawn flipped;
 - a camera of its own, through `player_position_cells()` and
   `visible_origin_cells()` above, without inheriting the tile page's framing;
-- steering that camera, through `handle_world_input`. `mods/examples/voxel_preview/`
-  puts pitch on `Q` and `E`, two keys the world screen does not read.
+- steering that camera, through `register_action` and the raw leftovers
+  `handle_world_input` offers beside it. `mods/examples/voxel_preview/` declares
+  its two pitch controls, so they are rebindable and can be put on a phone's
+  screen rather than being keycodes only a keyboard can reach.
 
 What is still missing:
 
@@ -629,9 +631,16 @@ host.register_option(manifest.id, {
 |---|---|
 | `key` | Addresses the setting within the mod |
 | `label` | Shown to the player |
-| `values` | The rungs, at least one. A toggle is a two-rung ladder |
+| `kind` | Optional; `Gen2ModHost.OPTION_LADDER` (the default) or `OPTION_BUTTON` |
+| `values` | The rungs, at least one. A toggle is a two-rung ladder. Ladder only |
 | `labels` | Optional; what each rung is shown as, defaulting to the values |
 | `default` | Optional; the rung used until the player picks one, defaulting to the first |
+| `press_label` | Optional; what a button setting's control reads, defaulting to `Go`. Button only |
+
+A **button** setting is a press rather than a ladder, for something with no value
+to keep: "recentre the camera now" is an action, not a rung. It stores nothing,
+`press_option(id, key)` is what both surfaces call, and `option_changed` carries
+a null value to say the press is the whole setting.
 
 Read it back with `host.option(id, key)`, or `option_index(id, key)` for the rung.
 A mod that has to rebuild something on a change connects to `option_changed(id,
@@ -656,6 +665,69 @@ Per-slot state belongs in the save instead. A discovered manifest can use
 Both sides deep-copy dictionaries, and writes larger than 64 KiB of UTF-8 JSON
 are refused. The manifest object itself is the capability: constructing another
 manifest with the same id does not grant access to that mod's state.
+
+## Adding a control
+
+`register_action(id, action)` declares a control of the mod's own. A mod cannot
+see the cartridge's eight, and the screen claims every one of them before a
+renderer is offered anything, so reading raw keycodes out of
+`handle_world_input` produces controls that cannot be rebound, collide silently
+with the d-pad, and do not exist on a touchscreen at all.
+
+```gdscript
+host.register_action(manifest.id, {
+	"key": "pitch_up", "label": "Camera up",
+	"default": [{"kind": "key", "code": KEY_F}],
+})
+```
+
+| Key | Meaning |
+|---|---|
+| `key` | Addresses the control within the mod |
+| `label` | Shown wherever the control is listed or drawn |
+| `default` | Optional; bindings in `Gen2InputActions`' own shape |
+
+`default` takes the same three kinds the eight take, so a mod's control binds to
+a key by physical position, a pad button, or a stick axis past the same deadzone:
+
+```gdscript
+{"kind": "key",        "code": <physical keycode>}
+{"kind": "pad_button", "code": <JoyButton>}
+{"kind": "pad_axis",   "code": <JoyAxis>, "sign": -1 or 1}
+```
+
+A default already bound to one of the eight is **dropped and reported**, because
+such a binding would never once fire: the screen takes those first. The action
+still registers, unbound on that slot, and the refusal reaches
+`Gen2ModHost.failures()` and the launcher. `W`, `A`, `S` and `D` are the d-pad's
+own default keys.
+
+Three ways to read one, none of them an `InputEvent`:
+
+| Call | For |
+|---|---|
+| `action_changed(id, key, pressed)` | The edge. A signal, like `option_changed` |
+| `action_held(id, key) -> bool` | The poll a camera wants |
+| `action_strength(id, key) -> float` | The same as a magnitude, 0 to 1 |
+
+`action_strength` is what makes an analogue control analogue: a stick bound to an
+action answers its travel past the deadzone, so a camera on the right stick moves
+at the rate the player is pushing it, while a key answers 0 or 1. For motion
+nothing can name, a two-finger drag and raw stick movement are still the
+leftovers `handle_world_input` and `handle_battle_input` are offered.
+
+Everything a registered control reaches is reachable without a keyboard:
+
+- the launcher's **controls** card lists a loaded mod's actions in their own
+  group under the eight, and rebinds them through the same sheet;
+- the on-screen controller can carry them. Off by default, because a mod must
+  not cover the screen of a player who never asked for one; switched on from the
+  same card, each is a pill the player drags where they like, per orientation,
+  beside A and B.
+
+An event reaches a mod's action only where the screen would have offered a
+renderer one, so an open menu, a running script, a battle or a trainer approach
+takes the press first.
 
 ## Not built yet
 

@@ -16,3 +16,22 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 		"values": [25.0, 50.19, 75.0], "labels": ["LOW", "MID", "HIGH"],
 		"default": 50.19,
 	})
+	## A setting that is a press rather than a ladder: nothing is stored, and
+	## the mod acts on option_changed.
+	host.register_option(manifest.id, {
+		"key": "recentre", "label": "RECENTRE", "kind": Gen2ModHost.OPTION_BUTTON,
+		"press_label": "NOW",
+	})
+	## Controls of the mod's own, declared rather than read off raw keycodes: the
+	## host binds them, the launcher's controls card rebinds them, and the
+	## on-screen controller can carry them, so a phone player can reach the
+	## camera. A default already on one of the cartridge's eight is dropped and
+	## reported, which is what a default on W would be.
+	host.register_action(manifest.id, {
+		"key": "pitch_down", "label": "Camera down",
+		"default": [{"kind": "key", "code": KEY_R}],
+	})
+	host.register_action(manifest.id, {
+		"key": "pitch_up", "label": "Camera up",
+		"default": [{"kind": "key", "code": KEY_F}],
+	})

@@ -48,8 +48,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > - **Mods.** A mod under `user://mods/` can add a species, move, item or trainer
 >   class, rebalance one the cartridge shipped, register a move effect and the
 >   steps it is built from, watch the world and battle event channels, add a menu
->   entry, and replace the world or battle renderer, which is what a 3D or HD
->   view needs.
+>   entry, declare which cartridges it is for, declare controls of its own that
+>   rebind and reach a touchscreen like the cartridge's eight, and replace the
+>   world or battle renderer, which is what a 3D or HD view needs.
 >
 > The real-data story preview walks all three cartridges end to end, from Elm's
 > lab to Red on Mt. Silver: every Johto badge with the errand behind it (the
@@ -190,7 +191,9 @@ the game knows which one you used.
 Keys are bound to positions rather than letters, so WASD stays under the same
 four fingers on a layout that spells them differently; the settings page shows
 each binding as the key actually printed on it. Every button can be rebound
-there, with as many keys and controller buttons as you like.
+there, with as many keys and controller buttons as you like. A mod's own
+controls appear in the same place and rebind the same way, and can be switched
+on as extra on-screen buttons for a phone.
 
 Any controller Godot recognises works without setup, and the launcher is fully
 navigable with one: the focus ring appears on the first pad or key press and

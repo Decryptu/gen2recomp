@@ -112,10 +112,20 @@ const CHANNELS: Array[StringName] = [CHANNEL_WORLD, CHANNEL_BATTLE]
 ## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER] makes for content.
 const FIRST_MOD_POCKET: int = 5
 
+## The two shapes a registered setting can take: a ladder of values the player
+## steps along, and a button that does something the moment it is pressed. A
+## button stores nothing, because "recentre the camera now" has no value to keep.
+const OPTION_LADDER: StringName = &"ladder"
+const OPTION_BUTTON: StringName = &"button"
+const OPTION_KINDS: Array[StringName] = [OPTION_LADDER, OPTION_BUTTON]
+
 ## Emitted when a registered option's value changes, whichever surface changed
 ## it. A mod that has to rebuild something on a change connects to this rather
 ## than reading its options every frame.
 signal option_changed(id: StringName, key: StringName, value: Variant)
+## Emitted when one of a mod's own registered actions is pressed or released,
+## whichever device produced it. See [method register_action].
+signal action_changed(id: StringName, key: StringName, pressed: bool)
 
 static var _instance: Gen2ModHost = null
 
@@ -127,6 +137,8 @@ var _loaded: Dictionary = {}
 ## nothing: the launcher runs before Play is pressed.
 var _target_game: StringName = &""
 var _options: Dictionary = {}
+## Mod id to its registered actions. See [method register_action].
+var _actions: Dictionary = {}
 var _world_renderers: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
@@ -292,6 +304,11 @@ func register_option(id: StringName, option: Dictionary) -> Dictionary:
 	var label: String = String(option.get("label", ""))
 	if label.is_empty():
 		return {"ok": false, "reason": &"option_missing_label", "detail": _option_name(id, key)}
+	var kind: StringName = StringName(option.get("kind", OPTION_LADDER))
+	if not OPTION_KINDS.has(kind):
+		return {"ok": false, "reason": &"unknown_option_kind", "detail": String(kind)}
+	if kind == OPTION_BUTTON:
+		return _register_button_option(id, key, label, option)
 	var values: Array = option.get("values", []) as Array
 	if values.is_empty():
 		return {"ok": false, "reason": &"option_missing_values", "detail": _option_name(id, key)}
@@ -308,10 +325,40 @@ func register_option(id: StringName, option: Dictionary) -> Dictionary:
 			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
 	var fallback: int = maxi(_value_index(values, option.get("default", values[0])), 0)
 	rows.append({
-		"key": key, "label": label, "values": values.duplicate(),
+		"key": key, "label": label, "kind": OPTION_LADDER, "values": values.duplicate(),
 		"labels": _strings(labels), "default": fallback,
 	})
 	_options[id] = rows
+	return {"ok": true, "id": id, "key": key}
+
+
+## A setting that is a press rather than a ladder: "recentre the camera now" has
+## no values and nothing to persist, so it stores nothing and only emits.
+func _register_button_option(
+	id: StringName, key: StringName, label: String, option: Dictionary
+) -> Dictionary:
+	var rows: Array = _options.get(id, [])
+	for existing: Dictionary in rows:
+		if StringName(existing.get("key", &"")) == key:
+			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
+	rows.append({
+		"key": key, "label": label, "kind": OPTION_BUTTON,
+		"press_label": String(option.get("press_label", "Go")),
+		"values": [], "labels": [], "default": 0,
+	})
+	_options[id] = rows
+	return {"ok": true, "id": id, "key": key}
+
+
+## Presses a button-kind setting. Nothing is stored: what a press means is the
+## mod's, and [signal option_changed] carries a null value to say so.
+func press_option(id: StringName, key: StringName) -> Dictionary:
+	var row: Dictionary = _option_row(id, key)
+	if row.is_empty():
+		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	if StringName(row.get("kind", OPTION_LADDER)) != OPTION_BUTTON:
+		return {"ok": false, "reason": &"option_is_not_a_button", "detail": _option_name(id, key)}
+	option_changed.emit(id, key, null)
 	return {"ok": true, "id": id, "key": key}
 
 
@@ -331,9 +378,16 @@ func option_mod_ids() -> Array[StringName]:
 func options(id: StringName) -> Array:
 	var out: Array = []
 	for row: Dictionary in _options.get(id, []) as Array:
+		if StringName(row.get("kind", OPTION_LADDER)) == OPTION_BUTTON:
+			out.append({
+				"key": row["key"], "label": row["label"], "kind": OPTION_BUTTON,
+				"press_label": row["press_label"],
+				"values": [], "labels": [], "default": 0, "index": 0, "value": null,
+			})
+			continue
 		var index: int = _stored_index(id, row)
 		out.append({
-			"key": row["key"], "label": row["label"],
+			"key": row["key"], "label": row["label"], "kind": OPTION_LADDER,
 			"values": (row["values"] as Array).duplicate(),
 			"labels": (row["labels"] as Array).duplicate(),
 			"default": row["default"], "index": index, "value": row["values"][index],
@@ -382,6 +436,123 @@ func set_option_index(id: StringName, key: StringName, index: int) -> Dictionary
 		return {"ok": false, "reason": &"option_not_written", "detail": Gen2ModOptions.PATH}
 	option_changed.emit(id, key, values[index])
 	return {"ok": true, "id": id, "key": key, "index": index, "value": values[index]}
+
+
+## Declares a control of the mod's own, in the shape [method register_option]
+## uses for a setting.
+##
+## [codeblock]
+## host.register_action(manifest.id, {
+##     "key": &"pitch_up",
+##     "label": "Raise the camera",
+##     "default": [{"kind": "key", "code": KEY_R}],
+## })
+## [/codeblock]
+##
+## `default` is [Gen2InputActions]' own binding shape, so a mod's action is bound
+## by key, pad button or stick and is rebound by the controls card that rebinds
+## the eight. A default already on one of the cartridge's buttons is dropped and
+## reported: the screen claims those before a renderer is offered anything, so
+## such a binding would never once fire.
+func register_action(id: StringName, action: Dictionary) -> Dictionary:
+	var key: StringName = StringName(action.get("key", &""))
+	if String(id).is_empty() or String(key).is_empty():
+		return {"ok": false, "reason": &"invalid_action", "detail": String(id)}
+	var label: String = String(action.get("label", ""))
+	if label.is_empty():
+		return {"ok": false, "reason": &"action_missing_label", "detail": _option_name(id, key)}
+	var rows: Array = _actions.get(id, [])
+	for existing: Dictionary in rows:
+		if StringName(existing.get("key", &"")) == key:
+			return {"ok": false, "reason": &"duplicate_action", "detail": _option_name(id, key)}
+	var scheme: Dictionary = _control_scheme()
+	var defaults: Array = []
+	var taken: Array[String] = []
+	for row: Variant in action.get("default", []) as Array:
+		if row is not Dictionary:
+			continue
+		# Through the same clamp the options file uses, so a declared binding and
+		# a stored one are the same shape and can be compared at all.
+		var binding: Dictionary = Gen2InputActions.sanitize_binding(row as Dictionary)
+		if binding.is_empty():
+			continue
+		var button: int = Gen2InputActions.button_bound_to(scheme, binding)
+		if button != Gen2Button.NONE:
+			taken.append("%s is %s" % [
+				Gen2InputActions.describe(binding), Gen2Button.label(button)
+			])
+			continue
+		defaults.append(binding.duplicate())
+	if not taken.is_empty():
+		_failures.append({
+			"ok": false, "reason": &"action_default_taken",
+			"detail": "%s: %s" % [_option_name(id, key), ", ".join(taken)],
+			"id": id,
+		})
+	rows.append({
+		"key": key, "label": label, "default": defaults,
+		"name": Gen2InputActions.mod_action_name(id, key),
+	})
+	_actions[id] = rows
+	return {"ok": true, "id": id, "key": key, "dropped": taken.size()}
+
+
+## Every registered action, in registration order, as `{id, key, label, name,
+## default}`. [Gen2InputRuntime] installs these and the controls card lists them.
+func actions() -> Array:
+	var out: Array = []
+	for id: StringName in _actions:
+		for row: Dictionary in _actions[id] as Array:
+			out.append({
+				"id": id, "key": row["key"], "label": row["label"],
+				"name": row["name"], "default": (row["default"] as Array).duplicate(true),
+			})
+	return out
+
+
+## Whether a mod's action is held right now, whatever is holding it: a key, a
+## pad button, a stick past the deadzone or a finger on the on-screen pad. The
+## poll a camera wants; [signal action_pressed] is the edge.
+func action_held(id: StringName, key: StringName) -> bool:
+	var name: StringName = Gen2InputActions.mod_action_name(id, key)
+	return InputMap.has_action(name) and Input.is_action_pressed(name)
+
+
+## The same as a magnitude, 0 to 1. A stick bound to an action answers its travel
+## past the deadzone, so a camera bound to the right stick moves at the rate the
+## player is pushing it; a key answers 0 or 1.
+func action_strength(id: StringName, key: StringName) -> float:
+	var name: StringName = Gen2InputActions.mod_action_name(id, key)
+	return Input.get_action_strength(name) if InputMap.has_action(name) else 0.0
+
+
+## The registered action an event has just pressed or released, as
+## `{id, key, pressed}`, or an empty dictionary. A screen asks this with what it
+## did not claim, which is what keeps a mod's key out of a menu.
+func action_in(event: InputEvent) -> Dictionary:
+	for row: Dictionary in actions():
+		var name: StringName = row["name"]
+		if event.is_action_pressed(name):
+			return {"id": row["id"], "key": row["key"], "pressed": true}
+		if event.is_action_released(name):
+			return {"id": row["id"], "key": row["key"], "pressed": false}
+	return {}
+
+
+## Announces an action to whoever subscribed. Called by the screen that offered
+## the event, so a mod hears its own control rather than an [InputEvent].
+func emit_action(id: StringName, key: StringName, pressed: bool) -> void:
+	action_changed.emit(id, key, pressed)
+
+
+## The live control scheme, or the stock one when no runtime owns it yet, which
+## is every headless run.
+static func _control_scheme() -> Dictionary:
+	var runtime: Gen2InputRuntime = Gen2InputRuntime.instance()
+	if runtime == null:
+		return Gen2InputActions.defaults()
+	var scheme: Dictionary = runtime.scheme()
+	return scheme if not scheme.is_empty() else Gen2InputActions.defaults()
 
 
 func _option_row(id: StringName, key: StringName) -> Dictionary:
