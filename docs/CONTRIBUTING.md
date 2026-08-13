@@ -127,17 +127,33 @@ tearing it down with `change_scene_to_file`.
 
 ### Audio
 
+Audio is the cartridge's own driver over an emulated APU, not an approximation
+of it.
+
 | File | Role |
 |---|---|
-| `audio/gen2_audio_decoder.gd` | Bounded Gen II command streams to event tracks |
-| `audio/gen2_audio_renderer.gd` | Deterministic event tracks to `AudioStreamWAV` |
-| `audio/gen2_audio_player.gd` | Music/effect players, caching and fades |
+| `audio/gen2_sound_engine.gd` | `audio/engine.asm`: one `update_sound()` per frame, writing hardware registers |
+| `audio/gen2_apu.gd` | The DMG sound hardware behind `$ff10`-`$ff3f` |
+| `audio/gen2_audio_player.gd` | The generator stream the driver and the APU feed |
+| `audio/gen2_audio_render.gd` | Offline render of one record, for tools and tests |
 
-`Gen2WorldAudioHost` composes these layers. The decoder stays independent of
-scene nodes and audio devices so synthetic records can test headers, pointers,
-loops, timing and truncation. The renderer is deterministic and bounded; do
-not turn unsupported modulation into an unbounded stream or claim byte-level
-hardware fidelity.
+Nothing between the stream bytes and the samples decides what a note sounds
+like: vibrato, pitch slides, the rotating duty pattern, envelopes, drum kits and
+effects stealing music channels are all the driver's own per-frame state. Two
+consequences for anyone editing this:
+
+- Behaviour belongs in the engine only when `audio/engine.asm` puts it there,
+  and its shape should follow the routine it comes from. Cartridge quirks are
+  reproduced, not corrected.
+- The engine is scene-free and device-free, so `tools/render_audio.gd` can dump
+  any record to a WAV plus a per-frame register trace. That trace is the parity
+  artefact: any faithful implementation of the same driver writes the same
+  registers in the same order on the same frames, which is how this port was
+  checked against pokecrystal record by record.
+
+`Gen2WorldAudioHost` probes a record by running the driver over it without
+rendering samples, so there is never a second synthesiser to diverge from the
+one the game plays through.
 
 ### Mods
 
