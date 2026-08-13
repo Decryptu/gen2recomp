@@ -343,3 +343,46 @@ func _assert_forced_walk(code: int, direction: Vector2i) -> void:
 		return
 	assert_eq(StringName(forced["kind"]), &"walk", "code $%02x" % code)
 	assert_eq(forced["direction"], direction, "code $%02x" % code)
+
+
+## home/map_objects.asm's SetTallGrassFlags, which is the pair
+## CheckSuperTallGrassTile and CheckGrassTile. Written out byte by byte over the
+## whole range rather than by example, because the nybble test lets codes in
+## that are named for water.
+func test_grass_kind_matches_set_tall_grass_flags_over_every_byte() -> void:
+	var tall: Array[int] = []
+	var long_grass: Array[int] = []
+	for code: int in 256:
+		match Gen2WorldCollision.grass_kind(code):
+			Gen2WorldCollision.GRASS_TALL:
+				tall.append(code)
+			Gen2WorldCollision.GRASS_LONG:
+				long_grass.append(code)
+	# CheckSuperTallGrassTile compares two codes and nothing else.
+	assert_eq(long_grass, [0x14, 0x1C] as Array[int])
+	# CheckGrassTile: high nybble $10 or $20, low three bits clear. $20 and $28
+	# are the water branch, which is a copy of the grass one in the source.
+	assert_eq(tall, [0x10, 0x18, 0x20, 0x28] as Array[int])
+
+
+func test_the_named_grass_codes_are_the_kind_the_source_calls_them() -> void:
+	assert_eq(Gen2WorldCollision.grass_kind(0x18), Gen2WorldCollision.GRASS_TALL, "COLL_TALL_GRASS")
+	assert_eq(Gen2WorldCollision.grass_kind(0x10), Gen2WorldCollision.GRASS_TALL, "COLL_TALL_GRASS_10")
+	assert_eq(Gen2WorldCollision.grass_kind(0x14), Gen2WorldCollision.GRASS_LONG, "COLL_LONG_GRASS")
+	assert_eq(Gen2WorldCollision.grass_kind(0x1C), Gen2WorldCollision.GRASS_LONG, "COLL_LONG_GRASS_1C")
+	assert_true(Gen2WorldCollision.is_long_grass(0x14))
+	assert_false(Gen2WorldCollision.is_long_grass(0x18))
+	assert_true(Gen2WorldCollision.is_grass(0x18))
+
+
+## The grass codes a renderer draws tufts on are not the encounter gate, which is
+## CheckGrassCollision and includes COLL_WATER so one routine can gate a surf
+## roll too. Water is not grass here.
+func test_water_and_the_walkable_floor_are_not_grass() -> void:
+	for code: int in [0x00, 0x07, 0x21, 0x24, 0x27, 0x29, 0x2B, 0x2C, 0x12, 0x15]:
+		assert_eq(
+			Gen2WorldCollision.grass_kind(code), Gen2WorldCollision.GRASS_NONE,
+			"0x%02X" % code
+		)
+	assert_false(Gen2WorldCollision.is_grass(-1))
+	assert_false(Gen2WorldCollision.is_grass(0x100))

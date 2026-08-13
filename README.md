@@ -298,6 +298,7 @@ all three games unless its row says otherwise:
 | `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
 | `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
 | `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree |
+| `validate_drawn_blocks.gd` | every map's whole padded rectangle, drawn from a loaded world and from its record alone, and how many padded blocks came off a neighbour rather than off the border block |
 | `validate_field_move_prompts.gd` | the faced-tile prompt chain, both gates and all three answers for Cut, Surf and Headbutt |
 | `validate_rock_smash.gd` | the rock map table, the smashable-rock census and its one flagged rock, and Cianwood City's rock |
 | `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree |

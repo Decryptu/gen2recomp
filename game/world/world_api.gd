@@ -2182,31 +2182,56 @@ func tile_indices_in_window(origin: Vector2i, size: Vector2i) -> PackedInt32Arra
 ## -1 for `$00`, which is why [method block_at] is left alone and the collision
 ## path never comes through here.
 func drawn_block_at(block_x: int, block_y: int) -> int:
-	if current_map == null:
+	return drawn_block_for(data, current_map, block_x, block_y, _block_overrides)
+
+
+## The same fold for a map that is not the loaded one, which is what a battle
+## staged on a map has: [Gen2BattleWorldContext] names the map and hands over no
+## world, deliberately, so there is no `current_map` to read.
+##
+## [param block_overrides] is a live `changeblock` table, keyed as
+## [method _block_key] keys one. A caller with no world has none, and a map with
+## no world has had no block edited.
+static func drawn_block_for(
+	data_source: GameData,
+	map: Gen2WorldMap,
+	block_x: int,
+	block_y: int,
+	block_overrides: Dictionary = {},
+) -> int:
+	if map == null:
 		return 0
 	var block: int = -1
 	if block_x >= 0 and block_y >= 0 \
-		and block_x < current_map.width_blocks and block_y < current_map.height_blocks:
-		block = block_at(block_x, block_y)
+		and block_x < map.width_blocks and block_y < map.height_blocks:
+		block = _overridden_block_at(map, block_x, block_y, block_overrides)
 	else:
-		block = _connected_drawn_block_at(block_x, block_y)
+		block = _connected_drawn_block_at(
+			data_source, map, block_x, block_y, block_overrides
+		)
 	if block < 0:
-		return current_map.border_block
-	return current_map.border_block if block == 0 else block
+		return map.border_block
+	return map.border_block if block == 0 else block
 
 
 ## Reads the three-block connection padding assembled by FillMapConnections.
 ## Its north, south, west, east call order matters at overlapping corners, so
 ## records are checked backwards and the later east/west strip wins there.
-func _connected_drawn_block_at(block_x: int, block_y: int) -> int:
-	if data == null:
+static func _connected_drawn_block_at(
+	data_source: GameData,
+	map: Gen2WorldMap,
+	block_x: int,
+	block_y: int,
+	block_overrides: Dictionary,
+) -> int:
+	if data_source == null:
 		return -1
-	for index: int in range(current_map.connections.size() - 1, -1, -1):
-		var connection: Dictionary = current_map.connections[index]
+	for index: int in range(map.connections.size() - 1, -1, -1):
+		var connection: Dictionary = map.connections[index]
 		var direction: String = String(connection.get("direction", ""))
-		if not _block_is_in_connection_strip(block_x, block_y, direction, connection):
+		if not _block_is_in_connection_strip(map, block_x, block_y, direction, connection):
 			continue
-		var target: Gen2WorldMap = data.world_map(
+		var target: Gen2WorldMap = data_source.world_map(
 			int(connection.get("map_group", -1)),
 			int(connection.get("map_number", -1)),
 		)
@@ -2219,37 +2244,37 @@ func _connected_drawn_block_at(block_x: int, block_y: int) -> int:
 				target_cell.y += target.height_blocks
 			"south":
 				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
-				target_cell.y -= current_map.height_blocks
+				target_cell.y -= map.height_blocks
 			"west":
 				target_cell.x += target.width_blocks
 				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
 			"east":
-				target_cell.x -= current_map.width_blocks
+				target_cell.x -= map.width_blocks
 				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
 			_:
 				continue
 		if target_cell.x < 0 or target_cell.y < 0 \
 			or target_cell.x >= target.width_blocks or target_cell.y >= target.height_blocks:
 			continue
-		return _map_block_at(target, target_cell.x, target_cell.y)
+		return _overridden_block_at(target, target_cell.x, target_cell.y, block_overrides)
 	return -1
 
 
-func _block_is_in_connection_strip(
-	block_x: int, block_y: int, direction: String, connection: Dictionary
+static func _block_is_in_connection_strip(
+	map: Gen2WorldMap, block_x: int, block_y: int, direction: String, connection: Dictionary
 ) -> bool:
 	var in_padding: bool = false
 	match direction:
 		"north":
 			in_padding = block_y >= -3 and block_y < 0
 		"south":
-			in_padding = block_y >= current_map.height_blocks \
-				and block_y < current_map.height_blocks + 3
+			in_padding = block_y >= map.height_blocks \
+				and block_y < map.height_blocks + 3
 		"west":
 			in_padding = block_x >= -3 and block_x < 0
 		"east":
-			in_padding = block_x >= current_map.width_blocks \
-				and block_x < current_map.width_blocks + 3
+			in_padding = block_x >= map.width_blocks \
+				and block_x < map.width_blocks + 3
 	if not in_padding:
 		return false
 
@@ -2270,10 +2295,16 @@ func _block_is_in_connection_strip(
 
 
 func _map_block_at(map: Gen2WorldMap, block_x: int, block_y: int) -> int:
-	if not _block_overrides.is_empty():
+	return _overridden_block_at(map, block_x, block_y, _block_overrides)
+
+
+static func _overridden_block_at(
+	map: Gen2WorldMap, block_x: int, block_y: int, block_overrides: Dictionary
+) -> int:
+	if not block_overrides.is_empty():
 		var key: String = _block_key(map, block_x, block_y)
-		if _block_overrides.has(key):
-			return int(_block_overrides[key])
+		if block_overrides.has(key):
+			return int(block_overrides[key])
 	return map.block_at(block_x, block_y)
 
 
@@ -3437,7 +3468,7 @@ func _object_key(map_group: int, map_number: int, object_index: int) -> String:
 	return "%d:%d:%d" % [map_group, map_number, object_index]
 
 
-func _block_key(map: Gen2WorldMap, block_x: int, block_y: int) -> String:
+static func _block_key(map: Gen2WorldMap, block_x: int, block_y: int) -> String:
 	return "%d:%d:%d:%d" % [map.group, map.number, block_x, block_y]
 
 

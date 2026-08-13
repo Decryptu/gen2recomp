@@ -70,6 +70,59 @@ static func is_walkable(collision_code: int) -> bool:
 	return permission_for(collision_code) == LAND_TILE
 
 
+## Grass: home/map_objects.asm's SetTallGrassFlags, which is what sets an
+## object's IN_GRASS_F and so what puts it in the tufts.
+##
+## Two kinds, and the source keeps them apart: CheckSuperTallGrassTile names the
+## long grass on its own (the Bug Contest doubles its encounter rate,
+## engine/overworld/events.asm's TryWildEncounter_BugContest), and CheckGrassTile
+## answers the rest by nybble. It is not the encounter gate: CheckGrassCollision
+## is, and that one includes water, which is how one routine gates a surf roll
+## too.
+const HI_NYBBLE_TALL_GRASS: int = 0x10
+const HI_NYBBLE_WATER: int = 0x20
+const LO_NYBBLE_GRASS: int = 0x07
+const COLL_LONG_GRASS: int = 0x14
+const COLL_LONG_GRASS_1C: int = 0x1C
+
+const GRASS_NONE: int = 0
+const GRASS_TALL: int = 1
+const GRASS_LONG: int = 2
+
+
+## Which kind of grass a cell is, or [constant GRASS_NONE]. One call rather than
+## two for a renderer that draws the two heights differently.
+static func grass_kind(collision_code: int) -> int:
+	if is_long_grass(collision_code):
+		return GRASS_LONG
+	if _check_grass_tile(collision_code):
+		return GRASS_TALL
+	return GRASS_NONE
+
+
+## Whether standing on [param collision_code] puts an object in grass at all,
+## which is SetTallGrassFlags' own condition.
+static func is_grass(collision_code: int) -> bool:
+	return grass_kind(collision_code) != GRASS_NONE
+
+
+## CheckSuperTallGrassTile: the two long-grass codes and nothing else.
+static func is_long_grass(collision_code: int) -> bool:
+	return collision_code == COLL_LONG_GRASS or collision_code == COLL_LONG_GRASS_1C
+
+
+## CheckGrassTile, nybble for nybble. Its water branch is a copy of its grass
+## branch, which the source itself notes ("For some reason, the above code is
+## duplicated down here"), so $20 and $28 answer grass here as they do there.
+static func _check_grass_tile(collision_code: int) -> bool:
+	if collision_code < 0 or collision_code > 0xFF:
+		return false
+	var high: int = collision_code & 0xF0
+	if high != HI_NYBBLE_TALL_GRASS and high != HI_NYBBLE_WATER:
+		return false
+	return (collision_code & LO_NYBBLE_GRASS) == 0
+
+
 ## Ledges: engine/overworld/player_movement.asm's .TryJump. Attempted only after
 ## an ordinary step into the faced cell is blocked, reading the collision code of
 ## the cell the player already stands on (wPlayerTileCollision). All eight hop

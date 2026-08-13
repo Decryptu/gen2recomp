@@ -320,6 +320,46 @@ which block a tile came from; the number is enough.
 `Gen2WorldAnimation` rewrites slots in this strip, so a renderer texturing from
 it follows water and flowers without knowing an animation ran.
 
+### Asking what a cell is
+
+`Gen2WorldAPI.collision_code_at(cell)` is the raw cartridge byte, and
+`Gen2WorldCollision` answers what the source asks of it. Read a predicate rather
+than a tile number: a pin by drawing is per tile id and per tileset, and the
+cartridge's own answer is per cell.
+
+| Call | Source |
+|---|---|
+| `permission_for(code)`, `is_walkable(code)` | `CollisionPermissionTable` |
+| `talks(code)` | The same table's `TALK` bit |
+| `grass_kind(code)`, `is_grass(code)`, `is_long_grass(code)` | `SetTallGrassFlags`, which is `CheckSuperTallGrassTile` then `CheckGrassTile` |
+| `allows_hop(code, direction)` | `.TryJump` |
+| `is_warp_tile(code)`, `is_pit_tile(code)` | `CheckWarpCollision`, `CheckPitTile` |
+| `side_wall_face_mask(code)` | `GetMovementPermissions` |
+
+`grass_kind` returns `GRASS_NONE`, `GRASS_TALL` or `GRASS_LONG`, because the
+cartridge keeps the two apart: the long grass is its own pair of codes and the
+Bug Contest doubles its encounter rate. It is `IN_GRASS_F`, not the encounter
+gate; `CheckGrassCollision` is that one and it includes water, since one routine
+gates a surf roll too.
+
+### The drawn block of a map that is not open
+
+`Gen2WorldAPI.drawn_block_at(x, y)` is the block a coordinate is drawn from
+rather than the block that is stored there: `LoadMetatiles` substitutes the
+map's border block for a `$00` byte, and `FillMapConnections` fills three blocks
+of padding around the map with a neighbour's art where a connection reaches.
+
+A caller with no world reads the same fold through
+`Gen2WorldAPI.drawn_block_for(data, map, x, y)`. That is what a battle has: a
+`Gen2BattleWorldContext` names the map and hands over no world, deliberately, so
+an arena built from `GameData` records asks the static. The instance method calls
+through to it, so the strip geometry and the north/south/west/east order at an
+overlapping corner exist once. `tools/validate_drawn_blocks.gd` sweeps every map
+of every cache over its whole padded rectangle and refuses a disagreement.
+
+Live `changeblock` edits are the loaded world's own and are not visible to the
+static form, which is correct for a map nobody is standing on.
+
 ## Framing the view
 
 `Gen2WorldAPI` offers a camera; it does not impose one.
