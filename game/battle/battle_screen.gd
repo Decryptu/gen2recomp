@@ -202,6 +202,15 @@ var _forget_moves: Array = []
 var _forget_cursor: int = 0
 var _forget_confirm_cursor: int = 0
 
+## Where a switch has got to. [code]&"offer"[/code] is `OfferSwitch`'s
+## `PlaceYesNoBox` and [code]&"pick"[/code] the party menu
+## `SetUpBattlePartyMenu` puts up behind it, which Baton Pass opens straight
+## into. Empty when neither is on screen.
+var _switch_stage: StringName = &""
+var _switch_menu: Gen2BattleSwitchMenu = null
+## The yes/no box's own cursor, which is a two-row `VerticalMenu`.
+var _switch_offer: Gen2WorldMenu = null
+
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
 ## flags of its own to read: it falls back to [method _random_slot], same as
@@ -223,6 +232,15 @@ var _player_max_hp: int = 0
 var _exp: int = 0
 
 var _box: Gen2TextBox = null
+
+## The two menus a switch is made with, and the one layer both are drawn on:
+## `PlaceYesNoBox`'s frame over the field, or the whole party page in place of
+## it, which is what `SetUpBattlePartyMenu` clearing the screen amounts to.
+var _menu_page: Gen2MenuPage = null
+var _party_page: Gen2PartyMenuPage = null
+var _menu_layer: TextureRect = null
+## What the layer currently holds, so a per-frame refresh redraws nothing.
+var _menu_drawn: String = ""
 
 ## `wTilemap` as this battle leaves it, which is what an animation edits and
 ## what the renderer draws both pictures out of.
@@ -247,6 +265,10 @@ var _audio_player: Gen2AudioPlayer = null
 ## step `HPBarAnim_BGMapUpdate` waits and `BattleIntroSlidingPics`' own
 ## `DelayFrame` are both hardware frame counts.
 func _process(delta: float) -> void:
+	## The yes/no box appears when the question above it has finished printing,
+	## and the box prints on its own clock rather than on a press.
+	if _switch_stage != &"":
+		_refresh_menu_layer()
 	if not frames_running():
 		_frame_elapsed = 0.0
 		return
@@ -289,6 +311,16 @@ func _ready() -> void:
 	_audio_player.name = "AudioPlayer"
 	add_child(_audio_player)
 	_anim_data = Gen2BattleAnimData.from_game_data(_data)
+
+	## Under the text box, because the refusals a switch list is answered with are
+	## `StdBattleTextbox` drawn over the party menu rather than into it. The
+	## yes/no box sits above the box's own rows and never meets it.
+	_menu_page = Gen2MenuPage.from_data(_data)
+	_party_page = Gen2PartyMenuPage.from_data(_data)
+	_menu_layer = TextureRect.new()
+	_menu_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_menu_layer.visible = false
+	_screen.display(_menu_layer)
 
 	_box = Gen2TextBox.new()
 	_box.font = Gen2Font.from_data(_data)
@@ -687,6 +719,7 @@ func _init_battle_display() -> void:
 	## reading the options file itself, since it is scene-free; this is the one
 	## place every battle here passes through.
 	_battle.battle_style_set = Gen2OptionsStore.current().battle_style_set
+	_close_switch()
 	_reseed_bg_map()
 	set_hp(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
@@ -1121,6 +1154,12 @@ func battle_snapshot() -> Dictionary:
 		"player": _player,
 		"message": _last_message,
 		"completion_sent": _world_battle_completion_sent,
+		"switch_stage": _switch_stage,
+		"switch_cursor": (
+			_switch_offer.selected_index() if _switch_offer != null
+			else (_switch_menu.cursor if _switch_menu != null else -1)
+		),
+		"switch_forced": _switch_menu != null and _switch_menu.forced,
 		"capture_selecting": _capture_selecting,
 		"capture_waiting": _capture_waiting,
 		"capture_ball": _selected_capture_ball(),
@@ -1772,10 +1811,10 @@ func _prepare_world_battle_recovery() -> bool:
 
 ## Answers a Baton Pass that stopped the turn, and whether there was one.
 ##
-## `ForcePickSwitchMonInBattle` is a menu, and this screen has none, so it takes
-## the first Pokémon standing exactly as [method _replace_the_fallen] does for a
-## faint. The engine keeps the choice open either way; what is missing is a
-## screen to make it with, not the seam.
+## The player's target is `ForcePickSwitchMonInBattle`, which is the party menu
+## with no way out of it, so the list is opened and the turn stays standing until
+## a row answers it. The enemy's is `FindMonInOTPartyToSwitchIntoBattle`, the
+## AI's own type-matchup pick, which [method Gen2Battle.baton_pass_target] makes.
 ##
 ## It is answered before a replacement, because a turn left standing here has not
 ## finished and nothing behind it can be asked yet.
@@ -1785,7 +1824,11 @@ func _answer_baton_pass() -> bool:
 	var side: int = _battle.awaiting_baton_pass()
 	if side < 0:
 		return false
-	var next: int = _next_healthy(side)
+	if side == Gen2Battle.PLAYER:
+		if _switch_stage == &"":
+			_open_switch_pick(true)
+		return true
+	var next: int = _battle.baton_pass_target(side)
 	if next < 0:
 		return false
 	_pending = _battle.pass_to(next)
@@ -1793,27 +1836,265 @@ func _answer_baton_pass() -> bool:
 	return true
 
 
-## Answers `OfferSwitch`'s yes/no, which only SHIFT ever reaches, and whether
-## there was one to answer.
-##
-## `PlaceYesNoBox` is a menu and this screen has none, so it declines: the
-## trainer's Pokémon comes in and the player's stays, which is what SET would
-## have done without asking. The engine keeps the choice open; what is missing
-## is a screen to make it with, the same gap [method _answer_baton_pass] has.
+## Opens `OfferSwitch`'s yes/no, which only SHIFT ever reaches, and answers
+## whether there was a question to put up.
 ##
 ## Answered before a replacement for the same reason a Baton Pass is: the turn it
 ## stopped has not finished, and nothing behind it can be asked yet.
 func _answer_switch_offer() -> bool:
 	if _battle == null or _battle.awaiting_switch_offer() < 0:
 		return false
-	_pending = _battle.answer_switch_offer(-1)
-	_show_next_event()
+	if _switch_stage == &"":
+		_open_switch_offer()
 	return true
 
 
+## `OfferSwitch`'s own `lb bc, 1, 7` through `_YesNoBox`, which stores the left
+## and top coordinates it is handed and adds five and four for the other two
+## (`home/menu.asm`). The flags, the two options and the `db 1` that opens the
+## cursor on YES are `YesNoMenuHeader`'s. `InterpretTwoOptionMenu`'s fifteen
+## frames between the answer and the box coming down are not spent, the way no
+## other menu delay here is.
+const YES_NO_LEFT: int = 1
+const YES_NO_TOP: int = 7
+const YES_NO_SPAN: Vector2i = Vector2i(5, 4)
+const YES_NO_OPTIONS: Array[String] = ["YES", "NO"]
+const YES_NO_FLAGS: int = Gen2MenuBox.STATICMENU_CURSOR \
+	| Gen2MenuBox.STATICMENU_NO_TOP_SPACING
+
+
+## Puts `OfferSwitch`'s question and its yes/no box up. The enemy's Pokémon is
+## named while it is still on its way in, which is the whole point of asking
+## before `ShowSetEnemyMonAndSendOutAnimation`.
+func _open_switch_offer() -> void:
+	var incoming: Gen2BattleMon = _battle.party(Gen2Battle.ENEMY).at(
+		_battle.awaiting_switch_offer()
+	)
+	show_message(Gen2BattleSwitchMenu.offer_text(
+		_enemy_label(), incoming.name_text() if incoming != null else "", _player_label()
+	))
+	_switch_offer = Gen2WorldMenu.new()
+	_switch_offer.options = YES_NO_OPTIONS.duplicate()
+	_switch_offer.flags = YES_NO_FLAGS
+	_switch_offer.rows = YES_NO_OPTIONS.size()
+	_switch_offer.cursor = 0
+	_switch_stage = &"offer"
+	_reopen_menu_layer()
+
+
+## `SetUpBattlePartyMenu` and the list behind it. [param forced] is the Baton
+## Pass variant, which cannot be backed out of.
+func _open_switch_pick(forced: bool) -> void:
+	_switch_menu = Gen2BattleSwitchMenu.for_party(_battle.party(Gen2Battle.PLAYER), forced)
+	_switch_offer = null
+	_switch_stage = &"pick"
+	## The party menu is the whole screen rather than a box on it, so the battle's
+	## own box goes with the field it belongs to.
+	if _box != null:
+		_box.visible = false
+	_reopen_menu_layer()
+
+
+func _close_switch() -> void:
+	_switch_stage = &""
+	_switch_menu = null
+	_switch_offer = null
+	if _box != null:
+		_box.visible = true
+	_reopen_menu_layer()
+
+
+## What a press does while either menu is up.
+func _answer_switch(button: int) -> void:
+	match _switch_stage:
+		&"offer":
+			_answer_switch_offer_button(button)
+		&"pick":
+			_answer_switch_pick(button)
+		&"refused":
+			## `StdBattleTextbox` blocks on a button and `jr .loop` reopens the
+			## list behind it.
+			if _box != null and _box.advance():
+				return
+			_open_switch_pick(_switch_menu != null and _switch_menu.forced)
+
+
+## `InterpretTwoOptionMenu` over `YesNoMenuHeader`: two rows that do not wrap,
+## and a B that is the same answer as NO.
+func _answer_switch_offer_button(button: int) -> void:
+	## The question is two paragraphs, so a press reads it before it answers
+	## anything, the way [method _answer_forget] does. The box is not up on
+	## hardware until the text is either.
+	if _offer_still_reading():
+		if button == Gen2Button.A:
+			_box.advance()
+			_refresh_menu_layer()
+		return
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN:
+			_switch_offer.move(Vector2i(0, 1 if button == Gen2Button.DOWN else -1))
+			_refresh_menu_layer()
+		Gen2Button.A:
+			if _switch_offer.selected_index() == 0:
+				_open_switch_pick(false)
+			else:
+				_decline_switch_offer()
+		Gen2Button.B:
+			_decline_switch_offer()
+
+
+## Whether `StdBattleTextbox` is still printing the question the box belongs to.
+func _offer_still_reading() -> bool:
+	return _box != null and (_box.is_revealing() or _box.has_pages_left())
+
+
+## `PartyMenuSelect`'s own joypad filter: the cursor, A and B, with everything
+## else ignored.
+func _answer_switch_pick(button: int) -> void:
+	match button:
+		Gen2Button.UP:
+			_switch_menu.move(-1)
+			_refresh_menu_layer()
+		Gen2Button.DOWN:
+			_switch_menu.move(1)
+			_refresh_menu_layer()
+		Gen2Button.A:
+			_resolve_switch(_switch_menu.confirm())
+		Gen2Button.B:
+			_resolve_switch(_switch_menu.cancel())
+
+
+func _resolve_switch(answer: Dictionary) -> void:
+	match StringName(answer.get("result", &"")):
+		Gen2BattleSwitchMenu.CHOSEN:
+			_play_anim_sound(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
+			_commit_switch(int(answer.get("index", -1)))
+		Gen2BattleSwitchMenu.CANCELLED:
+			_play_anim_sound(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
+			## `OfferSwitch.canceled_switch` falls into `.said_no`: backing out of
+			## the list is the same answer as NO.
+			_decline_switch_offer()
+		Gen2BattleSwitchMenu.CANNOT_CANCEL:
+			_play_anim_sound(int(answer.get("sfx", 0)))
+		_:
+			_show_switch_refusal(String(answer.get("text", "")))
+
+
+## The chosen row, which finishes whichever question the list was opened for.
+func _commit_switch(index: int) -> void:
+	var forced: bool = _switch_menu != null and _switch_menu.forced
+	_close_switch()
+	_pending = _battle.pass_to(index) if forced else _battle.answer_switch_offer(index)
+	_show_next_event()
+
+
+func _decline_switch_offer() -> void:
+	_close_switch()
+	_pending = _battle.answer_switch_offer(-1)
+	_show_next_event()
+
+
+## `BattleText_MonIsAlreadyOut` and `BattleText_TheresNoWillToBattle`, which the
+## source prints in a battle text box over the party menu and then redraws the
+## list behind.
+func _show_switch_refusal(text: String) -> void:
+	_switch_stage = &"refused"
+	if _box != null:
+		_box.visible = true
+	show_message(text)
+	_reopen_menu_layer()
+
+
+## `PlaceEnemysName`: the opponent's class name, a space, and their own name.
+func _enemy_label() -> String:
+	if _enemy_trainer_class <= 0 or _data == null:
+		return _name_of(_enemy)
+	return "%s %s" % [_data.trainer_name(_enemy_trainer_class), _enemy_trainer_name()]
+
+
+## `<PLAYER>`. A development battle has no save to read a name off, so
+## `NewGame`'s own default stands in rather than a blank in the middle of a
+## sentence.
+func _player_label() -> String:
+	if _source_save != null and not _source_save.player_name.is_empty():
+		return _source_save.player_name
+	return Gen2OakSpeech.DEFAULT_MALE
+
+
+## Redraws the menu layer even when nothing about the cursor moved, which is what
+## opening a list has to do: the same stage and cursor can be looking at a
+## different party.
+func _reopen_menu_layer() -> void:
+	_menu_drawn = ""
+	_refresh_menu_layer()
+
+
+## The yes/no frame over the field, or the whole party page in place of it.
+## Cheap to call every frame: it rebuilds only when what it would draw changed.
+func _refresh_menu_layer() -> void:
+	if _menu_layer == null:
+		return
+	var signature: String = "%s|%d|%d" % [
+		_switch_stage,
+		_switch_offer.selected_index() if _switch_offer != null else (
+			_switch_menu.cursor if _switch_menu != null else -1
+		),
+		int(_offer_still_reading()),
+	]
+	if signature == _menu_drawn:
+		return
+	_menu_drawn = signature
+
+	match _switch_stage:
+		&"offer":
+			_draw_yes_no_box()
+		&"pick", &"refused":
+			_draw_party_page()
+		_:
+			_menu_layer.visible = false
+
+
+func _draw_yes_no_box() -> void:
+	if _menu_page == null or _offer_still_reading():
+		_menu_layer.visible = false
+		return
+	var box: Gen2MenuBox = Gen2MenuBox.from_coords(
+		YES_NO_LEFT, YES_NO_TOP,
+		YES_NO_LEFT + YES_NO_SPAN.x, YES_NO_TOP + YES_NO_SPAN.y, YES_NO_FLAGS
+	)
+	_show_menu_image(
+		_menu_page.render(box, YES_NO_OPTIONS, _switch_offer.selected_index()),
+		box.border_position() * Gen2Font.TILE
+	)
+
+
+func _draw_party_page() -> void:
+	if _party_page == null or _switch_menu == null:
+		_menu_layer.visible = false
+		return
+	_show_menu_image(
+		_party_page.render(
+			_switch_menu.rows, _switch_menu.cursor, Gen2BattleSwitchMenu.prompt_text()
+		),
+		Vector2i.ZERO
+	)
+
+
+func _show_menu_image(image: Image, at: Vector2i) -> void:
+	_menu_layer.texture = ImageTexture.create_from_image(image)
+	_menu_layer.position = Vector2(at)
+	_menu_layer.size = Vector2(image.get_size())
+	_menu_layer.visible = true
+
+
 ## Sends out the first Pokémon standing on any side that owes one, and answers
-## whether it had to. Choosing which is a menu on the player's side and an AI on
-## the enemy's; this screen has neither, so it takes the first.
+## whether it had to.
+##
+## Still the only place that picks for the player rather than asking. The list is
+## the same one [method _open_switch_pick] opens, but `ForcePlayerMonChoice` is
+## reached through `AskUseNextPokemon`, whose NO runs away outside a turn, and
+## the enemy's own replacement is `FindPkmnInOTPartyToSwitchIntoBattle` rather
+## than the first standing. Both are engine work rather than a missing menu.
 func _replace_the_fallen() -> bool:
 	if _battle == null:
 		return false
@@ -2401,19 +2682,24 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Whether the battle itself is idle enough to pass an event on.
 ##
-## The two modal input states are the ones that mean something by themselves: the
-## forget-move prompt and ball selection. A draining bar, the opening slide and a
-## move animation are deliberately not on that list. None of them reads input,
-## and a camera that stops answering every time a bar drains is not a camera; the
-## presses they do swallow are swallowed in [method _handle_button], which runs
-## first and never reaches here.
+## The modal input states are the ones that mean something by themselves: the
+## forget-move prompt, a switch's yes/no or list, and ball selection. A draining
+## bar, the opening slide and a move animation are deliberately not on that list.
+## None of them reads input, and a camera that stops answering every time a bar
+## drains is not a camera; the presses they do swallow are swallowed in
+## [method _handle_button], which runs first and never reaches here.
 func _renderer_input_free() -> bool:
-	return is_ready() and _forget_stage == &"" and not _capture_selecting
+	return is_ready() and _forget_stage == &"" and _switch_stage == &"" \
+		and not _capture_selecting
 
 
 func _handle_button(button: int) -> bool:
 	if _forget_stage != &"":
 		_answer_forget(button)
+		return true
+
+	if _switch_stage != &"":
+		_answer_switch(button)
 		return true
 
 	if _capture_selecting:

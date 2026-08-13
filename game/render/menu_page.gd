@@ -63,6 +63,27 @@ func draw(
 		font.draw_code(CURSOR_CODE, indices, width, arrow.x * TILE, arrow.y * TILE)
 
 
+## The same menu as an image of its own frame alone, for a screen that composes
+## layers rather than one page: the box is drawn into a screen-sized buffer at
+## its own coordinates and then cropped back to it, so [method draw]'s absolute
+## placement stays the one piece of arithmetic.
+##
+## Opaque, because `MenuBox` fills its interior: a menu over the battle field
+## covers what is behind it.
+func render(
+	box: Gen2MenuBox, options: Array, cursor: int,
+	title: String = "", title_indent: int = 0
+) -> Image:
+	var width: int = Gen2Screen.WIDTH
+	var indices: PackedByteArray = PackedByteArray()
+	indices.resize(width * Gen2Screen.HEIGHT)
+	draw(box, options, cursor, indices, width, title, title_indent)
+	return Gen2PicImage.from_indices(
+		indices, width, Gen2Screen.HEIGHT,
+		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	).get_region(Rect2i(box.border_position() * TILE, box.border_size() * TILE))
+
+
 ## `Textbox`'s own `ClearBox` over the interior, so a menu drawn over a filled
 ## page does not show that page through its options. The blank the source fills
 ## with is $7f, which sits below the font and draws as index 0.

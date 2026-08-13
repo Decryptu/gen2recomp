@@ -85,8 +85,8 @@ func draw_enemy(
 	into: PackedByteArray, width: int, name: String, level: int
 ) -> void:
 	font.draw_text(name, into, width, ENEMY_NAME.x * TILE, ENEMY_NAME.y * TILE)
-	_draw_level(into, width, ENEMY_LEVEL, level)
-	_draw_bar_frame(into, width, ENEMY_BAR, Gen2BattleTiles.HP_BAR_END)
+	draw_level(into, width, ENEMY_LEVEL, level)
+	draw_bar_frame(into, width, ENEMY_BAR, Gen2BattleTiles.HP_BAR_END)
 
 	# The edge, which starts beside the bar and turns under it.
 	var left: int = ENEMY_EDGE.x * TILE
@@ -106,8 +106,8 @@ func draw_player(
 	into: PackedByteArray, width: int, name: String, level: int, hp: int, max_hp: int
 ) -> void:
 	font.draw_text(name, into, width, PLAYER_NAME.x * TILE, PLAYER_NAME.y * TILE)
-	_draw_level(into, width, PLAYER_LEVEL, level)
-	_draw_bar_frame(into, width, PLAYER_BAR, Gen2BattleTiles.HP_BAR_END + 1)
+	draw_level(into, width, PLAYER_LEVEL, level)
+	draw_bar_frame(into, width, PLAYER_BAR, Gen2BattleTiles.HP_BAR_END + 1)
 
 	# Right-aligned in a fixed field, as the games print any number in a panel:
 	# the digits line up and the leading spaces draw nothing.
@@ -170,14 +170,14 @@ func draw_exp_bar(into: PackedByteArray, width: int, pixels: int) -> void:
 
 ## The level symbol and the number, left-aligned after it, which is how a level
 ## is written everywhere in these games.
-func _draw_level(into: PackedByteArray, width: int, at: Vector2i, level: int) -> void:
+func draw_level(into: PackedByteArray, width: int, at: Vector2i, level: int) -> void:
 	tiles.draw(Gen2BattleTiles.LEVEL, into, width, at.x * TILE, at.y * TILE)
 	font.draw_text("%d" % level, into, width, (at.x + 1) * TILE, at.y * TILE)
 
 
 ## "HP:", the empty bar and the cap that closes it: everything about a bar that
 ## does not depend on how full it is.
-func _draw_bar_frame(into: PackedByteArray, width: int, at: Vector2i, cap: int) -> void:
+func draw_bar_frame(into: PackedByteArray, width: int, at: Vector2i, cap: int) -> void:
 	var left: int = at.x * TILE
 	var top: int = at.y * TILE
 	tiles.draw(Gen2BattleTiles.HP_LABEL, into, width, left, top)

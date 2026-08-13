@@ -133,6 +133,14 @@ func is_revealing() -> bool:
 	return _shown < float(_tiles_on_page)
 
 
+## Whether a page after this one is still waiting, which is what the blinking
+## arrow means. A screen putting a menu over the box waits for both this and
+## [method is_revealing] to be false, since the cartridge prints the whole text
+## before it opens one.
+func has_pages_left() -> bool:
+	return _page + 1 < _pages.size()
+
+
 ## Reveals the rest of the current page at once.
 func finish() -> void:
 	_shown = float(_tiles_on_page)

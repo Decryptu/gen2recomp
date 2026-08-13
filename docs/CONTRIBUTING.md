@@ -185,6 +185,7 @@ the contract and why a renderer must not write world state.
 | `render/text_box.gd` | Bordered text window |
 | `render/battle_tiles.gd` | Hardware-order battle tile page |
 | `render/battle_hud.gd` | Status panels on the tile grid |
+| `render/party_menu_page.gd` | `WritePartyMenuTilemap`'s party list |
 
 `Gen2Screen` is a `Control` with a 160x144 `SubViewport` at integer scale;
 surrounding UI uses window resolution. Project-wide stretch blurs menus and
@@ -327,9 +328,16 @@ plus the stages); `ResetBatonPassStatus` names the few things that do not.
 
 Switches happen before priority, so the incoming Pokémon takes the other
 side's move. A fainted replacement is caller policy: the turn stops at
-`must_replace` until `send_out`, and a Baton Pass target the same way. A full moveset similarly uses
-`must_learn_move`, `learn_move` and `decline_move`; the development screen
-declines automatically.
+`must_replace` until `send_out`, and a Baton Pass target the same way. A full
+moveset similarly uses `must_learn_move`, `learn_move` and `decline_move`.
+
+Three of those four questions are asked rather than answered for the player.
+`Gen2BattleSwitchMenu` is `PickSwitchMonInBattle` and its forced variant: the
+rows, the wrapping cursor and the already-out and no-energy refusals, with
+`Gen2PartyMenuPage` drawing `WritePartyMenuTilemap`'s columns and
+`Gen2MenuPage.render` drawing `PlaceYesNoBox` over the field. `must_replace` is
+the one still taken by the screen, because `ForcePlayerMonChoice` sits behind
+`AskUseNextPokemon`, whose NO runs away outside a turn.
 
 Trainer details:
 
