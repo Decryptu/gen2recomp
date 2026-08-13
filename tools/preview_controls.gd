@@ -3,7 +3,11 @@ extends SceneTree
 ## Captures the overworld with the on-screen controller shown, in whichever
 ## orientation the window is given.
 ##
-##   Godot --path . --resolution 480x960 -s res://tools/preview_controls.gd -- <out.png>
+##   Godot --path . --resolution 480x960 -s res://tools/preview_controls.gd -- <out.png> [mod]
+##
+## A `mod` argument registers two controls of a mod's own and switches their
+## on-screen buttons on, which is what a phone player who wants a mod's camera
+## has to be able to reach.
 ##
 ## The orientation is the window's, so `--resolution` chooses which arrangement
 ## is captured: portrait puts the screen at the top and the controller under it,
@@ -19,6 +23,7 @@ var _screen: Gen2WorldScreen = null
 var _output_path: String = ""
 var _fixture_directory: String = ""
 var _frames: int = 0
+var _with_mod_buttons: bool = false
 
 
 func _initialize() -> void:
@@ -28,6 +33,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	_output_path = args[0]
+	_with_mod_buttons = args.size() > 1 and args[1] == "mod"
 
 
 ## Built on the first frame rather than in [method _initialize], because the
@@ -40,7 +46,14 @@ func _build() -> void:
 
 	var options: Gen2Options = Gen2OptionsStore.current()
 	options.touch_mode = Gen2Options.TOUCH_ALWAYS
+	if _with_mod_buttons:
+		for key: String in ["pitch_up", "pitch_down"]:
+			Gen2ModHost.instance().register_action(&"voxel_preview", {
+				"key": StringName(key), "label": key.capitalize().replace("_", " "),
+			})
+		options.touch_layout.mod_buttons_shown = true
 	Gen2InputRuntime.instance().apply_options(options)
+	Gen2InputRuntime.instance().install_mod_actions()
 
 	# The window is whatever `--resolution` asked for; the interface is drawn at
 	# that size rather than stretched from the project's own base resolution.

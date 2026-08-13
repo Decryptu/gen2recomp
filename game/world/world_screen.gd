@@ -554,6 +554,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
 		return
+	# A mod's own declared control, before the raw leftovers: the mod hears its
+	# own action id rather than an InputEvent, and the same pauses that hold a
+	# renderer's events hold this one.
+	if _renderer_input_free():
+		var action: Dictionary = Gen2ModHost.instance().action_in(event)
+		if not action.is_empty():
+			Gen2ModHost.instance().emit_action(
+				action["id"], action["key"], bool(action["pressed"])
+			)
+			accept_event()
+			return
 	# Everything the screen wants has been claimed above, so what reaches here is
 	# what a renderer may have a use for: a free camera needs pointer and stick
 	# motion, and the screen has no opinion about either.

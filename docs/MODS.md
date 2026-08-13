@@ -40,6 +40,7 @@ user://mods/<id>/
 | `entry` | A `.gd` path inside the mod directory |
 | `description` | Optional |
 | `dependencies` | Optional object from required mod ids to SemVer ranges |
+| `games` | Optional list of cartridge ids the mod is for |
 
 `version` is a strict `major.minor.patch` number. Dependency ranges accept an
 exact version, `*`, component wildcards such as `1.x` or `1.4.*`, comparison
@@ -47,6 +48,16 @@ chains such as `>=1.2.0 <2.0.0`, and caret or tilde ranges such as `^1.2.3` and
 `~1.2.3`. Dependencies load first. A missing, disabled, incompatible or failed
 dependency, and every member of a dependency cycle, is refused by name before
 the dependent entry script runs.
+
+`games` is `RomRegistry` ids: `["gold", "silver", "crystal"]`. Absent or empty
+means every cartridge the host knows, which is what a manifest written before
+this existed says. A cartridge the mod does not name refuses the mod at load, by
+name, and the launcher's card prints what a mod is for before Play is pressed.
+Ids the host has never heard of are not refused when the manifest is read: a mod
+that also names a cartridge a later launcher will ship has to install today, and
+naming only such an id simply means it never runs here. There is no generation
+shorthand, because a generation is not a fact the registry holds about a dump,
+and a list of ids stays right when the launcher gains one.
 
 An entry that is absolute, contains `..` or is not GDScript is refused before
 anything runs. Manifests are read without executing mod code, so a launcher can
@@ -320,6 +331,46 @@ which block a tile came from; the number is enough.
 `Gen2WorldAnimation` rewrites slots in this strip, so a renderer texturing from
 it follows water and flowers without knowing an animation ran.
 
+### Asking what a cell is
+
+`Gen2WorldAPI.collision_code_at(cell)` is the raw cartridge byte, and
+`Gen2WorldCollision` answers what the source asks of it. Read a predicate rather
+than a tile number: a pin by drawing is per tile id and per tileset, and the
+cartridge's own answer is per cell.
+
+| Call | Source |
+|---|---|
+| `permission_for(code)`, `is_walkable(code)` | `CollisionPermissionTable` |
+| `talks(code)` | The same table's `TALK` bit |
+| `grass_kind(code)`, `is_grass(code)`, `is_long_grass(code)` | `SetTallGrassFlags`, which is `CheckSuperTallGrassTile` then `CheckGrassTile` |
+| `allows_hop(code, direction)` | `.TryJump` |
+| `is_warp_tile(code)`, `is_pit_tile(code)` | `CheckWarpCollision`, `CheckPitTile` |
+| `side_wall_face_mask(code)` | `GetMovementPermissions` |
+
+`grass_kind` returns `GRASS_NONE`, `GRASS_TALL` or `GRASS_LONG`, because the
+cartridge keeps the two apart: the long grass is its own pair of codes and the
+Bug Contest doubles its encounter rate. It is `IN_GRASS_F`, not the encounter
+gate; `CheckGrassCollision` is that one and it includes water, since one routine
+gates a surf roll too.
+
+### The drawn block of a map that is not open
+
+`Gen2WorldAPI.drawn_block_at(x, y)` is the block a coordinate is drawn from
+rather than the block that is stored there: `LoadMetatiles` substitutes the
+map's border block for a `$00` byte, and `FillMapConnections` fills three blocks
+of padding around the map with a neighbour's art where a connection reaches.
+
+A caller with no world reads the same fold through
+`Gen2WorldAPI.drawn_block_for(data, map, x, y)`. That is what a battle has: a
+`Gen2BattleWorldContext` names the map and hands over no world, deliberately, so
+an arena built from `GameData` records asks the static. The instance method calls
+through to it, so the strip geometry and the north/south/west/east order at an
+overlapping corner exist once. `tools/validate_drawn_blocks.gd` sweeps every map
+of every cache over its whole padded rectangle and refuses a disagreement.
+
+Live `changeblock` edits are the loaded world's own and are not visible to the
+static form, which is correct for a map nobody is standing on.
+
 ## Framing the view
 
 `Gen2WorldAPI` offers a camera; it does not impose one.
@@ -516,8 +567,10 @@ Supported by the contract above:
   and `frame_is_mirrored()` says when it is drawn flipped;
 - a camera of its own, through `player_position_cells()` and
   `visible_origin_cells()` above, without inheriting the tile page's framing;
-- steering that camera, through `handle_world_input`. `mods/examples/voxel_preview/`
-  puts pitch on `Q` and `E`, two keys the world screen does not read.
+- steering that camera, through `register_action` and the raw leftovers
+  `handle_world_input` offers beside it. `mods/examples/voxel_preview/` declares
+  its two pitch controls, so they are rebindable and can be put on a phone's
+  screen rather than being keycodes only a keyboard can reach.
 
 What is still missing:
 
@@ -578,9 +631,16 @@ host.register_option(manifest.id, {
 |---|---|
 | `key` | Addresses the setting within the mod |
 | `label` | Shown to the player |
-| `values` | The rungs, at least one. A toggle is a two-rung ladder |
+| `kind` | Optional; `Gen2ModHost.OPTION_LADDER` (the default) or `OPTION_BUTTON` |
+| `values` | The rungs, at least one. A toggle is a two-rung ladder. Ladder only |
 | `labels` | Optional; what each rung is shown as, defaulting to the values |
 | `default` | Optional; the rung used until the player picks one, defaulting to the first |
+| `press_label` | Optional; what a button setting's control reads, defaulting to `Go`. Button only |
+
+A **button** setting is a press rather than a ladder, for something with no value
+to keep: "recentre the camera now" is an action, not a rung. It stores nothing,
+`press_option(id, key)` is what both surfaces call, and `option_changed` carries
+a null value to say the press is the whole setting.
 
 Read it back with `host.option(id, key)`, or `option_index(id, key)` for the rung.
 A mod that has to rebuild something on a change connects to `option_changed(id,
@@ -605,6 +665,69 @@ Per-slot state belongs in the save instead. A discovered manifest can use
 Both sides deep-copy dictionaries, and writes larger than 64 KiB of UTF-8 JSON
 are refused. The manifest object itself is the capability: constructing another
 manifest with the same id does not grant access to that mod's state.
+
+## Adding a control
+
+`register_action(id, action)` declares a control of the mod's own. A mod cannot
+see the cartridge's eight, and the screen claims every one of them before a
+renderer is offered anything, so reading raw keycodes out of
+`handle_world_input` produces controls that cannot be rebound, collide silently
+with the d-pad, and do not exist on a touchscreen at all.
+
+```gdscript
+host.register_action(manifest.id, {
+	"key": "pitch_up", "label": "Camera up",
+	"default": [{"kind": "key", "code": KEY_F}],
+})
+```
+
+| Key | Meaning |
+|---|---|
+| `key` | Addresses the control within the mod |
+| `label` | Shown wherever the control is listed or drawn |
+| `default` | Optional; bindings in `Gen2InputActions`' own shape |
+
+`default` takes the same three kinds the eight take, so a mod's control binds to
+a key by physical position, a pad button, or a stick axis past the same deadzone:
+
+```gdscript
+{"kind": "key",        "code": <physical keycode>}
+{"kind": "pad_button", "code": <JoyButton>}
+{"kind": "pad_axis",   "code": <JoyAxis>, "sign": -1 or 1}
+```
+
+A default already bound to one of the eight is **dropped and reported**, because
+such a binding would never once fire: the screen takes those first. The action
+still registers, unbound on that slot, and the refusal reaches
+`Gen2ModHost.failures()` and the launcher. `W`, `A`, `S` and `D` are the d-pad's
+own default keys.
+
+Three ways to read one, none of them an `InputEvent`:
+
+| Call | For |
+|---|---|
+| `action_changed(id, key, pressed)` | The edge. A signal, like `option_changed` |
+| `action_held(id, key) -> bool` | The poll a camera wants |
+| `action_strength(id, key) -> float` | The same as a magnitude, 0 to 1 |
+
+`action_strength` is what makes an analogue control analogue: a stick bound to an
+action answers its travel past the deadzone, so a camera on the right stick moves
+at the rate the player is pushing it, while a key answers 0 or 1. For motion
+nothing can name, a two-finger drag and raw stick movement are still the
+leftovers `handle_world_input` and `handle_battle_input` are offered.
+
+Everything a registered control reaches is reachable without a keyboard:
+
+- the launcher's **controls** card lists a loaded mod's actions in their own
+  group under the eight, and rebinds them through the same sheet;
+- the on-screen controller can carry them. Off by default, because a mod must
+  not cover the screen of a player who never asked for one; switched on from the
+  same card, each is a pill the player drags where they like, per orientation,
+  beside A and B.
+
+An event reaches a mod's action only where the screen would have offered a
+renderer one, so an open menu, a running script, a battle or a trainer approach
+takes the press first.
 
 ## Not built yet
 

@@ -26,6 +26,9 @@ signal touch_controls_changed(shown: bool)
 signal scheme_changed()
 
 var _scheme: Dictionary = {}
+## What the player bound each mod's own actions to, keyed by action name. See
+## [method Gen2ModHost.register_action].
+var _mod_controls: Dictionary = {}
 var _touch_mode: StringName = Gen2Options.TOUCH_AUTO
 var _layout: Gen2TouchLayout = Gen2TouchLayout.new()
 var _device: StringName = Gen2InputDevice.KEYBOARD
@@ -69,15 +72,37 @@ func apply_options(options: Gen2Options) -> void:
 	if options == null:
 		return
 	_scheme = options.controls
+	_mod_controls = options.mod_controls
 	_touch_mode = options.touch_mode
 	_layout = options.touch_layout
 	Gen2InputActions.install(_scheme)
+	install_mod_actions()
 	scheme_changed.emit()
 	_refresh_touch_controls()
 
 
+## Puts every registered mod action in the [InputMap] with whatever the player
+## bound it to. Called again after a mod loads, since a mod registers its
+## actions during its own entry script and the options were applied before that.
+func install_mod_actions() -> void:
+	var actions: Array = Gen2ModHost.instance().actions()
+	Gen2InputActions.install_mod_actions(actions, _mod_controls)
+	# The on-screen controller places one button per action, so it needs the
+	# labels; where each one sits, and whether they are drawn at all, is the
+	# player's and stays in the layout.
+	var buttons: Array = []
+	for action: Dictionary in actions:
+		buttons.append({"action": action["name"], "label": action["label"]})
+	_layout.mod_buttons = buttons
+	touch_controls_changed.emit(_touch_shown)
+
+
 func scheme() -> Dictionary:
 	return _scheme
+
+
+func mod_controls() -> Dictionary:
+	return _mod_controls
 
 
 func touch_layout() -> Gen2TouchLayout:
@@ -152,8 +177,13 @@ func release(button: int) -> void:
 
 
 func _send(button: int, pressed: bool) -> void:
-	var action: StringName = Gen2Button.action(button)
-	if action.is_empty():
+	send_action(Gen2Button.action(button), pressed)
+
+
+## The same for an action named directly, which is what the on-screen controller
+## presses a mod's own button with.
+func send_action(action: StringName, pressed: bool) -> void:
+	if String(action).is_empty():
 		return
 	var event := InputEventAction.new()
 	event.action = action

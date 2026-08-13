@@ -56,12 +56,22 @@ func _ready() -> void:
 ## Discovers and runs every mod under [constant Gen2ModHost.ROOT], returning the
 ## ids that loaded. The directory is created when it is absent so a player has
 ## somewhere to put one without being told the path.
-func load_mods() -> Array:
+##
+## [param game_id] is the cartridge a mod's `games` declaration is checked
+## against. Empty at boot, because the launcher lists what is installed before a
+## cartridge is chosen and an unrestricted list is the honest answer there.
+func load_mods(game_id: StringName = &"") -> Array:
 	if not DirAccess.dir_exists_absolute(Gen2ModHost.ROOT):
 		DirAccess.make_dir_recursive_absolute(Gen2ModHost.ROOT)
 	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.set_target_game(game_id)
 	host.discover()
 	_loaded_mods = host.load_discovered()
+	# A mod registers its own controls inside its entry script, which is after the
+	# options were applied, so the InputMap gets them now rather than never.
+	var input: Gen2InputRuntime = Gen2InputRuntime.instance()
+	if input != null:
+		input.install_mod_actions()
 	for failure: Dictionary in host.failures():
 		push_warning("Mod %s was not loaded: %s (%s)" % [
 			failure.get("directory", failure.get("id", "?")),
@@ -81,7 +91,22 @@ func select_game(game_id: StringName) -> bool:
 		selected_save_slot = -1
 		reload_selected_save()
 	selected_game_id = game_id
+	_retarget_mods(game_id)
 	return true
+
+
+## Reloads the mods a cartridge is entitled to, when the cartridge changes.
+##
+## Every mod's entry script runs again against a fresh host, because a `games`
+## declaration decides what a mod may register at all and a registration made for
+## the previous cartridge would outlive it. Reached only from
+## [method select_game], which the launcher calls on Play and after an import,
+## not while the player walks along the shelf.
+func _retarget_mods(game_id: StringName) -> void:
+	if Gen2ModHost.instance().target_game() == game_id:
+		return
+	Gen2ModHost.reset()
+	load_mods(game_id)
 
 
 func has_selected_game() -> bool:

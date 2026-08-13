@@ -197,3 +197,46 @@ func test_a_duplicate_is_independent_of_the_original() -> void:
 		Vector2(0.6, 0.6), PORTRAIT.size,
 	)
 	assert_true(layout.is_default())
+
+
+## A mod's own controls have to reach a phone player, and must not cover the
+## screen of one who never asked for them.
+func test_mod_buttons_are_off_until_the_player_switches_them_on() -> void:
+	var layout: Gen2TouchLayout = _layout()
+	layout.mod_buttons = [
+		{"action": &"mod_voxel_pitch_up", "label": "Camera up"},
+		{"action": &"mod_voxel_pitch_down", "label": "Camera down"},
+	]
+	assert_true(layout.mod_groups().is_empty(), "off by default")
+	assert_true(layout.mod_button_rects(PORTRAIT).is_empty())
+
+	layout.mod_buttons_shown = true
+	assert_eq(layout.mod_groups().size(), 2)
+	assert_eq(layout.mod_label(&"mod_voxel_pitch_up"), "Camera up")
+	var rects: Dictionary = layout.mod_button_rects(PORTRAIT)
+	assert_eq(rects.size(), 2)
+	# Each is pressable at its own centre and stacked clear of the one above.
+	for action: StringName in rects:
+		assert_eq(layout.mod_action_at((rects[action] as Rect2).get_center(), PORTRAIT), action)
+	assert_false(
+		(rects[&"mod_voxel_pitch_up"] as Rect2).intersects(rects[&"mod_voxel_pitch_down"])
+	)
+
+
+func test_a_mod_button_is_placed_and_survives_the_options_file() -> void:
+	var layout: Gen2TouchLayout = _layout()
+	layout.mod_buttons = [{"action": &"mod_voxel_pitch_up", "label": "Camera up"}]
+	layout.mod_buttons_shown = true
+	layout.set_anchor(
+		Gen2TouchLayout.ORIENTATION_PORTRAIT, &"mod_voxel_pitch_up",
+		Vector2(0.3, 0.7), PORTRAIT.size,
+	)
+	var stored: Gen2TouchLayout = Gen2TouchLayout.parse(layout.to_dict())
+	assert_true(stored.mod_buttons_shown)
+	# The placement is read back without knowing which mods are installed, so an
+	# uninstalled mod's position waits rather than being thrown away.
+	assert_eq(
+		stored.anchor(Gen2TouchLayout.ORIENTATION_PORTRAIT, &"mod_voxel_pitch_up"),
+		Vector2(0.3, 0.7),
+	)
+	assert_false(layout.is_default())

@@ -51,8 +51,18 @@ func _dpad(offset: Vector2) -> Vector2:
 	return rect.get_center() + offset * rect.size * 0.45
 
 
+## What the pad is holding, back in [Gen2Button] terms. The pad itself holds
+## [InputMap] action names, because a mod's own on-screen button is one of the
+## things a finger can be on and it is not one of the eight.
 func _held() -> Dictionary:
-	return _pad.get("_held")
+	var out: Dictionary = {}
+	for action: StringName in (_pad.get("_held") as Dictionary):
+		var button: int = Gen2Button.from_action(action)
+		if button != Gen2Button.NONE:
+			out[button] = true
+		else:
+			out[action] = true
+	return out
 
 
 func test_the_pad_is_shown_when_the_setting_pins_it_on() -> void:

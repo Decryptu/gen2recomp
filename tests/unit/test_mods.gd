@@ -101,6 +101,60 @@ func test_manifest_versions_and_dependency_ranges_are_validated_before_code_runs
 	)
 
 
+## `games` is cartridge ids and nothing else. An unknown id is not refused when
+## the manifest is read, because a mod naming a cartridge a later launcher will
+## ship has to install today.
+func test_the_games_declaration_is_validated_by_shape_and_not_by_registry() -> void:
+	var source: Dictionary = _valid_manifest()
+	source["games"] = "crystal"
+	assert_eq(Gen2ModManifest.from_dictionary(source, _directory)["reason"], &"invalid_games")
+	source["games"] = ["Crystal"]
+	assert_eq(Gen2ModManifest.from_dictionary(source, _directory)["reason"], &"invalid_game")
+	source["games"] = ["gold", "silver", "crystal", "red"]
+	var read: Dictionary = Gen2ModManifest.from_dictionary(source, _directory)
+	assert_true(read["ok"], "an id this host does not know is still a legal declaration")
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_eq(manifest.games, [&"gold", &"silver", &"crystal", &"red"] as Array[StringName])
+	assert_eq(manifest.game_titles(), ["Gold", "Silver", "Crystal", "red"] as Array[String])
+
+
+## An absent declaration is every cartridge, and so is an unchosen one: the
+## launcher lists what is installed before Play is pressed.
+func test_a_mod_declaring_no_games_is_for_every_cartridge() -> void:
+	var read: Dictionary = Gen2ModManifest.from_dictionary(_valid_manifest(), _directory)
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_true(manifest.games.is_empty())
+	assert_true(manifest.supports_game(RomRegistry.GOLD))
+	assert_true(manifest.supports_game(&""))
+	assert_true(manifest.game_titles().is_empty())
+
+
+func test_a_mod_for_another_cartridge_is_refused_by_name_and_not_run() -> void:
+	_write_dependency_mod("%s/crystal_only" % ROOT, "crystalonly", "1.0.0")
+	_write("%s/crystal_only/mod.json" % ROOT, JSON.stringify({
+		"id": "crystalonly", "name": "Crystal Only", "version": "1.0.0",
+		"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		"games": ["crystal"],
+	}))
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.set_target_game(RomRegistry.GOLD)
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [])
+	assert_eq(StringName(host.failures()[-1]["reason"]), &"incompatible_game")
+	assert_eq(
+		Gen2ModRefusal.text(host.failures()[-1]), "That mod is not for Gold.",
+		"the launcher has a line for it"
+	)
+
+	Gen2ModHost.reset()
+	host = Gen2ModHost.instance()
+	host.set_target_game(RomRegistry.CRYSTAL)
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"crystalonly"])
+	for failure: Dictionary in host.failures():
+		assert_ne(StringName(failure["reason"]), &"incompatible_game")
+
+
 func test_dependencies_load_before_the_mod_that_requires_them() -> void:
 	_write_dependency_mod("%s/dep_core" % ROOT, "core", "1.5.0")
 	_write_dependency_mod("%s/addon" % ROOT, "addon", "2.0.0", {"core": "^1.2.0"})
@@ -777,4 +831,106 @@ func test_a_menu_entry_is_refused_rather_than_silently_dropped() -> void:
 			Gen2ModHost.MENU_START, &"x", {"label": "Other"}
 		)["reason"]),
 		&"duplicate_menu_entry"
+	)
+
+
+## R10's core: a mod declares a control, the host binds it in the same three
+## kinds the eight use, and it reaches the mod as an id.
+func test_a_registered_action_is_bound_and_arrives_as_its_own_id() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(host.register_action(&"voxel", {
+		"key": &"pitch_up", "label": "Camera up",
+		"default": [{"kind": "key", "code": KEY_R}],
+	})["ok"])
+	var actions: Array = host.actions()
+	assert_eq(actions.size(), 1)
+	assert_eq(StringName(actions[0]["name"]), &"mod_voxel_pitch_up")
+	assert_eq(actions[0]["default"], [{"kind": &"key", "code": KEY_R}])
+
+	Gen2InputActions.install_mod_actions(actions, {})
+	assert_true(InputMap.has_action(&"mod_voxel_pitch_up"))
+
+	var heard: Array = []
+	host.action_changed.connect(func(id: StringName, key: StringName, pressed: bool) -> void:
+		heard.append([id, key, pressed])
+	)
+	var event := InputEventAction.new()
+	event.action = &"mod_voxel_pitch_up"
+	event.pressed = true
+	var seen: Dictionary = host.action_in(event)
+	assert_eq(seen, {"id": &"voxel", "key": &"pitch_up", "pressed": true})
+	host.emit_action(seen["id"], seen["key"], true)
+	assert_eq(heard, [[&"voxel", &"pitch_up", true]])
+
+	Gen2InputActions.install_mod_actions([], {})
+	assert_false(
+		InputMap.has_action(&"mod_voxel_pitch_up"),
+		"a mod that is no longer loaded leaves no live action behind"
+	)
+
+
+## The bug behind the request: the mod's camera was on W, A, S and D, which are
+## the d-pad's own defaults, so it never once fired and nothing said why.
+func test_a_default_already_on_one_of_the_eight_is_dropped_and_reported() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var result: Dictionary = host.register_action(&"voxel", {
+		"key": &"pitch_up", "label": "Camera up",
+		"default": [
+			{"kind": "key", "code": KEY_W},
+			{"kind": "key", "code": KEY_R},
+		],
+	})
+	assert_true(result["ok"], "the action still registers")
+	assert_eq(int(result["dropped"]), 1)
+	assert_eq(
+		host.actions()[0]["default"], [{"kind": &"key", "code": KEY_R}],
+		"only the binding that would never have fired is gone"
+	)
+	assert_eq(StringName(host.failures()[-1]["reason"]), &"action_default_taken")
+	assert_string_contains(Gen2ModRefusal.text(host.failures()[-1]), "Up")
+
+
+func test_actions_refuse_a_missing_label_and_a_second_registration() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		host.register_action(&"voxel", {"key": &"pitch"})["reason"], &"action_missing_label"
+	)
+	assert_eq(host.register_action(&"voxel", {"label": "No key"})["reason"], &"invalid_action")
+	assert_true(host.register_action(&"voxel", {"key": &"pitch", "label": "Pitch"})["ok"])
+	assert_eq(
+		host.register_action(&"voxel", {"key": &"pitch", "label": "Pitch"})["reason"],
+		&"duplicate_action"
+	)
+
+
+## A setting that is a press: `register_option` takes a ladder of values, which
+## cannot express "recentre the camera now".
+func test_a_button_setting_stores_nothing_and_acts_on_the_press() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(host.register_option(&"voxel", {
+		"key": &"recentre", "label": "Recentre",
+		"kind": Gen2ModHost.OPTION_BUTTON, "press_label": "Now",
+	})["ok"])
+	var rows: Array = host.options(&"voxel")
+	assert_eq(StringName(rows[0]["kind"]), Gen2ModHost.OPTION_BUTTON)
+	assert_eq(String(rows[0]["press_label"]), "Now")
+	assert_true((rows[0]["values"] as Array).is_empty())
+
+	var heard: Array = []
+	host.option_changed.connect(func(id: StringName, key: StringName, value: Variant) -> void:
+		heard.append([id, key, value])
+	)
+	assert_true(host.press_option(&"voxel", &"recentre")["ok"])
+	assert_eq(heard, [[&"voxel", &"recentre", null]])
+	assert_null(
+		Gen2ModOptions.value(&"voxel", &"recentre"), "a press is not a stored value"
+	)
+
+	assert_true(host.register_option(&"voxel", {
+		"key": &"pitch", "label": "Pitch", "values": [1, 2],
+	})["ok"])
+	assert_eq(host.press_option(&"voxel", &"pitch")["reason"], &"option_is_not_a_button")
+	assert_eq(
+		host.register_option(&"voxel", {"key": &"x", "label": "X", "kind": &"slider"})["reason"],
+		&"unknown_option_kind"
 	)

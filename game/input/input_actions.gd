@@ -272,6 +272,13 @@ static func sanitize(raw: Variant) -> Dictionary:
 	return scheme
 
 
+## One binding, clamped to the three kinds and their ranges, or empty. Public
+## because a mod declares its own defaults as plain dictionaries and they have to
+## become the same shape the options file stores before anything compares them.
+static func sanitize_binding(row: Dictionary) -> Dictionary:
+	return _sanitize_binding(row)
+
+
 static func _sanitize_binding(row: Dictionary) -> Dictionary:
 	var kind := StringName(String(row.get("kind", "")))
 	if not KINDS.has(kind):
@@ -324,3 +331,94 @@ static func conflicts(scheme: Dictionary, binding: Dictionary, excluding: int) -
 				found.append(button)
 				break
 	return found
+
+
+## The first of the eight already bound to [param binding], or
+## [constant Gen2Button.NONE]. What a mod's declared default is checked against:
+## a mod cannot see the eight, so a default on W would never fire and nothing
+## would say why.
+static func button_bound_to(scheme: Dictionary, binding: Dictionary) -> int:
+	var found: Array[int] = conflicts(scheme, binding, Gen2Button.NONE)
+	return found[0] if not found.is_empty() else Gen2Button.NONE
+
+
+## A mod's own actions, installed beside the eight.
+##
+## Same three binding kinds, same deadzone, same physical keycodes: an action a
+## mod declares is bound, rebound and described by the code that does it for the
+## cartridge's own buttons, and reaches the mod as an id rather than as an
+## [InputEvent]. See [method Gen2ModHost.register_action].
+##
+## [param actions] is `[{name, default}]` and [param stored] is the player's
+## overrides keyed by the same names. Actions installed by an earlier call and
+## absent from this one are erased, so a mod switched off does not leave a live
+## action behind.
+static func install_mod_actions(actions: Array, stored: Dictionary) -> void:
+	var wanted: Dictionary = {}
+	for action: Dictionary in actions:
+		var name: StringName = StringName(action.get("name", &""))
+		if String(name).is_empty():
+			continue
+		wanted[name] = true
+		if not InputMap.has_action(name):
+			InputMap.add_action(name, DEADZONE)
+		else:
+			InputMap.action_set_deadzone(name, DEADZONE)
+			InputMap.action_erase_events(name)
+		var raw: Variant = stored.get(String(name), action.get("default", []))
+		for binding: Dictionary in _sanitize_bindings(raw):
+			var event: InputEvent = to_event(binding)
+			if event != null:
+				InputMap.action_add_event(name, event)
+	for name: StringName in _installed_mod_actions:
+		if not wanted.has(name) and InputMap.has_action(name):
+			InputMap.erase_action(name)
+	_installed_mod_actions = wanted.keys()
+
+
+## The mod action names currently in the [InputMap], so a later install can take
+## back what an earlier one added.
+static var _installed_mod_actions: Array = []
+
+
+## A stored binding list, clamped the way [method sanitize] clamps the eight.
+## Returns an empty list rather than a default: an action with nothing bound is
+## a mod's action the player has not chosen a key for, which is a legal state and
+## reads as "Unbound".
+static func _sanitize_bindings(raw: Variant) -> Array:
+	var bindings: Array = []
+	if raw is not Array:
+		return bindings
+	for row: Variant in raw as Array:
+		if row is not Dictionary:
+			continue
+		var binding: Dictionary = _sanitize_binding(row)
+		if not binding.is_empty() and not bindings.has(binding):
+			bindings.append(binding)
+		if bindings.size() >= MAX_BINDINGS:
+			break
+	return bindings
+
+
+## The player's mod-action overrides as the options file stores them, keyed by
+## action name. Kept apart from the eight so an uninstalled mod's leftover row is
+## visibly not one of the cartridge's buttons.
+static func sanitize_mod_controls(raw: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if raw is not Dictionary:
+		return out
+	for key: Variant in raw as Dictionary:
+		var name: String = String(key)
+		if not name.begins_with(MOD_ACTION_PREFIX):
+			continue
+		out[name] = _sanitize_bindings((raw as Dictionary)[key])
+	return out
+
+
+const MOD_ACTION_PREFIX: String = "mod_"
+
+
+## The [InputMap] action name a mod's key is installed under. The prefix keeps a
+## mod's actions out of the `gen2_*` namespace, which a mod cannot reach.
+static func mod_action_name(id: StringName, key: StringName) -> StringName:
+	return StringName("%s%s_%s" % [MOD_ACTION_PREFIX, id, key])

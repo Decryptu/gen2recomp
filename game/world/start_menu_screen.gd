@@ -249,10 +249,11 @@ func _confirm() -> void:
 		Mode.MODS:
 			if _mod_cursor >= 0 and _mod_cursor < _mod_ids.size():
 				_open_mod_options_mode(_mod_ids[_mod_cursor])
-		## Every row is a ladder read with left and right, so A does nothing,
-		## the way it does on the cartridge's own value rows.
+		## A ladder row is read with left and right, so A does nothing on one, the
+		## way it does on the cartridge's own value rows. A button row is the
+		## exception: pressing it is the whole setting.
 		Mode.MOD_OPTIONS:
-			pass
+			_press_mod_option()
 
 
 func _cancel() -> void:
@@ -407,6 +408,10 @@ func _mod_options() -> Array:
 
 func _render_mod_options() -> void:
 	_render_options(_mod_options(), _mod_option_cursor, func(row: Dictionary) -> String:
+		if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_BUTTON:
+			return "%s    %s" % [
+				String(row.get("label", "")), String(row.get("press_label", "Go"))
+			]
 		return "%s    %s" % [
 			String(row.get("label", "")),
 			String((row.get("labels", []) as Array)[int(row.get("index", 0))]),
@@ -414,11 +419,29 @@ func _render_mod_options() -> void:
 	)
 
 
+## A button row acts on the press and stores nothing. A ladder row ignores A.
+func _press_mod_option() -> void:
+	var rows: Array = _mod_options()
+	if rows.is_empty():
+		return
+	var row: Dictionary = rows[_mod_option_cursor]
+	if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) != Gen2ModHost.OPTION_BUTTON:
+		return
+	var result: Dictionary = Gen2ModHost.instance().press_option(
+		_mod_id, StringName(row.get("key", &""))
+	)
+	if not bool(result.get("ok", false)):
+		_status.text = Gen2ModRefusal.text(result)
+		_status.add_theme_color_override("font_color", ERROR)
+
+
 ## One rung either way, wrapping the way the cartridge's own value rows do.
 ## Written through the host, so the file is committed on the press and whatever
 ## registered the setting hears about it at once.
 func _adjust_mod_option(rows: Array, delta: int) -> void:
 	var row: Dictionary = rows[_mod_option_cursor]
+	if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_BUTTON:
+		return
 	var values: Array = row.get("values", []) as Array
 	var next: int = wrapi(int(row.get("index", 0)) + signi(delta), 0, maxi(values.size(), 1))
 	var result: Dictionary = Gen2ModHost.instance().set_option_index(

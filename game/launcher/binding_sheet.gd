@@ -13,6 +13,11 @@ signal bindings_changed()
 
 var _options: Gen2Options = null
 var _button: int = Gen2Button.NONE
+## The [InputMap] name of a mod's action while this sheet is editing one, empty
+## while it is editing one of the eight. A mod's bindings live in their own
+## namespace, so which list is being edited is which of these is set.
+var _action: StringName = &""
+var _label: String = ""
 var _list: VBoxContainer = null
 var _prompt: Label = null
 var _add: Gen2LauncherButton = null
@@ -28,7 +33,24 @@ static func for_button(
 	sheet._theme = palette
 	sheet._options = options
 	sheet._button = button
-	sheet._build(Gen2Button.label(button))
+	sheet._label = Gen2Button.label(button)
+	sheet._build(sheet._label)
+	sheet._build_rows()
+	return sheet
+
+
+## The same sheet for a mod's own action. Its last binding may be removed, unlike
+## one of the eight: a mod's control the player never wants is legitimately
+## unbound, and nothing puts a default back for it.
+static func for_mod_action(
+	palette: Gen2LauncherTheme, options: Gen2Options, action: StringName, label: String
+) -> Gen2BindingSheet:
+	var sheet := Gen2BindingSheet.new()
+	sheet._theme = palette
+	sheet._options = options
+	sheet._action = action
+	sheet._label = label
+	sheet._build(label)
 	sheet._build_rows()
 	return sheet
 
@@ -49,9 +71,29 @@ func _build_rows() -> void:
 ## The stored array itself, not a copy: removing a binding edits the options in
 ## place, so a button with no entry yet is given one first.
 func _bindings() -> Array:
+	if _action != &"":
+		var name: String = String(_action)
+		if not _options.mod_controls.has(name):
+			# Seeded from what the mod declared, so editing starts from what is
+			# bound rather than from nothing.
+			_options.mod_controls[name] = _registered_default()
+		return _options.mod_controls[name]
 	if not _options.controls.has(_button):
 		_options.controls[_button] = []
 	return _options.controls[_button]
+
+
+## Whether the last binding is the one thing this row may not lose. One of the
+## eight is a button the player could no longer press; a mod's action is not.
+func _keeps_one() -> bool:
+	return _action == &""
+
+
+func _registered_default() -> Array:
+	for action: Dictionary in Gen2ModHost.instance().actions():
+		if StringName(action["name"]) == _action:
+			return (action["default"] as Array).duplicate(true)
+	return []
 
 
 func _refresh() -> void:
@@ -68,7 +110,7 @@ func _refresh() -> void:
 			_theme, &"trash", Gen2LauncherButton.Variant.DANGER, 36.0
 		)
 		remove.tooltip_text = "Remove"
-		remove.set_disabled_state(bindings.size() <= 1)
+		remove.set_disabled_state(_keeps_one() and bindings.size() <= 1)
 		remove.pressed.connect(func() -> void: _remove(index))
 		row.add_child(remove)
 		_list.add_child(row)
@@ -77,7 +119,7 @@ func _refresh() -> void:
 
 func _remove(index: int) -> void:
 	var bindings: Array = _bindings()
-	if index < 0 or index >= bindings.size() or bindings.size() <= 1:
+	if index < 0 or index >= bindings.size() or (_keeps_one() and bindings.size() <= 1):
 		return
 	bindings.remove_at(index)
 	_refresh()
@@ -96,12 +138,17 @@ func _finish_capture(binding: Dictionary) -> void:
 	var bindings: Array = _bindings()
 	if bindings.has(binding):
 		_prompt.text = "%s is already on %s." % [
-			Gen2InputActions.describe(binding), Gen2Button.label(_button)
+			Gen2InputActions.describe(binding), _label
 		]
 		return
-	var taken: Array[int] = Gen2InputActions.conflicts(_options.controls, binding, _button)
+	var taken: Array[int] = Gen2InputActions.conflicts(
+		_options.controls, binding, _button
+	)
 	bindings.append(binding)
-	_options.controls[_button] = bindings
+	if _action != &"":
+		_options.mod_controls[String(_action)] = bindings
+	else:
+		_options.controls[_button] = bindings
 	_prompt.text = ""
 	if not taken.is_empty():
 		var names: Array[String] = []
