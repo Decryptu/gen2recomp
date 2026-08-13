@@ -254,6 +254,13 @@ func init_sound() -> void:
 	sfx_priority = 0
 	pitch_sweep_value = 0
 	low_health_alarm = 0
+	music_fade = 0
+	music_fade_count = 0
+	music_fade_record = {}
+	cry_pitch = 0
+	cry_length = 0
+	cry_tracks = 0
+	stereo_panning_mask = 0
 	_cur_track_duty = 0
 	_cur_track_volume_envelope = 0
 	_cur_track_frequency = 0
@@ -578,24 +585,15 @@ func _fade_music() -> void:
 	else:
 		if level == 0:
 			volume = 0
+			# `MusicFadeRestart` is `_InitSound` with the queued song carried
+			# across the clear, which is the only reason it exists.
 			var record: Dictionary = music_fade_record
-			_fade_restart()
+			init_sound()
 			if not record.is_empty():
 				play_music(record)
-			music_fade = 0
-			music_fade_record = {}
 			return
 		level -= 1
 	volume = (level << 4) | level
-
-
-## `MusicFadeRestart`: a full `_InitSound` that keeps the queued song.
-func _fade_restart() -> void:
-	var record: Dictionary = music_fade_record
-	var fade: int = music_fade
-	init_sound()
-	music_fade_record = record
-	music_fade = fade
 
 
 # ------------------------------------------------------------- note machinery

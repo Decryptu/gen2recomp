@@ -327,3 +327,38 @@ func test_a_record_with_no_bytes_is_refused() -> void:
 	var engine: Gen2SoundEngine = _engine()
 	assert_false(engine.play_music({"index": 1, "bank": 0x3B, "address": 0x4000, "bytes": []}))
 	assert_false(engine.play_music({}))
+
+
+func test_a_fade_steps_the_master_volume_and_then_restarts_the_driver() -> void:
+	var engine: Gen2SoundEngine = _engine()
+	var playing: Dictionary = _record([[0, [0xD8, 0x08, 0xB1, 0xD4, 0x1F, 0xFC, 0x03, 0x40]]])
+	assert_true(engine.play_music(playing))
+	# Two frames per volume level, from $77 down to nothing.
+	engine.start_fade(2)
+	var writes: Array = _writes(engine, 40)
+	var levels: Array = []
+	for value: int in _values(writes, NR50):
+		if levels.is_empty() or int(levels[levels.size() - 1]) != value:
+			levels.append(value)
+	# `FadeMusic` runs before the NR50 write and its count starts at zero, so the
+	# first frame of a fade is already a level down.
+	assert_eq(levels.slice(0, 4), [0x66, 0x55, 0x44, 0x33], "one level every other frame")
+	# The fade ends in `_InitSound`, which stops the song and restores volume.
+	assert_false(engine.music_channels_active())
+	assert_eq(engine.volume, Gen2SoundEngine.MAX_VOLUME)
+	assert_eq(engine.music_fade, 0)
+
+
+func test_a_fade_can_hand_over_to_the_song_queued_behind_it() -> void:
+	var engine: Gen2SoundEngine = _engine()
+	assert_true(engine.play_music(_record([[0, [0xD8, 0x08, 0xB1, 0xD4, 0x1F, 0xFC, 0x03, 0x40]]])))
+	var queued: Dictionary = _record([[1, [0xD8, 0x08, 0xB1, 0xD4, 0x1F, 0xFC, 0x03, 0x40]]], 0x3C)
+	engine.start_fade(1, queued)
+	for _frame: int in 40:
+		engine.update_sound()
+	# `wMusicFadeID` survives the restart, so the new song is playing and it is
+	# the one the fade named, on its own channel.
+	assert_true(engine.music_channels_active())
+	assert_false(engine.channels[0].channel_on)
+	assert_true(engine.channels[1].channel_on)
+	assert_eq(engine.music_fade, 0)
