@@ -4,16 +4,19 @@ extends Control
 ## `SplashScreen` (`engine/movie/splash.asm`), as far as this project has the art
 ## for it.
 ##
-## The source runs three things before a new game: the copyright screen, the
-## GameFreak logo animation and, on Crystal, the intro movie. The first two are
-## imported, so [Gen2BootCinema] is started with those phases and the movie is
-## skipped rather than held on a blank screen for the frames it would have taken.
+## The source runs four things before a new game: the copyright screen, the
+## GameFreak logo animation, on Crystal the intro movie, and the title screen.
+## Every one but the movie is imported, so [Gen2BootCinema] is started with those
+## phases and the movie is skipped rather than held on a blank screen for the
+## frames it would have taken.
 ##
 ## The pacing is the source's throughout. The copyright half is ten frames of
 ## blank and the screen for a hundred, with no button read at all, since
 ## `DelayFrames` does not look at the joypad; the GameFreak half is
 ## `GameFreakPresentsScene` and its sprite, which do read one, and a press there
-## ends the animation early through [method Gen2BootCinema.skip_presents].
+## ends the animation early through [method Gen2BootCinema.skip_presents]. The
+## title screen reads a held button rather than a press, because every branch of
+## `TitleScreenMain` is `hJoyDown`.
 
 ## Emitted once the last phase this host can draw has finished.
 signal closed()
@@ -24,6 +27,10 @@ var _cinema: Gen2BootCinema = null
 var _data: GameData = null
 var _page: Gen2CopyrightPage = null
 var _presents_page: Gen2GameFreakPresentsPage = null
+var _title_page: Gen2TitlePage = null
+## What `hJoyDown` holds this frame. `TitleScreenMain` reads the held state, and
+## its two chords cannot be expressed as presses.
+var _held: Array[int] = []
 var _background: TextureRect = null
 var _audio: Gen2AudioPlayer = null
 var _image: Image = null
@@ -43,9 +50,12 @@ func open(data: GameData) -> bool:
 		_page.draw(), Gen2Screen.WIDTH, Gen2Screen.HEIGHT, _palette()
 	)
 	_presents_page = Gen2GameFreakPresentsPage.from_data(data)
+	_title_page = Gen2TitlePage.from_data(data)
 	var phases: Array[StringName] = [Gen2BootCinema.PHASE_COPYRIGHT]
 	if _presents_page != null:
 		phases.append(Gen2BootCinema.PHASE_PRESENTS)
+	if _title_page != null:
+		phases.append(Gen2BootCinema.PHASE_TITLE)
 	_cinema = Gen2BootCinema.new()
 	_cinema.start(
 		data.id if data != null else &"gold", [], phases, _sine_table(data)
@@ -84,18 +94,31 @@ func advance_frames(count: int) -> void:
 		if _closed or _cinema.phase() == Gen2BootCinema.PHASE_FINISHED:
 			_finish()
 			return
-		_apply(_cinema.advance_frame())
+		_apply(_cinema.advance_frame(_held))
 
 
 ## `.joy_loop`'s `and PAD_BUTTONS`: only the GameFreak animation reads one, and
 ## a press there still spends `GameFreakPresentsEnd`'s sixteen frames.
 func handle_button(button: int) -> bool:
-	if _cinema == null or button in [
+	if _cinema == null:
+		return true
+	if _cinema.phase() == Gen2BootCinema.PHASE_TITLE:
+		# The title screen has no press of its own: a chord is a held state, so a
+		# press only adds a button and the release below takes it away.
+		if not _held.has(button):
+			_held.append(button)
+		return true
+	if button in [
 		Gen2Button.UP, Gen2Button.DOWN, Gen2Button.LEFT, Gen2Button.RIGHT
 	]:
 		return true
 	_cinema.skip_presents()
 	return true
+
+
+## The other half of `hJoyDown`, which a press-only host has no way to say.
+func release_button(button: int) -> void:
+	_held.erase(button)
 
 
 ## How many frames the splash still owes, so a driver can settle it with a loop
@@ -104,6 +127,11 @@ func handle_button(button: int) -> bool:
 func frames_left() -> int:
 	if _cinema == null or _cinema.phase() == Gen2BootCinema.PHASE_FINISHED:
 		return 0
+	if _cinema.phase() == Gen2BootCinema.PHASE_TITLE:
+		# `TitleScreenMain` waits on a button or on its own timer, so what is
+		# left is however much of that timer is still standing.
+		var title: Gen2TitleScene = _cinema.title()
+		return maxi(title.timer(), 1) if title != null else 1
 	if _cinema.phase() != Gen2BootCinema.PHASE_COPYRIGHT:
 		return 1
 	return Gen2BootCinema.COPYRIGHT_PRELUDE_FRAMES \
@@ -127,6 +155,25 @@ func _apply(events: Array[Dictionary]) -> void:
 			&"hide_image":
 				if StringName(event.get("id", &"")) == _visible_id:
 					_visible_id = &""
+			&"open_title":
+				_visible_id = &"title"
+			&"restart_opening":
+				# `TitleScreenEnd` jumps back to `IntroSequence`, which clears
+				# the screen before the copyright's own ten blank frames.
+				_visible_id = &""
+			&"title_menu":
+				# `Intro_MainMenu` is the launcher and the save screen here, so
+				# the answer this project has for the screen is New Game.
+				_cinema.select_title(&"new_game")
+			&"open_new_game":
+				# `NewGame` is the screen behind this one, so the opening is over
+				# and nothing else here spends a frame: without this the
+				# coordinator sits in its new-game phase and never finishes.
+				_cinema.finish_new_game()
+				_visible_id = &""
+				_refresh()
+				_finish()
+				return
 			&"play_sfx":
 				_play_sfx(int(event.get("sfx", 0)))
 			&"finish_intro":
@@ -158,6 +205,8 @@ func _frame_image() -> Image:
 		return _image
 	if _visible_id == &"game_freak_presents" and _presents_page != null:
 		return _presents_page.draw(_cinema.presents())
+	if _visible_id == &"title" and _title_page != null:
+		return _title_page.draw(_cinema.title())
 	return _blank()
 
 

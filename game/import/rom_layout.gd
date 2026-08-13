@@ -573,6 +573,54 @@ const PRESENTS_DITTO_FADE_COLORS: int = 16
 ## `PREDEFPAL_GAMEFREAK_LOGO_BG`, which is the copyright screen's own palette.
 const PRESENTS_OBJECT_PALETTE_COLORS: int = 4
 
+## The title screen (`_TitleScreen` on Crystal, `TitleScreen` on Gold and Silver,
+## `engine/movie/title.asm`). Two different screens sharing a phase: Crystal
+## decompresses three graphics and holds sixteen palettes of its own, while Gold
+## and Silver decompress two halves of a logo over one `$FF`-terminated tilemap
+## and animate a bird sprite behind a raw trail.
+##
+## Every offset was located the way the splash's were: the pinned PNG encoded as
+## cartridge 2bpp and matched, or, for an LZ run, every offset in the bank
+## decompressed and the one reproducing the PNG exactly kept. Each hits once.
+const TITLE_SUICUNE_TILES: int = 256
+## `--trim-end 4`: `DrawTitleGraphic` places 7 rows of 20 from `vTiles1`, and the
+## four tiles past them are whitespace the build drops.
+const TITLE_LOGO_TILES: int = 156
+## `--interleave`, so the sheet is a column of 8x16 objects rather than rows:
+## `InitializeBackground` walks five columns of six sprites, stepping the tile
+## number by two each time.
+const TITLE_CRYSTAL_TILES: int = 60
+const TITLE_CRYSTAL_SPRITE_COLUMNS: int = 5
+const TITLE_CRYSTAL_SPRITE_ROWS: int = 6
+## `TitleScreenPalettes` (`gfx/title/title.pal`), copied whole into both buffers.
+const TITLE_PALETTES: int = 16
+const TITLE_PALETTE_COLORS: int = 4
+
+## Gold and Silver's own halves. `TitleScreenGFX1` is `--trim-whitespace`, which
+## takes the bottom of the logo from 120 tiles to 112.
+const TITLE_LOGO_BOTTOM_TILES: int = 112
+const TITLE_LOGO_TOP_TILES: int = 60
+## `TitleScreenTilemap`, read a byte at a time until `-1`. Long enough for either
+## pin's run; one that reaches this has not found its terminator.
+const TITLE_TILEMAP_TERMINATOR: int = 0xFF
+const TITLE_TILEMAP_MAX: int = 1024
+## `debgcoord 0, 0`: the run is written straight into the BG map rather than into
+## the tilemap a screen is drawn from, so a row is `TILEMAP_WIDTH` and not
+## `SCREEN_WIDTH`. The twelve bytes past column 19 are off the right of the
+## screen and are blanks.
+const TITLE_TILEMAP_COLUMNS: int = 32
+const TITLE_TILEMAP_VISIBLE_COLUMNS: int = 20
+## `TitleScreenGFX3` is four drawn tiles on both profiles, but `TitleScreen`
+## copies eight whatever it is: Gold ships four blank tiles behind its trail and
+## Silver's four come off the head of the compressed Lugia, loaded into VRAM and
+## never shown. The source says so at the `FarCopyBytes`.
+const TITLE_TRAIL_DRAWN_TILES: int = 4
+const TITLE_TRAIL_COPIED_TILES: int = 8
+
+## `GSTitleBGPals` and `GSTitleOBPals`, contiguous in `engine/gfx/color.asm`.
+const TITLE_BG_PALETTES: int = 5
+const TITLE_OB_PALETTES: int = 2
+
 ## `engine/menus/start_menu.asm`'s `.PokedexDesc` through `.QuitDesc`, one
 ## contiguous run of `PlaceString` strings in the order they are defined, which
 ## is not the order `.Items` lists them in. MENU ACCOUNT is what draws one.
@@ -1049,6 +1097,26 @@ const GOLD_SILVER: Dictionary = {
 		"ditto_fade": -1,
 		"object_palette": 0xA4CD,
 	},
+	# `TitleScreen`. Gold's numbers; Silver's three differences are patched in
+	# `for_id`. `GSTitleOBPals` also appears in Crystal, which keeps the unused
+	# Gold and Silver title screen's copy at a different address; that is a
+	# leftover rather than a second candidate for this one. Nested the way
+	# trainer_card is, so Crystal's -1s stay out of the flat offset checks.
+	"title": {
+		"logo_bottom": 0x98000,
+		"logo_top": 0x98476,
+		"tilemap": 0x98616,
+		"trail": 0xE41E0,
+		"trail_tiles": 8,
+		"bird": 0xE4260,
+		"bird_tiles": 88,
+		"bg_palette": 0xBB36,
+		"ob_palette": 0xBB5E,
+		"suicune": -1,
+		"logo": -1,
+		"crystal": -1,
+		"palettes": -1,
+	},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
 	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
@@ -1284,6 +1352,25 @@ const CRYSTAL: Dictionary = {
 		"ditto_fade": 0xE47AC,
 		"object_palette": 0xA05E,
 	},
+	# `_TitleScreen`. A different screen from Gold and Silver's, so the two
+	# halves of this entry have nothing in common but the key: the three LZ runs
+	# and the sixteen palettes sit contiguous in `engine/movie/title.asm`'s own
+	# INCBIN order, ending on the palettes.
+	"title": {
+		"suicune": 0x10EF46,
+		"logo": 0x10F326,
+		"crystal": 0x10FCEE,
+		"palettes": 0x10FEDE,
+		"logo_bottom": -1,
+		"logo_top": -1,
+		"tilemap": -1,
+		"trail": -1,
+		"trail_tiles": 0,
+		"bird": -1,
+		"bird_tiles": 0,
+		"bg_palette": -1,
+		"ob_palette": -1,
+	},
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
@@ -1466,6 +1553,18 @@ static func for_id(id: StringName) -> Dictionary:
 			presents["gfx"] = 0xE49C9
 			presents["stars"] = 0xE4AA9
 			silver["game_freak_presents"] = presents
+			# Silver's logo bottom sits at Gold's address and its top 34 bytes
+			# later. Its trail is four tiles rather than eight, which is why the
+			# Lugia behind it starts 64 bytes earlier: `TitleScreen` copies 8
+			# tiles either way, so Silver's last four are the head of the
+			# compressed Lugia, loaded into VRAM and never drawn.
+			var title: Dictionary = (silver["title"] as Dictionary).duplicate()
+			title["logo_top"] = 0x98498
+			title["tilemap"] = 0x9862A
+			title["trail_tiles"] = 4
+			title["bird"] = 0xE4220
+			title["bird_tiles"] = 128
+			silver["title"] = title
 			return silver
 		RomRegistry.CRYSTAL:
 			return CRYSTAL

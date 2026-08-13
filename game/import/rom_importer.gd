@@ -296,6 +296,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not presents["ok"]:
 		return presents
 
+	var title: Dictionary = verify_title(rom, layout)
+	if not title["ok"]:
+		return title
+
 	var menu_text: Dictionary = verify_menu_text(rom, layout)
 	if not menu_text["ok"]:
 		return menu_text
@@ -575,6 +579,220 @@ static func _verify_presents_palettes(rom: RomFile, entry: Dictionary) -> Dictio
 			}
 		last = Vector2i(green, blue)
 	return {"ok": true, "message": "Splash palettes verified."}
+
+
+## `GSTitleOBPals` (`gfx/title/title_fg.pal`), which Gold and Silver share: a
+## white and three copies of one dark grey, then the yellow pair the bird is
+## drawn in. Three identical colours in a row is what makes it unmistakable.
+const TITLE_OB_COLORS: Array[int] = [
+	0x7FFF, 0x0CC7, 0x0CC7, 0x0CC7, 0x7FFF, 0x03FF, 0x02DA, 0x0000,
+]
+
+## The first colour of `GSTitleBGPals`, which is white on both profiles, and of
+## Crystal's own `TitleScreenPalettes`, which is not: its first palette is the
+## copyright line's, black on a black background.
+const TITLE_BG_FIRST_COLOR: int = 0x7FFF
+const TITLE_CRYSTAL_FIRST_COLORS: Array[int] = [0x0000, 0x0013, 0x7D0F, 0x7D0F]
+
+## How far past the end of an LZ run its neighbour may start. The INCBIN'd `.lz`
+## files carry a few bytes past the terminator `Decompress` stops on, so the
+## symbols in a section are consecutive without being flush.
+const TITLE_RUN_GAP_MAX: int = 16
+
+
+## The title screen's art, which is two different screens under one key.
+##
+## Crystal's three LZ runs and its palettes are one contiguous section in
+## `engine/movie/title.asm`'s INCBIN order, so each pins the next: a run that
+## decompresses to the wrong number of tiles, or whose neighbour does not follow
+## it, is not the one being looked for. Gold and Silver's logo halves pin their
+## tilemap the same way, and their trail pins the bird behind it.
+static func verify_title(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("title", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No title screen art on this cartridge."}
+	if int(entry.get("suicune", -1)) >= 0:
+		return _verify_crystal_title(rom, entry)
+	return _verify_gs_title(rom, entry)
+
+
+## `TitleSuicuneGFX`, `TitleLogoGFX`, `TitleCrystalGFX` and
+## `TitleScreenPalettes`, in that order and nothing between them.
+static func _verify_crystal_title(rom: RomFile, entry: Dictionary) -> Dictionary:
+	var runs: Array = [
+		["suicune", int(entry["suicune"]), RomLayout.TITLE_SUICUNE_TILES],
+		["logo", int(entry["logo"]), RomLayout.TITLE_LOGO_TILES],
+		["crystal", int(entry["crystal"]), RomLayout.TITLE_CRYSTAL_TILES],
+	]
+	var sheets: Dictionary = {}
+	for run: Array in runs:
+		var unpacked: Dictionary = _verify_title_run(rom, String(run[0]), int(run[1]), int(run[2]))
+		if not unpacked["ok"]:
+			return unpacked
+		sheets[run[0]] = unpacked["sheet"]
+		var next: int = int(unpacked["end"])
+		var follows: int = int(entry["palettes"]) if run[0] == "crystal" else int(
+			entry["logo"] if run[0] == "suicune" else entry["crystal"]
+		)
+		if follows < next or follows - next > TITLE_RUN_GAP_MAX:
+			return {
+				"ok": false,
+				"message": "The title %s run does not end in front of the next symbol." % run[0],
+			}
+
+	# `InitializeBackground` builds thirty 8x16 objects out of the crystal, so
+	# the sheet is a column with blank corners rather than a rectangle.
+	var crystal: PackedByteArray = sheets["crystal"]
+	if _sheet_tile_lit(crystal, 0) != 0 or _sheet_tile_lit(crystal, 1) == 0:
+		return {"ok": false, "message": "The title crystal does not open on a blank corner."}
+
+	var suicune: PackedByteArray = sheets["suicune"]
+	# `LoadSuicuneFrame` draws six rows of eight from each of `.Frames`' bases,
+	# which are two sheets of 128 tiles apart. Every frame has to be drawn on.
+	for base: int in [0x00, 0x08, 0x80, 0x88]:
+		var ink: bool = false
+		for row: int in 6:
+			for column: int in 8:
+				if _sheet_tile_lit(suicune, base + row * 16 + column) > 0:
+					ink = true
+					break
+			if ink:
+				break
+		if not ink:
+			return {"ok": false, "message": "The Suicune sheet is blank at frame $%02X." % base}
+
+	var palettes: int = int(entry["palettes"])
+	var size: int = Gen2Palette.COLOR_BYTES
+	if not rom.in_bounds(palettes, RomLayout.TITLE_PALETTES * RomLayout.TITLE_PALETTE_COLORS * size):
+		return {"ok": false, "message": "The title palettes are outside the cartridge."}
+	for index: int in TITLE_CRYSTAL_FIRST_COLORS.size():
+		var stored: int = rom.u16le(palettes + index * size)
+		if stored != TITLE_CRYSTAL_FIRST_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Title colour %d is $%04X, expected $%04X." % [
+					index, stored, TITLE_CRYSTAL_FIRST_COLORS[index],
+				],
+			}
+	return {"ok": true, "message": "Title screen verified."}
+
+
+## `TitleScreenGFX1` and `GFX2` over `TitleScreenTilemap`, and `GFX3`'s raw trail
+## in front of `GFX4`'s bird.
+static func _verify_gs_title(rom: RomFile, entry: Dictionary) -> Dictionary:
+	var bottom: Dictionary = _verify_title_run(
+		rom, "logo bottom", int(entry["logo_bottom"]), RomLayout.TITLE_LOGO_BOTTOM_TILES
+	)
+	if not bottom["ok"]:
+		return bottom
+	var top_at: int = int(entry["logo_top"])
+	if top_at < int(bottom["end"]) or top_at - int(bottom["end"]) > TITLE_RUN_GAP_MAX:
+		return {"ok": false, "message": "The title logo's halves are not consecutive."}
+	var top: Dictionary = _verify_title_run(
+		rom, "logo top", top_at, RomLayout.TITLE_LOGO_TOP_TILES
+	)
+	if not top["ok"]:
+		return top
+	# `--trim-whitespace` takes the bottom half down from 120 tiles to 112 by
+	# dropping blank tiles off the end, so its last tile is drawn on. A run of the
+	# right length whose tail is blank is a different graphic.
+	if _sheet_tile_lit(bottom["sheet"], RomLayout.TITLE_LOGO_BOTTOM_TILES - 1) == 0:
+		return {"ok": false, "message": "The title logo's bottom half ends on a blank tile."}
+
+	var tilemap_at: int = int(entry["tilemap"])
+	if tilemap_at < int(top["end"]) or tilemap_at - int(top["end"]) > TITLE_RUN_GAP_MAX:
+		return {"ok": false, "message": "The title tilemap does not follow the logo."}
+	var tilemap: PackedByteArray = read_title_tilemap(rom, {"title": entry})
+	if tilemap.is_empty():
+		return {"ok": false, "message": "The title tilemap has no terminator in range."}
+	if tilemap.size() % RomLayout.TITLE_TILEMAP_COLUMNS != 0:
+		return {
+			"ok": false,
+			"message": "The title tilemap is %d bytes, not whole rows." % tilemap.size(),
+		}
+
+	var trail: int = int(entry["trail"])
+	var trail_tiles: int = int(entry["trail_tiles"])
+	if not rom.in_bounds(trail, trail_tiles * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The title trail is outside the cartridge."}
+	for tile: int in RomLayout.TITLE_TRAIL_DRAWN_TILES:
+		if _tile_2bpp_lit(rom, trail, tile) == 0:
+			return {"ok": false, "message": "Title trail tile %d is blank." % tile}
+	# Gold's own run is eight tiles, and the four past the trail are the
+	# whitespace the source names at its `FarCopyBytes`.
+	for index: int in trail_tiles - RomLayout.TITLE_TRAIL_DRAWN_TILES:
+		var tile: int = RomLayout.TITLE_TRAIL_DRAWN_TILES + index
+		if _tile_2bpp_lit(rom, trail, tile) != 0:
+			return {"ok": false, "message": "Title trail tile %d is not blank." % tile}
+	# The bird starts where the trail's own tiles stop, which is what pins it.
+	var bird_at: int = trail + trail_tiles * Gen2Tiles.TILE_BYTES
+	if int(entry["bird"]) != bird_at:
+		return {"ok": false, "message": "The title bird is not behind the trail."}
+	var bird: Dictionary = _verify_title_run(
+		rom, "bird", bird_at, int(entry["bird_tiles"])
+	)
+	if not bird["ok"]:
+		return bird
+
+	var size: int = Gen2Palette.COLOR_BYTES
+	var bg: int = int(entry["bg_palette"])
+	var ob: int = int(entry["ob_palette"])
+	if not rom.in_bounds(bg, RomLayout.TITLE_BG_PALETTES * RomLayout.TITLE_PALETTE_COLORS * size):
+		return {"ok": false, "message": "The title palettes are outside the cartridge."}
+	if ob != bg + RomLayout.TITLE_BG_PALETTES * RomLayout.TITLE_PALETTE_COLORS * size:
+		return {"ok": false, "message": "The title object palettes do not follow the background's."}
+	if rom.u16le(bg) != TITLE_BG_FIRST_COLOR:
+		return {"ok": false, "message": "The title background palette does not open on white."}
+	for index: int in TITLE_OB_COLORS.size():
+		var stored: int = rom.u16le(ob + index * size)
+		if stored != TITLE_OB_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Title object colour %d is $%04X, expected $%04X." % [
+					index, stored, TITLE_OB_COLORS[index],
+				],
+			}
+	return {"ok": true, "message": "Title screen verified."}
+
+
+## One LZ run, checked for decompressing to exactly [param tiles] tiles.
+## Answers the decompressed sheet and the offset one past the run's terminator,
+## which is what pins whatever the section puts behind it.
+static func _verify_title_run(
+	rom: RomFile, name: String, at: int, tiles: int
+) -> Dictionary:
+	if at < 0:
+		return {"ok": false, "message": "The title %s has no address." % name}
+	var lz := Gen2Lz.new()
+	var sheet: PackedByteArray = lz.decompress(rom.bytes(), at)
+	var wanted: int = tiles * Gen2Tiles.TILE_BYTES
+	if sheet.size() != wanted:
+		return {
+			"ok": false,
+			"message": "The title %s decompressed to %d bytes, wanted %d." % [
+				name, sheet.size(), wanted,
+			],
+		}
+	return {"ok": true, "sheet": sheet, "end": at + lz.consumed}
+
+
+## `LoadTitleScreenTilemap`'s own loop: bytes until `-1`, which is not copied.
+## Empty when no terminator is reached inside the bounded window, which is what a
+## wrong offset produces.
+static func read_title_tilemap(rom: RomFile, layout: Dictionary) -> PackedByteArray:
+	var entry: Dictionary = layout.get("title", {})
+	var at: int = int(entry.get("tilemap", -1))
+	if at < 0:
+		return PackedByteArray()
+	var out: PackedByteArray = PackedByteArray()
+	for step: int in RomLayout.TITLE_TILEMAP_MAX:
+		if not rom.in_bounds(at + step, 1):
+			return PackedByteArray()
+		var byte: int = rom.u8(at + step)
+		if byte == RomLayout.TITLE_TILEMAP_TERMINATOR:
+			return out
+		out.append(byte)
+	return PackedByteArray()
 
 
 static func _tile_1bpp_has_ink(rom: RomFile, offset: int, tile: int) -> bool:
@@ -2350,6 +2568,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
+		"title": _import_title(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
@@ -2972,6 +3191,90 @@ func _import_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## The title screen's palettes and, on Gold and Silver, its tilemap. The
+## graphics themselves go through [method _import_title_sheets] with the rest of
+## the tile strips.
+##
+## Crystal's sixteen palettes are one run `_TitleScreen` copies whole into both
+## buffers; Gold and Silver's are five background and two object palettes that
+## `GetSGBLayout` and `LoadTitleScreenPals` load separately, so they are kept
+## apart under the names the source gives them.
+func _import_title(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("title", {})
+	if entry.is_empty():
+		return {}
+	if int(entry.get("palettes", -1)) >= 0:
+		return {
+			"palettes": _packed_palette(
+				rom, int(entry["palettes"]),
+				RomLayout.TITLE_PALETTES * RomLayout.TITLE_PALETTE_COLORS
+			),
+		}
+	return {
+		"bg_palettes": _packed_palette(
+			rom, int(entry["bg_palette"]),
+			RomLayout.TITLE_BG_PALETTES * RomLayout.TITLE_PALETTE_COLORS
+		),
+		"ob_palettes": _packed_palette(
+			rom, int(entry["ob_palette"]),
+			RomLayout.TITLE_OB_PALETTES * RomLayout.TITLE_PALETTE_COLORS
+		),
+		"tilemap": Array(read_title_tilemap(rom, layout)),
+	}
+
+
+## The title screen's graphics, each as one strip of tiles.
+##
+## Every one but the trail is an LZ run, so they cannot go through the fixed
+## table [method _import_tiles] uses: each is decompressed first and the strip
+## written from the result. The names are the source's own symbols with the
+## profile split dropped, since a cache only ever holds one cartridge's.
+func _import_title_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("title", {})
+	if entry.is_empty():
+		return {}
+	var runs: Array = []
+	if int(entry.get("suicune", -1)) >= 0:
+		runs = [
+			["title_suicune", int(entry["suicune"]), RomLayout.TITLE_SUICUNE_TILES],
+			["title_logo", int(entry["logo"]), RomLayout.TITLE_LOGO_TILES],
+			["title_crystal", int(entry["crystal"]), RomLayout.TITLE_CRYSTAL_TILES],
+		]
+	else:
+		runs = [
+			[
+				"title_logo_bottom", int(entry["logo_bottom"]),
+				RomLayout.TITLE_LOGO_BOTTOM_TILES,
+			],
+			["title_logo_top", int(entry["logo_top"]), RomLayout.TITLE_LOGO_TOP_TILES],
+			["title_bird", int(entry["bird"]), int(entry["bird_tiles"])],
+		]
+
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for run: Array in runs:
+		var name: String = String(run[0])
+		var tiles: int = int(run[2])
+		var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(run[1]))
+		if _lz.failed or raw.size() < tiles * Gen2Tiles.TILE_BYTES:
+			return {}
+		var indices: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
+			return {}
+		out[name] = _title_sheet_entry(tiles)
+	return out
+
+
+func _title_sheet_entry(tiles: int) -> Dictionary:
+	return {
+		"width": tiles * Gen2Tiles.TILE_WIDTH,
+		"height": Gen2Tiles.TILE_HEIGHT,
+		"tiles": tiles,
+		"first_code": 0,
+		"bits": 2,
+	}
+
+
 ## `GameFreakDittoGFX`, the one LZ run in the splash. `GameFreakPresentsInit`
 ## splits it over `vTiles0` and `vTiles1` as 128 tiles each, and the OAM sets
 ## index the result with a stride of $10, so it is kept as one strip of 256 and
@@ -3186,8 +3489,21 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"bits": 2,
 		}
 
+	## `TitleScreenGFX3`, the one title graphic that is not compressed: Gold and
+	## Silver only, and Gold's own four blank tiles behind it are kept, since
+	## `TitleScreen` copies eight tiles whatever the trail's own length is.
+	var title: Dictionary = layout.get("title", {})
+	if int(title.get("trail", -1)) >= 0:
+		sheets["title_trail"] = {
+			"offset": int(title["trail"]),
+			"tiles": int(title["trail_tiles"]),
+			"first_code": 0,
+			"bits": 2,
+		}
+
 	var written: Dictionary = _import_shrink_pics(rom, layout)
 	written.merge(_import_ditto_sheet(rom, layout), true)
+	written.merge(_import_title_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

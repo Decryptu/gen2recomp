@@ -23,7 +23,7 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	for key: String in gold:
 		if key in [
 			"item_attributes", "item_status_actions", "item_healing_hp",
-			"overworld_icons", "copyright", "game_freak_presents",
+			"overworld_icons", "copyright", "game_freak_presents", "title",
 		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
@@ -37,6 +37,23 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	assert_ne(gold_copyright["string"], silver_copyright["string"])
 	# The splash graphics are the same pictures 440 bytes apart in the same bank,
 	# and the object palette they are drawn through does not move at all.
+	# The title screen's two halves each move on their own: the logo's bottom and
+	# the trail sit at the same address on both, while the logo's top, the
+	# tilemap and the bird move with the compressed run in front of them. Both
+	# palette runs stay put, since neither is inside a graphic.
+	var gold_title: Dictionary = gold["title"]
+	var silver_title: Dictionary = silver["title"]
+	for shared: String in ["logo_bottom", "trail", "bg_palette", "ob_palette"]:
+		assert_eq(gold_title[shared], silver_title[shared], shared)
+	for moved: String in ["logo_top", "tilemap", "bird", "trail_tiles", "bird_tiles"]:
+		assert_ne(gold_title[moved], silver_title[moved], moved)
+	# `TitleScreen` copies eight tiles of trail whatever the run holds, so
+	# Silver's bird starts where its own four end.
+	assert_eq(
+		int(silver_title["bird"]) - int(silver_title["trail"]),
+		int(silver_title["trail_tiles"]) * 16
+	)
+
 	var gold_presents: Dictionary = gold["game_freak_presents"]
 	var silver_presents: Dictionary = silver["game_freak_presents"]
 	assert_ne(gold_presents["gfx"], silver_presents["gfx"])

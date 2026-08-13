@@ -138,3 +138,65 @@ func test_a_skipped_copyright_starts_on_the_next_phase_the_host_names() -> void:
 	assert_true(boot.drain_events().any(func(event: Dictionary) -> bool:
 		return event["type"] == &"open_title"
 	))
+
+
+## `RunTitleScreen` runs the screen rather than holding the phase: a held START
+## answers it, and the answer is what reaches the host.
+func test_the_title_phase_runs_its_own_screen_and_answers_the_host() -> void:
+	var boot := Boot.new()
+	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	assert_eq(boot.phase(), Boot.PHASE_TITLE)
+	assert_not_null(boot.title())
+
+	boot.drain_events()
+	for _frame: int in 20:
+		boot.advance_frame()
+	assert_eq(boot.phase(), Boot.PHASE_TITLE, "and it waits for a button")
+
+	var answered: Array[Dictionary] = boot.advance_frame([Gen2Button.START])
+	assert_true(answered.any(func(event: Dictionary) -> bool:
+		return event["type"] == &"title_menu"
+	))
+	assert_true(boot.select_title(&"new_game"))
+	assert_eq(boot.phase(), Boot.PHASE_NEW_GAME)
+
+
+## `TitleScreenEnd` jumps back to `IntroSequence`, so a screen nobody pressed
+## starts the whole opening again rather than standing still.
+func test_a_title_screen_nobody_presses_restarts_the_opening() -> void:
+	var boot := Boot.new()
+	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	var restarted: bool = false
+	for _frame: int in Gen2TitleScene.TIMER_GOLD + 4:
+		for event: Dictionary in boot.advance_frame():
+			if event["type"] == &"restart_opening":
+				restarted = true
+		if restarted:
+			break
+	assert_true(restarted)
+	## The order starts again from the top, which with only this phase drawable
+	## is this phase, on a screen that has not been answered.
+	assert_eq(boot.phase(), Boot.PHASE_TITLE)
+	assert_false(boot.title().finished())
+
+
+## The two chords answer without leaving the screen, because what they open is
+## the host's business and `Init` comes back to the title afterwards.
+func test_a_chord_is_reported_and_the_screen_stays_up() -> void:
+	var boot := Boot.new()
+	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	boot.drain_events()
+	for _frame: int in 4:
+		boot.advance_frame()
+	var chord: Array[Dictionary] = boot.advance_frame([
+		Gen2Button.UP, Gen2Button.B, Gen2Button.SELECT,
+	])
+	var reported: Array = chord.filter(func(event: Dictionary) -> bool:
+		return event["type"] == &"title_chord"
+	)
+	assert_eq(reported.size(), 1)
+	assert_eq(reported[0]["kind"], &"delete_save_data")
+	assert_eq(boot.phase(), Boot.PHASE_TITLE)
+	assert_false(boot.title().finished())
+	boot.advance_frame()
+	assert_eq(boot.title().timer(), Gen2TitleScene.TIMER_GOLD, "on a fresh timer")

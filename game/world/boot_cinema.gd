@@ -36,6 +36,8 @@ var _intro_scene_lengths: Array[int] = []
 ## `GameFreakPresentsScene` and the sprite beside it, which own every frame of
 ## the presents phase. Null until that phase is entered.
 var _presents: Gen2GameFreakPresents = null
+## `TitleScreenScene`'s own state while the title phase is up, null outside it.
+var _title: Gen2TitleScene = null
 ## The `BattleAnimSineWave` the presents phase reads its motion out of, handed
 ## in by the host that has a cache open.
 var _sine: Gen2BattleAnimData = null
@@ -58,6 +60,7 @@ func start(
 	_profile = profile
 	_sine = sine
 	_presents = null
+	_title = null
 	_intro_scene_lengths = _validated_intro_lengths(intro_scene_lengths)
 	_available = available.duplicate()
 	if not is_available(PHASE_COPYRIGHT):
@@ -114,7 +117,7 @@ func drain_events() -> Array[Dictionary]:
 ## Advances exactly one 59.7275 Hz source frame. A sound wait is released only
 ## through complete_sound(), so a slow or failed device cannot be mistaken for
 ## a fixed presentation delay.
-func advance_frame() -> Array[Dictionary]:
+func advance_frame(held: Array = []) -> Array[Dictionary]:
 	if _phase.is_empty() or _phase == PHASE_FINISHED or not _waiting_sound.is_empty():
 		return drain_events()
 	_frame += 1
@@ -127,10 +130,50 @@ func advance_frame() -> Array[Dictionary]:
 		PHASE_INTRO_MOVIE:
 			_advance_intro()
 		PHASE_TITLE:
-			pass
+			_advance_title(held)
 		PHASE_NEW_GAME:
 			pass
 	return drain_events()
+
+
+## `RunTitleScreen`'s own loop, one frame of it. The screen answers on its own
+## through `wTitleScreenSelectedOption`, so the two chords and the timeout land
+## here rather than waiting on the host; only the main-menu answer is left for
+## [method select_title], since what it opens is the host's business.
+func _advance_title(held: Array) -> void:
+	if _title == null:
+		_enter_after(PHASE_TITLE)
+		return
+	_title.advance_frame(held)
+	if not _title.finished():
+		return
+	var option: int = _title.selected_option()
+	match option:
+		Gen2TitleScene.OPTION_RESTART:
+			# `TitleScreenEnd` fades the music out and jumps back to
+			# `IntroSequence`, which is the whole opening again. The restart runs
+			# first because [method start] empties the queue, and its own
+			# `play_music none` is the fade landing.
+			start(_profile, _intro_scene_lengths, _available, _sine)
+			_emit(&"restart_opening", {"profile": _profile})
+		Gen2TitleScene.OPTION_DELETE_SAVE_DATA, Gen2TitleScene.OPTION_RESET_CLOCK:
+			_emit(&"title_chord", {
+				"option": option,
+				"kind": (
+					&"delete_save_data"
+					if option == Gen2TitleScene.OPTION_DELETE_SAVE_DATA
+					else &"reset_clock"
+				),
+			})
+			_title = Gen2TitleScene.create(_profile, _sine)
+		_:
+			_emit(&"title_menu", {"profile": _profile})
+
+
+## The live title screen, so a host can read the sprites and scroll it is
+## drawing. Null outside the title phase.
+func title() -> Gen2TitleScene:
+	return _title
 
 
 func wait_sound(token: StringName) -> void:
@@ -250,6 +293,11 @@ func _enter_after(phase: StringName) -> void:
 				_emit(&"play_music", {"music": &"gold_silver_opening", "restart": false})
 				_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
 			PHASE_TITLE:
+				# `_TitleScreen` draws the whole screen and plays
+				# `SFX_TITLE_SCREEN_ENTRANCE` before the loop's first frame;
+				# Crystal's music waits for its entrance to finish, so the
+				# request is the same either way and the host owns the delay.
+				_title = Gen2TitleScene.create(_profile, _sine)
 				_emit(&"open_title", {"profile": _profile})
 				_emit(&"play_music", {"music": &"title", "restart": false})
 		return
