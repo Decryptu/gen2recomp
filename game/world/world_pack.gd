@@ -86,10 +86,10 @@ const ACTION_LABELS: Dictionary = {
 	ACTION_QUIT: "QUIT",
 }
 
-## GIVE needs a held-item model, TOSS a quantity prompt and SEL the Select-button
-## registration; none exists yet, so all three keep their source position and are
-## marked unavailable, the way the party submenu carries STATS, SWITCH and MOVE.
-const IMPLEMENTED_ACTIONS: Array[StringName] = [ACTION_USE, ACTION_QUIT]
+## GIVE needs a held-item model and SEL the Select-button registration; neither
+## exists yet, so both keep their source position and are marked unavailable, the
+## way the party submenu carries STATS, SWITCH and MOVE.
+const IMPLEMENTED_ACTIONS: Array[StringName] = [ACTION_USE, ACTION_TOSS, ACTION_QUIT]
 
 
 ## One entry per pocket in source display order, each carrying only the items
@@ -158,7 +158,7 @@ static func item_submenu(data: GameData, item: int) -> Array:
 	if definition.is_empty():
 		return []
 	var permissions: int = int(definition.get("permissions", 0))
-	var can_toss: bool = (permissions & CANT_TOSS) == 0
+	var tossable: bool = can_toss(data, item)
 	var can_select: bool = (permissions & CANT_SELECT) == 0
 	# CheckItemMenu tests the nibble against zero, not against ITEMMENU_CURRENT,
 	# so a value of 1 to 3 would offer USE and then reach .Oak's refusal. No
@@ -166,8 +166,8 @@ static func item_submenu(data: GameData, item: int) -> Array:
 	var can_use: bool = int(definition.get("field_menu", 0)) != 0
 	var actions: Array[StringName] = SUBMENU_USE_QUIT
 	if int(definition.get("pocket", 0)) == TYPE_TM_HM:
-		actions = SUBMENU_USE_QUIT if not can_toss else SUBMENU_TMHM_USE_GIVE_QUIT
-	elif not can_toss:
+		actions = SUBMENU_USE_QUIT if not tossable else SUBMENU_TMHM_USE_GIVE_QUIT
+	elif not tossable:
 		actions = SUBMENU_USE_QUIT if not can_select else SUBMENU_USE_SELECT_QUIT
 	elif not can_select:
 		actions = SUBMENU_USE_GIVE_TOSS_QUIT if can_use else SUBMENU_GIVE_TOSS_QUIT
@@ -181,6 +181,18 @@ static func item_submenu(data: GameData, item: int) -> Array:
 			"available": IMPLEMENTED_ACTIONS.has(action),
 		})
 	return entries
+
+
+## `_CheckTossableItem`, which is what `.ItemBallsKey_LoadSubmenu` branches on
+## first and what decides whether TOSS is in the submenu at all. The permission
+## bit is set on an item that *cannot* be tossed.
+static func can_toss(data: GameData, item: int) -> bool:
+	if data == null:
+		return false
+	var definition: Dictionary = data.item(item)
+	if definition.is_empty():
+		return false
+	return (int(definition.get("permissions", 0)) & CANT_TOSS) == 0
 
 
 ## `UseItem`'s jumptable index: which of `.Oak`, `.Current`, `.Party` and

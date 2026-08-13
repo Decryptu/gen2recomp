@@ -190,14 +190,17 @@ func test_the_tm_pocket_has_its_own_submenu() -> void:
 	])
 
 
-## GIVE, TOSS and SEL keep their source position and are marked unavailable, the
-## way the party submenu carries STATS, SWITCH and MOVE.
-func test_only_use_and_quit_are_available() -> void:
+## GIVE and SEL keep their source position and are marked unavailable, the way
+## the party submenu carries STATS, SWITCH and MOVE. TOSS is built.
+func test_only_give_and_sel_are_unavailable() -> void:
 	for entry: Dictionary in Gen2WorldPack.item_submenu(_data, ITEM_POTION):
 		var action: StringName = StringName(entry.get("action", &""))
 		assert_eq(
 			bool(entry.get("available", false)),
-			action in [Gen2WorldPack.ACTION_USE, Gen2WorldPack.ACTION_QUIT],
+			action in [
+				Gen2WorldPack.ACTION_USE, Gen2WorldPack.ACTION_TOSS,
+				Gen2WorldPack.ACTION_QUIT,
+			],
 			"action %s" % action
 		)
 

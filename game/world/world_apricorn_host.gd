@@ -43,38 +43,10 @@ static func complete_runtime_request(
 		return resumed
 	if save == null:
 		return resumed
-	var committed: Dictionary = _commit(world, save, before, persist)
+	var committed: Dictionary = Gen2WorldTransaction.run(world, save, before, persist)
 	if not bool(committed.get("ok", false)):
-		return committed
+		return _failure(StringName(committed.get("reason", &"")), committed.get("details", {}))
 	return resumed
-
-
-## The same boundary every party- or bag-owned transaction here commits through:
-## validate the save, rebuild it around the resumed world and write it, putting
-## the live state back when any of the three refuses.
-static func _commit(
-	world: Gen2WorldAPI,
-	save: Gen2SaveData,
-	before: Gen2WorldSnapshot,
-	persist: bool
-) -> Dictionary:
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", candidate_validation)
-	if persist:
-		var write_result: Dictionary = Gen2SaveStore.save(candidate, world.data)
-		if not bool(write_result.get("ok", false)):
-			world.state.restore_from_dict(before.world_state.to_dict())
-			return _failure(&"save_failed", write_result)
-	_copy_save(save, candidate)
-	return {"ok": true}
 
 
 static func _resume(world: Gen2WorldAPI, completion: Dictionary) -> Dictionary:
@@ -88,17 +60,6 @@ static func _resume(world: Gen2WorldAPI, completion: Dictionary) -> Dictionary:
 		"quantity": int(completion.get("quantity", 0)),
 		"results": resumed,
 	}
-
-
-static func _copy_save(target: Gen2SaveData, source: Gen2SaveData) -> void:
-	target.format_version = source.format_version
-	target.game_id = source.game_id
-	target.rom_sha1 = source.rom_sha1
-	target.slot = source.slot
-	target.player_name = source.player_name
-	target.party = source.party.duplicate(true)
-	target.boxes = source.boxes
-	target.world = source.world
 
 
 static func _failure(reason: StringName, details: Dictionary) -> Dictionary:

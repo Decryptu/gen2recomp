@@ -20,12 +20,18 @@ signal closed
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
 	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
+	PACK_TOSS_QUANTITY, PACK_TOSS_CONFIRM,
 	PACK_RESULT, SAVE_CONFIRM, OPTIONS, MODS, MOD_OPTIONS,
 }
 
-## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm.
+## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm,
+## and `TossMenu`'s own three. "(S)" is three literal characters in the charmap,
+## not a plural rule, so the cartridge really does say "POTION(S)".
 const OAK_TEXT: String = "OAK: This isn't the time to use that!"
 const NO_MON_TEXT: String = "You don't have a #MON!"
+const ASK_THROW_AWAY_TEXT: String = "Throw away how many?"
+const ASK_QUANTITY_THROW_AWAY_TEXT: String = "Throw away %d %s(S)?"
+const THREW_AWAY_TEXT: String = "Threw away %s(S)."
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -58,6 +64,9 @@ var _pack_result_ok: bool = false
 var _teach_prompt: Dictionary = {}
 var _teach_cursor: int = 0
 var _teaching: bool = false
+## `SelectQuantityToToss`'s dial and `YesNoBox`'s cursor, held while TOSS runs.
+var _toss_prompt: Gen2WorldQuantityPrompt = null
+var _toss_confirm_cursor: int = 0
 
 ## ForgetMove's list and the two yes/no boxes around it. The party index is held
 ## because the second teach_tm_hm() call has to name the same Pokémon the first
@@ -134,6 +143,11 @@ func cursor() -> int:
 
 
 func handle_button(button: int) -> bool:
+	## `BuySellToss_InterpretJoypad` reads the joypad itself and answers with a
+	## carry, so the dial takes the whole button rather than a direction and an
+	## A/B split, the way [Gen2WorldApricorn] feeds it.
+	if _mode == Mode.PACK_TOSS_QUANTITY:
+		return _press_toss_quantity(button)
 	if Gen2Button.is_direction(button):
 		_move(Gen2Button.vector(button))
 		return true
@@ -182,6 +196,10 @@ func _move(direction: Vector2i) -> void:
 			if direction.y != 0 or direction.x != 0:
 				_forget_confirm_cursor = 1 - _forget_confirm_cursor
 				_render_stop_learning()
+		Mode.PACK_TOSS_CONFIRM:
+			if direction.y != 0 or direction.x != 0:
+				_toss_confirm_cursor = 1 - _toss_confirm_cursor
+				_render_toss_confirm()
 		Mode.PACK_TARGET:
 			if direction.y != 0 and not _party_targets().is_empty():
 				_target_cursor = wrapi(
@@ -233,6 +251,8 @@ func _confirm() -> void:
 			_confirm_forget()
 		Mode.PACK_STOP_LEARNING:
 			_confirm_stop_learning()
+		Mode.PACK_TOSS_CONFIRM:
+			_confirm_toss()
 		Mode.PACK_TARGET:
 			if _teaching:
 				_teach_selected_item(_target_cursor)
@@ -273,6 +293,11 @@ func _cancel() -> void:
 			_open_forget_ask()
 		Mode.PACK_TARGET:
 			_open_item_mode()
+		## B at the yes/no is `YesNoBox`'s no, which is the carry `TossMenu`
+		## returns on. The submenu is already closed by then, so it lands back on
+		## the pocket list rather than on the item's own menu.
+		Mode.PACK_TOSS_CONFIRM:
+			_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
 			_open_list_mode()
 		## `_Option.joypad_loop` exits on PAD_START | PAD_B from any row.
@@ -551,6 +576,9 @@ func _confirm_item_action() -> void:
 	if not bool(entry.get("available", false)):
 		_status.text = "%s is not available yet." % String(entry.get("label", ""))
 		_status.add_theme_color_override("font_color", MUTED)
+		return
+	if action == Gen2WorldPack.ACTION_TOSS:
+		_open_toss_quantity()
 		return
 	_confirm_use()
 
@@ -859,6 +887,92 @@ func _use_refusal(reason: StringName) -> String:
 		&"insufficient_item_quantity":
 			return "You have none of those."
 	return "Can't use that here: %s" % String(reason)
+
+
+## `TossMenu`: the ask, then `SelectQuantityToToss`, which is the same dial the
+## mart and Kurt read their joypad through. The ceiling is the stack itself.
+func _open_toss_quantity() -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	_mode = Mode.PACK_TOSS_QUANTITY
+	_toss_prompt = Gen2WorldQuantityPrompt.open(int(item.get("quantity", 1)))
+	_footer.text = "Up and down: one    Left and right: ten    A: choose    B: back"
+	_render_toss_quantity()
+
+
+func _render_toss_quantity() -> void:
+	_title.text = "TOSS"
+	_summary.text = String(_selected_item().get("name", ""))
+	_status.text = ASK_THROW_AWAY_TEXT
+	_status.add_theme_color_override("font_color", TEXT)
+	_render_options(
+		[_toss_prompt.value if _toss_prompt != null else 1], 0,
+		func(value: Variant) -> String: return "x%d" % int(value)
+	)
+
+
+## `AskQuantityThrowAwayText` and the `YesNoBox` behind it.
+func _open_toss_confirm() -> void:
+	if _toss_prompt == null or _selected_item().is_empty():
+		return
+	_mode = Mode.PACK_TOSS_CONFIRM
+	_toss_confirm_cursor = 0
+	_footer.text = "Up and down: move    A: choose    B: back"
+	_render_toss_confirm()
+
+
+func _render_toss_confirm() -> void:
+	_title.text = "TOSS"
+	_summary.text = ASK_QUANTITY_THROW_AWAY_TEXT % [
+		_toss_prompt.value if _toss_prompt != null else 1,
+		String(_selected_item().get("name", "")),
+	]
+	_status.text = ""
+	_render_options([{"label": "YES"}, {"label": "NO"}], _toss_confirm_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
+	)
+
+
+## `TossItem` and `ThrewAwayText`. The bag host owns the transaction; a refusal
+## is reported rather than swallowed, since nothing else here can explain it.
+func _confirm_toss() -> void:
+	if _toss_confirm_cursor != 0:
+		_open_pack_mode(false)
+		return
+	var item: Dictionary = _selected_item()
+	if _world == null or item.is_empty() or _toss_prompt == null:
+		_show_pack_result("No world is loaded.", false)
+		return
+	var result: Dictionary = Gen2WorldBagHost.toss(
+		_world, _pack_save, int(item.get("item", 0)), _toss_prompt.value, _pack_persist
+	)
+	if not bool(result.get("ok", false)):
+		_show_pack_result(
+			"Could not throw that away (%s)." % String(result.get("reason", "")), false
+		)
+		return
+	## The result box keeps whatever summary the mode before it left, and the
+	## question is not it: `ThrewAwayText` is printed under the item's own name.
+	_summary.text = String(result.get("name", ""))
+	_show_pack_result(THREW_AWAY_TEXT % String(result.get("name", "")), true)
+
+
+## The dial's own joypad read. Its cancel is `cp -1 / scf`, the same carry
+## `TossMenu` treats as "finish", so B goes back to the pocket list.
+func _press_toss_quantity(button: int) -> bool:
+	if _toss_prompt == null:
+		_open_pack_mode(false)
+		return true
+	match _toss_prompt.press(button):
+		Gen2WorldQuantityPrompt.CONFIRMED:
+			_open_toss_confirm()
+		Gen2WorldQuantityPrompt.CANCELLED:
+			_toss_prompt = null
+			_open_pack_mode(false)
+		_:
+			_render_toss_quantity()
+	return true
 
 
 func _show_pack_result(message: String, ok: bool) -> void:

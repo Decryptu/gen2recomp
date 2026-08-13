@@ -119,9 +119,13 @@ type byte `GameData` imports under the confusingly-named `pocket` field. It is
 presentation only: item counts stay a flat map on `Gen2WorldState` and pocket
 capacities are not enforced. `world_apricorn.gd` is `SelectApricornForKurt`'s
 own state machine over `FindApricornsInBag`, and `world_quantity_prompt.gd` is
-`BuySellToss_InterpretJoypad`, the dial every source quantity box shares;
-`world_apricorn_host.gd` takes the apricorns through the same validated
-candidate save the mart buys through. `start_menu_screen.gd` is the overlay, owning Pack,
+`BuySellToss_InterpretJoypad`, the dial every source quantity box shares, which
+`TossMenu` reads through as well. `world_transaction.gd` is the commit boundary
+all of them go through: validate the save, build a candidate, validate it against
+the world it now describes and write it, and restore the live world when any of
+the three refuses. `world_mart_host.gd`, `world_apricorn_host.gd`,
+`world_bag_host.gd` (the pack's TOSS) and `world_party_host.gd`'s five
+transactions each own what they change and nothing else. `start_menu_screen.gd` is the overlay, owning Pack,
 a Save confirmation and the OPTION menu as internal modes the way
 `world_service_screen.gd` owns a mart mode, and delegating Pokemon and Pokegear
 to the existing screens. `Gen2PartyScreen` and `Gen2BoxScreen` share one
