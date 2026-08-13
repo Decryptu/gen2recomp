@@ -36,7 +36,8 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   with imported win/loss text, map reloads, save-safe blackout recovery,
 >   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
 >   fishing, roaming, repel and wild encounters. The service overlay covers
->   menu selection, mart dialog variants and quantity purchases, source-timed
+>   menu selection, mart dialog variants and quantity purchases, Kurt's Apricorn
+>   errand, source-timed
 >   phone dispatch and bounded music, effects and cries. Everything the overworld
 >   times is a hardware frame count spent by one clock, so a seed, an input log
 >   and a frame number reproduce a walk exactly, on any display.
@@ -286,7 +287,7 @@ all three games unless its row says otherwise:
 
 | Tool | Checks |
 |---|---|
-| `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
+| `preview_world_services.gd <png> [mart\|apricorn] [presses]` | the mart or Kurt's Apricorn overlay, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_intro.gd <game> <png> [copyright\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |

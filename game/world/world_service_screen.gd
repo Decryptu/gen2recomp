@@ -16,7 +16,7 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
-enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK }
+enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK, APRICORN }
 
 ## engine/pokegear/pokegear.asm's card order. Each is behind its own
 ## wPokegearFlags bit, named here by the engine flag that carries it, since that
@@ -44,6 +44,7 @@ var _cursor: int = 0
 var _mart_entries: Array = []
 var _mart_quantity: int = 1
 var _mart_purchased: bool = false
+var _apricorns: Gen2WorldApricorn = null
 var _phone_entries: Array = []
 var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
@@ -104,6 +105,9 @@ func open_pending(
 		&"audio_requested":
 			_open_audio(request, resolved.get("data", {}).get("audio", {}))
 			return true
+		&"apricorn_selection_requested":
+			_open_apricorns()
+			return true
 	_show_error("No scene host for %s." % String(request.get("kind", "request")))
 	return false
 
@@ -162,6 +166,9 @@ func open_pokegear(
 func handle_button(button: int) -> bool:
 	if not is_active():
 		return false
+	if _mode == MODE.APRICORN:
+		_press_apricorns(button)
+		return true
 	if Gen2Button.is_direction(button):
 		_move_direction(Gen2Button.vector(button))
 		return true
@@ -248,6 +255,69 @@ func _open_mart(mart: Dictionary) -> void:
 		else "Select an item. Left and right change the quantity."
 	_footer.text = "D-pad: move and quantity    A: buy    B: leave"
 	_render_options()
+
+
+## `SelectApricornForKurt`'s two boxes. The model owns both cursors and the loop
+## between them, so this only draws whichever one it is on.
+func _open_apricorns() -> void:
+	_mode = MODE.APRICORN
+	_apricorns = Gen2WorldApricorn.open(_world.data, _world.state)
+	_title.text = "APRICORNS"
+	if _apricorns.is_done():
+		## FindApricornsInBag's own refusal. Kurt only asks with one in the bag,
+		## so this is the guard rather than a branch a player reaches.
+		_finish_apricorns()
+		return
+	_render_apricorns()
+
+
+func _render_apricorns() -> void:
+	if _apricorns.phase == Gen2WorldApricorn.SELECT_QUANTITY:
+		_cursor = 0
+		var chosen: Dictionary = _apricorns.selected_entry()
+		_summary.text = "How many should I make?"
+		## `PlaceApricornQuantity` draws the name and `×NN` under it; the
+		## ceiling is this host's own, since nothing here draws a bag page.
+		_status.text = "x%d    of %d" % [
+			_apricorns.prompt.value, _apricorns.prompt.maximum,
+		]
+		_status.add_theme_color_override("font_color", TEXT)
+		_footer.text = "Up/down: one    Left/right: ten    A: give    B: back"
+		_render_options([String(chosen.get("name", ""))])
+		return
+	_summary.text = "Which APRICORN should I use?"
+	_status.text = ""
+	_footer.text = "D-pad: move    A: choose    B: leave"
+	_render_options(_apricorn_rows())
+
+
+## The four-row window the scrolling menu shows, CANCEL included when the list
+## is short enough for it. `_cursor` is the row inside that window.
+func _apricorn_rows() -> Array:
+	var rows: Array = []
+	for row: int in _apricorns.rows():
+		var index: int = _apricorns.scroll + row
+		if index >= _apricorns.entries.size():
+			rows.append("CANCEL")
+			break
+		var entry: Dictionary = _apricorns.entries[index]
+		rows.append("%-12s x%2d" % [String(entry.get("name", "")), int(entry.get("quantity", 0))])
+	_cursor = _apricorns.cursor_y - 1
+	return rows
+
+
+func _press_apricorns(button: int) -> void:
+	_apricorns.press(button)
+	if _apricorns.is_done():
+		_finish_apricorns()
+		return
+	_render_apricorns()
+
+
+func _finish_apricorns() -> void:
+	var answer: Dictionary = _apricorns.result()
+	_apricorns = null
+	_finish_runtime({"ok": true, "item": answer["item"], "quantity": answer["quantity"]})
 
 
 func _open_phone(request: Dictionary, data: Dictionary) -> void:

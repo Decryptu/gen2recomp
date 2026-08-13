@@ -117,7 +117,11 @@ than a text one, and `trainer_card_screen.gd` colours it through
 `world_pack.gd` groups owned items into the four cartridge pockets by the item
 type byte `GameData` imports under the confusingly-named `pocket` field. It is
 presentation only: item counts stay a flat map on `Gen2WorldState` and pocket
-capacities are not enforced. `start_menu_screen.gd` is the overlay, owning Pack,
+capacities are not enforced. `world_apricorn.gd` is `SelectApricornForKurt`'s
+own state machine over `FindApricornsInBag`, and `world_quantity_prompt.gd` is
+`BuySellToss_InterpretJoypad`, the dial every source quantity box shares;
+`world_apricorn_host.gd` takes the apricorns through the same validated
+candidate save the mart buys through. `start_menu_screen.gd` is the overlay, owning Pack,
 a Save confirmation and the OPTION menu as internal modes the way
 `world_service_screen.gd` owns a mart mode, and delegating Pokemon and Pokegear
 to the existing screens. `Gen2PartyScreen` and `Gen2BoxScreen` share one

@@ -44,6 +44,8 @@ const ITEM_HM_WATERFALL: int = 0xF9
 ## TM08, the `add_tm ROCK_SMASH` row in the same file. Gold and Silver need it
 ## to finish the Burned Tower; no Crystal leg does.
 const ITEM_TM_ROCK_SMASH: int = 0xC7
+## The apricorn Azalea Town's own fruit tree bears.
+const APRICORN_WHT: int = 0x61
 ## Ice Path 1F's HM07 ball stands on (31,7) in both games, on the same region as
 ## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
 ## four neighbours are wall, so (30,7) facing right is the only approach.
@@ -1885,6 +1887,41 @@ func _hive_badge_path(
 		"cell": _cell_value(world),
 		"run": after_well,
 	})
+
+	# The apricorn errand. Azalea Town's own fruit tree bears WHT_APRICORN
+	# (data/items/fruit_trees.asm), but `fruittree` reaches no host, so the walk
+	# puts the tree's fruit in the bag rather than picking it. See HANDOFF.
+	var picked: Dictionary = world.state.apply_changes({}, {}, {
+		"items": {APRICORN_WHT: 4},
+	})
+	if not bool(picked.get("ok", false)):
+		return {"ok": false, "path": path, "reason": "apricorn grant failed"}
+	# Kurt1 is back at (3,2) with EVENT_CLEARED_SLOWPOKE_WELL set, and the warp
+	# already left the player on his cell. `.ClearedSlowpokeWell` hands over the
+	# LURE_BALL, then `.CheckApricorns` finds the white one and asks.
+	var errand: Dictionary = _talk_to(
+		world, Vector2i(3, 3), Gen2WorldSprite.FACING_UP, save, random, data, [],
+		{"item": APRICORN_WHT, "quantity": 2}
+	)
+	path.append({
+		"step": "kurts_apricorn_errand",
+		"map": _map_value(world),
+		"cell": _cell_value(world),
+		"given": errand.get("run", {}).get("apricorns_given", []),
+		"apricorns_left": world.state.item_quantity(APRICORN_WHT),
+		"kurt_quantity": world.state.kurt_apricorn_quantity(),
+		"making_balls": world.state.is_engine_flag_active(Gen2WorldState.engine_flag(
+			Gen2WorldState.ENGINE_KURT_MAKING_BALLS, Gen2WorldState.is_crystal_profile(data)
+		)),
+		"run": errand,
+	})
+	if not bool(errand.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Kurt's apricorn errand failed: %s" % errand.get("reason", ""),
+		}
+	if world.state.kurt_apricorn_quantity() != 2 or world.state.item_quantity(APRICORN_WHT) != 2:
+		return {"ok": false, "path": path, "reason": "Kurt took the wrong apricorns"}
 
 	var back_to_azalea: Dictionary = _warp_step(world, 8, 7)
 	if not bool(back_to_azalea.get("ok", false)):
@@ -9051,13 +9088,14 @@ func _talk_to(
 	random: RandomNumberGenerator,
 	data: GameData,
 	answers: Array[int] = [],
+	apricorn: Dictionary = {},
 ) -> Dictionary:
 	var walked: Dictionary = _walk_cell_resolving(world, cell, save, random, data)
 	if not bool(walked.get("ok", false)):
 		return walked
 	world.player_facing = facing
 	var run: Dictionary = _drain_story(
-		world, world.interact(), save, random, data, true, answers
+		world, world.interact(), save, random, data, true, answers, {}, apricorn
 	)
 	return {
 		"ok": bool(run.get("terminal", false)),
@@ -9172,12 +9210,17 @@ func _drain_story(
 	require_events: bool = false,
 	answers: Array[int] = [],
 	purchase: Dictionary = {},
+	apricorn: Dictionary = {},
 ) -> Dictionary:
 	var pending_answers: Array[int] = answers.duplicate()
 	## What to buy if a `pokemart` opens while this drain runs. Cleared once it
 	## is spent, so one standing order buys once.
 	var pending_purchase: Dictionary = purchase.duplicate()
 	var purchases: Array = []
+	## The same standing order for `special SelectApricornForKurt`. An empty one
+	## backs out of the box, which is the source's own cancel.
+	var pending_apricorn: Dictionary = apricorn.duplicate()
+	var apricorns_given: Array = []
 	if require_events and initial.is_empty():
 		return {
 			"statuses": [],
@@ -9375,6 +9418,27 @@ func _drain_story(
 						break
 					pending_purchase = {}
 				results = world.complete_runtime_request({"ok": true})
+			elif request_kind == &"apricorn_selection_requested":
+				# Kurt's two boxes are a runtime pause the same way a mart is.
+				# Gen2WorldApricornHost takes the apricorns and resumes, so the
+				# walk proves the transaction rather than only the request.
+				var given: Dictionary = Gen2WorldHost.complete_runtime_request(
+					world, {
+						"ok": true,
+						"item": int(pending_apricorn.get("item", 0)),
+						"quantity": int(pending_apricorn.get("quantity", 0)),
+					}, save, false
+				)
+				if not bool(given.get("ok", false)):
+					last_reason = String(given.get("reason", "apricorn host failed"))
+					last_details = JSON.stringify(given)
+					break
+				apricorns_given.append({
+					"item": int(given.get("item", 0)),
+					"quantity": int(given.get("quantity", 0)),
+				})
+				pending_apricorn = {}
+				results = given.get("results", [])
 			elif request_kind == &"audio_requested":
 				results = world.complete_runtime_request({"ok": true})
 			else:
@@ -9405,6 +9469,7 @@ func _drain_story(
 		"pending_trace": pending_trace,
 		"battles": battles,
 		"purchases": purchases,
+		"apricorns_given": apricorns_given,
 		"catch_tutorials": catch_tutorials,
 		"hall_of_fame": hall_of_fame,
 		"credits": credits,

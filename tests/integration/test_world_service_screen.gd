@@ -6,6 +6,9 @@ extends GutTest
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
+const APRICORN_RED: int = 0x55
+const APRICORN_BLU: int = 0x59
+
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
 
@@ -23,13 +26,13 @@ func after_each() -> void:
 	RomCache.clear(Fixture.directory())
 
 
-func _open_world() -> void:
+func _open_world(items: Dictionary = {7: 1}) -> void:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
 	_world_screen.map_number = Fixture.MAP_NUMBER
 	_world_screen.start_cell = Vector2i(7, 6)
-	var state := Gen2WorldState.new({}, {}, {7: 1}, {0: 500})
+	var state := Gen2WorldState.new({}, {}, items, {0: 500})
 	var world := Gen2WorldAPI.open(
 		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6), state
 	)
@@ -393,6 +396,53 @@ func _write_phone_request() -> void:
 
 func _write_audio_request() -> void:
 	_write_request_script([0x7F, 0x00, 0x40, 0x91], 0x6320)
+
+
+func _write_apricorn_request() -> void:
+	_write_request_script([
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_SELECT_APRICORN_FOR_KURT, 0x00,
+		Gen2WorldScript.END,
+	], 0x6320)
+
+
+func test_apricorn_overlay_gives_kurt_the_chosen_quantity_and_resumes() -> void:
+	_write_apricorn_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world({APRICORN_RED: 4, APRICORN_BLU: 2})
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._title.text, "APRICORNS")
+	assert_true(host.handle_button(Gen2Button.DOWN))
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_true(host.handle_button(Gen2Button.UP))
+	assert_true(host.handle_button(Gen2Button.A))
+	await get_tree().process_frame
+
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+	assert_eq(_world_screen._world.state.item_quantity(APRICORN_BLU), 0)
+	assert_eq(_world_screen._world.state.item_quantity(APRICORN_RED), 4)
+	assert_eq(_world_screen._world.state.kurt_apricorn_quantity(), 2)
+
+
+func test_apricorn_overlay_cancel_takes_nothing_and_resumes() -> void:
+	_write_apricorn_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world({APRICORN_RED: 4})
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_true(host.handle_button(Gen2Button.B))
+	await get_tree().process_frame
+
+	assert_null(_world_screen._service_host)
+	assert_false(_world_screen._world.script_input_waiting())
+	assert_eq(_world_screen._world.state.item_quantity(APRICORN_RED), 4)
+	assert_eq(_world_screen._world.state.kurt_apricorn_quantity(), 0)
 
 
 func _write_request_script(script: Array, address: int) -> void:

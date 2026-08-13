@@ -179,6 +179,31 @@ func test_reset_daily_flags_clears_the_matching_profiles_merchant_flag_only() ->
 	assert_false(gold_state.bargain_merchant_closed(false))
 
 
+## CheckDailyResetTimer zeroes the whole wDailyFlags1 byte, so Kurt's flag goes
+## with the merchant's. Without it he never finishes a ball.
+func test_reset_daily_flags_clears_kurts_flag_on_both_profiles() -> void:
+	for crystal: bool in [true, false]:
+		var state := Gen2WorldState.new()
+		var flag: int = Gen2WorldState.engine_flag(
+			Gen2WorldState.ENGINE_KURT_MAKING_BALLS, crystal
+		)
+		state.set_engine_flag(flag)
+		assert_false(state.reset_daily_flags(not crystal))
+		assert_true(state.is_engine_flag_active(flag))
+		assert_true(state.reset_daily_flags(crystal))
+		assert_false(state.is_engine_flag_active(flag))
+
+
+func test_the_saved_kurt_quantity_survives_a_snapshot_round_trip() -> void:
+	var state := Gen2WorldState.new()
+	state.set_kurt_apricorn_quantity(7)
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.kurt_apricorn_quantity(), 7)
+	## Absent in a state written before the errand existed, and zero is what a
+	## fresh SelectApricornForKurt writes anyway.
+	assert_eq(Gen2WorldState.from_dict({}).kurt_apricorn_quantity(), 0)
+
+
 ## Gen2WorldState.is_crystal_profile mirrors
 ## Gen2WorldScriptRunner._crystal_commands(): only a verified Gold or Silver
 ## cache is treated as the shorter engine flag table.

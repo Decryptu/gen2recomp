@@ -43,6 +43,10 @@ const ENGINE_ROCKETS_IN_RADIO_TOWER: int = 19
 const ENGINE_ROCKETS_IN_RADIO_TOWER_GOLD_SILVER: int = 18
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
+## The first entry in the same `wDailyFlags1` byte. `KurtsHouse.asm` sets it
+## when the apricorns are handed over and reads it to decide whether the ball is
+## ready, so the day boundary is the whole of the errand's wait.
+const ENGINE_KURT_MAKING_BALLS: int = 80
 
 ## wBikeFlags' BIKEFLAGS_STRENGTH_ACTIVE_F, three engine flags ahead of the badge
 ## section and so profile split the same way. Nothing in the pinned engine/ or
@@ -127,6 +131,10 @@ var _last_dex_mode: int = RomLayout.DEXMODE_NEW
 ## wDecoBed, wDecoCarpet, wDecoPlant and wDecoPoster. Values are decoration
 ## ids from data/decorations/decorations.asm, not the blocks they stamp.
 var _maptile_decorations: Dictionary = {}
+## `wKurtApricornQuantity`. Saved player data, not scratch: `SelectApricornForKurt`
+## writes it and `VAR_KURT_APRICORNS` is read a day later, by a different script
+## invocation, to size the balls Kurt hands back.
+var _kurt_apricorn_quantity: int = 0
 
 
 func _init(
@@ -222,6 +230,7 @@ func to_dict() -> Dictionary:
 		"radio_channel": _radio_channel,
 		"last_dex_mode": _last_dex_mode,
 		"maptile_decorations": _maptile_decorations.duplicate(),
+		"kurt_apricorn_quantity": _kurt_apricorn_quantity,
 	}
 
 
@@ -259,6 +268,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	restored.set_radio_knob(int(source.get("radio_knob", Gen2WorldRadio.KNOB_MIN)))
 	restored._radio_channel = int(source.get("radio_channel", -1))
 	restored.set_last_dex_mode(int(source.get("last_dex_mode", RomLayout.DEXMODE_NEW)))
+	restored.set_kurt_apricorn_quantity(int(source.get("kurt_apricorn_quantity", 0)))
 	return restored
 
 
@@ -292,6 +302,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_radio_channel = restored._radio_channel
 	_last_dex_mode = restored._last_dex_mode
 	_maptile_decorations = restored._maptile_decorations.duplicate()
+	_kurt_apricorn_quantity = restored._kurt_apricorn_quantity
 	changed.emit()
 
 
@@ -387,7 +398,9 @@ func set_hall_of_fame(active: bool = true) -> void:
 ## numbers were written against; pass [method is_crystal_profile] with the
 ## active GameData. Defaults to Crystal, matching every existing caller.
 func bargain_merchant_closed(crystal: bool = true) -> bool:
-	return is_engine_flag_active(_merchant_closed_flag(crystal))
+	return is_engine_flag_active(
+		engine_flag(ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED, crystal)
+	)
 
 
 ## The engine flag one badge occupies on the table [param crystal] selects,
@@ -441,9 +454,21 @@ func badge_mask(crystal: bool = true) -> int:
 
 ## Clears only source daily engine flags. Story flags such as Hall of Fame
 ## survive the day boundary.
+##
+## `CheckDailyResetTimer` (`engine/overworld/time.asm`) zeroes the whole
+## `wDailyFlags1` byte, so every flag in it goes together. Listed by Crystal
+## index because only the ones this project writes are modelled; add a flag
+## here as soon as something sets it, or it survives the day the cartridge
+## clears it on.
+const DAILY_ENGINE_FLAGS: Array[int] = [
+	ENGINE_KURT_MAKING_BALLS, ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED,
+]
+
+
 func reset_daily_flags(crystal: bool = true) -> bool:
 	var did_change: bool = false
-	for flag: int in [_merchant_closed_flag(crystal)]:
+	for crystal_index: int in DAILY_ENGINE_FLAGS:
+		var flag: int = engine_flag(crystal_index, crystal)
 		if not _engine_flags.has(flag):
 			continue
 		_engine_flags.erase(flag)
@@ -451,11 +476,6 @@ func reset_daily_flags(crystal: bool = true) -> bool:
 	if did_change:
 		changed.emit()
 	return did_change
-
-
-func _merchant_closed_flag(crystal: bool) -> int:
-	return ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED if crystal \
-		else ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER
 
 
 ## True unless [param data] is a verified Gold or Silver cache, matching
@@ -678,6 +698,18 @@ func set_repel_steps(steps: int) -> void:
 	if next_steps == _repel_steps:
 		return
 	_repel_steps = next_steps
+	changed.emit()
+
+
+func kurt_apricorn_quantity() -> int:
+	return _kurt_apricorn_quantity
+
+
+func set_kurt_apricorn_quantity(quantity: int) -> void:
+	var next_quantity: int = clampi(quantity, 0, 0xFF)
+	if next_quantity == _kurt_apricorn_quantity:
+		return
+	_kurt_apricorn_quantity = next_quantity
 	changed.emit()
 
 
@@ -957,6 +989,11 @@ func apply_changes(
 	var next_repel_steps: int = int(runtime_changes.get("repel_steps", _repel_steps))
 	if next_repel_steps < 0:
 		return {"ok": false, "reason": &"invalid_repel_steps"}
+	var next_kurt_apricorns: int = int(
+		runtime_changes.get("kurt_apricorn_quantity", _kurt_apricorn_quantity)
+	)
+	if next_kurt_apricorns < 0 or next_kurt_apricorns > 0xFF:
+		return {"ok": false, "reason": &"invalid_kurt_apricorn_quantity"}
 	var seen_changes: Dictionary = runtime_changes.get("seen_species", {})
 	if not seen_changes is Dictionary:
 		return {"ok": false, "reason": &"invalid_seen_species"}
@@ -1059,7 +1096,8 @@ func apply_changes(
 		or next_receive_cycle != _phone_receive_cycle \
 		or next_receive_minutes != _phone_receive_minutes \
 		or next_special_phone_call != _pending_special_phone_call \
-		or next_script_memory != _script_memory
+		or next_script_memory != _script_memory \
+		or next_kurt_apricorns != _kurt_apricorn_quantity
 	_event_flags = next_flags
 	_engine_flags = next_engine_flags
 	_map_scenes = next_scenes
@@ -1077,6 +1115,7 @@ func apply_changes(
 	_phone_receive_minutes = next_receive_minutes
 	_pending_special_phone_call = next_special_phone_call
 	_script_memory = next_script_memory
+	_kurt_apricorn_quantity = next_kurt_apricorns
 	if did_change:
 		changed.emit()
 	return {"ok": true, "changed": did_change}
