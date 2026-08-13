@@ -44,11 +44,17 @@ func _open(button: int) -> Gen2BindingSheet:
 	return _sheet()
 
 
-func _key(code: int) -> InputEventKey:
+func _key(code: int, pressed: bool = true) -> InputEventKey:
 	var event := InputEventKey.new()
 	event.physical_keycode = code
-	event.pressed = true
+	event.pressed = pressed
 	return event
+
+
+## A capture reads the press and binds on the release, so a tap is both.
+func _tap(sheet: Gen2BindingSheet, code: int) -> void:
+	sheet._unhandled_input(_key(code))
+	sheet._unhandled_input(_key(code, false))
 
 
 func test_a_binding_reads_as_keys_then_pad() -> void:
@@ -71,7 +77,7 @@ func test_capturing_a_key_adds_it_to_the_button() -> void:
 	var before: int = (_options.controls[Gen2Button.B] as Array).size()
 	var sheet: Gen2BindingSheet = await _open(Gen2Button.B)
 	sheet._start_capture()
-	sheet._unhandled_input(_key(KEY_F7))
+	_tap(sheet, KEY_F7)
 
 	var bindings: Array = _options.controls[Gen2Button.B]
 	assert_eq(bindings.size(), before + 1)
@@ -97,7 +103,7 @@ func test_binding_the_same_thing_twice_changes_nothing() -> void:
 	var before: Array = (_options.controls[Gen2Button.A] as Array).duplicate(true)
 
 	sheet._start_capture()
-	sheet._unhandled_input(_key(KEY_Z))
+	_tap(sheet, KEY_Z)
 
 	assert_eq(_options.controls[Gen2Button.A], before)
 
@@ -106,12 +112,72 @@ func test_binding_the_same_thing_twice_changes_nothing() -> void:
 func test_a_binding_already_on_another_button_is_reported_not_refused() -> void:
 	var sheet: Gen2BindingSheet = await _open(Gen2Button.B)
 	sheet._start_capture()
-	sheet._unhandled_input(_key(KEY_SPACE))
+	_tap(sheet, KEY_SPACE)
 
 	assert_true((_options.controls[Gen2Button.B] as Array).has(
 		{"kind": Gen2InputActions.KIND_KEY, "code": KEY_SPACE}
 	))
 	assert_string_contains(sheet.get("_prompt").text, Gen2Button.label(Gen2Button.A))
+
+
+## A player on a pad alone used to have no way out of a capture: every button
+## they pressed became the binding, and only a mouse or a finger could close the
+## sheet. Holding one past the threshold closes it and binds nothing.
+func test_holding_a_button_cancels_the_capture_instead_of_binding_it() -> void:
+	var sheet: Gen2BindingSheet = await _open(Gen2Button.B)
+	var before: Array = (_options.controls[Gen2Button.B] as Array).duplicate(true)
+	sheet._start_capture()
+	sheet._unhandled_input(_key(KEY_F8))
+	assert_false(sheet.get("_pending").is_empty(), "the press is held, not bound")
+
+	sheet.set("_pending_since", Time.get_ticks_msec() - Gen2BindingSheet.HOLD_CANCEL_MSEC)
+	sheet._process(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_eq(_options.controls[Gen2Button.B], before, "nothing was bound")
+	assert_null(_sheet(), "and the sheet closed")
+
+
+## A release that is not the held one is not the end of the capture: letting go
+## of a modifier still leaves the key it was pressed with waiting.
+func test_a_release_of_something_else_does_not_finish_the_capture() -> void:
+	var sheet: Gen2BindingSheet = await _open(Gen2Button.B)
+	var before: int = (_options.controls[Gen2Button.B] as Array).size()
+	sheet._start_capture()
+	sheet._unhandled_input(_key(KEY_F9))
+	sheet._unhandled_input(_key(KEY_F10, false))
+	assert_eq((_options.controls[Gen2Button.B] as Array).size(), before)
+
+	sheet._unhandled_input(_key(KEY_F9, false))
+	assert_eq((_options.controls[Gen2Button.B] as Array).size(), before + 1)
+
+
+## A stick has no release event: it falls back inside the same deadzone that
+## stopped it being read as a binding on the way out.
+func test_a_stick_binds_when_it_returns_to_centre() -> void:
+	var sheet: Gen2BindingSheet = await _open(Gen2Button.LEFT)
+	var before: int = (_options.controls[Gen2Button.LEFT] as Array).size()
+	sheet._start_capture()
+	## The right stick, since the left one is already on this button by default
+	## and a binding the button already has is reported rather than added twice.
+	sheet._unhandled_input(_motion(JOY_AXIS_RIGHT_X, -1.0))
+	assert_eq((_options.controls[Gen2Button.LEFT] as Array).size(), before)
+
+	sheet._unhandled_input(_motion(JOY_AXIS_RIGHT_X, 0.0))
+	var bindings: Array = _options.controls[Gen2Button.LEFT]
+	assert_eq(bindings.size(), before + 1)
+	assert_eq(bindings.back(), {
+		"kind": Gen2InputActions.KIND_PAD_AXIS,
+		"code": int(JOY_AXIS_RIGHT_X), "sign": -1,
+	})
+
+
+func _motion(axis: int, value: float) -> InputEventJoypadMotion:
+	var event := InputEventJoypadMotion.new()
+	event.axis = axis
+	event.axis_value = value
+	return event
 
 
 func test_a_binding_can_be_removed_but_never_the_last_one() -> void:

@@ -296,6 +296,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not presents["ok"]:
 		return presents
 
+	var menu_text: Dictionary = verify_menu_text(rom, layout)
+	if not menu_text["ok"]:
+		return menu_text
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -681,6 +685,95 @@ const INTRO_TEXT_OPENINGS: Dictionary = {
 	"oak_7": [1, ", are you"],
 	INTRO_TEXT_GENDER: [0, "Are you a boy?"],
 }
+
+
+## What each pack text opens with once its `text` macro byte is past. Short
+## anchors, the way the intro texts are anchored.
+const PACK_TEXT_OPENINGS: Dictionary = {
+	"oak_no_time": "OAK:",
+	"no_mon": "You don't have a",
+	"toss_ask": "Throw away how",
+	"toss_ask_quantity": "Throw away ",
+	"toss_threw": "Threw away",
+}
+## The first and last of `.PokedexDesc` through `.QuitDesc`, which is what says a
+## nine-string run is that run and not another one in the same bank. As decoded
+## rather than as written: `#MON` is the charmap's own ligature and comes back
+## out spelled.
+const MENU_DESCRIPTION_FIRST: String = "POKéMON\ndatabase"
+const MENU_DESCRIPTION_LAST: String = "Quit and\nbe judged."
+
+
+## The start menu's description run and the pack's five texts.
+##
+## The run is checked by content at both ends and by shape in between: nine
+## strings, each terminated inside its own bound, which no neighbouring text run
+## in the bank satisfies with those two at the ends. The five texts are checked
+## the way the intro texts are, by the `text` macro byte and the words after it.
+static func verify_menu_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("menu_text", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No menu text on this cartridge."}
+	var descriptions: Array[String] = read_menu_descriptions(rom, layout)
+	if descriptions.size() != RomLayout.MENU_DESCRIPTION_COUNT:
+		return {
+			"ok": false,
+			"message": "The start menu descriptions read %d of %d strings." % [
+				descriptions.size(), RomLayout.MENU_DESCRIPTION_COUNT,
+			],
+		}
+	if descriptions[0] != MENU_DESCRIPTION_FIRST:
+		return {
+			"ok": false,
+			"message": "The first start menu description is \"%s\"." % descriptions[0],
+		}
+	if descriptions[descriptions.size() - 1] != MENU_DESCRIPTION_LAST:
+		return {
+			"ok": false,
+			"message": "The last start menu description is \"%s\"." % descriptions[
+				descriptions.size() - 1
+			],
+		}
+	for key: String in PACK_TEXT_OPENINGS:
+		var at: int = int(entry.get(key, -1))
+		if at < 0 or not rom.in_bounds(at, RomLayout.PACK_TEXT_MAX_BYTES):
+			return {"ok": false, "message": "Pack text %s is outside the cartridge." % key}
+		if rom.u8(at) != TEXT_MACRO_START:
+			return {
+				"ok": false,
+				"message": "Pack text %s does not open with the text macro." % key,
+			}
+		var decoded: Dictionary = Gen2WorldScript.decode_text(
+			rom.slice(at, RomLayout.PACK_TEXT_MAX_BYTES)
+		)
+		if not bool(decoded.get("ok", false)):
+			return {"ok": false, "message": "Pack text %s did not decode." % key}
+		if not String(decoded["text"]).begins_with(String(PACK_TEXT_OPENINGS[key])):
+			return {
+				"ok": false,
+				"message": "Pack text %s reads \"%s\"." % [key, decoded["text"]],
+			}
+	return {"ok": true, "message": "Menu text verified."}
+
+
+## The nine descriptions at the layout's own offset, in the order the source
+## defines them. Short when a string runs past its bound, which is what a wrong
+## offset produces.
+static func read_menu_descriptions(rom: RomFile, layout: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	var at: int = int((layout.get("menu_text", {}) as Dictionary).get("descriptions", -1))
+	if at < 0:
+		return out
+	var data: PackedByteArray = rom.bytes()
+	for _index: int in RomLayout.MENU_DESCRIPTION_COUNT:
+		if not rom.in_bounds(at, 1):
+			return []
+		var end: int = Gen2Text.terminated_end(data, at, RomLayout.MENU_DESCRIPTION_MAX)
+		if end <= at or end - at >= RomLayout.MENU_DESCRIPTION_MAX:
+			return []
+		out.append(Gen2Text.decode(data, at, end - at))
+		at = end
+	return out
 
 
 ## data/text/name_input_chars.asm. Nothing in the block identifies itself, so it
@@ -2253,6 +2346,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
+		"menu_text": _import_menu_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
@@ -2767,6 +2861,30 @@ func _import_gender_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
 	var out: Array = []
 	for index: int in RomLayout.GENDER_SCREEN_PALETTE_COLORS:
 		out.append(rom.u16le(entry + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
+## The start menu's nine descriptions, keyed by the menu item each belongs to,
+## and the pack's five texts. A text's unfilled slots stay as
+## [Gen2TextStream]'s own markers: the quantity and the item name are only known
+## while the box is up.
+func _import_menu_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("menu_text", {})
+	if entry.is_empty():
+		return {}
+	var out: Dictionary = {}
+	var descriptions: Dictionary = {}
+	var read: Array[String] = read_menu_descriptions(rom, layout)
+	for index: int in read.size():
+		descriptions[String(RomLayout.MENU_DESCRIPTION_ORDER[index])] = read[index]
+	out["descriptions"] = descriptions
+	for key: String in PACK_TEXT_OPENINGS:
+		var decoded: Dictionary = Gen2WorldScript.decode_text(
+			rom.slice(int(entry[key]), RomLayout.PACK_TEXT_MAX_BYTES)
+		)
+		if not bool(decoded.get("ok", false)):
+			return {}
+		out[key] = String(decoded["text"])
 	return out
 
 

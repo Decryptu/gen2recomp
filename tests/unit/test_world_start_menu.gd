@@ -101,6 +101,16 @@ func test_cursor_persists_across_a_rebuild_and_clamps_to_a_shrunk_list() -> void
 	assert_lt(shrunk.cursor, shrunk.size())
 
 
+## `.MenuDesc`'s own strings come out of the cache, so a menu built by hand has
+## none: an entry with no imported line answers empty rather than one this
+## project wrote.
+func test_a_menu_built_without_a_cache_has_no_descriptions() -> void:
+	var menu := Gen2WorldStartMenu.build(1, true, true)
+	for entry: Dictionary in menu.items():
+		assert_eq(menu.description(StringName(entry["kind"])), "")
+	assert_eq(menu.selected_description(), "")
+
+
 func test_moving_an_empty_menu_does_nothing() -> void:
 	var menu := Gen2WorldStartMenu.new()
 	assert_false(menu.move(1))

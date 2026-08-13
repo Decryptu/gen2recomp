@@ -141,6 +141,48 @@ func test_pack_lists_a_granted_item() -> void:
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
 
+## MENU ACCOUNT is `.IsMenuAccountOn`, and what it gates is `.MenuDesc`: the
+## highlighted entry's own line under the list. It is read on every cursor move,
+## so turning it off in OPTION takes the box away without reopening the menu.
+func test_menu_account_draws_the_entry_description_and_off_takes_it_away() -> void:
+	await _open_world()
+	var options: Gen2Options = Gen2OptionsStore.current()
+	options.menu_account = true
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	var menu: Gen2WorldStartMenu = host.get("_menu")
+	assert_eq(host.get("_status").text, menu.selected_description())
+	assert_ne(host.get("_status").text, "")
+
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq(host.get("_status").text, menu.selected_description())
+
+	options.menu_account = false
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq(host.get("_status").text, "", "the box is gone")
+
+
+## The pack's wording is the cartridge's, read out of the cache rather than
+## written here. `Pack_GetItemName` fills the name slot and the dial owns the
+## number, so both markers are gone by the time a box is drawn.
+func test_the_toss_boxes_read_the_cartridges_own_words() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 5}})
+	var host: Gen2StartMenuScreen = await _open_pack()
+	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
+	assert_eq(host.get("_status").text, "Throw away how many?")
+
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_summary").text, "Throw away 5 POTION(S)?")
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(String(host.get("_pack_result")), "Threw away POTION(S).")
+	for marker: String in [Gen2TextStream.RAM_MARKER, Gen2TextStream.NUMBER_MARKER]:
+		assert_eq(String(host.get("_pack_result")).find(marker), -1, marker)
+
+
 ## `TossMenu`: the ask, `SelectQuantityToToss`'s dial, a yes/no and `TossItem`.
 ## The item submenu is already closed by the time it runs, so every way out of it
 ## lands back on the pocket list.
@@ -695,7 +737,10 @@ func test_an_item_with_no_field_menu_reports_oaks_refusal() -> void:
 	# CANT_TOSS with CANT_SELECT clear is MenuHeader_UnusableKeyItem: USE stays.
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
-	assert_eq(String(host.get("_pack_result")), Gen2StartMenuScreen.OAK_TEXT)
+	assert_eq(String(host.get("_pack_result")), host._pack_text(
+		Gen2StartMenuScreen.TEXT_OAK
+	))
+	assert_string_contains(String(host.get("_pack_result")), "isn't the")
 	assert_eq(_world_screen._world.state.item_quantity(7), 1)
 
 

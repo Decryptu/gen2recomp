@@ -257,15 +257,11 @@ func _render_submenu() -> void:
 
 
 func _resolve_data() -> GameData:
-	if GameRuntime.has_selected_game():
-		return GameRuntime.selected_data()
-	return GameData.open_any()
+	return Gen2GameRuntime.data_or_any()
 
 
 func _resolve_save() -> Gen2SaveData:
-	if _data == null or not GameRuntime.has_selected_save_slot():
-		return null
-	return GameRuntime.selected_save()
+	return Gen2GameRuntime.selected_save_or_null() if _data != null else null
 
 
 func _build_ui() -> void:
@@ -444,9 +440,7 @@ func _status_color(status: int) -> Color:
 func _start_battle() -> void:
 	if _data == null or _save == null:
 		return
-	if not GameRuntime.select_save_slot(_data.id, _save.slot):
-		_status.text = "The selected cartridge is not in the registry."
-		_status.add_theme_color_override("font_color", ERROR)
+	if not _select_slot():
 		return
 	get_tree().change_scene_to_file.call_deferred("res://game/battle/battle_screen.tscn")
 
@@ -469,11 +463,21 @@ func _open_storage() -> void:
 		_status.text = "No validated save selected."
 		_status.add_theme_color_override("font_color", ERROR)
 		return
-	if not GameRuntime.select_save_slot(_data.id, _save.slot):
-		_status.text = "The selected cartridge is not in the registry."
-		_status.add_theme_color_override("font_color", ERROR)
+	if not _select_slot():
 		return
 	get_tree().change_scene_to_file.call_deferred("res://game/save/box_screen.tscn")
+
+
+## Hands the slot to the runtime before changing scene, so the screen that opens
+## next reads the same save this one is showing. False with the refusal already
+## on screen when there is no runtime or the cartridge is not in the registry.
+func _select_slot() -> bool:
+	var runtime: Gen2GameRuntime = Gen2GameRuntime.instance()
+	if runtime != null and runtime.select_save_slot(_data.id, _save.slot):
+		return true
+	_status.text = "The selected cartridge is not in the registry."
+	_status.add_theme_color_override("font_color", ERROR)
+	return false
 
 
 func _button(text: String, colour: Color) -> Button:
