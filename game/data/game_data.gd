@@ -54,6 +54,7 @@ var _copyright_string: Array = []
 var _copyright_palette: Array = []
 var _text_bg_palette: Array = []
 var _presents_palettes: Dictionary = {}
+var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -121,6 +122,8 @@ static func open_directory(path: String) -> GameData:
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
 	var presents_palettes: Variant = manifest.get("presents_palettes", {})
 	data._presents_palettes = presents_palettes if presents_palettes is Dictionary else {}
+	var menu_text: Variant = manifest.get("menu_text", {})
+	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -1047,6 +1050,24 @@ func copyright_palette() -> PackedColorArray:
 	for packed: Variant in _copyright_palette:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
+
+
+## One of the pack's five texts (`oak_no_time`, `no_mon`, `toss_ask`,
+## `toss_ask_quantity`, `toss_threw`), still carrying [Gen2TextStream]'s markers
+## for the quantity and the item name. Empty on a cache imported before them,
+## which is the caller's cue to use its own wording.
+func menu_text(key: String) -> String:
+	return String(_menu_text.get(key, ""))
+
+
+## `.MenuDesc`'s line for one start-menu item, by the item's own kind. Empty for
+## an item the cartridge has no description for, and for every item on a cache
+## imported before the run was.
+func menu_description(kind: StringName) -> String:
+	var descriptions: Variant = _menu_text.get("descriptions", {})
+	if not descriptions is Dictionary:
+		return ""
+	return String((descriptions as Dictionary).get(String(kind), ""))
 
 
 ## One of the splash's object palettes: `object` is

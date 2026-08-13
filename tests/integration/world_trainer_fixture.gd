@@ -50,6 +50,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_overworld_graphics(directory)
 	_write_battle_graphics(directory, manifest)
 	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
+	_write_menu_text(manifest)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
 	manifest["game_id"] = String(game_id)
@@ -299,6 +300,30 @@ static func _write_overworld_graphics(directory: String) -> void:
 	sprite.resize(4 * Gen2Tiles.TILE_PIXELS)
 	sprite.fill(1)
 	RomCache.write_indices(RomCache.overworld_sprite_path(directory, TRAINER_SPRITE), sprite)
+
+
+## The start menu's nine descriptions and the pack's five texts, as the cartridge
+## words them. The two toss texts keep [Gen2TextStream]'s markers, since what
+## fills them is only known while the box is up.
+static func _write_menu_text(manifest: Dictionary) -> void:
+	manifest["menu_text"] = {
+		"descriptions": {
+			"pokedex": "POKéMON\ndatabase",
+			"pokemon": "Party PKMN\nstatus",
+			"pack": "Contains\nitems",
+			"pokegear": "Trainer's\nkey device",
+			"player": "Your own\nstatus",
+			"save": "Save your\nprogress",
+			"option": "Change\nsettings",
+			"exit": "Close this\nmenu",
+			"quit": "Quit and\nbe judged.",
+		},
+		"oak_no_time": "OAK: <PLAYER>!\nThis isn't the\ntime to use that!",
+		"no_mon": "You don't have a\nPOKéMON!",
+		"toss_ask": "Throw away how\nmany?",
+		"toss_ask_quantity": "Throw away <NUM_D009>\n<RAM_CF7E>(S)?",
+		"toss_threw": "Threw away\n<RAM_CF7E>(S).",
+	}
 
 
 ## `GameFreakLogoGFX` and whichever object sheet the profile carries, as flat

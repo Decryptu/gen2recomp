@@ -573,6 +573,24 @@ const PRESENTS_DITTO_FADE_COLORS: int = 16
 ## `PREDEFPAL_GAMEFREAK_LOGO_BG`, which is the copyright screen's own palette.
 const PRESENTS_OBJECT_PALETTE_COLORS: int = 4
 
+## `engine/menus/start_menu.asm`'s `.PokedexDesc` through `.QuitDesc`, one
+## contiguous run of `PlaceString` strings in the order they are defined, which
+## is not the order `.Items` lists them in. MENU ACCOUNT is what draws one.
+const MENU_DESCRIPTION_COUNT: int = 9
+## Long enough for the longest ("Trainer's key device"); a run that reaches it
+## has not found its terminator and is not the table.
+const MENU_DESCRIPTION_MAX: int = 64
+## The order the strings are laid out in, as the start menu's own item kinds.
+## `quit` is the Bug Contest's, which this project never shows.
+const MENU_DESCRIPTION_ORDER: Array[StringName] = [
+	&"pokedex", &"pokemon", &"pack", &"pokegear", &"player", &"save", &"option",
+	&"exit", &"quit",
+]
+
+## `data/text/common_2.asm`'s pack texts, each a `text_far` target the way the
+## intro texts are: `UseItem`'s two refusals and `TossMenu`'s three.
+const PACK_TEXT_MAX_BYTES: int = 256
+
 ## `gfx/font/bg_text.pal`, PAL_BG_TEXT. Stored whole rather than as a pair: a
 ## palette fade over a text box passes through its two middle colours even
 ## though a 1bpp glyph never draws them.
@@ -958,6 +976,19 @@ const GOLD_SILVER: Dictionary = {
 	## Nested the way the trainer card is, so the -1 for what Gold and Silver do
 	## not ship stays out of the flat offset checks. `_OakText3` is a bare
 	## `text_promptbutton` and carries no words, so it has no offset here.
+	# `engine/menus/start_menu.asm`'s description run and `data/text/common_2.asm`'s
+	# five pack texts, all located by encoding what the source says they read and
+	# matching the bytes. Each hits once per dump except the two refusals, which
+	# the cartridge also keeps a copy of elsewhere; the common_2 copy is the one
+	# beside the toss texts, which is what the offsets below are.
+	"menu_text": {
+		"descriptions": 0x12B15,
+		"oak_no_time": 0x1945B2,
+		"no_mon": 0x1945DB,
+		"toss_ask": 0x194569,
+		"toss_ask_quantity": 0x19457F,
+		"toss_threw": 0x19459C,
+	},
 	"intro_text": {
 		"oak_1": 0x195624,
 		"oak_2": 0x195693,
@@ -1194,6 +1225,15 @@ const CRYSTAL: Dictionary = {
 	## See the Gold and Silver block above. Crystal moves `_OakText6` and
 	## `_OakText7` out of the run the other four sit in, so the six are located
 	## one by one rather than walked.
+	# See the Gold and Silver block above for how these were located.
+	"menu_text": {
+		"descriptions": 0x1274E,
+		"oak_no_time": 0x1C0BEE,
+		"no_mon": 0x1C0C17,
+		"toss_ask": 0x1C0BA5,
+		"toss_ask_quantity": 0x1C0BBB,
+		"toss_threw": 0x1C0BD8,
+	},
 	"intro_text": {
 		"oak_1": 0x1C1D35,
 		"oak_2": 0x1C1DA4,

@@ -24,14 +24,25 @@ enum Mode {
 	PACK_RESULT, SAVE_CONFIRM, OPTIONS, MODS, MOD_OPTIONS,
 }
 
-## engine/items/pack.asm's own refusal texts, verbatim from data/text/common_2.asm,
-## and `TossMenu`'s own three. "(S)" is three literal characters in the charmap,
-## not a plural rule, so the cartridge really does say "POTION(S)".
-const OAK_TEXT: String = "OAK: This isn't the time to use that!"
-const NO_MON_TEXT: String = "You don't have a #MON!"
-const ASK_THROW_AWAY_TEXT: String = "Throw away how many?"
-const ASK_QUANTITY_THROW_AWAY_TEXT: String = "Throw away %d %s(S)?"
-const THREW_AWAY_TEXT: String = "Threw away %s(S)."
+## The pack's five imported texts, by the key `GameData.menu_text` holds each
+## under. `UseItem`'s two refusals and `TossMenu`'s three; "(S)" is three literal
+## characters in the charmap rather than a plural rule, so the cartridge really
+## does say "POTION(S)".
+const TEXT_OAK: String = "oak_no_time"
+const TEXT_NO_MON: String = "no_mon"
+const TEXT_TOSS_ASK: String = "toss_ask"
+const TEXT_TOSS_ASK_QUANTITY: String = "toss_ask_quantity"
+const TEXT_TOSS_THREW: String = "toss_threw"
+
+## What each reads on a cache imported before the texts were, which is the only
+## way any of these is ever seen. Verbatim from data/text/common_2.asm.
+const TEXT_FALLBACKS: Dictionary = {
+	TEXT_OAK: "OAK: <PLAYER>!\nThis isn't the\ntime to use that!",
+	TEXT_NO_MON: "You don't have a\nPOKéMON!",
+	TEXT_TOSS_ASK: "Throw away how\nmany?",
+	TEXT_TOSS_ASK_QUANTITY: "Throw away <NUM_>\n<RAM_>(S)?",
+	TEXT_TOSS_THREW: "Threw away\n<RAM_>(S).",
+}
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -609,13 +620,13 @@ func _confirm_use() -> void:
 	match Gen2WorldPack.field_use_kind(_data, number):
 		Gen2WorldPack.ITEMMENU_PARTY:
 			if _party_targets().is_empty():
-				_show_pack_result(NO_MON_TEXT, false)
+				_show_pack_result(_pack_text(TEXT_NO_MON), false)
 				return
 			_open_target_mode()
 		Gen2WorldPack.ITEMMENU_CURRENT, Gen2WorldPack.ITEMMENU_CLOSE:
 			_use_selected_item(-1)
 		_:
-			_show_pack_result(OAK_TEXT, false)
+			_show_pack_result(_pack_text(TEXT_OAK), false)
 
 
 ## `.Party`'s party list. Reads the same save the USE will be applied to, so a
@@ -646,7 +657,7 @@ func _party_targets() -> Array:
 func _open_teach_mode(item: int) -> void:
 	_teach_prompt = Gen2WorldTMHM.teach_prompt(_data, item)
 	if not bool(_teach_prompt.get("ok", false)):
-		_show_pack_result(OAK_TEXT, false)
+		_show_pack_result(_pack_text(TEXT_OAK), false)
 		return
 	_teaching = false
 	_teach_cursor = 0
@@ -671,7 +682,7 @@ func _confirm_teach() -> void:
 		_open_pack_mode(false)
 		return
 	if _party_targets().is_empty():
-		_show_pack_result(NO_MON_TEXT, false)
+		_show_pack_result(_pack_text(TEXT_NO_MON), false)
 		return
 	_teaching = true
 	_open_target_mode()
@@ -912,7 +923,7 @@ func _open_toss_quantity() -> void:
 func _render_toss_quantity() -> void:
 	_title.text = "TOSS"
 	_summary.text = String(_selected_item().get("name", ""))
-	_status.text = ASK_THROW_AWAY_TEXT
+	_status.text = _pack_text(TEXT_TOSS_ASK)
 	_status.add_theme_color_override("font_color", TEXT)
 	_render_options(
 		[_toss_prompt.value if _toss_prompt != null else 1], 0,
@@ -932,10 +943,11 @@ func _open_toss_confirm() -> void:
 
 func _render_toss_confirm() -> void:
 	_title.text = "TOSS"
-	_summary.text = ASK_QUANTITY_THROW_AWAY_TEXT % [
-		_toss_prompt.value if _toss_prompt != null else 1,
+	_summary.text = _fill_item_text(
+		_pack_text(TEXT_TOSS_ASK_QUANTITY),
 		String(_selected_item().get("name", "")),
-	]
+		_toss_prompt.value if _toss_prompt != null else 1
+	)
 	_status.text = ""
 	_render_options([{"label": "YES"}, {"label": "NO"}], _toss_confirm_cursor,
 		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
@@ -963,7 +975,9 @@ func _confirm_toss() -> void:
 	## The result box keeps whatever summary the mode before it left, and the
 	## question is not it: `ThrewAwayText` is printed under the item's own name.
 	_summary.text = String(result.get("name", ""))
-	_show_pack_result(THREW_AWAY_TEXT % String(result.get("name", "")), true)
+	_show_pack_result(
+		_fill_item_text(_pack_text(TEXT_TOSS_THREW), String(result.get("name", ""))), true
+	)
 
 
 ## The dial's own joypad read. Its cancel is `cp -1 / scf`, the same carry
@@ -981,6 +995,28 @@ func _press_toss_quantity(button: int) -> bool:
 		_:
 			_render_toss_quantity()
 	return true
+
+
+## One of the pack's own texts, imported when the cache carries it. The lines
+## are joined with a space: these boxes are window-resolution panels rather than
+## the hardware's own, and the source's breaks are where its box ended.
+func _pack_text(key: String) -> String:
+	var text: String = _data.menu_text(key) if _data != null else ""
+	if text.is_empty():
+		text = String(TEXT_FALLBACKS.get(key, ""))
+	return text.replace("\n", " ")
+
+
+## `Pack_GetItemName` fills wStringBuffer2 and the dial owns wItemQuantityChange,
+## so a text's one name slot and one number slot are these two. Filled by
+## position: the address inside a marker is the profile's own WRAM.
+func _fill_item_text(text: String, item_name: String, quantity: int = -1) -> String:
+	var out: String = text
+	if quantity >= 0:
+		out = Gen2TextStream.fill_marker(
+			out, Gen2TextStream.NUMBER_MARKER, str(quantity)
+		)
+	return Gen2TextStream.fill_marker(out, Gen2TextStream.RAM_MARKER, item_name)
 
 
 func _show_pack_result(message: String, ok: bool) -> void:

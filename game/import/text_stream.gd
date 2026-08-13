@@ -39,6 +39,12 @@ const TX_DAY: int = 0x15
 const TX_FAR: int = 0x16
 const TX_END: int = 0x50
 
+## What an unfilled slot in a decoded text opens with. A caller that knows the
+## value puts it in through [method fill_marker]; one that does not can at least
+## see that something belongs there.
+const RAM_MARKER: String = "<RAM_"
+const NUMBER_MARKER: String = "<NUM_"
+
 ## `TextSFX`: the seven command bytes that play an effect and `WaitSFX`.
 const TX_SOUND: Array[int] = [0x0B, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13]
 
@@ -161,7 +167,16 @@ static func _run(
 				prompt = true
 			TX_PAUSE:
 				pass
-			TX_BCD, TX_MOVE, TX_DECIMAL:
+			TX_DECIMAL:
+				# `text_decimal address, bytes, digits`: a number printed out of
+				# live RAM. Marked rather than skipped, the way TX_RAM is, so a
+				# caller that does know the value can put it in and one that does
+				# not can see that a number belongs there.
+				if not _has(data, at, 3):
+					return _truncated(out, &"truncated_text_command")
+				out += _decimal_string(context, data[at] | (data[at + 1] << 8))
+				at += 3
+			TX_BCD, TX_MOVE:
 				# Three bytes of operand each, and each prints from live RAM this
 				# project does not model. Skipped rather than drawn wrong.
 				if not _has(data, at, 3):
@@ -247,11 +262,31 @@ static func _name(context: Dictionary, key: String, fallback: String) -> String:
 	return value if not value.is_empty() else fallback
 
 
+## Replaces the first marker of [param prefix] in [param text] with
+## [param value]. The address inside a marker is the profile's own WRAM, so a
+## screen substitutes by position rather than by naming one.
+static func fill_marker(text: String, prefix: String, value: String) -> String:
+	var at: int = text.find(prefix)
+	if at < 0:
+		return text
+	var end: int = text.find(">", at)
+	if end < 0:
+		return text
+	return text.substr(0, at) + value + text.substr(end + 1)
+
+
 static func _ram_string(context: Dictionary, address: int) -> String:
 	var ram: Variant = context.get("ram", {})
 	if ram is Dictionary and (ram as Dictionary).has(address):
 		return String((ram as Dictionary)[address])
-	return "<RAM_%04X>" % address
+	return "%s%04X>" % [RAM_MARKER, address]
+
+
+static func _decimal_string(context: Dictionary, address: int) -> String:
+	var decimals: Variant = context.get("decimals", {})
+	if decimals is Dictionary and (decimals as Dictionary).has(address):
+		return String((decimals as Dictionary)[address])
+	return "%s%04X>" % [NUMBER_MARKER, address]
 
 
 static func _buffer_string(context: Dictionary, buffer: int) -> String:

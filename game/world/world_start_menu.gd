@@ -61,19 +61,9 @@ const SOURCE_ENTRIES: Array[Dictionary] = [
 ]
 
 ## `.Items`' third column, the one MENU ACCOUNT draws under the list
-## (`.MenuDesc`). Two lines in the source's own box, joined with a space here
-## because this list is not on the hardware tile grid. A mod's entry has none,
-## which is what the empty answer means.
-const SOURCE_DESCRIPTIONS: Dictionary = {
-	ITEM_POKEDEX: "#MON database",
-	ITEM_POKEMON: "Party #MON status",
-	ITEM_PACK: "Contains items",
-	ITEM_POKEGEAR: "Trainer's key device",
-	ITEM_PLAYER: "Your own status",
-	ITEM_SAVE: "Save your progress",
-	ITEM_OPTION: "Change settings",
-	ITEM_EXIT: "Close this menu",
-}
+## (`.MenuDesc`), as imported. A mod's entry has none, which is what the empty
+## answer means, and so does a cache imported before the run was.
+var _descriptions: Dictionary = {}
 
 var cursor: int = 0
 var _items: Array = []
@@ -121,12 +111,28 @@ static func from_world(world: Gen2WorldAPI, previous_cursor: int = 0) -> Gen2Wor
 	if world == null or world.state == null:
 		return Gen2WorldStartMenu.build(0, false, false, previous_cursor)
 	var party_count: int = int(world.party_summary().get("count", 0))
-	return Gen2WorldStartMenu.build(
+	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(
 		party_count,
 		world.state.is_engine_flag_active(ENGINE_POKEDEX),
 		world.state.is_engine_flag_active(ENGINE_POKEGEAR),
 		previous_cursor,
 	)
+	menu.load_descriptions(world.data)
+	return menu
+
+
+## `.MenuDesc`'s own strings, read out of the cache. Called by
+## [method from_world]; a menu built by hand has none and answers empty, which is
+## what a cache imported before the run does too.
+func load_descriptions(data: GameData) -> void:
+	_descriptions = {}
+	if data == null:
+		return
+	for entry: Dictionary in _items:
+		var kind: StringName = StringName(entry.get("kind", &""))
+		var text: String = data.menu_description(kind)
+		if not text.is_empty():
+			_descriptions[kind] = text.replace("\n", " ")
 
 
 static func _entry(kind: StringName, label: String, available: bool) -> Dictionary:
@@ -140,8 +146,8 @@ func items() -> Array:
 ## `.MenuDesc`'s line for one entry, empty for an entry the cartridge has none
 ## for. The caller decides whether to draw it: MENU ACCOUNT is what
 ## `.IsMenuAccountOn` reads, and it is an option rather than a rule.
-static func description(kind: StringName) -> String:
-	return String(SOURCE_DESCRIPTIONS.get(kind, ""))
+func description(kind: StringName) -> String:
+	return String(_descriptions.get(kind, ""))
 
 
 func selected_description() -> String:
