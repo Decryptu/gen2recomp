@@ -203,10 +203,16 @@ var _forget_cursor: int = 0
 var _forget_confirm_cursor: int = 0
 
 ## Where a switch has got to. [code]&"offer"[/code] is `OfferSwitch`'s
-## `PlaceYesNoBox` and [code]&"pick"[/code] the party menu
-## `SetUpBattlePartyMenu` puts up behind it, which Baton Pass opens straight
-## into. Empty when neither is on screen.
+## `PlaceYesNoBox`, [code]&"use_next"[/code] `AskUseNextPokemon`'s own box in the
+## same place, and [code]&"pick"[/code] the party menu `SetUpBattlePartyMenu`
+## puts up behind either, which Baton Pass and a replacement open straight into.
+## Empty when none of them is on screen.
 var _switch_stage: StringName = &""
+## Which question the list is answering: [code]&"offer"[/code] is `OfferSwitch`'s
+## YES, [code]&"baton_pass"[/code] the target `ForcePickSwitchMonInBattle` asks
+## for inside the move, and [code]&"replace"[/code] `ForcePlayerMonChoice` after
+## a faint. Only the first can be backed out of.
+var _switch_reason: StringName = &""
 var _switch_menu: Gen2BattleSwitchMenu = null
 ## The yes/no box's own cursor, which is a two-row `VerticalMenu`.
 var _switch_offer: Gen2WorldMenu = null
@@ -1160,6 +1166,7 @@ func battle_snapshot() -> Dictionary:
 			else (_switch_menu.cursor if _switch_menu != null else -1)
 		),
 		"switch_forced": _switch_menu != null and _switch_menu.forced,
+		"switch_reason": _switch_reason,
 		"capture_selecting": _capture_selecting,
 		"capture_waiting": _capture_waiting,
 		"capture_ball": _selected_capture_ball(),
@@ -1477,6 +1484,17 @@ func switch_player() -> void:
 		return
 	_pending = _battle.take_actions(Gen2Battle.switch_to(next), _enemy_action())
 	_show_next_event()
+
+
+## The development shortcut's own pick, with no menu in front of it. Every switch
+## the cartridge makes is either chosen from the party list or
+## [method Gen2Battle.replacement_target]'s.
+func _next_healthy(side: int) -> int:
+	var party: Gen2Party = _battle.party(side)
+	for index: int in party.size():
+		if party.can_send_out(index):
+			return index
+	return -1
 
 
 ## Opens LearnMove's full-slot branch, or keeps it open. Answered through
@@ -1826,7 +1844,7 @@ func _answer_baton_pass() -> bool:
 		return false
 	if side == Gen2Battle.PLAYER:
 		if _switch_stage == &"":
-			_open_switch_pick(true)
+			_open_switch_pick(&"baton_pass")
 		return true
 	var next: int = _battle.baton_pass_target(side)
 	if next < 0:
@@ -1870,22 +1888,35 @@ func _open_switch_offer() -> void:
 	var incoming: Gen2BattleMon = _battle.party(Gen2Battle.ENEMY).at(
 		_battle.awaiting_switch_offer()
 	)
-	show_message(Gen2BattleSwitchMenu.offer_text(
+	_open_yes_no(&"offer", Gen2BattleSwitchMenu.offer_text(
 		_enemy_label(), incoming.name_text() if incoming != null else "", _player_label()
 	))
+
+
+## `AskUseNextPokemon`'s question, over the box its own `lb bc, 1, 7` puts in the
+## same place `OfferSwitch`'s goes.
+func _open_use_next() -> void:
+	_open_yes_no(&"use_next", Gen2BattleSwitchMenu.use_next_text())
+
+
+func _open_yes_no(stage: StringName, question: String) -> void:
+	show_message(question)
 	_switch_offer = Gen2WorldMenu.new()
 	_switch_offer.options = YES_NO_OPTIONS.duplicate()
 	_switch_offer.flags = YES_NO_FLAGS
 	_switch_offer.rows = YES_NO_OPTIONS.size()
 	_switch_offer.cursor = 0
-	_switch_stage = &"offer"
+	_switch_stage = stage
 	_reopen_menu_layer()
 
 
-## `SetUpBattlePartyMenu` and the list behind it. [param forced] is the Baton
-## Pass variant, which cannot be backed out of.
-func _open_switch_pick(forced: bool) -> void:
-	_switch_menu = Gen2BattleSwitchMenu.for_party(_battle.party(Gen2Battle.PLAYER), forced)
+## `SetUpBattlePartyMenu` and the list behind it. [param reason] is which question
+## the row will answer; every one but `OfferSwitch`'s is a list with no way out.
+func _open_switch_pick(reason: StringName) -> void:
+	_switch_reason = reason
+	_switch_menu = Gen2BattleSwitchMenu.for_party(
+		_battle.party(Gen2Battle.PLAYER), reason != &"offer"
+	)
 	_switch_offer = null
 	_switch_stage = &"pick"
 	## The party menu is the whole screen rather than a box on it, so the battle's
@@ -1897,6 +1928,7 @@ func _open_switch_pick(forced: bool) -> void:
 
 func _close_switch() -> void:
 	_switch_stage = &""
+	_switch_reason = &""
 	_switch_menu = null
 	_switch_offer = null
 	if _box != null:
@@ -1909,6 +1941,8 @@ func _answer_switch(button: int) -> void:
 	match _switch_stage:
 		&"offer":
 			_answer_switch_offer_button(button)
+		&"use_next":
+			_answer_use_next_button(button)
 		&"pick":
 			_answer_switch_pick(button)
 		&"refused":
@@ -1916,7 +1950,7 @@ func _answer_switch(button: int) -> void:
 			## list behind it.
 			if _box != null and _box.advance():
 				return
-			_open_switch_pick(_switch_menu != null and _switch_menu.forced)
+			_open_switch_pick(_switch_reason)
 
 
 ## `InterpretTwoOptionMenu` over `YesNoMenuHeader`: two rows that do not wrap,
@@ -1936,11 +1970,44 @@ func _answer_switch_offer_button(button: int) -> void:
 			_refresh_menu_layer()
 		Gen2Button.A:
 			if _switch_offer.selected_index() == 0:
-				_open_switch_pick(false)
+				_open_switch_pick(&"offer")
 			else:
 				_decline_switch_offer()
 		Gen2Button.B:
 			_decline_switch_offer()
+
+
+## `AskUseNextPokemon`'s own loop. Its `.pressed_b` branch back to YES is
+## unreachable: `InterpretTwoOptionMenu` writes cursor NO on every carry it
+## returns, so a B is the same answer as NO, which is what the offer above does
+## with one too.
+func _answer_use_next_button(button: int) -> void:
+	if _offer_still_reading():
+		if button == Gen2Button.A:
+			_box.advance()
+			_refresh_menu_layer()
+		return
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN:
+			_switch_offer.move(Vector2i(0, 1 if button == Gen2Button.DOWN else -1))
+			_refresh_menu_layer()
+		Gen2Button.A:
+			_answer_use_next(_switch_offer.selected_index() == 0)
+		Gen2Button.B:
+			_answer_use_next(false)
+
+
+## YES falls straight into `ForcePlayerMonChoice` with no press in between; NO
+## runs, and a run that does not get away leaves its own line up and reaches the
+## same list on the press that reads it.
+func _answer_use_next(use_next: bool) -> void:
+	var events: Array = _battle.answer_use_next(use_next)
+	_close_switch()
+	if not events.is_empty():
+		_pending = events
+		_show_next_event()
+		return
+	_replace_the_fallen()
 
 
 ## Whether `StdBattleTextbox` is still printing the question the box belongs to.
@@ -1982,9 +2049,15 @@ func _resolve_switch(answer: Dictionary) -> void:
 
 ## The chosen row, which finishes whichever question the list was opened for.
 func _commit_switch(index: int) -> void:
-	var forced: bool = _switch_menu != null and _switch_menu.forced
+	var reason: StringName = _switch_reason
 	_close_switch()
-	_pending = _battle.pass_to(index) if forced else _battle.answer_switch_offer(index)
+	match reason:
+		&"baton_pass":
+			_pending = _battle.pass_to(index)
+		&"replace":
+			_pending = _battle.replace_fallen(index)
+		_:
+			_pending = _battle.answer_switch_offer(index)
 	_show_next_event()
 
 
@@ -2046,7 +2119,7 @@ func _refresh_menu_layer() -> void:
 	_menu_drawn = signature
 
 	match _switch_stage:
-		&"offer":
+		&"offer", &"use_next":
 			_draw_yes_no_box()
 		&"pick", &"refused":
 			_draw_party_page()
@@ -2087,36 +2160,39 @@ func _show_menu_image(image: Image, at: Vector2i) -> void:
 	_menu_layer.visible = true
 
 
-## Sends out the first Pokémon standing on any side that owes one, and answers
-## whether it had to.
+## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail put on
+## screen, and whether any of it had something to do.
 ##
-## Still the only place that picks for the player rather than asking. The list is
-## the same one [method _open_switch_pick] opens, but `ForcePlayerMonChoice` is
-## reached through `AskUseNextPokemon`, whose NO runs away outside a turn, and
-## the enemy's own replacement is `FindPkmnInOTPartyToSwitchIntoBattle` rather
-## than the first standing. Both are engine work rather than a missing menu.
+## The three steps are the source's own order: `AskUseNextPokemon`'s wild
+## question, `ForcePlayerMonChoice`'s list, and then the trainer's own entrance,
+## which [method Gen2Battle.replace_fallen] picks and which SHIFT turns into
+## another offer.
 func _replace_the_fallen() -> bool:
 	if _battle == null:
 		return false
 
-	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:
-		if not _battle.must_replace(side):
-			continue
-		var next: int = _next_healthy(side)
-		if next < 0:
-			continue
-		_pending = _battle.send_out(side, next)
-		_show_next_event()
+	if _battle.asking_use_next():
+		if _switch_stage == &"":
+			_open_use_next()
 		return true
-	return false
 
+	if _battle.must_replace(Gen2Battle.PLAYER):
+		if _switch_stage == &"":
+			_open_switch_pick(&"replace")
+		return true
 
-func _next_healthy(side: int) -> int:
-	var party: Gen2Party = _battle.party(side)
-	for index: int in party.size():
-		if party.can_send_out(index):
-			return index
-	return -1
+	if not _battle.must_replace(Gen2Battle.ENEMY):
+		return false
+	var events: Array = _battle.replace_fallen()
+	if events.is_empty():
+		return false
+	_pending = events
+	_show_next_event()
+	## `EnemySwitch` asks before that Pokémon is on the field, so the question
+	## goes up in the same step rather than a press later.
+	if _pending.is_empty():
+		_answer_switch_offer()
+	return true
 
 
 ## The next event, with whatever it changes applied first.

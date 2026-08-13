@@ -1,15 +1,20 @@
 extends SceneTree
 
-## Captures the two menus a battle switches through, against a real imported
-## cache: `OfferSwitch`'s yes/no box over the field, and the party list
-## `PickSwitchMonInBattle` opens behind it.
+## Captures the menus a battle switches through, against a real imported cache:
+## `OfferSwitch`'s yes/no box over the field, `AskUseNextPokemon`'s box in the
+## same place, and the party list both of them open behind.
 ##
 ##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses]
 ##
-## [stage] is `offer`, the default, or `pick`; [presses] is a `u,d,l,r,a,b` list
-## driven into the menu before the shot, so a cursor row or a refusal can be
-## photographed. The battle is a real trainer's party out of the cache with the
-## player on a bench of three, since a switch needs somebody to switch to.
+## [stage] is one of `offer` (the default), `pick`, `use_next` and `replace`;
+## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
+## cursor row or a refusal can be photographed. The battle is a real trainer's
+## party out of the cache with the player on a bench of three, since both a
+## switch and a replacement need somebody to send.
+##
+## The two faint stages take the player's Pokémon down rather than fighting it
+## down: what is being photographed is the question a faint leads to, and a real
+## turn would have to be repeated until a move happened to land.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## Enough frames for the scene to lay out and for the hardware viewport to hold
@@ -70,14 +75,18 @@ func _process(_delta: float) -> bool:
 		push_error("Could not write %s (error %d)" % [_output_path, error])
 		quit(1)
 		return true
-	print("Wrote %s, stage %s" % [_output_path, _screen.battle_snapshot()["switch_stage"]])
+	var snapshot: Dictionary = _screen.battle_snapshot()
+	print("Wrote %s, stage %s, answering %s" % [
+		_output_path, snapshot["switch_stage"], snapshot["switch_reason"],
+	])
 	quit(0)
 	return true
 
 
 ## The trainer's second Pokémon coming in, which is what `OfferSwitch` asks
-## about. SHIFT is forced on rather than read out of the options file, since the
-## question is the thing being photographed.
+## about, or the player's own going down, which is what `AskUseNextPokemon` and
+## `ForcePlayerMonChoice` follow. SHIFT is forced on rather than read out of the
+## options file, since the question is the thing being photographed.
 func _open() -> void:
 	var data: GameData = _screen.get("_data")
 	var rng := RandomNumberGenerator.new()
@@ -92,15 +101,25 @@ func _open() -> void:
 		quit(1)
 		return
 
+	## `AskUseNextPokemon` prints in a wild battle and returns at once in a
+	## trainer one, which is the only thing separating the two faint stages.
 	_screen.show_trainer(TRAINER_CLASS, 0, PLAYER_SPECIES[0], PLAYER_LEVEL)
 	var battle: Gen2Battle = Gen2Battle.create_parties(
-		data, Gen2Party.create(members), enemy, rng, true
+		data, Gen2Party.create(members), enemy, rng, _stage != "use_next"
 	)
 	battle.battle_style_set = false
 	_screen.set("_battle", battle)
-	_screen.set("_pending", battle.take_actions(
-		Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
-	))
+	if _stage in ["use_next", "replace"]:
+		## Through the screen's own quarter, so the HUD in the picture is the HUD
+		## the faint left rather than the one the intro drew.
+		for _quarter: int in 8:
+			if battle.player.is_fainted():
+				break
+			_screen.hurt_player()
+	else:
+		_screen.set("_pending", battle.take_actions(
+			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
+		))
 
 	_drain()
 	if _stage == "pick":
@@ -108,7 +127,7 @@ func _open() -> void:
 		_screen._handle_button(Gen2Button.A)
 	for press: String in _presses:
 		_screen._handle_button(_button(press))
-	if _stage == "offer":
+	if _stage in ["offer", "use_next"]:
 		_read_question()
 	## A refusal is a line the box is still revealing, and the capture does not
 	## wait on real time.

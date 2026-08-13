@@ -327,17 +327,22 @@ the turn standing and `Gen2Battle.pass_to` finishes it, asked through
 plus the stages); `ResetBatonPassStatus` names the few things that do not.
 
 Switches happen before priority, so the incoming Pokémon takes the other
-side's move. A fainted replacement is caller policy: the turn stops at
-`must_replace` until `send_out`, and a Baton Pass target the same way. A full
+side's move. A fainted replacement stops the turn at `must_replace` until
+`replace_fallen`, and a Baton Pass target the same way through `pass_to`. A full
 moveset similarly uses `must_learn_move`, `learn_move` and `decline_move`.
 
-Three of those four questions are asked rather than answered for the player.
+All four are asked rather than answered for the player.
 `Gen2BattleSwitchMenu` is `PickSwitchMonInBattle` and its forced variant: the
 rows, the wrapping cursor and the already-out and no-energy refusals, with
 `Gen2PartyMenuPage` drawing `WritePartyMenuTilemap`'s columns and
-`Gen2MenuPage.render` drawing `PlaceYesNoBox` over the field. `must_replace` is
-the one still taken by the screen, because `ForcePlayerMonChoice` sits behind
-`AskUseNextPokemon`, whose NO runs away outside a turn.
+`Gen2MenuPage.render` drawing `PlaceYesNoBox` over the field.
+`Gen2Battle.replace_fallen` is `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s
+tail and the one entry point besides `take_actions` that moves a battle on:
+`asking_use_next`/`answer_use_next` are `AskUseNextPokemon`, whose NO runs away
+outside a turn on `wPartyMon1Speed` rather than the corpse's; the trainer's own
+replacement is `replacement_target`, the AI's `FindMonInOTPartyToSwitchIntoBattle`
+pick; and it reaches `EnemySwitch` rather than `EnemySwitch_SetMode` unless the
+player went down in the same handler, so SHIFT offers a switch there too.
 
 Trainer details:
 
