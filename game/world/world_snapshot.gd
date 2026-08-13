@@ -16,6 +16,12 @@ var world_day: int = 0
 var world_hour: int = 6
 var world_minute: int = 0
 var dst_enabled: bool = false
+## What a replay needs beside the state: the seed the world's generators were
+## built from and how many hardware frames it has been pumped for. Both are zero
+## in a snapshot written before either existed, which reads as "not reproducible"
+## rather than as frame zero of a seeded run.
+var random_seed: int = 0
+var frame_number: int = 0
 var world_state: Gen2WorldState = Gen2WorldState.new()
 
 
@@ -33,6 +39,8 @@ static func from_world(world: Gen2WorldAPI) -> Gen2WorldSnapshot:
 	out.world_hour = int(clock.get("hour", 6))
 	out.world_minute = int(clock.get("minute", 0))
 	out.dst_enabled = world.daylight_saving_time_enabled()
+	out.random_seed = world.random_seed
+	out.frame_number = world.frame_number
 	out.world_state = Gen2WorldState.from_dict(world.state.to_dict())
 	return out
 
@@ -47,6 +55,8 @@ func to_dict() -> Dictionary:
 		"player_sprite_number": player_sprite_number,
 		"clock": [world_day, world_hour, world_minute],
 		"dst_enabled": dst_enabled,
+		"random_seed": random_seed,
+		"frame_number": frame_number,
 		"world_state": world_state.to_dict() if world_state != null else {},
 	}
 
@@ -75,6 +85,8 @@ static func from_dict(raw: Variant) -> Gen2WorldSnapshot:
 		out.world_hour = int(clock[1])
 		out.world_minute = int(clock[2])
 	out.dst_enabled = bool(source.get("dst_enabled", false))
+	out.random_seed = int(source.get("random_seed", 0))
+	out.frame_number = maxi(0, int(source.get("frame_number", 0)))
 	out.world_state = Gen2WorldState.from_dict(source.get("world_state", {}))
 	return out
 

@@ -8,12 +8,12 @@ extends RefCounted
 ## the indexed tile strip held by GameData.
 
 const TILE_BYTES: int = Gen2Tiles.TILE_BYTES
-## One command runs per hardware VBlank, so the sequence has to be paced by
-## elapsed time rather than by rendered frames. Stepping it once per drawn frame
-## makes water flow at the monitor's refresh rate instead of the cartridge's.
+## The hardware VBlank, and the project's one definition of it: every overworld
+## timer is counted in these, and [method Gen2WorldScreen.advance_frame] is the
+## single place real time is converted into them.
 const FRAME_SECONDS: float = 1.0 / 59.7275
-## The most catch-up frames one call will run. A stall should drop animation
-## frames, not spend the recovery frame walking thousands of commands.
+## The most catch-up frames one host frame will run. A stall should drop frames,
+## not spend the recovery frame walking thousands of commands.
 const MAX_CATCHUP_FRAMES: int = 4
 const TIMER_WATER_FRAMES: Array = [0, 1, 2, 3]
 const TIMER_FOUNTAIN_FRAMES: Array = [0, 1, 2, 3, 2, 3, 4, 0]
@@ -31,7 +31,6 @@ var _timer: int = 0
 var _water_color: int = -1
 var _cave_color: int = -1
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
-var _frame_seconds: float = 0.0
 var _changed: bool = false
 ## Which tiles a run of commands rewrote, and whether a palette row moved. A
 ## renderer that keeps a texture only has to redo these tiles: the sequence
@@ -50,7 +49,6 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	_timer = 0
 	_water_color = -1
 	_cave_color = -1
-	_frame_seconds = 0.0
 	_changed = false
 	_changed_tiles = {}
 	_palette_changed = false
@@ -63,30 +61,24 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	_commands = tileset.animation_commands.duplicate(true)
 
 
-## Runs the commands that [param delta] seconds of real time are worth and
-## reports whether the tile strip or a palette row actually changed.
+## Runs one hardware frame's command and reports whether the tile strip or a
+## palette row actually changed.
 ##
 ## Most commands are waits and timer bumps that draw nothing new, so the return
 ## value is what a renderer should gate its atlas rebuild on; [method tick] is
 ## the single-command step the sequence is defined in.
-func advance(delta: float) -> bool:
-	if _commands.is_empty() or tileset == null or delta <= 0.0:
+func advance_frame() -> bool:
+	if _commands.is_empty() or tileset == null:
 		return false
-	_frame_seconds = minf(
-		_frame_seconds + delta, FRAME_SECONDS * float(MAX_CATCHUP_FRAMES)
-	)
-	var changed: bool = false
 	_changed_tiles = {}
 	_palette_changed = false
-	while _frame_seconds >= FRAME_SECONDS:
-		_frame_seconds -= FRAME_SECONDS
-		_changed = false
-		tick()
-		changed = changed or _changed
-	return changed
+	_changed = false
+	tick()
+	return _changed
 
 
-## The tiles rewritten by the most recent [method advance], in ascending order.
+## The tiles rewritten by the most recent [method advance_frame], in ascending
+## order.
 func changed_tiles() -> PackedInt32Array:
 	var out := PackedInt32Array()
 	for tile: int in _changed_tiles:
@@ -95,8 +87,8 @@ func changed_tiles() -> PackedInt32Array:
 	return out
 
 
-## Whether the most recent [method advance] moved a palette row, which changes
-## every tile drawn with it rather than only the ones it rewrote.
+## Whether the most recent [method advance_frame] moved a palette row, which
+## changes every tile drawn with it rather than only the ones it rewrote.
 func palette_changed() -> bool:
 	return _palette_changed
 

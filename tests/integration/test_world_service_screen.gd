@@ -199,8 +199,9 @@ func test_pending_special_call_dispatches_the_imported_script() -> void:
 	assert_true(attempt["attempted"])
 	_world_screen._show_script_results(attempt["results"])
 	await get_tree().process_frame
-	var resumed: Array = _world_screen._world.advance_phone_ring(3.0)
-	_world_screen._show_script_results(resumed)
+	## The screen's own pump is what spends the two rings and shows what
+	## finishing them produced.
+	_world_screen.advance_frames(4 * Gen2WorldPhoneRing.TOTAL_FRAMES)
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.script_input_waiting())
@@ -250,8 +251,9 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.phone_ring_active())
 	assert_true(_world_screen._caption.text.contains("PHONE RING"))
-	var resumed: Array = _world_screen._world.advance_phone_ring(3.0)
-	_world_screen._show_script_results(resumed)
+	## The screen's own pump is what spends the two rings and shows what
+	## finishing them produced.
+	_world_screen.advance_frames(4 * Gen2WorldPhoneRing.TOTAL_FRAMES)
 	await get_tree().process_frame
 	assert_true(_world_screen._world.script_input_waiting())
 	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")

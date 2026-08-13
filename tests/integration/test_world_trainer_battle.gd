@@ -62,23 +62,35 @@ func _walk_one(direction: Vector2i) -> void:
 	var before: Vector2i = _world_screen._world.player_cell
 	assert_true(_world_screen.move_player(direction))
 	for _frame: int in 16:
-		await get_tree().process_frame
 		if not _world_screen._world.player_step_in_progress():
 			break
+		_world_screen.advance_frame()
+	await get_tree().process_frame
 	if _world_screen._world.player_cell == before:
 		assert_true(_world_screen.move_player(direction))
 
 
+## Spends the world's own frames rather than the host's, so the shock emote and
+## the approach cost what `SeenByTrainerScript` says they cost however fast this
+## machine runs the suite.
 func _trigger_trainer() -> void:
 	await _walk_one(Vector2i.RIGHT)
-	for _frame: int in 80:
-		await get_tree().process_frame
-		if _battle_host() != null:
-			return
+	for _frame: int in 400:
+		_world_screen.advance_frame()
+		if _battle_child() != null:
+			break
 		var pending: Dictionary = _world_screen._world.pending_script_input()
 		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
 			_world_screen._advance_script_input()
+	await get_tree().process_frame
 	assert_not_null(_battle_host())
+
+
+func _battle_child() -> Gen2BattleScreen:
+	for child: Node in _world_screen.get_children():
+		if child is Gen2BattleScreen:
+			return child as Gen2BattleScreen
+	return null
 
 
 ## The battle overlay, with its opening slide walked to the end.
@@ -87,15 +99,14 @@ func _trigger_trainer() -> void:
 ## nothing until the pics are in place. In play the screen's own frames spend
 ## that; a test that read the box without it would read an empty one.
 func _battle_host() -> Gen2BattleScreen:
-	for child: Node in _world_screen.get_children():
-		if child is Gen2BattleScreen:
-			var host: Gen2BattleScreen = child as Gen2BattleScreen
-			var guard: int = 4000
-			while host.frames_running() and guard > 0:
-				host.advance_frame()
-				guard -= 1
-			return host
-	return null
+	var host: Gen2BattleScreen = _battle_child()
+	if host == null:
+		return null
+	var guard: int = 4000
+	while host.frames_running() and guard > 0:
+		host.advance_frame()
+		guard -= 1
+	return host
 
 
 ## The wild this fixture ships, named out of the cache rather than spelled out.
@@ -129,11 +140,8 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_eq(snapshot["world_battle_active"], true)
 
 
-## The approach still takes the same number of process frames it did before
-## sub-cell interpolation existed (proven by every other case in this file
-## reaching the battle overlay through the same _trigger_trainer budget);
-## this only checks that while the trainer object is mid-step, its
-## presentation offset eases toward zero instead of snapping.
+## While the trainer object is mid-step, its presentation offset eases toward
+## zero instead of snapping.
 func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 	await _open_world()
 	await _walk_one(Vector2i.RIGHT)
@@ -143,9 +151,9 @@ func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 	var was_stepping: bool = false
 	var previous_magnitude: int = -1
 	var lowest_magnitude: int = Gen2WorldAPI.CELL_PIXELS
-	for _frame: int in 80:
-		await get_tree().process_frame
-		if _battle_host() != null:
+	for _frame: int in 400:
+		_world_screen.advance_frame()
+		if _battle_child() != null:
 			break
 		if object.is_stepping():
 			var offset: Vector2i = object.step_offset(Gen2WorldAPI.CELL_PIXELS)
@@ -168,10 +176,11 @@ func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 		var pending: Dictionary = _world_screen._world.pending_script_input()
 		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
 			_world_screen._advance_script_input()
+	await get_tree().process_frame
 	assert_not_null(_battle_host())
 	assert_true(saw_step)
-	# tick_step() decrements once per process call, the same rate the emote
-	# and movement-delay counters already use; the offset eases down to one
+	# tick_step() spends one hardware frame, the same one the emote and
+	# movement-delay counters are spent by; the offset eases down to one
 	# STEP_FRAMES_WALK-th of a cell on the frame before the step formally ends.
 	assert_eq(lowest_magnitude, Gen2WorldAPI.CELL_PIXELS / Gen2WorldAPI.STEP_FRAMES_WALK)
 

@@ -37,7 +37,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
 >   fishing, roaming, repel and wild encounters. The service overlay covers
 >   menu selection, mart dialog variants and quantity purchases, source-timed
->   phone dispatch and bounded music, effects and cries.
+>   phone dispatch and bounded music, effects and cries. Everything the overworld
+>   times is a hardware frame count spent by one clock, so a seed, an input log
+>   and a frame number reproduce a walk exactly, on any display.
 > - **Saves.** Three slots, `.sav` import, and a 14-box PC model with 20 slots
 >   per box. Gifts, eggs, NPC trades, HP/status items, repel and captures commit
 >   through a validated candidate save; a full party routes into the first free
@@ -284,9 +286,10 @@ all three games unless its row says otherwise:
 | `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_intro.gd <game> <png> [copyright\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
-| `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. `frame` picks which one the `png` is of, so the emote, the walk and the box can each be looked at |
+| `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
+| `replay_world.gd [game ...] [frames]` | records `(frame, button)` from a run of the real world screen and replays it into a fresh world, over every map of the spawn group on each cartridge. The same seed and log must reach the same `Gen2WorldSnapshot` byte for byte, and must reach it whether the frames were pumped at 30 fps or at 144 |
 | `preview_collision.gd <game> <group> <number> <png>` | one whole map as drawn, with every walk cell's permission checkerboarded over it: red is wall, blue is water. For a report that the player can stand where they should not |
 | `preview_overworld_sprites.gd <game> <png>` | every overworld sprite in a cache as one contact sheet, four facings across by four frames down, for eyeballing offsets, mirroring and frame order |
 | `render_audio.gd <game> <music\|sfx\|cry\|mon_cry> <id\|all> <frames> <prefix> [stereo]` | one record, or the whole table, run through the sound driver and the APU: a WAV to listen to and a per-frame hardware-register trace to diff |

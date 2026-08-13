@@ -95,7 +95,7 @@ func test_a_renderer_never_receives_a_movement_or_interaction_button() -> void:
 	## spawns facing down; the walk is the press after it.
 	_world_screen._unhandled_input(_press(KEY_RIGHT))
 	while _world_screen._world.player_step_in_progress():
-		_world_screen._world.advance_player_step(1.0)
+		_world_screen._world.advance_player_step_frame()
 	_world_screen._unhandled_input(_press(KEY_RIGHT))
 	_world_screen._unhandled_input(_press(KEY_SPACE))
 	# The screen claimed both: the player moved, and neither key was offered on.

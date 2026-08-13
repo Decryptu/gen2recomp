@@ -6,6 +6,14 @@ extends RefCounted
 ## each completed game minute, while time-of-day changes use the cartridge's
 ## 04:00, 10:00 and 18:00 boundaries.
 ##
+## Seconds, not hardware frames, on purpose. Everything else in the overworld is
+## a countdown spent by [method Gen2WorldScreen.advance_frame]; the cartridge
+## reads a real-time clock for the day cycle, so this one takes wall time and
+## [method Gen2WorldScreen._advance_day_cycle] is the only caller that hands it
+## `delta`. A test or a replay reaches any boundary by asking for the seconds
+## rather than by waiting for them
+## ([method Gen2WorldScreen.advance_world_time]).
+##
 ## The clock does not move roaming Pokémon: the cartridge advances those during
 ## map setup, so [method Gen2WorldAPI.advance_schedule] is driven by a map change
 ## rather than elapsed time.

@@ -8,7 +8,6 @@ extends RefCounted
 ## hardware frames in each of the three waits inside one ring, then repeats
 ## the ring once more.
 
-const FRAME_SECONDS: float = 1.0 / 59.7275
 const RING_COUNT: int = 2
 const WAITS_PER_RING: int = 3
 const WAIT_FRAMES: int = 20
@@ -16,7 +15,6 @@ const RING_FRAMES: int = WAITS_PER_RING * WAIT_FRAMES
 const TOTAL_FRAMES: int = RING_COUNT * RING_FRAMES
 
 var _elapsed_frames: int = 0
-var _fractional_frames: float = 0.0
 var _lead_frames: int = 0
 
 
@@ -24,13 +22,8 @@ func _init(lead_frames: int = 0) -> void:
 	_lead_frames = maxi(0, lead_frames)
 
 
-func advance(delta: float) -> Dictionary:
-	if delta > 0.0:
-		_fractional_frames += delta / FRAME_SECONDS
-		var whole_frames: int = floori(_fractional_frames)
-		if whole_frames > 0:
-			_fractional_frames -= float(whole_frames)
-			_elapsed_frames = mini(_elapsed_frames + whole_frames, total_frames())
+func advance_frame() -> Dictionary:
+	_elapsed_frames = mini(_elapsed_frames + 1, total_frames())
 	return snapshot()
 
 

@@ -5,13 +5,9 @@ extends RefCounted
 ## hardware frames. The renderer owns the pixels; this class owns the source
 ## duration, amplitude and deterministic offsets.
 
-const FRAME_SECONDS: float = 1.0 / 59.7275
-const MAX_CATCHUP_FRAMES: int = 4
-
 var _frame: int = 0
 var _duration: int = 0
 var _amplitude: int = 0
-var _elapsed: float = 0.0
 var _kind: StringName = &"none"
 var _source: Dictionary = {}
 
@@ -21,7 +17,6 @@ func start_screen_shake(packed_value: int, kind: StringName = &"screen_shake", s
 	_duration = value & 0x3F
 	_amplitude = 1 << ((value >> 6) & 0x03) if _duration > 0 else 0
 	_frame = 0
-	_elapsed = 0.0
 	_kind = kind if _duration > 0 else &"none"
 	_source = source.duplicate(true)
 	return snapshot()
@@ -32,19 +27,14 @@ func start_tree_shake(source: Dictionary = {}) -> Dictionary:
 	return start_screen_shake(32, &"tree_shake", source)
 
 
-func advance(delta: float) -> bool:
-	if not active() or delta <= 0.0:
+func advance_frame() -> bool:
+	if not active():
 		return false
-	_elapsed = minf(_elapsed + delta, FRAME_SECONDS * float(MAX_CATCHUP_FRAMES))
-	var changed: bool = false
-	while _elapsed >= FRAME_SECONDS and active():
-		_elapsed -= FRAME_SECONDS
-		_frame += 1
-		changed = true
+	_frame += 1
 	if not active():
 		_kind = &"none"
 		_source = {}
-	return changed
+	return true
 
 
 func active() -> bool:

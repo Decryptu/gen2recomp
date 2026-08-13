@@ -45,6 +45,12 @@ var world: Gen2WorldSnapshot = null
 ## Per-slot, per-mod JSON objects. Installation-wide options stay in their own
 ## user file; this namespace travels with the save.
 var mods: Dictionary = {}
+## What names the run beside the state it produced: the seed the world's
+## generators are built from and the mods that were loaded when the slot was
+## last written (`Gen2ModHost.loaded_mods`). Zero and empty read as "not
+## recorded", which is what every slot written before this existed says.
+var run_seed: int = 0
+var run_mods: Array = []
 var boxes_shape_valid: bool = true
 
 
@@ -75,6 +81,7 @@ func to_dict() -> Dictionary:
 		"boxes": saved_boxes,
 		"world": world.to_dict() if world != null else {},
 		"mods": mods.duplicate(true),
+		"run": {"seed": run_seed, "mods": run_mods.duplicate(true)},
 	}
 
 
@@ -126,6 +133,17 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 			var value: Variant = raw_mods[raw_id]
 			if _valid_mod_id(id) and value is Dictionary:
 				out.mods[StringName(id)] = (value as Dictionary).duplicate(true)
+	var raw_run: Variant = source.get("run", {})
+	if raw_run is Dictionary:
+		out.run_seed = int((raw_run as Dictionary).get("seed", 0))
+		var raw_run_mods: Variant = (raw_run as Dictionary).get("mods", [])
+		if raw_run_mods is Array:
+			for entry: Variant in raw_run_mods as Array:
+				if entry is Dictionary and _valid_mod_id(String((entry as Dictionary).get("id", ""))):
+					out.run_mods.append({
+						"id": String((entry as Dictionary).get("id", "")),
+						"version": String((entry as Dictionary).get("version", "")),
+					})
 	return out
 
 
@@ -140,6 +158,10 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## Version 4 had neither gender nor a play timer; both migrate to the value a
 ## new game starts with, male and 0:00, since neither can be recovered.
 ## Version 5 had no per-mod namespace.
+##
+## The `run` block joined version 6 after it shipped and is not a version of its
+## own: it defaults to no seed and no mod list, which is the truth about a slot
+## written before it existed rather than a value worth inventing.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -230,6 +252,8 @@ func copy_from(source: Gen2SaveData) -> bool:
 	boxes = copied.boxes
 	world = copied.world
 	mods = copied.mods.duplicate(true)
+	run_seed = copied.run_seed
+	run_mods = copied.run_mods.duplicate(true)
 	boxes_shape_valid = copied.boxes_shape_valid
 	return true
 

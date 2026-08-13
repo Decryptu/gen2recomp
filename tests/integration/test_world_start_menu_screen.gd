@@ -707,11 +707,11 @@ func test_player_opens_the_trainer_card_and_b_reopens_the_start_menu() -> void:
 func test_the_play_timer_counts_while_the_world_runs() -> void:
 	await _open_world()
 	## The fixture drives an injected save, which is the one the timer counts on
-	## too: _advance_game_time() prefers it exactly as the card does.
+	## too: the pump prefers it exactly as the card does.
 	var save: Gen2SaveData = _world_screen._injected_save
 	assert_not_null(save)
 	save.game_time = Gen2GameTime.new()
-	_world_screen._advance_game_time(Gen2WorldAnimation.FRAME_SECONDS * 3.0)
+	_world_screen.advance_frames(3)
 	assert_eq(save.game_time.frames, 3)
 
 

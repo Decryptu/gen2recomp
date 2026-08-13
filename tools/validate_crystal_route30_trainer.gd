@@ -135,10 +135,10 @@ func _verify_runtime_flow(data: GameData, trainer_record: Dictionary) -> void:
 		"Joey's shock-emote duration is wrong."
 	)
 	for _frame: int in Gen2WorldAPI.TRAINER_SHOCK_FRAMES - 1:
-		world.tick()
+		world.advance_emotes_frame()
 	_check(joey.emote_visible, "Joey's shock emote ended early.")
-	world.tick()
-	_check(not joey.emote_visible, "Joey's shock emote exceeded 30 frames.")
+	world.advance_emotes_frame()
+	_check(not joey.emote_visible, "Joey's shock emote outlasted its own count.")
 
 	var step: Dictionary = world.advance_trainer_approach_step(
 		TRAINER_OBJECT_INDEX, Vector2i.RIGHT

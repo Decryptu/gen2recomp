@@ -308,7 +308,7 @@ func _run_script(world: Gen2WorldAPI, dispatched: Array) -> Array:
 		if world.pending_script_wait().is_empty():
 			break
 		results.append_array(
-			world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+			world.advance_script_presentation_frame()
 		)
 	return results
 
@@ -410,6 +410,17 @@ func test_world_host_resolves_imported_mart_audio_and_phone_records() -> void:
 	assert_eq(special_world.state.pending_special_phone_call(), 1)
 
 
+## Spends [param frames] hardware frames of the two-ring sequence and returns
+## whatever finishing it produced.
+func _spend_phone_ring(world: Gen2WorldAPI, frames: int) -> Array:
+	var results: Array = []
+	for _frame: int in frames:
+		var spent: Array = world.advance_phone_ring_frame()
+		if not spent.is_empty():
+			results = spent
+	return results
+
+
 func test_phone_ring_runs_before_the_imported_incoming_script() -> void:
 	_write_service_cache()
 	var data: GameData = GameData.open_directory(_directory)
@@ -421,8 +432,11 @@ func test_phone_ring_runs_before_the_imported_incoming_script() -> void:
 	assert_true(world.phone_ring_active())
 	assert_true(world.pending_runtime_request().is_empty())
 	assert_eq(world.move_result(Vector2i.RIGHT)["reason"], &"phone_ring_active")
-	assert_true(world.advance_phone_ring(1.0).is_empty())
-	var resumed: Array = world.advance_phone_ring(2.0)
+	assert_true(
+		_spend_phone_ring(world, Gen2WorldPhoneRing.TOTAL_FRAMES - 1).is_empty(),
+		"the last of the two rings has not been spent yet"
+	)
+	var resumed: Array = _spend_phone_ring(world, 1)
 	assert_false(world.phone_ring_active())
 	assert_eq(resumed[0]["status"], &"waiting", JSON.stringify(resumed))
 	assert_eq(world.pending_script_input()["type"], &"text")
@@ -437,7 +451,7 @@ func test_phone_ring_runs_before_the_imported_outgoing_script() -> void:
 	var started: Array = world.request_outgoing_phone_call(0)
 	assert_eq(started[0]["status"], &"phone_ring")
 	assert_eq(started[0]["event"]["kind"], &"phone_outgoing")
-	var resumed: Array = world.advance_phone_ring(3.0)
+	var resumed: Array = _spend_phone_ring(world, 4 * Gen2WorldPhoneRing.TOTAL_FRAMES)
 	assert_eq(resumed[0]["status"], &"waiting", JSON.stringify(resumed))
 	assert_eq(world.pending_script_input()["type"], &"text")
 
@@ -818,8 +832,7 @@ func test_ledge_hop_crosses_two_cells_after_an_ordinary_step_is_blocked() -> voi
 	# uses with a magnitude-2 direction.
 	assert_true(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2(0, -2))
-	for _tick: int in 4:
-		world.advance_player_step(1000.0)
+	_finish_player_step(world)
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 
@@ -932,7 +945,7 @@ func test_strength_push_slides_the_boulder_over_the_slow_step_duration() -> void
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
 	for _frame: int in Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH:
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
 	assert_false(boulder.is_stepping())
 	assert_false(boulder.is_idle())
 	assert_eq(boulder.cell, BOULDER_LANDING)
@@ -1883,13 +1896,12 @@ func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
-	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_true(world.advance_player_step_frame())
 	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(3.875, 2.0))
 
 	# The step lands on the committed cell, where the two agree again.
-	assert_true(world.advance_player_step(1000.0))
-	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
+	_finish_player_step(world)
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_position_cells(), Vector2(7.0, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(world.visible_screen_origin_cell()))
@@ -1903,29 +1915,30 @@ func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -
 	assert_eq(top_left.visible_origin_cells(), Vector2(-4.0, -4.0))
 
 
-func test_advance_player_step_consumes_hardware_frames_and_caps_catchup() -> void:
+## One call, one hardware frame, whatever the host's frame rate is. The stall
+## cap lives on the pump that feeds this
+## (tests/integration/test_world_frame_pump.gd), not on the countdown.
+func test_advance_player_step_spends_exactly_one_frame_per_call() -> void:
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.move(Vector2i.LEFT))
 	assert_eq(world.player_cell, Vector2i(7, 6))
 
-	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_true(world.advance_player_step_frame())
 	assert_eq(world.player_step_offset_cells(), Vector2(0.875, 0.0))
 
-	# A huge delta advances at most Gen2WorldAnimation.MAX_CATCHUP_FRAMES
-	# hardware frames per call, the same stall cap the tile animation uses, so
-	# a pause drops step frames instead of snapping the sprite to its
-	# destination. STEP_FRAMES_WALK is 8: one frame already consumed above,
-	# four more are capped here, leaving three of eight.
-	assert_true(world.advance_player_step(1000.0))
+	# STEP_FRAMES_WALK is 8, one of which is spent above.
+	for _frame: int in 4:
+		assert_true(world.advance_player_step_frame())
 	assert_eq(world.player_step_offset_cells(), Vector2(3.0 / 8.0, 0.0))
 	assert_eq(world.player_cell, Vector2i(7, 6))
 
-	assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 3.0))
+	for _frame: int in 3:
+		assert_true(world.advance_player_step_frame())
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 6))
 	assert_eq(world.player_walk_frame(), 0, "SetFacingStanding restores the resting cel")
-	assert_false(world.advance_player_step(1.0))
+	assert_false(world.advance_player_step_frame())
 
 
 func test_player_step_does_not_affect_cell_collision_or_events() -> void:
@@ -1937,8 +1950,7 @@ func test_player_step_does_not_affect_cell_collision_or_events() -> void:
 	var during_permission: int = world.collision_permission_at(world.player_cell)
 	var during_walkable: bool = world.can_walk_to(Vector2i(6, 6))
 
-	assert_true(world.advance_player_step(1000.0))
-	assert_true(world.advance_player_step(1000.0))
+	_finish_player_step(world)
 	assert_false(world.player_step_in_progress())
 
 	# A presentation offset in flight never changes what resolves off the
@@ -1982,8 +1994,7 @@ func test_snapshot_ignores_transient_player_step() -> void:
 	assert_true(world.player_step_in_progress())
 	var mid_step: Dictionary = world.snapshot().to_dict()
 
-	assert_true(world.advance_player_step(1000.0))
-	assert_true(world.advance_player_step(1000.0))
+	_finish_player_step(world)
 	assert_false(world.player_step_in_progress())
 	var finished: Dictionary = world.snapshot().to_dict()
 
@@ -2017,7 +2028,17 @@ func _advance_object_frames(
 	world: Gen2WorldAPI, frames: int, random: RandomNumberGenerator
 ) -> void:
 	for _frame: int in frames:
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
+
+
+## Spends the frames the player's step still owes. Bounded rather than a while
+## loop so a step that never ends fails the assertion after it instead of
+## hanging the suite.
+func _finish_player_step(world: Gen2WorldAPI) -> void:
+	for _frame: int in 64:
+		if not world.player_step_in_progress():
+			return
+		world.advance_player_step_frame()
 
 
 func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
@@ -2028,7 +2049,7 @@ func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
 	var start: Vector2i = object.cell
 
 	# The first frame is the object's turn at the movement function.
-	assert_true(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_true(world.advance_object_steps_frame(random))
 	assert_true(object.is_stepping())
 	# StepVectors' slow row is 16 frames, half the player's walking speed.
 	assert_eq(object.step_frames_total, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
@@ -2102,7 +2123,7 @@ func test_a_swim_wander_object_moves_across_its_pond_within_its_radius() -> void
 
 	var visited: Dictionary = {object.cell: true}
 	for _frame: int in 1024:
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
 		visited[object.cell] = true
 	assert_eq(
 		visited.keys().size(), 2,
@@ -2142,7 +2163,7 @@ func test_blocked_wander_object_keeps_its_cell_and_waits() -> void:
 	random.seed = 77
 	var start: Vector2i = object.cell
 
-	assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	assert_false(world.advance_object_steps_frame(random))
 	assert_eq(object.cell, start)
 	assert_false(object.is_stepping())
 	# _RandomWalkContinue's .new_duration branch waits again rather than
@@ -2163,7 +2184,7 @@ func test_wander_object_never_leaves_its_source_radius() -> void:
 	var strayed: Vector2i = Vector2i.MAX
 	var visited: Dictionary = {}
 	for _frame: int in 2000:
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
 		visited[object.cell] = true
 		if abs(object.cell.x - origin.x) > 1 or abs(object.cell.y - origin.y) > 1:
 			strayed = object.cell
@@ -2203,25 +2224,27 @@ func test_standing_objects_are_never_moved_by_the_driver() -> void:
 	var facing: int = object.facing
 
 	for _frame: int in 300:
-		assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+		assert_false(world.advance_object_steps_frame(random))
 	assert_eq(object.cell, start)
 	assert_eq(object.facing, facing)
 
 
-func test_object_driver_caps_catchup_after_a_stall() -> void:
+## One call, one frame. The stall cap is the pump's
+## (tests/integration/test_world_frame_pump.gd), so this driver cannot be handed
+## a hundred frames by a slow host either.
+func test_object_driver_spends_exactly_one_frame_per_call() -> void:
 	var world: Gen2WorldAPI = _wandering_world()
 	var object: Gen2WorldObject = world.objects[0]
 	var random := RandomNumberGenerator.new()
 	random.seed = 90210
 
-	assert_true(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random))
+	# The deciding frame starts the step without spending one of its frames.
+	assert_true(world.advance_object_steps_frame(random))
 	assert_eq(object.step_frames_remaining, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
-	# A huge delta spends at most MAX_CATCHUP_FRAMES frames, the same stall cap
-	# the tile animation and the player's walk step use.
-	assert_true(world.advance_object_steps(1000.0, random))
+	for _frame: int in 4:
+		assert_true(world.advance_object_steps_frame(random))
 	assert_eq(
-		object.step_frames_remaining,
-		Gen2WorldAPI.STEP_FRAMES_NPC_WALK - Gen2WorldAnimation.MAX_CATCHUP_FRAMES
+		object.step_frames_remaining, Gen2WorldAPI.STEP_FRAMES_NPC_WALK - 4
 	)
 
 
@@ -2237,7 +2260,7 @@ func test_object_steps_do_not_survive_a_map_transition() -> void:
 	for _frame: int in 600:
 		if object.is_stepping():
 			break
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
 	assert_true(object.is_stepping())
 
 	var result: Dictionary = world.try_warp()
@@ -2275,7 +2298,7 @@ func test_object_driver_ignores_a_missing_generator() -> void:
 	var world: Gen2WorldAPI = _wandering_world()
 	var object: Gen2WorldObject = world.objects[0]
 	var start: Vector2i = object.cell
-	assert_false(world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, null))
+	assert_false(world.advance_object_steps_frame(null))
 	assert_eq(object.cell, start)
 	assert_false(object.is_stepping())
 
@@ -3355,7 +3378,7 @@ func test_a_press_in_a_new_direction_turns_on_the_spot_before_it_walks() -> void
 	assert_eq(world.player_walk_frame(), 0, "StepFunction_Turn stays standing")
 
 	while world.player_step_in_progress():
-		world.advance_player_step(1.0)
+		world.advance_player_step_frame()
 	assert_eq(world.player_walk_frame(), 0, "the completed turn stays standing")
 	var walk: Dictionary = world.player_input_move(Vector2i.RIGHT)
 	assert_true(walk["ok"])
@@ -3490,8 +3513,8 @@ func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> v
 	assert_eq(world.player_facing, Gen2WorldSprite.FACING_UP)
 	# One cell of trail, at turn_in's own STEP_WALK duration.
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0))
-	for _call: int in 2:
-		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_player_step_frame()
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(_final_status(_run_script(world, dispatched)), &"complete")
 
@@ -3513,16 +3536,16 @@ func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -
 	assert_eq(object.cell, start + Vector2i(2, 0), "both cells commit at once")
 	assert_eq(object.step_offset_cells(), Vector2(-2.0, 0.0), "and the drawing is behind both")
 
-	# STEP_FRAMES_WALK is 8 and MAX_CATCHUP_FRAMES caps a call at four.
-	for _call: int in 2:
-		assert_true(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	# Each of the two cells costs STEP_FRAMES_WALK frames.
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		assert_true(world.advance_scripted_steps_frame())
 	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "one step drawn, one to go")
 	assert_eq(object.cell, start + Vector2i(2, 0), "and no cell moved with it")
 
-	for _call: int in 2:
-		world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_scripted_steps_frame()
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
-	assert_false(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_false(world.advance_scripted_steps_frame())
 
 
 ## `Script_applymovement` sets SCRIPT_WAIT_MOVEMENT and StopScript, and
@@ -3553,7 +3576,7 @@ func test_applymovement_holds_the_script_until_the_trail_has_been_drawn() -> voi
 	# Two `step` commands, so the wait outlasts the first one's frames.
 	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
 		assert_true(
-			world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS).is_empty()
+			world.advance_script_presentation_frame().is_empty()
 		)
 	assert_false(world.pending_script_wait().is_empty(), "one step still to draw")
 	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0))
@@ -3584,7 +3607,7 @@ func test_a_movement_sleep_holds_the_wait_without_moving_anything() -> void:
 
 	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 	for _frame: int in 7:
-		world.advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+		world.advance_script_presentation_frame()
 	assert_false(world.pending_script_wait().is_empty(), "eight frames of sleep")
 	assert_eq(object.cell, start)
 	assert_eq(object.walk_frame(), 0, "STEP_TYPE_SLEEP stands still")
@@ -3672,7 +3695,7 @@ func _types_of(result: Dictionary) -> Array[StringName]:
 	return types
 
 
-## The two drivers own different objects. advance_object_steps() decides
+## The two drivers own different objects. advance_object_steps_frame() decides
 ## movement and a screen stops calling it while a script runs, which is exactly
 ## when a scripted trail has to keep being drawn, so draining it there as well
 ## would walk it at twice the speed.
@@ -3692,10 +3715,14 @@ func test_the_movement_driver_leaves_a_scripted_trail_to_its_own_driver() -> voi
 
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
-	world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0, random)
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_object_steps_frame(random)
 	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "untouched by the other driver")
 
-	assert_true(world.advance_scripted_steps(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	@warning_ignore("integer_division")
+	var half: int = Gen2WorldAPI.STEP_FRAMES_WALK / 2
+	for _frame: int in half:
+		assert_true(world.advance_scripted_steps_frame())
 	assert_eq(object.step_offset_cells(), Vector2(-0.5, 0.0))
 
 
@@ -3718,14 +3745,14 @@ func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 2.0))
 	assert_eq(world.player_walk_frame(), 0)
 
-	for _call: int in 2:
-		assert_true(world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0))
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		assert_true(world.advance_player_step_frame())
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0), "one step drawn")
 	# Eight frames in, the counter is on its third drawing: stand, walk, stand.
 	assert_eq(world.player_walk_frame(), 2)
 
-	for _call: int in 2:
-		world.advance_player_step(Gen2WorldAnimation.FRAME_SECONDS * 4.0)
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_player_step_frame()
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 4))
 	assert_eq(world.player_walk_frame(), 0, "EndSpriteMovement leaves the player standing")
@@ -4464,9 +4491,9 @@ func test_real_trainer_metadata_runs_seen_text_battle_and_beaten_flag() -> void:
 	assert_eq(plan["path"], [Vector2i.UP])
 	assert_eq(world.objects[0].emote_remaining, Gen2WorldAPI.TRAINER_SHOCK_FRAMES)
 	for _frame: int in Gen2WorldAPI.TRAINER_SHOCK_FRAMES - 1:
-		world.tick()
+		world.advance_emotes_frame()
 	assert_true(world.objects[0].emote_visible)
-	assert_true(world.tick())
+	assert_true(world.advance_emotes_frame())
 	assert_false(world.objects[0].emote_visible)
 	var step: Dictionary = world.advance_trainer_approach_step(0, Vector2i.UP)
 	assert_true(step["ok"])
@@ -4954,11 +4981,11 @@ func test_scripted_emote_holds_the_script_for_its_own_pause() -> void:
 	assert_eq(object.emote_id, 1)
 
 	for _frame: int in 3:
-		assert_true(world.advance_script_wait(Gen2WorldAnimation.FRAME_SECONDS).is_empty())
+		assert_true(world.advance_script_wait_frame().is_empty())
 	assert_true(object.emote_visible, "still up while the pause runs")
-	assert_false(world.tick(), "and not on a countdown of its own")
+	assert_false(world.advance_emotes_frame(), "and not on a countdown of its own")
 
-	var finished: Array = world.advance_script_wait(Gen2WorldAnimation.FRAME_SECONDS)
+	var finished: Array = world.advance_script_wait_frame()
 	assert_eq(_final_status(finished), &"complete")
 	assert_false(object.emote_visible)
 

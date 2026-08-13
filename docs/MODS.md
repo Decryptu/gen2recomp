@@ -496,16 +496,16 @@ Supported by the contract above:
   without the renderer knowing an animation ran;
 - movement progress. `Gen2WorldAPI.player_step_offset_cells()` and
   `Gen2WorldObject.step_offset_cells()` return an in-flight step as a fractional
-  cell, from one cell behind the committed cell down to zero, paced by
-  `advance_player_step(delta)` and `advance_object_steps()` at the hardware
-  frame rate and stall cap `Gen2WorldAnimation` uses. The logical cell still
+  cell, from one cell behind the committed cell down to zero, spent by
+  `advance_player_step_frame()` and `advance_object_steps_frame()` on the
+  screen's own hardware frame. The logical cell still
   commits at the start of the step; the fraction is presentation only and never
   reaches collision, events or the world snapshot.
   `mods/examples/voxel_preview/` reads both;
 - scripted movement progress, on the same two calls. An `applymovement` applies
   its whole stream at once, so every cell of the path commits together and the
   offset is as many cells behind as there are left to draw.
-  `advance_scripted_steps(delta)` drains that trail and is the one mover a
+  `advance_scripted_steps_frame()` drains that trail and is the one mover a
   screen keeps calling while a script runs, since that is when a script runs
   one. Each step lasts its own command's duration: 16 frames for the slow
   commands, 8 for the plain ones, 4 for the bike-speed ones;

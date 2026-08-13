@@ -14,12 +14,28 @@ extends SceneTree
 ##
 ## `maps/PlayersHouse1F.asm`: the two coord events at (8,4) and (9,4) are
 ## Crystal's trigger. Gold and Silver ship none; their scene 0 is an `sdefer` of
-## the same script, so the trace there starts from the map entry instead.
+## the same script, so the trace there starts from the map entry instead, which
+## is why its three checkpoints sit later than Crystal's.
+##
+## It is a regression test, not only a report: the three frames the emote, the
+## walk and the box first appear on are pinned in [constant CHECKPOINTS] and a
+## run that moves one of them exits non-zero. Change those numbers only with a
+## reading of the asm that says why.
 
 const WINDOW_SIZE := Vector2i(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
 const FRAME: float = 1.0 / 59.7275
 ## Long enough for the walk, the emote's fifteen frames and the text to appear.
 const TRACE_FRAMES: int = 600
+
+## The frame the emote, Mom's first drawn step and the text box each first
+## appear on, per profile. Every interval between them is the source's:
+## `showemote EMOTE_SHOCK, MOM1, 15` is 30 frames of emote, and the walk is
+## `MomWalksToPlayerMovement`'s own steps.
+const CHECKPOINTS: Dictionary = {
+	&"crystal": {&"emote": 3, &"walk": 32, &"text": 48},
+	&"gold": {&"emote": 10, &"walk": 40, &"text": 88},
+	&"silver": {&"emote": 10, &"walk": 40, &"text": 88},
+}
 
 ## `constants/map_constants.asm`, and `Gen2WorldSpawn`'s own group.
 const PLAYERS_HOUSE_1F: int = 6
@@ -28,6 +44,7 @@ const MOM_OBJECT: int = 0
 const APPROACH_CELL := Vector2i(9, 3)
 const TRIGGER_CELL := Vector2i(9, 4)
 
+var _game: StringName = &""
 var _screen: Gen2WorldScreen = null
 var _output_path: String = ""
 var _capture_frame: int = TRACE_FRAMES
@@ -43,6 +60,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var game: StringName = StringName(args[0])
+	_game = game
 	if args.size() > 1:
 		_output_path = args[1]
 	if args.size() > 2:
@@ -72,6 +90,10 @@ func _initialize() -> void:
 	save.world = world.snapshot()
 	_screen.set_data(data)
 	_screen.set_save(save)
+	## The trace owns the clock. Without this the screen spends host frames of
+	## its own before the trace starts, and the row an event lands on moves by
+	## one from run to run.
+	_screen.process_mode = Node.PROCESS_MODE_DISABLED
 	root.add_child(_screen)
 	current_scene = _screen
 
@@ -107,9 +129,6 @@ func _process(_delta: float) -> bool:
 			if node != null:
 				node.visible = false
 		return false
-	# The clock is the trace's, not the renderer's, so the report is the same on
-	# every run.
-	_screen.set_process(false)
 	if not _started:
 		_started = true
 		_screen.move_player(Vector2i(0, 1))
@@ -121,8 +140,38 @@ func _process(_delta: float) -> bool:
 	if _frames < maxi(TRACE_FRAMES, _capture_frame):
 		return false
 	_report()
-	quit(0)
+	quit(0 if _checkpoints_hold() else 1)
 	return true
+
+
+## The first frame each of the three checkpoints appears on, against the pinned
+## row. Reported as a line per checkpoint so a shift names itself.
+func _checkpoints_hold() -> bool:
+	var expected: Dictionary = CHECKPOINTS.get(_game, {})
+	if expected.is_empty():
+		print("no pinned checkpoints for %s" % _game)
+		return true
+	var held: bool = true
+	for name: StringName in [&"emote", &"walk", &"text"]:
+		var at: int = _first_frame(name)
+		var want: int = int(expected[name])
+		if at != want:
+			printerr("%s %s first appears on frame %d, not %d" % [_game, name, at, want])
+			held = false
+	print("%s checkpoints %s" % [_game, "hold" if held else "MOVED"])
+	return held
+
+
+func _first_frame(name: StringName) -> int:
+	for row: Dictionary in _trace:
+		var showing: bool = false
+		match name:
+			&"emote": showing = bool(row["emote"])
+			&"walk": showing = row["mom_offset"] != Vector2.ZERO
+			_: showing = bool(row["text"])
+		if showing:
+			return int(row["frame"])
+	return -1
 
 
 ## Prints only where something changed, which is what makes a stall readable.

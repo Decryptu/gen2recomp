@@ -232,6 +232,31 @@ func test_mod_save_namespaces_refuse_bad_ids_and_large_documents() -> void:
 	)
 
 
+## The seed and the mod list a crash report or a replay would name, beside the
+## per-mod namespace rather than inside it.
+func test_the_run_block_round_trips_and_refuses_an_invented_mod_id() -> void:
+	var save: Gen2SaveData = _save()
+	save.run_seed = 0x0BADF00D
+	save.run_mods = [
+		{"id": "weather_plus", "version": "1.2.0"},
+		{"id": "Bad Id", "version": "9"},
+	]
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_eq(restored.run_seed, 0x0BADF00D)
+	assert_eq(restored.run_mods, [{"id": "weather_plus", "version": "1.2.0"}])
+
+
+## A slot written before the block existed says so rather than claiming frame
+## zero of a seeded run.
+func test_a_save_without_a_run_block_records_no_seed() -> void:
+	var raw: Dictionary = _save().to_dict()
+	raw.erase("run")
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(raw)
+	assert_not_null(restored)
+	assert_eq(restored.run_seed, 0)
+	assert_eq(restored.run_mods, [])
+
+
 func test_format_five_migrates_to_an_empty_mod_namespace() -> void:
 	var raw: Dictionary = _save().to_dict()
 	raw["format_version"] = 5

@@ -250,7 +250,12 @@ func _process(delta: float) -> void:
 	if not frames_running():
 		_frame_elapsed = 0.0
 		return
-	_frame_elapsed += delta
+	## Capped the way [method Gen2WorldScreen._process] caps it: a stall should
+	## drop animation frames, not run a second of them in one host frame.
+	_frame_elapsed = minf(
+		_frame_elapsed + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
+	)
 	while _frame_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and frames_running():
 		_frame_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
 		advance_frame()
