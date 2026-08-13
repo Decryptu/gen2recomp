@@ -40,6 +40,7 @@ user://mods/<id>/
 | `entry` | A `.gd` path inside the mod directory |
 | `description` | Optional |
 | `dependencies` | Optional object from required mod ids to SemVer ranges |
+| `games` | Optional list of cartridge ids the mod is for |
 
 `version` is a strict `major.minor.patch` number. Dependency ranges accept an
 exact version, `*`, component wildcards such as `1.x` or `1.4.*`, comparison
@@ -47,6 +48,16 @@ chains such as `>=1.2.0 <2.0.0`, and caret or tilde ranges such as `^1.2.3` and
 `~1.2.3`. Dependencies load first. A missing, disabled, incompatible or failed
 dependency, and every member of a dependency cycle, is refused by name before
 the dependent entry script runs.
+
+`games` is `RomRegistry` ids: `["gold", "silver", "crystal"]`. Absent or empty
+means every cartridge the host knows, which is what a manifest written before
+this existed says. A cartridge the mod does not name refuses the mod at load, by
+name, and the launcher's card prints what a mod is for before Play is pressed.
+Ids the host has never heard of are not refused when the manifest is read: a mod
+that also names a cartridge a later launcher will ship has to install today, and
+naming only such an id simply means it never runs here. There is no generation
+shorthand, because a generation is not a fact the registry holds about a dump,
+and a list of ids stays right when the launcher gains one.
 
 An entry that is absolute, contains `..` or is not GDScript is refused before
 anything runs. Manifests are read without executing mod code, so a launcher can

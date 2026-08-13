@@ -99,6 +99,12 @@ func _row(manifest: Gen2ModManifest) -> Control:
 	line.add_child(text)
 	text.add_child(Gen2LauncherUI.body(_theme, manifest.name))
 	text.add_child(Gen2LauncherUI.muted(_theme, "%s  %s" % [manifest.id, manifest.version]))
+	# What it is for, so a player reads it before pressing Play rather than after
+	# the mod refused to load. A mod that declares nothing is for every cartridge
+	# and says nothing here.
+	var titles: Array[String] = manifest.game_titles()
+	if not titles.is_empty():
+		text.add_child(Gen2LauncherUI.muted(_theme, "For %s" % ", ".join(titles)))
 
 	var switch: Gen2LauncherToggle = Gen2LauncherToggle.create(
 		_theme, Gen2ModState.is_enabled(manifest.id)

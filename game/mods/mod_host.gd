@@ -122,6 +122,10 @@ static var _instance: Gen2ModHost = null
 var _manifests: Dictionary = {}
 ## Mod id to version for every entry script that ran. See [method loaded_mods].
 var _loaded: Dictionary = {}
+## The cartridge being played, which is what a mod's `games` declaration is
+## checked against. Empty until one is chosen, and an empty target restricts
+## nothing: the launcher runs before Play is pressed.
+var _target_game: StringName = &""
 var _options: Dictionary = {}
 var _world_renderers: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
@@ -655,6 +659,17 @@ func failures() -> Array:
 	return _failures.duplicate(true)
 
 
+## Names the cartridge about to be played, before [method load_discovered] runs.
+## Set by GameRuntime when a game is chosen; a host that is never told keeps
+## every mod, which is what the launcher wants while nothing is selected.
+func set_target_game(game_id: StringName) -> void:
+	_target_game = game_id
+
+
+func target_game() -> StringName:
+	return _target_game
+
+
 ## A mod may read and replace only its own slot namespace. The exact manifest
 ## object handed to register() is the capability; inventing another object with
 ## the same id grants nothing.
@@ -682,15 +697,23 @@ func _owns_manifest(manifest: Gen2ModManifest) -> bool:
 ##
 ## A mod that will not load is reported and skipped: one broken mod must not
 ## stop the others, and it must not stop the game starting. A mod the player
-## switched off is skipped silently and is not a failure.
+## switched off is skipped silently and is not a failure, and a mod for another
+## cartridge is a recorded refusal the launcher can show.
 func load_discovered() -> Array:
 	var loaded: Array = []
 	var pending: Array[StringName] = []
 	var failed: Dictionary = {}
 	for raw_id: Variant in _manifests:
 		var id := StringName(raw_id)
-		if Gen2ModState.is_enabled(id):
-			pending.append(id)
+		if not Gen2ModState.is_enabled(id):
+			continue
+		var manifest: Gen2ModManifest = _manifests[id]
+		if not manifest.supports_game(_target_game):
+			_failures.append(_dependency_refusal(
+				manifest, &"incompatible_game", RomRegistry.title_for(_target_game)
+			))
+			continue
+		pending.append(id)
 	pending.sort()
 
 	# Refuse unsatisfied declarations before running any entry code.

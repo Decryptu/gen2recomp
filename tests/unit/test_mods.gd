@@ -101,6 +101,60 @@ func test_manifest_versions_and_dependency_ranges_are_validated_before_code_runs
 	)
 
 
+## `games` is cartridge ids and nothing else. An unknown id is not refused when
+## the manifest is read, because a mod naming a cartridge a later launcher will
+## ship has to install today.
+func test_the_games_declaration_is_validated_by_shape_and_not_by_registry() -> void:
+	var source: Dictionary = _valid_manifest()
+	source["games"] = "crystal"
+	assert_eq(Gen2ModManifest.from_dictionary(source, _directory)["reason"], &"invalid_games")
+	source["games"] = ["Crystal"]
+	assert_eq(Gen2ModManifest.from_dictionary(source, _directory)["reason"], &"invalid_game")
+	source["games"] = ["gold", "silver", "crystal", "red"]
+	var read: Dictionary = Gen2ModManifest.from_dictionary(source, _directory)
+	assert_true(read["ok"], "an id this host does not know is still a legal declaration")
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_eq(manifest.games, [&"gold", &"silver", &"crystal", &"red"] as Array[StringName])
+	assert_eq(manifest.game_titles(), ["Gold", "Silver", "Crystal", "red"] as Array[String])
+
+
+## An absent declaration is every cartridge, and so is an unchosen one: the
+## launcher lists what is installed before Play is pressed.
+func test_a_mod_declaring_no_games_is_for_every_cartridge() -> void:
+	var read: Dictionary = Gen2ModManifest.from_dictionary(_valid_manifest(), _directory)
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_true(manifest.games.is_empty())
+	assert_true(manifest.supports_game(RomRegistry.GOLD))
+	assert_true(manifest.supports_game(&""))
+	assert_true(manifest.game_titles().is_empty())
+
+
+func test_a_mod_for_another_cartridge_is_refused_by_name_and_not_run() -> void:
+	_write_dependency_mod("%s/crystal_only" % ROOT, "crystalonly", "1.0.0")
+	_write("%s/crystal_only/mod.json" % ROOT, JSON.stringify({
+		"id": "crystalonly", "name": "Crystal Only", "version": "1.0.0",
+		"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		"games": ["crystal"],
+	}))
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.set_target_game(RomRegistry.GOLD)
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [])
+	assert_eq(StringName(host.failures()[-1]["reason"]), &"incompatible_game")
+	assert_eq(
+		Gen2ModRefusal.text(host.failures()[-1]), "That mod is not for Gold.",
+		"the launcher has a line for it"
+	)
+
+	Gen2ModHost.reset()
+	host = Gen2ModHost.instance()
+	host.set_target_game(RomRegistry.CRYSTAL)
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"crystalonly"])
+	for failure: Dictionary in host.failures():
+		assert_ne(StringName(failure["reason"]), &"incompatible_game")
+
+
 func test_dependencies_load_before_the_mod_that_requires_them() -> void:
 	_write_dependency_mod("%s/dep_core" % ROOT, "core", "1.5.0")
 	_write_dependency_mod("%s/addon" % ROOT, "addon", "2.0.0", {"core": "^1.2.0"})

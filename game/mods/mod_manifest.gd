@@ -25,6 +25,15 @@ var entry: String = ""
 var description: String = ""
 ## Required mod ids to accepted semantic-version ranges.
 var dependencies: Dictionary = {}
+## Which cartridges the mod is for, as [RomRegistry] ids. Empty means every game
+## the host knows, which is what a manifest written before this existed says.
+##
+## Cartridge ids rather than a generation number, because ids are what the
+## registry has: a generation is not a fact the host holds about a dump, and a
+## manifest may not declare something nothing can check. A list also stays right
+## when the launcher gains another generation, since a mod naming the three
+## Generation II cartridges refuses on a fourth without being edited.
+var games: Array[StringName] = []
 ## Absolute path of the directory the manifest was read from.
 var directory: String = ""
 
@@ -64,6 +73,18 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 
 	var regex := RegEx.new()
 	regex.compile(ID_PATTERN)
+	var raw_games: Variant = source.get("games", [])
+	if not raw_games is Array:
+		return _refuse(&"invalid_games", String(manifest.id))
+	for raw_game: Variant in raw_games as Array:
+		var game: String = String(raw_game)
+		# Shape only. An id this host has never heard of is not refused here: a
+		# mod that also names a cartridge a later launcher will ship has to
+		# install today and simply not run on the ones it does not name.
+		if regex.search(game) == null:
+			return _refuse(&"invalid_game", game)
+		if not manifest.games.has(StringName(game)):
+			manifest.games.append(StringName(game))
 	if regex.search(String(manifest.id)) == null:
 		return _refuse(&"invalid_id", String(manifest.id))
 	if manifest.api_version != API_VERSION:
@@ -98,6 +119,25 @@ func entry_path() -> String:
 	return "%s/%s" % [directory, entry]
 
 
+## Whether this mod declares [param game_id]. An empty declaration is every game,
+## and an empty [param game_id] is "no cartridge chosen yet", which restricts
+## nothing: the launcher lists what is installed before Play is pressed.
+func supports_game(game_id: StringName) -> bool:
+	return games.is_empty() or String(game_id).is_empty() or games.has(game_id)
+
+
+## What the mod is for, as titles the launcher can print. Empty for a mod that
+## declares nothing, which the card reads as every cartridge; a declared id the
+## registry does not know keeps its own name, so a mod for a later generation
+## says so rather than disappearing from its own card.
+func game_titles() -> Array[String]:
+	var out: Array[String] = []
+	for game: StringName in games:
+		var title: String = RomRegistry.title_for(game)
+		out.append(title if not title.is_empty() else String(game))
+	return out
+
+
 func summary() -> Dictionary:
 	return {
 		"id": id,
@@ -106,6 +146,7 @@ func summary() -> Dictionary:
 		"description": description,
 		"directory": directory,
 		"dependencies": dependencies.duplicate(),
+		"games": games.duplicate(),
 	}
 
 
