@@ -20,7 +20,11 @@ const MOVEMENT_SURF: StringName = &"surf"
 ## for a variable sprite no script has assigned yet.
 const SPRITE_CHRIS: int = 1
 const TRAINER_SHOCK_EMOTE: int = 0
-const TRAINER_SHOCK_FRAMES: int = 30
+## `SeenByTrainerScript`'s `showemote EMOTE_SHOCK, LAST_TALKED, 30`
+## (engine/events/trainer_scripts.asm), read the way every other `showemote` is:
+## the operand is `wScriptDelay` and `ShowEmoteScript`'s `pause 0` spends
+## two frames a unit (`Gen2WorldScriptRunner.PAUSE_FRAMES_PER_UNIT`).
+const TRAINER_SHOCK_FRAMES: int = 60
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
 ## duration for ordinary player walking (engine/overworld/map_objects.asm). The
 ## trainer approach shares it: see advance_trainer_approach_step().
@@ -190,6 +194,15 @@ var script_random: RandomNumberGenerator = null
 ## other two so seeding NPC motion cannot shift an encounter, a phone roll or a
 ## script's RANDOM result.
 var object_random: RandomNumberGenerator = null
+## The seed the three generators above were built from, mirrored here so a
+## snapshot records what a run can be reproduced with. Zero means nothing seeded
+## them and the run is not reproducible.
+var random_seed: int = 0
+## Hardware frames this world has been advanced by, monotonic from the frame the
+## snapshot it was opened from recorded. Every overworld timer is a countdown
+## spent by the same pump, so a seed, an input log and this number are what make
+## a run replayable. Advanced only by [method advance_frame_counter].
+var frame_number: int = 0
 var _last_schedule: Dictionary = {}
 var _phone_ring: Gen2WorldPhoneRing = null
 var _phone_ring_request: Dictionary = {}
@@ -200,7 +213,6 @@ var _phone_ring_request: Dictionary = {}
 var _player_step_direction: Vector2i = Vector2i.ZERO
 var _player_step_frames_total: int = 0
 var _player_step_frames_remaining: int = 0
-var _player_step_accumulator: float = 0.0
 ## The rest of a scripted movement stream the player still has to be drawn
 ## walking, the way Gen2WorldObject.queued_steps holds an object's.
 var _player_queued_steps: Array = []
@@ -210,13 +222,6 @@ var _player_queued_steps: Array = []
 var _player_scripted_steps: bool = false
 ## The player's own OBJECT_STEP_FRAME. See Gen2WorldObject.step_frame.
 var _player_step_frame: int = 0
-## Real time banked toward the next hardware frame of object movement, held
-## beside the player's own accumulator so the two stay in phase after a stall.
-var _object_step_accumulator: float = 0.0
-## The same for the presentation trail a scripted movement leaves, which is
-## drained by its own driver because that one runs while a script does.
-var _scripted_step_accumulator: float = 0.0
-var _script_wait_accumulator: float = 0.0
 ## Frames left of the counted wait a script is standing in, -1 while it is not
 ## standing in one or has not started counting.
 var _script_wait_frames: int = -1
@@ -283,6 +288,8 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	out.world_hour = world_snapshot.world_hour
 	out.world_minute = world_snapshot.world_minute
 	out.dst_enabled = world_snapshot.dst_enabled
+	out.random_seed = world_snapshot.random_seed
+	out.frame_number = world_snapshot.frame_number
 	return out
 
 
@@ -516,38 +523,28 @@ func _clear_player_step() -> void:
 	_player_step_direction = Vector2i.ZERO
 	_player_step_frames_total = 0
 	_player_step_frames_remaining = 0
-	_player_step_accumulator = 0.0
 	_player_queued_steps.clear()
 	_player_scripted_steps = false
 	_player_step_frame = 0
 
 
-## Advances the player's walk-step offset by real elapsed time, at
-## Gen2WorldAnimation's hardware-frame rate and stall catch-up cap, so both stay
-## in phase after a pause. This only shrinks a presentation offset that starts
-## and ends at player_cell; it never changes player_cell, collision or event
-## results, and a caller that never starts a step sees no difference.
-func advance_player_step(delta: float) -> bool:
-	if _player_step_frames_remaining <= 0 or delta <= 0.0:
+## Spends one hardware frame of the player's walk-step offset.
+##
+## This only shrinks a presentation offset that starts and ends at player_cell;
+## it never changes player_cell, collision or event results, and a caller that
+## never starts a step sees no difference.
+func advance_player_step_frame() -> bool:
+	if _player_step_frames_remaining <= 0:
 		return false
-	_player_step_accumulator = minf(
-		_player_step_accumulator + delta,
-		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
-	)
-	var changed: bool = false
-	while _player_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS \
-		and _player_step_frames_remaining > 0:
-		_player_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
-		_player_step_frame = (_player_step_frame + 1) & 0x0F
-		_player_step_frames_remaining -= 1
-		if _player_step_frames_remaining <= 0:
-			if _player_queued_steps.is_empty():
-				_player_scripted_steps = false
-			else:
-				var next: Dictionary = _player_queued_steps.pop_front()
-				_begin_player_step(next["direction"], int(next["frames"]))
-		changed = true
-	return changed
+	_player_step_frame = (_player_step_frame + 1) & 0x0F
+	_player_step_frames_remaining -= 1
+	if _player_step_frames_remaining <= 0:
+		if _player_queued_steps.is_empty():
+			_player_scripted_steps = false
+		else:
+			var next: Dictionary = _player_queued_steps.pop_front()
+			_begin_player_step(next["direction"], int(next["frames"]))
+	return true
 
 
 ## GetPlayerSprite: the sprite for the player's current state, not a fixed one.
@@ -1575,10 +1572,10 @@ func pending_phone_ring() -> Dictionary:
 ## Advances the source ring timing and starts the imported phone script when
 ## both rings have completed. A phone ring is transient runtime state and is
 ## intentionally absent from world snapshots.
-func advance_phone_ring(delta: float) -> Array:
+func advance_phone_ring_frame() -> Array:
 	if _phone_ring == null:
 		return []
-	var progress: Dictionary = _phone_ring.advance(delta)
+	var progress: Dictionary = _phone_ring.advance_frame()
 	if not bool(progress.get("finished", false)):
 		return []
 	var request: Dictionary = _phone_ring_request.duplicate(true)
@@ -1798,7 +1795,15 @@ func _fishing_context(rod: StringName) -> Dictionary:
 	}
 
 
-func tick() -> bool:
+## Counts one hardware frame, ahead of the advance_*_frame() calls that spend it.
+## [method Gen2WorldScreen.advance_frame] is the only caller.
+func advance_frame_counter() -> int:
+	frame_number += 1
+	return frame_number
+
+
+## One hardware frame of every object's emote countdown.
+func advance_emotes_frame() -> bool:
 	var changed: bool = false
 	for object: Gen2WorldObject in objects:
 		changed = object.tick_emote() or changed
@@ -3270,7 +3275,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				# The cell commits here, as it does for every other step in this
 				# runtime; only the drawing trails. A stream applies in one call,
 				# so the whole path is queued and drawn a step at a time by
-				# advance_scripted_steps().
+				# advance_scripted_steps_frame().
 				object.queue_step(direction, int(SCRIPTED_STEP_FRAMES[kind]))
 			else:
 				generated.append({
@@ -3828,8 +3833,8 @@ func _object_landing_cells(
 ## advance after each successful player step.
 ##
 ## One movement decision per eligible object per call. A caller wanting the
-## source's pacing uses advance_object_steps(), which spends the step and idle
-## durations this records.
+## source's pacing uses advance_object_steps_frame(), which spends the step and
+## idle durations this records.
 func advance_objects(random: RandomNumberGenerator) -> int:
 	var moved: int = 0
 	for object: Gen2WorldObject in objects:
@@ -3872,90 +3877,67 @@ func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenera
 	return true
 
 
-## Paces the data-driven movement templates by real elapsed time, at the same
-## hardware-frame rate and stall catch-up cap the player's own walk step and
-## Gen2WorldAnimation use.
+## One hardware frame of the data-driven movement templates.
 ##
 ## Per frame an object spends one frame of an in-flight step, one frame of its
 ## wait, or takes a new decision: the source's STEP_TYPE_CONTINUE_WALK,
 ## STEP_TYPE_SLEEP and STEP_TYPE_FROM_MOVEMENT cycle. The cell commits when the
 ## step starts, matching InitStep and the player path, and only the presentation
 ## offset trails. Returns true when something a renderer draws changed.
-func advance_object_steps(delta: float, random: RandomNumberGenerator) -> bool:
-	if delta <= 0.0 or random == null or objects.is_empty():
+func advance_object_steps_frame(random: RandomNumberGenerator) -> bool:
+	if random == null or objects.is_empty():
 		return false
-	_object_step_accumulator = minf(
-		_object_step_accumulator + delta,
-		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
-	)
 	var changed: bool = false
-	while _object_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
-		_object_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
-		for object: Gen2WorldObject in objects:
-			if not object.active or object.deleted:
-				continue
-			# A scripted trail belongs to advance_scripted_steps(), which runs
-			# while a script does. Draining it here as well would walk it at
-			# twice the speed on every frame both drivers run.
-			if object.scripted_steps:
-				continue
-			# A step in flight is drained whatever put it there, so a pushed
-			# boulder slides even though its template never decides anything.
-			# StepFunction_StrengthBoulder ends by standing the boulder back up
-			# without rolling a wait, which is why only a template that decides
-			# reaches start_idle below.
-			if object.is_stepping():
-				if object.tick_step():
-					changed = true
-					if not object.is_stepping() and object.movement_advances():
-						# StepFunction_ContinueWalk rolls a new wait the moment
-						# the step duration reaches zero, so a wandering object
-						# pauses between steps instead of walking without
-						# stopping.
-						object.start_idle(random.randi() & IDLE_MASK_SLOW)
-				continue
-			if not object.movement_advances():
-				continue
-			if object.tick_idle():
-				continue
-			var facing_before: int = object.facing
-			if _decide_object_movement(object, random):
-				_remember_object_position(object)
+	for object: Gen2WorldObject in objects:
+		if not object.active or object.deleted:
+			continue
+		# A scripted trail belongs to advance_scripted_steps_frame(), which runs
+		# while a script does. Draining it here as well would walk it at twice
+		# the speed on every frame both drivers run.
+		if object.scripted_steps:
+			continue
+		# A step in flight is drained whatever put it there, so a pushed
+		# boulder slides even though its template never decides anything.
+		# StepFunction_StrengthBoulder ends by standing the boulder back up
+		# without rolling a wait, which is why only a template that decides
+		# reaches start_idle below.
+		if object.is_stepping():
+			if object.tick_step():
 				changed = true
-			elif object.facing != facing_before:
-				_remember_object_position(object)
-				changed = true
+				if not object.is_stepping() and object.movement_advances():
+					# StepFunction_ContinueWalk rolls a new wait the moment
+					# the step duration reaches zero, so a wandering object
+					# pauses between steps instead of walking without
+					# stopping.
+					object.start_idle(random.randi() & IDLE_MASK_SLOW)
+			continue
+		if not object.movement_advances():
+			continue
+		if object.tick_idle():
+			continue
+		var facing_before: int = object.facing
+		if _decide_object_movement(object, random):
+			_remember_object_position(object)
+			changed = true
+		elif object.facing != facing_before:
+			_remember_object_position(object)
+			changed = true
 	return changed
 
 
 ## Drains the presentation trail an `applymovement` left on the objects it moved,
 ## and nothing else.
 ##
-## Separate from [method advance_object_steps] because that one decides movement
-## and a caller stops calling it while a script runs, which is exactly when a
-## scripted stream needs drawing. This decides nothing, rolls nothing and writes
-## no cell: every cell the stream names committed when it was applied. Returns
-## true when something a renderer draws moved.
-func advance_scripted_steps(delta: float) -> bool:
-	if delta <= 0.0 or objects.is_empty():
-		return false
-	var walking: Array = []
-	for object: Gen2WorldObject in objects:
-		if object.scripted_steps and not object.deleted:
-			walking.append(object)
-	if walking.is_empty():
-		_scripted_step_accumulator = 0.0
-		return false
-	_scripted_step_accumulator = minf(
-		_scripted_step_accumulator + delta,
-		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
-	)
+## Separate from [method advance_object_steps_frame] because that one decides
+## movement and a caller stops calling it while a script runs, which is exactly
+## when a scripted stream needs drawing. This decides nothing, rolls nothing and
+## writes no cell: every cell the stream names committed when it was applied.
+## Returns true when something a renderer draws moved.
+func advance_scripted_steps_frame() -> bool:
 	var changed: bool = false
-	while _scripted_step_accumulator >= Gen2WorldAnimation.FRAME_SECONDS:
-		_scripted_step_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
-		for object: Gen2WorldObject in walking:
-			if object.tick_step():
-				changed = true
+	for object: Gen2WorldObject in objects:
+		if object.scripted_steps and not object.deleted and object.tick_step():
+			changed = true
 	return changed
 
 
@@ -3965,12 +3947,11 @@ func advance_scripted_steps(delta: float) -> bool:
 ## The two waits are `ScriptEvents`'s own: SCRIPT_WAIT_MOVEMENT, which ends when
 ## the stream an `applymovement` started has been drawn, and the counted delay
 ## `pause`, `wait`, `deactivatefacing` and `showemote` spend. A host calls this
-## once per frame beside [method advance_scripted_steps], which is what draws
-## the movement the first one waits for.
-func advance_script_wait(delta: float) -> Array:
+## once per frame beside [method advance_scripted_steps_frame], which is what
+## draws the movement the first one waits for.
+func advance_script_wait_frame() -> Array:
 	var wait: Dictionary = pending_script_wait()
 	if wait.is_empty():
-		_script_wait_accumulator = 0.0
 		_script_wait_frames = -1
 		return []
 	if StringName(wait.get("wait", &"")) == Gen2WorldScriptRunner.WAIT_MOVEMENT:
@@ -3979,14 +3960,7 @@ func advance_script_wait(delta: float) -> Array:
 		return _complete_script_wait()
 	if _script_wait_frames < 0:
 		_script_wait_frames = maxi(0, int(wait.get("frames", 0)))
-		_script_wait_accumulator = 0.0
-	_script_wait_accumulator = minf(
-		_script_wait_accumulator + maxf(delta, 0.0),
-		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
-	)
-	while _script_wait_accumulator >= Gen2WorldAnimation.FRAME_SECONDS \
-		and _script_wait_frames > 0:
-		_script_wait_accumulator -= Gen2WorldAnimation.FRAME_SECONDS
+	if _script_wait_frames > 0:
 		_script_wait_frames -= 1
 	if _script_wait_frames > 0:
 		return []
@@ -4006,7 +3980,6 @@ func scripted_movement_in_progress() -> bool:
 
 
 func _complete_script_wait() -> Array:
-	_script_wait_accumulator = 0.0
 	_script_wait_frames = -1
 	if _active_script == null:
 		return []
@@ -4019,10 +3992,10 @@ func _complete_script_wait() -> Array:
 ## One hardware frame of every presentation a script waits on, for a caller with
 ## no render loop of its own: the trails and then the wait that is watching them.
 ## A screen calls the three parts itself, in the order it already draws them.
-func advance_script_presentation(delta: float) -> Array:
-	advance_player_step(delta)
-	advance_scripted_steps(delta)
-	return advance_script_wait(delta)
+func advance_script_presentation_frame() -> Array:
+	advance_player_step_frame()
+	advance_scripted_steps_frame()
+	return advance_script_wait_frame()
 
 
 ## Spends whole waits at the hardware frame rate until the script is no longer
@@ -4035,7 +4008,7 @@ func finish_script_waits(frame_limit: int = 1024) -> Array:
 	for _frame: int in frame_limit:
 		if pending_script_wait().is_empty():
 			break
-		var spent: Array = advance_script_presentation(Gen2WorldAnimation.FRAME_SECONDS)
+		var spent: Array = advance_script_presentation_frame()
 		if not spent.is_empty():
 			results = spent
 	return results
@@ -4542,9 +4515,7 @@ func _apply_map(
 	_apply_map_setup_player_state()
 	_clear_player_step()
 	# _load_objects() rebuilds every record, so in-flight object steps end with
-	# the objects that owned them; only the shared frame accumulators survive.
-	_object_step_accumulator = 0.0
-	_scripted_step_accumulator = 0.0
+	# the objects that owned them.
 	_load_objects()
 	# The cartridge moves roaming Pokémon in map setup, not on a timer, so a
 	# player who stands still does not watch them cross Johto.

@@ -74,8 +74,6 @@ var _pokedex_host: Gen2PokedexScreen = null
 ## dex closing and reopening for as long as the game runs, the way the start
 ## menu cursor below survives its own screen.
 var _pokedex_prev_entry: int = 0
-## Leftover of a frame the play timer has not counted yet.
-var _game_time_seconds: float = 0.0
 var _service_host: Gen2WorldServiceScreen = null
 var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
@@ -99,9 +97,23 @@ var _encounter_random := RandomNumberGenerator.new()
 ## encounters and script results however long the player stands watching.
 var _object_random := RandomNumberGenerator.new()
 var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
-## Paces the held-direction poll at the hardware's frame rate rather than the
-## host's. See [method _advance_held_direction].
-var _walk_accumulator: float = 0.0
+## Real time banked toward the next hardware frame. The overworld's one clock:
+## see [method _process].
+var _frame_elapsed: float = 0.0
+## `(frame, button)` input, recorded from a run and played back into another.
+## Both are opt-in and off in play. A replay applies a log's entries on the frame
+## that recorded them, from inside the pump, so a host that owes two frames
+## delivers the input of both rather than only of the later one; that is what
+## makes a replay independent of the frame rate it was recorded at.
+var _input_recording: Array = []
+var _recording_input: bool = false
+var _input_replay: Dictionary = {}
+var _replaying_input: bool = false
+## What a replay is holding down, in place of the runtime's own poll.
+var _replay_held_direction: int = Gen2Button.NONE
+## Whether a frame is being spent right now, which is what tells a press
+## delivered from inside the pump from one that arrived between two frames.
+var _spending_frame: bool = false
 var _screen_base_position: Vector2 = Vector2.ZERO
 
 @onready var _screen: Gen2Screen = %Screen
@@ -131,6 +143,30 @@ func set_data(data: GameData) -> void:
 ## Normal gameplay still reads the selected slot from GameRuntime.
 func set_save(save: Gen2SaveData) -> void:
 	_injected_save = save
+
+
+## The run's seed, in the order a run can claim one: the slot that recorded it,
+## the snapshot it was opened from, the scene's own development export, then a
+## fresh roll. Whatever wins is written back to the slot, so a run is
+## reproducible from the frame it started rather than from the next save.
+func _resolve_run_seed(save: Gen2SaveData) -> int:
+	var value: int = 0
+	if save != null and save.run_seed != 0:
+		value = save.run_seed
+	elif _world.random_seed != 0:
+		value = _world.random_seed
+	elif encounter_seed != 0:
+		value = encounter_seed
+	else:
+		var rolled := RandomNumberGenerator.new()
+		rolled.randomize()
+		while value == 0:
+			value = rolled.randi()
+	if save != null:
+		save.run_seed = value
+		if save.run_mods.is_empty():
+			save.run_mods = Gen2ModHost.instance().loaded_mods()
+	return value
 
 
 func _build_world() -> void:
@@ -170,12 +206,12 @@ func _build_world() -> void:
 		_hint.text = "Choose an imported map and starting cell in the scene settings."
 		return
 	_refresh_party_summary()
-	if encounter_seed != 0:
-		_encounter_random.seed = encounter_seed
-		_object_random.seed = encounter_seed + 1
-	else:
-		_encounter_random.randomize()
-		_object_random.randomize()
+	var run_seed: int = _resolve_run_seed(selected_save)
+	_encounter_random.seed = run_seed
+	## One seed, two streams: the second is offset so the object generator is not
+	## a replay of the encounter one.
+	_object_random.seed = run_seed + 1
+	_world.random_seed = run_seed
 
 	_world.schedule_random = _encounter_random
 	_world.script_random = _encounter_random
@@ -301,52 +337,73 @@ func cycle_world_renderer() -> Dictionary:
 	return select_world_renderer(ids[posmod(at + 1, ids.size())])
 
 
+## Real time becomes hardware frames here and nowhere else in the overworld.
+## Everything that counts frames is spent by [method advance_frame]; the day
+## cycle underneath it is the one deliberate reader of `delta`, because Gen II
+## keeps a real-time clock and a wall-clock reading is what the day cycle wants.
 func _process(delta: float) -> void:
-	_advance_game_time(delta)
+	_frame_elapsed = minf(
+		_frame_elapsed + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
+	)
+	while _frame_elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
+		_frame_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+		advance_frame()
+	_advance_day_cycle(delta)
+
+
+## Spends [param count] hardware frames. Public beside [method advance_frame] so
+## a test, a preview tool or a replay settles the world on the frames it owes
+## rather than on a clock.
+func advance_frames(count: int) -> void:
+	for _frame: int in maxi(0, count):
+		advance_frame()
+
+
+## One hardware frame of the overworld, in the order the frame is drawn in.
+##
+## Every countdown below is spent exactly once here, so each is a function of
+## [member Gen2WorldAPI.frame_number] and not of banked real time.
+func advance_frame() -> void:
+	_spending_frame = true
+	if _world != null:
+		_world.advance_frame_counter()
+		if _replaying_input:
+			_apply_replayed_input(_world.frame_number)
+	_advance_game_time_frame()
 	if _effects != null:
-		_effects.advance(delta)
+		_effects.advance_frame()
 		_apply_world_effect_offset()
-	if _animation != null and _animation.advance(delta) and _renderer != null:
+	if _animation != null and _animation.advance_frame() and _renderer != null:
 		_renderer.refresh_animation()
-	if _world != null and _world.advance_player_step(delta) and _renderer != null:
+	if _world != null and _world.advance_player_step_frame() and _renderer != null:
 		_renderer.refresh()
-	if _world != null and _world.tick() and _renderer != null:
+	if _world != null and _world.advance_emotes_frame() and _renderer != null:
 		_renderer.refresh()
 	_advance_forced_movement()
-	_advance_held_direction(delta)
-	if _objects_may_move() and _world.advance_object_steps(delta, _object_random) \
+	_advance_held_direction()
+	if _objects_may_move() and _world.advance_object_steps_frame(_object_random) \
 		and _renderer != null:
 		_renderer.refresh()
 	# Not gated on _objects_may_move(): an applymovement is drawn while the
 	# script that ran it is still going, which is when a script runs one.
-	if _world != null and _world.advance_scripted_steps(delta) and _renderer != null:
+	if _world != null and _world.advance_scripted_steps_frame() and _renderer != null:
 		_renderer.refresh()
 	# After the trail, because the frame it finishes drawing is the frame the
 	# script waiting on it resumes.
 	if _world != null and not _world.pending_script_wait().is_empty():
-		var wait_results: Array = _world.advance_script_wait(delta)
+		var wait_results: Array = _world.advance_script_wait_frame()
 		if not wait_results.is_empty():
 			_show_script_results(wait_results)
 	if not _trainer_approach.is_empty():
 		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
-		var ring_results: Array = _world.advance_phone_ring(delta)
+		var ring_results: Array = _world.advance_phone_ring_frame()
 		if not ring_results.is_empty():
 			_show_script_results(ring_results)
 		_refresh_labels()
-	if _clock != null and _world != null:
-		var ticks: Array = _clock.advance(delta, _world)
-		_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
-		if not ticks.is_empty():
-			_update_time_of_day()
-			if not _overlay_open() and not _world.script_input_waiting():
-				var phone_schedule: Dictionary = _world.advance_phone_schedule(
-					ticks.size(), _encounter_random
-				)
-				var phone_results: Array = phone_schedule.get("results", [])
-				if bool(phone_schedule.get("attempted", false)) and not phone_results.is_empty():
-					_show_script_results(phone_results)
-			_refresh_labels()
+	# The condition is the audio device's, not a counter's, but the request it
+	# completes is a script's, so it lands on a frame like every other resume.
 	if _audio_waiting and _audio_player != null and not _audio_player.effect_playing():
 		_audio_waiting = false
 		var audio_result: Dictionary = Gen2WorldHost.complete_runtime_request(
@@ -354,6 +411,66 @@ func _process(delta: float) -> void:
 		)
 		if bool(audio_result.get("ok", false)):
 			_show_script_results(audio_result.get("results", []))
+	_spending_frame = false
+
+
+## Starts recording every button the world consumes, discarding any earlier log.
+## What a run has to be replayable beside its seed: see [method replay_input] and
+## `tools/replay_world.gd`.
+func record_input() -> void:
+	_input_recording = []
+	_recording_input = true
+
+
+## The recorded `(frame, kind, button)` entries, in the order they were consumed.
+func input_recording() -> Array:
+	return _input_recording.duplicate(true)
+
+
+## Plays a recorded log back into this world instead of reading the input
+## runtime. Every entry is applied on the frame it names, from inside the pump.
+func replay_input(log: Array) -> void:
+	_input_replay = {}
+	for raw: Variant in log:
+		if not raw is Dictionary:
+			continue
+		var entry: Dictionary = raw
+		var frame: int = int(entry.get("frame", 0))
+		var at: Dictionary = _input_replay.get(frame, {"hold": Gen2Button.NONE, "presses": []})
+		if String(entry.get("kind", "")) == "hold":
+			at["hold"] = int(entry.get("button", Gen2Button.NONE))
+		else:
+			(at["presses"] as Array).append(int(entry.get("button", Gen2Button.NONE)))
+		_input_replay[frame] = at
+	_replaying_input = true
+
+
+func _apply_replayed_input(frame: int) -> void:
+	var at: Dictionary = _input_replay.get(frame, {})
+	_replay_held_direction = int(at.get("hold", Gen2Button.NONE))
+	for button: int in at.get("presses", []) as Array:
+		press_button(button)
+
+
+## The Generation 2 day cycle, which is the one thing here that is not a frame
+## count: the cartridge reads a real-time clock, so [Gen2WorldClock] takes real
+## seconds and a replay holds it rather than converting it.
+func _advance_day_cycle(delta: float) -> void:
+	if _clock == null or _world == null:
+		return
+	var ticks: Array = _clock.advance(delta, _world)
+	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
+	if ticks.is_empty():
+		return
+	_update_time_of_day()
+	if not _overlay_open() and not _world.script_input_waiting():
+		var phone_schedule: Dictionary = _world.advance_phone_schedule(
+			ticks.size(), _encounter_random
+		)
+		var phone_results: Array = phone_schedule.get("results", [])
+		if bool(phone_schedule.get("attempted", false)) and not phone_results.is_empty():
+			_show_script_results(phone_results)
+	_refresh_labels()
 
 
 ## .CheckTile's forced walk, which the source polls every frame with no input:
@@ -384,18 +501,18 @@ func _advance_forced_movement() -> void:
 ## hardware. The poll runs once per hardware frame, which is what the source
 ## did, and [method move_player] refuses while a step is still in flight, which
 ## is what turns sixty polls a second into one step every sixteen frames.
-func _advance_held_direction(delta: float) -> void:
-	_walk_accumulator = minf(
-		_walk_accumulator + delta,
-		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
-	)
-	if _walk_accumulator < Gen2WorldAnimation.FRAME_SECONDS:
-		return
-	_walk_accumulator = fmod(_walk_accumulator, Gen2WorldAnimation.FRAME_SECONDS)
+func _advance_held_direction() -> void:
+	## Polled before the pauses below rather than after, so a recording is what
+	## was held rather than what the world did with it.
+	var direction: int = _replay_held_direction if _replaying_input \
+		else Gen2InputRuntime.instance().held_direction()
+	if _recording_input and _world != null and direction != Gen2Button.NONE:
+		_input_recording.append({
+			"frame": _world.frame_number, "kind": "hold", "button": direction,
+		})
 	if not _objects_may_move() or _world.script_input_waiting() \
 		or _world.player_step_in_progress():
 		return
-	var direction: int = Gen2InputRuntime.instance().held_direction()
 	if direction != Gen2Button.NONE:
 		move_player(Gen2Button.vector(direction))
 
@@ -431,7 +548,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var button: int = Gen2Button.pressed_in(event)
 	if button != Gen2Button.NONE:
-		if _handle_button(button):
+		if press_button(button):
 			accept_event()
 		return
 	if event.is_pressed() and _handle_debug_key(event):
@@ -442,6 +559,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	# motion, and the screen has no opinion about either.
 	if _renderer_input_free() and Gen2ModHost.renderer_handles_input(_renderer, event):
 		accept_event()
+
+
+## One button, from whichever device produced it or from a replay, and the one
+## place a press is recorded. A press between two frames is consumed by the world
+## at the start of the next one, which is the frame the log names.
+func press_button(button: int) -> bool:
+	if _world == null or button == Gen2Button.NONE:
+		return false
+	if _recording_input:
+		_input_recording.append({
+			"frame": _world.frame_number if _spending_frame else _world.frame_number + 1,
+			"kind": "press",
+			"button": button,
+		})
+	return _handle_button(button)
 
 
 ## Routes one button to whatever owns the screen, and reports whether anything
@@ -747,23 +879,13 @@ func persist_world_snapshot() -> Dictionary:
 ## is cleared for `Script_halloffame` alone (engine/overworld/scripting.asm:2318)
 ## and `wGameLogicPaused` is set by Bill's PC (engine/pokemon/bills_pc.asm:2000)
 ## and by saving, which costs no frames here.
-##
-## Catch-up is capped the way [method Gen2WorldAnimation.advance] caps it, so a
-## stalled host cannot hand the timer a minute of frames at once.
-func _advance_game_time(delta: float) -> void:
+func _advance_game_time_frame() -> void:
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	if save == null or save.game_time == null:
 		return
 	if _hall_of_fame_host != null or _pc_host != null:
 		return
-	_game_time_seconds += minf(
-		delta, Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES)
-	)
-	var frames: int = int(_game_time_seconds / Gen2WorldAnimation.FRAME_SECONDS)
-	if frames <= 0:
-		return
-	_game_time_seconds -= float(frames) * Gen2WorldAnimation.FRAME_SECONDS
-	save.game_time.advance_frames(frames)
+	save.game_time.advance_frames(1)
 
 
 ## Deterministic driver for tests and screenshot tooling. The live scene uses
@@ -1344,12 +1466,11 @@ func _start_trainer_approach(request: Dictionary) -> void:
 	_refresh_labels()
 
 
-## Paced by call count rather than delta time, matching the emote and
-## movement-delay counters beside it and staying independent of real frame
-## timing. The object's step_frames_remaining (set by
-## [method Gen2WorldAPI.advance_trainer_approach_step]) is consumed one per call
-## like those counters, while step_offset() still gives the renderer 16-frame
-## interpolation.
+## One hardware frame of `SeenByTrainerScript`'s presentation: the shock emote's
+## own count, the movement delay, then one planned cell at a time. The object's
+## step_frames_remaining (set by
+## [method Gen2WorldAPI.advance_trainer_approach_step]) is spent by the same
+## frame, while step_offset() still gives the renderer 16-frame interpolation.
 func _advance_trainer_approach() -> void:
 	if _world == null:
 		_trainer_approach = {}

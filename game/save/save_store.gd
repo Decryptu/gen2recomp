@@ -305,7 +305,14 @@ static func create_new_game(
 	new_save.slot = slot
 	new_save.player_name = player_name
 	new_save.player_id = generator.randi_range(0, 0xFFFF)
+	# Rolled beside wPlayerID and never changed after, so a run is reproducible
+	# from its first frame. Zero would read as "unseeded", so it is rerolled.
+	while new_save.run_seed == 0:
+		new_save.run_seed = generator.randi()
+	new_save.run_mods = Gen2ModHost.instance().loaded_mods()
 	new_save.world = Gen2WorldSpawn.new_game_snapshot(data)
+	if new_save.world != null:
+		new_save.world.random_seed = new_save.run_seed
 	return new_save
 
 

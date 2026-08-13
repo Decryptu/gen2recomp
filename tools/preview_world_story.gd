@@ -8166,7 +8166,7 @@ func _push_boulder_run(
 
 ## Spends hardware frames until no object is mid-step. A pushed boulder slides
 ## for STEP_FRAMES_BOULDER_PUSH frames and refuses a second push until it stands
-## again, and advance_object_steps() caps its own catch-up, so this has to tick.
+## again, so this has to spend the frames rather than ask for them at once.
 func _settle_object_steps(world: Gen2WorldAPI, random: RandomNumberGenerator) -> void:
 	for _frame: int in OBJECT_STEP_FRAME_BUDGET:
 		var stepping: bool = false
@@ -8176,7 +8176,7 @@ func _settle_object_steps(world: Gen2WorldAPI, random: RandomNumberGenerator) ->
 				break
 		if not stepping:
 			return
-		world.advance_object_steps(Gen2WorldAnimation.FRAME_SECONDS, random)
+		world.advance_object_steps_frame(random)
 
 
 ## Mahogany Town east to Blackthorn City, on the same world, state and save.
@@ -9151,7 +9151,7 @@ func _drain_phone_ring(world: Gen2WorldAPI) -> Array:
 	for _frame: int in PHONE_RING_FRAME_BUDGET:
 		if not world.phone_ring_active():
 			return []
-		var results: Array = world.advance_phone_ring(Gen2WorldPhoneRing.FRAME_SECONDS)
+		var results: Array = world.advance_phone_ring_frame()
 		if not results.is_empty():
 			return results
 	return []
@@ -9308,7 +9308,7 @@ func _drain_story(
 					last_details = JSON.stringify(plan)
 					break
 				for _frame: int in int(plan.get("emote_frames", 0)):
-					world.tick()
+					world.advance_emotes_frame()
 				var approach_failed: bool = false
 				for path_step: Vector2i in plan.get("path", []):
 					var stepped: Dictionary = world.advance_trainer_approach_step(

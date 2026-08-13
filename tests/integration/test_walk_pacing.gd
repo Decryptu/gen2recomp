@@ -14,9 +14,6 @@ extends GutTest
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
-## One source VBlank, which is what the step accumulator counts in.
-const FRAME: float = 1.0 / 59.7275
-
 var _world: Gen2WorldAPI = null
 
 
@@ -50,9 +47,9 @@ func test_the_step_durations_are_the_source_rows() -> void:
 func test_a_walk_step_costs_exactly_eight_frames() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step(FRAME)
+		_world.advance_player_step_frame()
 		assert_true(_world.player_step_in_progress(), "still walking")
-	_world.advance_player_step(FRAME)
+	_world.advance_player_step_frame()
 	assert_false(_world.player_step_in_progress(), "the eighth frame ends it")
 
 
@@ -62,12 +59,12 @@ func test_a_queued_step_starts_on_the_frame_the_last_one_ends() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	_world._queue_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames():
-		_world.advance_player_step(FRAME)
+		_world.advance_player_step_frame()
 	assert_true(_world.player_step_in_progress(), "the second step took over")
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step(FRAME)
+		_world.advance_player_step_frame()
 		assert_true(_world.player_step_in_progress())
-	_world.advance_player_step(FRAME)
+	_world.advance_player_step_frame()
 	assert_false(_world.player_step_in_progress(), "and cost the same eight")
 
 
@@ -76,10 +73,10 @@ func test_a_queued_step_starts_on_the_frame_the_last_one_ends() -> void:
 func test_the_offset_covers_one_cell() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step(FRAME)
+		_world.advance_player_step_frame()
 	assert_ne(
 		_world.player_step_offset_cells(), Vector2.ZERO,
 		"the pic is still short of the cell"
 	)
-	_world.advance_player_step(FRAME)
+	_world.advance_player_step_frame()
 	assert_eq(_world.player_step_offset_cells(), Vector2.ZERO, "and lands on it")

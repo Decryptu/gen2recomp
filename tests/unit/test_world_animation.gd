@@ -91,34 +91,18 @@ func test_water_command_writes_the_imported_frame_and_done_loops() -> void:
 	assert_eq(animation.current_indices()[0], 1)
 
 
-func test_advance_paces_commands_by_elapsed_time_not_by_rendered_frames() -> void:
+func test_advance_frame_reports_no_redraw_when_the_command_changes_nothing() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
 	var animation := Gen2WorldAnimation.new()
 	animation.configure(world)
 
-	# A frame shorter than one hardware frame runs no command at all, so a fast
-	# display cannot make the sequence run faster than the cartridge does.
-	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS * 0.5))
-	assert_eq(animation.current_indices()[0], 0)
-
-	# The remainder carries over: two half frames are one whole one.
-	assert_true(animation.advance(Gen2WorldAnimation.FRAME_SECONDS * 0.5))
-	assert_eq(animation.current_indices()[0], 1)
-
-
-func test_advance_reports_no_redraw_when_the_command_changes_nothing() -> void:
-	var data: GameData = GameData.open_directory(_directory)
-	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
-	var animation := Gen2WorldAnimation.new()
-	animation.configure(world)
-
-	assert_true(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_true(animation.advance_frame())
 	# "done" only rewinds the command index, so nothing new is drawn and the
 	# renderer must not rebuild its atlas for it.
-	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_false(animation.advance_frame())
 	# The water command runs again, but writes the frame that is already there.
-	assert_false(animation.advance(Gen2WorldAnimation.FRAME_SECONDS))
+	assert_false(animation.advance_frame())
 
 
 func test_changed_tiles_reports_exactly_the_tiles_a_frame_rewrote() -> void:
@@ -131,7 +115,7 @@ func test_changed_tiles_reports_exactly_the_tiles_a_frame_rewrote() -> void:
 	# stale tile on screen and an over-report costs the work this replaced.
 	for _frame: int in 240:
 		var before: PackedByteArray = animation.current_indices().duplicate()
-		var redraw: bool = animation.advance(Gen2WorldAnimation.FRAME_SECONDS)
+		var redraw: bool = animation.advance_frame()
 		var after: PackedByteArray = animation.current_indices()
 		var actually_changed: Array = []
 		var width: int = RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_WIDTH
@@ -145,15 +129,3 @@ func test_changed_tiles_reports_exactly_the_tiles_a_frame_rewrote() -> void:
 					break
 		assert_eq(Array(animation.changed_tiles()), actually_changed)
 		assert_eq(redraw, not actually_changed.is_empty() or animation.palette_changed())
-
-
-func test_advance_drops_frames_after_a_stall_instead_of_running_the_backlog() -> void:
-	var data: GameData = GameData.open_directory(_directory)
-	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
-	var animation := Gen2WorldAnimation.new()
-	animation.configure(world)
-
-	# Ten seconds of stall is close to 600 hardware frames. Only the capped
-	# catch-up runs, so recovery costs a bounded amount of work.
-	animation.advance(10.0)
-	assert_lt(animation.command_index(), Gen2WorldAnimation.MAX_CATCHUP_FRAMES + 1)

@@ -88,8 +88,8 @@ var step_frames_remaining: int = 0
 var queued_steps: Array = []
 ## True while the trail above belongs to a script rather than to the movement
 ## templates, which is what tells the two drivers apart:
-## Gen2WorldAPI.advance_object_steps() decides movement and is refused while a
-## script runs, advance_scripted_steps() only draws and is not.
+## Gen2WorldAPI.advance_object_steps_frame() decides movement and is refused while a
+## script runs, advance_scripted_steps_frame() only draws and is not.
 var scripted_steps: bool = false
 ## Frames this object waits before its movement template decides again. The
 ## source keeps this in OBJECT_STEP_DURATION while the object sits in

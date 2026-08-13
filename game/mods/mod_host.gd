@@ -120,6 +120,8 @@ signal option_changed(id: StringName, key: StringName, value: Variant)
 static var _instance: Gen2ModHost = null
 
 var _manifests: Dictionary = {}
+## Mod id to version for every entry script that ran. See [method loaded_mods].
+var _loaded: Dictionary = {}
 var _options: Dictionary = {}
 var _world_renderers: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
@@ -785,7 +787,19 @@ func load_mod(manifest: Gen2ModManifest) -> Dictionary:
 	if mod == null or not mod.has_method("register"):
 		return _refuse_load(manifest, &"entry_has_no_register", path)
 	mod.call("register", self, manifest)
+	_loaded[manifest.id] = manifest.version
 	return {"ok": true, "id": manifest.id}
+
+
+## Every mod whose entry script ran, as `id` and `version` pairs in id order.
+## What a save records so a crash report or a replay can name what was loaded.
+func loaded_mods() -> Array:
+	var out: Array = []
+	var ids: Array = _loaded.keys()
+	ids.sort()
+	for id: StringName in ids:
+		out.append({"id": String(id), "version": String(_loaded[id])})
+	return out
 
 
 func _refuse_load(manifest: Gen2ModManifest, reason: StringName, path: String) -> Dictionary:
