@@ -50,6 +50,8 @@ var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
 var _gender_screen_palette: Array = []
+var _copyright_string: Array = []
+var _copyright_palette: Array = []
 var _text_bg_palette: Array = []
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -108,6 +110,10 @@ static func open_directory(path: String) -> GameData:
 	data._card_palettes = manifest.get("card_palettes", {})
 	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
 	data._gender_screen_palette = gender_palette if gender_palette is Array else []
+	var copyright_string: Variant = manifest.get("copyright_string", [])
+	data._copyright_string = copyright_string if copyright_string is Array else []
+	var copyright_palette: Variant = manifest.get("copyright_palette", [])
+	data._copyright_palette = copyright_palette if copyright_palette is Array else []
 	var text_palette: Variant = manifest.get("text_bg_palette", [])
 	data._text_bg_palette = text_palette if text_palette is Array else []
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
@@ -1005,6 +1011,27 @@ func gender_screen_palette() -> PackedColorArray:
 		return PackedColorArray()
 	var colors := PackedColorArray()
 	for packed: Variant in _gender_screen_palette:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## `CopyrightString`'s tile codes, in source order and including the `next`
+## that separates its rows. Empty on a cache that has no copyright screen, which
+## is the caller's cue not to draw one.
+func copyright_string() -> PackedByteArray:
+	var out := PackedByteArray()
+	for code: Variant in _copyright_string:
+		out.append(int(code) & 0xFF)
+	return out
+
+
+## PREDEFPAL_GAMEFREAK_LOGO_BG, the copyright screen's own four colours. Empty
+## on a cache imported before they were.
+func copyright_palette() -> PackedColorArray:
+	if _copyright_palette.size() < RomLayout.COPYRIGHT_PALETTE_COLORS:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in _copyright_palette:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
 

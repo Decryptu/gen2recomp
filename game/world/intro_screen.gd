@@ -29,6 +29,7 @@ var _label: String = ""
 var _gender: int = Gen2SaveData.GENDER_MALE
 var _standalone: bool = true
 
+var _splash: Gen2SplashScreen = null
 var _gender_screen: Gen2GenderScreen = null
 var _speech: Gen2OakSpeechScreen = null
 ## Null when a driver builds this class directly rather than instancing the
@@ -92,6 +93,8 @@ func _take_pending() -> void:
 
 ## Which sub-screen is up, so a test or a driver can press into the right one.
 func current() -> Control:
+	if _splash != null:
+		return _splash
 	if _gender_screen != null:
 		return _gender_screen
 	return _speech
@@ -106,9 +109,29 @@ func handle_button(button: int) -> bool:
 	return screen.handle_button(button) if screen != null else false
 
 
-## `PlayerProfileSetup` first. On Gold and Silver it has no gender screen to
-## reach, so the run starts on Oak's speech and the save keeps GENDER_MALE.
+## `SplashScreen` first, which is the copyright screen and nothing else until
+## the rest of the opening's art is imported, then `PlayerProfileSetup`.
 func _start() -> void:
+	_splash = Gen2SplashScreen.new()
+	if not _splash.open(_data):
+		# Never parented, so it is freed outright rather than queued.
+		_splash.free()
+		_splash = null
+		_start_profile_setup()
+		return
+	_splash.closed.connect(_on_splash_finished)
+	_show_sub_screen(_splash)
+
+
+func _on_splash_finished() -> void:
+	_splash.queue_free()
+	_splash = null
+	_start_profile_setup()
+
+
+## `PlayerProfileSetup`. On Gold and Silver it has no gender screen to reach, so
+## the run starts on Oak's speech and the save keeps GENDER_MALE.
+func _start_profile_setup() -> void:
 	_gender_screen = Gen2GenderScreen.new()
 	if not _gender_screen.open(_data):
 		# Never parented, so it is freed outright rather than queued.

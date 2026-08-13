@@ -2429,6 +2429,41 @@ func test_map_entry_dispatch_runs_the_current_map_callbacks() -> void:
 	assert_eq(world.state.map_scene(1, 1), 2)
 
 
+## `MAPSETUP_ENTER` runs the scene script once, as part of the map load. A host
+## that dispatches the same entry twice is dispatching twice, not entering
+## twice: a replayed scene walks its `applymovement`s again, which is what put
+## the Dragon Shrine's player through the north wall.
+func test_a_second_dispatch_of_one_entry_does_not_run_the_scene_again() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	# addval 1, so a second run would be visible in the flag it never sets.
+	scripts["48:6190"] = [Gen2WorldScript.SETEVENT, 13, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var target_map: Gen2WorldMap = data.world_map(1, 2)
+	target_map.scripts["callbacks"] = []
+	target_map.scripts["scenes"] = [{"id": 0, "script": 0x6190}]
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 2, Vector2i(2, 2))
+
+	var first: Array = world.dispatch_map_entry()
+	assert_eq(first.size(), 1)
+	assert_eq(first[0]["source"]["kind"], &"scene")
+
+	var again: Array = world.dispatch_map_entry()
+	assert_true(again.is_empty(), "the entry was already dispatched")
+
+	# A warp is a new entry, so the destination's own scene is armed again: the
+	# guard is per entry, not once per world.
+	world.state.set_event_flag(13, false)
+	assert_true(bool(world.try_warp(Vector2i(2, 2)).get("ok", false)), "onto map 1/1")
+	world.dispatch_map_entry()
+	assert_true(bool(world.try_warp(Vector2i(6, 6)).get("ok", false)), "and back")
+	var kinds: Array[StringName] = []
+	for result: Dictionary in world.dispatch_map_entry():
+		kinds.append(StringName((result.get("source", {}) as Dictionary).get("kind", &"")))
+	assert_true(kinds.has(&"scene"), "a warp is a new entry")
+	assert_true(world.event_flag_active(13))
+
+
 func test_map_entry_runs_the_default_scene_and_coordinate_events_follow_scene_state() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6050"] = [Gen2WorldScript.SETEVENT, 13, 0, Gen2WorldScript.END]

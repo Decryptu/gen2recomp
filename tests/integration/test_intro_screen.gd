@@ -39,8 +39,18 @@ func _clear_saves() -> void:
 				DirAccess.remove_absolute(copy)
 
 
+## `SplashScreen` runs in front of `PlayerProfileSetup`, so a run that wants the
+## gender question spends the copyright screen's own frames first. No button
+## skips it: `DelayFrames` reads no joypad.
 func _begin() -> void:
 	_screen.begin(_data, SLOT, LABEL, false)
+	_settle_splash()
+
+
+func _settle_splash() -> void:
+	var splash: Gen2SplashScreen = _screen.current() as Gen2SplashScreen
+	if splash != null:
+		splash.advance_frames(splash.frames_left())
 
 
 ## Spends whatever `DelayFrames` the speech is standing in. The intro's fades
@@ -90,8 +100,21 @@ func _run_intro(female: bool = false) -> String:
 	return typed
 
 
+## `SplashScreen` is what `Init` reaches before `NewGame`, so the copyright
+## screen is the first thing a new game shows and the gender question waits for
+## its hundred and ten frames.
+func test_the_copyright_screen_comes_before_the_gender_question() -> void:
+	_screen.begin(_data, SLOT, LABEL, false)
+	assert_true(_screen.current() is Gen2SplashScreen)
+	var splash: Gen2SplashScreen = _screen.current() as Gen2SplashScreen
+	splash.advance_frames(splash.frames_left() - 1)
+	assert_true(_screen.current() is Gen2SplashScreen, "and it is not cut short")
+	splash.advance_frames(1)
+	assert_true(_screen.current() is Gen2GenderScreen)
+
+
 ## `PlayerProfileSetup` runs before `OakSpeech`, so the gender question is the
-## first thing a new game shows.
+## first thing a new game shows once the splash has run.
 func test_the_gender_question_comes_first() -> void:
 	_begin()
 	assert_true(_screen.current() is Gen2GenderScreen)

@@ -1078,3 +1078,78 @@ func test_a_learnset_with_no_terminator_fails_rather_than_running_away() -> void
 	for i: int in RomLayout.MAX_LEVEL_UP_MOVES * 2 + 8:
 		data[at + i] = 1
 	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
+
+
+## `Copyright`'s two halves check each other: every code the string carries has
+## to be a tile of the strip the same routine loads, and the run has to end at
+## "@" after the source's three rows. A wrong offset for either fails one of
+## those, which is what makes the pair worth checking rather than the graphic
+## alone.
+func _copyright_dump() -> PackedByteArray:
+	var data: PackedByteArray = _dump()
+	var entry: Dictionary = _layout["copyright"]
+	var tiles: int = int(entry["tiles"])
+	var strip := PackedByteArray()
+	strip.resize(tiles * Gen2Tiles.TILE_BYTES)
+	strip.fill(0x18)
+	_write(data, int(entry["gfx"]), strip)
+	var codes := PackedByteArray()
+	for row: int in RomLayout.COPYRIGHT_STRING_ROWS:
+		if row > 0:
+			codes.append(RomLayout.COPYRIGHT_STRING_NEXT)
+		for index: int in 4:
+			codes.append(RomLayout.COPYRIGHT_FIRST_CODE + index)
+	codes.append(RomLayout.COPYRIGHT_STRING_TERMINATOR)
+	_write(data, int(entry["string"]), codes)
+	var palette := PackedByteArray()
+	for color: int in RomImporter.COPYRIGHT_COLORS:
+		palette.append(color & 0xFF)
+		palette.append(color >> 8)
+	_write(data, int(entry["palette"]), palette)
+	return data
+
+
+func test_a_plausible_copyright_screen_verifies() -> void:
+	assert_true(RomImporter.verify_copyright(_rom(_copyright_dump()), _layout)["ok"])
+
+
+func test_a_copyright_string_with_a_code_outside_its_strip_fails() -> void:
+	var data: PackedByteArray = _copyright_dump()
+	var at: int = int((_layout["copyright"] as Dictionary)["string"])
+	data[at + 1] = RomLayout.COPYRIGHT_FIRST_CODE + int(
+		(_layout["copyright"] as Dictionary)["tiles"]
+	)
+	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])
+
+
+func test_a_copyright_string_with_the_wrong_number_of_rows_fails() -> void:
+	var data: PackedByteArray = _copyright_dump()
+	var at: int = int((_layout["copyright"] as Dictionary)["string"])
+	data[at + 4] = RomLayout.COPYRIGHT_FIRST_CODE
+	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])
+
+
+func test_a_copyright_string_that_never_terminates_fails() -> void:
+	var data: PackedByteArray = _copyright_dump()
+	var at: int = int((_layout["copyright"] as Dictionary)["string"])
+	for index: int in RomLayout.COPYRIGHT_STRING_MAX + 1:
+		data[at + index] = RomLayout.COPYRIGHT_FIRST_CODE
+	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])
+	assert_true(RomImporter.read_copyright_string(_rom(data), _layout).is_empty())
+
+
+func test_a_blank_copyright_graphic_fails() -> void:
+	var data: PackedByteArray = _copyright_dump()
+	var entry: Dictionary = _layout["copyright"]
+	var blank := PackedByteArray()
+	blank.resize(int(entry["tiles"]) * Gen2Tiles.TILE_BYTES)
+	_write(data, int(entry["gfx"]), blank)
+	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])
+
+
+func test_a_copyright_palette_that_is_not_the_logo_palette_fails() -> void:
+	var data: PackedByteArray = _copyright_dump()
+	var at: int = int((_layout["copyright"] as Dictionary)["palette"])
+	data[at] = 0x7F
+	data[at + 1] = 0x7F
+	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])

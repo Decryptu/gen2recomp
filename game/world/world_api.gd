@@ -116,6 +116,10 @@ var player_sprite_number: int = Gen2WorldSprite.SPRITE_PLAYER
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
+## Whether this visit to the current map has already run its scene script. The
+## cartridge runs one on `MAPSETUP_ENTER` and not again until the next one, so a
+## host that dispatches an entry twice must not get two.
+var _map_entry_scene_ran: bool = false
 var _object_visibility_overrides: Dictionary = {}
 var _transient_object_visibility_overrides: Dictionary = {}
 ## Live cells and facings written by moveobject, turnobject, followers and the
@@ -2425,12 +2429,20 @@ func dispatch_callbacks(callback_type: int = -1) -> Array:
 ## Runs the callbacks that belong to entering the current map. The scene calls
 ## this once after opening a new or validated snapshot; map transitions already
 ## queue the same callback set from _apply_map().
+##
+## The scene script is armed only once per entry. `MAPSETUP_ENTER` runs it as
+## part of the map load, so a second call for the same entry is a caller
+## dispatching twice, not a second entry: replaying the scene would walk its
+## `applymovement`s again, which is what put the Dragon Shrine's player through
+## the north wall. The callbacks are re-queued, since each is written to run
+## whenever the map is refreshed.
 func dispatch_map_entry() -> Array:
 	if current_map == null:
 		return []
 	if _active_script == null and _script_queue.is_empty():
 		_queue_map_callbacks(-1)
-		_map_entry_scene_pending = true
+		if not _map_entry_scene_ran:
+			_map_entry_scene_pending = true
 	return run_event_queue(false)
 
 
@@ -2984,6 +2996,7 @@ func _queue_map_callbacks(callback_type: int) -> void:
 func _queue_map_scene() -> void:
 	if current_map == null:
 		return
+	_map_entry_scene_ran = true
 	var scenes: Array = current_map.scripts.get("scenes", [])
 	if scenes.is_empty():
 		return
@@ -4542,6 +4555,7 @@ func _apply_map(
 	_apply_map_music()
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
+	_map_entry_scene_ran = false
 
 
 ## The schedule update produced by the most recent map change, for a host that
