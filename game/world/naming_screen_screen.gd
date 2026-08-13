@@ -17,6 +17,15 @@ var _page: Gen2NamingScreenPage = null
 var _prompt: String = ""
 var _background: TextureRect = null
 
+## The four colours the screen is drawn through, index 0 the field and 3 the
+## ink. Empty is the ordinary black-on-white; the intro sets it because
+## `RotateThreePalettesRight` fades this screen out before `ClearTilemap`.
+var palette: PackedColorArray = PackedColorArray():
+	set(value):
+		palette = value
+		_refresh()
+
+
 
 ## `.PlayerNameString`'s "YOUR NAME?" is the caller's, since the same screen
 ## names a Pokemon, the rival and Mom under its own prompt. Answers false when
@@ -80,10 +89,14 @@ func _refresh() -> void:
 	if _background == null or _page == null or _screen == null:
 		return
 	var indices: PackedByteArray = _page.draw(_screen, _prompt)
-	# `.SetUpNamingScreen` reaches SCGB_DIPLOMA, which is two colours here the
-	# way every other 1bpp screen in this project is.
 	_background.texture = ImageTexture.create_from_image(Gen2PicImage.from_indices(
-		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, _colors()
 	))
 	_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+
+## `SCGB_DIPLOMA`, which is two colours here the way every other 1bpp screen in
+## this project is, unless a caller has handed one in.
+func _colors() -> PackedColorArray:
+	return palette if palette.size() == 4 else Gen2Palette.pic_palette(
+		PackedColorArray([Color.WHITE, Color.BLACK])
+	)

@@ -86,7 +86,16 @@ func _refresh() -> void:
 		return
 	var indices: PackedByteArray = _page.draw(_question, _menu.selected_index())
 	_background.texture = ImageTexture.create_from_image(Gen2PicImage.from_indices(
-		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, _palette()
 	))
 	_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+
+
+## `LoadGenderScreenPal`'s four colours. A cache written before they were
+## imported has none, and falls back to the black-on-white every other 1bpp page
+## here uses rather than refusing to draw.
+func _palette() -> PackedColorArray:
+	var colors: PackedColorArray = _page.palette
+	if colors.size() < RomLayout.GENDER_SCREEN_PALETTE_COLORS:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return colors

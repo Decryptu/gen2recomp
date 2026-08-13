@@ -59,17 +59,33 @@ static func from_atlas(
 	palette: PackedColorArray,
 	transparent_background: bool = false
 ) -> Image:
+	var cell: Dictionary = atlas_cell(indices, atlas, pic)
+	if cell.is_empty():
+		return Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
+	return from_indices(
+		cell["indices"], int(cell["width"]), int(cell["height"]),
+		palette, transparent_background
+	)
+
+
+## The same cell as indices, before a palette is chosen: { indices, width,
+## height }, or empty for a slot the atlas does not hold. Split out because a
+## screen that recolours one pic every few frames should swap the palette rather
+## than crop the atlas again, which is what a palette fade over a frontpic does.
+static func atlas_cell(
+	indices: PackedByteArray, atlas: Dictionary, pic: Dictionary
+) -> Dictionary:
 	var cell: int = int(atlas.get("cell", 0))
 	var columns: int = int(atlas.get("columns", 0))
 	var atlas_width: int = int(atlas.get("width", 0))
 	var slot: int = int(pic.get("slot", -1))
 	if cell <= 0 or columns <= 0 or atlas_width <= 0 or slot < 0:
-		return Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
+		return {}
 
 	var width: int = mini(int(pic.get("width", cell)), cell)
 	var height: int = mini(int(pic.get("height", cell)), cell)
 	if width <= 0 or height <= 0:
-		return Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
+		return {}
 
 	var left: int = (slot % columns) * cell
 	var top: int = (slot / columns) * cell
@@ -83,7 +99,7 @@ static func from_atlas(
 		for x: int in width:
 			cropped[y * width + x] = indices[from + x]
 
-	return from_indices(cropped, width, height, palette, transparent_background)
+	return {"indices": cropped, "width": width, "height": height}
 
 
 ## The palette flattened to bytes, four per index, so the inner loop is a copy
@@ -128,4 +144,20 @@ static func x_flipped(image: Image) -> Image:
 		return image
 	var out: Image = image.duplicate()
 	out.flip_x()
+	return out
+
+
+## The same mirror on an index buffer, for a caller keeping the indices so it
+## can recolour them.
+static func x_flipped_indices(indices: PackedByteArray, width: int) -> PackedByteArray:
+	if width <= 0:
+		return indices
+	var out := PackedByteArray()
+	out.resize(indices.size())
+	@warning_ignore("integer_division")
+	var height: int = indices.size() / width
+	for y: int in height:
+		var row: int = y * width
+		for x: int in width:
+			out[row + x] = indices[row + width - 1 - x]
 	return out

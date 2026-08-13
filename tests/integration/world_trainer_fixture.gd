@@ -322,6 +322,9 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"naming_cursor": [RomLayout.NAMING_CURSOR_TILES, 2],
 		"naming_middle_line": [RomLayout.NAMING_MARKER_TILES, 1],
 		"naming_under_line": [RomLayout.NAMING_MARKER_TILES, 1],
+		## `LoadGenderScreenLightBlueTile`'s one tile, on the index the real one
+		## carries, since the page reads the fill out of it rather than assuming.
+		"gender_screen": [RomLayout.GENDER_SCREEN_TILES, RomLayout.GENDER_SCREEN_FILL_INDEX],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet
@@ -352,6 +355,8 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		],
 		"badge": [0x7FFF, 0x5ABA, 0x49EF, 0x0000],
 	}
+	## `gfx/new_game/gender_screen.pal`'s own four colours.
+	manifest["gender_screen_palette"] = [0x7FFF, 0x7FC9, 0x7D61, 0x0000]
 	manifest["bar_palettes"] = {
 		"hp_green": [0x02E0, 0x02E0],
 		"hp_yellow": [0x02BF, 0x02BF],

@@ -15,6 +15,15 @@ var _page: Gen2MenuPage = null
 var _options: Array[String] = []
 var _background: TextureRect = null
 
+## The four colours the screen is drawn through, index 0 the field and 3 the
+## ink. Empty is the ordinary black-on-white; the intro sets it because
+## `RotateThreePalettesRight` fades this screen out before `ClearTilemap`.
+var palette: PackedColorArray = PackedColorArray():
+	set(value):
+		palette = value
+		_refresh()
+
+
 
 func open(data: GameData, gender: int) -> bool:
 	_options = Gen2PlayerNameChoices.options(data, gender)
@@ -70,8 +79,16 @@ func _refresh() -> void:
 	indices.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
 	var box := Gen2MenuBox.from_coords(0, 0, 10, Gen2TextBox.STANDARD_TOP - 1, FLAGS)
 	_page.draw(box, _options, _menu.selected_index(), indices, Gen2Screen.WIDTH, "NAME", 2)
+	# Index 0 stays transparent: `MENU_BACKUP_TILES` draws this over the left of
+	# a screen the player pic is still standing on the right of.
 	_background.texture = ImageTexture.create_from_image(Gen2PicImage.from_indices(
-		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK])), true
+		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, _colors(), true
 	))
 	_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+
+
+## The menu's own two colours unless a caller has handed a faded palette in.
+func _colors() -> PackedColorArray:
+	return palette if palette.size() == 4 else Gen2Palette.pic_palette(
+		PackedColorArray([Color.WHITE, Color.BLACK])
+	)

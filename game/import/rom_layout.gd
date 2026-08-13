@@ -494,6 +494,21 @@ const INTRO_PLAYER_PIC_COLUMNS: int = 7
 const INTRO_PLAYER_PIC_ROWS: int = 7
 const INTRO_PLAYER_PIC_TILES: int = INTRO_PLAYER_PIC_COLUMNS * INTRO_PLAYER_PIC_ROWS
 
+## `InitGender`'s own background: one 2bpp tile of a single colour index, and the
+## four-colour palette it is read through. `InitGenderScreen` ByteFills the whole
+## tilemap with tile $00, which is where `LoadGenderScreenLightBlueTile` puts it,
+## so the index in that tile is the field the box and menu are drawn over.
+const GENDER_SCREEN_TILES: int = 1
+const GENDER_SCREEN_PALETTE_COLORS: int = 4
+## The index every pixel of the tile carries, which is `.Palette`'s second
+## colour, RGB 09,30,31.
+const GENDER_SCREEN_FILL_INDEX: int = 1
+
+## `gfx/font/bg_text.pal`, PAL_BG_TEXT. Stored whole rather than as a pair: a
+## palette fade over a text box passes through its two middle colours even
+## though a 1bpp glyph never draws them.
+const TEXT_BG_PALETTE_COLORS: int = 4
+
 ## `_CGB_TrainerCard`'s eight background palettes, as the trainer classes it
 ## reads them from, in its own call order. Slot 0 is the player's own class,
 ## which is why the cache carries a class the trainer tables otherwise skip;
@@ -905,6 +920,12 @@ const GOLD_SILVER: Dictionary = {
 		"badge_palette": 0xA385,
 	},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
+	"gender_screen": {"tile": -1, "palette": -1},
+	## pokegold ships no `gfx/font/bg_text.pal`; its text boxes are coloured by
+	## the SGB/CGB layout that drew the screen, not by a palette of their own.
+	## Nested the way trainer_card is, so the -1 stays out of the flat offset
+	## checks.
+	"text_bg_palette": {"offset": -1},
 	# Pokedex. Located by encoding Bulbasaur's known category and published
 	# height and weight ("SEED", 204, 150) and matching the bytes, then finding
 	# the only 251-pointer run whose four 64-species groups each ascend and
@@ -1105,6 +1126,16 @@ const CRYSTAL: Dictionary = {
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
+	# `engine/menus/init_gender.asm`: LoadGenderScreenPal's inline `.Palette`
+	# (gfx/new_game/gender_screen.pal) and LoadGenderScreenLightBlueTile's
+	# `.LightBlueTile`. The palette's eight bytes are unique in the dump; the
+	# tile, sixteen bytes of one repeated index, is not, so it is taken from the
+	# `ld de` operand thirteen bytes past the palette. Crystal only.
+	"gender_screen": {"tile": 0x48E71, "palette": 0x48E5C},
+	# `gfx/font/bg_text.pal`, BG palette 7. Located from `LoadOW_BGPal7`'s own
+	# `ld hl` operand, whose `ld de` is wBGPals1 + PAL_BG_TEXT; the eight bytes
+	# are unique in the dump as well.
+	"text_bg_palette": {"offset": 0x49418},
 	# Pokedex; see the Gold and Silver block above for how these were located.
 	# Both order tables sit at the same offsets in all three dumps; the entries
 	# and their banks do not, and Gold and Silver do not even share description

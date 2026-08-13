@@ -43,10 +43,22 @@ func _begin() -> void:
 	_screen.begin(_data, SLOT, LABEL, false)
 
 
+## Spends whatever `DelayFrames` the speech is standing in. The intro's fades
+## and pic moves are real frame counts, so a test drives them rather than
+## skipping them; there is no clock in a GUT run.
+func _settle(limit: int = 40) -> void:
+	var speech: Gen2OakSpeechScreen = _screen.current() as Gen2OakSpeechScreen
+	for _pass: int in limit:
+		if speech == null or speech.animation_frames_left() == 0:
+			return
+		speech.advance_frames(speech.animation_frames_left())
+
+
 ## Presses A until [param stop] answers, so a test never has to know how many
 ## pages a text wrapped to.
 func _press_a_until(stop: Callable, limit: int = 200) -> void:
 	for _step: int in limit:
+		_settle()
 		if stop.call():
 			return
 		_screen.handle_button(Gen2Button.A)
@@ -71,6 +83,7 @@ func _run_intro(female: bool = false) -> String:
 	_screen.handle_button(Gen2Button.A)
 	_screen.handle_button(Gen2Button.START)
 	_screen.handle_button(Gen2Button.A)
+	_settle()
 	var speech: Gen2OakSpeechScreen = _screen.current() as Gen2OakSpeechScreen
 	var typed: String = speech.player_name()
 	_press_a_until(_done)
