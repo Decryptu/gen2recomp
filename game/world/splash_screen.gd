@@ -21,9 +21,11 @@ signal closed()
 const FRAME_RATE: float = Gen2BootCinema.FRAME_RATE
 
 var _cinema: Gen2BootCinema = null
+var _data: GameData = null
 var _page: Gen2CopyrightPage = null
 var _presents_page: Gen2GameFreakPresentsPage = null
 var _background: TextureRect = null
+var _audio: Gen2AudioPlayer = null
 var _image: Image = null
 var _visible_id: StringName = &""
 var _accumulator: float = 0.0
@@ -33,6 +35,7 @@ var _closed: bool = false
 ## Answers false on a cache with no imported splash art at all, which is the
 ## caller's cue to go straight on rather than to run an empty boot.
 func open(data: GameData) -> bool:
+	_data = data
 	_page = Gen2CopyrightPage.from_data(data)
 	if _page == null:
 		return false
@@ -59,6 +62,8 @@ func _ready() -> void:
 	_background.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_background)
+	_audio = Gen2AudioPlayer.new()
+	add_child(_audio)
 	if _cinema != null:
 		_refresh()
 
@@ -122,6 +127,8 @@ func _apply(events: Array[Dictionary]) -> void:
 			&"hide_image":
 				if StringName(event.get("id", &"")) == _visible_id:
 					_visible_id = &""
+			&"play_sfx":
+				_play_sfx(int(event.get("sfx", 0)))
 			&"finish_intro":
 				_refresh()
 				_finish()
@@ -152,6 +159,18 @@ func _frame_image() -> Image:
 	if _visible_id == &"game_freak_presents" and _presents_page != null:
 		return _presents_page.draw(_cinema.presents())
 	return _blank()
+
+
+## `PlaySFX`, which the GameFreak animation calls five times on Crystal and once
+## on Gold and Silver. A screen built outside the tree has no player, which is
+## what a frame-count test is, so the frames are spent either way.
+func _play_sfx(sfx: int) -> void:
+	if _audio == null or _data == null or sfx <= 0:
+		return
+	_audio.play_record(_data.world_audio(&"sfx", sfx), &"sfx", {
+		"wave_samples": _data.world_audio_asset(&"wave_samples"),
+		"drumkits": _data.world_audio_asset(&"drumkits"),
+	})
 
 
 ## `ClearTilemap` leaves the blank tile everywhere, which through this palette

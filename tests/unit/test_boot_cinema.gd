@@ -75,6 +75,31 @@ func test_boot_sound_wait_is_explicit_and_does_not_consume_frames() -> void:
 	assert_eq(boot.waiting_sound(), &"")
 
 
+## `PlaySFX` is inside the GameFreak animation, so the coordinator has to carry
+## its requests out to whatever owns a device. The sequence's own frame numbers
+## do not cross over: the coordinator's are the ones a caller reads.
+func test_the_gamefreak_sounds_reach_the_host() -> void:
+	var boot := Boot.new()
+	boot.start(&"crystal", [], [Boot.PHASE_COPYRIGHT, Boot.PHASE_PRESENTS])
+	boot.drain_events()
+	var sounds: Array[int] = []
+	var frames: Array[int] = []
+	for _frame: int in Boot.COPYRIGHT_PRELUDE_FRAMES + Boot.COPYRIGHT_HOLD_FRAMES + 100:
+		for event: Dictionary in boot.advance_frame():
+			if event["type"] != &"play_sfx":
+				continue
+			sounds.append(int(event["sfx"]))
+			frames.append(int(event["frame"]))
+	assert_eq(sounds, [
+		Gen2GameFreakPresents.SFX_DITTO_BOUNCE,
+		Gen2GameFreakPresents.SFX_DITTO_BOUNCE,
+		Gen2GameFreakPresents.SFX_DITTO_POP_UP,
+		Gen2GameFreakPresents.SFX_DITTO_TRANSFORM,
+	])
+	var offset: int = Boot.COPYRIGHT_PRELUDE_FRAMES + Boot.COPYRIGHT_HOLD_FRAMES
+	assert_eq(frames, [offset + 18, offset + 50, offset + 51, offset + 84])
+
+
 ## A host names the phases it has art for, and the source's order is kept
 ## through what is left: the copyright screen runs and the two the project has
 ## no graphics for are skipped, rather than held on a blank screen for the
