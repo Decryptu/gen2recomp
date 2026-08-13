@@ -295,6 +295,10 @@ func test_production_world_entry_and_facing_object_story_persist_separate_flags(
 	assert_false(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_false(_world_screen._world.state.hall_of_fame())
 
+	## Two presses, not one: the box reveals at the OPTION menu's TEXT SPEED now,
+	## and the first press completes the page the way holding A does in
+	## `PrintLetterDelay`. The second is the one that acknowledges it.
+	_world_screen._advance_script_input()
 	_world_screen._advance_script_input()
 	assert_true(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_true(_world_screen._world.state.hall_of_fame())

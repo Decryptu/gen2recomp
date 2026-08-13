@@ -236,3 +236,43 @@ func test_a_smashable_rock_is_in_neither_movement_set() -> void:
 	var rock: Gen2WorldObject = _object(Gen2WorldObject.MOVEMENT_SMASHABLE_ROCK)
 	assert_false(rock.movement_supported())
 	assert_false(rock.movement_advances())
+
+
+## The cartridge never rebuilds an object struct: `ApplyObjectFacing` and the
+## variable-sprite table write into the one that is already there. This project
+## rebuilds a record for both, so the live presentation has to survive it, or a
+## `turnobject` between a `showemote` and its `applymovement` takes the emote
+## down and empties the trail the script is waiting on.
+func test_a_rebuilt_record_keeps_the_emote_and_the_trail_it_replaces() -> void:
+	var previous: Gen2WorldObject = _object()
+	previous.set_emote(3, true)
+	previous.queue_step(Vector2i.RIGHT, 8)
+	previous.queue_step(Vector2i.RIGHT, 8)
+	previous.tick_step()
+	previous.deleted = false
+
+	var rebuilt: Gen2WorldObject = _object()
+	rebuilt.carry_presentation_from(previous)
+
+	assert_true(rebuilt.emote_visible)
+	assert_eq(rebuilt.emote_id, 3)
+	assert_true(rebuilt.scripted_steps)
+	assert_true(rebuilt.is_stepping())
+	assert_eq(rebuilt.step_offset_cells(), previous.step_offset_cells())
+	assert_eq(rebuilt.queued_steps.size(), 1)
+
+
+## `StepFunction_Sleep` decrements OBJECT_STEP_DURATION before testing it, so a
+## zero-length sleep wraps a whole byte rather than ending at once, and a stream
+## that asks for one is not a stream with nothing in it.
+func test_a_zero_length_sleep_wraps_a_whole_byte() -> void:
+	assert_eq(Gen2WorldObject.sleep_frames(0), 0x100)
+	assert_eq(Gen2WorldObject.sleep_frames(1), 1)
+
+	var object: Gen2WorldObject = _object()
+	object.queue_wait(2)
+	assert_true(object.scripted_steps)
+	assert_true(object.tick_step())
+	assert_eq(object.walk_frame(), 0, "a sleep stands still")
+	assert_true(object.tick_step())
+	assert_false(object.scripted_steps, "and the stream is done after its own count")

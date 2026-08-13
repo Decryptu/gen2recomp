@@ -198,10 +198,7 @@ func _build_world() -> void:
 	_play_current_map_music()
 	_text_box = Gen2TextBox.new()
 	_text_box.font = Gen2Font.from_data(_data)
-	## wTextboxFrame, which `Textbox` reads on every box it draws and the OPTION
-	## menu's FRAME row writes.
-	_text_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
-	_text_box.reveal_speed = 0.0
+	_apply_text_box_options()
 	_text_box.place_at_bottom()
 	_text_box.visible = false
 	_text_box.item_rect_changed.connect(_push_text_box_rect)
@@ -324,6 +321,12 @@ func _process(delta: float) -> void:
 	# script that ran it is still going, which is when a script runs one.
 	if _world != null and _world.advance_scripted_steps(delta) and _renderer != null:
 		_renderer.refresh()
+	# After the trail, because the frame it finishes drawing is the frame the
+	# script waiting on it resumes.
+	if _world != null and not _world.pending_script_wait().is_empty():
+		var wait_results: Array = _world.advance_script_wait(delta)
+		if not wait_results.is_empty():
+			_show_script_results(wait_results)
 	if not _trainer_approach.is_empty():
 		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
@@ -493,8 +496,24 @@ func _handle_button(button: int) -> bool:
 	return false
 
 
+## The two OPTION rows a box reads, applied on every box rather than once:
+## `Textbox` reads wTextboxFrame and `PrintLetterDelay` reads the text speed as
+## each one is drawn, and the OPTION menu commits both on the press that changes
+## them.
+func _apply_text_box_options() -> void:
+	if _text_box == null:
+		return
+	var options: Gen2Options = Gen2OptionsStore.current()
+	_text_box.set_frame_style(options.textbox_frame)
+	_text_box.reveal_speed = options.text_reveal_speed()
+
+
 ## The A press that clears whatever a running script is waiting on.
 func _advance_script_pause() -> void:
+	## Except a frame wait, which nothing but frames ends: the source is inside
+	## WaitScriptMovement or a DelayFrames loop and reads no input there.
+	if not _world.pending_script_wait().is_empty():
+		return
 	if _text_box != null and _text_box.visible:
 		_advance_script_input()
 		return
@@ -1882,6 +1901,7 @@ func _strength_refusal(reason: StringName) -> String:
 func _show_field_move_text(text: String) -> void:
 	_field_move_text = true
 	if _text_box != null and _text_box.font != null:
+		_apply_text_box_options()
 		_text_box.show_text(text)
 		_text_box.visible = true
 	_script_prompt = "A: continue"
@@ -2078,6 +2098,7 @@ func _show_script_results(results: Array) -> void:
 			var event: Dictionary = result.get("event", {})
 			var event_type: StringName = StringName(event.get("type", &""))
 			if event_type == &"text" and _text_box != null and _text_box.font != null:
+				_apply_text_box_options()
 				_text_box.show_text(String(event.get("text", "")))
 				_text_box.visible = true
 				_script_prompt = "A: advance text"
@@ -2085,6 +2106,8 @@ func _show_script_results(results: Array) -> void:
 				if _text_box != null:
 					_text_box.visible = true
 				_script_prompt = "A: continue script"
+			elif event_type == &"wait":
+				_script_prompt = "Script waiting on %s" % String(event.get("wait", &"frames"))
 			elif event_type in [&"choice", &"menu"]:
 				_open_service_host()
 				break

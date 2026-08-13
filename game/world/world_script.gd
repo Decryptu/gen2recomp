@@ -796,7 +796,7 @@ static func command_at(
 				command["block"] = int(data[offset + 3])
 			0x7C, 0x7E, 0x8C, 0x8E, 0x94, 0x97, 0x9B:
 				command["address"] = read_u16(data, offset + 1)
-			0x7D, 0x89:
+			0x7D, 0x89, 0x8A, 0x8B:
 				command["value"] = int(data[offset + 1])
 			0x80:
 				command["value"] = read_u16(data, offset + 1)

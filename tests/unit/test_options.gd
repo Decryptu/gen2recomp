@@ -54,6 +54,32 @@ func test_text_speed_round_trips_through_the_source_delays() -> void:
 		assert_eq(restored.text_speed, index)
 
 
+## `PrintLetterDelay` waits the low three bits of wOptions between two
+## characters, so the row is one, three or five frames a character and a box
+## driven by elapsed time wants that as a rate.
+func test_text_speed_is_a_per_character_frame_count() -> void:
+	var options := Gen2Options.new()
+	for index: int in Gen2Options.TEXT_DELAYS.size():
+		options.text_speed = index
+		assert_eq(options.text_delay_frames(), Gen2Options.TEXT_DELAYS[index])
+		assert_almost_eq(
+			options.text_reveal_speed(),
+			1.0 / (Gen2Options.FRAME_SECONDS * float(Gen2Options.TEXT_DELAYS[index])),
+			0.001
+		)
+	options.text_speed = 2
+	assert_almost_eq(options.text_reveal_speed(), 12.0, 0.001, "slow is five frames")
+
+
+## `.fast`: the branch taken when wTextboxFlags' FAST_TEXT_DELAY bit is clear
+## overrides the row with TEXT_DELAY_FAST.
+func test_a_cleared_fast_text_delay_bit_overrides_the_speed_row() -> void:
+	var options := Gen2Options.new()
+	options.text_speed = 2
+	options.fast_text_delay = false
+	assert_eq(options.text_delay_frames(), Gen2Options.TEXT_DELAY_FAST)
+
+
 func test_an_unlisted_text_delay_reads_as_medium() -> void:
 	var bytes: PackedByteArray = Gen2Options.new().to_source_bytes()
 	bytes[0] = (bytes[0] & ~Gen2Options.TEXT_DELAY_MASK) | 0b111

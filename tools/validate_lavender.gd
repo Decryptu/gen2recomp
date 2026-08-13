@@ -321,6 +321,9 @@ func _talk(world: Gen2WorldAPI) -> Array:
 			return statuses
 		if status != &"waiting":
 			return []
+		if not world.pending_script_wait().is_empty():
+			results = world.finish_script_waits()
+			continue
 		results = world.run_event_queue(true)
 	return []
 

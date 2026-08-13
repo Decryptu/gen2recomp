@@ -423,6 +423,9 @@ func _drain(world: Gen2WorldAPI, results: Array, data: GameData) -> Dictionary:
 				waiting = true
 		if not waiting:
 			return out
+		if not world.pending_script_wait().is_empty():
+			results = world.finish_script_waits()
+			continue
 		var request: Dictionary = world.pending_runtime_request()
 		if StringName(request.get("kind", &"")) == &"battle_requested":
 			var values: Dictionary = request.get("values", {})

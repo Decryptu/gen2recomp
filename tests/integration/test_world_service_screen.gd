@@ -205,6 +205,9 @@ func test_pending_special_call_dispatches_the_imported_script() -> void:
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.script_input_waiting())
 	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
+	## The first press completes the revealing page, as holding A does in
+	## `PrintLetterDelay`; the second acknowledges it.
+	_world_screen._advance_script_input()
 	_world_screen._advance_script_input()
 	await get_tree().process_frame
 	assert_false(_world_screen._world.script_input_waiting())
