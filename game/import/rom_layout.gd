@@ -141,6 +141,16 @@ const MART_COUNT: int = 34
 const MART_POINTER_SIZE: int = 2
 const MART_RECORD_MAX_ITEMS: int = 16
 const MART_TERMINATOR: int = 0xFF
+## `NUM_FRUIT_TREES` (`constants/script_constants.asm`). `FruitTreeItems` is one
+## item byte per tree, indexed by the `fruittree` command's operand less one, and
+## both pins ship the same thirty rows.
+const FRUIT_TREE_COUNT: int = 30
+## The seven apricorn items, ascending, and where their run starts in the table.
+## Rows 17 to 23 are `FRUITTREE_ROUTE_37_1` through `FRUITTREE_ROUTE_42_3`, and
+## no other row bears one; both pins agree. Used to identify the table by
+## content, since it has no header and no terminator.
+const FRUIT_TREE_APRICORNS: Array[int] = [0x55, 0x59, 0x5C, 0x5D, 0x61, 0x63, 0x65]
+const FRUIT_TREE_FIRST_APRICORN: int = 16
 const PHONE_CONTACT_COUNT: int = 38
 const PHONE_CONTACT_SIZE: int = 12
 const SPECIAL_PHONE_CALL_COUNT: int = 8
@@ -1022,6 +1032,7 @@ const GOLD_SILVER: Dictionary = {
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
+	"fruit_trees": 0x44091,
 	"rooftop_mart_count": 0,
 	"rooftop_mart_1": 0,
 	"rooftop_mart_2": 0,
@@ -1230,6 +1241,7 @@ const CRYSTAL: Dictionary = {
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
+	"fruit_trees": 0x44097,
 	"rooftop_mart_count": 2,
 	"rooftop_mart_1": 0x15AEE,
 	"rooftop_mart_2": 0x15AFF,

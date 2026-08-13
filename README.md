@@ -117,7 +117,7 @@ to check without writing.
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
-| World services | Referenced menus, mart inventories, phone contacts, special calls, bounded scripts/text, music, SFX, cries and shared waveform assets |
+| World services | Referenced menus, mart inventories, the thirty fruit trees' fruit, phone contacts, special calls, bounded scripts/text, music, SFX, cries and shared waveform assets |
 | Battle animations | All 278 animation scripts, the 188 objects, 185 framesets and 216 OAM sets they are drawn from, 39 decompressed graphics sheets and the sine table the motion callbacks scale with |
 
 Sprites remain colour indices and receive a palette at draw time, so shiny
@@ -269,6 +269,10 @@ runs the whole column in one command and ends on the first cell above it that is
 not a waterfall. Standing on a whirlpool, waterfall, door, staircase or cave
 tile overrides the pressed direction as the cartridge does, which is also how a
 waterfall is ridden back down.
+
+A fruit tree bears its own berry or apricorn once a day, refilling for every
+tree at once the first time one is touched after the day turns, which is how
+Kurt gets his Apricorns.
 
 Poké Balls on the ground are picked up by facing them, and so are the items
 hidden in scenery: neither pointer is a script, so each is decoded and its item

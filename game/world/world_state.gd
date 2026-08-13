@@ -47,6 +47,10 @@ const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
 ## when the apricorns are handed over and reads it to decide whether the ball is
 ## ready, so the day boundary is the whole of the errand's wait.
 const ENGINE_KURT_MAKING_BALLS: int = 80
+## Also `wDailyFlags1`. Not "every tree has fruit" but "the trees have already
+## been refilled today": `TryResetFruitTrees` refills them only while this is
+## clear, and `ResetFruitTrees` sets it behind itself.
+const ENGINE_ALL_FRUIT_TREES: int = 84
 
 ## wBikeFlags' BIKEFLAGS_STRENGTH_ACTIVE_F, three engine flags ahead of the badge
 ## section and so profile split the same way. Nothing in the pinned engine/ or
@@ -135,6 +139,10 @@ var _maptile_decorations: Dictionary = {}
 ## writes it and `VAR_KURT_APRICORNS` is read a day later, by a different script
 ## invocation, to size the balls Kurt hands back.
 var _kurt_apricorn_quantity: int = 0
+## `wFruitTreeFlags`, one bit per `FRUITTREE_*` constant, set by `PickedFruitTree`
+## and cleared for every tree at once by `ResetFruitTrees`. Kept as the set of
+## picked tree ids because the source's own question is per tree.
+var _picked_fruit_trees: Dictionary = {}
 
 
 func _init(
@@ -231,6 +239,7 @@ func to_dict() -> Dictionary:
 		"last_dex_mode": _last_dex_mode,
 		"maptile_decorations": _maptile_decorations.duplicate(),
 		"kurt_apricorn_quantity": _kurt_apricorn_quantity,
+		"picked_fruit_trees": _picked_fruit_trees.duplicate(),
 	}
 
 
@@ -269,6 +278,11 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	restored._radio_channel = int(source.get("radio_channel", -1))
 	restored.set_last_dex_mode(int(source.get("last_dex_mode", RomLayout.DEXMODE_NEW)))
 	restored.set_kurt_apricorn_quantity(int(source.get("kurt_apricorn_quantity", 0)))
+	var picked: Variant = source.get("picked_fruit_trees", {})
+	if picked is Dictionary:
+		for raw_tree: Variant in picked as Dictionary:
+			if int(raw_tree) > 0 and bool((picked as Dictionary)[raw_tree]):
+				restored._picked_fruit_trees[int(raw_tree)] = true
 	return restored
 
 
@@ -303,6 +317,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_last_dex_mode = restored._last_dex_mode
 	_maptile_decorations = restored._maptile_decorations.duplicate()
 	_kurt_apricorn_quantity = restored._kurt_apricorn_quantity
+	_picked_fruit_trees = restored._picked_fruit_trees.duplicate()
 	changed.emit()
 
 
@@ -461,7 +476,8 @@ func badge_mask(crystal: bool = true) -> int:
 ## here as soon as something sets it, or it survives the day the cartridge
 ## clears it on.
 const DAILY_ENGINE_FLAGS: Array[int] = [
-	ENGINE_KURT_MAKING_BALLS, ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED,
+	ENGINE_KURT_MAKING_BALLS, ENGINE_ALL_FRUIT_TREES,
+	ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED,
 ]
 
 
@@ -711,6 +727,14 @@ func set_kurt_apricorn_quantity(quantity: int) -> void:
 		return
 	_kurt_apricorn_quantity = next_quantity
 	changed.emit()
+
+
+func fruit_tree_picked(tree_id: int) -> bool:
+	return bool(_picked_fruit_trees.get(tree_id, false))
+
+
+func picked_fruit_trees() -> Dictionary:
+	return _picked_fruit_trees.duplicate()
 
 
 func consume_repel_step() -> void:
@@ -994,6 +1018,12 @@ func apply_changes(
 	)
 	if next_kurt_apricorns < 0 or next_kurt_apricorns > 0xFF:
 		return {"ok": false, "reason": &"invalid_kurt_apricorn_quantity"}
+	var fruit_tree_changes: Dictionary = runtime_changes.get("fruit_trees", {})
+	if not fruit_tree_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_fruit_trees"}
+	for raw_tree: Variant in fruit_tree_changes:
+		if int(raw_tree) < 1 or int(raw_tree) > RomLayout.FRUIT_TREE_COUNT:
+			return {"ok": false, "reason": &"invalid_fruit_trees"}
 	var seen_changes: Dictionary = runtime_changes.get("seen_species", {})
 	if not seen_changes is Dictionary:
 		return {"ok": false, "reason": &"invalid_seen_species"}
@@ -1081,6 +1111,13 @@ func apply_changes(
 			next_script_memory[address] = value
 	if next_script_memory.size() > SCRIPT_MEMORY_CAPACITY:
 		return {"ok": false, "reason": &"script_memory_capacity"}
+	var next_fruit_trees: Dictionary = _picked_fruit_trees.duplicate()
+	for raw_tree: Variant in fruit_tree_changes:
+		var tree: int = int(raw_tree)
+		if bool(fruit_tree_changes[raw_tree]):
+			next_fruit_trees[tree] = true
+		else:
+			next_fruit_trees.erase(tree)
 	var next_just_battled: bool = bool(
 		runtime_changes.get("just_battled", _just_battled)
 	)
@@ -1097,7 +1134,8 @@ func apply_changes(
 		or next_receive_minutes != _phone_receive_minutes \
 		or next_special_phone_call != _pending_special_phone_call \
 		or next_script_memory != _script_memory \
-		or next_kurt_apricorns != _kurt_apricorn_quantity
+		or next_kurt_apricorns != _kurt_apricorn_quantity \
+		or next_fruit_trees != _picked_fruit_trees
 	_event_flags = next_flags
 	_engine_flags = next_engine_flags
 	_map_scenes = next_scenes
@@ -1116,6 +1154,7 @@ func apply_changes(
 	_pending_special_phone_call = next_special_phone_call
 	_script_memory = next_script_memory
 	_kurt_apricorn_quantity = next_kurt_apricorns
+	_picked_fruit_trees = next_fruit_trees
 	if did_change:
 		changed.emit()
 	return {"ok": true, "changed": did_change}

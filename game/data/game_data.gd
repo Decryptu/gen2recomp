@@ -76,6 +76,7 @@ var _overworld_sprite_palettes: Array = []
 var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
 var _world_phone: Dictionary = {}
+var _world_fruit_trees: Array = []
 var _world_audio: Dictionary = {}
 var _battle_anims_section: Dictionary = {}
 ## Which of the sections above have been read. A section that is genuinely empty
@@ -196,6 +197,15 @@ func world_mart(index: int) -> Dictionary:
 		return _coerce_service_dictionary((rows as Array)[index])
 	var default_value: Variant = _marts().get("default", {})
 	return _coerce_service_dictionary(default_value)
+
+
+## `GetFruitTreeItem`: the item a tree bears, by the `fruittree` command's own
+## one-based tree id. Zero for an id no cartridge tree carries.
+func world_fruit_tree_item(tree_id: int) -> int:
+	var rows: Array = _fruit_trees()
+	if tree_id < 1 or tree_id > rows.size():
+		return 0
+	return int(rows[tree_id - 1])
 
 
 ## One imported priced or special mart list. The source keeps these lists apart
@@ -1405,6 +1415,14 @@ func _marts() -> Dictionary:
 	if _claim_section("marts"):
 		_world_marts = _read_section(RomCache.world_marts_path(directory), false)
 	return _world_marts
+
+
+func _fruit_trees() -> Array:
+	if _claim_section("fruit_trees"):
+		_world_fruit_trees = _read_section(
+			RomCache.world_fruit_trees_path(directory), true
+		)
+	return _world_fruit_trees
 
 
 func _phone() -> Dictionary:

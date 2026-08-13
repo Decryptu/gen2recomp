@@ -49,11 +49,16 @@ var _pads: Array[Control] = []
 static var _instance: Gen2InputRuntime = null
 
 
+## Named relative to the root rather than as `/root/InputRuntime`: a script
+## handed to `-s` runs outside the active scene tree, where an absolute path
+## makes even `get_node_or_null` push an error before returning null. The
+## no-runtime answer is the intended one for every headless run, so it has to be
+## silent.
 static func instance() -> Gen2InputRuntime:
 	if _instance == null:
 		var loop: SceneTree = Engine.get_main_loop() as SceneTree
 		if loop != null:
-			_instance = loop.root.get_node_or_null("/root/InputRuntime") as Gen2InputRuntime
+			_instance = loop.root.get_node_or_null(^"InputRuntime") as Gen2InputRuntime
 	return _instance
 
 

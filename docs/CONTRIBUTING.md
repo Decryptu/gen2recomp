@@ -366,6 +366,7 @@ Because wrong offsets can decode plausible neighboring data,
 | Trainers | Class name/pic/palette numbering, ends and pic pointers. Parties walk to the next class pointer, including empty class 10, checking counts and endpoints (Falkner's level 7 Pidgey and level 9 Pidgeotto, the last class's first name). Attributes validate defined flags and class 1 bytes; DVs anchor both ends and match the published tables byte-for-byte |
 | Evolutions, learnsets | Pointers address the banked window; methods, species, moves and levels valid, levels ascending except Muk, evolution count known. `EVOLVE_STAT` is four bytes, not three |
 | Growth | Growth rate and base EXP for all 251 species in all three games |
+| Fruit trees | Thirty rows of one item byte, identified by content because the table has no header and no terminator: rows 17 to 23 are the seven apricorns and no other row bears one, and the four Johto berry trees ahead of them share a berry |
 | World services | Source counts, pointer widths, banked addresses, mart terminators, phone sizes, non-trainer caller-name pointer tables, packed audio headers, cry pointers, shared waves, drumkits and bounded bank-window payloads. Menu headers need valid data pointers and command-derived shape; the script collector validates `phonecall` text pointers, leaves `memcall`/`memjump` to runtime memory snapshots, and ignores malformed candidates |
 
 When adding an offset, add its check. Find data by searching a dump for
