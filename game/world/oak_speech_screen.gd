@@ -52,6 +52,11 @@ var _text_palette: PackedColorArray = PackedColorArray()
 var _pic_cell: Dictionary = {}
 var _pic_pad_columns: int = 0
 var _text_box: Gen2TextBox = null
+## `Intro_PlacePlayerSprite`'s four OAM tiles, which is the one thing the intro
+## draws as an object rather than in the tilemap.
+var _sprite: TextureRect = null
+var _sprite_palette: PackedColorArray = PackedColorArray()
+var _sprite_source: Gen2WorldSprite = null
 var _naming: Gen2NamingScreenScreen = null
 var _name_menu: Gen2PlayerNameMenuScreen = null
 var _audio: Gen2AudioPlayer = null
@@ -257,6 +262,10 @@ func _apply_frame() -> void:
 		_naming.palette = text_colors
 	if _pic != null and _pic.texture != null and _pic_palette.size() == 4:
 		_redraw_pic(Gen2IntroPresentation.apply_bgp(_pic_palette, bgp))
+	# `RotatePalettesRight` writes the object palettes from the same table row,
+	# so the sprite `Intro_PlacePlayerSprite` leaves standing fades with the rest.
+	if _sprite != null and _sprite.visible:
+		_redraw_sprite(Gen2IntroPresentation.apply_bgp(_sprite_palette, bgp))
 	if _pic != null:
 		_pic.position.x = float(
 			(_presentation.column() + _pic_pad_columns) * TILE
@@ -266,10 +275,57 @@ func _apply_frame() -> void:
 func _enter_next_beat() -> void:
 	_index += 1
 	if _index >= _beats.size():
-		_phase = Phase.DONE
-		finished.emit(_player_name)
+		_begin_shrink()
 		return
 	_show_beat()
+
+
+## `InitializeWorld`'s `call ShrinkPlayer`, which runs the moment `OakSpeech`
+## returns, on the screen the speech left standing: the player pic is still at
+## (6,4) and `_OakText7`'s box is still drawn, because nothing between the two
+## routines clears either.
+func _begin_shrink() -> void:
+	_fade_music()
+	_play_shrink_sfx()
+	var waits: Array[int] = Gen2OakSpeech.SHRINK_WAITS
+	_presentation.push_delay(waits[0])
+	_queue(_shrink_to_first)
+
+
+func _shrink_to_first() -> void:
+	_show_shrink_pic(0)
+	_presentation.push_delay(Gen2OakSpeech.SHRINK_WAITS[1])
+	_queue(_shrink_to_second)
+
+
+func _shrink_to_second() -> void:
+	_show_shrink_pic(1)
+	_presentation.push_delay(Gen2OakSpeech.SHRINK_WAITS[2])
+	_queue(_shrink_clear)
+
+
+func _shrink_clear() -> void:
+	_pic.texture = null
+	_pic_cell = {}
+	_presentation.push_delay(Gen2OakSpeech.SHRINK_WAITS[3])
+	_queue(_shrink_place_sprite)
+
+
+func _shrink_place_sprite() -> void:
+	_place_player_sprite()
+	_presentation.push_delay(Gen2OakSpeech.SHRINK_WAITS[4])
+	_presentation.push_rotate_three_right()
+	_queue(_shrink_done)
+
+
+## `RotateThreePalettesRight` then `ClearTilemap`, which is where `ShrinkPlayer`
+## returns and `SpawnPlayer` takes over.
+func _shrink_done() -> void:
+	if _sprite != null:
+		_sprite.visible = false
+	_hide_speech(true)
+	_phase = Phase.DONE
+	finished.emit(_player_name)
 
 
 ## Loads the beat's picture, then runs whichever transition brings it in before
@@ -523,6 +579,77 @@ func _start_audio() -> void:
 	_audio.play_record(
 		_data.world_audio(&"music", Gen2OakSpeech.MUSIC_ROUTE_30), &"music",
 		_audio_assets()
+	)
+
+
+## One of `ShrinkPlayer`'s two intermediate pictures, in the same 7x7 box and the
+## same palette the player pic was drawn through: `ShrinkFrame` reloads the tiles
+## and re-places the graphic without touching the palettes.
+func _show_shrink_pic(which: int) -> void:
+	if _pic == null or _data == null:
+		return
+	var name: String = RomLayout.SHRINK_PIC_NAMES[which]
+	var indices: PackedByteArray = _data.tile_indices(name)
+	var side: int = RomLayout.SHRINK_PIC_COLUMNS * TILE
+	if indices.size() < side * side:
+		return
+	_pic_cell = {"indices": indices, "width": side, "height": side}
+	_pic_pad_columns = 0
+	_pic.size = Vector2(float(side), float(side))
+	_pic.position = Vector2(PIC_AT * TILE)
+	_redraw_pic(Gen2IntroPresentation.apply_bgp(_pic_palette, _presentation.bgp()))
+
+
+## `Intro_PlacePlayerSprite`: `GetPlayerIcon`'s first frame as four OAM tiles,
+## in PAL_OW_RED or PAL_OW_BLUE. Objects, so it survives the `ClearBox` that
+## emptied the picture and fades with the palette like everything else.
+func _place_player_sprite() -> void:
+	if _data == null:
+		return
+	var female: bool = _gender == Gen2SaveData.GENDER_FEMALE
+	var sprite: Gen2WorldSprite = _data.overworld_sprite(
+		Gen2WorldSprite.player_normal_sprite(female)
+	)
+	if sprite == null:
+		return
+	# The routine names PAL_OW_RED and PAL_OW_BLUE where `InitPlayerObject` names
+	# PAL_NPC_RED and PAL_NPC_BLUE; both pairs index the same two rows, since the
+	# lookup takes the low three bits.
+	var colors: PackedColorArray = _data.overworld_sprite_palette(
+		Gen2WorldSprite.player_palette(female), Gen2WorldPalette.TIME_DAY
+	)
+	if _sprite == null:
+		_sprite = TextureRect.new()
+		_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_sprite)
+	_sprite_source = sprite
+	_sprite_palette = colors
+	_sprite.position = Vector2(Gen2OakSpeech.SHRINK_SPRITE_AT)
+	_sprite.visible = true
+	_redraw_sprite(Gen2IntroPresentation.apply_bgp(colors, _presentation.bgp()))
+
+
+func _redraw_sprite(colors: PackedColorArray) -> void:
+	if _sprite == null or _sprite_source == null or _data == null:
+		return
+	var image: Image = Gen2WorldSprite.image_for(
+		_sprite_source, _data.overworld_sprite_indices(_sprite_source.number), colors
+	)
+	_sprite.texture = ImageTexture.create_from_image(image)
+	_sprite.size = Vector2(image.get_size())
+
+
+func _fade_music() -> void:
+	if _audio != null:
+		_audio.fade_out(Gen2OakSpeech.SHRINK_FADE_FRAMES)
+
+
+func _play_shrink_sfx() -> void:
+	if _audio == null or _data == null:
+		return
+	_audio.play_record(
+		_data.world_audio(&"sfx", Gen2OakSpeech.SHRINK_SFX), &"sfx", _audio_assets()
 	)
 
 

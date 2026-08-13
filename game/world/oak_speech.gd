@@ -53,6 +53,25 @@ const NAME_AFTER: String = "oak_6"
 ## `constants/music_constants.asm`: MUSIC_ROUTE_30.
 const MUSIC_ROUTE_30: int = 0x2B
 
+## `ShrinkPlayer`, which `InitializeWorld` calls the moment `OakSpeech` returns,
+## on the screen the speech left standing. `constants/sfx_constants.asm`:
+## SFX_ESCAPE_ROPE.
+const SHRINK_SFX: int = 0x10
+## `ld a, 32` into wMusicFade, on MUSIC_NONE.
+const SHRINK_FADE_FRAMES: int = 32
+## Its five `DelayFrames` operands, in order: before the first shrink picture,
+## between the two, before the box is cleared, before the sprite is placed, and
+## while the sprite stands there.
+const SHRINK_WAITS: Array[int] = [8, 8, 8, 3, 50]
+## `hlcoord 6, 5`, one row below the pictures `ShrinkFrame` places at (6,4), so
+## the box `ClearBox` empties leaves their top tile row behind. Both shrink
+## pictures are blank there, so nothing of it shows.
+const SHRINK_CLEAR_AT: Vector2i = Vector2i(6, 5)
+## `Intro_PlacePlayerSprite`'s four `dbsprite` entries are one 16x16 icon whose
+## first OAM slot is y `9 * 8 + 4`, x `9 * 8`. Hardware OAM counts from
+## (-8, -16), so the icon's top-left pixel is (72 - 8, 76 - 16).
+const SHRINK_SPRITE_AT: Vector2i = Vector2i(64, 60)
+
 ## `.PlayerNameString`, which the naming screen prints above its entry.
 const NAME_PROMPT: String = "YOUR NAME?"
 

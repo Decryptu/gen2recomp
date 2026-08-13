@@ -325,6 +325,10 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		## `LoadGenderScreenLightBlueTile`'s one tile, on the index the real one
 		## carries, since the page reads the fill out of it rather than assuming.
 		"gender_screen": [RomLayout.GENDER_SCREEN_TILES, RomLayout.GENDER_SCREEN_FILL_INDEX],
+		## `ShrinkPlayer`'s two pictures, flat fills like the rest: what a test
+		## checks is when each is drawn, not what is in it.
+		"shrink_1": [RomLayout.SHRINK_PIC_TILES, 2],
+		"shrink_2": [RomLayout.SHRINK_PIC_TILES, 1],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet

@@ -284,6 +284,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not text_palette["ok"]:
 		return text_palette
 
+	var shrink: Dictionary = verify_shrink_pics(rom, layout)
+	if not shrink["ok"]:
+		return shrink
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -462,6 +466,29 @@ const GENDER_SCREEN_COLORS: Array[int] = [0x7FFF, 0x7FC9, 0x7D61, 0x0000]
 ## `gfx/font/bg_text.pal`'s own four colours, which pin the palette. -1 on Gold
 ## and Silver, which ship no palette of their own for a text box.
 const TEXT_BG_COLORS: Array[int] = [0x7FFF, 0x7268, 0x40A5, 0x0000]
+
+
+## `ShrinkPlayer`'s two pictures. Both are LZ runs, so the check is that each
+## decompresses to exactly the 7x7 box `ShrinkFrame` asks `PlaceGraphic` for: a
+## wrong address either fails the decompressor or lands on a run of the wrong
+## size, and neither of those is the shrink.
+static func verify_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout["shrink_pics"]
+	var wanted: int = RomLayout.SHRINK_PIC_TILES * Gen2Tiles.TILE_BYTES
+	var lz := Gen2Lz.new()
+	for key: String in ["first", "second"]:
+		var at: int = int(entry[key])
+		if not rom.in_bounds(at):
+			return {"ok": false, "message": "Shrink pic %s is outside the cartridge." % key}
+		var raw: PackedByteArray = lz.decompress(rom.bytes(), at)
+		if lz.failed or raw.size() != wanted:
+			return {
+				"ok": false,
+				"message": "Shrink pic %s decompressed to %d bytes, wanted %d." % [
+					key, raw.size(), wanted,
+				],
+			}
+	return {"ok": true, "message": "Shrink pics verified."}
 
 
 static func verify_text_bg_palette(rom: RomFile, layout: Dictionary) -> Dictionary:
@@ -2403,6 +2430,35 @@ func _import_gender_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
 	return out
 
 
+## `ShrinkPlayer`'s two pictures, which are LZ runs rather than tile strips and
+## are laid out by `PlaceGraphic` the way every 7x7 pic is: as one 56x56 buffer
+## per picture, so a screen draws them the way it draws the player's own.
+func _import_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout["shrink_pics"]
+	var offsets: Array = [int(entry["first"]), int(entry["second"])]
+	var side: int = RomLayout.SHRINK_PIC_COLUMNS * Gen2Tiles.TILE_WIDTH
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for index: int in offsets.size():
+		var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(offsets[index]))
+		if _lz.failed or raw.size() < RomLayout.SHRINK_PIC_TILES * Gen2Tiles.TILE_BYTES:
+			return {}
+		var name: String = RomLayout.SHRINK_PIC_NAMES[index]
+		var pixels: PackedByteArray = Gen2Tiles.decode_pic(
+			raw, RomLayout.SHRINK_PIC_COLUMNS, RomLayout.SHRINK_PIC_ROWS
+		)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), pixels):
+			return {}
+		out[name] = {
+			"width": side,
+			"height": side,
+			"tiles": RomLayout.SHRINK_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+	return out
+
+
 ## Decodes the fixed tile sheets: the font, the eight text box borders and the
 ## battle HUD's graphics, each as one strip of tiles.
 ##
@@ -2560,7 +2616,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"bits": 2,
 		}
 
-	var written: Dictionary = {}
+	var written: Dictionary = _import_shrink_pics(rom, layout)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

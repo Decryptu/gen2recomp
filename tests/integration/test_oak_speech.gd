@@ -258,6 +258,28 @@ func test_a_female_intro_takes_the_female_default() -> void:
 	assert_eq(female.player_name(), Gen2OakSpeech.DEFAULT_FEMALE)
 
 
+## `InitializeWorld` calls `ShrinkPlayer` the moment `OakSpeech` returns, so the
+## run does not end on `_OakText7`: its five `DelayFrames` and the closing
+## `RotateThreePalettesRight` are 101 more frames, and the name only arrives at
+## the end of them.
+func test_the_speech_ends_on_the_shrink_rather_than_on_the_last_text() -> void:
+	_press_a_until(func() -> bool: return _screen.beat_index() == _screen.beat_count() - 1)
+	# The last beat's own pages, pressed without settling past the shrink the
+	# last of them starts.
+	for _step: int in 40:
+		if _screen.beat_index() >= _screen.beat_count():
+			break
+		_screen.handle_button(Gen2Button.A)
+	assert_eq(_finished.size(), 0, "the speech has not handed a name over yet")
+	assert_eq(_screen.animation_frames_left(), 8, "ShrinkPlayer's first DelayFrames")
+
+	var waits: int = 0
+	for wait: int in Gen2OakSpeech.SHRINK_WAITS:
+		waits += wait
+	_screen.advance_frames(waits + 3 * Gen2IntroPresentation.FADE_STEP_FRAMES)
+	assert_eq(_finished, [_screen.player_name()], "the name arrives when the shrink is over")
+
+
 ## Nothing but A moves the speech, the way every PrintText in the routine waits
 ## for one.
 func test_other_buttons_do_not_advance_the_speech() -> void:

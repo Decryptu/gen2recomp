@@ -509,6 +509,14 @@ const GENDER_SCREEN_FILL_INDEX: int = 1
 ## though a 1bpp glyph never draws them.
 const TEXT_BG_PALETTE_COLORS: int = 4
 
+## `ShrinkFrame`'s `ld c, 7 * 7`: both shrink pictures are the same 7x7 box the
+## trainer and player pics fill, and `PlaceGraphic` lays them down each column.
+const SHRINK_PIC_COLUMNS: int = 7
+const SHRINK_PIC_ROWS: int = 7
+const SHRINK_PIC_TILES: int = SHRINK_PIC_COLUMNS * SHRINK_PIC_ROWS
+## The two sheet names the cache holds them under.
+const SHRINK_PIC_NAMES: Array[String] = ["shrink_1", "shrink_2"]
+
 ## `_CGB_TrainerCard`'s eight background palettes, as the trainer classes it
 ## reads them from, in its own call order. Slot 0 is the player's own class,
 ## which is why the cache carries a class the trainer tables otherwise skip;
@@ -921,6 +929,10 @@ const GOLD_SILVER: Dictionary = {
 	},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
+	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
+	# `ld hl` / `ld b` operand pairs, which is the only place either address
+	# appears: the compressed bytes cannot be searched for the way a PNG can.
+	"shrink_pics": {"first": 0xFB5BE, "second": 0xFB64E},
 	## pokegold ships no `gfx/font/bg_text.pal`; its text boxes are coloured by
 	## the SGB/CGB layout that drew the screen, not by a palette of their own.
 	## Nested the way trainer_card is, so the -1 stays out of the flat offset
@@ -1132,6 +1144,8 @@ const CRYSTAL: Dictionary = {
 	# tile, sixteen bytes of one repeated index, is not, so it is taken from the
 	# `ld de` operand thirteen bytes past the palette. Crystal only.
 	"gender_screen": {"tile": 0x48E71, "palette": 0x48E5C},
+	# See the Gold and Silver block above for how these were located.
+	"shrink_pics": {"first": 0x4D249, "second": 0x4D2D9},
 	# `gfx/font/bg_text.pal`, BG palette 7. Located from `LoadOW_BGPal7`'s own
 	# `ld hl` operand, whose `ld de` is wBGPals1 + PAL_BG_TEXT; the eight bytes
 	# are unique in the dump as well.
