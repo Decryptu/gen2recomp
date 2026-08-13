@@ -1114,6 +1114,39 @@ func preview_pack_use() -> void:
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
+## Public screenshot driver for `TossMenu`. Grants a stack on an injected save
+## so nothing persists, then advances one menu step per call: Pack, the item,
+## TOSS, the quantity dial, the yes/no and the result.
+func preview_pack_toss() -> void:
+	if _world == null or _data == null:
+		return
+	if _start_menu_host != null:
+		## The submenu opens on USE, so the cursor is walked onto TOSS before the
+		## press that chooses it. Every other step is a plain A.
+		if _start_menu_host.get("_mode") == Gen2StartMenuScreen.Mode.PACK_ITEM:
+			var actions: Array = _start_menu_host.get("_item_actions")
+			for index: int in actions.size():
+				if StringName((actions[index] as Dictionary).get("action", &"")) \
+					== Gen2WorldPack.ACTION_TOSS:
+					_start_menu_host.set("_item_cursor", index)
+					break
+		_start_menu_host.handle_button(Gen2Button.A)
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "Toss preview needs a save"
+		_refresh_labels()
+		return
+	_injected_save = save
+	_world.state.apply_changes({}, {}, {"items": {Gen2WorldPartyHost.ITEM_POTION: 5}})
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	_start_menu_host.handle_button(Gen2Button.A)
+
+
 ## Public screenshot driver for ForgetMove. It fills the first party member's
 ## four move slots and grants a TM or HM that member can learn, on an injected
 ## save so nothing persists, then advances one menu step per call: Pack, the

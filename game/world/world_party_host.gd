@@ -66,13 +66,13 @@ static func complete_runtime_request(
 		return _failure(&"party_request_not_pending", request)
 	if save == null or world.data == null:
 		return _failure(&"missing_save", request)
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {
-			"message": validation.get("message", ""), "request": request,
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), {
+			"details": opened.get("details", {}), "request": request,
 		})
 
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var candidate: Gen2SaveData = opened["candidate"]
 	var generator: RandomNumberGenerator = random if random != null else RandomNumberGenerator.new()
 	if random == null:
 		generator.randomize()
@@ -102,22 +102,13 @@ static func complete_runtime_request(
 			"request": request, "results": resumed,
 		})
 
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", {
-			"message": candidate_validation.get("message", ""), "results": resumed,
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), {
+			"details": committed.get("details", {}), "results": resumed,
 		})
-	var write_result: Dictionary = {"ok": true}
-	if persist:
-		write_result = Gen2SaveStore.save(candidate, world.data)
-	if not bool(write_result.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"save_failed", {
-			"message": write_result.get("message", ""), "results": resumed,
-		})
-	_copy_save(save, candidate)
 	return {
 		"ok": true,
 		"handled": true,
@@ -137,10 +128,10 @@ static func heal_party(
 ) -> Dictionary:
 	if world == null or save == null or world.data == null:
 		return _failure(&"missing_save", {})
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
+	var candidate: Gen2SaveData = opened["candidate"]
 	var healed: int = 0
 	for mon: Gen2SaveMon in candidate.party:
 		if mon == null or mon.is_egg:
@@ -165,18 +156,11 @@ static func heal_party(
 	})
 	if resumed.is_empty() or not bool(resumed[0].get("ok", false)):
 		return _failure(&"runtime_request_failed", {"results": resumed})
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", candidate_validation)
-	var write_result: Dictionary = {"ok": true}
-	if persist:
-		write_result = Gen2SaveStore.save(candidate, world.data)
-	if not bool(write_result.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"save_failed", write_result)
-	_copy_save(save, candidate)
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
 	return {
 		"ok": true,
 		"handled": true,
@@ -199,10 +183,10 @@ static func use_item(
 		return _failure(&"missing_save", {})
 	if world.state == null or world.state.item_quantity(item) <= 0:
 		return _failure(&"insufficient_item_quantity", {"item": item})
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
+	var candidate: Gen2SaveData = opened["candidate"]
 	var effect: Dictionary = _apply_item_effect(world.data, candidate, item, party_index)
 	if not bool(effect.get("ok", false)):
 		return _failure(StringName(effect.get("reason", &"item_has_no_effect")), effect)
@@ -214,18 +198,11 @@ static func use_item(
 	var applied: Dictionary = world.state.apply_changes({}, {}, changes)
 	if not bool(applied.get("ok", false)):
 		return _failure(&"item_state_failed", applied)
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", candidate_validation)
-	var write_result: Dictionary = {"ok": true}
-	if persist:
-		write_result = Gen2SaveStore.save(candidate, world.data)
-	if not bool(write_result.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"save_failed", write_result)
-	_copy_save(save, candidate)
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
 	return {
 		"ok": true,
 		"item": item,
@@ -303,10 +280,10 @@ static func teach_tm_hm(
 			return _failure(&"cannot_forget_hm", {"forget_slot": forget_slot, "forgot": forgot})
 		slot = forget_slot
 
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
+	var candidate: Gen2SaveData = opened["candidate"]
 	var learner: Gen2SaveMon = candidate.party[party_index] as Gen2SaveMon
 	learner.moves[slot] = move
 	# LearnMove writes the move, then its PP from Moves + MOVE_PP: a freshly
@@ -322,18 +299,11 @@ static func teach_tm_hm(
 		})
 	if not bool(applied.get("ok", false)):
 		return _failure(&"item_state_failed", applied)
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", candidate_validation)
-	var write_result: Dictionary = {"ok": true}
-	if persist:
-		write_result = Gen2SaveStore.save(candidate, world.data)
-	if not bool(write_result.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"save_failed", write_result)
-	_copy_save(save, candidate)
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
 	return {
 		"ok": true,
 		"item": item,
@@ -361,9 +331,9 @@ static func capture_wild(
 ) -> Dictionary:
 	if world == null or save == null or world.data == null or wild == null:
 		return _failure(&"missing_capture_context", {})
-	var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-	if not bool(validation.get("ok", false)):
-		return _failure(&"invalid_save", {"message": validation.get("message", "")})
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
 	if save.party.size() >= Gen2SaveData.MAX_PARTY:
 		var storage: Dictionary = save.first_empty_box_slot()
 		if not bool(storage.get("ok", false)):
@@ -381,7 +351,7 @@ static func capture_wild(
 	if random == null:
 		generator.randomize()
 	var outcome: Dictionary = _capture_outcome(world.data, wild, ball, generator)
-	var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	var candidate: Gen2SaveData = opened["candidate"]
 	var destination: Dictionary = {}
 	if bool(outcome.get("caught", false)):
 		var captured: Gen2SaveMon = _captured_mon(
@@ -403,18 +373,11 @@ static func capture_wild(
 	var item_result: Dictionary = world.state.apply_changes({}, {}, {"items": {ball: next_quantity}})
 	if not bool(item_result.get("ok", false)):
 		return _failure(&"ball_state_failed", item_result)
-	candidate.world = world.snapshot()
-	var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-	if not bool(candidate_validation.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"candidate_save_invalid", candidate_validation)
-	var write_result: Dictionary = {"ok": true}
-	if persist:
-		write_result = Gen2SaveStore.save(candidate, world.data)
-	if not bool(write_result.get("ok", false)):
-		world.state.restore_from_dict(before.world_state.to_dict())
-		return _failure(&"save_failed", write_result)
-	_copy_save(save, candidate)
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
 	return {
 		"ok": true,
 		"handled": true,
@@ -777,17 +740,6 @@ static func _world_name(data: GameData, bank: int, address: int) -> String:
 		return ""
 	var bytes: PackedByteArray = data.world_text(bank, address)
 	return Gen2Text.decode_fixed(bytes, 0, RomLayout.TRADE_NAME_LENGTH) if not bytes.is_empty() else ""
-
-
-static func _copy_save(target: Gen2SaveData, source: Gen2SaveData) -> void:
-	target.format_version = source.format_version
-	target.game_id = source.game_id
-	target.rom_sha1 = source.rom_sha1
-	target.slot = source.slot
-	target.player_name = source.player_name
-	target.party = source.party
-	target.boxes = source.boxes
-	target.world = source.world
 
 
 static func _failure(reason: StringName, details: Dictionary) -> Dictionary:

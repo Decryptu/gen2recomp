@@ -152,23 +152,9 @@ static func purchase(
 	})
 	if not bool(applied.get("ok", false)):
 		return _failure(&"purchase_state_failed", applied)
-	if save != null:
-		var validation: Dictionary = Gen2SaveValidator.validate(save, world.data)
-		if not bool(validation.get("ok", false)):
-			world.state.restore_from_dict(before.world_state.to_dict())
-			return _failure(&"invalid_save", {"message": validation.get("message", "")})
-		var candidate: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
-		candidate.world = world.snapshot()
-		var candidate_validation: Dictionary = Gen2SaveValidator.validate(candidate, world.data)
-		if not bool(candidate_validation.get("ok", false)):
-			world.state.restore_from_dict(before.world_state.to_dict())
-			return _failure(&"candidate_save_invalid", candidate_validation)
-		if persist:
-			var write_result: Dictionary = Gen2SaveStore.save(candidate, world.data)
-			if not bool(write_result.get("ok", false)):
-				world.state.restore_from_dict(before.world_state.to_dict())
-				return _failure(&"save_failed", write_result)
-		_copy_save(save, candidate)
+	var committed: Dictionary = Gen2WorldTransaction.run(world, save, before, persist)
+	if not bool(committed.get("ok", false)):
+		return committed
 	if is_bargain:
 		var next_sold_items: Dictionary = {}
 		var previous_sold_items: Variant = mart.get("_sold_items", {})
@@ -188,16 +174,5 @@ static func purchase(
 	}
 
 
-static func _copy_save(target: Gen2SaveData, source: Gen2SaveData) -> void:
-	target.format_version = source.format_version
-	target.game_id = source.game_id
-	target.rom_sha1 = source.rom_sha1
-	target.slot = source.slot
-	target.player_name = source.player_name
-	target.party = source.party.duplicate(true)
-	target.boxes = source.boxes
-	target.world = source.world
-
-
 static func _failure(reason: StringName, details: Dictionary) -> Dictionary:
-	return {"ok": false, "reason": reason, "details": details.duplicate(true)}
+	return Gen2WorldTransaction.failure(reason, details)

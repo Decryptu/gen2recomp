@@ -250,9 +250,10 @@ Pokegear, Player, Save, Options and Exit.
   unavailable. The radio card tunes with left and right over the cartridge's
   two-step dial, and a tuned station keeps playing after the Pokegear closes,
   which is how the Poke Flute channel wakes Vermilion's Snorlax.
-- **Pack** opens each item's own source submenu and can use one: a Potion asks
-  which Pokemon and heals it, a Repel sets its step count. GIVE, TOSS and SEL
-  keep their source position marked unavailable.
+- **Pack** opens each item's own source submenu and can use or throw away one: a
+  Potion asks which Pokemon and heals it, a Repel sets its step count, and TOSS
+  runs the cartridge's own ask, quantity dial, yes/no and `TossItem`. GIVE and
+  SEL keep their source position marked unavailable.
 
 The party submenu offers Cut, Surf, Strength, Whirlpool, Waterfall, Flash,
 Headbutt and Rock Smash to a Pokemon that knows one; all eight show their

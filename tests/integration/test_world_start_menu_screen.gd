@@ -141,6 +141,87 @@ func test_pack_lists_a_granted_item() -> void:
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
 
+## `TossMenu`: the ask, `SelectQuantityToToss`'s dial, a yes/no and `TossItem`.
+## The item submenu is already closed by the time it runs, so every way out of it
+## lands back on the pocket list.
+func test_toss_takes_the_chosen_quantity_and_reports_it() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 5}})
+	var host: Gen2StartMenuScreen = await _open_pack()
+	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TOSS_QUANTITY)
+
+	## The dial opens on 1 and pages by ten, which cannot pass the stack.
+	host.handle_button(Gen2Button.RIGHT)
+	assert_eq((host.get("_toss_prompt") as Gen2WorldQuantityPrompt).value, 5)
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq((host.get("_toss_prompt") as Gen2WorldQuantityPrompt).value, 4)
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TOSS_CONFIRM)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+
+
+## `SelectQuantityToToss`'s `cp -1 / scf` and `YesNoBox`'s no are the same carry
+## `TossMenu` finishes on, and neither takes anything.
+func test_backing_out_of_either_toss_prompt_takes_nothing() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 5}})
+	var host: Gen2StartMenuScreen = await _open_pack()
+
+	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
+	host.handle_button(Gen2Button.B)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_eq(_world_screen._world.state.item_quantity(7), 5)
+
+	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_eq(_world_screen._world.state.item_quantity(7), 5, "NO takes nothing")
+
+
+## Tossing the last of a stack takes it off the pocket list, which is what the
+## pack redraws on the way back.
+func test_tossing_the_last_of_a_stack_empties_the_pocket() -> void:
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_pack()
+	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_eq((host.get("_pack_pockets")[0] as Dictionary)["items"], [])
+
+
+## Opens the pack on the items pocket with the cursor on the granted POTION.
+func _open_pack() -> Gen2StartMenuScreen:
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PACK)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	return host
+
+
+## Opens the item submenu and puts the cursor on [param action] before pressing A.
+func _choose_action(host: Gen2StartMenuScreen, action: StringName) -> void:
+	host.handle_button(Gen2Button.A)
+	var actions: Array = host.get("_item_actions")
+	for index: int in actions.size():
+		if StringName((actions[index] as Dictionary).get("action", &"")) == action:
+			host.set("_item_cursor", index)
+			break
+	host.handle_button(Gen2Button.A)
+
+
 ## HM04 with its real item number, plus the TM/HM table and the flag bit that
 ## lets the development save's first party member learn it.
 const HM_ITEM: int = 0xF6
