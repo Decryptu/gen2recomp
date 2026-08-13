@@ -9,9 +9,12 @@ extends Node
 ## prioritises. Each serviced step is one `_UpdateSound` plus the frame of
 ## samples the APU produced from it.
 
-## Two output frames of slack. Larger only adds latency before an effect is
-## heard; smaller starves whenever a game frame runs long.
-const BUFFER_SECONDS: float = 0.2
+## The generator's depth, which Godot rounds up to 4,096 output frames: seven
+## driver frames, 125 ms. This is latency, not headroom, because the buffer is
+## kept as full as it will go, so a button's effect is heard that long after the
+## press. Measured worst emptiness on a desktop run is a quarter of it; halving
+## it again would leave nothing for a long frame.
+const BUFFER_SECONDS: float = 0.1
 
 ## Whether `Music_StereoPanning` is honoured. Follows the SOUND option, which is
 ## what `wOptions`' STEREO bit means to the driver.
