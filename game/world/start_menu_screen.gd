@@ -348,6 +348,14 @@ func _open_list_mode() -> void:
 func _render_list() -> void:
 	if _menu == null:
 		return
+	## `.PrintMenuAccount`: the highlighted entry's own line, under the list,
+	## only while MENU ACCOUNT is on. `.IsMenuAccountOn` is read on every cursor
+	## move, so turning it off in OPTION takes the box away at once.
+	if Gen2OptionsStore.current().menu_account:
+		_status.text = _menu.selected_description()
+		_status.add_theme_color_override("font_color", MUTED)
+	else:
+		_status.text = ""
 	_render_options(_menu.items(), _menu.cursor, func(entry: Dictionary) -> String:
 		var label: String = String(entry.get("label", ""))
 		return label if bool(entry.get("available", false)) else "%s (unavailable)" % label

@@ -141,6 +141,28 @@ func test_pack_lists_a_granted_item() -> void:
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
 
 
+## MENU ACCOUNT is `.IsMenuAccountOn`, and what it gates is `.MenuDesc`: the
+## highlighted entry's own line under the list. It is read on every cursor move,
+## so turning it off in OPTION takes the box away without reopening the menu.
+func test_menu_account_draws_the_entry_description_and_off_takes_it_away() -> void:
+	await _open_world()
+	var options: Gen2Options = Gen2OptionsStore.current()
+	options.menu_account = true
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	var menu: Gen2WorldStartMenu = host.get("_menu")
+	assert_eq(host.get("_status").text, menu.selected_description())
+	assert_ne(host.get("_status").text, "")
+
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq(host.get("_status").text, menu.selected_description())
+
+	options.menu_account = false
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq(host.get("_status").text, "", "the box is gone")
+
+
 ## `TossMenu`: the ask, `SelectQuantityToToss`'s dial, a yes/no and `TossItem`.
 ## The item submenu is already closed by the time it runs, so every way out of it
 ## lands back on the pocket list.

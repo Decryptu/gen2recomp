@@ -221,10 +221,12 @@ with `Gen2InputRuntime.instance().held_direction()`, polled rather than driven b
 key repeat. An embedded host takes `handle_button(button)`; there is no keycode
 entry point, so a test presses a button rather than a key.
 
-Reach the runtime with `Gen2InputRuntime.instance()`, not the `InputRuntime`
-global: a script handed to `-s` compiles before the tree that owns the autoloads
-exists, so a preview tool naming a screen by type would fail to load it.
-`Gen2WorldScreen` reaches GameRuntime by path for the same reason.
+Reach an autoload through its own static accessor, `Gen2InputRuntime.instance()`
+or `Gen2GameRuntime.instance()`, never through the `InputRuntime` or
+`GameRuntime` global: a script handed to `-s` compiles before the tree that owns
+the autoloads exists, so a screen naming one by identifier fails to compile and
+takes every tool that loads it down with it. `Gen2GameRuntime.data_or_any()` and
+`selected_save_or_null()` are the two answers every screen wanted.
 
 A key binds by physical keycode, so a d-pad on WASD stays under the same four
 fingers on a layout that spells them differently; describe one with

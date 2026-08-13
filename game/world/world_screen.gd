@@ -2700,14 +2700,8 @@ func _phone_contact_label(contact: Dictionary) -> String:
 
 
 func _selected_runtime_data() -> GameData:
-	var runtime: Node = get_node_or_null("/root/GameRuntime")
-	if runtime != null and bool(runtime.call("has_selected_game")):
-		return runtime.call("selected_data") as GameData
-	return GameData.open_any()
+	return Gen2GameRuntime.data_or_any()
 
 
 func _selected_runtime_save() -> Gen2SaveData:
-	var runtime: Node = get_node_or_null("/root/GameRuntime")
-	if runtime != null and bool(runtime.call("has_selected_save_slot")):
-		return runtime.call("selected_save") as Gen2SaveData
-	return null
+	return Gen2GameRuntime.selected_save_or_null()

@@ -101,6 +101,32 @@ func test_cursor_persists_across_a_rebuild_and_clamps_to_a_shrunk_list() -> void
 	assert_lt(shrunk.cursor, shrunk.size())
 
 
+## `.Items`' third column, which MENU ACCOUNT draws under the list. Every
+## cartridge entry has one; a mod's does not, and answers empty rather than
+## inventing a line for it.
+func test_every_source_entry_carries_its_own_description() -> void:
+	for entry: Dictionary in Gen2WorldStartMenu.SOURCE_ENTRIES:
+		var kind: StringName = StringName(entry["kind"])
+		assert_ne(
+			Gen2WorldStartMenu.description(kind), "", "%s has no description" % kind
+		)
+	assert_eq(Gen2WorldStartMenu.description(Gen2WorldStartMenu.ITEM_MODS), "")
+	assert_eq(Gen2WorldStartMenu.description(&"nothing"), "")
+
+
+func test_the_description_follows_the_cursor() -> void:
+	var menu := Gen2WorldStartMenu.build(1, true, true)
+	assert_eq(
+		menu.selected_description(),
+		Gen2WorldStartMenu.description(menu.selected_kind())
+	)
+	menu.move(1)
+	assert_eq(
+		menu.selected_description(),
+		Gen2WorldStartMenu.description(menu.selected_kind())
+	)
+
+
 func test_moving_an_empty_menu_does_nothing() -> void:
 	var menu := Gen2WorldStartMenu.new()
 	assert_false(menu.move(1))

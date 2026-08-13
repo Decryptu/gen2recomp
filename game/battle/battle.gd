@@ -326,6 +326,11 @@ const CANT_ESCAPE_SET: StringName = &"cant_escape_set"
 ## [constant RUN_BLOCKED].
 const SWITCH_BLOCKED: StringName = &"switch_blocked"
 
+## `OfferSwitch`'s question, which only SHIFT ever reaches: the trainer is about
+## to send [code]index[/code] out, and the player may change too.
+## [method Gen2Battle.answer_switch_offer] is what closes it.
+const SWITCH_OFFERED: StringName = &"switch_offered"
+
 ## Mist and Focus Energy, set on the user. Both fail with [constant MOVE_FAILED]
 ## on a second use rather than silently re-applying.
 const MIST_SET: StringName = &"mist_set"
@@ -545,6 +550,13 @@ var _pending_turn: Dictionary = {}
 ## menu the player cannot back out of, so this is answered rather than optional
 ## and everything else is refused until it is.
 var _pending_baton_pass: int = -1
+## `OfferSwitch`'s pending question: the party slot the enemy is about to send
+## out, or -1 when nobody is being asked. SHIFT is the only mode that ever sets
+## it, and the turn stands still until [method answer_switch_offer] closes it.
+var _pending_switch_offer: int = -1
+## `wOptions`' BATTLE_SHIFT bit, as the caller's own setting rather than a read
+## of the options file: the engine is scene-free and takes its rules injected.
+var battle_style_set: bool = false
 
 ## The side whose Pursuit already ran, in front of the switch it answered, or -1.
 ## `PursuitSwitch` writes `CANNOT_MOVE` over that side's move once it has, and
@@ -874,6 +886,47 @@ func awaiting_replacement() -> bool:
 	return must_replace(PLAYER) or must_replace(ENEMY)
 
 
+## `CheckWhetherToAskSwitch`. In SHIFT mode a trainer's switch offers the player
+## one too, and four things have to hold: the battle has started, the player has
+## somebody else to send, SET is off, and the player's own Pokémon is standing.
+## A wild has no trainer to switch at all, and a link battle is not modelled.
+func should_offer_switch() -> bool:
+	return is_trainer_battle and not battle_style_set \
+		and party(PLAYER).healthy_count() > 1 and not mon(PLAYER).is_fainted()
+
+
+## The party slot the enemy is about to send out while the player is being asked
+## whether to switch as well, or -1. `OfferSwitch` asks before that Pokémon
+## appears, which is why the answer arrives with the enemy still on its way in.
+func awaiting_switch_offer() -> int:
+	return _pending_switch_offer
+
+
+## `OfferSwitch`'s yes/no. [param index] below zero is "no", which is the carry
+## the source returns and the end of the turn's first half; anything else is the
+## player switching too, which `EnemySwitch` reaches by falling into
+## `PlayerSwitch`.
+##
+## Refuses a slot the party would refuse, leaving the question standing, the way
+## `PickSwitchMonInBattle` redisplays its list rather than accepting one that
+## cannot come in.
+func answer_switch_offer(index: int = -1) -> Array:
+	if _pending_switch_offer < 0:
+		return []
+	if index >= 0 and not party(PLAYER).can_send_out(index):
+		return []
+	var enemy_index: int = _pending_switch_offer
+	_pending_switch_offer = -1
+	var events: Array = []
+	events.append_array(send_out(ENEMY, enemy_index))
+	if index >= 0:
+		events.append_array(send_out(PLAYER, index))
+	var actions: Dictionary = _pending_turn.get("actions", {})
+	_close_turn_bracket(ENEMY, actions.get(ENEMY, {}))
+	_pending_turn["index"] = int(_pending_turn["index"]) + 1
+	return _run_turn(events)
+
+
 ## Which side owes a Baton Pass target, or -1. The turn is standing still until
 ## [method pass_to] answers, the same refusal-until-answered shape
 ## [method must_replace] uses, except that this one stops a turn part way rather
@@ -1176,7 +1229,7 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 		return events
 	# A turn already part way through cannot be started again: the one standing
 	# is finished by [method pass_to] and by nothing else.
-	if _pending_baton_pass >= 0:
+	if _pending_baton_pass >= 0 or _pending_switch_offer >= 0:
 		return events
 
 	# Settled before anything is spent, because `TryPlayerSwitch` runs at menu
@@ -1265,6 +1318,17 @@ func _run_turn(events: Array) -> Array:
 			_reset_action_counters(side, -1)
 		if _is_switch(action):
 			_pursuit_before_switch(side, actions, events)
+			# `EnemySwitch`: on SHIFT the player is told who is coming and asked
+			# whether to change too, before that Pokémon is on the field. The
+			# turn stops here until the answer arrives.
+			if side == ENEMY and should_offer_switch():
+				_pending_switch_offer = int(action.get("index", -1))
+				events.append({
+					"type": SWITCH_OFFERED, "side": PLAYER,
+					"index": _pending_switch_offer,
+					"species": party(ENEMY).at(_pending_switch_offer).species,
+				})
+				return events
 			events.append_array(send_out(side, int(action.get("index", -1))))
 		elif _is_item(action):
 			_use_trainer_item(side, int(action.get("item", 0)), events)

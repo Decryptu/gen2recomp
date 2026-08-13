@@ -139,13 +139,11 @@ func withdraw_selected_box() -> bool:
 
 
 func _resolve_data() -> GameData:
-	return GameRuntime.selected_data() if GameRuntime.has_selected_game() else GameData.open_any()
+	return Gen2GameRuntime.data_or_any()
 
 
 func _resolve_save() -> Gen2SaveData:
-	if _data == null or not GameRuntime.has_selected_save_slot():
-		return null
-	return GameRuntime.selected_save()
+	return Gen2GameRuntime.selected_save_or_null() if _data != null else null
 
 
 func _build_ui() -> void:

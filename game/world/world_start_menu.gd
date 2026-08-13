@@ -60,6 +60,21 @@ const SOURCE_ENTRIES: Array[Dictionary] = [
 	{"kind": ITEM_EXIT, "label": "Exit", "available": true, "gate": &""},
 ]
 
+## `.Items`' third column, the one MENU ACCOUNT draws under the list
+## (`.MenuDesc`). Two lines in the source's own box, joined with a space here
+## because this list is not on the hardware tile grid. A mod's entry has none,
+## which is what the empty answer means.
+const SOURCE_DESCRIPTIONS: Dictionary = {
+	ITEM_POKEDEX: "#MON database",
+	ITEM_POKEMON: "Party #MON status",
+	ITEM_PACK: "Contains items",
+	ITEM_POKEGEAR: "Trainer's key device",
+	ITEM_PLAYER: "Your own status",
+	ITEM_SAVE: "Save your progress",
+	ITEM_OPTION: "Change settings",
+	ITEM_EXIT: "Close this menu",
+}
+
 var cursor: int = 0
 var _items: Array = []
 
@@ -120,6 +135,17 @@ static func _entry(kind: StringName, label: String, available: bool) -> Dictiona
 
 func items() -> Array:
 	return _items.duplicate(true)
+
+
+## `.MenuDesc`'s line for one entry, empty for an entry the cartridge has none
+## for. The caller decides whether to draw it: MENU ACCOUNT is what
+## `.IsMenuAccountOn` reads, and it is an option rather than a rule.
+static func description(kind: StringName) -> String:
+	return String(SOURCE_DESCRIPTIONS.get(kind, ""))
+
+
+func selected_description() -> String:
+	return description(selected_kind())
 
 
 func size() -> int:

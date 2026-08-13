@@ -236,7 +236,11 @@ The world screen's start menu wires every source entry: Pokedex, Pokemon, Pack,
 Pokegear, Player, Save, Options and Exit.
 
 - **Options** is the cartridge's own seven-row OPTION screen over the same
-  values the launcher's settings edit, so the two can never disagree.
+  values the launcher's settings edit, so the two can never disagree. Every row
+  but PRINT reaches something: text speed and frame reach the overworld's boxes
+  and a battle's, sound reaches the driver, battle scene skips an animation,
+  MENU ACCOUNT draws the highlighted entry's own line under the start menu, and
+  SET/SHIFT decides whether a trainer's switch offers you one.
 - **Player** is the trainer card, drawn from the cartridge's own graphics with
   its badge pages and play timer.
 - **Pokedex** lists species in the cartridge's NEW, OLD and A to Z orders,
@@ -296,6 +300,7 @@ all three games unless its row says otherwise:
 |---|---|
 | `preview_world_services.gd <png> [mart\|apricorn] [presses]` | the mart or Kurt's Apricorn overlay, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
+| `preview_party.gd <game> <png> [party\|box] [presses]` | the party and PC-box overlays as the overworld stacks them, over a development save. `presses` is a `u,d,l,r,a,b` list driven in before the shot, and several lists separated by `;` write one file each |
 | `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |

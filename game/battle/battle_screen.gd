@@ -292,8 +292,11 @@ func _ready() -> void:
 
 	_box = Gen2TextBox.new()
 	_box.font = Gen2Font.from_data(_data)
-	## wTextboxFrame: a battle's own boxes are drawn with the player's frame too.
-	_box.set_frame_style(Gen2OptionsStore.current().textbox_frame)
+	## wTextboxFrame and the TEXT SPEED delay: a battle's own boxes are the
+	## player's boxes, drawn through `PrintLetterDelay` like every other one.
+	var options: Gen2Options = Gen2OptionsStore.current()
+	_box.set_frame_style(options.textbox_frame)
+	_box.reveal_speed = options.text_reveal_speed()
 	_box.item_rect_changed.connect(_push_text_box_rect)
 	_box.visibility_changed.connect(_push_text_box_rect)
 	_screen.display(_box)
@@ -319,18 +322,17 @@ func set_data(data: GameData) -> void:
 	_injected_data = data
 
 
+## Null rather than the first imported cache: a battle opened without a runtime
+## is a development one, and the caller has already injected what it draws with.
 func _selected_runtime_data() -> GameData:
-	var runtime: Node = get_node_or_null("/root/GameRuntime")
-	if runtime != null and bool(runtime.call("has_selected_game")):
-		return runtime.call("selected_data") as GameData
+	var runtime: Gen2GameRuntime = Gen2GameRuntime.instance()
+	if runtime != null and runtime.has_selected_game():
+		return runtime.selected_data()
 	return null
 
 
 func _selected_runtime_save() -> Gen2SaveData:
-	var runtime: Node = get_node_or_null("/root/GameRuntime")
-	if runtime != null and bool(runtime.call("has_selected_save_slot")):
-		return runtime.call("selected_save") as Gen2SaveData
-	return null
+	return Gen2GameRuntime.selected_save_or_null()
 
 
 ## True once the cache had everything the renderer draws with.
@@ -681,6 +683,10 @@ func intro_running() -> bool:
 ## it there. Every caller that has just built a battle reaches this, which is the
 ## same order the source uses, `InitBattleDisplay` before `BattleStartMessage`.
 func _init_battle_display() -> void:
+	## `wOptions`' BATTLE_SHIFT bit. The engine takes it injected rather than
+	## reading the options file itself, since it is scene-free; this is the one
+	## place every battle here passes through.
+	_battle.battle_style_set = Gen2OptionsStore.current().battle_style_set
 	_reseed_bg_map()
 	set_hp(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
@@ -1620,6 +1626,8 @@ func advance() -> void:
 		return
 	if _answer_baton_pass():
 		return
+	if _answer_switch_offer():
+		return
 	if _replace_the_fallen():
 		return
 	if _battle != null and _battle.is_over():
@@ -1781,6 +1789,24 @@ func _answer_baton_pass() -> bool:
 	if next < 0:
 		return false
 	_pending = _battle.pass_to(next)
+	_show_next_event()
+	return true
+
+
+## Answers `OfferSwitch`'s yes/no, which only SHIFT ever reaches, and whether
+## there was one to answer.
+##
+## `PlaceYesNoBox` is a menu and this screen has none, so it declines: the
+## trainer's Pokémon comes in and the player's stays, which is what SET would
+## have done without asking. The engine keeps the choice open; what is missing
+## is a screen to make it with, the same gap [method _answer_baton_pass] has.
+##
+## Answered before a replacement for the same reason a Baton Pass is: the turn it
+## stopped has not finished, and nothing behind it can be asked yet.
+func _answer_switch_offer() -> bool:
+	if _battle == null or _battle.awaiting_switch_offer() < 0:
+		return false
+	_pending = _battle.answer_switch_offer(-1)
 	_show_next_event()
 	return true
 

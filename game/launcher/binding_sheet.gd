@@ -22,6 +22,11 @@ var _list: VBoxContainer = null
 var _prompt: Label = null
 var _add: Gen2LauncherButton = null
 var _capturing: bool = false
+## The binding being held, and when it went down. A capture reads a press and
+## acts on the release, which is what makes a hold mean something other than a
+## binding.
+var _pending: Dictionary = {}
+var _pending_since: int = 0
 
 
 ## Named for the button rather than `create`, since the base sheet's own factory
@@ -126,14 +131,38 @@ func _remove(index: int) -> void:
 	bindings_changed.emit()
 
 
+## How long a key or pad button has to be held for the capture to cancel instead
+## of binding. Long enough that a normal press cannot reach it, short enough to
+## find by accident.
+const HOLD_CANCEL_MSEC: int = 700
+
+
 func _start_capture() -> void:
 	_capturing = true
-	_prompt.text = "Press a key or a controller button. Close this to cancel."
+	_pending = {}
+	_prompt.text = "Tap a key or a controller button. Hold one to cancel."
 	_prompt.add_theme_color_override("font_color", _theme.accent)
+	set_process(true)
+
+
+## The hold cancels the moment it passes the threshold rather than on release,
+## so a player who is holding one down sees the sheet close under their thumb
+## instead of wondering how long is long enough.
+func _process(_delta: float) -> void:
+	if not _capturing or _pending.is_empty():
+		return
+	if Time.get_ticks_msec() - _pending_since < HOLD_CANCEL_MSEC:
+		return
+	_capturing = false
+	_pending = {}
+	set_process(false)
+	close()
 
 
 func _finish_capture(binding: Dictionary) -> void:
 	_capturing = false
+	_pending = {}
+	set_process(false)
 	_prompt.add_theme_color_override("font_color", _theme.muted)
 	var bindings: Array = _bindings()
 	if bindings.has(binding):
@@ -161,9 +190,12 @@ func _finish_capture(binding: Dictionary) -> void:
 	bindings_changed.emit()
 
 
-## While capturing, every key and pad event is the binding rather than a control
-## of the sheet, so the parent's cancel is deliberately not reached. The mouse
-## and a finger still work, which is what closes the sheet without binding.
+## While capturing, every key and pad event belongs to the binding rather than to
+## the sheet, so the parent's cancel is deliberately not reached. That used to
+## leave a player on a pad alone with no way out but to bind something and then
+## remove it, so a capture now reads the press and acts on the release: a tap
+## binds, and holding past [constant HOLD_CANCEL_MSEC] closes the sheet instead.
+## The mouse and a finger still work as they did.
 func _unhandled_input(event: InputEvent) -> void:
 	if not _capturing:
 		super._unhandled_input(event)
@@ -171,10 +203,40 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouse or event is InputEventScreenTouch \
 		or event is InputEventScreenDrag or event is InputEventAction:
 		return
-	if not event.is_pressed() or event.is_echo():
+	if event.is_echo():
 		return
+	if _pending.is_empty():
+		_begin_hold(event)
+		return
+	if _is_release_of_pending(event):
+		accept_event()
+		_finish_capture(_pending)
+
+
+func _begin_hold(event: InputEvent) -> void:
 	var binding: Dictionary = Gen2InputActions.from_event(event)
-	if binding.is_empty():
+	if binding.is_empty() or not _is_pressed(event):
 		return
 	accept_event()
-	_finish_capture(binding)
+	_pending = binding
+	_pending_since = Time.get_ticks_msec()
+
+
+## A key or a pad button releases; a stick releases by falling back inside the
+## deadzone, which is the same value [method Gen2InputActions.from_event] refuses
+## to read as a binding at all.
+func _is_release_of_pending(event: InputEvent) -> bool:
+	if event is InputEventJoypadMotion:
+		var motion: InputEventJoypadMotion = event
+		return StringName(_pending.get("kind", &"")) == Gen2InputActions.KIND_PAD_AXIS \
+			and int(_pending.get("code", -1)) == int(motion.axis) \
+			and absf(motion.axis_value) < Gen2InputActions.DEADZONE
+	return not _is_pressed(event) and Gen2InputActions.from_event(event) == _pending
+
+
+## `InputEventJoypadMotion` has no pressed state; every other event this reads
+## does.
+static func _is_pressed(event: InputEvent) -> bool:
+	if event is InputEventJoypadMotion:
+		return not Gen2InputActions.from_event(event).is_empty()
+	return event.is_pressed()

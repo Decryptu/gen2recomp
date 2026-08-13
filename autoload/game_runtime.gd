@@ -1,3 +1,4 @@
+class_name Gen2GameRuntime
 extends Node
 
 ## Runtime selection shared by the launcher and screens opened from it.
@@ -21,6 +22,41 @@ var selected_save_slot: int = -1
 ## only then is a save built and written. Abandoning the intro leaves no file.
 var pending_new_game_slot: int = -1
 var pending_new_game_label: String = ""
+
+## The autoload, cached after the first lookup.
+static var _instance: Gen2GameRuntime = null
+
+
+## The live runtime, or null outside a scene tree that has one.
+##
+## Named relative to the root rather than as `/root/GameRuntime`, and reached
+## through this rather than through the `GameRuntime` global, for the reason
+## [method Gen2InputRuntime.instance] gives: a script handed to `-s` compiles
+## before the autoloads exist, so a screen naming the global by identifier fails
+## to compile at all and takes every tool that loads it down with it.
+static func instance() -> Gen2GameRuntime:
+	if _instance == null:
+		var loop: SceneTree = Engine.get_main_loop() as SceneTree
+		if loop != null:
+			_instance = loop.root.get_node_or_null(^"GameRuntime") as Gen2GameRuntime
+	return _instance
+
+
+## The selected cache, or the first imported one when nothing is selected, which
+## is what a development screen opened outside the launcher wants.
+static func data_or_any() -> GameData:
+	var runtime: Gen2GameRuntime = instance()
+	if runtime != null and runtime.has_selected_game():
+		return runtime.selected_data()
+	return GameData.open_any()
+
+
+## The selected slot's save, or null when there is no runtime or no slot.
+static func selected_save_or_null() -> Gen2SaveData:
+	var runtime: Gen2GameRuntime = instance()
+	if runtime == null or not runtime.has_selected_save_slot():
+		return null
+	return runtime.selected_save()
 
 
 ## Stages a new game for [method take_pending_new_game] to pick up.
