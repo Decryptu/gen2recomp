@@ -91,3 +91,32 @@ func test_a_fade_walks_the_master_volume_down_and_then_stops() -> void:
 	assert_eq(_player.audio_status()["volume"], Gen2SoundEngine.MAX_VOLUME,
 		"the fade ends in `_InitSound`, which restores full volume")
 	assert_false(_player.audio_status()["music_active"])
+
+
+## `PlayStereoCry` writes wCryTracks and puts 1 in wStereoPanningMask;
+## `PlayMonCry2` zeroes both. Written per request, so one battler's side does not
+## leak into the next cry.
+func test_a_cry_takes_its_tracks_for_that_request_only() -> void:
+	var cry: Dictionary = _record(2)
+	cry["cry_pitch"] = 0
+	cry["cry_length"] = 0
+	_player.play_record(cry, &"cry", {}, false, 0xF0)
+	assert_eq(_player._engine.cry_tracks, 0xF0)
+	assert_eq(_player._engine.stereo_panning_mask, 1)
+
+	_player.play_record(cry, &"cry")
+	assert_eq(_player._engine.cry_tracks, 0, "the next cry is PlayMonCry2's")
+	assert_eq(_player._engine.stereo_panning_mask, 0)
+
+
+## `wLowHealthAlarm`'s DANGER_ON bit is what `PlayDanger` runs off; clearing it
+## zeroes the byte whole, the way `StopDangerSound` does.
+func test_the_low_health_alarm_is_the_danger_bit_and_its_timer() -> void:
+	assert_false(_player.low_health_alarm())
+	_player.set_low_health_alarm(true)
+	assert_true(_player.low_health_alarm())
+	assert_eq(_player._engine.low_health_alarm, 1 << Gen2SoundEngine.DANGER_ON_BIT)
+
+	_player._engine.low_health_alarm |= 12
+	_player.set_low_health_alarm(false)
+	assert_eq(_player._engine.low_health_alarm, 0, "the timer went with it")

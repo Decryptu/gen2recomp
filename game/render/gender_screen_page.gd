@@ -35,8 +35,11 @@ const LINE_SPACING: int = 2
 
 var frame_style: int = 0
 var font: Gen2Font = null
+## `LoadGenderScreenPal`'s four colours, in its own order.
+var palette: PackedColorArray = PackedColorArray()
 
 var _menu: Gen2MenuPage = null
+var _fill: int = 0
 
 
 static func from_data(data: GameData) -> Gen2GenderScreenPage:
@@ -47,7 +50,19 @@ static func from_data(data: GameData) -> Gen2GenderScreenPage:
 	out.font = menu.font
 	out._menu = menu
 	out.frame_style = Gen2OptionsStore.current().textbox_frame
+	out.palette = data.gender_screen_palette()
+	out._fill = _fill_index(data)
 	return out
+
+
+## The one index `LoadGenderScreenLightBlueTile`'s tile carries, read from the
+## imported tile rather than assumed, so a cache holding a different tile draws
+## what it holds.
+static func _fill_index(data: GameData) -> int:
+	if data.tile_sheet("gender_screen").is_empty():
+		return 0
+	var tile: PackedByteArray = data.tile_indices("gender_screen")
+	return 0 if tile.is_empty() else tile[0]
 
 
 static func menu_box() -> Gen2MenuBox:
@@ -56,17 +71,19 @@ static func menu_box() -> Gen2MenuBox:
 
 ## The whole 160x144 page as palette indices, with the arrow on [param cursor].
 ##
-## The source fills the background with one light-blue tile of its own
-## (`LoadGenderScreenLightBlueTile` and `gfx/new_game/gender_screen.pal`), which
-## this project does not import; the page is drawn on the blank every other 1bpp
-## screen here uses.
+## `InitGenderScreen` ByteFills the whole tilemap with tile $00, which
+## `LoadGenderScreenLightBlueTile` has just filled with one colour, so the field
+## behind the box and the menu is that index rather than a blank.
 func draw(question: String, cursor: int) -> PackedByteArray:
 	var width: int = COLUMNS * TILE
 	var indices := PackedByteArray()
 	indices.resize(width * ROWS * TILE)
+	if _fill != 0:
+		indices.fill(_fill)
 	if font == null:
 		return indices
 
+	_blank_interior(indices, width, TEXT_BOX)
 	font.draw_box(
 		frame_style, indices, width,
 		TEXT_BOX.position.x * TILE, TEXT_BOX.position.y * TILE,
@@ -82,3 +99,13 @@ func draw(question: String, cursor: int) -> PackedByteArray:
 
 	_menu.draw(menu_box(), OPTIONS, cursor, indices, width)
 	return indices
+
+
+## `TextboxBorder`'s own `' '` run across the interior rows, which is what keeps
+## the field from showing through a box drawn over it. Elsewhere the buffer is
+## already blank, so only a filled page needs this.
+func _blank_interior(indices: PackedByteArray, width: int, box: Rect2i) -> void:
+	for row: int in range((box.position.y + 1) * TILE, (box.position.y + box.size.y - 1) * TILE):
+		var at: int = row * width + (box.position.x + 1) * TILE
+		for column: int in (box.size.x - 2) * TILE:
+			indices[at + column] = 0

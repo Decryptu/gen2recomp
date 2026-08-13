@@ -87,6 +87,56 @@ func test_the_page_draws_the_question_and_the_menu() -> void:
 	assert_false(_ink(indices, Vector2i(7, 8)), "no cursor on Girl")
 
 
+## `InitGenderScreen` fills the whole tilemap with tile $00, which
+## `LoadGenderScreenLightBlueTile` has just filled with one index, so the field
+## is that index and only the boxes drawn over it are blank.
+func test_the_page_fills_the_field_with_the_light_blue_tile() -> void:
+	var page := Gen2GenderScreenPage.from_data(GameData.open_directory(Fixture.directory()))
+	var indices: PackedByteArray = page.draw(QUESTION, 0)
+	assert_eq(indices[0], RomLayout.GENDER_SCREEN_FILL_INDEX, "the top-left corner of the field")
+	assert_eq(
+		_at(indices, Vector2i(2, 11)),
+		RomLayout.GENDER_SCREEN_FILL_INDEX,
+		"and the row above the text box, which no box reaches"
+	)
+	# `TextboxBorder` runs ' ' across the interior rows, so the field does not
+	# show through the question.
+	assert_eq(_at(indices, Vector2i(10, 13)), 0, "the text box interior is blank")
+	assert_eq(_at(indices, Vector2i(9, 5)), 0, "and so is the menu's")
+
+
+## The four colours are the cartridge's own, so the field is the light blue
+## `gfx/new_game/gender_screen.pal` names rather than a chosen one.
+func test_the_page_carries_the_source_palette() -> void:
+	var page := Gen2GenderScreenPage.from_data(GameData.open_directory(Fixture.directory()))
+	assert_eq(page.palette.size(), RomLayout.GENDER_SCREEN_PALETTE_COLORS)
+	assert_eq(page.palette[0], Color.WHITE)
+	assert_eq(page.palette[1], Gen2Palette.from_packed(0x7FC9))
+	assert_eq(page.palette[3], Color.BLACK)
+
+
+## A cache written before the tile was imported has no fill and no palette, and
+## draws the black-on-white every other 1bpp page here uses rather than refusing.
+func test_a_cache_without_the_tile_draws_the_plain_page() -> void:
+	var directory: String = Fixture.directory()
+	var manifest: Dictionary = RomCache.read_manifest(directory)
+	var sheets: Dictionary = manifest["tiles"]
+	sheets.erase("gender_screen")
+	manifest["tiles"] = sheets
+	manifest["gender_screen_palette"] = []
+	RomCache.write_json(RomCache.manifest_path(directory), manifest)
+
+	var page := Gen2GenderScreenPage.from_data(GameData.open_directory(directory))
+	assert_eq(page.palette.size(), 0)
+	assert_eq(page.draw(QUESTION, 0)[0], 0, "the field falls back to blank")
+
+
+func _at(indices: PackedByteArray, tile: Vector2i) -> int:
+	return indices[
+		(tile.y * Gen2Font.TILE + 4) * Gen2Screen.WIDTH + tile.x * Gen2Font.TILE + 4
+	]
+
+
 func _ink(indices: PackedByteArray, tile: Vector2i) -> bool:
 	for row: int in Gen2Font.TILE:
 		for column: int in Gen2Font.TILE:

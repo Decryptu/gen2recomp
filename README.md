@@ -280,6 +280,8 @@ all three games unless its row says otherwise:
 |---|---|
 | `preview_world_services.gd <png>` | mart overlay, deterministic integration cache |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
+| `preview_intro.gd <game> <png> [gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade or a pic move can be looked at one frame at a time |
+| `preview_mom_scene.gd <game> [png]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
 | `preview_collision.gd <game> <group> <number> <png>` | one whole map as drawn, with every walk cell's permission checkerboarded over it: red is wall, blue is water. For a report that the player can stand where they should not |

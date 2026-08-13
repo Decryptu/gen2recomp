@@ -49,6 +49,8 @@ var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
+var _gender_screen_palette: Array = []
+var _text_bg_palette: Array = []
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -104,6 +106,10 @@ static func open_directory(path: String) -> GameData:
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
+	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
+	data._gender_screen_palette = gender_palette if gender_palette is Array else []
+	var text_palette: Variant = manifest.get("text_bg_palette", [])
+	data._text_bg_palette = text_palette if text_palette is Array else []
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
@@ -977,6 +983,28 @@ func battle_object_palette(
 		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
 	var colors := PackedColorArray()
 	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## `Palette_TextBG7`, the four colours a text box is drawn through. Empty on a
+## cartridge that ships none, which leaves a caller on its own black-on-white.
+func text_bg_palette() -> PackedColorArray:
+	if _text_bg_palette.size() < RomLayout.TEXT_BG_PALETTE_COLORS:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in _text_bg_palette:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## `LoadGenderScreenPal`'s four colours, whole. Empty on a cartridge with no
+## gender screen, which is the caller's cue that the screen is not asked for.
+func gender_screen_palette() -> PackedColorArray:
+	if _gender_screen_palette.size() < RomLayout.GENDER_SCREEN_PALETTE_COLORS:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in _gender_screen_palette:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
 

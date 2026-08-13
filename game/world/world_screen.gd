@@ -86,6 +86,11 @@ var _hall_of_fame_host: Gen2HallOfFameScreen = null
 var _field_move_text: bool = false
 ## Mirrors the source's wBattleMenuCursorPosition surviving a reopen.
 var _start_menu_cursor: int = 0
+## `.MenuReturns`' first entry, `.Reopen`: Pokedex, Pokemon, Pokegear and the
+## trainer card all return 0 from their `StartMenu_*` handler, so the menu is
+## drawn again rather than closed. Set when the menu opened the screen, so a
+## Pokegear reached by a script or by the debug key still returns to the world.
+var _reopen_start_menu: bool = false
 var _trainer_approach: Dictionary = {}
 var _active_battle_save: Gen2SaveData = null
 var _active_battle_persist: bool = false
@@ -1558,6 +1563,10 @@ func _on_start_menu_action(kind: StringName) -> void:
 	if host != null:
 		_start_menu_cursor = host.cursor()
 		host.queue_free()
+	_reopen_start_menu = kind in [
+		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR,
+		Gen2WorldStartMenu.ITEM_PLAYER, Gen2WorldStartMenu.ITEM_POKEDEX,
+	]
 	match kind:
 		Gen2WorldStartMenu.ITEM_POKEMON:
 			_open_embedded_party()
@@ -1568,6 +1577,15 @@ func _on_start_menu_action(kind: StringName) -> void:
 		Gen2WorldStartMenu.ITEM_POKEDEX:
 			_open_pokedex()
 	_refresh_labels()
+
+
+## `.Reopen`, which every `StartMenu_*` handler that returns 0 lands on. The
+## cursor is `wBattleMenuCursorPosition` and was kept when the menu closed.
+func _reopen_start_menu_if_due() -> void:
+	if not _reopen_start_menu:
+		return
+	_reopen_start_menu = false
+	_open_start_menu()
 
 
 ## `StartMenu_Pokedex`'s `farcall Pokedex`. Its own B returns to the overworld,
@@ -1608,6 +1626,7 @@ func _on_pokedex_closed() -> void:
 		_pokedex_prev_entry = host.previous_entry()
 		host.queue_free()
 	_script_prompt = "Pokedex closed"
+	_reopen_start_menu_if_due()
 	_refresh_labels()
 
 
@@ -1637,6 +1656,7 @@ func _on_trainer_card_closed() -> void:
 	if host != null:
 		host.queue_free()
 	_script_prompt = "Trainer card closed"
+	_reopen_start_menu_if_due()
 	_refresh_labels()
 
 
@@ -1690,6 +1710,7 @@ func _on_party_closed(_result: Dictionary) -> void:
 	if host != null:
 		host.queue_free()
 	_script_prompt = "Party closed"
+	_reopen_start_menu_if_due()
 	_refresh_labels()
 
 
@@ -1704,6 +1725,9 @@ func _on_party_action(action: Dictionary) -> void:
 	_party_host = null
 	if host != null:
 		host.queue_free()
+	# `PokemonActionSubmenu`'s `.quit` reaches `ExitAllMenus`, so a field move
+	# leaves the overworld rather than reopening the menu behind it.
+	_reopen_start_menu = false
 	if _world == null or StringName(action.get("kind", &"")) != &"field_move":
 		_refresh_labels()
 		return
@@ -2029,6 +2053,7 @@ func _on_service_completed(results: Array) -> void:
 	# whichever station was left tuned, or the map's own track when none was.
 	_play_current_map_music()
 	_show_script_results(results)
+	_reopen_start_menu_if_due()
 
 
 func _show_script_results(results: Array) -> void:

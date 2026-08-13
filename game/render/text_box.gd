@@ -76,6 +76,14 @@ const TILE: int = Gen2Font.TILE
 		field_opacity = next
 		_redraw()
 
+## The four colours the box is drawn through, index 0 the field and 3 the ink.
+## Empty is the ordinary black-on-white; the intro sets it because a palette
+## fade there remaps every BG palette on screen, the text one included.
+var palette: PackedColorArray = PackedColorArray():
+	set(value):
+		palette = value
+		_redraw()
+
 var font: Gen2Font = null
 
 var _pages: Array = []
@@ -214,18 +222,26 @@ func _redraw() -> void:
 	_draw_lines(indices, width)
 	_draw_cursor(indices, width)
 
-	# Index 0 is the field and index 3 the ink; 1bpp graphics have no middle
-	# colours, so the two between them are never drawn. Written out rather than
-	# taken from Gen2Palette.pic_palette because only the field carries alpha.
-	var field := Color(Color.WHITE, field_opacity)
 	var image: Image = Gen2PicImage.from_indices(
-		indices, width, height,
-		PackedColorArray([field, field, Color.BLACK, Color.BLACK])
+		indices, width, height, _colors()
 	)
 	if not raster_scx.is_empty():
 		image = Gen2Raster.scroll(image, raster_scx, Gen2BattleIntro.MAP_WIDTH)
 	texture = ImageTexture.create_from_image(image)
 	size = Vector2(width, height)
+
+
+## Index 0 is the field and index 3 the ink; 1bpp graphics have no middle
+## colours, so the two between them are never drawn. Written out rather than
+## taken from Gen2Palette.pic_palette because only the field carries alpha, and
+## [member field_opacity] is applied to whichever palette is in force.
+func _colors() -> PackedColorArray:
+	var source: PackedColorArray = (
+		palette if palette.size() == 4
+		else PackedColorArray([Color.WHITE, Color.WHITE, Color.BLACK, Color.BLACK])
+	)
+	var field := Color(source[0], field_opacity)
+	return PackedColorArray([field, Color(source[1], field_opacity), source[2], source[3]])
 
 
 ## Which half of the blink the box is in. `UnloadBlinkingCursor` puts the

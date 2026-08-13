@@ -276,6 +276,18 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not string_buffers["ok"]:
 		return string_buffers
 
+	var gender_screen: Dictionary = verify_gender_screen(rom, layout)
+	if not gender_screen["ok"]:
+		return gender_screen
+
+	var text_palette: Dictionary = verify_text_bg_palette(rom, layout)
+	if not text_palette["ok"]:
+		return text_palette
+
+	var shrink: Dictionary = verify_shrink_pics(rom, layout)
+	if not shrink["ok"]:
+		return shrink
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -444,6 +456,100 @@ static func verify_name_input_chars(rom: RomFile, layout: Dictionary) -> Diction
 const NAMING_MARKER_INK: int = 0x7F
 const NAMING_MIDDLE_LINE_ROWS: Array[int] = [3, 4]
 const NAMING_UNDER_LINE_ROWS: Array[int] = [6, 7]
+
+
+## `gfx/new_game/gender_screen.pal`'s four colours, which pin the palette:
+## white, the light blue the field is filled with, a darker blue, and black.
+const GENDER_SCREEN_COLORS: Array[int] = [0x7FFF, 0x7FC9, 0x7D61, 0x0000]
+
+
+## `gfx/font/bg_text.pal`'s own four colours, which pin the palette. -1 on Gold
+## and Silver, which ship no palette of their own for a text box.
+const TEXT_BG_COLORS: Array[int] = [0x7FFF, 0x7268, 0x40A5, 0x0000]
+
+
+## `ShrinkPlayer`'s two pictures. Both are LZ runs, so the check is that each
+## decompresses to exactly the 7x7 box `ShrinkFrame` asks `PlaceGraphic` for: a
+## wrong address either fails the decompressor or lands on a run of the wrong
+## size, and neither of those is the shrink.
+static func verify_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout["shrink_pics"]
+	var wanted: int = RomLayout.SHRINK_PIC_TILES * Gen2Tiles.TILE_BYTES
+	var lz := Gen2Lz.new()
+	for key: String in ["first", "second"]:
+		var at: int = int(entry[key])
+		if not rom.in_bounds(at):
+			return {"ok": false, "message": "Shrink pic %s is outside the cartridge." % key}
+		var raw: PackedByteArray = lz.decompress(rom.bytes(), at)
+		if lz.failed or raw.size() != wanted:
+			return {
+				"ok": false,
+				"message": "Shrink pic %s decompressed to %d bytes, wanted %d." % [
+					key, raw.size(), wanted,
+				],
+			}
+	return {"ok": true, "message": "Shrink pics verified."}
+
+
+static func verify_text_bg_palette(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: int = int((layout.get("text_bg_palette", {}) as Dictionary).get("offset", -1))
+	if entry < 0:
+		return {"ok": true, "message": "No text palette on this cartridge."}
+	if not rom.in_bounds(entry, TEXT_BG_COLORS.size() * Gen2Palette.COLOR_BYTES):
+		return {"ok": false, "message": "The text palette is outside the cartridge."}
+	for index: int in TEXT_BG_COLORS.size():
+		var stored: int = rom.u16le(entry + index * Gen2Palette.COLOR_BYTES)
+		if stored != TEXT_BG_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Text palette colour %d is $%04X, expected $%04X." % [
+					index, stored, TEXT_BG_COLORS[index],
+				],
+			}
+	return {"ok": true, "message": "Text palette verified."}
+
+
+## `LoadGenderScreenPal` and `LoadGenderScreenLightBlueTile`, whose bytes sit
+## thirteen apart in the same routine pair.
+##
+## The palette's eight bytes appear once in the dump, so they pin themselves.
+## The tile does not: sixteen bytes of one repeated index occur hundreds of
+## times, so it is checked for being exactly that, on the index the palette's
+## light blue sits at. Both are -1 on Gold and Silver, which ship no gender
+## screen at all.
+static func verify_gender_screen(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("gender_screen", {})
+	var palette: int = int(entry.get("palette", -1))
+	var tile: int = int(entry.get("tile", -1))
+	if palette < 0 and tile < 0:
+		return {"ok": true, "message": "No gender screen on this cartridge."}
+	if not rom.in_bounds(palette, RomLayout.GENDER_SCREEN_PALETTE_COLORS * Gen2Palette.COLOR_BYTES) \
+			or not rom.in_bounds(tile, RomLayout.TILE_BYTES_2BPP):
+		return {"ok": false, "message": "Gender screen graphics are outside the cartridge."}
+
+	for index: int in GENDER_SCREEN_COLORS.size():
+		var stored: int = rom.u16le(palette + index * Gen2Palette.COLOR_BYTES)
+		if stored != GENDER_SCREEN_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "Gender screen colour %d is $%04X, expected $%04X." % [
+					index, stored, GENDER_SCREEN_COLORS[index],
+				],
+			}
+
+	# One 2bpp tile whose every pixel is GENDER_SCREEN_FILL_INDEX: each row is
+	# the low plane lit and the high plane clear.
+	var low: int = 0xFF if (RomLayout.GENDER_SCREEN_FILL_INDEX & 1) != 0 else 0x00
+	var high: int = 0xFF if (RomLayout.GENDER_SCREEN_FILL_INDEX & 2) != 0 else 0x00
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		if rom.u8(tile + row * 2) != low or rom.u8(tile + row * 2 + 1) != high:
+			return {
+				"ok": false,
+				"message": "Gender screen tile row %d is not a solid index %d." % [
+					row, RomLayout.GENDER_SCREEN_FILL_INDEX,
+				],
+			}
+	return {"ok": true, "message": "Gender screen graphics verified."}
 
 
 ## Walks the type matchup chart from its offset to the terminator.
@@ -1809,6 +1915,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
+		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
+		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
 		"tiles": tiles,
@@ -2296,6 +2404,61 @@ func _import_card_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"background": background, "badge": badge}
 
 
+## `Palette_TextBG7`, the four colours a text box is drawn through. Only index 0
+## and index 3 are ever a pixel, since the font is 1bpp; the two between them are
+## what a palette fade over a box passes through. Empty on Gold and Silver.
+func _import_text_bg_palette(rom: RomFile, layout: Dictionary) -> Array:
+	var entry: int = int((layout["text_bg_palette"] as Dictionary)["offset"])
+	if entry < 0:
+		return []
+	var out: Array = []
+	for index: int in RomLayout.TEXT_BG_PALETTE_COLORS:
+		out.append(rom.u16le(entry + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
+## `LoadGenderScreenPal`'s four colours, stored whole rather than as a pair: the
+## screen is a background fill with a text box over it, not a pic drawn through
+## `LoadPalette_White_Col1_Col2_Black`. Empty on a profile with no gender screen.
+func _import_gender_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
+	var entry: int = int((layout["gender_screen"] as Dictionary)["palette"])
+	if entry < 0:
+		return []
+	var out: Array = []
+	for index: int in RomLayout.GENDER_SCREEN_PALETTE_COLORS:
+		out.append(rom.u16le(entry + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
+## `ShrinkPlayer`'s two pictures, which are LZ runs rather than tile strips and
+## are laid out by `PlaceGraphic` the way every 7x7 pic is: as one 56x56 buffer
+## per picture, so a screen draws them the way it draws the player's own.
+func _import_shrink_pics(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout["shrink_pics"]
+	var offsets: Array = [int(entry["first"]), int(entry["second"])]
+	var side: int = RomLayout.SHRINK_PIC_COLUMNS * Gen2Tiles.TILE_WIDTH
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for index: int in offsets.size():
+		var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(offsets[index]))
+		if _lz.failed or raw.size() < RomLayout.SHRINK_PIC_TILES * Gen2Tiles.TILE_BYTES:
+			return {}
+		var name: String = RomLayout.SHRINK_PIC_NAMES[index]
+		var pixels: PackedByteArray = Gen2Tiles.decode_pic(
+			raw, RomLayout.SHRINK_PIC_COLUMNS, RomLayout.SHRINK_PIC_ROWS
+		)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), pixels):
+			return {}
+		out[name] = {
+			"width": side,
+			"height": side,
+			"tiles": RomLayout.SHRINK_PIC_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+	return out
+
+
 ## Decodes the fixed tile sheets: the font, the eight text box borders and the
 ## battle HUD's graphics, each as one strip of tiles.
 ##
@@ -2444,8 +2607,16 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"columns": RomLayout.INTRO_PLAYER_PIC_COLUMNS,
 			"column_major": true,
 		}
+	var gender_screen: Dictionary = layout["gender_screen"]
+	if int(gender_screen["tile"]) >= 0:
+		sheets["gender_screen"] = {
+			"offset": int(gender_screen["tile"]),
+			"tiles": RomLayout.GENDER_SCREEN_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
 
-	var written: Dictionary = {}
+	var written: Dictionary = _import_shrink_pics(rom, layout)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

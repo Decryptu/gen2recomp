@@ -642,6 +642,26 @@ func _drawn_hp(side: int) -> int:
 	return animation.hp()
 
 
+## `HandleHPPals`, which sets `wLowHealthAlarm`'s DANGER_ON bit while the
+## player's own bar reads HP_RED and clears it otherwise. The colour follows what
+## is drawn rather than the numbers behind it, so a draining bar arms the alarm
+## on the frame it turns red. `StopDangerSound` silences it the moment the
+## Pokemon faints and `CleanUpBattleRAM` at the end of the battle, which is what
+## the two zero cases here are.
+func _update_low_health_alarm() -> void:
+	if _audio_player == null:
+		return
+	var hp: int = _drawn_hp(Gen2Battle.PLAYER)
+	var over: bool = _battle != null and _battle.is_over()
+	if hp <= 0 or _player_max_hp <= 0 or over:
+		_audio_player.set_low_health_alarm(false)
+		return
+	var lit: int = Gen2BattleHud.bar_pixels(
+		hp, _player_max_hp, Gen2BattleHud.HP_BAR_TILES * Gen2Font.TILE
+	)
+	_audio_player.set_low_health_alarm(GameData.hp_bar_palette_name(lit) == "hp_red")
+
+
 ## Whether any bar is still moving, which is what holds the next message back.
 func bars_animating() -> bool:
 	return not _bars.is_empty() or _exp_bar != null
@@ -747,6 +767,11 @@ const ANIM_MOVE_LIMIT: int = 0x100
 ## `PlayHitSound`'s three effects, by their `constants/sfx_constants.asm`
 ## numbers, which are the same in both pins.
 const SFX_NOT_VERY_EFFECTIVE: int = 0xAB
+## `wCryTracks`, which `PlayStereoCry` masks CHANNEL_TRACKS with: the enemy's
+## cry keeps the low nibble's terminals and the player's the high nibble's.
+const CRY_TRACKS_ENEMY: int = 0x0F
+const CRY_TRACKS_PLAYER: int = 0xF0
+
 const SFX_DAMAGE: int = 0xAC
 const SFX_SUPER_EFFECTIVE: int = 0xAD
 
@@ -926,7 +951,16 @@ func _play_anim_cry() -> void:
 	var record: Dictionary = _data.species_cry(_enemy if enemy_turn else _player)
 	if record.is_empty():
 		return
-	_audio_player.play_record(record, &"cry", _audio_assets())
+	_audio_player.play_record(
+		record, &"cry", _audio_assets(), false, cry_tracks(enemy_turn)
+	)
+
+
+## `wCryTracks`: every `PlayStereoCry` in `engine/battle/core.asm` writes `$0f`
+## for the enemy's cry and `$f0` for the player's, which is what puts each
+## battler's cry on its own side of the field.
+static func cry_tracks(enemy: bool) -> int:
+	return CRY_TRACKS_ENEMY if enemy else CRY_TRACKS_PLAYER
 
 
 ## `PlayHitSound`: only the two damage after-anims have one, and which of the
@@ -2500,6 +2534,7 @@ func _enemy_trainer_name() -> String:
 ## the battle engine: a turn resolves at once and is then shown an event at a
 ## time, so what is drawn deliberately lags where the battle has got to.
 func _push_view() -> void:
+	_update_low_health_alarm()
 	if not _renderer_ready:
 		return
 	_renderer.set_view({
