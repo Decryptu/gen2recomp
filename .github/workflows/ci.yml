@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  GODOT_VERSION: 4.8-dev2
+  GODOT_VERSION: 4.8-dev3
 
 jobs:
   tests:
