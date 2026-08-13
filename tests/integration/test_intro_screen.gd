@@ -47,10 +47,16 @@ func _begin() -> void:
 	_settle_splash()
 
 
-func _settle_splash() -> void:
+## The copyright half is a fixed budget and the GameFreak half a sequence, so
+## the splash is driven until it hands over rather than for a count.
+func _settle_splash(limit: int = 800) -> void:
 	var splash: Gen2SplashScreen = _screen.current() as Gen2SplashScreen
-	if splash != null:
-		splash.advance_frames(splash.frames_left())
+	if splash == null:
+		return
+	for _frame: int in limit:
+		if _screen.current() != splash:
+			return
+		splash.advance_frames(1)
 
 
 ## Spends whatever `DelayFrames` the speech is standing in. The intro's fades
@@ -101,15 +107,18 @@ func _run_intro(female: bool = false) -> String:
 
 
 ## `SplashScreen` is what `Init` reaches before `NewGame`, so the copyright
-## screen is the first thing a new game shows and the gender question waits for
-## its hundred and ten frames.
+## screen and the GameFreak animation behind it are the first things a new game
+## shows and the gender question waits for both.
 func test_the_copyright_screen_comes_before_the_gender_question() -> void:
 	_screen.begin(_data, SLOT, LABEL, false)
 	assert_true(_screen.current() is Gen2SplashScreen)
 	var splash: Gen2SplashScreen = _screen.current() as Gen2SplashScreen
 	splash.advance_frames(splash.frames_left() - 1)
-	assert_true(_screen.current() is Gen2SplashScreen, "and it is not cut short")
+	assert_eq(splash.visible_image(), &"copyright", "and it is not cut short")
 	splash.advance_frames(1)
+	assert_eq(splash.visible_image(), &"game_freak_presents")
+	assert_true(_screen.current() is Gen2SplashScreen)
+	_settle_splash()
 	assert_true(_screen.current() is Gen2GenderScreen)
 
 

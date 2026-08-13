@@ -53,6 +53,7 @@ var _gender_screen_palette: Array = []
 var _copyright_string: Array = []
 var _copyright_palette: Array = []
 var _text_bg_palette: Array = []
+var _presents_palettes: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -118,6 +119,8 @@ static func open_directory(path: String) -> GameData:
 	var text_palette: Variant = manifest.get("text_bg_palette", [])
 	data._text_bg_palette = text_palette if text_palette is Array else []
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
+	var presents_palettes: Variant = manifest.get("presents_palettes", {})
+	data._presents_palettes = presents_palettes if presents_palettes is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -1042,6 +1045,20 @@ func copyright_palette() -> PackedColorArray:
 		return PackedColorArray()
 	var colors := PackedColorArray()
 	for packed: Variant in _copyright_palette:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## One of the splash's object palettes: `object` is
+## PREDEFPAL_GAMEFREAK_LOGO_OB, `ditto` is `gfx/splash/ditto.pal` and
+## `ditto_fade` is the sixteen-step transform. Empty for a palette this profile
+## does not ship, which is how Gold and Silver say they have no Ditto.
+func presents_palette(name: String) -> PackedColorArray:
+	var stored: Variant = _presents_palettes.get(name, [])
+	if not stored is Array:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in stored as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
 
