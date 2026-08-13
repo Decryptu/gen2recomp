@@ -72,6 +72,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	var button: int = Gen2Button.pressed_in(event)
 	if button != 0 and handle_button(button):
 		get_viewport().set_input_as_handled()
+		return
+	## The title screen is the one screen here that reads `hJoyDown` rather than
+	## a press: its two chords are three buttons at once, which no press can say.
+	var released: int = Gen2Button.released_in(event)
+	if released != 0 and release_button(released):
+		get_viewport().set_input_as_handled()
 
 
 ## Sub-screens draw in the 160x144 space, so they go inside the hardware
@@ -107,6 +113,15 @@ func gender() -> int:
 func handle_button(button: int) -> bool:
 	var screen: Control = current()
 	return screen.handle_button(button) if screen != null else false
+
+
+## The release half, which only the splash's title phase has anything to do
+## with. Answers whether it was taken.
+func release_button(button: int) -> bool:
+	if _splash == null:
+		return false
+	_splash.release_button(button)
+	return true
 
 
 ## `SplashScreen` first, which is the copyright screen and nothing else until

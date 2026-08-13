@@ -97,6 +97,17 @@ lists contacts and dispatches calls, with the world runner executing the
 imported caller/callee script at the same transaction boundary. Audio stays
 behind bounded decoder, renderer and player layers.
 
+`title_scene.gd` and `render/title_page.gd` are `engine/movie/title.asm` and
+`TitleScreenScene`: the scene owns `TitleScreenEntrance`'s scroll and falling
+crystal, `SuicuneFrameIterator`, the bird's frameset and sine, the trail
+particles `UpdateTitleTrailSprite` spawns, `ScrollTitleScreenClouds` and the
+timer, and answers with the source's own `wTitleScreenSelectedOption`; the page
+builds the BG map at its own 256 pixels and samples it through `hSCX` and
+`wLYOverrides`, because that map wraps and a cloud walking left brings its right
+columns back round. `Gen2SplashScreen` hosts the phase and is the one screen here
+that reads a held button rather than a press, since both of
+`TitleScreenMain`'s chords are three buttons at once.
+
 `world_start_menu.gd` models `engine/menus/start_menu.asm`'s item list: source
 Pokedex/Pokemon/Pokegear gating and the `STATICMENU_WRAP` cursor.
 `pokedex.gd` models `engine/pokedex/pokedex.asm`'s listing: the three orderings
@@ -186,6 +197,7 @@ the contract and why a renderer must not write world state.
 | `render/battle_tiles.gd` | Hardware-order battle tile page |
 | `render/battle_hud.gd` | Status panels on the tile grid |
 | `render/party_menu_page.gd` | `WritePartyMenuTilemap`'s party list |
+| `render/title_page.gd` | `_TitleScreen`'s and `TitleScreen`'s two screens |
 
 `Gen2Screen` is a `Control` with a 160x144 `SubViewport` at integer scale;
 surrounding UI uses window resolution. Project-wide stretch blurs menus and
@@ -386,6 +398,7 @@ Because wrong offsets can decode plausible neighboring data,
 | Evolutions, learnsets | Pointers address the banked window; methods, species, moves and levels valid, levels ascending except Muk, evolution count known. `EVOLVE_STAT` is four bytes, not three |
 | Growth | Growth rate and base EXP for all 251 species in all three games |
 | Menu text | The start menu's nine `.MenuDesc` strings, pinned by the first and last of the run and by nine terminators between them, and the pack's five `text_far` texts, each by its own `text` macro byte and opening words |
+| Title | Crystal's three LZ runs and its palettes are one contiguous section, so each pins the next: a run decompressing to the wrong tile count, or one whose neighbour does not follow it inside a few bytes, is not the one being looked for. The crystal opens on a blank corner and every one of `.Frames`' four Suicune bases has ink under it. Gold and Silver's logo halves pin their tilemap the same way, the bottom half's last tile is drawn on because `--trim-whitespace` took the blanks off it, the trail's first four tiles are inked and Gold's own last four are blank, and the bird starts exactly where the trail's tiles stop. Both palette runs are contiguous, the background's opens on white and the objects' carries `title_fg.pal`'s three identical greys |
 | Splash | The copyright pair above, and `GameFreakPresents`' four graphics and three palettes, each identified by content: the word strip is inked in every tile and clear across the top two rows of the six that spell "PRESENTS", the logo's first tile is the blank one "GAME FREAK" borrows as its space, the sparkles close in on their own centre one row at a time, the Ditto decompresses to exactly 256 tiles with every OAM base landing on a drawn one, and the sixteen-step fade opens on the Ditto's own colour and runs pink to orange. The star strip and the fade palette are pinned to the logo graphic they sit against |
 | Fruit trees | Thirty rows of one item byte, identified by content because the table has no header and no terminator: rows 17 to 23 are the seven apricorns and no other row bears one, and the four Johto berry trees ahead of them share a berry |
 | World services | Source counts, pointer widths, banked addresses, mart terminators, phone sizes, non-trainer caller-name pointer tables, packed audio headers, cry pointers, shared waves, drumkits and bounded bank-window payloads. Menu headers need valid data pointers and command-derived shape; the script collector validates `phonecall` text pointers, leaves `memcall`/`memjump` to runtime memory snapshots, and ignores malformed candidates |

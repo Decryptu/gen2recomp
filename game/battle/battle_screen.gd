@@ -162,6 +162,9 @@ var _world_battle_recovery: Dictionary = {}
 var _last_message: String = ""
 ## A running [Gen2HpBarAnimation] per side. A side with no entry is not moving.
 var _bars: Dictionary = {}
+## `MonFaintedAnimation`s still running, oldest first. A double faint runs two,
+## one after the other, the way the source's two calls do.
+var _faints: Array[Dictionary] = []
 ## The running [Gen2ExpBarAnimation], or null when the exp bar is not filling.
 var _exp_bar: Gen2ExpBarAnimation = null
 ## The running [Gen2BattleIntro], or null once the pics have slid into place.
@@ -293,7 +296,7 @@ func _process(delta: float) -> void:
 ## [method advance_frame] so a test or a screenshot driver can settle the screen
 ## without waiting on real time.
 func frames_running() -> bool:
-	return bars_animating() or _intro != null or animation_running()
+	return bars_animating() or _intro != null or animation_running() or fainting()
 
 
 ## One hardware frame of everything that counts them. Public through
@@ -302,7 +305,41 @@ func frames_running() -> bool:
 func advance_frame() -> bool:
 	var moved: bool = advance_intro()
 	moved = advance_bars() or moved
+	moved = advance_faint() or moved
 	return advance_animation() or moved
+
+
+## Whether a picture is still sinking off its square.
+func fainting() -> bool:
+	return not _faints.is_empty()
+
+
+## One hardware frame of `MonFaintedAnimation`. Public so a test or a screenshot
+## driver can settle or step one without waiting on real time.
+func advance_faint() -> bool:
+	if _faints.is_empty():
+		return false
+	var faint: Dictionary = _faints[0]
+	faint["delay"] = int(faint["delay"]) - 1
+	if int(faint["delay"]) > 0:
+		return true
+	faint["delay"] = Gen2BattleScreenMap.FAINT_STEP_FRAMES
+	faint["step"] = int(faint["step"]) + 1
+	Gen2BattleScreenMap.faint_step(_bg_map, bool(faint["player_side"]))
+	if int(faint["step"]) >= Gen2BattleScreenMap.FAINT_STEPS:
+		_faints.remove_at(0)
+	_push_view()
+	return true
+
+
+## `PlayerMonFaintedAnimation` or `EnemyMonFaintedAnimation`, which
+## `FaintYourPokemon` and `FaintEnemyPokemon` run before their own text box.
+func _begin_faint(side: int) -> void:
+	_faints.append({
+		"player_side": side == Gen2Battle.PLAYER,
+		"step": 0,
+		"delay": Gen2BattleScreenMap.FAINT_STEP_FRAMES,
+	})
 
 
 func _ready() -> void:
@@ -785,7 +822,7 @@ func advance_bars() -> bool:
 	if moved:
 		_push_view()
 
-	if not _held_message.is_empty() and _bars.is_empty():
+	if not _held_message.is_empty() and _bars.is_empty() and not fainting():
 		var text: String = _held_message
 		_held_message = ""
 		show_message(text)
@@ -1045,6 +1082,7 @@ func _audio_assets() -> Dictionary:
 ## that took a picture off it leaves it off until something stamps it back.
 func _reseed_bg_map() -> void:
 	_bg_map = Gen2BattleScreenMap.seeded()
+	_faints.clear()
 
 
 ## How full the exp bar is, in `PlaceExpBar`'s own pixels. The committed value:
@@ -1651,7 +1689,7 @@ func advance() -> void:
 	## A bar the source is still animating has not printed its message yet, so
 	## there is nothing for a press to advance past. Without this the press
 	## would pop the next event and the held line would never be shown.
-	if bars_animating():
+	if bars_animating() or fainting():
 		return
 	## An animation is a run of unconditional delays, the way the intro is, so a
 	## press during one reaches nothing.
@@ -2218,7 +2256,7 @@ func _show_next_event() -> void:
 			## `applydamage` animates the bar and only then does `criticaltext`
 			## print, so a message caused by an event that moved a bar waits for
 			## it rather than racing it.
-			if not _bars.is_empty():
+			if not _bars.is_empty() or fainting():
 				_held_message = text
 			else:
 				show_message(text)
@@ -2266,6 +2304,10 @@ func _apply_event_state(event: Dictionary) -> void:
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+		Gen2Battle.FAINTED:
+			# `FaintYourPokemon` and `FaintEnemyPokemon` sink the picture before
+			# either prints, so the line waits on the animation.
+			_begin_faint(int(event["side"]))
 		Gen2Battle.SENT_OUT:
 			# The pic and the panel both change, and both come out of the event
 			# rather than out of the party, for the same reason every other number

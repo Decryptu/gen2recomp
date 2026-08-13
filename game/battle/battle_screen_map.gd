@@ -34,6 +34,18 @@ const PLAYER_BASE_TILE: int = 0x31
 const BLANK_TILE: int = Gen2BattleAnimBackground.BLANK_TILE
 
 
+## `MonFaintedAnimation`'s own block, which is not the picture's: seven columns
+## from one left of it, and seven rows ending one below, so the picture sinks
+## through a margin rather than out of its own frame.
+## `PlayerMonFaintedAnimation` and `EnemyMonFaintedAnimation` name the two.
+const FAINT_AT: Dictionary = {false: Vector2i(12, 0), true: Vector2i(1, 5)}
+const FAINT_COLUMNS: int = 7
+const FAINT_ROWS: int = 7
+## `ld b, 7` outer, each spending `ld c, 2 / DelayFrames`.
+const FAINT_STEPS: int = 7
+const FAINT_STEP_FRAMES: int = 2
+
+
 ## The map a battle sits at: both pictures whole, blank everywhere else.
 static func seeded() -> PackedByteArray:
 	var out: PackedByteArray = PackedByteArray()
@@ -42,6 +54,30 @@ static func seeded() -> PackedByteArray:
 	stamp(out, false)
 	stamp(out, true)
 	return out
+
+
+## One outer step of `MonFaintedAnimation`: the block's rows each take the one
+## above, and its top row is blanked with the routine's own seven spaces. Seven
+## of these sink the whole picture off its square.
+static func faint_step(map: PackedByteArray, player_side: bool) -> void:
+	if map.size() != COLUMNS * ROWS:
+		return
+	var at: Vector2i = FAINT_AT[player_side]
+	for index: int in FAINT_ROWS - 1:
+		var row: int = at.y + FAINT_ROWS - 1 - index
+		var above: int = row - 1
+		for column: int in FAINT_COLUMNS:
+			var x: int = at.x + column
+			if x < 0 or x >= COLUMNS or row < 0 or row >= ROWS:
+				continue
+			map[row * COLUMNS + x] = (
+				map[above * COLUMNS + x] if above >= 0 else BLANK_TILE
+			)
+	for column: int in FAINT_COLUMNS:
+		var x: int = at.x + column
+		if x < 0 or x >= COLUMNS or at.y < 0 or at.y >= ROWS:
+			continue
+		map[at.y * COLUMNS + x] = BLANK_TILE
 
 
 ## `PlaceGraphic` over one battler's box: a tile is

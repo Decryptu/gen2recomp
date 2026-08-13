@@ -111,11 +111,15 @@ func _open() -> void:
 	_screen.set("_battle", battle)
 	if _stage in ["use_next", "replace"]:
 		## Through the screen's own quarter, so the HUD in the picture is the HUD
-		## the faint left rather than the one the intro drew.
+		## the faint left rather than the one the intro drew, and then the
+		## engine's own FAINTED event, which is what runs `MonFaintedAnimation`.
 		for _quarter: int in 8:
 			if battle.player.is_fainted():
 				break
 			_screen.hurt_player()
+		_screen.set("_pending", [
+			{"type": Gen2Battle.FAINTED, "side": Gen2Battle.PLAYER},
+		])
 	else:
 		_screen.set("_pending", battle.take_actions(
 			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)

@@ -54,6 +54,7 @@ var _copyright_string: Array = []
 var _copyright_palette: Array = []
 var _text_bg_palette: Array = []
 var _presents_palettes: Dictionary = {}
+var _title: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -122,6 +123,8 @@ static func open_directory(path: String) -> GameData:
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
 	var presents_palettes: Variant = manifest.get("presents_palettes", {})
 	data._presents_palettes = presents_palettes if presents_palettes is Dictionary else {}
+	var title: Variant = manifest.get("title", {})
+	data._title = title if title is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1082,6 +1085,37 @@ func presents_palette(name: String) -> PackedColorArray:
 	for packed: Variant in stored as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
+
+
+## One of the title screen's palette runs, four colours to a palette:
+## [code]palettes[/code] is Crystal's sixteen, and [code]bg_palettes[/code] and
+## [code]ob_palettes[/code] are Gold and Silver's five and two. Empty for a run
+## this profile does not ship, which is how the two screens are told apart.
+func title_palettes(name: String) -> Array[PackedColorArray]:
+	var stored: Variant = _title.get(name, [])
+	var out: Array[PackedColorArray] = []
+	if not stored is Array:
+		return out
+	var packed: Array = stored
+	for first: int in range(0, packed.size(), RomLayout.TITLE_PALETTE_COLORS):
+		var colors := PackedColorArray()
+		for index: int in RomLayout.TITLE_PALETTE_COLORS:
+			colors.append(Gen2Palette.from_packed(int(packed[first + index])))
+		out.append(colors)
+	return out
+
+
+## `TitleScreenTilemap`, the `$FF`-terminated run `LoadTitleScreenTilemap` writes
+## straight into the BG map. Empty on Crystal, which draws its title screen with
+## `DrawTitleGraphic` instead of a stored map.
+func title_tilemap() -> PackedByteArray:
+	var stored: Variant = _title.get("tilemap", [])
+	var out := PackedByteArray()
+	if not stored is Array:
+		return out
+	for code: Variant in stored as Array:
+		out.append(int(code))
+	return out
 
 
 ## `PREDEFPAL_CGB_BADGE`, stored whole rather than as a pair.

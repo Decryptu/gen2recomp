@@ -117,6 +117,7 @@ to check without writing.
 | Sprites | Front/back for 251 species and all 26 Unown forms |
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
+| Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -164,8 +165,8 @@ battle, plus a save editor for party, boxes, bag, flags, position and dex that
 cannot produce a save the game will not load. A new game opens on the
 cartridge's own splash: the copyright screen for the hundred and ten frames
 `SplashScreen` gives it, then the GameFreak animation, which is Crystal's
-bouncing Ditto turning into the logo or Gold and Silver's star and sparkles, and
-then the gender question and Oak's speech; it starts with an empty
+bouncing Ditto turning into the logo or Gold and Silver's star and sparkles, then
+the title screen, and then the gender question and Oak's speech; it starts with an empty
 party at the Crystal home spawn with source starting money, and Elm's imported
 lab scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
 Continue enters the overworld, and the start menu's SAVE writes its map,
@@ -307,6 +308,7 @@ all three games unless its row says otherwise:
 | `preview_party.gd <game> <png> [party\|box] [presses]` | the party and PC-box overlays as the overworld stacks them, over a development save. `presses` is a `u,d,l,r,a,b` list driven in before the shot, and several lists separated by `;` write one file each |
 | `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
+| `preview_title.gd <game> <png> [frame;frame]` | the title screen at any source frame: Crystal's twenty-eight-frame interlaced entrance and its falling crystal, the Suicune cycle, Gold's Ho-Oh and Silver's Lugia over the scrolling clouds with the trail streaming behind |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
