@@ -31,6 +31,8 @@ var _staged_swarm: Dictionary = {}
 var _has_staged_swarm: bool = false
 var _has_staged_special_phone_call: bool = false
 var _staged_special_phone_call: int = 0
+var _has_staged_kurt_apricorn_quantity: bool = false
+var _staged_kurt_apricorn_quantity: int = 0
 var _reset_phone_receive_timer: bool = false
 var _events: Array = []
 var _pending: Dictionary = {}
@@ -105,6 +107,10 @@ const SPECIAL_SNORLAX_AWAKE: int = 96
 const SNORLAX_PROXIMITY_CELLS: Array[Vector2i] = [
 	Vector2i(33, 8), Vector2i(34, 10), Vector2i(35, 10), Vector2i(36, 8), Vector2i(36, 9),
 ]
+## SelectApricornForKurt, 86 in Crystal and 85 in Gold/Silver, which
+## special_index() already normalizes. maps/KurtsHouse.asm's `.AskApricorn`
+## branches on wScriptVar afterwards, one label per apricorn.
+const SPECIAL_SELECT_APRICORN_FOR_KURT: int = 86
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
@@ -595,6 +601,33 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 			int(phone_script.get("bank", -1)), int(phone_script.get("address", -1))
 		):
 			return _fail(&"phone_script_missing", phone_script)
+		return advance()
+	if kind == &"apricorn_selection_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"apricorn_selection_failed")), result
+			)
+		var apricorn: int = int(result.get("item", 0))
+		var apricorn_quantity: int = int(result.get("quantity", 0))
+		if apricorn != 0 and not Gen2WorldApricorn.is_apricorn(apricorn):
+			return _fail(&"invalid_apricorn", result)
+		## `SelectApricornForKurt` zeroes wKurtApricornQuantity on entry and
+		## writes it only past `Kurt_SelectQuantity`'s carry, so a cancelled
+		## selection leaves both bytes at zero.
+		if apricorn == 0:
+			apricorn_quantity = 0
+		elif apricorn_quantity < 1 or apricorn_quantity > Gen2WorldApricorn.MAX_QUANTITY:
+			return _fail(&"invalid_apricorn_quantity", result)
+		_script_value = apricorn
+		_staged_kurt_apricorn_quantity = apricorn_quantity
+		_has_staged_kurt_apricorn_quantity = true
+		_events.append({
+			"type": &"runtime_request_completed",
+			"kind": kind,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
 		return advance()
 	if kind == &"trainer_approach_requested":
 		if not bool(result.get("ok", false)):
@@ -1885,14 +1918,10 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 		0x14: # VAR_SPECIALPHONECALL
 			_script_value = _current_special_phone_call()
 		0x16: # VAR_KURT_APRICORNS
-			## _GetVarAction reads wKurtApricornQuantity. SelectApricornForKurt is
-			## the writer; its host mirrors that byte on the invocation request.
-			if not _request.has("kurt_apricorn_quantity"):
-				return {
-					"ok": false, "reason": &"missing_kurt_apricorn_quantity",
-					"variable": variable,
-				}
-			_script_value = clampi(int(_request["kurt_apricorn_quantity"]), 0, 0xFF)
+			## _GetVarAction reads wKurtApricornQuantity, saved player data whose
+			## only writer is SelectApricornForKurt. A selection made inside this
+			## invocation shadows the committed byte, as the WRAM write does.
+			_script_value = _kurt_apricorn_quantity()
 		0x17: # VAR_CALLERID
 			_script_value = int(_phone_context.get("caller_id", -1))
 		_:
@@ -1945,6 +1974,14 @@ func _current_special_phone_call() -> int:
 		if int(request_value) != 0:
 			return int(request_value)
 	return state.pending_special_phone_call() if state != null else 0
+
+
+func _kurt_apricorn_quantity() -> int:
+	if _has_staged_kurt_apricorn_quantity:
+		return _staged_kurt_apricorn_quantity
+	if _request.has("kurt_apricorn_quantity"):
+		return clampi(int(_request["kurt_apricorn_quantity"]), 0, 0xFF)
+	return state.kurt_apricorn_quantity() if state != null else 0
 
 
 func _clock_hour() -> int:
@@ -2074,6 +2111,13 @@ func _execute_special(special: int) -> Dictionary:
 			_emit_runtime_event(&"roaming_mons_initialized", {
 				"special": special,
 				"count": state.roaming_mons().size() if state != null else 0,
+			})
+		SPECIAL_SELECT_APRICORN_FOR_KURT:
+			## Both of the special's boxes are the host's; it answers with the
+			## chosen apricorn and how many of it, and a backed-out box is the
+			## source's own `wScriptVar = 0`.
+			return _stage_runtime_request(&"apricorn_selection_requested", {
+				"special": special,
 			})
 		SPECIAL_ACTIVATE_FISHING_SWARM:
 			_emit_runtime_event(&"phone_special_requested", {
@@ -3021,6 +3065,8 @@ func _complete() -> Dictionary:
 		runtime_changes["swarm"] = _staged_swarm.duplicate()
 	if _has_staged_special_phone_call:
 		runtime_changes["pending_special_phone_call"] = _staged_special_phone_call
+	if _has_staged_kurt_apricorn_quantity:
+		runtime_changes["kurt_apricorn_quantity"] = _staged_kurt_apricorn_quantity
 	if not _staged_engine_flags.is_empty():
 		runtime_changes["engine_flags"] = _staged_engine_flags.duplicate()
 	if _reset_phone_receive_timer:

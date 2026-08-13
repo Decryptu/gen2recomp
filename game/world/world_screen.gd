@@ -2272,6 +2272,7 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
 					&"special_phone_call_requested", &"town_map_requested",
+					&"apricorn_selection_requested",
 				]:
 					_open_service_host()
 					break

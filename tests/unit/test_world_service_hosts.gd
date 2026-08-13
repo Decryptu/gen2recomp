@@ -5,6 +5,10 @@ extends GutTest
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
+const APRICORN_RED: int = 0x55
+const APRICORN_PNK: int = 0x65
+const BALL_LEVEL: int = 0x9F
+
 var _data: GameData = null
 var _world: Gen2WorldAPI = null
 var _save: Gen2SaveData = null
@@ -391,6 +395,118 @@ func _write_bargain_schedule_script() -> void:
 	]
 	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
 	_data = GameData.open_directory(Fixture.directory())
+
+
+## `special SelectApricornForKurt` behind a coord event, over a bag holding
+## whichever apricorns the case needs.
+func _set_apricorn_script(items: Dictionary) -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_SELECT_APRICORN_FOR_KURT, 0x00,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var maps: Array = RomCache.read_json(RomCache.world_maps_path(Fixture.directory()))
+	for raw: Dictionary in maps:
+		if int(raw.get("group", -1)) != Fixture.MAP_GROUP \
+		or int(raw.get("number", -1)) != Fixture.MAP_NUMBER:
+			continue
+		var events: Dictionary = raw.get("events", {})
+		events["coord_events"] = [{"x": 7, "y": 6, "script": 0x6300}]
+		raw["events"] = events
+	RomCache.write_json(RomCache.world_maps_path(Fixture.directory()), maps)
+	_data = GameData.open_directory(Fixture.directory())
+	_world = Gen2WorldAPI.open(
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6),
+		Gen2WorldState.new({}, {}, items)
+	)
+	_save = Gen2SaveStore.create_development_save(_data, 0)
+	_save.world = _world.snapshot()
+
+
+func _open_apricorn_request() -> Dictionary:
+	var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	return _world.pending_runtime_request()
+
+
+func test_kurts_special_stages_a_request_carrying_the_bag_list() -> void:
+	_set_apricorn_script({APRICORN_RED: 4, APRICORN_PNK: 2, 7: 1})
+	var request: Dictionary = _open_apricorn_request()
+	assert_eq(request["kind"], &"apricorn_selection_requested")
+
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_true(resolved["ok"], JSON.stringify(resolved))
+	var apricorns: Array = resolved["data"]["apricorns"]
+	assert_eq(apricorns.size(), 2)
+	assert_eq(apricorns[0]["item"], APRICORN_RED)
+	assert_eq(apricorns[0]["quantity"], 4)
+	assert_eq(apricorns[1]["item"], APRICORN_PNK)
+
+
+func test_giving_kurt_apricorns_takes_them_and_commits_the_quantity() -> void:
+	_set_apricorn_script({APRICORN_RED: 4})
+	assert_eq(_open_apricorn_request()["kind"], &"apricorn_selection_requested")
+
+	var completed: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true, "item": APRICORN_RED, "quantity": 3}, _save, false
+	)
+	assert_true(completed["ok"], JSON.stringify(completed))
+	assert_eq(completed["results"][0]["status"], &"complete")
+	assert_eq(_world.state.item_quantity(APRICORN_RED), 1)
+	assert_eq(_world.state.kurt_apricorn_quantity(), 3)
+	assert_eq(_save.world.world_state.item_quantity(APRICORN_RED), 1)
+	assert_eq(_save.world.world_state.kurt_apricorn_quantity(), 3)
+
+
+func test_backing_out_of_kurts_selection_answers_zero_and_takes_nothing() -> void:
+	_set_apricorn_script({APRICORN_RED: 4})
+	assert_eq(_open_apricorn_request()["kind"], &"apricorn_selection_requested")
+
+	var completed: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true, "item": 0, "quantity": 0}, _save, false
+	)
+	assert_true(completed["ok"], JSON.stringify(completed))
+	assert_eq(_world.state.item_quantity(APRICORN_RED), 4)
+	assert_eq(_world.state.kurt_apricorn_quantity(), 0)
+
+
+func test_kurts_host_refuses_more_apricorns_than_the_bag_holds() -> void:
+	_set_apricorn_script({APRICORN_RED: 2})
+	assert_eq(_open_apricorn_request()["kind"], &"apricorn_selection_requested")
+
+	var completed: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true, "item": APRICORN_RED, "quantity": 3}, _save, false
+	)
+	assert_false(completed["ok"], JSON.stringify(completed))
+	assert_eq(completed["reason"], &"invalid_apricorn_quantity")
+	assert_eq(_world.state.item_quantity(APRICORN_RED), 2)
+	assert_eq(_world.pending_runtime_request()["kind"], &"apricorn_selection_requested")
+
+
+## The committed byte is what a later day's `verbosegiveitemvar BALL,
+## VAR_KURT_APRICORNS` sizes the ball stack from, in its own invocation.
+func test_the_saved_quantity_sizes_a_later_verbosegiveitemvar() -> void:
+	_set_apricorn_script({APRICORN_RED: 4})
+	assert_eq(_open_apricorn_request()["kind"], &"apricorn_selection_requested")
+	var completed: Dictionary = Gen2WorldHost.complete_runtime_request(
+		_world, {"ok": true, "item": APRICORN_RED, "quantity": 3}, _save, false
+	)
+	assert_true(completed["ok"], JSON.stringify(completed))
+
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6400)] = [
+		0x9F, BALL_LEVEL, 0x16, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var later := Gen2WorldScriptRunner.begin(
+		GameData.open_directory(Fixture.directory()), _world.state,
+		{"kind": &"test", "bank": Fixture.BANK, "script": 0x6400}
+	)
+	var result: Dictionary = later.advance()
+	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(_world.state.item_quantity(BALL_LEVEL), 3)
 
 
 func _write_menu_script() -> void:

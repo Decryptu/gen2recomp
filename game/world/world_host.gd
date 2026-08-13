@@ -26,6 +26,8 @@ static func complete_runtime_request(
 		)
 	if kind == &"party_heal_requested":
 		return Gen2WorldPartyHost.heal_party(world, save, persist)
+	if kind == &"apricorn_selection_requested":
+		return Gen2WorldApricornHost.complete_runtime_request(world, result, save, persist)
 	if kind == &"rival_name_requested":
 		var completion: Dictionary = {"ok": true}
 		for key: Variant in result:
@@ -132,6 +134,8 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"party_host_unavailable"
 		&"town_map_requested":
 			return &"town_map_host_unavailable"
+		&"apricorn_selection_requested":
+			return &"apricorn_data_unavailable"
 	return &"runtime_host_unavailable"
 
 
@@ -157,6 +161,15 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 				"data": {
 					"mart": mart_result["mart"], "mart_id": mart_id,
 					"dialog": dialog_id,
+				},
+			}
+		&"apricorn_selection_requested":
+			## `FindApricornsInBag` is the whole of the request's data: an empty
+			## bag is the source's own refusal, not a missing host.
+			return {
+				"ok": true,
+				"data": {
+					"apricorns": Gen2WorldApricorn.find_in_bag(world.data, world.state),
 				},
 			}
 		&"special_phone_call_requested":
