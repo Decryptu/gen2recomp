@@ -205,6 +205,14 @@ func timer() -> int:
 	return _timer
 
 
+## `wJumptableIndex`'s low nibble, which is the entry of the thirteen-frame cycle
+## the next frame runs. Only `STEP_PARSE` spends a tick of the wait, so it is
+## what separates a frame `Credits_HandleBButton` is the sole author of from one
+## `ParseCredits` also takes from.
+func step() -> int:
+	return _step
+
+
 func skippable() -> bool:
 	return _skippable
 
