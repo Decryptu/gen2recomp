@@ -241,12 +241,53 @@ func draw(movie: Gen2IntroMovie) -> Image:
 	if movie == null:
 		return image
 	_draw_background(image, movie)
-	var room: int = SHADOW_OAM_SPRITES
-	for sprite: Dictionary in movie.sprites():
-		room -= _draw_sprite(image, movie, sprite, room)
-		if room <= 0:
-			break
+	for entry: Dictionary in shadow_oam(movie):
+		_draw_sprite(image, movie, entry)
 	return image
+
+
+## Every live struct expanded into the shadow OAM the hardware would hold, in
+## struct order, which is the z-order `PlaySpriteAnimations` walks. `y` and `x`
+## are the OAM bytes and `tile` the byte `dbsprite` writes. [method draw] blits
+## this same list rather than re-deriving it, so a trace of it compares to a
+## cartridge's own buffer line for line.
+func shadow_oam(movie: Gen2IntroMovie) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if movie == null:
+		return out
+	for sprite: Dictionary in movie.sprites():
+		var index: int = int(sprite["set"])
+		if index < 0 or index >= OAM_SETS.size():
+			continue
+		var set: Dictionary = OAM_SETS[index]
+		var at: Vector2i = sprite["at"]
+		var flip_x: bool = bool(sprite["flip_x"])
+		var flip_y: bool = bool(sprite["flip_y"])
+		for part: Array in set["parts"]:
+			# `UpdateAnimFrame` stops at `wShadowOAMEnd` rather than growing.
+			if out.size() >= SHADOW_OAM_SPRITES:
+				return out
+			var dy: int = int(part[0])
+			var dx: int = int(part[1])
+			var attrs: int = int(part[3])
+			# `AddOrSubtractX`/`_Y`: a flipped frameset turns a part's own offset
+			# into -8 - offset before it is added.
+			if flip_x:
+				dx = -TILE - dx
+			if flip_y:
+				dy = -TILE - dy
+			out.append({
+				# `UpdateAnimFrame` builds every position with `add`, so an
+				# offset past the screen wraps rather than clamping.
+				"y": (at.y + dy) & 0xFF,
+				"x": (at.x + dx) & 0xFF,
+				"tile": (int(sprite["vtile"]) + int(set["vtile"]) + int(part[2])) & 0xFF,
+				"palette": attrs & ATTR_PALETTE,
+				"flip_x": bool(attrs & ATTR_XFLIP) != flip_x,
+				"flip_y": bool(attrs & ATTR_YFLIP) != flip_y,
+				"bank1": bool(sprite["bank1"]),
+			})
+	return out
 
 
 ## The BG map, sampled through `hSCY` and the scanline's own `hSCX`. Both are
@@ -302,52 +343,22 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
 			image.set_pixel(x, y, palette[pixel])
 
 
-## One sprite-anim struct's whole OAM set. Every position is worked out as a
-## byte and then clipped, because `UpdateAnimFrame` builds them with `add`: an
-## offset past the screen wraps rather than clamping.
-## Returns how many shadow-OAM entries it took, which is what the next struct has
-## fewer of.
-func _draw_sprite(
-	image: Image, movie: Gen2IntroMovie, sprite: Dictionary, room: int
-) -> int:
-	var set: Dictionary = OAM_SETS[int(sprite["set"])] if int(sprite["set"]) < OAM_SETS.size() \
-		else {}
-	if set.is_empty():
-		return 0
-	var parts: Array = (set["parts"] as Array).slice(0, room)
+## One shadow-OAM entry, off the sheet its struct was loaded into. The position
+## is already the OAM byte, so it is only moved off OAM's own (8, 16) origin.
+func _draw_sprite(image: Image, movie: Gen2IntroMovie, entry: Dictionary) -> void:
 	var strip: PackedByteArray = _sheet(
-		movie, movie.sheet("obj_bank1" if bool(sprite["bank1"]) else "obj")
+		movie, movie.sheet("obj_bank1" if bool(entry["bank1"]) else "obj")
 	)
 	if strip.is_empty():
-		return parts.size()
-	var at: Vector2i = sprite["at"]
-	var flip_x: bool = bool(sprite["flip_x"])
-	var flip_y: bool = bool(sprite["flip_y"])
-	for part: Array in parts:
-		var dy: int = int(part[0])
-		var dx: int = int(part[1])
-		var attrs: int = int(part[3])
-		var part_x: bool = bool(attrs & ATTR_XFLIP) != flip_x
-		var part_y: bool = bool(attrs & ATTR_YFLIP) != flip_y
-		# `AddOrSubtractX`/`_Y`: a flipped frameset turns a part's own offset
-		# into -8 - offset before it is added.
-		if flip_x:
-			dx = -TILE - dx
-		if flip_y:
-			dy = -TILE - dy
-		var tile: int = (int(sprite["vtile"]) + int(set["vtile"]) + int(part[2])) & 0xFF
-		var palette: PackedColorArray = movie.object_palette(attrs & ATTR_PALETTE)
-		if palette.size() <= TRANSPARENT_INDEX:
-			continue
-		_blit_sprite_tile(
-			image, strip, palette, tile,
-			Vector2i(
-				((at.x + dx) & 0xFF) - OAM_ORIGIN.x,
-				((at.y + dy) & 0xFF) - OAM_ORIGIN.y,
-			),
-			part_x, part_y
-		)
-	return parts.size()
+		return
+	var palette: PackedColorArray = movie.object_palette(int(entry["palette"]))
+	if palette.size() <= TRANSPARENT_INDEX:
+		return
+	_blit_sprite_tile(
+		image, strip, palette, int(entry["tile"]),
+		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
+		bool(entry["flip_x"]), bool(entry["flip_y"])
+	)
 
 
 func _blit_sprite_tile(

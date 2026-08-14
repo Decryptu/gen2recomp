@@ -106,10 +106,19 @@ const STARTERS: Dictionary = {
 
 ## `Intro_InitBubble.pixel_table`, read `ld e, [hl] / inc hl / ld d, [hl]`, so
 ## each row is (x, y) rather than the (y, x) every `depixel` in the file is.
+##
+## The index is `(wIntroFrameCounter1 & $70) swap 4`, which runs 0 to 7 over a
+## table of six: rows 6 and 7 are the first four bytes of `Intro_InitMagikarps`
+## read as coordinates. `depixel 8, 7, 0, 7` assembles to `ld de, $403f`, so
+## those bytes are $11 $3f $40 and then the `ldh a, [hSGB]` opcode $f0. The
+## counter opens at $80 and is decremented before the spawn, so 7 is the first
+## row the scene reaches and the two overread bubbles are the two the cartridge
+## shows first.
 const BUBBLE_AT: Array[Vector2i] = [
 	Vector2i(6 * 8, 14 * 8 + 4), Vector2i(14 * 8, 18 * 8 + 4),
 	Vector2i(10 * 8, 16 * 8 + 4), Vector2i(12 * 8, 15 * 8),
 	Vector2i(4 * 8, 13 * 8), Vector2i(8 * 8, 17 * 8),
+	Vector2i(0x11, 0x3F), Vector2i(0x40, 0xF0),
 ]
 
 ## `Intro_InitMagikarps`' two alternating triples, as `depixel` (y, x) pairs
@@ -230,7 +239,16 @@ var _bg_map: PackedByteArray = PackedByteArray()
 var _meta_at: int = 0
 var _bg_map_at: int = 0
 
-var _actors: Array[Dictionary] = []
+## `wSpriteAnimationStructs`: ten slots, an empty one free. Slot order is
+## z-order, and `_InitSpriteAnimStruct` takes the first free one, so a struct
+## spawned into the gap a deleted one left draws under everything spawned before
+## it.
+var _actors: Array[Dictionary] = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]
+## `wSpriteAnimCount`, which is `SPRITEANIMSTRUCT_INDEX` and a spawn counter
+## rather than a slot number. `ClearSpriteAnims` zeroes it with the structs.
+var _anim_count: int = 0
+## `wShadowOAM`, written by the sprite pass alone. See [method sprites].
+var _shadow: Array[Dictionary] = []
 ## Frames a scene spends inside `DelayFrames`, during which neither the
 ## jumptable nor `PlaySpriteAnimations` runs.
 var _delay: int = 0
@@ -334,25 +352,13 @@ func _reordered(run: PackedInt32Array, index: int, order: int) -> PackedColorArr
 	return out
 
 
-## Every live sprite-anim struct as the shadow OAM it produces, in struct order,
-## which is the z-order: `_InitSpriteAnimStruct` takes the first free slot and
-## `PlaySpriteAnimations` walks them in order.
+## `wShadowOAM` as `PlaySpriteAnimations` last left it, which is a buffer rather
+## than a view of the live structs. `.PlayFrame` writes it before the scene body
+## runs, so a `wGlobalAnimYOffset` a scene moves reaches the screen on the pass
+## after the one that moved it; reading the structs here instead would put every
+## global offset a pass early.
 func sprites() -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	for actor: Dictionary in _actors:
-		var entry: Array = _actor_frame(actor)
-		if entry.is_empty():
-			continue
-		out.append({
-			"at": Vector2i(
-				(int(actor["x"]) + int(actor["x_offset"]) + _global_x) & 0xFF,
-				(int(actor["y"]) + int(actor["y_offset"]) + _global_y) & 0xFF,
-			),
-			"set": int(entry[0]),
-			"flip_x": bool(int(entry[2]) & FLIP_X),
-			"vtile": int(actor["vtile"]),
-		})
-	return out
+	return _shadow
 
 
 func drain_events() -> Array[Dictionary]:
@@ -733,7 +739,7 @@ func _scene_end() -> void:
 ## for the fire cutscene, which blanks the map instead of drawing one.
 func _load_cutscene(name: StringName, first_row: int) -> void:
 	_cutscene = name
-	_actors.clear()
+	_clear_sprite_anims()
 	_bg_map.fill(0)
 	_bg_map_at = 0
 	if first_row < 0:
@@ -971,7 +977,7 @@ func _animate_fireball() -> void:
 func _init_bubble() -> void:
 	if _counter1 & 0x0F != 0:
 		return
-	_spawn(&"bubble", BUBBLE_AT[((_counter1 & 0x70) >> 4) % BUBBLE_AT.size()])
+	_spawn(&"bubble", BUBBLE_AT[(_counter1 & 0x70) >> 4])
 
 
 ## `Intro_InitShellders`: three `depixel`s falling one into the next, so only the
@@ -1022,10 +1028,28 @@ func _init_pikachu() -> void:
 	_spawn(&"pikachu_tail", Vector2i(24 * 8, 14 * 8))
 
 
-## `_InitSpriteAnimStruct`, which takes the first free slot. [param at] is the
-## shadow-OAM pixel as (x, y), which is the order the struct stores.
+## `ClearSpriteAnims`, which zeroes the whole of `wSpriteAnimData`: the structs
+## and the spawn counter their index field is taken from.
+func _clear_sprite_anims() -> void:
+	for slot: int in _actors.size():
+		_actors[slot] = {}
+	_anim_count = 0
+
+
+## `_InitSpriteAnimStruct`, which takes the first free slot and returns carry
+## when there is none, dropping the spawn. [param at] is the shadow-OAM pixel as
+## (x, y), which is the order the struct stores.
 func _spawn(object: StringName, at: Vector2i) -> Dictionary:
+	var slot: int = _actors.find({})
+	if slot < 0:
+		return {}
+	# `inc [hl]` and then a skip past zero, so the count never wraps to the byte
+	# a free slot is recognised by.
+	_anim_count = (_anim_count + 1) & 0xFF
+	if _anim_count == 0:
+		_anim_count = 1
 	var actor: Dictionary = {
+		"index": _anim_count,
 		"object": object,
 		"frameset": StringName((OBJECTS[object] as Dictionary)["frameset"]),
 		"func": StringName((OBJECTS[object] as Dictionary)["func"]),
@@ -1035,7 +1059,7 @@ func _spawn(object: StringName, at: Vector2i) -> Dictionary:
 		"duration": 0, "frame": -1,
 		"jumptable": 0, "var1": 0, "var2": 0,
 	}
-	_actors.append(actor)
+	_actors[slot] = actor
 	return actor
 
 
@@ -1048,8 +1072,16 @@ func _reinit_frameset(actor: Dictionary, frameset: StringName) -> void:
 
 ## `PlaySpriteAnimations`: each struct's own callback, then its frame counter.
 func _run_sprites() -> void:
-	var deleted: Array[Dictionary] = []
+	# `DeinitializeSprite` clears the struct's index and nothing else, and
+	# `DoNextFrameForAllSprites` reaches `UpdateAnimFrame` whether or not the
+	# sequence called it, so a sprite that deletes itself is drawn one last
+	# time; the pass after it is the one that skips the slot.
+	for slot: int in _actors.size():
+		if bool((_actors[slot] as Dictionary).get("deinit", false)):
+			_actors[slot] = {}
 	for actor: Dictionary in _actors.duplicate():
+		if actor.is_empty():
+			continue
 		var alive: bool = true
 		match StringName(actor["func"]):
 			&"bubble":
@@ -1075,14 +1107,31 @@ func _run_sprites() -> void:
 			&"cyndaquil":
 				_sprite_starter(actor, 0x30, 0x10)
 		if not alive:
-			deleted.append(actor)
-	var kept: Array[Dictionary] = []
-	for actor: Dictionary in _actors:
-		if actor in deleted:
+			actor["deinit"] = true
+	# `UpdateAnimFrame` writes each struct's OAM as it is reached, and
+	# `PlaySpriteAnimations` blanks whatever the last pass left past the end.
+	_shadow = []
+	for slot: int in _actors.size():
+		var actor: Dictionary = _actors[slot]
+		if actor.is_empty():
 			continue
-		if _advance_actor(actor):
-			kept.append(actor)
-	_actors = kept
+		if not _advance_actor(actor):
+			# `oamdelete` takes the struct away without reaching the OAM write,
+			# unlike a sequence deinitialising itself.
+			_actors[slot] = {}
+			continue
+		var entry: Array = _actor_frame(actor)
+		if entry.is_empty():
+			continue
+		_shadow.append({
+			"at": Vector2i(
+				(int(actor["x"]) + int(actor["x_offset"]) + _global_x) & 0xFF,
+				(int(actor["y"]) + int(actor["y_offset"]) + _global_y) & 0xFF,
+			),
+			"set": int(entry[0]),
+			"flip_x": bool(int(entry[2]) & FLIP_X),
+			"vtile": int(actor["vtile"]),
+		})
 
 
 ## `AnimSeq_GSIntroBubble`: up one pixel a frame on a sine of amplitude 8, gone
@@ -1109,9 +1158,9 @@ func _sprite_shellder(actor: Dictionary) -> bool:
 func _sprite_magikarp(actor: Dictionary) -> bool:
 	if int(actor["jumptable"]) == 0:
 		actor["jumptable"] = 1
-		# `SPRITEANIMSTRUCT_INDEX and $3, swapped`, which is the slot's own place
-		# in the triple turned into a starting angle.
-		actor["var1"] = ((_actors.find(actor) & 0x03) << 4) & 0xFF
+		# `SPRITEANIMSTRUCT_INDEX and $3, swapped`: the struct's own spawn number
+		# turned into a starting angle, which is what spreads the triple.
+		actor["var1"] = ((int(actor["index"]) & 0x03) << 4) & 0xFF
 	var offset: int = int(actor["x_offset"])
 	if offset >= 0xF0:
 		return false
@@ -1164,7 +1213,7 @@ func _lapras_bob(actor: Dictionary) -> bool:
 func _sprite_note(actor: Dictionary) -> bool:
 	if int(actor["jumptable"]) == 0:
 		actor["jumptable"] = 1
-		actor["var1"] = ((_actors.find(actor) & 0x01) << 5) & 0xFF
+		actor["var1"] = ((int(actor["index"]) & 0x01) << 5) & 0xFF
 	var offset: int = int(actor["x_offset"])
 	if offset >= 0x80:
 		return false
@@ -1260,8 +1309,8 @@ func _sprite_pikachu_tail(actor: Dictionary) -> bool:
 func _sprite_fireball(actor: Dictionary) -> void:
 	if int(actor["jumptable"]) == 0:
 		actor["jumptable"] = 1
-		var slot: int = _actors.find(actor)
-		actor["var1"] = (((slot & 0x04) << 1) + ((slot & 0x03) << 4)) & 0xFF
+		var index: int = int(actor["index"])
+		actor["var1"] = (((index & 0x04) << 1) + ((index & 0x03) << 4)) & 0xFF
 		return
 	actor["x"] = (int(actor["x"]) - 4) & 0xFF
 	var amplitude: int = int(actor["var2"])

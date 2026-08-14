@@ -194,6 +194,22 @@ const SCENE_PALETTE: Dictionary = {
 ## `IntroScene26`, the one setup scene whose palette clear is `ClearBGPalettes`.
 const SCENE_CRYSTAL_UNOWNS: int = 25
 
+## The tiles each setup scene's `Intro_DecompressRequest2bpp_*` calls ask for, in
+## order. `Request2bpp` is what makes a setup scene expensive: it hands VBlank
+## `TILES_PER_CYCLE` tiles at a time and spends a `DelayFrame` on each, so a
+## 128-tile sheet costs seventeen frames and the 255-tile one thirty-two. Half
+## the movie's length is these waits.
+const SCENE_REQUESTS: Dictionary = {
+	0: [64, 128, 128, 64], 2: [64, 128, 64], 4: [64, 128, 128, 64],
+	6: [64, 128, 255, 128, 64], 10: [64, 128, 64], 12: [64, 255, 128, 64],
+	14: [64, 128, 128, 64], 16: [64, 255, 64], 18: [64, 128, 128, 64],
+	25: [64, 128, 64],
+}
+## `TILES_PER_CYCLE` (home/gfx.asm).
+const TILES_PER_CYCLE: int = 8
+## `ClearTilemap`'s `WaitBGMap` tail, which every setup scene pays.
+const CLEAR_TILEMAP_FRAMES: int = 4
+
 ## `Intro_RustleGrass`'s `.RustlingGrassPointers`, four tiles at `vTiles2 tile
 ## $09` swapped every four frames for the first thirty-six of `IntroScene10`.
 const GRASS_FRAMES: Array[String] = ["grass_1", "grass_2", "grass_3", "grass_2"]
@@ -503,6 +519,10 @@ func _setup_scene() -> void:
 		if vram.has(part) and not vram.has("%s_first" % part):
 			_vram.erase("%s_first" % part)
 	_actors.clear()
+	# `wGlobalAnimXOffset` lives inside `wSpriteAnimData`, so `ClearSpriteAnims`
+	# takes it with the structs: the offset the jump scene walked to $80 does not
+	# survive into the scene after it.
+	_global_x_offset = 0
 	_tilemap = PackedByteArray()
 	_attr_override = PackedByteArray()
 	_sprite_vtile = 0
@@ -514,8 +534,13 @@ func _setup_scene() -> void:
 		_load_palettes(name)
 	# `Intro_ClearBGPals` spends two `DelayFrame`s. `IntroScene26` is the one
 	# setup scene that calls `ClearBGPalettes` instead, whose `WaitBGMap` tail
-	# spends four.
-	_delay = 4 if _scene == SCENE_CRYSTAL_UNOWNS else 2
+	# spends four. `ClearTilemap` then spends four of its own, and every sheet
+	# the scene asks for is a `Request2bpp` wait on top.
+	_delay = CLEAR_TILEMAP_FRAMES + (4 if _scene == SCENE_CRYSTAL_UNOWNS else 2)
+	for tiles: int in SCENE_REQUESTS.get(_scene, []):
+		# `.cycle` spends a frame per `TILES_PER_CYCLE`, and the remainder below
+		# one cycle spends a last one whether or not there is anything left.
+		_delay += tiles / TILES_PER_CYCLE + 1
 	_counter = 0
 	_timer = 0
 	_next_scene()
@@ -995,13 +1020,17 @@ func _run_sprites() -> void:
 
 ## `SpriteAnimFunc_IntroSuicune`: still until `wIntroSceneTimer` is set, then a
 ## jump on a sine of amplitude 32 and the second frameset under it.
+##
+## The reinit is unconditional in the source and has to stay that way:
+## `_ReinitSpriteAnimFrame` puts FRAME back to -1 and DURATION to 0 every frame,
+## so the jump holds `.Frameset_IntroSuicune2`'s first entry for the whole leap
+## rather than reaching its second.
 func _sprite_suicune(actor: Dictionary) -> void:
 	if _timer == 0:
 		return
 	actor["var2"] = (int(actor["var2"]) + 2) & 0xFF
 	actor["y_offset"] = _sine_at(-int(actor["var2"]) & 0xFF, 32)
-	if StringName(actor["frameset"]) != &"intro_suicune_2":
-		_reinit_frameset(actor, &"intro_suicune_2")
+	_reinit_frameset(actor, &"intro_suicune_2")
 
 
 ## `SpriteAnimFunc_IntroPichuWooper`: one hop, ten steps of a sine of

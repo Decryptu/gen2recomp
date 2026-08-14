@@ -5,7 +5,8 @@ extends SceneTree
 ##
 ##   Godot --headless --path . -s res://tools/trace_opening_oam.gd -- <game> <phase> [out.txt]
 ##
-## `phase` is `presents` or `title`. The artefact is the one `.claude/verification.md`
+## `phase` is `presents`, `intro` (Crystal's movie), `gs_intro` (Gold and
+## Silver's) or `title`. The artefact is the one `.claude/verification.md`
 ## step 2 asks for: two faithful implementations of `PlaySpriteAnimations` put
 ## the same sprites in the same slots on the same frames, so a `diff` against a
 ## cartridge running under an emulator settles the port rather than a frame count
@@ -21,11 +22,13 @@ extends SceneTree
 ## `tools/preview_intro.gd` photographs the same screen through the boot
 ## cinema, whose frames count from the copyright rather than from this phase.
 
-const PHASES: Array[String] = ["presents", "title"]
+const PHASES: Array[String] = ["presents", "intro", "gs_intro", "title"]
 
 ## The title screen runs until its own timeout, which is longer than anything
 ## worth diffing; this is well past `TitleScreenEnd`'s own count.
 const TITLE_FRAME_CAP: int = 4000
+## Either movie ends itself; this only stops a run that never does.
+const MOVIE_FRAME_CAP: int = 4000
 
 ## Frames to write a PNG for, beside the trace's own output path.
 var _shots: Dictionary = {}
@@ -50,8 +53,16 @@ func _initialize() -> void:
 	if args.size() > 3:
 		for value: String in args[3].split(","):
 			_shots[int(value)] = true
-	var lines: PackedStringArray = _trace_presents(data) if args[1] == "presents" \
-		else _trace_title(data)
+	var lines: PackedStringArray
+	match args[1]:
+		"presents":
+			lines = _trace_presents(data)
+		"intro":
+			lines = _trace_intro(data)
+		"gs_intro":
+			lines = _trace_gs_intro(data)
+		_:
+			lines = _trace_title(data)
 	if args.size() > 2:
 		var file := FileAccess.open(args[2], FileAccess.WRITE)
 		if file == null:
@@ -92,6 +103,57 @@ func _trace_presents(data: GameData) -> PackedStringArray:
 		phase.advance_frame()
 		frame += 1
 	_append_frame(out, frame, page.shadow_oam(phase))
+	print("frame %d: finished" % frame)
+	return out
+
+
+## `CrystalIntro` from its first frame to the one it sets its own exit bit on,
+## driven with no buttons held so nothing skips it.
+func _trace_intro(data: GameData) -> PackedStringArray:
+	var page: Gen2IntroMoviePage = Gen2IntroMoviePage.from_data(data)
+	if page == null:
+		push_error("%s has no intro movie art." % data.id)
+		return PackedStringArray()
+	var movie: Gen2IntroMovie = Gen2IntroMovie.create(
+		data, Gen2BattleAnimData.from_game_data(data)
+	)
+	var out := PackedStringArray()
+	var frame: int = 0
+	var scene: int = -1
+	while not movie.finished() and frame < MOVIE_FRAME_CAP:
+		_append_frame(out, frame, page.shadow_oam(movie))
+		if _shots.has(frame):
+			page.draw(movie).save_png("%s_f%d.png" % [_shot_prefix, frame])
+		if movie.scene() != scene:
+			scene = movie.scene()
+			print("frame %d: scene %d" % [frame, scene])
+		movie.advance_frame()
+		frame += 1
+	print("frame %d: finished" % frame)
+	return out
+
+
+## `GoldSilverIntro`, the same way.
+func _trace_gs_intro(data: GameData) -> PackedStringArray:
+	var page: Gen2GoldSilverIntroPage = Gen2GoldSilverIntroPage.from_data(data)
+	if page == null:
+		push_error("%s has no intro movie art." % data.id)
+		return PackedStringArray()
+	var movie: Gen2GoldSilverIntro = Gen2GoldSilverIntro.create(
+		data, Gen2BattleAnimData.from_game_data(data)
+	)
+	var out := PackedStringArray()
+	var frame: int = 0
+	var scene: int = -1
+	while not movie.finished() and frame < MOVIE_FRAME_CAP:
+		_append_frame(out, frame, page.shadow_oam(movie))
+		if _shots.has(frame):
+			page.draw(movie).save_png("%s_f%d.png" % [_shot_prefix, frame])
+		if movie.scene() != scene:
+			scene = movie.scene()
+			print("frame %d: scene %d" % [frame, scene])
+		movie.advance_frame()
+		frame += 1
 	print("frame %d: finished" % frame)
 	return out
 
