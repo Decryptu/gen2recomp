@@ -143,6 +143,19 @@ const FRAMESET_RESTART: StringName = &"restart"
 ## `B_OAM_XFLIP` on a frameset entry, which flips each tile where it stands.
 const FLIP_X: int = 1
 
+## `wShadowOAM`, which is forty `SPRITEOAMSTRUCT`s and no more.
+const SHADOW_OAM_SPRITES: int = 40
+## How many of those each OAM set takes, which is the `db` count each
+## `.OAMData_*` opens with. The geometry is [Gen2GoldSilverIntroPage]'s; only the
+## count belongs here, because a full buffer stops the sprite pass:
+## `UpdateAnimFrame` returns carry at `wShadowOAMEnd` and
+## `DoNextFrameForAllSprites` answers it with `jr c, .done`, so every struct in a
+## later slot loses its own sequence for that frame as well as its picture.
+const OAM_SET_SIZES: Array[int] = [
+	1, 1, 4, 4, 6, 6, 27, 27, 29, 2, 1, 16, 16, 16, 16, 16, 16, 16, 5, 5, 5, 4,
+	16, 36, 25, 25, 25,
+]
+
 const FRAMESETS: Dictionary = {
 	&"bubble": {"frames": [[0, 8, 0], [1, 8, 0]], "end": FRAMESET_RESTART},
 	&"shellder": {"frames": [[2, 8, 0], [3, 8, 0]], "end": FRAMESET_RESTART},
@@ -954,10 +967,12 @@ func _load_mon_palette(name: StringName) -> void:
 
 
 func _spawn_starter(name: StringName, at: Vector2i) -> void:
+	# The struct's own tile offset is zero: `SPRITE_ANIM_DICT_GS_INTRO_2` is in no
+	# `wSpriteAnimDict` pair this movie writes, so `GetSpriteAnimVTile` falls out
+	# of its loop with `xor a`. Each starter's vtile is its OAM set's own
+	# `spriteanimoam $10`/`$29`/`$42`, which is [Gen2GoldSilverIntroPage]'s.
 	_emit(&"play_sfx", {"sfx": SFX_GS_INTRO_POKEMON_APPEARS})
-	var actor: Dictionary = _spawn(name, at)
-	if not actor.is_empty():
-		actor["vtile"] = int((STARTERS[name] as Dictionary)["vtile"])
+	_spawn(name, at)
 
 
 ## `Intro_AnimateFireball`: a fireball every fourth frame, with the screen
@@ -1040,7 +1055,16 @@ func _clear_sprite_anims() -> void:
 ## when there is none, dropping the spawn. [param at] is the shadow-OAM pixel as
 ## (x, y), which is the order the struct stores.
 func _spawn(object: StringName, at: Vector2i) -> Dictionary:
-	var slot: int = _actors.find({})
+	# A struct whose sequence deleted itself this pass is already free:
+	# `DeinitializeSprite` clears its index there and then, and the OAM write it
+	# still gets has happened by the time a scene body spawns anything. So
+	# Pikachu takes the slot a note gave up on the same frame.
+	var slot: int = -1
+	for index: int in _actors.size():
+		var held: Dictionary = _actors[index]
+		if held.is_empty() or bool(held.get("deinit", false)):
+			slot = index
+			break
 	if slot < 0:
 		return {}
 	# `inc [hl]` and then a skip past zero, so the count never wraps to the byte
@@ -1079,7 +1103,12 @@ func _run_sprites() -> void:
 	for slot: int in _actors.size():
 		if bool((_actors[slot] as Dictionary).get("deinit", false)):
 			_actors[slot] = {}
-	for actor: Dictionary in _actors.duplicate():
+	# `UpdateAnimFrame` writes each struct's OAM as it is reached, and
+	# `PlaySpriteAnimations` blanks whatever the last pass left past the end.
+	_shadow = []
+	var room: int = SHADOW_OAM_SPRITES
+	for slot: int in _actors.size():
+		var actor: Dictionary = _actors[slot]
 		if actor.is_empty():
 			continue
 		var alive: bool = true
@@ -1108,13 +1137,6 @@ func _run_sprites() -> void:
 				_sprite_starter(actor, 0x30, 0x10)
 		if not alive:
 			actor["deinit"] = true
-	# `UpdateAnimFrame` writes each struct's OAM as it is reached, and
-	# `PlaySpriteAnimations` blanks whatever the last pass left past the end.
-	_shadow = []
-	for slot: int in _actors.size():
-		var actor: Dictionary = _actors[slot]
-		if actor.is_empty():
-			continue
 		if not _advance_actor(actor):
 			# `oamdelete` takes the struct away without reaching the OAM write,
 			# unlike a sequence deinitialising itself.
@@ -1132,6 +1154,9 @@ func _run_sprites() -> void:
 			"flip_x": bool(int(entry[2]) & FLIP_X),
 			"vtile": int(actor["vtile"]),
 		})
+		room -= OAM_SET_SIZES[int(entry[0])]
+		if room <= 0:
+			return
 
 
 ## `AnimSeq_GSIntroBubble`: up one pixel a frame on a sine of amplitude 8, gone
@@ -1220,7 +1245,10 @@ func _sprite_note(actor: Dictionary) -> bool:
 	actor["x_offset"] = (offset + 1) & 0xFF
 	actor["var1"] = (int(actor["var1"]) + 2) & 0xFF
 	actor["y_offset"] = _sine_at(int(actor["var1"]), 4)
-	if int(actor["var1"]) & 0x02 == 0:
+	# The `ld hl, SPRITEANIMSTRUCT_VAR1` in front of the `and $2` is dead: `ld hl`
+	# leaves `a` alone, so the bit tested is the sine's own, not VAR1's, and the
+	# note rises on the offset rather than on the angle.
+	if int(actor["y_offset"]) & 0x02 == 0:
 		return true
 	actor["y"] = (int(actor["y"]) - 1) & 0xFF
 	return true
@@ -1331,8 +1359,10 @@ func _sprite_starter(actor: Dictionary, first: int, second: int) -> void:
 	var angle: int = int(actor["var1"])
 	if angle >= 0x3C:
 		return
+	# The two `inc [hl]` leave `a` alone, so both halves take the angle from
+	# before the step, unlike `AnimSeq_GSIntroNote`'s `add 2 / ld [hl], a`.
 	actor["var1"] = (angle + 2) & 0xFF
-	actor["y_offset"] = _sine_at(actor["var1"], 0x90)
+	actor["y_offset"] = _sine_at(angle, 0x90)
 	var cosine: int = int(actor["var2"])
 	actor["var2"] = (cosine + 2) & 0xFF
 	actor["x_offset"] = _cosine_at(cosine, 0x90)
