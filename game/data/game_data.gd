@@ -57,6 +57,7 @@ var _presents_palettes: Dictionary = {}
 var _title: Dictionary = {}
 var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
+var _credits: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -131,6 +132,8 @@ static func open_directory(path: String) -> GameData:
 	data._town_map = town_map if town_map is Dictionary else {}
 	var oak_ratings: Variant = manifest.get("oak_ratings", {})
 	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
+	var credits: Variant = manifest.get("credits", {})
+	data._credits = credits if credits is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1150,6 +1153,68 @@ func oak_pc_text(name: String) -> String:
 func oak_ratings() -> Array:
 	var stored: Variant = _oak_ratings.get("ratings", [])
 	return stored if stored is Array else []
+
+
+## `CreditsScript`, terminator included. Empty on a cache imported without the
+## credits, which is the caller's cue not to open them.
+func credits_script() -> PackedByteArray:
+	var stored: Variant = _credits.get("script", [])
+	var out := PackedByteArray()
+	if not stored is Array:
+		return out
+	for command: Variant in stored as Array:
+		out.append(int(command) & 0xFF)
+	return out
+
+
+## One `CreditsStringsPointers` entry, as the tile codes `PlaceString` writes:
+## letters and `<NEXT>` for a name or a heading, `CopyrightGFX`'s own tile
+## numbers for the copyright.
+func credits_string(index: int) -> PackedByteArray:
+	var stored: Variant = _credits.get("strings", [])
+	var out := PackedByteArray()
+	if not stored is Array or index < 0 or index >= (stored as Array).size():
+		return out
+	for code: Variant in (stored as Array)[index] as Array:
+		out.append(int(code) & 0xFF)
+	return out
+
+
+## The two `CreditsScript` indices `ParseCredits` branches on: `staff` is the
+## first heading, below which every index is a name, and `copyright` the one
+## string printed from column 2. -1 on a cache without the credits.
+func credits_index(name: String) -> int:
+	return int(_credits.get(name, -1))
+
+
+## `CreditsPalettes` for one scene: three palettes on Crystal (the banner, the
+## border and the text region) and one on Gold and Silver, which gives the same
+## four colours to the first two slots.
+func credits_palette(scene: int, slot: int = 0) -> PackedColorArray:
+	var stored: Variant = _credits.get("palettes", [])
+	var per_scene: int = int(_credits.get("scene_palettes", 0))
+	var colors := PackedColorArray()
+	if not stored is Array or per_scene <= 0 or scene < 0:
+		return colors
+	var packed: Array = stored
+	var first: int = (
+		scene * per_scene + mini(slot, per_scene - 1)
+	) * RomLayout.CREDITS_PALETTE_COLORS
+	if first + RomLayout.CREDITS_PALETTE_COLORS > packed.size():
+		return colors
+	for index: int in RomLayout.CREDITS_PALETTE_COLORS:
+		colors.append(Gen2Palette.from_packed(int(packed[first + index])))
+	return colors
+
+
+## `Credits_LoadBorderGFX.Frames`: which sixteen-tile block of the mon run one
+## scene's frame draws. -1 outside the table.
+func credits_frame_block(scene: int, frame: int) -> int:
+	var stored: Variant = _credits.get("frames", [])
+	var at: int = scene * RomLayout.CREDITS_SCENE_FRAMES + frame
+	if not stored is Array or at < 0 or at >= (stored as Array).size():
+		return -1
+	return int((stored as Array)[at])
 
 
 ## `JohtoMap` or `KantoMap`: one tile number per cell of the whole screen, in

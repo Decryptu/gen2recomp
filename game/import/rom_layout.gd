@@ -705,6 +705,55 @@ const TOWN_MAP_PALETTE_COLORS: int = 4
 ## run: RGB 28,31,20.
 const TOWN_MAP_PALETTE_FIRST_COLOR: int = 0x53FC
 
+## The credits (`engine/movie/credits.asm`).
+##
+## `CreditsScript`'s commands, `const_def -1, -1`: the byte a command is not is a
+## `CreditsStringsPointers` index.
+const CREDITS_END: int = 0xFF
+const CREDITS_WAIT: int = 0xFE
+const CREDITS_SCENE: int = 0xFD
+const CREDITS_CLEAR: int = 0xFC
+const CREDITS_MUSIC: int = 0xFB
+const CREDITS_WAIT2: int = 0xFA
+const CREDITS_THEEND: int = 0xF9
+## The commands that take one operand; the rest are one byte.
+const CREDITS_OPERAND_COMMANDS: Array[int] = [
+	CREDITS_WAIT, CREDITS_WAIT2, CREDITS_SCENE,
+]
+
+## `CreditsBorderGFX`, then the four `Credits*GFX` mon sheets, uncompressed and
+## contiguous in that order, and `CreditsScript` directly behind them. So one
+## pinned offset locates all six and the run's own length pins the script.
+const CREDITS_BORDER_TILES: int = 9
+## `Credits_LoadBorderGFX.Frames` steps in 16-tile blocks, which is the 4x4 cell
+## the banner is five copies of.
+const CREDITS_MON_FRAME_TILES: int = 16
+const CREDITS_SCENES: int = 4
+const CREDITS_SCENE_FRAMES: int = 4
+## `TheEndGFX` (gfx/misc.asm), eight tiles across and two down.
+const CREDITS_THE_END_TILES: int = 16
+const CREDITS_THE_END_COLUMNS: int = 8
+
+## `Credits`' own VRAM window: the current mon frame's sixteen tiles at
+## `vTiles2`, the border at tile $20, "The End" at $40 and `CopyrightGFX` at $60,
+## which is where `LoadFontsBattleExtra` would put its strip. Letters are $80 and
+## up and are untouched.
+const CREDITS_BORDER_FIRST_CODE: int = 0x20
+const CREDITS_THE_END_FIRST_CODE: int = 0x40
+
+## `CreditsPalettes` (gfx/credits/credits.pal). Crystal copies 24 bytes per
+## scene, which is BG palettes 0, 1 and 2; Gold and Silver copy 8 twice, so
+## palettes 0 and 1 are the same four colours.
+const CREDITS_PALETTE_COLORS: int = 4
+## Every scene's first palette closes on RGB 07,07,07 in all three dumps, which
+## is what identifies the run.
+const CREDITS_PALETTE_LAST_COLOR: int = 0x1CE7
+
+## Long enough for either script and either longest string; one that reaches
+## these has not terminated.
+const CREDITS_SCRIPT_MAX_BYTES: int = 1024
+const CREDITS_STRING_MAX_BYTES: int = 64
+
 ## `OakRatings` (data/events/pokedex_ratings.asm): nineteen `rating` rows of a
 ## caught-count threshold, an sfx word and a text pointer, which `FindOakRating`
 ## walks until the count fits. The five texts around it are located from the
@@ -1172,6 +1221,35 @@ const GOLD_SILVER: Dictionary = {
 	# of five, which hit once per dump. Everything else Prof Oak's PC says is
 	# reached through the table's own text pointers.
 	"oak_ratings": 0x2685B,
+	# The credits. `gfx` was located by converting the pinned gfx/credits PNGs
+	# and matching the bytes: the border and the four mon sheets are one
+	# contiguous run in `credits.asm`'s own INCBIN order and `CreditsScript`
+	# follows it, so the run's length pins the script and the script's own
+	# terminator pins `CreditsStringsPointers`. `palettes` is
+	# gfx/credits/credits.pal assembled and matched, and `the_end` the same for
+	# gfx/credits/theend.png. Each hits once per dump. Nested the way
+	# trainer_card is.
+	"credits": {
+		"palettes": 0x86C1C,
+		"gfx": 0x86CA6,
+		"the_end": 0xCBCBD,
+		"script": 0x87A36,
+		"strings": 0x87B65,
+		# `PlaceFarString`, so the strings are not in the table's own bank.
+		"strings_bank": 0x70,
+		# NUM_CREDITS_STRINGS, STAFF and COPYRIGHT
+		# (constants/credits_constants.asm). All three are checked against the
+		# script and the copyright screen rather than trusted.
+		"string_count": 76,
+		"staff": 51,
+		"copyright": 71,
+		# `GetCreditsPalette.UpdatePals` copies eight bytes twice into the same
+		# two slots, so a scene is one palette rather than Crystal's three.
+		"scene_palettes": 1,
+		# `Credits_LoadBorderGFX.Frames`, as 16-tile blocks into the mon run.
+		# The first three scenes ship three frames each and repeat the first.
+		"frames": [0, 1, 0, 2, 3, 4, 3, 5, 6, 7, 6, 8, 9, 10, 11, 12],
+	},
 	# The copyright screen (`Copyright`, engine/menus/intro_menu.asm). The
 	# graphic was located by encoding the pinned gfx/splash/copyright.png as
 	# 2bpp and matching it, which hits once per dump; the string by assembling
@@ -1452,6 +1530,23 @@ const CRYSTAL: Dictionary = {
 	# See the Gold and Silver block above; the table is byte identical and only
 	# its address moves.
 	"oak_ratings": 0x2667F,
+	# See the Gold and Silver block above for how these were located. Crystal's
+	# strings sit in the pointer table's own bank, since it prints them with
+	# `PlaceString` rather than `PlaceFarString`, and each of its four scenes is
+	# three palettes rather than one.
+	"credits": {
+		"palettes": 0x109B6A,
+		"gfx": 0x109C24,
+		"the_end": 0xCBD2E,
+		"script": 0x10ACB4,
+		"strings": 0x10AE13,
+		"strings_bank": 0x42,
+		"string_count": 103,
+		"staff": 72,
+		"copyright": 98,
+		"scene_palettes": 3,
+		"frames": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+	},
 	# See the Gold and Silver block above for how this was located.
 	"copyright": {"gfx": 0xE4000, "tiles": 29, "string": 0x63FD, "palette": 0xA066},
 	# See the Gold and Silver block above for how these were located. Crystal
@@ -1975,6 +2070,45 @@ static func oak_text_stub_offset(rom: RomFile, layout: Dictionary, name: String)
 		return -1
 	var first: int = rom.u16le(table + 3) + int(OAK_TEXT_STUBS[name]) * OAK_TEXT_STUB_SIZE
 	return RomFile.linear(bank_of(table), first)
+
+
+## `Credits_LoadBorderGFX.Frames`, as 16-tile block indices into the mon run.
+static func credits_frames(layout: Dictionary) -> Array:
+	var stored: Variant = (layout.get("credits", {}) as Dictionary).get("frames", [])
+	return stored if stored is Array else []
+
+
+## How many tiles the four mon sheets occupy together, which is what the highest
+## block `.Frames` names says. Zero for a cartridge with no credits.
+static func credits_mon_tiles(layout: Dictionary) -> int:
+	var frames: Array = credits_frames(layout)
+	if frames.is_empty():
+		return 0
+	var highest: int = 0
+	for block: Variant in frames:
+		highest = maxi(highest, int(block))
+	return (highest + 1) * CREDITS_MON_FRAME_TILES
+
+
+## Where `CreditsPichuGFX` and its three neighbours start: directly behind
+## `CreditsBorderGFX`, which is the one offset pinned. -1 without a credits entry.
+static func credits_mon_gfx_offset(layout: Dictionary) -> int:
+	var at: int = int((layout.get("credits", {}) as Dictionary).get("gfx", -1))
+	return at + CREDITS_BORDER_TILES * Gen2Tiles.TILE_BYTES if at >= 0 else -1
+
+
+## The dump offset `CreditsStringsPointers` entry [param index] names. Its bank
+## is the strings' own rather than the table's, since Gold and Silver reach them
+## with `PlaceFarString`.
+static func credits_string_offset(rom: RomFile, layout: Dictionary, index: int) -> int:
+	var entry: Dictionary = layout.get("credits", {})
+	var table: int = int(entry.get("strings", -1))
+	if table < 0 or index < 0 or index >= int(entry.get("string_count", 0)):
+		return -1
+	var at: int = table + index * 2
+	if not rom.in_bounds(at, 2):
+		return -1
+	return RomFile.linear(int(entry.get("strings_bank", 0)), rom.u16le(at))
 
 
 ## `PokedexNestIconGFX`, which `INCBIN`s directly behind `kanto.bin` in the same

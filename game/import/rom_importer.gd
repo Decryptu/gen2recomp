@@ -308,6 +308,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not oak_ratings["ok"]:
 		return oak_ratings
 
+	var credits: Dictionary = verify_credits(rom, layout)
+	if not credits["ok"]:
+		return credits
+
 	var menu_text: Dictionary = verify_menu_text(rom, layout)
 	if not menu_text["ok"]:
 		return menu_text
@@ -998,6 +1002,211 @@ static func read_oak_text(rom: RomFile, layout: Dictionary, stub: int) -> String
 	if not bool(decoded.get("ok", false)):
 		return ""
 	return String(decoded["text"])
+
+
+## The credits (`engine/movie/credits.asm`), whose five runs each pin the next.
+##
+## `CreditsBorderGFX` is the only pinned graphics offset: the four mon sheets
+## follow it and `CreditsScript` follows them, so the run's own length is what
+## says the offset is right. The script's terminator then puts
+## `CreditsStringsPointers` where the layout claims it is, and the string the
+## `copyright` index names has to be the copyright screen's own, which the layout
+## pins separately in another bank. Content, not neighbours, identifies the two
+## uncompressed graphics and the palettes.
+static func verify_credits(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("credits", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No credits on this cartridge."}
+
+	var palettes: Dictionary = _verify_credits_palettes(rom, entry)
+	if not palettes["ok"]:
+		return palettes
+
+	var graphics: Dictionary = _verify_credits_gfx(rom, layout, entry)
+	if not graphics["ok"]:
+		return graphics
+
+	var script: PackedByteArray = read_credits_script(rom, layout)
+	if script.is_empty():
+		return {"ok": false, "message": "The credits script has no terminator."}
+	if int(entry["script"]) + script.size() != int(entry["strings"]):
+		return {
+			"ok": false,
+			"message": "The credits string table does not follow the script.",
+		}
+	var walked: Dictionary = _verify_credits_script(script, entry)
+	if not walked["ok"]:
+		return walked
+
+	return _verify_credits_strings(rom, layout, entry)
+
+
+## `CreditsPalettes`. Structural, plus the one colour every scene shares: each
+## opens a scene's first palette and closes it on RGB 07,07,07 in all three
+## dumps, so a run of four that does not is not this table.
+static func _verify_credits_palettes(rom: RomFile, entry: Dictionary) -> Dictionary:
+	var at: int = int(entry["palettes"])
+	var stride: int = int(entry["scene_palettes"]) * RomLayout.CREDITS_PALETTE_COLORS
+	var length: int = RomLayout.CREDITS_SCENES * stride * 2
+	if not rom.in_bounds(at, length):
+		return {"ok": false, "message": "The credits palettes are outside the cartridge."}
+	if at >= int(entry["gfx"]):
+		return {"ok": false, "message": "The credits palettes are behind the graphics."}
+	for colour: int in RomLayout.CREDITS_SCENES * stride:
+		if rom.u16le(at + colour * 2) & 0x8000:
+			return {"ok": false, "message": "A credits palette colour is not 15-bit."}
+	for scene: int in RomLayout.CREDITS_SCENES:
+		var last: int = at + (scene * stride + RomLayout.CREDITS_PALETTE_COLORS - 1) * 2
+		if rom.u16le(last) != RomLayout.CREDITS_PALETTE_LAST_COLOR:
+			return {
+				"ok": false,
+				"message": "Credits scene %d's palette does not close on RGB 07,07,07." % scene,
+			}
+	return {"ok": true, "message": "Credits palettes verified."}
+
+
+## The two uncompressed graphics, each by content. The border is a dither drawn
+## in colours 0 and 2 alone, so every low-plane byte in it is zero and its last
+## tile is colour 2 whole; "The End" uses colours 0, 1 and 3 alone, so no
+## high-plane bit in it stands without the low-plane bit under it.
+static func _verify_credits_gfx(
+	rom: RomFile, layout: Dictionary, entry: Dictionary
+) -> Dictionary:
+	var at: int = int(entry["gfx"])
+	var tiles: int = RomLayout.CREDITS_BORDER_TILES + RomLayout.credits_mon_tiles(layout)
+	if not rom.in_bounds(at, tiles * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The credits graphics are outside the cartridge."}
+	if at + tiles * Gen2Tiles.TILE_BYTES != int(entry["script"]):
+		return {"ok": false, "message": "The credits script does not follow the graphics."}
+	for row: int in RomLayout.CREDITS_BORDER_TILES * Gen2Tiles.TILE_HEIGHT:
+		if rom.u8(at + row * 2) != 0:
+			return {"ok": false, "message": "The credits border is not drawn in colour 2."}
+	var solid: int = at + (RomLayout.CREDITS_BORDER_TILES - 1) * Gen2Tiles.TILE_BYTES
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		if rom.u8(solid + row * 2 + 1) != 0xFF:
+			return {"ok": false, "message": "The credits border's last tile is not solid."}
+
+	var the_end: int = int(entry["the_end"])
+	if not rom.in_bounds(the_end, RomLayout.CREDITS_THE_END_TILES * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The End graphic is outside the cartridge."}
+	var ink: int = 0
+	for row: int in RomLayout.CREDITS_THE_END_TILES * Gen2Tiles.TILE_HEIGHT:
+		var low: int = rom.u8(the_end + row * 2)
+		var high: int = rom.u8(the_end + row * 2 + 1)
+		if high & ~low & 0xFF:
+			return {"ok": false, "message": "The End graphic uses colour 2."}
+		ink |= low
+	if ink == 0:
+		return {"ok": false, "message": "The End graphic is blank."}
+	return {"ok": true, "message": "Credits graphics verified."}
+
+
+## `ParseCredits`' own walk. A byte that is not one of the seven commands is a
+## string index, so a run that is not `CreditsScript` names one past the table
+## almost at once; the two indices the layout pins are checked against the walk
+## rather than trusted.
+static func _verify_credits_script(script: PackedByteArray, entry: Dictionary) -> Dictionary:
+	var count: int = int(entry["string_count"])
+	if script[0] != RomLayout.CREDITS_CLEAR:
+		return {"ok": false, "message": "The credits script does not open on a clear."}
+	var highest: int = -1
+	var first_string: int = -1
+	var step: int = 0
+	var terminated: bool = false
+	while step < script.size():
+		var command: int = script[step]
+		step += 1
+		if command == RomLayout.CREDITS_END:
+			terminated = true
+			break
+		if command >= RomLayout.CREDITS_THEEND:
+			if command in RomLayout.CREDITS_OPERAND_COMMANDS:
+				step += 1
+			continue
+		if command >= count:
+			return {
+				"ok": false,
+				"message": "The credits script names string %d of %d." % [command, count],
+			}
+		if first_string < 0:
+			first_string = command
+		highest = maxi(highest, command)
+		## A string is followed by the line it prints on, which is never a
+		## command byte.
+		step += 1
+	if not terminated or step != script.size():
+		return {"ok": false, "message": "The credits script's last command is cut short."}
+	if highest != count - 1:
+		return {
+			"ok": false,
+			"message": "The credits script's highest string is %d, not %d." % [
+				highest, count - 1,
+			],
+		}
+	if first_string != int(entry["staff"]):
+		return {
+			"ok": false,
+			"message": "The credits script opens on string %d, not STAFF %d." % [
+				first_string, int(entry["staff"]),
+			],
+		}
+	return {"ok": true, "message": "Credits script verified."}
+
+
+## `CreditsStringsPointers`. Every entry has to terminate inside the strings'
+## own bank, and the `copyright` one has to be the copyright screen's string:
+## `data/copyright.asm` is INCLUDEd once for each and the layout pins the two
+## addresses independently, so they check each other.
+static func _verify_credits_strings(
+	rom: RomFile, layout: Dictionary, entry: Dictionary
+) -> Dictionary:
+	var bank: int = int(entry["strings_bank"])
+	for index: int in int(entry["string_count"]):
+		var at: int = RomLayout.credits_string_offset(rom, layout, index)
+		if RomLayout.bank_of(at) != bank:
+			return {"ok": false, "message": "Credits string %d leaves bank $%02X." % [index, bank]}
+		if read_credits_string(rom, layout, index).is_empty():
+			return {"ok": false, "message": "Credits string %d has no terminator." % index}
+	var copyright: PackedByteArray = read_credits_string(
+		rom, layout, int(entry["copyright"])
+	)
+	var screen: PackedByteArray = read_copyright_string(rom, layout)
+	if copyright != screen:
+		return {
+			"ok": false,
+			"message": "The credits copyright string is not the copyright screen's.",
+		}
+	return {"ok": true, "message": "Credits verified."}
+
+
+## `CreditsScript` whole, terminator included. Empty when it does not terminate.
+static func read_credits_script(rom: RomFile, layout: Dictionary) -> PackedByteArray:
+	var at: int = int((layout.get("credits", {}) as Dictionary).get("script", -1))
+	if at < 0:
+		return PackedByteArray()
+	for length: int in range(1, RomLayout.CREDITS_SCRIPT_MAX_BYTES + 1):
+		if not rom.in_bounds(at + length - 1, 1):
+			break
+		if rom.u8(at + length - 1) == RomLayout.CREDITS_END:
+			return rom.slice(at, length)
+	return PackedByteArray()
+
+
+## One credits string as the tile codes `PlaceString` writes, the `@` dropped.
+## Empty when it does not terminate, which is what an index outside the table
+## produces.
+static func read_credits_string(
+	rom: RomFile, layout: Dictionary, index: int
+) -> PackedByteArray:
+	var at: int = RomLayout.credits_string_offset(rom, layout, index)
+	if at < 0:
+		return PackedByteArray()
+	for length: int in RomLayout.CREDITS_STRING_MAX_BYTES:
+		if not rom.in_bounds(at + length, 1):
+			break
+		if rom.u8(at + length) == Gen2Text.TERMINATOR:
+			return rom.slice(at, length)
+	return PackedByteArray()
 
 
 ## `FillTownMap`'s own loop: tile numbers until `-1`, which is not copied.
@@ -2813,6 +3022,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"title": _import_title(rom, layout),
 		"town_map": _import_town_map(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
+		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
@@ -3375,6 +3585,39 @@ func _import_presents_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## The credits: `CreditsScript`, every `CreditsStringsPointers` entry as the tile
+## codes it is, `CreditsPalettes` and `.Frames`' block indices.
+##
+## The strings stay codes rather than text for the same reason the copyright
+## screen's does: `CreditsStringsPointers.Copyright` is nothing but tile numbers
+## into `CopyrightGFX`, which `Credits` loads over $60 the way `Copyright` does.
+func _import_credits(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("credits", {})
+	if entry.is_empty():
+		return {}
+	var script: Array = []
+	for command: int in read_credits_script(rom, layout):
+		script.append(command)
+	var strings: Array = []
+	for index: int in int(entry["string_count"]):
+		var codes: Array = []
+		for code: int in read_credits_string(rom, layout, index):
+			codes.append(code)
+		strings.append(codes)
+	var scene_colors: int = int(entry["scene_palettes"]) * RomLayout.CREDITS_PALETTE_COLORS
+	return {
+		"script": script,
+		"strings": strings,
+		"staff": int(entry["staff"]),
+		"copyright": int(entry["copyright"]),
+		"scene_palettes": int(entry["scene_palettes"]),
+		"palettes": _packed_palette(
+			rom, int(entry["palettes"]), RomLayout.CREDITS_SCENES * scene_colors
+		),
+		"frames": RomLayout.credits_frames(layout).duplicate(),
+	}
+
+
 func _packed_palette(rom: RomFile, at: int, colors: int) -> Array:
 	if at < 0:
 		return []
@@ -3778,6 +4021,30 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"column_major": bool(card["pic_columns"]),
 		},
 	}
+	## `Credits`' own three requests. `CreditsBorderGFX` goes to `vTiles2 tile
+	## $20` and `TheEndGFX` to `$40`, so each carries its own first_code and a
+	## tile number resolves straight into a strip; the mon sheets are addressed
+	## by `.Frames`' block rather than by tile number and stay one run.
+	var credits: Dictionary = layout.get("credits", {})
+	if not credits.is_empty():
+		sheets["credits_border"] = {
+			"offset": int(credits["gfx"]),
+			"tiles": RomLayout.CREDITS_BORDER_TILES,
+			"first_code": RomLayout.CREDITS_BORDER_FIRST_CODE,
+			"bits": 2,
+		}
+		sheets["credits_the_end"] = {
+			"offset": int(credits["the_end"]),
+			"tiles": RomLayout.CREDITS_THE_END_TILES,
+			"first_code": RomLayout.CREDITS_THE_END_FIRST_CODE,
+			"bits": 2,
+		}
+		sheets["credits_mons"] = {
+			"offset": RomLayout.credits_mon_gfx_offset(layout),
+			"tiles": RomLayout.credits_mon_tiles(layout),
+			"first_code": 0,
+			"bits": 2,
+		}
 	## Crystal only: pokegold ships neither a Kris pic nor the right corner, and
 	## says so with the -1 every layout uses for data a profile does not carry.
 	if int(card["pic_female"]) >= 0:
