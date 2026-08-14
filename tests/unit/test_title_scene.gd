@@ -237,6 +237,41 @@ func test_a_trail_is_drawn_the_frame_after_it_is_spawned() -> void:
 	assert_eq(grew, [2, 6, 10] as Array[int])
 
 
+## `.Frameset_GSTitleTrail`: Gold alternates the two `spriteanimoam` vtiles and
+## `oamrestart`s, so each of the trail's two pictures is up for two frames, and
+## Silver holds the first and `oamend`s, which repeats it for as long as the
+## sprite is up. Measured against a cartridge, whose trail entries carry tile
+## $f8 and $fa on Gold and only $f8 on Silver.
+func test_golds_trail_alternates_its_two_pictures_and_silvers_does_not() -> void:
+	var gold := Gen2TitleScene.create(RomRegistry.GOLD, _sine())
+	var sets: Array[int] = []
+	for _frame: int in 20:
+		gold.advance_frame()
+		for sprite: Dictionary in gold.sprites():
+			if StringName(sprite["kind"]) != Gen2TitleScene.SPRITE_TRAIL:
+				continue
+			var set: int = int(sprite["tile"])
+			if sets.is_empty() or sets[sets.size() - 1] != set:
+				sets.append(set)
+			break
+	# Every trail on screen is on the same phase, since they are spawned on a
+	# four-frame cadence and the frameset's cycle is four frames long.
+	assert_eq(
+		sets, [0, 1, 0, 1, 0, 1, 0, 1, 0, 1] as Array[int],
+		"two frames each, then oamrestart"
+	)
+
+	var silver := Gen2TitleScene.create(RomRegistry.SILVER, _sine())
+	var held: Array[int] = []
+	for _frame: int in 20:
+		silver.advance_frame()
+		for sprite: Dictionary in silver.sprites():
+			if StringName(sprite["kind"]) == Gen2TitleScene.SPRITE_TRAIL \
+					and not held.has(int(sprite["tile"])):
+				held.append(int(sprite["tile"]))
+	assert_eq(held, [0] as Array[int], "oamend repeats the first")
+
+
 ## `AnimSeq_GSTitleTrail`'s Silver branch is a different routine under the same
 ## name: no `inc [hl]` on the y coordinate, and no
 ## `AnimSeqs_IncAnonJumptableIndex`, so `.zero` recomputes the sine every frame

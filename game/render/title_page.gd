@@ -20,6 +20,8 @@ const TRANSPARENT_INDEX: int = 0
 ## Shadow OAM counts from (8, 16), so a coordinate reaches the screen eight less
 ## across and sixteen less down.
 const OAM_ORIGIN := Vector2i(8, 16)
+## `wShadowOAM` holds forty sprites.
+const SHADOW_OAM_SPRITES: int = 40
 ## `TILEMAP_WIDTH_PX`: the BG map is 32 tiles across and wraps.
 const MAP_WIDTH: int = RomLayout.TITLE_TILEMAP_COLUMNS * Gen2Tiles.TILE_WIDTH
 ## `set B_LCDC_OBJ_SIZE`: every object on this screen is two tiles tall.
@@ -142,6 +144,10 @@ const TRAIL_TILES: Array[int] = [0x00, 0x02]
 ## `TitleScreen` copies the trail into `vTiles1 tile $78`, which the object
 ## layer addresses as tile $78 of the second sheet.
 const TRAIL_PALETTE: int = 1
+## `spriteanimoam $f8` and `$fa`: where those two tiles land in the object
+## layer's own numbering, which is what a shadow-OAM byte holds. The bird and
+## Crystal's crystal are both at the bottom of VRAM and count from zero.
+const TRAIL_VRAM_BASE: int = 0xF8
 
 ## `TitleScreenGFX2` is loaded at `vTiles1` and `GFX1` at `vTiles2`, so a
 ## tilemap code below $80 is the top half and one at or above it the bottom.
@@ -235,9 +241,41 @@ func draw(scene: Gen2TitleScene) -> Image:
 		_draw_gs_background()
 	_compose(image, scene)
 
-	for sprite: Dictionary in scene.sprites():
-		_draw_sprite(image, scene, sprite)
+	for entry: Dictionary in shadow_oam(scene):
+		_draw_sprite(image, entry)
 	return image
+
+
+## Every object expanded into the shadow OAM the hardware would hold, in struct
+## order, which is the z-order `PlaySpriteAnimations` walks. `y` and `x` are the
+## OAM bytes and `tile` the byte `dbsprite` writes; the screen is in 8x16 mode,
+## so one entry is two tiles and the second is `tile + 1`. [method draw] blits
+## this same list rather than re-deriving it, and a trace of it compares to a
+## cartridge's own buffer line for line.
+func shadow_oam(scene: Gen2TitleScene) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if scene == null:
+		return out
+	for sprite: Dictionary in scene.sprites():
+		var kind: StringName = StringName(sprite["kind"])
+		var at: Vector2i = sprite["at"]
+		var name: String = _sprite_sheet(kind)
+		for part: Vector3i in _oam_set(kind, int(sprite.get("tile", 0))):
+			# `UpdateAnimFrame` stops at `wShadowOAMEnd` rather than growing.
+			if out.size() >= SHADOW_OAM_SPRITES:
+				return out
+			var tile: int = int(sprite.get("tile", 0)) if name == "title_crystal" else part.z
+			out.append({
+				# `UpdateAnimFrame` builds every position with `add`, so an
+				# offset past the screen wraps rather than clamping.
+				"y": (at.y + part.y) & 0xFF,
+				"x": (at.x + part.x) & 0xFF,
+				"tile": (_vram_base(name) + tile) & 0xFF,
+				"palette": int(sprite.get("palette", 0)),
+				"behind": bool(sprite.get("behind", false)),
+				"sheet": name,
+			})
+	return out
 
 
 ## The BG map through `hSCX` and whatever `wLYOverrides` is writing over it, one
@@ -314,28 +352,26 @@ func _gs_palette(row: int, column: int) -> int:
 	return 0
 
 
-## One object's whole OAM set, positioned by its shadow-OAM coordinate and drawn
-## through an object palette, whose first colour is transparent.
-func _draw_sprite(image: Image, scene: Gen2TitleScene, sprite: Dictionary) -> void:
-	var palette: PackedColorArray = _palette(_object, int(sprite.get("palette", 0)))
+## One shadow-OAM entry, drawn through an object palette whose first colour is
+## transparent. The screen is in 8x16 mode, so the entry's tile is the top half
+## and the one after it the bottom.
+func _draw_sprite(image: Image, entry: Dictionary) -> void:
+	var palette: PackedColorArray = _palette(_object, int(entry["palette"]))
 	if palette.size() <= TRANSPARENT_INDEX:
 		return
-	var at: Vector2i = sprite["at"]
-	for part: Vector3i in _oam_set(StringName(sprite["kind"]), int(sprite.get("tile", 0))):
-		var name: String = _sprite_sheet(StringName(sprite["kind"]))
-		# `UpdateAnimFrame` builds every position with `add`, so an offset past
-		# the screen wraps rather than clamping.
-		var to := Vector2i(
-			((at.x + part.x) & 0xFF) - OAM_ORIGIN.x,
-			((at.y + part.y) & 0xFF) - OAM_ORIGIN.y,
+	var to := Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y)
+	var sheet: String = String(entry["sheet"])
+	for half: int in OBJECT_HEIGHT:
+		_blit_sprite_tile(
+			image, palette, sheet, int(entry["tile"]) - _vram_base(sheet) + half,
+			Vector2i(to.x, to.y + half * TILE), bool(entry["behind"])
 		)
-		var base: int = int(sprite.get("tile", 0)) if name == "title_crystal" else part.z
-		for half: int in OBJECT_HEIGHT:
-			_blit_sprite_tile(
-				image, palette, name, base + half,
-				Vector2i(to.x, to.y + half * TILE),
-				bool(sprite.get("behind", false))
-			)
+
+
+## Where a sheet sits in the object layer's numbering, which shadow OAM counts
+## from and the sheets themselves do not.
+func _vram_base(sheet: String) -> int:
+	return TRAIL_VRAM_BASE if sheet == "title_trail" else 0
 
 
 func _sprite_sheet(kind: StringName) -> String:
@@ -356,7 +392,11 @@ func _oam_set(kind: StringName, frame: int) -> Array[Vector3i]:
 		Gen2TitleScene.SPRITE_CRYSTAL:
 			return [Vector3i(0, 0, 0)] as Array[Vector3i]
 		Gen2TitleScene.SPRITE_TRAIL:
-			return [TRAIL_AT] as Array[Vector3i]
+			# The frameset's own two sets, which are one picture each.
+			return [Vector3i(
+				TRAIL_AT.x, TRAIL_AT.y,
+				TRAIL_TILES[clampi(frame, 0, TRAIL_TILES.size() - 1)]
+			)] as Array[Vector3i]
 		_:
 			var sets: Array[Vector2i] = (
 				BIRD_SETS_GOLD if _profile == RomRegistry.GOLD else BIRD_SETS_SILVER
