@@ -2088,9 +2088,8 @@ func _execute_special(special: int) -> Dictionary:
 			## engine/events/prof_oaks_pc.asm's ProfOaksPCBoot prints, counts the
 			## set bits in wPokedexSeen and wPokedexCaught for `Rate`, plays that
 			## rating's sound and waits for A or B. Presentation only: it writes
-			## nothing. The dex behind the counts exists; `OakRatings` and the
-			## nineteen texts it bands into are not imported, so there is no
-			## screen to hand this to yet.
+			## nothing, so the script runs straight on to its own `end` and
+			## [Gen2ProfOaksPC] is handed the counts by whoever draws this.
 			_emit_runtime_event(&"presentation_special_applied", {
 				"special": special, "kind": &"prof_oaks_pc_boot",
 			})

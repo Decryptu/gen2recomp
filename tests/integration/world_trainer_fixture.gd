@@ -33,6 +33,13 @@ const TOWN_MAP_EARTH: int = 1
 const TOWN_MAP_MOUNTAIN: int = 2
 ## `<BSP>`, which `TownMap_ConvertLineBreakCharacters` rewrites as `<LF>`.
 const TOWN_MAP_BREAK_CODE: int = 0x1F
+## `OakRatings`' own thresholds (data/events/pokedex_ratings.asm), and a first
+## sfx id the rest count up from so a row's sound identifies it.
+const OAK_THRESHOLDS: Array[int] = [
+	9, 19, 34, 49, 64, 79, 94, 109, 124, 139, 154, 169, 184, 199, 214, 229,
+	239, 248, 255,
+]
+const OAK_FIRST_SFX: int = 40
 ## The fixture ships one trainer class, numbered 1, holding one trainer.
 const TRAINER_CLASS: int = 1
 const TRAINER_SPECIES: int = 16
@@ -475,6 +482,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"exp": [0x7E24, 0x7E24],
 	}
 	manifest["town_map"] = _town_map()
+	manifest["oak_ratings"] = _oak_ratings()
 
 	var cell: int = 7 * Gen2Tiles.TILE_WIDTH
 	var columns: int = 16
@@ -494,6 +502,26 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			"rows": rows,
 		}
 	manifest["atlases"] = atlases
+
+
+## `OakRatings` and the four texts around it, at the real table's shape. The
+## thresholds are the cartridge's own, since what a test checks is the band a
+## caught count lands in; the texts are short stand-ins.
+static func _oak_ratings() -> Dictionary:
+	var rows: Array = []
+	for index: int in RomLayout.OAK_RATING_COUNT:
+		rows.append({
+			"threshold": OAK_THRESHOLDS[index],
+			"sfx": OAK_FIRST_SFX + index,
+			"text": "RATING%02d" % (index + 1),
+		})
+	return {
+		"ask": "RATE?",
+		"level": "LEVEL:",
+		"counts": "<RAM_D099> SEEN\n<RAM_D0AC> OWNED",
+		"closed": "CLOSED.",
+		"ratings": rows,
+	}
 
 
 ## `JohtoMap`, `KantoMap`, `TownMapPals` and `Landmarks`, at their real shapes.

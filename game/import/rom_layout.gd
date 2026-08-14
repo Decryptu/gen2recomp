@@ -695,6 +695,24 @@ const TOWN_MAP_PALETTE_COLORS: int = 4
 ## run: RGB 28,31,20.
 const TOWN_MAP_PALETTE_FIRST_COLOR: int = 0x53FC
 
+## `OakRatings` (data/events/pokedex_ratings.asm): nineteen `rating` rows of a
+## caught-count threshold, an sfx word and a text pointer, which `FindOakRating`
+## walks until the count fits. The five texts around it are located from the
+## table rather than pinned again: `engine/events/prof_oaks_pc.asm` lays the
+## stubs out as `OakPCText1`, `2` and `3` in front of `OakRating01` and
+## `OakPCText4` behind `OakRating19`, each a `text_far` and a `text_end`.
+const OAK_RATING_COUNT: int = 19
+const OAK_RATING_SIZE: int = 5
+const OAK_TEXT_STUB_SIZE: int = 5
+## Their order in the run, as offsets in stubs from `OakRating01`.
+const OAK_TEXT_STUBS: Dictionary = {
+	"ask": -3, "level": -2, "counts": -1, "closed": OAK_RATING_COUNT,
+}
+## The caught count `FindOakRating`'s last row answers, which is every species.
+const OAK_RATING_LAST_THRESHOLD: int = 255
+## Long enough for the longest rating; one that reaches it has not terminated.
+const OAK_TEXT_MAX_BYTES: int = 256
+
 ## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
 ## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
 ## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
@@ -1139,6 +1157,10 @@ const GOLD_SILVER: Dictionary = {
 		"landmarks": 0x92382,
 		"landmark_count": LANDMARK_COUNT_GOLD_SILVER,
 	},
+	# `OakRatings`, located by its own nineteen ascending thresholds at a stride
+	# of five, which hit once per dump. Everything else Prof Oak's PC says is
+	# reached through the table's own text pointers.
+	"oak_ratings": 0x2685B,
 	# The copyright screen (`Copyright`, engine/menus/intro_menu.asm). The
 	# graphic was located by encoding the pinned gfx/splash/copyright.png as
 	# 2bpp and matching it, which hits once per dump; the string by assembling
@@ -1415,6 +1437,9 @@ const CRYSTAL: Dictionary = {
 		"landmarks": 0x1CA8C3,
 		"landmark_count": LANDMARK_COUNT,
 	},
+	# See the Gold and Silver block above; the table is byte identical and only
+	# its address moves.
+	"oak_ratings": 0x2667F,
 	# See the Gold and Silver block above for how this was located.
 	"copyright": {"gfx": 0xE4000, "tiles": 29, "string": 0x63FD, "palette": 0xA066},
 	# See the Gold and Silver block above for how these were located. Crystal
@@ -1923,6 +1948,21 @@ static func is_matchup_type(value: int) -> bool:
 	if value <= PHYSICAL_TYPES_END:
 		return true
 	return value >= SPECIAL_TYPES_START and value < TYPE_COUNT
+
+
+## Where `OakRatings` row [param index] starts.
+static func oak_rating_offset(layout: Dictionary, index: int) -> int:
+	return int(layout.get("oak_ratings", -1)) + index * OAK_RATING_SIZE
+
+
+## The dump offset one of `prof_oaks_pc.asm`'s five text stubs sits at, counted
+## in stubs from `OakRating01`, whose address the table's first row carries.
+static func oak_text_stub_offset(rom: RomFile, layout: Dictionary, name: String) -> int:
+	var table: int = int(layout.get("oak_ratings", -1))
+	if not rom.in_bounds(table, OAK_RATING_SIZE) or not OAK_TEXT_STUBS.has(name):
+		return -1
+	var first: int = rom.u16le(table + 3) + int(OAK_TEXT_STUBS[name]) * OAK_TEXT_STUB_SIZE
+	return RomFile.linear(bank_of(table), first)
 
 
 static func landmark_count(layout: Dictionary) -> int:

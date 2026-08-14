@@ -6,6 +6,7 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/kurt.png apricorn
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/map.png town_map
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/card.png trainer_card
+##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/oak.png oak_pc
 ##
 ## `presses` drives the overlay with its own buttons before the shot, which is
 ## how the apricorn mode's second box is photographed.
@@ -82,12 +83,19 @@ func _process(_delta: float) -> bool:
 				_screen._service_host.handle_button(button)
 		elif _kind == &"trainer_card":
 			_screen._open_trainer_card()
+		elif _kind == &"oak_pc":
+			_screen.open_prof_oaks_pc()
 		else:
 			var waiting: Array = _screen._world.dispatch_script_events(Vector2i(7, 6))
 			_screen._show_script_results(waiting)
 		for button: int in _presses:
+			# The overlay owns the buttons when one is up; the trainer card and
+			# Prof Oak's PC are the world screen's own hosts, so they take theirs
+			# through the same entry point a key press does.
 			if _screen._service_host != null:
 				_screen._service_host.handle_button(button)
+			else:
+				_screen.press_button(button)
 	if _frames < 18:
 		return false
 	var image: Image = root.get_texture().get_image()

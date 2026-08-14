@@ -119,6 +119,7 @@ to check without writing.
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
 | Region map | The Pokegear's three graphics sheets, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
+| Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -307,12 +308,13 @@ all three games unless its row says otherwise:
 
 | Tool | Checks |
 |---|---|
-| `preview_world_services.gd <png> [mart\|apricorn\|town_map\|trainer_card] [presses]` | the mart, Kurt's Apricorn overlay, the Pokegear's MAP card or the trainer card, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
+| `preview_world_services.gd <png> [mart\|apricorn\|town_map\|trainer_card\|oak_pc] [presses]` | the mart, Kurt's Apricorn overlay, the Pokegear's MAP card, the trainer card or Prof Oak's PC, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_party.gd <game> <png> [party\|box] [presses]` | the party and PC-box overlays as the overworld stacks them, over a development save. `presses` is a `u,d,l,r,a,b` list driven in before the shot, and several lists separated by `;` write one file each |
 | `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_title.gd <game> <png> [frame;frame]` | the title screen at any source frame: Crystal's twenty-eight-frame interlaced entrance and its falling crystal, the Suicune cycle, Gold's Ho-Oh and Silver's Lugia over the scrolling clouds with the trail streaming behind |
+| `preview_prof_oaks_pc.gd <game> [caught]` | Prof Oak's PC against a real cache: every rating band and both its ends, or the three pages `ProfOaksPCBoot` shows for one owned count |
 | `preview_town_map.gd <game> <png> [landmark] [town_map\|card] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box or the Pokegear card's icon row, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |

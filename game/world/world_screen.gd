@@ -82,6 +82,10 @@ var _hall_of_fame_host: Gen2HallOfFameScreen = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
+## `ProfOaksPCBoot`'s three texts, one page at a time, and the sfx `Rate` leaves
+## for it to play once the last of them is up.
+var _oak_pc_pages: Array = []
+var _oak_pc_sfx: int = -1
 ## Mirrors the source's wBattleMenuCursorPosition surviving a reopen.
 var _start_menu_cursor: int = 0
 ## `.MenuReturns`' first entry, `.Reopen`: Pokedex, Pokemon, Pokegear and the
@@ -533,7 +537,7 @@ func _overlay_open() -> bool:
 ## object by call count, and an overlay hides the map entirely.
 func _objects_may_move() -> bool:
 	return _world != null and not _overlay_open() \
-		and not _field_move_text \
+		and not _field_move_text and _oak_pc_pages.is_empty() \
 		and _trainer_approach.is_empty() \
 		and not _world.script_busy() \
 		and not _world.phone_ring_active() \
@@ -610,6 +614,11 @@ func _handle_button(button: int) -> bool:
 	if _field_move_text:
 		if button == Gen2Button.A:
 			_acknowledge_field_move_text()
+		return true
+	if not _oak_pc_pages.is_empty():
+		## `JoyWaitAorB`, which is what waits between each of the three texts.
+		if button in [Gen2Button.A, Gen2Button.B]:
+			_advance_prof_oaks_pc()
 		return true
 	if _pokedex_host != null:
 		return _pokedex_host.handle_button(button)
@@ -722,14 +731,16 @@ func _handle_debug_key(event: InputEvent) -> bool:
 ## after the same overlays, pauses and hosts have each refused it.
 func _renderer_input_free() -> bool:
 	return _world != null and not _overlay_open() and not _field_move_text \
-		and _trainer_approach.is_empty() and not _world.phone_ring_active() \
-		and not _world.fishing_busy() and not _world.script_input_waiting()
+		and _oak_pc_pages.is_empty() and _trainer_approach.is_empty() \
+		and not _world.phone_ring_active() and not _world.fishing_busy() \
+		and not _world.script_input_waiting()
 
 
 ## Public driver for screenshot tooling and scene tests.
 func move_player(direction: Vector2i) -> bool:
 	if _world == null or _overlay_open() or _world.fishing_busy() \
-		or _field_move_text or _world.phone_ring_active() \
+		or _field_move_text or not _oak_pc_pages.is_empty() \
+		or _world.phone_ring_active() \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
 		or _world.player_step_in_progress():
 		return false
@@ -818,7 +829,8 @@ func _after_player_move(movement: Dictionary) -> bool:
 ## Public driver for the production NPC/object interaction path.
 func interact() -> bool:
 	if _world == null or _overlay_open() \
-		or _field_move_text or _world.phone_ring_active() or _world.fishing_busy():
+		or _field_move_text or not _oak_pc_pages.is_empty() \
+		or _world.phone_ring_active() or _world.fishing_busy():
 		return false
 	var results: Array = _world.interact()
 	if results.is_empty():
@@ -1723,6 +1735,7 @@ func _play_hall_of_fame_music() -> void:
 ## path.
 func _open_start_menu() -> void:
 	if _world == null or _data == null or _overlay_open() or _field_move_text \
+		or not _oak_pc_pages.is_empty() \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
 		or _world.phone_ring_active() or _world.fishing_busy():
 		return
@@ -1824,6 +1837,63 @@ func _on_pokedex_closed() -> void:
 		host.queue_free()
 	_script_prompt = "Pokedex closed"
 	_reopen_start_menu_if_due()
+	_refresh_labels()
+
+
+## `ProfOaksPCBoot` (engine/events/prof_oaks_pc.asm): the level line, `Rate`'s
+## seen and owned counts, and the rating those counts band into, each waiting for
+## A or B. The special writes nothing, so the script has already run on to its
+## own `end` and there is nothing to resume.
+func open_prof_oaks_pc() -> void:
+	if _world == null or _data == null or not _oak_pc_pages.is_empty():
+		return
+	var boot: Dictionary = Gen2ProfOaksPC.boot(_data, _world.state)
+	if boot.is_empty():
+		_script_prompt = "Prof Oak's PC needs a cache that carries its ratings"
+		_refresh_labels()
+		return
+	_oak_pc_pages = boot["pages"]
+	_oak_pc_sfx = int(boot["sfx"])
+	_show_prof_oaks_pc_page()
+
+
+func _show_prof_oaks_pc_page() -> void:
+	if _text_box == null or _text_box.font == null:
+		_close_prof_oaks_pc()
+		return
+	_apply_text_box_options()
+	_text_box.show_text(String(_oak_pc_pages[0]))
+	_text_box.visible = true
+	## `ProfOaksPCBoot` plays the sound `Rate` chose after the rating is printed,
+	## not before it.
+	if _oak_pc_pages.size() == 1 and _oak_pc_sfx >= 0:
+		_play_sfx(_oak_pc_sfx)
+	_script_prompt = "A: continue"
+	_refresh_labels()
+
+
+func _advance_prof_oaks_pc() -> void:
+	if _text_box == null:
+		_close_prof_oaks_pc()
+		return
+	if _text_box.is_revealing():
+		_text_box.finish()
+		return
+	if _text_box.advance():
+		return
+	_oak_pc_pages.remove_at(0)
+	if _oak_pc_pages.is_empty():
+		_close_prof_oaks_pc()
+		return
+	_show_prof_oaks_pc_page()
+
+
+func _close_prof_oaks_pc() -> void:
+	_oak_pc_pages = []
+	_oak_pc_sfx = -1
+	if _text_box != null:
+		_text_box.visible = false
+	_script_prompt = ""
 	_refresh_labels()
 
 
@@ -2342,7 +2412,10 @@ func _show_script_results(results: Array) -> void:
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
 		for result_event: Dictionary in result.get("events", []):
-			if result_event.get("type", &"") == &"hall_of_fame_requested":
+			if result_event.get("type", &"") == &"presentation_special_applied" \
+				and StringName(result_event.get("kind", &"")) == &"prof_oaks_pc_boot":
+				open_prof_oaks_pc()
+			elif result_event.get("type", &"") == &"hall_of_fame_requested":
 				## An event, not a runtime request: `halloffame` commits its flag
 				## and runs on, and the source's own `end` is the next command,
 				## so nothing is waiting to be resumed when this opens.

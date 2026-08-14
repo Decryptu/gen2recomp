@@ -56,6 +56,7 @@ var _text_bg_palette: Array = []
 var _presents_palettes: Dictionary = {}
 var _title: Dictionary = {}
 var _town_map: Dictionary = {}
+var _oak_ratings: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -128,6 +129,8 @@ static func open_directory(path: String) -> GameData:
 	data._title = title if title is Dictionary else {}
 	var town_map: Variant = manifest.get("town_map", {})
 	data._town_map = town_map if town_map is Dictionary else {}
+	var oak_ratings: Variant = manifest.get("oak_ratings", {})
+	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1119,6 +1122,19 @@ func title_tilemap() -> PackedByteArray:
 	for code: Variant in stored as Array:
 		out.append(int(code))
 	return out
+
+
+## One of Prof Oak's PC's four fixed texts: `ask` is `_OakPCText1`'s question,
+## `level` `_OakPCText2`, `counts` `_OakPCText3` with its two `text_ram` markers
+## still in, and `closed` `_OakPCText4`. Empty on a cache imported without them.
+func oak_pc_text(name: String) -> String:
+	return String(_oak_ratings.get(name, ""))
+
+
+## `OakRatings`, as [code]{ threshold, sfx, text }[/code] rows in table order.
+func oak_ratings() -> Array:
+	var stored: Variant = _oak_ratings.get("ratings", [])
+	return stored if stored is Array else []
 
 
 ## `JohtoMap` or `KantoMap`: one tile number per cell of the whole screen, in
