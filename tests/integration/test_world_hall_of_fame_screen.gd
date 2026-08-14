@@ -86,6 +86,13 @@ func test_a_key_walks_the_pages_and_the_last_one_closes_the_overlay() -> void:
 	_advance_to_the_end()
 	await get_tree().process_frame
 	assert_null(_world_screen._hall_of_fame_host)
+	## `AnimateHallOfFame` is followed by `farcall Credits`, so the induction ends
+	## into them rather than back onto the map.
+	assert_not_null(_world_screen._credits_host)
+	assert_false(_world_screen.move_player(Vector2i.DOWN))
+
+	_world_screen._credits_host.close()
+	await get_tree().process_frame
 	assert_true(_world_screen.move_player(Vector2i.DOWN))
 
 

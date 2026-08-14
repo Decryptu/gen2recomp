@@ -63,7 +63,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > a Union Cave Geodude taught HM04 Strength for Cianwood Gym's boulders, the
 > Lake of Rage, both Rocket hideouts, Blackthorn's boulder puzzle, and the
 > Rising Badge by Crystal's Dragon Shrine quiz or Gold and Silver's Dragon's Den
-> ball), then Kanto, all sixteen badges and Red.
+> ball), then Kanto, all sixteen badges and Red. Either ending closes the way the
+> cartridge's does: the Hall of Fame's induction panels with Prof Oak's rating
+> printed into the last of them, and then the credits.
 > Missing: full story state, the dex, the remaining special-call branches and
 > story-driven permanent contacts.
 
@@ -120,6 +122,7 @@ to check without writing.
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
 | Region map | The Pokegear's three graphics sheets, the Fast Ship's icon and the dex's nest marker, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
 | Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
+| Credits | `CreditsScript`'s whole command stream, every name and heading it prints, the four scene palettes, the border strip, "The End" and the four mons the banner animates |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -320,6 +323,7 @@ all three games unless its row says otherwise:
 | `preview_prof_oaks_pc.gd <game> [caught]` | Prof Oak's PC against a real cache: every rating band and both its ends, or the three pages `ProfOaksPCBoot` shows for one owned count |
 | `preview_town_map.gd <game> <png> [landmark] [town_map\|card\|area:<species>] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box, the Pokegear card's icon row or the dex's `<MON>'S NEST` screen, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one, `sel` and `rel` hold and release the dex area's SELECT, and `f<n>` spends n frames, which is what the nest blink is caught with |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache, ending on the player's own with Prof Oak's rating printed into it; `page` is how many panels to advance past |
+| `preview_credits.gd <game> <png> [frame;frame]` | the credits at any source frame: the banner's four mons, the scrolling border bands, each batch of names on its own scene palette, the copyright and "The End". A `CREDITS_WAIT` tick is thirteen frames, so the batches land a long way apart; a frame suffixed `b` holds B down for the skip a replay allows |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
 | `replay_world.gd [game ...] [frames]` | records `(frame, button)` from a run of the real world screen and replays it into a fresh world, over every map of the spawn group on each cartridge. The same seed and log must reach the same `Gen2WorldSnapshot` byte for byte, and must reach it whether the frames were pumped at 30 fps or at 144 |
@@ -340,6 +344,7 @@ all three games unless its row says otherwise:
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
 | `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
 | `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, all three frames composing, and every species' nests staying inside their own region and under shadow OAM's forty sprites |
+| `validate_credits.gd` | every credits string decoding into codes the screen can draw, the four scene palettes and every `Credits_LoadBorderGFX.Frames` block, and both whole scripts run frame by frame to `CREDITS_END` with nothing printed reaching either border band |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse |

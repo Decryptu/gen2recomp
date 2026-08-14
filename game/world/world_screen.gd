@@ -79,6 +79,7 @@ var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
 var _party_host: Gen2PartyScreen = null
 var _hall_of_fame_host: Gen2HallOfFameScreen = null
+var _credits_host: Gen2CreditsScreen = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -529,7 +530,7 @@ func _overlay_open() -> bool:
 	return _battle_host != null or _service_host != null or _pc_host != null \
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
-		or _pokedex_host != null
+		or _pokedex_host != null or _credits_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -555,11 +556,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		if press_button(button):
 			accept_event()
 		return
-	## The dex area's SELECT is a held state rather than a press, and the Pokedex
-	## is the only overlay here with anything to do with a release.
+	## The dex area's SELECT and the credits' A and B are held states rather than
+	## presses, and those two overlays are the only ones with anything to do with
+	## a release.
 	var released: int = Gen2Button.released_in(event)
 	if released != Gen2Button.NONE and _pokedex_host != null:
 		_pokedex_host.release_button(released)
+		accept_event()
+		return
+	if released != Gen2Button.NONE and _credits_host != null:
+		_credits_host.release_button(released)
 		accept_event()
 		return
 	if event.is_pressed() and _handle_debug_key(event):
@@ -610,6 +616,9 @@ func _handle_button(button: int) -> bool:
 	## to until it has finished, and it takes no cancel.
 	if _hall_of_fame_host != null:
 		_hall_of_fame_host.handle_button(button)
+		return true
+	if _credits_host != null:
+		_credits_host.handle_button(button)
 		return true
 	if _pc_host != null:
 		if button == Gen2Button.B:
@@ -1727,6 +1736,10 @@ func _on_hall_of_fame_closed() -> void:
 	if _renderer != null:
 		_renderer.refresh()
 	_refresh_labels()
+	## `AnimateHallOfFame` is followed by `farcall Credits` with the `wStatusFlags`
+	## byte pushed before the Hall of Fame bit went into it, so this pair is never
+	## skippable however many times it has been seen.
+	open_credits(false)
 
 
 ## `ProfOaksPCRating`'s tail: `PlayMusic MUSIC_NONE` stops the induction music
@@ -1736,6 +1749,61 @@ func _on_hall_of_fame_rating(sfx: int) -> void:
 	if _audio_player != null:
 		_audio_player.fade_out()
 	_play_sfx(sfx)
+
+
+## `Script_credits`, which farcalls `RedCredits` and then ends the script.
+##
+## [param skippable] is the `wStatusFlags` byte `Credits` is handed: `RedCredits`
+## passes the live one, which by Red has the Hall of Fame bit in it, while
+## `HallOfFame` pushes the byte before setting that bit, so the induction's own
+## credits cannot be skipped even on a second run.
+func open_credits(skippable: bool = true) -> void:
+	if _credits_host != null or _world == null or _data == null:
+		return
+	var host := Gen2CreditsScreen.new()
+	if not host.set_context(_data, skippable):
+		host.free()
+		_script_prompt = "The credits are not in this cache"
+		_refresh_labels()
+		return
+	host.closed.connect(_on_credits_closed)
+	host.music_requested.connect(_play_credits_music)
+	host.music_fade_requested.connect(_fade_credits_music)
+	_credits_host = host
+	_screen.display(host)
+	_script_prompt = "Credits"
+	_refresh_labels()
+
+
+func _on_credits_closed() -> void:
+	var host: Gen2CreditsScreen = _credits_host
+	_credits_host = null
+	if host != null:
+		host.queue_free()
+	_play_current_map_music()
+	if _renderer != null:
+		_renderer.refresh()
+	_script_prompt = ""
+	_refresh_labels()
+
+
+## `.music`, whose `PlayMusic MUSIC_NONE` and `DelayFrame` in front of the real
+## call are what stop the induction's own track first.
+func _play_credits_music(music: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	_audio_player.fade_out()
+	var record: Dictionary = _data.world_audio(&"music", music)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
+## `.end`'s `wMusicFade`, which the overworld's own player owns the way it owns
+## the Hall of Fame rating's sound.
+func _fade_credits_music(_music: int, frames: int) -> void:
+	if _audio_player != null:
+		_audio_player.fade_out(frames)
 
 
 func _play_hall_of_fame_music() -> void:
@@ -2452,6 +2520,8 @@ func _show_script_results(results: Array) -> void:
 				## and runs on, and the source's own `end` is the next command,
 				## so nothing is waiting to be resumed when this opens.
 				open_hall_of_fame()
+			elif result_event.get("type", &"") == &"credits_requested":
+				open_credits()
 			elif result_event.get("type", &"") == &"field_move_confirmed":
 				## `iftrue Script_Cut` and its four counterparts. The move is the
 				## host's, and it is the same staged request and acknowledge the

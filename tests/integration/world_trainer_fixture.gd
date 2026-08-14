@@ -48,6 +48,17 @@ const OAK_THRESHOLDS: Array[int] = [
 	239, 248, 255,
 ]
 const OAK_FIRST_SFX: int = 40
+## The fixture's `CreditsStringsPointers`: two names, the copyright and the
+## heading, which is the smallest table `ParseCredits`' two branches both need.
+const CREDITS_NAME_A: int = 0
+const CREDITS_NAME_B: int = 1
+const CREDITS_COPYRIGHT: int = 2
+const CREDITS_STAFF: int = 3
+const CREDITS_STRING_COUNT: int = 4
+## The banner strip is filled so a tile's index is the block it belongs to,
+## modulo the four an index can hold, which is how a page test says which frame
+## is on screen.
+const CREDITS_BLOCK_INDEXES: int = 4
 ## The fixture ships one trainer class, numbered 1, holding one trainer.
 const TRAINER_CLASS: int = 1
 const TRAINER_SPECIES: int = 16
@@ -75,6 +86,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_battle_graphics(directory, manifest)
 	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
 	_write_menu_text(manifest)
+	_write_credits(directory, manifest, crystal_commands)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
 	manifest["game_id"] = String(game_id)
@@ -358,6 +370,97 @@ static func _write_menu_text(manifest: Dictionary) -> void:
 		"toss_ask_quantity": "Throw away <NUM_D009>\n<RAM_CF7E>(S)?",
 		"toss_threw": "Threw away\n<RAM_CF7E>(S).",
 	}
+
+
+## A short `CreditsScript` reaching every command, its four strings, the four
+## scene palettes and `Credits_LoadBorderGFX.Frames`. The two profiles differ the
+## way the cartridges do: Crystal gives a scene three palettes and sixteen banner
+## blocks, Gold and Silver one palette and thirteen.
+static func _write_credits(
+	directory: String, manifest: Dictionary, crystal: bool
+) -> void:
+	var frames: Array = []
+	if crystal:
+		for block: int in RomLayout.CREDITS_SCENES * RomLayout.CREDITS_SCENE_FRAMES:
+			frames.append(block)
+	else:
+		for scene: int in RomLayout.CREDITS_SCENES - 1:
+			frames.append_array([scene * 3, scene * 3 + 1, scene * 3, scene * 3 + 2])
+		frames.append_array([9, 10, 11, 12])
+	## `GetCreditsPalette.UpdatePals` copies 24 bytes on Crystal and 8 twice on
+	## the other two, which is three palettes against one.
+	var scene_palettes: int = 3 if crystal else 1
+	var palettes: Array = []
+	for colour: int in RomLayout.CREDITS_SCENES * scene_palettes \
+		* RomLayout.CREDITS_PALETTE_COLORS:
+		palettes.append(0x0400 * (colour % 4) + colour)
+	manifest["credits"] = {
+		"script": [
+			RomLayout.CREDITS_CLEAR,
+			CREDITS_STAFF, 1,
+			RomLayout.CREDITS_WAIT, 2,
+			RomLayout.CREDITS_MUSIC,
+			RomLayout.CREDITS_WAIT2, 1,
+			RomLayout.CREDITS_WAIT, 1,
+			RomLayout.CREDITS_SCENE, 1,
+			CREDITS_NAME_A, 0,
+			CREDITS_NAME_B, 2,
+			RomLayout.CREDITS_WAIT, 2,
+			CREDITS_COPYRIGHT, 1,
+			RomLayout.CREDITS_WAIT, 1,
+			RomLayout.CREDITS_THEEND,
+			RomLayout.CREDITS_WAIT, 1,
+			RomLayout.CREDITS_END,
+		],
+		"strings": [
+			[0x80, 0x81, 0x82],
+			[0x83, 0x84],
+			## The copyright is the one string drawn out of `CopyrightGFX` and
+			## the one printed from column 2.
+			[
+				RomLayout.COPYRIGHT_FIRST_CODE, RomLayout.COPYRIGHT_FIRST_CODE + 1,
+				Gen2Credits.CODE_NEXT_LINE,
+				RomLayout.COPYRIGHT_FIRST_CODE + 2,
+			],
+			## `#` and a `<NEXT>`, which are the two things `PlaceString` does
+			## that placing a code does not.
+			[Gen2Credits.CODE_POKE, 0x85, Gen2Credits.CODE_NEXT_LINE, 0x86],
+		],
+		"staff": CREDITS_STAFF,
+		"copyright": CREDITS_COPYRIGHT,
+		"scene_palettes": scene_palettes,
+		"palettes": palettes,
+		"frames": frames,
+	}
+	var sheets: Dictionary = manifest.get("tiles", {})
+	var blocks: int = int(frames.max()) + 1
+	for entry: Array in [
+		["credits_border", RomLayout.CREDITS_BORDER_TILES, RomLayout.CREDITS_BORDER_FIRST_CODE],
+		["credits_the_end", RomLayout.CREDITS_THE_END_TILES, RomLayout.CREDITS_THE_END_FIRST_CODE],
+		["credits_mons", blocks * RomLayout.CREDITS_MON_FRAME_TILES, 0],
+	]:
+		var count: int = int(entry[1])
+		var indices := PackedByteArray()
+		indices.resize(count * Gen2Tiles.TILE_PIXELS)
+		for tile: int in count:
+			@warning_ignore("integer_division")
+			var block: int = tile / RomLayout.CREDITS_MON_FRAME_TILES
+			var index: int = block % CREDITS_BLOCK_INDEXES if entry[0] == "credits_mons" else 2
+			for pixel: int in Gen2Tiles.TILE_PIXELS:
+				## The strips are strips, so a tile's pixels are a column of the
+				## row rather than a run of it.
+				var y: int = pixel / Gen2Tiles.TILE_WIDTH
+				indices[y * count * Gen2Tiles.TILE_WIDTH
+					+ tile * Gen2Tiles.TILE_WIDTH + pixel % Gen2Tiles.TILE_WIDTH] = index
+		RomCache.write_indices(RomCache.tile_path(directory, String(entry[0])), indices)
+		sheets[String(entry[0])] = {
+			"width": count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": count,
+			"first_code": int(entry[2]),
+			"bits": 2,
+		}
+	manifest["tiles"] = sheets
 
 
 ## `GameFreakLogoGFX` and whichever object sheet the profile carries, as flat
