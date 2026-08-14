@@ -1,7 +1,10 @@
 extends GutTest
 
-## `TossItem` (`home/item.asm`), the pack's only bag-owned transaction, and the
-## [Gen2WorldTransaction] boundary it commits through.
+## The item transactions no party, mart or script is behind: `TossItem`
+## (`home/item.asm`) for the bag, and `engine/events/pokecenter_pc.asm`'s own
+## deposit, withdraw and toss for `wPCItems`. Both commit through the same
+## [Gen2WorldTransaction] boundary, and the PC's menus are checked here for the
+## same reason: it is the file that owns the fixture they read.
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
@@ -110,3 +113,97 @@ func test_a_refused_candidate_save_rolls_the_world_back() -> void:
 	var result: Dictionary = Gen2WorldBagHost.toss(_world, _save, POTION, 2, false)
 	assert_false(bool(result["ok"]), str(result))
 	assert_eq(_world.state.item_quantity(POTION), 5, "the stack is back")
+
+
+## `PlayerDepositItemMenu` and `PlayerWithdrawItemMenu` are the same move in
+## opposite directions, and the flat model keeps one stack per item on each side.
+func test_a_stack_moves_between_the_bag_and_the_pc_and_back() -> void:
+	var deposited: Dictionary = Gen2WorldPC.deposit(_world, _save, POTION, 2, false)
+	assert_true(bool(deposited["ok"]), str(deposited))
+	assert_eq(deposited["bag"], 3)
+	assert_eq(deposited["pc"], 2)
+	assert_eq(_world.state.item_quantity(POTION), 3)
+	assert_eq(_world.state.pc_item_quantity(POTION), 2)
+
+	var withdrawn: Dictionary = Gen2WorldPC.withdraw(_world, _save, POTION, 2, false)
+	assert_true(bool(withdrawn["ok"]), str(withdrawn))
+	assert_eq(_world.state.item_quantity(POTION), 5)
+	assert_eq(_world.state.pc_item_quantity(POTION), 0, "an emptied stack is gone")
+
+
+## `.no_toss` keeps a key item out of the PC, which is the same permission bit
+## TOSS reads.
+func test_a_key_item_cannot_be_deposited() -> void:
+	var result: Dictionary = Gen2WorldPC.deposit(_world, _save, KEY_ITEM, 1, false)
+	assert_false(bool(result["ok"]))
+	assert_eq(result["reason"], &"item_cannot_be_deposited")
+	assert_eq(_world.state.pc_item_quantity(KEY_ITEM), 0)
+
+
+## `.NoRoomInPC`: `ReceiveItem` fails before anything leaves the bag, so a full
+## PC leaves the stack where it was.
+func test_a_full_pc_refuses_a_new_stack_without_taking_it() -> void:
+	var full: Dictionary = {}
+	for slot: int in Gen2WorldPack.MAX_PC_ITEMS:
+		full[slot + 20] = 1
+	assert_true(bool(_world.state.apply_changes({}, {}, {"pc_items": full})["ok"]))
+	var result: Dictionary = Gen2WorldPC.deposit(_world, _save, POTION, 1, false)
+	assert_false(bool(result["ok"]))
+	assert_eq(result["reason"], &"pc_full")
+	assert_eq(_world.state.item_quantity(POTION), 5)
+
+
+## `TossItemFromPC` is `TossItem` on the other array, and reads `CanToss` the
+## same way.
+func test_the_pc_tosses_its_own_stack() -> void:
+	assert_true(bool(Gen2WorldPC.deposit(_world, _save, POTION, 3, false)["ok"]))
+	var result: Dictionary = Gen2WorldPC.toss(_world, _save, POTION, 1, false)
+	assert_true(bool(result["ok"]), str(result))
+	assert_eq(_world.state.pc_item_quantity(POTION), 2)
+	assert_eq(_world.state.item_quantity(POTION), 2, "the bag is not touched")
+
+
+## `.ChooseWhichPCListToUse`, and the HALL OF FAME row this project drops for
+## want of saved induction records.
+func test_the_top_menu_grows_with_the_dex_and_the_hall_of_fame() -> void:
+	var rows: Callable = func() -> Array:
+		var out: Array = []
+		for row: Dictionary in Gen2WorldPC.top_menu(_data, _world.state, "GOLD"):
+			out.append(int(row["row"]))
+		return out
+	assert_eq(Gen2WorldPC.top_menu_list(_world.state), Gen2WorldPC.PCPC_BEFORE_POKEDEX)
+	assert_eq(rows.call(), [
+		Gen2WorldPC.PCPCITEM_BILLS_PC, Gen2WorldPC.PCPCITEM_PLAYERS_PC,
+		Gen2WorldPC.PCPCITEM_TURN_OFF,
+	])
+	assert_eq(
+		String(Gen2WorldPC.top_menu(_data, _world.state, "GOLD")[1]["name"]), "GOLD's PC"
+	)
+
+	_world.state.set_engine_flag(Gen2WorldState.ENGINE_POKEDEX, true)
+	assert_eq(Gen2WorldPC.top_menu_list(_world.state), Gen2WorldPC.PCPC_BEFORE_HOF)
+	assert_true(Gen2WorldPC.PCPCITEM_OAKS_PC in rows.call())
+
+	_world.state.set_hall_of_fame(true)
+	assert_eq(Gen2WorldPC.top_menu_list(_world.state), Gen2WorldPC.PCPC_POSTGAME)
+	assert_false(
+		Gen2WorldPC.PCPCITEM_HALL_OF_FAME in rows.call(),
+		"the induction viewer has no records to read"
+	)
+
+
+## `PlayersPCMenuData.WhichPC`: the bedroom's list ends in TURN OFF, a Pokemon
+## Center's in LOG OFF, because the top menu is still open behind it.
+func test_the_item_pc_ends_in_log_off_only_inside_the_pokemon_center() -> void:
+	var last: Callable = func(house: bool) -> int:
+		var menu: Array = Gen2WorldPC.players_pc_menu(_data, house)
+		return int(menu[menu.size() - 1]["row"])
+	assert_eq(last.call(false), Gen2WorldPC.PLAYERSPCITEM_LOG_OFF)
+	assert_eq(last.call(true), Gen2WorldPC.PLAYERSPCITEM_TURN_OFF)
+
+
+## `PC_CheckPartyForPokemon`, which is the one refusal the top menu owns.
+func test_an_empty_party_cannot_open_the_pokemon_centers_pc() -> void:
+	assert_true(Gen2WorldPC.can_open(_save))
+	_save.party.clear()
+	assert_false(Gen2WorldPC.can_open(_save))

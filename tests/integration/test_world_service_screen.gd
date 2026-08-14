@@ -59,7 +59,9 @@ func _write_pc_request() -> void:
 	_data = GameData.open_directory(Fixture.directory())
 
 
-func test_players_house_pc_embeds_box_storage_and_resumes_the_waiting_script() -> void:
+## `_PlayersHousePC` is the item PC, not box storage: the bedroom's own list is
+## the one that ends in TURN OFF.
+func test_players_house_pc_opens_the_item_pc_and_resumes_the_waiting_script() -> void:
 	_write_pc_request()
 	await _open_world()
 	_world_screen._world.current_map.events["coord_events"][0]["script"] = 0x6190
@@ -69,20 +71,38 @@ func test_players_house_pc_embeds_box_storage_and_resumes_the_waiting_script() -
 	_world_screen._show_script_results(waiting)
 	await get_tree().process_frame
 
-	var pc: Gen2BoxScreen = _world_screen._pc_host
-	assert_not_null(pc)
-	assert_eq(pc.box_snapshot()["boxes"].size(), Gen2SaveData.BOX_COUNT)
-	assert_true(pc.select_party_member(0))
-	assert_true(pc.deposit_selected_party())
-	assert_eq((_world_screen._injected_save as Gen2SaveData).party.size(), 1)
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.PC_ITEMS)
+	assert_true(host._pc_house)
+	var rows: Array = []
+	for row: Dictionary in host._pc_rows:
+		rows.append(int(row["row"]))
+	assert_eq(rows, [
+		Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM,
+		Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM,
+		Gen2WorldPC.PLAYERSPCITEM_TOSS_ITEM,
+		Gen2WorldPC.PLAYERSPCITEM_TURN_OFF,
+	])
 
-	pc.close_embedded()
+	## DEPOSIT ITEM, then the one item the world was opened with.
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.PC_ITEM_LIST)
+	host.handle_button(Gen2Button.A)
+	assert_eq(_world_screen._world.state.pc_item_quantity(7), 1)
+	assert_eq(_world_screen._world.state.item_quantity(7), 0)
+
+	host.handle_button(Gen2Button.B)
+	host.handle_button(Gen2Button.B)
 	await get_tree().process_frame
-	assert_null(_world_screen._pc_host)
+	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
 
 
-func test_pokemon_center_pc_embeds_box_storage_and_resumes_the_waiting_script() -> void:
+## `PokemonCenterPC`'s top menu, whose BILL'S PC row is the box screen the
+## bedroom's PC used to open.
+func test_pokemon_center_pc_opens_the_top_menu_and_bills_pc_behind_it() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
 	scripts["48:6195"] = [
 		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_POKEMON_CENTER_PC, 0,
@@ -99,13 +119,23 @@ func test_pokemon_center_pc_embeds_box_storage_and_resumes_the_waiting_script() 
 	_world_screen._show_script_results(waiting)
 	await get_tree().process_frame
 
-	var pc: Gen2BoxScreen = _world_screen._pc_host
-	assert_not_null(pc)
-	assert_eq(pc.box_snapshot()["boxes"].size(), Gen2SaveData.BOX_COUNT)
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.PC)
+	assert_eq(int(host._pc_rows[0]["row"]), Gen2WorldPC.PCPCITEM_BILLS_PC)
 
-	pc.close_embedded()
+	host.handle_button(Gen2Button.A)
+	var boxes: Gen2BoxScreen = host._boxes
+	assert_not_null(boxes)
+	assert_eq(boxes.box_snapshot()["boxes"].size(), Gen2SaveData.BOX_COUNT)
+	boxes.close_embedded()
 	await get_tree().process_frame
-	assert_null(_world_screen._pc_host)
+	assert_null(host._boxes)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.PC)
+
+	host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
 
 

@@ -902,6 +902,55 @@ const OAK_RATING_LAST_THRESHOLD: int = 255
 ## Long enough for the longest rating; one that reaches it has not terminated.
 const OAK_TEXT_MAX_BYTES: int = 256
 
+## `PokemonCenterPC.Jumptable`'s five strings, one contiguous `@`-terminated run
+## in the source's own row order, and the six `text_far` stubs the routine's
+## own texts sit behind, which follow it at a fixed distance on all three
+## cartridges.
+const POKECENTER_PC_ROWS: Array[String] = [
+	"players_pc", "bills_pc", "oaks_pc", "hall_of_fame", "turn_off",
+]
+## `PlayersPCMenuData.PlayersPCMenuPointers`' own seven. The run below is the
+## order the *strings* are laid down in, which is not the jumptable's:
+## `.TurnOff` sits before `.LogOff` while `PLAYERSPCITEM_LOG_OFF` is 5 and
+## `PLAYERSPCITEM_TURN_OFF` is 6. `.WhichPC` names the jumptable, so a list entry
+## is read through `POKECENTER_PC_PLAYERS_ORDER`.
+const POKECENTER_PC_PLAYERS_AT: int = 0x168
+const POKECENTER_PC_PLAYERS_ROWS: Array[String] = [
+	"withdraw_item", "deposit_item", "toss_item", "mail_box", "decoration",
+	"turn_off", "log_off",
+]
+const POKECENTER_PC_PLAYERS_ORDER: Array[String] = [
+	"withdraw_item", "deposit_item", "toss_item", "mail_box", "decoration",
+	"log_off", "turn_off",
+]
+const POKECENTER_PC_ROW_MAX_BYTES: int = 24
+## `.WhichPC`: each list is a count, that many row indices and a `-1`. Both
+## tables follow their own string run, so the walk that reads the strings is
+## what finds them.
+const POKECENTER_PC_LISTS: int = 3
+const POKECENTER_PC_PLAYERS_LISTS: int = 2
+const POKECENTER_PC_LIST_END: int = 0xFF
+## Every `text_far` stub the two routines print through, as its own distance
+## from the row run. The six the top menu uses are one consecutive block; the
+## item PC's eight are scattered through `pokecenter_pc.asm` between the
+## submenus that own them, so each is pinned rather than strided.
+const POKECENTER_PC_TEXT_AT: Dictionary = {
+	"ask_what_do": 0x1D2,
+	"how_many_withdraw": 0x256,
+	"withdrew": 0x25B,
+	"no_room_withdraw": 0x260,
+	"no_items": 0x2CD,
+	"how_many_deposit": 0x374,
+	"deposited": 0x379,
+	"no_room_deposit": 0x37E,
+	"turn_on": 0x42D,
+	"whose": 0x432,
+	"bills_pc": 0x437,
+	"players_pc": 0x43C,
+	"oaks_pc": 0x441,
+	"closed": 0x446,
+}
+
 ## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
 ## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
 ## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
@@ -1351,6 +1400,11 @@ const GOLD_SILVER: Dictionary = {
 	# of five, which hit once per dump. Everything else Prof Oak's PC says is
 	# reached through the table's own text pointers.
 	"oak_ratings": 0x2685B,
+	# `PokemonCenterPC`'s own strings. The five row names are one run, and the
+	# routine's six `text_far` stubs sit `POKECENTER_PC_TEXT_AT` past its start;
+	# both were located by matching the row run's own bytes, which are unique in
+	# a dump.
+	"pokecenter_pc": 0x158D1,
 	# The credits. `gfx` was located by converting the pinned gfx/credits PNGs
 	# and matching the bytes: the border and the four mon sheets are one
 	# contiguous run in `credits.asm`'s own INCBIN order and `CreditsScript`
@@ -1676,6 +1730,9 @@ const CRYSTAL: Dictionary = {
 	# See the Gold and Silver block above; the table is byte identical and only
 	# its address moves.
 	"oak_ratings": 0x2667F,
+	# See the Gold and Silver block above; the run is byte identical and only its
+	# address moves.
+	"pokecenter_pc": 0x155FA,
 	# See the Gold and Silver block above for how these were located. Crystal's
 	# strings sit in the pointer table's own bank, since it prints them with
 	# `PlaceString` rather than `PlaceFarString`, and each of its four scenes is
@@ -2238,6 +2295,14 @@ static func oak_text_stub_offset(rom: RomFile, layout: Dictionary, name: String)
 		return -1
 	var first: int = rom.u16le(table + 3) + int(OAK_TEXT_STUBS[name]) * OAK_TEXT_STUB_SIZE
 	return RomFile.linear(bank_of(table), first)
+
+
+## Where the `text_far` stub [param name] names sits.
+static func pokecenter_pc_text_offset(layout: Dictionary, name: String) -> int:
+	var at: int = int(layout.get("pokecenter_pc", -1))
+	if at < 0 or not POKECENTER_PC_TEXT_AT.has(name):
+		return -1
+	return at + int(POKECENTER_PC_TEXT_AT[name])
 
 
 ## `Credits_LoadBorderGFX.Frames`, as 16-tile block indices into the mon run.

@@ -136,6 +136,8 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"town_map_host_unavailable"
 		&"apricorn_selection_requested":
 			return &"apricorn_data_unavailable"
+		&"pc_requested":
+			return &"pc_host_unavailable"
 	return &"runtime_host_unavailable"
 
 
@@ -215,6 +217,14 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 					"phone": source.get("phone", {}).duplicate(true),
 				},
 			}
+		&"pc_requested":
+			## `PokemonCenterPC` and `_PlayersHousePC`. Both are menus over state
+			## the world already holds, so the only thing to resolve is which of
+			## the two the script asked for.
+			var pc_mode: StringName = StringName(values.get("mode", &"pokemon_center"))
+			if pc_mode not in [&"pokemon_center", &"players_house"]:
+				return {"ok": false, "reason": &"unsupported_pc_mode"}
+			return {"ok": true, "data": {"pc": {"mode": pc_mode}}}
 		&"audio_requested":
 			var audio: Dictionary = _audio_for_request(world, request)
 			var audio_kind: StringName = StringName(request.get("values", {}).get("kind", &""))

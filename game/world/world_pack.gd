@@ -9,10 +9,9 @@ extends RefCounted
 ## (`data/items/attributes.asm`'s `item_attribute` macro calls it "pocket";
 ## `constants/item_data_constants.asm` names the same values
 ## `ITEM`/`KEY_ITEM`/`BALL`/`TM_HM`), which is what decides a real item's pocket.
-## Source capacities (`MAX_ITEMS` 20, `MAX_BALLS` 12, `MAX_KEY_ITEMS` 25,
-## `MAX_PC_ITEMS` 50) are enforced at data-aware receive seams. The save
-## remains a flat item-to-quantity map, so one item cannot be split into two
-## 99-count stacks like the source's packed pocket arrays can.
+## Source capacities (the four `MAX_*` below) are enforced at data-aware receive
+## seams. The save remains a flat item-to-quantity map, so one item cannot be
+## split into two 99-count stacks like the source's packed pocket arrays can.
 ##
 ## Pockets registered on `Gen2ModHost` follow the four source ones, and the item
 ## submenu below is `engine/items/pack.asm`'s own header selection.
@@ -25,6 +24,9 @@ const TYPE_TM_HM: int = 4
 const MAX_ITEMS: int = 20
 const MAX_BALLS: int = 12
 const MAX_KEY_ITEMS: int = 25
+## `wPCItems`' own cap, which is one list rather than four pockets: the item PC
+## takes anything the bag can hold and sorts it by nothing.
+const MAX_PC_ITEMS: int = 50
 const MAX_ITEM_STACK: int = 99
 
 ## `engine/items/pack.asm`'s own left/right pocket cycle

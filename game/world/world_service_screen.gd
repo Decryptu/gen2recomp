@@ -16,7 +16,15 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
-enum MODE { MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK, APRICORN }
+enum MODE {
+	MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK,
+	APRICORN, PC, PC_ITEMS, PC_ITEM_LIST, PC_TEXT,
+}
+
+## `PokemonCenterPC`'s own box storage, which is the one row that opens a screen
+## rather than a list. It is added as a child the way the MAP card adds the
+## region map, so the top menu is still there when the box screen closes.
+const BOX_SCENE := preload("res://game/save/box_screen.tscn")
 
 ## engine/pokegear/pokegear.asm's card order. Each is behind its own
 ## wPokegearFlags bit, named here by the engine flag that carries it, since that
@@ -49,6 +57,20 @@ var _phone_entries: Array = []
 var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
 var _town_map_from_request: bool = false
+## `PokemonCenterPC` and the item PC behind it: which rows are on offer, which
+## of the three item lists is open, and the box screen when BILL'S PC is.
+var _pc_rows: Array = []
+var _pc_house: bool = false
+var _pc_action: int = -1
+var _pc_entries: Array = []
+var _pc_quantity: int = 1
+## The PC's own text boxes and what happens once the last is acknowledged:
+## `PROF.OAK'S PC` returns to the top menu and `TURN OFF` shuts the machine down.
+var _pc_pages: Array = []
+var _pc_sfx: int = -1
+var _pc_after: StringName = &"top"
+var _pc_label: String = ""
+var _boxes: Gen2BoxScreen = null
 
 var _panel: PanelContainer = null
 var _title: Label = null
@@ -108,6 +130,9 @@ func open_pending(
 			return true
 		&"apricorn_selection_requested":
 			_open_apricorns()
+			return true
+		&"pc_requested":
+			_open_pc(StringName(resolved.get("data", {}).get("pc", {}).get("mode", &"")))
 			return true
 	_show_error("No scene host for %s." % String(request.get("kind", "request")))
 	return false
@@ -321,6 +346,257 @@ func _finish_apricorns() -> void:
 	_finish_runtime({"ok": true, "item": answer["item"], "quantity": answer["quantity"]})
 
 
+## `PokemonCenterPC`'s top menu, or `_PlayersHousePC`'s item PC when the script
+## asked for the bedroom's. `PC_CheckPartyForPokemon` is the one refusal either
+## has before it opens.
+func _open_pc(mode: StringName) -> void:
+	_pc_house = mode == &"players_house"
+	if not _pc_house and not Gen2WorldPC.can_open(_save):
+		## `.PokecenterPCCantUseText`: the machine answers and shuts down again.
+		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
+		return
+	if _pc_house:
+		_open_pc_items()
+		return
+	_mode = MODE.PC
+	_cursor = 0
+	_pc_rows = Gen2WorldPC.top_menu(
+		_data, _world.state, _save.player_name if _save != null else ""
+	)
+	_title.text = "PC"
+	_summary.text = _data.pokecenter_pc_text("whose")
+	_status.text = ""
+	_status.add_theme_color_override("font_color", MUTED)
+	_footer.text = "D-pad: move    A: choose    B: turn off"
+	_render_options()
+
+
+## The item PC's own menu. The Pokemon Center's list ends in LOG OFF because the
+## top menu is still open behind it; the bedroom's ends in TURN OFF.
+func _open_pc_items() -> void:
+	_mode = MODE.PC_ITEMS
+	_cursor = 0
+	_pc_action = -1
+	_pc_rows = Gen2WorldPC.players_pc_menu(_data, _pc_house)
+	_title.text = _data.pokecenter_pc_row("players_pc").replace(
+		Gen2WorldPC.PLAYER_MARKER,
+		_save.player_name if _save != null and not _save.player_name.is_empty()
+		else "PLAYER"
+	)
+	_summary.text = _data.pokecenter_pc_text("ask_what_do")
+	_refresh_pc_counts()
+	_footer.text = "D-pad: move    A: choose    B: back"
+	_render_options()
+
+
+## Whichever of the bag and the PC the chosen action reads.
+func _open_pc_item_list(action: int) -> void:
+	_pc_action = action
+	_cursor = 0
+	_pc_quantity = 1
+	_refresh_pc_entries()
+	if _pc_entries.is_empty():
+		## `.CheckItemsInBag`'s `.PlayersPCNoItemsText`, which the source prints
+		## for a deposit. The other two open an empty scrolling menu there, which
+		## can only be cancelled, so they are refused with the same box rather
+		## than drawn empty.
+		_status.text = _data.pokecenter_pc_text("no_items")
+		_status.add_theme_color_override("font_color", ERROR)
+		_render_options()
+		return
+	_mode = MODE.PC_ITEM_LIST
+	## `SelectQuantityToToss` is asked before the move, so the box that names it
+	## is the list's own prompt here.
+	_summary.text = {
+		Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM: "how_many_withdraw",
+		Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM: "how_many_deposit",
+	}.get(action, "")
+	_summary.text = _data.pokecenter_pc_text(_summary.text) if not _summary.text.is_empty() \
+		else _data.menu_text("toss_ask")
+	_footer.text = "D-pad: move and quantity    A: choose    B: back"
+	_render_options()
+
+
+func _refresh_pc_entries() -> void:
+	_pc_entries = Gen2WorldPC.bag_entries(_data, _world.state) \
+		if _pc_action == Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM \
+		else Gen2WorldPC.pc_entries(_data, _world.state)
+	_cursor = mini(_cursor, maxi(0, _pc_entries.size() - 1))
+	_refresh_pc_counts()
+
+
+func _refresh_pc_counts() -> void:
+	_status.text = "PC %d/%d stacks" % [
+		_world.state.pc_items().size(), Gen2WorldPack.MAX_PC_ITEMS,
+	]
+	_status.add_theme_color_override("font_color", MUTED)
+
+
+func _confirm_pc_row() -> void:
+	if _cursor < 0 or _cursor >= _pc_rows.size():
+		return
+	var row: int = int(_pc_rows[_cursor].get("row", -1))
+	if _mode == MODE.PC:
+		match row:
+			Gen2WorldPC.PCPCITEM_BILLS_PC:
+				_open_boxes()
+			Gen2WorldPC.PCPCITEM_PLAYERS_PC:
+				_open_pc_items()
+			Gen2WorldPC.PCPCITEM_OAKS_PC:
+				_open_pc_oak()
+			Gen2WorldPC.PCPCITEM_TURN_OFF:
+				## `TurnOffPC` prints before `.shutdown` runs.
+				_open_pc_text(
+					[_data.pokecenter_pc_text("closed")], &"close", "TURN OFF"
+				)
+		return
+	match row:
+		Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM, \
+		Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM, \
+		Gen2WorldPC.PLAYERSPCITEM_TOSS_ITEM:
+			_open_pc_item_list(row)
+		Gen2WorldPC.PLAYERSPCITEM_LOG_OFF:
+			_open_pc(&"pokemon_center")
+		Gen2WorldPC.PLAYERSPCITEM_TURN_OFF:
+			_finish_runtime({"ok": true, "script_value": 0})
+
+
+func _confirm_pc_item() -> void:
+	if _cursor < 0 or _cursor >= _pc_entries.size():
+		_open_pc_items()
+		return
+	var entry: Dictionary = _pc_entries[_cursor]
+	var item: int = int(entry.get("item", 0))
+	var applied: Dictionary = {}
+	match _pc_action:
+		Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM:
+			applied = Gen2WorldPC.withdraw(_world, _save, item, _pc_quantity, _persist)
+		Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM:
+			applied = Gen2WorldPC.deposit(_world, _save, item, _pc_quantity, _persist)
+		_:
+			applied = Gen2WorldPC.toss(_world, _save, item, _pc_quantity, _persist)
+	if not bool(applied.get("ok", false)):
+		## `.PackFull` and `.NoRoomInPC` are the two the source has a box for;
+		## everything else is a refusal it never reaches.
+		var reason: StringName = StringName(applied.get("reason", &""))
+		_status.text = {
+			&"pc_full": "no_room_deposit", &"pack_full": "no_room_withdraw",
+			&"item_stack_full": "no_room_withdraw",
+		}.get(reason, "")
+		_status.text = _data.pokecenter_pc_text(_status.text) if not _status.text.is_empty() \
+			else "Refused: %s" % String(reason)
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	_pc_quantity = 1
+	_refresh_pc_entries()
+	## `.PlayersPCWithdrewItemsText` and `.PlayersPCDepositItemsText`, whose two
+	## markers `PartyMonItemName` and the quantity fill.
+	_status.text = _filled(
+		_data.pokecenter_pc_text(
+			"withdrew" if _pc_action == Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM
+			else "deposited"
+		),
+		applied
+	) if _pc_action != Gen2WorldPC.PLAYERSPCITEM_TOSS_ITEM else _filled(
+		_data.menu_text("toss_threw"), applied
+	)
+	_status.add_theme_color_override("font_color", SUCCESS)
+	_render_options()
+
+
+## The item name and the quantity into whichever markers the box left for them.
+func _filled(text: String, applied: Dictionary) -> String:
+	var out: String = Gen2TextStream.fill_marker(
+		text, Gen2TextStream.NUMBER_MARKER, String.num_int64(int(applied.get("quantity", 0)))
+	)
+	return Gen2TextStream.fill_marker(
+		out, Gen2TextStream.RAM_MARKER, String(applied.get("name", ""))
+	)
+
+
+func _change_pc_quantity(step: int) -> void:
+	if _cursor < 0 or _cursor >= _pc_entries.size():
+		return
+	var owned: int = int(_pc_entries[_cursor].get("quantity", 1))
+	_pc_quantity = clampi(_pc_quantity + step, 1, maxi(1, owned))
+	_render_options()
+
+
+## `OaksPC`, which prints `ProfOaksPC`'s rating into the PC's own box and
+## returns to the loop. A cache with no rating table has nothing to print, which
+## is what an empty boot says.
+func _open_pc_oak() -> void:
+	var boot: Dictionary = Gen2ProfOaksPC.boot(_data, _world.state)
+	if boot.is_empty():
+		_status.text = "PROF.OAK'S PC needs a cache that carries its ratings."
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	_pc_sfx = int(boot["sfx"])
+	_open_pc_text(boot["pages"], &"top", "PROF.OAK'S PC")
+
+
+## A run of the PC's own boxes, acknowledged one at a time.
+func _open_pc_text(pages: Array, after: StringName, label: String) -> void:
+	_mode = MODE.PC_TEXT
+	_pc_pages = pages.duplicate()
+	_pc_after = after
+	_cursor = 0
+	_pc_label = label
+	_show_pc_page()
+
+
+func _show_pc_page() -> void:
+	_summary.text = String(_pc_pages[0]) if not _pc_pages.is_empty() else ""
+	_status.text = ""
+	_status.add_theme_color_override("font_color", MUTED)
+	_footer.text = "A: continue"
+	_render_options([_pc_label])
+
+
+## `ProfOaksPCBoot` plays the sound `Rate` chose once the rating is printed, so
+## the last page is where it lands.
+func _advance_pc_text() -> void:
+	if not _pc_pages.is_empty():
+		_pc_pages.remove_at(0)
+	if not _pc_pages.is_empty():
+		_show_pc_page()
+		return
+	if _pc_sfx >= 0:
+		Gen2WorldAudioHost.play(_data.world_audio(&"sfx", _pc_sfx), &"sound")
+	_pc_sfx = -1
+	if _pc_after == &"close":
+		_finish_runtime({"ok": true, "script_value": 0})
+		return
+	_open_pc(&"pokemon_center")
+
+
+## BILL'S PC. The panel steps aside for the box screen the way it does for the
+## region map, so the top menu is still there when the boxes close.
+func _open_boxes() -> void:
+	var host: Gen2BoxScreen = BOX_SCENE.instantiate() as Gen2BoxScreen
+	if host == null or _save == null:
+		_status.text = "Box storage needs a validated save."
+		_status.add_theme_color_override("font_color", ERROR)
+		return
+	_boxes = host
+	_panel.visible = false
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 5
+	add_child(host)
+	host.set_context(_data, _save, _persist, true)
+	host.closed.connect(_on_boxes_closed)
+
+
+## `Gen2BoxScreen.closed` carries the result its own host would have resumed a
+## script with; nothing is waiting here, because the PC's request is still open.
+func _on_boxes_closed(_result: Dictionary) -> void:
+	if _boxes != null:
+		_boxes.queue_free()
+		_boxes = null
+	_panel.visible = true
+	_open_pc(&"pokemon_center")
+
+
 func _open_phone(request: Dictionary, data: Dictionary) -> void:
 	_mode = MODE.PHONE
 	_cursor = 0
@@ -505,6 +781,8 @@ func _move_cursor(delta: int) -> void:
 	_cursor = wrapi(_cursor + delta, 0, count)
 	if _mode == MODE.MART:
 		_mart_quantity = 1
+	if _mode == MODE.PC_ITEM_LIST:
+		_pc_quantity = 1
 	_render_options()
 
 
@@ -524,6 +802,9 @@ func _move_direction(direction: Vector2i) -> void:
 		if direction.x != 0:
 			_tune_radio(direction.x)
 		return
+	if _mode == MODE.PC_ITEM_LIST and direction.x != 0:
+		_change_pc_quantity(direction.x)
+		return
 	if direction.x != 0:
 		_move_cursor(direction.x)
 	else:
@@ -531,6 +812,15 @@ func _move_direction(direction: Vector2i) -> void:
 
 
 func _confirm() -> void:
+	if _mode in [MODE.PC, MODE.PC_ITEMS]:
+		_confirm_pc_row()
+		return
+	if _mode == MODE.PC_ITEM_LIST:
+		_confirm_pc_item()
+		return
+	if _mode == MODE.PC_TEXT:
+		_advance_pc_text()
+		return
 	if _mode == MODE.MENU:
 		if _choices.is_empty():
 			_status.text = "The imported menu has no selectable options."
@@ -604,7 +894,20 @@ func _confirm() -> void:
 
 
 func _cancel() -> void:
-	if _mode == MODE.MENU:
+	if _mode == MODE.PC:
+		## `.shutdown`: B off the top menu is the same shut-down TURN OFF is.
+		_finish_runtime({"ok": true, "script_value": 0})
+	elif _mode == MODE.PC_ITEMS:
+		if _pc_house:
+			_finish_runtime({"ok": true, "script_value": 0})
+		else:
+			_open_pc(&"pokemon_center")
+	elif _mode == MODE.PC_ITEM_LIST:
+		_open_pc_items()
+	elif _mode == MODE.PC_TEXT:
+		## Both `PromptButton` answers advance the box; neither leaves early.
+		_advance_pc_text()
+	elif _mode == MODE.MENU:
 		_finish_input_cancelled()
 	elif _mode == MODE.MART:
 		_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0, "cancelled": true})
@@ -669,6 +972,8 @@ func _render_options(override: Array = []) -> void:
 	var values: Array = override if not override.is_empty() else (
 		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART \
 		else _phone_entries if _mode == MODE.PHONE_LIST \
+		else _pc_rows if _mode in [MODE.PC, MODE.PC_ITEMS] \
+		else _pc_entries if _mode == MODE.PC_ITEM_LIST \
 		else _pokegear_cards if _mode == MODE.POKEGEAR else ["Continue"]
 	)
 	for index: int in values.size():
@@ -700,6 +1005,10 @@ func _render_options(override: Array = []) -> void:
 				]
 			else:
 				name = "%s    %d" % [name, price]
+		if value is Dictionary and _mode == MODE.PC_ITEM_LIST:
+			var stack: int = int((value as Dictionary).get("quantity", 0))
+			name = "%s    x%d of %d" % [name, _pc_quantity, stack] if index == _cursor \
+				else "%s    x%d" % [name, stack]
 		if value is Dictionary and _mode == MODE.PHONE_LIST:
 			if int((value as Dictionary).get("trainer_class", 0)) > 0:
 				name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
@@ -720,6 +1029,10 @@ func _option_count() -> int:
 		return _phone_entries.size()
 	if _mode == MODE.POKEGEAR:
 		return _pokegear_cards.size()
+	if _mode in [MODE.PC, MODE.PC_ITEMS]:
+		return _pc_rows.size()
+	if _mode == MODE.PC_ITEM_LIST:
+		return maxi(1, _pc_entries.size())
 	return 1
 
 

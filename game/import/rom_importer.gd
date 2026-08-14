@@ -308,6 +308,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not oak_ratings["ok"]:
 		return oak_ratings
 
+	var pokecenter_pc: Dictionary = verify_pokecenter_pc(rom, layout)
+	if not pokecenter_pc["ok"]:
+		return pokecenter_pc
+
 	var intro_movie: Dictionary = verify_intro_movie(rom, layout)
 	if not intro_movie["ok"]:
 		return intro_movie
@@ -995,6 +999,98 @@ static func verify_oak_ratings(rom: RomFile, layout: Dictionary) -> Dictionary:
 		if read_oak_text(rom, layout, RomLayout.oak_text_stub_offset(rom, layout, name)).is_empty():
 			return {"ok": false, "message": "Oak's %s text did not decode." % name}
 	return {"ok": true, "message": "Prof Oak's PC verified."}
+
+
+## `PokemonCenterPC`'s five row strings and the six `text_far` stubs behind
+## them, identified by content: the run has to end on TURN OFF and every stub
+## has to decode, which is what says the one pinned address is right.
+static func verify_pokecenter_pc(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var rows: PackedStringArray = read_pokecenter_pc_rows(rom, layout)
+	if rows.size() != RomLayout.POKECENTER_PC_ROWS.size():
+		return {"ok": false, "message": "The Pokemon Center PC's rows are outside the cartridge."}
+	if read_pokecenter_pc_lists(rom, layout).size() != RomLayout.POKECENTER_PC_LISTS \
+		or read_pokecenter_pc_rows(rom, layout, true).size() \
+			!= RomLayout.POKECENTER_PC_PLAYERS_ROWS.size() \
+		or read_pokecenter_pc_lists(rom, layout, true).size() \
+			!= RomLayout.POKECENTER_PC_PLAYERS_LISTS:
+		return {"ok": false, "message": "The Pokemon Center PC's menu tables did not read."}
+	if rows[rows.size() - 1] != "TURN OFF":
+		return {
+			"ok": false,
+			"message": "The Pokemon Center PC's last row is \"%s\", not TURN OFF." % rows[
+				rows.size() - 1
+			],
+		}
+	for name: String in RomLayout.POKECENTER_PC_TEXT_AT:
+		if read_oak_text(
+			rom, layout, RomLayout.pokecenter_pc_text_offset(layout, name)
+		).is_empty():
+			return {
+				"ok": false,
+				"message": "The Pokemon Center PC's %s text did not decode." % name,
+			}
+	return {"ok": true, "message": "The Pokemon Center PC verified."}
+
+
+## One of the two row runs, in the source's own order. Empty when the run is out
+## of bounds, which is what a wrong address gives.
+static func read_pokecenter_pc_rows(
+	rom: RomFile, layout: Dictionary, players: bool = false
+) -> PackedStringArray:
+	var at: int = _pokecenter_pc_rows_at(layout, players)
+	var count: int = RomLayout.POKECENTER_PC_PLAYERS_ROWS.size() if players \
+		else RomLayout.POKECENTER_PC_ROWS.size()
+	if at < 0 or not rom.in_bounds(at, count * RomLayout.POKECENTER_PC_ROW_MAX_BYTES):
+		return PackedStringArray()
+	return Gen2Text.decode_sequence(
+		rom.bytes(), at, count, RomLayout.POKECENTER_PC_ROW_MAX_BYTES
+	)
+
+
+static func _pokecenter_pc_rows_at(layout: Dictionary, players: bool) -> int:
+	var at: int = int(layout.get("pokecenter_pc", -1))
+	if at < 0:
+		return -1
+	return at + RomLayout.POKECENTER_PC_PLAYERS_AT if players else at
+
+
+## `.WhichPC` behind one of the row runs: each list is a count, that many row
+## indices and a `-1`. Empty when a list runs off the end of the cartridge or
+## names a row the run above does not have.
+static func read_pokecenter_pc_lists(
+	rom: RomFile, layout: Dictionary, players: bool = false
+) -> Array:
+	var at: int = _pokecenter_pc_rows_at(layout, players)
+	var names: Array[String] = RomLayout.POKECENTER_PC_PLAYERS_ROWS if players \
+		else RomLayout.POKECENTER_PC_ROWS
+	if at < 0 or not rom.in_bounds(at, names.size() * RomLayout.POKECENTER_PC_ROW_MAX_BYTES):
+		return []
+	## `terminated_end` already answers past the `@`, which is where the next
+	## string starts.
+	for _row: String in names:
+		at = Gen2Text.terminated_end(
+			rom.bytes(), at, RomLayout.POKECENTER_PC_ROW_MAX_BYTES
+		)
+	var out: Array = []
+	var lists: int = RomLayout.POKECENTER_PC_PLAYERS_LISTS if players \
+		else RomLayout.POKECENTER_PC_LISTS
+	for _list: int in lists:
+		if not rom.in_bounds(at, 1):
+			return []
+		var count: int = rom.u8(at)
+		if count <= 0 or count > names.size() or not rom.in_bounds(at, count + 2):
+			return []
+		var rows: Array = []
+		for index: int in count:
+			var row: int = rom.u8(at + 1 + index)
+			if row >= names.size():
+				return []
+			rows.append(row)
+		if rom.u8(at + 1 + count) != RomLayout.POKECENTER_PC_LIST_END:
+			return []
+		out.append(rows)
+		at += count + 2
+	return out
 
 
 ## One `text_far` stub, followed and decoded. Empty when the stub is not one,
@@ -3248,6 +3344,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"intro_movie": _import_intro_movie(rom, layout),
 		"gs_intro": _import_gs_intro(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
+		"pokecenter_pc": _import_pokecenter_pc(rom, layout),
 		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
@@ -4152,6 +4249,30 @@ func _import_oak_ratings(rom: RomFile, layout: Dictionary) -> Dictionary:
 			),
 		})
 	out["ratings"] = rows
+	return out
+
+
+## `PokemonCenterPC`'s rows and the routine's own six texts, both keyed by the
+## names `RomLayout` gives them so nothing downstream counts positions.
+func _import_pokecenter_pc(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for players: bool in [false, true]:
+		var names: Array[String] = RomLayout.POKECENTER_PC_PLAYERS_ROWS if players \
+			else RomLayout.POKECENTER_PC_ROWS
+		var rows: PackedStringArray = read_pokecenter_pc_rows(rom, layout, players)
+		var stored: Dictionary = {}
+		for index: int in mini(rows.size(), names.size()):
+			stored[String(names[index])] = rows[index]
+		out["players_rows" if players else "rows"] = stored
+		out["players_lists" if players else "lists"] = read_pokecenter_pc_lists(
+			rom, layout, players
+		)
+	var texts: Dictionary = {}
+	for name: String in RomLayout.POKECENTER_PC_TEXT_AT:
+		texts[name] = read_oak_text(
+			rom, layout, RomLayout.pokecenter_pc_text_offset(layout, name)
+		)
+	out["texts"] = texts
 	return out
 
 

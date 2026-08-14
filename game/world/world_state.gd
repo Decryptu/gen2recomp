@@ -28,6 +28,9 @@ const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## lower there.
 const ENGINE_CREDITS_SKIP: int = 15
 const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
+## `CheckReceivedDex`'s own flag, which is what the Pokemon Center PC's list
+## selection reads before the Hall of Fame one.
+const ENGINE_POKEDEX: int = 11
 ## The one entry pokegold does not ship, and so the index every profile split in
 ## this table is measured from. See engine_flag().
 const ENGINE_MOBILE_SYSTEM: int = 16
@@ -98,6 +101,11 @@ var _event_flags: Dictionary = {}
 var _engine_flags: Dictionary = {}
 var _map_scenes: Dictionary = {}
 var _items: Dictionary = {}
+## `wPCItems`, which is its own array on the cartridge rather than a pocket of
+## the bag: `PlayersPC` moves stacks between the two and nothing else reads it.
+## Absent in a state written before the item PC existed, which restores as an
+## empty PC and needs no migration.
+var _pc_items: Dictionary = {}
 var _money: Dictionary = {}
 var _coins: int = 0
 var _phone_contacts: Dictionary = {}
@@ -219,6 +227,7 @@ func to_dict() -> Dictionary:
 		"engine_flags": _engine_flags.duplicate(),
 		"map_scenes": _map_scenes.duplicate(),
 		"items": _items.duplicate(),
+		"pc_items": _pc_items.duplicate(),
 		"money": _money.duplicate(),
 		"coins": _coins,
 		"phone_contacts": _phone_contacts.duplicate(),
@@ -273,6 +282,14 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	## Absent in a state written before the radio existed. Zero is the same
 	## MUSIC_NONE a fresh state starts on, and the next map load writes the real
 	## track, so an old save needs no migration.
+	var stored_pc_items: Variant = source.get("pc_items", {})
+	if stored_pc_items is Dictionary:
+		for raw_item: Variant in stored_pc_items as Dictionary:
+			var pc_item: int = int(raw_item)
+			var pc_quantity: int = int((stored_pc_items as Dictionary)[raw_item])
+			if pc_item > 0 and pc_quantity > 0 \
+				and restored._pc_items.size() < Gen2WorldPack.MAX_PC_ITEMS:
+				restored._pc_items[pc_item] = pc_quantity
 	restored._map_music = maxi(0, int(source.get("map_music", MUSIC_NONE)))
 	restored.set_radio_knob(int(source.get("radio_knob", Gen2WorldRadio.KNOB_MIN)))
 	restored._radio_channel = int(source.get("radio_channel", -1))
@@ -297,6 +314,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_engine_flags = restored._engine_flags.duplicate()
 	_map_scenes = restored._map_scenes.duplicate()
 	_items = restored._items.duplicate()
+	_pc_items = restored._pc_items.duplicate()
 	_money = restored._money.duplicate()
 	_coins = restored._coins
 	_phone_contacts = restored._phone_contacts.duplicate()
@@ -524,6 +542,14 @@ func item_quantity(item: int) -> int:
 
 func items() -> Dictionary:
 	return _items.duplicate()
+
+
+func pc_item_quantity(item: int) -> int:
+	return int(_pc_items.get(item, 0))
+
+
+func pc_items() -> Dictionary:
+	return _pc_items.duplicate()
 
 
 func money(account: int = 0) -> int:
@@ -957,6 +983,12 @@ func apply_changes(
 	for raw_item: Variant in item_changes:
 		if int(raw_item) <= 0 or int(item_changes[raw_item]) < 0:
 			return {"ok": false, "reason": &"invalid_item_quantity"}
+	var pc_item_changes: Dictionary = runtime_changes.get("pc_items", {})
+	if not pc_item_changes is Dictionary:
+		return {"ok": false, "reason": &"invalid_pc_items"}
+	for raw_item: Variant in pc_item_changes:
+		if int(raw_item) <= 0 or int(pc_item_changes[raw_item]) < 0:
+			return {"ok": false, "reason": &"invalid_pc_item_quantity"}
 	var engine_flag_changes: Dictionary = runtime_changes.get("engine_flags", {})
 	if not engine_flag_changes is Dictionary:
 		return {"ok": false, "reason": &"invalid_engine_flags"}
@@ -1069,6 +1101,16 @@ func apply_changes(
 			next_items.erase(item)
 		else:
 			next_items[item] = quantity
+	var next_pc_items: Dictionary = _pc_items.duplicate()
+	for raw_item: Variant in pc_item_changes:
+		var pc_item: int = int(raw_item)
+		var pc_quantity: int = int(pc_item_changes[raw_item])
+		if pc_quantity == 0:
+			next_pc_items.erase(pc_item)
+		else:
+			next_pc_items[pc_item] = pc_quantity
+	if next_pc_items.size() > Gen2WorldPack.MAX_PC_ITEMS:
+		return {"ok": false, "reason": &"pc_item_capacity"}
 	var next_money: Dictionary = _money.duplicate()
 	for raw_account: Variant in money_changes:
 		var account: int = int(raw_account)
@@ -1124,7 +1166,8 @@ func apply_changes(
 
 	var did_change: bool = next_flags != _event_flags or next_engine_flags != _engine_flags \
 		or next_scenes != _map_scenes \
-		or next_items != _items or next_money != _money or next_coins != _coins \
+		or next_items != _items or next_pc_items != _pc_items \
+		or next_money != _money or next_coins != _coins \
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
 		or next_seen_species != _seen_species \
 		or next_caught_species != _caught_species \
@@ -1140,6 +1183,7 @@ func apply_changes(
 	_engine_flags = next_engine_flags
 	_map_scenes = next_scenes
 	_items = next_items
+	_pc_items = next_pc_items
 	_money = next_money
 	_seen_species = next_seen_species
 	_caught_species = next_caught_species
