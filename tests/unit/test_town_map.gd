@@ -71,3 +71,41 @@ func test_only_the_d_pad_moves_the_cursor() -> void:
 	assert_false(map.press(Gen2Button.A))
 	assert_false(map.press(Gen2Button.LEFT))
 	assert_eq(map.cursor, 10)
+
+
+## `Pokedex_GetArea` opens on Johto whatever landmark it is given, holds the
+## region in the cursor byte, and reaches Kanto only once the Hall of Fame flag
+## is set.
+func test_the_dex_area_walks_regions_rather_than_landmarks() -> void:
+	var map := Gen2TownMap.create(71, true, false, Gen2TownMap.SCREEN_DEX_AREA)
+	assert_eq(map.region(), Gen2TownMap.REGION_JOHTO)
+	assert_false(map.press(Gen2Button.LEFT))
+	assert_false(map.press(Gen2Button.UP))
+	assert_false(map.press(Gen2Button.RIGHT))
+	assert_eq(map.region(), Gen2TownMap.REGION_JOHTO)
+
+	var opened := Gen2TownMap.create(71, true, true, Gen2TownMap.SCREEN_DEX_AREA)
+	assert_true(opened.press(Gen2Button.RIGHT))
+	assert_eq(opened.region(), Gen2TownMap.REGION_KANTO)
+	assert_false(opened.press(Gen2Button.RIGHT))
+	assert_true(opened.press(Gen2Button.LEFT))
+	assert_eq(opened.region(), Gen2TownMap.REGION_JOHTO)
+
+
+## `.CheckPlayerLocation`, which counts the Fast Ship as Johto rather than by
+## number the way the poster does.
+func test_the_dex_area_draws_the_player_only_in_their_own_region() -> void:
+	var johto := Gen2TownMap.create(1, true, true, Gen2TownMap.SCREEN_DEX_AREA)
+	assert_true(johto.player_in_region())
+	johto.press(Gen2Button.RIGHT)
+	assert_false(johto.player_in_region())
+
+	var ship := Gen2TownMap.create(
+		Gen2WorldRadio.fast_ship_landmark(true), true, true, Gen2TownMap.SCREEN_DEX_AREA
+	)
+	assert_true(ship.player_in_region())
+
+	var kanto := Gen2TownMap.create(47, true, true, Gen2TownMap.SCREEN_DEX_AREA)
+	assert_false(kanto.player_in_region())
+	kanto.press(Gen2Button.RIGHT)
+	assert_true(kanto.player_in_region())

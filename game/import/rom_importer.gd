@@ -837,6 +837,10 @@ static func verify_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
 					],
 				}
 
+	var nest_check: Dictionary = verify_dex_nest_icon(rom, layout)
+	if not bool(nest_check["ok"]):
+		return nest_check
+
 	var palette_map: int = int(entry["palette_map"])
 	if not rom.in_bounds(palette_map, RomLayout.TOWN_MAP_PALETTE_MAP_BYTES):
 		return {"ok": false, "message": "The region palette map is outside the cartridge."}
@@ -871,6 +875,35 @@ static func verify_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
 				}
 
 	return verify_landmarks(rom, layout)
+
+
+## `PokedexNestIconGFX` is one tile with no header and no neighbour to pin it
+## against, so it is identified by content: every one of its eight rows carries
+## ink and every plane byte is its own bit reversal, the icon being symmetric
+## about its vertical axis. No other tile behind `KantoMap` is both.
+static func verify_dex_nest_icon(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = RomLayout.dex_nest_icon_offset(layout)
+	if not rom.in_bounds(at, RomLayout.DEX_NEST_ICON_TILES * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The dex nest icon is outside the cartridge."}
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		var low: int = rom.u8(at + row * 2)
+		var high: int = rom.u8(at + row * 2 + 1)
+		if (low | high) == 0:
+			return {"ok": false, "message": "Dex nest icon row %d is blank." % row}
+		for plane: int in [low, high]:
+			if _reverse_byte(plane) != plane:
+				return {
+					"ok": false,
+					"message": "Dex nest icon row %d is not symmetric." % row,
+				}
+	return {"ok": true, "message": ""}
+
+
+static func _reverse_byte(value: int) -> int:
+	var out: int = 0
+	for bit: int in 8:
+		out = (out << 1) | ((value >> bit) & 1)
+	return out
 
 
 static func verify_landmarks(rom: RomFile, layout: Dictionary) -> Dictionary:
@@ -3808,6 +3841,15 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 		sheets["fast_ship"] = {
 			"offset": int(region_map["fast_ship"]),
 			"tiles": RomLayout.FAST_SHIP_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+
+	## `PokedexNestIconGFX`, the AREA screen's own object tile.
+	if RomLayout.dex_nest_icon_offset(layout) >= 0:
+		sheets["dex_nest_icon"] = {
+			"offset": RomLayout.dex_nest_icon_offset(layout),
+			"tiles": RomLayout.DEX_NEST_ICON_TILES,
 			"first_code": 0,
 			"bits": 2,
 		}

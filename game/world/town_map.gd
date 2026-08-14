@@ -21,19 +21,27 @@ const LANDMARK_ROUTE_28: int = 0x5E
 
 const REGION_JOHTO: int = 0
 const REGION_KANTO: int = 1
+## What the cache calls each region map, which is the pinned file name.
+const REGION_NAMES: Array[String] = ["johto", "kanto"]
 
 ## Which screen is being drawn. `_TownMap` is the town map poster and the
-## `OverworldTownMap` special; the card is the Pokegear's second page.
+## `OverworldTownMap` special; the card is the Pokegear's second page; the dex
+## area is `Pokedex_GetArea`, which draws both maps and switches between them.
 const SCREEN_TOWN_MAP: StringName = &"town_map"
 const SCREEN_POKEGEAR_CARD: StringName = &"pokegear_card"
+const SCREEN_DEX_AREA: StringName = &"dex_area"
 
 var crystal: bool = true
 var screen: StringName = SCREEN_TOWN_MAP
 ## `wTownMapPlayerIconLandmark`, which is where the player icon is drawn and
 ## which region the screen opens on.
 var player_landmark: int = JOHTO_LANDMARK
-## `wTownMapCursorLandmark`.
+## `wTownMapCursorLandmark`, which `Pokedex_GetArea` reuses to hold the region it
+## is showing rather than a landmark.
 var cursor: int = JOHTO_LANDMARK
+## `STATUSFLAGS_HALL_OF_FAME_F`, which the dex area reads on every right press
+## rather than once.
+var hall_of_fame: bool = false
 var _first: int = JOHTO_LANDMARK
 var _last: int = JOHTO_LANDMARK
 
@@ -48,7 +56,14 @@ static func create(
 	var out := Gen2TownMap.new()
 	out.crystal = is_crystal
 	out.screen = on_screen
+	out.hall_of_fame = hall_of_fame
 	out.player_landmark = landmark
+	if on_screen == SCREEN_DEX_AREA:
+		# `.Area` sets hWY to 144 before calling, so the window is off and BG map
+		# 0, the Johto one, is what `Pokedex_GetArea` opens on whatever landmark
+		# the player is standing at.
+		out.cursor = REGION_JOHTO
+		return out
 	if out.region() == REGION_KANTO:
 		# `TownMap_GetKantoLandmarkLimits`. Its two branches end on the same
 		# landmark, `LANDMARK_ROUTE_28` being `KANTO_LANDMARK_LAST`; only the
@@ -75,13 +90,30 @@ func _shift(landmark: int) -> int:
 
 
 ## Which map is drawn. `_TownMap` picks by number alone, so the Fast Ship shows
-## Kanto there; `InitPokegearTilemap.Map` tests it first and shows Johto.
+## Kanto there; `InitPokegearTilemap.Map` tests it first and shows Johto; the dex
+## area is told which one to show and keeps it in the cursor byte.
 func region() -> int:
+	if screen == SCREEN_DEX_AREA:
+		return cursor
 	if screen == SCREEN_POKEGEAR_CARD \
 		and player_landmark == Gen2WorldRadio.fast_ship_landmark(crystal):
 		return REGION_JOHTO
 	return REGION_KANTO if player_landmark >= Gen2WorldRadio.kanto_landmark(crystal) \
 		else REGION_JOHTO
+
+
+static func region_name(region: int) -> String:
+	return REGION_NAMES[clampi(region, REGION_JOHTO, REGION_KANTO)]
+
+
+## `.CheckPlayerLocation`, which is what decides whether the dex area draws the
+## player icon at all: the Fast Ship counts as Johto, and a player in the region
+## that is not on screen is not drawn.
+func player_in_region() -> bool:
+	var player: int = REGION_KANTO if Gen2WorldRadio.is_kanto_landmark(
+		player_landmark, crystal
+	) else REGION_JOHTO
+	return player == region()
 
 
 func first_landmark() -> int:
@@ -95,7 +127,24 @@ func last_landmark() -> int:
 ## `.pressed_up` and `.pressed_down`, which wrap round the window's ends rather
 ## than stopping at them: a cursor already at the last landmark is rewound to one
 ## before the first and then stepped on.
+##
+## The dex area walks regions instead: `.left` shows Johto and `.right` Kanto,
+## the second only once the Hall of Fame flag is set, and each returns without
+## redrawing when that region is already up.
 func press(button: int) -> bool:
+	if screen == SCREEN_DEX_AREA:
+		match button:
+			Gen2Button.LEFT:
+				if cursor == REGION_JOHTO:
+					return false
+				cursor = REGION_JOHTO
+				return true
+			Gen2Button.RIGHT:
+				if not hall_of_fame or cursor == REGION_KANTO:
+					return false
+				cursor = REGION_KANTO
+				return true
+		return false
 	match button:
 		Gen2Button.UP:
 			cursor = _first if cursor >= _last else cursor + 1

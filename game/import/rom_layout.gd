@@ -684,6 +684,12 @@ const FAST_SHIP_TILES: int = 8
 ## so a region map covers the screen before any frame is drawn over it.
 const TOWN_MAP_REGION_CELLS: int = 360
 const TOWN_MAP_REGION_TERMINATOR: int = 0xFF
+const TOWN_MAP_REGION_BYTES: int = TOWN_MAP_REGION_CELLS + 1
+
+## `PokedexNestIconGFX`, the blinking marker `Pokedex_GetArea` puts on every
+## landmark a species is found at. One uncompressed tile sitting directly behind
+## `KantoMap`, so the region map locates it rather than a fourth offset.
+const DEX_NEST_ICON_TILES: int = 1
 
 ## `TownMapPals`: a palette per tile id, condensed to nybbles, least significant
 ## first. It covers $00 to $5f; $60 and above take palette 0.
@@ -1969,6 +1975,13 @@ static func oak_text_stub_offset(rom: RomFile, layout: Dictionary, name: String)
 		return -1
 	var first: int = rom.u16le(table + 3) + int(OAK_TEXT_STUBS[name]) * OAK_TEXT_STUB_SIZE
 	return RomFile.linear(bank_of(table), first)
+
+
+## `PokedexNestIconGFX`, which `INCBIN`s directly behind `kanto.bin` in the same
+## bank; -1 for a cartridge with no region map.
+static func dex_nest_icon_offset(layout: Dictionary) -> int:
+	var kanto: int = int((layout.get("town_map", {}) as Dictionary).get("kanto", -1))
+	return kanto + TOWN_MAP_REGION_BYTES if kanto >= 0 else -1
 
 
 static func landmark_count(layout: Dictionary) -> int:

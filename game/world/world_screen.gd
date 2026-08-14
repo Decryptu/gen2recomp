@@ -555,6 +555,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if press_button(button):
 			accept_event()
 		return
+	## The dex area's SELECT is a held state rather than a press, and the Pokedex
+	## is the only overlay here with anything to do with a release.
+	var released: int = Gen2Button.released_in(event)
+	if released != Gen2Button.NONE and _pokedex_host != null:
+		_pokedex_host.release_button(released)
+		accept_event()
+		return
 	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
 		return

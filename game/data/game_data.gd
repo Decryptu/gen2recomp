@@ -387,6 +387,21 @@ func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
 	return value.duplicate(true) if value is Dictionary else {}
 
 
+## One region's normal encounter table, in the cartridge's own row order, which
+## is what `FindNest` walks. [param region] is `"johto"` or `"kanto"`; each row
+## carries the `"map"` key its group and number were merged under.
+func world_encounter_region_rows(method: StringName, region: String) -> Array:
+	var table: Variant = _encounters().get("water" if method == &"surf" else String(method), {})
+	if not table is Dictionary:
+		return []
+	var out: Array = []
+	for map_key: String in table as Dictionary:
+		var row: Variant = (table as Dictionary)[map_key]
+		if row is Dictionary and String((row as Dictionary).get("region", "")) == region:
+			out.append((row as Dictionary).duplicate(true))
+	return out
+
+
 ## One imported fishing group, indexed by the source map-header value. Group
 ## zero is the cartridge's no-fishing sentinel.
 func world_fishing_group(group: int) -> Dictionary:

@@ -126,3 +126,22 @@ func test_the_female_palette_replaces_the_male_one() -> void:
 		_page.image(_data, map, true).get_pixel(0, 143),
 		_page.image(_data, map, false).get_pixel(0, 143)
 	)
+
+
+## `.PlaceString_MonsNest`: the top row is blanked whole and the header written
+## from column 2, with the bar one row down and nothing else over the map.
+func test_the_dex_area_header_replaces_the_name_box() -> void:
+	var header: PackedByteArray = Gen2Text.encode("RATTATA")
+	header.append_array(Gen2Text.encode(Gen2TownMapScreen.NEST_HEADER_SUFFIX))
+	var map: PackedInt32Array = _page.tilemap(
+		_data.town_map_region("johto"), header, Gen2TownMap.SCREEN_DEX_AREA
+	)
+	assert_eq(_at(map, Vector2i(0, 0)), Gen2TownMapPage.BLANK_TILE)
+	assert_eq(_at(map, Vector2i(1, 0)), Gen2TownMapPage.BLANK_TILE)
+	assert_eq(_at(map, Vector2i(2, 0)), Gen2Text.encode("R")[0])
+	assert_eq(_at(map, Vector2i(9, 0)), Gen2Text.encode("'")[0], "'S NEST follows the name")
+	assert_eq(_at(map, Vector2i(19, 0)), Gen2TownMapPage.BLANK_TILE)
+	assert_eq(_at(map, Vector2i(0, 1)), Gen2TownMapPage.TOWN_MAP_FRAME_LEFT_TILE)
+	assert_eq(_at(map, Vector2i(10, 1)), Gen2TownMapPage.TOWN_MAP_FRAME_TOP_TILE)
+	assert_eq(_at(map, Vector2i(19, 1)), Gen2TownMapPage.TOWN_MAP_FRAME_RIGHT_TILE)
+	assert_eq(_at(map, Vector2i(0, 2)), Fixture.TOWN_MAP_JOHTO_TILE)

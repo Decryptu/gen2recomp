@@ -14,6 +14,10 @@ extends Control
 ## OPTION screen, SEARCH and its results. The Unown dex is not, so the OPTION
 ## screen draws `.NoUnownModeArrowCursorData`'s three rows, which is what the
 ## cartridge draws while `wUnlockedUnownMode` is clear.
+##
+## The entry screen's AREA is the exception to the panel above: `Pokedex_GetArea`
+## is the cartridge's own region map, so it opens [Gen2TownMapScreen], which
+## carries a hardware screen of its own.
 
 ## Emitted on B from the listing, which is where `DEXSTATE_EXIT` lands.
 signal closed
@@ -22,7 +26,7 @@ signal closed
 ## player: the overworld's own answers it, the way it answers a script's cry.
 signal cry_requested(species: int)
 
-enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS }
+enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS, AREA }
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -36,11 +40,11 @@ const ACCENT: Color = Color("#f3c969")
 const CAUGHT_SYMBOL: String = "*"
 const UNCAUGHT_SYMBOL: String = " "
 
-## `DexEntryScreen_ArrowCursorData`'s four positions, in its own order. AREA
-## wants a town map and PRNT a printer, neither of which is imported, so both are
-## drawn and refuse.
+## `DexEntryScreen_ArrowCursorData`'s four positions, in its own order. PRNT
+## wants a printer, which is deliberately out, so it is drawn and refuses.
 const ENTRY_BUTTONS: Array[String] = ["PAGE", "AREA", "CRY", "PRNT"]
 const ENTRY_BUTTON_PAGE: int = 0
+const ENTRY_BUTTON_AREA: int = 1
 const ENTRY_BUTTON_CRY: int = 2
 
 var _dex: Gen2Pokedex = null
@@ -54,6 +58,8 @@ var _option_cursor: int = 0
 ## `Pokedex_ReinitDexEntryScreen` puts back on PAGE for each new entry.
 var _entry_cursor: int = 0
 var _mode_rows: Array = []
+
+var _area: Gen2TownMapScreen = null
 
 var _title: Label = null
 var _summary: Label = null
@@ -101,6 +107,8 @@ func current_mode() -> Mode:
 func handle_button(button: int) -> bool:
 	if _dex == null:
 		return false
+	if _mode == Mode.AREA:
+		return _area.handle_button(button)
 	match _mode:
 		Mode.LIST:
 			return _handle_list(button)
@@ -113,6 +121,13 @@ func handle_button(button: int) -> bool:
 		Mode.SEARCH_RESULTS:
 			return _handle_search_results(button)
 	return false
+
+
+## The dex area is the one state here that reads a released button: its SELECT
+## shows the player icon only while it is held.
+func release_button(button: int) -> void:
+	if _mode == Mode.AREA and _area != null:
+		_area.release_button(button)
 
 
 ## `Pokedex_UpdateMainScreen`.
@@ -168,19 +183,58 @@ func _handle_entry(button: int) -> bool:
 	return false
 
 
-## `DexEntryScreen_MenuActionJumptable`. PAGE and CRY are built; `.Area` needs a
-## town map and `.Print` a printer, and both do nothing rather than refusing out
-## loud, since the cartridge's own row has no refusal for them either.
+## `DexEntryScreen_MenuActionJumptable`. `.Print` needs a printer and does
+## nothing rather than refusing out loud, since the cartridge's own row has no
+## refusal for it either.
 func _entry_action() -> void:
 	match _entry_cursor:
 		ENTRY_BUTTON_PAGE:
 			_dex.toggle_page()
 			_render_entry()
+		ENTRY_BUTTON_AREA:
+			_open_area()
 		ENTRY_BUTTON_CRY:
 			## `.Cry` is `GetCryIndex` and `PlayCry`, which is the species number
 			## less one straight into `PokemonCries`, not a lookup through the
 			## cry table: the row and the species share an index.
 			cry_requested.emit(_dex.selected_species())
+
+
+## `.Area`: `wDexCurLocation` is where the player is standing, and the nests are
+## `FindNest`'s answer for each region, walked here because the screen owns no
+## world state of its own. A cache with no region map leaves the entry up, the
+## way an unimported card leaves the Pokegear's list up.
+func _open_area() -> void:
+	if _area != null:
+		return
+	var species: int = _dex.selected_species()
+	var roaming: Array = _world.state.roaming_mons()
+	var nests: Array = []
+	for region: int in Gen2TownMap.REGION_NAMES.size():
+		nests.append(Gen2WorldEncounter.nests(
+			_data, species, Gen2TownMap.region_name(region), roaming
+		))
+	var host := Gen2TownMapScreen.new()
+	host.z_index = 10
+	add_child(host)
+	if not host.open_dex_area(
+		_data, species, nests, _world.landmark(), _world.state.hall_of_fame(),
+		_world.player_female(), _world.map_time_of_day()
+	):
+		host.queue_free()
+		return
+	host.closed.connect(_on_area_closed)
+	_area = host
+	_mode = Mode.AREA
+
+
+func _on_area_closed() -> void:
+	if _area != null:
+		_area.queue_free()
+		_area = null
+	## `.Area` redisplays the entry it left, cursor and page included.
+	_mode = Mode.ENTRY
+	_render_entry()
 
 
 ## `Pokedex_UpdateOptionScreen`: SELECT and B both return to the listing, and A

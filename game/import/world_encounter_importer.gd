@@ -129,7 +129,12 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 		for map_key: String in table_result["rows"]:
 			if destination.has(map_key):
 				return _error("Duplicate %s encounter map %s." % [table_name, map_key])
-			destination[map_key] = table_result["rows"][map_key]
+			var row: Dictionary = table_result["rows"][map_key]
+			# The two normal tables are merged for lookup by map, but FindNest
+			# walks one region's own table, so which one a row came from is kept.
+			if table_name in _NORMAL_TABLES:
+				row["region"] = table_name.split("_")[1]
+			destination[map_key] = row
 
 	var fish_result: Dictionary = _read_fishing_groups(rom, layout, wild_layout)
 	if not bool(fish_result.get("ok", false)):

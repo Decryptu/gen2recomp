@@ -42,6 +42,11 @@ const TOWN_MAP_FRAME_BAR_WIDTH: int = 11
 ## `InitPokegearTilemap.Map`'s single bar under the card icons.
 const CARD_BAR_ROW: int = 2
 
+## `Pokedex_GetArea.PlaceString_MonsNest`: the top row blanked, the same bar one
+## row down and the header printed from column 2.
+const NEST_BAR_ROW: int = 1
+const NEST_HEADER_AT: Vector2i = Vector2i(2, 0)
+
 ## `Pokegear_FinishTilemap`. The eight cells left of the name box are blanked
 ## with the Pokegear sheet's own blank, then one 2x2 icon is stamped per owned
 ## card and the Pokegear's own icon over the corner.
@@ -114,7 +119,8 @@ func _load_sheet(data: GameData, name: String, first_tile: int, count: int) -> v
 ## region map over everything, then the screen's own frame, then the name.
 ##
 ## [param cards] is `wPokegearFlags`, as the card names `Pokegear_FinishTilemap`
-## tests; it is read only by the Pokegear card's frame.
+## tests; it is read only by the Pokegear card's frame. [param name_codes] is the
+## landmark's name, or the dex area's whole `<MON>'S NEST` header.
 func tilemap(
 	region: PackedByteArray,
 	name_codes: PackedByteArray,
@@ -126,13 +132,16 @@ func tilemap(
 	map.fill(BLANK_TILE)
 	for cell: int in mini(region.size(), map.size()):
 		map[cell] = region[cell]
-	if screen == Gen2TownMap.SCREEN_POKEGEAR_CARD:
-		_draw_card_bar(map)
-		_draw_name(map, name_codes)
-		_draw_card_icons(map, cards)
-	else:
-		_draw_town_map_frame(map)
-		_draw_name(map, name_codes)
+	match screen:
+		Gen2TownMap.SCREEN_POKEGEAR_CARD:
+			_draw_bar(map, CARD_BAR_ROW)
+			_draw_name(map, name_codes)
+			_draw_card_icons(map, cards)
+		Gen2TownMap.SCREEN_DEX_AREA:
+			_draw_nest_header(map, name_codes)
+		_:
+			_draw_town_map_frame(map)
+			_draw_name(map, name_codes)
 	return map
 
 
@@ -148,11 +157,23 @@ func _draw_town_map_frame(map: PackedInt32Array) -> void:
 	_put(map, Vector2i(COLUMNS - 1, TOWN_MAP_FRAME_BAR_AT.y), TOWN_MAP_FRAME_RIGHT_TILE)
 
 
-func _draw_card_bar(map: PackedInt32Array) -> void:
+func _draw_bar(map: PackedInt32Array, row: int) -> void:
 	for column: int in range(1, COLUMNS - 1):
-		_put(map, Vector2i(column, CARD_BAR_ROW), TOWN_MAP_FRAME_TOP_TILE)
-	_put(map, Vector2i(0, CARD_BAR_ROW), TOWN_MAP_FRAME_LEFT_TILE)
-	_put(map, Vector2i(COLUMNS - 1, CARD_BAR_ROW), TOWN_MAP_FRAME_RIGHT_TILE)
+		_put(map, Vector2i(column, row), TOWN_MAP_FRAME_TOP_TILE)
+	_put(map, Vector2i(0, row), TOWN_MAP_FRAME_LEFT_TILE)
+	_put(map, Vector2i(COLUMNS - 1, row), TOWN_MAP_FRAME_RIGHT_TILE)
+
+
+## `.PlaceString_MonsNest`, which has no name box: the top row is blanked whole
+## and the header written over it, so a long name runs to the screen's edge.
+func _draw_nest_header(map: PackedInt32Array, header_codes: PackedByteArray) -> void:
+	for column: int in COLUMNS:
+		_put(map, Vector2i(column, 0), BLANK_TILE)
+	_draw_bar(map, NEST_BAR_ROW)
+	var at: Vector2i = NEST_HEADER_AT
+	for code: int in header_codes:
+		_put(map, at, code)
+		at.x += 1
 
 
 ## `Pokegear_FinishTilemap`, which runs after the name is placed and so blanks

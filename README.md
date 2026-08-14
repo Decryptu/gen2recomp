@@ -118,7 +118,7 @@ to check without writing.
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
-| Region map | The Pokegear's three graphics sheets and the Fast Ship's icon, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
+| Region map | The Pokegear's three graphics sheets, the Fast Ship's icon and the dex's nest marker, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
 | Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
@@ -254,8 +254,11 @@ Pokegear, Player, Save, Options and Exit.
   showing a name once seen and a caught mark once caught, and opens each seen
   species' entry with its category, height, weight and both description pages.
   SELECT changes the order and the mode is saved; START searches by one or two
-  types over species already caught. The Unown dex and the entry screen's AREA,
-  CRY and PRNT buttons are not built.
+  types over species already caught. The entry's AREA button is the cartridge's
+  own `<MON>'S NEST` map: the same region maps the Pokegear draws, a blinking
+  marker on every landmark the species is found at, SELECT swapping them for the
+  player icon, and left and right changing region once the Hall of Fame is
+  behind you. The Unown dex and the entry screen's PRNT button are not built.
 - **Pokegear** opens its card list in the source's clock, map, phone, radio
   order, showing only owned cards. The MAP card is the cartridge's own region
   map on the hardware tile grid: the Johto or Kanto tilemap coloured by tile
@@ -315,7 +318,7 @@ all three games unless its row says otherwise:
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_title.gd <game> <png> [frame;frame]` | the title screen at any source frame: Crystal's twenty-eight-frame interlaced entrance and its falling crystal, the Suicune cycle, Gold's Ho-Oh and Silver's Lugia over the scrolling clouds with the trail streaming behind |
 | `preview_prof_oaks_pc.gd <game> [caught]` | Prof Oak's PC against a real cache: every rating band and both its ends, or the three pages `ProfOaksPCBoot` shows for one owned count |
-| `preview_town_map.gd <game> <png> [landmark] [town_map\|card] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box or the Pokegear card's icon row, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one |
+| `preview_town_map.gd <game> <png> [landmark] [town_map\|card\|area:<species>] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box, the Pokegear card's icon row or the dex's `<MON>'S NEST` screen, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one, `sel` and `rel` hold and release the dex area's SELECT, and `f<n>` spends n frames, which is what the nest blink is caught with |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
@@ -336,7 +339,7 @@ all three games unless its row says otherwise:
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
 | `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
-| `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, and both frames composing |
+| `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, all three frames composing, and every species' nests staying inside their own region and under shadow OAM's forty sprites |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse |

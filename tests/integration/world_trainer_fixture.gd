@@ -33,6 +33,14 @@ const TOWN_MAP_EARTH: int = 1
 const TOWN_MAP_MOUNTAIN: int = 2
 ## `<BSP>`, which `TownMap_ConvertLineBreakCharacters` rewrites as `<LF>`.
 const TOWN_MAP_BREAK_CODE: int = 0x1F
+## The landmark each of the fixture's two maps reports, so `FindNest` has one map
+## per region to walk. The second is a Kanto number on a Johto map, which no
+## cartridge does and every region-split test needs.
+const MAP_LANDMARK: int = 1
+const HOME_MAP_LANDMARK: int = 47
+## The middle of the nest icon landmark 1 takes, which is its own stored point
+## less the four `.nestloop` subtracts from both coordinates.
+const NEST_ICON_PIXEL: Vector2i = Vector2i(138, 98)
 ## `OakRatings`' own thresholds (data/events/pokedex_ratings.asm), and a first
 ## sfx id the rest count up from so a row's sound identifies it.
 const OAK_THRESHOLDS: Array[int] = [
@@ -182,6 +190,7 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	var map: Dictionary = {
 		"group": MAP_GROUP,
 		"number": MAP_NUMBER,
+		"location": MAP_LANDMARK,
 		"tileset": 0,
 		"environment": 0,
 		"fish_group": 1,
@@ -202,6 +211,7 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	var home_map: Dictionary = map.duplicate(true)
 	home_map["group"] = Gen2WorldSpawn.NEW_BARK_GROUP
 	home_map["number"] = Gen2WorldSpawn.PLAYERS_HOUSE_2F
+	home_map["location"] = HOME_MAP_LANDMARK
 	home_map["fish_group"] = 0
 	home_map["width_blocks"] = 4
 	home_map["height_blocks"] = 3
@@ -221,11 +231,19 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	for _slot: int in RomLayout.WILD_GRASS_SLOT_COUNT:
 		grass_slots.append({"level": 5, "species": TRAINER_SPECIES})
 	var grass_times: Array = [grass_slots.duplicate(true), grass_slots.duplicate(true), grass_slots.duplicate(true)]
+	var home_key: String = "%d:%d" % [
+		Gen2WorldSpawn.NEW_BARK_GROUP, Gen2WorldSpawn.PLAYERS_HOUSE_2F,
+	]
 	RomCache.write_json(RomCache.world_encounters_path(directory), {
 		"grass": {"1:1": {
-			"map": "1:1", "rates": [255, 255, 255], "slots": grass_times,
+			"map": "1:1", "region": "johto", "rates": [255, 255, 255], "slots": grass_times,
 		}},
-		"water": {},
+		## One water row in the other region, which is what `FindNest`'s two
+		## walks are told apart by. Its rate is zero, so nothing surfs into it.
+		"water": {home_key: {
+			"map": home_key, "region": "kanto", "rate": 0,
+			"slots": [{"level": 5, "species": TRAINER_SPECIES}],
+		}},
 		"fishing": {
 			"groups": [{
 				"chance": 255,
@@ -432,6 +450,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"town_map": [RomLayout.TOWN_MAP_TILES, 1],
 		"pokegear": [RomLayout.POKEGEAR_TILES, 2],
 		"pokegear_sprites": [RomLayout.POKEGEAR_SPRITE_TILES, 3],
+		"dex_nest_icon": [RomLayout.DEX_NEST_ICON_TILES, 3],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet
