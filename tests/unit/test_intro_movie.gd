@@ -5,7 +5,7 @@ extends GutTest
 ## Every frame count here is the source's own: the scenes count in
 ## `wIntroSceneFrameCounter` and spend `DelayFrames`, neither of which depends on
 ## the art being imported, so the whole movie runs and lands on the same frame
-## with no [GameData] at all. tools/validate_intro_movie.gd is what checks the
+## with no [GameData] at all. tools/checks/intro_movie.gd is what checks the
 ## art it draws with.
 
 ## Longer than the movie, whose own total is asserted below.

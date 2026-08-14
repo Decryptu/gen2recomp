@@ -168,7 +168,7 @@ func test_layout_exposes_verified_normal_encounter_tables() -> void:
 ## a synthetic cartridge carrying the real Crystal anchor rows at the real
 ## offsets. The whole-cartridge fixture read_world_encounters() would need is
 ## impractical, so read_treemons() is driven directly; the real caches are
-## covered by tools/validate_headbutt.gd.
+## covered by tools/checks/headbutt.gd.
 const TREEMON_SET_CANYON: int = 1
 const TREEMON_SET_FOREST: int = 6
 const TREEMON_SET_ROCK: int = 7

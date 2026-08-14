@@ -1,47 +1,36 @@
 class_name Gen2BattleIntro
 extends RefCounted
 
-## The two pics sliding into place at the start of a battle
-## (`BattleIntroSlidingPics`, engine/battle/sliding_intro.asm), as the
-## background scroll it really is.
+## `BattleIntroSlidingPics` (engine/battle/sliding_intro.asm), which is a
+## background scroll rather than a moving object: the routine rewrites `SCX` part
+## way down the frame so the top band comes in from one side and the middle from
+## the other, while the bottom never moves. A band edge falls inside the player's
+## status panel, which is why this is a per-scanline offset.
 ##
-## Nothing slides here as an object. The routine scrolls the background itself,
-## in horizontal bands, by rewriting `SCX` part way down the frame: the top band
-## comes in from one side and the middle band from the other, and the bottom of
-## the screen never moves. A band edge falls inside the player's own status
-## panel, which is why this is a per-scanline offset rather than a moving layer.
-##
-## The background map is 32 tiles wide against a 20-tile screen, and
 ## `InitBattleDisplay.BlankBGMap` leaves everything past the drawn scene blank,
 ## so an offset wraps at [constant MAP_WIDTH] and blank is what scrolls in.
 ##
-## This is the one part of the battle presentation the two games do not share.
-## Crystal drives it through `wLYOverrides`, an HBlank table carrying a value
-## per scanline; pokegold busy-waits on `rLY` and writes `rSCX` twice a frame.
-## The band edges, the starting offsets and the shape of the walk all differ, so
-## both are written out rather than one standing in for the other.
+## The one part of the battle presentation the two games do not share: Crystal
+## drives `wLYOverrides`, an HBlank table with a value per scanline, while
+## pokegold busy-waits on `rLY` and writes `rSCX` twice a frame. Band edges,
+## starting offsets and the walk all differ, so both are written out.
 ##
-## Neither band lands on zero. Crystal's middle ends at 2 and Gold's top at 4,
-## and `InitBattleDisplay`'s own `xor a` / `ldh [hSCX], a` after the call is what
-## settles the screen; [method finished] is that write.
+## Neither band lands on zero (Crystal's middle ends at 2, Gold's top at 4);
+## `InitBattleDisplay`'s `xor a` / `ldh [hSCX], a` settles the screen, and
+## [method finished] is that write.
 ##
-## `.subfunction3`, the eighteen `wShadowOAMSprite00` entries walked two pixels
-## left a frame, is the overworld's own objects being slid off before
-## `HideSprites` clears them. This screen has no OAM and no overworld objects in
-## it, so there is nothing to walk; it is a boundary, not a gap.
-##
-## Scene-free like the rest of the battle layer: the screen ticks this once per
-## hardware frame and hands [method offsets] to whatever is drawing.
+## `.subfunction3` slides the overworld's own objects off before `HideSprites`
+## clears them. This screen has no OAM, so there is nothing to walk: a boundary,
+## not a gap.
 
-## The background map's width in pixels, which is what an offset wraps at: 32
-## tiles of 8. Everything from the screen's own 160 up to it is blank.
+## 32 tiles of 8, what an offset wraps at. Everything past the screen's 160 is
+## blank.
 const MAP_WIDTH: int = 256
 
-## Screen height in pixels, and so the length of [method offsets].
 const HEIGHT: int = Gen2Screen.HEIGHT
 
-## How much a band moves per frame. Both games step twice, in opposite
-## directions: `dec d` twice against `inc e` twice.
+## Both games step twice per frame, in opposite directions: `dec d` twice
+## against `inc e` twice.
 const STEP: int = 2
 
 ## Crystal's `ld d, $90` and `ld e, $72`, over `.subfunction5`'s three runs of
@@ -60,16 +49,15 @@ const GOLD_MIDDLE_START: int = 0x70
 const GOLD_TOP_ROWS: int = 64
 const GOLD_MIDDLE_ROWS: int = 32
 
-## Gold and Silver spend one frame before the loop: `ld a, c` / `ldh [hSCX], a`
-## / `call DelayFrame` puts the whole screen at the starting offset, with no
-## band written yet. Crystal delays nowhere before its own loop, so it has none.
+## `ld a, c` / `ldh [hSCX], a` / `call DelayFrame` puts the whole screen at the
+## starting offset with no band written yet. Crystal delays nowhere, so it has
+## none.
 const GOLD_LEAD_FRAMES: int = 1
 
 var _crystal: bool = true
 var _frame: int = 0
 
 
-## The intro for [param data]'s own game.
 static func for_data(data: GameData) -> Gen2BattleIntro:
 	return create(Gen2WorldState.is_crystal_profile(data))
 
@@ -80,8 +68,7 @@ static func create(crystal: bool) -> Gen2BattleIntro:
 	return intro
 
 
-## How many frames the whole slide is on screen for. Both games take the same
-## number, by different arithmetic.
+## Both games take the same number, by different arithmetic.
 func frames() -> int:
 	return CRYSTAL_FRAMES if _crystal else GOLD_LEAD_FRAMES + GOLD_LOOP_FRAMES
 
@@ -90,9 +77,8 @@ func finished() -> bool:
 	return _frame >= frames()
 
 
-## One hardware frame. Answers whether the screen should be redrawn, which is
-## every frame of the walk and the one that ends it, since the settle to zero is
-## a change like any other.
+## One hardware frame. Redraws on every frame of the walk and on the one that
+## ends it, since the settle to zero is a change like any other.
 func advance_frame() -> bool:
 	if finished():
 		return false
@@ -100,9 +86,8 @@ func advance_frame() -> bool:
 	return true
 
 
-## The background offset for every scanline, in the order the hardware draws
-## them. An offset is a distance to look *right* into the background map, so a
-## larger one puts the drawn scene further left.
+## The background offset per scanline, hardware draw order. An offset looks
+## *right* into the map, so a larger one puts the scene further left.
 func offsets() -> PackedInt32Array:
 	var out: PackedInt32Array = PackedInt32Array()
 	out.resize(HEIGHT)
@@ -126,18 +111,15 @@ func offsets() -> PackedInt32Array:
 	return out
 
 
-## Whether this is Gold and Silver's pre-loop frame, which has no bands at all.
 func _is_gold_lead() -> bool:
 	return not _crystal and _frame < GOLD_LEAD_FRAMES
 
 
-## Crystal steps its top band every frame, `ld d, $90` down by two.
-##
-## Gold and Silver write theirs to `hSCX`, which the VBlank handler copies to
-## `rSCX` only after the frame it was written during, so their top band trails
-## the middle one by a frame: the lead frame and the loop's own first frame both
-## show the starting offset. Crystal's two bands come out of one table and lag
-## together, so only Gold's separate writes make a lag visible.
+## Crystal steps every frame, `ld d, $90` down by two. Gold and Silver write to
+## `hSCX`, which VBlank copies to `rSCX` only after the frame it was written
+## during, so their top band trails the middle by one: both the lead frame and
+## the loop's first frame show the starting offset. Crystal's two bands come out
+## of one table and lag together, so only Gold's separate writes show it.
 func _top_offset() -> int:
 	if _crystal:
 		return posmod(CRYSTAL_TOP_START - STEP * _frame, MAP_WIDTH)
@@ -145,9 +127,8 @@ func _top_offset() -> int:
 	return posmod(GOLD_TOP_START - STEP * maxi(stepped - 1, 0), MAP_WIDTH)
 
 
-## Both middle bands step every frame of their own loop, `$72` and `$70` up by
-## two. Crystal's runs past the end of a byte and wraps, which is why it lands
-## on 2 rather than on nothing.
+## `$72` and `$70` up by two each frame. Crystal's runs past the end of a byte
+## and wraps, which is why it lands on 2.
 func _middle_offset() -> int:
 	if _crystal:
 		return posmod(CRYSTAL_MIDDLE_START + STEP * _frame, MAP_WIDTH)

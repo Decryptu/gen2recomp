@@ -272,26 +272,20 @@ magnified, so the second layer is what makes a 3D or HD renderer possible at
 all. Text boxes and menus stay hardware pixels over the top: the world gains
 resolution, the interface stays a Game Boy.
 
-The box is drawn as the cartridge draws it, which means opaque: over the white
-field that is invisible, and over a map it is a slab across the bottom third of
-the screen. `interface_opacity()` is the renderer's request for the field to be
-drawn through, and only the field. The frame's lines and the glyphs are ink and
-stay fully opaque, so nothing a renderer can ask for makes text harder to read.
-It is honoured only for a renderer that answered `uses_hardware_viewport()`
-false: one drawing in hardware pixels paints the background the box sits on, and
-a hole there would show the window behind the screen rather than the world.
-Around 0.75 is what reads well over a map.
+The box is drawn opaque, as the cartridge draws it. `interface_opacity()` asks
+for the field behind it to be drawn through, and only the field: the frame and
+the glyphs stay ink, so nothing a renderer asks for makes text harder to read.
+Around 0.75 reads well over a map. It is honoured only for a renderer that
+answered `uses_hardware_viewport()` false, since one drawing in hardware pixels
+paints the background itself and a hole would show the window behind the screen.
 
-`set_text_box_rect` is the same box measured rather than styled, for a renderer
-composing around it: the standard box is twenty by six at row twelve, but a box
-can be any size and is not always up. It is pushed on every change, including
-the empty rectangle when the box goes away, and again whenever a renderer is
-swapped in mid-scene.
+`set_text_box_rect` is the same box measured rather than styled, pushed on every
+change including the empty rectangle when it goes away. The standard box is
+twenty by six at row twelve, but a box can be any size and is not always up.
 
-The world's own menus are not this box. The start menu, the pack, the party and
-the PC are window-resolution panels over the whole screen with their own scrim,
-not cartridge boxes on the hardware layer, so a renderer neither sees nor styles
-them. `Gen2MenuPage` is the cartridge box path and is used by the naming and
+The world's own menus are not this box: the start menu, pack, party and PC are
+window-resolution panels with their own scrim, so a renderer neither sees nor
+styles them. `Gen2MenuPage` is the cartridge box path, used by the naming and
 gender screens, neither of which is ever over a renderer.
 
 A world renderer has a third:
@@ -365,7 +359,7 @@ A caller with no world reads the same fold through
 `Gen2BattleWorldContext` names the map and hands over no world, deliberately, so
 an arena built from `GameData` records asks the static. The instance method calls
 through to it, so the strip geometry and the north/south/west/east order at an
-overlapping corner exist once. `tools/validate_drawn_blocks.gd` sweeps every map
+overlapping corner exist once. `tools/checks/drawn_blocks.gd` sweeps every map
 of every cache over its whole padded rectangle and refuses a disagreement.
 
 Live `changeblock` edits are the loaded world's own and are not visible to the
@@ -527,65 +521,36 @@ neighbouring cell interacting exactly as it would on the cartridge.
 ## Measured against the voxel mod
 
 [DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod)
-is the reference for what a renderer mod has to be able to do. It turns
-gen1recomp's overworld into a voxel diorama with selectable camera pitch,
-first- and third-person free-roam, VR through OpenXR, water reflections and a
-day cycle, shipping no cartridge art: geometry is derived from the tile and
-sprite data the host already has.
+is the reference for what a renderer mod has to be able to do: a voxel diorama
+with selectable camera pitch, first and third person, VR, reflections and a day
+cycle, shipping no cartridge art. Everything it needs is in the contract above.
+Geometry comes from collision permissions, the block grid and the tileset atlas;
+the view runs at window resolution; animated tiles follow because
+`Gen2WorldAnimation` replaces atlas slots rather than map rectangles.
 
-Supported by the contract above:
+Movement is the one part worth naming. `Gen2WorldAPI.player_step_offset_cells()`
+and `Gen2WorldObject.step_offset_cells()` return an in-flight step as a
+fractional cell, from one cell behind the committed cell down to zero. The
+logical cell commits at the start of the step; the fraction is presentation only
+and never reaches collision, events or the snapshot. `applymovement` applies its
+whole stream at once, so a scripted path commits together and the offset trails
+by as many cells as are left to draw; `advance_scripted_steps_frame()` drains
+that trail, 16 frames a step for the slow commands, 8 for plain, 4 for bike
+speed. `Gen2WorldObject.frame` is the cartridge's `Facings` index, 0 to 3,
+changing every four frames the way `SetFacingStepAction` does.
+`mods/examples/voxel_preview/` reads all of it.
 
-- deriving geometry from host data. Collision permissions, the block grid, the
-  tileset atlas and its palettes are all reachable through `Gen2WorldAPI` and
-  `GameData`, with no cartridge access and no authored 3D assets;
-- rendering at the window's resolution rather than the hardware's;
-- switching views mid-session on a keybind, with no world state involved;
-- a day cycle, through `set_time_of_day` on the source 04:00, 10:00 and 18:00
-  boundaries, over the cartridge's own palette rows;
-- animated tiles, because `Gen2WorldAnimation` replaces atlas slots rather than
-  map rectangles, so geometry textured from the atlas follows water and flowers
-  without the renderer knowing an animation ran;
-- movement progress. `Gen2WorldAPI.player_step_offset_cells()` and
-  `Gen2WorldObject.step_offset_cells()` return an in-flight step as a fractional
-  cell, from one cell behind the committed cell down to zero, spent by
-  `advance_player_step_frame()` and `advance_object_steps_frame()` on the
-  screen's own hardware frame. The logical cell still
-  commits at the start of the step; the fraction is presentation only and never
-  reaches collision, events or the world snapshot.
-  `mods/examples/voxel_preview/` reads both;
-- scripted movement progress, on the same two calls. An `applymovement` applies
-  its whole stream at once, so every cell of the path commits together and the
-  offset is as many cells behind as there are left to draw.
-  `advance_scripted_steps_frame()` drains that trail and is the one mover a
-  screen keeps calling while a script runs, since that is when a script runs
-  one. Each step lasts its own command's duration: 16 frames for the slow
-  commands, 8 for the plain ones, 4 for the bike-speed ones;
-- a walking sprite. `Gen2WorldObject.frame` and `Gen2WorldAPI.player_walk_frame()`
-  are the cartridge's `Facings` index, 0 to 3: two standing drawings and two
-  walking ones, changing every four frames of a step the way
-  `SetFacingStepAction` does. `Gen2WorldSprite.image_for()` composes the frame,
-  and `frame_is_mirrored()` says when it is drawn flipped;
-- a camera of its own, through `player_position_cells()` and
-  `visible_origin_cells()` above, without inheriting the tile page's framing;
-- steering that camera, through `register_action` and the raw leftovers
-  `handle_world_input` offers beside it. `mods/examples/voxel_preview/` declares
-  its two pitch controls, so they are rebindable and can be put on a phone's
-  screen rather than being keycodes only a keyboard can reach.
-
-What is still missing:
-
-1. **The teleport, skyfall and dig step types.** `teleport_from`,
-   `teleport_to`, `skyfall` and `step_dig` reach the caller as a
-   `movement_command_requested` event and change nothing. None of them moves a
-   cell on the cartridge either: each is a spin, a rise or a fall over a fixed
-   count of frames (`StepFunction_TeleportFrom` and its neighbours in
-   `engine/overworld/map_objects.asm`), so each is a pose a renderer has to be
-   told about rather than an offset it can read.
+Not covered: the teleport, skyfall and dig step types. `teleport_from`,
+`teleport_to`, `skyfall` and `step_dig` reach the caller as a
+`movement_command_requested` event and change nothing. None moves a cell on the
+cartridge either, each being a spin, a rise or a fall over a fixed frame count
+(`StepFunction_TeleportFrom` and its neighbours), so each is a pose a renderer
+has to be told about rather than an offset it can read.
 
 **Per-block height is deliberately not a host boundary.** A renderer resolves
-shape from the collision permissions, the block grid and the tileset, all of
-which are already public, and keeps whatever table it needs beside its own
-resolver. A host-side one would be a second place for the same facts.
+shape from the collision permissions, the block grid and the tileset, all
+already public, and keeps whatever table it needs beside its own resolver. A
+host-side one would be a second place for the same facts.
 
 ## Adding a menu entry
 

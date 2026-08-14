@@ -6,7 +6,7 @@ extends GutTest
 ## Effects are built and stepped by hand, the way the motion callbacks are: what
 ## is worth checking here is which byte of the scanline table, the tilemap or the
 ## palette map a state writes, and where the two profiles' own tables part
-## company. `tools/validate_battle_anims.gd` is the counterpart that runs every
+## company. `tools/checks/battle_anims.gd` is the counterpart that runs every
 ## effect a real animation reaches, on all three cartridges.
 
 const BASE: int = 0x4000

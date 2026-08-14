@@ -24,50 +24,30 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >
 > Not a complete game yet. What works today:
 >
-> - **Import.** Species, moves, items, types, the type chart, learnsets,
->   evolutions, palettes, every Pokémon sprite, trainer pics and parties, the
->   font, text-box borders, the battle HUD, maps, overworld menus, 34 mart
->   lists, phone contacts, special calls and music/SFX pointers. A scene-free
->   host resolves all of it without reopening the ROM.
+> - **Import.** Every table below, resolved by a scene-free host without
+>   reopening the ROM.
 > - **Battles.** Parties, switching, running, stats, damage, accuracy, turn
 >   order, status and substatus effects, trainer AI, experience, levelling, move
->   learning and capture input on a real 160x144 screen. A fainted Pokémon's
->   replacement is chosen from the party list, a wild faint asks whether to send
->   the next one at all, and in SHIFT a trainer's switch asks whether you want
->   one too. Every one of those boxes is on the hardware tile grid.
-> - **Overworld.** Real maps, map connections, script requests, trainer battles
->   with imported win/loss text, map reloads, save-safe blackout recovery,
->   object lifecycle, followers, block edits, emotes, surf, ledge hops, grass,
->   fishing, roaming, repel and wild encounters. The service overlay covers
->   menu selection, mart dialog variants and quantity purchases, Kurt's Apricorn
->   errand, source-timed
->   phone dispatch and bounded music, effects and cries. Everything the overworld
->   times is a hardware frame count spent by one clock, so a seed, an input log
->   and a frame number reproduce a walk exactly, on any display.
-> - **Saves.** Three slots, `.sav` import, and a 14-box PC model with 20 slots
->   per box. Gifts, eggs, NPC trades, HP/status items, repel and captures commit
->   through a validated candidate save; a full party routes into the first free
->   box slot and full storage refuses atomically. Format 1 saves migrate without
->   inventing a world position.
-> - **Mods.** A mod under `user://mods/` can add a species, move, item or trainer
->   class, rebalance one the cartridge shipped, register a move effect and the
->   steps it is built from, watch the world and battle event channels, add a menu
->   entry, declare which cartridges it is for, declare controls of its own that
->   rebind and reach a touchscreen like the cartridge's eight, and replace the
->   world or battle renderer, which is what a 3D or HD view needs.
+>   learning and capture, on a real 160x144 screen and the hardware tile grid.
+> - **Overworld.** Real maps and connections, scripts, trainer battles, save-safe
+>   blackout recovery, object lifecycle, followers, block edits, emotes, surf,
+>   ledge hops, grass, fishing, roaming, repel and wild encounters, plus the
+>   service overlay (marts, Kurt's errand, phone dispatch, music and cries).
+>   Everything the overworld times is a hardware frame count spent by one clock,
+>   so a seed, an input log and a frame number reproduce a walk exactly.
+> - **Saves.** Three slots, `.sav` import, and a 14-box PC with 20 slots a box.
+>   Every party transaction commits through a validated candidate save.
+> - **Mods.** A mod under `user://mods/` can add or rebalance content, register
+>   move effects, watch the world and battle event channels, add menu entries and
+>   controls, and replace the world or battle renderer, which is what a 3D or HD
+>   view needs.
 >
-> The real-data story preview walks all three cartridges end to end, from Elm's
-> lab to Red on Mt. Silver: every Johto badge with the errand behind it (the
-> Mystery Egg, Slowpoke Well, HM01 Cut and the Farfetch'd hunt, the
-> SquirtBottle and Sudowoodo, HM03 Surf from the Kimono Girls, the SecretPotion,
-> a Union Cave Geodude taught HM04 Strength for Cianwood Gym's boulders, the
-> Lake of Rage, both Rocket hideouts, Blackthorn's boulder puzzle, and the
-> Rising Badge by Crystal's Dragon Shrine quiz or Gold and Silver's Dragon's Den
-> ball), then Kanto, all sixteen badges and Red. Either ending closes the way the
-> cartridge's does: the Hall of Fame's induction panels with Prof Oak's rating
-> printed into the last of them, and then the credits.
-> Missing: full story state, the dex, the remaining special-call branches and
-> story-driven permanent contacts.
+> The story preview walks all three cartridges from Elm's lab to Red on Mt.
+> Silver: every Johto badge with the errand behind it, then Kanto, all sixteen
+> badges, the Hall of Fame with Prof Oak's rating, and the credits.
+>
+> Missing: full story state, the Unown dex, and the remaining special-call
+> branches and story-driven contacts.
 
 ## Getting started
 
@@ -82,8 +62,6 @@ Put dumps in `roms/`, then verify them. See [roms/README.md](roms/README.md).
 ```bash
 godot --headless --path . -s res://tools/verify_rom.gd
 ```
-
-## Supported cartridges
 
 Matching uses SHA-1, never filenames. Unknown hashes are refused because an
 uncharacterised bank layout could produce corrupt assets.
@@ -100,91 +78,62 @@ uncharacterised bank layout could produce corrupt assets.
 godot --headless --path . -s res://tools/import_rom.gd
 ```
 
-Import takes a few seconds per game. The cache is keyed by game and hash and
-lives in Godot's `user://`, never in the project or an export. Use `--verify`
-to check without writing.
+A few seconds per game. The cache is keyed by game and hash and lives in Godot's
+`user://`, never in the project or an export. `--verify` checks without writing.
 
 | Data | Contents |
 |---|---|
-| Species | Names, base stats, types, held items, egg groups and TM/HM flags |
-| Learnsets | All 251 species' level-up moves in cartridge order |
-| Evolutions | Every evolution and method/requirements |
-| Moves | Names, power, type, accuracy, PP, effect and chance |
-| TM/HM moves | The 57 Gold/Silver or 60 Crystal TM, HM and move-tutor rows, which is what turns a TM in the bag into a move |
-| Items, types | 255 item names, prices, effects, menus, pockets, healing metadata and 28 type names |
-| NPC trades | Gold/Silver six-row or Crystal seven-row records with requested/offered species, DVs, held item and OT data |
+| Species | Names, base stats, types, held items, egg groups, TM/HM flags |
+| Learnsets, evolutions | All 251 species' level-up moves in cartridge order; every evolution and its method |
+| Moves, TM/HM | Power, type, accuracy, PP, effect and chance; the 57 or 60 TM, HM and tutor rows |
+| Items, types | 255 items with prices, effects, pockets and healing metadata; 28 type names |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
-| Trainers | Class names, pics, palettes, AI flags, DVs and every party |
-| Palettes | Normal and shiny 15-bit cartridge colours |
-| Sprites | Front/back for 251 species and all 26 Unown forms |
-| Font and borders | 128 glyphs and eight six-tile text-box frames |
-| Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
-| Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
-| Intro movie | Crystal only: the thirty-five entries of `CrystalIntro`'s art section, which is the Unown, pulse, panorama, Pichu/Wooper, grass and four Suicune sheets, their four BG maps with attribute planes, five sixteen-palette runs, and the fade and Unown palettes inside the code |
-| Region map | The Pokegear's three graphics sheets, the Fast Ship's icon and the dex's nest marker, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
-| Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
-| Credits | `CreditsScript`'s whole command stream, every name and heading it prints, the four scene palettes, the border strip, "The End" and the four mons the banner animates |
-| Battle HUD | HP/EXP bars, panel borders and colours |
+| Trainers, NPC trades | Class names, pics, palettes, AI flags, DVs and parties; trade records with DVs and OT data |
+| Sprites, palettes | Front/back for 251 species and 26 Unown forms; normal and shiny 15-bit colours |
+| Font, borders, HUD | 128 glyphs, eight text-box frames, HP/EXP bars and panels |
+| Splash, title, intro | Each cartridge's opening art, tilemaps and palette runs, including Crystal's 35-entry intro section |
+| Region map | Three graphics sheets, both region tilemaps, the per-tile palette map and 96 landmarks |
+| Prof Oak's PC, credits | The 19 `OakRatings` rows and their texts; `CreditsScript`'s whole command stream |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
-| Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
-| World services | Referenced menus, mart inventories, the thirty fruit trees' fruit, phone contacts, special calls, bounded scripts/text, music, SFX, cries and shared waveform assets |
-| Battle animations | All 278 animation scripts, the 188 objects, 185 framesets and 216 OAM sets they are drawn from, 39 decompressed graphics sheets and the sine table the motion callbacks scale with |
+| Wild encounters | Grass, water and swarm tables, 13 fishing groups, the roaming graph, rates, slots and repel checks |
+| World services | Menus, marts, fruit trees, phone contacts, special calls, bounded scripts and text, music, SFX and cries |
+| Battle animations | 278 scripts, 188 objects, 185 framesets, 216 OAM sets, 39 graphics sheets and the sine table |
 
-Sprites remain colour indices and receive a palette at draw time, so shiny
+Sprites stay colour indices and receive a palette at draw time, so shiny
 rendering needs no duplicate images.
 
-Preview decoded graphics:
-
-```bash
-godot --headless --path . -s res://tools/preview_pics.gd -- gold /tmp/gold.png front
-```
-
-Use `trainers`, `font` or `frames` instead of `front`. Dump decoded tables
-with `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`,
-`evolutions`, `growth` or `all`:
-
-```bash
-godot --headless --path . -s res://tools/dump_tables.gd -- gold moves
-```
-
-`matchups` prints a grid; `learnsets` and `evolutions` resolve numbers into
-names; `growth` checks all 251 species against the six curves and base EXP.
-
 ## Running
-
-Smoke test the main scene:
 
 ```bash
 godot --headless --path . --quit-after 30
 ```
 
-The launcher is a shelf of three cartridges, the selected one at full size in
-the middle. An unimported bay is drawn in the cartridge's own outline: drop a
-dump onto it, or click it to browse. Left and right move along the shelf; mods,
-settings and about are the round buttons in the dock underneath. It has a light
-and a dark appearance, following `ui_theme` in the options file, and the same
-layout works on a phone.
+The launcher is a shelf of three cartridges. An unimported bay is drawn in the
+cartridge's own outline: drop a dump on it, or click to browse. Mods, settings
+and about are in the dock underneath. It has a light and a dark appearance and
+the same layout works on a phone.
 
-Play opens the save screen: validated save slots created as you need them,
-naming, export and import, `.sav` import, party inspection and the development
-battle, plus a save editor for party, boxes, bag, flags, position and dex that
-cannot produce a save the game will not load. A new game opens on the
-cartridge's own splash: the copyright screen for the hundred and ten frames
-`SplashScreen` gives it, then the GameFreak animation, which is Crystal's
-bouncing Ditto turning into the logo or Gold and Silver's star and sparkles, then
-then the cartridge's own intro movie, which is Crystal's twenty-eight scenes of
-Unown and Suicune or Gold and Silver's seventeen over water, grass and fire, then
-the title screen, and then the gender question and Oak's speech; it starts with an empty
-party at the Crystal home spawn with source starting money, and Elm's imported
-lab scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
-Continue enters the overworld, and the start menu's SAVE writes its map,
-inventory, event and clock snapshot. See [docs/SAVES.md](docs/SAVES.md) for the
-save and SRAM contract.
+Play opens the save screen: validated slots, naming, export and import, `.sav`
+import, party inspection, and a save editor that cannot produce a save the game
+will not load. A new game opens on the cartridge's own splash, GameFreak
+animation, intro movie and title screen, then the gender question and Oak's
+speech. Continue enters the overworld, where the start menu's SAVE writes its
+map, inventory, event and clock snapshot. See [docs/SAVES.md](docs/SAVES.md).
 
-Settings are split into appearance, application values, controls and the
-cartridge's own OPTION values. The mods page can switch a mod off without
-uninstalling it. The button beside Play carries re-import, the cache folder and
-cache deletion; the about page holds the on-demand release check.
+The start menu wires every source entry: Pokedex, Pokemon, Pack, Pokegear,
+Player, Save, Options and Exit. Options is the cartridge's own seven-row OPTION
+screen over the same values the launcher's settings edit, so the two cannot
+disagree. Pokedex has the three source orderings, type search and the
+`<MON>'S NEST` area map. Pokegear has the clock, map, phone and radio cards, and
+a tuned station keeps playing after it closes, which is how the Poke Flute
+channel wakes Vermilion's Snorlax. Pack opens each item's own submenu, and the
+party submenu offers all eight field moves to a Pokemon that knows one.
+
+Facing something and pressing A is the other way to every field move: a cut
+tree, a whirlpool, a waterfall, a headbutt tree and open water each offer their
+move in the cartridge's own order and words. Fruit trees bear once a day, Poke
+Balls and hidden items are picked up by facing them, and the imported Players
+House PC opens box storage.
 
 Icons come from [Lucide](https://lucide.dev). See
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
@@ -203,202 +152,88 @@ the game knows which one you used.
 | START | Enter | Start |
 | SELECT | Backspace, Shift | Back |
 
-Keys are bound to positions rather than letters, so WASD stays under the same
-four fingers on a layout that spells them differently; the settings page shows
-each binding as the key actually printed on it. Every button can be rebound
-there, with as many keys and controller buttons as you like. A mod's own
-controls appear in the same place and rebind the same way, and can be switched
-on as extra on-screen buttons for a phone.
+Keys bind by physical position, so WASD stays under the same four fingers on a
+layout that spells them differently; settings shows each binding as the key
+actually printed on it. Everything can be rebound, with as many keys and
+controller buttons as you like, and a mod's own controls rebind the same way.
 
-Any controller Godot recognises works without setup, and the launcher is fully
-navigable with one: the focus ring appears on the first pad or key press and
-stays out of a mouse's way.
+Any controller Godot recognises works without setup. On a touchscreen the games
+draw a d-pad, A, B, START and SELECT, which appear while you touch the screen and
+step aside on the next key press; settings can pin them on, turn them off and
+arrange them separately for upright and sideways. Three quick taps brings them
+back. The screen fills whatever window or device it is given, in either
+orientation.
 
-The launcher is used directly on a touchscreen, with no on-screen buttons over
-it. The games draw a d-pad, A, B, START and SELECT instead, which appear while
-you are touching the screen and step aside on the next key or controller press.
-Settings can pin them on, turn them off for a phone with a controller attached,
-and arrange them: drag each group under your thumbs and set the size and
-opacity, separately for upright and sideways. Three quick taps on the game
-screen brings them back.
-
-The screen fills whatever window or device it is given, in either orientation.
-Upright puts the game at the top with the buttons underneath; sideways centres
-the game and puts the buttons in the margins either side.
-
-Development scenes and shortcuts:
+Development shortcuts are debug-build only, along with the map and cell readout:
 
 | Scene | Keys |
 |---|---|
 | `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
-| `game/battle/battle_screen.tscn` | `T` turn, A advances events, `Y` switch, `R` run, `[`/`]` matchup, `G`/`H` damage either side; in wild battles B opens the ball selector, left/right changes ball, A throws |
-| `game/world/world_screen.tscn` | `F` fishes while facing water with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone list directly, `V` cycles world renderers, F5 writes a snapshot |
+| `game/battle/battle_screen.tscn` | `T` turn, A advances, `Y` switch, `R` run, `[`/`]` matchup, `G`/`H` damage; in wild battles B opens the ball selector |
+| `game/world/world_screen.tscn` | `F` fishes with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone, `V` cycles renderers, F5 writes a snapshot |
 
-Everything in that table other than the cartridge's own buttons is debug-build
-only, along with the map and cell readout above and below the screen. A release
-export offers the eight buttons and nothing else; the methods behind each
-shortcut stay public, which is how `tools/preview_*.gd` drives them.
+A release export offers the eight buttons and nothing else. The method behind
+each shortcut stays public, which is how `tools/preview_*.gd` drives them.
 
-Battle-screen moves are random; use `show_trainer(trainer_class)` for a real
-party and trainer AI, or `show_matchup` for a fallback pairing. A full move set,
-a faint, a trainer's switch under SHIFT and a Baton Pass each stop and ask, in
-the cartridge's own boxes.
+## Tools
 
-The world screen's start menu wires every source entry: Pokedex, Pokemon, Pack,
-Pokegear, Player, Save, Options and Exit.
-
-- **Options** is the cartridge's own seven-row OPTION screen over the same
-  values the launcher's settings edit, so the two can never disagree. Every row
-  but PRINT reaches something: text speed and frame reach the overworld's boxes
-  and a battle's, sound reaches the driver, battle scene skips an animation,
-  MENU ACCOUNT draws the highlighted entry's own line under the start menu, and
-  SET/SHIFT decides whether a trainer's switch offers you one.
-- **Player** is the trainer card, drawn from the cartridge's own graphics with
-  its badge pages and play timer.
-- **Pokedex** lists species in the cartridge's NEW, OLD and A to Z orders,
-  showing a name once seen and a caught mark once caught, and opens each seen
-  species' entry with its category, height, weight and both description pages.
-  SELECT changes the order and the mode is saved; START searches by one or two
-  types over species already caught. The entry's AREA button is the cartridge's
-  own `<MON>'S NEST` map: the same region maps the Pokegear draws, a blinking
-  marker on every landmark the species is found at, SELECT swapping them for the
-  player icon, and left and right changing region once the Hall of Fame is
-  behind you. The Unown dex and the entry screen's PRNT button are not built.
-- **Pokegear** opens its card list in the source's clock, map, phone, radio
-  order, showing only owned cards. The MAP card is the cartridge's own region
-  map on the hardware tile grid: the Johto or Kanto tilemap coloured by tile
-  class, the landmark name in the box the source puts it in, the cursor walking
-  the region's own window, and the player icon standing where the map says. The
-  radio card tunes with left and right over the cartridge's two-step dial, and a
-  tuned station keeps playing after the Pokegear closes, which is how the Poke
-  Flute channel wakes Vermilion's Snorlax.
-- **Pack** opens each item's own source submenu and can use or throw away one: a
-  Potion asks which Pokemon and heals it, a Repel sets its step count, and TOSS
-  runs the cartridge's own ask, quantity dial, yes/no and `TossItem`. GIVE and
-  SEL keep their source position marked unavailable.
-
-The party submenu offers Cut, Surf, Strength, Whirlpool, Waterfall, Flash,
-Headbutt and Rock Smash to a Pokemon that knows one; all eight show their
-message first and change the world on the acknowledge, and stepping from water
-back onto land stops surfing. The last two have no badge behind them: for
-Headbutt, facing a tree and knowing the move is the whole gate, and the
-acknowledge rolls the tree's own encounter, which on Crystal can arrive asleep.
-Rock Smash asks the faced object rather than the ground, and a smashed rock is
-gone until the map reloads unless it carries an event flag.
-
-Facing something and pressing A is the other way to all of them: a cut tree, a
-whirlpool, a waterfall, a headbutt tree and open water each offer their move and
-ask before using it, in the cartridge's own order, refusing in the cartridge's
-own words or, for Headbutt and Surf, saying nothing at all. A Waterfall climb
-runs the whole column in one command and ends on the first cell above it that is
-not a waterfall. Standing on a whirlpool, waterfall, door, staircase or cave
-tile overrides the pressed direction as the cartridge does, which is also how a
-waterfall is ridden back down.
-
-A fruit tree bears its own berry or apricorn once a day, refilling for every
-tree at once the first time one is touched after the day turns, which is how
-Kurt gets his Apricorns.
-
-Poké Balls on the ground are picked up by facing them, and so are the items
-hidden in scenery: neither pointer is a script, so each is decoded and its item
-received. A hidden item answers only while its own event flag is clear, and
-picking it up sets that flag.
-The imported Players House PC opens the embedded box storage screen. The host
-clock advances one game minute per real minute and crosses source day
-boundaries. `preview_emote()`, `preview_wild_encounter()`,
-`preview_fishing_battle()`, `preview_script_event()`, `preview_battle_request()`,
-`preview_world_battle_loss()`, `preview_capture()` and
-`preview_party_transaction()` drive their live paths; the API also exposes
-swarm/roaming updates, repel countdowns and a JSON-safe snapshot.
-
-Headless tools, all against a real imported cache. Every `validate_*.gd` runs
-all three games unless its row says otherwise:
-
-| Tool | Checks |
-|---|---|
-| `preview_world_services.gd <png> [mart\|apricorn\|town_map\|trainer_card\|oak_pc] [presses]` | the mart, Kurt's Apricorn overlay, the Pokegear's MAP card, the trainer card or Prof Oak's PC, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
-| `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
-| `preview_party.gd <game> <png> [party\|box] [presses]` | the party and PC-box overlays as the overworld stacks them, over a development save. `presses` is a `u,d,l,r,a,b` list driven in before the shot, and several lists separated by `;` write one file each |
-| `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
-| `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
-| `preview_title.gd <game> <png> [frame;frame]` | the title screen at any source frame: Crystal's twenty-eight-frame interlaced entrance and its falling crystal, the Suicune cycle, Gold's Ho-Oh and Silver's Lugia over the scrolling clouds with the trail streaming behind |
-| `preview_prof_oaks_pc.gd <game> [caught]` | Prof Oak's PC against a real cache: every rating band and both its ends, or the three pages `ProfOaksPCBoot` shows for one owned count |
-| `preview_town_map.gd <game> <png> [landmark] [town_map\|card\|area:<species>] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box, the Pokegear card's icon row or the dex's `<MON>'S NEST` screen, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one, `sel` and `rel` hold and release the dex area's SELECT, and `f<n>` spends n frames, which is what the nest blink is caught with |
-| `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache, ending on the player's own with Prof Oak's rating printed into it; `page` is how many panels to advance past |
-| `preview_gs_intro.gd <game> [png] [frame;frame]` | Gold and Silver's own intro movie at any source frame: the shellders under water, the magikarp and the surfacing Lapras, Jigglypuff and Pikachu in the grass with the notes over them, the three starters flashing out of the dark, and Charizard breathing its fireball. With no png it runs the whole movie and prints the frame each of the seventeen scenes starts on |
-| `preview_intro_movie.gd <game> [png] [frame;frame]` | Crystal's intro movie at any source frame: the Unown fading in and bursting, the scrolling panorama with Suicune running across it, Wooper and Pichu in the rustling grass, the leap, the close-up, and C R Y S T A L spelled out in Unown. With no png it runs the whole movie and prints the frame each of the twenty-eight scenes starts on |
-| `preview_credits.gd <game> <png> [frame;frame]` | the credits at any source frame: the banner's four mons, the scrolling border bands, each batch of names on its own scene palette, the copyright and "The End". A `CREDITS_WAIT` tick is thirteen frames, so the batches land a long way apart; a frame suffixed `b` holds B down for the skip a replay allows |
-| `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
-| `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
-| `replay_world.gd [game ...] [frames]` | records `(frame, button)` from a run of the real world screen and replays it into a fresh world, over every map of the spawn group on each cartridge. The same seed and log must reach the same `Gen2WorldSnapshot` byte for byte, and must reach it whether the frames were pumped at 30 fps or at 144 |
-| `preview_collision.gd <game> <group> <number> <png>` | one whole map as drawn, with every walk cell's permission checkerboarded over it: red is wall, blue is water. For a report that the player can stand where they should not |
-| `preview_overworld_sprites.gd <game> <png>` | every overworld sprite in a cache as one contact sheet, four facings across by four frames down, for eyeballing offsets, mirroring and frame order |
-| `render_audio.gd <game> <music\|sfx\|cry\|mon_cry> <id\|all> <frames> <prefix> [stereo]` | one record, or the whole table, run through the sound driver and the APU: a WAV to listen to and a per-frame hardware-register trace to diff |
-| `validate_story_map_ids.gd` | the four maps the story route names by id rather than by cell, each against the map its number holds on the other profile |
-| `validate_crystal_route30_trainer.gd` | trainer record, sight line, approach, battle request, beaten flag, later interaction |
-| `validate_ledge_hops.gd` | the eight hop codes, accepted directions, Route 30's ledge record and the two-cell landing, in both games |
-| `validate_side_walls.gd` | the side-wall/side-buoy codes, their face masks and map census, in both games; Celadon Mansion Roof's fence and staircase landings on Crystal |
-| `validate_cut.gd` | the cut block tables, the profile-split tileset numbers and cuttable-cell census, and Ilex Forest's tree |
-| `validate_drawn_blocks.gd` | every map's whole padded rectangle, drawn from a loaded world and from its record alone, and how many padded blocks came off a neighbour rather than off the border block |
-| `validate_field_move_prompts.gd` | the faced-tile prompt chain, both gates and all three answers for Cut, Surf and Headbutt |
-| `validate_rock_smash.gd` | the rock map table, the smashable-rock census and its one flagged rock, and Cianwood City's rock |
-| `validate_headbutt.gd` | the treemon map tables and sets, the profile-split set numbering, the headbutt-tree census, and Ilex Forest's tree |
-| `validate_surf.gd` | the surf sprites and music record, the surf-entry cell census, and New Bark Town's east shore |
-| `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool |
-| `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
-| `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
-| `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, all three frames composing, and every species' nests staying inside their own region and under shadow OAM's forty sprites |
-| `validate_intro_movie.gd` | every entry of the intro art section at the size the routine loading it asks VRAM for, every BG map cell naming a tile its own sheet holds and every attribute byte a palette its own run has, and the whole movie run frame by frame to `JUMPTABLE_EXIT_F`: the frame each scene starts on, every sound it asks for resolving on the cache, and no frame asking shadow OAM for more than forty sprites |
-| `validate_gs_intro.gd` | every entry of Gold and Silver's own intro art section at the size the routine loading it asks VRAM for, both metatile maps naming only metatiles their own table holds and holding enough rows to draw a screen from where their scene starts, all six palette runs at their own lengths, Gold's whole section compared against Silver's entry by entry, and the whole movie run frame by frame to `JUMPTABLE_EXIT_F`: the frame each of the seventeen scenes starts on, every sound it asks for resolving on the cache, and the one frame that asks shadow OAM for more than the forty it holds |
-| `validate_credits.gd` | every credits string decoding into codes the screen can draw, the four scene palettes and every `Credits_LoadBorderGFX.Frames` block, and both whole scripts run frame by frame to `CREDITS_END` with nothing printed reaching either border band |
-| `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
-| `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
-| `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse |
-| `validate_rising_badge.gd` | Blackthorn Gym 2F's boulders and holes, the 1F block changes that open Clair's room, the lake crossing to the Dragon's Den door, and Dragon's Den B1F's whirlpool and shrine landfall |
-| `validate_route_27.gd` | the forced step off a cave mouth, Route 27's sealed Kanto landfall and three seas, and the Tohjo Falls climb and ride back down |
-| `validate_item_balls.gd` | Ice Path 1F's HM07 and Route 44's balls decoding from the `itemball` macro, and Route 45's PP Up and Cerulean Gym's machine part from the `hiddenitem` macro, all reaching the bag once |
-| `validate_elite_four.gd` | the seven Indigo Plateau maps, the one door into the rooms, the prepare callback's flag reset, and each room's sealed entrance and boss-opened exit |
-| `validate_ss_aqua.gd` | the S.S. Aqua's B1F sailors and the coord events that toggle them, 1F's deck and west wing, the lazy sailor and the granddaughter, and the corridor before and after the errand that opens it |
-| `validate_vermilion.gd` | the Vermilion port passage's stair pair, the cut tree sealing the gym yard, the gym door's one approach, and the gym's own lack of a scene or callback |
-| `validate_saffron.gd` | Route 6's dead-end north connection and the gate that carries the crossing, Saffron Gym's nine rooms and fifteen self-warp pairs, and the one chain of pads that reaches Sabrina |
-| `validate_celadon.gd` | Saffron's dead-end west connection and its gate, Route 7's open connection onto Celadon, the city's only cut tree sealing the gym yard from either side, and Celadon Gym's three unavoidable sight lines |
-| `validate_cerulean.gd` | the Route 5 gate out of Saffron, Cerulean's single east crossing, Route 9's entry pocket and the Pokecenter yard its one cut tree opens, the Power Plant's edgeless region, the buoy line that refuses a shore entry and the river that reaches it, and Cerulean Gym's pool with the three swimmer approaches that cross it |
-| `validate_lavender.gd` | Saffron's east gate, Route 8's single east crossing and the eight ledges that leave only one of its five sight lines unavoidable, Lavender Town's flypoint and its two open edges, and the EXPN CARD the Kanto Radio Tower withholds until the Power Plant runs |
-| `validate_fuchsia.gd` | the four connected routes south of Lavender and which of their eighteen sight lines each profile's walk cannot route around, the Route 15 gate, Fuchsia City's region behind it, and Fuchsia Gym's wall maze with no sight trainer in it |
-| `validate_radio.gd` | the radio station table and its three profile splits, every station's music record, the two big objects either game ships, Vermilion City sealed at the Diglett's Cave mouth by the Snorlax's two-by-two body, the whole tune-and-wake chain, and the Route 2 pocket behind the cave that one cut tree opens onto Pewter and Viridian |
-| `validate_pewter.gd` | Fuchsia's gate out and the five ungated connections back to Vermilion, the eight-cell pocket the Snorlax seals off the Route 11 crossing, Diglett's Cave's three regions and two ladders, Route 2's crossing onto Pewter once its tree is cut, and Pewter City's one south corridor and the gym sight line it owes |
-| `validate_cinnabar.gd` | the four connections from Pewter down to Pallet, Pallet's pond and the south edge that only crosses while surfing, Route 21's sea, Cinnabar's two seamless land regions and which crossing reaches Blue, Route 20's sealed west channel and the east landfall behind it, Seafoam Gym, and Viridian Gym's two objects behind one event flag |
-| `validate_magnet_train.gd` | the twelve doors over the lost-doll errand and both rides, the Copycat standing in her cell before any script has assigned her variable sprite, the Fan Club's Clefairy guy and the doll behind his own flag, and both Magnet Train stations as a lobby and a platform with no walkable seam between them |
-| `validate_mt_silver.gd` | the nine doors from Viridian Gym to Silver Cave Room 3, Viridian's west connection and Route 28's, Oak's lab, the Victory Road Gate's three regions and the black belt standing in each of the two cells that join them across all four flag combinations, Silver Cave Outside and its flypoint, the Pokecenter counter, each cave room as one region, and Red behind his own hide flag |
+Headless, and all against a real imported cache.
 
 ```bash
-# Crystal map 3/19: block edits, hidden object, facing interaction
-godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 3 19 3 5 1 37,1744
-# bedroom PC and the bedroom-to-town warp chain
-godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home
+godot --headless --path . -s res://tools/validate.gd -- all
+```
+
+`tools/validate.gd` is the check suite: one topic per subject under
+`tools/checks/`, each run against all three cartridges. Name topics or a group,
+or `all`; with no argument it lists them.
+
+| Group | Topics |
+|---|---|
+| `field_moves` | Cut, Surf, Whirlpool, Strength, Headbutt, Rock Smash and the faced-tile prompt chain |
+| `terrain` | Ledge hops, side walls, every map's drawn blocks, the story's map ids |
+| `johto` | Radio Tower, the Rising Badge, command queues, item balls, Route 27, the Magnet Train |
+| `kanto` | Each city, its gym and the way in, from Vermilion to Mt. Silver |
+| `art` | Both intro movies, the credits, the region map, all 278 battle animations |
+| `tables` | TM/HM, naming, world scripts, the opening lane |
+| `trainers` | The Route 30 trainer on each profile |
+
+The rest are previews and dumps, each driving a real screen or table:
+
+| Tool | Does |
+|---|---|
+| `dump_tables.gd <game> <table>` | Prints a decoded table: `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`, `evolutions`, `growth` or `all` |
+| `preview_pics.gd <game> <png> [kind]` | Contact sheet of `front`, `trainers`, `font` or `frames` |
+| `preview_*.gd` | One per screen: the intro, title, credits, Hall of Fame, region map, party, marts, fishing, battle switch and animations, overworld sprites and collision |
+| `preview_world_story.gd` | Map entry callbacks, event-flag visibility, facing interactions and the whole story route |
+| `replay_world.gd [game ...] [frames]` | Records `(frame, button)` from a real run and replays it into a fresh world; the same seed and log must reach the same snapshot byte for byte, at 30 fps and at 144 |
+| `render_audio.gd <game> <kind> <id> <frames> <prefix>` | One record or a whole table through the driver and APU: a WAV plus a per-frame register trace to diff |
+| `screenshot.gd <scene> <png> [frames] [method]` | Any scene to PNG. Opens a window, so it is not headless |
+
+```bash
 # the full walked route: Johto, the Hall of Fame, every Kanto gym, and Red
 godot --headless --path . -s res://tools/preview_world_story.gd -- crystal 24 7 2 2 1 none home story
 ```
 
-World text follows the cartridge command stream: `$50` is a page break, `$57`
-ends a text box and `$58` pauses for a prompt. The story runner keeps the source
-yes/no order, weekday wrapping and first eight temporary event flags, which
-reset on a map reload.
-
 ## Tests
 
 [GUT](https://github.com/bitwes/Gut) is in `addons/gut`; configuration is in
-`.gutconfig.json`.
+`.gutconfig.json`. Tests use synthetic files and a known SHA-1 vector, never a
+real cartridge, so they run anywhere.
+
+```bash
+godot --headless -s res://addons/gut/gut_cmdln.gd -gexit
+```
+
+That is the unit tier, and the default: roughly 2,500 tests in well under a
+minute. The scene integration tier drives real screens and is slower, so it is
+asked for explicitly, which is how CI runs both:
 
 ```bash
 godot --headless -s res://addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit
 ```
 
-Exit code `0` means all tests passed. They use synthetic files and a known
-SHA-1 vector, never a real cartridge. Overworld integration suites can run
-alone with `-gdir=res://tests/integration`; service coverage includes menus,
-marts, phone calls and audio requests.
+Exit code `0` means all tests passed. Run one script with `-gselect=<name>`.
 
 ## Layout
 
@@ -406,14 +241,12 @@ marts, phone calls and audio requests.
 |---|---|
 | `game/` | Feature folders with colocated scenes and scripts |
 | `autoload/` | Project singletons |
-| `assets/` | Authored or freely licensed assets |
-| `assets/brand/` | Logo and banner; see its README |
+| `assets/` | Authored or freely licensed assets; `assets/brand/` has its own README |
 | `addons/` | Third-party plugins |
-| `tests/` | GUT unit and integration tests |
-| `tools/` | Headless developer scripts |
+| `tests/` | `unit/` is the fast tier, `integration/` drives real screens |
+| `tools/` | Headless developer scripts; `tools/checks/` are validate topics |
 | `roms/` | User cartridges, excluded from Git and Godot imports |
-| `game/mods/` | Mod manifest, host, installer and refusal wording |
-| `mods/examples/` | Development-only example mods to copy into `user://mods/`; excluded from exports |
+| `mods/examples/` | Development-only example mods, excluded from exports |
 | `docs/` | Contributor notes |
 
 ## Platforms
@@ -427,8 +260,8 @@ godot --headless --path . --export-release "Linux" builds/linux/pokerecomp.x86_6
 ```
 
 Tests, tools and GUT are excluded, and `roms/` and the `user://` cache are not
-reachable from an export at all. Signing identities are placeholders: set the
-bundle identifiers, Android SDK paths and Apple team ID before publishing.
+reachable from an export. Signing identities are placeholders: set the bundle
+identifiers, Android SDK paths and Apple team ID before publishing.
 
 iOS forbids JIT and runtime native code, so mods must be interpreted GDScript,
 not compiled extensions. The project is therefore GDScript-first. See
@@ -436,10 +269,10 @@ not compiled extensions. The project is therefore GDScript-first. See
 
 ## Contributing
 
-Read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). No cartridge-derived data
-may enter the repository: no ROM, `.sav`, extracted sprites, text, maps or
-audio. `.gitignore`, the pre-commit hook and tests enforce this; do not weaken
-them. For reproducible comparisons with the upstream disassemblies, see
+Read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). No cartridge-derived data may
+enter the repository: no ROM, `.sav`, extracted sprites, text, maps or audio.
+`.gitignore`, the pre-commit hook and tests enforce this; do not weaken them.
+For reproducible comparisons with the upstream disassemblies, see
 [docs/REFERENCES.md](docs/REFERENCES.md).
 
 ## Licence

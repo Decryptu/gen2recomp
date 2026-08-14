@@ -6,7 +6,7 @@ extends GutTest
 ## Objects are built by hand rather than spawned by a script, because what is
 ## worth checking here is the arithmetic: which byte a state writes, where it
 ## wraps, and which of the source's own dead branches stays dead.
-## `tools/validate_battle_anims.gd` is the counterpart that runs all eighty
+## `tools/checks/battle_anims.gd` is the counterpart that runs all eighty
 ## against real cartridge data.
 
 const BASE: int = 0x4000
