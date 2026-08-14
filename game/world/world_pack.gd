@@ -97,11 +97,6 @@ const ACTION_LABELS: Dictionary = {
 	ACTION_QUIT: "QUIT",
 }
 
-## GIVE needs a held-item model and SEL the Select-button registration; neither
-## exists yet, so both keep their source position and are marked unavailable, the
-## way the party submenu carries STATS, SWITCH and MOVE.
-const IMPLEMENTED_ACTIONS: Array[StringName] = [ACTION_USE, ACTION_TOSS, ACTION_QUIT]
-
 
 ## One entry per pocket in source display order, each carrying only the items
 ## currently owned in that pocket. An unknown item number, or a quantity of
@@ -178,9 +173,8 @@ static func item_submenu(data: GameData, item: int) -> Array:
 	var definition: Dictionary = data.item(item)
 	if definition.is_empty():
 		return []
-	var permissions: int = int(definition.get("permissions", 0))
 	var tossable: bool = can_toss(data, item)
-	var can_select: bool = (permissions & CANT_SELECT) == 0
+	var selectable: bool = can_select(data, item)
 	# CheckItemMenu tests the nibble against zero, not against ITEMMENU_CURRENT,
 	# so a value of 1 to 3 would offer USE and then reach .Oak's refusal. No
 	# cartridge item carries one; all 256 rows are NOUSE, CURRENT, PARTY or CLOSE.
@@ -189,18 +183,14 @@ static func item_submenu(data: GameData, item: int) -> Array:
 	if int(definition.get("pocket", 0)) == TYPE_TM_HM:
 		actions = SUBMENU_USE_QUIT if not tossable else SUBMENU_TMHM_USE_GIVE_QUIT
 	elif not tossable:
-		actions = SUBMENU_USE_QUIT if not can_select else SUBMENU_USE_SELECT_QUIT
-	elif not can_select:
+		actions = SUBMENU_USE_QUIT if not selectable else SUBMENU_USE_SELECT_QUIT
+	elif not selectable:
 		actions = SUBMENU_USE_GIVE_TOSS_QUIT if can_use else SUBMENU_GIVE_TOSS_QUIT
 	else:
 		actions = SUBMENU_USE_GIVE_TOSS_SELECT_QUIT if can_use else SUBMENU_GIVE_TOSS_SELECT_QUIT
 	var entries: Array = []
 	for action: StringName in actions:
-		entries.append({
-			"action": action,
-			"label": String(ACTION_LABELS.get(action, "")),
-			"available": IMPLEMENTED_ACTIONS.has(action),
-		})
+		entries.append({"action": action, "label": String(ACTION_LABELS.get(action, ""))})
 	return entries
 
 
@@ -214,6 +204,26 @@ static func can_toss(data: GameData, item: int) -> bool:
 	if definition.is_empty():
 		return false
 	return (int(definition.get("permissions", 0)) & CANT_TOSS) == 0
+
+
+## `CheckSelectableItem`, which `RegisterItem` asks before it writes
+## `wRegisteredItem`. The bit is set on an item that *cannot* be registered.
+static func can_select(data: GameData, item: int) -> bool:
+	if data == null:
+		return false
+	var definition: Dictionary = data.item(item)
+	if definition.is_empty():
+		return false
+	return (int(definition.get("permissions", 0)) & CANT_SELECT) == 0
+
+
+## Whether a Pokemon may be handed this item. `.GiveItem`'s loop refuses the key
+## item pocket and then whatever `CheckTossableItem` refuses, which is the same
+## pair of tests that decides GIVE is in the submenu at all.
+static func can_hold(data: GameData, item: int) -> bool:
+	if not can_toss(data, item):
+		return false
+	return pocket_for(data, item) != TYPE_KEY_ITEM
 
 
 ## `UseItem`'s jumptable index: which of `.Oak`, `.Current`, `.Party` and
@@ -271,3 +281,62 @@ static func receive_check(
 		if entries >= capacity:
 			return {"ok": false, "reason": &"pocket_full", "pocket": pocket}
 	return {"ok": true, "quantity": current + quantity}
+
+
+## `GiveTakePartyMonItem`'s own wording (`data/text/common_2.asm`), shared by the
+## pack's GIVE, the party submenu's ITEM and SELECT's registration, none of which
+## can see the others' copy. Each source text is one box; the line breaks are
+## where its box ended, so they are not reproduced here.
+static func hold_text(mon_name: String, item_name: String) -> String:
+	return "Made %s hold %s." % [mon_name, item_name]
+
+
+## `PokemonAskSwapItemText`, the yes/no in front of the swap.
+static func ask_swap_text(mon_name: String, held_name: String) -> String:
+	return "%s is already holding %s. Switch items?" % [mon_name, held_name]
+
+
+static func swap_text(mon_name: String, held_name: String, item_name: String) -> String:
+	return "Took %s's %s and made it hold %s." % [mon_name, held_name, item_name]
+
+
+static func took_text(mon_name: String, item_name: String) -> String:
+	return "Took %s from %s." % [item_name, mon_name]
+
+
+static func not_holding_text(mon_name: String) -> String:
+	return "%s isn't holding anything." % mon_name
+
+
+## `ItemStorageFullText`, which is what a refused `ReceiveItemFromPokemon` says
+## on either half of the swap.
+static func storage_full_text() -> String:
+	return "Item storage space full."
+
+
+static func egg_cant_hold_text() -> String:
+	return "An EGG can't hold an item."
+
+
+## `ItemCantHeldText`, `.GiveItem`'s answer for a key item or an untossable one.
+static func cant_hold_text() -> String:
+	return "This item can't be held."
+
+
+## `CantUseItemText`, which is what `UseRegisteredItem` answers with where the
+## pack's own USE would reach `.Oak`.
+static func cant_use_text() -> String:
+	return "Can't use that here."
+
+
+static func registered_text(item_name: String) -> String:
+	return "Registered the %s." % item_name
+
+
+static func cant_register_text() -> String:
+	return "You can't register that item."
+
+
+## `MayRegisterItemText`, `SelectMenu`'s answer when nothing is registered.
+static func may_register_text() -> String:
+	return "An item in your PACK may be registered for use on SELECT Button."

@@ -207,3 +207,76 @@ func test_an_empty_party_cannot_open_the_pokemon_centers_pc() -> void:
 	assert_true(Gen2WorldPC.can_open(_save))
 	_save.party.clear()
 	assert_false(Gen2WorldPC.can_open(_save))
+
+
+## `TryGiveItemToPartymon`'s `.give_item_to_mon`: one out of the bag, one into
+## the hand.
+func test_giving_an_item_takes_it_out_of_the_bag() -> void:
+	var result: Dictionary = Gen2WorldBagHost.give_to_party(_world, _save, POTION, 0, false, false)
+	assert_true(bool(result["ok"]), str(result))
+	assert_eq(result["held"], 0)
+	assert_eq(_world.state.item_quantity(POTION), 4)
+	assert_eq((_save.party[0] as Gen2SaveMon).item, POTION)
+
+
+## The refusal `PokemonAskSwapItemText` is asked over: the source stops to ask
+## before it writes anything, so an unanswered swap leaves both items alone.
+func test_a_full_hand_is_refused_until_the_swap_is_answered() -> void:
+	(_save.party[0] as Gen2SaveMon).item = KEY_ITEM
+	var asked: Dictionary = Gen2WorldBagHost.give_to_party(_world, _save, POTION, 0, false, false)
+	assert_false(bool(asked["ok"]))
+	assert_eq(asked["reason"], &"already_holding")
+	assert_eq(int((asked["details"] as Dictionary)["held"]), KEY_ITEM)
+	assert_eq(_world.state.item_quantity(POTION), 5)
+	assert_eq((_save.party[0] as Gen2SaveMon).item, KEY_ITEM)
+
+	var swapped: Dictionary = Gen2WorldBagHost.give_to_party(_world, _save, POTION, 0, true, false)
+	assert_true(bool(swapped["ok"]), str(swapped))
+	assert_eq(swapped["held"], KEY_ITEM)
+	assert_eq(_world.state.item_quantity(POTION), 4)
+	assert_eq(_world.state.item_quantity(KEY_ITEM), 2)
+	assert_eq((_save.party[0] as Gen2SaveMon).item, POTION)
+
+
+## `.GiveItem` refuses the key item pocket before `TryGiveItemToPartymon` ever
+## runs, and an egg is refused by `GiveItem`'s own `cp EGG`.
+func test_a_key_item_and_an_egg_are_both_refused() -> void:
+	var key: Dictionary = Gen2WorldBagHost.give_to_party(_world, _save, KEY_ITEM, 0, false, false)
+	assert_false(bool(key["ok"]))
+	assert_eq(key["reason"], &"item_cannot_be_held")
+
+	(_save.party[0] as Gen2SaveMon).is_egg = true
+	var egg: Dictionary = Gen2WorldBagHost.give_to_party(_world, _save, POTION, 0, false, false)
+	assert_false(bool(egg["ok"]))
+	assert_eq(egg["reason"], &"cannot_hold_egg")
+	assert_eq(_world.state.item_quantity(POTION), 5)
+
+
+## `TakePartyItem`, and `PokemonNotHoldingText` for an empty hand.
+func test_taking_an_item_puts_it_back_in_the_bag() -> void:
+	assert_eq(
+		StringName(Gen2WorldBagHost.take_from_party(_world, _save, 0, false)["reason"]),
+		&"not_holding"
+	)
+	(_save.party[0] as Gen2SaveMon).item = POTION
+	var result: Dictionary = Gen2WorldBagHost.take_from_party(_world, _save, 0, false)
+	assert_true(bool(result["ok"]), str(result))
+	assert_eq(result["name"], "POTION")
+	assert_eq(_world.state.item_quantity(POTION), 6)
+	assert_eq((_save.party[0] as Gen2SaveMon).item, 0)
+
+
+## `RegisterItem` checks `CheckSelectableItem`, and `CheckRegisteredItem` clears
+## a registration the pack can no longer answer.
+func test_a_registration_lasts_while_the_item_is_owned() -> void:
+	var refused: Dictionary = Gen2WorldBagHost.register(_world, _save, POTION, false)
+	assert_false(bool(refused["ok"]))
+	assert_eq(refused["reason"], &"item_cannot_be_registered")
+
+	assert_true(bool(Gen2WorldBagHost.register(_world, _save, KEY_ITEM, false)["ok"]))
+	assert_eq(_world.state.registered_item(), KEY_ITEM)
+	assert_eq(Gen2WorldBagHost.registered_item(_world), KEY_ITEM)
+
+	_world.state.apply_changes({}, {}, {"items": {KEY_ITEM: 0}})
+	assert_eq(Gen2WorldBagHost.registered_item(_world), 0)
+	assert_eq(_world.state.registered_item(), 0, "the check clears it where it looks")

@@ -151,6 +151,11 @@ var _kurt_apricorn_quantity: int = 0
 ## and cleared for every tree at once by `ResetFruitTrees`. Kept as the set of
 ## picked tree ids because the source's own question is per tree.
 var _picked_fruit_trees: Dictionary = {}
+## `wRegisteredItem`. `wWhichRegisteredItem`'s pocket and slot number have no
+## counterpart in the flat item model: `CheckRegisteredItem` uses them to find
+## the entry again in its packed pocket array and clears both when the item is
+## not there, which here is the quantity the item number already answers.
+var _registered_item: int = 0
 
 
 func _init(
@@ -249,6 +254,7 @@ func to_dict() -> Dictionary:
 		"maptile_decorations": _maptile_decorations.duplicate(),
 		"kurt_apricorn_quantity": _kurt_apricorn_quantity,
 		"picked_fruit_trees": _picked_fruit_trees.duplicate(),
+		"registered_item": _registered_item,
 	}
 
 
@@ -300,6 +306,7 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		for raw_tree: Variant in picked as Dictionary:
 			if int(raw_tree) > 0 and bool((picked as Dictionary)[raw_tree]):
 				restored._picked_fruit_trees[int(raw_tree)] = true
+	restored.set_registered_item(int(source.get("registered_item", 0)))
 	return restored
 
 
@@ -336,6 +343,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_maptile_decorations = restored._maptile_decorations.duplicate()
 	_kurt_apricorn_quantity = restored._kurt_apricorn_quantity
 	_picked_fruit_trees = restored._picked_fruit_trees.duplicate()
+	_registered_item = restored._registered_item
 	changed.emit()
 
 
@@ -740,6 +748,21 @@ func set_repel_steps(steps: int) -> void:
 	if next_steps == _repel_steps:
 		return
 	_repel_steps = next_steps
+	changed.emit()
+
+
+## The item SELECT uses, or zero for none. `RegisterItem` writes the number and
+## `CheckRegisteredItem` clears it again the moment the pack no longer holds it,
+## which is why the ownership test lives with the reader rather than here.
+func registered_item() -> int:
+	return _registered_item
+
+
+func set_registered_item(item: int) -> void:
+	var next_item: int = item if item > 0 else 0
+	if next_item == _registered_item:
+		return
+	_registered_item = next_item
 	changed.emit()
 
 

@@ -27,6 +27,9 @@ const OPTION_SWITCH: StringName = &"switch"
 const OPTION_ITEM: StringName = &"item"
 const OPTION_CANCEL: StringName = &"cancel"
 const OPTION_MOVE: StringName = &"move"
+## `GiveTakeItemMenuData`'s own two rows, which ITEM opens rather than answers.
+const OPTION_GIVE: StringName = &"give"
+const OPTION_TAKE: StringName = &"take"
 ## engine/pokemon/mon_submenu.asm's NUM_MONMENU_ITEMS: a list already this long
 ## drops CANCEL rather than growing.
 const MAX_SUBMENU_ITEMS: int = 8
@@ -49,6 +52,9 @@ var _submenu: VBoxContainer = null
 var _submenu_items: Array = []
 var _submenu_cursor: int = 0
 var _submenu_open: bool = false
+## Whether the rows on screen are ITEM's GIVE/TAKE box rather than the mon's own
+## submenu, which is what B goes back to.
+var _item_menu_open: bool = false
 
 
 func _ready() -> void:
@@ -74,6 +80,7 @@ func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> 
 	_save = save
 	_member_cursor = 0
 	_submenu_open = false
+	_item_menu_open = false
 	_submenu_items = []
 	_submenu_cursor = 0
 	if is_inside_tree() and _cards != null:
@@ -130,14 +137,26 @@ static func submenu_items_for(data: GameData, mon: Gen2SaveMon) -> Array:
 	items.append(_option_entry(OPTION_STATS, "STATS"))
 	items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
 	items.append(_option_entry(OPTION_MOVE, "MOVE"))
-	items.append(_option_entry(OPTION_ITEM, "ITEM"))
+	items.append(_option_entry(OPTION_ITEM, "ITEM", true))
 	if items.size() < MAX_SUBMENU_ITEMS:
 		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
 	return items
 
 
-static func _option_entry(option: StringName, label: String) -> Dictionary:
-	return {"kind": &"option", "option": option, "label": label, "available": false}
+static func _option_entry(
+	option: StringName, label: String, available: bool = false
+) -> Dictionary:
+	return {"kind": &"option", "option": option, "label": label, "available": available}
+
+
+## `GiveTakeItemMenuData`, the two-row box ITEM opens. Both answers need the live
+## world the overworld owns, so each is reported rather than run here, the way a
+## field move is.
+static func item_menu_items() -> Array:
+	return [
+		{"kind": &"mon_item", "option": OPTION_GIVE, "label": "GIVE", "available": true},
+		{"kind": &"mon_item", "option": OPTION_TAKE, "label": "TAKE", "available": true},
+	]
 
 
 func _party_size() -> int:
@@ -192,21 +211,43 @@ func _confirm() -> void:
 		_status.text = "%s is not available yet." % String(entry.get("label", ""))
 		_status.add_theme_color_override("font_color", MUTED)
 		return
-	if StringName(entry.get("kind", &"")) != &"field_move":
-		return
-	action_chosen.emit({
-		"kind": &"field_move",
-		"move": int(entry.get("move", 0)),
-		"slot": _member_cursor,
-		"name": _display_name(_save.party[_member_cursor]),
-	})
+	match StringName(entry.get("kind", &"")):
+		&"field_move":
+			action_chosen.emit({
+				"kind": &"field_move",
+				"move": int(entry.get("move", 0)),
+				"slot": _member_cursor,
+				"name": _display_name(_save.party[_member_cursor]),
+			})
+		&"mon_item":
+			action_chosen.emit({
+				"kind": &"mon_item",
+				"option": StringName(entry.get("option", &"")),
+				"slot": _member_cursor,
+				"name": _display_name(_save.party[_member_cursor]),
+			})
+		&"option":
+			if StringName(entry.get("option", &"")) == OPTION_ITEM:
+				_open_item_menu()
 
 
 func _cancel() -> void:
+	## `GiveTakePartyMonItem`'s own `VerticalMenu` carry is `.cancel`, which
+	## returns to the submenu it opened over rather than closing the party menu.
+	if _item_menu_open:
+		_open_submenu()
+		return
 	if _submenu_open:
 		_close_submenu()
 		return
 	close_embedded()
+
+
+func _open_item_menu() -> void:
+	_submenu_items = item_menu_items()
+	_submenu_cursor = 0
+	_item_menu_open = true
+	_refresh()
 
 
 func _open_submenu() -> void:
@@ -215,11 +256,13 @@ func _open_submenu() -> void:
 	_submenu_items = submenu_items_for(_data, _save.party[_member_cursor])
 	_submenu_cursor = 0
 	_submenu_open = not _submenu_items.is_empty()
+	_item_menu_open = false
 	_refresh()
 
 
 func _close_submenu() -> void:
 	_submenu_open = false
+	_item_menu_open = false
 	_submenu_items = []
 	_submenu_cursor = 0
 	_refresh()
@@ -229,6 +272,7 @@ func _close_submenu() -> void:
 func submenu_snapshot() -> Dictionary:
 	return {
 		"open": _submenu_open,
+		"item_menu": _item_menu_open,
 		"cursor": _submenu_cursor,
 		"member": _member_cursor,
 		"items": _submenu_items.duplicate(true),

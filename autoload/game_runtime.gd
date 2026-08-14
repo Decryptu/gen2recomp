@@ -141,8 +141,15 @@ func select_game(game_id: StringName) -> bool:
 func _retarget_mods(game_id: StringName) -> void:
 	if Gen2ModHost.instance().target_game() == game_id:
 		return
+	reload_mods(game_id)
+
+
+## The same reload for a list that changed rather than a cartridge that did: a
+## mod switched on or off, or one deleted. One rule covers both, so a switch
+## applies where it was thrown instead of at the next launch.
+func reload_mods(game_id: StringName = selected_game_id) -> Array:
 	Gen2ModHost.reset()
-	load_mods(game_id)
+	return load_mods(game_id)
 
 
 func has_selected_game() -> bool:

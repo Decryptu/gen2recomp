@@ -3,13 +3,13 @@ extends VBoxContainer
 
 ## Installed mods, with an on/off switch and a delete beside each.
 ##
-## Switching one off takes effect on the next start, which the page says rather
-## than pretending a running registration can be withdrawn: a mod has already
-## registered its content and renderers by the time this is reachable.
+## A change to the list is applied where it is made: the host is reset and every
+## entry script runs again, which is the same reload a cartridge change already
+## did. Nothing here can withdraw one registration on its own, so the whole list
+## is reloaded rather than half of it.
 
 signal install_requested
 signal index_requested
-signal mods_changed
 
 var _theme: Gen2LauncherTheme = null
 var _list: VBoxContainer = null
@@ -168,20 +168,30 @@ func _set_enabled(manifest: Gen2ModManifest, on: bool) -> void:
 	if not Gen2ModState.set_enabled(manifest.id, on):
 		_fail("That switch could not be written to %s." % Gen2ModState.PATH)
 		return
-	_note.text = "%s is %s. Restart to apply." % [manifest.name, "on" if on else "off"]
-	mods_changed.emit()
+	_reload()
+	## After the list, which rewrites the note with where mods are loaded from.
+	refresh()
+	_note.text = "%s is %s." % [manifest.name, "on" if on else "off"]
 
 
 func _delete(manifest: Gen2ModManifest) -> void:
 	if not bool(Gen2ModInstaller.uninstall(manifest.id).get("ok", false)):
 		_fail("%s could not be removed." % manifest.name)
 		return
-	# Rediscover so the deleted mod leaves the list. What it already registered
-	# this session stays until restart, which the message says.
-	Gen2ModHost.instance().discover()
-	_note.text = "%s was removed. Restart to apply." % manifest.name
+	_reload()
 	refresh()
-	mods_changed.emit()
+	_note.text = "%s was removed." % manifest.name
+
+
+## The host reload behind either change. Without a runtime there is no host to
+## reload and rediscovering is all the list needs, which is what a page built by
+## a test or a preview gets.
+func _reload() -> void:
+	var runtime: Gen2GameRuntime = Gen2GameRuntime.instance()
+	if runtime == null:
+		Gen2ModHost.instance().discover()
+		return
+	runtime.reload_mods()
 
 
 func _fail(message: String) -> void:

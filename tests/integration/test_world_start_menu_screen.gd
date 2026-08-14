@@ -5,6 +5,9 @@ extends GutTest
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
+## `ITEM_REPEL`, whose effect `UseItem` keys on the item number for.
+const REPEL: int = 0x14
+
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
 
@@ -29,16 +32,24 @@ func after_each() -> void:
 
 
 ## Item 7 carries POTION's real ItemAttributes row, so the pack builds the
-## source's own USE/GIVE/TOSS/QUIT submenu for it and USE reaches .Party.
+## source's own USE/GIVE/TOSS/QUIT submenu for it and USE reaches .Party. Item
+## $14 is REPEL's, which is the number `UseItem`'s own effect keys on: it carries
+## no permission bit at all, so it is the row that reaches SEL.
 func _write_pack_item() -> void:
 	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
 	for raw: Dictionary in items:
-		if int(raw.get("number", 0)) == 7:
-			raw["name"] = "POTION"
-			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
-			raw["permissions"] = Gen2WorldPack.CANT_SELECT
-			raw["field_menu"] = Gen2WorldPack.ITEMMENU_PARTY
-			raw["heal_amount"] = 20
+		match int(raw.get("number", 0)):
+			7:
+				raw["name"] = "POTION"
+				raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+				raw["permissions"] = Gen2WorldPack.CANT_SELECT
+				raw["field_menu"] = Gen2WorldPack.ITEMMENU_PARTY
+				raw["heal_amount"] = 20
+			REPEL:
+				raw["name"] = "REPEL"
+				raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+				raw["permissions"] = 0
+				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CURRENT
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
 
 
@@ -984,3 +995,128 @@ func test_a_dex_search_reaches_its_results_and_back() -> void:
 	dex.handle_button(Gen2Button.B)
 	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.SEARCH)
 	assert_eq(model.search_type_1, 1, "the search screen re-initialises its rows")
+
+
+## `GiveItem`: the party list, then `TryGiveItemToPartymon`'s
+## `.give_item_to_mon`. The item leaves the bag on the same press.
+func test_give_hands_the_item_to_the_chosen_party_member() -> void:
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_pack()
+	_choose_action(host, Gen2WorldPack.ACTION_GIVE)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
+	assert_eq(host.get("_title").text, "GIVE TO")
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	var save: Gen2SaveData = _world_screen._injected_save
+	assert_eq((save.party[0] as Gen2SaveMon).item, 7)
+	assert_eq(_world_screen._world.state.item_quantity(7), 0)
+	assert_eq(
+		String(host.get("_pack_result")),
+		Gen2WorldPack.hold_text(_first_member_name(save), "POTION")
+	)
+
+
+## `PokemonAskSwapItemText` and its yes/no. `.abort` is the no, and it leaves
+## both items where they were.
+func test_a_full_hand_asks_before_the_swap_and_no_takes_nothing() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 1, REPEL: 1}})
+	var save: Gen2SaveData = _world_screen._injected_save
+	(save.party[0] as Gen2SaveMon).item = REPEL
+	var host: Gen2StartMenuScreen = await _open_pack()
+	_choose_action(host, Gen2WorldPack.ACTION_GIVE)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_GIVE_SWAP)
+	assert_eq(
+		host.get("_summary").text,
+		Gen2WorldPack.ask_swap_text(_first_member_name(save), "REPEL")
+	)
+
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_eq((save.party[0] as Gen2SaveMon).item, REPEL)
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+	_choose_action(host, Gen2WorldPack.ACTION_GIVE)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	assert_eq((save.party[0] as Gen2SaveMon).item, 7)
+	assert_eq(_world_screen._world.state.item_quantity(REPEL), 2, "the old one came back")
+
+
+## The party submenu's ITEM: `GiveTakeItemMenuData`'s two rows, TAKE running
+## `TakePartyItem` against the live world and saying so in the map's own box.
+func test_the_party_submenu_takes_a_held_item_back() -> void:
+	await _open_world()
+	var save: Gen2SaveData = _world_screen._injected_save
+	(save.party[0] as Gen2SaveMon).item = 7
+	_world_screen._open_embedded_party()
+	await get_tree().process_frame
+	var party: Gen2PartyScreen = _world_screen._party_host
+	party.handle_button(Gen2Button.A)
+	var items: Array = (party.submenu_snapshot()["items"] as Array)
+	for index: int in items.size():
+		if StringName((items[index] as Dictionary).get("option", &"")) \
+			== Gen2PartyScreen.OPTION_ITEM:
+			party.set("_submenu_cursor", index)
+			break
+	party.handle_button(Gen2Button.A)
+	assert_true(bool(party.submenu_snapshot()["item_menu"]))
+
+	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_null(_world_screen._party_host)
+	assert_eq((save.party[0] as Gen2SaveMon).item, 0)
+	assert_eq(_world_screen._world.state.item_quantity(7), 2)
+
+
+## `SelectMenu`: `CheckRegisteredItem` answers first, and `MayRegisterItemText`
+## is the whole of what an unregistered SELECT does.
+func test_select_says_an_item_may_be_registered_when_none_is() -> void:
+	await _open_world()
+	_world_screen.open_select_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(String(host.get("_pack_result")), Gen2WorldPack.may_register_text())
+
+
+## `RegisterItem` and `UseRegisteredItem`'s `.Current`, which is the whole
+## journey a registered REPEL makes from the pack to the SELECT button.
+func test_a_registered_item_is_used_by_the_select_button() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {REPEL: 1}})
+	var host: Gen2StartMenuScreen = await _open_pack()
+	host.set("_pack_cursor", 1)
+	_choose_action(host, Gen2WorldPack.ACTION_SELECT)
+	assert_eq(String(host.get("_pack_result")), Gen2WorldPack.registered_text("REPEL"))
+	assert_eq(_world_screen._world.state.registered_item(), REPEL)
+
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.B)
+	host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_null(_world_screen._start_menu_host)
+
+	assert_true(_world_screen.press_button(Gen2Button.SELECT))
+	await get_tree().process_frame
+	var select_host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	assert_eq(select_host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(_world_screen._world.state.repel_steps(), 100)
+	assert_eq(_world_screen._world.state.item_quantity(REPEL), 0)
+	assert_eq(
+		_world_screen._world.state.registered_item(), REPEL,
+		"the registration is only cleared where the check looks"
+	)
+
+
+## What the party list shows for the first member: `GetCurNickname`, which falls
+## back to the species name the fixture gave it.
+func _first_member_name(save: Gen2SaveData) -> String:
+	var mon: Gen2SaveMon = save.party[0]
+	if not mon.nickname.is_empty():
+		return mon.nickname
+	return String(_data.species(mon.species).get("name", ""))

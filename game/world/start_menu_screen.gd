@@ -20,7 +20,7 @@ signal closed
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
 	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
-	PACK_TOSS_QUANTITY, PACK_TOSS_CONFIRM,
+	PACK_TOSS_QUANTITY, PACK_TOSS_CONFIRM, PACK_GIVE_SWAP,
 	PACK_RESULT, SAVE_CONFIRM, OPTIONS, MODS, MOD_OPTIONS,
 }
 
@@ -79,6 +79,21 @@ var _teaching: bool = false
 var _toss_prompt: Gen2WorldQuantityPrompt = null
 var _toss_confirm_cursor: int = 0
 
+## GIVE's two directions. `_giving` is the pack's own: the item is chosen and the
+## party list picks who holds it. `_give_target` is `GiveTakePartyMonItem`'s,
+## where the Pokemon is already chosen and the pack list is `DepositSellPack`,
+## which acts on the item rather than opening a submenu over it.
+var _giving: bool = false
+var _give_target: int = -1
+## `PokemonAskSwapItemText`'s yes/no and who it is about.
+var _swap_cursor: int = 0
+var _swap_target: int = -1
+## Whether the USE running is `UseRegisteredItem`'s rather than the pack's own,
+## which is the one thing the two jumptables disagree about: their refusals.
+var _using_registered: bool = false
+## An entry point asked for before the panel was built, run once it is.
+var _pending_entry: Callable = Callable()
+
 ## ForgetMove's list and the two yes/no boxes around it. The party index is held
 ## because the second teach_tm_hm() call has to name the same Pokémon the first
 ## one refused.
@@ -113,6 +128,10 @@ func _ready() -> void:
 	_build_ui()
 	if _menu != null:
 		_open_list_mode()
+	if _pending_entry.is_valid():
+		var entry: Callable = _pending_entry
+		_pending_entry = Callable()
+		entry.call()
 
 
 ## `save_action` is called with no arguments and must return a Dictionary
@@ -151,6 +170,60 @@ func set_party_context(save: Gen2SaveData, persist: bool = true) -> void:
 ## way the source's wBattleMenuCursorPosition survives a reopen.
 func cursor() -> int:
 	return _menu.cursor if _menu != null else 0
+
+
+## `GiveTakePartyMonItem`'s GIVE, which opens the pack over a Pokemon the player
+## has already chosen. [method open] and [method set_party_context] come first,
+## the same way the start menu's own pack does.
+func open_give(party_index: int) -> void:
+	_give_target = party_index
+	if _defer_entry(open_give.bind(party_index)):
+		return
+	_open_pack_mode()
+
+
+## `SelectMenu`. `CheckRegisteredItem` answers first, and its `.NotRegistered`
+## carry is `MayRegisterItemText` rather than a pack at all; otherwise
+## `UseRegisteredItem` runs `CheckItemMenu`'s jumptable over the registered item,
+## which is the same one the pack's own USE reads.
+func open_registered_item() -> void:
+	if _defer_entry(open_registered_item):
+		return
+	var item: int = Gen2WorldBagHost.registered_item(_world)
+	_open_pack_mode()
+	_using_registered = true
+	if item <= 0:
+		_show_pack_result(Gen2WorldPack.may_register_text(), false)
+		return
+	if not _select_pack_item(item):
+		_show_pack_result(Gen2WorldPack.may_register_text(), false)
+		return
+	_confirm_use()
+
+
+## Holds an entry point until the panel exists, the way [method open] holds the
+## list. A caller that opens this screen before adding it to the tree is a
+## preview or a test; the overworld adds it first.
+func _defer_entry(entry: Callable) -> bool:
+	if is_inside_tree() and _options != null:
+		return false
+	_pending_entry = entry
+	return true
+
+
+## Puts the pack cursor on one item, which is what `CheckRegisteredItem` finding
+## the entry in its pocket amounts to here.
+func _select_pack_item(item: int) -> bool:
+	for pocket_index: int in _pack_pockets.size():
+		var items: Array = (_pack_pockets[pocket_index] as Dictionary).get("items", [])
+		for index: int in items.size():
+			if int((items[index] as Dictionary).get("item", 0)) != item:
+				continue
+			_pack_pocket_index = pocket_index
+			_pack_cursor = index
+			_render_pack()
+			return true
+	return false
 
 
 func handle_button(button: int) -> bool:
@@ -211,6 +284,10 @@ func _move(direction: Vector2i) -> void:
 			if direction.y != 0 or direction.x != 0:
 				_toss_confirm_cursor = 1 - _toss_confirm_cursor
 				_render_toss_confirm()
+		Mode.PACK_GIVE_SWAP:
+			if direction.y != 0 or direction.x != 0:
+				_swap_cursor = 1 - _swap_cursor
+				_render_give_swap()
 		Mode.PACK_TARGET:
 			if direction.y != 0 and not _party_targets().is_empty():
 				_target_cursor = wrapi(
@@ -250,7 +327,13 @@ func _confirm() -> void:
 		Mode.LIST:
 			_confirm_list()
 		Mode.PACK:
-			if not _current_pocket_items().is_empty():
+			if _current_pocket_items().is_empty():
+				return
+			## `DepositSellPack` acts on the item it is given rather than
+			## opening a submenu over it, which is the pack `.GiveItem` opens.
+			if _give_target >= 0:
+				_give_selected_item(_give_target)
+			else:
 				_open_item_mode()
 		Mode.PACK_ITEM:
 			_confirm_item_action()
@@ -264,13 +347,22 @@ func _confirm() -> void:
 			_confirm_stop_learning()
 		Mode.PACK_TOSS_CONFIRM:
 			_confirm_toss()
+		Mode.PACK_GIVE_SWAP:
+			_confirm_give_swap()
 		Mode.PACK_TARGET:
 			if _teaching:
 				_teach_selected_item(_target_cursor)
+			elif _giving:
+				_give_selected_item(_target_cursor)
 			else:
 				_use_selected_item(_target_cursor)
+		## A pack opened over one Pokemon has no menu behind it to go back to:
+		## the party screen closed when it asked for this one.
 		Mode.PACK_RESULT:
-			_open_pack_mode(false)
+			if _give_target >= 0:
+				closed.emit()
+			else:
+				_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
 			_confirm_save()
 		## Options_Cancel is the only handler that reads A.
@@ -292,9 +384,17 @@ func _cancel() -> void:
 		Mode.LIST:
 			closed.emit()
 		Mode.PACK:
-			_open_list_mode()
-		Mode.PACK_ITEM, Mode.PACK_RESULT, Mode.PACK_TEACH:
+			if _give_target >= 0:
+				closed.emit()
+			else:
+				_open_list_mode()
+		Mode.PACK_ITEM, Mode.PACK_TEACH:
 			_open_pack_mode(false)
+		Mode.PACK_RESULT:
+			if _give_target >= 0:
+				closed.emit()
+			else:
+				_open_pack_mode(false)
 		## B at ForgetMove's ask is YesNoBox's no, and B in the move list is its
 		## own .cancel's scf. Both are the carry LearnMove.cancel tests.
 		Mode.PACK_FORGET_ASK, Mode.PACK_FORGET:
@@ -307,7 +407,7 @@ func _cancel() -> void:
 		## B at the yes/no is `YesNoBox`'s no, which is the carry `TossMenu`
 		## returns on. The submenu is already closed by then, so it lands back on
 		## the pocket list rather than on the item's own menu.
-		Mode.PACK_TOSS_CONFIRM:
+		Mode.PACK_TOSS_CONFIRM, Mode.PACK_GIVE_SWAP:
 			_open_pack_mode(false)
 		Mode.SAVE_CONFIRM:
 			_open_list_mode()
@@ -504,6 +604,9 @@ func _adjust_mod_option(rows: Array, delta: int) -> void:
 ## same way. The item list is always rebuilt, since a USE changed a quantity.
 func _open_pack_mode(reset: bool = true) -> void:
 	_mode = Mode.PACK
+	_giving = false
+	_teaching = false
+	_using_registered = false
 	_pack_pockets = Gen2WorldPack.build(_data, _world.state) if _world != null else []
 	if reset:
 		_pack_pocket_index = 0
@@ -511,7 +614,9 @@ func _open_pack_mode(reset: bool = true) -> void:
 	_pack_pocket_index = clampi(_pack_pocket_index, 0, maxi(_pack_pockets.size() - 1, 0))
 	_pack_cursor = clampi(_pack_cursor, 0, maxi(_current_pocket_items().size() - 1, 0))
 	_status.text = ""
-	_footer.text = "Left and right: pocket    Up and down: move    A: choose    B: back"
+	_footer.text = "Left and right: pocket    Up and down: move    A: %s    B: back" % (
+		"give" if _give_target >= 0 else "choose"
+	)
 	_render_pack()
 
 
@@ -543,7 +648,7 @@ func _move_pack_cursor(delta: int) -> void:
 
 func _render_pack() -> void:
 	var pocket: Dictionary = _current_pocket()
-	_title.text = "PACK"
+	_title.text = "GIVE" if _give_target >= 0 else "PACK"
 	_summary.text = String(pocket.get("name", ""))
 	var items: Array = pocket.get("items", [])
 	if items.is_empty():
@@ -568,6 +673,11 @@ func _open_item_mode() -> void:
 	if item.is_empty():
 		return
 	_mode = Mode.PACK_ITEM
+	## Both are answers the party list ahead is still waiting to give. Leaving
+	## either set here is what let a TM's cancelled ChooseMonToLearnTMHM teach
+	## itself from the next item's own `.Party` list.
+	_teaching = false
+	_giving = false
 	_item_actions = Gen2WorldPack.item_submenu(_data, int(item.get("item", 0)))
 	_item_cursor = 0
 	_status.text = ""
@@ -578,28 +688,137 @@ func _open_item_mode() -> void:
 
 func _render_item_menu() -> void:
 	_title.text = "PACK"
-	_render_options(_item_actions, _item_cursor, func(entry: Dictionary) -> String:
-		var label: String = String(entry.get("label", ""))
-		return label if bool(entry.get("available", false)) else "%s (unavailable)" % label
+	_render_options(_item_actions, _item_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
 	)
 
 
 func _confirm_item_action() -> void:
 	if _item_cursor < 0 or _item_cursor >= _item_actions.size():
 		return
-	var entry: Dictionary = _item_actions[_item_cursor]
-	var action: StringName = StringName(entry.get("action", &""))
-	if action == Gen2WorldPack.ACTION_QUIT:
+	var action: StringName = StringName(
+		(_item_actions[_item_cursor] as Dictionary).get("action", &"")
+	)
+	match action:
+		Gen2WorldPack.ACTION_QUIT:
+			_open_pack_mode(false)
+		Gen2WorldPack.ACTION_TOSS:
+			_open_toss_quantity()
+		Gen2WorldPack.ACTION_GIVE:
+			_open_give_target()
+		Gen2WorldPack.ACTION_SELECT:
+			_register_selected_item()
+		_:
+			_confirm_use()
+
+
+## `GiveItem`'s own party list, which `.NoPokemon` answers when there is none.
+func _open_give_target() -> void:
+	if _party_targets().is_empty():
+		_show_pack_result(_pack_text(TEXT_NO_MON), false)
+		return
+	_giving = true
+	_open_target_mode()
+
+
+## `RegisterItem`. `CheckSelectableItem` has already decided whether SEL is in
+## the submenu at all, so the refusal here is only reachable from a caller that
+## is not that submenu.
+func _register_selected_item() -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	if _world == null:
+		_show_pack_result("No world is loaded.", false)
+		return
+	var result: Dictionary = Gen2WorldBagHost.register(
+		_world, _pack_save, int(item.get("item", 0)), _pack_persist
+	)
+	if not bool(result.get("ok", false)):
+		if StringName(result.get("reason", &"")) == &"item_cannot_be_registered":
+			_show_pack_result(Gen2WorldPack.cant_register_text(), false)
+			return
+		_show_pack_result(
+			"Could not register that (%s)." % String(result.get("reason", "")), false
+		)
+		return
+	_show_pack_result(Gen2WorldPack.registered_text(String(result.get("name", ""))), true)
+
+
+## `TryGiveItemToPartymon`, from either direction: the pack's GIVE names the
+## Pokemon last and `GiveTakePartyMonItem`'s GIVE names the item last. A hand
+## that is already full stops at `PokemonAskSwapItemText` with nothing written.
+func _give_selected_item(party_index: int, swap: bool = false) -> void:
+	var item: Dictionary = _selected_item()
+	if item.is_empty():
+		return
+	if _pack_save == null or _world == null:
+		_show_pack_result("No save is loaded.", false)
+		return
+	var number: int = int(item.get("item", 0))
+	if not Gen2WorldPack.can_hold(_data, number):
+		_show_pack_result(Gen2WorldPack.cant_hold_text(), false)
+		return
+	var result: Dictionary = Gen2WorldBagHost.give_to_party(
+		_world, _pack_save, number, party_index, swap, _pack_persist
+	)
+	if bool(result.get("ok", false)):
+		var name: String = _target_name(party_index)
+		var held_name: String = String(result.get("held_name", ""))
+		_show_pack_result(
+			Gen2WorldPack.swap_text(name, held_name, String(result.get("name", ""))) \
+				if int(result.get("held", 0)) > 0 \
+				else Gen2WorldPack.hold_text(name, String(result.get("name", ""))),
+			true
+		)
+		return
+	var reason: StringName = StringName(result.get("reason", &""))
+	if reason == &"already_holding":
+		_open_give_swap(party_index, String(
+			(result.get("details", {}) as Dictionary).get("held_name", "")
+		))
+		return
+	_show_pack_result(_give_refusal(reason, party_index), false)
+
+
+func _give_refusal(reason: StringName, party_index: int) -> String:
+	match reason:
+		&"cannot_hold_egg":
+			return Gen2WorldPack.egg_cant_hold_text()
+		&"item_cannot_be_held":
+			return Gen2WorldPack.cant_hold_text()
+		&"bag_full":
+			return Gen2WorldPack.storage_full_text()
+		&"insufficient_item_quantity":
+			return "You have none of those."
+	return "%s could not be given that (%s)." % [_target_name(party_index), String(reason)]
+
+
+func _open_give_swap(party_index: int, held_name: String) -> void:
+	_mode = Mode.PACK_GIVE_SWAP
+	_swap_cursor = 0
+	_swap_target = party_index
+	_status.text = ""
+	_footer.text = "Up and down: move    A: choose    B: back"
+	_render_give_swap(held_name)
+
+
+func _render_give_swap(held_name: String = "") -> void:
+	_title.text = "GIVE"
+	if not held_name.is_empty():
+		_summary.text = Gen2WorldPack.ask_swap_text(_target_name(_swap_target), held_name)
+	_render_options([{"label": "YES"}, {"label": "NO"}], _swap_cursor,
+		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
+	)
+
+
+## The answer to `PokemonAskSwapItemText`. Its no is `.abort`, which leaves both
+## items where they were.
+func _confirm_give_swap() -> void:
+	if _swap_cursor != 0:
 		_open_pack_mode(false)
 		return
-	if not bool(entry.get("available", false)):
-		_status.text = "%s is not available yet." % String(entry.get("label", ""))
-		_status.add_theme_color_override("font_color", MUTED)
-		return
-	if action == Gen2WorldPack.ACTION_TOSS:
-		_open_toss_quantity()
-		return
-	_confirm_use()
+	_give_selected_item(_swap_target, true)
 
 
 ## `UseItem`'s jumptable: `.Oak` refuses, `.Current` and `.Field` apply straight
@@ -848,12 +1067,12 @@ func _open_target_mode() -> void:
 	_mode = Mode.PACK_TARGET
 	_target_cursor = clampi(_target_cursor, 0, maxi(_party_targets().size() - 1, 0))
 	_status.text = ""
-	_footer.text = "Up and down: move    A: use    B: back"
+	_footer.text = "Up and down: move    A: %s    B: back" % ("give" if _giving else "use")
 	_render_targets()
 
 
 func _render_targets() -> void:
-	_title.text = "USE ON"
+	_title.text = "GIVE TO" if _giving else "USE ON"
 	_summary.text = String(_selected_item().get("name", ""))
 	_render_options(_party_targets(), 0 if _party_targets().is_empty() else _target_cursor,
 		func(entry: Dictionary) -> String:
@@ -878,7 +1097,7 @@ func _use_selected_item(party_index: int) -> void:
 		_world, _pack_save, number, party_index, _pack_persist
 	)
 	if not bool(result.get("ok", false)):
-		_show_pack_result(_use_refusal(StringName(result.get("reason", &""))), false)
+		_show_pack_result(_use_refusal(StringName(result.get("reason", &"")), number), false)
 		return
 	_show_pack_result(_use_summary(item, result), true)
 
@@ -899,12 +1118,19 @@ func _use_summary(item: Dictionary, result: Dictionary) -> String:
 	return "%s was used." % name
 
 
-func _use_refusal(reason: StringName) -> String:
+## `UseItem` and `UseRegisteredItem` refuse the same item in two words: the
+## pack's `.Field` falls through to `.Oak` when the effect did nothing, and
+## SELECT's `.Overworld` reaches `CantUseItem` instead.
+func _use_refusal(reason: StringName, item: int) -> String:
+	if _using_registered:
+		return Gen2WorldPack.cant_use_text()
 	match reason:
 		&"item_has_no_effect":
 			return "It won't have any effect."
 		&"insufficient_item_quantity":
 			return "You have none of those."
+	if Gen2WorldPack.field_use_kind(_data, item) == Gen2WorldPack.ITEMMENU_CLOSE:
+		return _pack_text(TEXT_OAK)
 	return "Can't use that here: %s" % String(reason)
 
 
