@@ -50,6 +50,7 @@ var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
 var _town_map_from_request: bool = false
 
+var _panel: PanelContainer = null
 var _title: Label = null
 var _summary: Label = null
 var _options: VBoxContainer = null
@@ -196,16 +197,16 @@ func _build_ui() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(500, 300)
-	panel.add_theme_stylebox_override("panel", _panel_style())
-	center.add_child(panel)
+	_panel = PanelContainer.new()
+	_panel.custom_minimum_size = Vector2(500, 300)
+	_panel.add_theme_stylebox_override("panel", _panel_style())
+	center.add_child(_panel)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_top", 20)
 	margin.add_theme_constant_override("margin_right", 24)
 	margin.add_theme_constant_override("margin_bottom", 20)
-	panel.add_child(margin)
+	_panel.add_child(margin)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 10)
 	margin.add_child(content)
@@ -403,23 +404,38 @@ func _time_of_day_label(hour24: int) -> String:
 func _open_town_map(from_request: bool) -> void:
 	_mode = MODE.TOWN_MAP
 	_town_map_from_request = from_request
-	_title.visible = false
-	_summary.visible = false
-	_options.visible = false
-	_status.visible = false
-	_footer.visible = false
+	# The region map is the whole screen, so the card list's own panel goes with
+	# its labels; the scrim behind it stays as the overlay's backdrop.
+	_panel.visible = false
 	_town_map = Gen2TownMapScreen.new()
-	_town_map.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_town_map.z_index = 5
 	add_child(_town_map)
 	_town_map.closed.connect(_on_town_map_closed)
-	_town_map.open(_world.landmark(), Gen2WorldState.is_crystal_profile(_data))
+	# The Pokegear's own MAP card when the Pokegear opened it, `_TownMap`'s
+	# corner box when `OverworldTownMap` did.
+	var owned: Array = []
+	for card: Dictionary in _pokegear_cards:
+		owned.append(StringName(card.get("card", &"")))
+	var screen: StringName = Gen2TownMap.SCREEN_TOWN_MAP if from_request \
+		else Gen2TownMap.SCREEN_POKEGEAR_CARD
+	var opened: bool = _town_map.open(
+		_data,
+		_world.landmark(),
+		_world.state.hall_of_fame(),
+		screen,
+		owned,
+		_save != null and _save.gender == Gen2SaveData.GENDER_FEMALE,
+		_world.map_time_of_day(),
+	)
+	if not opened:
+		_on_town_map_closed()
 
 
 func _on_town_map_closed() -> void:
 	if _town_map != null:
 		_town_map.queue_free()
 		_town_map = null
+	_panel.visible = true
 	if _town_map_from_request:
 		_town_map_from_request = false
 		_finish_runtime({"ok": true, "script_value": 1})

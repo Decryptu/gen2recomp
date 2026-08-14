@@ -1840,7 +1840,10 @@ func _open_trainer_card() -> void:
 		_refresh_labels()
 		return
 	host.z_index = 10
-	add_child(host)
+	## Into the hardware screen, the way the Hall of Fame goes: the card sizes
+	## itself in the 160x144 space, so adding it to this Control instead would
+	## draw it at one window pixel per hardware pixel in the corner.
+	_screen.display(host)
 	host.closed.connect(_on_trainer_card_closed)
 	_trainer_card_host = host
 	_script_prompt = "Trainer card open"

@@ -118,6 +118,7 @@ to check without writing.
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
+| Region map | The Pokegear's three graphics sheets, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |
 | Wild encounters | Normal/swarm grass and water, 13 fishing groups with day/night substitutions, 16-row roaming graph, map-linked rates and slots, time-of-day selection, surf variance and repel checks |
@@ -255,10 +256,13 @@ Pokegear, Player, Save, Options and Exit.
   types over species already caught. The Unown dex and the entry screen's AREA,
   CRY and PRNT buttons are not built.
 - **Pokegear** opens its card list in the source's clock, map, phone, radio
-  order, showing only owned cards; the map card keeps its position marked
-  unavailable. The radio card tunes with left and right over the cartridge's
-  two-step dial, and a tuned station keeps playing after the Pokegear closes,
-  which is how the Poke Flute channel wakes Vermilion's Snorlax.
+  order, showing only owned cards. The MAP card is the cartridge's own region
+  map on the hardware tile grid: the Johto or Kanto tilemap coloured by tile
+  class, the landmark name in the box the source puts it in, the cursor walking
+  the region's own window, and the player icon standing where the map says. The
+  radio card tunes with left and right over the cartridge's two-step dial, and a
+  tuned station keeps playing after the Pokegear closes, which is how the Poke
+  Flute channel wakes Vermilion's Snorlax.
 - **Pack** opens each item's own source submenu and can use or throw away one: a
   Potion asks which Pokemon and heals it, a Repel sets its step count, and TOSS
   runs the cartridge's own ask, quantity dial, yes/no and `TossItem`. GIVE and
@@ -303,12 +307,13 @@ all three games unless its row says otherwise:
 
 | Tool | Checks |
 |---|---|
-| `preview_world_services.gd <png> [mart\|apricorn] [presses]` | the mart or Kurt's Apricorn overlay, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
+| `preview_world_services.gd <png> [mart\|apricorn\|town_map\|trainer_card] [presses]` | the mart, Kurt's Apricorn overlay, the Pokegear's MAP card or the trainer card, over a deterministic integration cache. `presses` is a comma-separated button list driven into the overlay before the shot, which is how the second box is photographed |
 | `preview_fishing.gd <png> [game map]` | fishing, for example `silver 2 5`; one-argument form is a fixture smoke test |
 | `preview_party.gd <game> <png> [party\|box] [presses]` | the party and PC-box overlays as the overworld stacks them, over a development save. `presses` is a `u,d,l,r,a,b` list driven in before the shot, and several lists separated by `;` write one file each |
 | `preview_intro.gd <game> <png> [copyright\|presents\|gender\|speech\|beat] [steps]` | the new game's opening screens at hardware resolution: the copyright screen and the GameFreak animation by source frame, the gender question, and any frame of `OakSpeech` by source frame or by button press, so a fade, a bounce or a pic move can be looked at one frame at a time |
 | `preview_mom_scene.gd <game> [png] [frame]` | `MeetMomRightScript` through the real world screen, frame by frame: the script's state, the object `applymovement` is walking and whether the text box is up. The frames the emote, the walk and the box first appear on are pinned per profile, so a run that moves one exits non-zero. `frame` picks which one the `png` is of |
 | `preview_title.gd <game> <png> [frame;frame]` | the title screen at any source frame: Crystal's twenty-eight-frame interlaced entrance and its falling crystal, the Suicune cycle, Gold's Ho-Oh and Silver's Lugia over the scrolling clouds with the trail streaming behind |
+| `preview_town_map.gd <game> <png> [landmark] [town_map\|card] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box or the Pokegear card's icon row, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache; `page` is how many panels to advance past |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
@@ -329,6 +334,7 @@ all three games unless its row says otherwise:
 | `validate_whirlpool.gd` | the whirlpool block table, the forced-tile cell census, and Dragon's Den B1F's whirlpool |
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
 | `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
+| `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, and both frames composing |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
 | `validate_radio_tower.gd` | Blackthorn Gym's door and its only approach, Radio Tower 2F's stairs and 3F's card-key shutter, and the switch room's eleven doors and the one chain to the warehouse |

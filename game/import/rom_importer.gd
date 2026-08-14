@@ -300,6 +300,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not title["ok"]:
 		return title
 
+	var town_map: Dictionary = verify_town_map(rom, layout)
+	if not town_map["ok"]:
+		return town_map
+
 	var menu_text: Dictionary = verify_menu_text(rom, layout)
 	if not menu_text["ok"]:
 		return menu_text
@@ -774,6 +778,148 @@ static func _verify_title_run(
 			],
 		}
 	return {"ok": true, "sheet": sheet, "end": at + lz.consumed}
+
+
+## The region map, identified by content rather than by bounds.
+##
+## The two region tilemaps pin the graphic they are drawn out of: every one of
+## their 720 cells names a tile inside `TownMapGFX`'s 48, which no unrelated
+## 360-byte run does, and each ends on its own `-1`. The palette map is checked
+## the same way, against the six palettes it selects between, and the palette run
+## by the off-white all six open on. The landmark table checks its two ends and
+## every name pointer in between: `SPECIAL` sits at (0,0) with the only zeroed
+## record, the last row is the Fast Ship, and a pointer that leaves the table's
+## own bank is not a name.
+static func verify_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("town_map", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No region map on this cartridge."}
+
+	for run: Array in [
+		["town map graphic", int(entry["gfx"]), RomLayout.TOWN_MAP_TILES],
+		["Pokegear graphic", int(entry["pokegear_gfx"]), RomLayout.POKEGEAR_TILES],
+		["Pokegear sprites", int(entry["sprites"]), RomLayout.POKEGEAR_SPRITE_TILES],
+	]:
+		var lz := Gen2Lz.new()
+		var sheet: PackedByteArray = lz.decompress(rom.bytes(), int(run[1]))
+		var wanted: int = int(run[2]) * Gen2Tiles.TILE_BYTES
+		if sheet.size() != wanted:
+			return {
+				"ok": false,
+				"message": "The %s decompressed to %d bytes, wanted %d." % [
+					run[0], sheet.size(), wanted,
+				],
+			}
+
+	for region: String in ["johto", "kanto"]:
+		var cells: PackedByteArray = read_town_map_region(rom, layout, region)
+		if cells.size() != RomLayout.TOWN_MAP_REGION_CELLS:
+			return {
+				"ok": false,
+				"message": "The %s map is %d cells, wanted %d." % [
+					region, cells.size(), RomLayout.TOWN_MAP_REGION_CELLS,
+				],
+			}
+		for cell: int in cells:
+			if cell >= RomLayout.TOWN_MAP_TILES:
+				return {
+					"ok": false,
+					"message": "The %s map names tile $%02X, past its %d tiles." % [
+						region, cell, RomLayout.TOWN_MAP_TILES,
+					],
+				}
+
+	var palette_map: int = int(entry["palette_map"])
+	if not rom.in_bounds(palette_map, RomLayout.TOWN_MAP_PALETTE_MAP_BYTES):
+		return {"ok": false, "message": "The region palette map is outside the cartridge."}
+	for index: int in RomLayout.TOWN_MAP_PALETTE_MAP_BYTES:
+		var packed: int = rom.u8(palette_map + index)
+		if (packed & 0x0F) >= RomLayout.TOWN_MAP_PALETTES \
+			or (packed >> 4) >= RomLayout.TOWN_MAP_PALETTES:
+			return {
+				"ok": false,
+				"message": "Region palette map byte %d is $%02X, past its %d palettes." % [
+					index, packed, RomLayout.TOWN_MAP_PALETTES,
+				],
+			}
+
+	for name: String in ["palette", "palette_female"]:
+		var at: int = int(entry.get(name, -1))
+		if at < 0:
+			continue
+		var colors: int = RomLayout.TOWN_MAP_PALETTES * RomLayout.TOWN_MAP_PALETTE_COLORS
+		if not rom.in_bounds(at, colors * Gen2Palette.COLOR_BYTES):
+			return {"ok": false, "message": "The region %s is outside the cartridge." % name}
+		for palette: int in RomLayout.TOWN_MAP_PALETTES:
+			var first: int = rom.u16le(
+				at + palette * RomLayout.TOWN_MAP_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+			)
+			if first != RomLayout.TOWN_MAP_PALETTE_FIRST_COLOR:
+				return {
+					"ok": false,
+					"message": "Region %s %d opens on $%04X, expected $%04X." % [
+						name, palette, first, RomLayout.TOWN_MAP_PALETTE_FIRST_COLOR,
+					],
+				}
+
+	return verify_landmarks(rom, layout)
+
+
+static func verify_landmarks(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var count: int = RomLayout.landmark_count(layout)
+	var bank: int = RomLayout.bank_of(RomLayout.landmark_offset(layout, 0))
+	if not rom.in_bounds(
+		RomLayout.landmark_offset(layout, 0), count * RomLayout.LANDMARK_RECORD_SIZE
+	):
+		return {"ok": false, "message": "The landmark table is outside the cartridge."}
+	for index: int in count:
+		var record: int = RomLayout.landmark_offset(layout, index)
+		var at: int = RomLayout.landmark_name_offset(rom, layout, index)
+		if RomLayout.bank_of(at) != bank:
+			return {
+				"ok": false,
+				"message": "Landmark %d's name pointer leaves bank $%02X." % [index, bank],
+			}
+		var zeroed: bool = rom.u8(record) == 0 and rom.u8(record + 1) == 0
+		if zeroed != (index == 0):
+			return {
+				"ok": false,
+				"message": "Landmark %d is at (0,0); only LANDMARK_SPECIAL is." % index,
+			}
+	var first: String = Gen2Text.decode(
+		rom.bytes(), RomLayout.landmark_name_offset(rom, layout, 0),
+		RomLayout.LANDMARK_NAME_BYTES
+	)
+	if first != "SPECIAL":
+		return {"ok": false, "message": "Landmark 0: expected SPECIAL, read %s." % first}
+	var last: String = Gen2Text.decode(
+		rom.bytes(), RomLayout.landmark_name_offset(rom, layout, count - 1),
+		RomLayout.LANDMARK_NAME_BYTES
+	)
+	if last != "FAST SHIP":
+		return {
+			"ok": false,
+			"message": "Landmark %d: expected FAST SHIP, read %s." % [count - 1, last],
+		}
+	return {"ok": true, "message": "Region map verified."}
+
+
+## `FillTownMap`'s own loop: tile numbers until `-1`, which is not copied.
+static func read_town_map_region(
+	rom: RomFile, layout: Dictionary, region: String
+) -> PackedByteArray:
+	var at: int = int((layout.get("town_map", {}) as Dictionary).get(region, -1))
+	var out: PackedByteArray = PackedByteArray()
+	if at < 0:
+		return out
+	for step: int in RomLayout.TOWN_MAP_REGION_CELLS + 1:
+		if not rom.in_bounds(at + step, 1):
+			return PackedByteArray()
+		var byte: int = rom.u8(at + step)
+		if byte == RomLayout.TOWN_MAP_REGION_TERMINATOR:
+			return out
+		out.append(byte)
+	return PackedByteArray()
 
 
 ## `LoadTitleScreenTilemap`'s own loop: bytes until `-1`, which is not copied.
@@ -2569,6 +2715,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
 		"title": _import_title(rom, layout),
+		"town_map": _import_town_map(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
@@ -3223,6 +3370,83 @@ func _import_title(rom: RomFile, layout: Dictionary) -> Dictionary:
 	}
 
 
+## The region map's data half: both region tilemaps, `TownMapPals`' palette map,
+## the landmark table and the palettes the six tile classes are drawn through.
+##
+## A landmark's name is kept as the codes it is rather than as text, because
+## `TownMap_ConvertLineBreakCharacters` rewrites one of those codes before the
+## name is placed and a decoded string cannot say which byte it was: `<BSP>` is a
+## space everywhere else and a ligature ahead of it moves the character index off
+## the tile index.
+func _import_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("town_map", {})
+	if entry.is_empty():
+		return {}
+	var out: Dictionary = {
+		"johto": Array(read_town_map_region(rom, layout, "johto")),
+		"kanto": Array(read_town_map_region(rom, layout, "kanto")),
+		"palette_map": Array(
+			rom.slice(int(entry["palette_map"]), RomLayout.TOWN_MAP_PALETTE_MAP_BYTES)
+		),
+		"palettes": _packed_palette(
+			rom, int(entry["palette"]),
+			RomLayout.TOWN_MAP_PALETTES * RomLayout.TOWN_MAP_PALETTE_COLORS
+		),
+		"landmarks": _import_landmarks(rom, layout),
+	}
+	if int(entry.get("palette_female", -1)) >= 0:
+		out["palettes_female"] = _packed_palette(
+			rom, int(entry["palette_female"]),
+			RomLayout.TOWN_MAP_PALETTES * RomLayout.TOWN_MAP_PALETTE_COLORS
+		)
+	return out
+
+
+func _import_landmarks(rom: RomFile, layout: Dictionary) -> Array:
+	var out: Array = []
+	for index: int in RomLayout.landmark_count(layout):
+		var record: int = RomLayout.landmark_offset(layout, index)
+		var at: int = RomLayout.landmark_name_offset(rom, layout, index)
+		var codes: Array = []
+		for step: int in RomLayout.LANDMARK_NAME_BYTES:
+			var code: int = rom.u8(at + step)
+			if code == Gen2Text.TERMINATOR:
+				break
+			codes.append(code)
+		out.append({
+			# The stored bytes carry the hardware's own OAM offsets; the screen
+			# positions are what a caller wants.
+			"x": rom.u8(record) - RomLayout.LANDMARK_OAM_X,
+			"y": rom.u8(record + 1) - RomLayout.LANDMARK_OAM_Y,
+			"codes": codes,
+		})
+	return out
+
+
+## `Pokegear_LoadGFX`'s three LZ runs, each as one strip of tiles.
+func _import_town_map_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("town_map", {})
+	if entry.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for run: Array in [
+		["town_map", int(entry["gfx"]), RomLayout.TOWN_MAP_TILES],
+		["pokegear", int(entry["pokegear_gfx"]), RomLayout.POKEGEAR_TILES],
+		["pokegear_sprites", int(entry["sprites"]), RomLayout.POKEGEAR_SPRITE_TILES],
+	]:
+		var name: String = String(run[0])
+		var tiles: int = int(run[2])
+		var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(run[1]))
+		if _lz.failed or raw.size() < tiles * Gen2Tiles.TILE_BYTES:
+			return {}
+		var indices: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
+			return {}
+		out[name] = _strip_sheet_entry(tiles)
+	return out
+
+
 ## The title screen's graphics, each as one strip of tiles.
 ##
 ## Every one but the trail is an LZ run, so they cannot go through the fixed
@@ -3261,11 +3485,11 @@ func _import_title_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
 		var indices: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
 		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
 			return {}
-		out[name] = _title_sheet_entry(tiles)
+		out[name] = _strip_sheet_entry(tiles)
 	return out
 
 
-func _title_sheet_entry(tiles: int) -> Dictionary:
+func _strip_sheet_entry(tiles: int) -> Dictionary:
 	return {
 		"width": tiles * Gen2Tiles.TILE_WIDTH,
 		"height": Gen2Tiles.TILE_HEIGHT,
@@ -3504,6 +3728,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	var written: Dictionary = _import_shrink_pics(rom, layout)
 	written.merge(_import_ditto_sheet(rom, layout), true)
 	written.merge(_import_title_sheets(rom, layout), true)
+	written.merge(_import_town_map_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

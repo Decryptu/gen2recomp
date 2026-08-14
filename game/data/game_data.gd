@@ -55,6 +55,7 @@ var _copyright_palette: Array = []
 var _text_bg_palette: Array = []
 var _presents_palettes: Dictionary = {}
 var _title: Dictionary = {}
+var _town_map: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -125,6 +126,8 @@ static func open_directory(path: String) -> GameData:
 	data._presents_palettes = presents_palettes if presents_palettes is Dictionary else {}
 	var title: Variant = manifest.get("title", {})
 	data._title = title if title is Dictionary else {}
+	var town_map: Variant = manifest.get("town_map", {})
+	data._town_map = town_map if town_map is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1115,6 +1118,82 @@ func title_tilemap() -> PackedByteArray:
 		return out
 	for code: Variant in stored as Array:
 		out.append(int(code))
+	return out
+
+
+## `JohtoMap` or `KantoMap`: one tile number per cell of the whole screen, in
+## `FillTownMap`'s own order. Empty on a cache imported without the region map.
+func town_map_region(region: String) -> PackedByteArray:
+	var stored: Variant = _town_map.get(region, [])
+	var out := PackedByteArray()
+	if not stored is Array:
+		return out
+	for cell: Variant in stored as Array:
+		out.append(int(cell))
+	return out
+
+
+## `TownMapPals`: which of the six palettes a region-map tile is drawn through.
+## Its table covers $00 to $5f; $60 and above take palette 0, and so does a cache
+## that has no palette map.
+func town_map_palette_of(tile: int) -> int:
+	var stored: Variant = _town_map.get("palette_map", [])
+	if not stored is Array or tile < 0 or tile >= RomLayout.TOWN_MAP_PALETTE_MAP_LIMIT:
+		return 0
+	var packed: Array = stored
+	@warning_ignore("integer_division")
+	var index: int = tile / 2
+	if index >= packed.size():
+		return 0
+	var byte: int = int(packed[index])
+	return (byte >> 4) & 0x07 if tile & 1 else byte & 0x07
+
+
+## One of the six region-map palettes. [param female] is Kris's own city colours,
+## which only Crystal ships; every other palette of the pair is the same.
+func town_map_palette(slot: int, female: bool = false) -> PackedColorArray:
+	var name: String = "palettes_female" if female and _town_map.has("palettes_female") \
+		else "palettes"
+	var stored: Variant = _town_map.get(name, [])
+	var colors := PackedColorArray()
+	if not stored is Array or slot < 0 or slot >= RomLayout.TOWN_MAP_PALETTES:
+		return colors
+	var packed: Array = stored
+	var first: int = slot * RomLayout.TOWN_MAP_PALETTE_COLORS
+	if first + RomLayout.TOWN_MAP_PALETTE_COLORS > packed.size():
+		return colors
+	for index: int in RomLayout.TOWN_MAP_PALETTE_COLORS:
+		colors.append(Gen2Palette.from_packed(int(packed[first + index])))
+	return colors
+
+
+func landmark_count() -> int:
+	var stored: Variant = _town_map.get("landmarks", [])
+	return (stored as Array).size() if stored is Array else 0
+
+
+## One `Landmarks` row: [code]{ x, y, codes }[/code], where x and y are screen
+## pixels and `codes` is the name as `GetLandmarkName` copies it.
+func landmark(index: int) -> Dictionary:
+	var stored: Variant = _town_map.get("landmarks", [])
+	if not stored is Array or index < 0 or index >= (stored as Array).size():
+		return {}
+	var row: Dictionary = (stored as Array)[index]
+	var codes := PackedByteArray()
+	for code: Variant in row.get("codes", []) as Array:
+		codes.append(int(code))
+	return {"x": int(row.get("x", 0)), "y": int(row.get("y", 0)), "codes": codes}
+
+
+## A landmark's name as text. `<BSP>` reads as the space it is everywhere but the
+## region map, where [Gen2TownMapPage] breaks the line on it instead.
+func landmark_name(index: int) -> String:
+	var entry: Dictionary = landmark(index)
+	if entry.is_empty():
+		return ""
+	var out: String = ""
+	for code: int in entry.get("codes", PackedByteArray()) as PackedByteArray:
+		out += Gen2Text.character(code)
 	return out
 
 

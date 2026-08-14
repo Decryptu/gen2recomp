@@ -24,6 +24,15 @@ const SEEN_TEXT: int = 0x6FF0
 const WIN_TEXT: int = 0x7000
 const LOSS_TEXT: int = 0x7010
 const TRAINER_FLAG: int = 8
+## The fixture's two region maps, each a flat fill of one `TownMapGFX` tile so a
+## page test can tell which was drawn. Both are even, so `TownMapPals` gives
+## them the earth palette.
+const TOWN_MAP_JOHTO_TILE: int = 0x02
+const TOWN_MAP_KANTO_TILE: int = 0x04
+const TOWN_MAP_EARTH: int = 1
+const TOWN_MAP_MOUNTAIN: int = 2
+## `<BSP>`, which `TownMap_ConvertLineBreakCharacters` rewrites as `<LF>`.
+const TOWN_MAP_BREAK_CODE: int = 0x1F
 ## The fixture ships one trainer class, numbered 1, holding one trainer.
 const TRAINER_CLASS: int = 1
 const TRAINER_SPECIES: int = 16
@@ -411,6 +420,11 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		## the string below names those four, and what a test checks is where
 		## each lands.
 		"copyright": [COPYRIGHT_TILES, 3],
+		## `Pokegear_LoadGFX`'s three sheets, at their real lengths so a page can
+		## address every tile a region map or a card frame names.
+		"town_map": [RomLayout.TOWN_MAP_TILES, 1],
+		"pokegear": [RomLayout.POKEGEAR_TILES, 2],
+		"pokegear_sprites": [RomLayout.POKEGEAR_SPRITE_TILES, 3],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet
@@ -460,6 +474,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"hp_red": [0x001F, 0x001F],
 		"exp": [0x7E24, 0x7E24],
 	}
+	manifest["town_map"] = _town_map()
 
 	var cell: int = 7 * Gen2Tiles.TILE_WIDTH
 	var columns: int = 16
@@ -479,6 +494,56 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			"rows": rows,
 		}
 	manifest["atlases"] = atlases
+
+
+## `JohtoMap`, `KantoMap`, `TownMapPals` and `Landmarks`, at their real shapes.
+## The two region maps are flat fills of one tile each so a page test can tell
+## which one was drawn, and each landmark is placed on its own cell so a cursor
+## position is checkable; only the two named below carry real coordinates and a
+## line break, which is what the name box is tested with.
+static func _town_map() -> Dictionary:
+	var johto: Array = []
+	var kanto: Array = []
+	for cell: int in RomLayout.TOWN_MAP_REGION_CELLS:
+		johto.append(TOWN_MAP_JOHTO_TILE)
+		kanto.append(TOWN_MAP_KANTO_TILE)
+	var palette_map: Array = []
+	for index: int in RomLayout.TOWN_MAP_PALETTE_MAP_BYTES:
+		## Every even tile earth, every odd one mountain, so a tile's palette is
+		## a function of its number and nothing else.
+		palette_map.append((TOWN_MAP_MOUNTAIN << 4) | TOWN_MAP_EARTH)
+	var palettes: Array = []
+	var palettes_female: Array = []
+	for slot: int in RomLayout.TOWN_MAP_PALETTES:
+		for index: int in RomLayout.TOWN_MAP_PALETTE_COLORS:
+			palettes.append(RomLayout.TOWN_MAP_PALETTE_FIRST_COLOR if index == 0 else slot)
+			palettes_female.append(
+				RomLayout.TOWN_MAP_PALETTE_FIRST_COLOR if index == 0 else slot + 0x100
+			)
+	var landmarks: Array = []
+	for index: int in RomLayout.LANDMARK_COUNT:
+		landmarks.append({"x": index, "y": index, "codes": _codes("SPECIAL")})
+	landmarks[1] = {"x": 140, "y": 100, "codes": _codes("NEW BARK<BSP>TOWN")}
+	landmarks[2] = {"x": 128, "y": 100, "codes": _codes("ROUTE 29")}
+	return {
+		"johto": johto,
+		"kanto": kanto,
+		"palette_map": palette_map,
+		"palettes": palettes,
+		"palettes_female": palettes_female,
+		"landmarks": landmarks,
+	}
+
+
+## A landmark name as `GetLandmarkName` copies it, with `<BSP>` written out.
+static func _codes(name: String) -> Array:
+	var out: Array = []
+	for part: String in name.split("<BSP>"):
+		if not out.is_empty():
+			out.append(TOWN_MAP_BREAK_CODE)
+		for code: int in Gen2Text.encode(part):
+			out.append(code)
+	return out
 
 
 static func _text(text: String) -> Array:
