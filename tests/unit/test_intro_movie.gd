@@ -11,12 +11,13 @@ extends GutTest
 ## Longer than the movie, whose own total is asserted below.
 const FRAME_CAP: int = 20000
 
-## `IntroScene28` sets `JUMPTABLE_EXIT_F` on this frame.
-const MOVIE_FRAMES: int = 1784
+## `IntroScene28` sets `JUMPTABLE_EXIT_F` on this frame. Over half of it is the
+## setup scenes' `Request2bpp` waits, which spend a frame per eight tiles.
+const MOVIE_FRAMES: int = 2338
 ## The frame each of the twenty-eight scenes starts on.
 const SCENE_STARTS: Array[int] = [
-	0, 1, 132, 133, 264, 265, 396, 397, 494, 495, 694, 695, 890, 891, 1022, 1023,
-	1154, 1155, 1254, 1255, 1410, 1411, 1423, 1424, 1457, 1521, 1522, 1655,
+	0, 1, 188, 189, 359, 360, 547, 548, 733, 734, 933, 934, 1168, 1169, 1371,
+	1372, 1559, 1560, 1713, 1714, 1925, 1926, 1938, 1939, 1972, 2036, 2037, 2209,
 ]
 
 
@@ -94,10 +95,13 @@ func test_the_unown_burst_is_four_structs_that_delete_themselves() -> void:
 ## round the top of the screen.
 func test_a_sprite_coordinate_wraps_rather_than_clamping() -> void:
 	var movie: Gen2IntroMovie = _movie()
-	while movie.scene() < 19 and movie.frame() < FRAME_CAP:
+	# The scene index moves as its setup runs, and the setup then spends its own
+	# `Request2bpp` waits, so the sprite is looked for rather than counted to.
+	while movie.frame() < FRAME_CAP \
+			and (movie.scene() < 19 or movie.sprites().is_empty()):
 		movie.advance_frame()
 	var seen: Array[int] = []
-	for _frame: int in 20:
+	while movie.scene() == 19 and movie.frame() < FRAME_CAP:
 		movie.advance_frame()
 		for sprite: Dictionary in movie.sprites():
 			seen.append((sprite["at"] as Vector2i).y)
