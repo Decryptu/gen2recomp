@@ -77,7 +77,10 @@ func test_only_the_gamefreak_half_reads_a_button() -> void:
 	_splash.advance_frames(Gen2BootCinema.COPYRIGHT_HOLD_FRAMES + 20)
 	assert_eq(_splash.visible_image(), &"game_freak_presents")
 	assert_true(_splash.handle_button(Gen2Button.A))
-	_splash.advance_frames(Gen2GameFreakPresents.CLEANUP_FRAMES - 1)
+	_splash.advance_frames(
+		Gen2GameFreakPresents.CLEAR_TILEMAP_FRAMES
+		+ Gen2GameFreakPresents.CLEANUP_FRAMES - 1
+	)
 	assert_eq(_closed, 0)
 	_splash.advance_frames(1)
 	assert_eq(_closed, 1)

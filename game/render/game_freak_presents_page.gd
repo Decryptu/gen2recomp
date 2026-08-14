@@ -25,6 +25,8 @@ const TRANSPARENT_INDEX: int = 0
 ## Shadow OAM counts from (8, 16), so a coordinate reaches the screen eight less
 ## across and sixteen less down.
 const OAM_ORIGIN := Vector2i(8, 16)
+## `wShadowOAM` holds forty sprites, the name the other opening pages use.
+const SHADOW_OAM_SPRITES: int = 40
 
 ## `.OAMData_GameFreakLogo1_3` and `.OAMData_GameFreakLogo4_11`, as
 ## (x, y, tile) with the `dbsprite` bytes already worked out. Crystal's Ditto is
@@ -58,6 +60,9 @@ const GOLD_SPARKLE_AT := Vector2i(-4, -4)
 ## `SPRITE_ANIM_DICT_GS_SPLASH` is $8d, the first tile of `gamefreak_logo.1bpp`,
 ## so a sprite tile past the logo's fifteen is one of the star sheet's five.
 const GOLD_SPRITE_FIRST_TILE: int = RomLayout.PRESENTS_WORD_TILES
+## The VRAM tile the dictionary maps those objects to, which is what a shadow-OAM
+## byte holds. Crystal decompresses the Ditto to `vTiles0` and counts from zero.
+const GOLD_SPRITE_VRAM_BASE: int = 0x8D
 
 var _profile: StringName = &"gold"
 var _background: PackedColorArray = PackedColorArray()
@@ -116,10 +121,46 @@ func draw(phase: Gen2GameFreakPresents) -> Image:
 	if phase != null:
 		_draw_words(indices, width, phase)
 	var image: Image = Gen2PicImage.from_indices(indices, width, height, _background)
-	if phase != null:
-		for sprite: Dictionary in phase.sprites():
-			_draw_sprite(image, phase, sprite)
+	for entry: Dictionary in shadow_oam(phase):
+		_draw_sprite(image, phase, entry)
 	return image
+
+
+## Every live struct expanded into the shadow OAM the hardware would hold, in
+## struct order, which is the z-order `PlaySpriteAnimations` walks. One entry
+## per drawn tile, `y` and `x` the OAM bytes and `tile` the byte `dbsprite`
+## writes, so a trace of this compares to a cartridge's own buffer line for
+## line. [method draw] blits this same list rather than re-deriving it.
+func shadow_oam(phase: Gen2GameFreakPresents) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if phase == null:
+		return out
+	for sprite: Dictionary in phase.sprites():
+		var kind: StringName = StringName(sprite["kind"])
+		var at: Vector2i = sprite["at"]
+		var flip_y: bool = bool(sprite.get("flip_y", false))
+		for part: Dictionary in _oam_set(kind, int(sprite["set"])):
+			# `UpdateAnimFrame` stops at `wShadowOAMEnd` rather than growing, so
+			# a busier frame loses its last sprites. No frame here reaches it.
+			if out.size() >= SHADOW_OAM_SPRITES:
+				return out
+			var offset: Vector2i = part["at"]
+			# `dbsprite`'s own OAM_XFLIP flips the tile where it stands. Only the
+			# struct's flip moves anything: `AddOrSubtractY` turns its offset into
+			# -8 - offset, added to the coordinate as a byte, so the position is
+			# worked out mod 256 and then clipped. Applying that to a per-tile
+			# attribute drew the star's two halves on top of each other.
+			if flip_y:
+				offset.y = -TILE - offset.y
+			out.append({
+				"y": (at.y + offset.y) & 0xFF,
+				"x": (at.x + offset.x) & 0xFF,
+				"tile": (_vram_base() + int(part["tile"])) & 0xFF,
+				"flip_x": bool(part.get("flip_x", false)),
+				"flip_y": flip_y,
+				"logo": kind == Gen2GameFreakPresents.SPRITE_LOGO,
+			})
+	return out
 
 
 ## `GameFreakPresents_PlaceGameFreak` and `_PlacePresents`, whichever of the two
@@ -142,40 +183,22 @@ func _draw_words(
 			column += 1
 
 
-## One sprite-anim struct's whole OAM set, positioned by its shadow-OAM
-## coordinate and drawn through the object palette, whose first colour is
+## One shadow-OAM entry, drawn through the object palette whose first colour is
 ## transparent.
 func _draw_sprite(
-	image: Image, phase: Gen2GameFreakPresents, sprite: Dictionary
+	image: Image, phase: Gen2GameFreakPresents, entry: Dictionary
 ) -> void:
 	# `dbsprite`'s attribute byte names the object palette. Only Gold's logo is
 	# drawn through palette 1, which is the one the rotation moves.
-	var palette: PackedColorArray = _object_palette(
-		phase, StringName(sprite["kind"]) == Gen2GameFreakPresents.SPRITE_LOGO
-	)
+	var palette: PackedColorArray = _object_palette(phase, bool(entry["logo"]))
 	if palette.size() <= TRANSPARENT_INDEX:
 		return
-	var at: Vector2i = sprite["at"]
-	var flip_y: bool = bool(sprite.get("flip_y", false))
-	for part: Dictionary in _oam_set(StringName(sprite["kind"]), int(sprite["set"])):
-		var offset: Vector2i = part["at"]
-		var flip_x: bool = bool(part.get("flip_x", false))
-		# `AddOrSubtractY` and `AddOrSubtractX`: a flipped sprite's own offset
-		# becomes -8 - offset, and both are added to the struct's coordinate as
-		# bytes, so the whole position is worked out mod 256 and then clipped.
-		if flip_y:
-			offset.y = -TILE - offset.y
-		if flip_x:
-			offset.x = -TILE - offset.x
-		_blit_sprite_tile(
-			image, palette,
-			int(part["tile"]),
-			Vector2i(
-				((at.x + offset.x) & 0xFF) - OAM_ORIGIN.x,
-				((at.y + offset.y) & 0xFF) - OAM_ORIGIN.y,
-			),
-			flip_x, flip_y
-		)
+	_blit_sprite_tile(
+		image, palette,
+		int(entry["tile"]) - _vram_base(),
+		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
+		bool(entry["flip_x"]), bool(entry["flip_y"])
+	)
 
 
 ## The palette a sprite is drawn through: Crystal's Ditto colours with the
@@ -205,6 +228,11 @@ func _rotated_object_palette(order: int) -> PackedColorArray:
 	for index: int in _object.size():
 		out.append(_object[(order >> (index * 2)) & 0x03])
 	return out
+
+
+## Where the profile's sprite sheet sits in VRAM, which shadow OAM counts from.
+func _vram_base() -> int:
+	return 0 if _profile == RomRegistry.CRYSTAL else GOLD_SPRITE_VRAM_BASE
 
 
 ## `.OAMData_*` for one set, as [code]{ at, tile, flip_x }[/code] with the tile

@@ -42,6 +42,13 @@ const SFX_GAME_FREAK_PRESENTS: int = 0xC9
 ## `GameFreakPresentsEnd` on Crystal and `.finish` on Gold: the same
 ## `ld c, 16 / call DelayFrames` after the tilemap and the sprites are cleared.
 const CLEANUP_FRAMES: int = 16
+## `GameFreakPresentsEnd` reaches `ClearSprites` only after `ClearTilemap`, whose
+## `WaitBGMap` spends `ld c, 4 / call DelayFrames`. `ClearSpriteAnims` in front
+## of it takes the structs away without writing shadow OAM, so the buffer holds
+## its last frame and the sprite stays up over the cleared tilemap for those
+## four. Measured against a cartridge: the Ditto is in OAM for four frames past
+## the pass that sets the exit bit.
+const CLEAR_TILEMAP_FRAMES: int = 4
 
 ## The two `PlaceString`s. Crystal writes them with `CopyBytes` at (5,10) and
 ## (7,11); Gold places them a row lower at (5,12) and (7,13). The codes are the
@@ -50,6 +57,13 @@ const WORD_GAME_FREAK: Array[int] = [0, 1, 2, 3, 13, 4, 5, 3, 1, 6]
 const WORD_PRESENTS: Array[int] = [7, 8, 9, 10, 11, 12]
 const WORD_AT_CRYSTAL: Array[Vector2i] = [Vector2i(5, 10), Vector2i(7, 11)]
 const WORD_AT_GOLD: Array[Vector2i] = [Vector2i(5, 12), Vector2i(7, 13)]
+
+## `NUM_SPRITE_ANIM_STRUCTS`. `_InitSpriteAnimStruct` walks the array for the
+## first free slot and returns carry when there is none, so a spawn past the
+## tenth does not happen at all: Gold's sparkles stop at nine because the logo
+## holds the other slot. Measured against a cartridge, which sits at twenty-four
+## sprites through the whole spray.
+const SPRITE_ANIM_STRUCTS: int = 10
 
 ## `OAM_YCOORD_HIDDEN`, which `GameFreakPresentsInit` parks the Ditto at until
 ## `GameFreakLogo_Bounce` writes a real offset.
@@ -109,6 +123,11 @@ var _finished: bool = false
 ## the top of the loop, never where they are set.
 var _exit: bool = false
 var _cleanup: int = 0
+## `ClearTilemap`'s frames still to spend before `ClearSprites` empties the
+## buffer, so the sprite stays up over the cleared tilemap.
+var _retain: int = 0
+## `wShadowOAM`, which only a sprite pass writes and only `ClearSprites` empties.
+var _shadow: Array[Dictionary] = []
 var _frame: int = 0
 var _words: int = 0
 var _events: Array[Dictionary] = []
@@ -117,8 +136,10 @@ var _events: Array[Dictionary] = []
 ## `GameFreakPresents_PlaceLogo` waits for.
 var _star_done: bool = false
 
-## One sprite-anim struct, of which the splash needs at most a Ditto or a star
-## and a logo, plus Gold's sparkles.
+## `wSpriteAnimationStructs`, ten slots of which an empty Dictionary is a free
+## one. Fixed rather than compacted: the slot is the z-order, so a sparkle that
+## dies leaves a hole the next one takes, and a spawn with nothing free is
+## dropped.
 var _actors: Array[Dictionary] = []
 var _logo_register: int = LOGO_REGISTER_FIRST
 var _logo_palette: int = OBJECT_PALETTE_ORDER
@@ -138,19 +159,23 @@ func start(profile: StringName, sine: Gen2BattleAnimData = null) -> void:
 	_finished = false
 	_exit = false
 	_cleanup = 0
+	_retain = 0
 	_star_done = false
 	_logo_register = LOGO_REGISTER_FIRST
 	_logo_palette = OBJECT_PALETTE_ORDER
 	_actors.clear()
+	for _slot: int in SPRITE_ANIM_STRUCTS:
+		_actors.append({})
+	_shadow.clear()
 	_events.clear()
 	if _is_crystal():
 		# `GameFreakPresentsInit` puts the Ditto up before the loop starts,
 		# parked off screen with its jump height and sine offset loaded.
-		_actors.append({
+		_actors[0] = {
 			"kind": SPRITE_DITTO, "at": SPRITE_AT, "offset": Vector2i(0, Y_HIDDEN),
 			"scene": 0, "var1": 96, "var2": 48, "frame": -1, "duration": 0,
 			"set": 0, "flip_y": false,
-		})
+		}
 
 
 func profile() -> StringName:
@@ -180,27 +205,27 @@ func word_positions() -> Array[Vector2i]:
 	return WORD_AT_CRYSTAL if _is_crystal() else WORD_AT_GOLD
 
 
-## Every sprite the frame draws, as
+## What the last `PlaySpriteAnimations` pass left in shadow OAM, as
 ## [code]{ kind, at, set, flip_y }[/code] in shadow-OAM coordinates.
+##
+## The buffer, not the live structs: `GameFreakPresentsInit` spawns one without
+## writing shadow OAM, and a struct the scene half of a pass spawns is only drawn
+## by the sprite half, which on Gold and Silver runs first and so does not see it
+## until the pass after. Nothing else clears the buffer, so it also survives
+## `ClearSpriteAnims` until `ClearSprites` reaches it.
 func sprites() -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	for actor: Dictionary in _actors:
-		if not bool(actor.get("visible", true)):
-			continue
-		out.append({
-			"kind": actor["kind"],
-			"at": _oam_at(actor["at"], actor["offset"]),
-			"set": int(actor["set"]),
-			"flip_y": bool(actor.get("flip_y", false)),
-		})
-	return out
+	return _shadow.duplicate(true)
 
 
 ## Which `GameFreakDittoPaletteFade` colour the Ditto is wearing, or -1 before
 ## `GameFreakLogo_Transform` has written one.
+##
+## Applied in the pass that computes it, like the shadow OAM beside it:
+## `hCGBPalUpdate` and hDMATransfer are both serviced by the same VBlank, so the
+## palette and the sprites reach the screen together and neither is delayed here.
 func fade_step() -> int:
 	for actor: Dictionary in _actors:
-		if actor["kind"] == SPRITE_DITTO:
+		if actor.get("kind", SPRITE_NONE) == SPRITE_DITTO:
 			return int(actor.get("fade", -1))
 	return -1
 
@@ -230,6 +255,12 @@ func advance_frame() -> bool:
 	if _cleanup == 0 and _exit:
 		_enter_cleanup()
 	if _cleanup > 0:
+		# `ClearTilemap` spends its four frames with the buffer untouched, and
+		# `ClearSprites` empties it on the frame after the last of them.
+		if _retain > 0:
+			_retain -= 1
+		else:
+			_shadow.clear()
 		_cleanup -= 1
 		if _cleanup == 0:
 			_finished = true
@@ -257,9 +288,11 @@ func _is_crystal() -> bool:
 
 
 func _enter_cleanup() -> void:
-	_actors.clear()
+	# `ClearSpriteAnims` takes the structs away without touching the buffer.
+	_free_all()
 	_words = 0
-	_cleanup = CLEANUP_FRAMES
+	_retain = CLEAR_TILEMAP_FRAMES
+	_cleanup = CLEAR_TILEMAP_FRAMES + CLEANUP_FRAMES
 	_emit(&"clear", {})
 
 
@@ -307,13 +340,13 @@ func _advance_gold_scene() -> void:
 	match _scene:
 		0:
 			_star_done = false
-			_actors.append(_new_actor(SPRITE_STAR, SPRITE_AT, {"var1": 0x80, "angle": 0}))
+			_spawn(_new_actor(SPRITE_STAR, SPRITE_AT, {"var1": 0x80, "angle": 0}))
 			_emit(&"play_sfx", {"sfx": SFX_LOGO_GS})
 			_scene += 1
 		1:
 			if not _star_done:
 				return
-			_actors.append(_new_actor(SPRITE_LOGO, SPRITE_AT, {}))
+			_spawn(_new_actor(SPRITE_LOGO, SPRITE_AT, {}))
 			_scene += 1
 			_timer = 128
 		2:
@@ -345,9 +378,24 @@ func _spawn_sparkle(timer: int) -> void:
 	if timer & 1:
 		return
 	var vector: Vector2i = SPARKLE_VECTORS[(timer >> 1) & 0x0F]
-	_actors.append(_new_actor(SPRITE_SPARKLE, SPARKLE_AT, {
+	_spawn(_new_actor(SPRITE_SPARKLE, SPARKLE_AT, {
 		"angle": vector.x, "speed": vector.y << 8, "radius": 0,
 	}))
+
+
+## `_InitSpriteAnimStruct`: the first free slot takes it, and a full array
+## returns carry, which drops the spawn.
+func _spawn(actor: Dictionary) -> void:
+	for slot: int in _actors.size():
+		if (_actors[slot] as Dictionary).is_empty():
+			_actors[slot] = actor
+			return
+
+
+## `ClearSpriteAnims`, which zeroes every struct without writing shadow OAM.
+func _free_all() -> void:
+	for slot: int in _actors.size():
+		_actors[slot] = {}
 
 
 func _new_actor(kind: StringName, at: Vector2i, extra: Dictionary) -> Dictionary:
@@ -363,13 +411,28 @@ func _new_actor(kind: StringName, at: Vector2i, extra: Dictionary) -> Dictionary
 ## `DoNextFrameForAllSprites`, which runs each struct's own sequence and then
 ## advances its frameset.
 func _advance_sprites() -> void:
-	var live: Array[Dictionary] = []
-	for actor: Dictionary in _actors:
-		if not _advance_actor(actor):
+	_shadow = []
+	for slot: int in _actors.size():
+		var actor: Dictionary = _actors[slot]
+		if actor.is_empty():
 			continue
+		if not _advance_actor(actor):
+			# `DeinitSpriteAnimStruct` zeroes the slot, so the next pass skips
+			# it. This one does not: `DoNextFrameForAllSprites` calls
+			# `UpdateAnimFrame` whether or not the function deinitialised the
+			# struct, so a sprite that dies is drawn one last time. Measured
+			# against a cartridge: Gold's star is in OAM for a frame after it
+			# has gone, and every sparkle in the spray is.
+			_actors[slot] = {}
 		_advance_frameset(actor)
-		live.append(actor)
-	_actors = live
+		if not bool(actor.get("visible", true)):
+			continue
+		_shadow.append({
+			"kind": actor["kind"],
+			"at": _oam_at(actor["at"], actor["offset"]),
+			"set": int(actor["set"]),
+			"flip_y": bool(actor.get("flip_y", false)),
+		})
 
 
 func _advance_actor(actor: Dictionary) -> bool:

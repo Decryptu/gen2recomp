@@ -29,6 +29,29 @@ func _run(game_id: StringName, frames: int) -> Gen2GameFreakPresents:
 	return phase
 
 
+## `.OAMData_GSGameFreakLogoStar` draws two tiles and their X flips, and
+## `dbsprite`'s own OAM_XFLIP flips a tile where it stands. Only a struct's flip
+## moves anything, so the four entries sit in a 16x16 square rather than two on
+## top of two. Measured against a cartridge, whose star is at x 191 and 199 on
+## the frame it is thrown.
+func test_the_stars_flipped_halves_sit_beside_the_ones_they_mirror() -> void:
+	var page: Gen2GameFreakPresentsPage = _page(&"gold")
+	# The scene half of a pass spawns it and the sprite half, which runs first on
+	# Gold, only reaches it on the pass after.
+	var star: Gen2GameFreakPresents = _run(&"gold", 2)
+	var entries: Array[Dictionary] = page.shadow_oam(star)
+	assert_eq(entries.size(), 4, "the star's whole set")
+	var flipped: Array = entries.filter(func(e: Dictionary) -> bool: return e["flip_x"])
+	assert_eq(flipped.size(), 2, "two of the four are the mirrored halves")
+	var columns: Array = []
+	for entry: Dictionary in entries:
+		if not columns.has(entry["x"]):
+			columns.append(entry["x"])
+	columns.sort()
+	assert_eq(columns.size(), 2, "two columns, not one")
+	assert_eq(int(columns[1]) - int(columns[0]), 8, "a tile apart")
+
+
 ## `ClearTilemap` runs before anything else and the words are placed onto it, so
 ## the screen opens black and stays black everywhere the two strings are not.
 func test_the_screen_opens_cleared_and_the_words_land_on_their_own_rows() -> void:
