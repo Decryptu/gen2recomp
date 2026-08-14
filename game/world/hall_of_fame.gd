@@ -6,6 +6,9 @@ extends RefCounted
 ## `engine/events/halloffame.asm`'s AnimateHallOfFame walks the party built by
 ## GetHallOfFameParty, showing one panel per Pokémon and then the player's own,
 ## so the order and the contents here are that routine's, not a choice.
+## `HOF_AnimatePlayerPic` ends on `farcall ProfOaksPCRating`, whose two texts
+## print into the empty box that panel opens under itself, so the player's panel
+## is answered once per box rather than once.
 ##
 ## What this does not carry is what the project has no source for. The panel's
 ## `<ID>№/` line needs the mon's OT ID, which the save does keep; the player's
@@ -23,7 +26,12 @@ const PAGE_PLAYER: StringName = &"player"
 ## The pages, in AnimateHallOfFame's order: every non-egg party member, then the
 ## player. An empty or egg-only party still answers the player's page, matching
 ## LoadHOFTeam's carry falling straight through to HOF_AnimatePlayerPic.
-static func pages(data: GameData, save: Gen2SaveData) -> Array:
+##
+## [param state] is what `Rate` counts; without it, or without the rating table,
+## the player's page is the bare panel the source never stops on.
+static func pages(
+	data: GameData, save: Gen2SaveData, state: Gen2WorldState = null
+) -> Array:
 	var out: Array = []
 	if data == null or save == null:
 		return out
@@ -35,7 +43,33 @@ static func pages(data: GameData, save: Gen2SaveData) -> Array:
 		if mon.is_egg:
 			continue
 		out.append(_mon_page(data, mon))
-	out.append({"kind": PAGE_PLAYER, "player_name": save.player_name})
+	out.append_array(_player_pages(data, save, state))
+	return out
+
+
+## `HOF_AnimatePlayerPic`'s panel, once per box `ProfOaksPCRating` prints into
+## it: both its texts run past two lines, and `PrintText` waits at each break the
+## way it does anywhere else. The last box carries the sound the rating picked,
+## which is where `PlayMusic MUSIC_NONE` and `PlaySFX` both sit.
+static func _player_pages(
+	data: GameData, save: Gen2SaveData, state: Gen2WorldState
+) -> Array:
+	var panel: Dictionary = {"kind": PAGE_PLAYER, "player_name": save.player_name}
+	var rating: Dictionary = Gen2ProfOaksPC.rate(data, state)
+	if rating.is_empty():
+		return [panel]
+	var boxes: Array = []
+	for text: Variant in rating["pages"] as Array:
+		boxes.append_array(Gen2TextLayout.lay_out(
+			String(text), Gen2HallOfFamePage.TEXT_COLUMNS, Gen2HallOfFamePage.TEXT_ROWS
+		))
+	var out: Array = []
+	for index: int in boxes.size():
+		var page: Dictionary = panel.duplicate()
+		page["lines"] = Array(boxes[index] as PackedStringArray)
+		if index == boxes.size() - 1:
+			page["sfx"] = int(rating["sfx"])
+		out.append(page)
 	return out
 
 

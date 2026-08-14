@@ -1693,12 +1693,13 @@ func open_hall_of_fame() -> void:
 		_script_prompt = "Hall of Fame needs a save"
 		_refresh_labels()
 		return
-	var pages: Array = Gen2HallOfFame.pages(_data, save)
+	var pages: Array = Gen2HallOfFame.pages(_data, save, _world.state)
 	## No anchor preset: this is a child of the 160x144 Gen2Screen and sizes
 	## itself in native pixels, the way the story picture does.
 	var host := Gen2HallOfFameScreen.new()
 	host.set_context(_data, pages)
 	host.closed.connect(_on_hall_of_fame_closed)
+	host.rating_reached.connect(_on_hall_of_fame_rating)
 	_hall_of_fame_host = host
 	_screen.display(host)
 	if _hall_of_fame_host == null:
@@ -1726,6 +1727,15 @@ func _on_hall_of_fame_closed() -> void:
 	if _renderer != null:
 		_renderer.refresh()
 	_refresh_labels()
+
+
+## `ProfOaksPCRating`'s tail: `PlayMusic MUSIC_NONE` stops the induction music
+## where it stands, without a fade, and the rating's own sound plays over the
+## silence it leaves.
+func _on_hall_of_fame_rating(sfx: int) -> void:
+	if _audio_player != null:
+		_audio_player.fade_out()
+	_play_sfx(sfx)
 
 
 func _play_hall_of_fame_music() -> void:

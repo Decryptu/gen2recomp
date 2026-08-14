@@ -59,9 +59,18 @@ const CODE_SLASH: int = 0xF3
 ## Everything on a panel is printed with the battle-extra strip loaded.
 const FONT: StringName = Gen2Text.FONT_BATTLE_EXTRA
 
-## HOF_AnimatePlayerPic's `Textbox` at (0,2) with a 9x8 interior.
+## HOF_AnimatePlayerPic's two `Textbox` calls: a 9x8 interior beside the pic and
+## the ordinary bottom box, which it opens empty for `ProfOaksPCRating` to print
+## into.
 const PLAYER_BOX: Rect2i = Rect2i(0, 2, 11, 10)
 const PLAYER_NAME: Vector2i = Vector2i(2, 4)
+## `PrintText`'s own first line (`hlcoord 1, 14`) and the interior it prints
+## into, which is every text box's: one tile of margin each side and two lines
+## two rows apart.
+const TEXT_AT: Vector2i = Vector2i(1, 14)
+const TEXT_COLUMNS: int = MON_BOTTOM_BOX.size.x - 2
+const TEXT_ROWS: int = 2
+const TEXT_LINE_SPACING: int = 2
 
 ## `Textbox` draws with wTextboxFrame, which the in-game OPTION menu's FRAME row
 ## and the launcher's settings both write, so the panel is drawn in whichever
@@ -131,14 +140,21 @@ func _draw_mon(page: Dictionary, indices: PackedByteArray) -> void:
 	_text(indices, width, "%0*d" % [OT_DIGITS, int(page.get("ot_id", 0))], OT_NUMBER)
 
 
-## The player's page is the name box alone. The source also slides in the
-## player's own pic and prints the trainer ID and PLAY TIME beneath the name;
-## the project imports no player pic and its save model carries neither number,
-## so nothing stands in for them.
+## The player's page is the name box and the empty bottom one. The source also
+## slides in the player's own pic and prints the trainer ID and PLAY TIME beneath
+## the name; the project imports no player pic and its save model carries neither
+## number, so nothing stands in for them.
 func _draw_player(page: Dictionary, indices: PackedByteArray) -> void:
 	var width: int = COLUMNS * TILE
 	_box(indices, width, PLAYER_BOX)
+	_box(indices, width, MON_BOTTOM_BOX)
 	_text(indices, width, String(page.get("player_name", "")), PLAYER_NAME)
+	var lines: Array = page.get("lines", [])
+	for index: int in lines.size():
+		_text(
+			indices, width, String(lines[index]),
+			TEXT_AT + Vector2i(0, index * TEXT_LINE_SPACING)
+		)
 
 
 ## GetGender answers one of three, and the source prints a space for a

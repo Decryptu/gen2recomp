@@ -1,13 +1,13 @@
 class_name Gen2ProfOaksPC
 extends RefCounted
 
-## `ProfOaksPCBoot` and `Rate` (engine/events/prof_oaks_pc.asm), as the pages a
-## screen shows and the effect it plays.
+## `ProfOaksPCBoot`, `ProfOaksPCRating` and `Rate` (engine/events/prof_oaks_pc.asm),
+## as the pages a screen shows and the effect it plays.
 ##
 ## Presentation only: the routine counts `wPokedexSeen` and `wPokedexCaught` and
-## writes nothing back. The three pages are the source's own order, and each
-## waits for A or B, which is why the sound is on the last of them rather than on
-## the whole run.
+## writes nothing back. The pages are the source's own order, and each waits for
+## A or B, which is why the sound is on the last of them rather than on the whole
+## run.
 
 ## `PrintNum` with `PRINTNUM_LEFTALIGN | 1, 3`. Left aligned without leading
 ## zeros means `.AdvancePointer` does not step past a suppressed digit, so the
@@ -19,7 +19,18 @@ const COUNT_DIGITS: int = 3
 ## The whole boot, as [code]{ seen, caught, sfx, pages }[/code]. Empty for a
 ## cache imported without the rating table, which is the caller's cue to leave
 ## the script's own `end` alone.
+##
+## `ProfOaksPCBoot` is `_OakPCText2` in front of `Rate`.
 static func boot(data: GameData, state: Gen2WorldState) -> Dictionary:
+	var out: Dictionary = rate(data, state)
+	if out.is_empty():
+		return out
+	(out["pages"] as Array).push_front(data.oak_pc_text("level"))
+	return out
+
+
+## `Rate`, which is also the whole of `ProfOaksPCRating` bar the music it stops.
+static func rate(data: GameData, state: Gen2WorldState) -> Dictionary:
 	if data == null or data.oak_ratings().is_empty():
 		return {}
 	var seen: int = state.seen_count() if state != null else 0
@@ -30,7 +41,6 @@ static func boot(data: GameData, state: Gen2WorldState) -> Dictionary:
 		"caught": caught,
 		"sfx": int(rating.get("sfx", 0)),
 		"pages": [
-			data.oak_pc_text("level"),
 			counts_text(data, seen, caught),
 			String(rating.get("text", "")),
 		],

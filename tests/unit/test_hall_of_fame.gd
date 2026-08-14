@@ -6,6 +6,9 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
 const TILE: int = Gen2Font.TILE
 
+## `Rate`'s two texts, one box each at the fixture's short lengths.
+const RATING_PAGES: int = 2
+
 var _data: GameData = null
 
 
@@ -33,7 +36,7 @@ func _save(species_list: Array, eggs: Array = []) -> Gen2SaveData:
 
 func test_pages_follow_the_party_and_end_with_the_player() -> void:
 	var pages: Array = Gen2HallOfFame.pages(_data, _save([1, 4]))
-	assert_eq(pages.size(), 3)
+	assert_eq(pages.size(), 2 + RATING_PAGES)
 	assert_eq(StringName(pages[0]["kind"]), Gen2HallOfFame.PAGE_MON)
 	assert_eq(int(pages[0]["species"]), 1)
 	assert_eq(int(pages[0]["dex_number"]), 1)
@@ -42,11 +45,37 @@ func test_pages_follow_the_party_and_end_with_the_player() -> void:
 	assert_eq(String(pages[2]["player_name"]), "ASH")
 
 
+## `HOF_AnimatePlayerPic` ends on `farcall ProfOaksPCRating`, so the player's
+## panel is answered once per box its two texts fill, and the sound the rating
+## picked plays on the last of them.
+func test_the_player_panel_carries_the_oak_rating() -> void:
+	var pages: Array = Gen2HallOfFame.pages(_data, _save([1]))
+	var counts: Dictionary = pages[1]
+	var rating: Dictionary = pages[2]
+	assert_eq(StringName(counts["kind"]), Gen2HallOfFame.PAGE_PLAYER)
+	assert_eq(StringName(rating["kind"]), Gen2HallOfFame.PAGE_PLAYER)
+	assert_string_contains(String((counts["lines"] as Array)[0]), "SEEN")
+	assert_eq(String((rating["lines"] as Array)[0]), "RATING01", "nothing caught")
+	assert_false(counts.has("sfx"), "the sound is on the rating, not the counts")
+	assert_eq(int(rating["sfx"]), Fixture.OAK_FIRST_SFX)
+
+
+## A cache with no rating table leaves the panel the source never stops on.
+func test_a_cache_without_the_ratings_shows_the_bare_panel() -> void:
+	var manifest: Dictionary = RomCache.read_manifest(Fixture.directory())
+	manifest.erase("oak_ratings")
+	RomCache.write_json(RomCache.manifest_path(Fixture.directory()), manifest)
+	var data: GameData = GameData.open_directory(Fixture.directory())
+	var pages: Array = Gen2HallOfFame.pages(data, _save([1]))
+	assert_eq(pages.size(), 2)
+	assert_false(pages[1].has("lines"))
+
+
 ## GetHallOfFameParty skips EGG without consuming a slot, so the egg is neither
 ## inducted nor counted against the six.
 func test_an_egg_is_skipped_and_the_player_page_still_follows() -> void:
 	var pages: Array = Gen2HallOfFame.pages(_data, _save([1, 4, 7], [1]))
-	assert_eq(pages.size(), 3)
+	assert_eq(pages.size(), 2 + RATING_PAGES)
 	assert_eq(int(pages[0]["species"]), 1)
 	assert_eq(int(pages[1]["species"]), 7)
 	assert_eq(StringName(pages[2]["kind"]), Gen2HallOfFame.PAGE_PLAYER)
@@ -56,7 +85,7 @@ func test_an_egg_is_skipped_and_the_player_page_still_follows() -> void:
 ## party with nothing to induct still reaches the player's own panel.
 func test_a_party_of_only_eggs_answers_the_player_page_alone() -> void:
 	var pages: Array = Gen2HallOfFame.pages(_data, _save([1, 4], [0, 1]))
-	assert_eq(pages.size(), 1)
+	assert_eq(pages.size(), RATING_PAGES)
 	assert_eq(StringName(pages[0]["kind"]), Gen2HallOfFame.PAGE_PLAYER)
 
 
@@ -77,7 +106,7 @@ func test_a_nickname_is_kept() -> void:
 
 func test_pages_stop_at_a_full_party() -> void:
 	var pages: Array = Gen2HallOfFame.pages(_data, _save([1, 2, 3, 4, 5, 6, 7]))
-	assert_eq(pages.size(), Gen2HallOfFame.MAX_MONS + 1)
+	assert_eq(pages.size(), Gen2HallOfFame.MAX_MONS + RATING_PAGES)
 
 
 func test_a_missing_cache_or_save_answers_nothing() -> void:
@@ -97,15 +126,15 @@ func test_a_mon_panel_draws_both_boxes_on_a_full_screen_buffer() -> void:
 	assert_true(_has_ink(indices, Gen2HallOfFamePage.MON_BOTTOM_BOX))
 
 
-## The player's page is the name box alone: nothing is drawn where the mon
-## panel's bottom box would be, because the source's fields there have no data.
-func test_the_player_panel_draws_its_own_box_only() -> void:
+## `HOF_AnimatePlayerPic` opens the bottom box empty for the rating to print
+## into, so the player's panel draws both.
+func test_the_player_panel_draws_its_name_box_and_the_rating_box() -> void:
 	var page_renderer: Gen2HallOfFamePage = Gen2HallOfFamePage.from_data(_data)
 	var pages: Array = Gen2HallOfFame.pages(_data, _save([1]))
 	var indices: PackedByteArray = page_renderer.draw(pages[1])
 	assert_eq(indices.size(), Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
 	assert_true(_has_ink(indices, Gen2HallOfFamePage.PLAYER_BOX))
-	assert_false(_has_ink(indices, Gen2HallOfFamePage.MON_BOTTOM_BOX))
+	assert_true(_has_ink(indices, Gen2HallOfFamePage.MON_BOTTOM_BOX))
 
 
 ## Any non-zero palette index inside a tile rectangle. Index 0 is the page's
