@@ -28,6 +28,30 @@ const EXPECTED_PALETTES: Dictionary = {
 	"pack": 1,
 }
 
+## Long enough for the movie, whose own total is pinned below.
+const FRAME_CAP: int = 20000
+
+## Census of the real Gold and Silver caches, pinned so a change is loud: the
+## frames the jumptable takes to set its exit bit, the frame each scene starts
+## on, and how many sounds the movie asks for. The two cartridges run the same
+## movie off the same art, so one census covers both.
+const EXPECTED_FRAMES: int = 2355
+const EXPECTED_SCENE_STARTS: Array[int] = [
+	0, 1, 139, 620, 1214, 1294, 1295, 1425, 1681, 1746, 1747, 2009, 2021, 2150,
+	2158, 2225, 2290,
+]
+## `SFX_GS_INTRO_POKEMON_APPEARS` once per starter and the fireball once.
+const EXPECTED_SFX: int = 4
+## `MUSIC_GS_OPENING`, then `MUSIC_NONE` and `MUSIC_GS_OPENING_2` a frame apart.
+const EXPECTED_MUSIC: int = 3
+
+## The water scene asks shadow OAM for more than the forty it holds: Lapras is
+## twenty-seven sprites on its own and the magikarp triple six each, so
+## `UpdateAnimFrame` drops the last seven rather than growing, the way
+## `IntroScene10` drops Pichu's last tile on Crystal. Pinned rather than
+## bounded, because the overflow is the finding.
+const PEAK_SPRITES: int = 47
+
 var _failures: PackedStringArray = []
 ## Each cartridge's section, so the two that carry one can be compared.
 var _sections: Dictionary = {}
@@ -52,8 +76,84 @@ func _initialize() -> void:
 		_verify_section(game_id, data)
 		_verify_metatiles(game_id, data)
 		_verify_palettes(game_id, data)
+		_run(game_id, data)
 	_compare_cartridges()
 	_finish()
+
+
+## The whole movie, frame by frame to `JUMPTABLE_EXIT_F`: the scene starts, the
+## sounds and the busiest frame's sprite count. Every sound it names has to
+## resolve on the cache as well, since a `PlaySFX` the driver cannot answer is a
+## silent scene rather than an error.
+func _run(game_id: StringName, data: GameData) -> void:
+	var movie: Gen2GoldSilverIntro = Gen2GoldSilverIntro.create(
+		data, Gen2SplashScreen._sine_table(data)
+	)
+	var page: Gen2GoldSilverIntroPage = Gen2GoldSilverIntroPage.from_data(data)
+	_check(page != null, "%s: the intro page will not build." % game_id)
+	var starts: Array[int] = [0]
+	var scene: int = 0
+	var sfx: int = 0
+	var music: int = 0
+	var most: int = 0
+	while not movie.finished() and movie.frame() < FRAME_CAP:
+		for event: Dictionary in movie.advance_frame():
+			match StringName(event.get("type", &"")):
+				&"play_sfx":
+					sfx += 1
+					_check(
+						not data.world_audio(&"sfx", int(event["sfx"])).is_empty(),
+						"%s: intro sfx %d resolves to no record." % [
+							game_id, int(event["sfx"]),
+						]
+					)
+				&"play_music":
+					music += 1
+					_check(
+						not data.world_audio(&"music", int(event["music"])).is_empty(),
+						"%s: intro music %d resolves to no record." % [
+							game_id, int(event["music"]),
+						]
+					)
+		if movie.scene() != scene:
+			scene = movie.scene()
+			starts.append(movie.frame())
+		most = maxi(most, _sprite_count(movie))
+	_check(movie.finished(), "%s: the intro never set its exit bit." % game_id)
+	_check(
+		movie.frame() == EXPECTED_FRAMES,
+		"%s: the intro ran %d frames, not the pinned %d." % [
+			game_id, movie.frame(), EXPECTED_FRAMES,
+		]
+	)
+	_check(
+		starts == EXPECTED_SCENE_STARTS,
+		"%s: the intro scenes start on %s, not the pinned starts." % [game_id, starts]
+	)
+	_check(
+		sfx == EXPECTED_SFX and music == EXPECTED_MUSIC,
+		"%s: the intro asked for %d effects and %d songs, not %d and %d." % [
+			game_id, sfx, music, EXPECTED_SFX, EXPECTED_MUSIC,
+		]
+	)
+	_check(
+		most == PEAK_SPRITES,
+		"%s: the intro's busiest frame asked for %d sprites, not the pinned %d." % [
+			game_id, most, PEAK_SPRITES,
+		]
+	)
+
+
+## How many shadow-OAM entries this frame's structs add up to.
+func _sprite_count(movie: Gen2GoldSilverIntro) -> int:
+	var total: int = 0
+	for sprite: Dictionary in movie.sprites():
+		var index: int = int(sprite["set"])
+		if index < 0 or index >= Gen2GoldSilverIntroPage.OAM_SETS.size():
+			continue
+		total += ((Gen2GoldSilverIntroPage.OAM_SETS[index] as Dictionary)["parts"]
+			as Array).size()
+	return total
 
 
 ## Every entry of the section, at the size the routine that loads it asks VRAM
@@ -149,7 +249,10 @@ func _fail(message: String) -> void:
 
 func _finish() -> void:
 	if _failures.is_empty():
-		print("PASS gs intro: the section, the metatile maps and the palettes verified.")
+		print(
+			"PASS gs intro: the section, the metatile maps, the palettes and every "
+			+ "scene verified."
+		)
 		quit(0)
 		return
 	for message: String in _failures:

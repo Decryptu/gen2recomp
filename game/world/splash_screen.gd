@@ -5,10 +5,12 @@ extends Control
 ## for it.
 ##
 ## The source runs four things before a new game: the copyright screen, the
-## GameFreak logo animation, on Crystal the intro movie, and the title screen.
+## GameFreak logo animation, the intro movie, and the title screen. The movie is
+## the cartridge's own: `CrystalIntro` through [Gen2IntroMoviePage] on Crystal
+## and `GoldSilverIntro` through [Gen2GoldSilverIntroPage] on the other two.
 ## [Gen2BootCinema] is started with the phases this cache has art for; a phase it
 ## has none for is skipped rather than held on a blank screen for the frames it
-## would have taken, which is what Gold and Silver's `GoldSilverIntro` still is.
+## would have taken.
 ##
 ## The pacing is the source's throughout. The copyright half is ten frames of
 ## blank and the screen for a hundred, with no button read at all, since
@@ -28,6 +30,7 @@ var _data: GameData = null
 var _page: Gen2CopyrightPage = null
 var _presents_page: Gen2GameFreakPresentsPage = null
 var _movie_page: Gen2IntroMoviePage = null
+var _gs_movie_page: Gen2GoldSilverIntroPage = null
 var _title_page: Gen2TitlePage = null
 ## What `hJoyDown` holds this frame. `TitleScreenMain` reads the held state, and
 ## its two chords cannot be expressed as presses.
@@ -52,11 +55,12 @@ func open(data: GameData) -> bool:
 	)
 	_presents_page = Gen2GameFreakPresentsPage.from_data(data)
 	_movie_page = Gen2IntroMoviePage.from_data(data)
+	_gs_movie_page = Gen2GoldSilverIntroPage.from_data(data)
 	_title_page = Gen2TitlePage.from_data(data)
 	var phases: Array[StringName] = [Gen2BootCinema.PHASE_COPYRIGHT]
 	if _presents_page != null:
 		phases.append(Gen2BootCinema.PHASE_PRESENTS)
-	if _movie_page != null:
+	if _movie_page != null or _gs_movie_page != null:
 		phases.append(Gen2BootCinema.PHASE_INTRO_MOVIE)
 	if _title_page != null:
 		phases.append(Gen2BootCinema.PHASE_TITLE)
@@ -117,11 +121,15 @@ func handle_button(button: int) -> bool:
 	]:
 		return true
 	if _cinema.phase() == Gen2BootCinema.PHASE_INTRO_MOVIE:
-		# `.ShutOffMusic`: any of A, B, START or SELECT ends the whole movie and
-		# stops the music with it.
+		# `.ShutOffMusic` on Crystal and `.Finish` on Gold and Silver: any of A,
+		# B, START or SELECT ends the whole movie, and Crystal's also stops the
+		# music where it stands.
 		var movie: Gen2IntroMovie = _cinema.movie()
 		if movie != null:
 			movie.cancel()
+		var gs_movie: Gen2GoldSilverIntro = _cinema.gs_movie()
+		if gs_movie != null:
+			gs_movie.cancel()
 		return true
 	_cinema.skip_presents()
 	return true
@@ -216,8 +224,11 @@ func _frame_image() -> Image:
 		return _image
 	if _visible_id == &"game_freak_presents" and _presents_page != null:
 		return _presents_page.draw(_cinema.presents())
-	if _visible_id == &"intro_movie" and _movie_page != null:
-		return _movie_page.draw(_cinema.movie())
+	if _visible_id == &"intro_movie":
+		if _movie_page != null and _cinema.movie() != null:
+			return _movie_page.draw(_cinema.movie())
+		if _gs_movie_page != null and _cinema.gs_movie() != null:
+			return _gs_movie_page.draw(_cinema.gs_movie())
 	if _visible_id == &"title" and _title_page != null:
 		return _title_page.draw(_cinema.title())
 	return _blank()
