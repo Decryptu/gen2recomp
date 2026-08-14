@@ -108,6 +108,15 @@ columns back round. `Gen2SplashScreen` hosts the phase and is the one screen her
 that reads a held button rather than a press, since both of
 `TitleScreenMain`'s chords are three buttons at once.
 
+`town_map.gd` and `render/town_map_page.gd` are `_TownMap` and
+`InitPokegearTilemap.Map` (`engine/pokegear/pokegear.asm`): the model owns
+`TownMap_GetKantoLandmarkLimits`' two windows and the wrapping cursor walk, and
+the page builds one tile map out of `JohtoMap`/`KantoMap`, the screen's own
+frame and `PokegearMap_UpdateLandmarkName`'s box, then colours it through
+`TownMapPals`. A landmark's stored coordinates are shadow-OAM values with the
+hardware's offsets already in them, which the importer takes back off, so the
+point is the centre of its 16x16 icon.
+
 `world_start_menu.gd` models `engine/menus/start_menu.asm`'s item list: source
 Pokedex/Pokemon/Pokegear gating and the `STATICMENU_WRAP` cursor.
 `pokedex.gd` models `engine/pokedex/pokedex.asm`'s listing: the three orderings
@@ -198,6 +207,7 @@ the contract and why a renderer must not write world state.
 | `render/battle_hud.gd` | Status panels on the tile grid |
 | `render/party_menu_page.gd` | `WritePartyMenuTilemap`'s party list |
 | `render/title_page.gd` | `_TitleScreen`'s and `TitleScreen`'s two screens |
+| `render/town_map_page.gd` | `_TownMap`'s and the Pokegear MAP card's region map |
 
 `Gen2Screen` is a `Control` with a 160x144 `SubViewport` at integer scale;
 surrounding UI uses window resolution. Project-wide stretch blurs menus and
@@ -398,6 +408,8 @@ Because wrong offsets can decode plausible neighboring data,
 | Evolutions, learnsets | Pointers address the banked window; methods, species, moves and levels valid, levels ascending except Muk, evolution count known. `EVOLVE_STAT` is four bytes, not three |
 | Growth | Growth rate and base EXP for all 251 species in all three games |
 | Menu text | The start menu's nine `.MenuDesc` strings, pinned by the first and last of the run and by nine terminators between them, and the pack's five `text_far` texts, each by its own `text` macro byte and opening words |
+| Prof Oak's PC | `OakRatings`' nineteen thresholds ascend and end on every species, every row's text pointer stays in the table's own bank, and each of the five text stubs around it is a `text_far` that decodes |
+| Region map | The two region tilemaps pin the graphic they are drawn out of: every one of their 720 cells names a tile inside `TownMapGFX`'s 48, and each ends on its own `-1`. The palette map is checked against the six palettes it selects between, and the palette run by the off-white all six open on. The landmark table checks both ends, that only `LANDMARK_SPECIAL` sits at (0,0), and that every name pointer stays in the table's own bank |
 | Title | Crystal's three LZ runs and its palettes are one contiguous section, so each pins the next: a run decompressing to the wrong tile count, or one whose neighbour does not follow it inside a few bytes, is not the one being looked for. The crystal opens on a blank corner and every one of `.Frames`' four Suicune bases has ink under it. Gold and Silver's logo halves pin their tilemap the same way, the bottom half's last tile is drawn on because `--trim-whitespace` took the blanks off it, the trail's first four tiles are inked and Gold's own last four are blank, and the bird starts exactly where the trail's tiles stop. Both palette runs are contiguous, the background's opens on white and the objects' carries `title_fg.pal`'s three identical greys |
 | Splash | The copyright pair above, and `GameFreakPresents`' four graphics and three palettes, each identified by content: the word strip is inked in every tile and clear across the top two rows of the six that spell "PRESENTS", the logo's first tile is the blank one "GAME FREAK" borrows as its space, the sparkles close in on their own centre one row at a time, the Ditto decompresses to exactly 256 tiles with every OAM base landing on a drawn one, and the sixteen-step fade opens on the Ditto's own colour and runs pink to orange. The star strip and the fade palette are pinned to the logo graphic they sit against |
 | Fruit trees | Thirty rows of one item byte, identified by content because the table has no header and no terminator: rows 17 to 23 are the seven apricorns and no other row bears one, and the four Johto berry trees ahead of them share a berry |

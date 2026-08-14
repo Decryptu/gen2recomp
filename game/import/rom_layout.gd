@@ -664,6 +664,71 @@ const CARD_PALETTE_CLASSES: Array[int] = [0, 1, 3, 2, 4, 7, 6, 5]
 ## is stored whole.
 const CARD_BADGE_PALETTE_COLORS: int = 4
 
+## The region map (`_TownMap` and `PokegearMap`, engine/pokegear/pokegear.asm).
+##
+## `Pokegear_LoadGFX` builds one VRAM window for both screens: `TownMapGFX` at
+## `vTiles2`, `PokegearGFX` at `vTiles2 tile $30` and `PokegearSpritesGFX` at
+## `vTiles0`, which is where the cursor's tiles come from. All three are LZ runs.
+const TOWN_MAP_TILES: int = 48
+const TOWN_MAP_FIRST_TILE: int = 0x00
+const POKEGEAR_TILES: int = 46
+const POKEGEAR_FIRST_TILE: int = 0x30
+const POKEGEAR_SPRITE_TILES: int = 9
+## `FastShipGFX`, uncompressed and copied over the player icon's own tiles when
+## the player is on the S.S. Aqua, so it is the same four-frame walk read from
+## eight tiles rather than twenty-four.
+const FAST_SHIP_TILES: int = 8
+
+## `JohtoMap` and `KantoMap` (gfx/pokegear/johto.bin, kanto.bin): one tile number
+## per cell of the whole screen, then `-1`. `FillTownMap` writes them from (0,0),
+## so a region map covers the screen before any frame is drawn over it.
+const TOWN_MAP_REGION_CELLS: int = 360
+const TOWN_MAP_REGION_TERMINATOR: int = 0xFF
+
+## `TownMapPals`: a palette per tile id, condensed to nybbles, least significant
+## first. It covers $00 to $5f; $60 and above take palette 0.
+const TOWN_MAP_PALETTE_MAP_BYTES: int = 48
+const TOWN_MAP_PALETTE_MAP_LIMIT: int = 0x60
+## `MalePokegearPals`/`FemalePokegearPals` (`PokegearPals` on Gold and Silver),
+## which are gfx/pokegear/pokegear.pal: border, earth, mountain, city, point of
+## interest and mountain point of interest. Only the city palette differs between
+## the two Crystal copies.
+const TOWN_MAP_PALETTES: int = 6
+const TOWN_MAP_PALETTE_COLORS: int = 4
+## Every one of the six opens on the same off-white, which is what identifies the
+## run: RGB 28,31,20.
+const TOWN_MAP_PALETTE_FIRST_COLOR: int = 0x53FC
+
+## `OakRatings` (data/events/pokedex_ratings.asm): nineteen `rating` rows of a
+## caught-count threshold, an sfx word and a text pointer, which `FindOakRating`
+## walks until the count fits. The five texts around it are located from the
+## table rather than pinned again: `engine/events/prof_oaks_pc.asm` lays the
+## stubs out as `OakPCText1`, `2` and `3` in front of `OakRating01` and
+## `OakPCText4` behind `OakRating19`, each a `text_far` and a `text_end`.
+const OAK_RATING_COUNT: int = 19
+const OAK_RATING_SIZE: int = 5
+const OAK_TEXT_STUB_SIZE: int = 5
+## Their order in the run, as offsets in stubs from `OakRating01`.
+const OAK_TEXT_STUBS: Dictionary = {
+	"ask": -3, "level": -2, "counts": -1, "closed": OAK_RATING_COUNT,
+}
+## The caught count `FindOakRating`'s last row answers, which is every species.
+const OAK_RATING_LAST_THRESHOLD: int = 255
+## Long enough for the longest rating; one that reaches it has not terminated.
+const OAK_TEXT_MAX_BYTES: int = 256
+
+## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
+## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
+## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
+## it onward is one lower; see [Gen2WorldRadio]'s own constants.
+const LANDMARK_RECORD_SIZE: int = 4
+const LANDMARK_COUNT: int = 96
+const LANDMARK_COUNT_GOLD_SILVER: int = 95
+const LANDMARK_OAM_X: int = 8
+const LANDMARK_OAM_Y: int = 16
+## `GetLandmarkName` copies exactly this many bytes whatever the name's length.
+const LANDMARK_NAME_BYTES: int = 18
+
 ## The battle animation data layer: the per-move scripts and the four tables the
 ## objects they spawn are built from.
 ##
@@ -1075,6 +1140,32 @@ const GOLD_SILVER: Dictionary = {
 		"right_corner": -1,
 		"badge_palette": 0xA385,
 	},
+	# The region map. `johto`, `kanto`, `palette_map` and `palette` were located
+	# by assembling the pinned gfx/pokegear files and matching the bytes; the
+	# three graphics by decompressing at every offset and keeping the run that
+	# reproduces the pinned PNG exactly. Every hit is unique per dump. The
+	# landmark table was located by its own x,y byte pairs at a stride of four,
+	# which no other run in the cartridge matches. Nested the way trainer_card
+	# is, so Gold and Silver's absent female palette stays out of the flat offset
+	# checks.
+	"town_map": {
+		"gfx": 0xF8C92,
+		"pokegear_gfx": 0x1C0E43,
+		"sprites": 0x9149C,
+		"fast_ship": 0x90C7C,
+		"johto": 0x91F52,
+		"kanto": 0x920BB,
+		"palette_map": 0x91EAC,
+		"palette": 0xBB6E,
+		# `PokegearPals` is one run: no Kris, so no second city palette.
+		"palette_female": -1,
+		"landmarks": 0x92382,
+		"landmark_count": LANDMARK_COUNT_GOLD_SILVER,
+	},
+	# `OakRatings`, located by its own nineteen ascending thresholds at a stride
+	# of five, which hit once per dump. Everything else Prof Oak's PC says is
+	# reached through the table's own text pointers.
+	"oak_ratings": 0x2685B,
 	# The copyright screen (`Copyright`, engine/menus/intro_menu.asm). The
 	# graphic was located by encoding the pinned gfx/splash/copyright.png as
 	# 2bpp and matching it, which hits once per dump; the string by assembling
@@ -1335,6 +1426,26 @@ const CRYSTAL: Dictionary = {
 		"right_corner": 0x265C3,
 		"badge_palette": 0x9F16,
 	},
+	# The region map; see the Gold and Silver block above for how these were
+	# located. Every asset is byte identical across the three dumps, so only the
+	# addresses differ. Crystal adds Kris's own city palette and the ninety-sixth
+	# landmark, `BATTLE TOWER`.
+	"town_map": {
+		"gfx": 0xF8BA0,
+		"pokegear_gfx": 0x1DE2E4,
+		"sprites": 0x914DD,
+		"fast_ship": 0x90CB2,
+		"johto": 0x91FFF,
+		"kanto": 0x92168,
+		"palette_map": 0x91F4B,
+		"palette": 0xB729,
+		"palette_female": 0xB759,
+		"landmarks": 0x1CA8C3,
+		"landmark_count": LANDMARK_COUNT,
+	},
+	# See the Gold and Silver block above; the table is byte identical and only
+	# its address moves.
+	"oak_ratings": 0x2667F,
 	# See the Gold and Silver block above for how this was located.
 	"copyright": {"gfx": 0xE4000, "tiles": 29, "string": 0x63FD, "palette": 0xA066},
 	# See the Gold and Silver block above for how these were located. Crystal
@@ -1843,6 +1954,40 @@ static func is_matchup_type(value: int) -> bool:
 	if value <= PHYSICAL_TYPES_END:
 		return true
 	return value >= SPECIAL_TYPES_START and value < TYPE_COUNT
+
+
+## Where `OakRatings` row [param index] starts.
+static func oak_rating_offset(layout: Dictionary, index: int) -> int:
+	return int(layout.get("oak_ratings", -1)) + index * OAK_RATING_SIZE
+
+
+## The dump offset one of `prof_oaks_pc.asm`'s five text stubs sits at, counted
+## in stubs from `OakRating01`, whose address the table's first row carries.
+static func oak_text_stub_offset(rom: RomFile, layout: Dictionary, name: String) -> int:
+	var table: int = int(layout.get("oak_ratings", -1))
+	if not rom.in_bounds(table, OAK_RATING_SIZE) or not OAK_TEXT_STUBS.has(name):
+		return -1
+	var first: int = rom.u16le(table + 3) + int(OAK_TEXT_STUBS[name]) * OAK_TEXT_STUB_SIZE
+	return RomFile.linear(bank_of(table), first)
+
+
+static func landmark_count(layout: Dictionary) -> int:
+	return int((layout.get("town_map", {}) as Dictionary).get("landmark_count", 0))
+
+
+## Where landmark [param index]'s four-byte record starts.
+static func landmark_offset(layout: Dictionary, index: int) -> int:
+	var entry: Dictionary = layout.get("town_map", {})
+	return int(entry.get("landmarks", -1)) + index * LANDMARK_RECORD_SIZE
+
+
+## The dump offset landmark [param index]'s name pointer addresses. The pointer
+## is two bytes, so the string is in the table's own bank.
+static func landmark_name_offset(rom: RomFile, layout: Dictionary, index: int) -> int:
+	var record: int = landmark_offset(layout, index)
+	if not rom.in_bounds(record, LANDMARK_RECORD_SIZE):
+		return -1
+	return RomFile.linear(bank_of(record), rom.u16le(record + 2))
 
 
 static func font_offset(layout: Dictionary) -> int:

@@ -274,6 +274,13 @@ static func _characters() -> Dictionary:
 	table[0x59] = "<TARGET>"
 	table[0x5A] = "<USER>"
 
+	# `CheckDict`'s two break opportunities, which draw nothing of their own:
+	# `<BSP>` is replaced with a space and `<WBR>` skipped. Both are `<LF>`
+	# instead on the region map, which is `TownMap_ConvertLineBreakCharacters`
+	# rewriting the byte before the string is placed.
+	table[0x1F] = " "
+	table[0x25] = ""
+
 	# Line and box control. $16 is left out for the reason $14 is: to the
 	# command loop it is TX_FAR, and `CheckDict` has no `<CR>` entry.
 	table[0x22] = "\n"
