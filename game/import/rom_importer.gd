@@ -815,6 +815,10 @@ static func verify_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
 				],
 			}
 
+	var fast_ship: int = int(entry.get("fast_ship", -1))
+	if not rom.in_bounds(fast_ship, RomLayout.FAST_SHIP_TILES * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "The Fast Ship icon is outside the cartridge."}
+
 	for region: String in ["johto", "kanto"]:
 		var cells: PackedByteArray = read_town_map_region(rom, layout, region)
 		if cells.size() != RomLayout.TOWN_MAP_REGION_CELLS:
@@ -3799,6 +3803,15 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	## `TitleScreenGFX3`, the one title graphic that is not compressed: Gold and
 	## Silver only, and Gold's own four blank tiles behind it are kept, since
 	## `TitleScreen` copies eight tiles whatever the trail's own length is.
+	var region_map: Dictionary = layout.get("town_map", {})
+	if int(region_map.get("fast_ship", -1)) >= 0:
+		sheets["fast_ship"] = {
+			"offset": int(region_map["fast_ship"]),
+			"tiles": RomLayout.FAST_SHIP_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+
 	var title: Dictionary = layout.get("title", {})
 	if int(title.get("trail", -1)) >= 0:
 		sheets["title_trail"] = {

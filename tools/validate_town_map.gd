@@ -207,6 +207,16 @@ func _verify_page(game_id: StringName, data: GameData, crystal: bool) -> void:
 	var page: Gen2TownMapPage = Gen2TownMapPage.from_data(data)
 	if not _check(page != null and page.ready(), "%s: the region map art is missing." % game_id):
 		return
+	# The two objects the screen draws come off strips of their own.
+	for sheet: Array in [
+		["pokegear_sprites", RomLayout.POKEGEAR_SPRITE_TILES],
+		["fast_ship", RomLayout.FAST_SHIP_TILES],
+	]:
+		_check(
+			data.tile_indices(String(sheet[0])).size()
+				== int(sheet[1]) * Gen2Tiles.TILE_PIXELS,
+			"%s: the %s strip is not %d tiles." % [game_id, sheet[0], int(sheet[1])]
+		)
 	for screen: StringName in [
 		Gen2TownMap.SCREEN_TOWN_MAP, Gen2TownMap.SCREEN_POKEGEAR_CARD
 	]:

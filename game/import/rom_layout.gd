@@ -674,6 +674,10 @@ const TOWN_MAP_FIRST_TILE: int = 0x00
 const POKEGEAR_TILES: int = 46
 const POKEGEAR_FIRST_TILE: int = 0x30
 const POKEGEAR_SPRITE_TILES: int = 9
+## `FastShipGFX`, uncompressed and copied over the player icon's own tiles when
+## the player is on the S.S. Aqua, so it is the same four-frame walk read from
+## eight tiles rather than twenty-four.
+const FAST_SHIP_TILES: int = 8
 
 ## `JohtoMap` and `KantoMap` (gfx/pokegear/johto.bin, kanto.bin): one tile number
 ## per cell of the whole screen, then `-1`. `FillTownMap` writes them from (0,0),
@@ -1148,6 +1152,7 @@ const GOLD_SILVER: Dictionary = {
 		"gfx": 0xF8C92,
 		"pokegear_gfx": 0x1C0E43,
 		"sprites": 0x9149C,
+		"fast_ship": 0x90C7C,
 		"johto": 0x91F52,
 		"kanto": 0x920BB,
 		"palette_map": 0x91EAC,
@@ -1429,6 +1434,7 @@ const CRYSTAL: Dictionary = {
 		"gfx": 0xF8BA0,
 		"pokegear_gfx": 0x1DE2E4,
 		"sprites": 0x914DD,
+		"fast_ship": 0x90CB2,
 		"johto": 0x91FFF,
 		"kanto": 0x92168,
 		"palette_map": 0x91F4B,

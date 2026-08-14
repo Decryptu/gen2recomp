@@ -118,7 +118,7 @@ to check without writing.
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
-| Region map | The Pokegear's three graphics sheets, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
+| Region map | The Pokegear's three graphics sheets and the Fast Ship's icon, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
 | Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
 | Battle HUD | HP/EXP bars, panel borders and colours |
 | Overworld | Maps, tilesets, collisions, events, scripts, movement, palettes, animation and object sprites |

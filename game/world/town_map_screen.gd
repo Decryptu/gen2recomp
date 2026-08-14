@@ -222,7 +222,15 @@ func _refresh_cursor() -> void:
 
 
 func _cursor_image() -> Image:
-	var tiles: PackedByteArray = _data.tile_indices("pokegear_sprites") if _data != null \
+	return _icon_from("pokegear_sprites", CURSOR_TILE)
+
+
+## One 16x16 object out of a tile strip, as the four tiles from [param first].
+## [param flip] is `B_OAM_XFLIP`, which the hardware applies to each tile where
+## it stands rather than mirroring the square, so the quadrants keep their
+## corners.
+func _icon_from(sheet: String, first: int, flip: bool = false) -> Image:
+	var tiles: PackedByteArray = _data.tile_indices(sheet) if _data != null \
 		else PackedByteArray()
 	var palette: PackedColorArray = _object_palette()
 	var out := Image.create(ICON_SIZE, ICON_SIZE, false, Image.FORMAT_RGBA8)
@@ -231,14 +239,16 @@ func _cursor_image() -> Image:
 		return out
 	var width: int = tiles.size() / Gen2TownMapPage.TILE
 	for quadrant: int in 4:
-		var source_x: int = (CURSOR_TILE + quadrant) * Gen2TownMapPage.TILE
+		var source_x: int = (first + quadrant) * Gen2TownMapPage.TILE
 		var to_x: int = (quadrant & 1) * Gen2TownMapPage.TILE
 		var to_y: int = (quadrant >> 1) * Gen2TownMapPage.TILE
 		for y: int in Gen2TownMapPage.TILE:
 			for x: int in Gen2TownMapPage.TILE:
-				var index: int = tiles[y * width + source_x + x]
+				var index: int = tiles[
+					y * width + source_x + (Gen2TownMapPage.TILE - 1 - x if flip else x)
+				]
 				# Object colour zero is transparent under the hardware's own
-				# rules, which is what lets the cursor sit over the map.
+				# rules, which is what lets an icon sit over the map.
 				if index == 0:
 					continue
 				out.set_pixel(
@@ -248,7 +258,9 @@ func _cursor_image() -> Image:
 
 
 ## `PokegearMap_InitPlayerIcon`: `GetPlayerIcon`'s standing and walking frames,
-## which are the player's own overworld sprite facing down.
+## which are the player's own overworld sprite facing down. `Pokegear_LoadGFX`
+## copies `FastShipGFX` over those same tiles while the player is on the S.S.
+## Aqua, so the icon there is the ship walking through the same four frames.
 func _refresh_player_icon() -> void:
 	if _player_icon == null or _map == null:
 		return
@@ -261,18 +273,29 @@ func _player_image() -> Image:
 	blank.fill(Color(0, 0, 0, 0))
 	if _data == null:
 		return blank
+	@warning_ignore("integer_division")
+	var step: int = (_frames / WALK_FRAME_LENGTH) % WALK_FRAMES.size()
+	if _map != null and _map.player_landmark == Gen2WorldRadio.fast_ship_landmark(_map.crystal):
+		return _fast_ship_image(step)
 	var number: int = Gen2WorldSprite.player_normal_sprite(_female)
 	var sprite: Gen2WorldSprite = _data.overworld_sprite(number)
 	if sprite == null:
 		return blank
-	@warning_ignore("integer_division")
-	var step: int = (_frames / WALK_FRAME_LENGTH) % WALK_FRAMES.size()
 	return Gen2WorldSprite.image_for(
 		sprite,
 		_data.overworld_sprite_indices(number),
 		_object_palette(),
 		Gen2WorldSprite.FACING_DOWN,
 		WALK_FRAMES[step],
+	)
+
+
+## `FastShipGFX`, eight tiles copied over `vTiles0 tile $10`: the standing four
+## and the walking four the frameset alternates between, with no facing to pick.
+func _fast_ship_image(step: int) -> Image:
+	var frame: int = WALK_FRAMES[step]
+	return _icon_from(
+		"fast_ship", 4 if Gen2WorldSprite.is_walking_frame(frame) else 0, frame == 3
 	)
 
 
