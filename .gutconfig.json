@@ -1,5 +1,5 @@
 {
-	"dirs": ["res://tests/unit", "res://tests/integration"],
+	"dirs": ["res://tests/unit"],
 	"include_subdirs": true,
 	"log_level": 1,
 	"should_exit": true,

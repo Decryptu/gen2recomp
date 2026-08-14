@@ -65,6 +65,34 @@ var _player_pixels: PackedByteArray = PackedByteArray()
 var _enemy_pixels_species: int = -1
 var _player_pixels_species: int = -1
 
+## Everything a pic layer is built out of. A draining bar moves the panels while
+## the map, the species, the palette and the scroll all stand still, so the same
+## two pictures were being rebuilt into a screen-sized buffer and a fresh
+## texture on every frame of it. The layer is kept until one of its own inputs
+## changes.
+var _enemy_pic_key: Array = []
+var _player_pic_key: Array = []
+## The same for the four layers above them, by name.
+var _layer_keys: Dictionary = {}
+
+
+## Whether [param id] has to be rebuilt, recording [param key] as what it will
+## then be holding.
+func _layer_changed(id: StringName, key: Array) -> bool:
+	if _layer_keys.get(id, null) == key:
+		return false
+	_layer_keys[id] = key
+	return true
+
+
+## The per-scanline offsets every background layer is scrolled by, which belong
+## to each of them as much as their own contents do.
+func _raster_key() -> Array:
+	return [
+		PackedInt32Array(_view.get("raster_scy", [])),
+		PackedInt32Array(_view.get("raster_scx", [])),
+	]
+
 
 ## Reads what it draws with out of the cache and builds its layers. Answers
 ## false if the cache is missing something the HUD needs, mirroring
@@ -112,25 +140,39 @@ func refresh() -> void:
 func _draw_pics() -> void:
 	var map: PackedByteArray = _bg_map()
 	_ensure_pixels()
+	var raster: Array = _raster_key()
 
-	_show_layer(
-		_enemy_pic,
-		_pic_layer(map, Gen2BattleScreenMap.ENEMY_BASE_TILE, Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels),
-		_battler_palette(int(_view.get("enemy_species", 0)), Gen2BattleAnimBackground.PAL_BG_ENEMY)
+	var enemy: int = int(_view.get("enemy_species", 0))
+	var enemy_palette: PackedColorArray = _battler_palette(
+		enemy, Gen2BattleAnimBackground.PAL_BG_ENEMY
 	)
+	var enemy_key: Array = [map, enemy, enemy_palette, raster]
+	if enemy_key != _enemy_pic_key:
+		_enemy_pic_key = enemy_key
+		_show_layer(
+			_enemy_pic,
+			_pic_layer(map, Gen2BattleScreenMap.ENEMY_BASE_TILE, Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels),
+			enemy_palette
+		)
 	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
 	# after `BattleIntroSlidingPics` has returned, so it is not on the map to be
 	# scrolled and is simply not there yet.
 	if bool(_view.get("player_pic_visible", true)):
-		_show_layer(
-			_player_pic,
-			_pic_layer(map, Gen2BattleScreenMap.PLAYER_BASE_TILE, Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels),
-			_battler_palette(
-				int(_view.get("player_species", 0)), Gen2BattleAnimBackground.PAL_BG_PLAYER
-			)
+		var player: int = int(_view.get("player_species", 0))
+		var player_palette: PackedColorArray = _battler_palette(
+			player, Gen2BattleAnimBackground.PAL_BG_PLAYER
 		)
+		var player_key: Array = [map, player, player_palette, raster]
+		if player_key != _player_pic_key:
+			_player_pic_key = player_key
+			_show_layer(
+				_player_pic,
+				_pic_layer(map, Gen2BattleScreenMap.PLAYER_BASE_TILE, Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels),
+				player_palette
+			)
 	else:
 		_player_pic.texture = null
+		_player_pic_key = []
 
 
 ## The tilemap the animation edits, or the plain one both pics sit in when the
@@ -253,38 +295,51 @@ func _draw_panels() -> void:
 		_enemy_bar.texture = null
 		_player_bar.texture = null
 		_exp_bar.texture = null
+		_layer_keys.clear()
 		return
 
+	var raster: Array = _raster_key()
 	var enemy_hp: int = int(_view.get("enemy_hp", 0))
 	var enemy_max_hp: int = int(_view.get("enemy_max_hp", 0))
 	var player_hp: int = int(_view.get("player_hp", 0))
 	var player_max_hp: int = int(_view.get("player_max_hp", 0))
+	var enemy_name: String = String(_view.get("enemy_name", ""))
+	var enemy_level: int = int(_view.get("enemy_level", 0))
+	var player_name: String = String(_view.get("player_name", ""))
+	var player_level: int = int(_view.get("player_level", 0))
+	var exp_pixels: int = int(_view.get("exp_pixels", 0))
 
-	var panels: PackedByteArray = _new_buffer()
-	_hud.draw_enemy(
-		panels, Gen2Screen.WIDTH, String(_view.get("enemy_name", "")),
-		int(_view.get("enemy_level", 0))
-	)
-	_hud.draw_player(
-		panels, Gen2Screen.WIDTH, String(_view.get("player_name", "")),
-		int(_view.get("player_level", 0)), player_hp, player_max_hp
-	)
-	_show_layer(
-		_panels, panels,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
-	)
+	# The player's panel prints its own HP numbers, so it moves with the bar; the
+	# enemy's does not, which is why both sit in one layer keyed on all of it.
+	if _layer_changed(&"panels", [
+		enemy_name, enemy_level, player_name, player_level, player_hp, player_max_hp, raster,
+	]):
+		var panels: PackedByteArray = _new_buffer()
+		_hud.draw_enemy(panels, Gen2Screen.WIDTH, enemy_name, enemy_level)
+		_hud.draw_player(
+			panels, Gen2Screen.WIDTH, player_name, player_level, player_hp, player_max_hp
+		)
+		_show_layer(
+			_panels, panels,
+			Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		)
 
-	var enemy: PackedByteArray = _new_buffer()
-	_hud.draw_hp_bar(enemy, Gen2Screen.WIDTH, Gen2BattleHud.ENEMY_BAR, enemy_hp, enemy_max_hp)
-	_show_layer(_enemy_bar, enemy, _hp_palette(enemy_hp, enemy_max_hp))
+	if _layer_changed(&"enemy_bar", [enemy_hp, enemy_max_hp, raster]):
+		var enemy: PackedByteArray = _new_buffer()
+		_hud.draw_hp_bar(enemy, Gen2Screen.WIDTH, Gen2BattleHud.ENEMY_BAR, enemy_hp, enemy_max_hp)
+		_show_layer(_enemy_bar, enemy, _hp_palette(enemy_hp, enemy_max_hp))
 
-	var player: PackedByteArray = _new_buffer()
-	_hud.draw_hp_bar(player, Gen2Screen.WIDTH, Gen2BattleHud.PLAYER_BAR, player_hp, player_max_hp)
-	_show_layer(_player_bar, player, _hp_palette(player_hp, player_max_hp))
+	if _layer_changed(&"player_bar", [player_hp, player_max_hp, raster]):
+		var player: PackedByteArray = _new_buffer()
+		_hud.draw_hp_bar(
+			player, Gen2Screen.WIDTH, Gen2BattleHud.PLAYER_BAR, player_hp, player_max_hp
+		)
+		_show_layer(_player_bar, player, _hp_palette(player_hp, player_max_hp))
 
-	var gained: PackedByteArray = _new_buffer()
-	_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, int(_view.get("exp_pixels", 0)))
-	_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
+	if _layer_changed(&"exp_bar", [exp_pixels, raster]):
+		var gained: PackedByteArray = _new_buffer()
+		_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, exp_pixels)
+		_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
 
 
 ## `wShadowOAM` as the animation left it: up to forty sprites, each eight by

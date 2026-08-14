@@ -610,7 +610,7 @@ const FUCHSIA_ROUTE_15_GATE_DOOR: Vector2i = Vector2i(37, 22)
 const ROUTE_11_NUMBER: int = 2
 
 ## Vermilion's Snorlax. The whole chain is pinned and checked against the cache
-## by `tools/validate_radio.gd`, which is where these values are explained; only
+## by `tools/checks/radio.gd`, which is where these values are explained; only
 ## the cells the walk needs are repeated here.
 ##
 ## `maps/VermilionCity.asm` object 4 is a BIG_OBJECT filling (34,8) to (35,9),
@@ -647,7 +647,7 @@ const DIGLETTS_CAVE_CHAIN: Array[Vector2i] = [
 ## Route 2 and Pewter City. The cave lands in a 125-cell pocket closed by two
 ## cut trees, and the northern one on (5,8) is the only one that opens the rest
 ## of the route; cutting it reaches 469 cells and both the Pewter and the
-## Viridian crossing (`tools/validate_radio.gd` checks both counts).
+## Viridian crossing (`tools/checks/radio.gd` checks both counts).
 const ROUTE_2_GROUP: int = 23
 const ROUTE_2_NUMBER: int = 1
 const ROUTE_2_CUT_APPROACH: Vector2i = Vector2i(5, 9)
@@ -748,7 +748,7 @@ const VIRIDIAN_GYM_EXIT: Vector2i = Vector2i(4, 17)
 ## needs only the map the walk west crosses onto (`constants/map_constants.asm`,
 ## `data/maps/attributes.asm`). The three cave rooms are the one place the
 ## profiles renumber, 74 to 76 in Crystal and 66 to 68 in Gold and Silver, which
-## is why `tools/validate_mt_silver.gd` splits them and this Crystal-only walk
+## is why `tools/checks/mt_silver.gd` splits them and this Crystal-only walk
 ## does not name them at all.
 const SILVER_GROUP: int = 19
 const SILVER_CAVE_OUTSIDE_NUMBER: int = 2
@@ -772,7 +772,7 @@ const EVENT_OPENED_MT_SILVER: int = 1871
 ## joins the corridor to the Route 22 arm and is hidden by EVENT_FOUGHT_SNORLAX,
 ## which `_wake_snorlax()` already set; the left belt on (7,5) joins it to the
 ## Route 28 arm and is hidden by EVENT_OPENED_MT_SILVER. Oak is therefore the
-## gate on Mt. Silver, not a courtesy, and `tools/validate_mt_silver.gd` pins all
+## gate on Mt. Silver, not a courtesy, and `tools/checks/mt_silver.gd` pins all
 ## four flag combinations.
 const ROUTE_22_GATE_DOOR: Vector2i = Vector2i(13, 5)
 const GATE_WEST_DOOR: Vector2i = Vector2i(1, 7)
@@ -2012,7 +2012,7 @@ const FARFETCHD_HERD: Array = [
 ]
 
 ## Ilex Forest's cuttable tree, the only way from the forest's southern half to
-## the Route 34 exit (maps/IlexForest.blk; tools/validate_cut.gd pins the cell).
+## the Route 34 exit (maps/IlexForest.blk; tools/checks/cut.gd pins the cell).
 const ILEX_CUT_TREE: Vector2i = Vector2i(8, 25)
 const ILEX_CUT_APPROACH: Vector2i = Vector2i(8, 26)
 
@@ -4528,7 +4528,7 @@ func _dragons_den_dragon_fang(
 ## in a region that reaches no map edge, and the only crossing of the channel
 ## east of it starts in a pocket reached solely by leaving Tohjo Falls there.
 ## The cave in turn is two lower channels that reach the pool feeding them only
-## by climbing `COLL_WATERFALL` cells. `tools/validate_route_27.gd` pins all of
+## by climbing `COLL_WATERFALL` cells. `tools/checks/route_27.gd` pins all of
 ## it.
 ##
 ## Appends to [param path] and answers only ok or the failure.
@@ -6210,7 +6210,7 @@ func _celadon_gym_leg(
 ## grunt, who is armed by the Power Plant manager. The plant is not walked to
 ## either: it sits in a region with no map edge and no walkable neighbour, and
 ## the way in is Route 9's river, which the same cut that opens the route also
-## opens the shore of. `tools/validate_cerulean.gd` pins all of it.
+## opens the shore of. `tools/checks/cerulean.gd` pins all of it.
 func _cerulean_approach_path(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -6362,7 +6362,7 @@ func _machine_part_errand(
 ## columns, so one of the pair is met whichever way round it goes. All three stand
 ## on water and walk over it to reach the player, which the cartridge allows
 ## because `SeenByTrainerScript` is `applymovementlasttalked` and its steps reach
-## `NormalStep`, checking no permission. `tools/validate_cerulean.gd` pins the
+## `NormalStep`, checking no permission. `tools/checks/cerulean.gd` pins the
 ## geometry and each approach.
 ##
 ## Misty herself sets all three of their beaten flags along with her own, the way
@@ -6828,7 +6828,7 @@ func _magnet_train_ride(
 ## The longest open walk in Kanto and the first leg since Vermilion with no
 ## errand in it at all: Routes 12, 13, 14 and 15 are four plain connections, and
 ## the only door is `ROUTE_15_FUCHSIA_GATE` at the end. What it costs is
-## trainers, eighteen of them, and `tools/validate_fuchsia.gd` measures which
+## trainers, eighteen of them, and `tools/checks/fuchsia.gd` measures which
 ## ones a walk owes rather than guessing: on this profile only Route 13's
 ## Pokefan Joshua and Hiker Kenny stand where shutting their sight line seals the
 ## way south. The other three routes can be crossed without meeting anyone, and
@@ -6963,7 +6963,7 @@ func _fuchsia_leg(
 ## the Radio Card: `SnorlaxAwake` answers only while the Poke Flute channel is
 ## the track in `wMapMusic`, and a station's music id is neither sentinel
 ## `ExitPokegearRadio_HandleMusic` restores on, so it survives the Pokegear
-## closing. `tools/validate_radio.gd` owns that whole chain and the Route 2
+## closing. `tools/checks/radio.gd` owns that whole chain and the Route 2
 ## counts behind it.
 func _pewter_leg(
 	world: Gen2WorldAPI,
@@ -7549,7 +7549,7 @@ func _viridian_leg(
 ## The Victory Road Gate is three regions joined by two single cells and a black
 ## belt stands in each, so EVENT_OPENED_MT_SILVER is the one thing that joins
 ## the corridor to the Route 28 arm, exactly as EVENT_FOUGHT_SNORLAX joins it to
-## the Route 22 arm the leg arrives through. `tools/validate_mt_silver.gd` pins
+## the Route 22 arm the leg arrives through. `tools/checks/mt_silver.gd` pins
 ## all four combinations.
 ##
 ## Red himself is the route's second presentation boundary: his script ends on
@@ -7772,7 +7772,7 @@ func _silver_cave_heal(
 
 
 ## The three rooms and Red. Every room is one region, so each ladder is walked
-## to directly; `tools/validate_mt_silver.gd` is what says so.
+## to directly; `tools/checks/mt_silver.gd` is what says so.
 func _silver_cave_rooms(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -9358,7 +9358,7 @@ func _drain_story(
 				# the walked route runs the source presentation: shock emote for
 				# TRAINER_SHOCK_FRAMES, then one slow step per planned cell,
 				# then the facing update, before the seen text resumes. The
-				# same order tools/validate_crystal_route30_trainer.gd checks.
+				# same order tools/checks/crystal_route30_trainer.gd checks.
 				var approach_values: Dictionary = request.get("values", {})
 				var approach_index: int = int(approach_values.get("object_index", -1))
 				var raw_direction: Variant = approach_values.get("direction", Vector2i.ZERO)

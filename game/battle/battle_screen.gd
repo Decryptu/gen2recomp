@@ -295,8 +295,15 @@ func _process(delta: float) -> void:
 ## Whether anything is counting hardware frames right now. Public with
 ## [method advance_frame] so a test or a screenshot driver can settle the screen
 ## without waiting on real time.
+##
+## An exp bar stopped at a level boundary is waiting on the press that dismisses
+## `.LoopLevels`' textbox, not on frames: it cannot move until
+## [method Gen2ExpBarAnimation.resume]. It is excluded here so a caller draining
+## frames stops instead of spinning, which [method bars_animating] does not do
+## because that answers whether a bar is on screen.
 func frames_running() -> bool:
-	return bars_animating() or _intro != null or animation_running() or fainting()
+	var bars: bool = not _bars.is_empty() or (_exp_bar != null and not _exp_bar.paused())
+	return bars or _intro != null or animation_running() or fainting()
 
 
 ## One hardware frame of everything that counts them. Public through

@@ -227,7 +227,7 @@ static func read_world(
 ## A pointer that does not resolve is skipped, not fatal. Scripts are collected
 ## as fixed slices, so a slice that runs past its own end can decode stray bytes
 ## as a `writecmdqueue`; the corpus counts already treat that as expected. What
-## keeps this honest is `tools/validate_command_queues.gd`, which asserts the two
+## keeps this honest is `tools/checks/command_queues.gd`, which asserts the two
 ## real tables against the pinned sources rather than trusting the scan.
 static func _read_command_queues(
 	rom: RomFile, script_data: Dictionary, text_data: Dictionary, movement_data: Dictionary

@@ -3,7 +3,7 @@ extends GutTest
 ## The battle animation command interpreter
 ## (engine/battle_anims/anim_commands.asm), against hand-built regions.
 ##
-## The real cartridges are `tools/validate_battle_anims.gd`'s job; what is here
+## The real cartridges are `tools/checks/battle_anims.gd`'s job; what is here
 ## is the vocabulary and the control flow, including the shapes no shipped
 ## animation uses.
 

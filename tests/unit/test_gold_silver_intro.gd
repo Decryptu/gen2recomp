@@ -5,7 +5,7 @@ extends GutTest
 ## is the whole colour model, and the framesets and OAM sets the sprites index.
 ##
 ## The movie itself needs the art, so its frames, scene starts and sounds are
-## pinned in `tools/validate_gs_intro.gd` against a real cache instead.
+## pinned in `tools/checks/gs_intro.gd` against a real cache instead.
 
 
 ## `IntroSceneJumper.scenes` is seventeen entries, and `IntroScene17` is the one

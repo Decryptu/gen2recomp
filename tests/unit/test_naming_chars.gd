@@ -5,7 +5,7 @@ extends GutTest
 ## The cache is synthetic and has the real block's shape rather than its
 ## contents: four tables of 5, 6, 5 and 6 rows, every row 17 bytes, with the
 ## letter rows generated and the command row taken from [RomLayout]'s own
-## constant. The real cartridge bytes are the job of `tools/validate_naming.gd`,
+## constant. The real cartridge bytes are the job of `tools/checks/naming.gd`,
 ## which decodes all four tables out of all three dumps.
 
 const TABLE_ROWS: Array[int] = [5, 6, 5, 6]

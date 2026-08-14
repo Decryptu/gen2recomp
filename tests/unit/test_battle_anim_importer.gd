@@ -4,7 +4,7 @@ extends GutTest
 ##
 ## No cartridge is opened here, for the reason `test_rom_importer.gd` states:
 ## where the tables are is only settled by a real dump and
-## `tools/validate_battle_anims.gd`, and what is worth testing is that the
+## `tools/checks/battle_anims.gd`, and what is worth testing is that the
 ## checks would notice if they were somewhere else.
 
 ## Everything is put in bank 1, so an in-bank address is the file offset plus
