@@ -13,11 +13,11 @@ const FRAME_CAP: int = 20000
 
 ## `IntroScene28` sets `JUMPTABLE_EXIT_F` on this frame. Over half of it is the
 ## setup scenes' `Request2bpp` waits, which spend a frame per eight tiles.
-const MOVIE_FRAMES: int = 2338
+const MOVIE_FRAMES: int = 2340
 ## The frame each of the twenty-eight scenes starts on.
 const SCENE_STARTS: Array[int] = [
 	0, 1, 188, 189, 359, 360, 547, 548, 733, 734, 933, 934, 1168, 1169, 1371,
-	1372, 1559, 1560, 1713, 1714, 1925, 1926, 1938, 1939, 1972, 2036, 2037, 2209,
+	1372, 1560, 1561, 1714, 1715, 1927, 1928, 1940, 1941, 1974, 2038, 2039, 2211,
 ]
 
 

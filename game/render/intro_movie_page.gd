@@ -41,9 +41,6 @@ const ROWS: int = Gen2IntroMovie.ROWS
 const OAM_ORIGIN := Vector2i(8, 16)
 ## A sprite never draws its first colour.
 const TRANSPARENT_INDEX: int = 0
-## `Intro_RustleGrass` writes its four tiles at `vTiles2 tile $09`.
-const GRASS_FIRST_TILE: int = RomLayout.INTRO_GRASS_FIRST_TILE
-const GRASS_TILES: int = 4
 ## Where a BG tile number stops reading from the low sheet and starts reading
 ## from the one at `vTiles1`.
 const HIGH_TILE: int = 0x80
@@ -306,7 +303,14 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
 	var low_first: int = movie.sheet_first_tile("bg")
 	var high: PackedByteArray = _sheet(movie, movie.sheet("bg_high"))
 	var high_first: int = movie.sheet_first_tile("bg_high")
-	var grass: PackedByteArray = _sheet(movie, movie.grass_sheet())
+	# A bare `Request2bpp` writes over whichever sheet the tile number would
+	# otherwise read, so the run it covers is looked at before either of them.
+	var overlay: Array = movie.tile_overlay()
+	var overlay_strip: PackedByteArray = _sheet(
+		movie, String(overlay[2])
+	) if overlay.size() == 3 else PackedByteArray()
+	var overlay_first: int = int(overlay[0]) if overlay.size() == 3 else 0
+	var overlay_count: int = int(overlay[1]) if overlay.size() == 3 else 0
 	var scy: int = movie.scroll().y
 	for y: int in HEIGHT:
 		var scx: int = movie.scroll_x_at(y)
@@ -326,13 +330,13 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
 			var byte: int = attr[cell] if cell < attr.size() else 0
 			var strip: PackedByteArray = low
 			var index: int = tile + low_first
-			if tile >= HIGH_TILE:
+			if not overlay_strip.is_empty() and tile >= overlay_first \
+					and tile < overlay_first + overlay_count:
+				strip = overlay_strip
+				index = tile - overlay_first
+			elif tile >= HIGH_TILE:
 				strip = high
 				index = tile - HIGH_TILE + high_first
-			elif tile >= GRASS_FIRST_TILE and tile < GRASS_FIRST_TILE + GRASS_TILES \
-					and not grass.is_empty():
-				strip = grass
-				index = tile - GRASS_FIRST_TILE
 			var palette: PackedColorArray = palettes[byte & ATTR_PALETTE]
 			if palette.is_empty():
 				continue
@@ -346,16 +350,28 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
 ## One shadow-OAM entry, off the sheet its struct was loaded into. The position
 ## is already the OAM byte, so it is only moved off OAM's own (8, 16) origin.
 func _draw_sprite(image: Image, movie: Gen2IntroMovie, entry: Dictionary) -> void:
+	var tile: int = int(entry["tile"])
 	var strip: PackedByteArray = _sheet(
 		movie, movie.sheet("obj_bank1" if bool(entry["bank1"]) else "obj")
 	)
+	# A sprite tile counts from `vTiles0`, so $80 and up is the `vTiles1` half of
+	# the window, which the last two Suicune scenes load a sheet of their own
+	# into. A bare `Request2bpp` on top of either half wins over both.
+	var overlay: Array = movie.tile_overlay()
+	if overlay.size() == 3 and tile >= int(overlay[0]) \
+			and tile < int(overlay[0]) + int(overlay[1]):
+		strip = _sheet(movie, String(overlay[2]))
+		tile -= int(overlay[0])
+	elif tile >= HIGH_TILE:
+		strip = _sheet(movie, movie.sheet("obj_high"))
+		tile -= HIGH_TILE
 	if strip.is_empty():
 		return
 	var palette: PackedColorArray = movie.object_palette(int(entry["palette"]))
 	if palette.size() <= TRANSPARENT_INDEX:
 		return
 	_blit_sprite_tile(
-		image, strip, palette, int(entry["tile"]),
+		image, strip, palette, tile,
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
 		bool(entry["flip_x"]), bool(entry["flip_y"])
 	)

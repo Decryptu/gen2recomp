@@ -23,10 +23,10 @@ const FRAME_CAP: int = 20000
 ## Census of the real Crystal cache, pinned so a change is loud: the frames the
 ## jumptable takes to set its exit bit, the frame each scene starts on, and how
 ## many sounds the movie asks for.
-const EXPECTED_FRAMES: int = 2338
+const EXPECTED_FRAMES: int = 2340
 const EXPECTED_SCENE_STARTS: Array[int] = [
 	0, 1, 188, 189, 359, 360, 547, 548, 733, 734, 933, 934, 1168, 1169, 1371,
-	1372, 1559, 1560, 1713, 1714, 1925, 1926, 1938, 1939, 1972, 2036, 2037, 2209,
+	1372, 1560, 1561, 1714, 1715, 1927, 1928, 1940, 1941, 1974, 2038, 2039, 2211,
 ]
 const EXPECTED_SFX: int = 17
 const EXPECTED_MUSIC: int = 1

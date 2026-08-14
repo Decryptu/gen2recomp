@@ -70,6 +70,18 @@ const FRAMESET_WAIT: StringName = &"wait"
 const FLIP_X: int = 1
 const FLIP_Y: int = 2
 
+## `wShadowOAM`, which is forty `SPRITEOAMSTRUCT`s and no more, and how many of
+## them each OAM set takes. The geometry is [Gen2IntroMoviePage]'s; only the
+## count belongs here, because a full buffer stops the sprite pass:
+## `UpdateAnimFrame` returns carry at `wShadowOAMEnd` and
+## `DoNextFrameForAllSprites` answers it with `jr c, .done`, so a struct behind
+## the overflow loses its own sequence for that frame as well as its picture.
+## `IntroScene10` is where this movie reaches it, at forty-one.
+const SHADOW_OAM_SPRITES: int = 40
+const OAM_SET_SIZES: Array[int] = [
+	36, 28, 30, 31, 25, 25, 25, 16, 1, 3, 7, 4, 8, 12, 20, 20, 20,
+]
+
 const FRAMESETS: Dictionary = {
 	&"intro_suicune": {
 		"frames": [[0, 3, 0], [1, 3, 0], [2, 3, 0], [3, 3, 0]], "end": FRAMESET_RESTART,
@@ -164,6 +176,7 @@ const SCENE_VRAM: Dictionary = {
 		"bg": "suicune_jump", "map": "suicune_jump_map", "attr": "suicune_jump_attr",
 		"obj": "unown_back",
 	},
+
 	# `Intro_DecompressRequest2bpp_255Tiles` from `vTiles1` runs 255 tiles past
 	# the end of that bank, so the close-up's first 128 land where a BG tile
 	# number $80 and up reads and the rest in `vTiles2`, where one below $80
@@ -175,7 +188,7 @@ const SCENE_VRAM: Dictionary = {
 	},
 	18: {
 		"bg": "suicune_back", "bg_high": "unowns", "map": "suicune_back_map",
-		"attr": "suicune_back_attr",
+		"attr": "suicune_back_attr", "obj_high": "unowns",
 	},
 	25: {
 		"bg": "crystal_unowns", "map": "crystal_unowns_map",
@@ -202,7 +215,7 @@ const SCENE_CRYSTAL_UNOWNS: int = 25
 const SCENE_REQUESTS: Dictionary = {
 	0: [64, 128, 128, 64], 2: [64, 128, 64], 4: [64, 128, 128, 64],
 	6: [64, 128, 255, 128, 64], 10: [64, 128, 64], 12: [64, 255, 128, 64],
-	14: [64, 128, 128, 64], 16: [64, 255, 64], 18: [64, 128, 128, 64],
+	14: [64, 128, 128, 1, 64], 16: [64, 255, 64], 18: [64, 128, 128, 1, 64],
 	25: [64, 128, 64],
 }
 ## `TILES_PER_CYCLE` (home/gfx.asm).
@@ -214,6 +227,19 @@ const CLEAR_TILEMAP_FRAMES: int = 4
 ## $09` swapped every four frames for the first thirty-six of `IntroScene10`.
 const GRASS_FRAMES: Array[String] = ["grass_1", "grass_2", "grass_3", "grass_2"]
 const GRASS_RUSTLE_FRAMES: int = 36
+const GRASS_FIRST_TILE: int = RomLayout.INTRO_GRASS_FIRST_TILE
+const GRASS_TILES: int = 4
+
+## The bare `Request2bpp` a setup scene makes on top of its own sheets, as
+## (first tile, count, sheet). Both are `IntroGrass4GFX`'s single tile, and both
+## land in `vTiles1`, which a sprite reads as tile $80 and up: `IntroScene15`
+## parks it at `vTiles1 tile $00`, so tile $80 is the blade, and `IntroScene19`
+## at `vTiles1 tile $7f`, so tile $ff is. The wave of grass the last two scenes
+## run Suicune through is twenty sprites of that one tile.
+const SCENE_OVERLAY: Dictionary = {
+	14: [0x80, 1, RomLayout.INTRO_GRASS_BLANK],
+	18: [0xFF, 1, RomLayout.INTRO_GRASS_BLANK],
+}
 
 var _data: GameData = null
 var _sine: Gen2BattleAnimData = null
@@ -249,6 +275,12 @@ var _tilemap: PackedByteArray = PackedByteArray()
 ## The attribute plane `IntroScene9` writes over the loaded one, or empty.
 var _attr_override: PackedByteArray = PackedByteArray()
 var _grass_frame: int = 0
+## The one run of BG tiles a `Request2bpp` has written over the scene's own
+## sheets, as (first tile, count, sheet): `Intro_RustleGrass`'s four at
+## `vTiles2 tile $09`, or the single `IntroGrass4GFX` tile the two Suicune scenes
+## park in `vTiles1`. It lasts until a scene decompresses a sheet over it, which
+## every setup scene does.
+var _overlay: Array = []
 
 var _actors: Array[Dictionary] = []
 ## Frames a scene spends inside `DelayFrames`, during which neither the
@@ -341,9 +373,10 @@ func sheet_first_tile(part: String) -> int:
 	return int(_vram.get("%s_first" % part, 0))
 
 
-## The tile the four rustling-grass tiles at $09 currently show, as a sheet name.
-func grass_sheet() -> String:
-	return GRASS_FRAMES[_grass_frame]
+## The BG tiles a bare `Request2bpp` has written over the scene's own sheets, as
+## (first tile, count, sheet name), or empty.
+func tile_overlay() -> Array:
+	return _overlay
 
 
 ## The 32x32 BG map and its attribute plane, as the cache holds them.
@@ -527,6 +560,7 @@ func _setup_scene() -> void:
 	_attr_override = PackedByteArray()
 	_sprite_vtile = 0
 	_grass_frame = 0
+	_overlay = SCENE_OVERLAY.get(_scene, []) as Array
 	_scx = 0
 	_scy = 0
 	var name: String = String(SCENE_PALETTE.get(_scene, ""))
@@ -857,6 +891,7 @@ func _rustle_grass() -> void:
 	if _counter >= GRASS_RUSTLE_FRAMES:
 		return
 	_grass_frame = (_counter & 0x0C) >> 2
+	_overlay = [GRASS_FIRST_TILE, GRASS_TILES, GRASS_FRAMES[_grass_frame]]
 
 
 ## `Intro_LoadTilemap`: the top-left 20x18 of the decompressed BG map, copied
@@ -999,7 +1034,15 @@ func _reinit_frameset(actor: Dictionary, frameset: StringName) -> void:
 
 ## `PlaySpriteAnimations`: each struct's own callback, then its frame counter.
 func _run_sprites() -> void:
+	var kept: Array[Dictionary] = []
+	var room: int = SHADOW_OAM_SPRITES
 	for actor: Dictionary in _actors.duplicate():
+		if room <= 0:
+			# `jr c, .done`: a struct behind a full buffer is not deinitialised,
+			# it is simply never reached this frame, so neither its own sequence
+			# nor its frameset runs.
+			kept.append(actor)
+			continue
 		match StringName(actor["func"]):
 			&"suicune":
 				_sprite_suicune(actor)
@@ -1011,10 +1054,12 @@ func _run_sprites() -> void:
 				_sprite_unown_f(actor)
 			&"suicune_away":
 				_sprite_suicune_away(actor)
-	var kept: Array[Dictionary] = []
-	for actor: Dictionary in _actors:
-		if _advance_actor(actor):
-			kept.append(actor)
+		if not _advance_actor(actor):
+			continue
+		kept.append(actor)
+		var entry: Array = _actor_frame(actor)
+		if not entry.is_empty():
+			room -= OAM_SET_SIZES[int(entry[0])]
 	_actors = kept
 
 
