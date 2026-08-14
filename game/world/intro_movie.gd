@@ -335,11 +335,14 @@ func scroll() -> Vector2i:
 
 
 ## The `hSCX` for one scanline, which is `wLYOverrides` while `hLCDCPointer`
-## points at rSCX and plain `hSCX` otherwise.
+## points at rSCX and plain `hSCX` otherwise. `LCD` fires on `STAT_MODE_0` and
+## writes the entry `rLY` names, so the line after it is the one drawn with it;
+## `VBlank_Cutscene` writes entry zero, which is why the first two lines share
+## it.
 func scroll_x_at(line: int) -> int:
 	if not _ly_active or line < 0 or line >= _ly.size():
 		return _scx
-	return _ly[line]
+	return _ly[maxi(line - 1, 0)]
 
 
 ## One background palette, as colours a page can draw with.

@@ -22,8 +22,10 @@ const TRANSPARENT_INDEX: int = 0
 const OAM_ORIGIN := Vector2i(8, 16)
 ## `wShadowOAM` holds forty sprites.
 const SHADOW_OAM_SPRITES: int = 40
-## `TILEMAP_WIDTH_PX`: the BG map is 32 tiles across and wraps.
+## `TILEMAP_WIDTH_PX`/`TILEMAP_HEIGHT_PX`: the BG map is 32 tiles square and
+## wraps, and Crystal's `hSCY` of 8 is what makes the height matter.
 const MAP_WIDTH: int = RomLayout.TITLE_TILEMAP_COLUMNS * Gen2Tiles.TILE_WIDTH
+const MAP_HEIGHT: int = RomLayout.TITLE_TILEMAP_COLUMNS * Gen2Tiles.TILE_HEIGHT
 ## `set B_LCDC_OBJ_SIZE`: every object on this screen is two tiles tall.
 const OBJECT_HEIGHT: int = 2
 
@@ -43,6 +45,16 @@ const CRYSTAL_VERSION_ROW: int = 9
 const CRYSTAL_VERSION_AT: int = 5
 const CRYSTAL_VERSION_TILES: int = 11
 const CRYSTAL_VERSION_PALETTE: int = 1
+## `hlbgcoord 3, 0, vBGMap1` with `lb bc, 1, 13` from tile $0c: the copyright
+## line, in the window rather than in the background. `TitleLogoGFX` is 160 tiles
+## and only its first 140 are the logo, so tile $0c of `vTiles2` is the sheet's
+## own 140th: the decompress runs past `vTiles1` into the half the BG addresses
+## from $00.
+const CRYSTAL_COPYRIGHT_TILE: int = CRYSTAL_LOGO_COLUMNS * CRYSTAL_LOGO_ROWS
+const CRYSTAL_COPYRIGHT_TILES: int = 13
+const CRYSTAL_COPYRIGHT_AT: int = 3
+## `hlbgcoord 0, 0, vBGMap3` fills the window's own row with palette 7.
+const CRYSTAL_COPYRIGHT_PALETTE: int = 7
 const CRYSTAL_SUICUNE_PALETTE: int = 0
 ## The hardware has eight of each, and `_TitleScreen` fills both sets from one
 ## sixteen-palette run.
@@ -172,6 +184,8 @@ var _background: Array[PackedColorArray] = []
 var _object: Array[PackedColorArray] = []
 var _tilemap: PackedByteArray = PackedByteArray()
 var _drawn: PackedByteArray = PackedByteArray()
+## Which pixels an object has already claimed this frame.
+var _taken: PackedByteArray = PackedByteArray()
 var _map: Image = null
 var _map_indices: PackedByteArray = PackedByteArray()
 
@@ -231,16 +245,22 @@ func draw(scene: Gen2TitleScene) -> Image:
 	if scene == null:
 		return image
 
-	_map = Image.create_empty(MAP_WIDTH, height, false, Image.FORMAT_RGBA8)
+	_map = Image.create_empty(MAP_WIDTH, MAP_HEIGHT, false, Image.FORMAT_RGBA8)
 	_map.fill(blank)
-	_map_indices.resize(MAP_WIDTH * height)
+	_map_indices.resize(MAP_WIDTH * MAP_HEIGHT)
 	_map_indices.fill(0)
 	if _profile == RomRegistry.CRYSTAL:
 		_draw_crystal_background(scene)
 	else:
 		_draw_gs_background()
 	_compose(image, scene)
+	_draw_copyright_window(image, scene)
 
+	# The lower OAM index wins a pixel, so a slot only paints where no earlier
+	# one did: Gold's bird is copied into the last struct, so every trail spawned
+	# after it still takes a lower slot and covers it.
+	_taken.resize(width * height)
+	_taken.fill(0)
 	for entry: Dictionary in shadow_oam(scene):
 		_draw_sprite(image, entry)
 	return image
@@ -283,12 +303,35 @@ func shadow_oam(scene: Gen2TitleScene) -> Array[Dictionary]:
 func _compose(image: Image, scene: Gen2TitleScene) -> void:
 	var offsets: PackedInt32Array = scene.line_offsets()
 	var base: int = scene.scroll_x()
+	var scy: int = scene.scroll_y()
 	for y: int in image.get_height():
-		var shift: int = offsets[y] if y < offsets.size() else base
+		# `LCD` fires on `STAT_MODE_0` and writes `wLYOverrides[rLY]` to rSCX,
+		# which the line after it is drawn with; `VBlank_Cutscene` writes entry
+		# zero, so the first two lines share it.
+		var line: int = maxi(y - 1, 0)
+		var shift: int = offsets[line] if line < offsets.size() else base
+		var row: int = posmod(y + scy, MAP_HEIGHT)
 		for x: int in image.get_width():
 			var from: int = posmod(x + shift, MAP_WIDTH)
-			image.set_pixel(x, y, _map.get_pixel(from, y))
-			_drawn[y * image.get_width() + x] = _map_indices[y * MAP_WIDTH + from]
+			image.set_pixel(x, y, _map.get_pixel(from, row))
+			_drawn[y * image.get_width() + x] = _map_indices[row * MAP_WIDTH + from]
+
+
+## The window layer, which on this screen is the copyright line and nothing
+## else: one row of `vBGMap1` at `hWX` 7, so it starts at column 0 and covers
+## whatever the background left under it.
+func _draw_copyright_window(image: Image, scene: Gen2TitleScene) -> void:
+	var top: int = scene.window_y()
+	if top >= image.get_height():
+		return
+	var palette: PackedColorArray = _palette(_background, CRYSTAL_COPYRIGHT_PALETTE)
+	if palette.is_empty():
+		return
+	for index: int in CRYSTAL_COPYRIGHT_TILES:
+		_blit_window_tile(
+			image, palette, CRYSTAL_COPYRIGHT_TILE + index,
+			Vector2i((CRYSTAL_COPYRIGHT_AT + index) * TILE, top)
+		)
 
 
 ## `DrawTitleGraphic` over the logo, then `LoadSuicuneFrame`'s own six rows of
@@ -444,6 +487,33 @@ func _blit_background(
 			_map_indices[target_y * MAP_WIDTH + target_x] = value
 
 
+## One window tile straight onto the screen. The window is drawn over the
+## background and under nothing, so it needs neither the map's wrap nor a claim
+## on [member _taken].
+func _blit_window_tile(
+	image: Image, palette: PackedColorArray, tile: int, at: Vector2i
+) -> void:
+	var tiles: PackedByteArray = _sheets.get("title_logo", PackedByteArray())
+	var stride: int = int(_widths.get("title_logo", 0))
+	if stride <= 0:
+		return
+	for y: int in TILE:
+		var target_y: int = at.y + y
+		if target_y < 0 or target_y >= image.get_height():
+			continue
+		for x: int in TILE:
+			var target_x: int = at.x + x
+			if target_x < 0 or target_x >= image.get_width():
+				continue
+			var from: int = y * stride + tile * TILE + x
+			if from < 0 or from >= tiles.size():
+				continue
+			var value: int = tiles[from]
+			if value >= palette.size():
+				continue
+			image.set_pixel(target_x, target_y, palette[value])
+
+
 ## One object tile onto the drawn screen, clipped per axis so a sprite hanging
 ## off an edge cannot wrap onto the opposite one. [param behind] is `OAM_PRIO`,
 ## which lets the background's colours 1 to 3 cover the object.
@@ -469,6 +539,12 @@ func _blit_sprite_tile(
 			var value: int = tiles[from]
 			if value == TRANSPARENT_INDEX or value >= palette.size():
 				continue
-			if behind and _drawn[target_y * image.get_width() + target_x] != 0:
+			var at_pixel: int = target_y * image.get_width() + target_x
+			if _taken[at_pixel] != 0:
+				continue
+			# The claim comes first: an object that loses the pixel to the
+			# background still wins it against the objects behind it.
+			_taken[at_pixel] = 1
+			if behind and _drawn[at_pixel] != 0:
 				continue
 			image.set_pixel(target_x, target_y, palette[value])
