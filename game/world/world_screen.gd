@@ -1888,12 +1888,23 @@ func _advance_prof_oaks_pc() -> void:
 	_show_prof_oaks_pc_page()
 
 
+## `ProfOaksPCBoot` holds the script on the cartridge and nothing holds it here,
+## so `OaksLab`'s own goodbye text was already queued behind these pages. It is
+## put up now rather than dropped.
 func _close_prof_oaks_pc() -> void:
 	_oak_pc_pages = []
 	_oak_pc_sfx = -1
-	if _text_box != null:
-		_text_box.visible = false
-	_script_prompt = ""
+	var pending: Dictionary = _world.pending_script_input() if _world != null else {}
+	if StringName(pending.get("type", &"")) == &"text" \
+		and _text_box != null and _text_box.font != null:
+		_apply_text_box_options()
+		_text_box.show_text(String(pending.get("text", "")))
+		_text_box.visible = true
+		_script_prompt = "A: advance text"
+	else:
+		if _text_box != null:
+			_text_box.visible = false
+		_script_prompt = ""
 	_refresh_labels()
 
 
@@ -2349,9 +2360,13 @@ func _show_script_results(results: Array) -> void:
 			var event: Dictionary = result.get("event", {})
 			var event_type: StringName = StringName(event.get("type", &""))
 			if event_type == &"text" and _text_box != null and _text_box.font != null:
-				_apply_text_box_options()
-				_text_box.show_text(String(event.get("text", "")))
-				_text_box.visible = true
+				## Prof Oak's PC is the one special that draws on its own and
+				## whose script runs on past it, so its pages are shown first and
+				## this text waits behind them.
+				if _oak_pc_pages.is_empty():
+					_apply_text_box_options()
+					_text_box.show_text(String(event.get("text", "")))
+					_text_box.visible = true
 				_script_prompt = "A: advance text"
 			elif event_type == &"button":
 				if _text_box != null:
