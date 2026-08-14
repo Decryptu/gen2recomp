@@ -2,6 +2,9 @@ extends GutTest
 
 const Boot := preload("res://game/world/boot_cinema.gd")
 
+## Longer than the movie, whose own total tests/unit/test_intro_movie.gd pins.
+const FRAME_CAP: int = 20000
+
 
 func test_boot_starts_with_source_ordered_copyright_events() -> void:
 	var boot := Boot.new()
@@ -26,30 +29,39 @@ func test_boot_starts_with_source_ordered_copyright_events() -> void:
 	))
 
 
-func test_boot_keeps_intro_music_continuous_and_opens_title_after_28_scenes() -> void:
-	var lengths: Array[int] = []
-	for _scene: int in 28:
-		lengths.append(1)
-	lengths[0] = 2308
+## The movie phase spends what `CrystalIntro` spends rather than a budget of the
+## coordinator's, so it is driven until its own jumptable sets the exit bit.
+## `IntroScene13` is what starts the music, part way in and not at the top;
+## tests/unit/test_intro_movie.gd pins the scene budgets themselves.
+func test_boot_runs_the_whole_movie_and_opens_the_title_behind_it() -> void:
 	var boot := Boot.new()
-	boot.start(&"crystal", lengths)
+	boot.start(&"crystal", null, [
+		Boot.PHASE_COPYRIGHT, Boot.PHASE_PRESENTS, Boot.PHASE_INTRO_MOVIE,
+		Boot.PHASE_TITLE,
+	])
 	boot.drain_events()
 	# The GameFreak animation spends what `GameFreakPresentsScene` spends rather
 	# than a budget of the coordinator's, so the movie is reached by driving to
 	# it. tests/unit/test_game_freak_presents.gd pins the count itself.
-	var movie_start: Array[Dictionary] = []
 	for _frame: int in 10 + 100 + 500:
-		movie_start.append_array(boot.advance_frame())
+		boot.advance_frame()
 		if boot.phase() == Boot.PHASE_INTRO_MOVIE:
 			break
 	assert_eq(boot.phase(), Boot.PHASE_INTRO_MOVIE)
-	assert_true(movie_start.any(func(event: Dictionary) -> bool:
-		return event["type"] == &"play_music" and event["music"] == &"gold_silver_opening"
-	))
 
 	var title: Array[Dictionary] = []
-	for _frame: int in 2335:
-		title.append_array(boot.advance_frame())
+	var music: Array[Dictionary] = []
+	var frames: int = 0
+	while boot.phase() == Boot.PHASE_INTRO_MOVIE and frames < FRAME_CAP:
+		var events: Array[Dictionary] = boot.advance_frame()
+		frames += 1
+		title.append_array(events)
+		music.append_array(events.filter(func(event: Dictionary) -> bool:
+			return event["type"] == &"play_music" \
+				and event["phase"] == Boot.PHASE_INTRO_MOVIE
+		))
+	assert_eq(music.size(), 1, "one `PlayMusic`, which is `IntroScene13`'s")
+	assert_eq(int(music[0]["music"]), Gen2IntroMovie.MUSIC_CRYSTAL_OPENING)
 	assert_eq(boot.phase(), Boot.PHASE_TITLE)
 	assert_true(title.any(func(event: Dictionary) -> bool:
 		return event["type"] == &"open_title"
@@ -80,7 +92,7 @@ func test_boot_sound_wait_is_explicit_and_does_not_consume_frames() -> void:
 ## do not cross over: the coordinator's are the ones a caller reads.
 func test_the_gamefreak_sounds_reach_the_host() -> void:
 	var boot := Boot.new()
-	boot.start(&"crystal", [], [Boot.PHASE_COPYRIGHT, Boot.PHASE_PRESENTS])
+	boot.start(&"crystal", null, [Boot.PHASE_COPYRIGHT, Boot.PHASE_PRESENTS])
 	boot.drain_events()
 	var sounds: Array[int] = []
 	var frames: Array[int] = []
@@ -106,7 +118,7 @@ func test_the_gamefreak_sounds_reach_the_host() -> void:
 ## frames they would have taken.
 func test_a_host_without_the_movie_art_runs_only_the_phases_it_names() -> void:
 	var boot := Boot.new()
-	boot.start(&"crystal", [], [Boot.PHASE_COPYRIGHT])
+	boot.start(&"crystal", null, [Boot.PHASE_COPYRIGHT])
 	boot.drain_events()
 	assert_true(boot.is_available(Boot.PHASE_COPYRIGHT))
 	assert_false(boot.is_available(Boot.PHASE_PRESENTS))
@@ -133,7 +145,7 @@ func test_a_host_without_the_movie_art_runs_only_the_phases_it_names() -> void:
 ## opening events, rather than spending its hundred and ten frames blank.
 func test_a_skipped_copyright_starts_on_the_next_phase_the_host_names() -> void:
 	var boot := Boot.new()
-	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	boot.start(&"gold", null, [Boot.PHASE_TITLE])
 	assert_eq(boot.phase(), Boot.PHASE_TITLE)
 	assert_true(boot.drain_events().any(func(event: Dictionary) -> bool:
 		return event["type"] == &"open_title"
@@ -144,7 +156,7 @@ func test_a_skipped_copyright_starts_on_the_next_phase_the_host_names() -> void:
 ## answers it, and the answer is what reaches the host.
 func test_the_title_phase_runs_its_own_screen_and_answers_the_host() -> void:
 	var boot := Boot.new()
-	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	boot.start(&"gold", null, [Boot.PHASE_TITLE])
 	assert_eq(boot.phase(), Boot.PHASE_TITLE)
 	assert_not_null(boot.title())
 
@@ -165,7 +177,7 @@ func test_the_title_phase_runs_its_own_screen_and_answers_the_host() -> void:
 ## starts the whole opening again rather than standing still.
 func test_a_title_screen_nobody_presses_restarts_the_opening() -> void:
 	var boot := Boot.new()
-	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	boot.start(&"gold", null, [Boot.PHASE_TITLE])
 	var restarted: bool = false
 	for _frame: int in Gen2TitleScene.TIMER_GOLD + 4:
 		for event: Dictionary in boot.advance_frame():
@@ -184,7 +196,7 @@ func test_a_title_screen_nobody_presses_restarts_the_opening() -> void:
 ## the host's business and `Init` comes back to the title afterwards.
 func test_a_chord_is_reported_and_the_screen_stays_up() -> void:
 	var boot := Boot.new()
-	boot.start(&"gold", [], [Boot.PHASE_TITLE])
+	boot.start(&"gold", null, [Boot.PHASE_TITLE])
 	boot.drain_events()
 	for _frame: int in 4:
 		boot.advance_frame()

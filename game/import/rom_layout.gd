@@ -754,6 +754,78 @@ const CREDITS_PALETTE_LAST_COLOR: int = 0x1CE7
 const CREDITS_SCRIPT_MAX_BYTES: int = 1024
 const CREDITS_STRING_MAX_BYTES: int = 64
 
+## The intro movie (`CrystalIntro`, engine/movie/intro.asm).
+##
+## Every graphic, tilemap, attrmap and palette the movie draws is one contiguous
+## section behind the code, in the INCBIN order below, and each entry starts on a
+## sixteen-byte boundary from the first. So one pinned offset walks all
+## thirty-five: decompress an entry, round its length up to
+## [constant INTRO_ENTRY_ALIGN], and that is where the next one starts.
+const INTRO_ENTRY_ALIGN: int = 16
+## `IntroScene28`'s own count, which the movie ends on.
+const INTRO_SCENES: int = 28
+## The tilemaps and attrmaps are whole 32x32 BG maps, not screens.
+const INTRO_MAP_COLUMNS: int = 32
+const INTRO_MAP_ROWS: int = 32
+const INTRO_MAP_BYTES: int = INTRO_MAP_COLUMNS * INTRO_MAP_ROWS
+## Every `ld bc, 16 palettes` the movie copies into `wBGPals1`/`wBGPals2`.
+const INTRO_PALETTES: int = 16
+const INTRO_PALETTE_COLORS: int = 4
+## `Intro_Scene24_ApplyPaletteFade.FadePals` (gfx/intro/fade.pal): eight
+## palettes, one of which is copied over all eight BG palettes at a time.
+const INTRO_FADE_PALETTES: int = 8
+## `Intro_Scene20_AppearUnown`'s `.pal1` and `.pal2`, one palette each and
+## contiguous, so the first pins the second.
+const INTRO_UNOWN_PALETTES: int = 2
+## The section's entries, as (cache name, kind, tiles). `map` is a 32x32 BG map,
+## `attr` its attribute plane, `pal` a raw [constant INTRO_PALETTES] run and
+## `raw` uncompressed tiles; everything else is an LZ tile strip of that many
+## tiles. The order is `engine/movie/intro.asm`'s own INCBIN order and is what
+## the walk depends on.
+const INTRO_SECTION: Array[Array] = [
+	["suicune_run", "lz", 192],
+	["pichu_wooper", "lz", 128],
+	["background", "lz", 128],
+	["background_map", "map", 0],
+	["background_attr", "attr", 0],
+	["background_palette", "pal", 0],
+	["unowns", "lz", 128],
+	["pulse", "lz", 16],
+	["unown_a_map", "map", 0],
+	["unown_a_attr", "attr", 0],
+	["unown_hi_map", "map", 0],
+	["unown_hi_attr", "attr", 0],
+	["unowns_map", "map", 0],
+	["unowns_attr", "attr", 0],
+	["unowns_palette", "pal", 0],
+	["crystal_unowns", "lz", 32],
+	["crystal_unowns_map", "map", 0],
+	["crystal_unowns_attr", "attr", 0],
+	["crystal_unowns_palette", "pal", 0],
+	["suicune_close", "lz", 256],
+	["suicune_close_map", "map", 0],
+	["suicune_close_attr", "attr", 0],
+	["suicune_close_palette", "pal", 0],
+	["suicune_jump", "lz", 128],
+	["suicune_back", "lz", 128],
+	["suicune_jump_map", "map", 0],
+	["suicune_jump_attr", "attr", 0],
+	["suicune_back_map", "map", 0],
+	["suicune_back_attr", "attr", 0],
+	["suicune_palette", "pal", 0],
+	["unown_back", "lz", 48],
+	["grass_1", "raw", 4],
+	["grass_2", "raw", 4],
+	["grass_3", "raw", 4],
+	["grass_4", "raw", 1],
+]
+## `Intro_RustleGrass` swaps four tiles at `vTiles2 tile $09` between three of
+## the grass strips; `IntroScene15` and `IntroScene19` load the fourth as a
+## single sprite tile.
+const INTRO_GRASS_FIRST_TILE: int = 0x09
+## The blank the two Suicune scenes park in the sprite tile the dict points at.
+const INTRO_GRASS_BLANK: String = "grass_4"
+
 ## `OakRatings` (data/events/pokedex_ratings.asm): nineteen `rating` rows of a
 ## caught-count threshold, an sfx word and a text pointer, which `FindOakRating`
 ## walks until the count fits. The five texts around it are located from the
@@ -1292,6 +1364,10 @@ const GOLD_SILVER: Dictionary = {
 		"crystal": -1,
 		"palettes": -1,
 	},
+	# `GoldSilverIntro` is a different movie again (water, grass and fire rather
+	# than Unown and Suicune) and is not imported yet; see HANDOFF.md for the
+	# addresses its own section sits at.
+	"intro_movie": {"section": -1, "fade": -1, "unown_pals": -1},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
 	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
@@ -1583,6 +1659,14 @@ const CRYSTAL: Dictionary = {
 		"bg_palette": -1,
 		"ob_palette": -1,
 	},
+	# `CrystalIntro`'s art section. `IntroSuicuneRunGFX` is the only pinned
+	# address: the section is contiguous and sixteen-byte aligned, so the walk in
+	# `INTRO_SECTION` reaches the other thirty-four. Found by decompressing at
+	# every offset in the dump and keeping the one that produced the pinned
+	# gfx/intro/suicune_run.png exactly. `fade` and `unown_pals` are INCLUDEd
+	# inside the code rather than in that section; both are unique byte runs, and
+	# `unown_1.pal` pins `unown_2.pal` directly behind it.
+	"intro_movie": {"section": 0xE555D, "fade": 0xE519C, "unown_pals": 0xE538D},
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},

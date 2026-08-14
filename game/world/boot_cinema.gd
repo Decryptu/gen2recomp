@@ -12,7 +12,6 @@ extends RefCounted
 const FRAME_RATE: float = 59.7275
 const COPYRIGHT_PRELUDE_FRAMES: int = 10
 const COPYRIGHT_HOLD_FRAMES: int = 100
-const INTRO_TOTAL_FRAMES: int = 2335
 
 const PHASE_COPYRIGHT: StringName = &"copyright"
 const PHASE_PRESENTS: StringName = &"presents"
@@ -30,9 +29,10 @@ var _profile: StringName = &"gold"
 var _phase: StringName = &""
 var _frame: int = 0
 var _phase_frame: int = 0
-var _intro_scene: int = 0
-var _intro_scene_frame: int = 0
-var _intro_scene_lengths: Array[int] = []
+## `CrystalIntro`'s own state while the movie phase is up, null outside it.
+var _movie: Gen2IntroMovie = null
+## The cache the movie reads its art out of, handed in by the host.
+var _data: GameData = null
 ## `GameFreakPresentsScene` and the sprite beside it, which own every frame of
 ## the presents phase. Null until that phase is entered.
 var _presents: Gen2GameFreakPresents = null
@@ -53,15 +53,16 @@ var _available: Array[StringName] = []
 ## every phase, which is a host with the whole opening imported.
 func start(
 	profile: StringName = &"gold",
-	intro_scene_lengths: Array[int] = [],
+	data: GameData = null,
 	available: Array[StringName] = [],
 	sine: Gen2BattleAnimData = null,
 ) -> void:
 	_profile = profile
 	_sine = sine
+	_data = data
 	_presents = null
 	_title = null
-	_intro_scene_lengths = _validated_intro_lengths(intro_scene_lengths)
+	_movie = null
 	_available = available.duplicate()
 	if not is_available(PHASE_COPYRIGHT):
 		_phase = PHASE_COPYRIGHT
@@ -74,8 +75,6 @@ func start(
 	_phase = PHASE_COPYRIGHT
 	_frame = 0
 	_phase_frame = 0
-	_intro_scene = 0
-	_intro_scene_frame = 0
 	_waiting_sound = &""
 	_events.clear()
 	_emit(&"play_music", {"music": &"none", "restart": true})
@@ -101,7 +100,13 @@ func phase_frame() -> int:
 
 
 func intro_scene() -> int:
-	return _intro_scene
+	return _movie.scene() if _movie != null else 0
+
+
+## The live movie, so a host can read the screen it is drawing. Null outside the
+## intro phase.
+func movie() -> Gen2IntroMovie:
+	return _movie
 
 
 func waiting_sound() -> StringName:
@@ -154,7 +159,7 @@ func _advance_title(held: Array) -> void:
 			# `IntroSequence`, which is the whole opening again. The restart runs
 			# first because [method start] empties the queue, and its own
 			# `play_music none` is the fade landing.
-			start(_profile, _intro_scene_lengths, _available, _sine)
+			start(_profile, _data, _available, _sine)
 			_emit(&"restart_opening", {"profile": _profile})
 		Gen2TitleScene.OPTION_DELETE_SAVE_DATA, Gen2TitleScene.OPTION_RESET_CLOCK:
 			_emit(&"title_chord", {
@@ -250,23 +255,23 @@ func skip_presents() -> bool:
 	return _presents != null and _presents.cancel()
 
 
+## The movie spends whatever `CrystalIntro` spends: the sequence is asked for a
+## frame and the phase ends when its jumptable sets `JUMPTABLE_EXIT_F`.
 func _advance_intro() -> void:
-	_intro_scene_frame += 1
-	if _intro_scene >= _intro_scene_lengths.size():
-		return
-	if _intro_scene_frame < _intro_scene_lengths[_intro_scene]:
-		_emit(&"intro_frame", {
-			"scene": _intro_scene,
-			"frame": _intro_scene_frame,
-			"total_frame": _phase_frame,
-		})
-		return
-	_intro_scene += 1
-	_intro_scene_frame = 0
-	if _intro_scene >= _intro_scene_lengths.size():
+	if _movie == null:
 		_enter_after(PHASE_INTRO_MOVIE)
-	else:
-		_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
+		return
+	var scene: int = _movie.scene()
+	for event: Dictionary in _movie.advance_frame():
+		var values: Dictionary = event.duplicate()
+		for key: String in ["type", "frame", "scene"]:
+			values.erase(key)
+		_emit(StringName(event.get("type", &"")), values)
+	if _movie.scene() != scene:
+		_emit(&"show_image", {"id": &"intro_movie", "scene": _movie.scene()})
+	if _movie.finished():
+		_emit(&"hide_image", {"id": &"intro_movie"})
+		_enter_after(PHASE_INTRO_MOVIE)
 
 
 ## Enters the first phase after [param phase] the host can draw, with that
@@ -288,10 +293,10 @@ func _enter_after(phase: StringName) -> void:
 				_presents.start(_profile, _sine)
 				_emit(&"show_image", {"id": &"game_freak_presents"})
 			PHASE_INTRO_MOVIE:
-				_intro_scene = 0
-				_intro_scene_frame = 0
-				_emit(&"play_music", {"music": &"gold_silver_opening", "restart": false})
-				_emit(&"show_image", {"id": &"intro_scene", "scene": _intro_scene})
+				# `CrystalIntro` starts on a cleared screen and plays no music
+				# until `IntroScene13`, so the phase opens with the art alone.
+				_movie = Gen2IntroMovie.create(_data, _sine)
+				_emit(&"show_image", {"id": &"intro_movie", "scene": 0})
 			PHASE_TITLE:
 				# `_TitleScreen` draws the whole screen and plays
 				# `SFX_TITLE_SCREEN_ENTRANCE` before the loop's first frame;
@@ -315,43 +320,3 @@ func _emit(type: StringName, values: Dictionary) -> void:
 	}
 	event.merge(values, true)
 	_events.append(event)
-
-
-func _validated_intro_lengths(lengths: Array[int]) -> Array[int]:
-	if lengths.is_empty():
-		# The source movie is one frame-stepped 28-scene sequence. The fixed
-		# scene budgets keep the coordinator deterministic; imported intro data
-		# may replace them with the per-scene budgets used by its renderer.
-		var defaults: Array[int] = []
-		for _scene: int in 28:
-			defaults.append(1)
-		defaults[1] = 128
-		defaults[2] = 800
-		defaults[3] = 96
-		defaults[4] = 80
-		defaults[6] = 255
-		defaults[7] = 255
-		defaults[8] = 64
-		defaults[10] = 128
-		defaults[11] = 16
-		defaults[12] = 128
-		defaults[13] = 4
-		defaults[14] = 64
-		defaults[15] = 128
-		defaults[16] = 64
-		defaults[5] = 112
-		var remainder: int = INTRO_TOTAL_FRAMES
-		for value: int in defaults:
-			remainder -= value
-		defaults[5] += maxi(remainder, 0)
-		return defaults
-	var out: Array[int] = []
-	var total: int = 0
-	for value: int in lengths:
-		if value <= 0:
-			return _validated_intro_lengths([])
-		out.append(value)
-		total += value
-	if out.size() != 28 or total != INTRO_TOTAL_FRAMES:
-		return _validated_intro_lengths([])
-	return out

@@ -6,9 +6,9 @@ extends Control
 ##
 ## The source runs four things before a new game: the copyright screen, the
 ## GameFreak logo animation, on Crystal the intro movie, and the title screen.
-## Every one but the movie is imported, so [Gen2BootCinema] is started with those
-## phases and the movie is skipped rather than held on a blank screen for the
-## frames it would have taken.
+## [Gen2BootCinema] is started with the phases this cache has art for; a phase it
+## has none for is skipped rather than held on a blank screen for the frames it
+## would have taken, which is what Gold and Silver's `GoldSilverIntro` still is.
 ##
 ## The pacing is the source's throughout. The copyright half is ten frames of
 ## blank and the screen for a hundred, with no button read at all, since
@@ -27,6 +27,7 @@ var _cinema: Gen2BootCinema = null
 var _data: GameData = null
 var _page: Gen2CopyrightPage = null
 var _presents_page: Gen2GameFreakPresentsPage = null
+var _movie_page: Gen2IntroMoviePage = null
 var _title_page: Gen2TitlePage = null
 ## What `hJoyDown` holds this frame. `TitleScreenMain` reads the held state, and
 ## its two chords cannot be expressed as presses.
@@ -50,15 +51,18 @@ func open(data: GameData) -> bool:
 		_page.draw(), Gen2Screen.WIDTH, Gen2Screen.HEIGHT, _palette()
 	)
 	_presents_page = Gen2GameFreakPresentsPage.from_data(data)
+	_movie_page = Gen2IntroMoviePage.from_data(data)
 	_title_page = Gen2TitlePage.from_data(data)
 	var phases: Array[StringName] = [Gen2BootCinema.PHASE_COPYRIGHT]
 	if _presents_page != null:
 		phases.append(Gen2BootCinema.PHASE_PRESENTS)
+	if _movie_page != null:
+		phases.append(Gen2BootCinema.PHASE_INTRO_MOVIE)
 	if _title_page != null:
 		phases.append(Gen2BootCinema.PHASE_TITLE)
 	_cinema = Gen2BootCinema.new()
 	_cinema.start(
-		data.id if data != null else &"gold", [], phases, _sine_table(data)
+		data.id if data != null else &"gold", data, phases, _sine_table(data)
 	)
 	if is_inside_tree():
 		_refresh()
@@ -111,6 +115,13 @@ func handle_button(button: int) -> bool:
 	if button in [
 		Gen2Button.UP, Gen2Button.DOWN, Gen2Button.LEFT, Gen2Button.RIGHT
 	]:
+		return true
+	if _cinema.phase() == Gen2BootCinema.PHASE_INTRO_MOVIE:
+		# `.ShutOffMusic`: any of A, B, START or SELECT ends the whole movie and
+		# stops the music with it.
+		var movie: Gen2IntroMovie = _cinema.movie()
+		if movie != null:
+			movie.cancel()
 		return true
 	_cinema.skip_presents()
 	return true
@@ -205,6 +216,8 @@ func _frame_image() -> Image:
 		return _image
 	if _visible_id == &"game_freak_presents" and _presents_page != null:
 		return _presents_page.draw(_cinema.presents())
+	if _visible_id == &"intro_movie" and _movie_page != null:
+		return _movie_page.draw(_cinema.movie())
 	if _visible_id == &"title" and _title_page != null:
 		return _title_page.draw(_cinema.title())
 	return _blank()
