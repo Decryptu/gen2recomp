@@ -312,6 +312,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not intro_movie["ok"]:
 		return intro_movie
 
+	var gs_intro: Dictionary = verify_gs_intro(rom, layout)
+	if not gs_intro["ok"]:
+		return gs_intro
+
 	var credits: Dictionary = verify_credits(rom, layout)
 	if not credits["ok"]:
 		return credits
@@ -1046,6 +1050,44 @@ static func read_intro_section(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `GoldSilverIntro`'s art section, walked the same way `CrystalIntro`'s is: one
+## pinned address, each entry checked against the size the routine that loads it
+## asks VRAM for, and the next address that size rounded up to
+## [constant RomLayout.INTRO_ENTRY_ALIGN].
+##
+## The two `.tilemap`s and two `.bin`s are uncompressed and pret checks them in
+## as binary, so their lengths are the file's rather than a tile count.
+##
+## Returns {name: PackedByteArray} in `GS_INTRO_SECTION` order, or an empty
+## Dictionary if any entry does not decompress to its own size.
+static func read_gs_intro_section(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("gs_intro", {})
+	var at: int = int(entry.get("section", -1))
+	if at < 0:
+		return {}
+	var lz := Gen2Lz.new()
+	var out: Dictionary = {}
+	for row: Array in RomLayout.GS_INTRO_SECTION:
+		var name: String = String(row[0])
+		var raw_bytes: bool = String(row[1]) == "raw_bytes"
+		var wanted: int = int(row[2]) if raw_bytes else int(row[2]) * Gen2Tiles.TILE_BYTES
+		var raw: PackedByteArray = PackedByteArray()
+		var consumed: int = 0
+		if raw_bytes:
+			if not rom.in_bounds(at, wanted):
+				return {}
+			raw = rom.slice(at, wanted)
+			consumed = wanted
+		else:
+			raw = lz.decompress(rom.bytes(), at)
+			consumed = lz.consumed
+			if lz.failed or raw.size() != wanted:
+				return {}
+		out[name] = raw
+		at += _aligned(consumed, RomLayout.INTRO_ENTRY_ALIGN)
+	return out
+
+
 static func _intro_entry_bytes(kind: String, tiles: int) -> int:
 	match kind:
 		"map", "attr":
@@ -1116,6 +1158,59 @@ static func verify_intro_movie(rom: RomFile, layout: Dictionary) -> Dictionary:
 				"message": "The intro fade does not open on the first Unown palette.",
 			}
 	return {"ok": true, "message": "Intro movie verified."}
+
+
+## `GoldSilverIntro`. The section walk is most of the check; what is left is the
+## three palette runs outside it and the two metatile maps, which name their own
+## `.bin` entries and so check the pair.
+##
+## `predef_pals` is checked against `game_freak_presents.object_palette`, which
+## this layout pins independently: that offset is `PREDEFPAL_GAMEFREAK_LOGO_OB`,
+## index 77 of the same table, so each address confirms the other for nothing.
+static func verify_gs_intro(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("gs_intro", {})
+	if entry.is_empty() or int(entry.get("section", -1)) < 0:
+		return {"ok": true, "message": "No Gold and Silver intro on this cartridge."}
+
+	var section: Dictionary = read_gs_intro_section(rom, layout)
+	if section.is_empty():
+		return {"ok": false, "message": "The Gold and Silver intro section does not walk."}
+
+	# `Intro_Draw2x2Tiles` reads four bytes at `meta + 4 * tilemap[n]`, so no
+	# metatile a map names may sit past the end of its own `.bin`.
+	for pair: Array in [["water", "water"], ["grass", "grass"]]:
+		var map: PackedByteArray = section["%s_tilemap" % pair[0]]
+		var meta: PackedByteArray = section["%s_meta" % pair[1]]
+		var metatiles: int = meta.size() / RomLayout.GS_INTRO_META_BYTES
+		for cell: int in map.size():
+			if int(map[cell]) >= metatiles:
+				return {
+					"ok": false,
+					"message": "The %s map names a metatile outside its own table." % pair[0],
+				}
+
+	var predef: int = int(entry.get("predef_pals", -1))
+	var logo: int = int((layout.get("game_freak_presents", {}) as Dictionary).get(
+		"object_palette", -1
+	))
+	var wanted: int = predef \
+		+ RomLayout.GS_INTRO_PREDEF_GAMEFREAK_LOGO_OB * RomLayout.GS_INTRO_PREDEF_SIZE
+	if predef < 0 or logo != wanted:
+		return {
+			"ok": false,
+			"message": "The predef palettes do not hold the GameFreak logo's own.",
+		}
+	for name: String in ["magikarp_palettes", "shellder_lapras_palettes"]:
+		var palettes: int = RomLayout.GS_INTRO_MAGIKARP_PALETTES \
+			if name == "magikarp_palettes" else RomLayout.GS_INTRO_SHELLDER_LAPRAS_PALETTES
+		if not rom.in_bounds(
+			int(entry.get(name, -1)), palettes * RomLayout.GS_INTRO_PREDEF_SIZE
+		):
+			return {
+				"ok": false,
+				"message": "The Gold and Silver intro %s are outside the cartridge." % name,
+			}
+	return {"ok": true, "message": "Gold and Silver intro verified."}
 
 
 ## Eight palettes of one repeated colour, which is what a scene fades out of.
@@ -3151,6 +3246,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"title": _import_title(rom, layout),
 		"town_map": _import_town_map(rom, layout),
 		"intro_movie": _import_intro_movie(rom, layout),
+		"gs_intro": _import_gs_intro(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
@@ -3846,6 +3942,74 @@ func _import_intro_movie(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"palettes": palettes, "maps": maps}
 
 
+## `GoldSilverIntro`'s seven tile strips. The two `.tilemap`s and two `.bin`s are
+## metatile data rather than pixels, so they go beside the movie's own entry
+## through [method _import_gs_intro] rather than into the tile table.
+func _import_gs_intro_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_gs_intro_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for row: Array in RomLayout.GS_INTRO_SECTION:
+		if String(row[1]) == "raw_bytes":
+			continue
+		var name: String = String(row[0])
+		var tiles: int = int(row[2])
+		if not RomCache.write_indices(
+			RomCache.tile_path(directory, "gs_intro_%s" % name),
+			Gen2Tiles.decode_2bpp_strip(section[name], 0, tiles)
+		):
+			return {}
+		out["gs_intro_%s" % name] = _strip_sheet_entry(tiles)
+	return out
+
+
+## `GoldSilverIntro`'s metatile maps and its palettes.
+##
+## The four `.tilemap`/`.bin` runs are byte runs keyed by a name, written the way
+## the Crystal movie's BG maps are and read back with `GameData.gs_intro_map()`.
+## The palettes are `Intro_LoadMagikarpPalettes`' pair, the shellder and lapras
+## run, and the three `PredefPals` entries the scenes load through
+## `GetPredefPal`; the DMG register orders every scene fades through are code
+## rather than data and live in [Gen2GoldSilverIntro].
+func _import_gs_intro(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_gs_intro_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var entry: Dictionary = layout["gs_intro"]
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var maps: Array = []
+	for row: Array in RomLayout.GS_INTRO_SECTION:
+		if String(row[1]) != "raw_bytes":
+			continue
+		var name: String = String(row[0])
+		if not RomCache.write_indices(
+			RomCache.tile_path(directory, "gs_intro_%s" % name), section[name]
+		):
+			return {}
+		maps.append(name)
+	var colors: int = RomLayout.INTRO_PALETTE_COLORS
+	var palettes: Dictionary = {
+		"magikarp": _packed_palette(
+			rom, int(entry["magikarp_palettes"]),
+			RomLayout.GS_INTRO_MAGIKARP_PALETTES * colors
+		),
+		"shellder_lapras": _packed_palette(
+			rom, int(entry["shellder_lapras_palettes"]),
+			RomLayout.GS_INTRO_SHELLDER_LAPRAS_PALETTES * colors
+		),
+	}
+	var predef: int = int(entry["predef_pals"])
+	for name: String in RomLayout.GS_INTRO_PREDEF:
+		palettes[name] = _packed_palette(
+			rom,
+			predef + int(RomLayout.GS_INTRO_PREDEF[name]) * RomLayout.GS_INTRO_PREDEF_SIZE,
+			colors
+		)
+	return {"palettes": palettes, "maps": maps}
+
+
 static func _unpacked_words(raw: PackedByteArray) -> Array:
 	var out: Array = []
 	for index: int in raw.size() / Gen2Palette.COLOR_BYTES:
@@ -4340,6 +4504,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_title_sheets(rom, layout), true)
 	written.merge(_import_town_map_sheets(rom, layout), true)
 	written.merge(_import_intro_sheets(rom, layout), true)
+	written.merge(_import_gs_intro_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

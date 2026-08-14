@@ -59,6 +59,7 @@ var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
+var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -137,6 +138,8 @@ static func open_directory(path: String) -> GameData:
 	data._credits = credits if credits is Dictionary else {}
 	var intro_movie: Variant = manifest.get("intro_movie", {})
 	data._intro_movie = intro_movie if intro_movie is Dictionary else {}
+	var gs_intro: Variant = manifest.get("gs_intro", {})
+	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1191,9 +1194,34 @@ func credits_index(name: String) -> int:
 
 
 ## Whether this cache carries `CrystalIntro`'s art. False on Gold and Silver,
-## which ship a different movie that is not imported.
+## which run `GoldSilverIntro` instead; [method has_gs_intro] is that one.
 func has_intro_movie() -> bool:
 	return not (_intro_movie.get("maps", []) as Array).is_empty()
+
+
+## Whether this cache carries `GoldSilverIntro`'s art. False on Crystal.
+func has_gs_intro() -> bool:
+	return not (_gs_intro.get("maps", []) as Array).is_empty()
+
+
+## One of `GoldSilverIntro`'s metatile runs, by the name
+## `RomLayout.GS_INTRO_SECTION` gives it: a `_tilemap` is a 16-wide map of
+## metatile numbers and a `_meta` the four tiles each of those names.
+func gs_intro_map(name: String) -> PackedByteArray:
+	return tile_indices("gs_intro_%s" % name)
+
+
+## One of `GoldSilverIntro`'s palette runs: `magikarp` and `shellder_lapras` for
+## the two INCLUDEd inside the code, and the `RomLayout.GS_INTRO_PREDEF` names
+## for the entries the scenes take out of `PredefPals`.
+func gs_intro_palette(name: String) -> PackedColorArray:
+	var stored: Variant = (_gs_intro.get("palettes", {}) as Dictionary).get(name, [])
+	var colors := PackedColorArray()
+	if not stored is Array:
+		return colors
+	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
 
 
 ## One of the intro movie's 32x32 BG maps or attribute planes, by the name

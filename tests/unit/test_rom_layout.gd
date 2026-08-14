@@ -24,6 +24,7 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 		if key in [
 			"item_attributes", "item_status_actions", "item_healing_hp",
 			"overworld_icons", "copyright", "game_freak_presents", "title",
+			"gs_intro",
 		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
@@ -62,6 +63,83 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 		int(silver_presents["stars"]) - int(silver_presents["gfx"])
 	)
 	assert_eq(gold_presents["object_palette"], silver_presents["object_palette"])
+
+	# `GoldSilverIntro`'s art moves with the same 440 bytes the splash graphics
+	# do; every other address the movie reads is the same on both.
+	var gold_intro: Dictionary = gold["gs_intro"]
+	var silver_intro: Dictionary = silver["gs_intro"]
+	assert_eq(
+		int(gold_intro["section"]) - int(gold_presents["gfx"]),
+		int(silver_intro["section"]) - int(silver_presents["gfx"])
+	)
+	for shared: String in [
+		"magikarp_palettes", "shellder_lapras_palettes", "predef_pals"
+	]:
+		assert_eq(gold_intro[shared], silver_intro[shared], shared)
+
+
+## `game_freak_presents.object_palette` is `PREDEFPAL_GAMEFREAK_LOGO_OB`, index
+## 77 of the same `PredefPals` table `gs_intro.predef_pals` points at, so the two
+## addresses confirm each other and neither needs a second locator.
+func test_the_predef_palette_base_agrees_with_the_logo_palette() -> void:
+	for id: StringName in [RomRegistry.GOLD, RomRegistry.SILVER]:
+		var layout: Dictionary = RomLayout.for_id(id)
+		var intro: Dictionary = layout["gs_intro"]
+		var presents: Dictionary = layout["game_freak_presents"]
+		assert_eq(
+			int(intro["predef_pals"])
+				+ RomLayout.GS_INTRO_PREDEF_GAMEFREAK_LOGO_OB * RomLayout.GS_INTRO_PREDEF_SIZE,
+			int(presents["object_palette"]),
+			"%s predef base" % id
+		)
+
+
+## The three entries the movie reads out of `PredefPals` are contiguous, which is
+## why one base walks them; `PalPacket_Pack`'s own is four entries past.
+func test_the_intro_predef_palettes_are_one_run() -> void:
+	assert_eq(
+		int(RomLayout.GS_INTRO_PREDEF["jigglypuff_pikachu_ob"]),
+		int(RomLayout.GS_INTRO_PREDEF["jigglypuff_pikachu_bg"]) + 1
+	)
+	assert_eq(
+		int(RomLayout.GS_INTRO_PREDEF["starters_transition"]),
+		int(RomLayout.GS_INTRO_PREDEF["jigglypuff_pikachu_ob"]) + 1
+	)
+	assert_lt(
+		int(RomLayout.GS_INTRO_PREDEF["starters_transition"]),
+		int(RomLayout.GS_INTRO_PREDEF["pack"])
+	)
+
+
+## The section's own shape: eleven entries, the four uncompressed ones sized in
+## bytes and the seven compressed ones in tiles, in `GoldSilverIntro`'s INCBIN
+## order. The walk depends on that order, so a reordering is a broken import.
+func test_the_gold_silver_intro_section_is_the_incbin_order() -> void:
+	var names: Array[String] = []
+	for row: Array in RomLayout.GS_INTRO_SECTION:
+		names.append(String(row[0]))
+		assert_true(String(row[1]) in ["lz", "raw_bytes"], String(row[0]))
+		assert_gt(int(row[2]), 0, String(row[0]))
+	assert_eq(names, [
+		"water1", "water_tilemap", "water_meta", "water2",
+		"grass1", "grass_tilemap", "grass_meta", "grass2",
+		"fire1", "fire2", "fire3",
+	] as Array[String])
+
+
+## Every metatile map is a whole number of sixteen-wide rows, and the water
+## scene's own starting row is inside its map.
+func test_the_metatile_maps_are_sixteen_wide() -> void:
+	var water: int = 0
+	for row: Array in RomLayout.GS_INTRO_SECTION:
+		if not String(row[0]).ends_with("_tilemap"):
+			continue
+		assert_eq(int(row[2]) % RomLayout.GS_INTRO_META_COLUMNS, 0, String(row[0]))
+		if String(row[0]) == "water_tilemap":
+			water = int(row[2])
+	assert_lt(
+		RomLayout.GS_INTRO_WATER_FIRST_ROW, water / RomLayout.GS_INTRO_META_COLUMNS
+	)
 
 
 func test_crystal_has_its_own() -> void:
