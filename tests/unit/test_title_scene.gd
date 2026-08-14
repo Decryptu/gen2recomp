@@ -149,12 +149,17 @@ func test_the_suicune_frame_changes_every_eighth_frame() -> void:
 	assert_eq(_scene(RomRegistry.GOLD).suicune_base(), -1, "Gold has no Suicune")
 
 
-## `LoadSuicuneFrame` writes six rows of eight from the base it is handed.
+## `LoadSuicuneFrame` writes six rows of eight from the base it is handed, and
+## its `d` takes eight more at the end of each row than the eight it stepped
+## across, so the sheet it reads is sixteen wide and only its left half is drawn.
+## Measured against a cartridge: at a stride of eight the strip is torn, tiles
+## from one row of the sheet landing in the next.
 func test_the_suicune_strip_is_six_rows_of_eight() -> void:
 	var placed: Array[Vector3i] = _scene(RomRegistry.CRYSTAL).suicune_tiles()
 	assert_eq(placed.size(), Gen2TitleScene.SUICUNE_ROWS * Gen2TitleScene.SUICUNE_COLUMNS)
 	assert_eq(placed[0], Vector3i(6, 12, 0x00))
-	assert_eq(placed[8], Vector3i(6, 13, 0x08), "the next row is eight tiles on")
+	assert_eq(placed[7], Vector3i(13, 12, 0x07), "eight across")
+	assert_eq(placed[8], Vector3i(6, 13, 0x10), "and sixteen on to the next row")
 
 
 ## `InitializeBackground`: thirty 8x16 objects, five rows of six, all behind the

@@ -54,7 +54,11 @@ const CRYSTAL_STEP: int = 2
 const SUICUNE_FRAME_MASK: int = 0b111
 const SUICUNE_FRAMES: Array[int] = [0x80, 0x88, 0x00, 0x08]
 ## `LoadSuicuneFrame` draws six rows of eight from whichever base it is handed.
+## Its `d` rises by one across each of the eight columns and then by eight more
+## at the end of the row, so a row starts sixteen tiles past the one above it:
+## the sheet is sixteen wide and only its left half is on screen.
 const SUICUNE_COLUMNS: int = 8
+const SUICUNE_ROW_STRIDE: int = 16
 const SUICUNE_ROWS: int = 6
 const SUICUNE_AT := Vector2i(6, 12)
 ## `Decompress` puts the sheet at `vTiles4`, which is tile $80 of the bank the
@@ -438,7 +442,7 @@ func suicune_tiles() -> Array[Vector3i]:
 		for column: int in SUICUNE_COLUMNS:
 			out.append(Vector3i(
 				SUICUNE_AT.x + column, SUICUNE_AT.y + row,
-				base + row * SUICUNE_COLUMNS + column
+				base + row * SUICUNE_ROW_STRIDE + column
 			))
 	return out
 
