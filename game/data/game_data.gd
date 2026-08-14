@@ -58,6 +58,7 @@ var _title: Dictionary = {}
 var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
 var _credits: Dictionary = {}
+var _intro_movie: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
@@ -134,6 +135,8 @@ static func open_directory(path: String) -> GameData:
 	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
 	var credits: Variant = manifest.get("credits", {})
 	data._credits = credits if credits is Dictionary else {}
+	var intro_movie: Variant = manifest.get("intro_movie", {})
+	data._intro_movie = intro_movie if intro_movie is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
@@ -1185,6 +1188,31 @@ func credits_string(index: int) -> PackedByteArray:
 ## string printed from column 2. -1 on a cache without the credits.
 func credits_index(name: String) -> int:
 	return int(_credits.get(name, -1))
+
+
+## Whether this cache carries `CrystalIntro`'s art. False on Gold and Silver,
+## which ship a different movie that is not imported.
+func has_intro_movie() -> bool:
+	return not (_intro_movie.get("maps", []) as Array).is_empty()
+
+
+## One of the intro movie's 32x32 BG maps or attribute planes, by the name
+## `RomLayout.INTRO_SECTION` gives it. Empty on a cache without the movie.
+func intro_map(name: String) -> PackedByteArray:
+	return tile_indices("intro_%s" % name)
+
+
+## One of the intro movie's palette runs, by the name
+## `RomLayout.INTRO_SECTION` gives it, plus `fade` and `unown`. Sixteen
+## palettes for a scene's own run, eight for the fade and two for the Unown.
+func intro_palette(name: String) -> PackedColorArray:
+	var stored: Variant = (_intro_movie.get("palettes", {}) as Dictionary).get(name, [])
+	var colors := PackedColorArray()
+	if not stored is Array:
+		return colors
+	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
 
 
 ## `CreditsPalettes` for one scene: three palettes on Crystal (the banner, the

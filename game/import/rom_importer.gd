@@ -308,6 +308,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not oak_ratings["ok"]:
 		return oak_ratings
 
+	var intro_movie: Dictionary = verify_intro_movie(rom, layout)
+	if not intro_movie["ok"]:
+		return intro_movie
+
 	var credits: Dictionary = verify_credits(rom, layout)
 	if not credits["ok"]:
 		return credits
@@ -1002,6 +1006,131 @@ static func read_oak_text(rom: RomFile, layout: Dictionary, stub: int) -> String
 	if not bool(decoded.get("ok", false)):
 		return ""
 	return String(decoded["text"])
+
+
+## `CrystalIntro`'s art section, walked whole from its one pinned address.
+##
+## Every entry is decompressed and its length checked against what the routine
+## that loads it asks VRAM for, then the next entry's address is that length
+## rounded up to [constant RomLayout.INTRO_ENTRY_ALIGN]. Thirty-five entries in a
+## row landing on their exact sizes is what says the address is right; a walk
+## that starts anywhere else fails inside the first two.
+##
+## Returns {name: PackedByteArray} in `INTRO_SECTION` order, or an empty
+## Dictionary if any entry does not decompress to its own size.
+static func read_intro_section(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("intro_movie", {})
+	var at: int = int(entry.get("section", -1))
+	if at < 0:
+		return {}
+	var lz := Gen2Lz.new()
+	var out: Dictionary = {}
+	for row: Array in RomLayout.INTRO_SECTION:
+		var name: String = String(row[0])
+		var kind: String = String(row[1])
+		var wanted: int = _intro_entry_bytes(kind, int(row[2]))
+		var raw: PackedByteArray = PackedByteArray()
+		var consumed: int = 0
+		if kind == "pal" or kind == "raw":
+			if not rom.in_bounds(at, wanted):
+				return {}
+			raw = rom.slice(at, wanted)
+			consumed = wanted
+		else:
+			raw = lz.decompress(rom.bytes(), at)
+			consumed = lz.consumed
+			if lz.failed or raw.size() != wanted:
+				return {}
+		out[name] = raw
+		at += _aligned(consumed, RomLayout.INTRO_ENTRY_ALIGN)
+	return out
+
+
+static func _intro_entry_bytes(kind: String, tiles: int) -> int:
+	match kind:
+		"map", "attr":
+			return RomLayout.INTRO_MAP_BYTES
+		"pal":
+			return RomLayout.INTRO_PALETTES * RomLayout.INTRO_PALETTE_COLORS \
+				* Gen2Palette.COLOR_BYTES
+		_:
+			return tiles * Gen2Tiles.TILE_BYTES
+
+
+static func _aligned(value: int, to: int) -> int:
+	return ((value + to - 1) / to) * to
+
+
+## The intro movie. The section walk above is most of the check; what is left is
+## content, and the two palette runs INCLUDEd inside the code rather than in it.
+##
+## `unown_1.pal` is byte-identical to the first palette of `fade.pal`, which is
+## the same "two INCLUDEs of one picture check each other" the copyright string
+## gives the credits: the two are pinned independently, so each confirms the
+## other's address for nothing.
+static func verify_intro_movie(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("intro_movie", {})
+	if entry.is_empty() or int(entry.get("section", -1)) < 0:
+		return {"ok": true, "message": "No intro movie on this cartridge."}
+
+	var section: Dictionary = read_intro_section(rom, layout)
+	if section.is_empty():
+		return {"ok": false, "message": "The intro movie section does not walk."}
+
+	# `IntroScene3` puts the background sheet's 128 tiles at `vTiles2`, which is
+	# where a BG tile number below $80 reads from, so no cell of its map may name
+	# a tile the sheet does not hold.
+	for cell: int in RomLayout.INTRO_MAP_BYTES:
+		if int((section["background_map"] as PackedByteArray)[cell]) >= 0x80:
+			return {
+				"ok": false,
+				"message": "The intro background map names a tile outside its sheet.",
+			}
+	# `IntroScene1` and `IntroScene26` both open on a cleared screen and fade the
+	# Unown in: the first eight palettes of the Unown run are black and of the
+	# crystal run white, which is what each scene fades away from.
+	var unown_check: Dictionary = _verify_intro_palette_run(
+		section["unowns_palette"], 0x0000, "Unown"
+	)
+	if not unown_check["ok"]:
+		return unown_check
+	var crystal_check: Dictionary = _verify_intro_palette_run(
+		section["crystal_unowns_palette"], 0x7FFF, "crystal Unown"
+	)
+	if not crystal_check["ok"]:
+		return crystal_check
+
+	var fade: int = int(entry.get("fade", -1))
+	var pals: int = int(entry.get("unown_pals", -1))
+	var fade_bytes: int = RomLayout.INTRO_FADE_PALETTES \
+		* RomLayout.INTRO_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+	var pal_bytes: int = RomLayout.INTRO_UNOWN_PALETTES \
+		* RomLayout.INTRO_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+	if not rom.in_bounds(fade, fade_bytes) or not rom.in_bounds(pals, pal_bytes):
+		return {"ok": false, "message": "The intro fade palettes are outside the cartridge."}
+	for colour: int in RomLayout.INTRO_PALETTE_COLORS:
+		var offset: int = colour * Gen2Palette.COLOR_BYTES
+		if rom.u16le(fade + offset) != rom.u16le(pals + offset):
+			return {
+				"ok": false,
+				"message": "The intro fade does not open on the first Unown palette.",
+			}
+	return {"ok": true, "message": "Intro movie verified."}
+
+
+## Eight palettes of one repeated colour, which is what a scene fades out of.
+static func _verify_intro_palette_run(
+	raw: PackedByteArray, colour: int, name: String
+) -> Dictionary:
+	var colors: int = RomLayout.INTRO_FADE_PALETTES * RomLayout.INTRO_PALETTE_COLORS
+	for index: int in colors:
+		var at: int = index * Gen2Palette.COLOR_BYTES
+		if raw[at] | (raw[at + 1] << 8) != colour:
+			return {
+				"ok": false,
+				"message": "The intro %s palettes do not open on one colour." % name,
+			}
+	return {"ok": true, "message": ""}
 
 
 ## The credits (`engine/movie/credits.asm`), whose five runs each pin the next.
@@ -3021,6 +3150,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"presents_palettes": _import_presents_palettes(rom, layout),
 		"title": _import_title(rom, layout),
 		"town_map": _import_town_map(rom, layout),
+		"intro_movie": _import_intro_movie(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
@@ -3649,6 +3779,81 @@ func _import_copyright_palette(rom: RomFile, layout: Dictionary) -> Array:
 	return out
 
 
+## The intro movie's tile strips and its four BG maps with their attribute
+## planes, all out of one walk of the section.
+##
+## A map is a byte run keyed by a name, so it is written the way a strip is and
+## read back with `GameData.intro_map()`; it is not a sheet and gets no entry in
+## the manifest's tile table. `Intro_LoadTilemap` copies the top-left 20x18 of
+## one into `wTilemap`, which is why the whole 32x32 is kept rather than a
+## screen.
+func _import_intro_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_intro_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for row: Array in RomLayout.INTRO_SECTION:
+		var name: String = String(row[0])
+		var kind: String = String(row[1])
+		var raw: PackedByteArray = section[name]
+		var path: String = RomCache.tile_path(directory, "intro_%s" % name)
+		match kind:
+			"pal":
+				continue
+			"map", "attr":
+				if not RomCache.write_indices(path, raw):
+					return {}
+			_:
+				var tiles: int = int(row[2])
+				if not RomCache.write_indices(
+					path, Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
+				):
+					return {}
+				out["intro_%s" % name] = _strip_sheet_entry(tiles)
+	return out
+
+
+## The intro movie's palettes: the five sixteen-palette runs inside the section,
+## `Intro_Scene24_ApplyPaletteFade`'s eight and `Intro_Scene20_AppearUnown`'s
+## two, plus the names of the maps written beside the sheets.
+##
+## The fades `CrystalIntro_UnownFade` and `Intro_FadeUnownWordPals` run through
+## are `for hue, 32` tables the assembler generates, not cartridge data, so they
+## are computed in [Gen2IntroMovie] rather than imported.
+func _import_intro_movie(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_intro_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var entry: Dictionary = layout["intro_movie"]
+	var palettes: Dictionary = {}
+	var maps: Array = []
+	for row: Array in RomLayout.INTRO_SECTION:
+		var name: String = String(row[0])
+		match String(row[1]):
+			"pal":
+				palettes[name] = _unpacked_words(section[name])
+			"map", "attr":
+				maps.append(name)
+	palettes["fade"] = _packed_palette(
+		rom, int(entry["fade"]),
+		RomLayout.INTRO_FADE_PALETTES * RomLayout.INTRO_PALETTE_COLORS
+	)
+	palettes["unown"] = _packed_palette(
+		rom, int(entry["unown_pals"]),
+		RomLayout.INTRO_UNOWN_PALETTES * RomLayout.INTRO_PALETTE_COLORS
+	)
+	return {"palettes": palettes, "maps": maps}
+
+
+static func _unpacked_words(raw: PackedByteArray) -> Array:
+	var out: Array = []
+	for index: int in raw.size() / Gen2Palette.COLOR_BYTES:
+		var at: int = index * Gen2Palette.COLOR_BYTES
+		out.append(raw[at] | (raw[at + 1] << 8))
+	return out
+
+
 ## `ShrinkPlayer`'s two pictures, which are LZ runs rather than tile strips and
 ## are laid out by `PlaceGraphic` the way every 7x7 pic is: as one 56x56 buffer
 ## per picture, so a screen draws them the way it draws the player's own.
@@ -4134,6 +4339,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_ditto_sheet(rom, layout), true)
 	written.merge(_import_title_sheets(rom, layout), true)
 	written.merge(_import_town_map_sheets(rom, layout), true)
+	written.merge(_import_intro_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

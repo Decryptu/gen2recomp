@@ -120,6 +120,7 @@ to check without writing.
 | Font and borders | 128 glyphs and eight six-tile text-box frames |
 | Splash screen | The copyright graphic and its tile-code string, `GameFreakLogoGFX`'s two words and logo, Gold and Silver's star and sparkles, Crystal's compressed Ditto sheet, and the three palettes the three are drawn through |
 | Title screen | Crystal's Suicune strip, logo and crystal with its sixteen palettes; Gold and Silver's two logo halves, their `$FF`-terminated tilemap, the trail and the Ho-Oh or Lugia behind it, and both palette runs |
+| Intro movie | Crystal only: the thirty-five entries of `CrystalIntro`'s art section, which is the Unown, pulse, panorama, Pichu/Wooper, grass and four Suicune sheets, their four BG maps with attribute planes, five sixteen-palette runs, and the fade and Unown palettes inside the code |
 | Region map | The Pokegear's three graphics sheets, the Fast Ship's icon and the dex's nest marker, both region tilemaps, the per-tile palette map and its six palettes, and the ninety-six landmarks with their coordinates and names |
 | Prof Oak's PC | The nineteen `OakRatings` rows, each a caught-count threshold, the sound it plays and the rating it prints, and the four texts around them |
 | Credits | `CreditsScript`'s whole command stream, every name and heading it prints, the four scene palettes, the border strip, "The End" and the four mons the banner animates |
@@ -171,6 +172,7 @@ cannot produce a save the game will not load. A new game opens on the
 cartridge's own splash: the copyright screen for the hundred and ten frames
 `SplashScreen` gives it, then the GameFreak animation, which is Crystal's
 bouncing Ditto turning into the logo or Gold and Silver's star and sparkles, then
+on Crystal the twenty-eight-scene intro movie, then
 the title screen, and then the gender question and Oak's speech; it starts with an empty
 party at the Crystal home spawn with source starting money, and Elm's imported
 lab scripts offer Chikorita, Cyndaquil or Totodile at level 5 holding Berry.
@@ -323,6 +325,7 @@ all three games unless its row says otherwise:
 | `preview_prof_oaks_pc.gd <game> [caught]` | Prof Oak's PC against a real cache: every rating band and both its ends, or the three pages `ProfOaksPCBoot` shows for one owned count |
 | `preview_town_map.gd <game> <png> [landmark] [town_map\|card\|area:<species>] [presses]` | the region map against a real cache: the Johto or Kanto map the landmark picks, `_TownMap`'s corner box, the Pokegear card's icon row or the dex's `<MON>'S NEST` screen, and the cursor after a `u,d,b` press list. `hof` in that list opens the whole Kanto window rather than the Victory Road one, `sel` and `rel` hold and release the dex area's SELECT, and `f<n>` spends n frames, which is what the nest blink is caught with |
 | `preview_hall_of_fame.gd <game> <png> [page]` | the Hall of Fame induction panel against a real cache, ending on the player's own with Prof Oak's rating printed into it; `page` is how many panels to advance past |
+| `preview_intro_movie.gd <game> [png] [frame;frame]` | the intro movie at any source frame: the Unown fading in and bursting, the scrolling panorama with Suicune running across it, Wooper and Pichu in the rustling grass, the leap, the close-up, and C R Y S T A L spelled out in Unown. With no png it runs the whole movie and prints the frame each of the twenty-eight scenes starts on |
 | `preview_credits.gd <game> <png> [frame;frame]` | the credits at any source frame: the banner's four mons, the scrolling border bands, each batch of names on its own scene palette, the copyright and "The End". A `CREDITS_WAIT` tick is thirteen frames, so the batches land a long way apart; a frame suffixed `b` holds B down for the skip a replay allows |
 | `preview_battle_switch.gd <game> <png> [offer\|pick\|use_next\|replace] [presses]` | the boxes a battle switches through: `OfferSwitch`'s yes/no over the field under SHIFT, the party list behind it, `AskUseNextPokemon`'s wild question, and `ForcePlayerMonChoice`'s list after a faint. `presses` is a `u,d,l,r,a,b` list driven into the menu first, which is how a refusal is photographed |
 | `preview_world_story.gd` | map entry callbacks, event-flag visibility, facing interactions and the story route |
@@ -344,6 +347,7 @@ all three games unless its row says otherwise:
 | `validate_strength.gd` | the strength-boulder census and Cianwood Gym's corridor push |
 | `validate_battle_anims.gd` | all 278 battle animation scripts run to their own `anim_ret`, POUND command by command, both shapes of the profile split in TACKLE and BODY SLAM, the object, frameset and OAM tables, the sine table the motion callbacks scale with, the 39 graphics sheets, and every motion callback and background effect a real animation reaches |
 | `validate_town_map.gd` | the landmark tables and the one-landmark split `BATTLE TOWER` causes, both region tilemaps against `TownMapGFX`, the palette map and its two city palettes, the Johto and Kanto cursor windows either side of the Hall of Fame, all three frames composing, and every species' nests staying inside their own region and under shadow OAM's forty sprites |
+| `validate_intro_movie.gd` | every entry of the intro art section at the size the routine loading it asks VRAM for, every BG map cell naming a tile its own sheet holds and every attribute byte a palette its own run has, and the whole movie run frame by frame to `JUMPTABLE_EXIT_F`: the frame each scene starts on, every sound it asks for resolving on the cache, and no frame asking shadow OAM for more than forty sprites |
 | `validate_credits.gd` | every credits string decoding into codes the screen can draw, the four scene palettes and every `Credits_LoadBorderGFX.Frames` block, and both whole scripts run frame by frame to `CREDITS_END` with nothing printed reaching either border band |
 | `validate_tmhm.gd` | the TM/HM move table, the item-number mapping past its two dummy items, the seven moves an HM teaches, and the whole species compatibility census |
 | `validate_command_queues.gd` | the two `stonetable` command queues, their pit warps and boulders, and a real Blackthorn Gym 2F push firing its fall script |
