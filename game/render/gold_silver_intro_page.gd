@@ -380,15 +380,19 @@ func _draw_sprite(image: Image, movie: Gen2GoldSilverIntro, entry: Dictionary) -
 		_sheet(String((CUTSCENE_SHEETS.get(movie.cutscene(), {}) as Dictionary).get("obj", ""))),
 		palette, int(entry["tile"]),
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
-		bool(entry["flip_x"]), bool(entry["flip_y"])
+		bool(entry["flip_x"]), bool(entry["flip_y"]),
+		# Only the fire cutscene has `Intro_GetMonFrontpic`'s three pics in
+		# `vTiles0`. The water scene's own sprites cover the same tile numbers,
+		# and Lapras alone spans all three of those runs.
+		movie.cutscene() == Gen2GoldSilverIntro.CUTSCENE_FIRE
 	)
 
 
 func _blit_sprite_tile(
 	image: Image, strip: PackedByteArray, palette: PackedColorArray, tile: int,
-	at: Vector2i, flip_x: bool, flip_y: bool
+	at: Vector2i, flip_x: bool, flip_y: bool, starters: bool
 ) -> void:
-	var starter: Dictionary = _starter_for(tile)
+	var starter: Dictionary = _starter_for(tile) if starters else {}
 	for row: int in TILE:
 		var y: int = at.y + row
 		if y < 0 or y >= HEIGHT:
