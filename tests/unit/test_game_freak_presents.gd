@@ -10,12 +10,12 @@ const Presents := preload("res://game/world/game_freak_presents.gd")
 ## frame of `GameFreakLogo_Init`, fifty of `_Bounce`, thirty-three of `_Ditto`,
 ## sixty-five of `_Transform`, then thirty-three, sixty-five and a hundred and
 ## twenty-nine of `GameFreakPresentsScene`, the frame that reads the exit bit,
-## and `GameFreakPresentsEnd`'s sixteen. Gold is one frame of `_Star`, sixty-five
-## waiting for it, two runs of a hundred and twenty-nine either side of
-## `_PlacePresents`, the frame that sets the flag, the frame that reads it, and
-## the same sixteen.
-const CRYSTAL_FRAMES: int = 392
-const GOLD_FRAMES: int = 342
+## and `GameFreakPresentsEnd`'s four of `ClearTilemap` plus sixteen. Gold is one
+## frame of `_Star`, sixty-five waiting for it, two runs of a hundred and
+## twenty-nine either side of `_PlacePresents`, the frame that sets the flag, the
+## frame that reads it, and the same twenty.
+const CRYSTAL_FRAMES: int = 396
+const GOLD_FRAMES: int = 346
 
 
 func _run(profile: StringName, frames: int = 0) -> Gen2GameFreakPresents:
@@ -140,13 +140,18 @@ func test_the_transform_walks_every_fade_colour_and_then_starts_the_words() -> v
 
 ## Gold's `GameFreakPresents_PlaceLogo` waits on `wIntroSceneFrameCounter`, which
 ## only `AnimSeq_GSGameFreakLogoStar` sets, so the two are joined through the
-## sprite layer rather than by a count: the star is gone on exactly the frame the
-## logo arrives.
+## sprite layer rather than by a count. The star draws once more on the frame it
+## dies, because `DoNextFrameForAllSprites` calls `UpdateAnimFrame` whether or
+## not the sequence deinitialised the struct, so the logo arrives the frame
+## after that.
 func test_the_gold_logo_arrives_when_the_star_does_not_and_not_before() -> void:
 	var before: Gen2GameFreakPresents = _run(&"gold", 65)
 	assert_eq(_kinds(before), [Presents.SPRITE_STAR])
 
-	var after: Gen2GameFreakPresents = _run(&"gold", 66)
+	var dying: Gen2GameFreakPresents = _run(&"gold", 66)
+	assert_eq(_kinds(dying), [Presents.SPRITE_STAR], "drawn once after it is freed")
+
+	var after: Gen2GameFreakPresents = _run(&"gold", 67)
 	assert_eq(_kinds(after), [Presents.SPRITE_LOGO])
 
 
@@ -167,8 +172,11 @@ func test_the_gold_logo_rotates_its_palette_three_times_and_then_holds() -> void
 
 
 ## `GameFreakPresents_Sparkle` runs on every second frame of the sparkle timer,
-## so a hundred and twenty-eight frames produce sixty-four sparks, each living
-## its own vector's distance times sixteen frames.
+## which asks for sixty-four sparks over a hundred and twenty-eight frames. Most
+## of them never exist: `_InitSpriteAnimStruct` returns carry when all ten
+## `wSpriteAnimationStructs` are taken, and the logo holds one of them, so the
+## spray sits at nine and a spawn with nothing free is dropped. Measured against
+## a cartridge, whose busiest sparkle frame is twenty-four sprites.
 func test_gold_sprays_a_sparkle_every_other_frame_and_each_expires() -> void:
 	var phase := Presents.new()
 	phase.start(&"gold", _sine())
@@ -180,8 +188,8 @@ func test_gold_sprays_a_sparkle_every_other_frame_and_each_expires() -> void:
 		var now: int = _kinds(phase).count(Presents.SPRITE_SPARKLE)
 		spawned += maxi(now - before, 0)
 		most = maxi(most, now)
-	assert_eq(spawned, 64)
-	assert_gt(most, 0)
+	assert_eq(spawned, 27, "the rest find no free struct")
+	assert_eq(most, Presents.SPRITE_ANIM_STRUCTS - 1, "the logo holds the tenth")
 	assert_eq(_kinds(phase), [], "and none outlives the phase")
 
 
@@ -194,25 +202,37 @@ func test_a_button_cancels_it_and_still_spends_the_cleanup_frames() -> void:
 		assert_true(phase.cancel())
 		assert_false(phase.cancel(), "the bit is already set")
 		assert_false(phase.finished())
-		for _frame: int in Presents.CLEANUP_FRAMES - 1:
+		for _frame: int in Presents.CLEAR_TILEMAP_FRAMES + Presents.CLEANUP_FRAMES - 1:
 			phase.advance_frame()
 		assert_false(phase.finished(), "%s" % profile)
 		phase.advance_frame()
 		assert_true(phase.finished())
-		assert_eq(phase.frame(), 40 + Presents.CLEANUP_FRAMES)
+		assert_eq(
+			phase.frame(),
+			40 + Presents.CLEAR_TILEMAP_FRAMES + Presents.CLEANUP_FRAMES
+		)
 		assert_eq(phase.words(), 0, "ClearTilemap")
 		assert_eq(_kinds(phase), [], "ClearSpriteAnims")
 
 
-## The last sixteen frames are spent with the screen already cleared, which is
-## `GameFreakPresentsEnd`'s own order: clear, then `DelayFrames`.
-func test_the_screen_is_cleared_before_the_last_sixteen_frames() -> void:
-	var phase: Gen2GameFreakPresents = _run(
+## `GameFreakPresentsEnd`'s own order: `ClearSpriteAnims` and `ClearTilemap`
+## first, so the words go at once and the sprite stays up for the four frames
+## `WaitBGMap` spends, and only then does `ClearSprites` empty the buffer for the
+## last sixteen. Measured against a cartridge, which holds the Ditto in OAM for
+## four frames past the pass that sets the exit bit.
+func test_the_sprite_outlasts_the_words_by_the_cleartilemap_frames() -> void:
+	var last: Gen2GameFreakPresents = _run(
+		RomRegistry.CRYSTAL, CRYSTAL_FRAMES - Presents.CLEANUP_FRAMES
+	)
+	assert_false(last.finished())
+	assert_eq(last.words(), 0, "ClearTilemap has already run")
+	assert_eq(_kinds(last), [Presents.SPRITE_DITTO], "ClearSprites has not")
+
+	var cleared: Gen2GameFreakPresents = _run(
 		RomRegistry.CRYSTAL, CRYSTAL_FRAMES - Presents.CLEANUP_FRAMES + 1
 	)
-	assert_false(phase.finished())
-	assert_eq(phase.words(), 0)
-	assert_eq(_kinds(phase), [])
+	assert_false(cleared.finished())
+	assert_eq(_kinds(cleared), [])
 
 
 ## Without an imported sine table the phase still spends the cartridge's frames;
