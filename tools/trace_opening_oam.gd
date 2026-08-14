@@ -5,7 +5,7 @@ extends SceneTree
 ##
 ##   Godot --headless --path . -s res://tools/trace_opening_oam.gd -- <game> <phase> [out.txt]
 ##
-## `phase` is `presents` today. The artefact is the one `.claude/verification.md`
+## `phase` is `presents` or `title`. The artefact is the one `.claude/verification.md`
 ## step 2 asks for: two faithful implementations of `PlaySpriteAnimations` put
 ## the same sprites in the same slots on the same frames, so a `diff` against a
 ## cartridge running under an emulator settles the port rather than a frame count
@@ -21,7 +21,11 @@ extends SceneTree
 ## `tools/preview_intro.gd` photographs the same screen through the boot
 ## cinema, whose frames count from the copyright rather than from this phase.
 
-const PHASES: Array[String] = ["presents"]
+const PHASES: Array[String] = ["presents", "title"]
+
+## The title screen runs until its own timeout, which is longer than anything
+## worth diffing; this is well past `TitleScreenEnd`'s own count.
+const TITLE_FRAME_CAP: int = 4000
 
 ## Frames to write a PNG for, beside the trace's own output path.
 var _shots: Dictionary = {}
@@ -46,7 +50,8 @@ func _initialize() -> void:
 	if args.size() > 3:
 		for value: String in args[3].split(","):
 			_shots[int(value)] = true
-	var lines: PackedStringArray = _trace_presents(data)
+	var lines: PackedStringArray = _trace_presents(data) if args[1] == "presents" \
+		else _trace_title(data)
 	if args.size() > 2:
 		var file := FileAccess.open(args[2], FileAccess.WRITE)
 		if file == null:
@@ -87,6 +92,35 @@ func _trace_presents(data: GameData) -> PackedStringArray:
 		phase.advance_frame()
 		frame += 1
 	_append_frame(out, frame, page.shadow_oam(phase))
+	print("frame %d: finished" % frame)
+	return out
+
+
+## `TitleScreenScene` from its first frame, which is the entrance scrolling the
+## screen in, to the one that answers. Driven with no buttons held, the way a
+## cartridge left alone runs it, so the timeout is what ends it.
+func _trace_title(data: GameData) -> PackedStringArray:
+	var page: Gen2TitlePage = Gen2TitlePage.from_data(data)
+	if page == null:
+		push_error("%s has no title screen art." % data.id)
+		return PackedStringArray()
+	var scene: Gen2TitleScene = Gen2TitleScene.create(
+		data.id, Gen2BattleAnimData.from_game_data(data)
+	)
+	var out := PackedStringArray()
+	var frame: int = 0
+	var where: StringName = &""
+	while not scene.finished() and frame < TITLE_FRAME_CAP:
+		_append_frame(out, frame, page.shadow_oam(scene))
+		if _shots.has(frame):
+			var image: Image = page.draw(scene)
+			if image != null:
+				image.save_png("%s_f%d.png" % [_shot_prefix, frame])
+		if scene.scene() != where:
+			where = scene.scene()
+			print("frame %d: %s" % [frame, where])
+		scene.advance_frame()
+		frame += 1
 	print("frame %d: finished" % frame)
 	return out
 

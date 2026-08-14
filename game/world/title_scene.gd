@@ -54,7 +54,11 @@ const CRYSTAL_STEP: int = 2
 const SUICUNE_FRAME_MASK: int = 0b111
 const SUICUNE_FRAMES: Array[int] = [0x80, 0x88, 0x00, 0x08]
 ## `LoadSuicuneFrame` draws six rows of eight from whichever base it is handed.
+## Its `d` rises by one across each of the eight columns and then by eight more
+## at the end of the row, so a row starts sixteen tiles past the one above it:
+## the sheet is sixteen wide and only its left half is on screen.
 const SUICUNE_COLUMNS: int = 8
+const SUICUNE_ROW_STRIDE: int = 16
 const SUICUNE_ROWS: int = 6
 const SUICUNE_AT := Vector2i(6, 12)
 ## `Decompress` puts the sheet at `vTiles4`, which is tile $80 of the bank the
@@ -131,6 +135,12 @@ const TRAIL_SINE_AMPLITUDE: int = 2
 ## 10.
 const TRAIL_SILVER_TIMER_MASK: int = 0x30
 const TRAIL_SILVER_TIMER_SHIFT: int = 4
+## `.Frameset_GSTitleTrail`, as (OAM set, duration) pairs. Gold alternates the
+## two `spriteanimoam` vtiles and `oamrestart`s, so each picture is up for two
+## frames; Silver holds the first and `oamend`s, which repeats it forever. A
+## frame lasts its duration plus one, the way `GetSpriteAnimFrame` counts.
+const TRAIL_FRAMESET_GOLD: Array[Vector2i] = [Vector2i(0, 1), Vector2i(1, 1)]
+const TRAIL_FRAMESET_SILVER: Array[Vector2i] = [Vector2i(0, 32)]
 const TRAIL_SILVER_AMPLITUDE_BASE: int = 3
 const TRAIL_SILVER_STEP_BASE: int = 7
 
@@ -321,6 +331,7 @@ func _advance_trails() -> void:
 			trail["var1"] = (int(trail["var1"]) + TRAIL_SINE_STEP) & 0xFF
 			trail["yoffset"] = _lift(int(trail["var1"]), TRAIL_SINE_AMPLITUDE)
 		trail["at"] = at
+		_advance_trail_frameset(trail)
 		alive.append(trail)
 	_trails = alive
 	if (_timer & TRAIL_SPAWN_MASK) != 0 or _trails.size() >= MAX_TRAILS:
@@ -336,9 +347,28 @@ func _advance_trails() -> void:
 	_anim_count = (_anim_count + 1) & 0xFF
 	if _anim_count == 0:
 		_anim_count = 1
-	_trails.append(
-		{"at": spawn, "var1": 0, "yoffset": 0, "fresh": true, "index": _anim_count}
-	)
+	_trails.append({
+		"at": spawn, "var1": 0, "yoffset": 0, "fresh": true, "index": _anim_count,
+		"set": 0, "frame": -1, "duration": 0,
+	})
+
+
+## `GetSpriteAnimFrame` for one trail. The counter starts at -1 and the duration
+## is loaded on the pass that reads an entry, so an `oamframe X, n` is drawn
+## n + 1 times; Gold `oamrestart`s to the first entry and Silver `oamend`s, which
+## repeats the last for as long as the sprite is up.
+func _advance_trail_frameset(trail: Dictionary) -> void:
+	var frames: Array[Vector2i] = TRAIL_FRAMESET_GOLD if _profile == RomRegistry.GOLD \
+		else TRAIL_FRAMESET_SILVER
+	if int(trail["duration"]) > 0:
+		trail["duration"] = int(trail["duration"]) - 1
+		return
+	var at: int = int(trail["frame"]) + 1
+	if at >= frames.size():
+		at = 0 if _profile == RomRegistry.GOLD else frames.size() - 1
+	trail["frame"] = at
+	trail["set"] = frames[at].x
+	trail["duration"] = frames[at].y
 
 
 ## `AnimSeqs_Sine` over `BattleAnimSineWave`, as the byte `UpdateAnimFrame` adds
@@ -412,7 +442,7 @@ func suicune_tiles() -> Array[Vector3i]:
 		for column: int in SUICUNE_COLUMNS:
 			out.append(Vector3i(
 				SUICUNE_AT.x + column, SUICUNE_AT.y + row,
-				base + row * SUICUNE_COLUMNS + column
+				base + row * SUICUNE_ROW_STRIDE + column
 			))
 	return out
 
@@ -462,7 +492,7 @@ func _bird_sprites() -> Array[Dictionary]:
 		out.append({
 			"kind": SPRITE_TRAIL,
 			"at": Vector2i(trail_at.x, (trail_at.y + int(trail["yoffset"])) & 0xFF),
-			"tile": 0, "palette": 1,
+			"tile": int(trail["set"]), "palette": 1,
 		})
 
 	var amplitude: int = BIRD_SINE_GOLD if _profile == RomRegistry.GOLD else BIRD_SINE_SILVER
