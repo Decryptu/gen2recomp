@@ -65,17 +65,36 @@ func test_the_entrance_walks_the_scroll_in_over_twenty_eight_frames() -> void:
 
 
 ## `wLYOverrides` over the logo's eighty lines, the odd ones negated, which is
-## what pulls the two halves together.
+## what pulls the two halves together. The buffer is read by the LCD interrupt
+## where it stands rather than copied at VBlank, so it is a pass ahead of
+## `hSCX`; everything below the logo stands still, because `_TitleScreen` zeroed
+## the rest of the buffer and nothing rewrites it.
 func test_the_entrance_is_interlaced() -> void:
 	var scene: Gen2TitleScene = _scene(RomRegistry.CRYSTAL)
 	_spend(scene, 4)
 	var lines: PackedInt32Array = scene.line_offsets()
-	assert_eq(lines.size(), Gen2TitleScene.ENTRANCE_LINES)
-	assert_eq(lines[0], scene.scroll_x())
-	assert_eq(lines[1], -scene.scroll_x())
+	assert_eq(lines.size(), Gen2Screen.HEIGHT)
+	var ahead: int = scene.scroll_x() - Gen2TitleScene.ENTRANCE_SCX_STEP
+	assert_eq(lines[0], ahead)
+	assert_eq(lines[1], -ahead)
+	assert_eq(lines[Gen2TitleScene.ENTRANCE_LINES], 0, "the strip below is not moved")
 
 	_spend(scene, 40)
 	assert_eq(scene.line_offsets().size(), 0, "and nothing overrides after it")
+
+
+## `_TitleScreen`'s own `ld a, 8 / ldh [hSCY]`, and the copyright window
+## `TitleScreenEntrance.done` brings up behind it.
+func test_only_crystal_scrolls_down_and_shows_a_copyright_window() -> void:
+	var scene: Gen2TitleScene = _scene(RomRegistry.CRYSTAL)
+	assert_eq(scene.scroll_y(), Gen2TitleScene.CRYSTAL_SCY)
+	assert_eq(scene.window_y(), Gen2TitleScene.WINDOW_OFF_Y, "parked off the bottom")
+	_spend(scene, Gen2TitleScene.ENTRANCE_SCX / Gen2TitleScene.ENTRANCE_SCX_STEP + 1)
+	assert_eq(scene.scene(), Gen2TitleScene.SCENE_TIMER)
+	assert_eq(scene.window_y(), Gen2TitleScene.WINDOW_Y)
+	var gold: Gen2TitleScene = _scene(RomRegistry.GOLD)
+	assert_eq(gold.scroll_y(), 0)
+	assert_eq(gold.window_y(), Gen2TitleScene.WINDOW_OFF_Y, "and never draws one")
 
 
 ## `TitleScreenTimer`'s own `ld de`, which is the one value Gold does not share.
@@ -137,14 +156,18 @@ func test_the_timer_running_out_answers_restart() -> void:
 ## last two of which are a sheet on from the first two.
 func test_the_suicune_frame_changes_every_eighth_frame() -> void:
 	var scene: Gen2TitleScene = _scene(RomRegistry.CRYSTAL)
+	# `_TitleScreen`'s own `ld d, $0`, before the iterator has re-pointed the
+	# strip once.
+	assert_eq(scene.suicune_base(), 0x80, "the base the screen is built with")
 	var seen: Array[int] = []
 	for step: int in 4:
-		seen.append(scene.suicune_base())
 		_spend(scene, 8)
+		seen.append(scene.suicune_base())
 	## `.Frames`' four bases are $80, $88, $00 and $08, which are tiles 0, 8, 128
 	## and 136 of the strip: the sheet starts at VRAM tile $80 and the last two
 	## numbers have wrapped a byte.
 	assert_eq(seen, [0x00, 0x08, 0x80, 0x88] as Array[int])
+	_spend(scene, 8)
 	assert_eq(scene.suicune_base(), 0x00, "and then it comes round again")
 	assert_eq(_scene(RomRegistry.GOLD).suicune_base(), -1, "Gold has no Suicune")
 
@@ -155,7 +178,9 @@ func test_the_suicune_frame_changes_every_eighth_frame() -> void:
 ## Measured against a cartridge: at a stride of eight the strip is torn, tiles
 ## from one row of the sheet landing in the next.
 func test_the_suicune_strip_is_six_rows_of_eight() -> void:
-	var placed: Array[Vector3i] = _scene(RomRegistry.CRYSTAL).suicune_tiles()
+	var scene: Gen2TitleScene = _scene(RomRegistry.CRYSTAL)
+	_spend(scene, 1)
+	var placed: Array[Vector3i] = scene.suicune_tiles()
 	assert_eq(placed.size(), Gen2TitleScene.SUICUNE_ROWS * Gen2TitleScene.SUICUNE_COLUMNS)
 	assert_eq(placed[0], Vector3i(6, 12, 0x00))
 	assert_eq(placed[7], Vector3i(13, 12, 0x07), "eight across")

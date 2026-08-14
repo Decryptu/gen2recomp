@@ -40,6 +40,10 @@ const SHADOW_OAM_SPRITES: int = 40
 const ATTR_PALETTE: int = 0x07
 const ATTR_XFLIP: int = 0x20
 const ATTR_YFLIP: int = 0x40
+## `OAM_PRIO`: the background wins wherever its own colour is not 0. Lapras's
+## three sets carry it on every tile from its waterline down, which is what puts
+## the ocean's wave tiles over its body.
+const ATTR_PRIORITY: int = 0x80
 
 ## Which sheet each cutscene puts where: `bg` is what a tile below $80 reads,
 ## `bg_high` what one $80 and up reads, and `obj` what a sprite reads.
@@ -291,9 +295,14 @@ func draw(movie: Gen2GoldSilverIntro) -> Image:
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
 	if movie == null:
 		return image
-	_draw_background(image, movie)
+	var behind: PackedByteArray = _draw_background(image, movie)
+	# The lower OAM index wins a pixel, so a slot only paints where no earlier
+	# one did: Charizard's small fireball sits behind the big one it is spawned
+	# after, and the note behind Pikachu.
+	var taken := PackedByteArray()
+	taken.resize(WIDTH * HEIGHT)
 	for entry: Dictionary in shadow_oam(movie):
-		_draw_sprite(image, movie, entry)
+		_draw_sprite(image, movie, entry, behind, taken)
 	return image
 
 
@@ -332,20 +341,24 @@ func shadow_oam(movie: Gen2GoldSilverIntro) -> Array[Dictionary]:
 				"palette": 1 if attrs & ATTR_PALETTE else 0,
 				"flip_x": bool(attrs & ATTR_XFLIP) != flip_x,
 				"flip_y": bool(attrs & ATTR_YFLIP),
+				"priority": bool(attrs & ATTR_PRIORITY),
 			})
 	return out
 
 
 ## The BG map, sampled through `hSCX` and the scanline's own `hSCY`. Both are
 ## bytes and the map is 256 pixels square, so the sampling wraps rather than
-## clipping.
-func _draw_background(image: Image, movie: Gen2GoldSilverIntro) -> void:
+## clipping. Returns each pixel's own colour index, which is what an `OAM_PRIO`
+## sprite is drawn against.
+func _draw_background(image: Image, movie: Gen2GoldSilverIntro) -> PackedByteArray:
+	var behind := PackedByteArray()
 	var map: PackedByteArray = movie.bg_map()
 	if map.size() < MAP_COLUMNS * MAP_ROWS:
-		return
+		return behind
 	var palette: PackedColorArray = movie.palette()
 	if palette.is_empty():
-		return
+		return behind
+	behind.resize(WIDTH * HEIGHT)
 	var sheets: Dictionary = CUTSCENE_SHEETS.get(movie.cutscene(), {})
 	var low: PackedByteArray = _sheet(String(sheets.get("bg", "")))
 	var high: PackedByteArray = _sheet(String(sheets.get("bg_high", "")))
@@ -364,14 +377,18 @@ func _draw_background(image: Image, movie: Gen2GoldSilverIntro) -> void:
 			if tile >= HIGH_TILE:
 				strip = high
 				index = tile - HIGH_TILE
-			image.set_pixel(
-				x, y, palette[_pixel(strip, index, map_x % TILE, in_tile_y, false, false)]
-			)
+			var pixel: int = _pixel(strip, index, map_x % TILE, in_tile_y, false, false)
+			behind[y * WIDTH + x] = pixel
+			image.set_pixel(x, y, palette[pixel])
+	return behind
 
 
 ## One shadow-OAM entry, off the cutscene's own object sheet. The position is
 ## already the OAM byte, so it is only moved off OAM's own (8, 16) origin.
-func _draw_sprite(image: Image, movie: Gen2GoldSilverIntro, entry: Dictionary) -> void:
+func _draw_sprite(
+	image: Image, movie: Gen2GoldSilverIntro, entry: Dictionary,
+	behind: PackedByteArray, taken: PackedByteArray
+) -> void:
 	var palette: PackedColorArray = movie.object_palette(int(entry["palette"]))
 	if palette.size() <= TRANSPARENT_INDEX:
 		return
@@ -380,7 +397,8 @@ func _draw_sprite(image: Image, movie: Gen2GoldSilverIntro, entry: Dictionary) -
 		_sheet(String((CUTSCENE_SHEETS.get(movie.cutscene(), {}) as Dictionary).get("obj", ""))),
 		palette, int(entry["tile"]),
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
-		bool(entry["flip_x"]), bool(entry["flip_y"]),
+		bool(entry["flip_x"]), bool(entry["flip_y"]), taken,
+		behind if bool(entry.get("priority", false)) else PackedByteArray(),
 		# Only the fire cutscene has `Intro_GetMonFrontpic`'s three pics in
 		# `vTiles0`. The water scene's own sprites cover the same tile numbers,
 		# and Lapras alone spans all three of those runs.
@@ -388,9 +406,14 @@ func _draw_sprite(image: Image, movie: Gen2GoldSilverIntro, entry: Dictionary) -
 	)
 
 
+## [param taken] marks the pixels an earlier slot has already claimed, and
+## [param behind] is the background's own colour indices when the entry carries
+## `OAM_PRIO` and empty otherwise. The claim comes first: a sprite that loses the
+## pixel to the background still wins it against the sprites behind it.
 func _blit_sprite_tile(
 	image: Image, strip: PackedByteArray, palette: PackedColorArray, tile: int,
-	at: Vector2i, flip_x: bool, flip_y: bool, starters: bool
+	at: Vector2i, flip_x: bool, flip_y: bool, taken: PackedByteArray,
+	behind: PackedByteArray, starters: bool
 ) -> void:
 	var starter: Dictionary = _starter_for(tile) if starters else {}
 	for row: int in TILE:
@@ -405,6 +428,12 @@ func _blit_sprite_tile(
 				if not starter.is_empty() \
 				else _pixel(strip, tile, column, row, flip_x, flip_y)
 			if pixel == TRANSPARENT_INDEX:
+				continue
+			var at_pixel: int = y * WIDTH + x
+			if taken[at_pixel] != 0:
+				continue
+			taken[at_pixel] = 1
+			if not behind.is_empty() and behind[at_pixel] != TRANSPARENT_INDEX:
 				continue
 			image.set_pixel(x, y, palette[pixel])
 

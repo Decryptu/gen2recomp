@@ -121,3 +121,30 @@ func test_the_spawn_points_are_byte_coordinates() -> void:
 func test_every_scy_event_is_reachable_from_the_scenes_own_start() -> void:
 	for scy: int in Gen2GoldSilverIntro.SCY_EVENTS:
 		assert_between(int(scy), 0x80, 0xFF)
+
+
+## `Intro_AnimateOceanWaves` copies to `vBGMap0 tile $1e`, which is the map's
+## byte 480 and so the whole of row 15, never the byte $1e that reading the
+## operand as an offset gives. Its four tiles repeat across all thirty-two
+## columns and the set steps with `wIntroFrameCounter2`.
+func test_the_ocean_waves_fill_one_whole_map_row() -> void:
+	var movie: Gen2GoldSilverIntro = Gen2GoldSilverIntro.create(null)
+	for _frame: int in 700:
+		movie.advance_frame()
+	var map: PackedByteArray = movie.bg_map()
+	var first: int = Gen2GoldSilverIntro.WAVE_ROW * Gen2GoldSilverIntro.MAP_COLUMNS
+	for column: int in Gen2GoldSilverIntro.MAP_COLUMNS:
+		assert_between(map[first + column], 0x70, 0x7F)
+		assert_eq(map[first + column] & 0x03, column & 0x03, "four tiles repeated")
+	assert_eq(map[0x1E], 0, "and not the byte $1e the operand reads as an offset")
+
+
+## `IntroScene1`'s `depixel 28, 28` is `%11100000`, which takes colour 1 from
+## colour 0: the shellders and bubbles are white until `.scene3_1`'s
+## `depixel 28, 28, 4, 4` puts the identity order back.
+func test_the_underwater_objects_open_on_a_flooded_first_colour() -> void:
+	var order: int = Gen2GoldSilverIntro.DMG_OBJECT_UNDERWATER
+	var taken: Array[int] = []
+	for colour: int in 4:
+		taken.append((order >> (2 * colour)) & 0x03)
+	assert_eq(taken, [0, 0, 2, 3] as Array[int], "colour 1 comes from colour 0")

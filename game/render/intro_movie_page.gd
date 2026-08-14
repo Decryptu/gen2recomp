@@ -53,6 +53,9 @@ const ATTR_PALETTE: int = 0x07
 const ATTR_BANK1: int = 0x08
 const ATTR_XFLIP: int = 0x20
 const ATTR_YFLIP: int = 0x40
+## `OAM_PRIO`: the background wins wherever its own colour is not 0. Only
+## `.OAMData_IntroSuicuneAway` carries it, on all twenty of its tiles.
+const ATTR_PRIORITY: int = 0x80
 
 const OAM_SETS: Array[Dictionary] = [
 	# 0: SPRITE_ANIM_OAMSET_INTRO_SUICUNE_1 (.OAMData_IntroSuicune1, 36 sprites)
@@ -237,9 +240,13 @@ func draw(movie: Gen2IntroMovie) -> Image:
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
 	if movie == null:
 		return image
-	_draw_background(image, movie)
+	var behind: PackedByteArray = _draw_background(image, movie)
+	# The lower OAM index wins a pixel, so a slot only paints where no earlier
+	# one did.
+	var taken := PackedByteArray()
+	taken.resize(WIDTH * HEIGHT)
 	for entry: Dictionary in shadow_oam(movie):
-		_draw_sprite(image, movie, entry)
+		_draw_sprite(image, movie, entry, behind, taken)
 	return image
 
 
@@ -282,6 +289,7 @@ func shadow_oam(movie: Gen2IntroMovie) -> Array[Dictionary]:
 				"palette": attrs & ATTR_PALETTE,
 				"flip_x": bool(attrs & ATTR_XFLIP) != flip_x,
 				"flip_y": bool(attrs & ATTR_YFLIP) != flip_y,
+				"priority": bool(attrs & ATTR_PRIORITY),
 				"bank1": bool(sprite["bank1"]),
 			})
 	return out
@@ -290,11 +298,13 @@ func shadow_oam(movie: Gen2IntroMovie) -> Array[Dictionary]:
 ## The BG map, sampled through `hSCY` and the scanline's own `hSCX`. Both are
 ## bytes and the map is 256 pixels square, so the sampling wraps rather than
 ## clipping.
-func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
+func _draw_background(image: Image, movie: Gen2IntroMovie) -> PackedByteArray:
+	var behind := PackedByteArray()
 	var map: PackedByteArray = movie.bg_map()
 	var attr: PackedByteArray = movie.bg_attr()
 	if map.size() < RomLayout.INTRO_MAP_BYTES:
-		return
+		return behind
+	behind.resize(WIDTH * HEIGHT)
 	var screen: PackedByteArray = movie.screen_tilemap()
 	var palettes: Array[PackedColorArray] = []
 	for slot: int in Gen2IntroMovie.BG_PALETTES:
@@ -344,12 +354,17 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> void:
 				strip, index, map_x % TILE, in_tile_y,
 				bool(byte & ATTR_XFLIP), bool(byte & ATTR_YFLIP)
 			)
+			behind[y * WIDTH + x] = pixel
 			image.set_pixel(x, y, palette[pixel])
+	return behind
 
 
 ## One shadow-OAM entry, off the sheet its struct was loaded into. The position
 ## is already the OAM byte, so it is only moved off OAM's own (8, 16) origin.
-func _draw_sprite(image: Image, movie: Gen2IntroMovie, entry: Dictionary) -> void:
+func _draw_sprite(
+	image: Image, movie: Gen2IntroMovie, entry: Dictionary,
+	behind: PackedByteArray, taken: PackedByteArray
+) -> void:
 	var tile: int = int(entry["tile"])
 	var strip: PackedByteArray = _sheet(
 		movie, movie.sheet("obj_bank1" if bool(entry["bank1"]) else "obj")
@@ -373,13 +388,19 @@ func _draw_sprite(image: Image, movie: Gen2IntroMovie, entry: Dictionary) -> voi
 	_blit_sprite_tile(
 		image, strip, palette, tile,
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
-		bool(entry["flip_x"]), bool(entry["flip_y"])
+		bool(entry["flip_x"]), bool(entry["flip_y"]), taken,
+		behind if bool(entry.get("priority", false)) else PackedByteArray()
 	)
 
 
+## [param taken] marks the pixels an earlier slot has already claimed, and
+## [param behind] is the background's own colour indices when the entry carries
+## `OAM_PRIO` and empty otherwise. The claim comes first: a sprite that loses the
+## pixel to the background still wins it against the sprites behind it.
 func _blit_sprite_tile(
 	image: Image, strip: PackedByteArray, palette: PackedColorArray, tile: int,
-	at: Vector2i, flip_x: bool, flip_y: bool
+	at: Vector2i, flip_x: bool, flip_y: bool, taken: PackedByteArray,
+	behind: PackedByteArray
 ) -> void:
 	for row: int in TILE:
 		var y: int = at.y + row
@@ -391,6 +412,12 @@ func _blit_sprite_tile(
 				continue
 			var pixel: int = _pixel(strip, tile, column, row, flip_x, flip_y)
 			if pixel == TRANSPARENT_INDEX:
+				continue
+			var at_pixel: int = y * WIDTH + x
+			if taken[at_pixel] != 0:
+				continue
+			taken[at_pixel] = 1
+			if not behind.is_empty() and behind[at_pixel] != TRANSPARENT_INDEX:
 				continue
 			image.set_pixel(x, y, palette[pixel])
 

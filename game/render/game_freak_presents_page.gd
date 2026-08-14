@@ -121,8 +121,12 @@ func draw(phase: Gen2GameFreakPresents) -> Image:
 	if phase != null:
 		_draw_words(indices, width, phase)
 	var image: Image = Gen2PicImage.from_indices(indices, width, height, _background)
+	# The lower OAM index wins a pixel, so a slot only paints where no earlier
+	# one did.
+	var taken := PackedByteArray()
+	taken.resize(width * height)
 	for entry: Dictionary in shadow_oam(phase):
-		_draw_sprite(image, phase, entry)
+		_draw_sprite(image, phase, entry, taken)
 	return image
 
 
@@ -186,7 +190,8 @@ func _draw_words(
 ## One shadow-OAM entry, drawn through the object palette whose first colour is
 ## transparent.
 func _draw_sprite(
-	image: Image, phase: Gen2GameFreakPresents, entry: Dictionary
+	image: Image, phase: Gen2GameFreakPresents, entry: Dictionary,
+	taken: PackedByteArray
 ) -> void:
 	# `dbsprite`'s attribute byte names the object palette. Only Gold's logo is
 	# drawn through palette 1, which is the one the rotation moves.
@@ -197,7 +202,7 @@ func _draw_sprite(
 		image, palette,
 		int(entry["tile"]) - _vram_base(),
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
-		bool(entry["flip_x"]), bool(entry["flip_y"])
+		bool(entry["flip_x"]), bool(entry["flip_y"]), taken
 	)
 
 
@@ -306,9 +311,10 @@ func _blit_tile(
 
 ## One object tile onto the drawn screen, clipped per axis so a sprite hanging
 ## off an edge cannot wrap onto the opposite one.
+## [param taken] marks the pixels an earlier slot has already claimed.
 func _blit_sprite_tile(
 	image: Image, palette: PackedColorArray, tile: int, at: Vector2i,
-	flip_x: bool, flip_y: bool
+	flip_x: bool, flip_y: bool, taken: PackedByteArray
 ) -> void:
 	var tiles: PackedByteArray = _sprite_tiles
 	var stride: int = _sprite_width
@@ -340,4 +346,8 @@ func _blit_sprite_tile(
 			var value: int = tiles[from]
 			if value == TRANSPARENT_INDEX or value >= palette.size():
 				continue
+			var at_pixel: int = target_y * image.get_width() + target_x
+			if taken[at_pixel] != 0:
+				continue
+			taken[at_pixel] = 1
 			image.set_pixel(target_x, target_y, palette[value])

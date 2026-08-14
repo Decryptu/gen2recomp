@@ -45,6 +45,14 @@ const ENTRANCE_SCX_STEP: int = 4
 ## The interlaced band is the logo's height, and only its odd lines take the
 ## opposite sign.
 const ENTRANCE_LINES: int = 8 * 10
+## `_TitleScreen`'s own `ld a, 8 / ldh [hSCY]`, which Gold and Silver's zeroes
+## instead: Crystal's whole background sits eight pixels up the BG map.
+const CRYSTAL_SCY: int = 8
+## `hWY`. `_TitleScreen` parks the copyright window off the bottom at -112 and
+## `TitleScreenEntrance.done` brings it to $88, which is the one row of
+## `vBGMap1` the screen ever shows.
+const WINDOW_OFF_Y: int = 144
+const WINDOW_Y: int = 0x88
 const CRYSTAL_START_Y: int = -0x22
 const CRYSTAL_END_Y: int = 6 + 2 * Gen2Tiles.TILE_HEIGHT
 const CRYSTAL_STEP: int = 2
@@ -53,6 +61,9 @@ const CRYSTAL_STEP: int = 2
 ## changes on every eighth, walking `.Frames`' four bases.
 const SUICUNE_FRAME_MASK: int = 0b111
 const SUICUNE_FRAMES: Array[int] = [0x80, 0x88, 0x00, 0x08]
+## `_TitleScreen`'s own `ld d, $0`, which is the strip the screen opens on
+## before the iterator has re-pointed it once.
+const SUICUNE_FIRST_BASE: int = 0x00
 ## `LoadSuicuneFrame` draws six rows of eight from whichever base it is handed.
 ## Its `d` rises by one across each of the eight columns and then by eight more
 ## at the end of the row, so a row starts sixteen tiles past the one above it:
@@ -169,6 +180,10 @@ var _timer: int = 0
 var _scx: int = 0
 var _crystal_y: int = 0
 var _suicune_counter: int = 0
+## `LoadSuicuneFrame`'s live base, which the iterator re-points rather than the
+## page deriving it: the counter is read before it is raised, so the write lands
+## a frame later than a derivation from the raised counter would put it.
+var _suicune_base: int = SUICUNE_FIRST_BASE
 var _bird_var: int = 0
 var _bird_frame: int = 0
 var _selected: int = -1
@@ -219,6 +234,19 @@ func scroll_x() -> int:
 	return _scx
 
 
+## `hSCY`, a constant on each profile.
+func scroll_y() -> int:
+	return CRYSTAL_SCY if _profile == RomRegistry.CRYSTAL else 0
+
+
+## `hWY`: the row the copyright window starts on, or off the bottom of the
+## screen while it is parked there. Gold and Silver draw no window at all.
+func window_y() -> int:
+	if _profile != RomRegistry.CRYSTAL or _scene == SCENE_ENTRANCE:
+		return WINDOW_OFF_Y
+	return WINDOW_Y
+
+
 ## `wLYOverrides`, one signed scroll per scanline, empty when nothing is
 ## overriding `hSCX`.
 ##
@@ -232,8 +260,18 @@ func line_offsets() -> PackedInt32Array:
 	if _profile == RomRegistry.CRYSTAL:
 		if _scene != SCENE_ENTRANCE or _scx == 0:
 			return out
+		# `wLYOverrides` is read by the LCD interrupt where it stands rather than
+		# copied at VBlank, so the screen this state's sprites reach carries the
+		# *next* pass's fill: `TitleScreenEntrance` writes it before the frame it
+		# opened is drawn. Everything else here is a frame behind it.
+		var scx: int = _scx - ENTRANCE_SCX_STEP
+		# Only the logo's own eighty lines are written; `_TitleScreen` zeroed
+		# the rest of the buffer and nothing rewrites them, so the strip below
+		# the logo stands still while the logo comes in.
+		out.resize(Gen2Screen.HEIGHT)
+		out.fill(0)
 		for line: int in ENTRANCE_LINES:
-			out.append(_scx if line % 2 == 0 else -_scx)
+			out[line] = scx if line % 2 == 0 else -scx
 		return out
 	out.resize(CLOUD_FIRST_LINE + CLOUD_LINES)
 	out.fill(0)
@@ -281,7 +319,10 @@ func advance_frame(held: Array = []) -> void:
 ## every frame of every scene rather than inside one.
 func _advance_animation() -> void:
 	if _profile == RomRegistry.CRYSTAL:
-		_suicune_counter = (_suicune_counter + 1) & 0xFF
+		var value: int = _suicune_counter
+		_suicune_counter = (value + 1) & 0xFF
+		if value & SUICUNE_FRAME_MASK == 0:
+			_suicune_base = SUICUNE_FRAMES[(value >> 3) & 0x03]
 		return
 	# The struct's own VAR1, counted the way each profile counts it. A byte, so
 	# Silver's countdown wraps rather than going negative.
@@ -427,8 +468,7 @@ static func _chord(held: Array, buttons: Array) -> bool:
 func suicune_base() -> int:
 	if _profile != RomRegistry.CRYSTAL:
 		return -1
-	var base: int = SUICUNE_FRAMES[(_suicune_counter >> 3) & 0x03]
-	return (base - SUICUNE_VRAM_FIRST_TILE) & 0xFF
+	return (_suicune_base - SUICUNE_VRAM_FIRST_TILE) & 0xFF
 
 
 ## Where `LoadSuicuneFrame` writes, and how much: six rows of eight tiles read

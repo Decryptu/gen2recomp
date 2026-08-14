@@ -50,6 +50,11 @@ const LY_FLAT_LINES: int = 0x10
 const LY_SINE_LINES: int = 0x80
 const LY_SINE_AMPLITUDE: int = 4
 
+## `vBGMap0 tile $1e` is `vBGMap0 + TILE_SIZE * $1e` (`macros/gfx.asm`), which is
+## byte 480 of the map: the whole of row 15, and never the byte $1e that reading
+## the operand as an offset gives.
+const WAVE_ROW: int = 15
+
 ## The sounds and songs the movie asks for.
 const MUSIC_NONE: int = 0x00
 const MUSIC_GS_OPENING: int = 0x52
@@ -64,6 +69,10 @@ const DMG_IDENTITY: int = 0xE4
 const DMG_SILHOUETTE: int = 0x3F
 ## `%11111111`, the object order the silhouette scene hides its sprites behind.
 const DMG_OBJECT_HIDDEN: int = 0xFF
+## `%11100000`, which `IntroScene1`'s `depixel 28, 28` assembles to: colour 1 is
+## taken from colour 0, so the shellders and the bubbles are white underwater
+## until `.scene3_1`'s `depixel 28, 28, 4, 4` puts the order back.
+const DMG_OBJECT_UNDERWATER: int = 0xE0
 
 ## `IntroScene5.palettes` and `IntroScene9.palettes`, the two water and grass
 ## fade-outs, and `IntroScene16.palettes`, the fireball's. Each is walked by a
@@ -320,11 +329,14 @@ func scroll() -> Vector2i:
 
 
 ## The `hSCY` for one scanline, which is `wLYOverrides` while `hLCDCPointer`
-## points at rSCY and plain `hSCY` otherwise.
+## points at rSCY and plain `hSCY` otherwise. `LCD` fires on `STAT_MODE_0` and
+## writes the entry `rLY` names, so the line after it is the one drawn with it;
+## `VBlank_Cutscene` writes entry zero, which is why the first two lines share
+## it.
 func scroll_y_at(line: int) -> int:
 	if not _ly_active or line < 0 or line >= _ly.size():
 		return _scy
-	return _ly[line]
+	return _ly[maxi(line - 1, 0)]
 
 
 ## Which cutscene's sheets are loaded, as the `RomLayout.GS_INTRO_SECTION` name
@@ -470,8 +482,8 @@ func _scene_water_setup() -> void:
 	_sprite_flag = false
 	_load_layout(CUTSCENE_WATER)
 	_bgp = DMG_IDENTITY
-	_obp0 = DMG_IDENTITY
-	_obp1 = DMG_IDENTITY
+	_obp0 = DMG_OBJECT_UNDERWATER
+	_obp1 = DMG_OBJECT_UNDERWATER
 	_init_shellders()
 	_emit(&"play_music", {"music": MUSIC_GS_OPENING})
 	_delay = 9
@@ -801,15 +813,14 @@ func _update_tilemap_and_bg_map() -> void:
 
 
 ## `Intro_AnimateOceanWaves`: four tiles cycled through four sets, copied over
-## the BG map from `vBGMap0 tile $1e`. The request the source queues for VBlank
-## is applied here directly, which lands the same bytes on the same frame.
+## the whole of [constant WAVE_ROW]. The request the source queues for VBlank is
+## applied here directly, which lands the same bytes on the same frame.
 func _animate_ocean_waves() -> void:
 	if _counter2 & 0x03 == 0x03:
 		return
 	var set: int = (_counter2 & 0x30) >> 4
-	for index: int in 32:
-		var cell: int = (0x1E + index) & (MAP_BYTES - 1)
-		_bg_map[cell] = 0x70 + set * 4 + (index & 0x03)
+	for column: int in MAP_COLUMNS:
+		_bg_map[WAVE_ROW * MAP_COLUMNS + column] = 0x70 + set * 4 + (column & 0x03)
 
 
 ## `Intro_InitSineLYOverrides`: `BattleAnim_Sine_e` at amplitude 4, one entry per
