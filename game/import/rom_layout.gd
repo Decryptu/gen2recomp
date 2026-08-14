@@ -826,6 +826,64 @@ const INTRO_GRASS_FIRST_TILE: int = 0x09
 ## The blank the two Suicune scenes park in the sprite tile the dict points at.
 const INTRO_GRASS_BLANK: String = "grass_4"
 
+## `GoldSilverIntro` (pokegold/engine/movie/intro.asm), the movie Gold and Silver
+## run where Crystal runs `CrystalIntro`: seventeen scenes over water, grass and
+## fire rather than twenty-eight over Unown and Suicune.
+##
+## Its art section is the same shape as Crystal's, contiguous and
+## [constant INTRO_ENTRY_ALIGN]-aligned, so the one pinned address walks all
+## eleven entries. The names are pret's own file names, which are also the INCBIN
+## order the walk depends on: `1` is the sheet a scene puts at `vTiles2` and `2`
+## the one it puts at `vTiles0`, and `fire2` is the third at `vTiles1`.
+const GS_INTRO_SCENES: int = 17
+const GS_INTRO_SECTION: Array[Array] = [
+	["water1", "lz", 128],
+	["water_tilemap", "raw_bytes", 512],
+	["water_meta", "raw_bytes", 272],
+	["water2", "lz", 128],
+	["grass1", "lz", 48],
+	["grass_tilemap", "raw_bytes", 256],
+	["grass_meta", "raw_bytes", 112],
+	["grass2", "lz", 144],
+	["fire1", "lz", 128],
+	["fire2", "lz", 80],
+	["fire3", "lz", 100],
+]
+## `Intro_DrawBackground` reads a 16-wide map of 2x2 metatiles through
+## `Intro_Draw2x2Tiles`, which looks each byte up in the `.bin` four bytes at a
+## time. `TILEMAP_WIDTH` is 32 (constants/hardware.inc), so a full draw is
+## sixteen metatiles across and sixteen down, filling the whole BG map rather
+## than the twenty visible columns.
+const GS_INTRO_META_COLUMNS: int = 16
+const GS_INTRO_META_BYTES: int = 4
+## `ld de, Intro_WaterTilemap + 15 tiles`: the water scene starts fifteen
+## metatile rows down its own map and scrolls up towards the surface, while the
+## grass scene starts at its map's first row.
+const GS_INTRO_WATER_FIRST_ROW: int = 15
+
+## `Intro_LoadMagikarpPalettes`' inline `.MagikarpBGPal` and `.MagikarpOBPal`,
+## and `_CGB_GSIntro.ShellderLaprasScene`'s `gfx/intro/shellder_lapras_bg.pal`
+## and `_ob.pal`. Each pair is contiguous, so one pinned address per pair walks
+## both; the object run is two palettes and every other one is a single palette.
+const GS_INTRO_MAGIKARP_PALETTES: int = 2
+const GS_INTRO_SHELLDER_LAPRAS_PALETTES: int = 3
+
+## `PredefPals` (gfx/sgb/predef.pal), eight bytes an entry. The three the movie
+## reads are contiguous, so the run's own base is what locates them, and that
+## base is already pinned: `game_freak_presents.object_palette` is
+## `PREDEFPAL_GAMEFREAK_LOGO_OB`, index 77 of this table, which is what
+## `verify_gs_intro` checks the base against for nothing.
+const GS_INTRO_PREDEF_SIZE: int = INTRO_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+const GS_INTRO_PREDEF: Dictionary = {
+	"jigglypuff_pikachu_bg": 56,
+	"jigglypuff_pikachu_ob": 57,
+	"starters_transition": 58,
+	# `PalPacket_Pack + 1` is PACK, ROUTES, ROUTES, ROUTES, and `WipeAttrmap`
+	# leaves every tile on palette 0, so PACK is the only one the screen shows.
+	"pack": 60,
+}
+const GS_INTRO_PREDEF_GAMEFREAK_LOGO_OB: int = 77
+
 ## `OakRatings` (data/events/pokedex_ratings.asm): nineteen `rating` rows of a
 ## caught-count threshold, an sfx word and a text pointer, which `FindOakRating`
 ## walks until the count fits. The five texts around it are located from the
@@ -1364,10 +1422,22 @@ const GOLD_SILVER: Dictionary = {
 		"crystal": -1,
 		"palettes": -1,
 	},
-	# `GoldSilverIntro` is a different movie again (water, grass and fire rather
-	# than Unown and Suicune) and is not imported yet; see HANDOFF.md for the
-	# addresses its own section sits at.
+	# `CrystalIntro` is Crystal's; Gold and Silver run `GoldSilverIntro` below.
 	"intro_movie": {"section": -1, "fade": -1, "unown_pals": -1},
+	# `GoldSilverIntro`'s art section. `Intro_WaterGFX1` is the only pinned
+	# address in it: the section is contiguous and sixteen-byte aligned, so the
+	# walk in `GS_INTRO_SECTION` reaches the other ten, and all eleven reproduce
+	# pret's own build byte for byte. `magikarp_palettes` and
+	# `shellder_lapras_palettes` are INCLUDEd inside the code rather than in that
+	# section; each is a unique byte run whose object half sits directly behind
+	# it. `predef_pals` is `PredefPals` itself, checked against the
+	# `game_freak_presents.object_palette` this layout already pins.
+	"gs_intro": {
+		"section": 0xE54E8,
+		"magikarp_palettes": 0x9126,
+		"shellder_lapras_palettes": 0x96E1,
+		"predef_pals": 0xA265,
+	},
 	"intro_player": {"pic_male": -1, "pic_female": -1},
 	"gender_screen": {"tile": -1, "palette": -1},
 	# `ShrinkPlayer`'s two intermediate pictures. Located from the routine's own
@@ -1667,6 +1737,14 @@ const CRYSTAL: Dictionary = {
 	# inside the code rather than in that section; both are unique byte runs, and
 	# `unown_1.pal` pins `unown_2.pal` directly behind it.
 	"intro_movie": {"section": 0xE555D, "fade": 0xE519C, "unown_pals": 0xE538D},
+	# Crystal ships no `GoldSilverIntro`. Nested the way trainer_card is, so the
+	# -1s stay out of the flat offset checks.
+	"gs_intro": {
+		"section": -1,
+		"magikarp_palettes": -1,
+		"shellder_lapras_palettes": -1,
+		"predef_pals": -1,
+	},
 	# `engine/gfx/player_gfx.asm`: ChrisPic and KrisPic. Located by converting
 	# the pinned 56x56 PNGs with rgbgfx --columns and matching the full runs.
 	"intro_player": {"pic_male": 0x888A9, "pic_female": 0x88BB9},
@@ -1849,6 +1927,12 @@ static func for_id(id: StringName) -> Dictionary:
 			presents["gfx"] = 0xE49C9
 			presents["stars"] = 0xE4AA9
 			silver["game_freak_presents"] = presents
+			# `GoldSilverIntro`'s art sits in the same bank on both, the same 440
+			# bytes apart as the splash graphics. Every other address the movie
+			# reads is identical on the two cartridges, and so is the art itself.
+			var gs_intro: Dictionary = (silver["gs_intro"] as Dictionary).duplicate()
+			gs_intro["section"] = 0xE5330
+			silver["gs_intro"] = gs_intro
 			# Silver's logo bottom sits at Gold's address and its top 34 bytes
 			# later. Its trail is four tiles rather than eight, which is why the
 			# Lugia behind it starts 64 bytes earlier: `TitleScreen` copies 8
