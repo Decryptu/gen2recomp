@@ -149,7 +149,7 @@ func render() -> Image:
 	if _map == null:
 		return out
 	for object: Array in [
-		[_player_image(), _map.player_landmark], [_cursor_image(), _map.cursor],
+		[_cursor_image(), _map.cursor], [_player_image(), _map.player_landmark],
 	]:
 		if not _has_landmark(int(object[1])):
 			continue
@@ -169,6 +169,9 @@ func _process(delta: float) -> void:
 		advance_frame()
 
 
+## The cursor is built before the player icon so the player draws over it:
+## `_TownMap` spawns the player's struct first, which takes the lower shadow-OAM
+## indices, and a lower index is the one that shows.
 func _build() -> void:
 	var screen: Gen2Screen = SCREEN_SCENE.instantiate() as Gen2Screen
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -179,8 +182,8 @@ func _build() -> void:
 	_field.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.display(_field)
 	_background = _sprite()
-	_player_icon = _sprite()
 	_cursor_icon = _sprite()
+	_player_icon = _sprite()
 
 
 func _sprite() -> TextureRect:
