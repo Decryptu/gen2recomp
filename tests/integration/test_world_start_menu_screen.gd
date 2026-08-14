@@ -875,6 +875,48 @@ func test_pokedex_opens_from_the_start_menu_and_b_reopens_the_start_menu() -> vo
 	assert_true(_world_screen._objects_may_move())
 
 
+## The entry screen's AREA, which is `Pokedex_GetArea` rather than a panel: it
+## opens the cartridge's own region map over the dex and A or B hands the entry
+## back. The world screen carries the release the map's SELECT reads.
+func test_the_dex_entry_screens_area_button_opens_the_region_map() -> void:
+	await _open_world()
+	var state: Gen2WorldState = _world_screen._world.state
+	state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	state.set_species_seen(Fixture.TRAINER_SPECIES)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	## Only a seen species opens an entry, and the fixture has one.
+	for _row: int in RomLayout.SPECIES_COUNT:
+		if dex.get("_dex").selected_species() == Fixture.TRAINER_SPECIES:
+			break
+		dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.ENTRY)
+
+	## `DexEntryScreen_ArrowCursorData`'s second position.
+	dex.handle_button(Gen2Button.RIGHT)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.AREA)
+	var area: Gen2TownMapScreen = dex.get("_area")
+	assert_eq(area.current_nests(), [Fixture.MAP_LANDMARK], "the fixture's one grass map")
+
+	_world_screen.press_button(Gen2Button.SELECT)
+	assert_eq(area.shadow_oam(), Gen2TownMapScreen.OAM_PLAYER)
+	## The release is not a redraw: `.BlinkNestIcons` writes shadow OAM on every
+	## sixteenth frame and the player icon stands until it does.
+	dex.release_button(Gen2Button.SELECT)
+	for _frame: int in Gen2TownMapScreen.NEST_BLINK_FRAMES:
+		if area.shadow_oam() != Gen2TownMapScreen.OAM_PLAYER:
+			break
+		area.advance_frame()
+	assert_ne(area.shadow_oam(), Gen2TownMapScreen.OAM_PLAYER)
+
+	_world_screen.press_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.ENTRY)
+	assert_not_null(_world_screen._pokedex_host, "the dex is still up behind it")
+
+
 ## A mode chosen on the OPTION screen is written back to wLastDexMode, which is
 ## saved player data, so the next opening starts there.
 func test_the_chosen_dex_mode_survives_closing_the_dex() -> void:

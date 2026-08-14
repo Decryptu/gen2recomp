@@ -7,7 +7,8 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_hall_of_fame.gd -- crystal /tmp/hof.png [page]
 ##
 ## [page] is how many times to advance before the capture, so 0 is the first
-## party member and the last page is the player's own.
+## party member and the last pages are the player's own panel with each box
+## `ProfOaksPCRating` prints into it.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## Enough frames for the scene to lay out and the overlay to draw once.

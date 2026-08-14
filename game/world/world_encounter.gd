@@ -18,6 +18,10 @@ const METHOD_HEADBUTT: StringName = &"headbutt"
 ## RockMonEncounter's own method, which reads no rate and no slot table either.
 const METHOD_ROCK_SMASH: StringName = &"rock_smash"
 
+## `FindNest` calls `.RoamMon1` and `.RoamMon2` and nothing after them, so Gold
+## and Silver's third roamer has no nest.
+const ROAM_NEST_MONS: int = 2
+
 const SOURCE_NORMAL: StringName = &"normal"
 const SOURCE_SWARM: StringName = &"swarm"
 const SOURCE_ROAMING: StringName = &"roaming"
@@ -198,6 +202,65 @@ static func _wild_result(
 		"forced": forced,
 		"values": {"kind": &"wild", "pokemon": species, "level": level},
 	}
+
+
+## `FindNest`: every landmark one region holds [param species] at, in the order
+## its own tables name them and each landmark once. [param region] is the cache's
+## name for `FindNest`'s `e`, and [param roaming_mons] the live
+## [method Gen2WorldState.roaming_mons].
+##
+## Neither swarm table is read. Only the Johto walk reads the roamers, and only
+## `wRoamMon1` and `wRoamMon2`, so Gold and Silver's third never appears.
+static func nests(
+	data: GameData, species: int, region: String, roaming_mons: Array = []
+) -> Array:
+	var out: Array = []
+	if data == null or species < 1:
+		return out
+	for method: StringName in [METHOD_GRASS, &"water"]:
+		for row: Dictionary in data.world_encounter_region_rows(method, region):
+			if _holds_species(row, species):
+				_append_nest(out, data, String(row.get("map", "")))
+	if region == Gen2TownMap.region_name(Gen2TownMap.REGION_JOHTO):
+		for index: int in mini(ROAM_NEST_MONS, roaming_mons.size()):
+			var mon: Dictionary = roaming_mons[index]
+			if int(mon.get("species", 0)) != species:
+				continue
+			_append_nest(out, data, "%d:%d" % [
+				int(mon.get("map_group", 0)), int(mon.get("map_number", 0)),
+			])
+	return out
+
+
+## `.SearchMapForMon` over every slot the record carries: `NUM_GRASSMON * 3`
+## walks the three times of day as one run, and water's own three follow.
+static func _holds_species(row: Dictionary, species: int) -> bool:
+	var slots: Variant = row.get("slots", [])
+	if not slots is Array:
+		return false
+	for entry: Variant in slots as Array:
+		if entry is Array:
+			for slot: Variant in entry as Array:
+				if slot is Dictionary and int((slot as Dictionary).get("species", 0)) == species:
+					return true
+		elif entry is Dictionary and int((entry as Dictionary).get("species", 0)) == species:
+			return true
+	return false
+
+
+## `.AppendNest`: `GetWorldMapLocation` for the map, appended unless the list
+## already holds it. `LANDMARK_SPECIAL` is zero and the list it searches is
+## zero-filled, so a map with no landmark of its own always reports a hit and is
+## never appended.
+static func _append_nest(out: Array, data: GameData, map_key: String) -> void:
+	var parts: PackedStringArray = map_key.split(":")
+	if parts.size() != 2:
+		return
+	var map: Gen2WorldMap = data.world_map(int(parts[0]), int(parts[1]))
+	if map == null or map.location == Gen2WorldRadio.LANDMARK_SPECIAL:
+		return
+	if not out.has(map.location):
+		out.append(map.location)
 
 
 static func _rate(record: Dictionary, method: StringName, time_of_day: int) -> int:

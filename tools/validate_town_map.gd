@@ -11,8 +11,9 @@ extends SceneTree
 ## The real-cartridge counterpart to tests/unit/test_town_map.gd and
 ## test_town_map_page.gd, which use a synthetic cache. What only a real cache can
 ## say is that the 96 landmarks and the two 360-cell maps decoded, that the
-## Gold/Silver split is exactly the one `BATTLE TOWER` causes, and that every
-## landmark's icon lands on the screen it is drawn on.
+## Gold/Silver split is exactly the one `BATTLE TOWER` causes, that every
+## landmark's icon lands on the screen it is drawn on, and that `FindNest` keeps
+## each region's own wild tables over all 251 species.
 ##
 ##   Godot --headless --path . -s res://tools/validate_town_map.gd
 
@@ -36,6 +37,10 @@ const UNBROKEN_NAME: int = 2
 const ICON_ORIGIN: int = Gen2TownMapScreen.ICON_ORIGIN
 const LANDMARK_SPECIAL: int = 0
 
+## `wShadowOAMEnd - wShadowOAM` in sprites, which is what `.nestloop` would run
+## past if a species were found at more landmarks than the hardware has objects.
+const SHADOW_OAM_SPRITES: int = 40
+
 var _failures: PackedStringArray = []
 
 
@@ -51,6 +56,7 @@ func _initialize() -> void:
 		_verify_palettes(game_id, data, crystal)
 		_verify_cursor_walk(game_id, data, crystal)
 		_verify_page(game_id, data, crystal)
+		_verify_nests(game_id, data, crystal)
 	_finish()
 
 
@@ -218,7 +224,8 @@ func _verify_page(game_id: StringName, data: GameData, crystal: bool) -> void:
 			"%s: the %s strip is not %d tiles." % [game_id, sheet[0], int(sheet[1])]
 		)
 	for screen: StringName in [
-		Gen2TownMap.SCREEN_TOWN_MAP, Gen2TownMap.SCREEN_POKEGEAR_CARD
+		Gen2TownMap.SCREEN_TOWN_MAP, Gen2TownMap.SCREEN_POKEGEAR_CARD,
+		Gen2TownMap.SCREEN_DEX_AREA,
 	]:
 		for region: String in ["johto", "kanto"]:
 			var landmark: int = BROKEN_NAME if region == "johto" \
@@ -237,6 +244,65 @@ func _verify_page(game_id: StringName, data: GameData, crystal: bool) -> void:
 			)
 
 
+## `FindNest` over the whole species range, which is the only sweep that can say
+## the merged encounter tables kept their regions: a Johto walk that reached a
+## Kanto row would put a nest on the wrong map.
+func _verify_nests(game_id: StringName, data: GameData, crystal: bool) -> void:
+	_check(
+		data.tile_indices("dex_nest_icon").size()
+			== RomLayout.DEX_NEST_ICON_TILES * Gen2Tiles.TILE_PIXELS,
+		"%s: the dex nest icon is not one tile." % game_id
+	)
+	var kanto_first: int = Gen2WorldRadio.kanto_landmark(crystal)
+	var roaming: Array = data.world_roaming_mons()
+	var deepest: int = 0
+	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		for region: int in Gen2TownMap.REGION_NAMES.size():
+			var list: Array = Gen2WorldEncounter.nests(
+				data, species, Gen2TownMap.region_name(region), roaming
+			)
+			deepest = maxi(deepest, list.size())
+			var seen: Dictionary = {}
+			for landmark: int in list:
+				var in_kanto: bool = landmark >= kanto_first
+				if not _check(
+					landmark != LANDMARK_SPECIAL and in_kanto == (region == Gen2TownMap.REGION_KANTO)
+						and not seen.has(landmark),
+					"%s: species %d's %s nests name landmark %d." % [
+						game_id, species, Gen2TownMap.region_name(region), landmark,
+					]
+				):
+					return
+				seen[landmark] = true
+	# `.nestloop` writes straight into shadow OAM with no bound of its own, so a
+	# species over forty landmarks would run past it. None comes close.
+	_check(
+		deepest <= SHADOW_OAM_SPRITES,
+		"%s: a species nests at %d landmarks, past shadow OAM's %d." % [
+			game_id, deepest, SHADOW_OAM_SPRITES,
+		]
+	)
+	# `.RoamMon1` and `.RoamMon2` put a roamer on whatever map it is standing on,
+	# and only in Johto. There is no `.RoamMon3`, so Gold and Silver's Suicune
+	# has no nest at all.
+	for index: int in roaming.size():
+		var mon: Dictionary = roaming[index]
+		var species: int = int(mon["species"])
+		var map: Gen2WorldMap = data.world_map(int(mon["map_group"]), int(mon["map_number"]))
+		var wanted: Array = [] if index >= Gen2WorldEncounter.ROAM_NEST_MONS \
+			else [map.location]
+		_check(
+			Gen2WorldEncounter.nests(data, species, "johto", roaming) == wanted,
+			"%s: roamer %d (species %d) does not nest on %s." % [
+				game_id, index, species, str(wanted),
+			]
+		)
+		_check(
+			Gen2WorldEncounter.nests(data, species, "kanto", roaming).is_empty(),
+			"%s: roamer %d (species %d) nests in Kanto." % [game_id, index, species]
+		)
+
+
 func _check(condition: bool, message: String) -> bool:
 	if not condition:
 		_fail(message)
@@ -251,8 +317,8 @@ func _finish() -> void:
 	if _failures.is_empty():
 		print(
 			"PASS town map: the landmark tables and their profile split, both region "
-			+ "maps, the palette map and its two city palettes, the cursor windows and "
-			+ "both frames verified."
+			+ "maps, the palette map and its two city palettes, the cursor windows, all "
+			+ "three frames and every species' nests verified."
 		)
 		quit(0)
 		return

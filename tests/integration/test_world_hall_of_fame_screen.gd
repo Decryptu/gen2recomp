@@ -9,6 +9,10 @@ const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
 
 const PLAYER_CELL: Vector2i = Vector2i(2, 2)
 
+## `ProfOaksPCRating`'s two texts print into the player's panel, one box each at
+## the fixture's short lengths.
+const RATING_PAGES: int = 2
+
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
 
@@ -53,7 +57,7 @@ func test_the_overlay_opens_with_one_page_per_party_member_and_the_player() -> v
 	_world_screen.open_hall_of_fame()
 	await get_tree().process_frame
 	assert_not_null(_host())
-	assert_eq(_host().remaining(), 3)
+	assert_eq(_host().remaining(), 2 + RATING_PAGES)
 	assert_eq(StringName(_host().current_page()["kind"]), Gen2HallOfFame.PAGE_MON)
 
 
@@ -73,13 +77,13 @@ func test_a_key_walks_the_pages_and_the_last_one_closes_the_overlay() -> void:
 	await _open_world(1)
 	_world_screen.open_hall_of_fame()
 	await get_tree().process_frame
-	assert_eq(_host().remaining(), 2)
+	assert_eq(_host().remaining(), 1 + RATING_PAGES)
 
 	_host().handle_button(Gen2Button.A)
 	assert_eq(StringName(_host().current_page()["kind"]), Gen2HallOfFame.PAGE_PLAYER)
-	assert_eq(_host().remaining(), 1)
+	assert_eq(_host().remaining(), RATING_PAGES)
 
-	_host().handle_button(Gen2Button.A)
+	_advance_to_the_end()
 	await get_tree().process_frame
 	assert_null(_world_screen._hall_of_fame_host)
 	assert_true(_world_screen.move_player(Vector2i.DOWN))
@@ -104,8 +108,7 @@ func test_closing_the_overlay_writes_the_world_snapshot() -> void:
 	save.world = null
 	_world_screen.open_hall_of_fame()
 	await get_tree().process_frame
-	_host().handle_button(Gen2Button.A)
-	_host().handle_button(Gen2Button.A)
+	_advance_to_the_end()
 	await get_tree().process_frame
 	assert_null(_world_screen._hall_of_fame_host)
 	assert_not_null(save.world)
@@ -137,3 +140,10 @@ func test_the_halloffame_command_opens_the_overlay() -> void:
 
 	assert_true(world.state.hall_of_fame())
 	assert_not_null(_world_screen._hall_of_fame_host)
+
+
+## The panels are answered one at a time; a test that only wants the overlay
+## closed does not care how many there were.
+func _advance_to_the_end() -> void:
+	while _world_screen._hall_of_fame_host != null:
+		_host().handle_button(Gen2Button.A)

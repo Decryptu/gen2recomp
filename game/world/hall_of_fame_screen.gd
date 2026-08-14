@@ -5,17 +5,22 @@ extends Control
 ## the mart overlays are.
 ##
 ## `engine/events/halloffame.asm`'s HallOfFame saves, walks the party one panel
-## at a time and then shows the player's own, and finally runs the credits. What
-## is here is that walk: one page per non-egg party member, then the player's,
-## advanced by A. The credits, ProfOaksPCRating, the backpic and frontpic slides
-## and the palette rotations are not, and neither is the persisted Hall of Fame
-## record, which has no save field to go in.
+## at a time and then shows the player's own with `ProfOaksPCRating` printed into
+## it, and finally runs the credits. What is here is that walk, advanced by A.
+## The credits, the backpic and frontpic slides and the palette rotations are
+## not, and neither is the persisted Hall of Fame record, which has no save field
+## to go in.
 ##
 ## The source pauses 60 frames per panel and moves on by itself. This waits for
 ## a key instead: there is no animation to watch yet, so a timer would only be a
 ## delay.
 
 signal closed()
+
+## `ProfOaksPCRating`'s `PlayMusic MUSIC_NONE` and `PlaySFX`, which reach the
+## overworld's own player rather than one of this screen's: the same way the
+## Pokedex asks for a cry.
+signal rating_reached(sfx: int)
 
 const BACKDROP: Color = Color.WHITE
 
@@ -99,6 +104,8 @@ func _refresh() -> void:
 	var page: Dictionary = current_page()
 	if page.is_empty() or _background == null:
 		return
+	if page.has("sfx"):
+		rating_reached.emit(int(page["sfx"]))
 	var indices: PackedByteArray = _page_renderer.draw(page)
 	var image: Image = Gen2PicImage.from_indices(
 		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT,

@@ -316,3 +316,62 @@ func _write_species_list(bytes: PackedByteArray, at: int, species: Array) -> voi
 		bytes[cursor] = value
 		cursor += 1
 	bytes[cursor] = 0xFF
+
+
+## `FindNest` walks one region's own grass and water tables, appends each
+## landmark once, and reads the roamers in Johto only.
+class TestNests:
+	extends GutTest
+
+	const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
+
+	var _data: GameData = null
+
+	func before_each() -> void:
+		_data = Fixture.build()
+
+	func after_each() -> void:
+		RomCache.clear(Fixture.directory())
+
+	func test_a_species_nests_on_the_landmark_of_every_map_holding_it() -> void:
+		assert_eq(
+			Gen2WorldEncounter.nests(_data, Fixture.TRAINER_SPECIES, "johto"),
+			[Fixture.MAP_LANDMARK]
+		)
+		assert_eq(
+			Gen2WorldEncounter.nests(_data, Fixture.TRAINER_SPECIES, "kanto"),
+			[Fixture.HOME_MAP_LANDMARK],
+			"the water row is in the other region"
+		)
+
+	func test_a_species_in_no_table_nests_nowhere() -> void:
+		assert_eq(Gen2WorldEncounter.nests(_data, Fixture.TRAINER_SPECIES + 1, "johto"), [])
+
+	## `.RoamMon1` and `.RoamMon2` put a roamer wherever it is standing, and the
+	## Kanto walk calls neither. The third roamer Gold and Silver ship has no
+	## branch of its own.
+	func test_only_the_first_two_roamers_nest_and_only_in_johto() -> void:
+		var roaming: Array = []
+		for index: int in 3:
+			roaming.append({
+				"species": 240 + index,
+				"map_group": Fixture.MAP_GROUP,
+				"map_number": Fixture.MAP_NUMBER,
+			})
+		for index: int in 2:
+			assert_eq(
+				Gen2WorldEncounter.nests(_data, 240 + index, "johto", roaming),
+				[Fixture.MAP_LANDMARK]
+			)
+			assert_eq(Gen2WorldEncounter.nests(_data, 240 + index, "kanto", roaming), [])
+		assert_eq(Gen2WorldEncounter.nests(_data, 242, "johto", roaming), [])
+
+	## `.AppendNest` searches a zero-filled buffer, so a map whose landmark is
+	## `LANDMARK_SPECIAL` always reports a hit and is never appended.
+	func test_a_roamer_on_a_map_with_no_landmark_nests_nowhere() -> void:
+		assert_eq(
+			Gen2WorldEncounter.nests(_data, 240, "johto", [{
+				"species": 240, "map_group": 99, "map_number": 99,
+			}]),
+			[]
+		)

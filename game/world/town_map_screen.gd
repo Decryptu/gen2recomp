@@ -9,6 +9,10 @@ extends Control
 ## cursor `PokegearMap_InitCursor` spawns and the player icon
 ## `PokegearMap_InitPlayerIcon` does.
 ##
+## `Pokedex_GetArea`'s AREA screen is the same two pieces with a third object
+## set: no cursor, one blinking nest icon per landmark the species is found at,
+## and the player icon in their place while SELECT is held.
+##
 ## Landmark coordinates are shadow-OAM values with the hardware's own offsets
 ## already in them (`data/maps/landmarks.asm`'s `db x + 8, y + 16`), which the
 ## importer takes back off, so a landmark's stored point is the centre of its
@@ -36,6 +40,27 @@ const WALK_FRAMES: Array[int] = [0, 1, 2, 3]
 ## `_CGB_PokegearPals` writes background palettes only, so the objects keep the
 ## overworld's own.
 const OBJECT_PALETTE: int = 0
+## `PAL_OW_BLUE`, which `.ShowPlayerLoop` gives Kris. The Pokegear's own icon
+## takes `PAL_OW_RED` whoever the player is; only the dex area asks.
+const OBJECT_PALETTE_FEMALE: int = 1
+
+## `PokedexNestIconGFX`, one 8x8 object tile whose OAM position is the landmark's
+## own coordinates less four, which centres it on the point.
+const NEST_TILE: int = 0
+const NEST_ICON_SIZE: int = 8
+const NEST_ORIGIN: int = 4
+## `.BlinkNestIcons` reads `hVBlankCounter`: the set is redrawn or cleared every
+## sixteenth frame and left alone in between.
+const NEST_BLINK_FRAMES: int = 0x10
+## `.String_SNest`, printed straight after `GetPokemonName`'s answer.
+const NEST_HEADER_SUFFIX: String = "'S NEST"
+
+## What the shadow OAM currently holds, which is a state rather than a redraw:
+## the blink only writes it every sixteenth frame, so releasing SELECT leaves the
+## player icon standing until the next one.
+const OAM_NESTS: StringName = &"nests"
+const OAM_PLAYER: StringName = &"player"
+const OAM_CLEARED: StringName = &"cleared"
 
 var _data: GameData = null
 var _map: Gen2TownMap = null
@@ -50,6 +75,13 @@ var _field: Control = null
 var _background: TextureRect = null
 var _cursor_icon: TextureRect = null
 var _player_icon: TextureRect = null
+## The dex area's own state: the species its header names, one landmark list per
+## region and what the shadow OAM holds this frame.
+var _species: int = 0
+var _nests: Array = []
+var _oam: StringName = OAM_NESTS
+var _select_held: bool = false
+var _nest_icons: Array[TextureRect] = []
 ## Leftover of a hardware frame this screen has not counted yet.
 var _elapsed: float = 0.0
 
@@ -89,15 +121,42 @@ func open(
 	_map = Gen2TownMap.create(
 		landmark, Gen2WorldState.is_crystal_profile(_data), hall_of_fame, screen
 	)
+	if screen != Gen2TownMap.SCREEN_DEX_AREA:
+		_species = 0
+		_nests = []
+		for icon: TextureRect in _nest_icons:
+			icon.visible = false
 	_cards = cards.duplicate()
 	_female = female
 	_time_of_day = time_of_day
 	_frames = 0
+	# `.GetAndPlaceNest` runs before `.loop`, so the icons are up on frame zero.
+	_oam = OAM_NESTS
+	_select_held = false
 	_open = true
 	visible = true
 	if is_inside_tree() and _background != null:
 		_refresh()
 	return true
+
+
+## `Pokedex_GetArea`. [param nests] is one landmark list per region, in
+## [Gen2TownMap]'s own order, which is what [method Gen2WorldEncounter.nests]
+## answers; [param landmark] is `wDexCurLocation`, where the player is standing.
+func open_dex_area(
+	data: GameData,
+	species: int,
+	nests: Array,
+	landmark: int,
+	hall_of_fame: bool = false,
+	female: bool = false,
+	time_of_day: int = Gen2WorldPalette.TIME_MORNING,
+) -> bool:
+	_species = species
+	_nests = nests.duplicate(true)
+	return open(
+		data, landmark, hall_of_fame, Gen2TownMap.SCREEN_DEX_AREA, [], female, time_of_day
+	)
 
 
 func map() -> Gen2TownMap:
@@ -114,15 +173,33 @@ func cursor_name() -> String:
 
 ## `.loop`'s own joypad read: B leaves and the d-pad walks the window. Every
 ## other button is swallowed, which is what the loop does with them.
+##
+## The dex area's loop leaves on A as well as B, walks regions rather than
+## landmarks, and reads SELECT as a held state; see [method release_button].
 func handle_button(button: int) -> bool:
 	if not _open or _map == null:
 		return false
-	if button == Gen2Button.B:
+	if button == Gen2Button.B \
+		or (button == Gen2Button.A and _map.screen == Gen2TownMap.SCREEN_DEX_AREA):
 		close()
 		return true
+	if button == Gen2Button.SELECT and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		_select_held = true
+		_apply_select()
+		return true
 	if _map.press(button):
+		# `.left` and `.right` write the new region's icons at once rather than
+		# waiting for the blink.
+		_oam = OAM_NESTS
 		_refresh()
 	return true
+
+
+## The other half of `hJoypadDown`, which a press-only host cannot say. Only the
+## dex area's SELECT reads it.
+func release_button(button: int) -> void:
+	if button == Gen2Button.SELECT:
+		_select_held = false
 
 
 func close() -> void:
@@ -136,10 +213,34 @@ func close() -> void:
 ## One hardware frame. Only the player icon moves: the cursor's own
 ## `SPRITEANIMSTRUCT_ANIM_SEQ_ID` is overwritten with `SPRITE_ANIM_FUNC_NULL`, so
 ## it holds `.Frameset_StillCursor`'s single entry forever.
+##
+## The dex area animates nothing. Its own frame is `.BlinkNestIcons`, which
+## shows the icons for sixteen frames and hides them for sixteen; the player
+## icon it draws instead is `GetPlayerIcon`'s standing frame, not a walk.
 func advance_frame() -> void:
 	_frames += 1
+	if _map != null and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		_advance_dex_area()
+		return
 	if _frames % WALK_FRAME_LENGTH == 0:
 		_refresh_player_icon()
+
+
+func _advance_dex_area() -> void:
+	if _select_held:
+		_apply_select()
+		return
+	if _frames % NEST_BLINK_FRAMES != 0:
+		return
+	_oam = OAM_NESTS if (_frames & NEST_BLINK_FRAMES) != 0 else OAM_CLEARED
+	_refresh_objects()
+
+
+## `.HideNestsShowPlayer`, whose `.CheckPlayerLocation` empties the whole of
+## shadow OAM when the player is in the region that is not on screen.
+func _apply_select() -> void:
+	_oam = OAM_PLAYER if _map != null and _map.player_in_region() else OAM_CLEARED
+	_refresh_objects()
 
 
 ## The whole screen as one 160x144 image, objects included, for a preview or a
@@ -148,6 +249,8 @@ func render() -> Image:
 	var out: Image = _background_image()
 	if _map == null:
 		return out
+	if _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		return _render_dex_area(out)
 	for object: Array in [
 		[_cursor_image(), _map.cursor], [_player_image(), _map.player_landmark],
 	]:
@@ -158,6 +261,41 @@ func render() -> Image:
 			_icon_position(int(object[1]))
 		)
 	return out
+
+
+func _render_dex_area(out: Image) -> Image:
+	if _oam == OAM_PLAYER:
+		out.blend_rect(
+			_player_image(), Rect2i(Vector2i.ZERO, Vector2i(ICON_SIZE, ICON_SIZE)),
+			_icon_position(_map.player_landmark)
+		)
+		return out
+	if _oam != OAM_NESTS:
+		return out
+	var icon: Image = _nest_image()
+	for landmark: int in current_nests():
+		if not _has_landmark(landmark):
+			continue
+		out.blend_rect(
+			icon, Rect2i(Vector2i.ZERO, Vector2i(NEST_ICON_SIZE, NEST_ICON_SIZE)),
+			_nest_position(landmark)
+		)
+	return out
+
+
+## Which of the three things the dex area's shadow OAM is holding: the nest set,
+## the player icon, or nothing.
+func shadow_oam() -> StringName:
+	return _oam
+
+
+## The landmarks the region on screen holds the species at, which is the list
+## `.GetAndPlaceNest` last loaded.
+func current_nests() -> Array:
+	if _map == null or _map.region() >= _nests.size():
+		return []
+	var list: Variant = _nests[_map.region()]
+	return list if list is Array else []
 
 
 func _process(delta: float) -> void:
@@ -198,18 +336,57 @@ func _refresh() -> void:
 	if _background != null:
 		_background.texture = ImageTexture.create_from_image(_background_image())
 		_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	if _map != null and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		_refresh_objects()
+		return
 	_refresh_player_icon()
 	_refresh_cursor()
+
+
+## The dex area's shadow OAM, which holds one of three things whole rather than
+## a per-object position.
+func _refresh_objects() -> void:
+	if _cursor_icon == null or _player_icon == null:
+		return
+	_cursor_icon.visible = false
+	_player_icon.visible = _oam == OAM_PLAYER and _map != null \
+		and _has_landmark(_map.player_landmark)
+	if _player_icon.visible:
+		_player_icon.position = Vector2(_icon_position(_map.player_landmark))
+		_player_icon.texture = ImageTexture.create_from_image(_player_image())
+	var landmarks: Array = current_nests() if _oam == OAM_NESTS else []
+	while _nest_icons.size() < landmarks.size():
+		_nest_icons.append(_sprite())
+	var icon: Image = _nest_image() if not landmarks.is_empty() else null
+	for index: int in _nest_icons.size():
+		var node: TextureRect = _nest_icons[index]
+		var landmark: int = int(landmarks[index]) if index < landmarks.size() else -1
+		node.visible = landmark >= 0 and _has_landmark(landmark)
+		if not node.visible:
+			continue
+		node.position = Vector2(_nest_position(landmark))
+		node.texture = ImageTexture.create_from_image(icon)
 
 
 func _background_image() -> Image:
 	if _page == null or _map == null or _data == null:
 		return Image.create(Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8)
-	var region: String = "kanto" if _map.region() == Gen2TownMap.REGION_KANTO else "johto"
-	var landmark: Dictionary = _data.landmark(_map.cursor)
+	var codes: PackedByteArray = _header_codes()
 	return _page.image(_data, _page.tilemap(
-		_data.town_map_region(region), landmark.get("codes", PackedByteArray()), _map.screen, _cards
+		_data.town_map_region(Gen2TownMap.region_name(_map.region())),
+		codes, _map.screen, _cards
 	), _female)
+
+
+## The landmark name each map screen puts in its own box, or `GetPokemonName`
+## and `.String_SNest` for the dex area.
+func _header_codes() -> PackedByteArray:
+	if _map.screen != Gen2TownMap.SCREEN_DEX_AREA:
+		return _data.landmark(_map.cursor).get("codes", PackedByteArray())
+	var name: String = String(_data.species(_species).get("name", ""))
+	var out: PackedByteArray = Gen2Text.encode(name)
+	out.append_array(Gen2Text.encode(NEST_HEADER_SUFFIX))
+	return out
 
 
 ## `PokegearMap_InitCursor`: `.Frameset_StillCursor` over `PokegearSpritesGFX`'s
@@ -275,6 +452,10 @@ func _player_image() -> Image:
 		return blank
 	@warning_ignore("integer_division")
 	var step: int = (_frames / WALK_FRAME_LENGTH) % WALK_FRAMES.size()
+	if _map != null and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		# `.ShowPlayerLoop` writes four fixed tile offsets rather than starting a
+		# sprite anim, so the dex area's icon never walks.
+		step = 0
 	if _map != null and _map.player_landmark == Gen2WorldRadio.fast_ship_landmark(_map.crystal):
 		return _fast_ship_image(step)
 	var number: int = Gen2WorldSprite.player_normal_sprite(_female)
@@ -284,7 +465,7 @@ func _player_image() -> Image:
 	return Gen2WorldSprite.image_for(
 		sprite,
 		_data.overworld_sprite_indices(number),
-		_object_palette(),
+		_player_palette(),
 		Gen2WorldSprite.FACING_DOWN,
 		WALK_FRAMES[step],
 	)
@@ -299,10 +480,46 @@ func _fast_ship_image(step: int) -> Image:
 	)
 
 
-func _object_palette() -> PackedColorArray:
+## `PokedexNestIconGFX`, drawn with the same object palette every other icon on
+## these screens takes.
+func _nest_image() -> Image:
+	var tiles: PackedByteArray = _data.tile_indices("dex_nest_icon") if _data != null \
+		else PackedByteArray()
+	var palette: PackedColorArray = _object_palette()
+	var out := Image.create(NEST_ICON_SIZE, NEST_ICON_SIZE, false, Image.FORMAT_RGBA8)
+	out.fill(Color(0, 0, 0, 0))
+	if tiles.size() < Gen2TownMapPage.TILE * Gen2TownMapPage.TILE or palette.is_empty():
+		return out
+	var width: int = tiles.size() / Gen2TownMapPage.TILE
+	for y: int in Gen2TownMapPage.TILE:
+		for x: int in Gen2TownMapPage.TILE:
+			var index: int = tiles[y * width + NEST_TILE * Gen2TownMapPage.TILE + x]
+			if index == 0:
+				continue
+			out.set_pixel(x, y, palette[clampi(index, 0, palette.size() - 1)])
+	return out
+
+
+## `.nestloop`'s `sub 4` on both coordinates, which centres one tile on the
+## landmark's own point rather than on the 16x16 icon's corner.
+func _nest_position(landmark: int) -> Vector2i:
+	var entry: Dictionary = _data.landmark(landmark)
+	return Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0))) \
+		- Vector2i(NEST_ORIGIN, NEST_ORIGIN)
+
+
+func _object_palette(slot: int = OBJECT_PALETTE) -> PackedColorArray:
 	if _data == null:
 		return PackedColorArray()
-	return _data.overworld_sprite_palette(OBJECT_PALETTE, _time_of_day)
+	return _data.overworld_sprite_palette(slot, _time_of_day)
+
+
+## `PAL_OW_RED` everywhere but the dex area's player icon, which is the one
+## object on these screens that asks `wPlayerGender`.
+func _player_palette() -> PackedColorArray:
+	if _female and _map != null and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
+		return _object_palette(OBJECT_PALETTE_FEMALE)
+	return _object_palette()
 
 
 func _place(node: TextureRect, landmark: int) -> void:
