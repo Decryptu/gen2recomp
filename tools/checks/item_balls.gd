@@ -130,7 +130,7 @@ func _verify_hm07(data: GameData, game_id: StringName) -> void:
 		"%s: the HM07 ball did not pause on its found-item text." % game_id
 	)
 
-	var finished: Array = world.run_event_queue(true)
+	var finished: Array = _finish_receipt(world, world.run_event_queue(true))
 	_r.check(
 		not finished.is_empty()
 			and StringName(finished[0].get("status", &"")) == &"complete",
@@ -230,7 +230,7 @@ func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
 			StringName(results[0].get("status", &"")) == &"waiting",
 			"%s: the hidden item on %s did not pause on its found-item text." % [game_id, cell]
 		)
-		var finished: Array = world.run_event_queue(true)
+		var finished: Array = _finish_receipt(world, world.run_event_queue(true))
 		_r.check(
 			not finished.is_empty()
 				and StringName(finished[0].get("status", &"")) == &"complete",
@@ -263,6 +263,20 @@ func _open(data: GameData, id: Array, cell: Vector2i) -> Gen2WorldAPI:
 			break
 		world.run_event_queue(true)
 	return world
+
+
+## `GiveItemScript`'s tail, which both receipts end on: the sound, which a host
+## answers, and then `itemnotify`'s own box.
+func _finish_receipt(world: Gen2WorldAPI, results: Array) -> Array:
+	if results.is_empty():
+		return results
+	if StringName(results[0].get("event", {}).get("type", &"")) != &"runtime_request":
+		return results
+	if world.complete_runtime_request({"ok": true}).is_empty():
+		return []
+	return world.run_event_queue(true)
+
+
 func _find_kind(results: Array, kind: StringName) -> Array:
 	var matching: Array = []
 	for result: Dictionary in results:

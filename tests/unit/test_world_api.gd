@@ -596,12 +596,16 @@ func test_crystal_verbosegiveitemvar_reads_kurts_quantity_without_staging_a_swar
 		"kurt_apricorn_quantity": 3,
 	})
 	var result: Dictionary = runner.advance()
-	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	## `ScriptCall GiveItemScript`'s received line, not the swarm request a
+	## misread of this opcode would stage.
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(StringName(result["event"]["type"]), &"text", JSON.stringify(result))
+	assert_string_contains(String(result["event"]["text"]), data.item_name(1))
+
+	var finished: Dictionary = _drain_receipt(runner, runner.advance(true))
+	assert_eq(finished["status"], &"complete", JSON.stringify(finished))
 	assert_eq(state.item_quantity(1), 3)
 	assert_eq(state.swarm_map(), Vector2i(-1, -1))
-	assert_false(result["events"].any(func(event: Dictionary) -> bool:
-		return event.get("type", &"") == &"runtime_request"
-	))
 
 
 func test_random_unseen_wild_mon_uses_morning_rare_slots_and_seen_species() -> void:
@@ -5306,7 +5310,13 @@ func test_an_item_ball_is_dispatched_from_its_two_data_bytes() -> void:
 	assert_eq(results[0]["status"], &"waiting", JSON.stringify(results[0]))
 	assert_eq(results[0]["event"]["text"], "Found\n%s!" % _item_name(3))
 
-	var finished: Array = world.run_event_queue(true)
+	# `playsound SFX_ITEM` by name, not `specialsound`, and then `itemnotify`.
+	var notified: Array = _receipt_sound(world, &"sound")
+	assert_eq(
+		int(notified[0]["event"]["request"]["values"]["address"]),
+		Gen2WorldScriptRunner.SFX_ITEM
+	)
+	var finished: Array = _receipt_notify(world, 3)
 	assert_eq(finished[0]["status"], &"complete", JSON.stringify(finished[0]))
 	assert_eq(world.state.items().get(3, 0), 2)
 	# `disappear LAST_TALKED` writes the ball's own event flag, so it stays gone.
@@ -5384,7 +5394,10 @@ func test_a_hidden_item_is_dispatched_from_its_three_data_bytes() -> void:
 	# _PlayerFoundItemText is _FoundItemText's wording, so both share one string.
 	assert_eq(results[0]["event"]["text"], "Found\n%s!" % _item_name(3))
 
-	var finished: Array = world.run_event_queue(true)
+	# HiddenItemScript's own `specialsound` and `itemnotify`, which name the
+	# pocket the item landed in.
+	_receipt_sound(world, &"special_sound")
+	var finished: Array = _receipt_notify(world, 3)
 	assert_eq(finished[0]["status"], &"complete", JSON.stringify(finished[0]))
 	assert_eq(world.state.items().get(3, 0), 1)
 	# `callasm SetMemEvent` writes the record's own flag, not an object's.
@@ -5437,7 +5450,8 @@ func test_a_hidden_item_answers_only_while_its_flag_is_clear() -> void:
 
 	world.clear_event_flag(21)
 	assert_eq(world.interact().size(), 1)
-	assert_eq(world.run_event_queue(true)[0]["status"], &"complete")
+	_receipt_sound(world, &"special_sound")
+	assert_eq(_receipt_notify(world, 3)[0]["status"], &"complete")
 	assert_eq(world.state.items().get(3, 0), 1)
 	# And the flag it just wrote closes it again, so a second A press is inert.
 	assert_true(world.interact().is_empty())
@@ -5463,6 +5477,24 @@ func test_a_hidden_item_with_no_item_byte_fails_instead_of_running_data() -> voi
 
 func _item_name(number: int) -> String:
 	return GameData.open_directory(_directory).item_name(number)
+
+
+## `GiveItemScript`'s tail, which every item receipt now ends on. Acknowledging
+## the receipt's own line is what puts the sound out with the host.
+func _receipt_sound(world: Gen2WorldAPI, kind: StringName) -> Array:
+	var sound: Array = world.run_event_queue(true)
+	assert_eq(
+		StringName(sound[0]["event"]["request"]["values"]["kind"]), kind,
+		JSON.stringify(sound)
+	)
+	return sound
+
+
+## `itemnotify` behind the sound: one box naming the item and its pocket.
+func _receipt_notify(world: Gen2WorldAPI, item: int) -> Array:
+	var notified: Array = world.complete_runtime_request({"ok": true})
+	assert_string_contains(String(notified[0]["event"]["text"]), _item_name(item))
+	return world.run_event_queue(true)
 
 
 ## S2: `?RAM?CFA4?` was the text engine faithfully reporting an unresolved
@@ -5493,6 +5525,79 @@ func test_verbosegiveitem_fills_the_buffer_its_text_reads_by_address() -> void:
 		String(context["buffers"][RomLayout.STRING_BUFFER_4]), data.item_name(1),
 		"the same value is still reachable by text_buffer number"
 	)
+
+
+## `GiveItemScript`, which every `verbosegiveitem` calls: the received line, the
+## sound and `itemnotify`'s box, and on a full pack the same line followed by
+## `pocketisfull` instead. The line is printed either way, because the source's
+## `iffalse` sits behind its own `writetext`.
+func test_a_verbose_give_prints_the_line_the_pocket_and_the_full_branch() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6420"] = [
+		Gen2WorldScript.raw_opcode(0x9D, true), 1, 1, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	## One pocket for the given item and the twenty that fill it, so
+	## `GetPocketName` has the same answer either way.
+	var items: Array = RomCache.read_json(RomCache.items_path(_directory))
+	for raw: Dictionary in items:
+		if int(raw.get("number", 0)) <= Gen2WorldPack.MAX_ITEMS + 1:
+			raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+	RomCache.write_json(RomCache.items_path(_directory), items)
+	var data: GameData = GameData.open_directory(_directory)
+	var request: Dictionary = {"kind": &"script", "bank": 48, "script": 0x6420}
+
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), request)
+	assert_eq(runner.advance()["event"]["text"], "Received\n%s." % data.item_name(1))
+	var sound: Dictionary = runner.advance(true)
+	assert_eq(
+		StringName(sound["event"]["request"]["values"]["kind"]), &"special_sound",
+		JSON.stringify(sound)
+	)
+	var notified: Dictionary = runner.complete_runtime_request({"ok": true})
+	## `cont`, so the box scrolls one line and the item name stays under it.
+	assert_eq(
+		notified["event"]["text"],
+		"Put the\n%s in%sthe ITEM POCKET." % [
+			data.item_name(1), Gen2TextStream.SCROLL_BREAK,
+		]
+	)
+	assert_eq(runner.advance(true)["status"], &"complete")
+
+	## A pack with no room for it: `ReceiveItem` returns false, the line is still
+	## printed, and `pocketisfull` names the pocket that had no room.
+	var owned: Dictionary = {}
+	for number: int in range(2, 2 + Gen2WorldPack.MAX_ITEMS):
+		owned[number] = 1
+	var full := Gen2WorldState.new({}, {}, owned)
+	var refused := Gen2WorldScriptRunner.begin(data, full, request)
+	assert_eq(refused.advance()["event"]["text"], "Received\n%s." % data.item_name(1))
+	var pocket: Dictionary = refused.advance(true)
+	assert_eq(pocket["event"]["text"], "The ITEM POCKET\nis full…", JSON.stringify(pocket))
+	assert_eq(refused.advance(true)["status"], &"complete")
+	assert_eq(full.item_quantity(1), 0, "and nothing was received")
+
+
+## The command on its own, which seventy-nine scripts across the three cartridges
+## run after a plain `giveitem`. `CurItemName` reads wCurItem, so the box names
+## whatever that give wrote and the script runs on behind it.
+func test_itemnotify_names_the_item_the_give_before_it_wrote() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6430"] = [
+		Gen2WorldScript.GIVEITEM, 1, 1,
+		Gen2WorldScript.ITEMNOTIFY, Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"script", "bank": 48, "script": 0x6430,
+	})
+	var notified: Dictionary = runner.advance()
+	assert_string_contains(String(notified["event"]["text"]), data.item_name(1))
+	assert_string_contains(String(notified["event"]["text"]), "POCKET")
+	assert_eq(runner.advance(true)["status"], &"complete")
+	assert_eq(state.item_quantity(1), 1)
 
 
 func test_text_ram_resolves_through_the_cartridges_own_pointer_table() -> void:
@@ -5672,6 +5777,21 @@ func _pick_fruit_tree(data: GameData, state: Gen2WorldState) -> Dictionary:
 	var second: Dictionary = runner.advance(true)
 	if StringName(second.get("status", &"")) != &"waiting":
 		return second
+	return _drain_receipt(runner, runner.advance(true))
+
+
+## The `specialsound` and `itemnotify` behind a successful give, which a full
+## pack or a bare tree never reaches: whatever the caller was already looking at
+## is returned untouched in that case.
+func _drain_receipt(runner: Gen2WorldScriptRunner, result: Dictionary) -> Dictionary:
+	if StringName(result.get("status", &"")) != &"waiting":
+		return result
+	var event: Dictionary = result.get("event", {})
+	if StringName(event.get("type", &"")) != &"runtime_request":
+		return result
+	var sounded: Dictionary = runner.complete_runtime_request({"ok": true})
+	if StringName(sounded.get("status", &"")) != &"waiting":
+		return sounded
 	return runner.advance(true)
 
 

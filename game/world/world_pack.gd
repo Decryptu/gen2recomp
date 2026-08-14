@@ -37,6 +37,15 @@ const POCKET_NAMES: Dictionary = {
 	TYPE_KEY_ITEM: "Key Items",
 	TYPE_TM_HM: "TMs/HMs",
 }
+## `ItemPocketNames` (`data/items/pocket_names.asm`), which is a different set of
+## strings from the pack's own headers above: these are what `GetPocketName`
+## copies into wStringBuffer3 for `itemnotify` and `pocketisfull` to print.
+const SOURCE_POCKET_NAMES: Dictionary = {
+	TYPE_ITEM: "ITEM POCKET",
+	TYPE_KEY_ITEM: "KEY POCKET",
+	TYPE_BALL: "BALL POCKET",
+	TYPE_TM_HM: "TM POCKET",
+}
 
 ## `ITEMATTR_PERMISSIONS` bits and the field-menu nibble `CheckItemMenu` returns,
 ## named here in this file's own terms but valued from the import layer, so the
@@ -136,6 +145,16 @@ static func pocket_order() -> Array[int]:
 		if pocket > 0 and not order.has(pocket):
 			order.append(pocket)
 	return order
+
+
+## The name a script prints. `GetPocketName` masks the pocket to two bits, which
+## no cartridge item reaches past; a mod pocket keeps its own label instead of
+## wrapping onto a cartridge one.
+static func source_pocket_name(data: GameData, item: int) -> String:
+	var pocket: int = int(data.item(item).get("pocket", 0)) if data != null else 0
+	if SOURCE_POCKET_NAMES.has(pocket):
+		return String(SOURCE_POCKET_NAMES[pocket])
+	return pocket_name(pocket)
 
 
 static func pocket_name(pocket_type: int) -> String:

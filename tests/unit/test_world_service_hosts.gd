@@ -504,8 +504,19 @@ func test_the_saved_quantity_sizes_a_later_verbosegiveitemvar() -> void:
 		GameData.open_directory(Fixture.directory()), _world.state,
 		{"kind": &"test", "bank": Fixture.BANK, "script": 0x6400}
 	)
+	## GiveItemScript's received line, its sound and its `itemnotify` box, which
+	## every verbose give ends on.
 	var result: Dictionary = later.advance()
-	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	var sounded: Dictionary = later.advance(true)
+	assert_eq(
+		StringName(sounded["event"]["request"]["kind"]), &"audio_requested",
+		JSON.stringify(sounded)
+	)
+	assert_eq(
+		later.complete_runtime_request({"ok": true})["status"], &"waiting"
+	)
+	assert_eq(later.advance(true)["status"], &"complete")
 	assert_eq(_world.state.item_quantity(BALL_LEVEL), 3)
 
 

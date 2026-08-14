@@ -58,6 +58,10 @@ var _trainer_intro_approach_pending: bool = false
 ## its acknowledge continues into the earthquake, the disappear and the roll.
 ## The same shape _trainer_intro_approach_pending has for encounter music.
 var _rock_smash_after_sound: bool = false
+## Set while a receipt's own `specialsound` is out with the host, so its
+## completion continues into `itemnotify`'s box. `{ item, finish }`, the same
+## shape _rock_smash_after_sound has.
+var _item_notify_after_sound: Dictionary = {}
 var _battle_setup: Dictionary = {}
 var _loaded_battle_type: int = -1
 var _phone_context: Dictionary = {}
@@ -180,6 +184,19 @@ const FOUND_ITEM_TEXT: String = "Found\n%s!"
 ## Two source boxes, so four lines and no blank between them: the box is two
 ## rows, and a blank line would spend a third page drawing nothing.
 const NO_SPACE_ITEM_TEXT: String = "Found\n%s!\nBut you have\nno space left."
+## data/text/common_2.asm's `_ReceivedItemText`, `_PutItemInPocketText` and
+## `_PocketIsFullText`, each less its `<PLAYER>` for the reason FOUND_ITEM_TEXT
+## drops it: nothing writes `wPlayerName` yet. `GiveItemScript` prints the first
+## two around every `verbosegiveitem`, and `itemnotify` the second on its own.
+const RECEIVED_ITEM_TEXT: String = "Received\n%s."
+## The pocket line's own `cont` is a scroll rather than a page, so the item it
+## names is still on screen above it.
+const PUT_ITEM_TEXT: String = "Put the\n%s in" + Gen2TextStream.SCROLL_BREAK + "the %s."
+const POCKET_FULL_TEXT: String = "The %s\nis full…"
+## constants/sfx_constants.asm. `FindItemInBallScript` plays SFX_ITEM by name
+## rather than through `specialsound`, so a TM lying in a ball gets the ordinary
+## item jingle and the same TM handed over by an NPC gets SFX_GET_TM.
+const SFX_ITEM: int = 0x01
 ## data/text/common_1.asm's four fruit tree texts, paired the same way.
 ## `_HeyItsFruitText` and `_ObtainedFruitText` are one staged text because the
 ## source's `giveitem` sits between them and has nothing to show; they still
@@ -387,6 +404,24 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			var picked: Dictionary = _resolve_fruit_tree(fruit_tree, fruit_item)
 			if not bool(picked.get("ok", false)):
 				return _fail(StringName(picked.get("reason", &"fruit_tree_failed")), picked)
+			return _waiting_result()
+		## The tail every item receipt shares behind its own line: the sound, and
+		## then `itemnotify`'s box once the host has played it.
+		if pending_type == &"text" and _pending.get("special", &"") == &"item_received":
+			var receipt_item: int = int(_pending.get("item", 0))
+			var receipt_sfx: int = int(_pending.get("sfx", 0))
+			var receipt_finish: bool = bool(_pending.get("finish", false))
+			_pending = {}
+			_finish_after_pending = false
+			_stage_receipt_tail(receipt_item, receipt_sfx, receipt_finish)
+			return _waiting_result()
+		## `GiveItemScript.Full`, whose `promptbutton` is the acknowledge above.
+		if pending_type == &"text" and _pending.get("special", &"") == &"pocket_is_full":
+			var full_item: int = int(_pending.get("item", 0))
+			var full_finish: bool = bool(_pending.get("finish", false))
+			_pending = {}
+			_finish_after_pending = false
+			_stage_pocket_is_full(full_item, full_finish)
 			return _waiting_result()
 		## Script_UsedStrength's second writetext, _MoveBoulderText.
 		if pending_type == &"text" and _pending.get("special", &"") == &"strength_used":
@@ -683,6 +718,8 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		var smash_after_sound: bool = kind == &"audio_requested" \
 			and StringName((request.get("values", {}) as Dictionary).get("kind", &"")) \
 			== &"sound" and _rock_smash_after_sound
+		var notify_after_sound: Dictionary = _item_notify_after_sound \
+			if kind == &"audio_requested" else {}
 		_pending = {}
 		if approach_after_audio:
 			_trainer_intro_approach_pending = false
@@ -690,6 +727,12 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		if smash_after_sound:
 			_rock_smash_after_sound = false
 			_stage_rock_smashed()
+		if not notify_after_sound.is_empty():
+			_item_notify_after_sound = {}
+			_stage_item_notify(
+				int(notify_after_sound.get("item", 0)),
+				bool(notify_after_sound.get("finish", false))
+			)
 		return advance()
 	if kind == &"rival_name_requested":
 		if not bool(result.get("ok", false)):
@@ -897,13 +940,15 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		if not bool(quantity_result.get("ok", false)):
 			return quantity_result
 		var variable_item: int = int(command.get("item", 0))
+		var variable_name: String = data.item_name(variable_item) if data != null else ""
 		_set_text_buffer(
-			RomLayout.STRING_BUFFER_4,
-			data.item_name(variable_item) if data != null else "",
-			&"item_name",
+			RomLayout.STRING_BUFFER_4, variable_name, &"item_name",
 			{"item": variable_item}
 		)
-		return _stage_item_delta(variable_item, _script_value)
+		var variable_given: Dictionary = _stage_item_delta(variable_item, _script_value)
+		if not bool(variable_given.get("ok", true)):
+			return variable_given
+		return _stage_give_item_script(variable_item, variable_name)
 	var source: int = Gen2WorldScript.source_opcode(opcode, _crystal_commands())
 	var object_result: Dictionary = _execute_object_command(source, command)
 	if not object_result.is_empty():
@@ -1150,6 +1195,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			return _stage_warp(command)
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP, Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE, Gen2WorldScript.CLOSEWINDOW:
 			pass
+		Gen2WorldScript.ITEMNOTIFY:
+			## `CurItemName` reads wCurItem, which whichever `giveitem` came
+			## before this wrote.
+			return _stage_item_notify(_last_item, false)
+		Gen2WorldScript.POCKETISFULL:
+			return _stage_pocket_is_full(_last_item, false)
 		Gen2WorldScript.WRITETEXT:
 			return _show_text(bank, int(command["address"]), false)
 		Gen2WorldScript.FARWRITETEXT:
@@ -1210,7 +1261,6 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP,
 		Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE,
 		Gen2WorldScript.CLOSEWINDOW,
-		Gen2WorldScript.ITEMNOTIFY,
 		Gen2WorldScript.LOADMENU,
 		Gen2WorldScript.GETMONEY, Gen2WorldScript.GETCOINS, Gen2WorldScript.GETNUM,
 		Gen2WorldScript.GETMONNAME, Gen2WorldScript.GETITEMNAME,
@@ -1525,13 +1575,17 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			## _ReceivedItemText then prints as `text_ram wStringBuffer4`. Staging
 			## the item without filling the buffer leaves that text unresolved.
 			var verbose_item: int = int(command.get("item", 0))
+			var verbose_name: String = data.item_name(verbose_item) if data != null else ""
 			_set_text_buffer(
-				RomLayout.STRING_BUFFER_4,
-				data.item_name(verbose_item) if data != null else "",
-				&"item_name",
+				RomLayout.STRING_BUFFER_4, verbose_name, &"item_name",
 				{"item": verbose_item}
 			)
-			return _stage_item_delta(verbose_item, int(command.get("quantity", 1)))
+			var given: Dictionary = _stage_item_delta(
+				verbose_item, int(command.get("quantity", 1))
+			)
+			if not bool(given.get("ok", true)):
+				return given
+			return _stage_give_item_script(verbose_item, verbose_name)
 		0x9E:
 			return _stage_runtime_request(&"swarm_requested", {
 				"map_group": int(command.get("map_group", 0)),
@@ -2531,8 +2585,10 @@ func _stage_strength_boulder() -> Dictionary:
 ## the body is replayed here the way AskStrengthScript's is.
 ##
 ## Source order is receive, `disappear LAST_TALKED`, then the text, so the ball
-## is already gone when the box is drawn. `itemnotify` is the `item_changed`
-## event _stage_item_delta() emits.
+## is already gone when the box is drawn. Behind that text the script plays
+## SFX_ITEM by name rather than through `specialsound` and then runs
+## `itemnotify`; its own `pause 60` is the acknowledge here, since nothing draws
+## a text box that closes itself.
 ##
 ## The receive seam preserves the source's no-room branch without committing
 ## the item, hiding the ball, or setting its event flag.
@@ -2555,7 +2611,9 @@ func _stage_item_ball() -> Dictionary:
 	var item_name: String = data.item_name(item) if data != null else ""
 	if item_name.is_empty():
 		item_name = "ITEM"
-	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, true)
+	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, false, {
+		"special": &"item_received", "item": item, "sfx": SFX_ITEM, "finish": true,
+	})
 
 
 ## `FruitTreeScript` (`engine/events/fruit_trees.asm`). Like an item ball it is
@@ -2594,9 +2652,13 @@ func _resolve_fruit_tree(tree_id: int, item: int) -> Dictionary:
 	var received: Dictionary = _stage_item_delta(item, 1)
 	if not bool(received.get("accepted", true)):
 		return _stage_internal_text(FRUIT_TREE_FULL_TEXT % item_name, true)
-	## PickedFruitTree, which the source runs after the item is in the bag.
+	## PickedFruitTree, which the source runs after the item is in the bag, then
+	## its own `specialsound` and `itemnotify`.
 	_staged_fruit_trees[tree_id] = true
-	return _stage_internal_text(FRUIT_TREE_OBTAINED_TEXT % [item_name, item_name], true)
+	return _stage_internal_text(
+		FRUIT_TREE_OBTAINED_TEXT % [item_name, item_name], false,
+		{"special": &"item_received", "item": item, "finish": true}
+	)
 
 
 ## `TryResetFruitTrees`: `ResetFruitTrees` refills every tree at once and sets
@@ -2630,9 +2692,9 @@ func _fruit_tree_picked(tree_id: int) -> bool:
 ## object's. `_PlayerFoundItemText` is `_FoundItemText`'s wording, so the two
 ## share FOUND_ITEM_TEXT and its <PLAYER> boundary.
 ##
-## The source writes the text before `giveitem` and sets the flag after it. The
-## A full pocket leaves both the item and the event flag untouched, then shows
-## the source's no-space branch in one scene-free text pause.
+## The source writes the text before `giveitem` and sets the flag after it. A
+## full pocket leaves both the item and the event flag untouched, then shows the
+## source's no-space branch in one scene-free text pause.
 func _stage_hidden_item() -> Dictionary:
 	var item: int = int(_request.get("item", 0))
 	var flag: int = int(_request.get("flag", -1))
@@ -2646,7 +2708,9 @@ func _stage_hidden_item() -> Dictionary:
 	var item_name: String = data.item_name(item) if data != null else ""
 	if item_name.is_empty():
 		item_name = "ITEM"
-	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, true)
+	return _stage_internal_text(FOUND_ITEM_TEXT % item_name, false, {
+		"special": &"item_received", "item": item, "finish": true,
+	})
 
 
 ## CheckPartyMove: the first slot whose move list carries [param move], or -1.
@@ -2867,13 +2931,60 @@ func _rock_encounter() -> Dictionary:
 	return Gen2WorldTreemon.rock_encounter(data.treemon_set(set_number), _random)
 
 
-func _stage_internal_text(text: String, finish_after: bool) -> Dictionary:
-	_pending = {
+## `Script_itemnotify`: `GetPocketName` and `CurItemName` into
+## `PutItemInPocketText`, which `MapTextbox` prints and the script resumes
+## behind. Every receipt in the source ends on this box.
+func _stage_item_notify(item: int, finish_after: bool) -> Dictionary:
+	var item_name: String = data.item_name(item) if data != null else ""
+	if item_name.is_empty():
+		item_name = "ITEM"
+	return _stage_internal_text(
+		PUT_ITEM_TEXT % [item_name, Gen2WorldPack.source_pocket_name(data, item)],
+		finish_after
+	)
+
+
+## `Script_pocketisfull`, which is the same box with only the pocket in it.
+func _stage_pocket_is_full(item: int, finish_after: bool) -> Dictionary:
+	return _stage_internal_text(
+		POCKET_FULL_TEXT % Gen2WorldPack.source_pocket_name(data, item), finish_after
+	)
+
+
+## `GiveItemScript`, which is the whole of `verbosegiveitem` past the receive:
+## the received line, and then either the sound and `itemnotify` or, on a full
+## pack, `pocketisfull`. The line is printed either way, because the source's
+## `iffalse` sits behind its own `writetext`. Both boxes resume the caller.
+func _stage_give_item_script(item: int, item_name: String) -> Dictionary:
+	var named: String = item_name if not item_name.is_empty() else "ITEM"
+	return _stage_internal_text(RECEIVED_ITEM_TEXT % named, false, {
+		"special": &"item_received" if _script_value != 0 else &"pocket_is_full",
+		"item": item,
+	})
+
+
+## The tail a receipt shares once its own line has been read: the sound, and
+## then `itemnotify` behind it. [param sfx] is the id a script plays by name,
+## or 0 for `specialsound`'s own pocket-dependent choice.
+func _stage_receipt_tail(item: int, sfx: int, finish_after: bool) -> Dictionary:
+	_item_notify_after_sound = {"item": item, "finish": finish_after}
+	if sfx > 0:
+		return _stage_audio_request(&"sound", {"address": sfx})
+	return _stage_audio_request(&"special_sound", {"item": item})
+
+
+func _stage_internal_text(
+	text: String, finish_after: bool, values: Dictionary = {}
+) -> Dictionary:
+	var pending: Dictionary = {
 		"type": &"text",
 		"text": text,
 		"internal_text": true,
 		"source": _request.duplicate(true),
 	}
+	for key: Variant in values:
+		pending[key] = values[key]
+	_pending = pending
 	_finish_after_pending = finish_after
 	return {"ok": true}
 

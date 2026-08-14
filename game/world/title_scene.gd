@@ -113,13 +113,26 @@ const TRAIL_COORDS_GOLD: Array[Array] = [
 ]
 ## `depixel 15, 11, 4, 0`.
 const TRAIL_AT_SILVER := Vector2i(88, 124)
-## `AnimSeq_GSTitleTrail`: four pixels right and one down a frame, gone once its
-## x reaches $a4, with Gold riding a sine of its own three steps at a time.
+## `AnimSeq_GSTitleTrail`: four pixels right a frame, gone once its x reaches
+## $a4. The rest of it is two routines under one name. Only Gold's `.one` has the
+## `inc [hl]` that walks the y coordinate down, and only Gold's `.zero` seeds
+## VAR1 from the struct's own index and then reaches
+## `AnimSeqs_IncAnonJumptableIndex`, so its sine is set up once and stepped by
+## three a frame from there.
 const TRAIL_X_STEP: int = 4
 const TRAIL_Y_STEP: int = 1
 const TRAIL_X_END: int = 0xA4
 const TRAIL_SINE_STEP: int = 3
 const TRAIL_SINE_AMPLITUDE: int = 2
+## Silver's `.zero` runs every frame, and both numbers it wants come from
+## `wIntroSceneTimer`, which the union at `wJumptableIndex + 2` gives to
+## `LOW(wTitleScreenTimer)`: the byte the screen itself is counting down. Masked
+## and swapped it is 0 to 3, which is an amplitude of 3 to 6 and a step of 7 to
+## 10.
+const TRAIL_SILVER_TIMER_MASK: int = 0x30
+const TRAIL_SILVER_TIMER_SHIFT: int = 4
+const TRAIL_SILVER_AMPLITUDE_BASE: int = 3
+const TRAIL_SILVER_STEP_BASE: int = 7
 
 ## `ScrollTitleScreenClouds`: forty scanlines from line $5f take one shared
 ## offset that falls by one, on every eighth frame on Gold and on every frame on
@@ -129,8 +142,10 @@ const CLOUD_LINES: int = 0x28
 const CLOUD_GOLD_MASK: int = 0b111
 
 ## `NUM_SPRITE_ANIM_STRUCTS`: `_InitSpriteAnimStruct` walks ten slots and returns
-## carry rather than making an eleventh, so a burst of trails simply stops.
+## carry rather than making an eleventh, so a burst of trails simply stops. The
+## bird holds one of the ten for the whole screen's life, which leaves nine.
 const MAX_SPRITE_STRUCTS: int = 10
+const MAX_TRAILS: int = MAX_SPRITE_STRUCTS - 1
 
 ## What [method sprites] answers with.
 const SPRITE_CRYSTAL: StringName = &"crystal"
@@ -148,9 +163,16 @@ var _bird_var: int = 0
 var _bird_frame: int = 0
 var _selected: int = -1
 var _sine: Gen2BattleAnimData = null
-## The live trail particles, each `{ at, var1 }`. `_InitSpriteAnimStruct` has ten
-## slots and refuses an eleventh, which is what caps this too.
+## The live trail particles, each `{ at, var1, yoffset, fresh }`, capped the way
+## `_InitSpriteAnimStruct` caps them. `fresh` is a struct that has not had a
+## `PlaySpriteAnimations` pass yet: `UpdateTitleTrailSprite` spawns behind that
+## call, so a new trail neither runs its `.zero` nor reaches shadow OAM until the
+## next frame.
 var _trails: Array[Dictionary] = []
+## `wSpriteAnimCount`, which `_InitSpriteAnimStruct` raises on every spawn and
+## which every struct keeps as its own `SPRITEANIMSTRUCT_INDEX`. `TitleScreen`
+## spawns the bird before any trail, so the count opens at one.
+var _anim_count: int = 1
 var _cloud_scroll: int = 0
 
 
@@ -229,7 +251,10 @@ func advance_frame(held: Array = []) -> void:
 	if _scene == SCENE_END:
 		return
 	_frame += 1
-	_advance_animation()
+	# `RunTitleScreen`'s own order: the clouds, then the scene, which is what
+	# counts the timer down, then the sprites and the spawn behind them, both of
+	# which read that timer after the count.
+	_advance_clouds()
 	match _scene:
 		SCENE_ENTRANCE:
 			_advance_entrance()
@@ -239,6 +264,7 @@ func advance_frame(held: Array = []) -> void:
 			_scene = SCENE_MAIN
 		SCENE_MAIN:
 			_advance_main(held)
+	_advance_animation()
 
 
 ## `SuicuneFrameIterator` and `AnimSeq_GSIntroHoOhLugia`, both of which run on
@@ -251,12 +277,14 @@ func _advance_animation() -> void:
 	# Silver's countdown wraps rather than going negative.
 	_bird_var = (_bird_var + (1 if _profile == RomRegistry.GOLD else -1)) & 0xFF
 	_bird_frame += 1
-	_advance_clouds()
 	_advance_trails()
 
 
 ## `ScrollTitleScreenClouds`, whose `dec a` walks one shared offset off the left.
+## Crystal's own loop has no clouds in it.
 func _advance_clouds() -> void:
+	if _profile == RomRegistry.CRYSTAL:
+		return
 	if _profile == RomRegistry.GOLD and (_frame & CLOUD_GOLD_MASK) != 0:
 		return
 	_cloud_scroll = (_cloud_scroll - 1) & 0xFF
@@ -268,24 +296,57 @@ func _advance_clouds() -> void:
 func _advance_trails() -> void:
 	var alive: Array[Dictionary] = []
 	for trail: Dictionary in _trails:
+		if bool(trail["fresh"]):
+			trail["fresh"] = false
+			if _profile == RomRegistry.GOLD:
+				# Gold's `.zero`: VAR1 is the struct's own index masked to two bits
+				# and swapped, so four consecutive spawns open a quarter turn apart.
+				trail["var1"] = (int(trail["index"]) & 0x3) << 4
+		if _profile == RomRegistry.SILVER:
+			# Silver's `.zero` runs ahead of the move on every frame, because it
+			# never reaches `AnimSeqs_IncAnonJumptableIndex`.
+			var scale: int = (_timer & TRAIL_SILVER_TIMER_MASK) >> TRAIL_SILVER_TIMER_SHIFT
+			trail["var1"] = (
+				int(trail["var1"]) + scale + TRAIL_SILVER_STEP_BASE
+			) & 0xFF
+			trail["yoffset"] = _lift(
+				int(trail["var1"]), scale + TRAIL_SILVER_AMPLITUDE_BASE
+			)
 		var at: Vector2i = trail["at"]
 		if at.x >= TRAIL_X_END:
 			continue
 		at.x += TRAIL_X_STEP
-		at.y = (at.y + TRAIL_Y_STEP) & 0xFF
+		if _profile == RomRegistry.GOLD:
+			at.y = (at.y + TRAIL_Y_STEP) & 0xFF
+			trail["var1"] = (int(trail["var1"]) + TRAIL_SINE_STEP) & 0xFF
+			trail["yoffset"] = _lift(int(trail["var1"]), TRAIL_SINE_AMPLITUDE)
 		trail["at"] = at
-		trail["var1"] = (int(trail["var1"]) + TRAIL_SINE_STEP) & 0xFF
 		alive.append(trail)
 	_trails = alive
-	if (_timer & TRAIL_SPAWN_MASK) != 0 or _trails.size() >= MAX_SPRITE_STRUCTS:
+	if (_timer & TRAIL_SPAWN_MASK) != 0 or _trails.size() >= MAX_TRAILS:
 		return
-	var at: Vector2i = TRAIL_AT_SILVER
+	var spawn: Vector2i = TRAIL_AT_SILVER
 	if _profile == RomRegistry.GOLD:
 		var row: Array = TRAIL_COORDS_GOLD[_bird_entry()]
-		at = row[1 if (_timer & TRAIL_SPAWN_ALTERNATE) != 0 else 0]
-		if at.x < 0:
+		spawn = row[1 if (_timer & TRAIL_SPAWN_ALTERNATE) != 0 else 0]
+		if spawn.x < 0:
 			return
-	_trails.append({"at": at, "var1": 0})
+	# `_InitSpriteAnimStruct` steps `wSpriteAnimCount` past zero rather than
+	# through it, so no struct is ever indexed nothing.
+	_anim_count = (_anim_count + 1) & 0xFF
+	if _anim_count == 0:
+		_anim_count = 1
+	_trails.append(
+		{"at": spawn, "var1": 0, "yoffset": 0, "fresh": true, "index": _anim_count}
+	)
+
+
+## `AnimSeqs_Sine` over `BattleAnimSineWave`, as the byte `UpdateAnimFrame` adds
+## to a coordinate. Zero without the table rather than an invented curve.
+func _lift(a: int, amplitude: int) -> int:
+	if _sine == null:
+		return 0
+	return Gen2BattleAnimFunctions.sine_of(_sine, a, amplitude)
 
 
 ## `TitleScreenEntrance`. Its `.done` is what starts the music and drops the
@@ -390,25 +451,22 @@ func _crystal_sprites() -> Array[Dictionary]:
 ## battle animation reads.
 func _bird_sprites() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	# The trails were spawned before the bird and so hold the lower struct slots,
-	# which is what puts them behind it.
+	# `TitleScreen` spawns the bird into the first free slot and then copies the
+	# struct into `wSpriteAnim10` and clears the first, so the bird holds the last
+	# slot however late a trail is spawned: the trails are drawn first and the
+	# bird over them.
 	for trail: Dictionary in _trails:
+		if bool(trail["fresh"]):
+			continue
 		var trail_at: Vector2i = trail["at"]
-		var lift: int = 0
-		if _profile == RomRegistry.GOLD and _sine != null:
-			lift = Gen2BattleAnimFunctions.sine_of(
-				_sine, int(trail["var1"]), TRAIL_SINE_AMPLITUDE
-			)
 		out.append({
 			"kind": SPRITE_TRAIL,
-			"at": Vector2i(trail_at.x, (trail_at.y + lift) & 0xFF),
+			"at": Vector2i(trail_at.x, (trail_at.y + int(trail["yoffset"])) & 0xFF),
 			"tile": 0, "palette": 1,
 		})
 
 	var amplitude: int = BIRD_SINE_GOLD if _profile == RomRegistry.GOLD else BIRD_SINE_SILVER
-	var offset: int = 0
-	if _sine != null:
-		offset = Gen2BattleAnimFunctions.sine_of(_sine, _bird_var, amplitude)
+	var offset: int = _lift(_bird_var, amplitude)
 	# `UpdateAnimFrame` adds the offset to the coordinate as a byte, so a sprite
 	# pushed past the screen wraps rather than clamping.
 	out.append({

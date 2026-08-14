@@ -12,6 +12,27 @@ func _scene(profile: StringName) -> Gen2TitleScene:
 	return Gen2TitleScene.create(profile)
 
 
+## `BattleAnimSineWave`, hand-built rather than imported: `sine_table 32` is
+## `sin(x * pi / 32) * $100`.
+func _sine() -> Gen2BattleAnimData:
+	var bytes := PackedByteArray()
+	for index: int in 0x20:
+		var value: int = int(round(sin(float(index) * PI / 32.0) * 256.0))
+		bytes.append(value & 0xFF)
+		bytes.append((value >> 8) & 0xFF)
+	return Gen2BattleAnimData.create({}, [], bytes, &"gold")
+
+
+## Every trail on screen this frame, oldest first, as the shadow-OAM positions
+## [Gen2TitlePage] draws them at.
+func _trails(scene: Gen2TitleScene) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for sprite: Dictionary in scene.sprites():
+		if StringName(sprite["kind"]) == Gen2TitleScene.SPRITE_TRAIL:
+			out.append(sprite["at"])
+	return out
+
+
 func _spend(scene: Gen2TitleScene, frames: int, held: Array = []) -> void:
 	for _frame: int in frames:
 		scene.advance_frame(held)
@@ -186,7 +207,8 @@ func test_trails_are_spawned_behind_the_bird_and_fly_off() -> void:
 			return StringName(sprite["kind"]) == Gen2TitleScene.SPRITE_TRAIL
 	)
 	assert_gt(trails.size(), 0, "the screen is dropping trails")
-	assert_lte(trails.size(), Gen2TitleScene.MAX_SPRITE_STRUCTS)
+	## The bird holds the tenth struct for the whole screen, so nine is the cap.
+	assert_lte(trails.size(), Gen2TitleScene.MAX_TRAILS)
 	## `cp $a4 / jr nc, .delete` runs before the move, so the frame a particle
 	## lands on the edge is still drawn and the next one takes it away.
 	for trail: Dictionary in trails:
@@ -197,6 +219,96 @@ func test_trails_are_spawned_behind_the_bird_and_fly_off() -> void:
 	_spend(crystal, 40)
 	for sprite: Dictionary in crystal.sprites():
 		assert_eq(StringName(sprite["kind"]), Gen2TitleScene.SPRITE_CRYSTAL)
+
+
+## `UpdateTitleTrailSprite` reads the timer `TitleScreenScene` has already
+## counted down this frame, and `InitSpriteAnimStruct` runs behind
+## `PlaySpriteAnimations`, so a struct spawned now is not in shadow OAM until the
+## next frame. The timer is armed on frame 1 with its low two bits clear.
+func test_a_trail_is_drawn_the_frame_after_it_is_spawned() -> void:
+	var scene: Gen2TitleScene = _scene(RomRegistry.SILVER)
+	var grew: Array[int] = []
+	var count: int = 0
+	for frame: int in range(1, 13):
+		scene.advance_frame()
+		if _trails(scene).size() > count:
+			count = _trails(scene).size()
+			grew.append(frame)
+	assert_eq(grew, [2, 6, 10] as Array[int])
+
+
+## `AnimSeq_GSTitleTrail`'s Silver branch is a different routine under the same
+## name: no `inc [hl]` on the y coordinate, and no
+## `AnimSeqs_IncAnonJumptableIndex`, so `.zero` recomputes the sine every frame
+## off `wIntroSceneTimer`, which the union at `wJumptableIndex + 2` gives to
+## `LOW(wTitleScreenTimer)`.
+func test_silvers_trail_flies_level_on_a_sine_off_the_live_timer() -> void:
+	var scene := Gen2TitleScene.create(RomRegistry.SILVER, _sine())
+	var seen: Array[int] = []
+	var first := Vector2i(0, 0)
+	for _frame: int in 10:
+		scene.advance_frame()
+		var trails: Array[Vector2i] = _trails(scene)
+		if trails.is_empty():
+			continue
+		if seen.is_empty():
+			first = trails[0]
+		seen.append(trails[0].y)
+		assert_eq(trails[0].x, first.x + 4 * (seen.size() - 1), "four pixels a frame")
+
+	## `wIntroSceneTimer & $30` swapped is 0 to 3, so the amplitude is 3 to 6 and
+	## the trail stays inside that band of its own spawn row rather than falling.
+	var high: int = Gen2TitleScene.TRAIL_AT_SILVER.y + 6
+	for y: int in seen:
+		assert_between(y, Gen2TitleScene.TRAIL_AT_SILVER.y - 6, high)
+	assert_gt(_distinct(seen), 1, "and it is a sine rather than a straight line")
+
+	## Gold's own branch is the one that falls: its y coordinate takes an
+	## `inc [hl]` a frame under a sine of two.
+	var gold := Gen2TitleScene.create(RomRegistry.GOLD, _sine())
+	var gold_seen: Array[int] = []
+	for _frame: int in 10:
+		gold.advance_frame()
+		var trails: Array[Vector2i] = _trails(gold)
+		if not trails.is_empty():
+			gold_seen.append(trails[0].y)
+	assert_gt(gold_seen.size(), 4)
+	assert_between(
+		gold_seen[-1] - gold_seen[0], gold_seen.size() - 3, gold_seen.size() + 1,
+		"a pixel a frame, give or take the sine"
+	)
+
+
+## Gold's `.zero` seeds VAR1 with `SPRITEANIMSTRUCT_INDEX`, which is
+## `wSpriteAnimCount` at the spawn: four consecutive trails open a quarter turn
+## apart rather than all on the same phase.
+func test_golds_trails_open_on_their_own_phase() -> void:
+	var scene := Gen2TitleScene.create(RomRegistry.GOLD, _sine())
+	## Every Gold spawn row shares an x, and each trail moves four a frame, so the
+	## frame a trail was spawned on names it for as long as it is up.
+	var paths: Dictionary = {}
+	for frame: int in 40:
+		scene.advance_frame()
+		for at: Vector2i in _trails(scene):
+			var key: int = at.x - Gen2TitleScene.TRAIL_X_STEP * frame
+			if not paths.has(key):
+				paths[key] = [at.y]
+				continue
+			(paths[key] as Array).append(at.y - int((paths[key] as Array)[0]))
+	var shapes: Array[Array] = []
+	for key: int in paths:
+		var path: Array = (paths[key] as Array).slice(1, 12)
+		if path.size() == 11 and not shapes.has(path):
+			shapes.append(path)
+	assert_gt(shapes.size(), 1, "consecutive spawns ride the sine from different places")
+
+
+func _distinct(values: Array[int]) -> int:
+	var seen: Array[int] = []
+	for value: int in values:
+		if not seen.has(value):
+			seen.append(value)
+	return seen.size()
 
 
 ## `ScrollTitleScreenClouds`, which Gold runs on every eighth frame and Silver
