@@ -57,6 +57,7 @@ var _presents_palettes: Dictionary = {}
 var _title: Dictionary = {}
 var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
+var _pokecenter_pc: Dictionary = {}
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
 var _gs_intro: Dictionary = {}
@@ -134,6 +135,8 @@ static func open_directory(path: String) -> GameData:
 	data._town_map = town_map if town_map is Dictionary else {}
 	var oak_ratings: Variant = manifest.get("oak_ratings", {})
 	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
+	var pokecenter_pc: Variant = manifest.get("pokecenter_pc", {})
+	data._pokecenter_pc = pokecenter_pc if pokecenter_pc is Dictionary else {}
 	var credits: Variant = manifest.get("credits", {})
 	data._credits = credits if credits is Dictionary else {}
 	var intro_movie: Variant = manifest.get("intro_movie", {})
@@ -1153,6 +1156,41 @@ func title_tilemap() -> PackedByteArray:
 ## still in, and `closed` `_OakPCText4`. Empty on a cache imported without them.
 func oak_pc_text(name: String) -> String:
 	return String(_oak_ratings.get(name, ""))
+
+
+## One row string of either of the PC's two menus, by the name
+## `RomLayout.POKECENTER_PC_ROWS` or `POKECENTER_PC_PLAYERS_ROWS` gives it.
+## `<PLAYER>` is still in `players_pc`, the way the cartridge stores it. Empty on
+## a cache imported without them.
+func pokecenter_pc_row(name: String, players: bool = false) -> String:
+	var rows: Variant = _pokecenter_pc.get("players_rows" if players else "rows", {})
+	return String((rows as Dictionary).get(name, "")) if rows is Dictionary else ""
+
+
+## `.WhichPC`: which rows each of the menu's per-state lists offers, as indices
+## into the row order above. Empty on a cache imported without them.
+##
+## JSON numbers come back as floats, so the rows are converted here rather than
+## at every reader.
+func pokecenter_pc_lists(players: bool = false) -> Array:
+	var lists: Variant = _pokecenter_pc.get("players_lists" if players else "lists", [])
+	if not lists is Array:
+		return []
+	var out: Array = []
+	for raw_list: Variant in lists as Array:
+		var rows: Array[int] = []
+		if raw_list is Array:
+			for row: Variant in raw_list as Array:
+				rows.append(int(row))
+		out.append(rows)
+	return out
+
+
+## One of the routine's own six texts, by the name
+## `RomLayout.POKECENTER_PC_TEXTS` gives it.
+func pokecenter_pc_text(name: String) -> String:
+	var texts: Variant = _pokecenter_pc.get("texts", {})
+	return String((texts as Dictionary).get(name, "")) if texts is Dictionary else ""
 
 
 ## `OakRatings`, as [code]{ threshold, sfx, text }[/code] rows in table order.

@@ -32,7 +32,9 @@ const GROUPS: Dictionary = {
 		&"pewter", &"cinnabar", &"radio", &"elite_four", &"ss_aqua", &"mt_silver",
 	],
 	&"art": [&"intro_movie", &"gs_intro", &"credits", &"town_map", &"battle_anims"],
-	&"tables": [&"tmhm", &"naming", &"world_scripts", &"opening_lane"],
+	&"tables": [
+		&"tmhm", &"naming", &"world_scripts", &"opening_lane", &"pokecenter_pc",
+	],
 	&"trainers": [&"crystal_route30_trainer", &"gold_route30_trainer"],
 }
 

@@ -30,6 +30,25 @@ func test_world_state_round_trips_persistent_overworld_fields() -> void:
 	assert_eq(restored.roaming_mons().size(), 1)
 
 
+## `wPCItems` is its own array, so it round-trips beside the bag rather than
+## inside it. A state written before the item PC existed has no key at all,
+## which restores as an empty PC.
+func test_pc_items_round_trip_beside_the_bag() -> void:
+	var state := Gen2WorldState.new({}, {}, {3: 8})
+	assert_true(bool(state.apply_changes({}, {}, {"pc_items": {3: 2, 9: 1}})["ok"]))
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.item_quantity(3), 8)
+	assert_eq(restored.pc_item_quantity(3), 2)
+	assert_eq(restored.pc_item_quantity(9), 1)
+	var without: Dictionary = state.to_dict()
+	without.erase("pc_items")
+	assert_eq(Gen2WorldState.from_dict(without).pc_items().size(), 0)
+	assert_eq(
+		state.apply_changes({}, {}, {"pc_items": {0: 1}})["reason"],
+		&"invalid_pc_item_quantity"
+	)
+
+
 func test_maptile_decorations_round_trip_and_validate_categories() -> void:
 	var state := Gen2WorldState.new()
 	assert_true(state.set_maptile_decoration(&"bed", 0x02))

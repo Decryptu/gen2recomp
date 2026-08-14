@@ -11,7 +11,6 @@ const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const BATTLE_SCENE: PackedScene = preload("res://game/battle/battle_screen.tscn")
 const SERVICE_SCENE: PackedScene = preload("res://game/world/world_service_screen.tscn")
-const BOX_SCENE: PackedScene = preload("res://game/save/box_screen.tscn")
 const START_MENU_SCENE: PackedScene = preload("res://game/world/start_menu_screen.tscn")
 const PARTY_SCENE: PackedScene = preload("res://game/save/party_screen.tscn")
 const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
@@ -75,7 +74,6 @@ var _pokedex_host: Gen2PokedexScreen = null
 ## menu cursor below survives its own screen.
 var _pokedex_prev_entry: int = 0
 var _service_host: Gen2WorldServiceScreen = null
-var _pc_host: Gen2BoxScreen = null
 var _start_menu_host: Gen2StartMenuScreen = null
 var _party_host: Gen2PartyScreen = null
 var _hall_of_fame_host: Gen2HallOfFameScreen = null
@@ -527,7 +525,7 @@ func _advance_held_direction() -> void:
 ## they all need this one, and adding an overlay to five of six lists by hand is
 ## what the Cut and Hall of Fame work each paid for once.
 func _overlay_open() -> bool:
-	return _battle_host != null or _service_host != null or _pc_host != null \
+	return _battle_host != null or _service_host != null \
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
 		or _pokedex_host != null or _credits_host != null
@@ -619,10 +617,6 @@ func _handle_button(button: int) -> bool:
 		return true
 	if _credits_host != null:
 		_credits_host.handle_button(button)
-		return true
-	if _pc_host != null:
-		if button == Gen2Button.B:
-			_pc_host.close_embedded()
 		return true
 	if _party_host != null:
 		_party_host.handle_button(button)
@@ -922,7 +916,7 @@ func _advance_game_time_frame() -> void:
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	if save == null or save.game_time == null:
 		return
-	if _hall_of_fame_host != null or _pc_host != null:
+	if _hall_of_fame_host != null:
 		return
 	save.game_time.advance_frames(1)
 
@@ -1642,52 +1636,6 @@ func _open_service_host() -> void:
 	_refresh_labels()
 
 
-func _open_pc_host() -> void:
-	if _pc_host != null or _world == null or _data == null:
-		return
-	var host: Gen2BoxScreen = BOX_SCENE.instantiate() as Gen2BoxScreen
-	if host == null:
-		_script_prompt = "PC storage scene unavailable"
-		_refresh_labels()
-		return
-	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
-	var persist: bool = save != null and _injected_save == null
-	if save == null:
-		save = Gen2SaveStore.create_development_save(_data, 0)
-		if save != null:
-			save.world = _world.snapshot()
-		persist = false
-	if save == null:
-		host.queue_free()
-		_script_prompt = "PC storage requires a validated save"
-		_refresh_labels()
-		return
-	host.set_context(_data, save, persist, true)
-	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	host.z_index = 20
-	host.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(host)
-	host.closed.connect(_on_pc_closed)
-	_pc_host = host
-	_script_prompt = "PC storage open"
-	_refresh_labels()
-
-
-func _on_pc_closed(result: Dictionary) -> void:
-	var host: Gen2BoxScreen = _pc_host
-	_pc_host = null
-	if host != null:
-		host.queue_free()
-	if _world == null:
-		return
-	var resumed: Array = _world.complete_runtime_request(result)
-	if resumed.is_empty():
-		_script_prompt = "PC storage closed"
-	else:
-		_show_script_results(resumed)
-	_refresh_labels()
-
-
 ## Opens the induction sequence `halloffame` asks for. Public so the screenshot
 ## tool and the scene tests can reach it without replaying the whole route.
 ##
@@ -1816,8 +1764,8 @@ func _play_hall_of_fame_music() -> void:
 
 
 ## Public driver for screenshot tooling and scene tests, mirroring
-## _open_pc_host()'s shape. The START branch in _handle_button() is the normal
-## path.
+## _open_service_host()'s shape. The START branch in _handle_button() is the
+## normal path.
 func _open_start_menu() -> void:
 	if _world == null or _data == null or _overlay_open() or _field_move_text \
 		or not _oak_pc_pages.is_empty() \
@@ -2491,12 +2439,9 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
 					&"special_phone_call_requested", &"town_map_requested",
-					&"apricorn_selection_requested",
+					&"apricorn_selection_requested", &"pc_requested",
 				]:
 					_open_service_host()
-					break
-				if StringName(request.get("kind", &"")) == &"pc_requested":
-					_open_pc_host()
 					break
 				if StringName(request.get("kind", &"")) == &"audio_requested":
 					var audio_results: Array = _handle_audio_request(request)

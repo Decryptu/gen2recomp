@@ -7,6 +7,8 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/map.png town_map
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/card.png trainer_card
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/oak.png oak_pc
+##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/pc.png pc
+##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/pc.png pc a,down,a
 ##
 ## `presses` drives the overlay with its own buttons before the shot, which is
 ## how the apricorn mode's second box is photographed.
@@ -143,6 +145,10 @@ func _write_service_cache() -> void:
 		Gen2WorldScriptRunner.SPECIAL_SELECT_APRICORN_FOR_KURT, 0x00,
 		Gen2WorldScript.END,
 	] if _kind == &"apricorn" else [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_POKEMON_CENTER_PC, 0x00,
+		Gen2WorldScript.END,
+	] if _kind == &"pc" else [
 		0x94, 0, 0x00, 0x40, 0x91,
 	]
 	RomCache.write_json(RomCache.world_scripts_path(_fixture_directory), scripts)

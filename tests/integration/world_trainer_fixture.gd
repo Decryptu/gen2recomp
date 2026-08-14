@@ -86,6 +86,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_battle_graphics(directory, manifest)
 	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
 	_write_menu_text(manifest)
+	_write_pokecenter_pc(manifest)
 	_write_credits(directory, manifest, crystal_commands)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
@@ -369,6 +370,42 @@ static func _write_menu_text(manifest: Dictionary) -> void:
 		"toss_ask": "Throw away how\nmany?",
 		"toss_ask_quantity": "Throw away <NUM_D009>\n<RAM_CF7E>(S)?",
 		"toss_threw": "Threw away\n<RAM_CF7E>(S).",
+	}
+
+
+## `PokemonCenterPC`'s two row runs, its `.WhichPC` lists and the six texts the
+## routine prints, as the cartridge words them.
+static func _write_pokecenter_pc(manifest: Dictionary) -> void:
+	manifest["pokecenter_pc"] = {
+		"rows": {
+			"players_pc": "<PLAYER>'s PC", "bills_pc": "BILL's PC",
+			"oaks_pc": "PROF.OAK's PC", "hall_of_fame": "HALL OF FAME",
+			"turn_off": "TURN OFF",
+		},
+		"lists": [[1, 0, 4], [1, 0, 2, 4], [1, 0, 2, 3, 4]],
+		"players_rows": {
+			"withdraw_item": "WITHDRAW ITEM", "deposit_item": "DEPOSIT ITEM",
+			"toss_item": "TOSS ITEM", "mail_box": "MAIL BOX",
+			"decoration": "DECORATION", "turn_off": "TURN OFF",
+			"log_off": "LOG OFF",
+		},
+		"players_lists": [[0, 1, 2, 3, 5], [0, 1, 2, 3, 4, 6]],
+		"texts": {
+			"ask_what_do": "What do you want\nto do?",
+			"how_many_withdraw": "How many do you\nwant to withdraw?",
+			"withdrew": "Withdrew <NUM_D10C>\n<RAM_D086>(S).",
+			"no_room_withdraw": "There's no room\nfor more items.",
+			"no_items": "No items here!",
+			"how_many_deposit": "How many do you\nwant to deposit?",
+			"deposited": "Deposited <NUM_D10C>\n<RAM_D086>(S).",
+			"no_room_deposit": "There's no room to\nstore items.",
+			"turn_on": "<PLAYER> turned on\nthe PC.",
+			"whose": "Access whose PC?",
+			"bills_pc": "BILL's PC\naccessed.",
+			"players_pc": "Accessed own PC.",
+			"oaks_pc": "PROF.OAK's PC\naccessed.",
+			"closed": "…\nLink closed…",
+		},
 	}
 
 
