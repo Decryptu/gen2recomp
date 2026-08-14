@@ -110,6 +110,20 @@ func test_a_wait_tick_is_a_whole_jumptable_cycle() -> void:
 	assert_eq(credits.timer(), FIRST_WAIT - 1)
 
 
+## The cycle a caller can read: `wJumptableIndex` walks the thirteen entries in
+## order and wraps back onto `ParseCredits`, which is the one step that spends a
+## tick. Only that step and the one in front of it are ever followed by a parse,
+## which is what lets a test tell `Credits_HandleBButton` apart from the wait.
+func test_the_step_walks_the_cycle_and_wraps_onto_parse() -> void:
+	var credits: Gen2Credits = Gen2Credits.create(_data)
+	assert_eq(credits.step(), Gen2Credits.STEP_PARSE, "the loop opens on a parse")
+	for entry: int in range(1, Gen2Credits.CYCLE_FRAMES):
+		_spend(credits, 1)
+		assert_eq(credits.step(), entry)
+	_spend(credits, 1)
+	assert_eq(credits.step(), Gen2Credits.STEP_PARSE, "and the last entry wraps")
+
+
 ## `.print`: the string's line operand is two rows per step from row 6, and
 ## `NextLineChar` drops two more at the string's own starting column.
 func test_a_string_prints_two_rows_a_line_and_wraps_at_its_own_column() -> void:

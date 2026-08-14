@@ -29,8 +29,12 @@ var _profile: StringName = &"gold"
 var _phase: StringName = &""
 var _frame: int = 0
 var _phase_frame: int = 0
-## `CrystalIntro`'s own state while the movie phase is up, null outside it.
+## `CrystalIntro`'s own state while the movie phase is up, null outside it and
+## on Gold and Silver, which run [member _gs_movie] in the same slot.
 var _movie: Gen2IntroMovie = null
+## `GoldSilverIntro`'s, which is the other cartridges' movie. `IntroSequence`
+## runs one movie here, so the two share the phase rather than taking one each.
+var _gs_movie: Gen2GoldSilverIntro = null
 ## The cache the movie reads its art out of, handed in by the host.
 var _data: GameData = null
 ## `GameFreakPresentsScene` and the sprite beside it, which own every frame of
@@ -63,6 +67,7 @@ func start(
 	_presents = null
 	_title = null
 	_movie = null
+	_gs_movie = null
 	_available = available.duplicate()
 	if not is_available(PHASE_COPYRIGHT):
 		_phase = PHASE_COPYRIGHT
@@ -107,6 +112,12 @@ func intro_scene() -> int:
 ## intro phase.
 func movie() -> Gen2IntroMovie:
 	return _movie
+
+
+## The live Gold and Silver movie, which is the other half of the same phase.
+## Null on Crystal and outside the intro phase.
+func gs_movie() -> Gen2GoldSilverIntro:
+	return _gs_movie
 
 
 func waiting_sound() -> StringName:
@@ -258,20 +269,34 @@ func skip_presents() -> bool:
 ## The movie spends whatever `CrystalIntro` spends: the sequence is asked for a
 ## frame and the phase ends when its jumptable sets `JUMPTABLE_EXIT_F`.
 func _advance_intro() -> void:
-	if _movie == null:
+	if _movie == null and _gs_movie == null:
 		_enter_after(PHASE_INTRO_MOVIE)
 		return
-	var scene: int = _movie.scene()
-	for event: Dictionary in _movie.advance_frame():
+	var scene: int = _intro_scene()
+	var events: Array[Dictionary] = _movie.advance_frame() if _movie != null \
+		else _gs_movie.advance_frame()
+	for event: Dictionary in events:
 		var values: Dictionary = event.duplicate()
 		for key: String in ["type", "frame", "scene"]:
 			values.erase(key)
 		_emit(StringName(event.get("type", &"")), values)
-	if _movie.scene() != scene:
-		_emit(&"show_image", {"id": &"intro_movie", "scene": _movie.scene()})
-	if _movie.finished():
+	if _intro_scene() != scene:
+		_emit(&"show_image", {"id": &"intro_movie", "scene": _intro_scene()})
+	if _intro_finished():
 		_emit(&"hide_image", {"id": &"intro_movie"})
 		_enter_after(PHASE_INTRO_MOVIE)
+
+
+func _intro_scene() -> int:
+	if _movie != null:
+		return _movie.scene()
+	return _gs_movie.scene() if _gs_movie != null else 0
+
+
+func _intro_finished() -> bool:
+	if _movie != null:
+		return _movie.finished()
+	return _gs_movie.finished() if _gs_movie != null else true
 
 
 ## Enters the first phase after [param phase] the host can draw, with that
@@ -293,9 +318,15 @@ func _enter_after(phase: StringName) -> void:
 				_presents.start(_profile, _sine)
 				_emit(&"show_image", {"id": &"game_freak_presents"})
 			PHASE_INTRO_MOVIE:
-				# `CrystalIntro` starts on a cleared screen and plays no music
-				# until `IntroScene13`, so the phase opens with the art alone.
-				_movie = Gen2IntroMovie.create(_data, _sine)
+				# `IntroSequence` runs one movie here, and which one is the
+				# cartridge's: `CrystalIntro` starts on a cleared screen and plays
+				# no music until `IntroScene13`, while `GoldSilverIntro` asks for
+				# `MUSIC_GS_OPENING` in its own first scene. Either way the phase
+				# opens with the art alone.
+				if Gen2GoldSilverIntro.available(_data):
+					_gs_movie = Gen2GoldSilverIntro.create(_data, _sine)
+				else:
+					_movie = Gen2IntroMovie.create(_data, _sine)
 				_emit(&"show_image", {"id": &"intro_movie", "scene": 0})
 			PHASE_TITLE:
 				# `_TitleScreen` draws the whole screen and plays

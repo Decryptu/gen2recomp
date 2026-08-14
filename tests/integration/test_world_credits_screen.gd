@@ -12,6 +12,12 @@ const CREDITS_COMMAND: int = 0xA2
 const SCRIPT_ADDRESS: int = 0x7000
 ## Long enough for the fixture script to reach `CREDITS_END`.
 const WHOLE_SCRIPT_FRAMES: int = Gen2Credits.CYCLE_FRAMES * 40
+## The budget [method _advance_to_a_standing_wait] searches, which is the whole
+## script: a wait it can use turns up well before the end of one.
+const SEARCH_FRAMES: int = WHOLE_SCRIPT_FRAMES
+## One tick for `Credits_HandleBButton` to take and one left standing, so the
+## release half measures a wait rather than an empty one.
+const STANDING_WAIT: int = 2
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -50,6 +56,40 @@ func _host() -> Gen2CreditsScreen:
 	return _world_screen._credits_host
 
 
+## [Gen2CreditsScreen] counts hardware frames off wall-clock delta in `_process`,
+## which a test that also drives frames by hand cannot account for: one long
+## frame on a loaded machine spends an unknown part of the wait the case is about
+## to measure. `open_credits` and `_show_script_results` both build the host
+## synchronously, so this takes its processing away before the first frame
+## passes and the test owns every frame from there.
+func _stop_self_advancing() -> void:
+	if _host() != null:
+		_host().set_process(false)
+
+
+## Drives frames until the credits sit where the two halves below can each be
+## read on their own:
+##
+## - past the header, which is the only place `Credits_HandleBButton` skips;
+## - on a wait deep enough to still be standing after B has taken one, so the
+##   release half measures a wait rather than an empty one;
+## - and two frames short of the next `STEP_PARSE`, because that step spends a
+##   tick of its own and would be indistinguishable from the button.
+func _advance_to_a_standing_wait() -> bool:
+	for _frame: int in SEARCH_FRAMES:
+		if _host() == null or _host().credits() == null:
+			return false
+		var credits: Gen2Credits = _host().credits()
+		if credits.position() >= Gen2Credits.SKIP_FROM_POSITION \
+				and credits.timer() >= STANDING_WAIT \
+				and not credits.step() in [
+					Gen2Credits.STEP_PARSE, Gen2Credits.CYCLE_FRAMES - 1
+				]:
+			return true
+		_host().advance_frames(1)
+	return false
+
+
 ## `Script_credits` farcalls `RedCredits` and falls into `Script_endall`, so the
 ## overlay opens off the drained results the way `halloffame`'s does.
 func test_the_credits_command_opens_the_overlay() -> void:
@@ -68,6 +108,7 @@ func test_the_credits_command_opens_the_overlay() -> void:
 		int(world.current_map.events["coord_events"][0]["y"])
 	)
 	_world_screen._show_script_results(world.dispatch_script_events())
+	_stop_self_advancing()
 	await get_tree().process_frame
 
 	assert_not_null(_host())
@@ -90,6 +131,7 @@ func test_the_overworld_does_not_move_while_the_credits_run() -> void:
 func test_a_leaves_only_once_the_script_has_run_out() -> void:
 	await _open_world()
 	_world_screen.open_credits()
+	_stop_self_advancing()
 	await get_tree().process_frame
 	_world_screen.press_button(Gen2Button.A)
 	assert_not_null(_host(), "and the press is still swallowed rather than refused")
@@ -108,10 +150,13 @@ func test_a_leaves_only_once_the_script_has_run_out() -> void:
 func test_a_release_reaches_the_overlay() -> void:
 	await _open_world()
 	_world_screen.open_credits(true)
+	# The overlay advances itself on wall-clock delta, so the test takes every
+	# frame off it before the first one passes; see [method _stop_self_advancing].
+	_stop_self_advancing()
 	await get_tree().process_frame
+	assert_true(_advance_to_a_standing_wait(), "the credits reach a skippable wait")
+
 	_world_screen.press_button(Gen2Button.B)
-	## Past the header, which is the only place `Credits_HandleBButton` skips.
-	_host().advance_frames(Gen2Credits.CYCLE_FRAMES * 8)
 	var skipped: int = _host().credits().timer()
 	_host().advance_frames(1)
 	assert_lt(_host().credits().timer(), skipped, "B is burning the wait down")
