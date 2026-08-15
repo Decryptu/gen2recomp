@@ -1,42 +1,28 @@
 class_name Gen2BattleSwitchMenu
 extends RefCounted
 
-## Choosing who comes in next, from inside a battle
-## (`PickSwitchMonInBattle` and `ForcePickSwitchMonInBattle`,
-## `engine/battle/core.asm`).
+## `PickSwitchMonInBattle` and `ForcePickSwitchMonInBattle`
+## (`engine/battle/core.asm`).
 ##
-## Three callers, one list. `OfferSwitch`'s YES reaches the first, which the
-## player can back out of; Baton Pass reaches the second through
-## `ForcePickPartyMonInBattle`, which cannot be backed out of and answers a
-## refusal with `SFX_WRONG` and the list again. `ForcePlayerMonChoice`, the
-## replacement after a faint, is that same forced list one wrapper lower: it
-## stops at `ForcePickPartyMonInBattle` and so makes no `SwitchMonAlreadyOut`
-## check, which costs nothing because the slot it would refuse holds the Pokémon
-## that just fainted and `CheckIfCurPartyMonIsFitToFight` refuses it first.
+## Three callers, one list. `OfferSwitch`'s YES can be backed out of; Baton Pass
+## reaches `ForcePickPartyMonInBattle`, which cannot and answers a refusal with
+## `SFX_WRONG` and the list again; `ForcePlayerMonChoice` is that forced list one
+## wrapper lower, so it makes no `SwitchMonAlreadyOut` check, which costs nothing
+## because `CheckIfCurPartyMonIsFitToFight` refuses the fainted slot first. Both
+## wrap `PickPartyMonInBattle` and its two refusals.
 ##
-## Both wrap `PickPartyMonInBattle`, so both make the same two checks on the row
-## that was chosen and print the same two lines:
-##
-## - `CheckIfCurPartyMonIsFitToFight`: a fainted Pokémon prints
-##   `BattleText_TheresNoWillToBattle`;
-## - `SwitchMonAlreadyOut`: the Pokémon already standing prints
-##   `BattleText_MonIsAlreadyOut`.
-##
-## Scene-free: the rows and the cursor rules live here, [Gen2PartyMenuPage] draws
-## them and the battle screen owns the presses. `SetUpBattlePartyMenu` always
-## goes through `InitPartyMenuWithCancel`, so CANCEL is a row in both variants;
-## in the forced one choosing it is refused rather than absent.
+## Scene-free: [Gen2PartyMenuPage] draws the rows and the battle screen owns the
+## presses. `SetUpBattlePartyMenu` goes through `InitPartyMenuWithCancel`, so
+## CANCEL is a row in both variants and the forced one refuses rather than drops
+## it.
 
-## `PartyMenu2DMenuData`'s `_2DMENU_WRAP_UP_DOWN`, which is the only movement
-## flag the party menu sets: the list wraps and there is one column.
+## `PartyMenu2DMenuData`'s `_2DMENU_WRAP_UP_DOWN`, its only movement flag.
 const WRAPS: bool = true
 
-## `InitPartyMenuWithCancel` writes `wMenuCursorY` 1, which is the first member.
+## `InitPartyMenuWithCancel`'s `wMenuCursorY` 1: the first member.
 const DEFAULT_CURSOR: int = 0
 
-## `SFX_WRONG`, which `ForcePickPartyMonInBattle` plays when the pick it cannot
-## refuse is refused anyway, and `SFX_READ_TEXT_2`, which `PartyMenuSelect` plays
-## on both of its own ways out (`constants/sfx_constants.asm`).
+## `ForcePickPartyMonInBattle`'s refusal and `PartyMenuSelect`'s exits.
 const SFX_WRONG: int = 0x19
 const SFX_READ_TEXT_2: int = 0x08
 
@@ -48,16 +34,14 @@ const NO_ENERGY: StringName = &"no_energy"
 const CANNOT_CANCEL: StringName = &"cannot_cancel"
 
 ## One row per party member, in party order:
-## `{index, species, item, name, level, hp, max_hp, status, fainted}`.
-## [Gen2PartyMenuPage] draws exactly these fields and nothing reads the battle
-## behind them; the species and the held item are what its menu mon icon needs.
+## `{index, species, item, name, level, hp, max_hp, status, fainted}`, which is
+## exactly what [Gen2PartyMenuPage] draws and its icon needs.
 var rows: Array = []
 
 ## `ForcePickSwitchMonInBattle` rather than `PickSwitchMonInBattle`.
 var forced: bool = false
 
-## The party slot already on the field, which `SwitchMonAlreadyOut` compares
-## against.
+## What `SwitchMonAlreadyOut` compares against.
 var active: int = -1
 
 ## Zero-based over [method item_count], the CANCEL row last.
@@ -97,8 +81,7 @@ func is_cancel(index: int) -> bool:
 	return index == rows.size()
 
 
-## `_2DMENU_WRAP_UP_DOWN` over one column. Answers whether the cursor moved,
-## which it always does on a list of more than one row.
+## `_2DMENU_WRAP_UP_DOWN` over one column.
 func move(delta: int) -> bool:
 	if delta == 0 or item_count() <= 1:
 		return false
@@ -106,18 +89,16 @@ func move(delta: int) -> bool:
 	return true
 
 
-## A is `PartyMenuSelect` returning the row, then `PickPartyMonInBattle`'s and
-## `PickSwitchMonInBattle`'s two checks over it. A refusal leaves the list
-## standing, which is what both `jr z, .loop` and `jr c, .pick` do.
+## `PartyMenuSelect` returning the row, then the two checks over it; a refusal
+## leaves the list standing (`jr z, .loop`, `jr c, .pick`).
 func confirm() -> Dictionary:
 	if is_cancel(cursor):
 		return cancel()
 	if cursor < 0 or cursor >= rows.size():
 		return {"result": CANNOT_CANCEL, "sfx": SFX_WRONG}
 	var row: Dictionary = rows[cursor]
-	# The source also refuses an EGG (`BattleText_AnEGGCantBattle`). A battle
-	# party here is built from Pokémon that fight, so that branch has no way to
-	# be reached and is not modelled.
+		# `BattleText_AnEGGCantBattle` is unreachable: a battle party here holds
+		# only Pokémon that fight.
 	if bool(row.get("fainted", false)):
 		return {"result": NO_ENERGY, "text": no_energy_text()}
 	if int(row.get("index", -1)) == active:
@@ -125,22 +106,20 @@ func confirm() -> Dictionary:
 	return {"result": CHOSEN, "index": int(row.get("index", -1))}
 
 
-## B, and the CANCEL row, which `PartyMenuSelect` sets carry for alike.
-## `ForcePickPartyMonInBattle` swallows that carry, so the forced list refuses.
+## B and the CANCEL row both set carry, which `ForcePickPartyMonInBattle`
+## swallows.
 func cancel() -> Dictionary:
 	if forced:
 		return {"result": CANNOT_CANCEL, "sfx": SFX_WRONG}
 	return {"result": CANCELLED}
 
 
-## `PartyMenuStrings`' `WhichPKMNString`, which `PARTYMENUACTION_SWITCH` picks
-## and `PlacePartyMenuText` prints in the box along the bottom.
+## `PartyMenuStrings`' `WhichPKMNString`, which `PARTYMENUACTION_SWITCH` picks.
 static func prompt_text() -> String:
 	return "Which PKMN?"
 
 
-## `PlacePartyNicknames`' own `.CancelString`, printed two columns left of the
-## nicknames on the row below the last one.
+## `PlacePartyNicknames`' `.CancelString`, two columns left of the nicknames.
 static func cancel_label() -> String:
 	return "CANCEL"
 
@@ -155,15 +134,12 @@ static func already_out_text(name: String) -> String:
 	return "%s is already out." % name
 
 
-## `BattleText_UseNextMon`, the question `AskUseNextPokemon` puts up over the
-## same yes/no box `OfferSwitch` uses. Wild battles only: a trainer battle
-## returns from the routine before it prints.
+## `AskUseNextPokemon`'s question, wild battles only.
 static func use_next_text() -> String:
 	return "Use next PKMN?"
 
 
-## `BattleText_EnemyIsAboutToUseWillPlayerChangeMon`, the question `OfferSwitch`
-## puts up before the trainer's Pokémon is on the field. [param trainer] is
-## `Battle_GetTrainerName`'s answer and [param mon] the one about to come in.
+## `BattleText_EnemyIsAboutToUseWillPlayerChangeMon`, asked before the trainer's
+## Pokémon is out. [param trainer] is `Battle_GetTrainerName`'s.
 static func offer_text(trainer: String, mon: String, player: String) -> String:
 	return "%s is about to use %s. Will %s change PKMN?" % [trainer, mon, player]

@@ -132,8 +132,9 @@ var _state: Gen2WorldState = null
 ## `wPrevDexEntryBackup`, which `.show_search_results` fills so leaving the
 ## results screen puts the main listing back exactly where it was.
 var _listing_backup: Dictionary = {}
-## `wPokedexOrder`, always [constant RomLayout.SPECIES_COUNT] long. ABC mode
-## zero-fills its tail, and a zero is what `.PrintEntry` draws nothing for.
+## `wPokedexOrder`, [constant RomLayout.SPECIES_COUNT] long plus one slot per mod
+## species. ABC mode zero-fills its tail, and a zero is what `.PrintEntry` draws
+## nothing for.
 var _order: PackedInt32Array = PackedInt32Array()
 
 
@@ -156,27 +157,37 @@ static func open(
 
 ## `Pokedex_OrderMonsByMode`. NEW copies the new-dex table, OLD counts from 1,
 ## and ABC keeps only the species that have been seen and zero-fills the rest.
+##
+## Both tables are cartridge data of exactly [constant RomLayout.SPECIES_COUNT]
+## entries and OLD counts that far, so a mod's species can only follow the
+## cartridge's own run, ascending by number, the way `FIRST_MOD_POCKET` numbers a
+## mod pocket after the cartridge's.
 func order_by_mode() -> void:
+	var mod_species: Array[int] = _data.mod_species_numbers() if _data != null \
+		else [] as Array[int]
 	_order = PackedInt32Array()
-	_order.resize(RomLayout.SPECIES_COUNT)
+	_order.resize(RomLayout.SPECIES_COUNT + mod_species.size())
 	match mode:
 		RomLayout.DEXMODE_ABC:
-			_order_abc()
+			_order_abc(mod_species)
 		RomLayout.DEXMODE_OLD:
 			for index: int in RomLayout.SPECIES_COUNT:
 				_order[index] = index + 1
+			_append_mod_species(mod_species, RomLayout.SPECIES_COUNT)
 			_find_last_seen()
 		_:
 			var table: PackedInt32Array = _data.dex_order_new() if _data != null \
 				else PackedInt32Array()
 			for index: int in RomLayout.SPECIES_COUNT:
 				_order[index] = table[index] if index < table.size() else 0
+			_append_mod_species(mod_species, RomLayout.SPECIES_COUNT)
 			_find_last_seen()
 
 
 ## `Pokedex_ABCMode`: the alphabetical table filtered down to what has been
-## seen, and `wDexListingEnd` is that count rather than a position.
-func _order_abc() -> void:
+## seen, and `wDexListingEnd` is that count rather than a position. A mod's
+## species are filtered the same way and follow the table.
+func _order_abc(mod_species: Array[int]) -> void:
 	var table: PackedInt32Array = _data.dex_order_alpha() if _data != null \
 		else PackedInt32Array()
 	listing_end = 0
@@ -185,14 +196,24 @@ func _order_abc() -> void:
 			continue
 		_order[listing_end] = table[index]
 		listing_end += 1
+	for species: int in mod_species:
+		if not _has_seen(species):
+			continue
+		_order[listing_end] = species
+		listing_end += 1
+
+
+func _append_mod_species(mod_species: Array[int], at: int) -> void:
+	for index: int in mod_species.size():
+		_order[at + index] = mod_species[index]
 
 
 ## `.FindLastSeen`: walks the order backwards and stops at the first species that
 ## has been seen, answering that species' 1-based position. Nothing seen at all
 ## answers zero, which the loop reaches by counting all the way down.
 func _find_last_seen() -> void:
-	var end: int = RomLayout.SPECIES_COUNT
-	for index: int in range(RomLayout.SPECIES_COUNT - 1, -1, -1):
+	var end: int = _order.size()
+	for index: int in range(_order.size() - 1, -1, -1):
 		if _has_seen(_order[index]):
 			break
 		end -= 1
@@ -209,7 +230,11 @@ func _find_last_seen() -> void:
 func init_cursor_position() -> void:
 	scroll = 0
 	cursor = 0
-	if prev_entry <= 0 or prev_entry > RomLayout.SPECIES_COUNT:
+	if prev_entry <= 0:
+		return
+	# A mod species is numbered past the cartridge's range, so the bound is the
+	# order itself rather than the count.
+	if prev_entry > RomLayout.SPECIES_COUNT and not _order.has(prev_entry):
 		return
 	var index: int = 0
 	if listing_end >= listing_height + 1:
