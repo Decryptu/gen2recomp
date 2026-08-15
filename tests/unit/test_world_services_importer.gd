@@ -16,6 +16,7 @@ func test_marts_phone_audio_and_referenced_menu_are_imported() -> void:
 	_write_audio(data)
 	_write_menu(data)
 	_write_fruit_trees(data)
+	_write_spawns(data)
 
 	var scripts: Dictionary = {
 		"5:7000": [
@@ -84,6 +85,7 @@ func test_mart_terminator_is_required() -> void:
 	data.resize(0x200000)
 	_write_marts(data)
 	_write_fruit_trees(data)
+	_write_spawns(data)
 	data[RomFile.linear(5, 0x7000) + 3] = 0x00
 	var result: Dictionary = Gen2WorldServicesImporter.read_services(
 		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
@@ -104,6 +106,65 @@ func _write_fruit_trees(data: PackedByteArray) -> void:
 	]
 	for index: int in rows.size():
 		data[offset + index] = rows[index]
+
+
+## The two tables in their own shape: coordinates and spawn indexes are what
+## identifies each, so the fixture writes the pinned columns and invents the
+## rest.
+func _write_spawns(data: PackedByteArray) -> void:
+	var offset: int = int(_layout["spawn_points"])
+	for index: int in RomLayout.SPAWN_COUNT:
+		var at: int = offset + index * RomLayout.SPAWN_RECORD_SIZE
+		data[at] = 1 + index % 3
+		data[at + 1] = index
+		data[at + 2] = int(RomLayout.SPAWN_COORDINATES[index * 2])
+		data[at + 3] = int(RomLayout.SPAWN_COORDINATES[index * 2 + 1])
+	for byte: int in RomLayout.SPAWN_RECORD_SIZE:
+		data[offset + RomLayout.SPAWN_COUNT * RomLayout.SPAWN_RECORD_SIZE + byte] = \
+			RomLayout.SPAWN_TERMINATOR
+
+	var fly: int = int(_layout["flypoints"])
+	for index: int in RomLayout.FLYPOINT_COUNT:
+		data[fly + index * RomLayout.FLYPOINT_RECORD_SIZE] = 1 + index
+		data[fly + index * RomLayout.FLYPOINT_RECORD_SIZE + 1] = \
+			int(RomLayout.FLYPOINT_SPAWNS[index])
+	data[fly + RomLayout.FLYPOINT_COUNT * RomLayout.FLYPOINT_RECORD_SIZE] = \
+		RomLayout.FLYPOINT_TERMINATOR
+
+
+func test_a_spawn_table_at_the_wrong_offset_is_refused() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_marts(data)
+	_write_phone(data)
+	_write_audio(data)
+	_write_fruit_trees(data)
+	_write_spawns(data)
+	# One coordinate moved is a table that is not this one: every entry's x and y
+	# is what tells `SpawnPoints` from its neighbours.
+	data[int(_layout["spawn_points"]) + 2] += 1
+	var result: Dictionary = Gen2WorldServicesImporter.read_services(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_false(result["ok"])
+	assert_true(String(result["message"]).contains("Spawn 0"))
+
+
+func test_a_flypoint_table_without_its_terminator_is_refused() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_marts(data)
+	_write_phone(data)
+	_write_audio(data)
+	_write_fruit_trees(data)
+	_write_spawns(data)
+	data[int(_layout["flypoints"])
+		+ RomLayout.FLYPOINT_COUNT * RomLayout.FLYPOINT_RECORD_SIZE] = 0x00
+	var result: Dictionary = Gen2WorldServicesImporter.read_services(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_false(result["ok"])
+	assert_true(String(result["message"]).contains("flypoint table"))
 
 
 func test_a_fruit_tree_table_without_its_apricorn_run_is_refused() -> void:
@@ -305,3 +366,26 @@ func _write_far(data: PackedByteArray, offset: int, bank: int, address: int) -> 
 func _write_u16(data: PackedByteArray, offset: int, value: int) -> void:
 	data[offset] = value & 0xFF
 	data[offset + 1] = (value >> 8) & 0xFF
+
+
+func test_the_spawn_and_flypoint_tables_read_in_source_order() -> void:
+	var data := PackedByteArray()
+	data.resize(0x200000)
+	_write_spawns(data)
+	var result: Dictionary = Gen2WorldServicesImporter.read_spawns(
+		RomFile.from_bytes(data, RomRegistry.GOLD), _layout
+	)
+	assert_true(result["ok"], String(result.get("message", "")))
+	var spawns: Array = (result["data"] as Dictionary)["spawns"]
+	var flypoints: Array = (result["data"] as Dictionary)["flypoints"]
+	assert_eq(spawns.size(), RomLayout.SPAWN_COUNT)
+	assert_eq(flypoints.size(), RomLayout.FLYPOINT_COUNT)
+	# `SPAWN_HOME` is the bedroom and carries the table's first coordinates.
+	assert_eq(int(spawns[RomLayout.SPAWN_HOME]["x"]), 3)
+	assert_eq(int(spawns[RomLayout.SPAWN_HOME]["y"]), 3)
+	# Johto first: flypoint 0 is New Bark and the Kanto half starts at 12.
+	assert_eq(int(flypoints[0]["spawn"]), int(RomLayout.FLYPOINT_SPAWNS[0]))
+	assert_eq(
+		int(flypoints[RomLayout.KANTO_FLYPOINT]["spawn"]),
+		int(RomLayout.FLYPOINT_SPAWNS[RomLayout.KANTO_FLYPOINT])
+	)

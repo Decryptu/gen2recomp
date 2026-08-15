@@ -533,3 +533,62 @@ func _add_capture_metadata() -> void:
 		if int(raw["number"]) in [0x01, 0x02, 0x04, 0x05]:
 			raw["pocket"] = RomLayout.ITEM_POCKET_BALL
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+
+
+## `Softboiled_MilkDrinkFunction`: a fifth of the user's own maximum health moved
+## to another party member, and the three refusals `.SelectMilkDrinkRecipient`
+## loops on.
+
+func _fifth_of(index: int) -> int:
+	return Gen2WorldPartyHost.one_fifth_max_hp(_data, _save.party[index])
+
+
+func test_softboiled_moves_a_fifth_of_the_users_own_maximum() -> void:
+	var amount: int = _fifth_of(0)
+	assert_gt(amount, 0)
+	_save.party[1].hp = 1
+	var before: int = _save.party[0].hp
+
+	var result: Dictionary = Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)
+	assert_true(result["ok"], String(result.get("reason", "")))
+	assert_eq(int(result["amount"]), amount)
+	assert_eq(_save.party[0].hp, before - amount)
+	assert_eq(_save.party[1].hp, 1 + int(result["restored"]))
+
+
+func test_the_healed_member_is_never_taken_past_its_own_maximum() -> void:
+	# The user's fifth is what is spent whatever the recipient can hold, which is
+	# why the two numbers are reported separately.
+	var max_hp: int = Gen2SaveBattleAdapter.to_battle_mon(_data, _save.party[1]).max_hp()
+	_save.party[1].hp = max_hp - 1
+	var result: Dictionary = Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)
+	assert_true(result["ok"], String(result.get("reason", "")))
+	assert_eq(_save.party[1].hp, max_hp)
+	assert_eq(int(result["restored"]), 1)
+	assert_eq(int(result["amount"]), _fifth_of(0))
+
+
+func test_a_user_on_a_fifth_or_less_cannot_give_health_away() -> void:
+	# `.CheckMonHasEnoughHP` wants more than the fifth, not the fifth itself.
+	_save.party[1].hp = 1
+	_save.party[0].hp = _fifth_of(0)
+	var result: Dictionary = Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)
+	assert_false(bool(result.get("ok", false)))
+	assert_eq(StringName(result["reason"]), &"not_enough_health")
+	assert_eq(_save.party[1].hp, 1, "and nothing moved")
+
+
+func test_the_user_itself_a_fainted_member_and_a_full_one_are_all_refused() -> void:
+	assert_eq(
+		StringName(Gen2WorldPartyHost.transfer_health(_world, _save, 0, 0, false)["reason"]),
+		&"same_member"
+	)
+	assert_eq(
+		StringName(Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)["reason"]),
+		&"already_full"
+	)
+	_save.party[1].hp = 0
+	assert_eq(
+		StringName(Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)["reason"]),
+		&"fainted_member"
+	)

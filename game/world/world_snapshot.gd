@@ -22,6 +22,13 @@ var dst_enabled: bool = false
 ## rather than as frame zero of a seeded run.
 var random_seed: int = 0
 var frame_number: int = 0
+## Where a blackout, a Teleport, a Dig and an Escape Rope put the player: the
+## last Pokemon Center's own outdoor map, and the warp a cave was walked into
+## through. Both are saved player data on the cartridge (`wLastSpawnMapGroup`,
+## `wDigWarpNumber`), and a snapshot written before they existed carries neither,
+## which reads as a game that has entered no Pokemon Center and no cave.
+var last_spawn_map: Vector2i = Vector2i(-1, -1)
+var dig_warp: Dictionary = {}
 var world_state: Gen2WorldState = Gen2WorldState.new()
 
 
@@ -41,6 +48,8 @@ static func from_world(world: Gen2WorldAPI) -> Gen2WorldSnapshot:
 	out.dst_enabled = world.daylight_saving_time_enabled()
 	out.random_seed = world.random_seed
 	out.frame_number = world.frame_number
+	out.last_spawn_map = world.last_spawn_map
+	out.dig_warp = world.dig_warp.duplicate()
 	out.world_state = Gen2WorldState.from_dict(world.state.to_dict())
 	return out
 
@@ -57,6 +66,8 @@ func to_dict() -> Dictionary:
 		"dst_enabled": dst_enabled,
 		"random_seed": random_seed,
 		"frame_number": frame_number,
+		"last_spawn_map": [last_spawn_map.x, last_spawn_map.y],
+		"dig_warp": dig_warp.duplicate(),
 		"world_state": world_state.to_dict() if world_state != null else {},
 	}
 
@@ -87,6 +98,14 @@ static func from_dict(raw: Variant) -> Gen2WorldSnapshot:
 	out.dst_enabled = bool(source.get("dst_enabled", false))
 	out.random_seed = int(source.get("random_seed", 0))
 	out.frame_number = maxi(0, int(source.get("frame_number", 0)))
+	out.last_spawn_map = _vector_from_value(source.get("last_spawn_map", [-1, -1]))
+	var raw_dig: Variant = source.get("dig_warp", {})
+	if raw_dig is Dictionary and not (raw_dig as Dictionary).is_empty():
+		out.dig_warp = {
+			"warp": int((raw_dig as Dictionary).get("warp", 0)),
+			"map_group": int((raw_dig as Dictionary).get("map_group", 0)),
+			"map_number": int((raw_dig as Dictionary).get("map_number", 0)),
+		}
 	out.world_state = Gen2WorldState.from_dict(source.get("world_state", {}))
 	return out
 

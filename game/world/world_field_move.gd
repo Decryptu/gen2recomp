@@ -22,6 +22,19 @@ const MOVE_WATERFALL: int = 0x7F
 const MOVE_FLASH: int = 0x94
 const MOVE_HEADBUTT: int = 0x1D
 const MOVE_ROCK_SMASH: int = 0xF9
+## The rows whose own routine is an escape rather than a tile: Fly picks a spawn
+## off the region map, Teleport takes the last Pokemon Center's and Dig the warp
+## the player came into the cave through.
+const MOVE_FLY: int = 0x13
+const MOVE_DIG: int = 0x5B
+const MOVE_TELEPORT: int = 0x64
+## The row that is neither a tile nor an escape: SWEET SCENT calls a wild
+## encounter up out of the map the player is standing on.
+const MOVE_SWEET_SCENT: int = 0xE6
+## The two rows that move health between party members rather than touching the
+## map at all. `MonMenu_Softboiled_MilkDrink` is one routine for both.
+const MOVE_SOFTBOILED: int = 0x87
+const MOVE_MILK_DRINK: int = 0xD0
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -37,6 +50,8 @@ const BADGE_HIVE: int = 1
 const BADGE_PLAIN: int = 2
 const BADGE_FOG: int = 3
 const BADGE_GLACIER: int = 6
+## `.TryFly`'s own `CheckBadge ENGINE_STORMBADGE`, the sixth badge.
+const BADGE_STORM: int = 5
 ## WaterfallFunction's .TryWaterfall, whose CheckBadge argument is
 ## ENGINE_RISINGBADGE: 34 in Crystal and 33 in Gold/Silver.
 const BADGE_RISING: int = 7
@@ -60,7 +75,8 @@ const MUSIC_SURF: int = 0x21
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
-	MOVE_HEADBUTT, MOVE_ROCK_SMASH,
+	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT, MOVE_SWEET_SCENT,
+	MOVE_FLY, MOVE_SOFTBOILED, MOVE_MILK_DRINK,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

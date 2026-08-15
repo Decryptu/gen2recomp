@@ -119,6 +119,15 @@ var movement_mode: StringName = MOVEMENT_WALK
 ## that state a renderer reads. movement_mode carries the rest; the two surfing
 ## states differ from each other here and nowhere else.
 var player_sprite_number: int = Gen2WorldSprite.SPRITE_PLAYER
+## `wLastSpawnMapGroup`/`wLastSpawnMapNumber`: the outdoor map the player last
+## walked into a Pokemon Center from, which is what a blackout and a Teleport
+## both turn back into a spawn. `(-1, -1)` is a game that has entered none, and
+## `GetWhiteoutSpawn`'s own answer for that is `SPAWN_HOME`.
+var last_spawn_map: Vector2i = Vector2i(-1, -1)
+## `wDigWarpNumber`, `wDigMapGroup` and `wDigMapNumber`: the warp and outdoor map
+## the player last came into a cave through, which is where Dig and an Escape
+## Rope put them back. Empty until one is walked.
+var dig_warp: Dictionary = {}
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
@@ -297,6 +306,8 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	out.dst_enabled = world_snapshot.dst_enabled
 	out.random_seed = world_snapshot.random_seed
 	out.frame_number = world_snapshot.frame_number
+	out.last_spawn_map = world_snapshot.last_spawn_map
+	out.dig_warp = world_snapshot.dig_warp.duplicate()
 	return out
 
 
@@ -1460,8 +1471,27 @@ static func _strength_failure(reason: StringName) -> Dictionary:
 ## Environments a wild encounter is rolled on any tile of. `CAVE` and `DUNGEON`
 ## jump straight to the ice test, which is what puts encounters on a cave floor
 ## rather than only on its grass.
+const ENVIRONMENT_TOWN: int = 1
+const ENVIRONMENT_ROUTE: int = 2
+const ENVIRONMENT_INDOOR: int = 3
 const ENVIRONMENT_CAVE: int = 4
+const ENVIRONMENT_GATE: int = 6
 const ENVIRONMENT_DUNGEON: int = 7
+
+## `TILESET_POKECENTER` and `TILESET_POKECOM_CENTER`, the two `.SetSpawn`
+## respawns in. The second is Crystal's alone and its number is past the split,
+## so no profile of Gold or Silver has a map wearing it.
+const TILESET_POKECENTER: int = 0x07
+const TILESET_POKECENTER_GOLD_SILVER: int = 0x06
+const TILESET_POKECOM_CENTER: int = 0x15
+
+## `.SaveDigWarp`'s two refusals by name: Mount Moon Square and the Tin Tower
+## roof, outdoor maps reached from indoor ones, which Dig and an Escape Rope must
+## not put the player back on. Both sit in `GROUP_FAST_SHIP` at the same numbers
+## in both pins, since that group's rows do not move.
+const OUTDOOR_MAPS_INSIDE_INDOOR_ONES: Array[Vector2i] = [
+	Vector2i(15, 10), Vector2i(15, 12),
+]
 
 
 ## Whether `ENGINE_BUG_CONTEST_TIMER` is set, which is the one thing that says a
@@ -3885,7 +3915,13 @@ func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	var target_warp: Dictionary = (target_warps[destination_index] as Dictionary).duplicate(true)
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = cell
-	_apply_map(target_map, target_tileset, Vector2i(int(target_warp["x"]), int(target_warp["y"])))
+	# `wPrevWarp` is the warp walked through, which is what a Dig or an Escape
+	# Rope comes back out of.
+	_apply_map(
+		target_map, target_tileset,
+		Vector2i(int(target_warp["x"]), int(target_warp["y"])), false,
+		warp_index_at(cell)
+	)
 	return {
 		"ok": true,
 		"kind": &"warp",
@@ -4783,7 +4819,9 @@ func _apply_map(
 	target_tileset: Gen2WorldTileset,
 	target_cell: Vector2i,
 	custom_facing: bool = false,
+	from_warp: int = 0,
 ) -> void:
+	_record_escape_points(target_map, from_warp)
 	_block_overrides.clear()
 	_pending_cut.clear()
 	_pending_surf.clear()
@@ -4840,6 +4878,269 @@ func _apply_map(
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
 	_map_entry_scene_ran = false
+
+
+## `.SaveDigWarp` and `.SetSpawn`, both of which run on a map change and both of
+## which only ever fire on the way from an outdoor map into an indoor one.
+##
+## The dig warp is the warp the player came through, so it is only recorded on
+## the path that used one; a scripted `warp` names a destination rather than a
+## warp number and leaves the last walked one standing, which is what the
+## cartridge's own `wPrevWarp` does. Mount Moon Square and the Tin Tower roof are
+## outdoor maps reached from indoor ones and are refused by name.
+func _record_escape_points(target_map: Gen2WorldMap, from_warp: int) -> void:
+	if current_map == null or not _is_outdoor(current_map.environment) \
+			or not _is_indoor(target_map.environment):
+		return
+	var from_map: Vector2i = map_id()
+	# One-based, as `warp_index_at` counts and as a `warp_event` destination is:
+	# zero is a map change that walked through no warp at all.
+	if from_warp > 0 and not OUTDOOR_MAPS_INSIDE_INDOOR_ONES.has(from_map):
+		dig_warp = {
+			"warp": from_warp, "map_group": from_map.x, "map_number": from_map.y,
+		}
+	var tileset: int = target_map.tileset
+	if tileset == pokecenter_tileset() or tileset == TILESET_POKECOM_CENTER:
+		last_spawn_map = from_map
+
+
+## `CheckOutdoorMap` and `CheckIndoorMap` (`home/map.asm`), which are what both
+## of the recorders above are gated on.
+static func _is_outdoor(environment: int) -> bool:
+	return environment in [ENVIRONMENT_TOWN, ENVIRONMENT_ROUTE]
+
+
+static func _is_indoor(environment: int) -> bool:
+	return environment in [
+		ENVIRONMENT_INDOOR, ENVIRONMENT_CAVE, ENVIRONMENT_DUNGEON, ENVIRONMENT_GATE,
+	]
+
+
+## `TILESET_POKECENTER`, which is one lower on Gold and Silver: pokegold ships no
+## `TILESET_BATTLE_TOWER_OUTSIDE`, so every tileset past it sits one down.
+func pokecenter_tileset() -> int:
+	return TILESET_POKECENTER if Gen2WorldState.is_crystal_profile(data) \
+		else TILESET_POKECENTER_GOLD_SILVER
+
+
+## `IsSpawnPoint`: which spawn a map is, or -1 for a map that is none.
+func spawn_index_of(map: Vector2i) -> int:
+	if data == null:
+		return -1
+	for index: int in data.spawn_point_count():
+		var point: Dictionary = data.spawn_point(index)
+		if int(point["map_group"]) == map.x and int(point["map_number"]) == map.y:
+			return index
+	return -1
+
+
+## `GetWhiteoutSpawn`: the spawn a blackout puts the player at. The last Pokemon
+## Center's own outdoor map when that map is a spawn point, and `SPAWN_HOME`
+## when it is not or when none has been entered.
+func whiteout_spawn() -> int:
+	var index: int = spawn_index_of(last_spawn_map)
+	return index if index >= 0 else RomLayout.SPAWN_HOME
+
+
+## `EnterMapSpawnPoint` plus the map load behind it: the player put down at
+## spawn [param index], facing the way a warp leaves them. Answers the same
+## record a warp does, or a refusal when the cache holds no such spawn.
+func warp_to_spawn(index: int) -> Dictionary:
+	var point: Dictionary = data.spawn_point(index) if data != null else {}
+	if point.is_empty():
+		return {"ok": false, "kind": &"spawn_warp", "reason": &"missing_spawn"}
+	var target_map: Gen2WorldMap = data.world_map(
+		int(point["map_group"]), int(point["map_number"])
+	)
+	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset) \
+		if target_map != null else null
+	if target_map == null or target_tileset == null:
+		return {"ok": false, "kind": &"spawn_warp", "reason": &"missing_map"}
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	_apply_map(target_map, target_tileset, Vector2i(int(point["x"]), int(point["y"])))
+	return {
+		"ok": true,
+		"kind": &"spawn_warp",
+		"spawn": index,
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": map_id(),
+		"to_cell": player_cell,
+	}
+
+
+## `FlyFunction`'s `.TryFly`: the badge and the map, which is everything it can
+## refuse on before the region map is drawn. The choice itself belongs to
+## whoever draws that map; [method warp_to_spawn] is what answers it.
+func fly_request() -> Dictionary:
+	if current_map == null:
+		return _fly_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_FLY) < 0:
+		return _fly_failure(&"move_not_known")
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_STORM, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _fly_failure(&"badge_required")
+	if not _is_outdoor(current_map.environment):
+		return _fly_failure(&"indoors")
+	return {
+		"ok": true,
+		"kind": &"fly_requested",
+		"move": Gen2WorldFieldMove.MOVE_FLY,
+		"in_kanto": Gen2WorldRadio.is_kanto_landmark(
+			landmark(), Gen2WorldState.is_crystal_profile(data)
+		),
+		"visited": visited_flypoints(),
+	}
+
+
+static func _fly_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"fly_failed", "reason": reason}
+
+
+## `CheckIfVisitedFlypoint` over the whole table: which `FLY_*` indexes the
+## player may fly to. The bit tested is `wVisitedSpawns` at the flypoint's own
+## spawn, which is what this project keeps as the `ENGINE_FLYPOINT_*` run.
+func visited_flypoints() -> Array[int]:
+	var out: Array[int] = []
+	if data == null:
+		return out
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	for index: int in data.flypoint_count():
+		var spawn: int = int(data.flypoint(index).get("spawn", -1))
+		if spawn < 0:
+			continue
+		if state.is_engine_flag_active(Gen2WorldState.flypoint_flag(spawn, crystal)):
+			out.append(index)
+	return out
+
+
+## `SweetScentEncounter`, the whole of what the party submenu's SWEET SCENT row
+## does: a wild appears where one could have been stepped into.
+##
+## Its own gates, in the source's order: `CanEncounterWildMon` for the tile,
+## then the Bug Contest's own tables, then the map's rate and
+## `ChooseWildEncounter`. The rate is read but never rolled against, which is
+## what makes the move worth using; the five-step cooldown a map entry sets is
+## not consulted either, since nothing here is a step.
+func sweet_scent_request(random: RandomNumberGenerator = null) -> Dictionary:
+	if current_map == null or data == null:
+		return _sweet_scent_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_SWEET_SCENT) < 0:
+		return _sweet_scent_failure(&"move_not_known")
+	if not can_encounter_wild_mon():
+		return _sweet_scent_failure(&"no_encounter")
+	var encounter: Dictionary = encounter_request(random, true)
+	if encounter.is_empty():
+		return _sweet_scent_failure(&"no_encounter")
+	return {
+		"ok": true,
+		"kind": &"sweet_scent_requested",
+		"move": Gen2WorldFieldMove.MOVE_SWEET_SCENT,
+		"encounter": encounter,
+	}
+
+
+static func _sweet_scent_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"sweet_scent_failed", "reason": reason}
+
+
+## `TeleportFunction`: the outdoor-only escape to wherever the last Pokemon
+## Center was. Its whole test is the map being outdoors and the last spawn map
+## being a spawn point, and it checks no badge at all.
+##
+## The warp is applied here rather than staged, because `.TeleportScript` is the
+## source's own script and everything in it but `WarpToSpawnPoint` is animation
+## this project has no frames for.
+func teleport_request() -> Dictionary:
+	if current_map == null:
+		return _teleport_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_TELEPORT) < 0:
+		return _teleport_failure(&"move_not_known")
+	if not _is_outdoor(current_map.environment):
+		return _teleport_failure(&"not_outdoors")
+	var spawn: int = spawn_index_of(last_spawn_map)
+	if spawn < 0:
+		return _teleport_failure(&"no_spawn_point")
+	var warped: Dictionary = warp_to_spawn(spawn)
+	if not bool(warped.get("ok", false)):
+		return _teleport_failure(StringName(warped.get("reason", &"missing_spawn")))
+	return {
+		"ok": true,
+		"kind": &"teleport_requested",
+		"move": Gen2WorldFieldMove.MOVE_TELEPORT,
+		"warp": warped,
+	}
+
+
+static func _teleport_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"teleport_failed", "reason": reason}
+
+
+## `DigFunction`, which is `EscapeRopeOrDig` with the Dig half of its type byte:
+## a cave or a dungeon, and a recorded dig warp, and out through the warp the
+## player came in by.
+##
+## The source keeps three separate bytes and refuses when any is zero, which is
+## the same test as this project's record being empty.
+func dig_request() -> Dictionary:
+	if current_map == null:
+		return _dig_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_DIG) < 0:
+		return _dig_failure(&"move_not_known")
+	if current_map.environment not in [ENVIRONMENT_CAVE, ENVIRONMENT_DUNGEON]:
+		return _dig_failure(&"not_in_a_cave")
+	if dig_warp.is_empty():
+		return _dig_failure(&"no_dig_warp")
+	var warped: Dictionary = warp_to_dig_point()
+	if not bool(warped.get("ok", false)):
+		return _dig_failure(StringName(warped.get("reason", &"no_dig_warp")))
+	return {
+		"ok": true,
+		"kind": &"dig_requested",
+		"move": Gen2WorldFieldMove.MOVE_DIG,
+		"warp": warped,
+	}
+
+
+static func _dig_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"dig_failed", "reason": reason}
+
+
+## `.DoDig`: the recorded dig warp copied into `wNextWarp` and walked out of, so
+## the player lands on the outdoor map's own warp tile. Shared by Dig and by an
+## Escape Rope, which is the same routine with a different type byte.
+func warp_to_dig_point() -> Dictionary:
+	if dig_warp.is_empty():
+		return {"ok": false, "kind": &"dig_warp", "reason": &"no_dig_warp"}
+	var target_map: Gen2WorldMap = data.world_map(
+		int(dig_warp["map_group"]), int(dig_warp["map_number"])
+	) if data != null else null
+	var target_tileset: Gen2WorldTileset = data.world_tileset(target_map.tileset) \
+		if target_map != null else null
+	if target_map == null or target_tileset == null:
+		return {"ok": false, "kind": &"dig_warp", "reason": &"missing_map"}
+	var warps: Array = target_map.events.get("warps", [])
+	var index: int = int(dig_warp["warp"]) - 1
+	if index < 0 or index >= warps.size():
+		return {"ok": false, "kind": &"dig_warp", "reason": &"missing_destination"}
+	var destination: Dictionary = warps[index]
+	var from_map: Vector2i = map_id()
+	var from_cell: Vector2i = player_cell
+	_apply_map(
+		target_map, target_tileset,
+		Vector2i(int(destination["x"]), int(destination["y"]))
+	)
+	return {
+		"ok": true,
+		"kind": &"dig_warp",
+		"warp": int(dig_warp["warp"]),
+		"from_map": from_map,
+		"from_cell": from_cell,
+		"to_map": map_id(),
+		"to_cell": player_cell,
+	}
 
 
 ## The schedule update produced by the most recent map change, for a host that

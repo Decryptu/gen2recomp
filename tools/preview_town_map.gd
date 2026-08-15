@@ -3,12 +3,13 @@ extends SceneTree
 ## Captures the region map against a real imported cache.
 ##
 ##   Godot --headless --path . -s res://tools/preview_town_map.gd -- \
-##       crystal /tmp/map.png [landmark] [town_map|card|area:<species>] [presses]
+##       crystal /tmp/map.png [landmark] [town_map|card|area:<species>|fly[:all]] [presses]
 ##
 ## [landmark] is `TownMap_GetCurrentLandmark`'s answer, which picks the region and
 ## where the player icon stands; `card` draws the Pokegear's own MAP frame instead
-## of `_TownMap`'s corner box, and `area:19` draws `Pokedex_GetArea` for that
-## species. [presses] is a `u,d,l,r,a,b` list driven into the screen before the
+## of `_TownMap`'s corner box, `area:19` draws `Pokedex_GetArea` for that
+## species, and `fly` draws `_FlyMap` with its own cursor, `fly:all` with every
+## flypoint visited rather than none. [presses] is a `u,d,l,r,a,b` list driven into the screen before the
 ## shot, which is how a cursor walk is photographed. Three other tokens: `hof`
 ## opens with `STATUSFLAGS_HALL_OF_FAME_F` set, which widens the Kanto window past
 ## Victory Road and is what lets the dex area reach Kanto at all; `sel` and `rel`
@@ -30,7 +31,7 @@ func _initialize() -> void:
 	if args.size() < 2:
 		push_error(
 			"Usage: preview_town_map.gd -- <game> <output.png> [landmark] "
-			+ "[town_map|card|area:<species>] [presses]"
+			+ "[town_map|card|area:<species>|fly[:all]] [presses]"
 		)
 		quit(1)
 		return
@@ -99,6 +100,18 @@ func _open(
 	host: Gen2TownMapScreen, data: GameData, species: int, landmark: int,
 	hall_of_fame: bool, mode: String
 ) -> bool:
+	if mode.begins_with("fly"):
+		var visited: Array[int] = []
+		if mode == "fly:all":
+			for index: int in data.flypoint_count():
+				visited.append(index)
+		return host.open_fly(
+			data, landmark,
+			Gen2WorldRadio.is_kanto_landmark(
+				landmark, Gen2WorldState.is_crystal_profile(data)
+			),
+			visited
+		)
 	if species > 0:
 		var roaming: Array = data.world_roaming_mons()
 		var nests: Array = []

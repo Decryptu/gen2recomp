@@ -185,6 +185,45 @@ const FRUIT_TREE_COUNT: int = 30
 ## content, since it has no header and no terminator.
 const FRUIT_TREE_APRICORNS: Array[int] = [0x55, 0x59, 0x5C, 0x5D, 0x61, 0x63, 0x65]
 const FRUIT_TREE_FIRST_APRICORN: int = 16
+
+## `SpawnPoints` (`data/maps/spawn_points.asm`): `db group, number, x, y` per
+## `SPAWN_*` constant, then one row of `$FF` bytes. `NUM_SPAWNS` is 28 and both
+## pins ship the same rows, coordinates included; only the map numbers move,
+## since a group's numbering shifts with the maps pokegold does not have.
+const SPAWN_RECORD_SIZE: int = 4
+const SPAWN_COUNT: int = 28
+const SPAWN_TERMINATOR: int = 0xFF
+
+## The spawn coordinates, in table order, which is what identifies the table:
+## every entry's x and y at a stride of four is a run no other bytes in a dump
+## match. `SPAWN_HOME` is the bedroom, `SPAWN_DEBUG` the Viridian Pokecenter,
+## then Kanto and then Johto.
+const SPAWN_COORDINATES: Array[int] = [
+	3, 3, 5, 3,
+	5, 6, 23, 26, 13, 26, 19, 22, 11, 2, 9, 6, 5, 6, 9, 30, 29, 10, 19, 28, 11, 12, 9, 6,
+	13, 6, 29, 4, 31, 26, 11, 74, 15, 10, 23, 44, 15, 28, 13, 22, 23, 28, 15, 14,
+	21, 29, 21, 30, 23, 20, 6, 2,
+]
+
+## `SPAWN_*` indexes worth naming. `SPAWN_HOME` is where a new game's respawn
+## point starts and `SPAWN_INDIGO` is the one `FlyMap` tests before it will draw
+## Kanto at all.
+const SPAWN_HOME: int = 0
+const SPAWN_INDIGO: int = 13
+
+## `Flypoints` (`data/maps/flypoints.asm`): `db landmark, spawn` per `FLY_*`
+## constant, then `-1`. The twelve Johto rows come first and `KANTO_FLYPOINT` is
+## where Kanto starts, which is the whole of how `FlyMap` picks the region's
+## range. The spawn column is identical between the pins; the landmark column is
+## not, since Gold and Silver ship one landmark fewer.
+const FLYPOINT_RECORD_SIZE: int = 2
+const FLYPOINT_COUNT: int = 24
+const FLYPOINT_TERMINATOR: int = 0xFF
+const KANTO_FLYPOINT: int = 12
+const FLYPOINT_SPAWNS: Array[int] = [
+	14, 15, 16, 18, 20, 22, 21, 19, 23, 24, 25, 26,
+	2, 3, 4, 5, 7, 6, 8, 10, 9, 11, 12, 13,
+]
 const PHONE_CONTACT_COUNT: int = 38
 const PHONE_CONTACT_SIZE: int = 12
 const SPECIAL_PHONE_CALL_COUNT: int = 8
@@ -1606,6 +1645,12 @@ const GOLD_SILVER: Dictionary = {
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
 	"fruit_trees": 0x44091,
+	## `SpawnPoints` and `Flypoints`, each located by the byte column that is the
+	## same on all three dumps: the spawn coordinates at a stride of four, and
+	## the flypoints' spawn column at a stride of two ahead of its `-1`. Both hit
+	## once per dump.
+	"spawn_points": 0x15319,
+	"flypoints": 0x91BCC,
 	"rooftop_mart_count": 0,
 	"rooftop_mart_1": 0,
 	"rooftop_mart_2": 0,
@@ -1929,6 +1974,8 @@ const CRYSTAL: Dictionary = {
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
 	"fruit_trees": 0x44097,
+	"spawn_points": 0x152AB,
+	"flypoints": 0x91C5E,
 	"rooftop_mart_count": 2,
 	"rooftop_mart_1": 0x15AEE,
 	"rooftop_mart_2": 0x15AFF,

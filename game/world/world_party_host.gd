@@ -172,6 +172,79 @@ static func heal_party(
 	}
 
 
+## `Softboiled_MilkDrinkFunction`: a fifth of the user's own maximum health moved
+## from the user to another party member, as one candidate transaction.
+##
+## Both halves are the *user's* fifth. `GetOneFifthMaxHP` is called twice with
+## `wCurPartyMon` still holding the user, and only then is the recipient written
+## into it, so a big Pokemon heals a small one by a big number.
+##
+## The refusals are `.SelectMilkDrinkRecipient`'s own, in its order: the user
+## itself, a fainted recipient and one already at full health. The caller checks
+## the user's own health first, which is the `.CheckMonHasEnoughHP` this shares
+## with the party menu's line.
+static func transfer_health(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	from_index: int,
+	to_index: int,
+	persist: bool = true,
+) -> Dictionary:
+	if world == null or save == null or world.data == null:
+		return _failure(&"missing_save", {})
+	if from_index == to_index:
+		return _failure(&"same_member", {"party_index": to_index})
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
+	var candidate: Gen2SaveData = opened["candidate"]
+	var user: Gen2SaveMon = _party_member(candidate, from_index)
+	var target: Gen2SaveMon = _party_member(candidate, to_index)
+	if user == null or target == null:
+		return _failure(&"unknown_party_member", {"party_index": to_index})
+	var amount: int = one_fifth_max_hp(world.data, user)
+	if amount <= 0 or user.hp <= amount:
+		return _failure(&"not_enough_health", {"party_index": from_index})
+	if target.is_egg or target.hp <= 0:
+		return _failure(&"fainted_member", {"party_index": to_index})
+	var target_max: int = _max_hp(world.data, target)
+	if target.hp >= target_max:
+		return _failure(&"already_full", {"party_index": to_index})
+
+	user.hp -= amount
+	var restored: int = mini(amount, target_max - target.hp)
+	target.hp += restored
+	var before: Gen2WorldSnapshot = world.snapshot()
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
+	return {
+		"ok": true,
+		"amount": amount,
+		"restored": restored,
+		"from": from_index,
+		"to": to_index,
+	}
+
+
+## `GetOneFifthMaxHP`, and so also `.CheckMonHasEnoughHP`'s own divisor: a
+## Pokemon may use Softboiled or Milk Drink only while it has more than this.
+static func one_fifth_max_hp(data: GameData, mon: Gen2SaveMon) -> int:
+	if data == null or mon == null or mon.is_egg:
+		return 0
+	@warning_ignore("integer_division")
+	return _max_hp(data, mon) / 5
+
+
+## A party member by index, or null when the slot is empty.
+static func _party_member(save: Gen2SaveData, index: int) -> Gen2SaveMon:
+	if save == null or index < 0 or index >= save.party.size():
+		return null
+	return save.party[index]
+
+
 ## Applies a field item to a save and the live world as one candidate transaction.
 ## The current slice covers source party item effects, including EvoStoneEffect's
 ## candidate evolution and the HP delta applied by EvolvePokemon.

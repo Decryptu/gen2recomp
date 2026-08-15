@@ -109,3 +109,56 @@ func test_the_dex_area_draws_the_player_only_in_their_own_region() -> void:
 	assert_false(kanto.player_in_region())
 	kanto.press(Gen2Button.RIGHT)
 	assert_true(kanto.player_in_region())
+
+
+## `_FlyMap`, whose cursor is a `FLY_*` index rather than a landmark and whose
+## walk skips every flypoint the player has not visited.
+
+func test_the_fly_map_opens_on_the_region_the_player_is_in() -> void:
+	var johto := Gen2TownMap.fly(Gen2TownMap.JOHTO_LANDMARK, false, [] as Array[int], true)
+	assert_eq(johto.region(), Gen2TownMap.REGION_JOHTO)
+	assert_eq(johto.cursor, 0, "New Bark is Johto's default")
+	assert_eq(johto.first_landmark(), 0)
+	assert_eq(johto.last_landmark(), RomLayout.KANTO_FLYPOINT - 1)
+
+	var kanto := Gen2TownMap.fly(
+		60, true, [Gen2TownMap.FLY_INDIGO] as Array[int], true
+	)
+	assert_eq(kanto.region(), Gen2TownMap.REGION_KANTO)
+	assert_eq(kanto.cursor, Gen2TownMap.FLY_INDIGO, "Indigo is Kanto's default")
+	assert_eq(kanto.first_landmark(), RomLayout.KANTO_FLYPOINT)
+	assert_eq(kanto.last_landmark(), RomLayout.FLYPOINT_COUNT - 1)
+	# The player icon still says where the player is standing.
+	assert_eq(kanto.player_landmark, 60)
+
+
+func test_kanto_falls_back_to_johtos_map_until_indigo_plateau() -> void:
+	# `.NoKanto`, which is what stops the source's own crash on a region with no
+	# flypoint enabled.
+	var map := Gen2TownMap.fly(60, true, [] as Array[int], true)
+	assert_eq(map.region(), Gen2TownMap.REGION_JOHTO)
+	assert_eq(map.cursor, 0)
+
+
+func test_the_fly_cursor_skips_every_flypoint_that_has_not_been_visited() -> void:
+	# Violet is flypoint 2 and Goldenrod 4; nothing between them is visited.
+	var map := Gen2TownMap.fly(
+		Gen2TownMap.JOHTO_LANDMARK, false, [2, 4] as Array[int], true
+	)
+	map.press(Gen2Button.UP)
+	assert_eq(map.cursor, 2)
+	map.press(Gen2Button.UP)
+	assert_eq(map.cursor, 4)
+	# Wrapping past the end lands back on the default, which is on the map
+	# whether or not it has been visited.
+	map.press(Gen2Button.UP)
+	assert_eq(map.cursor, 0)
+	map.press(Gen2Button.DOWN)
+	assert_eq(map.cursor, 4)
+
+
+func test_a_fly_map_with_nothing_visited_holds_its_default() -> void:
+	var map := Gen2TownMap.fly(Gen2TownMap.JOHTO_LANDMARK, false, [] as Array[int], true)
+	for press: int in [Gen2Button.UP, Gen2Button.DOWN, Gen2Button.UP]:
+		map.press(press)
+		assert_eq(map.cursor, 0)

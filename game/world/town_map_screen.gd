@@ -74,6 +74,9 @@ var _open: bool = false
 var _field: Control = null
 var _background: TextureRect = null
 var _cursor_icon: TextureRect = null
+## `.pressedA`'s own answer, which `_FlyMap` returns in `e`: the chosen spawn, or
+## -1 for the `ld a, -1` a B press leaves.
+var _chosen_spawn: int = -1
 var _player_icon: TextureRect = null
 ## The dex area's own state: the species its header names, one landmark list per
 ## region and what the shadow OAM holds this frame.
@@ -159,12 +162,54 @@ func open_dex_area(
 	)
 
 
+## `_FlyMap`: the region map with the cursor walking the flypoints the player has
+## visited. [param in_kanto] is which map `FlyMap` opens, which is the region the
+## player is standing in, and [param visited] which `FLY_*` indexes
+## `CheckIfVisitedFlypoint` answers for.
+##
+## The answer is taken with [method chosen_spawn] once this closes: -1 for a
+## cancel, and the flypoint's own spawn for a choice, which is exactly the byte
+## `.pressedA` leaves in `e`.
+func open_fly(
+	data: GameData,
+	landmark: int,
+	in_kanto: bool,
+	visited: Array[int],
+	female: bool = false,
+	time_of_day: int = Gen2WorldPalette.TIME_MORNING,
+) -> bool:
+	_chosen_spawn = -1
+	if not open(
+		data, landmark, false, Gen2TownMap.SCREEN_FLY, [], female, time_of_day
+	):
+		return false
+	_map = Gen2TownMap.fly(
+		landmark, in_kanto, visited, Gen2WorldState.is_crystal_profile(_data)
+	)
+	if is_inside_tree() and _background != null:
+		_refresh()
+	return true
+
+
+## Which spawn the fly map was left on: -1 until one is chosen, and -1 for good
+## when B closed it.
+func chosen_spawn() -> int:
+	return _chosen_spawn
+
+
 func map() -> Gen2TownMap:
 	return _map
 
 
+## Where the cursor is drawn. The fly map's own cursor is a flypoint rather than
+## a landmark, and `Flypoints` is what turns one into the other.
 func cursor_landmark() -> int:
-	return _map.cursor if _map != null else 0
+	if _map == null:
+		return 0
+	if _map.screen != Gen2TownMap.SCREEN_FLY:
+		return _map.cursor
+	var row: Dictionary = _data.flypoint(_map.cursor) if _data != null else {}
+	return int(row.get("landmark", 0))
 
 
 func cursor_name() -> String:
@@ -179,6 +224,12 @@ func cursor_name() -> String:
 func handle_button(button: int) -> bool:
 	if not _open or _map == null:
 		return false
+	if button == Gen2Button.A and _map.screen == Gen2TownMap.SCREEN_FLY:
+		# `.pressedA` reads the flypoint's own spawn out of `Flypoints + 1`.
+		var row: Dictionary = _data.flypoint(_map.cursor) if _data != null else {}
+		_chosen_spawn = int(row.get("spawn", -1)) if not row.is_empty() else -1
+		close()
+		return true
 	if button == Gen2Button.B \
 		or (button == Gen2Button.A and _map.screen == Gen2TownMap.SCREEN_DEX_AREA):
 		close()
@@ -252,7 +303,7 @@ func render() -> Image:
 	if _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
 		return _render_dex_area(out)
 	for object: Array in [
-		[_cursor_image(), _map.cursor], [_player_image(), _map.player_landmark],
+		[_cursor_image(), cursor_landmark()], [_player_image(), _map.player_landmark],
 	]:
 		if not _has_landmark(int(object[1])):
 			continue
@@ -382,7 +433,7 @@ func _background_image() -> Image:
 ## and `.String_SNest` for the dex area.
 func _header_codes() -> PackedByteArray:
 	if _map.screen != Gen2TownMap.SCREEN_DEX_AREA:
-		return _data.landmark(_map.cursor).get("codes", PackedByteArray())
+		return _data.landmark(cursor_landmark()).get("codes", PackedByteArray())
 	var name: String = String(_data.species(_species).get("name", ""))
 	var out: PackedByteArray = Gen2Text.encode(name)
 	out.append_array(Gen2Text.encode(NEST_HEADER_SUFFIX))
@@ -394,7 +445,7 @@ func _header_codes() -> PackedByteArray:
 func _refresh_cursor() -> void:
 	if _cursor_icon == null or _map == null:
 		return
-	_place(_cursor_icon, _map.cursor)
+	_place(_cursor_icon, cursor_landmark())
 	_cursor_icon.texture = ImageTexture.create_from_image(_cursor_image())
 
 

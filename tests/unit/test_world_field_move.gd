@@ -12,6 +12,20 @@ extends GutTest
 
 const TILESET_CUTTABLE: int = Gen2WorldFieldMove.TILESET_JOHTO
 const TILESET_NO_ENTRY: int = 5
+## The escape moves' own three maps. The cache is not tagged `gold` or `silver`,
+## so `TILESET_POKECENTER` is Crystal's number.
+const TILESET_POKECENTER: int = Gen2WorldAPI.TILESET_POKECENTER
+const ESCAPE_TOWN: int = 4
+const ESCAPE_CAVE: int = 5
+const ESCAPE_POKECENTER: int = 6
+const ENVIRONMENT_INDOOR: int = Gen2WorldAPI.ENVIRONMENT_INDOOR
+const ENVIRONMENT_CAVE: int = Gen2WorldAPI.ENVIRONMENT_CAVE
+## Where the town's own spawn puts the player down, which is not its warp tile.
+const SPAWN_CELL: Vector2i = Vector2i(1, 1)
+## The town's two doors and the one every indoor map here has back out.
+const ESCAPE_CAVE_DOOR: Vector2i = Vector2i(3, 1)
+const ESCAPE_CENTRE_DOOR: Vector2i = Vector2i(5, 1)
+const ESCAPE_INSIDE_DOOR: Vector2i = Vector2i(2, 2)
 const BLOCK_TREE: int = 0x5B
 const BLOCK_TREE_CUT: int = 0x3C
 const BLOCK_GRASS: int = 0x03
@@ -98,6 +112,7 @@ func _write_cache() -> void:
 
 	RomCache.write_json(RomCache.world_tilesets_path(_directory), [
 		_tileset(TILESET_CUTTABLE), _tileset(TILESET_NO_ENTRY),
+		_tileset(TILESET_POKECENTER),
 	])
 	RomCache.write_json(RomCache.world_maps_path(_directory), [
 		_map(1, TILESET_CUTTABLE), _map(2, TILESET_NO_ENTRY),
@@ -105,17 +120,34 @@ func _write_cache() -> void:
 		# DUNGEON environment, which is what keeps the light on when the player
 		# walks from it into another cave room.
 		_map(3, TILESET_CUTTABLE, Gen2WorldPalette.PALETTE_DARK, ENVIRONMENT_DUNGEON),
+		# The three the escape moves need: an outdoor town, the cave it leads
+		# into and a Pokemon Center, each warping back to the town. `.SaveDigWarp`
+		# and `.SetSpawn` only fire on the way from an outdoor map into an indoor
+		# one, so the town is where both walks start.
+		_map(ESCAPE_TOWN, TILESET_CUTTABLE, 0, ENVIRONMENT_TOWN),
+		_map(ESCAPE_CAVE, TILESET_NO_ENTRY, 0, ENVIRONMENT_CAVE),
+		_map(ESCAPE_POKECENTER, TILESET_POKECENTER, 0, ENVIRONMENT_INDOOR),
 	])
+	# `SpawnPoints`, with the town as the one spawn this cache carries.
+	RomCache.write_json(RomCache.world_spawns_path(_directory), {
+		"spawns": [{
+			"map_group": 1, "map_number": ESCAPE_TOWN,
+			"x": SPAWN_CELL.x, "y": SPAWN_CELL.y,
+		}],
+		"flypoints": [],
+	})
 
 	var pixels := PackedByteArray()
 	pixels.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
 	for index: int in pixels.size():
 		pixels[index] = index % 4
-	for number: int in [TILESET_CUTTABLE, TILESET_NO_ENTRY]:
+	for number: int in [TILESET_CUTTABLE, TILESET_NO_ENTRY, TILESET_POKECENTER]:
 		RomCache.write_indices(RomCache.world_tile_path(_directory, number), pixels)
 
 	RomCache.write_json(RomCache.world_encounters_path(_directory), {
-		"grass": {}, "water": {}, "swarm_grass": {}, "swarm_water": {},
+		# One grass table, on map 1 alone, so SWEET SCENT has somewhere with a
+		# wild in it and somewhere without.
+		"grass": {"1:1": {"rates": [255, 255, 255], "slots": _grass_slots()}}, "water": {}, "swarm_grass": {}, "swarm_water": {},
 		"fishing": {"groups": [], "time_groups": []},
 		"roaming": {"maps": [], "mons": []},
 		"treemons": {
@@ -147,6 +179,18 @@ const TREEMON_RARE_SPECIES: int = 214
 ## One of the fixture's asleep species, so a tree encounter can be asserted
 ## both ways without depending on which row the roll lands on.
 const ASLEEP_SPECIES: int = 21
+
+
+## One grass table for map 1: three times of day of the source's seven slots,
+## all the same species, so a roll cannot pick a different answer.
+func _grass_slots() -> Array:
+	var out: Array = []
+	for time_of_day: int in 3:
+		var slots: Array = []
+		for slot: int in 7:
+			slots.append({"level": 5, "species": TREEMON_SPECIES})
+		out.append(slots)
+	return out
 
 
 func _treemon_sets() -> Array:
@@ -230,6 +274,28 @@ func _map(number: int, tileset: int, palette: int = 0, environment: int = 0) -> 
 			"x": TRANSITION_PIT_CELL.x, "y": TRANSITION_PIT_CELL.y,
 			"destination": 1, "map_group": 1, "map_number": 1,
 		})
+	# The town's two doors and the one door back out of each of them, so a walk
+	# in records the warp it came through and a Dig walks back out of it.
+	if number == ESCAPE_TOWN:
+		collision[ESCAPE_CAVE_DOOR.y * 8 + ESCAPE_CAVE_DOOR.x] = COLL_PIT
+		collision[ESCAPE_CENTRE_DOOR.y * 8 + ESCAPE_CENTRE_DOOR.x] = COLL_PIT
+		warps = [
+			{
+				"x": ESCAPE_CAVE_DOOR.x, "y": ESCAPE_CAVE_DOOR.y, "destination": 1,
+				"map_group": 1, "map_number": ESCAPE_CAVE,
+			},
+			{
+				"x": ESCAPE_CENTRE_DOOR.x, "y": ESCAPE_CENTRE_DOOR.y, "destination": 1,
+				"map_group": 1, "map_number": ESCAPE_POKECENTER,
+			},
+		]
+	elif number in [ESCAPE_CAVE, ESCAPE_POKECENTER]:
+		collision[ESCAPE_INSIDE_DOOR.y * 8 + ESCAPE_INSIDE_DOOR.x] = COLL_PIT
+		warps = [{
+			"x": ESCAPE_INSIDE_DOOR.x, "y": ESCAPE_INSIDE_DOOR.y,
+			"destination": 1 if number == ESCAPE_CAVE else 2,
+			"map_group": 1, "map_number": ESCAPE_TOWN,
+		}]
 	return {
 		"group": 1,
 		"number": number,
@@ -345,11 +411,21 @@ func test_the_eight_resolved_moves_are_the_field_moves_the_submenu_offers() -> v
 	assert_eq(Gen2WorldFieldMove.MOVE_FLASH, 0x94)
 	assert_eq(Gen2WorldFieldMove.MOVE_HEADBUTT, 0x1D)
 	assert_eq(Gen2WorldFieldMove.MOVE_ROCK_SMASH, 0xF9)
-	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, DIG, TELEPORT,
-	# SOFTBOILED, MILK_DRINK and SWEET_SCENT.
-	for move: int in [0x13, 0x5B, 0x64, 0x87, 0xD0, 0xE6]:
-		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_DIG))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_TELEPORT))
+	assert_eq(Gen2WorldFieldMove.MOVE_DIG, 0x5B)
+	assert_eq(Gen2WorldFieldMove.MOVE_TELEPORT, 0x64)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SWEET_SCENT))
+	assert_eq(Gen2WorldFieldMove.MOVE_SWEET_SCENT, 0xE6)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLY))
+	assert_eq(Gen2WorldFieldMove.MOVE_FLY, 0x13)
+	# Every `MonMenu_*` field-move row is answered now, so the submenu offers no
+	# entry that nothing acts on.
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SOFTBOILED))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_MILK_DRINK))
+	assert_eq(Gen2WorldFieldMove.MOVE_SOFTBOILED, 0x87)
+	assert_eq(Gen2WorldFieldMove.MOVE_MILK_DRINK, 0xD0)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 14)
 
 
 ## .TryStrength is CheckBadge ENGINE_PLAINBADGE and nothing else, so a request
@@ -1353,3 +1429,212 @@ func _headbutt_world(knows: bool = true, map_number: int = 1) -> Gen2WorldAPI:
 	if knows:
 		_knowing_party(world, Gen2WorldFieldMove.MOVE_HEADBUTT)
 	return world
+
+
+## `.SaveDigWarp` and `.SetSpawn`, and the two moves that read what they wrote.
+
+func _escape_world(map_number: int = ESCAPE_TOWN, cell: Vector2i = SPAWN_CELL) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		GameData.open_directory(_directory), 1, map_number, cell, Gen2WorldState.new()
+	)
+	world.set_party_summary(
+		1, false, [1] as Array[int],
+		[[Gen2WorldFieldMove.MOVE_DIG, Gen2WorldFieldMove.MOVE_TELEPORT]],
+		["MON"], [false]
+	)
+	return world
+
+
+func test_walking_into_a_cave_records_the_warp_and_nothing_else_does() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	assert_true(world.dig_warp.is_empty())
+	assert_eq(world.last_spawn_map, Vector2i(-1, -1))
+
+	world.player_cell = ESCAPE_CAVE_DOOR
+	assert_true(bool(world.try_warp().get("ok", false)))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_CAVE))
+	# One-based, as the town's own warp list counts it.
+	assert_eq(world.dig_warp, {"warp": 1, "map_group": 1, "map_number": ESCAPE_TOWN})
+	assert_eq(world.last_spawn_map, Vector2i(-1, -1), "a cave is no respawn")
+
+	# Out again: the way back is not a walk from an outdoor map, so neither
+	# record moves.
+	world.player_cell = ESCAPE_INSIDE_DOOR
+	assert_true(bool(world.try_warp().get("ok", false)))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_TOWN))
+	assert_eq(world.dig_warp, {"warp": 1, "map_group": 1, "map_number": ESCAPE_TOWN})
+
+
+func test_walking_into_a_pokemon_centre_records_the_spawn() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	world.player_cell = ESCAPE_CENTRE_DOOR
+	assert_true(bool(world.try_warp().get("ok", false)))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_POKECENTER))
+	assert_eq(world.last_spawn_map, Vector2i(1, ESCAPE_TOWN))
+	# `.SetSpawn` records the map, and `IsSpawnPoint` is what turns it into the
+	# spawn a blackout and a Teleport share.
+	assert_eq(world.spawn_index_of(world.last_spawn_map), 0)
+	assert_eq(world.whiteout_spawn(), 0)
+	# `.SaveDigWarp` fires on any outdoor to indoor walk, a Pokemon Center's
+	# included, so both records move on this one: the door is the town's second.
+	assert_eq(world.dig_warp, {"warp": 2, "map_group": 1, "map_number": ESCAPE_TOWN})
+
+
+func test_a_blackout_with_no_pokemon_centre_behind_it_falls_back_to_home() -> void:
+	# `GetWhiteoutSpawn`'s own `xor a`: a game that has entered none goes home.
+	assert_eq(_escape_world().whiteout_spawn(), RomLayout.SPAWN_HOME)
+
+
+func test_dig_takes_the_warp_the_cave_was_entered_by() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	world.player_cell = ESCAPE_CAVE_DOOR
+	world.try_warp()
+	world.player_cell = Vector2i(4, 4)
+
+	var dug: Dictionary = world.dig_request()
+	assert_true(bool(dug.get("ok", false)), String(dug.get("reason", "")))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_TOWN))
+	assert_eq(world.player_cell, ESCAPE_CAVE_DOOR)
+
+
+func test_dig_is_refused_outside_a_cave_and_with_no_warp_recorded() -> void:
+	var outdoors: Gen2WorldAPI = _escape_world()
+	assert_eq(StringName(outdoors.dig_request()["reason"]), &"not_in_a_cave")
+
+	var in_a_cave: Gen2WorldAPI = _escape_world(ESCAPE_CAVE, Vector2i(4, 4))
+	assert_eq(StringName(in_a_cave.dig_request()["reason"]), &"no_dig_warp")
+
+	var unknowing: Gen2WorldAPI = _escape_world(ESCAPE_CAVE, Vector2i(4, 4))
+	unknowing.set_party_summary(1, false, [1] as Array[int], [[]], ["MON"], [false])
+	assert_eq(StringName(unknowing.dig_request()["reason"]), &"move_not_known")
+
+
+func test_teleport_returns_to_the_last_pokemon_centre_from_outdoors() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	world.player_cell = ESCAPE_CENTRE_DOOR
+	world.try_warp()
+	# Out of the centre and away, so the return is somewhere to go.
+	world.player_cell = ESCAPE_INSIDE_DOOR
+	world.try_warp()
+	world.player_cell = Vector2i(6, 6)
+
+	var teleported: Dictionary = world.teleport_request()
+	assert_true(bool(teleported.get("ok", false)), String(teleported.get("reason", "")))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_TOWN))
+	assert_eq(world.player_cell, SPAWN_CELL)
+
+
+func test_teleport_is_refused_indoors_and_with_no_pokemon_centre_behind_it() -> void:
+	var fresh: Gen2WorldAPI = _escape_world()
+	assert_eq(StringName(fresh.teleport_request()["reason"]), &"no_spawn_point")
+
+	var indoors: Gen2WorldAPI = _escape_world(ESCAPE_POKECENTER, Vector2i(4, 4))
+	indoors.last_spawn_map = Vector2i(1, ESCAPE_TOWN)
+	assert_eq(StringName(indoors.teleport_request()["reason"]), &"not_outdoors")
+
+
+func test_a_snapshot_carries_both_escape_points_and_a_reopened_world_keeps_them() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	world.player_cell = ESCAPE_CAVE_DOOR
+	world.try_warp()
+	var snapshot: Gen2WorldSnapshot = Gen2WorldSnapshot.from_world(world)
+	snapshot.last_spawn_map = Vector2i(1, ESCAPE_TOWN)
+
+	var reopened: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(
+		GameData.open_directory(_directory),
+		Gen2WorldSnapshot.from_dict(snapshot.to_dict())
+	)
+	assert_eq(reopened.dig_warp, {"warp": 1, "map_group": 1, "map_number": ESCAPE_TOWN})
+	assert_eq(reopened.last_spawn_map, Vector2i(1, ESCAPE_TOWN))
+	# A snapshot written before either existed reads as a game that has entered
+	# neither, which is what their defaults say.
+	var old: Dictionary = snapshot.to_dict()
+	old.erase("dig_warp")
+	old.erase("last_spawn_map")
+	var older: Gen2WorldSnapshot = Gen2WorldSnapshot.from_dict(old)
+	assert_true(older.dig_warp.is_empty())
+	assert_eq(older.last_spawn_map, Vector2i(-1, -1))
+
+
+## `SweetScentEncounter`: a wild where one could have been stepped into.
+
+func _scent_world(cell: Vector2i = GRASS_CELL, map_number: int = 1) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		GameData.open_directory(_directory), 1, map_number, cell, Gen2WorldState.new()
+	)
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_SWEET_SCENT)
+	return world
+
+
+func test_sweet_scent_finds_a_wild_in_the_grass_without_rolling_the_rate() -> void:
+	var world: Gen2WorldAPI = _scent_world()
+	# The five-step cooldown a map entry sets is a step's gate, not this one.
+	assert_true(world.state.wild_encounter_cooldown() > 0)
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	var scent: Dictionary = world.sweet_scent_request(random)
+	assert_true(bool(scent.get("ok", false)), String(scent.get("reason", "")))
+	assert_eq(int((scent["encounter"] as Dictionary)["pokemon"]), TREEMON_SPECIES)
+
+
+func test_sweet_scent_says_nothing_is_here_off_the_grass_and_on_a_bare_map() -> void:
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	# `CanEncounterWildMon`: ordinary floor is where the source refuses first.
+	var on_floor: Gen2WorldAPI = _scent_world(Vector2i(1, 1))
+	assert_eq(StringName(on_floor.sweet_scent_request(random)["reason"]), &"no_encounter")
+
+	# And a map with no table of its own answers the same, which is
+	# `ChooseWildEncounter` refusing rather than the tile.
+	var bare: Gen2WorldAPI = _scent_world(GRASS_CELL, 2)
+	assert_eq(StringName(bare.sweet_scent_request(random)["reason"]), &"no_encounter")
+
+
+func test_sweet_scent_needs_a_party_member_that_knows_it() -> void:
+	var world: Gen2WorldAPI = _scent_world()
+	world.set_party_summary(1, false, [1] as Array[int], [[]], ["MON"], [false])
+	assert_eq(StringName(world.sweet_scent_request()["reason"]), &"move_not_known")
+
+
+## `FlyFunction`'s `.TryFly`, which is everything the move can refuse on before
+## the region map is drawn.
+
+func test_fly_needs_the_storm_badge_the_move_and_an_outdoor_map() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var badged := Gen2WorldState.new()
+	badged.set_engine_flag(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_STORM, Gen2WorldState.is_crystal_profile(data)
+	))
+	var outdoors: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, ESCAPE_TOWN, SPAWN_CELL, badged)
+	_knowing_party(outdoors, Gen2WorldFieldMove.MOVE_FLY)
+	assert_true(bool(outdoors.fly_request().get("ok", false)))
+
+	var indoors: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, ESCAPE_POKECENTER, Vector2i(4, 4), badged
+	)
+	_knowing_party(indoors, Gen2WorldFieldMove.MOVE_FLY)
+	assert_eq(StringName(indoors.fly_request()["reason"]), &"indoors")
+
+	var unbadged: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, ESCAPE_TOWN, SPAWN_CELL, Gen2WorldState.new()
+	)
+	_knowing_party(unbadged, Gen2WorldFieldMove.MOVE_FLY)
+	assert_eq(StringName(unbadged.fly_request()["reason"]), &"badge_required")
+
+
+func test_the_visited_flypoints_are_the_engine_flags_of_their_own_spawns() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, ESCAPE_TOWN, SPAWN_CELL, state)
+	assert_eq(world.visited_flypoints(), [] as Array[int])
+
+	# The fixture's flypoint table is empty, so the mapping itself is what is
+	# asserted here: `SPAWN_UNION_CAVE` has no flag row of its own and every
+	# spawn past it sits one lower than its own number.
+	assert_eq(Gen2WorldState.flypoint_flag(0), 51)
+	assert_eq(Gen2WorldState.flypoint_flag(13), 64, "Indigo Plateau")
+	assert_eq(Gen2WorldState.flypoint_flag(17), -1, "Union Cave has no flypoint")
+	assert_eq(Gen2WorldState.flypoint_flag(26), 76, "Mt. Silver")
+	# Gold and Silver ship no ENGINE_MOBILE_SYSTEM, so the whole run sits one
+	# lower there.
+	assert_eq(Gen2WorldState.flypoint_flag(0, false), 50)

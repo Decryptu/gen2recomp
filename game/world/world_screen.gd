@@ -2216,6 +2216,9 @@ func _on_party_action(action: Dictionary) -> void:
 	if StringName(action.get("kind", &"")) == &"mon_item":
 		_run_mon_item_action(action)
 		return
+	if StringName(action.get("kind", &"")) == &"heal_transfer":
+		_run_heal_transfer(action)
+		return
 	if StringName(action.get("kind", &"")) != &"field_move":
 		_refresh_labels()
 		return
@@ -2281,6 +2284,47 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used ROCK SMASH!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_FLY:
+			var fly: Dictionary = _world.fly_request()
+			if not bool(fly.get("ok", false)):
+				## `.nostormbadge` says the badge line and `.indoors`
+				## `FieldMoveFailed`; neither is a text this project imports, so
+				## both get the refusal every field move shares.
+				_show_field_move_text("Can't use that here.")
+				return
+			_open_fly_map(fly)
+		Gen2WorldFieldMove.MOVE_SWEET_SCENT:
+			var scent: Dictionary = _world.sweet_scent_request(_encounter_random)
+			if not bool(scent.get("ok", false)):
+				## `SweetScentNothing`, which is the one refusal the script has:
+				## a tile no wild could be stepped into on says the same thing a
+				## map with no table does.
+				_show_field_move_text("Looks like there's\nnothing here…")
+				return
+			_show_field_move_text("%s used SWEET SCENT!" % String(action.get("name", "")))
+			var found: Dictionary = scent["encounter"]
+			_start_battle_request({
+				"kind": &"battle_requested",
+				"values": found["values"],
+				"encounter": found.duplicate(true),
+			})
+		Gen2WorldFieldMove.MOVE_DIG:
+			var dig: Dictionary = _world.dig_request()
+			if not bool(dig.get("ok", false)):
+				## `.CantUseDigText`, which every refusal of an escape shares.
+				_show_field_move_text("Can't use that here.")
+				return
+			_show_field_move_text("%s used DIG!" % String(action.get("name", "")))
+			_refresh_after_escape()
+		Gen2WorldFieldMove.MOVE_TELEPORT:
+			var teleport: Dictionary = _world.teleport_request()
+			if not bool(teleport.get("ok", false)):
+				_show_field_move_text("Can't use that here.")
+				return
+			## `_TeleportReturnText`, which names no Pokemon: the move says where
+			## it is going rather than who used it.
+			_show_field_move_text("Return to the last\n#MON CENTER.")
+			_refresh_after_escape()
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -2396,6 +2440,21 @@ func _run_mon_item_action(action: Dictionary) -> void:
 					name, String(result.get("reason", "")),
 				]
 			)
+
+
+## `Softboiled_MilkDrinkFunction`'s two halves, once the party menu has picked
+## who is giving and who is receiving. The health moves through the world's own
+## transaction, since the party it changes is a save the world owns.
+func _run_heal_transfer(action: Dictionary) -> void:
+	var result: Dictionary = Gen2WorldPartyHost.transfer_health(
+		_world, _embedded_party_save(), int(action.get("slot", -1)),
+		int(action.get("target_slot", -1)), _injected_save == null
+	)
+	if not bool(result.get("ok", false)):
+		_show_field_move_text("It won't have any effect.")
+		return
+	## `PARTYMENUTEXT_HEAL_HP`, which is the line every healing item shares.
+	_show_field_move_text("%s\nrecovered health!" % String(action.get("target_name", "")))
 
 
 func _show_field_move_text(text: String) -> void:
@@ -2579,11 +2638,57 @@ func _open_service_overlay(kind: StringName) -> void:
 	_refresh_labels()
 
 
+## `_FlyMap` as its own overlay, and the warp its answer asks for. A cancel
+## leaves the player where they were, which is what `.illegal` does with the
+## `-1` a B press writes.
+func _open_fly_map(request: Dictionary) -> void:
+	if _service_host != null or _world == null or _data == null:
+		return
+	var host: Gen2WorldServiceScreen = SERVICE_SCENE.instantiate() as Gen2WorldServiceScreen
+	if host == null:
+		_script_prompt = "Region map scene unavailable"
+		_refresh_labels()
+		return
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	add_child(host)
+	var save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	if not host.open_fly_map(_world, _data, save, request):
+		host.queue_free()
+		_script_prompt = "Region map unavailable"
+		_refresh_labels()
+		return
+	host.completed.connect(_on_service_completed)
+	_service_host = host
+	_script_prompt = "Fly: choose a town"
+	_refresh_labels()
+
+
+## The fly map's own answer, which is not a script result: a spawn to warp to, or
+## -1 for a cancel.
+func _apply_fly_choice(results: Array) -> bool:
+	for result: Dictionary in results:
+		if StringName(result.get("kind", &"")) != &"fly_chosen":
+			continue
+		var spawn: int = int(result.get("spawn", -1))
+		if spawn < 0:
+			_refresh_labels()
+			return true
+		var warped: Dictionary = _world.warp_to_spawn(spawn)
+		if bool(warped.get("ok", false)):
+			_refresh_after_escape()
+		return true
+	return false
+
+
 func _on_service_completed(results: Array) -> void:
 	var host: Gen2WorldServiceScreen = _service_host
 	_service_host = null
 	if host != null:
 		host.queue_free()
+	if _apply_fly_choice(results):
+		return
 	# The radio card writes wMapMusic, so what plays after the Pokegear closes is
 	# whichever station was left tuned, or the map's own track when none was.
 	_play_current_map_music()
@@ -2764,6 +2869,21 @@ func _show_script_results(results: Array) -> void:
 			_play_current_map_music()
 		else:
 			_renderer.refresh()
+	_refresh_labels()
+
+
+## What a map change owes the screen once the world has already applied it: the
+## renderer, the animation and the music all belong to the map that is now under
+## the player. A warp reached through a script goes through the script result
+## instead; an escape move has no script here to carry it.
+func _refresh_after_escape() -> void:
+	if _world == null:
+		return
+	_animation.configure(_world, time_of_day)
+	if _renderer != null:
+		_renderer.set_world(_world, _animation)
+		_renderer.set_time_of_day(_render_time_of_day())
+	_play_current_map_music()
 	_refresh_labels()
 
 
