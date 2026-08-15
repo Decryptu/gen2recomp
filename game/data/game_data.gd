@@ -52,6 +52,7 @@ var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
 var _pokedex_palettes: Dictionary = {}
+var _pack: Dictionary = {}
 var _gender_screen_palette: Array = []
 var _copyright_string: Array = []
 var _copyright_palette: Array = []
@@ -127,6 +128,7 @@ static func open_directory(path: String) -> GameData:
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
 	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
+	data._pack = manifest.get("pack", {})
 	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
 	data._gender_screen_palette = gender_palette if gender_palette is Array else []
 	var copyright_string: Variant = manifest.get("copyright_string", [])
@@ -1281,8 +1283,10 @@ func copyright_palette() -> PackedColorArray:
 
 
 ## One of the pack's five texts (`oak_no_time`, `no_mon`, `toss_ask`,
-## `toss_ask_quantity`, `toss_threw`), still carrying [Gen2TextStream]'s markers
-## for the quantity and the item name. Empty on a cache imported before them,
+## `toss_ask_quantity`, `toss_threw`) or the six a field item says
+## (`escape_rope`, `itemfinder_nearby`, `itemfinder_nope`, `sacred_ash`,
+## `squirtbottle`, `coin_case`), still carrying [Gen2TextStream]'s markers
+## for the quantity, the player and the item name. Empty on a cache imported before them,
 ## which is the caller's cue to use its own wording.
 func menu_text(key: String) -> String:
 	return String(_menu_text.get(key, ""))
@@ -1640,6 +1644,37 @@ func pokedex_palette(name: String) -> PackedColorArray:
 	var colors := PackedColorArray()
 	for packed: Variant in stored as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## `DrawPocketName`'s own 5x3 piece for [param pocket], as the tile numbers it
+## copies. Empty for a cache without the screen, or for a pocket outside the
+## four the tilemap holds.
+func pack_pocket_name(pocket: int) -> PackedByteArray:
+	var stored: Variant = _pack.get("pocket_names", [])
+	var cells: int = RomLayout.PACK_NAME_COLUMNS * RomLayout.PACK_NAME_ROWS
+	if not stored is Array or pocket < 0 or pocket >= RomLayout.PACK_POCKETS \
+		or (stored as Array).size() < RomLayout.PACK_NAME_CELLS:
+		return PackedByteArray()
+	var out := PackedByteArray()
+	for cell: int in cells:
+		out.append(int((stored as Array)[pocket * cells + cell]))
+	return out
+
+
+## One of `_CGB_PackPals`' six palettes, Kris's set for [param female]. Empty
+## where the cache does not carry it, which is every Gold and Silver cache for
+## the female set.
+func pack_palette(index: int, female: bool = false) -> PackedColorArray:
+	var stored: Variant = _pack.get("female_palettes" if female else "palettes", [])
+	if not stored is Array or index < 0 or index >= RomLayout.PACK_PALETTES:
+		return PackedColorArray()
+	var first: int = index * RomLayout.PACK_PALETTE_COLORS
+	if (stored as Array).size() < first + RomLayout.PACK_PALETTE_COLORS:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for offset: int in RomLayout.PACK_PALETTE_COLORS:
+		colors.append(Gen2Palette.from_packed(int((stored as Array)[first + offset])))
 	return colors
 
 

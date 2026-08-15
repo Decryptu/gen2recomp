@@ -336,6 +336,14 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not menu_text["ok"]:
 		return menu_text
 
+	var pack: Dictionary = verify_pack(rom, layout)
+	if not pack["ok"]:
+		return pack
+
+	var descriptions: Dictionary = verify_descriptions(rom, layout)
+	if not descriptions["ok"]:
+		return descriptions
+
 	return {"ok": true, "message": "Layout verified."}
 
 
@@ -1852,12 +1860,23 @@ const INTRO_TEXT_OPENINGS: Dictionary = {
 
 ## What each pack text opens with once its `text` macro byte is past. Short
 ## anchors, the way the intro texts are anchored.
+## The pack's own five, and the six a field item says. Every one is
+## `data/text/common_*.asm`, which no other importer reads, so each is pinned by
+## its own opening rather than by a table.
 const PACK_TEXT_OPENINGS: Dictionary = {
 	"oak_no_time": "OAK:",
 	"no_mon": "You don't have a",
 	"toss_ask": "Throw away how",
 	"toss_ask_quantity": "Throw away ",
 	"toss_threw": "Threw away",
+	"escape_rope": "<PLAYER> used an",
+	"itemfinder_nearby": "Yes! ITEMFINDER",
+	"itemfinder_nope": "Nope! ITEMFINDER",
+	## `#` is the charmap's own ligature and decodes spelled out, the way
+	## MENU_DESCRIPTION_FIRST does.
+	"sacred_ash": "<PLAYER>'s POKéMON",
+	"squirtbottle": "<PLAYER> sprinkled",
+	"coin_case": "Coins:",
 }
 ## The first and last of `.PokedexDesc` through `.QuitDesc`, which is what says a
 ## nine-string run is that run and not another one in the same bank. As decoded
@@ -1899,7 +1918,11 @@ static func verify_menu_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 		}
 	for key: String in PACK_TEXT_OPENINGS:
 		var at: int = int(entry.get(key, -1))
-		if at < 0 or not rom.in_bounds(at, RomLayout.PACK_TEXT_MAX_BYTES):
+		## -1 is a text this cartridge has nothing usable at; only the Coin
+		## Case's is, and only on Gold and Silver.
+		if at < 0:
+			continue
+		if not rom.in_bounds(at, RomLayout.PACK_TEXT_MAX_BYTES):
 			return {"ok": false, "message": "Pack text %s is outside the cartridge." % key}
 		if rom.u8(at) != TEXT_MACRO_START:
 			return {
@@ -2143,6 +2166,78 @@ static func verify_gender_screen(rom: RomFile, layout: Dictionary) -> Dictionary
 				],
 			}
 	return {"ok": true, "message": "Gender screen graphics verified."}
+
+
+## `gfx/pack/pack.pal` and `pack_f.pal`, six palettes each, which pin both sets:
+## every dump ships them byte identical and Crystal stores Kris's immediately
+## after Chris's, inside `_CGB_PackPals` itself.
+const PACK_CHRIS_COLORS: Array[int] = [
+	0x7FFF, 0x7DEF, 0x7C00, 0x0000, 0x7FFF, 0x7DEF, 0x7C00, 0x0000,
+	0x7D7F, 0x7DEF, 0x7C00, 0x0000, 0x7FFF, 0x7DEF, 0x7C00, 0x001F,
+	0x7FFF, 0x7DEF, 0x001F, 0x0000, 0x7FFF, 0x1E67, 0x1E67, 0x0000,
+]
+const PACK_KRIS_COLORS: Array[int] = [
+	0x7FFF, 0x7DDF, 0x7CFF, 0x0000, 0x7FFF, 0x7DDF, 0x7CFF, 0x0000,
+	0x7DEF, 0x7DDF, 0x7CFF, 0x0000, 0x7FFF, 0x7DDF, 0x7CFF, 0x001F,
+	0x7FFF, 0x7DDF, 0x001F, 0x0000, 0x7FFF, 0x1E67, 0x1E67, 0x0000,
+]
+## What `DrawPocketName`'s tilemap sits before `PackMenuGFX` by in every dump.
+## The two were located independently, so the constant gap is what says both are
+## right rather than both being plausible.
+const PACK_NAME_TILEMAP_GAP: int = 0x135
+
+
+## The pack screen's four runs. Both palette sets are checked colour for colour,
+## the tilemap for being where it is relative to the sheet and for naming only
+## tiles the sheet carries, and every run for being inside the cartridge.
+static func verify_pack(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pack", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No pack screen on this cartridge."}
+	var menu_gfx: int = int(entry["menu_gfx"])
+	var names: int = int(entry["pocket_names"])
+	if not rom.in_bounds(menu_gfx, RomLayout.PACK_MENU_TILES * RomLayout.TILE_BYTES_2BPP) \
+		or not rom.in_bounds(
+			RomLayout.pack_gfx_offset(layout),
+			RomLayout.PACK_TILES * RomLayout.TILE_BYTES_2BPP
+		) \
+		or not rom.in_bounds(names, RomLayout.PACK_NAME_CELLS):
+		return {"ok": false, "message": "Pack graphics are outside the cartridge."}
+	if menu_gfx - names != PACK_NAME_TILEMAP_GAP:
+		return {
+			"ok": false,
+			"message": "The pack tilemap sits $%X before its sheet, expected $%X." % [
+				menu_gfx - names, PACK_NAME_TILEMAP_GAP,
+			],
+		}
+	for cell: int in RomLayout.PACK_NAME_CELLS:
+		var tile: int = rom.u8(names + cell)
+		if tile >= RomLayout.PACK_FIRST_TILE:
+			return {
+				"ok": false,
+				"message": "Pack tilemap cell %d is tile $%02X, past the sheet." % [
+					cell, tile,
+				],
+			}
+
+	var sets: Array = [["palettes", PACK_CHRIS_COLORS], ["female_palettes", PACK_KRIS_COLORS]]
+	for set_row: Array in sets:
+		var at: int = int(entry.get(String(set_row[0]), -1))
+		if at < 0:
+			continue
+		var want: Array[int] = set_row[1]
+		if not rom.in_bounds(at, want.size() * Gen2Palette.COLOR_BYTES):
+			return {"ok": false, "message": "Pack palettes are outside the cartridge."}
+		for index: int in want.size():
+			var stored: int = rom.u16le(at + index * Gen2Palette.COLOR_BYTES)
+			if stored != want[index]:
+				return {
+					"ok": false,
+					"message": "Pack %s colour %d is $%04X, expected $%04X." % [
+						set_row[0], index, stored, want[index],
+					],
+				}
+	return {"ok": true, "message": "Pack graphics verified."}
 
 
 ## Walks the type matchup chart from its offset to the terminator.
@@ -3527,6 +3622,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
 		"title": _import_title(rom, layout),
+		"pack": _import_pack(rom, layout),
 		"town_map": _import_town_map(rom, layout),
 		"intro_movie": _import_intro_movie(rom, layout),
 		"gs_intro": _import_gs_intro(rom, layout),
@@ -3697,6 +3793,11 @@ func _import_moves(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 		rom.bytes(), int(layout["move_names"]), RomLayout.MOVE_COUNT, RomLayout.MAX_NAME_LENGTH
 	)
 	var out: Array = []
+	## `PrintMoveDescription`'s own line, which the TM/HM pocket prints for the
+	## move a TM teaches.
+	var descriptions: Array[String] = read_descriptions(
+		rom, int(layout.get("move_descriptions", -1)), RomLayout.MOVE_DESCRIPTION_COUNT
+	)
 
 	for move: int in range(1, RomLayout.MOVE_COUNT + 1):
 		var entry: int = RomLayout.move_data_offset(layout, move)
@@ -3705,6 +3806,7 @@ func _import_moves(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 		out.append({
 			"number": move,
 			"name": names[move - 1],
+			"description": descriptions[move - 1] if move <= descriptions.size() else "",
 			"effect": rom.u8(entry + RomLayout.MOVE_EFFECT),
 			"power": rom.u8(entry + RomLayout.MOVE_POWER),
 			"type": rom.u8(entry + RomLayout.MOVE_TYPE),
@@ -3829,6 +3931,11 @@ func _import_items(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 	var out: Array = []
 	var status_masks: Dictionary = _read_item_status_masks(rom, layout)
 	var healing_amounts: Dictionary = _read_item_healing_amounts(rom, layout)
+	## `PrintItemDescription`'s own line, which the pack's text box prints under
+	## the pocket the row is in.
+	var descriptions: Array[String] = read_descriptions(
+		rom, int(layout.get("item_descriptions", -1)), RomLayout.ITEM_COUNT
+	)
 
 	for item: int in range(1, RomLayout.ITEM_COUNT + 1):
 		var at: int = int(layout["item_attributes"]) + (item - 1) * RomLayout.ITEM_ATTRIBUTE_SIZE
@@ -3847,6 +3954,8 @@ func _import_items(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 			"field_menu": packed_menu >> 4,
 			"battle_menu": packed_menu & 0x0F,
 		}
+		if item <= descriptions.size():
+			entry["description"] = descriptions[item - 1]
 		if status_masks.has(item):
 			entry["status_mask"] = int(status_masks[item])
 		if healing_amounts.has(item):
@@ -3856,6 +3965,45 @@ func _import_items(rom: RomFile, layout: Dictionary, on_progress: Callable) -> A
 			on_progress.call("items", item, RomLayout.ITEM_COUNT)
 
 	return out
+
+
+## One `table_width 2` description table, as [param count] decoded texts in
+## entry order. Every pointer is an address inside the table's own bank, which is
+## what `PrintItemDescription` and `PrintMoveDescription` read them as; an entry
+## that leaves the bank or runs past [constant RomLayout.DESCRIPTION_MAX_BYTES]
+## without a terminator answers an empty Array, since a wrong table decodes as
+## words rather than failing.
+static func read_descriptions(rom: RomFile, at: int, count: int) -> Array[String]:
+	var out: Array[String] = []
+	if at < 0 or not rom.in_bounds(at, count * 2):
+		return out
+	var bank: int = at / RomFile.BANK_SIZE
+	var data: PackedByteArray = rom.bytes()
+	for index: int in count:
+		var address: int = rom.u16le(at + index * 2)
+		if address < 0x4000 or address >= 0x8000:
+			return [] as Array[String]
+		var offset: int = bank * RomFile.BANK_SIZE + (address - 0x4000)
+		var end: int = Gen2Text.terminated_end(
+			data, offset, RomLayout.DESCRIPTION_MAX_BYTES
+		)
+		if end <= offset or end - offset >= RomLayout.DESCRIPTION_MAX_BYTES:
+			return [] as Array[String]
+		out.append(Gen2Text.decode(data, offset, end - offset))
+	return out
+
+
+## Both description tables, checked by decoding every entry of each.
+static func verify_descriptions(rom: RomFile, layout: Dictionary) -> Dictionary:
+	if read_descriptions(
+		rom, int(layout.get("item_descriptions", -1)), RomLayout.ITEM_COUNT
+	).size() != RomLayout.ITEM_COUNT:
+		return {"ok": false, "message": "The item descriptions do not decode."}
+	if read_descriptions(
+		rom, int(layout.get("move_descriptions", -1)), RomLayout.MOVE_DESCRIPTION_COUNT
+	).size() != RomLayout.MOVE_DESCRIPTION_COUNT:
+		return {"ok": false, "message": "The move descriptions do not decode."}
+	return {"ok": true, "message": "Descriptions verified."}
 
 
 static func verify_item_metadata(rom: RomFile, layout: Dictionary) -> Dictionary:
@@ -4115,8 +4263,11 @@ func _import_menu_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 		descriptions[String(RomLayout.MENU_DESCRIPTION_ORDER[index])] = read[index]
 	out["descriptions"] = descriptions
 	for key: String in PACK_TEXT_OPENINGS:
+		var at: int = int(entry.get(key, -1))
+		if at < 0:
+			continue
 		var decoded: Dictionary = Gen2WorldScript.decode_text(
-			rom.slice(int(entry[key]), RomLayout.PACK_TEXT_MAX_BYTES)
+			rom.slice(at, RomLayout.PACK_TEXT_MAX_BYTES)
 		)
 		if not bool(decoded.get("ok", false)):
 			return {}
@@ -4188,6 +4339,29 @@ func _packed_palette(rom: RomFile, at: int, colors: int) -> Array:
 	for index: int in colors:
 		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
 	return out
+
+
+## The pack screen's data half: `DrawPocketName`'s 5x12 tilemap and the palettes
+## `_CGB_PackPals` fills the attrmap with. The graphics go through the tile table
+## with the rest of the strips.
+##
+## Both palette sets are six palettes, not the eight the copy asks for; the two
+## past them are read out of whatever follows and no attribute names them.
+func _import_pack(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pack", {})
+	if entry.is_empty():
+		return {}
+	var names: Array = []
+	for cell: int in RomLayout.PACK_NAME_CELLS:
+		names.append(rom.u8(int(entry["pocket_names"]) + cell))
+	var colors: int = RomLayout.PACK_PALETTES * RomLayout.PACK_PALETTE_COLORS
+	return {
+		"pocket_names": names,
+		"palettes": _packed_palette(rom, int(entry["palettes"]), colors),
+		"female_palettes": _packed_palette(
+			rom, int(entry.get("female_palettes", -1)), colors
+		),
+	}
 
 
 ## `CopyrightString`, as the tile codes it is. Kept as codes rather than as text
@@ -4902,6 +5076,31 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"first_code": 0,
 			"bits": 2,
 		}
+
+	## `Pack_InitGFX`'s own two runs. The pocket pictures are one strip of all
+	## four rather than the fifteen tiles `DrawPackGFX` requests, since a cache
+	## holds what the cartridge stores and the screen picks its pocket out of it.
+	var pack: Dictionary = layout.get("pack", {})
+	if not pack.is_empty():
+		sheets["pack_menu"] = {
+			"offset": int(pack["menu_gfx"]),
+			"tiles": RomLayout.PACK_MENU_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+		sheets["pack_pockets"] = {
+			"offset": RomLayout.pack_gfx_offset(layout),
+			"tiles": RomLayout.PACK_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+		if int(pack.get("female_gfx", -1)) >= 0:
+			sheets["pack_pockets_female"] = {
+				"offset": int(pack["female_gfx"]),
+				"tiles": RomLayout.PACK_TILES,
+				"first_code": 0,
+				"bits": 2,
+			}
 
 	var title: Dictionary = layout.get("title", {})
 	if int(title.get("trail", -1)) >= 0:

@@ -69,6 +69,10 @@ const REGISTERABLE_KEY_ITEMS: Dictionary = {
 ## the item list never reaches.
 const ITEM_ROWS: int = 255
 
+## What fits between the text box's own borders: `Textbox`'s interior is 18
+## columns and `PrintItemDescription` is handed the cell one in from the left.
+const DESCRIPTION_COLUMNS: int = 18
+
 
 func run(r: RefCounted) -> void:
 	_r = r
@@ -81,6 +85,8 @@ func run(r: RefCounted) -> void:
 		_verify_submenus(game_id, data)
 		_verify_field_effects(game_id, data)
 		_verify_key_item_effects(game_id, data)
+		_verify_screen(game_id, data)
+		_verify_descriptions(game_id, data)
 
 
 ## `CheckSelectableItem` over the real rows. The eight named key items are the
@@ -333,3 +339,77 @@ func _verify_squirtbottle(game_id: StringName, data: GameData) -> void:
 			and StringName(nothing.get("kind", &"")) == &"squirtbottle_nothing",
 		"%s: the squirtbottle away from the tree answered %s." % [game_id, nothing]
 	)
+
+
+## The screen itself, drawn once per pocket out of the real cache: every cell of
+## every picture resolves to a tile the sheets carry, and the four pocket names
+## are four different pieces rather than one piece read four times.
+func _verify_screen(game_id: StringName, data: GameData) -> void:
+	var page: Gen2PackPage = Gen2PackPage.from_data(data)
+	if page == null or not page.ready():
+		_r.fail("%s: the cache carries no pack graphics." % game_id)
+		return
+	var names: Dictionary = {}
+	for pocket: int in RomLayout.PACK_POCKETS:
+		var name_cells: PackedByteArray = data.pack_pocket_name(pocket)
+		_r.check(
+			name_cells.size() == RomLayout.PACK_NAME_COLUMNS * RomLayout.PACK_NAME_ROWS,
+			"%s: pocket %d has no name piece." % [game_id, pocket]
+		)
+		names[name_cells] = pocket
+		var map: PackedInt32Array = page.pocket_map(
+			pocket,
+			[{"kind": Gen2PackPage.ROW_ITEM, "name": "POTION", "quantity": 9,
+				"show_quantity": true}, {"kind": Gen2PackPage.ROW_CANCEL}],
+			0, "Restores HP.", name_cells
+		)
+		var image: Image = page.image(data, map, pocket)
+		_r.check(
+			image != null and image.get_width() == Gen2Screen.WIDTH
+				and image.get_height() == Gen2Screen.HEIGHT,
+			"%s: pocket %d did not compose a screen." % [game_id, pocket]
+		)
+	_r.check(
+		names.size() == RomLayout.PACK_POCKETS,
+		"%s: the four pocket names are %d distinct pieces." % [game_id, names.size()]
+	)
+	## Kris's pack is Crystal's alone, so a Gold or Silver cache carrying one
+	## would mean the female offset was read off the wrong profile.
+	var female: bool = not data.tile_indices("pack_pockets_female").is_empty()
+	_r.check(
+		female == (game_id == &"crystal"),
+		"%s: a female pack is %spresent." % [game_id, "" if female else "not "]
+	)
+	print("%s: four pockets drawn, %d palettes, female pack %s." % [
+		game_id, RomLayout.PACK_PALETTES, "yes" if female else "no",
+	])
+
+
+## `PrintItemDescription` and `PrintMoveDescription`: every row the pack can
+## stand on has a line to print, and it fits the two rows the box holds.
+func _verify_descriptions(game_id: StringName, data: GameData) -> void:
+	var widest: int = 0
+	var rows: int = 0
+	for number: int in range(1, ITEM_ROWS + 1):
+		var entry: Dictionary = data.item(number)
+		if entry.is_empty():
+			continue
+		var text: String = String(entry.get("description", ""))
+		_r.check(not text.is_empty(), "%s: item $%02X has no description." % [game_id, number])
+		rows += 1
+		for line: String in text.split("\n", false):
+			widest = maxi(widest, line.length())
+	for number: int in range(1, RomLayout.MOVE_DESCRIPTION_COUNT + 1):
+		var text: String = String(data.move(number).get("description", ""))
+		_r.check(not text.is_empty(), "%s: move %d has no description." % [game_id, number])
+		for line: String in text.split("\n", false):
+			widest = maxi(widest, line.length())
+	_r.check(
+		widest <= DESCRIPTION_COLUMNS,
+		"%s: a description is %d characters, wider than the box's %d." % [
+			game_id, widest, DESCRIPTION_COLUMNS,
+		]
+	)
+	print("%s: %d item and %d move descriptions, widest line %d." % [
+		game_id, rows, RomLayout.MOVE_DESCRIPTION_COUNT, widest,
+	])

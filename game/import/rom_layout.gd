@@ -645,6 +645,45 @@ const UNOWN_FONT_TILES: int = 27
 ## `FIRST_UNOWN_CHAR`, where the letters land.
 const UNOWN_FONT_FIRST_TILE: int = 0x40
 
+## `ItemDescriptions` and `MoveDescriptions`, the two lines a pack row prints
+## into its own text box (`PrintItemDescription`, `PrintMoveDescription`). Both
+## are `table_width 2` pointer tables in the bank their texts sit in, so an entry
+## is read as an in-bank address rather than as a far pointer.
+const DESCRIPTION_MAX_BYTES: int = 80
+const MOVE_DESCRIPTION_COUNT: int = 251
+
+## The pack screen's own graphics (engine/items/pack.asm).
+##
+## `PackMenuGFX` is 80 tiles and `Pack_InitGFX` copies `$60 tiles` of it, so the
+## sixteen that land on `vTiles2 tile $50` are `PackGFX`'s own first sixteen;
+## `DrawPackGFX` then puts the current pocket's fifteen there before the screen
+## is shown, and the sixteenth is never named by a tilemap. That overrun is what
+## says the two runs are adjacent, and they are, in every dump.
+##
+## `PackFGFX` is Crystal's alone: Gold and Silver have no player gender and no
+## `DrawKrisPackGFX`. All four runs are uncompressed and each matches the
+## assembled `gfx/pack` PNGs once per dump.
+const PACK_MENU_TILES: int = 80
+const PACK_POCKET_TILES: int = 15
+const PACK_POCKETS: int = 4
+const PACK_TILES: int = PACK_POCKET_TILES * PACK_POCKETS
+## `PlacePackGFX`'s own `ld a, $50`, which is where a pocket's picture is placed
+## and so what a pack tile number is offset by.
+const PACK_FIRST_TILE: int = 0x50
+## `PackGFXPointers`' order, as the pocket each of the four pictures belongs to:
+## the sheet is stored key items, items, TM/HM, balls.
+const PACK_POCKET_PICTURES: Array[int] = [1, 3, 0, 2]
+## `DrawPocketName`'s 5x12 tilemap, four 5x3 pieces in `*_POCKET` order.
+const PACK_NAME_COLUMNS: int = 5
+const PACK_NAME_ROWS: int = 3
+const PACK_NAME_CELLS: int = PACK_NAME_COLUMNS * PACK_NAME_ROWS * PACK_POCKETS
+## `.ChrisPackPals` and `.KrisPackPals`, which `gfx/pack/pack.pal` and
+## `pack_f.pal` define six palettes each of. `_CGB_PackPals` copies eight and its
+## own comment asks why; the attrmap it then fills names only 0 to 5, so the two
+## past the file are read and never drawn.
+const PACK_PALETTES: int = 6
+const PACK_PALETTE_COLORS: int = 4
+
 ## `DrawIntroPlayerPic`'s uncompressed 7x7 picture. Crystal stores Chris and
 ## Kris column-major; Gold and Silver use CAL's normal trainer picture instead.
 const INTRO_PLAYER_PIC_COLUMNS: int = 7
@@ -1490,6 +1529,13 @@ const GOLD_SILVER: Dictionary = {
 	"palettes": 0xAD3D,
 	"move_names": 0x1B1574,
 	"item_names": 0x1B0000,
+	# `ItemDescriptions` and `MoveDescriptions`, each a table of in-bank
+	# pointers its own texts follow. Located by encoding the pinned first entry
+	# of each (`MasterBallDesc`, `PoundDescription`), which hits once per dump,
+	# and taking the pointer to it in the same bank; every one of the 255 and 251
+	# entries then terminates within [constant DESCRIPTION_MAX_BYTES].
+	"item_descriptions": 0x1B8000,
+	"move_descriptions": 0x1B4000,
 	"item_attributes": 0x68A0,
 	"item_status_actions": 0xF0C7,
 	"item_healing_hp": 0xF405,
@@ -1520,6 +1566,17 @@ const GOLD_SILVER: Dictionary = {
 		"toss_ask": 0x194569,
 		"toss_ask_quantity": 0x19457F,
 		"toss_threw": 0x19459C,
+		# The six a field item says, in the same file and located the same way.
+		"escape_rope": 0x1940AE,
+		"itemfinder_nearby": 0x19443B,
+		"itemfinder_nope": 0x19446D,
+		"sacred_ash": 0x194529,
+		"squirtbottle": 0x1944FF,
+		# `_CoinCaseCountText` ends with `done` rather than `text_end` here, so
+		# `DoTextUntilTerminator` indexes `TextCommands` with $57 and runs off
+		# the table: the arbitrary code execution pokegold's own comment names.
+		# There is no text to be faithful to, so it is not imported.
+		"coin_case": -1,
 	},
 	"intro_text": {
 		"oak_1": 0x195624,
@@ -1723,6 +1780,19 @@ const GOLD_SILVER: Dictionary = {
 		"question_mark_palette": 0x9559,
 		"cursor_palette": 0x9551,
 	},
+	# The pack screen. `menu_gfx` and `pocket_names` were located by assembling
+	# the pinned `gfx/pack` files and matching the bytes, and `palettes` by
+	# encoding `pack.pal`; each hits once per dump. `PackGFX` is not pinned
+	# separately because it follows the menu sheet immediately, which is what
+	# `Pack_InitGFX`'s sixteen-tile overrun relies on. `female_gfx` is -1 here:
+	# these cartridges have no Kris.
+	"pack": {
+		"menu_gfx": 0x10F31,
+		"female_gfx": -1,
+		"pocket_names": 0x10DFC,
+		"palettes": 0x996F,
+		"female_palettes": -1,
+	},
 	# Battle animations. `BattleAnimations` was located by matching
 	# `BattleAnim_Pound` whole (d1 01 e0 01 31 d0 08 88 38 00 06 d0 01 88 38 00
 	# 10 ff), then finding the run of 278 in-bank pointers whose second entry is
@@ -1887,6 +1957,9 @@ const CRYSTAL: Dictionary = {
 	"palettes": 0xA8CE,
 	"move_names": 0x1C9F29,
 	"item_names": 0x1C8000,
+	# The two description tables; see the Gold and Silver block above.
+	"item_descriptions": 0x1C8987,
+	"move_descriptions": 0x2CB52,
 	"item_attributes": 0x67C1,
 	"item_status_actions": 0xF071,
 	"item_healing_hp": 0xF3AF,
@@ -1912,6 +1985,12 @@ const CRYSTAL: Dictionary = {
 		"toss_ask": 0x1C0BA5,
 		"toss_ask_quantity": 0x1C0BBB,
 		"toss_threw": 0x1C0BD8,
+		"escape_rope": 0x1C06ED,
+		"itemfinder_nearby": 0x1C0A77,
+		"itemfinder_nope": 0x1C0AA9,
+		"sacred_ash": 0x1C0B65,
+		"squirtbottle": 0x1C0B3B,
+		"coin_case": 0x1C5C7B,
 	},
 	"intro_text": {
 		"oak_1": 0x1C1D35,
@@ -2081,6 +2160,17 @@ const CRYSTAL: Dictionary = {
 		"unown_font": 0x1DC000,
 		"question_mark_palette": 0x8FBA,
 		"cursor_palette": 0x8FC2,
+	},
+	# The pack screen; see the Gold and Silver block above for how these were
+	# located. Crystal is the profile that has both packs: `.KrisPackPals`
+	# follows `.ChrisPackPals` in the same routine, which is the contiguity
+	# `verify_pack` checks, while `PackFGFX` sits in a bank of its own.
+	"pack": {
+		"menu_gfx": 0x10B16,
+		"female_gfx": 0x48E9B,
+		"pocket_names": 0x109E1,
+		"palettes": 0x9439,
+		"female_palettes": 0x9469,
 	},
 	# Battle animations; see the Gold and Silver block above for how these were
 	# located. All five tables sit in the same two banks in every dump and only
@@ -2305,6 +2395,13 @@ const NAMING_CURSOR_TILES: int = 2
 const NAMING_MARKER_TILES: int = 1
 const TILE_BYTES_2BPP: int = 16
 const TILE_BYTES_1BPP: int = 8
+
+
+## `PackGFX`, which the source stores immediately after `PackMenuGFX` and never
+## points at except through `PackGFXPointers`' own offsets into it.
+static func pack_gfx_offset(layout: Dictionary) -> int:
+	return int((layout["pack"] as Dictionary)["menu_gfx"]) \
+		+ PACK_MENU_TILES * TILE_BYTES_2BPP
 
 
 static func naming_border_offset(layout: Dictionary) -> int:
