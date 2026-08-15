@@ -17,7 +17,6 @@ var _about: Gen2AboutPage = null
 
 var _file_dialog: FileDialog = null
 var _mod_dialog: FileDialog = null
-var _index_dialog: Gen2ModIndexDialog = null
 var _update_http: HTTPRequest = null
 
 var _importing: bool = false
@@ -56,7 +55,6 @@ func _build() -> void:
 
 	_mods = Gen2ModsPage.create(_palette)
 	_mods.install_requested.connect(_open_mod_dialog)
-	_mods.index_requested.connect(_open_index_dialog)
 	_shell.add_page(&"mods", "Mods", &"mods", _mods)
 
 	_settings = Gen2SettingsPage.create(_palette, self)
@@ -85,11 +83,6 @@ func _build_dialogs() -> void:
 
 	_mod_dialog = _picker("Choose a mod .zip", PackedStringArray(["*.zip; Mod archive"]))
 	_mod_dialog.file_selected.connect(func(path: String) -> void: import_mod_path(path))
-
-	_index_dialog = Gen2ModIndexDialog.new()
-	_index_dialog.theme = _palette.control_theme()
-	_index_dialog.mod_installed.connect(_on_index_mod_installed)
-	add_child(_index_dialog)
 
 	# Created once and reused. The check only ever runs from the button.
 	_update_http = HTTPRequest.new()
@@ -218,13 +211,6 @@ func _open_mod_dialog() -> void:
 	_mod_dialog.popup_centered(Vector2i(920, 620))
 
 
-func _open_index_dialog() -> void:
-	if _importing:
-		return
-	_index_dialog.refresh()
-	_index_dialog.popup_centered(Vector2i(720, 560))
-
-
 ## Asks the release API what the latest version is. Public so a test can drive
 ## the request path without a button press.
 func check_for_updates() -> void:
@@ -351,11 +337,6 @@ func _delete_cache(game_id: StringName) -> void:
 	_refresh_games()
 
 
-func _on_index_mod_installed(_id: StringName) -> void:
-	GameRuntime.load_mods()
-	_mods.refresh()
-
-
 func _on_files_dropped(files: PackedStringArray) -> void:
 	if _importing:
 		return
@@ -411,6 +392,19 @@ func preview_slot_states(states: Dictionary) -> void:
 		var imported: bool = bool(states.get(String(game_id), false))
 		_shelf.set_slot_state(game_id, imported, "Ready. 2 saves" if imported else "")
 	_refresh_backdrop()
+
+
+## Preview seam: opens one of the mods page's own views, so a mod's page and
+## the sources page can be photographed without a press.
+func preview_mods_view(view: StringName, id: StringName = &"") -> void:
+	select_page(&"mods")
+	match view:
+		&"mod":
+			_mods.open_mod(id)
+		&"sources":
+			_mods.open_sources()
+		_:
+			_mods.show_list()
 
 
 ## Preview seam: switches appearance without writing the options file.

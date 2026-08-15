@@ -1051,6 +1051,9 @@ func test_a_button_setting_stores_nothing_and_acts_on_the_press() -> void:
 
 
 func test_a_number_setting_is_one_field_rather_than_a_ladder_of_digits() -> void:
+	# Values are per installation and outlive a host reset, so this owns the key
+	# it writes on both sides of the test.
+	Gen2ModOptions.forget(&"voxel")
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	assert_true(host.register_option(&"voxel", {
 		"key": &"seed", "label": "Seed", "kind": Gen2ModHost.OPTION_NUMBER,
@@ -1084,6 +1087,7 @@ func test_a_number_setting_is_one_field_rather_than_a_ladder_of_digits() -> void
 		})["reason"],
 		&"option_range_inverted"
 	)
+	Gen2ModOptions.forget(&"voxel")
 
 
 func test_a_loaded_mod_survives_its_own_registration() -> void:
@@ -1097,3 +1101,62 @@ func test_a_loaded_mod_survives_its_own_registration() -> void:
 	assert_null(host.mod_entry(&"absent"))
 	Gen2ModHost.reset()
 	assert_null(Gen2ModHost.instance().mod_entry(&"listener"), "a reload drops the last load")
+
+
+## The catalogue is where a mod's origin is decided, and origin is what makes
+## removing one reversible or not. Nothing is written down for it: a mod belongs
+## to the source that lists its id, and a mod nothing lists came from a file.
+func _manifest(id: String, version: String) -> Gen2ModManifest:
+	var made: Dictionary = Gen2ModManifest.from_dictionary({
+		"id": id, "name": id.capitalize(), "version": version,
+		"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+	}, "%s/%s" % [ROOT, id])
+	return made["manifest"]
+
+
+func test_a_mod_belongs_to_the_source_that_lists_it_and_otherwise_to_the_file_it_came_from() -> void:
+	var sources: Array = [{"feed": "https://a.example/index.json", "label": "A"}]
+	var listings: Dictionary = {"https://a.example/index.json": [
+		{"id": &"voxel", "name": "Voxel", "version": "2.0.0",
+			"download": "https://a.example/voxel.zip"},
+		{"id": &"absent", "name": "Absent", "version": "1.0.0",
+			"download": "https://a.example/absent.zip"},
+	]}
+	var groups: Array = Gen2ModCatalogue.groups(
+		[_manifest("voxel", "1.0.0"), _manifest("handmade", "0.1.0")], sources, listings
+	)
+	assert_eq(groups.size(), 2)
+	assert_eq(String(groups[0]["label"]), "A")
+	assert_eq(String(groups[1]["label"]), Gen2ModCatalogue.SOURCE_FILE_LABEL)
+
+	var listed: Array = groups[0]["rows"]
+	assert_eq([String(listed[0]["id"]), String(listed[1]["id"])], ["absent", "voxel"])
+	# Listed and not installed: the row's action is the download.
+	assert_eq(Gen2ModCatalogue.action_for(listed[0]), &"download")
+	assert_false(bool(listed[0]["installed"]))
+	# Installed behind the listing: the same press is an update.
+	assert_eq(Gen2ModCatalogue.action_for(listed[1]), &"update")
+	assert_eq(String(listed[1]["listed_version"]), "2.0.0")
+	assert_eq(String(listed[1]["version"]), "1.0.0", "the version in hand is the one shown")
+	# Removing it leaves it listed, so it can be downloaded again.
+	assert_false(Gen2ModCatalogue.removal_is_permanent(listed[1]))
+
+	var loose: Dictionary = (groups[1]["rows"] as Array)[0]
+	assert_eq(String(loose["id"]), "handmade")
+	assert_eq(Gen2ModCatalogue.action_for(loose), &"remove")
+	assert_true(Gen2ModCatalogue.removal_is_permanent(loose), "a file is the only copy")
+
+
+func test_two_sources_listing_one_mod_leave_it_under_the_first() -> void:
+	# Otherwise the same mod is on screen twice with two different actions.
+	var sources: Array = [
+		{"feed": "https://a.example/index.json", "label": "A"},
+		{"feed": "https://b.example/index.json", "label": "B"},
+	]
+	var entry: Array = [{"id": &"voxel", "name": "Voxel", "version": "1.0.0",
+		"download": "https://a.example/voxel.zip"}]
+	var groups: Array = Gen2ModCatalogue.groups([], sources, {
+		"https://a.example/index.json": entry, "https://b.example/index.json": entry,
+	})
+	assert_eq(groups.size(), 1)
+	assert_eq(String(groups[0]["label"]), "A")

@@ -4,7 +4,9 @@ extends SceneTree
 ## chosen set of cartridges present.
 ##
 ##   Godot --path . -s res://tools/preview_launcher.gd -- \
-##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full]
+##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id]
+##
+## `view` is the mods page's own: `list`, `sources`, or `mod` with an id.
 ##
 ## The state argument uses the preview seams on the launcher, so an empty shelf
 ## can be photographed on a machine that has every cache imported. Like
@@ -22,6 +24,8 @@ var _launcher: Control = null
 var _mode: String = "light"
 var _page: String = "shelf"
 var _state: String = "full"
+var _view: String = ""
+var _mod: String = ""
 
 
 func _initialize() -> void:
@@ -36,6 +40,8 @@ func _initialize() -> void:
 	var height: int = int(args[3]) if args.size() > 3 else 800
 	var page: String = args[4] if args.size() > 4 else "shelf"
 	var state: String = args[5] if args.size() > 5 else "full"
+	_view = args[6] if args.size() > 6 else ""
+	_mod = args[7] if args.size() > 7 else ""
 
 	# Both, because the window already exists by the time a tool script runs and
 	# only the display server moves it.
@@ -60,6 +66,8 @@ func _process(_delta: float) -> bool:
 		if STATES.has(_state):
 			_launcher.preview_slot_states(STATES[_state])
 		_launcher.select_page(StringName(_page))
+		if not _view.is_empty():
+			_launcher.preview_mods_view(StringName(_view), StringName(_mod))
 	if _frames < 26:
 		return false
 	var image: Image = root.get_texture().get_image()
