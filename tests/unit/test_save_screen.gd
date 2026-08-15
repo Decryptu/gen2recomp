@@ -315,3 +315,48 @@ func test_renaming_from_the_screen_reaches_the_slot() -> void:
 
 	var rows: Array = _screen.save_screen_snapshot()["slots"]
 	assert_eq(rows[0]["label"], "Run two")
+
+
+## The reported "the app exits after Create save": every details-pane button
+## rebuilds the pane it sits in, so the node emitting `pressed` was one of the
+## children `_refresh_details` freed outright, and the engine walked a destroyed
+## object on the way back out of the signal. The API-driven cases above cannot
+## see it, because nothing is emitting when they call.
+func test_a_details_pane_button_survives_the_rebuild_it_triggers() -> void:
+	assert_true(Gen2SaveStore.save(_save(), _data)["ok"])
+	await _open_save_screen()
+	assert_true(_screen.select_slot(1))
+	_press_and_outlive("Rename")
+	assert_eq(_screen.save_screen_snapshot()["status"], "Renamed slot 2.")
+
+	assert_true(_screen.open_new_game(1))
+	_press_and_outlive("Cancel")
+	assert_false(_screen.save_screen_snapshot()["new_game_form"], "the form closed")
+
+	assert_true(_screen.open_new_game(1))
+	_press_and_outlive("Start game")
+	assert_eq(int(GameRuntime.take_pending_new_game()["slot"]), 1, "the press did the work")
+
+
+## Presses the pane button [param label] and asserts it is still a live object
+## when its own `pressed` returns. Reading the pending new game after a frame
+## would not: the press hands the tree a deferred scene change.
+func _press_and_outlive(label: String) -> void:
+	var button: Button = _find_button(_screen, label)
+	assert_not_null(button, "%s is on the pane" % label)
+	button.pressed.emit()
+	assert_true(
+		is_instance_valid(button),
+		"%s is still alive when its own signal returns" % label,
+	)
+
+
+## First button under [param node] whose text is [param label], or null.
+func _find_button(node: Node, label: String) -> Button:
+	if node is Button and (node as Button).text == label:
+		return node as Button
+	for child: Node in node.get_children():
+		var found: Button = _find_button(child, label)
+		if found != null:
+			return found
+	return null

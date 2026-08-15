@@ -114,8 +114,7 @@ func refresh() -> void:
 
 
 func _relist() -> void:
-	for child: Node in _list.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_list)
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	var groups: Array = Gen2ModCatalogue.groups(
 		host.manifests(), Gen2ModIndex.followed(), _listings

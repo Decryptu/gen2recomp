@@ -75,8 +75,7 @@ func _build() -> void:
 
 
 func refresh() -> void:
-	for child: Node in _list.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_list)
 	var sources: Array[Dictionary] = Gen2ModIndex.followed()
 	if sources.is_empty():
 		var empty: Gen2LauncherCard = Gen2LauncherCard.well(

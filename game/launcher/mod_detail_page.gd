@@ -71,8 +71,7 @@ func set_row(row: Dictionary) -> void:
 	_row = row.duplicate(true)
 	_title.text = String(row["name"])
 	_subtitle.text = "%s  %s" % [row["id"], row["source_label"]]
-	for child: Node in _body.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_body)
 
 	_body.add_child(_summary(row))
 	var description: String = String(row["description"])

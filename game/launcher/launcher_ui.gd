@@ -44,6 +44,20 @@ static func row(separation: int = GAP_MD) -> HBoxContainer:
 	return box
 
 
+## Empties a container that is about to be rebuilt.
+##
+## Every launcher pane is rebuilt from a button inside it, so the node emitting
+## `pressed` is one of the children being removed and `free()` there destroys an
+## object the signal is still walking. Detaching first takes the child out of the
+## rebuilt list at once and leaves the deletion to the end of the frame.
+static func clear(container: Node) -> void:
+	if container == null:
+		return
+	for child: Node in container.get_children():
+		container.remove_child(child)
+		child.queue_free()
+
+
 static func spacer() -> Control:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL

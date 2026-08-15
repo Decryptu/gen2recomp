@@ -253,8 +253,7 @@ func flash(duration: float = 0.4) -> void:
 
 
 func _rebuild_dock() -> void:
-	for child: Node in _dock.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_dock)
 	_buttons.clear()
 	# A screen with one page has nowhere to navigate to, so it gets no dock.
 	_dock_host.visible = _entries.size() > 1
