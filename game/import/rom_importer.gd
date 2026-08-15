@@ -316,6 +316,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not unown_words["ok"]:
 		return unown_words
 
+	var unown_walls: Dictionary = verify_unown_walls(rom, layout)
+	if not unown_walls["ok"]:
+		return unown_walls
+
 	var intro_movie: Dictionary = verify_intro_movie(rom, layout)
 	if not intro_movie["ok"]:
 		return intro_movie
@@ -1081,6 +1085,53 @@ static func verify_unown_words(rom: RomFile, layout: Dictionary) -> Dictionary:
 				],
 			}
 	return {"ok": true, "message": "Unown words verified."}
+
+
+## `UnownWalls`, the four chamber words in `UNOWNWORDS_*` order. Empty on a dump
+## that does not ship them, which is Gold and Silver, and on any failure.
+static func read_unown_walls(rom: RomFile, layout: Dictionary) -> PackedStringArray:
+	var at: int = int(layout.get("unown_walls", -1))
+	if at < 0 or not rom.in_bounds(at, RomLayout.UNOWN_WALL_COUNT * RomLayout.UNOWN_WALL_MAX_LENGTH):
+		return PackedStringArray()
+	var out: PackedStringArray = PackedStringArray()
+	for wall: int in RomLayout.UNOWN_WALL_COUNT:
+		var word: String = ""
+		for step: int in RomLayout.UNOWN_WALL_MAX_LENGTH:
+			var code: int = rom.u8(at)
+			at += 1
+			if code == RomLayout.UNOWN_WALL_TERMINATOR:
+				break
+			var letter: String = RomLayout.unown_wall_letter(code)
+			if letter.is_empty():
+				return PackedStringArray()
+			word += letter
+		if word.is_empty():
+			return PackedStringArray()
+		out.append(word)
+	return out
+
+
+## The four words, by shape and by the one the Kabuto chamber's own `setval`
+## names. A dump without the table reads as none rather than as four wrong words.
+static func verify_unown_walls(rom: RomFile, layout: Dictionary) -> Dictionary:
+	if int(layout.get("unown_walls", -1)) < 0:
+		return {"ok": true, "message": "No Unown walls in this dump."}
+	var walls: PackedStringArray = read_unown_walls(rom, layout)
+	if walls.size() != RomLayout.UNOWN_WALL_COUNT:
+		return {"ok": false, "message": "The Unown wall words did not decode."}
+	if walls[RomLayout.UNOWNWORDS_ESCAPE] != "ESCAPE":
+		return {
+			"ok": false,
+			"message": "The first Unown wall reads \"%s\", not the word UNOWNWORDS_ESCAPE names." % [
+				walls[RomLayout.UNOWNWORDS_ESCAPE],
+			],
+		}
+	var seen: Dictionary = {}
+	for word: String in walls:
+		if seen.has(word):
+			return {"ok": false, "message": "Two Unown walls read \"%s\"." % word}
+		seen[word] = true
+	return {"ok": true, "message": "Unown walls verified."}
 
 
 ## One of the two row runs, in the source's own order. Empty when the run is out
@@ -3409,6 +3460,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"pokecenter_pc": _import_pokecenter_pc(rom, layout),
 		"unown_words": Array(read_unown_words(rom, layout)),
+		"unown_walls": Array(read_unown_walls(rom, layout)),
 		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),

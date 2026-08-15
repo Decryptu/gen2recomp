@@ -3,15 +3,16 @@ extends RefCounted
 var _r: RefCounted = null
 
 ## Verifies the Unown dex against freshly imported real caches: `UnownWords`, the
-## twenty-six pics `Pokedex_LoadUnownFrontpicTiles` draws from, and
-## `GetUnownLetter` over every DV word a Pokemon can carry.
+## twenty-six pics `Pokedex_LoadUnownFrontpicTiles` draws from, `GetUnownLetter`
+## over every DV word a Pokemon can carry, and `UnownWalls` on the eight Ruins of
+## Alph patterns that ask for one.
 ##
 ## The whole corpus rather than a sample: all 65,536 DV words on each cartridge,
-## every letter and every form's picture. The words are a plain byte run behind
-## their own pointer table, so a wrong offset lands on neighbouring data that
-## still reads as letters; what says it is the right run is that each word opens
-## on its own letter, that the run starts where the table ends, and that the
-## three cartridges agree word for word.
+## every letter, every form's picture and every chamber wall. The words are a
+## plain byte run behind their own pointer table, so a wrong offset lands on
+## neighbouring data that still reads as letters; what says it is the right run
+## is that each word opens on its own letter, that the run starts where the table
+## ends, and that the three cartridges agree word for word.
 ##
 ##   Godot --headless --path . -s res://tools/validate.gd -- unown_dex
 
@@ -23,6 +24,17 @@ const X_WORD: String = "XXXXX"
 
 ## Every DV word, which is what `GetUnownLetter` divides down to a letter.
 const DV_WORDS: int = 0x10000
+
+## The four Ruins of Alph chambers, which carry the same map numbers on all
+## three cartridges: the eight rooms pokecrystal inserts sit behind them, so the
+## group's shift is measured from further down. Each has a wall pattern either
+## side of its doorway, and `CHAMBER_STAND` is a walkable cell to open on.
+const CHAMBER_GROUP: int = 3
+const CHAMBER_MAPS: Array[int] = [23, 24, 25, 26]
+const CHAMBER_STAND := Vector2i(3, 3)
+const WALLS_PER_CHAMBER: int = 2
+## Enough acknowledgements to drain a sign's own text and the word behind it.
+const WALL_DRAIN_STEPS: int = 6
 
 var _first_words: PackedStringArray = PackedStringArray()
 
@@ -38,6 +50,7 @@ func _check_game() -> void:
 	_check_pics()
 	_check_letters()
 	_check_dex_order()
+	_check_walls()
 
 
 func _check_words() -> void:
@@ -138,6 +151,79 @@ func _check_letters() -> void:
 	# apart: every middle bit clear is A, every one set is Z.
 	_r.check(Gen2Stats.unown_letter(0x0000) == 1, "all-zero DVs are not A.")
 	_r.check(Gen2Stats.unown_letter(0xFFFF) == RomLayout.UNOWN_FORMS, "all-one DVs are not Z.")
+
+
+## `DisplayUnownWords` on the maps that ask for it: the four Ruins of Alph
+## chambers, both wall patterns of each. Crystal alone ships them, so this is
+## eight words there and none on Gold and Silver, whose cells carry the puzzle
+## sign instead.
+func _check_walls() -> void:
+	var said: PackedStringArray = PackedStringArray()
+	for number: int in CHAMBER_MAPS:
+		var chamber: Gen2WorldAPI = _r.open_world(
+			CHAMBER_GROUP, number, CHAMBER_STAND
+		)
+		if chamber == null:
+			continue
+		for event: Dictionary in chamber.current_map.events.get("bg_events", []):
+			var word: String = _wall_word(number, Vector2i(
+				int(event["x"]), int(event["y"])
+			))
+			if not word.is_empty():
+				said.append(word)
+	if not _r.crystal:
+		_r.check(said.is_empty(), "a Gold or Silver chamber said %s." % [said])
+		return
+	_r.check(
+		said.size() == CHAMBER_MAPS.size() * WALLS_PER_CHAMBER,
+		"the chambers said %d words, not %d." % [
+			said.size(), CHAMBER_MAPS.size() * WALLS_PER_CHAMBER,
+		]
+	)
+	var distinct: Dictionary = {}
+	for word: String in said:
+		distinct[word] = true
+	_r.check(
+		distinct.size() == RomLayout.UNOWN_WALL_COUNT,
+		"the four chambers said %d distinct words: %s." % [distinct.size(), said]
+	)
+	_r.note("unown walls: %s." % " ".join(said))
+
+
+## Faces the bg event at [param cell] and drains what it says, answering the
+## word the wall spelled or an empty string when it said none. A refusal is a
+## failure: every one of these cells is one a player walks up to and presses A on.
+func _wall_word(number: int, cell: Vector2i) -> String:
+	var world: Gen2WorldAPI = _r.open_world(
+		CHAMBER_GROUP, number, cell + Vector2i(0, 1)
+	)
+	if world == null:
+		return ""
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	var results: Array = world.interact()
+	var word: String = ""
+	for step: int in WALL_DRAIN_STEPS:
+		if results.is_empty():
+			break
+		var status: StringName = StringName(results[0].get("status", &""))
+		if status == &"failed":
+			# The puzzle sign shares these maps and has no host; a wall pattern
+			# refusing is what this check exists to catch.
+			if StringName(results[0].get("reason", &"")) != &"unsupported_phone_special":
+				_r.fail("map %d's %s answered %s." % [
+					number, cell, String(results[0].get("reason", &"failed")),
+				])
+			break
+		if status != &"waiting":
+			break
+		var pending: Dictionary = world.pending_script_input()
+		if pending.is_empty() or StringName(pending.get("type", &"")) != &"text":
+			break
+		var text: String = String(pending.get("text", ""))
+		if pending.has("unown_wall"):
+			word = text
+		results = world.run_event_queue(true)
+	return word
 
 
 ## `UpdateUnownDex` and `Pokedex_DrawUnownModeBG` over a real state: catching

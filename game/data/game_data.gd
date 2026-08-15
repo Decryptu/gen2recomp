@@ -61,6 +61,7 @@ var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
 var _pokecenter_pc: Dictionary = {}
 var _unown_words: PackedStringArray = PackedStringArray()
+var _unown_walls: PackedStringArray = PackedStringArray()
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
 var _gs_intro: Dictionary = {}
@@ -147,6 +148,10 @@ static func open_directory(path: String) -> GameData:
 	if unown_words is Array:
 		for word: Variant in unown_words as Array:
 			data._unown_words.append(String(word))
+	var unown_walls: Variant = manifest.get("unown_walls", [])
+	if unown_walls is Array:
+		for wall: Variant in unown_walls as Array:
+			data._unown_walls.append(String(wall))
 	var credits: Variant = manifest.get("credits", {})
 	data._credits = credits if credits is Dictionary else {}
 	var intro_movie: Variant = manifest.get("intro_movie", {})
@@ -1351,6 +1356,15 @@ func unown_word(form: int) -> String:
 	if form < 1 or form > _unown_words.size():
 		return ""
 	return _unown_words[form - 1]
+
+
+## The word `DisplayUnownWords` spells on a chamber wall, by its own
+## `UNOWNWORDS_*` index. Empty for an index outside the four and on Gold and
+## Silver, which ship neither the words nor the special that draws them.
+func unown_wall_word(index: int) -> String:
+	if index < 0 or index >= _unown_walls.size():
+		return ""
+	return _unown_walls[index]
 
 
 ## `OakRatings`, as [code]{ threshold, sfx, text }[/code] rows in table order.

@@ -308,6 +308,9 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"game_id": game_id,
 		"sha1": "0123456789abcdef",
 		"complete": true,
+		## `UnownWalls`' four, since the special that draws one names them by
+		## index and a wrong index has to be told from a right one.
+		"unown_walls": ["WALLA", "WALLB", "WALLC", "WALLD"],
 	})
 
 
@@ -2867,6 +2870,41 @@ func test_readvar_partycount_reads_the_set_party_summary() -> void:
 	assert_eq(result.size(), 1)
 	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
 	assert_true(world.event_flag_active(41))
+
+
+## `DisplayUnownWords` draws the word a chamber wall spells and holds on
+## `JoyWaitAorB`; the `setval` in front of it is which word. The script carries
+## on into `closetext` once the box is acknowledged, and an index the table does
+## not have refuses rather than drawing a blank box.
+func test_the_unown_wall_special_says_the_word_its_setval_names() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:63B0"] = [
+		Gen2WorldScript.SETVAL, 2,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_DISPLAY_UNOWN_WORDS, 0x00,
+		Gen2WorldScript.END,
+	]
+	scripts["48:63C0"] = [
+		Gen2WorldScript.SETVAL, 9,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_DISPLAY_UNOWN_WORDS, 0x00,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x63B0,
+	})
+	var word: Dictionary = runner.advance()
+	assert_eq(word["status"], &"waiting", JSON.stringify(word))
+	assert_eq(word["event"]["type"], &"text")
+	assert_eq(word["event"]["text"], "WALLC")
+	assert_eq(runner.advance(true)["status"], &"complete")
+
+	var refused := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x63C0,
+	})
+	var failure: Dictionary = refused.advance()
+	assert_eq(failure["status"], &"failed", JSON.stringify(failure))
+	assert_eq(failure["reason"], &"unknown_unown_wall")
 
 
 ## `_GetVarAction.UnownCaught` counts `wUnownDex` up to its first empty slot.

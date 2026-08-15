@@ -125,6 +125,13 @@ const SNORLAX_PROXIMITY_CELLS: Array[Vector2i] = [
 ## special_index() already normalizes. maps/KurtsHouse.asm's `.AskApricorn`
 ## branches on wScriptVar afterwards, one label per apricorn.
 const SPECIAL_SELECT_APRICORN_FOR_KURT: int = 86
+## DisplayUnownWords, which is Crystal's alone: pokegold's table stops well
+## before it, so no Gold or Silver script can reach this index and neither dump
+## ships the words. The four wall patterns are Crystal bg events, two per
+## chamber, where Gold and Silver's cells carry only the puzzle sign. A preceding
+## `setval` puts the `UNOWNWORDS_*` index in wScriptVar. Not to be read as 41,
+## which is `UnownPuzzle` on both and is the sliding puzzle itself.
+const SPECIAL_DISPLAY_UNOWN_WORDS: int = 135
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
 const SPECIAL_RANDOM_PHONE_MON: int = 93
@@ -2299,6 +2306,23 @@ func _execute_special(special: int) -> Dictionary:
 				"kind": &"toggle_decorations_visibility",
 				"defaults": true,
 			})
+		SPECIAL_DISPLAY_UNOWN_WORDS:
+			## The word the wall spells, in a menu box of its own that
+			## `JoyWaitAorB` holds until a button. Here it is the sign's own text
+			## box, acknowledged the same way, since `UnownFont`'s 2x2 letter
+			## blocks are not imported.
+			var wall_word: String = data.unown_wall_word(_script_value) if data != null \
+				else ""
+			if wall_word.is_empty():
+				return {
+					"ok": false,
+					"reason": &"unknown_unown_wall",
+					"special": special,
+					"wall": _script_value,
+				}
+			## `special` is a StringName tag on a pending text, not the index, so
+			## the wall is named under its own key.
+			return _stage_internal_text(wall_word, false, {"unown_wall": _script_value})
 		SPECIAL_RANDOM_UNSEEN_WILD_MON:
 			var rare_species: int = _phone_unseen_rare_species()
 			if rare_species <= 0:

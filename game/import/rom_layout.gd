@@ -514,6 +514,27 @@ const UNOWN_WORD_TERMINATOR: int = 0xFF
 ## Well past REASSURE, the longest at eight.
 const UNOWN_WORD_MAX_LENGTH: int = 16
 
+## `UnownWalls` (data/events/unown_walls.asm): the four words the Ruins of Alph
+## chamber walls spell, in `UNOWNWORDS_*` order, ending at $FF. Crystal only,
+## since Gold and Silver's chambers carry the puzzle sign where Crystal carries
+## the pattern.
+##
+## A letter is stored under the `unown` charmap rather than the ordinary one:
+## `$10 * (i / 8) + 2 * i` over "ABCDEFGHIJKLMNOPQRSTUVWXYZ-", which is the
+## top-left tile of that letter's 2x2 block in a sixteen-tile-wide font. So the
+## codes run 0-14, 32-46, 64-78 and 96-100, always even, and nothing else decodes.
+const UNOWN_WALL_COUNT: int = 4
+const UNOWN_WALL_MAX_LENGTH: int = 12
+const UNOWN_WALL_TERMINATOR: int = 0xFF
+## "ABCDEFGHIJKLMNOPQRSTUVWXYZ-", the charmap's own `PRINTABLE_UNOWN`.
+const UNOWN_WALL_ALPHABET: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZ-"
+const UNOWN_WALL_BLOCK: int = 0x20
+const UNOWN_WALL_ROW_LETTERS: int = 8
+## The `UNOWNWORDS_*` argument `setval` puts in `wScriptVar` before the special.
+## Only the first is named: it is the one the Kabuto chamber's two wall patterns
+## ask for, and the check reads the word behind it rather than storing any.
+const UNOWNWORDS_ESCAPE: int = 0
+
 ## The font is indexed by character code, not by position in a sheet: its first
 ## tile is code $80 ("A") and its last is $FF ("9"). That is not a coincidence of
 ## ordering, it is how the hardware prints at all. The font is loaded so that a
@@ -1515,6 +1536,10 @@ const GOLD_SILVER: Dictionary = {
 	# own codes and matching the whole run, which hits once per dump; the table
 	# is the fifty-four bytes in front of it.
 	"unown_words": 0xFBB64,
+	# `UnownWalls` is Crystal's alone: the chamber wall patterns these four words
+	# belong to are Crystal bg events, where pokegold's cells carry the puzzle
+	# sign, and neither `DisplayUnownWords` nor the words are in the dump.
+	"unown_walls": -1,
 	# The credits. `gfx` was located by converting the pinned gfx/credits PNGs
 	# and matching the bytes: the border and the four mon sheets are one
 	# contiguous run in `credits.asm`'s own INCBIN order and `CreditsScript`
@@ -1875,6 +1900,9 @@ const CRYSTAL: Dictionary = {
 	# See the Gold and Silver block above; the words are byte identical and only
 	# their address moves.
 	"unown_words": 0xFBA5A,
+	# `UnownWalls`, located by encoding all four words in the `unown` charmap and
+	# matching the run, which hits once. `MenuHeaders_UnownWalls` follows it.
+	"unown_walls": 0x8AEBC,
 	# See the Gold and Silver block above for how these were located. Crystal's
 	# strings sit in the pointer table's own bank, since it prints them with
 	# `PlaceString` rather than `PlaceFarString`, and each of its four scenes is
@@ -2481,6 +2509,23 @@ static func unown_word_offset(rom: RomFile, layout: Dictionary, form: int) -> in
 		return -1
 	var pointer: int = rom.u16le(table + form * UNOWN_WORD_POINTER_SIZE)
 	return RomFile.linear(bank_of(table), pointer)
+
+
+## The letter [param code] spells under the `unown` charmap, or an empty string
+## when it is not a code that charmap can produce.
+static func unown_wall_letter(code: int) -> String:
+	if code < 0 or code % 2 != 0:
+		return ""
+	@warning_ignore("integer_division")
+	var block: int = code / UNOWN_WALL_BLOCK
+	@warning_ignore("integer_division")
+	var within: int = (code % UNOWN_WALL_BLOCK) / 2
+	if within >= UNOWN_WALL_ROW_LETTERS:
+		return ""
+	var index: int = block * UNOWN_WALL_ROW_LETTERS + within
+	if index >= UNOWN_WALL_ALPHABET.length():
+		return ""
+	return UNOWN_WALL_ALPHABET[index]
 
 
 ## Where the `text_far` stub [param name] names sits.

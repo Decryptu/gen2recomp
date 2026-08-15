@@ -168,7 +168,10 @@ func test_every_offset_lands_inside_a_cartridge() -> void:
 	for id: StringName in RomRegistry.ORDER:
 		var layout: Dictionary = RomLayout.for_id(id)
 		for key: String in layout:
-			if layout[key] is int and key != "pic_bank_add":
+			## -1 is the table this dump does not ship, the way the nested
+			## `town_map.palette_female` and `unown_walls` are on Gold and
+			## Silver; every reader checks for it before addressing anything.
+			if layout[key] is int and key != "pic_bank_add" and int(layout[key]) != -1:
 				assert_between(int(layout[key]), 0, RomRegistry.EXPECTED_SIZE - 1, "%s.%s" % [id, key])
 
 
