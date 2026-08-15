@@ -7,8 +7,8 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses] [passes]
 ##
-## [stage] is one of `offer` (the default), `menu`, `move`, `contest`, `pick`,
-## `use_next` and `replace`;
+## [stage] is one of `offer` (the default), `menu`, `move`, `contest`, `pack`,
+## `pick`, `use_next` and `replace`;
 ## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
 ## cursor row or a refusal can be photographed; [passes] is how many sprite
 ## passes the party page's icons are given, which is what moves the chosen row's
@@ -27,6 +27,12 @@ const WINDOW_SIZE := Vector2i(1152, 648)
 ## below rather than by waiting. A shorter run photographs the composite as it
 ## was a few frames before the presses.
 const SETTLE_FRAMES: int = 30
+
+## `BattlePack`'s rows for the `pack` stage: a potion, a Full Heal and an X
+## Attack, which are one of each of `UseItem`'s three battle branches
+## (constants/item_constants.asm).
+const PACK_ITEMS: Array[int] = [0x12, 0x26, 0x31]
+const PACK_QUANTITIES: Dictionary = {0x12: 3, 0x26: 1, 0x31: 2}
 
 ## Falkner, and three of the player's own, all at a level where nothing faints
 ## before the question is asked.
@@ -135,7 +141,7 @@ func _open() -> void:
 		_screen.set("_pending", [
 			{"type": Gen2Battle.FAINTED, "side": Gen2Battle.PLAYER},
 		])
-	elif _stage not in ["menu", "move", "contest"]:
+	elif _stage not in ["menu", "move", "contest", "pack"]:
 		_screen.set("_pending", battle.take_actions(
 			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
 		))
@@ -152,9 +158,15 @@ func _open() -> void:
 
 	## Both menu stages are what the intro leads into with nothing else staged,
 	## which is `BattleMenu`'s own first opening.
-	if _stage in ["menu", "move", "contest"]:
+	if _stage in ["menu", "move", "contest", "pack"]:
 		_drain_to_menu()
 		if _stage == "move":
+			_screen._handle_button(Gen2Button.A)
+		## `BattlePack`'s own list, over the bag the world hands the battle. The
+		## rows are a real cache's items, so the picture reads as the pack.
+		if _stage == "pack":
+			_screen.set_battle_pack(PACK_ITEMS, PACK_QUANTITIES)
+			_screen._handle_button(Gen2Button.DOWN)
 			_screen._handle_button(Gen2Button.A)
 		for press: String in _presses:
 			_screen._handle_button(_button(press))

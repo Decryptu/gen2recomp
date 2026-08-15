@@ -421,6 +421,32 @@ const ACTION_RUN: StringName = &"run"
 ## speeds say. Only the enemy ever uses one; the player's pack is the overworld's.
 const ACTION_ITEM: StringName = &"item"
 
+## The battle half of `ItemEffects` that is not data in the cache already: the
+## two revives, the four PP restorers and the doll, at their cartridge numbers.
+## Everything else a party item does comes off the item's own `status_mask` and
+## `heal_amount` rows.
+const ITEM_POKE_DOLL: int = 0x25
+const ITEM_REVIVE: int = 0x27
+const ITEM_MAX_REVIVE: int = 0x28
+const ITEM_ETHER: int = 0x3F
+const ITEM_MAX_ETHER: int = 0x40
+const ITEM_ELIXER: int = 0x41
+const ITEM_MAX_ELIXER: int = 0x15
+const ITEM_MYSTERYBERRY: int = 0x96
+const REVIVE_ITEMS: Array[int] = [ITEM_REVIVE, ITEM_MAX_REVIVE]
+const PP_ITEMS: Array[int] = [
+	ITEM_ETHER, ITEM_MAX_ETHER, ITEM_ELIXER, ITEM_MAX_ELIXER, ITEM_MYSTERYBERRY,
+]
+## The three of them that fill one slot, which is what `.loop` asks about; the
+## two Elixers fill every slot and ask nothing.
+const SLOT_PP_ITEMS: Array[int] = [ITEM_ETHER, ITEM_MAX_ETHER, ITEM_MYSTERYBERRY]
+## `RestorePPEffect`'s own amounts: the Max pair fill the slot, and the other
+## three add five (`MYSTERYBERRY` and `ETHER` share it).
+const PP_ITEM_AMOUNTS: Dictionary = {
+	ITEM_ETHER: 10, ITEM_ELIXER: 10, ITEM_MYSTERYBERRY: 5,
+	ITEM_MAX_ETHER: 0, ITEM_MAX_ELIXER: 0,
+}
+
 ## `wBattleType`. Only the values `TryToRunAwayFromBattle` branches on are named;
 ## everything else reaches the ordinary speed check.
 const BATTLETYPE_NORMAL: int = 0
@@ -1466,7 +1492,11 @@ func _run_turn(events: Array) -> Array:
 				return events
 			events.append_array(send_out(side, int(action.get("index", -1))))
 		elif _is_item(action):
-			_use_trainer_item(side, int(action.get("item", 0)), events)
+			## The player's own item was spent in the menu, the way
+			## `BattleMenu_Pack` spends it before the turn resolves; only the
+			## enemy reaches into its bag inside the turn.
+			if side == ENEMY:
+				_use_trainer_item(side, int(action.get("item", 0)), events)
 		elif moving and side != _pursuit_spent:
 			var slot: int = effective_slot(side, int(action.get("slot", 0)))
 			_act(side, slot, move_for(side, slot), events)
@@ -2204,6 +2234,144 @@ func _use_trainer_item(side: int, item: int, events: Array) -> void:
 	})
 
 
+## `DoItemEffect` with `wBattleMode` set, which is what the pack's own USE runs
+## inside a battle. The player's item is applied here rather than in the turn
+## loop, exactly as the cartridge applies it in the menu and only then spends the
+## turn as `BATTLEPLAYERACTION_USEITEM`.
+##
+## [param target_index] is the party member `UseItem_SelectMon` picked, for the
+## ITEMMENU_PARTY items that ask; [param move_slot] is `RestorePPEffect`'s own
+## question. A refusal is every branch that leaves `wItemEffectSucceeded` clear,
+## and none of them spends the item or the turn.
+func use_bag_item(item: int, target_index: int = -1, move_slot: int = -1) -> Dictionary:
+	if data == null or is_over():
+		return _item_failure(&"battle_not_running")
+	var definition: Dictionary = data.item(item)
+	if definition.is_empty():
+		return _item_failure(&"unknown_item")
+	if item == ITEM_POKE_DOLL:
+		## `PokeDollEffect`: `wForcedSwitch` and a DRAW, which is
+		## [method force_out] with nobody blown out by a move.
+		if is_trainer_battle:
+			return _item_failure(&"item_has_no_effect")
+		force_out(PLAYER)
+		return {"ok": true, "kind": &"fled", "item": item}
+	if Gen2AIItems.X_STATS.has(item) or Gen2AIItems.X_SUBSTATUSES.has(item):
+		var applied: Dictionary = _apply_active_item(mon(PLAYER), item)
+		if not bool(applied.get("ok", false)):
+			return _item_failure(StringName(applied.get("reason", &"item_has_no_effect")))
+		return {"ok": true, "kind": &"active_item", "item": item, "effect": applied}
+	var target: Gen2BattleMon = party(PLAYER).at(target_index)
+	if target == null:
+		return _item_failure(&"party_member_required")
+	var result: Dictionary = _apply_party_item(
+		target, item, definition, move_slot, target_index == party(PLAYER).active
+	)
+	if not bool(result.get("ok", false)):
+		return _item_failure(StringName(result.get("reason", &"item_has_no_effect")))
+	## `RevivePokemon`'s own `wBattleParticipantsNotFainted` write: a revived
+	## Pokemon that had already taken part shares the experience again.
+	if bool(result.get("revived", false)):
+		(_participants[PLAYER] as Dictionary)[target_index] = true
+	return {
+		"ok": true, "kind": &"party_item", "item": item,
+		"target": target_index, "effect": result,
+	}
+
+
+## `XItemEffect`, `GuardSpecEffect` and `DireHitEffect`, which act on whoever is
+## out rather than on a party member. Each refuses when there is nothing to do:
+## a stage already at the cap, or a flag already set
+## (`WontHaveAnyEffect_NotUsedMessage`).
+func _apply_active_item(user: Gen2BattleMon, item: int) -> Dictionary:
+	if user == null or user.is_fainted():
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	if Gen2AIItems.X_SUBSTATUSES.has(item):
+		var flag: int = int(Gen2AIItems.X_SUBSTATUSES[item])
+		if Gen2Substatus.has(user.substatus, flag):
+			return {"ok": false, "reason": &"item_has_no_effect"}
+		user.substatus |= flag
+		return {"ok": true, "substatus": flag}
+	var stat: String = String(Gen2AIItems.X_STATS[item])
+	if user.stage(stat) >= Gen2Stats.MAX_STAGE:
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	user.change_stage(stat, 1)
+	return {"ok": true, "stat": stat, "stages": 1}
+
+
+## The ITEMMENU_PARTY half of the table, which `UseItem_SelectMon` has already
+## chosen a target for. Every branch is the source's own refusal order: a fainted
+## target takes only a revive, a revive takes only a fainted one, and an item
+## that would change nothing is `WontHaveAnyEffect_NotUsedMessage`.
+##
+## [param active] is whether the target is the Pokemon that is out, which decides
+## the two things a benched member cannot have: `IsItemUsedOnConfusedMon`'s
+## confusion cure, and Full Restore's own.
+func _apply_party_item(
+	target: Gen2BattleMon, item: int, definition: Dictionary,
+	move_slot: int, active: bool
+) -> Dictionary:
+	if item in REVIVE_ITEMS:
+		if not target.is_fainted():
+			return {"ok": false, "reason": &"item_has_no_effect"}
+		target.hp = target.max_hp() if item == ITEM_MAX_REVIVE else maxi(target.max_hp() / 2, 1)
+		return {"ok": true, "revived": true, "healed": target.hp}
+	if target.is_fainted():
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	if item in PP_ITEMS:
+		return _restore_pp(target, item, move_slot)
+	var healed: int = 0
+	var heal_amount: int = int(definition.get("heal_amount", 0))
+	if heal_amount > 0:
+		healed = target.heal(
+			target.max_hp() if heal_amount >= Gen2Stats.MAX_STAT_VALUE else heal_amount
+		)
+	## `UseStatusHealer`: the mask decides, and only a `%11111111` one reaches
+	## `IsItemUsedOnConfusedMon`, which needs the target to be the one out.
+	var mask: int = int(definition.get("status_mask", 0))
+	var cured: int = target.status & mask
+	if cured != 0:
+		target.status = Gen2Status.NONE
+		target.toxic_counter = 0
+	var unconfused: bool = mask == 0xFF and active \
+		and Gen2Substatus.has(target.substatus, Gen2Substatus.CONFUSED)
+	if unconfused:
+		target.substatus &= ~Gen2Substatus.CONFUSED
+		target.confusion_turns = 0
+	if healed <= 0 and cured == 0 and not unconfused:
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	return {
+		"ok": true, "healed": healed, "status_cleared": cured, "unconfused": unconfused,
+	}
+
+
+## `RestorePPEffect`: the Elixers fill every slot and the Ethers one, which is
+## the slot `.loop` asks for. Nothing is spent on a moveset already full.
+func _restore_pp(target: Gen2BattleMon, item: int, move_slot: int) -> Dictionary:
+	var amount: int = PP_ITEM_AMOUNTS.get(item, 0)
+	var slots: Array[int] = []
+	if item in [ITEM_ELIXER, ITEM_MAX_ELIXER]:
+		for slot: int in target.moves.size():
+			slots.append(slot)
+	elif move_slot >= 0 and move_slot < target.moves.size():
+		slots.append(move_slot)
+	var restored: int = 0
+	for slot: int in slots:
+		if int(target.moves[slot]) <= 0:
+			continue
+		var full: int = int(data.move(int(target.moves[slot])).get("pp", 0))
+		var target_pp: int = full if amount <= 0 else mini(full, target.pp_left(slot) + amount)
+		restored += maxi(0, target_pp - target.pp_left(slot))
+		target.pp[slot] = target_pp
+	if restored <= 0:
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	return {"ok": true, "pp_restored": restored}
+
+
+static func _item_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"item_failed", "reason": reason}
+
+
 ## `IsAnyMonHoldingExpShare`: every living party index carrying one, in party
 ## order. A fainted holder is skipped and does not count towards the split, the
 ## same test the routine makes before it looks at the item at all.
@@ -2371,7 +2539,8 @@ func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
 	# cartridge spends the turn as BATTLEPLAYERACTION_USEITEM, which resolves at
 	# once and leaves the enemy's move behind it.
 	var player_switching: bool = _is_switch(actions.get(PLAYER, {})) \
-		or _is_run(actions.get(PLAYER, {}))
+		or _is_run(actions.get(PLAYER, {})) \
+		or _is_item(actions.get(PLAYER, {}))
 	# An enemy item is `wEnemyGoesFirst` for the same reason an enemy switch is,
 	# and both lose to a player switch, which was settled at menu time.
 	var enemy_switching: bool = _is_switch(actions.get(ENEMY, {})) \

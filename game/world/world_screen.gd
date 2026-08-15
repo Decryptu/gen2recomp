@@ -1430,14 +1430,14 @@ func preview_wild_encounter() -> void:
 	})
 
 
-## Public screenshot driver for `.Field`: grants an ITEMFINDER on an injected
+## Public screenshot driver for `.Field`: grants [param item] on an injected
 ## save, opens the pack on the key items and uses it, so what is photographed is
 ## the world's own answer with the pack already closed behind it.
-func preview_field_item() -> void:
+func preview_field_item(item: int = Gen2WorldPack.ITEM_ITEMFINDER) -> void:
 	if _world == null or _data == null or _start_menu_host != null:
 		return
 	_injected_save = _embedded_party_save()
-	_world.state.apply_changes({}, {}, {"items": {Gen2WorldPack.ITEM_ITEMFINDER: 1}})
+	_world.state.apply_changes({}, {}, {"items": {item: 1}})
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
@@ -1582,6 +1582,9 @@ func _start_battle_request(request: Dictionary) -> void:
 			host.set_capture_balls(
 				Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
 			)
+			host.set_battle_pack(
+				Gen2WorldPack.battle_items(_data, _world.state), _world.state.items()
+			)
 	host.set_meta("world_battle_request", {
 		"request": request.duplicate(true),
 		"save": save,
@@ -1596,6 +1599,7 @@ func _start_battle_request(request: Dictionary) -> void:
 	host.enemy_seen.connect(_on_enemy_seen)
 	if not tutorial:
 		host.capture_requested.connect(_on_capture_requested)
+		host.item_used.connect(_on_battle_item_used)
 	_battle_host = host
 	_script_prompt = "Battle in progress"
 	_refresh_labels()
@@ -1630,6 +1634,21 @@ func _on_capture_requested(ball: int) -> void:
 	)
 	_battle_host.complete_capture(result)
 	_refresh_labels()
+
+
+## `UseDisposableItem` inside a battle: the effect has already landed on the
+## party the battle owns, so all the world does is take the row down by one.
+func _on_battle_item_used(item: int, _target: int) -> void:
+	if _world == null or _world.inventory == null:
+		return
+	_world.inventory.change_item_quantity(item, -1)
+	if _battle_host != null:
+		_battle_host.set_battle_pack(
+			Gen2WorldPack.battle_items(_data, _world.state), _world.state.items()
+		)
+		_battle_host.set_capture_balls(
+			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
+		)
 
 
 func _on_battle_finished(result: Dictionary) -> void:
@@ -2197,6 +2216,20 @@ func _on_field_item_used(request: Dictionary) -> void:
 		_refresh_labels()
 		return
 	match StringName(request.get("effect", &"")):
+		Gen2WorldPack.FIELD_EFFECT_BICYCLE:
+			## `Script_GetOnBike` and `Script_GetOffBike`, both of which are a
+			## line, a `waitbutton` and `special UpdatePlayerSprite`. The music is
+			## the function's own rather than either script's.
+			var on: bool = StringName(
+				(request.get("bike", {}) as Dictionary).get("kind", &"")
+			) == &"bike_on"
+			var bike_name: String = _data.item_name(int(request.get("item", 0)))
+			_show_field_move_text(
+				"Got on the\n%s." % bike_name if on else "Got off\nthe %s." % bike_name
+			)
+			_play_current_map_music()
+			if _renderer != null:
+				_renderer.refresh()
 		Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE:
 			_show_field_move_text("Used an\nESCAPE ROPE.")
 			_refresh_after_escape()

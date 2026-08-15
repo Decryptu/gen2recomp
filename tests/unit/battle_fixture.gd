@@ -288,6 +288,36 @@ const MAX_ITEM: int = 174
 const SMOKE_BALL: int = 0x6A
 const HELD_ESCAPE: int = 72
 
+## The `ItemAttributes` rows `BattlePack` reads, at their real numbers: the
+## battle menu nibble, plus the `HealingHPAmounts` and `StatusHealingActions`
+## entries the cache carries beside it. Only the items a battle can use are here;
+## every other row is the plain placeholder above.
+const POTION: int = 0x12
+const FULL_RESTORE: int = 0x0E
+const FULL_HEAL: int = 0x26
+const REVIVE: int = 0x27
+const POKE_DOLL: int = 0x25
+const X_ATTACK: int = 0x31
+const GUARD_SPEC: int = 0x29
+const ETHER: int = 0x3F
+const ELIXER: int = 0x41
+const POKE_BALL: int = 0x05
+const BATTLE_ITEMS: Dictionary = {
+	POTION: {"name": "POTION", "battle_menu": 5, "pocket": 1, "heal_amount": 20},
+	FULL_RESTORE: {
+		"name": "FULL RESTORE", "battle_menu": 5, "pocket": 1,
+		"heal_amount": 999, "status_mask": 0xFF,
+	},
+	FULL_HEAL: {"name": "FULL HEAL", "battle_menu": 5, "pocket": 1, "status_mask": 0xFF},
+	REVIVE: {"name": "REVIVE", "battle_menu": 5, "pocket": 1},
+	POKE_DOLL: {"name": "POKE DOLL", "battle_menu": 6, "pocket": 1},
+	X_ATTACK: {"name": "X ATTACK", "battle_menu": 6, "pocket": 1},
+	GUARD_SPEC: {"name": "GUARD SPEC.", "battle_menu": 6, "pocket": 1},
+	ETHER: {"name": "ETHER", "battle_menu": 5, "pocket": 1},
+	ELIXER: {"name": "ELIXER", "battle_menu": 5, "pocket": 1},
+	POKE_BALL: {"name": "POKE BALL", "battle_menu": 6, "pocket": 3},
+}
+
 ## The held items the battle reads, at their real numbers with the real held
 ## effect and parameter bytes off the cartridge. Thick Club and Light Ball carry
 ## no held effect at all: `SpeciesItemBoost` checks them by number.
@@ -754,12 +784,15 @@ static func _items() -> Array:
 	var out: Array = []
 	for number: int in range(1, MAX_ITEM + 1):
 		var held: Array = HELD_ITEMS.get(number, [])
-		out.append({
+		var entry: Dictionary = {
 			"number": number,
 			"name": String(held[0]) if not held.is_empty() else "ITEM%d" % number,
 			"effect": int(held[1]) if not held.is_empty() else 0,
 			"parameter": int(held[2]) if not held.is_empty() else 0,
-		})
+		}
+		if BATTLE_ITEMS.has(number):
+			entry.merge(BATTLE_ITEMS[number] as Dictionary, true)
+		out.append(entry)
 	return out
 
 

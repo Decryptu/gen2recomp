@@ -2665,6 +2665,160 @@ func test_an_exp_share_halves_the_stat_experience_too() -> void:
 		})
 
 
+## `DoItemEffect` with `wBattleMode` set. The player's own bag: the effect lands
+## at menu time, and the turn it costs is spent afterwards.
+func test_a_bag_potion_heals_the_chosen_party_member() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])), _rng
+	)
+	var bench: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	bench.hp = 1
+
+	var used: Dictionary = battle.use_bag_item(Fixture.POTION, 1)
+
+	assert_true(bool(used.get("ok", false)), String(used.get("reason", "")))
+	assert_eq(int((used["effect"] as Dictionary)["healed"]), 20)
+	assert_eq(bench.hp, 21)
+	# A member already at full health is `WontHaveAnyEffect_NotUsedMessage`.
+	battle.mon(Gen2Battle.PLAYER).hp = battle.mon(Gen2Battle.PLAYER).max_hp()
+	var refused: Dictionary = battle.use_bag_item(Fixture.POTION, 0)
+	assert_false(bool(refused.get("ok", false)))
+	assert_eq(StringName(refused["reason"]), &"item_has_no_effect")
+
+
+## `UseStatusHealer`'s mask, and `IsItemUsedOnConfusedMon` behind it: only a
+## `%11111111` item cures confusion, and only on the Pokemon that is out.
+func test_a_full_heal_takes_the_status_and_the_confusion_of_the_one_out() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	var user: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	user.status = Gen2Status.PARALYSIS
+	user.substatus |= Gen2Substatus.CONFUSED
+	user.confusion_turns = 3
+
+	var used: Dictionary = battle.use_bag_item(Fixture.FULL_HEAL, 0)
+
+	assert_true(bool(used.get("ok", false)), String(used.get("reason", "")))
+	assert_eq(user.status, Gen2Status.NONE)
+	assert_false(Gen2Substatus.has(user.substatus, Gen2Substatus.CONFUSED))
+	assert_true(bool((used["effect"] as Dictionary)["unconfused"]))
+
+
+## `RevivePokemon`: a revive is refused on anything still standing, and the one
+## it brings back joins the experience split again.
+func test_a_revive_only_answers_a_fainted_member_and_puts_it_back_on_the_split() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+			_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])), _rng
+	)
+	assert_eq(StringName(battle.use_bag_item(Fixture.REVIVE, 0)["reason"]), &"item_has_no_effect")
+
+	var bench: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	bench.hp = 0
+	var used: Dictionary = battle.use_bag_item(Fixture.REVIVE, 1)
+
+	assert_true(bool(used.get("ok", false)), String(used.get("reason", "")))
+	assert_eq(bench.hp, maxi(bench.max_hp() / 2, 1))
+
+
+## `XItemEffect` and `GuardSpecEffect` act on whoever is out, and each refuses
+## once there is nothing left to raise or set.
+func test_an_x_item_raises_the_stage_once_and_then_has_no_effect() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	var user: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+
+	assert_true(bool(battle.use_bag_item(Fixture.X_ATTACK).get("ok", false)))
+	assert_eq(user.stage("attack"), 1)
+
+	assert_true(bool(battle.use_bag_item(Fixture.GUARD_SPEC).get("ok", false)))
+	assert_true(Gen2Substatus.has(user.substatus, Gen2Substatus.MIST))
+	assert_eq(
+		StringName(battle.use_bag_item(Fixture.GUARD_SPEC)["reason"]), &"item_has_no_effect"
+	)
+
+	user.change_stage("attack", Gen2Stats.MAX_STAGE)
+	assert_eq(
+		StringName(battle.use_bag_item(Fixture.X_ATTACK)["reason"]), &"item_has_no_effect"
+	)
+
+
+## `PokeDollEffect`: a wild battle ends as a DRAW the moment it is used, and a
+## trainer battle leaves `wItemEffectSucceeded` clear.
+func test_a_poke_doll_ends_a_wild_battle_and_does_nothing_to_a_trainer() -> void:
+	var wild: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	assert_true(bool(wild.use_bag_item(Fixture.POKE_DOLL).get("ok", false)))
+	assert_true(wild.is_over())
+	assert_true(wild.was_forced_out())
+	assert_null(wild.winner())
+
+	var trainer: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE])),
+		Gen2Party.of(_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])), _rng, true
+	)
+	assert_eq(
+		StringName(trainer.use_bag_item(Fixture.POKE_DOLL)["reason"]), &"item_has_no_effect"
+	)
+	assert_false(trainer.is_over())
+
+
+## `RestorePPEffect`: an Elixer fills every slot and an Ether the one it was
+## asked for, and neither is spent on a moveset that is already full.
+func test_the_pp_items_fill_one_slot_and_all_of_them() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE, Fixture.EMBER]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	var user: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	assert_eq(StringName(battle.use_bag_item(Fixture.ELIXER, 0)["reason"]), &"item_has_no_effect")
+
+	var full: int = user.pp_left(0)
+	user.pp[0] = 0
+	user.pp[1] = 0
+	assert_true(bool(battle.use_bag_item(Fixture.ETHER, 0, 0).get("ok", false)))
+	assert_eq(user.pp_left(0), mini(full, 10))
+	assert_eq(user.pp_left(1), 0, "the slot the Ether was not used on")
+
+	assert_true(bool(battle.use_bag_item(Fixture.ELIXER, 0).get("ok", false)))
+	assert_eq(user.pp_left(1), mini(int(_data.move(Fixture.EMBER).get("pp", 0)), 10))
+
+
+## `BATTLEPLAYERACTION_USEITEM`: the item is already spent when the turn runs, so
+## the player takes no move and the enemy's own still lands.
+func test_a_bag_item_costs_the_turn_and_the_enemy_still_moves() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	)
+	var enemy_hp: int = battle.enemy.hp
+	battle.mon(Gen2Battle.PLAYER).hp = 5
+
+	assert_true(bool(battle.use_bag_item(Fixture.POTION, 0).get("ok", false)))
+	var events: Array = battle.take_actions(
+		Gen2Battle.use_item(Fixture.POTION), Gen2Battle.use_move(0)
+	)
+
+	assert_eq(battle.enemy.hp, enemy_hp, "the player threw nothing")
+	assert_eq(_of_type(events, Gen2Battle.HIT).size(), 1, JSON.stringify(events))
+	assert_eq(int((events[0] as Dictionary).get("side", -1)), Gen2Battle.ENEMY)
+
+
 ## A trainer's item is an action rather than a move: it costs the turn, it lands
 ## before the player's move whatever the speeds say, and the item is gone.
 func test_a_trainer_item_resolves_before_the_players_move_and_is_spent() -> void:

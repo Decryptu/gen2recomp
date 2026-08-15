@@ -876,6 +876,11 @@ func _resolve_field_item(item: int) -> Dictionary:
 	var effect: StringName = Gen2WorldPack.field_effect(_data, item)
 	var request: Dictionary = {"ok": true, "effect": effect, "item": item}
 	match effect:
+		Gen2WorldPack.FIELD_EFFECT_BICYCLE:
+			var ridden: Dictionary = _world.bike_request()
+			if not bool(ridden.get("ok", false)):
+				return {"ok": false}
+			request["bike"] = ridden
 		Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE:
 			var escaped: Dictionary = _world.escape_rope_request()
 			if not bool(escaped.get("ok", false)):

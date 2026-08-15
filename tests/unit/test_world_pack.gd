@@ -40,6 +40,12 @@ func before_each() -> void:
 				raw["pocket"] = Gen2WorldPack.TYPE_KEY_ITEM
 				raw["permissions"] = Gen2WorldPack.CANT_TOSS
 				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CLOSE
+			## The fixture's own row for this number is a real cartridge item, so
+			## the unclassified case says so rather than relying on its silence.
+			ITEM_UNCLASSIFIED:
+				raw["name"] = "ITEM5"
+				raw["pocket"] = 0
+				raw["battle_menu"] = 0
 			ITEM_TM01:
 				raw["name"] = "TM01"
 				raw["pocket"] = Gen2WorldPack.TYPE_TM_HM

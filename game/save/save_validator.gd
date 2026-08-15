@@ -73,7 +73,9 @@ static func _validate_world(world: Gen2WorldSnapshot, data: GameData) -> Diction
 	if world.player_facing < Gen2WorldSprite.FACING_DOWN \
 		or world.player_facing > Gen2WorldSprite.FACING_RIGHT:
 		return _failure("the saved player facing is invalid")
-	if world.movement_mode not in [Gen2WorldAPI.MOVEMENT_WALK, Gen2WorldAPI.MOVEMENT_SURF]:
+	if world.movement_mode not in [
+		Gen2WorldAPI.MOVEMENT_WALK, Gen2WorldAPI.MOVEMENT_SURF, Gen2WorldAPI.MOVEMENT_BIKE,
+	]:
 		return _failure("the saved movement mode is invalid")
 	if world.world_day < 0 or world.world_day >= Gen2WorldClock.DAYS_PER_WEEK \
 		or world.world_hour < 0 or world.world_hour >= Gen2WorldClock.HOURS_PER_DAY \
