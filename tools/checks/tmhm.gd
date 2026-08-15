@@ -48,6 +48,21 @@ const EXPECTED_LEARNABLE_PAIRS: Dictionary = {
 	&"silver": 6372,
 	&"crystal": 6592,
 }
+## data/events/happiness_changes.asm verbatim. pokegold stops after Grooming;
+## Crystal adds HAPPINESS_GAINLEVELATHOME, and the eighteen rows before it are
+## byte identical.
+const EXPECTED_HAPPINESS_CHANGES: Array = [
+	[5, 3, 2], [5, 3, 2], [1, 1, 0], [3, 2, 1], [1, 1, 0], [-1, -1, -1],
+	[-5, -5, -10], [-5, -5, -10], [1, 1, 1], [3, 3, 1], [5, 5, 2], [1, 1, 1],
+	[3, 3, 1], [10, 10, 4], [-5, -5, -10], [-10, -10, -15], [-15, -15, -20],
+	[3, 3, 1], [10, 6, 4],
+]
+const EXPECTED_HAPPINESS_ROWS: Dictionary = {
+	&"gold": RomLayout.HAPPINESS_CHANGE_COUNT_GOLD_SILVER,
+	&"silver": RomLayout.HAPPINESS_CHANGE_COUNT_GOLD_SILVER,
+	&"crystal": RomLayout.HAPPINESS_CHANGE_COUNT,
+}
+
 ## Caterpie, Ditto, Kakuna, Magikarp, Metapod, Smeargle, Unown, Weedle and
 ## Wobbuffet, the same nine in both games.
 const EXPECTED_SPECIES_WITH_NONE: int = 9
@@ -64,6 +79,7 @@ func run(r: RefCounted) -> void:
 		_verify_item_numbers(game_id, data)
 		_verify_forget_move(game_id, data)
 		_census(game_id, data)
+		_verify_happiness_changes(game_id, data)
 
 
 ## home/hm_moves.asm's IsHMMove against the cartridge's own HM rows.
@@ -208,3 +224,34 @@ func _census(game_id: StringName, data: GameData) -> void:
 			game_id, species_with_none, EXPECTED_SPECIES_WITH_NONE,
 		]
 	)
+
+
+## data/events/happiness_changes.asm as the cache carries it, which is what
+## `TeachTMHM`'s `ld c, HAPPINESS_LEARNMOVE` reads. Every row is compared, not
+## only the one a TM uses: the table is one addressable block and a stride or a
+## sign read the wrong way is invisible on a single row of `+1, +1, +0`.
+func _verify_happiness_changes(game_id: StringName, data: GameData) -> void:
+	var rows: int = EXPECTED_HAPPINESS_ROWS.get(game_id, 0)
+	for row: int in rows:
+		_r.check(
+			data.happiness_changes(row + 1) == EXPECTED_HAPPINESS_CHANGES[row],
+			"%s: happiness row %d is %s, not the pinned %s." % [
+				game_id, row + 1, data.happiness_changes(row + 1),
+				EXPECTED_HAPPINESS_CHANGES[row],
+			]
+		)
+	_r.check(
+		data.happiness_changes(rows + 1).is_empty(),
+		"%s: happiness row %d exists; the table is %d rows." % [game_id, rows + 1, rows]
+	)
+	## `TeachTMHM`'s own row, named so the one the project actually runs is
+	## checked by constant rather than by index.
+	_r.check(
+		data.happiness_changes(RomLayout.HAPPINESS_LEARNMOVE) == [1, 1, 0],
+		"%s: HAPPINESS_LEARNMOVE is %s, not +1, +1, +0." % [
+			game_id, data.happiness_changes(RomLayout.HAPPINESS_LEARNMOVE),
+		]
+	)
+	print("%s: %d happiness rows, HAPPINESS_LEARNMOVE %s." % [
+		game_id, rows, data.happiness_changes(RomLayout.HAPPINESS_LEARNMOVE),
+	])

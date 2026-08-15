@@ -231,12 +231,22 @@ func test_the_field_effects_are_the_close_items_the_overworld_can_run() -> void:
 	)
 	for rod: int in [0x3A, 0x3B, 0x3D]:
 		assert_eq(Gen2WorldPack.field_effect(data, rod), Gen2WorldPack.FIELD_EFFECT_ROD)
-	assert_eq(Gen2WorldPack.field_effect(data, 0x36), Gen2WorldPack.FIELD_EFFECT_COIN_CASE)
 	assert_eq(Gen2WorldPack.field_effect(data, 0x37), Gen2WorldPack.FIELD_EFFECT_ITEMFINDER)
 	assert_eq(Gen2WorldPack.field_effect(data, 0x9C), Gen2WorldPack.FIELD_EFFECT_SACRED_ASH)
+	assert_eq(Gen2WorldPack.field_effect(data, 0x7F), Gen2WorldPack.FIELD_EFFECT_CARD_KEY)
+	assert_eq(
+		Gen2WorldPack.field_effect(data, 0x85), Gen2WorldPack.FIELD_EFFECT_BASEMENT_KEY
+	)
+	assert_eq(
+		Gen2WorldPack.field_effect(data, 0xAF), Gen2WorldPack.FIELD_EFFECT_SQUIRTBOTTLE
+	)
+	# `CoinCaseEffect` is on `.Current`, so the Coin Case has no field effect even
+	# with the nibble forced: nothing names it in FIELD_EFFECTS. `tools/checks/
+	# pack.gd` is what proves the real nibbles, which this fixture overwrites.
+	assert_eq(Gen2WorldPack.field_effect(data, 0x36), Gen2WorldPack.FIELD_EFFECT_NONE)
 
-	# The Bicycle is ITEMMENU_CLOSE with no effect built, so it is `.Oak`, and so
-	# is a repointed Escape Rope.
+	# A row off ITEMMENU_CLOSE takes its field effect with it, on the untouched
+	# fixture where neither the Bicycle nor the Escape Rope carries that nibble.
 	assert_eq(Gen2WorldPack.field_effect(_data, ITEM_BICYCLE), Gen2WorldPack.FIELD_EFFECT_NONE)
 	assert_eq(Gen2WorldPack.field_effect(_data, 0x13), Gen2WorldPack.FIELD_EFFECT_NONE)
 	assert_eq(Gen2WorldPack.field_effect(null, 0x13), Gen2WorldPack.FIELD_EFFECT_NONE)

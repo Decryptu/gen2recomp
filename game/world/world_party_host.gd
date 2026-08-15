@@ -22,6 +22,11 @@ const ITEM_POKE_BALL: int = 0x05
 ## what holds it and `BattleMenu_Pack`'s contest branch loads it by name.
 const ITEM_PARK_BALL: int = 0xB1
 
+## HAPPINESS_THRESHOLD_1 and HAPPINESS_THRESHOLD_2
+## (constants/pokemon_data_constants.asm), which pick a HappinessChanges column.
+const HAPPINESS_THRESHOLD_1: int = 100
+const HAPPINESS_THRESHOLD_2: int = 200
+
 const CAPTURE_BALLS: Array[int] = [
 	ITEM_POKE_BALL, ITEM_GREAT_BALL, ITEM_ULTRA_BALL, ITEM_MASTER_BALL,
 ]
@@ -367,7 +372,14 @@ static func teach_tm_hm(
 	learner.pp[slot] = int(world.data.move(move).get("pp", 0))
 
 	var before: Gen2WorldSnapshot = world.snapshot()
+	## `IsHM` returns before both the happiness change and `ConsumeTM`, so an HM
+	## costs nothing and moves nothing; a TM does both, in that order.
 	var consumed: bool = not Gen2WorldTMHM.is_hm(item)
+	var happiness: int = learner.happiness
+	if consumed:
+		learner.happiness = change_happiness(
+			world.data, learner.happiness, RomLayout.HAPPINESS_LEARNMOVE
+		)
 	var applied: Dictionary = {"ok": true}
 	if consumed:
 		applied = world.state.apply_changes({}, {}, {
@@ -389,7 +401,28 @@ static func teach_tm_hm(
 		"forgot": forgot,
 		"pp": learner.pp[slot],
 		"consumed": consumed,
+		"happiness": learner.happiness,
+		"happiness_change": learner.happiness - happiness,
 	}
+
+
+## `ChangeHappiness` over the imported table, without the egg and battle-mon
+## halves: an egg cannot reach a caller here, and no caller runs inside a battle.
+##
+## The three rows are picked by HAPPINESS_THRESHOLD_1 and _2, and the sign of a
+## change is `cp $64`: a byte from 100 up is the subtracting branch, which is why
+## the table is read signed. Each branch answers the carry rather than clamping,
+## so a rise saturates at 255 and a fall at 0.
+static func change_happiness(data: GameData, happiness: int, kind: int) -> int:
+	var changes: Array[int] = []
+	if data != null:
+		changes = data.happiness_changes(kind)
+	if changes.size() < RomLayout.HAPPINESS_CHANGE_WIDTH:
+		return happiness
+	var row: int = 0 if happiness < HAPPINESS_THRESHOLD_1 \
+		else (1 if happiness < HAPPINESS_THRESHOLD_2 else 2)
+	return clampi(happiness + changes[row], 0, 255)
+
 
 
 ## Attempts to catch one wild battle mon and consumes the ball on either result.

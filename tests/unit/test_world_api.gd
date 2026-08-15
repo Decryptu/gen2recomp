@@ -5666,6 +5666,22 @@ func test_the_itemfinder_answers_for_a_hidden_item_inside_the_screen() -> void:
 	assert_false(world.hidden_item_nearby())
 
 
+## The map gate every key-item effect opens with. Only `_Squirtbottle` answers
+## anyway: it writes `wItemEffectSucceeded` before the script it queues decides
+## anything, so the pack closes and the queued script says the line instead.
+## Which script each of the three reaches on its own map is swept over all three
+## cartridges by `tools/checks/pack.gd`, since no synthetic map can carry them.
+func test_a_key_item_effect_refuses_off_its_own_map() -> void:
+	var world := Gen2WorldAPI.open(GameData.open_directory(_directory), 1, 1, Vector2i(8, 7))
+	assert_false(bool(world.card_key_request().get("ok", false)))
+	assert_false(bool(world.basement_key_request().get("ok", false)))
+
+	var nothing: Dictionary = world.squirtbottle_request()
+	assert_true(bool(nothing.get("ok", false)))
+	assert_eq(StringName(nothing.get("kind", &"")), &"squirtbottle_nothing")
+	assert_true(world.queue_item_script(nothing).is_empty())
+
+
 func _item_name(number: int) -> String:
 	return GameData.open_directory(_directory).item_name(number)
 

@@ -29,6 +29,8 @@ var _moves: Array = []
 ## TMHMMoves in TMNUM order, restored to integers because JSON reads them back
 ## as floats.
 var _tmhm_moves: Array[int] = []
+## HappinessChanges, one row of three signed changes per HAPPINESS_* constant.
+var _happiness_changes: Array = []
 var _name_input_chars: Array = []
 ## StringBufferPointers as WRAM addresses, in `text_buffer` argument order.
 var _string_buffer_pointers: Array[int] = []
@@ -151,6 +153,7 @@ static func open_directory(path: String) -> GameData:
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
+	data._happiness_changes = data._read_array(RomCache.happiness_changes_path(path))
 	data._name_input_chars = data._read_array(RomCache.name_input_chars_path(path))
 	data._string_buffer_pointers = data._read_int_array(RomCache.text_buffers_path(path))
 	var intro: Variant = RomCache.read_json(RomCache.intro_text_path(path))
@@ -982,6 +985,19 @@ func tmhm_number_for_move(move_number: int) -> int:
 		return 0
 	var found: int = _tmhm_moves.find(move_number)
 	return found + 1 if found >= 0 else 0
+
+
+## `ChangeHappiness`'s own row lookup: the three changes HAPPINESS_[param kind]
+## makes, below 100, below 200 and above it. [param kind] is one-based the way
+## the source passes it. Empty for a row this cartridge does not carry, which is
+## HAPPINESS_GAINLEVELATHOME off Crystal, and a caller reads that as no change.
+func happiness_changes(kind: int) -> Array[int]:
+	var out: Array[int] = []
+	if kind < 1 or kind > _happiness_changes.size():
+		return out
+	for change: Variant in _happiness_changes[kind - 1]:
+		out.append(int(change))
+	return out
 
 
 ## One of data/text/name_input_chars.asm's four keyboards as rows of raw

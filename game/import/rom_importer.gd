@@ -3216,6 +3216,10 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	if tmhm_moves.is_empty():
 		result["message"] = "TM/HM move table is outside the cartridge or malformed."
 		return result
+	var happiness_changes: Array = _import_happiness_changes(rom, layout)
+	if happiness_changes.is_empty():
+		result["message"] = "Happiness change table is outside the cartridge or malformed."
+		return result
 	var name_input_chars: Array = _import_name_input_chars(rom, layout)
 	var string_buffers: Array = _import_string_buffer_pointers(rom, layout)
 	var intro_text: Dictionary = _import_intro_text(rom, layout)
@@ -3258,6 +3262,11 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		return result
 	if not RomCache.write_json(RomCache.tmhm_moves_path(directory), tmhm_moves):
 		result["message"] = "Could not write TM/HM move data."
+		return result
+	if not RomCache.write_json(
+		RomCache.happiness_changes_path(directory), happiness_changes
+	):
+		result["message"] = "Could not write happiness change data."
 		return result
 	if not RomCache.write_json(RomCache.name_input_chars_path(directory), name_input_chars):
 		result["message"] = "Could not write name input data."
@@ -3556,6 +3565,34 @@ func _import_tmhm_moves(rom: RomFile, layout: Dictionary) -> Array:
 	if int(out[RomLayout.TMHM_TM_COUNT]) != MOVE_CUT:
 		return []
 	return out
+
+
+## data/events/happiness_changes.asm's HappinessChanges, one row of three signed
+## changes per HAPPINESS_* constant. Empty on any layout or content failure.
+##
+## Checked rather than trusted: no change is larger than twenty either way, and
+## the first row has to be `+5, +3, +2`, which is what pins the table. Signed
+## because `ChangeHappiness` reads the byte as one: its `cp $64` puts everything
+## from 100 up on the subtracting branch.
+func _import_happiness_changes(rom: RomFile, layout: Dictionary) -> Array:
+	var at: int = int(layout.get("happiness_changes", -1))
+	var count: int = int(layout.get("happiness_change_count", 0))
+	var width: int = RomLayout.HAPPINESS_CHANGE_WIDTH
+	if count <= 0 or not rom.in_bounds(at, count * width):
+		return []
+	var out: Array = []
+	for row: int in count:
+		var changes: Array = []
+		for column: int in width:
+			var raw: int = rom.u8(at + row * width + column)
+			## `cp $64` is where the routine splits, so a byte from 100 up is
+			## the subtracting branch rather than a large rise.
+			var change: int = raw - 256 if raw >= 0x64 else raw
+			if absi(change) > 20:
+				return []
+			changes.append(change)
+		out.append(changes)
+	return out if out[0] == [5, 3, 2] else []
 
 
 ## data/text/name_input_chars.asm's four keyboards, each a list of 17-byte rows

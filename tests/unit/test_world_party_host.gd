@@ -313,6 +313,40 @@ func test_teaching_a_tm_consumes_it() -> void:
 	assert_eq(_world.state.item_quantity(TM_ITEM), 1)
 
 
+## `ld c, HAPPINESS_LEARNMOVE` sits between IsHM and ConsumeTM, so a TM moves
+## happiness and an HM does not. HAPPINESS_LEARNMOVE's row is `+1, +1, +0`, which
+## is the one row whose third column is zero: past 200 a TM changes nothing.
+func test_teaching_a_tm_raises_happiness_and_teaching_an_hm_does_not() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.happiness = 70
+	_world.state.apply_changes({}, {}, {"items": {TM_ITEM: 1, HM_ITEM: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, TM_ITEM, 0, -1, false)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(int(result["happiness_change"]), 1)
+	assert_eq(_save.party[0].happiness, 71)
+
+	_save.party[0].happiness = 240
+	var again: Dictionary = Gen2WorldPartyHost.teach_tm_hm(_world, _save, HM_ITEM, 0, -1, false)
+	assert_true(again["ok"], JSON.stringify(again))
+	assert_eq(int(again["happiness_change"]), 0)
+	assert_eq(_save.party[0].happiness, 240)
+
+
+## `ChangeHappiness` itself: the column HAPPINESS_THRESHOLD_1 and _2 pick, and
+## the two saturating branches. Row 6, "Lost to an enemy", is `-1` in all three
+## columns and row 14 `+10, +10, +4`, so one rise and one fall cover both ends.
+func test_a_happiness_change_picks_its_column_and_saturates() -> void:
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 99, 14), 109)
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 100, 14), 110)
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 200, 14), 204)
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 254, 14), 255, "no wrap past 255")
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 0, 6), 0, "no wrap below 0")
+	# A row this cartridge does not carry, and no cache at all, both leave the
+	# byte alone rather than inventing a change.
+	assert_eq(Gen2WorldPartyHost.change_happiness(_data, 70, 99), 70)
+	assert_eq(Gen2WorldPartyHost.change_happiness(null, 70, 5), 70)
+
+
 ## The refusal order is CanLearnTMHMMove, then KnowsMove, then LearnMove's slot
 ## search. Each answers before anything is written.
 func test_teaching_refuses_an_incompatible_species_without_writing() -> void:

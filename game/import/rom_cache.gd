@@ -19,6 +19,7 @@ const MANIFEST: String = "manifest.json"
 const SPECIES: String = "species.json"
 const MOVES: String = "moves.json"
 const TMHM_MOVES: String = "tmhm_moves.json"
+const HAPPINESS_CHANGES: String = "happiness_changes.json"
 const NAME_INPUT_CHARS: String = "name_input_chars.json"
 const INTRO_TEXT: String = "intro_text.json"
 const TEXT_BUFFERS: String = "text_buffers.json"
@@ -74,7 +75,7 @@ const BYTES_KEY: String = "bytes"
 ## a dump the owner still has, so re-importing costs a few seconds and a
 ## migration would have to carry every past shape forever. Nothing but the cache
 ## is thrown away, since saves live under their own root.
-const FORMAT_VERSION: int = 56
+const FORMAT_VERSION: int = 57
 
 ## What [method state] answers. A stale cache is told from a missing one because
 ## they need different things said to whoever is looking at it: one is a
@@ -104,6 +105,10 @@ static func moves_path(directory: String) -> String:
 
 static func tmhm_moves_path(directory: String) -> String:
 	return "%s/%s" % [directory, TMHM_MOVES]
+
+
+static func happiness_changes_path(directory: String) -> String:
+	return "%s/%s" % [directory, HAPPINESS_CHANGES]
 
 
 static func name_input_chars_path(directory: String) -> String:
