@@ -2281,6 +2281,23 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used ROCK SMASH!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_DIG:
+			var dig: Dictionary = _world.dig_request()
+			if not bool(dig.get("ok", false)):
+				## `.CantUseDigText`, which every refusal of an escape shares.
+				_show_field_move_text("Can't use that here.")
+				return
+			_show_field_move_text("%s used DIG!" % String(action.get("name", "")))
+			_refresh_after_escape()
+		Gen2WorldFieldMove.MOVE_TELEPORT:
+			var teleport: Dictionary = _world.teleport_request()
+			if not bool(teleport.get("ok", false)):
+				_show_field_move_text("Can't use that here.")
+				return
+			## `_TeleportReturnText`, which names no Pokemon: the move says where
+			## it is going rather than who used it.
+			_show_field_move_text("Return to the last\n#MON CENTER.")
+			_refresh_after_escape()
 		_:
 			_show_field_move_text("Can't use that here.")
 
@@ -2764,6 +2781,21 @@ func _show_script_results(results: Array) -> void:
 			_play_current_map_music()
 		else:
 			_renderer.refresh()
+	_refresh_labels()
+
+
+## What a map change owes the screen once the world has already applied it: the
+## renderer, the animation and the music all belong to the map that is now under
+## the player. A warp reached through a script goes through the script result
+## instead; an escape move has no script here to carry it.
+func _refresh_after_escape() -> void:
+	if _world == null:
+		return
+	_animation.configure(_world, time_of_day)
+	if _renderer != null:
+		_renderer.set_world(_world, _animation)
+		_renderer.set_time_of_day(_render_time_of_day())
+	_play_current_map_music()
 	_refresh_labels()
 
 

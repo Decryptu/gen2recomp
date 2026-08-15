@@ -22,6 +22,12 @@ const MOVE_WATERFALL: int = 0x7F
 const MOVE_FLASH: int = 0x94
 const MOVE_HEADBUTT: int = 0x1D
 const MOVE_ROCK_SMASH: int = 0xF9
+## The rows whose own routine is an escape rather than a tile: Fly picks a spawn
+## off the region map, Teleport takes the last Pokemon Center's and Dig the warp
+## the player came into the cave through.
+const MOVE_FLY: int = 0x13
+const MOVE_DIG: int = 0x5B
+const MOVE_TELEPORT: int = 0x64
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -60,7 +66,7 @@ const MUSIC_SURF: int = 0x21
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
-	MOVE_HEADBUTT, MOVE_ROCK_SMASH,
+	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

@@ -78,16 +78,17 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 
 
 ## The overworld's field-move list is a different question, and neither list
-## contains the other. Fly is an HM this project does not act on; Headbutt and
-## Rock Smash are TMs it does, so they are field moves ForgetMove will happily
-## forget.
+## contains the other. Fly is an HM this project does not act on; Headbutt, Rock
+## Smash, Dig and Teleport are TMs and level-up moves it does, so they are field
+## moves ForgetMove will happily forget.
 const TM_FIELD_MOVES: Array[int] = [
 	Gen2WorldFieldMove.MOVE_HEADBUTT, Gen2WorldFieldMove.MOVE_ROCK_SMASH,
+	Gen2WorldFieldMove.MOVE_DIG, Gen2WorldFieldMove.MOVE_TELEPORT,
 ]
 
 
 func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 8)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 10)
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
 		if TM_FIELD_MOVES.has(move):
 			continue
