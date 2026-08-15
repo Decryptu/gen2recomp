@@ -889,6 +889,17 @@ const ANIM_WAIT_SFX: StringName = &"wait_sfx"
 const ANIM_HIT_SOUND: StringName = &"hit_sound"
 const ANIM_APPEAR_USER: StringName = &"appear_user"
 
+## Whose square is showing the substitute's doll rather than the mon itself,
+## keyed by [constant Gen2Battle.PLAYER] and [constant Gen2Battle.ENEMY].
+##
+## The cartridge keeps this in VRAM rather than in a variable: `GetSubstitutePic`
+## writes the doll over the battler's own tiles and `DropPlayerSub` writes the
+## picture back, so what is on the field is whatever was drawn there last. The
+## three writers are the animation's `anim_raisesub` and `anim_dropsub`, the two
+## `noanim` commands the battle-scene option reaches instead, and a send-out,
+## which draws a fresh picture either way.
+var _substitute_pic: Dictionary = {Gen2Battle.PLAYER: false, Gen2Battle.ENEMY: false}
+
 ## `wFXAnimID` is a word: an id past this is not a move and skips the whole
 ## battle-scene, hud and after-anim half of `BattleAnimRunScript`.
 const ANIM_MOVE_LIMIT: int = 0x100
@@ -953,6 +964,8 @@ func _begin_animation(event: Dictionary) -> void:
 			# `xor a / ldh [hSCX] / ldh [hSCY]`, a delay, then the huds.
 			_step(ANIM_DELAY, {"frames": 1})
 			_step(ANIM_RESTORE_HUD, {})
+		else:
+			_apply_sub_pic_no_anim(index, int(event.get("param", 0)))
 		if after != 0:
 			_step(ANIM_WAIT_SFX, {})
 			_step(ANIM_HIT_SOUND, {})
@@ -970,6 +983,30 @@ func _begin_animation(event: Dictionary) -> void:
 	if bool(event.get("restore_user_pic", false)):
 		_step(ANIM_APPEAR_USER, {})
 	_run_next_anim_step()
+
+
+## The doll the animation would have drawn, written straight into the picture
+## when the battle-scene option is off and the script never runs.
+##
+## `BattleCommand_LowerSub` and `..._RaiseSub` both branch to their own `noanim`
+## routine on `_CheckBattleScene`, and `BattleCommand_Substitute`'s own
+## `.no_anim` calls `RaiseSubNoAnim`, so the three animation parameters answer
+## the same two pictures with the scenes turned off as with them on.
+func _apply_sub_pic_no_anim(index: int, param: int) -> void:
+	if index != Gen2EffectCommands.SUBSTITUTE_MOVE:
+		return
+	_set_substitute_pic(
+		Gen2Battle.ENEMY if bool(_anim_event.get("enemy_turn", false)) else Gen2Battle.PLAYER,
+		param != Gen2EffectCommands.SUBSTITUTE_ANIM_DROP
+	)
+
+
+## Which picture one battler's square is holding, and the view behind it.
+func _set_substitute_pic(side: int, raised: bool) -> void:
+	if bool(_substitute_pic.get(side, false)) == raised:
+		return
+	_substitute_pic[side] = raised
+	_push_view()
 
 
 func _step(kind: StringName, values: Dictionary) -> void:
@@ -1009,11 +1046,13 @@ func _run_next_anim_step() -> void:
 					return
 			ANIM_APPEAR_USER:
 				# `AppearUserLowerSub`, which Fly and Dig reach after the
-				# animation: the user's own picture stamped back into the map it
-				# was taken out of.
-				Gen2BattleScreenMap.stamp(
-					_bg_map, not bool(_anim_event.get("enemy_turn", false))
+				# animation: `LowerSubNoAnim` writes the user's own picture and
+				# `AppearUser` stamps it back into the map it was taken out of.
+				var enemy_turn: bool = bool(_anim_event.get("enemy_turn", false))
+				_set_substitute_pic(
+					Gen2Battle.ENEMY if enemy_turn else Gen2Battle.PLAYER, false
 				)
+				Gen2BattleScreenMap.stamp(_bg_map, not enemy_turn)
 				_push_view()
 	_anim = null
 	_anim_event = {}
@@ -1049,6 +1088,15 @@ func _after_anim_frame() -> void:
 				_play_anim_sound(int((command["operands"] as Array)[1]))
 			Gen2BattleAnimScript.CRY:
 				_play_anim_cry()
+			Gen2BattleAnimScript.RAISE_SUB, Gen2BattleAnimScript.DROP_SUB:
+				# `BattleAnimCmd_RaiseSub` and `..._DropSub` write the actor's own
+				# tiles, and the actor is `hBattleTurn`, which is whose animation
+				# this is.
+				_set_substitute_pic(
+					Gen2Battle.ENEMY if bool(_anim_event.get("enemy_turn", false))
+						else Gen2Battle.PLAYER,
+					StringName(command["name"]) == Gen2BattleAnimScript.RAISE_SUB
+				)
 	_push_view()
 
 
@@ -2669,6 +2717,8 @@ func _apply_event_state(event: Dictionary) -> void:
 			# `FaintYourPokemon` and `FaintEnemyPokemon` sink the picture before
 			# either prints, so the line waits on the animation.
 			_begin_faint(int(event["side"]))
+		Gen2Battle.SUBSTITUTE_PIC:
+			_set_substitute_pic(int(event["side"]), bool(event["raised"]))
 		Gen2Battle.SENT_OUT:
 			# The pic and the panel both change, and both come out of the event
 			# rather than out of the party, for the same reason every other number
@@ -2683,6 +2733,10 @@ func _apply_event_state(event: Dictionary) -> void:
 				_player = int(event["species"])
 				_player_level = int(event["level"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
+			# A send-out draws a picture through `GetBattleMonBackpic` or
+			# `GetEnemyMonFrontpic`, and the doll it would answer with belongs to
+			# a Substitute that switching has already taken away.
+			_set_substitute_pic(int(event["side"]), false)
 			_reseed_bg_map()
 			_refresh_exp_bar()
 		Gen2Battle.EXP_GAINED:
@@ -3343,6 +3397,9 @@ func _push_view() -> void:
 		return
 	_renderer.set_view({
 		"enemy_species": _enemy, "player_species": _player,
+		## Whose picture is the substitute's doll rather than the Pokémon's own.
+		"enemy_substitute": bool(_substitute_pic[Gen2Battle.ENEMY]),
+		"player_substitute": bool(_substitute_pic[Gen2Battle.PLAYER]),
 		"enemy_name": _name_of(_enemy), "player_name": _name_of(_player),
 		"enemy_level": _enemy_level, "player_level": _player_level,
 		## Who the fight is against, which the values above do not say. A wild

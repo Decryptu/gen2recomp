@@ -116,6 +116,12 @@ var stat_by: int = 0
 var stat_target: int = Gen2Battle.PLAYER
 var stat_moved: bool = false
 
+## `wSomeoneIsRampaging`, which `DoMove` clears before every move and only a
+## rampage or a Rollout being *started* sets. `BattleCommand_LowerSub` is the
+## one reader: a continuation turn drops the doll where a charging turn would
+## not have.
+var someone_is_rampaging: bool = false
+
 ## Set instead of moving a stat when a drop was blocked by the target's own
 ## Mist, so the fail-text step behind it can tell that apart from the ordinary
 ## "already at the bottom" failure and say the right thing.

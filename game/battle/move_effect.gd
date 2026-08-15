@@ -667,7 +667,9 @@ const DEFENSE_CURL_SEQUENCE: Array = [
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.DEFENSE_UP,
 	Gen2EffectCommands.CURL,
+	Gen2EffectCommands.LOWER_SUB,
 	Gen2EffectCommands.STAT_UP_ANIM,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.STAT_UP_MESSAGE,
 	Gen2EffectCommands.STAT_UP_FAIL_TEXT,
 	Gen2EffectCommands.END_MOVE,
@@ -1388,6 +1390,9 @@ const FURY_CUTTER_SEQUENCE: Array = [
 const TRIPLE_KICK_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	# `lowersub` opens the source's loop body and its `raisesub` sits behind
+	# `endloop`, which is where both land in a list run once per kick.
+	Gen2EffectCommands.LOWER_SUB,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
@@ -1399,6 +1404,7 @@ const TRIPLE_KICK_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.KICK_COUNTER,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1607,7 +1613,9 @@ const SWAGGER_SEQUENCE: Array = [
 	Gen2EffectCommands.SWITCH_TURN,
 	Gen2EffectCommands.ATTACK_UP_2,
 	Gen2EffectCommands.SWITCH_TURN,
+	Gen2EffectCommands.LOWER_SUB,
 	Gen2EffectCommands.STAT_UP_ANIM,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.SWITCH_TURN,
 	Gen2EffectCommands.STAT_UP_MESSAGE,
 	Gen2EffectCommands.SWITCH_TURN,
@@ -1656,6 +1664,10 @@ const STAT_RUN_LENGTH: int = 7
 ## list differs from its six neighbours.
 const DEFENSE_DOWN_HIT: int = STAT_DOWN_HIT_BASE + 1
 
+## `EFFECT_EVASION_UP`, the seventh of the raise run and the one list of the
+## twenty-eight whose doll commands are not where its neighbours put them.
+const EVASION_UP: int = STAT_UP_BASE + 6
+
 ## The two effect bytes a run does not reach. Metal Claw raises the user's
 ## Attack on a roll and Ancientpower raises all five of them, and neither sits
 ## in a run of its own: 139 falls where an eighth "down by one, on a hit" stat
@@ -1696,7 +1708,28 @@ static func _stat_up_sequence(command: StringName) -> Array:
 		Gen2EffectCommands.USED_MOVE_TEXT,
 		Gen2EffectCommands.DO_TURN,
 		command,
+		Gen2EffectCommands.LOWER_SUB,
 		Gen2EffectCommands.STAT_UP_ANIM,
+		Gen2EffectCommands.RAISE_SUB,
+		Gen2EffectCommands.STAT_UP_MESSAGE,
+		Gen2EffectCommands.STAT_UP_FAIL_TEXT,
+		Gen2EffectCommands.END_MOVE,
+	]
+
+
+## `EvasionUp`, the one row of the twenty-eight written differently: its
+## `lowersub` sits in front of the stat command rather than behind it, and a
+## `lowersubnoanim` takes the doll back off between the animation and the raise.
+## Minimize and Double Team are the only moves on it.
+static func _evasion_up_sequence(command: StringName) -> Array:
+	return [
+		Gen2EffectCommands.USED_MOVE_TEXT,
+		Gen2EffectCommands.DO_TURN,
+		Gen2EffectCommands.LOWER_SUB,
+		command,
+		Gen2EffectCommands.STAT_UP_ANIM,
+		Gen2EffectCommands.LOWER_SUB_NO_ANIM,
+		Gen2EffectCommands.RAISE_SUB,
 		Gen2EffectCommands.STAT_UP_MESSAGE,
 		Gen2EffectCommands.STAT_UP_FAIL_TEXT,
 		Gen2EffectCommands.END_MOVE,
@@ -1712,7 +1745,9 @@ static func _stat_down_sequence(command: StringName) -> Array:
 		Gen2EffectCommands.DO_TURN,
 		Gen2EffectCommands.CHECK_HIT,
 		command,
+		Gen2EffectCommands.LOWER_SUB,
 		Gen2EffectCommands.STAT_DOWN_ANIM,
+		Gen2EffectCommands.RAISE_SUB,
 		Gen2EffectCommands.STAT_DOWN_MESSAGE,
 		Gen2EffectCommands.STAT_DOWN_FAIL_TEXT,
 		Gen2EffectCommands.END_MOVE,
@@ -1727,7 +1762,9 @@ static func _stat_down_sequence(command: StringName) -> Array:
 static func _stat_sequences() -> Dictionary:
 	var out: Dictionary = {}
 	for offset: int in STAT_RUN_LENGTH:
-		out[STAT_UP_BASE + offset] = _stat_up_sequence(STAT_UP_COMMANDS[offset])
+		out[STAT_UP_BASE + offset] = _evasion_up_sequence(STAT_UP_COMMANDS[offset]) \
+			if STAT_UP_BASE + offset == EVASION_UP \
+			else _stat_up_sequence(STAT_UP_COMMANDS[offset])
 		out[STAT_UP_2_BASE + offset] = _stat_up_sequence(STAT_UP_2_COMMANDS[offset])
 		out[STAT_DOWN_BASE + offset] = _stat_down_sequence(STAT_DOWN_COMMANDS[offset])
 		out[STAT_DOWN_2_BASE + offset] = _stat_down_sequence(STAT_DOWN_2_COMMANDS[offset])

@@ -113,8 +113,54 @@ func run(r: RefCounted) -> void:
 		_verify_objects(game_id, data)
 		_verify_palettes(game_id, data)
 		_verify_gfx(game_id, data)
+		_verify_substitute_pic(game_id, data)
 		_run_every_animation(game_id, data)
 		_play_every_animation(game_id, data)
+
+
+## `GetSubstitutePic`, on both sides and all three cartridges: the doll is four
+## tiles of `MonsterSpriteGFX` in an otherwise empty box, at the one place the
+## routine copies them to. Nothing else in the box may carry ink, since the
+## routine zeroes it first and the battler's own picture is gone while it is up.
+func _verify_substitute_pic(game_id: StringName, data: GameData) -> void:
+	var strip: PackedByteArray = data.overworld_sprite_indices(
+		Gen2BattleRenderer.SUBSTITUTE_SPRITE
+	)
+	if not _r.check(
+		not strip.is_empty(),
+		"%s: no monster overworld sprite in the cache, so no doll." % game_id
+	):
+		return
+	for player_side: bool in [false, true]:
+		var side: int = Gen2BattleScreenMap.PLAYER_SIDE if player_side \
+			else Gen2BattleScreenMap.ENEMY_SIDE
+		var box: int = side * Gen2Font.TILE
+		var pixels: PackedByteArray = Gen2BattleRenderer.substitute_pixels(strip, player_side)
+		if not _r.check(
+			pixels.size() == box * box,
+			"%s: the doll's box is %d pixels, not %d." % [game_id, pixels.size(), box * box]
+		):
+			continue
+		var at: Vector2i = Gen2BattleRenderer.SUBSTITUTE_AT[player_side]
+		var doll := Rect2i(at * Gen2Font.TILE, Vector2i(16, 16))
+		var inside: int = 0
+		var outside: int = 0
+		for y: int in box:
+			for x: int in box:
+				if pixels[y * box + x] == 0:
+					continue
+				if doll.has_point(Vector2i(x, y)):
+					inside += 1
+				else:
+					outside += 1
+		_r.check(inside > 0, "%s: the doll drew nothing." % game_id)
+		_r.check(
+			outside == 0,
+			"%s: %d lit pixels outside the doll's own 16 by 16." % [game_id, outside]
+		)
+		print("%s: the %s doll is %d lit pixels at %s of a %dx%d box." % [
+			game_id, "player's" if player_side else "enemy's", inside, at, side, side,
+		])
 
 
 ## Every animation played through [Gen2BattleAnimPlayer], which is the script

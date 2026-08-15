@@ -98,6 +98,10 @@ const WAIT: StringName = &"wait"
 
 const OBJ: StringName = &"obj"
 const SOUND: StringName = &"sound"
+## The two that write a battler's own picture rather than an animation object:
+## `GetSubstitutePic` puts the doll over it and `DropPlayerSub` puts it back.
+const RAISE_SUB: StringName = &"raise_sub"
+const DROP_SUB: StringName = &"drop_sub"
 const CRY: StringName = &"cry"
 const JUMP: StringName = &"jump"
 const LOOP: StringName = &"loop"

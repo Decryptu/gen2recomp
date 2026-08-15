@@ -361,3 +361,108 @@ func test_every_status_animation_is_past_the_move_ids() -> void:
 	]:
 		assert_gt(index, 0xFF)
 		assert_lt(index, RomLayout.BATTLE_ANIM_SCRIPT_COUNT)
+
+
+## The substitute's doll, which is the sixth route: `lowersub` and `raisesub`
+## play the SUBSTITUTE animation on their own parameters, and the two `noanim`
+## commands write the picture with no animation at all.
+
+func _with_substitute(battle: Gen2Battle, side: int = Gen2Battle.PLAYER) -> Gen2Battle:
+	var mon: Gen2BattleMon = battle.mon(side)
+	mon.substatus |= Gen2Substatus.SUBSTITUTE
+	mon.substitute_hp = Gen2Substatus.substitute_hp_for(mon.max_hp())
+	return battle
+
+
+func _params(animations: Array) -> Array:
+	var out: Array = []
+	for animation: Dictionary in animations:
+		out.append([int(animation["index"]), int(animation["param"])])
+	return out
+
+
+func test_a_move_by_a_substituted_pokemon_drops_the_doll_and_puts_it_back() -> void:
+	var battle: Gen2Battle = _with_substitute(_battle([Fixture.TACKLE]))
+	var animations: Array = _animations(_run_move(battle, Fixture.TACKLE))
+	assert_eq(_params(animations), [
+		[Gen2EffectCommands.SUBSTITUTE_MOVE, Gen2EffectCommands.SUBSTITUTE_ANIM_DROP],
+		[Fixture.TACKLE, 0],
+		[Gen2EffectCommands.SUBSTITUTE_MOVE, Gen2EffectCommands.SUBSTITUTE_ANIM_RAISE],
+	])
+	# Both play on the user, whose doll it is.
+	for animation: Dictionary in animations:
+		assert_false(bool(animation["enemy_turn"]))
+
+
+func test_a_user_with_no_doll_plays_neither() -> void:
+	var animations: Array = _animations(_run_move(_battle([Fixture.TACKLE]), Fixture.TACKLE))
+	assert_eq(animations.size(), 1)
+
+
+func test_a_stat_move_carries_the_pair_around_its_own_animation() -> void:
+	var battle: Gen2Battle = _with_substitute(_battle([Fixture.SWORDS_DANCE]))
+	# `BattleCommand_StatUpDownAnim` clears the param the drop just wrote.
+	assert_eq(_params(_animations(_run_move(battle, Fixture.SWORDS_DANCE))), [
+		[Gen2EffectCommands.SUBSTITUTE_MOVE, Gen2EffectCommands.SUBSTITUTE_ANIM_DROP],
+		[Fixture.SWORDS_DANCE, 0],
+		[Gen2EffectCommands.SUBSTITUTE_MOVE, Gen2EffectCommands.SUBSTITUTE_ANIM_RAISE],
+	])
+
+
+func test_substitute_itself_plays_one_animation_and_no_pair() -> void:
+	# `BattleCommand_Substitute` calls `LoadAnim` rather than
+	# `AnimateCurrentMove`, so nothing drops a doll that is only now being made.
+	var animations: Array = _animations(
+		_run_move(_battle([Fixture.SUBSTITUTE]), Fixture.SUBSTITUTE)
+	)
+	assert_eq(_params(animations), [
+		[Gen2EffectCommands.SUBSTITUTE_MOVE, Gen2EffectCommands.SUBSTITUTE_ANIM_MADE],
+	])
+
+
+func test_a_charging_turn_drops_the_doll_and_the_release_turn_does_not() -> void:
+	# `CheckUserIsCharging` is what [member Gen2Turn.locked] answers, and the
+	# doll a charge turn dropped is still down when the move lands.
+	var battle: Gen2Battle = _with_substitute(_battle([Fixture.TACKLE]))
+	for locked: bool in [false, true]:
+		var events: Array = []
+		var turn: Gen2Turn = Gen2Turn.create(
+			battle, Gen2Battle.PLAYER, 0, Fixture.TACKLE, _data.move(Fixture.TACKLE), events
+		)
+		turn.locked = locked
+		Gen2EffectCommands.run(Gen2EffectCommands.LOWER_SUB, turn)
+		assert_eq(_animations(events).size(), 0 if locked else 1)
+
+
+func test_a_broken_doll_is_taken_off_the_field_at_once() -> void:
+	var battle: Gen2Battle = _with_substitute(
+		_battle([Fixture.TACKLE], [Fixture.TACKLE]), Gen2Battle.ENEMY
+	)
+	battle.enemy.substitute_hp = 1
+	var events: Array = _run_move(battle, Fixture.TACKLE)
+	var faded: int = _index_of(events, Gen2Battle.SUBSTITUTE_FADED)
+	var picture: int = _index_of(events, Gen2Battle.SUBSTITUTE_PIC)
+	assert_gt(faded, -1)
+	assert_eq(picture, faded + 1, "SubFadedText is followed by lowersubnoanim")
+	assert_eq(int(events[picture]["side"]), Gen2Battle.ENEMY)
+	assert_false(bool(events[picture]["raised"]))
+	# The doll is gone, so the `raisesub` behind the animation refuses.
+	var animations: Array = _animations(events)
+	assert_eq(int(animations[-1]["index"]), Fixture.TACKLE)
+
+
+func test_minimize_takes_the_doll_off_between_the_animation_and_the_raise() -> void:
+	# `EvasionUp` is the one stat list written differently: `lowersubnoanim`
+	# sits between `statupanim` and `raisesub`.
+	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.EVASION_UP)
+	assert_eq(
+		sequence.slice(sequence.find(Gen2EffectCommands.STAT_UP_ANIM)),
+		[
+			Gen2EffectCommands.STAT_UP_ANIM,
+			Gen2EffectCommands.LOWER_SUB_NO_ANIM,
+			Gen2EffectCommands.RAISE_SUB,
+			Gen2EffectCommands.STAT_UP_MESSAGE,
+			Gen2EffectCommands.STAT_UP_FAIL_TEXT,
+			Gen2EffectCommands.END_MOVE,
+		]
+	)

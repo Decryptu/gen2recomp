@@ -431,11 +431,29 @@ const SKIP_SUN_CHARGE: StringName = &"skipsuncharge"
 ## The move's own animation, and the damage flash `BattleAnimRunScript` chains
 ## off `wBattleAfterAnim` behind it.
 ##
-## `BattleCommand_MoveAnim` is `lowersub`, `moveanimnosub`, `raisesub`. Both subs
-## only drop and restore the doll's picture, which this project does not draw, so
-## the two names are one command here.
+## `BattleCommand_MoveAnim` is `lowersub`, `moveanimnosub`, `raisesub`, so this
+## command is all three; the two subs are separate commands as well, because 35
+## lists carry them around an animation of their own.
 const MOVE_ANIM: StringName = &"moveanim"
 const MOVE_ANIM_NO_SUB: StringName = &"moveanimnosub"
+
+## The substitute's doll dropped out of the way of an animation and put back
+## after it. Both answer nothing when the user has no doll up.
+const LOWER_SUB: StringName = &"lowersub"
+const RAISE_SUB: StringName = &"raisesub"
+
+## The same two pictures written with no animation at all. Only Minimize and
+## Double Team's list carries one: `lowersubnoanim` sits between the raise
+## animation and the `raisesub` behind it, so the doll is off the field for the
+## one command that would otherwise draw it over a minimizing Pokémon.
+const LOWER_SUB_NO_ANIM: StringName = &"lowersubnoanim"
+
+## The five effects `BattleCommand_LowerSub` names, which is every two-turn move:
+## Fly and Dig share one byte, so the source's five are four here.
+const CHARGE_EFFECTS: Array[int] = [
+	Gen2MoveEffect.RAZOR_WIND, Gen2MoveEffect.SKY_ATTACK, Gen2MoveEffect.SKULL_BASH,
+	Gen2MoveEffect.SOLARBEAM, Gen2MoveEffect.FLY_OR_DIG,
+]
 
 ## The animation a stat move plays, between the change and its message.
 ## `BattleCommand_StatUpAnim` uses one animation for both sides;
@@ -821,8 +839,18 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_thunder_accuracy(turn)
 		SKIP_SUN_CHARGE:
 			_skip_sun_charge(turn)
-		MOVE_ANIM, MOVE_ANIM_NO_SUB:
+		MOVE_ANIM:
+			_lower_sub(turn)
 			_move_anim(turn)
+			_raise_sub(turn)
+		MOVE_ANIM_NO_SUB:
+			_move_anim(turn)
+		LOWER_SUB:
+			_lower_sub(turn)
+		RAISE_SUB:
+			_raise_sub(turn)
+		LOWER_SUB_NO_ANIM:
+			_sub_pic(turn, false)
 		STAT_UP_ANIM:
 			_stat_change_anim(turn, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
 		STAT_DOWN_ANIM:
@@ -1704,6 +1732,10 @@ static func _substitute_damage(turn: Gen2Turn) -> void:
 	if broke:
 		defender.substatus &= ~Gen2Substatus.SUBSTITUTE
 		turn.emit(Gen2Battle.SUBSTITUTE_FADED, {"target": turn.target})
+		# `SubFadedText` is followed by a `BattleCommand_LowerSubNoAnim` between
+		# two `SwitchTurn`s: the doll goes off the field the moment it breaks,
+		# rather than waiting for a `raisesub` that will now refuse.
+		turn.emit(Gen2Battle.SUBSTITUTE_PIC, {"side": turn.target, "raised": false})
 		if not SUBSTITUTE_KEEPS_EFFECT.has(turn.effect()):
 			turn.effect_override = Gen2MoveEffect.NORMAL_HIT_EFFECT
 
@@ -2275,9 +2307,11 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 			turn.critical = bool(result["critical"])
 			turn.effectiveness = int(result["effectiveness"])
 
-		# `moveanimnosub` sits inside the source loop, after `clearmissdamage`
-		# and before `applydamage`, so every hit animates and only the last one
-		# carries the damage flash.
+		# `lowersub` opens the source loop and `moveanimnosub` sits inside it,
+		# after `clearmissdamage` and before `applydamage`, so every hit drops
+		# the user's doll and animates, and only the last one carries the damage
+		# flash. The `raisesub` behind `endloop` is at the tail of this command.
+		_lower_sub(turn)
 		_multi_hit_anim(turn, hit == hits - 1)
 
 		# `applydamage` is inside the loop too, so each hit goes through the whole
@@ -2291,7 +2325,10 @@ static func _multi_hit(turn: Gen2Turn) -> void:
 			turn.end()
 			return
 
+	# `BattleCommand_EndLoop` says how many hits landed, and the `raisesub`
+	# behind `endloop` follows that line rather than leading it.
 	turn.emit(Gen2Battle.HIT_TIMES, {"target": turn.target, "times": hits})
+	_raise_sub(turn)
 
 
 const FIXED_TWO_HIT_EFFECTS: Array = [Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE]
@@ -2457,6 +2494,11 @@ static func _rollout_power(turn: Gen2Turn) -> void:
 	# opening SLP_MASK check leaves both the counter and damage untouched.
 	if Gen2Status.is_asleep(mon.status):
 		return
+
+	# Set ahead of the miss check and off the count before it is raised, so only
+	# the first Rollout of a chain says a rampage started here.
+	turn.someone_is_rampaging = turn.someone_is_rampaging or mon.rollout_count == 0
+
 	if turn.missed:
 		mon.substatus &= ~Gen2Substatus.ROLLOUT
 		return
@@ -2500,6 +2542,7 @@ static func _rampage(turn: Gen2Turn) -> void:
 	mon.substatus |= Gen2Substatus.RAMPAGING
 	mon.rampage_move = turn.move_number
 	mon.rampage_turns = Gen2Substatus.roll_rampage_turns(turn.rng())
+	turn.someone_is_rampaging = true
 
 
 ## Defense Curl's flag is independent of whether its Defense stage changed. It
@@ -2807,6 +2850,7 @@ static func _perish_song(turn: Gen2Turn) -> void:
 static func _substitute(turn: Gen2Turn) -> void:
 	var user: Gen2BattleMon = turn.attacker()
 	if Gen2Substatus.has(user.substatus, Gen2Substatus.SUBSTITUTE):
+		_refused_substitute_raises(turn)
 		turn.emit(Gen2Battle.SUBSTITUTE_ALREADY)
 		return
 
@@ -2815,6 +2859,7 @@ static func _substitute(turn: Gen2Turn) -> void:
 	var cost: int = Gen2Substatus.substitute_hp_for(user.max_hp())
 	user.substitute_hp = cost
 	if user.hp <= cost:
+		_refused_substitute_raises(turn)
 		turn.emit(Gen2Battle.SUBSTITUTE_TOO_WEAK)
 		return
 
@@ -2823,14 +2868,24 @@ static func _substitute(turn: Gen2Turn) -> void:
 	user.trapped_turns = 0
 	user.trapping_move = 0
 
-	# `xor a / ld [wBattleAnimParam], a` before `LoadAnim`: param 0 is the doll
-	# going up, where `lowersub` and `raisesub` pass 1 and 2.
-	turn.battle.battle_anim_param = 0
-	_animate_current_move(turn)
+	# `ld [wBattleAnimParam], a` before `LoadAnim`, and `LoadAnim` rather than
+	# `AnimateCurrentMove`: the move plays its own animation with no drop and no
+	# raise around it, and param 0 is the branch that makes the doll.
+	turn.battle.battle_anim_param = SUBSTITUTE_ANIM_MADE
+	_play_fx_anim(turn, SUBSTITUTE_MOVE, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
 	turn.emit(Gen2Battle.SUBSTITUTE_MADE, {
 		"amount": cost, "hp": user.hp, "max_hp": user.max_hp(),
 		"substitute_hp": user.substitute_hp,
 	})
+
+
+## `.already_has_sub` and `.too_weak_to_sub`, which both answer
+## `call CheckUserIsCharging / call nz, BattleCommand_RaiseSub`: a refusal puts
+## the doll back only for a user that is charging, since that is the one route
+## into this command with the doll already dropped.
+static func _refused_substitute_raises(turn: Gen2Turn) -> void:
+	if turn.locked or turn.called:
+		_raise_sub(turn)
 
 
 ## The seed [method Gen2Battle._residual_leech_seed] reads back every turn.
@@ -3442,9 +3497,11 @@ static func _beat_up(turn: Gen2Turn) -> void:
 			turn.end()
 			return
 
-	# `beatupfailtext`, which says nothing when any member landed a hit.
+	# `beatupfailtext`, which says nothing when any member landed a hit, and the
+	# `raisesub` the list puts behind it.
 	if not struck:
 		turn.emit(Gen2Battle.MOVE_FAILED)
+	_raise_sub(turn)
 
 
 ## One pass of the loop: `critical`, `beatup`'s own numbers, `damagecalc`,
@@ -3453,6 +3510,9 @@ static func _beat_up(turn: Gen2Turn) -> void:
 ## `clearmissdamage` is structural, since the one `checkhit` sits outside the loop
 ## and has already ended the move on a miss.
 static func _beat_up_hit(turn: Gen2Turn) -> void:
+	# `lowersub` is the first command of the loop body, so every member's hit
+	# drops the user's doll again.
+	_lower_sub(turn)
 	_critical(turn)
 	_damage_calc(turn)
 	_damage_variation(turn)
@@ -3638,6 +3698,59 @@ static func _move_anim(turn: Gen2Turn) -> void:
 	)
 
 
+## `BattleCommand_LowerSub`: the user's doll dropped out of the way of whatever
+## is about to be drawn, as the SUBSTITUTE animation's own `.dropsub` branch.
+##
+## Nothing is dropped for a user with no doll up, and nothing is dropped on the
+## turn a two-turn move is charging either: `CheckUserIsCharging` is what
+## [method _do_turn] reads as [member Gen2Turn.locked] or
+## [member Gen2Turn.called], and a doll already dropped by the charge turn is
+## still down.
+static func _lower_sub(turn: Gen2Turn) -> void:
+	if not Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.SUBSTITUTE):
+		return
+	if not _lower_sub_animates(turn):
+		return
+	turn.battle.battle_anim_param = SUBSTITUTE_ANIM_DROP
+	_play_fx_anim(turn, SUBSTITUTE_MOVE, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
+
+
+## The two ways past the charging check, in the source's own order: a two-turn
+## move that has not charged yet is starting its charge, so the doll comes down
+## for the charge animation, and `.Rampage` lets a Rollout or a rampage through
+## on every turn but the one it is started from by a called move.
+static func _lower_sub_animates(turn: Gen2Turn) -> bool:
+	var user: Gen2BattleMon = turn.attacker()
+	if not Gen2Substatus.has(user.substatus, Gen2Substatus.CHARGING) \
+			and turn.effect() in CHARGE_EFFECTS:
+		return true
+	# `.Rampage` answers zero when nothing started rampaging on this move, which
+	# is every continuation turn, and the turn one is started on is not a
+	# charging turn unless the move was called.
+	if turn.effect() in [Gen2MoveEffect.ROLLOUT, Gen2MoveEffect.RAMPAGE] \
+			and not turn.someone_is_rampaging:
+		return true
+	return not (turn.locked or turn.called)
+
+
+## `BattleCommand_LowerSubNoAnim` and `..._RaiseSubNoAnim`: the picture written
+## straight into the battler's tiles. Unconditional in the source, since a side
+## with no doll is drawn its own picture either way, and this project only has
+## the two pictures to choose between.
+static func _sub_pic(turn: Gen2Turn, raised: bool) -> void:
+	turn.emit(Gen2Battle.SUBSTITUTE_PIC, {"raised": raised})
+
+
+## `BattleCommand_RaiseSub`: the doll put back once whatever dropped it is over.
+## Unconditional past the flag, so a Substitute that faded during the move leaves
+## the picture the drop restored.
+static func _raise_sub(turn: Gen2Turn) -> void:
+	if not Gen2Substatus.has(turn.attacker().substatus, Gen2Substatus.SUBSTITUTE):
+		return
+	turn.battle.battle_anim_param = SUBSTITUTE_ANIM_RAISE
+	_play_fx_anim(turn, SUBSTITUTE_MOVE, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
+
+
 ## `.alternate_anim`, the branch the five multi-hit effects take instead of
 ## clearing the param: the low bit is flipped, and the damage flash is kept only
 ## for the hit `wPlayerRolloutCount`/`wEnemyRolloutCount` says is the last one,
@@ -3718,10 +3831,15 @@ static func _status_target_anim(turn: Gen2Turn, flag: int) -> int:
 ##
 ## Not a list command. Fifteen commands call it from inside their own bodies,
 ## and it is the whole animation of every move whose effect list carries no
-## animation command at all. `wBattleAnimParam` is pushed across the sub calls
-## rather than cleared, so whatever the last animation left stands.
+## animation command at all. `wBattleAnimParam` is pushed across the drop rather
+## than cleared, so whatever the last animation left stands; the raise behind it
+## is last and leaves its own 2 there.
 static func _animate_current_move(turn: Gen2Turn) -> void:
+	var param: int = turn.battle.battle_anim_param
+	_lower_sub(turn)
+	turn.battle.battle_anim_param = param
 	_play_fx_anim(turn, turn.move_number, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
+	_raise_sub(turn)
 
 
 ## `BattleCommand_HeldFlinch`: a King's Rock on the attacker makes an ordinary
@@ -3802,6 +3920,15 @@ static func _stat_change(command: StringName, turn: Gen2Turn) -> void:
 ## Minimize's move number, which is the whole of what `MinimizeDropSub` compares
 ## against and what makes a Stomp hurt twice as much.
 const MINIMIZE_MOVE: int = 107
+
+## Substitute's move number, and so the animation `lowersub`, `raisesub` and the
+## move itself all play. Which of its four branches runs is
+## [member Gen2Battle.battle_anim_param]: 0 makes the doll, 1 drops it and 2
+## raises it.
+const SUBSTITUTE_MOVE: int = 164
+const SUBSTITUTE_ANIM_MADE: int = 0
+const SUBSTITUTE_ANIM_DROP: int = 1
+const SUBSTITUTE_ANIM_RAISE: int = 2
 
 ## `StatNames`' eighth row, which exists only so `BattleCommand_Curse` has
 ## something to name when neither of the two stats it raises can move.
