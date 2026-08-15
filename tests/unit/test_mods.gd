@@ -1160,3 +1160,21 @@ func test_two_sources_listing_one_mod_leave_it_under_the_first() -> void:
 	})
 	assert_eq(groups.size(), 1)
 	assert_eq(String(groups[0]["label"]), "A")
+
+
+## A headless process or one driving a tool script is a check, a test tier or a
+## screenshot. A mod that swaps the renderer or shuffles a table would change
+## what those measure without appearing anywhere in their output, so they
+## discover mods and run none.
+func test_a_tool_run_lists_the_mods_it_finds_and_runs_none_of_them() -> void:
+	assert_false(GameRuntime.mods_are_allowed(), "this run is headless and script-driven")
+	_write_dependency_mod("%s/quiet" % Gen2ModHost.ROOT, "quiet", "1.0.0")
+	assert_eq(GameRuntime.load_mods(), [], "nothing was run")
+	assert_true(
+		Gen2ModHost.instance().manifests().any(
+			func(manifest: Gen2ModManifest) -> bool: return manifest.id == &"quiet"
+		),
+		"and the list is still right"
+	)
+	assert_true(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START).is_empty())
+	Gen2ModInstaller.uninstall(&"quiet")

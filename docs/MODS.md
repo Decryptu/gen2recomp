@@ -122,6 +122,15 @@ what is already installed untouched. Reimporting a mod that is present asks
 first, and replacing one removes files the new version dropped rather than
 leaving them behind.
 
+Mods do not load in a headless run or one driving a `-s` tool script: a check, a
+test tier or a screenshot would otherwise be measuring a renderer or a shuffled
+table without saying so. Such a run still discovers mods, so a listing is right,
+and `--mods` on the command line puts them back for a run that is about a mod:
+
+```bash
+godot --headless --path . --quit-after 30 --mods
+```
+
 Mods load the same way in an exported build as in the editor: the entry script
 is plain GDScript read at runtime, even though the game's own scripts ship as
 binary tokens. An installed mod loads immediately, without a restart, and so
