@@ -2018,6 +2018,11 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 			_script_value = int(_request.get("map_group", -1))
 		0x0D: # VAR_MAPNUMBER
 			_script_value = int(_request.get("map_number", -1))
+		0x0E: # VAR_UNOWNCOUNT
+			## `.count_unown` walks wUnownDex and stops at the first empty slot,
+			## which is the size of the list here. All three Ruins of Alph
+			## scientists and the Kabuto chamber's wall read it.
+			_script_value = state.unown_caught_count() if state != null else 0
 		0x0F: # VAR_ENVIRONMENT
 			_script_value = int(_request.get("environment", -1))
 		0x14: # VAR_SPECIALPHONECALL

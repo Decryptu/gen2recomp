@@ -37,7 +37,7 @@ const GROUPS: Dictionary = {
 	],
 	&"tables": [
 		&"tmhm", &"naming", &"world_scripts", &"opening_lane", &"pokecenter_pc",
-		&"pack",
+		&"pack", &"unown_dex",
 	],
 	&"trainers": [&"crystal_route30_trainer", &"gold_route30_trainer"],
 }

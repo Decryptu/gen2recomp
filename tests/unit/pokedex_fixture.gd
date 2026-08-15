@@ -46,6 +46,15 @@ static func types_for(number: int) -> Array:
 	return [first, second]
 
 
+## One word per Unown form, each opening on its own letter the way the
+## cartridge's do, so a test can tell which form the dex is showing.
+static func unown_words() -> Array:
+	var out: Array = []
+	for form: int in RomLayout.UNOWN_FORMS:
+		out.append("%sWORD" % char("A".unicode_at(0) + form))
+	return out
+
+
 static func directory() -> String:
 	return RomCache.directory_for(GAME_ID, SHA1)
 
@@ -63,6 +72,7 @@ static func build() -> GameData:
 		"game_id": String(GAME_ID),
 		"sha1": SHA1,
 		"complete": true,
+		"unown_words": unown_words(),
 	})
 	return GameData.open_directory(path)
 

@@ -90,4 +90,8 @@ static func _mon_page(data: GameData, mon: Gen2SaveMon) -> Dictionary:
 		"level": mon.level,
 		"ot_id": mon.ot_id,
 		"gender": Gen2BattleMon.gender_for(data, mon.species, mon.dvs),
+		## `DisplayHOFMon` draws the pic through `GetMonFrontpic`, which reads
+		## `wUnownLetter`: an Unown in the Hall of Fame is its own letter, not A.
+		"unown_form": Gen2Stats.unown_letter(mon.dvs) \
+			if mon.species == RomLayout.UNOWN_SPECIES else 0,
 	}

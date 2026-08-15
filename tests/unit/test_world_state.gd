@@ -445,3 +445,31 @@ func test_the_unown_dex_is_not_a_listing_mode() -> void:
 	var state := Gen2WorldState.new()
 	state.set_last_dex_mode(RomLayout.DEXMODE_UNOWN)
 	assert_eq(state.last_dex_mode(), RomLayout.DEXMODE_NEW)
+
+
+## `UpdateUnownDex` walks to the first empty slot: a form already listed keeps
+## its place, and the list only ever grows at the end.
+func test_the_unown_dex_appends_in_catching_order_and_never_twice() -> void:
+	var state := Gen2WorldState.new()
+	for form: int in [12, 3, 12, 26, 3]:
+		state.update_unown_dex(form)
+	assert_eq(state.unown_dex(), [12, 3, 26] as Array[int])
+	assert_eq(state.unown_caught_count(), 3)
+
+	# A form outside the twenty-six is not a slot the loop can reach.
+	state.update_unown_dex(0)
+	state.update_unown_dex(RomLayout.UNOWN_FORMS + 1)
+	assert_eq(state.unown_caught_count(), 3)
+
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.unown_dex(), [12, 3, 26] as Array[int])
+
+
+## A snapshot written before the Unown dex existed restores as an empty one
+## rather than refusing, which is why no save format bump went with it.
+func test_a_state_without_an_unown_dex_restores_empty() -> void:
+	var state := Gen2WorldState.new()
+	state.update_unown_dex(4)
+	var raw: Dictionary = state.to_dict()
+	raw.erase("unown_dex")
+	assert_true(Gen2WorldState.from_dict(raw).unown_dex().is_empty())

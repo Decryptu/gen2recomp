@@ -1046,6 +1046,41 @@ func test_the_chosen_dex_mode_survives_closing_the_dex() -> void:
 	assert_eq(reopened.get("_dex").mode, RomLayout.DEXMODE_OLD)
 
 
+## The Unown dex: `Pokedex_CheckUnlockedUnownMode` puts a fourth row on the
+## OPTION screen once the Ruins of Alph research centre has set the flag, and
+## `.MenuAction_UnownMode` answers back to OPTION rather than to the listing,
+## with the listing's own mode untouched.
+func test_unown_mode_is_offered_once_its_flag_is_set_and_returns_to_the_option_screen() -> void:
+	await _open_world()
+	var state: Gen2WorldState = _world_screen._world.state
+	state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	dex.handle_button(Gen2Button.SELECT)
+	assert_eq(dex.get("_mode_rows").size(), 3, "three modes until the dex is upgraded")
+
+	state.set_engine_flag(Gen2WorldState.ENGINE_UNOWN_DEX)
+	state.update_unown_dex(3)
+	state.update_unown_dex(20)
+	dex.handle_button(Gen2Button.B)
+	dex.handle_button(Gen2Button.SELECT)
+	assert_eq(dex.get("_mode_rows").size(), 4)
+	for _row: int in 3:
+		dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.UNOWN)
+	assert_eq(dex.get("_dex").unown_word(), "CWORD")
+	dex.handle_button(Gen2Button.RIGHT)
+	assert_eq(dex.get("_dex").unown_word(), "TWORD")
+
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.OPTION)
+	assert_eq(
+		state.last_dex_mode(), RomLayout.DEXMODE_NEW,
+		"the listing keeps the mode it had"
+	)
+
+
 ## `Pokedex_UpdateMainScreen`'s START reaches the search screen, and its CANCEL
 ## row comes back to the listing.
 func test_the_dex_search_screen_opens_from_the_listing_and_cancels_back() -> void:

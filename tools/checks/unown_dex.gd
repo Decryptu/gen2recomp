@@ -1,0 +1,182 @@
+extends RefCounted
+
+var _r: RefCounted = null
+
+## Verifies the Unown dex against freshly imported real caches: `UnownWords`, the
+## twenty-six pics `Pokedex_LoadUnownFrontpicTiles` draws from, and
+## `GetUnownLetter` over every DV word a Pokemon can carry.
+##
+## The whole corpus rather than a sample: all 65,536 DV words on each cartridge,
+## every letter and every form's picture. The words are a plain byte run behind
+## their own pointer table, so a wrong offset lands on neighbouring data that
+## still reads as letters; what says it is the right run is that each word opens
+## on its own letter, that the run starts where the table ends, and that the
+## three cartridges agree word for word.
+##
+##   Godot --headless --path . -s res://tools/validate.gd -- unown_dex
+
+## `data/pokemon/unown_words.asm`'s first and last, either side of the run.
+const FIRST_WORD: String = "ANGRY"
+const LAST_WORD: String = "ZOOM"
+## `UnownWordX`, the one word that is not a word.
+const X_WORD: String = "XXXXX"
+
+## Every DV word, which is what `GetUnownLetter` divides down to a letter.
+const DV_WORDS: int = 0x10000
+
+var _first_words: PackedStringArray = PackedStringArray()
+
+
+func run(r: RefCounted) -> void:
+	_r = r
+	_first_words = PackedStringArray()
+	_r.each_game(_check_game)
+
+
+func _check_game() -> void:
+	_check_words()
+	_check_pics()
+	_check_letters()
+	_check_dex_order()
+
+
+func _check_words() -> void:
+	var words: PackedStringArray = PackedStringArray()
+	for form: int in range(1, RomLayout.UNOWN_FORMS + 1):
+		words.append(_r.data.unown_word(form))
+	if not _r.check(
+		words.size() == RomLayout.UNOWN_FORMS,
+		"the cache holds %d Unown words." % words.size()
+	):
+		return
+	for form: int in RomLayout.UNOWN_FORMS:
+		var letter: String = char("A".unicode_at(0) + form)
+		_r.check(
+			words[form].begins_with(letter),
+			"Unown %s's word is \"%s\"." % [letter, words[form]]
+		)
+	_r.check(words[0] == FIRST_WORD, "Unown A's word is \"%s\"." % words[0])
+	_r.check(
+		words[RomLayout.UNOWN_FORMS - 1] == LAST_WORD,
+		"Unown Z's word is \"%s\"." % words[RomLayout.UNOWN_FORMS - 1]
+	)
+	_r.check(words[23] == X_WORD, "Unown X's word is \"%s\"." % words[23])
+	# A form outside the range is what a caller reading an empty dex slot asks
+	# for, and it answers nothing rather than the neighbouring word.
+	_r.check(_r.data.unown_word(0).is_empty(), "form 0 answers a word.")
+	_r.check(
+		_r.data.unown_word(RomLayout.UNOWN_FORMS + 1).is_empty(),
+		"a form past Z answers a word."
+	)
+	if _first_words.is_empty():
+		_first_words = words
+	else:
+		_r.check(
+			_first_words == words, "the Unown words differ from the other cartridges."
+		)
+
+
+## The twenty-six front pics, since the dex draws one per form and the battle
+## now draws the letter a wild Unown's DVs name.
+func _check_pics() -> void:
+	var lit: int = 0
+	for form: int in RomLayout.UNOWN_FORMS:
+		for back: bool in [false, true]:
+			var pic: Dictionary = _r.data.unown_pic(form, back)
+			if not _r.check(not pic.is_empty(), "Unown form %d has no pic." % form):
+				continue
+			var indices: PackedByteArray = _r.data.atlas_indices(String(pic["atlas"]))
+			var atlas: Dictionary = _r.data.atlas(String(pic["atlas"]))
+			var cell: Dictionary = Gen2PicImage.atlas_cell(indices, atlas, pic)
+			if not _r.check(
+				not cell.is_empty(), "Unown form %d did not crop out of its atlas." % form
+			):
+				continue
+			var drawn: int = 0
+			for index: int in cell["indices"] as PackedByteArray:
+				if index != 0:
+					drawn += 1
+			_r.check(drawn > 0, "Unown form %d's %s pic is blank." % [
+				form, "back" if back else "front",
+			])
+			lit += drawn
+	_r.check(
+		_r.data.unown_pic(RomLayout.UNOWN_FORMS).is_empty(),
+		"a form past Z answers a pic."
+	)
+	_r.note("unown pics: %d forms, %d drawn pixels." % [RomLayout.UNOWN_FORMS, lit])
+
+
+## `GetUnownLetter` over every DV word: each answers a letter in range, and the
+## twenty-six bands are the divide's own, ten packed values each except Z's six.
+## Only the middle two bits of each DV are read, so the 65,536 words collapse to
+## 256 packed values and each letter is reached by 256 of them.
+func _check_letters() -> void:
+	var counts: Array[int] = []
+	counts.resize(RomLayout.UNOWN_FORMS + 1)
+	counts.fill(0)
+	for dvs: int in DV_WORDS:
+		var letter: int = Gen2Stats.unown_letter(dvs)
+		if letter < 1 or letter > RomLayout.UNOWN_FORMS:
+			_r.fail("DVs $%04X answer letter %d." % [dvs, letter])
+			return
+		counts[letter] += 1
+	for letter: int in range(1, RomLayout.UNOWN_FORMS):
+		_r.check(
+			counts[letter] == 10 * 256,
+			"letter %d is reached by %d DV words, not %d." % [
+				letter, counts[letter], 10 * 256,
+			]
+		)
+	_r.check(
+		counts[RomLayout.UNOWN_FORMS] == 6 * 256,
+		"Z is reached by %d DV words, not %d." % [
+			counts[RomLayout.UNOWN_FORMS], 6 * 256,
+		]
+	)
+	# The two ends, which say the packing is the source's rather than a shift
+	# apart: every middle bit clear is A, every one set is Z.
+	_r.check(Gen2Stats.unown_letter(0x0000) == 1, "all-zero DVs are not A.")
+	_r.check(Gen2Stats.unown_letter(0xFFFF) == RomLayout.UNOWN_FORMS, "all-one DVs are not Z.")
+
+
+## `UpdateUnownDex` and `Pokedex_DrawUnownModeBG` over a real state: catching
+## order, no duplicates, and the word the cursor lands on.
+func _check_dex_order() -> void:
+	var state := Gen2WorldState.new()
+	var dex: Gen2Pokedex = Gen2Pokedex.open(_r.data, state, RomLayout.DEXMODE_NEW)
+	_r.check(not dex.unown_unlocked(), "Unown mode is unlocked before the flag is set.")
+	state.set_engine_flag(Gen2WorldState.ENGINE_UNOWN_DEX)
+	_r.check(dex.unown_unlocked(), "the Unown dex flag does not unlock the mode.")
+	_r.check(
+		Gen2Pokedex.mode_rows(true).size() == Gen2Pokedex.MODE_ROWS.size(),
+		"an unlocked OPTION screen does not offer four modes."
+	)
+	for form: int in [7, 26, 7, 1]:
+		state.update_unown_dex(form)
+	var caught: Array[int] = [7, 26, 1]
+	_r.check(
+		state.unown_dex() == caught,
+		"the dex holds %s after G, Z, G, A." % [state.unown_dex()]
+	)
+	dex.open_unown_mode()
+	_r.check(dex.selected_unown_form() == 7, "the cursor does not open on the first form.")
+	_r.check(
+		dex.unown_word() == _r.data.unown_word(7),
+		"the cursor's word is \"%s\"." % dex.unown_word()
+	)
+	_r.check(dex.move_unown(Gen2Button.LEFT) == false, "the cursor moved left off the end.")
+	_r.check(dex.move_unown(Gen2Button.RIGHT), "the cursor did not move right.")
+	_r.check(dex.move_unown(Gen2Button.RIGHT), "the cursor did not reach the last form.")
+	_r.check(dex.move_unown(Gen2Button.RIGHT) == false, "the cursor moved right off the end.")
+	_r.check(
+		dex.selected_unown_form() == 1 and dex.unown_word() == _r.data.unown_word(1),
+		"the last form is %d." % dex.selected_unown_form()
+	)
+	# `.count_unown` stops at twenty-six however many times it is asked.
+	for form: int in range(1, RomLayout.UNOWN_FORMS + 1):
+		state.update_unown_dex(form)
+	_r.check(
+		state.unown_caught_count() == RomLayout.UNOWN_FORMS,
+		"a full dex counts %d." % state.unown_caught_count()
+	)

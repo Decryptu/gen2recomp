@@ -2869,6 +2869,29 @@ func test_readvar_partycount_reads_the_set_party_summary() -> void:
 	assert_true(world.event_flag_active(41))
 
 
+## `_GetVarAction.UnownCaught` counts `wUnownDex` up to its first empty slot.
+## All three Ruins of Alph scientists and the Kabuto chamber's wall open with
+## `readvar VAR_UNOWNCOUNT`, so an unsupported variable stops them talking.
+func test_readvar_unowncount_counts_the_unown_dex() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6390"] = [
+		Gen2WorldScript.READVAR, 0x0E,
+		Gen2WorldScript.IFEQUAL, 2, 0xA0, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:63A0"] = [Gen2WorldScript.SETEVENT, 44, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.state.update_unown_dex(4)
+	world.state.update_unown_dex(19)
+	world.current_map.events["coord_events"][0]["script"] = 0x6390
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_true(world.event_flag_active(44))
+
+
 func test_checkpoke_answers_the_party_summary_species_and_fails_without_one() -> void:
 	# Route 39's TrainerPokefanmDerek and Route 43's PicnickerTiffany both ask
 	# checkpoke before offering a phone number. Script_checkpoke searches

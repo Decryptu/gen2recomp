@@ -1153,3 +1153,71 @@ func test_a_copyright_palette_that_is_not_the_logo_palette_fails() -> void:
 	data[at] = 0x7F
 	data[at + 1] = 0x7F
 	assert_false(RomImporter.verify_copyright(_rom(data), _layout)["ok"])
+
+
+## `UnownWords`: a pointer table of NUM_UNOWN + 1 entries whose zeroth repeats
+## form A's, and the words themselves directly behind it, each letter stored as
+## its rank from `FIRST_UNOWN_CHAR` and terminated with $FF.
+func _unown_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	var table: int = int(_layout["unown_words"])
+	var run: int = table + RomLayout.UNOWN_WORD_ENTRIES * RomLayout.UNOWN_WORD_POINTER_SIZE
+	var at: int = run
+	for form: int in RomLayout.UNOWN_FORMS:
+		var pointer: int = RomFile.BANK_SIZE + (at % RomFile.BANK_SIZE)
+		var entry: int = table + (form + 1) * RomLayout.UNOWN_WORD_POINTER_SIZE
+		data[entry] = pointer & 0xFF
+		data[entry + 1] = pointer >> 8
+		if form == 0:
+			data[table] = pointer & 0xFF
+			data[table + 1] = pointer >> 8
+		# Two letters each: the form's own, then A, which is enough for the
+		# check that every word opens on its own letter.
+		data[at] = RomLayout.FIRST_UNOWN_CHAR + form
+		data[at + 1] = RomLayout.FIRST_UNOWN_CHAR
+		data[at + 2] = RomLayout.UNOWN_WORD_TERMINATOR
+		at += 3
+	return data
+
+
+func test_a_plausible_unown_word_table_verifies() -> void:
+	var rom: RomFile = _rom(_unown_dump())
+	assert_true(RomImporter.verify_unown_words(rom, _layout)["ok"])
+	var words: PackedStringArray = RomImporter.read_unown_words(rom, _layout)
+	assert_eq(words.size(), RomLayout.UNOWN_FORMS)
+	assert_eq(words[0], "AA")
+	assert_eq(words[RomLayout.UNOWN_FORMS - 1], "ZA")
+
+
+## The table's zeroth entry is what says the address is the table's rather than
+## a run of plausible bytes in front of it.
+func test_a_table_that_does_not_open_on_form_a_twice_fails() -> void:
+	var data: PackedByteArray = _unown_dump()
+	var table: int = int(_layout["unown_words"])
+	data[table] = data[table + 2] + 3
+	assert_false(RomImporter.verify_unown_words(_rom(data), _layout)["ok"])
+
+
+## And the words following their own table is what says it is the right length.
+func test_words_that_do_not_follow_their_table_fail() -> void:
+	var data: PackedByteArray = _unown_dump()
+	var table: int = int(_layout["unown_words"])
+	for form: int in RomLayout.UNOWN_WORD_ENTRIES:
+		var entry: int = table + form * RomLayout.UNOWN_WORD_POINTER_SIZE
+		var moved: int = int(data[entry]) | (int(data[entry + 1]) << 8)
+		moved += RomLayout.UNOWN_WORD_POINTER_SIZE
+		data[entry] = moved & 0xFF
+		data[entry + 1] = moved >> 8
+	assert_false(RomImporter.verify_unown_words(_rom(data), _layout)["ok"])
+
+
+## A byte that is not a letter is what a wrong address reads, and it drops the
+## whole table rather than a word.
+func test_a_word_with_a_byte_outside_the_alphabet_fails() -> void:
+	var data: PackedByteArray = _unown_dump()
+	var run: int = int(_layout["unown_words"]) \
+		+ RomLayout.UNOWN_WORD_ENTRIES * RomLayout.UNOWN_WORD_POINTER_SIZE
+	data[run] = RomLayout.FIRST_UNOWN_CHAR + RomLayout.UNOWN_FORMS
+	assert_false(RomImporter.verify_unown_words(_rom(data), _layout)["ok"])
+	assert_true(RomImporter.read_unown_words(_rom(data), _layout).is_empty())

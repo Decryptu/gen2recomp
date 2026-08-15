@@ -24,6 +24,9 @@ const MAX_STAT_VALUE: int = 999
 const MAX_DV: int = 15
 const MAX_STAT_EXP: int = 65535
 
+## `ld a, $ff / NUM_UNOWN + 1`, assembled rather than computed: 255 / 26 is 9.
+const UNOWN_LETTER_DIVISOR: int = 10
+
 ## The cartridge finds a square root by walking a table of squares, so it stops
 ## at the last entry rather than at the true root. Stat experience above 255
 ## squared is therefore wasted, and the most a full stat exp bar is worth is 63.
@@ -111,6 +114,22 @@ static func speed_dv(dvs: int) -> int:
 ## arrived in Generation 2 for base stats and stat experience but not for DVs.
 static func special_dv(dvs: int) -> int:
 	return (dvs >> DV_SPECIAL_SHIFT) & 0xF
+
+
+## Which of Unown's twenty-six letters a Pokémon with these DVs is, 1 being A.
+##
+## `GetUnownLetter` (engine/gfx/load_pics.asm) takes the middle two bits of each
+## DV in the order attack, defense, speed, special, packs them into one byte and
+## divides by `$ff / NUM_UNOWN + 1`, which is ten. So a letter is one more than a
+## byte that only ever holds those eight bits: the highest is $FF, which is Z.
+## Nothing stores the letter, here or on the cartridge; it is read off the DVs
+## every time the pic, the dex or a wild encounter needs it.
+static func unown_letter(dvs: int) -> int:
+	var packed: int = ((attack_dv(dvs) & 0x6) << 5) | ((defense_dv(dvs) & 0x6) << 3) \
+		| ((speed_dv(dvs) & 0x6) << 1) | ((special_dv(dvs) & 0x6) >> 1)
+	@warning_ignore("integer_division")
+	var letter: int = packed / UNOWN_LETTER_DIVISOR
+	return letter + 1
 
 
 ## Packs four DVs into the word the cartridge stores, which is what a caller

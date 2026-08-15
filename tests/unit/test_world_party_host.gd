@@ -501,6 +501,43 @@ func test_a_full_party_capture_uses_the_first_pc_box_slot() -> void:
 	assert_eq(result["destination"]["destination"], &"box")
 
 
+## `GeneratePartyMonStats`' `.registerunowndex`: the letter comes off the DVs
+## that were caught, and it is entered once however many of that form are caught.
+func test_catching_an_unown_into_the_party_enters_its_letter_in_the_unown_dex() -> void:
+	var dvs: int = Gen2Stats.pack_dvs(2, 0, 0, 0)
+	var wild: Gen2BattleMon = Gen2BattleMon.create(
+		_data, RomLayout.UNOWN_SPECIES, 5,
+		_data.moves_at_level(RomLayout.UNOWN_SPECIES, 5), dvs
+	)
+	assert_true(Gen2WorldPartyHost.capture_wild(
+		_world, _save, wild, 0x01, _random, 42, false
+	)["caught"])
+	assert_eq(_world.state.unown_dex(), [Gen2Stats.unown_letter(dvs)] as Array[int])
+
+	_world.state.apply_changes({}, {}, {"items": {0x01: 1}})
+	assert_true(Gen2WorldPartyHost.capture_wild(
+		_world, _save, wild, 0x01, _random, 42, false
+	)["caught"])
+	assert_eq(_world.state.unown_caught_count(), 1, "the same letter twice is one entry")
+
+
+## The routine runs under `wMonType` PARTYMON alone, so an Unown that goes
+## straight to the PC is caught without entering the Unown dex.
+func test_an_unown_caught_into_a_box_does_not_enter_the_unown_dex() -> void:
+	while _save.party.size() < Gen2SaveData.MAX_PARTY:
+		_save.party.append(Gen2SaveMon.from_dict(_save.party[0].to_dict()))
+	var wild: Gen2BattleMon = Gen2BattleMon.create(
+		_data, RomLayout.UNOWN_SPECIES, 5,
+		_data.moves_at_level(RomLayout.UNOWN_SPECIES, 5), Gen2Stats.pack_dvs(2, 0, 0, 0)
+	)
+	var result: Dictionary = Gen2WorldPartyHost.capture_wild(
+		_world, _save, wild, 0x01, _random, 42, false
+	)
+	assert_eq(result["destination"]["destination"], &"box")
+	assert_true(_world.state.has_caught_species(RomLayout.UNOWN_SPECIES))
+	assert_true(_world.state.unown_dex().is_empty())
+
+
 func test_full_storage_refuses_a_capture_before_consuming_the_ball() -> void:
 	while _save.party.size() < Gen2SaveData.MAX_PARTY:
 		_save.party.append(Gen2SaveMon.from_dict(_save.party[0].to_dict()))

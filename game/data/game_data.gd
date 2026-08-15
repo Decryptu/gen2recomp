@@ -60,6 +60,7 @@ var _title: Dictionary = {}
 var _town_map: Dictionary = {}
 var _oak_ratings: Dictionary = {}
 var _pokecenter_pc: Dictionary = {}
+var _unown_words: PackedStringArray = PackedStringArray()
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
 var _gs_intro: Dictionary = {}
@@ -142,6 +143,10 @@ static func open_directory(path: String) -> GameData:
 	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
 	var pokecenter_pc: Variant = manifest.get("pokecenter_pc", {})
 	data._pokecenter_pc = pokecenter_pc if pokecenter_pc is Dictionary else {}
+	var unown_words: Variant = manifest.get("unown_words", [])
+	if unown_words is Array:
+		for word: Variant in unown_words as Array:
+			data._unown_words.append(String(word))
 	var credits: Variant = manifest.get("credits", {})
 	data._credits = credits if credits is Dictionary else {}
 	var intro_movie: Variant = manifest.get("intro_movie", {})
@@ -1338,6 +1343,14 @@ func pokecenter_pc_lists(players: bool = false) -> Array:
 func pokecenter_pc_text(name: String) -> String:
 	var texts: Variant = _pokecenter_pc.get("texts", {})
 	return String((texts as Dictionary).get(name, "")) if texts is Dictionary else ""
+
+
+## The word `PrintUnownWord` puts under Unown form [param form], A being 1.
+## Empty for a form outside the range or a cache imported without the table.
+func unown_word(form: int) -> String:
+	if form < 1 or form > _unown_words.size():
+		return ""
+	return _unown_words[form - 1]
 
 
 ## `OakRatings`, as [code]{ threshold, sfx, text }[/code] rows in table order.

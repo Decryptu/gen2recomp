@@ -97,6 +97,7 @@ static func complete_runtime_request(
 	## After the snapshot, so a refused transaction rolls the dex flag back with
 	## everything else the request wrote.
 	_register_caught(world, int(transaction.get("register_caught", 0)))
+	_register_unown(world, int(transaction.get("register_unown", 0)))
 	var completion_result: Dictionary = {
 		"ok": true,
 		"script_value": int(transaction.get("script_value", 0)),
@@ -478,6 +479,9 @@ static func capture_wild(
 	## save takes the dex flag back with the ball.
 	if bool(outcome.get("caught", false)):
 		_register_caught(world, wild.species)
+		_register_unown(world, _unown_form(
+			wild.species, wild.persistent_dvs(), destination
+		))
 	var next_quantity: int = world.state.item_quantity(ball) - 1
 	var item_result: Dictionary = world.state.apply_changes({}, {}, {"items": {ball: next_quantity}})
 	if not bool(item_result.get("ok", false)):
@@ -578,6 +582,11 @@ static func _apply_party_request(
 		return {
 			"ok": true, "accepted": true, "script_value": 1,
 			"register_caught": received.species,
+			## A trade lands in the party slot the given Pokemon left, which is
+			## the PARTYMON `GeneratePartyMonStats` registers.
+			"register_unown": _unown_form(
+				received.species, received.dvs, {"destination": &"party"}
+			),
 			"summary": {
 				"kind": &"trade", "accepted": true, "trade_id": trade_id,
 				"given_species": requested.species,
@@ -604,6 +613,7 @@ static func _append_mon(
 	return {
 		"ok": true, "accepted": true, "script_value": script_value,
 		"register_caught": 0 if StringName(summary.get("kind", &"")) == &"egg" else mon.species,
+		"register_unown": 0 if mon.is_egg else _unown_form(mon.species, mon.dvs, destination),
 		"summary": summary.merged({
 			"accepted": true, "destination": destination.duplicate(true),
 		}),
@@ -617,6 +627,27 @@ static func _register_caught(world: Gen2WorldAPI, species: int) -> void:
 	if world == null or world.state == null or species <= 0:
 		return
 	world.state.set_species_caught(species)
+
+
+## `GeneratePartyMonStats`' `.registerunowndex`. The form is read off the DVs
+## rather than stored, and only a Pokemon that reached the party registers: the
+## routine runs under `wMonType` PARTYMON alone, so an Unown caught with a full
+## party is caught without entering the Unown dex.
+static func _unown_form(species: int, dvs: int, destination: Dictionary) -> int:
+	if species != RomLayout.UNOWN_SPECIES:
+		return 0
+	if StringName(destination.get("destination", &"")) != &"party":
+		return 0
+	return Gen2Stats.unown_letter(dvs)
+
+
+## Written straight onto the live state beside [method _register_caught], and
+## for the same reason: the caller has already taken the snapshot a refused save
+## rolls back to.
+static func _register_unown(world: Gen2WorldAPI, form: int) -> void:
+	if world == null or world.state == null or form <= 0:
+		return
+	world.state.update_unown_dex(form)
 
 
 static func _new_mon(

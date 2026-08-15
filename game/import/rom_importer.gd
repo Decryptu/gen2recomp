@@ -312,6 +312,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not pokecenter_pc["ok"]:
 		return pokecenter_pc
 
+	var unown_words: Dictionary = verify_unown_words(rom, layout)
+	if not unown_words["ok"]:
+		return unown_words
+
 	var intro_movie: Dictionary = verify_intro_movie(rom, layout)
 	if not intro_movie["ok"]:
 		return intro_movie
@@ -1030,6 +1034,53 @@ static func verify_pokecenter_pc(rom: RomFile, layout: Dictionary) -> Dictionary
 				"message": "The Pokemon Center PC's %s text did not decode." % name,
 			}
 	return {"ok": true, "message": "The Pokemon Center PC verified."}
+
+
+## `UnownWords`, twenty-six words in form order, A first. Empty on any failure,
+## since a half table would give the dex a blank word rather than a wrong
+## address.
+static func read_unown_words(rom: RomFile, layout: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for form: int in range(1, RomLayout.UNOWN_WORD_ENTRIES):
+		var at: int = RomLayout.unown_word_offset(rom, layout, form)
+		if at < 0 or not rom.in_bounds(at, RomLayout.UNOWN_WORD_MAX_LENGTH):
+			return PackedStringArray()
+		var word: String = ""
+		for step: int in RomLayout.UNOWN_WORD_MAX_LENGTH:
+			var code: int = rom.u8(at + step)
+			if code == RomLayout.UNOWN_WORD_TERMINATOR:
+				break
+			var letter: int = code - RomLayout.FIRST_UNOWN_CHAR
+			if letter < 0 or letter >= RomLayout.UNOWN_FORMS:
+				return PackedStringArray()
+			word += char("A".unicode_at(0) + letter)
+		if word.is_empty():
+			return PackedStringArray()
+		out.append(word)
+	return out
+
+
+## The words, plus the two things that say the table is where the layout says:
+## its zeroth entry is form A's again, and the run starts where the table ends.
+static func verify_unown_words(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var words: PackedStringArray = read_unown_words(rom, layout)
+	if words.size() != RomLayout.UNOWN_FORMS:
+		return {"ok": false, "message": "The Unown words did not decode."}
+	var table: int = int(layout.get("unown_words", -1))
+	var first: int = RomLayout.unown_word_offset(rom, layout, 0)
+	if first != RomLayout.unown_word_offset(rom, layout, 1):
+		return {"ok": false, "message": "The Unown word table does not open on form A twice."}
+	if first != table + RomLayout.UNOWN_WORD_ENTRIES * RomLayout.UNOWN_WORD_POINTER_SIZE:
+		return {"ok": false, "message": "The Unown words do not follow their own table."}
+	for form: int in RomLayout.UNOWN_FORMS:
+		if not words[form].begins_with(char("A".unicode_at(0) + form)):
+			return {
+				"ok": false,
+				"message": "Unown word %d is \"%s\", which is not its own letter." % [
+					form, words[form],
+				],
+			}
+	return {"ok": true, "message": "Unown words verified."}
 
 
 ## One of the two row runs, in the source's own order. Empty when the run is out
@@ -3357,6 +3408,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"gs_intro": _import_gs_intro(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"pokecenter_pc": _import_pokecenter_pc(rom, layout),
+		"unown_words": Array(read_unown_words(rom, layout)),
 		"credits": _import_credits(rom, layout),
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
