@@ -144,10 +144,29 @@ const EMOTE_NAMES: Array[String] = [
 ]
 
 ## IconPointers has one null entry followed by the 38 reusable overworld icon
-## shapes in constants/icon_constants.asm. The null entry is not graphic data.
+## shapes in constants/icon_constants.asm. The null entry is not graphic data:
+## `NullIcon` and `PoliwagIcon` are the same address, which is what makes the
+## table NUM_ICONS + 1 entries long and its first two entries equal.
 const MON_ICON_COUNT: int = 38
 const MON_ICON_TILES: int = 8
 const MON_ICON_BYTES: int = MON_ICON_TILES * Gen2Tiles.TILE_BYTES
+const ICON_POINTER_COUNT: int = MON_ICON_COUNT + 1
+const ICON_POINTER_SIZE: int = 2
+
+## `HeldItemIcons` is `gfx/stats/mail.2bpp` and `gfx/stats/item.2bpp`, the two
+## tiles `GetIconGFX` loads behind every icon's eight. The mail one is drawn by
+## no party menu here: nothing imports `data/items/mail_items.asm`, so
+## `ItemIsMail` is never true and `SPRITE_ANIM_FRAMESET_PARTY_MON_WITH_MAIL` is
+## unreachable.
+const HELD_ITEM_ICON_TILES: int = 2
+const HELD_ITEM_ICON_MAIL: int = 0
+const HELD_ITEM_ICON_ITEM: int = 1
+
+## `InitPartyMenuOBPals` copies two of the eight palettes at `PartyMenuOBPals`
+## into wOBPals1. Every party icon's OAM set is PAL_OW_RED, so the first is the
+## one an icon wears; the second is the run's only different row.
+const PARTY_MENU_OB_PALETTE_COUNT: int = 2
+const PARTY_MENU_OB_PALETTE_BYTES: int = 8
 
 ## Global overworld service tables. The source keeps these apart from map data:
 ## marts are an index table of item lists, phone contacts are fixed records,
@@ -1573,6 +1592,10 @@ const GOLD_SILVER: Dictionary = {
 	"overworld_sprite_count": 95,
 	"overworld_sprite_palettes": 0xB8AE,
 	"overworld_icons": 0x8EABE,
+	## `HeldItemIcons`, in front of `MonMenuIcons` in the same bank but behind
+	## `GetIconGFX`'s own code, so the icons' offset does not pin it.
+	"held_item_icons": 0x8E8DB,
+	"party_menu_ob_palettes": 0xBAC6,
 	"emotes": 0x143C1,
 	## The three sheets engine/events/field_moves.asm loads by name.
 	## CutGrassGFX follows CutTreeGFX, so one wrong offset shows on both.
@@ -1896,6 +1919,8 @@ const CRYSTAL: Dictionary = {
 	"overworld_sprite_count": 102,
 	"overworld_sprite_palettes": 0xB469,
 	"overworld_icons": 0x8EC0D,
+	"held_item_icons": 0x8E9F7,
+	"party_menu_ob_palettes": 0xB681,
 	"emotes": 0x1444D,
 	"headbutt_tree_gfx": 0x8C893,
 	"cut_tree_gfx": 0x8C98C,
@@ -2006,9 +2031,10 @@ static func for_id(id: StringName) -> Dictionary:
 			return GOLD_SILVER
 		RomRegistry.SILVER:
 			var silver: Dictionary = GOLD_SILVER.duplicate(true)
-			# Gold and Silver share the icon format but their banks differ by ten
-			# bytes at this table.
+			# Silver's copy of the icon bank sits twenty-six bytes lower than
+			# Gold's, so both offsets into it move together.
 			silver["overworld_icons"] = 0x8EAA4
+			silver["held_item_icons"] = 0x8E8C1
 			silver["item_attributes"] = 0x6866
 			silver["item_status_actions"] = 0xF0C5
 			silver["item_healing_hp"] = 0xF403
@@ -2237,6 +2263,18 @@ static func emote_offset(layout: Dictionary, index: int) -> int:
 static func overworld_icon_offset(layout: Dictionary, number: int) -> int:
 	return int(layout.get("overworld_icons", -1)) \
 		+ (number - 1) * MON_ICON_BYTES
+
+
+## `IconPointers`, which `engine/gfx/mon_icons.asm` INCLUDEs immediately in front
+## of `gfx/icons.asm`, so the icons' own offset pins it.
+static func icon_pointers_offset(layout: Dictionary) -> int:
+	return int(layout.get("overworld_icons", -1)) - ICON_POINTER_COUNT * ICON_POINTER_SIZE
+
+
+## `MonMenuIcons`, one icon number per species, INCLUDEd in front of
+## `IconPointers` by the same file and pinned by the same offset.
+static func mon_menu_icons_offset(layout: Dictionary) -> int:
+	return icon_pointers_offset(layout) - SPECIES_COUNT
 
 
 ## Trainer pics have no back half and no size of their own, so unlike the

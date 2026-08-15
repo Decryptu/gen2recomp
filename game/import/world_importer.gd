@@ -113,6 +113,18 @@ static func import_to_cache(
 			RomCache.overworld_icon_path(directory, number), icon_graphics[number]
 		):
 			return {"ok": false, "message": "Could not write overworld icon %d." % number}
+	if not RomCache.write_indices(
+		RomCache.mon_menu_icons_path(directory), result["menu_icons"]
+	):
+		return {"ok": false, "message": "Could not write the species icon table."}
+	if not RomCache.write_indices(
+		RomCache.held_item_icon_path(directory), result["held_item_pixels"]
+	):
+		return {"ok": false, "message": "Could not write the held item icons."}
+	if not RomCache.write_json(
+		RomCache.party_menu_icon_palettes_path(directory), result["icon_palettes"]
+	):
+		return {"ok": false, "message": "Could not write the party menu icon palettes."}
 
 	return {
 		"ok": true,
@@ -220,6 +232,9 @@ static func read_world(
 		"sprite_palettes": sprites["palettes"],
 		"sprite_graphics": sprites["graphics"],
 		"icon_graphics": icons["graphics"],
+		"menu_icons": icons["menu_icons"],
+		"held_item_pixels": icons["held_item_pixels"],
+		"icon_palettes": icons["icon_palettes"],
 		"effects": effects["effects"],
 	}
 
@@ -447,7 +462,13 @@ static func _read_overworld_sprites(rom: RomFile, layout: Dictionary) -> Diction
 
 ## LoadOverworldMonIcon reads the contiguous eight-tile IconPointers region.
 ## The pointer table is redundant for this use: every icon is 8 tiles and the
-## source stores them in the same order as constants/icon_constants.asm.
+## source stores them in the same order as constants/icon_constants.asm. It is
+## read anyway, as the check on the offset: `IconPointers` sits immediately in
+## front of the art and its entries walk it eight tiles at a time.
+##
+## `MonMenuIcons` is in front of that again (`ReadMonMenuIcon`), which is what
+## turns a species into one of the 38 shapes, and `HeldItemIcons` and
+## `PartyMenuOBPals` are the other two things a party menu icon needs.
 static func _read_overworld_icons(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var offset: int = int(layout.get("overworld_icons", -1))
 	var size: int = RomLayout.MON_ICON_COUNT * RomLayout.MON_ICON_BYTES
@@ -464,7 +485,124 @@ static func _read_overworld_icons(rom: RomFile, layout: Dictionary) -> Dictionar
 		if pixels.size() != RomLayout.MON_ICON_TILES * Gen2Tiles.TILE_PIXELS:
 			return _error("Overworld mon icon %d did not decode." % number)
 		graphics[number] = pixels
-	return {"ok": true, "graphics": graphics}
+
+	var pointers: Dictionary = _check_icon_pointers(rom, layout)
+	if not bool(pointers.get("ok", false)):
+		return pointers
+	var menu_icons: Dictionary = _read_mon_menu_icons(rom, layout)
+	if not bool(menu_icons.get("ok", false)):
+		return menu_icons
+	var held: Dictionary = _read_held_item_icons(rom, layout)
+	if not bool(held.get("ok", false)):
+		return held
+	var palettes: Dictionary = _read_party_menu_ob_palettes(rom, layout)
+	if not bool(palettes.get("ok", false)):
+		return palettes
+
+	return {
+		"ok": true,
+		"graphics": graphics,
+		"menu_icons": menu_icons["numbers"],
+		"held_item_pixels": held["pixels"],
+		"icon_palettes": palettes["palettes"],
+	}
+
+
+## The art's own offset read back through the table in front of it. Entry 0 is
+## `NullIcon`, which is `PoliwagIcon`, so the first two entries are the base
+## itself and every entry after that is eight tiles on from the one before.
+static func _check_icon_pointers(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var table: int = RomLayout.icon_pointers_offset(layout)
+	var span: int = RomLayout.ICON_POINTER_COUNT * RomLayout.ICON_POINTER_SIZE
+	if table < 0 or not rom.in_bounds(table, span):
+		return _error("IconPointers is outside the cartridge.")
+	var base: int = int(layout["overworld_icons"])
+	for index: int in RomLayout.ICON_POINTER_COUNT:
+		var address: int = rom.u16le(table + index * RomLayout.ICON_POINTER_SIZE)
+		var expected: int = RomFile.linear(RomLayout.bank_of(base), address)
+		var wanted: int = base + maxi(index - 1, 0) * RomLayout.MON_ICON_BYTES
+		if not _valid_cpu_address(address) or expected != wanted:
+			return _error(
+				"IconPointers entry %d names $%04X, which is not icon %d." % [
+					index, address, index,
+				]
+			)
+	return {"ok": true}
+
+
+## `MonMenuIcons`, one ICON_* number per species. EGG is not in the table:
+## `ReadMonMenuIcon` answers it before the lookup, which is why the run is
+## exactly NUM_POKEMON long.
+static func _read_mon_menu_icons(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = RomLayout.mon_menu_icons_offset(layout)
+	if offset < 0 or not rom.in_bounds(offset, RomLayout.SPECIES_COUNT):
+		return _error("MonMenuIcons is outside the cartridge.")
+	var numbers: PackedByteArray = rom.slice(offset, RomLayout.SPECIES_COUNT)
+	for species: int in RomLayout.SPECIES_COUNT:
+		var icon: int = numbers[species]
+		if icon < 1 or icon > RomLayout.MON_ICON_COUNT:
+			return _error(
+				"MonMenuIcons entry %d is icon %d, which is not one of the %d." % [
+					species + 1, icon, RomLayout.MON_ICON_COUNT,
+				]
+			)
+	return {"ok": true, "numbers": numbers}
+
+
+## `HeldItemIcons`. Both tiles are a box drawn to their own edges, so the first
+## and last row of each is solid colour 3; a neighbouring sheet or a run of code
+## read here is not.
+static func _read_held_item_icons(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout.get("held_item_icons", -1))
+	var size: int = RomLayout.HELD_ITEM_ICON_TILES * Gen2Tiles.TILE_BYTES
+	if offset < 0 or not rom.in_bounds(offset, size):
+		return _error("HeldItemIcons is outside the cartridge.")
+	var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		rom.slice(offset, size), 0, RomLayout.HELD_ITEM_ICON_TILES
+	)
+	if pixels.size() != RomLayout.HELD_ITEM_ICON_TILES * Gen2Tiles.TILE_PIXELS:
+		return _error("HeldItemIcons did not decode.")
+	# Both tiles are one strip, so a row of one is eight pixels into the row of
+	# the whole rather than sixty-four into the buffer.
+	var width: int = RomLayout.HELD_ITEM_ICON_TILES * Gen2Tiles.TILE_WIDTH
+	for tile: int in RomLayout.HELD_ITEM_ICON_TILES:
+		var at: int = tile * Gen2Tiles.TILE_WIDTH
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			var top: int = pixels[at + column]
+			var bottom: int = pixels[(Gen2Tiles.TILE_HEIGHT - 1) * width + at + column]
+			if top != 3 or bottom != 3:
+				return _error("HeldItemIcons tile %d is not a bordered box." % tile)
+	return {"ok": true, "pixels": pixels}
+
+
+## `PartyMenuOBPals`, of which `InitPartyMenuOBPals` copies two. The run is
+## eight rows that share colours 0, 1 and 3 and differ only in the second row's
+## colour 2, which is the shape checked here: colour data with bit 15 clear,
+## black in the last slot of each, and one differing colour between the two.
+static func _read_party_menu_ob_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout.get("party_menu_ob_palettes", -1))
+	var count: int = RomLayout.PARTY_MENU_OB_PALETTE_COUNT
+	if offset < 0 or not rom.in_bounds(offset, count * RomLayout.PARTY_MENU_OB_PALETTE_BYTES):
+		return _error("PartyMenuOBPals is outside the cartridge.")
+	var palettes: Array = []
+	for index: int in count:
+		var packed: Array = []
+		for slot: int in Gen2Palette.COLORS_PER_PIC:
+			var color: int = rom.u16le(
+				offset + index * RomLayout.PARTY_MENU_OB_PALETTE_BYTES
+					+ slot * Gen2Palette.COLOR_BYTES
+			)
+			if color & 0x8000:
+				return _error("PartyMenuOBPals colour %d/%d is not colour data." % [index, slot])
+			packed.append(color)
+		if packed[Gen2Palette.COLORS_PER_PIC - 1] != 0:
+			return _error("PartyMenuOBPals palette %d does not end in black." % index)
+		palettes.append(packed)
+	var first: Array = palettes[0]
+	var second: Array = palettes[1]
+	if first[0] != second[0] or first[1] != second[1] or first[2] == second[2]:
+		return _error("PartyMenuOBPals' two palettes are not the source's pair.")
+	return {"ok": true, "palettes": palettes}
 
 
 ## The sprites the engine draws over an object rather than as one: the eight

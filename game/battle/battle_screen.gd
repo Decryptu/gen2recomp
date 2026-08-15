@@ -179,6 +179,10 @@ var _intro_message: String = ""
 var _held_message: String = ""
 ## Leftover of a hardware frame the bars and the intro have not counted yet.
 var _frame_elapsed: float = 0.0
+## The same, for the party page's icons. Kept apart because they animate while
+## nothing else does, and [method frames_running] must stay false there: a
+## caller draining frames to a terminal state would never reach one.
+var _icon_elapsed: float = 0.0
 ## What the overworld clock said when the battle started, for the three heals
 ## that read it. Only the world path supplies one; the development drivers below
 ## leave [Gen2Battle] at its own midday default.
@@ -295,6 +299,7 @@ func _process(delta: float) -> void:
 	## The yes/no box appears when the question above it has finished printing,
 	## and the box prints on its own clock rather than on a press.
 	if _switch_stage != &"":
+		_advance_party_icons(delta)
 		_refresh_menu_layer()
 	if not frames_running():
 		_frame_elapsed = 0.0
@@ -2150,6 +2155,11 @@ func _open_switch_pick(reason: StringName) -> void:
 	)
 	_switch_offer = null
 	_switch_stage = &"pick"
+	## `InitPartyMenuGFX` spawns the icons where the list is built, so a reopened
+	## list opens on the first frame of their animation rather than resuming.
+	if _party_page != null:
+		_party_page.reset(_switch_menu.rows)
+	_icon_elapsed = 0.0
 	## The party menu is the whole screen rather than a box on it, so the battle's
 	## own box goes with the field it belongs to.
 	if _box != null:
@@ -2379,13 +2389,16 @@ func _reopen_menu_layer() -> void:
 func _refresh_menu_layer() -> void:
 	if _menu_layer == null:
 		return
-	var signature: String = "%s|%s|%d|%d|%d" % [
+	var signature: String = "%s|%s|%d|%d|%d|%s" % [
 		_switch_stage, _menu_stage,
 		_switch_offer.selected_index() if _switch_offer != null else (
 			_switch_menu.cursor if _switch_menu != null else -1
 		),
 		int(_offer_still_reading()),
 		_menu_position * 8 + _move_cursor,
+		## The icons move on their own clock, so the cursor alone does not say
+		## whether the page still draws what the layer is holding.
+		_party_page.animation_signature() if _party_page != null else "",
 	]
 	if signature == _menu_drawn:
 		return
@@ -2494,6 +2507,31 @@ func _draw_move_info(row: Dictionary) -> void:
 		_info_layer, _menu_page.render(box, [], -1, "", 0, extras),
 		box.border_position() * Gen2Font.TILE
 	)
+
+
+## `PlaySpriteAnimations` over the party page's icons, on the hardware clock the
+## bars use. Capped the same way, so a stall drops passes rather than running a
+## second of them at once.
+func _advance_party_icons(delta: float) -> void:
+	if _party_page == null or _switch_menu == null or _switch_stage not in [&"pick", &"refused"]:
+		_icon_elapsed = 0.0
+		return
+	_icon_elapsed = minf(
+		_icon_elapsed + delta,
+		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
+	)
+	while _icon_elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
+		_icon_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+		advance_party_icons()
+
+
+## One pass of the party page's icons. Public with [method advance_frame] so a
+## test or a screenshot driver can step them without waiting on real time.
+func advance_party_icons() -> bool:
+	if _party_page == null or _switch_menu == null:
+		return false
+	_party_page.advance(_switch_menu.rows, _switch_menu.cursor)
+	return true
 
 
 func _draw_party_page() -> void:

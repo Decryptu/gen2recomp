@@ -23,12 +23,19 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 	for key: String in gold:
 		if key in [
 			"item_attributes", "item_status_actions", "item_healing_hp",
-			"overworld_icons", "copyright", "game_freak_presents", "title",
+			"overworld_icons", "held_item_icons",
+			"copyright", "game_freak_presents", "title",
 			"gs_intro",
 		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
 	assert_ne(gold["item_attributes"], silver["item_attributes"])
+	# Both offsets into the icon bank move together: Silver's copy of it sits
+	# twenty-six bytes lower than Gold's.
+	assert_eq(
+		int(gold["overworld_icons"]) - int(silver["overworld_icons"]),
+		int(gold["held_item_icons"]) - int(silver["held_item_icons"])
+	)
 	# The copyright screen is the same graphic in the same place; only the
 	# string's own address moves, sixty bytes apart in bank 1.
 	var gold_copyright: Dictionary = gold["copyright"]
