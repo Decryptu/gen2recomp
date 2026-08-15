@@ -117,12 +117,18 @@ const CHANNELS: Array[StringName] = [CHANNEL_WORLD, CHANNEL_BATTLE]
 ## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER] makes for content.
 const FIRST_MOD_POCKET: int = 5
 
-## The two shapes a registered setting can take: a ladder of values the player
-## steps along, and a button that does something the moment it is pressed. A
-## button stores nothing, because "recentre the camera now" has no value to keep.
+## The three shapes a registered setting can take: a ladder of values the player
+## steps along, a whole number in a range, and a button that does something the
+## moment it is pressed. A button stores nothing, because "recentre the camera
+## now" has no value to keep.
+##
+## A number is not a ladder with every rung written out: a randomizer's seed is
+## one value with ten thousand of them, and dialling it as four one-digit
+## ladders spends four rows of a menu on one field.
 const OPTION_LADDER: StringName = &"ladder"
+const OPTION_NUMBER: StringName = &"number"
 const OPTION_BUTTON: StringName = &"button"
-const OPTION_KINDS: Array[StringName] = [OPTION_LADDER, OPTION_BUTTON]
+const OPTION_KINDS: Array[StringName] = [OPTION_LADDER, OPTION_NUMBER, OPTION_BUTTON]
 
 ## Emitted when a registered option's value changes, whichever surface changed
 ## it. A mod that has to rebuild something on a change connects to this rather
@@ -141,6 +147,9 @@ static var _mounted_packs: Dictionary = {}
 var _manifests: Dictionary = {}
 ## Mod id to version for every entry script that ran. See [method loaded_mods].
 var _loaded: Dictionary = {}
+## Mod id to the entry object `register` was called on, held so it survives the
+## load. See [method load_mod].
+var _entries: Dictionary = {}
 ## The cartridge being played, which is what a mod's `games` declaration is
 ## checked against. Empty until one is chosen, and an empty target restricts
 ## nothing: the launcher runs before Play is pressed.
@@ -295,13 +304,16 @@ func menu_entries(menu: StringName) -> Array:
 	return entries.duplicate(true)
 
 
-## Adds one setting the player can change, as a ladder of values.
+## Adds one setting the player can change: a ladder of values, a number in a
+## range, or a button. [code]kind[/code] chooses, and defaults to
+## [constant OPTION_LADDER].
 ##
-## [param option] needs a [code]key[/code], a [code]label[/code] and a non-empty
+## A ladder needs a [code]key[/code], a [code]label[/code] and a non-empty
 ## [code]values[/code] array; [code]labels[/code] is what each rung is shown as
 ## and defaults to the values themselves, and [code]default[/code] is the rung
 ## used until the player picks one and defaults to the first. A toggle is a
-## two-rung ladder.
+## two-rung ladder. [constant OPTION_NUMBER] takes a range instead; see
+## [method _register_number_option].
 ##
 ## A mod describes a setting rather than drawing one: the start menu's MODS entry
 ## and the launcher's mods page are both built from these registrations, so a mod
@@ -318,6 +330,8 @@ func register_option(id: StringName, option: Dictionary) -> Dictionary:
 		return {"ok": false, "reason": &"unknown_option_kind", "detail": String(kind)}
 	if kind == OPTION_BUTTON:
 		return _register_button_option(id, key, label, option)
+	if kind == OPTION_NUMBER:
+		return _register_number_option(id, key, label, option)
 	var values: Array = option.get("values", []) as Array
 	if values.is_empty():
 		return {"ok": false, "reason": &"option_missing_values", "detail": _option_name(id, key)}
@@ -359,6 +373,32 @@ func _register_button_option(
 	return {"ok": true, "id": id, "key": key}
 
 
+## A setting that is one whole number rather than a list of them. [param option]
+## takes [code]minimum[/code], [code]maximum[/code], an optional
+## [code]step[/code] the two surfaces move by, and an optional
+## [code]default[/code], clamped into the range as registered.
+func _register_number_option(
+	id: StringName, key: StringName, label: String, option: Dictionary
+) -> Dictionary:
+	var minimum: int = int(option.get("minimum", 0))
+	var maximum: int = int(option.get("maximum", 0))
+	if maximum < minimum:
+		return {"ok": false, "reason": &"option_range_inverted", "detail": _option_name(id, key)}
+	var rows: Array = _options.get(id, [])
+	for existing: Dictionary in rows:
+		if StringName(existing.get("key", &"")) == key:
+			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
+	rows.append({
+		"key": key, "label": label, "kind": OPTION_NUMBER,
+		"minimum": minimum, "maximum": maximum,
+		"step": maxi(int(option.get("step", 1)), 1),
+		"default": clampi(int(option.get("default", minimum)), minimum, maximum),
+		"values": [], "labels": [],
+	})
+	_options[id] = rows
+	return {"ok": true, "id": id, "key": key}
+
+
 ## Presses a button-kind setting. Nothing is stored: what a press means is the
 ## mod's, and [signal option_changed] carries a null value to say so.
 func press_option(id: StringName, key: StringName) -> Dictionary:
@@ -394,6 +434,14 @@ func options(id: StringName) -> Array:
 				"values": [], "labels": [], "default": 0, "index": 0, "value": null,
 			})
 			continue
+		if StringName(row.get("kind", OPTION_LADDER)) == OPTION_NUMBER:
+			out.append({
+				"key": row["key"], "label": row["label"], "kind": OPTION_NUMBER,
+				"minimum": row["minimum"], "maximum": row["maximum"], "step": row["step"],
+				"values": [], "labels": [], "default": row["default"],
+				"index": 0, "value": _stored_number(id, row),
+			})
+			continue
 		var index: int = _stored_index(id, row)
 		out.append({
 			"key": row["key"], "label": row["label"], "kind": OPTION_LADDER,
@@ -410,13 +458,21 @@ func option(id: StringName, key: StringName) -> Variant:
 	var row: Dictionary = _option_row(id, key)
 	if row.is_empty():
 		return null
+	match StringName(row.get("kind", OPTION_LADDER)):
+		OPTION_NUMBER:
+			return _stored_number(id, row)
+		OPTION_BUTTON:
+			return null
 	return (row["values"] as Array)[_stored_index(id, row)]
 
 
-## Which rung of the ladder [param key] is on, and -1 when nothing registered it.
+## Which rung of the ladder [param key] is on, and -1 when nothing registered it
+## or when it is not a ladder.
 func option_index(id: StringName, key: StringName) -> int:
 	var row: Dictionary = _option_row(id, key)
-	return -1 if row.is_empty() else _stored_index(id, row)
+	if row.is_empty() or StringName(row.get("kind", OPTION_LADDER)) != OPTION_LADDER:
+		return -1
+	return _stored_index(id, row)
 
 
 ## Sets [param key] to [param value], which has to be one of the registered
@@ -426,6 +482,8 @@ func set_option(id: StringName, key: StringName, value: Variant) -> Dictionary:
 	var row: Dictionary = _option_row(id, key)
 	if row.is_empty():
 		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	if StringName(row.get("kind", OPTION_LADDER)) == OPTION_NUMBER:
+		return _store_number(id, key, row, int(value))
 	var index: int = _value_index(row["values"] as Array, value)
 	if index < 0:
 		return {"ok": false, "reason": &"invalid_option_value", "detail": _option_name(id, key)}
@@ -433,11 +491,14 @@ func set_option(id: StringName, key: StringName, value: Variant) -> Dictionary:
 
 
 ## The same by rung rather than by value, which is what a menu stepping left and
-## right has in hand.
+## right has in hand. A number setting has no rungs; set it with
+## [method set_option] or [method adjust_option].
 func set_option_index(id: StringName, key: StringName, index: int) -> Dictionary:
 	var row: Dictionary = _option_row(id, key)
 	if row.is_empty():
 		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	if StringName(row.get("kind", OPTION_LADDER)) != OPTION_LADDER:
+		return {"ok": false, "reason": &"option_is_not_a_ladder", "detail": _option_name(id, key)}
 	var values: Array = row["values"] as Array
 	if index < 0 or index >= values.size():
 		return {"ok": false, "reason": &"invalid_option_value", "detail": _option_name(id, key)}
@@ -445,6 +506,50 @@ func set_option_index(id: StringName, key: StringName, index: int) -> Dictionary
 		return {"ok": false, "reason": &"option_not_written", "detail": Gen2ModOptions.PATH}
 	option_changed.emit(id, key, values[index])
 	return {"ok": true, "id": id, "key": key, "index": index, "value": values[index]}
+
+
+## One step either way, whatever kind the setting is: a ladder wraps to the next
+## rung, a number moves by its own step and stops at either end. What a menu
+## pressing left and right has in hand, so neither surface has to branch on the
+## kind to move a value.
+func adjust_option(id: StringName, key: StringName, delta: int) -> Dictionary:
+	var row: Dictionary = _option_row(id, key)
+	if row.is_empty():
+		return {"ok": false, "reason": &"unknown_option", "detail": _option_name(id, key)}
+	match StringName(row.get("kind", OPTION_LADDER)):
+		OPTION_BUTTON:
+			return {"ok": false, "reason": &"option_is_a_button", "detail": _option_name(id, key)}
+		OPTION_NUMBER:
+			return _store_number(
+				id, key, row, _stored_number(id, row) + signi(delta) * int(row["step"])
+			)
+	var values: Array = row["values"] as Array
+	return set_option_index(
+		id, key, wrapi(_stored_index(id, row) + signi(delta), 0, maxi(values.size(), 1))
+	)
+
+
+## Writes a number setting, clamped into the range as registered now. Out of
+## range is clamped rather than refused: a stored 9999 under a maximum a later
+## version lowered is the same question [method _stored_index] answers for a
+## ladder, and a menu holding right must stop at the end rather than fail.
+func _store_number(
+	id: StringName, key: StringName, row: Dictionary, value: int
+) -> Dictionary:
+	var clamped: int = clampi(value, int(row["minimum"]), int(row["maximum"]))
+	if not Gen2ModOptions.store(id, key, clamped):
+		return {"ok": false, "reason": &"option_not_written", "detail": Gen2ModOptions.PATH}
+	option_changed.emit(id, key, clamped)
+	return {"ok": true, "id": id, "key": key, "index": 0, "value": clamped}
+
+
+## The stored number resolved against the range as registered now, which is what
+## [method _stored_index] does for a ladder.
+func _stored_number(id: StringName, row: Dictionary) -> int:
+	var stored: Variant = Gen2ModOptions.value(id, StringName(row["key"]))
+	if stored is not float and stored is not int:
+		return int(row["default"])
+	return clampi(int(stored), int(row["minimum"]), int(row["maximum"]))
 
 
 ## Declares a control of the mod's own, in the shape [method register_option]
@@ -629,6 +734,32 @@ func patch_content(
 	kind: StringName, id: StringName, number: int, fields: Dictionary
 ) -> Dictionary:
 	return Gen2ContentOverlay.shared().patch(kind, id, number, fields)
+
+
+## Changes one map's wild encounter record: the rates and the per-time-of-day
+## slots [method GameData.world_encounter] answers with, which is what a
+## randomizer rewrites. [param method] is one of
+## [constant Gen2ContentOverlay.ENCOUNTER_METHODS].
+##
+## `slots` and `rates` are arrays and replace whole. Patching a map this
+## cartridge does not carry changes nothing, exactly as a species patch does.
+func patch_encounter(
+	id: StringName, method: StringName, group: int, number: int, fields: Dictionary
+) -> Dictionary:
+	var at: int = Gen2ContentOverlay.encounter_number(method, group, number)
+	if at < 0:
+		return {
+			"ok": false, "reason": &"unknown_encounter_method",
+			"detail": "%s %d:%d" % [method, group, number],
+		}
+	return Gen2ContentOverlay.shared().patch(Gen2ContentOverlay.KIND_ENCOUNTER, id, at, fields)
+
+
+## The same for one fishing group, numbered as the map headers number them. The
+## treemon sets, the Bug Contest list and the roaming mons are not patchable
+## yet; they are read straight off the cache.
+func patch_fishing_group(id: StringName, group: int, fields: Dictionary) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(Gen2ContentOverlay.KIND_FISHING, id, group, fields)
 
 
 ## The overlay every opened [GameData] reads through, for a launcher listing what
@@ -994,8 +1125,21 @@ func load_mod(manifest: Gen2ModManifest) -> Dictionary:
 	if mod == null or not mod.has_method("register"):
 		return _refuse_load(manifest, &"entry_has_no_register", path)
 	mod.call("register", self, manifest)
+	# Kept for as long as the mod is loaded. A Callable does not keep a
+	# RefCounted alive, so an entry that connects to option_changed and is then
+	# dropped has connected a signal to an object about to be collected; holding
+	# it here is what makes `register` the whole contract. Dropped by reset(),
+	# which builds a new host, so a reload does not leave the last load
+	# listening.
+	_entries[manifest.id] = mod
 	_loaded[manifest.id] = manifest.version
 	return {"ok": true, "id": manifest.id}
+
+
+## The object whose `register` ran for [param id], or null. A mod does not need
+## this; a launcher or a test asking what is loaded does.
+func mod_entry(id: StringName) -> Object:
+	return _entries.get(id, null)
 
 
 ## Every mod whose entry script ran, as `id` and `version` pairs in id order.

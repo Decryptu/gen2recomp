@@ -191,9 +191,10 @@ this section.
 A content number is per kind and starts at `Gen2ContentOverlay.FIRST_MOD_NUMBER`,
 which is 256. Every cartridge number fits in a byte, so a number that does not is
 unambiguously not the cartridge's, and a mod's own numbers mean the same thing on
-Gold, Silver and Crystal. Four kinds are reachable: `KIND_SPECIES`, `KIND_MOVE`,
-`KIND_ITEM` and `KIND_TRAINER`. Types are not, because the matchup lookup keys on
-the type count and a twenty-ninth type would renumber every pair in the chart.
+Gold, Silver and Crystal. Four kinds are numbered this way: `KIND_SPECIES`,
+`KIND_MOVE`, `KIND_ITEM` and `KIND_TRAINER`. Types are not reachable at all,
+because the matchup lookup keys on the type count and a twenty-ninth type would
+renumber every pair in the chart.
 
 ```gdscript
 host.register_content(Gen2ContentOverlay.KIND_SPECIES, manifest.id, 256, {
@@ -218,6 +219,30 @@ change, and a Dictionary field merges, so patching one stat leaves the other fiv
 alone. A patch of a number this cartridge lacks changes nothing rather than
 inventing a row, which is what keeps a mod that patches Crystal's MYSTICALMAN
 from conjuring one on Gold.
+
+`KIND_ENCOUNTER` and `KIND_FISHING` are the cartridge's wild tables. They are
+patched and never defined, since a mod can add neither a map nor a map header,
+and their numbers are table coordinates rather than content numbers. Patch them
+through the two helpers rather than counting the coordinate out yourself:
+
+```gdscript
+host.patch_encounter(manifest.id, &"grass", 3, 2, {
+	"rate": 20,
+	"slots": [[{"level": 50, "species": 1}], [], []],
+})
+host.patch_fishing_group(manifest.id, 1, {"rods": [...]})
+```
+
+An encounter row is what `GameData.world_encounter(method, group, number)`
+answers, and the patched row is what every reader gets, including the region
+walk `FindNest` uses. The method is one of `grass`, `surf`, `swarm_grass` and
+`swarm_water`. `slots` and `rates` are arrays and replace whole; patching a map
+this cartridge lacks changes nothing, exactly as a species patch does. The
+treemon sets, the Bug Contest list and the roaming mons are not patchable yet.
+
+Counts: `species_count()`, `move_count()` and `trainer_count()` are the
+cartridge's own runs. Mod numbers are not part of them and are enumerated with
+`Gen2ContentOverlay.defined_numbers(kind)`.
 
 Two mods claiming one number is refused and named, rather than decided by load
 order. `Gen2ContentOverlay.owner_of()` says which mod won a number.
@@ -356,7 +381,13 @@ tileset that ships only one block leaves 128 to 223 blank. Nothing needs to know
 which block a tile came from; the number is enough.
 
 `Gen2WorldAnimation` rewrites slots in this strip, so a renderer texturing from
-it follows water and flowers without knowing an animation ran.
+it follows water and flowers without knowing an animation ran. That is also why
+geometry cut from the strip is cut from one arbitrary frame:
+`tile_frames(tile)` answers every frame a tile is ever drawn as, in play order,
+each entry that tile's sixty-four palette indices row by row, with the tileset's
+own tile first and an empty array for a tile no command touches. It does not
+advance the live sequence, since the running game shares the object. Ask it once
+per animated tile when a map resolves, and let a mesh span the union.
 
 ### Asking what a cell is
 
@@ -613,7 +644,8 @@ silently winning.
 
 ## Adding a setting
 
-`register_option(id, option)` describes one setting as a ladder of values. The
+`register_option(id, option)` describes one setting: a ladder of values, a
+number in a range, or a button. The
 game and the launcher each build a surface from that one registration, so a mod
 writes no settings screen and the two can never disagree.
 
@@ -629,20 +661,33 @@ host.register_option(manifest.id, {
 |---|---|
 | `key` | Addresses the setting within the mod |
 | `label` | Shown to the player |
-| `kind` | Optional; `Gen2ModHost.OPTION_LADDER` (the default) or `OPTION_BUTTON` |
+| `kind` | Optional; `Gen2ModHost.OPTION_LADDER` (the default), `OPTION_NUMBER` or `OPTION_BUTTON` |
 | `values` | The rungs, at least one. A toggle is a two-rung ladder. Ladder only |
 | `labels` | Optional; what each rung is shown as, defaulting to the values |
-| `default` | Optional; the rung used until the player picks one, defaulting to the first |
+| `minimum`, `maximum` | The range, inclusive. Number only |
+| `step` | Optional; what one press moves the value by, defaulting to 1. Number only |
+| `default` | Optional; the rung or the number used until the player picks one, defaulting to the first rung or the minimum |
 | `press_label` | Optional; what a button setting's control reads, defaulting to `Go`. Button only |
+
+A **number** setting is one whole value in a range rather than a ladder with
+every rung written out: a randomizer's seed is one field with ten thousand
+values, and dialling it as four one-digit ladders spends four menu rows on one
+value. Set it with `set_option(id, key, value)`, clamped into the range as
+registered now, or step it with `adjust_option(id, key, delta)`, which is what
+both surfaces call and which steps a ladder just as well. The launcher draws it
+as a field that can be typed into; the start menu steps it left and right.
 
 A **button** setting is a press rather than a ladder, for something with no value
 to keep: "recentre the camera now" is an action, not a rung. It stores nothing,
 `press_option(id, key)` is what both surfaces call, and `option_changed` carries
 a null value to say the press is the whole setting.
 
-Read it back with `host.option(id, key)`, or `option_index(id, key)` for the rung.
+Read it back with `host.option(id, key)`, or `option_index(id, key)` for the
+rung, which is -1 for anything that is not a ladder.
 A mod that has to rebuild something on a change connects to `option_changed(id,
-key, value)` rather than polling: `mods/examples/voxel_preview/` registers a
+key, value)` rather than polling. The host keeps the entry object `register` was
+called on for as long as the mod is loaded, so connecting a signal to it is safe
+and a mod does not have to hold itself in a static variable: `mods/examples/voxel_preview/` registers a
 camera setting in `mod.gd` and its renderer reads it once and then listens.
 
 The two surfaces are a **MODS** entry in the start menu, beside the pack and the

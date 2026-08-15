@@ -455,7 +455,12 @@ func world_encounter(method: StringName, group: int, number: int) -> Dictionary:
 	if not table is Dictionary:
 		return {}
 	var value: Variant = (table as Dictionary).get("%d:%d" % [group, number], {})
-	return value.duplicate(true) if value is Dictionary else {}
+	var row: Dictionary = value.duplicate(true) if value is Dictionary else {}
+	return _overlaid(
+		Gen2ContentOverlay.KIND_ENCOUNTER,
+		Gen2ContentOverlay.encounter_number(method, group, number),
+		row
+	)
 
 
 ## One region's normal encounter table, in the cartridge's own row order, which
@@ -469,7 +474,14 @@ func world_encounter_region_rows(method: StringName, region: String) -> Array:
 	for map_key: String in table as Dictionary:
 		var row: Variant = (table as Dictionary)[map_key]
 		if row is Dictionary and String((row as Dictionary).get("region", "")) == region:
-			out.append((row as Dictionary).duplicate(true))
+			var pair: PackedStringArray = map_key.split(":")
+			out.append(_overlaid(
+				Gen2ContentOverlay.KIND_ENCOUNTER,
+				Gen2ContentOverlay.encounter_number(
+					method, int(pair[0]), int(pair[1]) if pair.size() > 1 else -1
+				),
+				(row as Dictionary).duplicate(true)
+			))
 	return out
 
 
@@ -485,7 +497,10 @@ func world_fishing_group(group: int) -> Dictionary:
 	if not groups is Array or group > (groups as Array).size():
 		return {}
 	var value: Variant = (groups as Array)[group - 1]
-	return value.duplicate(true) if value is Dictionary else {}
+	return _overlaid(
+		Gen2ContentOverlay.KIND_FISHING, group,
+		value.duplicate(true) if value is Dictionary else {}
+	)
 
 
 ## The twenty-two day/night fishing substitutions used by entries whose
@@ -978,6 +993,14 @@ func _rows(entry: Dictionary, key: String, fields: Array) -> Array:
 			coerced[field] = int(row.get(field, 0))
 		out.append(coerced)
 	return out
+
+
+## How many moves the cartridge carried, the counterpart of
+## [method species_count] and [method trainer_count]: mod moves are numbered
+## above the cartridge's range and enumerated through
+## [method Gen2ContentOverlay.defined_numbers].
+func move_count() -> int:
+	return _moves.size()
 
 
 func move(number: int) -> Dictionary:
@@ -2051,8 +2074,14 @@ func _entry(rows: Array, index: int) -> Dictionary:
 ##
 ## Numbering is one-based, the cartridge's own; see [Gen2ContentOverlay].
 func _content(kind: StringName, rows: Array, number: int) -> Dictionary:
-	var base: Dictionary = _entry(rows, number - 1)
-	if _overlay == null or _overlay.is_empty():
+	return _overlaid(kind, number, _entry(rows, number - 1))
+
+
+## The same for a row that is not one of the numbered content tables: an
+## encounter record or a fishing group, whose number is a table coordinate. A
+## number of -1 is a row no mod could have named and is answered untouched.
+func _overlaid(kind: StringName, number: int, base: Dictionary) -> Dictionary:
+	if _overlay == null or _overlay.is_empty() or number < 0:
 		return base
 	return _overlay.resolve(kind, number, base)
 

@@ -103,6 +103,76 @@ func current_indices() -> PackedByteArray:
 	return _indices
 
 
+## Every frame one animated tile is ever drawn as, in the order the sequence
+## plays them, each entry the tile's sixty-four palette indices row by row. An
+## empty array for a tile no command touches.
+##
+## Read-only and one map resolve's question: a mesh cut from the live strip is
+## cut from whichever frame the atlas happened to hold, so geometry has to span
+## the union of every frame. The live sequence is not advanced, because the
+## running game shares this object and stepping it would move what the player
+## sees; the walk runs on a copy from the start of the command list.
+func tile_frames(tile: int) -> Array[PackedByteArray]:
+	var out: Array[PackedByteArray] = []
+	if _commands.is_empty() or tileset == null or tile < 0 or tile >= tileset.tile_count:
+		return out
+	var walk: Gen2WorldAnimation = Gen2WorldAnimation.new()
+	walk.data = data
+	walk.map = map
+	walk.tileset = tileset
+	walk._time_of_day = _time_of_day
+	walk._commands = _commands
+	walk._indices = data.world_tileset_indices(tileset.number).duplicate()
+	walk._buffer.resize(TILE_BYTES)
+	var base: PackedByteArray = walk._tile_indices(tile)
+	# Every timer mask in the command table is &7 or narrower and a pass bumps
+	# the timer at most once, so eight passes of the list is a whole cycle of
+	# anything the cartridge animates.
+	for _step: int in _commands.size() * 8:
+		walk._changed_tiles = {}
+		walk.tick()
+		if walk._changed_tiles.has(tile):
+			out.append(walk._tile_indices(tile))
+	if out.is_empty():
+		return out
+	out = _cycle(out)
+	# The tileset's own tile is on screen from the map load until the first
+	# write, so it belongs to the union a mesh has to span unless a frame draws
+	# it again anyway.
+	if not out.has(base):
+		out.insert(0, base)
+	return out
+
+
+## The shortest prefix the frame list repeats, so a tile whose cycle is four
+## frames answers four rather than the same four eight times over. The walk
+## stops wherever eight passes leave it, so the last repeat may be partial.
+static func _cycle(frames: Array[PackedByteArray]) -> Array[PackedByteArray]:
+	for period: int in range(1, frames.size()):
+		var repeats: bool = true
+		for at: int in frames.size():
+			if frames[at] != frames[at % period]:
+				repeats = false
+				break
+		if repeats:
+			return frames.slice(0, period)
+	return frames
+
+
+## One tile's palette indices as sixty-four bytes, row by row, out of the strip
+## the atlas is built from.
+func _tile_indices(tile: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(Gen2Tiles.TILE_WIDTH * Gen2Tiles.TILE_HEIGHT)
+	var width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			out[y * Gen2Tiles.TILE_WIDTH + x] = _indices[
+				y * width + tile * Gen2Tiles.TILE_WIDTH + x
+			]
+	return out
+
+
 func water_palette_color() -> int:
 	return _water_color
 

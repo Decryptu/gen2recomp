@@ -46,6 +46,14 @@ func _write_cache() -> void:
 		{"number": 1, "name": "LEADER", "palette": [0x1234, 0x5678], "trainers": []},
 	])
 	RomCache.write_json(RomCache.world_trades_path(_directory), [])
+	RomCache.write_json(RomCache.world_encounters_path(_directory), {
+		"grass": {"3:2": {
+			"map": "3:2", "region": "johto", "rate": 4, "rates": [4, 4, 4],
+			"slots": [[{"level": 2, "species": 16}], [], []],
+		}},
+		"water": {},
+		"fishing": {"groups": [{"rods": []}], "time_groups": []},
+	})
 	RomCache.write_json(RomCache.tmhm_moves_path(_directory), [1])
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
@@ -179,3 +187,48 @@ func test_the_overlay_names_who_claimed_what() -> void:
 	var overlay: Gen2ContentOverlay = Gen2ModHost.instance().content_overlay()
 	assert_eq(overlay.defined_numbers(Gen2ContentOverlay.KIND_SPECIES), [NEW_SPECIES] as Array[int])
 	assert_eq(overlay.owner_of(Gen2ContentOverlay.KIND_SPECIES, NEW_SPECIES), MOD)
+
+
+func test_an_encounter_row_is_patched_where_the_cartridge_table_is_read() -> void:
+	# The single most wanted thing a randomizer does, and it has to arrive at
+	# GameData's own chokepoint so nothing downstream learns a mod exists.
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_encounter(MOD, &"grass", 3, 2, {
+		"rate": 20, "slots": [[{"level": 50, "species": 1}], [], []],
+	}).get("ok", false)))
+
+	var data: GameData = _data()
+	var row: Dictionary = data.world_encounter(&"grass", 3, 2)
+	assert_eq(int(row["rate"]), 20)
+	assert_eq(int(row["slots"][0][0]["species"]), 1, "an array field replaces whole")
+	assert_eq(row["rates"], [4.0, 4.0, 4.0], "an unnamed field is untouched")
+	# FindNest walks the region table rather than one map, and reads the same
+	# patched row.
+	var rows: Array = data.world_encounter_region_rows(&"grass", "johto")
+	assert_eq(int(rows[0]["rate"]), 20)
+	# A map this cartridge lacks, and a method that is not one, change nothing.
+	assert_true(data.world_encounter(&"grass", 9, 9).is_empty())
+	assert_eq(
+		StringName(host.patch_encounter(MOD, &"headbutt", 3, 2, {"rate": 1})["reason"]),
+		&"unknown_encounter_method"
+	)
+
+
+func test_a_fishing_group_is_patched_by_its_own_group_number() -> void:
+	assert_true(bool(Gen2ModHost.instance().patch_fishing_group(
+		MOD, 1, {"rods": [{"level": 10, "species": 129}]}
+	).get("ok", false)))
+	var groups: Array = _data().world_fishing_group(1)["rods"]
+	assert_eq(int(groups[0]["species"]), 129)
+	assert_true(_data().world_fishing_group(9).is_empty())
+
+
+func test_a_table_kind_is_patched_and_never_defined() -> void:
+	# There is no map or map header a mod can add, so there is no row for a
+	# definition to sit at.
+	assert_eq(
+		StringName(Gen2ModHost.instance().register_content(
+			Gen2ContentOverlay.KIND_ENCOUNTER, MOD, NEW_SPECIES, {}
+		)["reason"]),
+		&"content_kind_is_patch_only"
+	)

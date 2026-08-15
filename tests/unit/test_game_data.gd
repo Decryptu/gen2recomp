@@ -206,6 +206,9 @@ func test_a_complete_cache_opens() -> void:
 	var data: GameData = GameData.open_directory(_directory)
 	assert_not_null(data)
 	assert_eq(data.species_count(), 2)
+	# Moves are counted like species and trainer classes, so a mod walking every
+	# one does not have to scan 1 to 255 and keep what answers.
+	assert_eq(data.move_count(), 1)
 
 
 func test_an_incomplete_cache_does_not_open() -> void:

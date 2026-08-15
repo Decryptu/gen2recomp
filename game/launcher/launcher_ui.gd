@@ -1,8 +1,9 @@
 class_name Gen2LauncherUI
 extends RefCounted
 
-## Small shared pieces every launcher page builds from: text, rows, and the two
-## composite controls (segmented choice and slider) that replace Godot's own.
+## Small shared pieces every launcher page builds from: text, rows, and the
+## composite controls (segmented choice, number and slider) that replace Godot's
+## own.
 
 const GAP_XS: int = 4
 const GAP_SM: int = 8
@@ -88,6 +89,28 @@ static func segmented(
 	if selected >= 0 and selected < buttons.size():
 		buttons[selected].set_active(true)
 	return track
+
+
+## One whole number, typed or stepped. A slider is the wrong shape for a value
+## whose range is wide and whose exact digits matter, which is what a mod's
+## number setting usually is.
+static func number(
+	theme: Gen2LauncherTheme, value: int, minimum: int, maximum: int, step: int,
+	handler: Callable,
+) -> Control:
+	var box := SpinBox.new()
+	box.min_value = minimum
+	box.max_value = maximum
+	box.step = maxi(step, 1)
+	box.value = value
+	box.select_all_on_focus = true
+	box.custom_minimum_size = Vector2(120, 0)
+	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var field_edit: LineEdit = box.get_line_edit()
+	field_edit.add_theme_font_size_override("font_size", Gen2LauncherTheme.FONT_SMALL)
+	field_edit.add_theme_color_override("font_color", theme.text)
+	box.value_changed.connect(func(changed: float) -> void: handler.call(int(changed)))
+	return box
 
 
 static func slider(
