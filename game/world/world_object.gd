@@ -81,6 +81,12 @@ var emote_remaining: int = 0
 var step_direction: Vector2i = Vector2i.ZERO
 var step_frames_total: int = 0
 var step_frames_remaining: int = 0
+## Set on the frame a step starts and cleared by whoever reads it, which is the
+## grass rustle `NormalStep` spawns there.
+var step_began: bool = false
+## OBJECT_ACTION_WEIRD_TREE, while the sleep a `tree_shake` queued runs. See
+## queue_tree_shake().
+var weird_tree: bool = false
 ## The rest of a scripted movement stream, still to be drawn. An applymovement
 ## commits every cell of its path at once, so the whole path is behind the
 ## committed cell until these drain; each entry is one `{direction, frames}`
@@ -336,6 +342,17 @@ func queue_step(direction: Vector2i, frames: int) -> void:
 	_begin_step(direction, frames)
 
 
+## `Movement_tree_shake`: 24 frames of STEP_TYPE_SLEEP with OBJECT_ACTION_WEIRD_TREE.
+##
+## Nothing moves and nothing shakes but this object's own drawing:
+## `SetFacingWeirdTree` steps the frame counter every frame and takes its two
+## high bits, which is `walk_frame()` again, so Sudowoodo wobbles between its
+## standing drawing and its two walking ones where it stands.
+func queue_tree_shake(frames: int) -> void:
+	weird_tree = true
+	queue_wait(frames)
+
+
 ## Adds a `step_sleep` to the same trail: frames the stream spends standing.
 ## STEP_TYPE_SLEEP writes STANDING into OBJECT_WALKING, so this walks nothing
 ## and moves nothing, but the script waiting on the stream still waits for it.
@@ -353,6 +370,10 @@ func _begin_step(direction: Vector2i, frames: int) -> void:
 	step_direction = direction
 	step_frames_total = maxi(0, frames)
 	step_frames_remaining = step_frames_total
+	## `NormalStep` calls `ShakeGrass` where it starts the step, and a queued
+	## stream starts its later steps here rather than at a call site, so the flag
+	## is raised here and read once by Gen2WorldAPI.take_grass_rustles().
+	step_began = direction != Vector2i.ZERO
 
 
 ## Consumes one frame of an in-flight step. Returns true when a frame was
@@ -361,10 +382,16 @@ func _begin_step(direction: Vector2i, frames: int) -> void:
 func tick_step() -> bool:
 	if step_frames_remaining <= 0:
 		return false
-	if step_direction != Vector2i.ZERO:
+	if step_direction != Vector2i.ZERO or weird_tree:
 		advance_walk_frame()
 	step_frames_remaining -= 1
 	if step_frames_remaining <= 0:
+		if weird_tree:
+			## The 24 frames are not a multiple of the four-frame cycle, so
+			## unlike a step this one has to be stood back up by hand.
+			weird_tree = false
+			step_frame = 0
+			frame = 0
 		if queued_steps.is_empty():
 			scripted_steps = false
 		else:

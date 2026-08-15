@@ -3317,6 +3317,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_rock_map_count": int(encounters["rock_maps"]),
 		"world_treemon_set_count": int(encounters["treemon_sets"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
+		"overworld_effect_count": int(world["overworld_effects"]),
 		"world_menu_count": int(services["menus"]),
 		"world_mart_count": int(services["marts"]),
 		"world_phone_contact_count": int(services["phone_contacts"]),

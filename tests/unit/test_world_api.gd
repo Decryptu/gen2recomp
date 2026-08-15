@@ -123,6 +123,11 @@ func _write_cache(game_id: String = "testworld") -> void:
 	collision[11 * 16 + 11] = 0x29  # COLL_WATER
 	collision[11 * 16 + 12] = 0x29  # COLL_WATER
 
+	# A tall-grass cell at (5,10) for SetTallGrassFlags and the rustle ShakeGrass
+	# spawns on a step into it. LAND_TILE permission, so an ordinary step reaches
+	# it and nothing else in the fixture changes.
+	collision[10 * 16 + 5] = 0x18  # COLL_TALL_GRASS
+
 	var source_events: Dictionary = {
 		"bank": 48,
 		"warps": [{
@@ -2640,6 +2645,28 @@ func test_background_events_honor_source_direction_and_conditional_pointer_recor
 	assert_true(world.event_flag_active(11))
 
 
+## `NormalStep` calls `ShakeGrass` where it starts the step, and
+## `MovementFunction_ShakingGrass` gives the temporary object one frame less
+## than that step, so the rustle belongs to the step rather than to the cell.
+func test_a_step_into_grass_takes_one_rustle_per_step() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(5, 11))
+	assert_true(world.take_grass_rustles().is_empty(), "standing still shakes nothing")
+
+	assert_true(bool(world.move_result(Vector2i.UP).get("ok", false)))
+	var rustles: Array = world.take_grass_rustles()
+	assert_eq(rustles.size(), 1)
+	assert_eq(rustles[0]["object_index"], -1, "the player is index -1")
+	assert_eq(rustles[0]["cell"], Vector2i(5, 10))
+	assert_eq(rustles[0]["frames"], Gen2WorldAPI.STEP_FRAMES_WALK - 1)
+	assert_true(world.take_grass_rustles().is_empty(), "the flag is taken once")
+
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_player_step_frame()
+	assert_true(bool(world.move_result(Vector2i.UP).get("ok", false)))
+	assert_true(world.take_grass_rustles().is_empty(), "the cell left behind is not grass")
+
+
 ## CheckTileEvent (engine/overworld/events.asm) runs warps, coord events, the
 ## step count and encounters. TryBGEvent is behind CheckAPressOW, so walking
 ## onto a background event's own cell runs nothing; only interact() reaches it.
@@ -3464,6 +3491,11 @@ func test_script_movement_publishes_source_shake_effects() -> void:
 	for event: Dictionary in events:
 		if event.get("type", &"") == &"screen_shake_requested":
 			assert_eq(event["strength"], 16)
+	## `Movement_tree_shake` shakes the object, not the screen: 24 frames of
+	## OBJECT_ACTION_WEIRD_TREE on the object the stream was applied to.
+	for event: Dictionary in events:
+		if event.get("type", &"") == &"tree_shake_requested":
+			assert_eq(event["frames"], Gen2WorldAPI.TREE_SHAKE_FRAMES)
 
 
 ## Every step command reaches NormalStep (engine/overworld/movement.asm), which

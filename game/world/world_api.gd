@@ -43,6 +43,8 @@ const STEP_FRAMES_NPC_WALK: int = 16
 ## MovementFunction_Strength calls InitStep with `direction | 0`, so a pushed
 ## boulder indexes that same slow row and slides at a wandering NPC's speed.
 const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
+## `Movement_tree_shake`'s own `ld a, 24`, spent as a STEP_TYPE_SLEEP.
+const TREE_SHAKE_FRAMES: int = 24
 ## StepVectors' fast row: 4 pixels per frame for 4 frames, which the bike-speed
 ## movement commands reach through `STEP_BIKE`.
 const STEP_FRAMES_FAST: int = 4
@@ -213,6 +215,8 @@ var _phone_ring_request: Dictionary = {}
 var _player_step_direction: Vector2i = Vector2i.ZERO
 var _player_step_frames_total: int = 0
 var _player_step_frames_remaining: int = 0
+## Gen2WorldObject.step_began for the player.
+var _player_step_began: bool = false
 ## The rest of a scripted movement stream the player still has to be drawn
 ## walking, the way Gen2WorldObject.queued_steps holds an object's.
 var _player_queued_steps: Array = []
@@ -517,9 +521,11 @@ func _begin_player_step(direction: Vector2i, frames: int) -> void:
 	_player_step_direction = direction
 	_player_step_frames_total = maxi(0, frames)
 	_player_step_frames_remaining = _player_step_frames_total
+	_player_step_began = direction != Vector2i.ZERO
 
 
 func _clear_player_step() -> void:
+	_player_step_began = false
 	_player_step_direction = Vector2i.ZERO
 	_player_step_frames_total = 0
 	_player_step_frames_remaining = 0
@@ -1808,6 +1814,43 @@ func advance_emotes_frame() -> bool:
 	for object: Gen2WorldObject in objects:
 		changed = object.tick_emote() or changed
 	return changed
+
+
+## The grass rustles `NormalStep` spawned this frame, taken once.
+##
+## `ShakeGrass` runs where a step starts, for whichever object is stepping and
+## for the player alike, when the tile that step commits to is grass by
+## `SetTallGrassFlags`' own test. The temporary object it spawns lives one frame
+## less than the step (`MovementFunction_ShakingGrass`), tracks the object that
+## spawned it, and is drawn over that object's own sprite.
+##
+## Returned rather than emitted because nothing in the world reads it: it is
+## presentation, and [Gen2WorldEffects] is what holds it while it runs. Object
+## index -1 is the player.
+func take_grass_rustles() -> Array:
+	var out: Array = []
+	if _player_step_began:
+		_player_step_began = false
+		if Gen2WorldCollision.is_grass(collision_code_at(player_cell)):
+			out.append({
+				"object_index": -1,
+				"cell": player_cell,
+				"frames": maxi(0, _player_step_frames_total - 1),
+			})
+	for object: Gen2WorldObject in objects:
+		if not object.step_began:
+			continue
+		object.step_began = false
+		if not object.active or object.deleted:
+			continue
+		if not Gen2WorldCollision.is_grass(collision_code_at(object.cell)):
+			continue
+		out.append({
+			"object_index": object.index,
+			"cell": object.cell,
+			"frames": maxi(0, object.step_frames_total - 1),
+		})
+	return out
 
 
 ## Builds the source trainer approach path. The cartridge's
@@ -3344,10 +3387,16 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			&"step_stop":
 				break
 			&"tree_shake":
+				## `Movement_tree_shake` shakes the object, not the screen: the
+				## stream sleeps 24 frames while OBJECT_ACTION_WEIRD_TREE cycles
+				## its drawing. The event stays for a host that plays a sound
+				## over it; nothing else is asked of it.
+				object.queue_tree_shake(TREE_SHAKE_FRAMES)
 				generated.append({
 					"type": &"tree_shake_requested",
 					"object_index": object_index,
 					"cell": object.cell,
+					"frames": TREE_SHAKE_FRAMES,
 				})
 			&"rock_smash":
 				generated.append({

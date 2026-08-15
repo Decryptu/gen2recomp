@@ -10,6 +10,7 @@ const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
 
 var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
+var _effects: Gen2WorldEffects = null
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _atlas: ImageTexture = null
 ## Kept beside the texture so an animation frame can repaint the one or two
@@ -17,13 +18,26 @@ var _atlas: ImageTexture = null
 var _atlas_image: Image = null
 var _background_color: Color = FALLBACK_BACKGROUND
 var _actor_textures: Dictionary = {}
+var _priority_atlas: ImageTexture = null
+var _priority_indices: PackedByteArray = PackedByteArray()
+var _effect_sheets: Dictionary = {}
+var _effect_textures: Dictionary = {}
 
 
 func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> void:
 	_world = world
 	_animation = animation
 	_actor_textures.clear()
+	_effect_textures.clear()
 	_rebuild_atlas()
+	queue_redraw()
+
+
+## Gen2ModHost.RENDERER_EFFECTS_METHOD: the emote bubbles, boulder dust, grass
+## rustle and headbutt tree this view draws over the map. Presentation only, so a
+## renderer may be handed null and draw none of them.
+func set_effects(effects: Gen2WorldEffects) -> void:
+	_effects = effects
 	queue_redraw()
 
 
@@ -33,6 +47,7 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 func set_time_of_day(time_of_day: int) -> void:
 	_time_of_day = clampi(time_of_day, 0, 3)
 	_actor_textures.clear()
+	_effect_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()
 
@@ -57,6 +72,8 @@ func refresh_animation() -> void:
 	for tile: int in changed:
 		_paint_tile(_atlas_image, indices, palettes, tile)
 	_atlas.update(_atlas_image)
+	_priority_indices = indices
+	_priority_atlas = null
 	queue_redraw()
 
 
@@ -82,6 +99,9 @@ func _rebuild_atlas() -> void:
 	for tile: int in tile_count:
 		_paint_tile(_atlas_image, indices, palettes, tile)
 	_atlas = ImageTexture.create_from_image(_atlas_image)
+	# Built on demand: only an object standing in grass reads it.
+	_priority_indices = indices
+	_priority_atlas = null
 
 
 func _tile_palettes() -> Array:
@@ -136,9 +156,12 @@ func _draw() -> void:
 	)
 	var window_size: Vector2i = Gen2WorldAPI.VIEW_TILES + Vector2i.ONE
 	var page: PackedInt32Array = _world.tile_indices_in_window(tile_origin, window_size)
+	var hidden: Dictionary = _hidden_tree_tiles()
 	for y: int in window_size.y:
 		for x: int in window_size.x:
 			var tile: int = page[y * window_size.x + x]
+			if hidden.has(tile_origin + Vector2i(x, y)):
+				tile = Gen2WorldEffects.HEADBUTT_TREE_HIDDEN_TILE
 			if _atlas == null or tile < 0 or tile >= _world.current_tileset.tile_count:
 				continue
 			draw_texture_rect_region(
@@ -160,8 +183,11 @@ func _draw() -> void:
 		)
 		if texture != null:
 			draw_texture(texture, pixel)
+		if _in_grass(object.cell):
+			_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
 		if object.emote_visible:
 			_draw_emote(object.emote_id, pixel)
+		_draw_effect_sprites(object.index, pixel)
 
 	var player: Vector2 = Vector2(_world.player_pixel_position())
 	var player_texture: Texture2D = _actor_texture(
@@ -170,11 +196,24 @@ func _draw() -> void:
 	)
 	if player_texture != null:
 		draw_texture(player_texture, player)
+		if _in_grass(_world.player_cell):
+			_draw_grass_over(player, page, tile_origin, tile_offset, window_size)
 	else:
 		var marker := Rect2(Vector2(player.x, player.y), Vector2(16, 16))
 		draw_rect(marker, PLAYER_COLOR, false, 1.0)
 		draw_line(marker.position, marker.end, PLAYER_COLOR, 1.0)
 		draw_line(Vector2(marker.end.x, marker.position.y), Vector2(marker.position.x, marker.end.y), PLAYER_COLOR, 1.0)
+	_draw_effect_sprites(-1, player)
+	## The tree sprite stands over its own cell rather than over an object, and
+	## the source draws every one of these from `wShadowOAMSprite36` up, which is
+	## past every map object.
+	for sprite: Dictionary in _effect_sprites():
+		if int(sprite["object_index"]) != -2:
+			continue
+		_draw_effect_sprite(
+			sprite,
+			Vector2((sprite["cell"] as Vector2i) * Gen2WorldAPI.CELL_PIXELS) - camera_pixels,
+		)
 
 
 func _actor_texture(
@@ -210,21 +249,170 @@ func _sort_objects(first: Gen2WorldObject, second: Gen2WorldObject) -> bool:
 	return first.cell.y < second.cell.y
 
 
+## `SpawnEmote`: four tiles of the emote's own sheet, two rows above the object
+## the source's `MovementFunction_Emote` writes `-2 * TILE_WIDTH` for.
 func _draw_emote(emote_id: int, pixel: Vector2) -> void:
-	var bubble := Rect2(pixel + Vector2(4, -10), Vector2(8, 8))
-	draw_rect(bubble, Color("#fff8d6"), true)
-	draw_rect(bubble, Color("#18243a"), false, 1.0)
-	draw_colored_polygon(
-		PackedVector2Array([
-			pixel + Vector2(6, -2), pixel + Vector2(8, 2), pixel + Vector2(10, -2),
-		]),
-		Color("#fff8d6")
+	if emote_id < 0 or emote_id >= RomLayout.EMOTE_NAMES.size():
+		return
+	var sheet: Dictionary = _effect_sheet(RomLayout.EMOTE_NAMES[emote_id])
+	if sheet.is_empty():
+		return
+	for index: int in 4:
+		_draw_effect_tile(
+			sheet,
+			index,
+			Gen2WorldEffects.PAL_OW_EMOTE,
+			false,
+			pixel + Vector2((index & 1) * 8, (index >> 1) * 8 - 16),
+		)
+
+
+## `SetTallGrassFlags` sets IN_GRASS_F on an object standing in either kind of
+## grass, and `.InitSprite` turns that into OAM_PRIO on the two tiles carrying
+## RELATIVE_ATTRIBUTES, which are the bottom half of every facing: the grass in
+## front of the object covers its legs.
+func _in_grass(cell: Vector2i) -> bool:
+	return _world != null and _world.current_map != null \
+		and Gen2WorldCollision.is_grass(_world.collision_code_at(cell))
+
+
+## Redraws the map over the bottom half of a sprite drawn at [param pixel], with
+## the transparent index left out, which is what OAM_PRIO amounts to here.
+func _draw_grass_over(
+	pixel: Vector2,
+	page: PackedInt32Array,
+	tile_origin: Vector2i,
+	tile_offset: Vector2,
+	window_size: Vector2i,
+) -> void:
+	if _priority_atlas == null:
+		_build_priority_atlas()
+	if _priority_atlas == null:
+		return
+	var over := Rect2(
+		pixel + Vector2(0, Gen2Tiles.TILE_HEIGHT),
+		Vector2(Gen2WorldAPI.CELL_PIXELS, Gen2Tiles.TILE_HEIGHT),
 	)
-	var style: int = posmod(emote_id, 3)
-	if style == 0:
-		draw_circle(pixel + Vector2(8, -6), 2.0, Color("#d34a5a"))
-	elif style == 1:
-		draw_line(pixel + Vector2(6, -8), pixel + Vector2(10, -4), Color("#3d6fd6"), 1.5)
-		draw_line(pixel + Vector2(10, -8), pixel + Vector2(6, -4), Color("#3d6fd6"), 1.5)
-	else:
-		draw_rect(Rect2(pixel + Vector2(6, -8), Vector2(4, 4)), Color("#d69b2f"), true)
+	for y: int in window_size.y:
+		for x: int in window_size.x:
+			var at := Rect2(
+				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT) - tile_offset,
+				Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT),
+			)
+			var covered: Rect2 = at.intersection(over)
+			if covered.size.x <= 0.0 or covered.size.y <= 0.0:
+				continue
+			var tile: int = page[y * window_size.x + x]
+			if tile < 0 or tile >= _world.current_tileset.tile_count:
+				continue
+			draw_texture_rect_region(
+				_priority_atlas,
+				covered,
+				Rect2(
+					Vector2(tile * Gen2Tiles.TILE_WIDTH, 0) + (covered.position - at.position),
+					covered.size,
+				),
+			)
+
+
+## The same strip as the atlas with the cartridge's transparent index left out,
+## for the tiles that are drawn over a sprite rather than under it.
+func _build_priority_atlas() -> void:
+	if _atlas_image == null:
+		return
+	var image: Image = _atlas_image.duplicate()
+	var width: int = image.get_width()
+	if _priority_indices.size() < width * Gen2Tiles.TILE_HEIGHT:
+		return
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in width:
+			if int(_priority_indices[y * width + x]) == 0:
+				image.set_pixel(x, y, Color(0, 0, 0, 0))
+	_priority_atlas = ImageTexture.create_from_image(image)
+
+
+func _effect_sprites() -> Array:
+	return _effects.sprites() if _effects != null else []
+
+
+## The tiles a live effect takes from the map, as a set of absolute tile
+## coordinates. See Gen2WorldEffects.hidden_tree_cells().
+func _hidden_tree_tiles() -> Dictionary:
+	var out: Dictionary = {}
+	if _effects == null:
+		return out
+	for cell: Vector2i in _effects.hidden_tree_cells():
+		var origin: Vector2i = cell * RomLayout.MAP_BLOCK_CELL_WIDTH
+		for y: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
+			for x: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
+				out[origin + Vector2i(x, y)] = true
+	return out
+
+
+## Whatever [param object_index] is carrying this frame, drawn over it: the dust
+## and the grass rustle are STEP_TYPE_TRACKING_OBJECT and follow the object that
+## spawned them, so their anchor is where that object is drawn. -1 is the player.
+func _draw_effect_sprites(object_index: int, pixel: Vector2) -> void:
+	for sprite: Dictionary in _effect_sprites():
+		if int(sprite["object_index"]) == object_index:
+			_draw_effect_sprite(sprite, pixel)
+
+
+func _draw_effect_sprite(sprite: Dictionary, anchor: Vector2) -> void:
+	var sheet: Dictionary = _effect_sheet(String(sprite["kind"]))
+	if sheet.is_empty():
+		return
+	for tile: Dictionary in sprite["tiles"]:
+		_draw_effect_tile(
+			sheet,
+			int(tile["tile"]),
+			int(sprite["palette"]),
+			bool(tile["flip_x"]),
+			anchor + Vector2(tile["offset"] as Vector2i),
+		)
+
+
+func _effect_sheet(name: String) -> Dictionary:
+	if _world == null or _world.data == null:
+		return {}
+	if _effect_sheets.has(name):
+		return _effect_sheets[name]
+	var sheet: Dictionary = _world.data.overworld_effect(name)
+	_effect_sheets[name] = sheet
+	return sheet
+
+
+## One 8x8 tile of an effect sheet. Index 0 is the transparent colour here, as it
+## is for every object: these are sprites, not background.
+func _draw_effect_tile(
+	sheet: Dictionary, tile: int, palette_index: int, flip_x: bool, at: Vector2
+) -> void:
+	var key: String = "%s:%d:%d:%d:%d" % [
+		sheet["name"], tile, palette_index, int(flip_x), _time_of_day,
+	]
+	var texture: Texture2D = _effect_textures.get(key, null)
+	if texture == null:
+		var indices: PackedByteArray = sheet["indices"]
+		var tiles: int = int(sheet["tiles"])
+		if tile < 0 or tile >= tiles or indices.size() < tiles * Gen2Tiles.TILE_PIXELS:
+			return
+		var palette: PackedColorArray = _world.data.overworld_sprite_palette(
+			palette_index, _time_of_day
+		)
+		var image := Image.create(
+			Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
+		)
+		var width: int = tiles * Gen2Tiles.TILE_WIDTH
+		for y: int in Gen2Tiles.TILE_HEIGHT:
+			for x: int in Gen2Tiles.TILE_WIDTH:
+				var color_index: int = int(indices[y * width + tile * Gen2Tiles.TILE_WIDTH + x])
+				var color: Color = palette[color_index] if color_index < palette.size() \
+					else Color.MAGENTA
+				if color_index == 0:
+					color.a = 0.0
+				image.set_pixel(x, y, color)
+		if flip_x:
+			image.flip_x()
+		texture = ImageTexture.create_from_image(image)
+		_effect_textures[key] = texture
+	draw_texture(texture, at)

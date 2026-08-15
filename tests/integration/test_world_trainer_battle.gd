@@ -283,13 +283,15 @@ func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 	assert_false(world["just_battled"])
 
 
-func test_emote_preview_reaches_the_production_world_renderer() -> void:
+func test_effect_sprite_preview_reaches_the_production_world_renderer() -> void:
 	await _open_world()
-	_world_screen.preview_emote()
+	_world_screen.preview_effect_sprites()
 	await get_tree().process_frame
 
-	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Debug emote preview")
+	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Debug effect sprite preview")
 	assert_true((_world_screen._world.objects[0] as Gen2WorldObject).emote_visible)
+	assert_eq(_world_screen._effects.sprites().size(), 3,
+		"the dust, the rustle and the tree are all staged")
 
 
 func test_production_world_entry_and_facing_object_story_persist_separate_flags() -> void:

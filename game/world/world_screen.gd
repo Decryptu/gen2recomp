@@ -59,6 +59,8 @@ var _world: Gen2WorldAPI = null
 var _renderer: Node = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
+## The headbutt result waiting for ShakeHeadbuttTree's 32 frames to be spent.
+var _pending_headbutt_finish: Dictionary = {}
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
@@ -273,6 +275,8 @@ func _build_renderer() -> void:
 		_screen.display_native(_renderer)
 		_screen.native_size_changed.connect(_on_native_size_changed)
 		_on_native_size_changed(_screen.native_size())
+	if _renderer.has_method(Gen2ModHost.RENDERER_EFFECTS_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_EFFECTS_METHOD, _effects)
 	_renderer.set_world(_world, _animation)
 	_renderer.set_time_of_day(_render_time_of_day())
 	_apply_renderer_interface_style()
@@ -375,7 +379,8 @@ func advance_frame() -> void:
 			_apply_replayed_input(_world.frame_number)
 	_advance_game_time_frame()
 	if _effects != null:
-		_effects.advance_frame()
+		if _effects.advance_frame() and _renderer != null:
+			_renderer.refresh()
 		_apply_world_effect_offset()
 	if _animation != null and _animation.advance_frame() and _renderer != null:
 		_renderer.refresh_animation()
@@ -392,6 +397,13 @@ func advance_frame() -> void:
 	# script that ran it is still going, which is when a script runs one.
 	if _world != null and _world.advance_scripted_steps_frame() and _renderer != null:
 		_renderer.refresh()
+	# After both trails: `ShakeGrass` is called where the step starts, so a
+	# rustle taken now belongs to a step begun on this frame.
+	_spawn_grass_rustles()
+	if not _pending_headbutt_finish.is_empty() and (_effects == null or not _effects.sprites_active()):
+		var headbutt: Dictionary = _pending_headbutt_finish
+		_pending_headbutt_finish = {}
+		_finish_headbutt(headbutt)
 	# After the trail, because the frame it finishes drawing is the frame the
 	# script waiting on it resumes.
 	if _world != null and not _world.pending_script_wait().is_empty():
@@ -764,6 +776,14 @@ func move_player(direction: Vector2i) -> bool:
 		## SFX_STRENGTH here, not the menu that set the flag.
 		if movement.has("boulder_pushed"):
 			_play_sfx(SFX_STRENGTH)
+			var pushed: Dictionary = movement["boulder_pushed"]
+			if _effects != null:
+				## SpawnStrengthBoulderDust runs where MovementFunction_Strength
+				## starts the slide, and the dust tracks the boulder from there.
+				_effects.start_boulder_dust(
+					int(pushed["index"]), pushed["to_cell"], pushed["direction"],
+					Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH,
+				)
 			if _renderer != null:
 				_renderer.refresh()
 			_refresh_labels()
@@ -961,19 +981,34 @@ func _update_time_of_day() -> void:
 		_renderer.set_time_of_day(_render_time_of_day())
 
 
-## Public screenshot driver for the scripted emote state and renderer path.
-func preview_emote() -> void:
+## Public screenshot driver for every sprite the engine draws over an object
+## rather than as one: the scripted emote, `SpawnStrengthBoulderDust`,
+## `ShakeGrass` and `ShakeHeadbuttTree`. Each is started through the call the
+## game makes, so this photographs the renderer's own path.
+func preview_effect_sprites() -> void:
 	if _world == null or _renderer == null:
 		return
-	var actors: Array = _world.visible_objects()
-	if actors.is_empty():
-		_script_prompt = "No visible object for emote preview"
-		_refresh_labels()
-		return
-	var object: Gen2WorldObject = actors[0]
-	object.set_emote(0, true)
+	if _effects != null:
+		_effects.start_headbutt_tree(_world.player_cell + Vector2i(1, 0))
+		_effects.start_boulder_dust(
+			-1, _world.player_cell, Vector2i.DOWN, Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH
+		)
+		_effects.start_grass_rustle(
+			-1, _world.player_cell, Gen2WorldAPI.STEP_FRAMES_WALK - 1
+		)
+	## The nearest object rather than the first, so the emote lands inside the
+	## view a capture photographs.
+	var nearest: Gen2WorldObject = null
+	for object: Gen2WorldObject in _world.visible_objects():
+		if nearest == null or object.cell.distance_squared_to(_world.player_cell) \
+			< nearest.cell.distance_squared_to(_world.player_cell):
+			nearest = object
+	if nearest == null:
+		_script_prompt = "No visible object for the emote"
+	else:
+		nearest.set_emote(0, true)
+		_script_prompt = "Debug effect sprite preview"
 	_renderer.refresh()
-	_script_prompt = "Debug emote preview"
 	_refresh_labels()
 
 
@@ -2329,6 +2364,8 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 					_animation.configure(_world, _render_time_of_day())
 			&"headbutt_applied":
 				_play_sfx(SFX_HEADBUTT_TREE)
+				if _effects != null:
+					_effects.start_headbutt_tree(applied.get("cell", Vector2i.ZERO))
 			&"rock_smash_applied":
 				_play_sfx(SFX_STRENGTH)
 			_:
@@ -2337,7 +2374,11 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 			_renderer.refresh()
 		_script_prompt = label
 		if StringName(applied.get("kind", &"")) == &"headbutt_applied":
-			_finish_headbutt(applied)
+			## HeadbuttScript's `callasm ShakeHeadbuttTree` spends its 32 frames
+			## before `callasm TreeMonEncounter`, so the roll's own result waits
+			## for the animation rather than opening a battle over it.
+			_pending_headbutt_finish = applied.duplicate(true)
+			_refresh_labels()
 			return
 		if StringName(applied.get("kind", &"")) == &"rock_smash_applied":
 			_finish_rock_smash(applied)
@@ -2543,9 +2584,9 @@ func _show_script_results(results: Array) -> void:
 					)
 				_apply_world_effect_offset()
 			elif result_event.get("type", &"") == &"tree_shake_requested":
-				if _effects != null:
-					_effects.start_tree_shake(result_event)
-				_apply_world_effect_offset()
+				## The object animates itself for the frames the stream sleeps;
+				## there is nothing for a host to start.
+				pass
 			elif result_event.get("type", &"") in [
 				&"rock_smash_effect_requested",
 				&"movement_command_requested",
@@ -2589,6 +2630,19 @@ func _show_script_results(results: Array) -> void:
 		else:
 			_renderer.refresh()
 	_refresh_labels()
+
+
+## One frame's worth of `ShakeGrass`, for the player and for every object that
+## started a step onto grass on it.
+func _spawn_grass_rustles() -> void:
+	if _world == null or _effects == null:
+		return
+	for rustle: Dictionary in _world.take_grass_rustles():
+		_effects.start_grass_rustle(
+			int(rustle["object_index"]), rustle["cell"], int(rustle["frames"])
+		)
+	if _renderer != null and _effects.sprites_active():
+		_renderer.refresh()
 
 
 func _apply_world_effect_offset() -> void:

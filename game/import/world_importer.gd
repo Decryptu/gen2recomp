@@ -51,6 +51,12 @@ static func import_to_cache(
 		RomCache.overworld_sprite_palettes_path(directory), result["sprite_palettes"]
 	):
 		return {"ok": false, "message": "Could not write overworld sprite palettes."}
+	if not RomCache.write_section(
+		RomCache.overworld_effects_path(directory),
+		RomCache.blob_path(RomCache.overworld_effects_path(directory)),
+		result["effects"],
+	):
+		return {"ok": false, "message": "Could not write overworld effect sprites."}
 	if not RomCache.write_json(RomCache.world_tilesets_path(directory), tilesets):
 		return {"ok": false, "message": "Could not write overworld tileset data."}
 	if not RomCache.write_json(RomCache.world_palettes_path(directory), result["palettes"]):
@@ -114,6 +120,7 @@ static func import_to_cache(
 		"tilesets": tilesets.size(),
 		"overworld_sprites": result["sprites"].size(),
 		"overworld_icons": icon_graphics.size(),
+		"overworld_effects": (result["effects"] as Array).size(),
 		# The service importer scans and extends these. Handing back what was
 		# just decoded keeps them raw byte runs; reading them off disk again
 		# would hand it the spans the cache stores instead.
@@ -136,6 +143,9 @@ static func read_world(
 	var icons: Dictionary = _read_overworld_icons(rom, layout)
 	if not bool(icons.get("ok", false)):
 		return icons
+	var effects: Dictionary = _read_overworld_effects(rom, layout)
+	if not bool(effects.get("ok", false)):
+		return effects
 
 	var palettes: Dictionary = _read_world_palettes(rom, layout)
 	if not bool(palettes.get("ok", false)):
@@ -210,6 +220,7 @@ static func read_world(
 		"sprite_palettes": sprites["palettes"],
 		"sprite_graphics": sprites["graphics"],
 		"icon_graphics": icons["graphics"],
+		"effects": effects["effects"],
 	}
 
 
@@ -454,6 +465,81 @@ static func _read_overworld_icons(rom: RomFile, layout: Dictionary) -> Dictionar
 			return _error("Overworld mon icon %d did not decode." % number)
 		graphics[number] = pixels
 	return {"ok": true, "graphics": graphics}
+
+
+## The sprites the engine draws over an object rather than as one: the eight
+## showemote bubbles, the jump shadow, the fishing rod, Strength's boulder dust
+## and the tall-grass rustle, plus ShakeHeadbuttTree's own sheet.
+##
+## The emote table pins its own entries: LoadEmote copies each sheet to the VRAM
+## address the record carries, and the twelve tile numbers are the layout
+## FacingEmote ($f8, four tiles), FacingShadow and the fishing rod ($fc) and
+## FacingBoulderDust1/FacingGrass1 ($fe) index. A record naming any other tile
+## is a wrong table rather than a cartridge difference: all three ship this one
+## byte identical.
+const EMOTE_TILE_LAYOUT: Array = [
+	[4, 0xF8], [4, 0xF8], [4, 0xF8], [4, 0xF8], [4, 0xF8], [4, 0xF8], [4, 0xF8], [4, 0xF8],
+	[1, 0xFC], [2, 0xFC], [2, 0xFE], [1, 0xFE],
+]
+
+## HeadbuttTreeGFX's first tile row. The sheet has no table to pin it, and a
+## wrong offset in this bank decodes the routine beside it as art.
+const HEADBUTT_TREE_TILES: int = 8
+const HEADBUTT_TREE_SIGNATURE: Array = [0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x07, 0x04]
+
+static func _read_overworld_effects(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var table: int = int(layout.get("emotes", -1))
+	if not rom.in_bounds(table, RomLayout.EMOTE_COUNT * RomLayout.EMOTE_RECORD_SIZE):
+		return _error("Emote table is outside the cartridge.")
+
+	var effects: Array = []
+	for index: int in RomLayout.EMOTE_COUNT:
+		var at: int = RomLayout.emote_offset(layout, index)
+		var address: int = rom.u16le(at)
+		var byte_size: int = rom.u8(at + 2)
+		var bank: int = rom.u8(at + 3)
+		var destination: int = rom.u16le(at + 4)
+		var tiles: int = int(float(byte_size) / float(Gen2Tiles.TILE_BYTES))
+		var vtile: int = int(float(destination - RomLayout.VTILES0) / float(Gen2Tiles.TILE_BYTES))
+		var expected: Array = EMOTE_TILE_LAYOUT[index]
+		if not _valid_cpu_address(address):
+			return _error("Emote %d has an invalid CPU address." % index)
+		if byte_size % Gen2Tiles.TILE_BYTES != 0 or tiles != int(expected[0]):
+			return _error("Emote %d is %d bytes, not %d tiles." % [index, byte_size, expected[0]])
+		if vtile != int(expected[1]):
+			return _error("Emote %d loads to tile $%02X, not $%02X." % [index, vtile, expected[1]])
+		var pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+			rom.slice(RomFile.linear(bank, address), byte_size), 0, tiles
+		)
+		if pixels.size() != tiles * Gen2Tiles.TILE_PIXELS:
+			return _error("Emote %d graphics did not decode." % index)
+		effects.append({
+			"name": RomLayout.EMOTE_NAMES[index],
+			"tiles": tiles,
+			"vtile": vtile,
+			"bytes": Array(pixels),
+		})
+
+	var headbutt: int = int(layout.get("headbutt_tree_gfx", -1))
+	var headbutt_bytes: int = HEADBUTT_TREE_TILES * Gen2Tiles.TILE_BYTES
+	if not rom.in_bounds(headbutt, headbutt_bytes):
+		return _error("Headbutt tree graphics are outside the cartridge.")
+	if Array(rom.slice(headbutt, HEADBUTT_TREE_SIGNATURE.size())) != HEADBUTT_TREE_SIGNATURE:
+		return _error("Headbutt tree graphics do not start with the sheet's first row.")
+	var headbutt_pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		rom.slice(headbutt, headbutt_bytes), 0, HEADBUTT_TREE_TILES
+	)
+	if headbutt_pixels.size() != HEADBUTT_TREE_TILES * Gen2Tiles.TILE_PIXELS:
+		return _error("Headbutt tree graphics did not decode.")
+	effects.append({
+		"name": "headbutt_tree",
+		"tiles": HEADBUTT_TREE_TILES,
+		## FIELDMOVE_TREE, which ShakeHeadbuttTree writes into the struct's own
+		## tile field rather than reading from a table.
+		"vtile": 0x84,
+		"bytes": Array(headbutt_pixels),
+	})
+	return {"ok": true, "effects": effects}
 
 
 static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dictionary:
