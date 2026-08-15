@@ -5,6 +5,7 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/mart.png
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/kurt.png apricorn
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/map.png town_map
+##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/clock.png pokegear a
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/card.png trainer_card
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/oak.png oak_pc
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/pc.png pc
@@ -66,8 +67,11 @@ func _initialize() -> void:
 		for item: int in [0x55, 0x59, 0x5C, 0x5D, 0x61]:
 			items[item] = 6
 	var state := Gen2WorldState.new({}, {}, items, {0: 500})
-	if _kind == &"town_map":
+	if _kind in [&"town_map", &"pokegear"]:
 		state.set_engine_flag(Gen2WorldState.ENGINE_MAP_CARD, true)
+	if _kind == &"pokegear":
+		state.set_engine_flag(Gen2WorldState.ENGINE_PHONE_CARD, true)
+		state.set_engine_flag(Gen2WorldState.ENGINE_RADIO_CARD, true)
 	if _kind == &"unown_dex":
 		state.set_engine_flag(Gen2WorldState.ENGINE_POKEDEX, true)
 		## What the Ruins of Alph research centre leaves behind: the upgraded
@@ -95,6 +99,10 @@ func _process(_delta: float) -> bool:
 			_screen._open_pokegear()
 			for button: int in [Gen2Button.DOWN, Gen2Button.A]:
 				_screen._service_host.handle_button(button)
+		elif _kind == &"pokegear":
+			# The card list alone: `presses` picks the card, which is the live
+			# path each of the other three is reached by.
+			_screen._open_pokegear()
 		elif _kind == &"trainer_card":
 			_screen._open_trainer_card()
 		elif _kind == &"oak_pc":

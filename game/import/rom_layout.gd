@@ -802,6 +802,28 @@ const TOWN_MAP_REGION_BYTES: int = TOWN_MAP_REGION_CELLS + 1
 ## `KantoMap`, so the region map locates it rather than a fourth offset.
 const DEX_NEST_ICON_TILES: int = 1
 
+## `RadioTilemapRLE`, `PhoneTilemapRLE` and `ClockTilemapRLE`: the other three
+## Pokegear cards, one contiguous run in that order directly behind
+## `PokegearSpritesGFX`, byte identical on all three cartridges.
+##
+## `Pokegear_LoadTilemapRLE` reads the *tile* first and its run length second,
+## the opposite way round from the comment above it, and writes from (0,0) until
+## `-1`. Each card is twelve rows; `Textbox` draws the four below them.
+const POKEGEAR_CARD_ORDER: Array[String] = ["radio", "phone", "clock"]
+const POKEGEAR_CARD_COLUMNS: int = 20
+const POKEGEAR_CARD_ROWS: int = 12
+const POKEGEAR_CARD_CELLS: int = POKEGEAR_CARD_ROWS * POKEGEAR_CARD_COLUMNS
+const POKEGEAR_CARD_TERMINATOR: int = 0xFF
+## The whole run, which is what bounds the walk over the three.
+const POKEGEAR_CARD_TILEMAP_BYTES: int = 305
+
+## `_PokegearAskWhoCallText` and its two neighbours, adjacent in
+## `data/text/common_3.asm` and decoded in that order from the one offset: the
+## phone card asks the first when it opens, the clock card says the second, and
+## the phone submenu's DELETE row asks the third.
+const POKEGEAR_TEXT_NAMES: Array[String] = ["ask_who", "press_button", "ask_delete"]
+const POKEGEAR_TEXT_MAX_BYTES: int = 64
+
 ## `TownMapPals`: a palette per tile id, condensed to nybbles, least significant
 ## first. It covers $00 to $5f; $60 and above take palette 0.
 const TOWN_MAP_PALETTE_MAP_BYTES: int = 48
@@ -1506,13 +1528,17 @@ const GOLD_SILVER: Dictionary = {
 	# three graphics by decompressing at every offset and keeping the run that
 	# reproduces the pinned PNG exactly. Every hit is unique per dump. The
 	# landmark table was located by its own x,y byte pairs at a stride of four,
-	# which no other run in the cartridge matches. Nested the way trainer_card
-	# is, so Gold and Silver's absent female palette stays out of the flat offset
-	# checks.
+	# which no other run in the cartridge matches. `cards` is the three card
+	# tilemaps as one run, matched from the pinned .rle files, and `card_texts`
+	# the two Pokegear texts, matched as encoded characters. Nested the way
+	# trainer_card is, so Gold and Silver's absent female palette stays out of
+	# the flat offset checks.
 	"town_map": {
 		"gfx": 0xF8C92,
 		"pokegear_gfx": 0x1C0E43,
 		"sprites": 0x9149C,
+		"cards": 0x914CC,
+		"card_texts": 0x198089,
 		"fast_ship": 0x90C7C,
 		"johto": 0x91F52,
 		"kanto": 0x920BB,
@@ -1882,6 +1908,8 @@ const CRYSTAL: Dictionary = {
 		"gfx": 0xF8BA0,
 		"pokegear_gfx": 0x1DE2E4,
 		"sprites": 0x914DD,
+		"cards": 0x9150D,
+		"card_texts": 0x1C5847,
 		"fast_ship": 0x90CB2,
 		"johto": 0x91FFF,
 		"kanto": 0x92168,

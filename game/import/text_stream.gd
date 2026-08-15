@@ -296,9 +296,14 @@ static func _buffer_string(context: Dictionary, buffer: int) -> String:
 	return "<BUFFER_%d>" % buffer
 
 
-static func _weekday(context: Dictionary) -> String:
-	var day: int = int(context.get("weekday", 0))
+## `GetWeekday`'s own answer, which `TextCommand_DAY` and the Pokegear's clock
+## card both print.
+static func weekday_name(day: int) -> String:
 	return WEEKDAYS[posmod(day, WEEKDAYS.size())]
+
+
+static func _weekday(context: Dictionary) -> String:
+	return weekday_name(int(context.get("weekday", 0)))
 
 
 ## `TextCommand_FAR` banks in and runs the target as a whole text of its own.

@@ -10,6 +10,9 @@ var _r: RefCounted = null
 ## and engine/pokegear/pokegear.asm's `_TownMap`, `PokegearMap` and
 ## `TownMap_GetKantoLandmarkLimits`.
 ##
+## The Pokegear's other three cards are swept here too: they are the same VRAM
+## window, the same palettes and the same page.
+##
 ## The real-cartridge counterpart to tests/unit/test_town_map.gd and
 ## test_town_map_page.gd, which use a synthetic cache. What only a real cache can
 ## say is that the 96 landmarks and the two 360-cell maps decoded, that the
@@ -38,6 +41,23 @@ const UNBROKEN_NAME: int = 2
 const ICON_ORIGIN: int = Gen2TownMapScreen.ICON_ORIGIN
 const LANDMARK_SPECIAL: int = 0
 
+## One cell of each card tilemap that no other card has in that place: the clock
+## card's own name-box corner, the phone card's frame, and the radio dial's scale
+## row (gfx/pokegear/clock.tilemap.rle and its two neighbours).
+const CARD_PINS: Array[Array] = [
+	["clock", Vector2i(12, 0), 0x30],
+	["clock", Vector2i(19, 2), 0x33],
+	["phone", Vector2i(0, 2), 0x06],
+	["radio", Vector2i(9, 2), 0x3B],
+]
+
+## `_PokegearAskWhoCallText` and `_PokegearPressButtonText`, whose `line` is the
+## newline a decoded text carries.
+const CARD_TEXTS: Dictionary = {
+	"ask_who": "Whom do you want\nto call?",
+	"press_button": "Press any button\nto exit.",
+}
+
 ## `wShadowOAMEnd - wShadowOAM` in sprites, which is what `.nestloop` would run
 ## past if a species were found at more landmarks than the hardware has objects.
 const SHADOW_OAM_SPRITES: int = 40
@@ -58,6 +78,7 @@ func run(r: RefCounted) -> void:
 		_verify_page(game_id, data, crystal)
 		_verify_nests(game_id, data, crystal)
 		_verify_flypoints(game_id, data)
+		_verify_cards(game_id, data)
 
 
 ## `Flypoints` and `SpawnPoints` against the cache they were imported beside:
@@ -411,3 +432,68 @@ func _verify_nests(game_id: StringName, data: GameData, crystal: bool) -> void:
 			Gen2WorldEncounter.nests(data, species, "kanto", roaming).is_empty(),
 			"%s: roamer %d (species %d) nests in Kanto." % [game_id, index, species]
 		)
+
+
+## The clock, phone and radio cards on a real cache: each RLE tilemap decoded to
+## a whole screen out of the two sheets, both Pokegear texts as the source's own
+## words, and the page drawing all three. The tilemaps and the texts are byte
+## identical on the three cartridges, so the pins below are the same everywhere.
+func _verify_cards(game_id: StringName, data: GameData) -> void:
+	var page: Gen2TownMapPage = Gen2TownMapPage.from_data(data)
+	if not _r.check(
+		page != null and page.cards_ready(),
+		"%s: the cache holds no Pokegear card tilemaps." % game_id
+	):
+		return
+	for card: String in RomLayout.POKEGEAR_CARD_ORDER:
+		var cells: PackedByteArray = data.pokegear_card(StringName(card))
+		if not _r.check(
+			cells.size() == RomLayout.POKEGEAR_CARD_CELLS,
+			"%s: the %s card is %d cells, wanted %d." % [
+				game_id, card, cells.size(), RomLayout.POKEGEAR_CARD_CELLS,
+			]
+		):
+			continue
+		for cell: int in cells:
+			if not _r.check(
+				cell < RomLayout.POKEGEAR_FIRST_TILE + RomLayout.POKEGEAR_TILES
+					or cell == Gen2TownMapPage.BLANK_TILE,
+				"%s: the %s card names tile $%02X, past its sheets." % [game_id, card, cell]
+			):
+				break
+	for pin: Array in CARD_PINS:
+		var cells: PackedByteArray = data.pokegear_card(StringName(pin[0]))
+		var at: Vector2i = pin[1]
+		var cell: int = int(cells[at.y * Gen2TownMapPage.COLUMNS + at.x])
+		_r.check(
+			cell == int(pin[2]),
+			"%s: the %s card has $%02X at (%d,%d), wanted $%02X." % [
+				game_id, pin[0], cell, at.x, at.y, int(pin[2]),
+			]
+		)
+	for name: String in CARD_TEXTS:
+		_r.check(
+			data.pokegear_text(name) == String(CARD_TEXTS[name]),
+			"%s: Pokegear text %s reads \"%s\"." % [
+				game_id, name, data.pokegear_text(name).replace("\n", "|"),
+			]
+		)
+	## `PrintHoursMins` and `_GearTodayText` on the card the cartridge draws
+	## them on, read back off the tile map the page built.
+	var map: PackedInt32Array = page.clock_tilemap([&"map"], 3, 13, 5, "")
+	_r.check(
+		_card_text(map, Gen2TownMapPage.CLOCK_TIME_AT, 8) == " 1:05 PM",
+		"%s: the clock card reads \"%s\"." % [
+			game_id, _card_text(map, Gen2TownMapPage.CLOCK_TIME_AT, 8),
+		]
+	)
+	print("%s: 3 Pokegear cards of %d cells, %d texts." % [
+		game_id, RomLayout.POKEGEAR_CARD_CELLS, CARD_TEXTS.size(),
+	])
+
+
+func _card_text(map: PackedInt32Array, at: Vector2i, length: int) -> String:
+	var out: String = ""
+	for column: int in length:
+		out += Gen2Text.character(map[at.y * Gen2TownMapPage.COLUMNS + at.x + column])
+	return out

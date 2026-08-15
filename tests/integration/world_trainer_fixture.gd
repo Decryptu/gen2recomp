@@ -722,6 +722,14 @@ static func _town_map() -> Dictionary:
 		landmarks.append({"x": index, "y": index, "codes": _codes("SPECIAL")})
 	landmarks[1] = {"x": 140, "y": 100, "codes": _codes("NEW BARK<BSP>TOWN")}
 	landmarks[2] = {"x": 128, "y": 100, "codes": _codes("ROUTE 29")}
+	## The three card tilemaps, each a flat fill of the Pokegear sheet's own
+	## blank: a card test reads what the page draws over one, never the art.
+	var cards: Dictionary = {}
+	for card: String in RomLayout.POKEGEAR_CARD_ORDER:
+		var cells: Array = []
+		for cell: int in RomLayout.POKEGEAR_CARD_CELLS:
+			cells.append(Gen2TownMapPage.CARD_BLANK_TILE)
+		cards[card] = cells
 	return {
 		"johto": johto,
 		"kanto": kanto,
@@ -729,6 +737,11 @@ static func _town_map() -> Dictionary:
 		"palettes": palettes,
 		"palettes_female": palettes_female,
 		"landmarks": landmarks,
+		"cards": cards,
+		"card_texts": {
+			"ask_who": "WHOM TO CALL?", "press_button": "PRESS A BUTTON",
+			"ask_delete": "DELETE THIS NUMBER?",
+		},
 	}
 
 

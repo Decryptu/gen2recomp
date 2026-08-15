@@ -259,9 +259,13 @@ func test_phone_list_shows_registered_numbers_and_can_close() -> void:
 	await get_tree().process_frame
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_eq(host._title.text, "PHONE")
-	assert_eq(host._summary.text, "Registered numbers")
-	assert_eq(host.selected_index(), 0)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CARD)
+	assert_eq(host._pokegear.card(), Gen2PokegearScreen.CARD_PHONE)
+	assert_eq(host._pokegear.selected_contact(), 0)
+	## B leaves the card for the Pokegear's own card list, and the second one
+	## closes the device.
+	assert_true(host.handle_button(Gen2Button.B))
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
 	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
@@ -279,6 +283,9 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	await get_tree().process_frame
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
+	## The first A opens `PokegearPhoneContactSubmenu`, whose own first row is
+	## CALL.
+	assert_true(host.handle_button(Gen2Button.A))
 	assert_true(host.handle_button(Gen2Button.A))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
@@ -290,6 +297,35 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	await get_tree().process_frame
 	assert_true(_world_screen._world.script_input_waiting())
 	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
+
+
+## `PokegearPhoneContactSubmenu`'s DELETE row and the yes/no box behind it:
+## MOM is one of the two `CheckCanDeletePhoneNumber` refuses, so the contact the
+## fixture registers is offered all three rows and answering YES drops it.
+func test_the_phone_submenu_deletes_the_chosen_contact() -> void:
+	_write_phone_request()
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	assert_true(_world_screen._world.state.apply_changes({}, {}, {
+		"phone_contacts": {0: true},
+	})["ok"])
+	_world_screen._open_phone_list()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_eq(host._pokegear._submenu, ["CALL", "DELETE", "CANCEL"])
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_true(host._pokegear._asking_delete)
+	## The card's own box carries `PokegearAskDeleteText` while it is up.
+	assert_eq(
+		_row_text(host._pokegear._tilemap(), Gen2TownMapPage.CARD_TEXT_AT, 19),
+		_data.pokegear_text("ask_delete")
+	)
+	host.handle_button(Gen2Button.A)
+	assert_false(host._pokegear._asking_delete)
+	assert_false(_world_screen._world.state.has_phone_contact(0))
+	assert_eq(host._pokegear.selected_contact(), -1)
 
 
 func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void:
@@ -304,12 +340,24 @@ func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void
 	assert_not_null(host)
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
 	assert_true(host.handle_button(Gen2Button.A))
-	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CLOCK)
-	assert_true(host._summary.text.contains("WEDNESDAY"))
-	assert_true(host._summary.text.contains("12:07 AM"))
-	assert_true(host._status.text.contains("NIGHT"))
-	assert_true(host.handle_button(Gen2Button.B))
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CARD)
+	assert_eq(host._pokegear.card(), Gen2PokegearScreen.CARD_CLOCK)
+	## `Pokegear_UpdateClock` writes the weekday and `PrintHoursMins`' reading
+	## into the card's own tilemap, which is what the screen draws from.
+	var map: PackedInt32Array = host._pokegear._tilemap()
+	assert_eq(_row_text(map, Gen2TownMapPage.CLOCK_DAY_AT, 9), "WEDNESDAY")
+	assert_eq(_row_text(map, Gen2TownMapPage.CLOCK_TIME_AT, 8), "12:07 AM")
+	## Any button quits the clock card, which lands back on the card list.
+	assert_true(host.handle_button(Gen2Button.A))
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
+
+
+## A run of a card's tilemap read back as text, which is what the page printed.
+func _row_text(map: PackedInt32Array, at: Vector2i, length: int) -> String:
+	var out: String = ""
+	for column: int in length:
+		out += Gen2Text.character(map[at.y * Gen2TownMapPage.COLUMNS + at.x + column])
+	return out
 
 
 func test_audio_request_decodes_and_starts_the_runtime_player() -> void:

@@ -1507,6 +1507,29 @@ func town_map_region(region: String) -> PackedByteArray:
 	return out
 
 
+## `ClockTilemapRLE` and its two neighbours, decoded: the twelve rows a Pokegear
+## card draws above its text box. Empty for a name no card has.
+func pokegear_card(card: StringName) -> PackedByteArray:
+	var cards: Variant = _town_map.get("cards", {})
+	var out := PackedByteArray()
+	if not cards is Dictionary:
+		return out
+	var stored: Variant = (cards as Dictionary).get(String(card), [])
+	if not stored is Array:
+		return out
+	for cell: Variant in stored as Array:
+		out.append(int(cell))
+	return out
+
+
+## One of the Pokegear's own two texts, by the name `RomLayout` gives it.
+func pokegear_text(name: String) -> String:
+	var texts: Variant = _town_map.get("card_texts", {})
+	if not texts is Dictionary:
+		return ""
+	return String((texts as Dictionary).get(name, ""))
+
+
 ## `TownMapPals`: which of the six palettes a region-map tile is drawn through.
 ## Its table covers $00 to $5f; $60 and above take palette 0, and so does a cache
 ## that has no palette map.

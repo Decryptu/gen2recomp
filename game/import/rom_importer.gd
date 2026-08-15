@@ -865,6 +865,34 @@ static func verify_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
 	if not bool(nest_check["ok"]):
 		return nest_check
 
+	var cards: Dictionary = read_pokegear_cards(rom, layout)
+	if cards.size() != RomLayout.POKEGEAR_CARD_ORDER.size():
+		return {
+			"ok": false,
+			"message": "The Pokegear cards decoded to %d tilemaps, wanted %d." % [
+				cards.size(), RomLayout.POKEGEAR_CARD_ORDER.size(),
+			],
+		}
+	for name: String in cards:
+		for cell: int in cards[name] as PackedByteArray:
+			# Every card is drawn out of the same VRAM window the region map is,
+			# so a tile past the two sheets and the font is a wrong offset.
+			if cell >= RomLayout.POKEGEAR_FIRST_TILE + RomLayout.POKEGEAR_TILES \
+				and cell < Gen2Text.SPACE:
+				return {
+					"ok": false,
+					"message": "The %s card names tile $%02X, past its sheets." % [
+						name, cell,
+					],
+				}
+
+	var texts: Dictionary = read_pokegear_texts(rom, layout)
+	if texts.size() != RomLayout.POKEGEAR_TEXT_NAMES.size():
+		return {"ok": false, "message": "The Pokegear texts did not decode."}
+	for name: String in texts:
+		if String(texts[name]).is_empty():
+			return {"ok": false, "message": "Pokegear text %s is empty." % name}
+
 	var palette_map: int = int(entry["palette_map"])
 	if not rom.in_bounds(palette_map, RomLayout.TOWN_MAP_PALETTE_MAP_BYTES):
 		return {"ok": false, "message": "The region palette map is outside the cartridge."}
@@ -1647,6 +1675,50 @@ static func read_town_map_region(
 			return out
 		out.append(byte)
 	return PackedByteArray()
+
+
+## `Pokegear_LoadTilemapRLE` over the three cards in the run's own order, each
+## answered as its twelve rows of tile numbers. A card that does not decode to
+## exactly that many cells answers empty, which is what a wrong offset gives.
+static func read_pokegear_cards(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int((layout.get("town_map", {}) as Dictionary).get("cards", -1))
+	var out: Dictionary = {}
+	if at < 0 or not rom.in_bounds(at, RomLayout.POKEGEAR_CARD_TILEMAP_BYTES):
+		return out
+	var end: int = at + RomLayout.POKEGEAR_CARD_TILEMAP_BYTES
+	for name: String in RomLayout.POKEGEAR_CARD_ORDER:
+		var cells: PackedByteArray = PackedByteArray()
+		while at < end and rom.u8(at) != RomLayout.POKEGEAR_CARD_TERMINATOR:
+			if at + 1 >= end:
+				return {}
+			var tile: int = rom.u8(at)
+			for _step: int in rom.u8(at + 1):
+				cells.append(tile)
+			at += 2
+		if cells.size() != RomLayout.POKEGEAR_CARD_CELLS:
+			return {}
+		out[name] = cells
+		at += 1
+	return out
+
+
+## `_PokegearAskWhoCallText` and its neighbour, read one after the other from the
+## first: each decode answers where it ended, which is where the next begins.
+static func read_pokegear_texts(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int((layout.get("town_map", {}) as Dictionary).get("card_texts", -1))
+	var out: Dictionary = {}
+	var window: int = RomLayout.POKEGEAR_TEXT_NAMES.size() * RomLayout.POKEGEAR_TEXT_MAX_BYTES
+	if at < 0 or not rom.in_bounds(at, window):
+		return out
+	var data: PackedByteArray = rom.slice(at, window)
+	var offset: int = 0
+	for name: String in RomLayout.POKEGEAR_TEXT_NAMES:
+		var decoded: Dictionary = Gen2TextStream.decode(data, offset)
+		if not bool(decoded.get("ok", false)):
+			return {}
+		out[name] = String(decoded["text"])
+		offset = int(decoded["bytes"])
+	return out
 
 
 ## `LoadTitleScreenTilemap`'s own loop: bytes until `-1`, which is not copied.
@@ -4323,7 +4395,8 @@ func _import_title(rom: RomFile, layout: Dictionary) -> Dictionary:
 
 
 ## The region map's data half: both region tilemaps, `TownMapPals`' palette map,
-## the landmark table and the palettes the six tile classes are drawn through.
+## the landmark table, the palettes the six tile classes are drawn through, and
+## the other three Pokegear cards, which share the whole of that VRAM window.
 ##
 ## A landmark's name is kept as the codes it is rather than as text, because
 ## `TownMap_ConvertLineBreakCharacters` rewrites one of those codes before the
@@ -4351,6 +4424,12 @@ func _import_town_map(rom: RomFile, layout: Dictionary) -> Dictionary:
 			rom, int(entry["palette_female"]),
 			RomLayout.TOWN_MAP_PALETTES * RomLayout.TOWN_MAP_PALETTE_COLORS
 		)
+	var decoded: Dictionary = read_pokegear_cards(rom, layout)
+	var cards: Dictionary = {}
+	for name: String in decoded:
+		cards[name] = Array(decoded[name] as PackedByteArray)
+	out["cards"] = cards
+	out["card_texts"] = read_pokegear_texts(rom, layout)
 	return out
 
 
