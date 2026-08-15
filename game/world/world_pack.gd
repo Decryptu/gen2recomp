@@ -226,6 +226,40 @@ static func can_hold(data: GameData, item: int) -> bool:
 	return pocket_for(data, item) != TYPE_KEY_ITEM
 
 
+## The `ItemEffects` entries `.Field` reaches whose effect the overworld can run,
+## by the item number `data/items/attributes.asm` gives ITEMMENU_CLOSE. Every
+## other CLOSE item still falls through to `.Oak`; `HANDOFF.md` names what each
+## of those is waiting for.
+const FIELD_EFFECT_NONE: StringName = &""
+const FIELD_EFFECT_ESCAPE_ROPE: StringName = &"escape_rope"
+const FIELD_EFFECT_ROD: StringName = &"rod"
+const FIELD_EFFECT_COIN_CASE: StringName = &"coin_case"
+const FIELD_EFFECT_ITEMFINDER: StringName = &"itemfinder"
+const FIELD_EFFECT_SACRED_ASH: StringName = &"sacred_ash"
+const ITEM_ESCAPE_ROPE: int = 0x13
+const ITEM_COIN_CASE: int = 0x36
+const ITEM_ITEMFINDER: int = 0x37
+const ITEM_SACRED_ASH: int = 0x9C
+const FIELD_EFFECTS: Dictionary = {
+	ITEM_ESCAPE_ROPE: FIELD_EFFECT_ESCAPE_ROPE,
+	ITEM_COIN_CASE: FIELD_EFFECT_COIN_CASE,
+	ITEM_ITEMFINDER: FIELD_EFFECT_ITEMFINDER,
+	Gen2WorldInventory.ITEM_OLD_ROD: FIELD_EFFECT_ROD,
+	Gen2WorldInventory.ITEM_GOOD_ROD: FIELD_EFFECT_ROD,
+	Gen2WorldInventory.ITEM_SUPER_ROD: FIELD_EFFECT_ROD,
+	ITEM_SACRED_ASH: FIELD_EFFECT_SACRED_ASH,
+}
+
+
+## Which `.Field` effect a USE runs, or FIELD_EFFECT_NONE. The item's own menu
+## nibble decides, not the number: a mod repointing an item away from
+## ITEMMENU_CLOSE takes its field effect with it.
+static func field_effect(data: GameData, item: int) -> StringName:
+	if field_use_kind(data, item) != ITEMMENU_CLOSE:
+		return FIELD_EFFECT_NONE
+	return FIELD_EFFECTS.get(item, FIELD_EFFECT_NONE)
+
+
 ## `UseItem`'s jumptable index: which of `.Oak`, `.Current`, `.Party` and
 ## `.Field` a USE reaches. Everything below `ITEMMENU_CURRENT` is `.Oak`.
 static func field_use_kind(data: GameData, item: int) -> int:

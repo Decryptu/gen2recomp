@@ -5089,10 +5089,9 @@ func dig_request() -> Dictionary:
 		return _dig_failure(&"missing_map")
 	if party_slot_with_move(Gen2WorldFieldMove.MOVE_DIG) < 0:
 		return _dig_failure(&"move_not_known")
-	if current_map.environment not in [ENVIRONMENT_CAVE, ENVIRONMENT_DUNGEON]:
-		return _dig_failure(&"not_in_a_cave")
-	if dig_warp.is_empty():
-		return _dig_failure(&"no_dig_warp")
+	var checked: StringName = _check_can_dig()
+	if checked != &"":
+		return _dig_failure(checked)
 	var warped: Dictionary = warp_to_dig_point()
 	if not bool(warped.get("ok", false)):
 		return _dig_failure(StringName(warped.get("reason", &"no_dig_warp")))
@@ -5104,8 +5103,76 @@ func dig_request() -> Dictionary:
 	}
 
 
+## `EscapeRopeFunction`, which is `EscapeRopeOrDig` with the other type byte: the
+## same `.CheckCanDig` and the same `.DoDig`, without a move to know. The type
+## only picks which text the queued script says and whether `.FailDig` says
+## anything at all, so the refusal here is the item's silent one.
+func escape_rope_request() -> Dictionary:
+	if current_map == null:
+		return _escape_rope_failure(&"missing_map")
+	var checked: StringName = _check_can_dig()
+	if checked != &"":
+		return _escape_rope_failure(checked)
+	var warped: Dictionary = warp_to_dig_point()
+	if not bool(warped.get("ok", false)):
+		return _escape_rope_failure(StringName(warped.get("reason", &"no_dig_warp")))
+	return {
+		"ok": true,
+		"kind": &"escape_rope_requested",
+		"warp": warped,
+	}
+
+
+## `.CheckCanDig`: a cave or a dungeon, and all three bytes of the recorded dig
+## warp non-zero. Empty when it passes, otherwise the reason it did not.
+func _check_can_dig() -> StringName:
+	if current_map.environment not in [ENVIRONMENT_CAVE, ENVIRONMENT_DUNGEON]:
+		return &"not_in_a_cave"
+	if dig_warp.is_empty():
+		return &"no_dig_warp"
+	return &""
+
+
 static func _dig_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"dig_failed", "reason": reason}
+
+
+static func _escape_rope_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"escape_rope_failed", "reason": reason}
+
+
+## `CheckForHiddenItems`, which is the whole of the Itemfinder: a BGEVENT_ITEM
+## whose flag is still clear, inside the screen the player stands in the middle
+## of. The window is the source's own arithmetic on the bottom right corner,
+## `wXCoord + SCREEN_WIDTH / 4` and `wYCoord + SCREEN_HEIGHT / 4`, accepted while
+## the difference stays below half a screen: four cells up and left of the
+## player, four down and five right.
+func hidden_item_nearby() -> bool:
+	if current_map == null:
+		return false
+	for event: Variant in current_map.events.get("bg_events", []):
+		var bg_event: Dictionary = event
+		if int(bg_event.get("type", -1)) != BGEVENT_ITEM:
+			continue
+		var offset: Vector2i = player_cell - Vector2i(
+			int(bg_event.get("x", 0)), int(bg_event.get("y", 0))
+		)
+		if offset.x < -5 or offset.x > 4 or offset.y < -4 or offset.y > 4:
+			continue
+		var record: Dictionary = _hidden_item_record(bg_event)
+		if bool(record.get("ok", false)) and not event_flag_active(int(record["flag"])):
+			return true
+	return false
+
+
+## `.TryFish`'s own refusals, asked without casting: the pack has to know whether
+## `FishFunction` would reach `.FailFish` before it decides to close.
+func fishing_check(rod: StringName) -> Dictionary:
+	if current_map == null or data == null:
+		return {"ok": false, "reason": &"missing_map"}
+	var context: Dictionary = _fishing_context(rod)
+	return {"ok": true} if bool(context.get("ok", false)) \
+		else {"ok": false, "reason": StringName(context.get("reason", &"cannot_fish"))}
 
 
 ## `.DoDig`: the recorded dig warp copied into `wNextWarp` and walked out of, so

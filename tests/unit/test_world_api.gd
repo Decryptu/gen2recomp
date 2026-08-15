@@ -5629,6 +5629,43 @@ func test_a_hidden_item_with_no_item_byte_fails_instead_of_running_data() -> voi
 	assert_false(world.event_flag_active(22))
 
 
+## `CheckForHiddenItems`, the whole of the Itemfinder: the screen the player is
+## in the middle of, which is four cells up and left and four down and five
+## right, and only while the record's flag is clear.
+func test_the_itemfinder_answers_for_a_hidden_item_inside_the_screen() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61C0"] = [23, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61C0},
+	]
+	assert_true(world.hidden_item_nearby())
+
+	# The window is asymmetric on x, because the bottom right corner is
+	# `wXCoord + SCREEN_WIDTH / 4` and the difference is compared against half a
+	# screen: the item may sit four cells left of the player and five right.
+	world.player_cell = Vector2i(12, 6)
+	assert_true(world.hidden_item_nearby(), "the item four cells left")
+	world.player_cell = Vector2i(13, 6)
+	assert_false(world.hidden_item_nearby())
+	world.player_cell = Vector2i(3, 6)
+	assert_true(world.hidden_item_nearby(), "the item five cells right")
+	world.player_cell = Vector2i(2, 6)
+	assert_false(world.hidden_item_nearby())
+	world.player_cell = Vector2i(8, 10)
+	assert_true(world.hidden_item_nearby(), "the item four cells up")
+	world.player_cell = Vector2i(8, 11)
+	assert_false(world.hidden_item_nearby())
+
+	# A found item is not a nearby one, which is the same flag check the read is
+	# gated on.
+	world.player_cell = Vector2i(8, 7)
+	world.set_event_flag(23)
+	assert_false(world.hidden_item_nearby())
+
+
 func _item_name(number: int) -> String:
 	return GameData.open_directory(_directory).item_name(number)
 

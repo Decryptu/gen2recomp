@@ -651,6 +651,8 @@ static func _apply_item_effect(
 			"ok": true, "effect": &"repel",
 			"repel_steps": 100 if item == ITEM_REPEL else (200 if item == ITEM_SUPER_REPEL else 250),
 		}
+	if item == Gen2WorldPack.ITEM_SACRED_ASH:
+		return _apply_sacred_ash(data, save)
 	if party_index < 0 or party_index >= save.party.size():
 		return {"ok": false, "reason": &"party_member_required"}
 	var mon: Gen2SaveMon = save.party[party_index]
@@ -684,6 +686,33 @@ static func _apply_item_effect(
 		"ok": true, "effect": &"party_item", "healed": healed,
 		"status_cleared": cleared,
 	}
+
+
+## `_SacredAsh`: `CheckAnyFaintedMon` first, which skips eggs and stops at the
+## first zero, and then `SacredAshScript`'s `special HealParty` over the whole
+## party rather than over the fainted members alone.
+static func _apply_sacred_ash(data: GameData, save: Gen2SaveData) -> Dictionary:
+	var fainted: bool = false
+	for mon: Gen2SaveMon in save.party:
+		if mon != null and not mon.is_egg and mon.hp <= 0:
+			fainted = true
+			break
+	if not fainted:
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	var healed: int = 0
+	for mon: Gen2SaveMon in save.party:
+		if mon == null or mon.is_egg:
+			continue
+		var max_hp: int = _max_hp(data, mon)
+		if max_hp <= 0:
+			return {"ok": false, "reason": &"invalid_party_member"}
+		healed += max_hp - mon.hp
+		mon.hp = max_hp
+		mon.status = Gen2Status.NONE
+		for slot: int in Gen2SaveMon.MAX_MOVES:
+			var move_number: int = int(mon.moves[slot])
+			mon.pp[slot] = int(data.move(move_number).get("pp", 0)) if move_number > 0 else 0
+	return {"ok": true, "effect": &"sacred_ash", "healed": healed}
 
 
 static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -> Dictionary:

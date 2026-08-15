@@ -209,6 +209,33 @@ func test_only_a_selectable_item_can_be_registered() -> void:
 	assert_false(Gen2WorldPack.can_select(null, ITEM_UNCLASSIFIED))
 
 
+## `ItemEffects`' entries for the ITEMMENU_CLOSE items the overworld can run.
+## The menu nibble decides first, so a row moved off ITEMMENU_CLOSE takes its
+## field effect with it and a CLOSE row with no entry stays on `.Oak`.
+func test_the_field_effects_are_the_close_items_the_overworld_can_run() -> void:
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		if int(raw.get("number", 0)) in Gen2WorldPack.FIELD_EFFECTS:
+			raw["field_menu"] = Gen2WorldPack.ITEMMENU_CLOSE
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+	var data: GameData = GameData.open_directory(Fixture.directory())
+
+	assert_eq(
+		Gen2WorldPack.field_effect(data, 0x13), Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE
+	)
+	for rod: int in [0x3A, 0x3B, 0x3D]:
+		assert_eq(Gen2WorldPack.field_effect(data, rod), Gen2WorldPack.FIELD_EFFECT_ROD)
+	assert_eq(Gen2WorldPack.field_effect(data, 0x36), Gen2WorldPack.FIELD_EFFECT_COIN_CASE)
+	assert_eq(Gen2WorldPack.field_effect(data, 0x37), Gen2WorldPack.FIELD_EFFECT_ITEMFINDER)
+	assert_eq(Gen2WorldPack.field_effect(data, 0x9C), Gen2WorldPack.FIELD_EFFECT_SACRED_ASH)
+
+	# The Bicycle is ITEMMENU_CLOSE with no effect built, so it is `.Oak`, and so
+	# is a repointed Escape Rope.
+	assert_eq(Gen2WorldPack.field_effect(_data, ITEM_BICYCLE), Gen2WorldPack.FIELD_EFFECT_NONE)
+	assert_eq(Gen2WorldPack.field_effect(_data, 0x13), Gen2WorldPack.FIELD_EFFECT_NONE)
+	assert_eq(Gen2WorldPack.field_effect(null, 0x13), Gen2WorldPack.FIELD_EFFECT_NONE)
+
+
 func test_an_unknown_item_has_no_submenu() -> void:
 	assert_eq(Gen2WorldPack.item_submenu(_data, 250), [])
 	assert_eq(Gen2WorldPack.item_submenu(null, ITEM_POTION), [])

@@ -1509,6 +1509,29 @@ func test_dig_is_refused_outside_a_cave_and_with_no_warp_recorded() -> void:
 	assert_eq(StringName(unknowing.dig_request()["reason"]), &"move_not_known")
 
 
+func test_an_escape_rope_takes_the_same_warp_dig_does_and_knows_no_move() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	world.player_cell = ESCAPE_CAVE_DOOR
+	world.try_warp()
+	world.player_cell = Vector2i(4, 4)
+	# `EscapeRopeOrDig` is one routine: the item half asks for no party move, so
+	# a party that knows nothing still gets out.
+	world.set_party_summary(1, false, [1] as Array[int], [[]], ["MON"], [false])
+
+	var escaped: Dictionary = world.escape_rope_request()
+	assert_true(bool(escaped.get("ok", false)), String(escaped.get("reason", "")))
+	assert_eq(world.map_id(), Vector2i(1, ESCAPE_TOWN))
+	assert_eq(world.player_cell, ESCAPE_CAVE_DOOR)
+
+
+func test_an_escape_rope_shares_dig_s_two_refusals() -> void:
+	var outdoors: Gen2WorldAPI = _escape_world()
+	assert_eq(StringName(outdoors.escape_rope_request()["reason"]), &"not_in_a_cave")
+
+	var in_a_cave: Gen2WorldAPI = _escape_world(ESCAPE_CAVE, Vector2i(4, 4))
+	assert_eq(StringName(in_a_cave.escape_rope_request()["reason"]), &"no_dig_warp")
+
+
 func test_teleport_returns_to_the_last_pokemon_centre_from_outdoors() -> void:
 	var world: Gen2WorldAPI = _escape_world()
 	world.player_cell = ESCAPE_CENTRE_DOOR

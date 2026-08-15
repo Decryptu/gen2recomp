@@ -1430,6 +1430,33 @@ func preview_wild_encounter() -> void:
 	})
 
 
+## Public screenshot driver for `.Field`: grants an ITEMFINDER on an injected
+## save, opens the pack on the key items and uses it, so what is photographed is
+## the world's own answer with the pack already closed behind it.
+func preview_field_item() -> void:
+	if _world == null or _data == null or _start_menu_host != null:
+		return
+	_injected_save = _embedded_party_save()
+	_world.state.apply_changes({}, {}, {"items": {Gen2WorldPack.ITEM_ITEMFINDER: 1}})
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	_start_menu_host.handle_button(Gen2Button.A)
+	var pockets: Array = _start_menu_host.get("_pack_pockets")
+	while int(pockets[_start_menu_host.get("_pack_pocket_index")]["pocket"]) \
+		!= Gen2WorldPack.TYPE_KEY_ITEM:
+		_start_menu_host.handle_button(Gen2Button.RIGHT)
+	# The row's submenu, and then its first action, which for a key item is USE.
+	_start_menu_host.handle_button(Gen2Button.A)
+	_start_menu_host.handle_button(Gen2Button.A)
+	if _text_box != null:
+		# The box reveals a tile at a time off wall-clock delta, and a capture
+		# owning its own frames spends none on that.
+		_text_box.finish()
+
+
 ## Public screenshot and scene-test driver for the production fishing path.
 ## The caller can advance the cast and bite pauses with Space, Enter or Z.
 func preview_fishing() -> void:
@@ -1953,6 +1980,7 @@ func _open_start_menu_host(entry: Callable) -> void:
 	add_child(host)
 	host.action_chosen.connect(_on_start_menu_action)
 	host.closed.connect(_on_start_menu_closed)
+	host.field_item_used.connect(_on_field_item_used)
 	_start_menu_host = host
 	_script_prompt = "Start menu open"
 	if entry.is_valid():
@@ -2149,6 +2177,43 @@ func _on_start_menu_closed() -> void:
 		_start_menu_cursor = host.cursor()
 		host.queue_free()
 	_script_prompt = "Start menu closed"
+	_refresh_labels()
+
+
+## `PACKSTATE_QUITRUNSCRIPT`: the pack closes and the script the effect queued
+## runs in the overworld. The texts are the source's own words, host-authored the
+## way the field moves' are, because none of them is a text this project imports.
+## Each drops its `<PLAYER>` for the reason `FOUND_ITEM_TEXT` does: nothing
+## writes `wPlayerName` yet.
+func _on_field_item_used(request: Dictionary) -> void:
+	var host: Gen2StartMenuScreen = _start_menu_host
+	_start_menu_host = null
+	if host != null:
+		_start_menu_cursor = host.cursor()
+		host.queue_free()
+	## `.Field` reaches `ExitAllMenus`, so nothing reopens behind the effect.
+	_reopen_start_menu = false
+	if _world == null:
+		_refresh_labels()
+		return
+	match StringName(request.get("effect", &"")):
+		Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE:
+			_show_field_move_text("Used an\nESCAPE ROPE.")
+			_refresh_after_escape()
+		Gen2WorldPack.FIELD_EFFECT_ROD:
+			var rods: Array[StringName] = _world.available_fishing_rods()
+			select_fishing_rod(rods.find(StringName(request.get("rod", &""))))
+			start_fishing()
+		Gen2WorldPack.FIELD_EFFECT_ITEMFINDER:
+			_show_field_move_text(
+				"Yes! ITEMFINDER\nindicates there's\nan item nearby." \
+				if bool(request.get("found", false)) \
+				else "Nope! ITEMFINDER\nisn't responding."
+			)
+		Gen2WorldPack.FIELD_EFFECT_COIN_CASE:
+			_show_field_move_text("Coins:\n%4d" % int(request.get("coins", 0)))
+		Gen2WorldPack.FIELD_EFFECT_SACRED_ASH:
+			_show_field_move_text("#MON were all\nhealed!")
 	_refresh_labels()
 
 
@@ -2473,6 +2538,12 @@ func _show_field_move_text(text: String) -> void:
 ## SurfStartStep after its waitbutton. A refusal has nothing staged and just
 ## closes.
 func _acknowledge_field_move_text() -> void:
+	## A text longer than the box is several `waitbutton`s, so a press with a page
+	## still behind it spends itself on the box rather than on the move. A
+	## one-page text closes on the first press, which is every other caller.
+	if _text_box != null and _text_box.has_pages_left():
+		_text_box.advance()
+		return
 	_field_move_text = false
 	if _text_box != null:
 		_text_box.visible = false
