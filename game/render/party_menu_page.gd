@@ -11,11 +11,13 @@ extends RefCounted
 ## member because `PartyMenu2DMenuData`'s cursor offset is `dn 2, 0`.
 ##
 ## [Gen2BattleSwitchMenu] owns the rows and the cursor; this is presentation
-## only, and node-free, so the page can be read back headless.
+## only, and node-free, so the page can be read back headless. The one thing it
+## owns itself is `InitPartyMenuGFX`'s icons, because the sprite anim structs
+## behind them are per-frame state and nothing else here holds it: [method
+## advance] is one pass of `PlaySpriteAnimations` over them.
 ##
-## Not drawn: `InitPartyMenuGFX`'s menu mon icons, which are sprite animations
-## over columns 1 and 2 and need `gfx/icons`, and the eggs `PartyMenuCheckEgg`
-## skips every quality for, which a battle party cannot contain.
+## Not drawn: the eggs `PartyMenuCheckEgg` skips every quality for, which a
+## battle party cannot contain.
 
 const TILE: int = Gen2Font.TILE
 
@@ -48,6 +50,40 @@ const PROMPT: Vector2i = Vector2i(1, 16)
 ## Both HP numbers print through `PrintNum` three digits wide, space padded.
 const HP_NUMBER_DIGITS: int = 3
 
+## Shadow OAM's own origin, which every sprite here is placed through.
+const OAM_ORIGIN := Vector2i(8, 16)
+
+## `InitPartyMenuIcon`'s spawn: `add $1c` over the slot number shifted four, and
+## `ld e, $10`. The icon is the four `.OAMData_RedWalk` tiles at (-8,-8) from
+## there, so its top-left corner is the coordinate less a tile and the origin.
+const ICON_FIRST_Y: int = 0x1C
+const ICON_ROW_STEP: int = 16
+const ICON_TILE: int = Gen2Font.TILE
+
+## `SpriteAnimFunc_PartyMon`'s two columns: `8 * 2` for a row the cursor is not
+## on and `8 * 3` for the one it is, which is what frees column 0 for the arrow.
+const ICON_X: int = 8 * 2
+const ICON_SELECTED_X: int = 8 * 3
+
+## `.Frameset_PartyMon`: two OAM sets of eight, which is nine passes each
+## (`GetSpriteAnimFrame` returns the entry on the pass that loads the duration
+## too), then `oamrestart`. The second set is the same four tiles four on.
+const ICON_FRAME_DURATION: int = 8
+const ICON_FRAMES: int = 2
+const ICON_FRAME_TILES: int = 4
+
+## `SetPartyMonIconAnimSpeed`'s `.speeds`, added to every frame's duration, and
+## the same byte rotated twice into VAR2. A hurt Pokémon's icon steps and bobs
+## more slowly; a red one does neither.
+const ICON_SPEEDS: Array[int] = [0x00, 0x40, 0x80]
+const ICON_BOBS: Array[int] = [-2, -1, 0]
+
+## `.SpawnItemIcon`'s marker, `HeldItemIcons`' second tile, over the icon's own
+## bottom-left one. Its mail sibling is unreachable here (see
+## [constant RomLayout.HELD_ITEM_ICON_MAIL]).
+const ICON_ITEM_TILE: int = RomLayout.HELD_ITEM_ICON_ITEM
+const ICON_ITEM_QUADRANT: int = 2
+
 ## `PlaceStatusString`'s three-letter strings, in the order
 ## `PlaceNonFaintStatus` tests them. FNT comes first because
 ## `PlaceStatusString` checks the health before it ever looks at the byte.
@@ -60,6 +96,11 @@ const FAINTED_STRING: String = "FNT"
 var font: Gen2Font = null
 var hud: Gen2BattleHud = null
 var data: GameData = null
+
+## One sprite anim struct per member, in party order:
+## `{icon, item, speed, frame, duration, var1, x, y_offset}`. Empty until
+## [method advance] has been given rows to build it from.
+var _icons: Array = []
 
 ## `Textbox` draws with wTextboxFrame, so the bottom box wears whichever frame
 ## the player chose, as every other box here does.
@@ -103,7 +144,139 @@ func render(rows: Array, cursor: int, prompt: String) -> Image:
 	)
 	for index: int in rows.size():
 		_blend_bar(image, index, rows[index])
+	_blend_icons(image, rows.size())
 	return image
+
+
+## One pass of `PlaySpriteAnimations` over `InitPartyMenuGFX`'s structs: the
+## sequence first and then the frameset, which is the order
+## `DoNextFrameForAllSprites` calls them in. Called once per hardware frame by
+## whoever owns the screen; the structs are rebuilt when the party behind them
+## changes, the way a reopened menu respawns them.
+func advance(rows: Array, cursor: int) -> void:
+	if _icons.size() != rows.size():
+		reset(rows)
+	for index: int in _icons.size():
+		var icon: Dictionary = _icons[index]
+		_step_icon_sequence(icon, index == cursor)
+		_step_icon_frame(icon)
+
+
+## `InitPartyMenuGFX`: one struct per member, spawned in party order. FRAME
+## opens at -1 and DURATION at zero, so the first pass shows the first entry.
+func reset(rows: Array) -> void:
+	_icons = []
+	for row: Variant in rows:
+		var member: Dictionary = row as Dictionary
+		var speed: int = GameData.hp_bar_palette_index(Gen2BattleHud.bar_pixels(
+			int(member.get("hp", 0)), int(member.get("max_hp", 0)),
+			Gen2BattleHud.HP_BAR_TILES * TILE
+		))
+		_icons.append({
+			"icon": data.mon_menu_icon(int(member.get("species", 0))) if data != null else 0,
+			"item": int(member.get("item", 0)) != 0,
+			"speed": speed,
+			"frame": -1,
+			"duration": 0,
+			"var1": 0,
+			"x": ICON_X,
+			"y_offset": 0,
+		})
+
+
+## What the icons would draw right now, so a host caching its layer knows when
+## the picture behind that cache has moved.
+func animation_signature() -> String:
+	var parts: PackedStringArray = []
+	for icon: Dictionary in _icons:
+		parts.append("%d:%d:%d" % [int(icon["frame"]), int(icon["x"]), int(icon["y_offset"])])
+	return ",".join(parts)
+
+
+## `SpriteAnimFunc_PartyMon`, which hands the cursor's own row to
+## `SpriteAnimFunc_PartyMonSwitch`. VAR1 counts only while a row is the chosen
+## one, and the offset it picks changes every sixteenth pass.
+func _step_icon_sequence(icon: Dictionary, selected: bool) -> void:
+	if not selected:
+		icon["x"] = ICON_X
+		icon["y_offset"] = 0
+		return
+	icon["x"] = ICON_SELECTED_X
+	var counter: int = int(icon["var1"])
+	icon["var1"] = (counter + 1) & 0xFF
+	if counter & 0x0F != 0:
+		return
+	icon["y_offset"] = ICON_BOBS[int(icon["speed"])] if counter & 0x10 != 0 else 0
+
+
+## `GetSpriteAnimFrame` over `.Frameset_PartyMon`: count the duration down, and
+## on the pass it runs out step to the next entry and load its own.
+func _step_icon_frame(icon: Dictionary) -> void:
+	if int(icon["duration"]) > 0:
+		icon["duration"] = int(icon["duration"]) - 1
+		return
+	icon["frame"] = (int(icon["frame"]) + 1) % ICON_FRAMES
+	icon["duration"] = (ICON_FRAME_DURATION + ICON_SPEEDS[int(icon["speed"])]) & 0xFF
+
+
+## The icons over the page, in the one palette `InitPartyMenuOBPals` gives them.
+## They are objects rather than tiles, so colour 0 is transparent and they are
+## blended on top rather than written into the index buffer.
+func _blend_icons(image: Image, count: int) -> void:
+	if data == null or _icons.is_empty():
+		return
+	var colors: PackedColorArray = data.party_menu_icon_palette()
+	if colors.size() != Gen2Palette.COLORS_PER_PIC:
+		return
+	var held: PackedByteArray = data.held_item_icon_indices()
+	for index: int in mini(count, _icons.size()):
+		var icon: Dictionary = _icons[index]
+		## Shadow OAM holds nothing for a struct `UpdateAnimFrame` has not
+		## reached yet, which is why FRAME opens at -1 rather than at zero.
+		if int(icon["frame"]) < 0:
+			continue
+		var strip: PackedByteArray = data.overworld_icon_indices(int(icon["icon"]))
+		if strip.is_empty():
+			continue
+		var at := Vector2i(
+			int(icon["x"]) - ICON_TILE - OAM_ORIGIN.x,
+			ICON_FIRST_Y + index * ICON_ROW_STEP + int(icon["y_offset"])
+				- ICON_TILE - OAM_ORIGIN.y
+		)
+		var first: int = int(icon["frame"]) * ICON_FRAME_TILES
+		for quadrant: int in ICON_FRAME_TILES:
+			var source: PackedByteArray = strip
+			var tile: int = first + quadrant
+			if quadrant == ICON_ITEM_QUADRANT and bool(icon["item"]) and not held.is_empty():
+				source = held
+				tile = ICON_ITEM_TILE
+			_blend_tile(
+				image, source, tile, colors,
+				at + Vector2i((quadrant & 1) * ICON_TILE, (quadrant >> 1) * ICON_TILE)
+			)
+
+
+## One 8x8 tile of an index strip, clipped to the screen.
+func _blend_tile(
+	image: Image, strip: PackedByteArray, tile: int, colors: PackedColorArray, at: Vector2i
+) -> void:
+	@warning_ignore("integer_division")
+	var width: int = strip.size() / Gen2Tiles.TILE_HEIGHT
+	var left: int = tile * Gen2Tiles.TILE_WIDTH
+	if left + Gen2Tiles.TILE_WIDTH > width:
+		return
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		var y: int = at.y + row
+		if y < 0 or y >= Gen2Screen.HEIGHT:
+			continue
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			var x: int = at.x + column
+			if x < 0 or x >= Gen2Screen.WIDTH:
+				continue
+			var index: int = strip[row * width + left + column]
+			if index == 0:
+				continue
+			image.set_pixel(x, y, colors[index])
 
 
 func _draw_member(page: PackedByteArray, width: int, index: int, row: Dictionary) -> void:

@@ -48,8 +48,9 @@ const NO_ENERGY: StringName = &"no_energy"
 const CANNOT_CANCEL: StringName = &"cannot_cancel"
 
 ## One row per party member, in party order:
-## `{index, name, level, hp, max_hp, status, fainted}`. [Gen2PartyMenuPage] draws
-## exactly these fields and nothing reads the battle behind them.
+## `{index, species, item, name, level, hp, max_hp, status, fainted}`.
+## [Gen2PartyMenuPage] draws exactly these fields and nothing reads the battle
+## behind them; the species and the held item are what its menu mon icon needs.
 var rows: Array = []
 
 ## `ForcePickSwitchMonInBattle` rather than `PickSwitchMonInBattle`.
@@ -75,6 +76,8 @@ static func for_party(party: Gen2Party, is_forced: bool = false) -> Gen2BattleSw
 			continue
 		menu.rows.append({
 			"index": index,
+			"species": mon.species,
+			"item": mon.item,
 			"name": mon.name_text(),
 			"level": mon.level,
 			"hp": mon.hp,

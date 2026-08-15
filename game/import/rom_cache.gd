@@ -46,6 +46,9 @@ const OVERWORLD_SPRITES: String = "overworld_sprites.json"
 const OVERWORLD_SPRITE_PALETTES: String = "overworld_sprite_palettes.json"
 const OVERWORLD_SPRITES_DIR: String = "overworld_sprites"
 const OVERWORLD_ICONS_DIR: String = "overworld_icons"
+const MON_MENU_ICONS: String = "species.idx"
+const HELD_ITEM_ICONS: String = "held_item.idx"
+const PARTY_MENU_ICON_PALETTES: String = "palettes.json"
 const WORLD_MENUS: String = "world_menus.json"
 const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
@@ -65,7 +68,7 @@ const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
 ## importer is discarded rather than migrated.
-const FORMAT_VERSION: int = 54
+const FORMAT_VERSION: int = 55
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -247,6 +250,23 @@ static func overworld_sprite_path(directory: String, number: int) -> String:
 
 static func overworld_icon_path(directory: String, number: int) -> String:
 	return "%s/%s/%02d.idx" % [directory, OVERWORLD_ICONS_DIR, number]
+
+
+## `MonMenuIcons`: which of the icons above each species is drawn with. One byte
+## per species, so it is an index run rather than JSON like the tables beside it.
+static func mon_menu_icons_path(directory: String) -> String:
+	return "%s/%s/%s" % [directory, OVERWORLD_ICONS_DIR, MON_MENU_ICONS]
+
+
+## `HeldItemIcons`, the two tiles a party menu icon wears instead of its own
+## bottom-left one.
+static func held_item_icon_path(directory: String) -> String:
+	return "%s/%s/%s" % [directory, OVERWORLD_ICONS_DIR, HELD_ITEM_ICONS]
+
+
+## `PartyMenuOBPals`, which is the only palette a menu mon icon is drawn in.
+static func party_menu_icon_palettes_path(directory: String) -> String:
+	return "%s/%s/%s" % [directory, OVERWORLD_ICONS_DIR, PARTY_MENU_ICON_PALETTES]
 
 
 static func prepare(directory: String) -> bool:

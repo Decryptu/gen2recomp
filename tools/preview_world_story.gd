@@ -26,6 +26,10 @@ const SPECIALCALL_ASSISTANT: int = 3
 ## the route at ten (maps/Route41.asm).
 const WALK_RESOLVE_ATTEMPTS: int = 16
 
+## How many of the objects standing against a failed walk's frontier its reason
+## names. A crowded map has more than a reader needs.
+const BLOCKING_OBJECTS_REPORTED: int = 4
+
 ## constants/item_constants.asm's add_hm list, whose comment column is hex.
 ## `maps/Route32.asm` warp 1 and `maps/Route32Pokecenter1F.asm` warp 1, the
 ## fishing guru on (1,4) faced from below, and the nearest shore cell the rod is
@@ -9536,7 +9540,13 @@ func _walk_to_connection(
 			previous[next] = {"cell": cell, "direction": step}
 			frontier.append(next)
 	if edge.x < 0:
-		return {"ok": false, "reason": "connection edge unreachable", "direction": direction_name}
+		return {
+			"ok": false,
+			"reason": "connection edge unreachable%s" % _objects_in_the_way(
+				world, Vector2i(-1, -1), previous
+			),
+			"direction": direction_name,
+		}
 
 	var steps: Array[Vector2i] = []
 	var cursor: Vector2i = edge
@@ -9681,9 +9691,10 @@ func _walk_to_story_cell(
 	if not found:
 		return {
 			"ok": false,
-			"reason": "target %s unreachable from %s on %s (collision $%02x, walkable %s)" % [
+			"reason": "target %s unreachable from %s on %s (collision $%02x, walkable %s)%s" % [
 				target, world.player_cell, _map_value(world),
 				world.collision_code_at(target), world.can_walk_to(target),
+				_objects_in_the_way(world, target, previous),
 			],
 			"target": _cell_value_from_vector(target),
 		}
@@ -9707,6 +9718,59 @@ func _walk_to_story_cell(
 		if not events.is_empty():
 			break
 	return {"ok": true, "steps": steps.size(), "events": events}
+
+
+## What a failed walk hit, when what it hit was somebody standing there.
+## `Gen2WorldAPI.can_walk_to()` refuses a cell an object holds exactly as it
+## refuses a wall, so without this a route blocked by an NPC or an item ball
+## reads the same as one blocked by the map, and both of Route 40's beach rocks
+## and the Lake of Rage's gramps cost a hand-routed detour to find.
+##
+## [param target] is the cell the walk wanted, or `(-1, -1)` for a connection
+## edge that has none; [param visited] is the frontier's own `previous` map.
+## Answers "" when nothing is in the way, so it appends to a reason.
+func _objects_in_the_way(
+	world: Gen2WorldAPI, target: Vector2i, visited: Dictionary
+) -> String:
+	var named: PackedStringArray = []
+	var standing: Gen2WorldObject = world.object_at(target) if target.x >= 0 else null
+	if standing != null:
+		named.append("%s stands on it" % _object_name(standing))
+	for object: Gen2WorldObject in world.objects:
+		if object == standing or object.deleted or not object.active:
+			continue
+		if not _plugs_the_frontier(world, object, visited):
+			continue
+		named.append("%s at %s" % [_object_name(object), object.cell])
+		if named.size() >= BLOCKING_OBJECTS_REPORTED:
+			break
+	if named.is_empty():
+		return ""
+	return ", blocked by %s" % ", ".join(named)
+
+
+## Whether [param object] is standing in a gap rather than in the open: the walk
+## reached one side of it and there is ground on the other it never got to. An
+## NPC in the middle of a town is next to the frontier too, and naming that one
+## would bury the one that matters.
+func _plugs_the_frontier(
+	world: Gen2WorldAPI, object: Gen2WorldObject, visited: Dictionary
+) -> bool:
+	if visited.has(object.cell):
+		return false
+	var reached: bool = false
+	var beyond: bool = false
+	for step: Vector2i in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
+		var neighbour: Vector2i = object.cell + step
+		if visited.has(neighbour):
+			reached = true
+		elif world.can_walk_to(neighbour):
+			beyond = true
+	return reached and beyond
+
+
+func _object_name(object: Gen2WorldObject) -> String:
+	return "object %d (sprite %d)" % [object.index, object.sprite_number]
 
 
 ## The order Gen2WorldScreen uses after a successful step: a trainer who can

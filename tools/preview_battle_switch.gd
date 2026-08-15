@@ -5,12 +5,15 @@ extends SceneTree
 ## behind FIGHT, `OfferSwitch`'s yes/no box over the field,
 ## `AskUseNextPokemon`'s box in the same place, and the party list they open.
 ##
-##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses]
+##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses] [passes]
 ##
 ## [stage] is one of `offer` (the default), `menu`, `move`, `contest`, `pick`,
 ## `use_next` and `replace`;
 ## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
-## cursor row or a refusal can be photographed. The battle is a real trainer's
+## cursor row or a refusal can be photographed; [passes] is how many sprite
+## passes the party page's icons are given, which is what moves the chosen row's
+## icon off its resting offset. The screen's own processing is taken away before
+## those are spent, so the same arguments photograph the same frame. The battle is a real trainer's
 ## party out of the cache with the player on a bench of three, since both a
 ## switch and a replacement need somebody to send.
 ##
@@ -38,6 +41,7 @@ var _screen: Gen2BattleScreen = null
 var _output_path: String = ""
 var _stage: String = "offer"
 var _presses: PackedStringArray = PackedStringArray()
+var _icon_passes: int = 0
 var _frames: int = 0
 
 
@@ -51,6 +55,8 @@ func _initialize() -> void:
 	_stage = args[2] if args.size() > 2 else "offer"
 	if args.size() > 3:
 		_presses = args[3].split(",", false)
+	if args.size() > 4:
+		_icon_passes = int(args[4])
 
 	var data: GameData = GameData.open(StringName(args[0]))
 	if data == null:
@@ -153,6 +159,7 @@ func _open() -> void:
 		for press: String in _presses:
 			_screen._handle_button(_button(press))
 		_screen.finish()
+		_settle_icons()
 		return
 
 	_drain()
@@ -166,6 +173,17 @@ func _open() -> void:
 	## A refusal is a line the box is still revealing, and the capture does not
 	## wait on real time.
 	_screen.finish()
+	_settle_icons()
+
+
+## The icons animate on their own clock, so the screen keeps stepping them
+## across the frames this tool spends laying the scene out. Taking its
+## processing away first is what makes the shot the pass that was asked for.
+func _settle_icons() -> void:
+	_screen.set_process(false)
+	for _pass: int in _icon_passes:
+		_screen.advance_party_icons()
+	_screen._refresh_menu_layer()
 
 
 ## The same drain, stopping at `BattleMenu` rather than at a switch question.

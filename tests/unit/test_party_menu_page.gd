@@ -11,7 +11,18 @@ extends GutTest
 ##
 ## The battle-extra strip is filled with a different index from the rest, since
 ## the bars come off it and are the one thing on the page drawn through a palette
-## that is not black on white.
+## that is not black on white. The icons are the other: one fixture shape whose
+## two frames carry different indices, so which pass is on screen and where it
+## landed can both be read off the picture.
+
+## The fixture's one icon shape and the species that names it, plus the two
+## colours its frames are drawn in.
+const FIXTURE_ICON: int = 3
+const FIXTURE_SPECIES: int = 25
+const ICON_FIRST_PACKED: int = 0x03E0
+const ICON_SECOND_PACKED: int = 0x001F
+## The four tiles of the shape's first frame, which is half the strip.
+const HALF_ICON_COLUMNS: int = 4 * Gen2Tiles.TILE_WIDTH
 
 var _directory: String = ""
 
@@ -54,6 +65,8 @@ func _write_cache() -> void:
 			"bits": 1,
 		}
 
+	_write_icons()
+
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "partypagetest",
@@ -69,6 +82,33 @@ func _write_cache() -> void:
 	})
 
 
+## One icon shape whose first frame is index 1 and second index 2, the held item
+## marker in index 3, and the two palettes `InitPartyMenuOBPals` copies.
+func _write_icons() -> void:
+	var strip: PackedByteArray = PackedByteArray()
+	strip.resize(RomLayout.MON_ICON_TILES * Gen2Tiles.TILE_PIXELS)
+	var width: int = RomLayout.MON_ICON_TILES * Gen2Tiles.TILE_WIDTH
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		for column: int in width:
+			strip[row * width + column] = 1 if column < HALF_ICON_COLUMNS else 2
+	RomCache.write_indices(RomCache.overworld_icon_path(_directory, FIXTURE_ICON), strip)
+
+	var held: PackedByteArray = PackedByteArray()
+	held.resize(RomLayout.HELD_ITEM_ICON_TILES * Gen2Tiles.TILE_PIXELS)
+	held.fill(3)
+	RomCache.write_indices(RomCache.held_item_icon_path(_directory), held)
+
+	var species: PackedByteArray = PackedByteArray()
+	species.resize(RomLayout.SPECIES_COUNT)
+	species[FIXTURE_SPECIES - 1] = FIXTURE_ICON
+	RomCache.write_indices(RomCache.mon_menu_icons_path(_directory), species)
+
+	RomCache.write_json(RomCache.party_menu_icon_palettes_path(_directory), [
+		[0x7FFF, ICON_FIRST_PACKED, ICON_SECOND_PACKED, 0x0000],
+		[0x7FFF, ICON_FIRST_PACKED, 0x0000, 0x0000],
+	])
+
+
 func _page() -> Gen2PartyMenuPage:
 	return Gen2PartyMenuPage.from_data(GameData.open_directory(_directory))
 
@@ -77,10 +117,21 @@ func _rows(count: int = 2) -> Array:
 	var out: Array = []
 	for index: int in count:
 		out.append({
-			"index": index, "name": "PIKACHU", "level": 20,
+			"index": index, "species": FIXTURE_SPECIES, "item": 0,
+			"name": "PIKACHU", "level": 20,
 			"hp": 18, "max_hp": 20, "status": 0, "fainted": false,
 		})
 	return out
+
+
+## The page after [param passes] passes of `PlaySpriteAnimations`, which is what
+## [Gen2BattleScreen] spends one of a hardware frame.
+func _animated(rows: Array, cursor: int, passes: int) -> Image:
+	var page: Gen2PartyMenuPage = _page()
+	page.reset(rows)
+	for _pass: int in passes:
+		page.advance(rows, cursor)
+	return page.render(rows, cursor, Gen2BattleSwitchMenu.prompt_text())
 
 
 func _render(rows: Array, cursor: int = 0) -> Image:
@@ -113,12 +164,84 @@ func test_the_page_is_the_whole_screen() -> void:
 
 
 ## `hlcoord 3, 1` for the nicknames, stepping `2 * SCREEN_WIDTH` a member, with
-## columns 1 and 2 left for the menu mon icons nothing here draws.
+## columns 0 to 2 left for the icons, which are sprites rather than tilemap.
 func test_each_member_prints_two_rows_below_the_last() -> void:
 	var image: Image = _render(_rows())
 	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.NICKNAME.x, 1), 0, "the first nickname")
 	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.NICKNAME.x, 3), 0, "the second")
 	assert_eq(_ink_in_tile(image, Gen2PartyMenuPage.NICKNAME.x - 1, 1), 0, "the icon column")
+
+
+## `InitPartyMenuGFX` spawns a struct per member and `UpdateAnimFrame` writes
+## shadow OAM on the pass after, so a page that has not been stepped yet has no
+## icons on it at all.
+func test_no_icon_is_drawn_before_the_first_sprite_pass() -> void:
+	var page: Gen2PartyMenuPage = _page()
+	page.reset(_rows(1))
+	var image: Image = page.render(_rows(1), -1, "")
+	assert_eq(_ink_in_tile(image, 0, 1), 0, "nothing under the first member")
+
+
+## `InitPartyMenuIcon`'s `ld e, $10` less a tile and shadow OAM's own origin,
+## which puts an unselected icon over columns 0 and 1; the cursor's own row is
+## `SpriteAnimFunc_PartyMonSwitch`'s `8 * 3`, a column further right, which is
+## what leaves column 0 for the arrow.
+func test_the_chosen_row_moves_its_icon_out_of_the_cursor_column() -> void:
+	var rows: Array = _rows(2)
+	## Column 2 of the second member's own rows, which only a shifted icon
+	## reaches. The fixture's glyphs are solid tiles, so the picture is read
+	## where nothing else is drawn rather than where the arrow is.
+	var right := Vector2i(2 * Gen2Font.TILE + 1, 3 * Gen2Font.TILE + 2)
+	assert_eq(
+		_animated(rows, -1, 1).get_pixelv(right), Color.WHITE,
+		"an unselected icon stops at column 1"
+	)
+	assert_eq(
+		_animated(rows, 1, 1).get_pixelv(right), Gen2Palette.from_packed(ICON_FIRST_PACKED),
+		"and the chosen row's reaches column 2"
+	)
+
+
+## `.Frameset_PartyMon` is two OAM sets of eight, so the first entry is up for
+## nine passes and the second for the nine after it.
+func test_the_icon_steps_to_its_second_frame_after_nine_passes() -> void:
+	var rows: Array = _rows(1)
+	var at := Vector2i(Gen2Font.TILE, 1 * Gen2Font.TILE)
+	assert_eq(
+		_animated(rows, -1, 9).get_pixelv(at), Gen2Palette.from_packed(ICON_FIRST_PACKED),
+		"the first frame lasts nine passes"
+	)
+	assert_eq(
+		_animated(rows, -1, 10).get_pixelv(at), Gen2Palette.from_packed(ICON_SECOND_PACKED),
+		"and the second follows it"
+	)
+
+
+## `SpriteAnimFunc_PartyMonSwitch` moves YOFFSET on every sixteenth pass, and
+## `.speeds` picks how far by the bar's own colour: two pixels on a green one.
+func test_the_chosen_icon_bobs_on_its_own_counter() -> void:
+	var rows: Array = _rows(1)
+	## Two pixels above where the first icon rests, which nothing else draws on.
+	var above := Vector2i(2 * Gen2Font.TILE, 2)
+	assert_eq(
+		_animated(rows, 0, 16).get_pixelv(above), Color.WHITE, "the icon rests where it spawned"
+	)
+	assert_ne(
+		_animated(rows, 0, 17).get_pixelv(above), Color.WHITE,
+		"and stands two pixels higher once the counter passes sixteen"
+	)
+
+
+## `.SpawnItemIcon`: a member holding anything wears `HeldItemIcons`' second
+## tile in place of the icon's own bottom-left one.
+func test_a_held_item_replaces_the_icons_bottom_left_tile() -> void:
+	var rows: Array = _rows(1)
+	var quadrant := Vector2i(0, 1 * Gen2Font.TILE + 4)
+	var bare: Color = _animated(rows, -1, 1).get_pixelv(quadrant)
+	rows[0]["item"] = 1
+	var held: Color = _animated(rows, -1, 1).get_pixelv(quadrant)
+	assert_eq(bare, Gen2Palette.from_packed(ICON_FIRST_PACKED), "the icon's own tile")
+	assert_eq(held, Color.BLACK, "and the marker's, which the fixture fills with index 3")
 
 
 ## `PlacePartyNicknames.end` steps two columns back from the row below the last

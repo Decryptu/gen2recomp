@@ -83,6 +83,7 @@ var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
 var _overworld_effects: Array = []
 var _overworld_sprite_palettes: Array = []
+var _party_menu_icon_palette_rows: Array = []
 var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
 var _world_phone: Dictionary = {}
@@ -696,6 +697,50 @@ func overworld_icon_indices(icon_number: int) -> PackedByteArray:
 	)
 	_indices[key] = data
 	return data
+
+
+## `ReadMonMenuIcon`: the icon a species is drawn with in a party menu, or zero
+## when the cache does not hold the table. Its `cp EGG` answer is not modelled
+## because nothing here holds an egg; a mod species numbered past the
+## cartridge's own range has no row and answers zero for the same reason
+## `Gen2ContentOverlay.defined_numbers()` reaches no dex order.
+func mon_menu_icon(species: int) -> int:
+	var table: PackedByteArray = mon_menu_icon_table()
+	if species < 1 or species > table.size():
+		return 0
+	return table[species - 1]
+
+
+func mon_menu_icon_table() -> PackedByteArray:
+	var key: String = "overworld_icons/species"
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(RomCache.mon_menu_icons_path(directory))
+	_indices[key] = data
+	return data
+
+
+## `HeldItemIcons`, two tiles' worth of colour indices: the mail marker and the
+## item one, in that order.
+func held_item_icon_indices() -> PackedByteArray:
+	var key: String = "overworld_icons/held_item"
+	if _indices.has(key):
+		return _indices[key]
+	var data: PackedByteArray = RomCache.read_indices(RomCache.held_item_icon_path(directory))
+	_indices[key] = data
+	return data
+
+
+## One of `PartyMenuOBPals`' two palettes, colour 0 first. Colour 0 is an object
+## palette's transparent index; the caller decides that, not this.
+func party_menu_icon_palette(index: int = 0) -> PackedColorArray:
+	var palettes: Array = _party_menu_icon_palettes()
+	if index < 0 or index >= palettes.size() or not palettes[index] is Array:
+		return PackedColorArray()
+	var out := PackedColorArray()
+	for packed: Variant in palettes[index] as Array:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
 
 
 ## One of the eight overworld object palette kinds for a time-of-day group.
@@ -1440,15 +1485,25 @@ func card_badge_palette() -> PackedColorArray:
 	return colors
 
 
+## The three bar palettes in `GetHPPal`'s own order.
+const HP_BAR_PALETTE_NAMES: Array[String] = ["hp_green", "hp_yellow", "hp_red"]
+
+
 ## Which HP bar palette a bar of [param lit] pixels is drawn in. The colour
 ## follows what is drawn rather than the numbers behind it, which is why a bar
 ## can turn red on a Pokémon that still has a good few hit points.
 static func hp_bar_palette_name(lit: int) -> String:
+	return HP_BAR_PALETTE_NAMES[hp_bar_palette_index(lit)]
+
+
+## `GetHPPal`'s own answer, HP_GREEN, HP_YELLOW or HP_RED, for the callers that
+## index a table with it rather than naming a palette.
+static func hp_bar_palette_index(lit: int) -> int:
 	if lit >= RomLayout.HP_GREEN_PIXELS:
-		return "hp_green"
+		return 0
 	if lit >= RomLayout.HP_YELLOW_PIXELS:
-		return "hp_yellow"
-	return "hp_red"
+		return 1
+	return 2
 
 
 func trainer_count() -> int:
@@ -1786,6 +1841,14 @@ func _overworld_effect_records() -> Array:
 	if _claim_section("overworld_effects"):
 		_overworld_effects = _read_section(RomCache.overworld_effects_path(directory), true)
 	return _overworld_effects
+
+
+func _party_menu_icon_palettes() -> Array:
+	if _claim_section("party_menu_icon_palettes"):
+		_party_menu_icon_palette_rows = _read_section(
+			RomCache.party_menu_icon_palettes_path(directory), true
+		)
+	return _party_menu_icon_palette_rows
 
 
 func _sprite_palettes() -> Array:
