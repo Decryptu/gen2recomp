@@ -32,6 +32,14 @@ var top: int = 0
 var right: int = 0
 var bottom: int = 0
 var flags: int = 0
+## `dn rows, columns` and the `db spacing` beside it in a menu's own data
+## (`Place2DMenuItemStrings`, `Get2DMenuNumberOfColumns`). One column and no
+## spacing is `PlaceVerticalMenuItems`, which is every list menu here.
+var columns: int = 1
+var column_spacing: int = 0
+## `w2DMenuCursorOffsets`' high nybble, which is `ROW_STEP` for every menu built
+## from a header and one for `MoveSelectionScreen`'s own hand-built list.
+var row_step: int = ROW_STEP
 
 
 static func from_coords(x1: int, y1: int, x2: int, y2: int, menu_flags: int) -> Gen2MenuBox:
@@ -90,14 +98,22 @@ func cursor_start() -> Vector2i:
 	return Vector2i(left + 1, text_start().y)
 
 
-## Where item [param index] prints, zero-based.
+## Where item [param index] prints, zero-based. `Place2DMenuItemStrings` walks
+## the columns of a row before moving on, so an index counts along the row.
 func item_position(index: int) -> Vector2i:
-	return text_start() + Vector2i(0, index * ROW_STEP)
+	return text_start() + _item_offset(index)
 
 
 ## Where the cursor sits for item [param index], zero-based.
 func cursor_position(index: int) -> Vector2i:
-	return cursor_start() + Vector2i(0, index * ROW_STEP)
+	return cursor_start() + _item_offset(index)
+
+
+func _item_offset(index: int) -> Vector2i:
+	var per_row: int = maxi(1, columns)
+	return Vector2i(
+		(index % per_row) * column_spacing, (index / per_row) * row_step
+	)
 
 
 ## `PlaceMenuStrings`' title, which prints on the box's own top row indented by

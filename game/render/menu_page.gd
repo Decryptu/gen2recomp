@@ -39,9 +39,14 @@ static func from_data(data: GameData) -> Gen2MenuPage:
 ## The box's interior is not cleared: `MenuBox` calls `Textbox`, which fills its
 ## own interior with blanks, and every caller here draws onto a buffer it has
 ## already filled.
+## [param extras] are `PlaceString` calls the box's own caller makes at absolute
+## tile coordinates, as [code]{"text": String, "at": Vector2i}[/code]: the
+## battle's `MoveInfoBox` writes its type and PP into a plain `Textbox` that way
+## rather than as menu items.
 func draw(
 	box: Gen2MenuBox, options: Array, cursor: int,
-	indices: PackedByteArray, width: int, title: String = "", title_indent: int = 0
+	indices: PackedByteArray, width: int, title: String = "", title_indent: int = 0,
+	extras: Array = []
 ) -> void:
 	if font == null or box == null:
 		return
@@ -58,6 +63,13 @@ func draw(
 		var item: Vector2i = box.item_position(index)
 		font.draw_text(String(options[index]), indices, width, item.x * TILE, item.y * TILE)
 
+	for extra: Dictionary in extras:
+		var extra_at: Vector2i = extra.get("at", Vector2i.ZERO)
+		font.draw_text(
+			String(extra.get("text", "")), indices, width,
+			extra_at.x * TILE, extra_at.y * TILE
+		)
+
 	if cursor >= 0 and cursor < options.size() and box.has_flag(Gen2MenuBox.STATICMENU_CURSOR):
 		var arrow: Vector2i = box.cursor_position(cursor)
 		font.draw_code(CURSOR_CODE, indices, width, arrow.x * TILE, arrow.y * TILE)
@@ -72,12 +84,12 @@ func draw(
 ## covers what is behind it.
 func render(
 	box: Gen2MenuBox, options: Array, cursor: int,
-	title: String = "", title_indent: int = 0
+	title: String = "", title_indent: int = 0, extras: Array = []
 ) -> Image:
 	var width: int = Gen2Screen.WIDTH
 	var indices: PackedByteArray = PackedByteArray()
 	indices.resize(width * Gen2Screen.HEIGHT)
-	draw(box, options, cursor, indices, width, title, title_indent)
+	draw(box, options, cursor, indices, width, title, title_indent, extras)
 	return Gen2PicImage.from_indices(
 		indices, width, Gen2Screen.HEIGHT,
 		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))

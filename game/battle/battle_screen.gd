@@ -220,6 +220,24 @@ var _switch_menu: Gen2BattleSwitchMenu = null
 ## The yes/no box's own cursor, which is a two-row `VerticalMenu`.
 var _switch_offer: Gen2WorldMenu = null
 
+## `BattleMenu`'s own loop: [code]&"main"[/code] is FIGHT/PKMN/PACK/RUN,
+## [code]&"move"[/code] `MoveSelectionScreen`'s list and [code]&"refused"[/code]
+## the line it prints over that list before reopening it.
+var _menu_stage: StringName = &""
+## `wBattleMenuCursorPosition`, which is written back after every visit and so
+## opens on whatever was chosen last.
+var _menu_position: int = Gen2BattleMenu.FIGHT
+## `wListMoves_MoveIndicesBuffer` as [method Gen2BattleMenu.move_rows] shapes it,
+## rebuilt every time the list is opened because PP and Disable move under it.
+var _move_rows: Array = []
+## `wCurMoveNum`, which the list opens its cursor on.
+var _move_cursor: int = 0
+## `MoveInfoBox`, which is its own `Textbox` beside the list rather than part of
+## it, so it is drawn into a layer of its own.
+var _info_layer: TextureRect = null
+## The menu itself, which unlike [member _menu_layer] sits over the text box.
+var _battle_menu_layer: TextureRect = null
+
 ## The trainer class behind the enemy's own moves, or zero for
 ## [method show_matchup]'s invented pairing, which has no class and so no AI
 ## flags of its own to read: it falls back to [method _random_slot], same as
@@ -383,6 +401,18 @@ func _ready() -> void:
 	_box.visibility_changed.connect(_push_text_box_rect)
 	_screen.display(_box)
 	_box.place_at_bottom()
+	## Over the text box, unlike the two above: `LoadBattleMenu` draws its box
+	## into the tilemap after `EmptyBattleTextbox` has drawn that one, so the
+	## menu covers the box's right-hand half and `MoveSelectionScreen`'s list
+	## covers all of it.
+	_battle_menu_layer = TextureRect.new()
+	_battle_menu_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_battle_menu_layer.visible = false
+	_screen.display(_battle_menu_layer)
+	_info_layer = TextureRect.new()
+	_info_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_info_layer.visible = false
+	_screen.display(_info_layer)
 	_apply_renderer_interface_style()
 
 	var world_meta: Variant = get_meta("world_battle_request", {})
@@ -1212,6 +1242,10 @@ func battle_snapshot() -> Dictionary:
 		),
 		"switch_forced": _switch_menu != null and _switch_menu.forced,
 		"switch_reason": _switch_reason,
+		"menu_stage": _menu_stage,
+		"menu_position": _menu_position,
+		"move_cursor": _move_cursor,
+		"move_rows": _move_rows.duplicate(true),
 		"capture_selecting": _capture_selecting,
 		"capture_waiting": _capture_waiting,
 		"capture_ball": _selected_capture_ball(),
@@ -1704,6 +1738,11 @@ func advance() -> void:
 		return
 	if _box.advance():
 		return
+	## The battle menu is answered with A, which is what this call is: the source
+	## reads one joypad for the box and for the menu over it.
+	if _menu_stage != &"":
+		_answer_menu(Gen2Button.A)
+		return
 	if _capture_selecting or _capture_waiting:
 		return
 	if _world_battle_tutorial:
@@ -1747,7 +1786,7 @@ func advance() -> void:
 		if _save_battle_result() and _world_battle_active:
 			_finish_world_battle()
 		return
-	take_turn()
+	_open_battle_menu()
 
 
 ## Writes back only after every event from a finished battle has been shown.
@@ -1899,6 +1938,134 @@ func _answer_baton_pass() -> bool:
 	return true
 
 
+## `BattleMenu`: what the player is asked once the turn before it has finished
+## being shown. `EmptyBattleTextbox` first, so the menu opens over a clear box
+## rather than over the last line of the turn.
+##
+## `CheckPlayerHasUsableMoves` runs inside `MoveSelectionScreen` rather than
+## here, so a Pokemon with nothing left still opens the menu and Struggle is
+## chosen when FIGHT is.
+func _open_battle_menu() -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	if _battle.awaiting_move_learn() or _battle.must_replace(Gen2Battle.PLAYER):
+		return
+	_menu_stage = &"main"
+	show_message("")
+	_reopen_menu_layer()
+
+
+func _close_battle_menu() -> void:
+	_menu_stage = &""
+	_move_rows = []
+	_reopen_menu_layer()
+
+
+## `MoveSelectionScreen`. `wCurMoveNum` opens the cursor, and a Pokemon with no
+## usable move at all does not get a list: `CheckPlayerHasUsableMoves` returns
+## before the box is drawn and the turn is spent on Struggle.
+func _open_move_menu() -> void:
+	var mon: Gen2BattleMon = _battle.mon(Gen2Battle.PLAYER)
+	_move_rows = Gen2BattleMenu.move_rows(mon, _data)
+	if _move_rows.is_empty() or mon.is_out_of_pp():
+		_close_battle_menu()
+		_take_turn_with_slot(0)
+		return
+	_move_cursor = clampi(_move_cursor, 0, _move_rows.size() - 1)
+	_menu_stage = &"move"
+	show_message("")
+	_reopen_menu_layer()
+
+
+## What a press does while one of the two menus is up.
+func _answer_menu(button: int) -> void:
+	match _menu_stage:
+		&"main":
+			_answer_battle_menu(button)
+		&"move":
+			_answer_move_menu(button)
+		&"refused":
+			## `.place_textbox_start_over` blocks on the line and then jumps back
+			## to `MoveSelectionScreen`, which redraws the list.
+			if _box != null and _box.advance():
+				return
+			_open_move_menu()
+
+
+## `BattleMenu.loop`: the cursor moves, A picks, and B is disabled by the
+## header's own STATICMENU_DISABLE_B.
+func _answer_battle_menu(button: int) -> void:
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN, Gen2Button.LEFT, Gen2Button.RIGHT:
+			var moved: int = Gen2BattleMenu.main_moved(_menu_position, button)
+			if moved == _menu_position:
+				return
+			_menu_position = moved
+			_refresh_menu_layer()
+		Gen2Button.A:
+			_choose_battle_menu()
+
+
+func _choose_battle_menu() -> void:
+	match _menu_position:
+		Gen2BattleMenu.FIGHT:
+			_open_move_menu()
+		Gen2BattleMenu.PKMN:
+			## `BattleMenu_PKMN`'s list, whose SWITCH row is the only one of its
+			## three this screen answers: STATS is the summary screen and CANCEL
+			## comes back here.
+			_close_battle_menu()
+			_open_switch_pick(&"player")
+		Gen2BattleMenu.PACK:
+			## `BattleMenu_Pack` opens the whole pack; the only item this screen
+			## can use is a ball, so a wild battle reaches ball selection and a
+			## trainer battle is told what `.UseItem`'s own `wWildMon` test would
+			## have refused anyway.
+			_close_battle_menu()
+			if _is_wild_battle():
+				begin_capture()
+				return
+			show_message("No item can be used here.")
+		Gen2BattleMenu.RUN:
+			_close_battle_menu()
+			run_from_battle()
+
+
+## `.interpret_joypad`: the cursor wraps, B leaves the list for the menu behind
+## it, and A either refuses the slot or spends the turn on it.
+func _answer_move_menu(button: int) -> void:
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN:
+			_move_cursor = Gen2BattleMenu.move_cursor_moved(
+				_move_cursor, button, _move_rows.size()
+			)
+			_refresh_menu_layer()
+		Gen2Button.B:
+			_menu_stage = &"main"
+			_reopen_menu_layer()
+		Gen2Button.A:
+			var row: Dictionary = _move_rows[_move_cursor]
+			var refusal: String = Gen2BattleMenu.refusal_for(row)
+			if not refusal.is_empty():
+				_menu_stage = &"refused"
+				show_message(refusal)
+				_reopen_menu_layer()
+				return
+			_close_battle_menu()
+			_take_turn_with_slot(int(row.get("slot", 0)))
+
+
+## The turn `BattleMenu_Fight` leads to, with the slot the list chose. The
+## enemy's own action is picked here rather than in the menu, the way
+## `wEnemyAction` is decided after the player's choice.
+func _take_turn_with_slot(slot: int) -> void:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return
+	_move_cursor = slot
+	_pending = _battle.take_actions(Gen2Battle.use_move(slot), _enemy_action())
+	_show_next_event()
+
+
 ## Opens `OfferSwitch`'s yes/no, which only SHIFT ever reaches, and answers
 ## whether there was a question to put up.
 ##
@@ -1959,8 +2126,11 @@ func _open_yes_no(stage: StringName, question: String) -> void:
 ## the row will answer; every one but `OfferSwitch`'s is a list with no way out.
 func _open_switch_pick(reason: StringName) -> void:
 	_switch_reason = reason
+	## `PickSwitchMonInBattle` rather than `ForcePickSwitchMonInBattle` for the
+	## two the player opened themselves: `OfferSwitch`'s YES and the battle
+	## menu's own PKMN, both of which can be backed out of.
 	_switch_menu = Gen2BattleSwitchMenu.for_party(
-		_battle.party(Gen2Battle.PLAYER), reason != &"offer"
+		_battle.party(Gen2Battle.PLAYER), reason not in [&"offer", &"player"]
 	)
 	_switch_offer = null
 	_switch_stage = &"pick"
@@ -2083,6 +2253,12 @@ func _resolve_switch(answer: Dictionary) -> void:
 			_commit_switch(int(answer.get("index", -1)))
 		Gen2BattleSwitchMenu.CANCELLED:
 			_play_anim_sound(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
+			## `BattleMenuPKMN_Loop`'s `.Cancel` is a `jp BattleMenu`: the list
+			## the player opened themselves goes back to the menu it came from.
+			if _switch_reason == &"player":
+				_close_switch()
+				_open_battle_menu()
+				return
 			## `OfferSwitch.canceled_switch` falls into `.said_no`: backing out of
 			## the list is the same answer as NO.
 			_decline_switch_offer()
@@ -2101,6 +2277,13 @@ func _commit_switch(index: int) -> void:
 			_pending = _battle.pass_to(index)
 		&"replace":
 			_pending = _battle.replace_fallen(index)
+		&"player":
+			## `TryPlayerSwitch` spends the turn: the switch is the player's
+			## action and the enemy answers it, which is what makes a free switch
+			## cost a hit.
+			_pending = _battle.take_actions(
+				Gen2Battle.switch_to(index), _enemy_action()
+			)
 		_:
 			_pending = _battle.answer_switch_offer(index)
 	_show_next_event()
@@ -2152,22 +2335,34 @@ func _reopen_menu_layer() -> void:
 func _refresh_menu_layer() -> void:
 	if _menu_layer == null:
 		return
-	var signature: String = "%s|%d|%d" % [
-		_switch_stage,
+	var signature: String = "%s|%s|%d|%d|%d" % [
+		_switch_stage, _menu_stage,
 		_switch_offer.selected_index() if _switch_offer != null else (
 			_switch_menu.cursor if _switch_menu != null else -1
 		),
 		int(_offer_still_reading()),
+		_menu_position * 8 + _move_cursor,
 	]
 	if signature == _menu_drawn:
 		return
 	_menu_drawn = signature
 
+	if _info_layer != null:
+		_info_layer.visible = false
+	if _battle_menu_layer != null:
+		_battle_menu_layer.visible = false
 	match _switch_stage:
 		&"offer", &"use_next":
 			_draw_yes_no_box()
+			return
 		&"pick", &"refused":
 			_draw_party_page()
+			return
+	match _menu_stage:
+		&"main":
+			_draw_battle_menu()
+		&"move":
+			_draw_move_menu()
 		_:
 			_menu_layer.visible = false
 
@@ -2186,6 +2381,65 @@ func _draw_yes_no_box() -> void:
 	)
 
 
+## `BattleMenuHeader`'s two-by-two, drawn where its own `menu_coords` put it.
+func _draw_battle_menu() -> void:
+	if _menu_page == null:
+		return
+	var box: Gen2MenuBox = Gen2BattleMenu.main_box()
+	_show_layer_image(
+		_battle_menu_layer,
+		_menu_page.render(box, Gen2BattleMenu.MAIN_OPTIONS, _menu_position - 1),
+		box.border_position() * Gen2Font.TILE
+	)
+
+
+## `MoveSelectionScreen`'s list and the `MoveInfoBox` beside it.
+func _draw_move_menu() -> void:
+	if _menu_page == null or _move_rows.is_empty():
+		return
+	var names: Array = []
+	for row: Dictionary in _move_rows:
+		names.append(String(row.get("name", "")))
+	var box: Gen2MenuBox = Gen2BattleMenu.move_box()
+	_show_layer_image(
+		_battle_menu_layer,
+		_menu_page.render(box, names, _move_cursor),
+		box.border_position() * Gen2Font.TILE
+	)
+	_draw_move_info(_move_rows[_move_cursor])
+
+
+## `MoveInfoBox`: the type and the PP pair of the row the cursor is on, or its
+## `.Disabled` line in place of both.
+func _draw_move_info(row: Dictionary) -> void:
+	var box: Gen2MenuBox = Gen2BattleMenu.info_box()
+	var extras: Array = []
+	if bool(row.get("disabled", false)):
+		extras.append({
+			"text": Gen2BattleMenu.INFO_DISABLED,
+			"at": Gen2BattleMenu.INFO_DISABLED_AT,
+		})
+	else:
+		extras.append({
+			"text": Gen2BattleMenu.INFO_TYPE_LABEL,
+			"at": Gen2BattleMenu.INFO_TYPE_LABEL_AT,
+		})
+		extras.append({
+			"text": _data.type_name(int(row.get("type", 0))),
+			"at": Gen2BattleMenu.INFO_TYPE_AT,
+		})
+		## `PrintNum` with `lb bc, 1, 2`: two digits, space padded, either side
+		## of the '/' the routine writes itself.
+		extras.append({
+			"text": "%2d/%2d" % [int(row.get("pp", 0)), int(row.get("max_pp", 0))],
+			"at": Gen2BattleMenu.INFO_PP_AT,
+		})
+	_show_layer_image(
+		_info_layer, _menu_page.render(box, [], -1, "", 0, extras),
+		box.border_position() * Gen2Font.TILE
+	)
+
+
 func _draw_party_page() -> void:
 	if _party_page == null or _switch_menu == null:
 		_menu_layer.visible = false
@@ -2199,10 +2453,16 @@ func _draw_party_page() -> void:
 
 
 func _show_menu_image(image: Image, at: Vector2i) -> void:
-	_menu_layer.texture = ImageTexture.create_from_image(image)
-	_menu_layer.position = Vector2(at)
-	_menu_layer.size = Vector2(image.get_size())
-	_menu_layer.visible = true
+	_show_layer_image(_menu_layer, image, at)
+
+
+func _show_layer_image(layer: TextureRect, image: Image, at: Vector2i) -> void:
+	if layer == null:
+		return
+	layer.texture = ImageTexture.create_from_image(image)
+	layer.position = Vector2(at)
+	layer.size = Vector2(image.get_size())
+	layer.visible = true
 
 
 ## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail put on
@@ -2815,7 +3075,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ## [method _handle_button], which runs first and never reaches here.
 func _renderer_input_free() -> bool:
 	return is_ready() and _forget_stage == &"" and _switch_stage == &"" \
-		and not _capture_selecting
+		and _menu_stage == &"" and not _capture_selecting
 
 
 func _handle_button(button: int) -> bool:
@@ -2825,6 +3085,10 @@ func _handle_button(button: int) -> bool:
 
 	if _switch_stage != &"":
 		_answer_switch(button)
+		return true
+
+	if _menu_stage != &"":
+		_answer_menu(button)
 		return true
 
 	if _capture_selecting:
@@ -2842,12 +3106,6 @@ func _handle_button(button: int) -> bool:
 				return false
 		return true
 
-	## B opens ball selection and closes it again. The source reaches a ball
-	## through the PACK, which this screen has no menu for yet; until it does,
-	## the one button with nothing else to do here carries it.
-	if button == Gen2Button.B and _is_wild_battle():
-		begin_capture()
-		return true
 	if button == Gen2Button.A:
 		advance()
 		return true

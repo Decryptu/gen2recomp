@@ -422,6 +422,173 @@ func test_shift_offers_a_switch_when_the_trainer_replaces_its_own_faint() -> voi
 	assert_eq(battle.party(Gen2Battle.PLAYER).active, 0, "and the player stayed")
 
 
+## `BattleMenu` and the `MoveSelectionScreen` behind FIGHT: what the player is
+## asked on their own turn, which the screen used to answer itself with a random
+## slot.
+func _menu_stage() -> String:
+	return String(_screen.battle_snapshot()["menu_stage"])
+
+
+func _menu_layer() -> TextureRect:
+	return _screen.get("_battle_menu_layer")
+
+
+func _advance_to_menu(limit: int = 40) -> void:
+	for _press: int in limit:
+		if _menu_stage() != "":
+			return
+		_settle_bars()
+		_screen.finish()
+		_screen.advance()
+		await get_tree().process_frame
+
+
+## A wild battle whose player has two moves, so the list has two rows and a
+## second one to move the cursor onto.
+func _menu_battle() -> Gen2Battle:
+	return Gen2Battle.create_parties(
+		_data,
+		Gen2Party.create([
+			_mon(BattleFixture.PIKACHU, [BattleFixture.TACKLE, BattleFixture.GROWL]),
+			_mon(BattleFixture.BULBASAUR, [BattleFixture.TACKLE]),
+		]),
+		Gen2Party.of(_mon(BattleFixture.GEODUDE, [BattleFixture.TACKLE])),
+		_rng, false
+	)
+
+
+## The turn ends on the menu rather than on another turn, and `BattleMenuHeader`
+## opens on FIGHT.
+func test_the_end_of_a_turn_opens_the_battle_menu() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+
+	assert_eq(_menu_stage(), "main")
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.FIGHT)
+	assert_true(_menu_layer().visible)
+	assert_false(_screen._renderer_input_free(), "the menu owns the joypad")
+
+
+## `_2DMenuInterpretJoypad` with neither wrap flag: a press off the grid is
+## ignored, and the four positions are the source's own order.
+func test_the_battle_menu_walks_its_two_by_two_and_does_not_wrap() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+
+	await _press(Gen2Button.LEFT)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.FIGHT)
+	await _press(Gen2Button.RIGHT)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.PKMN)
+	await _press(Gen2Button.DOWN)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.RUN)
+	await _press(Gen2Button.DOWN)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.RUN)
+	await _press(Gen2Button.LEFT)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.PACK)
+
+
+## FIGHT is `MoveSelectionScreen`: the Pokemon's own moves, and the row chosen
+## there is the move the turn is spent on.
+func test_fight_opens_the_move_list_and_the_chosen_row_is_the_move_used() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+
+	await _press(Gen2Button.A)
+	assert_eq(_menu_stage(), "move")
+	var rows: Array = _screen.battle_snapshot()["move_rows"]
+	assert_eq(rows.size(), 2, "two moves, two rows")
+	assert_eq(int((rows[0] as Dictionary)["move"]), BattleFixture.TACKLE)
+
+	await _press(Gen2Button.DOWN)
+	assert_eq(int(_screen.battle_snapshot()["move_cursor"]), 1)
+	var before: int = battle.mon(Gen2Battle.PLAYER).pp_left(1)
+	await _press(Gen2Button.A)
+
+	assert_eq(_menu_stage(), "", "the list is gone once the turn is taken")
+	assert_eq(battle.mon(Gen2Battle.PLAYER).pp_left(1), before - 1, "GROWL was used")
+
+
+## `.pressed_up` and `.pressed_down` under the WRAP flag the screen writes.
+func test_the_move_cursor_wraps_and_b_goes_back_to_the_menu() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	await _press(Gen2Button.A)
+
+	await _press(Gen2Button.UP)
+	assert_eq(int(_screen.battle_snapshot()["move_cursor"]), 1, "wrapped to the last row")
+	await _press(Gen2Button.DOWN)
+	assert_eq(int(_screen.battle_snapshot()["move_cursor"]), 0)
+
+	await _press(Gen2Button.B)
+	assert_eq(_menu_stage(), "main", "B leaves the list for the menu behind it")
+
+
+## `.no_pp_left`: the line is printed over the list and the list comes back on
+## the press that reads it, with the turn still unspent.
+func test_a_move_with_no_pp_is_refused_and_the_list_comes_back() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	battle.mon(Gen2Battle.PLAYER).pp[0] = 0
+
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	assert_eq(_menu_stage(), "refused")
+	assert_true(
+		String(_screen.battle_snapshot()["message"]).contains("no PP left"),
+		String(_screen.battle_snapshot()["message"])
+	)
+
+	var box: Gen2TextBox = _screen.get("_box")
+	while box.is_revealing() or box.has_pages_left():
+		box.finish()
+		if box.has_pages_left():
+			box.advance()
+	await _press(Gen2Button.A)
+	assert_eq(_menu_stage(), "move", "and the list is back")
+
+
+## RUN is `BattleMenu_Run`, which settles before the turn does.
+func test_run_leaves_the_wild_battle() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.RIGHT)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.RUN)
+	await _press(Gen2Button.A)
+	assert_eq(_menu_stage(), "")
+	assert_false(_screen.get("_pending").is_empty(), "the run is a turn's worth of events")
+
+
+## PKMN is `BattleMenu_PKMN`: the same party list a switch offer opens, backed
+## out of into the menu it came from, and the row chosen there spends the turn.
+func test_pkmn_opens_a_party_list_that_can_be_cancelled_back_to_the_menu() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+
+	await _press(Gen2Button.RIGHT)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick")
+	assert_eq(String(_screen.battle_snapshot()["switch_reason"]), "player")
+	assert_false(bool(_screen.battle_snapshot()["switch_forced"]), "and it can be left")
+
+	await _press(Gen2Button.B)
+	assert_eq(_stage(), "")
+	assert_eq(_menu_stage(), "main", "cancelling is a jp BattleMenu")
+
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+	assert_eq(battle.party(Gen2Battle.PLAYER).active, 1, "the bench member came in")
+
+
 ## A mod's renderer is offered the leftovers only while the screen is not asking
 ## a question of its own, the way it is for the forget prompt and ball selection.
 func test_a_renderer_is_not_offered_input_while_a_menu_is_up() -> void:

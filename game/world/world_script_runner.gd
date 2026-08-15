@@ -1191,6 +1191,14 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			_staged_engine_flags[int(command["flag"])] = true
 		Gen2WorldScript.CHECKFLAG:
 			_script_value = 1 if _engine_flag_active(int(command["flag"])) else 0
+		## `Script_wildon` and `Script_wildoff`, which write
+		## `STATUSFLAGS_NO_WILD_ENCOUNTERS_F` outright rather than through a
+		## staged flag: it is scratch the next map entry does not clear, and the
+		## scripts that turn it off all turn it back on themselves.
+		Gen2WorldScript.WILDON:
+			_emit_runtime_event(&"wild_encounters_changed", {"enabled": true})
+		Gen2WorldScript.WILDOFF:
+			_emit_runtime_event(&"wild_encounters_changed", {"enabled": false})
 		Gen2WorldScript.WARP:
 			return _stage_warp(command)
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP, Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE, Gen2WorldScript.CLOSEWINDOW:
@@ -1251,6 +1259,7 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.SETVAL, Gen2WorldScript.ADDVAL, Gen2WorldScript.RANDOM,
 		Gen2WorldScript.CHECKEVENT, Gen2WorldScript.CLEAREVENT, Gen2WorldScript.SETEVENT,
 		Gen2WorldScript.CHECKFLAG, Gen2WorldScript.CLEARFLAG, Gen2WorldScript.SETFLAG,
+		Gen2WorldScript.WILDON, Gen2WorldScript.WILDOFF,
 		Gen2WorldScript.READMEM,
 		Gen2WorldScript.READVAR, Gen2WorldScript.LOADVAR,
 		Gen2WorldScript.CHECKTIME, Gen2WorldScript.SPECIAL,

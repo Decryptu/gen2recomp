@@ -111,6 +111,37 @@ static func is_long_grass(collision_code: int) -> bool:
 	return collision_code == COLL_LONG_GRASS or collision_code == COLL_LONG_GRASS_1C
 
 
+## engine/overworld/tile_events.asm's CheckGrassCollision: the ten codes it
+## searches, in its own order. This is the encounter gate, which is why it is a
+## list rather than the nybble test grass_kind() uses: COLL_WATER is on it, so
+## one routine gates a surf roll too, and COLL_TALL_GRASS_10 is not, so the
+## unused tall-grass code carries tufts without carrying encounters.
+const COLL_WATER: int = 0x29
+const ENCOUNTER_TILE_CODES: Array[int] = [
+	0x08,             # COLL_CUT_08
+	0x18,             # COLL_TALL_GRASS
+	COLL_LONG_GRASS,
+	0x28,             # COLL_CUT_28
+	COLL_WATER,
+	0x48, 0x49, 0x4A, 0x4B, 0x4C,  # COLL_GRASS_48..COLL_GRASS_4C
+]
+## home/map_objects.asm's CheckIceTile, which CanEncounterWildMon reads after
+## the grass test and a cave or dungeon reads instead of it.
+const COLL_ICE: int = 0x23
+const COLL_ICE_2B: int = 0x2B
+
+
+## CheckGrassCollision: whether standing on [param collision_code] is a tile a
+## wild encounter can be rolled on at all.
+static func gates_encounter(collision_code: int) -> bool:
+	return ENCOUNTER_TILE_CODES.has(collision_code)
+
+
+## CheckIceTile: ice refuses an encounter wherever it is, cave included.
+static func is_ice(collision_code: int) -> bool:
+	return collision_code == COLL_ICE or collision_code == COLL_ICE_2B
+
+
 ## CheckGrassTile, nybble for nybble. Its water branch is a copy of its grass
 ## branch, which the source itself notes ("For some reason, the above code is
 ## duplicated down here"), so $20 and $28 answer grass here as they do there.

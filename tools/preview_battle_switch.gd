@@ -1,12 +1,14 @@
 extends SceneTree
 
-## Captures the menus a battle switches through, against a real imported cache:
-## `OfferSwitch`'s yes/no box over the field, `AskUseNextPokemon`'s box in the
-## same place, and the party list both of them open behind.
+## Captures the menus a battle is answered through, against a real imported
+## cache: `BattleMenu`'s own FIGHT/PKMN/PACK/RUN and the `MoveSelectionScreen`
+## behind FIGHT, `OfferSwitch`'s yes/no box over the field,
+## `AskUseNextPokemon`'s box in the same place, and the party list they open.
 ##
 ##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses]
 ##
-## [stage] is one of `offer` (the default), `pick`, `use_next` and `replace`;
+## [stage] is one of `offer` (the default), `menu`, `move`, `pick`, `use_next`
+## and `replace`;
 ## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
 ## cursor row or a refusal can be photographed. The battle is a real trainer's
 ## party out of the cache with the player on a bench of three, since both a
@@ -28,6 +30,9 @@ const SETTLE_FRAMES: int = 30
 const TRAINER_CLASS: int = 1
 const PLAYER_SPECIES: Array[int] = [155, 152, 158]
 const PLAYER_LEVEL: int = 30
+## Four moves on the lead, so `MoveSelectionScreen`'s list is a full one:
+## TACKLE, GROWL, TAIL_WHIP and BITE (constants/move_constants.asm).
+const LEAD_MOVES: Array[int] = [33, 45, 39, 44]
 
 var _screen: Gen2BattleScreen = null
 var _output_path: String = ""
@@ -76,8 +81,9 @@ func _process(_delta: float) -> bool:
 		quit(1)
 		return true
 	var snapshot: Dictionary = _screen.battle_snapshot()
-	print("Wrote %s, stage %s, answering %s" % [
+	print("Wrote %s, switch stage %s answering %s, menu stage %s at %d/%d" % [
 		_output_path, snapshot["switch_stage"], snapshot["switch_reason"],
+		snapshot["menu_stage"], snapshot["menu_position"], snapshot["move_cursor"],
 	])
 	quit(0)
 	return true
@@ -94,7 +100,10 @@ func _open() -> void:
 
 	var members: Array = []
 	for species: int in PLAYER_SPECIES:
-		members.append(Gen2BattleMon.create(data, species, PLAYER_LEVEL, [33]))
+		members.append(Gen2BattleMon.create(
+			data, species, PLAYER_LEVEL,
+			LEAD_MOVES.duplicate() if members.is_empty() else [33]
+		))
 	var enemy: Gen2Party = Gen2TrainerParty.build(data, TRAINER_CLASS, 0)
 	if enemy == null or enemy.size() < 2:
 		push_error("Trainer class %d has no bench to switch from" % TRAINER_CLASS)
@@ -120,10 +129,21 @@ func _open() -> void:
 		_screen.set("_pending", [
 			{"type": Gen2Battle.FAINTED, "side": Gen2Battle.PLAYER},
 		])
-	else:
+	elif _stage not in ["menu", "move"]:
 		_screen.set("_pending", battle.take_actions(
 			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
 		))
+
+	## Both menu stages are what the intro leads into with nothing else staged,
+	## which is `BattleMenu`'s own first opening.
+	if _stage in ["menu", "move"]:
+		_drain_to_menu()
+		if _stage == "move":
+			_screen._handle_button(Gen2Button.A)
+		for press: String in _presses:
+			_screen._handle_button(_button(press))
+		_screen.finish()
+		return
 
 	_drain()
 	if _stage == "pick":
@@ -136,6 +156,16 @@ func _open() -> void:
 	## A refusal is a line the box is still revealing, and the capture does not
 	## wait on real time.
 	_screen.finish()
+
+
+## The same drain, stopping at `BattleMenu` rather than at a switch question.
+func _drain_to_menu() -> void:
+	for _press: int in 60:
+		if String(_screen.battle_snapshot()["menu_stage"]) != "":
+			return
+		_settle()
+		_screen.finish()
+		_screen.advance()
 
 
 ## Every queued event shown and pressed past, which is what reaches the question.

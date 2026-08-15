@@ -174,7 +174,7 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	var collision: Array = []
 	collision.resize(MAP_WIDTH_CELLS * MAP_HEIGHT_CELLS)
 	collision.fill(0)
-	collision[7 * MAP_WIDTH_CELLS + 8] = 0x20
+	collision[7 * MAP_WIDTH_CELLS + 8] = 0x29
 
 	var objects: Array = [{
 		"sprite": TRAINER_SPRITE,

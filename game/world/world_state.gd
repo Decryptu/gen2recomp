@@ -111,6 +111,15 @@ var _coins: int = 0
 var _phone_contacts: Dictionary = {}
 var _just_battled: bool = false
 var _repel_steps: int = 0
+## `wWildEncounterCooldown`, which `EnterMap` sets to five and every step
+## decrements. Scratch on the cartridge rather than saved data, kept here
+## because this is where the world's own per-step counters live; a state written
+## before it existed restores as zero, which is the value a walk reaches after
+## its first four steps anyway.
+var _wild_encounter_cooldown: int = 0
+## `wStatusFlags`' `STATUSFLAGS_NO_WILD_ENCOUNTERS_F`, which `wildoff` sets and
+## `wildon` clears around a scripted sequence.
+var _wild_encounters_off: bool = false
 var _swarm_map: Vector2i = Vector2i(-1, -1)
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
@@ -238,6 +247,8 @@ func to_dict() -> Dictionary:
 		"phone_contacts": _phone_contacts.duplicate(),
 		"just_battled": _just_battled,
 		"repel_steps": _repel_steps,
+		"wild_encounter_cooldown": _wild_encounter_cooldown,
+		"wild_encounters_off": _wild_encounters_off,
 		"swarm_map": [_swarm_map.x, _swarm_map.y],
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
@@ -307,6 +318,8 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 			if int(raw_tree) > 0 and bool((picked as Dictionary)[raw_tree]):
 				restored._picked_fruit_trees[int(raw_tree)] = true
 	restored.set_registered_item(int(source.get("registered_item", 0)))
+	restored.set_wild_encounter_cooldown(int(source.get("wild_encounter_cooldown", 0)))
+	restored.set_wild_encounters_off(bool(source.get("wild_encounters_off", false)))
 	return restored
 
 
@@ -327,6 +340,8 @@ func restore_from_dict(raw: Variant) -> void:
 	_phone_contacts = restored._phone_contacts.duplicate()
 	_just_battled = restored._just_battled
 	_repel_steps = restored._repel_steps
+	_wild_encounter_cooldown = restored._wild_encounter_cooldown
+	_wild_encounters_off = restored._wild_encounters_off
 	_swarm_map = restored._swarm_map
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
@@ -736,6 +751,44 @@ func set_radio_channel(channel: int) -> void:
 	if next_channel == _radio_channel:
 		return
 	_radio_channel = next_channel
+	changed.emit()
+
+
+func wild_encounter_cooldown() -> int:
+	return _wild_encounter_cooldown
+
+
+## `SetUpFiveStepWildEncounterCooldown`'s own write, which `EnterMap` makes on
+## every map entry, `reloadmapafterbattle` included.
+const WILD_ENCOUNTER_COOLDOWN_STEPS: int = 5
+
+
+func set_wild_encounter_cooldown(steps: int) -> void:
+	var next_steps: int = clampi(steps, 0, 0xFF)
+	if next_steps == _wild_encounter_cooldown:
+		return
+	_wild_encounter_cooldown = next_steps
+	changed.emit()
+
+
+## `CheckWildEncounterCooldown`: zero lets the step through, and so does the step
+## that takes the counter to zero. Answers whether this step is blocked.
+func consume_wild_encounter_cooldown() -> bool:
+	if _wild_encounter_cooldown <= 0:
+		return false
+	_wild_encounter_cooldown -= 1
+	changed.emit()
+	return _wild_encounter_cooldown > 0
+
+
+func wild_encounters_off() -> bool:
+	return _wild_encounters_off
+
+
+func set_wild_encounters_off(value: bool) -> void:
+	if _wild_encounters_off == value:
+		return
+	_wild_encounters_off = value
 	changed.emit()
 
 
