@@ -5058,9 +5058,12 @@ func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void
 	assert_eq(world.collision_permission_at(world.player_cell), Gen2WorldCollision.WATER_TILE)
 	## EnterMap's five-step cooldown: the map this world opened on set it, and
 	## every request spends one step of it before the tile is even looked at.
+	## The generator is seeded because the fixture's rate is 255 and one roll in
+	## 256 is the one that refuses: unseeded, this case failed about that often.
+	var random: RandomNumberGenerator = _seeded()
 	for step: int in Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS - 1:
-		assert_true(world.encounter_request().is_empty(), "cooldown step %d" % step)
-	var encounter: Dictionary = world.encounter_request()
+		assert_true(world.encounter_request(random).is_empty(), "cooldown step %d" % step)
+	var encounter: Dictionary = world.encounter_request(random)
 	assert_eq(encounter["kind"], &"wild_encounter_requested")
 	assert_eq(encounter["fish_group"], 1)
 	assert_eq(encounter["values"]["kind"], &"wild")

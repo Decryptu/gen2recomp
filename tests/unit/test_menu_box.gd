@@ -93,3 +93,35 @@ func test_world_menu_shares_this_flag_set() -> void:
 	assert_eq(
 		Gen2WorldMenu.STATICMENU_ENABLE_LEFT_RIGHT, Gen2MenuBox.STATICMENU_ENABLE_LEFT_RIGHT
 	)
+
+
+## `BattleMenuHeader`'s own `dn 2, 2` and `db 6`, which is the one two-column
+## menu here: FIGHT and PACK share a column, PKMN and RUN sit six to the right,
+## and the rows are two apart like every other menu's.
+func test_a_two_column_menu_walks_its_row_before_dropping() -> void:
+	var box: Gen2MenuBox = Gen2BattleMenu.main_box()
+	assert_eq(box.text_start(), Vector2i(10, 14))
+	assert_eq(box.item_position(0), Vector2i(10, 14), "FIGHT")
+	assert_eq(box.item_position(1), Vector2i(16, 14), "PKMN")
+	assert_eq(box.item_position(2), Vector2i(10, 16), "PACK")
+	assert_eq(box.item_position(3), Vector2i(16, 16), "RUN")
+	assert_eq(box.cursor_position(3), Vector2i(15, 16))
+	assert_eq(box.border_size(), Vector2i(12, 6))
+
+
+## `MoveSelectionScreen`'s own `Textbox`: `hlcoord 4, 12` with `b, 4` and
+## `c, 14`, its rows one apart rather than two, and its cursor column 5.
+func test_the_move_list_is_a_one_row_step_box() -> void:
+	var box: Gen2MenuBox = Gen2BattleMenu.move_box()
+	assert_eq(box.interior(), Vector2i(14, 4))
+	assert_eq(box.item_position(0), Vector2i(6, 13))
+	assert_eq(box.item_position(3), Vector2i(6, 16))
+	assert_eq(box.cursor_position(0), Vector2i(5, 13))
+
+
+## `MoveInfoBox`'s `hlcoord 0, 8` with `b, 3` and `c, 9`.
+func test_the_move_info_box_is_the_source_rectangle() -> void:
+	var box: Gen2MenuBox = Gen2BattleMenu.info_box()
+	assert_eq(box.interior(), Vector2i(9, 3))
+	assert_eq(box.border_position(), Vector2i(0, 8))
+	assert_eq(box.border_size(), Vector2i(11, 5))
