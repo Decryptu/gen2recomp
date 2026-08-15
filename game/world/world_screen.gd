@@ -859,7 +859,9 @@ func _after_player_move(movement: Dictionary) -> bool:
 		_show_script_results(phone_results)
 		return true
 	_show_script_results([])
-	var encounter: Dictionary = _world.encounter_request(_encounter_random)
+	var encounter: Dictionary = _world.encounter_request(
+		_encounter_random, false, &"auto", _repel_lead_level(), _party_holds_cleanse_tag()
+	)
 	if not encounter.is_empty():
 		_start_battle_request({
 			"kind": &"battle_requested",
@@ -867,6 +869,32 @@ func _after_player_move(movement: Dictionary) -> bool:
 			"encounter": encounter.duplicate(true),
 		})
 	return true
+
+
+## `CheckRepelEffect`'s own lead: the first party member that is not fainted, or
+## -1 when there is no party to read, which is what a repel compares a wild
+## level against. The party lives in the save rather than in the world API, so
+## the screen is the one place that can answer it.
+func _repel_lead_level() -> int:
+	var save: Gen2SaveData = _selected_runtime_save()
+	if save == null:
+		return -1
+	for mon: Gen2SaveMon in save.party:
+		if mon.hp > 0:
+			return mon.level
+	return -1
+
+
+## `ApplyCleanseTagEffectOnEncounterRate` walks the whole party, fainted members
+## included, and halves the rate on the first Cleanse Tag it finds.
+func _party_holds_cleanse_tag() -> bool:
+	var save: Gen2SaveData = _selected_runtime_save()
+	if save == null:
+		return false
+	for mon: Gen2SaveMon in save.party:
+		if mon.item == Gen2HeldItem.CLEANSE_TAG:
+			return true
+	return false
 
 
 ## Public driver for the production NPC/object interaction path.
@@ -1551,6 +1579,13 @@ func _on_battle_finished(result: Dictionary) -> void:
 		}})
 	var resumed: Array = _world.complete_runtime_request(result)
 	if resumed.is_empty():
+		## `WildBattleScript` is `randomwildmon`, `startbattle`,
+		## `reloadmapafterbattle`, `end`: a wild encounter reloads the map on the
+		## way out even though no script was suspended, and that reload is what
+		## puts the five-step cooldown back so the next step cannot roll another.
+		_world.reload_current_map()
+		if _renderer != null:
+			_renderer.refresh()
 		if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
 			var capture: Dictionary = result.get("capture", {})
 			var species: Dictionary = _data.species(int(capture.get("species", 0)))

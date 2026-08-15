@@ -114,6 +114,30 @@ func test_swarm_source_and_repel_are_resolved_after_the_candidate_roll() -> void
 	assert_eq(allowed["source"], Gen2WorldEncounter.SOURCE_SWARM)
 
 
+## `ApplyMusicEffectOnEncounterRate` then `ApplyCleanseTagEffectOnEncounterRate`,
+## both `sla b`/`srl b` on the rate byte: a rate of 200 doubled is 144, not 255.
+func test_the_rate_is_shifted_by_the_map_music_and_by_a_cleanse_tag() -> void:
+	var slots: Array = []
+	for _slot: int in RomLayout.WILD_GRASS_SLOT_COUNT:
+		slots.append({"level": 4, "species": 16})
+	var record: Dictionary = {"rates": [200, 200, 200], "slots": [slots, slots, slots]}
+	var cases: Array = [
+		[0, false, 200],
+		[Gen2WorldEncounter.MUSIC_POKEMON_MARCH, false, 144],
+		[Gen2WorldEncounter.MUSIC_RUINS_OF_ALPH_RADIO, false, 144],
+		[Gen2WorldEncounter.MUSIC_POKEMON_LULLABY, false, 100],
+		[0, true, 100],
+		[Gen2WorldEncounter.MUSIC_POKEMON_LULLABY, true, 50],
+	]
+	for case: Array in cases:
+		var result: Dictionary = Gen2WorldEncounter.resolve(
+			record, Gen2WorldEncounter.METHOD_GRASS, Gen2WorldPalette.TIME_DAY,
+			RandomNumberGenerator.new(), true,
+			{"map_music": case[0], "cleanse_tag": case[1]}
+		)
+		assert_eq(result["rate"], case[2], "music %d cleanse %s" % [case[0], case[1]])
+
+
 func test_roaming_selection_uses_the_land_roll_before_normal_slots() -> void:
 	var slots: Array = []
 	for _time_of_day: int in RomLayout.WILD_TIME_COUNT:

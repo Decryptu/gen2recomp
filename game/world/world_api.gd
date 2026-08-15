@@ -315,6 +315,9 @@ func _init(
 	current_map = map
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
+	# Opening a world is `StartMap`, which falls into `EnterMap`: the five-step
+	# cooldown is set here for the same reason _apply_map() sets it on a warp.
+	state.set_wild_encounter_cooldown(Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS)
 	_load_objects()
 	_apply_map_music()
 
@@ -1449,12 +1452,35 @@ static func _strength_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"strength_failed", "reason": reason}
 
 
+## Environments a wild encounter is rolled on any tile of. `CAVE` and `DUNGEON`
+## jump straight to the ice test, which is what puts encounters on a cave floor
+## rather than only on its grass.
+const ENVIRONMENT_CAVE: int = 4
+const ENVIRONMENT_DUNGEON: int = 7
+
+
+## `CanEncounterWildMon`: the whole condition on the tile the player is standing
+## on, before the rate is even read. Without it every step on open ground rolls,
+## which is both an encounter outside the grass and, over a walk, several times
+## the rate the cartridge has.
+func can_encounter_wild_mon() -> bool:
+	if state.wild_encounters_off():
+		return false
+	var code: int = collision_code_at(player_cell)
+	var environment: int = current_map.environment if current_map != null else 0
+	if environment != ENVIRONMENT_CAVE and environment != ENVIRONMENT_DUNGEON \
+		and not Gen2WorldCollision.gates_encounter(code):
+		return false
+	return not Gen2WorldCollision.is_ice(code)
+
+
 ## Rolls an encounter from the current map. Auto mode preserves the existing
 ## terrain behavior; an explicit rod method uses the map header's fishing
 ## group. The caller supplies the generator so tests can reproduce a result.
 func encounter_request(
 	random: RandomNumberGenerator = null, force_encounter: bool = false,
-	method: StringName = &"auto", lead_level: int = -1
+	method: StringName = &"auto", lead_level: int = -1,
+	cleanse_tag: bool = false
 ) -> Dictionary:
 	if current_map == null or data == null:
 		return {}
@@ -1489,6 +1515,15 @@ func encounter_request(
 		Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF,
 	]:
 		return {}
+	## `RandomEncounter`'s own two gates, in its order: the cooldown a map entry
+	## set, then `CanEncounterWildMon`. A forced request is a preview or a story
+	## walk asking for the table's answer rather than the step's, so it skips
+	## both the way it already skips the rate roll.
+	if not force_encounter:
+		if state.consume_wild_encounter_cooldown():
+			return {}
+		if not can_encounter_wild_mon():
+			return {}
 	var permission: int = collision_permission_at(player_cell)
 	var terrain_method: StringName = method
 	if terrain_method == &"auto" and permission == Gen2WorldCollision.WATER_TILE:
@@ -1515,6 +1550,8 @@ func encounter_request(
 			"map_number": current_map.number,
 			"repel_steps": state.repel_steps(),
 			"lead_level": lead_level,
+			"map_music": state.map_music(),
+			"cleanse_tag": cleanse_tag,
 		}
 	)
 	if resolved.is_empty():
@@ -3211,6 +3248,13 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 		if event_type == &"map_reload_requested":
 			generated.append(reload_current_map())
 			continue
+		if event_type == &"wild_encounters_changed":
+			var wild_enabled: bool = bool(event.get("enabled", true))
+			state.set_wild_encounters_off(not wild_enabled)
+			generated.append({
+				"type": &"wild_encounters_changed", "enabled": wild_enabled,
+			})
+			continue
 		if event_type == &"variable_sprite_changed":
 			var variable_sprite: int = int(event.get("variable_sprite", -1))
 			var sprite: int = int(event.get("sprite", 0))
@@ -4608,6 +4652,9 @@ func _apply_map(
 	# are live-map changes, so only those overrides expire on a map load.
 	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
+	# EnterMap's own SetUpFiveStepWildEncounterCooldown, which is why the first
+	# steps out of a door are quiet.
+	state.set_wild_encounter_cooldown(Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS)
 	# ResetFlashIfOutOfCave, which runs in map setup: stepping out into a route
 	# or a town puts the light out, and a cave to cave doorway does not.
 	state.clear_flash_if_outdoors(target_map.environment)
@@ -4662,6 +4709,10 @@ func reload_current_map() -> Dictionary:
 	_pending_flash.clear()
 	_clear_transient_object_visibility_overrides()
 	state.reset_map_reload_flags()
+	# `Script_reloadmap` asks for MAPSTATUS_ENTER, so a battle's own reload runs
+	# EnterMap and takes its five-step cooldown with it: that is what stops a
+	# second wild the step after the first.
+	state.set_wild_encounter_cooldown(Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS)
 	_load_objects()
 	return {"ok": true, "kind": &"reload_map", "map": map_id(), "cell": player_cell}
 

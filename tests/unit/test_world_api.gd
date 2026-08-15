@@ -49,7 +49,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"block_count": 2,
 		"tile_count": RomLayout.TILESET_TILE_COUNT,
 		"meta": meta,
-		"collision": [0, 0, 0, 0, 0x20, 0x20, 0x20, 0x20],
+		"collision": [0, 0, 0, 0, 0x29, 0x29, 0x29, 0x29],
 	}])
 
 	var blocks: Array = []
@@ -61,7 +61,7 @@ func _write_cache(game_id: String = "testworld") -> void:
 	for index: int in collision.size():
 		collision[index] = 0
 	collision[6 * 16 + 9] = 0x07
-	collision[7 * 16 + 8] = 0x20
+	collision[7 * 16 + 8] = 0x29
 	collision[6 * 16 + 6] = 0x70
 
 	# Ledge fixture, rows 2-4: a plain hop-down at (3,2) with a wall below it
@@ -127,6 +127,10 @@ func _write_cache(game_id: String = "testworld") -> void:
 	# spawns on a step into it. LAND_TILE permission, so an ordinary step reaches
 	# it and nothing else in the fixture changes.
 	collision[10 * 16 + 5] = 0x18  # COLL_TALL_GRASS
+
+	# An ice cell beside it, which CanEncounterWildMon refuses on every
+	# environment including the cave branch that skips the grass test.
+	collision[10 * 16 + 6] = 0x23  # COLL_ICE
 
 	var source_events: Dictionary = {
 		"bank": 48,
@@ -806,7 +810,7 @@ func test_movement_uses_raw_collision_codes_without_mutating_them() -> void:
 	assert_false(world.move(Vector2i.RIGHT))
 	assert_eq(world.player_cell, Vector2i(8, 6))
 
-	assert_eq(world.collision_code_at(Vector2i(8, 7)), 0x20)
+	assert_eq(world.collision_code_at(Vector2i(8, 7)), 0x29)
 	assert_false(world.can_walk_to(Vector2i(8, 7)))
 	assert_false(world.move(Vector2i.DOWN))
 
@@ -4988,7 +4992,7 @@ func test_change_block_updates_tiles_and_collision_from_the_tileset_block() -> v
 	assert_eq(world.change_block(0, 0, 1)["ok"], true)
 	assert_eq(world.block_at(0, 0), 1)
 	assert_eq(world.tile_index_at(0, 0), 16)
-	assert_eq(world.collision_code_at(Vector2i(0, 0)), 0x20)
+	assert_eq(world.collision_code_at(Vector2i(0, 0)), 0x29)
 	assert_eq(world.change_block(0, 0, 0)["ok"], true)
 	assert_eq(world.collision_code_at(Vector2i(0, 0)), 0)
 
@@ -5052,6 +5056,10 @@ func test_surf_movement_accepts_water_and_exposes_an_encounter_request() -> void
 	assert_true(movement["ok"])
 	assert_eq(movement["kind"], &"water_move")
 	assert_eq(world.collision_permission_at(world.player_cell), Gen2WorldCollision.WATER_TILE)
+	## EnterMap's five-step cooldown: the map this world opened on set it, and
+	## every request spends one step of it before the tile is even looked at.
+	for step: int in Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS - 1:
+		assert_true(world.encounter_request().is_empty(), "cooldown step %d" % step)
 	var encounter: Dictionary = world.encounter_request()
 	assert_eq(encounter["kind"], &"wild_encounter_requested")
 	assert_eq(encounter["fish_group"], 1)
@@ -5268,6 +5276,82 @@ func test_repel_blocks_lower_level_candidates_and_counts_down_on_steps() -> void
 		null, true, &"auto", 5
 	)
 	assert_false(allowed.is_empty())
+
+
+## `CanEncounterWildMon`: outdoors it is `CheckGrassCollision` on the standing
+## tile alone, so open ground rolls nothing however high the map's rate is.
+func test_an_unforced_encounter_needs_the_grass_the_source_checks_for() -> void:
+	var world := _world(Vector2i(5, 10))
+	world.state.set_wild_encounter_cooldown(0)
+	assert_true(world.can_encounter_wild_mon(), "COLL_TALL_GRASS")
+	assert_false(world.encounter_request(_seeded()).is_empty())
+
+	world.player_cell = Vector2i(5, 9)
+	assert_eq(world.collision_code_at(world.player_cell), 0, "plain land")
+	assert_false(world.can_encounter_wild_mon())
+	assert_true(world.encounter_request(_seeded()).is_empty())
+
+
+## The `CAVE`/`DUNGEON` branch skips the grass test, and the ice test is the one
+## thing both branches share.
+func test_a_cave_rolls_on_any_tile_and_ice_refuses_on_every_environment() -> void:
+	var world := _world(Vector2i(5, 9))
+	world.state.set_wild_encounter_cooldown(0)
+	world.current_map.environment = Gen2WorldAPI.ENVIRONMENT_CAVE
+	assert_true(world.can_encounter_wild_mon(), "a cave floor is not grass")
+	world.current_map.environment = Gen2WorldAPI.ENVIRONMENT_DUNGEON
+	assert_true(world.can_encounter_wild_mon())
+
+	world.player_cell = Vector2i(6, 10)
+	assert_eq(world.collision_code_at(world.player_cell), Gen2WorldCollision.COLL_ICE)
+	for environment: int in [
+		Gen2WorldAPI.ENVIRONMENT_CAVE, Gen2WorldAPI.ENVIRONMENT_DUNGEON, 2,
+	]:
+		world.current_map.environment = environment
+		assert_false(world.can_encounter_wild_mon(), "ice in environment %d" % environment)
+
+
+## `wildoff` and `wildon`, the one thing that turns the whole roll off from a
+## script.
+func test_wildoff_stops_every_roll_until_wildon_puts_it_back() -> void:
+	var world := _world(Vector2i(5, 10))
+	world.state.set_wild_encounter_cooldown(0)
+	world.state.set_wild_encounters_off(true)
+	assert_false(world.can_encounter_wild_mon())
+	assert_true(world.encounter_request(_seeded()).is_empty())
+	world.state.set_wild_encounters_off(false)
+	assert_false(world.encounter_request(_seeded()).is_empty())
+
+
+## `CheckWildEncounterCooldown`: five steps are written on map entry and the
+## fifth is the one that rolls, since the step taking the counter to zero is let
+## through.
+func test_a_map_entry_costs_four_steps_of_wild_encounters() -> void:
+	var world := _world(Vector2i(5, 10))
+	assert_eq(
+		world.state.wild_encounter_cooldown(),
+		Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS
+	)
+	for step: int in Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS - 1:
+		assert_true(world.encounter_request(_seeded()).is_empty(), "step %d" % step)
+	assert_false(world.encounter_request(_seeded()).is_empty())
+	assert_eq(world.state.wild_encounter_cooldown(), 0)
+
+	## `Script_reloadmap` re-enters the map, which is what a finished battle
+	## does, so the counter is back up afterwards.
+	assert_true(world.reload_current_map()["ok"])
+	assert_eq(
+		world.state.wild_encounter_cooldown(),
+		Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS
+	)
+
+
+## A generator whose first roll is under every fixture rate, so a request that
+## reaches the roll resolves and one that does not is the gate's answer.
+func _seeded() -> RandomNumberGenerator:
+	var random := RandomNumberGenerator.new()
+	random.seed = 1
+	return random
 
 
 func _event_value(
