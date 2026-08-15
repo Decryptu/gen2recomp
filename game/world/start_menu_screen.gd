@@ -58,6 +58,9 @@ const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
+## How many window pixels a hardware pixel is drawn as inside the panel.
+const PACK_VIEW_SCALE: int = 2
+
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
 var _save_action: Callable = Callable()
@@ -73,6 +76,12 @@ var _item_actions: Array = []
 var _item_cursor: int = 0
 var _target_cursor: int = 0
 var _pack_result: String = ""
+## `wItemsPocketScrollPosition` and its three siblings: which entry the visible
+## five start at. Held per pocket, the way the source holds one variable each.
+var _pack_scroll: Array[int] = [0, 0, 0, 0]
+var _pack_cursors: Array[int] = [0, 0, 0, 0]
+var _pack_page: Gen2PackPage = null
+var _pack_view: TextureRect = null
 var _pack_result_ok: bool = false
 ## AskTeachTMHM's resolved prompt, held while its yes/no is on screen, and
 ## whether the party list that follows is ChooseMonToLearnTMHM's rather than
@@ -332,7 +341,10 @@ func _confirm() -> void:
 		Mode.LIST:
 			_confirm_list()
 		Mode.PACK:
-			if _current_pocket_items().is_empty():
+			## `ScrollingMenuJoyAction`'s `.a_button` answers `-1` on the CANCEL
+			## row and falls into `.b_button`, so choosing it leaves the pack.
+			if _pack_cursor_on_cancel():
+				_cancel()
 				return
 			## `DepositSellPack` acts on the item it is given rather than
 			## opening a submenu over it, which is the pack `.GiveItem` opens.
@@ -618,8 +630,12 @@ func _open_pack_mode(reset: bool = true) -> void:
 	if reset:
 		_pack_pocket_index = 0
 		_pack_cursor = 0
+		_pack_cursors.fill(0)
+		_pack_scroll.fill(0)
 	_pack_pocket_index = clampi(_pack_pocket_index, 0, maxi(_pack_pockets.size() - 1, 0))
-	_pack_cursor = clampi(_pack_cursor, 0, maxi(_current_pocket_items().size() - 1, 0))
+	## The CANCEL row is always there, so an emptied pocket puts the cursor on it
+	## rather than on an item that is gone.
+	_pack_cursor = clampi(_pack_cursor, 0, _current_pocket_items().size())
 	_status.text = ""
 	_footer.text = "Left and right: pocket    Up and down: move    A: %s    B: back" % (
 		"give" if _give_target >= 0 else "choose"
@@ -637,33 +653,124 @@ func _current_pocket_items() -> Array:
 	return _current_pocket().get("items", [])
 
 
+## `.ItemsPocketMenu` and its three siblings, each of which stores its own
+## `w*PocketCursor` and `w*PocketScrollPosition` on the way out and loads them
+## again on the way in, so a pocket is where the player left it.
 func _cycle_pocket(delta: int) -> void:
 	if _pack_pockets.is_empty():
 		return
+	_pack_cursors[_pack_pocket_index] = _pack_cursor
 	_pack_pocket_index = wrapi(_pack_pocket_index + signi(delta), 0, _pack_pockets.size())
-	_pack_cursor = 0
+	_pack_cursor = clampi(
+		_pack_cursors[_pack_pocket_index], 0, _current_pocket_items().size()
+	)
 	_render_pack()
 
 
+## `ScrollingMenuJoyAction`'s `.d_up` and `.d_down`, which move the cursor
+## inside the visible five and scroll only at their edges. The CANCEL row is one
+## past the last item, which is what makes the walk wrap over `size + 1`.
 func _move_pack_cursor(delta: int) -> void:
-	var items: Array = _current_pocket_items()
-	if items.is_empty():
-		return
-	_pack_cursor = wrapi(_pack_cursor + signi(delta), 0, items.size())
+	var rows: int = _current_pocket_items().size() + 1
+	_pack_cursor = wrapi(_pack_cursor + signi(delta), 0, rows)
+	_pack_scroll[_pack_pocket_index] = clampi(
+		clampi(
+			_pack_scroll[_pack_pocket_index],
+			_pack_cursor - (Gen2PackPage.LIST_HEIGHT - 1), _pack_cursor
+		),
+		0, maxi(rows - Gen2PackPage.LIST_HEIGHT, 0)
+	)
 	_render_pack()
+
+
+## Whether the cursor is on `ScrollingMenu_UpdateDisplay`'s CANCEL row, which is
+## what a pocket with nothing in it is entirely made of.
+func _pack_cursor_on_cancel() -> bool:
+	return _pack_cursor >= _current_pocket_items().size()
 
 
 func _render_pack() -> void:
 	var pocket: Dictionary = _current_pocket()
 	_title.text = "GIVE" if _give_target >= 0 else "PACK"
 	_summary.text = String(pocket.get("name", ""))
-	var items: Array = pocket.get("items", [])
-	if items.is_empty():
-		_status.text = "No items in this pocket."
-		_status.add_theme_color_override("font_color", MUTED)
-	_render_options(items, _pack_cursor, func(entry: Dictionary) -> String:
-		return "%s    x%d" % [entry.get("name", "UNKNOWN"), int(entry.get("quantity", 0))]
+	_status.text = ""
+	_render_options([], -1, func(_entry: Variant) -> String: return "")
+	if _pack_view != null:
+		_pack_view.visible = true
+		_pack_view.texture = ImageTexture.create_from_image(_pack_image())
+
+
+## The five rows `ScrollingMenu_UpdateDisplay` writes, out of the pocket's own
+## items and the CANCEL row after them. The TM/HM pocket is
+## `TMHM_DisplayPocketItems`, which prints the TM number and the move it teaches
+## rather than the item's name.
+func _pack_rows() -> Array:
+	var items: Array = _current_pocket_items()
+	var tmhm: bool = int(_current_pocket().get("pocket", 0)) == Gen2WorldPack.TYPE_TM_HM
+	var scroll: int = _pack_scroll[_pack_pocket_index]
+	var out: Array = []
+	for offset: int in Gen2PackPage.LIST_HEIGHT:
+		var index: int = scroll + offset
+		if index > items.size():
+			break
+		if index == items.size():
+			out.append({"kind": Gen2PackPage.ROW_CANCEL})
+			break
+		var entry: Dictionary = items[index]
+		var item: int = int(entry.get("item", 0))
+		## `PlaceMenuItemQuantity` asks `_CheckTossableItem`, so a key item and
+		## an HM carry no count on this screen.
+		var row: Dictionary = {
+			"kind": Gen2PackPage.ROW_ITEM,
+			"name": String(entry.get("name", "")),
+			"quantity": int(entry.get("quantity", 0)),
+			"show_quantity": Gen2WorldPack.can_toss(_data, item),
+		}
+		if tmhm:
+			var number: int = RomLayout.tmhm_number_for_item(
+				item, _data.tmhm_moves().size() if _data != null else 0
+			)
+			var hm: bool = Gen2WorldTMHM.is_hm(item)
+			row["kind"] = Gen2PackPage.ROW_TM
+			row["hm"] = hm
+			row["number"] = number - RomLayout.TMHM_TM_COUNT if hm else number
+			row["name"] = _data.move(
+				Gen2WorldTMHM.move_for_item(_data, item)
+			).get("name", "") if _data != null else ""
+		out.append(row)
+	return out
+
+
+## The pack as the cartridge draws it. `UpdateItemDescription` prints the item's
+## own description, and the TM/HM pocket the move's; a cursor on CANCEL leaves
+## the box empty, which is what `TMHM_CheckHoveringOverCancel` does.
+func _pack_image() -> Image:
+	if _pack_page == null:
+		_pack_page = Gen2PackPage.from_data(_data)
+	var pocket: int = _pack_pocket_index
+	var rows: Array = _pack_rows()
+	var cursor: int = _pack_cursor - _pack_scroll[_pack_pocket_index]
+	var map: PackedInt32Array = _pack_page.pocket_map(
+		pocket, rows, cursor, _pack_description(),
+		_data.pack_pocket_name(pocket) if _data != null else PackedByteArray()
 	)
+	return _pack_page.image(_data, map, pocket, _player_is_female())
+
+
+func _pack_description() -> String:
+	if _pack_cursor_on_cancel() or _data == null:
+		return ""
+	var item: int = int(_selected_item().get("item", 0))
+	if Gen2WorldTMHM.is_tm_hm(item):
+		return String(_data.move(
+			Gen2WorldTMHM.move_for_item(_data, item)
+		).get("description", ""))
+	return String(_data.item(item).get("description", ""))
+
+
+## `wPlayerGender`, which picks Kris's pack and her own palettes.
+func _player_is_female() -> bool:
+	return _world != null and _world.player_female()
 
 
 func _selected_item() -> Dictionary:
@@ -854,7 +961,7 @@ func _confirm_use() -> void:
 			## `_CoinCaseCountText` and nothing else: the count is shown where the
 			## pack already prints, and the pack stays open behind it.
 			if number == Gen2WorldPack.ITEM_COIN_CASE:
-				_show_pack_result("Coins:\n%4d" % _coins(), true)
+				_show_pack_result(_coin_case_text(), true)
 				return
 			_use_selected_item(-1)
 		Gen2WorldPack.ITEMMENU_CLOSE:
@@ -1311,6 +1418,20 @@ func _press_toss_quantity(button: int) -> bool:
 	return true
 
 
+## `_CoinCaseCountText`, whose `text_decimal wCoins, 2, 4` comes back as a
+## number marker the count fills. Gold and Silver carry no usable text: theirs
+## ends with `done` rather than `text_end`, so `DoTextUntilTerminator` runs off
+## `TextCommands` and the cartridge executes whatever follows, which is
+## `docs/bugs_and_glitches.md`'s own Coin Case entry. Those two keep the wording.
+func _coin_case_text() -> String:
+	var text: String = _data.menu_text("coin_case") if _data != null else ""
+	if text.is_empty():
+		return "Coins:\n%4d" % _coins()
+	return Gen2TextStream.fill_marker(
+		text, Gen2TextStream.NUMBER_MARKER, "%4d" % _coins()
+	)
+
+
 ## `wCoins`, which only the Coin Case reads here.
 func _coins() -> int:
 	return _world.state.coins() if _world != null and _world.state != null else 0
@@ -1421,6 +1542,16 @@ func _build_ui() -> void:
 	_options.add_theme_constant_override("separation", 4)
 	_options.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(_options)
+	## The pack listing is the cartridge's own screen inside this panel, the way
+	## the Pokegear's card list holds the cartridge's four cards.
+	_pack_view = TextureRect.new()
+	_pack_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_pack_view.custom_minimum_size = Vector2(
+		Gen2Screen.WIDTH * PACK_VIEW_SCALE, Gen2Screen.HEIGHT * PACK_VIEW_SCALE
+	)
+	_pack_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_pack_view.visible = false
+	content.add_child(_pack_view)
 	_status = Label.new()
 	_status.add_theme_color_override("font_color", MUTED)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1431,6 +1562,8 @@ func _build_ui() -> void:
 
 
 func _render_options(values: Array, cursor: int, label_for: Callable) -> void:
+	if _pack_view != null:
+		_pack_view.visible = false
 	if _options == null:
 		return
 	for child: Node in _options.get_children():

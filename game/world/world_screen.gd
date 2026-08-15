@@ -2209,10 +2209,9 @@ func _on_start_menu_closed() -> void:
 
 
 ## `PACKSTATE_QUITRUNSCRIPT`: the pack closes and the script the effect queued
-## runs in the overworld. The texts are the source's own words, host-authored the
-## way the field moves' are, because none of them is a text this project imports.
-## Each drops its `<PLAYER>` for the reason `FOUND_ITEM_TEXT` does: nothing
-## writes `wPlayerName` yet.
+## runs in the overworld. The words are the cartridge's own, read out of the
+## cache by [method _field_item_text]; the host's wording behind it is only what
+## a cache imported before those texts were carries.
 func _on_field_item_used(request: Dictionary) -> void:
 	var host: Gen2StartMenuScreen = _start_menu_host
 	_start_menu_host = null
@@ -2240,7 +2239,7 @@ func _on_field_item_used(request: Dictionary) -> void:
 			if _renderer != null:
 				_renderer.refresh()
 		Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE:
-			_show_field_move_text("Used an\nESCAPE ROPE.")
+			_show_field_move_text(_field_item_text("escape_rope", "Used an\nESCAPE ROPE."))
 			_refresh_after_escape()
 		Gen2WorldPack.FIELD_EFFECT_ROD:
 			var rods: Array[StringName] = _world.available_fishing_rods()
@@ -2248,12 +2247,18 @@ func _on_field_item_used(request: Dictionary) -> void:
 			start_fishing()
 		Gen2WorldPack.FIELD_EFFECT_ITEMFINDER:
 			_show_field_move_text(
-				"Yes! ITEMFINDER\nindicates there's\nan item nearby." \
-				if bool(request.get("found", false)) \
-				else "Nope! ITEMFINDER\nisn't responding."
+				_field_item_text(
+					"itemfinder_nearby",
+					"Yes! ITEMFINDER\nindicates there's\nan item nearby."
+				) if bool(request.get("found", false)) \
+				else _field_item_text(
+					"itemfinder_nope", "Nope! ITEMFINDER\nisn't responding."
+				)
 			)
 		Gen2WorldPack.FIELD_EFFECT_SACRED_ASH:
-			_show_field_move_text("#MON were all\nhealed!")
+			_show_field_move_text(
+				_field_item_text("sacred_ash", "#MON were all\nhealed!")
+			)
 		## `farsjump CardKeySlotScript` and `farsjump BasementDoorScript`, each
 		## `QueueScript`d by its own routine, so both run as any map script does.
 		Gen2WorldPack.FIELD_EFFECT_CARD_KEY, Gen2WorldPack.FIELD_EFFECT_BASEMENT_KEY:
@@ -2264,8 +2269,22 @@ func _on_field_item_used(request: Dictionary) -> void:
 			if StringName(request.get("kind", &"")) == &"squirtbottle_watered":
 				_show_script_results(_world.queue_item_script(request))
 			else:
-				_show_field_move_text("Sprinkled water.\nBut nothing\nhappened…")
+				_show_field_move_text(_field_item_text(
+					"squirtbottle", "Sprinkled water.\nBut nothing\nhappened…"
+				))
 	_refresh_labels()
+
+
+## One of `data/text/common_2.asm`'s field-item lines, with `<PLAYER>` filled
+## from the world the way every other text's marker is. [param fallback] is what
+## a cache imported before these texts were carries instead.
+func _field_item_text(key: String, fallback: String) -> String:
+	var text: String = _data.menu_text(key) if _data != null else ""
+	if text.is_empty():
+		return fallback
+	return text.replace(
+		Gen2WorldPC.PLAYER_MARKER, _world.player_name() if _world != null else ""
+	)
 
 
 ## The save the embedded party view shows: the injected or selected one, or a

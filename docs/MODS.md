@@ -358,9 +358,10 @@ paints the background itself and a hole would show the window behind the screen.
 change including the empty rectangle when it goes away. The standard box is
 twenty by six at row twelve, but a box can be any size and is not always up.
 
-The world's own menus are not this box: the start menu, pack, party and PC are
+The world's own menus are not this box: the start menu, party and PC are
 window-resolution panels with their own scrim, so a renderer neither sees nor
-styles them. `Gen2MenuPage` is the cartridge box path, used by the naming and
+styles them. The pack's listing inside that panel is the cartridge's own screen,
+drawn by `Gen2PackPage`, and is not this box either. `Gen2MenuPage` is the cartridge box path, used by the naming and
 gender screens, neither of which is ever over a renderer.
 
 A world renderer has a third:
