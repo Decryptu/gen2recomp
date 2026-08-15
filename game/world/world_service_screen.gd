@@ -56,6 +56,9 @@ var _apricorns: Gen2WorldApricorn = null
 var _phone_entries: Array = []
 var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
+## Whether the region map on screen is the fly map, which answers a spawn rather
+## than closing back into the card list.
+var _fly_map: bool = false
 var _town_map_from_request: bool = false
 ## `PokemonCenterPC` and the item PC behind it: which rows are on offer, which
 ## of the three item lists is open, and the box screen when BILL'S PC is.
@@ -677,6 +680,47 @@ func _time_of_day_label(hour24: int) -> String:
 	return "DAY"
 
 
+## `_FlyMap` opened as an overlay of its own: the region map with the flypoint
+## cursor, and nothing of the Pokegear around it.
+##
+## The chosen spawn is reported through [signal completed] as
+## `{ "kind": &"fly_chosen", "spawn": index }`, and a cancel reports -1, which is
+## the `ld a, -1` `.pressedB` leaves.
+func open_fly_map(
+	world: Gen2WorldAPI, data: GameData, save: Gen2SaveData, request: Dictionary
+) -> bool:
+	_world = world
+	_data = data
+	_save = save
+	_persist = false
+	if _world == null or _data == null:
+		_show_error("The region map has no world or cartridge cache.")
+		return false
+	_mode = MODE.TOWN_MAP
+	_town_map_from_request = false
+	_fly_map = true
+	_panel.visible = false
+	_town_map = Gen2TownMapScreen.new()
+	_town_map.z_index = 5
+	add_child(_town_map)
+	_town_map.closed.connect(_on_town_map_closed)
+	var visited: Array[int] = []
+	for index: Variant in request.get("visited", []):
+		visited.append(int(index))
+	var opened: bool = _town_map.open_fly(
+		_data,
+		_world.landmark(),
+		bool(request.get("in_kanto", false)),
+		visited,
+		_save != null and _save.gender == Gen2SaveData.GENDER_FEMALE,
+		_world.map_time_of_day(),
+	)
+	if not opened:
+		_on_town_map_closed()
+		return false
+	return true
+
+
 func _open_town_map(from_request: bool) -> void:
 	_mode = MODE.TOWN_MAP
 	_town_map_from_request = from_request
@@ -708,10 +752,16 @@ func _open_town_map(from_request: bool) -> void:
 
 
 func _on_town_map_closed() -> void:
+	var chosen: int = _town_map.chosen_spawn() if _town_map != null else -1
 	if _town_map != null:
 		_town_map.queue_free()
 		_town_map = null
 	_panel.visible = true
+	if _fly_map:
+		_fly_map = false
+		_mode = -1
+		completed.emit([{"kind": &"fly_chosen", "spawn": chosen}])
+		return
 	if _town_map_from_request:
 		_town_map_from_request = false
 		_finish_runtime({"ok": true, "script_value": 1})

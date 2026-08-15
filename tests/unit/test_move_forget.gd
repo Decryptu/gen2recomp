@@ -89,7 +89,7 @@ const TM_FIELD_MOVES: Array[int] = [
 
 
 func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 11)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 12)
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
 		if TM_FIELD_MOVES.has(move):
 			continue
@@ -99,8 +99,8 @@ func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
 			Gen2MoveForget.is_hm_move(move),
 			"TM02 HEADBUTT and TM08 ROCK SMASH are not protected by IsHMMove"
 		)
-	assert_true(Gen2MoveForget.is_hm_move(0x13), "FLY is an HM with no field effect here")
-	assert_false(Gen2WorldFieldMove.FIELD_MOVES.has(0x13))
+	assert_true(Gen2MoveForget.is_hm_move(Gen2WorldFieldMove.MOVE_FLY))
+	assert_true(Gen2WorldFieldMove.FIELD_MOVES.has(Gen2WorldFieldMove.MOVE_FLY))
 
 
 ## ListMoves walks the slots and stops at the first zero, so a padded slot is

@@ -417,10 +417,11 @@ func test_the_eight_resolved_moves_are_the_field_moves_the_submenu_offers() -> v
 	assert_eq(Gen2WorldFieldMove.MOVE_TELEPORT, 0x64)
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SWEET_SCENT))
 	assert_eq(Gen2WorldFieldMove.MOVE_SWEET_SCENT, 0xE6)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLY))
+	assert_eq(Gen2WorldFieldMove.MOVE_FLY, 0x13)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, SOFTBOILED and
-	# MILK_DRINK.
-	for move: int in [0x13, 0x87, 0xD0]:
+	# submenu would offer an entry nothing answers: SOFTBOILED and MILK_DRINK.
+	for move: int in [0x87, 0xD0]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 
@@ -1590,3 +1591,47 @@ func test_sweet_scent_needs_a_party_member_that_knows_it() -> void:
 	var world: Gen2WorldAPI = _scent_world()
 	world.set_party_summary(1, false, [1] as Array[int], [[]], ["MON"], [false])
 	assert_eq(StringName(world.sweet_scent_request()["reason"]), &"move_not_known")
+
+
+## `FlyFunction`'s `.TryFly`, which is everything the move can refuse on before
+## the region map is drawn.
+
+func test_fly_needs_the_storm_badge_the_move_and_an_outdoor_map() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var badged := Gen2WorldState.new()
+	badged.set_engine_flag(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_STORM, Gen2WorldState.is_crystal_profile(data)
+	))
+	var outdoors: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, ESCAPE_TOWN, SPAWN_CELL, badged)
+	_knowing_party(outdoors, Gen2WorldFieldMove.MOVE_FLY)
+	assert_true(bool(outdoors.fly_request().get("ok", false)))
+
+	var indoors: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, ESCAPE_POKECENTER, Vector2i(4, 4), badged
+	)
+	_knowing_party(indoors, Gen2WorldFieldMove.MOVE_FLY)
+	assert_eq(StringName(indoors.fly_request()["reason"]), &"indoors")
+
+	var unbadged: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, ESCAPE_TOWN, SPAWN_CELL, Gen2WorldState.new()
+	)
+	_knowing_party(unbadged, Gen2WorldFieldMove.MOVE_FLY)
+	assert_eq(StringName(unbadged.fly_request()["reason"]), &"badge_required")
+
+
+func test_the_visited_flypoints_are_the_engine_flags_of_their_own_spawns() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, ESCAPE_TOWN, SPAWN_CELL, state)
+	assert_eq(world.visited_flypoints(), [] as Array[int])
+
+	# The fixture's flypoint table is empty, so the mapping itself is what is
+	# asserted here: `SPAWN_UNION_CAVE` has no flag row of its own and every
+	# spawn past it sits one lower than its own number.
+	assert_eq(Gen2WorldState.flypoint_flag(0), 51)
+	assert_eq(Gen2WorldState.flypoint_flag(13), 64, "Indigo Plateau")
+	assert_eq(Gen2WorldState.flypoint_flag(17), -1, "Union Cave has no flypoint")
+	assert_eq(Gen2WorldState.flypoint_flag(26), 76, "Mt. Silver")
+	# Gold and Silver ship no ENGINE_MOBILE_SYSTEM, so the whole run sits one
+	# lower there.
+	assert_eq(Gen2WorldState.flypoint_flag(0, false), 50)

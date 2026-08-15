@@ -512,6 +512,31 @@ static func engine_flag(crystal_index: int, crystal: bool = true) -> int:
 	return crystal_index - 1 if crystal_index > ENGINE_MOBILE_SYSTEM else -1
 
 
+## The `ENGINE_FLYPOINT_*` run, which is `wVisitedSpawns` a bit at a time: the
+## flag `CheckIfVisitedFlypoint` tests for spawn [param spawn], as a Crystal
+## index resolved onto [param crystal]'s own table.
+##
+## The rows are the spawns in order with one hole in them: `SPAWN_UNION_CAVE`
+## has no flag of its own (`data/events/engine_flags.asm`), so every spawn past
+## it sits one row lower than its own number. -1 for the Union Cave spawn and for
+## anything outside the run, which [method is_engine_flag_active] reads as
+## inactive.
+static func flypoint_flag(spawn: int, crystal: bool = true) -> int:
+	if spawn < 0 or spawn >= NUM_SPAWNS or spawn == SPAWN_UNION_CAVE:
+		return -1
+	var index: int = ENGINE_FLYPOINT_FIRST + spawn
+	if spawn > SPAWN_UNION_CAVE:
+		index -= 1
+	return engine_flag(index, crystal)
+
+
+## `ENGINE_FLYPOINT_PLAYERS_HOUSE`, where the run starts, and the one spawn the
+## run skips.
+const ENGINE_FLYPOINT_FIRST: int = 51
+const SPAWN_UNION_CAVE: int = 17
+const NUM_SPAWNS: int = RomLayout.SPAWN_COUNT
+
+
 ## The engine flag SetStrengthFlag sets and TryStrengthOW and
 ## DoPlayerMovement.CheckStrengthBoulder read, resolved for [param crystal] the
 ## way badge_flag() resolves a badge.

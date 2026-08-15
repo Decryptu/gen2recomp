@@ -67,6 +67,47 @@ func run(r: RefCounted) -> void:
 ## The landmark column is the profile-split half, so this is where it is swept:
 ## Gold and Silver ship one landmark fewer, and a Crystal number read on either
 ## of them lands on the wrong city.
+## `_FlyMap`'s own walk on a real cache: with every flypoint visited, one press
+## per row reaches each of the region's twelve and comes back to where it
+## started, and every cursor lands on a landmark the region map draws an icon
+## for.
+func _verify_fly_walk(game_id: StringName, data: GameData) -> void:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var visited: Array[int] = []
+	for index: int in data.flypoint_count():
+		visited.append(index)
+	for in_kanto: bool in [false, true]:
+		var map: Gen2TownMap = Gen2TownMap.fly(
+			Gen2TownMap.JOHTO_LANDMARK, in_kanto, visited, crystal
+		)
+		var opened: int = map.cursor
+		var seen: Dictionary = {}
+		for _press: int in RomLayout.KANTO_FLYPOINT:
+			seen[map.cursor] = true
+			var landmark: int = int(data.flypoint(map.cursor).get("landmark", -1))
+			var point: Dictionary = data.landmark(landmark)
+			_r.check(
+				not point.is_empty(),
+				"%s: flypoint %d names landmark %d, which the map cannot draw." % [
+					game_id, map.cursor, landmark,
+				]
+			)
+			map.press(Gen2Button.UP)
+		_r.check(
+			seen.size() == RomLayout.KANTO_FLYPOINT,
+			"%s: the %s fly walk reached %d flypoints, not %d." % [
+				game_id, "Kanto" if in_kanto else "Johto", seen.size(),
+				RomLayout.KANTO_FLYPOINT,
+			]
+		)
+		_r.check(
+			map.cursor == opened,
+			"%s: the %s fly walk did not wrap back to where it opened." % [
+				game_id, "Kanto" if in_kanto else "Johto",
+			]
+		)
+
+
 func _verify_flypoints(game_id: StringName, data: GameData) -> void:
 	if not _r.check(
 		data.flypoint_count() == RomLayout.FLYPOINT_COUNT,
@@ -123,6 +164,7 @@ func _verify_flypoints(game_id: StringName, data: GameData) -> void:
 				game_id, index, int(point["map_group"]), int(point["map_number"]),
 			]
 		)
+	_verify_fly_walk(game_id, data)
 	print("%s: %d flypoints over %d spawn points, %d of them Johto." % [
 		game_id, data.flypoint_count(), data.spawn_point_count(), RomLayout.KANTO_FLYPOINT,
 	])

@@ -4970,6 +4970,52 @@ func warp_to_spawn(index: int) -> Dictionary:
 	}
 
 
+## `FlyFunction`'s `.TryFly`: the badge and the map, which is everything it can
+## refuse on before the region map is drawn. The choice itself belongs to
+## whoever draws that map; [method warp_to_spawn] is what answers it.
+func fly_request() -> Dictionary:
+	if current_map == null:
+		return _fly_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_FLY) < 0:
+		return _fly_failure(&"move_not_known")
+	if not state.is_engine_flag_active(Gen2WorldState.badge_flag(
+		Gen2WorldFieldMove.BADGE_STORM, Gen2WorldState.is_crystal_profile(data)
+	)):
+		return _fly_failure(&"badge_required")
+	if not _is_outdoor(current_map.environment):
+		return _fly_failure(&"indoors")
+	return {
+		"ok": true,
+		"kind": &"fly_requested",
+		"move": Gen2WorldFieldMove.MOVE_FLY,
+		"in_kanto": Gen2WorldRadio.is_kanto_landmark(
+			landmark(), Gen2WorldState.is_crystal_profile(data)
+		),
+		"visited": visited_flypoints(),
+	}
+
+
+static func _fly_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"fly_failed", "reason": reason}
+
+
+## `CheckIfVisitedFlypoint` over the whole table: which `FLY_*` indexes the
+## player may fly to. The bit tested is `wVisitedSpawns` at the flypoint's own
+## spawn, which is what this project keeps as the `ENGINE_FLYPOINT_*` run.
+func visited_flypoints() -> Array[int]:
+	var out: Array[int] = []
+	if data == null:
+		return out
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	for index: int in data.flypoint_count():
+		var spawn: int = int(data.flypoint(index).get("spawn", -1))
+		if spawn < 0:
+			continue
+		if state.is_engine_flag_active(Gen2WorldState.flypoint_flag(spawn, crystal)):
+			out.append(index)
+	return out
+
+
 ## `SweetScentEncounter`, the whole of what the party submenu's SWEET SCENT row
 ## does: a wild appears where one could have been stepped into.
 ##

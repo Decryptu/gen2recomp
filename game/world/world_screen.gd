@@ -2281,6 +2281,15 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used ROCK SMASH!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_FLY:
+			var fly: Dictionary = _world.fly_request()
+			if not bool(fly.get("ok", false)):
+				## `.nostormbadge` says the badge line and `.indoors`
+				## `FieldMoveFailed`; neither is a text this project imports, so
+				## both get the refusal every field move shares.
+				_show_field_move_text("Can't use that here.")
+				return
+			_open_fly_map(fly)
 		Gen2WorldFieldMove.MOVE_SWEET_SCENT:
 			var scent: Dictionary = _world.sweet_scent_request(_encounter_random)
 			if not bool(scent.get("ok", false)):
@@ -2611,11 +2620,57 @@ func _open_service_overlay(kind: StringName) -> void:
 	_refresh_labels()
 
 
+## `_FlyMap` as its own overlay, and the warp its answer asks for. A cancel
+## leaves the player where they were, which is what `.illegal` does with the
+## `-1` a B press writes.
+func _open_fly_map(request: Dictionary) -> void:
+	if _service_host != null or _world == null or _data == null:
+		return
+	var host: Gen2WorldServiceScreen = SERVICE_SCENE.instantiate() as Gen2WorldServiceScreen
+	if host == null:
+		_script_prompt = "Region map scene unavailable"
+		_refresh_labels()
+		return
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	add_child(host)
+	var save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	if not host.open_fly_map(_world, _data, save, request):
+		host.queue_free()
+		_script_prompt = "Region map unavailable"
+		_refresh_labels()
+		return
+	host.completed.connect(_on_service_completed)
+	_service_host = host
+	_script_prompt = "Fly: choose a town"
+	_refresh_labels()
+
+
+## The fly map's own answer, which is not a script result: a spawn to warp to, or
+## -1 for a cancel.
+func _apply_fly_choice(results: Array) -> bool:
+	for result: Dictionary in results:
+		if StringName(result.get("kind", &"")) != &"fly_chosen":
+			continue
+		var spawn: int = int(result.get("spawn", -1))
+		if spawn < 0:
+			_refresh_labels()
+			return true
+		var warped: Dictionary = _world.warp_to_spawn(spawn)
+		if bool(warped.get("ok", false)):
+			_refresh_after_escape()
+		return true
+	return false
+
+
 func _on_service_completed(results: Array) -> void:
 	var host: Gen2WorldServiceScreen = _service_host
 	_service_host = null
 	if host != null:
 		host.queue_free()
+	if _apply_fly_choice(results):
+		return
 	# The radio card writes wMapMusic, so what plays after the Pokegear closes is
 	# whichever station was left tuned, or the map's own track when none was.
 	_play_current_map_music()

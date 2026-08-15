@@ -46,6 +46,8 @@ const BADGE_HIVE: int = 1
 const BADGE_PLAIN: int = 2
 const BADGE_FOG: int = 3
 const BADGE_GLACIER: int = 6
+## `.TryFly`'s own `CheckBadge ENGINE_STORMBADGE`, the sixth badge.
+const BADGE_STORM: int = 5
 ## WaterfallFunction's .TryWaterfall, whose CheckBadge argument is
 ## ENGINE_RISINGBADGE: 34 in Crystal and 33 in Gold/Silver.
 const BADGE_RISING: int = 7
@@ -70,6 +72,7 @@ const MUSIC_SURF: int = 0x21
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
 	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT, MOVE_SWEET_SCENT,
+	MOVE_FLY,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
