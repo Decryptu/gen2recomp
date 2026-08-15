@@ -4970,6 +4970,36 @@ func warp_to_spawn(index: int) -> Dictionary:
 	}
 
 
+## `SweetScentEncounter`, the whole of what the party submenu's SWEET SCENT row
+## does: a wild appears where one could have been stepped into.
+##
+## Its own gates, in the source's order: `CanEncounterWildMon` for the tile,
+## then the Bug Contest's own tables, then the map's rate and
+## `ChooseWildEncounter`. The rate is read but never rolled against, which is
+## what makes the move worth using; the five-step cooldown a map entry sets is
+## not consulted either, since nothing here is a step.
+func sweet_scent_request(random: RandomNumberGenerator = null) -> Dictionary:
+	if current_map == null or data == null:
+		return _sweet_scent_failure(&"missing_map")
+	if party_slot_with_move(Gen2WorldFieldMove.MOVE_SWEET_SCENT) < 0:
+		return _sweet_scent_failure(&"move_not_known")
+	if not can_encounter_wild_mon():
+		return _sweet_scent_failure(&"no_encounter")
+	var encounter: Dictionary = encounter_request(random, true)
+	if encounter.is_empty():
+		return _sweet_scent_failure(&"no_encounter")
+	return {
+		"ok": true,
+		"kind": &"sweet_scent_requested",
+		"move": Gen2WorldFieldMove.MOVE_SWEET_SCENT,
+		"encounter": encounter,
+	}
+
+
+static func _sweet_scent_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"sweet_scent_failed", "reason": reason}
+
+
 ## `TeleportFunction`: the outdoor-only escape to wherever the last Pokemon
 ## Center was. Its whole test is the map being outdoors and the last spawn map
 ## being a spawn point, and it checks no badge at all.

@@ -145,7 +145,9 @@ func _write_cache() -> void:
 		RomCache.write_indices(RomCache.world_tile_path(_directory, number), pixels)
 
 	RomCache.write_json(RomCache.world_encounters_path(_directory), {
-		"grass": {}, "water": {}, "swarm_grass": {}, "swarm_water": {},
+		# One grass table, on map 1 alone, so SWEET SCENT has somewhere with a
+		# wild in it and somewhere without.
+		"grass": {"1:1": {"rates": [255, 255, 255], "slots": _grass_slots()}}, "water": {}, "swarm_grass": {}, "swarm_water": {},
 		"fishing": {"groups": [], "time_groups": []},
 		"roaming": {"maps": [], "mons": []},
 		"treemons": {
@@ -177,6 +179,18 @@ const TREEMON_RARE_SPECIES: int = 214
 ## One of the fixture's asleep species, so a tree encounter can be asserted
 ## both ways without depending on which row the roll lands on.
 const ASLEEP_SPECIES: int = 21
+
+
+## One grass table for map 1: three times of day of the source's seven slots,
+## all the same species, so a roll cannot pick a different answer.
+func _grass_slots() -> Array:
+	var out: Array = []
+	for time_of_day: int in 3:
+		var slots: Array = []
+		for slot: int in 7:
+			slots.append({"level": 5, "species": TREEMON_SPECIES})
+		out.append(slots)
+	return out
 
 
 func _treemon_sets() -> Array:
@@ -401,10 +415,12 @@ func test_the_eight_resolved_moves_are_the_field_moves_the_submenu_offers() -> v
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_TELEPORT))
 	assert_eq(Gen2WorldFieldMove.MOVE_DIG, 0x5B)
 	assert_eq(Gen2WorldFieldMove.MOVE_TELEPORT, 0x64)
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SWEET_SCENT))
+	assert_eq(Gen2WorldFieldMove.MOVE_SWEET_SCENT, 0xE6)
 	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: FLY, SOFTBOILED, MILK_DRINK
-	# and SWEET_SCENT.
-	for move: int in [0x13, 0x87, 0xD0, 0xE6]:
+	# submenu would offer an entry nothing answers: FLY, SOFTBOILED and
+	# MILK_DRINK.
+	for move: int in [0x13, 0x87, 0xD0]:
 		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
 
 
@@ -1534,3 +1550,43 @@ func test_a_snapshot_carries_both_escape_points_and_a_reopened_world_keeps_them(
 	var older: Gen2WorldSnapshot = Gen2WorldSnapshot.from_dict(old)
 	assert_true(older.dig_warp.is_empty())
 	assert_eq(older.last_spawn_map, Vector2i(-1, -1))
+
+
+## `SweetScentEncounter`: a wild where one could have been stepped into.
+
+func _scent_world(cell: Vector2i = GRASS_CELL, map_number: int = 1) -> Gen2WorldAPI:
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		GameData.open_directory(_directory), 1, map_number, cell, Gen2WorldState.new()
+	)
+	_knowing_party(world, Gen2WorldFieldMove.MOVE_SWEET_SCENT)
+	return world
+
+
+func test_sweet_scent_finds_a_wild_in_the_grass_without_rolling_the_rate() -> void:
+	var world: Gen2WorldAPI = _scent_world()
+	# The five-step cooldown a map entry sets is a step's gate, not this one.
+	assert_true(world.state.wild_encounter_cooldown() > 0)
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	var scent: Dictionary = world.sweet_scent_request(random)
+	assert_true(bool(scent.get("ok", false)), String(scent.get("reason", "")))
+	assert_eq(int((scent["encounter"] as Dictionary)["pokemon"]), TREEMON_SPECIES)
+
+
+func test_sweet_scent_says_nothing_is_here_off_the_grass_and_on_a_bare_map() -> void:
+	var random := RandomNumberGenerator.new()
+	random.seed = 7
+	# `CanEncounterWildMon`: ordinary floor is where the source refuses first.
+	var on_floor: Gen2WorldAPI = _scent_world(Vector2i(1, 1))
+	assert_eq(StringName(on_floor.sweet_scent_request(random)["reason"]), &"no_encounter")
+
+	# And a map with no table of its own answers the same, which is
+	# `ChooseWildEncounter` refusing rather than the tile.
+	var bare: Gen2WorldAPI = _scent_world(GRASS_CELL, 2)
+	assert_eq(StringName(bare.sweet_scent_request(random)["reason"]), &"no_encounter")
+
+
+func test_sweet_scent_needs_a_party_member_that_knows_it() -> void:
+	var world: Gen2WorldAPI = _scent_world()
+	world.set_party_summary(1, false, [1] as Array[int], [[]], ["MON"], [false])
+	assert_eq(StringName(world.sweet_scent_request()["reason"]), &"move_not_known")

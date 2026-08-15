@@ -84,11 +84,12 @@ func test_is_hm_move_covers_every_hm_and_nothing_else() -> void:
 const TM_FIELD_MOVES: Array[int] = [
 	Gen2WorldFieldMove.MOVE_HEADBUTT, Gen2WorldFieldMove.MOVE_ROCK_SMASH,
 	Gen2WorldFieldMove.MOVE_DIG, Gen2WorldFieldMove.MOVE_TELEPORT,
+	Gen2WorldFieldMove.MOVE_SWEET_SCENT,
 ]
 
 
 func test_the_hm_list_and_the_overworld_field_moves_only_overlap() -> void:
-	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 10)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 11)
 	for move: int in Gen2WorldFieldMove.FIELD_MOVES:
 		if TM_FIELD_MOVES.has(move):
 			continue

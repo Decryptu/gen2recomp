@@ -28,6 +28,9 @@ const MOVE_ROCK_SMASH: int = 0xF9
 const MOVE_FLY: int = 0x13
 const MOVE_DIG: int = 0x5B
 const MOVE_TELEPORT: int = 0x64
+## The row that is neither a tile nor an escape: SWEET SCENT calls a wild
+## encounter up out of the map the player is standing on.
+const MOVE_SWEET_SCENT: int = 0xE6
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -66,7 +69,7 @@ const MUSIC_SURF: int = 0x21
 ## the moment it leaves it.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
-	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT,
+	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT, MOVE_SWEET_SCENT,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

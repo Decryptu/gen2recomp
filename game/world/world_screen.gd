@@ -2281,6 +2281,21 @@ func _on_party_action(action: Dictionary) -> void:
 				)
 				return
 			_show_field_move_text("%s used ROCK SMASH!" % String(action.get("name", "")))
+		Gen2WorldFieldMove.MOVE_SWEET_SCENT:
+			var scent: Dictionary = _world.sweet_scent_request(_encounter_random)
+			if not bool(scent.get("ok", false)):
+				## `SweetScentNothing`, which is the one refusal the script has:
+				## a tile no wild could be stepped into on says the same thing a
+				## map with no table does.
+				_show_field_move_text("Looks like there's\nnothing here…")
+				return
+			_show_field_move_text("%s used SWEET SCENT!" % String(action.get("name", "")))
+			var found: Dictionary = scent["encounter"]
+			_start_battle_request({
+				"kind": &"battle_requested",
+				"values": found["values"],
+				"encounter": found.duplicate(true),
+			})
 		Gen2WorldFieldMove.MOVE_DIG:
 			var dig: Dictionary = _world.dig_request()
 			if not bool(dig.get("ok", false)):
