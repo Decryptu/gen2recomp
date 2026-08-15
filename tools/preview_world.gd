@@ -13,9 +13,11 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y]
 ##
 ## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
-## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `field_item` (the
-## pack's own USE on the Itemfinder, which closes the pack over the world's
-## answer) or `bike` (the same USE on the Bicycle). The two numbers are the cell
+## `cut` (`OWCutAnimation`'s two halves and the jump shadow), or one of
+## [constant FIELD_ITEMS]' own names, which is the pack's USE on that item: the
+## Itemfinder closes the pack over the world's answer, the Coin Case prints
+## inside the pack, and the three in [constant FACE_UP_FIRST] each need their own
+## map and the cell below their target. The two numbers are the cell
 ## the player stands on, which is how the grass a standing object is drawn behind
 ## is photographed.
 
@@ -24,6 +26,25 @@ const WINDOW_SIZE := Vector2i(1152, 648)
 ## on its first facing and the boulder dust on its second, so every one of them
 ## is up and none is on the frame it was spawned. Cut needs more: its tree stands
 ## for three frames before it splits, and its leaves open on top of each other.
+## The `kind`s that are a pack USE rather than a staged sprite, and the item
+## each one uses. Every one of them is driven through the pack's own key item
+## pocket, so the picture is the screen's answer and not a staged state.
+const FIELD_ITEMS: Dictionary = {
+	&"field_item": Gen2WorldPack.ITEM_ITEMFINDER,
+	&"bike": Gen2WorldPack.ITEM_BICYCLE,
+	&"coin_case": Gen2WorldPack.ITEM_COIN_CASE,
+	&"squirtbottle": Gen2WorldPack.ITEM_SQUIRTBOTTLE,
+	&"card_key": Gen2WorldPack.ITEM_CARD_KEY,
+	&"basement_key": Gen2WorldPack.ITEM_BASEMENT_KEY,
+}
+
+## The three whose effect reads what the player is facing. Each is photographed
+## from the cell below its own target, so one press turns without moving: the
+## tree, the slot and the door all block their own cell.
+const FACE_UP_FIRST: Array[StringName] = [
+	&"squirtbottle", &"card_key", &"basement_key",
+]
+
 const STAGED_FRAMES: int = 2
 const STAGED_FRAMES_CUT: int = 12
 
@@ -105,10 +126,10 @@ func _process(_delta: float) -> bool:
 		return false
 	_frames += 1
 	if _frames == 2:
-		if _kind == &"field_item":
-			_screen.preview_field_item()
-		elif _kind == &"bike":
-			_screen.preview_field_item(Gen2WorldPack.ITEM_BICYCLE)
+		if FIELD_ITEMS.has(_kind):
+			if _kind in FACE_UP_FIRST:
+				_screen.move_up()
+			_screen.preview_field_item(int(FIELD_ITEMS[_kind]))
 		else:
 			_screen.preview_effect_sprites(_kind)
 		for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):

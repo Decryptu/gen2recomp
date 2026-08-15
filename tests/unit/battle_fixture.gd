@@ -280,8 +280,18 @@ const BEAT_UP: int = 251
 const MAX_MOVE: int = ROLLING_KICK_NEVER
 const BERRY_ITEM: int = 0xAD
 
-## The highest item number this table fills.
-const MAX_ITEM: int = 174
+## data/events/happiness_changes.asm, Crystal's nineteen rows verbatim, because
+## the three columns and their signs are what every happiness test asserts.
+const HAPPINESS_CHANGES: Array = [
+	[5, 3, 2], [5, 3, 2], [1, 1, 0], [3, 2, 1], [1, 1, 0], [-1, -1, -1],
+	[-5, -5, -10], [-5, -5, -10], [1, 1, 1], [3, 3, 1], [5, 5, 2], [1, 1, 1],
+	[3, 3, 1], [10, 10, 4], [-5, -5, -10], [-10, -10, -15], [-15, -15, -20],
+	[3, 3, 1], [10, 6, 4],
+]
+
+## The highest item number this table fills. The SQUIRTBOTTLE at $AF is the
+## last row anything reads, so the run stops there rather than at 255.
+const MAX_ITEM: int = 175
 ## The Smoke Ball and its held effect, both the cartridge's own numbers
 ## (constants/item_constants.asm, constants/item_data_constants.asm). It is the
 ## one item running reads.
@@ -405,6 +415,7 @@ static func build(directory: String) -> GameData:
 	RomCache.write_json(RomCache.types_path(directory), _types())
 	RomCache.write_json(RomCache.matchups_path(directory), _matchups())
 	RomCache.write_json(RomCache.trainers_path(directory), [])
+	RomCache.write_json(RomCache.happiness_changes_path(directory), HAPPINESS_CHANGES)
 	RomCache.write_json(RomCache.manifest_path(directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testgame",

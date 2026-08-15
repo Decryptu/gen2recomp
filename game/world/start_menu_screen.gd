@@ -848,6 +848,12 @@ func _confirm_use() -> void:
 				return
 			_open_target_mode()
 		Gen2WorldPack.ITEMMENU_CURRENT:
+			## `CoinCaseEffect` is `MenuTextboxWaitButton` over
+			## `_CoinCaseCountText` and nothing else: the count is shown where the
+			## pack already prints, and the pack stays open behind it.
+			if number == Gen2WorldPack.ITEM_COIN_CASE:
+				_show_pack_result("Coins:\n%4d" % _coins(), true)
+				return
 			_use_selected_item(-1)
 		Gen2WorldPack.ITEMMENU_CLOSE:
 			_use_field_item(number)
@@ -897,8 +903,21 @@ func _resolve_field_item(item: int) -> Dictionary:
 			request["rod"] = rod
 		Gen2WorldPack.FIELD_EFFECT_ITEMFINDER:
 			request["found"] = _world.hidden_item_nearby()
-		Gen2WorldPack.FIELD_EFFECT_COIN_CASE:
-			request["coins"] = _world.state.coins() if _world.state != null else 0
+		Gen2WorldPack.FIELD_EFFECT_CARD_KEY:
+			var slot: Dictionary = _world.card_key_request()
+			if not bool(slot.get("ok", false)):
+				return {"ok": false}
+			request.merge(slot, true)
+		Gen2WorldPack.FIELD_EFFECT_BASEMENT_KEY:
+			var door: Dictionary = _world.basement_key_request()
+			if not bool(door.get("ok", false)):
+				return {"ok": false}
+			request.merge(door, true)
+		## The one effect that cannot fail: `_Squirtbottle` writes
+		## `wItemEffectSucceeded` before the script it queues decides anything,
+		## so the pack closes whether or not a Sudowoodo is in front.
+		Gen2WorldPack.FIELD_EFFECT_SQUIRTBOTTLE:
+			request.merge(_world.squirtbottle_request(), true)
 		Gen2WorldPack.FIELD_EFFECT_SACRED_ASH:
 			if _pack_save == null:
 				return {"ok": false}
@@ -1288,6 +1307,11 @@ func _press_toss_quantity(button: int) -> bool:
 		_:
 			_render_toss_quantity()
 	return true
+
+
+## `wCoins`, which only the Coin Case reads here.
+func _coins() -> int:
+	return _world.state.coins() if _world != null and _world.state != null else 0
 
 
 ## One of the pack's own texts, imported when the cache carries it. The lines

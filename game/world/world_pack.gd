@@ -226,31 +226,41 @@ static func can_hold(data: GameData, item: int) -> bool:
 	return pocket_for(data, item) != TYPE_KEY_ITEM
 
 
-## The `ItemEffects` entries `.Field` reaches whose effect the overworld can run,
-## by the item number `data/items/attributes.asm` gives ITEMMENU_CLOSE. Every
-## other CLOSE item still falls through to `.Oak`; `HANDOFF.md` names what each
-## of those is waiting for.
+## The `ItemEffects` entries `.Field` reaches, by the item number
+## `data/items/attributes.asm` gives ITEMMENU_CLOSE. Every CLOSE item in either
+## pin is here; anything else with that nibble is a mod's, and falls through to
+## `.Oak` because no effect answers for it.
 const FIELD_EFFECT_NONE: StringName = &""
 const FIELD_EFFECT_BICYCLE: StringName = &"bicycle"
 const FIELD_EFFECT_ESCAPE_ROPE: StringName = &"escape_rope"
 const FIELD_EFFECT_ROD: StringName = &"rod"
-const FIELD_EFFECT_COIN_CASE: StringName = &"coin_case"
 const FIELD_EFFECT_ITEMFINDER: StringName = &"itemfinder"
 const FIELD_EFFECT_SACRED_ASH: StringName = &"sacred_ash"
+const FIELD_EFFECT_CARD_KEY: StringName = &"card_key"
+const FIELD_EFFECT_BASEMENT_KEY: StringName = &"basement_key"
+const FIELD_EFFECT_SQUIRTBOTTLE: StringName = &"squirtbottle"
 const ITEM_BICYCLE: int = 0x07
 const ITEM_ESCAPE_ROPE: int = 0x13
+## `CoinCaseEffect` is the one key item on `.Current` rather than `.Field`: it
+## prints its count inside the pack and closes nothing, so it has no field
+## effect and the screen answers it where the other CURRENT rows are answered.
 const ITEM_COIN_CASE: int = 0x36
 const ITEM_ITEMFINDER: int = 0x37
 const ITEM_SACRED_ASH: int = 0x9C
+const ITEM_CARD_KEY: int = 0x7F
+const ITEM_BASEMENT_KEY: int = 0x85
+const ITEM_SQUIRTBOTTLE: int = 0xAF
 const FIELD_EFFECTS: Dictionary = {
 	ITEM_BICYCLE: FIELD_EFFECT_BICYCLE,
 	ITEM_ESCAPE_ROPE: FIELD_EFFECT_ESCAPE_ROPE,
-	ITEM_COIN_CASE: FIELD_EFFECT_COIN_CASE,
 	ITEM_ITEMFINDER: FIELD_EFFECT_ITEMFINDER,
 	Gen2WorldInventory.ITEM_OLD_ROD: FIELD_EFFECT_ROD,
 	Gen2WorldInventory.ITEM_GOOD_ROD: FIELD_EFFECT_ROD,
 	Gen2WorldInventory.ITEM_SUPER_ROD: FIELD_EFFECT_ROD,
+	ITEM_CARD_KEY: FIELD_EFFECT_CARD_KEY,
+	ITEM_BASEMENT_KEY: FIELD_EFFECT_BASEMENT_KEY,
 	ITEM_SACRED_ASH: FIELD_EFFECT_SACRED_ASH,
+	ITEM_SQUIRTBOTTLE: FIELD_EFFECT_SQUIRTBOTTLE,
 }
 
 

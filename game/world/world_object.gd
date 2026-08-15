@@ -29,6 +29,10 @@ const MOVEMENT_STRENGTH_BOULDER: int = 0x19
 ## reacts to being smashed. Its flags1 are the boulder's, minus the palette bit
 ## and plus USE_OBP1, so nothing but the movement byte tells the two apart.
 const MOVEMENT_SMASHABLE_ROCK: int = 0x18
+## SPRITEMOVEDATA_SUDOWOODO, the row above the rock and in neither template set
+## for the same reason. Route 36's weird tree is the only object in either game
+## on it, and `.CheckCanUseSquirtbottle` is the only reader.
+const MOVEMENT_SUDOWOODO: int = 0x17
 const MOVEMENT_SWIM_WANDER: int = 0x24
 ## The three rows data/sprites/map_objects.asm gives BIG_OBJECT in their palette
 ## flags. Only two objects in either game use one: the player's bedroom big doll
@@ -182,6 +186,12 @@ func is_strength_boulder() -> bool:
 ## rather than a palette flag the row happens to carry.
 func is_smashable_rock() -> bool:
 	return movement == MOVEMENT_SMASHABLE_ROCK
+
+
+## `.CheckCanUseSquirtbottle`'s own test, read the same way: `GetFacingObject`
+## answers MAPOBJECT_MOVEMENT and the whole check is `cp SPRITEMOVEDATA_SUDOWOODO`.
+func is_sudowoodo() -> bool:
+	return movement == MOVEMENT_SUDOWOODO
 
 
 ## OBJECT_PALETTE bit SWIMMING, which CanObjectMoveInDirection reads to pick

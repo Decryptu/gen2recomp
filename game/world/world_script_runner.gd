@@ -330,6 +330,17 @@ static func begin(
 				runner._stage_hidden_item()
 	else:
 		started = runner._push_frame(bank, address)
+		## A label inside another script has no pointer of its own, so a caller
+		## that resolved one names the script containing it and how far in it
+		## starts. `WateredWeirdTreeScript` is the only one.
+		var offset: int = int(request.get("offset", 0))
+		if started and offset > 0:
+			var frame: Dictionary = runner._frames[runner._frames.size() - 1]
+			if offset >= (frame["data"] as PackedByteArray).size():
+				started = false
+			else:
+				frame["offset"] = offset
+				runner._frames[runner._frames.size() - 1] = frame
 	if not started:
 		runner._fail(&"missing_script", {"bank": bank, "address": address})
 	else:

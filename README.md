@@ -89,7 +89,7 @@ live under their own root and are not touched.
 |---|---|
 | Species | Names, base stats, types, held items, egg groups, TM/HM flags |
 | Learnsets, evolutions | All 251 species' level-up moves in cartridge order; every evolution and its method |
-| Moves, TM/HM | Power, type, accuracy, PP, effect and chance; the 57 or 60 TM, HM and tutor rows |
+| Moves, TM/HM | Power, type, accuracy, PP, effect and chance; the 57 or 60 TM, HM and tutor rows; the happiness table teaching one moves |
 | Items, types | 255 items with prices, effects, pockets and healing metadata; 28 type names |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
 | Trainers, NPC trades | Class names, pics, palettes, AI flags, DVs and parties; trade records with DVs and OT data |

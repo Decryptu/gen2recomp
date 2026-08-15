@@ -1437,17 +1437,19 @@ func preview_field_item(item: int = Gen2WorldPack.ITEM_ITEMFINDER) -> void:
 	if _world == null or _data == null or _start_menu_host != null:
 		return
 	_injected_save = _embedded_party_save()
-	_world.state.apply_changes({}, {}, {"items": {item: 1}})
+	# The coins are for the Coin Case, which is the one row here whose own words
+	# are a number; every other item ignores them.
+	_world.state.apply_changes({}, {}, {"items": {item: 1}, "coins": 1234})
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
 	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
 		_start_menu_host.handle_button(Gen2Button.DOWN)
 	_start_menu_host.handle_button(Gen2Button.A)
-	var pockets: Array = _start_menu_host.get("_pack_pockets")
-	while int(pockets[_start_menu_host.get("_pack_pocket_index")]["pocket"]) \
-		!= Gen2WorldPack.TYPE_KEY_ITEM:
-		_start_menu_host.handle_button(Gen2Button.RIGHT)
+	# The row itself, rather than whichever one the pocket opens on: the save may
+	# already own other key items, and a capture has to photograph the named one.
+	if not bool(_start_menu_host.call("_select_pack_item", item)):
+		return
 	# The row's submenu, and then its first action, which for a key item is USE.
 	_start_menu_host.handle_button(Gen2Button.A)
 	_start_menu_host.handle_button(Gen2Button.A)
@@ -2243,10 +2245,19 @@ func _on_field_item_used(request: Dictionary) -> void:
 				if bool(request.get("found", false)) \
 				else "Nope! ITEMFINDER\nisn't responding."
 			)
-		Gen2WorldPack.FIELD_EFFECT_COIN_CASE:
-			_show_field_move_text("Coins:\n%4d" % int(request.get("coins", 0)))
 		Gen2WorldPack.FIELD_EFFECT_SACRED_ASH:
 			_show_field_move_text("#MON were all\nhealed!")
+		## `farsjump CardKeySlotScript` and `farsjump BasementDoorScript`, each
+		## `QueueScript`d by its own routine, so both run as any map script does.
+		Gen2WorldPack.FIELD_EFFECT_CARD_KEY, Gen2WorldPack.FIELD_EFFECT_BASEMENT_KEY:
+			_show_script_results(_world.queue_item_script(request))
+		## `.SquirtbottleScript`, whose `callasm` picks between the tree's own
+		## script and the line it says when nothing is in front of the player.
+		Gen2WorldPack.FIELD_EFFECT_SQUIRTBOTTLE:
+			if StringName(request.get("kind", &"")) == &"squirtbottle_watered":
+				_show_script_results(_world.queue_item_script(request))
+			else:
+				_show_field_move_text("Sprinkled water.\nBut nothing\nhappened…")
 	_refresh_labels()
 
 

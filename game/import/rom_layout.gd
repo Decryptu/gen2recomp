@@ -1299,6 +1299,18 @@ const TMHM_BYTES: int = 8
 ## identical between the pins; only Crystal's tutor rows follow.
 const TMHM_TM_COUNT: int = 50
 const TMHM_HM_COUNT: int = 7
+## data/events/happiness_changes.asm's HappinessChanges, one row per HAPPINESS_*
+## constant and three signed bytes a row: the change below 100, the change below
+## 200 and the change above it. `ChangeHappiness` takes its argument one-based,
+## so row n-1 is HAPPINESS_n. Crystal ends on HAPPINESS_GAINLEVELATHOME, which
+## pokegold does not ship; the eighteen rows before it are byte identical.
+const HAPPINESS_CHANGE_WIDTH: int = 3
+const HAPPINESS_CHANGE_COUNT_GOLD_SILVER: int = 18
+const HAPPINESS_CHANGE_COUNT: int = 19
+## `TeachTMHM`'s own `ld c, HAPPINESS_LEARNMOVE`, one-based the way the source
+## passes it. The only row anything here asks for: every other `ChangeHappiness`
+## caller is a routine this project does not run.
+const HAPPINESS_LEARNMOVE: int = 5
 ## data/text/name_input_chars.asm's four keyboards, one contiguous block in
 ## source order with every row 17 bytes wide. The block is byte identical in all
 ## three dumps, so only its offset is profile split.
@@ -1390,6 +1402,10 @@ const GOLD_SILVER: Dictionary = {
 	"move_data": 0x41AFE,
 	"tmhm_moves": 0x11A66,
 	"tmhm_move_count": 57,
+	# `HappinessChanges`, located by its own fifty-four signed bytes, which hit
+	# once per dump. Nothing near it is a table with the same shape.
+	"happiness_changes": 0x7300,
+	"happiness_change_count": HAPPINESS_CHANGE_COUNT_GOLD_SILVER,
 	"name_input_chars": 0x120B4,
 	"string_buffer_pointers": 0x24000,
 	## `data/text/common_2.asm`'s intro texts, each at its own `text_far` target.
@@ -1761,6 +1777,10 @@ const CRYSTAL: Dictionary = {
 	"move_data": 0x41AFB,
 	"tmhm_moves": 0x1167A,
 	"tmhm_move_count": 60,
+	# See the Gold and Silver block above; the first eighteen rows are byte
+	# identical and Crystal adds HAPPINESS_GAINLEVELATHOME after them.
+	"happiness_changes": 0x7221,
+	"happiness_change_count": HAPPINESS_CHANGE_COUNT,
 	"name_input_chars": 0x11CE7,
 	"string_buffer_pointers": 0x24000,
 	## See the Gold and Silver block above. Crystal moves `_OakText6` and
@@ -2085,6 +2105,7 @@ static func for_id(id: StringName) -> Dictionary:
 			silver["item_attributes"] = 0x6866
 			silver["item_status_actions"] = 0xF0C5
 			silver["item_healing_hp"] = 0xF403
+			silver["happiness_changes"] = 0x72C6
 			# `CopyrightString` sits in bank 1 on both, sixty bytes apart.
 			var copyright: Dictionary = (silver["copyright"] as Dictionary).duplicate()
 			copyright["string"] = 0x64D9

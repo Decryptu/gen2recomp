@@ -5222,6 +5222,162 @@ func hidden_item_nearby() -> bool:
 	return false
 
 
+## The three maps `engine/events/card_key.asm`, `basement_key.asm` and
+## `squirtbottle.asm` name by constant before they do anything else. Each row is
+## the Crystal id and the Gold and Silver one; group 3 runs eight lower on
+## pokegold from `UNION_CAVE_1F`, which is what moves the underground.
+const KEY_ITEM_MAPS: Dictionary = {
+	&"RADIO_TOWER_3F": {&"crystal": Vector2i(3, 19), &"gold": Vector2i(3, 19)},
+	&"GOLDENROD_UNDERGROUND": {&"crystal": Vector2i(3, 53), &"gold": Vector2i(3, 45)},
+	&"ROUTE_36": {&"crystal": Vector2i(10, 3), &"gold": Vector2i(10, 3)},
+}
+
+## The two tiles `GetFacingTileCoord`'s results are compared against. The source
+## writes them in the object coordinate space, which is four cells ahead of the
+## map's own on each axis (`cp 18` / `cp 6` and `cp 22` / `cp 10`); both are the
+## cell the map's own `bg_event` for that door sits on.
+const CARD_KEY_SLOT_CELL: Vector2i = Vector2i(14, 2)
+const BASEMENT_DOOR_CELL: Vector2i = Vector2i(18, 6)
+
+
+func _is_on_key_item_map(name: StringName) -> bool:
+	if current_map == null:
+		return false
+	var row: Dictionary = KEY_ITEM_MAPS[name]
+	var id: Vector2i = row[&"crystal"] if Gen2WorldState.is_crystal_profile(data) \
+		else row[&"gold"]
+	return map_id() == id
+
+
+## `_CardKey`: the map, then `wPlayerDirection & %1100` against `OW_UP`, then the
+## faced tile. Everything it passes is `QueueScript` on a `farsjump` to
+## `CardKeySlotScript`, which no importer pins by name; the map's own
+## `bg_event 14, 2, BGEVENT_UP` is that script, and it is the tile the routine
+## already insists the player is facing.
+func card_key_request() -> Dictionary:
+	if not _is_on_key_item_map(&"RADIO_TOWER_3F"):
+		return {"ok": false, "kind": &"card_key_failed", "reason": &"wrong_map"}
+	if player_facing != Gen2WorldSprite.FACING_UP:
+		return {"ok": false, "kind": &"card_key_failed", "reason": &"not_facing_slot"}
+	if facing_cell() != CARD_KEY_SLOT_CELL:
+		return {"ok": false, "kind": &"card_key_failed", "reason": &"not_facing_slot"}
+	return _faced_bg_event_script_request(&"card_key_used", &"card_key_failed")
+
+
+## `_BasementKey`, which is `_CardKey` without the direction test: the door is a
+## `BGEVENT_READ`, so it answers whichever way the player is facing it from.
+func basement_key_request() -> Dictionary:
+	if not _is_on_key_item_map(&"GOLDENROD_UNDERGROUND"):
+		return {"ok": false, "kind": &"basement_key_failed", "reason": &"wrong_map"}
+	if facing_cell() != BASEMENT_DOOR_CELL:
+		return {"ok": false, "kind": &"basement_key_failed", "reason": &"not_facing_door"}
+	return _faced_bg_event_script_request(&"basement_key_used", &"basement_key_failed")
+
+
+## `_Squirtbottle`, which differs from the other two in never failing:
+## `wItemEffectSucceeded` is set before the script is queued, and
+## `.CheckCanUseSquirtbottle` only picks which half of it runs. So the refusal is
+## the queued script's own `_SquirtbottleNothingText` rather than `.Oak`.
+##
+## The test is `GetFacingObject` and `cp SPRITEMOVEDATA_SUDOWOODO`, the same
+## shape rock_smash_request() uses, behind the Route 36 map check.
+func squirtbottle_request() -> Dictionary:
+	var nothing: Dictionary = {"ok": true, "kind": &"squirtbottle_nothing"}
+	if not _is_on_key_item_map(&"ROUTE_36"):
+		return nothing
+	var tree: Gen2WorldObject = object_at(object_facing_cell())
+	if tree == null or not tree.is_sudowoodo():
+		return nothing
+	var script: Dictionary = _watered_weird_tree_script(tree.index)
+	if script.is_empty():
+		return nothing
+	script["ok"] = true
+	script["kind"] = &"squirtbottle_watered"
+	script["bank"] = int(current_map.events.get("bank", 0))
+	return script
+
+
+## `WateredWeirdTreeScript` is a label inside `SudowoodoScript` that no event
+## points at, so the cache carries no pointer of its own. Its position is
+## structural instead: the object's script opens `checkitem SQUIRTBOTTLE / iftrue
+## .Fight`, and the label sits just past the `closetext` that ends `.Fight`'s
+## yes/no ask. `.Fight` is a branch target and so is cached, which is why the
+## answer is that address and an offset into it rather than a bare address.
+## Empty for anything that does not decode that way.
+func _watered_weird_tree_script(object_index: int) -> Dictionary:
+	if data == null or current_map == null:
+		return {}
+	var rows: Array = current_map.events.get("objects", [])
+	if object_index < 0 or object_index >= rows.size():
+		return {}
+	var bank: int = int(current_map.events.get("bank", 0))
+	## Both opcodes sit below `$52`, where the two command tables still agree,
+	## so neither needs resolving through Gen2WorldScript.raw_opcode().
+	var branch: int = _script_command_end(
+		bank, int((rows[object_index] as Dictionary).get("script", 0)),
+		Gen2WorldScript.IFTRUE, true
+	)
+	if branch <= 0:
+		return {}
+	var offset: int = _script_command_end(bank, branch, Gen2WorldScript.CLOSETEXT, false)
+	return {"script": branch, "offset": offset} if offset > 0 else {}
+
+
+## Walks a script from [param address] to the first [param opcode]. Answers that
+## command's branch target when [param branch] is set, and otherwise how many
+## bytes in the command after it starts. 0 for a stream that ends or fails to
+## decode first, which is what leaves a caller with no label to jump to.
+func _script_command_end(bank: int, address: int, opcode: int, branch: bool) -> int:
+	var crystal: bool = data.id != &"gold" and data.id != &"silver"
+	var raw: PackedByteArray = data.world_script(bank, address)
+	var offset: int = 0
+	while offset < raw.size():
+		var command: Dictionary = Gen2WorldScript.command_at(raw, offset, crystal)
+		if not bool(command.get("ok", false)):
+			return 0
+		offset += int(command["width"])
+		if int(command["opcode"]) == opcode:
+			return int(command.get("address", 0)) if branch else offset
+	return 0
+
+
+## The `farsjump` the two key items end on: the script the faced cell's own
+## background event names, which is the label each routine jumps to.
+func _faced_bg_event_script_request(kind: StringName, failure: StringName) -> Dictionary:
+	for event: Dictionary in _active_events_at(facing_cell()):
+		if event.get("kind", &"") != &"bg_events":
+			continue
+		var script: int = _script_address_for_event(event)
+		if script <= 0:
+			continue
+		return {
+			"ok": true,
+			"kind": kind,
+			"bank": int(current_map.events.get("bank", 0)),
+			"script": script,
+			"cell": facing_cell(),
+		}
+	return {"ok": false, "kind": failure, "reason": &"missing_script"}
+
+
+## `QueueScript` for a resolved key-item effect: the request the pack answered
+## with is queued and run, so its script reaches the host exactly as an
+## interaction's does.
+func queue_item_script(request: Dictionary) -> Array:
+	if current_map == null or int(request.get("script", 0)) <= 0:
+		return []
+	_enqueue_script({
+		"kind": StringName(request.get("kind", &"item_script")),
+		"map_group": current_map.group,
+		"map_number": current_map.number,
+		"cell": player_cell,
+		"bank": int(request.get("bank", 0)),
+		"script": int(request.get("script", 0)),
+		"offset": int(request.get("offset", 0)),
+	})
+	return run_event_queue(false)
+
+
 ## `.TryFish`'s own refusals, asked without casting: the pack has to know whether
 ## `FishFunction` would reach `.FailFish` before it decides to close.
 func fishing_check(rod: StringName) -> Dictionary:

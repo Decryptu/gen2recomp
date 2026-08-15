@@ -25,11 +25,14 @@ func test_gold_and_silver_share_their_common_layout() -> void:
 			"item_attributes", "item_status_actions", "item_healing_hp",
 			"overworld_icons", "held_item_icons",
 			"copyright", "game_freak_presents", "title",
-			"gs_intro",
+			"gs_intro", "happiness_changes",
 		]:
 			continue
 		assert_eq(gold[key], silver[key], "Gold/Silver layout differs at %s" % key)
 	assert_ne(gold["item_attributes"], silver["item_attributes"])
+	# `HappinessChanges` is the same eighteen rows in bank 1 at its own address on
+	# each, the way the copyright string is.
+	assert_ne(gold["happiness_changes"], silver["happiness_changes"])
 	# Both offsets into the icon bank move together: Silver's copy of it sits
 	# twenty-six bytes lower than Gold's.
 	assert_eq(
