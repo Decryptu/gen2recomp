@@ -242,3 +242,24 @@ func _find_toast(node: Node) -> Gen2LauncherToast:
 		if found != null:
 			return found
 	return null
+
+
+## There is no cache migration by design, so the one thing the launcher owes a
+## player whose cache a build has outgrown is a sentence saying which of the
+## four states it is in and that the dump is wanted again.
+func test_every_cache_state_says_something_different() -> void:
+	var main := preload("res://game/main/main.gd")
+	var said: Dictionary = {}
+	for state: StringName in [
+		RomCache.STATE_USABLE, RomCache.STATE_STALE,
+		RomCache.STATE_INCOMPLETE, RomCache.STATE_MISSING,
+	]:
+		var text: String = main.cache_state_text(state)
+		assert_false(text.is_empty(), "%s says nothing" % state)
+		assert_false(said.has(text), "%s repeats another state's line" % state)
+		said[text] = true
+	for state: StringName in [RomCache.STATE_STALE, RomCache.STATE_INCOMPLETE]:
+		assert_true(
+			main.cache_state_text(state).contains("Import the cartridge again"),
+			"%s asks for the dump" % state
+		)

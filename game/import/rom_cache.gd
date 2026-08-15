@@ -67,8 +67,20 @@ const PAYLOAD_SPAN: int = 2
 const BYTES_KEY: String = "bytes"
 
 ## Bumped whenever the on-disk shape changes. A cache written by an older
-## importer is discarded rather than migrated.
+## importer is discarded rather than migrated: every byte in it is derived from
+## a dump the owner still has, so re-importing costs a few seconds and a
+## migration would have to carry every past shape forever. Nothing but the cache
+## is thrown away, since saves live under their own root.
 const FORMAT_VERSION: int = 55
+
+## What [method state] answers. A stale cache is told from a missing one because
+## they need different things said to whoever is looking at it: one is a
+## cartridge that was never imported, the other one imported by an older build
+## and needing the same dump again.
+const STATE_MISSING: StringName = &"missing"
+const STATE_STALE: StringName = &"stale"
+const STATE_INCOMPLETE: StringName = &"incomplete"
+const STATE_USABLE: StringName = &"usable"
 
 
 static func directory_for(id: StringName, sha1: String) -> String:
@@ -281,11 +293,19 @@ static func prepare(directory: String) -> bool:
 
 ## True when [param directory] holds a complete cache this build can read.
 static func is_usable(directory: String) -> bool:
+	return state(directory) == STATE_USABLE
+
+
+## Why a cache cannot be read, for a caller that has to say so. An import writes
+## the manifest last and marks it complete last, so a run that was interrupted
+## leaves the directory behind and reads as incomplete rather than as stale.
+static func state(directory: String) -> StringName:
 	var manifest: Dictionary = read_manifest(directory)
 	if manifest.is_empty():
-		return false
-	return int(manifest.get("format_version", -1)) == FORMAT_VERSION \
-		and bool(manifest.get("complete", false))
+		return STATE_MISSING
+	if int(manifest.get("format_version", -1)) != FORMAT_VERSION:
+		return STATE_STALE
+	return STATE_USABLE if bool(manifest.get("complete", false)) else STATE_INCOMPLETE
 
 
 static func read_manifest(directory: String) -> Dictionary:

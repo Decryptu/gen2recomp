@@ -81,6 +81,10 @@ godot --headless --path . -s res://tools/import_rom.gd
 A few seconds per game. The cache is keyed by game and hash and lives in Godot's
 `user://`, never in the project or an export. `--verify` checks without writing.
 
+A cache is never migrated. An update that changes its format discards the old
+one, and the launcher's manage sheet says so: import the same dump again. Saves
+live under their own root and are not touched.
+
 | Data | Contents |
 |---|---|
 | Species | Names, base stats, types, held items, egg groups, TM/HM flags |

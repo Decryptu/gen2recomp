@@ -98,6 +98,10 @@ func test_reading_missing_index_data_yields_an_empty_buffer() -> void:
 func test_a_cache_without_a_manifest_is_not_usable() -> void:
 	RomCache.prepare(_directory)
 	assert_false(RomCache.is_usable(_directory))
+	# A directory with nothing readable in it is the same as no directory: both
+	# want the cartridge imported, and neither has anything to migrate.
+	assert_eq(RomCache.state(_directory), RomCache.STATE_MISSING)
+	assert_eq(RomCache.state("%s/absent" % _directory), RomCache.STATE_MISSING)
 
 
 func test_an_incomplete_cache_is_not_usable() -> void:
@@ -107,6 +111,7 @@ func test_an_incomplete_cache_is_not_usable() -> void:
 		"format_version": RomCache.FORMAT_VERSION, "complete": false,
 	})
 	assert_false(RomCache.is_usable(_directory))
+	assert_eq(RomCache.state(_directory), RomCache.STATE_INCOMPLETE)
 
 
 func test_a_cache_from_another_format_version_is_not_usable() -> void:
@@ -115,6 +120,9 @@ func test_a_cache_from_another_format_version_is_not_usable() -> void:
 		"format_version": RomCache.FORMAT_VERSION - 1, "complete": true,
 	})
 	assert_false(RomCache.is_usable(_directory))
+	# Told apart from a missing cache because there is no migration: what this
+	# needs said is that the dump is wanted again, not that it was never here.
+	assert_eq(RomCache.state(_directory), RomCache.STATE_STALE)
 
 
 func test_a_complete_current_cache_is_usable() -> void:
@@ -123,6 +131,7 @@ func test_a_complete_current_cache_is_usable() -> void:
 		"format_version": RomCache.FORMAT_VERSION, "complete": true,
 	})
 	assert_true(RomCache.is_usable(_directory))
+	assert_eq(RomCache.state(_directory), RomCache.STATE_USABLE)
 
 
 func test_clear_removes_subdirectories_too() -> void:
