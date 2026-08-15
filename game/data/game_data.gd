@@ -759,8 +759,8 @@ func overworld_icon_indices(icon_number: int) -> PackedByteArray:
 ## `ReadMonMenuIcon`: the icon a species is drawn with in a party menu, or zero
 ## when the cache does not hold the table. Its `cp EGG` answer is not modelled
 ## because nothing here holds an egg; a mod species numbered past the
-## cartridge's own range has no row and answers zero for the same reason
-## `Gen2ContentOverlay.defined_numbers()` reaches no dex order.
+## cartridge's own range has no row in the imported table and answers zero,
+## which is `ICON_NULL`.
 func mon_menu_icon(species: int) -> int:
 	var table: PackedByteArray = mon_menu_icon_table()
 	if species < 1 or species > table.size():
@@ -910,6 +910,16 @@ func dex_entry(number: int) -> Dictionary:
 		"weight": int(dex.get("weight", 0)),
 		"pages": pages,
 	}
+
+
+## Every species number a mod defined, ascending, and empty when no mod did.
+## Both dex order tables are cartridge data of exactly [constant
+## RomLayout.SPECIES_COUNT] entries, so a mod row can only follow them; see
+## [method Gen2Pokedex.order_by_mode].
+func mod_species_numbers() -> Array[int]:
+	if _overlay == null:
+		return [] as Array[int]
+	return _overlay.defined_numbers(Gen2ContentOverlay.KIND_SPECIES)
 
 
 ## data/pokemon/dex_order_new.asm, the order DEXMODE_NEW lists species in.

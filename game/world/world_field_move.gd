@@ -4,16 +4,13 @@ extends RefCounted
 ## Scene-free tables and gates for the overworld field moves
 ## (engine/events/overworld.asm).
 ##
-## All seven overworld field moves are resolved here. Cut, Surf and Whirlpool
-## follow the shape CutFunction defines: check the badge, then check the faced
-## tile, then stage a change the text acknowledge commits. Strength is the odd
-## one, see BADGE_PLAIN; Flash checks the map rather than a tile, see
-## [method Gen2WorldPalette.is_dark]; Headbutt checks a tile and no badge at
-## all, and its roll lives in [Gen2WorldTreemon].
+## Cut, Surf and Whirlpool follow CutFunction's shape: badge, faced tile, then a
+## change the text acknowledge commits. Strength is the odd one (BADGE_PLAIN),
+## Flash checks the map rather than a tile ([method Gen2WorldPalette.is_dark]),
+## and Headbutt checks a tile and no badge, its roll being [Gen2WorldTreemon]'s.
 
 ## constants/move_constants.asm, whose comment column is hex. The submenu, not
-## CutFunction, SurfFunction or WhirlpoolFunction, is what checks a party Pokemon
-## knows these.
+## the functions, is what checks a party Pokemon knows these.
 const MOVE_CUT: int = 0x0F
 const MOVE_SURF: int = 0x39
 const MOVE_STRENGTH: int = 0x46
@@ -22,69 +19,54 @@ const MOVE_WATERFALL: int = 0x7F
 const MOVE_FLASH: int = 0x94
 const MOVE_HEADBUTT: int = 0x1D
 const MOVE_ROCK_SMASH: int = 0xF9
-## The rows whose own routine is an escape rather than a tile: Fly picks a spawn
-## off the region map, Teleport takes the last Pokemon Center's and Dig the warp
-## the player came into the cave through.
+## The escape rows: Fly picks a spawn off the region map, Teleport takes the last
+## Pokemon Center's and Dig the warp the player came in through.
 const MOVE_FLY: int = 0x13
 const MOVE_DIG: int = 0x5B
 const MOVE_TELEPORT: int = 0x64
-## The row that is neither a tile nor an escape: SWEET SCENT calls a wild
-## encounter up out of the map the player is standing on.
+## Neither a tile nor an escape: a wild encounter out of the map underfoot.
 const MOVE_SWEET_SCENT: int = 0xE6
-## The two rows that move health between party members rather than touching the
-## map at all. `MonMenu_Softboiled_MilkDrink` is one routine for both.
+## `MonMenu_Softboiled_MilkDrink`, one routine for both: health between party
+## members, no map.
 const MOVE_SOFTBOILED: int = 0x87
 const MOVE_MILK_DRINK: int = 0xD0
 
-## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
-## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
-## source badge-order indices rather than flag numbers, so
-## Gen2WorldState.badge_flag() resolves them on either profile:
-## ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold/Silver, ENGINE_PLAINBADGE
-## 29 and 28, ENGINE_FOGBADGE 30 and 29, ENGINE_GLACIERBADGE 33 and 32.
+## Each function's own CheckBadge argument, as badge-order indices rather than
+## flag numbers: ENGINE_HIVEBADGE is 28 in Crystal and 27 in Gold and Silver, and
+## every badge past it splits the same way, so Gen2WorldState.badge_flag()
+## resolves them.
 const BADGE_HIVE: int = 1
-## .TryStrength is the whole gate: CheckBadge ENGINE_PLAINBADGE and nothing
-## else. It checks no tile, no block table and no player state, unlike the other
-## three, and its .AlreadyUsingStrength branch is marked unreferenced in both
-## pins, so an already-active flag is not a refusal either.
+## .TryStrength is the whole gate: no tile, no block table, no player state, and
+## its .AlreadyUsingStrength branch is unreferenced in both pins.
 const BADGE_PLAIN: int = 2
 const BADGE_FOG: int = 3
 const BADGE_GLACIER: int = 6
 ## `.TryFly`'s own `CheckBadge ENGINE_STORMBADGE`, the sixth badge.
 const BADGE_STORM: int = 5
-## WaterfallFunction's .TryWaterfall, whose CheckBadge argument is
-## ENGINE_RISINGBADGE: 34 in Crystal and 33 in Gold/Silver.
+## WaterfallFunction's .TryWaterfall: ENGINE_RISINGBADGE.
 const BADGE_RISING: int = 7
-## FlashFunction's .CheckUseFlash, whose CheckBadge argument is
-## ENGINE_ZEPHYRBADGE: 27 in Crystal and 26 in Gold/Silver. It is the first
-## badge, so Flash is gated on the least of the eight.
+## FlashFunction's .CheckUseFlash: ENGINE_ZEPHYRBADGE, the least of the eight.
 const BADGE_ZEPHYR: int = 0
 
 ## GetSurfType's comparison, constants/pokemon_constants.asm.
 const SPECIES_PIKACHU: int = 0x19
 
-## constants/music_constants.asm. home/audio.asm's SpecialMapMusic returns this
-## ahead of the map header's own music whenever the player state is surfing, so
-## it belongs to Surf rather than to any one map. Surf has no sound effect:
-## UsedSurfScript never calls PlaySFX.
+## `SpecialMapMusic` returns this ahead of the map header's while the player is
+## surfing, so it belongs to Surf. `UsedSurfScript` calls no PlaySFX.
 const MUSIC_SURF: int = 0x21
-## `BikeFunction`'s own `ld de, MUSIC_BICYCLE`, which it writes to `wMapMusic` so
-## the track survives a map load the way `SpecialMapMusic` keeps MUSIC_SURF.
+## `BikeFunction` writes this to `wMapMusic`, so it survives a map load.
 const MUSIC_BICYCLE: int = 0x13
 
-## The data/mon_menu.asm MonMenuOptions field-move rows this project acts on.
-## Both pins ship the same rows, so this needs no profile split. IsFieldMove
-## decides submenu membership from this list alone, so a move stops appearing
-## the moment it leaves it.
+## data/mon_menu.asm's MonMenuOptions rows, identical between the pins and the
+## whole of IsFieldMove's submenu membership.
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
 	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT, MOVE_SWEET_SCENT,
 	MOVE_FLY, MOVE_SOFTBOILED, MOVE_MILK_DRINK,
 ]
 
-## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of
-## the six block ($12, $1a); the four grass codes are LAND_TILE and cuttable
-## anyway, which is why membership here is separate from the permission.
+## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry: the
+## four grass codes are LAND_TILE and cuttable, so this is not the permission.
 const CUTTABLE_COLLISIONS: Array[int] = [
 	0x12,  # COLL_CUT_TREE
 	0x1A,  # COLL_CUT_TREE_1A
@@ -94,16 +76,13 @@ const CUTTABLE_COLLISIONS: Array[int] = [
 	0x1C,  # COLL_LONG_GRASS_1C
 ]
 
-## OWCutAnimation's index in e: which of the two cut animations the replacement
-## plays. Recorded because CheckOverworldTileArrays returns it beside the
-## replacement block; this renderer draws neither.
+## OWCutAnimation's index in e, returned beside the replacement block by
+## CheckOverworldTileArrays. This renderer draws neither.
 const ANIMATION_TREE: int = 0
 const ANIMATION_GRASS: int = 1
 
-## constants/tileset_constants.asm. Numbers 1 to 3 agree between the pins, but
-## pokegold has no BATTLE_TOWER_OUTSIDE, POKECOM_CENTER or BATTLE_TOWER_INSIDE,
-## so everything above $03 is shifted. PARK and FOREST are the two tilesets in
-## the cut table that this reaches.
+## constants/tileset_constants.asm: 1 to 3 agree, and pokegold ships three fewer
+## tilesets after them, so PARK and FOREST shift.
 const TILESET_JOHTO: int = 0x01
 const TILESET_JOHTO_MODERN: int = 0x02
 const TILESET_KANTO: int = 0x03
@@ -113,9 +92,8 @@ const TILESET_FOREST_CRYSTAL: int = 0x1F
 const TILESET_FOREST_GOLD_SILVER: int = 0x1C
 
 ## data/collision/field_move_blocks.asm's CutTreeBlockPointers, byte identical
-## between the pins: facing block to [replacement block, animation]. Only the
-## tileset numbers keying it are profile split, so the lists are shared and
-## _cut_tables() picks the keys.
+## between the pins: facing block to [replacement block, animation]. Only its
+## tileset keys are profile split, which is what _cut_tables() picks.
 const CUT_BLOCKS_JOHTO: Dictionary = {
 	0x03: [0x02, ANIMATION_GRASS],
 	0x5B: [0x3C, ANIMATION_TREE],
@@ -147,25 +125,21 @@ static func is_field_move(move: int) -> bool:
 	return FIELD_MOVES.has(move)
 
 
-## GetSurfType resolved through ChrisStateSprites: the surfing player's sprite
-## for the party member carrying the move. The source keeps the Pikachu variant
-## as a separate wPlayerState value; only the sprite differs, so this collapses
-## the two lookups into the one number a renderer needs.
+## GetSurfType through ChrisStateSprites. The source keeps the Pikachu variant
+## as its own wPlayerState value and only the sprite differs, so the two lookups
+## collapse into the one number a renderer needs.
 static func surf_sprite(species: int) -> int:
 	return Gen2WorldSprite.SPRITE_SURFING_PIKACHU if species == SPECIES_PIKACHU \
 		else Gen2WorldSprite.SPRITE_SURF
 
 
-## CheckCutCollision: whether the faced cell's collision code is one Cut acts on
-## at all. A match still needs a block in the tileset's list.
 static func cuttable(collision_code: int) -> bool:
 	return CUTTABLE_COLLISIONS.has(collision_code)
 
 
-## home/map_objects.asm's CheckCutTreeTile, which is the two tree codes alone.
-## TryTileCollisionEvent's `.cut` branch reads this rather than
-## CheckCutCollision, so pressing A at tall grass offers nothing while the party
-## submenu's CUT still cuts it.
+## CheckCutTreeTile, the two tree codes alone. TryTileCollisionEvent's `.cut`
+## reads this rather than CheckCutCollision, so an A press at tall grass offers
+## nothing while the submenu's CUT still cuts it.
 const CUT_TREE_COLLISIONS: Array[int] = [0x12, 0x1A]
 
 
@@ -173,8 +147,7 @@ static func cut_tree_tile(collision_code: int) -> bool:
 	return CUT_TREE_COLLISIONS.has(collision_code)
 
 
-## The tileset-to-block-list mapping for one profile. Kept as a function rather
-## than two constants so the shared lists above stay single-sourced.
+## A function rather than two constants, so the lists above stay single-sourced.
 static func _cut_tables(is_crystal: bool) -> Dictionary:
 	return {
 		TILESET_JOHTO: CUT_BLOCKS_JOHTO,
@@ -185,10 +158,8 @@ static func _cut_tables(is_crystal: bool) -> Dictionary:
 	}
 
 
-## CheckOverworldTileArrays against CutTreeBlockPointers: the replacement for
-## [param block] in [param tileset], or a not-ok result when the tileset carries
-## no list or the block is not in it. Both misses are the source's same
-## "nothing to cut" answer.
+## CheckOverworldTileArrays against CutTreeBlockPointers; an absent tileset and
+## an absent block are the same "nothing to cut".
 static func cut_replacement(tileset: int, block: int, is_crystal: bool) -> Dictionary:
 	var blocks: Variant = _cut_tables(is_crystal).get(tileset)
 	if blocks == null:
@@ -199,32 +170,27 @@ static func cut_replacement(tileset: int, block: int, is_crystal: bool) -> Dicti
 	return {"ok": true, "block": int(row[0]), "animation": int(row[1])}
 
 
-## home/map_objects.asm's CheckWhirlpoolTile, which TryWhirlpoolMenu applies to
-## the faced tile. Both codes are WATER_TILE | TALK, so the cell is reachable by
-## surfing straight onto it; what makes it an obstacle is
+## home/map_objects.asm's CheckWhirlpoolTile. Both codes are WATER_TILE | TALK,
+## so the cell can be surfed onto: what makes it an obstacle is
 ## Gen2WorldCollision.forced_action(), not the permission.
 const WHIRLPOOL_COLLISIONS: Array[int] = [
 	Gen2WorldCollision.COLL_WHIRLPOOL,
 	Gen2WorldCollision.COLL_WHIRLPOOL_2C,
 ]
 
-## data/collision/field_move_blocks.asm's WhirlpoolBlockPointers, byte identical
-## between the pins like CutTreeBlockPointers. It names only TILESET_JOHTO, which
-## is $01 in both games, so unlike the cut table this needs no profile split.
+## WhirlpoolBlockPointers, which names only TILESET_JOHTO, $01 in both games, so
+## unlike the cut table it needs no profile split.
 const WHIRLPOOL_BLOCKS_JOHTO: Dictionary = {
 	0x07: [0x36, ANIMATION_TREE],
 }
 
 
-## CheckWhirlpoolTile: whether the faced cell's collision code is one Whirlpool
-## acts on. A match still needs a block in the tileset's list.
 static func whirlpool_tile(collision_code: int) -> bool:
 	return WHIRLPOOL_COLLISIONS.has(collision_code)
 
 
-## CheckOverworldTileArrays against WhirlpoolBlockPointers, the counterpart of
-## cut_replacement(). Both misses, absent tileset and absent block, are the
-## source's same "nothing to do" answer.
+## CheckOverworldTileArrays against WhirlpoolBlockPointers, cut_replacement()'s
+## counterpart down to both misses answering the same way.
 static func whirlpool_replacement(tileset: int, block: int) -> Dictionary:
 	if tileset != TILESET_JOHTO:
 		return {"ok": false}
@@ -234,34 +200,27 @@ static func whirlpool_replacement(tileset: int, block: int) -> Dictionary:
 	return {"ok": true, "block": int(row[0]), "animation": int(row[1])}
 
 
-## home/map_objects.asm's CheckWaterfallTile, which CheckMapCanWaterfall applies
-## to wTileUp. COLL_CURRENT_DOWN is in the table beside COLL_WATERFALL and is
-## marked unused in both pins; it is kept because the source compares both and a
-## list of interesting codes that quietly drops one is how a table rots.
+## home/map_objects.asm's CheckWaterfallTile, on wTileUp. COLL_CURRENT_DOWN is
+## unused in both pins and kept because the source compares both.
 const WATERFALL_COLLISIONS: Array[int] = [
 	Gen2WorldCollision.COLL_WATERFALL,
 	Gen2WorldCollision.COLL_CURRENT_DOWN,
 ]
 
 
-## CheckWaterfallTile: whether [param collision_code] is one Waterfall climbs.
-## Unlike Cut and Whirlpool this needs no block table, because Waterfall changes
-## no block. It moves the player and nothing else.
+## No block table: Waterfall moves the player and changes nothing.
 static func waterfall_tile(collision_code: int) -> bool:
 	return WATERFALL_COLLISIONS.has(collision_code)
 
 
-## home/map_objects.asm's CheckHeadbuttTreeTile, applied to the faced tile by
-## both TryHeadbuttFromMenu and the overworld A-press in
-## engine/overworld/events.asm.
+## home/map_objects.asm's CheckHeadbuttTreeTile, read by TryHeadbuttFromMenu and
+## by the overworld A press.
 const HEADBUTT_COLLISIONS: Array[int] = [
 	Gen2WorldCollision.COLL_HEADBUTT_TREE,
 	Gen2WorldCollision.COLL_HEADBUTT_TREE_1D,
 ]
 
 
-## CheckHeadbuttTreeTile: whether [param collision_code] is a headbutt tree.
-## Like Waterfall this needs no block table, because a headbutt changes no
-## block: ShakeHeadbuttTree is an animation and the tree is still there after.
+## No block table either: ShakeHeadbuttTree is an animation and the tree stands.
 static func headbutt_tile(collision_code: int) -> bool:
 	return HEADBUTT_COLLISIONS.has(collision_code)

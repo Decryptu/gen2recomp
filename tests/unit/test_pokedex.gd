@@ -5,6 +5,8 @@ extends GutTest
 
 const Fixture := preload("res://tests/unit/pokedex_fixture.gd")
 
+const MOD_SPECIES: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
+
 var _data: GameData = null
 
 
@@ -476,3 +478,48 @@ func test_an_empty_unown_dex_has_no_form_and_no_word() -> void:
 	assert_eq(dex.selected_unown_form(), 0)
 	assert_eq(dex.unown_word(), "")
 	assert_false(dex.move_unown(Gen2Button.RIGHT))
+
+
+## Both order tables are cartridge data of exactly 251 entries and OLD counts
+## that far, so a mod's species follows the cartridge's own run in every mode
+## rather than being left out of the listing entirely.
+func test_a_mod_species_follows_the_cartridge_run_in_every_mode() -> void:
+	var overlay := Gen2ContentOverlay.new()
+	overlay.define(
+		Gen2ContentOverlay.KIND_SPECIES, &"testmod", MOD_SPECIES, {"name": "VOLTLING"}
+	)
+	_data.set_content_overlay(overlay)
+
+	for mode: int in [RomLayout.DEXMODE_NEW, RomLayout.DEXMODE_OLD]:
+		var dex: Gen2Pokedex = _dex([MOD_SPECIES], [MOD_SPECIES], mode)
+		assert_eq(dex.listing_end, RomLayout.SPECIES_COUNT + 1,
+			"the mod species is the last row of the order")
+		dex.scroll = dex.listing_end - dex.listing_height
+		dex.cursor = dex.listing_height - 1
+		assert_eq(dex.selected_species(), MOD_SPECIES)
+		assert_eq(String(dex.rows()[dex.cursor]["name"]), "VOLTLING")
+
+	# ABC filters the mod species by seen the way it filters the table.
+	var abc: Gen2Pokedex = _dex([4, MOD_SPECIES], [], RomLayout.DEXMODE_ABC)
+	assert_eq(abc.listing_end, 2)
+	assert_eq(int(abc.rows()[1]["species"]), MOD_SPECIES)
+
+
+## `wPrevDexEntry` is a species number, so a mod's is past the cartridge's count
+## and the order is what says whether it is a real entry.
+func test_the_dex_reopens_on_a_mod_species_it_was_left_on() -> void:
+	var overlay := Gen2ContentOverlay.new()
+	overlay.define(
+		Gen2ContentOverlay.KIND_SPECIES, &"testmod", MOD_SPECIES, {"name": "VOLTLING"}
+	)
+	_data.set_content_overlay(overlay)
+	var dex: Gen2Pokedex = _dex([MOD_SPECIES], [], RomLayout.DEXMODE_OLD, MOD_SPECIES)
+	assert_eq(dex.selected_species(), MOD_SPECIES)
+
+	# A number no mod defined is out of the order and seeks nowhere, which is
+	# where the cartridge's own bound left it.
+	var unknown: Gen2Pokedex = _dex(
+		[MOD_SPECIES], [], RomLayout.DEXMODE_OLD, Gen2ContentOverlay.FIRST_MOD_NUMBER + 9
+	)
+	assert_eq(unknown.scroll, 0)
+	assert_eq(unknown.cursor, 0)
