@@ -68,6 +68,9 @@ const SPECIES_PIKACHU: int = 0x19
 ## it belongs to Surf rather than to any one map. Surf has no sound effect:
 ## UsedSurfScript never calls PlaySFX.
 const MUSIC_SURF: int = 0x21
+## `BikeFunction`'s own `ld de, MUSIC_BICYCLE`, which it writes to `wMapMusic` so
+## the track survives a map load the way `SpecialMapMusic` keeps MUSIC_SURF.
+const MUSIC_BICYCLE: int = 0x13
 
 ## The data/mon_menu.asm MonMenuOptions field-move rows this project acts on.
 ## Both pins ship the same rows, so this needs no profile split. IsFieldMove

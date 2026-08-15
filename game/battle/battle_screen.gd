@@ -3,6 +3,9 @@ extends Control
 
 signal battle_finished(result: Dictionary)
 signal capture_requested(ball: int)
+## A bag item spent inside the battle, so the world takes one off the pocket.
+## `target` is the party index an ITEMMENU_PARTY item was used on, or -1.
+signal item_used(item: int, target: int)
 ## `LoadEnemyMon`'s own `wPokedexSeen` write (engine/battle/core.asm:6407). Every
 ## enemy sent out sets it, a trainer's party as much as a wild, so this is the
 ## event rather than the battle result. The host owns the flag, since the battle
@@ -191,6 +194,20 @@ var _time_of_day: int = Gen2WorldPalette.TIME_DAY
 ## than a white field. Null unless the caller supplied one; see
 ## [method set_world_context].
 var _world_context: Gen2BattleWorldContext = null
+## `BattlePack`'s own rows and cursor, and the item held while
+## `UseItem_SelectMon` picks a target for it.
+var _pack_rows: Array[int] = []
+var _pack_quantities: Dictionary = {}
+var _pack_index: int = 0
+var _pack_selecting: bool = false
+var _pack_item: int = 0
+## `RestorePPEffect`'s own `.loop`, which asks which move before it restores
+## anything. Only the three items that fill one slot ever open it.
+var _pack_move_slots: Array = []
+var _pack_move_index: int = 0
+var _pack_move_target: int = -1
+var _pack_move_selecting: bool = false
+
 var _capture_balls: Array[int] = []
 var _capture_quantities: Dictionary = {}
 var _capture_ball_index: int = 0
@@ -1329,6 +1346,153 @@ func world_context() -> Gen2BattleWorldContext:
 	return _world_context
 
 
+## `BattlePack`, which is the same pack with `wBattleMode` set: the bag rows the
+## world hands over, already filtered to what `CheckItemMenu`'s battle nibble
+## says can be used at all. Balls stay in the list and reach the ball selector,
+## since that is where the throw is drawn.
+func set_battle_pack(items: Array, quantities: Dictionary = {}) -> void:
+	_pack_rows.clear()
+	for raw_item: Variant in items:
+		var item: int = int(raw_item)
+		if item > 0 and not _pack_rows.has(item):
+			_pack_rows.append(item)
+	_pack_quantities = quantities.duplicate()
+	if _pack_index >= _pack_rows.size():
+		_pack_index = 0
+
+
+func battle_pack_items() -> Array[int]:
+	return _pack_rows.duplicate()
+
+
+## `BattleMenu_Pack`'s own list. A row is chosen with left and right, used with A
+## and left with B, the way ball selection already is.
+func open_battle_pack() -> Dictionary:
+	if _battle == null or _battle.is_over() or not _pending.is_empty():
+		return {"ok": false, "reason": &"battle_events_pending"}
+	if _pack_rows.is_empty():
+		show_message("You have no items to use!")
+		return {"ok": false, "reason": &"no_usable_items"}
+	_pack_selecting = true
+	_pack_index = mini(_pack_index, _pack_rows.size() - 1)
+	_show_pack_selection()
+	return {"ok": true, "item": selected_pack_item()}
+
+
+func selected_pack_item() -> int:
+	if _pack_rows.is_empty():
+		return 0
+	return int(_pack_rows[posmod(_pack_index, _pack_rows.size())])
+
+
+func select_pack_row(index: int) -> Dictionary:
+	if not _pack_selecting or _pack_rows.is_empty():
+		return {"ok": false, "reason": &"pack_not_open"}
+	_pack_index = posmod(index, _pack_rows.size())
+	_show_pack_selection()
+	return {"ok": true, "item": selected_pack_item()}
+
+
+func _show_pack_selection() -> void:
+	var item: int = selected_pack_item()
+	show_message("Use %s x%d. Left and right: choose, A: use, B: back" % [
+		_item_name(item), int(_pack_quantities.get(item, 1)),
+	])
+
+
+func close_battle_pack() -> void:
+	_pack_selecting = false
+	_pack_item = 0
+	_open_battle_menu()
+
+
+## `UseItem`'s jumptable inside a battle. A ball reaches the throw the screen
+## already draws, an ITEMMENU_PARTY row asks `UseItem_SelectMon` for a target
+## first, and everything else is applied to whoever is out.
+func use_selected_pack_item() -> Dictionary:
+	if not _pack_selecting or _battle == null:
+		return {"ok": false, "reason": &"pack_not_open"}
+	var item: int = selected_pack_item()
+	if _data != null and int(_data.item(item).get("pocket", 0)) == Gen2WorldPack.TYPE_BALL:
+		_pack_selecting = false
+		if not _is_wild_battle():
+			## `PokeBallEffect`'s `UseBallInTrainerBattle`, which spends neither
+			## the ball nor the turn.
+			show_message("The trainer blocked the BALL!
+Don't be a thief!")
+			return {"ok": false, "reason": &"ball_in_trainer_battle"}
+		var opened: Dictionary = begin_capture()
+		if bool(opened.get("ok", false)):
+			select_capture_ball(_capture_balls.find(item))
+		return opened
+	if _data != null \
+		and int(_data.item(item).get("battle_menu", 0)) == Gen2WorldPack.ITEMMENU_PARTY:
+		_pack_selecting = false
+		_pack_item = item
+		_open_switch_pick(&"item")
+		return {"ok": true, "status": &"choosing_target", "item": item}
+	return _use_pack_item(item, -1)
+
+
+## `RestorePPEffect`'s question: which of the target's moves the Ether goes on.
+## The Elixers fill every slot and never open this.
+func _open_pack_move(item: int, target: int) -> void:
+	var mon: Gen2BattleMon = _battle.party(Gen2Battle.PLAYER).at(target)
+	_pack_move_slots = []
+	if mon != null:
+		for slot: int in mon.moves.size():
+			if int(mon.moves[slot]) > 0:
+				_pack_move_slots.append(slot)
+	if _pack_move_slots.is_empty():
+		_use_pack_item(item, target)
+		return
+	_pack_item = item
+	_pack_move_target = target
+	_pack_move_index = 0
+	_pack_move_selecting = true
+	_show_pack_move_selection()
+
+
+func _show_pack_move_selection() -> void:
+	var mon: Gen2BattleMon = _battle.party(Gen2Battle.PLAYER).at(_pack_move_target)
+	var slot: int = int(_pack_move_slots[_pack_move_index])
+	var move: Dictionary = _data.move(int(mon.moves[slot])) if _data != null else {}
+	show_message("Restore %s %d PP. Left and right: choose, A: use, B: back" % [
+		String(move.get("name", "MOVE")), mon.pp_left(slot),
+	])
+
+
+func _close_pack_move() -> void:
+	_pack_move_selecting = false
+	_pack_move_slots = []
+	_pack_move_target = -1
+
+
+## The chosen row, applied and then paid for with the turn:
+## `BATTLEPLAYERACTION_USEITEM` leaves the enemy's own move behind it.
+func _use_pack_item(item: int, target: int, move_slot: int = -1) -> Dictionary:
+	_pack_selecting = false
+	_pack_item = 0
+	_close_pack_move()
+	var used: Dictionary = _battle.use_bag_item(item, target, move_slot)
+	if not bool(used.get("ok", false)):
+		## `.Field`'s battle twin: every refused effect is one line and the pack
+		## again, so nothing is spent and the turn is still the player's.
+		show_message("It won't have any effect.")
+		_pack_selecting = true
+		return used
+	item_used.emit(item, target)
+	## `ItemUsedText`, less its `<PLAYER>` the way every other host-authored line
+	## here drops one.
+	show_message("Used the %s." % _item_name(item))
+	if _battle.is_over():
+		## `PokeDollEffect`'s `wForcedSwitch`: the battle is already over, so no
+		## turn is taken and the terminal text is what follows this line.
+		return used
+	_pending = _battle.take_actions(Gen2Battle.use_item(item), _enemy_action())
+	return used
+
+
 ## Supplies the wild battle with the supported balls currently owned by the
 ## overworld. The battle scene never reads or mutates world inventory itself.
 func set_capture_balls(balls: Array, quantities: Dictionary = {}) -> void:
@@ -2091,6 +2255,11 @@ func _choose_battle_menu() -> void:
 				if bool(begin_capture().get("ok", false)):
 					throw_capture_ball()
 				return
+			if not _pack_rows.is_empty():
+				open_battle_pack()
+				return
+			## No bag was handed over, which is every battle outside the world
+			## host: a wild one still reaches the throw the screen owns.
 			if _is_wild_battle():
 				begin_capture()
 				return
@@ -2199,7 +2368,7 @@ func _open_switch_pick(reason: StringName) -> void:
 	## two the player opened themselves: `OfferSwitch`'s YES and the battle
 	## menu's own PKMN, both of which can be backed out of.
 	_switch_menu = Gen2BattleSwitchMenu.for_party(
-		_battle.party(Gen2Battle.PLAYER), reason not in [&"offer", &"player"]
+		_battle.party(Gen2Battle.PLAYER), reason not in [&"offer", &"player", &"item"]
 	)
 	_switch_offer = null
 	_switch_stage = &"pick"
@@ -2343,6 +2512,16 @@ func _answer_switch_pick(button: int) -> void:
 			_switch_menu.move(1)
 			_refresh_menu_layer()
 		Gen2Button.A:
+			## `UseItem_SelectMon` makes neither of `PickPartyMonInBattle`'s two
+			## checks: a fainted member is exactly what a Revive wants, and the
+			## one already out is what a potion usually goes on. The item's own
+			## effect is what refuses.
+			if _switch_reason == &"item" and not _switch_menu.is_cancel(_switch_menu.cursor):
+				_resolve_switch({
+					"result": Gen2BattleSwitchMenu.CHOSEN,
+					"index": int(_switch_menu.rows[_switch_menu.cursor].get("index", -1)),
+				})
+				return
 			_resolve_switch(_switch_menu.confirm())
 		Gen2Button.B:
 			_resolve_switch(_switch_menu.cancel())
@@ -2355,6 +2534,12 @@ func _resolve_switch(answer: Dictionary) -> void:
 			_commit_switch(int(answer.get("index", -1)))
 		Gen2BattleSwitchMenu.CANCELLED:
 			_play_anim_sound(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
+			## A target list backed out of leaves the item where it was and
+			## reopens the pack it was chosen from.
+			if _switch_reason == &"item":
+				_close_switch()
+				open_battle_pack()
+				return
 			## `BattleMenuPKMN_Loop`'s `.Cancel` is a `jp BattleMenu`: the list
 			## the player opened themselves goes back to the menu it came from.
 			if _switch_reason == &"player":
@@ -2375,6 +2560,14 @@ func _commit_switch(index: int) -> void:
 	var reason: StringName = _switch_reason
 	_close_switch()
 	match reason:
+		&"item":
+			## `StatusHealer_Jumptable`'s way back: the pack is where a used item
+			## leaves the player, and where a cancelled one does too.
+			if _pack_item in Gen2Battle.SLOT_PP_ITEMS:
+				_open_pack_move(_pack_item, index)
+				return
+			_use_pack_item(_pack_item, index)
+			return
 		&"baton_pass":
 			_pending = _battle.pass_to(index)
 		&"replace":
@@ -3223,7 +3416,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## [method _handle_button], which runs first and never reaches here.
 func _renderer_input_free() -> bool:
 	return is_ready() and _forget_stage == &"" and _switch_stage == &"" \
-		and _menu_stage == &"" and not _capture_selecting
+		and _menu_stage == &"" and not _capture_selecting and not _pack_selecting \
+		and not _pack_move_selecting
 
 
 func _handle_button(button: int) -> bool:
@@ -3237,6 +3431,39 @@ func _handle_button(button: int) -> bool:
 
 	if _menu_stage != &"":
 		_answer_menu(button)
+		return true
+
+	if _pack_move_selecting:
+		match button:
+			Gen2Button.RIGHT:
+				_pack_move_index = posmod(_pack_move_index + 1, _pack_move_slots.size())
+				_show_pack_move_selection()
+			Gen2Button.LEFT:
+				_pack_move_index = posmod(_pack_move_index - 1, _pack_move_slots.size())
+				_show_pack_move_selection()
+			Gen2Button.A:
+				_use_pack_item(
+					_pack_item, _pack_move_target, int(_pack_move_slots[_pack_move_index])
+				)
+			Gen2Button.B:
+				_close_pack_move()
+				open_battle_pack()
+			_:
+				return false
+		return true
+
+	if _pack_selecting:
+		match button:
+			Gen2Button.RIGHT:
+				select_pack_row(_pack_index + 1)
+			Gen2Button.LEFT:
+				select_pack_row(_pack_index - 1)
+			Gen2Button.A:
+				use_selected_pack_item()
+			Gen2Button.B:
+				close_battle_pack()
+			_:
+				return false
 		return true
 
 	if _capture_selecting:

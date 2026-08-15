@@ -61,6 +61,11 @@ const ENGINE_ALL_FRUIT_TREES: int = 84
 ## the save across maps, warps and snapshots.
 const ENGINE_STRENGTH_ACTIVE: int = 24
 const ENGINE_STRENGTH_ACTIVE_GOLD_SILVER: int = 23
+## The next flag in the same byte: `BIKEFLAGS_ALWAYS_ON_BIKE_F`, which is the
+## whole of `.CantGetOffBike`. `BIKEFLAGS_DOWNHILL_F` follows it and is read by
+## `DoPlayerMovement` alone, which no map ever sets.
+const ENGINE_ALWAYS_ON_BIKE: int = 25
+const ENGINE_ALWAYS_ON_BIKE_GOLD_SILVER: int = 24
 
 ## wBadges spans wJohtoBadges then wKantoBadges as one contiguous flag_array, and
 ## VAR_BADGES counts both bytes, not Johto alone. These are Crystal indices:
@@ -542,6 +547,13 @@ const NUM_SPAWNS: int = RomLayout.SPAWN_COUNT
 ## way badge_flag() resolves a badge.
 static func strength_active_flag(crystal: bool = true) -> int:
 	return ENGINE_STRENGTH_ACTIVE if crystal else ENGINE_STRENGTH_ACTIVE_GOLD_SILVER
+
+
+## `.GetOffBike`'s own `bit BIKEFLAGS_ALWAYS_ON_BIKE_F`, resolved for the profile
+## [param data] names the way strength_active_flag() resolves its own.
+static func always_on_bike_flag(data: GameData) -> int:
+	return ENGINE_ALWAYS_ON_BIKE if is_crystal_profile(data) \
+		else ENGINE_ALWAYS_ON_BIKE_GOLD_SILVER
 
 
 ## Mirrors _GetVarAction's .CountBadges: a popcount over both badge bytes.

@@ -231,16 +231,19 @@ static func can_hold(data: GameData, item: int) -> bool:
 ## other CLOSE item still falls through to `.Oak`; `HANDOFF.md` names what each
 ## of those is waiting for.
 const FIELD_EFFECT_NONE: StringName = &""
+const FIELD_EFFECT_BICYCLE: StringName = &"bicycle"
 const FIELD_EFFECT_ESCAPE_ROPE: StringName = &"escape_rope"
 const FIELD_EFFECT_ROD: StringName = &"rod"
 const FIELD_EFFECT_COIN_CASE: StringName = &"coin_case"
 const FIELD_EFFECT_ITEMFINDER: StringName = &"itemfinder"
 const FIELD_EFFECT_SACRED_ASH: StringName = &"sacred_ash"
+const ITEM_BICYCLE: int = 0x07
 const ITEM_ESCAPE_ROPE: int = 0x13
 const ITEM_COIN_CASE: int = 0x36
 const ITEM_ITEMFINDER: int = 0x37
 const ITEM_SACRED_ASH: int = 0x9C
 const FIELD_EFFECTS: Dictionary = {
+	ITEM_BICYCLE: FIELD_EFFECT_BICYCLE,
 	ITEM_ESCAPE_ROPE: FIELD_EFFECT_ESCAPE_ROPE,
 	ITEM_COIN_CASE: FIELD_EFFECT_COIN_CASE,
 	ITEM_ITEMFINDER: FIELD_EFFECT_ITEMFINDER,
@@ -249,6 +252,22 @@ const FIELD_EFFECTS: Dictionary = {
 	Gen2WorldInventory.ITEM_SUPER_ROD: FIELD_EFFECT_ROD,
 	ITEM_SACRED_ASH: FIELD_EFFECT_SACRED_ASH,
 }
+
+
+## The bag rows `BattlePack` can offer, in the pack's own pocket order: every
+## owned item whose battle nibble is not ITEMMENU_NOUSE. The balls are in it,
+## because the pack is where a throw is chosen from too.
+static func battle_items(data: GameData, state: Gen2WorldState) -> Array[int]:
+	var out: Array[int] = []
+	if data == null or state == null:
+		return out
+	for pocket: Dictionary in build(data, state):
+		var numbers: Array = pocket.get("items", [])
+		for row: Dictionary in numbers:
+			var item: int = int(row.get("item", 0))
+			if int(data.item(item).get("battle_menu", 0)) != ITEMMENU_NOUSE:
+				out.append(item)
+	return out
 
 
 ## Which `.Field` effect a USE runs, or FIELD_EFFECT_NONE. The item's own menu

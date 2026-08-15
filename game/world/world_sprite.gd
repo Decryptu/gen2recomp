@@ -60,6 +60,12 @@ static func player_normal_sprite(female: bool) -> int:
 	return SPRITE_KRIS if female else SPRITE_PLAYER
 
 
+## The same table's PLAYER_BIKE row, which `UpdatePlayerSprite` reads once
+## `VAR_MOVEMENT` is PLAYER_BIKE.
+static func player_bike_sprite(female: bool) -> int:
+	return SPRITE_KRIS_BIKE if female else SPRITE_PLAYER_BIKE
+
+
 ## `InitPlayerObject`'s `ln e, PAL_NPC_RED` and its female branch.
 static func player_palette(female: bool) -> int:
 	return PAL_NPC_BLUE if female else PAL_NPC_RED

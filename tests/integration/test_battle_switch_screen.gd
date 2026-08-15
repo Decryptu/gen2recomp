@@ -600,3 +600,106 @@ func test_a_renderer_is_not_offered_input_while_a_menu_is_up() -> void:
 	await _read_question()
 	await _press(Gen2Button.B)
 	assert_true(_screen._renderer_input_free())
+
+
+## `BattleMenu_Pack`: PACK opens `BattlePack`'s own list, an ITEMMENU_PARTY row
+## asks `UseItem_SelectMon` for a target, and the item is spent before the turn
+## the enemy still gets.
+func test_the_pack_uses_an_item_on_the_chosen_member_and_spends_the_turn() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	_screen.set_battle_pack(
+		[BattleFixture.POTION], {BattleFixture.POTION: 2}
+	)
+	var spent: Array = []
+	_screen.item_used.connect(func(item: int, target: int) -> void:
+		spent.append([item, target])
+	)
+	var bench: Gen2BattleMon = battle.party(Gen2Battle.PLAYER).at(1)
+	bench.hp = 1
+
+	await _press(Gen2Button.DOWN)
+	assert_eq(int(_screen.battle_snapshot()["menu_position"]), Gen2BattleMenu.PACK)
+	await _press(Gen2Button.A)
+	assert_true(bool(_screen.get("_pack_selecting")), "the pack list is up")
+	assert_eq(_screen.selected_pack_item(), BattleFixture.POTION)
+
+	# The party list `UseItem_SelectMon` opens, and the bench member on it.
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick")
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+
+	assert_eq(bench.hp, 21, "the potion landed on the bench member")
+	assert_eq(spent, [[BattleFixture.POTION, 1]], "and the world was told to spend it")
+	assert_false(bool(_screen.get("_pack_selecting")))
+
+
+## `UseItem_SelectMon` makes none of the switch list's own checks: the Pokemon
+## already out is exactly what a potion is usually used on, and backing out of
+## the list reopens the pack rather than the menu.
+func test_the_item_target_list_takes_the_one_out_and_backs_out_to_the_pack() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	_screen.set_battle_pack([BattleFixture.POTION], {BattleFixture.POTION: 1})
+	battle.mon(Gen2Battle.PLAYER).hp = 1
+
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick")
+	await _press(Gen2Button.B)
+	assert_eq(_stage(), "", "the list is gone")
+	assert_true(bool(_screen.get("_pack_selecting")), "and the pack is back")
+
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	## Healed to 21 and then hit, because the item spends the turn and the enemy
+	## still moves in it.
+	assert_gt(battle.mon(Gen2Battle.PLAYER).hp, 1, "used on the one that is out")
+	assert_lt(battle.mon(Gen2Battle.PLAYER).hp, 21, "and the enemy answered it")
+
+
+## An ITEMMENU_CLOSE row is applied to whoever is out with no list in front of
+## it, and B leaves the pack for the menu it was opened from.
+func test_an_x_item_needs_no_target_and_b_closes_the_pack() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	_screen.set_battle_pack([BattleFixture.X_ATTACK], {BattleFixture.X_ATTACK: 1})
+
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.B)
+	assert_eq(_menu_stage(), "main", "B is a jp BattleMenu")
+
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	assert_eq(battle.mon(Gen2Battle.PLAYER).stage("attack"), 1)
+	assert_eq(_stage(), "", "no target list for an item used on the one that is out")
+
+
+## `RestorePPEffect`'s `.loop`: an Ether asks which move after it has asked which
+## Pokemon, and the slot chosen there is the one that fills.
+func test_an_ether_asks_which_move_and_fills_that_slot() -> void:
+	var battle: Gen2Battle = _menu_battle()
+	await _open(battle, [Gen2Battle.use_move(0), Gen2Battle.use_move(0)])
+	await _advance_to_menu()
+	_screen.set_battle_pack([BattleFixture.ETHER], {BattleFixture.ETHER: 1})
+	var user: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	user.pp[0] = 0
+	user.pp[1] = 0
+
+	await _press(Gen2Button.DOWN)
+	await _press(Gen2Button.A)
+	await _press(Gen2Button.A)
+	assert_eq(_stage(), "pick")
+	await _press(Gen2Button.A)
+	assert_true(bool(_screen.get("_pack_move_selecting")), "the move list is up")
+
+	await _press(Gen2Button.RIGHT)
+	await _press(Gen2Button.A)
+	assert_eq(user.pp_left(0), 0, "the slot it was not used on")
+	assert_gt(user.pp_left(1), 0, "and the one it was")

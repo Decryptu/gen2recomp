@@ -16,6 +16,7 @@ const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
 const PLAYER_VIEW_CELL: Vector2i = Vector2i(4, 4)
 const MOVEMENT_WALK: StringName = &"walk"
 const MOVEMENT_SURF: StringName = &"surf"
+const MOVEMENT_BIKE: StringName = &"bike"
 ## constants/sprite_constants.asm's first real id, and what GetMonSprite answers
 ## for a variable sprite no script has assigned yet.
 const SPRITE_CHRIS: int = 1
@@ -284,7 +285,7 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	if world_snapshot.player_facing < Gen2WorldSprite.FACING_DOWN \
 		or world_snapshot.player_facing > Gen2WorldSprite.FACING_RIGHT:
 		return null
-	if world_snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
+	if world_snapshot.movement_mode not in [MOVEMENT_WALK, MOVEMENT_SURF, MOVEMENT_BIKE]:
 		return null
 	if world_snapshot.world_day < 0 or world_snapshot.world_day >= Gen2WorldClock.DAYS_PER_WEEK \
 		or world_snapshot.world_hour < 0 or world_snapshot.world_hour >= Gen2WorldClock.HOURS_PER_DAY \
@@ -351,6 +352,10 @@ func landmark() -> int:
 func map_music_track() -> int:
 	if movement_mode == MOVEMENT_SURF:
 		return Gen2WorldFieldMove.MUSIC_SURF
+	## `BikeFunction` writes `wMapMusic` itself rather than going through
+	## `SpecialMapMusic`, so the track is the bike's until the player gets off.
+	if movement_mode == MOVEMENT_BIKE:
+		return Gen2WorldFieldMove.MUSIC_BICYCLE
 	return current_map.music if current_map != null else Gen2WorldState.MUSIC_NONE
 
 
@@ -596,7 +601,7 @@ func player_sprite() -> Gen2WorldSprite:
 
 
 func set_movement_mode(mode: StringName) -> Dictionary:
-	if mode not in [MOVEMENT_WALK, MOVEMENT_SURF]:
+	if mode not in [MOVEMENT_WALK, MOVEMENT_SURF, MOVEMENT_BIKE]:
 		return {"ok": false, "reason": &"invalid_movement_mode", "mode": mode}
 	movement_mode = mode
 	return {"ok": true, "mode": movement_mode}
@@ -4530,7 +4535,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
 	_advance_followers(from_cell, previous_cells)
-	_start_player_step(direction, STEP_FRAMES_WALK)
+	_start_player_step(direction, _step_frames_for_movement())
 	return {
 		"ok": true,
 		"kind": kind,
@@ -5101,6 +5106,58 @@ func dig_request() -> Dictionary:
 		"move": Gen2WorldFieldMove.MOVE_DIG,
 		"warp": warped,
 	}
+
+
+## `DoPlayerMovement`'s own speed for a committed step: `STEP_BIKE` while riding,
+## which is `big_step` and so four frames, and `STEP_WALK`'s eight otherwise.
+## `.BikeCheck`'s downhill branch is not modelled: `BIKEFLAGS_DOWNHILL_F` is set
+## by nothing in either pin, so no map can ask for the slower non-down step.
+func _step_frames_for_movement() -> int:
+	return STEP_FRAMES_FAST if movement_mode == MOVEMENT_BIKE else STEP_FRAMES_WALK
+
+
+## `BikeFunction`'s `.TryBike`: `.CheckEnvironment` first, then the state the
+## player is in. Getting off is refused while `BIKEFLAGS_ALWAYS_ON_BIKE_F` is
+## set, which is `Script_CantGetOffBike`; the two get-on and get-off scripts are
+## the caller's, since both are text and a sprite update.
+func bike_request() -> Dictionary:
+	if current_map == null:
+		return _bike_failure(&"missing_map")
+	if not _can_ride_bike_here():
+		return _bike_failure(&"cannot_use_bike")
+	if movement_mode == MOVEMENT_WALK:
+		movement_mode = MOVEMENT_BIKE
+		player_sprite_number = Gen2WorldSprite.player_bike_sprite(_player_female)
+		return {
+			"ok": true, "kind": &"bike_on",
+			"music": Gen2WorldFieldMove.MUSIC_BICYCLE,
+			"sprite": player_sprite_number,
+		}
+	if movement_mode != MOVEMENT_BIKE:
+		return _bike_failure(&"cannot_use_bike")
+	if state.is_engine_flag_active(Gen2WorldState.always_on_bike_flag(data)):
+		return _bike_failure(&"always_on_bike")
+	movement_mode = MOVEMENT_WALK
+	player_sprite_number = _walking_sprite()
+	return {
+		"ok": true, "kind": &"bike_off",
+		"music": map_music_track(),
+		"sprite": player_sprite_number,
+	}
+
+
+## `.CheckEnvironment`: outdoors, a cave or a gate, and standing on a tile whose
+## permission's low nibble is `FLOOR_TILE`. Water and every wall code fail it, so
+## a surfing player can never be on a bike either.
+func _can_ride_bike_here() -> bool:
+	if not _is_outdoor(current_map.environment) \
+		and current_map.environment not in [ENVIRONMENT_CAVE, ENVIRONMENT_GATE]:
+		return false
+	return (collision_permission_at(player_cell) & 0x0F) == Gen2WorldCollision.LAND_TILE
+
+
+static func _bike_failure(reason: StringName) -> Dictionary:
+	return {"ok": false, "kind": &"bike_failed", "reason": reason}
 
 
 ## `EscapeRopeFunction`, which is `EscapeRopeOrDig` with the other type byte: the

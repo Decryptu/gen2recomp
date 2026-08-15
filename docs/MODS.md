@@ -480,8 +480,8 @@ A battle renderer has two optional methods of its own:
 the screen claims what it needs and offers the rest, so a renderer can steer a
 camera and can never take a gameplay press. A `Gen2Button` is routed to whatever
 owns the screen before this is reached, on both sides, so the text box, the
-forget-move list and ball selection each take their press first and what arrives
-here is pointer and stick motion. Ball selection and the forget prompt also
+forget-move list, the pack's own rows and ball selection each take their press
+first and what arrives here is pointer and stick motion. Those three also
 withhold everything else while they are up, because a press there means
 something by itself. A draining bar, the opening slide and a move animation do
 not: none of them reads input, and a camera that stalls whenever a bar drains is

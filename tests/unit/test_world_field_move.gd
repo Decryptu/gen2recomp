@@ -1509,6 +1509,59 @@ func test_dig_is_refused_outside_a_cave_and_with_no_warp_recorded() -> void:
 	assert_eq(StringName(unknowing.dig_request()["reason"]), &"move_not_known")
 
 
+## `BikeFunction`: `.CheckEnvironment`, then the two directions of `.TryBike`.
+func test_the_bike_goes_on_and_off_outdoors_and_carries_its_own_music() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+
+	var on: Dictionary = world.bike_request()
+	assert_true(bool(on.get("ok", false)), String(on.get("reason", "")))
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_BIKE)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER_BIKE)
+	assert_eq(world.map_music_track(), Gen2WorldFieldMove.MUSIC_BICYCLE)
+
+	var off: Dictionary = world.bike_request()
+	assert_true(bool(off.get("ok", false)), String(off.get("reason", "")))
+	assert_eq(world.movement_mode, Gen2WorldAPI.MOVEMENT_WALK)
+	assert_eq(world.player_sprite_number, Gen2WorldSprite.SPRITE_PLAYER)
+	assert_ne(world.map_music_track(), Gen2WorldFieldMove.MUSIC_BICYCLE)
+
+
+## `.CheckEnvironment` again: a cave is a place to ride and an indoor map is not,
+## and `.GetOffBike` refuses while BIKEFLAGS_ALWAYS_ON_BIKE_F is set.
+func test_the_bike_is_refused_indoors_and_cannot_be_left_where_it_is_forced() -> void:
+	var indoors: Gen2WorldAPI = _escape_world(ESCAPE_POKECENTER, Vector2i(4, 4))
+	assert_eq(StringName(indoors.bike_request()["reason"]), &"cannot_use_bike")
+
+	var cave: Gen2WorldAPI = _escape_world(ESCAPE_CAVE, Vector2i(4, 4))
+	assert_true(bool(cave.bike_request().get("ok", false)), "a cave is rideable")
+
+	cave.state.set_engine_flag(Gen2WorldState.always_on_bike_flag(cave.data), true)
+	assert_eq(StringName(cave.bike_request()["reason"]), &"always_on_bike")
+	assert_eq(cave.movement_mode, Gen2WorldAPI.MOVEMENT_BIKE, "still riding")
+
+
+## `DoPlayerMovement` picks `STEP_BIKE` for a committed step while riding, which
+## is `big_step` and so half the frames an ordinary walk spends.
+func test_a_step_on_the_bike_spends_half_the_frames() -> void:
+	var world: Gen2WorldAPI = _escape_world()
+	assert_true(bool(world.move_result(Vector2i.RIGHT).get("ok", false)))
+	var walking: int = _drain_player_step(world)
+
+	assert_true(bool(world.bike_request().get("ok", false)))
+	assert_true(bool(world.move_result(Vector2i.LEFT).get("ok", false)))
+	assert_eq(_drain_player_step(world), walking / 2)
+
+
+## How many frames the step in flight still owes, spent one at a time.
+func _drain_player_step(world: Gen2WorldAPI) -> int:
+	var frames: int = 0
+	while world.player_step_in_progress():
+		world.advance_player_step_frame()
+		frames += 1
+	return frames
+
+
 func test_an_escape_rope_takes_the_same_warp_dig_does_and_knows_no_move() -> void:
 	var world: Gen2WorldAPI = _escape_world()
 	world.player_cell = ESCAPE_CAVE_DOOR
