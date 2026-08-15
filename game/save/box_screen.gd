@@ -249,16 +249,14 @@ func _build_ui() -> void:
 func _refresh() -> void:
 	if _box_grid == null:
 		return
-	for child: Node in _box_grid.get_children():
-		child.free()
+	Gen2LauncherUI.clear(_box_grid)
 	for slot: int in Gen2SaveBox.CAPACITY:
 		var button := _button(_slot_text(slot), TEXT)
 		button.custom_minimum_size = Vector2(170, 58)
 		button.pressed.connect(_select_box_slot.bind(slot))
 		_box_grid.add_child(button)
 	if _party_members != null:
-		for child: Node in _party_members.get_children():
-			child.free()
+		Gen2LauncherUI.clear(_party_members)
 		for index: int in Gen2SaveData.MAX_PARTY:
 			var member := _button(_party_text(index), TEXT)
 			member.custom_minimum_size = Vector2(280, 40)

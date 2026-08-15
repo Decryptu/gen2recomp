@@ -102,9 +102,7 @@ func _registered_default() -> Array:
 
 
 func _refresh() -> void:
-	for child: Node in _list.get_children():
-		_list.remove_child(child)
-		child.queue_free()
+	Gen2LauncherUI.clear(_list)
 	var bindings: Array = _bindings()
 	for index: int in bindings.size():
 		var row: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)

@@ -293,12 +293,7 @@ func _refresh() -> void:
 
 
 func _refresh_slot_cards() -> void:
-	# Selecting a slot is reached from a slot card's own `pressed`, so the
-	# card being replaced is still emitting. `free()` there is a use after
-	# free; detaching first keeps it out of the rebuilt list.
-	for child: Node in _slots_container.get_children():
-		_slots_container.remove_child(child)
-		child.queue_free()
+	Gen2LauncherUI.clear(_slots_container)
 	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 
@@ -351,8 +346,11 @@ func _refresh_details() -> void:
 		return
 	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
-	for child: Node in _details_box.get_children():
-		child.free()
+	Gen2LauncherUI.clear(_details_box)
+	# The pane's own controls go with it. A detached child is deleted at the end
+	# of the frame rather than here, so a reference kept past the rebuild would
+	# still answer `is_instance_valid` and report a form that is off screen.
+	_name_input = null
 	if _data == null or _selected_slot < 0:
 		return
 	# A slot targeted for a new game has no row yet, since slots_for answers only

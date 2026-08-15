@@ -403,8 +403,7 @@ func _refresh_party() -> void:
 func _refresh_party_form() -> void:
 	if _party_form == null:
 		return
-	for child: Node in _party_form.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_party_form)
 	if _selected_party < 0 or _selected_party >= _editor.save.party.size():
 		return
 	var mon: Gen2SaveMon = _editor.save.party[_selected_party]

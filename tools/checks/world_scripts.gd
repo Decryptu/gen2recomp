@@ -75,6 +75,8 @@ func _validate(game_id: StringName) -> bool:
 	var invalid_text: int = 0
 	var invalid_text_reasons: Dictionary = {}
 	var invalid_text_samples: Array = []
+	var ram_addresses: Dictionary = {}
+	var number_markers: int = 0
 	for raw_key: Variant in (text_value as Dictionary):
 		var raw_text: PackedByteArray = _pointer_bytes(data, String(raw_key), true)
 		var decoded: Dictionary = Gen2WorldScript.decode_text(raw_text)
@@ -84,6 +86,9 @@ func _validate(game_id: StringName) -> bool:
 			invalid_text_reasons[reason] = int(invalid_text_reasons.get(reason, 0)) + 1
 			if invalid_text_samples.size() < 3:
 				invalid_text_samples.append({"length": raw_text.size(), "head": _head(raw_text)})
+		var text: String = String(decoded.get("text", ""))
+		_tally_ram_markers(text, ram_addresses)
+		number_markers += text.count(Gen2TextStream.NUMBER_MARKER)
 	print("%s: scripts=%d commands=%d terminal=%d parse_failures=%d texts=%d invalid_text=%d" % [
 		game_id, script_count, command_count, terminal_count, parse_failures,
 		(text_value as Dictionary).size(), invalid_text,
@@ -95,6 +100,7 @@ func _validate(game_id: StringName) -> bool:
 	print("  invalid_text_reasons=%s" % invalid_text_reasons)
 	print("  invalid_text_samples=%s" % JSON.stringify(invalid_text_samples))
 	print("  commands=%s" % command_names)
+	_print_ram_markers(data, ram_addresses, number_markers)
 	_print_standard_table(game_id)
 	return true
 
@@ -107,6 +113,38 @@ func _pointer_bytes(data: GameData, key: String, text: bool) -> PackedByteArray:
 	var bank: int = int(parts[0])
 	var address: int = ("0x%s" % parts[1]).hex_to_int()
 	return data.world_text(bank, address) if text else data.world_script(bank, address)
+
+
+## Counts the `<RAM_xxxx>` markers one decoded text left behind.
+func _tally_ram_markers(text: String, tally: Dictionary) -> void:
+	var at: int = text.find(Gen2TextStream.RAM_MARKER)
+	while at >= 0:
+		var address: int = ("0x%s" % text.substr(
+			at + Gen2TextStream.RAM_MARKER.length(), 4
+		)).hex_to_int()
+		tally[address] = int(tally.get(address, 0)) + 1
+		at = text.find(Gen2TextStream.RAM_MARKER, at + 1)
+
+
+## Which `text_ram` targets the corpus names, split by whether the runner can
+## answer one. Everything it can is a StringBufferPointers entry, which is what
+## `Gen2WorldScriptRunner._text_buffer_ram` fills; an address outside that table
+## names storage nothing here writes and reaches the player as `<RAM_xxxx>`.
+##
+## Gold and Silver each carry one unwired entry, `0415`, and it is not a text:
+## the reference scanner reaches 94:4188 through bytes that are not commands,
+## the same speculation the parse failures above come from.
+func _print_ram_markers(data: GameData, tally: Dictionary, numbers: int) -> void:
+	var buffers: Array[int] = data.string_buffer_addresses()
+	var wired: int = 0
+	var unwired: Dictionary = {}
+	for address: Variant in tally:
+		var count: int = int(tally[address])
+		if buffers.has(int(address)):
+			wired += count
+		else:
+			unwired["%04X" % int(address)] = count
+	print("  ram_markers wired=%d unwired=%s number_markers=%d" % [wired, unwired, numbers])
 
 
 func _head(bytes: PackedByteArray) -> String:

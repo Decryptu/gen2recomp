@@ -354,8 +354,7 @@ func submenu_snapshot() -> Dictionary:
 func _render_submenu() -> void:
 	if _submenu == null:
 		return
-	for child: Node in _submenu.get_children():
-		child.queue_free()
+	Gen2LauncherUI.clear(_submenu)
 	_submenu.visible = _submenu_open
 	if not _submenu_open:
 		return
@@ -459,8 +458,7 @@ func _build_ui() -> void:
 func _refresh() -> void:
 	if _cards == null:
 		return
-	for child: Node in _cards.get_children():
-		child.free()
+	Gen2LauncherUI.clear(_cards)
 	if _player_label != null:
 		_player_label.text = "Player: %s" % (_save.player_name if _save != null else "Unavailable")
 	if _data == null or _save == null:
