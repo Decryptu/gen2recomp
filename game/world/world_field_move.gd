@@ -31,6 +31,10 @@ const MOVE_TELEPORT: int = 0x64
 ## The row that is neither a tile nor an escape: SWEET SCENT calls a wild
 ## encounter up out of the map the player is standing on.
 const MOVE_SWEET_SCENT: int = 0xE6
+## The two rows that move health between party members rather than touching the
+## map at all. `MonMenu_Softboiled_MilkDrink` is one routine for both.
+const MOVE_SOFTBOILED: int = 0x87
+const MOVE_MILK_DRINK: int = 0xD0
 
 ## CheckBadge's arguments in CutFunction's .CheckAble, SurfFunction's .TrySurf,
 ## StrengthFunction's .TryStrength and WhirlpoolFunction's .TryWhirlpool, as
@@ -72,7 +76,7 @@ const MUSIC_SURF: int = 0x21
 const FIELD_MOVES: Array[int] = [
 	MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_WHIRLPOOL, MOVE_WATERFALL, MOVE_FLASH,
 	MOVE_HEADBUTT, MOVE_ROCK_SMASH, MOVE_DIG, MOVE_TELEPORT, MOVE_SWEET_SCENT,
-	MOVE_FLY,
+	MOVE_FLY, MOVE_SOFTBOILED, MOVE_MILK_DRINK,
 ]
 
 ## engine/overworld/tile_events.asm's CheckCutCollision, entry for entry. Two of

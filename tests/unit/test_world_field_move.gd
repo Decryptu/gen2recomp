@@ -419,10 +419,13 @@ func test_the_eight_resolved_moves_are_the_field_moves_the_submenu_offers() -> v
 	assert_eq(Gen2WorldFieldMove.MOVE_SWEET_SCENT, 0xE6)
 	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_FLY))
 	assert_eq(Gen2WorldFieldMove.MOVE_FLY, 0x13)
-	# MonMenuOptions rows this project does not act on yet must stay out, or the
-	# submenu would offer an entry nothing answers: SOFTBOILED and MILK_DRINK.
-	for move: int in [0x87, 0xD0]:
-		assert_false(Gen2WorldFieldMove.is_field_move(move), "move $%02x" % move)
+	# Every `MonMenu_*` field-move row is answered now, so the submenu offers no
+	# entry that nothing acts on.
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_SOFTBOILED))
+	assert_true(Gen2WorldFieldMove.is_field_move(Gen2WorldFieldMove.MOVE_MILK_DRINK))
+	assert_eq(Gen2WorldFieldMove.MOVE_SOFTBOILED, 0x87)
+	assert_eq(Gen2WorldFieldMove.MOVE_MILK_DRINK, 0xD0)
+	assert_eq(Gen2WorldFieldMove.FIELD_MOVES.size(), 14)
 
 
 ## .TryStrength is CheckBadge ENGINE_PLAINBADGE and nothing else, so a request

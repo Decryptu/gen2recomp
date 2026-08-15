@@ -17,6 +17,12 @@ const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#2d4566")
 const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
+
+## The two `MonMenuOptions` rows that open a second party list rather than
+## leaving the menu: `MonMenu_Softboiled_MilkDrink` serves both.
+const HEAL_TRANSFER_MOVES: Array[int] = [
+	Gen2WorldFieldMove.MOVE_SOFTBOILED, Gen2WorldFieldMove.MOVE_MILK_DRINK,
+]
 const ACCENT: Color = Color("#f3c969")
 const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
@@ -55,6 +61,10 @@ var _submenu_open: bool = false
 ## Whether the rows on screen are ITEM's GIVE/TAKE box rather than the mon's own
 ## submenu, which is what B goes back to.
 var _item_menu_open: bool = false
+## `.SelectMilkDrinkRecipient`: which party member is giving its health away, and
+## which of the two moves asked. -1 and 0 when no recipient list is open.
+var _heal_user: int = -1
+var _heal_move: int = 0
 
 
 func _ready() -> void:
@@ -198,6 +208,9 @@ func _move_cursor(delta: int) -> void:
 
 
 func _confirm() -> void:
+	if _heal_user >= 0:
+		_choose_heal_target()
+		return
 	if not _submenu_open:
 		_open_submenu()
 		return
@@ -213,9 +226,13 @@ func _confirm() -> void:
 		return
 	match StringName(entry.get("kind", &"")):
 		&"field_move":
+			var move: int = int(entry.get("move", 0))
+			if move in HEAL_TRANSFER_MOVES:
+				_open_heal_target(move)
+				return
 			action_chosen.emit({
 				"kind": &"field_move",
-				"move": int(entry.get("move", 0)),
+				"move": move,
 				"slot": _member_cursor,
 				"name": _display_name(_save.party[_member_cursor]),
 			})
@@ -232,6 +249,13 @@ func _confirm() -> void:
 
 
 func _cancel() -> void:
+	## `.SelectMilkDrinkRecipient`'s own `.set_carry`: a B press over the
+	## recipient list gives up on the move and leaves the party menu standing.
+	if _heal_user >= 0:
+		_heal_user = -1
+		_heal_move = 0
+		_open_submenu()
+		return
 	## `GiveTakePartyMonItem`'s own `VerticalMenu` carry is `.cancel`, which
 	## returns to the submenu it opened over rather than closing the party menu.
 	if _item_menu_open:
@@ -241,6 +265,54 @@ func _cancel() -> void:
 		_close_submenu()
 		return
 	close_embedded()
+
+
+## `MonMenu_Softboiled_MilkDrink`'s own gate and then
+## `.SelectMilkDrinkRecipient`: a user with a fifth of its health or less says so
+## and stays on the submenu, and anything else opens the recipient list, which is
+## the party list again with the submenu closed.
+func _open_heal_target(move: int) -> void:
+	var user: Gen2SaveMon = _save.party[_member_cursor]
+	var fifth: int = Gen2WorldPartyHost.one_fifth_max_hp(_data, user)
+	if fifth <= 0 or user.hp <= fifth:
+		## `_PokemonNotEnoughHPText`.
+		_status.text = "Not enough HP…"
+		_status.add_theme_color_override("font_color", MUTED)
+		return
+	_heal_user = _member_cursor
+	_heal_move = move
+	_submenu_open = false
+	_item_menu_open = false
+	_submenu_items = []
+	_refresh()
+
+
+## One press over the recipient list. The three refusals stay on the list the way
+## `.cant_use` loops back to it; anything else is the caller's to apply, since
+## the health it moves belongs to a save the world owns.
+func _choose_heal_target() -> void:
+	if _member_cursor == _heal_user:
+		_status.text = "It won't have any effect."
+		_status.add_theme_color_override("font_color", MUTED)
+		return
+	var target: Gen2SaveMon = _save.party[_member_cursor]
+	var target_max: int = Gen2SaveBattleAdapter.to_battle_mon(_data, target).max_hp() \
+		if not target.is_egg else 0
+	if target.is_egg or target.hp <= 0 or target.hp >= target_max:
+		_status.text = "It won't have any effect."
+		_status.add_theme_color_override("font_color", MUTED)
+		return
+	var action: Dictionary = {
+		"kind": &"heal_transfer",
+		"move": _heal_move,
+		"slot": _heal_user,
+		"target_slot": _member_cursor,
+		"name": _display_name(_save.party[_heal_user]),
+		"target_name": _display_name(target),
+	}
+	_heal_user = -1
+	_heal_move = 0
+	action_chosen.emit(action)
 
 
 func _open_item_menu() -> void:

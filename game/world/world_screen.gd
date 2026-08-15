@@ -2216,6 +2216,9 @@ func _on_party_action(action: Dictionary) -> void:
 	if StringName(action.get("kind", &"")) == &"mon_item":
 		_run_mon_item_action(action)
 		return
+	if StringName(action.get("kind", &"")) == &"heal_transfer":
+		_run_heal_transfer(action)
+		return
 	if StringName(action.get("kind", &"")) != &"field_move":
 		_refresh_labels()
 		return
@@ -2437,6 +2440,21 @@ func _run_mon_item_action(action: Dictionary) -> void:
 					name, String(result.get("reason", "")),
 				]
 			)
+
+
+## `Softboiled_MilkDrinkFunction`'s two halves, once the party menu has picked
+## who is giving and who is receiving. The health moves through the world's own
+## transaction, since the party it changes is a save the world owns.
+func _run_heal_transfer(action: Dictionary) -> void:
+	var result: Dictionary = Gen2WorldPartyHost.transfer_health(
+		_world, _embedded_party_save(), int(action.get("slot", -1)),
+		int(action.get("target_slot", -1)), _injected_save == null
+	)
+	if not bool(result.get("ok", false)):
+		_show_field_move_text("It won't have any effect.")
+		return
+	## `PARTYMENUTEXT_HEAL_HP`, which is the line every healing item shares.
+	_show_field_move_text("%s\nrecovered health!" % String(action.get("target_name", "")))
 
 
 func _show_field_move_text(text: String) -> void:
