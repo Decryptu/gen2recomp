@@ -1,20 +1,14 @@
 class_name Gen2Battle
 extends RefCounted
 
-## A battle: two parties, a turn at a time.
+## A battle: two parties, a turn at a time. Scene-free with randomness injected,
+## so a whole battle can be fought in a test with no display.
 ##
-## [RefCounted], scene-free, randomness injected, so a whole battle can be fought
-## in a test with no display.
-##
-## A turn answers with a list of events, not a new state or a string. An event
-## says what happened and carries its numbers; sentences, animation and draining
-## bars are the screen's job.
-##
-## A side is a party, and a wild encounter is a party of one. The caller decides
-## which action a side takes and answers the questions a turn stops on: one that
-## ends with somebody down says so through [method must_replace] and stands still
-## until [method replace_fallen], which is the only entry point besides
-## [method take_actions] that moves a battle on.
+## A turn answers with events carrying their own numbers, never a string:
+## sentences, animation and draining bars are the screen's job. A side is a party
+## and a wild encounter a party of one. A turn ending with somebody down says so
+## through [method must_replace] and stands still until [method replace_fallen],
+## the only entry point besides [method take_actions] that moves a battle on.
 
 ## The two sides, as plain numbers rather than an enum: they are dictionary keys
 ## and event payloads throughout, and an enum buys nothing where everything that
@@ -30,10 +24,8 @@ const NO_EFFECT: StringName = &"no_effect"
 const HIT: StringName = &"hit"
 const RECOIL: StringName = &"recoil"
 const FAINTED: StringName = &"fainted"
-## A multi-hit move's own summary, once every planned hit has landed. Not
-## shown at all if the target faints partway through: the cartridge's own
-## loop jumps straight to ending the move on a faint, before it ever reaches
-## the line that would have said how many times it hit.
+## A multi-hit move's summary, once every planned hit has landed. A target that
+## faints partway gets none, the loop ending the move first.
 const HIT_TIMES: StringName = &"hit_times"
 ## A draining move healed the attacker off what it dealt.
 const DRAINED: StringName = &"drained"
@@ -41,16 +33,13 @@ const DRAINED: StringName = &"drained"
 ## the cartridge shows neither a critical hit nor an effectiveness line for
 ## one, since the damage was never actually multiplied by either.
 const OHKO: StringName = &"ohko"
-## A status stopped a Pokémon moving. [code]reason[/code] says which one, since
-## the six read differently and not all of them are a surprise: [code]&"sleep"[/code],
-## [code]&"freeze"[/code], [code]&"paralysis"[/code], [code]&"flinch"[/code],
-## [code]&"recharge"[/code].
+## A status stopped a Pokémon moving, [code]reason[/code] being which:
+## [code]&"sleep"[/code], [code]&"freeze"[/code], [code]&"paralysis"[/code],
+## [code]&"flinch"[/code], [code]&"recharge"[/code].
 const CANNOT_MOVE: StringName = &"cannot_move"
 const WOKE_UP: StringName = &"woke_up"
-## A freeze cleared, from any of the three places one is. `side` is whoever
-## thawed, not whoever acted: the user through a Flame Wheel or Sacred Fire, the
-## target through `BattleCommand_BurnTarget`'s `Defrost`, or either through
-## `HandleDefrost`'s end-of-turn roll.
+## A freeze cleared, `side` being whoever thawed rather than whoever acted: a
+## Flame Wheel, `BurnTarget`'s `Defrost`, or `HandleDefrost`'s roll.
 const THAWED: StringName = &"thawed"
 ## A status put on a Pokémon, and a slice taken off by one it already had.
 const STATUS_INFLICTED: StringName = &"status_inflicted"
@@ -81,10 +70,9 @@ const STAT_CHANGE_FAILED: StringName = &"stat_change_failed"
 ## nobody to call back, and the screen has one sentence to say rather than two.
 const WITHDREW: StringName = &"withdrew"
 const SENT_OUT: StringName = &"sent_out"
-## The player got away. `how` says which branch answered: [code]&"battle_type"[/code]
-## for the two types that always escape, [code]&"item"[/code] for the Smoke Ball,
-## [code]&"speed"[/code] for the plain comparison, [code]&"odds"[/code] for the
-## accumulated odds and [code]&"roll"[/code] for the last random check.
+## The player got away, `how` naming the branch: [code]&"battle_type"[/code] for
+## the two that always escape, [code]&"item"[/code] for the Smoke Ball,
+## [code]&"speed"[/code], [code]&"odds"[/code] and [code]&"roll"[/code].
 const FLED: StringName = &"fled"
 ## The roll came up short. The turn is spent and the enemy still acts, which is
 ## `.cant_escape_2` setting `wBattlePlayerAction` to `BATTLEPLAYERACTION_USEITEM`.
@@ -96,14 +84,12 @@ const RUN_BLOCKED: StringName = &"run_blocked"
 const OVER: StringName = &"over"
 
 ## Experience, once the fainted Pokémon's opponent has somebody to award it to.
-## Never emitted for [constant ENEMY]: [code]GiveExperiencePoints[/code] only
-## reads the player's party structure, so a trainer's Pokémon are the reason for
-## this, never the recipient.
+## Never for [constant ENEMY]: `GiveExperiencePoints` reads the player's party
+## alone, so a trainer's Pokémon are the reason and never the recipient.
 const EXP_GAINED: StringName = &"exp_gained"
-## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], out of the same
-## divided block [constant EXP_GAINED]'s award came from: see
-## [method Gen2Experience.shared_block]. Divided by the same count, but a base
-## stat rather than a figure the level formula has been through.
+## The five stats in [constant Gen2Experience.STAT_EXP_KEYS], out of the block
+## [constant EXP_GAINED] came from ([method Gen2Experience.shared_block]) and
+## divided by the same count, but a base stat rather than a level figure.
 const STAT_EXP_GAINED: StringName = &"stat_exp_gained"
 ## A level gained from the experience just awarded. [code]old_stats[/code] and
 ## [code]new_stats[/code] are both [Gen2BattleMon.stats], so a screen can show
@@ -120,11 +106,9 @@ const MOVE_OFFERED: StringName = &"move_offered"
 const MOVE_FORGOTTEN: StringName = &"move_forgotten"
 const MOVE_DECLINED: StringName = &"move_declined"
 
-## Disable, Attract, Encore, Mist and Focus Energy each refuse for their own
-## reason (nothing to disable, a same-gender or genderless target, an already
-## encored target) rather than missing a roll ([constant MISSED]) or losing to a
-## type ([constant NO_EFFECT]). One event for all five, the "but it failed!" the
-## cartridge shares across them.
+## Disable, Attract, Encore, Mist and Focus Energy refuse for their own reasons
+## rather than missing a roll ([constant MISSED]) or losing to a type
+## ([constant NO_EFFECT]): the "but it failed!" the cartridge shares.
 const MOVE_FAILED: StringName = &"move_failed"
 const BIDE_STORING: StringName = &"bide_storing"
 const BIDE_UNLEASHED: StringName = &"bide_unleashed"
@@ -142,18 +126,15 @@ const SKETCHED_MOVE: StringName = &"sketched_move"
 ## both of the user's active type bytes.
 const TYPE_CHANGED: StringName = &"type_changed"
 
-## Disable locked a slot, and later let it go. [code]slot[/code] and
-## [code]move[/code] on the first are the target's, read off
-## [member Gen2BattleMon.disabled_slot] before it moves. A Pokémon still locked
-## into the disabled move is refused through [constant CANNOT_MOVE]'s
-## [code]&"disabled"[/code] reason, not here.
+## Disable locked a slot and later let it go, [code]slot[/code] and
+## [code]move[/code] being the target's. A Pokémon locked into the disabled move
+## is refused through [constant CANNOT_MOVE]'s [code]&"disabled"[/code].
 const DISABLE_INFLICTED: StringName = &"disable_inflicted"
 const DISABLE_ENDED: StringName = &"disable_ended"
 
-## Attract's two events: falling in love, [constant Gen2Substatus.ATTRACTED] set
-## until a switch, and a turn where a fresh roll finds the target too smitten to
-## move, which is [constant CANNOT_MOVE]'s [code]&"attract"[/code] reason rather
-## than an event, the shape flinch and confusion use.
+## Falling in love, [constant Gen2Substatus.ATTRACTED] until a switch. A turn it
+## costs is [constant CANNOT_MOVE]'s [code]&"attract"[/code], the shape flinch
+## and confusion use.
 const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 
 ## Encore locked a slot, and later let it go, the same pair
@@ -161,22 +142,18 @@ const ATTRACT_INFLICTED: StringName = &"attract_inflicted"
 const ENCORE_INFLICTED: StringName = &"encore_inflicted"
 const ENCORE_ENDED: StringName = &"encore_ended"
 
-## What a held item gave back between turns. Leftovers keeps its own event
-## because its line is the cartridge's own "recovered with", while a berry says
-## "recovered using a"; [constant RECOVERED_USING_ITEM] covers both the HP berry
-## and the status berries, which share `UseOpponentItem` and its text.
-## [code]item[/code] on all four is what did it, and on the three consumable ones
-## it is the number the Pokémon no longer holds.
+## What a held item gave back between turns. Leftovers has its own line
+## ("recovered with"); [constant RECOVERED_USING_ITEM] covers the HP berry and the
+## status berries, which share `UseOpponentItem`. [code]item[/code] is what did it,
+## and on the consumable three what is no longer held.
 const RECOVERED_WITH_ITEM: StringName = &"recovered_with_item"
 const RECOVERED_USING_ITEM: StringName = &"recovered_using_item"
 const RESTORED_PP: StringName = &"restored_pp"
 const ITEM_HEALED_CONFUSION: StringName = &"item_healed_confusion"
 
-## A Focus Band held the Pokémon on one hit point through what would have
-## finished it. [code]item[/code] is what did it, since the cartridge's line
-## names the item rather than the effect. This is `HungOnText`; Endure's own line
-## is [constant ENDURED_HIT], and the two are separate texts for separate
-## reasons, so neither stands in for the other.
+## `HungOnText`: a Focus Band held the Pokémon on one hit point. The line names
+## the item, which is why [code]item[/code] is on it. Endure's own line is
+## [constant ENDURED_HIT] and neither text stands in for the other.
 const ENDURED: StringName = &"endured"
 
 ## Protect and Detect: `ProtectedItselfText` when the flag goes up, and
@@ -191,26 +168,20 @@ const PROTECTING_ITSELF: StringName = &"protecting_itself"
 const BRACED_ITSELF: StringName = &"braced_itself"
 const ENDURED_HIT: StringName = &"endured_hit"
 
-## Destiny Bond: `DestinyBondEffectText` when it is used, and `TookDownWithItText`
-## when it collects. [code]target[/code] on the second is the Pokémon that went
-## down holding it; [code]side[/code] is the attacker it takes with it, and the
-## two [constant FAINTED] events follow in that order.
+## `DestinyBondEffectText` when it is used and `TookDownWithItText` when it
+## collects, where [code]target[/code] is the Pokémon that went down holding it
+## and [code]side[/code] the attacker it takes with it, in that order.
 const DESTINY_BOND_SET: StringName = &"destiny_bond_set"
 const TOOK_DOWN_WITH_IT: StringName = &"took_down_with_it"
 
-## Whirlwind and Roar against a trainer: `DraggedOutText`, printed after the
-## replacement is out and before it walks into any spikes.
-##
-## The cartridge's line is `<USER>`, which is the Pokémon that *used* the move
-## rather than the one dragged out, in both directions. That is mirrored rather
-## than corrected, so [code]side[/code] here is the user and the Pokémon dragged
-## out is the one on [code]target[/code].
+## Whirlwind and Roar against a trainer: `DraggedOutText`, after the replacement
+## is out and before any spikes. The line is `<USER>` in both directions, mirrored
+## rather than corrected, so [code]side[/code] is the user.
 const DRAGGED_OUT: StringName = &"dragged_out"
 
-## The same pair against a wild, where the battle ends instead:
-## `FledInFearText` for Roar and `BlownAwayText` for Whirlwind, told apart by the
-## move number. [code]target[/code] is whoever left, which is the wild when the
-## player used it and the player's own Pokémon when the wild did.
+## The same pair against a wild, where the battle ends: `FledInFearText` for
+## Roar and `BlownAwayText` for Whirlwind, told apart by the move number.
+## [code]target[/code] is whoever left, either way round.
 const FLED_IN_FEAR: StringName = &"fled_in_fear"
 const BLOWN_AWAY: StringName = &"blown_away"
 
@@ -242,47 +213,37 @@ const STOLE_ITEM: StringName = &"stole_item"
 ## swings once as itself.
 const BEAT_UP_ATTACK: StringName = &"beat_up_attack"
 
-## Rain Dance, Sunny Day and Sandstorm. [code]weather[/code] on all four is the
-## [Gen2Weather] value, so a screen names it without being told twice.
-## [constant WEATHER_CONTINUES] is the line printed on every turn the weather
-## survives, which is the same turn a Sandstorm's damage lands on.
+## Rain Dance, Sunny Day and Sandstorm, [code]weather[/code] being the
+## [Gen2Weather] value. [constant WEATHER_CONTINUES] is printed on every turn the
+## weather survives, which is the turn a Sandstorm's damage lands on.
 const WEATHER_STARTED: StringName = &"weather_started"
 const WEATHER_CONTINUES: StringName = &"weather_continues"
 const WEATHER_ENDED: StringName = &"weather_ended"
 const HURT_BY_SANDSTORM: StringName = &"hurt_by_sandstorm"
 
-## Reflect, Light Screen and Safeguard going up and running out.
-## [code]screen[/code] on all three is the [Gen2Screens] flag, so one pair of
-## events covers the three moves. [constant SCREEN_SET] carries the side that put
-## it up, which is also the side it protects; [constant SCREEN_FADED] the side it
-## is leaving. [constant SAFEGUARD_PROTECTED] is `BattleCommand_CheckSafeguard`'s
-## own line, the one a status move gets when it is refused outright rather than
-## quietly, and it carries the `target` it failed against.
+## Reflect, Light Screen and Safeguard going up and running out, one pair for the
+## three: [code]screen[/code] is the [Gen2Screens] flag and the side the one it
+## protects. [constant SAFEGUARD_PROTECTED] is
+## `BattleCommand_CheckSafeguard`'s line, with the `target` it failed against.
 const SCREEN_SET: StringName = &"screen_set"
 const SCREEN_FADED: StringName = &"screen_faded"
 const SAFEGUARD_PROTECTED: StringName = &"safeguard_protected"
 
-## Perish Song. [constant PERISH_SONG_STARTED] is `StartPerishText`, which names
-## both Pokémon rather than either side, so its [code]side[/code] is only whoever
-## sang. [constant PERISH_COUNT] carries the [code]side[/code] it is counting down
-## and the [code]count[/code] just reached, including the zero that kills, since
-## `HandlePerishSong` prints on every tick.
+## `StartPerishText` names both Pokémon, so its [code]side[/code] is only whoever
+## sang. [constant PERISH_COUNT] carries the side counting down and the
+## [code]count[/code] reached, the killing zero included.
 const PERISH_SONG_STARTED: StringName = &"perish_song_started"
 const PERISH_COUNT: StringName = &"perish_count"
 
-## A trainer spent one of its two items on whoever it has out. [code]item[/code]
-## is what was spent and [code]effect[/code] is [method Gen2AIItems.apply]'s own
-## answer, so a screen can follow the bar or the stage without asking the battle
-## again. The cartridge prints one line for all thirteen ("<TRAINER> used ITEM on
-## <MON>"), which is why there is one event rather than thirteen.
+## A trainer spent one of its two items, [code]effect[/code] being
+## [method Gen2AIItems.apply]'s answer so a screen follows the bar without asking
+## again. One event rather than thirteen: the cartridge prints one line.
 const TRAINER_USED_ITEM: StringName = &"trainer_used_item"
 
-## The heal family. [constant HP_RESTORED] carries the user's `hp` and `max_hp`
-## so a screen moves the bar without reading the battle back;
-## [constant HP_ALREADY_FULL] is `BattleCommand_Heal`'s own refusal, which costs
-## the turn. Rest's two lines are separate events rather than one with a flag,
-## because the cartridge chooses between them on whether there was a status to
-## clear and a screen should not have to know that rule.
+## [constant HP_RESTORED] carries `hp` and `max_hp` so a screen moves the bar
+## without reading the battle back; [constant HP_ALREADY_FULL] is
+## `BattleCommand_Heal`'s refusal, which costs the turn. Rest's two lines are two
+## events, the cartridge picking on whether a status was cleared.
 const HP_RESTORED: StringName = &"hp_restored"
 const HP_ALREADY_FULL: StringName = &"hp_already_full"
 const WENT_TO_SLEEP: StringName = &"went_to_sleep"
@@ -308,11 +269,9 @@ const PRESENT_REFUSED: StringName = &"present_refused"
 ## [constant RECOIL] does, so a screen moves the bar without asking again.
 const CRASHED: StringName = &"crashed"
 
-## Bind, Wrap, Fire Spin, Clamp and Whirlpool: the target was bound, lost a
-## sixteenth of its health to the binding, or was let go. [code]move[/code] on all
-## three is the move that did it, which is what the cartridge's own texts name
-## through `wStringBuffer1`. The release carries no damage, because the turn the
-## counter reaches zero costs nothing.
+## Bind, Wrap, Fire Spin, Clamp and Whirlpool: bound, taking a sixteenth, or let
+## go. [code]move[/code] is what the texts name through `wStringBuffer1`; the
+## release carries no damage, the turn the counter empties costing nothing.
 const TRAPPED: StringName = &"trapped"
 const HURT_BY_TRAP: StringName = &"hurt_by_trap"
 const RELEASED_FROM_TRAP: StringName = &"released_from_trap"
@@ -321,19 +280,13 @@ const RELEASED_FROM_TRAP: StringName = &"released_from_trap"
 ## a second one from the same user is [constant MOVE_FAILED].
 const CANT_ESCAPE_SET: StringName = &"cant_escape_set"
 
-## A switch `TryPlayerSwitch` refused, which costs nothing at all: it prints
-## `BattleText_MonCantBeRecalled` and jumps back to `BattleMenuPKMN_Loop`, so no
-## turn is spent and the enemy does not move. The same shape as
-## [constant RUN_BLOCKED].
+## A switch `TryPlayerSwitch` refused: `BattleText_MonCantBeRecalled`, then back
+## to `BattleMenuPKMN_Loop`, so no turn is spent. As [constant RUN_BLOCKED] is.
 const SWITCH_BLOCKED: StringName = &"switch_blocked"
 
-## `OfferSwitch`'s question, which only SHIFT ever reaches: the trainer is about
-## to send [code]index[/code] out, and the player may change too.
-## [method Gen2Battle.answer_switch_offer] is what closes it.
-##
-## Raised from two places, because `EnemySwitch` is: a trainer switching by
-## choice inside a turn, and a trainer replacing its own faint through
-## [method replace_fallen], where there is no turn left behind it.
+## `OfferSwitch`'s question, which only SHIFT reaches: the trainer is about to
+## send [code]index[/code] out and the player may change too, until
+## [method answer_switch_offer]. Raised from both places `EnemySwitch` is.
 const SWITCH_OFFERED: StringName = &"switch_offered"
 
 ## Mist and Focus Energy, set on the user. Both fail with [constant MOVE_FAILED]
@@ -341,21 +294,19 @@ const SWITCH_OFFERED: StringName = &"switch_offered"
 const MIST_SET: StringName = &"mist_set"
 const FOCUS_ENERGY_SET: StringName = &"focus_energy_set"
 
-## Substitute. The two refusals are separate events because the cartridge chooses
-## between `HasSubstituteText` and `TooWeakSubText` on which precondition failed.
-## The last two name the Pokémon behind the doll and carry no amount, since
-## `SubTookDamageText` reports no number and the real health never moved.
+## Substitute. Two refusals, because the cartridge picks between
+## `HasSubstituteText` and `TooWeakSubText` on which precondition failed. The last
+## two carry no amount: `SubTookDamageText` reports none and the health never
+## moved.
 const SUBSTITUTE_MADE: StringName = &"substitute_made"
 const SUBSTITUTE_ALREADY: StringName = &"substitute_already"
 const SUBSTITUTE_TOO_WEAK: StringName = &"substitute_too_weak"
 const SUBSTITUTE_TOOK_DAMAGE: StringName = &"substitute_took_damage"
 const SUBSTITUTE_FADED: StringName = &"substitute_faded"
 
-## `BattleCommand_RaiseSubNoAnim` and `..._LowerSubNoAnim`: the doll put over a
-## battler's picture or taken off it with no animation and no frames, which is
-## what the two commands amount to once `WaitBGMap` is discounted. Carries `side`
-## and `raised`. Says nothing about the battle: it is the picture alone, which is
-## why an animated drop is the animation's own `anim_dropsub` instead.
+## `BattleCommand_RaiseSubNoAnim` and `..._LowerSubNoAnim`: once `WaitBGMap` is
+## discounted, the doll drawn over a picture or taken off it, no frames and no
+## battle state. An animated drop is the animation's own `anim_dropsub`.
 const SUBSTITUTE_PIC: StringName = &"substitute_pic"
 
 ## Leech Seed, on the Pokémon that was seeded rather than the one that seeded it.
@@ -375,10 +326,9 @@ const HURT_BY_CURSE: StringName = &"hurt_by_curse"
 const SPIKES_SET: StringName = &"spikes_set"
 const HURT_BY_SPIKES: StringName = &"hurt_by_spikes"
 
-## `BattleCommand_ClearHazards`' own three lines, all about the user's own side.
-## [constant RELEASED_BY] is not [constant RELEASED_FROM_TRAP]: `HandleWrap`'s
-## release names the move that let go and this one names the Pokémon that spun
-## out of it, so the two texts are two events.
+## `BattleCommand_ClearHazards`' three lines, all about the user's own side. Not
+## [constant RELEASED_FROM_TRAP]: `HandleWrap`'s release names the move, this one
+## the Pokémon that spun out of it.
 const SHED_LEECH_SEED: StringName = &"shed_leech_seed"
 const BLEW_SPIKES: StringName = &"blew_spikes"
 const RELEASED_BY: StringName = &"released_by"
@@ -387,44 +337,34 @@ const RELEASED_BY: StringName = &"released_by"
 ## [constant MISSED], which is `GetFailureResultText`'s own line.
 const EVADED: StringName = &"evaded"
 
-## A stat drop blocked by the target's own Mist. Not [constant STAT_CHANGE_FAILED]:
-## the cartridge prints a line of its own ("It's protected by mist!") rather
-## than the generic "won't go any lower" a drop already at its floor gets, and a
-## screen that read this as the generic failure would say the wrong thing.
+## A drop blocked by Mist. Not [constant STAT_CHANGE_FAILED]: the cartridge's own
+## "It's protected by mist!" rather than the "won't go any lower" a drop at its
+## floor gets.
 const MIST_PROTECTED: StringName = &"mist_protected"
 
-## `PlayFXAnimID`: one animation for the screen to spend frames on.
-##
-## The engine has resolved by the time the screen draws, so this sits at its own
-## index in the returned list and the ordering stays the cartridge's rather than
-## the screen's, the same shape [Gen2HpBarAnimation] already has.
-##
-## Carries `index` (`wFXAnimID`), `param` (`wBattleAnimParam`), `after_anim`
-## (`wBattleAfterAnim`, zero for none), `enemy_turn` (`hBattleTurn`),
-## `effectiveness` (`wTypeModifier`, which `PlayHitSound` reads) and
-## `restore_user_pic`, the `AppearUserLowerSub` that follows Fly and Dig.
+## `PlayFXAnimID`: one animation to spend frames on, at its own index in the
+## returned list so the ordering stays the cartridge's, as [Gen2HpBarAnimation]
+## does. Carries `index` (`wFXAnimID`), `param` (`wBattleAnimParam`), `after_anim`
+## (`wBattleAfterAnim`), `enemy_turn` (`hBattleTurn`), `effectiveness`
+## (`wTypeModifier`, which `PlayHitSound` reads) and `restore_user_pic`, the
+## `AppearUserLowerSub` after Fly and Dig.
 const ANIMATION: StringName = &"animation"
 
-## What a side does with its turn. Switching is not a move with a very high
-## priority: it is settled before priority is looked at, which is why it is an
-## action rather than a move number.
+## What a side does with its turn. Switching is settled before priority is looked
+## at, which is why it is an action rather than a very fast move.
 const ACTION_MOVE: StringName = &"move"
 const ACTION_SWITCH: StringName = &"switch"
-## Running is settled before the turn rather than inside it, because
-## `BattleMenu_Run` runs at menu time: a successful run ends the battle before
-## either side moves, and a refusal the player can do nothing about sends them
-## back to the menu with no turn spent at all.
+## `BattleMenu_Run` runs at menu time, so running is settled before the turn: a
+## success ends the battle before either side moves and a refusal spends none.
 const ACTION_RUN: StringName = &"run"
-## A trainer reaching into its bag, which is `AI_TryItem`'s own action. It costs
-## the turn and is settled ahead of it: `AI_SwitchOrTryItem` sets
-## `wEnemyGoesFirst`, so the item lands before the player's move whatever the
-## speeds say. Only the enemy ever uses one; the player's pack is the overworld's.
+## `AI_TryItem`'s action. It costs the turn and lands before the player's move
+## whatever the speeds say, `AI_SwitchOrTryItem` setting `wEnemyGoesFirst`. Only
+## the enemy uses one; the player's pack is the overworld's.
 const ACTION_ITEM: StringName = &"item"
 
-## The battle half of `ItemEffects` that is not data in the cache already: the
-## two revives, the four PP restorers and the doll, at their cartridge numbers.
-## Everything else a party item does comes off the item's own `status_mask` and
-## `heal_amount` rows.
+## The half of `ItemEffects` the cache does not carry: the two revives, the four
+## PP restorers and the doll. Everything else comes off the item's own
+## `status_mask` and `heal_amount`.
 const ITEM_POKE_DOLL: int = 0x25
 const ITEM_REVIVE: int = 0x27
 const ITEM_MAX_REVIVE: int = 0x28
@@ -465,17 +405,15 @@ const NEVER_ESCAPES: Array[int] = [
 	BATTLETYPE_TRAP, BATTLETYPE_CELEBI, BATTLETYPE_FORCESHINY, BATTLETYPE_SUICUNE,
 ]
 
-## `TryToRunAwayFromBattle`'s own arithmetic. The odds are
-## `player_speed * 32 / ((enemy_speed / 4) & $ff)`, then 30 per attempt after the
-## first, and anything over a byte gets away without a roll.
+## `TryToRunAwayFromBattle`: `player_speed * 32 / ((enemy_speed / 4) & $ff)`, plus
+## 30 per attempt after the first, and over a byte gets away without a roll.
 const FLEE_SPEED_MULTIPLIER: int = 32
 const FLEE_ENEMY_SPEED_SHIFT: int = 2
 const FLEE_ATTEMPT_BONUS: int = 30
 const FLEE_ODDS_RANGE: int = 256
 
-## Priority runs from 0 to 3 and most moves are 1, so a move can go below the
-## ordinary as well as above it. The values are keyed by the move's effect byte,
-## which the cache already carries.
+## Priority runs 0 to 3 with most moves at 1, so a move can go below the ordinary
+## as well as above it. Keyed by effect byte, which the cache carries.
 const BASE_PRIORITY: int = 1
 const EFFECT_PRIORITIES: Dictionary = {
 	Gen2MoveEffect.PROTECT: 3,
@@ -494,14 +432,12 @@ const VITAL_THROW: int = 0xE9
 var data: GameData = null
 var rng: RandomNumberGenerator = null
 
-## Whether beating this opponent is worth the 1.5x [Gen2Experience] gives a
-## trainer battle. A wild encounter (the default, and every existing caller's
-## meaning before this field existed) never sets it.
+## Whether beating this opponent is worth [Gen2Experience]'s trainer 1.5x. A wild
+## encounter, which is the default, never sets it.
 var is_trainer_battle: bool = false
 
-## `wBattleType`, which only running reads so far. A `loadvar VAR_BATTLETYPE`
-## before `startbattle` is what sets it on the world path; everything else is
-## BATTLETYPE_NORMAL.
+## `wBattleType`, read by running alone so far and set on the world path by a
+## `loadvar VAR_BATTLETYPE` before `startbattle`.
 var battle_type: int = BATTLETYPE_NORMAL
 
 ## Earned player badges as source-order bits. Zero is the battle-safe default
@@ -512,117 +448,96 @@ var player_badge_mask: int = 0
 ## choosing FIGHT clears it again, which is `BattleMenu_Fight`'s own `xor a`.
 var flee_attempts: int = 0
 
-## `wBattleWeather` and `wWeatherCount`. One of each for the whole battle rather
-## than one per side, and neither survives it: nothing outside a battle has
-## weather, so a fresh [Gen2Battle] starts clear.
+## `wBattleWeather` and `wWeatherCount`: one of each for the battle rather than
+## per side, and neither survives it.
 var weather: int = Gen2Weather.NONE
 var weather_turns: int = 0
 
-## `wPlayerScreens`/`wEnemyScreens` and the three counters beside each, keyed by
-## side. Field state, not Pokémon state: nothing clears these on a switch, so a
-## Reflect outlives whoever put it up and only its own count ends it.
+## `wPlayerScreens`/`wEnemyScreens` and their counters. Field state, not Pokémon
+## state: a switch clears none of it, so a Reflect outlives whoever put it up.
 var screens: Dictionary = {PLAYER: Gen2Screens.NONE, ENEMY: Gen2Screens.NONE}
 var light_screen_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
 var reflect_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
 var safeguard_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
 
-## `wTimeOfDay`, which only the three time-based heals read. It holds
-## `MORN_F`/`DAY_F`/`NITE_F` (engine/rtc/rtc.asm, `GetTimeOfDay`), the bit
-## indices 0/1/2 rather than the shifted flags, and those are the same three
-## numbers [Gen2WorldPalette] already uses, so the overworld's value is written
-## here unmapped. A battle nobody told stands at midday.
+## `wTimeOfDay`, read by the three time-based heals alone: `MORN_F`/`DAY_F`/
+## `NITE_F` as bit indices rather than shifted flags, which is what
+## [Gen2WorldPalette] holds too, so the overworld's value is written here
+## unmapped. A battle nobody told stands at midday.
 var time_of_day: int = Gen2WorldPalette.TIME_DAY
 
-## `wEnemyTrainerItem1` and `wEnemyTrainerItem2`: the two items this trainer
-## class may spend, one copy for the whole battle. Each is removed as it is
-## spent, which is the cartridge's own `xor a; ld [de], a`. Empty for a wild
-## battle and for any class carrying `NO_ITEM` twice.
+## `wEnemyTrainerItem1` and `wEnemyTrainerItem2`, one copy for the whole battle
+## and each removed as it is spent (`xor a; ld [de], a`). Empty for a wild battle
+## and for a class carrying `NO_ITEM` twice.
 var enemy_items: Array[int] = []
 
-## `wPlayerUsedMoves`: the distinct moves the Pokémon the player currently has
-## out has thrown, oldest first, which is the only thing the switch AI has to go
-## on about what it is facing. `NewBattleMonStatus` clears it on every player
-## send-out, so it describes the Pokémon rather than the battle, and
-## `UpdateUsedMoves` keeps at most four, dropping the oldest.
+## `wPlayerUsedMoves`, oldest first: all the switch AI has to go on about what it
+## is facing. `NewBattleMonStatus` clears it on every send-out, so it describes
+## the Pokémon rather than the battle, and `UpdateUsedMoves` keeps four.
 var player_used_moves: Array[int] = []
 
-## `wBattleAnimParam`, the animation's own input byte. Battle state rather than
-## turn state, because it sits outside the run `ClearBattleAnims` zeroes: almost
-## every animation command clears it, and the five multi-hit effects alternate
-## its low bit from whatever the last hit left.
+## `wBattleAnimParam`, the animation's input byte. Battle state rather than turn
+## state: it sits outside the run `ClearBattleAnims` zeroes, and the five
+## multi-hit effects alternate its low bit from whatever the last hit left.
 var battle_anim_param: int = 0
 
-## `wPlayerJustGotFrozen` and `wEnemyJustGotFrozen`, keyed by side: whether this
-## side was frozen during the turn now ending. `HandleDefrost` refuses to thaw
-## one that was, so a freeze always costs its target at least the turn it landed
-## on. Cleared at the top of every turn, the way `BattleTurn.loop` clears both
-## bytes before either side chooses.
+## `wPlayerJustGotFrozen` and `wEnemyJustGotFrozen`: frozen during the turn now
+## ending, which `HandleDefrost` refuses to thaw, so a freeze costs the turn it
+## landed on. Cleared at the top of every turn, as `BattleTurn.loop` clears it.
 var _just_got_frozen: Dictionary = {PLAYER: false, ENEMY: false}
 
-## `wEnemyGoesFirst`, written once per turn by `DetermineMoveOrder` and read by
-## `CheckOpponentWentFirst`. It is exactly what [method order] already decides, so
-## this is that answer kept rather than a second decision:
-## [method opponent_went_first] is the `wEnemyGoesFirst XOR hBattleTurn` the three
-## commands that ask are given.
+## `wEnemyGoesFirst`, written once a turn by `DetermineMoveOrder`: [method order]'s
+## answer kept rather than decided twice, and [method opponent_went_first] is the
+## `wEnemyGoesFirst XOR hBattleTurn` the three commands asking are given.
 var enemy_goes_first: bool = false
 
 ## Set once the player has run. The battle is over with no winner, which is the
 ## DRAW `wBattleResult` the cartridge writes.
 var _fled: bool = false
 
-## `wForcedSwitch`, the other way a battle ends in that same DRAW: Whirlwind or
-## Roar in a wild battle blows one side out of it rather than switching anybody.
-## `BattleTurn`'s `ld a, [wForcedSwitch] / jr nz, .quit` is what ends it, and
+## `wForcedSwitch`: Whirlwind or Roar in a wild battle blows a side out rather
+## than switching anybody. `BattleTurn`'s `jr nz, .quit` ends it and the
 ## `SetBattleDraw` beside it is why [method winner] answers nobody.
 var _forced_out: bool = false
 ## Which side was blown out, for a screen that has to say who left.
 var _forced_out_side: int = -1
 
 ## The half-run turn a Baton Pass stopped, as
-## [code]{"acting": Array, "actions": Dictionary, "index": int}[/code], or empty
-## when no turn is part way through. [method _run_turn] reads it and
-## [method pass_to] is what lets it finish.
+## [code]{"acting": Array, "actions": Dictionary, "index": int}[/code], which
+## [method pass_to] lets finish.
 var _pending_turn: Dictionary = {}
 
-## The side owing a Baton Pass target, or -1. `ForcePickSwitchMonInBattle` is a
-## menu the player cannot back out of, so this is answered rather than optional
-## and everything else is refused until it is.
+## The side owing a Baton Pass target, or -1. `ForcePickSwitchMonInBattle` cannot
+## be backed out of, so everything else is refused until it is answered.
 var _pending_baton_pass: int = -1
-## `OfferSwitch`'s pending question: the party slot the enemy is about to send
-## out, or -1 when nobody is being asked. SHIFT is the only mode that ever sets
-## it, and the turn stands still until [method answer_switch_offer] closes it.
+## `OfferSwitch`'s pending question, the slot the enemy is about to send out or
+## -1. SHIFT alone sets it, and the turn stands still until
+## [method answer_switch_offer] closes it.
 var _pending_switch_offer: int = -1
 ## `wOptions`' BATTLE_SHIFT bit, as the caller's own setting rather than a read
 ## of the options file: the engine is scene-free and takes its rules injected.
 var battle_style_set: bool = false
 
-## Whether `AskUseNextPokemon` has already been answered for the faint standing.
-## It is asked once: a NO whose run does not get away falls through to
-## `ForcePlayerMonChoice` rather than asking again. Cleared by the player's own
-## next entrance.
+## Whether `AskUseNextPokemon` was answered for the faint standing. Asked once,
+## a NO whose run fails falling through to `ForcePlayerMonChoice`.
 var _use_next_answered: bool = false
 
-## The side whose Pursuit already ran, in front of the switch it answered, or -1.
-## `PursuitSwitch` writes `CANNOT_MOVE` over that side's move once it has, and
-## `CheckTurn` reads the byte back and ends the turn, so the action it would have
-## taken later this turn is spent.
+## The side whose Pursuit already ran in front of the switch it answered, or -1.
+## `PursuitSwitch` writes `CANNOT_MOVE` over that side's move and `CheckTurn`
+## ends the turn on it, so the action it would have taken is spent.
 var _pursuit_spent: int = -1
 
 ## The two sides, keyed by [constant PLAYER] and [constant ENEMY].
 var parties: Dictionary = {}
 
-## Which of a side's party indices have fought since the current opponent was
-## sent in, a Dictionary used for its keys. Seeded with the lead at
-## [method create_parties], added to on every [method send_out], and reset to
-## whoever is left standing once experience is awarded: see
-## [method _award_experience]. Only [constant PLAYER]'s side is read, mirroring
-## the cartridge's asymmetry, but both are tracked the same way.
+## Which party indices have fought since the current opponent came in, a
+## Dictionary used for its keys: seeded at [method create_parties], added to on
+## every [method send_out], reset once experience is awarded.
 var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
 
-## The last direct damage each side took during the current pair of actions.
-## Counter and Mirror Coat read this after the faster side has acted. It is
-## cleared at the start of every action pair, because the cartridge's own
-## `wCurDamage` is a move-local value rather than a battle-long history.
+## The last direct damage each side took this action pair, which Counter and
+## Mirror Coat read after the faster side has acted. Cleared each pair: the
+## cartridge's `wCurDamage` is move-local, not a history.
 var _last_damage_taken: Dictionary = {PLAYER: {}, ENEMY: {}}
 
 ## `wPlayerFutureSightCount/Damage` and the enemy pair. Keyed by the side that
@@ -748,12 +663,10 @@ func opponent_of(side: int) -> int:
 	return ENEMY if side == PLAYER else PLAYER
 
 
-## Which Unown letter a Pokémon is, 1 being A, and zero for anything else.
-##
-## `_GetFrontpic` draws Unown out of `UnownPicPointers` by `wUnownLetter`, which
-## `GetUnownLetter` fills from the same DVs the stats came from. It is a display
-## value the way the level and the HP in an event are, so it travels with the
-## send-out rather than being read off the party by whatever draws the picture.
+## Which Unown letter a Pokémon is, 1 being A, zero for anything else.
+## `_GetFrontpic` reads `UnownPicPointers` by `wUnownLetter`, which
+## `GetUnownLetter` fills from the same DVs the stats came from: a display value
+## like the level in an event, so it travels with the send-out.
 static func unown_form_of(battler: Gen2BattleMon) -> int:
 	if battler == null or battler.species != RomLayout.UNOWN_SPECIES:
 		return 0
@@ -773,10 +686,8 @@ func reset_damage_taken() -> void:
 	_last_damage_taken = {PLAYER: {}, ENEMY: {}}
 
 
-## Adds the uncapped damage figure to the current action pair's saturating word.
-## `BattleCommand_ApplyDamage.update_damage_taken` is an add-with-carry capped
-## at $ffff, not an assignment. Bide accumulates the same raw word across its
-## storage window.
+## `BattleCommand_ApplyDamage.update_damage_taken`, an add-with-carry capped at
+## $ffff rather than an assignment. Bide accumulates the same raw word.
 func record_damage_taken(target: int, source: int, move_number: int, effect: int, amount: int) -> void:
 	if amount <= 0 or target not in [PLAYER, ENEMY] or source not in [PLAYER, ENEMY]:
 		return
@@ -814,11 +725,9 @@ func is_over() -> bool:
 	return _fled or _forced_out or party(PLAYER).is_wiped() or party(ENEMY).is_wiped()
 
 
-## `wForcedSwitch` and `SetBattleDraw` together: Whirlwind or Roar blowing
-## [param side] out of a wild battle, which ends it with nobody beaten.
-##
-## Nothing is switched and nobody faints, so both parties are left exactly as
-## they stand; [method winner] answers null the way it does for a run.
+## `wForcedSwitch` and `SetBattleDraw`: Whirlwind or Roar blowing [param side] out
+## of a wild battle. Nothing is switched and nobody faints, so both parties stand
+## as they are and [method winner] answers null, the way a run leaves it.
 func force_out(side: int) -> void:
 	if is_over():
 		return
@@ -844,23 +753,17 @@ func has_fled() -> bool:
 	return _fled
 
 
-## `TryToRunAwayFromBattle`, resolved without spending anything.
-##
-## Answers `outcome`: [code]&"fled"[/code], [code]&"failed"[/code] for the roll
-## that came up short and costs the turn, or [code]&"blocked"[/code] for a
-## refusal that costs nothing. `how` or `reason` says which branch answered.
-##
-## Both trapping checks are refusals that cost nothing rather than failed rolls:
-## `.cant_escape` prints and returns without writing
-## `BATTLEPLAYERACTION_USEITEM`, so `BattleMenu_Run` falls through to
-## `jp BattleMenu`. Only `.cant_escape_2`, the roll that came up short, spends
-## the turn.
+## `TryToRunAwayFromBattle`, resolved without spending anything. Answers
+## `outcome`: [code]&"fled"[/code], [code]&"failed"[/code] for the short roll,
+## which costs the turn, or [code]&"blocked"[/code] for a refusal that costs
+## nothing, with `how` or `reason` naming the branch. Both trapping checks are
+## refusals rather than failed rolls: `.cant_escape` returns without writing
+## `BATTLEPLAYERACTION_USEITEM`, so only `.cant_escape_2` spends the turn.
 ##
 ## [param runner_speed] is the Speed the caller hands the routine, which is not
-## always the Pokémon that is out: `BattleMenu_Run` passes `wBattleMonSpeed` and
-## `AskUseNextPokemon` passes `wPartyMon1Speed`. Below zero takes the former.
-## Everything else the run reads (the held item, the wrap counter) still comes off
-## the battle copy, since the source's `hl` covers the Speed word alone.
+## always the Pokémon out: `BattleMenu_Run` passes `wBattleMonSpeed` and
+## `AskUseNextPokemon` `wPartyMon1Speed`, and below zero takes the former. The
+## source's `hl` covers the Speed word alone, so the rest is the battle copy's.
 func run_odds(runner_speed: int = -1) -> Dictionary:
 	if battle_type in ALWAYS_ESCAPES:
 		return {"outcome": &"fled", "how": &"battle_type", "battle_type": battle_type}
@@ -975,21 +878,17 @@ func _attempt_run(events: Array, runner_speed: int = -1) -> StringName:
 	return outcome
 
 
-## Whether `AskUseNextPokemon` has a question to put up: the player owes a
-## replacement and this is a wild battle. A trainer battle returns from the
-## routine at once, since "that decision is made for us", and the question is
-## asked once per faint. See [method answer_use_next].
+## Whether `AskUseNextPokemon` has a question: the player owes a replacement and
+## this is a wild battle. A trainer battle returns at once ("that decision is
+## made for us"), and the question is asked once per faint.
 func asking_use_next() -> bool:
 	return must_replace(PLAYER) and not is_trainer_battle and not _use_next_answered
 
 
-## `AskUseNextPokemon`'s yes/no. YES leaves `ForcePlayerMonChoice` standing and
-## answers nothing; NO is `TryToRunAwayFromBattle`, which ends the battle when it
-## gets away and falls into that same forced choice when it does not.
-##
-## The Speed handed to the run is `wPartyMon1Speed`, the first party slot's, not
-## the Pokémon that just fainted: the source reads the party structure here
-## because the battle copy is a corpse.
+## `AskUseNextPokemon`'s yes/no. YES leaves `ForcePlayerMonChoice` standing; NO is
+## `TryToRunAwayFromBattle`, which ends the battle or falls into that same forced
+## choice. The Speed handed to the run is `wPartyMon1Speed`, the first slot's:
+## the source reads the party here because the battle copy is a corpse.
 func answer_use_next(use_next: bool) -> Array:
 	if not asking_use_next():
 		return []
@@ -1009,30 +908,23 @@ func _first_party_speed() -> int:
 	return 0 if first == null else int(first.stats.get("speed", 0))
 
 
-## Who [param side] sends out to replace a faint.
-##
-## The enemy's is `FindMonInOTPartyToSwitchIntoBattle`, the AI's own type-matchup
-## pick. The player's is asked rather than answered, so this is only the fallback
-## a caller with no opinion takes.
+## Who [param side] sends out to replace a faint: the enemy's is
+## `FindMonInOTPartyToSwitchIntoBattle`'s type-matchup pick, and the player's is
+## asked rather than answered, so this is the fallback for a caller with none.
 func replacement_target(side: int) -> int:
 	if side == ENEMY:
 		return Gen2AISwitch.pick_target(self)
 	return party(side).first_healthy()
 
 
-## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail: whoever
-## owes a Pokémon sends one out. The entry point a faint is answered through, and
-## the one thing besides [method take_actions] that moves a battle on.
-##
-## [param index] is the player's own row out of `ForcePlayerMonChoice`, refused
-## the way the party menu refuses so the question stays standing. The enemy's is
-## never asked for.
-##
-## The order is `DoubleSwitch`'s: with both sides down the player enters first,
-## so the AI's pick is scored against whoever that turned out to be, and the
-## enemy arrives through `EnemySwitch_SetMode`, which asks nothing. Only a
-## trainer replacing on its own reaches `EnemySwitch`, whose SHIFT branch offers
-## the player a switch as well.
+## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail, and the
+## one thing besides [method take_actions] that moves a battle on. [param index]
+## is the player's row out of `ForcePlayerMonChoice`, refused the way the party
+## menu refuses so the question stays standing; the enemy's is never asked for.
+## The order is `DoubleSwitch`'s: with both down the player enters first, so the
+## AI's pick is scored against whoever that turned out to be, and the enemy
+## arrives through `EnemySwitch_SetMode`. Only a trainer replacing on its own
+## reaches `EnemySwitch` and its SHIFT offer.
 func replace_fallen(index: int = -1) -> Array:
 	var events: Array = []
 	if is_over() or _pending_switch_offer >= 0 or _pending_baton_pass >= 0:
@@ -1052,10 +944,9 @@ func replace_fallen(index: int = -1) -> Array:
 	return events
 
 
-## `EnemyPartyMonEntrance`: the trainer's own replacement, which is
-## `EnemySwitch_SetMode` when it simply walks in and `EnemySwitch` when SHIFT
-## makes it an offer first. The offer is closed by
-## [method answer_switch_offer], the same one a mid-turn switch raises.
+## `EnemyPartyMonEntrance`: `EnemySwitch_SetMode` when the replacement walks in,
+## `EnemySwitch` when SHIFT makes it an offer, closed by
+## [method answer_switch_offer] like a mid-turn switch's.
 func _enemy_entrance(events: Array, offer: bool) -> void:
 	var target: int = replacement_target(ENEMY)
 	if target < 0:
@@ -1070,10 +961,9 @@ func _enemy_entrance(events: Array, offer: bool) -> void:
 	})
 
 
-## `CheckWhetherToAskSwitch`. In SHIFT mode a trainer's switch offers the player
-## one too, and four things have to hold: the battle has started, the player has
-## somebody else to send, SET is off, and the player's own Pokémon is standing.
-## A wild has no trainer to switch at all, and a link battle is not modelled.
+## `CheckWhetherToAskSwitch`: in SHIFT mode a trainer's switch offers the player
+## one, given a started battle, somebody else to send, SET off and the player's
+## own Pokémon standing. A wild has no trainer to switch.
 func should_offer_switch() -> bool:
 	return is_trainer_battle and not battle_style_set \
 		and party(PLAYER).healthy_count() > 1 and not mon(PLAYER).is_fainted()
@@ -1086,14 +976,10 @@ func awaiting_switch_offer() -> int:
 	return _pending_switch_offer
 
 
-## `OfferSwitch`'s yes/no. [param index] below zero is "no", which is the carry
-## the source returns and the end of the turn's first half; anything else is the
-## player switching too, which `EnemySwitch` reaches by falling into
-## `PlayerSwitch`.
-##
-## Refuses a slot the party would refuse, leaving the question standing, the way
-## `PickSwitchMonInBattle` redisplays its list rather than accepting one that
-## cannot come in.
+## `OfferSwitch`'s yes/no. [param index] below zero is the source's carry, ending
+## the turn's first half; anything else is the player switching too, which
+## `EnemySwitch` reaches by falling into `PlayerSwitch`. A slot the party would
+## refuse leaves the question standing.
 func answer_switch_offer(index: int = -1) -> Array:
 	if _pending_switch_offer < 0:
 		return []
@@ -1115,20 +1001,15 @@ func answer_switch_offer(index: int = -1) -> Array:
 	return _run_turn(events)
 
 
-## Which side owes a Baton Pass target, or -1. The turn is standing still until
-## [method pass_to] answers, the same refusal-until-answered shape
-## [method must_replace] uses, except that this one stops a turn part way rather
-## than between two.
+## Which side owes a Baton Pass target, or -1: [method must_replace]'s shape,
+## except that this one stops a turn part way rather than between two.
 func awaiting_baton_pass() -> int:
 	return _pending_baton_pass
 
 
-## Answers a pending Baton Pass by sending [param index] out, then finishes the
-## turn that was waiting on it and returns everything that happened after.
-##
-## Refuses an index the party would refuse anyway, leaving the question standing,
-## because `ForcePickSwitchMonInBattle` redisplays its list rather than accepting
-## a Pokémon that cannot come in.
+## Answers a pending Baton Pass by sending [param index] out and finishing the
+## turn behind it. An index the party would refuse leaves the question standing,
+## as `ForcePickSwitchMonInBattle` redisplays its list.
 func pass_to(index: int) -> Array:
 	var side: int = _pending_baton_pass
 	if side < 0 or not party(side).can_send_out(index):
@@ -1148,22 +1029,18 @@ func request_baton_pass(side: int) -> void:
 	_pending_baton_pass = side
 
 
-## `FindMonInOTPartyToSwitchIntoBattle`, which `EnemySwitch_SetMode` reaches
-## because Baton Pass zeroes `wEnemySwitchMonIndex` rather than naming anybody:
-## the same pick [method replacement_target] makes, asked without asking whether
-## the trainer wants to switch at all, since the move has already decided that.
+## `FindMonInOTPartyToSwitchIntoBattle`, reached because Baton Pass zeroes
+## `wEnemySwitchMonIndex` rather than naming anybody:
+## [method replacement_target]'s pick, without the question of whether to switch,
+## which the move has already answered.
 func baton_pass_target(side: int) -> int:
 	return replacement_target(side)
 
 
 ## `PassedBattleMonEntrance` and the enemy's `EnemySwitch_SetMode`: an entrance
-## that keeps what it is handed.
-##
-## Neither calls `NewBattleMonStatus` or resets the stat levels, which is the
-## only difference from [method send_out] and the only reason Baton Pass exists.
-## The state is captured before the switch and put back after it, so the Pokémon
-## walking back to its ball still loses everything, exactly as it would on the
-## cartridge where none of it was ever its own.
+## that keeps what it is handed, neither calling `NewBattleMonStatus` nor
+## resetting the stages, which is the whole difference from [method send_out].
+## The Pokémon walking back to its ball still loses everything.
 func baton_pass_send_out(side: int, index: int) -> Array:
 	var passed: Dictionary = mon(side).capture_passed_state()
 	var events: Array = send_out(side, index, -1, true)
@@ -1174,14 +1051,10 @@ func baton_pass_send_out(side: int, index: int) -> Array:
 	return events
 
 
-## `ResetBatonPassStatus`: the five things a pass does not carry.
-##
-## Nightmare is the odd one and is easy to get backwards. The check runs after
-## the entrance, so the sleep it reads is the *arriving* Pokémon's, not the one
-## that left: a Nightmare survives a pass only into somebody already asleep.
-##
-## Attraction and the wrap counters are cleared on *both* sides, since the
-## Pokémon that was loved or bound is not on the field any more either.
+## `ResetBatonPassStatus`: the five things a pass does not carry. Nightmare is
+## easy to get backwards, the check running after the entrance, so the sleep it
+## reads is the *arriving* Pokémon's. Attraction and the wrap counters clear on
+## both sides, whoever was loved or bound having left the field.
 func _reset_baton_pass_status(side: int) -> void:
 	var arriving: Gen2BattleMon = mon(side)
 	if not Gen2Status.is_asleep(arriving.status):
@@ -1205,10 +1078,8 @@ func _reset_baton_pass_status(side: int) -> void:
 		mon(each).trapping_move = 0
 
 
-## Whether [param side] has a move waiting on [method learn_move] or
-## [method decline_move]: every slot already held something when a level
-## taught it a new one, so nothing was learned without asking, the same
-## refusal-until-answered shape [method must_replace] already uses.
+## A move waiting on [method learn_move] or [method decline_move]: every slot was
+## full when a level taught a new one, [method must_replace]'s shape again.
 func must_learn_move(side: int) -> bool:
 	return not (_move_learn_queue.get(side, []) as Array).is_empty()
 
@@ -1217,23 +1088,17 @@ func awaiting_move_learn() -> bool:
 	return must_learn_move(PLAYER) or must_learn_move(ENEMY)
 
 
-## The offer waiting on [param side], or an empty Dictionary. [code]species[/code],
-## [code]index[/code], [code]move[/code] and [code]level[/code] are enough to say
-## "your FOO wants to learn BAR" without asking the Pokémon anything the event
-## did not already carry.
+## The offer waiting on [param side], or empty. [code]species[/code],
+## [code]index[/code], [code]move[/code] and [code]level[/code] say "your FOO
+## wants to learn BAR" without reading the Pokémon back.
 func pending_learn(side: int) -> Dictionary:
 	var queue: Array = _move_learn_queue.get(side, [])
 	return queue[0] if not queue.is_empty() else {}
 
 
-## Answers a pending offer by giving up [param forget_slot] for it. Refuses if
-## there is nothing pending: an answer to a question nobody asked is not
-## approximated into one that was.
-##
-## An HM slot is refused too, because `ForgetMove` never returns one: its
-## `.hmmove` branch prints `MoveCantForgetHMText` and redisplays the list
-## (engine/pokemon/learn.asm). A refused answer leaves the offer pending, so
-## [method must_learn_move] still holds and the caller can ask again.
+## Answers a pending offer by giving up [param forget_slot]. An HM slot is refused
+## as `ForgetMove`'s `.hmmove` branch refuses it, and either refusal leaves the
+## offer standing.
 func learn_move(side: int, forget_slot: int) -> Array:
 	if not must_learn_move(side):
 		return []
@@ -1250,10 +1115,9 @@ func learn_move(side: int, forget_slot: int) -> Array:
 		return []
 	(_move_learn_queue[side] as Array).pop_front()
 
-	# LearnMove clears a Disable naming the move that just went, but only in
-	# battle. The cartridge compares move numbers against wDisabledMove; Disable
-	# is a slot here, and the new move takes the forgotten one's slot, so slot
-	# equality is the same test.
+	# LearnMove clears a Disable naming the move that went, in battle only. The
+	# cartridge compares numbers against wDisabledMove; Disable is a slot here and
+	# the new move takes the forgotten one's, so slot equality is that test.
 	if learner.disabled_slot == forget_slot:
 		learner.disabled_slot = -1
 		learner.disable_turns = 0
@@ -1277,14 +1141,10 @@ func decline_move(side: int) -> Array:
 	}]
 
 
-## Sends a side's [param index] out, whether as a replacement or between turns.
-## Returns the events, which is one event or none: a switch that cannot be made
-## is refused rather than approximated.
-##
-## [param dragged_by] is the side that used Whirlwind or Roar, or -1 for an
-## ordinary switch. It exists because `DraggedOutText` is printed between
-## `ForceEnemySwitch` and `SpikesDamage`, so the line has to land inside this
-## method rather than around it.
+## Sends a side's [param index] out, as a replacement or between turns, with one
+## event or none: an impossible switch is refused. [param dragged_by] is the side
+## that used Whirlwind or Roar, -1 otherwise, because `DraggedOutText` is printed
+## between `ForceEnemySwitch` and `SpikesDamage`.
 func send_out(
 	side: int, index: int, dragged_by: int = -1, preserve_counter_moves: bool = false
 ) -> Array:
@@ -1307,14 +1167,12 @@ func send_out(
 		# NewBattleMonStatus/NewEnemyMonStatus clear both counter-move words.
 		mon(PLAYER).last_counter_move = 0
 		mon(ENEMY).last_counter_move = 0
-	# `BreakAttraction`, which every entrance calls and which clears the flag on
-	# *both* sides rather than only the incoming Pokémon's: whoever the Pokémon
-	# that left was in love with is not on the field any more either.
+	# `BreakAttraction`, which every entrance calls, clears both sides: whoever
+	# the Pokémon that left loved is not on the field either.
 	mon(PLAYER).substatus &= ~Gen2Substatus.ATTRACTED
 	mon(ENEMY).substatus &= ~Gen2Substatus.ATTRACTED
-	# `NewBattleMonStatus`, which clears the used-move list beside the rest of
-	# the incoming Pokémon's volatile state. The enemy's send-out leaves it
-	# alone: the list describes what the player has shown, not what it is facing.
+	# `NewBattleMonStatus` clears the used-move list with the rest of the volatile
+	# state. The enemy's send-out leaves it alone: it lists what the player showed.
 	if side == PLAYER:
 		player_used_moves = []
 		# The next faint is a fresh `AskUseNextPokemon`.
@@ -1339,14 +1197,8 @@ func send_out(
 	return events
 
 
-## `SpikesDamage`, which every entrance runs behind its own `SetPlayerTurn` or
-## `SetEnemyTurn`: the spikes read are the ones lying on the side walking in.
-##
-## Every reachable call site is an entrance this method already is
-## (`DetermineMoveOrder`, `PlayerPartyMonEntrance`, `EnemyPartyMonEntrance`,
-## `EnemyMonEntrance`, `ForcePlayerMonChoice`). `DoBattle`'s two run before the
-## move can have been used, and `BattleCommand_ForceSwitch`'s two belong to an
-## effect this engine does not have yet.
+## `SpikesDamage`, behind each entrance's own `SetPlayerTurn`/`SetEnemyTurn`, so
+## the spikes read are the ones on the side walking in.
 func _spikes_damage(side: int, events: Array) -> void:
 	if not Gen2Screens.has(screens[side], Gen2Screens.SPIKES):
 		return
@@ -1364,9 +1216,8 @@ func _spikes_damage(side: int, events: Array) -> void:
 		events.append({"type": FAINTED, "side": side})
 
 
-## `UpdateUsedMoves`: a move the player throws is remembered once, and the list
-## holds four. A fifth distinct move drops the oldest rather than being ignored,
-## which is why this is a queue rather than a set with a cap.
+## `UpdateUsedMoves`: remembered once, four kept, and a fifth drops the oldest
+## rather than being ignored, which is why it is a queue and not a capped set.
 func _record_used_move(move_number: int) -> void:
 	if move_number == 0 or player_used_moves.has(move_number):
 		return
@@ -1375,13 +1226,9 @@ func _record_used_move(move_number: int) -> void:
 		player_used_moves.remove_at(0)
 
 
-## Ends the whole trapping relationship, on both sides at once.
-##
-## `NewBattleMonStatus` and `NewEnemyMonStatus` each clear both wrap counters and
-## the opponent's `SUBSTATUS_CANT_RUN` beside their own substatus block, so a
-## send-out by either side frees the other as well.
-## [method Gen2BattleMon.reset_volatile] cannot answer for that on its own: it
-## runs on the Pokémon leaving, and half of this state lives on the one staying.
+## Ends the trapping relationship on both sides, as `NewBattleMonStatus` does.
+## [method Gen2BattleMon.reset_volatile] cannot: half the state is on the Pokémon
+## staying.
 func _clear_trapping() -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var battler: Gen2BattleMon = mon(side)
@@ -1390,28 +1237,19 @@ func _clear_trapping() -> void:
 		battler.substatus &= ~Gen2Substatus.CANT_RUN
 
 
-## Whether `TryPlayerSwitch` would refuse to recall the player's Pokémon: it is
-## bound, or the opponent is holding it with Mean Look or Spider Web.
-##
-## Player-only, as the cartridge's is. `AI_Switch` makes no such check, so the
-## enemy switches out of either one, and that asymmetry is the cartridge's rather
-## than an omission here.
+## Whether `TryPlayerSwitch` would refuse the recall: bound, or held by Mean Look
+## or Spider Web. Player-only, `AI_Switch` making no such check.
 func switch_blocked() -> bool:
 	return mon(PLAYER).trapped_turns > 0 \
 		or Gen2Substatus.has(mon(ENEMY).substatus, Gen2Substatus.CANT_RUN)
 
 
-## Both sides act, and the turn plays out. Returns the events in the order they
-## happened.
-##
-## An action is [method use_move] or [method switch_to]. Nothing happens while
-## either side owes a replacement, and a faint ends the turn where it is.
-##
-## [method order]'s priority check reads the move each side is credited with once,
-## before either has acted, which is when the cartridge decides order. What
-## actually runs is recomputed just before [method _act], because Encore can land
-## on a side that has not gone yet and `CheckOpponentWentFirst` overrides that
-## side's chosen action for the very turn it lands.
+## Both sides act and the turn plays out, answering the events in order. An action
+## is [method use_move] or [method switch_to]; nothing happens while either side
+## owes a replacement, and a faint ends the turn where it is. [method order] reads
+## each side's credited move once before either acts, which is when the cartridge
+## decides order, and what runs is recomputed just before [method _act]: Encore
+## can land on a side that has not gone.
 func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	var events: Array = []
 	if is_over() or awaiting_replacement() or awaiting_move_learn():
@@ -1461,12 +1299,9 @@ func take_actions(player_action: Dictionary, enemy_action: Dictionary) -> Array:
 	return _run_turn(events)
 
 
-## The per-side loop and the end-of-turn tail, run from wherever the turn last
-## stopped. Ordinarily that is the beginning and it runs to the end in one call.
-##
-## Baton Pass is the one thing that stops it part way: the cartridge opens a
-## switch menu inside `DoPlayerTurn` and waits, so the turn is left standing with
-## its remaining half in [member _pending_turn] until [method pass_to] answers.
+## The per-side loop and the end-of-turn tail, from wherever the turn last
+## stopped. Baton Pass is the one thing that stops it part way: `DoPlayerTurn`
+## opens a switch menu and waits, so the rest sits in [member _pending_turn].
 func _run_turn(events: Array) -> Array:
 	var acting: Array = _pending_turn["acting"]
 	var actions: Dictionary = _pending_turn["actions"]
@@ -1476,25 +1311,22 @@ func _run_turn(events: Array) -> Array:
 		var action: Dictionary = actions[side]
 		var action_event_start: int = events.size()
 		var moving: bool = not (_is_run(action) or _is_switch(action) or _is_item(action))
-		# The faint check is the source's own `HasPlayerFainted`/`HasEnemyFainted`
-		# between the two halves of the turn, and it gates the whole of the second
-		# half rather than only its move. It is asked before the bracket below
-		# opens for that reason. A switching or item-using side is always
+		# `HasPlayerFainted`/`HasEnemyFainted` between the halves of the turn,
+		# gating the whole second half rather than its move, which is why it is
+		# asked before the bracket opens. A switching or item-using side is always
 		# [method order]'s first, so this is only ever asked of a move.
 		if moving and (mon(side).is_fainted() or mon(opponent_of(side)).is_fainted()):
 			break
 		_open_turn_bracket(side, action)
 		if not moving:
 			# `.reset_rage` for a switch and `.reset_bide` for an item or a failed
-			# run, both of which fall into `.locked_in`'s unconditional zeroing.
-			# `AI_TryItem` does the same on the enemy's side. -1 is no move's
-			# effect, so both counters go.
+			# run, both falling into `.locked_in`'s zeroing, and `AI_TryItem` the
+			# same on the enemy's side. -1 is no effect, so both counters go.
 			_reset_action_counters(side, -1)
 		if _is_switch(action):
 			_pursuit_before_switch(side, actions, events)
 			# `EnemySwitch`: on SHIFT the player is told who is coming and asked
-			# whether to change too, before that Pokémon is on the field. The
-			# turn stops here until the answer arrives.
+			# whether to change, before that Pokémon is out. The turn stops here.
 			if side == ENEMY and should_offer_switch():
 				_pending_switch_offer = int(action.get("index", -1))
 				events.append({
@@ -1505,9 +1337,8 @@ func _run_turn(events: Array) -> Array:
 				return events
 			events.append_array(send_out(side, int(action.get("index", -1))))
 		elif _is_item(action):
-			## The player's own item was spent in the menu, the way
-			## `BattleMenu_Pack` spends it before the turn resolves; only the
-			## enemy reaches into its bag inside the turn.
+			## `BattleMenu_Pack` spends the player's item before the turn
+			## resolves; only the enemy reaches into its bag inside one.
 			if side == ENEMY:
 				_use_trainer_item(side, int(action.get("item", 0)), events)
 		elif moving and side != _pursuit_spent:
@@ -1519,10 +1350,9 @@ func _run_turn(events: Array) -> Array:
 		if _pending_baton_pass >= 0:
 			return events
 		_close_turn_bracket(side, action)
-		# `ld a, [wForcedSwitch] / and a / ret nz`, which `Battle_PlayerFirst` and
-		# `Battle_EnemyFirst` each ask twice, behind each side's own wrapper. A
-		# Pokémon blown or teleported out of a wild battle ends the turn where it
-		# stands: no second move, and none of the end-of-turn tail below.
+		# `ld a, [wForcedSwitch] / and a / ret nz`, asked twice by each of
+		# `Battle_PlayerFirst` and `Battle_EnemyFirst`. Blown or teleported out of
+		# a wild battle ends the turn where it stands, tail included.
 		if was_forced_out():
 			_pending_turn = {}
 			events.append({"type": OVER, "winner": winner()})
@@ -1544,9 +1374,8 @@ func _run_turn(events: Array) -> Array:
 	return events
 
 
-## Core checks both battlers after every action, independently of whether that
-## effect list carried `checkfaint`. Keep effect-owned ordering where an event
-## already exists; fill only the missing report.
+## Core checks both battlers after every action, whether or not the effect list
+## carried `checkfaint`: this fills only the report an effect did not make.
 func _report_unannounced_action_faints(events: Array, since: int) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		if not mon(side).is_fainted():
@@ -1561,10 +1390,8 @@ func _report_unannounced_action_faints(events: Array, since: int) -> void:
 			events.append({"type": FAINTED, "side": side})
 
 
-## `HandleFutureSight`, player then enemy outside link battles. The count is
-## decremented before testing one, and the stored base damage receives its
-## spread only on impact. The ordinary hit and apply commands retain Protect,
-## Substitute, Focus Band, faint and Rage interactions.
+## `HandleFutureSight`, player then enemy: the count is decremented before it is
+## tested, and the stored base damage takes its spread on impact.
 func _tick_future_sight(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var pending: Dictionary = _future_sight[side]
@@ -1594,12 +1421,9 @@ func _tick_future_sight(events: Array) -> void:
 			Gen2EffectCommands.run(command, turn)
 
 
-## `wPlayerIsSwitching` and `wEnemyIsSwitching`: whether [param side] is recalling
-## a Pokémon this turn. Both are zeroed at the top of `BattleTurn`, which is what
-## rebuilding [member _pending_turn] every turn already does.
-##
-## An enemy item is not a switch here even though [method order] treats it as one
-## for ordering: `AI_TryItem` sets no flag, only `AI_Switch` does, and
+## `wPlayerIsSwitching` and `wEnemyIsSwitching`, zeroed each turn the way
+## rebuilding [member _pending_turn] is. An enemy item is not a switch here though
+## [method order] orders it as one: `AI_TryItem` sets no flag, and
 ## [method Gen2EffectCommands._pursuit] is the reader.
 func is_switching(side: int) -> bool:
 	if _pending_turn.is_empty():
@@ -1608,22 +1432,12 @@ func is_switching(side: int) -> bool:
 	return _is_switch(actions.get(side, {}))
 
 
-## `PursuitSwitch`, which the cartridge calls from `BattleMonEntrance` and from
-## `AI_Switch`, both in front of the recall: a side that chose Pursuit takes its
-## whole turn now, against the Pokémon on its way out, and then has nothing left
-## to spend later in the turn.
-##
-## No speed or priority test. The switch is settled first whatever the speeds, so
-## the pursuer always gets the early hit; `EFFECT_PURSUIT` carries no priority
-## entry and does not need one.
-##
-## The effect byte is read here rather than inside a command because the trigger
-## belongs to the byte rather than to the list, the same way
-## [constant EFFECT_PRIORITIES] reads bytes from outside every list.
-##
-## Called from a chosen switch only. The cartridge's two call sites are the two
-## entrances a switch action reaches; `PassedBattleMonEntrance`,
-## `PlayerPartyMonEntrance` and `ForcePlayerMonChoice` call neither, so a Baton
+## `PursuitSwitch`, called from `BattleMonEntrance` and `AI_Switch` in front of
+## the recall: the pursuer spends its whole turn now, against the Pokémon on its
+## way out. No speed or priority test, the switch being settled first whatever
+## the speeds, which is why `EFFECT_PURSUIT` carries no priority entry; the effect
+## byte is read here rather than in a command because the trigger belongs to the
+## byte, as [constant EFFECT_PRIORITIES] does. A chosen switch only, so a Baton
 ## Pass and a post-faint replacement are not pursued.
 func _pursuit_before_switch(side: int, actions: Dictionary, events: Array) -> void:
 	var other: int = opponent_of(side)
@@ -1639,30 +1453,24 @@ func _pursuit_before_switch(side: int, actions: Dictionary, events: Array) -> vo
 	_pursuit_spent = other
 
 
-## `CheckOpponentWentFirst`, which is `wEnemyGoesFirst XOR hBattleTurn`: whether
-## the Pokémon opposite [param side] has already moved this turn.
-##
-## Protect and Endure both fail outright on a yes, which is what makes two
-## Protects in one turn a question of speed and what makes a Protect behind a
-## switch fail: a switching side is `.player_first` or `wEnemyGoesFirst`, so the
-## other side is always second.
+## `CheckOpponentWentFirst`, `wEnemyGoesFirst XOR hBattleTurn`. Protect and Endure
+## fail outright on a yes, which is what makes two Protects a question of speed
+## and a Protect behind a switch fail, a switching side always going first.
 func opponent_went_first(side: int) -> bool:
 	return (side == PLAYER) == enemy_goes_first
 
 
-## `EndUserDestinyBond`, the front half of the wrapper each side's action runs
-## inside (`PlayerTurn_EndOpponentProtectEndureDestinyBond`,
-## engine/battle/core.asm). It is in front of `DoPlayerTurn`, so a Pokémon that
-## cannot move still loses the bond it put up.
+## `EndUserDestinyBond`, the front half of the wrapper each action runs inside.
+## Ahead of `DoPlayerTurn`, so a Pokémon that cannot move still loses its bond.
 func _open_turn_bracket(side: int, action: Dictionary) -> void:
 	if not _brackets_turn(side, action):
 		return
 	mon(side).substatus &= ~Gen2Substatus.DESTINY_BOND
 
 
-## `EndOpponentProtectEndureDestinyBond`, the back half: the three flags that only
-## an opposing action ends. A Protect therefore covers exactly one opposing
-## action, and outlives the turn it was used on when it was used going second.
+## `EndOpponentProtectEndureDestinyBond`, the back half: three flags only an
+## opposing action ends, so a Protect covers one action and outlives its own turn
+## when it was used going second.
 func _close_turn_bracket(side: int, action: Dictionary) -> void:
 	if not _brackets_turn(side, action):
 		return
@@ -1672,35 +1480,21 @@ func _close_turn_bracket(side: int, action: Dictionary) -> void:
 	)
 
 
-## Whether an action runs inside that wrapper, and the two sides do not agree.
-##
-## The player's runs on everything it spends the turn on: `Battle_PlayerFirst` and
-## `Battle_EnemyFirst` both call `PlayerTurn_End...` unconditionally, and
-## `DoPlayerTurn`'s own `ret nz` for a switch, an item or a failed run skips only
-## the move, not the two clears around it. The enemy's is skipped outright when
-## `AI_SwitchOrTryItem` answers, which is the `.switch_item` and
-## `.switched_or_used_item` jump past `EnemyTurn_End...`.
-##
-## So a Protect the player put up survives an enemy switch and blocks the move
-## after it, where an enemy's does not survive a player switch.
+## Whether an action runs inside that wrapper, which the two sides disagree on:
+## the player's runs on everything, both orderings calling `PlayerTurn_End...`
+## unconditionally, and the enemy's is jumped past whenever `AI_SwitchOrTryItem`
+## answers. So a player's Protect survives an enemy switch and an enemy's does not
+## survive a player switch.
 func _brackets_turn(side: int, action: Dictionary) -> bool:
 	return side == PLAYER or not (_is_switch(action) or _is_item(action))
 
 
 ## `ParsePlayerAction` and `ParseEnemyAction`: the two counters a chain keeps only
-## while the chain is the move being used. Both are zeroed unless this move is the
-## one that feeds them, and Protect and Endure share a counter, so alternating the
-## two does not reset it.
-##
-## The source has a second, unconditional reset behind `CheckPlayerLockedIn` and
-## `CheckEnemyLockedIn`, for a Pokémon locked into a recharge, a charge, a rampage
-## or a Rollout. It is not modelled separately because it can never disagree: none
-## of Fury Cutter, Protect and Endure sets any of those four flags, so a locked-in
-## Pokémon's forced move always fails the effect test below anyway.
-##
-## [param effect] is the move's own byte rather than [method Gen2Turn.effect],
-## which a broken Substitute can overwrite part way through a move that has
-## already been counted.
+## while it is the move being used, Protect and Endure sharing one. The source's
+## second reset behind `CheckPlayerLockedIn` cannot disagree, none of the three
+## setting a recharge, charge, rampage or Rollout flag. [param effect] is the
+## move's own byte, not [method Gen2Turn.effect], which a broken Substitute
+## overwrites part way.
 func _reset_action_counters(side: int, effect: int) -> void:
 	var actor: Gen2BattleMon = mon(side)
 	if effect != Gen2MoveEffect.FURY_CUTTER:
@@ -1723,15 +1517,10 @@ func take_turn(player_slot: int, enemy_slot: int) -> Array:
 	return take_actions(use_move(player_slot), use_move(enemy_slot))
 
 
-## `ResidualDamage`: what a burn, a poison, a Leech Seed, a Nightmare and a Curse
-## take from each side at the end of the turn, in that order and in the order the
-## sides acted.
-##
-## After both moves rather than after each, skipping whoever is already down, so
-## a Pokémon that faints to its burn does so here rather than mid-move.
-##
-## The four steps are four routines' worth of `HasUserFainted` between them: a
-## Pokémon that goes down to its poison pays neither the seed nor the nightmare.
+## `ResidualDamage`: burn, poison, Leech Seed, Nightmare and Curse, in that order
+## and in the order the sides acted, after both moves and skipping whoever is
+## down. `HasUserFainted` sits between the steps, so one that goes down to its
+## poison pays neither the seed nor the nightmare.
 func _residual_damage(acting: Array, events: Array) -> void:
 	for side: int in acting:
 		if mon(side).is_fainted():
@@ -1748,9 +1537,9 @@ func _residual_damage(acting: Array, events: Array) -> void:
 		_residual_curse(side, events)
 
 
-## A running [member Gen2BattleMon.toxic_counter] means Toxic, which ramps
-## instead of taking the flat eighth. The counter rises here, once a turn, so the
-## turn it was inflicted counts as the first.
+## A running [member Gen2BattleMon.toxic_counter] means Toxic, which ramps rather
+## than taking the flat eighth. It rises here, so the turn it landed is the
+## first.
 func _residual_status(side: int, events: Array) -> void:
 	var current: Gen2BattleMon = mon(side)
 	if not Gen2Status.has(current.status, Gen2Status.BURN | Gen2Status.POISON):
@@ -1777,15 +1566,10 @@ func _residual_status(side: int, events: Array) -> void:
 		events.append({"type": FAINTED, "side": side})
 
 
-## An eighth off the seeded Pokémon and onto the one across from it, capped by
-## `RestoreHP`. What is healed is what `SubtractHP` left in `bc`: the eighth
-## normally, and the seeded Pokémon's whole remaining health when the eighth
-## would have taken it below zero, so
-## [method Gen2BattleMon.take_damage]'s own answer is the figure to hand on.
-##
-## A fainted receiver cannot happen on the cartridge, where `ResidualDamage` runs
-## behind a faint check inside each side's own move; it can here, because this
-## runs once after both. Nothing is moved in that case.
+## An eighth off the seeded Pokémon and onto the one opposite, capped by
+## `RestoreHP`: what is healed is what `SubtractHP` left in `bc`, which is
+## [method Gen2BattleMon.take_damage]'s answer. A fainted receiver cannot happen
+## on the cartridge and can here, this running after both moves; nothing moves.
 func _residual_leech_seed(side: int, events: Array) -> void:
 	var current: Gen2BattleMon = mon(side)
 	if not Gen2Substatus.has(current.substatus, Gen2Substatus.LEECH_SEED):
@@ -1839,17 +1623,9 @@ func _residual_curse(side: int, events: Array) -> void:
 		events.append({"type": FAINTED, "side": side})
 
 
-## `HandleWeather`: one turn off the count, the line that goes with it, and a
-## Sandstorm's eighth off whoever it can reach.
-##
-## Ahead of [method _tick_wrap] because `HandleBetweenTurnEffects` runs weather
-## before wrap. The countdown happens before the message, so the turn the count
-## reaches zero prints the ending line and deals no Sandstorm damage; the turn
-## the weather was set counts as one of its own, since `HandleWeather` runs on
-## that turn too.
-##
-## Player first whoever moved first, the same `SetPlayerTurn` then
-## `SetEnemyTurn` [method _tick_wrap] follows.
+## `HandleWeather`: a turn off the count, its line, and a Sandstorm's eighth off
+## whoever it reaches, ahead of [method _tick_wrap]. The countdown is before the
+## message, so the turn it empties prints the ending line and deals no damage.
 func _tick_weather(events: Array) -> void:
 	if not Gen2Weather.is_active(weather):
 		return
@@ -1885,20 +1661,12 @@ func _tick_weather(events: Array) -> void:
 			events.append({"type": FAINTED, "side": side})
 
 
-## `HandleWrap`: one turn off each bound Pokémon's counter, and a sixteenth of
-## its health with it.
-##
-## Between [method _residual_damage] and [method _tick_encore] because
-## `HandleBetweenTurnEffects` runs future sight, weather, wrap and perish song
-## before its leftovers block and `HandleEncore` last, while poison and burn are
-## taken inside each side's own move well ahead of any of it.
-##
-## Always the player first, whoever moved first: unlike `ResidualDamage`, which
-## runs inside a turn and so follows it, `HandleWrap` is `SetPlayerTurn` then
-## `SetEnemyTurn` outside a link battle.
-##
-## The turn the counter reaches zero is the release and costs nothing, which is
-## why the rolled three to six turns are two to five turns of damage.
+## `HandleWrap`: a turn off each bound Pokémon's counter and a sixteenth of its
+## health, between [method _residual_damage] and [method _tick_encore] where
+## `HandleBetweenTurnEffects` runs it, always the player first where
+## `ResidualDamage` follows the turn order. The turn the counter empties is the
+## release and costs nothing, which is why three to six rolled turns are two to
+## five turns of damage.
 func _tick_wrap(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var current: Gen2BattleMon = mon(side)
@@ -1925,17 +1693,11 @@ func _tick_wrap(events: Array) -> void:
 			events.append({"type": FAINTED, "side": side})
 
 
-## `HandlePerishSong`: one off each side's count, said out loud, and whoever
-## reaches zero is finished where it stands.
-##
-## Behind [method _tick_wrap] and ahead of the leftovers block, which is where
-## `HandleBetweenTurnEffects` calls it, and player first for the same reason
-## every other handler here is: the order that reverses them is the link one.
-##
-## The line prints on every tick including the last, since `HandlePerishSong`
-## decrements, prints, and only then looks at whether the count came out zero.
-## The kill is `xor a` straight into the HP word rather than damage, so nothing
-## about it is a sixteenth of anything and no held item can answer it.
+## `HandlePerishSong`: one off each count, said out loud, and whoever reaches zero
+## is finished where it stands. Behind [method _tick_wrap] and ahead of the
+## leftovers block, player first as every handler here is. The line prints on
+## every tick including the last, and the kill is `xor a` into the HP word rather
+## than damage, so no held item can answer it.
 func _tick_perish(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var current: Gen2BattleMon = mon(side)
@@ -1954,16 +1716,11 @@ func _tick_perish(events: Array) -> void:
 		events.append({"type": FAINTED, "side": side})
 
 
-## The leftovers block of `HandleBetweenTurnEffects`: `HandleLeftovers`,
-## `HandleMysteryberry` and then `HandleHealingItems`, after the wrap tick and
-## before Encore.
-##
-## The three do not agree on an order. The first two are `SetPlayerTurn` then
-## `SetEnemyTurn` reading `GetUserItem`, so the player is handled first; the
-## third is the same two calls reading `GetOpponentItem`, so the enemy is.
-## `HandleDefrost` runs between the second and the third and is not an item
-## effect at all; `HandleSafeguard` and `HandleScreens` sit behind it in that
-## order, and are not item effects either.
+## `HandleBetweenTurnEffects`' leftovers block: `HandleLeftovers`,
+## `HandleMysteryberry`, then `HandleHealingItems`, after the wrap tick and before
+## Encore. The first two read `GetUserItem` so the player is first, the third
+## `GetOpponentItem` so the enemy is. `HandleDefrost`, `HandleSafeguard` and
+## `HandleScreens` sit among them and are not item effects.
 func _tick_held_items(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		_use_leftovers(side, events)
@@ -1978,15 +1735,9 @@ func _tick_held_items(events: Array) -> void:
 		use_confusion_berry(side, events)
 
 
-## `HandleDefrost`: each frozen side thaws on its own roll at the end of a turn,
-## which is the only thing that makes a Generation 2 freeze temporary. Without
-## it a freeze lasts until a Flame Wheel, a Sacred Fire or an item, which is
-## Generation 1's rule.
-##
-## Player first, then enemy: the branch that reverses them is the
-## `USING_EXTERNAL_CLOCK` one, and this project has no link play. Nothing is
-## rolled for a side that is not frozen, since `bit FRZ` comes before
-## `BattleRandom`, so a battle with no freeze in it draws no randomness here.
+## `HandleDefrost`: each frozen side thaws on its own roll, the only thing making
+## a Generation 2 freeze temporary. Player first, and `bit FRZ` comes before
+## `BattleRandom`, so a battle with no freeze draws no randomness here.
 func _tick_defrost(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var current: Gen2BattleMon = mon(side)
@@ -1996,19 +1747,14 @@ func _tick_defrost(events: Array) -> void:
 			continue
 		if not Gen2Status.rolls_thaw(rng):
 			continue
-		# `xor a / ld [wBattleMonStatus], a` clears the whole byte rather than
-		# the bit, which is the same thing: a freeze is never on it with anything
-		# else.
+		# `xor a / ld [wBattleMonStatus], a` clears the byte rather than the bit,
+		# which is the same thing: a freeze is never on it with anything else.
 		current.status = Gen2Status.NONE
 		events.append({"type": THAWED, "side": side})
 
 
-## `HandleSafeguard`: one turn off each side's count, and the line when it runs
-## out. Player first, then enemy, the same order [method _tick_defrost] uses and
-## for the same reason: the branch that reverses them is the link one.
-##
-## The count is read only while the flag is up, so a side without a Safeguard
-## rolls nothing and prints nothing.
+## `HandleSafeguard`: a turn off each side's count and the line when it runs out.
+## The count is read only while the flag is up, so a side without one is quiet.
 func _tick_safeguard(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		if not Gen2Screens.has(screens[side], Gen2Screens.SAFEGUARD):
@@ -2023,13 +1769,8 @@ func _tick_safeguard(events: Array) -> void:
 		})
 
 
-## `HandleScreens`: Light Screen before Reflect on each side, which is the order
-## `.TickScreens` tests the two bits in, and the player's side before the
-## enemy's.
-##
-## Unlike Safeguard there is no shared count: `wPlayerLightScreenCount` and the
-## Reflect count beside it are separate bytes, so a side can hold both at once
-## and lose them on different turns.
+## `HandleScreens`: Light Screen before Reflect, `.TickScreens`' own order, and
+## the player first. The counts are separate bytes, so a side holds both.
 func _tick_screens(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		for row: Array in [
@@ -2064,9 +1805,9 @@ func _use_leftovers(side: int, events: Array) -> void:
 	})
 
 
-## `HandleMysteryberry`: five points back into the first move that ran out, or
-## one for Sketch. It is consumed by its own code rather than through
-## `ConsumeHeldItem`, which is why it is not on `ConsumableEffects`.
+## `HandleMysteryberry`: five points into the first move that ran out, one for
+## Sketch. Consumed by its own code, which is why it is not on
+## `ConsumableEffects`.
 func _use_pp_berry(side: int, events: Array) -> void:
 	var holder: Gen2BattleMon = mon(side)
 	if holder.is_fainted() or _held_effect(holder) != Gen2HeldItem.RESTORE_PP:
@@ -2109,9 +1850,8 @@ func use_hp_berry(side: int, events: Array) -> bool:
 	return true
 
 
-## `UseHeldStatusHealingItem`, which is reached both from here and from the
-## moment a status lands: the berry answers immediately rather than waiting for
-## the end of the turn.
+## `UseHeldStatusHealingItem`, reached here and the moment a status lands: the
+## berry answers at once rather than at the end of the turn.
 func use_status_berry(side: int, events: Array) -> bool:
 	var holder: Gen2BattleMon = mon(side)
 	if holder.status == Gen2Status.NONE:
@@ -2119,11 +1859,9 @@ func use_status_berry(side: int, events: Array) -> bool:
 	if not Gen2HeldItem.heals_status(_held_effect(holder), holder.status):
 		return false
 
-	# The status byte and nothing else: `UseHeldStatusHealingItem` clears
-	# `wBattleMonStatus` and never touches `SUBSTATUS_TOXIC`, so a Pokémon cured
-	# of a Toxic keeps the flag that makes its next poison ramp.
-	# [member Gen2BattleMon.toxic_counter] is that flag and that counter folded
-	# into one, so leaving it alone is what keeps the two in step.
+	# The status byte alone: `UseHeldStatusHealingItem` never touches
+	# `SUBSTATUS_TOXIC`, so a cured Pokémon keeps the flag that ramps its next
+	# poison, and [member Gen2BattleMon.toxic_counter] is that flag.
 	holder.status = Gen2Status.NONE
 	var used: int = holder.item
 	holder.item = 0
@@ -2131,9 +1869,8 @@ func use_status_berry(side: int, events: Array) -> bool:
 	return true
 
 
-## `UseConfusionHealingItem`. A Miracleberry answers for this as well as for the
-## status byte, but it is spent by whichever came first, which is why the two are
-## separate calls rather than one.
+## `UseConfusionHealingItem`. A Miracleberry answers here and for the status byte,
+## spent by whichever came first, which is why the calls are separate.
 func use_confusion_berry(side: int, events: Array) -> bool:
 	var holder: Gen2BattleMon = mon(side)
 	if not Gen2Substatus.has(holder.substatus, Gen2Substatus.CONFUSED):
@@ -2149,10 +1886,8 @@ func use_confusion_berry(side: int, events: Array) -> bool:
 	return true
 
 
-## Encore's countdown, once a turn rather than once a side's move: `HandleEncore`
-## runs after both sides act, the timing [method _residual_damage] uses. Ends
-## early the moment the encored slot runs out of PP, which the cartridge checks
-## every tick, not only at expiry.
+## Encore's countdown, once a turn rather than once a move. It ends the moment
+## the encored slot runs out of PP, checked every tick rather than at expiry.
 func _tick_encore(acting: Array, events: Array) -> void:
 	for side: int in acting:
 		var current: Gen2BattleMon = mon(side)
@@ -2168,12 +1903,10 @@ func _tick_encore(acting: Array, events: Array) -> void:
 		events.append({"type": ENCORE_ENDED, "side": side})
 
 
-## Experience for every enemy Pokémon that fainted this turn, from a move
-## ([method _act]) or from status damage ([method _residual_damage]).
-##
-## [constant FAINTED] clears the fainted member out of [member _participants] on
-## either side, since a fainted Pokémon stops participating regardless of which
-## side receives experience; only [method _give_experience_for] is asymmetric.
+## Experience for every enemy Pokémon that fainted this turn, to a move or to
+## status damage. [constant FAINTED] clears the member out of
+## [member _participants] on either side; only [method _give_experience_for] is
+## asymmetric.
 func _award_experience(events: Array) -> void:
 	for event: Dictionary in events.duplicate():
 		if StringName(event.get("type", "")) != FAINTED:
@@ -2184,15 +1917,11 @@ func _award_experience(events: Array) -> void:
 			_give_experience_for(mon(ENEMY), events)
 
 
-## Splits what [param defeated] is worth between everyone owed a share, then
-## resets the participant set to whoever is left standing: the next enemy
-## Pokémon, if the trainer has one, starts its own participant count fresh.
-##
-## `UpdateFaintedPlayerMon` awards in two passes when anything alive is holding
-## an Exp. Share. The block is halved once, then that same halved block is split
-## among the participants, and split again among the holders, so each group
-## divides half of it. A Pokémon that both fought and holds one is in both
-## passes and is awarded twice.
+## Splits what [param defeated] is worth, then resets the participant set to
+## whoever is standing, so the trainer's next Pokémon starts its own count.
+## `UpdateFaintedPlayerMon` awards in two passes when anything alive holds an
+## Exp. Share: the block is halved, then split among the participants and again
+## among the holders. A Pokémon in both passes is awarded twice.
 func _give_experience_for(defeated: Gen2BattleMon, events: Array) -> void:
 	var participants: Array = (_participants[PLAYER] as Dictionary).keys()
 	var holders: Array = _exp_share_holders()
@@ -2224,16 +1953,11 @@ func _award_share(
 			_give_experience_to(learner, int(index), award, stat_gains, by_exp_share, events)
 
 
-## Spends one of the trainer's two items, which costs the turn.
-##
-## The item is gone whether or not it changed anything: `AI_TryItem` clears the
-## slot the moment a check said yes, and the checks are what decide that, not
-## the effect. Bide, Fury Cutter, Protect, Rage and `wLastEnemyCounterMove` are
-## cleared alongside it on the cartridge. The two counters are cleared by
-## [method _reset_action_counters], which the caller runs for every action that is
-## not a move; the counter move was already cleared by
-## [method reset_damage_taken] at the top of this action pair; and Bide and Rage
-## do not exist here yet.
+## Spends one of the trainer's two items, which costs the turn. The item is gone
+## whether or not it changed anything, `AI_TryItem` clearing the slot the moment a
+## check said yes. What the cartridge clears beside it is
+## [method _reset_action_counters]'s work and
+## [method reset_damage_taken]'s; Bide and Rage do not exist here yet.
 func _use_trainer_item(side: int, item: int, events: Array) -> void:
 	if item == 0:
 		return
@@ -2247,15 +1971,12 @@ func _use_trainer_item(side: int, item: int, events: Array) -> void:
 	})
 
 
-## `DoItemEffect` with `wBattleMode` set, which is what the pack's own USE runs
-## inside a battle. The player's item is applied here rather than in the turn
-## loop, exactly as the cartridge applies it in the menu and only then spends the
-## turn as `BATTLEPLAYERACTION_USEITEM`.
-##
-## [param target_index] is the party member `UseItem_SelectMon` picked, for the
-## ITEMMENU_PARTY items that ask; [param move_slot] is `RestorePPEffect`'s own
-## question. A refusal is every branch that leaves `wItemEffectSucceeded` clear,
-## and none of them spends the item or the turn.
+## `DoItemEffect` with `wBattleMode` set, the pack's own USE inside a battle:
+## applied here rather than in the turn loop, as the cartridge applies it in the
+## menu and then spends the turn as `BATTLEPLAYERACTION_USEITEM`.
+## [param target_index] is `UseItem_SelectMon`'s pick and [param move_slot]
+## `RestorePPEffect`'s question; a refusal is any branch leaving
+## `wItemEffectSucceeded` clear, and none spends the item or the turn.
 func use_bag_item(item: int, target_index: int = -1, move_slot: int = -1) -> Dictionary:
 	if data == null or is_over():
 		return _item_failure(&"battle_not_running")
@@ -2292,10 +2013,9 @@ func use_bag_item(item: int, target_index: int = -1, move_slot: int = -1) -> Dic
 	}
 
 
-## `XItemEffect`, `GuardSpecEffect` and `DireHitEffect`, which act on whoever is
-## out rather than on a party member. Each refuses when there is nothing to do:
-## a stage already at the cap, or a flag already set
-## (`WontHaveAnyEffect_NotUsedMessage`).
+## `XItemEffect`, `GuardSpecEffect` and `DireHitEffect`, on whoever is out rather
+## than a party member, each refusing a capped stage or a set flag with
+## `WontHaveAnyEffect_NotUsedMessage`.
 func _apply_active_item(user: Gen2BattleMon, item: int) -> Dictionary:
 	if user == null or user.is_fainted():
 		return {"ok": false, "reason": &"item_has_no_effect"}
@@ -2312,14 +2032,11 @@ func _apply_active_item(user: Gen2BattleMon, item: int) -> Dictionary:
 	return {"ok": true, "stat": stat, "stages": 1}
 
 
-## The ITEMMENU_PARTY half of the table, which `UseItem_SelectMon` has already
-## chosen a target for. Every branch is the source's own refusal order: a fainted
-## target takes only a revive, a revive takes only a fainted one, and an item
-## that would change nothing is `WontHaveAnyEffect_NotUsedMessage`.
-##
-## [param active] is whether the target is the Pokemon that is out, which decides
-## the two things a benched member cannot have: `IsItemUsedOnConfusedMon`'s
-## confusion cure, and Full Restore's own.
+## The ITEMMENU_PARTY half, whose target `UseItem_SelectMon` has chosen, in the
+## source's own refusal order: a fainted target takes only a revive, a revive only
+## a fainted one, and anything else that would change nothing is
+## `WontHaveAnyEffect_NotUsedMessage`. [param active] decides the two a benched
+## member cannot have, `IsItemUsedOnConfusedMon`'s cure and Full Restore's.
 func _apply_party_item(
 	target: Gen2BattleMon, item: int, definition: Dictionary,
 	move_slot: int, active: bool
@@ -2385,9 +2102,8 @@ static func _item_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "kind": &"item_failed", "reason": reason}
 
 
-## `IsAnyMonHoldingExpShare`: every living party index carrying one, in party
-## order. A fainted holder is skipped and does not count towards the split, the
-## same test the routine makes before it looks at the item at all.
+## `IsAnyMonHoldingExpShare`: every living party index carrying one, in order. A
+## fainted holder is skipped before the item is looked at, so it splits nothing.
 func _exp_share_holders() -> Array:
 	var out: Array = []
 	var party_side: Gen2Party = party(PLAYER)
@@ -2407,9 +2123,8 @@ func _give_experience_to(
 	events.append({
 		"type": EXP_GAINED, "side": PLAYER, "index": index,
 		"species": learner.species, "amount": award, "exp": learner.exp,
-		# Which of the two passes this came from. The cartridge prints the same
-		# line either way; this is here so a Pokémon that is in both passes can
-		# be told apart from one awarded twice for any other reason.
+		# Which pass this came from. The cartridge prints one line either way; this
+		# tells a Pokémon in both passes from one awarded twice otherwise.
 		"exp_share": by_exp_share,
 	})
 
@@ -2448,10 +2163,8 @@ func _give_experience_to(
 		_offer_moves_learned_at(learner, index, learner.level, events)
 
 
-## What [param learner] is taught at exactly [param level]: straight into an
-## empty slot with no question asked, the same as the cartridge asks none when
-## there is nowhere for the answer to go, or queued for [method learn_move] or
-## [method decline_move] when every slot already holds something.
+## What [param learner] is taught at exactly [param level]: into an empty slot
+## unasked, or queued for [method learn_move] when every slot is full.
 func _offer_moves_learned_at(learner: Gen2BattleMon, index: int, level: int, events: Array) -> void:
 	for move: int in data.moves_learned_at(learner.species, level):
 		if learner.moves.has(move):
@@ -2492,19 +2205,17 @@ func _run_event(type: StringName, attempt: Dictionary) -> Dictionary:
 	return out
 
 
-## The move an action commits a side to, which is nothing at all for a switch.
-## Struggle stands in there so that the order can be worked out without a special
-## case; a switching side never reaches the point of using it.
+## The move an action commits a side to, Struggle standing in for a switch so
+## the order needs no special case. A switching side never uses it.
 func _move_for_action(side: int, action: Dictionary) -> int:
 	if _is_switch(action) or _is_run(action) or _is_item(action):
 		return Gen2Damage.STRUGGLE
 	return move_for(side, int(action.get("slot", 0)))
 
 
-## The slot PP is actually spent from, not always the slot asked for: Encore
-## forces the slot it locked in, as a two-turn release forces its move number.
-## The encored slot is used only while still usable, so a move out of PP is not
-## reached for once [method _tick_encore] has ended the effect.
+## The slot PP is spent from, not always the one asked for: Encore forces the
+## slot it locked in, as a release forces its move number, and only while that
+## slot is still usable.
 func effective_slot(side: int, requested_slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.encored_slot >= 0 and attacker.can_use(attacker.encored_slot):
@@ -2512,17 +2223,12 @@ func effective_slot(side: int, requested_slot: int) -> int:
 	return requested_slot
 
 
-## Which move a side will actually use.
-##
-## A release turn answers with the charged move whatever slot is asked for, since
-## the cartridge chooses nothing on that turn. Rollout and rampage continuations
-## force the move that started the chain the same way. Failing that, Encore
-## answers with [method effective_slot], which may also not be the asked slot.
-##
-## Failing that, an unusable slot answers Struggle. That is the cartridge's
-## answer for a Pokémon with no PP anywhere, and it is used here for an empty,
-## spent or disabled slot too: the caller asked for something that cannot happen,
-## and Struggle is the only always-available move.
+## Which move a side will actually use. A release turn answers with the charged
+## move whatever slot was asked for, the cartridge choosing nothing that turn, and
+## Rollout and rampage continuations force the move that started the chain;
+## failing those, Encore answers with [method effective_slot]. An unusable slot
+## answers Struggle, the cartridge's answer for a Pokémon with no PP anywhere,
+## used here for an empty, spent or disabled slot too.
 func move_for(side: int, slot: int) -> int:
 	var attacker: Gen2BattleMon = mon(side)
 	if attacker.charged_move != 0:
@@ -2538,19 +2244,14 @@ func move_for(side: int, slot: int) -> int:
 	return int(attacker.moves[chosen_slot]) if attacker.can_use(chosen_slot) else Gen2Damage.STRUGGLE
 
 
-## Who goes first, as the two sides in the order they act.
-##
-## A switch is settled first: the incoming Pokémon comes out and then takes the
-## other side's move, so a switching side acts first at any speed or priority.
-## Two switches in one turn go to the player, as outside a link battle.
-##
-## Otherwise priority decides, then speed with stages applied, then a coin flip.
-## The cartridge weighs a held Quick Claw between priority and speed; no held
-## items exist here yet.
+## Who goes first, as the two sides in the order they act. A switch is settled
+## first at any speed or priority, the incoming Pokémon taking the other side's
+## move, and two switches go to the player as outside a link battle. Otherwise
+## priority decides, then a Quick Claw, then speed with stages applied, then a
+## coin flip.
 func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
-	# A failed run is settled before the enemy moves, the way a switch is: the
-	# cartridge spends the turn as BATTLEPLAYERACTION_USEITEM, which resolves at
-	# once and leaves the enemy's move behind it.
+	# A failed run is settled before the enemy moves, as a switch is: the turn is
+	# spent as BATTLEPLAYERACTION_USEITEM, which resolves at once.
 	var player_switching: bool = _is_switch(actions.get(PLAYER, {})) \
 		or _is_run(actions.get(PLAYER, {})) \
 		or _is_item(actions.get(PLAYER, {}))
@@ -2578,14 +2279,10 @@ func order(chosen: Dictionary, actions: Dictionary = {}) -> Array:
 	return _sides(rng.randi_range(0, 255) < 128)
 
 
-## `DetermineMoveOrder`'s `.equal_priority` block: whether a Quick Claw settles
-## the turn before the speeds are looked at.
-##
-## Answers true for the player going first, false for the enemy, and null for
-## "the claw said nothing", which is what falls through to speed. The order is
-## the cartridge's: the player's claw is rolled first and only reaches the
-## enemy's when the player has none, and when both sides carry one the enemy's
-## roll is taken first outside a link battle.
+## `DetermineMoveOrder`'s `.equal_priority` block: true for the player first,
+## false for the enemy, null for a claw that said nothing, which falls through to
+## speed. The player's claw is rolled first and the enemy's only when the player
+## has none, except that with one on each side the enemy's roll is taken first.
 func _quick_claw() -> Variant:
 	var player_claw: bool = _held_effect(mon(PLAYER)) == Gen2HeldItem.QUICK_CLAW
 	var enemy_claw: bool = _held_effect(mon(ENEMY)) == Gen2HeldItem.QUICK_CLAW
@@ -2621,13 +2318,10 @@ static func priority_of(move: Dictionary) -> int:
 	return int(EFFECT_PRIORITIES.get(int(move.get("effect", -1)), BASE_PRIORITY))
 
 
-## One side's move, run as the list of commands its effect is made of.
-##
-## Nothing about a particular move lives here. The effect byte picks a sequence
-## out of [Gen2MoveEffect] and its commands run in order against a [Gen2Turn]
-## until one says the move is finished; announcing, spending, rolling, applying
-## and fainting are all commands. That is the cartridge's arrangement, and it is
-## why the rest of Generation 2 is commands rather than branches in here.
+## One side's move, as the list of commands its effect is made of: the effect byte
+## picks a sequence out of [Gen2MoveEffect] and its commands run against a
+## [Gen2Turn] until one ends the move. Announcing, spending, rolling, applying and
+## fainting are all commands, which is why no move lives here.
 func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	var move: Dictionary = data.move(move_number)
 	if move.is_empty():
@@ -2657,11 +2351,10 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	_run_move_effect(turn)
 
 
-## `ResetTurn`, used by Metronome, Mirror Move and Sleep Talk. A called command
-## replaces the working move and starts its command list from the beginning,
-## without running the once-per-action status gate again. A fresh [Gen2Turn]
-## gives the called move a clean move-struct copy while retaining the acting
-## side and the one shared event stream.
+## `ResetTurn`, used by Metronome, Mirror Move and Sleep Talk: the called move
+## replaces the working one and starts its list from the beginning, without the
+## once-per-action status gate. A fresh [Gen2Turn] is that clean move-struct copy,
+## keeping the acting side and the one event stream.
 func _run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
 	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
 		if turn.ended:
