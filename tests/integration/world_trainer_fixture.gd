@@ -601,6 +601,14 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"pokegear": [RomLayout.POKEGEAR_TILES, 2],
 		"pokegear_sprites": [RomLayout.POKEGEAR_SPRITE_TILES, 3],
 		"dex_nest_icon": [RomLayout.DEX_NEST_ICON_TILES, 3],
+		## `Pokedex_LoadGFX`'s two runs, `UnownFont` and the footprint grid, at
+		## their real lengths so the dex page can address every tile a layout
+		## names. Flat fills like the rest: what a test checks is where each
+		## lands.
+		"pokedex": [RomLayout.POKEDEX_TILES, 1],
+		"pokedex_slowpoke": [RomLayout.POKEDEX_SLOWPOKE_TILES, 2],
+		"unown_font": [RomLayout.UNOWN_FONT_TILES, 3],
+		"footprints": [RomLayout.FOOTPRINT_SLOTS * RomLayout.FOOTPRINT_TILES, 1],
 	}
 	## The font and the frames are the two sheets addressed by character code
 	## rather than by slot, so both need their real first code. A frames sheet
@@ -631,6 +639,13 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 			[0x7FE0, 0x0000], [0x03FF, 0x0000], [0x7C1F, 0x0000], [0x4210, 0x0000],
 		],
 		"badge": [0x7FFF, 0x5ABA, 0x49EF, 0x0000],
+	}
+	## `_CGB_Pokedex`'s three: PREDEFPAL_POKEDEX and the two the screen loads
+	## beside it (gfx/pokedex/question_mark.pal and cursor.pal).
+	manifest["pokedex_palettes"] = {
+		"interface": [0x7FFF, 0x2A9F, 0x195A, 0x0000],
+		"question_mark": [0x2EB, 0x227, 0xCC6, 0x584],
+		"cursor": [0x0000, 0x2EB, 0x227, 0x0000],
 	}
 	## `gfx/new_game/gender_screen.pal`'s own four colours.
 	manifest["gender_screen_palette"] = [0x7FFF, 0x7FC9, 0x7D61, 0x0000]

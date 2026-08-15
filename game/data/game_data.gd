@@ -51,6 +51,7 @@ var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
+var _pokedex_palettes: Dictionary = {}
 var _gender_screen_palette: Array = []
 var _copyright_string: Array = []
 var _copyright_palette: Array = []
@@ -125,6 +126,7 @@ static func open_directory(path: String) -> GameData:
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
+	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
 	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
 	data._gender_screen_palette = gender_palette if gender_palette is Array else []
 	var copyright_string: Variant = manifest.get("copyright_string", [])
@@ -1626,6 +1628,37 @@ func card_badge_palette() -> PackedColorArray:
 	for packed: Variant in stored as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
+
+
+## One of `_CGB_Pokedex`'s three palettes by name: `interface` is
+## PREDEFPAL_POKEDEX, `question_mark` what an unseen species' picture wears, and
+## `cursor` the arrow's object palette. Empty when the cache does not carry it.
+func pokedex_palette(name: String) -> PackedColorArray:
+	var stored: Variant = _pokedex_palettes.get(name, [])
+	if not stored is Array or (stored as Array).size() < Gen2Palette.COLORS_PER_PIC:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## The four tiles of a species' footprint, in the `footprints` strip's own
+## numbering: the two top halves where the species sits, and the two bottom
+## halves [constant RomLayout.FOOTPRINT_HALF_STRIDE] tiles further on, which is
+## the offset the source calls a forgotten tile-editor fix. Empty for a species
+## outside the run.
+func footprint_tiles(species: int) -> PackedInt32Array:
+	if species < 1 or species > RomLayout.FOOTPRINT_SPECIES:
+		return PackedInt32Array()
+	var index: int = species - 1
+	var first: int = (index / 8) * (8 * RomLayout.FOOTPRINT_TILES) \
+		+ (index % 8) * RomLayout.FOOTPRINT_HALF_TILES
+	return PackedInt32Array([
+		first, first + 1,
+		first + RomLayout.FOOTPRINT_HALF_STRIDE,
+		first + RomLayout.FOOTPRINT_HALF_STRIDE + 1,
+	])
 
 
 ## The three bar palettes in `GetHPPal`'s own order.
