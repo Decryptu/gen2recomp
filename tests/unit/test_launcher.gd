@@ -202,6 +202,72 @@ func test_index_install_requires_the_download_to_be_the_listed_mod() -> void:
 	assert_string_contains(dialog.status_text(), "Installed")
 
 
+## A server that is down costs the freshness of a listing rather than the
+## listing: the last feed that parsed is kept and shown, with the player told
+## which copy they are looking at.
+func test_an_index_that_cannot_be_read_falls_back_to_the_copy_on_disk() -> void:
+	var feed: String = "https://mods.example.com/index.json"
+	var dialog := Gen2ModIndexDialog.new()
+	add_child_autofree(dialog)
+	await get_tree().process_frame
+	dialog.open_feed(feed)
+
+	var text: String = JSON.stringify({
+		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
+		"name": "Example",
+		"mods": [{"id": "voxel", "name": "Voxel", "version": "1.2.0",
+			"download": "https://example.com/voxel.zip"}],
+	})
+	assert_true(bool(dialog.apply_feed_response(true, "", text).get("ok", false)))
+	assert_string_contains(dialog.status_text(), "lists 1 mod")
+
+	dialog.apply_feed_response(false, "That index could not be read (HTTP 503).")
+	assert_string_contains(dialog.status_text(), "Showing the copy saved")
+
+	# A fetch that arrives as something other than a feed is the same answer.
+	dialog.apply_feed_response(true, "", "not json")
+	assert_string_contains(dialog.status_text(), "Showing the copy saved")
+
+	Gen2ModIndex.forget_cache(feed)
+	dialog.apply_feed_response(false, "That index could not be read (HTTP 503).")
+	assert_string_contains(dialog.status_text(), "HTTP 503")
+	assert_false(dialog.status_text().contains("Showing the copy"))
+
+
+## A listing offering a newer version than the one installed says so, and the
+## count of them is on the status line.
+func test_an_index_names_the_mods_a_newer_version_is_listed_for() -> void:
+	_write_probe_mod_zip()
+	var installed: Dictionary = Gen2ModInstaller.install_zip(_mod_archive)
+	assert_true(bool(installed.get("ok", false)), JSON.stringify(installed))
+	Gen2ModHost.reset()
+	Gen2ModHost.instance().discover()
+
+	var feed: String = "https://mods.example.com/updates.json"
+	var dialog := Gen2ModIndexDialog.new()
+	add_child_autofree(dialog)
+	await get_tree().process_frame
+	dialog.open_feed(feed)
+	dialog.apply_feed_response(true, "", JSON.stringify({
+		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
+		"name": "Example",
+		"mods": [{"id": String(PROBE_MOD_ID), "name": "Launcher Probe", "version": "9.9.9",
+			"download": "https://example.com/probe.zip"}],
+	}))
+	assert_string_contains(dialog.status_text(), "1 can be updated")
+
+	# The same listing at the installed version offers a reinstall and no update.
+	dialog.apply_feed_response(true, "", JSON.stringify({
+		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
+		"name": "Example",
+		"mods": [{"id": String(PROBE_MOD_ID), "name": "Launcher Probe",
+			"version": String(installed["version"]),
+			"download": "https://example.com/probe.zip"}],
+	}))
+	assert_false(dialog.status_text().contains("can be updated"))
+	Gen2ModIndex.forget_cache(feed)
+
+
 ## A toast with nothing to say occupies nothing: not drawn, and not in the hit
 ## test either.
 func test_a_silent_toast_is_not_on_screen_at_all() -> void:

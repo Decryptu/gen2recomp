@@ -133,6 +133,10 @@ signal option_changed(id: StringName, key: StringName, value: Variant)
 signal action_changed(id: StringName, key: StringName, pressed: bool)
 
 static var _instance: Gen2ModHost = null
+## Which mod packs this process has mounted. Static because a resource pack
+## cannot be unmounted, so a host rebuilt by [method reset] inherits whatever the
+## last one mounted whether it tracks it or not.
+static var _mounted_packs: Dictionary = {}
 
 var _manifests: Dictionary = {}
 ## Mod id to version for every entry script that ran. See [method loaded_mods].
@@ -976,6 +980,10 @@ func _dependency_refusal(
 ## is only reported by whatever the caller can name it with: without this the
 ## launcher and the startup warning both say "?".
 func load_mod(manifest: Gen2ModManifest) -> Dictionary:
+	if manifest.packed():
+		var mounted: Dictionary = _mount_pack(manifest)
+		if not bool(mounted.get("ok", false)):
+			return mounted
 	var path: String = manifest.entry_path()
 	if not FileAccess.file_exists(path):
 		return _refuse_load(manifest, &"missing_entry_script", path)
@@ -999,6 +1007,24 @@ func loaded_mods() -> Array:
 	for id: StringName in ids:
 		out.append({"id": String(id), "version": String(_loaded[id])})
 	return out
+
+
+## Mounts a mod's own resource pack, once per run.
+##
+## `replace_files` is false, so a pack can only add paths and can never land on
+## one the game itself ships: a mod that names `res://game/...` is ignored there
+## rather than obeyed. There is no unmount in the engine, which is why a reload
+## remounts nothing and why the set is kept on the host rather than the manifest.
+func _mount_pack(manifest: Gen2ModManifest) -> Dictionary:
+	if _mounted_packs.has(manifest.id):
+		return {"ok": true, "id": manifest.id}
+	var path: String = manifest.pack_path()
+	if not FileAccess.file_exists(path):
+		return _refuse_load(manifest, &"missing_mod_pack", path)
+	if not ProjectSettings.load_resource_pack(ProjectSettings.globalize_path(path), false):
+		return _refuse_load(manifest, &"mod_pack_unreadable", path)
+	_mounted_packs[manifest.id] = true
+	return {"ok": true, "id": manifest.id}
 
 
 func _refuse_load(manifest: Gen2ModManifest, reason: StringName, path: String) -> Dictionary:

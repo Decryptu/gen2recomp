@@ -40,6 +40,8 @@ const WORDING: Dictionary = {
 	&"missing_entry": "The mod names no entry script.",
 	&"entry_not_gdscript": "A mod's entry script has to be GDScript (%s).",
 	&"entry_escapes_mod": "The entry script points outside the mod folder (%s).",
+	&"pack_escapes_mod": "The mod's resource pack has to be a file beside its mod.json (%s).",
+	&"pack_not_a_resource_pack": "A mod's pack has to be a .pck or .zip (%s).",
 
 	# Writing it into place.
 	&"could_not_create_mod_directory": "The mod folder could not be created.",
@@ -48,6 +50,8 @@ const WORDING: Dictionary = {
 	&"already_installed": "It is already installed.",
 
 	# Running it.
+	&"missing_mod_pack": "The mod's resource pack %s is missing.",
+	&"mod_pack_unreadable": "The mod's resource pack %s could not be opened.",
 	&"missing_entry_script": "The entry script %s is missing.",
 	&"entry_not_a_script": "The entry %s is not a script.",
 	&"entry_has_no_register": "The entry script %s has no register() function.",

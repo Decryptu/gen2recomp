@@ -37,7 +37,8 @@ user://mods/<id>/
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
 | `api_version` | Must equal `Gen2ModManifest.API_VERSION` |
-| `entry` | A `.gd` path inside the mod directory |
+| `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
+| `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
 | `dependencies` | Optional object from required mod ids to SemVer ranges |
 | `games` | Optional list of cartridge ids the mod is for |
@@ -62,6 +63,23 @@ and a list of ids stays right when the launcher gains one.
 An entry that is absolute, contains `..` or is not GDScript is refused before
 anything runs. Manifests are read without executing mod code, so a launcher can
 list what is installed and say why something was rejected.
+
+A mod may ship its scripts and resources in a resource pack instead of loose
+files. `pack` names a `.pck` or `.zip` beside `mod.json`, exported from
+`res://mods/<id>/`, and `entry` is then a path inside that root:
+
+```
+user://mods/voxel/
+  mod.json      { "pack": "content.zip", "entry": "mod.gd", ... }
+  content.zip   mods/voxel/mod.gd, mods/voxel/renderer.gd, ...
+```
+
+`mod.json` itself stays a plain file, so the launcher lists a packed mod and can
+refuse it without mounting anything. The pack is mounted only when the mod
+actually loads, with `replace_files` false, so it can add paths and never land on
+one the game itself ships. A pack that names a path rather than a file beside the
+manifest, or that is neither `.pck` nor `.zip`, is refused when the manifest is
+read.
 
 ```gdscript
 extends RefCounted
@@ -150,6 +168,19 @@ GitHub slug.
 A listed mod installs through the same path an imported `.zip` does, and its
 manifest id must match the one the feed advertised, so a listing grants a mod
 nothing that picking the same file by hand would not.
+
+A row whose `version` is newer than the installed copy's says so and offers
+**Update** rather than **Reinstall**, and the status line counts how many the
+listing offers. Both sides have to be strict `major.minor.patch` numbers to be
+compared: a version a feed made up is reported as uncomparable rather than
+guessed at, and a listing older than the installed copy is neither an update nor
+an error.
+
+Each feed's last listing that parsed is kept under `user://mod_index_cache/`. It
+goes up while the request is in flight and stays up when the fetch fails, with
+the age of the copy said on the status line, so browsing what you follow does not
+depend on the server being reachable at that moment. Unfollowing an index drops
+its cached copy with it.
 
 ## Adding content
 

@@ -26,6 +26,7 @@ var _status: Label = null
 var _entry_list: VBoxContainer = null
 var _http: HTTPRequest = null
 var _entries: Array[Dictionary] = []
+var _feed: String = ""
 var _pending_entry: Dictionary = {}
 var _busy: bool = false
 
@@ -147,7 +148,14 @@ func _on_open_pressed() -> void:
 	if _busy or _sources.selected < 0:
 		return
 	var feed: String = String(_sources.get_item_metadata(_sources.selected))
+	open_feed(feed)
 	_clear_entries()
+	# The last good copy goes up first, so a slow or unreachable server costs
+	# the freshness of the listing rather than the listing.
+	var cached: Dictionary = Gen2ModIndex.cached_feed(feed)
+	if bool(cached.get("ok", false)):
+		_entries.assign(cached["entries"])
+		_show_entries()
 	_set_status("Reading %s..." % feed, MUTED)
 	_request(feed, _on_feed_received)
 
@@ -157,31 +165,90 @@ func _on_feed_received(
 ) -> void:
 	_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
-		_set_status("That index could not be read (HTTP %d)." % code, ERROR)
+		apply_feed_response(false, "That index could not be read (HTTP %d)." % code)
 		return
-	var parsed: Dictionary = Gen2ModIndex.parse_feed(body.get_string_from_utf8())
+	apply_feed_response(true, "", body.get_string_from_utf8())
+
+
+## Shows whatever the request came back with. Separate from the handler, the way
+## [method install_entry_bytes] is, so both answers a server can give are
+## testable without one: a feed that parsed is listed and kept, and anything else
+## falls back to the copy already on disk.
+func apply_feed_response(ok: bool, problem: String, text: String = "") -> Dictionary:
+	if not ok:
+		_fall_back_to_cache(problem)
+		return {"ok": false, "reason": &"index_request_failed", "detail": problem}
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(text)
 	if not bool(parsed.get("ok", false)):
-		_set_status(_reason_text(parsed), ERROR)
-		return
+		_fall_back_to_cache(_reason_text(parsed))
+		return parsed
+	Gen2ModIndex.cache_feed(_feed, text)
 	_entries.assign(parsed["entries"])
 	_show_entries()
-	var name: String = String(parsed.get("name", ""))
+	_set_status(_listing_text(parsed), MUTED)
+	return parsed
+
+
+## Which feed the listing is about. Set before a request goes out, so a failure
+## and a stored copy both know which index they are for.
+func open_feed(feed: String) -> void:
+	_feed = feed
+
+
+## What the player is told when the fetch failed. The cached listing goes up with
+## it, so the message says which copy they are looking at rather than only what
+## went wrong.
+func _fall_back_to_cache(problem: String) -> void:
+	var cached: Dictionary = Gen2ModIndex.cached_feed(_feed)
+	if not bool(cached.get("ok", false)):
+		_set_status(problem, ERROR)
+		return
+	_entries.assign(cached["entries"])
+	_show_entries()
 	_set_status(
-		"%s lists %d mod%s." % [
-			name if not name.is_empty() else "That index",
-			_entries.size(), "" if _entries.size() == 1 else "s",
-		],
-		MUTED,
+		"%s Showing the copy saved %s ago." % [problem, _age_text(int(cached.get("age", 0)))],
+		ACCENT,
 	)
+
+
+func _listing_text(parsed: Dictionary) -> String:
+	var name: String = String(parsed.get("name", ""))
+	var line: String = "%s lists %d mod%s." % [
+		name if not name.is_empty() else "That index",
+		_entries.size(), "" if _entries.size() == 1 else "s",
+	]
+	var updates: int = Gen2ModIndex.update_count(_entries, _installed_versions())
+	if updates > 0:
+		line += "  %d can be updated." % updates
+	return line
+
+
+## Rounded to the largest unit that still says something useful: a listing hours
+## old and one days old are different answers, and minutes below an hour are not.
+static func _age_text(seconds: int) -> String:
+	if seconds < 3600:
+		return "%d minute%s" % [maxi(seconds / 60, 1), "" if seconds < 120 else "s"]
+	if seconds < 86400:
+		@warning_ignore("integer_division")
+		var hours: int = seconds / 3600
+		return "%d hour%s" % [hours, "" if hours == 1 else "s"]
+	@warning_ignore("integer_division")
+	var days: int = seconds / 86400
+	return "%d day%s" % [days, "" if days == 1 else "s"]
 
 
 func _show_entries() -> void:
 	_clear_entries()
+	var installed: Dictionary = _installed_versions()
+	for entry: Dictionary in _entries:
+		_entry_list.add_child(_entry_row(entry, installed))
+
+
+func _installed_versions() -> Dictionary:
 	var installed: Dictionary = {}
 	for manifest: Gen2ModManifest in Gen2ModHost.instance().manifests():
 		installed[manifest.id] = manifest.version
-	for entry: Dictionary in _entries:
-		_entry_list.add_child(_entry_row(entry, installed))
+	return installed
 
 
 func _entry_row(entry: Dictionary, installed: Dictionary) -> Control:
@@ -206,12 +273,47 @@ func _entry_row(entry: Dictionary, installed: Dictionary) -> Control:
 		detail.add_theme_color_override("font_color", MUTED)
 		text.add_child(detail)
 
+	var state: StringName = Gen2ModIndex.update_state(
+		version, String(installed.get(StringName(entry["id"]), ""))
+	)
+	if state != Gen2ModIndex.NOT_INSTALLED:
+		var have := Label.new()
+		have.text = _installed_text(state, String(installed[StringName(entry["id"])]))
+		have.add_theme_color_override(
+			"font_color", ACCENT if state == Gen2ModIndex.UPDATE_AVAILABLE else MUTED
+		)
+		text.add_child(have)
+
 	var button := Button.new()
-	var have: bool = installed.has(entry["id"])
-	button.text = "Reinstall" if have else "Install"
-	button.pressed.connect(_on_install_pressed.bind(entry, have))
+	button.text = _button_text(state)
+	button.pressed.connect(
+		_on_install_pressed.bind(entry, state != Gen2ModIndex.NOT_INSTALLED)
+	)
 	row.add_child(button)
 	return row
+
+
+## What the row says about the copy on disk. An unorderable version on either
+## side is said as such rather than guessed at, since a feed is a stranger's file
+## and a version it made up is not a reason to offer an update.
+static func _installed_text(state: StringName, installed: String) -> String:
+	match state:
+		Gen2ModIndex.UPDATE_AVAILABLE:
+			return "Installed %s" % installed
+		Gen2ModIndex.INSTALLED_IS_NEWER:
+			return "Installed %s, newer than this listing" % installed
+		Gen2ModIndex.UNKNOWN:
+			return "Installed %s, versions cannot be compared" % installed
+	return "Installed %s, up to date" % installed
+
+
+static func _button_text(state: StringName) -> String:
+	match state:
+		Gen2ModIndex.NOT_INSTALLED:
+			return "Install"
+		Gen2ModIndex.UPDATE_AVAILABLE:
+			return "Update"
+	return "Reinstall"
 
 
 func _on_install_pressed(entry: Dictionary, replace: bool) -> void:

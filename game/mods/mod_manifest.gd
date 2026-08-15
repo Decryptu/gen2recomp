@@ -22,6 +22,10 @@ var name: String = ""
 var version: String = ""
 var api_version: int = 0
 var entry: String = ""
+## An optional resource pack beside the manifest, `.pck` or `.zip`, holding the
+## mod's own scripts and resources. Its files mount at [method mount_root], so
+## [member entry] is a path inside that root rather than inside the directory.
+var pack: String = ""
 var description: String = ""
 ## Required mod ids to accepted semantic-version ranges.
 var dependencies: Dictionary = {}
@@ -65,6 +69,7 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 	manifest.version = String(source.get("version", ""))
 	manifest.api_version = int(source.get("api_version", 0))
 	manifest.entry = String(source.get("entry", ""))
+	manifest.pack = String(source.get("pack", ""))
 	manifest.description = String(source.get("description", ""))
 	var raw_dependencies: Variant = source.get("dependencies", {})
 	if not raw_dependencies is Dictionary:
@@ -112,11 +117,37 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 		# iOS forbids JIT and loading native code at runtime, so a mod is
 		# interpreted GDScript or it is nothing.
 		return _refuse(&"entry_not_gdscript", manifest.entry)
+	if not manifest.pack.is_empty():
+		if manifest.pack.begins_with("/") or manifest.pack.contains("..") \
+			or manifest.pack.contains(":") or manifest.pack.contains("/"):
+			# A pack is a file beside the manifest, not a path: it is mounted
+			# rather than read, so there is nothing to gain by letting it point
+			# anywhere else.
+			return _refuse(&"pack_escapes_mod", manifest.pack)
+		if not (manifest.pack.ends_with(".pck") or manifest.pack.ends_with(".zip")):
+			return _refuse(&"pack_not_a_resource_pack", manifest.pack)
 	return {"ok": true, "manifest": manifest}
 
 
+## Whether this mod ships its files as a resource pack rather than loose.
+func packed() -> bool:
+	return not pack.is_empty()
+
+
+## Where a pack's files are expected to land. `ProjectSettings.load_resource_pack`
+## mounts each file at the `res://` path it was packed with, so a mod exports
+## from this root and the host resolves the entry against it. One root per id,
+## which is also what keeps two packs from landing on each other.
+func mount_root() -> String:
+	return "res://mods/%s" % id
+
+
+func pack_path() -> String:
+	return "%s/%s" % [directory, pack]
+
+
 func entry_path() -> String:
-	return "%s/%s" % [directory, entry]
+	return "%s/%s" % [mount_root() if packed() else directory, entry]
 
 
 ## Whether this mod declares [param game_id]. An empty declaration is every game,
@@ -145,6 +176,7 @@ func summary() -> Dictionary:
 		"version": version,
 		"description": description,
 		"directory": directory,
+		"pack": pack,
 		"dependencies": dependencies.duplicate(),
 		"games": games.duplicate(),
 	}
