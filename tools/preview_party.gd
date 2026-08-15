@@ -1,16 +1,18 @@
 extends SceneTree
 
-## Captures the party and PC-box overlays against a real cache.
+## Captures the window-resolution save overlays against a real cache: the party,
+## the PC boxes and the start menu's pack.
 ##
-##   Godot --path . -s res://tools/preview_party.gd -- <game> <out.png> [party|box] [presses]
+##   Godot --path . -s res://tools/preview_party.gd -- <game> <out.png> [party|box|pack|select] [presses]
 ##
 ## `presses` is a comma-separated button list driven into the overlay before the
 ## shot, the way `preview_world_services.gd` photographs a second page: `d` is
 ## down, `u` up, `l` left, `r` right, `a` and `b` the two buttons. Several
 ## comma-separated lists write one file each.
 ##
-## Both screens are built directly rather than through the overworld, which is
-## what makes this a screen test rather than a world one. They reach the runtime
+## Each is built directly rather than through the overworld, which is what makes
+## this a screen test rather than a world one; the pack is given a world of its
+## own because its transactions read one. They reach the runtime
 ## through `Gen2GameRuntime`, so they compile under `-s` where naming the
 ## autoload by identifier would not.
 ##
@@ -18,6 +20,12 @@ extends SceneTree
 ## other than the project's own.
 
 const FRAMES_BEFORE_CAPTURE: int = 6
+
+## Item numbers from `constants/item_constants.asm`, the three rows the pack's
+## own submenu split is worth photographing.
+const ITEM_POTION: int = 0x12
+const ITEM_BICYCLE: int = 0x07
+const ITEM_REPEL: int = 0x14
 
 const BUTTONS: Dictionary = {
 	"u": Gen2Button.UP, "d": Gen2Button.DOWN, "l": Gen2Button.LEFT,
@@ -35,7 +43,7 @@ var _elapsed: int = 0
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
-		push_error("Usage: preview_party.gd -- <game> <out.png> [party|box] [presses]")
+		push_error("Usage: preview_party.gd -- <game> <out.png> [party|box|pack|select]")
 		quit(1)
 		return
 	var game: StringName = StringName(args[0])
@@ -81,9 +89,38 @@ func _build(data: GameData) -> Control:
 		var boxes := Gen2BoxScreen.new()
 		boxes.set_context(data, save, false, true)
 		return boxes
+	if _what == "pack" or _what == "select":
+		return _build_pack(data, save)
 	var party := Gen2PartyScreen.new()
 	party.set_context(data, save, true)
 	return party
+
+
+## The start menu over a world holding one of each pack row the submenu splits
+## on: a POTION (USE/GIVE/TOSS), a REPEL (which also reaches SEL) and the
+## BICYCLE, whose key-item row offers neither GIVE nor TOSS.
+func _build_pack(data: GameData, save: Gen2SaveData) -> Control:
+	var state := Gen2WorldState.new({}, {}, {ITEM_POTION: 3, ITEM_REPEL: 2, ITEM_BICYCLE: 1})
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, Gen2WorldSpawn.NEW_BARK_GROUP, Gen2WorldSpawn.PLAYERS_HOUSE_2F,
+		Gen2WorldSpawn.HOME_CELL, state
+	)
+	if world == null:
+		push_error("Could not open a world for %s." % data.id)
+		return null
+	save.world = world.snapshot()
+	var menu := Gen2StartMenuScreen.new()
+	## No slot on disk, so nothing this photographs is written anywhere.
+	menu.set_party_context(save, false)
+	if not menu.open(world, data, func() -> Dictionary: return {"ok": true}):
+		push_error("Could not open the start menu for %s." % data.id)
+		return null
+	## `SelectMenu` over a BICYCLE already registered, which is what the button
+	## reaches in the overworld and what no button driven into this screen can.
+	if _what == "select":
+		state.set_registered_item(ITEM_BICYCLE)
+		menu.open_registered_item()
+	return menu
 
 
 func _drive(program: String) -> void:

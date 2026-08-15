@@ -34,6 +34,7 @@ const GROUPS: Dictionary = {
 	&"art": [&"intro_movie", &"gs_intro", &"credits", &"town_map", &"battle_anims"],
 	&"tables": [
 		&"tmhm", &"naming", &"world_scripts", &"opening_lane", &"pokecenter_pc",
+		&"pack",
 	],
 	&"trainers": [&"crystal_route30_trainer", &"gold_route30_trainer"],
 }

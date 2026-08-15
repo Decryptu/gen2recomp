@@ -652,6 +652,9 @@ func _handle_button(button: int) -> bool:
 		Gen2Button.START:
 			_open_start_menu()
 			return true
+		Gen2Button.SELECT:
+			open_select_menu()
+			return true
 	if Gen2Button.is_direction(button):
 		move_player(Gen2Button.vector(button))
 		return true
@@ -1767,6 +1770,13 @@ func _play_hall_of_fame_music() -> void:
 ## _open_service_host()'s shape. The START branch in _handle_button() is the
 ## normal path.
 func _open_start_menu() -> void:
+	_open_start_menu_host(Callable())
+
+
+## `SelectMenu` and `GiveTakePartyMonItem`'s GIVE both open the pack this screen
+## already hosts, so they share its opener and hand it their own entry point.
+## [param entry] is called with the host once it is on screen.
+func _open_start_menu_host(entry: Callable) -> void:
 	if _world == null or _data == null or _overlay_open() or _field_move_text \
 		or not _oak_pc_pages.is_empty() \
 		or not _trainer_approach.is_empty() or _world.script_busy() \
@@ -1797,7 +1807,17 @@ func _open_start_menu() -> void:
 	host.closed.connect(_on_start_menu_closed)
 	_start_menu_host = host
 	_script_prompt = "Start menu open"
+	if entry.is_valid():
+		entry.call(host)
 	_refresh_labels()
+
+
+## `SelectMenu`, which is the whole of what the SELECT button does in the
+## overworld: the registered item, or the text saying one may be registered.
+func open_select_menu() -> void:
+	_open_start_menu_host(func(host: Gen2StartMenuScreen) -> void:
+		host.open_registered_item()
+	)
 
 
 func _on_start_menu_action(kind: StringName) -> void:
@@ -2042,7 +2062,13 @@ func _on_party_action(action: Dictionary) -> void:
 	# `PokemonActionSubmenu`'s `.quit` reaches `ExitAllMenus`, so a field move
 	# leaves the overworld rather than reopening the menu behind it.
 	_reopen_start_menu = false
-	if _world == null or StringName(action.get("kind", &"")) != &"field_move":
+	if _world == null:
+		_refresh_labels()
+		return
+	if StringName(action.get("kind", &"")) == &"mon_item":
+		_run_mon_item_action(action)
+		return
+	if StringName(action.get("kind", &"")) != &"field_move":
 		_refresh_labels()
 		return
 	match int(action.get("move", 0)):
@@ -2191,6 +2217,37 @@ func _strength_refusal(reason: StringName) -> String:
 	if reason == &"badge_required":
 		return "Sorry! A new BADGE is required."
 	return "Can't use that here."
+
+
+## `GiveTakePartyMonItem`'s two answers. TAKE is a bag transaction and says so in
+## the map's own text box; GIVE needs an item, which is `.GiveItem`'s pack over
+## the Pokemon already chosen.
+func _run_mon_item_action(action: Dictionary) -> void:
+	var slot: int = int(action.get("slot", -1))
+	if StringName(action.get("option", &"")) == Gen2PartyScreen.OPTION_GIVE:
+		_open_start_menu_host(func(host: Gen2StartMenuScreen) -> void:
+			host.open_give(slot)
+		)
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	var result: Dictionary = Gen2WorldBagHost.take_from_party(
+		_world, save, slot, _injected_save == null
+	)
+	var name: String = String(action.get("name", ""))
+	if bool(result.get("ok", false)):
+		_show_field_move_text(Gen2WorldPack.took_text(name, String(result.get("name", ""))))
+		return
+	match StringName(result.get("reason", &"")):
+		&"not_holding":
+			_show_field_move_text(Gen2WorldPack.not_holding_text(name))
+		&"bag_full":
+			_show_field_move_text(Gen2WorldPack.storage_full_text())
+		_:
+			_show_field_move_text(
+				"%s could not hand that over (%s)." % [
+					name, String(result.get("reason", "")),
+				]
+			)
 
 
 func _show_field_move_text(text: String) -> void:

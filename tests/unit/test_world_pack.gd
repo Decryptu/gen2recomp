@@ -190,19 +190,23 @@ func test_the_tm_pocket_has_its_own_submenu() -> void:
 	])
 
 
-## GIVE and SEL keep their source position and are marked unavailable, the way
-## the party submenu carries STATS, SWITCH and MOVE. TOSS is built.
-func test_only_give_and_sel_are_unavailable() -> void:
-	for entry: Dictionary in Gen2WorldPack.item_submenu(_data, ITEM_POTION):
-		var action: StringName = StringName(entry.get("action", &""))
-		assert_eq(
-			bool(entry.get("available", false)),
-			action in [
-				Gen2WorldPack.ACTION_USE, Gen2WorldPack.ACTION_TOSS,
-				Gen2WorldPack.ACTION_QUIT,
-			],
-			"action %s" % action
-		)
+## `.GiveItem`'s loop refuses the key item pocket and whatever `CheckTossableItem`
+## refuses, which is the pair that also decides GIVE is in a submenu at all.
+func test_a_key_item_cannot_be_held() -> void:
+	assert_true(Gen2WorldPack.can_hold(_data, ITEM_POTION))
+	assert_true(Gen2WorldPack.can_hold(_data, ITEM_TM01))
+	assert_false(Gen2WorldPack.can_hold(_data, ITEM_BICYCLE))
+	assert_false(Gen2WorldPack.can_hold(_data, 250))
+	assert_false(Gen2WorldPack.can_hold(null, ITEM_POTION))
+
+
+## `CheckSelectableItem`: the permission bit is set on an item that cannot be
+## registered, which is every fixture row but the unclassified one.
+func test_only_a_selectable_item_can_be_registered() -> void:
+	assert_false(Gen2WorldPack.can_select(_data, ITEM_POTION))
+	assert_true(Gen2WorldPack.can_select(_data, ITEM_UNCLASSIFIED))
+	assert_false(Gen2WorldPack.can_select(_data, 250))
+	assert_false(Gen2WorldPack.can_select(null, ITEM_UNCLASSIFIED))
 
 
 func test_an_unknown_item_has_no_submenu() -> void:

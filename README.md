@@ -126,8 +126,10 @@ screen over the same values the launcher's settings edit, so the two cannot
 disagree. Pokedex has the three source orderings, type search and the
 `<MON>'S NEST` area map. Pokegear has the clock, map, phone and radio cards, and
 a tuned station keeps playing after it closes, which is how the Poke Flute
-channel wakes Vermilion's Snorlax. Pack opens each item's own submenu, and the
-party submenu offers all eight field moves to a Pokemon that knows one.
+channel wakes Vermilion's Snorlax. Pack opens each item's own submenu: USE,
+GIVE, TOSS and SEL, which registers an item to the SELECT button and uses it
+from the map. The party submenu offers all eight field moves to a Pokemon that
+knows one, and ITEM gives or takes what it holds.
 
 Facing something and pressing A is the other way to every field move: a cut
 tree, a whirlpool, a waterfall, a headbutt tree and open water each offer their
