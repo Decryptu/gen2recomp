@@ -268,23 +268,20 @@ func _on_update_response(
 func _open_manage_sheet(game_id: StringName) -> void:
 	if _importing:
 		return
-	var data: GameData = GameData.open(game_id)
+	var path: String = RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
+	var state: StringName = RomCache.state(path)
 	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(
 		_palette, RomRegistry.title_for(game_id)
 	)
 	var body: VBoxContainer = sheet.body()
-	body.add_child(Gen2LauncherUI.muted(
-		_palette,
-		"This cartridge is imported and verified." if data != null
-		else "No cache exists for this cartridge yet.",
-	))
-	var directory: Label = Gen2LauncherUI.muted(
-		_palette, RomCache.directory_for(game_id, RomRegistry.sha1_for(game_id))
-	)
+	body.add_child(Gen2LauncherUI.muted(_palette, cache_state_text(state)))
+	var directory: Label = Gen2LauncherUI.muted(_palette, path)
 	directory.add_theme_color_override("font_color", _palette.faint)
 	body.add_child(directory)
 
-	if data != null:
+	# Off the state rather than off the data: a stale or half-written cache is
+	# exactly the one worth opening or deleting, and neither can be read.
+	if state != RomCache.STATE_MISSING:
 		var open_folder: Gen2LauncherButton = Gen2LauncherButton.create(
 			_palette, "Open cache folder", Gen2LauncherButton.Variant.NEUTRAL, &"folder"
 		)
@@ -301,7 +298,7 @@ func _open_manage_sheet(game_id: StringName) -> void:
 
 	var reimport: Gen2LauncherButton = Gen2LauncherButton.create(
 		_palette,
-		"Re-import" if data != null else "Import",
+		"Re-import" if state != RomCache.STATE_MISSING else "Import",
 		Gen2LauncherButton.Variant.PRIMARY,
 		&"download",
 	)
@@ -312,6 +309,24 @@ func _open_manage_sheet(game_id: StringName) -> void:
 	)
 	sheet.add_action(reimport)
 	sheet.open(self)
+
+
+## What the manage sheet says about a cache in [param state]. Takes the state
+## rather than a cartridge so the four sentences can be asserted without a cache
+## on disk to put a build's own cartridges at risk.
+##
+## A cache is never migrated ([constant RomCache.FORMAT_VERSION]), so a build
+## that has moved on says so and asks for the dump again rather than reporting
+## the cartridge as never imported.
+static func cache_state_text(state: StringName) -> String:
+	match state:
+		RomCache.STATE_USABLE:
+			return "This cartridge is imported and verified."
+		RomCache.STATE_STALE:
+			return "This cache was written by an older build. Import the cartridge again."
+		RomCache.STATE_INCOMPLETE:
+			return "The last import did not finish. Import the cartridge again."
+	return "No cache exists for this cartridge yet."
 
 
 func _open_cache_folder(game_id: StringName) -> void:

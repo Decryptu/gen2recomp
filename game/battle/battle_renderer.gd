@@ -58,12 +58,24 @@ var _player_bar: TextureRect = null
 var _exp_bar: TextureRect = null
 var _sprites: TextureRect = null
 
+## `SPRITE_MONSTER` (constants/sprite_constants.asm), the same number in both
+## pins. `GetSubstitutePic` builds the doll out of `MonsterSpriteGFX`, which is
+## that overworld sprite's own strip, so the battle draws a walking sprite.
+const SUBSTITUTE_SPRITE: int = 0x4C
+
+## Where `GetSubstitutePic` copies the four tiles: the enemy takes the sprite's
+## down-facing frame at columns 2 and 3, rows 5 and 6 of its 7x7 box, the player
+## the up-facing one a row higher in a 6x6 box. A tile index into either box is
+## `column * side + row`, which is what `sScratch + (2 * 7 + 5) tiles` says.
+const SUBSTITUTE_AT: Dictionary = {false: Vector2i(2, 5), true: Vector2i(2, 4)}
+const SUBSTITUTE_FIRST_TILE: Dictionary = {false: 0, true: 4}
+
 ## One 56x56 and one 48x48 index buffer, the two pics padded out to their own
-## boxes, rebuilt only when the species drawn changes.
+## boxes, rebuilt only when the picture drawn changes.
 var _enemy_pixels: PackedByteArray = PackedByteArray()
 var _player_pixels: PackedByteArray = PackedByteArray()
-var _enemy_pixels_species: int = -1
-var _player_pixels_species: int = -1
+var _enemy_pixels_key: Array = []
+var _player_pixels_key: Array = []
 
 ## Everything a pic layer is built out of. A draining bar moves the panels while
 ## the map, the species, the palette and the scroll all stand still, so the same
@@ -146,7 +158,7 @@ func _draw_pics() -> void:
 	var enemy_palette: PackedColorArray = _battler_palette(
 		enemy, Gen2BattleAnimBackground.PAL_BG_ENEMY
 	)
-	var enemy_key: Array = [map, enemy, enemy_palette, raster]
+	var enemy_key: Array = [map, enemy, _enemy_pixels_key, enemy_palette, raster]
 	if enemy_key != _enemy_pic_key:
 		_enemy_pic_key = enemy_key
 		_show_layer(
@@ -162,7 +174,7 @@ func _draw_pics() -> void:
 		var player_palette: PackedColorArray = _battler_palette(
 			player, Gen2BattleAnimBackground.PAL_BG_PLAYER
 		)
-		var player_key: Array = [map, player, player_palette, raster]
+		var player_key: Array = [map, player, _player_pixels_key, player_palette, raster]
 		if player_key != _player_pic_key:
 			_player_pic_key = player_key
 			_show_layer(
@@ -213,16 +225,63 @@ func _pic_layer(
 
 
 ## The two pics as index buffers padded out to their own boxes, so a tile id
-## indexes a fixed grid whatever size the species' own pic is.
+## indexes a fixed grid whatever size the species' own pic is. A side whose doll
+## is up is holding the substitute's picture instead, which is the same box with
+## a different four tiles in it.
 func _ensure_pixels() -> void:
-	var enemy: int = int(_view.get("enemy_species", 0))
-	if enemy != _enemy_pixels_species:
-		_enemy_pixels = _padded_pic(_data.species_pic(enemy), Gen2BattleScreenMap.ENEMY_SIDE)
-		_enemy_pixels_species = enemy
-	var player: int = int(_view.get("player_species", 0))
-	if player != _player_pixels_species:
-		_player_pixels = _padded_pic(_data.species_pic(player, true), Gen2BattleScreenMap.PLAYER_SIDE)
-		_player_pixels_species = player
+	var enemy_key: Array = [
+		int(_view.get("enemy_species", 0)), bool(_view.get("enemy_substitute", false)),
+	]
+	if enemy_key != _enemy_pixels_key:
+		_enemy_pixels = _substitute_pic(false) if bool(enemy_key[1]) \
+			else _padded_pic(_data.species_pic(int(enemy_key[0])), Gen2BattleScreenMap.ENEMY_SIDE)
+		_enemy_pixels_key = enemy_key
+	var player_key: Array = [
+		int(_view.get("player_species", 0)), bool(_view.get("player_substitute", false)),
+	]
+	if player_key != _player_pixels_key:
+		_player_pixels = _substitute_pic(true) if bool(player_key[1]) \
+			else _padded_pic(
+				_data.species_pic(int(player_key[0]), true), Gen2BattleScreenMap.PLAYER_SIDE
+			)
+		_player_pixels_key = player_key
+
+
+func _substitute_pic(player_side: bool) -> PackedByteArray:
+	return substitute_pixels(_data.overworld_sprite_indices(SUBSTITUTE_SPRITE), player_side)
+
+
+## `GetSubstitutePic`: a blank box with four tiles of [param strip], the monster
+## overworld sprite, copied into it. The doll wears whichever battler palette its
+## box sits in, since nothing writes one for it.
+##
+## Static because it is the whole of the picture and takes no screen: a check
+## sweeping three caches builds it the same way the renderer does.
+static func substitute_pixels(strip: PackedByteArray, player_side: bool) -> PackedByteArray:
+	var side: int = Gen2BattleScreenMap.PLAYER_SIDE if player_side \
+		else Gen2BattleScreenMap.ENEMY_SIDE
+	var box: int = side * TILE
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(box * box)
+
+	var first: int = int(SUBSTITUTE_FIRST_TILE[player_side])
+	# The strip is one tile row high, so its length is its width in pixels.
+	@warning_ignore("integer_division")
+	var width: int = strip.size() / TILE
+	if width < (first + 4) * TILE:
+		return out
+
+	var at: Vector2i = SUBSTITUTE_AT[player_side]
+	for tile: int in 4:
+		var left: int = (at.x + (tile & 1)) * TILE
+		var top: int = (at.y + (tile >> 1)) * TILE
+		var from_x: int = (first + tile) * TILE
+		for row: int in TILE:
+			var from: int = row * width + from_x
+			var to: int = (top + row) * box + left
+			for column: int in TILE:
+				out[to + column] = strip[from + column]
+	return out
 
 
 func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:

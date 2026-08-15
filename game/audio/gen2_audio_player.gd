@@ -168,6 +168,13 @@ func audio_status() -> Dictionary:
 
 func _exit_tree() -> void:
 	stop_all()
+	# Stopping the player is not enough to let go of its playback: the audio
+	# server holds one per stream, and only taking the stream off the player
+	# releases it. A headless tool that builds a world screen and exits reported
+	# one leaked `AudioStreamGeneratorPlayback` per screen without this.
+	if _player != null:
+		_player.stream = null
+	_generator = null
 
 
 func _is_music(request_kind: StringName) -> bool:

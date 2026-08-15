@@ -180,3 +180,80 @@ func test_the_view_carries_the_tilemap_and_the_palette_maps() -> void:
 		assert_eq(value, Gen2BattleAnimBackground.PALETTE_IDENTITY)
 	assert_true(bool(view["hud_visible"]))
 	assert_eq((view["anim_sprites"] as Array).size(), 0)
+
+
+## Which picture a battler's square is showing. The synthetic cache resolves no
+## animation script, so what is driven here is the `noanim` half: the two
+## commands the battle-scene option reaches instead of the SUBSTITUTE animation,
+## and the events that write the picture outside one.
+
+func _substitute_event(param: int, enemy_turn: bool = false) -> Dictionary:
+	return _animation_event({
+		"index": Gen2EffectCommands.SUBSTITUTE_MOVE, "param": param,
+		"after_anim": Gen2BattleAnimPlayer.AFTER_ANIM_NONE, "enemy_turn": enemy_turn,
+	})
+
+
+func _view() -> Dictionary:
+	return (_screen._renderer as Gen2BattleRenderer)._view
+
+
+func test_the_doll_is_drawn_and_taken_off_with_the_battle_scene_turned_off() -> void:
+	await _open_battle()
+	var options: Gen2Options = Gen2OptionsStore.current()
+	options.battle_scene = false
+	Gen2OptionsStore.save(options)
+
+	assert_false(bool(_view()["player_substitute"]))
+	_screen._begin_animation(_substitute_event(Gen2EffectCommands.SUBSTITUTE_ANIM_MADE))
+	_settle_animation()
+	assert_true(bool(_view()["player_substitute"]), "`.no_anim` calls RaiseSubNoAnim")
+	assert_false(bool(_view()["enemy_substitute"]), "the actor's square alone")
+
+	_screen._begin_animation(_substitute_event(Gen2EffectCommands.SUBSTITUTE_ANIM_DROP))
+	_settle_animation()
+	assert_false(bool(_view()["player_substitute"]))
+
+	_screen._begin_animation(_substitute_event(Gen2EffectCommands.SUBSTITUTE_ANIM_RAISE, true))
+	_settle_animation()
+	assert_true(bool(_view()["enemy_substitute"]))
+	assert_false(bool(_view()["player_substitute"]))
+
+
+func test_a_move_animation_with_the_scene_off_leaves_the_doll_alone() -> void:
+	await _open_battle()
+	var options: Gen2Options = Gen2OptionsStore.current()
+	options.battle_scene = false
+	Gen2OptionsStore.save(options)
+
+	_screen._apply_event({
+		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.PLAYER, "raised": true,
+	})
+	_screen._begin_animation(_animation_event())
+	_settle_animation()
+	assert_true(bool(_view()["player_substitute"]))
+
+
+func test_the_doll_comes_off_for_a_restored_user_picture() -> void:
+	await _open_battle()
+	# `AppearUserLowerSub`, which Fly and Dig reach: `LowerSubNoAnim` writes the
+	# user's own picture back before `AppearUser` stamps it into the map.
+	_screen._apply_event({
+		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.ENEMY, "raised": true,
+	})
+	assert_true(bool(_view()["enemy_substitute"]))
+	_screen._begin_animation(_animation_event({"restore_user_pic": true, "enemy_turn": true}))
+	_settle_animation()
+	assert_false(bool(_view()["enemy_substitute"]))
+
+
+func test_a_send_out_draws_a_picture_rather_than_the_doll_the_last_one_had() -> void:
+	await _open_battle()
+	_screen._apply_event({
+		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.PLAYER, "raised": true,
+	})
+	_screen._apply_event({
+		"type": Gen2Battle.SENT_OUT, "side": Gen2Battle.PLAYER, "species": 16,
+		"level": 5, "hp": 20, "max_hp": 20,
+	})
+	assert_false(bool(_view()["player_substitute"]))

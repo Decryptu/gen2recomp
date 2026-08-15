@@ -490,3 +490,63 @@ func test_the_text_box_is_scrolled_with_the_rest_of_the_background() -> void:
 
 	_settle_intro()
 	assert_true(box.raster_scx.is_empty())
+
+
+## `GetSubstitutePic`: the doll is four tiles of the monster overworld sprite in
+## an otherwise empty box, at columns 2 and 3 of both boxes and one row higher in
+## the player's. What it draws from a real cache is swept by
+## `tools/checks/battle_anims.gd`; the placement is arithmetic and is pinned
+## here, against a strip whose every pixel says which tile it came from.
+func test_the_doll_takes_four_tiles_of_the_monster_sprite_into_a_blank_box() -> void:
+	var strip: PackedByteArray = PackedByteArray()
+	strip.resize(12 * Gen2Font.TILE * Gen2Font.TILE)
+	for index: int in strip.size():
+		strip[index] = 1 + (index % (12 * Gen2Font.TILE)) / Gen2Font.TILE
+
+	for player_side: bool in [false, true]:
+		var side: int = Gen2BattleScreenMap.PLAYER_SIDE if player_side \
+			else Gen2BattleScreenMap.ENEMY_SIDE
+		var box: int = side * Gen2Font.TILE
+		var pixels: PackedByteArray = Gen2BattleRenderer.substitute_pixels(strip, player_side)
+		assert_eq(pixels.size(), box * box)
+
+		# The down-facing frame for the enemy's front picture, the up-facing one
+		# for the player's back picture, laid out in reading order.
+		var first: int = int(Gen2BattleRenderer.SUBSTITUTE_FIRST_TILE[player_side])
+		var at: Vector2i = Gen2BattleRenderer.SUBSTITUTE_AT[player_side]
+		var lit: int = 0
+		for y: int in box:
+			for x: int in box:
+				var value: int = int(pixels[y * box + x])
+				var cell: Vector2i = Vector2i(x, y) / Gen2Font.TILE - at
+				if cell.x < 0 or cell.x > 1 or cell.y < 0 or cell.y > 1:
+					assert_eq(value, 0, "outside the doll at %d,%d" % [x, y])
+					continue
+				lit += 1
+				assert_eq(value, 1 + first + cell.y * 2 + cell.x, "tile at %d,%d" % [x, y])
+		assert_eq(lit, 16 * 16)
+
+
+func test_the_doll_is_what_a_substituted_side_draws() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	_settle_intro()
+	var renderer: Gen2BattleRenderer = _battle_screen._renderer
+	var own: PackedByteArray = renderer._player_pixels.duplicate()
+
+	_battle_screen._apply_event({
+		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.PLAYER, "raised": true,
+	})
+	assert_ne(renderer._player_pixels, own, "the doll replaced the picture")
+	assert_eq(
+		renderer._player_pixels,
+		Gen2BattleRenderer.substitute_pixels(
+			_data.overworld_sprite_indices(Gen2BattleRenderer.SUBSTITUTE_SPRITE), true
+		)
+	)
+	assert_eq(renderer._enemy_pixels_key[1], false, "and only that side's")
+
+	_battle_screen._apply_event({
+		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.PLAYER, "raised": false,
+	})
+	assert_eq(renderer._player_pixels, own)

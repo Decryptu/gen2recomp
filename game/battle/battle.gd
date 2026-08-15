@@ -351,6 +351,13 @@ const SUBSTITUTE_TOO_WEAK: StringName = &"substitute_too_weak"
 const SUBSTITUTE_TOOK_DAMAGE: StringName = &"substitute_took_damage"
 const SUBSTITUTE_FADED: StringName = &"substitute_faded"
 
+## `BattleCommand_RaiseSubNoAnim` and `..._LowerSubNoAnim`: the doll put over a
+## battler's picture or taken off it with no animation and no frames, which is
+## what the two commands amount to once `WaitBGMap` is discounted. Carries `side`
+## and `raised`. Says nothing about the battle: it is the picture alone, which is
+## why an animated drop is the animation's own `anim_dropsub` instead.
+const SUBSTITUTE_PIC: StringName = &"substitute_pic"
+
 ## Leech Seed, on the Pokémon that was seeded rather than the one that seeded it.
 ## [constant LEECH_SEED_SAPPED] carries the healed side under `to`, `to_amount`,
 ## `to_hp` and `to_max_hp`, since one event moves health across the field.
