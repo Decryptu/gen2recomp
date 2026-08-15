@@ -1574,10 +1574,11 @@ const GOLD_SILVER: Dictionary = {
 	"overworld_sprite_palettes": 0xB8AE,
 	"overworld_icons": 0x8EABE,
 	"emotes": 0x143C1,
-	## ShakeHeadbuttTree's eight-tile sheet. CutTreeGFX and CutGrassGFX follow it
-	## in the same bank; neither is imported because nothing draws Cut's own
-	## animation yet.
+	## The three sheets engine/events/field_moves.asm loads by name.
+	## CutGrassGFX follows CutTreeGFX, so one wrong offset shows on both.
 	"headbutt_tree_gfx": 0x8CB0B,
+	"cut_tree_gfx": 0x8CC04,
+	"cut_grass_gfx": 0x8CC44,
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
@@ -1888,6 +1889,8 @@ const CRYSTAL: Dictionary = {
 	"overworld_icons": 0x8EC0D,
 	"emotes": 0x1444D,
 	"headbutt_tree_gfx": 0x8C893,
+	"cut_tree_gfx": 0x8C98C,
+	"cut_grass_gfx": 0x8C9CC,
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,

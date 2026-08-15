@@ -10,20 +10,25 @@ extends SceneTree
 ## tree. That mode drives the screen's own path and needs a display, so it runs
 ## without `--headless`:
 ##
-##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/effects.png live 6 10
+##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y]
 ##
-## The two optional numbers are the cell the player stands on, which is how the
-## grass a standing object is drawn behind is photographed.
+## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree) or
+## `cut` (`OWCutAnimation`'s two halves and the jump shadow). The two numbers are
+## the cell the player stands on, which is how the grass a standing object is
+## drawn behind is photographed.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## Hardware frames spent after the sprites are staged. Two puts the grass rustle
 ## on its first facing and the boulder dust on its second, so every one of them
-## is up and none is on the frame it was spawned.
+## is up and none is on the frame it was spawned. Cut needs more: its tree stands
+## for three frames before it splits, and its leaves open on top of each other.
 const STAGED_FRAMES: int = 2
+const STAGED_FRAMES_CUT: int = 12
 
 var _screen: Gen2WorldScreen = null
 var _output_path: String = ""
 var _frames: int = 0
+var _kind: StringName = &"effects"
 
 
 func _initialize() -> void:
@@ -40,9 +45,10 @@ func _initialize() -> void:
 			quit(1)
 			return
 		_output_path = args[3]
+		_kind = StringName(args[5]) if args.size() >= 6 else &"effects"
 		_build_live(
 			data, int(args[1]), int(args[2]),
-			Vector2i(int(args[5]), int(args[6])) if args.size() >= 7 else Vector2i(-1, -1),
+			Vector2i(int(args[6]), int(args[7])) if args.size() >= 8 else Vector2i(-1, -1),
 		)
 		return
 	var map: Gen2WorldMap = data.world_map(int(args[1]), int(args[2])) if data != null else null
@@ -97,8 +103,8 @@ func _process(_delta: float) -> bool:
 		return false
 	_frames += 1
 	if _frames == 2:
-		_screen.preview_effect_sprites()
-		for _frame: int in STAGED_FRAMES:
+		_screen.preview_effect_sprites(_kind)
+		for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
 			_screen.advance_frame()
 	if _frames < 18:
 		return false

@@ -7,9 +7,9 @@ extends RefCounted
 ##
 ## Two shapes live here. `ShakeScreen` is one packed byte of duration and
 ## amplitude. The rest are the sprites the engine draws over the map rather than
-## as map objects: `SpawnStrengthBoulderDust`, `ShakeGrass` and
-## `ShakeHeadbuttTree`, each its own frameset over one of the sheets
-## GameData.overworld_effect() holds.
+## as map objects: `SpawnStrengthBoulderDust`, `ShakeGrass`, `ShakeHeadbuttTree`,
+## `OWCutAnimation` and `SpawnShadow`, each its own frameset over one of the
+## sheets GameData.overworld_effect() holds.
 
 var _frame: int = 0
 var _duration: int = 0
@@ -18,10 +18,13 @@ var _kind: StringName = &"none"
 var _source: Dictionary = {}
 var _sprites: Array = []
 
-## The three effect sprites, by the sheet each draws from.
+## The effect sprites, each named for the sheet it draws from.
 const SPRITE_BOULDER_DUST: StringName = &"boulder_dust"
 const SPRITE_GRASS_RUSTLE: StringName = &"grass_rustle"
 const SPRITE_HEADBUTT_TREE: StringName = &"headbutt_tree"
+const SPRITE_CUT_TREE: StringName = &"cut_tree"
+const SPRITE_CUT_LEAF: StringName = &"cut_grass"
+const SPRITE_SHADOW: StringName = &"shadow"
 
 ## constants/sprite_data_constants.asm. Every emote-object spawn names its
 ## palette: PAL_OW_EMOTE for the dust and the emote bubbles, PAL_OW_TREE for the
@@ -29,8 +32,64 @@ const SPRITE_HEADBUTT_TREE: StringName = &"headbutt_tree"
 const PAL_OW_EMOTE: int = 5
 const PAL_OW_TREE: int = 6
 
-## ShakeHeadbuttTree's `ld a, 32 / ld [wFrameCounter], a`.
+## ShakeHeadbuttTree's `ld a, 32 / ld [wFrameCounter], a`, and OWCutAnimation's
+## own, which both branches of its jumptable write.
 const HEADBUTT_TREE_FRAMES: int = 32
+const CUT_FRAMES: int = 32
+
+## `.Frameset_CutTree`, as [first frame, tile offsets] pairs. `oamframe X, n`
+## lasts n + 1 frames and `oamwait n` draws nothing for n + 1, which is what puts
+## the two gaps in: the tree stands for three frames, splits for seventeen, and
+## then its halves slide apart in two steps of two. `oamdelete` ends it four
+## frames before the counter does.
+const CUT_TREE_STEPS: Array = [
+	[0, [Vector2i(0, 0), Vector2i(8, 0), Vector2i(0, 8), Vector2i(8, 8)]],
+	[3, [Vector2i(-2, 0), Vector2i(10, 0), Vector2i(-2, 8), Vector2i(10, 8)]],
+	[20, []],
+	[22, [Vector2i(-4, 0), Vector2i(12, 0), Vector2i(-4, 8), Vector2i(12, 8)]],
+	[24, []],
+	[26, [Vector2i(-8, 0), Vector2i(16, 0), Vector2i(-8, 8), Vector2i(16, 8)]],
+	[28, []],
+]
+
+## `Cut_GetLeafSpawnCoords`, as pixel offsets from where the player is drawn.
+## Its own table is screen coordinates, indexed by the facing and then by which
+## quarter of the block the player stands in, because Cut clears the whole block
+## and the leaves are spawned over it. Order is the source's: DOWN, UP, LEFT,
+## RIGHT, each with top-left, top-right, bottom-left, bottom-right.
+const CUT_LEAF_ORIGINS: Array[Vector2i] = [
+	Vector2i(16, 16), Vector2i(0, 16), Vector2i(16, 32), Vector2i(0, 32),
+	Vector2i(16, -16), Vector2i(0, -16), Vector2i(16, 0), Vector2i(0, 0),
+	Vector2i(-16, 16), Vector2i(0, 16), Vector2i(-16, 0), Vector2i(0, 0),
+	Vector2i(16, 16), Vector2i(32, 16), Vector2i(16, 0), Vector2i(32, 0),
+]
+
+## `Cut_SpawnAnimateLeaves` spawns four leaves an eighth of a turn apart, and
+## `SpriteAnimFunc_CutLeaves` steps each angle by three a frame while the radius
+## it is multiplied by grows by half a pixel.
+const CUT_LEAF_ANGLES: Array[int] = [0x00, 0x10, 0x20, 0x30]
+const CUT_LEAF_ANGLE_STEP: int = 3
+const CUT_LEAF_RADIUS_STEP: int = 0x80
+## `.OAMData_Leaf`'s single `dbsprite -1, -1, 4, 4`.
+const CUT_LEAF_OFFSET := Vector2i(-4, -4)
+
+## The rod tile `FacingFishDown` and its three siblings add to the player's own
+## four, in Gen2WorldSprite's DOWN, UP, LEFT, RIGHT order: offset, which of the
+## two rod tiles, and whether it is mirrored. The player picture itself is the
+## standing one, so the rod is the whole difference.
+const FISHING_ROD_TILES: Array = [
+	{"offset": Vector2i(0, 16), "tile": 0, "flip_x": false},
+	{"offset": Vector2i(0, -8), "tile": 0, "flip_x": false},
+	{"offset": Vector2i(-8, 5), "tile": 1, "flip_x": true},
+	{"offset": Vector2i(16, 5), "tile": 1, "flip_x": false},
+]
+
+
+## `MovementFunction_Shadow`: y offset 14 along the axis the jump is on and 12
+## across it, x offset zero, in the source's DOWN, UP, LEFT, RIGHT order.
+const SHADOW_OFFSETS: Array[Vector2i] = [
+	Vector2i(0, 14), Vector2i(0, 14), Vector2i(0, 12), Vector2i(0, 12),
+]
 
 ## `MovementFunction_BoulderDust`'s `.dust_coords`, indexed by the boulder's own
 ## walking direction in the source's DOWN, UP, LEFT, RIGHT order.
@@ -60,6 +119,57 @@ func start_headbutt_tree(cell: Vector2i) -> void:
 		"palette": PAL_OW_TREE,
 		"frame": 0,
 		"duration": HEADBUTT_TREE_FRAMES,
+	})
+
+
+## `OWCutAnimation`, over the cell the block being cut is faced from. Index 0 is
+## the splitting tree and index 1 the four leaves (`Gen2WorldFieldMove`'s
+## ANIMATION_TREE and ANIMATION_GRASS), which is the byte
+## `CheckOverworldTileArrays` returns beside the replacement block.
+##
+## [param player_cell] is where the player stands, which is what picks the
+## leaves' own corner of the block.
+func start_cut(
+	cell: Vector2i, animation: int, direction: Vector2i, player_cell: Vector2i
+) -> void:
+	if animation == 0:
+		_sprites.append({
+			"kind": SPRITE_CUT_TREE,
+			"cell": cell,
+			"object_index": -2,
+			"palette": PAL_OW_TREE,
+			"frame": 0,
+			"duration": CUT_FRAMES,
+		})
+		return
+	var origin: Vector2i = CUT_LEAF_ORIGINS[
+		_direction_index(direction) * 4 + (player_cell.x & 1) + (player_cell.y & 1) * 2
+	]
+	for angle: int in CUT_LEAF_ANGLES:
+		_sprites.append({
+			"kind": SPRITE_CUT_LEAF,
+			"cell": cell,
+			"object_index": -1,
+			"palette": PAL_OW_TREE,
+			"frame": 0,
+			"duration": CUT_FRAMES,
+			"origin": origin,
+			"angle": angle,
+		})
+
+
+## `SpawnShadow`, under a jumping object for twice the jump it was spawned in.
+## Tracks whoever is jumping, and sits below them because the jump is an offset
+## on the sprite alone.
+func start_jump_shadow(object_index: int, cell: Vector2i, direction: Vector2i, step_frames: int) -> void:
+	_sprites.append({
+		"kind": SPRITE_SHADOW,
+		"cell": cell,
+		"object_index": object_index,
+		"palette": PAL_OW_EMOTE,
+		"frame": 0,
+		"duration": (int(float(maxi(0, step_frames)) / 2.0) + 1) * 2,
+		"direction": _direction_index(direction),
 	})
 
 
@@ -184,7 +294,7 @@ func snapshot() -> Dictionary:
 
 ## One sprite's tiles this frame: [{ offset, tile, flip_x }], where `tile` is an
 ## index into the sheet the kind names.
-static func _tiles_for(sprite: Dictionary) -> Array:
+func _tiles_for(sprite: Dictionary) -> Array:
 	var frame: int = int(sprite["frame"])
 	match StringName(sprite["kind"]):
 		SPRITE_HEADBUTT_TREE:
@@ -215,6 +325,39 @@ static func _tiles_for(sprite: Dictionary) -> Array:
 				{"offset": Vector2i(-1, 9), "tile": 0, "flip_x": false},
 				{"offset": Vector2i(9, 9), "tile": 0, "flip_x": true},
 			]
+		SPRITE_CUT_TREE:
+			## The frameset's own steps, held until the next one starts and gone
+			## once `oamdelete` is reached.
+			var tree: Array = []
+			for step: Array in CUT_TREE_STEPS:
+				if frame < int(step[0]):
+					break
+				tree = step[1]
+			var cut: Array = []
+			for index: int in tree.size():
+				cut.append({"offset": tree[index], "tile": index, "flip_x": false})
+			return cut
+		SPRITE_CUT_LEAF:
+			## `SpriteAnimFunc_CutLeaves`: the leaf sits on a circle whose angle
+			## steps by three a frame and whose radius is the high byte of a
+			## sixteen-bit accumulator growing by $80, so it widens every second
+			## frame. `AnimSeqs_Sine` is the y offset and `AnimSeqs_Cosine` the x.
+			var radius: int = int(float(frame * CUT_LEAF_RADIUS_STEP) / 256.0)
+			var angle: int = (int(sprite["angle"]) + frame * CUT_LEAF_ANGLE_STEP) & 0xFF
+			return [{
+				"offset": (sprite["origin"] as Vector2i) + CUT_LEAF_OFFSET + Vector2i(
+					_signed(_cosine(angle, radius)), _signed(_sine(angle, radius))
+				),
+				"tile": 0,
+				"flip_x": false,
+			}]
+		SPRITE_SHADOW:
+			## `FacingShadow`: one tile drawn twice, the second mirrored.
+			var at: Vector2i = SHADOW_OFFSETS[int(sprite.get("direction", 0))]
+			return [
+				{"offset": at, "tile": 0, "flip_x": false},
+				{"offset": at + Vector2i(8, 0), "tile": 0, "flip_x": true},
+			]
 		SPRITE_BOULDER_DUST:
 			## `SetFacingBoulderDust` swaps FACING_BOULDER_DUST_1 and _2 on bit 1
 			## of the step frame, and each draws its one tile four times in a
@@ -230,6 +373,35 @@ static func _tiles_for(sprite: Dictionary) -> Array:
 				})
 			return dust
 	return []
+
+
+## `BattleAnim_Sine` and `..._Cosine` over `BattleAnimSineWave`, which is what
+## `AnimSeqs_Sine` reaches. The table is cartridge data rather than a derivation
+## (entry 16 is $0100), so a caller with no cache draws no leaves rather than
+## drawing them on a table of its own.
+var _sine_table: Gen2BattleAnimData = null
+
+
+## Hands this the sine table the cut leaves ride on. Called once by the screen
+## that owns the effects; nothing else here needs a cache.
+func set_sine_table(sine: Gen2BattleAnimData) -> void:
+	_sine_table = sine
+
+
+func _sine(angle: int, amplitude: int) -> int:
+	return Gen2BattleAnimFunctions.sine_of(_sine_table, angle, amplitude) \
+		if _sine_table != null else 0
+
+
+func _cosine(angle: int, amplitude: int) -> int:
+	return Gen2BattleAnimFunctions.cosine_of(_sine_table, angle, amplitude) \
+		if _sine_table != null else 0
+
+
+## A sprite offset is a byte the cartridge adds; a renderer drawing at a signed
+## pixel needs the same byte read as a two's complement offset.
+static func _signed(value: int) -> int:
+	return value - 0x100 if value >= 0x80 else value
 
 
 ## The source's DOWN, UP, LEFT, RIGHT order, which is what `.dust_coords` is

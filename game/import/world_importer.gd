@@ -482,10 +482,23 @@ const EMOTE_TILE_LAYOUT: Array = [
 	[1, 0xFC], [2, 0xFC], [2, 0xFE], [1, 0xFE],
 ]
 
-## HeadbuttTreeGFX's first tile row. The sheet has no table to pin it, and a
-## wrong offset in this bank decodes the routine beside it as art.
-const HEADBUTT_TREE_TILES: int = 8
-const HEADBUTT_TREE_SIGNATURE: Array = [0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x07, 0x04]
+## The three sheets `engine/events/field_moves.asm` loads by name rather than
+## through a table: name, layout key, tiles, the tile they are loaded to, and the
+## first tile row each one starts with. None has a table to pin it, and a wrong
+## offset in this bank decodes the routine beside it as legal-looking art, so the
+## signature is the check. CutTreeGFX and CutGrassGFX are adjacent, which is what
+## makes one wrong offset show up on two sheets.
+const FIELD_MOVE_SHEETS: Array = [
+	## FIELDMOVE_TREE, which ShakeHeadbuttTree and Cut_SpawnAnimateTree write
+	## into the struct's own tile field rather than reading from a table.
+	["headbutt_tree", "headbutt_tree_gfx", 8, 0x84,
+		[0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x07, 0x04]],
+	["cut_tree", "cut_tree_gfx", 4, 0x84,
+		[0x00, 0x00, 0x00, 0x00, 0x28, 0x28, 0x54, 0x7C]],
+	## FIELDMOVE_GRASS, the leaves' own tile.
+	["cut_grass", "cut_grass_gfx", 4, 0x80,
+		[0x00, 0x00, 0x3C, 0x3C, 0x7E, 0x42, 0xE3, 0x9D]],
+]
 
 static func _read_overworld_effects(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var table: int = int(layout.get("emotes", -1))
@@ -520,25 +533,26 @@ static func _read_overworld_effects(rom: RomFile, layout: Dictionary) -> Diction
 			"bytes": Array(pixels),
 		})
 
-	var headbutt: int = int(layout.get("headbutt_tree_gfx", -1))
-	var headbutt_bytes: int = HEADBUTT_TREE_TILES * Gen2Tiles.TILE_BYTES
-	if not rom.in_bounds(headbutt, headbutt_bytes):
-		return _error("Headbutt tree graphics are outside the cartridge.")
-	if Array(rom.slice(headbutt, HEADBUTT_TREE_SIGNATURE.size())) != HEADBUTT_TREE_SIGNATURE:
-		return _error("Headbutt tree graphics do not start with the sheet's first row.")
-	var headbutt_pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
-		rom.slice(headbutt, headbutt_bytes), 0, HEADBUTT_TREE_TILES
-	)
-	if headbutt_pixels.size() != HEADBUTT_TREE_TILES * Gen2Tiles.TILE_PIXELS:
-		return _error("Headbutt tree graphics did not decode.")
-	effects.append({
-		"name": "headbutt_tree",
-		"tiles": HEADBUTT_TREE_TILES,
-		## FIELDMOVE_TREE, which ShakeHeadbuttTree writes into the struct's own
-		## tile field rather than reading from a table.
-		"vtile": 0x84,
-		"bytes": Array(headbutt_pixels),
-	})
+	for sheet: Array in FIELD_MOVE_SHEETS:
+		var name: String = String(sheet[0])
+		var offset: int = int(layout.get(String(sheet[1]), -1))
+		var sheet_tiles: int = int(sheet[2])
+		var signature: Array = sheet[4]
+		if not rom.in_bounds(offset, sheet_tiles * Gen2Tiles.TILE_BYTES):
+			return _error("%s graphics are outside the cartridge." % name)
+		if Array(rom.slice(offset, signature.size())) != signature:
+			return _error("%s graphics do not start with the sheet's first row." % name)
+		var sheet_pixels: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+			rom.slice(offset, sheet_tiles * Gen2Tiles.TILE_BYTES), 0, sheet_tiles
+		)
+		if sheet_pixels.size() != sheet_tiles * Gen2Tiles.TILE_PIXELS:
+			return _error("%s graphics did not decode." % name)
+		effects.append({
+			"name": name,
+			"tiles": sheet_tiles,
+			"vtile": int(sheet[3]),
+			"bytes": Array(sheet_pixels),
+		})
 	return {"ok": true, "effects": effects}
 
 
