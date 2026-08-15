@@ -151,6 +151,37 @@ func test_item_with_no_effect_is_not_consumed() -> void:
 	assert_eq(_world.state.item_quantity(0x09), before_quantity)
 
 
+## `_SacredAsh`: `CheckAnyFaintedMon` first, and then `SacredAshScript`'s
+## `special HealParty`, which is the whole party rather than the fainted half.
+func test_sacred_ash_heals_the_whole_party_once_one_member_has_fainted() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x9C: 1}})
+	_save.party[0].hp = 0
+	_save.party[1].hp = 1
+	_save.party[1].status = Gen2Status.POISON
+	_save.party[1].pp[0] = 0
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x9C, -1, false)
+
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["effect"], &"sacred_ash")
+	assert_eq(_world.state.item_quantity(0x9C), 0)
+	for index: int in 2:
+		var mon: Gen2SaveMon = _save.party[index]
+		assert_eq(mon.hp, Gen2SaveBattleAdapter.to_battle_mon(_data, mon).max_hp())
+		assert_eq(mon.status, Gen2Status.NONE)
+	assert_eq(
+		_save.party[1].pp[0], int(_data.move(int(_save.party[1].moves[0])).get("pp", 0))
+	)
+
+
+func test_sacred_ash_is_refused_and_kept_while_nothing_has_fainted() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x9C: 1}})
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x9C, -1, false)
+	assert_false(result["ok"])
+	assert_eq(StringName(result["reason"]), &"item_has_no_effect")
+	assert_eq(_world.state.item_quantity(0x9C), 1)
+
+
 func test_moon_stone_evolves_a_party_member_and_consumes_the_item() -> void:
 	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 1, 5)
 	source.hp = maxi(source.max_hp() - 3, 1)

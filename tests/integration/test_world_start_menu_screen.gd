@@ -7,6 +7,12 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
 ## `ITEM_REPEL`, whose effect `UseItem` keys on the item number for.
 const REPEL: int = 0x14
+## ITEMMENU_CLOSE rows at their real numbers: two `.Field` runs here and one it
+## does not, which is what says the pack quits on the effect rather than on the
+## menu nibble.
+const ITEMFINDER: int = 0x37
+const CARD_KEY: int = 0x7F
+const OLD_ROD: int = Gen2WorldInventory.ITEM_OLD_ROD
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -50,6 +56,21 @@ func _write_pack_item() -> void:
 				raw["pocket"] = Gen2WorldPack.TYPE_ITEM
 				raw["permissions"] = 0
 				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CURRENT
+			ITEMFINDER:
+				raw["name"] = "ITEMFINDER"
+				raw["pocket"] = Gen2WorldPack.TYPE_KEY_ITEM
+				raw["permissions"] = Gen2WorldPack.CANT_TOSS
+				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CLOSE
+			OLD_ROD:
+				raw["name"] = "OLD ROD"
+				raw["pocket"] = Gen2WorldPack.TYPE_KEY_ITEM
+				raw["permissions"] = Gen2WorldPack.CANT_TOSS
+				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CLOSE
+			CARD_KEY:
+				raw["name"] = "CARD KEY"
+				raw["pocket"] = Gen2WorldPack.TYPE_KEY_ITEM
+				raw["permissions"] = Gen2WorldPack.CANT_TOSS
+				raw["field_menu"] = Gen2WorldPack.ITEMMENU_CLOSE
 	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
 
 
@@ -253,14 +274,90 @@ func test_tossing_the_last_of_a_stack_empties_the_pocket() -> void:
 	assert_eq((host.get("_pack_pockets")[0] as Dictionary)["items"], [])
 
 
-## Opens the pack on the items pocket with the cursor on the granted POTION.
-func _open_pack() -> Gen2StartMenuScreen:
+## `.Field`: `DoItemEffect` runs in the overworld and `PACKSTATE_QUITRUNSCRIPT`
+## closes the pack behind it, so the Itemfinder's answer is in the world's own
+## text box rather than in the pack's result line. A key item is not consumed.
+func test_a_field_item_closes_the_pack_and_answers_in_the_world() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {ITEMFINDER: 1}})
+	var scripts: Dictionary = RomCache.read_json(
+		RomCache.world_scripts_path(Fixture.directory())
+	)
+	scripts["48:61C0"] = [30, 0, 7, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_world_screen._world.current_map.events["bg_events"] = [
+		{"x": 7, "y": 5, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x61C0},
+	]
+	var host: Gen2StartMenuScreen = await _open_pack(Gen2WorldPack.TYPE_KEY_ITEM)
+
+	_choose_action(host, Gen2WorldPack.ACTION_USE)
+	await get_tree().process_frame
+
+	assert_null(_world_screen._start_menu_host, "the pack quit")
+	assert_true(_world_screen.get("_field_move_text"))
+	assert_eq(_world_screen._world.state.item_quantity(ITEMFINDER), 1)
+
+
+## `UseRod`: the rod the pack chose is the one `FishFunction` casts, and a cast
+## it would refuse is `.FailFish`, which is `.Oak` with the pack still open.
+func test_a_rod_casts_from_the_pack_and_is_refused_away_from_water() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {OLD_ROD: 1}})
+
+	var away: Gen2StartMenuScreen = await _open_pack(Gen2WorldPack.TYPE_KEY_ITEM)
+	_choose_action(away, Gen2WorldPack.ACTION_USE)
+	await get_tree().process_frame
+	assert_not_null(_world_screen._start_menu_host, "no water in front of the player")
+	assert_eq(away.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	away.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	_world_screen._start_menu_host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+
+	_world_screen._position_for_fishing_preview()
+	var host: Gen2StartMenuScreen = await _open_pack(Gen2WorldPack.TYPE_KEY_ITEM)
+	_choose_action(host, Gen2WorldPack.ACTION_USE)
+	await get_tree().process_frame
+
+	assert_null(_world_screen._start_menu_host, "the pack quit")
+	assert_true(_world_screen._world.fishing_busy())
+	assert_eq(
+		_world_screen.get("_selected_rod"), Gen2WorldEncounter.METHOD_OLD_ROD
+	)
+
+
+## An ITEMMENU_CLOSE row whose effect this project has no overworld for leaves
+## `wItemEffectSucceeded` clear, which is `.Oak` with every other refusal and a
+## pack still open behind it.
+func test_a_field_item_with_no_effect_stays_in_the_pack_on_oaks_refusal() -> void:
+	await _open_world()
+	_world_screen._world.state.apply_changes({}, {}, {"items": {CARD_KEY: 1}})
+	var host: Gen2StartMenuScreen = await _open_pack(Gen2WorldPack.TYPE_KEY_ITEM)
+
+	_choose_action(host, Gen2WorldPack.ACTION_USE)
+	await get_tree().process_frame
+
+	assert_not_null(_world_screen._start_menu_host)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(
+		String(host.get("_pack_result")), host._pack_text(Gen2StartMenuScreen.TEXT_OAK)
+	)
+
+
+## Opens the pack on [param pocket], cursor on its first row, which for the
+## default items pocket is the granted POTION.
+func _open_pack(pocket: int = Gen2WorldPack.TYPE_ITEM) -> Gen2StartMenuScreen:
 	_world_screen._open_start_menu()
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	_select(host, Gen2WorldStartMenu.ITEM_PACK)
 	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
+	var guard: int = host.get("_pack_pockets").size()
+	while int(host.get("_pack_pockets")[host.get("_pack_pocket_index")]["pocket"]) != pocket \
+		and guard > 0:
+		host.handle_button(Gen2Button.RIGHT)
+		guard -= 1
 	return host
 
 

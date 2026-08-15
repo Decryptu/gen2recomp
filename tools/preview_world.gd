@@ -12,10 +12,11 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y]
 ##
-## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree) or
-## `cut` (`OWCutAnimation`'s two halves and the jump shadow). The two numbers are
-## the cell the player stands on, which is how the grass a standing object is
-## drawn behind is photographed.
+## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
+## `cut` (`OWCutAnimation`'s two halves and the jump shadow) or `field_item` (the
+## pack's own USE on the Itemfinder, which closes the pack over the world's
+## answer). The two numbers are the cell the player stands on, which is how the
+## grass a standing object is drawn behind is photographed.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## Hardware frames spent after the sprites are staged. Two puts the grass rustle
@@ -103,7 +104,10 @@ func _process(_delta: float) -> bool:
 		return false
 	_frames += 1
 	if _frames == 2:
-		_screen.preview_effect_sprites(_kind)
+		if _kind == &"field_item":
+			_screen.preview_field_item()
+		else:
+			_screen.preview_effect_sprites(_kind)
 		for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
 			_screen.advance_frame()
 	if _frames < 18:

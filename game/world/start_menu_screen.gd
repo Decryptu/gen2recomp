@@ -16,6 +16,11 @@ extends Control
 signal action_chosen(kind: StringName)
 ## Emitted on Exit or cancel from the top-level list.
 signal closed
+## `.Field`'s PACKSTATE_QUITRUNSCRIPT: an ITEMMENU_CLOSE item whose effect
+## succeeded, so the pack quits and the overworld runs what the effect queued.
+## The payload is the resolved effect, because the screen hosting the world is
+## the one that can cast a rod or draw a warp.
+signal field_item_used(request: Dictionary)
 
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
@@ -822,10 +827,10 @@ func _confirm_give_swap() -> void:
 
 
 ## `UseItem`'s jumptable: `.Oak` refuses, `.Current` and `.Field` apply straight
-## away, and `.Party` asks which Pokemon first. `.Field`'s extra
-## `PACKSTATE_QUITRUNSCRIPT` on success has no counterpart yet, because no
-## `ITEMMENU_CLOSE` item has an effect here: Escape Rope and Dig need the spawn
-## warp, so every one of them reaches `.Oak`'s refusal instead.
+## away, and `.Party` asks which Pokemon first. `.Field` runs the effect here and
+## quits the pack only when it succeeded, which is `wItemEffectSucceeded`; a CLOSE
+## item this project has no effect for leaves the byte clear and lands on `.Oak`
+## with every other refusal.
 func _confirm_use() -> void:
 	var item: Dictionary = _selected_item()
 	if item.is_empty():
@@ -842,10 +847,65 @@ func _confirm_use() -> void:
 				_show_pack_result(_pack_text(TEXT_NO_MON), false)
 				return
 			_open_target_mode()
-		Gen2WorldPack.ITEMMENU_CURRENT, Gen2WorldPack.ITEMMENU_CLOSE:
+		Gen2WorldPack.ITEMMENU_CURRENT:
 			_use_selected_item(-1)
+		Gen2WorldPack.ITEMMENU_CLOSE:
+			_use_field_item(number)
 		_:
 			_show_pack_result(_pack_text(TEXT_OAK), false)
+
+
+## `.Field`: `DoItemEffect` and then `wItemEffectSucceeded`. The effects that run
+## in the overworld are resolved here and reported to the host, which is what
+## `QueueScript` is on the cartridge; the pack itself only decides whether to
+## quit.
+func _use_field_item(item: int) -> void:
+	var request: Dictionary = _resolve_field_item(item) if _world != null else {}
+	if not bool(request.get("ok", false)):
+		## `.Field` says `.Oak` and `UseRegisteredItem`'s `.Overworld`
+		## `CantUseItem`, which is the one thing the two jumptables disagree on.
+		_show_pack_result(_use_refusal(&"item_effect_failed", item), false)
+		return
+	field_item_used.emit(request)
+
+
+## One `ItemEffects` entry each, in the order `Gen2WorldPack.FIELD_EFFECTS` names
+## them. A failure is `.Oak`, whatever the effect's own reason was: the source
+## reads one byte and cannot tell them apart either.
+func _resolve_field_item(item: int) -> Dictionary:
+	var effect: StringName = Gen2WorldPack.field_effect(_data, item)
+	var request: Dictionary = {"ok": true, "effect": effect, "item": item}
+	match effect:
+		Gen2WorldPack.FIELD_EFFECT_ESCAPE_ROPE:
+			var escaped: Dictionary = _world.escape_rope_request()
+			if not bool(escaped.get("ok", false)):
+				return {"ok": false}
+			## `UseDisposableItem`, which only the succeeding half reaches. The
+			## row was chosen out of the pack, so the pocket holds at least one.
+			if _world.inventory != null:
+				_world.inventory.change_item_quantity(item, -1)
+			request["warp"] = escaped
+		Gen2WorldPack.FIELD_EFFECT_ROD:
+			var rod: StringName = Gen2WorldInventory.rod_for_item(item)
+			if not bool(_world.fishing_check(rod).get("ok", false)):
+				return {"ok": false}
+			request["rod"] = rod
+		Gen2WorldPack.FIELD_EFFECT_ITEMFINDER:
+			request["found"] = _world.hidden_item_nearby()
+		Gen2WorldPack.FIELD_EFFECT_COIN_CASE:
+			request["coins"] = _world.state.coins() if _world.state != null else 0
+		Gen2WorldPack.FIELD_EFFECT_SACRED_ASH:
+			if _pack_save == null:
+				return {"ok": false}
+			var used: Dictionary = Gen2WorldPartyHost.use_item(
+				_world, _pack_save, item, -1, _pack_persist
+			)
+			if not bool(used.get("ok", false)):
+				return {"ok": false}
+			request["healed"] = int(used.get("healed", 0))
+		_:
+			return {"ok": false}
+	return request
 
 
 ## `.Party`'s party list. Reads the same save the USE will be applied to, so a
@@ -1124,13 +1184,15 @@ func _use_summary(item: Dictionary, result: Dictionary) -> String:
 func _use_refusal(reason: StringName, item: int) -> String:
 	if _using_registered:
 		return Gen2WorldPack.cant_use_text()
+	## `.Field` reads one byte and says `.Oak` for every way an effect can fail,
+	## so a CLOSE item is answered before the reasons `.Party`'s own effects give.
+	if Gen2WorldPack.field_use_kind(_data, item) == Gen2WorldPack.ITEMMENU_CLOSE:
+		return _pack_text(TEXT_OAK)
 	match reason:
 		&"item_has_no_effect":
 			return "It won't have any effect."
 		&"insufficient_item_quantity":
 			return "You have none of those."
-	if Gen2WorldPack.field_use_kind(_data, item) == Gen2WorldPack.ITEMMENU_CLOSE:
-		return _pack_text(TEXT_OAK)
 	return "Can't use that here: %s" % String(reason)
 
 
