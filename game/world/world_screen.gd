@@ -225,6 +225,9 @@ func _build_world() -> void:
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
 	_effects = Gen2WorldEffects.new()
+	## The cut leaves ride BattleAnimSineWave, which is cartridge data rather
+	## than a table this could derive.
+	_effects.set_sine_table(Gen2BattleAnimData.from_game_data(_data))
 	_world.set_world_clock(initial_day, initial_hour, initial_minute)
 	_world.set_object_time(initial_hour, time_of_day)
 	var rods: Array[StringName] = _world.available_fishing_rods()
@@ -812,6 +815,13 @@ func move_player(direction: Vector2i) -> bool:
 func _after_player_move(movement: Dictionary) -> bool:
 	if movement.get("kind", &"") == &"ledge_hop":
 		_play_ledge_hop_sfx()
+		if _effects != null:
+			## `JumpStep` spawns the shadow where the hop starts, and it tracks
+			## the player over both cells of it.
+			_effects.start_jump_shadow(
+				-1, _world.player_cell, _world.facing_direction(),
+				Gen2WorldAPI.STEP_FRAMES_HOP,
+			)
 	## .ExitWater calls PlayMapMusic before the step, which is what drops the
 	## surfing track once the player is walking again.
 	if movement.get("kind", &"") == &"exit_water":
@@ -981,12 +991,27 @@ func _update_time_of_day() -> void:
 		_renderer.set_time_of_day(_render_time_of_day())
 
 
-## Public screenshot driver for every sprite the engine draws over an object
-## rather than as one: the scripted emote, `SpawnStrengthBoulderDust`,
-## `ShakeGrass` and `ShakeHeadbuttTree`. Each is started through the call the
-## game makes, so this photographs the renderer's own path.
-func preview_effect_sprites() -> void:
+## Public screenshot driver for the sprites the engine draws over an object
+## rather than as one. `effects` is the scripted emote, `SpawnStrengthBoulderDust`,
+## `ShakeGrass` and `ShakeHeadbuttTree`; `cut` is `OWCutAnimation`'s two halves
+## and the jump shadow. Each is started through the call the game makes, so this
+## photographs the renderer's own path.
+func preview_effect_sprites(kind: StringName = &"effects") -> void:
 	if _world == null or _renderer == null:
+		return
+	if kind == &"cut":
+		if _effects != null:
+			## Both halves of `OWCutAnimation` at once, over the cell Cut would
+			## clear, plus the shadow `JumpStep` spawns under a ledge hop.
+			_effects.start_cut(_world.facing_cell(), 0, _world.facing_direction(), _world.player_cell)
+			_effects.start_cut(_world.facing_cell(), 1, _world.facing_direction(), _world.player_cell)
+			_effects.start_jump_shadow(
+				-1, _world.player_cell, _world.facing_direction(),
+				Gen2WorldAPI.STEP_FRAMES_HOP,
+			)
+		_script_prompt = "Debug cut animation preview"
+		_renderer.refresh()
+		_refresh_labels()
 		return
 	if _effects != null:
 		_effects.start_headbutt_tree(_world.player_cell + Vector2i(1, 0))
@@ -2369,7 +2394,16 @@ func _commit_field_move(applied: Dictionary, label: String) -> void:
 			&"rock_smash_applied":
 				_play_sfx(SFX_STRENGTH)
 			_:
+				## `OWCutAnimation` plays it, which is why the sound and the
+				## animation start together.
 				_play_sfx(SFX_CUT)
+				if _effects != null and StringName(applied.get("kind", &"")) == &"cut_applied":
+					_effects.start_cut(
+						applied.get("cell", Vector2i.ZERO),
+						int(applied.get("animation", 0)),
+						_world.facing_direction(),
+						_world.player_cell,
+					)
 		if _renderer != null:
 			_renderer.refresh()
 		_script_prompt = label

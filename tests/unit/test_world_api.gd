@@ -846,6 +846,25 @@ func test_ledge_hop_crosses_two_cells_after_an_ordinary_step_is_blocked() -> voi
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 
 
+## `UpdateJumpPosition`'s own `.y_offsets`, spent one entry per frame of the
+## hop: the sprite rises to twelve pixels above its cell and is back on it two
+## frames before the step ends. An ordinary walk has no arc at all.
+func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
+	assert_eq(world.player_jump_offset(), 0, "standing still is on the ground")
+	assert_eq(world.move_result(Vector2i.DOWN)["kind"], &"ledge_hop")
+	var arc: Array = []
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_HOP:
+		arc.append(world.player_jump_offset())
+		world.advance_player_step_frame()
+	assert_eq(arc, Gen2WorldAPI.JUMP_OFFSETS)
+	assert_eq(world.player_jump_offset(), 0, "and the arc ends with the step")
+
+	var walker: Gen2WorldAPI = _world(Vector2i(5, 11))
+	assert_true(bool(walker.move_result(Vector2i.UP).get("ok", false)))
+	assert_eq(walker.player_jump_offset(), 0)
+
+
 func test_ledge_hop_refuses_a_direction_the_code_does_not_allow() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
 	assert_false(world.can_walk_to(Vector2i(2, 2)))

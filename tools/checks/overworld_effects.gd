@@ -22,7 +22,8 @@ const EXPECTED: Array = [
 	["shock", 4, 0xF8], ["question", 4, 0xF8], ["happy", 4, 0xF8], ["sad", 4, 0xF8],
 	["heart", 4, 0xF8], ["bolt", 4, 0xF8], ["sleep", 4, 0xF8], ["fish", 4, 0xF8],
 	["shadow", 1, 0xFC], ["rod", 2, 0xFC], ["boulder_dust", 2, 0xFE],
-	["grass_rustle", 1, 0xFE], ["headbutt_tree", 8, 0x84],
+	["grass_rustle", 1, 0xFE], ["headbutt_tree", 8, 0x84], ["cut_tree", 4, 0x84],
+	["cut_grass", 4, 0x80],
 ]
 
 var _first: Dictionary = {}

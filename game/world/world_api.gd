@@ -217,6 +217,9 @@ var _player_step_frames_total: int = 0
 var _player_step_frames_remaining: int = 0
 ## Gen2WorldObject.step_began for the player.
 var _player_step_began: bool = false
+## Whether the step in flight is a ledge hop, which is the only one the source
+## gives a jump arc. See player_jump_offset().
+var _player_jumping: bool = false
 ## The rest of a scripted movement stream the player still has to be drawn
 ## walking, the way Gen2WorldObject.queued_steps holds an object's.
 var _player_queued_steps: Array = []
@@ -473,6 +476,25 @@ func player_step_in_progress() -> bool:
 	return _player_step_frames_remaining > 0
 
 
+## `UpdateJumpPosition`'s `.y_offsets`: the pixel a jumping sprite is drawn above
+## its own cell, one entry per frame of the hop. The accumulator the source
+## indexes it with is stepped by the step vector and halved, which over a hop's
+## two STEP_WALK halves is one entry a frame.
+const JUMP_OFFSETS: Array[int] = [
+	-4, -6, -8, -10, -11, -12, -12, -12, -11, -10, -9, -8, -6, -4, 0, 0,
+]
+
+
+## How far above its cell the player is drawn this frame, zero unless a ledge hop
+## is in flight. Presentation only: `player_cell` committed to the landing cell
+## when the hop started.
+func player_jump_offset() -> int:
+	if not _player_jumping or _player_step_frames_total <= 0:
+		return 0
+	var spent: int = _player_step_frames_total - _player_step_frames_remaining
+	return JUMP_OFFSETS[clampi(spent, 0, JUMP_OFFSETS.size() - 1)]
+
+
 ## The in-flight walk step's presentation offset in fractional walk cells,
 ## from 1.0 cell behind player_cell down to zero, so a renderer that does not
 ## think in hardware pixels (a 3D or free-roam mod) can still smooth against
@@ -526,6 +548,7 @@ func _begin_player_step(direction: Vector2i, frames: int) -> void:
 
 func _clear_player_step() -> void:
 	_player_step_began = false
+	_player_jumping = false
 	_player_step_direction = Vector2i.ZERO
 	_player_step_frames_total = 0
 	_player_step_frames_remaining = 0
@@ -639,7 +662,13 @@ func fishing_busy() -> bool:
 
 
 func facing_cell() -> Vector2i:
-	return player_cell + _direction_for_facing(player_facing)
+	return player_cell + facing_direction()
+
+
+## The unit step the player's own facing points at, which is what every table
+## keyed by `wPlayerDirection` is indexed by.
+func facing_direction() -> Vector2i:
+	return _direction_for_facing(player_facing)
 
 
 ## The cell CheckFacingObject searches, which is the faced one doubled away when
@@ -4440,6 +4469,7 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	state.consume_repel_step()
 	_advance_followers(from_cell, previous_cells)
 	_start_player_step(direction * 2, STEP_FRAMES_HOP)
+	_player_jumping = true
 	return {
 		"ok": true,
 		"kind": &"ledge_hop",

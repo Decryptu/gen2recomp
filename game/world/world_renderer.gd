@@ -190,14 +190,19 @@ func _draw() -> void:
 		_draw_effect_sprites(object.index, pixel)
 
 	var player: Vector2 = Vector2(_world.player_pixel_position())
+	## The jump arc is a sprite offset, not a position: the shadow and the grass
+	## the hop leaves behind stay on the ground.
+	var jump: Vector2 = Vector2(0, _world.player_jump_offset())
 	var player_texture: Texture2D = _actor_texture(
 		_world.player_sprite(), _world.player_palette(), _world.player_facing,
 		_world.player_walk_frame()
 	)
 	if player_texture != null:
-		draw_texture(player_texture, player)
+		draw_texture(player_texture, player + jump)
 		if _in_grass(_world.player_cell):
-			_draw_grass_over(player, page, tile_origin, tile_offset, window_size)
+			_draw_grass_over(player + jump, page, tile_origin, tile_offset, window_size)
+		if _world.fishing_busy():
+			_draw_fishing_rod(player + jump)
 	else:
 		var marker := Rect2(Vector2(player.x, player.y), Vector2(16, 16))
 		draw_rect(marker, PLAYER_COLOR, false, 1.0)
@@ -329,6 +334,21 @@ func _build_priority_atlas() -> void:
 			if int(_priority_indices[y * width + x]) == 0:
 				image.set_pixel(x, y, Color(0, 0, 0, 0))
 	_priority_atlas = ImageTexture.create_from_image(image)
+
+
+## `FacingFishDown` and its three siblings: the standing player plus one tile of
+## the rod sheet, which is what `Script_FishCastRod`'s `fish_cast_rod` puts up
+## and `PutTheRodAway` takes down.
+func _draw_fishing_rod(pixel: Vector2) -> void:
+	var sheet: Dictionary = _effect_sheet("rod")
+	if sheet.is_empty():
+		return
+	var facing: int = clampi(_world.player_facing, 0, Gen2WorldEffects.FISHING_ROD_TILES.size() - 1)
+	var tile: Dictionary = Gen2WorldEffects.FISHING_ROD_TILES[facing]
+	_draw_effect_tile(
+		sheet, int(tile["tile"]), Gen2WorldEffects.PAL_OW_EMOTE, bool(tile["flip_x"]),
+		pixel + Vector2(tile["offset"] as Vector2i),
+	)
 
 
 func _effect_sprites() -> Array:
