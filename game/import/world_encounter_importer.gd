@@ -97,6 +97,8 @@ static func import_to_cache(
 		"tree_maps": int(result["counts"]["tree_maps"]),
 		"rock_maps": int(result["counts"]["rock_maps"]),
 		"treemon_sets": int(result["counts"]["treemon_sets"]),
+		"bug_contest_mons": int(result["counts"]["bug_contest_mons"]),
+		"bug_contestants": int(result["counts"]["bug_contestants"]),
 	}
 
 
@@ -145,6 +147,9 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 	var treemon_result: Dictionary = read_treemons(rom, layout, wild_layout)
 	if not bool(treemon_result.get("ok", false)):
 		return treemon_result
+	var contest_result: Dictionary = read_bug_contest(rom, wild_layout)
+	if not bool(contest_result.get("ok", false)):
+		return contest_result
 
 	return {
 		"ok": true,
@@ -156,6 +161,7 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 			"fishing": fish_result["fishing"],
 			"roaming": roam_result["roaming"],
 			"treemons": treemon_result["treemons"],
+			"bug_contest": contest_result["bug_contest"],
 			"probabilities": {
 				"grass": RomLayout.WILD_GRASS_PROBABILITIES,
 				"water": RomLayout.WILD_WATER_PROBABILITIES,
@@ -171,8 +177,123 @@ static func read_world_encounters(rom: RomFile, layout: Dictionary) -> Dictionar
 			"tree_maps": int(treemon_result["tree_maps"]),
 			"rock_maps": int(treemon_result["rock_maps"]),
 			"treemon_sets": int(treemon_result["sets"]),
+			"bug_contest_mons": int(contest_result["mon_count"]),
+			"bug_contestants": int(contest_result["contestant_count"]),
 		},
 	}
+
+
+## `ContestMons` and `BugContestantPointers`, the Bug Catching Contest's own two
+## tables. Both ship byte identical on all three cartridges; they are read
+## rather than constants because they are cartridge data with a locator, unlike
+## `RadioChannelSongs`.
+##
+## A contestant record is `db class, id` then three `dbw mon, score` placings,
+## which `ComputeAIContestantScores` picks one of at random and then perturbs.
+## Entry zero of the pointer table is the player's own slot (`BUG_CONTEST_PLAYER`
+## is 1), and the source repeats the first real entry there, so the ten that
+## follow are what is read.
+static func read_bug_contest(rom: RomFile, configured: Dictionary) -> Dictionary:
+	var mons_offset: int = int(configured.get("bug_contest_mons", -1))
+	var mon_count: int = int(configured.get("bug_contest_mon_count", -1))
+	var pointer_offset: int = int(configured.get("bug_contestants", -1))
+	var contestant_count: int = int(configured.get("bug_contestant_count", -1))
+	if mons_offset < 0 or mon_count <= 0 or pointer_offset < 0 or contestant_count <= 0:
+		return _error("Bug Contest layout is incomplete.")
+
+	var mons: Array = []
+	for index: int in mon_count:
+		var at: int = mons_offset + index * 4
+		if not rom.in_bounds(at, 4):
+			return _error("ContestMons row %d is outside the ROM." % index)
+		var percent: int = rom.u8(at)
+		var species: int = rom.u8(at + 1)
+		var min_level: int = rom.u8(at + 2)
+		var max_level: int = rom.u8(at + 3)
+		var last: bool = index == mon_count - 1
+		# The last row's percentage is `db -1`, which is what stops
+		# ChooseWildEncounter_BugContest's walk however the earlier rows fall.
+		if last != (percent == 0xFF):
+			return _error("ContestMons row %d ends the table in the wrong place." % index)
+		if species < 1 or species > RomLayout.SPECIES_COUNT \
+			or min_level < 1 or max_level < min_level or max_level > RomLayout.MAX_LEVEL:
+			return _error("ContestMons row %d is out of range." % index)
+		mons.append({
+			"percent": percent, "species": species,
+			"min_level": min_level, "max_level": max_level,
+		})
+
+	var bank: int = floori(float(pointer_offset) / float(RomFile.BANK_SIZE))
+	var contestants: Array = []
+	for index: int in contestant_count:
+		# Entry zero is the player's, so the ten AI contestants start at one.
+		var entry: int = pointer_offset + (index + 1) * 2
+		if not rom.in_bounds(entry, 2):
+			return _error("BugContestantPointers entry %d is outside the ROM." % index)
+		var pointer: int = rom.u16le(entry)
+		if pointer < 0x4000 or pointer > 0x7FFF:
+			return _error("BugContestantPointers entry %d is not a banked pointer." % index)
+		var at: int = RomFile.linear(bank, pointer)
+		if not rom.in_bounds(at, 11):
+			return _error("Bug contestant %d is outside the ROM." % index)
+		var placings: Array = []
+		for placing: int in 3:
+			var species: int = rom.u8(at + 2 + placing * 3)
+			if species < 1 or species > RomLayout.SPECIES_COUNT:
+				return _error("Bug contestant %d placing %d is out of range." % [index, placing])
+			placings.append({
+				"species": species,
+				"score": rom.u16le(at + 3 + placing * 3),
+			})
+		contestants.append({
+			"trainer_class": rom.u8(at),
+			"trainer": rom.u8(at + 1),
+			"placings": placings,
+		})
+
+	var anchor: Dictionary = _validate_bug_contest(mons, contestants)
+	if not bool(anchor.get("ok", false)):
+		return anchor
+	return {
+		"ok": true,
+		"bug_contest": {"mons": mons, "contestants": contestants},
+		"mon_count": mons.size(),
+		"contestant_count": contestants.size(),
+	}
+
+
+## The first and last row of each table, which all three cartridges ship the
+## same: `db 20, CATERPIE, 7, 18` and `db -1, VENOMOTH, 30, 40`, and
+## `BugContestant_BugCatcherDon`'s `dbw KAKUNA, 300` through
+## `BugContestant_SchoolboyKipp`'s `dbw KAKUNA, 259`.
+const _CONTEST_MON_ANCHORS: Dictionary = {
+	"first": {"percent": 20, "species": 10, "min_level": 7, "max_level": 18},
+	"last": {"percent": 0xFF, "species": 49, "min_level": 30, "max_level": 40},
+}
+const _CONTESTANT_ANCHORS: Dictionary = {
+	"first": [[14, 300], [11, 285], [10, 226]],
+	"last": [[48, 267], [46, 254], [14, 259]],
+}
+
+
+static func _validate_bug_contest(mons: Array, contestants: Array) -> Dictionary:
+	for edge: String in _CONTEST_MON_ANCHORS:
+		var row: Dictionary = mons[0] if edge == "first" else mons[mons.size() - 1]
+		var expected: Dictionary = _CONTEST_MON_ANCHORS[edge]
+		for field: String in expected:
+			if int(row.get(field, -1)) != int(expected[field]):
+				return _error("ContestMons %s row does not match the source." % edge)
+	for edge: String in _CONTESTANT_ANCHORS:
+		var entry: Dictionary = contestants[0] if edge == "first" \
+			else contestants[contestants.size() - 1]
+		var placings: Array = entry.get("placings", [])
+		var expected_placings: Array = _CONTESTANT_ANCHORS[edge]
+		for index: int in expected_placings.size():
+			var placing: Dictionary = placings[index]
+			if int(placing["species"]) != int(expected_placings[index][0]) \
+				or int(placing["score"]) != int(expected_placings[index][1]):
+				return _error("Bug contestant %s record does not match the source." % edge)
+	return {"ok": true}
 
 
 static func _read_map_table(

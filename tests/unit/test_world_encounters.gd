@@ -399,3 +399,139 @@ class TestNests:
 			}]),
 			[]
 		)
+
+
+## The Bug Catching Contest's own encounter, score and judging
+## (engine/events/bug_contest/, engine/overworld/events.asm). The tables are the
+## cartridge's; these are built by hand the way every other case here is.
+const CONTEST_MONS: Array[Dictionary] = [
+	{"percent": 20, "species": 10, "min_level": 7, "max_level": 18},
+	{"percent": 20, "species": 13, "min_level": 7, "max_level": 18},
+	{"percent": 10, "species": 11, "min_level": 9, "max_level": 18},
+	{"percent": 10, "species": 14, "min_level": 9, "max_level": 18},
+	{"percent": 5, "species": 12, "min_level": 12, "max_level": 15},
+	{"percent": 5, "species": 15, "min_level": 12, "max_level": 15},
+	{"percent": 10, "species": 48, "min_level": 10, "max_level": 16},
+	{"percent": 10, "species": 46, "min_level": 10, "max_level": 17},
+	{"percent": 5, "species": 123, "min_level": 13, "max_level": 14},
+	{"percent": 5, "species": 127, "min_level": 13, "max_level": 14},
+	{"percent": 0xFF, "species": 49, "min_level": 30, "max_level": 40},
+]
+
+
+## `TryWildEncounter_BugContest`: `40 percent` in the long grass and
+## `20 percent` on anything else, which are $ff/100 scaled rather than 40 and 20.
+func test_the_contest_rate_is_the_two_percent_macros() -> void:
+	assert_eq(Gen2WorldBugContest.RATE_LONG_GRASS, 102)
+	assert_eq(Gen2WorldBugContest.RATE_ELSEWHERE, 51)
+	var random := RandomNumberGenerator.new()
+	random.seed = 3
+	var forced: Dictionary = Gen2WorldBugContest.resolve(
+		CONTEST_MONS, true, random, true
+	)
+	assert_eq(forced["rate"], Gen2WorldBugContest.RATE_LONG_GRASS)
+	assert_eq(forced["source"], Gen2WorldBugContest.SOURCE_CONTEST)
+	assert_eq(forced["battle_type"], Gen2WorldBugContest.BATTLE_TYPE)
+
+
+## `ChooseWildEncounter_BugContest` walks the percentages with a roll halved into
+## 0-99, so every draw lands on a row of the table and inside its own levels.
+func test_every_contest_draw_is_a_table_row_at_its_own_level() -> void:
+	var random := RandomNumberGenerator.new()
+	random.seed = 11
+	var seen: Dictionary = {}
+	for _draw: int in 400:
+		var result: Dictionary = Gen2WorldBugContest.resolve(
+			CONTEST_MONS, false, random, true
+		)
+		assert_false(result.is_empty())
+		var row: Dictionary = {}
+		for candidate: Dictionary in CONTEST_MONS:
+			if int(candidate["species"]) == int(result["pokemon"]):
+				row = candidate
+				break
+		assert_false(row.is_empty(), "species %d is not in the table" % int(result["pokemon"]))
+		assert_between(int(result["level"]), int(row["min_level"]), int(row["max_level"]))
+		seen[int(result["pokemon"])] = true
+	## Venomoth's row is the `db -1` terminator, which the walk can never reach.
+	assert_false(seen.has(49), "the -1 row is the sentinel, not a draw")
+	assert_true(seen.size() >= 8, "the common rows all come up")
+
+
+## `ContestScore`: max HP four times, the five stats, the DV term, an eighth of
+## the remaining HP and one for a held item.
+func test_the_contest_score_is_the_source_tally() -> void:
+	var mon: Dictionary = {
+		"species": 10, "max_hp": 30, "hp": 16, "attack": 12, "defense": 13,
+		"speed": 14, "special_attack": 15, "special_defense": 16,
+		"dvs": 0, "item": 0,
+	}
+	assert_eq(Gen2WorldBugContest.score(mon), 192)
+	mon["dvs"] = 0x2222
+	assert_eq(Gen2WorldBugContest.score(mon), 192 + 29, "the DV term")
+	mon["item"] = 1
+	assert_eq(Gen2WorldBugContest.score(mon), 192 + 29 + 1)
+	assert_eq(Gen2WorldBugContest.score({"species": 0}), 0, "nothing caught scores nothing")
+
+
+## `BugContest_JudgeContestants` scores the AI first and inserts the player last,
+## and `DetermineContestWinners` only pushes a place down on a *lower* score, so
+## the player takes a place they tie.
+func test_the_player_is_judged_last_and_takes_a_tie() -> void:
+	var contestants: Array = []
+	for index: int in Gen2WorldBugContest.NUM_CONTESTANTS:
+		contestants.append({
+			"trainer_class": 36, "trainer": index,
+			"placings": [
+				{"species": 10, "score": 200},
+				{"species": 10, "score": 200},
+				{"species": 10, "score": 200},
+			],
+		})
+	## One competitor, so the only score to beat is 200 plus its own `and %111`
+	## perturbation, which is 0 to 7 whatever the seed.
+	var withdrawn: Dictionary = {}
+	for index: int in range(1, Gen2WorldBugContest.NUM_CONTESTANTS):
+		withdrawn[index] = true
+	var random := RandomNumberGenerator.new()
+	for seed_value: int in 12:
+		random.seed = seed_value
+		var won: Dictionary = Gen2WorldBugContest.judge(
+			12, 207, contestants, withdrawn, random
+		)
+		assert_eq(won["placings"].size(), 2, "one contestant and the player")
+		assert_eq(int(won["player_place"]), 1, "an equal score still wins")
+		random.seed = seed_value
+		var lost: Dictionary = Gen2WorldBugContest.judge(
+			12, 199, contestants, withdrawn, random
+		)
+		assert_eq(int(lost["player_place"]), 2, "one under the lowest roll loses")
+		assert_eq(
+			int((lost["placings"][0] as Dictionary)["id"]), 2,
+			"contestant zero is id 2, since the player is 1"
+		)
+
+
+## `SelectRandomBugContestContestants`: five of the ten, each set once.
+func test_five_contestants_are_withdrawn_and_no_index_twice() -> void:
+	var random := RandomNumberGenerator.new()
+	for seed_value: int in 20:
+		random.seed = seed_value
+		var withdrawn: Dictionary = Gen2WorldBugContest.select_withdrawn(random)
+		assert_eq(withdrawn.size(), Gen2WorldBugContest.CONTESTANTS_WITHDRAWN)
+		for index: Variant in withdrawn:
+			assert_between(int(index), 0, Gen2WorldBugContest.NUM_CONTESTANTS - 1)
+
+
+## `CheckBugContestTimer` in the minutes the world clock keeps, including the
+## midnight the source's own day counter would have caught.
+func test_the_contest_timer_counts_the_minutes_down_across_midnight() -> void:
+	var started: Dictionary = {"day": 0, "hour": 23, "minute": 55}
+	assert_eq(Gen2WorldBugContest.minutes_remaining(started, started), 20)
+	assert_eq(Gen2WorldBugContest.minutes_remaining(
+		started, {"day": 1, "hour": 0, "minute": 5}
+	), 10)
+	assert_eq(Gen2WorldBugContest.minutes_remaining(
+		started, {"day": 1, "hour": 0, "minute": 15}
+	), 0)
+	assert_eq(Gen2WorldBugContest.minutes_remaining({}, started), 0)

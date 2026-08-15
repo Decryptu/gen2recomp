@@ -488,6 +488,27 @@ func treemon_set(index: int) -> Dictionary:
 	return value.duplicate(true) if value is Dictionary else {}
 
 
+## `ContestMons`, the eleven `%, species, min, max` rows
+## `ChooseWildEncounter_BugContest` walks. All three cartridges ship the same
+## table.
+func bug_contest_mons() -> Array:
+	return _bug_contest_table("mons")
+
+
+## `BugContestantPointers`' ten AI contestants, each `db class, id` and three
+## `dbw mon, score` placings. The player's own entry zero is not among them.
+func bug_contestants() -> Array:
+	return _bug_contest_table("contestants")
+
+
+func _bug_contest_table(key: String) -> Array:
+	var contest: Variant = _encounters().get("bug_contest", {})
+	if not contest is Dictionary:
+		return []
+	var value: Variant = (contest as Dictionary).get(key, [])
+	return (value as Array).duplicate(true) if value is Array else []
+
+
 ## CheckSleepingTreeMon's list for one time of day. Empty on Gold and Silver,
 ## which import no such lists because pokegold ships none.
 func asleep_treemons(time_of_day: int) -> Array:

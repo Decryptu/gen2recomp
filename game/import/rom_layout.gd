@@ -1660,6 +1660,15 @@ const GOLD_SILVER: Dictionary = {
 		"treemon_sets": 0xBA470,
 		"treemon_set_count": 6,
 		"asleep_treemons": {},
+		# data/wild/bug_contest_mons.asm's ContestMons and
+		# data/events/bug_contest_winners.asm's BugContestantPointers, both
+		# located by their own bytes, which are unique in every dump: the
+		# eleven `%, species, min, max` rows and the pointer entry pokegold and
+		# pokecrystal both repeat for BUG_CONTEST_PLAYER.
+		"bug_contest_mons": 0x97BB8,
+		"bug_contest_mon_count": 11,
+		"bug_contestants": 0x13B3F,
+		"bug_contestant_count": 10,
 	},
 	# Gold and Silver patch three bank numbers and pass the rest through. The
 	# stored value is what the linker assigned before three pic sections were
@@ -1977,6 +1986,11 @@ const CRYSTAL: Dictionary = {
 		# CheckSleepingTreeMon and data/wild/treemons_asleep.asm are Crystal
 		# only; pokegold ships neither. File order is Nite, Day, Morn.
 		"asleep_treemons": {"nite": 0x3EB5D, "day": 0x3EB69, "morn": 0x3EB6F},
+		# See the Gold and Silver block above for how these two were located.
+		"bug_contest_mons": 0x97D87,
+		"bug_contest_mon_count": 11,
+		"bug_contestants": 0x13783,
+		"bug_contestant_count": 10,
 	},
 	# Crystal's equivalent table is a contiguous $48-$5F, so the whole remap
 	# collapses to a constant: PICS_FIX in pokecrystal.
