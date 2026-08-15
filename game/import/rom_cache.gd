@@ -54,6 +54,9 @@ const WORLD_MARTS: String = "world_marts.json"
 const WORLD_PHONE: String = "world_phone.json"
 const WORLD_AUDIO: String = "world_audio.json"
 const WORLD_FRUIT_TREES: String = "world_fruit_trees.json"
+## `SpawnPoints` and `Flypoints` together: one file, because the fly map, the
+## two escape moves and a blackout all read both.
+const WORLD_SPAWNS: String = "world_spawns.json"
 const BATTLE_ANIMS: String = "battle_anims.json"
 const BATTLE_ANIM_GFX_DIR: String = "battle_anim_gfx"
 
@@ -71,7 +74,7 @@ const BYTES_KEY: String = "bytes"
 ## a dump the owner still has, so re-importing costs a few seconds and a
 ## migration would have to carry every past shape forever. Nothing but the cache
 ## is thrown away, since saves live under their own root.
-const FORMAT_VERSION: int = 55
+const FORMAT_VERSION: int = 56
 
 ## What [method state] answers. A stale cache is told from a missing one because
 ## they need different things said to whoever is looking at it: one is a
@@ -226,6 +229,10 @@ static func world_audio_path(directory: String) -> String:
 
 static func world_fruit_trees_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_FRUIT_TREES]
+
+
+static func world_spawns_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_SPAWNS]
 
 
 ## The battle animation scripts and the four tables their objects are built

@@ -57,6 +57,75 @@ func run(r: RefCounted) -> void:
 		_verify_cursor_walk(game_id, data, crystal)
 		_verify_page(game_id, data, crystal)
 		_verify_nests(game_id, data, crystal)
+		_verify_flypoints(game_id, data)
+
+
+## `Flypoints` and `SpawnPoints` against the cache they were imported beside:
+## every flypoint names a landmark the region map draws and a spawn the table
+## holds, and every spawn names a map this cartridge ships.
+##
+## The landmark column is the profile-split half, so this is where it is swept:
+## Gold and Silver ship one landmark fewer, and a Crystal number read on either
+## of them lands on the wrong city.
+func _verify_flypoints(game_id: StringName, data: GameData) -> void:
+	if not _r.check(
+		data.flypoint_count() == RomLayout.FLYPOINT_COUNT,
+		"%s: %d flypoints, not %d." % [
+			game_id, data.flypoint_count(), RomLayout.FLYPOINT_COUNT,
+		]
+	):
+		return
+	if not _r.check(
+		data.spawn_point_count() == RomLayout.SPAWN_COUNT,
+		"%s: %d spawn points, not %d." % [
+			game_id, data.spawn_point_count(), RomLayout.SPAWN_COUNT,
+		]
+	):
+		return
+
+	var seen: Dictionary = {}
+	for index: int in data.flypoint_count():
+		var row: Dictionary = data.flypoint(index)
+		var landmark: int = int(row["landmark"])
+		var spawn: int = int(row["spawn"])
+		_r.check(
+			landmark > 0 and landmark < data.landmark_count(),
+			"%s: flypoint %d names landmark %d, which this cartridge does not ship." % [
+				game_id, index, landmark,
+			]
+		)
+		_r.check(
+			not seen.has(landmark),
+			"%s: flypoint %d repeats landmark %d." % [game_id, index, landmark]
+		)
+		seen[landmark] = true
+		var point: Dictionary = data.spawn_point(spawn)
+		_r.check(
+			not point.is_empty() and data.world_map(
+				int(point["map_group"]), int(point["map_number"])
+			) != null,
+			"%s: flypoint %d lands on spawn %d, which names no map." % [
+				game_id, index, spawn,
+			]
+		)
+		# Johto first, Kanto behind it: `FlyMap` picks a region's cursor range
+		# off that split alone.
+		_r.check(
+			(landmark < Gen2WorldRadio.kanto_landmark(Gen2WorldState.is_crystal_profile(data)))
+				== (index < RomLayout.KANTO_FLYPOINT),
+			"%s: flypoint %d is on the wrong side of the region split." % [game_id, index]
+		)
+	for index: int in data.spawn_point_count():
+		var point: Dictionary = data.spawn_point(index)
+		_r.check(
+			data.world_map(int(point["map_group"]), int(point["map_number"])) != null,
+			"%s: spawn %d names map %d.%d, which this cartridge does not ship." % [
+				game_id, index, int(point["map_group"]), int(point["map_number"]),
+			]
+		)
+	print("%s: %d flypoints over %d spawn points, %d of them Johto." % [
+		game_id, data.flypoint_count(), data.spawn_point_count(), RomLayout.KANTO_FLYPOINT,
+	])
 
 
 func _verify_landmarks(game_id: StringName, data: GameData, crystal: bool) -> void:

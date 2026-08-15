@@ -88,6 +88,7 @@ var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
 var _world_phone: Dictionary = {}
 var _world_fruit_trees: Array = []
+var _world_spawns: Dictionary = {}
 var _world_audio: Dictionary = {}
 var _battle_anims_section: Dictionary = {}
 ## Which of the sections above have been read. A section that is genuinely empty
@@ -235,6 +236,49 @@ func world_fruit_tree_item(tree_id: int) -> int:
 	if tree_id < 1 or tree_id > rows.size():
 		return 0
 	return int(rows[tree_id - 1])
+
+
+## `SpawnPoints` row [param index]: `{ map_group, map_number, x, y }`, and empty
+## for an index no spawn carries. This is where a Fly, a Dig, a Teleport and a
+## blackout each put the player down.
+func spawn_point(index: int) -> Dictionary:
+	var rows: Variant = _spawns().get("spawns", [])
+	if not rows is Array or index < 0 or index >= (rows as Array).size():
+		return {}
+	var row: Variant = (rows as Array)[index]
+	if not row is Dictionary:
+		return {}
+	return {
+		"map_group": int((row as Dictionary).get("map_group", 0)),
+		"map_number": int((row as Dictionary).get("map_number", 0)),
+		"x": int((row as Dictionary).get("x", 0)),
+		"y": int((row as Dictionary).get("y", 0)),
+	}
+
+
+func spawn_point_count() -> int:
+	var rows: Variant = _spawns().get("spawns", [])
+	return (rows as Array).size() if rows is Array else 0
+
+
+## `Flypoints` row [param index]: `{ landmark, spawn }`. The index is a `FLY_*`
+## constant, which is what the fly map's cursor walks, not a landmark.
+func flypoint(index: int) -> Dictionary:
+	var rows: Variant = _spawns().get("flypoints", [])
+	if not rows is Array or index < 0 or index >= (rows as Array).size():
+		return {}
+	var row: Variant = (rows as Array)[index]
+	if not row is Dictionary:
+		return {}
+	return {
+		"landmark": int((row as Dictionary).get("landmark", 0)),
+		"spawn": int((row as Dictionary).get("spawn", 0)),
+	}
+
+
+func flypoint_count() -> int:
+	var rows: Variant = _spawns().get("flypoints", [])
+	return (rows as Array).size() if rows is Array else 0
 
 
 ## One imported priced or special mart list. The source keeps these lists apart
@@ -1877,6 +1921,12 @@ func _fruit_trees() -> Array:
 			RomCache.world_fruit_trees_path(directory), true
 		)
 	return _world_fruit_trees
+
+
+func _spawns() -> Dictionary:
+	if _claim_section("spawns"):
+		_world_spawns = _read_section(RomCache.world_spawns_path(directory), false)
+	return _world_spawns
 
 
 func _phone() -> Dictionary:

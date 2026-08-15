@@ -46,6 +46,8 @@ static func import_to_cache(
 		RomCache.world_fruit_trees_path(directory), result["fruit_trees"]
 	):
 		return _error("Could not write world fruit tree data.")
+	if not RomCache.write_json(RomCache.world_spawns_path(directory), result["spawns"]):
+		return _error("Could not write world spawn data.")
 	if not RomCache.write_section(
 		RomCache.world_audio_path(directory),
 		RomCache.blob_path(RomCache.world_audio_path(directory)),
@@ -80,6 +82,8 @@ static func import_to_cache(
 		"cries": (result["audio"].get("cries", []) as Array).size(),
 		"mon_cries": (result["audio"].get("mon_cries", []) as Array).size(),
 		"fruit_trees": (result["fruit_trees"] as Array).size(),
+		"spawns": ((result["spawns"] as Dictionary)["spawns"] as Array).size(),
+		"flypoints": ((result["spawns"] as Dictionary)["flypoints"] as Array).size(),
 	}
 
 
@@ -103,6 +107,9 @@ static func read_services(
 	var fruit_trees: Dictionary = read_fruit_trees(rom, layout)
 	if not bool(fruit_trees.get("ok", false)):
 		return fruit_trees
+	var spawns: Dictionary = read_spawns(rom, layout)
+	if not bool(spawns.get("ok", false)):
+		return spawns
 	var menus: Dictionary = _read_menus(rom, scripts, standard_scripts)
 	if not bool(menus.get("ok", false)):
 		return menus
@@ -116,6 +123,7 @@ static func read_services(
 		"phone": phone["data"],
 		"audio": audio["data"],
 		"fruit_trees": fruit_trees["items"],
+		"spawns": spawns["data"],
 		"phone_scripts": phone_scripts,
 	}
 
@@ -206,6 +214,50 @@ static func read_fruit_trees(rom: RomFile, layout: Dictionary) -> Dictionary:
 	if items.slice(0, 4).any(func(item: Variant) -> bool: return int(item) != int(items[0])):
 		return _error("The first four fruit trees do not share one berry.")
 	return {"ok": true, "items": items}
+
+
+## `SpawnPoints` and `Flypoints`, the two tables every escape from a map reads:
+## a spawn is `db group, number, x, y` and a flypoint is `db landmark, spawn`.
+##
+## Each identifies itself by the column that is the same on all three dumps, the
+## spawn coordinates and the flypoint spawn indexes, and each is checked to its
+## own terminator, so a shifted table fails rather than decoding its neighbour.
+static func read_spawns(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var spawn_offset: int = int(layout.get("spawn_points", 0))
+	var span: int = (RomLayout.SPAWN_COUNT + 1) * RomLayout.SPAWN_RECORD_SIZE
+	if spawn_offset <= 0 or not rom.in_bounds(spawn_offset, span):
+		return _error("Spawn point table is outside the cartridge.")
+	var spawns: Array = []
+	for index: int in RomLayout.SPAWN_COUNT:
+		var at: int = spawn_offset + index * RomLayout.SPAWN_RECORD_SIZE
+		var x: int = rom.u8(at + 2)
+		var y: int = rom.u8(at + 3)
+		if x != int(RomLayout.SPAWN_COORDINATES[index * 2]) \
+				or y != int(RomLayout.SPAWN_COORDINATES[index * 2 + 1]):
+			return _error("Spawn %d is not at the coordinates the table pins." % index)
+		spawns.append({
+			"map_group": rom.u8(at), "map_number": rom.u8(at + 1), "x": x, "y": y,
+		})
+	for byte: int in RomLayout.SPAWN_RECORD_SIZE:
+		if rom.u8(spawn_offset + RomLayout.SPAWN_COUNT * RomLayout.SPAWN_RECORD_SIZE + byte) \
+				!= RomLayout.SPAWN_TERMINATOR:
+			return _error("The spawn point table does not end where it should.")
+
+	var fly_offset: int = int(layout.get("flypoints", 0))
+	var fly_span: int = RomLayout.FLYPOINT_COUNT * RomLayout.FLYPOINT_RECORD_SIZE + 1
+	if fly_offset <= 0 or not rom.in_bounds(fly_offset, fly_span):
+		return _error("Flypoint table is outside the cartridge.")
+	var flypoints: Array = []
+	for index: int in RomLayout.FLYPOINT_COUNT:
+		var at: int = fly_offset + index * RomLayout.FLYPOINT_RECORD_SIZE
+		var spawn: int = rom.u8(at + 1)
+		if spawn != int(RomLayout.FLYPOINT_SPAWNS[index]):
+			return _error("Flypoint %d does not name the spawn the table pins." % index)
+		flypoints.append({"landmark": rom.u8(at), "spawn": spawn})
+	if rom.u8(fly_offset + RomLayout.FLYPOINT_COUNT * RomLayout.FLYPOINT_RECORD_SIZE) \
+			!= RomLayout.FLYPOINT_TERMINATOR:
+		return _error("The flypoint table does not end where it should.")
+	return {"ok": true, "data": {"spawns": spawns, "flypoints": flypoints}}
 
 
 static func _read_mart_list(rom: RomFile, bank: int, address: int, _priced: bool) -> Dictionary:
