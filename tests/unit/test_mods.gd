@@ -503,6 +503,69 @@ func test_a_broken_mod_is_reported_and_does_not_stop_the_others() -> void:
 	assert_true(String(failures[0]["directory"]).ends_with(_valid_manifest()["id"]))
 
 
+## A mod may ship its scripts inside a resource pack rather than loose, which is
+## how an exported mod arrives: `mod.json` stays readable so the launcher can
+## list it without mounting anything, and the pack is mounted only when the mod
+## actually loads.
+func test_a_packed_mod_mounts_its_pack_and_runs_the_entry_inside_it() -> void:
+	var source: Dictionary = _valid_manifest()
+	source["id"] = "packmod"
+	source["entry"] = "main.gd"
+	source["pack"] = "content.zip"
+	var directory: String = "%s/packmod" % ROOT
+	DirAccess.make_dir_recursive_absolute(directory)
+	_write("%s/mod.json" % directory, JSON.stringify(source))
+	# Packed at the root the host mounts it from, which is what a mod exports to.
+	_write_zip("%s/content.zip" % directory, {
+		"mods/packmod/main.gd":
+			"extends RefCounted\n\nfunc register(host, manifest) -> void:\n"
+			+ "\thost.register_menu_entry(&\"start_menu\", &\"packed\", {\"label\": manifest.name})\n",
+	})
+	_clear(_directory)
+
+	var read: Dictionary = Gen2ModManifest.read(directory)
+	assert_true(read["ok"], JSON.stringify(read))
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_true(manifest.packed())
+	assert_eq(manifest.entry_path(), "res://mods/packmod/main.gd")
+
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"packmod"], JSON.stringify(host.failures()))
+	var entries: Array = host.menu_entries(Gen2ModHost.MENU_START)
+	assert_eq(entries.size(), 1)
+	assert_eq(String(entries[0]["label"]), "Voxel World")
+
+
+## A mod naming a pack that is not there is refused by name rather than failing
+## at its entry, which would say the script is missing and not why.
+func test_a_declared_pack_that_is_absent_is_refused_by_name() -> void:
+	var source: Dictionary = _valid_manifest()
+	source["pack"] = "content.pck"
+	_write_manifest(source)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [])
+	assert_eq(host.failures()[0]["reason"], &"missing_mod_pack")
+
+
+## A pack is a file beside the manifest. Anything that points elsewhere, or is
+## not a resource pack at all, is refused before a mount is attempted.
+func test_a_pack_that_points_outside_the_mod_is_refused() -> void:
+	for pack: String in ["../other.pck", "/tmp/other.pck", "nested/other.pck", "res://x.pck"]:
+		var source: Dictionary = _valid_manifest()
+		source["pack"] = pack
+		_write_manifest(source)
+		assert_eq(
+			Gen2ModManifest.read(_directory)["reason"], &"pack_escapes_mod",
+			"pack %s must be refused" % pack
+		)
+	var source: Dictionary = _valid_manifest()
+	source["pack"] = "content.tar"
+	_write_manifest(source)
+	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"pack_not_a_resource_pack")
+
+
 ## Builds a zip at [param path] from { entry path: text } so an installer test
 ## can describe an archive's layout in one literal.
 func _write_zip(path: String, entries: Dictionary) -> void:
@@ -771,6 +834,57 @@ func test_following_an_index_persists_it_and_never_duplicates_a_feed() -> void:
 
 	Gen2ModIndex.unfollow(added["feed"], store)
 	assert_eq(Gen2ModIndex.followed(store).size(), 0)
+
+
+## A listing is kept so browsing what the player follows does not depend on the
+## server being up at that moment, and it goes with the index when they stop
+## following it.
+func test_a_fetched_feed_is_cached_and_dropped_with_the_index() -> void:
+	var store: String = "%s/indexes.json" % ROOT
+	DirAccess.make_dir_recursive_absolute(ROOT)
+	var cache: String = "%s/index_cache" % ROOT
+	var feed: String = Gen2ModIndex.follow("someone/mods", store)["feed"]
+	assert_false(Gen2ModIndex.cached_feed(feed, cache)["ok"], "nothing cached before a fetch")
+
+	assert_true(Gen2ModIndex.cache_feed(feed, _feed([
+		{"id": "voxel", "name": "Voxel", "version": "1.2.0",
+			"download": "https://example.com/voxel.zip"},
+	]), cache))
+	var cached: Dictionary = Gen2ModIndex.cached_feed(feed, cache)
+	assert_true(cached["ok"], JSON.stringify(cached))
+	assert_eq((cached["entries"] as Array).size(), 1)
+	assert_eq(cached["entries"][0]["id"], &"voxel")
+	assert_true(int(cached["age"]) >= 0)
+
+	Gen2ModIndex.forget_cache(feed, cache)
+	assert_eq(Gen2ModIndex.cached_feed(feed, cache)["reason"], &"index_not_cached")
+
+
+## A cache file that no longer parses costs the listing and nothing else.
+func test_an_unreadable_cache_is_refused_like_any_other_feed() -> void:
+	var cache: String = "%s/index_cache" % ROOT
+	var feed: String = "https://mods.example.com/index.json"
+	DirAccess.make_dir_recursive_absolute(cache)
+	_write(Gen2ModIndex.cache_path(feed, cache), "{not json")
+	assert_eq(Gen2ModIndex.cached_feed(feed, cache)["reason"], &"index_not_cached")
+
+
+## What a listed version is to the copy on disk. A version either side cannot
+## order is said to be unknown rather than guessed at: a feed is a stranger's
+## file, and a version it made up is no reason to offer an update.
+func test_a_listed_version_is_compared_against_the_installed_one() -> void:
+	assert_eq(Gen2ModIndex.update_state("1.2.0", ""), Gen2ModIndex.NOT_INSTALLED)
+	assert_eq(Gen2ModIndex.update_state("1.2.0", "1.1.9"), Gen2ModIndex.UPDATE_AVAILABLE)
+	assert_eq(Gen2ModIndex.update_state("1.2.0", "1.2.0"), Gen2ModIndex.UP_TO_DATE)
+	assert_eq(Gen2ModIndex.update_state("1.2.0", "1.3.0"), Gen2ModIndex.INSTALLED_IS_NEWER)
+	assert_eq(Gen2ModIndex.update_state("latest", "1.2.0"), Gen2ModIndex.UNKNOWN)
+	assert_eq(Gen2ModIndex.update_state("", "1.2.0"), Gen2ModIndex.UNKNOWN)
+
+	assert_eq(Gen2ModIndex.update_count([
+		{"id": &"voxel", "version": "1.2.0"},
+		{"id": &"other", "version": "0.1.0"},
+		{"id": &"absent", "version": "9.9.9"},
+	], {&"voxel": "1.1.0", &"other": "0.1.0"}), 1)
 
 
 func test_following_a_refused_url_stores_nothing() -> void:

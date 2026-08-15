@@ -27,6 +27,22 @@ const MAX_ENTRIES: int = 500
 ## The indexes this player follows. Small enough to keep beside the mods rather
 ## than wait for a general settings model.
 const FOLLOWED_PATH: String = "user://mod_indexes.json"
+## Where a fetched feed is kept, one file per feed. A cached listing is what a
+## player sees while the request is in flight and what they still see when the
+## server is down or the device is offline, so browsing what they follow does not
+## depend on the network being up at that moment.
+const CACHE_DIRECTORY: String = "user://mod_index_cache"
+
+## What [method update_state] answers.
+const UPDATE_AVAILABLE: StringName = &"update_available"
+const UP_TO_DATE: StringName = &"up_to_date"
+## The installed copy is newer than the listing, which a feed lagging behind its
+## own releases produces. Not an update, and not an error either.
+const INSTALLED_IS_NEWER: StringName = &"installed_is_newer"
+## Either side is missing a version or carries one nothing can order.
+const UNKNOWN: StringName = &"unknown"
+## Not installed at all, so there is nothing to compare.
+const NOT_INSTALLED: StringName = &"not_installed"
 
 
 ## Turns whatever the player pasted into the feed URL to read.
@@ -108,6 +124,88 @@ static func parse_feed(text: String) -> Dictionary:
 ## feed cannot downgrade a download to a channel anyone can rewrite.
 static func is_downloadable(url: String) -> bool:
 	return url.begins_with("https://") and url.length() > len("https://")
+
+
+## What a listed entry is to the copy already installed: [constant NOT_INSTALLED],
+## [constant UNKNOWN] when either side has no orderable version, or one of the
+## three orderings. [Gen2UpdateCheck.compare_versions] is the same comparison the
+## launcher makes against the project's own releases, so a feed and a release are
+## ordered by one rule.
+static func update_state(listed: String, installed: String) -> StringName:
+	if installed.strip_edges().is_empty():
+		return NOT_INSTALLED
+	if not Gen2ModVersion.valid_version(listed) \
+		or not Gen2ModVersion.valid_version(installed):
+		return UNKNOWN
+	var order: int = Gen2UpdateCheck.compare_versions(installed, listed)
+	if order < 0:
+		return UPDATE_AVAILABLE
+	return UP_TO_DATE if order == 0 else INSTALLED_IS_NEWER
+
+
+## How many of [param entries] a newer version is listed for. [param installed]
+## is mod id to installed version, which [method Gen2ModHost.manifests] fills.
+static func update_count(entries: Array, installed: Dictionary) -> int:
+	var out: int = 0
+	for entry: Variant in entries:
+		if not entry is Dictionary:
+			continue
+		var row: Dictionary = entry as Dictionary
+		var have: String = String(installed.get(StringName(row.get("id", &"")), ""))
+		if update_state(String(row.get("version", "")), have) == UPDATE_AVAILABLE:
+			out += 1
+	return out
+
+
+## The file a feed's last good copy is kept in. Named by hash rather than by URL,
+## because a URL is not a filename and a feed may live at any path a publisher
+## likes.
+static func cache_path(feed: String, directory: String = CACHE_DIRECTORY) -> String:
+	return "%s/%s.json" % [directory, feed.sha256_text().substr(0, 32)]
+
+
+## Keeps [param text] as the last good copy of [param feed]. Only a feed that
+## parsed is worth keeping, so the caller stores after [method parse_feed] rather
+## than on arrival.
+static func cache_feed(feed: String, text: String, directory: String = CACHE_DIRECTORY) -> bool:
+	if text.length() > MAX_FEED_BYTES:
+		return false
+	DirAccess.make_dir_recursive_absolute(directory)
+	var file: FileAccess = FileAccess.open(cache_path(feed, directory), FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_string(JSON.stringify({
+		"feed": feed, "fetched_at": int(Time.get_unix_time_from_system()), "text": text,
+	}))
+	file.close()
+	return true
+
+
+## The cached copy of [param feed], parsed, as
+## { ok, name, entries, fetched_at, age }, or { ok: false, reason }. A cache file
+## that no longer parses is refused like any other feed, so a corrupted one costs
+## the listing and nothing else.
+static func cached_feed(feed: String, directory: String = CACHE_DIRECTORY) -> Dictionary:
+	var path: String = cache_path(feed, directory)
+	if not FileAccess.file_exists(path):
+		return {"ok": false, "reason": &"index_not_cached"}
+	var json := JSON.new()
+	if json.parse(FileAccess.get_file_as_string(path)) != OK or json.data is not Dictionary:
+		return {"ok": false, "reason": &"index_not_cached"}
+	var stored: Dictionary = json.data as Dictionary
+	var parsed: Dictionary = parse_feed(String(stored.get("text", "")))
+	if not bool(parsed.get("ok", false)):
+		return parsed
+	var fetched_at: int = int(stored.get("fetched_at", 0))
+	parsed["fetched_at"] = fetched_at
+	parsed["age"] = maxi(int(Time.get_unix_time_from_system()) - fetched_at, 0)
+	return parsed
+
+
+## Drops a feed's cached copy, which [method unfollow] does so an index the
+## player stopped following leaves nothing on disk.
+static func forget_cache(feed: String, directory: String = CACHE_DIRECTORY) -> void:
+	DirAccess.remove_absolute(cache_path(feed, directory))
 
 
 static func _entry_from(raw: Dictionary) -> Dictionary:
@@ -197,6 +295,7 @@ static func unfollow(feed: String, path: String = FOLLOWED_PATH) -> void:
 		if row["feed"] != feed:
 			kept.append(row)
 	_store(kept, path)
+	forget_cache(feed)
 
 
 static func _store(rows: Array[Dictionary], path: String) -> void:
