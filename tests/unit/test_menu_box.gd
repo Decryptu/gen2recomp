@@ -125,3 +125,45 @@ func test_the_move_info_box_is_the_source_rectangle() -> void:
 	assert_eq(box.interior(), Vector2i(9, 3))
 	assert_eq(box.border_position(), Vector2i(0, 8))
 	assert_eq(box.border_size(), Vector2i(11, 5))
+
+
+## `MenuHeaders_UnownWalls`' `menu_coords 9 - n, 4, 10 + n, 9`: the box is built
+## around the word, so "ESCAPE" and "HO-OH" are different sizes and both are
+## centred on the same two columns.
+func test_an_unown_wall_box_is_built_around_its_word() -> void:
+	var escape: Gen2MenuBox = Gen2UnownWall.menu_box("ESCAPE")
+	assert_eq(escape.border_position(), Vector2i(3, 4))
+	assert_eq(escape.border_size(), Vector2i(14, 6))
+	var ho_oh: Gen2MenuBox = Gen2UnownWall.menu_box("HO-OH")
+	assert_eq(ho_oh.border_position(), Vector2i(4, 4))
+	assert_eq(ho_oh.border_size(), Vector2i(12, 6))
+	## `MenuBoxCoord2Tile`, `inc hl` and two rows down, then two columns a letter.
+	assert_eq(Gen2UnownWall.block_position(escape, 0), Vector2i(4, 6))
+	assert_eq(Gen2UnownWall.block_position(escape, 5), Vector2i(14, 6))
+
+
+## The `unown` charmap's `$10 * (i / 8) + 2 * i`: eight letters to a row of the
+## sheet, each two tiles wide and two rows tall, so I opens a new row rather than
+## following H.
+func test_the_unown_charmap_steps_a_row_every_eighth_letter() -> void:
+	assert_eq(Gen2UnownWall.char_code("A"), 0x00)
+	assert_eq(Gen2UnownWall.char_code("H"), 0x0E)
+	assert_eq(Gen2UnownWall.char_code("I"), 0x20)
+	assert_eq(Gen2UnownWall.char_code("X"), 0x4E)
+	assert_eq(Gen2UnownWall.char_code(" "), -1)
+
+
+## `_DisplayUnownWords_CopyWord`: a letter is the computed tile, the one after
+## it, and the two a whole sheet row below. `.ConvertChar` branches away from
+## that arithmetic for the last three characters, whose tiles sit in the other
+## graphics block, which is what `_DisplayUnownWords_FillAttr`'s `cp 'Y'` splits.
+func test_a_letter_block_is_four_tiles_and_the_last_three_are_the_exception() -> void:
+	var word: Array = Gen2UnownWall.blocks("AYZ-")
+	assert_eq(word[0]["tiles"], [0x00, 0x01, 0x10, 0x11])
+	assert_true(bool(word[0]["bank1"]), "A is drawn out of the second block")
+	assert_eq(word[1]["tiles"], [0x5B, 0x5C, 0x4D, 0x5D], "Y")
+	assert_eq(word[2]["tiles"], [0x4E, 0x4F, 0x5E, 0x5F], "Z")
+	assert_eq(word[3]["tiles"], [0x02, 0x03, 0x03, 0x02], "the dash is one tile twice")
+	for index: int in [1, 2, 3]:
+		assert_false(bool(word[index]["bank1"]), "the last three are in the first block")
+	assert_eq(Gen2UnownWall.blocks("ESCAPE!"), [], "a character with no tile")

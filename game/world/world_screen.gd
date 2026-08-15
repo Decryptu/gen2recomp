@@ -87,6 +87,8 @@ var _field_move_text: bool = false
 ## for it to play once the last of them is up.
 var _oak_pc_pages: Array = []
 var _oak_pc_sfx: int = -1
+## `DisplayUnownWords`' box, up until the `JoyWaitAorB` behind it is answered.
+var _unown_wall_box: TextureRect = null
 ## Mirrors the source's wBattleMenuCursorPosition surviving a reopen.
 var _start_menu_cursor: int = 0
 ## `.MenuReturns`' first entry, `.Reopen`: Pokedex, Pokemon, Pokegear and the
@@ -644,6 +646,11 @@ func _handle_button(button: int) -> bool:
 		## `JoyWaitAorB`, which is what waits between each of the three texts.
 		if button in [Gen2Button.A, Gen2Button.B]:
 			_advance_prof_oaks_pc()
+		return true
+	if _unown_wall_box != null:
+		## `DisplayUnownWords`' own `JoyWaitAorB`, and the click it plays after.
+		if button in [Gen2Button.A, Gen2Button.B]:
+			_close_unown_wall()
 		return true
 	if _pokedex_host != null:
 		return _pokedex_host.handle_button(button)
@@ -2832,6 +2839,9 @@ func _show_script_results(results: Array) -> void:
 			waiting = true
 			var event: Dictionary = result.get("event", {})
 			var event_type: StringName = StringName(event.get("type", &""))
+			if event_type == &"text" and event.has("unown_wall") \
+				and _open_unown_wall(String(event.get("text", ""))):
+				break
 			if event_type == &"text" and _text_box != null and _text_box.font != null:
 				## Prof Oak's PC is the one special that draws on its own and
 				## whose script runs on past it, so its pages are shown first and
@@ -3086,6 +3096,42 @@ func _show_story_picture(species: int) -> void:
 	) / 2.0
 	_story_picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_screen.display(_story_picture)
+
+
+## `DisplayUnownWords`: the chamber wall's word in a box of its own, held by
+## `JoyWaitAorB`. The special stages the word as a text the runner is waiting on,
+## so answering the box is what answers that wait; a cache or a map that cannot
+## draw the letters falls back to the text box, which is what puts the word up
+## on any host without the chamber's own tileset.
+func _open_unown_wall(word: String) -> bool:
+	if _world == null or _data == null or _unown_wall_box != null:
+		return false
+	var image: Image = Gen2UnownWallPage.render(
+		_data, _world.current_tileset, _world.current_map, word, _render_time_of_day()
+	)
+	if image == null:
+		return false
+	var box: Gen2MenuBox = Gen2UnownWall.menu_box(word)
+	_unown_wall_box = TextureRect.new()
+	_unown_wall_box.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_unown_wall_box.texture = ImageTexture.create_from_image(image)
+	_unown_wall_box.size = image.get_size()
+	_unown_wall_box.position = Vector2(box.border_position() * Gen2Font.TILE)
+	_unown_wall_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_screen.display(_unown_wall_box)
+	_script_prompt = "A or B: close the wall"
+	return true
+
+
+func _close_unown_wall() -> void:
+	if _unown_wall_box == null:
+		return
+	_unown_wall_box.queue_free()
+	_unown_wall_box = null
+	_play_sfx(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
+	## The wait behind the box is the staged text the special left, so the script
+	## resumes on the same press the source's `CloseWindow` returns on.
+	_show_script_results(_world.run_event_queue(true))
 
 
 func _hide_story_picture() -> void:
