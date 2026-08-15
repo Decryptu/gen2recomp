@@ -1221,3 +1221,69 @@ func test_a_word_with_a_byte_outside_the_alphabet_fails() -> void:
 	data[run] = RomLayout.FIRST_UNOWN_CHAR + RomLayout.UNOWN_FORMS
 	assert_false(RomImporter.verify_unown_words(_rom(data), _layout)["ok"])
 	assert_true(RomImporter.read_unown_words(_rom(data), _layout).is_empty())
+
+
+## `Pokegear_LoadTilemapRLE`, whose pairs are the tile first and its run length
+## second, the opposite way round from the comment above it. The three cards are
+## one run, so a reader that took them the other way round would decode the first
+## card into something the wrong length and take the other two with it.
+func test_the_pokegear_cards_decode_as_tile_then_length() -> void:
+	var data: PackedByteArray = _dump()
+	_write(data, int((_layout["town_map"] as Dictionary)["cards"]), _cards())
+	var cards: Dictionary = RomImporter.read_pokegear_cards(_rom(data), _layout)
+	assert_eq(cards.size(), RomLayout.POKEGEAR_CARD_ORDER.size())
+	for name: String in RomLayout.POKEGEAR_CARD_ORDER:
+		var cells: PackedByteArray = cards[name]
+		assert_eq(cells.size(), RomLayout.POKEGEAR_CARD_CELLS)
+		assert_eq(cells[0], Gen2TownMapPage.CARD_BLANK_TILE)
+
+
+## A card whose runs do not add up to a screen is a wrong offset, and the whole
+## walk answers empty rather than three cards of the wrong length.
+func test_a_short_pokegear_card_refuses_the_whole_run() -> void:
+	var data: PackedByteArray = _dump()
+	var at: int = int((_layout["town_map"] as Dictionary)["cards"])
+	_write(data, at, _cards())
+	data[at + 1] -= 1
+	assert_true(RomImporter.read_pokegear_cards(_rom(data), _layout).is_empty())
+
+
+## The Pokegear's own two texts, read one after the other from a single offset:
+## each decode says where it ended, which is where the next begins.
+func test_the_pokegear_texts_are_read_in_sequence() -> void:
+	var data: PackedByteArray = _dump()
+	var at: int = int((_layout["town_map"] as Dictionary)["card_texts"])
+	var offset: int = at
+	for words: String in ["WHOM?", "PRESS", "DELETE?"]:
+		_write(data, offset, _text(words))
+		offset += _text(words).size()
+	var texts: Dictionary = RomImporter.read_pokegear_texts(_rom(data), _layout)
+	assert_eq(
+		texts,
+		{"ask_who": "WHOM?", "press_button": "PRESS", "ask_delete": "DELETE?"}
+	)
+	data[at] = 0xFF
+	assert_true(RomImporter.read_pokegear_texts(_rom(data), _layout).is_empty())
+
+
+## `text "..." / done`: the start command, the characters and `<DONE>`.
+func _text(words: String) -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray([Gen2TextStream.TX_START])
+	out.append_array(Gen2Text.encode(words))
+	out.append(Gen2TextStream.CHAR_DONE)
+	return out
+
+
+## Three cards of one tile each, at the source's own encoding: the run length is
+## a byte, so a screen takes two pairs.
+func _cards() -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	for _card: String in RomLayout.POKEGEAR_CARD_ORDER:
+		var left: int = RomLayout.POKEGEAR_CARD_CELLS
+		while left > 0:
+			var run: int = mini(left, 0xFF)
+			out.append(Gen2TownMapPage.CARD_BLANK_TILE)
+			out.append(run)
+			left -= run
+		out.append(RomLayout.POKEGEAR_CARD_TERMINATOR)
+	return out

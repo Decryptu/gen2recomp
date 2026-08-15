@@ -44,6 +44,12 @@ const OBJECT_PALETTE: int = 0
 ## takes `PAL_OW_RED` whoever the player is; only the dex area asks.
 const OBJECT_PALETTE_FEMALE: int = 1
 
+## `InitPokegearModeIndicatorArrow`, which the Pokegear spawns on every card
+## including this one. Its position is [Gen2PokegearScreen]'s, at the MAP card's
+## own entry in `AnimatePokegearModeIndicatorArrow.XCoords`.
+const ARROW_TILE: int = 0x00
+const ARROW_CARD: StringName = &"map"
+
 ## `PokedexNestIconGFX`, one 8x8 object tile whose OAM position is the landmark's
 ## own coordinates less four, which centres it on the point.
 const NEST_TILE: int = 0
@@ -74,6 +80,8 @@ var _open: bool = false
 var _field: Control = null
 var _background: TextureRect = null
 var _cursor_icon: TextureRect = null
+## The Pokegear's mode arrow, which is up on the card and on no other screen.
+var _arrow: TextureRect = null
 ## `.pressedA`'s own answer, which `_FlyMap` returns in `e`: the chosen spawn, or
 ## -1 for the `ld a, -1` a B press leaves.
 var _chosen_spawn: int = -1
@@ -302,6 +310,16 @@ func render() -> Image:
 		return out
 	if _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
 		return _render_dex_area(out)
+	if _map.screen == Gen2TownMap.SCREEN_POKEGEAR_CARD:
+		out.blend_rect(
+			_icon_from("pokegear_sprites", ARROW_TILE),
+			Rect2i(Vector2i.ZERO, Vector2i(ICON_SIZE, ICON_SIZE)),
+			Gen2PokegearScreen.ARROW_AT + Vector2i(
+				Gen2PokegearScreen.ARROW_CARD_STRIDE
+				* Gen2PokegearScreen.ARROW_CARDS.find(ARROW_CARD),
+				0
+			)
+		)
 	for object: Array in [
 		[_cursor_image(), cursor_landmark()], [_player_image(), _map.player_landmark],
 	]:
@@ -371,6 +389,7 @@ func _build() -> void:
 	_field.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.display(_field)
 	_background = _sprite()
+	_arrow = _sprite()
 	_cursor_icon = _sprite()
 	_player_icon = _sprite()
 
@@ -387,6 +406,7 @@ func _refresh() -> void:
 	if _background != null:
 		_background.texture = ImageTexture.create_from_image(_background_image())
 		_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_refresh_arrow()
 	if _map != null and _map.screen == Gen2TownMap.SCREEN_DEX_AREA:
 		_refresh_objects()
 		return
@@ -417,6 +437,24 @@ func _refresh_objects() -> void:
 			continue
 		node.position = Vector2(_nest_position(landmark))
 		node.texture = ImageTexture.create_from_image(icon)
+
+
+## Up only on the Pokegear's own card: `OverworldTownMap`, the fly map and the
+## dex area each open the region map without a Pokegear around it.
+func _refresh_arrow() -> void:
+	if _arrow == null:
+		return
+	_arrow.visible = _map != null and _map.screen == Gen2TownMap.SCREEN_POKEGEAR_CARD
+	if not _arrow.visible:
+		return
+	_arrow.position = Vector2(
+		Gen2PokegearScreen.ARROW_AT + Vector2i(
+			Gen2PokegearScreen.ARROW_CARD_STRIDE
+			* Gen2PokegearScreen.ARROW_CARDS.find(ARROW_CARD),
+			0
+		)
+	)
+	_arrow.texture = ImageTexture.create_from_image(_icon_from("pokegear_sprites", ARROW_TILE))
 
 
 func _background_image() -> Image:

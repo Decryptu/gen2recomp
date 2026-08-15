@@ -17,7 +17,7 @@ const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
 enum MODE {
-	MENU, MART, PHONE, PHONE_LIST, AUDIO, POKEGEAR, RADIO, TOWN_MAP, CLOCK,
+	MENU, MART, PHONE, AUDIO, POKEGEAR, TOWN_MAP, CARD,
 	APRICORN, PC, PC_ITEMS, PC_ITEM_LIST, PC_TEXT,
 }
 
@@ -53,9 +53,11 @@ var _mart_entries: Array = []
 var _mart_quantity: int = 1
 var _mart_purchased: bool = false
 var _apricorns: Gen2WorldApricorn = null
-var _phone_entries: Array = []
 var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
+## The clock, phone or radio card while one is open, which is a hardware-
+## resolution screen over this panel the way the region map is.
+var _pokegear: Gen2PokegearScreen = null
 ## Whether the region map on screen is the fly map, which answers a spawn rather
 ## than closing back into the card list.
 var _fly_map: bool = false
@@ -145,23 +147,17 @@ func is_active() -> bool:
 	return _mode >= 0
 
 
-## Opens the Pokegear phone list. Contact order follows the cartridge table,
-## and only registered numbers are selectable.
+## Opens the Pokegear straight onto its PHONE card, which is what the overworld's
+## own phone shortcut reaches.
 func open_phone_list(
 	world: Gen2WorldAPI,
 	data: GameData,
 	save: Gen2SaveData = null,
 	persist: bool = false
 ) -> bool:
-	_world = world
-	_data = data
-	_save = save
-	_persist = persist
-	if _world == null or _data == null:
-		_show_error("Phone has no world or cartridge cache.")
+	if not _open_pokegear(world, data, save, persist, "Phone"):
 		return false
-	_phone_entries = _world.registered_phone_contacts()
-	_open_phone_list()
+	_open_card(Gen2PokegearScreen.CARD_PHONE)
 	return true
 
 
@@ -173,12 +169,22 @@ func open_pokegear(
 	save: Gen2SaveData = null,
 	persist: bool = false
 ) -> bool:
+	if not _open_pokegear(world, data, save, persist, "Pokegear"):
+		return false
+	_open_pokegear_cards()
+	return true
+
+
+## `wPokegearFlags`: which cards the player owns, in the jumptable's own order.
+func _open_pokegear(
+	world: Gen2WorldAPI, data: GameData, save: Gen2SaveData, persist: bool, label: String
+) -> bool:
 	_world = world
 	_data = data
 	_save = save
 	_persist = persist
 	if _world == null or _data == null:
-		_show_error("Pokegear has no world or cartridge cache.")
+		_show_error("%s has no world or cartridge cache." % label)
 		return false
 	_pokegear_cards = []
 	for card: Dictionary in POKEGEAR_CARDS:
@@ -187,7 +193,6 @@ func open_pokegear(
 		if not owned:
 			continue
 		_pokegear_cards.append(card)
-	_open_pokegear_cards()
 	return true
 
 
@@ -198,6 +203,8 @@ func handle_button(button: int) -> bool:
 	if _mode == MODE.APRICORN:
 		_press_apricorns(button)
 		return true
+	if _mode == MODE.CARD and _pokegear != null:
+		return _pokegear.handle_button(button)
 	if Gen2Button.is_direction(button):
 		_move_direction(Gen2Button.vector(button))
 		return true
@@ -626,16 +633,6 @@ func _open_phone(request: Dictionary, data: Dictionary) -> void:
 	_render_options(["Continue"])
 
 
-func _open_phone_list() -> void:
-	_mode = MODE.PHONE_LIST
-	_cursor = 0
-	_title.text = "PHONE"
-	_summary.text = "Registered numbers"
-	_status.text = "Choose a contact to call." if not _phone_entries.is_empty() else "No registered numbers."
-	_footer.text = "D-pad: move    A: call    B: close"
-	_render_options()
-
-
 func _open_pokegear_cards() -> void:
 	_mode = MODE.POKEGEAR
 	_cursor = 0
@@ -647,37 +644,118 @@ func _open_pokegear_cards() -> void:
 	_render_options()
 
 
-## The source clock card clears its inner box, prints the weekday and renders a
-## 12-hour clock with the AM/PM label. The host keeps the card list as its
-## navigation shell, then presents the card as its own read-only page.
-func _open_clock_card() -> void:
-	_mode = MODE.CLOCK
+## The clock, phone and radio cards, each on the hardware's own tile grid the way
+## the MAP card is. The card list stays this panel's, so a card is opened over it
+## and closing one comes back to the list.
+func _open_card(card: StringName) -> void:
+	_mode = MODE.CARD
 	_cursor = 0
-	_title.text = "CLOCK"
-	var clock: Dictionary = _world.world_clock()
-	var hour24: int = int(clock.get("hour", 0))
-	var hour12: int = hour24 % 12
-	if hour12 == 0:
-		hour12 = 12
-	var period: String = "AM" if hour24 < 12 else "PM"
-	var weekday: String = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][
-		posmod(int(clock.get("day", 0)), 7)
-	]
-	_summary.text = "%s\n\n%02d:%02d %s" % [
-		weekday, hour12, int(clock.get("minute", 0)), period,
-	]
-	_status.text = "Time of day: %s" % _time_of_day_label(hour24)
-	_status.add_theme_color_override("font_color", TEXT)
-	_footer.text = "B: back to cards"
-	_render_options(["CLOCK CARD"])
+	_panel.visible = false
+	_pokegear = Gen2PokegearScreen.new()
+	_pokegear.z_index = 5
+	add_child(_pokegear)
+	_pokegear.closed.connect(_on_card_closed)
+	_pokegear.switched.connect(_on_card_switched)
+	_pokegear.tuned.connect(_on_card_tuned)
+	_pokegear.called.connect(_on_card_called)
+	_pokegear.deleted.connect(_on_card_deleted)
+	var owned: Array = []
+	for entry: Dictionary in _pokegear_cards:
+		owned.append(StringName(entry.get("card", &"")))
+	var text: String = ""
+	if card == Gen2PokegearScreen.CARD_CLOCK:
+		text = _data.pokegear_text("press_button")
+	elif card == Gen2PokegearScreen.CARD_PHONE:
+		text = _data.pokegear_text("ask_who")
+	if not _pokegear.open(
+		_data, card, owned, text, _data.pokegear_text("ask_delete"),
+		_world.map_time_of_day()
+	):
+		_on_card_closed()
+		return
+	_refresh_card()
 
 
-func _time_of_day_label(hour24: int) -> String:
-	if hour24 < Gen2WorldClock.MORN_START or hour24 >= Gen2WorldClock.NITE_START:
-		return "NIGHT"
-	if hour24 < Gen2WorldClock.DAY_START:
-		return "MORNING"
-	return "DAY"
+## What the open card reads off the world, which is all of its display state.
+func _refresh_card() -> void:
+	if _pokegear == null:
+		return
+	match _pokegear.card():
+		Gen2PokegearScreen.CARD_CLOCK:
+			var clock: Dictionary = _world.world_clock()
+			_pokegear.set_clock(
+				int(clock.get("day", 0)), int(clock.get("hour", 0)),
+				int(clock.get("minute", 0))
+			)
+		Gen2PokegearScreen.CARD_RADIO:
+			var tuned: Dictionary = _world.radio_station()
+			_pokegear.set_radio(
+				_world.state.radio_knob(),
+				String(tuned.get("name", "")) if bool(tuned.get("ok", false)) else ""
+			)
+		Gen2PokegearScreen.CARD_PHONE:
+			_pokegear.set_contacts(
+				_world.registered_phone_contacts(),
+				Gen2WorldPhoneHost.map_has_phone_service(_world.current_map)
+			)
+
+
+## `Pokegear_SwitchPage`: the next or previous card the player owns, with no wrap
+## at either end. The clock is always there and is where the Pokegear opens.
+func _on_card_switched(direction: int) -> void:
+	var order: Array = []
+	for entry: Dictionary in _pokegear_cards:
+		order.append(StringName(entry.get("card", &"")))
+	var at: int = order.find(_pokegear.card()) + direction
+	if at < 0 or at >= order.size():
+		return
+	var card: StringName = order[at]
+	if card == &"map":
+		# The MAP card is the region map's own screen, and closing it comes back
+		# to the card list rather than to the card this left.
+		_close_card()
+		_open_town_map(false)
+		return
+	_close_card()
+	_open_card(card)
+
+
+func _on_card_tuned(knob: int) -> void:
+	_world.tune_radio(knob)
+	_refresh_card()
+
+
+func _on_card_called(contact: int) -> void:
+	var results: Array = _world.request_outgoing_phone_call(contact)
+	_close_card()
+	_panel.visible = true
+	_mode = -1
+	completed.emit(results)
+
+
+## `PokegearPhone_DeletePhoneNumber`, which clears the slot and closes the gap
+## behind it. The list here is a set, so dropping the contact is the whole of it.
+func _on_card_deleted(contact: int) -> void:
+	var changed: Dictionary = _world.state.apply_changes({}, {}, {
+		"phone_contacts": {contact: false},
+	})
+	if bool(changed.get("ok", false)):
+		_refresh_card()
+
+
+func _on_card_closed() -> void:
+	if _pokegear != null and _pokegear.card() == Gen2PokegearScreen.CARD_RADIO:
+		_world.close_radio()
+	_close_card()
+	_panel.visible = true
+	_open_pokegear_cards()
+
+
+func _close_card() -> void:
+	if _pokegear == null:
+		return
+	_pokegear.queue_free()
+	_pokegear = null
 
 
 ## `_FlyMap` opened as an overlay of its own: the region map with the flypoint
@@ -770,43 +848,6 @@ func _on_town_map_closed() -> void:
 	completed.emit([])
 
 
-## The radio card. Left and right are the tuning knob, which is the whole of the
-## card's input: the source has no confirm on a station.
-func _open_radio() -> void:
-	_mode = MODE.RADIO
-	_cursor = 0
-	_title.text = "RADIO"
-	_refresh_radio()
-	_footer.text = "Left and right: tune    B: close"
-
-
-func _refresh_radio() -> void:
-	var tuned: Dictionary = _world.radio_station()
-	_summary.text = "%.1f MHz" % float(tuned.get("frequency", 0.0))
-	if bool(tuned.get("ok", false)):
-		_status.text = String(tuned.get("name", ""))
-		_status.add_theme_color_override("font_color", SUCCESS)
-	else:
-		# NoRadioName blanks the label rather than saying anything.
-		_status.text = ""
-		_status.add_theme_color_override("font_color", MUTED)
-	_render_options([_radio_dial()])
-
-
-## The dial as the knob positions it can stop on, so a player can see where the
-## stations sit without a drawn tuner.
-func _radio_dial() -> String:
-	var dial: String = ""
-	for knob: int in Gen2WorldRadio.knob_values():
-		dial += "|" if knob == _world.state.radio_knob() else "."
-	return dial
-
-
-func _tune_radio(step: int) -> void:
-	_world.tune_radio(_world.state.radio_knob() + step * Gen2WorldRadio.KNOB_STEP)
-	_refresh_radio()
-
-
 func _open_audio(request: Dictionary, record: Dictionary) -> void:
 	_mode = MODE.AUDIO
 	_cursor = 0
@@ -847,10 +888,6 @@ func _move_direction(direction: Vector2i) -> void:
 		return
 	if _mode == MODE.MART and direction.x != 0:
 		_change_mart_quantity(direction.x)
-		return
-	if _mode == MODE.RADIO:
-		if direction.x != 0:
-			_tune_radio(direction.x)
 		return
 	if _mode == MODE.PC_ITEM_LIST and direction.x != 0:
 		_change_pc_quantity(direction.x)
@@ -915,29 +952,11 @@ func _confirm() -> void:
 			_status.text = "%s is not implemented." % String(card.get("name", ""))
 			_status.add_theme_color_override("font_color", ERROR)
 			return
-		match StringName(card.get("card", &"")):
-			&"map":
-				_open_town_map(false)
-			&"radio":
-				_open_radio()
-			&"phone":
-				_phone_entries = _world.registered_phone_contacts()
-				_open_phone_list()
-			&"clock":
-				_open_clock_card()
-		return
-	if _mode == MODE.CLOCK:
-		return
-	if _mode == MODE.RADIO:
-		return
-	if _mode == MODE.PHONE_LIST:
-		if _phone_entries.is_empty():
-			_status.text = "No registered numbers."
-			return
-		var contact: Dictionary = _phone_entries[_cursor]
-		var results: Array = _world.request_outgoing_phone_call(int(contact.get("index", -1)))
-		_mode = -1
-		completed.emit(results)
+		var chosen: StringName = StringName(card.get("card", &""))
+		if chosen == &"map":
+			_open_town_map(false)
+		else:
+			_open_card(chosen)
 		return
 	if _mode in [MODE.PHONE, MODE.AUDIO]:
 		_finish_runtime({"ok": true, "script_value": 1})
@@ -961,20 +980,9 @@ func _cancel() -> void:
 		_finish_input_cancelled()
 	elif _mode == MODE.MART:
 		_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0, "cancelled": true})
-	elif _mode == MODE.RADIO:
-		_world.close_radio()
-		_open_pokegear_cards()
-	elif _mode == MODE.CLOCK:
-		_open_pokegear_cards()
 	elif _mode == MODE.POKEGEAR:
 		_mode = -1
 		completed.emit([])
-	elif _mode == MODE.PHONE_LIST:
-		if _pokegear_cards.is_empty():
-			_mode = -1
-			completed.emit([])
-		else:
-			_open_pokegear_cards()
 	elif _mode in [MODE.PHONE, MODE.AUDIO]:
 		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
 	elif _mode == MODE.TOWN_MAP and _town_map != null:
@@ -1021,7 +1029,6 @@ func _render_options(override: Array = []) -> void:
 		parent = grid
 	var values: Array = override if not override.is_empty() else (
 		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART \
-		else _phone_entries if _mode == MODE.PHONE_LIST \
 		else _pc_rows if _mode in [MODE.PC, MODE.PC_ITEMS] \
 		else _pc_entries if _mode == MODE.PC_ITEM_LIST \
 		else _pokegear_cards if _mode == MODE.POKEGEAR else ["Continue"]
@@ -1059,9 +1066,6 @@ func _render_options(override: Array = []) -> void:
 			var stack: int = int((value as Dictionary).get("quantity", 0))
 			name = "%s    x%d of %d" % [name, _pc_quantity, stack] if index == _cursor \
 				else "%s    x%d" % [name, stack]
-		if value is Dictionary and _mode == MODE.PHONE_LIST:
-			if int((value as Dictionary).get("trainer_class", 0)) > 0:
-				name = "%s %d" % [name, int((value as Dictionary).get("trainer_number", 0))]
 		label.text = ("> " if index == _cursor else "  ") + name
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
@@ -1075,8 +1079,6 @@ func _option_count() -> int:
 		return _menu.options.size() if _menu != null else _choices.size()
 	if _mode == MODE.MART:
 		return _mart_entries.size()
-	if _mode == MODE.PHONE_LIST:
-		return _phone_entries.size()
 	if _mode == MODE.POKEGEAR:
 		return _pokegear_cards.size()
 	if _mode in [MODE.PC, MODE.PC_ITEMS]:

@@ -145,3 +145,128 @@ func test_the_dex_area_header_replaces_the_name_box() -> void:
 	assert_eq(_at(map, Vector2i(10, 1)), Gen2TownMapPage.TOWN_MAP_FRAME_TOP_TILE)
 	assert_eq(_at(map, Vector2i(19, 1)), Gen2TownMapPage.TOWN_MAP_FRAME_RIGHT_TILE)
 	assert_eq(_at(map, Vector2i(0, 2)), Fixture.TOWN_MAP_JOHTO_TILE)
+
+
+## `Textbox`'s own border codes, which every card draws under itself and which
+## `compose` resolves through the chosen frame rather than through the font.
+func test_every_card_draws_the_source_text_box() -> void:
+	assert_true(_page.cards_ready())
+	for map: PackedInt32Array in [
+		_page.clock_tilemap([], 0, 0, 0, ""),
+		_page.radio_tilemap([], ""),
+		_page.phone_tilemap([], [], 0, true, ""),
+	]:
+		assert_eq(
+			_at(map, Gen2TownMapPage.CARD_TEXTBOX_AT),
+			RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_LEFT
+		)
+		assert_eq(
+			_at(map, Vector2i(19, 17)),
+			RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_BOTTOM_RIGHT
+		)
+		assert_eq(_at(map, Vector2i(1, 13)), Gen2TownMapPage.BLANK_TILE)
+
+
+## `Pokegear_FinishTilemap` runs after every card's own jumptable entry, so the
+## icon row is on all four screens rather than on the MAP card alone.
+func test_a_card_carries_the_icon_row() -> void:
+	var map: PackedInt32Array = _page.clock_tilemap([&"map", &"radio"], 0, 0, 0, "")
+	assert_eq(
+		_at(map, Gen2TownMapPage.CARD_POKEGEAR_ICON_AT),
+		Gen2TownMapPage.CARD_POKEGEAR_ICON_TILE
+	)
+	assert_eq(_at(map, Vector2i(2, 0)), 0x40)
+	assert_eq(_at(map, Vector2i(6, 0)), 0x42)
+	## The PHONE card is not owned here, so its two cells keep the blank
+	## `Pokegear_FinishTilemap` filled them with.
+	assert_eq(_at(map, Vector2i(4, 0)), Gen2TownMapPage.CARD_BLANK_TILE)
+
+
+## `PrintHoursMins`: twelve-hour, the hour space-padded and the minute not, and
+## both midnight and noon printed as twelve.
+func test_the_clock_card_prints_the_source_reading() -> void:
+	assert_eq(Gen2TownMapPage._clock_reading(0, 7), "12:07 AM")
+	assert_eq(Gen2TownMapPage._clock_reading(12, 0), "12:00 PM")
+	assert_eq(Gen2TownMapPage._clock_reading(9, 30), " 9:30 AM")
+	assert_eq(Gen2TownMapPage._clock_reading(23, 59), "11:59 PM")
+	var map: PackedInt32Array = _page.clock_tilemap([], 3, 13, 5, "")
+	assert_eq(_text(map, Gen2TownMapPage.CLOCK_DAY_AT, 9), "WEDNESDAY")
+	assert_eq(_text(map, Gen2TownMapPage.CLOCK_TIME_AT, 8), " 1:05 PM")
+	assert_eq(_text(map, Gen2TownMapPage.CLOCK_SWITCH_AT, 8), " SWITCH▶")
+
+
+## `UpdateRadioStation` places a station's name and `NoRadioStation` places
+## nothing, which is a dial between two channels.
+func test_the_radio_card_prints_only_a_tuned_station() -> void:
+	assert_eq(
+		_text(_page.radio_tilemap([], "LUCKY CHANNEL"), Gen2TownMapPage.RADIO_STATION_AT, 13),
+		"LUCKY CHANNEL"
+	)
+	## The card's own art is left where a name would go, which in the fixture is
+	## its flat fill.
+	assert_eq(
+		_at(_page.radio_tilemap([], ""), Gen2TownMapPage.RADIO_STATION_AT),
+		Gen2TownMapPage.CARD_BLANK_TILE
+	)
+
+
+## `GetCallerName`: a trainer's own name with a colon and their class on the line
+## below, everyone else on one line, and `.PlacePhoneBars`' fourth tile only
+## where there is service.
+func test_the_phone_card_lists_callers_the_source_way() -> void:
+	var rows: Array = [
+		{"name": "MOM:"}, {"name": "JACK", "class": "SCHOOLBOY"},
+	]
+	var map: PackedInt32Array = _page.phone_tilemap([], rows, 1, true, "")
+	assert_eq(_text(map, Vector2i(Gen2TownMapPage.PHONE_NAME_COLUMN, 4), 4), "MOM:")
+	assert_eq(_text(map, Vector2i(Gen2TownMapPage.PHONE_NAME_COLUMN, 6), 5), "JACK:")
+	assert_eq(_text(map, Vector2i(Gen2TownMapPage.PHONE_CLASS_COLUMN, 7), 9), "SCHOOLBOY")
+	assert_eq(
+		_at(map, Vector2i(Gen2TownMapPage.PHONE_CURSOR_COLUMN, 6)),
+		Gen2TownMapPage.PHONE_CURSOR_CODE
+	)
+	assert_eq(_at(map, Gen2TownMapPage.PHONE_SERVICE_AT), Gen2TownMapPage.PHONE_SERVICE_TILE)
+	assert_eq(
+		_at(_page.phone_tilemap([], rows, 0, false, ""), Gen2TownMapPage.PHONE_SERVICE_AT),
+		Gen2TownMapPage.CARD_BLANK_TILE
+	)
+
+
+## `PokegearPhoneContactSubmenu`: the cursor in the strings' own column, the
+## text one tile right of it, and a two-option box opening two rows lower than a
+## three-option one so both end on the same row.
+func test_the_phone_submenu_sits_where_its_strings_do() -> void:
+	var map: PackedInt32Array = _page.phone_tilemap([], [], 0, true, "")
+	_page.draw_phone_submenu(map, ["CALL", "DELETE", "CANCEL"], 1)
+	assert_eq(_text(map, Vector2i(11, 6), 4), "CALL")
+	assert_eq(_text(map, Vector2i(11, 8), 6), "DELETE")
+	assert_eq(_text(map, Vector2i(11, 10), 6), "CANCEL")
+	assert_eq(
+		_at(map, Vector2i(Gen2TownMapPage.PHONE_SUBMENU_CURSOR_COLUMN, 8)),
+		Gen2TownMapPage.PHONE_CURSOR_CODE
+	)
+	var short_map: PackedInt32Array = _page.phone_tilemap([], [], 0, true, "")
+	_page.draw_phone_submenu(short_map, ["CALL", "CANCEL"], 0)
+	assert_eq(_text(short_map, Vector2i(11, 8), 4), "CALL")
+	assert_eq(_text(short_map, Vector2i(11, 10), 6), "CANCEL")
+
+
+## `YesNoBox`'s `lb bc, SCREEN_WIDTH - 6, 7`, which DELETE opens over the card.
+func test_the_yes_no_box_is_at_the_source_corner() -> void:
+	var map: PackedInt32Array = _page.phone_tilemap([], [], 0, true, "")
+	_page.draw_yes_no(map, 1)
+	assert_eq(
+		_at(map, Vector2i(Gen2TownMapPage.YES_NO_BOX[0], Gen2TownMapPage.YES_NO_BOX[1])),
+		RomLayout.FRAME_FIRST_CODE + RomLayout.FRAME_TOP_LEFT
+	)
+	assert_eq(_text(map, Vector2i(16, 8), 3), "YES")
+	assert_eq(_text(map, Vector2i(16, 10), 2), "NO")
+	assert_eq(_at(map, Vector2i(15, 10)), Gen2TownMapPage.PHONE_CURSOR_CODE)
+
+
+## A run of the tile map read back as text, which is what the page printed.
+func _text(map: PackedInt32Array, at: Vector2i, length: int) -> String:
+	var out: String = ""
+	for column: int in length:
+		out += Gen2Text.character(_at(map, at + Vector2i(column, 0)))
+	return out
