@@ -309,6 +309,31 @@ func test_sending_one_out_after_a_faint_calls_nobody_back() -> void:
 	assert_false(battle.must_replace(Gen2Battle.PLAYER))
 
 
+## `_GetFrontpic` draws Unown by `wUnownLetter`, so the letter travels with the
+## send-out the way the level and the HP do. Every other species carries zero.
+func test_a_send_out_carries_the_unown_letter_its_dvs_name() -> void:
+	var letter_dvs: int = Gen2Stats.pack_dvs(2, 0, 0, 0)
+	var battle: Gen2Battle = _party_battle(
+		[
+			_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+			Gen2BattleMon.create(
+				_data, RomLayout.UNOWN_SPECIES, 20, [Fixture.TACKLE], letter_dvs
+			),
+		],
+		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
+	)
+	var sent: Dictionary = _first(
+		battle.send_out(Gen2Battle.PLAYER, 1), Gen2Battle.SENT_OUT
+	)
+	assert_eq(int(sent["unown_form"]), Gen2Stats.unown_letter(letter_dvs))
+	assert_gt(int(sent["unown_form"]), 1, "and it is not form A by default")
+	assert_eq(
+		int(_first(battle.send_out(Gen2Battle.PLAYER, 0), Gen2Battle.SENT_OUT)["unown_form"]),
+		0,
+		"anything else is not an Unown"
+	)
+
+
 ## `HandlePlayerMonFaint` and `HandleEnemyMonFaint`'s replacement tail, which is
 ## the only entry point besides a turn that moves a battle on.
 func _replacement_battle(player: Array, enemy: Array, trainer: bool) -> Gen2Battle:

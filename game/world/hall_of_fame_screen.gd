@@ -124,7 +124,9 @@ func _refresh_pic(page: Dictionary) -> void:
 	if _data == null or StringName(page.get("kind", &"")) != Gen2HallOfFame.PAGE_MON:
 		return
 	var species: int = int(page.get("species", 0))
-	var pic: Dictionary = _data.species_pic(species)
+	var unown_form: int = int(page.get("unown_form", 0))
+	var pic: Dictionary = _data.unown_pic(unown_form - 1) if unown_form > 0 \
+		else _data.species_pic(species)
 	if pic.is_empty():
 		return
 	var image: Image = Gen2PicImage.from_atlas(

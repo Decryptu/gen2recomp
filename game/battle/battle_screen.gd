@@ -270,6 +270,10 @@ var _enemy_trainer_index: int = 0
 
 var _enemy: int = 1
 var _player: int = 1
+## Which Unown letter each side's picture is, and zero for every other species.
+## Drawn values like the two above: they follow the events rather than the party.
+var _enemy_unown_form: int = 0
+var _player_unown_form: int = 0
 var _enemy_level: int = 5
 var _player_level: int = 5
 var _enemy_hp: int = 0
@@ -821,6 +825,10 @@ func _init_battle_display() -> void:
 	## reading the options file itself, since it is scene-free; this is the one
 	## place every battle here passes through.
 	_battle.battle_style_set = Gen2OptionsStore.current().battle_style_set
+	## `InitBattleDisplay` draws both pics, so the letters start from the party
+	## the same way the species above do; every later change is a send-out.
+	_enemy_unown_form = Gen2Battle.unown_form_of(_battle.enemy)
+	_player_unown_form = Gen2Battle.unown_form_of(_battle.player)
 	_close_switch()
 	_reseed_bg_map()
 	set_hp(
@@ -2920,10 +2928,12 @@ func _apply_event_state(event: Dictionary) -> void:
 			if int(event["side"]) == Gen2Battle.ENEMY:
 				enemy_seen.emit(int(event["species"]))
 				_enemy = int(event["species"])
+				_enemy_unown_form = int(event.get("unown_form", 0))
 				_enemy_level = int(event["level"])
 				set_hp(int(event["hp"]), int(event["max_hp"]), _player_hp, _player_max_hp)
 			else:
 				_player = int(event["species"])
+				_player_unown_form = int(event.get("unown_form", 0))
 				_player_level = int(event["level"])
 				set_hp(_enemy_hp, _enemy_max_hp, int(event["hp"]), int(event["max_hp"]))
 			# A send-out draws a picture through `GetBattleMonBackpic` or
@@ -3624,6 +3634,8 @@ func _push_view() -> void:
 		return
 	_renderer.set_view({
 		"enemy_species": _enemy, "player_species": _player,
+		"enemy_unown_form": _enemy_unown_form,
+		"player_unown_form": _player_unown_form,
 		## Whose picture is the substitute's doll rather than the Pokémon's own.
 		"enemy_substitute": bool(_substitute_pic[Gen2Battle.ENEMY]),
 		"player_substitute": bool(_substitute_pic[Gen2Battle.PLAYER]),

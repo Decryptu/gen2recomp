@@ -231,20 +231,35 @@ func _pic_layer(
 func _ensure_pixels() -> void:
 	var enemy_key: Array = [
 		int(_view.get("enemy_species", 0)), bool(_view.get("enemy_substitute", false)),
+		int(_view.get("enemy_unown_form", 0)),
 	]
 	if enemy_key != _enemy_pixels_key:
 		_enemy_pixels = _substitute_pic(false) if bool(enemy_key[1]) \
-			else _padded_pic(_data.species_pic(int(enemy_key[0])), Gen2BattleScreenMap.ENEMY_SIDE)
+			else _padded_pic(
+				_battler_pic(int(enemy_key[0]), int(enemy_key[2]), false),
+				Gen2BattleScreenMap.ENEMY_SIDE
+			)
 		_enemy_pixels_key = enemy_key
 	var player_key: Array = [
 		int(_view.get("player_species", 0)), bool(_view.get("player_substitute", false)),
+		int(_view.get("player_unown_form", 0)),
 	]
 	if player_key != _player_pixels_key:
 		_player_pixels = _substitute_pic(true) if bool(player_key[1]) \
 			else _padded_pic(
-				_data.species_pic(int(player_key[0]), true), Gen2BattleScreenMap.PLAYER_SIDE
+				_battler_pic(int(player_key[0]), int(player_key[2]), true),
+				Gen2BattleScreenMap.PLAYER_SIDE
 			)
 		_player_pixels_key = player_key
+
+
+## `_GetFrontpic`'s own branch: Unown is drawn out of `UnownPicPointers` by
+## letter, and everything else out of the species table. The atlas is indexed
+## from zero and a letter counts from one, which is the subtraction here.
+func _battler_pic(species: int, unown_form: int, back: bool) -> Dictionary:
+	if species == RomLayout.UNOWN_SPECIES and unown_form > 0:
+		return _data.unown_pic(unown_form - 1, back)
+	return _data.species_pic(species, back)
 
 
 func _substitute_pic(player_side: bool) -> PackedByteArray:

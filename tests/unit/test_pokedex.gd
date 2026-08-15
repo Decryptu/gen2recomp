@@ -262,7 +262,7 @@ func test_no_previous_entry_opens_at_the_top() -> void:
 
 
 ## `Pokedex_DrawOptionScreenBG` hides UNOWN MODE while wUnlockedUnownMode is
-## clear, which is the only state this project can be in.
+## clear, which is what `Pokedex_CheckUnlockedUnownMode` reads the flag for.
 func test_the_option_screen_lists_three_modes_without_the_unown_dex() -> void:
 	var rows: Array = Gen2Pokedex.mode_rows()
 	assert_eq(rows.size(), 3)
@@ -426,3 +426,53 @@ func test_the_results_listing_is_four_rows() -> void:
 	dex.begin_search()
 	dex.listing_height = Gen2Pokedex.SEARCH_RESULTS_HEIGHT
 	assert_eq(dex.rows().size(), 4)
+
+
+## `Pokedex_CheckUnlockedUnownMode` is the whole of the mode's gate, and
+## `Pokedex_DrawUnownModeBG` lists `wUnownDex` in catching order behind it.
+func test_unown_mode_is_unlocked_by_its_flag_and_lists_the_catching_order() -> void:
+	var state: Gen2WorldState = _state([])
+	var dex: Gen2Pokedex = Gen2Pokedex.open(_data, state, RomLayout.DEXMODE_NEW)
+	assert_false(dex.unown_unlocked())
+	assert_eq(Gen2Pokedex.mode_rows(dex.unown_unlocked()).size(), 3)
+
+	state.set_engine_flag(Gen2WorldState.ENGINE_UNOWN_DEX)
+	assert_true(dex.unown_unlocked())
+	assert_eq(Gen2Pokedex.mode_rows(dex.unown_unlocked()).size(), 4)
+
+	for form: int in [3, 26, 1]:
+		state.update_unown_dex(form)
+	dex.open_unown_mode()
+	assert_eq(dex.unown_forms(), [3, 26, 1] as Array[int])
+	assert_eq(dex.selected_unown_form(), 3)
+	assert_eq(dex.unown_word(), "CWORD")
+
+
+## `Pokedex_UnownModeHandleDPadInput` reads left and right only, stops at
+## `wDexUnownCount` rather than at twenty-six, and does not wrap at either end.
+func test_the_unown_cursor_stops_at_both_ends_of_what_has_been_caught() -> void:
+	var state: Gen2WorldState = _state([])
+	for form: int in [5, 9]:
+		state.update_unown_dex(form)
+	var dex: Gen2Pokedex = Gen2Pokedex.open(_data, state, RomLayout.DEXMODE_NEW)
+	dex.open_unown_mode()
+	assert_false(dex.move_unown(Gen2Button.LEFT), "the first form is the left edge")
+	assert_false(dex.move_unown(Gen2Button.UP), "up and down are not read at all")
+	assert_true(dex.move_unown(Gen2Button.RIGHT))
+	assert_eq(dex.selected_unown_form(), 9)
+	assert_eq(dex.unown_word(), "IWORD")
+	assert_false(dex.move_unown(Gen2Button.RIGHT), "the last form caught is the right edge")
+
+
+## An empty dex is a legal state: the flag is set by the research centre before
+## anything has been caught, and `Pokedex_LoadUnownFrontpicTiles` reads the zero
+## in the first slot.
+func test_an_empty_unown_dex_has_no_form_and_no_word() -> void:
+	var state: Gen2WorldState = _state([])
+	state.set_engine_flag(Gen2WorldState.ENGINE_UNOWN_DEX)
+	var dex: Gen2Pokedex = Gen2Pokedex.open(_data, state, RomLayout.DEXMODE_NEW)
+	dex.open_unown_mode()
+	assert_true(dex.unown_forms().is_empty())
+	assert_eq(dex.selected_unown_form(), 0)
+	assert_eq(dex.unown_word(), "")
+	assert_false(dex.move_unown(Gen2Button.RIGHT))

@@ -9,6 +9,7 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/oak.png oak_pc
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/pc.png pc
 ##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/pc.png pc a,down,a
+##   Godot --path . -s res://tools/preview_world_services.gd -- /tmp/unown.png unown_dex
 ##
 ## `presses` drives the overlay with its own buttons before the shot, which is
 ## how the apricorn mode's second box is photographed.
@@ -18,6 +19,10 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
 ## The seven ApricornBalls rows, named so a capture reads as the cartridge's
 ## list rather than as the fixture's ITEM<number> placeholders.
+## The forms the Unown dex preview has caught, in catching order rather than
+## alphabetically, since that is the whole of what the screen lists.
+const UNOWN_CAUGHT: Array[int] = [6, 21, 1, 14, 26]
+
 const APRICORNS: Dictionary = {
 	0x55: "RED APRICORN", 0x59: "BLU APRICORN", 0x5C: "YLW APRICORN",
 	0x5D: "GRN APRICORN", 0x61: "WHT APRICORN", 0x63: "BLK APRICORN",
@@ -63,6 +68,13 @@ func _initialize() -> void:
 	var state := Gen2WorldState.new({}, {}, items, {0: 500})
 	if _kind == &"town_map":
 		state.set_engine_flag(Gen2WorldState.ENGINE_MAP_CARD, true)
+	if _kind == &"unown_dex":
+		state.set_engine_flag(Gen2WorldState.ENGINE_POKEDEX, true)
+		## What the Ruins of Alph research centre leaves behind: the upgraded
+		## dex, and the forms caught since, in catching order.
+		state.set_engine_flag(Gen2WorldState.ENGINE_UNOWN_DEX, true)
+		for form: int in UNOWN_CAUGHT:
+			state.update_unown_dex(form)
 	var world := Gen2WorldAPI.open(
 		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6), state
 	)
@@ -87,6 +99,14 @@ func _process(_delta: float) -> bool:
 			_screen._open_trainer_card()
 		elif _kind == &"oak_pc":
 			_screen.open_prof_oaks_pc()
+		elif _kind == &"unown_dex":
+			# The live path: the dex's own OPTION screen, its fourth row.
+			_screen._open_pokedex()
+			for button: int in [
+				Gen2Button.SELECT, Gen2Button.DOWN, Gen2Button.DOWN,
+				Gen2Button.DOWN, Gen2Button.A,
+			]:
+				_screen._pokedex_host.handle_button(button)
 		else:
 			var waiting: Array = _screen._world.dispatch_script_events(Vector2i(7, 6))
 			_screen._show_script_results(waiting)
@@ -94,7 +114,9 @@ func _process(_delta: float) -> bool:
 			# The overlay owns the buttons when one is up; the trainer card and
 			# Prof Oak's PC are the world screen's own hosts, so they take theirs
 			# through the same entry point a key press does.
-			if _screen._service_host != null:
+			if _screen._pokedex_host != null:
+				_screen._pokedex_host.handle_button(button)
+			elif _screen._service_host != null:
 				_screen._service_host.handle_button(button)
 			else:
 				_screen.press_button(button)

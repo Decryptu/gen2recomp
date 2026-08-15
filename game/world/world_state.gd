@@ -31,6 +31,11 @@ const ENGINE_HALL_OF_FAME: int = ENGINE_CREDITS_SKIP
 ## `CheckReceivedDex`'s own flag, which is what the Pokemon Center PC's list
 ## selection reads before the Hall of Fame one.
 const ENGINE_POKEDEX: int = 11
+## The next bit of the same `wStatusFlags` byte, `STATUSFLAGS_UNOWN_DEX_F`, which
+## `Pokedex_CheckUnlockedUnownMode` reads and only the Ruins of Alph research
+## centre's scientist sets. Ahead of ENGINE_MOBILE_SYSTEM, so it is one index on
+## every profile.
+const ENGINE_UNOWN_DEX: int = 12
 ## The one entry pokegold does not ship, and so the index every profile split in
 ## this table is measured from. See engine_flag().
 const ENGINE_MOBILE_SYSTEM: int = 16
@@ -146,6 +151,11 @@ var _seen_species: Dictionary = {}
 ## seen array rather than derived from the party, because the cartridge's own
 ## flag survives releasing, trading away or boxing the Pokemon that set it.
 var _caught_species: Dictionary = {}
+## `wUnownDex`: the Unown forms caught, in catching order rather than by letter,
+## and only the ones that reached the party. Twenty-six slots on the cartridge,
+## where an empty one is a zero; here the list is as long as it is full, so its
+## size is `.count_unown`'s own answer.
+var _unown_dex: Array[int] = []
 var _phone_receive_cycle: int = 0
 var _phone_receive_minutes: int = PHONE_RECEIVE_DELAYS[0]
 var _pending_special_phone_call: int = 0
@@ -276,6 +286,7 @@ func to_dict() -> Dictionary:
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
 		"seen_species": _seen_species.duplicate(),
 		"caught_species": _caught_species.duplicate(),
+		"unown_dex": _unown_dex.duplicate(),
 		"phone_receive_cycle": _phone_receive_cycle,
 		"phone_receive_minutes": _phone_receive_minutes,
 		"pending_special_phone_call": _pending_special_phone_call,
@@ -339,6 +350,14 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 		for raw_tree: Variant in picked as Dictionary:
 			if int(raw_tree) > 0 and bool((picked as Dictionary)[raw_tree]):
 				restored._picked_fruit_trees[int(raw_tree)] = true
+	## Absent in a state written before the Unown dex, which reads as an empty
+	## one: the flag that unlocks the mode is an engine flag and survives on its
+	## own, so an old save shows the mode with nothing listed under it, which is
+	## what a player who has caught none would see anyway.
+	var stored_unown: Variant = source.get("unown_dex", [])
+	if stored_unown is Array:
+		for raw_form: Variant in stored_unown as Array:
+			restored.update_unown_dex(int(raw_form))
 	restored.set_registered_item(int(source.get("registered_item", 0)))
 	restored.set_wild_encounter_cooldown(int(source.get("wild_encounter_cooldown", 0)))
 	restored.set_wild_encounters_off(bool(source.get("wild_encounters_off", false)))
@@ -383,6 +402,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
 	_seen_species = restored._seen_species.duplicate()
 	_caught_species = restored._caught_species.duplicate()
+	_unown_dex = restored._unown_dex.duplicate()
 	_phone_receive_cycle = restored._phone_receive_cycle
 	_phone_receive_minutes = restored._phone_receive_minutes
 	_pending_special_phone_call = restored._pending_special_phone_call
@@ -1070,6 +1090,32 @@ func set_species_caught(species: int, caught: bool = true) -> void:
 		set_species_seen(species, true)
 	else:
 		_caught_species.erase(species)
+
+
+## `UpdateUnownDex`: appends the form unless it is already listed. The walk stops
+## at the first empty slot, so a form only ever reaches the end of the list, and
+## a full twenty-six returns without writing anything.
+##
+## Its caller is what limits this, not the routine: `GeneratePartyMonStats` runs
+## it only for a PARTYMON, so an Unown that goes straight to the PC is caught
+## without entering the dex.
+func update_unown_dex(form: int) -> void:
+	if form < 1 or form > RomLayout.UNOWN_FORMS:
+		return
+	if form in _unown_dex or _unown_dex.size() >= RomLayout.UNOWN_FORMS:
+		return
+	_unown_dex.append(form)
+
+
+## The forms caught, in catching order. `Pokedex_DrawUnownModeBG` walks exactly
+## this and stops at the first empty slot.
+func unown_dex() -> Array[int]:
+	return _unown_dex.duplicate()
+
+
+## `_GetVarAction.UnownCaught`, which is `VAR_UNOWNCOUNT`.
+func unown_caught_count() -> int:
+	return _unown_dex.size()
 
 
 func has_seen_species(species: int) -> bool:

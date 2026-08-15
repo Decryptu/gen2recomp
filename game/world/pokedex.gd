@@ -29,10 +29,9 @@ const PAGE_1: int = 0
 const PAGE_2: int = 1
 
 ## `Pokedex_DrawOptionScreenBG.Modes`, verbatim, and the description
-## `Pokedex_DisplayModeDescription` prints under each. UNOWN is built in its
-## source position and refused, the way the start menu builds Pokedex: nothing
-## here tracks STATUSFLAGS_UNOWN_DEX_F, so `wUnlockedUnownMode` is always false
-## and `.NoUnownModeArrowCursorData`'s three rows are what the screen gets.
+## `Pokedex_DisplayModeDescription` prints under each. UNOWN is offered only once
+## `Pokedex_CheckUnlockedUnownMode` has read STATUSFLAGS_UNOWN_DEX_F; without it
+## `.NoUnownModeArrowCursorData`'s three rows are what the screen gets.
 const MODE_ROWS: Array[Dictionary] = [
 	{
 		"mode": RomLayout.DEXMODE_NEW,
@@ -123,6 +122,9 @@ var search_type_2: int = SEARCH_TYPE_NONE
 var search_cursor: int = SEARCH_ROW_TYPE_1
 ## `wDexSearchResultCount`.
 var search_result_count: int = 0
+
+## `wDexCurUnownIndex`, a position in the caught-forms list rather than a letter.
+var unown_cursor: int = 0
 
 var _data: GameData = null
 var _state: Gen2WorldState = null
@@ -264,6 +266,63 @@ func seen_count() -> int:
 
 func caught_count() -> int:
 	return _state.caught_count() if _state != null else 0
+
+
+## `wUnlockedUnownMode`, which is `Pokedex_CheckUnlockedUnownMode`'s reading of
+## the one engine flag the Ruins of Alph research centre sets.
+func unown_unlocked() -> bool:
+	return _state != null \
+		and _state.is_engine_flag_active(Gen2WorldState.ENGINE_UNOWN_DEX)
+
+
+## `Pokedex_DrawUnownModeBG`'s own walk: the forms caught, in catching order.
+## `wDexUnownCount` is its length.
+func unown_forms() -> Array[int]:
+	return _state.unown_dex() if _state != null else [] as Array[int]
+
+
+## `Pokedex_InitUnownMode`, which opens on the first form caught rather than on
+## the one last looked at.
+func open_unown_mode() -> void:
+	unown_cursor = 0
+
+
+## The form under the cursor, 1 being A, or zero when nothing has been caught:
+## `Pokedex_LoadUnownFrontpicTiles` reads `wUnownDex` at the cursor, and an empty
+## dex leaves it on a zero slot.
+func selected_unown_form() -> int:
+	var forms: Array[int] = unown_forms()
+	if unown_cursor < 0 or unown_cursor >= forms.size():
+		return 0
+	return forms[unown_cursor]
+
+
+## `PrintUnownWord`, which reads the word for the form under the cursor. Empty
+## for an empty dex, which is the blank row the fill leaves.
+func unown_word() -> String:
+	var form: int = selected_unown_form()
+	if form <= 0 or _data == null:
+		return ""
+	return _data.unown_word(form)
+
+
+## `Pokedex_UnownModeHandleDPadInput`: right and left only, no wrap at either
+## end, and the right edge is `wDexUnownCount` rather than twenty-six. Answers
+## whether the cursor moved.
+func move_unown(button: int) -> bool:
+	var count: int = unown_forms().size()
+	match button:
+		Gen2Button.RIGHT:
+			if unown_cursor + 1 >= count:
+				return false
+			unown_cursor += 1
+			return true
+		Gen2Button.LEFT:
+			if unown_cursor <= 0:
+				return false
+			unown_cursor -= 1
+			return true
+	return false
 
 
 ## `Pokedex_ListingHandleDPadInput`. Answers whether the position changed, which

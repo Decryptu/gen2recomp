@@ -10,10 +10,10 @@ extends Control
 ## tile-accurate listing with. Every rule the screen obeys is [Gen2Pokedex]'s,
 ## which is the source's own.
 ##
-## Five of the source's six states are here: the listing, the entry screen, the
-## OPTION screen, SEARCH and its results. The Unown dex is not, so the OPTION
-## screen draws `.NoUnownModeArrowCursorData`'s three rows, which is what the
-## cartridge draws while `wUnlockedUnownMode` is clear.
+## All six of the source's states are here: the listing, the entry screen, the
+## OPTION screen, SEARCH, its results and the Unown dex. The OPTION screen draws
+## `.NoUnownModeArrowCursorData`'s three rows until the Ruins of Alph research
+## centre has set the flag, which is what the cartridge draws too.
 ##
 ## The entry screen's AREA is the exception to the panel above: `Pokedex_GetArea`
 ## is the cartridge's own region map, so it opens [Gen2TownMapScreen], which
@@ -26,7 +26,7 @@ signal closed
 ## player: the overworld's own answers it, the way it answers a script's cry.
 signal cry_requested(species: int)
 
-enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS, AREA }
+enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS, AREA, UNOWN }
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -120,6 +120,8 @@ func handle_button(button: int) -> bool:
 			return _handle_search(button)
 		Mode.SEARCH_RESULTS:
 			return _handle_search_results(button)
+		Mode.UNOWN:
+			return _handle_unown(button)
 	return false
 
 
@@ -259,8 +261,15 @@ func _handle_option(button: int) -> bool:
 
 ## `.ChangeMode`, including the message it shows while the order is rebuilt.
 ## Choosing the mode already in use returns to the listing untouched.
+##
+## UNOWN is not one of them: `.MenuAction_UnownMode` never writes `wCurDexMode`,
+## it jumps straight to DEXSTATE_UNOWN_MODE, so the listing keeps the mode it
+## had and the Unown screen answers back to OPTION rather than to the listing.
 func _choose_mode() -> void:
 	var row: Dictionary = _mode_rows[_option_cursor]
+	if int(row["mode"]) == RomLayout.DEXMODE_UNOWN:
+		_open_unown_mode()
+		return
 	var changed: bool = _dex.change_mode(int(row["mode"]))
 	if changed:
 		_world.state.set_last_dex_mode(_dex.mode)
@@ -296,7 +305,7 @@ func _open_entry_mode() -> void:
 
 func _open_option_mode() -> void:
 	_mode = Mode.OPTION
-	_mode_rows = Gen2Pokedex.mode_rows()
+	_mode_rows = Gen2Pokedex.mode_rows(_dex.unown_unlocked())
 	_title.text = "OPTION"
 	_summary.text = ""
 	_status.text = ""
@@ -308,6 +317,48 @@ func _open_option_mode() -> void:
 		if int(_mode_rows[index]["mode"]) == _dex.mode:
 			_option_cursor = index
 	_render_option()
+
+
+## `Pokedex_UpdateUnownMode`: left and right walk the forms caught, and A or B
+## both leave. `.a_b` goes back to DEXSTATE_OPTION_SCR, not to the listing.
+func _handle_unown(button: int) -> bool:
+	match button:
+		Gen2Button.A, Gen2Button.B:
+			_open_option_mode()
+			return true
+		Gen2Button.LEFT, Gen2Button.RIGHT:
+			if _dex.move_unown(button):
+				_render_unown()
+			return true
+	return false
+
+
+## `Pokedex_InitUnownMode`, which opens on the first form caught.
+func _open_unown_mode() -> void:
+	_mode = Mode.UNOWN
+	_dex.open_unown_mode()
+	_title.text = "UNOWN MODE"
+	_status.text = ""
+	_footer.text = "Left/Right: form    A or B: back"
+	_render_unown()
+
+
+## `Pokedex_DrawUnownModeBG` and `PrintUnownWord`: the forms caught, in catching
+## order, with the cursor's own letter and its word underneath. The letters are
+## drawn with the alphabet rather than the Unown font, which is
+## `Pokedex_LoadUnownFont`'s inverted copy of the pic sheet and is not imported.
+func _render_unown() -> void:
+	var forms: Array[int] = _dex.unown_forms()
+	_summary.text = "CAUGHT %2d/%d" % [forms.size(), RomLayout.UNOWN_FORMS]
+	var letters: PackedStringArray = PackedStringArray()
+	for index: int in forms.size():
+		var letter: String = char("A".unicode_at(0) + forms[index] - 1)
+		letters.append(("[%s]" if index == _dex.unown_cursor else " %s ") % letter)
+	for child: Node in _options.get_children():
+		child.queue_free()
+	_add_line(" ".join(letters))
+	_add_line("")
+	_add_line(_dex.unown_word())
 
 
 ## `Pokedex_UpdateSearchScreen`: up and down move the four rows, left and right

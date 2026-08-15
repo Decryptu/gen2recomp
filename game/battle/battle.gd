@@ -748,6 +748,18 @@ func opponent_of(side: int) -> int:
 	return ENEMY if side == PLAYER else PLAYER
 
 
+## Which Unown letter a Pokémon is, 1 being A, and zero for anything else.
+##
+## `_GetFrontpic` draws Unown out of `UnownPicPointers` by `wUnownLetter`, which
+## `GetUnownLetter` fills from the same DVs the stats came from. It is a display
+## value the way the level and the HP in an event are, so it travels with the
+## send-out rather than being read off the party by whatever draws the picture.
+static func unown_form_of(battler: Gen2BattleMon) -> int:
+	if battler == null or battler.species != RomLayout.UNOWN_SPECIES:
+		return 0
+	return Gen2Stats.unown_letter(battler.persistent_dvs())
+
+
 ## `BattleCommand_FreezeTarget`'s own tail, which writes the flag on the side it
 ## just froze so [method _tick_defrost] leaves that one alone this turn.
 func mark_just_got_frozen(side: int) -> void:
@@ -1318,6 +1330,7 @@ func send_out(
 		"type": SENT_OUT, "side": side, "index": index,
 		"species": current.active_mon().species, "level": current.active_mon().level,
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
+		"unown_form": unown_form_of(current.active_mon()),
 	})
 	(_participants[side] as Dictionary)[index] = true
 	if dragged_by >= 0:

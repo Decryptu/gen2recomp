@@ -87,6 +87,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
 	_write_menu_text(manifest)
 	_write_pokecenter_pc(manifest)
+	_write_unown_words(manifest)
 	_write_credits(directory, manifest, crystal_commands)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
@@ -375,6 +376,15 @@ static func _write_menu_text(manifest: Dictionary) -> void:
 
 ## `PokemonCenterPC`'s two row runs, its `.WhichPC` lists and the six texts the
 ## routine prints, as the cartridge words them.
+## One word per Unown form, each opening on its own letter the way
+## `UnownWords`' do, so a test can tell which form the dex is showing.
+static func _write_unown_words(manifest: Dictionary) -> void:
+	var words: Array = []
+	for form: int in RomLayout.UNOWN_FORMS:
+		words.append("%sWORD" % char("A".unicode_at(0) + form))
+	manifest["unown_words"] = words
+
+
 static func _write_pokecenter_pc(manifest: Dictionary) -> void:
 	manifest["pokecenter_pc"] = {
 		"rows": {

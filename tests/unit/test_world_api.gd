@@ -308,6 +308,9 @@ func _write_cache(game_id: String = "testworld") -> void:
 		"game_id": game_id,
 		"sha1": "0123456789abcdef",
 		"complete": true,
+		## `UnownWalls`' four, since the special that draws one names them by
+		## index and a wrong index has to be told from a right one.
+		"unown_walls": ["WALLA", "WALLB", "WALLC", "WALLD"],
 	})
 
 
@@ -2867,6 +2870,64 @@ func test_readvar_partycount_reads_the_set_party_summary() -> void:
 	assert_eq(result.size(), 1)
 	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
 	assert_true(world.event_flag_active(41))
+
+
+## `DisplayUnownWords` draws the word a chamber wall spells and holds on
+## `JoyWaitAorB`; the `setval` in front of it is which word. The script carries
+## on into `closetext` once the box is acknowledged, and an index the table does
+## not have refuses rather than drawing a blank box.
+func test_the_unown_wall_special_says_the_word_its_setval_names() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:63B0"] = [
+		Gen2WorldScript.SETVAL, 2,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_DISPLAY_UNOWN_WORDS, 0x00,
+		Gen2WorldScript.END,
+	]
+	scripts["48:63C0"] = [
+		Gen2WorldScript.SETVAL, 9,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_DISPLAY_UNOWN_WORDS, 0x00,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x63B0,
+	})
+	var word: Dictionary = runner.advance()
+	assert_eq(word["status"], &"waiting", JSON.stringify(word))
+	assert_eq(word["event"]["type"], &"text")
+	assert_eq(word["event"]["text"], "WALLC")
+	assert_eq(runner.advance(true)["status"], &"complete")
+
+	var refused := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x63C0,
+	})
+	var failure: Dictionary = refused.advance()
+	assert_eq(failure["status"], &"failed", JSON.stringify(failure))
+	assert_eq(failure["reason"], &"unknown_unown_wall")
+
+
+## `_GetVarAction.UnownCaught` counts `wUnownDex` up to its first empty slot.
+## All three Ruins of Alph scientists and the Kabuto chamber's wall open with
+## `readvar VAR_UNOWNCOUNT`, so an unsupported variable stops them talking.
+func test_readvar_unowncount_counts_the_unown_dex() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6390"] = [
+		Gen2WorldScript.READVAR, 0x0E,
+		Gen2WorldScript.IFEQUAL, 2, 0xA0, 0x63,
+		Gen2WorldScript.END,
+	]
+	scripts["48:63A0"] = [Gen2WorldScript.SETEVENT, 44, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	world.state.update_unown_dex(4)
+	world.state.update_unown_dex(19)
+	world.current_map.events["coord_events"][0]["script"] = 0x6390
+	var result: Array = world.dispatch_script_events()
+	assert_eq(result.size(), 1)
+	assert_eq(result[0]["status"], &"complete", JSON.stringify(result))
+	assert_true(world.event_flag_active(44))
 
 
 func test_checkpoke_answers_the_party_summary_species_and_fails_without_one() -> void:

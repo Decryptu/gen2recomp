@@ -69,6 +69,24 @@ func test_hp_dv_is_assembled_from_the_low_bit_of_the_other_four() -> void:
 	assert_eq(Gen2Stats.hp_dv(Gen2Stats.pack_dvs(14, 14, 14, 14)), 0, "even DVs contribute nothing")
 
 
+## `GetUnownLetter`: the middle two bits of each DV, in attack, defense, speed
+## and special order, over ten. The published letters for a few DV words, which
+## a shift in the wrong direction cannot reproduce.
+func test_the_unown_letter_is_the_middle_bits_of_every_dv_over_ten() -> void:
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(0, 0, 0, 0)), 1, "A")
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(15, 15, 15, 15)), 26, "Z")
+	# Only bits 2 and 1 of each DV are read: 1 and 8 are outside them, so a
+	# Pokémon whose DVs are all odd is still A.
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(9, 9, 9, 9)), 1)
+	# Attack's pair is the top of the byte, so it alone spans most of the range.
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(2, 0, 0, 0)), 7)
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(4, 0, 0, 0)), 13)
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(6, 0, 0, 0)), 20)
+	# And special's is the bottom, so it alone never leaves A.
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(0, 0, 0, 6)), 1)
+	assert_eq(Gen2Stats.unown_letter(Gen2Stats.pack_dvs(0, 0, 6, 6)), 2)
+
+
 func test_dvs_pack_into_the_word_the_cartridge_stores() -> void:
 	var packed: int = Gen2Stats.pack_dvs(1, 2, 3, 4)
 	assert_eq(Gen2Stats.attack_dv(packed), 1)
