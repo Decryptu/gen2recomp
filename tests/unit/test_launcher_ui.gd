@@ -236,6 +236,56 @@ func test_dragging_the_row_settles_on_whatever_it_was_left_nearest() -> void:
 	assert_eq(stage.selected, 0, "clicking the one beside it chooses it")
 
 
+## The pointer path itself, pushed through a viewport rather than handed to the
+## stage. Every other test here calls `_gui_input` directly and is blind to what
+## the mouse actually reaches: a card that stopped the pointer left the row
+## selectable only by the gaps between the cards, on a mouse and on a
+## touchscreen alike.
+func test_a_press_on_a_cartridge_reaches_the_row_behind_it() -> void:
+	var stage: Gen2CartridgeStage = await _pointed_stage()
+	var neighbour: Gen2Cartridge = stage.cartridge(RomRegistry.ORDER[1])
+	assert_eq(neighbour.mouse_filter, Control.MOUSE_FILTER_IGNORE, "the card is not a wall")
+	_point(stage, neighbour.get_global_rect().get_center())
+	await get_tree().process_frame
+	assert_eq(stage.selected, 1, "pressing a cartridge chooses it")
+
+	# And a drag begun on a card carries the row, which is the touch gesture.
+	# After the slide, so the card being grabbed is the size it has at rest.
+	await wait_seconds(0.4)
+	var card: Gen2Cartridge = stage.selected_cartridge()
+	var from: Vector2 = card.get_global_rect().get_center()
+	var by := Vector2(-card.size.x * 1.2, 0.0)
+	_pointer(stage, _button(from, true))
+	_pointer(stage, _motion(from + by, by))
+	_pointer(stage, _button(from + by, false))
+	await wait_seconds(0.5)
+	assert_eq(stage.selected, 2, "dragging from a cartridge moves the row")
+
+
+## A shelf in a viewport of its own, so pushed input is routed the way the
+## running launcher routes it. The test runner's own interface is over the
+## window and would take every press pushed at that one.
+func _pointed_stage() -> Gen2CartridgeStage:
+	var holder := SubViewport.new()
+	holder.size = Vector2i(1000, 640)
+	holder.handle_input_locally = true
+	add_child_autofree(holder)
+	var page: Gen2ShelfPage = Gen2ShelfPage.create(_light, false)
+	holder.add_child(page)
+	page.size = Vector2(1000, 640)
+	await get_tree().process_frame
+	return page.stage()
+
+
+func _point(stage: Gen2CartridgeStage, at: Vector2) -> void:
+	_pointer(stage, _button(at, true))
+	_pointer(stage, _button(at, false))
+
+
+func _pointer(stage: Gen2CartridgeStage, event: InputEvent) -> void:
+	(stage.get_viewport() as SubViewport).push_input(event, true)
+
+
 func test_a_scroll_pane_only_stops_a_pad_when_there_is_more_to_see() -> void:
 	var pane: Gen2LauncherScroll = Gen2LauncherScroll.create()
 	pane.size = Vector2(200, 120)

@@ -102,6 +102,13 @@ func load_mods(game_id: StringName = &"") -> Array:
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	host.set_target_game(game_id)
 	host.discover()
+	if not mods_are_allowed():
+		_loaded_mods = []
+		if not host.manifests().is_empty():
+			print("Mods: %d installed, none loaded. Pass --mods to run them." % [
+				host.manifests().size()
+			])
+		return _loaded_mods
 	_loaded_mods = host.load_discovered()
 	# A mod registers its own controls inside its entry script, which is after the
 	# options were applied, so the InputMap gets them now rather than never.
@@ -114,6 +121,24 @@ func load_mods(game_id: StringName = &"") -> Array:
 			failure.get("reason", "unknown"), failure.get("detail", ""),
 		])
 	return _loaded_mods
+
+
+## Whether this process runs the mods it finds.
+##
+## A headless run or one driving a `-s` tool script is a check, a test tier or a
+## screenshot, and a mod that swaps the renderer or shuffles a table changes what
+## those measure without saying so anywhere in their output. Such a run discovers
+## mods, so a list is still right, and loads none unless `--mods` is passed. A
+## player's own launch is neither, so what they switched on in the launcher is
+## what runs.
+static func mods_are_allowed() -> bool:
+	var args: PackedStringArray = OS.get_cmdline_args()
+	if args.has("--mods") or OS.get_cmdline_user_args().has("--mods"):
+		return true
+	return not (
+		DisplayServer.get_name() == "headless"
+		or args.has("-s") or args.has("--script")
+	)
 
 
 func loaded_mods() -> Array:

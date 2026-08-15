@@ -72,9 +72,11 @@ func _build() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	custom_minimum_size = Vector2(0, MIN_HEIGHT)
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	resized.connect(_place_all)
 	focus_entered.connect(_place_all)
 	focus_exited.connect(_place_all)
+	mouse_exited.connect(func() -> void: _hover(-1))
 	for index: int in _order.size():
 		var cartridge: Gen2Cartridge = Gen2Cartridge.create(_theme, _order[index])
 		add_child(cartridge)
@@ -152,9 +154,12 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		_on_click(event)
-	elif event is InputEventMouseMotion and _grabbed:
-		accept_event()
-		_on_drag(event)
+	elif event is InputEventMouseMotion:
+		if _grabbed:
+			accept_event()
+			_on_drag(event)
+		else:
+			_hover(_at((event as InputEventMouseMotion).position))
 
 
 ## The row is dragged rather than paged: a press takes hold of it, the pointer
@@ -188,6 +193,7 @@ func _on_click(click: InputEventMouseButton) -> void:
 	if not _grabbed:
 		return
 	_grabbed = false
+	_hover(_at(click.position))
 	# A press that went nowhere is a click on whatever it landed on. Anything
 	# further than that was a drag, and a drag chooses by where it stopped.
 	if _travel <= TAP:
@@ -196,6 +202,14 @@ func _on_click(click: InputEventMouseButton) -> void:
 			_on_pressed(hit)
 			return
 	_settle()
+
+
+## Lights whichever card the pointer is over, and names it in the tooltip. The
+## cards take no pointer events of their own, so this is where hover lives.
+func _hover(index: int) -> void:
+	for at: int in _cartridges.size():
+		_cartridges[at].set_hovered(at == index)
+	tooltip_text = RomRegistry.title_for(_order[index]) if index >= 0 else ""
 
 
 func _on_drag(motion: InputEventMouseMotion) -> void:

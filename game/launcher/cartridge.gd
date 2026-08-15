@@ -65,13 +65,13 @@ static func create(theme: Gen2LauncherTheme, id: StringName) -> Gen2Cartridge:
 
 
 func _build() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	tooltip_text = RomRegistry.title_for(game_id)
-	mouse_entered.connect(_on_hover.bind(true))
-	mouse_exited.connect(_on_hover.bind(false))
-	# The stage owns every press on the row, because a press here is the start of
-	# a drag as often as it is a choice, and only the stage knows which it became.
+	# The stage owns the pointer for the whole row, so a card is invisible to it
+	# and calls [method set_hovered] when the stage says so. A press here is the
+	# start of a drag as often as it is a choice, and only the stage knows which
+	# it became; a card that took the press would also lose the release, because
+	# a drag long enough carries the card being held off the stage and Godot
+	# stops delivering to a control that is no longer drawn.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	resized.connect(_place)
 
 	_bay = Control.new()
@@ -212,6 +212,14 @@ func _corner(centre: Vector2, radius: float, from: float, to: float) -> PackedVe
 		var angle: float = lerpf(from, to, float(step) / float(steps))
 		points.append(centre + Vector2(cos(angle), sin(angle)) * radius)
 	return points
+
+
+## Lit and lifted under the pointer. Called by the stage, which hit-tests the
+## row itself.
+func set_hovered(entered: bool) -> void:
+	if _hover == entered:
+		return
+	_on_hover(entered)
 
 
 func _on_hover(entered: bool) -> void:
