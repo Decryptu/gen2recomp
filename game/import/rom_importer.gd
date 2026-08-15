@@ -3520,6 +3520,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
+		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
 		"menu_text": _import_menu_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
@@ -4052,6 +4053,27 @@ func _import_card_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"background": background, "badge": badge}
 
 
+## `_CGB_Pokedex`'s three palettes.
+##
+## `interface` is PREDEFPAL_POKEDEX, the four colours the whole screen is drawn
+## through; `question_mark` is what an unseen species' Slowpoke picture wears,
+## which `_CGB_Pokedex` fills the 7x7 pic box with; `cursor` is object palette 7,
+## the arrow's own. All three are four colours stored whole rather than as a
+## pair, the way `card_badge_palette` is.
+func _import_pokedex_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pokedex", {})
+	var out: Dictionary = {}
+	for name: String in ["interface", "question_mark", "cursor"]:
+		var at: int = int(entry.get("%s_palette" % name, -1))
+		if at < 0:
+			continue
+		var colors: Array = []
+		for index: int in Gen2Palette.COLORS_PER_PIC:
+			colors.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
+		out[name] = colors
+	return out
+
+
 ## `Palette_TextBG7`, the four colours a text box is drawn through. Only index 0
 ## and index 3 are ever a pixel, since the font is 1bpp; the two between them are
 ## what a palette fade over a box passes through. Empty on Gold and Silver.
@@ -4525,6 +4547,33 @@ func _import_town_map_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `Pokedex_LoadGFX`'s two LZ runs, each as one strip of tiles.
+##
+## Kept out of the fixed table [method _import_tiles] uses for the same reason
+## the region map's are: a compressed run has to be decompressed before its tile
+## count is even known.
+func _import_pokedex_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pokedex", {})
+	if not entry.has("gfx"):
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for run: Array in [
+		["pokedex", int(entry["gfx"]), RomLayout.POKEDEX_TILES],
+		["pokedex_slowpoke", int(entry["slowpoke"]), RomLayout.POKEDEX_SLOWPOKE_TILES],
+	]:
+		var name: String = String(run[0])
+		var tiles: int = int(run[2])
+		var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(run[1]))
+		if _lz.failed or raw.size() < tiles * Gen2Tiles.TILE_BYTES:
+			return {}
+		var indices: PackedByteArray = Gen2Tiles.decode_2bpp_strip(raw, 0, tiles)
+		if not RomCache.write_indices(RomCache.tile_path(directory, name), indices):
+			return {}
+		out[name] = _strip_sheet_entry(tiles)
+	return out
+
+
 ## The title screen's graphics, each as one strip of tiles.
 ##
 ## Every one but the trail is an LZ run, so they cannot go through the fixed
@@ -4682,6 +4731,24 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.CARD_FRAME_TILES,
 			"first_code": 0,
 			"bits": 2,
+		},
+		## `Footprints`, one 1bpp strip of every species' four tiles.
+		## `Pokedex_GetAndPlaceFootprint` addresses a half at a time, so the
+		## strip is stored the cartridge's way and read through
+		## [method GameData.footprint_tiles] rather than reordered here.
+		## `UnownFont`, which `Pokedex_LoadUnownFont` inverts over the dex
+		## sheet's own tiles rather than loading beside it.
+		"unown_font": {
+			"offset": int(layout["pokedex"]["unown_font"]),
+			"tiles": RomLayout.UNOWN_FONT_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		"footprints": {
+			"offset": int(layout["pokedex"]["footprints"]),
+			"tiles": RomLayout.FOOTPRINT_SLOTS * RomLayout.FOOTPRINT_TILES,
+			"first_code": 0,
+			"bits": 1,
 		},
 		## LoadNamingScreenGFX's own four. The border and the cursor are 2bpp,
 		## the two entry markers 1bpp, and all four are located from the keyboard
@@ -4849,6 +4916,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_ditto_sheet(rom, layout), true)
 	written.merge(_import_title_sheets(rom, layout), true)
 	written.merge(_import_town_map_sheets(rom, layout), true)
+	written.merge(_import_pokedex_sheets(rom, layout), true)
 	written.merge(_import_intro_sheets(rom, layout), true)
 	written.merge(_import_gs_intro_sheets(rom, layout), true)
 	var done: int = 0

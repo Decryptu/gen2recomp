@@ -609,6 +609,42 @@ const CARD_PIC_COLUMNS: int = 5
 const CARD_PIC_ROWS: int = 7
 const CARD_PIC_TILES: int = CARD_PIC_COLUMNS * CARD_PIC_ROWS
 
+## The Pokedex's own graphics (engine/pokedex/pokedex.asm).
+##
+## `PokedexLZ` is the 58 tiles `Pokedex_LoadGFX` decompresses to `vTiles2 tile
+## $31`, and `PokedexSlowpokeLZ` the 55 that go to `vTiles0`, which is what an
+## unseen species is drawn as. Both were located by compressing the pinned
+## `gfx/pokedex` PNGs with pret's own `tools/lzcompress` flags and matching the
+## bytes: each hits once per dump, the second follows the first, and that is the
+## order the source stores them in.
+##
+## `Footprints` is 1bpp and uncompressed: 251 species of four tiles, stored as
+## eight top halves and then the eight matching bottom halves, which is why a
+## species' bottom half sits [constant FOOTPRINT_HALF_STRIDE] tiles past its top.
+## The 8 KiB run matches once per dump and is byte identical on all three.
+const POKEDEX_TILES: int = 58
+const POKEDEX_SLOWPOKE_TILES: int = 55
+## `Pokedex_GetAndPlaceFootprint` asks for two 1bpp tiles at a time, twice.
+const FOOTPRINT_TILES: int = 4
+const FOOTPRINT_HALF_TILES: int = 2
+## The gap the source calls "each bottom half is 8 tiles off": eight species of
+## two tiles sit between a footprint's halves.
+const FOOTPRINT_HALF_STRIDE: int = 8 * FOOTPRINT_HALF_TILES
+const FOOTPRINT_SPECIES: int = 251
+## The stored image is 16x64 tiles, which is 256 species of four and not 251:
+## the last eight species' bottom halves are only addressable because the run
+## carries the whole grid. All 1,024 tiles are imported for that reason.
+const FOOTPRINT_SLOTS: int = 256
+
+## `UnownFont`, the alphabet `Pokedex_LoadUnownFont` inverts into the dex sheet's
+## own `$40` onwards. The file is 27 tiles and `Request2bpp` sends
+## `NUM_UNOWN + 1`, which is the same 27; the `39 tiles` the copy before it asks
+## for runs past the sheet into whatever follows and is never drawn. Located by
+## matching the assembled `gfx/font/unown_font.png`, which hits once per dump.
+const UNOWN_FONT_TILES: int = 27
+## `FIRST_UNOWN_CHAR`, where the letters land.
+const UNOWN_FONT_FIRST_TILE: int = 0x40
+
 ## `DrawIntroPlayerPic`'s uncompressed 7x7 picture. Crystal stores Chris and
 ## Kris column-major; Gold and Silver use CAL's normal trainer picture instead.
 const INTRO_PLAYER_PIC_COLUMNS: int = 7
@@ -1676,6 +1712,16 @@ const GOLD_SILVER: Dictionary = {
 		"entry_banks": [0x68, 0x69, 0x6A, 0x6B],
 		"order_alpha": 0x40C65,
 		"order_new": 0x40D60,
+		# The screen's own graphics; see POKEDEX_TILES for how these were
+		# located. All five are byte identical across the three dumps, so only
+		# the addresses differ.
+		"gfx": 0x41511,
+		"slowpoke": 0x416B3,
+		"footprints": 0xF930E,
+		"interface_palette": 0xA34D,
+		"unown_font": 0xFB30E,
+		"question_mark_palette": 0x9559,
+		"cursor_palette": 0x9551,
 	},
 	# Battle animations. `BattleAnimations` was located by matching
 	# `BattleAnim_Pound` whole (d1 01 e0 01 31 d0 08 88 38 00 06 d0 01 88 38 00
@@ -2024,6 +2070,17 @@ const CRYSTAL: Dictionary = {
 		"entry_banks": [0x60, 0x6E, 0x73, 0x74],
 		"order_alpha": 0x40C65,
 		"order_new": 0x40D60,
+		# Crystal stores the two small palettes the other way round, which is
+		# why each is pinned rather than walked from its neighbour.
+		# `interface_palette` is PREDEFPAL_POKEDEX, pinned as its own offset the
+		# way `trainer_card.badge_palette` pins PREDEFPAL_CGB_BADGE.
+		"gfx": 0x4150E,
+		"slowpoke": 0x416B0,
+		"footprints": 0xF9434,
+		"interface_palette": 0x9EDE,
+		"unown_font": 0x1DC000,
+		"question_mark_palette": 0x8FBA,
+		"cursor_palette": 0x8FC2,
 	},
 	# Battle animations; see the Gold and Silver block above for how these were
 	# located. All five tables sit in the same two banks in every dump and only

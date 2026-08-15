@@ -36,17 +36,17 @@ const MODE_ROWS: Array[Dictionary] = [
 	{
 		"mode": RomLayout.DEXMODE_NEW,
 		"label": "NEW #DEX MODE",
-		"description": "#MN are listed by\nevolution type.",
+		"description": "PKMN are listed by\nevolution type.",
 	},
 	{
 		"mode": RomLayout.DEXMODE_OLD,
 		"label": "OLD #DEX MODE",
-		"description": "#MN are listed by\nofficial type.",
+		"description": "PKMN are listed by\nofficial type.",
 	},
 	{
 		"mode": RomLayout.DEXMODE_ABC,
 		"label": "A to Z MODE",
-		"description": "#MN are listed\nalphabetically.",
+		"description": "PKMN are listed\nalphabetically.",
 	},
 	{
 		"mode": RomLayout.DEXMODE_UNOWN,

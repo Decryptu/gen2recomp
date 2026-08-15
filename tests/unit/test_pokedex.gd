@@ -523,3 +523,135 @@ func test_the_dex_reopens_on_a_mod_species_it_was_left_on() -> void:
 	)
 	assert_eq(unknown.scroll, 0)
 	assert_eq(unknown.cursor, 0)
+
+
+## The page, which is the picture the model drives: engine/pokedex/pokedex.asm's
+## own `Pokedex_Draw*BG` routines as tile writes. Only the layout is checked
+## here; that the sheets behind it are the cartridge's is `tools/checks/pokedex.gd`.
+func _page() -> Gen2PokedexPage:
+	var page: Gen2PokedexPage = Gen2PokedexPage.from_data(_data)
+	assert_not_null(page, "the fixture carries the dex sheets")
+	assert_true(page.ready())
+	return page
+
+
+func _cell(map: PackedInt32Array, x: int, y: int) -> int:
+	return map[y * Gen2PokedexPage.COLUMNS + x]
+
+
+## `Pokedex_DrawMainScreenBG`: the sidebar column and its three joints, and the
+## two counts `CountSetBits` prints.
+func test_the_main_screen_draws_the_sidebar_and_both_counts() -> void:
+	var map: PackedInt32Array = _page().main_background(40, 20)
+	assert_eq(_cell(map, 8, 0), Gen2PokedexPage.SIDEBAR_TOP)
+	assert_eq(_cell(map, 8, 4), Gen2PokedexPage.SIDEBAR)
+	assert_eq(_cell(map, 8, 8), Gen2PokedexPage.SIDEBAR_SPLIT_TOP)
+	assert_eq(_cell(map, 8, 9), Gen2PokedexPage.SIDEBAR_SPLIT_BOTTOM)
+	assert_eq(_cell(map, 8, 16), Gen2PokedexPage.SIDEBAR_BOTTOM)
+	assert_eq(_cell(map, 6, 12), Gen2Text.encode("40")[0], "SEEN's own digits")
+	assert_eq(_cell(map, 6, 15), Gen2Text.encode("20")[0], "OWN's")
+
+
+## `Pokedex_PlaceFrontpicTopLeftCorner` counts down each column, because that is
+## how a pic is stored.
+func test_the_picture_box_names_its_tiles_down_each_column() -> void:
+	var map: PackedInt32Array = _page().main_background(0, 0)
+	assert_eq(_cell(map, 1, 1), 0)
+	assert_eq(_cell(map, 1, 2), 1, "one down is the next tile")
+	assert_eq(_cell(map, 2, 1), 7, "one across is seven on")
+
+
+## `DrawPokedexListWindow`'s scroll bar, which DEXMODE_OLD replaces with the two
+## tiles that are not one, and `Pokedex_PrintListing`'s own row spacing.
+func test_the_listing_window_swaps_its_scroll_bar_in_old_mode() -> void:
+	var page: Gen2PokedexPage = _page()
+	var rows: Array = _dex([1, 2], [2]).rows()
+	var new_mode: PackedInt32Array = page.window_map(rows, false, 0)
+	var old_mode: PackedInt32Array = page.window_map(rows, true, 0)
+	var columns: int = Gen2PokedexPage.WINDOW_COLUMNS
+	assert_eq(new_mode[11], Gen2PokedexPage.SCROLL_TOP)
+	assert_eq(old_mode[11], Gen2PokedexPage.NO_SCROLL_TOP)
+	assert_eq(new_mode[5 * columns + 11], Gen2PokedexPage.SCROLL)
+	assert_eq(old_mode[5 * columns + 11], Gen2PokedexPage.NO_SCROLL)
+
+
+## `Pokedex_PlaceCaughtSymbolIfCaught` writes one cell ahead of the name, and
+## `Pokedex_PlaceDefaultStringIfNotSeen` replaces the name entirely.
+func test_a_listing_row_marks_caught_and_hides_an_unseen_name() -> void:
+	var page: Gen2PokedexPage = _page()
+	var order: Array = Fixture.new_order()
+	var caught: int = int(order[0])
+	var map: PackedInt32Array = page.window_map(_dex([caught], [caught]).rows(), false, 0)
+	var columns: int = Gen2PokedexPage.WINDOW_COLUMNS
+	assert_eq(map[2 * columns], Gen2PokedexPage.CURSOR_CODE, "the arrow is in column 0")
+	assert_eq(map[2 * columns + 1], Gen2PokedexPage.CAUGHT_SYMBOL)
+	assert_eq(
+		map[4 * columns + 2], Gen2Text.encode(Gen2Pokedex.NOT_SEEN_NAME)[0],
+		"the second row has not been seen",
+	)
+
+
+## `Pokedex_DrawFootprint`'s four cells, and `Pokedex_LoadCurrentFootprint`'s own
+## stride: a species' bottom half sits eight species of two tiles past its top.
+func test_the_entry_screen_names_its_footprint_cells() -> void:
+	var page: Gen2PokedexPage = _page()
+	assert_true(page.load_footprint(_data, 1))
+	var tiles: PackedInt32Array = _data.footprint_tiles(1)
+	assert_eq(tiles[2], tiles[0] + RomLayout.FOOTPRINT_HALF_STRIDE)
+	var map: PackedInt32Array = page.entry_map(
+		1, "MON001", _data.dex_entry(1), true, Gen2Pokedex.PAGE_1, 0
+	)
+	var at: Vector2i = Gen2PokedexPage.FOOTPRINT_AT
+	assert_eq(_cell(map, at.x, at.y), Gen2PokedexPage.FOOTPRINT_TOP)
+	assert_eq(_cell(map, at.x + 1, at.y + 1), Gen2PokedexPage.FOOTPRINT_BOTTOM + 1)
+
+
+## `DisplayDexEntry` prints the height as two digits of feet and two of inches
+## and the weight in tenths, and leaves the template's own placeholders on a
+## species that has not been caught.
+func test_the_entry_screen_prints_its_measurements_only_once_caught() -> void:
+	var page: Gen2PokedexPage = _page()
+	var entry: Dictionary = _data.dex_entry(211)
+	var caught: PackedInt32Array = page.entry_map(
+		211, "MON211", entry, true, Gen2Pokedex.PAGE_1, 0
+	)
+	var uncaught: PackedInt32Array = page.entry_map(
+		211, "MON211", entry, false, Gen2Pokedex.PAGE_1, 0
+	)
+	assert_eq(_cell(caught, 14, 7), Gen2PokedexPage.HEIGHT_FEET)
+	assert_eq(_cell(caught, 16, 7), Gen2Text.encode("11")[0], "eleven inches")
+	assert_eq(_cell(uncaught, 15, 7), Gen2Text.encode("?")[0], "the template's own")
+	assert_eq(_cell(caught, 1, 10), Gen2PokedexPage.PAGE_MARKER)
+	assert_eq(_cell(caught, 2, 10), Gen2PokedexPage.PAGE_ONE)
+	assert_eq(
+		_cell(page.entry_map(211, "MON211", entry, true, Gen2Pokedex.PAGE_2, 0), 2, 10),
+		Gen2PokedexPage.PAGE_TWO,
+	)
+
+
+## `Pokedex_DrawOptionScreenBG` draws the fourth row only once
+## `wUnlockedUnownMode` is set, and the box under it carries whichever message
+## the screen last asked for.
+func test_the_option_screen_draws_the_unown_row_only_when_it_is_unlocked() -> void:
+	var page: Gen2PokedexPage = _page()
+	var locked: PackedInt32Array = page.option_map(false, 0, "a description")
+	var unlocked: PackedInt32Array = page.option_map(true, 3, "a description")
+	var unown: int = Gen2Text.encode("UNOWN MODE")[0]
+	assert_ne(_cell(locked, 3, 10), unown)
+	assert_eq(_cell(unlocked, 3, 10), unown)
+	assert_eq(_cell(unlocked, 2, 10), Gen2PokedexPage.CURSOR_CODE)
+	assert_eq(_cell(unlocked, 1, 14), Gen2Text.encode("a")[0], "the box says it")
+
+
+## `UnownModeLetterAndCursorCoords` is indexed by catching position rather than
+## by form, so the second form caught takes the second cell whichever letter it
+## is, and its cursor is not always in the column beside it.
+func test_the_unown_screen_places_its_letters_and_word() -> void:
+	var map: PackedInt32Array = _page().unown_map([1, 9], 1, "ESCAPE")
+	assert_eq(_cell(map, 4, 11), RomLayout.UNOWN_FONT_FIRST_TILE, "A caught first")
+	assert_eq(
+		_cell(map, 4, 10), RomLayout.UNOWN_FONT_FIRST_TILE + 8,
+		"I caught second, in the second cell",
+	)
+	assert_eq(_cell(map, 3, 10), Gen2PokedexPage.CURSOR_CODE)
+	assert_eq(_cell(map, 4, 15), Gen2Text.encode("ESCAPE")[0])

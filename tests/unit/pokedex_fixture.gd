@@ -73,6 +73,14 @@ static func build() -> GameData:
 		"sha1": SHA1,
 		"complete": true,
 		"unown_words": unown_words(),
+		"tiles": _tiles(path),
+		## `_CGB_Pokedex`'s three, at their real values so a page test reads the
+		## colours the screen actually draws through.
+		"pokedex_palettes": {
+			"interface": [0x7FFF, 0x2A9F, 0x195A, 0x0000],
+			"question_mark": [0x2EB, 0x227, 0xCC6, 0x584],
+			"cursor": [0x0000, 0x2EB, 0x227, 0x0000],
+		},
 	})
 	return GameData.open_directory(path)
 
@@ -94,3 +102,31 @@ static func _species() -> Array:
 			},
 		})
 	return out
+
+
+## `Pokedex_LoadGFX`'s sheets and the font the page draws characters with, each
+## at its real length and filled with its own index, so a test can say which
+## sheet a cell came from by reading one pixel.
+static func _tiles(path: String) -> Dictionary:
+	var sheets: Dictionary = {}
+	for entry: Array in [
+		["font", RomLayout.FONT_TILES, 3, RomLayout.FONT_FIRST_CODE],
+		["pokedex", RomLayout.POKEDEX_TILES, 1, 0],
+		["pokedex_slowpoke", RomLayout.POKEDEX_SLOWPOKE_TILES, 2, 0],
+		["unown_font", RomLayout.UNOWN_FONT_TILES, 3, 0],
+		["footprints", RomLayout.FOOTPRINT_SLOTS * RomLayout.FOOTPRINT_TILES, 1, 0],
+	]:
+		var name: String = String(entry[0])
+		var count: int = int(entry[1])
+		var indices := PackedByteArray()
+		indices.resize(count * Gen2Tiles.TILE_PIXELS)
+		indices.fill(int(entry[2]))
+		RomCache.write_indices(RomCache.tile_path(path, name), indices)
+		sheets[name] = {
+			"width": count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": count,
+			"first_code": int(entry[3]),
+			"bits": 1,
+		}
+	return sheets
