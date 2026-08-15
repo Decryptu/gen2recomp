@@ -25,6 +25,14 @@ func after_each() -> void:
 	Gen2ModInstaller.uninstall(PROBE_MOD_ID)
 
 
+## The mods page on its own, which is what every mod workflow but the file
+## picker lives on. Built outside the launcher because none of it needs one.
+func _mods_page() -> Gen2ModsPage:
+	var page: Gen2ModsPage = Gen2ModsPage.create(Gen2LauncherTheme.active())
+	add_child_autofree(page)
+	return page
+
+
 func _open_launcher() -> void:
 	var packed: PackedScene = load("res://game/main/main.tscn")
 	_launcher = packed.instantiate()
@@ -182,35 +190,30 @@ func test_launcher_reports_a_file_that_is_not_a_mod_archive() -> void:
 func test_index_install_requires_the_download_to_be_the_listed_mod() -> void:
 	_write_probe_mod_zip()
 	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(_mod_archive)
-	var dialog := Gen2ModIndexDialog.new()
-	add_child_autofree(dialog)
-	await get_tree().process_frame
+	var page: Gen2ModsPage = _mods_page()
 
-	# A feed offering one mod cannot deliver another.
-	var wrong: Dictionary = dialog.install_entry_bytes(
+	# A source offering one mod cannot deliver another.
+	var wrong: Dictionary = page.install_entry_bytes(
 		{"id": &"something_else", "name": "Something Else"}, bytes
 	)
 	assert_false(wrong["ok"])
 	assert_eq(wrong["reason"], &"unexpected_mod_id")
-	assert_string_contains(dialog.status_text(), "different mod")
+	assert_string_contains(page.status_text(), "different mod")
 
-	var right: Dictionary = dialog.install_entry_bytes(
+	var right: Dictionary = page.install_entry_bytes(
 		{"id": PROBE_MOD_ID, "name": "Launcher Probe"}, bytes
 	)
 	assert_true(right["ok"], JSON.stringify(right))
 	assert_eq(right["id"], PROBE_MOD_ID)
-	assert_string_contains(dialog.status_text(), "Installed")
+	assert_string_contains(page.status_text(), "Installed")
 
 
 ## A server that is down costs the freshness of a listing rather than the
 ## listing: the last feed that parsed is kept and shown, with the player told
 ## which copy they are looking at.
-func test_an_index_that_cannot_be_read_falls_back_to_the_copy_on_disk() -> void:
+func test_a_source_that_cannot_be_read_falls_back_to_the_copy_on_disk() -> void:
 	var feed: String = "https://mods.example.com/index.json"
-	var dialog := Gen2ModIndexDialog.new()
-	add_child_autofree(dialog)
-	await get_tree().process_frame
-	dialog.open_feed(feed)
+	var page: Gen2ModsPage = _mods_page()
 
 	var text: String = JSON.stringify({
 		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
@@ -218,25 +221,25 @@ func test_an_index_that_cannot_be_read_falls_back_to_the_copy_on_disk() -> void:
 		"mods": [{"id": "voxel", "name": "Voxel", "version": "1.2.0",
 			"download": "https://example.com/voxel.zip"}],
 	})
-	assert_true(bool(dialog.apply_feed_response(true, "", text).get("ok", false)))
-	assert_string_contains(dialog.status_text(), "lists 1 mod")
+	assert_true(bool(page.receive_feed_response(feed, true, text).get("ok", false)))
+	assert_string_contains(page.status_text(), "lists 1 mod")
 
-	dialog.apply_feed_response(false, "That index could not be read (HTTP 503).")
-	assert_string_contains(dialog.status_text(), "Showing the copy saved")
+	page.receive_feed_response(feed, false, "", "That source could not be read (HTTP 503).")
+	assert_string_contains(page.status_text(), "Showing the copy saved")
 
 	# A fetch that arrives as something other than a feed is the same answer.
-	dialog.apply_feed_response(true, "", "not json")
-	assert_string_contains(dialog.status_text(), "Showing the copy saved")
+	page.receive_feed_response(feed, true, "not json")
+	assert_string_contains(page.status_text(), "Showing the copy saved")
 
 	Gen2ModIndex.forget_cache(feed)
-	dialog.apply_feed_response(false, "That index could not be read (HTTP 503).")
-	assert_string_contains(dialog.status_text(), "HTTP 503")
-	assert_false(dialog.status_text().contains("Showing the copy"))
+	page.receive_feed_response(feed, false, "", "That source could not be read (HTTP 503).")
+	assert_string_contains(page.status_text(), "HTTP 503")
+	assert_false(page.status_text().contains("Showing the copy"))
 
 
 ## A listing offering a newer version than the one installed says so, and the
 ## count of them is on the status line.
-func test_an_index_names_the_mods_a_newer_version_is_listed_for() -> void:
+func test_a_source_names_the_mods_a_newer_version_is_listed_for() -> void:
 	_write_probe_mod_zip()
 	var installed: Dictionary = Gen2ModInstaller.install_zip(_mod_archive)
 	assert_true(bool(installed.get("ok", false)), JSON.stringify(installed))
@@ -244,27 +247,24 @@ func test_an_index_names_the_mods_a_newer_version_is_listed_for() -> void:
 	Gen2ModHost.instance().discover()
 
 	var feed: String = "https://mods.example.com/updates.json"
-	var dialog := Gen2ModIndexDialog.new()
-	add_child_autofree(dialog)
-	await get_tree().process_frame
-	dialog.open_feed(feed)
-	dialog.apply_feed_response(true, "", JSON.stringify({
+	var page: Gen2ModsPage = _mods_page()
+	page.receive_feed_response(feed, true, JSON.stringify({
 		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
 		"name": "Example",
 		"mods": [{"id": String(PROBE_MOD_ID), "name": "Launcher Probe", "version": "9.9.9",
 			"download": "https://example.com/probe.zip"}],
 	}))
-	assert_string_contains(dialog.status_text(), "1 can be updated")
+	assert_string_contains(page.status_text(), "1 can be updated")
 
 	# The same listing at the installed version offers a reinstall and no update.
-	dialog.apply_feed_response(true, "", JSON.stringify({
+	page.receive_feed_response(feed, true, JSON.stringify({
 		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
 		"name": "Example",
 		"mods": [{"id": String(PROBE_MOD_ID), "name": "Launcher Probe",
 			"version": String(installed["version"]),
 			"download": "https://example.com/probe.zip"}],
 	}))
-	assert_false(dialog.status_text().contains("can be updated"))
+	assert_false(page.status_text().contains("can be updated"))
 	Gen2ModIndex.forget_cache(feed)
 
 

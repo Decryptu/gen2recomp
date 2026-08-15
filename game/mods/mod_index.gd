@@ -202,6 +202,46 @@ static func cached_feed(feed: String, directory: String = CACHE_DIRECTORY) -> Di
 	return parsed
 
 
+## What a fetch of [param feed] amounts to, whether or not it arrived.
+##
+## A feed that parsed is kept and answered; anything else falls back to the copy
+## already on disk, so a server that is down costs the freshness of a listing
+## rather than the listing. `stale` is true for the fallback, with `age` in
+## seconds and `problem` the reason the fetch was not used. Separate from any
+## request so both answers a server can give are testable without one.
+static func receive_feed(
+	feed: String, ok: bool, text: String = "", problem: String = ""
+) -> Dictionary:
+	if ok:
+		var parsed: Dictionary = parse_feed(text)
+		if bool(parsed.get("ok", false)):
+			cache_feed(feed, text)
+			parsed["stale"] = false
+			return parsed
+		problem = Gen2ModRefusal.text(parsed)
+	var cached: Dictionary = cached_feed(feed)
+	if not bool(cached.get("ok", false)):
+		return {"ok": false, "reason": &"index_request_failed", "detail": problem}
+	cached["stale"] = true
+	cached["problem"] = problem
+	return cached
+
+
+## How old a cached listing is, rounded to the largest unit that still says
+## something useful: a listing hours old and one days old are different answers,
+## and minutes below an hour are not.
+static func age_text(seconds: int) -> String:
+	if seconds < 3600:
+		return "%d minute%s" % [maxi(seconds / 60, 1), "" if seconds < 120 else "s"]
+	if seconds < 86400:
+		@warning_ignore("integer_division")
+		var hours: int = seconds / 3600
+		return "%d hour%s" % [hours, "" if hours == 1 else "s"]
+	@warning_ignore("integer_division")
+	var days: int = seconds / 86400
+	return "%d day%s" % [days, "" if days == 1 else "s"]
+
+
 ## Drops a feed's cached copy, which [method unfollow] does so an index the
 ## player stopped following leaves nothing on disk.
 static func forget_cache(feed: String, directory: String = CACHE_DIRECTORY) -> void:

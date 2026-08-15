@@ -133,11 +133,11 @@ app's `Documents/mods` on iOS (reachable in the Files app, since the export sets
 `UIFileSharingEnabled`), and internal app storage on Android, where the system
 file picker is how an archive gets in.
 
-## Publishing an index
+## Publishing a source
 
-An index is a JSON feed listing mods that stay in their authors' own
+A source is a JSON feed listing mods that stay in their authors' own
 repositories. Anyone can publish one, and the game follows none until a player
-adds it, because following an index is trusting whoever publishes it.
+adds it, because following a source is trusting whoever publishes it.
 
 ```json
 {
@@ -177,10 +177,18 @@ guessed at, and a listing older than the installed copy is neither an update nor
 an error.
 
 Each feed's last listing that parsed is kept under `user://mod_index_cache/`. It
-goes up while the request is in flight and stays up when the fetch fails, with
-the age of the copy said on the status line, so browsing what you follow does not
-depend on the server being reachable at that moment. Unfollowing an index drops
-its cached copy with it.
+is what the mod list is built from, so the list opens instantly and offline and
+the network is only ever asked when the player asks for it, on **Sources**. A
+fetch that fails leaves the copy on disk up with its age said on the status
+line. Unfollowing a source drops its cached copy with it.
+
+The launcher's mod list is grouped by where each mod came from: a source that
+lists a mod's id owns it, and a mod no source lists came from a file. That is
+the whole rule and nothing records it, which is what makes removal mean two
+different things. Removing a mod a source lists uninstalls it and leaves the row
+behind offering the download again; removing one that came from a file deletes
+the only copy there was, and is confirmed first. A mod listed by two sources
+belongs to the first one followed, so it is on screen once.
 
 ## Adding content
 
