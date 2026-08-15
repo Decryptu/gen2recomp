@@ -90,8 +90,8 @@ func _verify_map_tables(game_id: StringName, data: GameData, crystal: bool) -> v
 			int(EXPECTED_ILEX_SET[game_id]),
 		]
 	)
-	# RockMonMaps is imported for Rock Smash, which is not implemented; the
-	# four rows are checked here so the table cannot rot unnoticed.
+	# RockMonMaps' four rows, checked beside the tree tables because both come
+	# out of the same importer pass; Rock Smash's own behaviour is its topic.
 	var rock_maps: Array = [
 		Vector2i(22, 3), Vector2i(22, 1), Vector2i(3, 78 if crystal else 70),
 		Vector2i(3, 40 if crystal else 32),

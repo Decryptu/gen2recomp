@@ -698,6 +698,12 @@ func _headbutt_with(player_id: int, seed_value: int) -> void:
 	# being pinned.
 	_world_screen._encounter_random.seed = seed_value
 	_world_screen._acknowledge_field_move_text()
+	## HeadbuttScript spends ShakeHeadbuttTree's 32 frames between the text and
+	## `callasm TreeMonEncounter`. The screen counts hardware frames off
+	## wall-clock delta, so this takes its processing away and spends them.
+	_world_screen.set_process(false)
+	for _frame: int in Gen2WorldEffects.HEADBUTT_TREE_FRAMES + 1:
+		_world_screen.advance_frame()
 	await get_tree().process_frame
 
 

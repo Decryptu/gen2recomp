@@ -31,7 +31,10 @@ const GROUPS: Dictionary = {
 		&"vermilion", &"saffron", &"celadon", &"cerulean", &"lavender", &"fuchsia",
 		&"pewter", &"cinnabar", &"radio", &"elite_four", &"ss_aqua", &"mt_silver",
 	],
-	&"art": [&"intro_movie", &"gs_intro", &"credits", &"town_map", &"battle_anims"],
+	&"art": [
+		&"intro_movie", &"gs_intro", &"credits", &"town_map", &"battle_anims",
+		&"overworld_effects",
+	],
 	&"tables": [
 		&"tmhm", &"naming", &"world_scripts", &"opening_lane", &"pokecenter_pc",
 		&"pack",

@@ -75,6 +75,11 @@ func _build() -> void:
 	_screen.set_save(save)
 	root.add_child(_screen)
 	current_scene = _screen
+	## The frames before the capture belong to the layout, not to the world: a
+	## screen left processing spends them on its own clock, and a long first
+	## frame could cross a cartridge minute and dispatch a phone call over the
+	## controller being photographed.
+	_screen.set_process(false)
 
 
 func _process(_delta: float) -> bool:

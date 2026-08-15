@@ -40,7 +40,7 @@ func _initialize() -> void:
 		return
 
 	var count: int = data.overworld_sprite_count()
-	var rows: int = ceili(float(count) / float(COLUMNS))
+	var rows: int = ceili(float(count) / float(COLUMNS)) + 1
 	var sheet := Image.create(COLUMNS * TILE_W, rows * TILE_H, false, Image.FORMAT_RGBA8)
 	sheet.fill(BACKGROUND)
 	for number: int in range(1, count + 1):
@@ -62,6 +62,35 @@ func _initialize() -> void:
 					Rect2i(0, 0, CELL, CELL),
 					at + Vector2i(facing * CELL, frame * CELL)
 				)
+	## The last row is the effect sheets, tile by tile in the order
+	## data/sprites/emotes.asm lists them, with the headbutt tree's eight after
+	## them. They are drawn over an object rather than as one, so they have no
+	## facings and no frames: a wrong offset shows up as noise here.
+	var effects_top: int = (rows - 1) * TILE_H + 1
+	var at_x: int = 1
+	for name: String in RomLayout.EMOTE_NAMES + ["headbutt_tree"] as Array[String]:
+		var effect: Dictionary = data.overworld_effect(name)
+		if effect.is_empty():
+			continue
+		var palette: PackedColorArray = data.overworld_sprite_palette(
+			Gen2WorldEffects.PAL_OW_TREE if name in ["grass_rustle", "headbutt_tree"]
+			else Gen2WorldEffects.PAL_OW_EMOTE,
+			Gen2WorldPalette.TIME_DAY,
+		)
+		var indices: PackedByteArray = effect["indices"]
+		var tiles: int = int(effect["tiles"])
+		for tile: int in tiles:
+			for y: int in Gen2Tiles.TILE_HEIGHT:
+				for x: int in Gen2Tiles.TILE_WIDTH:
+					var index: int = int(indices[
+						y * tiles * Gen2Tiles.TILE_WIDTH + tile * Gen2Tiles.TILE_WIDTH + x
+					])
+					sheet.set_pixel(
+						at_x + x, effects_top + y,
+						palette[index] if index < palette.size() else Color.MAGENTA
+					)
+			at_x += Gen2Tiles.TILE_WIDTH
+		at_x += 2
 	sheet.resize(sheet.get_width() * SCALE, sheet.get_height() * SCALE, Image.INTERPOLATE_NEAREST)
 	if sheet.save_png(args[1]) != OK:
 		push_error("Could not write %s" % args[1])

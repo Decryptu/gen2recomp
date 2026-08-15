@@ -81,6 +81,7 @@ var _world_palettes: Array = []
 var _decoded_palettes: Dictionary = {}
 var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
+var _overworld_effects: Array = []
 var _overworld_sprite_palettes: Array = []
 var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
@@ -636,6 +637,26 @@ func overworld_sprite_indices(number: int) -> PackedByteArray:
 	)
 	_indices[key] = data
 	return data
+
+
+## One of the sprites the engine draws over an object rather than as one, by the
+## name `data/sprites/emotes.asm` gives it plus ShakeHeadbuttTree's own sheet:
+## { tiles, vtile, indices }, empty when the cache does not hold it.
+func overworld_effect(name: String) -> Dictionary:
+	for row: Variant in _overworld_effect_records():
+		if not row is Dictionary or String((row as Dictionary).get("name", "")) != name:
+			continue
+		var record: Dictionary = row as Dictionary
+		return {
+			"name": name,
+			"tiles": int(record.get("tiles", 0)),
+			"vtile": int(record.get("vtile", 0)),
+			"indices": _payload_bytes(
+				record if record.has(RomCache.PAYLOAD_KEY) else record.get("bytes", []),
+				_blob("overworld_effects"),
+			),
+		}
+	return {}
 
 
 ## The reusable icon strip indexed by constants/icon_constants.asm.
@@ -1654,6 +1675,8 @@ func _section_json_path(section: String) -> String:
 			return RomCache.world_audio_path(directory)
 		"battle_anims":
 			return RomCache.battle_anims_path(directory)
+		"overworld_effects":
+			return RomCache.overworld_effects_path(directory)
 	return ""
 
 
@@ -1736,6 +1759,12 @@ func _sprites() -> Array:
 	if _claim_section("sprites"):
 		_overworld_sprites = _read_section(RomCache.overworld_sprites_path(directory), true)
 	return _overworld_sprites
+
+
+func _overworld_effect_records() -> Array:
+	if _claim_section("overworld_effects"):
+		_overworld_effects = _read_section(RomCache.overworld_effects_path(directory), true)
+	return _overworld_effects
 
 
 func _sprite_palettes() -> Array:

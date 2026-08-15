@@ -128,6 +128,21 @@ const OVERWORLD_SPRITE_PALETTE_GROUP_BYTES: int = 8
 const OVERWORLD_SPRITE_PALETTE_BYTES: int = OVERWORLD_SPRITE_PALETTE_GROUP_COUNT * OVERWORLD_SPRITE_PALETTE_GROUP_BYTES
 const OVERWORLD_SPRITE_TYPES: Array = [1, 2, 3]
 const OVERWORLD_SPRITE_PALETTE_COUNT: int = 8
+## data/sprites/emotes.asm's `emote` macro: CPU address, byte length, ROM bank,
+## and the VRAM address the sheet is loaded to. Twelve entries, in
+## constants/script_constants.asm's EMOTE_* order, and the last four are the
+## engine's own overlays rather than showemote arguments: a jump shadow, the
+## fishing rod, Strength's boulder dust and the tall-grass rustle.
+const EMOTE_RECORD_SIZE: int = 6
+const EMOTE_COUNT: int = 12
+## The `vTiles0 tile n` an emote record's last field holds. A sprite tile counts
+## from here, so the tile number is the distance in tiles from it.
+const VTILES0: int = 0x8000
+const EMOTE_NAMES: Array[String] = [
+	"shock", "question", "happy", "sad", "heart", "bolt", "sleep", "fish",
+	"shadow", "rod", "boulder_dust", "grass_rustle",
+]
+
 ## IconPointers has one null entry followed by the 38 reusable overworld icon
 ## shapes in constants/icon_constants.asm. The null entry is not graphic data.
 const MON_ICON_COUNT: int = 38
@@ -1558,6 +1573,11 @@ const GOLD_SILVER: Dictionary = {
 	"overworld_sprite_count": 95,
 	"overworld_sprite_palettes": 0xB8AE,
 	"overworld_icons": 0x8EABE,
+	"emotes": 0x143C1,
+	## ShakeHeadbuttTree's eight-tile sheet. CutTreeGFX and CutGrassGFX follow it
+	## in the same bank; neither is imported because nothing draws Cut's own
+	## animation yet.
+	"headbutt_tree_gfx": 0x8CB0B,
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
@@ -1866,6 +1886,8 @@ const CRYSTAL: Dictionary = {
 	"overworld_sprite_count": 102,
 	"overworld_sprite_palettes": 0xB469,
 	"overworld_icons": 0x8EC0D,
+	"emotes": 0x1444D,
+	"headbutt_tree_gfx": 0x8C893,
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
@@ -2189,6 +2211,10 @@ static func overworld_sprite_offset(layout: Dictionary, number: int) -> int:
 
 static func overworld_sprite_count(layout: Dictionary) -> int:
 	return int(layout.get("overworld_sprite_count", 0))
+
+
+static func emote_offset(layout: Dictionary, index: int) -> int:
+	return int(layout.get("emotes", -1)) + index * EMOTE_RECORD_SIZE
 
 
 static func overworld_icon_offset(layout: Dictionary, number: int) -> int:

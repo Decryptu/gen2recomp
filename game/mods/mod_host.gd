@@ -45,6 +45,11 @@ const RENDERER_SURFACE_METHOD: String = "uses_hardware_viewport"
 ## created and whenever the window changes it. Only reached by a renderer that
 ## asked for the native layer. Shared by both renderer kinds.
 const RENDERER_RESIZE_METHOD: String = "set_native_size"
+## Optional, world renderers only. Called with the screen's [Gen2WorldEffects]
+## when the renderer is built. It holds the sprites the engine draws over the
+## map rather than as objects, all of them presentation with no world state
+## behind them, so a renderer that draws its own effects can ignore it.
+const RENDERER_EFFECTS_METHOD: String = "set_effects"
 ## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
 ## per battle, before the first [code]set_view[/code], when the battle was
 ## entered from the world. It is where the fight is happening: a renderer staging

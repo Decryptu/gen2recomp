@@ -276,3 +276,22 @@ func test_a_zero_length_sleep_wraps_a_whole_byte() -> void:
 	assert_eq(object.walk_frame(), 0, "a sleep stands still")
 	assert_true(object.tick_step())
 	assert_false(object.scripted_steps, "and the stream is done after its own count")
+
+
+## `Movement_tree_shake` is a 24-frame STEP_TYPE_SLEEP under
+## OBJECT_ACTION_WEIRD_TREE: nothing moves, and `SetFacingWeirdTree` takes the
+## two high bits of the frame counter, so the drawing changes every four frames
+## and the object is stood back up at the end.
+func test_a_tree_shake_wobbles_where_it_stands() -> void:
+	var object: Gen2WorldObject = _object()
+	var cell: Vector2i = object.cell
+	object.queue_tree_shake(Gen2WorldAPI.TREE_SHAKE_FRAMES)
+	var frames: Array = []
+	for _frame: int in Gen2WorldAPI.TREE_SHAKE_FRAMES:
+		assert_true(object.tick_step())
+		frames.append(object.frame)
+	assert_eq(frames.slice(0, 8), [0, 0, 0, 1, 1, 1, 1, 2])
+	assert_eq(object.cell, cell, "a shake walks nothing")
+	assert_false(object.weird_tree)
+	assert_eq(object.frame, 0, "24 frames is not a whole cycle, so it is stood up by hand")
+	assert_false(object.tick_step())
