@@ -225,6 +225,19 @@ func _write_cache(game_id: String = "testworld") -> void:
 					{"level": 5, "species": 16}],
 			},
 		},
+		"bug_contest": {
+			"mons": [
+				{"percent": 50, "species": 10, "min_level": 7, "max_level": 18},
+				{"percent": 50, "species": 13, "min_level": 9, "max_level": 9},
+				{"percent": 255, "species": 49, "min_level": 30, "max_level": 40},
+			],
+			"contestants": [
+				{"trainer_class": 36, "trainer": 1, "placings": [
+					{"species": 10, "score": 300}, {"species": 11, "score": 285},
+					{"species": 12, "score": 226},
+				]},
+			],
+		},
 		"swarm_grass": {
 			"1:1": {
 				"map": "1:1", "rates": [255, 255, 255],
@@ -262,6 +275,9 @@ func _write_cache(game_id: String = "testworld") -> void:
 	})
 	RomCache.write_json(RomCache.world_standard_scripts_path(_directory), {
 		"0": {"bank": 48, "address": 0x6020, "bytes": [0x4C, 0x00, 0x70, 0x91]},
+		# BugContestResultsWarpScript's own index, so the contest can end the way
+		# CheckTimeEvents ends it: through the std script, not a special case.
+		"22": {"bank": 48, "address": 0x6020, "bytes": [0x4C, 0x00, 0x70, 0x91]},
 	})
 	RomCache.write_json(RomCache.world_text_path(_directory), {
 		"48:7000": [0x00, 0x80, 0x81, Gen2WorldScript.TEXT_TERMINATOR],
@@ -5983,3 +5999,111 @@ func test_the_picked_fruit_trees_survive_a_snapshot_round_trip() -> void:
 	var bad: Dictionary = state.apply_changes({}, {}, {"fruit_trees": {0: true}})
 	assert_false(bad["ok"])
 	assert_eq(bad["reason"], &"invalid_fruit_trees")
+
+
+## The Bug Catching Contest, from the officer's specials to the encounter and
+## the timer (engine/events/bug_contest/, engine/overworld/events.asm).
+func _contest_world(cell: Vector2i = Vector2i(5, 10)) -> Gen2WorldAPI:
+	var world := _world(cell)
+	world.state.set_wild_encounter_cooldown(0)
+	## The officer's own `setflag ENGINE_BUG_CONTEST_TIMER`, resolved for the
+	## profile the way every flag past ENGINE_MOBILE_SYSTEM has to be.
+	world.state.set_engine_flag(Gen2WorldState.engine_flag(
+		Gen2WorldState.ENGINE_BUG_CONTEST_TIMER,
+		Gen2WorldState.is_crystal_profile(world.data)
+	))
+	return world
+
+
+func test_a_contest_replaces_the_maps_own_tables_with_contest_mons() -> void:
+	var world := _contest_world()
+	assert_true(world.bug_contest_active())
+	var encounter: Dictionary = world.encounter_request(_seeded(), true)
+	assert_eq(encounter["source"], Gen2WorldBugContest.SOURCE_CONTEST)
+	assert_eq(encounter["rate"], Gen2WorldBugContest.RATE_ELSEWHERE)
+	assert_ne(int(encounter["pokemon"]), 16, "not the fixture map's own slot")
+	assert_eq(int(encounter["battle_type"]), Gen2WorldBugContest.BATTLE_TYPE)
+
+	## Its own rate rather than the map's 255, so a walk in the grass draws some
+	## of the time instead of every step.
+	var random: RandomNumberGenerator = _seeded()
+	var drawn: int = 0
+	for _step: int in 200:
+		world.state.set_wild_encounter_cooldown(0)
+		if not world.encounter_request(random).is_empty():
+			drawn += 1
+	assert_between(drawn, 1, 199, "the contest rate is neither never nor always")
+
+	## `CanEncounterWildMon` still gates it: a contest rolls nothing off grass.
+	world.player_cell = Vector2i(5, 9)
+	world.state.set_wild_encounter_cooldown(0)
+	assert_true(world.encounter_request(_seeded()).is_empty())
+
+
+func test_giving_park_balls_starts_the_timer_and_the_count() -> void:
+	var world := _contest_world()
+	var started: Dictionary = world.start_bug_contest()
+	assert_eq(int(started["park_balls"]), Gen2WorldBugContest.BALLS)
+	assert_eq(world.bug_contest_minutes_remaining(), Gen2WorldBugContest.MINUTES)
+	assert_eq(world.state.bug_contest_started()["hour"], world.world_hour)
+	assert_true(world.check_bug_contest_timer().is_empty(), "twenty minutes left")
+
+	## `CheckTimeEvents` ends it on the reading that runs out, and running out of
+	## balls reaches the same warp.
+	world.set_world_clock(
+		world.world_day, world.world_hour, world.world_minute + Gen2WorldBugContest.MINUTES
+	)
+	assert_eq(world.bug_contest_minutes_remaining(), 0)
+	assert_false(world.check_bug_contest_timer().is_empty())
+
+
+func test_the_contest_ends_when_the_park_balls_run_out() -> void:
+	var world := _contest_world()
+	world.start_bug_contest()
+	world.state.set_park_balls(0)
+	assert_false(world.check_bug_contest_timer().is_empty())
+
+
+func test_ending_the_contest_clears_the_flag_and_keeps_what_was_caught() -> void:
+	var world := _contest_world()
+	world.start_bug_contest()
+	world.state.set_contest_mon({"species": 10, "level": 12, "max_hp": 30})
+	assert_true(world.end_bug_contest()["ok"])
+	assert_false(world.bug_contest_active())
+	assert_eq(world.state.park_balls(), 0)
+	assert_eq(int(world.state.contest_mon()["species"]), 10, "judging still needs it")
+
+
+func test_the_judging_reads_the_contestants_that_turned_up() -> void:
+	var world := _contest_world()
+	for index: int in Gen2WorldBugContest.NUM_CONTESTANTS:
+		world.state.set_event_flag(
+			Gen2WorldState.EVENT_BUG_CATCHING_CONTESTANT_FIRST + index,
+			index >= Gen2WorldBugContest.CONTESTANTS_WITHDRAWN
+		)
+	assert_eq(
+		world.state.withdrawn_bug_contestants().size(),
+		Gen2WorldBugContest.NUM_CONTESTANTS - Gen2WorldBugContest.CONTESTANTS_WITHDRAWN
+	)
+	world.state.set_contest_mon({
+		"species": 10, "level": 12, "max_hp": 30, "hp": 30,
+		"attack": 12, "defense": 13, "speed": 14,
+		"special_attack": 15, "special_defense": 16, "dvs": 0, "item": 0,
+	})
+	var judged: Dictionary = world.judge_bug_contest(_seeded())
+	assert_eq(int(judged["score"]), 193)
+	assert_true(judged["placings"].size() > 0)
+
+
+## The park balls and what was caught survive a save and come back, since a
+## contest can be walked out of and resumed.
+func test_contest_state_round_trips_through_the_state_dictionary() -> void:
+	var world := _contest_world()
+	world.start_bug_contest()
+	world.state.set_contest_mon({"species": 13, "level": 9, "max_hp": 22})
+	world.state.set_contest_second_party_species(155)
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(world.state.to_dict())
+	assert_eq(restored.park_balls(), Gen2WorldBugContest.BALLS)
+	assert_eq(int(restored.contest_mon()["species"]), 13)
+	assert_eq(restored.contest_second_party_species(), 155)
+	assert_eq(restored.bug_contest_started(), world.state.bug_contest_started())

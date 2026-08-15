@@ -3316,6 +3316,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"world_tree_map_count": int(encounters["tree_maps"]),
 		"world_rock_map_count": int(encounters["rock_maps"]),
 		"world_treemon_set_count": int(encounters["treemon_sets"]),
+		"world_bug_contest_mon_count": int(encounters["bug_contest_mons"]),
+		"world_bug_contestant_count": int(encounters["bug_contestants"]),
 		"overworld_sprite_count": int(world["overworld_sprites"]),
 		"overworld_effect_count": int(world["overworld_effects"]),
 		"world_menu_count": int(services["menus"]),
@@ -3376,6 +3378,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["tree_maps"] = int(encounters["tree_maps"])
 	result["rock_maps"] = int(encounters["rock_maps"])
 	result["treemon_sets"] = int(encounters["treemon_sets"])
+	result["bug_contest_mons"] = int(encounters["bug_contest_mons"])
+	result["bug_contestants"] = int(encounters["bug_contestants"])
 	result["overworld_sprites"] = int(world["overworld_sprites"])
 	result["menus"] = int(services["menus"])
 	result["marts"] = int(services["marts"])

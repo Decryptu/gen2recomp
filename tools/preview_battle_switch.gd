@@ -7,8 +7,8 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses]
 ##
-## [stage] is one of `offer` (the default), `menu`, `move`, `pick`, `use_next`
-## and `replace`;
+## [stage] is one of `offer` (the default), `menu`, `move`, `contest`, `pick`,
+## `use_next` and `replace`;
 ## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
 ## cursor row or a refusal can be photographed. The battle is a real trainer's
 ## party out of the cache with the player on a bench of three, since both a
@@ -129,14 +129,24 @@ func _open() -> void:
 		_screen.set("_pending", [
 			{"type": Gen2Battle.FAINTED, "side": Gen2Battle.PLAYER},
 		])
-	elif _stage not in ["menu", "move"]:
+	elif _stage not in ["menu", "move", "contest"]:
 		_screen.set("_pending", battle.take_actions(
 			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
 		))
 
+	## `ContestBattleMenuHeader` in place of the ordinary one, which is
+	## wBattleType alone. The balls are the contest's own count rather than the
+	## bag's, exactly as the world screen hands them over.
+	if _stage == "contest":
+		battle.battle_type = Gen2Battle.BATTLETYPE_CONTEST
+		_screen.set_capture_balls(
+			[Gen2WorldPartyHost.ITEM_PARK_BALL],
+			{Gen2WorldPartyHost.ITEM_PARK_BALL: Gen2WorldBugContest.BALLS}
+		)
+
 	## Both menu stages are what the intro leads into with nothing else staged,
 	## which is `BattleMenu`'s own first opening.
-	if _stage in ["menu", "move"]:
+	if _stage in ["menu", "move", "contest"]:
 		_drain_to_menu()
 		if _stage == "move":
 			_screen._handle_button(Gen2Button.A)

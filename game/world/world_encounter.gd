@@ -45,7 +45,7 @@ static func resolve(
 		generator.randomize()
 
 	var rate: int = _rate(record, method, time_of_day)
-	rate = _apply_music_effect(rate, int(options.get("map_music", 0)))
+	rate = apply_music_effect(rate, int(options.get("map_music", 0)))
 	if bool(options.get("cleanse_tag", false)):
 		rate >>= 1
 	if rate <= 0:
@@ -284,7 +284,7 @@ const MUSIC_POKEMON_LULLABY: int = 0x50
 const MUSIC_POKEMON_MARCH: int = 0x51
 
 
-static func _apply_music_effect(rate: int, map_music: int) -> int:
+static func apply_music_effect(rate: int, map_music: int) -> int:
 	if map_music == MUSIC_POKEMON_MARCH or map_music == MUSIC_RUINS_OF_ALPH_RADIO:
 		return (rate << 1) & 0xFF
 	if map_music == MUSIC_POKEMON_LULLABY:

@@ -858,6 +858,13 @@ func _after_player_move(movement: Dictionary) -> bool:
 	if bool(phone_attempt.get("attempted", false)) and not phone_results.is_empty():
 		_show_script_results(phone_results)
 		return true
+	## `CheckTimeEvents`' contest branch, which is read a step at a time and
+	## takes the whole turn when it runs out: no encounter is rolled on the step
+	## the contest ends.
+	var contest_over: Array = _world.check_bug_contest_timer()
+	if not contest_over.is_empty():
+		_show_script_results(contest_over)
+		return true
 	_show_script_results([])
 	var encounter: Dictionary = _world.encounter_request(
 		_encounter_random, false, &"auto", _repel_lead_level(), _party_holds_cleanse_tag()
@@ -869,6 +876,25 @@ func _after_player_move(movement: Dictionary) -> bool:
 			"encounter": encounter.duplicate(true),
 		})
 	return true
+
+
+## The three placings as one line. `_BugContestJudging` prints them as three
+## texts of its own, which no script points at and so nothing imports; the
+## placings themselves are the source's.
+func _bug_contest_placings_text(judged: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	var places: Array[String] = ["1st", "2nd", "3rd"]
+	var placings: Array = judged.get("placings", [])
+	for index: int in placings.size():
+		var entry: Dictionary = placings[index]
+		var who: String = "You" if int(entry.get("id", 0)) == Gen2WorldBugContest.PLAYER_ID \
+			else "Contestant %d" % int(entry.get("id", 0))
+		parts.append("%s %s, %s (%d)" % [
+			places[index], who,
+			String(_data.species(int(entry.get("species", 0))).get("name", "-")),
+			int(entry.get("score", 0)),
+		])
+	return "Bug Contest: %s" % ", ".join(parts)
 
 
 ## `CheckRepelEffect`'s own lead: the first party member that is not fainted, or
@@ -1518,9 +1544,17 @@ func _start_battle_request(request: Dictionary) -> void:
 	# carries that one.
 	host.set_world_context(Gen2BattleWorldContext.capture(_world, _render_time_of_day()))
 	if _world != null and not tutorial:
-		host.set_capture_balls(
-			Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
-		)
+		## `BattleMenu_Pack`'s contest branch loads PARK_BALL and nothing else,
+		## and the count is `wParkBallsRemaining` rather than the bag.
+		if _world.bug_contest_active():
+			host.set_capture_balls(
+				[Gen2WorldPartyHost.ITEM_PARK_BALL],
+				{Gen2WorldPartyHost.ITEM_PARK_BALL: _world.state.park_balls()}
+			)
+		else:
+			host.set_capture_balls(
+				Gen2WorldPartyHost.owned_capture_balls(_world), _world.state.items()
+			)
 	host.set_meta("world_battle_request", {
 		"request": request.duplicate(true),
 		"save": save,
@@ -1558,8 +1592,14 @@ func _on_capture_requested(ball: int) -> void:
 		_active_battle_save = save
 		_active_battle_persist = false
 	var target: Gen2BattleMon = _battle_host.capture_target()
-	var result: Dictionary = Gen2WorldPartyHost.capture_wild(
-		_world, save, target, ball, _encounter_random, 0, _active_battle_persist
+	## A contest throw is its own transaction: the ball is the contest's, the
+	## catch goes to wContestMon and no save is touched.
+	var result: Dictionary = (
+		Gen2WorldPartyHost.capture_contest(_world, target, _encounter_random)
+		if _world.bug_contest_active()
+		else Gen2WorldPartyHost.capture_wild(
+			_world, save, target, ball, _encounter_random, 0, _active_battle_persist
+		)
 	)
 	_battle_host.complete_capture(result)
 	_refresh_labels()
@@ -1588,8 +1628,21 @@ func _on_battle_finished(result: Dictionary) -> void:
 			_renderer.refresh()
 		if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
 			var capture: Dictionary = result.get("capture", {})
-			var species: Dictionary = _data.species(int(capture.get("species", 0)))
-			_script_prompt = "Caught %s" % String(species.get("name", "UNKNOWN"))
+			if bool(capture.get("contest", false)):
+				## The catch is only kept when the question the battle asked was
+				## answered YES, or when there was nothing to replace, which the
+				## host already stored.
+				var caught_mon: Dictionary = capture.get("mon", {})
+				if bool(capture.get("replace", false)) and not caught_mon.is_empty():
+					_world.state.set_contest_mon(caught_mon)
+				var held: Dictionary = _world.state.contest_mon()
+				_script_prompt = "Contest: holding %s, %d PARK BALLs left" % [
+					String(_data.species(int(held.get("species", 0))).get("name", "nothing")),
+					_world.state.park_balls(),
+				]
+			else:
+				var species: Dictionary = _data.species(int(capture.get("species", 0)))
+				_script_prompt = "Caught %s" % String(species.get("name", "UNKNOWN"))
 		else:
 			_script_prompt = "Battle finished: %s" % String(
 				result.get("outcome", result.get("reason", "unknown"))
@@ -2588,6 +2641,19 @@ func _show_script_results(results: Array) -> void:
 				if StringName(request.get("kind", &"")) == &"catch_tutorial_requested":
 					_start_battle_request(request)
 					break
+				if StringName(request.get("kind", &"")) == &"bug_contest_judging_requested":
+					## `_BugContestJudging` scores the player, ranks them against
+					## the contestants who turned up and leaves the placing in
+					## wScriptVar, which the results script branches on.
+					var judged: Dictionary = _world.judge_bug_contest(_encounter_random)
+					var judged_results: Array = _world.complete_runtime_request({
+						"ok": true,
+						"script_value": int(judged.get("player_place", 0)),
+						"judging": judged.duplicate(true),
+					})
+					_script_prompt = _bug_contest_placings_text(judged)
+					_show_script_results(judged_results)
+					return
 				if StringName(request.get("kind", &"")) == &"swarm_requested":
 					var values: Dictionary = request.get("values", {})
 					var swarm_results: Array = _world.complete_runtime_request({
@@ -2946,7 +3012,20 @@ func _refresh_party_summary() -> void:
 			moves.append(mon_moves)
 			names.append(_mon_display_name(mon))
 			eggs.append(mon.is_egg)
-	_world.set_party_summary(save.party.size(), has_pokerus, species, moves, names, eggs)
+	## The three party facts the Bug Contest's own scripts ask about, which are
+	## not per-slot: whether the lead can be entered at all, the byte
+	## `ContestDropOffMons` stashes, and whether what is caught can be taken home.
+	var lead: Gen2SaveMon = save.party[0] if not save.party.is_empty() else null
+	var second: Gen2SaveMon = save.party[1] if save.party.size() > 1 else null
+	_world.set_party_summary(
+		save.party.size(), has_pokerus, species, moves, names, eggs,
+		{
+			"lead_fainted": lead == null or lead.hp <= 0,
+			"second_species": int(second.species) if second != null else 0,
+			"storage_full": save.party.size() >= Gen2SaveData.MAX_PARTY \
+				and not bool(save.first_empty_box_slot().get("ok", false)),
+		}
+	)
 
 
 ## GetPartyNickname's answer for one slot, following the party screen's own rule:

@@ -605,9 +605,12 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 ## [param eggs] marks which slots are eggs, because `CheckPartyMove` skips them:
 ## an egg carries the moves it will hatch with and would otherwise answer for a
 ## move no usable party member knows.
+## [param extra] carries the few party facts a script asks about that are not
+## per-slot: `lead_fainted` for `ContestDropOffMons`, `second_species` for the
+## byte it stashes, and `storage_full` for `CheckPartyFullAfterContest`.
 func set_party_summary(
 	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int],
-	moves: Array = [], names: Array = [], eggs: Array = []
+	moves: Array = [], names: Array = [], eggs: Array = [], extra: Dictionary = {}
 ) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
@@ -616,6 +619,8 @@ func set_party_summary(
 		"moves": moves.duplicate(true), "names": names.duplicate(),
 		"eggs": eggs.duplicate(),
 	}
+	for key: Variant in extra:
+		_party_summary[key] = extra[key]
 	return {"ok": true}
 
 
@@ -1459,6 +1464,108 @@ const ENVIRONMENT_CAVE: int = 4
 const ENVIRONMENT_DUNGEON: int = 7
 
 
+## Whether `ENGINE_BUG_CONTEST_TIMER` is set, which is the one thing that says a
+## contest is running (`CheckTimeEvents`, `RandomEncounter`).
+func bug_contest_active() -> bool:
+	return state.bug_contest_active(Gen2WorldState.is_crystal_profile(data))
+
+
+## `StartBugContestTimer` and `GiveParkBalls`: twenty balls, no caught Pokemon
+## and the clock the contest is counted from. The flag itself is the script's
+## own `setflag`, which runs before this.
+func start_bug_contest() -> Dictionary:
+	state.set_contest_mon({})
+	state.set_park_balls(Gen2WorldBugContest.BALLS)
+	state.set_bug_contest_started(world_clock())
+	return {
+		"ok": true,
+		"kind": &"bug_contest_started",
+		"park_balls": state.park_balls(),
+		"minutes": Gen2WorldBugContest.MINUTES,
+	}
+
+
+## `CheckBugContestTimer` as `CheckTimeEvents` calls it: how many minutes are
+## left, and whether this reading is the one that ends the contest. Answers zero
+## minutes when no contest is running, which is what `VAR_BUGCONTEST_MINS_REMAINING`
+## reads there too.
+func bug_contest_minutes_remaining() -> int:
+	if not bug_contest_active():
+		return 0
+	return Gen2WorldBugContest.minutes_remaining(
+		state.bug_contest_started(), world_clock()
+	)
+
+
+## `BugContestResultsWarpScript`'s index in `StdScripts`, the same 22 in both
+## pins the way `StrengthBoulderScript` is the same 14. It warps to the results
+## gate and falls into `BugContestResultsScript`, which is what clears
+## `ENGINE_BUG_CONTEST_TIMER` and runs the judging.
+const STD_BUG_CONTEST_RESULTS_WARP: int = 22
+
+
+## `CheckTimeEvents`' contest branch: the timer is read once a step, and the
+## reading that runs out queues `BugCatchingContestOverScript`, which is the
+## sound, the line and the warp back to the gate. Out of balls reaches the same
+## warp through `BugCatchingContestOutOfBallsScript`, so both are one answer.
+##
+## Answers the queued results, or an empty Array while the contest runs on.
+func check_bug_contest_timer() -> Array:
+	if not bug_contest_active():
+		return []
+	var over: StringName = &""
+	if bug_contest_minutes_remaining() <= 0:
+		over = &"time_up"
+	elif state.park_balls() <= 0:
+		over = &"out_of_balls"
+	if over == &"":
+		return []
+	var entry: Dictionary = data.world_standard_script(STD_BUG_CONTEST_RESULTS_WARP)
+	if entry.is_empty():
+		return []
+	_enqueue_script({
+		"kind": &"bug_contest_over",
+		"reason": over,
+		"map_group": current_map.group if current_map != null else -1,
+		"map_number": current_map.number if current_map != null else -1,
+		"cell": player_cell,
+		"bank": int(entry.get("bank", -1)),
+		"script": int(entry.get("address", -1)),
+	})
+	return run_event_queue(false)
+
+
+## `BugContestResultsWarpScript`'s own tail: the flag is cleared, the balls and
+## the timer go with it, and the Pokemon that was caught stays for the judging
+## the results gate runs.
+func end_bug_contest() -> Dictionary:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	state.set_engine_flag(
+		Gen2WorldState.engine_flag(Gen2WorldState.ENGINE_BUG_CONTEST_TIMER, crystal), false
+	)
+	state.set_park_balls(0)
+	state.set_bug_contest_started({})
+	return {"ok": true, "kind": &"bug_contest_ended"}
+
+
+## `_BugContestJudging`: the player's own score against the five contestants who
+## turned up, and where that placed them.
+func judge_bug_contest(random: RandomNumberGenerator) -> Dictionary:
+	var caught: Dictionary = state.contest_mon()
+	var result: Dictionary = Gen2WorldBugContest.judge(
+		int(caught.get("species", 0)),
+		Gen2WorldBugContest.score(caught),
+		data.bug_contestants(),
+		state.withdrawn_bug_contestants(),
+		random if random != null else RandomNumberGenerator.new()
+	)
+	result["ok"] = true
+	result["kind"] = &"bug_contest_judged"
+	result["score"] = Gen2WorldBugContest.score(caught)
+	result["caught"] = caught
+	return result
+
+
 ## `CanEncounterWildMon`: the whole condition on the tile the player is standing
 ## on, before the rate is even read. Without it every step on open ground rolls,
 ## which is both an encounter outside the grass and, over a walk, several times
@@ -1532,6 +1639,27 @@ func encounter_request(
 		terrain_method = Gen2WorldEncounter.METHOD_GRASS
 	if terrain_method not in [Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF]:
 		return {}
+	## `RandomEncounter`'s Bug Contest branch, which replaces the map's own
+	## tables with `ContestMons` and the rate with the standing tile's own.
+	if bug_contest_active():
+		var contest: Dictionary = Gen2WorldBugContest.resolve(
+			data.bug_contest_mons(),
+			Gen2WorldCollision.is_long_grass(collision_code_at(player_cell)),
+			random if random != null else RandomNumberGenerator.new(),
+			force_encounter,
+			{
+				"map_music": state.map_music(),
+				"cleanse_tag": cleanse_tag,
+				"repel_steps": state.repel_steps(),
+				"lead_level": lead_level,
+			}
+		)
+		if contest.is_empty():
+			return {}
+		contest["map"] = map_id()
+		contest["cell"] = player_cell
+		contest["movement"] = movement_mode
+		return contest
 	var source: StringName = Gen2WorldEncounter.SOURCE_NORMAL
 	var record: Dictionary = data.world_encounter(terrain_method, current_map.group, current_map.number)
 	if state.swarm_active_on(current_map.group, current_map.number):
@@ -3247,6 +3375,34 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 			continue
 		if event_type == &"map_reload_requested":
 			generated.append(reload_current_map())
+			continue
+		if event_type == &"bug_contest_started":
+			generated.append(start_bug_contest())
+			continue
+		if event_type == &"bug_contestants_selected":
+			var withdrawn: Dictionary = Gen2WorldBugContest.select_withdrawn(
+				schedule_random if schedule_random != null else RandomNumberGenerator.new()
+			)
+			for index: int in Gen2WorldBugContest.NUM_CONTESTANTS:
+				state.set_event_flag(
+					Gen2WorldState.EVENT_BUG_CATCHING_CONTESTANT_FIRST + index,
+					bool(withdrawn.get(index, false))
+				)
+			generated.append({
+				"type": &"bug_contestants_selected",
+				"withdrawn": withdrawn.keys(),
+			})
+			continue
+		if event_type == &"contest_mons_dropped_off":
+			state.set_contest_second_party_species(int(event.get("second_species", 0)))
+			generated.append({
+				"type": &"contest_mons_dropped_off",
+				"second_species": state.contest_second_party_species(),
+			})
+			continue
+		if event_type == &"contest_mons_returned":
+			state.set_contest_second_party_species(0)
+			generated.append({"type": &"contest_mons_returned"})
 			continue
 		if event_type == &"wild_encounters_changed":
 			var wild_enabled: bool = bool(event.get("enabled", true))

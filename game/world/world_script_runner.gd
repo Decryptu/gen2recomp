@@ -83,6 +83,15 @@ var _random := RandomNumberGenerator.new()
 const PHONE_CONTACT_GOT: int = 0
 const PHONE_CONTACTS_FULL: int = 1
 const PHONE_CONTACT_REFUSED: int = 2
+## The Bug Catching Contest's own six, all below the index where Gold and
+## Silver's table diverges except the contestant draw, which special_index()
+## normalizes (engine/events/special_pointers.asm).
+const SPECIAL_BUG_CONTEST_JUDGING: int = 20
+const SPECIAL_CHECK_PARTY_FULL_AFTER_CONTEST: int = 21
+const SPECIAL_CONTEST_DROP_OFF_MONS: int = 22
+const SPECIAL_CONTEST_RETURN_MONS: int = 23
+const SPECIAL_GIVE_PARK_BALLS: int = 24
+const SPECIAL_SELECT_RANDOM_BUG_CONTESTANTS: int = 71
 const SPECIAL_ACTIVATE_FISHING_SWARM: int = 72
 const SPECIAL_TOGGLE_MAPTILE_DECORATIONS: int = 73
 const SPECIAL_TOGGLE_DECORATIONS_VISIBILITY: int = 74
@@ -700,6 +709,9 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 	if kind in [
 		&"mart_requested", &"audio_requested", &"pokemon_requested", &"trade_requested",
 		&"pc_requested", &"party_heal_requested", &"town_map_requested",
+		## `BugContestJudging` answers with the placing, which the results script
+		## reads out of wScriptVar exactly as the marts and the PC do.
+		&"bug_contest_judging_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -2171,7 +2183,7 @@ func _execute_special(special: int) -> Dictionary:
 			_script_value = 1 if state != null \
 				and state.map_music() == Gen2WorldRadio.MUSIC_POKE_FLUTE_CHANNEL \
 				and cell in SNORLAX_PROXIMITY_CELLS else 0
-		46, 48, 49, 50, 51, 94, 95, 157, 158:
+		46, 48, 49, 50, 51, 52, 53, 94, 95, 157, 158:
 			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
 			## affect presentation or source-only counters, not scene-free state.
 			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
@@ -2182,6 +2194,10 @@ func _execute_special(special: int) -> Dictionary:
 			## `RefreshSprites` (158) reload the sprite set a `variablesprite`
 			## just changed. `PlaySlowCry` (95) is the cry player with its pitch
 			## and tempo lowered, so it plays audio and reads nothing.
+			## `ClearBGPalettes` (52) and `UpdateTimePals` (53) are the palette
+			## pair `BugContestResultsWarpScript` and the day/night scripts open
+			## with; the renderer takes its palettes from the map and the clock,
+			## so both are presentation here too.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
 		SPECIAL_INIT_ROAM_MONS:
 			## InitRoamMons seeds the roam structs with Raikou and Entei at
@@ -2200,6 +2216,44 @@ func _execute_special(special: int) -> Dictionary:
 			## chosen apricorn and how many of it, and a backed-out box is the
 			## source's own `wScriptVar = 0`.
 			return _stage_runtime_request(&"apricorn_selection_requested", {
+				"special": special,
+			})
+		SPECIAL_GIVE_PARK_BALLS:
+			## `GiveParkBalls` clears wContestMon, loads twenty balls and starts
+			## the timer. The flag itself is the script's own `setflag`, which
+			## has already run by here.
+			_emit_runtime_event(&"bug_contest_started", {"special": special})
+		SPECIAL_SELECT_RANDOM_BUG_CONTESTANTS:
+			## Five of the ten contestant flags set, which is both who competes
+			## in the judging and which sprites the park does not draw.
+			_emit_runtime_event(&"bug_contestants_selected", {"special": special})
+		SPECIAL_CONTEST_DROP_OFF_MONS:
+			## `ContestDropOffMons` answers 1 when the lead is fainted, which is
+			## the one branch its callers read, and otherwise masks the party to
+			## its first member.
+			var contest_party: Dictionary = _request.get("party", {})
+			if contest_party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			var lead_fainted: bool = bool(contest_party.get("lead_fainted", false))
+			_script_value = 1 if lead_fainted else 0
+			if not lead_fainted:
+				_emit_runtime_event(&"contest_mons_dropped_off", {
+					"special": special,
+					"second_species": int(contest_party.get("second_species", 0)),
+				})
+		SPECIAL_CONTEST_RETURN_MONS:
+			_emit_runtime_event(&"contest_mons_returned", {"special": special})
+		SPECIAL_CHECK_PARTY_FULL_AFTER_CONTEST:
+			## `CheckPartyFullAfterContest` answers whether the Pokemon caught in
+			## the contest can be taken home, which is a party slot or a box slot.
+			var after_party: Dictionary = _request.get("party", {})
+			if after_party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			_script_value = 1 if bool(after_party.get("storage_full", false)) else 0
+		SPECIAL_BUG_CONTEST_JUDGING:
+			## The judging prints three placings and leaves the player's own in
+			## wScriptVar, which the results script branches on.
+			return _stage_runtime_request(&"bug_contest_judging_requested", {
 				"special": special,
 			})
 		SPECIAL_ACTIVATE_FISHING_SWARM:

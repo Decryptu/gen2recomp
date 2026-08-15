@@ -1409,6 +1409,12 @@ func _is_wild_battle() -> bool:
 	return values is Dictionary and StringName((values as Dictionary).get("kind", &"")) == &"wild"
 
 
+## `wBattleType` being BATTLETYPE_CONTEST, which is what makes the menu the
+## contest's own and the ball a Park Ball.
+func _is_bug_contest_battle() -> bool:
+	return _battle != null and _battle.battle_type == Gen2Battle.BATTLETYPE_CONTEST
+
+
 func _capture_failure(reason: StringName) -> Dictionary:
 	return {"ok": false, "reason": reason}
 
@@ -1751,6 +1757,11 @@ func advance() -> void:
 		_show_next_capture_message()
 		return
 	if _capture_terminal:
+		## `BugContest_SetCaughtContestMon` asks before replacing the Pokemon
+		## already caught, over the same `PlaceYesNoBox` a switch offer uses.
+		if bool(_capture_result.get("replace_offer", false)) and _switch_stage == &"":
+			_open_yes_no(&"contest_replace", CONTEST_REPLACE_TEXT)
+			return
 		var capture: Dictionary = _capture_result.duplicate(true)
 		_clear_capture_action()
 		_finish_world_capture(capture)
@@ -2020,8 +2031,13 @@ func _choose_battle_menu() -> void:
 			## `BattleMenu_Pack` opens the whole pack; the only item this screen
 			## can use is a ball, so a wild battle reaches ball selection and a
 			## trainer battle is told what `.UseItem`'s own `wWildMon` test would
-			## have refused anyway.
+			## have refused anyway. Its `.contest` branch skips the pack outright
+			## and throws the one ball a contest has.
 			_close_battle_menu()
+			if _is_bug_contest_battle():
+				if bool(begin_capture().get("ok", false)):
+					throw_capture_ball()
+				return
 			if _is_wild_battle():
 				begin_capture()
 				return
@@ -2160,12 +2176,40 @@ func _answer_switch(button: int) -> void:
 			_answer_use_next_button(button)
 		&"pick":
 			_answer_switch_pick(button)
+		&"contest_replace":
+			_answer_contest_replace(button)
 		&"refused":
 			## `StdBattleTextbox` blocks on a button and `jr .loop` reopens the
 			## list behind it.
 			if _box != null and _box.advance():
 				return
 			_open_switch_pick(_switch_reason)
+
+
+## `BugContest_SetCaughtContestMon`'s own `PlaceYesNoBox`, which `ret c` reads as
+## keeping the Pokemon already caught. The answer rides out on the capture
+## result, since what it decides is world state rather than battle state.
+const CONTEST_REPLACE_TEXT: String = "Replace the one you caught?"
+
+
+func _answer_contest_replace(button: int) -> void:
+	if _offer_still_reading():
+		if button == Gen2Button.A:
+			_box.advance()
+			_refresh_menu_layer()
+		return
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN:
+			_switch_offer.move(Vector2i(0, 1 if button == Gen2Button.DOWN else -1))
+			_refresh_menu_layer()
+		Gen2Button.A, Gen2Button.B:
+			var replace: bool = button == Gen2Button.A \
+				and _switch_offer.selected_index() == 0
+			_close_switch()
+			var capture: Dictionary = _capture_result.duplicate(true)
+			capture["replace"] = replace
+			_clear_capture_action()
+			_finish_world_capture(capture)
 
 
 ## `InterpretTwoOptionMenu` over `YesNoMenuHeader`: two rows that do not wrap,
@@ -2352,7 +2396,7 @@ func _refresh_menu_layer() -> void:
 	if _battle_menu_layer != null:
 		_battle_menu_layer.visible = false
 	match _switch_stage:
-		&"offer", &"use_next":
+		&"offer", &"use_next", &"contest_replace":
 			_draw_yes_no_box()
 			return
 		&"pick", &"refused":
@@ -2385,10 +2429,22 @@ func _draw_yes_no_box() -> void:
 func _draw_battle_menu() -> void:
 	if _menu_page == null:
 		return
-	var box: Gen2MenuBox = Gen2BattleMenu.main_box()
+	var contest: bool = _is_bug_contest_battle()
+	var box: Gen2MenuBox = Gen2BattleMenu.main_box(contest)
+	var extras: Array = []
+	if contest:
+		## `.PrintParkBallsRemaining`, which prints the count beside the row
+		## rather than inside it.
+		extras.append({
+			"text": "%2d" % _capture_quantity(Gen2WorldPartyHost.ITEM_PARK_BALL),
+			"at": Gen2BattleMenu.CONTEST_BALLS_AT,
+		})
 	_show_layer_image(
 		_battle_menu_layer,
-		_menu_page.render(box, Gen2BattleMenu.MAIN_OPTIONS, _menu_position - 1),
+		_menu_page.render(
+			box, Gen2BattleMenu.main_options(contest), _menu_position - 1,
+			"", 0, extras
+		),
 		box.border_position() * Gen2Font.TILE
 	)
 

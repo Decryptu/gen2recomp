@@ -68,13 +68,28 @@ const NO_PP_TEXT: String = "There's no PP left for this move!"
 const DISABLED_TEXT: String = "The move is disabled!"
 
 
-static func main_box() -> Gen2MenuBox:
+## `ContestBattleMenuHeader`: the same two-by-two four columns further left, with
+## twelve of spacing, and PARKBALL where PACK is. Its ball count is printed by
+## the header's own `.PrintParkBallsRemaining` at (13,16) rather than as part of
+## the row.
+const CONTEST_LEFT: int = 2
+const CONTEST_SPACING: int = 12
+const CONTEST_OPTIONS: Array[String] = ["FIGHT", "PKMN", "PARKBALL×", "RUN"]
+const CONTEST_BALLS_AT := Vector2i(13, 16)
+
+
+static func main_box(contest: bool = false) -> Gen2MenuBox:
 	var box: Gen2MenuBox = Gen2MenuBox.from_coords(
-		MAIN_LEFT, MAIN_TOP, MAIN_RIGHT, MAIN_BOTTOM, MAIN_FLAGS
+		CONTEST_LEFT if contest else MAIN_LEFT,
+		MAIN_TOP, MAIN_RIGHT, MAIN_BOTTOM, MAIN_FLAGS
 	)
 	box.columns = MAIN_COLUMNS
-	box.column_spacing = MAIN_SPACING
+	box.column_spacing = CONTEST_SPACING if contest else MAIN_SPACING
 	return box
+
+
+static func main_options(contest: bool = false) -> Array[String]:
+	return CONTEST_OPTIONS.duplicate() if contest else MAIN_OPTIONS.duplicate()
 
 
 static func move_box() -> Gen2MenuBox:

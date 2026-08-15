@@ -18,6 +18,9 @@ const ITEM_MASTER_BALL: int = 0x01
 const ITEM_ULTRA_BALL: int = 0x02
 const ITEM_GREAT_BALL: int = 0x04
 const ITEM_POKE_BALL: int = 0x05
+## The Bug Contest's own ball. It is never in the bag: `wParkBallsRemaining` is
+## what holds it and `BattleMenu_Pack`'s contest branch loads it by name.
+const ITEM_PARK_BALL: int = 0xB1
 
 const CAPTURE_BALLS: Array[int] = [
 	ITEM_POKE_BALL, ITEM_GREAT_BALL, ITEM_ULTRA_BALL, ITEM_MASTER_BALL,
@@ -647,6 +650,64 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 	}
 
 
+## A Park Ball thrown inside the Bug Catching Contest, which is a different
+## transaction from [method capture_wild]: the ball comes out of
+## `wParkBallsRemaining` rather than the bag, and what is caught goes to
+## `wContestMon` rather than to the party or a box, so no save is touched and
+## nothing can be refused for a full party.
+##
+## `BugContest_SetCaughtContestMon` asks before replacing a Pokemon already
+## caught, so a hit while one is held answers `replace_offer` and leaves the
+## state alone until the caller comes back with [method set_contest_mon].
+static func capture_contest(
+	world: Gen2WorldAPI, wild: Gen2BattleMon, random: RandomNumberGenerator = null
+) -> Dictionary:
+	if world == null or world.data == null or world.state == null or wild == null:
+		return _failure(&"missing_capture_context", {})
+	if world.state.park_balls() <= 0:
+		return _failure(&"no_park_balls", {"ball": ITEM_PARK_BALL})
+	var generator: RandomNumberGenerator = random if random != null else RandomNumberGenerator.new()
+	if random == null:
+		generator.randomize()
+	world.state.set_park_balls(world.state.park_balls() - 1)
+	var outcome: Dictionary = _capture_outcome(world.data, wild, ITEM_PARK_BALL, generator)
+	var result: Dictionary = {
+		"ok": true,
+		"ball": ITEM_PARK_BALL,
+		"quantity": world.state.park_balls(),
+		"caught": bool(outcome["caught"]),
+		"catch_rate": int(outcome["catch_rate"]),
+		"wobbles": int(outcome["wobbles"]),
+		"contest": true,
+	}
+	if not bool(outcome["caught"]):
+		return result
+	result["mon"] = contest_mon_from(wild)
+	result["replace_offer"] = not world.state.contest_mon().is_empty()
+	if not bool(result["replace_offer"]):
+		world.state.set_contest_mon(result["mon"])
+	return result
+
+
+## `.generatestats`: the caught Pokemon as `ContestScore` reads it. The stats
+## and DVs are the ones the wild was standing there with, which is what
+## `GeneratePartyMonStats` builds for a `WILDMON`.
+static func contest_mon_from(wild: Gen2BattleMon) -> Dictionary:
+	return {
+		"species": wild.species,
+		"level": wild.level,
+		"hp": wild.hp,
+		"max_hp": wild.max_hp(),
+		"attack": int(wild.stats.get("attack", 0)),
+		"defense": int(wild.stats.get("defense", 0)),
+		"speed": int(wild.stats.get("speed", 0)),
+		"special_attack": int(wild.stats.get("sp_attack", 0)),
+		"special_defense": int(wild.stats.get("sp_defense", 0)),
+		"dvs": wild.dvs,
+		"item": wild.item,
+	}
+
+
 static func _capture_outcome(
 	data: GameData, wild: Gen2BattleMon, ball: int, random: RandomNumberGenerator
 ) -> Dictionary:
@@ -657,7 +718,9 @@ static func _capture_outcome(
 	match ball:
 		ITEM_ULTRA_BALL:
 			catch_rate = mini(catch_rate * 2, 255)
-		ITEM_GREAT_BALL:
+		## `GreatBallMultiplier` and `ParkBallMultiplier` are the same routine
+		## written twice: catch rate times one and a half.
+		ITEM_GREAT_BALL, ITEM_PARK_BALL:
 			catch_rate = mini(catch_rate + int(catch_rate / 2.0), 255)
 		ITEM_POKE_BALL:
 			pass

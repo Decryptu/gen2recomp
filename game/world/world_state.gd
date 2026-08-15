@@ -120,6 +120,19 @@ var _wild_encounter_cooldown: int = 0
 ## `wStatusFlags`' `STATUSFLAGS_NO_WILD_ENCOUNTERS_F`, which `wildoff` sets and
 ## `wildon` clears around a scripted sequence.
 var _wild_encounters_off: bool = false
+## The Bug Catching Contest's own counters. `wParkBallsRemaining` and the clock
+## reading `StartBugContestTimer` copies to `wBugContestStartTime`; whether a
+## contest is running at all is `ENGINE_BUG_CONTEST_TIMER`, which is an engine
+## flag and lives with the rest of them.
+var _park_balls: int = 0
+var _bug_contest_started: Dictionary = {}
+## `wContestMon`, the party-struct-shaped Pokemon `BugContest_SetCaughtContestMon`
+## generates. Kept as the fields `ContestScore` reads rather than a whole
+## [Gen2BattleMon], because judging is all anything does with it.
+var _contest_mon: Dictionary = {}
+## `wBugContestSecondPartySpecies`: the byte `ContestDropOffMons` moves out of
+## the way so the party is one Pokemon long, and `ContestReturnMons` puts back.
+var _contest_second_party_species: int = 0
 var _swarm_map: Vector2i = Vector2i(-1, -1)
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
@@ -249,6 +262,10 @@ func to_dict() -> Dictionary:
 		"repel_steps": _repel_steps,
 		"wild_encounter_cooldown": _wild_encounter_cooldown,
 		"wild_encounters_off": _wild_encounters_off,
+		"park_balls": _park_balls,
+		"bug_contest_started": _bug_contest_started.duplicate(),
+		"contest_mon": _contest_mon.duplicate(),
+		"contest_second_party_species": _contest_second_party_species,
 		"swarm_map": [_swarm_map.x, _swarm_map.y],
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
@@ -320,6 +337,16 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	restored.set_registered_item(int(source.get("registered_item", 0)))
 	restored.set_wild_encounter_cooldown(int(source.get("wild_encounter_cooldown", 0)))
 	restored.set_wild_encounters_off(bool(source.get("wild_encounters_off", false)))
+	restored.set_park_balls(int(source.get("park_balls", 0)))
+	var started: Variant = source.get("bug_contest_started", {})
+	if started is Dictionary:
+		restored._bug_contest_started = _clock_dict(started as Dictionary)
+	var caught: Variant = source.get("contest_mon", {})
+	if caught is Dictionary and int((caught as Dictionary).get("species", 0)) > 0:
+		restored._contest_mon = (caught as Dictionary).duplicate()
+	restored.set_contest_second_party_species(
+		int(source.get("contest_second_party_species", 0))
+	)
 	return restored
 
 
@@ -342,6 +369,10 @@ func restore_from_dict(raw: Variant) -> void:
 	_repel_steps = restored._repel_steps
 	_wild_encounter_cooldown = restored._wild_encounter_cooldown
 	_wild_encounters_off = restored._wild_encounters_off
+	_park_balls = restored._park_balls
+	_bug_contest_started = restored._bug_contest_started.duplicate()
+	_contest_mon = restored._contest_mon.duplicate()
+	_contest_second_party_species = restored._contest_second_party_species
 	_swarm_map = restored._swarm_map
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
@@ -779,6 +810,89 @@ func consume_wild_encounter_cooldown() -> bool:
 	_wild_encounter_cooldown -= 1
 	changed.emit()
 	return _wild_encounter_cooldown > 0
+
+
+## `ENGINE_BUG_CONTEST_TIMER`, the flag `Route35NationalParkGate` sets on the
+## way in and `BugContestResultsWarpScript` clears on the way out. It is
+## `wStatusFlags2`' own bit, so it sits past `ENGINE_MOBILE_SYSTEM` and shifts on
+## Gold and Silver like every other flag there.
+const ENGINE_BUG_CONTEST_TIMER: int = 17
+## `ENGINE_DAILY_BUG_CONTEST`, the once-a-day flag the officer checks.
+const ENGINE_DAILY_BUG_CONTEST: int = 81
+## `BugCatchingContestantEventFlagTable`, whose ten entries are the same numbers
+## in both pins. A set flag is a contestant who is not in this contest.
+const EVENT_BUG_CATCHING_CONTESTANT_FIRST: int = 1814
+
+
+## [param crystal] the way every other profile-shifted flag takes it: the state
+## holds no GameData of its own, so the caller resolves the profile.
+func bug_contest_active(crystal: bool = true) -> bool:
+	return is_engine_flag_active(engine_flag(ENGINE_BUG_CONTEST_TIMER, crystal))
+
+
+func park_balls() -> int:
+	return _park_balls
+
+
+func set_park_balls(count: int) -> void:
+	var next_count: int = clampi(count, 0, 0xFF)
+	if next_count == _park_balls:
+		return
+	_park_balls = next_count
+	changed.emit()
+
+
+## The clock `StartBugContestTimer` copied, as `{day, hour, minute}`, or an empty
+## Dictionary when no contest has been started.
+func bug_contest_started() -> Dictionary:
+	return _bug_contest_started.duplicate()
+
+
+func set_bug_contest_started(clock: Dictionary) -> void:
+	_bug_contest_started = _clock_dict(clock)
+	changed.emit()
+
+
+static func _clock_dict(clock: Dictionary) -> Dictionary:
+	if clock.is_empty():
+		return {}
+	return {
+		"day": int(clock.get("day", 0)),
+		"hour": int(clock.get("hour", 0)),
+		"minute": int(clock.get("minute", 0)),
+	}
+
+
+func contest_mon() -> Dictionary:
+	return _contest_mon.duplicate()
+
+
+func set_contest_mon(mon: Dictionary) -> void:
+	_contest_mon = mon.duplicate() if int(mon.get("species", 0)) > 0 else {}
+	changed.emit()
+
+
+func contest_second_party_species() -> int:
+	return _contest_second_party_species
+
+
+func set_contest_second_party_species(species: int) -> void:
+	var next_species: int = clampi(species, 0, 0xFF)
+	if next_species == _contest_second_party_species:
+		return
+	_contest_second_party_species = next_species
+	changed.emit()
+
+
+## Which of the ten contestants are not in this contest, as
+## `{index: true}`, read off the event flags
+## `SelectRandomBugContestContestants` set.
+func withdrawn_bug_contestants() -> Dictionary:
+	var out: Dictionary = {}
+	for index: int in Gen2WorldBugContest.NUM_CONTESTANTS:
+		if is_event_flag_active(EVENT_BUG_CATCHING_CONTESTANT_FIRST + index):
+			out[index] = true
+	return out
 
 
 func wild_encounters_off() -> bool:
