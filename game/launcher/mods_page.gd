@@ -140,6 +140,17 @@ func _option_field(id: StringName, option: Dictionary) -> Control:
 				_fail(Gen2ModRefusal.text(result))
 		)
 		return Gen2LauncherUI.field(_theme, String(option.get("label", "")), press)
+	if StringName(option.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_NUMBER:
+		# Typed rather than dialled: a seed is one field with ten thousand values
+		# and no player wants to hold an arrow through it.
+		return Gen2LauncherUI.field(_theme, String(option.get("label", "")), Gen2LauncherUI.number(
+			_theme, int(option.get("value", 0)), int(option.get("minimum", 0)),
+			int(option.get("maximum", 0)), int(option.get("step", 1)),
+			func(value: int) -> void:
+				var result: Dictionary = Gen2ModHost.instance().set_option(id, key, value)
+				if not bool(result.get("ok", false)):
+					_fail(Gen2ModRefusal.text(result))
+		))
 	return Gen2LauncherUI.field(_theme, String(option.get("label", "")), Gen2LauncherUI.segmented(
 		_theme, option.get("labels", []) as Array, int(option.get("index", 0)),
 		func(index: int) -> void:

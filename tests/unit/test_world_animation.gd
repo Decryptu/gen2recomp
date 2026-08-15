@@ -40,6 +40,21 @@ func _write_cache() -> void:
 			{"operation": "water", "tile": 0},
 			{"operation": "done"},
 		],
+	}, {
+		# The same tile animated properly: a timer bump per pass, so the water
+		# command walks all four frames of the asset instead of standing on the
+		# first. What tile_frames() has to recover.
+		"number": 1,
+		"block_count": 1,
+		"tile_count": RomLayout.TILESET_TILE_COUNT,
+		"meta": meta,
+		"collision": [],
+		"palette_map": [0],
+		"animation_commands": [
+			{"operation": "timer_8"},
+			{"operation": "water", "tile": 0},
+			{"operation": "done"},
+		],
 	}])
 	RomCache.write_json(RomCache.world_maps_path(_directory), [{
 		"group": 1,
@@ -52,10 +67,22 @@ func _write_cache() -> void:
 		"collision": [0, 0, 0, 0],
 		"collision_width": 2,
 		"collision_height": 2,
+	}, {
+		"group": 1,
+		"number": 2,
+		"tileset": 1,
+		"environment": 0,
+		"width_blocks": 1,
+		"height_blocks": 1,
+		"blocks": [0],
+		"collision": [0, 0, 0, 0],
+		"collision_width": 2,
+		"collision_height": 2,
 	}])
 	var pixels := PackedByteArray()
 	pixels.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 0), pixels)
+	RomCache.write_indices(RomCache.world_tile_path(_directory, 1), pixels)
 
 	var palettes: Array = []
 	for _group: int in RomLayout.WORLD_PALETTE_GROUP_COUNT:
@@ -66,8 +93,13 @@ func _write_cache() -> void:
 	water.resize(64)
 	for index: int in water.size():
 		water[index] = 0
+	# Frame 0 is a solid low plane; the other three are one, two and three lit
+	# rows, so the four frames are told apart by their contents.
 	for y: int in 8:
 		water[y * 2] = 0xFF
+	for frame: int in range(1, 4):
+		for y: int in frame:
+			water[frame * 16 + y * 2] = 0xFF
 	RomCache.write_json(RomCache.world_animation_assets_path(_directory), {"water": water})
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
@@ -129,3 +161,28 @@ func test_changed_tiles_reports_exactly_the_tiles_a_frame_rewrote() -> void:
 					break
 		assert_eq(Array(animation.changed_tiles()), actually_changed)
 		assert_eq(redraw, not actually_changed.is_empty() or animation.palette_changed())
+
+
+func test_tile_frames_answers_every_frame_in_order_without_moving_the_sequence() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 2, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+	for _frame: int in 5:
+		animation.advance_frame()
+	var before: PackedByteArray = animation.current_indices().duplicate()
+	var at: int = animation.command_index()
+
+	# The tileset's own tile, then the four the water command plays.
+	var frames: Array[PackedByteArray] = animation.tile_frames(0)
+	assert_eq(frames.size(), 5)
+	# The asset's four frames light 8, 1, 2 and 3 rows, in that play order.
+	var lit: Array[int] = []
+	for frame: PackedByteArray in frames:
+		lit.append(frame.count(1))
+	assert_eq(lit, [0, 64, 8, 16, 24] as Array[int])
+	# A mod shares this object with the running game, so asking must not step it.
+	assert_eq(animation.current_indices(), before)
+	assert_eq(animation.command_index(), at)
+	# A tile no command touches has no frames, rather than one of itself.
+	assert_eq(animation.tile_frames(1).size(), 0)

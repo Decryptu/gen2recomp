@@ -27,7 +27,28 @@ const KIND_SPECIES: StringName = &"species"
 const KIND_MOVE: StringName = &"move"
 const KIND_ITEM: StringName = &"item"
 const KIND_TRAINER: StringName = &"trainer"
-const KINDS: Array[StringName] = [KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER]
+## One map's wild encounter record, the row [method GameData.world_encounter]
+## answers, numbered with [method encounter_number].
+const KIND_ENCOUNTER: StringName = &"encounter"
+## One fishing group, the row [method GameData.world_fishing_group] answers,
+## numbered with the group number a map header carries.
+const KIND_FISHING: StringName = &"fishing"
+const KINDS: Array[StringName] = [
+	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_ENCOUNTER, KIND_FISHING,
+]
+
+## The kinds that are a cartridge table rather than numbered content, and are
+## therefore [method patch]-only: a mod cannot add a map or a map header, so
+## there is no row for a [method define] to sit at. Their numbers are table
+## coordinates and do not obey [constant FIRST_MOD_NUMBER].
+const TABLE_KINDS: Array[StringName] = [KIND_ENCOUNTER, KIND_FISHING]
+
+## The methods [method encounter_number] can name, in the order it encodes them.
+## `surf` is the runtime's name for the cartridge's water table, which is what
+## [method GameData.world_encounter] takes.
+const ENCOUNTER_METHODS: Array[StringName] = [
+	&"grass", &"surf", &"swarm_grass", &"swarm_water",
+]
 
 ## The first number a mod may define. Every cartridge content number is one byte,
 ## in all three games, so a number that does not fit in one is unambiguously not
@@ -142,6 +163,8 @@ func is_empty() -> bool:
 func define(kind: StringName, id: StringName, number: int, row: Dictionary) -> Dictionary:
 	if not KINDS.has(kind):
 		return {"ok": false, "reason": &"unknown_content_kind", "detail": String(kind)}
+	if TABLE_KINDS.has(kind):
+		return {"ok": false, "reason": &"content_kind_is_patch_only", "detail": String(kind)}
 	if number < FIRST_MOD_NUMBER:
 		return {
 			"ok": false, "reason": &"reserved_content_number",
@@ -161,11 +184,19 @@ func define(kind: StringName, id: StringName, number: int, row: Dictionary) -> D
 ##
 ## Only the fields given change, and a Dictionary field merges rather than
 ## replacing, so patching [code]{"stats": {"speed": 120}}[/code] leaves the other
-## five stats alone. Refused for a number a mod would have to [method define].
+## five stats alone. An Array field replaces whole, which is what a randomizer
+## rewriting an encounter row's [code]slots[/code] wants. Refused for a number a
+## mod would have to [method define].
 func patch(kind: StringName, id: StringName, number: int, fields: Dictionary) -> Dictionary:
 	if not KINDS.has(kind):
 		return {"ok": false, "reason": &"unknown_content_kind", "detail": String(kind)}
-	if number < 1 or number >= FIRST_MOD_NUMBER:
+	if TABLE_KINDS.has(kind):
+		if number < 0:
+			return {
+				"ok": false, "reason": &"not_a_table_row",
+				"detail": "%s %d" % [kind, number],
+			}
+	elif number < 1 or number >= FIRST_MOD_NUMBER:
 		return {
 			"ok": false, "reason": &"not_a_cartridge_number",
 			"detail": "%s %d" % [kind, number],
@@ -209,6 +240,17 @@ func defined_numbers(kind: StringName) -> Array[int]:
 		out.append(number)
 	out.sort()
 	return out
+
+
+## The [constant KIND_ENCOUNTER] number for one map's table under one method, or
+## -1 for a method or a map coordinate that cannot exist. A map group and number
+## are each one byte, so the three parts pack without colliding and a mod's
+## patch means the same thing on all three cartridges.
+static func encounter_number(method: StringName, group: int, number: int) -> int:
+	var at: int = ENCOUNTER_METHODS.find(method)
+	if at < 0 or group < 0 or group > 0xFF or number < 0 or number > 0xFF:
+		return -1
+	return at * 0x10000 + group * 0x100 + number
 
 
 ## Which mod claimed [param number], or an empty name. For a launcher listing

@@ -557,10 +557,13 @@ func _mod_options() -> Array:
 
 func _render_mod_options() -> void:
 	_render_options(_mod_options(), _mod_option_cursor, func(row: Dictionary) -> String:
-		if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_BUTTON:
-			return "%s    %s" % [
-				String(row.get("label", "")), String(row.get("press_label", "Go"))
-			]
+		match StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)):
+			Gen2ModHost.OPTION_BUTTON:
+				return "%s    %s" % [
+					String(row.get("label", "")), String(row.get("press_label", "Go"))
+				]
+			Gen2ModHost.OPTION_NUMBER:
+				return "%s    %d" % [String(row.get("label", "")), int(row.get("value", 0))]
 		return "%s    %s" % [
 			String(row.get("label", "")),
 			String((row.get("labels", []) as Array)[int(row.get("index", 0))]),
@@ -584,17 +587,16 @@ func _press_mod_option() -> void:
 		_status.add_theme_color_override("font_color", ERROR)
 
 
-## One rung either way, wrapping the way the cartridge's own value rows do.
-## Written through the host, so the file is committed on the press and whatever
-## registered the setting hears about it at once.
+## One step either way: a rung, wrapping the way the cartridge's own value rows
+## do, or one of a number's own steps. Written through the host, so the file is
+## committed on the press and whatever registered the setting hears about it at
+## once.
 func _adjust_mod_option(rows: Array, delta: int) -> void:
 	var row: Dictionary = rows[_mod_option_cursor]
 	if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) == Gen2ModHost.OPTION_BUTTON:
 		return
-	var values: Array = row.get("values", []) as Array
-	var next: int = wrapi(int(row.get("index", 0)) + signi(delta), 0, maxi(values.size(), 1))
-	var result: Dictionary = Gen2ModHost.instance().set_option_index(
-		_mod_id, StringName(row.get("key", &"")), next
+	var result: Dictionary = Gen2ModHost.instance().adjust_option(
+		_mod_id, StringName(row.get("key", &"")), delta
 	)
 	if not bool(result.get("ok", false)):
 		_status.text = Gen2ModRefusal.text(result)

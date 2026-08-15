@@ -1048,3 +1048,52 @@ func test_a_button_setting_stores_nothing_and_acts_on_the_press() -> void:
 		host.register_option(&"voxel", {"key": &"x", "label": "X", "kind": &"slider"})["reason"],
 		&"unknown_option_kind"
 	)
+
+
+func test_a_number_setting_is_one_field_rather_than_a_ladder_of_digits() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(host.register_option(&"voxel", {
+		"key": &"seed", "label": "Seed", "kind": Gen2ModHost.OPTION_NUMBER,
+		"minimum": 0, "maximum": 9999, "default": 1234,
+	})["ok"])
+	var row: Dictionary = host.options(&"voxel")[0]
+	assert_eq(StringName(row["kind"]), Gen2ModHost.OPTION_NUMBER)
+	assert_eq(int(row["value"]), 1234)
+	assert_eq(int(host.option(&"voxel", &"seed")), 1234)
+
+	var heard: Array = []
+	host.option_changed.connect(func(_id: StringName, _key: StringName, value: Variant) -> void:
+		heard.append(value)
+	)
+	assert_true(host.set_option(&"voxel", &"seed", 4321)["ok"])
+	assert_eq(heard, [4321])
+	assert_eq(Gen2ModOptions.value(&"voxel", &"seed"), 4321, "stored like any other value")
+	# Either surface steps a number the same way it steps a ladder, and a
+	# number stops at its own end rather than wrapping into the other one.
+	assert_eq(int(host.adjust_option(&"voxel", &"seed", 1)["value"]), 4322)
+	assert_true(host.set_option(&"voxel", &"seed", 99999)["ok"])
+	assert_eq(int(host.option(&"voxel", &"seed")), 9999, "clamped into the range")
+	assert_eq(host.option_index(&"voxel", &"seed"), -1, "a number is on no rung")
+	assert_eq(
+		host.set_option_index(&"voxel", &"seed", 0)["reason"], &"option_is_not_a_ladder"
+	)
+	assert_eq(
+		host.register_option(&"voxel", {
+			"key": &"bad", "label": "Bad", "kind": Gen2ModHost.OPTION_NUMBER,
+			"minimum": 10, "maximum": 1,
+		})["reason"],
+		&"option_range_inverted"
+	)
+
+
+func test_a_loaded_mod_survives_its_own_registration() -> void:
+	# A Callable does not keep a RefCounted alive, so a mod that connects to
+	# option_changed and is then dropped would be listening from the grave.
+	_write_dependency_mod("%s/listener" % ROOT, "listener", "1.0.0")
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	assert_eq(host.load_discovered(), [&"listener"])
+	assert_not_null(host.mod_entry(&"listener"))
+	assert_null(host.mod_entry(&"absent"))
+	Gen2ModHost.reset()
+	assert_null(Gen2ModHost.instance().mod_entry(&"listener"), "a reload drops the last load")
