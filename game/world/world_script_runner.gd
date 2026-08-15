@@ -2307,10 +2307,10 @@ func _execute_special(special: int) -> Dictionary:
 				"defaults": true,
 			})
 		SPECIAL_DISPLAY_UNOWN_WORDS:
-			## The word the wall spells, in a menu box of its own that
-			## `JoyWaitAorB` holds until a button. Here it is the sign's own text
-			## box, acknowledged the same way, since `UnownFont`'s 2x2 letter
-			## blocks are not imported.
+			## The word the wall spells, staged as the text `JoyWaitAorB` holds
+			## until a button. A host that can reach the chamber's own tileset
+			## draws it as `_DisplayUnownWords_CopyWord`'s 2x2 letter blocks
+			## instead ([Gen2UnownWallPage]); the wait it answers is this one.
 			var wall_word: String = data.unown_wall_word(_script_value) if data != null \
 				else ""
 			if wall_word.is_empty():

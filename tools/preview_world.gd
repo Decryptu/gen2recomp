@@ -13,6 +13,9 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y]
 ##
 ## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
+## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
+## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
+## ESCAPE, WATER and LIGHT, as `crystal 3 24 ... unown_wall 3 1`),
 ## `cut` (`OWCutAnimation`'s two halves and the jump shadow), or one of
 ## [constant FIELD_ITEMS]' own names, which is the pack's USE on that item: the
 ## Itemfinder closes the pack over the world's answer, the Coin Case prints
@@ -126,7 +129,17 @@ func _process(_delta: float) -> bool:
 		return false
 	_frames += 1
 	if _frames == 2:
-		if FIELD_ITEMS.has(_kind):
+		if _kind == &"unown_wall":
+			## The chamber's own `bg_event ..., BGEVENT_UP`: face the wall from
+			## the cell below it and read it, which is the only way in.
+			_screen.move_up()
+			_screen.interact()
+			## `writetext` is one page: the first press finishes the reveal the
+			## text speed is still spending, and the second ends the page, which
+			## is what runs `special DisplayUnownWords` and puts the box up.
+			_screen.press_button(Gen2Button.A)
+			_screen.press_button(Gen2Button.A)
+		elif FIELD_ITEMS.has(_kind):
 			if _kind in FACE_UP_FIRST:
 				_screen.move_up()
 			_screen.preview_field_item(int(FIELD_ITEMS[_kind]))

@@ -171,6 +171,7 @@ func _check_walls() -> void:
 			))
 			if not word.is_empty():
 				said.append(word)
+				_check_wall_box(number, word)
 	if not _r.crystal:
 		_r.check(said.is_empty(), "a Gold or Silver chamber said %s." % [said])
 		return
@@ -188,6 +189,38 @@ func _check_walls() -> void:
 		"the four chambers said %d distinct words: %s." % [distinct.size(), said]
 	)
 	_r.note("unown walls: %s." % " ".join(said))
+
+
+## The box `DisplayUnownWords` draws that word in: `MenuHeaders_UnownWalls`'
+## size, and every letter block drawn out of the chamber's own tileset rather
+## than left as the frame's own blank. A letter whose tiles land outside the
+## graphics the tileset ships is what this catches, since the charmap computes
+## them rather than reading a table.
+func _check_wall_box(number: int, word: String) -> void:
+	var map: Gen2WorldMap = _r.data.world_map(CHAMBER_GROUP, number)
+	var tileset: Gen2WorldTileset = _r.data.world_tileset(map.tileset) if map != null else null
+	var image: Image = Gen2UnownWallPage.render(_r.data, tileset, map, word)
+	if not _r.check(image != null, "map %d's \"%s\" box did not draw." % [number, word]):
+		return
+	var box: Gen2MenuBox = Gen2UnownWall.menu_box(word)
+	_r.check(
+		image.get_size() == box.border_size() * Gen2Font.TILE,
+		"map %d's \"%s\" box is %s, not %s." % [
+			number, word, image.get_size(), box.border_size() * Gen2Font.TILE,
+		]
+	)
+	for index: int in word.length():
+		var at: Vector2i = (
+			Gen2UnownWall.block_position(box, index) - box.border_position()
+		) * Gen2Font.TILE
+		var colours: Dictionary = {}
+		for y: int in Gen2Font.TILE * 2:
+			for x: int in Gen2Font.TILE * 2:
+				colours[image.get_pixelv(at + Vector2i(x, y))] = true
+		_r.check(
+			colours.size() > 1,
+			"map %d's \"%s\" letter %d is one flat colour." % [number, word, index]
+		)
 
 
 ## Faces the bg event at [param cell] and drains what it says, answering the
