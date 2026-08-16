@@ -1953,6 +1953,26 @@ func _award_share(
 			_give_experience_to(learner, int(index), award, stat_gains, by_exp_share, events)
 
 
+## What a won battle owes when nothing simulated the turns that won it: every
+## enemy Pokémon fainted in party order through [method _give_experience_for], so
+## the split, the Exp. Share pass, the level ups, the evolutions and the moves
+## learned are the engine's own and only the fighting is missing. The
+## participant set never grows past whoever is out, so the award is the floor a
+## real fight could have paid rather than a guess at who took part.
+func award_win_experience() -> Array:
+	var events: Array = []
+	if data == null or parties.is_empty():
+		return events
+	var beaten: Gen2Party = party(ENEMY)
+	for index: int in beaten.size():
+		var defeated: Gen2BattleMon = beaten.at(index)
+		if defeated == null or defeated.is_fainted():
+			continue
+		defeated.hp = 0
+		_give_experience_for(defeated, events)
+	return events
+
+
 ## Spends one of the trainer's two items, which costs the turn. The item is gone
 ## whether or not it changed anything, `AI_TryItem` clearing the slot the moment a
 ## check said yes. What the cartridge clears beside it is

@@ -54,16 +54,17 @@ const APRICORN_WHT: int = 0x61
 ## the Route 44 door and the first staircase (`maps/IcePath1F.asm`). Three of its
 ## four neighbours are wall, so (30,7) facing right is the only approach.
 const HM07_APPROACH: Vector2i = Vector2i(30, 7)
-## constants/mart_constants.asm's MART_BLACKTHORN, which
-## BlackthornMartClerkScript names. Its stock is the cartridge's
-## (`data/items/marts.asm` MartBlackthorn), and it sells no Poké Balls at all.
-## How many balls the route buys is its own choice, not the cartridge's; five
-## Great Balls is what the source start money covers.
-const MART_BLACKTHORN: int = 17
-const GREAT_BALLS_BOUGHT: int = 5
-## `maps/BlackthornMart.asm` object 1 on (1,3), standing right behind the
-## counter on (2,3), so it is talked to from (3,3) facing left.
-const BLACKTHORN_MART_CLERK_FACE: Vector2i = Vector2i(3, 3)
+## How many balls the route buys is its own choice, not the cartridge's, and the
+## source start money is the whole budget: no battle here pays prize money.
+## `MartViolet` sells Poké Balls and `MartBlackthorn` does not, so the two catches
+## before Goldenrod are stocked in Violet and Dratini's far lower catch rate is
+## answered with the cheapest ball Blackthorn does stock.
+const POKE_BALLS_BOUGHT: int = 5
+const GREAT_BALLS_BOUGHT: int = 3
+## Both marts are the standard six-by-four interior: object 1 on (1,3), standing
+## right behind the counter on (2,3), so the clerk is talked to from (3,3)
+## facing left.
+const MART_CLERK_FACE: Vector2i = Vector2i(3, 3)
 ## The two Radio Tower keys, from the same hex comment column.
 const ITEM_CARD_KEY: int = 0x7F
 const ITEM_BASEMENT_KEY: int = 0x85
@@ -75,6 +76,10 @@ const BADGE_STORM: int = 5
 ## rolls that find nothing worth throwing at, and Dragon's Den answers with a
 ## Dratini about one roll in ten.
 const CATCH_ATTEMPTS: int = 256
+
+## A wild fight that has not reached that in this many turns is not going to:
+## the lead has no move that hurts it, or the two are healing past each other.
+const WEAKEN_TURN_CAP: int = 40
 
 ## Mahogany Town, whose map scene and merchant flag are what open the east exit
 ## onto Route 44 (`data/maps/maps.asm`).
@@ -1537,6 +1542,31 @@ func _story_path(data: GameData) -> Dictionary:
 	if not bool(transition.get("ok", false)):
 		return {"ok": false, "path": path, "reason": "Violet Pokemon Center exit warp failed"}
 	path.append({"step": "violet_city_after_heal", "map": _map_value(world), "cell": _cell_value(world)})
+
+	# The mart on the way to the gym: Route 32's Tentacool and Union Cave's
+	# Geodude are both fought and thrown at from here on, and five Poké Balls do
+	# not cover two catches.
+	var violet_mart: Dictionary = _warp_chain(world, save, random, data, [Vector2i(9, 17)])
+	if not bool(violet_mart.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Violet Mart unreachable: %s" % violet_mart.get("reason", ""),
+		}
+	var poke_balls: Dictionary = _buy_balls(
+		world, save, random, data, path, Gen2WorldPartyHost.ITEM_POKE_BALL,
+		POKE_BALLS_BOUGHT, "violet_mart_poke_balls"
+	)
+	if not bool(poke_balls.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Violet Mart failed: %s" % poke_balls.get("reason", ""),
+		}
+	var out_of_violet_mart: Dictionary = _warp_chain(world, save, random, data, [Vector2i(2, 7)])
+	if not bool(out_of_violet_mart.get("ok", false)):
+		return {
+			"ok": false, "path": path,
+			"reason": "Violet Mart exit failed: %s" % out_of_violet_mart.get("reason", ""),
+		}
 
 	var gym_warp: Dictionary = _warp_to(world.current_map, 10, 7)
 	if gym_warp.is_empty():
@@ -4177,8 +4207,9 @@ func _rising_badge_path(
 			"ok": false, "path": path,
 			"reason": "Blackthorn Mart unreachable: %s" % mart_trip.get("reason", ""),
 		}
-	var bought: Dictionary = _buy_great_balls(
-		world, save, random, data, path, GREAT_BALLS_BOUGHT
+	var bought: Dictionary = _buy_balls(
+		world, save, random, data, path, Gen2WorldPartyHost.ITEM_GREAT_BALL,
+		GREAT_BALLS_BOUGHT, "blackthorn_mart_great_balls"
 	)
 	if not bool(bought.get("ok", false)):
 		return {
@@ -8658,50 +8689,49 @@ func _push_boulder_at(
 	}
 
 
-## BlackthornMartClerkScript, talked to across its own counter.
+## A mart clerk, talked to across their own counter.
 ##
-## The route needs this once. Elm's aide gives five Poké Balls, Union Cave's
-## Geodude costs one, and Dratini is a far lower catch rate than Geodude, so the
-## four left do not land it. Blackthorn is the last town the route stands in
-## before the Dragon's Den, and its stock is the cartridge's: MartBlackthorn
-## sells no Poké Balls, so what the route buys is Great Balls: they are the
-## cheapest ball it stocks, and the source start money buys five of them against
-## two Ultra Balls.
+## Elm's aide gives five Poké Balls, which is not what three catches cost: the
+## route fights each wild down and throws until one sticks, and every throw that
+## does not is a ball. So it buys before the two catches it can and before the
+## one it cannot, Blackthorn being the last town the route stands in before the
+## Dragon's Den.
 ##
 ## The clerk stands on (1,3) behind the `$90` counter on (2,3), so this is a
 ## CheckFacingObject doubled reach like the Radio Card woman's, and the buying
 ## itself happens inside the clerk's own `pokemart` pause rather than beside it.
-func _buy_great_balls(
+func _buy_balls(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
 	random: RandomNumberGenerator,
 	data: GameData,
 	path: Array,
+	item: int,
 	quantity: int,
+	step: String,
 ) -> Dictionary:
-	var walked: Dictionary = _walk_cell_resolving(
-		world, BLACKTHORN_MART_CLERK_FACE, save, random, data
-	)
+	var held: int = world.state.item_quantity(item)
+	var walked: Dictionary = _walk_cell_resolving(world, MART_CLERK_FACE, save, random, data)
 	if not bool(walked.get("ok", false)):
 		return {"ok": false, "reason": "the mart clerk is unreachable: %s" % walked.get("reason", "")}
 	world.player_facing = Gen2WorldSprite.FACING_LEFT
 	var run: Dictionary = _drain_story(
 		world, world.interact(), save, random, data, true, [],
-		{"item": Gen2WorldPartyHost.ITEM_GREAT_BALL, "quantity": quantity}
+		{"item": item, "quantity": quantity}
 	)
 	path.append({
-		"step": "blackthorn_mart_great_balls",
+		"step": step,
 		"map": _map_value(world),
 		"cell": _cell_value(world),
-		"balls": world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL),
+		"balls": world.state.item_quantity(item),
 		"money": world.state.money(),
 		"purchases": run.get("purchases", []),
 		"run": run,
 	})
 	if not bool(run.get("terminal", false)):
 		return {"ok": false, "reason": "the mart clerk did not finish: %s" % run.get("reason", "")}
-	if world.state.item_quantity(Gen2WorldPartyHost.ITEM_GREAT_BALL) < quantity:
-		return {"ok": false, "reason": "the Great Balls did not reach the bag"}
+	if world.state.item_quantity(item) < held + quantity:
+		return {"ok": false, "reason": "the balls did not reach the bag"}
 	return {"ok": true}
 
 
@@ -8819,23 +8849,35 @@ func _catch_field_move_mon(
 		var wild: Gen2BattleMon = Gen2BattleMon.create(
 			data, species, level, data.moves_at_level(species, level), random.randi() & 0xFFFF
 		)
-		# CatchMon reads the wild's current HP, and this tool simulates no wild
-		# battle, the same way _drain_story() answers every trainer battle with a
-		# win rather than fighting it. So the throw is made at the one HP a
-		# player would have brought it to. Union Cave's Geodude lands at full HP
-		# on a catch rate of 255; Dratini's is far lower and does not.
-		wild.hp = 1
+		# CatchMon reads the wild's current HP, so the throw is made at the HP the
+		# party fought it down to, through Gen2Battle.take_turn like any other
+		# battle. It is the levels _award_battle_experience() writes back that make
+		# this affordable; before them the lead lost all three fights. The
+		# encounters are forced, so a fight the walk did not keep is rolled back
+		# with them: no Pokémon Center stands between two of these.
+		var before_fight: Array = _party_snapshot(save)
+		var fight: Dictionary = _weaken_wild(world, save, data, wild, random)
+		if not bool(fight.get("ok", false)):
+			_restore_party(world, save, before_fight)
+			attempts.append({
+				"species": species, "level": level, "thrown": false,
+				"reason": fight.get("reason", ""),
+			})
+			continue
 		var throw_result: Dictionary = Gen2WorldPartyHost.capture_wild(
 			world, save, wild, ball, random, 0, false
 		)
 		attempts.append({
 			"species": species, "level": level, "thrown": true, "ball": ball,
+			"turns": int(fight.get("turns", 0)),
+			"hp": int(fight.get("hp", 0)), "max_hp": int(fight.get("max_hp", 0)),
 			"caught": bool(throw_result.get("caught", false)),
 			"reason": throw_result.get("reason", ""),
 		})
 		if bool(throw_result.get("caught", false)):
 			caught = throw_result
 			break
+		_restore_party(world, save, before_fight)
 	_mirror_party(world, save)
 	path.append({
 		"step": step,
@@ -8857,6 +8899,11 @@ func _catch_field_move_mon(
 ## ChooseMonToLearnTMHM leaves the player to pick. Compatibility, a known move
 ## and a full moveset are all real refusals, so the walk tries each slot in party
 ## order and reports the last reason when none of them can learn it.
+##
+## A full moveset everywhere is the second pass rather than a failure: it is
+## `ForgetMove`'s own prompt, which the walk answers with the first slot that is
+## not an HM, since every HM it has taught is load bearing. A levelled party
+## reaches it, because four level-up moves leave the starter no room for CUT.
 func _teach_tm_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Dictionary:
 	var reason: String = "no party member"
 	for index: int in save.party.size():
@@ -8864,6 +8911,20 @@ func _teach_tm_hm(world: Gen2WorldAPI, save: Gen2SaveData, item: int) -> Diction
 		if bool(result.get("ok", false)):
 			return result
 		reason = String(result.get("reason", ""))
+	for index: int in save.party.size():
+		var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+		if mon == null or mon.is_egg:
+			continue
+		for slot: int in mon.moves.size():
+			if int(mon.moves[slot]) == 0 or Gen2MoveForget.is_hm_move(int(mon.moves[slot])):
+				continue
+			var replaced: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
+				world, save, item, index, slot, false
+			)
+			if bool(replaced.get("ok", false)):
+				return replaced
+			reason = String(replaced.get("reason", ""))
+			break
 	return {"ok": false, "reason": reason}
 
 
@@ -9177,6 +9238,185 @@ func _party_species(save: Gen2SaveData) -> Array:
 ## The whole read-only mirror in one call, so every leg answers VAR_PARTYCOUNT,
 ## CheckPokerus, checkpoke and CheckPartyMove the same way. Pokerus is false
 ## throughout: nothing on this route gives it.
+## The experience a won trainer battle pays, since this walk answers every one of
+## them with a win rather than fighting it. [method Gen2Battle.award_win_experience]
+## is the engine's own split, level up, evolution and move learning; the fought
+## party is written back over the saved one through the adapter that owns that
+## seam, so a leg arrives carrying the levels its fights paid for rather than the
+## ones it started the game with.
+##
+## What is still not a played route: no party member takes damage, and a move
+## offered into a full moveset is left in the engine's queue, which is the same
+## answer as declining it.
+func _award_battle_experience(
+	world: Gen2WorldAPI, save: Gen2SaveData, battle: Gen2Battle, player_party: Gen2Party
+) -> Dictionary:
+	if battle == null or player_party == null or save == null:
+		return {"ok": true, "awarded": 0, "grew": []}
+	var events: Array = battle.award_win_experience()
+	if not _write_party_back(world, save, player_party):
+		return {"ok": false, "reason": "the fought party no longer lines up with the saved one"}
+	var awarded: int = 0
+	var grew: Array = []
+	for event: Dictionary in events:
+		match StringName(event.get("type", &"")):
+			Gen2Battle.EXP_GAINED:
+				awarded += int(event.get("amount", 0))
+			Gen2Battle.GREW_LEVEL:
+				grew.append({
+					"species": int(event.get("species", 0)),
+					"level": int(event.get("new_level", 0)),
+				})
+			Gen2Battle.EVOLVED:
+				grew.append({
+					"species": int(event.get("new_species", 0)),
+					"from": int(event.get("old_species", 0)),
+				})
+	return {"ok": true, "awarded": awarded, "grew": grew}
+
+
+func _party_snapshot(save: Gen2SaveData) -> Array:
+	var out: Array = []
+	for mon: Gen2SaveMon in save.party:
+		out.append(mon.to_dict())
+	return out
+
+
+func _restore_party(world: Gen2WorldAPI, save: Gen2SaveData, snapshot: Array) -> void:
+	var restored: Array[Gen2SaveMon] = []
+	for raw: Dictionary in snapshot:
+		restored.append(Gen2SaveMon.from_dict(raw))
+	save.party = restored
+	_mirror_party(world, save)
+
+
+## A fought party over the saved one, through the adapter that owns that seam.
+## Evolution and a level up both change what the world draws and what a script
+## reads, so the summary is refreshed with it.
+func _write_party_back(world: Gen2WorldAPI, save: Gen2SaveData, party: Gen2Party) -> bool:
+	var written: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		save.game_id, save.rom_sha1, save.slot, party, save.player_name, save
+	)
+	if written == null:
+		return false
+	save.party = written.party
+	_mirror_party(world, save)
+	return true
+
+
+## Fights [param wild] down to where a player would throw and leaves it standing:
+## the saved party's lead attacking through [method Gen2Battle.take_turn], never
+## picking a move whose best possible roll could faint the target, since a
+## fainted wild is not a catch. The damage the lead takes is written back with
+## the rest of the party, so the route pays for the fight and heals it at the
+## Pokémon Center the way a played one does.
+func _weaken_wild(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	data: GameData,
+	wild: Gen2BattleMon,
+	random: RandomNumberGenerator,
+) -> Dictionary:
+	var player_party: Gen2Party = Gen2SaveBattleAdapter.to_battle_party(data, save)
+	if player_party == null or player_party.is_wiped():
+		return {"ok": false, "reason": "no party fit to fight the wild"}
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		data, player_party, Gen2Party.of(wild), random
+	)
+	if battle == null:
+		return {"ok": false, "reason": "wild battle setup failed"}
+	var turns: int = 0
+	# A levelled lead one-shots most of what this route needs alive, so the
+	# fighter is chosen before the first turn rather than assumed: the member
+	# whose hardest safe hit is hardest, which is usually a low-level catch from
+	# an earlier leg rather than the starter.
+	var fighter: int = _weakening_member(battle, player_party, wild)
+	if fighter != player_party.active:
+		battle.take_actions(
+			Gen2Battle.switch_to(fighter), Gen2Battle.use_move(_wild_slot(wild, random))
+		)
+		turns += 1
+	# `CatchMon`'s odds improve the whole way down and no move that could faint
+	# the wild is ever picked, so the fight runs until nothing safe is left
+	# rather than stopping at a fraction of its health.
+	while wild.hp > 1 and turns < WEAKEN_TURN_CAP and not battle.is_over():
+		var attacker: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+		if attacker == null or attacker.is_fainted():
+			break
+		var slot: int = _throttled_slot(battle, attacker, wild)
+		if slot < 0:
+			break
+		battle.take_turn(slot, _wild_slot(wild, random))
+		turns += 1
+	var lead: Gen2BattleMon = battle.mon(Gen2Battle.PLAYER)
+	if lead == null or lead.is_fainted():
+		return {"ok": false, "reason": "the lead fainted before the throw", "turns": turns}
+	if wild.is_fainted():
+		return {"ok": false, "reason": "the wild fainted before the throw", "turns": turns}
+	if not _write_party_back(world, save, player_party):
+		return {"ok": false, "reason": "the fought party no longer lines up with the saved one"}
+	return {"ok": true, "turns": turns, "hp": wild.hp, "max_hp": wild.max_hp()}
+
+
+## Which party member does the weakening: the one with the hardest hit that
+## still cannot faint [param target], or whoever is already out when no member
+## has one, which is the walk throwing at a wild it could only have knocked out.
+func _weakening_member(battle: Gen2Battle, party: Gen2Party, target: Gen2BattleMon) -> int:
+	var best: int = party.active
+	var best_damage: int = -1
+	for index: int in party.size():
+		var member: Gen2BattleMon = party.at(index)
+		if member == null or member.is_fainted():
+			continue
+		var slot: int = _throttled_slot(battle, member, target)
+		if slot < 0:
+			continue
+		var hit: Dictionary = Gen2Damage.calculate_with(
+			member, target, battle.data.move(int(member.moves[slot])),
+			true, Gen2Damage.MAX_VARIATION
+		)
+		if int(hit.get("damage", 0)) > best_damage:
+			best = index
+			best_damage = int(hit.get("damage", 0))
+	return best
+
+
+## The hardest hit that cannot faint [param target], measured at a critical and
+## [constant Gen2Damage.MAX_VARIATION] so the worst case is what is compared.
+## Answers -1 when every usable move could take the last hit point, which is the
+## point the walk stops attacking and throws.
+func _throttled_slot(battle: Gen2Battle, attacker: Gen2BattleMon, target: Gen2BattleMon) -> int:
+	var best: int = -1
+	var best_damage: int = 0
+	for slot: int in attacker.moves.size():
+		if not attacker.can_use(slot):
+			continue
+		var move: Dictionary = battle.data.move(int(attacker.moves[slot]))
+		if move.is_empty() or int(move.get("power", 0)) <= 0:
+			continue
+		var hit: Dictionary = Gen2Damage.calculate_with(
+			attacker, target, move, true, Gen2Damage.MAX_VARIATION
+		)
+		var damage: int = int(hit.get("damage", 0))
+		if bool(hit.get("immune", false)) or damage >= target.hp:
+			continue
+		if best < 0 or damage > best_damage:
+			best = slot
+			best_damage = damage
+	return best
+
+
+## What the wild does with the turn. `_random_slot`'s own answer
+## (`battle_screen.gd`): a wild belongs to no trainer class, so it has no AI move
+## weights to score with.
+func _wild_slot(wild: Gen2BattleMon, random: RandomNumberGenerator) -> int:
+	var usable: Array[int] = []
+	for slot: int in wild.moves.size():
+		if wild.can_use(slot):
+			usable.append(slot)
+	return usable[random.randi_range(0, usable.size() - 1)] if not usable.is_empty() else 0
+
+
 func _mirror_party(world: Gen2WorldAPI, save: Gen2SaveData) -> void:
 	var species: Array[int] = []
 	var moves: Array = []
@@ -9345,6 +9585,13 @@ func _drain_story(
 					last_details = JSON.stringify(prepared.get("details", {}))
 					break
 				var enemy_party: Gen2Party = prepared.get("enemy_party", null)
+				var levelled: Dictionary = _award_battle_experience(
+					world, save, prepared.get("battle", null), player_party
+				)
+				if not bool(levelled.get("ok", true)):
+					last_reason = String(levelled.get("reason", "experience write-back failed"))
+					last_details = JSON.stringify(levelled)
+					break
 				battles.append({
 					"trainer_class": int(prepared.get("trainer_class", 0)),
 					"trainer_index": int(prepared.get("trainer_index", 0)),
@@ -9352,6 +9599,8 @@ func _drain_story(
 						if enemy_party != null and enemy_party.active_mon() != null else 0,
 					"battle_type": int(request.get("values", {}).get("battle_type", 0)),
 					"can_lose": bool(request.get("values", {}).get("can_lose", false)),
+					"exp": levelled.get("awarded", 0),
+					"grew": levelled.get("grew", []),
 				})
 				results = world.complete_runtime_request({
 					"ok": true,
