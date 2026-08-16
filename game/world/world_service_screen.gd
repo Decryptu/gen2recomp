@@ -26,6 +26,9 @@ enum MODE {
 ## region map, so the top menu is still there when the box screen closes.
 const BOX_SCENE := preload("res://game/save/box_screen.tscn")
 
+## `BuyMenu`'s own 160x144, which a window-resolution panel cannot host.
+const HARDWARE_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
+
 ## engine/pokegear/pokegear.asm's card order. Each is behind its own
 ## wPokegearFlags bit, named here by the engine flag that carries it, since that
 ## is what the state holds. The clock card needs no flag.
@@ -37,6 +40,30 @@ const POKEGEAR_CARDS: Array[Dictionary] = [
 ]
 
 const WorldMenu := preload("res://game/world/world_menu.gd")
+
+## `BuyMenuLoop`'s four states: the list `ScrollingMenu` runs, the quantity
+## `SelectQuantityToBuy` asks for, `MartConfirmPurchase`'s yes/no, and a box
+## waiting on `JoyWaitAorB`.
+const MART_LIST: StringName = &"list"
+const MART_QUANTITY: StringName = &"quantity"
+const MART_CONFIRM: StringName = &"confirm"
+const MART_MESSAGE: StringName = &"message"
+## Which of `GetMartDialogGroup.MartTextFunctionPointers`' groups a variant
+## reads. The rooftop sale takes the standard group, which is why it has no
+## prefix of its own; the bargain shop's `MARTTEXT_HOW_MANY` slot is
+## `BuyMenuLoop` rather than a text, so it asks no quantity.
+const MART_TEXT_PREFIX: Dictionary = {
+	&"standard": "", &"bitter": "bitter_", &"bargain": "bargain_",
+	&"pharmacy": "pharmacy_", &"rooftop_mart_1": "", &"rooftop_mart_2": "",
+}
+## `PlayTransactionSound`, once the money has been taken.
+const SFX_TRANSACTION: int = 0x22
+## `Textbox`'s interior, which is what a mart box's words are wrapped to.
+const MART_TEXT_COLUMNS: int = 18
+const MART_TEXT_ROWS: int = 2
+## `hMoneyTemp` is HRAM and `wItemQuantityChange` is not, which is how a
+## `text_decimal` marker says which of the two numbers it wants.
+const HRAM_FIRST: int = 0xFF00
 
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
@@ -52,6 +79,18 @@ var _cursor: int = 0
 var _mart_entries: Array = []
 var _mart_quantity: int = 1
 var _mart_purchased: bool = false
+## `BuyMenu`'s screen, which owns all 160x144 the way the region map does: the
+## scrolling list's own scroll and cursor, which of `BuyMenuLoop`'s four states
+## it is in, and the boxes waiting on a press.
+var _mart_hardware: Gen2Screen = null
+var _mart_view: TextureRect = null
+var _mart_page: Gen2MartPage = null
+var _mart_menu_page: Gen2MenuPage = null
+var _mart_stage: StringName = MART_LIST
+var _mart_scroll: int = 0
+var _mart_pages: Array = []
+var _mart_after: StringName = MART_LIST
+var _mart_confirm: int = 0
 var _apricorns: Gen2WorldApricorn = null
 var _pokegear_cards: Array = []
 var _town_map: Gen2TownMapScreen = null
@@ -203,6 +242,9 @@ func handle_button(button: int) -> bool:
 	if _mode == MODE.APRICORN:
 		_press_apricorns(button)
 		return true
+	if _mode == MODE.MART:
+		_press_mart(button)
+		return true
 	if _mode == MODE.CARD and _pokegear != null:
 		return _pokegear.handle_button(button)
 	## The panel is behind the box screen while BILL'S PC is open, the way it is
@@ -283,18 +325,325 @@ func _open_menu(input: Dictionary) -> void:
 	_render_options()
 
 
-func _open_mart(mart: Dictionary) -> void:
+## `BuyMenu`, which is a screen of its own rather than a box over the map: the
+## panel steps aside for it the way it does for the region map, and the shop's
+## own intro box is the first thing it prints.
+func _open_mart(_mart: Dictionary) -> void:
 	_mode = MODE.MART
 	_refresh_mart_entries()
 	_mart_quantity = 1
 	_mart_purchased = false
+	_mart_scroll = 0
 	_cursor = 0
-	_title.text = String(mart.get("label", "MART"))
-	_summary.text = "Money: %d" % _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT)
-	_status.text = "One of each item per visit." if StringName(mart.get("variant", &"")) == &"bargain" \
-		else "Select an item. Left and right change the quantity."
-	_footer.text = "D-pad: move and quantity    A: buy    B: leave"
-	_render_options()
+	_panel.visible = false
+	if _mart_hardware == null:
+		_mart_hardware = HARDWARE_SCENE.instantiate() as Gen2Screen
+		_mart_hardware.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_mart_hardware.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_mart_hardware.z_index = 5
+		add_child(_mart_hardware)
+		_mart_view = TextureRect.new()
+		_mart_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_mart_view.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+		_mart_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_mart_hardware.display(_mart_view)
+	_show_mart_text(_mart_text("intro"), MART_LIST)
+
+
+## One of the shop's own boxes, by the slot name its group gives it.
+func _mart_text(slot: String, filled: Dictionary = {}) -> String:
+	var prefix: String = String(MART_TEXT_PREFIX.get(
+		StringName(_mart_source().get("variant", &"standard")), ""
+	))
+	var name: String = prefix + slot
+	if slot == "intro" and prefix.is_empty():
+		name = "welcome"
+	var text: String = _data.mart_text(name)
+	if text.is_empty():
+		return ""
+	return _fill_mart_markers(text, filled)
+
+
+## `PartyMonItemName` and the two `text_decimal`s a mart box carries. The number
+## markers are told apart by their address rather than by their order, since the
+## bargain shop names the item first and the price second.
+func _fill_mart_markers(text: String, filled: Dictionary) -> String:
+	var out: String = Gen2TextStream.fill_marker(
+		text, Gen2TextStream.RAM_MARKER, String(filled.get("name", ""))
+	)
+	while true:
+		var at: int = out.find(Gen2TextStream.NUMBER_MARKER)
+		if at < 0:
+			break
+		var end: int = out.find(">", at)
+		if end < 0:
+			break
+		var address: int = out.substr(
+			at + Gen2TextStream.NUMBER_MARKER.length(),
+			end - at - Gen2TextStream.NUMBER_MARKER.length()
+		).hex_to_int()
+		out = out.substr(0, at) + String.num_int64(int(filled.get(
+			"total" if address >= HRAM_FIRST else "quantity", 0
+		))) + out.substr(end + 1)
+	return out
+
+
+## A box the shop is holding on, laid out into the pages `JoyWaitAorB` steps
+## through. An empty text goes straight on, which is what a cache imported
+## before the mart's own words leaves.
+func _show_mart_text(text: String, after: StringName) -> void:
+	_mart_after = after
+	_mart_pages = [] if text.strip_edges().is_empty() \
+		else Gen2TextLayout.lay_out(text, MART_TEXT_COLUMNS, MART_TEXT_ROWS)
+	if _mart_pages.is_empty():
+		_advance_mart_text()
+		return
+	_mart_stage = MART_MESSAGE
+	_render_mart()
+
+
+func _advance_mart_text() -> void:
+	if not _mart_pages.is_empty():
+		_mart_pages.remove_at(0)
+	if not _mart_pages.is_empty():
+		_render_mart()
+		return
+	if _mart_after == MART_LIST:
+		_mart_stage = MART_LIST
+		_render_mart()
+		return
+	_close_mart()
+	_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0})
+
+
+## `w2DMenuNumRows`: the CANCEL row is only on offer when the whole list fits,
+## because `ScrollingMenu_InitFlags` adds it to the row count and `.d_down`
+## stops scrolling at `size - height`.
+func _mart_row_count() -> int:
+	return _mart_entries.size() + 1 if _mart_entries.size() < Gen2MartPage.LIST_HEIGHT \
+		else Gen2MartPage.LIST_HEIGHT
+
+
+func _mart_rows() -> Array:
+	var out: Array = []
+	for row: int in _mart_row_count():
+		var index: int = _mart_scroll + row
+		out.append(
+			{"cancel": true} if index >= _mart_entries.size() else _mart_entries[index]
+		)
+	return out
+
+
+func _mart_selection() -> Dictionary:
+	var index: int = _mart_scroll + _cursor
+	return {} if index >= _mart_entries.size() else _mart_entries[index]
+
+
+func _press_mart(button: int) -> void:
+	match _mart_stage:
+		MART_MESSAGE:
+			if button in [Gen2Button.A, Gen2Button.B]:
+				_advance_mart_text()
+		MART_LIST:
+			_press_mart_list(button)
+		MART_QUANTITY:
+			_press_mart_quantity(button)
+		MART_CONFIRM:
+			_press_mart_confirm(button)
+
+
+func _press_mart_list(button: int) -> void:
+	match button:
+		Gen2Button.UP:
+			_move_mart_cursor(-1)
+		Gen2Button.DOWN:
+			_move_mart_cursor(1)
+		Gen2Button.B:
+			_leave_mart()
+		Gen2Button.A:
+			var entry: Dictionary = _mart_selection()
+			if entry.is_empty():
+				_leave_mart()
+				return
+			if bool(entry.get("sold_out", false)):
+				## `BargainShopAskPurchaseQuantity.SoldOut`, the one refusal that
+				## comes before a price is ever named.
+				_show_mart_text(_mart_text("sold_out", {"name": entry.get("name", "")}), MART_LIST)
+				return
+			_mart_quantity = 1
+			if StringName(_mart_source().get("variant", &"")) == &"bargain":
+				_ask_mart_confirm()
+				return
+			## `MARTTEXT_HOW_MANY` is printed before `SelectQuantityToBuy`, and
+			## the box stays up under the dial rather than waiting on a press.
+			_mart_pages = Gen2TextLayout.lay_out(
+				_mart_text("how_many"), MART_TEXT_COLUMNS, MART_TEXT_ROWS
+			)
+			_mart_stage = MART_QUANTITY
+			_render_mart()
+
+
+func _move_mart_cursor(delta: int) -> void:
+	var rows: int = _mart_row_count()
+	var next: int = _cursor + delta
+	if next < 0:
+		if _mart_scroll > 0:
+			_mart_scroll -= 1
+	elif next >= rows:
+		if _mart_entries.size() >= _mart_scroll + Gen2MartPage.LIST_HEIGHT:
+			_mart_scroll += 1
+	else:
+		_cursor = next
+	_render_mart()
+
+
+## `BuySellToss_InterpretJoypad`: one on up and down, ten on left and right,
+## against `wItemQuantity`, which `StandardMartAskPurchaseQuantity` sets to the
+## whole stack rather than to what the money or the pack allows.
+func _press_mart_quantity(button: int) -> void:
+	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK
+	match button:
+		Gen2Button.UP:
+			_mart_quantity = 1 if _mart_quantity >= maximum else _mart_quantity + 1
+		Gen2Button.DOWN:
+			_mart_quantity = maximum if _mart_quantity <= 1 else _mart_quantity - 1
+		Gen2Button.RIGHT:
+			_mart_quantity = mini(_mart_quantity + 10, maximum)
+		Gen2Button.LEFT:
+			_mart_quantity = maxi(_mart_quantity - 10, 1)
+		Gen2Button.B:
+			_mart_stage = MART_LIST
+		Gen2Button.A:
+			_ask_mart_confirm()
+			return
+	_render_mart()
+
+
+## `MartConfirmPurchase`: the price box and the yes/no over it.
+func _ask_mart_confirm() -> void:
+	var entry: Dictionary = _mart_selection()
+	_mart_confirm = 0
+	_mart_stage = MART_CONFIRM
+	_mart_pages = Gen2TextLayout.lay_out(
+		_mart_text("final_price", {
+			"name": entry.get("name", ""),
+			"quantity": _mart_quantity,
+			"total": int(entry.get("price", 0)) * _mart_quantity,
+		}),
+		MART_TEXT_COLUMNS, MART_TEXT_ROWS
+	)
+	_render_mart()
+
+
+func _press_mart_confirm(button: int) -> void:
+	match button:
+		Gen2Button.UP, Gen2Button.DOWN:
+			_mart_confirm = 1 - _mart_confirm
+		Gen2Button.B:
+			_mart_stage = MART_LIST
+		Gen2Button.A:
+			if _mart_confirm == 0:
+				_buy_mart_selection()
+				return
+			_mart_stage = MART_LIST
+	_render_mart()
+
+
+## The transaction itself, and whichever of `BuyMenuLoop`'s three answers it
+## earns: too little money, no room in the pack, or the shop's own thanks.
+func _buy_mart_selection() -> void:
+	var entry: Dictionary = _mart_selection()
+	var purchase: Dictionary = Gen2WorldMartHost.purchase(
+		_world, _save, _mart_source(), int(entry.get("item", 0)), _mart_quantity, _persist
+	)
+	if not bool(purchase.get("ok", false)):
+		var reason: StringName = StringName(purchase.get("reason", &""))
+		var slot: String = {
+			&"insufficient_money": "no_money", &"item_stack_full": "pack_full",
+			&"bargain_item_sold_out": "sold_out",
+		}.get(reason, "")
+		if slot.is_empty():
+			_status.text = "Purchase failed: %s" % String(reason)
+			_status.add_theme_color_override("font_color", ERROR)
+			_mart_stage = MART_LIST
+			_render_mart()
+			return
+		_show_mart_text(_mart_text(slot, {"name": entry.get("name", "")}), MART_LIST)
+		return
+	_mart_purchased = true
+	Gen2WorldAudioHost.play(_data.world_audio(&"sfx", SFX_TRANSACTION), &"sound")
+	_refresh_mart_entries()
+	_show_mart_text(_mart_text("thanks", {
+		"name": purchase.get("name", ""), "quantity": _mart_quantity,
+		"total": int(purchase.get("total", 0)),
+	}), MART_LIST)
+
+
+func _leave_mart() -> void:
+	_show_mart_text(_mart_text("come_again"), &"exit")
+
+
+func _close_mart() -> void:
+	if _mart_hardware != null:
+		_mart_hardware.queue_free()
+		_mart_hardware = null
+		_mart_view = null
+	_panel.visible = true
+
+
+func _render_mart() -> void:
+	if _mart_view == null or _data == null:
+		return
+	if _mart_page == null:
+		_mart_page = Gen2MartPage.from_data(_data)
+	if _mart_page == null:
+		return
+	var page: PackedStringArray = _mart_pages[0] if not _mart_pages.is_empty() \
+		else PackedStringArray()
+	var image: Image = _mart_page.render({
+		"money": _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT),
+		"rows": _mart_rows(),
+		"cursor": _cursor if _mart_stage == MART_LIST else -1,
+		"scrolled": _mart_scroll > 0,
+		"text": "\n".join(page) if _mart_stage != MART_LIST else _mart_description(),
+		## `StandardMartAskPurchaseQuantity` closes the dial with `ExitMenu`
+		## before `MartConfirmPurchase` prints, so the box is the quantity
+		## stage's alone.
+		"quantity": _mart_quantity if _mart_stage == MART_QUANTITY else -1,
+		"subtotal": int(_mart_selection().get("price", 0)) * _mart_quantity,
+	})
+	if image == null:
+		return
+	if _mart_stage == MART_CONFIRM:
+		if _mart_menu_page == null:
+			_mart_menu_page = Gen2MenuPage.from_data(_data)
+		if _mart_menu_page != null:
+			var box: Gen2MenuBox = _mart_yes_no_box()
+			var menu: Image = _mart_menu_page.render(
+				box, ["YES", "NO"], _mart_confirm
+			)
+			image.blend_rect(
+				menu, Rect2i(Vector2i.ZERO, menu.get_size()),
+				box.border_position() * Gen2Font.TILE
+			)
+	_mart_view.texture = ImageTexture.create_from_image(image)
+
+
+## `YesNoBox`'s own `lb bc, SCREEN_WIDTH - 6, 7`, which `_YesNoBox` turns into
+## the five-wide, four-tall box at (14,7).
+func _mart_yes_no_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(
+		14, 7, 19, 11,
+		Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_NO_TOP_SPACING
+	)
+
+
+## `UpdateItemDescription`, which prints nothing for the CANCEL row.
+func _mart_description() -> String:
+	var entry: Dictionary = _mart_selection()
+	if entry.is_empty():
+		return ""
+	return String(_data.item(int(entry.get("item", 0))).get("description", ""))
 
 
 ## `SelectApricornForKurt`'s two boxes. The model owns both cursors and the loop
@@ -885,8 +1234,6 @@ func _move_cursor(delta: int) -> void:
 	if count <= 0:
 		return
 	_cursor = wrapi(_cursor + delta, 0, count)
-	if _mode == MODE.MART:
-		_mart_quantity = 1
 	if _mode == MODE.PC_ITEM_LIST:
 		_pc_quantity = 1
 	_render_options()
@@ -900,9 +1247,6 @@ func _move_direction(direction: Vector2i) -> void:
 		if _menu.move(direction):
 			_cursor = _menu.selected_index()
 			_render_options()
-		return
-	if _mode == MODE.MART and direction.x != 0:
-		_change_mart_quantity(direction.x)
 		return
 	if _mode == MODE.PC_ITEM_LIST and direction.x != 0:
 		_change_pc_quantity(direction.x)
@@ -929,35 +1273,6 @@ func _confirm() -> void:
 			_status.add_theme_color_override("font_color", ERROR)
 			return
 		_finish_input(_cursor)
-		return
-	if _mode == MODE.MART:
-		if _cursor >= _mart_entries.size():
-			_cancel()
-			return
-		var entry: Dictionary = _mart_entries[_cursor]
-		if bool(entry.get("leave", false)):
-			_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0})
-			return
-		if bool(entry.get("sold_out", false)):
-			_status.text = "This item is sold out for this visit."
-			_status.add_theme_color_override("font_color", ERROR)
-			return
-		var purchase: Dictionary = Gen2WorldMartHost.purchase(
-			_world, _save, _mart_source(), int(entry.get("item", 0)), _mart_quantity, _persist
-		)
-		if not bool(purchase.get("ok", false)):
-			_status.text = "Purchase failed: %s" % String(purchase.get("reason", "unknown"))
-			_status.add_theme_color_override("font_color", ERROR)
-			return
-		_mart_purchased = true
-		_summary.text = "Money: %d" % _world.state.money(Gen2WorldMartHost.MONEY_ACCOUNT)
-		_status.text = "Bought %s. Owned: %d" % [
-			String(purchase.get("name", "UNKNOWN")), int(purchase.get("owned", 0)),
-		]
-		_status.add_theme_color_override("font_color", SUCCESS)
-		_mart_quantity = 1
-		_refresh_mart_entries()
-		_render_options()
 		return
 	if _mode == MODE.POKEGEAR:
 		if _cursor >= _pokegear_cards.size():
@@ -993,8 +1308,6 @@ func _cancel() -> void:
 		_advance_pc_text()
 	elif _mode == MODE.MENU:
 		_finish_input_cancelled()
-	elif _mode == MODE.MART:
-		_finish_runtime({"ok": true, "script_value": 1 if _mart_purchased else 0, "cancelled": true})
 	elif _mode == MODE.POKEGEAR:
 		_mode = -1
 		completed.emit([])
@@ -1027,6 +1340,7 @@ func _finish_runtime(result: Dictionary) -> void:
 
 func _finish(results: Array) -> void:
 	_mode = -1
+	_close_mart()
 	completed.emit(results)
 
 
@@ -1043,7 +1357,7 @@ func _render_options(override: Array = []) -> void:
 		_options.add_child(grid)
 		parent = grid
 	var values: Array = override if not override.is_empty() else (
-		_choices if _mode == MODE.MENU else _mart_entries if _mode == MODE.MART \
+		_choices if _mode == MODE.MENU \
 		else _pc_rows if _mode in [MODE.PC, MODE.PC_ITEMS] \
 		else _pc_entries if _mode == MODE.PC_ITEM_LIST \
 		else _pokegear_cards if _mode == MODE.POKEGEAR else ["Continue"]
@@ -1061,22 +1375,6 @@ func _render_options(override: Array = []) -> void:
 				name = str(dictionary.get("trainer_name", "UNKNOWN"))
 			if name.is_empty() and dictionary.has("index"):
 				name = "CONTACT %d" % int(dictionary.get("index", -1))
-		if value is Dictionary and _mode == MODE.MART \
-			and not bool((value as Dictionary).get("leave", false)):
-			if bool((value as Dictionary).get("sold_out", false)):
-				name = "%s    SOLD OUT" % name
-				label.text = ("> " if index == _cursor else "  ") + name
-				label.add_theme_color_override("font_color", ERROR if index == _cursor else MUTED)
-				label.add_theme_font_size_override("font_size", 18)
-				parent.add_child(label)
-				continue
-			var price: int = int((value as Dictionary).get("price", 0))
-			if index == _cursor:
-				name = "%s    %d x %d = %d" % [
-					name, price, _mart_quantity, price * _mart_quantity,
-				]
-			else:
-				name = "%s    %d" % [name, price]
 		if value is Dictionary and _mode == MODE.PC_ITEM_LIST:
 			var stack: int = int((value as Dictionary).get("quantity", 0))
 			name = "%s    x%d of %d" % [name, _pc_quantity, stack] if index == _cursor \
@@ -1085,15 +1383,11 @@ func _render_options(override: Array = []) -> void:
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
 		parent.add_child(label)
-	if _mode == MODE.MART:
-		_update_mart_status()
 
 
 func _option_count() -> int:
 	if _mode == MODE.MENU:
 		return _menu.options.size() if _menu != null else _choices.size()
-	if _mode == MODE.MART:
-		return _mart_entries.size()
 	if _mode == MODE.POKEGEAR:
 		return _pokegear_cards.size()
 	if _mode in [MODE.PC, MODE.PC_ITEMS]:
@@ -1107,47 +1401,10 @@ func _mart_source() -> Dictionary:
 	return _resolved.get("data", {}).get("mart", {})
 
 
+## `FarReadMart`'s own list. CANCEL is not one of its rows: `ScrollingMenu`
+## draws it past the terminator, which is what [method _mart_rows] does.
 func _refresh_mart_entries() -> void:
 	_mart_entries = Gen2WorldMartHost.entries(_data, _mart_source())
-	_mart_entries.append({"leave": true, "name": "LEAVE"})
-
-
-func _change_mart_quantity(delta: int) -> void:
-	if _cursor < 0 or _cursor >= _mart_entries.size():
-		return
-	var entry: Dictionary = _mart_entries[_cursor]
-	if bool(entry.get("leave", false)) or bool(entry.get("sold_out", false)):
-		return
-	if StringName(_mart_source().get("variant", &"")) == &"bargain":
-		return
-	var owned: int = _world.state.item_quantity(int(entry.get("item", 0)))
-	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK - owned
-	if maximum <= 0:
-		_mart_quantity = 0
-	else:
-		_mart_quantity = clampi(_mart_quantity + delta, 1, maximum)
-	_render_options()
-
-
-func _update_mart_status() -> void:
-	if _mode != MODE.MART or _cursor < 0 or _cursor >= _mart_entries.size():
-		return
-	var entry: Dictionary = _mart_entries[_cursor]
-	if bool(entry.get("leave", false)):
-		_status.text = "Leave this shop."
-		return
-	if bool(entry.get("sold_out", false)):
-		_status.text = "Sold out for this visit."
-		return
-	var item: int = int(entry.get("item", 0))
-	var owned: int = _world.state.item_quantity(item)
-	var maximum: int = Gen2WorldMartHost.MAX_ITEM_STACK - owned
-	if maximum <= 0:
-		_status.text = "This item stack is full."
-		return
-	_status.text = "Owned: %d    Quantity: %d    Total: %d" % [
-		owned, _mart_quantity, int(entry.get("price", 0)) * _mart_quantity,
-	]
 
 
 func _phone_text(summary: Dictionary) -> String:

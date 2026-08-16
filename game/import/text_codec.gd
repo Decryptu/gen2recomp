@@ -39,6 +39,11 @@ const BATTLE_EXTRA_CHARACTERS: Dictionary = {
 	0x74: "№",
 }
 
+## `'▲'`, which `_LoadFontsExtra2` parks in the middle of that run: a scrolling
+## menu draws it and nothing else does, so it is the one code in $60 to $78 that
+## is a character under the main font as well.
+const UP_ARROW_CODE: int = 0x61
+
 ## The lowest code with a tile. Below it is a space, border, control code or a
 ## print-time name, so it is also the line between [method encode]'s range and
 ## what only [method decode] understands.
@@ -199,6 +204,7 @@ static func _characters() -> Dictionary:
 	table[0xE9] = "&"
 	table[0xEA] = "é"
 	table[0xEB] = "→"
+	table[UP_ARROW_CODE] = "▲"
 	table[0xEC] = "▷"
 	table[0xED] = "▶"
 	table[0xEE] = "▼"

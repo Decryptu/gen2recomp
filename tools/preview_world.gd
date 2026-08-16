@@ -16,7 +16,9 @@ extends SceneTree
 ## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
 ## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
 ## ESCAPE, WATER and LIGHT, as `crystal 3 24 ... unown_wall 3 1`),
-## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `pokepic`
+## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `mart`
+## (`BuyMenu`, talked open from the cell in front of a shop's counter, as
+## `crystal 1 8 ... mart 3 3`), `pokepic`
 ## (`Script_pokepic`'s box over the map, holding Chikorita), the name of any
 ## `preview_*` driver on the world screen without that prefix (`field_move` is
 ## `PartyMenu` with a taught CUT on it, `start_menu`, `capture`, `move_forget`
@@ -59,6 +61,11 @@ const POKEPIC_SPECIES: int = 152
 ## How a `kind` names one of [Gen2WorldScreen]'s own screenshot drivers, so
 ## every `preview_*` on it is reachable from here rather than from nothing.
 const SCREEN_DRIVER: String = "preview_%s"
+
+## The clerk's own text box, which is the one press between `pokemart` and the
+## welcome the buy screen opens on. One more reaches the list, two the quantity
+## dial and three the yes/no.
+const MART_PRESSES: int = 1
 
 const STAGED_FRAMES: int = 2
 const STAGED_FRAMES_CUT: int = 12
@@ -151,6 +158,15 @@ func _process(_delta: float) -> bool:
 			## is what runs `special DisplayUnownWords` and puts the box up.
 			_screen.press_button(Gen2Button.A)
 			_screen.press_button(Gen2Button.A)
+		elif _kind == &"mart":
+			## The clerk behind the counter, talked to from the cell in front of
+			## him: his `pokemart` is what opens `BuyMenu`, so the shop is
+			## reached the way a player reaches it. The presses are the dialog's
+			## own, the welcome box first and then the list.
+			_screen.press_button(Gen2Button.LEFT)
+			_screen.interact()
+			for _press: int in MART_PRESSES:
+				_screen.press_button(Gen2Button.A)
 		elif _kind == &"pokepic":
 			_screen.preview_pokepic(POKEPIC_SPECIES)
 		elif FIELD_ITEMS.has(_kind):

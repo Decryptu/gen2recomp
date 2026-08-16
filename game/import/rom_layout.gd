@@ -1146,6 +1146,44 @@ const POKECENTER_PC_TEXT_AT: Dictionary = {
 	"closed": 0x446,
 }
 
+## Every `text_far` stub `engine/items/mart.asm` prints through, as its distance
+## from `MartHowManyText`. `GetMartDialogGroup.MartTextFunctionPointers` is what
+## groups them: the rooftop sale reads the standard group, the bargain shop asks
+## no quantity, and every other group's sold-out slot is `BuyMenuLoop` rather
+## than a text. The deltas are the same on all three cartridges, which ship the
+## whole routine byte identical.
+const MART_TEXT_AT: Dictionary = {
+	"how_many": 0x000,
+	"final_price": 0x005,
+	"bitter_intro": 0x03C,
+	"bitter_how_many": 0x041,
+	"bitter_final_price": 0x046,
+	"bitter_thanks": 0x04B,
+	"bitter_pack_full": 0x050,
+	"bitter_no_money": 0x055,
+	"bitter_come_again": 0x05A,
+	"bargain_intro": 0x05F,
+	"bargain_final_price": 0x064,
+	"bargain_thanks": 0x069,
+	"bargain_pack_full": 0x06E,
+	"bargain_sold_out": 0x073,
+	"bargain_no_money": 0x078,
+	"bargain_come_again": 0x07D,
+	"pharmacy_intro": 0x082,
+	"pharmacy_how_many": 0x087,
+	"pharmacy_final_price": 0x08C,
+	"pharmacy_thanks": 0x091,
+	"pharmacy_pack_full": 0x096,
+	"pharmacy_no_money": 0x09B,
+	"pharmacy_come_again": 0x0A0,
+	"welcome": 0x175,
+	"thanks": 0x192,
+	"no_money": 0x197,
+	"pack_full": 0x19C,
+	"come_again": 0x1A6,
+	"ask_more": 0x1AB,
+}
+
 ## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
 ## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
 ## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
@@ -1578,6 +1616,9 @@ const GOLD_SILVER: Dictionary = {
 	"frames": 0xF88F2,
 	"bar_palettes": 0xAD2D,
 	"battle_font": 0xF86F2,
+	# `FontsExtra_SolidBlackAndUpArrowGFX`' second tile, which is 1bpp here and
+	# a 2bpp sheet of its own on Crystal. Both are unique in their dump.
+	"up_arrow": {"offset": 0xF9306, "bits": 1},
 	"enemy_hud": 0xF8BB2,
 	"player_hud": 0xF8BD2,
 	"exp_bar": 0xF8C02,
@@ -1836,6 +1877,7 @@ const GOLD_SILVER: Dictionary = {
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
+	"mart_text": 0x16063,
 	"fruit_trees": 0x44091,
 	## `SpawnPoints` and `Flypoints`, each located by the byte column that is the
 	## same on all three dumps: the spawn coordinates at a stride of four, and
@@ -1996,6 +2038,8 @@ const CRYSTAL: Dictionary = {
 	"frames": 0xF8800,
 	"bar_palettes": 0xA8BE,
 	"battle_font": 0xF8600,
+	# `FontsExtra2_UpArrowGFX`, its own 2bpp tile here.
+	"up_arrow": {"offset": 0xF9424, "bits": 2},
 	"enemy_hud": 0xF8AC0,
 	"player_hud": 0xF8AE0,
 	"exp_bar": 0xF8B10,
@@ -2215,6 +2259,7 @@ const CRYSTAL: Dictionary = {
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
+	"mart_text": 0x15E0E,
 	"fruit_trees": 0x44097,
 	"spawn_points": 0x152AB,
 	"flypoints": 0x91C5E,
@@ -2711,6 +2756,14 @@ static func pokecenter_pc_text_offset(layout: Dictionary, name: String) -> int:
 	if at < 0 or not POKECENTER_PC_TEXT_AT.has(name):
 		return -1
 	return at + int(POKECENTER_PC_TEXT_AT[name])
+
+
+## Where the mart's `text_far` stub [param name] names sits.
+static func mart_text_offset(layout: Dictionary, name: String) -> int:
+	var at: int = int(layout.get("mart_text", -1))
+	if at < 0 or not MART_TEXT_AT.has(name):
+		return -1
+	return at + int(MART_TEXT_AT[name])
 
 
 ## `Credits_LoadBorderGFX.Frames`, as 16-tile block indices into the mon run.

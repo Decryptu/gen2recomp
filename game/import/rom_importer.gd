@@ -336,6 +336,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not menu_text["ok"]:
 		return menu_text
 
+	var mart_text: Dictionary = verify_mart_text(rom, layout)
+	if not mart_text["ok"]:
+		return mart_text
+
 	var pack: Dictionary = verify_pack(rom, layout)
 	if not pack["ok"]:
 		return pack
@@ -1078,6 +1082,24 @@ static func verify_pokecenter_pc(rom: RomFile, layout: Dictionary) -> Dictionary
 				"message": "The Pokemon Center PC's %s text did not decode." % name,
 			}
 	return {"ok": true, "message": "The Pokemon Center PC verified."}
+
+
+## `engine/items/mart.asm`'s own `text_far` stubs, identified by content: all
+## twenty-nine have to decode and the standard welcome has to be the word the
+## shop opens with, which is what says the one pinned address is right.
+static func verify_mart_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	for name: String in RomLayout.MART_TEXT_AT:
+		if read_oak_text(rom, layout, RomLayout.mart_text_offset(layout, name)).is_empty():
+			return {"ok": false, "message": "The mart's %s text did not decode." % name}
+	var welcome: String = read_oak_text(
+		rom, layout, RomLayout.mart_text_offset(layout, "welcome")
+	)
+	if not welcome.begins_with("Welcome!"):
+		return {
+			"ok": false,
+			"message": "The mart's welcome text is \"%s\", not the shop's own." % welcome,
+		}
+	return {"ok": true, "message": "The mart's texts verified."}
 
 
 ## `UnownWords`, twenty-six words in form order, A first. Empty on any failure,
@@ -3693,6 +3715,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"pc_palette": _import_pc_palette(rom, layout),
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
 		"menu_text": _import_menu_text(rom, layout),
+		"mart_text": _import_mart_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
@@ -4363,6 +4386,14 @@ func _import_menu_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## The mart's own boxes, by the name `RomLayout.MART_TEXT_AT` gives each stub.
+func _import_mart_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in RomLayout.MART_TEXT_AT:
+		out[name] = read_oak_text(rom, layout, RomLayout.mart_text_offset(layout, name))
+	return out
+
+
 ## The splash's object palettes: PREDEFPAL_GAMEFREAK_LOGO_OB on every profile,
 ## and on Crystal `gfx/splash/ditto.pal` with the sixteen-step fade
 ## `GameFreakLogo_Transform` walks through its third colour.
@@ -4977,6 +5008,15 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.BATTLE_FONT_TILES,
 			"first_code": 0,
 			"bits": 2,
+		},
+		# `'▲'`, the one tile a scrolling menu needs that no font strip carries:
+		# Crystal loads it out of a 2bpp sheet of its own and Gold and Silver
+		# out of the second tile of a 1bpp pair.
+		"up_arrow": {
+			"offset": int((layout.get("up_arrow", {}) as Dictionary).get("offset", -1)),
+			"tiles": 1,
+			"first_code": Gen2Text.UP_ARROW_CODE,
+			"bits": int((layout.get("up_arrow", {}) as Dictionary).get("bits", 2)),
 		},
 		"enemy_hud": {
 			"offset": int(layout["enemy_hud"]),
