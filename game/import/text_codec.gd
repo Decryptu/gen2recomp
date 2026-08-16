@@ -44,6 +44,11 @@ const BATTLE_EXTRA_CHARACTERS: Dictionary = {
 ## is a character under the main font as well.
 const UP_ARROW_CODE: int = 0x61
 
+## `charmap.asm`'s "…", the one code in that run source text writes as itself.
+## `_LoadFontsExtra1` is what puts a tile under it, which is why the importer
+## checks this one glyph by shape (`RomImporter.verify_font_extra`).
+const ELLIPSIS_CODE: int = 0x75
+
 ## The lowest code with a tile. Below it is a space, border, control code or a
 ## print-time name, so it is also the line between [method encode]'s range and
 ## what only [method decode] understands.
@@ -219,7 +224,7 @@ static func _characters() -> Dictionary:
 	table[0x72] = "“"
 	table[0x73] = "”"
 	table[0x74] = "·"
-	table[0x75] = "…"
+	table[ELLIPSIS_CODE] = "…"
 	table[0x79] = "┌"
 	table[0x7A] = "─"
 	table[0x7B] = "┐"
@@ -304,7 +309,7 @@ static func _encodings() -> Dictionary:
 	# writes the character itself (Text_MoveForgetCount's "1, 2 and…"), so a line
 	# quoting that wording has to encode it. $56 is "……" and stays decode-only,
 	# two $75s drawing the same thing.
-	out["…"] = 0x75
+	out["…"] = ELLIPSIS_CODE
 
 	_codes = out
 	return _codes

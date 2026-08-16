@@ -1546,6 +1546,37 @@ func preview_options() -> void:
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
+## Public screenshot drivers for `SaveMenu`, one per box it puts up:
+## `WouldYouLikeToSaveTheGameText` with its yes/no, `AlreadyASaveFileText` past
+## `_ContText`'s own wait, and `SavingDontTurnOffThePowerText` with no question
+## behind it. An injected save keeps the write in memory, the way
+## [method preview_pack_toss] keeps its stack.
+func preview_save_menu() -> void:
+	_preview_save_menu(0)
+
+
+func preview_save_overwrite() -> void:
+	_preview_save_menu(2)
+
+
+func preview_save_writing() -> void:
+	_preview_save_menu(3)
+
+
+## [param answers] is how many A presses to spend past the first question.
+func _preview_save_menu(answers: int) -> void:
+	if _world == null or _data == null or _start_menu_host != null:
+		return
+	_injected_save = _embedded_party_save()
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_SAVE:
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	for _press: int in answers + 1:
+		_start_menu_host.handle_button(Gen2Button.A)
+
+
 ## Public screenshot driver for `TossMenu`. Grants a stack on an injected save
 ## so nothing persists, then advances one menu step per call: Pack, the item,
 ## TOSS, the quantity dial, the yes/no and the result.
@@ -2290,6 +2321,7 @@ func _open_start_menu_host(entry: Callable) -> void:
 	host.action_chosen.connect(_on_start_menu_action)
 	host.closed.connect(_on_start_menu_closed)
 	host.field_item_used.connect(_on_field_item_used)
+	host.sfx_requested.connect(_play_sfx)
 	_start_menu_host = host
 	_script_prompt = "Start menu open"
 	if entry.is_valid():

@@ -218,3 +218,73 @@ func test_the_box_grows_downward_by_two_rows_an_entry() -> void:
 	assert_eq(five.border_size(), Vector2i(10, 12))
 	assert_eq(Gen2StartMenuPage.list_box(8).border_size(), Vector2i(10, 18))
 	assert_eq(Gen2StartMenuPage.list_box(5, true).border_position(), Vector2i(10, 2))
+
+
+func _save_state(pokedex: bool, cursor: int) -> Dictionary:
+	return {
+		"player_name": "GOLD", "badges": 3, "pokedex": pokedex, "caught": 42,
+		"hours": 12, "minutes": 7,
+		"lines": Gen2StartMenuScreen.SAVE_ASK_LINES, "line": 0, "cursor": cursor,
+	}
+
+
+func _opaque(image: Image, tile: Vector2i) -> bool:
+	return image.get_pixel(
+		tile.x * Gen2Font.TILE + 4, tile.y * Gen2Font.TILE + 4
+	).a > 0.0
+
+
+## `SaveMenu` draws `DisplaySaveInfoOnSave`'s box in the right-hand sixteen
+## columns, `SpeechTextbox` at the foot and `PlaceYesNoBox`'s own on the left,
+## and nothing else: the map is still showing everywhere between them.
+func test_the_save_screen_draws_three_boxes_over_the_map() -> void:
+	Fixture.build()
+	var page: Gen2StartMenuPage = Gen2StartMenuPage.from_data(
+		GameData.open_directory(Fixture.directory())
+	)
+	var asked: Image = page.render_save(_save_state(true, 0))
+	assert_true(_opaque(asked, Vector2i(4, 0)), "the info box's own corner")
+	assert_true(_opaque(asked, Vector2i(19, 9)), "and its far one")
+	assert_true(_opaque(asked, Vector2i(0, 12)), "the speech box")
+	assert_true(_opaque(asked, Vector2i(0, 7)), "the yes/no box")
+	assert_true(_opaque(asked, Vector2i(5, 11)), "and its far corner")
+	assert_false(_opaque(asked, Vector2i(3, 0)), "the map left of the info box")
+	assert_false(_opaque(asked, Vector2i(0, 6)), "the map above the yes/no box")
+	assert_false(_opaque(asked, Vector2i(19, 11)), "the map between the boxes")
+
+	## `SavingDontTurnOffThePower` prints with no question behind it, so the
+	## yes/no box is not up at all.
+	var saving: Image = page.render_save(_save_state(true, -1))
+	assert_false(_opaque(saving, Vector2i(0, 7)))
+	RomCache.clear(Fixture.directory())
+
+
+## `.MenuData_NoDex` blanks the third row's label and
+## `Continue_DisplayPokedexNumCaught` returns before its own `PrintNum`, so a
+## player without the Pokedex is shown neither the word nor the count.
+func test_the_dex_row_is_blank_without_the_pokedex_flag() -> void:
+	Fixture.build()
+	var page: Gen2StartMenuPage = Gen2StartMenuPage.from_data(
+		GameData.open_directory(Fixture.directory())
+	)
+	var without: Image = page.render_save(_save_state(false, 0))
+	var with_dex: Image = page.render_save(_save_state(true, 0))
+	assert_ne(without.get_data(), with_dex.get_data())
+	## An interior tile the box never writes, which is what a blank row reads as.
+	var blank: Color = without.get_pixel(6 * Gen2Font.TILE, 3 * Gen2Font.TILE)
+	var row: int = Gen2StartMenuPage.SAVE_DEX_AT.y
+	for column: int in range(5, Gen2StartMenuPage.SAVE_INFO_RIGHT):
+		assert_true(
+			_tile_is(without, Vector2i(column, row), blank),
+			"column %d of the dex row is blank" % column
+		)
+	assert_false(_tile_is(with_dex, Vector2i(5, row), blank), "#DEX is printed")
+	RomCache.clear(Fixture.directory())
+
+
+func _tile_is(image: Image, tile: Vector2i, color: Color) -> bool:
+	for y: int in Gen2Font.TILE:
+		for x: int in Gen2Font.TILE:
+			if image.get_pixel(tile.x * Gen2Font.TILE + x, tile.y * Gen2Font.TILE + y) != color:
+				return false
+	return true

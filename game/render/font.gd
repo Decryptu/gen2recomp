@@ -38,6 +38,13 @@ var _battle_extra: PackedByteArray = PackedByteArray()
 var _battle_extra_width: int = 0
 var _battle_extra_tiles: int = 0
 
+## `FontExtra`, which `_LoadFontsExtra1` parks under the main font's own $80
+## floor: the ellipsis, the two quotes, the middle dot and `<COLON>` all draw
+## from here, and nothing else in this project can draw them.
+var _extra: PackedByteArray = PackedByteArray()
+var _extra_width: int = 0
+var _extra_tiles: int = 0
+
 
 ## Reads both sheets out of a cache, or null if that cache has no font in it.
 static func from_data(data: GameData) -> Gen2Font:
@@ -66,6 +73,12 @@ static func from_data(data: GameData) -> Gen2Font:
 	out._battle_extra = data.tile_indices("battle_font")
 	out._battle_extra_width = int(battle_extra.get("width", 0))
 	out._battle_extra_tiles = int(battle_extra.get("tiles", 0))
+
+	# Optional for the same reason.
+	var extra: Dictionary = data.tile_sheet("font_extra")
+	out._extra = data.tile_indices("font_extra")
+	out._extra_width = int(extra.get("width", 0))
+	out._extra_tiles = int(extra.get("tiles", 0))
 
 	return out if out.is_usable() else null
 
@@ -104,6 +117,14 @@ func draw_code(
 		if within < 0 or within >= _battle_extra_tiles:
 			return
 		blit_slot(_battle_extra, _battle_extra_width, within, into, into_width, at_x, at_y)
+		return
+	# `_LoadFontsExtra1`'s own run, which is under the main font everywhere the
+	# battle's strip is not: a code below the font's $80 draws from FontExtra.
+	if code >= RomLayout.FONT_EXTRA_LOADED_FIRST \
+		and code <= RomLayout.FONT_EXTRA_LOADED_LAST:
+		var extra_slot: int = code - RomLayout.FONT_EXTRA_FIRST_CODE
+		if extra_slot < _extra_tiles:
+			blit_slot(_extra, _extra_width, extra_slot, into, into_width, at_x, at_y)
 		return
 	var slot: int = code - _first_code
 	if slot < 0 or slot >= _glyph_tiles:
