@@ -54,6 +54,20 @@ func test_switching_pages_hands_the_ring_to_the_new_one() -> void:
 	assert_true(focused.is_visible_in_tree(), "focus never lands on a hidden page")
 
 
+func test_down_from_the_cartridge_reaches_the_floating_dock() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = _focus_owner() as Gen2CartridgeStage
+	assert_not_null(stage)
+	var guard: Gen2FocusGuard = _launcher.find_child("FocusGuard", true, false)
+	assert_true(guard.move_focus(Vector2.DOWN))
+	var focused: Control = _focus_owner()
+	assert_not_null(focused)
+	assert_true(focused is Gen2LauncherButton)
+	assert_ne(focused, stage)
+
+
 ## A mouse needs no ring, and putting one up would move it away from whatever
 ## the player is pointing at.
 func test_a_mouse_is_left_alone() -> void:
