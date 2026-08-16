@@ -22,7 +22,6 @@ var _pending_import_path: String = ""
 var _shell: Gen2LauncherShell = null
 var _page: VBoxContainer = null
 var _slots_container: HFlowContainer = null
-var _slots_section: Control = null
 var _details_box: VBoxContainer = null
 var _status_title: String = ""
 var _status_detail: String = ""
@@ -191,17 +190,22 @@ func _build_ui() -> void:
 	_shell.add_action(back)
 
 	_page = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
-	var head: VBoxContainer = Gen2LauncherUI.column(2)
+	var head: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	_page.add_child(head)
-	head.add_child(Gen2LauncherUI.title(
+	var save_title: Label = Gen2LauncherUI.title(
 		_palette, "Save data", Gen2LauncherTheme.FONT_DISPLAY
-	))
-	head.add_child(Gen2LauncherUI.muted(
+	)
+	save_title.name = "SaveScreenTitle"
+	head.add_child(save_title)
+	head.add_child(Gen2LauncherUI.spacer())
+	var game_title: Label = Gen2LauncherUI.muted(
 		_palette, _data.title() if _data != null else "No cartridge selected"
-	))
+	)
+	game_title.name = "SaveScreenGameTitle"
+	game_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	game_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	head.add_child(game_title)
 
-	_slots_section = Gen2LauncherUI.caption(_palette, "Slots")
-	_page.add_child(_slots_section)
 	_slots_container = HFlowContainer.new()
 	_slots_container.add_theme_constant_override("h_separation", Gen2LauncherUI.GAP_MD)
 	_slots_container.add_theme_constant_override("v_separation", Gen2LauncherUI.GAP_MD)
@@ -268,7 +272,6 @@ func _refresh() -> void:
 
 func _refresh_slot_cards() -> void:
 	Gen2LauncherUI.clear(_slots_container)
-	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 
 	for row: Dictionary in _slots:
@@ -318,7 +321,6 @@ func _slot_card(row: Dictionary) -> Control:
 func _refresh_details() -> void:
 	if _details_box == null:
 		return
-	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 	Gen2LauncherUI.clear(_details_box)
 	# The pane's own controls go with it. A detached child is deleted at the end
