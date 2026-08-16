@@ -92,10 +92,31 @@ func test_every_glyph_the_launcher_asks_for_is_one_the_set_draws() -> void:
 	var used: Array[StringName] = [
 		&"shelf", &"mods", &"settings", &"about", &"play", &"plus", &"back",
 		&"folder", &"trash", &"refresh", &"download", &"check", &"warning",
-		&"save", &"dots", &"close", &"power",
+		&"save", &"dots", &"close", &"power", &"refresh_square",
 	]
 	for glyph: StringName in used:
 		assert_true(Gen2LauncherIcon.has_glyph(glyph), String(glyph))
+
+
+func test_mod_update_controls_stay_icon_sized_for_mobile() -> void:
+	var page: Gen2ModsPage = Gen2ModsPage.create(_light)
+	add_child_autofree(page)
+	page.size = Vector2(360, 640)
+	await get_tree().process_frame
+	var check: Gen2LauncherButton = page.get("_check_updates_button")
+	assert_not_null(check)
+	assert_eq(check.text, "", "the page-wide check does not widen the mobile header")
+	assert_eq(check.get("_glyph"), &"refresh_square")
+	var actions: Array[Control] = page._action_buttons({
+		"name": "Example", "installed": true,
+		"update": Gen2ModIndex.UPDATE_AVAILABLE,
+	})
+	var update: Gen2LauncherButton = actions[0] as Gen2LauncherButton
+	assert_eq(update.text, "", "an available update is the requested download-only button")
+	assert_eq(update.get("_glyph"), &"download")
+	assert_lte(page.get_combined_minimum_size().x, 360.0, "the Mods page fits a narrow phone")
+	for action: Control in actions:
+		action.free()
 
 
 func test_a_card_pads_its_child_and_carries_no_shadow_unless_it_floats() -> void:
