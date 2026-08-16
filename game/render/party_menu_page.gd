@@ -16,8 +16,9 @@ extends RefCounted
 ## behind them are per-frame state and nothing else here holds it: [method
 ## advance] is one pass of `PlaySpriteAnimations` over them.
 ##
-## Not drawn: the eggs `PartyMenuCheckEgg` skips every quality for, which a
-## battle party cannot contain.
+## A row carrying `egg` is `PartyMenuCheckEgg`'s: its nickname and its icon are
+## drawn and every other quality is stepped past. Only the overworld menu can
+## show one; a battle party cannot hold an egg.
 
 const TILE: int = Gen2Font.TILE
 
@@ -172,8 +173,15 @@ func reset(rows: Array) -> void:
 			int(member.get("hp", 0)), int(member.get("max_hp", 0)),
 			Gen2BattleHud.HP_BAR_TILES * TILE
 		))
+		## `PlacePartyMenuHPBar` never runs for an egg, so the speed byte behind
+		## its icon is whatever the last party left in `wHPPals`. Zero here, the
+		## green one, rather than a stale byte no save can reproduce.
+		if bool(member.get("egg", false)):
+			speed = 0
 		_icons.append({
-			"icon": data.mon_menu_icon(int(member.get("species", 0))) if data != null else 0,
+			"icon": data.mon_menu_icon(
+				int(member.get("species", 0)), bool(member.get("egg", false))
+			) if data != null else 0,
 			"item": int(member.get("item", 0)) != 0,
 			"speed": speed,
 			"frame": -1,
@@ -288,6 +296,12 @@ func _draw_member(page: PackedByteArray, width: int, index: int, row: Dictionary
 		String(row.get("name", "")), page, width,
 		NICKNAME.x * TILE, (NICKNAME.y + step) * TILE
 	)
+	## Every quality below `PlacePartyNicknames` opens its loop with
+	## `PartyMenuCheckEgg` and steps past the row, so an egg is a nickname and
+	## an icon and nothing else. Reachable from the overworld menu only: a battle
+	## party cannot hold one.
+	if bool(row.get("egg", false)):
+		return
 	font.draw_text(
 		"%s/%s" % [
 			str(hp).lpad(HP_NUMBER_DIGITS), str(max_hp).lpad(HP_NUMBER_DIGITS),
@@ -307,6 +321,8 @@ func _draw_member(page: PackedByteArray, width: int, index: int, row: Dictionary
 ## gives every tile its own palette, and one index buffer carries one.
 func _blend_bar(image: Image, index: int, row: Dictionary) -> void:
 	var width: int = Gen2Screen.WIDTH
+	if bool(row.get("egg", false)):
+		return
 	var buffer: PackedByteArray = PackedByteArray()
 	buffer.resize(width * Gen2Screen.HEIGHT)
 	var hp: int = int(row.get("hp", 0))

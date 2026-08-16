@@ -151,6 +151,11 @@ const MON_ICON_BYTES: int = MON_ICON_TILES * Gen2Tiles.TILE_BYTES
 const ICON_POINTER_COUNT: int = MON_ICON_COUNT + 1
 const ICON_POINTER_SIZE: int = 2
 
+## `constants/icon_constants.asm`'s `ICON_EGG`, which `ReadMonMenuIcon` answers
+## for species EGG rather than reading `MonMenuIcons`. It is the one icon no
+## species row names.
+const ICON_EGG: int = 28
+
 ## `HeldItemIcons` is `gfx/stats/mail.2bpp` and `gfx/stats/item.2bpp`, the two
 ## tiles `GetIconGFX` loads behind every icon's eight. The mail one is drawn by
 ## no party menu here: nothing imports `data/items/mail_items.asm`, so
