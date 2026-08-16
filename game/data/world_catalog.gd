@@ -60,11 +60,29 @@ const BGEVENT_ITEM: int = Gen2WorldAPI.BGEVENT_ITEM
 ## practice; this is the guard against a decode that runs away.
 const MAX_SCRIPT_COMMANDS: int = 4096
 
+## The cache stores every script as a fixed 512-byte window rather than as its
+## own length, so a walk that ran the whole window would spend most of it
+## decoding whatever the ROM put after the script. A blob holds one routine and
+## the branch labels behind it: the Game Corner's vendor, the busiest shape
+## either game has, is a loop and three prizes, which is five. Sixteen is well
+## past anything real and is what keeps this a second rather than eight.
+const MAX_ROUTINES: int = 16
+
 var _data: GameData = null
 ## id to row.
 var _rows: Dictionary = {}
 ## kind to the ids under it, in decode order.
 var _by_kind: Dictionary = {}
+## The commands a site's fields also have to reach, keyed by the byte they sit
+## at: `bank << 24 | address` to `{id, role}`. A starter's species is its ball's
+## PICTURE as well as its `givepoke`, and a prize's price is both the
+## `checkcoins` that decides affordability and the `takecoins` that charges. See
+## [method link_at].
+var _links: Dictionary = {}
+## Built on first ask. See [method item_sources].
+var _item_sources: Dictionary = {}
+## Built on first ask. See [method field_hm_items].
+var _field_hms: Array[int] = []
 
 
 ## Builds the catalog for [param data]. Walks every imported script once and
@@ -77,6 +95,7 @@ static func build(data: GameData) -> Gen2WorldCatalog:
 		return out
 	out._scan_scripts()
 	out._scan_map_events()
+	out._attribute_maps()
 	return out
 
 
@@ -121,6 +140,19 @@ func size() -> int:
 	return _rows.size()
 
 
+## The site a command at [param bank]:[param address] belongs to but is not
+## itself, as `{id, role}`, or empty. `role` is `picture` for a starter's
+## `pokepic` and `price` for a prize's `checkcoins` or `takecoins`.
+##
+## This is what makes a patched field effective at the whole TRANSACTION rather
+## than at one command of it: the ball that shows a Bellsprout hands over a
+## Bellsprout, and a prize the mod priced at 500 is refused at 499 coins and
+## charges 500.
+func link_at(bank: int, address: int) -> Dictionary:
+	var value: Variant = _links.get((bank & 0xFF) << ID_BANK_SHIFT | (address & ID_ADDRESS_MASK), null)
+	return value if value is Dictionary else {}
+
+
 ## Every row, patched, for a mod planning a placement in one pass.
 func rows(kind: StringName = &"") -> Array:
 	var out: Array = []
@@ -144,6 +176,8 @@ func possible_starters() -> Array[int]:
 ## must keep reachable. Read off the cartridge's own TM/HM move table rather
 ## than written down, so Gold and Crystal each answer for themselves.
 func field_hm_items() -> Array[int]:
+	if not _field_hms.is_empty():
+		return _field_hms
 	var out: Array[int] = []
 	if _data == null:
 		return out
@@ -154,7 +188,44 @@ func field_hm_items() -> Array[int]:
 			continue
 		if Gen2WorldFieldMove.is_field_move(_data.tmhm_move(number + 1)):
 			out.append(item)
+	_field_hms = out
 	return out
+
+
+## Which badge an engine flag grants, or -1. Public because a requirement names
+## the FLAG and a placement reasons about the badge.
+func badge_for_engine_flag(flag: int) -> int:
+	return _badge_for_flag(flag)
+
+
+## The badge [param item]'s own move needs before the overworld will run it, or
+## -1 for an item that is not a field HM. `GetTMHMItemMove` and the field
+## functions' own `CheckBadge` arguments, neither of them written down here.
+func badge_for_hm_item(item: int) -> int:
+	return Gen2WorldFieldMove.badge_for_move(move_for_hm_item(item))
+
+
+## The field move [param item] teaches, or 0 for anything that is not a field HM.
+func move_for_hm_item(item: int) -> int:
+	if _data == null or not Gen2WorldTMHM.is_hm(item):
+		return 0
+	var move: int = Gen2WorldTMHM.move_for_item(_data, item)
+	return move if Gen2WorldFieldMove.is_field_move(move) else 0
+
+
+## Every item some check in this catalog hands over, as a set. An item outside it
+## is bought, found in a mart or given by a story script, so asking for it gates
+## no placement.
+func item_sources() -> Dictionary:
+	if not _item_sources.is_empty():
+		return _item_sources
+	for row: Dictionary in rows(KIND_ITEM):
+		_item_sources[int(row["item"])] = true
+	for kind: StringName in [KIND_STARTER, KIND_GIFT, KIND_PRIZE]:
+		for row: Dictionary in rows(kind):
+			if int(row.get("item", 0)) > 0:
+				_item_sources[int(row["item"])] = true
+	return _item_sources
 
 
 ## Whether a row's reward is one a later check may be gated behind: a badge, or a
@@ -187,6 +258,7 @@ func _scan_one_script(
 ) -> void:
 	if body.is_empty():
 		return
+
 	var commands: Array = []
 	var offset: int = 0
 	## The walk does NOT stop at the first `end` or `sjump`. A bounded blob holds
@@ -199,6 +271,7 @@ func _scan_one_script(
 	## a site's numbers have to be ones the cartridge can hold ([method
 	## _plausible]), and a static has to be followed by the `startbattle` that
 	## makes it one.
+	var terminators: int = 0
 	for _step: int in MAX_SCRIPT_COMMANDS:
 		if offset >= body.size():
 			break
@@ -207,6 +280,10 @@ func _scan_one_script(
 			break
 		commands.append(command)
 		offset += int(command["width"])
+		if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal):
+			terminators += 1
+			if terminators >= MAX_ROUTINES:
+				break
 	## Two facts about the WHOLE script decide what its give sites mean: a
 	## `takecoins` makes them purchases, and a `pokepic` of the species a
 	## `givepoke` later hands over is the only shape Elm's three balls take and
@@ -219,25 +296,23 @@ func _scan_one_script(
 			pictured[int(command.get("pokemon", 0))] = true
 	for command: Dictionary in commands:
 		_record_script_site(
-			bank, address, command, commands, _coin_price(commands, int(command["offset"])),
-			pictured, crystal
+			bank, address, command, commands,
+			_coin_price(commands, int(command["offset"]), crystal), pictured, crystal
 		)
 
 
 ## `takecoins`' own operand, which is the purchase price and is what makes a
-## `givepoke` beside it a PRIZE rather than a gift. The source order is give then
-## take, so the answer is the nearest one AFTER [param at]; a script that takes
-## before it gives falls back to the nearest before. Zero when the script spends
-## no coins at all.
-func _coin_price(commands: Array, at: int) -> int:
-	var before: int = 0
+## `givepoke` beside it a PRIZE rather than a gift. Read from the give's own
+## branch, so a vendor's three prizes get three prices. Zero when the branch
+## spends no coins at all, which is what makes a give a gift.
+func _coin_price(commands: Array, at: int, crystal: bool) -> int:
+	var take: int = _nearest_coin_command(commands, at, &"takecoins", crystal)
+	if take < 0:
+		return 0
 	for command: Dictionary in commands:
-		if StringName(command["name"]) != &"takecoins":
-			continue
-		if int(command["offset"]) > at:
+		if int(command["offset"]) == take:
 			return int(command.get("value", 0))
-		before = int(command.get("value", 0))
-	return before
+	return 0
 
 
 func _record_script_site(
@@ -258,10 +333,25 @@ func _record_script_site(
 				kind = KIND_PRIZE
 			elif pictured.has(species):
 				kind = KIND_STARTER
-			_add(kind, bank, address, offset, {
+			var row: Dictionary = {
 				"species": species, "level": level,
 				"item": int(command.get("item", 0)), "price": coins,
-			}, commands, offset, crystal)
+			}
+			## The ball's own picture, and the two coin commands of the branch
+			## this give sits in. Absolute addresses, so the runner finds them
+			## from its own frame.
+			if kind == KIND_STARTER:
+				var picture: int = _address_of(commands, &"pokepic", species)
+				if picture >= 0:
+					row["picture_address"] = address + picture
+			if kind == KIND_PRIZE:
+				var check: int = _nearest_coin_command(commands, offset, &"checkcoins", crystal)
+				var take: int = _nearest_coin_command(commands, offset, &"takecoins", crystal)
+				if check >= 0:
+					row["check_address"] = address + check
+				if take >= 0:
+					row["take_address"] = address + take
+			_add(kind, bank, address, offset, row, commands, offset, crystal)
 		&"loadwildmon":
 			## `loadwildmon` then `startbattle` is what a static encounter IS;
 			## two bytes that merely decode as one are not.
@@ -282,9 +372,14 @@ func _record_script_site(
 		&"pokemart":
 			## `db dialog_id / dw mart_id`, so the dialog is the byte and the
 			## mart index the word behind it.
+			var mart: int = int(command.get("address", 0))
 			_add(KIND_SHOP, bank, address, offset, {
-				"mart": int(command.get("address", 0)),
+				"mart": mart,
 				"dialog": int(command.get("value", 0)),
+				## The inventory this site sells, resolved to `{item, price}` so
+				## a mod can move one row of one shop without inventing a mart.
+				## Prices are the items' own until a patch names another.
+				"items": _mart_items(mart),
 			}, commands, offset, crystal)
 		&"giveitem", &"verbosegiveitem":
 			var item: int = int(command.get("item", command.get("value", 0)))
@@ -302,6 +397,129 @@ func _record_script_site(
 			_add(KIND_BADGE, bank, address, offset, {
 				"badge": badge, "engine_flag": int(command.get("flag", 0)),
 			}, commands, offset, crystal)
+
+
+## Where a command naming [param species] sits inside the blob, or -1. Used for
+## the `pokepic` a starter's `givepoke` answers.
+static func _address_of(commands: Array, name: StringName, species: int) -> int:
+	for command: Dictionary in commands:
+		if StringName(command["name"]) == name and int(command.get("pokemon", -1)) == species:
+			return int(command["offset"])
+	return -1
+
+
+## The coin command of the BRANCH [param at] sits in, or -1. A branch is what
+## lies between two terminators, which is how the Game Corner's vendor keeps
+## three prices in one script: one `.loop` and a label per prize. Bounded that
+## way, one coin command belongs to one give site and no two sites claim it.
+static func _nearest_coin_command(
+	commands: Array, at: int, name: StringName, crystal: bool
+) -> int:
+	var bounds: Array = _branch_bounds(commands, at, crystal)
+	for command: Dictionary in commands:
+		if StringName(command["name"]) != name:
+			continue
+		var offset: int = int(command["offset"])
+		if offset >= int(bounds[0]) and offset < int(bounds[1]):
+			return offset
+	return -1
+
+
+## The offsets bounding the branch [param at] sits in: just past the terminator
+## before it, up to and including the terminator after it.
+static func _branch_bounds(commands: Array, at: int, crystal: bool) -> Array:
+	var start: int = 0
+	var end: int = 0x10000
+	for command: Dictionary in commands:
+		var offset: int = int(command["offset"])
+		if not Gen2WorldScript.is_terminal(int(command["opcode"]), crystal) \
+			and StringName(command["name"]) not in [&"sjump", &"farsjump", &"jumpstd"]:
+			continue
+		if offset < at:
+			start = offset + int(command["width"])
+		else:
+			end = offset + int(command["width"])
+			break
+	return [start, end]
+
+
+## The mart list at [param index] as `{item, price}` rows, which is the shape
+## [method Gen2WorldMartHost.entries] already reads.
+func _mart_items(index: int) -> Array:
+	var out: Array = []
+	if _data == null:
+		return out
+	var mart: Dictionary = _data.world_mart(index)
+	for raw: Variant in mart.get("items", []):
+		var item: int = int(raw) if not raw is Dictionary else int((raw as Dictionary).get("item", 0))
+		if item <= 0:
+			continue
+		out.append({"item": item, "price": int(_data.item(item).get("price", 0))})
+	return out
+
+
+## Stamps every script site with the MAP whose events reach it, which is the one
+## thing a script address does not carry and a placement cannot do without: a
+## badge is only completable if its gym can be walked to.
+##
+## Each map's own event scripts are followed through `scall`, `sjump`, `farscall`
+## and the branch commands, which is the same closure the importer walks. A
+## script two maps both reach is stamped with the first in map order, so the
+## answer is stable; a script no map reaches keeps no map at all rather than a
+## guessed one.
+func _attribute_maps() -> void:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(_data)
+	var owner: Dictionary = {}
+	## One scan per script for the whole corpus, not one per map that reaches it:
+	## the busiest scripts are reached from dozens of maps.
+	var references: Dictionary = {}
+	for map: Gen2WorldMap in _data.world_maps():
+		var bank: int = int(map.events.get("bank", 0))
+		var pending: Array = []
+		for source: String in ["objects", "bg_events", "coord_events"]:
+			for raw: Variant in map.events.get(source, []):
+				if raw is Dictionary and int((raw as Dictionary).get("script", 0)) > 0:
+					pending.append([bank, int((raw as Dictionary)["script"])])
+		var scripts: Dictionary = map.scripts
+		if int(scripts.get("address", 0)) > 0:
+			pending.append([int(scripts.get("bank", bank)), int(scripts["address"])])
+		for raw: Variant in scripts.get("callbacks", []):
+			if raw is Dictionary and int((raw as Dictionary).get("script", 0)) > 0:
+				pending.append([int(scripts.get("bank", bank)), int((raw as Dictionary)["script"])])
+		var seen: Dictionary = {}
+		for _step: int in MAX_SCRIPT_COMMANDS:
+			if pending.is_empty():
+				break
+			var entry: Array = pending.pop_back()
+			var key: int = (int(entry[0]) & 0xFF) << ID_BANK_SHIFT \
+				| (int(entry[1]) & ID_ADDRESS_MASK)
+			if seen.has(key):
+				continue
+			seen[key] = true
+			if not owner.has(key):
+				owner[key] = Vector2i(map.group, map.number)
+			if not references.has(key):
+				var body: PackedByteArray = _data.world_script(int(entry[0]), int(entry[1]))
+				references[key] = Gen2WorldScript.scan_references(
+					body, int(entry[0]), int(entry[1]), crystal
+				).get("scripts", []) if not body.is_empty() else []
+			for reference: Variant in references[key]:
+				if reference is Dictionary:
+					pending.append([
+						int((reference as Dictionary)["bank"]),
+						int((reference as Dictionary)["address"]),
+					])
+	for id: Variant in _rows:
+		var row: Dictionary = _rows[id]
+		if row.has("map") or not row.has("address"):
+			continue
+		## The site's own byte first, then the entry point its blob starts at:
+		## a site inside a routine is reached through the routine, not at it.
+		for address: int in [int(row["address"]), int(row.get("script_base", row["address"]))]:
+			var key: int = (int(row["bank"]) & 0xFF) << ID_BANK_SHIFT | (address & ID_ADDRESS_MASK)
+			if owner.has(key):
+				row["map"] = owner[key]
+				break
 
 
 ## Whether [param name] is the next few commands after [param at]. The cartridge
@@ -383,6 +601,9 @@ func _add(
 	row["kind"] = kind
 	row["bank"] = bank
 	row["address"] = address + offset
+	## The blob this site was decoded from, which is the address a map's own
+	## event points at. See [method _attribute_maps].
+	row["script_base"] = address
 	row["requires"] = _requirements(commands, at, crystal)
 	_store(row)
 
@@ -423,6 +644,12 @@ func _store(row: Dictionary) -> void:
 	if id < 0 or _rows.has(id) or not _plausible(row):
 		return
 	_rows[id] = row
+	for key: String in ["picture_address", "check_address", "take_address"]:
+		if not row.has(key):
+			continue
+		_links[(int(row["bank"]) & 0xFF) << ID_BANK_SHIFT | (int(row[key]) & ID_ADDRESS_MASK)] = {
+			"id": id, "role": &"picture" if key == "picture_address" else &"price",
+		}
 	var kind: StringName = StringName(row["kind"])
 	var list: Array = _by_kind.get(kind, [])
 	list.append(id)
@@ -436,12 +663,21 @@ func _store(row: Dictionary) -> void:
 ##
 ## Read in source order up to the site rather than over the whole script, since a
 ## `checkevent` after a `givepoke` guards something else.
-func _requirements(commands: Array, at: int, _crystal: bool) -> Array:
+func _requirements(commands: Array, at: int, crystal: bool) -> Array:
 	var out: Array = []
 	var seen: Dictionary = {}
 	for command: Dictionary in commands:
 		if int(command["offset"]) >= at:
 			break
+		## A blob holds several routines back to back, and a condition before the
+		## last `end` or `sjump` guards one of the earlier ones. Reading the whole
+		## blob put thirteen conditions on a starter, two of them badges the
+		## cartridge plainly does not ask a starter for.
+		if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal) \
+			or StringName(command["name"]) in [&"sjump", &"farsjump", &"jumpstd"]:
+			out.clear()
+			seen.clear()
+			continue
 		match StringName(command["name"]):
 			&"checkevent":
 				_append_once(out, seen, {"event": int(command.get("flag", 0))})

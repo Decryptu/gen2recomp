@@ -6563,3 +6563,182 @@ func test_an_unpatched_catalogue_hands_over_the_cartridges_own_numbers() -> void
 	var request: Dictionary = waiting[0]["event"]["request"]
 	assert_eq(int(request["values"]["pokemon"]), 109)
 	assert_eq(int(request["values"]["level"]), 21)
+
+
+## A starter's species drives the BALL as well as the gift: patching the
+## `givepoke` alone would show one Pokemon and hand over another.
+func test_a_patched_starter_shows_and_gives_the_same_pokemon() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `pokepic CYNDAQUIL` then `givepoke CYNDAQUIL, 5, BERRY`, which is the one
+	## shape Elm's three balls take.
+	scripts["48:6F00"] = [
+		0x56, 155,
+		Gen2WorldScript.GIVEPOKE, 155, 5, 0, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var catalog: Gen2WorldCatalog = data.catalog()
+	var starters: Array = catalog.rows(Gen2WorldCatalog.KIND_STARTER)
+	assert_eq(starters.size(), 1, JSON.stringify(starters))
+	assert_eq(int(starters[0]["picture_address"]), 0x6F00, "the ball's own pokepic")
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(starters[0]["id"]), {
+		"species": 25, "level": 9,
+	})
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6),
+		Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6F00,
+	}]
+	var results: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var pictured: int = -1
+	for event: Dictionary in results[0]["events"]:
+		if StringName(event.get("type", &"")) == &"pokemon_picture_requested":
+			pictured = int(event["pokemon"])
+	assert_eq(pictured, 25, "the ball shows the patch")
+	var request: Dictionary = results[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 25, "and hands the same one over")
+	assert_eq(int(request["values"]["level"]), 9)
+	## What the ball carries is the cartridge's and is not a species patch.
+	assert_eq(int(request["values"]["item"]), 0)
+
+
+## A prize's price is its affordability branch and its deduction, one linked
+## transaction. Patching the Pokemon alone would sell a Mewtwo for 100 coins.
+func test_a_patched_prize_checks_and_charges_the_patched_price() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## The Game Corner vendor's own shape: `checkcoins`, a branch on HAVE_LESS,
+	## then the give and the charge.
+	scripts["48:6F40"] = [
+		Gen2WorldScript.CHECKCOINS, 100, 0,
+		Gen2WorldScript.IFEQUAL, 0, 0x60, 0x6F,
+		Gen2WorldScript.GIVEPOKE, 63, 5, 0, 0,
+		Gen2WorldScript.TAKECOINS, 100, 0,
+		Gen2WorldScript.END,
+	]
+	## `.NotEnoughCoins`: sets a flag and stops, so the refusal is observable.
+	scripts["48:6F60"] = [Gen2WorldScript.SETEVENT, 12, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var catalog: Gen2WorldCatalog = data.catalog()
+	var prizes: Array = catalog.rows(Gen2WorldCatalog.KIND_PRIZE)
+	assert_eq(prizes.size(), 1, JSON.stringify(prizes))
+	assert_eq(int(prizes[0]["price"]), 100)
+	assert_eq(int(prizes[0]["check_address"]), 0x6F40, "the affordability branch")
+	assert_eq(int(prizes[0]["take_address"]), 0x6F4C, "and the deduction")
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(prizes[0]["id"]), {
+		"species": 150, "price": 9000,
+	})
+
+	## One coin short of the PATCHED price takes the refusal branch, though the
+	## cartridge's own 100 is long since covered.
+	var short: Gen2WorldAPI = _coin_world(data, 8999)
+	var short_results: Array = _run_script(short, short.dispatch_script_events(Vector2i(8, 6)))
+	assert_eq(_final_status(short_results), &"complete", JSON.stringify(short_results))
+	assert_true(short.state.is_event_flag_active(12), "refused below the patched price")
+	assert_eq(short.state.coins(), 8999, "and nothing was charged")
+
+	var rich: Gen2WorldAPI = _coin_world(data, 9000)
+	var paid: Array = rich.dispatch_script_events(Vector2i(8, 6))
+	var request: Dictionary = paid[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 150, "the patched prize")
+	var after: Array = rich.complete_runtime_request({"ok": true, "accepted": true})
+	assert_eq(_final_status(after), &"complete", JSON.stringify(after))
+	assert_false(rich.state.is_event_flag_active(12))
+	assert_eq(rich.state.coins(), 0, "and the patched price was charged")
+
+
+func _coin_world(data: GameData, coins: int) -> Gen2WorldAPI:
+	var state := Gen2WorldState.new(
+		{}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1}, {}, coins
+	)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), state)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6F40,
+	}]
+	return world
+
+
+## A shop sells the shelf its own site names, at that site's prices. Two shops on
+## one mart list can differ without either inventing a mart.
+func test_a_patched_shop_sells_its_own_shelf_at_its_own_prices() -> void:
+	_write_service_cache()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `pokemart MARTTYPE_STANDARD, 0`.
+	scripts["48:6F80"] = [0x94, 0, 0, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var shops: Array = data.catalog().rows(Gen2WorldCatalog.KIND_SHOP)
+	assert_eq(shops.size(), 1, JSON.stringify(shops))
+	assert_eq(shops[0]["items"], [{"item": 7, "price": 0}], "the mart's own shelf")
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(shops[0]["id"]), {
+		"items": [{"item": 3, "price": 4242}],
+	})
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6),
+		Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6F80,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var request: Dictionary = waiting[0]["event"]["request"]
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(world, request)
+	assert_true(bool(resolved.get("ok", false)), JSON.stringify(resolved))
+	var entries: Array = Gen2WorldMartHost.entries(
+		data, resolved["data"]["mart"]
+	)
+	assert_eq(entries.size(), 1)
+	assert_eq(int(entries[0]["item"]), 3, "the patched shelf")
+	assert_eq(int(entries[0]["price"]), 4242, "at the patched price")
+
+
+## Both halves of a trade take the patch, and the cartridge record they came from
+## is left alone for whatever other site names it.
+func test_a_patched_trade_uses_both_halves_without_moving_the_record() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `trade 0`.
+	scripts["48:6FA0"] = [0x96, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	RomCache.write_json(RomCache.world_trades_path(_directory), [{
+		"trade_id": 0, "dialog": 0, "requested_species": 16, "offered_species": 19,
+		"nickname": "SWAPPY", "ot_name": "MIKE", "ot_id": 1234, "dvs": 0,
+		"item": 0, "gender": RomLayout.TRADE_GENDER_EITHER,
+	}])
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var trades: Array = data.catalog().rows(Gen2WorldCatalog.KIND_TRADE)
+	assert_eq(trades.size(), 1, JSON.stringify(trades))
+	assert_eq(int(trades[0]["species"]), 19)
+	assert_eq(int(trades[0]["requested_species"]), 16)
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(trades[0]["id"]), {
+		"species": 25, "requested_species": 1,
+	})
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6),
+		Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6FA0,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var values: Dictionary = waiting[0]["event"]["request"]["values"]
+	assert_eq(int(values["offered_species"]), 25, "what the trade hands over")
+	assert_eq(int(values["requested_species"]), 1, "and what it asks for")
+	assert_eq(int(values["trade_id"]), 0, "still the cartridge's own record")
+	## The record itself is untouched, so a second site naming it is unaffected.
+	assert_eq(int(data.world_trade(0)["offered_species"]), 19)
+	assert_eq(int(data.world_trade(0)["requested_species"]), 16)

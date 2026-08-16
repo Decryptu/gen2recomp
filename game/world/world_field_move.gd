@@ -57,6 +57,27 @@ const MUSIC_SURF: int = 0x21
 ## `BikeFunction` writes this to `wMapMusic`, so it survives a map load.
 const MUSIC_BICYCLE: int = 0x13
 
+## Which badge each gated field move asks `CheckBadge` for, as the badge-order
+## index the constants above are. A move that is not here has no badge gate:
+## Headbutt, Rock Smash, Dig, Teleport, Sweet Scent and the two heals.
+const MOVE_BADGES: Dictionary = {
+	MOVE_CUT: BADGE_HIVE,
+	MOVE_SURF: BADGE_FOG,
+	MOVE_STRENGTH: BADGE_PLAIN,
+	MOVE_WHIRLPOOL: BADGE_GLACIER,
+	MOVE_WATERFALL: BADGE_RISING,
+	MOVE_FLASH: BADGE_ZEPHYR,
+	MOVE_FLY: BADGE_STORM,
+}
+
+
+## The badge [param move] needs before the overworld will run it, or -1. The one
+## fact a placement has to respect: an HM in the bag is not a way past anything
+## until its badge is in hand.
+static func badge_for_move(move: int) -> int:
+	return int(MOVE_BADGES.get(move, -1))
+
+
 ## data/mon_menu.asm's MonMenuOptions rows, identical between the pins and the
 ## whole of IsFieldMove's submenu membership.
 const FIELD_MOVES: Array[int] = [
