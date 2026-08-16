@@ -24,9 +24,8 @@ var _page: VBoxContainer = null
 var _slots_container: HFlowContainer = null
 var _slots_section: Control = null
 var _details_box: VBoxContainer = null
-var _status_icon: Gen2LauncherIcon = null
-var _status_label: Label = null
-var _status_detail: Label = null
+var _status_title: String = ""
+var _status_detail: String = ""
 var _name_input: LineEdit = null
 var _export_dialog: FileDialog = null
 var _slot_import_dialog: FileDialog = null
@@ -168,8 +167,8 @@ func save_screen_snapshot() -> Dictionary:
 		# question as whether it was asked for: a details pane that refused to
 		# draw leaves the flag up and the form absent.
 		"new_game_form": is_instance_valid(_name_input),
-		"status": _status_label.text if _status_label != null else "",
-		"detail": _status_detail.text if _status_detail != null else "",
+		"status": _status_title,
+		"detail": _status_detail,
 		"slots": _slots.duplicate(true),
 	}
 
@@ -215,7 +214,6 @@ func _build_ui() -> void:
 	_details_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details.add_child(_details_box)
 
-	_page.add_child(_build_status())
 	_shell.add_page(&"saves", "Saves", &"save", _page)
 
 	_file_dialog = _picker(
@@ -236,30 +234,6 @@ func _build_ui() -> void:
 		PackedStringArray(["*.json; pokerecomp save"]),
 	)
 	_slot_import_dialog.file_selected.connect(_import_slot_file)
-
-	_set_status(
-		&"info",
-		"Select a save slot.",
-		"Create a new game, continue a validated save, or import an original cartridge save.",
-	)
-
-
-func _build_status() -> Gen2LauncherCard:
-	var panel: Gen2LauncherCard = Gen2LauncherCard.well(_palette, Gen2LauncherTheme.RADIUS_MD, 16)
-	var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
-	panel.add_child(line)
-	_status_icon = Gen2LauncherIcon.create(&"about", 20.0, _palette.muted)
-	_status_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(_status_icon)
-	var text: VBoxContainer = Gen2LauncherUI.column(1)
-	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.add_child(text)
-	_status_label = Gen2LauncherUI.body(_palette, "")
-	text.add_child(_status_label)
-	_status_detail = Gen2LauncherUI.muted(_palette, "")
-	text.add_child(_status_detail)
-	return panel
-
 
 func _picker(title: String, mode: FileDialog.FileMode, filters: PackedStringArray) -> FileDialog:
 	var dialog := FileDialog.new()
@@ -710,19 +684,9 @@ func _status_name(status: int) -> String:
 
 
 func _set_status(kind: StringName, title: String, detail: String) -> void:
-	if _status_label == null:
-		return
-	_status_label.text = title
-	_status_detail.text = detail
-	var colour: Color = _palette.text
-	var glyph: StringName = &"about"
-	match kind:
-		&"success":
-			colour = _palette.success
-			glyph = &"check"
-		&"error":
-			colour = _palette.error
-			glyph = &"warning"
-			Gen2LauncherAudio.play(&"error")
-	_status_label.add_theme_color_override("font_color", colour)
-	_status_icon.set_glyph(glyph, 18.0, colour)
+	_status_title = title
+	_status_detail = detail
+	if kind == &"error":
+		Gen2LauncherAudio.play(&"error")
+	if _shell != null:
+		_shell.toast().show_message(kind, title, detail)

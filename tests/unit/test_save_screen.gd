@@ -97,6 +97,9 @@ func test_save_screen_shows_no_slots_before_any_save_exists() -> void:
 	var snapshot: Dictionary = _screen.save_screen_snapshot()
 	assert_eq(snapshot["selected_slot"], -1)
 	assert_eq((snapshot["slots"] as Array).size(), 0)
+	assert_eq(snapshot["status"], "", "the old bottom slot prompt is gone")
+	for node: Node in _screen.find_children("*", "Label", true, false):
+		assert_ne((node as Label).text, "Select a save slot.")
 
 
 func test_save_screen_distinguishes_an_occupied_slot() -> void:
