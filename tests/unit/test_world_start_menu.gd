@@ -193,3 +193,28 @@ func test_mods_appears_only_for_a_mod_that_registered_a_setting() -> void:
 	])
 	assert_true(bool(menu.items()[4].get("available", false)))
 	Gen2ModHost.reset()
+
+
+## `.PokedexString` and its siblings, which are what the box over the map
+## prints, and the name `PlaceString` reads for `<PLAYER>`.
+func test_the_labels_are_the_source_strings_with_the_player_name_filled_in() -> void:
+	var menu: Gen2WorldStartMenu = Gen2WorldStartMenu.build(1, true, true, 0, "GOLD")
+	var labels: Array = []
+	for entry: Variant in menu.items():
+		labels.append(String((entry as Dictionary).get("label", "")))
+	assert_eq(labels, [
+		"#DEX", "#MON", "PACK", "<POKE>GEAR", "GOLD", "SAVE", "OPTION", "EXIT",
+	])
+	## A world with no save selected has no name to read.
+	assert_eq(String(Gen2WorldStartMenu.build(0, false, false).items()[1]["label"]), "PLAYER")
+
+
+## `AutomaticGetMenuBottomCoord` grows the box downward by two rows an entry and
+## its own border, so `.MenuHeader`'s bottom coordinate is never read;
+## `.ContestMenuHeader` is the same box two rows down.
+func test_the_box_grows_downward_by_two_rows_an_entry() -> void:
+	var five: Gen2MenuBox = Gen2StartMenuPage.list_box(5)
+	assert_eq(five.border_position(), Vector2i(10, 0))
+	assert_eq(five.border_size(), Vector2i(10, 12))
+	assert_eq(Gen2StartMenuPage.list_box(8).border_size(), Vector2i(10, 18))
+	assert_eq(Gen2StartMenuPage.list_box(5, true).border_position(), Vector2i(10, 2))

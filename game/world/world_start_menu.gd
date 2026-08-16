@@ -49,15 +49,19 @@ const GATE_POKEGEAR: StringName = &"pokegear"
 ## host's registered entries can be spliced in without the order becoming a
 ## question. EXIT stays last: it is what closes the menu, and the source never
 ## puts anything after it.
+## The labels are `.PokedexString` and its siblings verbatim, which is what the
+## box over the map prints. `#` is the charmap's own $54 and expands to "POKe";
+## `<PLAYER>`, which the source's own `.StatusString` is, is filled in by
+## [method build] because `PlaceString` reads `wPlayerName` for it.
 const SOURCE_ENTRIES: Array[Dictionary] = [
-	{"kind": ITEM_POKEDEX, "label": "Pokedex", "available": true, "gate": GATE_POKEDEX},
-	{"kind": ITEM_POKEMON, "label": "Pokemon", "available": true, "gate": GATE_PARTY},
-	{"kind": ITEM_PACK, "label": "Pack", "available": true, "gate": &""},
-	{"kind": ITEM_POKEGEAR, "label": "Pokegear", "available": true, "gate": GATE_POKEGEAR},
-	{"kind": ITEM_PLAYER, "label": "Player", "available": true, "gate": &""},
-	{"kind": ITEM_SAVE, "label": "Save", "available": true, "gate": &""},
-	{"kind": ITEM_OPTION, "label": "Options", "available": true, "gate": &""},
-	{"kind": ITEM_EXIT, "label": "Exit", "available": true, "gate": &""},
+	{"kind": ITEM_POKEDEX, "label": "#DEX", "available": true, "gate": GATE_POKEDEX},
+	{"kind": ITEM_POKEMON, "label": "#MON", "available": true, "gate": GATE_PARTY},
+	{"kind": ITEM_PACK, "label": "PACK", "available": true, "gate": &""},
+	{"kind": ITEM_POKEGEAR, "label": "<POKE>GEAR", "available": true, "gate": GATE_POKEGEAR},
+	{"kind": ITEM_PLAYER, "label": "<PLAYER>", "available": true, "gate": &""},
+	{"kind": ITEM_SAVE, "label": "SAVE", "available": true, "gate": &""},
+	{"kind": ITEM_OPTION, "label": "OPTION", "available": true, "gate": &""},
+	{"kind": ITEM_EXIT, "label": "EXIT", "available": true, "gate": &""},
 ]
 
 ## `.Items`' third column, the one MENU ACCOUNT draws under the list
@@ -80,6 +84,7 @@ static func build(
 	pokedex_obtained: bool,
 	pokegear_obtained: bool,
 	previous_cursor: int = 0,
+	player_name: String = "",
 ) -> Gen2WorldStartMenu:
 	var menu := Gen2WorldStartMenu.new()
 	var passes: Dictionary = {
@@ -96,8 +101,16 @@ static func build(
 			if not Gen2ModHost.instance().option_mod_ids().is_empty():
 				items.append(_entry(ITEM_MODS, "Mods", true))
 			items.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
+		var label: String = String(entry["label"])
+		## `PlaceString` reads `wPlayerName` for `<PLAYER>`, so the STATUS row
+		## says the player's own name and never those eight characters.
+		## A world with no save selected has no name to read, which is a
+		## screenshot tool or a test rather than a game: the row says PLAYER
+		## rather than printing the marker's own characters.
+		if entry["kind"] == ITEM_PLAYER:
+			label = player_name if not player_name.is_empty() else "PLAYER"
 		items.append(_entry(
-			StringName(entry["kind"]), String(entry["label"]), bool(entry["available"])
+			StringName(entry["kind"]), label, bool(entry["available"])
 		))
 	menu._items = items
 	menu.cursor = clampi(previous_cursor, 0, maxi(items.size() - 1, 0))
@@ -116,6 +129,7 @@ static func from_world(world: Gen2WorldAPI, previous_cursor: int = 0) -> Gen2Wor
 		world.state.is_engine_flag_active(ENGINE_POKEDEX),
 		world.state.is_engine_flag_active(ENGINE_POKEGEAR),
 		previous_cursor,
+		world.player_name(),
 	)
 	menu.load_descriptions(world.data)
 	return menu
@@ -132,7 +146,9 @@ func load_descriptions(data: GameData) -> void:
 		var kind: StringName = StringName(entry.get("kind", &""))
 		var text: String = data.menu_description(kind)
 		if not text.is_empty():
-			_descriptions[kind] = text.replace("\n", " ")
+			## Kept as the two rows `.MenuDesc`'s own `next` places, since the
+			## account block is ten tiles wide and no line of it fits on one.
+			_descriptions[kind] = text
 
 
 static func _entry(kind: StringName, label: String, available: bool) -> Dictionary:

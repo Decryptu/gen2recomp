@@ -1530,6 +1530,22 @@ func preview_start_menu() -> void:
 	_start_menu_host.handle_button(Gen2Button.DOWN)
 
 
+## Public screenshot driver for `_Option`, which is what the start menu's own
+## OPTION row opens. One call, since the picture wanted is the settings screen
+## and not the row that reaches it.
+func preview_options() -> void:
+	if _world == null or _data == null:
+		return
+	if _start_menu_host == null:
+		_injected_save = _embedded_party_save()
+		_open_start_menu()
+	if _start_menu_host == null:
+		return
+	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_OPTION:
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	_start_menu_host.handle_button(Gen2Button.A)
+
+
 ## Public screenshot driver for `TossMenu`. Grants a stack on an injected save
 ## so nothing persists, then advances one menu step per call: Pack, the item,
 ## TOSS, the quantity dial, the yes/no and the result.
@@ -2268,6 +2284,9 @@ func _open_start_menu_host(entry: Callable) -> void:
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 20
 	add_child(host)
+	## `StartMenu`'s box stands over the map, so it is drawn into the screen the
+	## map is already in rather than into one of the host's own.
+	host.set_screen(_screen)
 	host.action_chosen.connect(_on_start_menu_action)
 	host.closed.connect(_on_start_menu_closed)
 	host.field_item_used.connect(_on_field_item_used)

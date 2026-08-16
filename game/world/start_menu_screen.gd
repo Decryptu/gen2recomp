@@ -129,6 +129,18 @@ var _mod_cursor: int = 0
 var _mod_id: StringName = &""
 var _mod_option_cursor: int = 0
 
+## The cartridge's own screens, drawn into whichever [Gen2Screen] the host
+## handed over. `StartMenu`'s box sits over the map, so it goes into the world's
+## own screen rather than one of this node's; without one, the panel below
+## stands in, which is what a test or the launcher gets. The pack and its
+## modes are still the panel, and are the next row of `HANDOFF.md`'s table.
+var _screen: Gen2Screen = null
+var _view: TextureRect = null
+var _page: Gen2StartMenuPage = null
+## The panel's own two roots, hidden whenever a cartridge screen is up.
+var _scrim: ColorRect = null
+var _center: CenterContainer = null
+
 var _title: Label = null
 var _summary: Label = null
 var _options: VBoxContainer = null
@@ -245,16 +257,21 @@ func handle_button(button: int) -> bool:
 	## carry, so the dial takes the whole button rather than a direction and an
 	## A/B split, the way [Gen2WorldApricorn] feeds it.
 	if _mode == Mode.PACK_TOSS_QUANTITY:
-		return _press_toss_quantity(button)
+		var pressed: bool = _press_toss_quantity(button)
+		_render_hardware()
+		return pressed
 	if Gen2Button.is_direction(button):
 		_move(Gen2Button.vector(button))
+		_render_hardware()
 		return true
 	match button:
 		Gen2Button.A:
 			_confirm()
+			_render_hardware()
 			return true
 		Gen2Button.B:
 			_cancel()
+			_render_hardware()
 			return true
 	return false
 
@@ -1513,10 +1530,12 @@ func _build_ui() -> void:
 	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scrim.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(scrim)
+	_scrim = scrim
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
+	_center = center
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(420, 320)
 	panel.add_theme_stylebox_override("panel", _panel_style())
@@ -1561,7 +1580,82 @@ func _build_ui() -> void:
 	content.add_child(_footer)
 
 
+## The screen `StartMenu`'s own box is drawn into. The world hands over the one
+## the map is already in, so the box stands over it the way the map name sign
+## does; a caller that hands over none keeps the panel.
+func set_screen(screen: Gen2Screen) -> void:
+	_screen = screen
+	if _screen == null or _view != null:
+		return
+	_view = TextureRect.new()
+	_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_view.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_screen.display(_view)
+	_render_hardware()
+
+
+## Frees the overlay, since it lives in a screen this node does not own.
+func _exit_tree() -> void:
+	if _view != null:
+		_view.queue_free()
+		_view = null
+
+
+## Whichever of the cartridge's screens this mode is, or nothing for a mode that
+## is still the panel.
+func _render_hardware() -> void:
+	if _view == null:
+		return
+	var image: Image = _hardware_image()
+	_view.visible = image != null
+	if _scrim != null:
+		_scrim.visible = image == null
+	if _center != null:
+		_center.visible = image == null
+	if image == null:
+		return
+	_view.texture = ImageTexture.create_from_image(image)
+
+
+func _hardware_image() -> Image:
+	if _data == null:
+		return null
+	if _page == null:
+		_page = Gen2StartMenuPage.from_data(_data)
+	if _page == null:
+		return null
+	match _mode:
+		Mode.LIST:
+			if _menu == null:
+				return null
+			var labels: Array = []
+			for entry: Variant in _menu.items():
+				labels.append(String((entry as Dictionary).get("label", "")))
+			## `.PrintMenuAccount` reads the option on every cursor move, so
+			## turning MENU ACCOUNT off takes the block away at once.
+			var description: String = _menu.selected_description() \
+				if Gen2OptionsStore.current().menu_account else ""
+			return _page.render_list(
+				labels, _menu.cursor, description,
+				_world != null and _world.bug_contest_active()
+			)
+		Mode.OPTIONS:
+			if _options_menu == null:
+				return null
+			return _page.render_options(_options_menu.rows(), _options_menu.cursor)
+		Mode.MODS:
+			## Not a cartridge screen: this project's own list, in `_Option`'s
+			## own shape so the two do not look like different games.
+			var rows: Array = []
+			for id: StringName in _mod_ids:
+				rows.append({"label": _mod_name(id), "value": ""})
+			return _page.render_options(rows, _mod_cursor)
+	return null
+
+
 func _render_options(values: Array, cursor: int, label_for: Callable) -> void:
+	_render_hardware()
 	if _pack_view != null:
 		_pack_view.visible = false
 	if _options == null:
