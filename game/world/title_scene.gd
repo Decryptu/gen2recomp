@@ -1,18 +1,15 @@
 class_name Gen2TitleScene
 extends RefCounted
 
-## The title screen's own scene machine (`TitleScreenScene`,
-## `engine/menus/intro_menu.asm`), one source frame at a time.
+## `TitleScreenScene` (`engine/menus/intro_menu.asm`), one source frame at a
+## time. Two screens under one name: Crystal opens on `TitleScreenEntrance`,
+## walking `hSCX` in from 112 while the crystal falls and the interlaced
+## `wLYOverrides` pull the logo together, and Gold and Silver go straight to the
+## timer with a bird on its own sine.
 ##
-## Two screens under one name. Crystal opens on `TitleScreenEntrance`, which
-## walks `hSCX` in from 112 while the crystal falls into place and the interlaced
-## `wLYOverrides` pull the logo together; Gold and Silver have no entrance at all
-## and go straight to the timer with a bird flying on its own sine.
-##
-## Scene-free: this owns the frames, the scroll, the sprites and the option the
-## screen answers with. [Gen2TitlePage] owns the pixels and a host owns the
-## device. What it never owns is the decision behind the answer: the caller reads
-## [method selected_option] once [method finished] holds.
+## Scene-free: the frames, the scroll, the sprites and the answer. The pixels are
+## [Gen2TitlePage]'s and the caller reads [method selected_option] once
+## [method finished] holds.
 
 ## `.scenes`. Crystal's table opens on the entrance and Gold and Silver's does
 ## not, so the phase is named rather than numbered here.
@@ -36,10 +33,9 @@ const OPTION_RESET_CLOCK: int = 4
 const TIMER_GOLD: int = 84 * 60 + 16
 const TIMER_DEFAULT: int = 73 * 60 + 36
 
-## `TitleScreenEntrance`: `hSCX` starts at +112 and comes off four a frame, and
-## `AnimateTitleCrystal` moves thirty sprites down two a frame until the first
-## one's y reaches 6 + two tiles. Both take the same twenty-eight frames, which
-## is why neither has to wait for the other.
+## `TitleScreenEntrance`: `hSCX` from +112 off four a frame, and
+## `AnimateTitleCrystal` thirty sprites down two a frame until the first's y
+## reaches 6 + two tiles. Both take the same twenty-eight frames.
 const ENTRANCE_SCX: int = 112
 const ENTRANCE_SCX_STEP: int = 4
 ## The interlaced band is the logo's height, and only its odd lines take the
@@ -65,41 +61,36 @@ const SUICUNE_FRAMES: Array[int] = [0x80, 0x88, 0x00, 0x08]
 ## before the iterator has re-pointed it once.
 const SUICUNE_FIRST_BASE: int = 0x00
 ## `LoadSuicuneFrame` draws six rows of eight from whichever base it is handed.
-## Its `d` rises by one across each of the eight columns and then by eight more
-## at the end of the row, so a row starts sixteen tiles past the one above it:
-## the sheet is sixteen wide and only its left half is on screen.
+## Its `d` rises by one per column and eight more at the row's end, so a row
+## starts sixteen past the one above: the sheet is 16 wide, half of it on screen.
 const SUICUNE_COLUMNS: int = 8
 const SUICUNE_ROW_STRIDE: int = 16
 const SUICUNE_ROWS: int = 6
 const SUICUNE_AT := Vector2i(6, 12)
-## `Decompress` puts the sheet at `vTiles4`, which is tile $80 of the bank the
-## Suicune strip is read through, and a tile number is a byte: `.Frames`' last
-## two bases are written as `vTiles5` $00 and $08 because $180 and $188 have
-## wrapped. Subtracting the sheet's own start as a byte undoes both.
+## `Decompress` puts the sheet at `vTiles4`, tile $80 of its bank, and a tile
+## number is a byte: `.Frames`' last two bases read `vTiles5` $00 and $08 because
+## $180 and $188 wrapped. Subtracting the sheet's start as a byte undoes both.
 const SUICUNE_VRAM_FIRST_TILE: int = 0x80
 
-## `InitializeBackground`: thirty 8x16 objects as five rows of six. Its
-## `.InitColumn` keeps `d` for the whole run and walks `b` by eight, so what it
-## calls a column is a row of sprites across; `d` rises by $10, one object's
-## height, between them. The tile number steps by two throughout.
+## `InitializeBackground`: thirty 8x16 objects as five rows of six. `.InitColumn`
+## keeps `d` and walks `b` by eight, so its "column" is a row across; `d` rises
+## by $10, one object's height, between them, and the tile number steps by two.
 const CRYSTAL_ROWS: int = 5
 const CRYSTAL_COLUMNS: int = 6
 const CRYSTAL_ROW_STEP: int = 0x10
 const CRYSTAL_FIRST_X: int = 0x40
 const CRYSTAL_X_STEP: int = 8
 
-## `depixel 12, 11`, the bird's own struct coordinate. `_InitSpriteAnimStruct`
-## takes x in e and y in d, and `ldpixel` loads the first operand into the high
-## byte, so the pair reads (y, x) however the macro's own comment names them.
+## `depixel 12, 11`, the bird's struct coordinate. `_InitSpriteAnimStruct` takes
+## x in e and y in d and `ldpixel` loads the first operand high, so it is (y, x).
 const BIRD_AT := Vector2i(11 * Gen2Tiles.TILE_WIDTH, 12 * Gen2Tiles.TILE_HEIGHT)
 ## `AnimSeq_GSIntroHoOhLugia`: Gold counts its sine input up and scales by two,
 ## Silver counts down and scales by eight, and the answer is the y offset.
 const BIRD_SINE_GOLD: int = 2
 const BIRD_SINE_SILVER: int = 8
 
-## `.Frameset_GSIntroHoOhLugia`, as [code](oam set, frames)[/code] pairs in each
-## profile's own order. `oamframe X, n` lasts n + 1 frames and `oamrestart`
-## takes the sequence back to the top, so both loop rather than settling.
+## `.Frameset_GSIntroHoOhLugia` as [code](oam set, frames)[/code] pairs per
+## profile. `oamframe X, n` lasts n + 1 and `oamrestart` loops rather than ending.
 const BIRD_FRAMESET_GOLD: Array[Vector2i] = [
 	Vector2i(0, 11), Vector2i(1, 10), Vector2i(2, 11),
 	Vector2i(3, 11), Vector2i(2, 10), Vector2i(4, 11),
@@ -110,10 +101,9 @@ const BIRD_FRAMESET_SILVER: Array[Vector2i] = [
 	Vector2i(1, 4),
 ]
 
-## `UpdateTitleTrailSprite`, which spawns a trail behind the bird on every
-## fourth frame of the timer. Gold picks the spawn from `.TitleTrailCoords` by
-## the bird's own frame and the timer's bit 2, and a row of zeroes means that
-## frame drops no trail; Silver spawns from one fixed place.
+## `UpdateTitleTrailSprite`, a trail every fourth frame of the timer. Gold picks
+## from `.TitleTrailCoords` by the bird's frame and the timer's bit 2, a row of
+## zeroes dropping none; Silver spawns from one fixed place.
 const TRAIL_SPAWN_MASK: int = 0b11
 const TRAIL_SPAWN_ALTERNATE: int = 0b100
 ## `dbpixel x, y, 4, 0` per entry, as (x, y) pixel pairs and (-1, -1) for the
@@ -128,43 +118,38 @@ const TRAIL_COORDS_GOLD: Array[Array] = [
 ]
 ## `depixel 15, 11, 4, 0`.
 const TRAIL_AT_SILVER := Vector2i(88, 124)
-## `AnimSeq_GSTitleTrail`: four pixels right a frame, gone once its x reaches
-## $a4. The rest of it is two routines under one name. Only Gold's `.one` has the
-## `inc [hl]` that walks the y coordinate down, and only Gold's `.zero` seeds
-## VAR1 from the struct's own index and then reaches
-## `AnimSeqs_IncAnonJumptableIndex`, so its sine is set up once and stepped by
-## three a frame from there.
+## `AnimSeq_GSTitleTrail`: four pixels right a frame, gone at x $a4. Two routines
+## under one name past that. Only Gold's `.one` has the `inc [hl]` walking y
+## down, and only Gold's `.zero` seeds VAR1 from the struct's index and reaches
+## `AnimSeqs_IncAnonJumptableIndex`, so its sine is set up once then stepped by
+## three.
 const TRAIL_X_STEP: int = 4
 const TRAIL_Y_STEP: int = 1
 const TRAIL_X_END: int = 0xA4
 const TRAIL_SINE_STEP: int = 3
 const TRAIL_SINE_AMPLITUDE: int = 2
-## Silver's `.zero` runs every frame, and both numbers it wants come from
+## Silver's `.zero` runs every frame and takes both numbers from
 ## `wIntroSceneTimer`, which the union at `wJumptableIndex + 2` gives to
-## `LOW(wTitleScreenTimer)`: the byte the screen itself is counting down. Masked
-## and swapped it is 0 to 3, which is an amplitude of 3 to 6 and a step of 7 to
-## 10.
+## `LOW(wTitleScreenTimer)`, the byte the screen counts down. Masked and swapped
+## it is 0 to 3: an amplitude of 3 to 6 and a step of 7 to 10.
 const TRAIL_SILVER_TIMER_MASK: int = 0x30
 const TRAIL_SILVER_TIMER_SHIFT: int = 4
-## `.Frameset_GSTitleTrail`, as (OAM set, duration) pairs. Gold alternates the
-## two `spriteanimoam` vtiles and `oamrestart`s, so each picture is up for two
-## frames; Silver holds the first and `oamend`s, which repeats it forever. A
-## frame lasts its duration plus one, the way `GetSpriteAnimFrame` counts.
+## `.Frameset_GSTitleTrail` as (OAM set, duration) pairs. Gold alternates two
+## `spriteanimoam` vtiles and `oamrestart`s; Silver holds the first and `oamend`s,
+## repeating it forever. A frame lasts its duration plus one.
 const TRAIL_FRAMESET_GOLD: Array[Vector2i] = [Vector2i(0, 1), Vector2i(1, 1)]
 const TRAIL_FRAMESET_SILVER: Array[Vector2i] = [Vector2i(0, 32)]
 const TRAIL_SILVER_AMPLITUDE_BASE: int = 3
 const TRAIL_SILVER_STEP_BASE: int = 7
 
-## `ScrollTitleScreenClouds`: forty scanlines from line $5f take one shared
-## offset that falls by one, on every eighth frame on Gold and on every frame on
-## Silver.
+## `ScrollTitleScreenClouds`: forty scanlines from $5f share one falling offset,
+## stepped every eighth frame on Gold and every frame on Silver.
 const CLOUD_FIRST_LINE: int = 0x5F
 const CLOUD_LINES: int = 0x28
 const CLOUD_GOLD_MASK: int = 0b111
 
-## `NUM_SPRITE_ANIM_STRUCTS`: `_InitSpriteAnimStruct` walks ten slots and returns
-## carry rather than making an eleventh, so a burst of trails simply stops. The
-## bird holds one of the ten for the whole screen's life, which leaves nine.
+## `_InitSpriteAnimStruct` walks ten slots and returns carry rather than making
+## an eleventh. The bird holds one for the screen's life, leaving nine.
 const MAX_SPRITE_STRUCTS: int = 10
 const MAX_TRAILS: int = MAX_SPRITE_STRUCTS - 1
 
@@ -180,23 +165,20 @@ var _timer: int = 0
 var _scx: int = 0
 var _crystal_y: int = 0
 var _suicune_counter: int = 0
-## `LoadSuicuneFrame`'s live base, which the iterator re-points rather than the
-## page deriving it: the counter is read before it is raised, so the write lands
-## a frame later than a derivation from the raised counter would put it.
+## `LoadSuicuneFrame`'s live base, re-pointed by the iterator rather than derived
+## by the page: the counter is read before it is raised, so the write lands late.
 var _suicune_base: int = SUICUNE_FIRST_BASE
 var _bird_var: int = 0
 var _bird_frame: int = 0
 var _selected: int = -1
 var _sine: Gen2BattleAnimData = null
-## The live trail particles, each `{ at, var1, yoffset, fresh }`, capped the way
-## `_InitSpriteAnimStruct` caps them. `fresh` is a struct that has not had a
+## Live particles as `{ at, var1, yoffset, fresh }`, capped the way
+## `_InitSpriteAnimStruct` caps them. `fresh` is a struct with no
 ## `PlaySpriteAnimations` pass yet: `UpdateTitleTrailSprite` spawns behind that
-## call, so a new trail neither runs its `.zero` nor reaches shadow OAM until the
-## next frame.
+## call, so a new trail neither runs `.zero` nor reaches OAM until next frame.
 var _trails: Array[Dictionary] = []
-## `wSpriteAnimCount`, which `_InitSpriteAnimStruct` raises on every spawn and
-## which every struct keeps as its own `SPRITEANIMSTRUCT_INDEX`. `TitleScreen`
-## spawns the bird before any trail, so the count opens at one.
+## `wSpriteAnimCount`, raised on every spawn and kept as each struct's
+## `SPRITEANIMSTRUCT_INDEX`. The bird is spawned first, so it opens at one.
 var _anim_count: int = 1
 var _cloud_scroll: int = 0
 
@@ -247,27 +229,22 @@ func window_y() -> int:
 	return WINDOW_Y
 
 
-## `wLYOverrides`, one signed scroll per scanline, empty when nothing is
-## overriding `hSCX`.
-##
-## Crystal's is `TitleScreenEntrance`: the logo's eighty lines take the scroll
-## with the odd ones negated, which is the interlaced pull-together, and `.done`
-## clears the pointer so nothing overrides after it. Gold and Silver's is
-## `ScrollTitleScreenClouds`, forty lines of cloud walking left for the whole
-## screen's life.
+## `wLYOverrides`, one signed scroll per scanline, empty when nothing overrides
+## `hSCX`. Crystal's is `TitleScreenEntrance`: the logo's eighty lines take the
+## scroll with the odd ones negated, the interlaced pull-together, and `.done`
+## clears the pointer. Gold and Silver's is `ScrollTitleScreenClouds`, forty
+## lines walking left for the screen's whole life.
 func line_offsets() -> PackedInt32Array:
 	var out := PackedInt32Array()
 	if _profile == RomRegistry.CRYSTAL:
 		if _scene != SCENE_ENTRANCE or _scx == 0:
 			return out
-		# `wLYOverrides` is read by the LCD interrupt where it stands rather than
-		# copied at VBlank, so the screen this state's sprites reach carries the
-		# *next* pass's fill: `TitleScreenEntrance` writes it before the frame it
-		# opened is drawn. Everything else here is a frame behind it.
+		# `wLYOverrides` is read live rather than copied at VBlank, so the screen
+		# this state's sprites reach carries the *next* pass's fill:
+		# `TitleScreenEntrance` writes it before the frame it opened is drawn.
 		var scx: int = _scx - ENTRANCE_SCX_STEP
-		# Only the logo's own eighty lines are written; `_TitleScreen` zeroed
-		# the rest of the buffer and nothing rewrites them, so the strip below
-		# the logo stands still while the logo comes in.
+		# Only the logo's eighty lines are written; `_TitleScreen` zeroed the
+		# rest, so the strip below it stands still while the logo comes in.
 		out.resize(Gen2Screen.HEIGHT)
 		out.fill(0)
 		for line: int in ENTRANCE_LINES:
@@ -280,9 +257,8 @@ func line_offsets() -> PackedInt32Array:
 	return out
 
 
-## Whether the screen has answered. The caller reads [method selected_option]
-## and moves on: a timer that ran out answers nothing and is the intro movie's
-## cue instead.
+## Whether the screen has answered. A timer that ran out answers nothing and is
+## the intro movie's cue instead.
 func finished() -> bool:
 	return _scene == SCENE_END
 
@@ -292,16 +268,14 @@ func selected_option() -> int:
 	return _selected
 
 
-## One source frame. [param held] is the buttons down this frame, as
-## [Gen2Button] values, since `GetJoypad`'s `hJoyDown` is what every branch here
-## reads rather than a press.
+## One source frame. [param held] is the buttons down, since every branch here
+## reads `GetJoypad`'s `hJoyDown` rather than a press.
 func advance_frame(held: Array = []) -> void:
 	if _scene == SCENE_END:
 		return
 	_frame += 1
-	# `RunTitleScreen`'s own order: the clouds, then the scene, which is what
-	# counts the timer down, then the sprites and the spawn behind them, both of
-	# which read that timer after the count.
+	# `RunTitleScreen`'s order: clouds, then the scene that counts the timer
+	# down, then the sprites and the spawn, both of which read it after.
 	_advance_clouds()
 	match _scene:
 		SCENE_ENTRANCE:
@@ -342,8 +316,7 @@ func _advance_clouds() -> void:
 
 
 ## `AnimSeq_GSTitleTrail` over every live particle, then
-## `UpdateTitleTrailSprite`'s own spawn. The move runs first because
-## `PlaySpriteAnimations` does, and the spawn is the call behind it.
+## `UpdateTitleTrailSprite`'s spawn, which is the call behind it.
 func _advance_trails() -> void:
 	var alive: Array[Dictionary] = []
 	for trail: Dictionary in _trails:
@@ -395,9 +368,8 @@ func _advance_trails() -> void:
 
 
 ## `GetSpriteAnimFrame` for one trail. The counter starts at -1 and the duration
-## is loaded on the pass that reads an entry, so an `oamframe X, n` is drawn
-## n + 1 times; Gold `oamrestart`s to the first entry and Silver `oamend`s, which
-## repeats the last for as long as the sprite is up.
+## loads on the pass that reads an entry, so `oamframe X, n` is drawn n + 1
+## times; Gold `oamrestart`s and Silver `oamend`s, repeating the last.
 func _advance_trail_frameset(trail: Dictionary) -> void:
 	var frames: Array[Vector2i] = TRAIL_FRAMESET_GOLD if _profile == RomRegistry.GOLD \
 		else TRAIL_FRAMESET_SILVER
@@ -431,9 +403,8 @@ func _advance_entrance() -> void:
 		_crystal_y = (_crystal_y + CRYSTAL_STEP) & 0xFF
 
 
-## `TitleScreenMain`: the timer down a frame, then the three chords. The button
-## checks run before the timer is looked at again, so the last frame of the
-## count can still be answered.
+## `TitleScreenMain`: the timer down a frame, then the three chords. The buttons
+## are checked before the timer is looked at again, so its last frame answers.
 func _advance_main(held: Array) -> void:
 	if _timer <= 0:
 		# `.end` into `TitleScreenEnd`, which fades the music out and then answers
@@ -487,9 +458,8 @@ func suicune_tiles() -> Array[Vector3i]:
 	return out
 
 
-## The screen's objects for this frame, as
-## [code]{ kind, at, tile, palette }[/code] in shadow-OAM coordinates. Crystal's
-## thirty crystal parts, or Gold and Silver's bird and the trail behind it.
+## [code]{ kind, at, tile, palette }[/code] in shadow-OAM coordinates: Crystal's
+## thirty crystal parts, or the bird and its trail.
 func sprites() -> Array[Dictionary]:
 	if _profile == RomRegistry.CRYSTAL:
 		return _crystal_sprites()
@@ -516,15 +486,13 @@ func _crystal_sprites() -> Array[Dictionary]:
 	return out
 
 
-## The bird's own frameset and the trail sprite under it. The y offset is
-## `AnimSeqs_Sine` over `BattleAnimSineWave`, which is the same table every
-## battle animation reads.
+## The bird's frameset and the trail under it. The y offset is `AnimSeqs_Sine`
+## over `BattleAnimSineWave`, the table every battle animation reads.
 func _bird_sprites() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	# `TitleScreen` spawns the bird into the first free slot and then copies the
-	# struct into `wSpriteAnim10` and clears the first, so the bird holds the last
-	# slot however late a trail is spawned: the trails are drawn first and the
-	# bird over them.
+	# `TitleScreen` spawns the bird into the first free slot, copies the struct
+	# into `wSpriteAnim10` and clears the first, so the bird holds the last slot
+	# however late a trail is spawned and is drawn over them.
 	for trail: Dictionary in _trails:
 		if bool(trail["fresh"]):
 			continue
@@ -554,9 +522,8 @@ func bird_frame() -> int:
 	return int(_bird_frameset()[_bird_entry()].x)
 
 
-## `SPRITEANIMSTRUCT_FRAME`, which is the entry of the frameset rather than the
-## OAM set it names: Gold's list reaches set 2 twice, and `.TitleTrailCoords` is
-## indexed by the entry, not by the picture.
+## `SPRITEANIMSTRUCT_FRAME` is the frameset entry, not the OAM set it names:
+## Gold's list reaches set 2 twice and `.TitleTrailCoords` indexes the entry.
 func _bird_entry() -> int:
 	var frameset: Array[Vector2i] = _bird_frameset()
 	var total: int = 0

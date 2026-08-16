@@ -3,30 +3,21 @@ extends Control
 
 ## A Game Boy Color screen: 160x144 pixels, scaled by a whole number to fit.
 ##
-## The game must not run at the window's resolution: a GBC pixel has to stay
-## square and sharp, so everything the game draws goes into a hardware-sized
-## [SubViewport] blown up by an integer factor. Any other scale resamples an 8x8
-## tile into something that crawls when it moves.
-##
-## Surrounding chrome is ordinary Godot UI at window resolution. Keeping the two
-## apart is why this is a [Control] rather than a project-wide stretch setting.
-##
-## Add what the game draws with [method display]; it goes inside the viewport.
+## What the game draws goes into a hardware-sized [SubViewport] blown up by an
+## integer factor, since any other scale resamples an 8x8 tile into something
+## that crawls when it moves. Surrounding chrome is ordinary Godot UI at window
+## resolution, which is why this is a [Control] and not a stretch setting.
 ##
 ## [method display_native] is a second layer behind it, covering the same
-## rectangle at window resolution, for a view not made of hardware pixels: a 3D
-## or HD renderer cannot be drawn into a 160x144 buffer and magnified, but still
-## has to line up with the text boxes and menus above it, which stay hardware
-## pixels.
+## rectangle at window resolution, for a view that cannot be drawn into a 160x144
+## buffer and magnified but still has to line up with the boxes above it.
 
 const WIDTH: int = 160
 const HEIGHT: int = 144
 
-## Emitted after a resize changes the whole-number factor the screen is drawn
-## at. Nothing in the game should care, but a debug overlay might.
+## After a resize changes the factor. Nothing in the game should care.
 signal scale_changed(factor: int)
-## Emitted after the native layer's rectangle changes, in window pixels. A view
-## drawn there sizes itself to this rather than to the window.
+## After the native layer's rectangle changes; a view drawn there sizes to this.
 signal native_size_changed(size: Vector2i)
 
 var scale_factor: int = 1
@@ -37,33 +28,29 @@ var scale_factor: int = 1
 
 
 func _ready() -> void:
-	# The viewport's size is not set here: a stretching SubViewportContainer
-	# owns it, and it falls out of the container's size divided by the shrink
-	# factor. Writing it directly is refused at runtime.
+	# The viewport's size is the container's divided by the shrink factor, and
+	# writing it directly is refused at runtime.
 	resized.connect(_fit)
 	_fit()
 
 
-## Puts a node inside the screen. Anything added this way is drawn in hardware
-## pixels, so position it in the 160x144 space and nothing else.
+## Inside the screen, in hardware pixels: position it in the 160x144 space.
 func display(node: Node) -> void:
 	_viewport.add_child(node)
 
 
-## Puts a node on the layer behind the hardware screen, covering the same
-## rectangle at the window's own resolution. Position it in [method native_size]
-## pixels; what is drawn in the hardware viewport is composited over it.
+## On the layer behind, in [method native_size] window pixels; the hardware
+## viewport is composited over it.
 func display_native(node: Node) -> void:
 	_native.add_child(node)
 
 
-## The native layer's rectangle in window pixels, which is the hardware screen's
-## size times the whole-number factor it is drawn at.
+## The native layer's rectangle in window pixels.
 func native_size() -> Vector2i:
 	return Vector2i(WIDTH * scale_factor, HEIGHT * scale_factor)
 
 
-## Removes and frees everything currently on screen, on both layers.
+## Frees everything on screen, on both layers.
 func clear() -> void:
 	for parent: Node in [_viewport, _native]:
 		for child: Node in parent.get_children():
@@ -76,10 +63,8 @@ func viewport() -> SubViewport:
 	return _viewport
 
 
-## The largest whole number of window pixels per hardware pixel that fits in an
-## area. Public because [Gen2GameFrame] has to know how tall the screen will be
-## before it can decide what is left for the on-screen controller, and two
-## copies of this arithmetic would eventually disagree.
+## The largest whole number of window pixels per hardware pixel that fits.
+## Public because [Gen2GameFrame] sizes the on-screen controller off it.
 static func fit_factor(area: Vector2) -> int:
 	return maxi(1, mini(int(area.x) / WIDTH, int(area.y) / HEIGHT))
 
@@ -90,8 +75,7 @@ func _fit() -> void:
 
 	_container.stretch_shrink = factor
 	_container.size = drawn
-	# Centred rather than anchored: a screen that does not divide evenly into
-	# the window leaves a margin, and an uneven one is visible.
+	# Centred rather than anchored: an uneven margin is visible.
 	_container.position = ((size - drawn) * 0.5).floor()
 	_native.size = drawn
 	_native.position = _container.position

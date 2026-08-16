@@ -1,17 +1,13 @@
 class_name Gen2MenuBox
 extends RefCounted
 
-## The geometry every cartridge menu is laid out with: `menu_coords`' four
-## corners, `GetMenuBoxDims`, `GetMenuTextStartCoord` and the cursor position
-## `_InitVerticalMenuCursor` derives from them.
-##
-## Scene-free arithmetic on the hardware tile grid, so a layout can be checked
-## without drawing it. [Gen2MenuPage] draws what this places, and
-## [Gen2WorldMenu] owns the selection rules; nothing here reads input or holds a
-## cursor of its own.
+## Every cartridge menu's geometry: `menu_coords`' four corners,
+## `GetMenuBoxDims`, `GetMenuTextStartCoord` and the cursor position
+## `_InitVerticalMenuCursor` derives from them. Scene-free arithmetic on the tile
+## grid, so a layout can be checked without drawing it. [Gen2MenuPage] draws what
+## this places and [Gen2WorldMenu] owns the selection rules.
 
-## constants/menu_constants.asm. Owned here because this is the layer that reads
-## all of them; [Gen2WorldMenu] takes the two that decide selection from here.
+## constants/menu_constants.asm, owned here because this layer reads all of them.
 const STATICMENU_DISABLE_B: int = 1 << 0
 const STATICMENU_ENABLE_SELECT: int = 1 << 1
 const STATICMENU_ENABLE_LEFT_RIGHT: int = 1 << 2
@@ -21,9 +17,8 @@ const STATICMENU_WRAP: int = 1 << 5
 const STATICMENU_NO_TOP_SPACING: int = 1 << 6
 const STATICMENU_CURSOR: int = 1 << 7
 
-## `_InitVerticalMenuCursor`'s `ln a, 2, 0`: the cursor steps two rows per item
-## and no columns, which is why `PlaceVerticalMenuItems` advances by
-## `2 * SCREEN_WIDTH`.
+## `_InitVerticalMenuCursor`'s `ln a, 2, 0`: two rows per item and no columns,
+## which is why `PlaceVerticalMenuItems` advances by `2 * SCREEN_WIDTH`.
 const ROW_STEP: int = 2
 
 ## `menu_coords x1, y1, x2, y2`, which stores `db y1, x1` then `db y2, x2`.
@@ -32,9 +27,8 @@ var top: int = 0
 var right: int = 0
 var bottom: int = 0
 var flags: int = 0
-## `dn rows, columns` and the `db spacing` beside it in a menu's own data
-## (`Place2DMenuItemStrings`, `Get2DMenuNumberOfColumns`). One column and no
-## spacing is `PlaceVerticalMenuItems`, which is every list menu here.
+## `dn rows, columns` and its `db spacing` (`Place2DMenuItemStrings`). One column
+## and no spacing is `PlaceVerticalMenuItems`, which is every list menu here.
 var columns: int = 1
 var column_spacing: int = 0
 ## `w2DMenuCursorOffsets`' high nybble, which is `ROW_STEP` for every menu built
@@ -56,9 +50,8 @@ func has_flag(flag: int) -> bool:
 	return (flags & flag) != 0
 
 
-## `GetMenuBoxDims`, which answers the span between the corners. `MenuBox`
-## then decrements both before calling `Textbox`, so this is the interior plus
-## one in each direction.
+## `GetMenuBoxDims`, the span between the corners. `MenuBox` decrements both
+## before `Textbox`, so this is the interior plus one on each axis.
 func dims() -> Vector2i:
 	return Vector2i(right - left, bottom - top)
 
@@ -68,8 +61,7 @@ func interior() -> Vector2i:
 	return dims() - Vector2i.ONE
 
 
-## The whole drawn frame, border included, which is the interior plus the two
-## edge tiles on each axis.
+## The drawn frame: the interior plus the two edge tiles on each axis.
 func border_size() -> Vector2i:
 	return interior() + Vector2i(2, 2)
 
@@ -90,16 +82,14 @@ func text_start() -> Vector2i:
 	return at
 
 
-## `_InitVerticalMenuCursor`'s init coords, which share the text's row and sit
-## one column left of it. The source writes `wMenuBorderLeftCoord + 1` outright
-## rather than subtracting from the text column, so a menu without
-## STATICMENU_CURSOR still has a position here; it just never draws one.
+## `_InitVerticalMenuCursor`'s init coords, one column left of the text. The
+## source writes `wMenuBorderLeftCoord + 1` outright rather than subtracting, so
+## a menu without STATICMENU_CURSOR has a position here and never draws one.
 func cursor_start() -> Vector2i:
 	return Vector2i(left + 1, text_start().y)
 
 
-## Where item [param index] prints, zero-based. `Place2DMenuItemStrings` walks
-## the columns of a row before moving on, so an index counts along the row.
+## Zero-based. `Place2DMenuItemStrings` walks a row's columns before moving on.
 func item_position(index: int) -> Vector2i:
 	return text_start() + _item_offset(index)
 
@@ -116,7 +106,6 @@ func _item_offset(index: int) -> Vector2i:
 	)
 
 
-## `PlaceMenuStrings`' title, which prints on the box's own top row indented by
-## the byte that follows the item list.
+## `PlaceMenuStrings`' title: the top row, indented by the byte after the items.
 func title_position(indent: int) -> Vector2i:
 	return Vector2i(left + indent, top)

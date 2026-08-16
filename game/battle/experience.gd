@@ -1,17 +1,13 @@
 class_name Gen2Experience
 extends RefCounted
 
-## The six growth curves, what a defeated Pokémon is worth, and what it leaves
-## behind in stat experience.
-##
-## Static like [Gen2Stats] and [Gen2Damage]: integer arithmetic in the hardware's
-## order, every division truncating, so a tidier rearrangement gives a different
-## answer. The curves are `CalcExpAtLevel`'s formula, pinned against
-## `data/growth_rates.asm` and checked against all 251 species in all three
-## games; see `tools/dump_tables.gd`'s `growth` view.
+## The six growth curves, what a defeated Pokémon is worth, and the stat
+## experience it leaves. Static like [Gen2Stats] and [Gen2Damage]: hardware
+## order, every division truncating. The curves are `CalcExpAtLevel`'s formula
+## pinned against `data/growth_rates.asm` and swept over all 251 species on all
+## three games; see `tools/dump_tables.gd`'s `growth` view.
 
-## `wBaseGrowthRate` order (`GROWTH_*`). Only four are used by a real species;
-## the other two are named for completeness.
+## `wBaseGrowthRate` order. Only four are used by a real species.
 const GROWTH_MEDIUM_FAST: int = 0
 const GROWTH_SLIGHTLY_FAST: int = 1
 const GROWTH_SLIGHTLY_SLOW: int = 2
@@ -32,8 +28,7 @@ const CURVES: Dictionary = {
 
 const MAX_LEVEL: int = 100
 
-## Three bytes on the cartridge. No curve reaches it before level 100; it exists
-## to have an answer ready, like [constant Gen2Stats.MAX_STAT_EXP].
+## Three bytes on the cartridge, which no curve reaches before level 100.
 const MAX_EXP: int = 0xFFFFFF
 
 ## The cartridge copies base Sp. Attack into the fifth slot and never touches
@@ -48,17 +43,14 @@ const MIN_PARTICIPANTS_TO_SPLIT: int = 2
 ## `IsAnyMonHoldingExpShare` checks it. It carries no `ITEMATTR_EFFECT` at all.
 const EXP_SHARE_ITEM: int = 39
 
-## `BoostExp`'s own shape, `value + floor(value / 2)` rather than
-## multiply-by-3-divide-by-2: the two disagree exactly where the extra truncation
-## matters. The traded and Lucky Egg boosts are not implemented, since nothing
-## here has an original trainer ID or an item engine.
+## `BoostExp` is `value + floor(value / 2)`, not multiply-then-divide, and the
+## two disagree. The traded and Lucky Egg boosts have no OT ID to read.
 const TRAINER_BONUS_NUMERATOR: int = 3
 const TRAINER_BONUS_DENOMINATOR: int = 2
 
 
-## Level 1 is hard-coded to zero rather than run through the formula, which
-## underflows there on the medium slow curve. `docs/bugs_and_glitches.md` calls
-## that a bug, not a rule.
+## Level 1 is hard-coded to zero: the medium slow curve underflows there, which
+## `docs/bugs_and_glitches.md` calls a bug rather than a rule.
 static func total_exp_at(growth_rate: int, level: int) -> int:
 	var n: int = clampi(level, 1, MAX_LEVEL)
 	if n <= 1:
@@ -88,11 +80,9 @@ static func level_for_exp(growth_rate: int, experience_points: int) -> int:
 
 
 ## `floor(base_exp * level / 7)`, then a trainer battle's 1.5x.
-##
-## [param defeated_base_exp] is the base experience *after* [method shared_block]
-## has divided it: `wEnemyMonBaseExp` sits in the same seven-byte block as the
-## base stats and `.EvenlyDivideExpAmongParticipants` divides all of it in one
-## loop. Dividing the award instead would truncate in the wrong place.
+## [param defeated_base_exp] is *already* divided by [method shared_block], since
+## `wEnemyMonBaseExp` is in the block `.EvenlyDivideExpAmongParticipants` walks;
+## dividing the award instead truncates in the wrong place.
 static func award_for(defeated_level: int, defeated_base_exp: int, is_trainer_battle: bool) -> int:
 	@warning_ignore("integer_division")
 	var award: int = (defeated_base_exp * defeated_level) / 7
@@ -114,14 +104,11 @@ static func stat_exp_gain(defeated_stats: Dictionary, participants: int) -> Dict
 	return shared_block(defeated_stats, 0, false, participants)["stats"]
 
 
-## The seven-byte block `wEnemyMonBaseStats` to `wEnemyMonEnd`, shared out.
-##
-## The five base stats and the base experience are always divided together in one
-## loop, which is why this answers for both at once. The catch rate is the
-## seventh byte and is divided with them; nothing reads it after a faint.
-##
-## [param halved] is the Exp. Share pass of `UpdateFaintedPlayerMon`: every byte
-## is halved once before any division, however many holders there are.
+## The seven-byte block `wEnemyMonBaseStats` to `wEnemyMonEnd`, shared out. The
+## five base stats and the base experience go through one loop, which is why this
+## answers for both; the seventh byte is the catch rate, which nothing reads
+## after a faint. [param halved] is `UpdateFaintedPlayerMon`'s Exp. Share pass,
+## once before any division however many holders there are.
 static func shared_block(
 	defeated_stats: Dictionary, defeated_base_exp: int, halved: bool, recipients: int
 ) -> Dictionary:

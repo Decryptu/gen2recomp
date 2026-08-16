@@ -1,26 +1,22 @@
 class_name Gen2PicImage
 extends RefCounted
 
-## Colour indices plus a palette to an [Image].
+## Colour indices plus a palette to an [Image]. The cache stores what the
+## cartridge stores, two bits per pixel and no colour, so the palette is chosen
+## here at draw time and a shiny sprite costs one [PackedColorArray] rather than
+## a second copy of the pixels.
 ##
-## The cache stores what the cartridge stores: two bits per pixel, no colour. The
-## palette is chosen here, at draw time, so a shiny sprite costs one different
-## [PackedColorArray] rather than a second copy of the pixels.
-##
-## The image is built as one buffer for [method Image.create_from_data]:
-## per-pixel [method Image.set_pixel] on a 56x56 sprite is 3136 binding calls for
-## a table lookup, and a battle can want several sprites a frame.
-##
-## Node-free: an [Image] is data, not a scene, so this can be checked headless.
+## Built as one buffer for [method Image.create_from_data]: per-pixel
+## [method Image.set_pixel] on a 56x56 sprite is 3136 binding calls for a table
+## lookup, and a battle can want several sprites a frame. Node-free, so headless.
 
 const CHANNELS: int = 4
 
 
-## An image [param width] x [param height] pixels from a row-major index buffer.
-##
-## [param transparent_background] makes index 0 transparent. The hardware has no
-## alpha and draws that index as white, which is right for a battle sprite in
-## its window; it is wrong for a sprite over anything else.
+## An image [param width] x [param height] from a row-major index buffer.
+## [param transparent_background] makes index 0 transparent: the hardware has no
+## alpha and draws it white, which is right for a battle sprite in its window and
+## wrong for one over anything else.
 static func from_indices(
 	indices: PackedByteArray,
 	width: int,
@@ -47,11 +43,9 @@ static func from_indices(
 
 
 ## One cell out of a pic atlas, cropped to the pic's real size.
-##
-## [param pic] is what [method GameData.species_pic] returns: which atlas, which
-## slot, and how much of the cell the sprite actually fills. Cropping matters
-## because a cell is the size of the largest pic of its kind, so a 5x5 sprite
-## carries two rows and columns of blank tiles it should not be positioned by.
+## [param pic] is [method GameData.species_pic]'s answer: which atlas, which slot
+## and how much of the cell is filled. A cell is the size of the largest pic of
+## its kind, so a 5x5 sprite carries blank tiles it must not be positioned by.
 static func from_atlas(
 	indices: PackedByteArray,
 	atlas: Dictionary,
@@ -68,10 +62,9 @@ static func from_atlas(
 	)
 
 
-## The same cell as indices, before a palette is chosen: { indices, width,
-## height }, or empty for a slot the atlas does not hold. Split out because a
-## screen that recolours one pic every few frames should swap the palette rather
-## than crop the atlas again, which is what a palette fade over a frontpic does.
+## The same cell before a palette is chosen: { indices, width, height }, or empty
+## for a slot the atlas does not hold. Split out so a palette fade over a
+## frontpic swaps colours rather than cropping the atlas again.
 static func atlas_cell(
 	indices: PackedByteArray, atlas: Dictionary, pic: Dictionary
 ) -> Dictionary:
@@ -102,8 +95,7 @@ static func atlas_cell(
 	return {"indices": cropped, "width": width, "height": height}
 
 
-## The palette flattened to bytes, four per index, so the inner loop is a copy
-## rather than a colour conversion.
+## Four bytes per index, so the inner loop copies rather than converting colours.
 static func _lookup(palette: PackedColorArray, transparent_background: bool) -> PackedByteArray:
 	var out: PackedByteArray = PackedByteArray()
 	out.resize(Gen2Palette.COLORS_PER_PIC * CHANNELS)
@@ -114,31 +106,26 @@ static func _lookup(palette: PackedColorArray, transparent_background: bool) -> 
 		out[at] = int(roundf(color.r * 255.0))
 		out[at + 1] = int(roundf(color.g * 255.0))
 		out[at + 2] = int(roundf(color.b * 255.0))
-		# The palette's own alpha, so a caller that wants one colour translucent
-		# says so in the colour rather than needing a second flag. Every
-		# cartridge palette is opaque, since Gen2Palette.decode_color builds an
-		# opaque Color.
+		# The palette's own alpha, so a translucent colour needs no second
+		# flag. Every cartridge palette is opaque, Gen2Palette.decode_color
+		# building an opaque Color.
 		out[at + 3] = 0 if transparent_background and i == 0 \
 			else int(roundf(clampf(color.a, 0.0, 1.0) * 255.0))
 
 	return out
 
 
-## What `wBoxAlignment` produces, which is a plain horizontal mirror.
-##
-## The flag is read twice, and only both halves together make sense of it.
-## `LoadOrientedFrontpic`'s `.x_flip` (`engine/gfx/load_pics.asm:401`) bit-
-## reverses every byte of pic data as it loads, mirroring each tile's own
-## pixels; `PlaceGraphic`'s `.right` (`engine/gfx/place_graphic.asm:30`) then
-## walks the tile columns with `dec hl` instead of `inc hl`, so the pic's first
-## tile column lands in the box's last. Reversing the columns without flipping
-## the tiles scrambles the sprite, which is what a column-strip reversal alone
-## did here.
+## What `wBoxAlignment` produces, a plain horizontal mirror. The flag is read
+## twice and only both halves make sense of it: `LoadOrientedFrontpic`'s
+## `.x_flip` bit-reverses every byte as it loads, mirroring each tile's pixels,
+## and `PlaceGraphic`'s `.right` then walks the tile columns with `dec hl`, so
+## the first column lands in the box's last. Reversing the columns alone
+## scrambles the sprite, which is what a column-strip reversal did here.
 ##
 ## The two compose exactly into [method Image.flip_x]: a pixel at
 ## `x = 8 * column + px` lands at `8 * (columns - 1 - column) + (7 - px)`, which
-## is `width - 1 - x`. `PrepMonFrontpic` (`home/pokemon.asm:61`) is the one
-## caller that sets the flag and the Oak speech the one screen that reaches it.
+## is `width - 1 - x`. `PrepMonFrontpic` is the one caller that sets the flag and
+## the Oak speech the one screen that reaches it.
 static func x_flipped(image: Image) -> Image:
 	if image == null:
 		return image
@@ -147,8 +134,7 @@ static func x_flipped(image: Image) -> Image:
 	return out
 
 
-## The same mirror on an index buffer, for a caller keeping the indices so it
-## can recolour them.
+## The same mirror on an index buffer, for a caller that will recolour it.
 static func x_flipped_indices(indices: PackedByteArray, width: int) -> PackedByteArray:
 	if width <= 0:
 		return indices

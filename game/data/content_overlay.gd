@@ -4,67 +4,51 @@ extends RefCounted
 ## Content a mod adds or changes, consulted ahead of the cartridge's own tables.
 ##
 ## [GameData] funnels every species, move, item and trainer read through one
-## place, so this is the one place that has to answer to add a Pokémon or
-## rebalance a move. Nothing downstream knows a mod exists: a defined species has
-## a learnset, evolutions and TM flags because those live on the species row, and
-## the engine reads them the way it reads Pikachu's.
+## place, so this is the one place that has to answer. Nothing downstream knows a
+## mod exists: a defined species has a learnset, evolutions and TM flags because
+## those live on the species row.
 ##
-## Two operations, deliberately distinct:
-##
-## - [method define] adds content at a number the cartridge does not use.
-## - [method patch] changes fields of a row the cartridge does use.
-##
-## Definitions are normalized on the way in, against [constant DEFAULTS], because
-## readers index these rows directly: [method GameData.palette] reads
-## [code]palette.normal[/code] and [method GameData.species_pic] reads
-## [code]front_tiles[/code], and a definition that omitted either would crash the
-## reader rather than draw wrong. A mod supplies what it cares about.
+## [method define] adds content at a number the cartridge does not use;
+## [method patch] changes fields of a row it does. Definitions are normalized
+## against [constant DEFAULTS] on the way in, because readers index these rows
+## directly ([method GameData.palette] reads [code]palette.normal[/code],
+## [method GameData.species_pic] reads [code]front_tiles[/code]) and an omitted
+## field would crash the reader rather than draw wrong.
 
-## The content kinds a mod may reach. Types are not one of them: the matchup
-## lookup keys on [constant RomLayout.TYPE_COUNT], so a twenty-ninth type would
-## renumber every pair already in the chart.
+## The kinds a mod may reach. Types are not one: the matchup lookup keys on
+## [constant RomLayout.TYPE_COUNT], so a new type renumbers the whole chart.
 const KIND_SPECIES: StringName = &"species"
 const KIND_MOVE: StringName = &"move"
 const KIND_ITEM: StringName = &"item"
 const KIND_TRAINER: StringName = &"trainer"
-## One map's wild encounter record, the row [method GameData.world_encounter]
-## answers, numbered with [method encounter_number].
+## [method GameData.world_encounter]'s row, numbered by [method encounter_number].
 const KIND_ENCOUNTER: StringName = &"encounter"
-## One fishing group, the row [method GameData.world_fishing_group] answers,
-## numbered with the group number a map header carries.
+## [method GameData.world_fishing_group]'s row, numbered as a map header does.
 const KIND_FISHING: StringName = &"fishing"
 const KINDS: Array[StringName] = [
 	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_ENCOUNTER, KIND_FISHING,
 ]
 
-## The kinds that are a cartridge table rather than numbered content, and are
-## therefore [method patch]-only: a mod cannot add a map or a map header, so
-## there is no row for a [method define] to sit at. Their numbers are table
+## A cartridge table rather than numbered content, so [method patch]-only: a mod
+## cannot add a map for a definition to sit at. Their numbers are table
 ## coordinates and do not obey [constant FIRST_MOD_NUMBER].
 const TABLE_KINDS: Array[StringName] = [KIND_ENCOUNTER, KIND_FISHING]
 
-## The methods [method encounter_number] can name, in the order it encodes them.
-## `surf` is the runtime's name for the cartridge's water table, which is what
-## [method GameData.world_encounter] takes.
+## [method encounter_number]'s methods in the order it encodes them. `surf` is
+## the runtime's name for the water table, which is what the reader takes.
 const ENCOUNTER_METHODS: Array[StringName] = [
 	&"grass", &"surf", &"swarm_grass", &"swarm_water",
 ]
 
-## The first number a mod may define. Every cartridge content number is one byte,
-## in all three games, so a number that does not fit in one is unambiguously not
-## the cartridge's. That is what makes a mod's own numbers mean the same thing on
-## Gold, Silver and Crystal, which a boundary derived from a per-game count
-## (251 species, 66 or 67 trainer classes) would not.
-##
-## The cost is that a mod number does not fit the cartridge's byte-wide storage:
-## [Gen2SramAdapter] exports party species to a real `.sav` and cannot carry one.
-## The project save is JSON and carries them fine.
+## Every cartridge content number is one byte in all three games, so anything
+## past a byte is unambiguously not the cartridge's, and a mod's numbers mean the
+## same thing on each. A boundary taken from a per-game count (251 species, 66 or
+## 67 trainer classes) would not. The cost: [Gen2SramAdapter] exports party
+## species to a real `.sav` and cannot carry one. The project save is JSON.
 const FIRST_MOD_NUMBER: int = 256
 
-## What a definition that omits a field gets instead, per kind. The field lists
-## are the importer's own rows (`_import_species`, `_import_moves`,
-## `_import_items`, `_import_trainers`), so a definition is a cartridge row with
-## the parts a mod did not care about filled in.
+## What an omitted field gets, per kind. The field lists are the importer's own
+## rows (`_import_species`, `_import_moves`, `_import_items`, `_import_trainers`).
 const DEFAULTS: Dictionary = {
 	KIND_SPECIES: {
 		"name": "?",
@@ -133,33 +117,27 @@ var _patched: Dictionary = {}
 var _owners: Dictionary = {}
 
 
-## The overlay [GameData] consults. Shared rather than per-cache because mods
-## load before any cache is opened and their content applies to whichever game
-## the player then picks.
+## Shared rather than per-cache: mods load before any cache is opened and apply
+## to whichever game the player then picks.
 static func shared() -> Gen2ContentOverlay:
 	if _shared == null:
 		_shared = Gen2ContentOverlay.new()
 	return _shared
 
 
-## Discards every registration. [method Gen2ModHost.reset] calls this, so
-## reloading the mod list does not leave the last load's content behind.
+## [method Gen2ModHost.reset]'s, so a reload leaves no earlier content behind.
 static func reset() -> void:
 	_shared = null
 
 
-## Whether anything is registered at all. Every content read asks this first, so
-## a game with no mods pays one dictionary check per species lookup.
+## Asked first by every content read, so an unmodded game pays one check.
 func is_empty() -> bool:
 	return _defined.is_empty() and _patched.is_empty()
 
 
-## Adds content at a number the cartridge does not use.
-##
-## [param row] is a partial row: whatever it does not carry comes from
-## [constant DEFAULTS], so a species defined with a name, stats and a learnset is
-## a complete species. Refused if the number is a cartridge number, if the kind
-## is not one of [constant KINDS], or if another mod already claimed it.
+## Adds content at a number the cartridge does not use. [param row] is partial
+## and the rest comes from [constant DEFAULTS]. Refused for a cartridge number,
+## a kind outside [constant KINDS], or a number another mod claimed.
 func define(kind: StringName, id: StringName, number: int, row: Dictionary) -> Dictionary:
 	if not KINDS.has(kind):
 		return {"ok": false, "reason": &"unknown_content_kind", "detail": String(kind)}
@@ -179,14 +157,10 @@ func define(kind: StringName, id: StringName, number: int, row: Dictionary) -> D
 	return {"ok": true, "kind": kind, "number": number}
 
 
-## Replaces named fields of a cartridge row: a move's power, a species' types, an
-## item's price.
-##
-## Only the fields given change, and a Dictionary field merges rather than
-## replacing, so patching [code]{"stats": {"speed": 120}}[/code] leaves the other
-## five stats alone. An Array field replaces whole, which is what a randomizer
-## rewriting an encounter row's [code]slots[/code] wants. Refused for a number a
-## mod would have to [method define].
+## Replaces named fields of a cartridge row. A Dictionary field merges, so
+## [code]{"stats": {"speed": 120}}[/code] leaves the other five alone; an Array
+## replaces whole, which is what a randomizer rewriting an encounter row's
+## [code]slots[/code] wants. Refused for a number [method define] would take.
 func patch(kind: StringName, id: StringName, number: int, fields: Dictionary) -> Dictionary:
 	if not KINDS.has(kind):
 		return {"ok": false, "reason": &"unknown_content_kind", "detail": String(kind)}
@@ -212,13 +186,10 @@ func patch(kind: StringName, id: StringName, number: int, fields: Dictionary) ->
 	return {"ok": true, "kind": kind, "number": number}
 
 
-## The row a reader gets for [param number], given the cartridge's own
-## [param base]. A definition answers on its own; a patch is folded onto the
-## base; anything else is the base untouched.
-##
-## A patch of a number this cartridge does not carry answers empty rather than
-## conjuring a row out of the patch alone: Crystal's MYSTICALMAN is not a trainer
-## class Gold has, and a mod patching it must not invent one there.
+## The row a reader gets: a definition answers alone, a patch is folded onto
+## [param base], anything else is the base untouched. A patch of a number this
+## cartridge does not carry answers empty rather than conjuring a row, since
+## Crystal's MYSTICALMAN is not a trainer class Gold has.
 func resolve(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 	var defined: Dictionary = _defined.get(kind, {})
 	if defined.has(number):
@@ -231,9 +202,8 @@ func resolve(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 	return _merged(base, patched[number])
 
 
-## Every number defined for [param kind], in ascending order. What a menu or a
-## dex listing walks to show mod content beside the cartridge's, since
-## [method GameData.species_count] stays the cartridge's own count.
+## Ascending, for a menu or dex listing showing mod content beside the
+## cartridge's, since [method GameData.species_count] stays the cartridge's.
 func defined_numbers(kind: StringName) -> Array[int]:
 	var out: Array[int] = []
 	for number: int in (_defined.get(kind, {}) as Dictionary).keys():
@@ -242,10 +212,8 @@ func defined_numbers(kind: StringName) -> Array[int]:
 	return out
 
 
-## The [constant KIND_ENCOUNTER] number for one map's table under one method, or
-## -1 for a method or a map coordinate that cannot exist. A map group and number
-## are each one byte, so the three parts pack without colliding and a mod's
-## patch means the same thing on all three cartridges.
+## One map's table under one method, or -1 for a coordinate that cannot exist.
+## Group and number are a byte each, so the three parts pack without colliding.
 static func encounter_number(method: StringName, group: int, number: int) -> int:
 	var at: int = ENCOUNTER_METHODS.find(method)
 	if at < 0 or group < 0 or group > 0xFF or number < 0 or number > 0xFF:
@@ -253,14 +221,12 @@ static func encounter_number(method: StringName, group: int, number: int) -> int
 	return at * 0x10000 + group * 0x100 + number
 
 
-## Which mod claimed [param number], or an empty name. For a launcher listing
-## what changed the game it is about to start.
+## Which mod claimed [param number], for a launcher listing what it will change.
 func owner_of(kind: StringName, number: int) -> StringName:
 	return StringName((_owners.get(kind, {}) as Dictionary).get(number, &""))
 
 
-## One number, one mod. Two mods reaching for the same species is exactly the
-## conflict a player wants named rather than resolved by load order.
+## One number, one mod: a collision is named rather than settled by load order.
 func _claim(kind: StringName, id: StringName, number: int) -> Dictionary:
 	var owners: Dictionary = _owners.get(kind, {})
 	var owner: StringName = StringName(owners.get(number, &""))
@@ -283,10 +249,9 @@ func _normalized(kind: StringName, number: int, row: Dictionary) -> Dictionary:
 
 
 ## [param over] laid on [param base], recursing into Dictionary values so a
-## partial [code]stats[/code] keeps the stats it did not name. Arrays replace
-## whole: a two-element [code]types[/code] merged element-wise would make
-## [code][15][/code] mean "Ice and whatever was there", which is not what writing
-## it says.
+## partial [code]stats[/code] keeps what it did not name. Arrays replace whole: a
+## merged [code]types[/code] would read [code][15][/code] as "Ice and whatever
+## was there".
 func _merged(base: Dictionary, over: Dictionary) -> Dictionary:
 	var out: Dictionary = base.duplicate(true)
 	for key: Variant in over:
