@@ -102,6 +102,26 @@ func test_up_from_the_dock_returns_to_the_current_page() -> void:
 	assert_true(_focus_owner() is Gen2CartridgeStage)
 
 
+func test_mod_page_builds_a_visible_logical_focus_route() -> void:
+	_use(InputEventJoypadButton.new())
+	_launcher.select_page(&"mods")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var check: Control = _focus_owner()
+	assert_not_null(check)
+	assert_string_contains(check.tooltip_text, "Check all followed sources")
+	var right: NodePath = check.focus_neighbor_right
+	assert_false(right.is_empty(), "the page explicitly names the next control")
+	var next: Control = check.get_node(right) as Control
+	assert_eq(next.tooltip_text, "Install a mod .zip", "right follows the visible action row")
+	next.grab_focus()
+	var down: NodePath = next.focus_neighbor_bottom
+	assert_false(down.is_empty(), "down enters the page rather than losing focus")
+	var below: Control = next.get_node(down) as Control
+	assert_true(below.is_visible_in_tree())
+	assert_ne(below, check)
+
+
 ## A mouse needs no ring, and putting one up would move it away from whatever
 ## the player is pointing at.
 func test_a_mouse_is_left_alone() -> void:

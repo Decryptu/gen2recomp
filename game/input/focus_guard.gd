@@ -27,6 +27,7 @@ func _process(_delta: float) -> void:
 	# Lists and detail panes are rebuilt after button presses. If the focused
 	# button was part of that rebuild, restore a visible target on the next frame.
 	refresh()
+	_refresh_focus_neighbors()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -105,10 +106,34 @@ func move_focus(direction: Vector2) -> bool:
 	if current == null or not _root.is_ancestor_of(current):
 		refresh()
 		return viewport.gui_get_focus_owner() != null
+	var best: Control = _neighbor(current, direction, focusable_controls(_root))
+	if best == null:
+		return false
+	best.grab_focus()
+	return true
+
+
+## Godot's automatic search is unreliable across nested cards, scroll panes and
+## the floating dock. Explicit neighbours make the same visual layout produce
+## the same route for arrows, WASD mappings and controller d-pads.
+func _refresh_focus_neighbors() -> void:
+	if _root == null or not _root.is_inside_tree():
+		return
+	var controls: Array[Control] = focusable_controls(_root)
+	for control: Control in controls:
+		_set_neighbor(control, &"left", _neighbor(control, Vector2.LEFT, controls))
+		_set_neighbor(control, &"right", _neighbor(control, Vector2.RIGHT, controls))
+		_set_neighbor(control, &"up", _neighbor(control, Vector2.UP, controls))
+		_set_neighbor(control, &"down", _neighbor(control, Vector2.DOWN, controls))
+
+
+static func _neighbor(
+	current: Control, direction: Vector2, controls: Array[Control]
+) -> Control:
 	var origin: Vector2 = current.get_global_rect().get_center()
 	var best: Control = null
 	var best_score: float = INF
-	for candidate: Control in focusable_controls(_root):
+	for candidate: Control in controls:
 		if candidate == current:
 			continue
 		var delta: Vector2 = candidate.get_global_rect().get_center() - origin
@@ -116,16 +141,22 @@ func move_focus(direction: Vector2) -> bool:
 		if forward <= 1.0:
 			continue
 		var sideways: float = absf(delta.cross(direction))
-		# Prefer the intended axis strongly, while still allowing the dock's
-		# offset buttons to be reached from controls near either page edge.
 		var score: float = forward + sideways * 2.5
 		if score < best_score:
 			best_score = score
 			best = candidate
-	if best == null:
-		return false
-	best.grab_focus()
-	return true
+	return best
+
+
+static func _set_neighbor(control: Control, side: StringName, target: Control) -> void:
+	var path := NodePath()
+	if target != null:
+		path = control.get_path_to(target)
+	match side:
+		&"left": control.focus_neighbor_left = path
+		&"right": control.focus_neighbor_right = path
+		&"up": control.focus_neighbor_top = path
+		&"down": control.focus_neighbor_bottom = path
 
 
 ## The first control under [param root] that would accept focus, depth first in
@@ -157,9 +188,16 @@ static func _collect_focusable(root: Node, out: Array[Control]) -> void:
 		if control != null:
 			if not control.is_visible_in_tree():
 				continue
-			if control.focus_mode == Control.FOCUS_ALL and not _is_disabled(control):
+			if control.focus_mode == Control.FOCUS_ALL and not _is_disabled(control) \
+				and not _scroll_with_controls(control):
 				out.append(control)
 		_collect_focusable(child, out)
+
+
+static func _scroll_with_controls(control: Control) -> bool:
+	if not control is ScrollContainer:
+		return false
+	return first_focusable(control) != null
 
 
 static func _is_disabled(control: Control) -> bool:

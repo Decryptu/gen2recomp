@@ -119,6 +119,16 @@ func test_mod_update_controls_stay_icon_sized_for_mobile() -> void:
 		action.free()
 
 
+func test_launcher_buttons_always_draw_a_coloured_focus_ring() -> void:
+	for variant: Gen2LauncherButton.Variant in Gen2LauncherButton.Variant.values():
+		var button: Gen2LauncherButton = Gen2LauncherButton.create(_light, "Focus", variant)
+		var ring: StyleBoxFlat = button.get_theme_stylebox("focus") as StyleBoxFlat
+		assert_not_null(ring)
+		assert_eq(ring.border_color, _light.accent)
+		assert_gte(ring.border_width_left, 3)
+		button.free()
+
+
 func test_a_card_pads_its_child_and_carries_no_shadow_unless_it_floats() -> void:
 	var card: Gen2LauncherCard = Gen2LauncherCard.create(_light, Gen2LauncherTheme.RADIUS_MD, 20)
 	var label: Label = Gen2LauncherUI.body(_light, "x")

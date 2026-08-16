@@ -165,12 +165,10 @@ func repaint() -> void:
 	_style("pressed", _pressed_fill(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("disabled", _theme.with_alpha(fill, 0.4), _theme.with_alpha(border, 0.4),
 		radius, pad_x, pad_y)
-	# A chip says where focus is by filling, so a ring over the fill would only be
-	# a second answer to the same question.
-	if _fills_on_focus():
-		_style("focus", fill, border, radius, pad_x, pad_y)
-	else:
-		_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 2)
+	# Focus is not hover or the active value. A distinct, heavy accent ring is
+	# always present so keyboard and controller users can locate the cursor even
+	# on a filled primary button or the already-selected dock page.
+	_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 3)
 
 	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
 			"font_focus_color"]:
