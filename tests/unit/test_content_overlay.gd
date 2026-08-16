@@ -52,7 +52,32 @@ func _write_cache() -> void:
 			"slots": [[{"level": 2, "species": 16}], [], []],
 		}},
 		"water": {},
-		"fishing": {"groups": [{"rods": []}], "time_groups": []},
+		"fishing": {
+			"groups": [{"rods": []}],
+			"time_groups": [{
+				"day": {"species": 0xDE, "level": 20},
+				"night": {"species": 0x78, "level": 20},
+			}],
+		},
+		"treemons": {
+			"tree_maps": [{"map_group": 3, "map_number": 2, "set": 1}],
+			"rock_maps": [],
+			"sets": [
+				{"common": [], "rare": []},
+				{
+					"common": [{"percent": 50, "species": 10, "level": 10}],
+					"rare": [{"percent": 50, "species": 11, "level": 12}],
+				},
+			],
+		},
+		"bug_contest": {
+			"mons": [{"percent": 20, "species": 10, "min_level": 7, "max_level": 18}],
+			"contestants": [],
+		},
+		"roaming": {
+			"maps": [],
+			"mons": [{"species": 243, "level": 40, "map_group": 3, "map_number": 2}],
+		},
 	})
 	RomCache.write_json(RomCache.tmhm_moves_path(_directory), [1])
 	RomCache.write_json(RomCache.manifest_path(_directory), {
@@ -232,3 +257,60 @@ func test_a_table_kind_is_patched_and_never_defined() -> void:
 		)["reason"]),
 		&"content_kind_is_patch_only"
 	)
+
+
+## The four wild sources beside the map tables. Each is patched by its own index
+## and each keeps the field a patch did not name, which is the whole point: a
+## contest row's percent is its scoring weight and a roamer's map is live state.
+func test_the_four_other_wild_sources_are_patched_by_index() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_treemon_set(MOD, 1, {
+		"common": [{"percent": 50, "species": 1, "level": 3}],
+	}).get("ok", false)))
+	assert_true(bool(host.patch_bug_contest_mon(MOD, 0, {"species": 2}).get("ok", false)))
+	assert_true(bool(host.patch_roaming_mon(MOD, 0, {"species": 3}).get("ok", false)))
+	assert_true(bool(host.patch_fishing_time_group(MOD, 0, {
+		"night": {"species": 4, "level": 20},
+	}).get("ok", false)))
+
+	var data: GameData = _data()
+	var set_one: Dictionary = data.treemon_set(1)
+	assert_eq(int(set_one["common"][0]["species"]), 1)
+	assert_eq(int(set_one["rare"][0]["species"]), 11, "the rare table is untouched")
+
+	var contest: Array = data.bug_contest_mons()
+	assert_eq(int(contest[0]["species"]), 2)
+	assert_eq(int(contest[0]["percent"]), 20, "the contest's own weight survives")
+	assert_eq(int(contest[0]["max_level"]), 18)
+
+	var roaming: Array = data.world_roaming_mons()
+	assert_eq(int(roaming[0]["species"]), 3)
+	assert_eq(int(roaming[0]["map_group"]), 3, "where it is now is not a patch")
+	assert_eq(int(roaming[0]["level"]), 40)
+
+	var times: Array = data.world_fishing_time_groups()
+	assert_eq(int(times[0]["night"]["species"]), 4)
+	assert_eq(int(times[0]["day"]["species"]), 0xDE, "the day half is untouched")
+
+	## Every one is a table row, so none of them can be DEFINED.
+	for kind: StringName in [
+		Gen2ContentOverlay.KIND_TREEMON, Gen2ContentOverlay.KIND_BUG_CONTEST,
+		Gen2ContentOverlay.KIND_ROAMING, Gen2ContentOverlay.KIND_FISHING_TIME,
+	]:
+		assert_eq(
+			StringName(host.register_content(kind, MOD, NEW_SPECIES, {})["reason"]),
+			&"content_kind_is_patch_only", String(kind)
+		)
+
+
+## `clear_owner` is what a save switch spends: everything one mod claimed goes,
+## and the numbers are free for the next run to claim again.
+func test_clearing_one_owner_leaves_the_cartridge_row_and_frees_the_number() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_bug_contest_mon(MOD, 0, {"species": 2}).get("ok", false)))
+	assert_eq(int(_data().bug_contest_mons()[0]["species"]), 2)
+	Gen2ContentOverlay.shared().clear_owner(MOD)
+	assert_eq(int(_data().bug_contest_mons()[0]["species"]), 10)
+	assert_eq(Gen2ContentOverlay.shared().owner_of(Gen2ContentOverlay.KIND_BUG_CONTEST, 0), &"")
+	assert_true(bool(host.patch_bug_contest_mon(&"other", 0, {"species": 5}).get("ok", false)))
+	assert_eq(int(_data().bug_contest_mons()[0]["species"]), 5)

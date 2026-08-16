@@ -175,12 +175,19 @@ func party_snapshot() -> Dictionary:
 ## The MAIL branch is not reproduced: ItemIsMail tests the held item against
 ## data/items/mail_items.asm, and this project has no mail, so ITEM is always
 ## the entry in that position.
-static func submenu_items_for(data: GameData, mon: Gen2SaveMon) -> Array:
+## [param slot] is one-based and [param in_battle] is whether the list belongs to
+## a turn: both only decide which mod rows are offered, and neither changes a
+## cartridge row.
+static func submenu_items_for(
+	data: GameData, mon: Gen2SaveMon, slot: int = 0, in_battle: bool = false
+) -> Array:
 	var items: Array = []
 	if mon == null:
 		return items
 	# The source compares wCurPartySpecies against EGG ($fd); this save model
 	# carries the same fact as Gen2SaveMon.is_egg beside a real species.
+	## An egg is three rows and no moves, and a mod gets none of them: there is
+	## nothing to follow, teach or send out, and the source itself offers less.
 	if mon.is_egg:
 		items.append(_option_entry(OPTION_STATS, "STATS"))
 		items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
@@ -199,6 +206,16 @@ static func submenu_items_for(data: GameData, mon: Gen2SaveMon) -> Array:
 	items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
 	items.append(_option_entry(OPTION_MOVE, "MOVE"))
 	items.append(_option_entry(OPTION_ITEM, "ITEM", true))
+	## After every cartridge action and before CANCEL, which is the source's own
+	## last row and the way out of the box. A mod cannot displace one: the list
+	## still stops at `NUM_MONMENU_ITEMS`, so rows past it are simply not offered.
+	for entry: Dictionary in Gen2ModHost.instance().party_member_entries(slot, in_battle):
+		if items.size() >= MAX_SUBMENU_ITEMS:
+			break
+		items.append({
+			"kind": &"mod_party_action", "mod": entry["kind"],
+			"label": entry["label"], "handler": entry["handler"], "available": true,
+		})
 	if items.size() < MAX_SUBMENU_ITEMS:
 		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
 	return items
@@ -321,6 +338,17 @@ func _confirm() -> void:
 				"slot": _member_cursor,
 				"name": _display_name(_save.party[_member_cursor]),
 			})
+		&"mod_party_action":
+			## The handler is the mod's, and the slot is the only thing it is
+			## told: the menu closes behind it the way a field move's does.
+			(entry["handler"] as Callable).call(_member_cursor + 1)
+			_close_submenu()
+			action_chosen.emit({
+				"kind": &"mod_party_action",
+				"mod": StringName(entry.get("mod", &"")),
+				"slot": _member_cursor,
+				"name": _display_name(_save.party[_member_cursor]),
+			})
 		&"option":
 			if StringName(entry.get("option", &"")) == OPTION_ITEM:
 				_open_item_menu()
@@ -402,7 +430,7 @@ func _open_item_menu() -> void:
 func _open_submenu() -> void:
 	if _member_cursor < 0 or _member_cursor >= _party_size():
 		return
-	_submenu_items = submenu_items_for(_data, _save.party[_member_cursor])
+	_submenu_items = submenu_items_for(_data, _save.party[_member_cursor], _member_cursor + 1)
 	_submenu_cursor = 0
 	_submenu_open = not _submenu_items.is_empty()
 	_item_menu_open = false

@@ -174,7 +174,12 @@ func _retarget_mods(game_id: StringName) -> void:
 ## applies where it was thrown instead of at the next launch.
 func reload_mods(game_id: StringName = selected_game_id) -> Array:
 	Gen2ModHost.reset()
-	return load_mods(game_id)
+	var loaded: Array = load_mods(game_id)
+	## The reset dropped the old host's providers and its overlay with them, so
+	## the freshly loaded ones are told which save is open rather than finding
+	## out at the next slot change.
+	_activate_mod_save()
+	return loaded
 
 
 func has_selected_game() -> bool:
@@ -195,6 +200,7 @@ func select_save_slot(game_id: StringName, slot: int) -> bool:
 	if selected_save_slot != slot:
 		reload_selected_save()
 	selected_save_slot = slot
+	_activate_mod_save()
 	return true
 
 
@@ -229,3 +235,18 @@ func selected_save() -> Gen2SaveData:
 func reload_selected_save() -> void:
 	_save = null
 	_save_key = ""
+
+
+## Tells the mods that hold a run which save it is, before any screen reads
+## `GameData`. Every slot change goes through here, including the one to no slot
+## at all: a development run is null rather than an invented save, and a mod that
+## patched for the last run has its contributions dropped either way.
+func _activate_mod_save() -> void:
+	Gen2ModHost.instance().activate_save(selected_save_or_null())
+
+
+## A save that has just been made. The mods are told before it is written, so
+## whatever a run is built from is in the file the player will load next time.
+func announce_new_save(save: Gen2SaveData) -> void:
+	Gen2ModHost.instance().created_save(save)
+	Gen2ModHost.instance().activate_save(save)

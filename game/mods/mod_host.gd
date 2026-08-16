@@ -170,6 +170,12 @@ var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
 var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
 var _menu_entries: Dictionary = {}
+## The rows mods add to a party member's own submenu, in registration order. See
+## [method register_party_member_menu].
+var _party_member_entries: Array = []
+## `{manifest, provider}` per mod told which save is being played, in
+## registration order. See [method register_save_lifecycle].
+var _save_providers: Array = []
 var _subscribers: Dictionary = {}
 var _failures: Array = []
 
@@ -386,6 +392,50 @@ func register_menu_entry(menu: StringName, id: StringName, entry: Dictionary) ->
 	entries.append(registered)
 	_menu_entries[menu] = entries
 	return {"ok": true, "id": id}
+
+
+## Adds one row to the PARTY MEMBER submenu, the box a party slot opens.
+##
+## Unlike [method register_menu_entry] a row here is about a SLOT rather than
+## about the menu, so both halves are Callables taking the one-based slot: the
+## label so a mod can say something different on the slot it already owns, and
+## the handler so it knows which one was chosen. Both are validated here, where
+## the mod's name is still in hand.
+##
+## Outside battle only. A battle's party list is a switch, and a row that ran a
+## mod's field action in the middle of a turn would be world state changing while
+## the turn owns it.
+func register_party_member_menu(id: StringName, entry: Dictionary) -> Dictionary:
+	if String(id).is_empty():
+		return {"ok": false, "reason": &"invalid_party_menu_entry"}
+	var label: Variant = entry.get("label", null)
+	var handler: Variant = entry.get("handler", null)
+	for pair: Array in [["label", label], ["handler", handler]]:
+		if not pair[1] is Callable or not (pair[1] as Callable).is_valid():
+			return {
+				"ok": false, "reason": &"party_menu_entry_missing_callable",
+				"detail": "%s: %s" % [id, pair[0]],
+			}
+	for existing: Dictionary in _party_member_entries:
+		if StringName(existing["kind"]) == id:
+			return {"ok": false, "reason": &"duplicate_party_menu_entry", "detail": String(id)}
+	_party_member_entries.append({"kind": id, "label": label, "handler": handler})
+	return {"ok": true, "id": id}
+
+
+## The mod rows for [param slot], one-based, each `{kind, label, handler}` with
+## the label already resolved. Empty inside a battle. A label callable answering
+## an empty string drops its own row, which is how a mod shows one conditionally.
+func party_member_entries(slot: int, in_battle: bool = false) -> Array:
+	var out: Array = []
+	if in_battle or slot < 1:
+		return out
+	for entry: Dictionary in _party_member_entries:
+		var label: String = String((entry["label"] as Callable).call(slot))
+		if label.is_empty():
+			continue
+		out.append({"kind": entry["kind"], "label": label, "handler": entry["handler"]})
+	return out
 
 
 ## Every entry registered for [param menu], in registration order. The callers
@@ -843,11 +893,46 @@ func patch_encounter(
 	return Gen2ContentOverlay.shared().patch(Gen2ContentOverlay.KIND_ENCOUNTER, id, at, fields)
 
 
-## The same for one fishing group, numbered as the map headers number them. The
-## treemon sets, the Bug Contest list and the roaming mons are not patchable
-## yet; they are read straight off the cache.
+## The same for one fishing group, numbered as the map headers number them.
 func patch_fishing_group(id: StringName, group: int, fields: Dictionary) -> Dictionary:
 	return Gen2ContentOverlay.shared().patch(Gen2ContentOverlay.KIND_FISHING, id, group, fields)
+
+
+## One treemon SET, by the set number [method GameData.treemon_set_for_map]
+## answers: Headbutt and Rock Smash draw from the same table and differ only in
+## which map list names the set. `common` and `rare` are arrays and replace
+## whole; each row is `{species, level, percent}` and the percent is the roll.
+func patch_treemon_set(id: StringName, set_index: int, fields: Dictionary) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_TREEMON, id, set_index, fields
+	)
+
+
+## One `ContestMons` row by index. Name `species`, `min_level` or `max_level`;
+## `percent` is both the choice roll's weight and part of what the judging reads,
+## so leaving it out leaves the contest scoring exactly as the cartridge has it.
+func patch_bug_contest_mon(id: StringName, index: int, fields: Dictionary) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_BUG_CONTEST, id, index, fields
+	)
+
+
+## One roaming mon by index. Name `species` or `level`; `map_group` and
+## `map_number` are where it currently is, which is live state the roamer's own
+## movement writes and a patch must not pin.
+func patch_roaming_mon(id: StringName, index: int, fields: Dictionary) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_ROAMING, id, index, fields
+	)
+
+
+## One of the day/night fishing substitutions, by index. A rod entry whose
+## species byte is zero defers to these, and its own `threshold` is the bite and
+## stays with the entry rather than moving here.
+func patch_fishing_time_group(id: StringName, index: int, fields: Dictionary) -> Dictionary:
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_FISHING_TIME, id, index, fields
+	)
 
 
 ## The overlay every opened [GameData] reads through, for a launcher listing what
@@ -1085,6 +1170,88 @@ func write_save_data(
 	if save == null:
 		return {"ok": false, "reason": &"missing_mod_save"}
 	return save.set_mod_data(manifest.id, value)
+
+
+## Checked at registration. See [method register_save_lifecycle].
+const SAVE_LIFECYCLE_METHODS: Array[String] = [
+	"save_created", "save_activated", "save_deactivated",
+]
+
+
+## Registers a provider told which save is being played, so a mod can hold a run
+## rather than an installation.
+##
+## [param manifest] is the object `register()` was handed, and it is the
+## capability: the host keeps it beside the provider, so a callback can reach
+## [method read_save_data] and [method write_save_data] for its OWN namespace and
+## no other mod's. A manifest this host did not discover registers nothing.
+##
+## [param provider] is a [RefCounted] answering
+## [constant SAVE_LIFECYCLE_METHODS]. Ordering is in `docs/MODS.md`; the part
+## that matters here is that the host drops every lifecycle mod's overlay
+## contributions before a `save_activated` runs, so two slots cannot leak
+## patches into one another and a provider that fails leaves nothing installed.
+func register_save_lifecycle(manifest: Gen2ModManifest, provider: Object) -> Dictionary:
+	if not _owns_manifest(manifest):
+		return {"ok": false, "reason": &"unknown_mod_save_owner"}
+	if provider == null or provider is Node:
+		return {"ok": false, "reason": &"invalid_save_provider", "detail": String(manifest.id)}
+	var missing: Array[String] = []
+	for method: String in SAVE_LIFECYCLE_METHODS:
+		if not provider.has_method(method):
+			missing.append(method)
+	if not missing.is_empty():
+		return {
+			"ok": false, "reason": &"save_provider_missing_methods",
+			"detail": "%s: %s" % [manifest.id, ", ".join(missing)],
+		}
+	for entry: Dictionary in _save_providers:
+		if (entry["manifest"] as Gen2ModManifest).id == manifest.id:
+			return {"ok": false, "reason": &"duplicate_save_provider", "detail": String(manifest.id)}
+	_save_providers.append({"manifest": manifest, "provider": provider})
+	return {"ok": true, "id": manifest.id}
+
+
+func save_lifecycle_ids() -> Array:
+	var out: Array = []
+	for entry: Dictionary in _save_providers:
+		out.append((entry["manifest"] as Gen2ModManifest).id)
+	return out
+
+
+## A save that has just been made, before it is written or played. A provider
+## snapshots whatever its run is built from into its own namespace here; there is
+## nothing to clear, since the save carries no run yet.
+func created_save(save: Gen2SaveData) -> void:
+	for entry: Dictionary in _save_providers:
+		entry["provider"].call("save_created", save)
+
+
+## The save about to be played, or null for a DEVELOPMENT run: one started
+## without a selected slot, which has no namespace to read and must not be handed
+## an invented save to write into.
+##
+## Every lifecycle mod's overlay contributions are dropped first, in one pass, so
+## the callbacks that follow all start from the cartridge whatever order they run
+## in. A mod that patches at load time and registers no provider is untouched.
+func activate_save(save: Gen2SaveData) -> void:
+	_clear_save_overlays()
+	for entry: Dictionary in _save_providers:
+		entry["provider"].call("save_activated", save)
+
+
+## The save was closed. The overlay is cleared after, not before, so nothing is
+## left patched by a run nobody is playing.
+func deactivate_save() -> void:
+	for entry: Dictionary in _save_providers:
+		entry["provider"].call("save_deactivated")
+	_clear_save_overlays()
+
+
+func _clear_save_overlays() -> void:
+	var overlay: Gen2ContentOverlay = Gen2ContentOverlay.shared()
+	for entry: Dictionary in _save_providers:
+		overlay.clear_owner((entry["manifest"] as Gen2ModManifest).id)
 
 
 func _owns_manifest(manifest: Gen2ModManifest) -> bool:

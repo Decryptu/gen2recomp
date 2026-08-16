@@ -50,6 +50,7 @@ func run(r: RefCounted) -> void:
 		_verify_bug_contest()
 		_verify_gate_errand()
 		_census()
+		_verify_wild_patch_indices()
 	)
 
 
@@ -360,6 +361,66 @@ func _verify_union_cave() -> void:
 
 
 ## Every map in the cache, so a rule change is one number rather than one map.
+## Every index of the four wild sources beside the map tables is patchable and
+## reads back through `GameData`, on a real cache. An off-by-one in either
+## direction, or a source a reader takes from somewhere else, shows here and
+## nowhere in a hand-built fixture.
+func _verify_wild_patch_indices() -> void:
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open(_r.game_id)
+	if data == null:
+		return
+	data.set_content_overlay(overlay)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var sets: int = 0
+	for index: int in data.treemon_set_count():
+		if data.treemon_set(index).is_empty():
+			continue
+		sets += 1
+		overlay.patch(Gen2ContentOverlay.KIND_TREEMON, &"check", index, {
+			"common": [{"percent": 100, "species": index + 1, "level": 5}],
+		})
+		var patched: Dictionary = data.treemon_set(index)
+		_r.check(
+			int((patched["common"] as Array)[0]["species"]) == index + 1
+				and (patched["rare"] as Array).size() == (data.treemon_set(index)["rare"] as Array).size(),
+			"treemon set %d did not read its patch back." % index
+		)
+	var rows: int = 0
+	for pair: Array in [
+		[Gen2ContentOverlay.KIND_BUG_CONTEST, data.bug_contest_mons()],
+		[Gen2ContentOverlay.KIND_ROAMING, data.world_roaming_mons()],
+	]:
+		for index: int in (pair[1] as Array).size():
+			rows += 1
+			overlay.patch(pair[0], &"check", index, {"species": index + 1})
+	for index: int in data.world_fishing_time_groups().size():
+		rows += 1
+		overlay.patch(Gen2ContentOverlay.KIND_FISHING_TIME, &"check", index, {
+			"night": {"species": index + 1, "level": 5},
+		})
+	for index: int in data.bug_contest_mons().size():
+		_r.check(
+			int(data.bug_contest_mons()[index]["species"]) == index + 1,
+			"contest row %d did not read its patch back." % index
+		)
+	for index: int in data.world_roaming_mons().size():
+		_r.check(
+			int(data.world_roaming_mons()[index]["species"]) == index + 1,
+			"roaming mon %d did not read its patch back." % index
+		)
+	for index: int in data.world_fishing_time_groups().size():
+		_r.check(
+			int(data.world_fishing_time_groups()[index]["night"]["species"]) == index + 1,
+			"fishing time group %d did not read its patch back." % index
+		)
+	_r.note("wild patch indices: %d treemon sets and %d list rows read back." % [
+		sets, rows,
+	])
+	## The shared overlay is untouched, since a check is not a mod.
+	_r.check(host.content_overlay().is_empty(), "the check leaked into the shared overlay.")
+
+
 func _census() -> void:
 	var cells: int = 0
 	var maps: Dictionary = {}

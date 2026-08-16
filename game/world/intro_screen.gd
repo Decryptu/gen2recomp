@@ -185,6 +185,9 @@ func _on_speech_finished(player_name: String) -> void:
 		return
 	created.gender = _gender
 	created.label = _label
+	## Before the write: a mod holding a run snapshots what built it into the
+	## save's own namespace, and that has to be in the bytes on disk.
+	GameRuntime.announce_new_save(created)
 	var result: Dictionary = Gen2SaveStore.save(created, _data)
 	if not bool(result["ok"]):
 		_fail(String(result["message"]))

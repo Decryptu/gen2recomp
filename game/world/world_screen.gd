@@ -3424,6 +3424,7 @@ func _refresh_party_summary() -> void:
 	var moves: Array = []
 	var names: Array = []
 	var eggs: Array = []
+	var fainted: Array = []
 	for member: Variant in save.party:
 		if member is Gen2SaveMon:
 			var mon: Gen2SaveMon = member as Gen2SaveMon
@@ -3439,6 +3440,7 @@ func _refresh_party_summary() -> void:
 			moves.append(mon_moves)
 			names.append(_mon_display_name(mon))
 			eggs.append(mon.is_egg)
+			fainted.append(mon.hp <= 0)
 	## The three party facts the Bug Contest's own scripts ask about, which are
 	## not per-slot: whether the lead can be entered at all, the byte
 	## `ContestDropOffMons` stashes, and whether what is caught can be taken home.
@@ -3451,7 +3453,8 @@ func _refresh_party_summary() -> void:
 			"second_species": int(second.species) if second != null else 0,
 			"storage_full": save.party.size() >= Gen2SaveData.MAX_PARTY \
 				and not bool(save.first_empty_box_slot().get("ok", false)),
-		}
+		},
+		fainted
 	)
 
 

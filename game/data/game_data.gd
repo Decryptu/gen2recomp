@@ -520,7 +520,9 @@ func world_fishing_time_groups() -> Array:
 	if not fishing is Dictionary:
 		return []
 	var groups: Variant = (fishing as Dictionary).get("time_groups", [])
-	return groups.duplicate(true) if groups is Array else []
+	if not groups is Array:
+		return []
+	return _overlaid_rows(Gen2ContentOverlay.KIND_FISHING_TIME, groups as Array)
 
 
 func world_roaming_maps() -> Array:
@@ -536,7 +538,9 @@ func world_roaming_mons() -> Array:
 	if not roaming is Dictionary:
 		return []
 	var mons: Variant = (roaming as Dictionary).get("mons", [])
-	return mons.duplicate(true) if mons is Array else []
+	if not mons is Array:
+		return []
+	return _overlaid_rows(Gen2ContentOverlay.KIND_ROAMING, mons as Array)
 
 
 ## GetTreeMonSet against TreeMonMaps or RockMonMaps: the treemon set number for
@@ -558,6 +562,16 @@ func treemon_set_for_map(group: int, number: int, rock: bool = false) -> int:
 	return 0
 
 
+## How many treemon sets this cartridge imported, which is what a caller walking
+## them needs: Gold and Silver ship six and Crystal nine.
+func treemon_set_count() -> int:
+	var treemons: Variant = _encounters().get("treemons", {})
+	if not treemons is Dictionary:
+		return 0
+	var sets: Variant = (treemons as Dictionary).get("sets", [])
+	return (sets as Array).size() if sets is Array else 0
+
+
 ## GetTreeMons: one set's common and rare tables by set number. The caller
 ## applies the profile's own set limit first; this answers the raw table.
 func treemon_set(index: int) -> Dictionary:
@@ -568,7 +582,10 @@ func treemon_set(index: int) -> Dictionary:
 	if not sets is Array or index < 0 or index >= (sets as Array).size():
 		return {}
 	var value: Variant = (sets as Array)[index]
-	return value.duplicate(true) if value is Dictionary else {}
+	return _overlaid(
+		Gen2ContentOverlay.KIND_TREEMON, index,
+		value.duplicate(true) if value is Dictionary else {}
+	)
 
 
 ## `ContestMons`, the eleven `%, species, min, max` rows
@@ -589,7 +606,26 @@ func _bug_contest_table(key: String) -> Array:
 	if not contest is Dictionary:
 		return []
 	var value: Variant = (contest as Dictionary).get(key, [])
-	return (value as Array).duplicate(true) if value is Array else []
+	if not value is Array:
+		return []
+	## Only the mon rows are patchable. A contestant is a trainer and its three
+	## placings are the judging's own scores, which a wild shuffle has no say in.
+	if key != "mons":
+		return (value as Array).duplicate(true)
+	return _overlaid_rows(Gen2ContentOverlay.KIND_BUG_CONTEST, value as Array)
+
+
+## A table stored as an ARRAY of rows, each row overlaid under its own index.
+## The map tables are dictionaries keyed by a coordinate and go through
+## [method _overlaid]; these four are lists and the index IS the number.
+func _overlaid_rows(kind: StringName, rows: Array) -> Array:
+	var out: Array = []
+	for index: int in rows.size():
+		var row: Variant = rows[index]
+		out.append(_overlaid(
+			kind, index, row.duplicate(true) if row is Dictionary else {}
+		))
+	return out
 
 
 ## CheckSleepingTreeMon's list for one time of day. Empty on Gold and Silver,

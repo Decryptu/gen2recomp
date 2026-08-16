@@ -73,6 +73,7 @@ func after_each() -> void:
 	if is_instance_valid(_world_screen):
 		_world_screen.free()
 		_world_screen = null
+	Gen2ModHost.reset()
 	RomCache.clear(Fixture.directory())
 
 
@@ -1131,3 +1132,78 @@ func test_a_refusal_holds_the_menu_until_a_or_b() -> void:
 	assert_true(party.handle_button(Gen2Button.B))
 	assert_eq(String(party.submenu_snapshot()["message"]), "")
 	assert_true(bool(party.submenu_snapshot()["open"]), "and the submenu is still up")
+
+
+## A mod's party-member rows land after every cartridge action and before CANCEL,
+## which is the way out of the box. The label is asked per slot, so a mod can say
+## something different about the one it already owns.
+func test_a_mod_party_row_lands_after_the_cartridge_actions() -> void:
+	await _open_world()
+	var chosen: Array = []
+	assert_true(bool(Gen2ModHost.instance().register_party_member_menu(&"follower", {
+		"label": func(slot: int) -> String: return "FOLLOWING" if slot == 2 else "FOLLOW",
+		"handler": func(slot: int) -> void: chosen.append(slot),
+	}).get("ok", false)))
+	## A second mod appends behind the first rather than replacing it.
+	assert_true(bool(Gen2ModHost.instance().register_party_member_menu(&"pet", {
+		"label": func(_slot: int) -> String: return "PET",
+		"handler": func(_slot: int) -> void: pass,
+	}).get("ok", false)))
+
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	assert_eq(
+		_labels(party.submenu_snapshot()["items"]),
+		["CUT", "STATS", "SWITCH", "MOVE", "ITEM", "FOLLOW", "PET", "CANCEL"]
+	)
+
+	## Choosing it calls the mod's handler with the ONE-based slot and closes the
+	## menu, the way a field move does.
+	for _step: int in 5:
+		party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
+	assert_eq(chosen, [1])
+	await get_tree().process_frame
+	assert_null(_world_screen._party_host)
+
+
+## An egg has nothing to follow, and a battle's party list is a switch: neither
+## is offered a mod row.
+func test_an_egg_and_a_battle_list_are_offered_no_mod_row() -> void:
+	await _open_world()
+	assert_true(bool(Gen2ModHost.instance().register_party_member_menu(&"follower", {
+		"label": func(_slot: int) -> String: return "FOLLOW",
+		"handler": func(_slot: int) -> void: pass,
+	}).get("ok", false)))
+	var egg := Gen2SaveMon.new()
+	egg.is_egg = true
+	assert_eq(
+		_labels(Gen2PartyScreen.submenu_items_for(_data, egg, 1)),
+		["STATS", "SWITCH", "CANCEL"]
+	)
+	var mon: Gen2SaveMon = Gen2SaveStore.create_development_save(_data, 0).party[0]
+	assert_false(
+		_labels(Gen2PartyScreen.submenu_items_for(_data, mon, 1, true)).has("FOLLOW"),
+		"a battle party list"
+	)
+	assert_true(_labels(Gen2PartyScreen.submenu_items_for(_data, mon, 1)).has("FOLLOW"))
+
+
+## A row is registered by name with two Callables, and both are checked here
+## rather than at the press.
+func test_a_party_row_needs_both_callables_and_a_free_name() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var label: Callable = func(_slot: int) -> String: return "X"
+	assert_eq(
+		host.register_party_member_menu(&"a", {"label": label})["reason"],
+		&"party_menu_entry_missing_callable"
+	)
+	assert_true(bool(host.register_party_member_menu(
+		&"a", {"label": label, "handler": func(_slot: int) -> void: pass}
+	).get("ok", false)))
+	assert_eq(
+		host.register_party_member_menu(
+			&"a", {"label": label, "handler": func(_slot: int) -> void: pass}
+		)["reason"],
+		&"duplicate_party_menu_entry"
+	)

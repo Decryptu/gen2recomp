@@ -687,7 +687,8 @@ func set_movement_mode(mode: StringName) -> Dictionary:
 ## byte it stashes, and `storage_full` for `CheckPartyFullAfterContest`.
 func set_party_summary(
 	count: int, has_pokerus: bool, species: Array[int] = [] as Array[int],
-	moves: Array = [], names: Array = [], eggs: Array = [], extra: Dictionary = {}
+	moves: Array = [], names: Array = [], eggs: Array = [], extra: Dictionary = {},
+	fainted: Array = []
 ) -> Dictionary:
 	if count < 0:
 		return {"ok": false, "reason": &"invalid_party_summary", "count": count}
@@ -695,6 +696,10 @@ func set_party_summary(
 		"count": count, "pokerus": has_pokerus, "species": species.duplicate(),
 		"moves": moves.duplicate(true), "names": names.duplicate(),
 		"eggs": eggs.duplicate(),
+		## Per slot, beside the three per-slot arrays above. `lead_fainted` in
+		## `extra` is the same fact about slot 0 and stays: the Bug Contest's own
+		## scripts ask it by that name.
+		"fainted": fainted.duplicate(),
 	}
 	for key: Variant in extra:
 		_party_summary[key] = extra[key]

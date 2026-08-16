@@ -254,8 +254,25 @@ An encounter row is what `GameData.world_encounter(method, group, number)`
 answers, and the patched row is what every reader gets, including the region
 walk `FindNest` uses. The method is one of `grass`, `surf`, `swarm_grass` and
 `swarm_water`. `slots` and `rates` are arrays and replace whole; patching a map
-this cartridge lacks changes nothing, exactly as a species patch does. The
-treemon sets, the Bug Contest list and the roaming mons are not patchable yet.
+this cartridge lacks changes nothing, exactly as a species patch does.
+
+The four wild sources beside the map tables are patched the same way, each by its
+own index in the cartridge's own table:
+
+| Helper | Row | Index |
+|---|---|---|
+| `patch_treemon_set(id, set, fields)` | `GameData.treemon_set(set)`, which Headbutt and Rock Smash share | The set number `treemon_set_for_map` answers |
+| `patch_bug_contest_mon(id, index, fields)` | One `ContestMons` row | Its position in the list |
+| `patch_roaming_mon(id, index, fields)` | One roaming Pokemon | Its position in the list |
+| `patch_fishing_time_group(id, index, fields)` | One day/night fishing substitution | Its position in the list |
+
+Name only what changes. A contest row's `percent` is both the choice roll's
+weight and part of what the judging reads, a rod entry's `threshold` is the bite,
+and a roaming mon's `map_group`/`map_number` are where it currently is, which the
+roamer's own movement writes; a patch naming `species` and `level` leaves all
+three exactly as the cartridge has them. Every runtime reader goes through
+`GameData`, so a patched row reaches the encounter roll, the treemon draw, the
+Pokedex nest search and a visible encounter's context alike.
 
 Counts: `species_count()`, `move_count()` and `trainer_count()` are the
 cartridge's own runs. Mod numbers are not part of them and are enumerated with
@@ -773,6 +790,65 @@ above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one
 silently winning.
+
+## Adding a row to a party member's menu
+
+`register_party_member_menu(id, entry)` appends to the box a party slot opens.
+Both halves are Callables taking the ONE-based slot, because a row here is about
+a member rather than about the menu:
+
+```gdscript
+host.register_party_member_menu(manifest.id, {
+	"label": func(slot: int) -> String:
+		return "FOLLOWING" if slot == following_slot else "FOLLOW",
+	"handler": func(slot: int) -> void:
+		host.set_option(manifest.id, &"slot", slot),
+})
+```
+
+Rows land after every cartridge action and before CANCEL, which is the way out
+of the box; a mod cannot displace or reorder a cartridge row, and the list still
+stops at the source's own `NUM_MONMENU_ITEMS`. A label answering an empty string
+drops its own row, which is how a row is shown conditionally. Choosing one calls
+the handler and closes the menu, the way a field move does.
+
+Not offered for an egg, and not offered inside a battle: a battle's party list is
+a switch, and a row running a mod's action in the middle of a turn would be world
+state changing while the turn owns it.
+
+## Holding a run rather than an installation
+
+A mod whose settings decide what a whole playthrough looks like has a problem
+`read_save_data` alone does not solve: an installation option changed mid-run
+would silently rewrite the save being played, and opening another save could not
+restore the settings that made it. `register_save_lifecycle(manifest, provider)`
+is the seam for that.
+
+The `manifest` is the object `register()` was handed, and it IS the capability:
+the host keeps it beside the provider, so a callback reaches
+`read_save_data`/`write_save_data` for its own namespace and no other mod's. A
+manifest this host never discovered registers nothing.
+
+| Method | Called when |
+|---|---|
+| `save_created(save)` | A save has just been made, before it is written. Snapshot whatever the run is built from into your namespace here |
+| `save_activated(save)` | That save is about to be played. `save` is `null` for a DEVELOPMENT run, one started with no selected slot |
+| `save_deactivated()` | The save was closed |
+
+Ordering, which is the part that matters:
+
+1. The host drops every lifecycle mod's overlay contributions, in one pass.
+2. `save_activated` runs, in registration order.
+
+So a provider always starts from the cartridge, two slots cannot leak patches
+into one another, and a provider that fails leaves nothing installed rather than
+the previous run's shuffle. `save_deactivated` clears afterwards, so nothing
+stays patched by a run nobody is playing.
+
+Save the compact INPUTS plus an algorithm version, not the generated plan: a plan
+can exceed the 64 KiB namespace and duplicates cartridge rows anyway. A save
+carrying no snapshot has no run and should stay vanilla rather than adopt today's
+options.
 
 ## Adding a setting
 

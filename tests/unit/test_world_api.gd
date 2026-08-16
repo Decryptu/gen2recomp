@@ -3170,11 +3170,15 @@ func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.party_summary().is_empty())
 	assert_true(world.set_party_summary(
-		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"], [false, true]
+		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"], [false, true],
+		{}, [false, true]
 	)["ok"])
 	var expected: Dictionary = {
 		"count": 3, "pokerus": true, "species": [25, 1],
 		"moves": [[0x46], []], "names": ["PIKA", "BULBASAUR"], "eggs": [false, true],
+		## Per slot beside the rest: a fainted Pokemon in slot 2 is a fact the
+		## lead's own flag cannot carry.
+		"fainted": [false, true],
 	}
 	assert_eq(world.party_summary(), expected)
 	assert_false(world.set_party_summary(-1, false)["ok"])
