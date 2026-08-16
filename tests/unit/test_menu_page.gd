@@ -7,6 +7,7 @@ extends GutTest
 ## border, the options and the cursor be told apart without a real cartridge.
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
+const BattleFixture := preload("res://tests/unit/battle_fixture.gd")
 
 const TILE: int = Gen2Font.TILE
 const WIDTH: int = Gen2Screen.WIDTH
@@ -127,3 +128,48 @@ func test_a_title_prints_only_when_the_flag_is_set() -> void:
 	var with_title: PackedByteArray = _blank()
 	_page.draw(titled, OPTIONS, 0, with_title, WIDTH, "LONGTITLEHERE", 2)
 	assert_true(_ink_in_tile(with_title, Vector2i(14, 4)), "the title ran past the corner")
+
+
+## `Pokepic`'s box is a `MenuBox` and a `PlaceGraphic`, so it is checked where
+## the box it is made of is. `PokepicMenuHeader`'s `menu_coords 6, 4, 14, 13` is
+## nine tiles by ten drawn, with a seven-wide interior the 7x7 pic fills and one
+## interior row left under it.
+func test_the_pokepic_box_is_the_headers_own_size() -> void:
+	var box: Gen2MenuBox = Gen2PokepicPage.menu_box()
+	assert_eq(box.border_position(), Vector2i(6, 4))
+	assert_eq(box.border_size(), Vector2i(9, 10))
+	assert_eq(box.interior(), Vector2i(7, 8))
+
+
+## `PadFrontpic` bottom-aligns a smaller pic one column in rather than centring
+## it, on top of `PlaceGraphic`'s own one-tile inset.
+func test_a_pokepic_smaller_than_the_block_is_padded_not_centred() -> void:
+	assert_eq(Gen2PokepicPage.pic_position(7, 7), Vector2i(TILE, TILE))
+	assert_eq(Gen2PokepicPage.pic_position(6, 6), Vector2i(2 * TILE, 2 * TILE))
+	assert_eq(Gen2PokepicPage.pic_position(5, 5), Vector2i(2 * TILE, 3 * TILE))
+
+
+func test_the_pokepic_box_draws_the_pic_inside_its_frame() -> void:
+	var data: GameData = GameData.open_directory(Fixture.directory())
+	var image: Image = Gen2PokepicPage.render(data, BattleFixture.CHARMANDER, Gen2WorldMap.new())
+	assert_not_null(image)
+	assert_eq(image.get_size(), Vector2i(9, 10) * TILE)
+	## The atlas is filled with index 1, so a pic pixel is the map's own second
+	## background colour and the interior around it is the box's blank.
+	## Through [method Gen2PicImage.from_indices] rather than off the palette, so
+	## the comparison is against the same eight bits a channel the image holds.
+	var pic: Color = Gen2PicImage.from_indices(
+		PackedByteArray([1]), 1, 1,
+		data.world_palette(int(Gen2WorldPalette.palette_slots(
+			Gen2WorldMap.new().environment, Gen2WorldPalette.TIME_MORNING
+		)[Gen2PokepicPage.PALETTE_GRAY]))
+	).get_pixel(0, 0)
+	assert_eq(image.get_pixelv(Gen2PokepicPage.pic_position(7, 7)), pic, "the pic's corner")
+	## `lb bc, 7, 7` in an eight-row interior leaves the bottom row of it blank.
+	assert_ne(image.get_pixel(TILE, 8 * TILE + 1), pic, "the row under the pic")
+
+
+func test_the_pokepic_box_refuses_a_species_the_cache_does_not_hold() -> void:
+	var data: GameData = GameData.open_directory(Fixture.directory())
+	assert_null(Gen2PokepicPage.render(data, BattleFixture.MAX_SPECIES + 1, Gen2WorldMap.new()))
+	assert_null(Gen2PokepicPage.render(data, BattleFixture.CHARMANDER, null))

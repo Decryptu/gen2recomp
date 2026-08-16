@@ -12,6 +12,10 @@ extends RefCounted
 
 const CHANNELS: int = 4
 
+## `PadFrontpic`'s box: every front pic is placed as 7x7 tiles whatever its own
+## size is.
+const FRONTPIC_TILES: int = 7
+
 
 ## An image [param width] x [param height] from a row-major index buffer.
 ## [param transparent_background] makes index 0 transparent: the hardware has no
@@ -132,6 +136,20 @@ static func x_flipped(image: Image) -> Image:
 	var out: Image = image.duplicate()
 	out.flip_x()
 	return out
+
+
+## `PadFrontpic` (engine/gfx/load_pics.asm) fills the 7x7 block a front pic is
+## placed in, and does not centre a smaller pic: it lays one blank tile column
+## before it and blank rows above it, so the pic is bottom-aligned one column in.
+## This is that left pad, in tiles, for a [param width]-tile-wide pic.
+##
+## [param mirrored] is `wBoxAlignment`, which `LoadOrientedFrontpic` reads:
+## reversing the columns leaves the trailing blank on the left instead, which for
+## a 5x5 is one column further in than a 6x6.
+static func frontpic_pad_columns(width: int, mirrored: bool = false) -> int:
+	if width >= FRONTPIC_TILES or width <= 0:
+		return 0
+	return FRONTPIC_TILES - 1 - width if mirrored else 1
 
 
 ## The same mirror on an index buffer, for a caller that will recolour it.
