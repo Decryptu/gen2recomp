@@ -72,6 +72,7 @@ var _hour: int = 0
 var _minute: int = 0
 var _knob: int = 0
 var _station: String = ""
+var _show_lines: PackedStringArray = PackedStringArray()
 var _text: String = ""
 ## `PokegearAskDeleteText`, which replaces the card's question while the yes/no
 ## box is up.
@@ -148,10 +149,14 @@ func set_clock(weekday: int, hour: int, minute: int) -> void:
 	_refresh()
 
 
-## `wRadioTuningKnob` and whatever `UpdateRadioStation` last placed for it.
-func set_radio(knob: int, station: String) -> void:
+## `wRadioTuningKnob`, whatever `UpdateRadioStation` last placed for it, and the
+## two rows [Gen2RadioShow] has printed into the card's text box.
+func set_radio(
+	knob: int, station: String, lines: PackedStringArray = PackedStringArray()
+) -> void:
 	_knob = knob
 	_station = station
+	_show_lines = lines
 	_refresh()
 
 
@@ -387,7 +392,7 @@ func _background_image() -> Image:
 
 func _tilemap() -> PackedInt32Array:
 	if _card == CARD_RADIO:
-		return _page.radio_tilemap(_owned, _station)
+		return _page.radio_tilemap(_owned, _station, _show_lines)
 	if _card != CARD_PHONE:
 		return _page.clock_tilemap(_owned, _weekday, _hour, _minute, _text)
 	var map: PackedInt32Array = _page.phone_tilemap(

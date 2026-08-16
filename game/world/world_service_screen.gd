@@ -693,9 +693,11 @@ func _refresh_card() -> void:
 			)
 		Gen2PokegearScreen.CARD_RADIO:
 			var tuned: Dictionary = _world.radio_station()
+			var show: Gen2RadioShow = _world.radio_show()
 			_pokegear.set_radio(
 				_world.state.radio_knob(),
-				String(tuned.get("name", "")) if bool(tuned.get("ok", false)) else ""
+				String(tuned.get("name", "")) if bool(tuned.get("ok", false)) else "",
+				show.lines() if show != null else PackedStringArray()
 			)
 		Gen2PokegearScreen.CARD_PHONE:
 			_pokegear.set_contacts(
@@ -722,6 +724,15 @@ func _on_card_switched(direction: int) -> void:
 		return
 	_close_card()
 	_open_card(card)
+
+
+## One hardware frame of whichever card is open. Only the radio card spends any:
+## `PlayRadioShow` is the one thing the Pokegear runs per frame.
+func advance_frame() -> void:
+	if _pokegear == null or _pokegear.card() != Gen2PokegearScreen.CARD_RADIO:
+		return
+	if _world.advance_radio_frame():
+		_refresh_card()
 
 
 func _on_card_tuned(knob: int) -> void:

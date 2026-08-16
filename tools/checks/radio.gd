@@ -81,6 +81,11 @@ const SPECIES_SNORLAX: int = 143
 const SNORLAX_LEVEL: int = 50
 const BATTLETYPE_FORCEITEM: int = 10
 
+## Long enough for a hundred lines at `PrintRadioLine`'s own 100 frames, which
+## walks the longest station (Buena's twenty-one segments) several times over.
+const SHOW_FRAMES: int = 12000
+const SHOW_SEEDS: int = 20
+
 
 func run(r: RefCounted) -> void:
 	_r = r
@@ -92,6 +97,7 @@ func run(r: RefCounted) -> void:
 		var crystal: bool = Gen2WorldState.is_crystal_profile(data)
 		_verify_stations(data, game_id, crystal)
 		_verify_music_records(data, game_id, crystal)
+		_verify_shows(data, game_id, crystal)
 		_verify_big_object_census(data, game_id)
 		_verify_snorlax(data, game_id, crystal)
 		_verify_route_2(data, game_id, crystal)
@@ -141,6 +147,76 @@ func _verify_stations(data: GameData, game_id: StringName, crystal: bool) -> voi
 	print("%s radio: %d channels, the Poke Flute channel on %.1f, music %d." % [
 		game_id, Gen2WorldRadio.channel_count(crystal),
 		Gen2WorldRadio.frequency_for(KNOB_POKE_FLUTE), Gen2WorldRadio.MUSIC_POKE_FLUTE_CHANNEL,
+	])
+
+
+## Every channel's programme, driven for long enough that each of its segments
+## runs many times over, on twenty seeds and both halves of the clock. What it
+## can catch that a unit test cannot: a line whose `text_ram` buffer the cache
+## does not fill, so it prints an empty name, and a segment that never leaves
+## the box it wrote.
+func _verify_shows(data: GameData, game_id: StringName, crystal: bool) -> void:
+	var caught: Array = []
+	for species: int in range(1, data.species_count() + 1):
+		caught.append(species)
+	var visited: Dictionary = {}
+	var lines_seen: int = 0
+	var blank: Array[String] = []
+	for channel: int in Gen2WorldRadio.CHANNEL_SONGS.size():
+		if channel == Gen2WorldRadio.BUENAS_PASSWORD and not crystal:
+			continue
+		for seed_index: int in SHOW_SEEDS:
+			var random := RandomNumberGenerator.new()
+			random.seed = seed_index
+			# Both sides of NITE_HOUR, so Buena's off-air arm is walked too.
+			var hour: int = 20 if seed_index % 2 == 0 else 9
+			var show: Gen2RadioShow = Gen2RadioShow.start(data, channel, {
+				"crystal": crystal, "weekday": seed_index % 7, "hour": hour,
+				"caught": caught, "hall_of_fame": seed_index % 3 == 0,
+				"kanto_badges": 0xFF if seed_index % 3 == 0 else 0,
+				"lucky_number": 12345,
+			}, random)
+			var last: String = ""
+			for frame: int in SHOW_FRAMES:
+				if show.finished():
+					break
+				# Midnight arrives halfway through, which is the only way
+				# Buena's ten shutdown lines are ever reached.
+				if frame == SHOW_FRAMES / 2:
+					show.set_hour(0 if hour >= Gen2RadioShow.NITE_HOUR else 20)
+				visited[show.segment()] = true
+				show.advance_frame()
+				if not show.ran_segment.is_empty():
+					visited[show.ran_segment] = true
+				var bottom: String = show.lines()[1]
+				if bottom == last:
+					continue
+				last = bottom
+				lines_seen += 1
+				if bottom.strip_edges().is_empty():
+					continue
+				if bottom.contains("{") \
+					or (bottom.contains("  ") and not bottom.begins_with(" ")):
+					blank.append("%s ch%d: \"%s\"" % [game_id, channel, bottom])
+	_r.check(
+		blank.is_empty(),
+		"%s: a radio line has an unfilled buffer in it: %s" % [
+			game_id, ", ".join(blank.slice(0, 3)),
+		]
+	)
+	var unreached: Array[String] = []
+	for segment_id: StringName in Gen2RadioShow.SEGMENTS:
+		if segment_id == Gen2RadioShow.SCROLL or visited.has(segment_id):
+			continue
+		if not crystal and String(segment_id).begins_with("BuenasPassword"):
+			continue
+		unreached.append(String(segment_id))
+	_r.check(
+		unreached.is_empty(),
+		"%s: radio segments never ran: %s" % [game_id, ", ".join(unreached)]
+	)
+	print("%s radio shows: %d of %d segments run, %d lines printed." % [
+		game_id, visited.size() - 1, Gen2RadioShow.SEGMENTS.size() - 1, lines_seen,
 	])
 
 

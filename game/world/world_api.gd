@@ -206,6 +206,19 @@ var script_random: RandomNumberGenerator = null
 ## other two so seeding NPC motion cannot shift an encounter, a phone roll or a
 ## script's RANDOM result.
 var object_random: RandomNumberGenerator = null
+## Supplies the radio shows' own rolls, apart from the three above for the same
+## reason they are apart from each other: reading the radio must not move a
+## wild encounter or an NPC.
+var radio_random: RandomNumberGenerator = null
+## The programme the open radio card is reading, built by tune_radio() and
+## dropped when the card closes or the dial finds dead air.
+var _radio_show: Gen2RadioShow = null
+## `wBuenasPassword` and `DAILYFLAGS2_BUENAS_PASSWORD_F`, and `wLuckyIDNumber`.
+## None of the three is in the save model, so each is rolled once per world and
+## kept here; see HANDOFF.md's divergence row.
+var _buenas_password: int = -1
+var _buenas_password_today: bool = false
+var _lucky_number: int = -1
 ## The seed the three generators above were built from, mirrored here so a
 ## snapshot records what a run can be reproduced with. Zero means nothing seeded
 ## them and the run is not reproducible.
@@ -401,16 +414,64 @@ func tune_radio(knob: int) -> Dictionary:
 		# NoRadioStation: no channel, and the map's own music comes back.
 		state.set_radio_channel(-1)
 		state.set_map_music(map_music_track())
+		_radio_show = null
 		return tuned
 	state.set_radio_channel(int(tuned["channel"]))
 	state.set_map_music(int(tuned["music"]))
+	_start_radio_show(int(tuned["channel"]))
 	return tuned
+
+
+## The programme the tuned station is reading, or null on dead air.
+func radio_show() -> Gen2RadioShow:
+	return _radio_show
+
+
+## `PlayRadioShow`, dispatched once a hardware frame while the radio card is
+## open. Answers whether the box changed, so the host redraws only then.
+func advance_radio_frame() -> bool:
+	if _radio_show == null:
+		return false
+	_radio_show.set_hour(int(world_clock().get("hour", 12)))
+	var changed_box: bool = _radio_show.advance_frame()
+	var track: int = _radio_show.pending_music
+	if track >= 0:
+		_radio_show.pending_music = -1
+		state.set_map_music(track)
+	_buenas_password = _radio_show.buenas_password
+	_buenas_password_today = _radio_show.buenas_password_today
+	return changed_box
+
+
+## `LoadStation_`'s own jump into `RadioJumptable`, with the WRAM facts the
+## shows read beyond the dial's.
+func _start_radio_show(channel: int) -> void:
+	var crystal: bool = Gen2WorldState.is_crystal_profile(data)
+	var clock: Dictionary = world_clock()
+	if radio_random == null:
+		radio_random = RandomNumberGenerator.new()
+		radio_random.randomize()
+	if _lucky_number < 0:
+		# `ResetLuckyNumberShowFlag`'s weekly roll, which has no saved home here.
+		_lucky_number = radio_random.randi_range(0, 99999)
+	_radio_show = Gen2RadioShow.start(data, channel, {
+		"crystal": crystal,
+		"weekday": world_day,
+		"hour": int(clock.get("hour", 12)),
+		"caught": state.caught_species().keys(),
+		"hall_of_fame": state.hall_of_fame(),
+		"kanto_badges": (state.badge_mask(crystal) >> 8) & 0xFF,
+		"lucky_number": _lucky_number,
+	}, radio_random)
+	_radio_show.buenas_password = _buenas_password
+	_radio_show.buenas_password_today = _buenas_password_today
 
 
 ## Closing the radio card. ExitPokegearRadio_HandleMusic restores the map's own
 ## music only for the two sentinels; a real station id falls through both, so
 ## whatever was tuned keeps playing.
 func close_radio() -> void:
+	_radio_show = null
 	if state.radio_channel() < 0:
 		state.set_map_music(map_music_track())
 
