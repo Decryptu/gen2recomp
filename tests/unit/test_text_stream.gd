@@ -70,6 +70,19 @@ func test_a_name_with_nobody_to_ask_stays_a_marker() -> void:
 	assert_eq(decoded["text"], "<PLAYER>")
 
 
+func test_the_same_byte_is_a_buffer_command_and_the_player_inside_a_literal() -> void:
+	# Elm's "#MON's first partner, <PLAY_G>!": $14 after TX_START is a character
+	# `CheckDict` sends to `PlaceGenderedPlayerName`, not a second command.
+	var literal: Dictionary = Gen2TextStream.decode(
+		PackedByteArray([0x00, 0x14, 0xE7, 0x50]), 0, {"player": "GOLD"}
+	)
+	assert_eq(literal["text"], "GOLD!")
+	var command: Dictionary = Gen2TextStream.decode(
+		PackedByteArray([0x14, 0x03, 0x50]), 0, {"player": "GOLD", "buffers": {3: "TM24"}}
+	)
+	assert_eq(command["text"], "TM24")
+
+
 func test_a_string_buffer_is_read_by_number() -> void:
 	var decoded: Dictionary = Gen2TextStream.decode(
 		PackedByteArray([0x14, 0x03, 0x50]), 0, {"buffers": {3: "TM24"}}

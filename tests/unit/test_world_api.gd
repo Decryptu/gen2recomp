@@ -2402,9 +2402,9 @@ func test_event_flags_hide_objects_from_rendering_occupancy_and_dispatch() -> vo
 	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
 	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
-	## `ReadObjectEvents` tests the flag at map load and nothing re-tests it while
-	## the map is up, so writing it moves nothing until the map is loaded again.
-	## That is why `appear` and `disappear` exist and edit the struct themselves.
+	## `LoadObjectMasks` reads the flag once a map load and nothing re-tests it
+	## while the map is up, so writing it moves nothing on its own. That is why
+	## `appear` and `disappear` exist and edit the struct themselves.
 	world.set_event_flag(7)
 	assert_eq(world.visible_objects().size(), 1)
 	assert_not_null(world.object_at(Vector2i(5, 6)))
@@ -2419,6 +2419,26 @@ func test_event_flags_hide_objects_from_rendering_occupancy_and_dispatch() -> vo
 	world.clear_event_flag(7)
 	assert_eq(world.visible_objects().size(), 1)
 	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
+
+
+func test_a_map_entry_masks_on_the_flags_its_own_callbacks_wrote() -> void:
+	## `MapSetupScript_Warp` runs `HandleNewMap`'s `MAPCALLBACK_NEWMAP` before
+	## `LoadMapObjects` calls `LoadObjectMasks`, so a flag the entry callback set
+	## hides its object on that entry rather than on the next map load. Reading
+	## the flag while the record is built instead is what put the bedroom's four
+	## decorations on screen for a new game.
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	assert_eq(world.visible_objects().size(), 1)
+
+	world.set_event_flag(7)
+	var _entry: Array = world.dispatch_map_entry()
+	assert_eq(world.visible_objects().size(), 0)
+	assert_true(world.can_walk_to(Vector2i(5, 6)))
+	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 0)
+
+	world.clear_event_flag(7)
+	var _reentry: Array = world.dispatch_map_entry()
+	assert_eq(world.visible_objects().size(), 1)
 
 
 func test_event_dispatch_reports_decoded_records_without_running_scripts() -> void:
