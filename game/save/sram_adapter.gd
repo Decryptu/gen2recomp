@@ -19,9 +19,22 @@ const MON_NAME_LENGTH: int = 11
 const PP_MASK: int = 0x3F
 const PP_UP_MASK: int = 0xC0
 
+## `wPlayerGender` is the first byte of `wCrystalData`, and bit 0 is the whole of
+## it: 0 male, 1 female. The other six bytes of the run are the mobile profile's
+## age, prefecture and postal code, which nothing here owns.
+const PLAYER_GENDER_MASK: int = 0x01
+
 ## `player_id` is wPlayerID, the two big-endian bytes wPlayerData opens with in
 ## both pins (ram/wram.asm), which is why it shares an address with
 ## `primary_data_start`.
+##
+## `player_gender` is Crystal's alone and sits nowhere near the rest: it is
+## `sCrystalData`, its own SRAM section past the Active Box, Link Battle and Hall
+## of Fame ones, so no checksum covers it and `_SaveData` is the only routine
+## that ever writes it. `01:be3d` in `pokecrystal11.sym`, which is bank 1 offset
+## `0x3E3D` in a 32 KiB image; that build is byte identical to the cartridge this
+## project verifies, so the address is the linker's rather than a guess. Gold and
+## Silver have no such section and no such byte: their player is always male.
 const LAYOUTS: Dictionary = {
 	"gold": {
 		"primary_check_1": 0x2008,
@@ -99,6 +112,7 @@ const LAYOUTS: Dictionary = {
 		"player_id": 0x2009,
 		"player_name": 0x200B,
 		"party": 0x2865,
+		"player_gender": 0x3E3D,
 		"game_time": {
 			"cap": 0x2051, "hours": 0x2052, "minutes": 0x2054,
 			"seconds": 0x2055, "frames": 0x2056,
@@ -295,6 +309,7 @@ static func _read_save(
 	save.player_name = Gen2Text.decode_fixed(raw, int(layout["player_name"]), NAME_LENGTH)
 	save.player_id = _read_u16_be(raw, int(layout["player_id"]))
 	save.game_time = _read_game_time(raw, layout["game_time"])
+	save.gender = _read_gender(raw, layout)
 
 	var species_start: int = party_start + 1
 	var terminator: int = int(raw[species_start + count])
@@ -378,6 +393,7 @@ static func _write_save(raw: PackedByteArray, save: Gen2SaveData, data: GameData
 	_write_fixed_text(raw, int(layout["player_name"]), NAME_LENGTH, save.player_name)
 	_write_u16_be(raw, int(layout["player_id"]), save.player_id)
 	_write_game_time(raw, layout["game_time"], save.game_time)
+	_write_gender(raw, layout, save.gender)
 	var party_start: int = int(layout["party"])
 	raw[party_start] = save.party.size()
 	var species_start: int = party_start + 1
@@ -396,6 +412,26 @@ static func _write_save(raw: PackedByteArray, save: Gen2SaveData, data: GameData
 		_write_mon(raw, mons_start + index * PARTYMON_SIZE, mon, data)
 		_write_fixed_text(raw, ot_start + index * NAME_LENGTH, NAME_LENGTH, mon.original_trainer)
 		_write_fixed_text(raw, nickname_start + index * MON_NAME_LENGTH, MON_NAME_LENGTH, mon.nickname)
+
+
+## A profile with no `sCrystalData` reads as male, which is what Gold and Silver
+## are: `wPlayerGender` exists in neither pin's WRAM.
+static func _read_gender(raw: PackedByteArray, layout: Dictionary) -> int:
+	if not layout.has("player_gender"):
+		return Gen2SaveData.GENDER_MALE
+	return Gen2SaveData.GENDER_FEMALE \
+		if raw[int(layout["player_gender"])] & PLAYER_GENDER_MASK \
+		else Gen2SaveData.GENDER_MALE
+
+
+## Only bit 0 is written: the six bytes after it and the seven bits beside it are
+## the mobile profile's, which this project does not own.
+static func _write_gender(raw: PackedByteArray, layout: Dictionary, gender: int) -> void:
+	if not layout.has("player_gender"):
+		return
+	var at: int = int(layout["player_gender"])
+	raw[at] = (int(raw[at]) & ~PLAYER_GENDER_MASK) \
+		| (PLAYER_GENDER_MASK if gender == Gen2SaveData.GENDER_FEMALE else 0)
 
 
 static func _write_mon(raw: PackedByteArray, start: int, mon: Gen2SaveMon, data: GameData) -> void:
