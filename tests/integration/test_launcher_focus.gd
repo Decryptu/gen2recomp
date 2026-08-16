@@ -68,6 +68,40 @@ func test_down_from_the_cartridge_reaches_the_floating_dock() -> void:
 	assert_ne(focused, stage)
 
 
+func test_left_and_right_stay_inside_the_floating_dock() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var shell: Gen2LauncherShell = _launcher.get("_shell")
+	var buttons: Dictionary = shell.get("_buttons")
+	var mods: Gen2LauncherButton = buttons[&"mods"]
+	mods.grab_focus()
+	var right := InputEventAction.new()
+	right.action = &"ui_right"
+	right.pressed = true
+	shell._on_dock_input(right, &"mods")
+	assert_same(_focus_owner(), buttons[&"settings"], "right stays on the dock")
+	var left := InputEventAction.new()
+	left.action = &"ui_left"
+	left.pressed = true
+	shell._on_dock_input(left, &"settings")
+	assert_same(_focus_owner(), mods, "left stays on the dock")
+
+
+func test_up_from_the_dock_returns_to_the_current_page() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var shell: Gen2LauncherShell = _launcher.get("_shell")
+	var buttons: Dictionary = shell.get("_buttons")
+	(buttons[&"mods"] as Control).grab_focus()
+	var up := InputEventAction.new()
+	up.action = &"ui_up"
+	up.pressed = true
+	shell._on_dock_input(up, &"mods")
+	assert_true(_focus_owner() is Gen2CartridgeStage)
+
+
 ## A mouse needs no ring, and putting one up would move it away from whatever
 ## the player is pointing at.
 func test_a_mouse_is_left_alone() -> void:

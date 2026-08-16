@@ -291,10 +291,42 @@ func _rebuild_dock() -> void:
 		# plus the filled disc already say which page is open.
 		button.tooltip_text = String(entry["label"])
 		button.pressed.connect(select.bind(id))
+		button.gui_input.connect(_on_dock_input.bind(id))
 		_dock.add_child(button)
 		_buttons[id] = button
 	if not _current.is_empty():
 		select(_current)
+
+
+## The dock overlaps the page by design, which makes Godot's geometric focus
+## search prefer the large page control above it over a neighbouring disc.
+## Own the dock's axes explicitly: horizontal movement stays in the dock and
+## wraps, while up returns to the current page. Keyboard and controller arrows
+## are both the same ui_* actions here.
+func _on_dock_input(event: InputEvent, id: StringName) -> void:
+	var at: int = -1
+	for index: int in _entries.size():
+		if StringName(_entries[index]["id"]) == id:
+			at = index
+			break
+	if at < 0:
+		return
+	var target: Control = null
+	if event.is_action_pressed("ui_left", true):
+		target = _buttons.get(StringName(_entries[posmod(at - 1, _entries.size())]["id"]))
+	elif event.is_action_pressed("ui_right", true):
+		target = _buttons.get(StringName(_entries[posmod(at + 1, _entries.size())]["id"]))
+	elif event.is_action_pressed("ui_up", true):
+		var page: Control = _page_nodes.get(_current)
+		if page != null:
+			target = page.call("focus_target") if page.has_method("focus_target") \
+				else Gen2FocusGuard.first_focusable(page)
+	else:
+		return
+	if target == null or not target.is_visible_in_tree():
+		return
+	(_buttons[id] as Control).accept_event()
+	target.grab_focus()
 
 
 func _apply_layout() -> void:
