@@ -455,6 +455,10 @@ func advance_frame() -> void:
 		)
 		if bool(audio_result.get("ok", false)):
 			_show_script_results(audio_result.get("results", []))
+	# `PlayRadioShow` runs from the Pokegear's own loop, so an open radio card
+	# spends this frame too rather than counting one of its own.
+	if _service_host != null:
+		_service_host.advance_frame()
 	_spending_frame = false
 
 

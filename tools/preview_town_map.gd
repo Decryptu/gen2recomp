@@ -33,6 +33,10 @@ const BUTTONS: Dictionary = {
 }
 
 
+## Any fixed value; the point is that two runs photograph the same programme.
+const RADIO_SEED: int = 20260816
+
+
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
@@ -164,15 +168,20 @@ func _capture_card(
 		push_error("The cache holds no Pokegear cards.")
 		quit(1)
 		return
+	# The show rolls its own species, places and adjectives, so the run is
+	# pinned the way preview_world.gd's is: the same seed photographs the same
+	# words every time.
+	world.radio_random = RandomNumberGenerator.new()
+	world.radio_random.seed = RADIO_SEED
 	host.tuned.connect(func(knob: int) -> void:
 		world.tune_radio(knob)
-		host.set_radio(knob, _station_name(world))
+		_refresh_radio(host, world)
 	)
 	var clock: Dictionary = world.world_clock()
 	host.set_clock(
 		int(clock["day"]), int(clock["hour"]), int(clock["minute"])
 	)
-	host.set_radio(world.state.radio_knob(), _station_name(world))
+	_refresh_radio(host, world)
 	host.set_contacts(
 		world.registered_phone_contacts(),
 		Gen2WorldPhoneHost.map_has_phone_service(world.current_map)
@@ -180,6 +189,12 @@ func _capture_card(
 	for step: Array in steps:
 		if String(step[0]) == "press":
 			host.handle_button(int(step[1]))
+		elif String(step[0]) == "frames":
+			# `PlayRadioShow`'s own dispatch, spent by hand: a line is up for
+			# 100 frames, so `f250` is the third one of the tuned programme.
+			for _frame: int in int(step[1]):
+				world.advance_radio_frame()
+			_refresh_radio(host, world)
 	var error: Error = host.render().save_png(output)
 	if error != OK:
 		push_error("Could not write %s (error %d)" % [output, error])
@@ -191,6 +206,14 @@ func _capture_card(
 		world.registered_phone_contacts().size(),
 	])
 	quit(0)
+
+
+static func _refresh_radio(host: Gen2PokegearScreen, world: Gen2WorldAPI) -> void:
+	var show: Gen2RadioShow = world.radio_show()
+	host.set_radio(
+		world.state.radio_knob(), _station_name(world),
+		show.lines() if show != null else PackedStringArray()
+	)
 
 
 static func _card_text(data: GameData, card: StringName) -> String:

@@ -209,3 +209,141 @@ func test_play_map_music_reports_only_a_real_change() -> void:
 	assert_false(state.play_map_music(12), "the same track does not restart")
 	assert_true(state.play_map_music(13))
 	assert_eq(state.map_music(), 13)
+
+
+## The programme layer. The corpus sweep lives in `tools/checks/radio.gd`, which
+## drives every segment on a real cache; what is worth pinning here is the box's
+## own two-line behaviour and the four branches whose input is not a roll.
+
+func _show(channel: int, context: Dictionary = {}) -> Gen2RadioShow:
+	var random := RandomNumberGenerator.new()
+	random.seed = 1
+	var facts: Dictionary = {"crystal": true, "weekday": 0, "hour": 20}
+	facts.merge(context, true)
+	return Gen2RadioShow.start(null, channel, facts, random)
+
+
+## Runs frames until a segment actually prints, rather than until the box moves:
+## `RadioScroll` clears the bottom row a frame before the next line lands on it.
+func _next_line(show: Gen2RadioShow) -> PackedStringArray:
+	for _frame: int in Gen2RadioShow.LINE_FRAMES + 3:
+		var before: StringName = show.segment()
+		show.advance_frame()
+		if before != Gen2RadioShow.SCROLL:
+			return show.lines()
+	return show.lines()
+
+
+func test_the_first_line_lands_on_the_top_row_and_the_rest_scroll_up() -> void:
+	var show: Gen2RadioShow = _show(Gen2WorldRadio.ROCKET_RADIO)
+	assert_eq(
+		_next_line(show), PackedStringArray(["… …Ahem, we are", ""]),
+		"the first line printed is the top row and nothing has scrolled"
+	)
+	assert_eq(_next_line(show), PackedStringArray(["… …Ahem, we are", "TEAM ROCKET!"]))
+	assert_eq(_next_line(show), PackedStringArray(["TEAM ROCKET!", "After three years"]))
+
+
+func test_a_line_is_up_for_a_hundred_frames() -> void:
+	var show: Gen2RadioShow = _show(Gen2WorldRadio.ROCKET_RADIO)
+	show.advance_frame()
+	assert_eq(show.lines()[0], "… …Ahem, we are")
+	for _frame: int in Gen2RadioShow.LINE_FRAMES:
+		assert_false(show.advance_frame(), "the box moved before its delay ran out")
+	# Frame 101 is `RadioScroll` taking wNextRadioLine, which prints nothing;
+	# the segment it took runs on the frame after it.
+	assert_false(show.advance_frame())
+	assert_eq(show.segment(), StringName("RocketRadio2"))
+	assert_true(show.advance_frame(), "the next segment did not run on frame 102")
+
+
+func test_the_three_music_only_stations_print_nothing_and_stop() -> void:
+	for channel: int in [
+		Gen2WorldRadio.POKE_FLUTE_RADIO, Gen2WorldRadio.UNOWN_RADIO,
+		Gen2WorldRadio.EVOLUTION_RADIO,
+	]:
+		var show: Gen2RadioShow = _show(channel)
+		show.advance_frame()
+		assert_true(show.finished(), "channel %d kept talking" % channel)
+		assert_eq(show.lines(), PackedStringArray(["", ""]))
+		assert_eq(
+			show.pending_music, Gen2WorldRadio.CHANNEL_SONGS[channel],
+			"StartRadioStation did not commit channel %d's track" % channel
+		)
+
+
+func test_the_music_channel_picks_its_track_off_the_weekday() -> void:
+	for weekday: int in 7:
+		var show: Gen2RadioShow = _show(
+			Gen2WorldRadio.POKEMON_MUSIC, {"weekday": weekday}
+		)
+		show.advance_frame()
+		assert_eq(
+			show.pending_music,
+			Gen2RadioShow.MUSIC_POKEMON_MARCH if weekday % 2 == 0 \
+				else Gen2RadioShow.MUSIC_POKEMON_LULLABY,
+			"weekday %d took the wrong half of StartPokemonMusicChannel" % weekday
+		)
+
+
+func test_the_music_channel_says_its_three_lines_once_and_stops() -> void:
+	var show: Gen2RadioShow = _show(Gen2WorldRadio.POKEMON_MUSIC, {"weekday": 1})
+	var said: Array[String] = []
+	for _frame: int in Gen2RadioShow.LINE_FRAMES * 10:
+		if show.finished():
+			break
+		if show.advance_frame():
+			said.append(show.lines()[1] if not show.lines()[1].is_empty() else show.lines()[0])
+	assert_true(show.finished(), "BenFernMusic7's bare ret did not end the show")
+	assert_eq(said[said.size() - 1], "#MON Lullaby!")
+
+
+## `BuenasPasswordCheckTime` is a live reading, so the hour moving under a show
+## already talking is what reaches the ten shutdown lines.
+func test_midnight_takes_buena_off_the_air_mid_show() -> void:
+	var show: Gen2RadioShow = _show(Gen2WorldRadio.BUENAS_PASSWORD, {"hour": 20})
+	assert_eq(_next_line(show), PackedStringArray(["BUENA: BUENA here!", ""]))
+	show.set_hour(0)
+	var said: Array[String] = []
+	for _frame: int in Gen2RadioShow.LINE_FRAMES * 20:
+		if show.advance_frame():
+			said.append(show.lines()[1])
+	assert_true(
+		said.has("have to shut down!"),
+		"the midnight arm never ran: %s" % ", ".join(said.slice(0, 6))
+	)
+
+
+func test_buenas_password_is_rolled_once_a_day_and_kept() -> void:
+	var show: Gen2RadioShow = _show(Gen2WorldRadio.BUENAS_PASSWORD, {"hour": 20})
+	for _frame: int in Gen2RadioShow.LINE_FRAMES * 6:
+		show.advance_frame()
+	assert_true(show.buenas_password_today, "the daily flag was not set")
+	var first: int = show.buenas_password
+	assert_true(first >= 0 and (first & 0xF) < 3, "the low nybble is not a word index")
+	assert_true(
+		(first >> 4) < Gen2RadioShow.BUENA_PASSWORDS.size(),
+		"the high nybble is not a category"
+	)
+	for _frame: int in Gen2RadioShow.LINE_FRAMES * 20:
+		show.advance_frame()
+	assert_eq(show.buenas_password, first, "a second pass rolled a new password")
+
+
+func test_a_password_category_names_a_word_of_its_own_kind() -> void:
+	assert_eq(
+		Gen2RadioShow.password_words(null, (6 << 4) | 1), "CHERRYGROVE CITY",
+		"the literal categories are read straight out of the table"
+	)
+
+
+## `PeoplePlaces4`'s list is walked from a label, so progress shortens it.
+func test_the_hidden_people_list_shrinks_with_progress() -> void:
+	var early: Array[int] = Gen2RadioShow.hidden_people(false, 0)
+	var beaten: Array[int] = Gen2RadioShow.hidden_people(true, 0)
+	var all_badges: Array[int] = Gen2RadioShow.hidden_people(true, 0xFF)
+	assert_eq(early.size(), 18)
+	assert_eq(beaten.size(), 13)
+	assert_eq(all_badges.size(), 5)
+	for class_number: int in all_badges:
+		assert_true(class_number in early, "class %d stopped being hidden" % class_number)

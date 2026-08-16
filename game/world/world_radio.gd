@@ -9,11 +9,10 @@ extends RefCounted
 ## the tuned channel live on `Gen2WorldState`; the music a station commits lands
 ## in `Gen2WorldState.map_music`, which is what `SnorlaxAwake` reads.
 ##
-## The station *programmes* are out. `engine/pokegear/radio.asm`'s shows are
-## their own content layer. What is modelled here is `UpdateRadioStation`,
-## `RadioChannels`, each handler's availability check, `LoadStation_*`,
-## `PlayRadioShow`'s Rocket override and `StartRadioStation`'s music commit,
-## which is the whole of what the overworld can observe.
+## Modelled here: `UpdateRadioStation`, `RadioChannels`, each handler's
+## availability check, `LoadStation_*`, `PlayRadioShow`'s Rocket override and
+## `StartRadioStation`'s music commit, which is the whole of what the overworld
+## can observe. The words a station then prints are [Gen2RadioShow].
 ##
 ## Channel ids are Crystal-canonical, the way `Gen2WorldScript.special_index()`
 ## keeps specials Crystal-canonical: Gold and Silver ship no Buena's Password
@@ -65,21 +64,18 @@ const KNOB_MIN: int = 0
 const KNOB_MAX: int = 80
 const KNOB_STEP: int = 2
 
-## constants/landmark_constants.asm. Crystal's LANDMARK_BATTLE_TOWER sits inside
-## the Johto run, so every landmark from it onward is one higher than
-## Gold/Silver's.
+## constants/landmark_constants.asm, Crystal-canonical. The two tables differ by
+## exactly one insertion, LANDMARK_BATTLE_TOWER inside the Johto run, so every
+## landmark from it onward is one higher than Gold and Silver's and
+## `profile_landmark()` is the whole conversion.
+const LANDMARK_BATTLE_TOWER: int = 29
 const KANTO_LANDMARK: int = 47
-const KANTO_LANDMARK_GOLD_SILVER: int = 46
 const LANDMARK_FAST_SHIP: int = 95
-const LANDMARK_FAST_SHIP_GOLD_SILVER: int = 94
 const LANDMARK_SPECIAL: int = 0
 const LANDMARK_RUINS_OF_ALPH: int = 9
 const LANDMARK_MAHOGANY_TOWN: int = 36
-const LANDMARK_MAHOGANY_TOWN_GOLD_SILVER: int = 35
 const LANDMARK_ROUTE_43: int = 37
-const LANDMARK_ROUTE_43_GOLD_SILVER: int = 36
 const LANDMARK_LAKE_OF_RAGE: int = 38
-const LANDMARK_LAKE_OF_RAGE_GOLD_SILVER: int = 37
 
 ## `wTimeOfDay`: .PKMNTalkAndPokedexShow runs the Pokedex Show in the morning and
 ## Oak's Talk the rest of the day.
@@ -147,12 +143,19 @@ static func raw_channel(channel: int, crystal: bool = true) -> int:
 	return -1 if channel == BUENAS_PASSWORD else channel - 1
 
 
+## A Crystal landmark index on the active profile.
+static func profile_landmark(landmark: int, crystal: bool = true) -> int:
+	if crystal or landmark < LANDMARK_BATTLE_TOWER:
+		return landmark
+	return landmark - 1
+
+
 static func kanto_landmark(crystal: bool = true) -> int:
-	return KANTO_LANDMARK if crystal else KANTO_LANDMARK_GOLD_SILVER
+	return profile_landmark(KANTO_LANDMARK, crystal)
 
 
 static func fast_ship_landmark(crystal: bool = true) -> int:
-	return LANDMARK_FAST_SHIP if crystal else LANDMARK_FAST_SHIP_GOLD_SILVER
+	return profile_landmark(LANDMARK_FAST_SHIP, crystal)
 
 
 ## `IsInJohto` and the Pokegear's own `.InJohto`, which agree once the landmark
@@ -234,9 +237,9 @@ static func _channel_for_rule(entry: Dictionary, context: Dictionary) -> int:
 			if not bool(context.get("rocket_signal", false)):
 				return -1
 			var lake: Array[int] = [
-				LANDMARK_MAHOGANY_TOWN if crystal else LANDMARK_MAHOGANY_TOWN_GOLD_SILVER,
-				LANDMARK_ROUTE_43 if crystal else LANDMARK_ROUTE_43_GOLD_SILVER,
-				LANDMARK_LAKE_OF_RAGE if crystal else LANDMARK_LAKE_OF_RAGE_GOLD_SILVER,
+				profile_landmark(LANDMARK_MAHOGANY_TOWN, crystal),
+				profile_landmark(LANDMARK_ROUTE_43, crystal),
+				profile_landmark(LANDMARK_LAKE_OF_RAGE, crystal),
 			]
 			return int(entry["channel"]) if landmark in lake else -1
 	return -1

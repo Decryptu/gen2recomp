@@ -253,9 +253,19 @@ static func _clock_reading(hour: int, minute: int) -> String:
 	return "%2d:%02d %s" % [reading, posmod(minute, 60), "AM" if hour24 < 12 else "PM"]
 
 
-## `.Radio`, whose card prints nothing but the tuned station's own name.
-func radio_tilemap(owned: Array, station: String) -> PackedInt32Array:
+## `.Radio`: the tuned station's own name under the dial, and whatever
+## [Gen2RadioShow] has printed into the two box rows.
+func radio_tilemap(
+	owned: Array, station: String, lines: PackedStringArray = PackedStringArray()
+) -> PackedInt32Array:
 	var map: PackedInt32Array = _card_base(&"radio", "")
+	# Drawn row by row rather than as one `\n` text: a show whose top row is
+	# still empty must leave the bottom one where it is, and `_draw_textbox`
+	# closes the gap instead.
+	for line: int in lines.size():
+		_draw_string(
+			map, CARD_TEXT_AT + Vector2i(0, line * CARD_TEXT_SPACING), lines[line]
+		)
 	if not station.is_empty():
 		_draw_string(map, RADIO_STATION_AT, station)
 	_draw_card_icons(map, owned)
