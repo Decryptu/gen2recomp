@@ -1197,14 +1197,18 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			)
 			_emit_runtime_event(&"text_buffer_requested", command)
 		Gen2WorldScript.GETSTRING:
+			## `Script_getstring` is `CopyName1`, which copies a plain character
+			## run up to its `@`. It is not a text: the first byte of
+			## `PokegearName` is `#`, which the command layer reads as an unknown
+			## command and refuses, so decoding this the way `writetext` is
+			## decoded leaves every `getstring` buffer empty and prints
+			## "<PLAYER> received !" with a hole where the name belongs.
 			var string_text: String = ""
 			if data != null:
 				var string_data: PackedByteArray = data.world_text(
 					int(_request.get("bank", 0)), int(command["address"])
 				)
-				var string_decoded: Dictionary = _decode_text_with_buffers(string_data)
-				if bool(string_decoded.get("ok", false)):
-					string_text = String(string_decoded.get("text", ""))
+				string_text = Gen2Text.decode(string_data, 0, string_data.size())
 			_set_text_buffer(int(command["string_buffer"]), string_text, &"string", {
 				"bank": int(_request.get("bank", 0)), "address": int(command["address"]),
 			})

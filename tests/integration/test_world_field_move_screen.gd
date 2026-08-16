@@ -923,11 +923,11 @@ func test_a_flagged_rock_stays_smashed_across_a_reload() -> void:
 	assert_true(bool(world.smash_object(ROCK_OBJECT_INDEX).get("ok", false)))
 	assert_true(world.state.is_event_flag_active(ROCK_EVENT_FLAG))
 
-	# The cache's own record still carries -1, so the reloaded object needs the
-	# flag put back on it the way the cartridge's map data carries it.
+	# The cache's own record still carries -1, so the map data needs the flag put
+	# on it the way the cartridge's does, before the load that reads it:
+	# `ReadObjectEvents` is the only thing that tests an object's event flag.
+	world.current_map.events["objects"][ROCK_OBJECT_INDEX]["event_flag"] = ROCK_EVENT_FLAG
 	world.reload_current_map()
-	(world.objects[ROCK_OBJECT_INDEX] as Gen2WorldObject).event_flag = ROCK_EVENT_FLAG
-	world.set_object_time(world.object_hour, world.object_time_of_day)
 	assert_null(world.object_at(ROCK_CELL), "a set event flag keeps it hidden")
 
 

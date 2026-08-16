@@ -2402,11 +2402,19 @@ func test_event_flags_hide_objects_from_rendering_occupancy_and_dispatch() -> vo
 	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 1)
 	assert_false(world.can_walk_to(Vector2i(5, 6)))
 
+	## `ReadObjectEvents` tests the flag at map load and nothing re-tests it while
+	## the map is up, so writing it moves nothing until the map is loaded again.
+	## That is why `appear` and `disappear` exist and edit the struct themselves.
 	world.set_event_flag(7)
-	assert_eq(world.visible_objects().size(), 0)
-	assert_null(world.object_at(Vector2i(5, 6)))
-	assert_true(world.can_walk_to(Vector2i(5, 6)))
-	assert_eq(world.dispatch_events(Vector2i(5, 6)).size(), 0)
+	assert_eq(world.visible_objects().size(), 1)
+	assert_not_null(world.object_at(Vector2i(5, 6)))
+	assert_false(world.can_walk_to(Vector2i(5, 6)))
+
+	var reloaded: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(world.data, world.snapshot())
+	assert_eq(reloaded.visible_objects().size(), 0)
+	assert_null(reloaded.object_at(Vector2i(5, 6)))
+	assert_true(reloaded.can_walk_to(Vector2i(5, 6)))
+	assert_eq(reloaded.dispatch_events(Vector2i(5, 6)).size(), 0)
 
 	world.clear_event_flag(7)
 	assert_eq(world.visible_objects().size(), 1)
@@ -2649,7 +2657,9 @@ func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
 	assert_eq(completed[0]["status"], &"complete")
 	assert_true(world.event_flag_active(7))
 	assert_true(world.state.hall_of_fame())
-	assert_eq(world.visible_objects().size(), 0)
+	## Still standing there: the flag hides it on the next map load, not on the
+	## `setevent` that wrote it, which is what `restored` below is.
+	assert_eq(world.visible_objects().size(), 1)
 
 	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(data, world.snapshot())
 	assert_not_null(restored)
@@ -5885,6 +5895,35 @@ func test_text_ram_resolves_through_the_cartridges_own_pointer_table() -> void:
 	var ram: Dictionary = runner.text_context()["ram"]
 	assert_true(ram.has(0xCF6B), "buffer 4 is wStringBuffer1, not wStringBuffer4")
 	assert_false(ram.has(0xCFA4))
+
+
+## `Script_getstring` is `CopyName1`: a plain character run ending in `@`, not a
+## text-command stream. `PokegearName` is `db "#GEAR@"`, and `#` is `$54`, which
+## the command layer refuses as an unknown command; decoding it that way filled
+## the buffer with nothing and printed "<PLAYER> received !" in Mom's own scene.
+func test_getstring_reads_a_name_and_not_a_text_stream() -> void:
+	var texts: Dictionary = RomCache.read_json(RomCache.world_text_path(_directory))
+	# "#GEAR@": the word code for POKé, four letters, and the name terminator.
+	texts["48:6500"] = [0x54, 0x86, 0x84, 0x80, 0x91, 0x50]
+	RomCache.write_json(RomCache.world_text_path(_directory), texts)
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6430"] = [
+		Gen2WorldScript.GETSTRING, 0x00, 0x65, RomLayout.STRING_BUFFER_4,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.from_dict({}), {
+		"kind": &"script", "bank": 48, "script": 0x6430,
+	})
+	runner.advance()
+
+	var context: Dictionary = runner.text_context()
+	assert_eq(String(context["buffers"][RomLayout.STRING_BUFFER_4]), "POKéGEAR")
+	assert_eq(
+		String((context["ram"] as Dictionary)[0xCFA4]), "POKéGEAR",
+		"_ReceivedItemText reads wStringBuffer4 by address, not by number"
+	)
 
 
 func test_an_unfilled_buffer_contributes_no_address() -> void:
