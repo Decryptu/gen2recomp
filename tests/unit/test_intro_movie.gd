@@ -131,3 +131,55 @@ func test_a_button_ends_the_movie_and_the_music() -> void:
 func test_a_cache_without_the_art_does_not_offer_the_movie() -> void:
 	assert_false(Gen2IntroMovie.available(null))
 	assert_null(Gen2IntroMoviePage.from_data(null))
+
+
+## `Intro_PerspectiveScrollBG` writes `wLYOverrides`, which `LCD` reads live
+## rather than at VBlank, so the screen a pass's sprites reach already carries
+## the fill the pass after it makes. Reporting the live buffer instead leaves
+## the grass band two pixels behind everything drawn on it.
+func test_the_perspective_band_is_reported_a_pass_ahead() -> void:
+	var movie: Gen2IntroMovie = _movie()
+	while movie.scene() != 3 and movie.frame() < FRAME_CAP:
+		movie.advance_frame()
+	while movie.waiting():
+		movie.advance_frame()
+	var band: Array[int] = []
+	for _pass: int in 4:
+		band.append(movie.scroll_x_at(96))
+		movie.advance_frame()
+	# The scene's own first pass has not run on the frame its delay ends; every
+	# pass after it is two pixels past the buffer it wrote.
+	assert_eq(band, [0, 4, 6, 8] as Array[int])
+	# The last pass has none after it, so the screen it reaches is the buffer as
+	# it stands: $81 passes of two pixels, wrapped.
+	var last: int = 0
+	while movie.scene() == 3 and movie.frame() < FRAME_CAP:
+		last = movie.scroll_x_at(96)
+		movie.advance_frame()
+	assert_eq(last, (0x81 * 2) & 0xFF)
+
+
+## A setup scene clears the palettes first and copies its own run in last, past
+## every decompression, so the whole wait is that clear rather than the scene it
+## is loading.
+func test_a_setup_scene_is_cleared_until_its_decompressions_are_served() -> void:
+	var movie: Gen2IntroMovie = _movie()
+	while not movie.waiting() and movie.frame() < FRAME_CAP:
+		movie.advance_frame()
+	assert_eq(movie.scene(), 1)
+	var waits: int = 0
+	while movie.waiting():
+		waits += 1
+		for slot: int in Gen2IntroMovie.BG_PALETTES:
+			for colour: Color in movie.palette(slot):
+				assert_eq(colour, Color.BLACK)
+		movie.advance_frame()
+	# `Intro_ClearBGPals` and `ClearTilemap` plus a frame per eight tiles of the
+	# scene's four sheets.
+	assert_eq(waits, 58)
+	# `IntroScene26` calls `ClearBGPalettes` instead, whose fill is white.
+	while movie.scene() != Gen2IntroMovie.SCENE_CRYSTAL_UNOWNS + 1 \
+			and movie.frame() < FRAME_CAP:
+		movie.advance_frame()
+	assert_true(movie.waiting())
+	assert_eq(movie.palette(0)[0], Color.WHITE)

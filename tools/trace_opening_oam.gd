@@ -16,8 +16,19 @@ extends SceneTree
 ## A line is `frame slot y x tile`, with `y` and `x` the OAM bytes: a cartridge's
 ## own buffer is read at the frame boundary, where hDMATransfer copies it.
 ##
+## Either movie also writes `<out>.state`, one `frame scene counter` line per
+## frame. That is the pair a cartridge's own `wJumptableIndex` and
+## `wIntroSceneFrameCounter` hold, and it is what aligns a pixel diff: a setup
+## scene's decompression overruns VBlank by three to twelve frames there and by
+## none here, so a per-scene offset is still several frames out inside the scene
+## and every frame of a fade compares against the wrong step of it. A frame
+## spending the setup's own delay is written under the setup scene's index,
+## which is where the source spends it.
+##
 ## A fourth argument writes the page's own picture for those frames, named after
 ## each, so the frame a diff points at can be looked at beside the emulator's.
+## It is a comma list, and an entry may be a `lo-hi` range, which is what a
+## per-frame pixel diff over a whole scene wants rather than a hand-listed set.
 ## The page draws into an `Image`, so this stays headless;
 ## `tools/preview_intro.gd` photographs the same screen through the boot
 ## cinema, whose frames count from the copyright rather than from this phase.
@@ -33,6 +44,8 @@ const MOVIE_FRAME_CAP: int = 4000
 ## Frames to write a PNG for, beside the trace's own output path.
 var _shots: Dictionary = {}
 var _shot_prefix: String = "res://presents"
+## `frame scene counter` per frame, for whichever phase keeps those.
+var _state := PackedStringArray()
 
 
 func _initialize() -> void:
@@ -52,7 +65,14 @@ func _initialize() -> void:
 		_shot_prefix = args[2].get_basename()
 	if args.size() > 3:
 		for value: String in args[3].split(","):
-			_shots[int(value)] = true
+			var dash: int = value.find("-", 1)
+			if dash < 0:
+				_shots[int(value)] = true
+				continue
+			for frame: int in range(
+				int(value.left(dash)), int(value.substr(dash + 1)) + 1
+			):
+				_shots[frame] = true
 	var lines: PackedStringArray
 	match args[1]:
 		"presents":
@@ -71,6 +91,10 @@ func _initialize() -> void:
 			return
 		file.store_string("\n".join(lines) + "\n")
 		print("%d lines to %s" % [lines.size(), args[2]])
+		if not _state.is_empty():
+			var states := FileAccess.open(args[2] + ".state", FileAccess.WRITE)
+			if states != null:
+				states.store_string("\n".join(_state) + "\n")
 	else:
 		print("\n".join(lines))
 	quit(0)
@@ -122,6 +146,7 @@ func _trace_intro(data: GameData) -> PackedStringArray:
 	var scene: int = -1
 	while not movie.finished() and frame < MOVIE_FRAME_CAP:
 		_append_frame(out, frame, page.shadow_oam(movie))
+		_append_state(frame, movie.scene(), movie.counter(), movie.waiting())
 		if _shots.has(frame):
 			page.draw(movie).save_png("%s_f%d.png" % [_shot_prefix, frame])
 		if movie.scene() != scene:
@@ -147,6 +172,7 @@ func _trace_gs_intro(data: GameData) -> PackedStringArray:
 	var scene: int = -1
 	while not movie.finished() and frame < MOVIE_FRAME_CAP:
 		_append_frame(out, frame, page.shadow_oam(movie))
+		_append_state(frame, movie.scene(), movie.counter(), movie.waiting())
 		if _shots.has(frame):
 			page.draw(movie).save_png("%s_f%d.png" % [_shot_prefix, frame])
 		if movie.scene() != scene:
@@ -185,6 +211,19 @@ func _trace_title(data: GameData) -> PackedStringArray:
 		frame += 1
 	print("frame %d: finished" % frame)
 	return out
+
+
+## A frame paying a setup scene's delay is written under the setup scene's own
+## index, which is the one the cartridge is still in while it spends it.
+func _append_state(frame: int, scene: int, counter: int, waiting: bool) -> void:
+	# A setup scene's counter is the previous scene's last value until the
+	# routine's own tail zeroes it, and the routine is spread over every
+	# `DelayFrame` its decompressions spend, so a waiting frame carries no
+	# counter to line up on and is written as -1.
+	_state.append(
+		"%d %d %d" % [frame, scene - 1, -1] if waiting
+		else "%d %d %d" % [frame, scene, counter]
+	)
 
 
 func _append_frame(out: PackedStringArray, frame: int, entries: Array[Dictionary]) -> void:

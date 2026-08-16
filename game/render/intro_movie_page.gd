@@ -240,13 +240,15 @@ func draw(movie: Gen2IntroMovie) -> Image:
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
 	if movie == null:
 		return image
-	var behind: PackedByteArray = _draw_background(image, movie)
+	var background: Array = _draw_background(image, movie)
+	var behind: PackedByteArray = background[0]
+	var forced: PackedByteArray = background[1]
 	# The lower OAM index wins a pixel, so a slot only paints where no earlier
 	# one did.
 	var taken := PackedByteArray()
 	taken.resize(WIDTH * HEIGHT)
 	for entry: Dictionary in shadow_oam(movie):
-		_draw_sprite(image, movie, entry, behind, taken)
+		_draw_sprite(image, movie, entry, behind, forced, taken)
 	return image
 
 
@@ -298,13 +300,19 @@ func shadow_oam(movie: Gen2IntroMovie) -> Array[Dictionary]:
 ## The BG map, sampled through `hSCY` and the scanline's own `hSCX`. Both are
 ## bytes and the map is 256 pixels square, so the sampling wraps rather than
 ## clipping.
-func _draw_background(image: Image, movie: Gen2IntroMovie) -> PackedByteArray:
+func _draw_background(image: Image, movie: Gen2IntroMovie) -> Array:
 	var behind := PackedByteArray()
+	# The same indices where the tile's own attribute carries the priority bit,
+	# which wins over every sprite rather than only over the ones marked
+	# `OAM_PRIO`. The panorama's grass row carries it, which is what puts the
+	# blades over Pichu's ears.
+	var forced := PackedByteArray()
 	var map: PackedByteArray = movie.bg_map()
 	var attr: PackedByteArray = movie.bg_attr()
 	if map.size() < RomLayout.INTRO_MAP_BYTES:
-		return behind
+		return [behind, forced]
 	behind.resize(WIDTH * HEIGHT)
+	forced.resize(WIDTH * HEIGHT)
 	var screen: PackedByteArray = movie.screen_tilemap()
 	var palettes: Array[PackedColorArray] = []
 	for slot: int in Gen2IntroMovie.BG_PALETTES:
@@ -355,15 +363,17 @@ func _draw_background(image: Image, movie: Gen2IntroMovie) -> PackedByteArray:
 				bool(byte & ATTR_XFLIP), bool(byte & ATTR_YFLIP)
 			)
 			behind[y * WIDTH + x] = pixel
+			if byte & ATTR_PRIORITY != 0:
+				forced[y * WIDTH + x] = pixel
 			image.set_pixel(x, y, palette[pixel])
-	return behind
+	return [behind, forced]
 
 
 ## One shadow-OAM entry, off the sheet its struct was loaded into. The position
 ## is already the OAM byte, so it is only moved off OAM's own (8, 16) origin.
 func _draw_sprite(
 	image: Image, movie: Gen2IntroMovie, entry: Dictionary,
-	behind: PackedByteArray, taken: PackedByteArray
+	behind: PackedByteArray, forced: PackedByteArray, taken: PackedByteArray
 ) -> void:
 	var tile: int = int(entry["tile"])
 	var strip: PackedByteArray = _sheet(
@@ -389,14 +399,15 @@ func _draw_sprite(
 		image, strip, palette, tile,
 		Vector2i(int(entry["x"]) - OAM_ORIGIN.x, int(entry["y"]) - OAM_ORIGIN.y),
 		bool(entry["flip_x"]), bool(entry["flip_y"]), taken,
-		behind if bool(entry.get("priority", false)) else PackedByteArray()
+		behind if bool(entry.get("priority", false)) else forced
 	)
 
 
 ## [param taken] marks the pixels an earlier slot has already claimed, and
-## [param behind] is the background's own colour indices when the entry carries
-## `OAM_PRIO` and empty otherwise. The claim comes first: a sprite that loses the
-## pixel to the background still wins it against the sprites behind it.
+## [param behind] is the background's own colour indices: every one of them when
+## the entry carries `OAM_PRIO`, and only the tiles whose attribute carries the
+## priority bit otherwise. The claim comes first: a sprite that loses the pixel
+## to the background still wins it against the sprites behind it.
 func _blit_sprite_tile(
 	image: Image, strip: PackedByteArray, palette: PackedColorArray, tile: int,
 	at: Vector2i, flip_x: bool, flip_y: bool, taken: PackedByteArray,
