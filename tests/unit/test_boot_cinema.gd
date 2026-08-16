@@ -152,6 +152,39 @@ func test_a_skipped_copyright_starts_on_the_next_phase_the_host_names() -> void:
 	))
 
 
+## `PlayMusic MUSIC_TITLE` sits in `_TitleScreen` on Gold and Silver and in
+## `TitleScreenEntrance.done` on Crystal, so the request lands with the screen on
+## one profile and once the logo has come in on the other.
+func test_the_title_music_lands_where_each_profile_plays_it() -> void:
+	var gs := Boot.new()
+	gs.start(&"gold", null, [Boot.PHASE_TITLE])
+	var opening: Array[Dictionary] = gs.drain_events().filter(
+		func(event: Dictionary) -> bool: return event["type"] == &"play_music"
+	)
+	assert_eq(opening.size(), 1, "`_TitleScreen` ends on it")
+	assert_eq(int(opening[0]["music"]), Boot.MUSIC_TITLE)
+
+	var crystal := Boot.new()
+	crystal.start(&"crystal", null, [Boot.PHASE_TITLE])
+	assert_true(crystal.drain_events().all(
+		func(event: Dictionary) -> bool: return event["type"] != &"play_music"
+	), "Crystal's entrance is still coming in")
+	var music: Array[Dictionary] = []
+	var frames: int = 0
+	while music.is_empty() and frames < 200:
+		music.append_array(crystal.advance_frame().filter(
+			func(event: Dictionary) -> bool: return event["type"] == &"play_music"
+		))
+		frames += 1
+		assert_eq(
+			crystal.title().scene() == Gen2TitleScene.SCENE_ENTRANCE,
+			music.is_empty(),
+			"the entrance and the silence in front of it end together"
+		)
+	assert_eq(music.size(), 1, "`.done` is what starts it")
+	assert_eq(int(music[0]["music"]), Boot.MUSIC_TITLE)
+
+
 ## `RunTitleScreen` runs the screen rather than holding the phase: a held START
 ## answers it, and the answer is what reaches the host.
 func test_the_title_phase_runs_its_own_screen_and_answers_the_host() -> void:

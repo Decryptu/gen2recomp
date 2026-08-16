@@ -409,6 +409,22 @@ func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
 
 
+## The other half of the same rule: the radio card is what writes
+## `wPokegearRadioMusicPlaying`, so a Pokegear that opened one owes the map its
+## music back. Dead air is `NoRadioMusic`, which owes it just as a station does.
+func test_the_radio_card_is_what_owes_the_map_its_music_back() -> void:
+	await _open_world()
+	_world_screen._open_pokegear()
+	await get_tree().process_frame
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_eq(host.radio_music_playing(), Gen2WorldServiceScreen.RADIO_MUSIC_SILENT)
+	host._open_card(Gen2PokegearScreen.CARD_RADIO)
+	await get_tree().process_frame
+	assert_eq(host._pokegear.card(), Gen2PokegearScreen.CARD_RADIO)
+	assert_ne(host.radio_music_playing(), Gen2WorldServiceScreen.RADIO_MUSIC_SILENT)
+
+
 ## A run of a card's tilemap read back as text, which is what the page printed.
 func _row_text(map: PackedInt32Array, at: Vector2i, length: int) -> String:
 	var out: String = ""
@@ -451,6 +467,12 @@ func test_town_map_decoration_opens_fullscreen_and_closes_the_script_request() -
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.TOWN_MAP)
 	assert_not_null(host._town_map)
 	assert_true(host._town_map.visible)
+	## `_TownMap` touches no music, so nothing is owed on the way out: only the
+	## radio card sets `wPokegearRadioMusicPlaying`, and only that restarts the
+	## map's own track over the poster.
+	assert_eq(
+		host.radio_music_playing(), Gen2WorldServiceScreen.RADIO_MUSIC_SILENT
+	)
 	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
