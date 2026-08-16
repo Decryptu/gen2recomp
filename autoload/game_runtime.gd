@@ -164,7 +164,10 @@ func select_game(game_id: StringName) -> bool:
 ## [method select_game], which the launcher calls on Play and after an import,
 ## not while the player walks along the shelf.
 func _retarget_mods(game_id: StringName) -> void:
-	if Gen2ModHost.instance().target_game() == game_id:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	if host.target_game() == game_id:
+		return
+	if host.retarget_if_same_mod_set(game_id):
 		return
 	reload_mods(game_id)
 

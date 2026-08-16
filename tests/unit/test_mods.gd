@@ -185,6 +185,32 @@ func test_a_mod_for_another_cartridge_is_refused_by_name_and_not_run() -> void:
 		assert_ne(StringName(failure["reason"]), &"incompatible_game")
 
 
+func test_retargeting_keeps_live_mods_when_the_enabled_set_is_unchanged() -> void:
+	_write_dependency_mod("%s/every_game" % ROOT, "everygame", "1.0.0")
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	host.load_discovered()
+	var entry: Object = host.mod_entry(&"everygame")
+	assert_true(host.retarget_if_same_mod_set(RomRegistry.GOLD))
+	assert_eq(host.target_game(), RomRegistry.GOLD)
+	assert_same(host.mod_entry(&"everygame"), entry, "the entry script was not rerun")
+
+
+func test_retargeting_refuses_to_keep_a_different_eligible_mod_set() -> void:
+	_write_dependency_mod("%s/crystal_only" % ROOT, "crystalonly", "1.0.0")
+	_write("%s/crystal_only/mod.json" % ROOT, JSON.stringify({
+		"id": "crystalonly", "name": "Crystal Only", "version": "1.0.0",
+		"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		"games": ["crystal"],
+	}))
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.set_target_game(RomRegistry.GOLD)
+	host.discover(ROOT)
+	host.load_discovered()
+	assert_false(host.retarget_if_same_mod_set(RomRegistry.CRYSTAL))
+	assert_eq(host.target_game(), RomRegistry.GOLD, "a refused retarget leaves the host intact")
+
+
 func test_dependencies_load_before_the_mod_that_requires_them() -> void:
 	_write_dependency_mod("%s/dep_core" % ROOT, "core", "1.5.0")
 	_write_dependency_mod("%s/addon" % ROOT, "addon", "2.0.0", {"core": "^1.2.0"})

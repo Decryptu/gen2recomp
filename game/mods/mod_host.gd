@@ -1193,6 +1193,21 @@ func target_game() -> StringName:
 	return _target_game
 
 
+## Retargets the live registrations when the cartridge filter selects exactly
+## the same enabled manifests. Entry scripts can be expensive (a randomizer may
+## build its tables while registering), so rerunning an unchanged set on Play
+## would block the launcher without changing what the host provides.
+func retarget_if_same_mod_set(game_id: StringName) -> bool:
+	for raw_manifest: Variant in _manifests.values():
+		var manifest: Gen2ModManifest = raw_manifest
+		if not Gen2ModState.is_enabled(manifest.id):
+			continue
+		if manifest.supports_game(_target_game) != manifest.supports_game(game_id):
+			return false
+	_target_game = game_id
+	return true
+
+
 ## A mod may read and replace only its own slot namespace. The exact manifest
 ## object handed to register() is the capability; inventing another object with
 ## the same id grants nothing.
