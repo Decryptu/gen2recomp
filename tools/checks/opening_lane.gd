@@ -8,6 +8,10 @@ var _r: RefCounted = null
 ##
 ##   Godot --headless --path . -s res://tools/validate.gd -- opening_lane
 
+## Longer than the whole boot: Crystal's movie is 2,340 frames and Gold and
+## Silver's 2,355, and the title screen's music lands just behind either.
+const OPENING_FRAME_CAP: int = 6000
+
 const REQUIRED_SECTIONS: Dictionary = {
 	"maps": RomCache.WORLD_MAPS,
 	"tilesets": RomCache.WORLD_TILESETS,
@@ -88,6 +92,8 @@ func _validate(game_id: StringName) -> bool:
 			elif record.get("bytes", PackedByteArray()).is_empty():
 				failures.append("missing_audio_record_payload:%s:%d" % [kind, index])
 
+	failures.append_array(_audit_opening_music(data))
+
 	var script_audit: Dictionary = _audit_scripts(data, game_id == &"crystal")
 	for reason: String in script_audit["failures"]:
 		failures.append(reason)
@@ -143,3 +149,57 @@ func _audit_scripts(data: GameData, crystal: bool) -> Dictionary:
 		"unknown_commands": unknown_commands,
 		"malformed_pointers": malformed_pointers,
 	}
+
+
+## The opening's own `PlayMusic` calls, driven through the live screen rather
+## than counted off the coordinator: every one of them has to reach the driver,
+## which is the half `tests/unit/test_boot_cinema.gd` cannot see. The whole boot
+## is run to the title screen's own `PlayMusic MUSIC_TITLE`, so the movie's
+## request is spent on the way.
+func _audit_opening_music(data: GameData) -> Array[String]:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return ["no_scene_tree_for_opening_music"]
+	var splash := Gen2SplashScreen.new()
+	tree.root.add_child(splash)
+	# The screen counts its own frames off the clock in `_process`; this check
+	# spends them by hand, the way `tools/preview_*.gd` do.
+	splash.set_process(false)
+	var out: Array[String] = []
+	if not splash.open(data):
+		out.append("splash_did_not_open")
+		tree.root.remove_child(splash)
+		splash.free()
+		return out
+	var movie_music: int = -1
+	var movie_frame: int = 0
+	var title_music: int = -1
+	var frames: int = 0
+	var seen: int = -1
+	while frames < OPENING_FRAME_CAP and title_music < 0:
+		splash.advance_frames(1)
+		frames += 1
+		var request: Dictionary = splash.last_music_request()
+		if int(request.get("frame", -1)) == seen or int(request.get("music", 0)) <= 0:
+			continue
+		seen = int(request.get("frame", -1))
+		if not bool(request.get("played", false)):
+			out.append("opening_music_refused:%d" % int(request.get("music", 0)))
+			break
+		if splash.visible_image() == &"title":
+			title_music = int(request["music"])
+		elif movie_music < 0:
+			movie_music = int(request["music"])
+			movie_frame = seen
+	if movie_music < 0:
+		out.append("the movie asked the driver for no music")
+	if title_music != Gen2BootCinema.MUSIC_TITLE:
+		out.append("the title screen asked the driver for music %d" % title_music)
+	elif not splash.music_playing():
+		out.append("the title screen's music did not reach the driver")
+	print("  opening_music: movie=%d at frame %d, title=%d" % [
+		movie_music, movie_frame, title_music,
+	])
+	tree.root.remove_child(splash)
+	splash.free()
+	return out

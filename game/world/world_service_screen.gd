@@ -39,6 +39,13 @@ const POKEGEAR_CARDS: Array[Dictionary] = [
 	{"card": &"radio", "name": "RADIO", "flag": Gen2WorldState.ENGINE_RADIO_CARD},
 ]
 
+## `wPokegearRadioMusicPlaying`, which is what `ExitPokegearRadio_HandleMusic`
+## branches on: zero while nothing in this overlay has touched the music, and
+## one of the source's own two values once the radio card has.
+const RADIO_MUSIC_SILENT: int = 0
+const RADIO_MUSIC_RESTART_MAP: int = 0xFE
+const RADIO_MUSIC_ENTER_MAP: int = 0xFF
+
 const WorldMenu := preload("res://game/world/world_menu.gd")
 
 ## `BuyMenuLoop`'s four states: the list `ScrollingMenu` runs, the quantity
@@ -97,6 +104,9 @@ var _town_map: Gen2TownMapScreen = null
 ## The clock, phone or radio card while one is open, which is a hardware-
 ## resolution screen over this panel the way the region map is.
 var _pokegear: Gen2PokegearScreen = null
+## `wPokegearRadioMusicPlaying`. Only the radio card writes it, so an overlay
+## that never opened one leaves the map's own music where it stands.
+var _radio_music: int = RADIO_MUSIC_SILENT
 ## Whether the region map on screen is the fly map, which answers a spawn rather
 ## than closing back into the card list.
 var _fly_map: bool = false
@@ -1042,6 +1052,11 @@ func _refresh_card() -> void:
 			)
 		Gen2PokegearScreen.CARD_RADIO:
 			var tuned: Dictionary = _world.radio_station()
+			# `RadioMusicRestartDE` on a station and `NoRadioMusic` on dead air:
+			# either way the card has taken the music off the map, which is what
+			# makes the exit restart it.
+			_radio_music = RADIO_MUSIC_RESTART_MAP if bool(tuned.get("ok", false)) \
+				else RADIO_MUSIC_ENTER_MAP
 			var show: Gen2RadioShow = _world.radio_show()
 			_pokegear.set_radio(
 				_world.state.radio_knob(),
@@ -1073,6 +1088,15 @@ func _on_card_switched(direction: int) -> void:
 		return
 	_close_card()
 	_open_card(card)
+
+
+## `wPokegearRadioMusicPlaying`, for the host that owns the driver:
+## `ExitPokegearRadio_HandleMusic` restarts the map's music only when the radio
+## card has played something over it, and every other service leaves it alone.
+## The restart lands when this overlay closes rather than when the card does,
+## since the card list is this panel rather than the Pokegear's own screen.
+func radio_music_playing() -> int:
+	return _radio_music
 
 
 ## One hardware frame of whichever card is open. Only the radio card spends any:

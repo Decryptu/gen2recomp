@@ -2955,9 +2955,12 @@ func _on_service_completed(results: Array) -> void:
 		host.queue_free()
 	if _apply_fly_choice(results):
 		return
-	# The radio card writes wMapMusic, so what plays after the Pokegear closes is
-	# whichever station was left tuned, or the map's own track when none was.
-	_play_current_map_music()
+	# `ExitPokegearRadio_HandleMusic`: only the radio card takes the music off the
+	# map, and the restart behind it is what plays whichever station was left
+	# tuned, or the map's own track when none was. Every other service leaves the
+	# music where it stands, which is what `_TownMap` does with the map poster.
+	if host != null and host.radio_music_playing() != Gen2WorldServiceScreen.RADIO_MUSIC_SILENT:
+		_play_current_map_music()
 	_show_script_results(results)
 	_reopen_start_menu_if_due()
 

@@ -13,6 +13,11 @@ const FRAME_RATE: float = 59.7275
 const COPYRIGHT_PRELUDE_FRAMES: int = 10
 const COPYRIGHT_HOLD_FRAMES: int = 100
 
+## `constants/music_constants.asm`'s first two entries, which is every song the
+## boot itself names; the movies name their own.
+const MUSIC_NONE: int = 0
+const MUSIC_TITLE: int = 1
+
 const PHASE_COPYRIGHT: StringName = &"copyright"
 const PHASE_PRESENTS: StringName = &"presents"
 const PHASE_INTRO_MOVIE: StringName = &"intro_movie"
@@ -82,7 +87,7 @@ func start(
 	_phase_frame = 0
 	_waiting_sound = &""
 	_events.clear()
-	_emit(&"play_music", {"music": &"none", "restart": true})
+	_emit(&"play_music", {"music": MUSIC_NONE, "restart": true})
 	_emit(&"hide_image", {"id": &"boot"})
 
 
@@ -160,7 +165,12 @@ func _advance_title(held: Array) -> void:
 	if _title == null:
 		_enter_after(PHASE_TITLE)
 		return
+	var entrance: bool = _title.scene() == Gen2TitleScene.SCENE_ENTRANCE
 	_title.advance_frame(held)
+	if entrance and _title.scene() != Gen2TitleScene.SCENE_ENTRANCE:
+		# `TitleScreenEntrance.done`: the logo has come in, the LY override is
+		# dropped and the music starts there rather than with the screen.
+		_emit(&"play_music", {"music": MUSIC_TITLE, "restart": true})
 	if not _title.finished():
 		return
 	var option: int = _title.selected_option()
@@ -330,12 +340,14 @@ func _enter_after(phase: StringName) -> void:
 				_emit(&"show_image", {"id": &"intro_movie", "scene": 0})
 			PHASE_TITLE:
 				# `_TitleScreen` draws the whole screen and plays
-				# `SFX_TITLE_SCREEN_ENTRANCE` before the loop's first frame;
-				# Crystal's music waits for its entrance to finish, so the
-				# request is the same either way and the host owns the delay.
+				# `SFX_TITLE_SCREEN_ENTRANCE` before the loop's first frame. Gold
+				# and Silver's `_TitleScreen` ends on `PlayMusic MUSIC_TITLE`;
+				# Crystal's sits in `TitleScreenEntrance.done` instead, which
+				# [method _advance_title] is where this coordinator reaches.
 				_title = Gen2TitleScene.create(_profile, _sine)
 				_emit(&"open_title", {"profile": _profile})
-				_emit(&"play_music", {"music": &"title", "restart": false})
+				if _profile != RomRegistry.CRYSTAL:
+					_emit(&"play_music", {"music": MUSIC_TITLE, "restart": true})
 		return
 	_phase = PHASE_FINISHED
 	_phase_frame = 0

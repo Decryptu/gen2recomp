@@ -41,6 +41,9 @@ var _image: Image = null
 var _visible_id: StringName = &""
 var _accumulator: float = 0.0
 var _closed: bool = false
+## The last `PlayMusic` handed to the driver, which is the only place the
+## opening's own music can be observed from outside.
+var _last_music: Dictionary = {}
 
 
 ## Answers false on a cache with no imported splash art at all, which is the
@@ -80,8 +83,7 @@ func _ready() -> void:
 	_background.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_background)
-	_audio = Gen2AudioPlayer.new()
-	add_child(_audio)
+	_ensure_audio()
 	if _cinema != null:
 		_refresh()
 
@@ -157,6 +159,18 @@ func frames_left() -> int:
 		+ Gen2BootCinema.COPYRIGHT_HOLD_FRAMES - _cinema.phase_frame()
 
 
+## The last `PlayMusic` this host handed the driver, and whether the driver took
+## it: `{ music, restart, played }`, empty before the first one. The events
+## themselves are the coordinator's; only this says one arrived.
+func last_music_request() -> Dictionary:
+	return _last_music.duplicate()
+
+
+## Whether a song is running in the driver right now.
+func music_playing() -> bool:
+	return _audio != null and bool(_audio.audio_status().get("music_active", false))
+
+
 ## Which image the coordinator has up, empty while the screen is blank.
 func visible_image() -> StringName:
 	return _visible_id
@@ -195,6 +209,10 @@ func _apply(events: Array[Dictionary]) -> void:
 				return
 			&"play_sfx":
 				_play_sfx(int(event.get("sfx", 0)))
+			&"play_music":
+				_play_music(
+					int(event.get("music", 0)), bool(event.get("restart", true))
+				)
 			&"finish_intro":
 				_refresh()
 				_finish()
@@ -234,16 +252,52 @@ func _frame_image() -> Image:
 	return _blank()
 
 
-## `PlaySFX`, which the GameFreak animation calls five times on Crystal and once
-## on Gold and Silver. A screen built outside the tree has no player, which is
-## what a frame-count test is, so the frames are spent either way.
-func _play_sfx(sfx: int) -> void:
-	if _audio == null or _data == null or sfx <= 0:
+## The driver, built on the first frame that needs it rather than in `_ready`: a
+## tool or a check that adds this screen and spends its frames by hand runs
+## before the tree calls one, and the copyright's own `PlayMusic MUSIC_NONE` is
+## on the first of those frames.
+func _ensure_audio() -> void:
+	if _audio != null:
 		return
-	_audio.play_record(_data.world_audio(&"sfx", sfx), &"sfx", {
+	_audio = Gen2AudioPlayer.new()
+	add_child(_audio)
+
+
+## `PlaySFX`, which the GameFreak animation calls five times on Crystal and once
+## on Gold and Silver. A cache with no record for one spends its frames anyway,
+## which is what a frame-count test is.
+func _play_sfx(sfx: int) -> void:
+	_ensure_audio()
+	if _data == null or sfx <= 0:
+		return
+	_audio.play_record(_data.world_audio(&"sfx", sfx), &"sfx", _audio_assets())
+
+
+## `PlayMusic`, which the copyright's own start, both movies and the title
+## screen each ask for. `MUSIC_NONE` is a stop rather than a stream, and the
+## player answers it as `_InitSound` does.
+func _play_music(music: int, restart: bool) -> void:
+	_ensure_audio()
+	if _data == null or music < 0:
+		return
+	var answer: Dictionary = _audio.play_record(
+		_data.world_audio(&"music", music), &"music", _audio_assets(), restart
+	)
+	_last_music = {
+		"music": music,
+		"restart": restart,
+		"played": bool(answer.get("ok", false)),
+		"frame": _cinema.frame() if _cinema != null else 0,
+	}
+
+
+## The two blobs `Gen2SoundEngine` reads outside a record: `WaveSamples` and the
+## drumkits, which every request here shares.
+func _audio_assets() -> Dictionary:
+	return {
 		"wave_samples": _data.world_audio_asset(&"wave_samples"),
 		"drumkits": _data.world_audio_asset(&"drumkits"),
-	})
+	}
 
 
 ## `ClearTilemap` leaves the blank tile everywhere, which through this palette
