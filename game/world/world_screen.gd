@@ -84,6 +84,11 @@ var _pending_headbutt_finish: Dictionary = {}
 ## empty on every other frame. The map swaps between the two stages, which is
 ## where the setup script's own list sits.
 var _map_fade: Dictionary = {}
+## `wLandmarkSignTimer` and the window the sign is drawn in. The map load decides
+## whether there is a sign (`Gen2WorldAPI.map_name_sign_pending`); the sixty
+## frames it stands for are spent here, like every other overworld countdown.
+var _map_name_sign: TextureRect = null
+var _map_name_sign_frames: int = 0
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
@@ -436,6 +441,11 @@ func advance_frame() -> void:
 	## Before everything the map draws: the fade owns the frame the map swaps on,
 	## and nothing else runs while `RunMapSetupScript` is spending its own.
 	_advance_map_fade()
+	## `RefreshMapSprites` runs inside the setup script and `PlaceMapNameSign`
+	## with the rest of the map's background, so a sign raised by the load this
+	## frame carried is spent from the next one.
+	_advance_map_name_sign()
+	_raise_map_name_sign()
 	if _effects != null:
 		if _effects.advance_frame() and _renderer != null:
 			_renderer.refresh()
@@ -921,8 +931,10 @@ func _after_player_move(movement: Dictionary) -> bool:
 			## `MapSetupScript_Connection`, which is the step itself rather than
 			## a warp: the neighbour's blocks are loaded under a camera that
 			## never stops, and its `FadeToMapMusic` is why crossing a route
-			## boundary into the same track is one continuous piece.
-			_animation.configure(_world, time_of_day)
+			## boundary into the same track is one continuous piece. It carries
+			## no `LoadMapGraphics` either, so the tile animation is re-pointed
+			## at the new tileset where it stands rather than restarted.
+			_animation.reload_tileset(_world, time_of_day)
 			_set_renderer_world()
 			_fade_to_map_music()
 		else:
@@ -3364,6 +3376,72 @@ func _show_story_picture(species: int) -> void:
 	)
 	_story_picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_screen.display(_story_picture)
+
+
+## How many of `wLandmarkSignTimer`'s sixty frames the sign has left, and zero
+## when there is none up. What a test or a screenshot tool waits on.
+func map_name_sign_frames() -> int:
+	return _map_name_sign_frames
+
+
+## `InitMapNameSign`'s own decision, raised where the map load leaves it: the
+## sign is a window over the bottom four rows and the map keeps moving behind it,
+## which is why a connection crossing shows one without stopping the camera.
+##
+## Gold and Silver ship neither the routine nor `MapEntryFrameGFX`, so the world
+## asks for no sign there and the page would answer none either.
+func _raise_map_name_sign() -> void:
+	if _world == null or _data == null:
+		return
+	var landmark: int = _world.map_name_sign_pending()
+	_world.clear_map_name_sign()
+	if landmark < 0:
+		return
+	_hide_map_name_sign()
+	## The timer is the setup script's, not the sheet's: a cache with no
+	## `MapEntryFrameGFX` spends the same sixty frames with nothing drawn in
+	## them rather than skipping them.
+	_map_name_sign_frames = Gen2WorldAPI.MAP_NAME_SIGN_FRAMES
+	var image: Image = Gen2MapNameSignPage.render(_data, _data.landmark_name(landmark))
+	if image == null:
+		return
+	_map_name_sign = TextureRect.new()
+	_map_name_sign.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_map_name_sign.texture = ImageTexture.create_from_image(image)
+	_map_name_sign.size = image.get_size()
+	_map_name_sign.position = Vector2(0, Gen2MapNameSignPage.TOP)
+	_map_name_sign.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## `PlaceMapNameSign` returns on the frame the timer still reads 60, so the
+	## window is only brought down on the frame after the one that raised it.
+	_map_name_sign.visible = false
+	_screen.display(_map_name_sign)
+
+
+## `PlaceMapNameSign`, which counts `wLandmarkSignTimer` down a frame at a time
+## and takes the window away on the frame it runs out.
+func _advance_map_name_sign() -> void:
+	if _map_name_sign_frames <= 0:
+		return
+	## `PlayerEvents` zeroes the timer behind every player event but a connection
+	## crossing and a change of facing, neither of which runs a script: a text
+	## box, a trainer or a warp takes the sign down where it stands.
+	if _world != null and _world.script_busy():
+		_hide_map_name_sign()
+		return
+	_map_name_sign_frames -= 1
+	if _map_name_sign_frames <= 0:
+		_hide_map_name_sign()
+		return
+	if _map_name_sign != null:
+		_map_name_sign.visible = true
+
+
+func _hide_map_name_sign() -> void:
+	_map_name_sign_frames = 0
+	if _map_name_sign == null:
+		return
+	_map_name_sign.queue_free()
+	_map_name_sign = null
 
 
 ## `DisplayUnownWords`: the chamber wall's word in a box of its own, held by

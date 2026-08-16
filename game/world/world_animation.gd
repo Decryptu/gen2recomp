@@ -61,6 +61,19 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	_commands = tileset.animation_commands.duplicate(true)
 
 
+## `MapSetupScript_Connection`'s own tileset load: `LoadMapTileset` between
+## `SuspendMapAnims` and `ActivateMapAnims`, with no `LoadMapGraphics` and so no
+## `hTileAnimFrame` reset. The strip and the command list are the new map's; the
+## place in the sequence is where the crossing left it, which is what keeps the
+## water moving across a route boundary rather than restarting it.
+func reload_tileset(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MORNING) -> void:
+	var command_index: int = _command_index
+	var timer: int = _timer
+	configure(world, time_of_day)
+	_command_index = command_index
+	_timer = timer
+
+
 ## Runs one hardware frame's command and reports whether the tile strip or a
 ## palette row actually changed.
 ##
