@@ -1,5 +1,12 @@
 extends RefCounted
 
+## The one cached "text" that is not one. `96:4081` is bank 96, `0x180081` in a
+## Gold or Silver dump, and the bytes there are a pointer table: `00 09 3a 42 03
+## 94 40 31 2d ...`, the same `00 09 xx 42 31 xx` row repeating. The reference
+## scanner reached it through bytes that are not commands, which is where the
+## parse failures and the unwired `0415` marker below come from too.
+const NOT_A_TEXT: Array[String] = ["96:4081"]
+
 var _r: RefCounted = null
 
 ## Reports how far the cached overworld script and text resources can be read.
@@ -77,6 +84,7 @@ func _validate(game_id: StringName) -> bool:
 	var invalid_text_samples: Array = []
 	var ram_addresses: Dictionary = {}
 	var number_markers: int = 0
+	var raw_bytes: Dictionary = {}
 	for raw_key: Variant in (text_value as Dictionary):
 		var raw_text: PackedByteArray = _pointer_bytes(data, String(raw_key), true)
 		var decoded: Dictionary = Gen2WorldScript.decode_text(raw_text)
@@ -89,6 +97,8 @@ func _validate(game_id: StringName) -> bool:
 		var text: String = String(decoded.get("text", ""))
 		_tally_ram_markers(text, ram_addresses)
 		number_markers += text.count(Gen2TextStream.NUMBER_MARKER)
+		_tally_raw_bytes(text, String(raw_key), raw_bytes)
+
 	print("%s: scripts=%d commands=%d terminal=%d parse_failures=%d texts=%d invalid_text=%d" % [
 		game_id, script_count, command_count, terminal_count, parse_failures,
 		(text_value as Dictionary).size(), invalid_text,
@@ -101,8 +111,9 @@ func _validate(game_id: StringName) -> bool:
 	print("  invalid_text_samples=%s" % JSON.stringify(invalid_text_samples))
 	print("  commands=%s" % command_names)
 	_print_ram_markers(data, ram_addresses, number_markers)
+	print("  raw_byte_markers=%s" % raw_bytes)
 	_print_standard_table(game_id)
-	return true
+	return raw_bytes.is_empty()
 
 
 ## Resolves one "bank:address" cache key through the runtime accessor.
@@ -113,6 +124,23 @@ func _pointer_bytes(data: GameData, key: String, text: bool) -> PackedByteArray:
 	var bank: int = int(parts[0])
 	var address: int = ("0x%s" % parts[1]).hex_to_int()
 	return data.world_text(bank, address) if text else data.world_script(bank, address)
+
+
+## The `<xx>` [method Gen2Text.character] leaves for a byte it has no character
+## for, which is a decoder gap rather than anything the cartridge draws: every
+## byte `PlaceString` reaches is either a glyph or a `CheckDict` entry. `$14`
+## reached the player as `?14?` mid-sentence in 243 Crystal texts before
+## `<PLAY_G>` was wired, so this is a failure and not a census.
+func _tally_raw_bytes(text: String, key: String, tally: Dictionary) -> void:
+	var found: Array[RegExMatch] = RegEx.create_from_string("<([0-9A-F]{2})>").search_all(text)
+	if found.is_empty():
+		return
+	if NOT_A_TEXT.has(key):
+		return
+	var bytes: PackedStringArray = PackedStringArray()
+	for match_result: RegExMatch in found:
+		bytes.append(match_result.get_string(1))
+	tally[key] = bytes
 
 
 ## Counts the `<RAM_xxxx>` markers one decoded text left behind.

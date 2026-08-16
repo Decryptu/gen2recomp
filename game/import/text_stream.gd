@@ -39,6 +39,12 @@ const TX_DAY: int = 0x15
 const TX_FAR: int = 0x16
 const TX_END: int = 0x50
 
+## `<PLAY_G>`, which is `TX_STRINGBUFFER`'s byte read as a character rather than
+## as a command. `constants/charmap.asm` maps it and `CheckDict` sends it to
+## `PlaceGenderedPlayerName`, so it is the player's name; 243 Crystal texts use
+## it and no Gold or Silver text does, their `CheckDict` having no entry for it.
+const CHAR_PLAY_G: int = 0x14
+
 ## What an unfilled slot in a decoded text opens with. A caller that knows the
 ## value puts it in through [method fill_marker]; one that does not can at least
 ## see that something belongs there.
@@ -238,7 +244,9 @@ static func _place(data: PackedByteArray, offset: int, context: Dictionary) -> D
 ## The `print_name` half of `CheckDict`. Everything else is a glyph.
 static func _dict(byte: int, context: Dictionary) -> String:
 	match byte:
-		0x52:
+		CHAR_PLAY_G, 0x52:
+			# `PlaceGenderedPlayerName` places `wPlayerName`, the same string
+			# `PrintPlayerName` does; the honorific is the Japanese build's.
 			return _name(context, "player", "<PLAYER>")
 		0x53:
 			return _name(context, "rival", "<RIVAL>")

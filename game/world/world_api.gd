@@ -2817,7 +2817,30 @@ func dispatch_map_entry() -> Array:
 		_queue_map_callbacks(-1)
 		if not _map_entry_scene_ran:
 			_map_entry_scene_pending = true
-	return run_event_queue(false)
+	var events: Array = run_event_queue(false)
+	load_object_masks()
+	return events
+
+
+## `LoadObjectMasks` (engine/overworld/map_objects_2.asm), which is what actually
+## masks an object rather than `ReadObjectEvents`: that one copies every event
+## into `wMapObjects` without looking at a flag.
+##
+## The distinction is the whole reason this is a step of its own.
+## `MapSetupScript_Warp` runs `LoadMapAttributes`, then `HandleNewMap`, whose
+## `MAPCALLBACK_NEWMAP` is where `ToggleDecorationsVisibility` sets the four
+## `EVENT_PLAYERS_HOUSE_2F_*` flags for a decoration the player does not own, and
+## only then `LoadMapObjects`, which runs `MAPCALLBACK_OBJECTS` and calls this.
+## So a flag a map-entry callback writes is read *after* it is written. Reading
+## it while the record is built puts the console, both dolls and the big doll in
+## the player's bedroom on a new game, each drawn as the `SPRITE_CHRIS` its
+## unassigned variable sprite falls back to.
+func load_object_masks() -> void:
+	for object: Gen2WorldObject in objects:
+		object.flag_hidden = object.event_flag_active(state)
+	## `LoadObjectMasks` writes one mask byte an object out of `GetObjectTimeMask`
+	## and `CheckObjectFlag` together, which is what this already is.
+	set_object_time(object_hour, object_time_of_day)
 
 
 ## Starts the first active scripted object in the cell the player is facing.
@@ -5539,14 +5562,15 @@ func _load_objects(carry_presentation: bool = false) -> void:
 		var sprite_number: int = int(_variable_sprites.get(
 			source_sprite_number, source_sprite_number
 		))
-		## GetMonSprite's `.Variable` branch reads wVariableSprites and falls
-		## through to `.NoBreedmon` when the slot is still zero, which answers
-		## SPRITE_CHRIS (1) rather than nothing
+		## `GetMonSprite`'s `.Variable` branch reads wVariableSprites and falls
+		## through to `.NoBreedmon` on a zero slot, whose `ld a, WALKING_SPRITE`
+		## is 1 and so `SPRITE_CHRIS` by coincidence of two constant lists
 		## (engine/overworld/overworld.asm). So an object whose variable sprite
 		## no script has assigned yet is drawn, occupies its cell and is
 		## talkable. Copycat's House 2F is where it matters: SPRITE_COPYCAT is
 		## $fb and only the Copycat's own script assigns it, so without this she
-		## could not be reached to run it.
+		## could not be reached to run it. An object that should not be there at
+		## all is masked by [method load_object_masks], not by this fallback.
 		if sprite_number >= Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE:
 			sprite_number = SPRITE_CHRIS
 		var sprite: Gen2WorldSprite = null
@@ -5564,9 +5588,8 @@ func _load_objects(carry_presentation: bool = false) -> void:
 		if _object_facing_overrides.has(key):
 			object.facing = int(_object_facing_overrides[key])
 		## A reload that carries presentation is a refresh under a running
-		## script, not a map load, so the flag answer is carried with it;
-		## `ReadObjectEvents` is the only thing that reads the flag, and it runs
-		## once per map load.
+		## script, not a map load, so the flag answer is carried with it rather
+		## than re-read: [method load_object_masks] is a map-setup step.
 		if index < previous.size():
 			object.carry_presentation_from(previous[index] as Gen2WorldObject)
 			object.flag_hidden = (previous[index] as Gen2WorldObject).flag_hidden
