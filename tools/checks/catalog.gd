@@ -72,6 +72,8 @@ func run(r: RefCounted) -> void:
 		_verify_badges(catalog)
 		_verify_ids(catalog)
 		_verify_patching(catalog)
+		_verify_links(catalog)
+		_verify_progression(catalog)
 	)
 
 
@@ -178,6 +180,101 @@ func _verify_ids(catalog: Gen2WorldCatalog) -> void:
 			_r.check(false, "id %d does not recompute from its own address." % id)
 			return
 	_r.note("%d ids, each naming one site." % seen.size())
+
+
+## The four fields whose effect is not at the command the site is: a starter's
+## picture, and a prize's two coin commands. A patch that reached the `givepoke`
+## alone would show one Pokemon and hand over another.
+func _verify_links(catalog: Gen2WorldCatalog) -> void:
+	for row: Dictionary in catalog.rows(Gen2WorldCatalog.KIND_STARTER):
+		_r.check(
+			row.has("picture_address"),
+			"a starter has no linked pokepic, so its ball would show the old one."
+		)
+		if not row.has("picture_address"):
+			return
+		var linked: Dictionary = catalog.link_at(
+			int(row["bank"]), int(row["picture_address"])
+		)
+		_r.check(
+			int(linked.get("id", -1)) == int(row["id"])
+				and StringName(linked.get("role", &"")) == &"picture",
+			"a starter's pokepic does not link back to it."
+		)
+	for row: Dictionary in catalog.rows(Gen2WorldCatalog.KIND_PRIZE):
+		for key: String in ["check_address", "take_address"]:
+			_r.check(row.has(key), "a prize has no linked %s." % key)
+			if not row.has(key):
+				return
+			var linked: Dictionary = catalog.link_at(int(row["bank"]), int(row[key]))
+			_r.check(
+				int(linked.get("id", -1)) == int(row["id"])
+					and StringName(linked.get("role", &"")) == &"price",
+				"a prize's %s does not link back to it." % key
+			)
+	var shops: Array = catalog.rows(Gen2WorldCatalog.KIND_SHOP)
+	var stocked: int = 0
+	for row: Dictionary in shops:
+		if not (row.get("items", []) as Array).is_empty():
+			stocked += 1
+	_r.check(stocked > 0, "no shop site carries an inventory.")
+	_r.note("%d of %d shop sites carry their own shelf." % [stocked, shops.size()])
+
+
+## The cartridge's own placement finishes, and one that hides Surf behind Surf
+## does not. The second is the whole reason the validator exists.
+func _verify_progression(catalog: Gen2WorldCatalog) -> void:
+	var data: GameData = GameData.open(_r.game_id)
+	if data == null:
+		return
+	var vanilla: Dictionary = Gen2WorldProgression.validate(data, {})
+	_r.check(
+		bool(vanilla["ok"]),
+		"the cartridge's own placement does not validate: %s." % str(vanilla.get("missing", {}))
+	)
+	_r.note("progression: %d checks reached, %d of them critical." % [
+		int(vanilla["reached"]), int(vanilla["critical"]),
+	])
+
+	var surf_item: int = 0
+	for item: int in catalog.field_hm_items():
+		if catalog.move_for_hm_item(item) == Gen2WorldFieldMove.MOVE_SURF:
+			surf_item = item
+	var walk: Gen2WorldReachability = Gen2WorldReachability.build(data)
+	var dry: Dictionary = walk.reachable(Gen2WorldProgression.START_MAP, {})
+	var behind: int = -1
+	for row: Dictionary in catalog.rows(Gen2WorldCatalog.KIND_ITEM):
+		if not row.has("map"):
+			continue
+		var key: int = Gen2WorldReachability.map_key(
+			int((row["map"] as Vector2i).x), int((row["map"] as Vector2i).y)
+		)
+		if not dry.has(key):
+			behind = int(row["id"])
+			break
+	if behind < 0 or surf_item <= 0:
+		_r.check(false, "no site behind Surf to build a self-locking placement from.")
+		return
+	## Surf on a shore only Surf reaches, and nowhere else.
+	var patches: Dictionary = {behind: {"item": surf_item}}
+	for row: Dictionary in catalog.rows(Gen2WorldCatalog.KIND_ITEM):
+		if int(row["item"]) == surf_item and int(row["id"]) != behind:
+			patches[int(row["id"])] = {"item": RomLayout.ITEM_TM01}
+	var locked: Dictionary = Gen2WorldProgression.validate(data, patches)
+	_r.check(not bool(locked["ok"]), "a placement hiding Surf behind Surf validated.")
+	_r.check(
+		not (locked.get("missing", {}) as Dictionary).is_empty(),
+		"a rejected placement named no unreachable requirement."
+	)
+	## And it is the same answer twice, which is what lets a generator retry.
+	_r.check(
+		Gen2WorldProgression.validate(data, patches) == locked,
+		"two validations of one placement disagreed."
+	)
+	_r.check(
+		bool(Gen2WorldProgression.validate(data, {})["ok"]),
+		"a rejected placement was left installed."
+	)
 
 
 ## The whole point of the catalog: a patch has to reach the row a runtime reader

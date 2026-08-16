@@ -553,6 +553,16 @@ static func _apply_party_request(
 		var trade: Dictionary = world.data.world_trade(trade_id)
 		if trade.is_empty():
 			return {"ok": false, "reason": &"unknown_trade", "trade_id": trade_id}
+		## A visible-catalog site may name its own two halves. Applied to this
+		## call's COPY of the record: one cartridge trade row is named by more
+		## than one site, and writing the row would move the other one too. The
+		## nickname, OT, item and DVs stay the record's, since they belong to the
+		## Pokemon the cartridge wrote rather than to the species.
+		for half: Array in [
+			["offered_species", "offered_species"], ["requested_species", "requested_species"],
+		]:
+			if values.has(half[0]) and int(values[half[0]]) > 0:
+				trade[half[1]] = int(values[half[0]])
 		var requested_index: int = int(result.get("party_index", -1))
 		if requested_index < 0 or requested_index >= candidate.party.size():
 			requested_index = _find_trade_candidate(world.data, candidate, trade)

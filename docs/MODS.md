@@ -300,21 +300,60 @@ for row in catalog.rows(Gen2WorldCatalog.KIND_STATIC):
 | `KIND_SHOP` | `mart`, `dialog` | A `pokemart` command |
 
 Every row also carries `id`, `kind`, its `bank` and `address` (or its `map` and
-`event_index`), and `requires`: the events, engine flags and items the script
-tested before reaching the site. `requires` is a decoded fact about what the
-cartridge looked at, not a claim that the site is unreachable without them.
-
-For proving a placement finishes: `catalog.possible_starters()` is the three
-species Elm offers, `catalog.field_hm_items()` is the HM items whose move is a
-field move on THIS cartridge, and `catalog.is_progression(row)` is true for a
-badge or a field HM. A check the catalog did not record stays vanilla; nothing
-is guessed.
+`event_index`), the `map` it stands on where the host could attribute one, and
+`requires`: the events, engine flags and items the script tested before reaching
+the site, read from the site's own branch rather than the whole blob.
 
 `patch_check(id, fields)` changes a field of a row. It cannot replace the script:
 the site still sets its own completion flag, prints its own dialogue, takes its
 own money and runs its own battle, and only the number it hands over is the
 mod's. Two mods patching one id is refused by the overlay's own ownership rule,
 not by load order.
+
+A field is effective at its whole TRANSACTION, not at one command of it. The
+host links the commands a site's numbers also reach:
+
+| Patch | Also drives |
+|---|---|
+| a starter's `species` | the `pokepic` its ball shows, so the picture and the Pokemon cannot disagree |
+| a prize's `price` | its `checkcoins` affordability branch and its `takecoins` deduction, as one transaction |
+| a trade's `species` / `requested_species` | both halves of the trade, carried beside the cartridge record rather than written into it, so a second site naming that record is unaffected |
+| a shop's `items` | the shelf the counter sells, as `{item, price}` rows |
+
+## Proving a placement finishes
+
+A shuffle of badges and key items can write a seed nobody can beat.
+`host.validate_placement(data, patches)` answers before anything is installed:
+
+```gdscript
+var result := host.validate_placement(data, {check_id: {"item": hm_surf}, ...})
+if not result["ok"]:
+	print(result["missing"])   # {check, kind, requirement}
+```
+
+`patches` is the same `{check_id: fields}` shape `patch_check` takes one row at a
+time. The answer is `{ok, reached, critical, missing}`, deterministic, and it
+installs nothing: a failed seed leaves the game exactly as it was, so a generator
+retries against `missing` rather than guessing.
+
+`missing.requirement` is one of `{map}`, `{item}` or `{badge}`, which is the
+first thing that never became satisfiable. Behind it:
+
+- `Gen2WorldReachability` floods each map's own collision grid from the cells a
+  player arrives on, so an exit only Surf reaches is a Surf exit, and asks the
+  same tile questions the overworld does.
+- An HM is only a way past anything once its badge is in hand; the badge each
+  field move needs is `Gen2WorldFieldMove.badge_for_move`.
+- `catalog.possible_starters()`, `catalog.field_hm_items()` and
+  `catalog.is_progression(row)` are the same facts for a mod doing its own
+  planning.
+
+What it does NOT model, stated so a mod does not read more into a pass than is
+there: it is MAP-granular rather than cell-exact, and story `checkevent` guards
+are treated as satisfiable because a placement does not move the scripts that
+set them. Both are deliberate and both err toward passing a seed rather than
+rejecting a good one. A site the catalog could not attribute to a map is taken
+as standing where the player already is.
 
 The catalog is DERIVED, not imported, so it needs no cache-format bump and no
 re-import. It is also a decode of a corpus: `tools/checks/catalog.gd` pins both

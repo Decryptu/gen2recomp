@@ -158,12 +158,17 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 					"ok": false,
 					"reason": StringName(mart_result.get("reason", &"mart_data_unavailable")),
 				}
+			var mart: Dictionary = mart_result["mart"]
+			## A catalog site may sell its own shelf. `{item, price}` is the shape
+			## `Gen2WorldMartHost.entries` already reads, so a patched price is
+			## the price the counter charges and nothing else changes.
+			if values.has("items") and values["items"] is Array \
+				and not (values["items"] as Array).is_empty():
+				mart = mart.duplicate(true)
+				mart["items"] = (values["items"] as Array).duplicate(true)
 			return {
 				"ok": true,
-				"data": {
-					"mart": mart_result["mart"], "mart_id": mart_id,
-					"dialog": dialog_id,
-				},
+				"data": {"mart": mart, "mart_id": mart_id, "dialog": dialog_id},
 			}
 		&"apricorn_selection_requested":
 			## `FindApricornsInBag` is the whole of the request's data: an empty

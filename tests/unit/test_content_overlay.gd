@@ -362,3 +362,17 @@ func test_a_catalog_id_names_a_kind_a_bank_and_an_address() -> void:
 		"the kind is part of the id"
 	)
 	assert_eq(Gen2WorldCatalog.pack_id(&"not_a_kind", 1, 1), -1)
+
+
+## The validator is what a mod asks before it installs a placement, and it must
+## install nothing itself: two calls in a row see the same world.
+func test_validating_a_placement_installs_nothing() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var id: int = Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_STATIC, 48, 0x6E00)
+	var first: Dictionary = host.validate_placement(_data(), {id: {"species": 25}})
+	assert_true(first.has("ok"))
+	assert_true(Gen2ContentOverlay.shared().is_empty(), "nothing was installed")
+	assert_eq(
+		host.validate_placement(_data(), {id: {"species": 25}}), first,
+		"and one placement always answers the same way"
+	)

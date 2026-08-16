@@ -956,6 +956,19 @@ func patch_check(id: StringName, check_id: int, fields: Dictionary) -> Dictionar
 	)
 
 
+## Whether [param patches] leaves the game finishable, WITHOUT installing any of
+## them. [param patches] is catalog check id to the fields a mod proposes, which
+## is the same shape [method patch_check] takes one row at a time.
+##
+## Answers `{ok, reached, critical, missing}`, and on a failure `missing` names
+## the check that could not be reached and the one requirement of it that never
+## became satisfiable, so a generator retries against a reason. Deterministic:
+## one placement always answers the same way. See [Gen2WorldProgression] for what
+## the proof does and does not cover.
+func validate_placement(data: GameData, patches: Dictionary) -> Dictionary:
+	return Gen2WorldProgression.validate(data, patches)
+
+
 ## The overlay every opened [GameData] reads through, for a launcher listing what
 ## a mod changed before the player starts.
 func content_overlay() -> Gen2ContentOverlay:

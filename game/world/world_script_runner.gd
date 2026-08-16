@@ -1306,6 +1306,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE,
 		Gen2WorldScript.CLOSEWINDOW,
 		Gen2WorldScript.LOADMENU,
+		## Both comparisons answer through `_script_value` and stage nothing, so
+		## they never returned from their own branch and fell through to the
+		## refusal below. Every `checkcoins` in either game is a Game Corner or a
+		## Buena prize counter, and every one of them stopped its script here.
+		Gen2WorldScript.CHECKMONEY, Gen2WorldScript.CHECKCOINS,
 		Gen2WorldScript.GETMONEY, Gen2WorldScript.GETCOINS, Gen2WorldScript.GETNUM,
 		Gen2WorldScript.GETMONNAME, Gen2WorldScript.GETITEMNAME,
 		Gen2WorldScript.GETCURLANDMARKNAME, Gen2WorldScript.GETTRAINERNAME,
@@ -1330,6 +1335,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 func _catalogued(command: Dictionary, frame: Dictionary) -> Dictionary:
 	if data == null or not data.has_content_overlay():
 		return command
+	var linked: Dictionary = data.catalog().link_at(
+		int(frame["bank"]), int(frame["address"]) + int(command["offset"])
+	)
+	if not linked.is_empty():
+		return _linked_command(command, linked)
 	var candidates: Array = CATALOG_KINDS.get(StringName(command["name"]), [])
 	if candidates.is_empty():
 		return command
@@ -1350,10 +1360,17 @@ func _catalogued(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldCatalog.KIND_STATIC:
 			out["pokemon"] = int(row["species"])
 			out["level"] = int(row["level"])
-		Gen2WorldCatalog.KIND_TRADE:
-			out["value"] = int(row["trade"])
 		Gen2WorldCatalog.KIND_SHOP:
 			out["address"] = int(row["mart"])
+			## The inventory this site sells, carried to the mart host so a
+			## patched shelf reaches the shop rather than a different mart id.
+			out["mart_items"] = row.get("items", [])
+		Gen2WorldCatalog.KIND_TRADE:
+			out["value"] = int(row["trade"])
+			## Both halves, carried beside the record rather than written into
+			## it: one cartridge trade row can be named by two sites.
+			out["offered_species"] = int(row["species"])
+			out["requested_species"] = int(row["requested_species"])
 		Gen2WorldCatalog.KIND_BADGE:
 			## The badge a flag grants IS the flag, so moving one moves which
 			## bit the site sets. An index outside the list leaves it alone.
@@ -1375,6 +1392,23 @@ func _catalogued(command: Dictionary, frame: Dictionary) -> Dictionary:
 			out["level"] = int(row["level"])
 			out["value_2"] = int(row["level"])
 			out["item"] = int(row.get("item", command.get("item", 0)))
+	return out
+
+
+## A command that is not the site itself but carries one of its numbers: the
+## `pokepic` a starter's ball shows, and the `checkcoins`/`takecoins` a prize
+## charges with. Substituting only the `givepoke` would show one Pokemon and hand
+## over another, and price a prize the player could not afford.
+func _linked_command(command: Dictionary, linked: Dictionary) -> Dictionary:
+	var row: Dictionary = data.catalog().check(int(linked["id"]))
+	if row.is_empty():
+		return command
+	var out: Dictionary = command.duplicate(true)
+	match StringName(linked["role"]):
+		&"picture":
+			out["pokemon"] = int(row["species"])
+		&"price":
+			out["value"] = int(row["price"])
 	return out
 
 
@@ -1649,18 +1683,25 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			## player and then relies on this to drop them through it.
 			_emit_runtime_event(&"warp_check_requested", {})
 		0x93:
-			return _stage_runtime_request(&"mart_requested", {
+			var mart: Dictionary = {
 				"dialog": int(command.get("value", 0)),
 				"address": int(command.get("address", 0)),
-			})
+			}
+			if command.has("mart_items"):
+				mart["items"] = command["mart_items"]
+			return _stage_runtime_request(&"mart_requested", mart)
 		0x94:
 			return _stage_runtime_request(&"elevator_requested", {
 				"address": int(command.get("address", 0)),
 			})
 		0x95:
-			return _stage_runtime_request(&"trade_requested", {
-				"trade_id": int(command.get("value", 0)),
-			})
+			var trade: Dictionary = {"trade_id": int(command.get("value", 0))}
+			## A patched site names both halves; an unpatched one names neither
+			## and the record answers for both, as it always has.
+			for key: String in ["offered_species", "requested_species"]:
+				if command.has(key):
+					trade[key] = int(command[key])
+			return _stage_runtime_request(&"trade_requested", trade)
 		0x96:
 			return _stage_phone_choice(int(command.get("value", 0)))
 		0x97:
