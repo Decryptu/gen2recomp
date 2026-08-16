@@ -227,6 +227,41 @@ func test_pc_storage_moves_party_to_box_and_back_through_atomic_save() -> void:
 	assert_null(restored.boxes[0].slots[0])
 
 
+## `CopyBoxmonSpecies` ends every list with the row its `ld a, -1` terminator
+## becomes, and `BillsPC_PressDown` stops the cursor on it.
+func test_box_screen_lists_the_party_with_a_cancel_row() -> void:
+	var save: Gen2SaveData = _save_with_two()
+	await _open_box_screen(save)
+	var rows: Array = _box_screen.rows()
+	assert_eq(rows.size(), 3)
+	assert_eq(String((rows[0] as Dictionary)["name"]), "SPARKY")
+	assert_true(bool((rows[2] as Dictionary)["cancel"]))
+	for _press: int in 5:
+		_box_screen.handle_button(Gen2Button.DOWN)
+	var snapshot: Dictionary = _box_screen.box_snapshot()
+	assert_eq(int(snapshot["cursor"]) + int(snapshot["scroll"]), rows.size() - 1)
+
+
+## `BillsPC_PressRight` walks the party and every box round, and the row the
+## cursor stands on is what a transfer takes.
+func test_box_screen_walks_boxes_and_deposits_the_row_under_the_cursor() -> void:
+	var save: Gen2SaveData = _save_with_two()
+	await _open_box_screen(save)
+	_box_screen.handle_button(Gen2Button.DOWN)
+	_box_screen.handle_button(Gen2Button.A)
+	assert_eq(save.party.size(), 1)
+	assert_not_null(save.boxes[0].slots[0])
+	_box_screen.handle_button(Gen2Button.RIGHT)
+	assert_eq(int(_box_screen.box_snapshot()["loaded"]), 1)
+	assert_eq(String(_box_screen.rows()[0]["name"]), "GEODUDE")
+	_box_screen.handle_button(Gen2Button.A)
+	assert_eq(save.party.size(), 2)
+	assert_null(save.boxes[0].slots[0])
+	for _press: int in Gen2SaveData.BOX_COUNT:
+		_box_screen.handle_button(Gen2Button.RIGHT)
+	assert_eq(int(_box_screen.box_snapshot()["loaded"]), Gen2BoxScreen.LOADED_PARTY)
+
+
 func test_pc_storage_refuses_depositing_the_last_party_member() -> void:
 	var save: Gen2SaveData = _save()
 	var result: Dictionary = Gen2SaveStorage.deposit_party_to_box(save, _data, 0, 0)

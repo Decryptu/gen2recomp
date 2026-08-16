@@ -340,6 +340,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not pack["ok"]:
 		return pack
 
+	var pc: Dictionary = verify_pc(rom, layout)
+	if not pc["ok"]:
+		return pc
+
 	var descriptions: Dictionary = verify_descriptions(rom, layout)
 	if not descriptions["ok"]:
 		return descriptions
@@ -2240,6 +2244,76 @@ static func verify_pack(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"ok": true, "message": "Pack graphics verified."}
 
 
+## `PCMailGFX`, the four tiles `BillsPC_InitGFX` copies to `vTiles2 tile $5c`:
+## the mail marker `PCMonInfo` prints for a held mail, the item marker beside it,
+## and the two halves of each. Byte identical in all three dumps.
+const PC_MAIL_BYTES: Array[int] = [
+	0xFF, 0xFF, 0xFF, 0x81, 0xFF, 0xC3, 0xFF, 0xA5,
+	0xFF, 0x99, 0xFF, 0x81, 0xFF, 0x81, 0xFF, 0xFF,
+	0xFF, 0xFF, 0x81, 0xFF, 0xFF, 0xFF, 0xBD, 0xE7,
+	0xBD, 0xFF, 0x81, 0xFF, 0x81, 0xFF, 0xFF, 0xFF,
+	0x00, 0x00, 0x38, 0x38, 0x3C, 0x3C, 0x3E, 0x3E,
+	0x3E, 0x3E, 0x3C, 0x3C, 0x38, 0x38, 0x00, 0x00,
+	0x00, 0x00, 0x1C, 0x1C, 0x3C, 0x3C, 0x7C, 0x7C,
+	0x7C, 0x7C, 0x3C, 0x3C, 0x1C, 0x1C, 0x00, 0x00,
+]
+## `BillsPCOrangePalette`, `gfx/pc/orange.pal` encoded.
+const PC_ORANGE_COLORS: Array[int] = [0x01FF, 0x0197, 0x00EF, 0x0000]
+## The most padding an aligned `PCSelectLZ` leaves before `PCMailGFX`: the run
+## is `--align 4` on Gold and Silver and `--align 1` on Crystal.
+const PC_SELECT_MAX_PADDING: int = 4
+
+
+## Bill's PC's own three runs. The mail sheet and the palette are checked byte
+## for byte, and the cursor sheet by decompressing: a run that yields exactly
+## eight tiles and ends where the mail sheet begins is the one the source names,
+## which is the same neighbour argument `verify_pack` makes.
+static func verify_pc(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pc", {})
+	if entry.is_empty():
+		return {"ok": true, "message": "No PC screen on this cartridge."}
+	var select: int = int(entry["select_gfx"])
+	var mail: int = int(entry["mail_gfx"])
+	var orange: int = int(entry["orange_palette"])
+	if not rom.in_bounds(mail, PC_MAIL_BYTES.size()) \
+		or not rom.in_bounds(orange, PC_ORANGE_COLORS.size() * Gen2Palette.COLOR_BYTES) \
+		or select < 0 or select >= mail:
+		return {"ok": false, "message": "PC graphics are outside the cartridge."}
+	for index: int in PC_MAIL_BYTES.size():
+		if rom.u8(mail + index) != PC_MAIL_BYTES[index]:
+			return {
+				"ok": false,
+				"message": "PCMailGFX byte %d is $%02X, expected $%02X." % [
+					index, rom.u8(mail + index), PC_MAIL_BYTES[index],
+				],
+			}
+	for index: int in PC_ORANGE_COLORS.size():
+		var stored: int = rom.u16le(orange + index * Gen2Palette.COLOR_BYTES)
+		if stored != PC_ORANGE_COLORS[index]:
+			return {
+				"ok": false,
+				"message": "PC orange colour %d is $%04X, expected $%04X." % [
+					index, stored, PC_ORANGE_COLORS[index],
+				],
+			}
+	var lz := Gen2Lz.new()
+	var raw: PackedByteArray = lz.decompress(rom.bytes(), select)
+	if lz.failed or raw.size() != RomLayout.PC_SELECT_TILES * Gen2Tiles.TILE_BYTES:
+		return {
+			"ok": false,
+			"message": "PCSelectLZ decompresses to %d bytes, expected %d." % [
+				raw.size(), RomLayout.PC_SELECT_TILES * Gen2Tiles.TILE_BYTES,
+			],
+		}
+	var padding: int = mail - select - lz.consumed
+	if padding < 0 or padding > PC_SELECT_MAX_PADDING:
+		return {
+			"ok": false,
+			"message": "PCSelectLZ ends %d bytes before PCMailGFX." % padding,
+		}
+	return {"ok": true, "message": "PC graphics verified."}
+
+
 ## Walks the type matchup chart from its offset to the terminator.
 ##
 ## Returns an Array of { attacker, defender, multiplier, negated_by_foresight },
@@ -3616,6 +3690,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
+		"pc_palette": _import_pc_palette(rom, layout),
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
 		"menu_text": _import_menu_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
@@ -4222,6 +4297,19 @@ func _import_pokedex_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `BillsPCOrangePalette`, the four colours `_CGB_BillsPC` puts on the mon-pic
+## box while `wCurPartySpecies` is $ff, which is every row holding no Pokemon.
+func _import_pc_palette(rom: RomFile, layout: Dictionary) -> Array:
+	var entry: Dictionary = layout.get("pc", {})
+	if entry.is_empty():
+		return []
+	var at: int = int(entry["orange_palette"])
+	var out: Array = []
+	for index: int in RomLayout.PC_PALETTE_COLORS:
+		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
+	return out
+
+
 ## `Palette_TextBG7`, the four colours a text box is drawn through. Only index 0
 ## and index 3 are ever a pixel, since the font is 1bpp; the two between them are
 ## what a palette fade over a box passes through. Empty on Gold and Silver.
@@ -4721,6 +4809,32 @@ func _import_town_map_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `BillsPC_InitGFX`'s two runs: the compressed cursor sheet and the mail and
+## item markers stored uncompressed behind it.
+func _import_pc_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("pc", {})
+	if entry.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var raw: PackedByteArray = _lz.decompress(rom.bytes(), int(entry["select_gfx"]))
+	if _lz.failed or raw.size() < RomLayout.PC_SELECT_TILES * Gen2Tiles.TILE_BYTES:
+		return {}
+	var out: Dictionary = {}
+	for run: Array in [
+		["pc_select", Gen2Tiles.decode_2bpp_strip(raw, 0, RomLayout.PC_SELECT_TILES),
+			RomLayout.PC_SELECT_TILES],
+		["pc_mail", Gen2Tiles.decode_2bpp_strip(
+			rom.bytes(), int(entry["mail_gfx"]), RomLayout.PC_MAIL_TILES),
+			RomLayout.PC_MAIL_TILES],
+	]:
+		if not RomCache.write_indices(
+			RomCache.tile_path(directory, String(run[0])), run[1]
+		):
+			return {}
+		out[String(run[0])] = _strip_sheet_entry(int(run[2]))
+	return out
+
+
 ## `Pokedex_LoadGFX`'s two LZ runs, each as one strip of tiles.
 ##
 ## Kept out of the fixed table [method _import_tiles] uses for the same reason
@@ -5116,6 +5230,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_title_sheets(rom, layout), true)
 	written.merge(_import_town_map_sheets(rom, layout), true)
 	written.merge(_import_pokedex_sheets(rom, layout), true)
+	written.merge(_import_pc_sheets(rom, layout), true)
 	written.merge(_import_intro_sheets(rom, layout), true)
 	written.merge(_import_gs_intro_sheets(rom, layout), true)
 	var done: int = 0
