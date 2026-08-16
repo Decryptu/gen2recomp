@@ -76,12 +76,9 @@ static func decode_1bpp_strip(data: PackedByteArray, offset: int, count: int) ->
 	return out
 
 
-## The same, for tiles stored 2bpp: the battle HUD's graphics, which are four
-## colours where the font is two.
-##
-## Kept as a strip for the same reason the font is. These sheets are addressed by
-## tile number, so one row turns that number into a horizontal offset and nothing
-## else, and a sheet that decoded short leaves a visible hole rather than failing.
+## The same for 2bpp tiles: the battle HUD's graphics, four colours where the
+## font is two. A strip for the same reason, these sheets being addressed by tile
+## number, and a short decode leaves a visible hole rather than failing.
 static func decode_2bpp_strip(data: PackedByteArray, offset: int, count: int) -> PackedByteArray:
 	var width: int = count * TILE_WIDTH
 	var out: PackedByteArray = PackedByteArray()

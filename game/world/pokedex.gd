@@ -1,22 +1,17 @@
 class_name Gen2Pokedex
 extends RefCounted
 
-## Scene-free model of the Pokedex (engine/pokedex/pokedex.asm).
+## Scene-free model of the Pokedex (engine/pokedex/pokedex.asm), holding what
+## `wPokedexDataStart`..`wPokedexDataEnd` does: the mode, the species order that
+## mode built, how far the listing runs, and the cursor and scroll into it. A
+## screen draws [method rows] and feeds buttons back in.
 ##
-## Holds what `wPokedexDataStart`..`wPokedexDataEnd` holds: the current mode, the
-## species order that mode built, how far down the listing runs, and the cursor
-## and scroll offset into it. A screen draws [method rows] and feeds buttons back
-## in; nothing here knows what a Control is.
-##
-## The two orderings come from the cache ([method GameData.dex_order_new] and
-## [method GameData.dex_order_alpha]); DEXMODE_OLD has no table because
-## `.OldMode` counts from 1. Seen and caught come from [Gen2WorldState], which
-## already keeps both arrays.
+## The orderings come from the cache ([method GameData.dex_order_new] and
+## [method GameData.dex_order_alpha]); DEXMODE_OLD has no table, `.OldMode`
+## counting from 1. Seen and caught come from [Gen2WorldState].
 
-## What each screen writes to `wDexListingHeight`: the main screen `ld a, 7` and
-## the search results screen `ld a, 4`. It is WRAM the source rewrites per
-## screen, so [member listing_height] carries it and these are only the two
-## values written to it.
+## What each screen writes to `wDexListingHeight`: `ld a, 7` on the main screen
+## and `ld a, 4` on the search results. [member listing_height] carries it.
 const LISTING_HEIGHT: int = 7
 const SEARCH_RESULTS_HEIGHT: int = 4
 
@@ -59,14 +54,11 @@ const MODE_ROWS: Array[Dictionary] = [
 ## rebuilds the order.
 const CHANGING_MODES_TEXT: String = "Changing modes.\nPlease wait."
 
-## `PokedexTypeSearchConversionTable` (data/types/search_types.asm), which is
-## what turns a search row's 1-based position into a real type number. Its order
-## is the cartridge's own and is not the type numbering: FIRE follows NORMAL
-## because the search screen lists the special types first.
-##
-## Kept as named constants rather than imported, the way the matchup multipliers
-## are: all seventeen entries are types [RomLayout] already names, and the table
-## is identical in both pins.
+## `PokedexTypeSearchConversionTable` (data/types/search_types.asm), turning a
+## search row's 1-based position into a type number. Its order is not the type
+## numbering: FIRE follows NORMAL, the search screen listing specials first.
+## Named rather than imported, like the matchup multipliers: all seventeen are
+## types [RomLayout] already names and the table is identical in both pins.
 const SEARCH_TYPES: Array[int] = [
 	RomLayout.TYPE_NORMAL, RomLayout.TYPE_FIRE, RomLayout.TYPE_WATER,
 	RomLayout.TYPE_GRASS, RomLayout.TYPE_ELECTRIC, RomLayout.TYPE_ICE,
@@ -156,12 +148,9 @@ static func open(
 
 
 ## `Pokedex_OrderMonsByMode`. NEW copies the new-dex table, OLD counts from 1,
-## and ABC keeps only the species that have been seen and zero-fills the rest.
-##
-## Both tables are cartridge data of exactly [constant RomLayout.SPECIES_COUNT]
-## entries and OLD counts that far, so a mod's species can only follow the
-## cartridge's own run, ascending by number, the way `FIRST_MOD_POCKET` numbers a
-## mod pocket after the cartridge's.
+## ABC keeps the seen species and zero-fills the rest. Both tables are exactly
+## [constant RomLayout.SPECIES_COUNT] entries and OLD counts that far, so a mod's
+## species can only follow the cartridge's run, ascending by number.
 func order_by_mode() -> void:
 	var mod_species: Array[int] = _data.mod_species_numbers() if _data != null \
 		else [] as Array[int]
@@ -220,13 +209,11 @@ func _find_last_seen() -> void:
 	listing_end = end
 
 
-## `Pokedex_InitCursorPosition`: seeks the cursor to `wPrevDexEntry`, scrolling
-## first while there is more than one page and then moving the cursor within it.
-##
-## A zero or out-of-range previous entry leaves both at zero. An entry that is
-## not in the order at all is not special-cased on the cartridge either: the
-## second walk runs its full seven steps and leaves the cursor past the last row,
-## which ABC mode can reach when the last entry viewed has not been seen.
+## `Pokedex_InitCursorPosition`: seeks to `wPrevDexEntry`, scrolling while there
+## is more than one page and then moving the cursor within it. A zero or
+## out-of-range entry leaves both at zero. An entry not in the order is not
+## special-cased on the cartridge either: the second walk runs its full seven
+## steps and leaves the cursor past the last row, which ABC mode can reach.
 func init_cursor_position() -> void:
 	scroll = 0
 	cursor = 0
@@ -258,14 +245,11 @@ func selected_species() -> int:
 	return _order[index]
 
 
-## The listing as [constant LISTING_HEIGHT] rows, in `Pokedex_PrintListing`'s
-## own order, each as `.PrintEntry` would draw it:
-## { species, empty, number, seen, caught, name, selected }.
-##
-## [code]empty[/code] is the species-zero row `.PrintEntry` returns from
-## immediately, which is what the tail of an ABC listing is made of.
-## [code]number[/code] is the three-digit zero-padded dex number, and only OLD
-## mode prints one.
+## `Pokedex_PrintListing`'s rows, each as `.PrintEntry` would draw it:
+## { species, empty, number, seen, caught, name, selected }. [code]empty[/code]
+## is the species-zero row `.PrintEntry` returns from at once, which the tail of
+## an ABC listing is made of; [code]number[/code] is three digits zero-padded and
+## only OLD mode prints one.
 func rows() -> Array:
 	var out: Array = []
 	for index: int in listing_height:
@@ -350,12 +334,9 @@ func move_unown(button: int) -> bool:
 	return false
 
 
-## `Pokedex_ListingHandleDPadInput`. Answers whether the position changed, which
-## is the carry flag the source returns.
-##
-## Left and right page the listing and are refused outright while it fits on one
-## screen: the source checks `wDexListingHeight` against `wDexListingEnd` before
-## it looks at either button.
+## `Pokedex_ListingHandleDPadInput`, answering the carry flag the source returns.
+## Left and right page the listing and are refused while it fits on one screen,
+## the source checking `wDexListingHeight` against `wDexListingEnd` first.
 func move_listing(button: int) -> bool:
 	match button:
 		Gen2Button.UP:
@@ -443,9 +424,8 @@ func toggle_page() -> void:
 	prev_entry = selected_species()
 
 
-## `Pokedex_NextOrPreviousDexEntry`: moves in the pressed direction until it
-## lands on a species that has been seen, and puts the cursor and scroll back
-## where they were if it runs out of listing first.
+## `Pokedex_NextOrPreviousDexEntry`: moves until it lands on a seen species, and
+## puts the cursor and scroll back if it runs out of listing first.
 ##
 ## Answers whether it moved. A move re-enters the entry screen at page 1, which
 ## is `Pokedex_ReinitDexEntryScreen`.
@@ -494,18 +474,15 @@ func entry() -> Dictionary:
 	}
 
 
-## `_PrintNum` (engine/math/print_num.asm) for the two calls this screen makes:
-## [param digits] digits with [param before_point] of them in front of a decimal
-## point, and neither the money nor the leading-zero flag set.
+## `_PrintNum` (engine/math/print_num.asm) for this screen's two calls:
+## [param digits] digits with [param before_point] before a decimal point, and
+## neither the money nor the leading-zero flag set. A leading zero is neither
+## printed nor replaced, `.PrintLeadingZero` writing nothing while the flag is
+## clear and `.AdvancePointer` stepping over the cell anyway, which is why this
+## answers a fixed-width field of spaces rather than a trimmed number.
 ##
-## A leading zero is not printed and not replaced: `.PrintLeadingZero` writes
-## nothing while the flag is clear and `.AdvancePointer` steps over the cell
-## regardless, leaving the background template's own space. That is why this
-## returns a fixed-width field with spaces rather than a trimmed number.
-##
-## The digit immediately in front of the point is always printed, even when it
-## is a zero: `.PrintDigit` latches "a digit has been printed" as `e` runs out,
-## which is what makes a height of 8 read 0'08" rather than blank.
+## The digit in front of the point always prints, zero or not: `.PrintDigit`
+## latches as `e` runs out, which makes a height of 8 read 0'08" not blank.
 static func print_num(value: int, digits: int, before_point: int) -> String:
 	var text: String = ""
 	var padded: String = String.num_int64(maxi(value, 0)).lpad(digits, "0").right(digits)
@@ -617,17 +594,12 @@ func _step_search_type(delta: int) -> void:
 		search_type_2 = value
 
 
-## `Pokedex_SearchForMons` plus `.MenuAction_BeginSearch`'s answer to it.
-##
-## Each chosen type filters the listing in place and the second row is applied
-## first, so choosing two types finds the species carrying both rather than
-## either. A species has to have been *caught*, not merely seen: `.Search`
-## checks `Pokedex_CheckCaught`.
-##
-## Answers the number of results. Zero leaves the listing rebuilt by mode, which
-## is what `.MenuAction_BeginSearch` does before showing its own not-found text;
-## anything else moves the listing onto the results and backs up what it
-## replaced.
+## `Pokedex_SearchForMons` plus `.MenuAction_BeginSearch`'s answer to it. Each
+## chosen type filters the listing in place with the second row applied first, so
+## two types find the species carrying both; a species has to have been *caught*,
+## `.Search` checking `Pokedex_CheckCaught`. Answers the result count: zero
+## leaves the listing rebuilt by mode, before the not-found text, and anything
+## else moves it onto the results and backs up what it replaced.
 func begin_search() -> int:
 	search_result_count = 0
 	if search_type_2 != SEARCH_TYPE_NONE:

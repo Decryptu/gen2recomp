@@ -4,17 +4,14 @@ extends RefCounted
 ## What a mod is allowed to change, and the only way it gets to change it.
 ##
 ## A mod never touches scene nodes or engine internals: it is handed this host,
-## registers what it provides, and is done. All it can reach is cartridge content
-## through [GameData] and live world state through [Gen2WorldAPI], both
-## scene-free.
+## registers what it provides, and is done. All it reaches is cartridge content
+## through [GameData] and live world state through [Gen2WorldAPI].
 ##
-## Two things are replaceable this way: the world renderer and the battle
-## renderer. Nothing about either requires the drawing to be 2D, so a renderer
-## building geometry from the same block and collision data, or drawing a battle
-## from the same display values, is a registration, not a fork.
+## The world renderer and the battle renderer are replaceable this way. Neither
+## requires 2D, so a renderer building geometry from the same block and collision
+## data is a registration rather than a fork, and
 ## [method select_world_renderer] and [method select_battle_renderer] swap
-## between registered renderers, which is why the contract is a factory rather
-## than a one-time construction.
+## between them, which is why the contract is a factory.
 ##
 ## Mods are interpreted GDScript: iOS forbids JIT and runtime native loading, so
 ## a compiled extension is not an option for a distributed mod.
@@ -56,24 +53,19 @@ const RENDERER_EFFECTS_METHOD: String = "set_effects"
 ## are drawn from, so a renderer draws them with its objects or ignores them.
 const RENDERER_ACTORS_METHOD: String = "set_actors"
 ## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
-## per battle, before the first [code]set_view[/code], when the battle was
-## entered from the world. It is where the fight is happening: a renderer staging
-## it on the map needs that, and one drawing the cartridge's white field ignores
-## it. A development battle started outside the world passes null.
+## per battle, before the first [code]set_view[/code], saying where the fight is
+## happening: a renderer staging it on the map needs that and one drawing the
+## white field ignores it. A battle started outside the world passes null.
 const RENDERER_WORLD_CONTEXT_METHOD: String = "set_world_context"
-## Optional, world renderers only. Offered every input event the world screen
-## chose not to use, so a renderer can own camera pitch, first person or
-## free-roam. Answering true consumes the event.
+## Optional, world renderers only. Offered every input event the world screen did
+## not use, so a renderer can own camera pitch or first person; answering true
+## consumes the event. The screen decides first, so a renderer can never take a
+## movement or interaction key: it reads world state and must not write it, and
+## free-roam movement is the separate pose layer docs/MODS.md describes.
 ##
-## The screen decides first and offers what is left, so a renderer can never take
-## a movement or interaction key: a renderer reads world state and must not write
-## it, and moving the player is writing it. A renderer wanting free-roam movement
-## is the separate pose layer docs/MODS.md describes, not this.
-##
-## Implement this rather than Godot's own [method Node._input] or
-## [method Node._unhandled_input]: a node in the tree is offered events before
-## the screen decides what it needs, so reading them directly races the gameplay
-## keys instead of taking what is left.
+## Implement this rather than [method Node._input] or
+## [method Node._unhandled_input], which are offered events before the screen
+## decides and so race the gameplay keys instead of taking what is left.
 const RENDERER_INPUT_METHOD: String = "handle_world_input"
 ## Optional, battle renderers only. The same seam on the battle side: every event
 ## [Gen2BattleScreen] did not claim, so a renderer composing its own shot can let
@@ -127,9 +119,8 @@ const FIRST_MOD_POCKET: int = 5
 ## moment it is pressed. A button stores nothing, because "recentre the camera
 ## now" has no value to keep.
 ##
-## A number is not a ladder with every rung written out: a randomizer's seed is
-## one value with ten thousand of them, and dialling it as four one-digit
-## ladders spends four rows of a menu on one field.
+## A number is not a ladder with every rung written out: a randomizer's seed has
+## ten thousand, and four one-digit ladders spend four menu rows on one field.
 const OPTION_LADDER: StringName = &"ladder"
 const OPTION_NUMBER: StringName = &"number"
 const OPTION_BUTTON: StringName = &"button"
@@ -354,20 +345,18 @@ func menu_entries(menu: StringName) -> Array:
 	return entries.duplicate(true)
 
 
-## Adds one setting the player can change: a ladder of values, a number in a
-## range, or a button. [code]kind[/code] chooses, and defaults to
-## [constant OPTION_LADDER].
-##
-## A ladder needs a [code]key[/code], a [code]label[/code] and a non-empty
-## [code]values[/code] array; [code]labels[/code] is what each rung is shown as
-## and defaults to the values themselves, and [code]default[/code] is the rung
-## used until the player picks one and defaults to the first. A toggle is a
-## two-rung ladder. [constant OPTION_NUMBER] takes a range instead; see
-## [method _register_number_option].
+## One setting the player can change: a ladder of values, a number in a range or
+## a button, chosen by [code]kind[/code] and defaulting to
+## [constant OPTION_LADDER]. A ladder needs a [code]key[/code], a
+## [code]label[/code] and a non-empty [code]values[/code] array;
+## [code]labels[/code] names each rung and defaults to the values themselves, and
+## [code]default[/code] is the rung used until the player picks, defaulting to
+## the first. A toggle is a two-rung ladder, and [constant OPTION_NUMBER] takes a
+## range instead ([method _register_number_option]).
 ##
 ## A mod describes a setting rather than drawing one: the start menu's MODS entry
-## and the launcher's mods page are both built from these registrations, so a mod
-## never writes a settings screen and the two surfaces cannot disagree.
+## and the launcher's mods page are both built from these, so the two surfaces
+## cannot disagree.
 func register_option(id: StringName, option: Dictionary) -> Dictionary:
 	var key: StringName = StringName(option.get("key", &""))
 	if String(id).is_empty() or String(key).is_empty():
@@ -613,11 +602,10 @@ func _stored_number(id: StringName, row: Dictionary) -> int:
 ## })
 ## [/codeblock]
 ##
-## `default` is [Gen2InputActions]' own binding shape, so a mod's action is bound
-## by key, pad button or stick and is rebound by the controls card that rebinds
-## the eight. A default already on one of the cartridge's buttons is dropped and
-## reported: the screen claims those before a renderer is offered anything, so
-## such a binding would never once fire.
+## `default` is [Gen2InputActions]' binding shape, so a mod's action binds by key,
+## pad button or stick and is rebound by the same controls card. A default on one
+## of the cartridge's buttons is dropped and reported, since the screen claims
+## those first and such a binding would never fire.
 func register_action(id: StringName, action: Dictionary) -> Dictionary:
 	var key: StringName = StringName(action.get("key", &""))
 	if String(id).is_empty() or String(key).is_empty():
@@ -821,10 +809,9 @@ func content_overlay() -> Gen2ContentOverlay:
 ## Watches one of [constant CHANNELS]. [param handler] is called with each event
 ## dictionary as it reaches the screen showing it.
 ##
-## Reading only. A subscriber is handed a copy, so writing to it changes nothing,
-## and there is no return value the engine reads: observation cannot make two
-## mods fight over the same state, which is what makes this safe to hand out
-## before any mutation hook exists.
+## Reading only. A subscriber is handed a copy and there is no return value the
+## engine reads, so observation cannot make two mods fight over the same state,
+## which is what makes this safe before any mutation hook exists.
 func subscribe(channel: StringName, id: StringName, handler: Callable) -> Dictionary:
 	if not CHANNELS.has(channel):
 		return {"ok": false, "reason": &"unknown_channel", "detail": String(channel)}
@@ -1179,8 +1166,7 @@ func load_mod(manifest: Gen2ModManifest) -> Dictionary:
 	# RefCounted alive, so an entry that connects to option_changed and is then
 	# dropped has connected a signal to an object about to be collected; holding
 	# it here is what makes `register` the whole contract. Dropped by reset(),
-	# which builds a new host, so a reload does not leave the last load
-	# listening.
+	# so a reload does not leave the last load listening.
 	_entries[manifest.id] = mod
 	_loaded[manifest.id] = manifest.version
 	return {"ok": true, "id": manifest.id}
@@ -1205,10 +1191,9 @@ func loaded_mods() -> Array:
 
 ## Mounts a mod's own resource pack, once per run.
 ##
-## `replace_files` is false, so a pack can only add paths and can never land on
-## one the game itself ships: a mod that names `res://game/...` is ignored there
-## rather than obeyed. There is no unmount in the engine, which is why a reload
-## remounts nothing and why the set is kept on the host rather than the manifest.
+## `replace_files` is false, so a pack only adds paths and never lands on one the
+## game ships. The engine has no unmount, which is why a reload remounts nothing
+## and the set is kept on the host rather than the manifest.
 func _mount_pack(manifest: Gen2ModManifest) -> Dictionary:
 	if _mounted_packs.has(manifest.id):
 		return {"ok": true, "id": manifest.id}

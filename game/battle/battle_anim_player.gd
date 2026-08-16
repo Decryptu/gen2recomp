@@ -1,75 +1,62 @@
 class_name Gen2BattleAnimPlayer
 extends RefCounted
 
-## One battle animation playing: `RunBattleAnimScript`'s own frame loop
-## (engine/battle_anims/anim_commands.asm).
+## One battle animation playing: `RunBattleAnimScript`'s frame loop
+## (engine/battle_anims/anim_commands.asm). [Gen2BattleAnimScript] is the
+## interpreter and knows only bytes, [Gen2BattleAnimObject] is one object and
+## knows only itself; this is what the cartridge does with both once a frame,
+## running the script until it yields, stepping every live object and collecting
+## what they would put in `wShadowOAM`.
 ##
-## [Gen2BattleAnimScript] is the interpreter and knows only bytes;
-## [Gen2BattleAnimObject] is one object and knows only itself. This is what the
-## cartridge does with both once a frame: run the script until it yields, step
-## every live object, and collect what they would put in `wShadowOAM`.
-##
-## Scene-free like the rest of the battle layer. Nothing here draws: a frame
-## answers with sprites, a tile window and the palette each sprite wants, and
-## whoever is drawing decides what that looks like.
-##
-## All five of `.playframe`'s steps are here. [method unimplemented] reports what
-## an animation asked for and did not get, which cartridge data no longer
-## produces and a hand-built region still can.
+## Scene-free: a frame answers with sprites, a tile window and the palette each
+## sprite wants. All five of `.playframe`'s steps are here, and
+## [method unimplemented] reports what an animation asked for and did not get,
+## which cartridge data no longer produces and a hand-built region still can.
 
-## `NUM_BATTLE_ANIM_STRUCTS`: ten slots, and an eleventh object is simply not
-## spawned.
+## `NUM_BATTLE_ANIM_STRUCTS`: an eleventh object is simply not spawned.
 const MAX_OBJECTS: int = 10
 
-## `BATTLEANIMSTRUCT_LENGTH`, which only matters because `BattleAnimCmd_ClearObjs`
-## counts in bytes rather than objects.
+## Matters only because `BattleAnimCmd_ClearObjs` counts bytes, not objects.
 const OBJECT_STRUCT_BYTES: int = 24
 
 ## `BattleAnimCmd_ClearObjs` clears `$a0` bytes where the ten structs are `$f0`,
-## so it reaches into the seventh object and stops. Zeroing a struct's first byte
-## is what frees it, so seven slots are freed and the last three survive a
-## command that reads as if it cleared everything.
-## This is the cartridge's own bug (docs/bugs_and_glitches.md) and is reproduced.
+## stopping inside the seventh. Zeroing a struct's first byte frees it, so seven
+## go and the last three survive a command that reads as clearing everything:
+## the cartridge's own bug (docs/bugs_and_glitches.md), reproduced.
 const CLEAR_OBJS_BYTES: int = 0xA0
 
-## `OAM_COUNT`: the hardware's forty sprites. An object whose sprites would run
-## past the end aborts the whole update, which is why a busy frame can lose the
-## objects queued after it rather than truncating one.
+## The hardware's forty sprites. An object whose sprites would overrun aborts the
+## whole update, so a busy frame loses the objects after it rather than one.
 const MAX_SPRITES: int = 40
 
-## `NUM_BATTLEANIMTILEDICT_ENTRIES`: the five graphics sheets one animation may
-## have loaded at once, as `anim_1gfx` through `anim_5gfx` fill them.
+## The five sheets `anim_1gfx` through `anim_5gfx` may have loaded at once.
 const TILE_DICT_ENTRIES: int = 5
 
-## The tile window an animation's graphics are loaded into, from
-## `BATTLEANIM_BASE_TILE` up to `vTiles1`. `BattleAnimCmd_*GFX` stops loading
-## once the running tile id reaches this, which is why a five-sheet animation
-## can silently load fewer than five.
+## The window graphics load into, `BATTLEANIM_BASE_TILE` up to `vTiles1`.
+## `BattleAnimCmd_*GFX` stops once the running tile id reaches it, so a
+## five-sheet animation can silently load fewer.
 const MAX_TILES: int = 128 - Gen2BattleAnimObject.BASE_TILE
 
 ## `wBattleAnimFlags` bits (constants/ram_constants.asm).
 const FLAG_KEEP_SPRITES: int = 1 << 3
 
-## The two `AnimObjGFX` rows that hold no sheet of their own: the battler
-## graphics commands fill them in from whichever picture is on the field.
+## The two `AnimObjGFX` rows with no sheet: the battler graphics commands fill
+## them from whichever picture is on the field.
 const GFX_PLAYERHEAD: int = 0x28
 const GFX_ENEMYFEET: int = 0x29
 
-## `vTiles0`, the object tile bank the animation window sits at the end of.
-## `BattleAnimCmd_BattlerGFX_*` counts its destinations back from the top of it.
+## `vTiles0`, whose top `BattleAnimCmd_BattlerGFX_*` counts back from.
 const OBJECT_TILES: int = 0x80
 
-## `NUM_BG_EFFECTS`: five background effects run at once, and a sixth is simply
-## not queued, the way an eleventh object is not spawned.
+## Five background effects at once; a sixth is not queued, as an eleventh object
+## is not spawned.
 const MAX_BG_EFFECTS: int = Gen2BattleAnimBgEffects.MAX_EFFECTS
 
-## `ROLLOUT`, the move `Rollout_FillLYOverridesBackup` and `.playframe`'s own
-## frame-delay branch both check `wFXAnimID` against.
+## What `Rollout_FillLYOverridesBackup` and `.playframe` check `wFXAnimID` for.
 const ROLLOUT: int = 0xCD
 
-## `BATTLE_AFTERANIMS` (constants/move_constants.asm) and the four offsets from
-## it a battle command writes into `wBattleAfterAnim`. The byte stored is the
-## offset; `BattleAnimRunScript` adds the base back to reach the animation.
+## `BATTLE_AFTERANIMS` and the four offsets from it written into
+## `wBattleAfterAnim`; `BattleAnimRunScript` adds the base back.
 const BATTLE_AFTERANIMS: int = 0x10E
 const AFTER_ANIM_NONE: int = 0
 const AFTER_ANIM_ENEMY_DAMAGE: int = 0x10F - BATTLE_AFTERANIMS
@@ -78,10 +65,9 @@ const AFTER_ANIM_PLAYER_DAMAGE: int = 0x112 - BATTLE_AFTERANIMS
 const AFTER_ANIM_WOBBLE: int = 0x113 - BATTLE_AFTERANIMS
 
 ## The status animations `PlayOpponentBattleAnim` plays on the target, past
-## `wFXAnimID`'s low byte and so reached by `BattleAnimRunScript`'s `.not_move`
-## branch. Only these five of the non-move block are named, because only these
-## five have a caller: `constants/move_constants.asm`'s `ANIM_SLP` and `ANIM_SAP`
-## sit among them and nothing in either pin ever asks for one.
+## `wFXAnimID`'s low byte and so reached by `BattleAnimRunScript`'s `.not_move`.
+## Only these five of the block are named, the rest having no caller: `ANIM_SLP`
+## and `ANIM_SAP` sit among them and nothing in either pin asks for one.
 const ANIM_CONFUSED: int = 0x103
 const ANIM_BRN: int = 0x105
 const ANIM_PSN: int = 0x106
@@ -97,15 +83,14 @@ var _objects: Array[Gen2BattleAnimObject] = []
 var _last_object_index: int = 0
 ## `wBattleAnimTileDict`: five (graphics id, tile offset) pairs.
 var _tile_dict: Array = []
-## Which sheet occupies each tile of the window, as
-## [code]{ gfx, tile }[/code] per loaded tile, so a renderer knows where an
-## OAM tile id's pixels come from.
+## [code]{ gfx, tile }[/code] per loaded tile, so a renderer knows where an OAM
+## tile id's pixels come from.
 var _tiles: Array = []
 var _keep_sprites: bool = false
 var _sprites: Array = []
 ## What the last frame's `RunBattleAnimCommand` ran, for the caller that owns
-## the things the interpreter does not: `anim_sound` and `anim_cry` have to
-## reach an audio player, and this layer has none.
+## what the interpreter does not: `anim_sound` and `anim_cry` need an audio
+## player, which this layer has none of.
 var _frame_commands: Array = []
 var _unimplemented: Dictionary = {}
 ## `wActiveBGEffects`: five `battle_bg_effect` slots.
@@ -113,22 +98,18 @@ var _bg_effects: Array[Gen2BattleAnimBgEffect] = []
 ## The video state the bg effects and `BattleAnimFunc_Surf` share.
 var _background: Gen2BattleAnimBackground = null
 
-## `wCurItem`, which `GetBallAnimPal` reads to colour a thrown ball. Nothing but
-## a ball animation asks, and an item that is not a ball falls out of
-## `BallColors` on its own terminator.
+## `wCurItem`, read by `GetBallAnimPal` to colour a thrown ball. Nothing else
+## asks, and a non-ball falls out of `BallColors` on its own terminator.
 var cur_item: int = 0
 
-## `wPlayerSubStatus3` and `wEnemySubStatus3`'s Fly and Dig bits, which three bg
-## effects check before they touch a battler that is not on the field.
+## The Fly and Dig bits three bg effects check before touching a battler.
 var player_off_field: bool = false
 var enemy_off_field: bool = false
 
 
-## Starts [param index] of `BattleAnimations`. Answers null when the cache has no
-## such animation, which is what an unimported layer looks like.
-##
-## [param param] is `wBattleAnimParam`, and [param enemy_turn] is `hBattleTurn`:
-## the two inputs the battle engine sets before `PlayBattleAnim`.
+## Starts [param index] of `BattleAnimations`, null when the cache has no such
+## animation. [param param] is `wBattleAnimParam` and [param enemy_turn] is
+## `hBattleTurn`, the two inputs set before `PlayBattleAnim`.
 static func create(
 	data: Gen2BattleAnimData, index: int, enemy_turn: bool = false, param: int = 0
 ) -> Gen2BattleAnimPlayer:
@@ -194,9 +175,8 @@ func bg_effects() -> Array:
 	return out
 
 
-## `BGEffect_CheckFlyDigStatus`: whether the battler on [param player_side] is
-## off the field mid-Fly or mid-Dig, which is what stops three effects touching
-## a picture that is not there.
+## `BGEffect_CheckFlyDigStatus`: whether the battler is off the field mid-Fly or
+## mid-Dig, which stops three effects touching a picture that is not there.
 func fly_dig_status(player_side: bool) -> bool:
 	return player_off_field if player_side else enemy_off_field
 
@@ -278,14 +258,11 @@ func unimplemented() -> Dictionary:
 	return out
 
 
-## One hardware frame of `.playframe`, in its own order: the script, the bg
-## effects, every object, the scanline table and the palettes. Answers whether
-## the animation is still running.
-##
-## `.playframe` skips its own `BattleAnimDelayFrame` while Rollout's bg effect is
-## live, because that effect waits a frame itself. Both paths spend exactly one
-## frame, so a player stepped once per frame runs its body once either way and
-## there is nothing here for the check to decide.
+## One hardware frame of `.playframe`, in its order: the script, the bg effects,
+## every object, the scanline table and the palettes. `.playframe` skips its own
+## `BattleAnimDelayFrame` while Rollout's bg effect is live, because that effect
+## waits a frame itself, but both paths spend exactly one frame, so a player
+## stepped once per frame has nothing for the check to decide.
 func advance_frame() -> bool:
 	if finished():
 		_finish()
@@ -391,22 +368,18 @@ func _load_graphics(operands: Array) -> void:
 
 
 ## `BattleAnimCmd_BattlerGFX_1Row` and `..._2Row`: one or two rows of each
-## battler's own picture copied into the top of the animation window, so an
-## effect can lift a battler's feet or head off the tilemap and move them as
-## objects. Three of the bg effects do exactly that, `BattleBGEffect_Tackle`
-## among them.
+## battler's picture copied into the top of the animation window, so an effect
+## can lift a battler's feet or head off the tilemap and move them as objects,
+## which three bg effects including `BattleBGEffect_Tackle` do.
 ##
-## The two dict entries are crosswise with what is copied: the entry named
-## `PLAYERHEAD` holds the enemy's rows and the one named `ENEMYFEET` the
-## player's. The object rows are crossed the same way, since
-## `BATTLE_ANIM_OBJ_ENEMYFEET_*` names `BATTLE_ANIM_GFX_PLAYERHEAD`, so the two
-## cancel and each object draws its own battler. Both crossings are the
-## cartridge's and neither is tidied, the same answer `$d9` and `$da` already
-## get.
+## The two dict entries are crosswise with what is copied, `PLAYERHEAD` holding
+## the enemy's rows and `ENEMYFEET` the player's, and the object rows are crossed
+## the same way, `BATTLE_ANIM_OBJ_ENEMYFEET_*` naming
+## `BATTLE_ANIM_GFX_PLAYERHEAD`, so the two cancel. Both crossings are the
+## cartridge's and neither is tidied.
 ##
-## The window tiles these fill do not name an imported sheet: they name a tile of
-## `vTiles2`, which is where the battle's own two pictures live, in the numbering
-## [Gen2BattleScreenMap] already writes into the tilemap.
+## The window tiles these fill name a tile of `vTiles2`, where the battle's own
+## pictures live, in the numbering [Gen2BattleScreenMap] writes.
 func _load_battler_graphics(rows: int) -> void:
 	var slot: int = _free_tile_dict_slot()
 	if slot < 0 or slot + 1 >= TILE_DICT_ENTRIES:

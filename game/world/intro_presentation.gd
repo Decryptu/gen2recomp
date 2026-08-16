@@ -5,14 +5,11 @@ extends RefCounted
 ## `Intro_RotatePalettesLeftFrontpic`, `Intro_WipeInFrontpic` and
 ## `MovePlayerPic`, queued as steps a screen advances one VBlank at a time.
 ##
-## Two things about this are the source's rather than an approximation of it.
-##
-## A palette step is a DMG palette byte, not a rotation: `CopyPals` reads the
-## byte two bits at a time and writes the loaded colour each pair names, so a
-## fade is an index remap of the palette already loaded. See [method apply_bgp].
-##
-## Every count is a `DelayFrames` operand, so a screen that steps this at
-## [constant FRAME_RATE] spends the frames the cartridge spends.
+## A palette step is a DMG palette byte, not a rotation: `CopyPals` reads it two
+## bits at a time and writes the loaded colour each pair names, so a fade is an
+## index remap of the palette already loaded ([method apply_bgp]). Every count is
+## a `DelayFrames` operand, so a screen stepping this at [constant FRAME_RATE]
+## spends the frames the cartridge spends.
 
 const FRAME_RATE: float = 59.7275
 
@@ -22,10 +19,9 @@ const KEEP: int = -1
 ## `%11100100`: the identity remap, which is what an unfaded screen shows.
 const BGP_NORMAL: int = 0xE4
 
-## `home/fade.asm`'s IncGradGBPalTable_00 to _07, the half `RotatePalettesRight`
-## and `RotatePalettesLeft` take when hCGB is set. A row is bgp, obp0 and obp1,
-## and all three are equal in this half, so one byte stands for the row and one
-## fade covers the sprites `Intro_PlacePlayerSprite` leaves on screen.
+## `home/fade.asm`'s IncGradGBPalTable_00 to _07, the half the rotate routines
+## take when hCGB is set. A row is bgp, obp0 and obp1, all three equal here, so
+## one byte stands for the row and one fade covers the sprites too.
 const INC_GRAD: Array[int] = [0xFF, 0xFE, 0xF9, 0xE4, 0xE4, 0x90, 0x40, 0x00]
 ## Both rotate routines' own `ld c, 8`.
 const FADE_STEP_FRAMES: int = 8
@@ -39,10 +35,9 @@ const WAIT_BG_MAP_FRAMES: int = 4
 const FRONTPIC_FADE: Array[int] = [0x54, 0xA8, 0xFC, 0xF8, 0xF4, 0xE4]
 const FRONTPIC_FADE_STEP_FRAMES: int = 10
 
-## `Intro_WipeInFrontpic` walks hWX from $77 down in eights, stopping when the
-## subtraction would pass zero. hWY sits at $90 for the whole of `OakSpeech`
-## (`home/init.asm`, `StartTitleScreen`), so the window it moves is off the
-## bottom of the screen: the walk is a delay, and the pic appears when the
+## `Intro_WipeInFrontpic` walks hWX from $77 down in eights until it would pass
+## zero. hWY sits at $90 for the whole of `OakSpeech` (`StartTitleScreen`), so
+## the window is off the bottom and the walk is a delay; the pic appears when the
 ## routine writes the identity palette on its second frame.
 const WIPE_START: int = 0x77
 const WIPE_STEP: int = 8
@@ -64,9 +59,9 @@ var _bgp: int = BGP_NORMAL
 var _column: int = PIC_LEFT_COLUMN
 
 
-## Empties the queue. The palette byte and the pic column are hardware state and
-## survive it: a routine that returns leaves the screen as it drew it, which is
-## how `MovePlayerPicRight` hands the naming menu a pic already at column 13.
+## Empties the queue. The palette byte and pic column are hardware state and
+## survive it, which is how `MovePlayerPicRight` hands the naming menu a pic
+## already at column 13.
 func clear() -> void:
 	_steps.clear()
 	_step = 0

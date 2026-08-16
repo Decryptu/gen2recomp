@@ -1,16 +1,13 @@
 class_name Gen2BattleMon
 extends RefCounted
 
-## One Pokémon as a battle sees it: its stats, what it knows, how much of it is
-## left, and how far its stats have been pushed around.
+## One Pokémon as a battle sees it: its stats, what it knows, how much is left
+## and how far its stats have been pushed around. Scene-free, reading cartridge
+## content through [GameData] and never a ROM.
 ##
-## [RefCounted] and scene-free, reading cartridge content through [GameData] and
-## never a ROM.
-##
-## Stats are worked out once, at build time, because that is when the cartridge
-## works them out; only a level up recalculates them. Stages are applied on the
-## way out, to the unmodified stat every time, which is why they are stored
-## separately rather than folded in.
+## Stats are worked out at build time, which is when the cartridge works them
+## out, and only a level up recalculates them. Stages are applied on the way out
+## to the unmodified stat every time, hence stored separately.
 
 ## What a Pokémon can carry into a battle, which is the same four slots
 ## [Gen2Learnset] fills.
@@ -316,13 +313,10 @@ func _stat(
 	)
 
 
-## A stat as the damage formula sees it, with its stage and then its status
-## applied.
-##
-## The cartridge's order: copy the stat, apply the stage, then halve a burned
-## Pokémon's Attack and quarter a paralysed one's Speed. Both land on the copy the
-## stages did, which is why a critical hit reading [method unmodified_stat] is
-## free of the burn as well as the stages.
+## A stat as the damage formula sees it, in the cartridge's order: copy, apply
+## the stage, then halve a burned Attack or quarter a paralysed Speed. Both land
+## on the copy the stages did, which is why a critical hit reading
+## [method unmodified_stat] is free of the burn as well as the stages.
 func stat(key: String) -> int:
 	var value: int = _badge_boosted(int(stats.get(key, 0)), key)
 	if not STAGED_STATS.has(key):
@@ -381,18 +375,16 @@ func reset_stages() -> void:
 		stages[key] = 0
 
 
-## What Baton Pass hands to whoever comes in behind it.
+## What Baton Pass hands to whoever comes in behind it. On the cartridge none of
+## this is the Pokémon's: `wPlayerSubStatus1` through `5` and their counters are
+## battle-position state, cleared on an ordinary entrance only because
+## `NewBattleMonStatus` says so, where `PassedBattleMonEntrance` and
+## `EnemySwitch_SetMode` do not. Here the same state is per-Pokémon and copied
+## across instead, with `ResetBatonPassStatus` naming what does not survive the
+## trip ([method Gen2Battle._reset_baton_pass_status]).
 ##
-## On the cartridge none of this is the Pokémon's: `wPlayerSubStatus1` through
-## `5` and every counter beside them are battle-position state, and an ordinary
-## entrance clears them only because `NewBattleMonStatus` says so.
-## `PassedBattleMonEntrance` and `EnemySwitch_SetMode` do not, which is the whole
-## of what Baton Pass is. Here the same state is per-Pokémon, so it is copied
-## across instead, and `ResetBatonPassStatus` then names the few things that do
-## not survive the trip: see [method Gen2Battle._reset_baton_pass_status].
-##
-## The list is exactly [method reset_volatile]'s, plus the stages, which is why
-## the two sit together: a field added to one belongs in the other.
+## The list is [method reset_volatile]'s plus the stages, which is why the two
+## sit together: a field added to one belongs in the other.
 const PASSED_FIELDS: Array[String] = [
 	"substatus", "confusion_turns", "charged_move", "rollout_count",
 	"rampage_turns", "rampage_move", "toxic_counter", "disabled_slot",
@@ -501,16 +493,11 @@ func persistent_dvs() -> int:
 	return int(transform_original.get("dvs", dvs))
 
 
-## The gender the cartridge's own `GetGender` would answer, from the species'
-## gender ratio and this Pokémon's own Attack and Speed DVs.
-##
-## Not a coin flip and not a stat total: the cartridge folds the Attack DV into
-## one byte's high nibble and the Speed DV into its low nibble, then compares
-## that against the species ratio. Ratio 0 is always male and 254 always female
-## with no comparison at all; 255 is genderless. Otherwise below the ratio is
-## male and at or above it female, so a higher ratio means likelier female.
-## [constant Gen2Species.GENDER_UNKNOWN] and the two extremes are named here
-## rather than repeated at every caller.
+## `GetGender`'s answer, from the species ratio and this Pokémon's Attack and
+## Speed DVs: the cartridge folds the Attack DV into a byte's high nibble and the
+## Speed DV into its low, then compares against the ratio. Ratio 0 is always male
+## and 254 always female with no comparison at all, 255 is genderless, and
+## otherwise below the ratio is male, so a higher ratio means likelier female.
 const GENDER_F0: int = 0
 const GENDER_F100: int = 254
 const GENDER_UNKNOWN: int = 255
@@ -651,12 +638,11 @@ func spend_pp(slot: int) -> void:
 		pp[slot] = maxi(int(pp[slot]) - 1, 0)
 
 
-## Whether there is anything left to do with a move slot.
-##
-## A disabled slot answers false whatever its PP, as the cartridge's menu never
-## offers it. [method Gen2Battle.effective_slot] and [method Gen2Battle.move_for]
-## reroute a caller that still asks; [constant Gen2EffectCommands.CHECK_STATUS]
-## catches the one path through neither.
+## Whether there is anything left to do with a move slot. A disabled one answers
+## false whatever its PP, the cartridge's menu never offering it;
+## [method Gen2Battle.effective_slot] and [method Gen2Battle.move_for] reroute a
+## caller that still asks, and [constant Gen2EffectCommands.CHECK_STATUS] catches
+## the one path through neither.
 func can_use(slot: int) -> bool:
 	return slot >= 0 and slot < moves.size() and pp_left(slot) > 0 and slot != disabled_slot
 

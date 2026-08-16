@@ -20,18 +20,16 @@ const MOVEMENT_PLAYER: int = 11
 const MOVEMENT_FOLLOW: int = 19
 const MOVEMENT_SCRIPTED: int = 20
 ## SPRITEMOVEDATA_STRENGTH_BOULDER. The constants file's comment column is hex,
-## which is why this is $19 and not 19: 19 is SPRITEMOVEDATA_FOLLOWING ($13)
-## above. A boulder decides nothing on its own, so it is deliberately in neither
-## movement_supported() nor movement_advances(); it only reacts to a push.
+## hence $19 and not 19, which is SPRITEMOVEDATA_FOLLOWING ($13). A boulder
+## decides nothing, so it is in neither movement_supported() nor
+## movement_advances() and only reacts to a push.
 const MOVEMENT_STRENGTH_BOULDER: int = 0x19
-## SPRITEMOVEDATA_SMASHABLE_ROCK, the row directly below the boulder and in
-## neither template set for the same reason: a rock decides nothing and only
-## reacts to being smashed. Its flags1 are the boulder's, minus the palette bit
-## and plus USE_OBP1, so nothing but the movement byte tells the two apart.
+## SPRITEMOVEDATA_SMASHABLE_ROCK, below the boulder and in neither set for the
+## same reason. Its flags1 are the boulder's minus the palette bit and plus
+## USE_OBP1, so only the movement byte tells the two apart.
 const MOVEMENT_SMASHABLE_ROCK: int = 0x18
-## SPRITEMOVEDATA_SUDOWOODO, the row above the rock and in neither template set
-## for the same reason. Route 36's weird tree is the only object in either game
-## on it, and `.CheckCanUseSquirtbottle` is the only reader.
+## SPRITEMOVEDATA_SUDOWOODO, in neither set for the same reason. Route 36's weird
+## tree is the only object on it and `.CheckCanUseSquirtbottle` the only reader.
 const MOVEMENT_SUDOWOODO: int = 0x17
 const MOVEMENT_SWIM_WANDER: int = 0x24
 ## The three rows data/sprites/map_objects.asm gives BIG_OBJECT in their palette
@@ -65,11 +63,10 @@ var object_type: int = 0
 var sight_range: int = 0
 var event_script: int = 0
 var event_flag: int = 0
-## Whether [member event_flag] was set when this object table was built.
-## `ReadObjectEvents` reads the flag at map load and `wMapObjects` carries the
-## answer until the next one, so a script that writes the flag while the map is
-## up moves nothing: only `appear` and `disappear`, which edit the live struct as
-## well, do. Kept across a mid-script object reload for that reason.
+## Whether [member event_flag] was set when the table was built.
+## `ReadObjectEvents` reads it at map load and `wMapObjects` carries the answer
+## until the next, so only `appear` and `disappear`, which edit the live struct
+## too, move anything mid-map. Kept across a mid-script object reload.
 var flag_hidden: bool = false
 var trainer_data: Dictionary = {}
 var facing: int = Gen2WorldSprite.FACING_DOWN
@@ -85,9 +82,8 @@ var deleted: bool = false
 var emote_id: int = -1
 var emote_visible: bool = false
 var emote_remaining: int = 0
-## Transient sub-cell presentation offset toward a cell this object already
-## committed to. The logical cell changes at the start of a step, not here;
-## a renderer reads this only to draw the approach to it.
+## Sub-cell presentation offset toward a cell already committed to: the logical
+## cell changes at the start of a step, and this only draws the approach.
 var step_direction: Vector2i = Vector2i.ZERO
 var step_frames_total: int = 0
 var step_frames_remaining: int = 0
@@ -141,15 +137,12 @@ static func from_event(
 	return out
 
 
-## Carries the live presentation of the object this one replaces at the same
-## index on the same map: the emote it is showing, the trail it is still being
-## drawn walking, and whether a movement stream deleted it.
-##
-## The cartridge never rebuilds an object struct for any of the reasons this
-## project rebuilds a record: `ApplyObjectFacing`, `CopyDECoordsToMapObject` and
-## the variable-sprite table all write into the struct that is already there.
-## Without this, a `turnobject` between a `showemote` and its `applymovement`
-## takes the emote down and empties the trail the script is waiting on.
+## Carries the live presentation of the object this replaces at the same index:
+## its emote, the trail it is still being drawn walking, and whether a movement
+## stream deleted it. The cartridge never rebuilds a struct for the reasons this
+## project rebuilds a record, `ApplyObjectFacing` and the rest writing into the
+## one already there, so without this a `turnobject` between a `showemote` and
+## its `applymovement` empties the trail the script is waiting on.
 func carry_presentation_from(previous: Gen2WorldObject) -> void:
 	if previous == null:
 		return
@@ -186,10 +179,9 @@ func is_strength_boulder() -> bool:
 	return movement == MOVEMENT_STRENGTH_BOULDER
 
 
-## TryRockSmashFromMenu's own test: GetFacingObject hands MAPOBJECT_MOVEMENT
-## back in `d` and the whole check is `cp SPRITEMOVEDATA_SMASHABLE_ROCK`. Unlike
-## the three below it that is the source asking the movement byte directly
-## rather than a palette flag the row happens to carry.
+## TryRockSmashFromMenu: `GetFacingObject` hands MAPOBJECT_MOVEMENT back in `d`
+## and the check is `cp SPRITEMOVEDATA_SMASHABLE_ROCK`. Unlike the three below,
+## that is the movement byte directly rather than a palette flag.
 func is_smashable_rock() -> bool:
 	return movement == MOVEMENT_SMASHABLE_ROCK
 
@@ -202,9 +194,8 @@ func is_sudowoodo() -> bool:
 
 ## OBJECT_PALETTE bit SWIMMING, which CanObjectMoveInDirection reads to pick
 ## WillObjectBumpIntoLand over WillObjectBumpIntoWater. Same shape as
-## is_strength_boulder(): data/sprites/map_objects.asm sets the bit on exactly the
-## SPRITEMOVEDATA_SWIM_WANDER row, so the movement template answers it. Only
-## Union Cave B2F's Lapras uses that row, in either game.
+## is_strength_boulder(): the bit sits on the SPRITEMOVEDATA_SWIM_WANDER row
+## alone, which only Union Cave B2F's Lapras uses.
 func is_swimming() -> bool:
 	return movement == MOVEMENT_SWIM_WANDER
 
@@ -250,10 +241,8 @@ func movement_supported() -> bool:
 	]
 
 
-## The supported templates that actually decide something on their own: the
-## three random-walk rows and the two random-spin rows. The standing and
-## fixed-facing rows resolve once in the source and never ask again, so a
-## per-frame driver skips them rather than re-deciding nothing every frame.
+## The templates that decide something: the three random-walk and two
+## random-spin rows. Standing and fixed-facing resolve once and never ask again.
 func movement_advances() -> bool:
 	return movement in [
 		MOVEMENT_WANDER, MOVEMENT_WALK_UP_DOWN, MOVEMENT_WALK_LEFT_RIGHT,
@@ -276,13 +265,10 @@ func visible_at(hour: int, time_of_day: int) -> bool:
 	return hour >= hour_1 or hour <= hour_2
 
 
-## A zero or negative flag is the cache's no-flag/default value. The source
-## uses $FFFF as the explicit always-visible sentinel, imported as -1.
-##
-## Read once, when the object table is built: `ReadObjectEvents` tests the flag
-## at map load and nothing re-tests it while the map is up, which is the whole
-## reason `appear` and `disappear` exist. A `setevent` on an object's own flag
-## therefore changes nothing on screen until the map is loaded again. See
+## A zero or negative flag is the cache's default; the source's always-visible
+## $FFFF is imported as -1. Read once, when the object table is built, which is
+## why `appear` and `disappear` exist and why a bare `setevent` on an object's
+## own flag changes nothing until the map is loaded again. See
 ## [member flag_hidden].
 func visible_with_state(hour: int, time_of_day: int, state: Gen2WorldState) -> bool:
 	return visible_at(hour, time_of_day) and not event_flag_active(state)
@@ -343,10 +329,9 @@ func tick_emote() -> bool:
 	return false
 
 
-## Starts the presentation offset for a step whose destination cell is
-## already committed. [param frames] is the caller's own step duration, kept
-## caller-side so a slow trainer approach and an ordinary walk can share this
-## helper without this class knowing which one is running.
+## Starts the presentation offset for a step whose cell is already committed.
+## [param frames] is the caller's duration, so a slow trainer approach and an
+## ordinary walk share this helper.
 func start_step(direction: Vector2i, frames: int) -> void:
 	queued_steps.clear()
 	scripted_steps = false
@@ -364,12 +349,10 @@ func queue_step(direction: Vector2i, frames: int) -> void:
 	_begin_step(direction, frames)
 
 
-## `Movement_tree_shake`: 24 frames of STEP_TYPE_SLEEP with OBJECT_ACTION_WEIRD_TREE.
-##
-## Nothing moves and nothing shakes but this object's own drawing:
-## `SetFacingWeirdTree` steps the frame counter every frame and takes its two
-## high bits, which is `walk_frame()` again, so Sudowoodo wobbles between its
-## standing drawing and its two walking ones where it stands.
+## `Movement_tree_shake`: 24 frames of STEP_TYPE_SLEEP with
+## OBJECT_ACTION_WEIRD_TREE. Nothing moves but the drawing: `SetFacingWeirdTree`
+## steps the frame counter and takes its two high bits, `walk_frame()` again, so
+## Sudowoodo wobbles between its standing and walking pictures where it stands.
 func queue_tree_shake(frames: int) -> void:
 	weird_tree = true
 	queue_wait(frames)
@@ -392,15 +375,14 @@ func _begin_step(direction: Vector2i, frames: int) -> void:
 	step_direction = direction
 	step_frames_total = maxi(0, frames)
 	step_frames_remaining = step_frames_total
-	## `NormalStep` calls `ShakeGrass` where it starts the step, and a queued
-	## stream starts its later steps here rather than at a call site, so the flag
-	## is raised here and read once by Gen2WorldAPI.take_grass_rustles().
+	# `NormalStep` calls `ShakeGrass` where it starts the step, and a queued
+	# stream starts its later steps here, so the flag is raised here and read
+	# once by Gen2WorldAPI.take_grass_rustles().
 	step_began = direction != Vector2i.ZERO
 
 
-## Consumes one frame of an in-flight step. Returns true when a frame was
-## consumed, false once the step has already finished, so a caller pacing by
-## call count rather than delta time can tell "still stepping" from "done".
+## One frame of an in-flight step; false once it has finished, so a caller pacing
+## by call count can tell "still stepping" from "done".
 func tick_step() -> bool:
 	if step_frames_remaining <= 0:
 		return false
@@ -409,8 +391,8 @@ func tick_step() -> bool:
 	step_frames_remaining -= 1
 	if step_frames_remaining <= 0:
 		if weird_tree:
-			## The 24 frames are not a multiple of the four-frame cycle, so
-			## unlike a step this one has to be stood back up by hand.
+			# The 24 frames are not a multiple of the four-frame cycle, so
+			# unlike a step this one has to be stood back up by hand.
 			weird_tree = false
 			step_frame = 0
 			frame = 0
@@ -427,9 +409,8 @@ func is_stepping() -> bool:
 
 
 ## One hardware frame of `SetFacingStepAction`. The counter is never cleared
-## here: `EndSpriteMovement` is what zeroes it on the cartridge, and every step
-## duration is a multiple of four, so a stopped object is already standing on
-## frame 0 or 2 without one. Frames 1 and 3 are the two walking drawings.
+## here, `EndSpriteMovement` doing it on the cartridge, and every step duration
+## is a multiple of four, so a stopped object already stands on frame 0 or 2.
 func advance_walk_frame() -> void:
 	step_frame = (step_frame + 1) & 0x0F
 	frame = walk_frame()
@@ -466,14 +447,10 @@ func step_offset(cell_pixels: int) -> Vector2i:
 	return Vector2i(int(round(offset.x)), int(round(offset.y)))
 
 
-## The same offset in fractional walk cells, from where the sprite is drawn back
-## to the committed cell. A renderer that does not think in hardware pixels reads
-## this instead of step_offset(), exactly as a renderer reads the player's
-## Gen2WorldAPI.player_step_offset_cells().
-##
-## One in-flight step is at most a cell behind. A scripted stream commits its
-## whole path at once, so its trail is as many cells behind as it has left to
-## draw.
+## The same offset in fractional walk cells, for a renderer that does not think
+## in hardware pixels, matching Gen2WorldAPI.player_step_offset_cells(). One
+## in-flight step is at most a cell behind; a scripted stream commits its whole
+## path at once, so its trail is as many cells behind as it has left to draw.
 func step_offset_cells() -> Vector2:
 	var behind := Vector2.ZERO
 	for entry: Dictionary in queued_steps:

@@ -1,20 +1,14 @@
 class_name Gen2Stats
 extends RefCounted
 
-## The stat arithmetic: base stats, DVs and stat experience into the numbers a
-## battle is fought with.
+## Base stats, DVs and stat experience into the numbers a battle is fought with.
 ##
 ## Integer arithmetic in the hardware's order: every division truncates, and a
-## tidier rearrangement gives a different answer often enough to matter.
-##
-## Generation 2 has DVs and stat experience, not later games' effort values. A DV
-## is four bits per stat, and HP's is assembled from the low bit of the other
-## four rather than stored, which is why a shiny Pokémon has the stats it does:
-## shininess is a pattern in the same nibbles.
+## tidier rearrangement gives a different answer often enough to matter. A DV is
+## four bits per stat, and HP's is assembled from the other four rather than
+## stored, which is the same reading that decides shininess.
 
-## The two constants the formula ends on. A stat is never below its floor, so a
-## level 1 Pokémon with nothing going for it still has 5 of everything and 11 hit
-## points.
+## The floors the formula ends on: a level 1 Pokémon still has 5 and 11.
 const STAT_MIN_NORMAL: int = 5
 const STAT_MIN_HP: int = 10
 
@@ -27,21 +21,17 @@ const MAX_STAT_EXP: int = 65535
 ## `ld a, $ff / NUM_UNOWN + 1`, assembled rather than computed: 255 / 26 is 9.
 const UNOWN_LETTER_DIVISOR: int = 10
 
-## The cartridge finds a square root by walking a table of squares, so it stops
-## at the last entry rather than at the true root. Stat experience above 255
-## squared is therefore wasted, and the most a full stat exp bar is worth is 63.
+## The table of squares stops here rather than at the true root, so stat
+## experience above 255 squared is wasted and a full bar is worth 63.
 const MAX_SQUARE_ROOT: int = 255
 
-## Stat stages run from -6 to +6. The cartridge stores them 7-centred, from 1 to
-## 13, because it indexes the multiplier table with them directly; here they are
-## the numbers a player would recognise and the table is offset instead.
+## The cartridge stores stages 7-centred so it can index the table with them;
+## here they are signed and the table is offset instead.
 const MIN_STAGE: int = -6
 const MAX_STAGE: int = 6
 
-## What each stage multiplies a stat by, as the numerator and denominator pair the
-## cartridge stores. They are not a clean 2/(2+n) curve: the drops are rounded
-## percentages, so -1 is 66/100 and not 2/3, and the two disagree by a point on a
-## stat of 150.
+## The cartridge's own numerator/denominator pairs, not a 2/(2+n) curve: the
+## drops are rounded percentages, so -1 is 66/100 and differs on a stat of 150.
 const STAGE_MULTIPLIERS: Array = [
 	[25, 100], [28, 100], [33, 100], [40, 100], [50, 100], [66, 100],
 	[1, 1],
@@ -56,14 +46,9 @@ const DV_SPEED_SHIFT: int = 4
 const DV_SPECIAL_SHIFT: int = 0
 
 
-## The square root as the cartridge computes it: the smallest whole number whose
-## square is at least [param value], never below 1 and never above
-## [constant MAX_SQUARE_ROOT].
-##
-## A ceiling, not a floor: getting it wrong shows up as a stat being one out on
-## any trained Pokémon. The cartridge scans a table of squares for the first
-## entry not smaller than the stat experience, and that table starts at 1, so an
-## untrained Pokémon answers 1 rather than 0.
+## The cartridge's square root: the first entry of a table of squares not
+## smaller than [param value]. A ceiling, not a floor, and the table starts at 1,
+## so an untrained Pokémon answers 1 rather than 0.
 static func square_root(value: int) -> int:
 	for root: int in range(1, MAX_SQUARE_ROOT):
 		if root * root >= value:
@@ -71,11 +56,8 @@ static func square_root(value: int) -> int:
 	return MAX_SQUARE_ROOT
 
 
-## One stat, from its base value, its DV, its stat experience and a level.
-##
-## [param is_hp] picks the other ending: HP adds the level and ten where every
-## other stat adds five. Everything before that is shared, which is why they are
-## one function rather than two.
+## One stat, from base, DV, stat experience and level. [param is_hp] picks the
+## other ending alone: HP adds the level and ten where the rest add five.
 static func calculate(
 	base: int, dv: int, stat_exp: int, level: int, is_hp: bool = false
 ) -> int:
@@ -88,11 +70,8 @@ static func calculate(
 	return mini(out, MAX_STAT_VALUE)
 
 
-## HP's DV, which is not stored: it is the low bit of each of the other four,
-## in the order attack, defense, speed, special.
-##
-## The same four nibbles decide whether a Pokémon is shiny, so its colour and its
-## hit points are two readings of one number rather than two facts about it.
+## HP's DV is not stored: it is the low bit of each of the other four, in the
+## order attack, defense, speed, special, which is what shininess reads too.
 static func hp_dv(dvs: int) -> int:
 	return ((attack_dv(dvs) & 1) << 3) | ((defense_dv(dvs) & 1) << 2) \
 		| ((speed_dv(dvs) & 1) << 1) | (special_dv(dvs) & 1)
@@ -110,20 +89,15 @@ static func speed_dv(dvs: int) -> int:
 	return (dvs >> DV_SPEED_SHIFT) & 0xF
 
 
-## Special Attack and Special Defense share one DV in these games. The split
-## arrived in Generation 2 for base stats and stat experience but not for DVs.
+## Special Attack and Special Defense share one DV: the split arrived for base
+## stats and stat experience but not here.
 static func special_dv(dvs: int) -> int:
 	return (dvs >> DV_SPECIAL_SHIFT) & 0xF
 
 
-## Which of Unown's twenty-six letters a Pokémon with these DVs is, 1 being A.
-##
-## `GetUnownLetter` (engine/gfx/load_pics.asm) takes the middle two bits of each
-## DV in the order attack, defense, speed, special, packs them into one byte and
-## divides by `$ff / NUM_UNOWN + 1`, which is ten. So a letter is one more than a
-## byte that only ever holds those eight bits: the highest is $FF, which is Z.
-## Nothing stores the letter, here or on the cartridge; it is read off the DVs
-## every time the pic, the dex or a wild encounter needs it.
+## `GetUnownLetter` (engine/gfx/load_pics.asm), 1 being A: the middle two bits of
+## each DV packed into a byte and divided by [constant UNOWN_LETTER_DIVISOR], so
+## the highest, $FF, is Z. Nothing stores the letter on either side.
 static func unown_letter(dvs: int) -> int:
 	var packed: int = ((attack_dv(dvs) & 0x6) << 5) | ((defense_dv(dvs) & 0x6) << 3) \
 		| ((speed_dv(dvs) & 0x6) << 1) | ((special_dv(dvs) & 0x6) >> 1)
@@ -132,8 +106,7 @@ static func unown_letter(dvs: int) -> int:
 	return letter + 1
 
 
-## Packs four DVs into the word the cartridge stores, which is what a caller
-## building a Pokémon by hand wants.
+## Four DVs into the word the cartridge stores, for a caller building one by hand.
 static func pack_dvs(attack: int, defense: int, speed: int, special: int) -> int:
 	return (clampi(attack, 0, MAX_DV) << DV_ATTACK_SHIFT) \
 		| (clampi(defense, 0, MAX_DV) << DV_DEFENSE_SHIFT) \
@@ -142,11 +115,8 @@ static func pack_dvs(attack: int, defense: int, speed: int, special: int) -> int
 
 
 ## A stat with a stage applied, capped at [constant MAX_STAT_VALUE] and never
-## below 1.
-##
-## The stage is applied to the unmodified stat every time rather than to the last
-## answer, so six drops and six rises leave the stat where it started instead of
-## grinding it down through twelve truncations.
+## below 1. Applied to the unmodified stat every time rather than to the last
+## answer, so six drops and six rises leave it where it started.
 static func apply_stage(value: int, stage: int) -> int:
 	var ratio: Array = STAGE_MULTIPLIERS[clampi(stage, MIN_STAGE, MAX_STAGE) - MIN_STAGE]
 	@warning_ignore("integer_division")

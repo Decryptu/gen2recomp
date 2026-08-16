@@ -1,22 +1,18 @@
 class_name Gen2MenuPage
 extends RefCounted
 
-## One cartridge menu box on the hardware tile grid: `MenuBox`'s frame,
+## One menu box on the hardware tile grid: `MenuBox`'s frame,
 ## `PlaceVerticalMenuItems`' options, `PlaceMenuStrings`' title and
-## `Place2DMenuCursor`'s arrow.
-##
-## The geometry is [Gen2MenuBox]'s and the selection [Gen2WorldMenu]'s; this is
-## presentation only. Node-free, so a menu can be drawn into any buffer a screen
-## already owns and read back headless: the naming screen and the gender screen
-## both draw one over a page they built first.
+## `Place2DMenuCursor`'s arrow. Geometry is [Gen2MenuBox]'s and selection
+## [Gen2WorldMenu]'s; this is presentation, and node-free so a menu can be drawn
+## into any buffer a screen already owns and read back headless.
 
 const TILE: int = Gen2Font.TILE
 
 ## `charmap.asm`: `"▶"` is $ed, which is what `Place2DMenuCursor` writes.
 const CURSOR_CODE: int = 0xED
 
-## `Textbox` draws with wTextboxFrame, so a menu is drawn in whichever frame the
-## player chose, the way the Hall of Fame panel and the world's own boxes are.
+## `Textbox` draws with wTextboxFrame, so a menu wears the player's chosen frame.
 var frame_style: int = 0
 
 var font: Gen2Font = null
@@ -36,13 +32,10 @@ static func from_data(data: GameData) -> Gen2MenuPage:
 ## [param width] pixels across, with the arrow on [param cursor]. A negative
 ## cursor draws no arrow, which is what a menu without STATICMENU_CURSOR is.
 ##
-## The box's interior is not cleared: `MenuBox` calls `Textbox`, which fills its
-## own interior with blanks, and every caller here draws onto a buffer it has
-## already filled.
-## [param extras] are `PlaceString` calls the box's own caller makes at absolute
-## tile coordinates, as [code]{"text": String, "at": Vector2i}[/code]: the
-## battle's `MoveInfoBox` writes its type and PP into a plain `Textbox` that way
-## rather than as menu items.
+## [param extras] are `PlaceString` calls the caller makes at absolute tile
+## coordinates, as [code]{"text": String, "at": Vector2i}[/code]: the battle's
+## `MoveInfoBox` writes its type and PP into a plain `Textbox` that way rather
+## than as menu items.
 func draw(
 	box: Gen2MenuBox, options: Array, cursor: int,
 	indices: PackedByteArray, width: int, title: String = "", title_indent: int = 0,
@@ -75,13 +68,10 @@ func draw(
 		font.draw_code(CURSOR_CODE, indices, width, arrow.x * TILE, arrow.y * TILE)
 
 
-## The same menu as an image of its own frame alone, for a screen that composes
-## layers rather than one page: the box is drawn into a screen-sized buffer at
-## its own coordinates and then cropped back to it, so [method draw]'s absolute
-## placement stays the one piece of arithmetic.
-##
-## Opaque, because `MenuBox` fills its interior: a menu over the battle field
-## covers what is behind it.
+## The same menu as an image of its frame alone, for a screen that composes
+## layers: drawn into a screen-sized buffer at its own coordinates and cropped
+## back, so [method draw]'s placement stays the one piece of arithmetic. Opaque,
+## because `MenuBox` fills its interior.
 func render(
 	box: Gen2MenuBox, options: Array, cursor: int,
 	title: String = "", title_indent: int = 0, extras: Array = []
@@ -96,9 +86,8 @@ func render(
 	).get_region(Rect2i(box.border_position() * TILE, box.border_size() * TILE))
 
 
-## `Textbox`'s own `ClearBox` over the interior, so a menu drawn over a filled
-## page does not show that page through its options. The blank the source fills
-## with is $7f, which sits below the font and draws as index 0.
+## `Textbox`'s own `ClearBox`, so a menu over a filled page does not show it
+## through. The source's blank is $7f, below the font, which draws as index 0.
 func _fill_interior(box: Gen2MenuBox, indices: PackedByteArray, width: int) -> void:
 	var interior: Vector2i = box.interior()
 	var left: int = (box.left + 1) * TILE

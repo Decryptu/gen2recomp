@@ -1,43 +1,35 @@
 class_name Gen2Text
 extends RefCounted
 
-## The Generation 2 character encoding, for the international ROMs.
+## The Generation 2 character encoding, for the international ROMs. One byte per
+## character terminated by $50, the alphabet in runs: $80 is "A", $A0 is "a", $F6
+## is "0". Some codes expand to whole words ($5D is "TRAINER") or name the player
+## at print time ($52); those stay bracketed markers so nothing is silently lost.
+## The Japanese cartridges reuse most of this range for kana, are not in
+## [RomRegistry], and would decode into nonsense here.
 ##
-## One byte per character, terminated by $50, the alphabet in runs: $80 is "A",
-## $A0 is "a", $F6 is "0". Some codes expand to whole words ($5D is "TRAINER") or
-## name the player at print time ($52); those stay bracketed markers so a caller
-## can substitute them and nothing is silently lost.
-##
-## The Japanese cartridges reuse most of this range for kana. They are not in
-## [RomRegistry], and this table would decode them into nonsense.
-##
-## A byte does not name a character on its own. `constants/charmap.asm` maps the
-## $60 to $7F run twice over, once from `gfx/font/font.png` and again from
-## `gfx/font/font_battle_extra.png` under its own "Actual characters" heading,
-## and $6e three times; the byte means whichever strip the hardware last loaded
-## into video memory. Every entry point here takes the strip, defaulting to the
-## main font, which is what all but the battle and Hall of Fame screens have up.
+## A byte does not name a character on its own: `constants/charmap.asm` maps the
+## $60 to $7F run twice, from `gfx/font/font.png` and from
+## `gfx/font/font_battle_extra.png`, and $6e three times, so a byte means
+## whichever strip the hardware last loaded. Every entry point takes the strip,
+## defaulting to the main font that all but the battle and Hall of Fame have up.
 
 const TERMINATOR: int = 0x50
 const SPACE: int = 0x7F
 
-## Which strip is loaded. [constant FONT_MAIN] is `_LoadStandardFont`'s;
-## [constant FONT_BATTLE_EXTRA] is what `_LoadFontsBattleExtra` leaves behind,
-## which `engine/events/halloffame.asm` calls before it prints a panel.
+## `_LoadStandardFont`'s strip, and `_LoadFontsBattleExtra`'s, which
+## `engine/events/halloffame.asm` calls before it prints a panel.
 const FONT_MAIN: StringName = &"main"
 const FONT_BATTLE_EXTRA: StringName = &"battle_extra"
 
-## The run `_LoadFontsBattleExtra` overwrites: twenty-five tiles from $60, which
-## is `ld hl, vTiles2 tile $60` and `lb bc, BANK(FontBattleExtra), 25`. Outside
-## it the main font is still up, so letters, digits and the box-drawing codes
-## mean what they always did.
+## The run `_LoadFontsBattleExtra` overwrites: `ld hl, vTiles2 tile $60` and
+## `lb bc, BANK(FontBattleExtra), 25`. Outside it the main font is still up.
 const BATTLE_EXTRA_FIRST_CODE: int = 0x60
 const BATTLE_EXTRA_LAST_CODE: int = 0x78
 
-## What that run says. The rest of it is the HP bar's fill levels and the two HUD
-## borders, which are graphics rather than characters, so a code in the run and
-## not in here has no character at all: falling back to the main font's would
-## decode $75 as an ellipsis when the tile in memory is a piece of a bar.
+## What that run says. The rest is the HP bar's fill levels and the HUD borders,
+## graphics rather than characters, so a code in the run and not here has none:
+## falling back would decode $75 as an ellipsis when the tile is part of a bar.
 const BATTLE_EXTRA_CHARACTERS: Dictionary = {
 	0x6E: "<LV>",
 	0x70: "<DO>",
@@ -47,22 +39,19 @@ const BATTLE_EXTRA_CHARACTERS: Dictionary = {
 	0x74: "№",
 }
 
-## The lowest code the font has a tile for. Everything below it is a space, a
-## border, a control code or a name substituted at print time, so it is also the
-## line between what [method encode] will produce and what only [method decode]
-## understands.
+## The lowest code with a tile. Below it is a space, border, control code or a
+## print-time name, so it is also the line between [method encode]'s range and
+## what only [method decode] understands.
 const FIRST_PRINTABLE: int = 0x80
 
 ## What an unencodable character becomes: "?", because a question mark on screen
 ## is a bug someone will report and a dropped character is not.
 const UNKNOWN: int = 0xE6
 
-## The longest character sequence one tile can stand for: the apostrophe
-## ligatures ('s, 't) and PK/MN are two characters in a single glyph, because
-## the font has no room for a free-standing apostrophe followed by a letter.
-## The longer word codes $54 ("POKé") and $4a ("PKMN") are not reachable through
-## this: they sit below FIRST_PRINTABLE and so are decode-only by design. Write
-## "#" for $54 the way the source charmap does.
+## The longest sequence one tile stands for: the apostrophe ligatures and PK/MN
+## are two characters in one glyph. The word codes $54 ("POKé") and $4a ("PKMN")
+## sit below FIRST_PRINTABLE and are decode-only; write "#" for $54 as the source
+## charmap does.
 const MAX_LIGATURE: int = 2
 
 static var _table: Dictionary = {}
@@ -70,8 +59,7 @@ static var _codes: Dictionary = {}
 static var _battle_extra_codes: Dictionary = {}
 
 
-## Decodes bytes from [param offset] up to a terminator or [param max_length]
-## characters, whichever comes first.
+## Up to a terminator or [param max_length] characters, whichever comes first.
 static func decode(
 	data: PackedByteArray, offset: int, max_length: int, font: StringName = FONT_MAIN
 ) -> String:
@@ -87,23 +75,18 @@ static func decode(
 	return out
 
 
-## A fixed-width field: the game pads names with $50 and reads a known number of
-## bytes, so trailing padding is stripped rather than treated as a terminator
-## mid-string.
+## A fixed-width field: the game pads names with $50 and reads a known count, so
+## trailing padding is stripped rather than read as a mid-string terminator.
 static func decode_fixed(data: PackedByteArray, offset: int, length: int) -> String:
 	return decode(data, offset, length)
 
 
-## Walks [param count] consecutive terminated strings starting at [param offset].
-##
-## Species names are fixed-width, but move and item names are not: each entry
-## ends at its terminator and the next begins on the very next byte. Nothing
-## announces a length, so one wrong byte slides every name after it, which is why
-## the importer checks such a table's last entry as well as its first.
-##
-## [param max_length] is a runaway guard, not a field width: without it a table
-## read past its end would scan the remaining megabyte for a terminator that is
-## not coming.
+## [param count] consecutive terminated strings from [param offset]. Species
+## names are fixed-width; move and item names are not, each ending at its
+## terminator with the next on the following byte. Nothing announces a length, so
+## one wrong byte slides every name after it, which is why the importer checks
+## such a table's last entry as well as its first. [param max_length] is a
+## runaway guard, not a field width.
 static func decode_sequence(
 	data: PackedByteArray, offset: int, count: int, max_length: int
 ) -> PackedStringArray:
@@ -117,13 +100,10 @@ static func decode_sequence(
 	return out
 
 
-## The offset just past the terminator of the string at [param offset].
-##
-## What a caller needs to read the field that follows a variable-length string:
-## a Pokedex entry's height sits directly after its category, and its second
-## description page directly after its first. [param max_length] is the same
-## runaway guard [method decode_sequence] uses, and a walk that hits it, or the
-## end of the data, still answers one past where it stopped rather than looping.
+## Just past the terminator, for a caller reading the field that follows a
+## variable-length string: a Pokedex entry's height sits directly after its
+## category. [param max_length] is [method decode_sequence]'s runaway guard, and
+## a walk that hits it still answers one past where it stopped.
 static func terminated_end(data: PackedByteArray, offset: int, max_length: int) -> int:
 	var end: int = offset
 	while end < data.size() and data[end] != TERMINATOR and end - offset < max_length:
@@ -131,19 +111,13 @@ static func terminated_end(data: PackedByteArray, offset: int, max_length: int) 
 	return end + 1
 
 
-## Turns a string into the codes that draw it, one code per tile.
-##
-## The inverse of [method decode] over the printable range only: a name read back
-## out of the cache is a Godot [String] and has to become tiles again. Control
-## codes and print-time name codes are decode-only, since they are not glyphs and
-## the layout layer handles line breaks itself.
-##
-## Anything the font cannot draw becomes [constant UNKNOWN] rather than being
-## dropped, like an unrecognised byte on the way in.
-## [param font] adds the strip's own single characters. Its bracketed markers
-## (`<LV>`, `<ID>`, `<DO>`) stay decode-only, the way `<PLAYER>` and the word
-## codes already are: a marker is not a character someone types, and the callers
-## that place one place the code itself.
+## A string to the codes that draw it, one per tile: [method decode]'s inverse
+## over the printable range alone, since a name read back out of the cache is a
+## Godot [String]. Control and print-time name codes are decode-only, not being
+## glyphs, and anything the font cannot draw becomes [constant UNKNOWN] rather
+## than being dropped. [param font] adds the strip's own single characters; its
+## bracketed markers (`<LV>`, `<ID>`, `<DO>`) stay decode-only like `<PLAYER>`,
+## since the callers that place one place the code itself.
 static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArray:
 	var codes: Dictionary = _encodings() if font == FONT_MAIN else _battle_extra_encodings()
 	var out: PackedByteArray = PackedByteArray()
@@ -151,8 +125,7 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 
 	while at < text.length():
 		var taken: int = 0
-		# Longest first, so "'s" wins over "'" followed by an "s" that has no
-		# code of its own.
+		# Longest first, so "'s" wins over a "'" with no "s" code after it.
 		for length: int in range(mini(MAX_LIGATURE, text.length() - at), 0, -1):
 			var candidate: String = text.substr(at, length)
 			if codes.has(candidate):
@@ -167,8 +140,7 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 	return out
 
 
-## How many tiles a string occupies, which is not its length: a ligature is two
-## characters in one tile, so anything laying text out has to ask.
+## Tiles, not length: a ligature is two characters in one, so layout has to ask.
 static func encoded_length(text: String, font: StringName = FONT_MAIN) -> int:
 	return encode(text, font).size()
 
@@ -176,14 +148,12 @@ static func encoded_length(text: String, font: StringName = FONT_MAIN) -> int:
 static func character(byte: int, font: StringName = FONT_MAIN) -> String:
 	if font == FONT_BATTLE_EXTRA \
 		and byte >= BATTLE_EXTRA_FIRST_CODE and byte <= BATTLE_EXTRA_LAST_CODE:
-		# The run this strip owns answers only from its own table, never from the
-		# main font's meaning for the same byte.
+		# The run this strip owns answers from its own table alone.
 		return BATTLE_EXTRA_CHARACTERS.get(byte, "<%02X>" % byte)
 	var table: Dictionary = _characters()
 	if table.has(byte):
 		return table[byte]
-	# Never silently drop a byte we do not understand: an unrecognised code in a
-	# name means the offset table is wrong, and that should be visible.
+	# Never drop an unknown byte: it means the offset table is wrong.
 	return "<%02X>" % byte
 
 
@@ -241,8 +211,7 @@ static func _characters() -> Dictionary:
 	table[0x7D] = "└"
 	table[0x7E] = "┘"
 
-	# Apostrophe ligatures: one tile each, because the font has no room for a
-	# free-standing apostrophe followed by a letter.
+	# Apostrophe ligatures, one tile each: the font has no free-standing one.
 	table[0xD0] = "'d"
 	table[0xD1] = "'l"
 	table[0xD2] = "'m"
@@ -262,9 +231,9 @@ static func _characters() -> Dictionary:
 	table[0xE1] = "PK"
 	table[0xE2] = "MN"
 
-	# Substituted from RAM when the game prints them. $14 is not among them:
-	# `charmap.asm` gives it no character and `CheckDict` no entry, because it
-	# is TX_STRINGBUFFER one layer up. See [Gen2TextStream].
+	# Substituted from RAM at print time. $14 is not among them: `charmap.asm`
+	# gives it no character and `CheckDict` no entry, it being TX_STRINGBUFFER
+	# one layer up. See [Gen2TextStream].
 	table[0x38] = "<RED>"
 	table[0x39] = "<GREEN>"
 	table[0x3F] = "<ENEMY>"
@@ -274,15 +243,14 @@ static func _characters() -> Dictionary:
 	table[0x59] = "<TARGET>"
 	table[0x5A] = "<USER>"
 
-	# `CheckDict`'s two break opportunities, which draw nothing of their own:
-	# `<BSP>` is replaced with a space and `<WBR>` skipped. Both are `<LF>`
-	# instead on the region map, which is `TownMap_ConvertLineBreakCharacters`
-	# rewriting the byte before the string is placed.
+	# `CheckDict`'s two break opportunities, drawing nothing: `<BSP>` becomes a
+	# space and `<WBR>` is skipped. `TownMap_ConvertLineBreakCharacters` rewrites
+	# both to `<LF>` before a region map string is placed.
 	table[0x1F] = " "
 	table[0x25] = ""
 
-	# Line and box control. $16 is left out for the reason $14 is: to the
-	# command loop it is TX_FAR, and `CheckDict` has no `<CR>` entry.
+	# Line and box control. $16 is left out for $14's reason: to the command
+	# loop it is TX_FAR, and `CheckDict` has no `<CR>` entry.
 	table[0x22] = "\n"
 	table[0x4B] = "\n"
 	table[0x4C] = "\n"
@@ -298,10 +266,9 @@ static func _characters() -> Dictionary:
 	return _table
 
 
-## The printable table inverted. Built in ascending code order and never
-## overwritten, so where two codes draw the same character the lower one wins:
-## the only such pair is the full stop at $E8 and the narrower decimal point at
-## $F2, and $E8 is the one sentences end with.
+## The printable table inverted, built ascending and never overwritten, so the
+## lower of two codes drawing one character wins. The only such pair is the full
+## stop at $E8 and the narrower decimal point at $F2.
 static func _encodings() -> Dictionary:
 	if not _codes.is_empty():
 		return _codes
@@ -317,29 +284,24 @@ static func _encodings() -> Dictionary:
 		if not out.has(text):
 			out[text] = code
 
-	# constants/charmap.asm maps "#" to $54, the POKé ligature, which is how every
-	# source text writes it. Encode only: decoding $54 stays "POKé", so a round
-	# trip through the cartridge's own shorthand is not silently rewritten.
-	# Without this a synthesized literal such as "a #MON!" encodes "#" as UNKNOWN
-	# and draws a question mark.
+	# constants/charmap.asm maps "#" to $54, the POKé ligature every source text
+	# writes. Encode only, so decoding $54 stays "POKé" and a round trip is not
+	# rewritten. Without it "a #MON!" draws a question mark.
 	out["#"] = 0x54
 
-	# charmap.asm maps "…" to $75, which is likewise below FIRST_PRINTABLE and so
-	# decode-only. Source text writes the character itself (Text_MoveForgetCount's
-	# "1, 2 and…"), so a synthesized line quoting that wording needs it to encode
-	# rather than draw a question mark. $56 is "……" and stays decode-only: two
-	# $75s draw the same thing, and nothing has to choose between them.
+	# charmap.asm maps "…" to $75, likewise below FIRST_PRINTABLE. Source text
+	# writes the character itself (Text_MoveForgetCount's "1, 2 and…"), so a line
+	# quoting that wording has to encode it. $56 is "……" and stays decode-only,
+	# two $75s drawing the same thing.
 	out["…"] = 0x75
 
 	_codes = out
 	return _codes
 
 
-## The main font's encodings with the battle-extra run replaced.
-##
-## The main table's entries for $60 to $78 are dropped rather than kept
-## alongside: with that strip loaded there is no tile drawing an ellipsis, so
-## encoding one would place a byte that draws part of an HP bar.
+## The main font's encodings with the battle-extra run replaced. $60 to $78 are
+## dropped rather than kept alongside: with that strip loaded no tile draws an
+## ellipsis, so encoding one would place a byte that draws part of an HP bar.
 static func _battle_extra_encodings() -> Dictionary:
 	if not _battle_extra_codes.is_empty():
 		return _battle_extra_codes

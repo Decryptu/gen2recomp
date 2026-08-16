@@ -10,9 +10,8 @@ extends RefCounted
 ## through [method must_replace] and stands still until [method replace_fallen],
 ## the only entry point besides [method take_actions] that moves a battle on.
 
-## The two sides, as plain numbers rather than an enum: they are dictionary keys
-## and event payloads throughout, and an enum buys nothing where everything that
-## reads one is comparing it against these two constants.
+## Plain numbers rather than an enum: they are dictionary keys and event payloads
+## throughout, and everything reading one compares it against these two.
 const PLAYER: int = 0
 const ENEMY: int = 1
 
@@ -29,9 +28,9 @@ const FAINTED: StringName = &"fainted"
 const HIT_TIMES: StringName = &"hit_times"
 ## A draining move healed the attacker off what it dealt.
 const DRAINED: StringName = &"drained"
-## A one-hit KO landed. Its own event rather than a flag on [constant HIT]:
-## the cartridge shows neither a critical hit nor an effectiveness line for
-## one, since the damage was never actually multiplied by either.
+## A one-hit KO landed. Its own event rather than a flag on [constant HIT]: the
+## cartridge shows neither a critical nor an effectiveness line, the damage
+## having been multiplied by neither.
 const OHKO: StringName = &"ohko"
 ## A status stopped a Pokémon moving, [code]reason[/code] being which:
 ## [code]&"sleep"[/code], [code]&"freeze"[/code], [code]&"paralysis"[/code],
