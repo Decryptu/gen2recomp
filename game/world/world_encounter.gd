@@ -302,6 +302,24 @@ static func _slots(record: Dictionary, method: StringName, time_of_day: int) -> 
 	return (value as Array)[index] if index < (value as Array).size() and (value as Array)[index] is Array else []
 
 
+## The slots [method resolve] would draw from, as
+## `{species, min_level, max_level}`. A cartridge table names one level per slot,
+## so the two bounds are equal; the shape is the Bug Contest's as well, whose
+## rows are a range. See [method Gen2WorldAPI.active_encounter_tables].
+static func active_slots(record: Dictionary, method: StringName, time_of_day: int) -> Array:
+	var out: Array = []
+	for slot: Variant in _slots(record, method, time_of_day):
+		if not slot is Dictionary:
+			continue
+		var level: int = int((slot as Dictionary).get("level", 0))
+		out.append({
+			"species": int((slot as Dictionary).get("species", 0)),
+			"min_level": level,
+			"max_level": level,
+		})
+	return out
+
+
 static func _choose_slot(random: RandomNumberGenerator, method: StringName) -> int:
 	var probabilities: Array[int] = (
 		RomLayout.WILD_WATER_PROBABILITIES if method == METHOD_SURF

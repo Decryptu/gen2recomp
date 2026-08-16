@@ -349,6 +349,17 @@ static func _write_overworld_graphics(directory: String) -> void:
 	sprite.fill(1)
 	RomCache.write_indices(RomCache.overworld_sprite_path(directory, TRAINER_SPRITE), sprite)
 
+	## `MonMenuIcons`, one row per species: every one of them icon 1, which is
+	## all anything drawing a party icon or a visible encounter needs here.
+	var menu_icons: PackedByteArray = PackedByteArray()
+	menu_icons.resize(RomLayout.SPECIES_COUNT)
+	menu_icons.fill(1)
+	RomCache.write_indices(RomCache.mon_menu_icons_path(directory), menu_icons)
+	var icon: PackedByteArray = PackedByteArray()
+	icon.resize(8 * Gen2Tiles.TILE_PIXELS)
+	icon.fill(1)
+	RomCache.write_indices(RomCache.overworld_icon_path(directory, 1), icon)
+
 
 ## The start menu's nine descriptions and the pack's five texts, as the cartridge
 ## words them. The two toss texts keep [Gen2TextStream]'s markers, since what

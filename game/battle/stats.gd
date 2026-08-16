@@ -45,6 +45,11 @@ const DV_DEFENSE_SHIFT: int = 8
 const DV_SPEED_SHIFT: int = 4
 const DV_SPECIAL_SHIFT: int = 0
 
+## `SHINY_ATK_MASK`, `SHINY_DEF_DV`, `SHINY_SPD_DV` and `SHINY_SPC_DV`. See
+## [method is_shiny].
+const SHINY_ATK_MASK: int = 0b0010
+const SHINY_DV: int = 10
+
 
 ## The cartridge's square root: the first entry of a table of squares not
 ## smaller than [param value]. A ceiling, not a floor, and the table starts at 1,
@@ -93,6 +98,16 @@ static func speed_dv(dvs: int) -> int:
 ## stats and stat experience but not here.
 static func special_dv(dvs: int) -> int:
 	return (dvs >> DV_SPECIAL_SHIFT) & 0xF
+
+
+## `CheckShininess` (engine/gfx/color.asm): three DVs at exactly ten and the
+## Attack DV carrying `SHINY_ATK_MASK`, which is the whole of what being shiny
+## is. Everything that draws a shiny picture asks this and nothing stores a flag.
+static func is_shiny(dvs: int) -> bool:
+	return (attack_dv(dvs) & SHINY_ATK_MASK) != 0 \
+		and defense_dv(dvs) == SHINY_DV \
+		and speed_dv(dvs) == SHINY_DV \
+		and special_dv(dvs) == SHINY_DV
 
 
 ## `GetUnownLetter` (engine/gfx/load_pics.asm), 1 being A: the middle two bits of

@@ -11,6 +11,10 @@ var _r: RefCounted = null
 ## home/map_objects.asm's CheckIceTile. The real-cartridge counterpart to the
 ## gate cases in tests/unit/test_world_api.gd, which use a hand-built map.
 ##
+## The visible-encounter sweep is checked against the same rule on the same
+## corpus: `visible_encounter_cells` has to name exactly the cells the step roll
+## accepts, grouped by the method the terrain resolves to.
+##
 ## The census is the point: an encounter cell is a small minority of a map's
 ## walkable cells, and the defect this topic exists to catch was every land cell
 ## rolling. A route whose grass moves, or a collision code that stops being read
@@ -46,6 +50,7 @@ func run(r: RefCounted) -> void:
 		_verify_bug_contest()
 		_verify_gate_errand()
 		_census()
+		_verify_wild_patch_indices()
 	)
 
 
@@ -356,6 +361,66 @@ func _verify_union_cave() -> void:
 
 
 ## Every map in the cache, so a rule change is one number rather than one map.
+## Every index of the four wild sources beside the map tables is patchable and
+## reads back through `GameData`, on a real cache. An off-by-one in either
+## direction, or a source a reader takes from somewhere else, shows here and
+## nowhere in a hand-built fixture.
+func _verify_wild_patch_indices() -> void:
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open(_r.game_id)
+	if data == null:
+		return
+	data.set_content_overlay(overlay)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var sets: int = 0
+	for index: int in data.treemon_set_count():
+		if data.treemon_set(index).is_empty():
+			continue
+		sets += 1
+		overlay.patch(Gen2ContentOverlay.KIND_TREEMON, &"check", index, {
+			"common": [{"percent": 100, "species": index + 1, "level": 5}],
+		})
+		var patched: Dictionary = data.treemon_set(index)
+		_r.check(
+			int((patched["common"] as Array)[0]["species"]) == index + 1
+				and (patched["rare"] as Array).size() == (data.treemon_set(index)["rare"] as Array).size(),
+			"treemon set %d did not read its patch back." % index
+		)
+	var rows: int = 0
+	for pair: Array in [
+		[Gen2ContentOverlay.KIND_BUG_CONTEST, data.bug_contest_mons()],
+		[Gen2ContentOverlay.KIND_ROAMING, data.world_roaming_mons()],
+	]:
+		for index: int in (pair[1] as Array).size():
+			rows += 1
+			overlay.patch(pair[0], &"check", index, {"species": index + 1})
+	for index: int in data.world_fishing_time_groups().size():
+		rows += 1
+		overlay.patch(Gen2ContentOverlay.KIND_FISHING_TIME, &"check", index, {
+			"night": {"species": index + 1, "level": 5},
+		})
+	for index: int in data.bug_contest_mons().size():
+		_r.check(
+			int(data.bug_contest_mons()[index]["species"]) == index + 1,
+			"contest row %d did not read its patch back." % index
+		)
+	for index: int in data.world_roaming_mons().size():
+		_r.check(
+			int(data.world_roaming_mons()[index]["species"]) == index + 1,
+			"roaming mon %d did not read its patch back." % index
+		)
+	for index: int in data.world_fishing_time_groups().size():
+		_r.check(
+			int(data.world_fishing_time_groups()[index]["night"]["species"]) == index + 1,
+			"fishing time group %d did not read its patch back." % index
+		)
+	_r.note("wild patch indices: %d treemon sets and %d list rows read back." % [
+		sets, rows,
+	])
+	## The shared overlay is untouched, since a check is not a mod.
+	_r.check(host.content_overlay().is_empty(), "the check leaked into the shared overlay.")
+
+
 func _census() -> void:
 	var cells: int = 0
 	var maps: Dictionary = {}
@@ -369,6 +434,12 @@ func _census() -> void:
 		)
 		world.state.set_wild_encounter_cooldown(0)
 		var counts: Dictionary = _map_counts(world)
+		var visible: Dictionary = _visible_cells_match(world)
+		if not bool(visible["ok"]):
+			_r.check(false, "map %d/%d cell %s: %s." % [
+				map.group, map.number, str(visible["cell"]), visible["reason"],
+			])
+			return
 		cells += int(counts["encounter"])
 		iced += int(counts["ice"])
 		if int(counts["encounter"]) > 0:
@@ -405,3 +476,36 @@ func _map_counts(world: Gen2WorldAPI) -> Dictionary:
 			elif Gen2WorldCollision.is_ice(world.collision_code_at(cell)):
 				ice += 1
 	return {"walkable": walkable, "encounter": encounter, "ice": ice}
+
+
+## The sweep a visible-encounter provider is handed has to be exactly the set of
+## cells the step roll accepts, cell for cell, or a mod stands a Pokemon where
+## the cartridge would never have produced one. Answered per map and grouped by
+## the method the terrain resolves to, so the two counts also have to add up.
+func _visible_cells_match(world: Gen2WorldAPI) -> Dictionary:
+	var sweep: Dictionary = world.visible_encounter_cells()
+	var listed: Dictionary = {}
+	for method: Variant in sweep:
+		for cell: Vector2 in sweep[method] as PackedVector2Array:
+			var at := Vector2i(cell)
+			var permission: int = world.collision_permission_at(at)
+			var wanted: StringName = Gen2WorldEncounter.METHOD_SURF \
+				if permission == Gen2WorldCollision.WATER_TILE \
+				else Gen2WorldEncounter.METHOD_GRASS
+			if StringName(method) != wanted or listed.has(at):
+				return {"ok": false, "cell": at, "reason": "wrong method or listed twice"}
+			listed[at] = true
+	var map: Gen2WorldMap = world.current_map
+	for y: int in map.collision_height:
+		for x: int in map.collision_width:
+			var cell := Vector2i(x, y)
+			world.player_cell = cell
+			## The sweep's one narrowing on the roll: a cell nothing can stand
+			## on. A cave's walls pass `CanEncounterWildMon`, since that branch
+			## skips the grass test, and a Pokemon cannot be put in one.
+			var permission: int = world.collision_permission_at(cell)
+			var standable: bool = permission == Gen2WorldCollision.LAND_TILE \
+				or permission == Gen2WorldCollision.WATER_TILE
+			if (world.can_encounter_wild_mon() and standable) != listed.has(cell):
+				return {"ok": false, "cell": cell, "reason": "the roll and the sweep disagree"}
+	return {"ok": true, "cells": listed.size()}

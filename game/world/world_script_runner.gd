@@ -941,6 +941,7 @@ func is_finished() -> bool:
 func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 	var opcode: int = int(command["opcode"])
 	var bank: int = int(frame["bank"])
+	command = _catalogued(command, frame)
 	if opcode == Gen2WorldScript.FARJUMPTEXT:
 		if _crystal_commands():
 			return _show_text(int(command["bank"]), int(command["address"]), true)
@@ -1317,6 +1318,83 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		"reason": &"unsupported_runtime_command",
 		"command": command,
 	}
+
+
+## A command whose numbers a mod may have moved, substituted before it runs.
+##
+## The site is addressed by the byte it sits at, `frame.address + offset`, which
+## is exactly the id [Gen2WorldCatalog] gave it. Only the OPERANDS change: the
+## command still runs, its script still sets its own completion flag, prints its
+## own dialogue and takes its own money, and nothing here can replace any of
+## that. A cartridge with no mod patch pays one dictionary read.
+func _catalogued(command: Dictionary, frame: Dictionary) -> Dictionary:
+	if data == null or not data.has_content_overlay():
+		return command
+	var candidates: Array = CATALOG_KINDS.get(StringName(command["name"]), [])
+	if candidates.is_empty():
+		return command
+	var at: int = int(frame["address"]) + int(command["offset"])
+	var row: Dictionary = {}
+	var kind: StringName = &""
+	for candidate: StringName in candidates:
+		row = data.catalog().check(
+			Gen2WorldCatalog.pack_id(candidate, int(frame["bank"]), at)
+		)
+		if not row.is_empty():
+			kind = candidate
+			break
+	if row.is_empty():
+		return command
+	var out: Dictionary = command.duplicate(true)
+	match kind:
+		Gen2WorldCatalog.KIND_STATIC:
+			out["pokemon"] = int(row["species"])
+			out["level"] = int(row["level"])
+		Gen2WorldCatalog.KIND_TRADE:
+			out["value"] = int(row["trade"])
+		Gen2WorldCatalog.KIND_SHOP:
+			out["address"] = int(row["mart"])
+		Gen2WorldCatalog.KIND_BADGE:
+			## The badge a flag grants IS the flag, so moving one moves which
+			## bit the site sets. An index outside the list leaves it alone.
+			var flags: Array[int] = Gen2WorldState.BADGE_ENGINE_FLAGS \
+				if Gen2WorldState.is_crystal_profile(data) \
+				else Gen2WorldState.BADGE_ENGINE_FLAGS_GOLD_SILVER
+			var badge: int = int(row["badge"])
+			if badge >= 0 and badge < flags.size():
+				out["flag"] = flags[badge]
+		Gen2WorldCatalog.KIND_ITEM:
+			out["item"] = int(row["item"])
+			out["value"] = int(row["item"])
+			out["quantity"] = maxi(1, int(row["quantity"]))
+			out["value_2"] = maxi(1, int(row["quantity"]))
+		_:
+			## Every giving kind: a starter, a gift and a prize are one command.
+			out["pokemon"] = int(row["species"])
+			out["value"] = int(row["species"])
+			out["level"] = int(row["level"])
+			out["value_2"] = int(row["level"])
+			out["item"] = int(row.get("item", command.get("item", 0)))
+	return out
+
+
+## Which catalog kinds a command name can be a site for. `givepoke` is three at
+## once, and which one it is was decided when the catalog walked the script, so
+## the id is tried under each until one answers. A site the catalog never
+## recorded answers empty under all of them and the command runs untouched.
+const CATALOG_KINDS: Dictionary = {
+	&"loadwildmon": [Gen2WorldCatalog.KIND_STATIC],
+	&"trade": [Gen2WorldCatalog.KIND_TRADE],
+	&"pokemart": [Gen2WorldCatalog.KIND_SHOP],
+	&"setflag": [Gen2WorldCatalog.KIND_BADGE],
+	&"giveitem": [Gen2WorldCatalog.KIND_ITEM],
+	&"verbosegiveitem": [Gen2WorldCatalog.KIND_ITEM],
+	&"givepoke": [
+		Gen2WorldCatalog.KIND_GIFT, Gen2WorldCatalog.KIND_STARTER,
+		Gen2WorldCatalog.KIND_PRIZE,
+	],
+	&"giveegg": [Gen2WorldCatalog.KIND_GIFT],
+}
 
 
 func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) -> Dictionary:

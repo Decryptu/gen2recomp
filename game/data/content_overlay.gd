@@ -25,14 +25,34 @@ const KIND_TRAINER: StringName = &"trainer"
 const KIND_ENCOUNTER: StringName = &"encounter"
 ## [method GameData.world_fishing_group]'s row, numbered as a map header does.
 const KIND_FISHING: StringName = &"fishing"
+## The four wild sources beside the map tables, each numbered by its own index
+## in the cartridge's table: [method GameData.treemon_set]'s set, one
+## `ContestMons` row, one roaming mon, and one day/night fishing substitution.
+##
+## A row is PATCHED, never replaced: `percent` is the contest's own roll and its
+## scoring weight, a rod entry's `threshold` is the bite, and a roaming mon's map
+## is live state. Naming only `species` and `level` leaves every one of them.
+const KIND_TREEMON: StringName = &"treemon"
+const KIND_BUG_CONTEST: StringName = &"bug_contest"
+const KIND_ROAMING: StringName = &"roaming"
+const KIND_FISHING_TIME: StringName = &"fishing_time"
+## One [Gen2WorldCatalog] site, numbered by its own stable id: a starter, a gift,
+## a static battle, a trade, a prize, an item, a badge or a shop. Patch-only for
+## the same reason the tables are, and a patch changes a FIELD of the site rather
+## than the script that runs it.
+const KIND_CHECK: StringName = &"check"
 const KINDS: Array[StringName] = [
 	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_ENCOUNTER, KIND_FISHING,
+	KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING, KIND_FISHING_TIME, KIND_CHECK,
 ]
 
 ## A cartridge table rather than numbered content, so [method patch]-only: a mod
 ## cannot add a map for a definition to sit at. Their numbers are table
 ## coordinates and do not obey [constant FIRST_MOD_NUMBER].
-const TABLE_KINDS: Array[StringName] = [KIND_ENCOUNTER, KIND_FISHING]
+const TABLE_KINDS: Array[StringName] = [
+	KIND_ENCOUNTER, KIND_FISHING, KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING,
+	KIND_FISHING_TIME, KIND_CHECK,
+]
 
 ## [method encounter_number]'s methods in the order it encodes them. `surf` is
 ## the runtime's name for the water table, which is what the reader takes.
@@ -224,6 +244,23 @@ static func encounter_number(method: StringName, group: int, number: int) -> int
 ## Which mod claimed [param number], for a launcher listing what it will change.
 func owner_of(kind: StringName, number: int) -> StringName:
 	return StringName((_owners.get(kind, {}) as Dictionary).get(number, &""))
+
+
+## Drops everything [param id] claimed, definitions and patches both, and
+## releases the numbers so it or another mod may claim them again.
+##
+## What a save switch needs: a run's patches belong to the save that created
+## them, and the next save has to start from the cartridge rather than from the
+## last one's shuffle. See [method Gen2ModHost.activate_save].
+func clear_owner(id: StringName) -> void:
+	for kind: Variant in _owners:
+		var owners: Dictionary = _owners[kind]
+		for number: Variant in owners.keys():
+			if StringName(owners[number]) != id:
+				continue
+			owners.erase(number)
+			(_defined.get(kind, {}) as Dictionary).erase(number)
+			(_patched.get(kind, {}) as Dictionary).erase(number)
 
 
 ## One number, one mod: a collision is named rather than settled by load order.

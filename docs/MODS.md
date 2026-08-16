@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Must equal `Gen2ModManifest.API_VERSION` |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -254,8 +254,72 @@ An encounter row is what `GameData.world_encounter(method, group, number)`
 answers, and the patched row is what every reader gets, including the region
 walk `FindNest` uses. The method is one of `grass`, `surf`, `swarm_grass` and
 `swarm_water`. `slots` and `rates` are arrays and replace whole; patching a map
-this cartridge lacks changes nothing, exactly as a species patch does. The
-treemon sets, the Bug Contest list and the roaming mons are not patchable yet.
+this cartridge lacks changes nothing, exactly as a species patch does.
+
+The four wild sources beside the map tables are patched the same way, each by its
+own index in the cartridge's own table:
+
+| Helper | Row | Index |
+|---|---|---|
+| `patch_treemon_set(id, set, fields)` | `GameData.treemon_set(set)`, which Headbutt and Rock Smash share | The set number `treemon_set_for_map` answers |
+| `patch_bug_contest_mon(id, index, fields)` | One `ContestMons` row | Its position in the list |
+| `patch_roaming_mon(id, index, fields)` | One roaming Pokemon | Its position in the list |
+| `patch_fishing_time_group(id, index, fields)` | One day/night fishing substitution | Its position in the list |
+
+Name only what changes. A contest row's `percent` is both the choice roll's
+weight and part of what the judging reads, a rod entry's `threshold` is the bite,
+and a roaming mon's `map_group`/`map_number` are where it currently is, which the
+roamer's own movement writes; a patch naming `species` and `level` leaves all
+three exactly as the cartridge has them. Every runtime reader goes through
+`GameData`, so a patched row reaches the encounter roll, the treemon draw, the
+Pokedex nest search and a visible encounter's context alike.
+
+## The gameplay catalog
+
+Everything else a cartridge hands out is a SITE in a script or a map event, not a
+table: a starter, a gift, a static battle, a trade, a Game Corner prize, an item
+on the ground, a badge and a shop. `GameData.catalog()` decodes them once and
+gives each a stable id, so a mod places rewards without holding a single script
+address of its own.
+
+```gdscript
+var catalog := data.catalog()
+for row in catalog.rows(Gen2WorldCatalog.KIND_STATIC):
+	host.patch_check(manifest.id, row["id"], {"species": 25, "level": 5})
+```
+
+| Kind | A row carries | Decoded from |
+|---|---|---|
+| `KIND_STARTER` | `species`, `level`, `item` | A `givepoke` whose script also shows the same species with `pokepic`, which only Elm's three balls do |
+| `KIND_GIFT` | `species`, `level`, `item` | Any other `givepoke` or `giveegg` |
+| `KIND_PRIZE` | `species`, `level`, `price` | A give site in a script that spends `takecoins`, priced by the branch's own take |
+| `KIND_STATIC` | `species`, `level` | A `loadwildmon` with the `startbattle` that makes it one |
+| `KIND_TRADE` | `trade`, `species`, `requested_species` | A `trade` command and the record it names |
+| `KIND_ITEM` | `item`, `quantity`, `hidden` | `giveitem`, `verbosegiveitem`, an `itemball` object and a `hiddenitem` bg event |
+| `KIND_BADGE` | `badge`, `engine_flag` | A `setflag` of a badge's engine flag |
+| `KIND_SHOP` | `mart`, `dialog` | A `pokemart` command |
+
+Every row also carries `id`, `kind`, its `bank` and `address` (or its `map` and
+`event_index`), and `requires`: the events, engine flags and items the script
+tested before reaching the site. `requires` is a decoded fact about what the
+cartridge looked at, not a claim that the site is unreachable without them.
+
+For proving a placement finishes: `catalog.possible_starters()` is the three
+species Elm offers, `catalog.field_hm_items()` is the HM items whose move is a
+field move on THIS cartridge, and `catalog.is_progression(row)` is true for a
+badge or a field HM. A check the catalog did not record stays vanilla; nothing
+is guessed.
+
+`patch_check(id, fields)` changes a field of a row. It cannot replace the script:
+the site still sets its own completion flag, prints its own dialogue, takes its
+own money and runs its own battle, and only the number it hands over is the
+mod's. Two mods patching one id is refused by the overlay's own ownership rule,
+not by load order.
+
+The catalog is DERIVED, not imported, so it needs no cache-format bump and no
+re-import. It is also a decode of a corpus: `tools/checks/catalog.gd` pins both
+the census and the semantics on all three cartridges, because a decode that
+drifts into something still plausible is what a count alone cannot see.
 
 Counts: `species_count()`, `move_count()` and `trainer_count()` are the
 cartridge's own runs. Mod numbers are not part of them and are enumerated with
@@ -644,6 +708,76 @@ A registered world renderer that wants to draw them takes them through the
 optional `set_actors(actors: Gen2WorldActors)`, which is handed the same
 resolved list the built-in view draws.
 
+## Visible wild encounters
+
+A mod that wants wild Pokemon standing on the map instead of a roll on every
+step registers a **provider** (`api_version` 2). It owns the population and
+nothing else; every rule a cartridge owns stays in `Gen2WorldAPI`.
+
+```gdscript
+func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
+    host.register_visible_encounters(manifest.id, Roamers.new())
+```
+
+A `RefCounted` and never a `Node`, with four methods refused by name at
+registration:
+
+| Method | Called when |
+|---|---|
+| `set_context(context: Dictionary)` | The map changed, and again whenever the player's pose moves |
+| `advance_frame()` | Once per hardware frame |
+| `encounters() -> Array` | The population now. A read, asked once a frame |
+| `battle_finished(id: StringName, result: Dictionary)` | A battle this provider's entry started ended |
+
+The context is a snapshot, never a live handle:
+
+| Key | Meaning |
+|---|---|
+| `map` | `Vector2i(group, number)` |
+| `eligible` | `{grass, surf}` to `PackedVector2Array` of cells a wild may stand on. `CanEncounterWildMon` per cell: the grass test, the cave and dungeon branch that skips it, and the ice refusal |
+| `tables` | `{grass, surf}` to `{source, slots}`, the table a roll would read right now, with the swarm's and the Bug Contest's substitutions already made and the time of day already picked. A slot is `{species, min_level, max_level}` |
+| `player` | `{cell, facing}` |
+| `run_seed` | The run's own seed, so a population is reproducible |
+| `generation` | Bumped on every map change: a context with an older one is stale |
+
+Each entry of `encounters()`:
+
+| Key | Meaning |
+|---|---|
+| `id` | Stable across frames. It is what a battle result is reported back under |
+| `cell` | Must be in `eligible`; which method it is in decides which table it is checked against |
+| `facing` | `Gen2WorldSprite.FACING_*` |
+| `species`, `level` | Must be offered by that table |
+| `dvs` | The packed DV word, carried into the battle unchanged |
+| `pulse` | Optional. Ask for the shiny sparkle over this entry |
+
+Anything else is dropped rather than drawn, including an entry that names
+`shiny`: shininess is `CheckShininess` over the DVs and is the host's answer.
+At most `Gen2WorldEncounters.MAX_ENTRIES` entries are drawn in a frame.
+
+What the host does with a valid population:
+
+- Draws it through the actor layer, with the SPECIES' own four colours, shiny or
+  not, so a renderer reading `set_actors` gets it for free.
+- Turns the ordinary post-step roll off while any provider is registered.
+  Scripted, fishing, Headbutt, Rock Smash, Sweet Scent and Bug Contest
+  encounters keep their own paths.
+- Starts the normal wild battle when the player steps onto an entry, with that
+  entry's exact species, level and DVs, then calls `battle_finished`. Whether
+  the entry survives that is the provider's one rule to document.
+- Discards the population, its sprites and any running pulse on a map change,
+  before the new map is drawn.
+- Plays `ANIM_SEND_OUT_MON` with the shiny param over a pulsing shiny entry,
+  anchored to it and with no battle field behind it, sound included. The host
+  deduplicates: a request inside `Gen2WorldEncounters.PULSE_FRAMES` of the last
+  one is dropped, so a provider may ask on spawn and every ten seconds without
+  touching a node or the audio service. A pulse on an ordinary Pokemon draws
+  nothing.
+
+A world renderer that wants to draw the sparkle itself takes the optional
+`set_encounters(encounters: Gen2WorldEncounters)`; the population itself already
+arrives through `set_actors`.
+
 ## Measured against the voxel mod
 
 [DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod)
@@ -703,6 +837,65 @@ above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one
 silently winning.
+
+## Adding a row to a party member's menu
+
+`register_party_member_menu(id, entry)` appends to the box a party slot opens.
+Both halves are Callables taking the ONE-based slot, because a row here is about
+a member rather than about the menu:
+
+```gdscript
+host.register_party_member_menu(manifest.id, {
+	"label": func(slot: int) -> String:
+		return "FOLLOWING" if slot == following_slot else "FOLLOW",
+	"handler": func(slot: int) -> void:
+		host.set_option(manifest.id, &"slot", slot),
+})
+```
+
+Rows land after every cartridge action and before CANCEL, which is the way out
+of the box; a mod cannot displace or reorder a cartridge row, and the list still
+stops at the source's own `NUM_MONMENU_ITEMS`. A label answering an empty string
+drops its own row, which is how a row is shown conditionally. Choosing one calls
+the handler and closes the menu, the way a field move does.
+
+Not offered for an egg, and not offered inside a battle: a battle's party list is
+a switch, and a row running a mod's action in the middle of a turn would be world
+state changing while the turn owns it.
+
+## Holding a run rather than an installation
+
+A mod whose settings decide what a whole playthrough looks like has a problem
+`read_save_data` alone does not solve: an installation option changed mid-run
+would silently rewrite the save being played, and opening another save could not
+restore the settings that made it. `register_save_lifecycle(manifest, provider)`
+is the seam for that.
+
+The `manifest` is the object `register()` was handed, and it IS the capability:
+the host keeps it beside the provider, so a callback reaches
+`read_save_data`/`write_save_data` for its own namespace and no other mod's. A
+manifest this host never discovered registers nothing.
+
+| Method | Called when |
+|---|---|
+| `save_created(save)` | A save has just been made, before it is written. Snapshot whatever the run is built from into your namespace here |
+| `save_activated(save)` | That save is about to be played. `save` is `null` for a DEVELOPMENT run, one started with no selected slot |
+| `save_deactivated()` | The save was closed |
+
+Ordering, which is the part that matters:
+
+1. The host drops every lifecycle mod's overlay contributions, in one pass.
+2. `save_activated` runs, in registration order.
+
+So a provider always starts from the cartridge, two slots cannot leak patches
+into one another, and a provider that fails leaves nothing installed rather than
+the previous run's shuffle. `save_deactivated` clears afterwards, so nothing
+stays patched by a run nobody is playing.
+
+Save the compact INPUTS plus an algorithm version, not the generated plan: a plan
+can exceed the 64 KiB namespace and duplicates cartridge rows anyway. A save
+carrying no snapshot has no run and should stay vanilla rather than adopt today's
+options.
 
 ## Adding a setting
 

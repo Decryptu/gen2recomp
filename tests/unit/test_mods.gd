@@ -69,6 +69,27 @@ func _valid_manifest() -> Dictionary:
 	}
 
 
+## A manifest this host has actually discovered, which is what a capability
+## check needs: the object, not an id that matches one.
+## Its own directory and entry filename: Godot caches a loaded script by path,
+## so two tests writing different code to one path would run the first one's.
+func _loaded_manifest() -> Gen2ModManifest:
+	var directory: String = "%s/lifecycle" % ROOT
+	DirAccess.make_dir_recursive_absolute(directory)
+	var source: Dictionary = _valid_manifest()
+	source["id"] = "lifecycle"
+	source["entry"] = "lifecycle_entry.gd"
+	_write("%s/mod.json" % directory, JSON.stringify(source))
+	_write(
+		"%s/lifecycle_entry.gd" % directory,
+		"extends RefCounted\n\nfunc register(_host, _manifest) -> void:\n\tpass\n"
+	)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	host.load_discovered()
+	return host.manifests()[0]
+
+
 func test_a_valid_manifest_is_read_without_running_the_mod() -> void:
 	_write_manifest(_valid_manifest())
 	var result: Dictionary = Gen2ModManifest.read(_directory)
@@ -82,6 +103,15 @@ func test_a_valid_manifest_is_read_without_running_the_mod() -> void:
 func test_a_manifest_built_for_another_host_is_refused() -> void:
 	var source: Dictionary = _valid_manifest()
 	source["api_version"] = Gen2ModManifest.API_VERSION + 1
+	_write_manifest(source)
+	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"unsupported_api_version")
+
+	## An OLDER contract still runs: every bump so far has only added to it, and
+	## refusing one would break every mod already installed.
+	source["api_version"] = Gen2ModManifest.MIN_API_VERSION
+	_write_manifest(source)
+	assert_true(bool(Gen2ModManifest.read(_directory).get("ok", false)))
+	source["api_version"] = Gen2ModManifest.MIN_API_VERSION - 1
 	_write_manifest(source)
 	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"unsupported_api_version")
 
@@ -318,6 +348,137 @@ func test_two_mods_cannot_claim_one_world_actor_id() -> void:
 	var second: Dictionary = host.register_world_actor(&"first", script.new())
 	assert_false(second["ok"])
 	assert_eq(second["reason"], &"duplicate_actor")
+
+
+## The visible-encounter seam is registered on the same rules an actor is, and
+## for the same reason: a provider is state the host drives, not a scene.
+func test_a_visible_encounter_provider_is_refused_on_the_same_three_rules() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var partial := GDScript.new()
+	# Every method but battle_finished.
+	partial.source_code = "extends RefCounted\nfunc set_context(_c) -> void:\n\tpass\nfunc advance_frame() -> void:\n\tpass\nfunc encounters() -> Array:\n\treturn []\n"
+	partial.reload()
+	var missing: Dictionary = host.register_visible_encounters(&"broken", partial.new())
+	assert_false(missing["ok"])
+	assert_eq(missing["reason"], &"provider_missing_methods")
+	assert_string_contains(String(missing["detail"]), "battle_finished")
+
+	var node := Node2D.new()
+	assert_eq(
+		host.register_visible_encounters(&"node", node)["reason"], &"provider_is_a_node"
+	)
+	node.free()
+
+	var whole := GDScript.new()
+	whole.source_code = partial.source_code + "func battle_finished(_id, _r) -> void:\n\tpass\n"
+	whole.reload()
+	assert_true(bool(host.register_visible_encounters(&"wilds", whole.new())["ok"]))
+	assert_eq(host.visible_encounter_ids(), [&"wilds"])
+	assert_eq(host.visible_encounter_providers().size(), 1)
+	assert_eq(
+		host.register_visible_encounters(&"wilds", whole.new())["reason"],
+		&"duplicate_provider"
+	)
+
+
+## A mod that holds a RUN rather than an installation. The manifest is the
+## capability, and the ordering is the point: the overlay is cleared before any
+## `save_activated`, so two slots cannot leak patches into one another.
+func test_a_save_lifecycle_provider_is_driven_and_its_overlay_cleared_per_save() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var manifest: Gen2ModManifest = _loaded_manifest()
+	var script := GDScript.new()
+	script.source_code = """extends RefCounted
+
+var calls: Array = []
+
+func save_created(save) -> void:
+	calls.append([&"created", save])
+
+func save_activated(save) -> void:
+	calls.append([&"activated", save])
+	Gen2ModHost.instance().patch_content(&"species", &"lifecycle", 1, {"name": "PATCHED"})
+
+func save_deactivated() -> void:
+	calls.append([&"deactivated", null])
+"""
+	script.reload()
+	var provider: Object = script.new()
+	assert_true(bool(host.register_save_lifecycle(manifest, provider).get("ok", false)))
+	assert_eq(host.save_lifecycle_ids(), [manifest.id])
+
+	## A manifest this host never discovered is not the capability.
+	var stranger := Gen2ModManifest.new()
+	stranger.id = manifest.id
+	assert_eq(
+		host.register_save_lifecycle(stranger, script.new())["reason"],
+		&"unknown_mod_save_owner"
+	)
+	assert_eq(
+		host.register_save_lifecycle(manifest, script.new())["reason"],
+		&"duplicate_save_provider"
+	)
+
+	var overlay: Gen2ContentOverlay = Gen2ContentOverlay.shared()
+	host.activate_save(null)
+	assert_eq(overlay.owner_of(&"species", 1), manifest.id, "a development run patches too")
+	## Switching saves drops the last run's contributions BEFORE the callback, so
+	## what is installed after is only what this activation put there.
+	host.activate_save(null)
+	assert_eq(overlay.owner_of(&"species", 1), manifest.id)
+	host.deactivate_save()
+	assert_eq(overlay.owner_of(&"species", 1), &"", "nothing stays patched with no save open")
+	assert_eq(
+		[provider.get("calls")[0][0], provider.get("calls")[1][0], provider.get("calls")[2][0]],
+		[&"activated", &"activated", &"deactivated"]
+	)
+	## A development run is told so explicitly rather than handed an invented save.
+	assert_null(provider.get("calls")[0][1])
+
+
+## A provider that fails leaves the previous save's patches gone rather than
+## installed, because the clear happens first.
+func test_a_failing_save_provider_leaves_no_earlier_patches_installed() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var manifest: Gen2ModManifest = _loaded_manifest()
+	var script := GDScript.new()
+	script.source_code = """extends RefCounted
+
+var fail: bool = false
+
+func save_created(_save) -> void:
+	pass
+
+func save_activated(_save) -> void:
+	if fail:
+		return
+	Gen2ModHost.instance().patch_content(&"species", &"lifecycle", 1, {"name": "RUN ONE"})
+
+func save_deactivated() -> void:
+	pass
+"""
+	script.reload()
+	var provider: Object = script.new()
+	assert_true(bool(host.register_save_lifecycle(manifest, provider).get("ok", false)))
+	host.activate_save(null)
+	assert_eq(Gen2ContentOverlay.shared().owner_of(&"species", 1), manifest.id)
+	provider.set("fail", true)
+	host.activate_save(null)
+	assert_eq(Gen2ContentOverlay.shared().owner_of(&"species", 1), &"")
+
+
+func test_a_save_lifecycle_provider_is_refused_by_shape() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var manifest: Gen2ModManifest = _loaded_manifest()
+	var node := Node2D.new()
+	assert_eq(host.register_save_lifecycle(manifest, node)["reason"], &"invalid_save_provider")
+	node.free()
+	var partial := GDScript.new()
+	partial.source_code = "extends RefCounted\nfunc save_created(_s) -> void:\n\tpass\n"
+	partial.reload()
+	var result: Dictionary = host.register_save_lifecycle(manifest, partial.new())
+	assert_eq(result["reason"], &"save_provider_missing_methods")
+	assert_string_contains(String(result["detail"]), "save_activated")
 
 
 func test_a_battle_renderer_missing_a_contract_method_is_refused_at_registration() -> void:

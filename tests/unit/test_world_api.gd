@@ -3170,11 +3170,15 @@ func test_party_summary_round_trips_and_reaches_queued_script_requests() -> void
 	var world: Gen2WorldAPI = _world()
 	assert_true(world.party_summary().is_empty())
 	assert_true(world.set_party_summary(
-		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"], [false, true]
+		3, true, [25, 1] as Array[int], [[0x46], []], ["PIKA", "BULBASAUR"], [false, true],
+		{}, [false, true]
 	)["ok"])
 	var expected: Dictionary = {
 		"count": 3, "pokerus": true, "species": [25, 1],
 		"moves": [[0x46], []], "names": ["PIKA", "BULBASAUR"], "eggs": [false, true],
+		## Per slot beside the rest: a fainted Pokemon in slot 2 is a fact the
+		## lead's own flag cannot carry.
+		"fainted": [false, true],
 	}
 	assert_eq(world.party_summary(), expected)
 	assert_false(world.set_party_summary(-1, false)["ok"])
@@ -6280,3 +6284,282 @@ func test_contest_state_round_trips_through_the_state_dictionary() -> void:
 	assert_eq(int(restored.contest_mon()["species"]), 13)
 	assert_eq(restored.contest_second_party_species(), 155)
 	assert_eq(restored.bug_contest_started(), world.state.bug_contest_started())
+
+
+## What a visible-encounter provider is handed instead of deriving it: the cells
+## a wild may stand on, grouped by the method the terrain resolves to.
+func test_visible_encounter_cells_group_by_terrain_and_refuse_ice() -> void:
+	var world := _world()
+	var cells: Dictionary = world.visible_encounter_cells()
+	var grass: PackedVector2Array = cells[Gen2WorldEncounter.METHOD_GRASS]
+	var surf: PackedVector2Array = cells[Gen2WorldEncounter.METHOD_SURF]
+	assert_true(grass.has(Vector2(5, 10)), "the tall grass cell")
+	assert_false(grass.has(Vector2(5, 9)), "plain land is not grass")
+	assert_false(grass.has(Vector2(6, 10)), "ice")
+	assert_true(surf.has(Vector2(11, 11)), "the pond")
+	assert_true(surf.has(Vector2(12, 11)), "and its second cell")
+	assert_false(surf.has(Vector2(5, 10)), "grass is not surfable")
+
+	## The cave branch skips the grass test, so every walkable floor is eligible.
+	world.current_map.environment = Gen2WorldAPI.ENVIRONMENT_CAVE
+	var cave: PackedVector2Array = world.visible_encounter_cells()[
+		Gen2WorldEncounter.METHOD_GRASS
+	]
+	assert_true(cave.has(Vector2(5, 9)), "plain land in a cave")
+	assert_false(cave.has(Vector2(6, 10)), "ice in a cave")
+
+
+## `wildoff` empties the sweep, so a mod cannot stand a Pokemon on a map a script
+## has switched encounters off for.
+func test_visible_encounter_cells_are_empty_while_wild_encounters_are_off() -> void:
+	var world := _world()
+	world.state.set_wild_encounters_off(true)
+	var cells: Dictionary = world.visible_encounter_cells()
+	assert_eq((cells[Gen2WorldEncounter.METHOD_GRASS] as PackedVector2Array).size(), 0)
+	assert_eq((cells[Gen2WorldEncounter.METHOD_SURF] as PackedVector2Array).size(), 0)
+
+
+## The active table is the one a roll would read: the day's slots, and the swarm's
+## in place of them while one is on.
+func test_active_encounter_tables_follow_the_clock_and_the_swarm() -> void:
+	var world := _world()
+	world.set_object_time(12, Gen2WorldPalette.TIME_DAY)
+	var tables: Dictionary = world.active_encounter_tables()
+	var grass: Dictionary = tables[Gen2WorldEncounter.METHOD_GRASS]
+	assert_eq(StringName(grass["source"]), Gen2WorldEncounter.SOURCE_NORMAL)
+	assert_eq(int((grass["slots"] as Array)[0]["species"]), 16)
+	assert_eq(int((grass["slots"] as Array)[0]["min_level"]), 5)
+	assert_eq(int((grass["slots"] as Array)[0]["max_level"]), 5)
+	assert_eq(
+		int((tables[Gen2WorldEncounter.METHOD_SURF]["slots"] as Array)[0]["species"]), 16
+	)
+
+	world.set_swarm_map(Vector2i(1, 1))
+	var swarmed: Dictionary = world.active_encounter_tables()[
+		Gen2WorldEncounter.METHOD_GRASS
+	]
+	assert_eq(StringName(swarmed["source"]), Gen2WorldEncounter.SOURCE_SWARM)
+	assert_eq(int((swarmed["slots"] as Array)[0]["species"]), 19)
+
+
+## The contest replaces the map's own grass table wholesale, and its rows are a
+## level RANGE where a cartridge table's slot is one level.
+func test_active_encounter_tables_take_the_contest_table_while_it_runs() -> void:
+	var world := _contest_world()
+	world.start_bug_contest()
+	var grass: Dictionary = world.active_encounter_tables()[
+		Gen2WorldEncounter.METHOD_GRASS
+	]
+	assert_eq(StringName(grass["source"]), Gen2WorldBugContest.SOURCE_CONTEST)
+	assert_eq(int((grass["slots"] as Array)[0]["species"]), 10)
+	assert_eq(int((grass["slots"] as Array)[0]["min_level"]), 7)
+	assert_eq(int((grass["slots"] as Array)[0]["max_level"]), 18)
+
+
+## `ANIM_SEND_OUT_MON` with the shiny param, anchored to the Pokemon rather than
+## to a battler and with no field behind it: the host's whole pulse. A provider
+## may ask on every frame; only the first of a window is played.
+func test_a_shiny_pulse_runs_the_cartridge_animation_and_is_deduplicated() -> void:
+	var world := _world()
+	var driver := Gen2WorldEncounters.new()
+	var provider: Object = _pulse_provider()
+	driver.set_providers([provider])
+	driver.set_world(world, _shiny_anim_data())
+	driver.advance_frame()
+	assert_eq(driver.entries().size(), 1)
+	assert_true(bool(driver.entries()[0]["shiny"]))
+	assert_eq(driver.pulse_anchor(), Vector2(5, 10) * float(Gen2WorldAPI.CELL_PIXELS))
+	assert_false(driver.pulse_sprites().is_empty(), "the animation put objects in OAM")
+
+	## The provider asks for a pulse on every frame of the window and gets one
+	## sparkle: the host owns the cadence.
+	for _frame: int in 8:
+		driver.advance_frame()
+	assert_null(driver.pulse_anchor(), "no second sparkle inside the window")
+
+	## An ordinary Pokemon asking for one gets nothing, since the cartridge's
+	## sparkle is the only animation this seam plays.
+	provider.set("dvs", 0)
+	var plain := Gen2WorldEncounters.new()
+	plain.set_providers([provider])
+	plain.set_world(world, _shiny_anim_data())
+	plain.advance_frame()
+	assert_false(bool(plain.entries()[0]["shiny"]))
+	assert_true(plain.pulse_sprites().is_empty())
+	assert_null(plain.pulse_anchor())
+
+
+## An entry the map cannot produce is dropped rather than drawn, and so is one
+## that asserts a shininess of its own.
+func test_a_visible_encounter_entry_is_validated_against_the_snapshot() -> void:
+	var world := _world()
+	var driver := Gen2WorldEncounters.new()
+	var provider: Object = _pulse_provider()
+	driver.set_providers([provider])
+	driver.set_world(world)
+	for bad: Dictionary in [
+		{"cell": Vector2i(5, 9)},          # not an eligible cell
+		{"species": 200},                  # not in the active table
+		{"level": 40},                     # off the slot's own level
+		{"id": &""},                       # no stable id
+		{"shiny": true},                   # the host's answer, not the mod's
+	]:
+		provider.set("overrides", bad)
+		driver.advance_frame()
+		assert_eq(driver.entries().size(), 0, str(bad))
+	provider.set("overrides", {})
+	driver.advance_frame()
+	assert_eq(driver.entries().size(), 1)
+
+
+func _pulse_provider() -> Object:
+	var script := GDScript.new()
+	script.source_code = """extends RefCounted
+
+var dvs: int = 0
+var overrides: Dictionary = {}
+
+func set_context(_context) -> void:
+	pass
+
+func advance_frame() -> void:
+	pass
+
+func encounters() -> Array:
+	var entry: Dictionary = {
+		"id": &"one", "cell": Vector2i(5, 10), "species": 16, "level": 5,
+		"dvs": dvs, "pulse": true,
+	}
+	entry.merge(overrides, true)
+	return [entry]
+
+func battle_finished(_id, _result) -> void:
+	pass
+"""
+	script.reload()
+	var out: Object = script.new()
+	## `CheckShininess`: the attack mask and three tens.
+	out.set("dvs", Gen2Stats.pack_dvs(2, 10, 10, 10))
+	return out
+
+
+## A hand-built animation region whose only script sits at the shiny index, so
+## the pulse has something real to run without a cartridge in hand. One object
+## spawned and held, which is all the pulse is asked to prove here.
+func _shiny_anim_data() -> Gen2BattleAnimData:
+	var base: int = 0x4000
+	var table: int = (Gen2WorldEncounters.SHINY_ANIM + 1) * 2
+	var body: int = base + table
+	var bytes := PackedByteArray()
+	bytes.resize(table)
+	bytes[Gen2WorldEncounters.SHINY_ANIM * 2] = body & 0xFF
+	bytes[Gen2WorldEncounters.SHINY_ANIM * 2 + 1] = body >> 8
+	# `anim_obj` row 0 at (80, 64), a yield, and `anim_ret`.
+	for value: int in [0xD0, 0x00, 0x50, 0x40, 0x00, 0x01, 0xFF]:
+		bytes.append(value)
+	var frameset: int = base + 2
+	var oam: int = base + RomLayout.BATTLE_ANIM_OAM_SET_SIZE
+	return Gen2BattleAnimData.create({
+		&"scripts": {
+			"bank": 0x32, "address": base,
+			"count": Gen2WorldEncounters.SHINY_ANIM + 1, "data": bytes,
+		},
+		&"objects": {
+			"bank": 0x33, "address": base, "count": 1,
+			"data": PackedByteArray([0x00, 0x90, 0x00, 0x00, 0x02, 0x01]),
+		},
+		&"framesets": {
+			"bank": 0x33, "address": base, "count": 1,
+			"data": PackedByteArray([frameset & 0xFF, frameset >> 8,
+				0x00, 0x0F, Gen2BattleAnimObject.OAM_END]),
+		},
+		&"oam_sets": {
+			"bank": 0x33, "address": base, "count": 1,
+			"data": PackedByteArray([0x00, 0x01, oam & 0xFF, oam >> 8,
+				0xF8, 0xF8, 0x00, 0x00]),
+		},
+	}, [{"tiles": 0, "sheet": false}, {"tiles": 4, "sheet": true}])
+
+
+## The catalog over a hand-built cache: what each shape decodes to, and that a
+## patch reaches the request the SCRIPT makes rather than only the row.
+func test_a_catalogued_site_hands_over_what_a_mod_patched() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `loadwildmon KOFFING, 21` then `startbattle`, which is what a static IS,
+	## and a `verbosegiveitem` behind it.
+	scripts["48:6E00"] = [
+		0x5D, 109, 21,
+		0x5F,
+		0x9E, 0x2A, 1,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var catalog: Gen2WorldCatalog = data.catalog()
+
+	var statics: Array = catalog.rows(Gen2WorldCatalog.KIND_STATIC)
+	assert_eq(statics.size(), 1, JSON.stringify(statics))
+	assert_eq(int(statics[0]["species"]), 109)
+	assert_eq(int(statics[0]["level"]), 21)
+	## The id is the byte the command sits at, not its offset in a blob: the
+	## `loadwildmon` is the first command of the script at $6E00.
+	assert_eq(
+		int(statics[0]["id"]),
+		Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_STATIC, 48, 0x6E00)
+	)
+	var items: Array = catalog.rows(Gen2WorldCatalog.KIND_ITEM)
+	var given: Array = items.filter(func(row: Dictionary) -> bool:
+		return row.has("address") and int(row["address"]) == 0x6E04
+	)
+	assert_eq(given.size(), 1, "the verbosegiveitem behind the battle")
+	assert_eq(int(given[0]["item"]), 0x2A)
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(statics[0]["id"]), {
+		"species": 25, "level": 3,
+	})
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(given[0]["id"]), {
+		"item": 1, "quantity": 4,
+	})
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6),
+		Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6E00,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	var request: Dictionary = waiting[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 25, "the script asked for the patch")
+	assert_eq(int(request["values"]["level"]), 3)
+
+	## The battle is answered and the give runs behind it, into its own
+	## acknowledge text, which is where the script is left waiting.
+	var after: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
+	var changed: Dictionary = {}
+	for event: Dictionary in after[0]["events"]:
+		if StringName(event.get("type", &"")) == &"item_changed":
+			changed = event
+	assert_eq(int(changed.get("item", 0)), 1, "the patched item")
+	assert_eq(int(changed.get("quantity", 0)), 4, "in the patched quantity")
+
+
+## The site still runs the cartridge's own script: only the number it hands over
+## is the mod's. An unpatched cache is the control.
+func test_an_unpatched_catalogue_hands_over_the_cartridges_own_numbers() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6E00"] = [0x5D, 109, 21, 0x5F, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6E00,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var request: Dictionary = waiting[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 109)
+	assert_eq(int(request["values"]["level"]), 21)

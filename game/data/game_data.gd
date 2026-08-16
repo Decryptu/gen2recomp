@@ -94,6 +94,9 @@ var _overworld_sprite_palettes: Array = []
 var _party_menu_icon_palette_rows: Array = []
 var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
+## Built on first ask and kept, since the walk behind it is the whole script
+## corpus. See [method catalog].
+var _catalog: Gen2WorldCatalog = null
 var _world_phone: Dictionary = {}
 var _world_fruit_trees: Array = []
 var _world_spawns: Dictionary = {}
@@ -222,6 +225,14 @@ func world_map(group: int, number: int) -> Gen2WorldMap:
 
 func world_maps() -> Array:
 	return _maps().duplicate()
+
+
+## Every imported script's `bank:address` key, sorted, for a caller that has to
+## walk the whole corpus rather than follow one pointer. See [Gen2WorldCatalog].
+func world_script_keys() -> Array:
+	var out: Array = _scripts().keys()
+	out.sort()
+	return out
 
 
 ## Raw bounded script bytes indexed by the cartridge's bank and CPU address.
@@ -520,7 +531,9 @@ func world_fishing_time_groups() -> Array:
 	if not fishing is Dictionary:
 		return []
 	var groups: Variant = (fishing as Dictionary).get("time_groups", [])
-	return groups.duplicate(true) if groups is Array else []
+	if not groups is Array:
+		return []
+	return _overlaid_rows(Gen2ContentOverlay.KIND_FISHING_TIME, groups as Array)
 
 
 func world_roaming_maps() -> Array:
@@ -536,7 +549,9 @@ func world_roaming_mons() -> Array:
 	if not roaming is Dictionary:
 		return []
 	var mons: Variant = (roaming as Dictionary).get("mons", [])
-	return mons.duplicate(true) if mons is Array else []
+	if not mons is Array:
+		return []
+	return _overlaid_rows(Gen2ContentOverlay.KIND_ROAMING, mons as Array)
 
 
 ## GetTreeMonSet against TreeMonMaps or RockMonMaps: the treemon set number for
@@ -558,6 +573,16 @@ func treemon_set_for_map(group: int, number: int, rock: bool = false) -> int:
 	return 0
 
 
+## How many treemon sets this cartridge imported, which is what a caller walking
+## them needs: Gold and Silver ship six and Crystal nine.
+func treemon_set_count() -> int:
+	var treemons: Variant = _encounters().get("treemons", {})
+	if not treemons is Dictionary:
+		return 0
+	var sets: Variant = (treemons as Dictionary).get("sets", [])
+	return (sets as Array).size() if sets is Array else 0
+
+
 ## GetTreeMons: one set's common and rare tables by set number. The caller
 ## applies the profile's own set limit first; this answers the raw table.
 func treemon_set(index: int) -> Dictionary:
@@ -568,7 +593,10 @@ func treemon_set(index: int) -> Dictionary:
 	if not sets is Array or index < 0 or index >= (sets as Array).size():
 		return {}
 	var value: Variant = (sets as Array)[index]
-	return value.duplicate(true) if value is Dictionary else {}
+	return _overlaid(
+		Gen2ContentOverlay.KIND_TREEMON, index,
+		value.duplicate(true) if value is Dictionary else {}
+	)
 
 
 ## `ContestMons`, the eleven `%, species, min, max` rows
@@ -589,7 +617,26 @@ func _bug_contest_table(key: String) -> Array:
 	if not contest is Dictionary:
 		return []
 	var value: Variant = (contest as Dictionary).get(key, [])
-	return (value as Array).duplicate(true) if value is Array else []
+	if not value is Array:
+		return []
+	## Only the mon rows are patchable. A contestant is a trainer and its three
+	## placings are the judging's own scores, which a wild shuffle has no say in.
+	if key != "mons":
+		return (value as Array).duplicate(true)
+	return _overlaid_rows(Gen2ContentOverlay.KIND_BUG_CONTEST, value as Array)
+
+
+## A table stored as an ARRAY of rows, each row overlaid under its own index.
+## The map tables are dictionaries keyed by a coordinate and go through
+## [method _overlaid]; these four are lists and the index IS the number.
+func _overlaid_rows(kind: StringName, rows: Array) -> Array:
+	var out: Array = []
+	for index: int in rows.size():
+		var row: Variant = rows[index]
+		out.append(_overlaid(
+			kind, index, row.duplicate(true) if row is Dictionary else {}
+		))
+	return out
 
 
 ## CheckSleepingTreeMon's list for one time of day. Empty on Gold and Silver,
@@ -2179,6 +2226,28 @@ func _overlaid(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 	if _overlay == null or _overlay.is_empty() or number < 0:
 		return base
 	return _overlay.resolve(kind, number, base)
+
+
+## The catalog of gameplay sites this cartridge holds, built once and kept: the
+## walk is the whole script corpus and nothing about it changes while a cache is
+## open. See [Gen2WorldCatalog].
+func catalog() -> Gen2WorldCatalog:
+	if _catalog == null:
+		_catalog = Gen2WorldCatalog.build(self)
+	return _catalog
+
+
+## One catalog row with any patch folded in. Called by the catalog itself, which
+## holds the rows; nothing else should need it.
+func overlaid_check(id: int, base: Dictionary) -> Dictionary:
+	return _overlaid(Gen2ContentOverlay.KIND_CHECK, id, base)
+
+
+## Whether any mod content reaches this cache at all, which is the one check a
+## hot path pays before asking the overlay anything. Not the SHARED overlay: a
+## tool or a test may hand this cache one of its own.
+func has_content_overlay() -> bool:
+	return _overlay != null and not _overlay.is_empty()
 
 
 ## Replaces the mod content this cache answers with. For a tool or a test that

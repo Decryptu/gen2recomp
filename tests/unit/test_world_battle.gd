@@ -163,3 +163,25 @@ func test_invalid_battle_identifiers_are_structured_failures() -> void:
 	)
 	assert_false(invalid_trainer["ok"])
 	assert_eq(invalid_trainer["reason"], &"invalid_trainer")
+
+
+## A visible encounter chose its DVs before the player met it, so the battle is
+## built with those four numbers rather than a fresh roll. Nothing else names
+## `dvs`, and what does not gets the perfect word it always got.
+func test_a_wild_request_carries_its_own_dvs_into_the_battle() -> void:
+	var shiny: int = Gen2Stats.pack_dvs(2, 10, 10, 10)
+	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data, {"values": {"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5, "dvs": shiny}},
+		_player_party()
+	)
+	assert_true(bool(prepared["ok"]), String(prepared.get("reason", "")))
+	assert_eq((prepared["battle"] as Gen2Battle).enemy.dvs, shiny)
+	assert_true(Gen2Stats.is_shiny((prepared["battle"] as Gen2Battle).enemy.dvs))
+
+	var rolled: Dictionary = Gen2WorldBattleAdapter.prepare(
+		_data, {"values": {"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5}},
+		_player_party()
+	)
+	assert_eq(
+		(rolled["battle"] as Gen2Battle).enemy.dvs, Gen2BattleMon.PERFECT_DVS
+	)

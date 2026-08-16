@@ -221,3 +221,122 @@ func test_a_registered_world_actor_is_driven_by_the_screen_and_drawn_by_the_view
 	assert_eq((drawn[0]["sprite"] as Gen2WorldSprite).icon_number, 1)
 	assert_eq(drawn[0]["position_cells"], Vector2(3, 4))
 	assert_eq(_world_screen._renderer._actors, _world_screen._actors)
+
+
+## A mod's visible-encounter provider: the context it is handed, one advance per
+## world frame, the entries it answers, and the result of a battle it caused.
+const PROVIDER_SOURCE: String = """extends RefCounted
+
+var context: Dictionary = {}
+var frames: int = 0
+var results: Array = []
+var entry: Dictionary = {}
+
+func set_context(value: Dictionary) -> void:
+	context = value
+
+func advance_frame() -> void:
+	frames += 1
+
+func encounters() -> Array:
+	return [] if entry.is_empty() else [entry]
+
+func battle_finished(id, result) -> void:
+	results.append([id, result])
+"""
+
+
+## The whole seam in one walk: the provider is contexted from the map's own
+## tables, its entry is validated against them, drawn with the SPECIES' colours,
+## and met by stepping onto it instead of by a roll.
+func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() -> void:
+	var provider: Object = _script(PROVIDER_SOURCE).new()
+	assert_true(
+		Gen2ModHost.instance().register_visible_encounters(&"wilds", provider)["ok"]
+	)
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	_world_screen.set_process(false)
+	## The fixture map is plain land, which is not grass. A cave floor is
+	## eligible everywhere, which is the branch that makes the sweep answerable
+	## here at all.
+	_world_screen._world.current_map.environment = Gen2WorldAPI.ENVIRONMENT_CAVE
+	_world_screen._encounters.set_providers([provider])
+
+	var context: Dictionary = provider.get("context")
+	assert_eq(context["map"], Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
+	assert_eq(int(context["generation"]), 1)
+	var slots: Array = context["tables"][Gen2WorldEncounter.METHOD_GRASS]["slots"]
+	assert_eq(int(slots[0]["species"]), Fixture.TRAINER_SPECIES)
+	var cell := Vector2i(7, 7)
+	assert_true(
+		(context["eligible"][Gen2WorldEncounter.METHOD_GRASS] as PackedVector2Array).has(
+			Vector2(cell)
+		)
+	)
+
+	## Off the table, so nothing is drawn: the host will not stand a Pokemon the
+	## map cannot produce.
+	provider.set("entry", {
+		"id": &"a", "cell": cell, "species": Fixture.TRAINER_SPECIES, "level": 99, "dvs": 0,
+	})
+	_world_screen.advance_frames(1)
+	assert_eq(_world_screen._encounters.entries().size(), 0, "level off the table")
+
+	## Shiny DVs: `CheckShininess`'s three tens and the attack mask.
+	var shiny: int = Gen2Stats.pack_dvs(2, 10, 10, 10)
+	provider.set("entry", {
+		"id": &"a", "cell": cell, "species": Fixture.TRAINER_SPECIES, "level": 5,
+		"dvs": shiny, "facing": Gen2WorldSprite.FACING_UP,
+	})
+	var stepped: int = int(provider.get("frames"))
+	_world_screen.advance_frames(1)
+	assert_eq(int(provider.get("frames")), stepped + 1)
+	var entries: Array = _world_screen._encounters.entries()
+	assert_eq(entries.size(), 1)
+	assert_true(bool(entries[0]["shiny"]), "the host answers shininess, not the mod")
+	var drawn: Array = _world_screen._actors.sprites()
+	assert_eq(drawn.size(), 1)
+	assert_eq(drawn[0]["position_cells"], Vector2(cell))
+	assert_eq(
+		drawn[0]["colors"], _data.palette(Fixture.TRAINER_SPECIES, true),
+		"the shiny palette"
+	)
+
+	## A step onto an empty cell starts nothing, though the map's own grass rate
+	## is 255: while a provider is active the post-step roll is off.
+	_world_screen._world.player_cell = Vector2i(6, 7)
+	_world_screen._after_player_move({"kind": &"step"})
+	assert_null(_world_screen._battle_host, "no roll while a provider is active")
+
+	## Walking onto it starts the battle with those exact DVs.
+	_world_screen._world.player_cell = cell
+	_world_screen._after_player_move({"kind": &"step"})
+	var request: Dictionary = _world_screen._battle_host.get_meta(
+		"world_battle_request"
+	)["request"]
+	assert_eq(int(request["values"]["dvs"]), shiny)
+	assert_eq(int(request["values"]["level"]), 5)
+	assert_eq(StringName(request["visible_encounter"]), &"a")
+
+	_world_screen._on_battle_finished({"outcome": Gen2WorldBattleAdapter.OUTCOME_RAN})
+	var reported: Array = provider.get("results")
+	assert_eq(reported.size(), 1)
+	assert_eq(StringName(reported[0][0]), &"a")
+	assert_eq(StringName(reported[0][1]["outcome"]), Gen2WorldBattleAdapter.OUTCOME_RAN)
+
+	## A map change discards the population and every sprite resolved from it
+	## before the next map is drawn, and says so with a fresh generation.
+	var generation: int = int((provider.get("context") as Dictionary)["generation"])
+	_world_screen._world.current_map.number = Fixture.MAP_NUMBER + 1
+	_world_screen._encounters.set_world(_world_screen._world)
+	assert_eq(_world_screen._encounters.entries().size(), 0)
+	assert_eq(
+		int((provider.get("context") as Dictionary)["generation"]), generation + 1
+	)
