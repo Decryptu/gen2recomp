@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cnrvj8xm16up4"
-path="res://.godot/imported/crystal.webp-672296d70ab0a0622ca536fbf8857ae7.ctex"
+uid="uid://bxnsora23rrqw"
+path="res://.godot/imported/mods.svg-11f4ac71639c85729fa7f5a75e5eabb3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/launcher/bg/crystal.webp"
-dest_files=["res://.godot/imported/crystal.webp-672296d70ab0a0622ca536fbf8857ae7.ctex"]
+source_file="res://assets/launcher/icons/mods.svg"
+dest_files=["res://.godot/imported/mods.svg-11f4ac71639c85729fa7f5a75e5eabb3.ctex"]
 
 [params]
 
@@ -39,3 +39,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
+svg/scale=1.0
+editor/scale_with_editor_scale=false
+editor/convert_colors_with_editor_theme=false

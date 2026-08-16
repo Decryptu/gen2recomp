@@ -14,16 +14,25 @@ const ART: Dictionary = {
 	&"crystal": preload("res://assets/cartridges/crystal.webp"),
 }
 
-## What the launcher puts behind itself while a cartridge is selected. Only shown
-## once that cartridge is imported: an empty bay has no game to dress the page in.
-const BACKDROP: Dictionary = {
-	&"gold": preload("res://assets/launcher/bg/gold.webp"),
-	&"silver": preload("res://assets/launcher/bg/silver.webp"),
-	&"crystal": preload("res://assets/launcher/bg/crystal.webp"),
-}
-
 ## The cartridge shells are 1058 by 1201.
 const ASPECT: float = 1058.0 / 1201.0
+
+const SIDE_FADE_SHADER: String = """
+shader_type canvas_item;
+
+uniform float side = 0.0;
+uniform sampler2D cartridge_texture : source_color;
+uniform bool use_cartridge_texture = false;
+
+void fragment() {
+	vec4 sampled = use_cartridge_texture ? texture(cartridge_texture, UV) : texture(TEXTURE, UV);
+	vec4 colour = sampled * COLOR;
+	float inward = side < 0.0 ? UV.x : 1.0 - UV.x;
+	float gradient_alpha = mix(0.25, 1.0, inward);
+	colour.a *= mix(1.0, gradient_alpha, clamp(abs(side), 0.0, 1.0));
+	COLOR = colour;
+}
+"""
 
 var game_id: StringName = &""
 var imported: bool = false
@@ -37,6 +46,8 @@ var _bay: Control = null
 var _bay_icon: Gen2LauncherIcon = null
 var _bay_label: Label = null
 var _hover: bool = false
+var _side_fade: ShaderMaterial = null
+var _bay_side_fade: ShaderMaterial = null
 ## Whether the stage is being driven by a keyboard or a pad and this is the
 ## cartridge it is on. A pointer needs no ring; a pad has nothing else to go on.
 var _highlighted: bool = false
@@ -73,10 +84,18 @@ func _build() -> void:
 	# stops delivering to a control that is no longer drawn.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	resized.connect(_place)
+	var fade_shader := Shader.new()
+	fade_shader.code = SIDE_FADE_SHADER
+	_side_fade = ShaderMaterial.new()
+	_side_fade.shader = fade_shader
+	_side_fade.set_shader_parameter("use_cartridge_texture", true)
+	_bay_side_fade = ShaderMaterial.new()
+	_bay_side_fade.shader = fade_shader
 
 	_bay = Control.new()
 	_bay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_bay.material = _bay_side_fade
 	_bay.draw.connect(_draw_bay)
 	add_child(_bay)
 
@@ -91,10 +110,11 @@ func _build() -> void:
 	invitation.offset_top = 0.0
 	invitation.offset_bottom = 0.0
 	_bay.add_child(invitation)
-	_bay_icon = Gen2LauncherIcon.create(&"download", 26.0, _theme.faint)
+	_bay_icon = Gen2LauncherIcon.create(&"download", 44.0, _theme.faint)
 	_bay_icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	invitation.add_child(_bay_icon)
-	_bay_label = Gen2LauncherUI.muted(_theme, "Drop a dump\nor click to browse")
+	_bay_label = Gen2LauncherUI.muted(_theme, RomRegistry.title_for(game_id))
+	_bay_label.add_theme_font_size_override("font_size", Gen2LauncherTheme.FONT_TITLE)
 	_bay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_bay_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	invitation.add_child(_bay_label)
@@ -105,6 +125,8 @@ func _build() -> void:
 	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_art.material = _side_fade
+	_side_fade.set_shader_parameter("cartridge_texture", _art.texture)
 	add_child(_art)
 
 	set_imported(false)
@@ -122,8 +144,22 @@ func set_imported(state: bool) -> void:
 func set_depth(distance: int) -> void:
 	depth = distance
 	_bay_label.visible = distance == 0
-	_bay_icon.set_glyph(&"download", 26.0 if distance == 0 else 20.0, _theme.faint)
+	_bay_icon.set_glyph(&"download", 44.0 if distance == 0 else 26.0, _theme.faint)
 	queue_redraw()
+
+
+## The selected cartridge is untouched. A left neighbour fades from 100% at its
+## inner edge to 25% at its outer edge; a right neighbour mirrors that ramp.
+func set_side_fade(slot: float) -> void:
+	if _side_fade == null:
+		return
+	var side: float = clampf(slot, -1.0, 1.0)
+	# Keep the selected artwork on TextureRect's native colour path so its colour
+	# is identical to the source image.
+	_art.material = null if is_zero_approx(side) else _side_fade
+	_bay.material = null if is_zero_approx(side) else _bay_side_fade
+	_side_fade.set_shader_parameter("side", side)
+	_bay_side_fade.set_shader_parameter("side", side)
 
 
 func set_highlighted(state: bool) -> void:
@@ -157,7 +193,7 @@ func _draw() -> void:
 		return
 	var pad: float = size.x * 0.05
 	draw_style_box(
-		_theme.box(Color(0, 0, 0, 0), size.x * 0.09, _theme.accent, 3),
+		_theme.box(Color(0, 0, 0, 0), size.x * 0.09, _theme.accent, 6),
 		Rect2(Vector2(-pad, -pad), size + Vector2(pad, pad) * 2.0),
 	)
 

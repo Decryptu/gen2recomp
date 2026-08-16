@@ -15,6 +15,7 @@ signal page_selected(id: StringName)
 const COMPACT_WIDTH: float = 820.0
 ## Room kept for a message and its detail line above the page.
 const TOAST_HEIGHT: float = 84.0
+const DOCK_OVERLAY_HEIGHT: float = Gen2LauncherUI.DOCK_SAFE_BOTTOM + 22.0
 
 var theme_palette: Gen2LauncherTheme = null
 var compact: bool = false
@@ -33,7 +34,7 @@ var _clock: Label = null
 var _battery: Gen2LauncherBattery = null
 var _top_right: HBoxContainer = null
 var _pages: MarginContainer = null
-var _dock_host: CenterContainer = null
+var _dock_host: Control = null
 var _dock: HBoxContainer = null
 var _toast: Gen2LauncherToast = null
 var _flash: ColorRect = null
@@ -77,7 +78,7 @@ func _build() -> void:
 	# whatever the picture happens to be doing underneath.
 	_art_veil = ColorRect.new()
 	_art_veil.color = theme_palette.with_alpha(
-		theme_palette.backdrop_bottom, 0.91 if theme_palette.is_dark() else 0.88
+		theme_palette.backdrop_bottom, 0.76 if theme_palette.is_dark() else 0.72
 	)
 	_art_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_art_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -92,6 +93,7 @@ func _build() -> void:
 	var top: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	root.add_child(top)
 	_clock = Gen2LauncherUI.title(theme_palette, _now(), Gen2LauncherTheme.FONT_TITLE)
+	_clock.add_theme_color_override("font_color", theme_palette.surface)
 	_clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(_clock)
 	top.add_child(Gen2LauncherUI.spacer())
@@ -115,7 +117,9 @@ func _build() -> void:
 	_pages.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_pages)
 
-	root.add_child(_build_dock())
+	# The dock floats over the page instead of consuming a row from it. Its fade
+	# makes the page continue behind the controls without a hard horizontal cut.
+	add_child(_build_dock())
 
 	_toast = Gen2LauncherToast.create(theme_palette)
 	_toast.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -148,10 +152,26 @@ func battery() -> Gen2LauncherBattery:
 ## A row of plain discs on the page, with nothing behind them. A bar or a card
 ## under the dock would be one more surface to place at every width, and the
 ## discs already say where they are.
-func _build_dock() -> CenterContainer:
-	_dock_host = CenterContainer.new()
+func _build_dock() -> Control:
+	_dock_host = Control.new()
+	_dock_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dock_host.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_dock_host.offset_top = -DOCK_OVERLAY_HEIGHT
+
+	var fade := TextureRect.new()
+	fade.texture = _dock_gradient()
+	fade.stretch_mode = TextureRect.STRETCH_SCALE
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_dock_host.add_child(fade)
+
+	var centre := CenterContainer.new()
+	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	centre.offset_top = 26.0
 	_dock = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
-	_dock_host.add_child(_dock)
+	centre.add_child(_dock)
+	_dock_host.add_child(centre)
 	return _dock_host
 
 
@@ -202,7 +222,7 @@ func toast() -> Gen2LauncherToast:
 ## Puts [param texture] behind the launcher, crossfading from whatever was there.
 ## Pass null for the plain gradient, which is what a page with no cartridge
 ## behind it wants.
-func set_backdrop_art(texture: Texture2D) -> void:
+func set_backdrop_art(texture: Texture2D, game_screen: bool = false) -> void:
 	if texture == _art_texture:
 		return
 	_art_texture = texture
@@ -214,6 +234,12 @@ func set_backdrop_art(texture: Texture2D) -> void:
 	_art_front = _art_back
 	_art_back = outgoing
 	_art_front.texture = texture
+	_art_front.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_art_front.texture_filter = (
+		CanvasItem.TEXTURE_FILTER_NEAREST
+		if game_screen
+		else CanvasItem.TEXTURE_FILTER_LINEAR
+	)
 	_art_front.modulate.a = 0.0
 	_art_holder.move_child(_art_back, 0)
 	_art_holder.move_child(_art_front, 1)
@@ -277,10 +303,12 @@ func _apply_layout() -> void:
 	_host.add_theme_constant_override("margin_left", margin)
 	_host.add_theme_constant_override("margin_right", margin)
 	_host.add_theme_constant_override("margin_top", 20 if wide else 14)
-	_host.add_theme_constant_override("margin_bottom", 24 if wide else 16)
+	# Pages reach the bezel; each scrolling page owns a safe tail that can move
+	# its final control above the floating dock.
+	_host.add_theme_constant_override("margin_bottom", 0)
 	for key: StringName in _buttons:
 		(_buttons[key] as Gen2LauncherButton).set_side(
-			Gen2LauncherButton.DOCK_SIDE if wide else 46.0
+			Gen2LauncherButton.DOCK_SIDE if wide else 68.0
 		)
 	if compact == not wide and not _entries.is_empty():
 		return
@@ -297,10 +325,7 @@ func _apply_layout() -> void:
 func _place_toast() -> void:
 	if _toast == null or _pages == null:
 		return
-	var below: float = (
-		(global_position.y + size.y) - (_pages.global_position.y + _pages.size.y)
-	)
-	_toast.offset_bottom = -maxf(below + 10.0, 0.0)
+	_toast.offset_bottom = -(Gen2LauncherUI.DOCK_SAFE_BOTTOM + 10.0)
 	_toast.offset_top = _toast.offset_bottom - TOAST_HEIGHT
 
 
@@ -314,4 +339,17 @@ func _page_gradient() -> GradientTexture2D:
 	texture.fill_to = Vector2(0.85, 1.0)
 	texture.width = 64
 	texture.height = 64
+	return texture
+
+
+func _dock_gradient() -> GradientTexture2D:
+	var ramp := Gradient.new()
+	ramp.set_color(0, theme_palette.with_alpha(theme_palette.backdrop_bottom, 0.0))
+	ramp.set_color(1, theme_palette.backdrop_bottom)
+	var texture := GradientTexture2D.new()
+	texture.gradient = ramp
+	texture.fill_from = Vector2(0.5, 0.0)
+	texture.fill_to = Vector2(0.5, 1.0)
+	texture.width = 8
+	texture.height = 128
 	return texture

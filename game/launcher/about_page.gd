@@ -70,6 +70,7 @@ func _build() -> void:
 		hash_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hash_label.add_theme_color_override("font_color", _theme.faint)
 		line.add_child(hash_label)
+	column.add_child(Gen2LauncherUI.dock_safe_space())
 
 
 ## Shown after a release check answers, in the colour its outcome deserves.

@@ -4,10 +4,6 @@ extends VBoxContainer
 ## The launcher's home: the cartridge carousel and the one or two things you can
 ## do with whatever is in the middle of it.
 ##
-## The name of the selected cartridge is written on its own button rather than
-## over it, so the page carries one label instead of three that all say the same
-## thing.
-##
 ## The page reports what was clicked and displays what it is told. Every import,
 ## refusal and launch belongs to the launcher.
 
@@ -19,7 +15,6 @@ signal selection_changed(game_id: StringName)
 
 var _theme: Gen2LauncherTheme = null
 var _stage: Gen2CartridgeStage = null
-var _play: Gen2LauncherButton = null
 var _manage: Gen2LauncherButton = null
 var _details: Dictionary = {}
 var _compact: bool = false
@@ -40,25 +35,19 @@ func _build() -> void:
 	_stage.selection_changed.connect(_on_selection_changed)
 	_stage.insert_requested.connect(func(id: StringName) -> void: insert_requested.emit(id))
 	_stage.play_requested.connect(func(id: StringName) -> void: play_requested.emit(id))
-	add_child(_stage)
 
-	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
-	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	add_child(actions)
-
-	_play = Gen2LauncherButton.create(_theme, "", Gen2LauncherButton.Variant.HERO, &"play")
-	_play.custom_minimum_size = Vector2(210, 52)
-	_play.add_theme_font_size_override("font_size", Gen2LauncherTheme.FONT_TITLE)
-	_play.sound = &"power"
-	_play.pressed.connect(_on_primary)
-	actions.add_child(_play)
-
-	_manage = Gen2LauncherButton.icon_only(_theme, &"dots", Gen2LauncherButton.Variant.DOCK, 44.0)
-	_manage.tooltip_text = "Cache and re-import"
+	_manage = Gen2LauncherButton.icon_only(
+		_theme, &"dots", Gen2LauncherButton.Variant.DOCK, _action_side()
+	)
+	_manage.tooltip_text = "Cartridge options"
 	_manage.pressed.connect(func() -> void: manage_requested.emit(_stage.selected_id()))
-	actions.add_child(_manage)
+	add_child(_stage)
+	_stage.add_child(_manage)
+	_stage.resized.connect(_place_manage)
+	_stage.layout_changed.connect(_place_manage)
 
 	_refresh_action()
+	_place_manage.call_deferred()
 
 
 func stage() -> Gen2CartridgeStage:
@@ -86,7 +75,6 @@ func set_slot_state(game_id: StringName, imported: bool, detail: String) -> void
 
 
 func set_busy(busy: bool) -> void:
-	_play.set_disabled_state(busy)
 	_manage.set_disabled_state(busy)
 
 
@@ -102,42 +90,50 @@ func set_compact(compact: bool) -> void:
 	if compact == _compact:
 		return
 	_compact = compact
-	_play.custom_minimum_size = Vector2(170 if compact else 210, 46 if compact else 52)
-	_play.add_theme_font_size_override(
-		"font_size",
-		Gen2LauncherTheme.FONT_BODY if compact else Gen2LauncherTheme.FONT_TITLE,
-	)
-	_manage.set_side(40.0 if compact else 44.0)
-
-
-func _on_primary() -> void:
-	var id: StringName = _stage.selected_id()
-	if _stage.selected_cartridge().imported:
-		play_requested.emit(id)
-	else:
-		insert_requested.emit(id)
+	_manage.set_side(_action_side())
+	_sync_stage_inset()
+	_place_manage.call_deferred()
 
 
 func _on_selection_changed(game_id: StringName) -> void:
 	_refresh_action()
+	_place_manage.call_deferred()
 	selection_changed.emit(game_id)
 
 
-## The button carries the cartridge's name, so it says both what is selected and
-## what pressing it does.
+func _action_side() -> float:
+	return 68.0 if _compact else Gen2LauncherButton.DOCK_SIDE
+
+
+func _place_manage() -> void:
+	if _stage == null or _manage == null:
+		return
+	var card: Gen2Cartridge = _stage.selected_cartridge()
+	if card == null:
+		return
+	var gap: float = Gen2LauncherUI.GAP_MD + card.size.x * 0.05
+	_manage.position = Vector2(
+		(_stage.size.x - _manage.size.x) * 0.5,
+		maxf(0.0, card.position.y - _manage.size.y - gap),
+	)
+	_stage.move_child(_manage, _stage.get_child_count() - 1)
+
+
 func _refresh_action() -> void:
 	var id: StringName = _stage.selected_id()
 	var card: Gen2Cartridge = _stage.selected_cartridge()
 	if card == null:
 		return
 	var title: String = RomRegistry.title_for(id)
-	_play.text = title
 	if card.imported:
-		_play.set_glyph(&"play")
-		_play.sound = &"power"
-		_play.tooltip_text = "Play %s. %s" % [title, _details.get(id, "Ready")]
-	else:
-		_play.set_glyph(&"download")
-		_play.sound = &"click"
-		_play.tooltip_text = "Import a %s cartridge dump" % title
+		_manage.tooltip_text = "%s options. %s" % [title, _details.get(id, "Ready")]
 	_manage.visible = card.imported
+	_sync_stage_inset()
+
+
+func _sync_stage_inset() -> void:
+	if _stage == null or _manage == null:
+		return
+	_stage.set_top_inset(
+		_manage.size.y + Gen2LauncherUI.GAP_LG if _manage.visible else 0.0
+	)

@@ -13,18 +13,18 @@ extends Control
 signal selection_changed(game_id: StringName)
 signal insert_requested(game_id: StringName)
 signal play_requested(game_id: StringName)
+signal layout_changed
 
 ## How big a cartridge beside the selection is, as a fraction of it.
 const SIDE: float = 0.56
-const DIM: float = 0.72
 ## The space between two cartridges, as a fraction of the selected one's width.
-const GAP: float = 0.11
+const GAP: float = 0.18
 ## The narrowest the selected cartridge gets, as a fraction of the stage, once
 ## the whole row no longer fits.
 const NARROW_SHARE: float = 0.62
 ## The width a selected cartridge has to keep for the row to be worth fitting.
 const COMFORT: float = 200.0
-const MAX_HEIGHT: float = 460.0
+const MAX_HEIGHT: float = 430.0
 const MIN_HEIGHT: float = 130.0
 ## Slots past the first that a cartridge is pushed out by, so the one wrapping
 ## round is well off the visible group before it crosses.
@@ -35,6 +35,10 @@ const VANISH: float = 1.34
 const TAP: float = 6.0
 
 var selected: int = 0
+## Space owned by controls above and by the floating dock below. The cartridge
+## is measured in what remains, so neither can be pushed outside a short window.
+var top_inset: float = 0.0
+var bottom_inset: float = Gen2LauncherUI.DOCK_SAFE_BOTTOM
 
 var _theme: Gen2LauncherTheme = null
 var _cartridges: Array[Gen2Cartridge] = []
@@ -94,6 +98,11 @@ func selected_id() -> StringName:
 
 func selected_cartridge() -> Gen2Cartridge:
 	return _cartridges[selected] if selected < _cartridges.size() else null
+
+
+func set_top_inset(value: float) -> void:
+	top_inset = maxf(value, 0.0)
+	_place_all()
 
 
 ## Moves the carousel onto [param index], wrapping rather than clamping: the row
@@ -274,7 +283,10 @@ func _shortest(delta: float) -> float:
 func _place_all() -> void:
 	if _cartridges.is_empty() or size.x <= 0.0:
 		return
-	var hero_height: float = clampf(size.y * 0.94, MIN_HEIGHT, MAX_HEIGHT)
+	var usable_height: float = maxf(size.y - top_inset - bottom_inset, 1.0)
+	var hero_height: float = minf(
+		clampf(usable_height * 0.88, MIN_HEIGHT, MAX_HEIGHT), usable_height
+	)
 	var hero_width: float = hero_height * Gen2Cartridge.ASPECT
 	# The whole row fits whenever fitting it leaves a cartridge worth looking at.
 	# Below that the hero holds [constant NARROW_SHARE] of the stage and the two
@@ -286,7 +298,7 @@ func _place_all() -> void:
 	hero_width = minf(hero_width, fitted)
 	hero_height = hero_width / Gen2Cartridge.ASPECT
 	_stride = hero_width * (0.5 + GAP + SIDE * 0.5)
-	var middle: Vector2 = Vector2(size.x * 0.5, size.y * 0.5)
+	var middle: Vector2 = Vector2(size.x * 0.5, top_inset + usable_height * 0.5)
 
 	# Furthest from the middle first, so the selected cartridge is drawn last and
 	# nothing beside it overlaps the one being looked at. Draw order is child
@@ -315,11 +327,13 @@ func _place_all() -> void:
 		card.set_depth(0 if reach < 0.5 else 1)
 		card.position.x = middle.x + signf(slot) * out * _stride - width * 0.5
 		card.set_rest_y(middle.y - height * 0.5)
+		card.set_side_fade(slot)
 		card.modulate.a = clampf(
-			lerpf(1.0, DIM, minf(reach, 1.0)) * clampf((VANISH - reach) / 0.34, 0.0, 1.0), 0.0, 1.0
+			clampf((VANISH - reach) / 0.34, 0.0, 1.0), 0.0, 1.0
 		)
 		card.visible = card.modulate.a > 0.0
 		card.set_highlighted(reach < 0.5 and has_focus())
+	layout_changed.emit()
 
 
 ## Where cartridge [param index] sits relative to the middle, in slots.

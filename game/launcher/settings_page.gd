@@ -145,6 +145,7 @@ func _build() -> void:
 			_options.printer_brightness = index
 			_persist()
 	)))
+	column.add_child(Gen2LauncherUI.dock_safe_space())
 
 
 func _open_touch_layout() -> void:

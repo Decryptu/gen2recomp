@@ -90,6 +90,7 @@ func set_row(row: Dictionary) -> void:
 		for option: Dictionary in options:
 			fields.add_child(_option_field(mod_id(), option))
 		_body.add_child(panel)
+	_body.add_child(Gen2LauncherUI.dock_safe_space())
 
 
 ## The strip of facts and the buttons that act on them: what is installed, what

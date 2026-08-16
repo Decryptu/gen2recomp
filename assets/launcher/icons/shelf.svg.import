@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://4aro3o106u2f"
-path="res://.godot/imported/gold.webp-2a38c8594aa2ce0d1d82f76cae43992e.ctex"
+uid="uid://bx8xhku7h0pvd"
+path="res://.godot/imported/shelf.svg-8168fe8c58cfe6d2c885326fdf1c2540.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/launcher/bg/gold.webp"
-dest_files=["res://.godot/imported/gold.webp-2a38c8594aa2ce0d1d82f76cae43992e.ctex"]
+source_file="res://assets/launcher/icons/shelf.svg"
+dest_files=["res://.godot/imported/shelf.svg-8168fe8c58cfe6d2c885326fdf1c2540.ctex"]
 
 [params]
 
@@ -39,3 +39,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
+svg/scale=1.0
+editor/scale_with_editor_scale=false
+editor/convert_colors_with_editor_theme=false
