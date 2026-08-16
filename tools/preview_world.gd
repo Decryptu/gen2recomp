@@ -20,6 +20,10 @@ extends SceneTree
 ## (`BuyMenu`, talked open from the cell in front of a shop's counter, as
 ## `crystal 1 8 ... mart 3 3`), `pokepic`
 ## (`Script_pokepic`'s box over the map, holding Chikorita),
+## `warp` (`MapSetupScript_Door` at its whitest: the player is walked up onto the
+## warp tile named by the two numbers below it, and the picture is
+## `FadeOutToWhite`'s last order, which is the frame the new map is loaded on:
+## `crystal 24 7 ... warp 7 1` is the bedroom staircase),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -35,6 +39,9 @@ extends SceneTree
 ## is photographed.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
+## Longer than a step onto a warp tile and the fade behind it, for the `warp`
+## kind, which drives to a frame rather than spending a count.
+const WARP_FRAME_CAP: int = 120
 ## Hardware frames spent after the sprites are staged. Two puts the grass rustle
 ## on its first facing and the boulder dust on its second, so every one of them
 ## is up and none is on the frame it was spawned. Cut needs more: its tree stands
@@ -150,6 +157,11 @@ func _process(_delta: float) -> bool:
 	if _screen == null:
 		return false
 	_frames += 1
+	## Again, and after the screen is in the tree: a node whose script defines
+	## `_process` has its processing turned back on when it is made ready, so the
+	## call in [method _build_live] alone leaves the screen spending frames of
+	## its own beside the ones staged below.
+	_screen.set_process(false)
 	if _frames == 2:
 		if _kind == &"unown_wall":
 			## The chamber's own `bg_event ..., BGEVENT_UP`: face the wall from
@@ -170,6 +182,19 @@ func _process(_delta: float) -> bool:
 			_screen.interact()
 			for _press: int in MART_PRESSES:
 				_screen.press_button(Gen2Button.A)
+		elif _kind == &"warp":
+			## `MapSetupScript_Door` at its whitest: the step onto the warp tile
+			## and then `FadeOutToWhite`'s last order, which is the frame the map
+			## is loaded on.
+			for _frame: int in WARP_FRAME_CAP:
+				## The first press turns, the second steps: the player is facing
+				## the room rather than the stairs when the map opens.
+				_screen.move_up()
+				_screen.advance_frame()
+				var fade: Dictionary = _screen.map_fade()
+				if StringName(fade.get("stage", &"")) == &"out" \
+					and int(fade.get("step", 0)) == Gen2WorldPalette.FADE_OUT_ORDERS.size() - 1:
+					break
 		elif _kind == &"pokepic":
 			_screen.preview_pokepic(POKEPIC_SPECIES)
 		elif FIELD_ITEMS.has(_kind):
@@ -185,8 +210,11 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
-			_screen.advance_frame()
+		if _kind != &"warp":
+			## The `warp` kind drove itself to the frame it wants; every other
+			## kind stages a sprite and then spends the frames it needs.
+			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
+				_screen.advance_frame()
 	if _frames < 18:
 		return false
 	var image: Image = root.get_texture().get_image()

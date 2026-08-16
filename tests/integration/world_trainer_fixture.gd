@@ -11,6 +11,12 @@ const SHA1: String = "0123456789abcdef"
 const BANK: int = 48
 const MAP_GROUP: int = 1
 const MAP_NUMBER: int = 1
+## The door either map warps through, each the other's destination 1. Both sit
+## away from everything else the fixture stages, since a warp tile is also a
+## forced step.
+const WARP_CELL := Vector2i(10, 8)
+const HOME_WARP_CELL := Vector2i(6, 4)
+
 const MAP_WIDTH_BLOCKS: int = 6
 const MAP_HEIGHT_BLOCKS: int = 5
 ## The fixture's copyright strip, shorter than either cartridge's so a page test
@@ -176,6 +182,10 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	collision.resize(MAP_WIDTH_CELLS * MAP_HEIGHT_CELLS)
 	collision.fill(0)
 	collision[7 * MAP_WIDTH_CELLS + 8] = 0x29
+	## A door on the far corner, and its pair on the home map: a warp is the one
+	## thing a step can owe that the screen spends frames on, and
+	## `CheckWarpCollision` needs a warp tile under the `warp_event` for it.
+	collision[WARP_CELL.y * MAP_WIDTH_CELLS + WARP_CELL.x] = Gen2WorldCollision.COLL_DOOR
 
 	var objects: Array = [{
 		"sprite": TRAINER_SPRITE,
@@ -220,6 +230,11 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 			"bank": BANK,
 			"coord_events": [{"scene": 0, "x": 4, "y": 5, "script": TUTORIAL_SCRIPT}],
 			"objects": objects,
+			"warps": [{
+				"x": WARP_CELL.x, "y": WARP_CELL.y, "destination": 1,
+				"map_group": Gen2WorldSpawn.NEW_BARK_GROUP,
+				"map_number": Gen2WorldSpawn.PLAYERS_HOUSE_2F,
+			}],
 		},
 	}
 	var home_map: Dictionary = map.duplicate(true)
@@ -239,7 +254,11 @@ static func _write_world(directory: String, crystal_commands: bool = true) -> vo
 	home_map["collision"] = home_collision
 	home_map["collision_width"] = 8
 	home_map["collision_height"] = 6
-	home_map["events"] = {"bank": BANK, "objects": []}
+	home_collision[HOME_WARP_CELL.y * 8 + HOME_WARP_CELL.x] = Gen2WorldCollision.COLL_DOOR
+	home_map["events"] = {"bank": BANK, "objects": [], "warps": [{
+		"x": HOME_WARP_CELL.x, "y": HOME_WARP_CELL.y, "destination": 1,
+		"map_group": MAP_GROUP, "map_number": MAP_NUMBER,
+	}]}
 	RomCache.write_json(RomCache.world_maps_path(directory), [map, home_map])
 	var grass_slots: Array = []
 	for _slot: int in RomLayout.WILD_GRASS_SLOT_COUNT:

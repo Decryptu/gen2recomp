@@ -106,6 +106,36 @@ const PALETTE_ROWS: Array = [
 ]
 
 
+## `.cgbfade`, the seven rows `GetTimePalFade` answers with on a CGB, each
+## packed the way `dc` packs one: colour j of the result is colour
+## `(order >> 2j) & 3` of the palette it is applied to, which is what
+## `DmgToCgbTimePals` does with it. Row 3 is the identity, row 6 is every colour
+## flattened onto colour 0.
+const FADE_ORDERS: Array[int] = [0xFF, 0xFE, 0xF9, 0xE4, 0x90, 0x40, 0x00]
+## `RotatePalettesRight`'s and the two map fades' own starting rows.
+const FADE_IDENTITY: int = 0xE4
+
+## `FadeOutToWhite`: `ld c, $9` is row 3, and `ConvertTimePalsIncHL` walks four
+## rows forward, two frames each. `FadeInFromWhite` is `ld c, $12`, row 6, and
+## `ConvertTimePalsDecHL` walks the same four back.
+const FADE_OUT_ORDERS: Array[int] = [0xE4, 0x90, 0x40, 0x00]
+const FADE_IN_ORDERS: Array[int] = [0x00, 0x40, 0x90, 0xE4]
+## `DelayFrames`' own `ld c, 2` inside either loop.
+const FADE_STEP_FRAMES: int = 2
+
+
+## One step of a palette fade: `CopyPals`' rule, which every `DmgToCgb*Pals`
+## caller shares. The identity order answers the palette it was handed.
+static func fade_palette(palette: PackedColorArray, order: int) -> PackedColorArray:
+	if order == FADE_IDENTITY or palette.size() < 4:
+		return palette
+	var out := PackedColorArray()
+	out.resize(palette.size())
+	for index: int in palette.size():
+		out[index] = palette[(order >> (2 * mini(index, 3))) & 3] if index < 4 			else palette[index]
+	return out
+
+
 static func palette_slots(environment: int, time_of_day: int) -> Array:
 	var environment_index: int = clampi(environment, 0, PALETTE_ROWS.size() - 1)
 	var time_index: int = clampi(time_of_day, 0, 3)
@@ -125,6 +155,8 @@ static func tile_palettes(
 	time_of_day: int = TIME_MORNING,
 	water_color: int = -1,
 	cave_color: int = -1,
+	fade_order: int = FADE_IDENTITY,
+	white_fill: bool = false,
 ) -> Array:
 	var slots: Array = palette_slots(map.environment, time_of_day)
 	var resolved: Array = []
@@ -137,7 +169,19 @@ static func tile_palettes(
 		elif slot == 4 and cave_color >= 0 and base.size() >= 2:
 			palette[0] = base[clampi(cave_color, 0, 1)]
 		resolved.append(palette)
-	var fallback: PackedColorArray = data.world_palette(0)
+	# `FillWhiteBGColor`, which only the fade out of the map runs: every
+	# background palette takes palette 0's own colour 0, so the order that
+	# flattens a palette onto it flattens the screen onto one white.
+	if white_fill and not resolved.is_empty():
+		var white: Color = (resolved[0] as PackedColorArray)[0]
+		for slot: int in range(1, resolved.size()):
+			var palette: PackedColorArray = resolved[slot]
+			palette[0] = white
+			resolved[slot] = palette
+	if fade_order != FADE_IDENTITY:
+		for slot: int in resolved.size():
+			resolved[slot] = fade_palette(resolved[slot], fade_order)
+	var fallback: PackedColorArray = fade_palette(data.world_palette(0), fade_order)
 	var out: Array = []
 	out.resize(tileset.tile_count)
 	for tile: int in tileset.tile_count:

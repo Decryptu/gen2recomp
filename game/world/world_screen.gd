@@ -41,6 +41,18 @@ const SFX_HEADBUTT_TREE: int = 0x6D
 ## induction.
 const MUSIC_HALL_OF_FAME: int = 20
 
+## `GetWarpSFX`: the door, the warp panel, and everything else, which is a step
+## out of a building. Read off the tile the step landed on, the way
+## `wPlayerTileCollision` is.
+const SFX_ENTER_DOOR: int = 0x1F
+const SFX_WARP_TO: int = 0x13
+const SFX_EXIT_BUILDING: int = 0x23
+const COLL_DOOR: int = 0x71
+const COLL_WARP_PANEL: int = 0x7C
+## `FadeToMapMusic`'s own `ld a, 8` into `wMusicFade`, which is what the new
+## map's track arrives behind.
+const WARP_MUSIC_FADE_FRAMES: int = 8
+
 @export var map_group: int = 24
 @export var map_number: int = 3
 @export var start_cell: Vector2i = Vector2i(4, 4)
@@ -68,6 +80,10 @@ var _encounters: Gen2WorldEncounters = null
 var _battle_encounter_id: StringName = &""
 ## The headbutt result waiting for ShakeHeadbuttTree's 32 frames to be spent.
 var _pending_headbutt_finish: Dictionary = {}
+## `MapSetupScript_Door` while it is running: `{ stage, step, frames, cell }`,
+## empty on every other frame. The map swaps between the two stages, which is
+## where the setup script's own list sits.
+var _map_fade: Dictionary = {}
 var _text_box: Gen2TextBox = null
 var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
@@ -417,6 +433,9 @@ func advance_frame() -> void:
 		if _replaying_input:
 			_apply_replayed_input(_world.frame_number)
 	_advance_game_time_frame()
+	## Before everything the map draws: the fade owns the frame the map swaps on,
+	## and nothing else runs while `RunMapSetupScript` is spending its own.
+	_advance_map_fade()
 	if _effects != null:
 		if _effects.advance_frame() and _renderer != null:
 			_renderer.refresh()
@@ -590,7 +609,10 @@ func _advance_held_direction() -> void:
 ## they all need this one, and adding an overlay to five of six lists by hand is
 ## what the Cut and Hall of Fame work each paid for once.
 func _overlay_open() -> bool:
-	return _battle_host != null or _service_host != null \
+	## A map fade is not an overlay, but nothing may move or be pressed inside
+	## one either: `RunMapSetupScript` runs with the joypad unread.
+	return not _map_fade.is_empty() \
+		or _battle_host != null or _service_host != null \
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
 		or _pokedex_host != null or _credits_host != null
@@ -672,7 +694,8 @@ func press_button(button: int) -> bool:
 ## refusing the ones it has no use for, which is what keeps a stray press from
 ## reaching the map behind it.
 func _handle_button(button: int) -> bool:
-	if not _trainer_approach.is_empty() or _world.phone_ring_active():
+	if not _map_fade.is_empty() or not _trainer_approach.is_empty() \
+		or _world.phone_ring_active():
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -882,20 +905,36 @@ func _after_player_move(movement: Dictionary) -> bool:
 	if movement.get("kind", &"") == &"exit_water":
 		_play_current_map_music()
 
-	var transition: Dictionary = movement
 	## CheckTileEvent gates warps on nothing, so surfing onto a warp tile and the
 	## step back onto land both reach one.
 	if movement.get("kind", &"") in [
 		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
-	]:
-		transition = _world.try_warp()
+	] and _world.warp_pending():
+		## `WarpToNewMapScript`: the sound, and then `newloadmap MAPSETUP_DOOR`,
+		## whose `FadeOutToWhite` runs before the map is loaded at all. The map
+		## swaps when that fade lands, and everything a step still owes waits
+		## for `FadeInFromWhite` behind it.
+		_start_map_fade()
+		return true
 	if _renderer != null:
-		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
+		if bool(movement.get("ok", false)) and movement.get("kind", &"") != &"move":
+			## `MapSetupScript_Connection`, which is the step itself rather than
+			## a warp: the neighbour's blocks are loaded under a camera that
+			## never stops, and its `FadeToMapMusic` is why crossing a route
+			## boundary into the same track is one continuous piece.
 			_animation.configure(_world, time_of_day)
 			_set_renderer_world()
-			_play_current_map_music()
+			_fade_to_map_music()
 		else:
 			_renderer.refresh()
+	return _after_map_settled()
+
+
+## `EnterMap`'s own tail, which a warp reaches once its setup script has run and
+## an ordinary step reaches on the frame it finished: the sight lines, the map's
+## scripts, the two phone paths, the contest timer, and the wild roll behind all
+## of them.
+func _after_map_settled() -> bool:
 	_refresh_labels()
 	var sight_results: Array = _world.dispatch_sight_events()
 	if sight_results.is_empty():
@@ -940,6 +979,92 @@ func _after_player_move(movement: Dictionary) -> bool:
 			"encounter": encounter.duplicate(true),
 		})
 	return true
+
+
+## `MapSetupScript_Door` while it is running, for a test or a preview tool that
+## has to land on one of its frames: `{ stage, step, frames }`, empty on every
+## other frame of the game.
+func map_fade() -> Dictionary:
+	return _map_fade.duplicate()
+
+
+## `WarpToNewMapScript`. `GetWarpSFX` reads the tile the step landed on, and
+## `MapSetupScript_Door`'s `FadeOutToWhite` is the first thing the setup script
+## spends: four palette orders, two frames each, before anything is loaded.
+func _start_map_fade() -> void:
+	_play_sfx(_warp_sfx())
+	_map_fade = {"stage": &"out", "step": 0, "frames": Gen2WorldPalette.FADE_STEP_FRAMES}
+	_apply_map_fade_step()
+
+
+## `GetWarpSFX`, off `wPlayerTileCollision`.
+func _warp_sfx() -> int:
+	match _world.collision_code_at(_world.player_cell):
+		COLL_DOOR:
+			return SFX_ENTER_DOOR
+		COLL_WARP_PANEL:
+			return SFX_WARP_TO
+	return SFX_EXIT_BUILDING
+
+
+## One frame of the fade the warp is inside, spent from [method advance_frame]
+## like every other countdown here. The two stages are `FadeOutToWhite` and
+## `FadeInFromWhite`; the map is loaded between them, which is where the rest of
+## `MapSetupScript_Door`'s list sits.
+func _advance_map_fade() -> void:
+	if _map_fade.is_empty():
+		return
+	_map_fade["frames"] = int(_map_fade["frames"]) - 1
+	if int(_map_fade["frames"]) > 0:
+		return
+	var step: int = int(_map_fade["step"]) + 1
+	var out: bool = StringName(_map_fade["stage"]) == &"out"
+	if step < Gen2WorldPalette.FADE_OUT_ORDERS.size():
+		_map_fade["step"] = step
+		_map_fade["frames"] = Gen2WorldPalette.FADE_STEP_FRAMES
+		_apply_map_fade_step()
+		return
+	if out:
+		_swap_warped_map()
+		_map_fade = {"stage": &"in", "step": 0, "frames": Gen2WorldPalette.FADE_STEP_FRAMES}
+		_apply_map_fade_step()
+		return
+	_map_fade = {}
+	_apply_map_fade_step()
+	## `EnterMap` runs the map's own scripts once the setup script has finished,
+	## which is the frame the fade lands on.
+	_after_map_settled()
+
+
+## The palette order this step of the fade draws with. `FillWhiteBGColor` is the
+## fade out's alone, so the way back in flattens onto whatever the new map's own
+## palette 0 holds.
+func _apply_map_fade_step() -> void:
+	if _renderer == null or not _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
+		return
+	if _map_fade.is_empty():
+		_renderer.call(
+			Gen2ModHost.RENDERER_FADE_METHOD, Gen2WorldPalette.FADE_IDENTITY, false
+		)
+		return
+	var out: bool = StringName(_map_fade["stage"]) == &"out"
+	var orders: Array[int] = Gen2WorldPalette.FADE_OUT_ORDERS if out \
+		else Gen2WorldPalette.FADE_IN_ORDERS
+	_renderer.call(
+		Gen2ModHost.RENDERER_FADE_METHOD, orders[int(_map_fade["step"])], out
+	)
+
+
+## The middle of `MapSetupScript_Door`: the map the warp names is loaded with the
+## screen at its whitest, and `FadeToMapMusic` is the eight-step fade the new
+## map's track arrives behind rather than a restart.
+func _swap_warped_map() -> void:
+	var transition: Dictionary = _world.try_warp()
+	if not bool(transition.get("ok", false)):
+		return
+	_animation.configure(_world, time_of_day)
+	_set_renderer_world()
+	_fade_to_map_music()
 
 
 ## The three placings as one line. `_BugContestJudging` prints them as three
@@ -3354,6 +3479,20 @@ func _audio_assets() -> Dictionary:
 		"wave_samples": _data.world_audio_asset(&"wave_samples") if _data != null else {},
 		"drumkits": _data.world_audio_asset(&"drumkits") if _data != null else {},
 	}
+
+
+## `FadeToMapMusic`, which is what a map entered through a warp arrives behind:
+## `wMusicFade` is eight and `wMusicFadeID` the map's own track, so the piece
+## that was playing fades out and the new one starts where it lands. A map whose
+## track is already playing keeps it, which is the routine's own `cp e`.
+func _fade_to_map_music() -> void:
+	if _audio_player == null or _data == null or _world == null \
+		or _world.current_map == null:
+		return
+	_audio_player.fade_to(
+		_data.world_audio(&"music", _world.state.map_music()),
+		WARP_MUSIC_FADE_FRAMES, _audio_assets(),
+	)
 
 
 ## Plays whatever `wMapMusic` currently holds. `Gen2WorldAPI` owns the write,

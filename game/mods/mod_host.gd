@@ -57,6 +57,12 @@ const RENDERER_ACTORS_METHOD: String = "set_actors"
 ## [constant RENDERER_ACTORS_METHOD]; what is only here is the shiny pulse, which
 ## is battle-animation OAM over the map and which a renderer may ignore.
 const RENDERER_ENCOUNTERS_METHOD: String = "set_encounters"
+## Optional, world renderers only. Called with one step of a map fade: the
+## palette order `DmgToCgbTimePals` applies to every palette on screen, and
+## `FillWhiteBGColor` beside it on the way out. The host spends the fade's own
+## frames either way, so a renderer that ignores this cuts to the new map on the
+## frame the cartridge is at its whitest rather than desynchronising.
+const RENDERER_FADE_METHOD: String = "set_fade"
 ## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
 ## per battle, before the first [code]set_view[/code], saying where the fight is
 ## happening: a renderer staging it on the map needs that and one drawing the

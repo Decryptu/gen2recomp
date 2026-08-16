@@ -123,6 +123,26 @@ func fade_out(frames: int = 0) -> bool:
 	return true
 
 
+## `FadeToMapMusic`: the same `wMusicFade`, with `wMusicFadeID` behind it, so the
+## new track starts when the fade reaches zero rather than over the old one.
+## Answers false when there is nothing playing to fade, which is the source's own
+## `cp e / jr z, .done` and the driver starting the piece at once.
+func fade_to(record: Dictionary, frames: int, assets: Dictionary = {}) -> bool:
+	if record.is_empty():
+		return false
+	_engine.set_assets(assets)
+	_engine.stereo = stereo
+	var key: String = "%d:%d" % [int(record.get("bank", -1)), int(record.get("address", -1))]
+	if key == _music_key:
+		return false
+	if not _engine.any_channel_active():
+		return bool(play_record(record, &"map_music", assets).get("played", false))
+	_start_stream()
+	_engine.start_fade(frames, record)
+	_music_key = key
+	return true
+
+
 func stop_all() -> void:
 	_engine.init_sound()
 	_music_key = ""
