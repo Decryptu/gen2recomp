@@ -14,6 +14,7 @@ var _shelf: Gen2ShelfPage = null
 var _mods: Gen2ModsPage = null
 var _settings: Gen2SettingsPage = null
 var _about: Gen2AboutPage = null
+var _title_backdrop: Gen2LauncherTitleBackdrop = null
 
 var _file_dialog: FileDialog = null
 var _mod_dialog: FileDialog = null
@@ -45,6 +46,8 @@ func _build() -> void:
 
 	_shell = Gen2LauncherShell.create(_palette)
 	add_child(_shell)
+	_title_backdrop = Gen2LauncherTitleBackdrop.new()
+	add_child(_title_backdrop)
 
 	_shelf = Gen2ShelfPage.create(_palette, _shell.compact)
 	_shelf.insert_requested.connect(_open_import_dialog)
@@ -138,7 +141,18 @@ func _refresh_backdrop() -> void:
 	var showing: bool = (
 		_shell.current_page() == &"shelf" and seated != null and seated.imported
 	)
-	_shell.set_backdrop_art(Gen2Cartridge.BACKDROP.get(game_id, null) if showing else null)
+	if not showing:
+		_title_backdrop.hide_backdrop()
+		_shell.set_backdrop_art(null)
+		return
+	var data: GameData = GameData.open(game_id)
+	var title_texture: Texture2D = _title_backdrop.show_game(data)
+	if title_texture != null:
+		_shell.set_backdrop_art(title_texture, true)
+	else:
+		# A legacy cache without imported title art gets the neutral page rather
+		# than carrying a second set of authored background images in the build.
+		_shell.set_backdrop_art(null)
 
 
 func _refresh_games() -> void:

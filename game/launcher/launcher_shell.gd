@@ -77,7 +77,7 @@ func _build() -> void:
 	# whatever the picture happens to be doing underneath.
 	_art_veil = ColorRect.new()
 	_art_veil.color = theme_palette.with_alpha(
-		theme_palette.backdrop_bottom, 0.91 if theme_palette.is_dark() else 0.88
+		theme_palette.backdrop_bottom, 0.76 if theme_palette.is_dark() else 0.72
 	)
 	_art_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_art_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -202,7 +202,7 @@ func toast() -> Gen2LauncherToast:
 ## Puts [param texture] behind the launcher, crossfading from whatever was there.
 ## Pass null for the plain gradient, which is what a page with no cartridge
 ## behind it wants.
-func set_backdrop_art(texture: Texture2D) -> void:
+func set_backdrop_art(texture: Texture2D, game_screen: bool = false) -> void:
 	if texture == _art_texture:
 		return
 	_art_texture = texture
@@ -214,6 +214,12 @@ func set_backdrop_art(texture: Texture2D) -> void:
 	_art_front = _art_back
 	_art_back = outgoing
 	_art_front.texture = texture
+	_art_front.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_art_front.texture_filter = (
+		CanvasItem.TEXTURE_FILTER_NEAREST
+		if game_screen
+		else CanvasItem.TEXTURE_FILTER_LINEAR
+	)
 	_art_front.modulate.a = 0.0
 	_art_holder.move_child(_art_back, 0)
 	_art_holder.move_child(_art_front, 1)
