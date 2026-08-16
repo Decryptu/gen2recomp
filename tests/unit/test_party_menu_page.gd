@@ -323,3 +323,24 @@ func test_the_prompt_box_covers_the_bottom_four_rows() -> void:
 	)
 	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.PROMPT.x, Gen2PartyMenuPage.PROMPT.y), 0)
 	assert_eq(_ink_in_tile(image, 0, Gen2PartyMenuPage.TEXTBOX.y - 1), 0, "nothing above it")
+
+
+## `PartyMenuCheckEgg` opens every quality's loop below the nicknames, so an egg
+## is a name and nothing else. Reachable from the overworld menu alone.
+func test_an_egg_row_draws_its_nickname_and_no_other_quality() -> void:
+	var rows: Array = _rows(1)
+	rows[0]["egg"] = true
+	rows[0]["name"] = "EGG"
+	var image: Image = _render(rows)
+	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.NICKNAME.x, 1), 0, "the nickname")
+	assert_eq(_ink_in_tile(image, Gen2PartyMenuPage.HP_DIGITS.x + 1, 1), 0, "no HP numbers")
+	assert_eq(_ink_in_tile(image, Gen2PartyMenuPage.LEVEL.x, 2), 0, "no level")
+	assert_eq(_ink_in_tile(image, Gen2PartyMenuPage.HP_BAR.x, 2), 0, "no bar")
+	assert_eq(_ink_in_tile(image, Gen2PartyMenuPage.STATUS.x, 2), 0, "no status")
+
+
+## `ReadMonMenuIcon`'s `cp EGG`: the icon is the one no species row names.
+func test_an_egg_takes_the_egg_icon_rather_than_its_species_own() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	assert_eq(data.mon_menu_icon(FIXTURE_SPECIES), FIXTURE_ICON)
+	assert_eq(data.mon_menu_icon(FIXTURE_SPECIES, true), RomLayout.ICON_EGG)

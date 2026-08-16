@@ -17,7 +17,11 @@ extends SceneTree
 ## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
 ## ESCAPE, WATER and LIGHT, as `crystal 3 24 ... unown_wall 3 1`),
 ## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `pokepic`
-## (`Script_pokepic`'s box over the map, holding Chikorita), or one of
+## (`Script_pokepic`'s box over the map, holding Chikorita), the name of any
+## `preview_*` driver on the world screen without that prefix (`field_move` is
+## `PartyMenu` with a taught CUT on it, `start_menu`, `capture`, `move_forget`
+## and the rest; a `*_use` name is driven twice, since each call is one step of
+## its own sequence), or one of
 ## [constant FIELD_ITEMS]' own names, which is the pack's USE on that item: the
 ## Itemfinder closes the pack over the world's answer, the Coin Case prints
 ## inside the pack, and the three in [constant FACE_UP_FIRST] each need their own
@@ -51,6 +55,10 @@ const FACE_UP_FIRST: Array[StringName] = [
 
 ## `ElmsLabScript`'s left ball, which is the first `pokepic` a new game shows.
 const POKEPIC_SPECIES: int = 152
+
+## How a `kind` names one of [Gen2WorldScreen]'s own screenshot drivers, so
+## every `preview_*` on it is reachable from here rather than from nothing.
+const SCREEN_DRIVER: String = "preview_%s"
 
 const STAGED_FRAMES: int = 2
 const STAGED_FRAMES_CUT: int = 12
@@ -149,6 +157,13 @@ func _process(_delta: float) -> bool:
 			if _kind in FACE_UP_FIRST:
 				_screen.move_up()
 			_screen.preview_field_item(int(FIELD_ITEMS[_kind]))
+		elif _screen.has_method(SCREEN_DRIVER % _kind):
+			## The screen's own `preview_*` drivers, by their name without the
+			## prefix. A `*_use` driver is one step per call, so it is called
+			## twice: the first opens the menu and the second answers it.
+			_screen.call(SCREEN_DRIVER % _kind)
+			if String(_kind).ends_with("_use"):
+				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
 		for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):

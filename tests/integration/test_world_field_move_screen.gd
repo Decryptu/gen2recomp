@@ -1098,3 +1098,36 @@ func _open_waterfall_world(badge: bool = true) -> void:
 	)
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_UP
 	_world_screen._world.movement_mode = Gen2WorldAPI.MOVEMENT_SURF
+
+
+## `InitPartyMenuWithCancel`: the row after the last member answers A with the
+## same carry a B press sets, so the menu closes from either.
+func test_the_cancel_row_closes_the_menu_the_way_b_does() -> void:
+	await _open_world()
+	var party: Gen2PartyScreen = await _open_party()
+	var members: int = _world_screen._embedded_party_save().party.size()
+	for _step: int in members:
+		party.handle_button(Gen2Button.DOWN)
+	assert_true(bool(party.submenu_snapshot()["on_cancel"]), "the cursor is past the party")
+	party.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_null(_world_screen._party_host)
+
+
+## A refusal stands in the menu's own bottom box and `JoyWaitAorB` holds there:
+## a direction does not answer it and the next A or B does nothing but clear it.
+func test_a_refusal_holds_the_menu_until_a_or_b() -> void:
+	await _open_world()
+	var party: Gen2PartyScreen = await _open_party()
+	party.handle_button(Gen2Button.A)
+	## STATS, the first row this project does not act on.
+	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
+	var refused: Dictionary = party.submenu_snapshot()
+	assert_ne(String(refused["message"]), "", "the refusal is in the box")
+
+	assert_false(party.handle_button(Gen2Button.DOWN), "a direction is not one of the two")
+	assert_eq(int(party.submenu_snapshot()["cursor"]), int(refused["cursor"]))
+	assert_true(party.handle_button(Gen2Button.B))
+	assert_eq(String(party.submenu_snapshot()["message"]), "")
+	assert_true(bool(party.submenu_snapshot()["open"]), "and the submenu is still up")

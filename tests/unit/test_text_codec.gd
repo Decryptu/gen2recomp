@@ -51,16 +51,17 @@ func test_word_codes_expand() -> void:
 	assert_eq(Gen2Text.decode(PackedByteArray([0xE1, 0xE2]), 0, 4), "PKMN")
 
 
-## constants/charmap.asm maps "#" to $54, so a synthesized literal writes the
-## POKé ligature the way every source text does. Spelling it out instead is legal
-## but costs three extra tiles, because $54 is below FIRST_PRINTABLE and so
-## decode-only.
-func test_hash_encodes_the_poke_ligature_the_source_charmap_names() -> void:
-	assert_eq(Gen2Text.encode("#"), PackedByteArray([0x54]))
-	assert_eq(Gen2Text.encoded_length("a #MON!"), 7)
+## constants/charmap.asm maps "#" to $54, which `CheckDict` prints as four
+## characters, so a synthesized literal may write the shorthand the way every
+## source text does and still occupy the four tiles POKé takes. $54 itself is no
+## glyph, which is why the code is not what is written.
+func test_hash_encodes_the_word_the_source_dictionary_prints() -> void:
+	assert_eq(Gen2Text.encode("#"), Gen2Text.encode("POKé"))
+	assert_eq(Gen2Text.encoded_length("a #MON!"), 10)
 	assert_eq(Gen2Text.decode(Gen2Text.encode("#MON"), 0, 16), "POKéMON")
-	# Without the alias this drew UNKNOWN, the question-mark glyph.
-	assert_ne(Gen2Text.encode("#")[0], Gen2Text.UNKNOWN)
+	# Every code it writes is a glyph, which $54 is not.
+	for code: int in Gen2Text.encode("#"):
+		assert_true(code >= Gen2Text.FIRST_PRINTABLE, "code %02X is drawable" % code)
 	assert_eq(Gen2Text.encoded_length("POKéMON"), 7)
 
 

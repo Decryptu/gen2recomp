@@ -779,11 +779,13 @@ func overworld_icon_indices(icon_number: int) -> PackedByteArray:
 
 
 ## `ReadMonMenuIcon`: the icon a species is drawn with in a party menu, or zero
-## when the cache does not hold the table. Its `cp EGG` answer is not modelled
-## because nothing here holds an egg; a mod species numbered past the
-## cartridge's own range has no row in the imported table and answers zero,
-## which is `ICON_NULL`.
-func mon_menu_icon(species: int) -> int:
+## when the cache does not hold the table. Its `cp EGG` is [param egg], which
+## this save model carries beside a real species rather than as species $fd. A
+## mod species numbered past the cartridge's own range has no row in the imported
+## table and answers zero, which is `ICON_NULL`.
+func mon_menu_icon(species: int, egg: bool = false) -> int:
+	if egg:
+		return RomLayout.ICON_EGG
 	var table: PackedByteArray = mon_menu_icon_table()
 	if species < 1 or species > table.size():
 		return 0

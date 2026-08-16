@@ -388,11 +388,11 @@ func _tilemap(map: PackedInt32Array, tiles: Array[int], at: Vector2i) -> void:
 ## Printed text is character codes, which are tile numbers in the font's own
 ## window, so it goes into the same map as everything else.
 ##
-## `#` ($54) is not a tile: `PlacePOKe` prints `PlacePOKeText`, four characters,
-## so the label the source writes as "#DEX" occupies seven columns and reads
-## POKéDEX. Expanding it here is what that dict entry does.
+## `#` ($54) is not a tile: [method Gen2Text.encode] prints `PlacePOKe`'s four
+## characters for it, so the label the source writes as "#DEX" occupies seven
+## columns and reads POKéDEX.
 func _text(map: PackedInt32Array, text: String, at: Vector2i) -> void:
-	var codes: PackedByteArray = Gen2Text.encode(text.replace("#", "POKé"))
+	var codes: PackedByteArray = Gen2Text.encode(text)
 	for index: int in codes.size():
 		_put(map, at + Vector2i(index, 0), codes[index])
 

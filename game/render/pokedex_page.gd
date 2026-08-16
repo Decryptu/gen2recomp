@@ -621,27 +621,13 @@ func _tiles(map: PackedInt32Array, x: int, y: int, run: Array[int]) -> void:
 
 
 ## `PlaceString`, whose `CheckDict` expands the shorthand before a tile is drawn.
-##
-## `#` is `$54` and prints "POKé" as four characters; on this screen `$54` is a
-## dex sheet tile, so a byte placed as itself would draw part of the frame. The
-## expansion cannot go back through the encoder either, because "POKé" is the
-## shorthand's own text and encodes to `$54` again.
-const POKE_CODES: Array[int] = [0x8F, 0x8E, 0x8A, 0xEA]
-
-
+## That expansion is [method Gen2Text.encode]'s, which matters here more than
+## elsewhere: `$54` is a dex sheet tile on this screen, so a byte placed as
+## itself would draw part of the frame.
 func _text(map: PackedInt32Array, x: int, y: int, text: String) -> void:
-	var at: int = x
-	var first: bool = true
-	for part: String in text.split("#"):
-		if not first:
-			for code: int in POKE_CODES:
-				_put(map, at, y, code)
-				at += 1
-		first = false
-		var codes: PackedByteArray = Gen2Text.encode(part)
-		for index: int in codes.size():
-			_put(map, at + index, y, codes[index])
-		at += codes.size()
+	var codes: PackedByteArray = Gen2Text.encode(text)
+	for index: int in codes.size():
+		_put(map, x + index, y, codes[index])
 
 
 ## `PrintNum`, as the digits it writes. [param leading_zeros] is its own flag;

@@ -48,6 +48,12 @@ const FIRST_PRINTABLE: int = 0x80
 ## is a bug someone will report and a dropped character is not.
 const UNKNOWN: int = 0xE6
 
+## `constants/charmap.asm`'s "#" is $54, which `CheckDict` prints as this word.
+## [method encode] writes the word rather than the code, since only the word has
+## glyphs; decoding $54 still answers "POKé", so a round trip is unchanged.
+const POKE_SHORTHAND: String = "#"
+const POKE_WORD: String = "POK\u00e9"
+
 ## The longest sequence one tile stands for: the apostrophe ligatures and PK/MN
 ## are two characters in one glyph. The word codes $54 ("POKé") and $4a ("PKMN")
 ## sit below FIRST_PRINTABLE and are decode-only; write "#" for $54 as the source
@@ -122,12 +128,16 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 	var codes: Dictionary = _encodings() if font == FONT_MAIN else _battle_extra_encodings()
 	var out: PackedByteArray = PackedByteArray()
 	var at: int = 0
+	# `PlaceNextChar` hands $54 to `CheckDict`, whose `PlacePOKe` prints four
+	# characters, so the source's own "#" is four tiles and not one. Expanding
+	# here is what puts POKé on screen: $54 is no glyph and would draw a blank.
+	var expanded: String = text.replace(POKE_SHORTHAND, POKE_WORD)
 
-	while at < text.length():
+	while at < expanded.length():
 		var taken: int = 0
 		# Longest first, so "'s" wins over a "'" with no "s" code after it.
-		for length: int in range(mini(MAX_LIGATURE, text.length() - at), 0, -1):
-			var candidate: String = text.substr(at, length)
+		for length: int in range(mini(MAX_LIGATURE, expanded.length() - at), 0, -1):
+			var candidate: String = expanded.substr(at, length)
 			if codes.has(candidate):
 				out.append(codes[candidate])
 				taken = length
@@ -283,11 +293,6 @@ static func _encodings() -> Dictionary:
 		var text: String = table[code]
 		if not out.has(text):
 			out[text] = code
-
-	# constants/charmap.asm maps "#" to $54, the POKé ligature every source text
-	# writes. Encode only, so decoding $54 stays "POKé" and a round trip is not
-	# rewritten. Without it "a #MON!" draws a question mark.
-	out["#"] = 0x54
 
 	# charmap.asm maps "…" to $75, likewise below FIRST_PRINTABLE. Source text
 	# writes the character itself (Text_MoveForgetCount's "1, 2 and…"), so a line
