@@ -50,6 +50,11 @@ const RENDERER_RESIZE_METHOD: String = "set_native_size"
 ## map rather than as objects, all of them presentation with no world state
 ## behind them, so a renderer that draws its own effects can ignore it.
 const RENDERER_EFFECTS_METHOD: String = "set_effects"
+## Optional, world renderers only. Called with the screen's [Gen2WorldActors]
+## when the renderer is built. It holds the sprites registered mods put in the
+## world, already resolved to the same [Gen2WorldSprite] the map's own objects
+## are drawn from, so a renderer draws them with its objects or ignores them.
+const RENDERER_ACTORS_METHOD: String = "set_actors"
 ## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
 ## per battle, before the first [code]set_view[/code], when the battle was
 ## entered from the world. It is where the fight is happening: a renderer staging
@@ -158,6 +163,10 @@ var _options: Dictionary = {}
 ## Mod id to its registered actions. See [method register_action].
 var _actions: Dictionary = {}
 var _world_renderers: Dictionary = {}
+## Mod id to the world actor it registered. Held for as long as the mod is
+## loaded, the way its entry object is: an actor carries the mod's own state
+## between frames. See [method register_world_actor].
+var _world_actors: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
 var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
@@ -224,6 +233,47 @@ func select_world_renderer(id: StringName) -> Dictionary:
 ## built-in one so a screen always has something to draw with.
 func create_world_renderer() -> Node:
 	return _create(_world_renderers, _selected_world_renderer, Gen2WorldRenderer)
+
+
+## Registers a world ACTOR under [param id]: one sprite in the overworld, drawn
+## with the map's own objects.
+##
+## [param actor] is an object and not a script, because an actor is a pose and
+## not a view: the host drives the one it is handed rather than building one per
+## world. It must be a [RefCounted] and never a [Node], and must answer the three
+## methods in [constant Gen2WorldActors.ACTOR_METHODS]; a registration missing
+## one is refused here, where the mod's name is still in hand.
+##
+## What an actor draws is presentation and takes part in nothing else. See
+## [Gen2WorldActors] for the contract and `docs/MODS.md` for the entry shape.
+func register_world_actor(id: StringName, actor: Object) -> Dictionary:
+	if String(id).is_empty() or actor == null:
+		return {"ok": false, "reason": &"invalid_actor"}
+	if actor is Node:
+		return {"ok": false, "reason": &"actor_is_a_node", "detail": String(id)}
+	var missing: Array[String] = []
+	for method: String in Gen2WorldActors.ACTOR_METHODS:
+		if not actor.has_method(method):
+			missing.append(method)
+	if not missing.is_empty():
+		return {
+			"ok": false, "reason": &"actor_missing_methods",
+			"detail": "%s: %s" % [id, ", ".join(missing)],
+		}
+	if _world_actors.has(id):
+		return {"ok": false, "reason": &"duplicate_actor", "detail": String(id)}
+	_world_actors[id] = actor
+	return {"ok": true, "id": id}
+
+
+func world_actor_ids() -> Array:
+	return _world_actors.keys()
+
+
+## Every registered actor, in registration order, which is the order two standing
+## on one row are drawn in.
+func world_actors() -> Array:
+	return _world_actors.values()
 
 
 ## Registers a battle renderer under [param id]. See

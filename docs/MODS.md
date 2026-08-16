@@ -600,6 +600,50 @@ the four source directions using the source tie-breaking, and pass both to the
 existing interaction path. Smooth movement then leaves an NPC in the
 neighbouring cell interacting exactly as it would on the cartridge.
 
+## Putting one sprite in the world
+
+A mod that wants a follower, a pet, a marker over an object or a ghost of a
+previous run does not need a renderer: it registers a world **actor** and the
+built-in view draws it with the map's own objects.
+
+```gdscript
+func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
+    host.register_world_actor(manifest.id, Follower.new())
+```
+
+The actor is a `RefCounted` and never a `Node`, because it is a pose and not a
+view. Three methods, refused by name at registration the way a renderer's are:
+
+| Method | Called when |
+|---|---|
+| `set_world(world: Gen2WorldAPI)` | The map changed, or the view was created |
+| `advance_frame()` | Once per world frame, after the player's step advanced |
+| `sprites() -> Array` | What to draw now. A read: it is asked once a frame however many times the screen redraws |
+
+Each entry of `sprites()` is a dictionary naming cartridge art and nothing else:
+
+| Key | Meaning |
+|---|---|
+| `icon` | An `IconPointers` row, as `GameData.mon_menu_icon(species)` answers it |
+| `sprite` | An `OverworldSprites` row instead, for an NPC or an object picture |
+| `facing` | `Gen2WorldSprite.FACING_*`. Right is the left picture mirrored, as on the cartridge |
+| `position_cells` | Where to draw it, in fractional walk cells, the unit `player_position_cells()` is in |
+
+The host resolves the strip, the palette, the time of day and the icon's own
+two-frame animation (`.Frameset_PartyMon`'s rate), so a mod never composes
+pixels. An entry naming art the cache does not carry is dropped rather than
+drawn as a placeholder.
+
+An actor's sprite is **presentation**: it occupies no cell, blocks nothing,
+nobody talks to it, no trainer sees it and it is in no snapshot. That is what
+lets it exist at all, since world state is the one thing a mod must not write.
+Actors are sorted into the object pass by the row they stand on, so a follower
+one cell below an NPC is drawn over it.
+
+A registered world renderer that wants to draw them takes them through the
+optional `set_actors(actors: Gen2WorldActors)`, which is handed the same
+resolved list the built-in view draws.
+
 ## Measured against the voxel mod
 
 [DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod)

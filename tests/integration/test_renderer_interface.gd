@@ -1,8 +1,9 @@
 extends GutTest
 
 ## The interface seam a native-layer renderer gets: how opaque the screen draws
-## its own text box, and where that box is. Both screens are the production
-## paths; only the renderer is synthetic.
+## its own text box, and where that box is, plus the seam a mod's world actor
+## gets, which is the same shape one layer down. Both screens are the production
+## paths; only the renderer and the actor are synthetic.
 ##
 ## The contract is that the box stays the screen's. A renderer asks and is told;
 ## it never draws or moves the box, and the frame and the glyphs are opaque
@@ -176,3 +177,47 @@ func test_the_battle_screen_opens_the_same_seam() -> void:
 		(renderer.get("rects") as Array).back(),
 		Rect2i(0, Gen2TextBox.STANDARD_TOP * Gen2Font.TILE, 160, 48)
 	)
+
+
+## A mod's world actor, driven by the screen rather than by a view: the world it
+## is handed, one advance per world frame, and the resolved sprites reaching the
+## renderer that draws them.
+const ACTOR_SOURCE: String = """extends RefCounted
+
+var world = null
+var frames: int = 0
+
+func set_world(value) -> void:
+	world = value
+
+func advance_frame() -> void:
+	frames += 1
+
+func sprites() -> Array:
+	return [{"icon": 1, "position_cells": Vector2(3, 4)}]
+"""
+
+
+func test_a_registered_world_actor_is_driven_by_the_screen_and_drawn_by_the_view() -> void:
+	var actor: Object = _script(ACTOR_SOURCE).new()
+	assert_true(Gen2ModHost.instance().register_world_actor(&"follower", actor)["ok"])
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	## The screen owns the frames it spends, so take its processing away before
+	## counting them.
+	_world_screen.set_process(false)
+	assert_eq(actor.get("world"), _world_screen._world)
+	var before: int = int(actor.get("frames"))
+	_world_screen.advance_frames(3)
+	assert_eq(int(actor.get("frames")), before + 3)
+	var drawn: Array = _world_screen._actors.sprites()
+	assert_eq(drawn.size(), 1)
+	assert_eq((drawn[0]["sprite"] as Gen2WorldSprite).icon_number, 1)
+	assert_eq(drawn[0]["position_cells"], Vector2(3, 4))
+	assert_eq(_world_screen._renderer._actors, _world_screen._actors)

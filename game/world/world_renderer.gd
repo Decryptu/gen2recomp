@@ -11,6 +11,7 @@ const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
 var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
+var _actors: Gen2WorldActors = null
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _atlas: ImageTexture = null
 ## Kept beside the texture so an animation frame can repaint the one or two
@@ -38,6 +39,14 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 ## renderer may be handed null and draw none of them.
 func set_effects(effects: Gen2WorldEffects) -> void:
 	_effects = effects
+	queue_redraw()
+
+
+## Gen2ModHost.RENDERER_ACTORS_METHOD: the sprites registered mods put in the
+## world. Presentation only, drawn with the map's own objects and taking part in
+## nothing else, so a renderer may be handed null and draw none of them.
+func set_actors(actors: Gen2WorldActors) -> void:
+	_actors = actors
 	queue_redraw()
 
 
@@ -173,9 +182,24 @@ func _draw() -> void:
 				Rect2(Vector2(tile * Gen2Tiles.TILE_WIDTH, 0), Vector2(8, 8)),
 			)
 
-	var actors: Array = _world.visible_objects()
-	actors.sort_custom(_sort_objects)
-	for object: Gen2WorldObject in actors:
+	var objects: Array = _world.visible_objects()
+	objects.sort_custom(_sort_objects)
+	## A mod's actors are drawn in the same pass and sorted into the same rows:
+	## a follower one cell below an NPC has to be drawn over it, and one cell
+	## above it under it. They carry no emote, no effect sprite and no grass of
+	## their own beyond the tuft the map draws over anything standing in it.
+	var drawn: Array = []
+	for object: Gen2WorldObject in objects:
+		drawn.append({"object": object, "row": float(object.cell.y)})
+	if _actors != null:
+		for sprite: Dictionary in _actors.sprites():
+			drawn.append({"actor": sprite, "row": (sprite["position_cells"] as Vector2).y})
+	drawn.sort_custom(_sort_drawn)
+	for entry: Dictionary in drawn:
+		if entry.has("actor"):
+			_draw_actor(entry["actor"], camera_pixels, page, tile_origin, tile_offset, window_size)
+			continue
+		var object: Gen2WorldObject = entry["object"]
 		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
 			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels
 		var texture: Texture2D = _actor_texture(
@@ -246,6 +270,35 @@ func _actor_texture(
 	var texture: Texture2D = ImageTexture.create_from_image(image)
 	_actor_textures[key] = texture
 	return texture
+
+
+## One mod actor, drawn from the [Gen2WorldSprite] the actor layer resolved for
+## it. Its position is in walk cells, the unit `player_position_cells()` is in,
+## so a follower halfway through a step is drawn halfway.
+func _draw_actor(
+	sprite: Dictionary, camera_pixels: Vector2, page: PackedInt32Array,
+	tile_origin: Vector2i, tile_offset: Vector2, window_size: Vector2i
+) -> void:
+	var position: Vector2 = sprite["position_cells"]
+	var pixel: Vector2 = position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
+	var texture: Texture2D = _actor_texture(
+		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"])
+	)
+	if texture == null:
+		return
+	draw_texture(texture, pixel)
+	if _in_grass(Vector2i(roundi(position.x), roundi(position.y))):
+		_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
+
+
+## The object pass's own order, with a mod's actors sorted into it: the row a
+## thing stands on, then the map's objects before any actor on that row.
+func _sort_drawn(first: Dictionary, second: Dictionary) -> bool:
+	if is_equal_approx(float(first["row"]), float(second["row"])):
+		if first.has("object") and second.has("object"):
+			return _sort_objects(first["object"], second["object"])
+		return first.has("object")
+	return float(first["row"]) < float(second["row"])
 
 
 func _sort_objects(first: Gen2WorldObject, second: Gen2WorldObject) -> bool:
