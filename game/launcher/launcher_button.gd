@@ -27,7 +27,8 @@ enum Variant {
 }
 
 const ICON_SIDE: float = 23.0
-const DOCK_SIDE: float = 52.0
+const DOCK_SIDE: float = 76.0
+const DOCK_ICON_SHARE: float = 0.42
 
 var variant: Variant = Variant.NEUTRAL
 ## Played on press. A cartridge action overrides it with its own clip.
@@ -133,6 +134,7 @@ func repaint() -> void:
 	# same on purpose: a pad moving onto a control has to read exactly as a
 	# pointer resting on it.
 	var reached: bool = _lit or _active
+	var icon_side: float = _side * DOCK_ICON_SHARE if variant == Variant.DOCK else ICON_SIDE
 
 	match variant:
 		Variant.PRIMARY:
@@ -174,9 +176,10 @@ func repaint() -> void:
 			"font_focus_color"]:
 		add_theme_color_override(state, ink)
 	add_theme_color_override("font_disabled_color", _theme.faint)
+	add_theme_constant_override("icon_max_width", int(icon_side))
 	if not _glyph.is_empty():
 		icon = Gen2LauncherIcon.raster(
-			_glyph, ICON_SIDE, _theme.faint if disabled else ink
+			_glyph, icon_side, _theme.faint if disabled else ink
 		)
 	# Godot gives the icon the left slot and the label the rest of the width, so
 	# a button with no label leaves its icon hard against the left edge. Centring

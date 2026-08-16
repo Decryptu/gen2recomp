@@ -56,7 +56,7 @@ func _build() -> void:
 	_shelf.selection_changed.connect(_on_cartridge_selected)
 	_shell.add_page(&"shelf", "Play", &"shelf", _shelf)
 
-	_mods = Gen2ModsPage.create(_palette)
+	_mods = Gen2ModsPage.create(_palette, self)
 	_mods.install_requested.connect(_open_mod_dialog)
 	_shell.add_page(&"mods", "Mods", &"mods", _mods)
 
@@ -419,6 +419,29 @@ func preview_mods_view(view: StringName, id: StringName = &"") -> void:
 			_mods.open_sources()
 		_:
 			_mods.show_list()
+
+
+## Preview seam: opens a real launcher sheet without synthesising a pointer
+## press, so visual checks can photograph every menu consistently.
+func preview_sheet(view: StringName) -> void:
+	match view:
+		&"manage":
+			select_page(&"shelf")
+			_open_manage_sheet(_shelf.selected_id())
+		&"touch":
+			select_page(&"settings")
+			_settings._open_touch_layout()
+		&"binding":
+			select_page(&"settings")
+			var sheet: Gen2BindingSheet = Gen2BindingSheet.for_button(
+				_palette, Gen2OptionsStore.current(), Gen2Button.A
+			)
+			sheet.open(self)
+		&"delete_mod":
+			select_page(&"mods")
+			var row: Dictionary = _mods._row_for(&"voxel_preview")
+			if not row.is_empty():
+				_mods.remove_mod(row)
 
 
 ## Preview seam: switches appearance without writing the options file.

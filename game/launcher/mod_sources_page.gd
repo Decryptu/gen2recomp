@@ -85,9 +85,11 @@ func refresh() -> void:
 		line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty.add_child(line)
 		_list.add_child(empty)
+		_list.add_child(Gen2LauncherUI.dock_safe_space())
 		return
 	for source: Dictionary in sources:
 		_list.add_child(_card(source))
+	_list.add_child(Gen2LauncherUI.dock_safe_space())
 
 
 func _card(source: Dictionary) -> Control:

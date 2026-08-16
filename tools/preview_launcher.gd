@@ -66,7 +66,9 @@ func _process(_delta: float) -> bool:
 		if STATES.has(_state):
 			_launcher.preview_slot_states(STATES[_state])
 		_launcher.select_page(StringName(_page))
-		if not _view.is_empty():
+		if _view in ["manage", "touch", "binding", "delete_mod"]:
+			_launcher.preview_sheet(StringName(_view))
+		elif not _view.is_empty():
 			_launcher.preview_mods_view(StringName(_view), StringName(_mod))
 	if _frames < 26:
 		return false

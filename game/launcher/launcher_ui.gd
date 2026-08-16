@@ -9,6 +9,8 @@ const GAP_XS: int = 4
 const GAP_SM: int = 8
 const GAP_MD: int = 14
 const GAP_LG: int = 22
+## Empty scroll tail that lets the final control rise clear of the floating dock.
+const DOCK_SAFE_BOTTOM: float = 132.0
 
 
 static func title(theme: Gen2LauncherTheme, text: String, size: int = Gen2LauncherTheme.FONT_TITLE) -> Label:
@@ -62,6 +64,13 @@ static func spacer() -> Control:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return gap
+
+
+static func dock_safe_space() -> Control:
+	var gap := Control.new()
+	gap.custom_minimum_size.y = DOCK_SAFE_BOTTOM
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return gap
 

@@ -27,6 +27,7 @@ signal install_requested
 const MAX_DOWNLOAD_BYTES: int = 96 * 1024 * 1024
 
 var _theme: Gen2LauncherTheme = null
+var _host: Control = null
 var _views: Control = null
 var _list_view: VBoxContainer = null
 var _list: VBoxContainer = null
@@ -42,9 +43,10 @@ var _pending: Dictionary = {}
 var _busy: bool = false
 
 
-static func create(palette: Gen2LauncherTheme) -> Gen2ModsPage:
+static func create(palette: Gen2LauncherTheme, host: Control = null) -> Gen2ModsPage:
 	var page := Gen2ModsPage.new()
 	page._theme = palette
+	page._host = host
 	page._build()
 	page.refresh()
 	return page
@@ -124,6 +126,7 @@ func _relist() -> void:
 
 	if groups.is_empty() and failures.is_empty():
 		_list.add_child(_empty_state())
+		_list.add_child(Gen2LauncherUI.dock_safe_space())
 		return
 	for group: Dictionary in groups:
 		_list.add_child(Gen2LauncherUI.caption(_theme, String(group["label"])))
@@ -133,6 +136,7 @@ func _relist() -> void:
 		_list.add_child(Gen2LauncherUI.caption(_theme, "Not loaded"))
 		for failure: Dictionary in failures:
 			_list.add_child(_refusal(failure))
+	_list.add_child(Gen2LauncherUI.dock_safe_space())
 
 
 func _empty_state() -> Control:
@@ -444,7 +448,7 @@ func remove_mod(row: Dictionary) -> void:
 		_remove_now(row)
 	)
 	sheet.add_action(confirm)
-	sheet.open(self)
+	sheet.open(_host if _host != null else self)
 
 
 func _remove_now(row: Dictionary) -> void:

@@ -33,6 +33,7 @@ func _build() -> void:
 	add_theme_constant_override("separation", Gen2LauncherUI.GAP_SM)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_readout = Gen2LauncherUI.title(_theme, "%d%%" % level, Gen2LauncherTheme.FONT_BODY)
+	_readout.add_theme_color_override("font_color", _theme.surface)
 	_readout.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(_readout)
 	_cell = Control.new()
@@ -55,7 +56,7 @@ func set_level(percent: int) -> void:
 
 
 func _draw_cell() -> void:
-	var ink: Color = _theme.warning if level <= LOW else _theme.text
+	var ink: Color = _theme.warning if level <= LOW else _theme.surface
 	var shell := Rect2(Vector2(0.0, (_cell.size.y - BODY.y) * 0.5), BODY)
 	_cell.draw_style_box(
 		_theme.box(Color(0, 0, 0, 0), 4.0, _theme.with_alpha(ink, 0.55), 2), shell

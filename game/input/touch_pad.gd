@@ -277,8 +277,7 @@ func _draw_cross(rect: Rect2, alpha: float) -> void:
 		Vector2(arm.x, rect.size.y),
 	)
 	for bar: Rect2 in [horizontal, vertical]:
-		draw_rect(bar, _tint(FILL, alpha))
-		draw_rect(bar, _tint(BORDER, alpha), false, BORDER_WIDTH)
+		_draw_rounded_box(bar, _tint(FILL, alpha), _tint(BORDER, alpha))
 	for button: int in Gen2Button.DIRECTIONS:
 		if not _is_held(button):
 			continue
@@ -288,7 +287,17 @@ func _draw_cross(rect: Rect2, alpha: float) -> void:
 			arm.y if step.y == 0.0 else (rect.size.y - arm.y) * 0.5,
 		)
 		var centre: Vector2 = rect.get_center() + step * (rect.size - span) * 0.5
-		draw_rect(Rect2(centre - span * 0.5, span), _tint(FILL_PRESSED, alpha))
+		_draw_rounded_box(Rect2(centre - span * 0.5, span), _tint(FILL_PRESSED, alpha))
+
+
+func _draw_rounded_box(rect: Rect2, fill: Color, border: Color = Color.TRANSPARENT) -> void:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.border_color = border
+	if border.a > 0.0:
+		box.set_border_width_all(int(BORDER_WIDTH))
+	box.set_corner_radius_all(int(minf(rect.size.x, rect.size.y) * 0.16))
+	draw_style_box(box, rect)
 
 
 func _draw_round(rect: Rect2, text: String, alpha: float, pressed: bool) -> void:

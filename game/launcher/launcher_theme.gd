@@ -220,6 +220,12 @@ func control_theme() -> Theme:
 	theme.set_stylebox("panel", "Panel", box(panel, RADIUS_MD, line))
 	theme.set_stylebox("panel", "PanelContainer", box(panel, RADIUS_MD, line))
 	theme.set_stylebox("panel", "AcceptDialog", padded(box(backdrop_top, 0.0), 18))
+	# Tooltips are launcher surfaces too, not the platform's stock grey popup.
+	theme.set_stylebox(
+		"panel", "TooltipPanel", padded(floating(surface, RADIUS_SM, 12), 12, 8)
+	)
+	theme.set_color("font_color", "TooltipLabel", on_surface)
+	theme.set_font_size("font_size", "TooltipLabel", FONT_SMALL)
 	theme.set_color("font_color", "Label", text)
 	theme.set_color("default_color", "RichTextLabel", text)
 
