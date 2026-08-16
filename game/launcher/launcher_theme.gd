@@ -238,6 +238,7 @@ func control_theme() -> Theme:
 		theme.set_stylebox("slider", type, padded(box(surface_alt, 3.0, line), 0, 3))
 		theme.set_stylebox("grabber_area", type, padded(box(accent, 3.0), 0, 3))
 		theme.set_stylebox("grabber_area_highlight", type, padded(box(accent, 3.0), 0, 3))
+		theme.set_stylebox("focus", type, padded(box(Color(0, 0, 0, 0), RADIUS_SM, accent, 2), 4, 4))
 		theme.set_icon("grabber", type, _knob(accent))
 		theme.set_icon("grabber_highlight", type, _knob(accent.lightened(0.15)))
 		theme.set_icon("grabber_disabled", type, _knob(faint))

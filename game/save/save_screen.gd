@@ -22,11 +22,9 @@ var _pending_import_path: String = ""
 var _shell: Gen2LauncherShell = null
 var _page: VBoxContainer = null
 var _slots_container: HFlowContainer = null
-var _slots_section: Control = null
 var _details_box: VBoxContainer = null
-var _status_icon: Gen2LauncherIcon = null
-var _status_label: Label = null
-var _status_detail: Label = null
+var _status_title: String = ""
+var _status_detail: String = ""
 var _name_input: LineEdit = null
 var _export_dialog: FileDialog = null
 var _slot_import_dialog: FileDialog = null
@@ -168,8 +166,8 @@ func save_screen_snapshot() -> Dictionary:
 		# question as whether it was asked for: a details pane that refused to
 		# draw leaves the flag up and the form absent.
 		"new_game_form": is_instance_valid(_name_input),
-		"status": _status_label.text if _status_label != null else "",
-		"detail": _status_detail.text if _status_detail != null else "",
+		"status": _status_title,
+		"detail": _status_detail,
 		"slots": _slots.duplicate(true),
 	}
 
@@ -192,17 +190,22 @@ func _build_ui() -> void:
 	_shell.add_action(back)
 
 	_page = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
-	var head: VBoxContainer = Gen2LauncherUI.column(2)
+	var head: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	_page.add_child(head)
-	head.add_child(Gen2LauncherUI.title(
+	var save_title: Label = Gen2LauncherUI.title(
 		_palette, "Save data", Gen2LauncherTheme.FONT_DISPLAY
-	))
-	head.add_child(Gen2LauncherUI.muted(
+	)
+	save_title.name = "SaveScreenTitle"
+	head.add_child(save_title)
+	head.add_child(Gen2LauncherUI.spacer())
+	var game_title: Label = Gen2LauncherUI.muted(
 		_palette, _data.title() if _data != null else "No cartridge selected"
-	))
+	)
+	game_title.name = "SaveScreenGameTitle"
+	game_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	game_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	head.add_child(game_title)
 
-	_slots_section = Gen2LauncherUI.caption(_palette, "Slots")
-	_page.add_child(_slots_section)
 	_slots_container = HFlowContainer.new()
 	_slots_container.add_theme_constant_override("h_separation", Gen2LauncherUI.GAP_MD)
 	_slots_container.add_theme_constant_override("v_separation", Gen2LauncherUI.GAP_MD)
@@ -215,7 +218,6 @@ func _build_ui() -> void:
 	_details_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details.add_child(_details_box)
 
-	_page.add_child(_build_status())
 	_shell.add_page(&"saves", "Saves", &"save", _page)
 
 	_file_dialog = _picker(
@@ -236,30 +238,6 @@ func _build_ui() -> void:
 		PackedStringArray(["*.json; pokerecomp save"]),
 	)
 	_slot_import_dialog.file_selected.connect(_import_slot_file)
-
-	_set_status(
-		&"info",
-		"Select a save slot.",
-		"Create a new game, continue a validated save, or import an original cartridge save.",
-	)
-
-
-func _build_status() -> Gen2LauncherCard:
-	var panel: Gen2LauncherCard = Gen2LauncherCard.well(_palette, Gen2LauncherTheme.RADIUS_MD, 16)
-	var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
-	panel.add_child(line)
-	_status_icon = Gen2LauncherIcon.create(&"about", 20.0, _palette.muted)
-	_status_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(_status_icon)
-	var text: VBoxContainer = Gen2LauncherUI.column(1)
-	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.add_child(text)
-	_status_label = Gen2LauncherUI.body(_palette, "")
-	text.add_child(_status_label)
-	_status_detail = Gen2LauncherUI.muted(_palette, "")
-	text.add_child(_status_detail)
-	return panel
-
 
 func _picker(title: String, mode: FileDialog.FileMode, filters: PackedStringArray) -> FileDialog:
 	var dialog := FileDialog.new()
@@ -294,7 +272,6 @@ func _refresh() -> void:
 
 func _refresh_slot_cards() -> void:
 	Gen2LauncherUI.clear(_slots_container)
-	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 
 	for row: Dictionary in _slots:
@@ -344,7 +321,6 @@ func _slot_card(row: Dictionary) -> Control:
 func _refresh_details() -> void:
 	if _details_box == null:
 		return
-	_slots_section.visible = not _new_game_visible
 	_slots_container.visible = not _new_game_visible
 	Gen2LauncherUI.clear(_details_box)
 	# The pane's own controls go with it. A detached child is deleted at the end
@@ -710,19 +686,9 @@ func _status_name(status: int) -> String:
 
 
 func _set_status(kind: StringName, title: String, detail: String) -> void:
-	if _status_label == null:
-		return
-	_status_label.text = title
-	_status_detail.text = detail
-	var colour: Color = _palette.text
-	var glyph: StringName = &"about"
-	match kind:
-		&"success":
-			colour = _palette.success
-			glyph = &"check"
-		&"error":
-			colour = _palette.error
-			glyph = &"warning"
-			Gen2LauncherAudio.play(&"error")
-	_status_label.add_theme_color_override("font_color", colour)
-	_status_icon.set_glyph(glyph, 18.0, colour)
+	_status_title = title
+	_status_detail = detail
+	if kind == &"error":
+		Gen2LauncherAudio.play(&"error")
+	if _shell != null:
+		_shell.toast().show_message(kind, title, detail)

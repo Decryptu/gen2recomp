@@ -54,6 +54,74 @@ func test_switching_pages_hands_the_ring_to_the_new_one() -> void:
 	assert_true(focused.is_visible_in_tree(), "focus never lands on a hidden page")
 
 
+func test_down_from_the_cartridge_reaches_the_floating_dock() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var stage: Gen2CartridgeStage = _focus_owner() as Gen2CartridgeStage
+	assert_not_null(stage)
+	var guard: Gen2FocusGuard = _launcher.find_child("FocusGuard", true, false)
+	assert_true(guard.move_focus(Vector2.DOWN))
+	var focused: Control = _focus_owner()
+	assert_not_null(focused)
+	assert_true(focused is Gen2LauncherButton)
+	assert_ne(focused, stage)
+
+
+func test_left_and_right_stay_inside_the_floating_dock() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var shell: Gen2LauncherShell = _launcher.get("_shell")
+	var buttons: Dictionary = shell.get("_buttons")
+	var mods: Gen2LauncherButton = buttons[&"mods"]
+	mods.grab_focus()
+	var right := InputEventAction.new()
+	right.action = &"ui_right"
+	right.pressed = true
+	shell._on_dock_input(right, &"mods")
+	assert_same(_focus_owner(), buttons[&"settings"], "right stays on the dock")
+	var left := InputEventAction.new()
+	left.action = &"ui_left"
+	left.pressed = true
+	shell._on_dock_input(left, &"settings")
+	assert_same(_focus_owner(), mods, "left stays on the dock")
+
+
+func test_up_from_the_dock_returns_to_the_current_page() -> void:
+	_use(InputEventJoypadButton.new())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var shell: Gen2LauncherShell = _launcher.get("_shell")
+	var buttons: Dictionary = shell.get("_buttons")
+	(buttons[&"mods"] as Control).grab_focus()
+	var up := InputEventAction.new()
+	up.action = &"ui_up"
+	up.pressed = true
+	shell._on_dock_input(up, &"mods")
+	assert_true(_focus_owner() is Gen2CartridgeStage)
+
+
+func test_mod_page_builds_a_visible_logical_focus_route() -> void:
+	_use(InputEventJoypadButton.new())
+	_launcher.select_page(&"mods")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var check: Control = _focus_owner()
+	assert_not_null(check)
+	assert_string_contains(check.tooltip_text, "Check all followed sources")
+	var right: NodePath = check.focus_neighbor_right
+	assert_false(right.is_empty(), "the page explicitly names the next control")
+	var next: Control = check.get_node(right) as Control
+	assert_eq(next.tooltip_text, "Install a mod .zip", "right follows the visible action row")
+	next.grab_focus()
+	var down: NodePath = next.focus_neighbor_bottom
+	assert_false(down.is_empty(), "down enters the page rather than losing focus")
+	var below: Control = next.get_node(down) as Control
+	assert_true(below.is_visible_in_tree())
+	assert_ne(below, check)
+
+
 ## A mouse needs no ring, and putting one up would move it away from whatever
 ## the player is pointing at.
 func test_a_mouse_is_left_alone() -> void:

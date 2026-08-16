@@ -41,6 +41,8 @@ var _http: HTTPRequest = null
 var _listings: Dictionary = {}
 var _pending: Dictionary = {}
 var _busy: bool = false
+var _check_queue: Array[String] = []
+var _check_updates_button: Gen2LauncherButton = null
 
 
 static func create(palette: Gen2LauncherTheme, host: Control = null) -> Gen2ModsPage:
@@ -68,7 +70,9 @@ func _build() -> void:
 	_list_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_views.add_child(_list_view)
 
-	var head: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
+	# Actions get their own row: three controls beside the title exceed a phone's
+	# width, while this stays compact on desktop and wraps nothing unpredictably.
+	var head: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_SM)
 	_list_view.add_child(head)
 	var text: VBoxContainer = Gen2LauncherUI.column(2)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -78,8 +82,16 @@ func _build() -> void:
 	text.add_child(_note)
 
 	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(actions)
+	_check_updates_button = Gen2LauncherButton.icon_only(
+		_theme, &"refresh_square", Gen2LauncherButton.Variant.NEUTRAL, 42.0
+	)
+	_check_updates_button.tooltip_text = "Check all followed sources for mod updates"
+	_check_updates_button.pressed.connect(check_for_updates)
+	actions.add_child(_check_updates_button)
 	var install: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Install", Gen2LauncherButton.Variant.PRIMARY, &"plus"
 	)
@@ -208,10 +220,11 @@ func _action_buttons(row: Dictionary) -> Array[Control]:
 			out.append(get_it)
 			return out
 		&"update":
-			var update: Gen2LauncherButton = Gen2LauncherButton.create(
-				_theme, "Update", Gen2LauncherButton.Variant.PRIMARY, &"download"
+			var update: Gen2LauncherButton = Gen2LauncherButton.icon_only(
+				_theme, &"download", Gen2LauncherButton.Variant.PRIMARY, 40.0
 			)
 			update.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			update.tooltip_text = "Download and install the available update for %s" % row["name"]
 			update.pressed.connect(func() -> void: download(row))
 			out.append(update)
 	var remove: Gen2LauncherButton = Gen2LauncherButton.icon_only(
@@ -324,15 +337,66 @@ func _on_followed(feed: String) -> void:
 ## [method Gen2ModIndex.receive_feed]'s, so a failure falls back to the copy on
 ## disk rather than emptying the list.
 func fetch_feed(feed: String) -> void:
+	_fetch_feed(feed)
+
+
+## Reads every followed source one at a time. This only updates cached index
+## metadata: an archive is downloaded exclusively by the separate download
+## button on a mod row after an update is shown.
+func check_for_updates() -> void:
+	if _busy or not _check_queue.is_empty():
+		return
+	for source: Dictionary in Gen2ModIndex.followed():
+		_check_queue.append(String(source["feed"]))
+	if _check_queue.is_empty():
+		_status("Follow a source before checking for updates.", _theme.muted)
+		return
+	_check_updates_button.set_disabled_state(true)
+	_status("Checking mod sources for updates...", _theme.muted)
+	_check_next_source()
+
+
+func _check_next_source() -> void:
+	if _check_queue.is_empty():
+		_check_updates_button.set_disabled_state(false)
+		refresh()
+		var count: int = available_update_count()
+		_status(
+			"%d mod update%s available. Choose its download button to install." % [
+				count, " is" if count == 1 else "s are",
+			] if count > 0 else "All installed mods are up to date.",
+			_theme.accent if count > 0 else _theme.muted,
+		)
+		return
+	var feed: String = _check_queue.pop_front()
+	_fetch_feed(feed, _check_next_source)
+
+
+func available_update_count() -> int:
+	var count: int = 0
+	for group: Dictionary in Gen2ModCatalogue.groups(
+		Gen2ModHost.instance().manifests(), Gen2ModIndex.followed(), _listings
+	):
+		for row: Dictionary in group["rows"] as Array:
+			if StringName(row.get("update", &"")) == Gen2ModIndex.UPDATE_AVAILABLE:
+				count += 1
+	return count
+
+
+func _fetch_feed(feed: String, finished: Callable = Callable()) -> void:
 	_status("Reading %s..." % feed, _theme.muted)
-	_request(feed, func(
+	var started: bool = _request(feed, func(
 		result: int, code: int, _headers: PackedStringArray, body: PackedByteArray
 	) -> void:
 		if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 			receive_feed_response(feed, false, "", "That source could not be read (HTTP %d)." % code)
-			return
-		receive_feed_response(feed, true, body.get_string_from_utf8())
+		else:
+			receive_feed_response(feed, true, body.get_string_from_utf8())
+		if finished.is_valid():
+			finished.call()
 	)
+	if not started and finished.is_valid():
+		finished.call_deferred()
 
 
 ## Takes whatever the request came back with. Public and separate from the
@@ -477,12 +541,12 @@ func _reload() -> void:
 	runtime.reload_mods()
 
 
-func _request(url: String, handler: Callable) -> void:
+func _request(url: String, handler: Callable) -> bool:
 	if not Gen2ModIndex.is_downloadable(url):
 		_status("That address is not an https URL.", _theme.error)
-		return
+		return false
 	if _http == null or _busy:
-		return
+		return false
 	for connection: Dictionary in _http.request_completed.get_connections():
 		_http.request_completed.disconnect(connection["callable"])
 	_http.request_completed.connect(func(
@@ -495,6 +559,8 @@ func _request(url: String, handler: Callable) -> void:
 	if _http.request(url) != OK:
 		_busy = false
 		_status("Could not reach %s." % url, _theme.error)
+		return false
+	return true
 
 
 func _status(message: String, colour: Color) -> void:

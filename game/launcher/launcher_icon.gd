@@ -21,6 +21,7 @@ const PATHS: Dictionary = {
 	&"plus": "plus.svg",
 	&"power": "power.svg",
 	&"refresh": "refresh.svg",
+	&"refresh_square": "refresh-square.svg",
 	&"save": "save.svg",
 	&"settings": "settings.svg",
 	&"shelf": "shelf.svg",

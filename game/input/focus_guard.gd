@@ -23,6 +23,29 @@ var preferred: Control = null
 var _root: Control = null
 
 
+func _process(_delta: float) -> void:
+	# Lists and detail panes are rebuilt after button presses. If the focused
+	# button was part of that rebuild, restore a visible target on the next frame.
+	refresh()
+	_refresh_focus_neighbors()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	var direction := Vector2.ZERO
+	if event.is_action_pressed("ui_up", true):
+		direction = Vector2.UP
+	elif event.is_action_pressed("ui_down", true):
+		direction = Vector2.DOWN
+	elif event.is_action_pressed("ui_left", true):
+		direction = Vector2.LEFT
+	elif event.is_action_pressed("ui_right", true):
+		direction = Vector2.RIGHT
+	else:
+		return
+	if move_focus(direction):
+		_root.get_viewport().set_input_as_handled()
+
+
 ## Attaches a guard to [param root] and returns it. The guard is a child of the
 ## screen it watches, so it goes away with it.
 static func attach(root: Control) -> Gen2FocusGuard:
@@ -71,6 +94,71 @@ func _on_device_changed(_kind: StringName) -> void:
 	refresh()
 
 
+## Directional fallback for layouts Godot cannot join geometrically, notably
+## the page host and the floating dock. It only receives an unhandled action,
+## so native traversal inside rows, sliders, text fields and scroll panes keeps
+## precedence.
+func move_focus(direction: Vector2) -> bool:
+	if _root == null or not _root.is_inside_tree() or direction == Vector2.ZERO:
+		return false
+	var viewport: Viewport = _root.get_viewport()
+	var current: Control = viewport.gui_get_focus_owner()
+	if current == null or not _root.is_ancestor_of(current):
+		refresh()
+		return viewport.gui_get_focus_owner() != null
+	var best: Control = _neighbor(current, direction, focusable_controls(_root))
+	if best == null:
+		return false
+	best.grab_focus()
+	return true
+
+
+## Godot's automatic search is unreliable across nested cards, scroll panes and
+## the floating dock. Explicit neighbours make the same visual layout produce
+## the same route for arrows, WASD mappings and controller d-pads.
+func _refresh_focus_neighbors() -> void:
+	if _root == null or not _root.is_inside_tree():
+		return
+	var controls: Array[Control] = focusable_controls(_root)
+	for control: Control in controls:
+		_set_neighbor(control, &"left", _neighbor(control, Vector2.LEFT, controls))
+		_set_neighbor(control, &"right", _neighbor(control, Vector2.RIGHT, controls))
+		_set_neighbor(control, &"up", _neighbor(control, Vector2.UP, controls))
+		_set_neighbor(control, &"down", _neighbor(control, Vector2.DOWN, controls))
+
+
+static func _neighbor(
+	current: Control, direction: Vector2, controls: Array[Control]
+) -> Control:
+	var origin: Vector2 = current.get_global_rect().get_center()
+	var best: Control = null
+	var best_score: float = INF
+	for candidate: Control in controls:
+		if candidate == current:
+			continue
+		var delta: Vector2 = candidate.get_global_rect().get_center() - origin
+		var forward: float = delta.dot(direction)
+		if forward <= 1.0:
+			continue
+		var sideways: float = absf(delta.cross(direction))
+		var score: float = forward + sideways * 2.5
+		if score < best_score:
+			best_score = score
+			best = candidate
+	return best
+
+
+static func _set_neighbor(control: Control, side: StringName, target: Control) -> void:
+	var path := NodePath()
+	if target != null:
+		path = control.get_path_to(target)
+	match side:
+		&"left": control.focus_neighbor_left = path
+		&"right": control.focus_neighbor_right = path
+		&"up": control.focus_neighbor_top = path
+		&"down": control.focus_neighbor_bottom = path
+
+
 ## The first control under [param root] that would accept focus, depth first in
 ## tree order, which for a screen built top to bottom is the first one a reader
 ## would point at.
@@ -86,6 +174,30 @@ static func first_focusable(root: Node) -> Control:
 		if found != null:
 			return found
 	return null
+
+
+static func focusable_controls(root: Node) -> Array[Control]:
+	var out: Array[Control] = []
+	_collect_focusable(root, out)
+	return out
+
+
+static func _collect_focusable(root: Node, out: Array[Control]) -> void:
+	for child: Node in root.get_children():
+		var control := child as Control
+		if control != null:
+			if not control.is_visible_in_tree():
+				continue
+			if control.focus_mode == Control.FOCUS_ALL and not _is_disabled(control) \
+				and not _scroll_with_controls(control):
+				out.append(control)
+		_collect_focusable(child, out)
+
+
+static func _scroll_with_controls(control: Control) -> bool:
+	if not control is ScrollContainer:
+		return false
+	return first_focusable(control) != null
 
 
 static func _is_disabled(control: Control) -> bool:

@@ -97,6 +97,17 @@ func test_save_screen_shows_no_slots_before_any_save_exists() -> void:
 	var snapshot: Dictionary = _screen.save_screen_snapshot()
 	assert_eq(snapshot["selected_slot"], -1)
 	assert_eq((snapshot["slots"] as Array).size(), 0)
+	assert_eq(snapshot["status"], "", "the old bottom slot prompt is gone")
+	for node: Node in _screen.find_children("*", "Label", true, false):
+		assert_ne((node as Label).text, "Select a save slot.")
+		assert_ne((node as Label).text, "SLOTS", "the slots heading is fully removed")
+	var save_title: Label = _screen.find_child("SaveScreenTitle", true, false)
+	var game_title: Label = _screen.find_child("SaveScreenGameTitle", true, false)
+	assert_not_null(save_title)
+	assert_not_null(game_title)
+	assert_same(save_title.get_parent(), game_title.get_parent(),
+		"game name shares the Save data heading row")
+	assert_eq(game_title.horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT)
 
 
 func test_save_screen_distinguishes_an_occupied_slot() -> void:
