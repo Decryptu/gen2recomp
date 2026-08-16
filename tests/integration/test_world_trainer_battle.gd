@@ -313,7 +313,10 @@ func test_production_world_entry_and_facing_object_story_persist_separate_flags(
 	_world_screen._advance_script_input()
 	assert_true(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_true(_world_screen._world.state.hall_of_fame())
-	assert_eq(_world_screen.world_snapshot()["visible_objects"], 0)
+	## Still on screen: `ReadObjectEvents` tested the flag when the map loaded
+	## and nothing re-tests it while the map is up, so the `setevent` this script
+	## just ran hides the object on the next load, which is `restored` below.
+	assert_eq(_world_screen.world_snapshot()["visible_objects"], 1)
 
 	var snapshot: Gen2WorldSnapshot = _world_screen.world_save_snapshot()
 	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(_data, snapshot)

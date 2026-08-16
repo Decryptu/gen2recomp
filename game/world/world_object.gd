@@ -65,6 +65,12 @@ var object_type: int = 0
 var sight_range: int = 0
 var event_script: int = 0
 var event_flag: int = 0
+## Whether [member event_flag] was set when this object table was built.
+## `ReadObjectEvents` reads the flag at map load and `wMapObjects` carries the
+## answer until the next one, so a script that writes the flag while the map is
+## up moves nothing: only `appear` and `disappear`, which edit the live struct as
+## well, do. Kept across a mid-script object reload for that reason.
+var flag_hidden: bool = false
 var trainer_data: Dictionary = {}
 var facing: int = Gen2WorldSprite.FACING_DOWN
 ## The `Facings` frame this object is drawn on, 0 to 3: two standing and two
@@ -272,6 +278,12 @@ func visible_at(hour: int, time_of_day: int) -> bool:
 
 ## A zero or negative flag is the cache's no-flag/default value. The source
 ## uses $FFFF as the explicit always-visible sentinel, imported as -1.
+##
+## Read once, when the object table is built: `ReadObjectEvents` tests the flag
+## at map load and nothing re-tests it while the map is up, which is the whole
+## reason `appear` and `disappear` exist. A `setevent` on an object's own flag
+## therefore changes nothing on screen until the map is loaded again. See
+## [member flag_hidden].
 func visible_with_state(hour: int, time_of_day: int, state: Gen2WorldState) -> bool:
 	return visible_at(hour, time_of_day) and not event_flag_active(state)
 

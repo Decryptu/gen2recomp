@@ -2273,7 +2273,12 @@ func set_object_time(hour: int, time_of_day: int) -> void:
 	object_hour = clampi(hour, 0, 23)
 	object_time_of_day = clampi(time_of_day, 0, 3)
 	for object: Gen2WorldObject in objects:
-		object.active = object.visible_with_state(object_hour, object_time_of_day, state)
+		## The flag half of the test is the one the object table was built with,
+		## not the live one: see [member Gen2WorldObject.flag_hidden]. The time
+		## half is live, because `CheckObjectTime` runs from the clock callback
+		## while the map is up.
+		object.active = object.visible_at(object_hour, object_time_of_day) \
+			and not object.flag_hidden
 		var key: String = _object_key(current_map.group, current_map.number, object.index)
 		if _object_visibility_overrides.has(key):
 			object.active = bool(_object_visibility_overrides[key])
@@ -5558,8 +5563,15 @@ func _load_objects(carry_presentation: bool = false) -> void:
 			object.cell = _object_position_overrides[key]
 		if _object_facing_overrides.has(key):
 			object.facing = int(_object_facing_overrides[key])
+		## A reload that carries presentation is a refresh under a running
+		## script, not a map load, so the flag answer is carried with it;
+		## `ReadObjectEvents` is the only thing that reads the flag, and it runs
+		## once per map load.
 		if index < previous.size():
 			object.carry_presentation_from(previous[index] as Gen2WorldObject)
+			object.flag_hidden = (previous[index] as Gen2WorldObject).flag_hidden
+		else:
+			object.flag_hidden = object.event_flag_active(state)
 		objects.append(object)
 	set_object_time(object_hour, object_time_of_day)
 
