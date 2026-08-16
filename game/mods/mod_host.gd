@@ -52,6 +52,11 @@ const RENDERER_EFFECTS_METHOD: String = "set_effects"
 ## world, already resolved to the same [Gen2WorldSprite] the map's own objects
 ## are drawn from, so a renderer draws them with its objects or ignores them.
 const RENDERER_ACTORS_METHOD: String = "set_actors"
+## Optional, world renderers only. Called with the screen's [Gen2WorldEncounters]
+## when the renderer is built. The population itself is drawn through
+## [constant RENDERER_ACTORS_METHOD]; what is only here is the shiny pulse, which
+## is battle-animation OAM over the map and which a renderer may ignore.
+const RENDERER_ENCOUNTERS_METHOD: String = "set_encounters"
 ## Optional, battle renderers only. Called with a [Gen2BattleWorldContext] once
 ## per battle, before the first [code]set_view[/code], saying where the fight is
 ## happening: a renderer staging it on the map needs that and one drawing the
@@ -158,6 +163,9 @@ var _world_renderers: Dictionary = {}
 ## loaded, the way its entry object is: an actor carries the mod's own state
 ## between frames. See [method register_world_actor].
 var _world_actors: Dictionary = {}
+## Mod id to the visible-encounter provider it registered, held the way an actor
+## is. See [method register_visible_encounters].
+var _visible_encounters: Dictionary = {}
 var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
 var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
@@ -265,6 +273,48 @@ func world_actor_ids() -> Array:
 ## on one row are drawn in.
 func world_actors() -> Array:
 	return _world_actors.values()
+
+
+## Registers a VISIBLE ENCOUNTER provider under [param id]: a bounded population
+## of wild Pokemon standing on the map, met by walking into one, instead of the
+## roll a step takes.
+##
+## [param provider] is an object and not a script, for the reason an actor is:
+## the host drives the one it is handed. It must be a [RefCounted] and never a
+## [Node], and must answer the four methods in
+## [constant Gen2WorldEncounters.PROVIDER_METHODS].
+##
+## The provider owns its population and nothing else. Which cells are eligible,
+## which table is active, whether an entry is inside both, what a shiny is and
+## what meeting one starts are all the host's, and while at least one provider is
+## registered the ordinary post-step roll is off. See [Gen2WorldEncounters].
+func register_visible_encounters(id: StringName, provider: Object) -> Dictionary:
+	if String(id).is_empty() or provider == null:
+		return {"ok": false, "reason": &"invalid_provider"}
+	if provider is Node:
+		return {"ok": false, "reason": &"provider_is_a_node", "detail": String(id)}
+	var missing: Array[String] = []
+	for method: String in Gen2WorldEncounters.PROVIDER_METHODS:
+		if not provider.has_method(method):
+			missing.append(method)
+	if not missing.is_empty():
+		return {
+			"ok": false, "reason": &"provider_missing_methods",
+			"detail": "%s: %s" % [id, ", ".join(missing)],
+		}
+	if _visible_encounters.has(id):
+		return {"ok": false, "reason": &"duplicate_provider", "detail": String(id)}
+	_visible_encounters[id] = provider
+	return {"ok": true, "id": id}
+
+
+func visible_encounter_ids() -> Array:
+	return _visible_encounters.keys()
+
+
+## Every registered provider, in registration order.
+func visible_encounter_providers() -> Array:
+	return _visible_encounters.values()
 
 
 ## Registers a battle renderer under [param id]. See

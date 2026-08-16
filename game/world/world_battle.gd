@@ -39,8 +39,12 @@ static func prepare(
 				return _failure(&"invalid_wild_species", {"species": species})
 			if level < 1 or level > Gen2Experience.MAX_LEVEL:
 				return _failure(&"invalid_wild_level", {"level": level})
+			# `LoadEnemyMon` rolls `wEnemyMonDVs` unless the caller already has
+			# them; a visible encounter chose its own before the player met it,
+			# and shininess is a fact about those four numbers alone.
 			var wild_mon: Gen2BattleMon = Gen2BattleMon.create(
-				data, species, level, data.moves_at_level(species, level)
+				data, species, level, data.moves_at_level(species, level),
+				int(values.get("dvs", Gen2BattleMon.PERFECT_DVS))
 			)
 			# LoadEnemyMon's .TreeMon branch: a headbutt encounter whose species
 			# is in CheckSleepingTreeMon's list for the current time of day

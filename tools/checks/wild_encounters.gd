@@ -11,6 +11,10 @@ var _r: RefCounted = null
 ## home/map_objects.asm's CheckIceTile. The real-cartridge counterpart to the
 ## gate cases in tests/unit/test_world_api.gd, which use a hand-built map.
 ##
+## The visible-encounter sweep is checked against the same rule on the same
+## corpus: `visible_encounter_cells` has to name exactly the cells the step roll
+## accepts, grouped by the method the terrain resolves to.
+##
 ## The census is the point: an encounter cell is a small minority of a map's
 ## walkable cells, and the defect this topic exists to catch was every land cell
 ## rolling. A route whose grass moves, or a collision code that stops being read
@@ -369,6 +373,12 @@ func _census() -> void:
 		)
 		world.state.set_wild_encounter_cooldown(0)
 		var counts: Dictionary = _map_counts(world)
+		var visible: Dictionary = _visible_cells_match(world)
+		if not bool(visible["ok"]):
+			_r.check(false, "map %d/%d cell %s: %s." % [
+				map.group, map.number, str(visible["cell"]), visible["reason"],
+			])
+			return
 		cells += int(counts["encounter"])
 		iced += int(counts["ice"])
 		if int(counts["encounter"]) > 0:
@@ -405,3 +415,36 @@ func _map_counts(world: Gen2WorldAPI) -> Dictionary:
 			elif Gen2WorldCollision.is_ice(world.collision_code_at(cell)):
 				ice += 1
 	return {"walkable": walkable, "encounter": encounter, "ice": ice}
+
+
+## The sweep a visible-encounter provider is handed has to be exactly the set of
+## cells the step roll accepts, cell for cell, or a mod stands a Pokemon where
+## the cartridge would never have produced one. Answered per map and grouped by
+## the method the terrain resolves to, so the two counts also have to add up.
+func _visible_cells_match(world: Gen2WorldAPI) -> Dictionary:
+	var sweep: Dictionary = world.visible_encounter_cells()
+	var listed: Dictionary = {}
+	for method: Variant in sweep:
+		for cell: Vector2 in sweep[method] as PackedVector2Array:
+			var at := Vector2i(cell)
+			var permission: int = world.collision_permission_at(at)
+			var wanted: StringName = Gen2WorldEncounter.METHOD_SURF \
+				if permission == Gen2WorldCollision.WATER_TILE \
+				else Gen2WorldEncounter.METHOD_GRASS
+			if StringName(method) != wanted or listed.has(at):
+				return {"ok": false, "cell": at, "reason": "wrong method or listed twice"}
+			listed[at] = true
+	var map: Gen2WorldMap = world.current_map
+	for y: int in map.collision_height:
+		for x: int in map.collision_width:
+			var cell := Vector2i(x, y)
+			world.player_cell = cell
+			## The sweep's one narrowing on the roll: a cell nothing can stand
+			## on. A cave's walls pass `CanEncounterWildMon`, since that branch
+			## skips the grass test, and a Pokemon cannot be put in one.
+			var permission: int = world.collision_permission_at(cell)
+			var standable: bool = permission == Gen2WorldCollision.LAND_TILE \
+				or permission == Gen2WorldCollision.WATER_TILE
+			if (world.can_encounter_wild_mon() and standable) != listed.has(cell):
+				return {"ok": false, "cell": cell, "reason": "the roll and the sweep disagree"}
+	return {"ok": true, "cells": listed.size()}

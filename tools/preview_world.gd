@@ -19,7 +19,10 @@ extends SceneTree
 ## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `mart`
 ## (`BuyMenu`, talked open from the cell in front of a shop's counter, as
 ## `crystal 1 8 ... mart 3 3`), `pokepic`
-## (`Script_pokepic`'s box over the map, holding Chikorita), the name of any
+## (`Script_pokepic`'s box over the map, holding Chikorita),
+## `visible_encounter` (a shiny of the map's own table standing on the eligible
+## cell nearest the player, with the cartridge's sparkle over it: try
+## `crystal 24 3 ... visible_encounter 4 9`), the name of any
 ## `preview_*` driver on the world screen without that prefix (`field_move` is
 ## `PartyMenu` with a taught CUT on it, `start_menu`, `capture`, `move_forget`
 ## and the rest; a `*_use` name is driven twice, since each call is one step of

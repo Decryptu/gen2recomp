@@ -12,6 +12,8 @@ var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
 var _actors: Gen2WorldActors = null
+var _encounters: Gen2WorldEncounters = null
+var _anim_textures: Dictionary = {}
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _atlas: ImageTexture = null
 ## Kept beside the texture so an animation frame can repaint the one or two
@@ -47,6 +49,15 @@ func set_effects(effects: Gen2WorldEffects) -> void:
 ## nothing else, so a renderer may be handed null and draw none of them.
 func set_actors(actors: Gen2WorldActors) -> void:
 	_actors = actors
+	queue_redraw()
+
+
+## Gen2ModHost.RENDERER_ENCOUNTERS_METHOD: the host's visible-encounter layer.
+## Its population is drawn through [method set_actors] with everything else; what
+## is read here is the shiny pulse alone, which is the cartridge's own battle
+## animation objects over the map and has no other layer to ride.
+func set_encounters(encounters: Gen2WorldEncounters) -> void:
+	_encounters = encounters
 	queue_redraw()
 
 
@@ -243,6 +254,7 @@ func _draw() -> void:
 			sprite,
 			Vector2((sprite["cell"] as Vector2i) * Gen2WorldAPI.CELL_PIXELS) - camera_pixels,
 		)
+	_draw_encounter_pulse(camera_pixels)
 
 
 func _actor_texture(
@@ -251,19 +263,24 @@ func _actor_texture(
 	facing: int,
 	frame: int,
 	big_shape: int = Gen2WorldSprite.BIG_SHAPE_NONE,
+	color_override: PackedColorArray = PackedColorArray(),
 ) -> Texture2D:
 	if sprite == null or _world == null or _world.data == null:
 		return null
 	var palette: int = palette_override if palette_override != 0 else sprite.default_palette
-	var key: String = "%d:%d:%d:%d:%d:%d:%d" % [
+	var key: String = "%d:%d:%d:%d:%d:%d:%d:%d" % [
 		sprite.sprite_type, sprite.number, palette, facing, frame, big_shape, _time_of_day,
+		hash(color_override),
 	]
 	if _actor_textures.has(key):
 		return _actor_textures[key]
 	var indices: PackedByteArray = _world.data.overworld_icon_indices(sprite.icon_number) \
 		if sprite.sprite_type == Gen2WorldSprite.TYPE_MON_ICON \
 		else _world.data.overworld_sprite_indices(sprite.number)
-	var colors: PackedColorArray = _world.data.overworld_sprite_palette(palette, _time_of_day)
+	## A visible encounter names the species' own four colours; everything else
+	## wears one of the map's sprite palettes.
+	var colors: PackedColorArray = color_override if not color_override.is_empty() \
+		else _world.data.overworld_sprite_palette(palette, _time_of_day)
 	var image: Image = Gen2WorldSprite.big_image_for(sprite, indices, colors, big_shape) \
 		if big_shape != Gen2WorldSprite.BIG_SHAPE_NONE \
 		else Gen2WorldSprite.image_for(sprite, indices, colors, facing, frame)
@@ -282,7 +299,8 @@ func _draw_actor(
 	var position: Vector2 = sprite["position_cells"]
 	var pixel: Vector2 = position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
 	var texture: Texture2D = _actor_texture(
-		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"])
+		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"]),
+		Gen2WorldSprite.BIG_SHAPE_NONE, sprite.get("colors", PackedColorArray())
 	)
 	if texture == null:
 		return
@@ -402,6 +420,91 @@ func _draw_fishing_rod(pixel: Vector2) -> void:
 		sheet, int(tile["tile"]), Gen2WorldEffects.PAL_OW_EMOTE, bool(tile["flip_x"]),
 		pixel + Vector2(tile["offset"] as Vector2i),
 	)
+
+
+## The enemy battler's own box on the battle screen, in pixels: `wShadowOAM` from
+## an animation aimed at it is written around this, so translating its centre
+## onto a walk cell's is what puts the sparkle over the Pokemon out here.
+const BATTLER_CENTRE := Vector2(
+	(Gen2BattleScreenMap.ENEMY_AT.x + 0.5 * Gen2BattleScreenMap.ENEMY_SIDE) * Gen2Tiles.TILE_WIDTH,
+	(Gen2BattleScreenMap.ENEMY_AT.y + 0.5 * Gen2BattleScreenMap.ENEMY_SIDE) * Gen2Tiles.TILE_HEIGHT
+)
+
+
+## The shiny pulse: the cartridge's own `ANIM_SEND_OUT_MON` objects, drawn where
+## the Pokemon stands instead of where a battler would. The field and background
+## layer the animation shares the screen with in a battle is simply not run, so
+## what lands here is the sparkle and nothing behind it.
+func _draw_encounter_pulse(camera_pixels: Vector2) -> void:
+	if _encounters == null or _world == null or _world.data == null:
+		return
+	var anchor: Variant = _encounters.pulse_anchor()
+	if not anchor is Vector2:
+		return
+	var origin: Vector2 = (anchor as Vector2) - camera_pixels \
+		+ Vector2(Gen2WorldAPI.CELL_PIXELS, Gen2WorldAPI.CELL_PIXELS) * 0.5 - BATTLER_CENTRE
+	var window: Array = _encounters.pulse_tiles()
+	var pair: Array = _encounters.pulse_battler_pair()
+	for entry: Variant in _encounters.pulse_sprites():
+		if entry is Dictionary:
+			_draw_pulse_sprite(entry as Dictionary, window, pair, origin)
+
+
+func _draw_pulse_sprite(
+	sprite: Dictionary, window: Array, pair: Array, origin: Vector2
+) -> void:
+	var at: int = int(sprite.get("tile", 0)) - Gen2BattleAnimObject.BASE_TILE
+	if at < 0 or at >= window.size() or not window[at] is Dictionary:
+		return
+	var slot: Dictionary = window[at]
+	# `anim_battlergfx_*` moves a battler as objects and has no picture out here.
+	if not slot.has("gfx"):
+		return
+	var attributes: int = int(sprite.get("attributes", 0))
+	var texture: Texture2D = _pulse_texture(
+		int(slot["gfx"]), int(slot["tile"]), attributes, pair
+	)
+	if texture == null:
+		return
+	draw_texture(texture, origin + Vector2(
+		float(int(sprite.get("x", 0)) - 8), float(int(sprite.get("y", 0)) - 16)
+	))
+
+
+func _pulse_texture(
+	gfx: int, tile: int, attributes: int, pair: Array
+) -> Texture2D:
+	var key: String = "%d:%d:%d:%s" % [
+		gfx, tile, attributes & (Gen2BattleAnimObject.OAM_SHARED_FLAGS
+			| Gen2BattleAnimObject.OAM_PALETTE), str(pair),
+	]
+	if _anim_textures.has(key):
+		return _anim_textures[key]
+	var strip: PackedByteArray = _world.data.battle_anim_gfx_indices(gfx)
+	@warning_ignore("integer_division")
+	var width: int = strip.size() / Gen2Tiles.TILE_HEIGHT
+	if width <= 0 or (tile + 1) * Gen2Tiles.TILE_WIDTH > width:
+		return null
+	var pixels := PackedByteArray()
+	pixels.resize(Gen2Tiles.TILE_PIXELS)
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		var from: int = row * width + tile * Gen2Tiles.TILE_WIDTH
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			pixels[row * Gen2Tiles.TILE_WIDTH + column] = strip[from + column]
+	var image: Image = Gen2PicImage.from_indices(
+		pixels, Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT,
+		_world.data.battle_object_palette(
+			attributes & Gen2BattleAnimObject.OAM_PALETTE, pair
+		),
+		true
+	)
+	if (attributes & Gen2BattleAnimObject.OAM_XFLIP) != 0:
+		image.flip_x()
+	if (attributes & Gen2BattleAnimObject.OAM_YFLIP) != 0:
+		image.flip_y()
+	var texture: Texture2D = ImageTexture.create_from_image(image)
+	_anim_textures[key] = texture
+	return texture
 
 
 func _effect_sprites() -> Array:

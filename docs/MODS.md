@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Must equal `Gen2ModManifest.API_VERSION` |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -643,6 +643,76 @@ one cell below an NPC is drawn over it.
 A registered world renderer that wants to draw them takes them through the
 optional `set_actors(actors: Gen2WorldActors)`, which is handed the same
 resolved list the built-in view draws.
+
+## Visible wild encounters
+
+A mod that wants wild Pokemon standing on the map instead of a roll on every
+step registers a **provider** (`api_version` 2). It owns the population and
+nothing else; every rule a cartridge owns stays in `Gen2WorldAPI`.
+
+```gdscript
+func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
+    host.register_visible_encounters(manifest.id, Roamers.new())
+```
+
+A `RefCounted` and never a `Node`, with four methods refused by name at
+registration:
+
+| Method | Called when |
+|---|---|
+| `set_context(context: Dictionary)` | The map changed, and again whenever the player's pose moves |
+| `advance_frame()` | Once per hardware frame |
+| `encounters() -> Array` | The population now. A read, asked once a frame |
+| `battle_finished(id: StringName, result: Dictionary)` | A battle this provider's entry started ended |
+
+The context is a snapshot, never a live handle:
+
+| Key | Meaning |
+|---|---|
+| `map` | `Vector2i(group, number)` |
+| `eligible` | `{grass, surf}` to `PackedVector2Array` of cells a wild may stand on. `CanEncounterWildMon` per cell: the grass test, the cave and dungeon branch that skips it, and the ice refusal |
+| `tables` | `{grass, surf}` to `{source, slots}`, the table a roll would read right now, with the swarm's and the Bug Contest's substitutions already made and the time of day already picked. A slot is `{species, min_level, max_level}` |
+| `player` | `{cell, facing}` |
+| `run_seed` | The run's own seed, so a population is reproducible |
+| `generation` | Bumped on every map change: a context with an older one is stale |
+
+Each entry of `encounters()`:
+
+| Key | Meaning |
+|---|---|
+| `id` | Stable across frames. It is what a battle result is reported back under |
+| `cell` | Must be in `eligible`; which method it is in decides which table it is checked against |
+| `facing` | `Gen2WorldSprite.FACING_*` |
+| `species`, `level` | Must be offered by that table |
+| `dvs` | The packed DV word, carried into the battle unchanged |
+| `pulse` | Optional. Ask for the shiny sparkle over this entry |
+
+Anything else is dropped rather than drawn, including an entry that names
+`shiny`: shininess is `CheckShininess` over the DVs and is the host's answer.
+At most `Gen2WorldEncounters.MAX_ENTRIES` entries are drawn in a frame.
+
+What the host does with a valid population:
+
+- Draws it through the actor layer, with the SPECIES' own four colours, shiny or
+  not, so a renderer reading `set_actors` gets it for free.
+- Turns the ordinary post-step roll off while any provider is registered.
+  Scripted, fishing, Headbutt, Rock Smash, Sweet Scent and Bug Contest
+  encounters keep their own paths.
+- Starts the normal wild battle when the player steps onto an entry, with that
+  entry's exact species, level and DVs, then calls `battle_finished`. Whether
+  the entry survives that is the provider's one rule to document.
+- Discards the population, its sprites and any running pulse on a map change,
+  before the new map is drawn.
+- Plays `ANIM_SEND_OUT_MON` with the shiny param over a pulsing shiny entry,
+  anchored to it and with no battle field behind it, sound included. The host
+  deduplicates: a request inside `Gen2WorldEncounters.PULSE_FRAMES` of the last
+  one is dropped, so a provider may ask on spawn and every ten seconds without
+  touching a node or the audio service. A pulse on an ordinary Pokemon draws
+  nothing.
+
+A world renderer that wants to draw the sparkle itself takes the optional
+`set_encounters(encounters: Gen2WorldEncounters)`; the population itself already
+arrives through `set_actors`.
 
 ## Measured against the voxel mod
 

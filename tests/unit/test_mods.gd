@@ -85,6 +85,15 @@ func test_a_manifest_built_for_another_host_is_refused() -> void:
 	_write_manifest(source)
 	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"unsupported_api_version")
 
+	## An OLDER contract still runs: every bump so far has only added to it, and
+	## refusing one would break every mod already installed.
+	source["api_version"] = Gen2ModManifest.MIN_API_VERSION
+	_write_manifest(source)
+	assert_true(bool(Gen2ModManifest.read(_directory).get("ok", false)))
+	source["api_version"] = Gen2ModManifest.MIN_API_VERSION - 1
+	_write_manifest(source)
+	assert_eq(Gen2ModManifest.read(_directory)["reason"], &"unsupported_api_version")
+
 
 func test_manifest_versions_and_dependency_ranges_are_validated_before_code_runs() -> void:
 	var source: Dictionary = _valid_manifest()
@@ -318,6 +327,37 @@ func test_two_mods_cannot_claim_one_world_actor_id() -> void:
 	var second: Dictionary = host.register_world_actor(&"first", script.new())
 	assert_false(second["ok"])
 	assert_eq(second["reason"], &"duplicate_actor")
+
+
+## The visible-encounter seam is registered on the same rules an actor is, and
+## for the same reason: a provider is state the host drives, not a scene.
+func test_a_visible_encounter_provider_is_refused_on_the_same_three_rules() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var partial := GDScript.new()
+	# Every method but battle_finished.
+	partial.source_code = "extends RefCounted\nfunc set_context(_c) -> void:\n\tpass\nfunc advance_frame() -> void:\n\tpass\nfunc encounters() -> Array:\n\treturn []\n"
+	partial.reload()
+	var missing: Dictionary = host.register_visible_encounters(&"broken", partial.new())
+	assert_false(missing["ok"])
+	assert_eq(missing["reason"], &"provider_missing_methods")
+	assert_string_contains(String(missing["detail"]), "battle_finished")
+
+	var node := Node2D.new()
+	assert_eq(
+		host.register_visible_encounters(&"node", node)["reason"], &"provider_is_a_node"
+	)
+	node.free()
+
+	var whole := GDScript.new()
+	whole.source_code = partial.source_code + "func battle_finished(_id, _r) -> void:\n\tpass\n"
+	whole.reload()
+	assert_true(bool(host.register_visible_encounters(&"wilds", whole.new())["ok"]))
+	assert_eq(host.visible_encounter_ids(), [&"wilds"])
+	assert_eq(host.visible_encounter_providers().size(), 1)
+	assert_eq(
+		host.register_visible_encounters(&"wilds", whole.new())["reason"],
+		&"duplicate_provider"
+	)
 
 
 func test_a_battle_renderer_missing_a_contract_method_is_refused_at_registration() -> void:

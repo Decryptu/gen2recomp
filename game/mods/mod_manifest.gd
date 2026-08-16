@@ -7,12 +7,16 @@ extends RefCounted
 ## and say why something was refused without running a line of mod code.
 ##
 ## [code]api_version[/code] is [Gen2ModHost]'s contract, not the mod's own
-## version. A mod built against an older host is refused rather than allowed to
-## fail somewhere less obvious.
+## version. A mod built against a NEWER host is refused rather than allowed to
+## fail somewhere less obvious; one built against an older one still runs, since
+## every version so far has only added to the contract.
 
 const FILENAME: String = "mod.json"
 ## Bumped when the host contract changes in a way an existing mod would notice.
-const API_VERSION: int = 1
+## 2 added [method Gen2ModHost.register_visible_encounters].
+const API_VERSION: int = 2
+## The oldest contract this host still answers. See [constant API_VERSION].
+const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase
 ## alphabet. A mod cannot name itself something that escapes its own folder.
 const ID_PATTERN: String = "^[a-z0-9][a-z0-9_-]*$"
@@ -92,7 +96,7 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 			manifest.games.append(StringName(game))
 	if regex.search(String(manifest.id)) == null:
 		return _refuse(&"invalid_id", String(manifest.id))
-	if manifest.api_version != API_VERSION:
+	if manifest.api_version < MIN_API_VERSION or manifest.api_version > API_VERSION:
 		return _refuse(
 			&"unsupported_api_version",
 			"mod declares %d, host provides %d" % [manifest.api_version, API_VERSION]

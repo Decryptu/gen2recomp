@@ -122,3 +122,14 @@ func test_a_stage_never_takes_a_stat_below_one_or_above_the_cap() -> void:
 func test_a_stage_past_the_ends_is_clamped_rather_than_read_off_the_table() -> void:
 	assert_eq(Gen2Stats.apply_stage(100, 99), Gen2Stats.apply_stage(100, Gen2Stats.MAX_STAGE))
 	assert_eq(Gen2Stats.apply_stage(100, -99), Gen2Stats.apply_stage(100, Gen2Stats.MIN_STAGE))
+
+
+## `CheckShininess`: the Attack DV's own bit and three tens, and nothing else.
+func test_shininess_is_the_attack_mask_and_three_tens() -> void:
+	assert_true(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(2, 10, 10, 10)))
+	assert_true(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(15, 10, 10, 10)), "the mask, not the value")
+	assert_false(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(1, 10, 10, 10)), "attack mask clear")
+	assert_false(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(2, 11, 10, 10)))
+	assert_false(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(2, 10, 9, 10)))
+	assert_false(Gen2Stats.is_shiny(Gen2Stats.pack_dvs(2, 10, 10, 0)))
+	assert_false(Gen2Stats.is_shiny(0))

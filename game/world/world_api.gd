@@ -1667,14 +1667,92 @@ func judge_bug_contest(random: RandomNumberGenerator) -> Dictionary:
 ## which is both an encounter outside the grass and, over a walk, several times
 ## the rate the cartridge has.
 func can_encounter_wild_mon() -> bool:
+	return can_encounter_wild_mon_at(player_cell)
+
+
+## `CanEncounterWildMon` asked of a cell the player is not standing on, which is
+## what a visible encounter needs before it may put one there. The engine flag is
+## the map's, the rest is the cell's.
+func can_encounter_wild_mon_at(cell: Vector2i) -> bool:
 	if state.wild_encounters_off():
 		return false
-	var code: int = collision_code_at(player_cell)
+	var code: int = collision_code_at(cell)
 	var environment: int = current_map.environment if current_map != null else 0
 	if environment != ENVIRONMENT_CAVE and environment != ENVIRONMENT_DUNGEON \
 		and not Gen2WorldCollision.gates_encounter(code):
 		return false
 	return not Gen2WorldCollision.is_ice(code)
+
+
+## Every cell of the current map a wild could be met on, grouped by the method
+## the terrain resolves to, as [method encounter_request] resolves it: WATER_TILE
+## is `surf` and LAND_TILE is `grass`, and a cave or dungeon floor is grass
+## whether or not it is drawn as grass.
+##
+## One narrowing on [method can_encounter_wild_mon]: a cell nothing can stand on
+## is not offered. A cave's walls pass the gate, since the cave branch skips the
+## grass test, and a Pokemon cannot be put inside one.
+##
+## The map's own collision grid and nothing past it: a connection's cells belong
+## to the connected map's own tables.
+func visible_encounter_cells() -> Dictionary:
+	var out: Dictionary = {
+		Gen2WorldEncounter.METHOD_GRASS: PackedVector2Array(),
+		Gen2WorldEncounter.METHOD_SURF: PackedVector2Array(),
+	}
+	if current_map == null or state.wild_encounters_off():
+		return out
+	var size: Vector2i = map_size_cells()
+	for y: int in size.y:
+		for x: int in size.x:
+			var cell := Vector2i(x, y)
+			if not can_encounter_wild_mon_at(cell):
+				continue
+			var permission: int = collision_permission_at(cell)
+			if permission == Gen2WorldCollision.WATER_TILE:
+				out[Gen2WorldEncounter.METHOD_SURF].append(Vector2(cell))
+			elif permission == Gen2WorldCollision.LAND_TILE:
+				out[Gen2WorldEncounter.METHOD_GRASS].append(Vector2(cell))
+	return out
+
+
+## The wild table each method would resolve against right now, with the Bug
+## Contest's and the swarm's substitutions already made and the time of day
+## already picked. `slots` is the flat list of `{species, min_level, max_level}`
+## a roll would choose from, which is what a caller populating a map with visible
+## Pokemon needs and what it must not derive for itself. The two bounds are equal
+## for every table but the Bug Contest's, which rolls a level of its own.
+func active_encounter_tables() -> Dictionary:
+	var out: Dictionary = {}
+	if current_map == null or data == null:
+		return out
+	for method: StringName in [Gen2WorldEncounter.METHOD_GRASS, Gen2WorldEncounter.METHOD_SURF]:
+		var source: StringName = Gen2WorldEncounter.SOURCE_NORMAL
+		var record: Dictionary = data.world_encounter(
+			method, current_map.group, current_map.number
+		)
+		if bug_contest_active() and method == Gen2WorldEncounter.METHOD_GRASS:
+			out[method] = {
+				"source": Gen2WorldBugContest.SOURCE_CONTEST,
+				"slots": Gen2WorldBugContest.active_slots(data.bug_contest_mons()),
+			}
+			continue
+		if state.swarm_active_on(current_map.group, current_map.number):
+			var swarm_method: StringName = &"swarm_grass" \
+				if method == Gen2WorldEncounter.METHOD_GRASS else &"swarm_water"
+			var swarm_record: Dictionary = data.world_encounter(
+				swarm_method, current_map.group, current_map.number
+			)
+			if not swarm_record.is_empty():
+				record = swarm_record
+				source = Gen2WorldEncounter.SOURCE_SWARM
+		if record.is_empty():
+			continue
+		out[method] = {
+			"source": source,
+			"slots": Gen2WorldEncounter.active_slots(record, method, object_time_of_day),
+		}
+	return out
 
 
 ## Rolls an encounter from the current map. Auto mode preserves the existing

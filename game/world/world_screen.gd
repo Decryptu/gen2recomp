@@ -62,6 +62,10 @@ var _effects: Gen2WorldEffects = null
 ## The sprites registered mods put in the world, driven a frame at a time here
 ## and drawn by the renderer with the map's own objects.
 var _actors: Gen2WorldActors = null
+var _encounters: Gen2WorldEncounters = null
+## The id of the visible encounter the running battle belongs to, so its provider
+## is told how the fight ended and nothing else is.
+var _battle_encounter_id: StringName = &""
 ## The headbutt result waiting for ShakeHeadbuttTree's 32 frames to be spent.
 var _pending_headbutt_finish: Dictionary = {}
 var _text_box: Gen2TextBox = null
@@ -233,9 +237,16 @@ func _build_world() -> void:
 	_actors.set_actors(Gen2ModHost.instance().world_actors())
 	## The cut leaves ride BattleAnimSineWave, which is cartridge data rather
 	## than a table this could derive.
-	_effects.set_sine_table(Gen2BattleAnimData.from_game_data(_data))
+	var anim_data: Gen2BattleAnimData = Gen2BattleAnimData.from_game_data(_data)
+	_effects.set_sine_table(anim_data)
 	_world.set_world_clock(initial_day, initial_hour, initial_minute)
 	_world.set_object_time(initial_hour, time_of_day)
+	## After the clock, since the tables a provider is handed are the ones this
+	## time of day resolves to.
+	_encounters = Gen2WorldEncounters.new()
+	_encounters.set_providers(Gen2ModHost.instance().visible_encounter_providers())
+	_encounters.set_world(_world, anim_data)
+	_actors.set_encounters(_encounters)
 	var rods: Array[StringName] = _world.available_fishing_rods()
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
@@ -288,6 +299,8 @@ func _build_renderer() -> void:
 		_renderer.call(Gen2ModHost.RENDERER_EFFECTS_METHOD, _effects)
 	if _renderer.has_method(Gen2ModHost.RENDERER_ACTORS_METHOD):
 		_renderer.call(Gen2ModHost.RENDERER_ACTORS_METHOD, _actors)
+	if _renderer.has_method(Gen2ModHost.RENDERER_ENCOUNTERS_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_ENCOUNTERS_METHOD, _encounters)
 	_set_renderer_world()
 	_renderer.set_time_of_day(_render_time_of_day())
 	_apply_renderer_interface_style()
@@ -304,6 +317,8 @@ func _set_renderer_world() -> void:
 		_renderer.set_world(_world, _animation)
 	if _actors != null:
 		_actors.set_world(_world)
+	if _encounters != null:
+		_encounters.set_world(_world)
 
 
 ## The text box is the screen's, not the renderer's, and over a native-layer view
@@ -414,6 +429,12 @@ func advance_frame() -> void:
 		_renderer.refresh()
 	## After the player's own step, so an actor reading
 	## `player_step_offset_cells()` sees this frame rather than the last one's.
+	## Before the actors, which draw its population: a wild that moved this frame
+	## has to be in the sprite list the actor layer collects after it.
+	if _encounters != null and _encounters.advance_frame():
+		_play_encounter_sounds()
+		if _renderer != null:
+			_renderer.refresh()
 	if _actors != null and _actors.advance_frame() and _renderer != null:
 		_renderer.refresh()
 	_advance_forced_movement()
@@ -900,6 +921,15 @@ func _after_player_move(movement: Dictionary) -> bool:
 		_show_script_results(contest_over)
 		return true
 	_show_script_results([])
+	## While a provider is active the step takes no roll of its own: a wild is
+	## met by walking into one. Everything else that reaches a wild, a script, a
+	## rod, Headbutt, Rock Smash, Sweet Scent and the contest, keeps its own path.
+	if _encounters != null and _encounters.active():
+		var visible: Dictionary = _encounters.battle_request_at(_world.player_cell)
+		if not visible.is_empty():
+			_battle_encounter_id = StringName(visible["visible_encounter"])
+			_start_battle_request(visible)
+		return true
 	var encounter: Dictionary = _world.encounter_request(
 		_encounter_random, false, &"auto", _repel_lead_level(), _party_holds_cleanse_tag()
 	)
@@ -1123,6 +1153,61 @@ func preview_effect_sprites(kind: StringName = &"effects") -> void:
 		_script_prompt = "Debug effect sprite preview"
 	_renderer.refresh()
 	_refresh_labels()
+
+
+## Public screenshot driver for the visible-encounter seam, which otherwise needs
+## a mod: a shiny Pokemon of the map's own table, on the eligible cell nearest
+## the player, asking for its pulse. The provider is the synthetic one below;
+## everything else is the host's own path.
+func preview_visible_encounter() -> void:
+	if _world == null or _encounters == null or _renderer == null:
+		return
+	_encounters.set_providers([PreviewEncounters.new(_world)])
+	advance_frames(2)
+	_script_prompt = "Debug visible encounter preview"
+	_renderer.refresh()
+	_refresh_labels()
+
+
+## What a mod's provider is, in the fewest lines that exercise the contract.
+class PreviewEncounters extends RefCounted:
+	## `CheckShininess`: the attack mask and three tens.
+	const SHINY_DVS: int = (2 << 12) | (10 << 8) | (10 << 4) | 10
+
+	var _entries: Array = []
+
+	func _init(world: Gen2WorldAPI) -> void:
+		var cells: Dictionary = world.visible_encounter_cells()
+		var tables: Dictionary = world.active_encounter_tables()
+		for method: Variant in cells:
+			var slots: Array = (tables.get(method, {}) as Dictionary).get("slots", [])
+			var nearest := Vector2(-1, -1)
+			for cell: Vector2 in cells[method] as PackedVector2Array:
+				if nearest.x < 0 or cell.distance_squared_to(Vector2(world.player_cell)) \
+					< nearest.distance_squared_to(Vector2(world.player_cell)):
+					nearest = cell
+			if nearest.x < 0 or slots.is_empty():
+				continue
+			_entries.append({
+				"id": StringName("preview_%s" % method),
+				"cell": Vector2i(nearest),
+				"species": int(slots[0]["species"]),
+				"level": int(slots[0]["min_level"]),
+				"dvs": SHINY_DVS,
+				"pulse": true,
+			})
+
+	func set_context(_context: Dictionary) -> void:
+		pass
+
+	func advance_frame() -> void:
+		pass
+
+	func encounters() -> Array:
+		return _entries
+
+	func battle_finished(_id: StringName, _result: Variant) -> void:
+		pass
 
 
 ## Public screenshot driver for `Script_pokepic`'s box. The scripts that run one
@@ -1700,6 +1785,11 @@ func _on_battle_finished(result: Dictionary) -> void:
 	_battle_host = null
 	if host != null:
 		host.queue_free()
+	if not String(_battle_encounter_id).is_empty():
+		var fought: StringName = _battle_encounter_id
+		_battle_encounter_id = &""
+		if _encounters != null:
+			_encounters.battle_finished(fought, result.duplicate(true))
 	if _world == null:
 		return
 	var pay_day_money: int = int(result.get("pay_day_money", 0))
@@ -3280,6 +3370,15 @@ func _play_current_map_music() -> void:
 
 func _play_ledge_hop_sfx() -> void:
 	_play_sfx(SFX_JUMP_OVER_LEDGE)
+
+
+## `BattleAnimCmd_Sound` from a shiny pulse. The interpreter has no audio device,
+## as it has none in a battle either, so the screen spends what its commands
+## asked for. A cry is not one of them: the sparkle's script has no `anim_cry`.
+func _play_encounter_sounds() -> void:
+	for command: Dictionary in _encounters.frame_commands():
+		if StringName(command["name"]) == Gen2BattleAnimScript.SOUND:
+			_play_sfx(int((command["operands"] as Array)[1]))
 
 
 func _play_sfx(index: int) -> void:
