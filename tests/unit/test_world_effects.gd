@@ -157,3 +157,136 @@ func _sine_bytes() -> PackedByteArray:
 	for value: int in RomLayout.BATTLE_ANIM_SINE_WAVE:
 		out.append(value)
 	return out
+
+
+## The mod actor layer, which is the other half of this file's subject: sprites
+## the screen drives a frame at a time and the renderer draws, with no world
+## state behind them. Its own contract is Gen2WorldActors.
+const ActorFixture := preload("res://tests/integration/world_trainer_fixture.gd")
+
+
+class TestActor extends RefCounted:
+	var world: Gen2WorldAPI = null
+	var frames: int = 0
+	var reads: int = 0
+	var out: Array = []
+
+	func set_world(value: Gen2WorldAPI) -> void:
+		world = value
+
+	func advance_frame() -> void:
+		frames += 1
+
+	func sprites() -> Array:
+		reads += 1
+		return out
+
+
+func _actor_world() -> Gen2WorldAPI:
+	ActorFixture.build()
+	return Gen2WorldAPI.open(
+		GameData.open_directory(ActorFixture.directory()), 1, 1, Vector2i(4, 4)
+	)
+
+
+func test_an_actors_entry_is_resolved_to_the_sprite_the_map_objects_use() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [{
+		"icon": 1, "facing": Gen2WorldSprite.FACING_LEFT,
+		"position_cells": Vector2(4, 5.5),
+	}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_eq(actor.world, world)
+	var drawn: Array = actors.sprites()
+	assert_eq(drawn.size(), 1)
+	var sprite: Gen2WorldSprite = drawn[0]["sprite"]
+	assert_eq(sprite.sprite_type, Gen2WorldSprite.TYPE_MON_ICON)
+	assert_eq(sprite.icon_number, 1)
+	assert_true(sprite.animate_icon_frames, "an actor's icon animates, a map object's does not")
+	assert_eq(drawn[0]["facing"], Gen2WorldSprite.FACING_LEFT)
+	assert_eq(drawn[0]["position_cells"], Vector2(4, 5.5))
+	RomCache.clear(ActorFixture.directory())
+
+
+## `.Frameset_PartyMon`: two sets of eight, nine passes each.
+func test_an_icon_actor_steps_the_strips_two_frames_at_the_framesets_rate() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [{"icon": 1, "position_cells": Vector2.ZERO}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_eq(int(actors.sprites()[0]["frame"]), 0)
+	for _frame: int in Gen2WorldActors.ICON_FRAME_FRAMES:
+		actors.advance_frame()
+	assert_eq(int(actors.sprites()[0]["frame"]), 1)
+	var sprite: Gen2WorldSprite = actors.sprites()[0]["sprite"]
+	assert_eq(sprite.frame_tile_offset(Gen2WorldSprite.FACING_DOWN, 1), 4)
+	for _frame: int in Gen2WorldActors.ICON_FRAME_FRAMES:
+		actors.advance_frame()
+	assert_eq(int(actors.sprites()[0]["frame"]), 0)
+	assert_eq(actor.frames, Gen2WorldActors.ICON_FRAME_FRAMES * 2)
+	RomCache.clear(ActorFixture.directory())
+
+
+## A map object's icon is copied into both VRAM halves, so it shows one frame
+## forever; only an actor asks for the second.
+func test_a_map_objects_icon_never_reaches_the_strips_second_frame() -> void:
+	var sprite: Gen2WorldSprite = Gen2WorldSprite.from_mon_icon(1)
+	assert_eq(sprite.frame_tile_offset(Gen2WorldSprite.FACING_DOWN, 1), 0)
+	assert_eq(sprite.frame_tile_offset(Gen2WorldSprite.FACING_UP, 3), 0)
+
+
+func test_actor_sprites_are_sorted_by_row_and_read_once_a_frame() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [
+		{"icon": 1, "position_cells": Vector2(0, 6)},
+		{"icon": 2, "position_cells": Vector2(0, 2)},
+	]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	var reads: int = actor.reads
+	var drawn: Array = actors.sprites()
+	assert_eq((drawn[0]["sprite"] as Gen2WorldSprite).icon_number, 2)
+	assert_eq((drawn[1]["sprite"] as Gen2WorldSprite).icon_number, 1)
+	actors.sprites()
+	assert_eq(actor.reads, reads, "a second draw in one frame asks the mod nothing")
+	RomCache.clear(ActorFixture.directory())
+
+
+## Art the cache does not carry is dropped rather than drawn as a placeholder,
+## and an entry naming neither an icon nor a sprite is not an entry.
+func test_an_actor_naming_art_that_is_not_there_draws_nothing() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [
+		{"icon": 0, "position_cells": Vector2.ZERO},
+		{"icon": RomLayout.MON_ICON_COUNT + 1, "position_cells": Vector2.ZERO},
+		{"position_cells": Vector2.ZERO},
+		"not a sprite",
+	]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_eq(actors.sprites().size(), 0)
+	RomCache.clear(ActorFixture.directory())
+
+
+## Whether the screen has to redraw: a still actor costs nothing beyond the
+## icon's own animation.
+func test_an_actor_that_has_not_moved_reports_no_redraw() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [{"icon": 1, "position_cells": Vector2(3, 3)}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_false(actors.advance_frame())
+	actor.out = [{"icon": 1, "position_cells": Vector2(3, 3.5)}]
+	assert_true(actors.advance_frame())
+	RomCache.clear(ActorFixture.directory())

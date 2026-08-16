@@ -25,6 +25,11 @@ const FACING_RIGHT: int = 3
 ## `GetUsedSprite` copies that many twice; see [method frame_tile_offset].
 const WALKING_HALF_TILES: int = 12
 
+## Tiles in one frame of a mon icon. `LoadOverworldMonIcon` asks for eight, which
+## is the two `.Frameset_PartyMon` steps through; see [member
+## animate_icon_frames] for why only an actor gets the second.
+const MON_ICON_FRAME_TILES: int = 4
+
 ## data/sprites/player_sprites.asm's ChrisStateSprites and KrisStateSprites, the
 ## wPlayerState to sprite lookup GetPlayerSprite walks. ChrisStateSprites is
 ## identical in both pins and the numbers themselves
@@ -78,6 +83,13 @@ var tiles: int = 0
 var sprite_type: int = TYPE_STILL
 var default_palette: int = 0
 var icon_number: int = 0
+## Whether a mon icon's two 4-tile frames are both drawn. False for a map
+## object, because the cartridge does not animate one: `GetUsedSprite` copies an
+## icon's eight tiles into `vTiles0` and `vTiles1` both, so the walking rows of
+## `Facings` land on the same picture and the object shows its first frame
+## forever. A mod's world actor is not a map object and asks for the animation
+## the strip carries, which is the two frames `Gen2PartyMenuPage` steps through.
+var animate_icon_frames: bool = false
 
 
 static func from_cache(value: Dictionary) -> Gen2WorldSprite:
@@ -128,7 +140,10 @@ func is_walking() -> bool:
 ## does frame 3 of down and up: `FacingStepDown3` is `FacingStepDown1` with
 ## `OAM_XFLIP` on every tile and its two columns swapped.
 func frame_tile_offset(facing: int, frame: int) -> int:
-	if tiles <= 4 or sprite_type in [TYPE_STILL, TYPE_MON_ICON]:
+	if sprite_type == TYPE_MON_ICON:
+		return MON_ICON_FRAME_TILES if animate_icon_frames and is_walking_frame(frame) \
+			and tiles >= MON_ICON_FRAME_TILES * 2 else 0
+	if tiles <= 4 or sprite_type == TYPE_STILL:
 		return 0
 	var facing_index: int = clampi(facing, FACING_DOWN, FACING_RIGHT)
 	if facing_index == FACING_RIGHT:

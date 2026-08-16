@@ -59,6 +59,9 @@ var _world: Gen2WorldAPI = null
 var _renderer: Node = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
+## The sprites registered mods put in the world, driven a frame at a time here
+## and drawn by the renderer with the map's own objects.
+var _actors: Gen2WorldActors = null
 ## The headbutt result waiting for ShakeHeadbuttTree's 32 frames to be spent.
 var _pending_headbutt_finish: Dictionary = {}
 var _text_box: Gen2TextBox = null
@@ -227,6 +230,8 @@ func _build_world() -> void:
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
 	_effects = Gen2WorldEffects.new()
+	_actors = Gen2WorldActors.new()
+	_actors.set_actors(Gen2ModHost.instance().world_actors())
 	## The cut leaves ride BattleAnimSineWave, which is cartridge data rather
 	## than a table this could derive.
 	_effects.set_sine_table(Gen2BattleAnimData.from_game_data(_data))
@@ -282,9 +287,24 @@ func _build_renderer() -> void:
 		_on_native_size_changed(_screen.native_size())
 	if _renderer.has_method(Gen2ModHost.RENDERER_EFFECTS_METHOD):
 		_renderer.call(Gen2ModHost.RENDERER_EFFECTS_METHOD, _effects)
-	_renderer.set_world(_world, _animation)
+	if _renderer.has_method(Gen2ModHost.RENDERER_ACTORS_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_ACTORS_METHOD, _actors)
+	_set_renderer_world()
 	_renderer.set_time_of_day(_render_time_of_day())
 	_apply_renderer_interface_style()
+
+
+## The map under the player changed, or the view was created: the renderer and
+## the mod actors are both told, since an actor is handed the same
+## [Gen2WorldAPI] a renderer is and has to drop whatever it was following on the
+## map it has just left.
+func _set_renderer_world() -> void:
+	if _world == null:
+		return
+	if _renderer != null:
+		_renderer.set_world(_world, _animation)
+	if _actors != null:
+		_actors.set_world(_world)
 
 
 ## The text box is the screen's, not the renderer's, and over a native-layer view
@@ -392,6 +412,10 @@ func advance_frame() -> void:
 	if _world != null and _world.advance_player_step_frame() and _renderer != null:
 		_renderer.refresh()
 	if _world != null and _world.advance_emotes_frame() and _renderer != null:
+		_renderer.refresh()
+	## After the player's own step, so an actor reading
+	## `player_step_offset_cells()` sees this frame rather than the last one's.
+	if _actors != null and _actors.advance_frame() and _renderer != null:
 		_renderer.refresh()
 	_advance_forced_movement()
 	_advance_held_direction()
@@ -844,7 +868,7 @@ func _after_player_move(movement: Dictionary) -> bool:
 	if _renderer != null:
 		if bool(transition.get("ok", false)) and transition.get("kind", &"") != &"move":
 			_animation.configure(_world, time_of_day)
-			_renderer.set_world(_world, _animation)
+			_set_renderer_world()
 			_play_current_map_music()
 		else:
 			_renderer.refresh()
@@ -3008,7 +3032,7 @@ func _show_script_results(results: Array) -> void:
 		if map_changed:
 			_world.reload_current_map()
 			_animation.configure(_world, time_of_day)
-			_renderer.set_world(_world, _animation)
+			_set_renderer_world()
 			_renderer.set_time_of_day(_render_time_of_day())
 			_play_current_map_music()
 		else:
@@ -3024,8 +3048,8 @@ func _refresh_after_escape() -> void:
 	if _world == null:
 		return
 	_animation.configure(_world, time_of_day)
+	_set_renderer_world()
 	if _renderer != null:
-		_renderer.set_world(_world, _animation)
 		_renderer.set_time_of_day(_render_time_of_day())
 	_play_current_map_music()
 	_refresh_labels()

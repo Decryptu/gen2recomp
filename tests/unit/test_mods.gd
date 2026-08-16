@@ -249,6 +249,77 @@ func test_the_built_in_battle_renderer_is_registered_before_any_mod_loads() -> v
 	renderer.free()
 
 
+## A world actor is one sprite in the world rather than a view of it, so it is
+## an object and not a script and the host holds the one it is handed.
+func test_a_discovered_mod_registers_a_world_actor_the_screen_then_drives() -> void:
+	var directory: String = "%s/follower" % ROOT
+	DirAccess.make_dir_recursive_absolute(directory)
+	var manifest: Dictionary = _valid_manifest()
+	manifest["id"] = "follower"
+	_write("%s/mod.json" % directory, JSON.stringify(manifest))
+	_write("%s/actor.gd" % directory, """extends RefCounted
+
+var _world = null
+
+func set_world(world) -> void:
+	_world = world
+
+func advance_frame() -> void:
+	pass
+
+func sprites() -> Array:
+	return [{"icon": 1, "position_cells": Vector2(2, 3)}]
+""")
+	_write("%s/mod.gd" % directory, """extends RefCounted
+
+func register(host, manifest) -> void:
+	host.register_world_actor(manifest.id, load("%s/actor.gd").new())
+""" % directory)
+
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(host.discover(ROOT).size(), 1)
+	assert_eq(host.load_discovered(), [&"follower"])
+	assert_eq(host.world_actor_ids(), [&"follower"])
+	var actors: Array = host.world_actors()
+	assert_eq(actors.size(), 1)
+	assert_eq((actors[0].call("sprites")[0] as Dictionary)["icon"], 1)
+	## The host keeps it for as long as the mod is loaded: an actor carries the
+	## mod's own state between frames.
+	assert_eq(host.world_actors()[0], actors[0])
+
+
+func test_a_world_actor_missing_a_contract_method_is_refused_at_registration() -> void:
+	var script := GDScript.new()
+	# Has set_world and sprites, but not advance_frame.
+	script.source_code = "extends RefCounted\nfunc set_world(_w) -> void:\n\tpass\nfunc sprites() -> Array:\n\treturn []\n"
+	script.reload()
+	var result: Dictionary = Gen2ModHost.instance().register_world_actor(&"broken", script.new())
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"actor_missing_methods")
+	assert_string_contains(String(result["detail"]), "advance_frame")
+
+
+## A follower is a pose, not a scene, so a node is refused rather than parented
+## somewhere it would outlive the map.
+func test_a_world_actor_that_is_a_node_is_refused() -> void:
+	var node := Node2D.new()
+	var result: Dictionary = Gen2ModHost.instance().register_world_actor(&"node", node)
+	assert_false(result["ok"])
+	assert_eq(result["reason"], &"actor_is_a_node")
+	node.free()
+
+
+func test_two_mods_cannot_claim_one_world_actor_id() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var script := GDScript.new()
+	script.source_code = "extends RefCounted\nfunc set_world(_w) -> void:\n\tpass\nfunc advance_frame() -> void:\n\tpass\nfunc sprites() -> Array:\n\treturn []\n"
+	script.reload()
+	assert_true(bool(host.register_world_actor(&"first", script.new()).get("ok", false)))
+	var second: Dictionary = host.register_world_actor(&"first", script.new())
+	assert_false(second["ok"])
+	assert_eq(second["reason"], &"duplicate_actor")
+
+
 func test_a_battle_renderer_missing_a_contract_method_is_refused_at_registration() -> void:
 	var script := GDScript.new()
 	# Has set_battle_data and refresh, but not set_view.
