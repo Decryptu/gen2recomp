@@ -640,6 +640,72 @@ func test_sram_game_time_round_trips_both_profile_layouts() -> void:
 		assert_eq(restored_time.to_dict(), save.game_time.to_dict(), String(game_id))
 
 
+## `sCrystalData` is its own SRAM section outside both save copies, so the byte
+## is neither checksummed nor mirrored into the backup: an import reads it where
+## it stands and an export writes it in place.
+func test_crystal_carries_the_players_gender_and_the_others_do_not() -> void:
+	var data: GameData = _adapter_data(RomRegistry.CRYSTAL)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.CRYSTAL, data)
+	var at: int = int(Gen2SramAdapter.LAYOUTS["crystal"]["player_gender"])
+	# The six bytes after it are the mobile profile's, and so are the seven bits
+	# beside it; both have to come back untouched.
+	raw[at] = 0xF0
+	for byte: int in 6:
+		raw[at + 1 + byte] = 0xA0 + byte
+
+	var male: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.CRYSTAL, data.sha1, 0, raw, data
+	)
+	assert_true(male["ok"], male["message"])
+	assert_eq((male["save"] as Gen2SaveData).gender, Gen2SaveData.GENDER_MALE)
+
+	raw[at] = 0xF1
+	var female: Dictionary = Gen2SramAdapter.import_bytes(
+		RomRegistry.CRYSTAL, data.sha1, 0, raw, data
+	)
+	assert_true(female["ok"], female["message"])
+	var save: Gen2SaveData = female["save"]
+	assert_eq(save.gender, Gen2SaveData.GENDER_FEMALE)
+
+	save.gender = Gen2SaveData.GENDER_MALE
+	var exported: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
+	assert_true(exported["ok"], exported["message"])
+	var output: PackedByteArray = exported["raw"]
+	assert_eq(output[at], 0xF0, "only bit 0 of wPlayerGender is ours to write")
+	for byte: int in 6:
+		assert_eq(output[at + 1 + byte], 0xA0 + byte, "the mobile profile moved")
+	assert_eq(
+		(Gen2SramAdapter.import_bytes(
+			RomRegistry.CRYSTAL, data.sha1, 0, output, data
+		)["save"] as Gen2SaveData).gender,
+		Gen2SaveData.GENDER_MALE
+	)
+
+
+func test_gold_and_silver_have_no_gender_byte_to_read_or_write() -> void:
+	for game_id: StringName in [RomRegistry.GOLD, RomRegistry.SILVER]:
+		assert_false(
+			Gen2SramAdapter.LAYOUTS[String(game_id)].has("player_gender"),
+			"%s has no sCrystalData section" % game_id
+		)
+		var data: GameData = _adapter_data(game_id)
+		var raw: PackedByteArray = _raw_cartridge(game_id, data)
+		var imported: Dictionary = Gen2SramAdapter.import_bytes(
+			game_id, data.sha1, 0, raw, data
+		)
+		assert_true(imported["ok"], imported["message"])
+		var save: Gen2SaveData = imported["save"]
+		assert_eq(save.gender, Gen2SaveData.GENDER_MALE, String(game_id))
+		# An export of a female save must not invent a byte for her.
+		save.gender = Gen2SaveData.GENDER_FEMALE
+		var exported: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
+		assert_true(exported["ok"], exported["message"])
+		assert_eq(
+			(exported["raw"] as PackedByteArray).slice(0x3E00, 0x3F00),
+			raw.slice(0x3E00, 0x3F00), String(game_id)
+		)
+
+
 func test_silver_uses_the_gold_save_layout() -> void:
 	var data: GameData = _adapter_data(RomRegistry.SILVER)
 	var raw: PackedByteArray = _raw_cartridge(RomRegistry.SILVER, data)
