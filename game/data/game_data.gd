@@ -94,6 +94,9 @@ var _overworld_sprite_palettes: Array = []
 var _party_menu_icon_palette_rows: Array = []
 var _world_menus: Dictionary = {}
 var _world_marts: Dictionary = {}
+## Built on first ask and kept, since the walk behind it is the whole script
+## corpus. See [method catalog].
+var _catalog: Gen2WorldCatalog = null
 var _world_phone: Dictionary = {}
 var _world_fruit_trees: Array = []
 var _world_spawns: Dictionary = {}
@@ -222,6 +225,14 @@ func world_map(group: int, number: int) -> Gen2WorldMap:
 
 func world_maps() -> Array:
 	return _maps().duplicate()
+
+
+## Every imported script's `bank:address` key, sorted, for a caller that has to
+## walk the whole corpus rather than follow one pointer. See [Gen2WorldCatalog].
+func world_script_keys() -> Array:
+	var out: Array = _scripts().keys()
+	out.sort()
+	return out
 
 
 ## Raw bounded script bytes indexed by the cartridge's bank and CPU address.
@@ -2215,6 +2226,28 @@ func _overlaid(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 	if _overlay == null or _overlay.is_empty() or number < 0:
 		return base
 	return _overlay.resolve(kind, number, base)
+
+
+## The catalog of gameplay sites this cartridge holds, built once and kept: the
+## walk is the whole script corpus and nothing about it changes while a cache is
+## open. See [Gen2WorldCatalog].
+func catalog() -> Gen2WorldCatalog:
+	if _catalog == null:
+		_catalog = Gen2WorldCatalog.build(self)
+	return _catalog
+
+
+## One catalog row with any patch folded in. Called by the catalog itself, which
+## holds the rows; nothing else should need it.
+func overlaid_check(id: int, base: Dictionary) -> Dictionary:
+	return _overlaid(Gen2ContentOverlay.KIND_CHECK, id, base)
+
+
+## Whether any mod content reaches this cache at all, which is the one check a
+## hot path pays before asking the overlay anything. Not the SHARED overlay: a
+## tool or a test may hand this cache one of its own.
+func has_content_overlay() -> bool:
+	return _overlay != null and not _overlay.is_empty()
 
 
 ## Replaces the mod content this cache answers with. For a tool or a test that

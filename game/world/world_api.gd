@@ -2799,6 +2799,9 @@ func events_at(cell: Vector2i = player_cell) -> Array:
 				continue
 			var event: Dictionary = raw.duplicate(true)
 			event["kind"] = StringName(source)
+			## Its place in its own list, which is the only stable name a bg
+			## event has: [Gen2WorldCatalog] addresses an item under a tile by it.
+			event["event_index"] = index
 			if source == "objects":
 				event["object_index"] = index
 			out.append(event)
@@ -3259,6 +3262,10 @@ func _item_ball_request_for_event(event: Dictionary) -> Dictionary:
 	var raw: PackedByteArray = data.world_script(bank, pointer)
 	if raw.size() < 2 or int(raw[0]) <= 0:
 		return {}
+	## The catalog addresses a ball by its map and its object index, so a mod
+	## that moved what is in it is read here rather than in the runner: these two
+	## bytes are data, not a command anything executes.
+	var patched: Dictionary = _catalogued_item(object_index, int(raw[0]), maxi(1, int(raw[1])))
 	return {
 		"kind": &"item_ball",
 		"map_group": current_map.group,
@@ -3268,9 +3275,23 @@ func _item_ball_request_for_event(event: Dictionary) -> Dictionary:
 		"script": pointer,
 		"object_index": object.index,
 		"event": event.duplicate(true),
-		"item": int(raw[0]),
-		"quantity": maxi(1, int(raw[1])),
+		"item": int(patched["item"]),
+		"quantity": int(patched["quantity"]),
 	}
+
+
+## One item site's row from [Gen2WorldCatalog], by the map event it is. Answers
+## the cartridge's own numbers when no mod has moved it.
+func _catalogued_item(event_index: int, item: int, quantity: int) -> Dictionary:
+	var fallback: Dictionary = {"item": item, "quantity": quantity}
+	if data == null or current_map == null or not data.has_content_overlay():
+		return fallback
+	var row: Dictionary = data.catalog().check(Gen2WorldCatalog.pack_event_id(
+		Gen2WorldCatalog.KIND_ITEM, current_map.group, current_map.number, event_index
+	))
+	if row.is_empty():
+		return fallback
+	return {"item": int(row["item"]), "quantity": maxi(1, int(row["quantity"]))}
 
 
 ## `.itemifset`'s own record (engine/overworld/events.asm): a BGEVENT_ITEM
@@ -3290,10 +3311,15 @@ func _hidden_item_record(event: Dictionary) -> Dictionary:
 	)
 	if raw.size() < 3 or int(raw[2]) <= 0:
 		return {"ok": false, "reason": &"invalid_hidden_item", "pointer": pointer}
+	## A hidden item is indexed after the map's objects, which is the order the
+	## catalog walked them in. Its own event flag is the site's completion and is
+	## never a patch.
+	var index: int = (current_map.events.get("objects", []) as Array).size() \
+		+ maxi(0, int(event.get("event_index", 0)))
 	return {
 		"ok": true,
 		"flag": int(raw[0]) | (int(raw[1]) << 8),
-		"item": int(raw[2]),
+		"item": int(_catalogued_item(index, int(raw[2]), 1)["item"]),
 	}
 
 

@@ -274,6 +274,53 @@ three exactly as the cartridge has them. Every runtime reader goes through
 `GameData`, so a patched row reaches the encounter roll, the treemon draw, the
 Pokedex nest search and a visible encounter's context alike.
 
+## The gameplay catalog
+
+Everything else a cartridge hands out is a SITE in a script or a map event, not a
+table: a starter, a gift, a static battle, a trade, a Game Corner prize, an item
+on the ground, a badge and a shop. `GameData.catalog()` decodes them once and
+gives each a stable id, so a mod places rewards without holding a single script
+address of its own.
+
+```gdscript
+var catalog := data.catalog()
+for row in catalog.rows(Gen2WorldCatalog.KIND_STATIC):
+	host.patch_check(manifest.id, row["id"], {"species": 25, "level": 5})
+```
+
+| Kind | A row carries | Decoded from |
+|---|---|---|
+| `KIND_STARTER` | `species`, `level`, `item` | A `givepoke` whose script also shows the same species with `pokepic`, which only Elm's three balls do |
+| `KIND_GIFT` | `species`, `level`, `item` | Any other `givepoke` or `giveegg` |
+| `KIND_PRIZE` | `species`, `level`, `price` | A give site in a script that spends `takecoins`, priced by the branch's own take |
+| `KIND_STATIC` | `species`, `level` | A `loadwildmon` with the `startbattle` that makes it one |
+| `KIND_TRADE` | `trade`, `species`, `requested_species` | A `trade` command and the record it names |
+| `KIND_ITEM` | `item`, `quantity`, `hidden` | `giveitem`, `verbosegiveitem`, an `itemball` object and a `hiddenitem` bg event |
+| `KIND_BADGE` | `badge`, `engine_flag` | A `setflag` of a badge's engine flag |
+| `KIND_SHOP` | `mart`, `dialog` | A `pokemart` command |
+
+Every row also carries `id`, `kind`, its `bank` and `address` (or its `map` and
+`event_index`), and `requires`: the events, engine flags and items the script
+tested before reaching the site. `requires` is a decoded fact about what the
+cartridge looked at, not a claim that the site is unreachable without them.
+
+For proving a placement finishes: `catalog.possible_starters()` is the three
+species Elm offers, `catalog.field_hm_items()` is the HM items whose move is a
+field move on THIS cartridge, and `catalog.is_progression(row)` is true for a
+badge or a field HM. A check the catalog did not record stays vanilla; nothing
+is guessed.
+
+`patch_check(id, fields)` changes a field of a row. It cannot replace the script:
+the site still sets its own completion flag, prints its own dialogue, takes its
+own money and runs its own battle, and only the number it hands over is the
+mod's. Two mods patching one id is refused by the overlay's own ownership rule,
+not by load order.
+
+The catalog is DERIVED, not imported, so it needs no cache-format bump and no
+re-import. It is also a decode of a corpus: `tools/checks/catalog.gd` pins both
+the census and the semantics on all three cartridges, because a decode that
+drifts into something still plausible is what a count alone cannot see.
+
 Counts: `species_count()`, `move_count()` and `trainer_count()` are the
 cartridge's own runs. Mod numbers are not part of them and are enumerated with
 `Gen2ContentOverlay.defined_numbers(kind)`.

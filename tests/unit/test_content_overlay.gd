@@ -314,3 +314,51 @@ func test_clearing_one_owner_leaves_the_cartridge_row_and_frees_the_number() -> 
 	assert_eq(Gen2ContentOverlay.shared().owner_of(Gen2ContentOverlay.KIND_BUG_CONTEST, 0), &"")
 	assert_true(bool(host.patch_bug_contest_mon(&"other", 0, {"species": 5}).get("ok", false)))
 	assert_eq(int(_data().bug_contest_mons()[0]["species"]), 5)
+
+
+## A catalog site is patched by the stable id the catalog gave it, and only the
+## fields named move. The decode itself is checked on real cartridges by
+## `tools/checks/catalog.gd`; what is here is the patch surface.
+func test_a_catalog_site_is_patched_by_its_own_id() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var id: int = Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_STATIC, 48, 0x6E00)
+	assert_true(bool(host.patch_check(MOD, id, {"species": 25}).get("ok", false)))
+	assert_eq(
+		Gen2ContentOverlay.shared().resolve(
+			Gen2ContentOverlay.KIND_CHECK, id, {"species": 109, "level": 21}
+		),
+		{"species": 25, "level": 21},
+		"the level a patch did not name is the cartridge's"
+	)
+	assert_eq(host.patch_check(MOD, -1, {"species": 1})["reason"], &"not_a_check_id")
+	assert_eq(
+		StringName(host.register_content(
+			Gen2ContentOverlay.KIND_CHECK, MOD, NEW_SPECIES, {}
+		)["reason"]),
+		&"content_kind_is_patch_only"
+	)
+
+
+## Two mods cannot both move one site, and the refusal names both.
+func test_two_mods_cannot_claim_one_catalog_site() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var id: int = Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_GIFT, 30, 0x4C62)
+	assert_true(bool(host.patch_check(MOD, id, {"species": 1}).get("ok", false)))
+	var second: Dictionary = host.patch_check(&"other", id, {"species": 2})
+	assert_false(second["ok"])
+	assert_eq(second["reason"], &"duplicate_content")
+	assert_string_contains(String(second["detail"]), String(MOD))
+
+
+## An id is the byte a site lives at, so the two spaces cannot collide and an
+## event site is not a script site.
+func test_a_catalog_id_names_a_kind_a_bank_and_an_address() -> void:
+	var script_id: int = Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_ITEM, 48, 0x6E04)
+	var event_id: int = Gen2WorldCatalog.pack_event_id(Gen2WorldCatalog.KIND_ITEM, 48, 0x6E, 4)
+	assert_ne(script_id, event_id)
+	assert_ne(
+		script_id,
+		Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_BADGE, 48, 0x6E04),
+		"the kind is part of the id"
+	)
+	assert_eq(Gen2WorldCatalog.pack_id(&"not_a_kind", 1, 1), -1)

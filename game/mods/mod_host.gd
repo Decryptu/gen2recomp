@@ -935,6 +935,27 @@ func patch_fishing_time_group(id: StringName, index: int, fields: Dictionary) ->
 	)
 
 
+## One [Gen2WorldCatalog] site, by the stable id the catalog gave it. This is how
+## a mod reaches a starter, a gift, a static battle, a trade, a Game Corner
+## prize, an item on the ground, a badge or a shop.
+##
+## Name only the field that moves: `species` and `level` for anything that hands
+## over a Pokemon, `item` and `quantity` for anything that hands over an item,
+## `price` for a prize, `mart` for a shop, `badge` for a badge. The site still
+## runs the cartridge's own script, so its completion flag, its dialogue, its
+## inventory transaction and its battle flow are untouched.
+##
+## An id no cartridge site carries changes nothing, exactly as a species patch of
+## a number this cartridge lacks does. Read the ids from
+## `GameData.catalog().rows(kind)` rather than computing one.
+func patch_check(id: StringName, check_id: int, fields: Dictionary) -> Dictionary:
+	if check_id < 0:
+		return {"ok": false, "reason": &"not_a_check_id", "detail": str(check_id)}
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_CHECK, id, check_id, fields
+	)
+
+
 ## The overlay every opened [GameData] reads through, for a launcher listing what
 ## a mod changed before the player starts.
 func content_overlay() -> Gen2ContentOverlay:

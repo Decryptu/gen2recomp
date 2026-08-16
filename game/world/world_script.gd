@@ -444,6 +444,13 @@ static func _later_command_width(opcode: int) -> int:
 static func _later_command_name(opcode: int, crystal_commands: bool) -> StringName:
 	if opcode < 0x55:
 		return &""
+	## $55 is the seam between the two tables: pokegold's `pokepic` and Crystal's
+	## own `promptbutton`, which is one byte and has no species. The base table
+	## already splits them, and answering `pokepic` here shadowed it, so every one
+	## of Crystal's promptbuttons decoded under the wrong name and
+	## `command_at` read the next command's first byte as a species.
+	if crystal_commands and opcode == PROMPTBUTTON:
+		return &""
 	if crystal_commands:
 		match opcode:
 			0x9F: return &"verbosegiveitemvar"
@@ -744,7 +751,10 @@ static func command_at(
 		var source: int = Gen2WorldScript.source_opcode(opcode, crystal_commands)
 		match source:
 			0x55:
-				command["pokemon"] = int(data[offset + 1])
+				## Crystal's own $55 is `promptbutton`, one byte and no species;
+				## only pokegold's $55 is `pokepic`. See `_later_command_name`.
+				if command["name"] == &"pokepic":
+					command["pokemon"] = int(data[offset + 1])
 			0x5C:
 				command["pokemon"] = int(data[offset + 1])
 				command["level"] = int(data[offset + 2])

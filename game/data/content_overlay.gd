@@ -36,9 +36,14 @@ const KIND_TREEMON: StringName = &"treemon"
 const KIND_BUG_CONTEST: StringName = &"bug_contest"
 const KIND_ROAMING: StringName = &"roaming"
 const KIND_FISHING_TIME: StringName = &"fishing_time"
+## One [Gen2WorldCatalog] site, numbered by its own stable id: a starter, a gift,
+## a static battle, a trade, a prize, an item, a badge or a shop. Patch-only for
+## the same reason the tables are, and a patch changes a FIELD of the site rather
+## than the script that runs it.
+const KIND_CHECK: StringName = &"check"
 const KINDS: Array[StringName] = [
 	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_ENCOUNTER, KIND_FISHING,
-	KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING, KIND_FISHING_TIME,
+	KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING, KIND_FISHING_TIME, KIND_CHECK,
 ]
 
 ## A cartridge table rather than numbered content, so [method patch]-only: a mod
@@ -46,7 +51,7 @@ const KINDS: Array[StringName] = [
 ## coordinates and do not obey [constant FIRST_MOD_NUMBER].
 const TABLE_KINDS: Array[StringName] = [
 	KIND_ENCOUNTER, KIND_FISHING, KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING,
-	KIND_FISHING_TIME,
+	KIND_FISHING_TIME, KIND_CHECK,
 ]
 
 ## [method encounter_number]'s methods in the order it encodes them. `surf` is

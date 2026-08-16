@@ -6479,3 +6479,87 @@ func _shiny_anim_data() -> Gen2BattleAnimData:
 				0xF8, 0xF8, 0x00, 0x00]),
 		},
 	}, [{"tiles": 0, "sheet": false}, {"tiles": 4, "sheet": true}])
+
+
+## The catalog over a hand-built cache: what each shape decodes to, and that a
+## patch reaches the request the SCRIPT makes rather than only the row.
+func test_a_catalogued_site_hands_over_what_a_mod_patched() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	## `loadwildmon KOFFING, 21` then `startbattle`, which is what a static IS,
+	## and a `verbosegiveitem` behind it.
+	scripts["48:6E00"] = [
+		0x5D, 109, 21,
+		0x5F,
+		0x9E, 0x2A, 1,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var overlay := Gen2ContentOverlay.new()
+	var data: GameData = GameData.open_directory(_directory)
+	data.set_content_overlay(overlay)
+	var catalog: Gen2WorldCatalog = data.catalog()
+
+	var statics: Array = catalog.rows(Gen2WorldCatalog.KIND_STATIC)
+	assert_eq(statics.size(), 1, JSON.stringify(statics))
+	assert_eq(int(statics[0]["species"]), 109)
+	assert_eq(int(statics[0]["level"]), 21)
+	## The id is the byte the command sits at, not its offset in a blob: the
+	## `loadwildmon` is the first command of the script at $6E00.
+	assert_eq(
+		int(statics[0]["id"]),
+		Gen2WorldCatalog.pack_id(Gen2WorldCatalog.KIND_STATIC, 48, 0x6E00)
+	)
+	var items: Array = catalog.rows(Gen2WorldCatalog.KIND_ITEM)
+	var given: Array = items.filter(func(row: Dictionary) -> bool:
+		return row.has("address") and int(row["address"]) == 0x6E04
+	)
+	assert_eq(given.size(), 1, "the verbosegiveitem behind the battle")
+	assert_eq(int(given[0]["item"]), 0x2A)
+
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(statics[0]["id"]), {
+		"species": 25, "level": 3,
+	})
+	overlay.patch(Gen2ContentOverlay.KIND_CHECK, &"mod", int(given[0]["id"]), {
+		"item": 1, "quantity": 4,
+	})
+
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6),
+		Gen2WorldState.new({}, {}, {Gen2WorldInventory.ITEM_OLD_ROD: 1})
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6E00,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	var request: Dictionary = waiting[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 25, "the script asked for the patch")
+	assert_eq(int(request["values"]["level"]), 3)
+
+	## The battle is answered and the give runs behind it, into its own
+	## acknowledge text, which is where the script is left waiting.
+	var after: Array = world.complete_runtime_request({
+		"ok": true, "outcome": Gen2WorldBattleAdapter.OUTCOME_WON,
+	})
+	var changed: Dictionary = {}
+	for event: Dictionary in after[0]["events"]:
+		if StringName(event.get("type", &"")) == &"item_changed":
+			changed = event
+	assert_eq(int(changed.get("item", 0)), 1, "the patched item")
+	assert_eq(int(changed.get("quantity", 0)), 4, "in the patched quantity")
+
+
+## The site still runs the cartridge's own script: only the number it hands over
+## is the mod's. An unpatched cache is the control.
+func test_an_unpatched_catalogue_hands_over_the_cartridges_own_numbers() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6E00"] = [0x5D, 109, 21, 0x5F, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 8, "y": 6, "script": 0x6E00,
+	}]
+	var waiting: Array = world.dispatch_script_events(Vector2i(8, 6))
+	var request: Dictionary = waiting[0]["event"]["request"]
+	assert_eq(int(request["values"]["pokemon"]), 109)
+	assert_eq(int(request["values"]["level"]), 21)
