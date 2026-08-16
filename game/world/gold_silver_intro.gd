@@ -318,6 +318,12 @@ func counter() -> int:
 	return _counter1
 
 
+## Whether this frame is one a setup scene's own `DelayFrames` debt is paid on;
+## see [method Gen2IntroMovie.waiting].
+func waiting() -> bool:
+	return _delay > 0
+
+
 ## `wIntroSpriteStateFlag`, which is what Jigglypuff waits on and the note stops
 ## on.
 func sprite_flag() -> bool:

@@ -258,6 +258,14 @@ var _scy: int = 0
 ## when [member _ly_active] is false, which is `hLCDCPointer` zero.
 var _ly: PackedByteArray = PackedByteArray()
 var _ly_active: bool = false
+## The same buffer as the *next* pass will have written it. `wLYOverrides` is
+## read live by `LCD` rather than DMA'd, so the screen this pass's sprites reach
+## carries the fill the pass after it makes; drawing the picture from `_ly`
+## leaves the perspective band two pixels behind everything else on it.
+## `Gen2TitleScene.line_offsets` is the same correction on the entrance.
+var _ly_shown: PackedByteArray = PackedByteArray()
+## The palette run a setup scene copies in once its decompressions are served.
+var _pending_palette: String = ""
 
 ## `wBGPals2`, eight palettes of four packed colours.
 var _palettes: PackedInt32Array = PackedInt32Array()
@@ -298,6 +306,7 @@ static func create(data: GameData, sine: Gen2BattleAnimData = null) -> Gen2Intro
 	out._data = data
 	out._sine = sine
 	out._ly.resize(SCREEN_HEIGHT_PX)
+	out._ly_shown.resize(SCREEN_HEIGHT_PX)
 	out._palettes.resize(PALETTES * PALETTE_COLORS)
 	return out
 
@@ -324,6 +333,15 @@ func counter() -> int:
 	return _counter
 
 
+## Whether this frame is one a setup scene's own `DelayFrames` debt is paid on.
+## The source spends them inside the setup scene's jumptable index and
+## `_setup_scene` has already stepped past it, so a trace lining these frames up
+## against a cartridge's own `wJumptableIndex` has to say which index each
+## belongs to (`tools/trace_opening_oam.gd`).
+func waiting() -> bool:
+	return _delay > 0
+
+
 ## `wIntroSceneTimer`, which `AnimSeq_GSTitleTrail` reads on Gold and Silver and
 ## `CrystalIntro_UnownFade` writes here.
 func timer() -> int:
@@ -340,9 +358,9 @@ func scroll() -> Vector2i:
 ## `VBlank_Cutscene` writes entry zero, which is why the first two lines share
 ## it.
 func scroll_x_at(line: int) -> int:
-	if not _ly_active or line < 0 or line >= _ly.size():
+	if not _ly_active or line < 0 or line >= _ly_shown.size():
 		return _scx
-	return _ly[maxi(line - 1, 0)]
+	return _ly_shown[maxi(line - 1, 0)]
 
 
 ## One background palette, as colours a page can draw with.
@@ -439,6 +457,9 @@ func advance_frame() -> Array[Dictionary]:
 	_frame += 1
 	if _delay > 0:
 		_delay -= 1
+		if _delay == 0 and not _pending_palette.is_empty():
+			_load_palettes(_pending_palette)
+			_pending_palette = ""
 		return drain_events()
 	_run_scene()
 	_run_sprites()
@@ -566,9 +587,15 @@ func _setup_scene() -> void:
 	_overlay = SCENE_OVERLAY.get(_scene, []) as Array
 	_scx = 0
 	_scy = 0
-	var name: String = String(SCENE_PALETTE.get(_scene, ""))
-	if not name.is_empty() and _data != null:
-		_load_palettes(name)
+	# The routine clears the palettes first and copies its own run in last, past
+	# every decompression, so the screen is that clear for the whole wait: black
+	# under `Intro_ClearBGPals` and white under `IntroScene26`'s
+	# `ClearBGPalettes`. Loading the run here instead shows the next scene forty
+	# to ninety frames before the cartridge does.
+	var cleared: int = WHITE if _scene == SCENE_CRYSTAL_UNOWNS else 0
+	for index: int in _palettes.size():
+		_palettes[index] = cleared
+	_pending_palette = String(SCENE_PALETTE.get(_scene, ""))
 	# `Intro_ClearBGPals` spends two `DelayFrame`s. `IntroScene26` is the one
 	# setup scene that calls `ClearBGPalettes` instead, whose `WaitBGMap` tail
 	# spends four. `ClearTilemap` then spends four of its own, and every sheet
@@ -649,7 +676,7 @@ func _scene_unown_hi() -> void:
 
 ## `IntroScene4`: `Intro_PerspectiveScrollBG` for $80 frames.
 func _scene_perspective_scroll() -> void:
-	_perspective_scroll()
+	_perspective_scroll(_counter != 0x80)
 	if _counter == 0x80:
 		_next_scene()
 		return
@@ -662,7 +689,7 @@ func _scene_suicune_runs_in() -> void:
 	var value: int = _counter
 	_counter = (_counter + 1) & 0xFF
 	if value < 0x40:
-		_perspective_scroll()
+		_perspective_scroll(value + 1 < 0x40)
 		return
 	if value == 0x40:
 		_emit(&"play_sfx", {"sfx": SFX_INTRO_SUICUNE_3})
@@ -871,7 +898,9 @@ func _scene_end() -> void:
 
 ## `Intro_PerspectiveScrollBG`: the trees scroll one pixel every other frame and
 ## the grass two every frame, which is what makes the ground look nearer.
-func _perspective_scroll() -> void:
+## [param again] is whether the pass after this one scrolls too, which is what
+## says how far ahead the screen this pass reaches already is.
+func _perspective_scroll(again: bool) -> void:
 	if _counter & 0x01 != 0:
 		var trees: int = (_ly[0] + 1) & 0xFF
 		for line: int in 0x5F:
@@ -880,11 +909,20 @@ func _perspective_scroll() -> void:
 	for offset: int in 0x31:
 		_ly[0x5F + offset] = grass
 	_scx = _ly[0]
+	var next_trees: int = (
+		(_ly[0] + 1) & 0xFF if again and (_counter + 1) & 0x01 != 0 else _ly[0]
+	)
+	var next_grass: int = (_ly[0x5F] + 2) & 0xFF if again else _ly[0x5F]
+	for line: int in 0x5F:
+		_ly_shown[line] = next_trees
+	for offset: int in 0x31:
+		_ly_shown[0x5F + offset] = next_grass
 
 
 func _reset_ly_overrides() -> void:
 	for line: int in _ly.size():
 		_ly[line] = 0
+		_ly_shown[line] = 0
 	_ly_active = true
 
 
