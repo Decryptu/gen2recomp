@@ -53,6 +53,7 @@ var _bar_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
 var _pokedex_palettes: Dictionary = {}
 var _pack: Dictionary = {}
+var _pc_palette: Array = []
 var _gender_screen_palette: Array = []
 var _copyright_string: Array = []
 var _copyright_palette: Array = []
@@ -129,6 +130,8 @@ static func open_directory(path: String) -> GameData:
 	data._card_palettes = manifest.get("card_palettes", {})
 	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
 	data._pack = manifest.get("pack", {})
+	var pc_palette: Variant = manifest.get("pc_palette", [])
+	data._pc_palette = pc_palette if pc_palette is Array else []
 	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
 	data._gender_screen_palette = gender_palette if gender_palette is Array else []
 	var copyright_string: Variant = manifest.get("copyright_string", [])
@@ -1643,6 +1646,17 @@ func pokedex_palette(name: String) -> PackedColorArray:
 		return PackedColorArray()
 	var colors := PackedColorArray()
 	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## `BillsPCOrangePalette`, the mon-pic box's colours while the PC's cursor
+## stands on a row holding no Pokemon. Empty for a cache without the screen.
+func pc_palette() -> PackedColorArray:
+	if _pc_palette.size() < RomLayout.PC_PALETTE_COLORS:
+		return PackedColorArray()
+	var colors := PackedColorArray()
+	for packed: Variant in _pc_palette:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
 

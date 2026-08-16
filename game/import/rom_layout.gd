@@ -684,6 +684,18 @@ const PACK_NAME_CELLS: int = PACK_NAME_COLUMNS * PACK_NAME_ROWS * PACK_POCKETS
 const PACK_PALETTES: int = 6
 const PACK_PALETTE_COLORS: int = 4
 
+## `BillsPC_InitGFX`'s two runs and `BillsPCOrangePalette`. `PCSelectLZ` is the
+## selection cursor's own eight sprite tiles and `PCMailGFX` the four the mail
+## and item markers are drawn from, stored immediately after it in every dump.
+## Crystal compresses the first with `--literal-only` and Gold and Silver do
+## not, so its run is 131 bytes there and 29 here; the decompressed sheet is
+## what the importer checks, not the run's length.
+const PC_SELECT_TILES: int = 8
+const PC_MAIL_TILES: int = 4
+## `gfx/pc/orange.pal`, which `_CGB_BillsPC` loads over the mon-pic palette
+## while the cursor stands on a row holding no Pokémon.
+const PC_PALETTE_COLORS: int = 4
+
 ## `DrawIntroPlayerPic`'s uncompressed 7x7 picture. Crystal stores Chris and
 ## Kris column-major; Gold and Silver use CAL's normal trainer picture instead.
 const INTRO_PLAYER_PIC_COLUMNS: int = 7
@@ -1793,6 +1805,15 @@ const GOLD_SILVER: Dictionary = {
 		"palettes": 0x996F,
 		"female_palettes": -1,
 	},
+	# Bill's PC. `mail_gfx` was located by assembling `gfx/pc/pc_mail.png`,
+	# `select_gfx` by decompressing backwards from it until the run reproduced
+	# `gfx/pc/pc.png` and ended where the mail sheet begins, and
+	# `orange_palette` by encoding `gfx/pc/orange.pal`. Each hits once per dump.
+	"pc": {
+		"select_gfx": 0xE3BF8,
+		"mail_gfx": 0xE3C18,
+		"orange_palette": 0x95CD,
+	},
 	# Battle animations. `BattleAnimations` was located by matching
 	# `BattleAnim_Pound` whole (d1 01 e0 01 31 d0 08 88 38 00 06 d0 01 88 38 00
 	# 10 ff), then finding the run of 278 in-bank pointers whose second entry is
@@ -2171,6 +2192,13 @@ const CRYSTAL: Dictionary = {
 		"pocket_names": 0x109E1,
 		"palettes": 0x9439,
 		"female_palettes": 0x9469,
+	},
+	# Bill's PC; see the Gold and Silver block above for how these were located.
+	# Crystal's cursor sheet is `--literal-only`, so its run is the longer one.
+	"pc": {
+		"select_gfx": 0xE3419,
+		"mail_gfx": 0xE349D,
+		"orange_palette": 0x9036,
 	},
 	# Battle animations; see the Gold and Silver block above for how these were
 	# located. All five tables sit in the same two banks in every dump and only

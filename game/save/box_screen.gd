@@ -1,20 +1,37 @@
 class_name Gen2BoxScreen
 extends Control
 
-## First PC presentation: one numbered box, its twenty fixed slots, and the
-## explicit party/box transfer boundary. Box names and cartridge SRAM layout
-## remain outside this screen until their canonical source is verified.
+## Bill's PC, on the hardware's own grid.
+##
+## [Gen2PCBoxPage] is the picture and `engine/pokemon/bills_pc.asm` is the model:
+## `wBillsPC_LoadedBox` picks the party or one box, `CopyBoxmonSpecies` builds
+## the list it walks with a CANCEL row on the end, and
+## `BillsPC_PressUp`/`Down`/`Left`/`Right` are the cursor, the scroll and the box
+## the D-pad changes.
+##
+## What the source splits between DEPOSIT, WITHDRAW and MOVE WITHOUT MAIL is one
+## screen here: A on a party row deposits and A on a box row withdraws, through
+## [Gen2SaveStorage]'s atomic transfers. The submenus behind those rows (STATS,
+## RELEASE, MOVE) are not built; nothing calls them and the storage boundary is
+## what the PC exists for.
 
 signal closed(result: Dictionary)
 
-const BACKGROUND: Color = Color("#09111f")
-const PANEL: Color = Color("#14233a")
-const BORDER: Color = Color("#2d4566")
-const TEXT: Color = Color("#f4f7fb")
-const MUTED: Color = Color("#9eacc0")
-const ACCENT: Color = Color("#f3c969")
-const SUCCESS: Color = Color("#7bd89a")
-const ERROR: Color = Color("#ef8a8a")
+## The PC is drawn in hardware pixels and the panel it is opened from is ordinary
+## UI at window resolution, so the screen carries a [Gen2Screen] of its own, the
+## way [Gen2TownMapScreen] does.
+const SCREEN_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
+
+## `PCString_ChooseaPKMN` and `.PartyPKMN`. Both are engine strings inside
+## `bills_pc.asm` that no script points at, so nothing imports them and they are
+## the host's, like the contest judging lines. "PKMN" is the two tiles `<PK>` and
+## `<MN>`, which is what [method Gen2Text.encode] makes of it; "#" is the POKé
+## ligature and has no tile in either font.
+const PROMPT_CHOOSE: String = "Choose a PKMN."
+const PARTY_NAME: String = "PARTY PKMN"
+
+## `wBillsPC_LoadedBox`: zero is the party and the boxes follow it.
+const LOADED_PARTY: int = 0
 
 var _data: GameData = null
 var _data_override: GameData = null
@@ -25,17 +42,27 @@ var _embedded: bool = false
 var _box_index: int = 0
 var _selected_box_slot: int = -1
 var _selected_party_index: int = -1
-var _box_title: Label = null
-var _party_members: VBoxContainer = null
-var _box_grid: GridContainer = null
-var _selection: Label = null
-var _status: Label = null
+## `wBillsPC_LoadedBox`, `wBillsPC_CursorPosition` and `wBillsPC_ScrollPosition`.
+var _loaded: int = LOADED_PARTY
+var _cursor: int = 0
+var _scroll: int = 0
+## The line the bottom box carries, which is `PCString_ChooseaPKMN` until a
+## transfer answers.
+var _prompt: String = PROMPT_CHOOSE
+var _page: Gen2PCBoxPage = null
+var _field: Control = null
+var _backdrop: ColorRect = null
+var _background: TextureRect = null
+var _pic: TextureRect = null
+var _cursor_sprites: Array[TextureRect] = []
 
 
 func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_STOP
 	_data = _data_override if _data_override != null else _resolve_data()
 	_save = _save_override if _save_override != null else _resolve_save()
-	_build_ui()
+	_page = Gen2PCBoxPage.from_data(_data)
+	_build()
 	_refresh()
 	# Not while embedded in the overworld: the world screen routes buttons here
 	# itself, and a focus ring appearing over the map would be the map's.
@@ -54,7 +81,9 @@ func set_context(
 	_embedded = embedded
 	_data = data
 	_save = save
-	if is_inside_tree() and _box_grid != null:
+	if is_inside_tree():
+		if _page == null:
+			_page = Gen2PCBoxPage.from_data(_data)
 		_refresh()
 
 
@@ -72,6 +101,10 @@ func box_snapshot() -> Dictionary:
 		"box": _box_index,
 		"selected_box_slot": _selected_box_slot,
 		"selected_party_index": _selected_party_index,
+		"loaded": _loaded,
+		"cursor": _cursor,
+		"scroll": _scroll,
+		"prompt": _prompt,
 		"boxes": boxes,
 	}
 
@@ -81,8 +114,11 @@ func select_box(box_index: int) -> bool:
 		return false
 	_box_index = box_index
 	_selected_box_slot = -1
-	if _box_grid != null:
-		_refresh()
+	if _loaded != LOADED_PARTY:
+		_loaded = box_index + 1
+	_cursor = 0
+	_scroll = 0
+	_refresh()
 	return true
 
 
@@ -91,8 +127,7 @@ func select_box_slot(slot: int) -> bool:
 		return false
 	_selected_box_slot = slot
 	_selected_party_index = -1
-	if _box_grid != null:
-		_refresh_selection()
+	_refresh()
 	return true
 
 
@@ -101,41 +136,97 @@ func select_party_member(index: int) -> bool:
 		return false
 	_selected_party_index = index
 	_selected_box_slot = -1
-	if _party_members != null:
-		_refresh_selection()
+	_refresh()
 	return true
 
 
 func deposit_selected_party() -> bool:
 	if _save == null or _selected_party_index < 0:
-		_set_status("Select a party member first.", ERROR)
+		_prompt = "Choose a party PKMN."
+		_refresh()
 		return false
 	var result: Dictionary = Gen2SaveStorage.deposit_party_to_box(
 		_save, _data, _selected_party_index, _box_index, -1, _persist
 	)
 	if not bool(result.get("ok", false)):
-		_set_status(String(result.get("message", result.get("reason", "Deposit refused."))), ERROR)
+		_prompt = String(result.get("message", result.get("reason", "Deposit refused.")))
+		_refresh()
 		return false
-	_set_status("Moved to Box %d slot %d." % [int(result["box"]) + 1, int(result["slot"]) + 1], SUCCESS)
+	_prompt = "Stored in BOX %d." % (int(result["box"]) + 1)
 	_selected_party_index = -1
+	_clamp_cursor()
 	_refresh()
 	return true
 
 
 func withdraw_selected_box() -> bool:
 	if _save == null or _selected_box_slot < 0:
-		_set_status("Select a stored Pokémon first.", ERROR)
+		_prompt = "Choose a stored PKMN."
+		_refresh()
 		return false
 	var result: Dictionary = Gen2SaveStorage.withdraw_box_to_party(
 		_save, _data, _box_index, _selected_box_slot, _persist
 	)
 	if not bool(result.get("ok", false)):
-		_set_status(String(result.get("message", result.get("reason", "Withdrawal refused."))), ERROR)
+		_prompt = String(result.get("message", result.get("reason", "Withdrawal refused.")))
+		_refresh()
 		return false
-	_set_status("Moved to party slot %d." % (int(result["party_index"]) + 1), SUCCESS)
+	_prompt = "Taken out of BOX %d." % (_box_index + 1)
 	_selected_box_slot = -1
+	_clamp_cursor()
 	_refresh()
 	return true
+
+
+## `_StatsScreenDPad` and its siblings: up and down walk the list, left and right
+## change the loaded box, A takes the row the cursor stands on and B leaves.
+func handle_button(button: int) -> bool:
+	match button:
+		Gen2Button.UP:
+			_press_up()
+		Gen2Button.DOWN:
+			_press_down()
+		Gen2Button.LEFT:
+			_press_left()
+		Gen2Button.RIGHT:
+			_press_right()
+		Gen2Button.A:
+			_confirm()
+		Gen2Button.B:
+			_back()
+		_:
+			return false
+	return true
+
+
+## The list `CopyBoxmonSpecies` builds: every occupied slot of the loaded list,
+## then the CANCEL row its `ld a, -1` terminator becomes.
+func rows() -> Array:
+	var out: Array = []
+	for entry: Array in _entries():
+		var mon: Gen2SaveMon = entry[1]
+		out.append({
+			"name": _display_name(mon), "index": int(entry[0]), "cancel": false,
+		})
+	out.append({"name": Gen2PCBoxPage.CANCEL, "index": -1, "cancel": true})
+	return out
+
+
+func _entries() -> Array:
+	var out: Array = []
+	if _save == null:
+		return out
+	if _loaded == LOADED_PARTY:
+		for index: int in _save.party.size():
+			out.append([index, _save.party[index]])
+		return out
+	var box: Gen2SaveBox = _save.boxes[_box_index] if _box_index < _save.boxes.size() else null
+	if box == null:
+		return out
+	for slot: int in Gen2SaveBox.CAPACITY:
+		if slot < box.slots.size() and box.slots[slot] != null:
+			out.append([slot, box.slots[slot]])
+	return out
 
 
 func _resolve_data() -> GameData:
@@ -146,167 +237,199 @@ func _resolve_save() -> Gen2SaveData:
 	return Gen2GameRuntime.selected_save_or_null() if _data != null else null
 
 
-func _build_ui() -> void:
-	var background := ColorRect.new()
-	background.color = BACKGROUND
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
-
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 42)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_right", 42)
-	margin.add_theme_constant_override("margin_bottom", 30)
-	add_child(margin)
-
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 12)
-	margin.add_child(content)
-
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 12)
-	content.add_child(header)
-	var heading := VBoxContainer.new()
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_theme_constant_override("separation", 3)
-	header.add_child(heading)
-	var title := Label.new()
-	title.text = "PC STORAGE"
-	title.add_theme_color_override("font_color", TEXT)
-	title.add_theme_font_size_override("font_size", 30)
-	heading.add_child(title)
-	var subtitle := Label.new()
-	subtitle.text = "Party and fixed twenty-slot boxes"
-	subtitle.add_theme_color_override("font_color", MUTED)
-	heading.add_child(subtitle)
-	var previous := _button("Previous box", TEXT)
-	previous.pressed.connect(_previous_box)
-	header.add_child(previous)
-	var next := _button("Next box", TEXT)
-	next.pressed.connect(_next_box)
-	header.add_child(next)
-	var back := _button("Turn off PC" if _embedded else "Back to party", TEXT)
-	back.pressed.connect(_back)
-	header.add_child(back)
-
-	_box_title = Label.new()
-	_box_title.add_theme_color_override("font_color", ACCENT)
-	_box_title.add_theme_font_size_override("font_size", 18)
-	content.add_child(_box_title)
-
-	var main := HBoxContainer.new()
-	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main.add_theme_constant_override("separation", 18)
-	content.add_child(main)
-
-	var box_panel := PanelContainer.new()
-	box_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, BORDER, 8))
-	main.add_child(box_panel)
-	var box_margin := MarginContainer.new()
-	box_margin.add_theme_constant_override("margin_left", 14)
-	box_margin.add_theme_constant_override("margin_top", 14)
-	box_margin.add_theme_constant_override("margin_right", 14)
-	box_margin.add_theme_constant_override("margin_bottom", 14)
-	box_panel.add_child(box_margin)
-	_box_grid = GridContainer.new()
-	_box_grid.columns = 4
-	_box_grid.add_theme_constant_override("h_separation", 8)
-	_box_grid.add_theme_constant_override("v_separation", 8)
-	box_margin.add_child(_box_grid)
-
-	var side := VBoxContainer.new()
-	side.custom_minimum_size.x = 300
-	side.add_theme_constant_override("separation", 10)
-	main.add_child(side)
-	var party_heading := Label.new()
-	party_heading.text = "PARTY"
-	party_heading.add_theme_color_override("font_color", TEXT)
-	party_heading.add_theme_font_size_override("font_size", 18)
-	side.add_child(party_heading)
-	_party_members = VBoxContainer.new()
-	_party_members.add_theme_constant_override("separation", 6)
-	side.add_child(_party_members)
-	var deposit := _button("Deposit selected party member", ACCENT)
-	deposit.pressed.connect(deposit_selected_party)
-	side.add_child(deposit)
-	var withdraw := _button("Withdraw selected box slot", ACCENT)
-	withdraw.pressed.connect(withdraw_selected_box)
-	side.add_child(withdraw)
-	_selection = Label.new()
-	_selection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_selection.custom_minimum_size.y = 56
-	_selection.add_theme_color_override("font_color", MUTED)
-	side.add_child(_selection)
-
-	_status = Label.new()
-	_status.add_theme_color_override("font_color", MUTED)
-	content.add_child(_status)
+func _build() -> void:
+	var screen: Gen2Screen = SCREEN_SCENE.instantiate() as Gen2Screen
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(screen)
+	_field = Control.new()
+	_field.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_field.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.display(_field)
+	## The page is drawn with colour 0 transparent so the pic shows through the
+	## cell it is composed into, which leaves the backdrop to fill it.
+	_backdrop = ColorRect.new()
+	_backdrop.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_field.add_child(_backdrop)
+	## The pic sits under the page so the listing's border stays drawn over it,
+	## the way the hardware's own window does.
+	_pic = _sprite()
+	_background = _sprite()
+	for _index: int in Gen2PCBoxPage.max_cursor_sprites():
+		_cursor_sprites.append(_sprite())
 
 
+func _sprite() -> TextureRect:
+	var node := TextureRect.new()
+	node.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_field.add_child(node)
+	return node
+
+
+## The cursor's row is the selection whether or not there is anything to draw
+## it with: a cache carrying no font still stores and withdraws.
+## Drawing only. The selection is [method _sync_selection]'s, so a caller that
+## picked a slot by hand keeps it and a cache carrying no font still draws
+## nothing without losing one.
 func _refresh() -> void:
-	if _box_grid == null:
+	var mon: Gen2SaveMon = _selected_mon()
+	if _page == null or _background == null:
 		return
-	Gen2LauncherUI.clear(_box_grid)
-	for slot: int in Gen2SaveBox.CAPACITY:
-		var button := _button(_slot_text(slot), TEXT)
-		button.custom_minimum_size = Vector2(170, 58)
-		button.pressed.connect(_select_box_slot.bind(slot))
-		_box_grid.add_child(button)
-	if _party_members != null:
-		Gen2LauncherUI.clear(_party_members)
-		for index: int in Gen2SaveData.MAX_PARTY:
-			var member := _button(_party_text(index), TEXT)
-			member.custom_minimum_size = Vector2(280, 40)
-			if _save != null and index < _save.party.size():
-				member.pressed.connect(_select_party_member.bind(index))
-			else:
-				member.disabled = true
-			_party_members.add_child(member)
-	if _box_title != null:
-		_box_title.text = "Box %d of %d" % [_box_index + 1, Gen2SaveData.BOX_COUNT]
-	_refresh_selection()
+	var visible_rows: Array = []
+	var all_rows: Array = rows()
+	for index: int in Gen2PCBoxPage.LIST_HEIGHT:
+		var at: int = _scroll + index
+		if at < all_rows.size():
+			visible_rows.append(all_rows[at])
+	var indices: PackedByteArray = _page.draw({
+		"box_name": _box_name(),
+		"rows": visible_rows,
+		"prompt": _prompt,
+		"mon": _mon_state(mon),
+	})
+	var palette: PackedColorArray = _interface_palette()
+	if _backdrop != null:
+		_backdrop.color = palette[0]
+	_background.texture = ImageTexture.create_from_image(Gen2PicImage.from_indices(
+		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, palette, true
+	))
+	_background.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_refresh_pic(mon)
+	_refresh_cursor(all_rows.size())
 
 
-func _refresh_selection() -> void:
-	if _selection == null:
+## `_CGB_BillsPC`'s background palette, PREDEFPAL_POKEDEX, which the Pokedex
+## already imports as its own interface palette.
+func _interface_palette() -> PackedColorArray:
+	var colors: PackedColorArray = _data.pokedex_palette("interface") if _data != null \
+		else PackedColorArray()
+	if colors.is_empty():
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return colors
+
+
+## Which slot the cursor stands on, kept in the two fields the transfers read so
+## that walking the list and picking a slot by hand are the same selection.
+func _sync_selection() -> void:
+	if _selected_mon() == null:
 		return
-	if _save == null:
-		_selection.text = "No validated save selected."
-		_set_status("No validated save selected.", ERROR)
+	var entries: Array = _entries()
+	var at: int = _cursor + _scroll
+	if at < 0 or at >= entries.size():
 		return
-	if _selected_party_index >= 0 and _selected_party_index < _save.party.size():
-		_selection.text = "Selected party: %s\nDeposit uses the first free slot in Box %d." % [
-			_display_name(_save.party[_selected_party_index]), _box_index + 1,
-		]
+	if _loaded == LOADED_PARTY:
+		_selected_party_index = int(entries[at][0])
+		_selected_box_slot = -1
 		return
-	if _selected_box_slot >= 0:
-		var box: Gen2SaveBox = _save.boxes[_box_index]
-		var mon: Gen2SaveMon = box.slots[_selected_box_slot] if box != null else null
-		_selection.text = "Selected Box %d slot %d: %s" % [
-			_box_index + 1, _selected_box_slot + 1,
-			_display_name(mon) if mon != null else "Empty",
-		]
+	_selected_box_slot = int(entries[at][0])
+	_selected_party_index = -1
+
+
+func _selected_mon() -> Gen2SaveMon:
+	var entries: Array = _entries()
+	var at: int = _cursor + _scroll
+	if at < 0 or at >= entries.size():
+		return null
+	return entries[at][1]
+
+
+## `PCMonInfo`'s own fields. An egg is drawn as its pic and nothing else, which
+## is where the source returns.
+func _mon_state(mon: Gen2SaveMon) -> Dictionary:
+	if mon == null or _data == null:
+		return {}
+	if mon.is_egg:
+		return {}
+	return {
+		"level": mon.level,
+		"gender": _gender_glyph(Gen2BattleMon.gender_for(_data, mon.species, mon.dvs)),
+		"species_name": String(_data.species(mon.species).get("name", "")),
+		"item": mon.item,
+		## `ItemIsMail` reads a list no importer reads, so no item is mail here
+		## and the mail marker is unreachable; see HANDOFF.md.
+		"mail": false,
+	}
+
+
+func _gender_glyph(gender: StringName) -> String:
+	if gender == Gen2BattleMon.GENDER_MALE:
+		return "♂"
+	if gender == Gen2BattleMon.GENDER_FEMALE:
+		return "♀"
+	return " "
+
+
+func _refresh_pic(mon: Gen2SaveMon) -> void:
+	if _pic == null:
 		return
-	_selection.text = "Select a party member or a stored Pokémon."
+	_pic.texture = null
+	if mon == null or _data == null:
+		return
+	var pic: Dictionary = _data.species_pic(mon.species)
+	if pic.is_empty():
+		return
+	var image: Image = Gen2PicImage.from_atlas(
+		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic,
+		_data.palette(mon.species)
+	)
+	_pic.texture = ImageTexture.create_from_image(image)
+	_pic.size = Vector2(image.get_size())
+	## `_PrepMonFrontpic` places a pic smaller than the seven-tile cell at its
+	## bottom, which is what keeps every species standing on the same line.
+	var cell: int = Gen2PCBoxPage.pic_size()
+	_pic.position = Vector2(Gen2PCBoxPage.pic_position()) + Vector2(
+		float(cell - image.get_width()) * 0.5, float(cell - image.get_height())
+	)
 
 
-func _slot_text(slot: int) -> String:
-	if _save == null or _box_index >= _save.boxes.size() or _save.boxes[_box_index] == null:
-		return "%02d\nEmpty" % (slot + 1)
-	var mon: Gen2SaveMon = _save.boxes[_box_index].slots[slot]
-	if mon == null:
-		return "%02d\nEmpty" % (slot + 1)
-	return "%02d  %s\nLv %d" % [slot + 1, _display_name(mon), mon.level]
+func _refresh_cursor(row_count: int) -> void:
+	var sprites: Array = _page.cursor_sprites(_cursor, row_count)
+	var sheet: PackedByteArray = _data.tile_indices("pc_select") if _data != null \
+		else PackedByteArray()
+	var palette: PackedColorArray = _data.party_menu_icon_palette(0) if _data != null \
+		else PackedColorArray()
+	for index: int in _cursor_sprites.size():
+		var node: TextureRect = _cursor_sprites[index]
+		node.visible = index < sprites.size() and not sheet.is_empty() \
+			and not palette.is_empty()
+		if not node.visible:
+			continue
+		var sprite: Dictionary = sprites[index]
+		node.position = Vector2(sprite["position"])
+		node.texture = ImageTexture.create_from_image(_cursor_image(
+			sheet, palette, int(sprite["tile"]),
+			bool(sprite["flip_x"]), bool(sprite["flip_y"])
+		))
 
 
-func _party_text(index: int) -> String:
-	if _save == null or index >= _save.party.size():
-		return "%d  Empty" % (index + 1)
-	var mon: Gen2SaveMon = _save.party[index]
-	return "%d  %s  Lv %d" % [index + 1, _display_name(mon), mon.level]
+## One tile of `PCSelectLZ`, flipped the way its OAM attribute asks. `B_OAM_XFLIP`
+## flips the tile where it stands rather than mirroring a square, which is why
+## each object is drawn on its own.
+func _cursor_image(
+	sheet: PackedByteArray, palette: PackedColorArray, tile: int,
+	flip_x: bool, flip_y: bool
+) -> Image:
+	var size: int = Gen2Font.TILE
+	var cell := PackedByteArray()
+	cell.resize(size * size)
+	Gen2Font.blit_slot(
+		sheet, RomLayout.PC_SELECT_TILES * size, tile, cell, size, 0, 0
+	)
+	var image: Image = Gen2PicImage.from_indices(cell, size, size, palette, true)
+	if flip_x:
+		image.flip_x()
+	if flip_y:
+		image.flip_y()
+	return image
+
+
+## `BillsPC_BoxName`, which names the party or the loaded box.
+func _box_name() -> String:
+	if _loaded == LOADED_PARTY:
+		return PARTY_NAME
+	return "BOX %d" % (_box_index + 1)
 
 
 func _mon_snapshot(box: int, slot: int, mon: Gen2SaveMon) -> Dictionary:
@@ -320,39 +443,86 @@ func _mon_snapshot(box: int, slot: int, mon: Gen2SaveMon) -> Dictionary:
 
 func _display_name(mon: Gen2SaveMon) -> String:
 	if mon == null:
-		return "Empty"
+		return ""
 	if not mon.nickname.is_empty():
 		return mon.nickname
-	return String(_data.species(mon.species).get("name", "UNKNOWN")) if _data != null else "UNKNOWN"
+	return String(_data.species(mon.species).get("name", "UNKNOWN")) if _data != null \
+		else "UNKNOWN"
 
 
-func _previous_box() -> void:
-	if _save != null:
-		_box_index = posmod(_box_index - 1, Gen2SaveData.BOX_COUNT)
-		_selected_box_slot = -1
-		_refresh()
-
-
-func _next_box() -> void:
-	if _save != null:
-		_box_index = posmod(_box_index + 1, Gen2SaveData.BOX_COUNT)
-		_selected_box_slot = -1
-		_refresh()
-
-
-func _select_box_slot(slot: int) -> void:
-	select_box_slot(slot)
-
-
-func _select_party_member(index: int) -> void:
-	select_party_member(index)
-
-
-func _set_status(message: String, colour: Color) -> void:
-	if _status == null:
+func _press_up() -> void:
+	if _cursor > 0:
+		_cursor -= 1
+	elif _scroll > 0:
+		_scroll -= 1
+	else:
 		return
-	_status.text = message
-	_status.add_theme_color_override("font_color", colour)
+	_sync_selection()
+	_refresh()
+
+
+## `BillsPC_PressDown`: the cursor stops one row short of the list's length and
+## the scroll takes over at the bottom of the five rows on screen.
+func _press_down() -> void:
+	var count: int = rows().size()
+	if _cursor + _scroll + 1 >= count:
+		return
+	if _cursor + 1 < Gen2PCBoxPage.LIST_HEIGHT:
+		_cursor += 1
+	else:
+		_scroll += 1
+	_sync_selection()
+	_refresh()
+
+
+## `BillsPC_PressLeft`/`Right`, which wrap the party and every box round.
+func _press_left() -> void:
+	_load(_loaded - 1 if _loaded > LOADED_PARTY else Gen2SaveData.BOX_COUNT)
+
+
+func _press_right() -> void:
+	_load(_loaded + 1 if _loaded < Gen2SaveData.BOX_COUNT else LOADED_PARTY)
+
+
+func _load(loaded: int) -> void:
+	_loaded = loaded
+	if _loaded != LOADED_PARTY:
+		_box_index = _loaded - 1
+	_cursor = 0
+	_scroll = 0
+	_selected_box_slot = -1
+	_selected_party_index = -1
+	_prompt = PROMPT_CHOOSE
+	_sync_selection()
+	_refresh()
+
+
+## A on the CANCEL row leaves, the way `.Cancel` does; on any other row it is the
+## transfer the loaded list implies.
+func _confirm() -> void:
+	var all_rows: Array = rows()
+	var at: int = _cursor + _scroll
+	if at < 0 or at >= all_rows.size() or bool((all_rows[at] as Dictionary)["cancel"]):
+		_back()
+		return
+	_sync_selection()
+	if _loaded == LOADED_PARTY:
+		deposit_selected_party()
+		return
+	withdraw_selected_box()
+
+
+## After a transfer the list is one row shorter, so the cursor comes back inside
+## it the way `CopyBoxmonSpecies` and the joypad bounds do together.
+func _clamp_cursor() -> void:
+	var count: int = rows().size()
+	while _cursor + _scroll >= count and (_cursor > 0 or _scroll > 0):
+		if _scroll > 0:
+			_scroll -= 1
+		else:
+			_cursor -= 1
+	_selected_box_slot = -1
+	_selected_party_index = -1
 
 
 func _back() -> void:
@@ -366,25 +536,3 @@ func close_embedded() -> void:
 	if not _embedded:
 		return
 	closed.emit({"ok": true, "script_value": 0, "changed": false})
-
-
-func _button(text: String, colour: Color) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.add_theme_color_override("font_color", colour)
-	button.add_theme_color_override("font_hover_color", Color.WHITE)
-	button.add_theme_font_size_override("font_size", 14)
-	return button
-
-
-func _panel_style(fill: Color, line: Color, radius: int) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = fill
-	style.border_color = line
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(radius)
-	style.content_margin_left = 18
-	style.content_margin_top = 14
-	style.content_margin_right = 18
-	style.content_margin_bottom = 14
-	return style

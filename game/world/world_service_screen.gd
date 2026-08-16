@@ -205,6 +205,10 @@ func handle_button(button: int) -> bool:
 		return true
 	if _mode == MODE.CARD and _pokegear != null:
 		return _pokegear.handle_button(button)
+	## The panel is behind the box screen while BILL'S PC is open, the way it is
+	## behind the region map, so the buttons are the box screen's.
+	if _boxes != null:
+		return _boxes.handle_button(button)
 	if Gen2Button.is_direction(button):
 		_move_direction(Gen2Button.vector(button))
 		return true
