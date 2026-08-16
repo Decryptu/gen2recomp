@@ -72,17 +72,23 @@ func draw(
 ## layers: drawn into a screen-sized buffer at its own coordinates and cropped
 ## back, so [method draw]'s placement stays the one piece of arithmetic. Opaque,
 ## because `MenuBox` fills its interior.
+##
+## [param palette] is the four colours the box is drawn with, and defaults to
+## `PAL_BG_TEXT`'s black on white. A box a CGB layout fills with a palette of the
+## map's own passes that one instead, which is what `_CGB_Pokepic` does.
 func render(
 	box: Gen2MenuBox, options: Array, cursor: int,
-	title: String = "", title_indent: int = 0, extras: Array = []
+	title: String = "", title_indent: int = 0, extras: Array = [],
+	palette: PackedColorArray = PackedColorArray()
 ) -> Image:
 	var width: int = Gen2Screen.WIDTH
 	var indices: PackedByteArray = PackedByteArray()
 	indices.resize(width * Gen2Screen.HEIGHT)
 	draw(box, options, cursor, indices, width, title, title_indent, extras)
+	var colors: PackedColorArray = palette if palette.size() >= 4 \
+		else Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
 	return Gen2PicImage.from_indices(
-		indices, width, Gen2Screen.HEIGHT,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		indices, width, Gen2Screen.HEIGHT, colors
 	).get_region(Rect2i(box.border_position() * TILE, box.border_size() * TILE))
 
 

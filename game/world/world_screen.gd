@@ -69,7 +69,6 @@ var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
 var _audio_waiting: bool = false
 var _script_prompt: String = ""
-var _story_picture_backdrop: ColorRect = null
 var _story_picture: TextureRect = null
 var _battle_host: Gen2BattleScreen = null
 var _trainer_card_host: Gen2TrainerCardScreen = null
@@ -1123,6 +1122,14 @@ func preview_effect_sprites(kind: StringName = &"effects") -> void:
 		nearest.set_emote(0, true)
 		_script_prompt = "Debug effect sprite preview"
 	_renderer.refresh()
+	_refresh_labels()
+
+
+## Public screenshot driver for `Script_pokepic`'s box. The scripts that run one
+## are Elm's three balls and their neighbours, which no map reaches from a bare
+## warp, so the species is named here; everything else is the branch's own call.
+func preview_pokepic(species: int) -> void:
+	_show_story_picture(species)
 	_refresh_labels()
 
 
@@ -3118,29 +3125,25 @@ func _prompted_field_move_name(slot: int) -> String:
 	return _mon_display_name(member as Gen2SaveMon) if member is Gen2SaveMon else "#MON"
 
 
+## `Script_pokepic`'s box over the map, which is what a starter's ball and every
+## other `pokepic` shows. The map stays up behind it: `MENU_BACKUP_TILES` is what
+## `ClosePokepic` restores, and an overlay that is removed does that by existing.
 func _show_story_picture(species: int) -> void:
-	if _data == null:
+	if _data == null or _world == null:
 		return
-	var pic: Dictionary = _data.species_pic(species)
-	if pic.is_empty():
-		return
-	var image: Image = Gen2PicImage.from_atlas(
-		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic,
-		_data.palette(species)
+	var image: Image = Gen2PokepicPage.render(
+		_data, species, _world.current_map, _render_time_of_day()
 	)
+	if image == null:
+		return
 	_hide_story_picture()
-	_story_picture_backdrop = ColorRect.new()
-	_story_picture_backdrop.color = Color.WHITE
-	_story_picture_backdrop.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
-	_story_picture_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_screen.display(_story_picture_backdrop)
 	_story_picture = TextureRect.new()
 	_story_picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_story_picture.texture = ImageTexture.create_from_image(image)
 	_story_picture.size = image.get_size()
-	_story_picture.position = (
-		Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT) - Vector2(image.get_size())
-	) / 2.0
+	_story_picture.position = Vector2(
+		Gen2PokepicPage.menu_box().border_position() * Gen2Font.TILE
+	)
 	_story_picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_screen.display(_story_picture)
 
@@ -3185,9 +3188,6 @@ func _hide_story_picture() -> void:
 	if _story_picture != null:
 		_story_picture.queue_free()
 		_story_picture = null
-	if _story_picture_backdrop != null:
-		_story_picture_backdrop.queue_free()
-		_story_picture_backdrop = null
 
 
 func _sync_host_clock() -> void:

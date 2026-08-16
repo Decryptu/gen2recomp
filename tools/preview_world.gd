@@ -16,7 +16,8 @@ extends SceneTree
 ## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
 ## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
 ## ESCAPE, WATER and LIGHT, as `crystal 3 24 ... unown_wall 3 1`),
-## `cut` (`OWCutAnimation`'s two halves and the jump shadow), or one of
+## `cut` (`OWCutAnimation`'s two halves and the jump shadow), `pokepic`
+## (`Script_pokepic`'s box over the map, holding Chikorita), or one of
 ## [constant FIELD_ITEMS]' own names, which is the pack's USE on that item: the
 ## Itemfinder closes the pack over the world's answer, the Coin Case prints
 ## inside the pack, and the three in [constant FACE_UP_FIRST] each need their own
@@ -47,6 +48,9 @@ const FIELD_ITEMS: Dictionary = {
 const FACE_UP_FIRST: Array[StringName] = [
 	&"squirtbottle", &"card_key", &"basement_key",
 ]
+
+## `ElmsLabScript`'s left ball, which is the first `pokepic` a new game shows.
+const POKEPIC_SPECIES: int = 152
 
 const STAGED_FRAMES: int = 2
 const STAGED_FRAMES_CUT: int = 12
@@ -139,6 +143,8 @@ func _process(_delta: float) -> bool:
 			## is what runs `special DisplayUnownWords` and puts the box up.
 			_screen.press_button(Gen2Button.A)
 			_screen.press_button(Gen2Button.A)
+		elif _kind == &"pokepic":
+			_screen.preview_pokepic(POKEPIC_SPECIES)
 		elif FIELD_ITEMS.has(_kind):
 			if _kind in FACE_UP_FIRST:
 				_screen.move_up()

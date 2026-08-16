@@ -151,3 +151,15 @@ func test_x_flipped_leaves_the_source_alone() -> void:
 
 func test_x_flipped_tolerates_a_null_image() -> void:
 	assert_null(Gen2PicImage.x_flipped(null))
+
+
+## `PadFrontpic`'s three branches. A full-width pic is padded on neither side; a
+## narrower one takes one blank column at the left, and `LoadOrientedFrontpic`'s
+## column reversal moves the trailing blank there instead.
+func test_frontpic_pad_columns_is_padfrontpics_own_alignment() -> void:
+	assert_eq(Gen2PicImage.frontpic_pad_columns(7), 0)
+	assert_eq(Gen2PicImage.frontpic_pad_columns(6), 1)
+	assert_eq(Gen2PicImage.frontpic_pad_columns(5), 1)
+	assert_eq(Gen2PicImage.frontpic_pad_columns(6, true), 0)
+	assert_eq(Gen2PicImage.frontpic_pad_columns(5, true), 1)
+	assert_eq(Gen2PicImage.frontpic_pad_columns(0), 0, "a pic the cache has no size for")

@@ -491,7 +491,7 @@ func _show_pic(kind: int) -> void:
 		return
 	_pic_cell = cell
 	_pic_palette = palette
-	_pic_pad_columns = _pad_columns(int(cell["width"]) / TILE, mirrored)
+	_pic_pad_columns = Gen2PicImage.frontpic_pad_columns(int(cell["width"]) / TILE, mirrored)
 	_pic.size = Vector2(float(cell["width"]), float(cell["height"]))
 	_pic.position = Vector2(
 		float((PIC_AT.x + _pic_pad_columns) * TILE),
@@ -508,17 +508,6 @@ func _redraw_pic(colors: PackedColorArray) -> void:
 	_pic.texture = ImageTexture.create_from_image(Gen2PicImage.from_indices(
 		_pic_cell["indices"], int(_pic_cell["width"]), int(_pic_cell["height"]), colors
 	))
-
-
-## Blank tile columns `PadFrontpic` leaves to the left of a pic in the 7x7 box.
-##
-## A full-width pic is padded on neither side. A narrower one takes one blank
-## column at the left, so `.right`'s column reversal leaves `PIC_TILES - 1 -
-## width` of the trailing blank on that side instead.
-static func _pad_columns(width: int, mirrored: bool) -> int:
-	if width >= PIC_TILES or width <= 0:
-		return 0
-	return PIC_TILES - 1 - width if mirrored else 1
 
 
 func _trainer_cell(trainer_class: int) -> Dictionary:
