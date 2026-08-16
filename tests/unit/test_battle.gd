@@ -1253,6 +1253,29 @@ func test_a_trainer_battle_adds_the_experience_bonus() -> void:
 	assert_eq(_first(events, Gen2Battle.EXP_GAINED)["amount"], 67)
 
 
+## A host that decided a battle without playing it, which is what the story walk
+## does: every enemy is paid for in party order, at the same figures a fought
+## faint would have paid, and the party ends up levelled rather than merely told
+## it won.
+func test_a_won_battle_can_be_paid_for_without_being_fought() -> void:
+	var battle: Gen2Battle = Gen2Battle.create_parties(
+		_data, Gen2Party.of(_mon(Fixture.PIKACHU, 5, [Fixture.THUNDERBOLT])),
+		Gen2Party.create([
+			_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE]),
+			_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE]),
+		]), _rng, true
+	)
+	var before: int = battle.player.level
+	var events: Array = battle.award_win_experience()
+
+	var gains: Array = _of_type(events, Gen2Battle.EXP_GAINED)
+	assert_eq(gains.size(), 2, "one for each of the trainer's Pokémon")
+	for gain: Dictionary in gains:
+		assert_eq(gain["amount"], 67, "the same 45 plus the trainer bonus a fought faint pays")
+	assert_true(battle.party(Gen2Battle.ENEMY).is_wiped(), "the whole party is beaten")
+	assert_gt(battle.player.level, before, "134 experience is more than one level at five")
+
+
 ## Base experience is the seventh byte of the same block as the base stats, and
 ## `.EvenlyDivideExpAmongParticipants` divides the whole block in one loop before
 ## `GiveExperiencePoints` reads any of it. So the award divides too, and it
