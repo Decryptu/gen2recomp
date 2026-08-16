@@ -4073,6 +4073,15 @@ func _apply_script_warp(request: Dictionary) -> Dictionary:
 ## field selects a one-based warp in the destination map, as in the original
 ## map macro. An invalid target leaves this API unchanged and returns an error
 ## record instead of silently placing the player on another map.
+## `CheckWarpCollision`'s own answer, without walking through the warp: whether
+## the step that just landed on [param cell] has a warp to take. A host that
+## spends `MapSetupScript_Door`'s fade before the map swaps asks this first, and
+## [method try_warp] is the swap itself.
+func warp_pending(cell: Vector2i = player_cell) -> bool:
+	return not warp_at(cell).is_empty() \
+		and Gen2WorldCollision.is_warp_tile(collision_code_at(cell))
+
+
 func try_warp(cell: Vector2i = player_cell) -> Dictionary:
 	var source_warp: Dictionary = warp_at(cell)
 	if source_warp.is_empty():

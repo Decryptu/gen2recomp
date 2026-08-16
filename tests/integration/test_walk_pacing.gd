@@ -14,18 +14,27 @@ extends GutTest
 
 const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
+## Longer than the turn, the step and the fade behind them: the helper below
+## drives to a state rather than spending a count.
+const WALK_FRAME_CAP: int = 40
+
 var _world: Gen2WorldAPI = null
+var _data: GameData = null
+var _screen: Gen2WorldScreen = null
 
 
 func before_each() -> void:
-	var data: GameData = Fixture.build()
-	data = GameData.open_directory(Fixture.directory())
+	Fixture.build()
+	_data = GameData.open_directory(Fixture.directory())
 	_world = Gen2WorldAPI.open(
-		data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(2, 2)
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(2, 2)
 	)
 
 
 func after_each() -> void:
+	if is_instance_valid(_screen):
+		_screen.free()
+		_screen = null
 	RomCache.clear(Fixture.directory())
 
 
@@ -80,3 +89,79 @@ func test_the_offset_covers_one_cell() -> void:
 	)
 	_world.advance_player_step_frame()
 	assert_eq(_world.player_step_offset_cells(), Vector2.ZERO, "and lands on it")
+
+
+## The production screen on the fixture's map, walked up onto the door and
+## stopped on the frame `WarpToNewMapScript` starts, which is the frame the step
+## onto the warp tile landed on and no fade frame has been spent yet. Its own clock is taken away, so every frame after
+## that is spent by hand.
+func _walk_onto_the_door() -> Gen2WorldScreen:
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	var screen: Gen2WorldScreen = packed.instantiate() as Gen2WorldScreen
+	screen.map_group = Fixture.MAP_GROUP
+	screen.map_number = Fixture.MAP_NUMBER
+	screen.start_cell = Fixture.WARP_CELL + Vector2i.DOWN
+	screen.encounter_seed = 1
+	screen.set_data(_data)
+	add_child(screen)
+	await get_tree().process_frame
+	screen.set_process(false)
+	screen._frame_elapsed = 0.0
+	for _frame: int in WALK_FRAME_CAP:
+		## One press turns and the next steps, and a press inside the fade is
+		## swallowed, so the same call drives all three.
+		screen.move_up()
+		screen.advance_frame()
+		if not screen.map_fade().is_empty():
+			break
+	return screen
+
+
+## `WarpToNewMapScript` is `warpsound` and `newloadmap MAPSETUP_DOOR`, and that
+## setup script spends frames before the map is loaded and after: four palette
+## orders of `FadeOutToWhite`, two frames each, then the load, then the four of
+## `FadeInFromWhite`. A warp that swapped the map on the frame the step landed
+## on is what puts the same input on a different frame from the cartridge's.
+func test_a_warp_spends_the_setup_script_own_fade() -> void:
+	_screen = await _walk_onto_the_door()
+	assert_eq(_screen._world.player_cell, Fixture.WARP_CELL, "the step landed on it")
+	assert_eq(
+		_screen._world.map_id(), Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER),
+		"and the map has not swapped: `FadeOutToWhite` runs first"
+	)
+	assert_eq(StringName(_screen.map_fade().get("stage", &"")), &"out")
+	var fade_frames: int = Gen2WorldPalette.FADE_OUT_ORDERS.size() \
+		* Gen2WorldPalette.FADE_STEP_FRAMES
+	## One of the fade out's own frames is the frame the step landed on, which is
+	## the one the fade was started in.
+	var out_frames: int = 1
+	while StringName(_screen.map_fade().get("stage", &"")) == &"out" \
+		and out_frames < WALK_FRAME_CAP:
+		_screen.advance_frame()
+		out_frames += 1
+	assert_eq(out_frames, fade_frames, "`FadeOutToWhite` is four orders of two frames")
+	assert_eq(
+		_screen._world.map_id(),
+		Vector2i(Gen2WorldSpawn.NEW_BARK_GROUP, Gen2WorldSpawn.PLAYERS_HOUSE_2F),
+		"the map is loaded when the fade out lands"
+	)
+	assert_eq(
+		StringName(_screen.map_fade().get("stage", &"")), &"in",
+		"and `FadeInFromWhite` is what the new map arrives behind"
+	)
+	var in_frames: int = 0
+	while not _screen.map_fade().is_empty() and in_frames < WALK_FRAME_CAP:
+		_screen.advance_frame()
+		in_frames += 1
+	assert_eq(in_frames, fade_frames, "and the way back in is the same four")
+
+
+## `RunMapSetupScript` runs with the joypad unread, so nothing the player does
+## inside those sixteen frames moves anything.
+func test_no_input_is_taken_while_the_warp_fade_runs() -> void:
+	_screen = await _walk_onto_the_door()
+	assert_false(_screen.map_fade().is_empty(), "the fade is up")
+	var cell: Vector2i = _screen._world.player_cell
+	assert_false(_screen.move_player(Vector2i.DOWN), "no step is taken")
+	assert_true(_screen.press_button(Gen2Button.A), "and A is swallowed rather than used")
+	assert_eq(_screen._world.player_cell, cell)

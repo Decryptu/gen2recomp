@@ -747,6 +747,17 @@ A registered world renderer that wants to draw them takes them through the
 optional `set_actors(actors: Gen2WorldActors)`, which is handed the same
 resolved list the built-in view draws.
 
+### The map fades
+
+A warp spends `MapSetupScript_Door`'s two fades, sixteen frames in which no
+input is read. A renderer is offered each step of them through the optional
+`set_fade(order: int, white_fill: bool)`: `order` is the palette order
+`DmgToCgbTimePals` applies to every palette on screen, and `white_fill` is
+`FillWhiteBGColor`, which the way out runs and the way in does not. The identity
+order (`Gen2WorldPalette.FADE_IDENTITY`) is every other frame of the game. A
+renderer that does not define it cuts to the new map on the frame the cartridge
+is at its whitest; the host spends the frames either way.
+
 ## Visible wild encounters
 
 A mod that wants wild Pokemon standing on the map instead of a roll on every

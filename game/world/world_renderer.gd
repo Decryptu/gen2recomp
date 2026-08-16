@@ -25,6 +25,10 @@ var _priority_atlas: ImageTexture = null
 var _priority_indices: PackedByteArray = PackedByteArray()
 var _effect_sheets: Dictionary = {}
 var _effect_textures: Dictionary = {}
+## The palette order the map fades are one step of, and `FillWhiteBGColor`
+## beside it. The identity order is every other frame of the game.
+var _fade_order: int = Gen2WorldPalette.FADE_IDENTITY
+var _fade_white_fill: bool = false
 
 
 func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> void:
@@ -68,6 +72,23 @@ func set_time_of_day(time_of_day: int) -> void:
 	_time_of_day = clampi(time_of_day, 0, 3)
 	_actor_textures.clear()
 	_effect_textures.clear()
+	_rebuild_atlas()
+	queue_redraw()
+
+
+## Gen2ModHost.RENDERER_FADE_METHOD: one step of `FadeOutToWhite` or
+## `FadeInFromWhite`, which is a palette order applied to every palette on
+## screen and, on the way out, `FillWhiteBGColor` under it. The identity order
+## is a screen that is not fading. Presentation only: the host spends the frames
+## whether or not the view it is drawing with takes this.
+func set_fade(order: int, white_fill: bool = false) -> void:
+	if order == _fade_order and white_fill == _fade_white_fill:
+		return
+	_fade_order = order
+	_fade_white_fill = white_fill
+	_actor_textures.clear()
+	_effect_textures.clear()
+	_anim_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()
 
@@ -132,6 +153,8 @@ func _tile_palettes() -> Array:
 		_time_of_day,
 		_animation.water_palette_color() if _animation != null else -1,
 		_animation.cave_palette_color() if _animation != null else -1,
+		_fade_order,
+		_fade_white_fill,
 	)
 
 
@@ -279,8 +302,13 @@ func _actor_texture(
 		else _world.data.overworld_sprite_indices(sprite.number)
 	## A visible encounter names the species' own four colours; everything else
 	## wears one of the map's sprite palettes.
-	var colors: PackedColorArray = color_override if not color_override.is_empty() \
-		else _world.data.overworld_sprite_palette(palette, _time_of_day)
+	## `DmgToCgbObjPals` takes the fade's own order too, and `FillWhiteBGColor`
+	## is background only, so a sprite flattens onto its own colour 0.
+	var colors: PackedColorArray = Gen2WorldPalette.fade_palette(
+		color_override if not color_override.is_empty() \
+			else _world.data.overworld_sprite_palette(palette, _time_of_day),
+		_fade_order,
+	)
 	var image: Image = Gen2WorldSprite.big_image_for(sprite, indices, colors, big_shape) \
 		if big_shape != Gen2WorldSprite.BIG_SHAPE_NONE \
 		else Gen2WorldSprite.image_for(sprite, indices, colors, facing, frame)
