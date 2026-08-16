@@ -1,9 +1,10 @@
 class_name Gen2StartMenuScreen
 extends Control
 
-## The overworld pause menu (engine/menus/start_menu.asm), presented as a
-## window-resolution Control panel consistent with the mart, phone and PC
-## storage overlays rather than the hardware `menu_coords` box.
+## The overworld pause menu (engine/menus/start_menu.asm). The list, `_Option`
+## and `SaveMenu` are the cartridge's own screens through [Gen2StartMenuPage],
+## drawn into whichever [Gen2Screen] the host hands over; the pack's modes are
+## still a window-resolution Control panel, which is `HANDOFF.md`'s open row.
 ##
 ## Pokedex, Pokemon and Pokegear are screens the world already owns
 ## (Gen2PokedexScreen, Gen2PartyScreen, the phone list on
@@ -21,13 +22,47 @@ signal closed
 ## The payload is the resolved effect, because the screen hosting the world is
 ## the one that can cast a rod or draw a warp.
 signal field_item_used(request: Dictionary)
+## `PlaySFX`, which this screen has no driver of its own for: the world that
+## hosts it owns the player. `SFX_SAVE` is the only one it asks for.
+signal sfx_requested(sfx: int)
 
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
 	PACK_FORGET_ASK, PACK_FORGET, PACK_STOP_LEARNING,
 	PACK_TOSS_QUANTITY, PACK_TOSS_CONFIRM, PACK_GIVE_SWAP,
-	PACK_RESULT, SAVE_CONFIRM, OPTIONS, MODS, MOD_OPTIONS,
+	PACK_RESULT, SAVE_ASK, SAVE_OVERWRITE, SAVE_SAVING, SAVE_SAVED,
+	SAVE_FAILED, OPTIONS, MODS, MOD_OPTIONS,
 }
+
+## `SaveMenu`'s four texts, out of `data/text/common_3.asm` on Crystal and
+## `common_2.asm` on Gold and Silver, which no importer reads and which this
+## project authors beside its other engine text. Verbatim, one entry a line, so
+## the box scrolls where `_ContText` scrolls.
+const SAVE_ASK_LINES: Array[String] = [
+	"Would you like to", "save the game?",
+]
+## `AlreadyASaveFileText`. `AnotherSaveFileText` is its sibling for a save file
+## belonging to another player, and `CompareLoadedAndSavedPlayerID` cannot
+## reach it here: a world is always played from the slot it was started in.
+const SAVE_OVERWRITE_LINES: Array[String] = [
+	"There is already a", "save file. Is it", "OK to overwrite?",
+]
+const SAVE_SAVING_LINES: Array[String] = [
+	"SAVING… DON'T TURN", "OFF THE POWER.",
+]
+## `_SavedTheGameText`, whose `<PLAYER>` is filled from the save.
+const SAVE_SAVED_LINES: Array[String] = [
+	"%s saved", "the game.",
+]
+
+## `SavingDontTurnOffThePower`'s own `ld c, 16`, then `SavedTheGame`'s 32 before
+## the words and 30 after them.
+const SAVE_SAVING_FRAMES: int = 16
+const SAVE_WRITE_FRAMES: int = 32
+const SAVE_DONE_FRAMES: int = 30
+## `ld de, SFX_SAVE` (constants/sfx_constants.asm; the comment column there is
+## hex).
+const SFX_SAVE: int = 0x25
 
 ## The pack's five imported texts, by the key `GameData.menu_text` holds each
 ## under. `UseItem`'s two refusals and `TossMenu`'s three; "(S)" is three literal
@@ -116,8 +151,15 @@ var _forget_cursor: int = 0
 var _forget_party_index: int = -1
 var _forget_confirm_cursor: int = 0
 
-var _save_cursor: int = 0
-var _save_result_shown: bool = false
+## `SaveMenu`'s own state: the text standing in the speech box, which of its
+## lines is on the top row, `wMenuCursorY` for the yes/no, and the frames the
+## two timed modes have spent.
+var _save_lines: Array = []
+var _save_line: int = 0
+var _save_cursor: int = -1
+var _save_frames: int = 0
+var _save_elapsed: float = 0.0
+var _save_result: Dictionary = {}
 
 var _options_menu: Gen2WorldOptionsMenu = null
 
@@ -325,10 +367,12 @@ func _move(direction: Vector2i) -> void:
 					_target_cursor + signi(direction.y), 0, _party_targets().size()
 				)
 				_render_targets()
-		Mode.SAVE_CONFIRM:
-			if not _save_result_shown and (direction.x != 0 or direction.y != 0):
+		## `VerticalMenu` over `YesNoMenuHeader`, which is only up while a
+		## question is; the two timed modes read no joypad at all.
+		Mode.SAVE_ASK, Mode.SAVE_OVERWRITE:
+			if _save_cursor >= 0 and (direction.x != 0 or direction.y != 0):
 				_save_cursor = 1 - _save_cursor
-				_render_save_confirm()
+				_render_save()
 		Mode.OPTIONS:
 			if direction.y != 0:
 				_options_menu.move(direction.y)
@@ -397,7 +441,8 @@ func _confirm() -> void:
 				closed.emit()
 			else:
 				_open_pack_mode(false)
-		Mode.SAVE_CONFIRM:
+		Mode.SAVE_ASK, Mode.SAVE_OVERWRITE, Mode.SAVE_SAVING, Mode.SAVE_SAVED, \
+		Mode.SAVE_FAILED:
 			_confirm_save()
 		## Options_Cancel is the only handler that reads A.
 		Mode.OPTIONS:
@@ -443,8 +488,9 @@ func _cancel() -> void:
 		## the pocket list rather than on the item's own menu.
 		Mode.PACK_TOSS_CONFIRM, Mode.PACK_GIVE_SWAP:
 			_open_pack_mode(false)
-		Mode.SAVE_CONFIRM:
-			_open_list_mode()
+		Mode.SAVE_ASK, Mode.SAVE_OVERWRITE, Mode.SAVE_SAVING, Mode.SAVE_SAVED, \
+		Mode.SAVE_FAILED:
+			_cancel_save()
 		## `_Option.joypad_loop` exits on PAD_START | PAD_B from any row.
 		Mode.OPTIONS, Mode.MODS:
 			_open_list_mode()
@@ -1491,37 +1537,152 @@ func _render_pack_result() -> void:
 	_render_options(["Continue"], 0, func(entry: Variant) -> String: return str(entry))
 
 
+## `SaveMenu`'s first question. `LoadStandardMenuHeader` and
+## `DisplaySaveInfoOnSave` put the info box up before it, and both stay up for
+## every mode below.
 func _open_save_confirm_mode() -> void:
-	_mode = Mode.SAVE_CONFIRM
-	_save_cursor = 0
-	_save_result_shown = false
+	_enter_save_mode(Mode.SAVE_ASK, SAVE_ASK_LINES, 0)
+
+
+## The yes/no's own cursor, `YesNoMenuHeader`'s `db 1` default, and the words
+## the box holds. [param cursor] below zero is a mode with no box at all.
+func _enter_save_mode(mode: Mode, lines: Array, cursor: int) -> void:
+	_mode = mode
+	_save_lines = lines.duplicate()
+	_save_line = 0
+	_save_cursor = cursor
+	_save_frames = 0
 	_title.text = "SAVE"
-	_summary.text = "Save your progress?"
+	_summary.text = " ".join(_save_lines)
 	_status.text = ""
-	_footer.text = "D-pad: choose    A: confirm    B: cancel"
-	_render_save_confirm()
+	_footer.text = "D-pad: choose    A: confirm    B: cancel" if cursor >= 0 \
+		else "A: continue"
+	_render_save()
 
 
 func _confirm_save() -> void:
-	if _save_result_shown:
-		_open_list_mode()
-		return
-	if _save_cursor == 1:
-		_open_list_mode()
-		return
-	var result: Dictionary = _save_action.call() if _save_action.is_valid() else {"ok": false, "reason": &"no_save_action"}
-	_save_result_shown = true
-	if bool(result.get("ok", false)):
-		_status.text = "World saved."
-		_status.add_theme_color_override("font_color", SUCCESS)
-	else:
-		_status.text = "Save failed: %s" % String(result.get("reason", "unknown"))
-		_status.add_theme_color_override("font_color", ERROR)
-	_render_options(["Continue"], 0, func(entry: Variant) -> String: return str(entry))
+	match _mode:
+		## `.refused` on NO, which is the carry `StartMenu_Save` answers with 0:
+		## back to the list rather than out of the menu.
+		Mode.SAVE_ASK:
+			if _save_cursor == 1:
+				_open_list_mode()
+			else:
+				_enter_save_mode(Mode.SAVE_OVERWRITE, SAVE_OVERWRITE_LINES, -1)
+		Mode.SAVE_OVERWRITE:
+			## `_ContText`'s own `PromptButton` before the third line, which
+			## `AlreadyASaveFileText` is the only one of these texts to carry.
+			if _save_cursor < 0:
+				_save_line = 1
+				_save_cursor = 0
+				_render_save()
+			elif _save_cursor == 1:
+				_open_list_mode()
+			else:
+				_enter_save_mode(Mode.SAVE_SAVING, SAVE_SAVING_LINES, -1)
+		## The two timed modes read no button, since `SavingDontTurnOffThePower`
+		## zeroes the joypad bytes before it prints.
+		Mode.SAVE_SAVING, Mode.SAVE_SAVED:
+			pass
+		Mode.SAVE_FAILED:
+			_open_list_mode()
 
 
-func _render_save_confirm() -> void:
-	_render_options(["Yes", "No"], _save_cursor, func(entry: Variant) -> String: return str(entry))
+## B is `YesNoBox`'s no wherever a question is up, and `PromptButton`'s other
+## button while the text still has a line to come. The two timed modes read no
+## joypad at all.
+func _cancel_save() -> void:
+	if _save_cursor < 0 and _mode == Mode.SAVE_OVERWRITE:
+		_confirm_save()
+	elif _save_cursor >= 0:
+		_open_list_mode()
+
+
+## One hardware frame of the two timed modes. Public so a test or a preview owns
+## its own frames rather than sampling a screen mid-flight.
+func advance_save_frame() -> void:
+	if _mode != Mode.SAVE_SAVING and _mode != Mode.SAVE_SAVED:
+		return
+	_save_frames += 1
+	match _mode:
+		Mode.SAVE_SAVING:
+			if _save_frames == SAVE_SAVING_FRAMES:
+				_write_save()
+			elif _save_frames == SAVE_SAVING_FRAMES + SAVE_WRITE_FRAMES:
+				_show_save_result()
+		## Exactly, not past: the host is freed a frame later and this would
+		## otherwise emit again on every frame in between.
+		Mode.SAVE_SAVED:
+			if _save_frames == SAVE_DONE_FRAMES:
+				## `StartMenu_Save`'s `ld a, 1`, which is `StartMenu`'s exit
+				## rather than its `.Reopen`.
+				closed.emit()
+
+
+func advance_save_frames(count: int) -> void:
+	for _step: int in count:
+		advance_save_frame()
+
+
+func _process(delta: float) -> void:
+	if _mode != Mode.SAVE_SAVING and _mode != Mode.SAVE_SAVED:
+		return
+	_save_elapsed += delta
+	while _save_elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
+		_save_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+		advance_save_frame()
+
+
+func _write_save() -> void:
+	_save_result = _save_action.call() if _save_action.is_valid() \
+		else {"ok": false, "reason": &"no_save_action"}
+
+
+## `SavedTheGame`'s words and `SFX_SAVE` behind them. A refused write is this
+## project's own line: the cartridge has no failure path, because its write is
+## to SRAM it has already checked.
+func _show_save_result() -> void:
+	if not bool(_save_result.get("ok", false)):
+		_enter_save_mode(Mode.SAVE_FAILED, [
+			"Save failed:", String(_save_result.get("reason", "unknown")),
+		], 0)
+		return
+	var name: String = _pack_save.player_name if _pack_save != null else ""
+	_enter_save_mode(Mode.SAVE_SAVED, [
+		SAVE_SAVED_LINES[0] % name, SAVE_SAVED_LINES[1],
+	], -1)
+	## `WaitSFX` after it is not spent, for the reason the intro cry's is not.
+	sfx_requested.emit(SFX_SAVE)
+
+
+## `DisplaySaveInfoOnSave`'s four rows: the same fields [Gen2TrainerCard]'s
+## first page reads, with `Continue_DisplayBadgeCount`'s popcount over both
+## badge bytes beside them.
+func _save_state() -> Dictionary:
+	var state: Gen2WorldState = _world.state if _world != null else null
+	var time: Gen2GameTime = _pack_save.game_time \
+		if _pack_save != null and _pack_save.game_time != null else Gen2GameTime.new()
+	var crystal: bool = Gen2WorldState.is_crystal_profile(_data)
+	return {
+		"player_name": _pack_save.player_name if _pack_save != null else "",
+		"badges": state.badge_count(crystal) if state != null else 0,
+		"pokedex": state != null and state.is_engine_flag_active(
+			Gen2WorldStartMenu.ENGINE_POKEDEX
+		),
+		"caught": state.caught_count() if state != null else 0,
+		"hours": time.hours,
+		"minutes": time.minutes,
+		"lines": _save_lines,
+		"line": _save_line,
+		"cursor": _save_cursor,
+	}
+
+
+func _render_save() -> void:
+	_render_options(
+		["Yes", "No"] if _save_cursor >= 0 else [], _save_cursor,
+		func(entry: Variant) -> String: return str(entry)
+	)
 
 
 func _build_ui() -> void:
@@ -1640,6 +1801,9 @@ func _hardware_image() -> Image:
 				labels, _menu.cursor, description,
 				_world != null and _world.bug_contest_active()
 			)
+		Mode.SAVE_ASK, Mode.SAVE_OVERWRITE, Mode.SAVE_SAVING, Mode.SAVE_SAVED, \
+		Mode.SAVE_FAILED:
+			return _page.render_save(_save_state())
 		Mode.OPTIONS:
 			if _options_menu == null:
 				return null

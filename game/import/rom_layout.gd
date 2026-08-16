@@ -549,6 +549,20 @@ const FONT_INK_RUNS: Array = [[0x80, 0x99], [0xA0, 0xB9], [0xF6, 0xFF]]
 ## three agree on are checked.
 const FONT_BLANK_RUNS: Array = [[0xBA, 0xBF], [0xC6, 0xCF], [0xD7, 0xDE]]
 
+## `FontExtra`, the 2bpp sheet `_LoadFontsExtra1` parks under the main font.
+## Thirty-two tiles stored, of which it copies `FontExtra + 3 tiles` to
+## `vTiles2 tile '<BOLD_D>'` for 22, so a tile is addressed by its code minus
+## $60 and the run that reaches the screen is $63 to $78. That run carries the
+## ellipsis, the two quotes, the middle dot and `<COLON>`, which is every
+## character [Gen2Text] decodes below the main font's own $80 and the reason a
+## text saying "…" drew nothing without it. Codes $60 to $62 are overwritten by
+## `FontsExtra_SolidBlackGFX`, `FontsExtra2_UpArrowGFX` and
+## `PokegearPhoneIconGFX` and are stored but never drawn from here.
+const FONT_EXTRA_TILES: int = 32
+const FONT_EXTRA_FIRST_CODE: int = 0x60
+const FONT_EXTRA_LOADED_FIRST: int = 0x63
+const FONT_EXTRA_LOADED_LAST: int = 0x78
+
 ## Text box borders: eight frames of six tiles, in the order ┌ ─ ┐ │ └ ┘, loaded
 ## at code $79 where [Gen2Text]'s box-drawing codes start, so a box is drawn by
 ## printing characters like anything else.
@@ -2846,6 +2860,13 @@ static func landmark_name_offset(rom: RomFile, layout: Dictionary, index: int) -
 
 static func font_offset(layout: Dictionary) -> int:
 	return int(layout["font"])
+
+
+## `FontExtra` is the entry immediately before `Font` in `gfx/font.asm` on all
+## three dumps, so the pinned font offset walks it too and it needs no address
+## of its own. Its own content is what checks that (`verify_layout`).
+static func font_extra_offset(layout: Dictionary) -> int:
+	return font_offset(layout) - FONT_EXTRA_TILES * Gen2Tiles.TILE_BYTES
 
 
 ## Frames are stored back to back in selection order, six tiles of 1bpp each.

@@ -2890,7 +2890,46 @@ static func verify_font(rom: RomFile, layout: Dictionary) -> Dictionary:
 		if rom.u8(offset + i) == 0xFF:
 			return {"ok": false, "message": "Font: solid row at byte %d; not font data." % i}
 
+	return verify_font_extra(rom, layout)
+
+
+## `FontExtra` has no address of its own: it is the entry before `Font` in
+## `gfx/font.asm`, so it is checked by what it draws. Every code
+## `_LoadFontsExtra1` puts on screen is a glyph, and the ellipsis is one row of
+## three dots on the seventh, which no neighbouring sheet read a tile early or
+## late reproduces.
+static func verify_font_extra(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = RomLayout.font_extra_offset(layout)
+	if not rom.in_bounds(offset, RomLayout.FONT_EXTRA_TILES * Gen2Tiles.TILE_BYTES):
+		return {"ok": false, "message": "FontExtra runs past the end of the dump."}
+
+	for code: int in range(
+		RomLayout.FONT_EXTRA_LOADED_FIRST, RomLayout.FONT_EXTRA_LOADED_LAST + 1
+	):
+		if _extra_glyph_rows(rom, offset, code).count(0) == Gen2Tiles.TILE_1BPP_BYTES:
+			return {
+				"ok": false,
+				"message": "FontExtra: code $%02X has no glyph." % code,
+			}
+
+	var ellipsis: Array[int] = _extra_glyph_rows(rom, offset, Gen2Text.ELLIPSIS_CODE)
+	if ellipsis[6] == 0 or ellipsis.count(0) != Gen2Tiles.TILE_1BPP_BYTES - 1:
+		return {
+			"ok": false,
+			"message": "FontExtra: $%02X is not the ellipsis." % Gen2Text.ELLIPSIS_CODE,
+		}
+
 	return {"ok": true, "message": ""}
+
+
+## One 2bpp tile of `FontExtra` as eight row masks, a set bit per lit pixel.
+static func _extra_glyph_rows(rom: RomFile, offset: int, code: int) -> Array[int]:
+	var at: int = offset \
+		+ (code - RomLayout.FONT_EXTRA_FIRST_CODE) * Gen2Tiles.TILE_BYTES
+	var rows: Array[int] = []
+	for row: int in Gen2Tiles.TILE_1BPP_BYTES:
+		rows.append(rom.u8(at + 2 * row) | rom.u8(at + 2 * row + 1))
+	return rows
 
 
 ## Ink in the tile for one character code, in pixels.
@@ -5021,6 +5060,12 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"tiles": RomLayout.FONT_TILES,
 			"first_code": RomLayout.FONT_FIRST_CODE,
 			"bits": 1,
+		},
+		"font_extra": {
+			"offset": RomLayout.font_extra_offset(layout),
+			"tiles": RomLayout.FONT_EXTRA_TILES,
+			"first_code": RomLayout.FONT_EXTRA_FIRST_CODE,
+			"bits": 2,
 		},
 		"frames": {
 			"offset": RomLayout.frame_offset(layout, 0),

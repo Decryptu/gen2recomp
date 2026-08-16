@@ -688,17 +688,33 @@ func test_save_writes_a_snapshot_to_the_injected_save_without_touching_disk() ->
 	_select(host, Gen2WorldStartMenu.ITEM_SAVE)
 	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
-	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_CONFIRM)
-	## Yes is the confirm menu's default cursor position.
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_ASK)
+	## Yes is YesNoMenuHeader's own default cursor position. The second question
+	## is AskOverwriteSaveFile's, which every save here reaches: the slot the
+	## world is played from always exists and always carries this player's ID.
 	host.handle_button(Gen2Button.A)
-	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_OVERWRITE)
+	## `_ContText`'s wait before the text's third line, then its yes.
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_SAVING)
+	## SavingDontTurnOffThePower's sixteen frames and SavedTheGame's thirty-two
+	## are both spent before the words that follow them.
+	host.advance_save_frames(
+		Gen2StartMenuScreen.SAVE_SAVING_FRAMES
+		+ Gen2StartMenuScreen.SAVE_WRITE_FRAMES - 1
+	)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_SAVING)
+	host.advance_save_frames(1)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.SAVE_SAVED)
 	assert_eq(save.world.map_id, expected.map_id)
 	assert_eq(save.world.player_cell, expected.player_cell)
 	assert_true(save.world.world_state.is_event_flag_active(MARKER_FLAG))
-	## Continue returns to the list without reopening a fresh menu instance.
-	host.handle_button(Gen2Button.A)
-	await get_tree().process_frame
-	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.LIST)
+	## `StartMenu_Save`'s `ld a, 1`: a save that succeeded leaves the menu.
+	var closed: Array = []
+	host.closed.connect(func() -> void: closed.append(true))
+	host.advance_save_frames(Gen2StartMenuScreen.SAVE_DONE_FRAMES)
+	assert_eq(closed.size(), 1)
 
 
 ## Covers three of _open_start_menu()'s busy-state guards directly; the fourth

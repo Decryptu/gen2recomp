@@ -1,7 +1,8 @@
 class_name Gen2StartMenuPage
 extends RefCounted
 
-## `StartMenu`'s own box over the map, and the `_Option` screen behind it.
+## `StartMenu`'s own box over the map, the `_Option` screen behind it, and
+## `SaveMenu`'s three boxes over the map as well.
 ##
 ## Node-free presentation, like the other pages: geometry is [Gen2MenuBox]'s and
 ## the models are [Gen2WorldStartMenu] and [Gen2WorldOptionsMenu]. The list is a
@@ -46,6 +47,48 @@ const OPTIONS_VALUE_COLUMN: int = 11
 ## `Options_UpdateCursorPosition` walks column 1 by two rows per option.
 const OPTIONS_CURSOR_COLUMN: int = 1
 
+## `DisplaySaveInfoOnSave`'s `lb de, 4, 0` through `_OffsetMenuHeader`, which
+## keeps `menu_coords 0, 0, 15, 9`'s span and moves its left edge to column 4.
+const SAVE_INFO_LEFT: int = 4
+const SAVE_INFO_TOP: int = 0
+const SAVE_INFO_RIGHT: int = 19
+const SAVE_INFO_BOTTOM: int = 9
+## `.MenuData_Dex`'s own `db 0`: no cursor, no title and the ordinary top
+## spacing, so the four rows start at (5, 2) and step two.
+const SAVE_INFO_FLAGS: int = 0
+## `Continue_DisplayBadgesDexPlayerName`'s three `decoord`s and
+## `Continue_PrintGameTime`'s, each an offset from `MenuBoxCoord2Tile`'s corner
+## and so four columns right of what the source writes.
+const SAVE_NAME_AT: Vector2i = Vector2i(SAVE_INFO_LEFT + 8, 2)
+const SAVE_BADGES_AT: Vector2i = Vector2i(SAVE_INFO_LEFT + 13, 4)
+const SAVE_DEX_AT: Vector2i = Vector2i(SAVE_INFO_LEFT + 12, 6)
+const SAVE_TIME_AT: Vector2i = Vector2i(SAVE_INFO_LEFT + 9, 8)
+## Each value's `PrintNum` width: `lb bc, 1, 2` for the badges, `1, 3` for the
+## dex count and `2, 3` then `PRINTNUM_LEADINGZEROS | 1, 2` for the timer.
+const SAVE_BADGE_CELLS: int = 2
+const SAVE_DEX_CELLS: int = 3
+const SAVE_HOUR_CELLS: int = 3
+
+## `SpeechTextbox`: `hlcoord 0, 12` with `TEXTBOX_INNERH`/`TEXTBOX_INNERW`, and
+## `PrintText`'s own two rows inside it.
+const SAVE_TEXTBOX_AT: Vector2i = Vector2i(0, 12)
+const SAVE_TEXTBOX_SIZE: Vector2i = Vector2i(20, 6)
+const SAVE_TEXT_AT: Vector2i = Vector2i(1, 14)
+const SAVE_TEXT_SPACING: int = 2
+## How many of a text's lines the box shows at once, which is what makes
+## `_ContText` a scroll rather than a third row.
+const SAVE_TEXT_ROWS: int = 2
+
+## `SaveTheGame_yesorno`'s `lb bc, 0, 7` into `_YesNoBox`, which stores the left
+## coordinate, adds 5 for the right, the top, and adds 4 for the bottom.
+## `YesNoMenuHeader.MenuData` is where the flags and the two strings come from.
+const SAVE_YES_NO_AT: Vector2i = Vector2i(0, 7)
+const SAVE_YES_NO_SPAN: Vector2i = Vector2i(5, 4)
+const SAVE_YES_NO_FLAGS: int = (
+	Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_NO_TOP_SPACING
+)
+const SAVE_YES_NO_OPTIONS: Array[String] = ["YES", "NO"]
+
 var frame_style: int = 0
 var font: Gen2Font = null
 var menu: Gen2MenuPage = null
@@ -84,19 +127,113 @@ func render_list(
 		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8
 	)
 	var box: Gen2MenuBox = list_box(labels.size(), contest)
-	var drawn: Image = menu.render(box, labels, cursor)
-	if drawn != null:
-		image.blit_rect(
-			drawn, Rect2i(Vector2i.ZERO, drawn.get_size()),
-			box.border_position() * TILE
-		)
+	_blit(image, menu.render(box, labels, cursor), box.border_position())
 	if not description.is_empty():
-		var account: Image = _render_account(description)
-		if account != null:
-			image.blit_rect(
-				account, Rect2i(Vector2i.ZERO, account.get_size()), ACCOUNT_AT * TILE
-			)
+		_blit(image, _render_account(description), ACCOUNT_AT)
 	return image
+
+
+## `SaveMenu`'s screen: `DisplaySaveInfoOnSave`'s box in the top-right,
+## `SpeechTextbox` at the foot, and `PlaceYesNoBox`'s own box on the left when a
+## question is up. Transparent everywhere else, since the map stays behind it.
+##
+## [param state] is what [Gen2StartMenuScreen] holds:
+##
+## [codeblock]
+## {
+##   "player_name": String,
+##   "badges": int,
+##   "pokedex": bool,     # STATUSFLAGS_POKEDEX_F, which blanks the #DEX row
+##   "caught": int,
+##   "hours": int, "minutes": int,
+##   "lines": Array,      # the text's own lines, whole
+##   "line": int,         # which of them is on the box's top row
+##   "cursor": int,       # -1 while no yes/no box is up
+## }
+## [/codeblock]
+func render_save(state: Dictionary) -> Image:
+	if menu == null or font == null:
+		return null
+	var image: Image = Image.create_empty(
+		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8
+	)
+	_blit(image, _render_save_info(state), Vector2i(SAVE_INFO_LEFT, SAVE_INFO_TOP))
+	_blit(image, _render_save_textbox(state), SAVE_TEXTBOX_AT)
+	var cursor: int = int(state.get("cursor", -1))
+	if cursor >= 0:
+		var box: Gen2MenuBox = Gen2MenuBox.from_coords(
+			SAVE_YES_NO_AT.x, SAVE_YES_NO_AT.y,
+			SAVE_YES_NO_AT.x + SAVE_YES_NO_SPAN.x,
+			SAVE_YES_NO_AT.y + SAVE_YES_NO_SPAN.y, SAVE_YES_NO_FLAGS
+		)
+		_blit(image, menu.render(box, SAVE_YES_NO_OPTIONS, cursor), SAVE_YES_NO_AT)
+	return image
+
+
+## `Continue_LoadMenuHeader`'s four rows and the three values
+## `Continue_DisplayBadgesDexPlayerName` prints over them. `.MenuData_NoDex`
+## blanks the third row's label, and `Continue_DisplayPokedexNumCaught` returns
+## before its own `PrintNum`, so a player without the Pokedex is shown neither.
+func _render_save_info(state: Dictionary) -> Image:
+	var dex: bool = bool(state.get("pokedex", false))
+	var box: Gen2MenuBox = Gen2MenuBox.from_coords(
+		SAVE_INFO_LEFT, SAVE_INFO_TOP, SAVE_INFO_RIGHT, SAVE_INFO_BOTTOM,
+		SAVE_INFO_FLAGS
+	)
+	var extras: Array = [
+		{"text": String(state.get("player_name", "")), "at": SAVE_NAME_AT},
+		{
+			"text": ("%d" % int(state.get("badges", 0))).lpad(SAVE_BADGE_CELLS),
+			"at": SAVE_BADGES_AT,
+		},
+		{
+			"text": "%s:%02d" % [
+				("%d" % int(state.get("hours", 0))).lpad(SAVE_HOUR_CELLS),
+				int(state.get("minutes", 0)),
+			],
+			"at": SAVE_TIME_AT,
+		},
+	]
+	if dex:
+		extras.append({
+			"text": ("%d" % int(state.get("caught", 0))).lpad(SAVE_DEX_CELLS),
+			"at": SAVE_DEX_AT,
+		})
+	return menu.render(
+		box, ["PLAYER", "BADGES", "#DEX" if dex else " ", "TIME"], -1, "", 0, extras
+	)
+
+
+## The speech box and the two lines of the text standing in it. A text longer
+## than the box is scrolled by [code]state["line"][/code], which is what
+## `_ContText` does to `AlreadyASaveFileText`'s third line.
+func _render_save_textbox(state: Dictionary) -> Image:
+	var width: int = SAVE_TEXTBOX_SIZE.x * TILE
+	var indices := PackedByteArray()
+	indices.resize(width * SAVE_TEXTBOX_SIZE.y * TILE)
+	font.draw_box(
+		frame_style, indices, width, 0, 0, SAVE_TEXTBOX_SIZE.x, SAVE_TEXTBOX_SIZE.y
+	)
+	var lines: Array = state.get("lines", [])
+	var first: int = maxi(int(state.get("line", 0)), 0)
+	var at: Vector2i = SAVE_TEXT_AT - SAVE_TEXTBOX_AT
+	for row: int in SAVE_TEXT_ROWS:
+		var index: int = first + row
+		if index < 0 or index >= lines.size():
+			continue
+		font.draw_text(
+			String(lines[index]), indices, width,
+			at.x * TILE, (at.y + row * SAVE_TEXT_SPACING) * TILE
+		)
+	return Gen2PicImage.from_indices(
+		indices, width, SAVE_TEXTBOX_SIZE.y * TILE, _palette()
+	)
+
+
+func _blit(into: Image, part: Image, at: Vector2i) -> void:
+	if part == null:
+		return
+	into.blit_rect(part, Rect2i(Vector2i.ZERO, part.get_size()), at * TILE)
 
 
 ## `_Option`'s whole screen: the border, `StringOptions` and each row's own

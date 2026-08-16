@@ -21,6 +21,7 @@ func _dump() -> PackedByteArray:
 	var data: PackedByteArray = PackedByteArray()
 	data.resize(RomRegistry.EXPECTED_SIZE)
 	_write(data, RomLayout.font_offset(_layout), _font())
+	_write(data, RomLayout.font_extra_offset(_layout), _font_extra())
 	for frame: int in RomLayout.FRAME_COUNT:
 		_write(data, RomLayout.frame_offset(_layout, frame), _frame(frame))
 	return data
@@ -41,6 +42,23 @@ func _font() -> PackedByteArray:
 			continue
 		for row: int in Gen2Tiles.TILE_1BPP_BYTES:
 			out[tile * Gen2Tiles.TILE_1BPP_BYTES + row] = 0x7E
+	return out
+
+
+## Ink on every tile `_LoadFontsExtra1` loads, and the ellipsis's own single row
+## of dots on the seventh, which is the shape the check pins.
+func _font_extra() -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(RomLayout.FONT_EXTRA_TILES * Gen2Tiles.TILE_BYTES)
+	for code: int in range(
+		RomLayout.FONT_EXTRA_LOADED_FIRST, RomLayout.FONT_EXTRA_LOADED_LAST + 1
+	):
+		var tile: int = code - RomLayout.FONT_EXTRA_FIRST_CODE
+		var rows: Array = [6] if code == Gen2Text.ELLIPSIS_CODE else range(
+			Gen2Tiles.TILE_1BPP_BYTES
+		)
+		for row: int in rows:
+			out[tile * Gen2Tiles.TILE_BYTES + 2 * row] = 0x92
 	return out
 
 
@@ -83,6 +101,26 @@ func test_a_plausible_font_and_borders_verify() -> void:
 	var data: PackedByteArray = _dump()
 	assert_true(RomImporter.verify_font(_rom(data), _layout)["ok"])
 	assert_true(RomImporter.verify_frames(_rom(data), _layout)["ok"])
+
+
+## FontExtra has no pinned address: it is read off the font's, so the check that
+## it is the right sheet is the only thing standing between "…" and a blank.
+func test_a_font_extra_one_tile_out_fails() -> void:
+	var data: PackedByteArray = _dump()
+	_write(
+		data, RomLayout.font_extra_offset(_layout) + Gen2Tiles.TILE_BYTES,
+		_font_extra()
+	)
+	assert_false(RomImporter.verify_font(_rom(data), _layout)["ok"])
+
+
+func test_a_font_extra_with_no_ellipsis_fails() -> void:
+	var data: PackedByteArray = _dump()
+	var at: int = RomLayout.font_extra_offset(_layout) \
+		+ (Gen2Text.ELLIPSIS_CODE - RomLayout.FONT_EXTRA_FIRST_CODE) * Gen2Tiles.TILE_BYTES
+	for row: int in Gen2Tiles.TILE_1BPP_BYTES:
+		data[at + 2 * row] = 0xFF
+	assert_false(RomImporter.verify_font_extra(_rom(data), _layout)["ok"])
 
 
 func test_a_font_one_tile_out_fails() -> void:

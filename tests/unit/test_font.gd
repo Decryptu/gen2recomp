@@ -10,8 +10,10 @@ const SHEET_TILES: int = 3
 const WIDTH: int = SHEET_TILES * Gen2Font.TILE
 
 const BATTLE_EXTRA_WIDTH: int = RomLayout.BATTLE_FONT_TILES * Gen2Font.TILE
+const FONT_EXTRA_WIDTH: int = RomLayout.FONT_EXTRA_TILES * Gen2Font.TILE
 ## Not [constant Gen2Tiles.INK], so a pixel says which strip it came from.
 const BATTLE_EXTRA_INK: int = 2
+const FONT_EXTRA_INK: int = 1
 
 var _directory: String = ""
 var _font: Gen2Font = null
@@ -48,6 +50,12 @@ func _write_cache() -> void:
 	battle_extra.fill(BATTLE_EXTRA_INK)
 	RomCache.write_indices(RomCache.tile_path(_directory, "battle_font"), battle_extra)
 
+	# FontExtra, which is under that same run whenever the battle strip is not.
+	var extra: PackedByteArray = PackedByteArray()
+	extra.resize(FONT_EXTRA_WIDTH * Gen2Font.TILE)
+	extra.fill(FONT_EXTRA_INK)
+	RomCache.write_indices(RomCache.tile_path(_directory, "font_extra"), extra)
+
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "fontgame",
@@ -65,6 +73,11 @@ func _write_cache() -> void:
 			"battle_font": {
 				"width": BATTLE_EXTRA_WIDTH, "height": Gen2Font.TILE,
 				"tiles": RomLayout.BATTLE_FONT_TILES, "first_code": 0,
+			},
+			"font_extra": {
+				"width": FONT_EXTRA_WIDTH, "height": Gen2Font.TILE,
+				"tiles": RomLayout.FONT_EXTRA_TILES,
+				"first_code": RomLayout.FONT_EXTRA_FIRST_CODE,
 			},
 		},
 	})
@@ -169,10 +182,32 @@ func test_a_battle_extra_code_is_drawn_from_that_strip() -> void:
 	assert_eq(into[0], BATTLE_EXTRA_INK)
 
 
-func test_the_same_code_draws_nothing_with_the_main_font_loaded() -> void:
-	# The main font sheet starts at $80, so $74 is below it and has no tile.
+func test_the_same_code_is_font_extras_with_the_main_font_loaded() -> void:
+	# `_LoadFontsExtra1` is what stands in that run outside a battle, so $74 is
+	# № under one strip and the middle dot under the other.
 	var into: PackedByteArray = _canvas(1)
 	_font.draw_code(0x74, into, Gen2Font.TILE, 0, 0)
+	assert_eq(into[0], FONT_EXTRA_INK)
+
+
+## The three codes below `_LoadFontsExtra1`'s own `vTiles2 tile '<BOLD_D>'` are
+## overwritten by black, the up arrow and the phone icon, so FontExtra's first
+## three tiles never reach the screen through this path.
+func test_the_run_below_bold_d_is_not_drawn_from_font_extra() -> void:
+	var into: PackedByteArray = _canvas(1)
+	_font.draw_code(RomLayout.FONT_EXTRA_LOADED_FIRST - 1, into, Gen2Font.TILE, 0, 0)
+	assert_eq(into[0], 0)
+
+
+func test_a_cache_without_font_extra_draws_that_run_blank() -> void:
+	var manifest: Dictionary = RomCache.read_manifest(_directory)
+	(manifest["tiles"] as Dictionary).erase("font_extra")
+	RomCache.write_json(RomCache.manifest_path(_directory), manifest)
+
+	var font: Gen2Font = Gen2Font.from_data(GameData.open_directory(_directory))
+	assert_not_null(font)
+	var into: PackedByteArray = _canvas(1)
+	font.draw_code(Gen2Text.ELLIPSIS_CODE, into, Gen2Font.TILE, 0, 0)
 	assert_eq(into[0], 0)
 
 
