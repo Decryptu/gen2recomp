@@ -140,7 +140,8 @@ Facing something and pressing A is the other way to every field move: a cut
 tree, a whirlpool, a waterfall, a headbutt tree and open water each offer their
 move in the cartridge's own order and words. Fruit trees bear once a day, Poke
 Balls and hidden items are picked up by facing them, and the imported Players
-House PC opens box storage.
+House PC opens box storage. Walking into a new area raises Crystal's own map name
+sign for sixty frames, which Gold and Silver never had.
 
 Icons come from [Lucide](https://lucide.dev). See
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
@@ -201,7 +202,7 @@ or `all`; with no argument it lists them.
 | `terrain` | Ledge hops, side walls, every map's drawn blocks, the story's map ids |
 | `johto` | Radio Tower, the Rising Badge, command queues, item balls, Route 27, the Magnet Train |
 | `kanto` | Each city, its gym and the way in, from Vermilion to Mt. Silver |
-| `art` | Both intro movies, the credits, the region map, all 278 battle animations |
+| `art` | Both intro movies, the credits, the region map, all 278 battle animations, the map name sign |
 | `tables` | TM/HM, naming, world scripts, the opening lane |
 | `trainers` | The Route 30 trainer on each profile |
 

@@ -340,6 +340,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not mart_text["ok"]:
 		return mart_text
 
+	var map_entry_sign: Dictionary = verify_map_entry_sign(rom, layout)
+	if not map_entry_sign["ok"]:
+		return map_entry_sign
+
 	var pack: Dictionary = verify_pack(rom, layout)
 	if not pack["ok"]:
 		return pack
@@ -2211,6 +2215,27 @@ const PACK_KRIS_COLORS: Array[int] = [
 ## The two were located independently, so the constant gap is what says both are
 ## right rather than both being plausible.
 const PACK_NAME_TILEMAP_GAP: int = 0x135
+
+
+## `MapEntryFrameGFX`, which `gfx/font.asm` lays down immediately before
+## `FontsExtra2_UpArrowGFX`. The two were pinned independently, so the sheet
+## ending exactly where the arrow starts is what says both are right.
+static func verify_map_entry_sign(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int(layout.get("map_entry_sign", -1))
+	if at < 0:
+		return {"ok": true, "message": "No map name sign on this cartridge."}
+	var bytes: int = RomLayout.MAP_ENTRY_SIGN_TILES * RomLayout.TILE_BYTES_2BPP
+	if not rom.in_bounds(at, bytes):
+		return {"ok": false, "message": "The map name sign is outside the cartridge."}
+	var arrow: int = int((layout.get("up_arrow", {}) as Dictionary).get("offset", -1))
+	if at + bytes != arrow:
+		return {
+			"ok": false,
+			"message": "The map name sign ends at $%X, expected the up arrow's $%X." % [
+				at + bytes, arrow,
+			],
+		}
+	return {"ok": true, "message": "Map name sign verified."}
 
 
 ## The pack screen's four runs. Both palette sets are checked colour for colour,
@@ -5197,6 +5222,17 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 		sheets["game_freak_stars"] = {
 			"offset": int(presents["stars"]),
 			"tiles": RomLayout.PRESENTS_STARS_TILES,
+			"first_code": 0,
+			"bits": 2,
+		}
+
+	## `MapEntryFrameGFX`, the map name sign's frame. Crystal only: Gold and
+	## Silver ship neither the sheet nor `InitMapNameSign`, and say so with the
+	## -1 every absent record uses.
+	if int(layout.get("map_entry_sign", -1)) >= 0:
+		sheets["map_entry_sign"] = {
+			"offset": int(layout["map_entry_sign"]),
+			"tiles": RomLayout.MAP_ENTRY_SIGN_TILES,
 			"first_code": 0,
 			"bits": 2,
 		}

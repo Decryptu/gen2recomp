@@ -24,6 +24,9 @@ extends SceneTree
 ## warp tile named by the two numbers below it, and the picture is
 ## `FadeOutToWhite`'s last order, which is the frame the new map is loaded on:
 ## `crystal 24 7 ... warp 7 1` is the bedroom staircase),
+## `map_name_sign` (`InitMapNameSign`'s window, raised by walking west off the
+## map's edge onto its neighbour: `crystal 24 4 ... map_name_sign 1 8` crosses
+## New Bark Town into Route 29),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -195,6 +198,18 @@ func _process(_delta: float) -> bool:
 				if StringName(fade.get("stage", &"")) == &"out" \
 					and int(fade.get("step", 0)) == Gen2WorldPalette.FADE_OUT_ORDERS.size() - 1:
 					break
+		elif _kind == &"map_name_sign":
+			## `MapSetupScript_Connection`'s `InitMapNameSign`: walked west off
+			## New Bark Town's edge onto Route 29, photographed while the sign
+			## the crossing raised is still up (`crystal 24 4 ... map_name_sign
+			## 0 6`). The camera and the tile animation both keep running behind
+			## it, which is the whole point of the row.
+			for _frame: int in WARP_FRAME_CAP:
+				_screen.move_left()
+				_screen.advance_frame()
+				if _screen.map_name_sign_frames() > 0 \
+					and _screen.map_name_sign_frames() < Gen2WorldAPI.MAP_NAME_SIGN_FRAMES:
+					break
 		elif _kind == &"pokepic":
 			_screen.preview_pokepic(POKEPIC_SPECIES)
 		elif FIELD_ITEMS.has(_kind):
@@ -210,9 +225,9 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		if _kind != &"warp":
-			## The `warp` kind drove itself to the frame it wants; every other
-			## kind stages a sprite and then spends the frames it needs.
+		if _kind not in [&"warp", &"map_name_sign"]:
+			## Those two kinds drove themselves to the frame they want; every
+			## other kind stages a sprite and then spends the frames it needs.
 			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
 				_screen.advance_frame()
 	if _frames < 18:

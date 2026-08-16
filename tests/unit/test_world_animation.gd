@@ -186,3 +186,25 @@ func test_tile_frames_answers_every_frame_in_order_without_moving_the_sequence()
 	assert_eq(animation.command_index(), at)
 	# A tile no command touches has no frames, rather than one of itself.
 	assert_eq(animation.tile_frames(1).size(), 0)
+
+
+func test_reload_tileset_keeps_the_place_a_connection_crossing_left() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+	for _frame: int in 3:
+		animation.advance_frame()
+	var at: int = animation.command_index()
+	assert_ne(at, 0)
+
+	# `MapSetupScript_Connection` carries `LoadMapTileset` and no
+	# `LoadMapGraphics`, so nothing resets `hTileAnimFrame`: the neighbour's own
+	# command list is loaded where the sequence stands.
+	var neighbour := Gen2WorldAPI.open(data, 1, 2, Vector2i.ZERO)
+	animation.reload_tileset(neighbour)
+	assert_eq(animation.command_index(), at)
+	assert_eq(animation.tileset.number, 1)
+	# A warp is the other setup script and does reset it.
+	animation.configure(neighbour)
+	assert_eq(animation.command_index(), 0)

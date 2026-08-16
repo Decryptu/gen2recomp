@@ -165,3 +165,43 @@ func test_no_input_is_taken_while_the_warp_fade_runs() -> void:
 	assert_false(_screen.move_player(Vector2i.DOWN), "no step is taken")
 	assert_true(_screen.press_button(Gen2Button.A), "and A is swallowed rather than used")
 	assert_eq(_screen._world.player_cell, cell)
+
+
+## `InitMapNameSign` sits inside the same setup script: the warp crosses from the
+## map's own landmark into the house's, so a sign is raised, and
+## `PlaceMapNameSign` counts `wLandmarkSignTimer`'s sixty frames down behind it.
+func test_a_warp_into_another_landmark_raises_the_map_name_sign() -> void:
+	_screen = await _walk_onto_the_door()
+	assert_eq(_screen.map_name_sign_frames(), 0, "nothing is up while the fade runs")
+	for _frame: int in WALK_FRAME_CAP:
+		_screen.advance_frame()
+		if _screen.map_name_sign_frames() > 0:
+			break
+	assert_eq(
+		_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES,
+		"the sign is raised once the map is loaded, with all sixty frames to spend"
+	)
+	for _frame: int in Gen2WorldAPI.MAP_NAME_SIGN_FRAMES - 1:
+		_screen.advance_frame()
+	assert_eq(_screen.map_name_sign_frames(), 1, "still up on its last frame")
+	_screen.advance_frame()
+	assert_eq(_screen.map_name_sign_frames(), 0, "and gone on the sixtieth")
+
+
+## `.CheckMovingWithinLandmark`: the map the world opens on is `wPrevLandmark`,
+## so walking back into the landmark just left raises nothing.
+func test_a_warp_back_into_the_same_landmark_raises_no_sign() -> void:
+	assert_eq(_world.map_name_sign_pending(), -1, "opening a world raises none")
+	var home: Gen2WorldMap = _data.world_map(
+		Gen2WorldSpawn.NEW_BARK_GROUP, Gen2WorldSpawn.PLAYERS_HOUSE_2F
+	)
+	_world._apply_map(
+		_data.world_map(Fixture.MAP_GROUP, Fixture.MAP_NUMBER),
+		_world.current_tileset, Vector2i(2, 2)
+	)
+	assert_eq(_world.map_name_sign_pending(), -1, "the same landmark, so no sign")
+	_world._apply_map(home, _data.world_tileset(home.tileset), Vector2i(1, 1))
+	assert_eq(
+		_world.map_name_sign_pending(), Fixture.HOME_MAP_LANDMARK,
+		"and the house's own landmark is what the sign names"
+	)

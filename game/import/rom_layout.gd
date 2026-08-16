@@ -563,6 +563,11 @@ const FRAME_VERTICAL: int = 3
 const FRAME_BOTTOM_LEFT: int = 4
 const FRAME_BOTTOM_RIGHT: int = 5
 
+## `MapEntryFrameGFX`, the fourteen tiles `LoadMapNameSignGFX` requests into
+## `vTiles2 tile MAP_NAME_SIGN_START`. `PlaceMapNameFrame` addresses them by
+## offset from that base, so the strip is stored in the cartridge's own order.
+const MAP_ENTRY_SIGN_TILES: int = 14
+
 ## The battle HUD's own graphics, which sit in the same section as the font and
 ## the text box borders and are the rest of what a battle screen draws.
 ##
@@ -1619,6 +1624,9 @@ const GOLD_SILVER: Dictionary = {
 	# `FontsExtra_SolidBlackAndUpArrowGFX`' second tile, which is 1bpp here and
 	# a 2bpp sheet of its own on Crystal. Both are unique in their dump.
 	"up_arrow": {"offset": 0xF9306, "bits": 1},
+	# No `MapEntryFrameGFX` and no `InitMapNameSign` on these two: the map name
+	# sign is Crystal's own screen.
+	"map_entry_sign": -1,
 	"enemy_hud": 0xF8BB2,
 	"player_hud": 0xF8BD2,
 	"exp_bar": 0xF8C02,
@@ -2040,6 +2048,11 @@ const CRYSTAL: Dictionary = {
 	"battle_font": 0xF8600,
 	# `FontsExtra2_UpArrowGFX`, its own 2bpp tile here.
 	"up_arrow": {"offset": 0xF9424, "bits": 2},
+	# `MapEntryFrameGFX`, the map name sign's own fourteen tiles. It is the entry
+	# before `FontsExtra2_UpArrowGFX` in `gfx/font.asm` and ends exactly where
+	# that one starts, which is what checks the address. Gold and Silver ship
+	# neither the sheet nor `InitMapNameSign`, and say so with a -1.
+	"map_entry_sign": 0xF9344,
 	"enemy_hud": 0xF8AC0,
 	"player_hud": 0xF8AE0,
 	"exp_bar": 0xF8B10,

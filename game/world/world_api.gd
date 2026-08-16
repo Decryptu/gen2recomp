@@ -101,6 +101,25 @@ const BGEVENT_IFNOTSET: int = 6
 const BGEVENT_ITEM: int = 7
 const BGEVENT_COPY: int = 8
 
+## `InitMapNameSign`. `wCurLandmark` is -1 on a map that has no name to show,
+## and the five landmarks `.CheckSpecialMap` names get no sign either, alongside
+## `LANDMARK_SPECIAL` itself. Crystal indices, since the sign is Crystal's own
+## screen. The two National Park gates are `GROUP_ROUTE_35_NATIONAL_PARK_GATE`'s
+## maps 15 and 17, which `.CheckNationalParkGate` names because their
+## environment is not `GATE`.
+const MAP_NAME_SIGN_NO_LANDMARK: int = -1
+const MAP_NAME_SIGN_FRAMES: int = 60
+const NATIONAL_PARK_GATE_GROUP: int = 10
+const NATIONAL_PARK_GATE_MAPS: Array[int] = [15, 17]
+const MAP_NAME_SIGN_SILENT_LANDMARKS: Array[int] = [
+	Gen2WorldRadio.LANDMARK_SPECIAL,
+	0x11,  # LANDMARK_RADIO_TOWER
+	0x46,  # LANDMARK_LAV_RADIO_TOWER
+	0x3B,  # LANDMARK_UNDERGROUND_PATH
+	0x5A,  # LANDMARK_INDIGO_PLATEAU
+	0x44,  # LANDMARK_POWER_PLANT
+]
+
 var data: GameData = null
 var state: Gen2WorldState = null
 var inventory: Gen2WorldInventory = null
@@ -129,6 +148,12 @@ var last_spawn_map: Vector2i = Vector2i(-1, -1)
 ## the player last came into a cave through, which is where Dig and an Escape
 ## Rope put them back. Empty until one is walked.
 var dig_warp: Dictionary = {}
+## `wPrevLandmark`, which is not saved on the cartridge either: `NewGame` writes
+## New Bark Town into it and `FinishContinueFunction` sets SHOWN_MAP_NAME_SIGN so
+## the map a loaded game opens on raises no sign. Opening a world is both of
+## those, so the map it opens on is what the field starts as.
+var _prev_landmark: int = MAP_NAME_SIGN_NO_LANDMARK
+var _map_name_sign: int = MAP_NAME_SIGN_NO_LANDMARK
 var _script_queue: Array = []
 var _active_script: Gen2WorldScriptRunner = null
 var _map_entry_scene_pending: bool = false
@@ -343,6 +368,7 @@ func _init(
 	# Opening a world is `StartMap`, which falls into `EnterMap`: the five-step
 	# cooldown is set here for the same reason _apply_map() sets it on a warp.
 	state.set_wild_encounter_cooldown(Gen2WorldState.WILD_ENCOUNTER_COOLDOWN_STEPS)
+	_prev_landmark = map_name_sign_landmark()
 	_load_objects()
 	_apply_map_music()
 
@@ -357,6 +383,53 @@ func map_id() -> Vector2i:
 ## no caller and is deliberately not modelled.
 func landmark() -> int:
 	return current_map.location if current_map != null else Gen2WorldRadio.LANDMARK_SPECIAL
+
+
+## `InitMapNameSign`'s own `wCurLandmark`: a gate borrows nobody's name, so its
+## landmark is -1 and no sign is ever raised on it. `.CheckNationalParkGate`
+## names the two gates whose environment is not `GATE` and folds them in.
+func map_name_sign_landmark() -> int:
+	if current_map == null:
+		return MAP_NAME_SIGN_NO_LANDMARK
+	if current_map.environment == ENVIRONMENT_GATE \
+		or (current_map.group == NATIONAL_PARK_GATE_GROUP
+			and NATIONAL_PARK_GATE_MAPS.has(current_map.number)):
+		return MAP_NAME_SIGN_NO_LANDMARK
+	return landmark()
+
+
+## The landmark a sign is waiting to be raised for, or -1 for no sign. Read once
+## by the host, which owns the sixty frames it is up for; `InitMapNameSign`
+## itself only decides and loads.
+func map_name_sign_pending() -> int:
+	return _map_name_sign
+
+
+func clear_map_name_sign() -> void:
+	_map_name_sign = MAP_NAME_SIGN_NO_LANDMARK
+
+
+## `InitMapNameSign`, which every map setup script but the submenu's reaches.
+##
+## The sign is Crystal's own screen: pokegold ships neither `MapEntryFrameGFX`
+## nor the routine, so the whole decision is skipped there. `wPrevLandmark` is
+## written on both branches, which is what makes a walk through a gate silent on
+## the way out as well as the way in.
+func _init_map_name_sign() -> void:
+	var current: int = map_name_sign_landmark()
+	var previous: int = _prev_landmark
+	_prev_landmark = current
+	_map_name_sign = MAP_NAME_SIGN_NO_LANDMARK
+	if not Gen2WorldState.is_crystal_profile(data):
+		return
+	## `.CheckMovingWithinLandmark`: the same landmark, or arriving from a map
+	## that had none.
+	if current == previous or previous == Gen2WorldRadio.LANDMARK_SPECIAL:
+		return
+	if current == MAP_NAME_SIGN_NO_LANDMARK \
+		or MAP_NAME_SIGN_SILENT_LANDMARKS.has(current):
+		return
+	_map_name_sign = current
 
 
 ## GetMapMusic_MaybeSpecial: SpecialMapMusic answers first, so a surfing player
@@ -5087,6 +5160,7 @@ func _apply_map(
 	# station: its own track is not this map's, so the comparison fails and the
 	# map's music wins.
 	_apply_map_music()
+	_init_map_name_sign()
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
 	_map_entry_scene_ran = false
