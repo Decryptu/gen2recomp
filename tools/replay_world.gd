@@ -37,6 +37,15 @@ const DIRECTIONS: Array[int] = [
 const ROUTE_GROUP: int = Gen2WorldSpawn.NEW_BARK_GROUP
 const ROUTE_MAPS: int = 8
 
+## Cherrygrove's mart, which is map 1/8 with the clerk on (1,3) and its two door
+## cells on (2,7) and (3,7) in all three caches, so one errand route sweeps
+## every profile the way the walk routes do.
+const MART_MAP: Vector2i = Vector2i(1, 8)
+const MART_DOOR: Vector2i = Vector2i(3, 7)
+## The counter cell the clerk is talked to across, which is `preview_world_story`'s
+## own MART_CLERK_FACE: `CheckFacingObject` reaches two cells over a `$90`.
+const MART_COUNTER: Vector2i = Vector2i(3, 3)
+
 var _failures: int = 0
 var _routes: int = 0
 
@@ -73,11 +82,21 @@ func _sweep() -> void:
 
 
 ## Every map in the spawn group the cache ships, entered on a cell the cartridge
-## itself warps onto, plus the new game's own spawn. A route list rather than one
-## map, because a walk that never leaves an empty bedroom proves the pump on
-## nothing.
+## itself warps onto, plus the new game's own spawn and one scripted errand. A
+## route list rather than one map, because a walk that never leaves an empty
+## bedroom proves the pump on nothing.
 func _routes_for(data: GameData) -> Array:
-	var out: Array = [{"name": "new_game_spawn", "spawn": true}]
+	var out: Array = [
+		{"name": "new_game_spawn", "spawn": true},
+		{
+			"name": "mart_errand",
+			"spawn": true,
+			"errand": true,
+			"group": MART_MAP.x,
+			"number": MART_MAP.y,
+			"cell": MART_DOOR,
+		},
+	]
 	for number: int in range(1, ROUTE_MAPS + 1):
 		var map: Gen2WorldMap = data.world_map(ROUTE_GROUP, number)
 		if map == null:
@@ -99,7 +118,8 @@ func _check_route(data: GameData, route: Dictionary, frames: int) -> int:
 	_routes += 1
 	var failures: int = 0
 	var seed_value: int = _route_seed(data, route)
-	var program: Array = _program(seed_value, frames)
+	var errand: bool = bool(route.get("errand", false))
+	var program: Array = _program(seed_value, frames, errand)
 
 	var recorded: Dictionary = await _run(data, route, seed_value, frames, program, true)
 	if not bool(recorded.get("ok", false)):
@@ -112,6 +132,12 @@ func _check_route(data: GameData, route: Dictionary, frames: int) -> int:
 	## closes in the story walker.
 	if String(recorded["world"]) == String(recorded["initial"]):
 		_report(data, route, "record", "the run moved no world state, so it proves nothing")
+		return 1
+	## And an errand that never reached the till is a walk around a shop: the
+	## money is what says the clerk's script ran, the overlay opened and a
+	## purchase was committed, which is the whole reason this route is here.
+	if errand and int(recorded["money"]) >= int(recorded["initial_money"]):
+		_report(data, route, "record", "the mart took no money, so no purchase was replayed")
 		return 1
 
 	for label: String in ["replay", "30fps", "144fps"]:
@@ -160,6 +186,13 @@ func _run(
 	save.run_seed = seed_value
 	if bool(route.get("spawn", false)):
 		save.world = Gen2WorldSpawn.new_game_snapshot(data)
+		## An errand starts from the new game's own snapshot rather than a bare
+		## map, because the start money is what a mart spends and only the spawn
+		## carries it, and then stands on the errand's map.
+		if bool(route.get("errand", false)) and save.world != null:
+			save.world.map_id = Vector2i(int(route["group"]), int(route["number"]))
+			save.world.player_cell = route["cell"]
+			save.world.last_spawn_map = save.world.map_id
 	else:
 		screen.map_group = int(route["group"])
 		screen.map_number = int(route["number"])
@@ -180,6 +213,7 @@ func _run(
 	screen.set_process(false)
 
 	var initial: String = JSON.stringify(screen._world.snapshot().to_dict(), "\t")
+	var initial_money: int = screen._world.state.money()
 	screen.replay_input(log)
 	if recording:
 		screen.record_input()
@@ -195,6 +229,7 @@ func _run(
 
 	var state: String = _state(screen, save)
 	var world: String = JSON.stringify(screen._world.snapshot().to_dict(), "\t")
+	var money: int = screen._world.state.money()
 	var consumed: Array = screen.input_recording()
 	root.remove_child(screen)
 	screen.free()
@@ -202,6 +237,8 @@ func _run(
 		"ok": true,
 		"state": state,
 		"initial": initial,
+		"initial_money": initial_money,
+		"money": money,
 		"world": world,
 		"log": log if not recording else consumed,
 	}
@@ -220,7 +257,9 @@ func _state(screen: Gen2WorldScreen, save: Gen2SaveData) -> String:
 ## The input a run is driven by: a direction held for a while, an occasional A,
 ## and nothing else the cartridge's own controller does not have. Deterministic
 ## in the route's seed, so the generated program is itself reproducible.
-func _program(seed_value: int, frames: int) -> Array:
+func _program(seed_value: int, frames: int, errand: bool = false) -> Array:
+	if errand:
+		return _errand_program(frames)
 	var random := RandomNumberGenerator.new()
 	random.seed = seed_value
 	var log: Array = []
@@ -236,6 +275,36 @@ func _program(seed_value: int, frames: int) -> Array:
 				break
 			log.append({"frame": frame, "kind": "hold", "button": direction})
 			frame += 1
+	return log
+
+
+## The scripted errand: walk the door column up to the counter, turn into the
+## clerk, and then press A on a cadence for the rest of the run. That one button
+## carries the whole leg, because every step of it answers a press: the clerk's
+## `pokemart` dialog, the mart overlay's own A, and the boxes on either side.
+##
+## Held rather than counted out step by step: `move_player` refuses while a step
+## is in flight, so a direction held to the counter arrives on the cell whatever
+## the walk rate is, and the turn into the counter is a press the wall refuses to
+## move on.
+func _errand_program(frames: int) -> Array:
+	var log: Array = []
+	var walk: int = mini(frames, (MART_DOOR.y - MART_COUNTER.y) * Gen2WorldAPI.STEP_FRAMES_WALK)
+	for frame: int in range(1, walk + 1):
+		log.append({"frame": frame, "kind": "hold", "button": Gen2Button.UP})
+	## Clear of the walk rather than up against it: `move_player` refuses a press
+	## while the last step is still in flight, and a turn that is refused leaves
+	## the player facing the wall behind the counter instead of the clerk.
+	if walk + Gen2WorldAPI.STEP_FRAMES_WALK * 3 <= frames:
+		log.append({
+			"frame": walk + Gen2WorldAPI.STEP_FRAMES_WALK * 3,
+			"kind": "press",
+			"button": Gen2Button.LEFT,
+		})
+	var frame: int = walk + Gen2WorldAPI.STEP_FRAMES_WALK * 5
+	while frame <= frames:
+		log.append({"frame": frame, "kind": "press", "button": Gen2Button.A})
+		frame += 8
 	return log
 
 
