@@ -69,6 +69,7 @@ var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
 var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
+var _mart_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -167,6 +168,8 @@ static func open_directory(path: String) -> GameData:
 	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
 	var menu_text: Variant = manifest.get("menu_text", {})
 	data._menu_text = menu_text if menu_text is Dictionary else {}
+	var mart_text: Variant = manifest.get("mart_text", {})
+	data._mart_text = mart_text if mart_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -1295,6 +1298,14 @@ func copyright_palette() -> PackedColorArray:
 ## which is the caller's cue to use its own wording.
 func menu_text(key: String) -> String:
 	return String(_menu_text.get(key, ""))
+
+
+## One of `engine/items/mart.asm`'s own boxes, by the name
+## `RomLayout.MART_TEXT_AT` gives its stub, still carrying [Gen2TextStream]'s
+## markers for the quantity, the item name and the price. Empty on a cache
+## imported before them.
+func mart_text(name: String) -> String:
+	return String(_mart_text.get(name, ""))
 
 
 ## `.MenuDesc`'s line for one start-menu item, by the item's own kind. Empty for

@@ -601,6 +601,8 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"pokegear": [RomLayout.POKEGEAR_TILES, 2],
 		"pokegear_sprites": [RomLayout.POKEGEAR_SPRITE_TILES, 3],
 		"dex_nest_icon": [RomLayout.DEX_NEST_ICON_TILES, 3],
+		## `'▲'`, the single tile a scrolling menu draws its own arrow from.
+		"up_arrow": [1, 2],
 		## `Pokedex_LoadGFX`'s two runs, `UnownFont` and the footprint grid, at
 		## their real lengths so the dex page can address every tile a layout
 		## names. Flat fills like the rest: what a test checks is where each
@@ -618,6 +620,7 @@ static func _write_battle_graphics(directory: String, manifest: Dictionary) -> v
 		"font": RomLayout.FONT_FIRST_CODE,
 		"frames": RomLayout.FRAME_FIRST_CODE,
 		"copyright": RomLayout.COPYRIGHT_FIRST_CODE,
+		"up_arrow": Gen2Text.UP_ARROW_CODE,
 	}
 	for name: String in sheet_tiles:
 		var tile_count: int = int(sheet_tiles[name][0])
