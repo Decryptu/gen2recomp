@@ -12,6 +12,11 @@ extends RefCounted
 ## about a specific dump, which is why an uncharacterised ROM is refused rather
 ## than guessed at, and an offset is only trustworthy alongside its check in
 ## [method RomImporter.verify_layout].
+##
+## So the comments here are dense on purpose and this file is the one exemption
+## from the density rule in `docs/CONTRIBUTING.md`: most of them record how an
+## offset was found, which is the evidence for a number rather than a restatement
+## of the code beside it. Tighten the wording, never delete the derivation.
 
 const SPECIES_COUNT: int = 251
 const NAME_LENGTH: int = 10

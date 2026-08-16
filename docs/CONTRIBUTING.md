@@ -157,7 +157,9 @@ subject. Before creating any file, name the existing one it cannot go in.
 - **Comments.** A source symbol plus a one-line reason. Comment non-obvious
   constraints and quirks; never restate the line below. No section banners, no
   doc comment on a self-evident function. Net new comment lines should stay a
-  small fraction of net new code lines.
+  small fraction of net new code lines. `rom_layout.gd` is the one exemption and
+  says why in its own header: a comment recording how an offset was located is
+  the evidence for that number, not an explanation of the code.
 
 When something changes, replace the old text. Never append a correction, and
 never let a file grow just because work happened.
