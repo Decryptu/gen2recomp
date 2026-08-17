@@ -10,12 +10,30 @@ extends RefCounted
 const STATICMENU_ENABLE_LEFT_RIGHT: int = Gen2MenuBox.STATICMENU_ENABLE_LEFT_RIGHT
 const STATICMENU_WRAP: int = Gen2MenuBox.STATICMENU_WRAP
 
+## `YesNoBox`'s own `lb bc, SCREEN_WIDTH - 6, 7`, which `_YesNoBox` turns into
+## the five-wide, four-tall box at (14,7). A `choice` pending value carries no
+## `loadmenu` header, since `Script_yesorno` never loads one, so this is the
+## box every such prompt falls back to.
+const YES_NO_LEFT: int = 14
+const YES_NO_TOP: int = 7
+const YES_NO_RIGHT: int = 19
+const YES_NO_BOTTOM: int = 11
+
 var kind: StringName = &"vertical"
 var options: Array = []
 var flags: int = 0
 var rows: int = 0
 var columns: int = 1
 var cursor: int = 0
+## `menu_coords x1, y1, x2, y2`, imported off the `LoadMenuHeader` a scripted
+## `verticalmenu`/`2dmenu` reads. [const YES_NO_LEFT] and its three siblings
+## when there is no such header.
+var box_left: int = YES_NO_LEFT
+var box_top: int = YES_NO_TOP
+var box_right: int = YES_NO_RIGHT
+var box_bottom: int = YES_NO_BOTTOM
+## `Place2DMenuItemStrings`' own column spacing, a `2d` menu's `db spacing`.
+var _spacing: int = 0
 
 
 static func from_input(input: Dictionary) -> Gen2WorldMenu:
@@ -31,9 +49,26 @@ static func from_input(input: Dictionary) -> Gen2WorldMenu:
 	if menu.kind == &"2d":
 		menu.rows = maxi(1, int(header.get("rows", menu.rows)))
 		menu.columns = maxi(1, int(header.get("columns", menu.columns)))
+		menu._spacing = int(header.get("spacing", 0))
 	var default_position: int = int(header.get("default", 1)) - 1
 	menu.cursor = menu._clamp_position(default_position)
+	menu.box_left = int(header.get("left", YES_NO_LEFT))
+	menu.box_top = int(header.get("top", YES_NO_TOP))
+	menu.box_right = int(header.get("right", YES_NO_RIGHT))
+	menu.box_bottom = int(header.get("bottom", YES_NO_BOTTOM))
 	return menu
+
+
+## The box the source's own `menu_coords` puts this menu in, for a renderer
+## that draws it over the map the way `MenuBox` does. `Place2DMenuItemStrings`'
+## own column count and spacing carry over for a `2d` menu; every list menu
+## here is one column with no spacing.
+func box() -> Gen2MenuBox:
+	var out := Gen2MenuBox.from_coords(box_left, box_top, box_right, box_bottom, flags)
+	if kind == &"2d":
+		out.columns = maxi(1, columns)
+		out.column_spacing = _spacing
+	return out
 
 
 func move(direction: Vector2i) -> bool:

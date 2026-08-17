@@ -107,8 +107,16 @@ func _render() -> void:
 	))
 
 
+## `PrintHour` prints `GetTimeOfDayString`'s own MORN/DAY/NITE ahead of the
+## hour, not AM/PM: `constants/misc_constants.asm`'s `MORN_HOUR`/`DAY_HOUR`/
+## `NITE_HOUR` are 4, 10 and 18, so midnight through 3 is still NITE.
 func _hour_text() -> String:
 	var shown: int = _hour % 12
 	if shown == 0:
 		shown = 12
-	return "%d %s" % [shown, "AM" if _hour < 12 else "PM"]
+	var word: String = "NITE"
+	if _hour >= 4 and _hour < 10:
+		word = "MORN"
+	elif _hour >= 10 and _hour < 18:
+		word = "DAY"
+	return "%s %d" % [word, shown]
