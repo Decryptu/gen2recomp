@@ -693,6 +693,11 @@ func _queue_player_step(direction: Vector2i, frames: int) -> void:
 
 
 func _begin_player_step(direction: Vector2i, frames: int) -> void:
+	## `StepFunction_PlayerJump` is the only step type that runs
+	## `UpdateJumpPosition`, and every other step type replaces it, so the arc
+	## belongs to the hop that set it and to nothing begun after it.
+	## `_try_ledge_hop` raises the flag again once this has cleared it.
+	_player_jumping = false
 	_player_step_direction = direction
 	_player_step_frames_total = maxi(0, frames)
 	_player_step_frames_remaining = _player_step_frames_total
@@ -4146,13 +4151,34 @@ func _apply_script_warp(request: Dictionary) -> Dictionary:
 ## field selects a one-based warp in the destination map, as in the original
 ## map macro. An invalid target leaves this API unchanged and returns an error
 ## record instead of silently placing the player on another map.
-## `CheckWarpCollision`'s own answer, without walking through the warp: whether
+## `CheckWarpTile`'s own answer, without walking through the warp: whether
 ## the step that just landed on [param cell] has a warp to take. A host that
 ## spends `MapSetupScript_Door`'s fade before the map swaps asks this first, and
 ## [method try_warp] is the swap itself.
+##
+## `CheckWarpTile` is `GetDestinationWarpNumber` and then `CheckDirectionalWarp`,
+## which clears carry on the four warp carpets: landing on one of those warps
+## nothing, and only [method edge_warp_ready] takes it.
 func warp_pending(cell: Vector2i = player_cell) -> bool:
+	var code: int = collision_code_at(cell)
 	return not warp_at(cell).is_empty() \
-		and Gen2WorldCollision.is_warp_tile(collision_code_at(cell))
+		and Gen2WorldCollision.is_warp_tile(code) \
+		and not Gen2WorldCollision.is_directional_warp(code)
+
+
+## `DoPlayerMovement.CheckWarp`: the player is standing on the warp carpet that
+## names [param direction], is already facing that way, and the cell carries a
+## warp. The press takes the warp instead of bumping, which is why an interior
+## door is stood on first and walked into afterwards.
+func edge_warp_ready(direction: Vector2i) -> bool:
+	var code: int = collision_code_at(player_cell)
+	if Gen2WorldCollision.directional_warp_direction(code) != direction:
+		return false
+	## `ld a, [wPlayerDirection] / rrca / rrca` against wWalkingDirection: the
+	## facing has to agree with the press, which a turn from the same cell buys.
+	if _facing_for_direction(direction) != player_facing:
+		return false
+	return not warp_at(player_cell).is_empty()
 
 
 func try_warp(cell: Vector2i = player_cell) -> Dictionary:
@@ -4748,7 +4774,23 @@ func player_input_move(direction: Vector2i) -> Dictionary:
 			return {
 				"ok": true, "kind": &"turn", "facing": player_facing, "cell": player_cell,
 			}
-	return move_result(direction)
+	var stepped: Dictionary = move_result(direction)
+	if bool(stepped.get("ok", false)):
+		return stepped
+	## `.CheckWarp` sits after `.TryStep` and `.TryJump` and before `.NotMoving`,
+	## so a carpet is only reached once the step into it has been refused, which
+	## it always is: the cell past a door carpet is the map's own wall or edge.
+	## `.StandInPlace` spends no step, so the warp is taken on the press.
+	if forced == &"none" and edge_warp_ready(direction):
+		return {
+			"ok": true,
+			"kind": &"edge_warp",
+			"from_map": map_id(),
+			"from_cell": player_cell,
+			"to_map": map_id(),
+			"to_cell": player_cell,
+		}
+	return stepped
 
 
 func move_result(direction: Vector2i) -> Dictionary:

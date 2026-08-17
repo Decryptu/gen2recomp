@@ -24,6 +24,9 @@ extends SceneTree
 ## warp tile named by the two numbers below it, and the picture is
 ## `FadeOutToWhite`'s last order, which is the frame the new map is loaded on:
 ## `crystal 24 7 ... warp 7 1` is the bedroom staircase),
+## `door` (`.CheckWarp`'s carpet: the player is walked down onto an interior
+## door's mat and photographed standing on it, which the step itself no longer
+## warps: `crystal 24 6 ... door 6 5` is the front door of the player's house),
 ## `map_name_sign` (`InitMapNameSign`'s window, raised by walking west off the
 ## map's edge onto its neighbour: `crystal 24 4 ... map_name_sign 1 8` crosses
 ## New Bark Town into Route 29),
@@ -198,6 +201,20 @@ func _process(_delta: float) -> bool:
 				if StringName(fade.get("stage", &"")) == &"out" \
 					and int(fade.get("step", 0)) == Gen2WorldPalette.FADE_OUT_ORDERS.size() - 1:
 					break
+		elif _kind == &"door":
+			## `CheckDirectionalWarp`'s carpet: the step onto an interior door's
+			## mat lands and takes no warp, which is what this photographs. The
+			## press after it is `.CheckWarp`, and that is the one that warps.
+			for _frame: int in WARP_FRAME_CAP:
+				_screen.move_down()
+				_screen.advance_frame()
+				if Gen2WorldCollision.is_directional_warp(
+					int(_screen.world_snapshot().get("collision", -1))
+				):
+					## player_cell commits when the step starts, so the frames
+					## the player is still walking are spent before the picture.
+					_screen.advance_frames(Gen2WorldAPI.STEP_FRAMES_WALK)
+					break
 		elif _kind == &"map_name_sign":
 			## `MapSetupScript_Connection`'s `InitMapNameSign`: walked west off
 			## New Bark Town's edge onto Route 29, photographed while the sign
@@ -225,7 +242,7 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		if _kind not in [&"warp", &"map_name_sign"]:
+		if _kind not in [&"warp", &"door", &"map_name_sign"]:
 			## Those two kinds drove themselves to the frame they want; every
 			## other kind stages a sprite and then spends the frames it needs.
 			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):

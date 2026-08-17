@@ -2,10 +2,11 @@ extends RefCounted
 
 var _r: RefCounted = null
 
-## Verifies ledge hopping against freshly imported real caches, for both
-## command profiles. The expected codes come from the pinned pokecrystal and
-## pokegold sources: engine/overworld/player_movement.asm's .TryJump, its
-## .ledge_table, and data/collision/collision_permissions.asm.
+## Verifies the two `DoPlayerMovement` branches a step is refused into against
+## freshly imported real caches, for both command profiles: `.TryJump` and the
+## `.CheckWarp` behind it. The expected codes come from the pinned pokecrystal
+## and pokegold sources: engine/overworld/player_movement.asm's .TryJump, its
+## .ledge_table, .EdgeWarps, and data/collision/collision_permissions.asm.
 ##
 ## The real-cartridge counterpart to tests/unit/test_world_collision.gd and the
 ## ledge cases in tests/unit/test_world_api.gd, which use synthetic caches. It
@@ -33,13 +34,14 @@ const ROUTE30_BATTLE_EVENT_FLAG: int = 1812
 
 func run(r: RefCounted) -> void:
 	_r = r
-	for game_id: StringName in [&"crystal", &"gold"]:
+	for game_id: StringName in [&"crystal", &"gold", &"silver"]:
 		var data: GameData = GameData.open(game_id)
 		if data == null:
 			_r.fail("%s cache is unavailable. Import roms/%s.gbc first." % [game_id, game_id])
 			continue
 		_verify_permissions(game_id)
 		_verify_route30(game_id, data)
+		_verify_warp_carpets(game_id, data)
 
 
 ## The eight hop codes stay LAND_TILE, which is what makes .TryStep walk onto
@@ -189,6 +191,68 @@ func _reachable(world: Gen2WorldAPI) -> Dictionary:
 			seen[next] = true
 			frontier.append(next)
 	return seen
+
+
+## `.CheckWarp` over the whole corpus. Every warp event standing on one of
+## `CheckDirectionalWarp`'s four carpets takes nothing on the step that lands on
+## it, because `CheckWarpTile` clears carry there. What the press does next is
+## decided by the cell the carpet names, since `.CheckWarp` sits after
+## `.TryStep`: a wall there leaves the warp as the only answer, which is every
+## door, and a walkable cell there means the press steps off instead. The two
+## ports are the whole of that second set on all three cartridges, and their
+## warps are taken by `OlivinePortSailorAtGangwayScript` rather than by walking.
+func _verify_warp_carpets(game_id: StringName, data: GameData) -> void:
+	var carpets: int = 0
+	var stepped_off: int = 0
+	var by_code: Dictionary = {}
+	for map: Gen2WorldMap in data.world_maps():
+		for warp: Dictionary in map.events.get("warps", []) as Array:
+			var cell := Vector2i(int(warp.get("x", -1)), int(warp.get("y", -1)))
+			if cell.x < 0 or cell.y < 0 \
+				or cell.x >= map.collision_width or cell.y >= map.collision_height:
+				continue
+			var code: int = int(map.collision[cell.y * map.collision_width + cell.x])
+			if not Gen2WorldCollision.is_directional_warp(code):
+				continue
+			carpets += 1
+			by_code[code] = int(by_code.get(code, 0)) + 1
+			var direction: Vector2i = Gen2WorldCollision.directional_warp_direction(code)
+			var world: Gen2WorldAPI = Gen2WorldAPI.open(
+				data, map.group, map.number, cell, Gen2WorldState.new()
+			)
+			if not _r.check(
+				world != null, "%s: map %d/%d did not open." % [game_id, map.group, map.number]
+			):
+				continue
+			world.player_facing = world._facing_for_direction(direction)
+			_r.check(
+				not world.warp_pending(cell),
+				"%s: map %d/%d %s warps on the step that lands on it." % [
+					game_id, map.group, map.number, cell
+				]
+			)
+			var walkable: bool = world.can_walk_to(cell + direction, direction)
+			var pressed: StringName = StringName(
+				world.player_input_move(direction).get("kind", &"")
+			)
+			if walkable:
+				stepped_off += 1
+				_r.check(
+					pressed == &"move",
+					"%s: map %d/%d %s warped instead of stepping off." % [
+						game_id, map.group, map.number, cell
+					]
+				)
+				continue
+			_r.check(
+				pressed == &"edge_warp",
+				"%s: map %d/%d %s did not warp when walked into." % [
+					game_id, map.group, map.number, cell
+				]
+			)
+	_r.note("%s: %d warp carpets, %d walked into and %d stepped off, by code %s" % [
+		game_id, carpets, carpets - stepped_off, stepped_off, by_code
+	])
 
 
 func _reaches_north_edge(world: Gen2WorldAPI, seen: Dictionary) -> bool:

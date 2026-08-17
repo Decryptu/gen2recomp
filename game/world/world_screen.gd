@@ -80,6 +80,10 @@ var _encounters: Gen2WorldEncounters = null
 var _battle_encounter_id: StringName = &""
 ## The headbutt result waiting for ShakeHeadbuttTree's 32 frames to be spent.
 var _pending_headbutt_finish: Dictionary = {}
+## The step in flight whose `PlayerEvents` are still owed, empty while none is.
+## `CheckPlayerState` reads `PLAYERSTEP_STOP_F`, so the warp, the coord events
+## and the wild roll all belong to the frame the step lands on.
+var _pending_step_events: Dictionary = {}
 ## `MapSetupScript_Door` while it is running: `{ stage, step, frames, cell }`,
 ## empty on every other frame. The map swaps between the two stages, which is
 ## where the setup script's own list sits.
@@ -454,6 +458,13 @@ func advance_frame() -> void:
 		_renderer.refresh_animation()
 	if _world != null and _world.advance_player_step_frame() and _renderer != null:
 		_renderer.refresh()
+	## `_HandlePlayerStep` runs before `PlayerEvents` in `HandleMap`, so the step
+	## that finishes on this frame is the one whose events this frame runs.
+	if not _pending_step_events.is_empty() and _world != null \
+		and not _world.player_step_in_progress():
+		var landed: Dictionary = _pending_step_events
+		_pending_step_events = {}
+		_complete_player_step(landed)
 	if _world != null and _world.advance_emotes_frame() and _renderer != null:
 		_renderer.refresh()
 	## After the player's own step, so an actor reading
@@ -896,10 +907,10 @@ func move_player(direction: Vector2i) -> bool:
 	return _after_player_move(movement)
 
 
-## Everything a completed step owes the rest of the screen: contextual audio, the
-## warp it may have landed on, the redraw, then sight, phone and encounter checks
-## in that order. Shared with the forced-tile path, which reaches it without a
-## key press.
+## What a step owes the rest of the screen on the frame it starts: the sounds
+## that belong to the step itself and the redraw. Everything else waits for the
+## step to land; see [method _complete_player_step]. Shared with the forced-tile
+## path, which reaches it without a key press.
 func _after_player_move(movement: Dictionary) -> bool:
 	if movement.get("kind", &"") == &"ledge_hop":
 		_play_ledge_hop_sfx()
@@ -914,20 +925,8 @@ func _after_player_move(movement: Dictionary) -> bool:
 	## surfing track once the player is walking again.
 	if movement.get("kind", &"") == &"exit_water":
 		_play_current_map_music()
-
-	## CheckTileEvent gates warps on nothing, so surfing onto a warp tile and the
-	## step back onto land both reach one.
-	if movement.get("kind", &"") in [
-		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
-	] and _world.warp_pending():
-		## `WarpToNewMapScript`: the sound, and then `newloadmap MAPSETUP_DOOR`,
-		## whose `FadeOutToWhite` runs before the map is loaded at all. The map
-		## swaps when that fade lands, and everything a step still owes waits
-		## for `FadeInFromWhite` behind it.
-		_start_map_fade()
-		return true
 	if _renderer != null:
-		if bool(movement.get("ok", false)) and movement.get("kind", &"") != &"move":
+		if movement.get("kind", &"") == &"connection":
 			## `MapSetupScript_Connection`, which is the step itself rather than
 			## a warp: the neighbour's blocks are loaded under a camera that
 			## never stops, and its `FadeToMapMusic` is why crossing a route
@@ -939,6 +938,33 @@ func _after_player_move(movement: Dictionary) -> bool:
 			_fade_to_map_music()
 		else:
 			_renderer.refresh()
+	## `CheckPlayerState` only turns `wMapEventStatus` on where the step function
+	## set `PLAYERSTEP_STOP_F`, so `PlayerEvents` and everything under it run on
+	## the frame the step lands rather than on the frame it was asked for. The
+	## step's own frames are spent by `advance_frame`, which drains this.
+	if _world != null and _world.player_step_in_progress():
+		_pending_step_events = movement.duplicate(true)
+		return true
+	return _complete_player_step(movement)
+
+
+## `PlayerEvents` for the step that has just landed: the warp it stands on, and
+## then the map's own tail.
+func _complete_player_step(movement: Dictionary) -> bool:
+	## `CheckTileEvent` gates warps on nothing, so surfing onto a warp tile and
+	## the step back onto land both reach one. `edge_warp` is
+	## `DoPlayerMovement.CheckWarp`'s own answer, which has already made the
+	## check `CheckWarpTile` refuses for a carpet.
+	var kind: StringName = StringName(movement.get("kind", &""))
+	if kind == &"edge_warp" or (kind in [
+		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
+	] and _world.warp_pending()):
+		## `WarpToNewMapScript`: the sound, and then `newloadmap MAPSETUP_DOOR`,
+		## whose `FadeOutToWhite` runs before the map is loaded at all. The map
+		## swaps when that fade lands, and everything a step still owes waits
+		## for `FadeInFromWhite` behind it.
+		_start_map_fade()
+		return true
 	return _after_map_settled()
 
 

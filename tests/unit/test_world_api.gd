@@ -107,6 +107,12 @@ func _write_cache(game_id: String = "testworld") -> void:
 	collision[6 * 16 + 12] = 0x07  # wall below the door
 	collision[5 * 16 + 15] = 0x41  # COLL_WALK_RIGHT
 
+	# CheckDirectionalWarp's carpet, for DoPlayerMovement.CheckWarp: a warp cell
+	# that is stood on rather than warped onto, with the wall an interior door
+	# always has behind it.
+	collision[4 * 16 + 13] = 0x78  # COLL_WARP_CARPET_UP
+	collision[3 * 16 + 13] = 0x07  # wall above the carpet
+
 	# A lone COLL_UP_WALL at (2,10), matching real Route 42 cliff cells: it
 	# blocks stepping off the edge (entering from above, moving DOWN) but not
 	# climbing it (moving UP from below), since the enter rule only tests the
@@ -134,9 +140,10 @@ func _write_cache(game_id: String = "testworld") -> void:
 
 	var source_events: Dictionary = {
 		"bank": 48,
-		"warps": [{
-			"x": 6, "y": 6, "destination": 1, "map_group": 1, "map_number": 2,
-		}],
+		"warps": [
+			{"x": 6, "y": 6, "destination": 1, "map_group": 1, "map_number": 2},
+			{"x": 13, "y": 4, "destination": 1, "map_group": 1, "map_number": 2},
+		],
 		"coord_events": [{"scene": 0, "x": 7, "y": 6, "script": 0x6000}],
 		"bg_events": [{"x": 8, "y": 6, "type": 0, "script": 0x6015}],
 		"objects": [{"sprite": 1, "x": 5, "y": 6, "script": 0x6030, "event_flag": 7}],
@@ -887,6 +894,14 @@ func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
 	assert_true(bool(walker.move_result(Vector2i.UP).get("ok", false)))
 	assert_eq(walker.player_jump_offset(), 0)
 
+	## StepFunction_PlayerJump is the only step type that runs
+	## UpdateJumpPosition, so the step after the hop is on the ground for the
+	## whole of it however the hop left the flag.
+	assert_true(bool(world.move_result(Vector2i.DOWN).get("ok", false)), "a walk off the ledge")
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		assert_eq(world.player_jump_offset(), 0, "the walk after a hop has no arc")
+		world.advance_player_step_frame()
+
 
 func test_ledge_hop_refuses_a_direction_the_code_does_not_allow() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(3, 2))
@@ -1588,6 +1603,43 @@ func test_a_warp_event_on_ordinary_floor_never_fires() -> void:
 	assert_true(
 		floor_world.try_warp(Vector2i(6, 6)).is_empty(),
 		"a warp record on floor answers nothing",
+	)
+
+
+## CheckDirectionalWarp clears carry on the four warp carpets, so CheckWarpTile
+## refuses them and the step that lands on one takes nothing. Only
+## DoPlayerMovement.CheckWarp takes a carpet, and only for the direction it names
+## and only once the facing agrees: an interior door is stood on first and walked
+## into afterwards.
+func test_a_warp_carpet_is_walked_into_rather_than_landed_on() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(13, 5))
+	assert_eq(world.collision_code_at(Vector2i(13, 4)), 0x78, "COLL_WARP_CARPET_UP")
+
+	assert_true(bool(world.move_result(Vector2i.UP).get("ok", false)), "the carpet is walkable")
+	assert_eq(world.player_cell, Vector2i(13, 4))
+	assert_false(world.warp_pending(), "and landing on it warps nothing")
+
+	_finish_player_step(world)
+	assert_false(world.edge_warp_ready(Vector2i.LEFT), "only the direction the carpet names")
+	assert_true(world.edge_warp_ready(Vector2i.UP), "which the step up is already facing")
+
+	var taken: Dictionary = world.player_input_move(Vector2i.UP)
+	assert_eq(StringName(taken.get("kind", &"")), &"edge_warp")
+	assert_false(world.player_step_in_progress(), ".StandInPlace spends no step")
+	assert_eq(world.player_cell, Vector2i(13, 4), "the warp itself is the host's")
+
+
+## `ld a, [wPlayerDirection] / rrca / rrca` against wWalkingDirection: the press
+## that arrives with the wrong facing turns, and the one after it warps.
+func test_a_warp_carpet_facing_the_wrong_way_turns_first() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(13, 4))
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+	assert_false(world.edge_warp_ready(Vector2i.UP), "facing down, so no warp yet")
+	assert_eq(StringName(world.player_input_move(Vector2i.UP).get("kind", &"")), &"turn")
+	_finish_player_step(world)
+	assert_eq(
+		StringName(world.player_input_move(Vector2i.UP).get("kind", &"")), &"edge_warp",
+		"and the second press takes it",
 	)
 
 
