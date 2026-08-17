@@ -1206,6 +1206,30 @@ func test_a_menu_entry_is_refused_rather_than_silently_dropped() -> void:
 	)
 
 
+func test_mart_entries_append_conditionally_without_replacing_source_rows() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(host.register_menu_entry(Gen2ModHost.MENU_MART, &"local", {
+		"label": "Local stock", "item": 8, "price": 75,
+		"available": func(mart: Dictionary) -> bool: return int(mart["mart_id"]) == 3,
+	})["ok"])
+	assert_true(host.register_menu_entry(Gen2ModHost.MENU_MART, &"duplicate", {
+		"label": "Already sold", "item": 7,
+	})["ok"])
+	assert_eq(host.mart_entries({"mart_id": 2, "items": [7]}), [])
+	assert_eq(host.mart_entries({"mart_id": 3, "items": [7]}), [{"item": 8, "price": 75}])
+	assert_eq(host.register_menu_entry(
+		Gen2ModHost.MENU_MART, &"missing", {"label": "Missing"}
+	)["reason"], &"invalid_mart_item")
+	assert_eq(host.register_menu_entry(
+		Gen2ModHost.MENU_MART, &"negative", {"label": "Negative", "item": 8, "price": -1}
+	)["reason"], &"invalid_mart_price")
+	assert_eq(host.register_menu_entry(
+		Gen2ModHost.MENU_MART, &"filter", {
+			"label": "Filter", "item": 8, "available": false,
+		}
+	)["reason"], &"invalid_mart_filter")
+
+
 ## R10's core: a mod declares a control, the host binds it in the same three
 ## kinds the eight use, and it reaches the mod as an id.
 func test_a_registered_action_is_bound_and_arrives_as_its_own_id() -> void:
@@ -1239,6 +1263,24 @@ func test_a_registered_action_is_bound_and_arrives_as_its_own_id() -> void:
 		InputMap.has_action(&"mod_voxel_pitch_up"),
 		"a mod that is no longer loaded leaves no live action behind"
 	)
+
+
+func test_registered_actions_form_named_axes_and_a_bounded_vector() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	for key: StringName in [&"left", &"right", &"up", &"down"]:
+		assert_true(host.register_action(&"camera", {"key": key, "label": String(key)})["ok"])
+	Gen2InputActions.install_mod_actions(host.actions(), {})
+	Input.action_press(&"mod_camera_right", 0.8)
+	Input.action_press(&"mod_camera_down", 0.8)
+	assert_almost_eq(host.action_axis(&"camera", &"left", &"right"), 0.8, 0.001)
+	var direction: Vector2 = host.action_vector(
+		&"camera", &"left", &"right", &"up", &"down"
+	)
+	assert_almost_eq(direction.length(), 1.0, 0.001)
+	assert_gt(direction.x, 0.0)
+	assert_gt(direction.y, 0.0)
+	Input.action_release(&"mod_camera_right")
+	Input.action_release(&"mod_camera_down")
 
 
 ## The bug behind the request: the mod's camera was on W, A, S and D, which are

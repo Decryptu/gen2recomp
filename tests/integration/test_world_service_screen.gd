@@ -14,6 +14,7 @@ var _world_screen: Gen2WorldScreen = null
 
 
 func before_each() -> void:
+	Gen2ModHost.reset()
 	_data = Fixture.build()
 	_write_service_cache()
 	_data = GameData.open_directory(Fixture.directory())
@@ -24,6 +25,7 @@ func after_each() -> void:
 		_world_screen.free()
 		_world_screen = null
 	RomCache.clear(Fixture.directory())
+	Gen2ModHost.reset()
 
 
 func _open_world(items: Dictionary = {7: 1}) -> void:
@@ -167,6 +169,25 @@ func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_false(_world_screen._world.script_input_waiting())
+
+
+func test_a_registered_mart_row_is_bought_through_the_regular_transaction() -> void:
+	assert_true(Gen2ModHost.instance().register_menu_entry(Gen2ModHost.MENU_MART, &"second", {
+		"label": "Second item", "item": 8, "price": 25,
+	})["ok"])
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_eq(host._mart_entries.size(), 2)
+	assert_eq(int(host._mart_entries[1]["item"]), 8)
+	assert_eq(int(host._mart_entries[1]["price"]), 25)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	assert_eq(_world_screen._world.state.money(), 475)
+	assert_eq(_world_screen._world.state.item_quantity(8), 1)
 
 
 func test_mart_overlay_purchases_the_selected_quantity() -> void:
