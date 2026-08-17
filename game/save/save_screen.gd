@@ -202,6 +202,8 @@ func _build_ui() -> void:
 		_palette, _data.title() if _data != null else "No cartridge selected"
 	)
 	game_title.name = "SaveScreenGameTitle"
+	# The expanding spacer otherwise squeezes a wrapping label to one character per line.
+	game_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	game_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	game_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	head.add_child(game_title)
