@@ -295,7 +295,12 @@ func test_pending_special_call_dispatches_the_imported_script() -> void:
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
 	assert_true(_world_screen._world.script_input_waiting())
-	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
+	## `writetext` prints and returns: the `waitbutton` behind it is what the
+	## script is holding on, and the words are on the box either way.
+	assert_eq(
+		StringName(_world_screen._world.pending_script_input().get("type", &"")), &"button"
+	)
+	assert_eq(" ".join(_world_screen._text_box.text_lines()), "PHONE SCRIPT")
 	## The first press completes the revealing page, as holding A does in
 	## `PrintLetterDelay`; the second acknowledges it.
 	_world_screen._advance_script_input()
@@ -353,7 +358,12 @@ func test_phone_list_starts_the_source_timed_outgoing_ring() -> void:
 	_world_screen.advance_frames(4 * Gen2WorldPhoneRing.TOTAL_FRAMES)
 	await get_tree().process_frame
 	assert_true(_world_screen._world.script_input_waiting())
-	assert_eq(_world_screen._world.pending_script_input()["text"], "PHONE SCRIPT")
+	## `writetext` prints and returns: the `waitbutton` behind it is what the
+	## script is holding on, and the words are on the box either way.
+	assert_eq(
+		StringName(_world_screen._world.pending_script_input().get("type", &"")), &"button"
+	)
+	assert_eq(" ".join(_world_screen._text_box.text_lines()), "PHONE SCRIPT")
 
 
 ## `PokegearPhoneContactSubmenu`'s DELETE row and the yes/no box behind it:
@@ -522,10 +532,12 @@ func _write_phone_request() -> void:
 	_write_request_script([0x9C, 0x01, 0x00, 0x91], 0x6320)
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
 	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6400)] = [
-		0x4B, Fixture.BANK, 0x00, 0x70, 0x9C, 0x00, 0x00, 0x91,
+		0x4B, Fixture.BANK, 0x00, 0x70, Gen2WorldScript.WAITBUTTON,
+		0x9C, 0x00, 0x00, 0x91,
 	]
 	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6500)] = [
-		0x4B, Fixture.BANK, 0x00, 0x70, 0x9C, 0x00, 0x00, 0x91,
+		0x4B, Fixture.BANK, 0x00, 0x70, Gen2WorldScript.WAITBUTTON,
+		0x9C, 0x00, 0x00, 0x91,
 	]
 	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
 	var phone_text: Array = [Gen2WorldScript.TEXT_START]

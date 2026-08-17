@@ -131,3 +131,22 @@ func test_the_layout_carries_a_line_over_a_scroll_but_not_a_paragraph() -> void:
 	var paged: Array = Gen2TextLayout.lay_out("one\ntwo" + PARA + "three", 20, 2)
 	assert_eq(paged.size(), 2)
 	assert_eq(Array(paged[1]), ["three"])
+
+
+## `<SCROLL>` and `TextCommand_SCROLL` both reach `_ContTextNoPause`, which is
+## the two `TextScroll`s with no `PromptButton` in front of them. Reading either
+## as a `<CONT>` puts a press in the middle of a sentence.
+func test_the_two_scrolls_that_wait_for_nothing_are_their_own_break() -> void:
+	var character: Dictionary = Gen2TextStream.decode(
+		PackedByteArray([0x00, 0x80, 0x4C, 0x81, 0x57])
+	)
+	assert_true(character["ok"])
+	assert_eq(character["text"], "A" + Gen2TextStream.SCROLL_NOWAIT_BREAK + "B")
+	assert_false(bool(character["prompt"]))
+
+	var command: Dictionary = Gen2TextStream.decode(
+		PackedByteArray([0x00, 0x80, 0x50, 0x07, 0x00, 0x81, 0x57])
+	)
+	assert_true(command["ok"])
+	assert_eq(command["text"], "A" + Gen2TextStream.SCROLL_NOWAIT_BREAK + "B")
+	assert_false(bool(command["prompt"]))

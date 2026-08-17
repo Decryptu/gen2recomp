@@ -3799,6 +3799,11 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 				int(event.get("map_group", -1)), int(event.get("map_number", -1)),
 				int(event.get("object_index", -1))
 			)
+			## `wObjectFollow_Leader` and `wObjectFollow_Follower` are one byte
+			## each, and `SetFollowerIfVisible` runs `ResetFollower` before it
+			## writes: a second `follow` replaces the pair rather than adding to
+			## it.
+			_object_followers.clear()
 			_object_followers[follow_key] = {
 				"target_index": int(event.get("target_index", -1)),
 				"exact": bool(event.get("exact", true)),
@@ -3927,6 +3932,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			var cells: int = 2 if jumping else 1
 			var destination: Vector2i = object.cell + direction * cells
 			if _cell_in_bounds(destination):
+				var vacated: Vector2i = object.cell
 				object.cell = destination
 				# The cell commits here, as it does for every other step in this
 				# runtime; only the drawing trails. A stream applies in one call,
@@ -3935,6 +3941,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				object.queue_step(
 					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
 				)
+				_advance_followers(object_index, vacated)
 			else:
 				generated.append({
 					"type": &"movement_blocked", "object_index": object_index,
@@ -4044,10 +4051,12 @@ func _apply_player_movement(event: Dictionary) -> Array:
 			var cells: int = 2 if jumping else 1
 			var destination: Vector2i = player_cell + direction * cells
 			if _cell_in_bounds(destination):
+				var vacated: Vector2i = player_cell
 				player_cell = destination
 				_queue_player_step(
 					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
 				)
+				_advance_followers(-1, vacated)
 			else:
 				generated.append({
 					"type": &"movement_blocked", "player": true, "cell": destination,
@@ -4728,66 +4737,86 @@ func _remember_object_position(object: Gen2WorldObject) -> void:
 	_object_facing_overrides[key] = object.facing
 
 
+## Every follower of [param leader_index] steps into the cell that leader has
+## just left. `follow` names the leader first and the follower second, and the
+## follower may be the player, so this is driven by an object's scripted step as
+## well as by a player one; [param leader_index] is -1 for the player.
+##
 ## Follower steps commit on the map bounds alone, for the same reason a scripted
 ## step and a trainer approach do: MovementFunction_Follow is HandleMovementData
 ## over the queued leader commands (engine/overworld/map_objects.asm), so every
 ## one of them lands in NormalStep and never reaches CanObjectMoveInDirection.
-func _advance_followers(previous_player_cell: Vector2i, previous_cells: Dictionary) -> void:
+func _advance_followers(leader_index: int, leader_from_cell: Vector2i) -> void:
+	if current_map == null:
+		return
 	var relations: Array = []
 	for key: String in _object_followers:
 		var separator: PackedStringArray = key.split(":")
 		if separator.size() != 3 or int(separator[0]) != current_map.group \
 			or int(separator[1]) != current_map.number:
 			continue
-		relations.append({
-			"key": key,
-			"index": int(separator[2]),
-			"relation": (_object_followers[key] as Dictionary).duplicate(true),
-		})
+		var relation: Dictionary = _object_followers[key]
+		if int(relation.get("target_index", -1)) != leader_index:
+			continue
+		relations.append({"index": int(separator[2]), "relation": relation.duplicate(true)})
 	relations.sort_custom(func(first: Dictionary, second: Dictionary) -> bool:
 		return int(first["index"]) < int(second["index"])
 	)
 	for entry: Dictionary in relations:
-		var follower_index: int = int(entry["index"])
-		if follower_index < 0 or follower_index >= objects.size():
-			continue
-		var follower: Gen2WorldObject = objects[follower_index]
+		_step_follower(
+			int(entry["index"]), leader_from_cell,
+			bool((entry["relation"] as Dictionary).get("exact", true))
+		)
+
+
+## One follower's step toward [param target_cell], which is the cell its leader
+## has just left. An index below zero is the player, who is the object the
+## source counts as zero and who is the follower in every `follow <NPC>, PLAYER`.
+func _step_follower(follower_index: int, target_cell: Vector2i, exact: bool) -> void:
+	var follower_cell: Vector2i = player_cell
+	var follower: Gen2WorldObject = null
+	if follower_index >= 0:
+		if follower_index >= objects.size():
+			return
+		follower = objects[follower_index]
 		if not follower.active or follower.deleted:
-			continue
-		var relation: Dictionary = entry["relation"]
-		var target_index: int = int(relation.get("target_index", -1))
-		var exact: bool = bool(relation.get("exact", true))
-		var target_cell: Vector2i = previous_player_cell
-		if target_index >= 0 and previous_cells.has(target_index):
-			target_cell = previous_cells[target_index]
-		elif target_index >= 0 and target_index < objects.size():
-			target_cell = (objects[target_index] as Gen2WorldObject).cell
-		var delta: Vector2i = target_cell - follower.cell
-		if abs(delta.x) + abs(delta.y) <= 1:
-			continue
-		var direction: Vector2i
-		if exact and abs(delta.x) != 0 and abs(delta.y) != 0:
-			# Exact followers preserve the leader's cardinal path instead of
-			# cutting a diagonal corner.
-			direction = Vector2i(signi(delta.x), 0) if abs(delta.x) >= abs(delta.y) \
-				else Vector2i(0, signi(delta.y))
-		elif abs(delta.x) >= abs(delta.y):
-			direction = Vector2i(signi(delta.x), 0)
-		else:
-			direction = Vector2i(0, signi(delta.y))
-		var destination: Vector2i = follower.cell + direction
-		if _cell_in_bounds(destination):
-			follower.cell = destination
-			follower.apply_direction(direction)
-			# The player's own walk duration, not the slower wandering one:
-			# QueueFollowerFirstStep queues `movement_step` and the queue after
-			# it holds the leader's own command bytes.
-			follower.start_step(direction, STEP_FRAMES_WALK)
-			var override_key: String = _object_key(
-				current_map.group, current_map.number, follower_index
-			)
-			_object_position_overrides[override_key] = follower.cell
-			_object_facing_overrides[override_key] = follower.facing
+			return
+		follower_cell = follower.cell
+	## The queue holds the leader's own command bytes one step behind it, so a
+	## follower steps into the cell just vacated however close it already is;
+	## only a follower standing in that cell has nothing to walk to.
+	var delta: Vector2i = target_cell - follower_cell
+	if delta == Vector2i.ZERO:
+		return
+	var direction: Vector2i
+	if exact and abs(delta.x) != 0 and abs(delta.y) != 0:
+		# Exact followers preserve the leader's cardinal path instead of
+		# cutting a diagonal corner.
+		direction = Vector2i(signi(delta.x), 0) if abs(delta.x) >= abs(delta.y) \
+			else Vector2i(0, signi(delta.y))
+	elif abs(delta.x) >= abs(delta.y):
+		direction = Vector2i(signi(delta.x), 0)
+	else:
+		direction = Vector2i(0, signi(delta.y))
+	var destination: Vector2i = follower_cell + direction
+	if not _cell_in_bounds(destination):
+		return
+	# The player's own walk duration, not the slower wandering one:
+	# QueueFollowerFirstStep queues `movement_step` and the queue after it holds
+	# the leader's own command bytes.
+	if follower == null:
+		player_cell = destination
+		player_facing = _facing_for_direction(direction)
+		_queue_player_step(direction, STEP_FRAMES_WALK)
+		return
+	follower.cell = destination
+	follower.apply_direction(direction)
+	follower.queue_step(direction, STEP_FRAMES_WALK)
+	var override_key: String = _object_key(
+		current_map.group, current_map.number, follower_index
+	)
+	_object_position_overrides[override_key] = follower.cell
+	_object_facing_overrides[override_key] = follower.facing
 
 
 ## Moves one cell or enters a neighboring map when the step leaves a connected
@@ -4886,9 +4915,6 @@ func move_result(direction: Vector2i) -> Dictionary:
 		return {"ok": false, "kind": &"move", "reason": &"blocked"}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
-	var previous_cells: Dictionary = {}
-	for index: int in objects.size():
-		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
 	## .TrySurf's .ExitWater: .GetOutOfWater restores PLAYER_NORMAL and the walking
 	## sprite before .DoStep runs, so the state is already back to walking while
 	## the step onto land is still being taken.
@@ -4904,7 +4930,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
-	_advance_followers(from_cell, previous_cells)
+	_advance_followers(-1, from_cell)
 	_start_player_step(direction, _step_frames_for_movement())
 	return {
 		"ok": true,
@@ -4961,13 +4987,10 @@ func _forced_turn() -> Dictionary:
 func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
-	var previous_cells: Dictionary = {}
-	for index: int in objects.size():
-		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
-	_advance_followers(from_cell, previous_cells)
+	_advance_followers(-1, from_cell)
 	_start_player_step(direction, STEP_FRAMES_WALK)
 	return {
 		"ok": true,
@@ -5072,13 +5095,10 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 		return {}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
-	var previous_cells: Dictionary = {}
-	for index: int in objects.size():
-		previous_cells[index] = (objects[index] as Gen2WorldObject).cell
 	player_cell = landing
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
-	_advance_followers(from_cell, previous_cells)
+	_advance_followers(-1, from_cell)
 	_start_player_step(direction * 2, STEP_FRAMES_HOP, true)
 	return {
 		"ok": true,

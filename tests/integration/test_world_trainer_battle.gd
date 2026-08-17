@@ -302,7 +302,11 @@ func test_production_world_entry_and_facing_object_story_persist_separate_flags(
 	_world_screen._world.player_cell = Vector2i(4, 3)
 	_world_screen._world.player_facing = Gen2WorldSprite.FACING_RIGHT
 	assert_true(_world_screen.interact())
-	assert_eq(_world_screen._world.pending_script_input()["type"], &"text")
+	## The `waitbutton` behind the `writetext`, which is what a text ending in
+	## `<DONE>` leaves the script holding on.
+	assert_eq(
+		StringName(_world_screen._world.pending_script_input().get("type", &"")), &"button"
+	)
 	assert_false(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_false(_world_screen._world.state.hall_of_fame())
 
@@ -676,6 +680,9 @@ func _install_story_slice() -> void:
 	]
 	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, STORY_OBJECT)] = [
 		Gen2WorldScript.WRITETEXT, STORY_TEXT & 0xFF, STORY_TEXT >> 8,
+		## The `waitbutton` every talked-to script carries behind its text:
+		## `writetext` itself prints and returns.
+		Gen2WorldScript.WAITBUTTON,
 		Gen2WorldScript.SETEVENT, STORY_EVENT_FLAG, 0,
 		Gen2WorldScript.SETFLAG, Gen2WorldState.ENGINE_HALL_OF_FAME, 0,
 		Gen2WorldScript.END,

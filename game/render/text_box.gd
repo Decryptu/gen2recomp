@@ -46,6 +46,13 @@ const CURSOR_COLUMN: int = 18
 const CURSOR_BLINK_FRAMES: int = 16
 const FRAME_SECONDS: float = 1.0 / 60.0
 
+## `TextScroll` shifts the whole interior up one tile row, blanks the row it
+## leaves at the bottom and spends five frames. `_ContText` and
+## `_ContTextNoPause` both call it twice, which is one text line, since a box's
+## lines sit two rows apart.
+const SCROLL_STEPS: int = 2
+const SCROLL_STEP_FRAMES: int = 5
+
 const TILE: int = Gen2Font.TILE
 
 ## Tiles per second while a page is revealing. The games run this off the frame
@@ -92,6 +99,13 @@ var _lines: Array = []
 var _tiles_on_page: int = 0
 var _shown: float = 0.0
 var _blink: float = 0.0
+## The rows on their way off the top of the box while `TextScroll` runs, how far
+## up they have moved, and the page to start once they are gone. `_scroll_page`
+## is -1 whenever nothing is scrolling.
+var _scroll_lines: Array = []
+var _scroll_rows: int = 0
+var _scroll_elapsed: float = 0.0
+var _scroll_page: int = -1
 
 
 func _ready() -> void:
@@ -101,12 +115,20 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _scroll_page >= 0:
+		_advance_scroll(delta)
+		return
 	if _shown < float(_tiles_on_page):
 		_shown = minf(_shown + delta * reveal_speed, float(_tiles_on_page))
 		_redraw()
 		return
 	if _pages.is_empty():
 		set_process(false)
+		return
+	if _enter_of(_page + 1) == &"scroll_nowait":
+		# `_ContTextNoPause` has no `PromptButton` in front of it: the printer
+		# reaches the code, scrolls and carries on.
+		_begin_scroll(_page + 1)
 		return
 	# Waiting: only the arrow changes, and only when it crosses a half period.
 	var was_up: bool = _cursor_up()
@@ -123,14 +145,26 @@ func place_at_bottom() -> void:
 
 ## Lays [param text] out and starts revealing its first page.
 func show_text(text: String) -> void:
-	_pages = Gen2TextLayout.lay_out(text, text_columns(), text_rows())
+	_pages = Gen2TextLayout.lay_out_pages(text, text_columns(), text_rows())
 	_page = 0
+	_scroll_page = -1
+	_scroll_lines = []
 	_start_page()
 
 
-## True while a page still has tiles left to reveal.
+## True while a page still has tiles left to reveal, or while the box is in the
+## middle of a scroll: neither has reached its `PromptButton` yet.
 func is_revealing() -> bool:
-	return _shown < float(_tiles_on_page)
+	return _scroll_page >= 0 or _shown < float(_tiles_on_page)
+
+
+## Every line the box is holding, its pages in order. What is on screen is read
+## through this rather than through the pagination behind it.
+func text_lines() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for page: Dictionary in _pages:
+		out.append_array(page["lines"])
+	return out
 
 
 ## Whether a page after this one is still waiting, which is what the blinking
@@ -143,6 +177,8 @@ func has_pages_left() -> bool:
 
 ## Reveals the rest of the current page at once.
 func finish() -> void:
+	if _scroll_page >= 0:
+		_end_scroll()
 	_shown = float(_tiles_on_page)
 	set_process(false)
 	_redraw()
@@ -156,6 +192,10 @@ func advance() -> bool:
 		return false
 	if is_revealing():
 		finish()
+		return true
+
+	if _enter_of(_page + 1) == &"scroll":
+		_begin_scroll(_page + 1)
 		return true
 
 	_page += 1
@@ -199,11 +239,78 @@ func text_rows() -> int:
 	return maxi((rows - 1 - TEXT_TOP) / LINE_SPACING + 1, 0)
 
 
+## How the page at [param index] is reached, and `&""` when there is no such
+## page.
+func _enter_of(index: int) -> StringName:
+	if index < 0 or index >= _pages.size():
+		return &""
+	return StringName(_pages[index].get("enter", &"page"))
+
+
+## Starts `TextScroll`'s two steps, with the lines that are on screen moving up
+## through the interior and off the top of it.
+func _begin_scroll(next_page: int) -> void:
+	_scroll_lines = _lines.duplicate()
+	_scroll_rows = 1
+	_scroll_elapsed = 0.0
+	_scroll_page = next_page
+	_lines = []
+	_tiles_on_page = 0
+	_shown = 0.0
+	set_process(true)
+	_redraw()
+
+
+func _advance_scroll(delta: float) -> void:
+	advance_scroll_frames(delta / FRAME_SECONDS)
+
+
+## [param frames] hardware frames of `TextScroll`. Counted in frames rather than
+## seconds so a tool spending them one at a time lands on the same step the
+## clock does; see [method is_scrolling].
+func advance_scroll_frames(frames: float) -> void:
+	if _scroll_page < 0:
+		return
+	_scroll_elapsed += frames
+	while _scroll_elapsed >= float(SCROLL_STEP_FRAMES):
+		_scroll_elapsed -= float(SCROLL_STEP_FRAMES)
+		if _scroll_rows >= SCROLL_STEPS:
+			_end_scroll()
+			return
+		_scroll_rows += 1
+		_redraw()
+
+
+## Whether `TextScroll`'s two steps are running, which is the one wait that is
+## neither a page turn nor a reveal.
+func is_scrolling() -> bool:
+	return _scroll_page >= 0
+
+
+## Puts the page the scroll was heading for up. Its first line is the one that
+## was underneath, which is where `_ContText` leaves it.
+func _end_scroll() -> void:
+	var next_page: int = _scroll_page
+	_scroll_page = -1
+	_scroll_lines = []
+	_scroll_rows = 0
+	if next_page < 0:
+		return
+	_page = next_page
+	if _page >= _pages.size():
+		_pages = []
+		_lines = []
+		_tiles_on_page = 0
+		finished.emit()
+		return
+	_start_page()
+
+
 func _start_page() -> void:
 	_lines = []
 	_tiles_on_page = 0
 	if _page < _pages.size():
-		for line: String in _pages[_page]:
+		for line: String in _pages[_page]["lines"]:
 			var codes: PackedByteArray = Gen2Text.encode(line)
 			_lines.append(codes)
 			_tiles_on_page += codes.size()
@@ -268,6 +375,8 @@ func _draw_border(indices: PackedByteArray, width: int) -> void:
 func _draw_cursor(indices: PackedByteArray, width: int) -> void:
 	if _pages.is_empty() or is_revealing() or not _cursor_up():
 		return
+	if _enter_of(_page + 1) == &"scroll_nowait":
+		return
 	if CURSOR_COLUMN >= columns or rows <= 0:
 		return
 	font.draw_code(
@@ -276,6 +385,9 @@ func _draw_cursor(indices: PackedByteArray, width: int) -> void:
 
 
 func _draw_lines(indices: PackedByteArray, width: int) -> void:
+	if _scroll_page >= 0:
+		_draw_scrolling_lines(indices, width)
+		return
 	var left: int = 0
 	for i: int in _lines.size():
 		var codes: PackedByteArray = _lines[i]
@@ -287,3 +399,18 @@ func _draw_lines(indices: PackedByteArray, width: int) -> void:
 				codes[tile], indices, width, (TEXT_LEFT + tile) * TILE, top
 			)
 		left += codes.size()
+
+
+## The interior mid-`TextScroll`: every line one tile row higher per step, and
+## the row that reaches the border gone, which is what the second copy does to
+## the first line on the cartridge.
+func _draw_scrolling_lines(indices: PackedByteArray, width: int) -> void:
+	for i: int in _scroll_lines.size():
+		var codes: PackedByteArray = _scroll_lines[i]
+		var row: int = TEXT_TOP + i * LINE_SPACING - _scroll_rows
+		if row < 1:
+			continue
+		for tile: int in codes.size():
+			font.draw_code(
+				codes[tile], indices, width, (TEXT_LEFT + tile) * TILE, row * TILE
+			)
