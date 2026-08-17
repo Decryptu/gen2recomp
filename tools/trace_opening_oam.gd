@@ -17,8 +17,9 @@ extends SceneTree
 ## own buffer is read at the frame boundary, where hDMATransfer copies it.
 ##
 ## Either movie also writes `<out>.state`, one `frame scene counter` line per
-## frame. That is the pair a cartridge's own `wJumptableIndex` and
-## `wIntroSceneFrameCounter` hold, and it is what aligns a pixel diff: a setup
+## frame. Gold and Silver append their second scene counter, since their scroll
+## scenes advance that one while the first stays fixed. These are the cartridge
+## state that aligns a pixel diff: a setup
 ## scene's decompression overruns VBlank by three to twelve frames there and by
 ## none here, so a per-scene offset is still several frames out inside the scene
 ## and every frame of a fade compares against the wrong step of it. A frame
@@ -172,7 +173,10 @@ func _trace_gs_intro(data: GameData) -> PackedStringArray:
 	var scene: int = -1
 	while not movie.finished() and frame < MOVIE_FRAME_CAP:
 		_append_frame(out, frame, page.shadow_oam(movie))
-		_append_state(frame, movie.scene(), movie.counter(), movie.waiting())
+		_append_state(
+			frame, movie.scene(), movie.counter(), movie.waiting(),
+			movie.secondary_counter()
+		)
 		if _shots.has(frame):
 			page.draw(movie).save_png("%s_f%d.png" % [_shot_prefix, frame])
 		if movie.scene() != scene:
@@ -215,15 +219,21 @@ func _trace_title(data: GameData) -> PackedStringArray:
 
 ## A frame paying a setup scene's delay is written under the setup scene's own
 ## index, which is the one the cartridge is still in while it spends it.
-func _append_state(frame: int, scene: int, counter: int, waiting: bool) -> void:
+func _append_state(
+	frame: int, scene: int, counter: int, waiting: bool, secondary: int = -1
+) -> void:
 	# A setup scene's counter is the previous scene's last value until the
 	# routine's own tail zeroes it, and the routine is spread over every
 	# `DelayFrame` its decompressions spend, so a waiting frame carries no
 	# counter to line up on and is written as -1.
-	_state.append(
-		"%d %d %d" % [frame, scene - 1, -1] if waiting
-		else "%d %d %d" % [frame, scene, counter]
-	)
+	var values: Array = [frame, scene - 1, -1] if waiting \
+		else [frame, scene, counter]
+	if secondary >= 0:
+		values.append(secondary)
+	var words := PackedStringArray()
+	for value: int in values:
+		words.append(str(value))
+	_state.append(" ".join(words))
 
 
 func _append_frame(out: PackedStringArray, frame: int, entries: Array[Dictionary]) -> void:

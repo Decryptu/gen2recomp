@@ -2,7 +2,8 @@ class_name Gen2StartMenuPage
 extends RefCounted
 
 ## `StartMenu`'s own box over the map, the `_Option` screen behind it, and
-## `SaveMenu`'s three boxes over the map as well.
+## `SaveMenu`'s three boxes over the map as well. In-game mod rows borrow the
+## OPTION layout because they have no cartridge screen of their own.
 ##
 ## Node-free presentation, like the other pages: geometry is [Gen2MenuBox]'s and
 ## the models are [Gen2WorldStartMenu] and [Gen2WorldOptionsMenu]. The list is a

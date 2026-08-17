@@ -759,7 +759,7 @@ func _render_pack() -> void:
 	_status.text = ""
 	_render_options([], -1, func(_entry: Variant) -> String: return "")
 	if _pack_view != null:
-		_pack_view.visible = true
+		_pack_view.visible = _view == null or not _view.visible
 		_pack_view.texture = ImageTexture.create_from_image(_pack_image())
 
 
@@ -1722,8 +1722,7 @@ func _build_ui() -> void:
 	_options.add_theme_constant_override("separation", 4)
 	_options.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(_options)
-	## The pack listing is the cartridge's own screen inside this panel, the way
-	## the Pokegear's card list holds the cartridge's four cards.
+	## Fallback for a caller that did not hand this host the world's Gen2Screen.
 	_pack_view = TextureRect.new()
 	_pack_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_pack_view.custom_minimum_size = Vector2(
@@ -1808,13 +1807,29 @@ func _hardware_image() -> Image:
 			if _options_menu == null:
 				return null
 			return _page.render_options(_options_menu.rows(), _options_menu.cursor)
+		Mode.PACK:
+			return _pack_image()
 		Mode.MODS:
-			## Not a cartridge screen: this project's own list, in `_Option`'s
-			## own shape so the two do not look like different games.
 			var rows: Array = []
 			for id: StringName in _mod_ids:
 				rows.append({"label": _mod_name(id), "value": ""})
 			return _page.render_options(rows, _mod_cursor)
+		Mode.MOD_OPTIONS:
+			var rows: Array = []
+			for raw: Dictionary in _mod_options():
+				var value: String = ""
+				match StringName(raw.get("kind", Gen2ModHost.OPTION_LADDER)):
+					Gen2ModHost.OPTION_BUTTON:
+						value = String(raw.get("press_label", "Go"))
+					Gen2ModHost.OPTION_NUMBER:
+						value = str(int(raw.get("value", 0)))
+					_:
+						var labels: Array = raw.get("labels", []) as Array
+						var index: int = int(raw.get("index", 0))
+						if index >= 0 and index < labels.size():
+							value = String(labels[index])
+				rows.append({"label": String(raw.get("label", "")), "value": value})
+			return _page.render_options(rows, _mod_option_cursor)
 	return null
 
 

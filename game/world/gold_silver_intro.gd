@@ -318,6 +318,10 @@ func counter() -> int:
 	return _counter1
 
 
+func secondary_counter() -> int:
+	return _counter2
+
+
 ## Whether this frame is one a setup scene's own `DelayFrames` debt is paid on;
 ## see [method Gen2IntroMovie.waiting].
 func waiting() -> bool:
