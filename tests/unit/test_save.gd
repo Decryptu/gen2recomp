@@ -95,6 +95,15 @@ func test_a_saved_pokemon_restores_stats_hp_status_exp_and_pp() -> void:
 
 func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 	var source: Gen2SaveData = _save()
+	source.label = "ROUTE TEST"
+	source.player_id = 0xBEEF
+	source.gender = Gen2SaveData.GENDER_FEMALE
+	source.game_time.hours = 17
+	source.game_time.minutes = 42
+	source.run_seed = 0x12345678
+	source.run_mods = [{"id": "weather_plus", "version": "1.2.0"}]
+	source.run_options = {&"weather_plus": {&"storms": true}}
+	source.mods = {&"weather_plus": {"fronts": [1, 3, 5]}}
 	(source.party[0] as Gen2SaveMon).nickname = "SPARKY"
 	(source.party[0] as Gen2SaveMon).original_trainer = "RED"
 	var boxed: Gen2SaveMon = Gen2SaveMon.from_dict(source.party[1].to_dict())
@@ -106,6 +115,15 @@ func test_battle_save_writeback_preserves_player_and_pokemon_identity() -> void:
 		_data.id, _data.sha1, source.slot, party, "", source
 	)
 	assert_eq(written.player_name, "RED")
+	assert_eq(written.label, "ROUTE TEST")
+	assert_eq(written.player_id, 0xBEEF)
+	assert_eq(written.gender, Gen2SaveData.GENDER_FEMALE)
+	assert_eq(written.game_time.hours, 17)
+	assert_eq(written.game_time.minutes, 42)
+	assert_eq(written.run_seed, 0x12345678)
+	assert_eq(written.run_mods, [{"id": "weather_plus", "version": "1.2.0"}])
+	assert_eq(written.run_options, {&"weather_plus": {&"storms": true}})
+	assert_eq(written.mods, {&"weather_plus": {"fronts": [1, 3, 5]}})
 	assert_eq((written.party[0] as Gen2SaveMon).nickname, "SPARKY")
 	assert_eq((written.party[0] as Gen2SaveMon).original_trainer, "RED")
 	assert_eq(written.boxes[2].slots[4].species, boxed.species)
@@ -241,9 +259,16 @@ func test_the_run_block_round_trips_and_refuses_an_invented_mod_id() -> void:
 		{"id": "weather_plus", "version": "1.2.0"},
 		{"id": "Bad Id", "version": "9"},
 	]
+	save.run_options = {
+		&"weather_plus": {&"draw_distance": 24, &"storms": true},
+		&"Bad Id": {&"ignored": true},
+	}
 	var restored: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
 	assert_eq(restored.run_seed, 0x0BADF00D)
 	assert_eq(restored.run_mods, [{"id": "weather_plus", "version": "1.2.0"}])
+	assert_eq(restored.run_options, {
+		&"weather_plus": {&"draw_distance": 24, &"storms": true},
+	})
 
 
 ## A slot written before the block existed says so rather than claiming frame
@@ -255,6 +280,7 @@ func test_a_save_without_a_run_block_records_no_seed() -> void:
 	assert_not_null(restored)
 	assert_eq(restored.run_seed, 0)
 	assert_eq(restored.run_mods, [])
+	assert_eq(restored.run_options, {})
 
 
 func test_format_five_migrates_to_an_empty_mod_namespace() -> void:
@@ -680,6 +706,55 @@ func test_crystal_carries_the_players_gender_and_the_others_do_not() -> void:
 		)["save"] as Gen2SaveData).gender,
 		Gen2SaveData.GENDER_MALE
 	)
+
+
+## Every species, item and move on the hardware is one byte, and mod content is
+## numbered past that on purpose, so an export refuses rather than truncating a
+## number into a different Pokemon in a real cartridge.
+func test_mod_content_cannot_be_exported_to_a_cartridge() -> void:
+	var data: GameData = _adapter_data(RomRegistry.CRYSTAL)
+	var raw: PackedByteArray = _raw_cartridge(RomRegistry.CRYSTAL, data)
+	var save: Gen2SaveData = Gen2SramAdapter.import_bytes(
+		RomRegistry.CRYSTAL, data.sha1, 0, raw, data
+	)["save"]
+	assert_true(Gen2SramAdapter.export_bytes(save, raw, data)["ok"], "the cartridge save exports")
+
+	# Registered, so the save validator accepts the numbers and the refusal below
+	# is this boundary's own rather than an unknown-content one.
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_content(
+		Gen2ContentOverlay.KIND_SPECIES, &"testmod", Gen2ContentOverlay.FIRST_MOD_NUMBER,
+		{"name": "VOLTLING"}
+	)
+	host.register_content(
+		Gen2ContentOverlay.KIND_MOVE, &"testmod", Gen2ContentOverlay.FIRST_MOD_NUMBER + 4,
+		{"name": "HOWL"}
+	)
+	host.register_content(
+		Gen2ContentOverlay.KIND_ITEM, &"testmod", Gen2ContentOverlay.FIRST_MOD_NUMBER + 9,
+		{"name": "CHARM"}
+	)
+
+	var mon: Gen2SaveMon = save.party[0]
+	var species: int = mon.species
+	mon.species = Gen2ContentOverlay.FIRST_MOD_NUMBER
+	var refused: Dictionary = Gen2SramAdapter.export_bytes(save, raw, data)
+	assert_false(refused["ok"])
+	assert_string_contains(String(refused["message"]), "mod content")
+
+	mon.species = species
+	mon.moves[1] = Gen2ContentOverlay.FIRST_MOD_NUMBER + 4
+	assert_false(
+		Gen2SramAdapter.export_bytes(save, raw, data)["ok"], "a mod move is a byte too wide too"
+	)
+	mon.moves[1] = 1
+	var boxed: Gen2SaveMon = Gen2SaveMon.from_dict(mon.to_dict())
+	boxed.item = Gen2ContentOverlay.FIRST_MOD_NUMBER + 9
+	(save.boxes[3] as Gen2SaveBox).slots[2] = boxed
+	assert_false(
+		Gen2SramAdapter.export_bytes(save, raw, data)["ok"], "and a boxed one is not exempt"
+	)
+	Gen2ModHost.reset()
 
 
 func test_gold_and_silver_have_no_gender_byte_to_read_or_write() -> void:

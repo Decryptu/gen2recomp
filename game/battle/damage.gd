@@ -451,7 +451,13 @@ static func psywave_damage(level: int, rng: RandomNumberGenerator) -> int:
 
 ## The split is by type, not by move: below Fire is physical and Fire up
 ## special, which is why Hyper Beam is special and Bite physical.
+##
+## A type past the cartridge's chart is a mod's own and carries the choice on its
+## row instead, since there is no number to compare it against. Only such a
+## number reaches the overlay, so a cartridge battle pays one comparison.
 static func is_physical(move_type: int) -> bool:
+	if move_type >= RomLayout.TYPE_COUNT:
+		return Gen2ContentOverlay.shared().type_is_physical(move_type)
 	return move_type < RomLayout.SPECIAL_TYPES_START
 
 

@@ -42,8 +42,7 @@ var label: String = ""
 var party: Array = []
 var boxes: Array = []
 var world: Gen2WorldSnapshot = null
-## Per-slot, per-mod JSON objects. Installation-wide options stay in their own
-## user file; this namespace travels with the save.
+## Per-slot, per-mod JSON objects. This namespace travels with the save.
 var mods: Dictionary = {}
 ## What names the run beside the state it produced: the seed the world's
 ## generators are built from and the mods that were loaded when the slot was
@@ -51,6 +50,11 @@ var mods: Dictionary = {}
 ## recorded", which is what every slot written before this existed says.
 var run_seed: int = 0
 var run_mods: Array = []
+## The registered mod settings this run was created with, keyed by mod id and
+## option key. The installation-wide options file is only the template for a
+## new run; once a slot exists its effective settings live here so reopening it
+## cannot silently change the state that produced the save.
+var run_options: Dictionary = {}
 var boxes_shape_valid: bool = true
 
 
@@ -81,7 +85,11 @@ func to_dict() -> Dictionary:
 		"boxes": saved_boxes,
 		"world": world.to_dict() if world != null else {},
 		"mods": mods.duplicate(true),
-		"run": {"seed": run_seed, "mods": run_mods.duplicate(true)},
+		"run": {
+			"seed": run_seed,
+			"mods": run_mods.duplicate(true),
+			"mod_options": run_options.duplicate(true),
+		},
 	}
 
 
@@ -144,6 +152,13 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 						"id": String((entry as Dictionary).get("id", "")),
 						"version": String((entry as Dictionary).get("version", "")),
 					})
+		var raw_run_options: Variant = (raw_run as Dictionary).get("mod_options", {})
+		if raw_run_options is Dictionary:
+			for raw_id: Variant in raw_run_options:
+				var id: String = String(raw_id)
+				var options: Variant = (raw_run_options as Dictionary)[raw_id]
+				if _valid_mod_id(id) and options is Dictionary:
+					out.run_options[StringName(id)] = (options as Dictionary).duplicate(true)
 	return out
 
 
@@ -160,8 +175,9 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## Version 5 had no per-mod namespace.
 ##
 ## The `run` block joined version 6 after it shipped and is not a version of its
-## own: it defaults to no seed and no mod list, which is the truth about a slot
-## written before it existed rather than a value worth inventing.
+## own: it defaults to no seed, mod list or mod-option snapshot, which is the
+## truth about a slot written before it existed rather than a value worth
+## inventing.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
 		return {"ok": false, "message": "save data is not an object"}
@@ -254,6 +270,7 @@ func copy_from(source: Gen2SaveData) -> bool:
 	mods = copied.mods.duplicate(true)
 	run_seed = copied.run_seed
 	run_mods = copied.run_mods.duplicate(true)
+	run_options = copied.run_options.duplicate(true)
 	boxes_shape_valid = copied.boxes_shape_valid
 	return true
 

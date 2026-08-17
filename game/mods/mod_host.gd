@@ -184,6 +184,10 @@ var _party_member_entries: Array = []
 ## registration order. See [method register_save_lifecycle].
 var _save_providers: Array = []
 var _subscribers: Dictionary = {}
+## One presentation-event mutator per channel. Mutation is exclusive because
+## composing two rewrites in load order would make the result depend on which
+## mod happened to load first.
+var _event_mutators: Dictionary = {}
 var _failures: Array = []
 
 
@@ -939,6 +943,23 @@ func patch_content(
 	return Gen2ContentOverlay.shared().patch(kind, id, number, fields)
 
 
+## Changes one attacking/defending type pair. A matchup is an exception row,
+## not separately numbered content, so its collision-free key is packed here
+## and the caller keeps speaking in type ids.
+func patch_type_matchup(
+	id: StringName, attacking: int, defending: int, fields: Dictionary
+) -> Dictionary:
+	var number: int = Gen2ContentOverlay.matchup_number(attacking, defending)
+	if number < 0:
+		return {
+			"ok": false, "reason": &"invalid_type_matchup",
+			"detail": "%d against %d" % [attacking, defending],
+		}
+	return Gen2ContentOverlay.shared().patch(
+		Gen2ContentOverlay.KIND_MATCHUP, id, number, fields
+	)
+
+
 ## Changes one map's wild encounter record: the rates and the per-time-of-day
 ## slots [method GameData.world_encounter] answers with, which is what a
 ## randomizer rewrites. [param method] is one of
@@ -1043,9 +1064,8 @@ func content_overlay() -> Gen2ContentOverlay:
 ## Watches one of [constant CHANNELS]. [param handler] is called with each event
 ## dictionary as it reaches the screen showing it.
 ##
-## Reading only. A subscriber is handed a copy and there is no return value the
-## engine reads, so observation cannot make two mods fight over the same state,
-## which is what makes this safe before any mutation hook exists.
+## Reading only. A subscriber is handed a copy of the event after the channel's
+## optional presentation mutator has run.
 func subscribe(channel: StringName, id: StringName, handler: Callable) -> Dictionary:
 	if not CHANNELS.has(channel):
 		return {"ok": false, "reason": &"unknown_channel", "detail": String(channel)}
@@ -1065,21 +1085,67 @@ func unsubscribe(channel: StringName, id: StringName) -> void:
 	(_subscribers.get(channel, {}) as Dictionary).erase(id)
 
 
-## Hands [param event] to whoever is watching [param channel].
+## Exclusively claims a channel's presentation-event rewrite. The battle turn or
+## world script has already committed its state when these events reach the
+## screen, so this may change text, animation and other presentation fields but
+## not gameplay outcomes. The event's routing key (`type` or `status`) cannot be
+## changed, which keeps a rewrite from turning one screen operation into another.
+func register_event_mutator(
+	channel: StringName, id: StringName, handler: Callable
+) -> Dictionary:
+	if not CHANNELS.has(channel):
+		return {"ok": false, "reason": &"unknown_channel", "detail": String(channel)}
+	if String(id).is_empty():
+		return {"ok": false, "reason": &"invalid_event_mutator", "detail": String(channel)}
+	if not handler.is_valid():
+		return {"ok": false, "reason": &"invalid_event_mutator_handler", "detail": String(id)}
+	if _event_mutators.has(channel):
+		var owner: StringName = StringName((_event_mutators[channel] as Dictionary).get("id", &""))
+		return {
+			"ok": false, "reason": &"duplicate_event_mutator",
+			"detail": "%s: %s and %s" % [channel, owner, id],
+		}
+	_event_mutators[channel] = {"id": id, "handler": handler}
+	return {"ok": true, "id": id}
+
+
+func unregister_event_mutator(channel: StringName, id: StringName) -> void:
+	var registered: Dictionary = _event_mutators.get(channel, {})
+	if StringName(registered.get("id", &"")) == id:
+		_event_mutators.erase(channel)
+
+
+## Hands [param event] through the optional presentation rewrite and then to
+## every watcher. Returns the effective event for the screen to consume.
 ##
 ## Static and null-safe on the instance, because this sits on the path every
 ## battle event and every world result takes: a game with no mods must not build
 ## a host, or copy an event, to publish to nobody.
-static func publish(channel: StringName, event: Dictionary) -> void:
+static func publish(channel: StringName, event: Dictionary) -> Dictionary:
 	if _instance == null:
-		return
+		return event
+	var effective: Dictionary = event
+	var registration: Dictionary = _instance._event_mutators.get(channel, {})
+	var mutator: Variant = registration.get("handler", null)
+	if mutator is Callable and (mutator as Callable).is_valid():
+		var candidate: Variant = (mutator as Callable).call(event.duplicate(true))
+		if candidate is Dictionary and _same_event_kind(channel, event, candidate as Dictionary):
+			effective = (candidate as Dictionary).duplicate(true)
 	var handlers: Dictionary = _instance._subscribers.get(channel, {})
-	if handlers.is_empty():
-		return
 	for id: StringName in handlers.keys():
 		var handler: Callable = handlers[id]
 		if handler.is_valid():
-			handler.call(event.duplicate(true))
+			handler.call(effective.duplicate(true))
+	return effective
+
+
+static func _same_event_kind(
+	channel: StringName, original: Dictionary, candidate: Dictionary
+) -> bool:
+	var key: String = "type" if channel == CHANNEL_BATTLE else "status"
+	if not original.has(key):
+		return not candidate.has(key)
+	return candidate.has(key) and candidate[key] == original[key]
 
 
 ## Adds a move effect, as the list of commands a move carrying [param effect]
@@ -1336,7 +1402,13 @@ func save_lifecycle_ids() -> Array:
 ## A save that has just been made, before it is written or played. A provider
 ## snapshots whatever its run is built from into its own namespace here; there is
 ## nothing to clear, since the save carries no run yet.
+##
+## The installation's mod settings are copied onto the save first, so the run
+## records what it was created with and a later change to the installation cannot
+## reach back into it. See [method Gen2ModOptions.bind_run].
 func created_save(save: Gen2SaveData) -> void:
+	if save != null:
+		save.run_options = Gen2ModOptions.snapshot(_options.keys())
 	for entry: Dictionary in _save_providers:
 		entry["provider"].call("save_created", save)
 
@@ -1348,8 +1420,19 @@ func created_save(save: Gen2SaveData) -> void:
 ## Every lifecycle mod's overlay contributions are dropped first, in one pass, so
 ## the callbacks that follow all start from the cartridge whatever order they run
 ## in. A mod that patches at load time and registers no provider is untouched.
+##
+## The save's own mod settings are bound before any callback runs, so a provider
+## reads the values this run was played with rather than the installation's. A
+## slot written before that snapshot existed adopts the installation once, here,
+## which is the one place the two can honestly be reconciled.
 func activate_save(save: Gen2SaveData) -> void:
 	_clear_save_overlays()
+	if save == null:
+		Gen2ModOptions.unbind_run()
+	else:
+		if save.run_options.is_empty():
+			save.run_options = Gen2ModOptions.snapshot(_options.keys())
+		Gen2ModOptions.bind_run(save.run_options)
 	for entry: Dictionary in _save_providers:
 		entry["provider"].call("save_activated", save)
 
@@ -1360,6 +1443,7 @@ func deactivate_save() -> void:
 	for entry: Dictionary in _save_providers:
 		entry["provider"].call("save_deactivated")
 	_clear_save_overlays()
+	Gen2ModOptions.unbind_run()
 
 
 func _clear_save_overlays() -> void:

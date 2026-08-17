@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -208,10 +208,15 @@ this section.
 A content number is per kind and starts at `Gen2ContentOverlay.FIRST_MOD_NUMBER`,
 which is 256. Every cartridge number fits in a byte, so a number that does not is
 unambiguously not the cartridge's, and a mod's own numbers mean the same thing on
-Gold, Silver and Crystal. Four kinds are numbered this way: `KIND_SPECIES`,
-`KIND_MOVE`, `KIND_ITEM` and `KIND_TRAINER`. Types are not reachable at all,
-because the matchup lookup keys on the type count and a twenty-ninth type would
-renumber every pair in the chart.
+Gold, Silver and Crystal. Five kinds are numbered this way: `KIND_SPECIES`,
+`KIND_MOVE`, `KIND_ITEM`, `KIND_TRAINER` and `KIND_TYPE`.
+
+A type is the one kind numbered from zero, the cartridge's own chart being
+zero-based, so `patch_content(KIND_TYPE, id, 0, ...)` renames NORMAL and a defined
+type sits past 256 like the rest. It carries a `name` and `physical`, which is
+which stat pair it uses: Generation II splits by type number rather than per move,
+and a number past the chart has nothing to compare against, so a defined type has
+to say. Special is the default.
 
 ```gdscript
 host.register_content(Gen2ContentOverlay.KIND_SPECIES, manifest.id, 256, {
@@ -227,9 +232,32 @@ which exist because readers index these rows directly: `palette.normal` and
 that omitted either would crash the reader rather than draw wrong.
 
 Everything a species carries is a field on the one row, so a learnset, an
-evolution and TM compatibility are part of the definition rather than three more
-registrations. The engine then reads them the way it reads Pikachu's, because
+evolution, its egg moves and TM compatibility are part of the definition rather
+than four more registrations. The engine then reads them the way it reads Pikachu's, because
 every content read in the game goes through one place, `GameData._content()`.
+
+### Art
+
+The pic atlases hold exactly the cartridge's own slots, so a defined species or
+trainer class has no cell to point at and supplies decoded indices instead: two
+bits a pixel, row-major, in the same 0-3 index space the cache stores, and exactly
+`tiles * tiles * 64` of them.
+
+```gdscript
+host.register_content(Gen2ContentOverlay.KIND_SPECIES, manifest.id, 256, {
+	"name": "VOLTLING",
+	"pics": {"front": {"tiles": 7, "indices": front}, "back": {"tiles": 6, "indices": back}},
+	"icon": {"indices": strip},          # or a cartridge icon number, 1 to 38
+	"palette": {"normal": [0x7FFF, 0x0000], "shiny": [0x7FFF, 0x0000]},
+})
+```
+
+A trainer class names one `pic` rather than two. An `icon` is the party menu's
+own strip, the eight tiles of its two 2x2 frames, or one of the cartridge's icon
+numbers to borrow a picture that already exists. Art left out is not an error: a
+species with no `pics` draws whatever its atlas slot holds, which for a number
+past 251 is nothing, and `GameData.species_pic()` answers both kinds in one shape
+so no screen has to know which it got.
 
 `patch_content()` changes a row the cartridge does have. Only the fields named
 change, and a Dictionary field merges, so patching one stat leaves the other five
@@ -248,6 +276,18 @@ host.patch_encounter(manifest.id, &"grass", 3, 2, {
 	"slots": [[{"level": 50, "species": 1}], [], []],
 })
 host.patch_fishing_group(manifest.id, 1, {"rods": [...]})
+```
+
+A type matchup is patched by its pair rather than by a number, and is patch-only:
+the cartridge chart is a sparse table of exceptions, so an absent pair is already
+neutral and there is no row to define. `multiplier` is in tenths, the way the
+damage formula divides, and `negated_by_foresight` is the Ghost immunities' own
+rule.
+
+```gdscript
+host.patch_type_matchup(manifest.id, 256, RomLayout.TYPE_NORMAL, {
+	"multiplier": RomLayout.MATCHUP_SUPER_EFFECTIVE,
+})
 ```
 
 An encounter row is what `GameData.world_encounter(method, group, number)`
@@ -411,10 +451,20 @@ answering for a list it is no longer in.
 `CHANNEL_BATTLE` calls `handler` with each event dictionary as the screen showing
 it reads it, so a subscriber sees what the player sees, in that order.
 
-Reading only. The handler is given a copy and nothing reads its return value:
-observation cannot make two mods fight over the same state, which is what makes
-this safe to hand out before any mutation hook exists. Events are published from
-the screens, so a headless tool or a test driving the engine directly fires none.
+A subscriber reads only: the handler is given a copy and nothing reads its return
+value, so watching cannot make two mods fight over the same state. Events are
+published from the screens, so a headless tool or a test driving the engine
+directly fires none.
+
+`register_event_mutator(channel, id, handler)` is the other half. The turn or the
+script has already committed its state by the time these events reach the screen,
+so the handler may rewrite what is SHOWN - text, animation, display values - and
+is handed the whole event to return a changed copy of. Two things it cannot do:
+change the routing key (`type` on the battle channel, `status` on the world one),
+which would turn one screen operation into another, and share the channel. One
+mutator per channel, because composing two rewrites in load order would make the
+picture depend on which mod loaded first. A handler that returns anything else
+leaves the event alone, and subscribers see the mutated event, not the original.
 
 ## Replacing the world renderer
 
@@ -964,6 +1014,13 @@ can exceed the 64 KiB namespace and duplicates cartridge rows anyway. A save
 carrying no snapshot has no run and should stay vanilla rather than adopt today's
 options.
 
+Registered settings need none of that. The host snapshots them onto the save
+itself (`Gen2SaveData.run_options`) when it is created, binds that snapshot while
+the slot is played, and puts a change made mid-run into the save rather than into
+the installation. So `host.option()` answers with what THIS run is played with,
+the launcher edits the installation with no slot open, and a slot written before
+the snapshot existed adopts the installation once, when it is first activated.
+
 ## Adding a setting
 
 `register_option(id, option)` describes one setting: a ladder of values, a
@@ -1018,11 +1075,15 @@ only when at least one loaded mod registered a setting, so a player with no mods
 sees the cartridge's menu exactly.
 
 A change is committed the moment it is made, the way the cartridge's own OPTION
-menu writes each press to `wOptions`. Values live in `user://mod_options.json`,
-keyed by mod id, because a draw distance is a property of this installation and
-must not change when a save slot is loaded. Only values are stored, never what a setting means, so a
-mod that drops a rung in a later version finds its stored value refused and its
-default used instead, and uninstalling a mod drops what it stored.
+menu writes each press to `wOptions`. With no slot open it lands in
+`user://mod_options.json`, keyed by mod id: that file is the installation's own
+values and the template a new run is created from. While a slot is played the
+change belongs to the slot instead (`run_options`, see "Holding a run rather than
+an installation"), because a draw distance that moved under a loaded save would
+make that save's own recorded walk unreproducible. Only values are stored, never
+what a setting means, so a mod that drops a rung in a later version finds its
+stored value refused and its default used instead, and uninstalling a mod drops
+what it stored.
 
 Per-slot state belongs in the save instead. A discovered manifest can use
 `host.read_save_data(manifest, save)` and
@@ -1098,10 +1159,12 @@ takes the press first.
 
 ## Not built yet
 
-Art for mod content and mutation hooks on the event channels. A mod
-species does not appear in the Pokedex either: both dex order tables are
-cartridge data of exactly 251 entries, and nothing splices `defined_numbers()`
-into them, though a mod species that replaces a cartridge one does carry its own
-dex entry. Evaluate
+A mod species does not appear in the Pokedex: both dex order tables are cartridge
+data of exactly 251 entries, and nothing splices `defined_numbers()` into them,
+though a mod species that replaces a cartridge one does carry its own dex entry.
+Mod content cannot leave the project's own save either: every species, item and
+move on the hardware is one byte, so `Gen2SramAdapter` refuses to export a save
+carrying any of it rather than truncating a number into a different Pokemon.
+Evaluate
 [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) before
 expanding the loader itself.

@@ -306,26 +306,20 @@ func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
 	if pic.is_empty():
 		return out
 
-	var atlas: Dictionary = _data.atlas(String(pic["atlas"]))
-	var indices: PackedByteArray = _data.atlas_indices(String(pic["atlas"]))
-	var cell: int = int(atlas.get("cell", 0))
-	var columns: int = int(atlas.get("columns", 0))
-	var atlas_width: int = int(atlas.get("width", 0))
-	var slot: int = int(pic.get("slot", -1))
-	if cell <= 0 or columns <= 0 or atlas_width <= 0 or slot < 0:
+	var name: String = String(pic.get("atlas", ""))
+	var cell: Dictionary = Gen2PicImage.atlas_cell(
+		_data.atlas_indices(name), _data.atlas(name), pic
+	)
+	if cell.is_empty():
 		return out
 
-	var width: int = mini(int(pic.get("width", cell)), mini(cell, box))
-	var height: int = mini(int(pic.get("height", cell)), mini(cell, box))
-	var left: int = (slot % columns) * cell
-	@warning_ignore("integer_division")
-	var top: int = (slot / columns) * cell
+	var indices: PackedByteArray = cell["indices"]
+	var width: int = mini(int(cell["width"]), box)
+	var height: int = mini(int(cell["height"]), box)
+	var stride: int = int(cell["width"])
 	for y: int in height:
-		var from: int = (top + y) * atlas_width + left
-		if from + width > indices.size():
-			break
 		for x: int in width:
-			out[y * box + x] = indices[from + x]
+			out[y * box + x] = indices[y * stride + x]
 	return out
 
 

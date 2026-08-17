@@ -2851,7 +2851,7 @@ func _replace_the_fallen() -> bool:
 func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
-		Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
+		event = Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
 		if StringName(event["type"]) == Gen2Battle.ANIMATION:
 			## The engine has already resolved; this event is the frames the
 			## screen owes for it, and nothing behind it is shown until they are

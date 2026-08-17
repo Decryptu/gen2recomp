@@ -5,7 +5,7 @@ battle engine. Slots live in Godot's `user://`, never in the repository.
 
 ## Canonical project model
 
-Save format version 2 stores:
+Save format version 6 stores:
 
 - game ID and ROM SHA-1, preventing use with another cache;
 - player name, party order and each Pokémon's species, held item, level,
@@ -21,6 +21,13 @@ Save format version 2 stores:
   day/hour/minute clock and the daylight-saving flag;
 - imported-save and party-transaction identity fields: OT ID, nickname, OT,
   happiness, Pokerus and caught data;
+- the trainer card's own fields: `player_id`, the player's `gender` and the play
+  timer;
+- a per-slot, per-mod JSON namespace, and the `run` block naming what produced
+  the state: the world's seed, the mods that were loaded when it was last
+  written, and the registered mod settings the run is played with
+  (`run_options`), so a slot cannot silently change draw distance when it is
+  reopened;
 - `is_egg` for received eggs. An egg keeps its party slot and is skipped when
   the battle party is built, matching the cartridge refusing it as a combatant
   rather than removing it; the writeback puts it back in the same slot. Hatch
@@ -39,18 +46,21 @@ own `label`, the player's name for the slot, so an exported file names itself;
 an empty label means fall back to the player name. Box names, current-box UI
 state and cartridge SRAM box placement are intentionally outside this model.
 
-Each save also carries `player_id`, the cartridge's own `wPlayerID`. It is
-rolled once when a game starts, read from SRAM on import and written back on
-export, and `GetTreeScore` is what reads it: half of a headbutt tree's
-encounter tier comes from the trainer ID. The rest of the trainer card, gender
-and play time, is not modelled.
+`player_id` is the cartridge's own `wPlayerID`, rolled once when a game starts,
+read from SRAM on import and written back on export. `GetTreeScore` is what reads
+it: half of a headbutt tree's encounter tier comes from the trainer ID. `gender`
+is Crystal's `wPlayerGender` and is always male on Gold and Silver, which ship
+neither the byte nor Kris.
 
 Older project saves migrate in memory one version step at a time: version 1
 gains fourteen empty boxes, version 2 gains an empty label, version 3 gains a
-zero `player_id`. Migration preserves a missing world snapshot as missing; it
-does not invent a map, player position or event state, and it does not roll an
-ID, since that would change an existing save's headbutt encounters. The next
-successful save writes version 4.
+zero `player_id`, version 4 gains a male gender and a 0:00 timer, version 5 gains
+an empty mod namespace. Migration preserves a missing world snapshot as missing;
+it does not invent a map, player position or event state, and it does not roll an
+ID, since that would change an existing save's headbutt encounters. The `run`
+block joined version 6 after it shipped and is not a version of its own: it
+defaults to no seed, mod list or settings snapshot, which is the truth about a
+slot written before it existed. The next successful save writes version 6.
 
 ## Player flow
 
@@ -155,7 +165,12 @@ It maps player name and six-party fields: species, item, moves, OT ID,
 experience, stat experience, DVs, PP, happiness, Pokerus, caught data, level,
 status, current HP, nickname and OT. Derived stats are rebuilt from selected
 `GameData`; other bytes remain untouched. Export requires an existing valid SRAM
-image and does not invent unsupported map or event state.
+image and does not invent unsupported map or event state. It also refuses a save
+carrying mod content: every species, item and move on the hardware is one byte,
+and `Gen2ContentOverlay.FIRST_MOD_NUMBER` sits past that, so truncating one would
+write a different Pokemon into a real cartridge. Crystal's player gender rides
+along in `sCrystalData`, its own section outside both save copies, of which only
+bit 0 is written.
 
 | Profile | Primary data | Checksum | Party | Backup |
 |---|---|---|---|---|

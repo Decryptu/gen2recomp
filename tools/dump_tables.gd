@@ -7,11 +7,11 @@ extends SceneTree
 ## The written counterpart of the contact sheet: a bad offset in a name table
 ## produces plausible words rather than an error, so the check is reading the
 ## output. <game> is a registry id; [table] is species, moves, items, types,
-## matchups, trainers, learnsets, evolutions or all.
+## matchups, trainers, learnsets, egg_moves, evolutions or all.
 
 const TABLES: PackedStringArray = [
 	"species", "moves", "items", "types", "matchups", "trainers", "learnsets",
-	"evolutions", "growth",
+	"egg_moves", "evolutions", "growth",
 ]
 
 ## Which file a table is read out of, where it is not a file of its own.
@@ -20,6 +20,7 @@ const TABLES: PackedStringArray = [
 ## of their own.
 const SOURCES: Dictionary = {
 	"learnsets": RomCache.SPECIES,
+	"egg_moves": RomCache.SPECIES,
 	"evolutions": RomCache.SPECIES,
 	"growth": RomCache.SPECIES,
 }
@@ -142,6 +143,8 @@ func _dump(directory: String, table: String) -> void:
 			_dump_trainers(directory, rows)
 		"learnsets":
 			_dump_learnsets(directory, rows)
+		"egg_moves":
+			_dump_egg_moves(directory, rows)
 		"evolutions":
 			_dump_evolutions(directory, rows)
 		"growth":
@@ -171,6 +174,30 @@ func _dump_learnsets(directory: String, rows: Array) -> void:
 			parts.append("%d %s" % [int(entry["level"]), _name_at(moves, int(entry["move"]))])
 		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), ", ".join(parts)])
 	print("  %d level-up moves" % total)
+
+
+## Only the species that inherit something, which is a little over 40 percent of
+## them. An egg-move list has no self-checking shape at all: every byte in it is a
+## plausible move number, and one pointer read a byte out of step still decodes.
+## What settles it is reading names against the published lists, which is why the
+## two the importer pins are worth finding here: Bulbasaur and Staryu.
+func _dump_egg_moves(directory: String, rows: Array) -> void:
+	var moves: Array = _names_in(RomCache.moves_path(directory))
+	var total: int = 0
+	var species: int = 0
+
+	print("\negg moves")
+	for row: Dictionary in rows:
+		var inherited: Array = row.get("egg_moves", [])
+		if inherited.is_empty():
+			continue
+		total += inherited.size()
+		species += 1
+		var parts: PackedStringArray = []
+		for move: Variant in inherited:
+			parts.append(_name_at(moves, int(move)))
+		print("  %3d  %-11s %s" % [int(row["number"]), String(row["name"]), ", ".join(parts)])
+	print("  %d egg moves across %d species" % [total, species])
 
 
 ## Every species' growth rate and base experience yield, the two fields

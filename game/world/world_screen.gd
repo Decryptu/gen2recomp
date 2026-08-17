@@ -3259,8 +3259,8 @@ func _show_script_results(results: Array) -> void:
 	var clock_changed: bool = false
 	var recovered: bool = false
 	var recovery_prompt: String = ""
-	for result: Dictionary in results:
-		Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, result)
+	for source_result: Dictionary in results:
+		var result: Dictionary = Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, source_result)
 		if result.has("clock"):
 			clock_changed = true
 		var status: StringName = StringName(result.get("status", &""))

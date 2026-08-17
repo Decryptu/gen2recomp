@@ -190,6 +190,9 @@ static func export_bytes(
 	var validation: Dictionary = Gen2SaveValidator.validate(save, data)
 	if not validation["ok"]:
 		return _failure("save cannot be exported: %s" % validation["message"])
+	var mod_content: Dictionary = _mod_content_refusal(save)
+	if not mod_content["ok"]:
+		return mod_content
 
 	var selected: String = ""
 	if _primary_is_valid(raw, layout):
@@ -211,6 +214,34 @@ static func export_bytes(
 		"raw": output,
 		"copy": selected,
 	}
+
+
+## Refuses a save holding content a cartridge byte cannot name.
+##
+## Every species, item and move on the hardware is one byte, and
+## [constant Gen2ContentOverlay.FIRST_MOD_NUMBER] sits past that on purpose. So a
+## mod's own content has no representation here: truncating it would write a
+## different Pokémon into a real cartridge, which is worse than refusing. The
+## project's own JSON save carries it either way.
+static func _mod_content_refusal(save: Gen2SaveData) -> Dictionary:
+	var mons: Array = save.party.duplicate()
+	for raw_box: Variant in save.boxes:
+		if raw_box is Gen2SaveBox:
+			mons.append_array((raw_box as Gen2SaveBox).slots)
+	for raw_mon: Variant in mons:
+		if not raw_mon is Gen2SaveMon:
+			continue
+		var mon: Gen2SaveMon = raw_mon
+		var numbers: Array[int] = [mon.species, mon.item]
+		for move: Variant in mon.moves:
+			numbers.append(int(move))
+		for number: int in numbers:
+			if number >= Gen2ContentOverlay.FIRST_MOD_NUMBER:
+				return _failure(
+					"%s carries mod content (%d) no cartridge byte can name"
+					% [mon.nickname if not mon.nickname.is_empty() else "a Pokemon", number]
+				)
+	return {"ok": true, "message": ""}
 
 
 static func _layout_for(game_id: StringName) -> Dictionary:

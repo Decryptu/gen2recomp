@@ -137,6 +137,92 @@ func test_a_subscriber_sees_published_events_and_cannot_write_through_them() -> 
 	assert_eq(_seen.size(), 1)
 
 
+## Mutation is the other half of the event channel: the turn or the script has
+## already committed, so what reaches the screen is presentation and may be
+## rewritten, while the key the screen dispatches on may not.
+func test_an_event_mutator_rewrites_presentation_and_not_the_routing_key() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.register_event_mutator(
+		Gen2ModHost.CHANNEL_BATTLE, MOD,
+		func(event: Dictionary) -> Dictionary:
+			event["damage"] = 1
+			return event
+	).get("ok", false)))
+	assert_true(bool(host.subscribe(Gen2ModHost.CHANNEL_BATTLE, MOD, _watch).get("ok", false)))
+
+	var effective: Dictionary = Gen2ModHost.publish(
+		Gen2ModHost.CHANNEL_BATTLE, {"type": Gen2Battle.HIT, "damage": 12}
+	)
+	assert_eq(int(effective["damage"]), 1, "the screen shows what the mutator returned")
+	assert_eq(int(_seen[0]["damage"]), 1, "and a watcher sees the same event")
+
+	host.unregister_event_mutator(Gen2ModHost.CHANNEL_BATTLE, MOD)
+	assert_eq(
+		int(Gen2ModHost.publish(
+			Gen2ModHost.CHANNEL_BATTLE, {"type": Gen2Battle.HIT, "damage": 12}
+		)["damage"]),
+		12
+	)
+
+
+func test_a_mutator_that_changes_the_key_or_answers_with_nothing_is_ignored() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_event_mutator(
+		Gen2ModHost.CHANNEL_BATTLE, MOD,
+		func(event: Dictionary) -> Dictionary:
+			event["type"] = Gen2Battle.ANIMATION
+			return event
+	)
+	var event: Dictionary = {"type": Gen2Battle.HIT, "damage": 12}
+	assert_eq(
+		StringName(Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)["type"]),
+		StringName(Gen2Battle.HIT),
+		"a rewrite cannot turn one screen operation into another"
+	)
+
+	host.unregister_event_mutator(Gen2ModHost.CHANNEL_BATTLE, MOD)
+	host.register_event_mutator(
+		Gen2ModHost.CHANNEL_WORLD, MOD, func(_event: Dictionary) -> Variant: return null
+	)
+	assert_eq(
+		Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, {"status": &"waiting"}),
+		{"status": &"waiting"},
+		"and a mutator answering with nothing leaves the event alone"
+	)
+
+
+## Exclusive, because composing two rewrites in load order would make the picture
+## depend on which mod happened to load first.
+func test_only_one_mod_may_mutate_a_channel() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.register_event_mutator(
+		Gen2ModHost.CHANNEL_WORLD, MOD, _watch
+	).get("ok", false)))
+	var second: Dictionary = host.register_event_mutator(
+		Gen2ModHost.CHANNEL_WORLD, &"othermod", _watch
+	)
+	assert_eq(StringName(second["reason"]), &"duplicate_event_mutator")
+	assert_string_contains(String(second["detail"]), "othermod")
+	assert_eq(
+		StringName(host.register_event_mutator(&"nowhere", MOD, _watch)["reason"]),
+		&"unknown_channel"
+	)
+	assert_eq(
+		StringName(host.register_event_mutator(
+			Gen2ModHost.CHANNEL_BATTLE, MOD, Callable()
+		)["reason"]),
+		&"invalid_event_mutator_handler"
+	)
+	# Another mod's id cannot release it either.
+	host.unregister_event_mutator(Gen2ModHost.CHANNEL_WORLD, &"othermod")
+	assert_eq(
+		StringName(host.register_event_mutator(
+			Gen2ModHost.CHANNEL_WORLD, &"othermod", _watch
+		)["reason"]),
+		&"duplicate_event_mutator"
+	)
+
+
 func test_unsubscribing_and_unknown_channels() -> void:
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	assert_eq(

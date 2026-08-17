@@ -89,6 +89,7 @@ live under their own root and are not touched.
 |---|---|
 | Species | Names, base stats, types, held items, egg groups, TM/HM flags |
 | Learnsets, evolutions | All 251 species' level-up moves in cartridge order; every evolution and its method |
+| Egg moves | Every species' inherited moves: 478 across 106 species on Gold and Silver, 480 across 105 on Crystal |
 | Moves, TM/HM | Power, type, accuracy, PP, effect and chance; the 57 or 60 TM, HM and tutor rows; the happiness table teaching one moves |
 | Items, types | 255 items with prices, effects, pockets and healing metadata; 28 type names |
 | Type chart | Every matchup and the two Foresight-cancelled entries |
@@ -210,7 +211,7 @@ The rest are previews and dumps, each driving a real screen or table:
 
 | Tool | Does |
 |---|---|
-| `dump_tables.gd <game> <table>` | Prints a decoded table: `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`, `evolutions`, `growth` or `all` |
+| `dump_tables.gd <game> <table>` | Prints a decoded table: `species`, `moves`, `items`, `types`, `matchups`, `trainers`, `learnsets`, `egg_moves`, `evolutions`, `growth` or `all` |
 | `preview_pics.gd <game> <png> [kind]` | Contact sheet of `front`, `trainers`, `font` or `frames` |
 | `preview_*.gd` | One per screen: the intro, title, credits, Hall of Fame, region map, party, marts, fishing, battle switch and animations, overworld sprites and collision |
 | `preview_world_story.gd` | Map entry callbacks, event-flag visibility, facing interactions and the whole story route |

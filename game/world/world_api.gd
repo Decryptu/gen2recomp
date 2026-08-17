@@ -33,9 +33,8 @@ const STEP_FRAMES_WALK: int = 8
 ## A ledge hop is two chained STEP_WALK-duration cells back to back
 ## (engine/overworld/map_objects.asm's StepFunction_PlayerJump: .initjump/
 ## .stepjump then .initland/.stepland, each timed by the same InitStep call
-## the ordinary walk uses). The source also overlays a visual jump arc via
-## OBJECT_JUMP_HEIGHT/UpdateJumpPosition, which this project does not render;
-## no vertical bob exists anywhere else in this renderer either.
+## the ordinary walk uses). OBJECT_JUMP_HEIGHT/UpdateJumpPosition supplies the
+## vertical arc exposed by player_jump_offset() and drawn by the world renderer.
 const STEP_FRAMES_HOP: int = STEP_FRAMES_WALK * 2
 ## StepVectors' slow row: 1 pixel per frame for 16 frames. _RandomWalkContinue
 ## calls InitStep with a direction of 0 to 3, which indexes that first row, so

@@ -15,7 +15,9 @@ const FILENAME: String = "mod.json"
 ## Bumped when the host contract changes in a way an existing mod would notice.
 ## 2 added [method Gen2ModHost.register_visible_encounters].
 ## 3 added mart rows and named action axes.
-const API_VERSION: int = 3
+## 4 added types, type matchups and mod-supplied art as content, and
+## [method Gen2ModHost.register_event_mutator].
+const API_VERSION: int = 4
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase

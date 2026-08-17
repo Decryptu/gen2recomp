@@ -57,10 +57,10 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 ## rest in order; the write fails rather than dropping an egg or shifting a
 ## slot when the two no longer line up.
 ##
-## The fields restored off [param source_save] are the ones the battle model does
-## not carry at all. Happiness is not among them any more: Return and Frustration
-## read it, so [Gen2BattleMon] holds it and it round-trips rather than being put
-## back from before the fight.
+## The candidate starts as a complete clone of [param source_save], so fields
+## the battle model does not carry cannot disappear as the save schema grows.
+## Happiness is not restored from that clone: Return and Frustration read it,
+## so [Gen2BattleMon] holds it and it round-trips with the fought party.
 static func from_battle_party(
 	game_id: StringName, rom_sha1: String, slot: int, party: Gen2Party, player_name: String = "",
 	source_save: Gen2SaveData = null
@@ -76,26 +76,17 @@ static func from_battle_party(
 			return null
 		if source_save.party.size() > Gen2Party.MAX_SIZE:
 			return null
-	var out := Gen2SaveData.new()
+	var out: Gen2SaveData = (
+		Gen2SaveData.from_dict(source_save.to_dict())
+		if source_save != null else Gen2SaveData.new()
+	)
+	if out == null:
+		return null
 	out.game_id = game_id
 	out.rom_sha1 = rom_sha1
 	out.slot = slot
 	out.player_name = source_save.player_name if source_save != null else player_name
-	if source_save != null:
-		out.boxes.clear()
-		for raw_box: Variant in source_save.boxes:
-			var box: Gen2SaveBox = raw_box if raw_box is Gen2SaveBox else null
-			if box == null:
-				out.boxes.append(Gen2SaveBox.new())
-				continue
-			var copied_box: Gen2SaveBox = Gen2SaveBox.from_dict(box.to_dict())
-			copied_box.shape_valid = box.shape_valid
-			out.boxes.append(copied_box)
-		while out.boxes.size() < Gen2SaveData.BOX_COUNT:
-			out.boxes.append(Gen2SaveBox.new())
-		if source_save.world != null:
-			out.world = Gen2WorldSnapshot.from_dict(source_save.world.to_dict())
-		out.mods = source_save.mods.duplicate(true)
+	out.party.clear()
 	var fought: int = 0
 	var slot_count: int = source_save.party.size() if egg_count > 0 else party.mons.size()
 	for index: int in slot_count:
