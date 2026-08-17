@@ -9,7 +9,6 @@ signal completed(results: Array)
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
-const SCRIM: Color = Color(0.02, 0.04, 0.08, 0.78)
 const TEXT: Color = Color("#f4f7fb")
 const MUTED: Color = Color("#9eacc0")
 const ACCENT: Color = Color("#f3c969")
@@ -125,6 +124,10 @@ var _pc_sfx: int = -1
 var _pc_after: StringName = &"top"
 var _pc_label: String = ""
 var _boxes: Gen2BoxScreen = null
+
+var _service_hardware: Gen2Screen = null
+var _service_view: TextureRect = null
+var _service_page: Gen2WorldServicePage = null
 
 var _panel: PanelContainer = null
 var _title: Label = null
@@ -279,12 +282,6 @@ func selected_index() -> int:
 
 
 func _build_ui() -> void:
-	var scrim := ColorRect.new()
-	scrim.color = SCRIM
-	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scrim.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(scrim)
-
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
@@ -320,6 +317,19 @@ func _build_ui() -> void:
 	_footer = Label.new()
 	_footer.add_theme_color_override("font_color", ACCENT)
 	content.add_child(_footer)
+
+	_service_hardware = HARDWARE_SCENE.instantiate() as Gen2Screen
+	_service_hardware.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_service_hardware.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_service_hardware.z_index = 4
+	add_child(_service_hardware)
+	_service_view = TextureRect.new()
+	_service_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_service_view.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
+	_service_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_service_hardware.display(_service_view)
+	_panel.visible = false
+	_service_hardware.visible = false
 
 
 func _open_menu(input: Dictionary) -> void:
@@ -599,6 +609,7 @@ func _close_mart() -> void:
 		_mart_hardware = null
 		_mart_view = null
 	_panel.visible = true
+	_service_hardware.visible = true
 
 
 func _render_mart() -> void:
@@ -953,6 +964,7 @@ func _open_boxes() -> void:
 		return
 	_boxes = host
 	_panel.visible = false
+	_service_hardware.visible = false
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 5
 	add_child(host)
@@ -967,6 +979,7 @@ func _on_boxes_closed(_result: Dictionary) -> void:
 		_boxes.queue_free()
 		_boxes = null
 	_panel.visible = true
+	_service_hardware.visible = true
 	_open_pc(&"pokemon_center")
 
 
@@ -1014,6 +1027,7 @@ func _open_card(card: StringName) -> void:
 	_mode = MODE.CARD
 	_cursor = 0
 	_panel.visible = false
+	_service_hardware.visible = false
 	_pokegear = Gen2PokegearScreen.new()
 	_pokegear.z_index = 5
 	add_child(_pokegear)
@@ -1117,6 +1131,7 @@ func _on_card_called(contact: int) -> void:
 	var results: Array = _world.request_outgoing_phone_call(contact)
 	_close_card()
 	_panel.visible = true
+	_service_hardware.visible = true
 	_mode = -1
 	completed.emit(results)
 
@@ -1136,6 +1151,7 @@ func _on_card_closed() -> void:
 		_world.close_radio()
 	_close_card()
 	_panel.visible = true
+	_service_hardware.visible = true
 	_open_pokegear_cards()
 
 
@@ -1166,6 +1182,7 @@ func open_fly_map(
 	_town_map_from_request = false
 	_fly_map = true
 	_panel.visible = false
+	_service_hardware.visible = false
 	_town_map = Gen2TownMapScreen.new()
 	_town_map.z_index = 5
 	add_child(_town_map)
@@ -1193,6 +1210,7 @@ func _open_town_map(from_request: bool) -> void:
 	# The region map is the whole screen, so the card list's own panel goes with
 	# its labels; the scrim behind it stays as the overlay's backdrop.
 	_panel.visible = false
+	_service_hardware.visible = false
 	_town_map = Gen2TownMapScreen.new()
 	_town_map.z_index = 5
 	add_child(_town_map)
@@ -1223,6 +1241,7 @@ func _on_town_map_closed() -> void:
 		_town_map.queue_free()
 		_town_map = null
 	_panel.visible = true
+	_service_hardware.visible = true
 	if _fly_map:
 		_fly_map = false
 		_mode = -1
@@ -1407,6 +1426,33 @@ func _render_options(override: Array = []) -> void:
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
 		parent.add_child(label)
+	_render_service_page(values)
+
+
+func _render_service_page(values: Array) -> void:
+	if _service_view == null or _data == null:
+		return
+	if _service_page == null:
+		_service_page = Gen2WorldServicePage.from_data(_data)
+	if _service_page == null:
+		return
+	var labels: Array = []
+	for value: Variant in values:
+		if value is Dictionary:
+			var row: Dictionary = value
+			var label: String = String(row.get("name", row.get("caller_label", "")))
+			if _mode == MODE.PC_ITEM_LIST:
+				label += " x%d" % int(row.get("quantity", 0))
+			labels.append(label)
+		else:
+			labels.append(String(value))
+	var full_screen: bool = _mode in [MODE.PC, MODE.PC_ITEMS, MODE.PC_ITEM_LIST, MODE.PC_TEXT]
+	var image: Image = _service_page.render(
+		_title.text, _summary.text, labels, _cursor, _status.text, full_screen
+	)
+	if image != null:
+		_service_view.texture = ImageTexture.create_from_image(image)
+		_service_hardware.visible = true
 
 
 func _option_count() -> int:

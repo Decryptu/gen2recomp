@@ -1,6 +1,6 @@
 extends GutTest
 
-## `NewGame`: the gender question, then Oak's speech with the naming screen in
+## `NewGame`: the gender question, clock set, then Oak's speech with the naming screen in
 ## it, then one write. Nothing reaches disk until the run is over, which is what
 ## lets [Gen2SaveValidator]'s rule that a save has a trainer stand unchanged.
 
@@ -70,6 +70,12 @@ func _settle(limit: int = 40) -> void:
 		speech.advance_frames(speech.animation_frames_left())
 
 
+func _accept_clock() -> void:
+	assert_true(_screen.current() is Gen2ClockSetScreen)
+	for _step: int in 6:
+		_screen.handle_button(Gen2Button.A)
+
+
 ## Presses A until [param stop] answers, so a test never has to know how many
 ## pages a text wrapped to.
 func _press_a_until(stop: Callable, limit: int = 200) -> void:
@@ -95,6 +101,7 @@ func _run_intro(female: bool = false) -> String:
 	if female:
 		_screen.handle_button(Gen2Button.DOWN)
 	_screen.handle_button(Gen2Button.A)
+	_accept_clock()
 	_press_a_until(_at_naming)
 	_screen.handle_button(Gen2Button.A)
 	_screen.handle_button(Gen2Button.START)
@@ -128,7 +135,27 @@ func test_the_gender_question_comes_first() -> void:
 	_begin()
 	assert_true(_screen.current() is Gen2GenderScreen)
 	_screen.handle_button(Gen2Button.A)
+	assert_true(_screen.current() is Gen2ClockSetScreen, "then InitClock")
+	_accept_clock()
 	assert_true(_screen.current() is Gen2OakSpeechScreen, "then the speech")
+
+
+func test_clock_set_wraps_each_source_dial_and_reaches_the_speech() -> void:
+	_begin()
+	_screen.handle_button(Gen2Button.A)
+	var clock: Gen2ClockSetScreen = _screen.current() as Gen2ClockSetScreen
+	assert_not_null(clock)
+	clock.handle_button(Gen2Button.DOWN)
+	clock.handle_button(Gen2Button.A)
+	clock.handle_button(Gen2Button.A)
+	clock.handle_button(Gen2Button.DOWN)
+	clock.handle_button(Gen2Button.A)
+	clock.handle_button(Gen2Button.A)
+	clock.handle_button(Gen2Button.DOWN)
+	assert_eq(clock.value(), {"day": 6, "hour": 9, "minute": 59})
+	clock.handle_button(Gen2Button.A)
+	clock.handle_button(Gen2Button.A)
+	assert_true(_screen.current() is Gen2OakSpeechScreen)
 
 
 ## `NewGame` reaches `InitializeWorld` only after both have returned, so nothing
@@ -137,6 +164,7 @@ func test_nothing_is_written_while_the_intro_runs() -> void:
 	_begin()
 	assert_false(Gen2SaveStore.exists(_data.id, _data.sha1, SLOT))
 	_screen.handle_button(Gen2Button.A)
+	_accept_clock()
 	_press_a_until(_at_naming)
 	assert_false(
 		Gen2SaveStore.exists(_data.id, _data.sha1, SLOT),
@@ -149,6 +177,7 @@ func test_nothing_is_written_while_the_intro_runs() -> void:
 func test_abandoning_the_intro_leaves_no_slot() -> void:
 	_begin()
 	_screen.handle_button(Gen2Button.A)
+	_accept_clock()
 	_press_a_until(_at_naming)
 	_screen.free()
 	_screen = null
@@ -199,6 +228,7 @@ func test_the_written_save_carries_the_new_game_spawn() -> void:
 	assert_not_null(save.world, "the new-game snapshot came with it")
 	assert_eq(save.slot, SLOT)
 	assert_eq(save.game_id, _data.id)
+	assert_eq(save.world.world_clock(), {"day": 0, "hour": 10, "minute": 0})
 
 
 ## A cartridge with no gender screen starts on the speech instead, and its save
@@ -210,6 +240,8 @@ func test_a_cartridge_without_a_gender_screen_starts_on_the_speech() -> void:
 	_data = GameData.open_directory(Fixture.directory())
 
 	_begin()
+	assert_true(_screen.current() is Gen2ClockSetScreen)
+	_accept_clock()
 	assert_true(_screen.current() is Gen2OakSpeechScreen)
 	assert_eq(_screen.gender(), Gen2SaveData.GENDER_MALE)
 
@@ -220,5 +252,6 @@ func test_a_cache_without_intro_text_fails_without_writing() -> void:
 	RomCache.write_json(RomCache.intro_text_path(Fixture.directory()), {})
 	_data = GameData.open_directory(Fixture.directory())
 	_begin()
+	_accept_clock()
 	assert_eq(_failed.size(), 1)
 	assert_false(Gen2SaveStore.exists(_data.id, _data.sha1, SLOT))
