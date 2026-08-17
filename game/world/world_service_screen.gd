@@ -82,6 +82,7 @@ var _choices: Array = []
 var _menu_input: Dictionary = {}
 var _menu: Gen2WorldMenu = null
 var _cursor: int = 0
+var _mart: Dictionary = {}
 var _mart_entries: Array = []
 var _mart_quantity: int = 1
 var _mart_purchased: bool = false
@@ -348,8 +349,11 @@ func _open_menu(input: Dictionary) -> void:
 ## `BuyMenu`, which is a screen of its own rather than a box over the map: the
 ## panel steps aside for it the way it does for the region map, and the shop's
 ## own intro box is the first thing it prints.
-func _open_mart(_mart: Dictionary) -> void:
+func _open_mart(mart: Dictionary) -> void:
 	_mode = MODE.MART
+	_mart = mart.duplicate(true)
+	for row: Dictionary in Gen2ModHost.instance().mart_entries(_mart):
+		(_mart["items"] as Array).append(row)
 	_refresh_mart_entries()
 	_mart_quantity = 1
 	_mart_purchased = false
@@ -1468,7 +1472,7 @@ func _option_count() -> int:
 
 
 func _mart_source() -> Dictionary:
-	return _resolved.get("data", {}).get("mart", {})
+	return _mart
 
 
 ## `FarReadMart`'s own list. CANCEL is not one of its rows: `ScrollingMenu`

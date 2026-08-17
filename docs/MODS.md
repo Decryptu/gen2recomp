@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -883,6 +883,7 @@ or remove them.
 |---|---|---|
 | `Gen2ModHost.MENU_START` | the start menu, immediately before EXIT | `label`, optional `handler: Callable` |
 | `Gen2ModHost.MENU_PACK_POCKET` | after the pack's four source pockets | `label`, `pocket` |
+| `Gen2ModHost.MENU_MART` | after a mart's cartridge shelf | `label`, `item`, optional `price`, optional `available(mart)` |
 
 ```gdscript
 func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
@@ -898,6 +899,11 @@ above `Gen2ModHost.FIRST_MOD_POCKET`: 1 to 4 are the cartridge's ITEM, KEY_ITEM,
 BALL and TM_HM, and an item joins the pocket its own definition names. Two mods
 claiming the same entry id is refused with `duplicate_menu_entry` rather than one
 silently winning.
+
+A mart filter receives the resolved mart dictionary, including `mart_id`,
+`dialog_id` and `variant`. Its row is omitted when the filter answers false or
+the source shelf already sells that item. Selection still goes through the
+ordinary mart transaction, including money, stack limits and save validation.
 
 ## Adding a row to a party member's menu
 
@@ -1068,12 +1074,14 @@ Three ways to read one, none of them an `InputEvent`:
 | `action_changed(id, key, pressed)` | The edge. A signal, like `option_changed` |
 | `action_held(id, key) -> bool` | The poll a camera wants |
 | `action_strength(id, key) -> float` | The same as a magnitude, 0 to 1 |
+| `action_axis(id, negative, positive) -> float` | Two named actions as one signed axis |
+| `action_vector(id, left, right, up, down) -> Vector2` | Two named axes, limited to unit length |
 
 `action_strength` is what makes an analogue control analogue: a stick bound to an
 action answers its travel past the deadzone, so a camera on the right stick moves
-at the rate the player is pushing it, while a key answers 0 or 1. For motion
-nothing can name, a two-finger drag and raw stick movement are still the
-leftovers `handle_world_input` and `handle_battle_input` are offered.
+at the rate the player is pushing it, while a key answers 0 or 1. Cameras can
+compose four such actions through `action_vector`; a two-finger drag remains a
+raw `handle_world_input` or `handle_battle_input` leftover.
 
 Everything a registered control reaches is reachable without a keyboard:
 
@@ -1090,8 +1098,7 @@ takes the press first.
 
 ## Not built yet
 
-Art for mod content, mutation hooks on the event channels, entries in the party submenu or the mart,
-and `.zip`/`.pck` packs through `ProjectSettings.load_resource_pack()`. A mod
+Art for mod content and mutation hooks on the event channels. A mod
 species does not appear in the Pokedex either: both dex order tables are
 cartridge data of exactly 251 entries, and nothing splices `defined_numbers()`
 into them, though a mod species that replaces a cartridge one does carry its own

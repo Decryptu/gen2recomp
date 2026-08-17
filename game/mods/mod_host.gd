@@ -112,7 +112,8 @@ const BUILT_IN_RENDERER: StringName = &"gen2"
 ## mod can only add and never reorder or remove what the game shipped.
 const MENU_START: StringName = &"start_menu"
 const MENU_PACK_POCKET: StringName = &"pack_pocket"
-const MENU_IDS: Array[StringName] = [MENU_START, MENU_PACK_POCKET]
+const MENU_MART: StringName = &"mart"
+const MENU_IDS: Array[StringName] = [MENU_START, MENU_PACK_POCKET, MENU_MART]
 
 ## The event channels a mod may watch. Both carry the typed dictionaries the
 ## engine already produces, published where the screen reads them, so a
@@ -366,9 +367,10 @@ func create_battle_renderer() -> Node:
 
 ## Adds one entry to [param menu]. [param entry] needs a [code]label[/code]; the
 ## start menu takes an optional [code]handler[/code] Callable the screen calls
-## when the entry is chosen, and a pack pocket needs a [code]pocket[/code] type
-## number at or above [constant FIRST_MOD_POCKET], which is the number its items
-## carry in their own definitions.
+## when the entry is chosen, a pack pocket needs a [code]pocket[/code] type
+## number at or above [constant FIRST_MOD_POCKET], and a mart entry names an
+## [code]item[/code], optional [code]price[/code], and optional
+## [code]available(mart)[/code] Callable.
 ##
 ## An entry without a handler still appears, marked unavailable, which is what
 ## every unimplemented cartridge entry already does.
@@ -386,6 +388,21 @@ func register_menu_entry(menu: StringName, id: StringName, entry: Dictionary) ->
 		if pocket < FIRST_MOD_POCKET:
 			return {"ok": false, "reason": &"reserved_pocket", "detail": String(id)}
 		registered["pocket"] = pocket
+	elif menu == MENU_MART:
+		var item: int = int(entry.get("item", 0))
+		if item <= 0:
+			return {"ok": false, "reason": &"invalid_mart_item", "detail": String(id)}
+		registered["item"] = item
+		if entry.has("price"):
+			var price: int = int(entry["price"])
+			if price < 0:
+				return {"ok": false, "reason": &"invalid_mart_price", "detail": String(id)}
+			registered["price"] = price
+		if entry.has("available"):
+			var available: Variant = entry["available"]
+			if not available is Callable or not (available as Callable).is_valid():
+				return {"ok": false, "reason": &"invalid_mart_filter", "detail": String(id)}
+			registered["available"] = available
 	else:
 		var handler: Variant = entry.get("handler", null)
 		registered["available"] = handler is Callable and (handler as Callable).is_valid()
@@ -449,6 +466,29 @@ func party_member_entries(slot: int, in_battle: bool = false) -> Array:
 func menu_entries(menu: StringName) -> Array:
 	var entries: Array = _menu_entries.get(menu, [])
 	return entries.duplicate(true)
+
+
+## The extra shelf rows available in this mart, after source rows with the same
+## item and earlier registrations have claimed their position. A filter sees a
+## deep copy, so deciding where a row appears cannot alter the transaction.
+func mart_entries(mart: Dictionary) -> Array:
+	var out: Array = []
+	var claimed: Dictionary = {}
+	for raw: Variant in mart.get("items", []) as Array:
+		claimed[int(raw) if not raw is Dictionary else int((raw as Dictionary).get("item", 0))] = true
+	for entry: Dictionary in _menu_entries.get(MENU_MART, []) as Array:
+		var item: int = int(entry["item"])
+		if claimed.has(item):
+			continue
+		var available: Variant = entry.get("available", null)
+		if available is Callable and not bool((available as Callable).call(mart.duplicate(true))):
+			continue
+		var row: Dictionary = {"item": item}
+		if entry.has("price"):
+			row["price"] = int(entry["price"])
+		out.append(row)
+		claimed[item] = true
+	return out
 
 
 ## One setting the player can change: a ladder of values, a number in a range or
@@ -782,6 +822,25 @@ func action_held(id: StringName, key: StringName) -> bool:
 func action_strength(id: StringName, key: StringName) -> float:
 	var name: StringName = Gen2InputActions.mod_action_name(id, key)
 	return Input.get_action_strength(name) if InputMap.has_action(name) else 0.0
+
+
+## A signed named axis from two registered actions. Opposing inputs cancel, the
+## same rule [method Input.get_axis] applies to the cartridge's own directions.
+func action_axis(id: StringName, negative: StringName, positive: StringName) -> float:
+	return action_strength(id, positive) - action_strength(id, negative)
+
+
+## Two named axes as one vector, limited to the unit circle so diagonals do not
+## move a camera faster than either axis alone.
+func action_vector(
+	id: StringName,
+	negative_x: StringName, positive_x: StringName,
+	negative_y: StringName, positive_y: StringName
+) -> Vector2:
+	return Vector2(
+		action_axis(id, negative_x, positive_x),
+		action_axis(id, negative_y, positive_y)
+	).limit_length()
 
 
 ## The registered action an event has just pressed or released, as
