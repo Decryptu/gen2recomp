@@ -47,6 +47,10 @@ const OPTIONS_COLON_COLUMN: int = 10
 const OPTIONS_VALUE_COLUMN: int = 11
 ## `Options_UpdateCursorPosition` walks column 1 by two rows per option.
 const OPTIONS_CURSOR_COLUMN: int = 1
+## Eight labels fit between the borders. Only seven entries may carry a value
+## on the following row; the eighth label is OPTION's value-less CANCEL row.
+const OPTIONS_VISIBLE_ROWS: int = 8
+const OPTIONS_VISIBLE_VALUE_ROWS: int = 7
 
 ## `DisplaySaveInfoOnSave`'s `lb de, 4, 0` through `_OffsetMenuHeader`, which
 ## keeps `menu_coords 0, 0, 15, 9`'s span and moves its left edge to column 4.

@@ -150,6 +150,66 @@ func test_mod_settings_use_the_hardware_option_screen() -> void:
 	Gen2ModHost.reset()
 
 
+func test_long_mod_list_scrolls_the_hardware_option_screen() -> void:
+	var host_api: Gen2ModHost = Gen2ModHost.instance()
+	for index: int in 10:
+		assert_true(bool(host_api.register_option(StringName("mod_%02d" % index), {
+			"key": &"enabled", "label": "ENABLED", "values": [0, 1],
+		})["ok"]))
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_MODS)
+	host.handle_button(Gen2Button.A)
+	for _step: int in 8:
+		host.handle_button(Gen2Button.DOWN)
+	assert_eq(host.get("_mod_cursor"), 8)
+	var rows: Array = []
+	for id: StringName in host.get("_mod_ids") as Array[StringName]:
+		rows.append({"label": String(id), "value": ""})
+	var window: Dictionary = host.call("_option_window", rows, 8)
+	assert_eq((window["rows"] as Array).size(), Gen2StartMenuPage.OPTIONS_VISIBLE_ROWS)
+	assert_eq((window["rows"] as Array)[7]["label"], "mod_08")
+	assert_eq(window["cursor"], 7)
+	assert_true((host.get("_view") as TextureRect).visible)
+
+	Gen2ModHost.reset()
+
+
+func test_long_mod_settings_scroll_and_adjust_the_global_row() -> void:
+	var host_api: Gen2ModHost = Gen2ModHost.instance()
+	for index: int in 14:
+		assert_true(bool(host_api.register_option(&"randomizer", {
+			"key": StringName("setting_%02d" % index),
+			"label": "SETTING %02d" % index,
+			"values": [0, 1], "labels": ["OFF", "ON"],
+		})["ok"]))
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_MODS)
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	for _step: int in 8:
+		host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.RIGHT)
+	assert_eq(host.get("_mod_option_cursor"), 8)
+	assert_eq(host_api.option(&"randomizer", &"setting_08"), 1)
+	assert_eq(host_api.option(&"randomizer", &"setting_07"), 0)
+	var window: Dictionary = host.call(
+		"_option_window", host.call("_mod_options"), 8,
+		Gen2StartMenuPage.OPTIONS_VISIBLE_VALUE_ROWS
+	)
+	assert_eq((window["rows"] as Array).size(), Gen2StartMenuPage.OPTIONS_VISIBLE_VALUE_ROWS)
+	assert_eq((window["rows"] as Array)[6]["key"], &"setting_08")
+	assert_eq(window["cursor"], 6)
+	assert_true((host.get("_view") as TextureRect).visible)
+
+	Gen2ModHost.reset()
+
+
 func test_pokemon_opens_the_embedded_party_screen_and_reopens_the_menu() -> void:
 	await _open_world()
 	_world_screen._world.set_party_summary(1, false)

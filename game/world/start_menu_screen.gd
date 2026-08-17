@@ -1813,7 +1813,8 @@ func _hardware_image() -> Image:
 			var rows: Array = []
 			for id: StringName in _mod_ids:
 				rows.append({"label": _mod_name(id), "value": ""})
-			return _page.render_options(rows, _mod_cursor)
+			var window: Dictionary = _option_window(rows, _mod_cursor)
+			return _page.render_options(window["rows"], window["cursor"])
 		Mode.MOD_OPTIONS:
 			var rows: Array = []
 			for raw: Dictionary in _mod_options():
@@ -1829,8 +1830,28 @@ func _hardware_image() -> Image:
 						if index >= 0 and index < labels.size():
 							value = String(labels[index])
 				rows.append({"label": String(raw.get("label", "")), "value": value})
-			return _page.render_options(rows, _mod_option_cursor)
+			var window: Dictionary = _option_window(
+				rows, _mod_option_cursor, Gen2StartMenuPage.OPTIONS_VISIBLE_VALUE_ROWS
+			)
+			return _page.render_options(window["rows"], window["cursor"])
 	return null
+
+
+## Keeps the active global row on the hardware page. Input and mutations retain
+## the global cursor; only the rows handed to the page move.
+func _option_window(
+	rows: Array, cursor: int,
+	visible_rows: int = Gen2StartMenuPage.OPTIONS_VISIBLE_ROWS
+) -> Dictionary:
+	var first: int = clampi(
+		cursor - visible_rows + 1,
+		0, maxi(rows.size() - visible_rows, 0)
+	)
+	var last: int = mini(first + visible_rows, rows.size())
+	return {
+		"rows": rows.slice(first, last),
+		"cursor": cursor - first if cursor >= 0 else -1,
+	}
 
 
 func _render_options(values: Array, cursor: int, label_for: Callable) -> void:
