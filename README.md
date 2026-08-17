@@ -46,8 +46,9 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 > Silver: every Johto badge with the errand behind it, then Kanto, all sixteen
 > badges, the Hall of Fame with Prof Oak's rating, and the credits.
 >
-> Missing: full story state, the Unown dex, and the remaining special-call
-> branches and story-driven contacts.
+> Missing: link play, item mail and Mystery Gift, the Battle Tower, and a
+> handful of pixel-level divergences still being chased in the opening movies
+> and title screen against a real cartridge.
 
 ## Getting started
 

@@ -1189,6 +1189,3 @@ though a mod species that replaces a cartridge one does carry its own dex entry.
 Mod content cannot leave the project's own save either: every species, item and
 move on the hardware is one byte, so `Gen2SramAdapter` refuses to export a save
 carrying any of it rather than truncating a number into a different Pokemon.
-Evaluate
-[godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) before
-expanding the loader itself.
