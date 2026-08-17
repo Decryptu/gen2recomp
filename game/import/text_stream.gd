@@ -81,6 +81,10 @@ const CHAR_DEXEND: int = 0x5F
 ## [method Gen2Text.character] can produce either of these.
 const PAGE_BREAK: String = "\ue000"
 const SCROLL_BREAK: String = "\ue001"
+## `_ContTextNoPause`, which `<SCROLL>` and `TextCommand_SCROLL` reach directly:
+## the same two `TextScroll`s with no `PromptButton` in front of them, so the box
+## rolls on without a press.
+const SCROLL_NOWAIT_BREAK: String = "\ue002"
 
 ## `GetWeekday`'s `.Days`, which `TextCommand_DAY` follows with "DAY".
 const WEEKDAYS: Array[String] = [
@@ -165,7 +169,7 @@ static func _run(
 			TX_LOW:
 				out += "\n"
 			TX_SCROLL:
-				out += SCROLL_BREAK
+				out += SCROLL_NOWAIT_BREAK
 			TX_PROMPT_BUTTON, TX_WAIT_BUTTON:
 				# Both wait for a press; only the first shows the arrow, which is
 				# the box's business rather than the string's.
@@ -226,8 +230,10 @@ static func _place(data: PackedByteArray, offset: int, context: Dictionary) -> D
 				out += "\n"
 			CHAR_PARA:
 				out += PAGE_BREAK
-			CHAR_CONT, CHAR_CONT_RAW, CHAR_SCROLL:
+			CHAR_CONT, CHAR_CONT_RAW:
 				out += SCROLL_BREAK
+			CHAR_SCROLL:
+				out += SCROLL_NOWAIT_BREAK
 			CHAR_WBR:
 				pass
 			CHAR_BSP:

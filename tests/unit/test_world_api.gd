@@ -2434,7 +2434,7 @@ func test_advance_objects_still_makes_one_decision_per_call() -> void:
 
 func test_follower_carries_the_player_walk_step_offset() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
-		"48:6080": [0x70, 2, 0, 0x91],
+		"48:6080": [0x70, 0, 2, 0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6080
@@ -4038,7 +4038,7 @@ func test_script_movement_still_refuses_a_step_off_the_map() -> void:
 
 func test_follow_command_moves_the_follower_after_a_player_step() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
-		"48:6080": [0x70, 2, 0, 0x91],
+		"48:6080": [0x70, 0, 2, 0x91],
 	})
 	var data: GameData = GameData.open_directory(_directory)
 	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6080
@@ -4048,6 +4048,53 @@ func test_follow_command_moves_the_follower_after_a_player_step() -> void:
 	assert_eq(results[0]["status"], &"complete")
 	assert_true(world.move(Vector2i.LEFT))
 	assert_eq((world.objects[0] as Gen2WorldObject).cell, Vector2i(6, 6))
+
+
+## `follow NEWBARKTOWN_TEACHER, PLAYER`, which is what walks the player back out
+## of the route and what a swapped pair of operands leaves standing still.
+func test_follow_names_the_leader_first_so_the_player_can_be_the_follower() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x0F, 0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6080": [0x70, 2, 0, 0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6080
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(4, 6))
+	var leader: Gen2WorldObject = world.objects[0]
+	var from: Vector2i = leader.cell
+	assert_eq(_final_status(_run_script(world, world.dispatch_script_events(Vector2i(7, 6)))),
+		&"complete")
+	assert_eq(leader.cell, from + Vector2i(2, 0), "the leader walked its own two steps")
+	assert_eq(world.player_cell, from + Vector2i(1, 0), "the player followed into its trail")
+
+
+## `Script_writetext` is `MapTextbox` and returns. A text ending in `<DONE>`
+## owes no press of its own, so the `waitbutton` behind the command is what the
+## script holds on; one ending in `<PROMPT>` owes its own.
+func test_a_writetext_says_whether_its_text_owes_a_press() -> void:
+	RomCache.write_json(RomCache.world_text_path(_directory), {
+		"48:7000": [0x00, 0x80, 0x57],
+		"48:7010": [0x00, 0x80, 0x58],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6060": [
+			Gen2WorldScript.WRITETEXT, 0x00, 0x70, Gen2WorldScript.WAITBUTTON, 0x91,
+		],
+		"48:6070": [Gen2WorldScript.WRITETEXT, 0x10, 0x70, 0x91],
+	})
+	for expected: Dictionary in [
+		{"script": 0x6060, "prompt": false}, {"script": 0x6070, "prompt": true},
+	]:
+		var data: GameData = GameData.open_directory(_directory)
+		data.world_map(1, 1).events["coord_events"][0]["script"] = int(expected["script"])
+		var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+		assert_eq(world.dispatch_script_events(Vector2i(7, 6))[0]["status"], &"waiting")
+		var pending: Dictionary = world.pending_script_input()
+		assert_eq(StringName(pending.get("type", &"")), &"text")
+		assert_eq(bool(pending.get("prompt", true)), bool(expected["prompt"]),
+			"script %04X" % int(expected["script"]))
 
 
 func test_script_items_money_and_coins_commit_as_one_runtime_transaction() -> void:

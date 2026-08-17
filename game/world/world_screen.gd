@@ -117,6 +117,12 @@ var _credits_host: Gen2CreditsScreen = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
+## Whether the text on screen owes a press of its own. A `writetext` whose last
+## page ends in `<DONE>` does not: `MapTextbox` prints and returns, and the
+## press is the `waitbutton` behind the command.
+var _text_awaits_press: bool = true
+## How many presses [method preview_text_scroll] will spend looking for one.
+const PREVIEW_TEXT_PRESSES: int = 8
 ## `ProfOaksPCBoot`'s three texts, one page at a time, and the sfx `Rate` leaves
 ## for it to play once the last of them is up.
 var _oak_pc_pages: Array = []
@@ -1402,6 +1408,28 @@ func preview_pokepic(species: int) -> void:
 	_refresh_labels()
 
 
+## Public screenshot driver for `_ContText`'s scroll: the object in front of the
+## player is talked to and its text walked to the `<CONT>` that scrolls, and the
+## box's own frames are then spent by hand so the picture is the same every run
+## rather than whatever the wall clock reached.
+func preview_text_scroll() -> void:
+	if _text_box == null:
+		return
+	## A `BGEVENT_READ` is read from the cell below it, so the sign is faced
+	## first; its own tile is a wall, so this turns rather than steps.
+	move_up()
+	interact()
+	for _press: int in PREVIEW_TEXT_PRESSES:
+		if _text_box.is_scrolling():
+			break
+		_advance_script_pause()
+	_text_box.set_process(false)
+	## One frame into the first of `TextScroll`'s two steps, where the two lines
+	## sit on rows no finished page can put them on.
+	_text_box.advance_scroll_frames(1.0)
+	_refresh_labels()
+
+
 ## Public screenshot driver. It executes the first active scripted event in
 ## source order, which keeps the debug image tied to imported map data.
 func preview_script_event() -> void:
@@ -2070,11 +2098,31 @@ func _advance_script_input() -> void:
 		_text_box.finish()
 		return
 	if _text_box.advance():
+		## The press that reaches a `<DONE>` last page is that page's `<PARA>`,
+		## not an acknowledgement of the text: the script runs on behind it.
+		if not _text_awaits_press and not _text_box.has_pages_left():
+			_continue_after_text()
 		return
 	_text_box_rect_held += 1
 	_text_box.visible = false
 	_script_prompt = ""
 	_show_script_results(_world.run_event_queue(true))
+	_text_box_rect_held -= 1
+	_push_text_box_rect()
+	_refresh_labels()
+
+
+## Runs a script on past a text that owes no press, leaving the box up: the
+## cartridge closes it at `closetext`, not at the end of a `writetext`. So the
+## box is taken down only where nothing is left to print into it.
+func _continue_after_text() -> void:
+	_text_awaits_press = true
+	_text_box_rect_held += 1
+	_script_prompt = ""
+	_show_script_results(_world.run_event_queue(true))
+	if _text_box != null and StringName(_world.pending_script_input().get("type", &"")) \
+		not in [&"text", &"button"] and _world.pending_script_wait().is_empty():
+		_text_box.visible = false
 	_text_box_rect_held -= 1
 	_push_text_box_rect()
 	_refresh_labels()
@@ -3204,6 +3252,7 @@ func _on_service_completed(results: Array) -> void:
 
 
 func _show_script_results(results: Array) -> void:
+	var continue_after_text: bool = false
 	var waiting: bool = false
 	var failed: bool = false
 	var map_changed: bool = false
@@ -3236,6 +3285,9 @@ func _show_script_results(results: Array) -> void:
 					_text_box.show_text(String(event.get("text", "")))
 					_text_box.visible = true
 				_script_prompt = "A: advance text"
+				_text_awaits_press = bool(event.get("prompt", true))
+				continue_after_text = not _text_awaits_press \
+					and not _text_box.has_pages_left()
 			elif event_type == &"button":
 				if _text_box != null:
 					_text_box.visible = true
@@ -3379,6 +3431,11 @@ func _show_script_results(results: Array) -> void:
 			_play_current_map_music()
 		else:
 			_renderer.refresh()
+	## Decided in the loop and spent here, because a special drawing its own
+	## pages is an event on the same result as the text waiting behind them.
+	if continue_after_text and _oak_pc_pages.is_empty():
+		_continue_after_text()
+		return
 	_refresh_labels()
 
 

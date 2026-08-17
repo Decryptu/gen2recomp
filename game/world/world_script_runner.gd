@@ -1845,9 +1845,16 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 			})
 			_stage_object_event_flag(int(command.get("object_id", 0)), false)
 		0x6F, 0x76:
+			## `StartFollow` takes the FIRST operand through `SetLeaderIfVisible`
+			## and the second through `SetFollowerIfVisible`, which is the object
+			## that takes SPRITEMOVEDATA_FOLLOWING. So the first leads and the
+			## second follows; the macro's own operand comments say the reverse.
+			## Reading them the other way round leaves the player standing where
+			## `NewBarkTown_TeacherBringsYouBackMovement` should have walked them
+			## and steps the rival out of the cell he pushed the player from.
 			_emit_object_event(&"object_follow", {
-				"object_index": _object_index_from_id(int(command.get("object_id", 0))),
-				"target_index": _object_index_from_id(int(command.get("object_id_2", 0))),
+				"object_index": _object_index_from_id(int(command.get("object_id_2", 0))),
+				"target_index": _object_index_from_id(int(command.get("object_id", 0))),
 				"exact": source_opcode == 0x6F,
 			})
 		0x70:
@@ -3250,6 +3257,13 @@ func _show_text(bank: int, address: int, finish_after: bool) -> Dictionary:
 		"text": String(decoded.get("text", "")),
 		"bank": bank,
 		"address": address,
+		## `Script_writetext` is `MapTextbox` and returns: only `<PROMPT>`,
+		## `text_promptbutton` and `text_waitbutton` spend a press inside the
+		## text. A text ending in `<DONE>` therefore owes none of its own, and
+		## the press belongs to the `waitbutton` behind the command.
+		## `JumpTextScript` carries that `waitbutton` itself, which is what
+		## [param finish_after] names.
+		"prompt": finish_after or bool(decoded.get("prompt", false)),
 		"source": _request.duplicate(true),
 	}
 	_finish_after_pending = finish_after

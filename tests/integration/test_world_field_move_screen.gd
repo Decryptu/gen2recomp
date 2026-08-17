@@ -260,10 +260,7 @@ func _open_party() -> Gen2PartyScreen:
 ## The text box holds its message as wrapped lines, so the assertions below
 ## rejoin them rather than depending on where the wrap lands.
 func _shown_text() -> String:
-	var lines: PackedStringArray = PackedStringArray()
-	for page: PackedStringArray in _world_screen._text_box.get("_pages"):
-		lines.append_array(page)
-	return " ".join(lines)
+	return " ".join(_world_screen._text_box.text_lines())
 
 
 func _labels(items: Array) -> Array:
