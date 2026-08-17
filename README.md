@@ -200,7 +200,7 @@ or `all`; with no argument it lists them.
 |---|---|
 | `field_moves` | Cut, Surf, Whirlpool, Strength, Headbutt, Rock Smash and the faced-tile prompt chain |
 | `terrain` | Ledge hops, side walls, every map's drawn blocks, the story's map ids |
-| `johto` | Radio Tower, the Rising Badge, command queues, item balls, Route 27, the Magnet Train |
+| `johto` | Radio Tower, the Rising Badge, command queues, item balls, Route 27, the Magnet Train and long scripted scenes |
 | `kanto` | Each city, its gym and the way in, from Vermilion to Mt. Silver |
 | `art` | Both intro movies, the credits, the region map, all 278 battle animations, the map name sign |
 | `tables` | TM/HM, naming, world scripts, the opening lane |
