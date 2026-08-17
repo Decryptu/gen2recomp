@@ -239,8 +239,11 @@ func _draw() -> void:
 		var texture: Texture2D = _actor_texture(
 			object.sprite, object.palette, object.facing, object.frame, object.big_object_shape()
 		)
+		# The same sprite offset the player's hop takes, so a `jump_step` in a
+		# movement stream arcs rather than sliding.
+		var object_jump := Vector2(0, -object.height_offset_pixels())
 		if texture != null:
-			draw_texture(texture, pixel)
+			draw_texture(texture, pixel + object_jump)
 		if _in_grass(object.cell):
 			_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
 		if object.emote_visible:
