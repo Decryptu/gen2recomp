@@ -316,6 +316,31 @@ const COLL_STAIRCASE: int = 0x7A
 const COLL_CAVE: int = 0x7B
 const COLL_PIT: int = 0x60
 const COLL_PIT_68: int = 0x68
+## CheckDirectionalWarp's four carpets, keyed by the direction the player has to
+## walk in to take them. `DoPlayerMovement.CheckWarp` indexes `.EdgeWarps` with
+## wWalkingDirection, whose order is down, up, left, right.
+const DIRECTIONAL_WARPS: Dictionary = {
+	Vector2i.DOWN: 0x70,   # COLL_WARP_CARPET_DOWN
+	Vector2i.UP: 0x78,     # COLL_WARP_CARPET_UP
+	Vector2i.LEFT: 0x76,   # COLL_WARP_CARPET_LEFT
+	Vector2i.RIGHT: 0x7E,  # COLL_WARP_CARPET_RIGHT
+}
+
+
+## CheckDirectionalWarp: a carpet clears carry, so `CheckWarpTile` refuses it and
+## the step that lands on one takes no warp. Only `DoPlayerMovement.CheckWarp`
+## takes these, and only for the one direction the carpet names.
+static func is_directional_warp(collision_code: int) -> bool:
+	return DIRECTIONAL_WARPS.values().has(collision_code)
+
+
+## Which direction [param collision_code] has to be walked in to warp, or
+## Vector2i.ZERO when it is not a carpet.
+static func directional_warp_direction(collision_code: int) -> Vector2i:
+	for direction: Vector2i in DIRECTIONAL_WARPS:
+		if int(DIRECTIONAL_WARPS[direction]) == collision_code:
+			return direction
+	return Vector2i.ZERO
 
 
 ## CheckWarpCollision: the two pit codes or the whole $70 nybble, and nowhere

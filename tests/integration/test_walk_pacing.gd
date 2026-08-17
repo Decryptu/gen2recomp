@@ -96,6 +96,18 @@ func test_the_offset_covers_one_cell() -> void:
 ## onto the warp tile landed on and no fade frame has been spent yet. Its own clock is taken away, so every frame after
 ## that is spent by hand.
 func _walk_onto_the_door() -> Gen2WorldScreen:
+	var screen: Gen2WorldScreen = await _screen_below_the_door()
+	for _frame: int in WALK_FRAME_CAP:
+		## One press turns and the next steps, and a press inside the fade is
+		## swallowed, so the same call drives all three.
+		screen.move_up()
+		screen.advance_frame()
+		if not screen.map_fade().is_empty():
+			break
+	return screen
+
+
+func _screen_below_the_door() -> Gen2WorldScreen:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	var screen: Gen2WorldScreen = packed.instantiate() as Gen2WorldScreen
 	screen.map_group = Fixture.MAP_GROUP
@@ -107,14 +119,30 @@ func _walk_onto_the_door() -> Gen2WorldScreen:
 	await get_tree().process_frame
 	screen.set_process(false)
 	screen._frame_elapsed = 0.0
-	for _frame: int in WALK_FRAME_CAP:
-		## One press turns and the next steps, and a press inside the fade is
-		## swallowed, so the same call drives all three.
-		screen.move_up()
-		screen.advance_frame()
-		if not screen.map_fade().is_empty():
-			break
 	return screen
+
+
+## `CheckPlayerState` turns `wMapEventStatus` on where the step function set
+## `PLAYERSTEP_STOP_F`, so `PlayerEvents` and everything under it, the warp, the
+## coord events and the wild roll, run on the frame the step lands rather than on
+## the frame the button was read.
+func test_a_warp_waits_for_the_step_onto_its_tile_to_land() -> void:
+	_screen = await _screen_below_the_door()
+	_screen.move_up()   # `.CheckTurning`: the first press only turns.
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_TURN:
+		_screen.advance_frame()
+	_screen.move_up()
+	assert_true(_screen._world.player_step_in_progress(), "the step onto the door started")
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK - 1:
+		_screen.advance_frame()
+		assert_true(
+			_screen.map_fade().is_empty(),
+			"no warp while the player is still between the two cells",
+		)
+	assert_true(_screen._world.player_step_in_progress(), "the last frame of the step")
+	_screen.advance_frame()
+	assert_false(_screen._world.player_step_in_progress(), "which lands it")
+	assert_false(_screen.map_fade().is_empty(), "and the warp is taken on that frame")
 
 
 ## `WarpToNewMapScript` is `warpsound` and `newloadmap MAPSETUP_DOOR`, and that
@@ -132,9 +160,9 @@ func test_a_warp_spends_the_setup_script_own_fade() -> void:
 	assert_eq(StringName(_screen.map_fade().get("stage", &"")), &"out")
 	var fade_frames: int = Gen2WorldPalette.FADE_OUT_ORDERS.size() \
 		* Gen2WorldPalette.FADE_STEP_FRAMES
-	## One of the fade out's own frames is the frame the step landed on, which is
-	## the one the fade was started in.
-	var out_frames: int = 1
+	## `PlayerEvents` runs after the frame's own map background, so the frame the
+	## step landed on starts the script and spends none of its fade.
+	var out_frames: int = 0
 	while StringName(_screen.map_fade().get("stage", &"")) == &"out" \
 		and out_frames < WALK_FRAME_CAP:
 		_screen.advance_frame()
