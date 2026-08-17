@@ -233,7 +233,7 @@ real cartridge, so they run anywhere.
 godot --headless -s res://addons/gut/gut_cmdln.gd -gexit
 ```
 
-That is the unit tier, and the default: roughly 2,500 tests in well under a
+That is the unit tier, and the default: more than 2,700 tests in well under a
 minute. The scene integration tier drives real screens and is slower, so it is
 asked for explicitly, which is how CI runs both:
 
