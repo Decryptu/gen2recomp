@@ -127,6 +127,29 @@ func test_cancel_closes_the_menu_the_same_as_exit() -> void:
 	assert_true(_world_screen._objects_may_move())
 
 
+func test_mod_settings_use_the_hardware_option_screen() -> void:
+	var host_api: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host_api.register_option(&"display", {
+		"key": &"distance", "label": "Distance", "values": [1, 2],
+		"labels": ["Near", "Far"],
+	})["ok"]))
+	await _open_world()
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_MODS)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.MODS)
+	assert_true((host.get("_view") as TextureRect).visible)
+	assert_false((host.get("_center") as Control).visible)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.MOD_OPTIONS)
+	assert_true((host.get("_view") as TextureRect).visible)
+	assert_false((host.get("_center") as Control).visible)
+
+	Gen2ModHost.reset()
+
+
 func test_pokemon_opens_the_embedded_party_screen_and_reopens_the_menu() -> void:
 	await _open_world()
 	_world_screen._world.set_party_summary(1, false)
@@ -161,6 +184,9 @@ func test_pack_lists_a_granted_item() -> void:
 	host.handle_button(Gen2Button.A)
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
+	assert_true((host.get("_view") as TextureRect).visible)
+	assert_false((host.get("_center") as Control).visible)
+	assert_false((host.get("_pack_view") as TextureRect).visible)
 	var items_pocket: Dictionary = host.get("_pack_pockets")[0]
 	assert_eq(items_pocket["pocket"], Gen2WorldPack.TYPE_ITEM)
 	var items: Array = items_pocket["items"]

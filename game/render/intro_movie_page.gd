@@ -383,7 +383,9 @@ func _draw_sprite(
 	# the window, which the last two Suicune scenes load a sheet of their own
 	# into. A bare `Request2bpp` on top of either half wins over both.
 	var overlay: Array = movie.tile_overlay()
-	if overlay.size() == 3 and tile >= int(overlay[0]) \
+	## `Intro_RustleGrass` writes vTiles2 in VRAM bank 0. Pichu and Wooper read
+	## the same tile numbers from bank 1, where their own sheet remains intact.
+	if not bool(entry["bank1"]) and overlay.size() == 3 and tile >= int(overlay[0]) \
 			and tile < int(overlay[0]) + int(overlay[1]):
 		strip = _sheet(movie, String(overlay[2]))
 		tile -= int(overlay[0])
