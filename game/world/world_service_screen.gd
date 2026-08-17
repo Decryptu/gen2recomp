@@ -1433,6 +1433,8 @@ func _render_options(override: Array = []) -> void:
 	_render_service_page(values)
 
 
+## `PhoneCall`'s ringing box and `PC_DisplayText`'s plain `MenuTextbox` print
+## neither one, so those two draw no rows at all here.
 func _render_service_page(values: Array) -> void:
 	if _service_view == null or _data == null:
 		return
@@ -1440,8 +1442,9 @@ func _render_service_page(values: Array) -> void:
 		_service_page = Gen2WorldServicePage.from_data(_data)
 	if _service_page == null:
 		return
+	var page_rows: Array = [] if _mode in [MODE.PHONE, MODE.PC_TEXT, MODE.AUDIO] else values
 	var labels: Array = []
-	for value: Variant in values:
+	for value: Variant in page_rows:
 		if value is Dictionary:
 			var row: Dictionary = value
 			var label: String = String(row.get("name", row.get("caller_label", "")))
@@ -1450,13 +1453,65 @@ func _render_service_page(values: Array) -> void:
 			labels.append(label)
 		else:
 			labels.append(String(value))
-	var full_screen: bool = _mode in [MODE.PC, MODE.PC_ITEMS, MODE.PC_ITEM_LIST, MODE.PC_TEXT]
 	var image: Image = _service_page.render(
-		_title.text, _summary.text, labels, _cursor, _status.text, full_screen
+		_title.text, _summary.text, labels, _cursor, _status.text, _service_box()
 	)
 	if image != null:
 		_service_view.texture = ImageTexture.create_from_image(image)
 		_service_hardware.visible = true
+
+
+## The `menu_coords` box this mode's own list sits in. `null` draws no box,
+## which is what MODE.MENU falls back to before a menu is loaded.
+func _service_box() -> Gen2MenuBox:
+	match _mode:
+		MODE.MENU:
+			return _menu.box() if _menu != null else null
+		MODE.PC, MODE.PC_ITEMS:
+			return _pc_top_box()
+		MODE.PC_ITEM_LIST:
+			return _pc_item_list_box()
+		MODE.APRICORN:
+			return _apricorn_quantity_box() if _apricorns != null \
+				and _apricorns.phase == Gen2WorldApricorn.SELECT_QUANTITY \
+				else _apricorn_select_box()
+		MODE.POKEGEAR, MODE.AUDIO:
+			return _dynamic_box(_option_count())
+	return null
+
+
+## `PokemonCenterPC.TopMenu` and `PlayersPCMenuData` share this `menu_coords`.
+func _pc_top_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(
+		0, 0, 15, 12, Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_WRAP
+	)
+
+
+## `PCItemsMenuData`'s `menu_coords 4, 1, 18, 10`.
+func _pc_item_list_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(4, 1, 18, 10, Gen2MenuBox.STATICMENU_CURSOR)
+
+
+## `Kurt_SelectApricorn.MenuHeader`'s `menu_coords 1, 1, 13, 10`.
+func _apricorn_select_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(1, 1, 13, 10, Gen2MenuBox.STATICMENU_CURSOR)
+
+
+## `Kurt_SelectQuantity.MenuHeader`'s `menu_coords 6, 9, SCREEN_WIDTH - 1, 12`.
+## `PlaceApricornQuantity` writes the name and quantity by hand rather than
+## through a `STATICMENU_CURSOR` list, so this box draws no cursor.
+func _apricorn_quantity_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(6, 9, 19, 12, 0)
+
+
+## The list box every mode above still leaves to the panel: POKEGEAR's card
+## list, which `HANDOFF.md` already records as staying a panel, and AUDIO,
+## which is a debug host with no cartridge screen of its own.
+func _dynamic_box(count: int) -> Gen2MenuBox:
+	var bottom: int = mini(17, 1 + maxi(count, 1) * 2)
+	return Gen2MenuBox.from_coords(
+		9, 0, 19, bottom, Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_WRAP
+	)
 
 
 func _option_count() -> int:

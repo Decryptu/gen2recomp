@@ -17,23 +17,17 @@ static func from_data(data: GameData) -> Gen2WorldServicePage:
 	return out if out.font != null and out.menu != null else null
 
 
-## `MenuTextbox` over the map. PC owns the screen, while script menus leave the
-## map visible around their box.
+## `MenuTextbox` over the map: every box here carries `MENU_BACKUP_TILES`, so
+## the map stays visible around it and nothing here fills the screen white.
+## The caller supplies its own `menu_coords` box; an empty [param rows] draws
+## no box at all, which is what a plain `MenuTextbox` print is.
 func render(title: String, prompt: String, rows: Array, cursor: int,
-		message: String = "", full_screen: bool = false) -> Image:
+		message: String = "", box: Gen2MenuBox = null) -> Image:
 	var image := Image.create_empty(
 		Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8
 	)
-	if full_screen:
-		image.fill(Color.WHITE)
-	var count: int = maxi(rows.size(), 1)
-	var bottom: int = mini(17, 1 + count * 2)
-	var box := Gen2MenuBox.from_coords(
-		0 if full_screen else 9, 0, 19, bottom,
-		Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_WRAP
-	)
-	var labels: Array = rows if not rows.is_empty() else [""]
-	_blit(image, menu.render(box, labels, cursor), box.border_position())
+	if not rows.is_empty() and box != null:
+		_blit(image, menu.render(box, rows, cursor), box.border_position())
 	var words: String = message if not message.is_empty() else prompt
 	if words.is_empty():
 		words = title
