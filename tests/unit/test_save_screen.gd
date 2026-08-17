@@ -108,6 +108,9 @@ func test_save_screen_shows_no_slots_before_any_save_exists() -> void:
 	assert_same(save_title.get_parent(), game_title.get_parent(),
 		"game name shares the Save data heading row")
 	assert_eq(game_title.horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT)
+	assert_eq(game_title.autowrap_mode, TextServer.AUTOWRAP_OFF)
+	assert_eq(game_title.get_line_count(), 1,
+		"the game name stays on one line beside the expanding spacer")
 
 
 func test_save_screen_distinguishes_an_occupied_slot() -> void:
