@@ -497,10 +497,12 @@ static func _defense_stat(
 ## `DittoMetalPowder`, called at `.done` after `TruncateHL_BC`, so the half again
 ## lands on the byte rather than on the stat it was truncated from.
 ##
-## Its overflow is reproduced, not corrected: `srl a / add c` carries for a byte
-## over 170 and the recovery halves the *attack* and shifts the carry back into
-## the defence, which is `docs/bugs_and_glitches.md`'s "Metal Powder can increase
-## damage taken with boosted (Special) Defense".
+## Its overflow is reproduced by default: `srl a / add c` carries for a byte over
+## 170 and the recovery halves the *attack* and shifts the carry back into the
+## defence, which is `docs/bugs_and_glitches.md`'s "Metal Powder can increase
+## damage taken with boosted (Special) Defense". Turning
+## `metal_powder_overflow` off keeps the boosted defence at the byte it would
+## have overflowed past, which is what the boost was for.
 static func metal_powder_pair(defender: Gen2BattleMon, pair: Array) -> Array:
 	if defender == null or not Gen2HeldItem.boosts_defence(defender.species, defender.item):
 		return pair
@@ -508,6 +510,8 @@ static func metal_powder_pair(defender: Gen2BattleMon, pair: Array) -> Array:
 	var boosted: int = Gen2HeldItem.metal_powder_defence(int(pair[1]))
 	if boosted <= STAT_BYTE_MAX:
 		return [attack, boosted]
+	if not Gen2Rules.hardware(&"metal_powder_overflow"):
+		return [attack, STAT_BYTE_MAX]
 	# `srl b`, floored at one the way the routine's own `inc b` floors it.
 	attack = maxi(attack >> 1, 1)
 	# `scf / rr c`: the carry comes back as the high bit of what is left.

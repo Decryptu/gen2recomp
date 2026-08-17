@@ -430,6 +430,9 @@ const VITAL_THROW: int = 0xE9
 
 var data: GameData = null
 var rng: RandomNumberGenerator = null
+## The run's own divergences and difficulty. Set by [method create_parties], which
+## also installs it, so the statics in the formula read the same set.
+var rules: Gen2Rules = null
 
 ## Whether beating this opponent is worth [Gen2Experience]'s trainer 1.5x. A wild
 ## encounter, which is the default, never sets it.
@@ -574,7 +577,8 @@ static func create_parties(
 	enemy_party: Gen2Party,
 	generator: RandomNumberGenerator,
 	trainer_battle: bool = false,
-	player_badges: int = 0
+	player_badges: int = 0,
+	battle_rules: Gen2Rules = null
 ) -> Gen2Battle:
 	if game_data == null or player_party == null or enemy_party == null:
 		return null
@@ -586,6 +590,10 @@ static func create_parties(
 	out.parties = {PLAYER: player_party, ENEMY: enemy_party}
 	out.rng = generator if generator != null else RandomNumberGenerator.new()
 	out.is_trainer_battle = trainer_battle
+	# The rules the fight is fought under, installed for its duration: the damage
+	# formula and the experience curves are statics with no battle in hand.
+	out.rules = battle_rules if battle_rules != null else Gen2Rules.active()
+	Gen2Rules.install(out.rules)
 	out.player_badge_mask = player_badges & 0xFFFF
 	out._participants = {PLAYER: {player_party.active: true}, ENEMY: {enemy_party.active: true}}
 	out._apply_player_badges()
@@ -597,12 +605,14 @@ static func create(
 	game_data: GameData,
 	player_mon: Gen2BattleMon,
 	enemy_mon: Gen2BattleMon,
-	generator: RandomNumberGenerator
+	generator: RandomNumberGenerator,
+	battle_rules: Gen2Rules = null
 ) -> Gen2Battle:
 	if player_mon == null or enemy_mon == null:
 		return null
 	return create_parties(
-		game_data, Gen2Party.of(player_mon), Gen2Party.of(enemy_mon), generator
+		game_data, Gen2Party.of(player_mon), Gen2Party.of(enemy_mon), generator,
+		false, 0, battle_rules
 	)
 
 

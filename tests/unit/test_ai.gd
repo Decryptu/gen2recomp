@@ -1218,3 +1218,65 @@ func _score_spread(
 		_rng.seed = seed_value
 		seen[int(_scores(attacker, defender, flags, attacker_turns, defender_turns)[slot])] = true
 	return seen
+
+
+## `AI_Cautious`'s `ret nc` abandons the remaining slots on a missed roll, so a
+## Pokemon carrying several residual moves has the ones after the miss left alone.
+## pret's fix moves on to the next slot instead, which is the default here.
+##
+## Read off the scores rather than the choice: the layer is a 90% roll per slot,
+## so what differs between the two is which slots were reached, and the argmin
+## would hide that.
+func test_the_cautious_bug_abandons_the_slots_after_a_missed_roll() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [
+		Fixture.LEECH_SEED, Fixture.THUNDER_WAVE, Fixture.POISON_POWDER, Fixture.SPIKES,
+	])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var rules := Gen2Rules.new()
+	var discouraged: Callable = func(scores: Array) -> int:
+		var count: int = 0
+		for score: int in scores:
+			if score > Gen2BattleAI.DEFAULT_SCORE:
+				count += 1
+		return count
+
+	# Every one of the four is residual, so the fix discourages all four whenever
+	# no roll misses and never leaves a gap; with the bug a miss stops the walk.
+	var abandoned: bool = false
+	for seed: int in 60:
+		Gen2Rules.install(null)
+		_rng.seed = seed
+		var fixed: Array = Gen2BattleAI.score_slots(
+			pikachu, geodude, _data, RomLayout.AI_CAUTIOUS, _rng, 1
+		)
+		rules.set_flag(&"cautious_ai_abandons_remaining_moves", true)
+		Gen2Rules.install(rules)
+		_rng.seed = seed
+		var hardware: Array = Gen2BattleAI.score_slots(
+			pikachu, geodude, _data, RomLayout.AI_CAUTIOUS, _rng, 1
+		)
+		assert_true(
+			int(discouraged.call(hardware)) <= int(discouraged.call(fixed)),
+			"the bug can only ever discourage fewer moves, never more"
+		)
+		if int(discouraged.call(hardware)) < int(discouraged.call(fixed)):
+			abandoned = true
+	Gen2Rules.install(null)
+	assert_true(abandoned, "a missed roll has to be reachable in sixty seeds")
+
+
+## The first turn is exempt either way: `AI_Cautious` returns before the loop.
+func test_cautious_leaves_the_first_turn_alone_under_both_rules() -> void:
+	var pikachu: Gen2BattleMon = _mon(Fixture.PIKACHU, 50, [Fixture.LEECH_SEED, Fixture.TACKLE])
+	var geodude: Gen2BattleMon = _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"cautious_ai_abandons_remaining_moves", true)
+	for hardware: bool in [false, true]:
+		Gen2Rules.install(rules if hardware else null)
+		_rng.seed = 7
+		assert_eq(
+			Gen2BattleAI.score_slots(pikachu, geodude, _data, RomLayout.AI_CAUTIOUS, _rng, 0),
+			[Gen2BattleAI.DEFAULT_SCORE, Gen2BattleAI.DEFAULT_SCORE,
+				Gen2BattleAI.UNUSABLE_SCORE, Gen2BattleAI.UNUSABLE_SCORE]
+		)
+	Gen2Rules.install(null)

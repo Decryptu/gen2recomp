@@ -398,6 +398,16 @@ func test_the_metal_powder_carry_halves_the_attack_and_folds_the_defence_back() 
 		"only a Ditto holding it"
 	)
 
+	# With `metal_powder_overflow` off the boost stops at the byte instead of
+	# carrying, so the boost cannot end up raising the damage taken.
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"metal_powder_overflow", false)
+	Gen2Rules.install(rules)
+	assert_eq(apply.call(200, 171), [200, Gen2Damage.STAT_BYTE_MAX])
+	assert_eq(apply.call(200, 100), [200, 150], "and nothing below the byte moves")
+	Gen2Rules.install(null)
+	assert_eq(apply.call(200, 171), [100, 128], "the default is still the hardware's")
+
 
 ## The Scope Lens is one more critical level, added after the move's own two and
 ## Focus Energy's one, in `BattleCommand_Critical`'s own order.

@@ -4,9 +4,11 @@ extends SceneTree
 ## chosen set of cartridges present.
 ##
 ##   Godot --path . -s res://tools/preview_launcher.gd -- \
-##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id]
+##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id] [scroll]
 ##
 ## `view` is the mods page's own: `list`, `sources`, or `mod` with an id.
+## `scroll` is how far down the page's own scroll to photograph, in pixels, for a
+## card that does not fit the window.
 ##
 ## The state argument uses the preview seams on the launcher, so an empty shelf
 ## can be photographed on a machine that has every cache imported. Like
@@ -26,6 +28,7 @@ var _page: String = "shelf"
 var _state: String = "full"
 var _view: String = ""
 var _mod: String = ""
+var _scroll: int = 0
 
 
 func _initialize() -> void:
@@ -42,6 +45,7 @@ func _initialize() -> void:
 	var state: String = args[5] if args.size() > 5 else "full"
 	_view = args[6] if args.size() > 6 else ""
 	_mod = args[7] if args.size() > 7 else ""
+	_scroll = int(args[8]) if args.size() > 8 else 0
 
 	# Both, because the window already exists by the time a tool script runs and
 	# only the display server moves it.
@@ -70,6 +74,12 @@ func _process(_delta: float) -> bool:
 			_launcher.preview_sheet(StringName(_view))
 		elif not _view.is_empty():
 			_launcher.preview_mods_view(StringName(_view), StringName(_mod))
+	# After the seams, so the page being photographed is the one that scrolls, and
+	# every frame, since a rebuilt page starts at the top again.
+	if _scroll > 0:
+		var scroll: ScrollContainer = _first_scroll(_launcher)
+		if scroll != null:
+			scroll.scroll_vertical = _scroll
 	if _frames < 26:
 		return false
 	var image: Image = root.get_texture().get_image()
@@ -80,3 +90,13 @@ func _process(_delta: float) -> bool:
 	print("Wrote %s (%dx%d)" % [_output, image.get_width(), image.get_height()])
 	quit()
 	return true
+
+
+func _first_scroll(node: Node) -> ScrollContainer:
+	if node is ScrollContainer and node.is_visible_in_tree():
+		return node
+	for child: Node in node.get_children():
+		var found: ScrollContainer = _first_scroll(child)
+		if found != null:
+			return found
+	return null

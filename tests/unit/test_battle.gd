@@ -1308,6 +1308,27 @@ func test_experience_and_stat_experience_both_divide_among_participants() -> voi
 		assert_eq(stat_gain["gains"]["speed"], 10, "20 / 2")
 
 
+## The rules a battle was built with are the ones it keeps and the ones the
+## formula's statics read, so a test or a tool cannot resolve half a fight under
+## one set and half under another.
+func test_a_battle_installs_the_rules_it_was_created_with() -> void:
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"metal_powder_overflow", false)
+	var battle: Gen2Battle = Gen2Battle.create(
+		_data, _mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE]), _rng, rules
+	)
+	assert_same(battle.rules, rules)
+	assert_false(Gen2Rules.hardware(&"metal_powder_overflow"))
+
+	Gen2Rules.install(null)
+	var plain: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	assert_not_null(plain.rules, "a battle with no rules of its own plays the installed set")
+	assert_true(Gen2Rules.hardware(&"metal_powder_overflow"))
+
+
 func test_participants_narrow_to_whoever_is_active_once_an_enemy_faints() -> void:
 	# Three enemies, one at a time. The lead player Pokémon is credited for the
 	# first kill by default; switching in the second one adds it without

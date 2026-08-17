@@ -271,6 +271,31 @@ func test_the_run_block_round_trips_and_refuses_an_invented_mod_id() -> void:
 	})
 
 
+## The rules travel with the slot, not with the installation: a run recorded under
+## one set did not produce the state a different set would.
+func test_the_runs_rules_round_trip_and_are_absent_when_never_recorded() -> void:
+	var save: Gen2SaveData = _save()
+	assert_null(save.run_rules, "a save invents none")
+
+	var rules := Gen2Rules.new()
+	rules.set_mode(Gen2Rules.MODE_VANILLA)
+	rules.difficulty = Gen2Rules.DIFFICULTY_HARD
+	rules.set_flag(&"metal_powder_overflow", false)
+	save.run_rules = rules
+
+	var restored: Gen2SaveData = Gen2SaveData.from_dict(save.to_dict())
+	assert_not_null(restored.run_rules)
+	assert_true(restored.run_rules.matches(rules))
+	assert_eq(restored.run_rules.difficulty, Gen2Rules.DIFFICULTY_HARD)
+
+	# A copy is its own object, so editing one slot's rules cannot reach another's.
+	var copy := Gen2SaveData.new()
+	assert_true(copy.copy_from(save))
+	assert_true(copy.run_rules.matches(rules))
+	copy.run_rules.difficulty = Gen2Rules.DIFFICULTY_EASY
+	assert_eq(save.run_rules.difficulty, Gen2Rules.DIFFICULTY_HARD)
+
+
 ## A slot written before the block existed says so rather than claiming frame
 ## zero of a seeded run.
 func test_a_save_without_a_run_block_records_no_seed() -> void:
@@ -281,6 +306,7 @@ func test_a_save_without_a_run_block_records_no_seed() -> void:
 	assert_eq(restored.run_seed, 0)
 	assert_eq(restored.run_mods, [])
 	assert_eq(restored.run_options, {})
+	assert_null(restored.run_rules)
 
 
 func test_format_five_migrates_to_an_empty_mod_namespace() -> void:

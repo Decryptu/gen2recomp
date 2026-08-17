@@ -1953,6 +1953,7 @@ func _start_battle_request(request: Dictionary) -> void:
 	_active_battle_persist = save != null and _injected_save == null
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
+	host.set_rules(_world.rules if _world != null else null)
 	host.set_time_of_day(time_of_day)
 	# The clock's row is what the battle's own heals read; the drawn row is what
 	# a renderer staging the fight on this map has to match, so the context

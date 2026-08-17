@@ -27,7 +27,8 @@ Save format version 6 stores:
   the state: the world's seed, the mods that were loaded when it was last
   written, and the registered mod settings the run is played with
   (`run_options`), so a slot cannot silently change draw distance when it is
-  reopened;
+  reopened, and the gameplay rules it is played under (`run_rules`: which of the
+  cartridge's own bugs are reproduced, and the trainer-AI difficulty);
 - `is_egg` for received eggs. An egg keeps its party slot and is skipped when
   the battle party is built, matching the cartridge refusing it as a combatant
   rather than removing it; the writeback puts it back in the same slot. Hatch
@@ -59,8 +60,9 @@ an empty mod namespace. Migration preserves a missing world snapshot as missing;
 it does not invent a map, player position or event state, and it does not roll an
 ID, since that would change an existing save's headbutt encounters. The `run`
 block joined version 6 after it shipped and is not a version of its own: it
-defaults to no seed, mod list or settings snapshot, which is the truth about a
-slot written before it existed. The next successful save writes version 6.
+defaults to no seed, mod list, settings snapshot or rules, which is the truth
+about a slot written before it existed; such a slot adopts the installation's
+rules once, when it is first activated. The next successful save writes version 6.
 
 ## Player flow
 

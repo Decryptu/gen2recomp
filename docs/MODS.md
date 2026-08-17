@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -1020,6 +1020,30 @@ the slot is played, and puts a change made mid-run into the save rather than int
 the installation. So `host.option()` answers with what THIS run is played with,
 the launcher edits the installation with no slot open, and a slot written before
 the snapshot existed adopts the installation once, when it is first activated.
+
+## Reading the run's rules
+
+`world.rules` is a `Gen2Rules`: which of the cartridge's own bugs this run
+reproduces, and its trainer-AI difficulty. Read it, do not write it. A rule that
+changed mid-run would make the save it produced unreproducible, which is the
+whole reason the rules belong to the run rather than to the installation.
+
+```gdscript
+if world.rules.reproduces(&"metal_powder_overflow"):
+	...
+if world.rules.difficulty == Gen2Rules.DIFFICULTY_HARD:
+	...
+```
+
+`Gen2Rules.FLAGS` is every flag this build names, mapped to what it does by
+default. Each is named for the HARDWARE's behaviour, so a flag that is on means
+the cartridge's bug is reproduced and off means this project's corrected answer is
+used. An unknown flag answers false rather than failing, so a mod written against
+a later build still runs.
+
+The same object is on a battle (`battle.rules`), and exactly one set is installed
+at a time (`Gen2Rules.active()`) because the damage formula and the experience
+curves are statics with no engine object to read it off.
 
 ## Adding a setting
 

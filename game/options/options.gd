@@ -82,6 +82,11 @@ var ui_theme: StringName = &"light"
 ## Button bindings, in the shape [Gen2InputActions] stores. Held as data rather
 ## than as an [InputMap] state so the file is the whole scheme and nothing has
 ## to read the engine back to know what the player chose.
+## What the engine does where this project and the cartridge disagree, and the
+## difficulty. Its own object because it belongs to a run rather than to this
+## installation: see [Gen2Rules] and [member Gen2SaveData.run_rules].
+var rules: Gen2Rules = Gen2Rules.new()
+
 var controls: Dictionary = Gen2InputActions.defaults()
 ## What the player bound a mod's own actions to, keyed by the [InputMap] action
 ## name rather than by a button. Separate from [member controls] because a mod's
@@ -180,6 +185,7 @@ func to_dict() -> Dictionary:
 		"max_fps": max_fps,
 		"game_speed": String(game_speed),
 		"ui_theme": String(ui_theme),
+		"rules": rules.to_dict(),
 		"controls": Gen2InputActions.to_dict(controls),
 		"mod_controls": mod_controls.duplicate(true),
 		"touch_mode": String(touch_mode),
@@ -213,6 +219,7 @@ static func parse(raw: Variant) -> Gen2Options:
 	options.ui_theme = _one_of(row.get("ui_theme", ""), UI_THEMES)
 	var fps: int = int(row.get("max_fps", 60))
 	options.max_fps = fps if FPS_CHOICES.has(fps) else 60
+	options.rules = Gen2Rules.parse(row.get("rules"))
 	options.controls = Gen2InputActions.sanitize(row.get("controls"))
 	options.mod_controls = Gen2InputActions.sanitize_mod_controls(row.get("mod_controls"))
 	options.touch_mode = _one_of(row.get("touch_mode", ""), TOUCH_MODES)

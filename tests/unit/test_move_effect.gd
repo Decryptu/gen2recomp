@@ -838,6 +838,40 @@ func test_belly_drum_fails_without_cost_under_half_health() -> void:
 	assert_eq(_first(turn.events, Gen2Battle.STAT_CHANGE_FAILED)["by"], 6)
 
 
+## `BattleCommand_BellyDrum` calls `BattleCommand_AttackUp2` BEFORE the HP check
+## and only branches to `.failed` after it, so on hardware the two stages have
+## already been paid when the failure is printed.
+func test_the_belly_drum_bug_pays_two_stages_before_it_fails() -> void:
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"belly_drum_boosts_below_half_hp", true)
+	Gen2Rules.install(rules)
+
+	var turn: Gen2Turn = _turn(_battle())
+	var mon: Gen2BattleMon = turn.attacker()
+	mon.hp = 1
+	Gen2EffectCommands.run(Gen2EffectCommands.BELLY_DRUM, turn)
+
+	assert_eq(mon.stage("attack"), Gen2EffectCommands.ATTACK_UP_2_STAGES)
+	assert_eq(mon.hp, 1, "and still no HP spent, the subtraction being past the branch")
+	assert_eq(_first(turn.events, Gen2Battle.STAT_CHANGED)["by"], 2)
+	assert_eq(_first(turn.events, Gen2Battle.STAT_CHANGE_FAILED)["by"], 6)
+
+	# The raise is capped by the room left, so it cannot walk past the top, and a
+	# Pokemon already there is the ordinary failure with nothing paid.
+	var full: Gen2Turn = _turn(_battle())
+	var maxed: Gen2BattleMon = full.attacker()
+	maxed.hp = 1
+	maxed.change_stage("attack", Gen2Stats.MAX_STAGE - 1)
+	Gen2EffectCommands.run(Gen2EffectCommands.BELLY_DRUM, full)
+	assert_eq(maxed.stage("attack"), Gen2Stats.MAX_STAGE)
+
+	Gen2Rules.install(null)
+	var corrected: Gen2Turn = _turn(_battle())
+	corrected.attacker().hp = 1
+	Gen2EffectCommands.run(Gen2EffectCommands.BELLY_DRUM, corrected)
+	assert_eq(corrected.attacker().stage("attack"), 0, "the default pays nothing")
+
+
 func test_belly_drum_fails_once_attack_is_already_at_the_top() -> void:
 	var turn: Gen2Turn = _turn(_battle())
 	var mon: Gen2BattleMon = turn.attacker()

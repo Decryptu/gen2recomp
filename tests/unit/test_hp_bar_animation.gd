@@ -85,3 +85,49 @@ func test_a_small_maximum_still_walks_pixel_by_pixel() -> void:
 		_settle(animation),
 		Gen2HpBarAnimation.LENGTH_PX * Gen2HpBarAnimation.FRAMES_PER_STEP
 	)
+
+
+## `ShortHPBar_CalcPixelFrame` is what prints the number under a 48-pixel
+## maximum, and it rounds up: 20 HP over 48 pixels has no exact HP per pixel, so
+## every pixel but the ends is a fraction the routine rounds rather than floors.
+func test_a_small_maximum_prints_the_short_branchs_own_number() -> void:
+	var animation: Gen2HpBarAnimation = Gen2HpBarAnimation.create(20, 0, 20)
+	var seen: Array = []
+	while not animation.finished():
+		animation.advance_frame()
+		seen.append(animation.hp())
+	assert_eq(int(seen[0]), 20, "the first step is still the HP it started from")
+	assert_eq(int(seen[-1]), 0)
+	for index: int in range(1, seen.size()):
+		assert_true(int(seen[index]) <= int(seen[index - 1]), "the number never goes back up")
+
+
+## The routine's loop subtracts before it tests, so a product that lands exactly
+## on a multiple of the bar's width is counted and then rounded up again: one HP
+## too many, which pret's fix removes by stopping on the zero. 24 of 48 pixels of
+## a 12 HP maximum is such a product (12 * 24 = 288 = 6 * 48).
+func test_the_short_bar_off_by_one_is_switchable_at_an_exact_multiple() -> void:
+	var corrected: Gen2HpBarAnimation = Gen2HpBarAnimation.create(12, 0, 12)
+	var buggy: Gen2HpBarAnimation = Gen2HpBarAnimation.create(12, 0, 12)
+	var rules := Gen2Rules.new()
+
+	while corrected.pixels() > Gen2HpBarAnimation.LENGTH_PX / 2:
+		corrected.advance_frame()
+		buggy.advance_frame()
+	assert_eq(corrected.pixels(), Gen2HpBarAnimation.LENGTH_PX / 2)
+
+	Gen2Rules.install(null)
+	assert_eq(corrected.hp(), 6, "the quotient itself")
+	rules.set_flag(&"short_hp_bar_number_off_by_one", true)
+	Gen2Rules.install(rules)
+	assert_eq(buggy.hp(), 7, "and one HP more on hardware")
+	Gen2Rules.install(null)
+
+
+## `wCurHPAnimLowHP`/`wCurHPAnimHighHP`: the routine clamps its answer to the two
+## ends of the animation, which is why the extra HP is invisible on most drains.
+func test_the_short_bar_number_stays_inside_the_two_ends() -> void:
+	var animation: Gen2HpBarAnimation = Gen2HpBarAnimation.create(10, 8, 20)
+	while not animation.finished():
+		animation.advance_frame()
+		assert_true(animation.hp() >= 8 and animation.hp() <= 10, str(animation.hp()))

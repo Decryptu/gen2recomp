@@ -12,6 +12,9 @@ signal appearance_changed
 ## Label, then the values in the order the source cycles them.
 const TEXT_SPEEDS: Array[String] = ["Fast", "Mid", "Slow"]
 const PRINTER_LABELS: Array[String] = ["Lightest", "Lighter", "Normal", "Darker", "Darkest"]
+## [constant Gen2Rules.MODES], in its order. Written out rather than capitalized
+## from the names, which would say "Qol".
+const RULE_MODES: Array[String] = ["Current", "Vanilla", "QoL"]
 
 var _theme: Gen2LauncherTheme = null
 var _options: Gen2Options = null
@@ -100,6 +103,27 @@ func _build() -> void:
 	)
 	section.arrange_requested.connect(_open_touch_layout)
 	controls.add_child(section)
+
+	var rules: VBoxContainer = _card(column, "Gameplay")
+	rules.add_child(Gen2LauncherUI.muted(
+		_theme,
+		"What the engine does where this port and the cartridge disagree. A run "
+		+ "keeps the rules it was created with, so changing these affects the next "
+		+ "new game rather than a save already in progress."
+	))
+	rules.add_child(Gen2LauncherUI.field(_theme, "Bugs", Gen2LauncherUI.segmented(
+		_theme, RULE_MODES, maxi(Gen2Rules.MODES.find(_options.rules.mode), 0),
+		func(index: int) -> void:
+			_options.rules.set_mode(Gen2Rules.MODES[index])
+			_persist()
+	)))
+	rules.add_child(Gen2LauncherUI.field(_theme, "Trainer AI", Gen2LauncherUI.segmented(
+		_theme, _titles(Gen2Rules.DIFFICULTIES),
+		maxi(Gen2Rules.DIFFICULTIES.find(_options.rules.difficulty), 0),
+		func(index: int) -> void:
+			_options.rules.difficulty = Gen2Rules.DIFFICULTIES[index]
+			_persist()
+	)))
 
 	var game: VBoxContainer = _card(column, "In game")
 	game.add_child(Gen2LauncherUI.muted(

@@ -158,6 +158,9 @@ var _source_save: Gen2SaveData = null
 var _world_battle_active: bool = false
 var _world_battle_tutorial: bool = false
 var _world_battle_request: Dictionary = {}
+## The run's rules, handed over by whoever opened this screen. A development
+## battle has none and plays the installed set.
+var _injected_rules: Gen2Rules = null
 var _world_battle_completion_sent: bool = false
 var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
@@ -460,6 +463,12 @@ func set_data(data: GameData) -> void:
 	_injected_data = data
 
 
+## The rules the world is being played under, so the fight inside it is fought
+## under the same ones rather than under whatever was installed last.
+func set_rules(battle_rules: Gen2Rules) -> void:
+	_injected_rules = battle_rules
+
+
 ## Null rather than the first imported cache: a battle opened without a runtime
 ## is a development one, and the caller has already injected what it draws with.
 func _selected_runtime_data() -> GameData:
@@ -620,7 +629,7 @@ func start_world_battle(
 	if badge_mask < 0:
 		badge_mask = 0
 	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
-		_data, request, player_party, _rng, badge_mask
+		_data, request, player_party, _rng, badge_mask, _injected_rules
 	)
 	if not bool(prepared.get("ok", false)):
 		_emit_world_battle_failure(
@@ -1744,7 +1753,11 @@ func _random_slot(side: int) -> int:
 func _enemy_slot() -> int:
 	if _enemy_trainer_class == 0:
 		return _random_slot(Gen2Battle.ENEMY)
-	var weights: int = int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
+	# The class's own imported mask under the normal difficulty; the other two
+	# rewrite which layers score rather than inventing a level or a stat.
+	var weights: int = _rules().ai_move_weights(
+		int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
+	)
 	return Gen2BattleAI.choose_slot(
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
 		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
@@ -1765,6 +1778,14 @@ func _enemy_action() -> Dictionary:
 		_data.trainer_attributes(_enemy_trainer_class).get("ai_item_switch", 0)
 	)
 	return Gen2BattleAI.choose_action(_battle, flags, slot, _rng)
+
+
+## The run's rules, which the battle carries once it exists and the installed set
+## answers for before that: a screen builds its menus before its battle.
+func _rules() -> Gen2Rules:
+	if _battle != null and _battle.rules != null:
+		return _battle.rules
+	return _injected_rules if _injected_rules != null else Gen2Rules.active()
 
 
 ## Tries to run, which is `BattleMenu_Run` and settles before the turn does.

@@ -55,6 +55,12 @@ var run_mods: Array = []
 ## new run; once a slot exists its effective settings live here so reopening it
 ## cannot silently change the state that produced the save.
 var run_options: Dictionary = {}
+## The divergence flags and difficulty this run is played under. Its own field
+## rather than a mod's, because it changes what the engine does: a run recorded
+## under one set of rules did not produce the state a different set would.
+## Null reads as "not recorded", which every slot written before it says, and
+## adopts the installation's once.
+var run_rules: Gen2Rules = null
 var boxes_shape_valid: bool = true
 
 
@@ -89,6 +95,7 @@ func to_dict() -> Dictionary:
 			"seed": run_seed,
 			"mods": run_mods.duplicate(true),
 			"mod_options": run_options.duplicate(true),
+			"rules": run_rules.to_dict() if run_rules != null else {},
 		},
 	}
 
@@ -152,6 +159,9 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 						"id": String((entry as Dictionary).get("id", "")),
 						"version": String((entry as Dictionary).get("version", "")),
 					})
+		var raw_rules: Variant = (raw_run as Dictionary).get("rules", {})
+		if raw_rules is Dictionary and not (raw_rules as Dictionary).is_empty():
+			out.run_rules = Gen2Rules.parse(raw_rules)
 		var raw_run_options: Variant = (raw_run as Dictionary).get("mod_options", {})
 		if raw_run_options is Dictionary:
 			for raw_id: Variant in raw_run_options:
@@ -175,8 +185,8 @@ static func from_dict(raw: Variant) -> Gen2SaveData:
 ## Version 5 had no per-mod namespace.
 ##
 ## The `run` block joined version 6 after it shipped and is not a version of its
-## own: it defaults to no seed, mod list or mod-option snapshot, which is the
-## truth about a slot written before it existed rather than a value worth
+## own: it defaults to no seed, mod list, mod-option snapshot or rules, which is
+## the truth about a slot written before it existed rather than a value worth
 ## inventing.
 static func migrate_dict(raw: Variant) -> Dictionary:
 	if not raw is Dictionary:
@@ -271,6 +281,7 @@ func copy_from(source: Gen2SaveData) -> bool:
 	run_seed = copied.run_seed
 	run_mods = copied.run_mods.duplicate(true)
 	run_options = copied.run_options.duplicate(true)
+	run_rules = copied.run_rules.duplicate_rules() if copied.run_rules != null else null
 	boxes_shape_valid = copied.boxes_shape_valid
 	return true
 

@@ -130,6 +130,10 @@ const MAP_NAME_SIGN_SILENT_LANDMARKS: Array[int] = [
 ]
 
 var data: GameData = null
+## What this run diverges from the cartridge on, and its difficulty. Read-only to
+## a mod: a rule that changed mid-run would make the save it produced
+## unreproducible, which is the whole reason it belongs to the run.
+var rules: Gen2Rules = null
 var state: Gen2WorldState = null
 var inventory: Gen2WorldInventory = null
 var current_map: Gen2WorldMap = null
@@ -306,6 +310,7 @@ static func open(
 	number: int,
 	start_cell: Vector2i,
 	world_state: Gen2WorldState = null,
+	world_rules: Gen2Rules = null,
 ) -> Gen2WorldAPI:
 	if game_data == null:
 		return null
@@ -315,11 +320,13 @@ static func open(
 	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
 	if tileset == null:
 		return null
-	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state)
+	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state, world_rules)
 
 
 ## Opens a validated map/player snapshot without silently clamping its cell.
-static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot) -> Gen2WorldAPI:
+static func open_snapshot(
+	game_data: GameData, world_snapshot: Gen2WorldSnapshot, world_rules: Gen2Rules = null
+) -> Gen2WorldAPI:
 	if game_data == null or world_snapshot == null:
 		return null
 	var map: Gen2WorldMap = game_data.world_map(world_snapshot.map_id.x, world_snapshot.map_id.y)
@@ -343,7 +350,8 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	if tileset == null:
 		return null
 	var out := Gen2WorldAPI.new(
-		game_data, map, tileset, world_snapshot.player_cell, world_snapshot.world_state
+		game_data, map, tileset, world_snapshot.player_cell, world_snapshot.world_state,
+		world_rules
 	)
 	out.player_facing = world_snapshot.player_facing
 	out.movement_mode = world_snapshot.movement_mode
@@ -365,8 +373,15 @@ func _init(
 	tileset: Gen2WorldTileset,
 	start_cell: Vector2i = Vector2i.ZERO,
 	world_state: Gen2WorldState = null,
+	world_rules: Gen2Rules = null,
 ) -> void:
 	data = game_data
+	# Opening a world is the run starting, so its rules become the installed ones:
+	# the statics that read them ([Gen2Experience], [Gen2Damage], [Gen2BattleAI])
+	# take no world object, and one installed set is what keeps them from
+	# disagreeing with this one. A null set leaves the shipped behaviour alone.
+	rules = world_rules if world_rules != null else Gen2Rules.active()
+	Gen2Rules.install(rules)
 	state = world_state if world_state != null else Gen2WorldState.new()
 	state.changed.connect(_on_world_state_changed)
 	inventory = Gen2WorldInventory.new(data, state)
