@@ -4,7 +4,7 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_intro.gd -- <game> <out.png> [what] [steps]
 ##
-## `what` is `copyright`, `presents`, `gender`, `speech` or `shrink`; `steps` is how many source frames or
+## `what` is `copyright`, `presents`, `gender`, `clock`, `speech` or `shrink`; `steps` is how many source frames or
 ## advances to run first, so any beat of `OakSpeech` can be photographed. Several
 ## comma-separated steps write one file each, suffixed with the step, which is
 ## how a whole fade is looked at without paying for a process per frame. The
@@ -37,7 +37,7 @@ func _initialize() -> void:
 	if args.size() < 2:
 		push_error(
 			"Usage: preview_intro.gd -- <game> <out.png> "
-			+ "[copyright|presents|gender|speech|shrink] [step]"
+			+ "[copyright|presents|gender|clock|speech|shrink] [step]"
 		)
 		quit(1)
 		return
@@ -96,6 +96,13 @@ func _build(data: GameData) -> Control:
 			gender.free()
 			return null
 		return gender
+	if _what == "clock":
+		var clock := Gen2ClockSetScreen.new()
+		if not clock.open(data):
+			push_error("This cache carries no clock font.")
+			clock.free()
+			return null
+		return clock
 	var speech := Gen2OakSpeechScreen.new()
 	if not speech.open(data, Gen2SaveData.GENDER_MALE):
 		push_error("This cache carries no intro text.")
@@ -124,6 +131,11 @@ func _drive(step: Vector2i) -> void:
 		for _press: int in step.x - _presses_run:
 			_screen.handle_button(Gen2Button.DOWN)
 		_presses_run = step.x
+		return
+	if _what == "clock":
+		while _presses_run < step.x:
+			_screen.handle_button(Gen2Button.A)
+			_presses_run += 1
 		return
 	var speech: Gen2OakSpeechScreen = _screen as Gen2OakSpeechScreen
 	if _what == "speech":

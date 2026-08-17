@@ -31,7 +31,9 @@ var _standalone: bool = true
 
 var _splash: Gen2SplashScreen = null
 var _gender_screen: Gen2GenderScreen = null
+var _clock_screen: Gen2ClockSetScreen = null
 var _speech: Gen2OakSpeechScreen = null
+var _clock: Dictionary = {"day": 0, "hour": 10, "minute": 0}
 ## Null when a driver builds this class directly rather than instancing the
 ## scene; the sub-screens are then plain children and draw at their own size.
 var _viewport: Gen2Screen = null
@@ -103,6 +105,8 @@ func current() -> Control:
 		return _splash
 	if _gender_screen != null:
 		return _gender_screen
+	if _clock_screen != null:
+		return _clock_screen
 	return _speech
 
 
@@ -152,7 +156,7 @@ func _start_profile_setup() -> void:
 		# Never parented, so it is freed outright rather than queued.
 		_gender_screen.free()
 		_gender_screen = null
-		_start_speech()
+		_start_clock()
 		return
 	_gender_screen.closed.connect(_on_gender_chosen)
 	_show_sub_screen(_gender_screen)
@@ -162,6 +166,26 @@ func _on_gender_chosen(chosen: int) -> void:
 	_gender = chosen
 	_gender_screen.queue_free()
 	_gender_screen = null
+	_start_clock()
+
+
+## `OakSpeech` farcalls `InitClock` before its first `PrintText`, then
+## `SetDayOfWeek` after the hour and minute have been accepted.
+func _start_clock() -> void:
+	_clock_screen = Gen2ClockSetScreen.new()
+	if not _clock_screen.open(_data):
+		_clock_screen.free()
+		_clock_screen = null
+		_fail("This cartridge cache carries no clock font.")
+		return
+	_clock_screen.finished.connect(_on_clock_set)
+	_show_sub_screen(_clock_screen)
+
+
+func _on_clock_set(day: int, hour: int, minute: int) -> void:
+	_clock = {"day": day, "hour": hour, "minute": minute}
+	_clock_screen.queue_free()
+	_clock_screen = null
 	_start_speech()
 
 
@@ -185,6 +209,10 @@ func _on_speech_finished(player_name: String) -> void:
 		return
 	created.gender = _gender
 	created.label = _label
+	if created.world != null:
+		created.world.world_day = int(_clock["day"])
+		created.world.world_hour = int(_clock["hour"])
+		created.world.world_minute = int(_clock["minute"])
 	## Before the write: a mod holding a run snapshots what built it into the
 	## save's own namespace, and that has to be in the bytes on disk.
 	GameRuntime.announce_new_save(created)
