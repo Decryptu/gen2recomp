@@ -390,8 +390,10 @@ func _draw_sprite(
 		strip = _sheet(movie, String(overlay[2]))
 		tile -= int(overlay[0])
 	elif tile >= HIGH_TILE:
-		strip = _sheet(movie, movie.sheet("obj_high"))
-		tile -= HIGH_TILE
+		var high: String = movie.sheet("obj_high")
+		if not high.is_empty():
+			strip = _sheet(movie, high)
+			tile -= HIGH_TILE
 	if strip.is_empty():
 		return
 	var palette: PackedColorArray = movie.object_palette(int(entry["palette"]))
