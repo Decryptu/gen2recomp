@@ -27,6 +27,9 @@ var stereo: bool = false:
 var _player: AudioStreamPlayer = null
 var _generator: AudioStreamGenerator = null
 var _playback: AudioStreamGeneratorPlayback = null
+## Driver frames rendered, which is what says the timeline is moving at all. See
+## [method timeline_updates].
+var _timeline_updates: int = 0
 var _engine: Gen2SoundEngine = null
 var _apu: Gen2Apu = null
 var _music_key: String = ""
@@ -171,6 +174,20 @@ func effect_playing() -> bool:
 	return _engine.sfx_active()
 
 
+## How many driver frames this player has actually rendered.
+##
+## The engine only advances inside [method _service_timeline], which needs an
+## output stream with room in it: a headless run, a check or a replay leaves the
+## channels exactly as the last request set them, so [method effect_playing] would
+## answer true for the rest of the run. Anything WAITING on a sound compares this
+## count across two frames instead of trusting that answer, and stops waiting when
+## it has not moved. `AudioStreamPlayer.playing` is not that test: the dummy audio
+## driver reports true and consumes nothing. See `Gen2BattleScreen`'s
+## `ANIM_WAIT_SFX` and `HANDOFF.md`'s `WaitSFX` row.
+func timeline_updates() -> int:
+	return _timeline_updates
+
+
 func audio_status() -> Dictionary:
 	var active: Array[int] = []
 	for index: int in Gen2SoundEngine.NUM_CHANNELS:
@@ -238,6 +255,7 @@ func _service_timeline() -> void:
 		if _playback == null:
 			return
 	while _playback.get_frames_available() >= Gen2Apu.SAMPLES_PER_FRAME:
+		_timeline_updates += 1
 		_engine.update_sound()
 		_apu.render_frame(_buffer)
 		_playback.push_buffer(_buffer)

@@ -30,12 +30,13 @@ func after_each() -> void:
 	RomCache.clear(Fixture.directory(&"gold"))
 
 
-func _open_world(with_save: bool = false) -> void:
+func _open_world(with_save: bool = false, seed_value: int = 0) -> void:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
 	_world_screen.map_number = Fixture.MAP_NUMBER
 	_world_screen.start_cell = Vector2i(4, 5)
+	_world_screen.encounter_seed = seed_value
 	_world_screen.set_data(_data)
 	if with_save:
 		var player: Gen2BattleMon = Gen2BattleMon.create(
@@ -281,6 +282,62 @@ func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 	assert_eq(world["player_cell"], Vector2i(5, 5))
 	assert_eq(world["visible_objects"], 1)
 	assert_false(world["just_battled"])
+
+
+## The seam `tools/replay_world.gd` closes: a fight inside a walk belongs to the
+## world's own clock and the world's own funnel, so it is spent and steered by the
+## same two calls the map is, and its own decisions come out of the run's seed.
+func test_a_battle_is_spent_and_steered_by_the_world_that_opened_it() -> void:
+	await _open_world(true)
+	await _trigger_trainer()
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	assert_true(_world_screen.battle_active())
+	assert_eq(_world_screen.battles_fought(), 1)
+	assert_false(host.is_processing(), "the fight does not spend frames of its own")
+
+	## The intro slides on hardware frames, and the only ones it gets are the
+	## world's: nothing here waits on real time.
+	var slid: bool = false
+	for _frame: int in 200:
+		_world_screen.advance_frame()
+		if host.battle_snapshot()["message"] != "":
+			slid = true
+			break
+	assert_true(slid, "the world's own pump reached the battle's first message")
+
+	## And one press, through the world, reaches the fight rather than the map:
+	## the funnel is what makes a recorded log complete.
+	_world_screen.record_input()
+	assert_true(_world_screen.press_button(Gen2Button.A))
+	var log: Array = _world_screen.input_recording()
+	assert_eq(log.size(), 1, "the world recorded the battle's own press")
+	assert_eq(int(log[0]["button"]), Gen2Button.A)
+
+
+## Two runs of the same fight from the same seed decide the same things, which is
+## what makes a battle inside a replay reproducible without recording any of it.
+func test_two_battles_from_one_seed_choose_the_same_enemy_moves() -> void:
+	var choices: Array = []
+	for _run: int in 2:
+		await _open_world(true, 0x5EED)
+		await _trigger_trainer()
+		var host: Gen2BattleScreen = _battle_host()
+		assert_not_null(host)
+		var seen: Array = []
+		for _frame: int in 900:
+			_world_screen.advance_frame()
+			if not _world_screen.battle_active():
+				break
+			var message: String = String(host.battle_snapshot()["message"])
+			if message.begins_with("Enemy ") and (seen.is_empty() or seen[-1] != message):
+				seen.append(message)
+			_world_screen.press_button(Gen2Button.A)
+		choices.append(seen)
+		_world_screen.queue_free()
+		await get_tree().process_frame
+	assert_false((choices[0] as Array).is_empty(), "the enemy took at least one turn")
+	assert_eq(choices[0], choices[1])
 
 
 func test_effect_sprite_preview_reaches_the_production_world_renderer() -> void:

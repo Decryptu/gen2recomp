@@ -5,6 +5,23 @@ extends RefCounted
 ## cartridge-derived data and has a different lifecycle.
 
 const ROOT: String = "user://save_slots"
+
+## Where slots are actually read and written, which is [constant ROOT] unless a
+## tool moved it. The seam exists because a tool that drives a real battle to its
+## end writes the slot it was played from, and a check must never be able to
+## overwrite the owner's own save; see [method use_root] and
+## `tools/replay_world.gd`.
+static var _root: String = ROOT
+
+
+static func root() -> String:
+	return _root
+
+
+## Points every slot path at [param path]. An empty one restores
+## [constant ROOT], which is what a tool does when it is finished.
+static func use_root(path: String) -> void:
+	_root = ROOT if path.is_empty() else path
 ## Slots are created on demand rather than preallocated, so this is only a
 ## ceiling: it keeps a slot number a bounded, validatable thing and stops a
 ## runaway caller filling the directory. Slot files are still `slot_N.json`,
@@ -26,7 +43,7 @@ const DEVELOPMENT_PLAYER_ID: int = 0x1A2B
 
 
 static func directory_for(game_id: StringName, rom_sha1: String) -> String:
-	return "%s/%s_%s" % [ROOT, String(game_id), rom_sha1.substr(0, 8)]
+	return "%s/%s_%s" % [root(), String(game_id), rom_sha1.substr(0, 8)]
 
 
 static func path_for(game_id: StringName, rom_sha1: String, slot: int) -> String:
