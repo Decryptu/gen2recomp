@@ -25,7 +25,7 @@ const GROUPS: Dictionary = {
 	&"terrain": [&"ledge_hops", &"side_walls", &"drawn_blocks", &"story_map_ids"],
 	&"johto": [
 		&"radio_tower", &"rising_badge", &"command_queues", &"item_balls",
-		&"route_27", &"magnet_train",
+		&"route_27", &"magnet_train", &"scripted_scenes",
 	],
 	&"kanto": [
 		&"vermilion", &"saffron", &"celadon", &"cerulean", &"lavender", &"fuchsia",
