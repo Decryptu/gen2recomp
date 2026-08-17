@@ -35,8 +35,19 @@ func _ready() -> void:
 
 
 ## Inside the screen, in hardware pixels: position it in the 160x144 space.
+##
+## Everything placed this way is interface, and sits above whatever
+## [method display_content] put there, in the order it was placed.
 func display(node: Node) -> void:
 	_viewport.add_child(node)
+
+
+## Renderer content, in hardware pixels, kept below every node [method display]
+## placed. A renderer rebuilt mid-screen would otherwise be appended after a live
+## text box and paint over it.
+func display_content(node: Node) -> void:
+	_viewport.add_child(node)
+	_viewport.move_child(node, 0)
 
 
 ## On the layer behind, in [method native_size] window pixels; the hardware

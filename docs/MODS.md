@@ -850,6 +850,17 @@ speed. `Gen2WorldObject.frame` is the cartridge's `Facings` index, 0 to 3,
 changing every four frames the way `SetFacingStepAction` does.
 `mods/examples/voxel_preview/` reads all of it.
 
+A hop is the one step with a second axis.
+`Gen2WorldAPI.player_height_offset_pixels()` and
+`Gen2WorldObject.height_offset_pixels()` return how far above the ground the
+sprite is drawn, in world pixels and positive upward, which is
+`UpdateJumpPosition`'s own `.y_offsets` table over the step's frames. It is zero
+at rest, zero on every ordinary step, and zero again on the frame the hop
+completes; only a ledge hop and the three `jump_step` movement commands raise it,
+and each of those covers two cells over twice its command's frames. Presentation
+only, like the horizontal offset beside it: the cell, the collision, the triggers
+and the snapshot are at the landing cell for the whole arc.
+
 Not covered: the teleport, skyfall and dig step types. `teleport_from`,
 `teleport_to`, `skyfall` and `step_dig` reach the caller as a
 `movement_command_requested` event and change nothing. None moves a cell on the

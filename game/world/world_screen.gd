@@ -94,6 +94,9 @@ var _map_fade: Dictionary = {}
 var _map_name_sign: TextureRect = null
 var _map_name_sign_frames: int = 0
 var _text_box: Gen2TextBox = null
+var _text_box_rect: Rect2i = Rect2i()
+var _text_box_rect_pushed: bool = false
+var _text_box_rect_held: int = 0
 var _clock: Gen2WorldClock = null
 var _audio_player: Gen2AudioPlayer = null
 var _audio_waiting: bool = false
@@ -315,7 +318,7 @@ func _build_renderer() -> void:
 		_renderer.queue_free()
 	_renderer = Gen2ModHost.instance().create_world_renderer()
 	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
-		_screen.display(_renderer)
+		_screen.display_content(_renderer)
 	else:
 		_screen.display_native(_renderer)
 		_screen.native_size_changed.connect(_on_native_size_changed)
@@ -355,13 +358,25 @@ func _apply_renderer_interface_style() -> void:
 	if _text_box == null:
 		return
 	_text_box.field_opacity = Gen2ModHost.renderer_interface_opacity(_renderer)
+	# A renderer swapped in mid-scene has no rectangle, so this one is not deduped.
+	_text_box_rect_pushed = false
 	_push_text_box_rect()
 
 
+## Pushed only when the rectangle actually changes, and never while a page turn
+## is between the box it just closed and the box the next event opens: a renderer
+## composing around the box would otherwise pan away and back inside one
+## conversation. A conversation that really ends pushes the empty rectangle once,
+## because the empty one differs from the occupied one it replaces.
 func _push_text_box_rect() -> void:
-	if _text_box == null:
+	if _text_box == null or _text_box_rect_held > 0:
 		return
-	Gen2ModHost.renderer_set_text_box_rect(_renderer, _text_box.occupied_rect())
+	var rect: Rect2i = _text_box.occupied_rect()
+	if _text_box_rect_pushed and rect == _text_box_rect:
+		return
+	_text_box_rect = rect
+	_text_box_rect_pushed = true
+	Gen2ModHost.renderer_set_text_box_rect(_renderer, rect)
 
 
 ## What the renderer actually draws with, which is not always the clock: a dark
@@ -1177,6 +1192,12 @@ func move_up() -> void:
 
 func move_down() -> void:
 	move_player(Vector2i.DOWN)
+
+
+## The hop's own arc, for `preview_world.gd`'s `ledge` kind, which drives to the
+## top of it rather than spending a count.
+func player_height_offset_pixels() -> float:
+	return _world.player_height_offset_pixels() if _world != null else 0.0
 
 
 func world_snapshot() -> Dictionary:
@@ -2050,9 +2071,12 @@ func _advance_script_input() -> void:
 		return
 	if _text_box.advance():
 		return
+	_text_box_rect_held += 1
 	_text_box.visible = false
 	_script_prompt = ""
 	_show_script_results(_world.run_event_queue(true))
+	_text_box_rect_held -= 1
+	_push_text_box_rect()
 	_refresh_labels()
 
 

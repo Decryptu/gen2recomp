@@ -890,6 +890,19 @@ func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
 	assert_eq(arc, Gen2WorldAPI.JUMP_OFFSETS)
 	assert_eq(world.player_jump_offset(), 0, "and the arc ends with the step")
 
+	## The mod-facing spelling of the same arc: world pixels, positive upward.
+	var lifted: Gen2WorldAPI = _world(Vector2i(3, 2))
+	assert_eq(lifted.player_height_offset_pixels(), 0.0, "at rest")
+	assert_eq(lifted.move_result(Vector2i.DOWN)["kind"], &"ledge_hop")
+	var cell: Vector2i = lifted.player_cell
+	var highest: float = 0.0
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_HOP:
+		highest = maxf(highest, lifted.player_height_offset_pixels())
+		assert_eq(lifted.player_cell, cell, "the cell is the landing cell throughout")
+		lifted.advance_player_step_frame()
+	assert_eq(highest, 12.0, "the top of .y_offsets, above the ground")
+	assert_eq(lifted.player_height_offset_pixels(), 0.0, "and back down on landing")
+
 	var walker: Gen2WorldAPI = _world(Vector2i(5, 11))
 	assert_true(bool(walker.move_result(Vector2i.UP).get("ok", false)))
 	assert_eq(walker.player_jump_offset(), 0)
@@ -3739,6 +3752,33 @@ func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> v
 		world.advance_player_step_frame()
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(_final_status(_run_script(world, dispatched)), &"complete")
+
+
+## `JumpStep` sets STEP_TYPE_NPC_JUMP, whose jumptable is `.Jump` then `.Land`
+## with a `GetNextTile` between them, so one `jump_step` covers two cells over
+## twice the duration and wears `UpdateJumpPosition`'s arc for the whole of it.
+func test_a_scripted_jump_step_covers_two_cells_and_arcs_over_them() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		"48:6100": [0x33, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	var start: Vector2i = object.cell
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+	assert_eq(object.cell, start + Vector2i(2, 0), "two cells, committed at once")
+
+	var highest: float = 0.0
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK * 2:
+		assert_true(world.advance_scripted_steps_frame())
+		highest = maxf(highest, object.height_offset_pixels())
+	assert_eq(highest, 12.0, "the top of .y_offsets")
+	assert_eq(object.step_offset_cells(), Vector2.ZERO, "and the whole hop is drawn")
+	assert_eq(object.height_offset_pixels(), 0.0, "back on the ground where it lands")
 
 
 func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -> void:

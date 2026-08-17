@@ -3544,7 +3544,7 @@ func _build_renderer() -> void:
 		_renderer.queue_free()
 	_renderer = Gen2ModHost.instance().create_battle_renderer()
 	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
-		_screen.display(_renderer)
+		_screen.display_content(_renderer)
 	else:
 		_screen.display_native(_renderer)
 		_screen.native_size_changed.connect(_on_native_size_changed)

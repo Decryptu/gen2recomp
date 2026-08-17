@@ -87,6 +87,9 @@ var emote_remaining: int = 0
 var step_direction: Vector2i = Vector2i.ZERO
 var step_frames_total: int = 0
 var step_frames_remaining: int = 0
+## Whether the in-flight step is a `jump_step`, which is the only kind drawn
+## above its own cell. See height_offset_pixels().
+var step_jumping: bool = false
 ## Set on the frame a step starts and cleared by whoever reads it, which is the
 ## grass rustle `NormalStep` spawns there.
 var step_began: bool = false
@@ -152,6 +155,7 @@ func carry_presentation_from(previous: Gen2WorldObject) -> void:
 	step_direction = previous.step_direction
 	step_frames_total = previous.step_frames_total
 	step_frames_remaining = previous.step_frames_remaining
+	step_jumping = previous.step_jumping
 	queued_steps = previous.queued_steps.duplicate(true)
 	scripted_steps = previous.scripted_steps
 	step_frame = previous.step_frame
@@ -341,12 +345,14 @@ func start_step(direction: Vector2i, frames: int) -> void:
 ## Adds one step of a scripted stream to the trail. The first one starts at
 ## once and the rest wait their turn, so a five-step applymovement is drawn as
 ## five steps rather than as one arrival.
-func queue_step(direction: Vector2i, frames: int) -> void:
+func queue_step(direction: Vector2i, frames: int, jumping: bool = false) -> void:
 	scripted_steps = true
 	if step_frames_remaining > 0:
-		queued_steps.append({"direction": direction, "frames": maxi(0, frames)})
+		queued_steps.append({
+			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
+		})
 		return
-	_begin_step(direction, frames)
+	_begin_step(direction, frames, jumping)
 
 
 ## `Movement_tree_shake`: 24 frames of STEP_TYPE_SLEEP with
@@ -371,7 +377,10 @@ static func sleep_frames(length: int) -> int:
 	return length if length > 0 else 0x100
 
 
-func _begin_step(direction: Vector2i, frames: int) -> void:
+func _begin_step(direction: Vector2i, frames: int, jumping: bool = false) -> void:
+	# `StepFunction_NPCJump` is the only step type running `UpdateJumpPosition`,
+	# and every step begun after it replaces the type, so the arc ends here.
+	step_jumping = jumping
 	step_direction = direction
 	step_frames_total = maxi(0, frames)
 	step_frames_remaining = step_frames_total
@@ -400,7 +409,9 @@ func tick_step() -> bool:
 			scripted_steps = false
 		else:
 			var next: Dictionary = queued_steps.pop_front()
-			_begin_step(next["direction"], int(next["frames"]))
+			_begin_step(
+				next["direction"], int(next["frames"]), bool(next.get("jumping", false))
+			)
 	return true
 
 
@@ -445,6 +456,18 @@ func is_idle() -> bool:
 func step_offset(cell_pixels: int) -> Vector2i:
 	var offset: Vector2 = step_offset_cells() * float(cell_pixels)
 	return Vector2i(int(round(offset.x)), int(round(offset.y)))
+
+
+## How far above the ground this object is drawn, in world pixels and positive
+## upward, matching Gen2WorldAPI.player_height_offset_pixels(). Zero unless a
+## `jump_step` is in flight; presentation only, the cell having committed to the
+## landing cell when the jump started.
+func height_offset_pixels() -> float:
+	if not step_jumping or step_frames_total <= 0:
+		return 0.0
+	return float(-Gen2WorldAPI.jump_offset_at(
+		step_frames_total - step_frames_remaining, step_frames_total
+	))
 
 
 ## The same offset in fractional walk cells, for a renderer that does not think

@@ -169,6 +169,93 @@ func test_the_world_renderer_is_told_where_the_box_is_and_when_it_is_gone() -> v
 	assert_eq((renderer.get("rects") as Array).back(), Rect2i())
 
 
+## The screen owns everything above the renderer, so a renderer built after the
+## text box, which is what cycling back to the built-in one does, still goes
+## below it. Before this the fresh view was appended after the live box and
+## painted over the words being read.
+func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
+	await _open_world(HARDWARE_SOURCE)
+	var box: Gen2TextBox = _world_screen._text_box
+	box.show_text("HI")
+	box.finish()
+	box.visible = true
+	var texture: Texture2D = box.texture
+
+	assert_true(Gen2ModHost.instance().select_world_renderer(&"gen2")["ok"])
+	_world_screen._build_renderer()
+	var viewport: SubViewport = _world_screen._screen.viewport()
+	assert_eq(_world_screen._renderer.get_parent(), viewport, "still in the viewport")
+	assert_true(
+		viewport.get_children().find(_world_screen._renderer)
+			< viewport.get_children().find(box),
+		"and below the box rather than over it"
+	)
+	assert_eq(_world_screen._text_box, box, "the same live box node")
+	assert_eq(box.texture, texture, "with the glyphs it was already showing")
+	assert_true(box.visible)
+
+
+## The same rule in the battle screen, whose box is never hidden at all.
+func test_a_battle_renderer_rebuilt_mid_scene_stays_below_the_interface() -> void:
+	await _open_battle()
+	assert_true(Gen2ModHost.instance().select_battle_renderer(&"gen2")["ok"])
+	_battle_screen._build_renderer()
+	var viewport: SubViewport = _battle_screen._screen.viewport()
+	var children: Array = viewport.get_children()
+	assert_eq(children.find(_battle_screen._renderer), 0, "the renderer is the floor")
+	assert_true(children.find(_battle_screen._box) > 0)
+
+
+## A page turn hides the box and the next event shows it again inside one call,
+## so the rectangle a renderer composes around must not go empty between them: a
+## 3D view told the box had closed pans back to the player and away again.
+func test_one_conversation_never_publishes_an_empty_text_box_rect_between_pages() -> void:
+	var raw: Callable = func(source_opcode: int) -> int:
+		return Gen2WorldScript.raw_opcode(source_opcode, true)
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), {
+		Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TRAINER_SCRIPT): [
+			raw.call(0x90),
+		],
+		Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT): [
+			Gen2WorldScript.OPENTEXT,
+			Gen2WorldScript.WRITETEXT,
+			Fixture.SEEN_TEXT & 0xFF, Fixture.SEEN_TEXT >> 8,
+			Gen2WorldScript.WAITBUTTON,
+			Gen2WorldScript.WRITETEXT,
+			Fixture.WIN_TEXT & 0xFF, Fixture.WIN_TEXT >> 8,
+			Gen2WorldScript.WAITBUTTON,
+			Gen2WorldScript.CLOSETEXT,
+			raw.call(0x90),
+		],
+	})
+	_data = GameData.open_directory(Fixture.directory())
+	var renderer: Node = await _open_world(NATIVE_SOURCE)
+	var box: Gen2TextBox = _world_screen._text_box
+
+	_world_screen._show_script_results(
+		_world_screen._world.dispatch_script_events(Vector2i(4, 5))
+	)
+	box.finish()
+	assert_true(box.visible, "the first page is up")
+	var occupied: Rect2i = (renderer.get("rects") as Array).back() as Rect2i
+	assert_ne(occupied, Rect2i())
+
+	## Every page and button of it, driven the way a press does. The box closes
+	## and reopens inside those calls; the renderer must not hear about it.
+	var pushed: int = (renderer.get("rects") as Array).size()
+	for _press: int in 8:
+		if not box.visible:
+			break
+		box.finish()
+		_world_screen._advance_script_input()
+	assert_false(box.visible, "the conversation is over")
+	assert_eq(
+		(renderer.get("rects") as Array).size(), pushed + 1,
+		"one publication for the whole conversation, at the end of it"
+	)
+	assert_eq((renderer.get("rects") as Array).back(), Rect2i())
+
+
 func test_the_battle_screen_opens_the_same_seam() -> void:
 	var renderer: Node = await _open_battle()
 	assert_almost_eq(_battle_screen._box.field_opacity, 0.75, 0.001)

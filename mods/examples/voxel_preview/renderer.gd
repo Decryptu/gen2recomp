@@ -204,7 +204,8 @@ func refresh() -> void:
 	if _world == null or _camera == null:
 		return
 	var here: Vector3 = _player_position()
-	_player.position = here + Vector3(0.0, 0.6, 0.0)
+	# The hop is the card's alone: arcing the camera with it shakes the view.
+	_player.position = here + Vector3(0.0, 0.6 + _player_height(), 0.0)
 	_camera.position = here + _camera_offset()
 	_camera.look_at(here, Vector3.UP)
 	_rebuild_objects()
@@ -224,6 +225,13 @@ func _cell_center(cell: Vector2i) -> Vector3:
 func _player_position() -> Vector3:
 	var position: Vector2 = _world.player_position_cells()
 	return Vector3(position.x * CELL_SIZE, 0.0, position.y * CELL_SIZE)
+
+
+## The ledge hop's own arc, in cells: the host gives it in world pixels, and a
+## walk cell is Gen2WorldAPI.CELL_PIXELS of them.
+func _player_height() -> float:
+	return _world.player_height_offset_pixels() \
+		/ float(Gen2WorldAPI.CELL_PIXELS) * CELL_SIZE
 
 
 ## One solid per walk cell, extruded by what the cell's collision permission

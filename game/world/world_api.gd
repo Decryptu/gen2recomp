@@ -56,11 +56,16 @@ const STEP_FRAMES_TURN: int = 4
 ## How long each scripted step command takes, from the `STEP_*` speed it passes
 ## to `InitStep` (engine/overworld/movement.asm) and that row of `StepVectors`.
 ##
-## Every command here moves one cell, because every one of them reaches
-## `InitStep`: `NormalStep`, `SlideStep`, `JumpStep` and `TurningStep` all call
-## it and differ only in the `OBJECT_ACTION` they set over the top, a spin for
-## the three turning rows and a jump arc for the three jumping ones. The turning
-## rows keep the direction the command names; `turn_away` does not reverse it.
+## Every command here reaches `InitStep`: `NormalStep`, `SlideStep`, `JumpStep`
+## and `TurningStep` all call it and differ in the step type they set over the
+## top, a spin for the three turning rows and a jump for the three jumping ones.
+## The turning rows keep the direction the command names; `turn_away` does not
+## reverse it.
+##
+## The frames here are one cell's. The three jumping rows cover two: `JumpStep`
+## sets `STEP_TYPE_NPC_JUMP` or `STEP_TYPE_PLAYER_JUMP`, whose jumptables are
+## `.Jump` then `.Land` with a `GetNextTile` between them, so each spends this
+## many frames and the command lands two cells on (JUMP_STEP_KINDS below).
 ##
 ## `turn_step` is the one command that is not here: `TurnStep` sets
 ## STEP_TYPE_TURN, never calls `InitStep`, and `StepFunction_Turn` is two frames
@@ -79,6 +84,11 @@ const SCRIPTED_STEP_FRAMES: Dictionary = {
 	&"turn_in": STEP_FRAMES_WALK,
 	&"turn_waterfall": STEP_FRAMES_FAST,
 }
+## The three rows of SCRIPTED_STEP_FRAMES that are a hop: two cells, twice the
+## frames, and the arc `UpdateJumpPosition` draws over them.
+const JUMP_STEP_KINDS: Array[StringName] = [
+	&"slow_jump_step", &"jump_step", &"fast_jump_step",
+]
 ## The commands that only change a facing. `TurnHead` writes the direction and
 ## stands; `TurnStep` writes it two frames in and stands for two more.
 const SCRIPTED_TURN_KINDS: Array[StringName] = [&"turn_head", &"turn_step"]
@@ -645,7 +655,29 @@ func player_jump_offset() -> int:
 	if not _player_jumping or _player_step_frames_total <= 0:
 		return 0
 	var spent: int = _player_step_frames_total - _player_step_frames_remaining
-	return JUMP_OFFSETS[clampi(spent, 0, JUMP_OFFSETS.size() - 1)]
+	return jump_offset_at(spent, _player_step_frames_total)
+
+
+## The table entry a jump of [param total] frames is on after [param spent] of
+## them. `UpdateJumpPosition` indexes it with an accumulator stepped by the step
+## vector and halved, so a hop covering two cells in 16 frames advances one entry
+## a frame and every other duration covers the same table at its own rate: the
+## proportion is the accumulator.
+static func jump_offset_at(spent: int, total: int) -> int:
+	if total <= 0:
+		return 0
+	var index: int = spent * JUMP_OFFSETS.size() / total
+	return JUMP_OFFSETS[clampi(index, 0, JUMP_OFFSETS.size() - 1)]
+
+
+## How far above the ground the player is drawn this frame, in world pixels and
+## positive upward: the mod-facing spelling of player_jump_offset(), which is the
+## same arc in the renderer's own downward-positive draw space. Zero at rest, on
+## an ordinary step, and on the frame a hop completes. Presentation only: the
+## cell, the collision, the triggers and the snapshot are already at the landing
+## cell while this is above zero.
+func player_height_offset_pixels() -> float:
+	return float(-player_jump_offset())
 
 
 ## The in-flight walk step's presentation offset in fractional walk cells,
@@ -676,28 +708,34 @@ func player_walk_frame() -> int:
 	return (_player_step_frame >> 2) & 3
 
 
-func _start_player_step(direction: Vector2i, frames: int) -> void:
+func _start_player_step(
+	direction: Vector2i, frames: int, jumping: bool = false
+) -> void:
 	_player_queued_steps.clear()
 	_player_scripted_steps = false
-	_begin_player_step(direction, frames)
+	_begin_player_step(direction, frames, jumping)
 
 
 ## One step of a scripted stream, behind whatever the player is already walking.
 ## See Gen2WorldObject.queue_step().
-func _queue_player_step(direction: Vector2i, frames: int) -> void:
+func _queue_player_step(direction: Vector2i, frames: int, jumping: bool = false) -> void:
 	_player_scripted_steps = true
 	if _player_step_frames_remaining > 0:
-		_player_queued_steps.append({"direction": direction, "frames": maxi(0, frames)})
+		_player_queued_steps.append({
+			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
+		})
 		return
-	_begin_player_step(direction, frames)
+	_begin_player_step(direction, frames, jumping)
 
 
-func _begin_player_step(direction: Vector2i, frames: int) -> void:
-	## `StepFunction_PlayerJump` is the only step type that runs
-	## `UpdateJumpPosition`, and every other step type replaces it, so the arc
-	## belongs to the hop that set it and to nothing begun after it.
-	## `_try_ledge_hop` raises the flag again once this has cleared it.
-	_player_jumping = false
+func _begin_player_step(
+	direction: Vector2i, frames: int, jumping: bool = false
+) -> void:
+	## `StepFunction_PlayerJump` and `StepFunction_NPCJump` are the only step
+	## types that run `UpdateJumpPosition`, and every other step type replaces
+	## them, so the arc belongs to the hop that set it and to nothing begun after
+	## it. `_try_ledge_hop` and a `jump_step` raise the flag again.
+	_player_jumping = jumping
 	_player_step_direction = direction
 	_player_step_frames_total = maxi(0, frames)
 	_player_step_frames_remaining = _player_step_frames_total
@@ -730,7 +768,9 @@ func advance_player_step_frame() -> bool:
 			_player_scripted_steps = false
 		else:
 			var next: Dictionary = _player_queued_steps.pop_front()
-			_begin_player_step(next["direction"], int(next["frames"]))
+			_begin_player_step(
+				next["direction"], int(next["frames"]), bool(next.get("jumping", false))
+			)
 	return true
 
 
@@ -3883,14 +3923,18 @@ func _apply_object_movement(event: Dictionary) -> Array:
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			object.apply_direction(direction)
-			var destination: Vector2i = object.cell + direction
+			var jumping: bool = kind in JUMP_STEP_KINDS
+			var cells: int = 2 if jumping else 1
+			var destination: Vector2i = object.cell + direction * cells
 			if _cell_in_bounds(destination):
 				object.cell = destination
 				# The cell commits here, as it does for every other step in this
 				# runtime; only the drawing trails. A stream applies in one call,
 				# so the whole path is queued and drawn a step at a time by
 				# advance_scripted_steps_frame().
-				object.queue_step(direction, int(SCRIPTED_STEP_FRAMES[kind]))
+				object.queue_step(
+					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
+				)
 			else:
 				generated.append({
 					"type": &"movement_blocked", "object_index": object_index,
@@ -3996,10 +4040,14 @@ func _apply_player_movement(event: Dictionary) -> Array:
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			player_facing = _facing_for_direction(direction)
-			var destination: Vector2i = player_cell + direction
+			var jumping: bool = kind in JUMP_STEP_KINDS
+			var cells: int = 2 if jumping else 1
+			var destination: Vector2i = player_cell + direction * cells
 			if _cell_in_bounds(destination):
 				player_cell = destination
-				_queue_player_step(direction, int(SCRIPTED_STEP_FRAMES[kind]))
+				_queue_player_step(
+					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
+				)
 			else:
 				generated.append({
 					"type": &"movement_blocked", "player": true, "cell": destination,
@@ -5031,8 +5079,7 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	player_facing = _facing_for_direction(direction)
 	state.consume_repel_step()
 	_advance_followers(from_cell, previous_cells)
-	_start_player_step(direction * 2, STEP_FRAMES_HOP)
-	_player_jumping = true
+	_start_player_step(direction * 2, STEP_FRAMES_HOP, true)
 	return {
 		"ok": true,
 		"kind": &"ledge_hop",

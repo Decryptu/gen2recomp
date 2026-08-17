@@ -27,6 +27,8 @@ extends SceneTree
 ## `door` (`.CheckWarp`'s carpet: the player is walked down onto an interior
 ## door's mat and photographed standing on it, which the step itself no longer
 ## warps: `crystal 24 6 ... door 6 5` is the front door of the player's house),
+## `ledge` (the ledge hop at the top of its arc, walking south from the cell the
+## two numbers name until one allows the hop: `crystal 24 4 ... ledge 5 4`),
 ## `map_name_sign` (`InitMapNameSign`'s window, raised by walking west off the
 ## map's edge onto its neighbour: `crystal 24 4 ... map_name_sign 1 8` crosses
 ## New Bark Town into Route 29),
@@ -48,6 +50,9 @@ const WINDOW_SIZE := Vector2i(1152, 648)
 ## Longer than a step onto a warp tile and the fade behind it, for the `warp`
 ## kind, which drives to a frame rather than spending a count.
 const WARP_FRAME_CAP: int = 120
+## `UpdateJumpPosition`'s highest `.y_offsets` entry, which is where the `ledge`
+## kind photographs the hop.
+const LEDGE_ARC_TOP: float = 12.0
 ## Hardware frames spent after the sprites are staged. Two puts the grass rustle
 ## on its first facing and the boulder dust on its second, so every one of them
 ## is up and none is on the frame it was spawned. Cut needs more: its tree stands
@@ -215,6 +220,16 @@ func _process(_delta: float) -> bool:
 					## the player is still walking are spent before the picture.
 					_screen.advance_frames(Gen2WorldAPI.STEP_FRAMES_WALK)
 					break
+		elif _kind == &"ledge":
+			## `StepFunction_PlayerJump` at the top of its arc: the player is
+			## walked south until a cell allows the hop below it, and the picture
+			## is the frame `UpdateJumpPosition` draws highest
+			## (`crystal 24 4 ... ledge 5 4`).
+			for _frame: int in WARP_FRAME_CAP:
+				_screen.move_down()
+				_screen.advance_frame()
+				if _screen.player_height_offset_pixels() >= LEDGE_ARC_TOP:
+					break
 		elif _kind == &"map_name_sign":
 			## `MapSetupScript_Connection`'s `InitMapNameSign`: walked west off
 			## New Bark Town's edge onto Route 29, photographed while the sign
@@ -242,7 +257,7 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		if _kind not in [&"warp", &"door", &"map_name_sign"]:
+		if _kind not in [&"warp", &"door", &"map_name_sign", &"ledge"]:
 			## Those two kinds drove themselves to the frame they want; every
 			## other kind stages a sprite and then spends the frames it needs.
 			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
