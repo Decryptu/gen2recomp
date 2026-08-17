@@ -15,12 +15,18 @@ extends RefCounted
 ## [method GameData.species_pic] reads [code]front_tiles[/code]) and an omitted
 ## field would crash the reader rather than draw wrong.
 
-## The kinds a mod may reach. Types are not one: the matchup lookup keys on
-## [constant RomLayout.TYPE_COUNT], so a new type renumbers the whole chart.
+## The kinds a mod may reach. Types are zero-based while the other numbered
+## content is one-based; [method define] and [method patch] keep that distinction
+## at this boundary so every reader can use the same overlay.
 const KIND_SPECIES: StringName = &"species"
 const KIND_MOVE: StringName = &"move"
 const KIND_ITEM: StringName = &"item"
 const KIND_TRAINER: StringName = &"trainer"
+const KIND_TYPE: StringName = &"type"
+## One attacking/defending type pair, packed by [method matchup_number]. The
+## cartridge chart is a sparse table of exceptions, so this is patch-only: an
+## absent pair already means neutral and there is no separate row to define.
+const KIND_MATCHUP: StringName = &"matchup"
 ## [method GameData.world_encounter]'s row, numbered by [method encounter_number].
 const KIND_ENCOUNTER: StringName = &"encounter"
 ## [method GameData.world_fishing_group]'s row, numbered as a map header does.
@@ -42,7 +48,8 @@ const KIND_FISHING_TIME: StringName = &"fishing_time"
 ## than the script that runs it.
 const KIND_CHECK: StringName = &"check"
 const KINDS: Array[StringName] = [
-	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_ENCOUNTER, KIND_FISHING,
+	KIND_SPECIES, KIND_MOVE, KIND_ITEM, KIND_TRAINER, KIND_TYPE, KIND_MATCHUP,
+	KIND_ENCOUNTER, KIND_FISHING,
 	KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING, KIND_FISHING_TIME, KIND_CHECK,
 ]
 
@@ -50,7 +57,7 @@ const KINDS: Array[StringName] = [
 ## cannot add a map for a definition to sit at. Their numbers are table
 ## coordinates and do not obey [constant FIRST_MOD_NUMBER].
 const TABLE_KINDS: Array[StringName] = [
-	KIND_ENCOUNTER, KIND_FISHING, KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING,
+	KIND_MATCHUP, KIND_ENCOUNTER, KIND_FISHING, KIND_TREEMON, KIND_BUG_CONTEST, KIND_ROAMING,
 	KIND_FISHING_TIME, KIND_CHECK,
 ]
 
@@ -88,8 +95,14 @@ const DEFAULTS: Dictionary = {
 		"egg_groups": [15, 15],
 		"tmhm": [0, 0, 0, 0, 0, 0, 0, 0],
 		"evolutions": [],
+		"egg_moves": [],
 		"learnset": [],
 		"front_tiles": [7, 7],
+		# Optional decoded, indexed art. A custom pic is
+		# `{tiles, indices}` and an icon is either a cartridge icon number or
+		# `{indices}`. Empty means the mod intentionally supplied no art.
+		"pics": {"front": {}, "back": {}},
+		"icon": 0,
 		# White and black, which draws something legible and obviously not
 		# coloured, the same answer bar_palette() gives an unknown name.
 		"palette": {"normal": [0x7FFF, 0x0000], "shiny": [0x7FFF, 0x0000]},
@@ -118,12 +131,19 @@ const DEFAULTS: Dictionary = {
 	KIND_TRAINER: {
 		"name": "?",
 		"palette": [0x7FFF, 0x0000],
+		"pic": {},
 		"trainers": [],
 		"attributes": {
 			"item1": 0, "item2": 0, "base_reward": 0,
 			"ai_move_weights": 0, "ai_item_switch": 0,
 		},
 		"dvs": Gen2BattleMon.PERFECT_DVS,
+	},
+	KIND_TYPE: {
+		"name": "?",
+		# Generation II has no per-move category. A newly defined type has to
+		# choose which stat pair it uses, and special is the safer default.
+		"physical": false,
 	},
 }
 
@@ -168,6 +188,9 @@ func define(kind: StringName, id: StringName, number: int, row: Dictionary) -> D
 			"ok": false, "reason": &"reserved_content_number",
 			"detail": "%s %d" % [kind, number],
 		}
+	var validation: Dictionary = _validate_fields(kind, row)
+	if not bool(validation.get("ok", false)):
+		return validation
 	var conflict: Dictionary = _claim(kind, id, number)
 	if not bool(conflict.get("ok", false)):
 		return conflict
@@ -190,13 +213,21 @@ func patch(kind: StringName, id: StringName, number: int, fields: Dictionary) ->
 				"ok": false, "reason": &"not_a_table_row",
 				"detail": "%s %d" % [kind, number],
 			}
-	elif number < 1 or number >= FIRST_MOD_NUMBER:
+	elif kind == KIND_TYPE and (number < 0 or number >= FIRST_MOD_NUMBER):
+		return {
+			"ok": false, "reason": &"not_a_cartridge_number",
+			"detail": "%s %d" % [kind, number],
+		}
+	elif kind != KIND_TYPE and (number < 1 or number >= FIRST_MOD_NUMBER):
 		return {
 			"ok": false, "reason": &"not_a_cartridge_number",
 			"detail": "%s %d" % [kind, number],
 		}
 	if fields.is_empty():
 		return {"ok": false, "reason": &"empty_content_patch", "detail": String(kind)}
+	var validation: Dictionary = _validate_fields(kind, fields)
+	if not bool(validation.get("ok", false)):
+		return validation
 	var conflict: Dictionary = _claim(kind, id, number)
 	if not bool(conflict.get("ok", false)):
 		return conflict
@@ -241,6 +272,29 @@ static func encounter_number(method: StringName, group: int, number: int) -> int
 	return at * 0x10000 + group * 0x100 + number
 
 
+## One collision-free key for a type matchup. Both ids remain whole rather than
+## being multiplied by the cartridge's type count, so a mod type cannot alias a
+## cartridge pair. Negative or wider-than-31-bit ids cannot be content numbers.
+static func matchup_number(attacking: int, defending: int) -> int:
+	if attacking < 0 or attacking > 0x7FFFFFFF \
+		or defending < 0 or defending > 0x7FFFFFFF:
+		return -1
+	return (attacking << 32) | defending
+
+
+## Which stat pair a type uses. Only a mod type reaches this: the cartridge's own
+## split is a number comparison ([method Gen2Damage.is_physical]) and needs no
+## lookup, so an unmodded battle pays nothing for the question.
+func type_is_physical(number: int) -> bool:
+	var defined: Dictionary = _defined.get(KIND_TYPE, {})
+	if defined.has(number):
+		return bool((defined[number] as Dictionary).get("physical", false))
+	var patched: Dictionary = _patched.get(KIND_TYPE, {})
+	if patched.has(number):
+		return bool((patched[number] as Dictionary).get("physical", false))
+	return number < RomLayout.SPECIAL_TYPES_START
+
+
 ## Which mod claimed [param number], for a launcher listing what it will change.
 func owner_of(kind: StringName, number: int) -> StringName:
 	return StringName((_owners.get(kind, {}) as Dictionary).get(number, &""))
@@ -283,6 +337,81 @@ func _normalized(kind: StringName, number: int, row: Dictionary) -> Dictionary:
 	var out: Dictionary = _merged(DEFAULTS[kind], row)
 	out["number"] = number
 	return out
+
+
+## Validates the fields readers index directly before a mod claims their number.
+## Rows otherwise stay open-ended so future readers can add optional fields
+## without making an older host erase them.
+func _validate_fields(kind: StringName, fields: Dictionary) -> Dictionary:
+	if kind == KIND_SPECIES:
+		if fields.has("pics"):
+			var pics: Variant = fields["pics"]
+			if not pics is Dictionary:
+				return _invalid(&"invalid_content_pic", "species pics")
+			for facing: String in ["front", "back"]:
+				if (pics as Dictionary).has(facing):
+					var valid_pic: Dictionary = _validate_pic((pics as Dictionary)[facing], 7)
+					if not bool(valid_pic.get("ok", false)):
+						return valid_pic
+		if fields.has("icon"):
+			var icon: Variant = fields["icon"]
+			if icon is int or icon is float:
+				if int(icon) < 0 or int(icon) > RomLayout.MON_ICON_COUNT:
+					return _invalid(&"invalid_content_icon", "icon %d" % int(icon))
+			elif icon is Dictionary:
+				if not _valid_indices((icon as Dictionary).get("indices", null), 8 * Gen2Tiles.TILE_PIXELS):
+					return _invalid(&"invalid_content_icon", "custom icon")
+			else:
+				return _invalid(&"invalid_content_icon", "species icon")
+	elif kind == KIND_TRAINER and fields.has("pic"):
+		var valid_trainer_pic: Dictionary = _validate_pic(fields["pic"], 7)
+		if not bool(valid_trainer_pic.get("ok", false)):
+			return valid_trainer_pic
+	elif kind == KIND_TYPE:
+		if fields.has("name") and String(fields["name"]).is_empty():
+			return _invalid(&"invalid_content_type", "type name")
+		if fields.has("physical") and not fields["physical"] is bool:
+			return _invalid(&"invalid_content_type", "physical must be true or false")
+	elif kind == KIND_MATCHUP:
+		if not fields.has("multiplier"):
+			return _invalid(&"invalid_type_matchup", "multiplier is missing")
+		var multiplier: int = int(fields["multiplier"])
+		if multiplier < 0 or multiplier > 0xFF:
+			return _invalid(&"invalid_type_matchup", "multiplier %d" % multiplier)
+		if fields.has("negated_by_foresight") and not fields["negated_by_foresight"] is bool:
+			return _invalid(&"invalid_type_matchup", "negated_by_foresight")
+	return {"ok": true}
+
+
+func _validate_pic(value: Variant, maximum_tiles: int) -> Dictionary:
+	if value is Dictionary and (value as Dictionary).is_empty():
+		return {"ok": true}
+	if not value is Dictionary:
+		return _invalid(&"invalid_content_pic", "pic is not a dictionary")
+	var tiles: int = int((value as Dictionary).get("tiles", 0))
+	if tiles < 1 or tiles > maximum_tiles:
+		return _invalid(&"invalid_content_pic", "pic tiles %d" % tiles)
+	if not _valid_indices(
+		(value as Dictionary).get("indices", null), tiles * tiles * Gen2Tiles.TILE_PIXELS
+	):
+		return _invalid(&"invalid_content_pic", "pic indices")
+	return {"ok": true}
+
+
+func _valid_indices(value: Variant, expected: int) -> bool:
+	if not value is PackedByteArray and not value is Array:
+		return false
+	if value.size() != expected:
+		return false
+	for pixel: Variant in value:
+		var index: int = int(pixel)
+		if index < 0 or index > 3:
+			return false
+	return true
+
+
+func _invalid(reason: StringName, detail: String) -> Dictionary:
+	return {"ok": false, "reason": reason, "detail": detail}
 
 
 ## [param over] laid on [param base], recursing into Dictionary values so a

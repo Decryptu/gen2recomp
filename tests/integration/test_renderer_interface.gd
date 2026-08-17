@@ -405,12 +405,13 @@ func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() ->
 	## Walking onto it starts the battle with those exact DVs.
 	_world_screen._world.player_cell = cell
 	_world_screen._after_player_move({"kind": &"step"})
-	var request: Dictionary = _world_screen._battle_host.get_meta(
-		"world_battle_request"
-	)["request"]
-	assert_eq(int(request["values"]["dvs"]), shiny)
-	assert_eq(int(request["values"]["level"]), 5)
-	assert_eq(StringName(request["visible_encounter"]), &"a")
+	## The adapter's own prepared request, which is the `values` block itself.
+	var request: Dictionary = _world_screen._battle_host.world_battle_request()
+	assert_eq(int(request["dvs"]), shiny)
+	assert_eq(int(request["level"]), 5)
+	## Which entry it was is the world's own bookkeeping, since that is what gets
+	## reported back to the provider when the fight ends.
+	assert_eq(_world_screen._battle_encounter_id, &"a")
 
 	_world_screen._on_battle_finished({"outcome": Gen2WorldBattleAdapter.OUTCOME_RAN})
 	var reported: Array = provider.get("results")

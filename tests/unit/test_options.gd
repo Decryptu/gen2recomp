@@ -146,6 +146,24 @@ func test_out_of_range_values_are_clamped_rather_than_refused() -> void:
 	assert_eq(options.max_fps, 60, "an unlisted frame cap falls back to 60")
 
 
+## The gameplay rules live in the options file but are their own block: the
+## settings screen edits them there, and a new run takes a copy.
+func test_the_rules_block_travels_with_the_options_file() -> void:
+	var options := Gen2Options.new()
+	assert_eq(options.rules.mode, Gen2Rules.MODE_CURRENT)
+	options.rules.set_mode(Gen2Rules.MODE_VANILLA)
+	options.rules.difficulty = Gen2Rules.DIFFICULTY_EASY
+
+	var restored: Gen2Options = Gen2Options.parse(options.to_dict())
+	assert_true(restored.rules.matches(options.rules))
+	assert_eq(restored.rules.mode, Gen2Rules.MODE_VANILLA)
+	assert_eq(restored.rules.difficulty, Gen2Rules.DIFFICULTY_EASY)
+	assert_eq(
+		Gen2Options.parse({}).rules.mode, Gen2Rules.MODE_CURRENT,
+		"a file written before the block existed plays what shipped"
+	)
+
+
 func test_a_non_dictionary_parses_as_defaults() -> void:
 	var options: Gen2Options = Gen2Options.parse("not options")
 	assert_eq(options.to_source_bytes(), Gen2Options.new().to_source_bytes())

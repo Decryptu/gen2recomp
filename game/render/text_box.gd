@@ -114,6 +114,14 @@ func _ready() -> void:
 	set_process(false)
 
 
+## One hardware frame of the reveal, for a caller spending frames by hand rather
+## than by real time: the overworld's own pump while an overlay is up, a check, a
+## screenshot driver, a replay. `PrintLetterDelay` is a frame count on the
+## cartridge, so this is the same clock [method _process] converts real time into.
+func advance_frame() -> void:
+	_process(FRAME_SECONDS)
+
+
 func _process(delta: float) -> void:
 	if _scroll_page >= 0:
 		_advance_scroll(delta)

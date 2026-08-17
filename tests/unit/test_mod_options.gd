@@ -193,3 +193,73 @@ func test_the_shipped_example_registers_the_setting_its_renderer_reads() -> void
 	# The renderer heard the change rather than polling for it.
 	assert_eq(renderer.camera_pitch(), host.option(renderer.MOD_ID, renderer.OPTION_PITCH))
 	renderer.free()
+
+
+## A slot's own settings, which is what makes its recorded walk reproducible: the
+## file is the template a new run is created from, and the run holds the values it
+## was played with from then on.
+func test_a_new_save_records_the_settings_it_was_created_with() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(_distance(host).get("ok", false)))
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 24).get("ok", false)))
+
+	var save := Gen2SaveData.new()
+	host.created_save(save)
+	assert_eq(save.run_options, {MOD: {&"draw_distance": 24}})
+
+	host.activate_save(save)
+	# The installation moves on; the run does not, and the value the run is played
+	# with is the one it recorded.
+	Gen2ModOptions.unbind_run()
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 8).get("ok", false)))
+	host.activate_save(save)
+	assert_eq(host.option(MOD, &"draw_distance"), 24)
+
+	host.deactivate_save()
+	assert_false(Gen2ModOptions.run_bound())
+	assert_eq(host.option(MOD, &"draw_distance"), 8, "and the launcher edits the installation")
+
+
+## A slot written before the snapshot existed adopts the installation once, which
+## is the only honest reconciliation: nothing recorded what it was played with.
+func test_a_save_with_no_recorded_settings_adopts_the_installation_once() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(_distance(host).get("ok", false)))
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 16).get("ok", false)))
+
+	var save := Gen2SaveData.new()
+	host.activate_save(save)
+	assert_eq(save.run_options, {MOD: {&"draw_distance": 16}})
+	assert_eq(host.option(MOD, &"draw_distance"), 16)
+
+
+## A change made while a slot is played belongs to that slot: the installation is
+## left alone, so the other slots keep the walk they recorded.
+func test_a_change_during_a_run_is_kept_by_the_run() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(_distance(host).get("ok", false)))
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 8).get("ok", false)))
+
+	var save := Gen2SaveData.new()
+	host.created_save(save)
+	host.activate_save(save)
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 24).get("ok", false)))
+	assert_eq(save.run_options, {MOD: {&"draw_distance": 24}}, "the save carries it")
+	assert_eq(
+		Gen2SaveData.from_dict(save.to_dict()).run_options, {MOD: {&"draw_distance": 24}},
+		"and it survives the round trip through the file"
+	)
+
+	host.deactivate_save()
+	assert_eq(host.option(MOD, &"draw_distance"), 8, "the installation was left alone")
+
+
+## A development run has no slot, so there is nothing to bind and nothing to
+## invent: the installation is what it plays with.
+func test_a_run_with_no_slot_plays_the_installations_settings() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(_distance(host).get("ok", false)))
+	assert_true(bool(host.set_option(MOD, &"draw_distance", 16).get("ok", false)))
+	host.activate_save(null)
+	assert_false(Gen2ModOptions.run_bound())
+	assert_eq(host.option(MOD, &"draw_distance"), 16)

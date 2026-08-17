@@ -433,6 +433,13 @@ const DEXMODE_UNOWN: int = 3
 const EVOS_ATTACKS_POINTER_SIZE: int = 2
 const EVOS_ATTACKS_END: int = 0
 
+## EggMovePointers is one little-endian pointer per species. Like the evolution
+## table, each pointer names a list in the table's own bank. Unlike a level-up
+## list, an egg-move list carries move numbers alone and ends at $FF; an empty
+## list is therefore one $FF byte.
+const EGG_MOVE_POINTER_SIZE: int = 2
+const EGG_MOVE_END: int = 0xFF
+
 ## How a species evolves. The byte after the method is a level for
 ## [constant EVOLVE_LEVEL] and [constant EVOLVE_STAT], an item for
 ## [constant EVOLVE_ITEM], a held item for [constant EVOLVE_TRADE] ($FF for
@@ -1629,6 +1636,11 @@ const GOLD_SILVER: Dictionary = {
 		"gender": -1,
 	},
 	"evos_attacks": 0x427BD,
+	# `EggMovePointers` followed through its 251 same-bank pointers. The lists
+	# contain 478 move ids across 106 nonempty species in both Gold and Silver.
+	"egg_move_pointers": 0x239FE,
+	"egg_move_count": 478,
+	"egg_move_species_count": 106,
 	"type_names": 0x509AE,
 	"type_matchups": 0x34D01,
 	"font": 0xF82F2,
@@ -2054,6 +2066,11 @@ const CRYSTAL: Dictionary = {
 		"gender": 0x1C0CA3,
 	},
 	"evos_attacks": 0x425B1,
+	# Crystal's own `EggMovePointers`; its revised breeding data contains 480
+	# move ids across 105 nonempty species.
+	"egg_move_pointers": 0x23B11,
+	"egg_move_count": 480,
+	"egg_move_species_count": 105,
 	"type_names": 0x5097B,
 	"type_matchups": 0x34BB1,
 	"font": 0xF8200,
@@ -2701,6 +2718,12 @@ static func move_data_offset(layout: Dictionary, move: int) -> int:
 ## bank, so [method bank_of] on the table itself resolves it.
 static func evos_attacks_pointer_offset(layout: Dictionary, species: int) -> int:
 	return int(layout["evos_attacks"]) + (species - 1) * EVOS_ATTACKS_POINTER_SIZE
+
+
+## One species' pointer in EggMovePointers. The address has no bank byte; the
+## table's bank is the list's bank too.
+static func egg_move_pointer_offset(layout: Dictionary, species: int) -> int:
+	return int(layout["egg_move_pointers"]) + (species - 1) * EGG_MOVE_POINTER_SIZE
 
 
 ## How many bytes one evolution entry occupies. [constant EVOLVE_STAT] carries a

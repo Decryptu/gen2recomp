@@ -138,6 +138,17 @@ var _start_menu_cursor: int = 0
 var _reopen_start_menu: bool = false
 var _trainer_approach: Dictionary = {}
 var _active_battle_save: Gen2SaveData = null
+## How many battles this run has started, which is what a replay compares beside
+## the party: a route that fought and one that walked past the grass reach
+## different states for the same reason.
+var _battles_fought: int = 0
+## What the last one resolved to (`Gen2WorldBattleAdapter.OUTCOME_*`), which is
+## the fight's own result rather than the party's: a lost battle heals the party
+## on the way out, so the outcome is what says the turn resolved at all.
+var _last_battle_outcome: StringName = &""
+## The audio driver's rendered-frame count as of the last frame, for the one
+## script wait that reads it. See [method Gen2AudioPlayer.timeline_updates].
+var _audio_rendered_seen: int = 0
 var _active_battle_persist: bool = false
 var _encounter_random := RandomNumberGenerator.new()
 ## NPC movement rolls from its own generator, so a seeded route keeps the same
@@ -529,7 +540,14 @@ func advance_frame() -> void:
 		_refresh_labels()
 	# The condition is the audio device's, not a counter's, but the request it
 	# completes is a script's, so it lands on a frame like every other resume.
-	if _audio_waiting and _audio_player != null and not _audio_player.effect_playing():
+	## The same rule the battle's `ANIM_WAIT_SFX` follows: a driver nobody is
+	## servicing leaves `effect_playing()` true for the rest of the run, so the
+	## rendered-frame count is what decides whether this is a wait at all.
+	var audio_rendered: int = _audio_player.timeline_updates() if _audio_player != null else 0
+	var audio_moved: bool = audio_rendered != _audio_rendered_seen
+	_audio_rendered_seen = audio_rendered
+	if _audio_waiting and _audio_player != null \
+		and (not _audio_player.effect_playing() or not audio_moved):
 		_audio_waiting = false
 		var audio_result: Dictionary = Gen2WorldHost.complete_runtime_request(
 			_world, {"ok": true, "sound_finished": true}
@@ -540,7 +558,36 @@ func advance_frame() -> void:
 	# spends this frame too rather than counting one of its own.
 	if _service_host != null:
 		_service_host.advance_frame()
+	## A battle is `BattleIntro` onward running inside the map's own loop, so its
+	## bars, its animations and its faints are spent from this pump rather than
+	## from real time. That is what makes a fight inside a replay reach the same
+	## place on the same frame.
+	if _battle_host != null:
+		_battle_host.advance_hardware_frame()
 	_spending_frame = false
+
+
+## Whether a battle owns the screen right now. Public beside
+## [method battles_fought] so a tool driving a run knows which of the two funnels
+## its presses are going through, and so a replay can compare the count.
+func battle_active() -> bool:
+	return _battle_host != null
+
+
+func battles_fought() -> int:
+	return _battles_fought
+
+
+func last_battle_outcome() -> StringName:
+	return _last_battle_outcome
+
+
+## The save this run is playing, which is what a fight writes its party back into.
+## The injected one for a test or a tool, the runtime's selected slot otherwise.
+func active_save() -> Gen2SaveData:
+	if _active_battle_save != null:
+		return _active_battle_save
+	return _injected_save if _injected_save != null else _selected_runtime_save()
 
 
 ## Starts recording every button the world consumes, discarding any earlier log.
@@ -676,7 +723,7 @@ func _objects_may_move() -> bool:
 ## device produced it. What is left over is a development shortcut or something
 ## only a renderer could want.
 func _unhandled_input(event: InputEvent) -> void:
-	if _world == null or _battle_host != null:
+	if _world == null:
 		return
 	var button: int = Gen2Button.pressed_in(event)
 	if button != Gen2Button.NONE:
@@ -736,6 +783,13 @@ func press_button(button: int) -> bool:
 ## refusing the ones it has no use for, which is what keeps a stray press from
 ## reaching the map behind it.
 func _handle_button(button: int) -> bool:
+	## First, because a battle hides the map entirely and owns every button while
+	## it does. The fight takes it through this funnel rather than reading events
+	## of its own, so a press inside a battle is recorded once, by the world, and
+	## a replayed log reaches the fight (`tools/replay_world.gd`).
+	if _battle_host != null:
+		_battle_host.press_button(button)
+		return true
 	if not _map_fade.is_empty() or not _trainer_approach.is_empty() \
 		or _world.phone_ring_active():
 		return true
@@ -1951,13 +2005,40 @@ func _start_battle_request(request: Dictionary) -> void:
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	_active_battle_save = save
 	_active_battle_persist = save != null and _injected_save == null
+	_battles_fought += 1
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
+	host.set_rules(_world.rules if _world != null else null)
+	## Drawn from the world's own generator, so the fight's own decisions are part
+	## of the run's seeded chain and a replay reproduces them without recording
+	## anything about the battle. Its frames and its buttons both come through this
+	## screen from here on.
+	host.set_random_seed(_encounter_random.randi())
+	host.set_external_input(true)
 	host.set_time_of_day(time_of_day)
 	# The clock's row is what the battle's own heals read; the drawn row is what
 	# a renderer staging the fight on this map has to match, so the context
 	# carries that one.
 	host.set_world_context(Gen2BattleWorldContext.capture(_world, _render_time_of_day()))
+	var badges: int = _world.state.badge_mask(Gen2WorldState.is_crystal_profile(_data)) \
+		if _world != null and _world.state != null else 0
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 10
+	host.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(host)
+	host.battle_finished.connect(_on_battle_finished)
+	host.enemy_seen.connect(_on_enemy_seen)
+	if not tutorial:
+		host.capture_requested.connect(_on_capture_requested)
+		host.item_used.connect(_on_battle_item_used)
+	_battle_host = host
+	## Started after the connections and here rather than left to the host's own
+	## deferred call: `startbattle` is a script command, so the fight belongs to
+	## the frame the encounter fired on, and a run driven frame by frame (a check,
+	## a replay) never reaches a deferred call at all.
+	host.start_world_battle(request.duplicate(true), save, badges)
+	## After the fight exists, because starting one clears whatever capture action
+	## was staged: the bag belongs to this battle rather than to the last one.
 	if _world != null and not tutorial:
 		## `BattleMenu_Pack`'s contest branch loads PARK_BALL and nothing else,
 		## and the count is `wParkBallsRemaining` rather than the bag.
@@ -1973,22 +2054,9 @@ func _start_battle_request(request: Dictionary) -> void:
 			host.set_battle_pack(
 				Gen2WorldPack.battle_items(_data, _world.state), _world.state.items()
 			)
-	host.set_meta("world_battle_request", {
-		"request": request.duplicate(true),
-		"save": save,
-		"player_badges": _world.state.badge_mask(Gen2WorldState.is_crystal_profile(_data)) \
-			if _world != null and _world.state != null else 0,
-	})
-	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	host.z_index = 10
-	host.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(host)
-	host.battle_finished.connect(_on_battle_finished)
-	host.enemy_seen.connect(_on_enemy_seen)
-	if not tutorial:
-		host.capture_requested.connect(_on_capture_requested)
-		host.item_used.connect(_on_battle_item_used)
-	_battle_host = host
+	## Its frames come from this screen's own pump from here on, so it must not
+	## also spend real-time ones of its own.
+	host.set_process(false)
 	_script_prompt = "Battle in progress"
 	_refresh_labels()
 
@@ -2051,6 +2119,7 @@ func _on_battle_finished(result: Dictionary) -> void:
 			_encounters.battle_finished(fought, result.duplicate(true))
 	if _world == null:
 		return
+	_last_battle_outcome = StringName(result.get("outcome", &""))
 	var pay_day_money: int = int(result.get("pay_day_money", 0))
 	if pay_day_money > 0 and StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_WON:
 		_world.state.apply_changes({}, {}, {"money": {
@@ -3259,8 +3328,8 @@ func _show_script_results(results: Array) -> void:
 	var clock_changed: bool = false
 	var recovered: bool = false
 	var recovery_prompt: String = ""
-	for result: Dictionary in results:
-		Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, result)
+	for source_result: Dictionary in results:
+		var result: Dictionary = Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, source_result)
 		if result.has("clock"):
 			clock_changed = true
 		var status: StringName = StringName(result.get("status", &""))

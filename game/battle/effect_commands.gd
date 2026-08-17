@@ -258,6 +258,9 @@ const HAZE: StringName = &"haze"
 ## Half the user's maximum HP for an Attack straight to the top of its range.
 ## Fails free if it has no more than half, or if Attack is already there.
 const BELLY_DRUM: StringName = &"bellydrum"
+## What one `BattleCommand_AttackUp2` is worth, which is what Belly Drum spends
+## before it checks whether it can pay. See [method _belly_drum].
+const ATTACK_UP_2_STAGES: int = 2
 
 ## Copies the target's stages onto the user, all seven at once. Fails if the
 ## target has nothing raised or lowered to copy.
@@ -2384,6 +2387,15 @@ static func _belly_drum(turn: Gen2Turn) -> void:
 	var has_enough_hp: bool = mon.hp * 2 > mon.max_hp()
 	var stage: int = mon.stage("attack")
 	if not has_enough_hp or stage >= Gen2Stats.MAX_STAGE:
+		## `BattleCommand_BellyDrum` calls `BattleCommand_AttackUp2` before the
+		## HP check and only branches to `.failed` after it, so on hardware a
+		## Belly Drum that cannot pay has already been paid: Attack is up two
+		## stages and no HP was taken.
+		if not has_enough_hp and stage < Gen2Stats.MAX_STAGE \
+			and Gen2Rules.hardware(&"belly_drum_boosts_below_half_hp"):
+			var by: int = mini(ATTACK_UP_2_STAGES, Gen2Stats.MAX_STAGE - stage)
+			mon.change_stage("attack", by)
+			turn.emit(Gen2Battle.STAT_CHANGED, {"target": turn.side, "stat": "attack", "by": by})
 		turn.emit(Gen2Battle.STAT_CHANGE_FAILED, {"target": turn.side, "stat": "attack", "by": 6})
 		return
 

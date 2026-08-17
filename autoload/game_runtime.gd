@@ -246,10 +246,28 @@ func reload_selected_save() -> void:
 ## patched for the last run has its contributions dropped either way.
 func _activate_mod_save() -> void:
 	Gen2ModHost.instance().activate_save(selected_save_or_null())
+	_activate_rules(selected_save_or_null())
+
+
+## Plays under the slot's own rules, not the installation's. A slot written before
+## the block existed has none and adopts the installation once, here, which is the
+## only place the two can honestly be reconciled; a run with no slot plays the
+## settings screen's own set.
+func _activate_rules(save: Gen2SaveData) -> void:
+	var installed: Gen2Rules = Gen2OptionsStore.current().rules
+	if save != null:
+		if save.run_rules == null:
+			save.run_rules = installed.duplicate_rules()
+		installed = save.run_rules
+	Gen2Rules.install(installed)
 
 
 ## A save that has just been made. The mods are told before it is written, so
-## whatever a run is built from is in the file the player will load next time.
+## whatever a run is built from is in the file the player will load next time,
+## and the rules it records are the ones it will always be played under.
 func announce_new_save(save: Gen2SaveData) -> void:
+	if save != null and save.run_rules == null:
+		save.run_rules = Gen2OptionsStore.current().rules.duplicate_rules()
 	Gen2ModHost.instance().created_save(save)
 	Gen2ModHost.instance().activate_save(save)
+	_activate_rules(save)

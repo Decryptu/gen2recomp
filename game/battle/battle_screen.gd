@@ -152,12 +152,20 @@ var _renderer_ready: bool = false
 var _battle: Gen2Battle = null
 var _pending: Array = []
 var _rng := RandomNumberGenerator.new()
+## Whether something else owns the funnel every button arrives through. Set while
+## this screen is an overlay inside the overworld, so a press is recorded once, by
+## the world, and a replayed log reaches the fight: see
+## [method Gen2WorldScreen.press_button] and `tools/replay_world.gd`.
+var _external_input: bool = false
 var _save_slot: int = -1
 var _save_written: bool = false
 var _source_save: Gen2SaveData = null
 var _world_battle_active: bool = false
 var _world_battle_tutorial: bool = false
 var _world_battle_request: Dictionary = {}
+## The run's rules, handed over by whoever opened this screen. A development
+## battle has none and plays the installed set.
+var _injected_rules: Gen2Rules = null
 var _world_battle_completion_sent: bool = false
 var _world_battle_terminal_text_shown: bool = false
 var _world_battle_recovery_shown: bool = false
@@ -441,16 +449,15 @@ func _ready() -> void:
 	_screen.display(_info_layer)
 	_apply_renderer_interface_style()
 
-	var world_meta: Variant = get_meta("world_battle_request", {})
-	if world_meta is Dictionary and not (world_meta as Dictionary).is_empty():
-		call_deferred("_start_world_battle_from_meta", world_meta)
+	## Whatever this screen was opened on its own for. A battle inside the
+	## overworld is started by [method start_world_battle], from the frame the
+	## encounter fired on, rather than from anything read here.
+	var saved: Gen2SaveData = _selected_runtime_save()
+	if saved != null and show_saved_party(saved):
+		show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
 	else:
-		var saved: Gen2SaveData = _selected_runtime_save()
-		if saved != null and show_saved_party(saved):
-			show_message("Save slot %d loaded. Wild %s appeared!" % [_save_slot + 1, _name_of(_enemy)])
-		else:
-			show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
-			_announce()
+		show_matchup(DEFAULT_ENEMY, DEFAULT_PLAYER, DEFAULT_LEVEL, DEFAULT_LEVEL)
+		_announce()
 
 
 ## Supplies a cache-backed data source before the scene enters the tree. The
@@ -458,6 +465,64 @@ func _ready() -> void:
 ## imported cache.
 func set_data(data: GameData) -> void:
 	_injected_data = data
+
+
+## The rules the world is being played under, so the fight inside it is fought
+## under the same ones rather than under whatever was installed last.
+func set_rules(battle_rules: Gen2Rules) -> void:
+	_injected_rules = battle_rules
+
+
+## Seeds everything this screen decides for itself: the enemy's move choice, its
+## item and switch decisions, and the capture rolls.
+##
+## A battle inside a walk is drawn from the world's own generator, so the seed is
+## part of the run's own chain and a replay reproduces the fight without recording
+## anything about it. A battle with no world seeds itself randomly, which is what
+## a development one should do.
+func set_random_seed(value: int) -> void:
+	_rng.seed = value
+
+
+## Hands the input funnel to whoever opened this screen. The world does while a
+## battle is an overlay on it: one funnel is what makes a recorded log complete,
+## and two would record every press twice or none.
+func set_external_input(external: bool) -> void:
+	_external_input = external
+
+
+## The request this fight was started from, as the adapter prepared it: the
+## species, the level, the DVs and which visible encounter it was, for a test or a
+## mod asking what is being fought rather than what is drawn.
+func world_battle_request() -> Dictionary:
+	return _world_battle_request.duplicate(true)
+
+
+## One button, from the funnel rather than from an [InputEvent]. Public so the
+## world can forward what it consumed and a tool can drive a fight by hand.
+func press_button(button: int) -> bool:
+	if not is_ready() or button == Gen2Button.NONE:
+		return false
+	return _handle_button(button)
+
+
+## One hardware frame of everything this screen counts, including the party icons
+## the switch menu animates, which [method _process] otherwise paces off real
+## time. What lets the world spend a battle's frames from its own pump, so a
+## replayed run reaches the same place at the same frame.
+func advance_hardware_frame() -> bool:
+	var moved: bool = false
+	## `PrintLetterDelay` is a frame count, and with nothing servicing the box's
+	## own `_process` a message would never finish revealing, so a press would
+	## complete the page forever and never acknowledge it.
+	if _box != null:
+		_box.advance_frame()
+	if _switch_stage in [&"pick", &"refused"]:
+		moved = advance_party_icons()
+		_refresh_menu_layer()
+	if not frames_running():
+		return moved
+	return advance_frame() or moved
 
 
 ## Null rather than the first imported cache: a battle opened without a runtime
@@ -620,7 +685,7 @@ func start_world_battle(
 	if badge_mask < 0:
 		badge_mask = 0
 	var prepared: Dictionary = Gen2WorldBattleAdapter.prepare(
-		_data, request, player_party, _rng, badge_mask
+		_data, request, player_party, _rng, badge_mask, _injected_rules
 	)
 	if not bool(prepared.get("ok", false)):
 		_emit_world_battle_failure(
@@ -709,18 +774,6 @@ func _preview_world_battle_loss() -> void:
 	finish()
 	advance()
 	finish()
-
-
-func _start_world_battle_from_meta(meta: Variant) -> void:
-	if not meta is Dictionary:
-		_emit_world_battle_failure(&"invalid_battle_metadata")
-		return
-	var values: Dictionary = meta as Dictionary
-	var save_value: Variant = values.get("save", null)
-	var save: Gen2SaveData = save_value if save_value is Gen2SaveData else null
-	start_world_battle(
-		values.get("request", {}), save, int(values.get("player_badges", -1))
-	)
 
 
 func _emit_world_battle_failure(reason: StringName, details: Dictionary = {}) -> void:
@@ -1060,10 +1113,19 @@ func _run_next_anim_step() -> void:
 				_push_view()
 				return
 			ANIM_WAIT_SFX:
+				## `WaitSFX` is a real wait while the driver is being serviced and
+				## no wait at all when it is not: a run with no audio device leaves
+				## the channels as the sound left them, so `effect_playing()` would
+				## answer true for the rest of the run and this plan would never
+				## finish. The rendered-frame count is what tells the two apart,
+				## and it costs one frame either way.
 				if _audio_player != null and _audio_player.effect_playing():
-					_anim_plan.push_front(step)
-					_anim_delay = 1
-					return
+					var rendered: int = _audio_player.timeline_updates()
+					if int(step.get("rendered", -1)) != rendered:
+						step["rendered"] = rendered
+						_anim_plan.push_front(step)
+						_anim_delay = 1
+						return
 			ANIM_HIT_SOUND:
 				_play_hit_sound()
 			ANIM_SCRIPT:
@@ -1744,7 +1806,11 @@ func _random_slot(side: int) -> int:
 func _enemy_slot() -> int:
 	if _enemy_trainer_class == 0:
 		return _random_slot(Gen2Battle.ENEMY)
-	var weights: int = int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
+	# The class's own imported mask under the normal difficulty; the other two
+	# rewrite which layers score rather than inventing a level or a stat.
+	var weights: int = _rules().ai_move_weights(
+		int(_data.trainer_attributes(_enemy_trainer_class).get("ai_move_weights", 0))
+	)
 	return Gen2BattleAI.choose_slot(
 		_battle.mon(Gen2Battle.ENEMY), _battle.mon(Gen2Battle.PLAYER), _data, weights, _rng,
 		_battle.mon(Gen2Battle.ENEMY).turns_taken, _battle.mon(Gen2Battle.PLAYER).turns_taken,
@@ -1765,6 +1831,14 @@ func _enemy_action() -> Dictionary:
 		_data.trainer_attributes(_enemy_trainer_class).get("ai_item_switch", 0)
 	)
 	return Gen2BattleAI.choose_action(_battle, flags, slot, _rng)
+
+
+## The run's rules, which the battle carries once it exists and the installed set
+## answers for before that: a screen builds its menus before its battle.
+func _rules() -> Gen2Rules:
+	if _battle != null and _battle.rules != null:
+		return _battle.rules
+	return _injected_rules if _injected_rules != null else Gen2Rules.active()
 
 
 ## Tries to run, which is `BattleMenu_Run` and settles before the turn does.
@@ -2851,7 +2925,7 @@ func _replace_the_fallen() -> bool:
 func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
-		Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
+		event = Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
 		if StringName(event["type"]) == Gen2Battle.ANIMATION:
 			## The engine has already resolved; this event is the frames the
 			## screen owes for it, and nothing behind it is shown until they are
@@ -3387,7 +3461,7 @@ func _read_hp() -> void:
 ## The cartridge's own controls first, then the development drivers that stand
 ## in for a battle menu this screen does not have yet.
 func _unhandled_input(event: InputEvent) -> void:
-	if not is_ready():
+	if not is_ready() or _external_input:
 		return
 	var button: int = Gen2Button.pressed_in(event)
 	if button != Gen2Button.NONE:

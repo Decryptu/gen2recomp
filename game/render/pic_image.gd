@@ -69,9 +69,22 @@ static func from_atlas(
 ## The same cell before a palette is chosen: { indices, width, height }, or empty
 ## for a slot the atlas does not hold. Split out so a palette fade over a
 ## frontpic swaps colours rather than cropping the atlas again.
+##
+## A [param pic] carrying its own [code]indices[/code] is a mod's picture and has
+## no cell to crop: the atlases hold exactly the cartridge's slots. Answering it
+## here is what lets every screen draw one without knowing which it has.
 static func atlas_cell(
 	indices: PackedByteArray, atlas: Dictionary, pic: Dictionary
 ) -> Dictionary:
+	if pic.has("indices"):
+		var supplied: Variant = pic["indices"]
+		var pic_width: int = int(pic.get("width", 0))
+		var pic_height: int = int(pic.get("height", 0))
+		if not supplied is PackedByteArray or pic_width <= 0 or pic_height <= 0 \
+			or (supplied as PackedByteArray).size() < pic_width * pic_height:
+			return {}
+		return {"indices": supplied, "width": pic_width, "height": pic_height}
+
 	var cell: int = int(atlas.get("cell", 0))
 	var columns: int = int(atlas.get("columns", 0))
 	var atlas_width: int = int(atlas.get("width", 0))

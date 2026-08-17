@@ -179,9 +179,11 @@ func reset(rows: Array) -> void:
 		if bool(member.get("egg", false)):
 			speed = 0
 		_icons.append({
-			"icon": data.mon_menu_icon(
+			## The strip is asked for by species rather than by icon number, so a
+			## mod species drawing indices of its own animates with the rest.
+			"strip": data.species_icon_indices(
 				int(member.get("species", 0)), bool(member.get("egg", false))
-			) if data != null else 0,
+			) if data != null else PackedByteArray(),
 			"item": int(member.get("item", 0)) != 0,
 			"speed": speed,
 			"frame": -1,
@@ -243,7 +245,7 @@ func _blend_icons(image: Image, count: int) -> void:
 		## reached yet, which is why FRAME opens at -1 rather than at zero.
 		if int(icon["frame"]) < 0:
 			continue
-		var strip: PackedByteArray = data.overworld_icon_indices(int(icon["icon"]))
+		var strip: PackedByteArray = icon["strip"]
 		if strip.is_empty():
 			continue
 		var at := Vector2i(

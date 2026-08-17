@@ -1397,9 +1397,9 @@ static func _estimate_damage(
 ## once it is no longer the attacker's first turn.
 ##
 ## Diverges from a documented source bug (`docs/bugs_and_glitches.md`,
-## "'Cautious' AI may fail to discourage residual moves"): a missed roll there
-## abandons the remaining slots instead of moving on. This implements pret's own
-## fix, the same call [code]Gen2EffectCommands._belly_drum[/code] makes.
+## "'Cautious' AI may fail to discourage residual moves") unless
+## `cautious_ai_abandons_remaining_moves` is on: `ret nc` abandons the remaining
+## slots on a missed roll, where pret's own fix moves on to the next one.
 static func _apply_cautious(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
 	rng: RandomNumberGenerator, atk_turns: int, _def_turns: int, weather: int,
@@ -1413,8 +1413,12 @@ static func _apply_cautious(
 		if not attacker.can_use(slot):
 			continue
 		var move: Dictionary = _move_at(attacker, data, slot)
-		if RESIDUAL_MOVE_NUMBERS.has(int(move.get("number", 0))) and _roll(rng, 90):
+		if not RESIDUAL_MOVE_NUMBERS.has(int(move.get("number", 0))):
+			continue
+		if _roll(rng, 90):
 			_discourage(scores, slot, 1)
+		elif Gen2Rules.hardware(&"cautious_ai_abandons_remaining_moves"):
+			return
 
 
 ## [constant RomLayout.AI_STATUS]: dismiss a status move the defender's typing

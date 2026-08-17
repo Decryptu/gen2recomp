@@ -1118,6 +1118,129 @@ func test_a_learnset_with_no_terminator_fails_rather_than_running_away() -> void
 	assert_false(RomImporter.verify_evos_attacks(_rom(data), _layout)["ok"])
 
 
+## `EggMovePointers`, built to the census the layout pins so the check has
+## something it should accept as well as things it should not. The two pinned
+## species carry the Gold/Silver lists, this dump being a Gold one.
+func _egg_move_entries() -> Array:
+	var out: Array = []
+	for _species: int in RomLayout.SPECIES_COUNT:
+		out.append([] as Array[int])
+	out[RomImporter.EGG_MOVE_BULBASAUR_SPECIES - 1] = \
+		RomImporter.EGG_MOVES_BULBASAUR_GOLD_SILVER.duplicate()
+	out[RomImporter.EGG_MOVE_STARYU_SPECIES - 1] = \
+		RomImporter.EGG_MOVES_STARYU_GOLD_SILVER.duplicate()
+
+	# Filler enough to reach the pinned totals, clear of the two named species.
+	var moves: int = int(_layout["egg_move_count"]) \
+		- RomImporter.EGG_MOVES_BULBASAUR_GOLD_SILVER.size() \
+		- RomImporter.EGG_MOVES_STARYU_GOLD_SILVER.size()
+	var species: int = int(_layout["egg_move_species_count"]) - 2
+	for index: int in species:
+		var list: Array[int] = [1]
+		if index == 0:
+			list.resize(moves - species + 1)
+			list.fill(1)
+		out[10 + index] = list
+	return out
+
+
+func _write_egg_moves(data: PackedByteArray, entries: Array) -> void:
+	var table: int = int(_layout["egg_move_pointers"])
+	var at: int = table + RomLayout.SPECIES_COUNT * RomLayout.EGG_MOVE_POINTER_SIZE
+	for species: int in RomLayout.SPECIES_COUNT:
+		var address: int = RomFile.BANK_SIZE + (at % RomFile.BANK_SIZE)
+		var pointer: int = table + species * RomLayout.EGG_MOVE_POINTER_SIZE
+		data[pointer] = address & 0xFF
+		data[pointer + 1] = address >> 8
+		for move: int in entries[species] as Array:
+			data[at] = move
+			at += 1
+		data[at] = RomLayout.EGG_MOVE_END
+		at += 1
+
+
+func _egg_move_dump() -> PackedByteArray:
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_egg_moves(data, _egg_move_entries())
+	return data
+
+
+func test_a_plausible_egg_move_table_verifies_and_reads_back() -> void:
+	var rom: RomFile = _rom(_egg_move_dump())
+	var result: Dictionary = RomImporter.verify_egg_moves(rom, _layout)
+	assert_true(result["ok"], result["message"])
+	assert_eq(
+		RomImporter.read_egg_moves(rom, _layout, RomImporter.EGG_MOVE_BULBASAUR_SPECIES)["moves"],
+		RomImporter.EGG_MOVES_BULBASAUR_GOLD_SILVER
+	)
+	assert_eq(
+		RomImporter.read_egg_moves(rom, _layout, RomImporter.EGG_MOVE_STARYU_SPECIES)["moves"],
+		RomImporter.EGG_MOVES_STARYU_GOLD_SILVER
+	)
+	assert_eq(
+		RomImporter.read_egg_moves(rom, _layout, 2)["moves"], [] as Array[int],
+		"a species that inherits nothing is one terminator, not a missing list"
+	)
+
+
+## The empty list is what makes this table easy to read one byte out of step: a
+## slid pointer still lands on a plausible move id, and the census is the only
+## thing that notices.
+func test_an_egg_move_pointer_table_one_byte_out_fails() -> void:
+	var data: PackedByteArray = _egg_move_dump()
+	var table: int = int(_layout["egg_move_pointers"])
+	for species: int in RomLayout.SPECIES_COUNT:
+		var at: int = table + species * RomLayout.EGG_MOVE_POINTER_SIZE
+		data[at] = (data[at] + 1) & 0xFF
+	assert_false(RomImporter.verify_egg_moves(_rom(data), _layout)["ok"])
+
+
+func test_an_egg_move_pointer_outside_the_banked_window_fails() -> void:
+	var data: PackedByteArray = _egg_move_dump()
+	data[int(_layout["egg_move_pointers"]) + 1] = 0x20
+	assert_false(RomImporter.verify_egg_moves(_rom(data), _layout)["ok"])
+
+
+func test_an_egg_move_that_is_not_a_move_fails() -> void:
+	var entries: Array = _egg_move_entries()
+	entries[9] = [RomLayout.MOVE_COUNT + 1] as Array[int]
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_egg_moves(data, entries)
+	assert_false(RomImporter.verify_egg_moves(_rom(data), _layout)["ok"])
+
+
+## The walk stops at the bank's end rather than the dump's, so an unterminated
+## list fails instead of collecting whatever the next section holds.
+func test_an_egg_move_list_with_no_terminator_fails() -> void:
+	var data: PackedByteArray = _egg_move_dump()
+	var at: int = int(_layout["egg_move_pointers"]) \
+		+ RomLayout.SPECIES_COUNT * RomLayout.EGG_MOVE_POINTER_SIZE
+	var bank_end: int = (RomLayout.bank_of(at) + 1) * RomFile.BANK_SIZE
+	for i: int in bank_end - at:
+		data[at + i] = 1
+	assert_false(RomImporter.verify_egg_moves(_rom(data), _layout)["ok"])
+
+
+func test_an_egg_move_census_that_disagrees_with_the_layout_fails() -> void:
+	var entries: Array = _egg_move_entries()
+	(entries[RomImporter.EGG_MOVE_BULBASAUR_SPECIES - 1] as Array).append(1)
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(RomRegistry.EXPECTED_SIZE)
+	_write_egg_moves(data, entries)
+	var result: Dictionary = RomImporter.verify_egg_moves(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(result["message"], "egg moves")
+
+
+## Crystal's revision differs from Gold's in these two lists and in nothing else
+## this check can see, so reading a Crystal dump with the Gold pins has to fail.
+func test_the_gold_lists_are_refused_for_crystal() -> void:
+	var crystal: RomFile = RomFile.from_bytes(_egg_move_dump(), RomRegistry.CRYSTAL)
+	assert_false(RomImporter.verify_egg_moves(crystal, _layout)["ok"])
+
+
 ## `Copyright`'s two halves check each other: every code the string carries has
 ## to be a tile of the strip the same routine loads, and the run has to end at
 ## "@" after the source's three rows. A wrong offset for either fails one of

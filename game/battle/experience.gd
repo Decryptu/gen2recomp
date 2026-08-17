@@ -49,11 +49,13 @@ const TRAINER_BONUS_NUMERATOR: int = 3
 const TRAINER_BONUS_DENOMINATOR: int = 2
 
 
-## Level 1 is hard-coded to zero: the medium slow curve underflows there, which
-## `docs/bugs_and_glitches.md` calls a bug rather than a rule.
+## Level 1 is hard-coded to zero, which is pret's own fix: the medium slow curve
+## underflows there, and `docs/bugs_and_glitches.md` calls it a bug rather than a
+## rule. Under `medium_slow_level_one_underflow` the formula runs at level 1 the
+## way `CalcExpAtLevel` does, and its three bytes wrap.
 static func total_exp_at(growth_rate: int, level: int) -> int:
 	var n: int = clampi(level, 1, MAX_LEVEL)
-	if n <= 1:
+	if n <= 1 and not Gen2Rules.hardware(&"medium_slow_level_one_underflow"):
 		return 0
 
 	var curve: Array = CURVES.get(growth_rate, CURVES[GROWTH_MEDIUM_FAST])
@@ -67,7 +69,12 @@ static func total_exp_at(growth_rate: int, level: int) -> int:
 	var cubic: int = (a * n * n * n) / b
 	var quadratic: int = c * n * n
 	var linear: int = d * n
-	return clampi(cubic + quadratic + linear - e, 0, MAX_EXP)
+	var total: int = cubic + quadratic + linear - e
+	if total < 0:
+		# `sub`/`sbc` over the three bytes of hProduct, which is the underflow
+		# itself rather than a floor at zero.
+		return total & MAX_EXP
+	return clampi(total, 0, MAX_EXP)
 
 
 ## Walked upward the way `CalcLevel` walks it: the forward formula truncates, so

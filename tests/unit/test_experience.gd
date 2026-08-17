@@ -54,6 +54,28 @@ func test_level_one_is_zero_on_every_curve_not_the_formulas_underflow() -> void:
 	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_SLOW, 1), 0)
 
 
+## The same level under `medium_slow_level_one_underflow`, which is the cartridge
+## itself: `CalcExpAtLevel` has no level 1 branch, so the formula runs and its
+## three bytes wrap. The other curves are positive there and are unaffected, which
+## is why the bug is Medium Slow's alone.
+func test_the_medium_slow_underflow_is_switchable_and_wraps_three_bytes() -> void:
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"medium_slow_level_one_underflow", true)
+	Gen2Rules.install(rules)
+
+	assert_eq(
+		Gen2Experience.total_exp_at(Gen2Experience.GROWTH_MEDIUM_SLOW, 1),
+		Gen2Experience.MAX_EXP - 54 + 1,
+		"-54 stored unsigned in hProduct's three bytes"
+	)
+	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_MEDIUM_FAST, 1), 1)
+	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_FAST, 1), 0, "4/5 truncates")
+	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_SLOW, 1), 1)
+
+	Gen2Rules.install(null)
+	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_MEDIUM_SLOW, 1), 0)
+
+
 func test_level_never_goes_below_one_or_past_the_cap() -> void:
 	assert_eq(Gen2Experience.total_exp_at(Gen2Experience.GROWTH_MEDIUM_FAST, 0), 0)
 	assert_eq(

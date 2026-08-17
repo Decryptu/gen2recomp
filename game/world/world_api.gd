@@ -33,9 +33,8 @@ const STEP_FRAMES_WALK: int = 8
 ## A ledge hop is two chained STEP_WALK-duration cells back to back
 ## (engine/overworld/map_objects.asm's StepFunction_PlayerJump: .initjump/
 ## .stepjump then .initland/.stepland, each timed by the same InitStep call
-## the ordinary walk uses). The source also overlays a visual jump arc via
-## OBJECT_JUMP_HEIGHT/UpdateJumpPosition, which this project does not render;
-## no vertical bob exists anywhere else in this renderer either.
+## the ordinary walk uses). OBJECT_JUMP_HEIGHT/UpdateJumpPosition supplies the
+## vertical arc exposed by player_jump_offset() and drawn by the world renderer.
 const STEP_FRAMES_HOP: int = STEP_FRAMES_WALK * 2
 ## StepVectors' slow row: 1 pixel per frame for 16 frames. _RandomWalkContinue
 ## calls InitStep with a direction of 0 to 3, which indexes that first row, so
@@ -131,6 +130,10 @@ const MAP_NAME_SIGN_SILENT_LANDMARKS: Array[int] = [
 ]
 
 var data: GameData = null
+## What this run diverges from the cartridge on, and its difficulty. Read-only to
+## a mod: a rule that changed mid-run would make the save it produced
+## unreproducible, which is the whole reason it belongs to the run.
+var rules: Gen2Rules = null
 var state: Gen2WorldState = null
 var inventory: Gen2WorldInventory = null
 var current_map: Gen2WorldMap = null
@@ -307,6 +310,7 @@ static func open(
 	number: int,
 	start_cell: Vector2i,
 	world_state: Gen2WorldState = null,
+	world_rules: Gen2Rules = null,
 ) -> Gen2WorldAPI:
 	if game_data == null:
 		return null
@@ -316,11 +320,13 @@ static func open(
 	var tileset: Gen2WorldTileset = game_data.world_tileset(map.tileset)
 	if tileset == null:
 		return null
-	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state)
+	return Gen2WorldAPI.new(game_data, map, tileset, start_cell, world_state, world_rules)
 
 
 ## Opens a validated map/player snapshot without silently clamping its cell.
-static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot) -> Gen2WorldAPI:
+static func open_snapshot(
+	game_data: GameData, world_snapshot: Gen2WorldSnapshot, world_rules: Gen2Rules = null
+) -> Gen2WorldAPI:
 	if game_data == null or world_snapshot == null:
 		return null
 	var map: Gen2WorldMap = game_data.world_map(world_snapshot.map_id.x, world_snapshot.map_id.y)
@@ -344,7 +350,8 @@ static func open_snapshot(game_data: GameData, world_snapshot: Gen2WorldSnapshot
 	if tileset == null:
 		return null
 	var out := Gen2WorldAPI.new(
-		game_data, map, tileset, world_snapshot.player_cell, world_snapshot.world_state
+		game_data, map, tileset, world_snapshot.player_cell, world_snapshot.world_state,
+		world_rules
 	)
 	out.player_facing = world_snapshot.player_facing
 	out.movement_mode = world_snapshot.movement_mode
@@ -366,8 +373,15 @@ func _init(
 	tileset: Gen2WorldTileset,
 	start_cell: Vector2i = Vector2i.ZERO,
 	world_state: Gen2WorldState = null,
+	world_rules: Gen2Rules = null,
 ) -> void:
 	data = game_data
+	# Opening a world is the run starting, so its rules become the installed ones:
+	# the statics that read them ([Gen2Experience], [Gen2Damage], [Gen2BattleAI])
+	# take no world object, and one installed set is what keeps them from
+	# disagreeing with this one. A null set leaves the shipped behaviour alone.
+	rules = world_rules if world_rules != null else Gen2Rules.active()
+	Gen2Rules.install(rules)
 	state = world_state if world_state != null else Gen2WorldState.new()
 	state.changed.connect(_on_world_state_changed)
 	inventory = Gen2WorldInventory.new(data, state)

@@ -25,6 +25,7 @@ const LENGTH_PX: int = Gen2BattleHud.HP_BAR_TILES * Gen2BattleHud.TILE
 const FRAMES_PER_STEP: int = 2
 
 var _max_hp: int = 0
+var _from_hp: int = 0
 var _to_hp: int = 0
 var _pixels: int = 0
 var _target_pixels: int = 0
@@ -36,6 +37,7 @@ var _frames: int = 0
 static func create(from_hp: int, to_hp: int, max_hp: int) -> Gen2HpBarAnimation:
 	var animation := Gen2HpBarAnimation.new()
 	animation._max_hp = max_hp
+	animation._from_hp = from_hp
 	animation._to_hp = to_hp
 	animation._pixels = Gen2BattleHud.bar_pixels(from_hp, max_hp, LENGTH_PX)
 	animation._target_pixels = Gen2BattleHud.bar_pixels(to_hp, max_hp, LENGTH_PX)
@@ -67,10 +69,10 @@ func advance_frame() -> bool:
 ## arrived.
 ##
 ## Mid-animation this is the inverse of `ComputeHPBarPixels`, which is what the
-## long branch prints as it steps real HP toward the target. The short branch
-## back-computes with `ShortHPBar_CalcPixelFrame` instead, whose documented
-## off-by-one for low HP is not reproduced; see the divergence note in
-## `HANDOFF.md`. Only the number differs, never the bar.
+## long branch prints as it steps real HP toward the target. The short branch is
+## `ShortHPBar_CalcPixelFrame`'s own answer instead, whose off-by-one for low HP
+## is switched by `short_hp_bar_number_off_by_one`. Only the number differs,
+## never the bar.
 func hp() -> int:
 	if finished():
 		return _to_hp
@@ -80,6 +82,37 @@ func hp() -> int:
 		return 0
 	if _pixels >= LENGTH_PX:
 		return _max_hp
+	if _max_hp < LENGTH_PX:
+		return _short_bar_hp()
 	@warning_ignore("integer_division")
 	var value: int = _pixels * _max_hp / LENGTH_PX
 	return clampi(maxi(value, 1), 0, _max_hp)
+
+
+## `ShortHPBar_CalcPixelFrame`, which is how a maximum under the bar's own width
+## recovers an HP number from a pixel count: multiply, subtract the width until it
+## borrows, then round with its `add hl, $80` and one more subtraction.
+##
+## Its loop subtracts before it tests, so an exact multiple of the width is
+## counted and then rounded up again: one HP too many, which is
+## `docs/bugs_and_glitches.md`'s "HP bar animation off-by-one error for low HP".
+## pret's fix stops the loop on the zero, and the rounding then lands on the
+## quotient itself. Everything else about the routine is the same either way.
+##
+## The answer is clamped to the two ends of this animation, which is the routine's
+## own `wCurHPAnimLowHP`/`wCurHPAnimHighHP` comparison and is why the extra HP is
+## invisible until the drain passes through an exact multiple.
+func _short_bar_hp() -> int:
+	var total: int = _max_hp * _pixels
+	var counted: int = 0
+	var rest: int = total
+	while true:
+		rest -= LENGTH_PX
+		if rest < 0:
+			break
+		if rest == 0 and not Gen2Rules.hardware(&"short_hp_bar_number_off_by_one"):
+			break
+		counted += 1
+	if rest + 0x80 - LENGTH_PX >= 0:
+		counted += 1
+	return clampi(counted, mini(_from_hp, _to_hp), maxi(_from_hp, _to_hp))

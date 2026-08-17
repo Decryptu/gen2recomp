@@ -8,6 +8,7 @@ extends GutTest
 const MOD: StringName = &"testmod"
 const NEW_SPECIES: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
 const NEW_MOVE: int = Gen2ContentOverlay.FIRST_MOD_NUMBER + 1
+const NEW_TYPE: int = Gen2ContentOverlay.FIRST_MOD_NUMBER + 2
 
 var _directory: String = ""
 
@@ -376,3 +377,203 @@ func test_validating_a_placement_installs_nothing() -> void:
 		host.validate_placement(_data(), {id: {"species": 25}}), first,
 		"and one placement always answers the same way"
 	)
+
+
+## A type is the one kind numbered from zero, so the cartridge's own NORMAL is
+## patchable at 0 and a mod's own type sits past FIRST_MOD_NUMBER like the rest.
+func test_a_type_is_patched_at_zero_and_defined_past_the_cartridge() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_content(
+		Gen2ContentOverlay.KIND_TYPE, MOD, 0, {"name": "PLAIN"}
+	).get("ok", false)))
+	assert_true(bool(host.register_content(
+		Gen2ContentOverlay.KIND_TYPE, MOD, NEW_TYPE, {"name": "SOUND", "physical": true}
+	).get("ok", false)))
+
+	var data: GameData = _data()
+	assert_eq(data.type_name(0), "PLAIN")
+	assert_eq(data.type_name(NEW_TYPE), "SOUND")
+	assert_eq(data.mod_type_numbers(), [NEW_TYPE] as Array[int])
+	# The stat pair a mod type uses is its own row's, since Generation II splits
+	# by type number and a number past the chart compares against nothing.
+	assert_true(data.type_is_physical(NEW_TYPE))
+	assert_false(data.type_is_physical(RomLayout.SPECIAL_TYPES_START))
+	assert_true(Gen2Damage.is_physical(NEW_TYPE), "and the damage formula agrees")
+
+
+func test_a_defined_type_defaults_to_the_special_side() -> void:
+	assert_true(bool(Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_TYPE, MOD, NEW_TYPE, {"name": "SOUND"}
+	).get("ok", false)))
+	assert_false(_data().type_is_physical(NEW_TYPE))
+	assert_false(Gen2Damage.is_physical(NEW_TYPE))
+
+
+## A matchup is an exception row rather than numbered content: an absent pair is
+## already neutral, so there is nothing to define and both halves of the key stay
+## whole so a mod type cannot alias a cartridge pair.
+func test_a_type_matchup_is_patched_by_its_pair() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_type_matchup(
+		MOD, NEW_TYPE, RomLayout.TYPE_NORMAL,
+		{"multiplier": RomLayout.MATCHUP_SUPER_EFFECTIVE}
+	).get("ok", false)))
+	assert_true(bool(host.patch_type_matchup(
+		MOD, RomLayout.TYPE_NORMAL, NEW_TYPE, {"multiplier": RomLayout.MATCHUP_NO_EFFECT}
+	).get("ok", false)))
+
+	var data: GameData = _data()
+	assert_eq(
+		data.type_matchup(NEW_TYPE, RomLayout.TYPE_NORMAL),
+		RomLayout.MATCHUP_SUPER_EFFECTIVE
+	)
+	assert_eq(
+		data.type_matchup(RomLayout.TYPE_NORMAL, NEW_TYPE), RomLayout.MATCHUP_NO_EFFECT,
+		"the pair is ordered: attacking against defending is not its own reverse"
+	)
+	assert_eq(
+		data.type_matchup(RomLayout.TYPE_NORMAL, RomLayout.TYPE_NORMAL),
+		RomLayout.MATCHUP_EFFECTIVE,
+		"and a pair nobody named is still neutral"
+	)
+	assert_eq(
+		StringName(host.patch_type_matchup(MOD, -1, 0, {"multiplier": 10})["reason"]),
+		&"invalid_type_matchup"
+	)
+
+
+func test_a_patched_matchup_carries_its_own_foresight_rule() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.patch_type_matchup(
+		MOD, RomLayout.TYPE_NORMAL, NEW_TYPE, {
+			"multiplier": RomLayout.MATCHUP_NO_EFFECT, "negated_by_foresight": true,
+		}
+	).get("ok", false)))
+	var data: GameData = _data()
+	assert_eq(data.type_matchup(RomLayout.TYPE_NORMAL, NEW_TYPE), RomLayout.MATCHUP_NO_EFFECT)
+	assert_eq(
+		data.type_matchup(RomLayout.TYPE_NORMAL, NEW_TYPE, true), RomLayout.MATCHUP_EFFECTIVE,
+		"identified, the immunity is cancelled the way the Ghost ones are"
+	)
+	assert_eq(
+		StringName(host.patch_type_matchup(MOD, 0, 1, {"name": "X"})["reason"]),
+		&"invalid_type_matchup", "a matchup with no multiplier is not a matchup"
+	)
+
+
+## The atlases hold exactly the cartridge's 251 slots, so a defined species has
+## no cell to point at and carries decoded indices instead. Every screen reads
+## them through the same crop.
+func test_a_defined_species_draws_its_own_pixels() -> void:
+	var pixels: PackedByteArray = _indices(2, 3)
+	assert_true(bool(Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES, {
+			"name": "VOLTLING",
+			"pics": {"front": {"tiles": 2, "indices": pixels}},
+		}
+	).get("ok", false)))
+
+	var data: GameData = _data()
+	var pic: Dictionary = data.species_pic(NEW_SPECIES)
+	assert_eq(int(pic["width"]), 2 * Gen2Tiles.TILE_WIDTH)
+	assert_eq(int(pic["slot"]), -1, "there is no atlas cell behind it")
+	var cell: Dictionary = Gen2PicImage.atlas_cell(
+		data.atlas_indices("front"), data.atlas("front"), pic
+	)
+	assert_eq(cell["indices"], pixels)
+	assert_eq(int(cell["width"]), 2 * Gen2Tiles.TILE_WIDTH)
+	# The back pic was not supplied, so it is the cartridge's own answer: an
+	# atlas slot no cell holds, which draws nothing rather than the wrong species.
+	assert_eq(int(data.species_pic(NEW_SPECIES, true)["slot"]), NEW_SPECIES - 1)
+
+
+func test_a_pic_that_does_not_fill_its_own_size_is_refused() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(
+		StringName(host.register_content(
+			Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+			{"pics": {"front": {"tiles": 3, "indices": _indices(2, 0)}}}
+		)["reason"]),
+		&"invalid_content_pic"
+	)
+	assert_eq(
+		StringName(host.register_content(
+			Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+			{"pics": {"front": {"tiles": 2, "indices": _indices(2, 9)}}}
+		)["reason"]),
+		&"invalid_content_pic", "a pixel is two bits, so index 9 is not one"
+	)
+	assert_true(
+		_data().species(NEW_SPECIES).is_empty(), "and nothing was claimed by either"
+	)
+
+
+## A trainer class is drawn from the same atlas and gets the same answer.
+func test_a_defined_trainer_class_draws_its_own_pixels() -> void:
+	var pixels: PackedByteArray = _indices(7, 1)
+	assert_true(bool(Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_TRAINER, MOD, Gen2ContentOverlay.FIRST_MOD_NUMBER, {
+			"name": "RANGER", "pic": {"tiles": 7, "indices": pixels},
+		}
+	).get("ok", false)))
+	var pic: Dictionary = _data().trainer_pic(Gen2ContentOverlay.FIRST_MOD_NUMBER)
+	assert_eq(pic["indices"], pixels)
+	assert_eq(int(pic["height"]), 7 * Gen2Tiles.TILE_HEIGHT)
+
+
+## Its party icon is either one of the cartridge's 38 strips or the mod's own two
+## frames. `ReadMonMenuIcon`'s table has no row for a mod species either way.
+func test_a_defined_species_names_or_supplies_its_party_icon() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.register_content(
+		Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+		{"name": "VOLTLING", "icon": RomLayout.ICON_EGG}
+	).get("ok", false)))
+	assert_eq(_data().mon_menu_icon(NEW_SPECIES), RomLayout.ICON_EGG)
+
+	var strip: PackedByteArray = _icon_strip()
+	assert_true(bool(host.register_content(
+		Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+		{"name": "VOLTLING", "icon": {"indices": strip}}
+	).get("ok", false)))
+	var data: GameData = _data()
+	assert_eq(data.mon_menu_icon(NEW_SPECIES), 0, "no cartridge icon is named")
+	assert_eq(data.species_icon_indices(NEW_SPECIES), strip)
+	assert_eq(
+		StringName(host.register_content(
+			Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+			{"icon": RomLayout.MON_ICON_COUNT + 1}
+		)["reason"]),
+		&"invalid_content_icon"
+	)
+
+
+## Inherited moves ride the species row like the learnset does, so a defined
+## species answers with its own list and a cartridge one with the cache's.
+func test_egg_moves_read_off_the_species_row() -> void:
+	assert_true(bool(Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES,
+		{"name": "VOLTLING", "egg_moves": [1, 1]}
+	).get("ok", false)))
+	var data: GameData = _data()
+	assert_eq(data.egg_moves(NEW_SPECIES), [1, 1] as Array[int])
+	assert_eq(data.egg_moves(1), [] as Array[int], "the cartridge row named none")
+	assert_eq(data.egg_moves(NEW_SPECIES + 99), [] as Array[int], "and neither does nothing")
+
+
+## An icon is two 2x2-tile frames, which is the eight tiles the strip a party
+## menu steps through carries.
+func _icon_strip() -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(8 * Gen2Tiles.TILE_PIXELS)
+	out.fill(2)
+	return out
+
+
+## Two bits a pixel, so a filled buffer is what a real decode produces and the
+## validator has something to reject when it is not.
+func _indices(tiles: int, value: int) -> PackedByteArray:
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(tiles * tiles * Gen2Tiles.TILE_PIXELS)
+	out.fill(value)
+	return out

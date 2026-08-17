@@ -30,6 +30,16 @@ const TRAINER_MIDDLE_CLASS_NAME: String = "YOUNGSTER"
 const FIRST_EVOLUTION_LEVEL: int = 16
 const FIRST_LEARNSET_MOVE: int = 33
 
+## Two independently pinned EggMovePointers rows, one at each side of the
+## breeding divide between the profiles. Staryu loses its three inherited moves
+## in Crystal; Bulbasaur loses Charm there and keeps the other five.
+const EGG_MOVE_BULBASAUR_SPECIES: int = 1
+const EGG_MOVE_STARYU_SPECIES: int = 120
+const EGG_MOVES_BULBASAUR_GOLD_SILVER: Array[int] = [113, 130, 219, 204, 13, 80]
+const EGG_MOVES_BULBASAUR_CRYSTAL: Array[int] = [113, 130, 219, 13, 80]
+const EGG_MOVES_STARYU_GOLD_SILVER: Array[int] = [62, 112, 48]
+const EGG_MOVES_STARYU_CRYSTAL: Array[int] = []
+
 ## Tyrogue, the only species that evolves on a stat comparison, and the number of
 ## ways it can go. It is worth checking on its own: [constant RomLayout.EVOLVE_STAT]
 ## is the one entry that is four bytes rather than three, so a decoder that has
@@ -215,6 +225,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	var evos_attacks: Dictionary = verify_evos_attacks(rom, layout)
 	if not evos_attacks["ok"]:
 		return evos_attacks
+
+	var egg_moves: Dictionary = verify_egg_moves(rom, layout)
+	if not egg_moves["ok"]:
+		return egg_moves
 
 	var pokedex: Dictionary = verify_pokedex(rom, layout)
 	if not pokedex["ok"]:
@@ -2535,6 +2549,104 @@ static func read_evos_attacks(rom: RomFile, layout: Dictionary, species: int) ->
 	return {"evolutions": evolutions, "learnset": learnset}
 
 
+## One species' inherited move list from EggMovePointers. Returns { moves } on
+## success, including an empty list, and an empty Dictionary for a malformed
+## pointer, move id or unterminated list.
+##
+## The address has no bank byte, so it must name the switchable window and is
+## resolved against the pointer table's bank. The walk stops at that bank's end,
+## not merely the dump's end: continuing into the next bank would turn a missing
+## terminator into plausible data from an unrelated section.
+static func read_egg_moves(rom: RomFile, layout: Dictionary, species: int) -> Dictionary:
+	if species < 1 or species > RomLayout.SPECIES_COUNT \
+		or not layout.has("egg_move_pointers"):
+		return {}
+	var table: int = RomLayout.egg_move_pointer_offset(layout, species)
+	if not rom.in_bounds(table, RomLayout.EGG_MOVE_POINTER_SIZE):
+		return {}
+
+	var address: int = rom.u16le(table)
+	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
+		return {}
+	var bank: int = RomLayout.bank_of(table)
+	var at: int = RomFile.linear(bank, address)
+	var bank_end: int = mini((bank + 1) * RomFile.BANK_SIZE, rom.size())
+	var moves: Array[int] = []
+	while at < bank_end:
+		var move: int = rom.u8(at)
+		at += 1
+		if move == RomLayout.EGG_MOVE_END:
+			return {"moves": moves}
+		if move < 1 or move > RomLayout.MOVE_COUNT:
+			return {}
+		moves.append(move)
+	return {}
+
+
+## Checks all 251 inherited-move lists before they can enter the cache. The
+## census pins the complete table while Bulbasaur and Staryu distinguish the
+## Gold/Silver data from Crystal's revision.
+static func verify_egg_moves(rom: RomFile, layout: Dictionary) -> Dictionary:
+	for key: String in ["egg_move_pointers", "egg_move_count", "egg_move_species_count"]:
+		if not layout.has(key):
+			return {"ok": false, "message": "No egg-move layout field %s." % key}
+
+	var entries: Array = []
+	var total: int = 0
+	var nonempty: int = 0
+	for species: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		var entry: Dictionary = read_egg_moves(rom, layout, species)
+		if entry.is_empty():
+			return {
+				"ok": false,
+				"message": "Species %d has no readable egg-move list." % species,
+			}
+		var moves: Array = entry["moves"]
+		entries.append(moves)
+		total += moves.size()
+		if not moves.is_empty():
+			nonempty += 1
+
+	var expected_total: int = int(layout["egg_move_count"])
+	if total != expected_total:
+		return {
+			"ok": false,
+			"message": "Read %d egg moves, expected %d." % [total, expected_total],
+		}
+	var expected_nonempty: int = int(layout["egg_move_species_count"])
+	if nonempty != expected_nonempty:
+		return {
+			"ok": false,
+			"message": "%d species have egg moves, expected %d." % [
+				nonempty, expected_nonempty,
+			],
+		}
+
+	var bulbasaur: Array[int] = EGG_MOVES_BULBASAUR_GOLD_SILVER
+	var staryu: Array[int] = EGG_MOVES_STARYU_GOLD_SILVER
+	if rom.id == RomRegistry.CRYSTAL:
+		bulbasaur = EGG_MOVES_BULBASAUR_CRYSTAL
+		staryu = EGG_MOVES_STARYU_CRYSTAL
+	elif rom.id != RomRegistry.GOLD and rom.id != RomRegistry.SILVER:
+		return {"ok": false, "message": "No egg-move profile for %s." % rom.id}
+
+	if entries[EGG_MOVE_BULBASAUR_SPECIES - 1] != bulbasaur:
+		return {
+			"ok": false,
+			"message": "Bulbasaur egg moves are %s, expected %s." % [
+				entries[EGG_MOVE_BULBASAUR_SPECIES - 1], bulbasaur,
+			],
+		}
+	if entries[EGG_MOVE_STARYU_SPECIES - 1] != staryu:
+		return {
+			"ok": false,
+			"message": "Staryu egg moves are %s, expected %s." % [
+				entries[EGG_MOVE_STARYU_SPECIES - 1], staryu,
+			],
+		}
+	return {"ok": true, "message": ""}
+
+
 ## Walks one species' Pokedex entry (data/pokemon/dex_entries.asm).
 ##
 ## Returns { category, height, weight, pages }, empty if the pointer or the walk
@@ -3591,6 +3703,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"trainer_party_count": 0,
 		"evolutions": 0,
 		"learnset_moves": 0,
+		"egg_moves": 0,
 		"maps": 0,
 		"tilesets": 0,
 		"overworld_sprites": 0,
@@ -3727,6 +3840,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 
 	var evolutions: int = _count_in(species, "evolutions")
 	var learnset_moves: int = _count_in(species, "learnset")
+	var egg_moves: int = _count_in(species, "egg_moves")
 	var trainer_party_count: int = _count_in(trainers, "trainers")
 
 	var manifest: Dictionary = {
@@ -3736,6 +3850,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"species_count": species.size(),
 		"evolution_count": evolutions,
 		"learnset_move_count": learnset_moves,
+		"egg_move_count": egg_moves,
 		"move_count": moves.size(),
 		"item_count": items.size(),
 		"world_trade_count": trades.size(),
@@ -3836,6 +3951,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 	result["battle_anim_gfx_tiles"] = int(battle_anims["gfx_tiles"])
 	result["evolutions"] = evolutions
 	result["learnset_moves"] = learnset_moves
+	result["egg_moves"] = egg_moves
 	result["elapsed_ms"] = Time.get_ticks_msec() - started
 	result["message"] = ("Imported %d species, %d moves, %d items, %d type matchups, "
 		+ "%d trainer classes carrying %d trainers, %d maps, %d tilesets, %d grass encounter maps, "
@@ -3845,7 +3961,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		+ "%d menus, %d marts, %d phone contacts, %d phone script resources, "
 		+ "%d music tracks and %d sound effects, "
 		+ "%d battle animations over %d graphics tiles, "
-		+ "%d evolutions and %d level-up moves in %d ms.") % [
+		+ "%d evolutions, %d level-up moves and %d egg moves in %d ms.") % [
 		species.size(), moves.size(), items.size(), matchups.size(), trainers.size(),
 		trainer_party_count, int(world["maps"]), int(world["tilesets"]),
 		int(encounters["grass"]), int(encounters["water"]),
@@ -3857,7 +3973,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		int(services["phone_scripts"]),
 		int(services["music"]), int(services["sfx"]),
 		int(battle_anims["scripts"]), int(battle_anims["gfx_tiles"]),
-		evolutions, learnset_moves, result["elapsed_ms"],
+		evolutions, learnset_moves, egg_moves, result["elapsed_ms"],
 	]
 	return result
 
@@ -3880,6 +3996,7 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 		var egg_groups: int = rom.u8(stats + RomLayout.OFFSET_EGG_GROUPS)
 		var palette: int = RomLayout.palette_offset(layout, species)
 		var evos_attacks: Dictionary = read_evos_attacks(rom, layout, species)
+		var inherited: Dictionary = read_egg_moves(rom, layout, species)
 		var dex: Dictionary = read_dex_entry(rom, layout, species)
 
 		out.append({
@@ -3914,6 +4031,7 @@ func _import_species(rom: RomFile, layout: Dictionary, on_progress: Callable) ->
 			# stored on the species rather than in tables of their own.
 			"evolutions": evos_attacks.get("evolutions", []),
 			"learnset": evos_attacks.get("learnset", []),
+			"egg_moves": inherited.get("moves", []),
 			"front_tiles": [dimensions & 0x0F, dimensions >> 4],
 			# The Pokedex entry. On the species rather than in a table of its
 			# own because it is asked for by species number and nothing else,

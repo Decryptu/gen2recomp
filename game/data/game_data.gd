@@ -832,14 +832,33 @@ func overworld_icon_indices(icon_number: int) -> PackedByteArray:
 ## when the cache does not hold the table. Its `cp EGG` is [param egg], which
 ## this save model carries beside a real species rather than as species $fd. A
 ## mod species numbered past the cartridge's own range has no row in the imported
-## table and answers zero, which is `ICON_NULL`.
-func mon_menu_icon(species: int, egg: bool = false) -> int:
+## table, so its own row names one of the cartridge's icons instead; a mod that
+## supplied indices of its own answers zero here and is drawn through
+## [method species_icon_indices].
+func mon_menu_icon(species_number: int, egg: bool = false) -> int:
 	if egg:
 		return RomLayout.ICON_EGG
+	var icon: Variant = species(species_number).get("icon", null)
+	if icon is int or icon is float:
+		if int(icon) > 0 and int(icon) <= RomLayout.MON_ICON_COUNT:
+			return int(icon)
 	var table: PackedByteArray = mon_menu_icon_table()
-	if species < 1 or species > table.size():
+	if species_number < 1 or species_number > table.size():
 		return 0
-	return table[species - 1]
+	return table[species_number - 1]
+
+
+## The two-frame strip a species is drawn with in a party menu: the cartridge
+## icon [method mon_menu_icon] names, or a mod's own indices where it supplied
+## them. Empty when neither exists, which is what a menu draws no icon for.
+func species_icon_indices(species_number: int, egg: bool = false) -> PackedByteArray:
+	if not egg:
+		var icon: Variant = species(species_number).get("icon", null)
+		if icon is Dictionary:
+			var indices: Variant = (icon as Dictionary).get("indices", null)
+			if indices is PackedByteArray:
+				return indices
+	return overworld_icon_indices(mon_menu_icon(species_number, egg))
 
 
 func mon_menu_icon_table() -> PackedByteArray:
@@ -961,6 +980,21 @@ func learnset(number: int) -> Array:
 ## [constant RomLayout.EVOLVE_STAT].
 func evolutions(number: int) -> Array:
 	return _rows(species(number), "evolutions", ["method", "parameter", "condition", "target"])
+
+
+## The moves a species can inherit from its father, in `EggMovePointers`' own
+## order. Empty for the 145 or 146 species that inherit none, and for a mod
+## species that named none.
+##
+## Move numbers alone: an egg move has no level, unlike a [method learnset] row.
+## Which of them a hatched Pokémon actually knows is the breeding rule, not this
+## table, and no breeding exists here yet; the data is what a mod, a dex screen or
+## a randomizer asks for.
+func egg_moves(number: int) -> Array[int]:
+	var out: Array[int] = []
+	for move: Variant in species(number).get("egg_moves", []):
+		out.append(int(move))
+	return out
 
 
 ## A species' Pokedex entry as { category, height, weight, pages }, or an empty
@@ -1159,9 +1193,27 @@ func world_trade_count() -> int:
 	return _world_trades.size()
 
 
-## Type names are indexed from zero, unlike everything else here.
+## Type names are indexed from zero, unlike everything else here, which is why
+## this passes the number to the overlay untouched rather than through
+## [method _content]'s one-based subtraction.
 func type_name(number: int) -> String:
-	return String(_entry(_types, number).get("name", ""))
+	return String(_overlaid(Gen2ContentOverlay.KIND_TYPE, number, _entry(_types, number))
+		.get("name", ""))
+
+
+## Which stat pair a type attacks and defends with. The cartridge's answer is
+## [method Gen2Damage.is_physical]'s number comparison; a mod type carries the
+## choice on its own row, since Generation II has no per-move category.
+func type_is_physical(number: int) -> bool:
+	return Gen2Damage.is_physical(number)
+
+
+## Every type number a mod defined, ascending. The cartridge's own run is
+## [constant RomLayout.TYPE_COUNT] wide and includes the padding these follow.
+func mod_type_numbers() -> Array[int]:
+	if _overlay == null:
+		return [] as Array[int]
+	return _overlay.defined_numbers(Gen2ContentOverlay.KIND_TYPE)
 
 
 ## How effective [param attacking] is against [param defending], in tenths: 0 for
@@ -1176,11 +1228,34 @@ func type_name(number: int) -> String:
 ##
 ## [param foresight] is whether the defender has been identified, which cancels
 ## the Ghost immunities and nothing else.
+##
+## The key keeps both ids whole ([method Gen2ContentOverlay.matchup_number]) so a
+## mod type cannot alias a cartridge pair. An unmodded game answers off the
+## folded lookup alone; the overlay is asked only when a mod loaded, this being
+## the damage formula's own path.
 func type_matchup(attacking: int, defending: int, foresight: bool = false) -> int:
-	var key: int = attacking * RomLayout.TYPE_COUNT + defending
+	var key: int = Gen2ContentOverlay.matchup_number(attacking, defending)
+	if _overlay != null and not _overlay.is_empty():
+		var row: Dictionary = _overlay.resolve(
+			Gen2ContentOverlay.KIND_MATCHUP, key, _matchup_row(key)
+		)
+		if foresight and bool(row.get("negated_by_foresight", false)):
+			return RomLayout.MATCHUP_EFFECTIVE
+		return int(row.get("multiplier", RomLayout.MATCHUP_EFFECTIVE))
 	if foresight and _foresight_matchups.has(key):
 		return RomLayout.MATCHUP_EFFECTIVE
 	return int(_matchups.get(key, RomLayout.MATCHUP_EFFECTIVE))
+
+
+## The cartridge's own row for a pair, in the shape a patch merges onto. Never
+## empty, because an absent pair is a real answer here (neutral) rather than a
+## row the cartridge does not carry: [method Gen2ContentOverlay.resolve] leaves an
+## empty base untouched.
+func _matchup_row(key: int) -> Dictionary:
+	return {
+		"multiplier": int(_matchups.get(key, RomLayout.MATCHUP_EFFECTIVE)),
+		"negated_by_foresight": _foresight_matchups.has(key),
+	}
 
 
 ## How effective [param attacking] is against a defender of one or two types,
@@ -1213,7 +1288,9 @@ func _build_matchups(rows: Array) -> void:
 	_matchups = {}
 	_foresight_matchups = {}
 	for row: Dictionary in rows:
-		var key: int = int(row["attacker"]) * RomLayout.TYPE_COUNT + int(row["defender"])
+		var key: int = Gen2ContentOverlay.matchup_number(
+			int(row["attacker"]), int(row["defender"])
+		)
 		_matchups[key] = int(row["multiplier"])
 		if bool(row.get("negated_by_foresight", false)):
 			_foresight_matchups[key] = true
@@ -1892,8 +1969,13 @@ func trainer_dvs(number: int) -> int:
 ## Where a trainer class sits in the trainer atlas. Every trainer is drawn at the
 ## same size, so unlike a species pic this one always fills its cell.
 func trainer_pic(number: int) -> Dictionary:
-	if trainer(number).is_empty():
+	var entry: Dictionary = trainer(number)
+	if entry.is_empty():
 		return {}
+
+	var supplied: Dictionary = _supplied_pic(entry.get("pic", {}))
+	if not supplied.is_empty():
+		return supplied
 
 	var cell: int = int(atlas("trainers").get("cell", 0))
 	if cell <= 0:
@@ -1951,11 +2033,18 @@ func tile_indices(name: String) -> PackedByteArray:
 ## Cells are the size of the largest pic of their kind so a slot can be found by
 ## arithmetic; a smaller pic sits in the top-left of its cell and the rest is
 ## blank. Returns { atlas, slot, width, height } in pixels, or an empty
-## Dictionary for a species that is not in the cache.
+## Dictionary for a species that is not in the cache. A mod species carries its
+## own pixels instead of a cell; see [method _supplied_pic].
 func species_pic(number: int, back: bool = false) -> Dictionary:
 	var entry: Dictionary = species(number)
 	if entry.is_empty():
 		return {}
+
+	var supplied: Dictionary = _supplied_pic(
+		(entry.get("pics", {}) as Dictionary).get("back" if back else "front", {})
+	)
+	if not supplied.is_empty():
+		return supplied
 
 	# Unown's main-table slot holds form A. Its other 25 forms are in an atlas
 	# of their own and are asked for by form, not by species.
@@ -1970,6 +2059,29 @@ func species_pic(number: int, back: bool = false) -> Dictionary:
 		"slot": number - 1,
 		"width": int(tiles[0]) * Gen2Tiles.TILE_WIDTH,
 		"height": int(tiles[1]) * Gen2Tiles.TILE_HEIGHT,
+	}
+
+
+## A mod's own picture for a numbered row, in [method species_pic]'s shape but
+## carrying the pixels instead of an atlas cell to crop.
+##
+## The atlases hold exactly the cartridge's slots, so a defined species or
+## trainer class has no cell to point at and supplies decoded indices on its own
+## row instead. [method Gen2PicImage.atlas_cell] takes either, which is what lets
+## every screen draw both without knowing which it has.
+func _supplied_pic(art: Variant) -> Dictionary:
+	if not art is Dictionary or (art as Dictionary).is_empty():
+		return {}
+	var tiles: int = int((art as Dictionary).get("tiles", 0))
+	var indices: Variant = (art as Dictionary).get("indices", null)
+	if tiles <= 0 or not indices is PackedByteArray:
+		return {}
+	return {
+		"atlas": "",
+		"slot": -1,
+		"indices": indices,
+		"width": tiles * Gen2Tiles.TILE_WIDTH,
+		"height": tiles * Gen2Tiles.TILE_HEIGHT,
 	}
 
 

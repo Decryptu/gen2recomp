@@ -6881,3 +6881,29 @@ func test_a_patched_trade_uses_both_halves_without_moving_the_record() -> void:
 	## The record itself is untouched, so a second site naming it is unaffected.
 	assert_eq(int(data.world_trade(0)["offered_species"]), 19)
 	assert_eq(int(data.world_trade(0)["requested_species"]), 16)
+
+
+## A world is a run, so opening one installs the rules it was opened with: the
+## statics that read them ([Gen2Experience], [Gen2Damage], [Gen2BattleAI]) take no
+## world object, and the battles inside the walk have to be fought under the same
+## set the walk is.
+func test_opening_a_world_carries_and_installs_its_rules() -> void:
+	var rules := Gen2Rules.new()
+	rules.set_flag(&"belly_drum_boosts_below_half_hp", true)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(
+		data, 1, 1, Vector2i(8, 6), Gen2WorldState.new(), rules
+	)
+	assert_same(world.rules, rules)
+	assert_true(Gen2Rules.hardware(&"belly_drum_boosts_below_half_hp"))
+
+	# A snapshot restore is the same run continuing, so it takes the rules the
+	# same way rather than adopting whatever is installed.
+	var restored: Gen2WorldAPI = Gen2WorldAPI.open_snapshot(data, world.snapshot(), rules)
+	assert_same(restored.rules, rules)
+
+	Gen2Rules.install(null)
+	var plain: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6), Gen2WorldState.new())
+	assert_not_null(plain.rules, "a world opened without rules plays the installed set")
+	assert_false(Gen2Rules.hardware(&"belly_drum_boosts_below_half_hp"))
+	Gen2Rules.install(null)
