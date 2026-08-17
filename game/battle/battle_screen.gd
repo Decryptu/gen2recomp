@@ -2127,6 +2127,10 @@ func _save_battle_result() -> bool:
 				"message": result.get("message", ""),
 			})
 		return false
+	# from_battle_party() returns a clone; without this, the fought party's HP,
+	# experience and PP reach disk but never the live save the world screen and
+	# the next battle read, so both keep showing the pre-battle party.
+	Gen2WorldTransaction.copy_into(_source_save, save)
 	_save_written = true
 	return true
 
