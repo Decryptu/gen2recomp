@@ -105,6 +105,7 @@ func _check_signs(landmarks: Array) -> void:
 			continue
 		var column: int = Gen2MapNameSignPage.name_column(name)
 		var blank: Color = image.get_pixel(TILE + 1, TILE + 1)
+		_check_palette(landmark, blank)
 		_r.check(
 			_ink(image, Rect2i(
 				Vector2i(column, Gen2MapNameSignPage.NAME_ROW) * TILE,
@@ -122,6 +123,29 @@ func _check_signs(landmarks: Array) -> void:
 			column + Gen2Text.encoded_length(name) <= Gen2MapNameSignPage.COLUMNS - 1,
 			"landmark %d's name runs into the frame's right edge." % landmark
 		)
+
+
+## `InitMapSignAttrmap` writes PAL_BG_TEXT over the whole sign, and on a map
+## that slot holds `bg_tiles.pal`'s own "text" row rather than `LoadOW_BGPal7`'s
+## blue `Palette_TextBG7`. Colour 0 of the two differs, so the interior says
+## which one the sign was drawn through.
+func _check_palette(landmark: int, blank: Color) -> void:
+	var slots: Array = Gen2WorldPalette.palette_slots(
+		Gen2WorldAPI.ENVIRONMENT_TOWN, Gen2WorldPalette.TIME_MORNING
+	)
+	var wanted: PackedColorArray = _r.data.world_palette(
+		int(slots[Gen2MapNameSignPage.PAL_BG_TEXT])
+	)
+	if not _r.check(wanted.size() >= 4, "the cache holds no PAL_BG_TEXT palette."):
+		return
+	## The rendered sign is an 8-bit image, so the comparison is made there
+	## rather than on the palette's own 5-bit-derived floats.
+	_r.check(
+		blank.to_rgba32() == wanted[0].to_rgba32(),
+		"landmark %d's sign interior is %s, not PAL_BG_TEXT's own %s." % [
+			landmark, blank, wanted[0]
+		]
+	)
 
 
 static func _ink(image: Image, area: Rect2i, blank: Color) -> bool:

@@ -18,6 +18,19 @@ const YES_NO_LEFT: int = 14
 const YES_NO_TOP: int = 7
 const YES_NO_RIGHT: int = 19
 const YES_NO_BOTTOM: int = 11
+## `YesNoMenuHeader.MenuData`'s own `db STATICMENU_CURSOR |
+## STATICMENU_NO_TOP_SPACING`. A `choice` with no `loadmenu` header behind it is
+## a `Script_yesorno`, so it inherits these rather than no flags at all: without
+## STATICMENU_CURSOR [Gen2MenuPage] draws no arrow, and the box said YES and NO
+## with nothing marking which one A would answer.
+## `YesNoMenuHeader.MenuData`'s own `db "YES@"` / `db "NO@"`. The runner names
+## the two answers with internal keys, which every branch reading a choice
+## compares against; those keys are not what the cartridge prints.
+const YES_NO_KEYS: Array = [&"yes", &"no"]
+const YES_NO_OPTIONS: Array = ["YES", "NO"]
+const YES_NO_FLAGS: int = (
+	Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_NO_TOP_SPACING
+)
 
 var kind: StringName = &"vertical"
 var options: Array = []
@@ -43,7 +56,9 @@ static func from_input(input: Dictionary) -> Gen2WorldMenu:
 	menu.options = input.get(
 		"options", input.get("choices", header.get("options", []))
 	).duplicate(true)
-	menu.flags = int(header.get("data_flags", 0))
+	if menu.options == YES_NO_KEYS:
+		menu.options = YES_NO_OPTIONS.duplicate()
+	menu.flags = int(header.get("data_flags", YES_NO_FLAGS))
 	menu.rows = maxi(1, int(header.get("rows", menu.options.size())))
 	menu.columns = maxi(1, int(header.get("columns", 1)))
 	if menu.kind == &"2d":

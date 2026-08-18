@@ -216,6 +216,30 @@ func test_a_warp_into_another_landmark_raises_the_map_name_sign() -> void:
 	assert_eq(_screen.map_name_sign_frames(), 0, "and gone on the sixtieth")
 
 
+## `PlayerEvents` zeroes `wLandmarkSignTimer` behind `DoPlayerEvent`, so only a
+## dispatched player event takes the sign down. A map's own callbacks are
+## `RunMapCallback`'s work inside map setup and reach `PlayerEvents` never: one
+## sitting on the queue used to take down the sign that same map load raised,
+## which is every connection crossing into a map that has one.
+func test_a_queued_map_callback_does_not_take_the_sign_down() -> void:
+	_screen = await _walk_onto_the_door()
+	for _frame: int in WALK_FRAME_CAP:
+		_screen.advance_frame()
+		if _screen.map_name_sign_frames() > 0:
+			break
+	assert_eq(_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES)
+	## The fixture's house has no callback of its own, so one stands on the
+	## queue directly: what is under test is that a waiting script is not what
+	## takes the sign down, whatever put it there.
+	_screen._world._script_queue.append({})
+	assert_true(_screen._world.script_busy(), "a callback is waiting to run")
+	_screen.advance_frame()
+	assert_eq(
+		_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES - 1,
+		"and the sign spent that frame rather than being taken down"
+	)
+
+
 ## `.CheckMovingWithinLandmark`: the map the world opens on is `wPrevLandmark`,
 ## so walking back into the landmark just left raises nothing.
 func test_a_warp_back_into_the_same_landmark_raises_no_sign() -> void:

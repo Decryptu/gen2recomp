@@ -4468,6 +4468,15 @@ func try_connection(direction: Vector2i) -> Dictionary:
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
 	_apply_map(target_map, target_tileset, target_cell)
+	## `CheckMovingOffEdgeOfMap` answers a step that has ALREADY landed: the
+	## player walks the whole step onto the cell the connection strip's blocks
+	## are drawn in, and only then does `EdgeWarpScript`'s `MAPSETUP_CONNECTION`
+	## re-anchor the map around it. So a crossing costs exactly the frames any
+	## other step does. `_apply_map` clears the step it inherits, so the step is
+	## begun after it; the cell it is drawn walking out of is the new map's own
+	## connection strip, which is the same picture the old map's edge was.
+	player_facing = _facing_for_direction(direction)
+	_start_player_step(direction, _step_frames_for_movement())
 	return {
 		"ok": true,
 		"kind": &"connection",
@@ -4951,9 +4960,9 @@ func move_result(direction: Vector2i) -> Dictionary:
 		or destination.y >= current_map.collision_height:
 		var transition: Dictionary = try_connection(direction)
 		if not transition.is_empty():
-			if bool(transition.get("ok", false)):
-				player_facing = _facing_for_direction(direction)
-				state.consume_repel_step()
+			## `CheckTileEvent` branches to `.map_connection` before it reaches
+			## `CountStep`, so the step that leaves a map costs no repel step;
+			## try_connection() owns the facing and the step's own frames.
 			return transition
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
 	if forced_walk:

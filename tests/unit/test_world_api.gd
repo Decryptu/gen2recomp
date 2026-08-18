@@ -2077,7 +2077,11 @@ func test_player_step_does_not_affect_cell_collision_or_events() -> void:
 	assert_eq(world.player_cell, Vector2i(7, 6))
 
 
-func test_player_step_clears_on_connection_transition() -> void:
+## CheckMovingOffEdgeOfMap only answers a step that has landed, so the crossing
+## costs the frames any other step does: the map is swapped under a step that is
+## still running, and the cell it is drawn walking out of is the connection
+## strip the neighbour's edge was drawn in.
+func test_connection_transition_spends_a_step() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(14, 6))
 	assert_true(world.move(Vector2i.RIGHT))
 	assert_eq(world.player_cell, Vector2i(15, 6))
@@ -2087,6 +2091,10 @@ func test_player_step_clears_on_connection_transition() -> void:
 	assert_true(result["ok"])
 	assert_eq(result["kind"], &"connection")
 	assert_eq(world.map_id(), Vector2i(1, 2))
+	assert_true(world.player_step_in_progress())
+	assert_eq(world.player_step_offset_cells(), Vector2(-1, 0))
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_player_step_frame()
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 
