@@ -85,7 +85,43 @@ func test_every_named_icon_rasterises_rather_than_drawing_nothing() -> void:
 		var raster: Texture2D = Gen2LauncherIcon.raster(glyph, 24.0, _light.text)
 		assert_not_null(raster, String(glyph))
 		assert_gt(raster.get_width(), 0, String(glyph))
+		# The SVG text is what is rasterised, so the source has to be exported
+		# verbatim: Godot's SVG importer would ship the `.ctex` alone and every
+		# glyph would draw nothing outside the editor.
+		var import_path: String = "%s.import" % Gen2LauncherIcon.source_path(glyph)
+		assert_true(FileAccess.file_exists(import_path), import_path)
+		assert_string_contains(
+			FileAccess.get_file_as_string(import_path), 'importer="keep"', String(glyph)
+		)
 	assert_false(Gen2LauncherIcon.has_glyph(&"nonesuch"))
+	assert_eq(Gen2LauncherIcon.source_path(&"nonesuch"), "")
+
+
+## A launcher page scrolls vertically only, so nothing inside one may measure
+## wider than the window it is given: a portrait phone is the ordinary case.
+func test_a_settings_row_stacks_rather_than_running_off_a_narrow_page() -> void:
+	var choices: Array = ["Windowed", "Fullscreen", "Borderless"]
+	var control: Control = Gen2LauncherUI.segmented(_light, choices, 0, func(_i: int) -> void: pass)
+	var row: Container = Gen2LauncherUI.field(_light, "Window", control)
+	var host := Control.new()
+	add_child_autofree(host)
+	host.add_child(row)
+	var label: Control = row.get_child(0)
+
+	# The row never asks for more than the control itself, so no page is widened
+	# by one and then measured as fitting.
+	var wanted: float = Gen2LauncherUI.preferred_width(control)
+	assert_lt(row.get_combined_minimum_size().x, wanted)
+
+	row.size = Vector2(wanted + label.get_combined_minimum_size().x + 100.0, 0.0)
+	await wait_process_frames(2)
+	assert_gt(control.position.x, label.size.x, "side by side while both fit")
+
+	row.size = Vector2(wanted + 10.0, 0.0)
+	await wait_process_frames(2)
+	assert_eq(control.position.x, 0.0, "stacked once they do not")
+	assert_gt(control.position.y, label.size.y, "the control under the label")
+	assert_eq(control.size.x, row.size.x, "the control takes the whole width once stacked")
 
 
 func test_every_glyph_the_launcher_asks_for_is_one_the_set_draws() -> void:

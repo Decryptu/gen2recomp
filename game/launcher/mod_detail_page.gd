@@ -118,14 +118,13 @@ func _summary(row: Dictionary) -> Control:
 		if not titles.is_empty():
 			column.add_child(Gen2LauncherUI.field(_theme, "For", _value(", ".join(titles))))
 
-	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	var actions: HFlowContainer = Gen2LauncherUI.actions()
 	column.add_child(actions)
 	if bool(row["installed"]):
 		var switch: Gen2LauncherToggle = Gen2LauncherToggle.create(_theme, bool(row["enabled"]))
 		switch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		switch.toggled.connect(func(on: bool) -> void: enabled_changed.emit(_row, on))
 		actions.add_child(switch)
-	actions.add_child(Gen2LauncherUI.spacer())
 	if bool(row["listed"]):
 		var get_it: Gen2LauncherButton = Gen2LauncherButton.create(
 			_theme, _download_label(row), Gen2LauncherButton.Variant.PRIMARY, &"download"

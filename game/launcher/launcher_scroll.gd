@@ -19,7 +19,11 @@ const PAGE: float = 0.42
 
 static func create() -> Gen2LauncherScroll:
 	var scroll := Gen2LauncherScroll.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# Never `SCROLL_MODE_DISABLED`: that adds the child's whole minimum width to
+	# the pane, so one row wider than the window widens the launcher itself
+	# rather than being held inside the pane. Hidden instead, and the rows stack
+	# or wrap ([FieldRow], `controls_section.gd`) so nothing needs the axis.
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
 	return scroll
