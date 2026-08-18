@@ -21,16 +21,12 @@ const SIDE_FADE_SHADER: String = """
 shader_type canvas_item;
 
 uniform float side = 0.0;
-uniform sampler2D cartridge_texture : source_color;
-uniform bool use_cartridge_texture = false;
 
+// COLOR arrives already equal to texture(TEXTURE, UV) * MODULATE, so the sample
+// is never read again: multiplying by it would square the artwork and darken it.
 void fragment() {
-	vec4 sampled = use_cartridge_texture ? texture(cartridge_texture, UV) : texture(TEXTURE, UV);
-	vec4 colour = sampled * COLOR;
 	float inward = side < 0.0 ? UV.x : 1.0 - UV.x;
-	float gradient_alpha = mix(0.25, 1.0, inward);
-	colour.a *= mix(1.0, gradient_alpha, clamp(abs(side), 0.0, 1.0));
-	COLOR = colour;
+	COLOR.a *= mix(1.0, mix(0.25, 1.0, inward), clamp(abs(side), 0.0, 1.0));
 }
 """
 
@@ -88,7 +84,6 @@ func _build() -> void:
 	fade_shader.code = SIDE_FADE_SHADER
 	_side_fade = ShaderMaterial.new()
 	_side_fade.shader = fade_shader
-	_side_fade.set_shader_parameter("use_cartridge_texture", true)
 	_bay_side_fade = ShaderMaterial.new()
 	_bay_side_fade.shader = fade_shader
 
@@ -126,7 +121,6 @@ func _build() -> void:
 	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_art.material = _side_fade
-	_side_fade.set_shader_parameter("cartridge_texture", _art.texture)
 	add_child(_art)
 
 	set_imported(false)
@@ -154,10 +148,8 @@ func set_side_fade(slot: float) -> void:
 	if _side_fade == null:
 		return
 	var side: float = clampf(slot, -1.0, 1.0)
-	# Keep the selected artwork on TextureRect's native colour path so its colour
-	# is identical to the source image.
-	_art.material = null if is_zero_approx(side) else _side_fade
-	_bay.material = null if is_zero_approx(side) else _bay_side_fade
+	# The material stays attached at every slot: at side 0 it is a pass through,
+	# so detaching it could only reintroduce a seam mid-slide.
 	_side_fade.set_shader_parameter("side", side)
 	_bay_side_fade.set_shader_parameter("side", side)
 
