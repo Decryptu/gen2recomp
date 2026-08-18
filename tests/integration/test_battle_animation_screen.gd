@@ -257,3 +257,33 @@ func test_a_send_out_draws_a_picture_rather_than_the_doll_the_last_one_had() -> 
 		"level": 5, "hp": 20, "max_hp": 20,
 	})
 	assert_false(bool(_view()["player_substitute"]))
+
+
+func test_the_frames_an_animation_spends_do_not_owe_a_press() -> void:
+	# `DoMove` reads no joypad between `PlayFXAnimID` and the command after it,
+	# so the line behind an animation is said when its frames run out rather
+	# than when the player presses A.
+	await _open_battle()
+	_screen._pending = [{
+		"type": Gen2Battle.MISSED, "side": Gen2Battle.PLAYER, "move": 33,
+	}]
+	_screen._begin_animation(_animation_event())
+	_settle_animation()
+	assert_false(_screen.animation_running())
+	assert_eq(_screen._pending.size(), 0, "the pump ran on without a press")
+	assert_ne(String(_screen.battle_snapshot()["message"]), "",
+		"the held line was said")
+
+
+func test_a_line_on_screen_still_owes_its_press() -> void:
+	# The same pump must not walk past a box: only a button dismisses one.
+	await _open_battle()
+	_screen.show_message("ATTACK MISSED!")
+	_screen._pending = [{
+		"type": Gen2Battle.MISSED, "side": Gen2Battle.PLAYER, "move": 33,
+	}]
+	_screen._begin_animation(_animation_event())
+	_settle_animation()
+	assert_eq(_screen._pending.size(), 1, "the line was not pressed past")
+	_screen.advance()
+	assert_eq(_screen._pending.size(), 0)

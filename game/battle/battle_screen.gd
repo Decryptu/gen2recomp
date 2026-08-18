@@ -188,6 +188,11 @@ var _intro_message: String = ""
 ## prints it after the bar arrives, since `applydamage` runs before
 ## `criticaltext` and `supereffectivetext`.
 var _held_message: String = ""
+## Whether the box is holding a line nobody has pressed past yet. Only a box
+## waits for a button in `DoMove`'s loop, so this is what tells the frame pump
+## that the run of frames it just finished owes a press rather than the next
+## command; see [method _resume_after_frames].
+var _message_awaits_press: bool = false
 ## Leftover of a hardware frame the bars and the intro have not counted yet.
 var _frame_elapsed: float = 0.0
 ## The same, for the party page's icons. Kept apart because they animate while
@@ -378,10 +383,31 @@ func frames_running() -> bool:
 func advance_frame() -> bool:
 	if _box != null:
 		_box.advance_frame()
+	var was_running: bool = frames_running()
 	var moved: bool = advance_intro()
 	moved = advance_bars() or moved
 	moved = advance_faint() or moved
-	return advance_animation() or moved
+	moved = advance_animation() or moved
+	_resume_after_frames(was_running)
+	return moved
+
+
+## What the source does when the frames a command spends run out: it runs on to
+## the next command. Nothing in `DoMove`'s loop reads a button between an
+## animation, `AnimateHPBar` and `MonFaintedAnimation` and whatever follows them,
+## so the pump continues here rather than standing still until a press.
+##
+## The waits that are real are all a box: a message on screen is left alone, and
+## so is a bar that is holding one (`_held_message`, released by
+## [method advance_bars]) or the exp bar stopped at a level boundary.
+func _resume_after_frames(was_running: bool) -> void:
+	if not was_running or frames_running() or _pending.is_empty():
+		return
+	if not _held_message.is_empty() or not _intro_message.is_empty():
+		return
+	if _message_awaits_press:
+		return
+	_show_next_event()
 
 
 ## Whether a picture is still sinking off its square.
@@ -1360,6 +1386,7 @@ func show_message(text: String) -> void:
 		_intro_message = text
 		return
 	_last_message = text
+	_message_awaits_press = true
 	if _box != null:
 		_box.show_text(text)
 
@@ -2060,6 +2087,7 @@ func advance() -> void:
 		return
 	if _box.advance():
 		return
+	_message_awaits_press = false
 	## The battle menu is answered with A, which is what this call is: the source
 	## reads one joypad for the box and for the menu over it.
 	if _menu_stage != &"":

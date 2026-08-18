@@ -251,3 +251,25 @@ func test_a_party_heal_request_is_settled_where_it_is_staged() -> void:
 	)
 	assert_true(_world_screen._world.pending_runtime_request().is_empty())
 	assert_true((save.party[0] as Gen2SaveMon).hp > 1, "the party healed with no press")
+
+
+## `Script_pokepic` puts its box up and `Script_cry` is the next command, so the
+## picture and the runtime request the cry stages land on the same result. The
+## request takes the pump out of the result loop, and the events beside it are
+## the box: they are applied before the status, not skipped with it.
+func test_a_picture_beside_a_runtime_request_is_still_drawn() -> void:
+	var directory: String = Fixture.directory()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT)] = [
+		0x56, 155,
+		0x84, 155, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+	_data = GameData.open_directory(directory)
+	_world_screen = await _open_world()
+
+	_world_screen._show_script_results(
+		_world_screen._world.dispatch_script_events(SCRIPT_CELL)
+	)
+	assert_not_null(_world_screen._story_picture, "the pokepic box is on screen")

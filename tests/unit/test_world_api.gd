@@ -3925,6 +3925,37 @@ func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -
 	assert_false(world.advance_scripted_steps_frame())
 
 
+## `NormalStep` writes OBJECT_FACING where it starts each step, so a stream whose
+## legs turn is drawn turning with them. The whole path commits in one call here,
+## which is why the facing has to travel with the trail rather than with the
+## commit: applied with the cells it would walk the first two legs already facing
+## the way the last one ends.
+func test_a_turning_stream_is_drawn_facing_each_leg_in_turn() -> void:
+	RomCache.write_json(RomCache.world_movements_path(_directory), {
+		# step down, step down, step right.
+		"48:6100": [0x0C, 0x0C, 0x0F, 0x47],
+	})
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:6070": [0x69, 2, 0x00, 0x61, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 1).events["coord_events"][0]["script"] = 0x6070
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var object: Gen2WorldObject = world.objects[0]
+	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
+
+	assert_eq(object.facing, Gen2WorldSprite.FACING_DOWN, "the first leg")
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_scripted_steps_frame()
+	assert_eq(object.facing, Gen2WorldSprite.FACING_DOWN, "still the second")
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_scripted_steps_frame()
+	assert_eq(object.facing, Gen2WorldSprite.FACING_RIGHT, "and the last one turns")
+	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+		world.advance_scripted_steps_frame()
+	assert_eq(object.step_offset_cells(), Vector2.ZERO)
+
+
 ## `Script_applymovement` sets SCRIPT_WAIT_MOVEMENT and StopScript, and
 ## `WaitScriptMovement` holds the script until the stream clears
 ## SCRIPTED_MOVEMENT_STATE_F, which `Movement_step_end` is what does. So the
