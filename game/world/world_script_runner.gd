@@ -38,6 +38,12 @@ var _reset_phone_receive_timer: bool = false
 var _events: Array = []
 var _pending: Dictionary = {}
 var _last_text: Dictionary = {}
+
+## The text the still-open box is showing. `Script_yesorno`'s `YesNoBox` and
+## `Script_verticalmenu`'s `_2DMenu` draw over that box rather than replacing it,
+## so the question a choice answers is the last text the script wrote; without it
+## a host has nothing but the command's own name to print.
+var _standing_text: String = ""
 var _last_talked_object_index: int = -1
 var _last_item: int = 0
 var _staged_warp: Dictionary = {}
@@ -241,8 +247,9 @@ const WAIT_FRAMES: StringName = &"frames"
 ## delays six.
 const PAUSE_FRAMES_PER_UNIT: int = 2
 const WAIT_FRAMES_PER_UNIT: int = 6
+## `_SetDayOfWeek`'s own `.Days`, which are uppercase like every cartridge string.
 const WEEKDAY_NAMES: Array[StringName] = [
-	&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
+	&"SUNDAY", &"MONDAY", &"TUESDAY", &"WEDNESDAY", &"THURSDAY", &"FRIDAY", &"SATURDAY",
 ]
 
 ## Crystal event flags used by the player's room decoration callbacks. The
@@ -361,6 +368,8 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		_phone_started = true
 		_emit_runtime_event(&"phone_call_started", _phone_context)
 	if _pending:
+		if _pending.has("text"):
+			_standing_text = String(_pending["text"])
 		var pending_request: Dictionary = _pending.get("request", {})
 		if _pending.get("type", &"") == &"runtime_request" \
 			and StringName(pending_request.get("kind", &"")) == &"battle_requested":
@@ -406,6 +415,7 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 				"type": &"choice",
 				"command": &"yesorno",
 				"choices": [&"yes", &"no"],
+				"text": _standing_text,
 				"special": &"strength_ask",
 				"slot": int(_pending.get("slot", -1)),
 				"source": _request.duplicate(true),
@@ -477,6 +487,7 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 				"type": &"choice",
 				"command": &"yesorno",
 				"choices": [&"yes", &"no"],
+				"text": _standing_text,
 				"special": &"field_move_ask",
 				"move": int(_pending.get("move", 0)),
 				"slot": int(_pending.get("slot", -1)),
@@ -504,6 +515,7 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 				"type": &"choice",
 				"command": &"yesorno",
 				"choices": [&"yes", &"no"],
+				"text": _standing_text,
 				"special": &"rock_smash_ask",
 				"slot": int(_pending.get("slot", -1)),
 				"source": _request.duplicate(true),
@@ -1237,7 +1249,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.WARP:
 			return _stage_warp(command)
 		Gen2WorldScript.OPENTEXT, Gen2WorldScript.REANCHORMAP, Gen2WorldScript.CLOSETEXT, Gen2WorldScript.WRITEUNUSEDBYTE, Gen2WorldScript.CLOSEWINDOW:
-			pass
+			## `Script_closetext` takes the box down, so nothing stands behind a
+			## later choice; leaving the last question there would print it under
+			## an unrelated menu.
+			if opcode == Gen2WorldScript.CLOSETEXT:
+				_standing_text = ""
 		Gen2WorldScript.ITEMNOTIFY:
 			## `CurItemName` reads wCurItem, which whichever `giveitem` came
 			## before this wrote.
@@ -1967,6 +1983,7 @@ func _stage_menu(two_dimensional: bool, command: Dictionary) -> Dictionary:
 		"menu_kind": &"2d" if two_dimensional else &"vertical",
 		"header": _loaded_menu.duplicate(true),
 		"options": _loaded_menu.get("options", []).duplicate(true),
+		"text": _standing_text,
 		"source": _request.duplicate(true),
 	}
 	return {"ok": true}
@@ -2129,6 +2146,12 @@ func _stage_trainer_approach() -> void:
 	})
 
 
+## `wXCoord`/`wYCoord`, mirrored onto the request the way the party count is.
+func _player_cell() -> Vector2i:
+	var standing: Variant = _request.get("player_cell", Vector2i(-1, -1))
+	return standing if standing is Vector2i else Vector2i(-1, -1)
+
+
 func _read_runtime_variable(variable: int) -> Dictionary:
 	var clock: Dictionary = _request.get("clock", {})
 	var hour: int = int(clock.get("hour", _clock_hour()))
@@ -2162,6 +2185,24 @@ func _read_runtime_variable(variable: int) -> Dictionary:
 			_script_value = state.unown_caught_count() if state != null else 0
 		0x0F: # VAR_ENVIRONMENT
 			_script_value = int(_request.get("environment", -1))
+		0x05: # VAR_DEXCAUGHT
+			_script_value = state.caught_count() if state != null else 0
+		0x06: # VAR_DEXSEEN
+			_script_value = state.seen_count() if state != null else 0
+		0x10: # VAR_BOXSPACE
+			## `.BoxFreeSpace` opens SRAM for the count; the party mirror carries
+			## it here for the same reason it carries VAR_PARTYCOUNT, and an
+			## absent mirror fails rather than inventing an empty box.
+			var storage: Dictionary = _request.get("party", {})
+			if not storage.has("box_free_space"):
+				return {
+					"ok": false, "reason": &"missing_party_summary", "variable": variable,
+				}
+			_script_value = int(storage.get("box_free_space", 0))
+		0x12: # VAR_XCOORD
+			_script_value = _player_cell().x
+		0x13: # VAR_YCOORD
+			_script_value = _player_cell().y
 		0x14: # VAR_SPECIALPHONECALL
 			_script_value = _current_special_phone_call()
 		0x16: # VAR_KURT_APRICORNS
@@ -2331,8 +2372,7 @@ func _execute_special(special: int) -> Dictionary:
 			## player stands on. The Poke Flute channel reaches wMapMusic through
 			## StartRadioStation and stays there because closing the Pokegear
 			## restores the map's music only for its two sentinel ids.
-			var standing: Variant = _request.get("player_cell", Vector2i(-1, -1))
-			var cell: Vector2i = standing if standing is Vector2i else Vector2i(-1, -1)
+			var cell: Vector2i = _player_cell()
 			_script_value = 1 if state != null \
 				and state.map_music() == Gen2WorldRadio.MUSIC_POKE_FLUTE_CHANNEL \
 				and cell in SNORLAX_PROXIMITY_CELLS else 0
@@ -2529,10 +2569,15 @@ func _decoration_block(category: StringName, decoration: int) -> int:
 func _stage_day_of_week_menu() -> void:
 	_pending = {
 		"type": &"menu",
-		"menu_kind": &"vertical",
+		## `SetDayOfWeek` is a dial, not a list: one weekday in a nine-wide box at
+		## `hlcoord 9, 3` between two arrows, with `.GetJoypadAction` stepping
+		## `wTempDayOfWeek` and A accepting. The selection rules are a wrapping
+		## vertical menu's, so only the drawing differs from one.
+		"menu_kind": &"spinner",
 		"command": &"set_day_of_week",
 		"options": WEEKDAY_NAMES.duplicate(),
 		"header": {"default": 1, "data_flags": 1 << 5},
+		"text": _standing_text,
 		"special": &"set_day_of_week",
 		"source": _request.duplicate(true),
 	}
@@ -2543,6 +2588,7 @@ func _stage_day_of_week_confirmation(day: int) -> void:
 		"type": &"choice",
 		"command": &"set_day_of_week_confirmation",
 		"choices": [&"yes", &"no"],
+		"text": _standing_text,
 		"special": &"set_day_of_week_confirmation",
 		"day": posmod(day, WEEKDAY_NAMES.size()),
 		"source": _request.duplicate(true),
@@ -3236,6 +3282,7 @@ func _stage_choice(command: Dictionary, choices: Array) -> Dictionary:
 		"type": &"choice",
 		"command": command.get("name", &"choice"),
 		"choices": choices.duplicate(true),
+		"text": _standing_text,
 		"source": _request.duplicate(true),
 	}
 	return {"ok": true}

@@ -1,12 +1,18 @@
 class_name Gen2ClockSetScreen
 extends Control
 
-## `InitClock` followed by `SetDayOfWeek`, before Oak's first speech beat.
+## `InitClock`, before Oak's first speech beat. Hour and minutes only: the
+## routine ends on `OakText_ResponseToSetTime` after `.MinutesAreSet` and never
+## calls `SetDayOfWeek`, which is Mom's own errand in `PlayersHouse1F.asm`. The
+## weekday the save starts on is whatever the RTC holds, SUNDAY on a fresh one.
 
 signal finished(day: int, hour: int, minute: int)
 
-enum Phase { HOUR, HOUR_CONFIRM, MINUTE, MINUTE_CONFIRM, DAY, DAY_CONFIRM, DONE }
+enum Phase { HOUR, HOUR_CONFIRM, MINUTE, MINUTE_CONFIRM, DONE }
 
+## `SetDayOfWeek`'s own `.WeekdayStrings`, padded the way the source pads them so
+## the name is centred in its nine-wide box. Drawn by Mom's errand rather than
+## here; this is where the strings live because the dial page is shared.
 const DAYS: Array[String] = [
 	" SUNDAY", " MONDAY", " TUESDAY", "WEDNESDAY", "THURSDAY", " FRIDAY", "SATURDAY",
 ]
@@ -16,6 +22,8 @@ var _view: TextureRect = null
 var _phase: int = Phase.HOUR
 var _hour: int = 10
 var _minute: int = 0
+## `InitTimeOfDay` leaves the RTC's own weekday alone, so a new save starts on
+## SUNDAY and Mom's `SetDayOfWeek` is what changes it.
 var _day: int = 0
 var _confirm_cursor: int = 0
 
@@ -39,7 +47,7 @@ func handle_button(button: int) -> bool:
 	if _phase == Phase.DONE:
 		return true
 	if button in [Gen2Button.UP, Gen2Button.DOWN]:
-		if _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM, Phase.DAY_CONFIRM]:
+		if _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM]:
 			_confirm_cursor = 1 - _confirm_cursor
 			_render()
 			return true
@@ -47,17 +55,16 @@ func handle_button(button: int) -> bool:
 		match _phase:
 			Phase.HOUR: _hour = wrapi(_hour + step, 0, 24)
 			Phase.MINUTE: _minute = wrapi(_minute + step, 0, 60)
-			Phase.DAY: _day = wrapi(_day + step, 0, 7)
 		_render()
 		return true
-	if button == Gen2Button.B and _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM, Phase.DAY_CONFIRM]:
+	if button == Gen2Button.B and _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM]:
 		_phase -= 1
 		_confirm_cursor = 0
 		_render()
 		return true
 	if button != Gen2Button.A:
 		return false
-	if _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM, Phase.DAY_CONFIRM] \
+	if _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM] \
 			and _confirm_cursor == 1:
 		_phase -= 1
 		_confirm_cursor = 0
@@ -71,11 +78,7 @@ func handle_button(button: int) -> bool:
 		Phase.MINUTE:
 			_phase = Phase.MINUTE_CONFIRM
 			_confirm_cursor = 0
-		Phase.MINUTE_CONFIRM: _phase = Phase.DAY
-		Phase.DAY:
-			_phase = Phase.DAY_CONFIRM
-			_confirm_cursor = 0
-		Phase.DAY_CONFIRM:
+		Phase.MINUTE_CONFIRM:
 			_phase = Phase.DONE
 			finished.emit(_day, _hour, _minute)
 	_render()
@@ -89,21 +92,17 @@ func value() -> Dictionary:
 func _render() -> void:
 	if _view == null or _page == null or _phase == Phase.DONE:
 		return
-	var day: bool = _phase in [Phase.DAY, Phase.DAY_CONFIRM]
-	var confirm: bool = _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM, Phase.DAY_CONFIRM]
+	var confirm: bool = _phase in [Phase.HOUR_CONFIRM, Phase.MINUTE_CONFIRM]
 	var value_text: String
 	var prompt: String
-	if day:
-		value_text = DAYS[_day]
-		prompt = "%s, is it?" % DAYS[_day].strip_edges() if confirm else "What day is it?"
-	elif _phase in [Phase.MINUTE, Phase.MINUTE_CONFIRM]:
+	if _phase in [Phase.MINUTE, Phase.MINUTE_CONFIRM]:
 		value_text = "%d min." % _minute
 		prompt = "Whoa! %d min.?" % _minute if confirm else "How many minutes?"
 	else:
 		value_text = "%s o'clock" % _hour_text()
 		prompt = "What? %s?" % value_text if confirm else "What time is it?"
 	_view.texture = ImageTexture.create_from_image(_page.render(
-		value_text, prompt, _confirm_cursor if confirm else -1, day
+		value_text, prompt, _confirm_cursor if confirm else -1, false
 	))
 
 

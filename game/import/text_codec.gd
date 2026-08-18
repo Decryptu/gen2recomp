@@ -64,6 +64,14 @@ const UNKNOWN: int = 0xE6
 const POKE_SHORTHAND: String = "#"
 const POKE_WORD: String = "POK\u00e9"
 
+## The same two codes spelled the other way pret spells them. A caller writing
+## `<POKE>` or `<PKMN>` means the charmap entry, not six literal characters, and
+## without this each angle bracket encodes as UNKNOWN and prints "?".
+const WORD_SPELLINGS: Dictionary = {
+	"<POKE>": POKE_WORD,
+	"<PKMN>": "PKMN",
+}
+
 ## The longest sequence one tile stands for: the apostrophe ligatures and PK/MN
 ## are two characters in one glyph. The word codes $54 ("POKé") and $4a ("PKMN")
 ## sit below FIRST_PRINTABLE and are decode-only; write "#" for $54 as the source
@@ -142,6 +150,8 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 	# characters, so the source's own "#" is four tiles and not one. Expanding
 	# here is what puts POKé on screen: $54 is no glyph and would draw a blank.
 	var expanded: String = text.replace(POKE_SHORTHAND, POKE_WORD)
+	for spelling: String in WORD_SPELLINGS:
+		expanded = expanded.replace(spelling, WORD_SPELLINGS[spelling])
 
 	while at < expanded.length():
 		var taken: int = 0

@@ -3904,6 +3904,9 @@ func _refresh_party_summary() -> void:
 			"second_species": int(second.species) if second != null else 0,
 			"storage_full": save.party.size() >= Gen2SaveData.MAX_PARTY \
 				and not bool(save.first_empty_box_slot().get("ok", false)),
+			## `VAR_BOXSPACE`, which Route 29's catching tutorial reads before it
+			## offers to hand a POKé BALL over.
+			"box_free_space": save.box_free_space(),
 		},
 		fainted
 	)

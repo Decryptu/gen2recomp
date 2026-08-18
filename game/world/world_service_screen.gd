@@ -129,6 +129,8 @@ var _boxes: Gen2BoxScreen = null
 var _service_hardware: Gen2Screen = null
 var _service_view: TextureRect = null
 var _service_page: Gen2WorldServicePage = null
+## `SetDayOfWeek`'s own dial, shared with the new game's `InitClock` screen.
+var _clock_page: Gen2ClockSetPage = null
 
 var _panel: PanelContainer = null
 var _title: Label = null
@@ -340,7 +342,10 @@ func _open_menu(input: Dictionary) -> void:
 	_choices = _menu.options.duplicate(true)
 	_cursor = _menu.selected_index()
 	_title.text = "MENU"
-	_summary.text = String(input.get("command", input.get("menu_kind", "Choose an option")))
+	## The question the box behind this menu is still showing. A command name is
+	## an internal key, never something the cartridge prints, so it is not a
+	## fallback: an unattached menu says nothing rather than saying "yesorno".
+	_summary.text = String(input.get("text", ""))
 	_status.text = ""
 	_footer.text = "D-pad: move    A: choose    B: cancel"
 	_render_options()
@@ -1403,6 +1408,10 @@ func _render_options(override: Array = []) -> void:
 		grid.add_theme_constant_override("h_separation", 18)
 		_options.add_child(grid)
 		parent = grid
+	if _is_dial() and override.is_empty():
+		## One value at a time, the way the dial itself shows it.
+		override = [_choices[clampi(_cursor, 0, _choices.size() - 1)]] if not _choices.is_empty() \
+			else []
 	var values: Array = override if not override.is_empty() else (
 		_choices if _mode == MODE.MENU \
 		else _pc_rows if _mode in [MODE.PC, MODE.PC_ITEMS] \
@@ -1453,7 +1462,7 @@ func _render_service_page(values: Array) -> void:
 			labels.append(label)
 		else:
 			labels.append(String(value))
-	var image: Image = _service_page.render(
+	var image: Image = _dial_image() if _is_dial() else _service_page.render(
 		_title.text, _summary.text, labels, _cursor, _status.text, _service_box()
 	)
 	if image != null:
@@ -1461,12 +1470,31 @@ func _render_service_page(values: Array) -> void:
 		_service_hardware.visible = true
 
 
+func _is_dial() -> bool:
+	return _mode == MODE.MENU and _menu != null and _menu.kind == &"spinner"
+
+
+## `SetDayOfWeek`'s `.loop`: the box, the two arrows, the one weekday string at
+## `hlcoord 10, 5` and `.OakTimeWhatDayIsItText` in the speech box below it.
+func _dial_image() -> Image:
+	if _clock_page == null:
+		_clock_page = Gen2ClockSetPage.from_data(_data)
+	if _clock_page == null:
+		return null
+	var day: int = clampi(_cursor, 0, Gen2ClockSetScreen.DAYS.size() - 1)
+	var prompt: String = _summary.text if not _summary.text.is_empty() \
+		else "What day is it?"
+	return _clock_page.render(Gen2ClockSetScreen.DAYS[day], prompt, -1, true)
+
+
 ## The `menu_coords` box this mode's own list sits in. `null` draws no box,
 ## which is what MODE.MENU falls back to before a menu is loaded.
 func _service_box() -> Gen2MenuBox:
 	match _mode:
 		MODE.MENU:
-			return _menu.box() if _menu != null else null
+			if _menu == null or _menu.kind == &"spinner":
+				return null
+			return _menu.box()
 		MODE.PC, MODE.PC_ITEMS:
 			return _pc_top_box()
 		MODE.PC_ITEM_LIST:

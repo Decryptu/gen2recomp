@@ -3273,13 +3273,16 @@ func test_set_day_of_week_follows_the_source_selection_and_confirmation_flow() -
 	var menu: Dictionary = runner.advance()
 	assert_eq(menu["status"], &"waiting")
 	assert_eq(menu["event"]["type"], &"menu")
+	## `SetDayOfWeek` shows one weekday between two arrows, not a seven-row list:
+	## seven rows at `_InitVerticalMenuCursor`'s two-row step do not fit a screen.
+	assert_eq(menu["event"]["menu_kind"], &"spinner")
 	assert_eq(menu["event"]["options"], [
-		&"Sunday", &"Monday", &"Tuesday", &"Wednesday", &"Thursday", &"Friday", &"Saturday",
+		&"SUNDAY", &"MONDAY", &"TUESDAY", &"WEDNESDAY", &"THURSDAY", &"FRIDAY", &"SATURDAY",
 	])
 
 	var confirmation_text: Dictionary = runner.advance(true, 3)
 	assert_eq(confirmation_text["event"]["type"], &"text")
-	assert_eq(confirmation_text["event"]["text"], "Wednesday,\nis it?")
+	assert_eq(confirmation_text["event"]["text"], "WEDNESDAY,\nis it?")
 	var confirmation: Dictionary = runner.advance(true)
 	assert_eq(confirmation["event"]["type"], &"choice")
 	assert_eq(confirmation["event"]["choices"], [&"yes", &"no"])
@@ -3290,6 +3293,85 @@ func test_set_day_of_week_follows_the_source_selection_and_confirmation_flow() -
 	var complete: Dictionary = runner.advance(true)
 	assert_eq(complete["status"], &"complete")
 	assert_eq(complete["clock"], {"day": 3, "hour": 8, "minute": 15})
+
+
+## `Script_yesorno` is `YesNoBox` drawn over the box `writetext` left open, and
+## `Script_verticalmenu` is `_2DMenu` over the same box, so the question a choice
+## answers is the last text the script wrote. Without it a host has nothing but
+## the command's own name, which is how "yesorno" reached the screen.
+func test_a_choice_carries_the_text_the_open_box_is_still_showing() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6640"] = [
+		Gen2WorldScript.WRITETEXT, 0x00, 0x70,
+		Gen2WorldScript.YESORNO,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6650"] = [
+		Gen2WorldScript.WRITETEXT, 0x00, 0x70,
+		Gen2WorldScript.CLOSETEXT,
+		Gen2WorldScript.YESORNO,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6640,
+	})
+	assert_eq(runner.advance()["event"]["text"], "AB")
+	var choice: Dictionary = runner.advance(true)
+	assert_eq(choice["event"]["type"], &"choice")
+	assert_eq(choice["event"]["text"], "AB", JSON.stringify(choice))
+
+	var closed := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6650,
+	})
+	assert_eq(closed.advance()["event"]["text"], "AB")
+	assert_eq(closed.advance(true)["event"]["text"], "")
+
+
+## `_GetVarAction.BoxFreeSpace` is `MONS_PER_BOX - [sBoxCount]`. Route 29's
+## catching tutorial reads it before it hands a POKé BALL over, so an
+## unsupported variable stops that NPC talking at all.
+func test_readvar_boxspace_reads_the_party_summary_mirror() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6660"] = [
+		Gen2WorldScript.READVAR, 0x10,
+		Gen2WorldScript.IFEQUAL, 14, 0x70, 0x66,
+		Gen2WorldScript.END,
+	]
+	scripts["48:6670"] = [Gen2WorldScript.SETEVENT, 41, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+
+	var state := Gen2WorldState.new()
+	var runner := Gen2WorldScriptRunner.begin(data, state, {
+		"kind": &"test", "bank": 48, "script": 0x6660,
+		"party": {"count": 1, "box_free_space": 14},
+	})
+	assert_eq(runner.advance()["status"], &"complete")
+	assert_true(state.is_event_flag_active(41))
+
+	var unmirrored := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6660,
+	})
+	var refused: Dictionary = unmirrored.advance()
+	assert_eq(refused["status"], &"failed", JSON.stringify(refused))
+	assert_eq(refused["reason"], &"missing_party_summary")
+
+
+## An empty box is the whole box; a storage with no free slot anywhere answers 0,
+## which is the refusal every reader of the var already branches on.
+func test_box_free_space_answers_the_box_a_deposit_would_land_in() -> void:
+	var save: Gen2SaveData = Gen2SaveData.new()
+	assert_eq(save.box_free_space(), Gen2SaveBox.CAPACITY)
+	for slot: int in Gen2SaveBox.CAPACITY:
+		(save.boxes[0] as Gen2SaveBox).put(Gen2SaveMon.new())
+	assert_eq(save.box_free_space(), Gen2SaveBox.CAPACITY)
+	for box: Gen2SaveBox in save.boxes:
+		for slot: int in Gen2SaveBox.CAPACITY:
+			box.put(Gen2SaveMon.new())
+	assert_eq(save.box_free_space(), 0)
 
 
 func test_initial_dst_specials_publish_source_confirmation_text_and_commit_state() -> void:

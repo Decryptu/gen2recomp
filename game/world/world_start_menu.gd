@@ -99,7 +99,7 @@ static func build(
 			continue
 		if entry["kind"] == ITEM_EXIT:
 			if not Gen2ModHost.instance().option_mod_ids().is_empty():
-				items.append(_entry(ITEM_MODS, "Mods", true))
+				items.append(_entry(ITEM_MODS, "MODS", true))
 			items.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
 		var label: String = String(entry["label"])
 		## `PlaceString` reads `wPlayerName` for `<PLAYER>`, so the STATUS row
