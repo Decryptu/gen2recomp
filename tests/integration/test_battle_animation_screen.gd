@@ -45,6 +45,9 @@ func _open_battle() -> void:
 	while _screen.intro_running() and guard > 0:
 		_screen.advance_frame()
 		guard -= 1
+	## The intro runs on into `BattleMenu`, and a menu owns the joypad. These
+	## tests drive the pump mid-turn instead, so it is closed behind them.
+	_screen._close_battle_menu()
 
 
 func _animation_event(extra: Dictionary = {}) -> Dictionary:

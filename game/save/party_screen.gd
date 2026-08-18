@@ -22,6 +22,9 @@ signal closed(result: Dictionary)
 ## Gen2StartMenuScreen.action_chosen. Field moves need the live world, which
 ## belongs to the world screen, so the choice is reported rather than run here.
 signal action_chosen(action: Dictionary)
+## A sound this screen owes, by `constants/sfx_constants.asm` index. Emitted
+## rather than played: the audio player belongs to whoever embedded this.
+signal sfx_requested(index: int)
 
 const HARDWARE_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
 
@@ -60,6 +63,13 @@ const MAX_SUBMENU_ITEMS: int = 8
 ## of `data/text/common_*.asm`.
 const PROMPT_CHOOSE: String = "Choose a #MON."
 const PROMPT_USE_ON_WHICH: String = "Use on which PKMN?"
+
+## `SwitchPartyMons`' own `PARTYMENUACTION_MOVE` string, `MoveToWhereString`.
+const PROMPT_MOVE_TO_WHERE: String = "Move to where?"
+
+## `constants/sfx_constants.asm`'s SFX_SWITCH_POKEMON, which
+## `_SwitchPartyMons.ClearSprite` plays once the two rows have traded places.
+const SFX_SWITCH_POKEMON: int = 0x20
 
 ## `_PokemonNotEnoughHPText` and `_ItemCantUseOnMonText`, the two refusals the
 ## heal transfer prints. Both are a `MenuTextbox` over the menu on the cartridge
@@ -104,6 +114,9 @@ var _item_menu_open: bool = false
 ## which of the two moves asked. -1 and 0 when no recipient list is open.
 var _heal_user: int = -1
 var _heal_move: int = 0
+## `wSwitchMon` less one: which member SWITCH is holding, or -1 when the list is
+## not `InitPartyMenuNoCancel`'s.
+var _switch_from: int = -1
 
 ## The embedded view's own hardware screen and the two pages drawn into it.
 var _hardware: Gen2Screen = null
@@ -144,6 +157,7 @@ func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> 
 	_item_menu_open = false
 	_submenu_items = []
 	_submenu_cursor = 0
+	_switch_from = -1
 	if is_inside_tree() and _cards != null:
 		_refresh()
 
@@ -190,7 +204,7 @@ static func submenu_items_for(
 	## nothing to follow, teach or send out, and the source itself offers less.
 	if mon.is_egg:
 		items.append(_option_entry(OPTION_STATS, "STATS"))
-		items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
+		items.append(_option_entry(OPTION_SWITCH, "SWITCH", true))
 		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
 		return items
 	for move: int in mon.moves:
@@ -203,7 +217,9 @@ static func submenu_items_for(
 			"available": true,
 		})
 	items.append(_option_entry(OPTION_STATS, "STATS"))
-	items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
+	## `SwitchPartyMons` makes its own `cp 2` refusal rather than being greyed
+	## out, so the row is offered whatever the party holds.
+	items.append(_option_entry(OPTION_SWITCH, "SWITCH", true))
 	items.append(_option_entry(OPTION_MOVE, "MOVE"))
 	items.append(_option_entry(OPTION_ITEM, "ITEM", true))
 	## After every cartridge action and before CANCEL, which is the source's own
@@ -286,7 +302,9 @@ func _move_cursor(delta: int) -> void:
 ## `InitPartyMenuWithCancel`, which every way into this menu goes through: the
 ## party plus the CANCEL row `PlacePartyNicknames.end` prints after it.
 func _row_count() -> int:
-	return _party_size() + 1
+	## `SwitchPartyMons` reopens through `InitPartyMenuNoCancel`, so the row
+	## after the last member is not there to land on.
+	return _party_size() if _switch_from >= 0 else _party_size() + 1
 
 
 ## Where the arrow is, which [Gen2PartyMenuPage] counts the same way.
@@ -295,7 +313,7 @@ func _cursor_row() -> int:
 
 
 func _on_cancel_row() -> bool:
-	return _member_cursor >= _party_size()
+	return _switch_from < 0 and _member_cursor >= _party_size()
 
 
 func _confirm() -> void:
@@ -303,6 +321,9 @@ func _confirm() -> void:
 	## the row and the button are one path.
 	if _on_cancel_row() and not _submenu_open:
 		_cancel()
+		return
+	if _switch_from >= 0:
+		_finish_switch()
 		return
 	if _heal_user >= 0:
 		_choose_heal_target()
@@ -350,11 +371,20 @@ func _confirm() -> void:
 				"name": _display_name(_save.party[_member_cursor]),
 			})
 		&"option":
-			if StringName(entry.get("option", &"")) == OPTION_ITEM:
-				_open_item_menu()
+			match StringName(entry.get("option", &"")):
+				OPTION_ITEM:
+					_open_item_menu()
+				OPTION_SWITCH:
+					_begin_switch()
 
 
 func _cancel() -> void:
+	## `SwitchPartyMons`' `bit B_PAD_B` reaches `.DontSwitch`, which is
+	## `CancelPokemonAction`: the move is given up and the plain list comes back.
+	if _switch_from >= 0:
+		_switch_from = -1
+		_close_submenu()
+		return
 	## `.SelectMilkDrinkRecipient`'s own `.set_carry`: a B press over the
 	## recipient list gives up on the move and leaves the party menu standing.
 	if _heal_user >= 0:
@@ -420,6 +450,39 @@ func _choose_heal_target() -> void:
 	action_chosen.emit(action)
 
 
+## `SwitchPartyMons`: a party of one has nothing to trade with and falls straight
+## into `.DontSwitch`, and anything else holds this member and reopens the list
+## without its CANCEL row.
+func _begin_switch() -> void:
+	if _party_size() < 2:
+		_close_submenu()
+		return
+	_switch_from = _member_cursor
+	_submenu_open = false
+	_item_menu_open = false
+	_submenu_items = []
+	_refresh()
+
+
+## `_SwitchPartyMons`: the two members trade places whole, and the same row twice
+## is its own `jr z, .skip`. The list comes back with CANCEL either way.
+func _finish_switch() -> void:
+	var from: int = _switch_from
+	_switch_from = -1
+	if from != _member_cursor and from >= 0 and from < _party_size() \
+		and _member_cursor < _party_size():
+		var held: Gen2SaveMon = _save.party[from]
+		_save.party[from] = _save.party[_member_cursor]
+		_save.party[_member_cursor] = held
+		sfx_requested.emit(SFX_SWITCH_POKEMON)
+	_member_cursor = clampi(_member_cursor, 0, _row_count() - 1)
+	## The icons are respawned rather than stepped: `LoadPartyMenuGFX` and
+	## `InitPartyMenuGFX` run again behind the reopened list.
+	if _page != null:
+		_page.reset(_rows())
+	_refresh()
+
+
 func _open_item_menu() -> void:
 	_submenu_items = item_menu_items()
 	_submenu_cursor = 0
@@ -453,6 +516,7 @@ func submenu_snapshot() -> Dictionary:
 		"cursor": _submenu_cursor,
 		"member": _member_cursor,
 		"on_cancel": _on_cancel_row(),
+		"switch_from": _switch_from,
 		"message": _message,
 		"items": _submenu_items.duplicate(true),
 	}
@@ -550,6 +614,8 @@ func _rows() -> Array:
 func _prompt() -> String:
 	if not _message.is_empty():
 		return _message
+	if _switch_from >= 0:
+		return PROMPT_MOVE_TO_WHERE
 	return PROMPT_USE_ON_WHICH if _heal_user >= 0 else PROMPT_CHOOSE
 
 
@@ -563,7 +629,9 @@ func _render_hardware() -> void:
 	if _page == null:
 		return
 	var rows: Array = _rows()
-	var image: Image = _page.render(rows, _cursor_row(), _prompt())
+	var image: Image = _page.render(
+		rows, _cursor_row(), _prompt(), _switch_from < 0, _switch_from
+	)
 	if image == null:
 		return
 	if _menu_page != null and (_submenu_open or _item_menu_open):

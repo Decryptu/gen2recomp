@@ -328,7 +328,7 @@ func test_a_hit_drains_the_bar_before_it_says_what_the_hit_was() -> void:
 
 	var guard: int = 4000
 	while _battle_screen.bars_animating() and guard > 0:
-		_battle_screen.advance_bars()
+		_battle_screen.advance_frame()
 		guard -= 1
 	assert_eq(_battle_screen.battle_snapshot()["message"], "It's super effective!")
 
@@ -397,7 +397,7 @@ func test_experience_says_its_line_first_and_the_level_line_after_the_bar() -> v
 	# printed and the walk stops for the button that dismisses it.
 	var guard: int = 4000
 	while not _battle_screen._exp_bar.paused() and guard > 0:
-		_battle_screen.advance_bars()
+		_battle_screen.advance_frame()
 		guard -= 1
 	assert_gt(guard, 0, "the bar reached the end of the level")
 	assert_eq(
@@ -418,7 +418,7 @@ func test_experience_says_its_line_first_and_the_level_line_after_the_bar() -> v
 
 	guard = 4000
 	while _battle_screen.bars_animating() and guard > 0:
-		_battle_screen.advance_bars()
+		_battle_screen.advance_frame()
 		guard -= 1
 	assert_gt(guard, 0, "the walk ended")
 	assert_eq(

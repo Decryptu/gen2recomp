@@ -38,6 +38,10 @@ const CANCEL_COLUMN: int = NICKNAME.x - 2
 ## `Place2DMenuCursor`'s column, `PartyMenu2DMenuData`'s `db 1, 0`.
 const CURSOR_COLUMN: int = 0
 
+## `charmap.asm`: `"▷"` is $ec, which `SwitchPartyMons` writes at
+## `hlcoord 0, 1` over the row of the member being moved.
+const HELD_CODE: int = 0xEC
+
 ## Rows per member, `dn 2, 0`.
 const ROW_STEP: int = 2
 
@@ -123,7 +127,12 @@ static func from_data(source: GameData) -> Gen2PartyMenuPage:
 
 ## The whole screen, with the arrow on [param cursor] counting CANCEL as the row
 ## after the last member. [param rows] is [member Gen2BattleSwitchMenu.rows].
-func render(rows: Array, cursor: int, prompt: String) -> Image:
+## `SwitchPartyMons` opens through `InitPartyMenuNoCancel`, so [param cancel] is
+## false while a member is being moved, and [param held] is that member's row,
+## which wears `▷` instead of nothing.
+func render(
+	rows: Array, cursor: int, prompt: String, cancel: bool = true, held: int = -1
+) -> Image:
 	var width: int = Gen2Screen.WIDTH
 	var height: int = Gen2Screen.HEIGHT
 	var page: PackedByteArray = PackedByteArray()
@@ -131,10 +140,16 @@ func render(rows: Array, cursor: int, prompt: String) -> Image:
 
 	for index: int in rows.size():
 		_draw_member(page, width, index, rows[index])
-	font.draw_text(
-		Gen2BattleSwitchMenu.cancel_label(), page, width,
-		CANCEL_COLUMN * TILE, (NICKNAME.y + rows.size() * ROW_STEP) * TILE
-	)
+	if cancel:
+		font.draw_text(
+			Gen2BattleSwitchMenu.cancel_label(), page, width,
+			CANCEL_COLUMN * TILE, (NICKNAME.y + rows.size() * ROW_STEP) * TILE
+		)
+	if held >= 0 and held < rows.size():
+		font.draw_code(
+			HELD_CODE, page, width,
+			CURSOR_COLUMN * TILE, (NICKNAME.y + held * ROW_STEP) * TILE
+		)
 	_draw_cursor(page, width, cursor)
 	_draw_prompt(page, width, prompt)
 

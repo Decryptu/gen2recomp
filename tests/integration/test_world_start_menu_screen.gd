@@ -1307,6 +1307,72 @@ func test_the_party_submenu_takes_a_held_item_back() -> void:
 	assert_eq(_world_screen._world.state.item_quantity(7), 2)
 
 
+## `SwitchPartyMons`: the row is held, the list comes back with `▷` on it and no
+## CANCEL, and `_SwitchPartyMons` trades the two members whole.
+func test_the_party_submenu_switch_row_moves_a_member() -> void:
+	await _open_world()
+	var save: Gen2SaveData = _world_screen._injected_save
+	var first: Gen2SaveMon = save.party[0]
+	var second: Gen2SaveMon = save.party[1]
+	var played: Array[int] = []
+	_world_screen._open_embedded_party()
+	await get_tree().process_frame
+	var party: Gen2PartyScreen = _world_screen._party_host
+	party.sfx_requested.connect(func(index: int) -> void: played.append(index))
+	_choose_submenu(party, Gen2PartyScreen.OPTION_SWITCH)
+
+	var snapshot: Dictionary = party.submenu_snapshot()
+	assert_eq(int(snapshot["switch_from"]), 0, "the first row is being moved")
+	assert_false(bool(snapshot["open"]), "and the submenu is gone")
+	assert_eq(party._prompt(), Gen2PartyScreen.PROMPT_MOVE_TO_WHERE)
+	assert_eq(party._row_count(), 2, "InitPartyMenuNoCancel has no CANCEL row")
+
+	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
+	assert_same(save.party[0], second, "the two traded places")
+	assert_same(save.party[1], first)
+	assert_eq(played, [Gen2PartyScreen.SFX_SWITCH_POKEMON])
+	assert_eq(int(party.submenu_snapshot()["switch_from"]), -1)
+	assert_eq(party._row_count(), 3, "and CANCEL is back")
+
+
+## `.DontSwitch`, both ways into it: a party of one never leaves the submenu, and
+## B over the list is `CancelPokemonAction`.
+func test_switch_refuses_a_party_of_one_and_b_gives_the_move_up() -> void:
+	await _open_world()
+	var save: Gen2SaveData = _world_screen._injected_save
+	var first: Gen2SaveMon = save.party[0]
+	var second: Gen2SaveMon = save.party[1]
+	_world_screen._open_embedded_party()
+	await get_tree().process_frame
+	var party: Gen2PartyScreen = _world_screen._party_host
+
+	_choose_submenu(party, Gen2PartyScreen.OPTION_SWITCH)
+	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.B)
+	assert_eq(int(party.submenu_snapshot()["switch_from"]), -1)
+	assert_false(bool(party.submenu_snapshot()["open"]), "CancelPokemonAction")
+	assert_same(save.party[0], first, "and nothing moved")
+	assert_same(save.party[1], second)
+
+	save.party.remove_at(1)
+	party.set_context(_data, save, true)
+	_choose_submenu(party, Gen2PartyScreen.OPTION_SWITCH)
+	assert_eq(int(party.submenu_snapshot()["switch_from"]), -1, "cp 2 refused it")
+	assert_false(bool(party.submenu_snapshot()["open"]))
+
+
+## Opens the mon's submenu and puts the cursor on one of its option rows.
+func _choose_submenu(party: Gen2PartyScreen, option: StringName) -> void:
+	party.handle_button(Gen2Button.A)
+	var items: Array = (party.submenu_snapshot()["items"] as Array)
+	for index: int in items.size():
+		if StringName((items[index] as Dictionary).get("option", &"")) == option:
+			party.set("_submenu_cursor", index)
+			break
+	party.handle_button(Gen2Button.A)
+
+
 ## `SelectMenu`: `CheckRegisteredItem` answers first, and `MayRegisterItemText`
 ## is the whole of what an unregistered SELECT does.
 func test_select_says_an_item_may_be_registered_when_none_is() -> void:
