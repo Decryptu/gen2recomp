@@ -25,6 +25,11 @@ const RADIUS_MD: float = 14.0
 const RADIUS_SM: float = 10.0
 const RADIUS_PILL: float = 999.0
 
+## The clear space between a control's own edge and the focus ring around it. A
+## ring drawn flush on an accent button only makes the button look bigger; a
+## ring standing off it reads as a ring in every palette.
+const FOCUS_GAP: int = 3
+
 const FONT_HERO: int = 40
 const FONT_DISPLAY: int = 28
 const FONT_TITLE: int = 19
@@ -163,6 +168,18 @@ func box(
 	return style
 
 
+## The ring that says a keyboard or a pad is on a control, drawn clear of it by
+## [constant FOCUS_GAP]. Expand margins draw outside the control's rect without
+## touching its layout, so nothing moves when focus arrives.
+func focus_ring(radius: float = RADIUS_SM, width: int = 2) -> StyleBoxFlat:
+	# A border is drawn inside its box, so the box has to clear the control by the
+	# gap and the stroke together for the gap to survive.
+	var reach: float = float(FOCUS_GAP + width)
+	var style: StyleBoxFlat = box(Color(0, 0, 0, 0), radius + reach, accent, width)
+	style.set_expand_margin_all(reach)
+	return style
+
+
 ## A card that reads as sitting on the page rather than printed on it. Reserved
 ## for the few things that really float, because a shadow is drawn outside the
 ## control and any clipping ancestor would cut it.
@@ -190,7 +207,7 @@ func control_theme() -> Theme:
 
 	var field: StyleBoxFlat = padded(box(surface_alt, RADIUS_SM, line), 12, 9)
 	theme.set_stylebox("normal", "LineEdit", field)
-	theme.set_stylebox("focus", "LineEdit", padded(box(surface_alt, RADIUS_SM, accent, 2), 12, 9))
+	theme.set_stylebox("focus", "LineEdit", padded(focus_ring(RADIUS_SM), 12, 9))
 	theme.set_stylebox("read_only", "LineEdit", field)
 	theme.set_color("font_color", "LineEdit", text)
 	theme.set_color("font_placeholder_color", "LineEdit", faint)
@@ -203,9 +220,7 @@ func control_theme() -> Theme:
 			"hover", type, padded(box(panel.lerp(accent, 0.07), RADIUS_SM, accent_wash(0.4)), 14, 9)
 		)
 		theme.set_stylebox("pressed", type, padded(box(surface_alt, RADIUS_SM, line), 14, 9))
-		theme.set_stylebox(
-			"focus", type, padded(box(Color(0, 0, 0, 0), RADIUS_SM, accent, 2), 14, 9)
-		)
+		theme.set_stylebox("focus", type, padded(focus_ring(RADIUS_SM), 14, 9))
 		theme.set_stylebox("disabled", type, padded(box(surface_alt, RADIUS_SM, line), 14, 9))
 		theme.set_color("font_color", type, text)
 		theme.set_color("font_hover_color", type, text)
@@ -238,7 +253,7 @@ func control_theme() -> Theme:
 		theme.set_stylebox("slider", type, padded(box(surface_alt, 3.0, line), 0, 3))
 		theme.set_stylebox("grabber_area", type, padded(box(accent, 3.0), 0, 3))
 		theme.set_stylebox("grabber_area_highlight", type, padded(box(accent, 3.0), 0, 3))
-		theme.set_stylebox("focus", type, padded(box(Color(0, 0, 0, 0), RADIUS_SM, accent, 2), 4, 4))
+		theme.set_stylebox("focus", type, padded(focus_ring(RADIUS_SM), 4, 4))
 		theme.set_icon("grabber", type, _knob(accent))
 		theme.set_icon("grabber_highlight", type, _knob(accent.lightened(0.15)))
 		theme.set_icon("grabber_disabled", type, _knob(faint))

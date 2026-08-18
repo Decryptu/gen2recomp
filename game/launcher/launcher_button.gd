@@ -165,10 +165,13 @@ func repaint() -> void:
 	_style("pressed", _pressed_fill(fill), _hovered(border), radius, pad_x, pad_y)
 	_style("disabled", _theme.with_alpha(fill, 0.4), _theme.with_alpha(border, 0.4),
 		radius, pad_x, pad_y)
-	# Focus is not hover or the active value. A distinct, heavy accent ring is
-	# always present so keyboard and controller users can locate the cursor even
-	# on a filled primary button or the already-selected dock page.
-	_style("focus", Color(0, 0, 0, 0), _theme.accent, radius, pad_x, pad_y, 3)
+	# Focus is not hover or the active value. A heavy accent ring standing clear
+	# of the button is always present, so keyboard and controller users can locate
+	# the cursor even on a filled primary button or the already-selected dock page,
+	# where a flush ring would only read as a slightly larger button.
+	add_theme_stylebox_override(
+		"focus", _theme.padded(_theme.focus_ring(radius, 3), pad_x, pad_y)
+	)
 
 	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
 			"font_focus_color"]:

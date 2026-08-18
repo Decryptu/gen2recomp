@@ -4,11 +4,14 @@ extends SceneTree
 ## chosen set of cartridges present.
 ##
 ##   Godot --path . -s res://tools/preview_launcher.gd -- \
-##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id] [scroll]
+##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id] \
+##       [scroll] [focus index]
 ##
 ## `view` is the mods page's own: `list`, `sources`, or `mod` with an id.
 ## `scroll` is how far down the page's own scroll to photograph, in pixels, for a
-## card that does not fit the window.
+## card that does not fit the window. `focus` puts the keyboard on the nth
+## focusable control in tree order, which is the only way to photograph a focus
+## ring: nothing takes focus until the player presses something.
 ##
 ## The state argument uses the preview seams on the launcher, so an empty shelf
 ## can be photographed on a machine that has every cache imported. Like
@@ -29,6 +32,7 @@ var _state: String = "full"
 var _view: String = ""
 var _mod: String = ""
 var _scroll: int = 0
+var _focus: int = -1
 
 
 func _initialize() -> void:
@@ -46,6 +50,7 @@ func _initialize() -> void:
 	_view = args[6] if args.size() > 6 else ""
 	_mod = args[7] if args.size() > 7 else ""
 	_scroll = int(args[8]) if args.size() > 8 else 0
+	_focus = int(args[9]) if args.size() > 9 else -1
 
 	# Both, because the window already exists by the time a tool script runs and
 	# only the display server moves it.
@@ -80,6 +85,15 @@ func _process(_delta: float) -> bool:
 		var scroll: ScrollContainer = _first_scroll(_launcher)
 		if scroll != null:
 			scroll.scroll_vertical = _scroll
+	# Late enough that the page it lands on is the one being photographed, and the
+	# guard has finished moving focus about after the page change.
+	if _frames == 20 and _focus >= 0:
+		var reachable: Array[Control] = []
+		_focusable(_launcher, reachable)
+		if _focus < reachable.size():
+			reachable[_focus].grab_focus()
+		else:
+			push_error("Only %d focusable controls" % reachable.size())
 	if _frames < 26:
 		return false
 	var image: Image = root.get_texture().get_image()
@@ -90,6 +104,15 @@ func _process(_delta: float) -> bool:
 	print("Wrote %s (%dx%d)" % [_output, image.get_width(), image.get_height()])
 	quit()
 	return true
+
+
+func _focusable(node: Node, into: Array[Control]) -> void:
+	var control := node as Control
+	if control != null and control.is_visible_in_tree() \
+			and control.focus_mode == Control.FOCUS_ALL:
+		into.append(control)
+	for child: Node in node.get_children():
+		_focusable(child, into)
 
 
 func _first_scroll(node: Node) -> ScrollContainer:

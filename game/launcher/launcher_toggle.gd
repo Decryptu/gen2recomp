@@ -44,10 +44,7 @@ func _draw() -> void:
 	draw_circle(centre, KNOB * 0.5, _theme.on_accent)
 	draw_circle(centre, KNOB * 0.5, _theme.with_alpha(_theme.line, 0.9), false, 1.0, true)
 	if has_focus():
-		draw_style_box(
-			_theme.box(Color(0, 0, 0, 0), TRACK.y * 0.5 + 3.0, _theme.accent, 2),
-			Rect2(Vector2(-3, -3), TRACK + Vector2(6, 6)),
-		)
+		draw_style_box(_theme.focus_ring(TRACK.y * 0.5), Rect2(Vector2.ZERO, TRACK))
 
 
 func _on_toggled(on: bool) -> void:
