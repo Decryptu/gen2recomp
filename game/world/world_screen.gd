@@ -1072,6 +1072,7 @@ func _complete_player_step(movement: Dictionary) -> bool:
 		## whose `FadeOutToWhite` runs before the map is loaded at all. The map
 		## swaps when that fade lands, and everything a step still owes waits
 		## for `FadeInFromWhite` behind it.
+		_zero_map_name_sign_timer()
 		_start_map_fade()
 		return true
 	return _after_map_settled()
@@ -1087,16 +1088,19 @@ func _after_map_settled() -> bool:
 	if sight_results.is_empty():
 		sight_results = _world.dispatch_script_events()
 	if not sight_results.is_empty():
+		_zero_map_name_sign_timer()
 		_show_script_results(sight_results)
 		return true
 	var special_attempt: Dictionary = _world.try_special_phone_call()
 	var special_results: Array = special_attempt.get("results", [])
 	if bool(special_attempt.get("attempted", false)) and not special_results.is_empty():
+		_zero_map_name_sign_timer()
 		_show_script_results(special_results)
 		return true
 	var phone_attempt: Dictionary = _world.try_receive_phone_call(_encounter_random)
 	var phone_results: Array = phone_attempt.get("results", [])
 	if bool(phone_attempt.get("attempted", false)) and not phone_results.is_empty():
+		_zero_map_name_sign_timer()
 		_show_script_results(phone_results)
 		return true
 	## `CheckTimeEvents`' contest branch, which is read a step at a time and
@@ -1104,6 +1108,7 @@ func _after_map_settled() -> bool:
 	## the contest ends.
 	var contest_over: Array = _world.check_bug_contest_timer()
 	if not contest_over.is_empty():
+		_zero_map_name_sign_timer()
 		_show_script_results(contest_over)
 		return true
 	_show_script_results([])
@@ -1114,12 +1119,16 @@ func _after_map_settled() -> bool:
 		var visible: Dictionary = _encounters.battle_request_at(_world.player_cell)
 		if not visible.is_empty():
 			_battle_encounter_id = StringName(visible["visible_encounter"])
+			_zero_map_name_sign_timer()
 			_start_battle_request(visible)
 		return true
 	var encounter: Dictionary = _world.encounter_request(
 		_encounter_random, false, &"auto", _repel_lead_level(), _party_holds_cleanse_tag()
 	)
 	if not encounter.is_empty():
+		## `RandomEncounter` answers `CheckTileEvent` with carry, so a wild met
+		## on a step is a player event like any other.
+		_zero_map_name_sign_timer()
 		_start_battle_request({
 			"kind": &"battle_requested",
 			"values": encounter["values"],
@@ -1268,6 +1277,9 @@ func interact() -> bool:
 	var results: Array = _world.interact()
 	if results.is_empty():
 		return false
+	## `OWPlayerInput`, the last branch `PlayerEvents` tries, and a player event
+	## like the rest of them.
+	_zero_map_name_sign_timer()
 	_show_script_results(results)
 	return true
 
@@ -3743,7 +3755,13 @@ func _raise_map_name_sign() -> void:
 	## `MapEntryFrameGFX` spends the same sixty frames with nothing drawn in
 	## them rather than skipping them.
 	_map_name_sign_frames = Gen2WorldAPI.MAP_NAME_SIGN_FRAMES
-	var image: Image = Gen2MapNameSignPage.render(_data, _data.landmark_name(landmark))
+	var image: Image = Gen2MapNameSignPage.render(
+		_data,
+		_data.landmark_name(landmark),
+		_world.current_map.environment if _world.current_map != null \
+			else Gen2WorldAPI.ENVIRONMENT_TOWN,
+		_render_time_of_day(),
+	)
 	if image == null:
 		return
 	_map_name_sign = TextureRect.new()
@@ -3763,18 +3781,22 @@ func _raise_map_name_sign() -> void:
 func _advance_map_name_sign() -> void:
 	if _map_name_sign_frames <= 0:
 		return
-	## `PlayerEvents` zeroes the timer behind every player event but a connection
-	## crossing and a change of facing, neither of which runs a script: a text
-	## box, a trainer or a warp takes the sign down where it stands.
-	if _world != null and _world.script_busy():
-		_hide_map_name_sign()
-		return
 	_map_name_sign_frames -= 1
 	if _map_name_sign_frames <= 0:
 		_hide_map_name_sign()
 		return
 	if _map_name_sign != null:
 		_map_name_sign.visible = true
+
+
+## `PlayerEvents`' own `xor a / ld [wLandmarkSignTimer], a`, which sits behind
+## `DoPlayerEvent` and is skipped for PLAYEREVENT_CONNECTION and
+## PLAYEREVENT_JOYCHANGEFACING alone. Called where this screen dispatches one of
+## the others, rather than keyed on a script being busy: the map's own callbacks
+## are `RunMapCallback`'s work inside map setup and reach `PlayerEvents` never,
+## so a queued one used to take down the very sign the map load had raised.
+func _zero_map_name_sign_timer() -> void:
+	_hide_map_name_sign()
 
 
 func _hide_map_name_sign() -> void:

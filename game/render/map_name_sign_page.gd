@@ -40,9 +40,27 @@ const TILE_INTERIOR: int = 13
 const NAME_ROW: int = 2
 
 
+## `PAL_BG_TEXT`, the slot `InitMapSignAttrmap` writes over every tile of the
+## sign. On a map that is the map's OWN palette 7, which `LoadMapPalettes` fills
+## out of `bg_tiles.pal`'s per-environment, per-time-of-day "text" row: cream,
+## cream, brown, black, which is what makes the sign read as wood. The blue
+## `Palette_TextBG7` this used to draw with is `LoadOW_BGPal7`'s, and nothing in
+## `MapSetupScript_Connection` or `RefreshMapSprites` runs that before the sign
+## is placed.
+const PAL_BG_TEXT: int = 7
+
+
 ## The sign holding [param name], or null when the cache carries no sheet, no
-## font or no text palette, which is every Gold and Silver cache.
-static func render(data: GameData, name: String) -> Image:
+## font or no palette, which is every Gold and Silver cache.
+##
+## [param environment] and [param time_of_day] are the map's, since the slot the
+## sign is drawn through is one of the eight the map loaded.
+static func render(
+	data: GameData,
+	name: String,
+	environment: int = Gen2WorldAPI.ENVIRONMENT_TOWN,
+	time_of_day: int = Gen2WorldPalette.TIME_MORNING,
+) -> Image:
 	if data == null:
 		return null
 	var sheet: PackedByteArray = data.tile_indices("map_entry_sign")
@@ -51,7 +69,8 @@ static func render(data: GameData, name: String) -> Image:
 	var font: Gen2Font = Gen2Font.from_data(data)
 	if font == null:
 		return null
-	var palette: PackedColorArray = data.text_bg_palette()
+	var slots: Array = Gen2WorldPalette.palette_slots(environment, time_of_day)
+	var palette: PackedColorArray = data.world_palette(int(slots[PAL_BG_TEXT]))
 	if palette.size() < 4:
 		palette = Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
 	var width: int = COLUMNS * TILE

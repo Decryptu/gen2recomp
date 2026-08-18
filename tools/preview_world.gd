@@ -38,6 +38,8 @@ extends SceneTree
 ## `map_name_sign` (`InitMapNameSign`'s window, raised by walking west off the
 ## map's edge onto its neighbour: `crystal 24 4 ... map_name_sign 1 8` crosses
 ## New Bark Town into Route 29),
+## `yes_no` (`Script_yesorno`'s box, over the map's first script run to the
+## choice it ends on: `crystal 26 3 ... yes_no 31 6` is Cherrygrove's guide),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -201,6 +203,20 @@ func _process(_delta: float) -> bool:
 			## is what runs `special DisplayUnownWords` and puts the box up.
 			_screen.press_button(Gen2Button.A)
 			_screen.press_button(Gen2Button.A)
+		elif _kind == &"yes_no":
+			## `Script_yesorno`'s own box: the NPC beside the player is talked
+			## to and each page answered until the choice the script ends on is
+			## up, which is what photographs `YesNoMenuHeader.MenuData`'s
+			## cursor. `crystal 26 3 ... yes_no 31 6` is Cherrygrove's guide.
+			_screen.press_button(Gen2Button.RIGHT)
+			_screen.interact()
+			for _press: int in WARP_FRAME_CAP:
+				if StringName(_screen._world.pending_script_input().get(
+					"command", &"")) == &"yesorno":
+					break
+				_screen.press_button(Gen2Button.A)
+				for _frame: int in 20:
+					_screen.advance_frame()
 		elif _kind == &"mart":
 			## The clerk behind the counter, talked to from the cell in front of
 			## him: his `pokemart` is what opens `BuyMenu`, so the shop is
