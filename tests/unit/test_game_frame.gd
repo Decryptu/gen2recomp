@@ -62,3 +62,12 @@ func test_the_portrait_screen_leaves_the_controller_its_share() -> void:
 func test_a_tiny_frame_keeps_the_screen_at_one_to_one() -> void:
 	var screen: Rect2 = _screen(Vector2(120, 300), true)
 	assert_eq(screen.size, Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT))
+
+
+## The split above is only reachable if the device is allowed to turn: Godot's
+## default locks every handheld to landscape, and nothing else here sets it.
+func test_a_handheld_may_turn_into_the_portrait_layout() -> void:
+	assert_eq(
+		int(ProjectSettings.get_setting("display/window/handheld/orientation")),
+		DisplayServer.SCREEN_SENSOR,
+	)

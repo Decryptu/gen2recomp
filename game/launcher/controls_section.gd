@@ -55,14 +55,13 @@ func _build() -> void:
 		+ "them off and need them back, tap the game screen three times quickly."
 	))
 
-	var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+	var actions: HFlowContainer = Gen2LauncherUI.actions()
 	add_child(actions)
 	var arrange: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Arrange on-screen buttons", Gen2LauncherButton.Variant.NEUTRAL, &"settings"
 	)
 	arrange.pressed.connect(func() -> void: arrange_requested.emit())
 	actions.add_child(arrange)
-	actions.add_child(Gen2LauncherUI.spacer())
 	var reset: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Reset controls", Gen2LauncherButton.Variant.QUIET
 	)
@@ -99,8 +98,7 @@ func _build_mod_actions() -> void:
 
 func _mod_row(action: Dictionary) -> HBoxContainer:
 	var name: StringName = action["name"]
-	var value: Label = Gen2LauncherUI.body(_theme, "")
-	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var value: Label = _bindings_label()
 	var edit: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Change", Gen2LauncherButton.Variant.QUIET
 	)
@@ -151,8 +149,7 @@ func _open_mod_editor(action: Dictionary) -> void:
 
 
 func _binding_row(button: int) -> HBoxContainer:
-	var value: Label = Gen2LauncherUI.body(_theme, "")
-	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var value: Label = _bindings_label()
 	var edit: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Change", Gen2LauncherButton.Variant.QUIET
 	)
@@ -164,6 +161,18 @@ func _binding_row(button: int) -> HBoxContainer:
 	_rows[button] = value
 	_refresh_row(button)
 	return row
+
+
+## What a control is bound to, which is the one part of a row with no bound on
+## its length: a button with three bindings names them all. It wraps rather than
+## widening the row, because the page it sits in scrolls vertically only and a
+## row wider than the window loses its Change button off the right edge.
+func _bindings_label() -> Label:
+	var value: Label = Gen2LauncherUI.body(_theme, "")
+	value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	value.custom_minimum_size = Vector2(60, 0)
+	return value
 
 
 func _label_for(button: int) -> Label:

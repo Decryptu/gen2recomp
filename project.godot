@@ -29,6 +29,9 @@ file_logging/enable_file_logging=true
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+; Both orientations: `Gen2GameFrame.split()` sends the hardware screen to the
+; top of a portrait window and gives the controller the room under it.
+window/handheld/orientation=6
 
 [editor_plugins]
 

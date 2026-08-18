@@ -4,6 +4,11 @@ extends TextureRect
 ## The launcher's custom filled icon set, rasterised from SVG at the size it is
 ## drawn. Source SVGs remain editable in `assets/launcher/icons`; their
 ## `currentColor` fill is replaced with the active palette colour at runtime.
+##
+## Each source carries `importer="keep"`, because this reads the SVG text rather
+## than the texture Godot's own SVG importer makes: an imported `.svg` ships as
+## its `.ctex` alone, so `_svg()` came back empty on every exported build and
+## every glyph drew nothing. `test_launcher_ui.gd` asserts the importer.
 const GRID: int = 24
 
 const ICON_DIRECTORY: String = "res://assets/launcher/icons"
@@ -55,19 +60,31 @@ static func raster(glyph: StringName, side: float, colour: Color) -> Texture2D:
 	var image: Image = Image.new()
 	# Rendered at twice the drawn size: the launcher scales with the window, and
 	# a stroke resampled up from its exact size frays.
-	var error: int = image.load_svg_from_string(_svg(glyph, colour), side * 2.0 / float(GRID))
-	if error != OK or image.is_empty():
+	var source: String = _svg(glyph, colour)
+	var error: int = OK if source.is_empty() else image.load_svg_from_string(
+		source, side * 2.0 / float(GRID)
+	)
+	if source.is_empty() or error != OK or image.is_empty():
+		# A TextureRect with no texture looks exactly like one that was never
+		# asked for, so say which glyph failed rather than draw a hole.
+		push_warning("Launcher icon '%s' did not rasterise (error %d)." % [glyph, error])
 		return null
 	var made: ImageTexture = ImageTexture.create_from_image(image)
 	_cache[key] = made
 	return made
 
 
-static func _svg(glyph: StringName, colour: Color) -> String:
+## The file the glyph is drawn from, so a check can reach it without repeating
+## the layout of `PATHS`.
+static func source_path(glyph: StringName) -> String:
 	var filename: String = PATHS.get(glyph, "")
-	if filename.is_empty():
+	return "" if filename.is_empty() else "%s/%s" % [ICON_DIRECTORY, filename]
+
+
+static func _svg(glyph: StringName, colour: Color) -> String:
+	if source_path(glyph).is_empty():
 		return ""
-	var source: String = FileAccess.get_file_as_string("%s/%s" % [ICON_DIRECTORY, filename])
+	var source: String = FileAccess.get_file_as_string(source_path(glyph))
 	return source.replace("currentColor", "#%s" % colour.to_html(false))
 
 
