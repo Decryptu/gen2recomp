@@ -275,14 +275,15 @@ func _blend_icons(image: Image, count: int) -> void:
 			if quadrant == ICON_ITEM_QUADRANT and bool(icon["item"]) and not held.is_empty():
 				source = held
 				tile = ICON_ITEM_TILE
-			_blend_tile(
+			blend_tile(
 				image, source, tile, colors,
 				at + Vector2i((quadrant & 1) * ICON_TILE, (quadrant >> 1) * ICON_TILE)
 			)
 
 
-## One 8x8 tile of an index strip, clipped to the screen.
-func _blend_tile(
+## One 8x8 tile of an index strip, clipped to the screen. Static and public
+## because the move screen composes the same icon over its own page.
+static func blend_tile(
 	image: Image, strip: PackedByteArray, tile: int, colors: PackedColorArray, at: Vector2i
 ) -> void:
 	@warning_ignore("integer_division")
