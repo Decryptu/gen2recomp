@@ -153,19 +153,26 @@ func draw_hp_bar(
 ## [param pixels] is `PlaceExpBar`'s own `b`: the bar is a pixel count, never a
 ## ratio, because `CalcExpBar` has already done the division and rounded it the
 ## cartridge's way.
+##
+## `PlaceExpBar` starts at `hlcoord 17, 11` and writes with `ld [hld], a`, so
+## the full tiles land at the right-hand end and the run walks left; unlike
+## `DrawBattleHPBar` it lays no empty template first and instead writes $62 for
+## every tile the fill did not reach. Filling the other way put the bar's lit
+## end on the wrong side, and skipping the empties left the trough unpainted.
 func draw_exp_bar(into: PackedByteArray, width: int, pixels: int) -> void:
-	var length: int = EXP_BAR_TILES * TILE
-	var lit: int = clampi(pixels, 0, length)
-	var left: int = PLAYER_EXP.x * TILE
+	var remaining: int = clampi(pixels, 0, EXP_BAR_TILES * TILE)
+	var right: int = PLAYER_EXP.x + EXP_BAR_TILES - 1
 	var top: int = PLAYER_EXP.y * TILE
 
 	for tile: int in EXP_BAR_TILES:
-		var within: int = clampi(lit - tile * TILE, 0, TILE)
-		if within <= 0:
-			continue
-		var number: int = Gen2BattleTiles.HP_BAR_FULL if within >= TILE \
-			else Gen2BattleTiles.EXP_BAR_FIRST_PARTIAL + within - 1
-		tiles.draw(number, into, width, left + tile * TILE, top)
+		var number: int = Gen2BattleTiles.HP_BAR_EMPTY
+		if remaining >= TILE:
+			number = Gen2BattleTiles.HP_BAR_FULL
+			remaining -= TILE
+		elif remaining > 0:
+			number = Gen2BattleTiles.EXP_BAR_FIRST_PARTIAL + remaining - 1
+			remaining = 0
+		tiles.draw(number, into, width, (right - tile) * TILE, top)
 
 
 ## The level symbol and the number, left-aligned after it, which is how a level

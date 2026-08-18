@@ -181,38 +181,61 @@ func test_the_hp_bar_fill_is_drawn_apart_from_the_panel() -> void:
 	assert_eq(_ink_in_row(empty, Gen2BattleHud.ENEMY_BAR.y), 0, "a fainted bar draws nothing")
 
 
-## `PlaceExpBar` takes a pixel count in `b`, walks eight tiles filling whole
-## ones and draws the remainder as a partial. It is never a ratio: `CalcExpBar`
-## has already divided.
+## `PlaceExpBar` takes a pixel count in `b`, and it is never a ratio:
+## `CalcExpBar` has already divided. It starts at `hlcoord 17, 11` and writes
+## with `ld [hld], a`, so the full tiles land at the right-hand end and the run
+## walks left, and unlike `DrawBattleHPBar` it lays no empty template first:
+## every tile the fill did not reach is written $62 by `.loop2`.
+##
+## The fixture fills each sheet with one index, so a column says which sheet
+## drew it: the seven partial fills are the exp bar's own (2) and the empty and
+## full tiles are the battle font's (1). A column of 0 is a hole.
 func test_the_exp_bar_is_drawn_from_a_pixel_count() -> void:
 	_write_cache()
 	var hud: Gen2BattleHud = Gen2BattleHud.from_data(_data())
-	var length: int = Gen2BattleHud.EXP_BAR_TILES * Gen2BattleHud.TILE
+	var tile: int = Gen2BattleHud.TILE
+	var length: int = Gen2BattleHud.EXP_BAR_TILES * tile
 
-	var empty: PackedByteArray = PackedByteArray()
-	empty.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
-	hud.draw_exp_bar(empty, Gen2Screen.WIDTH, 0)
-	assert_eq(_ink_in_row(empty, Gen2BattleHud.PLAYER_EXP.y), 0, "no exp draws nothing")
+	for pixels: int in [0, 4, tile, tile + 4, length, length * 2]:
+		var screen: PackedByteArray = _exp_row(hud, pixels)
+		for column: int in Gen2BattleHud.EXP_BAR_TILES:
+			assert_ne(
+				_exp_column(screen, column), 0,
+				"tile %d is drawn at %d pixels" % [column, pixels]
+			)
 
-	var part: PackedByteArray = PackedByteArray()
-	part.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
-	hud.draw_exp_bar(part, Gen2Screen.WIDTH, length / 2)
+	# Under one tile: only the rightmost column is a partial, and it is the
+	# right-hand one because the run is written leftward from column 17.
+	var part: PackedByteArray = _exp_row(hud, 4)
+	assert_eq(_exp_column(part, Gen2BattleHud.EXP_BAR_TILES - 1), 2, "the lit end is the right")
+	for column: int in Gen2BattleHud.EXP_BAR_TILES - 1:
+		assert_eq(_exp_column(part, column), 1, "tile %d is still empty" % column)
 
-	var full: PackedByteArray = PackedByteArray()
-	full.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
-	hud.draw_exp_bar(full, Gen2Screen.WIDTH, length)
+	# One tile and a remainder: the rightmost is full and the partial has moved
+	# one column left, which a bar filling the other way would invert.
+	var more: PackedByteArray = _exp_row(hud, tile + 4)
+	assert_eq(_exp_column(more, Gen2BattleHud.EXP_BAR_TILES - 1), 1, "a whole tile")
+	assert_eq(_exp_column(more, Gen2BattleHud.EXP_BAR_TILES - 2), 2, "then the remainder")
 
-	var part_ink: int = _ink_in_row(part, Gen2BattleHud.PLAYER_EXP.y)
-	var full_ink: int = _ink_in_row(full, Gen2BattleHud.PLAYER_EXP.y)
-	assert_ne(part_ink, 0)
-	assert_gt(full_ink, part_ink, "a fuller bar is more ink")
+	# Exactly full and past full draw the same eight whole tiles and no partial.
+	for pixels: int in [length, length * 2]:
+		var screen: PackedByteArray = _exp_row(hud, pixels)
+		for column: int in Gen2BattleHud.EXP_BAR_TILES:
+			assert_eq(_exp_column(screen, column), 1, "tile %d is whole" % column)
 
-	var over: PackedByteArray = PackedByteArray()
-	over.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
-	hud.draw_exp_bar(over, Gen2Screen.WIDTH, length * 2)
-	assert_eq(
-		_ink_in_row(over, Gen2BattleHud.PLAYER_EXP.y), full_ink, "the bar stops at its own end"
-	)
+
+func _exp_row(hud: Gen2BattleHud, pixels: int) -> PackedByteArray:
+	var screen: PackedByteArray = PackedByteArray()
+	screen.resize(Gen2Screen.WIDTH * Gen2Screen.HEIGHT)
+	hud.draw_exp_bar(screen, Gen2Screen.WIDTH, pixels)
+	return screen
+
+
+## The index one pixel inside tile [param column] of the exp bar's own row.
+func _exp_column(screen: PackedByteArray, column: int) -> int:
+	var x: int = (Gen2BattleHud.PLAYER_EXP.x + column) * Gen2Font.TILE
+	var y: int = Gen2BattleHud.PLAYER_EXP.y * Gen2Font.TILE
+	return screen[y * Gen2Screen.WIDTH + x]
 
 
 ## Lit pixels in one row of tiles.

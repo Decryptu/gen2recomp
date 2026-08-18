@@ -64,18 +64,30 @@ const UNKNOWN: int = 0xE6
 const POKE_SHORTHAND: String = "#"
 const POKE_WORD: String = "POK\u00e9"
 
-## The same two codes spelled the other way pret spells them. A caller writing
-## `<POKE>` or `<PKMN>` means the charmap entry, not six literal characters, and
-## without this each angle bracket encodes as UNKNOWN and prints "?".
-const WORD_SPELLINGS: Dictionary = {
+## The same two codes spelled the other way pret spells them, and the tiles each
+## one actually draws. `CheckDict` hands $24 to `PlacePOKE`, whose text is
+## `db "<PO><KE>@"`, and $4a to `PlacePKMN`, whose text is `db "<PK><MN>@"`: two
+## dedicated narrow tiles each, never the four letters `PlacePOKe` prints for
+## `#`. Without this each angle bracket encodes as UNKNOWN and prints "?".
+const WORD_TILES: Dictionary = {
+	"<POKE>": [0x70, 0x71],
+	"<PKMN>": [0xE1, 0xE2],
+}
+
+## The letters to fall back to when the loaded strip has no such tile: only the
+## battle-extra one, where $70 and $71 are `<DO>` and `◀`. Same policy as
+## [method _battle_extra_encodings]' dropped run, and no battle text writes
+## `<POKE>` anyway; `<PKMN>`'s $e1 and $e2 sit outside that run and are exact.
+const WORD_FALLBACKS: Dictionary = {
 	"<POKE>": POKE_WORD,
 	"<PKMN>": "PKMN",
 }
 
 ## The longest sequence one tile stands for: the apostrophe ligatures and PK/MN
-## are two characters in one glyph. The word codes $54 ("POKé") and $4a ("PKMN")
-## sit below FIRST_PRINTABLE and are decode-only; write "#" for $54 as the source
-## charmap does.
+## are two characters in one glyph. [constant WORD_TILES]' spellings are longer
+## and are matched ahead of this run rather than through it. The three word codes
+## themselves sit below FIRST_PRINTABLE and are decode-only; write "#" for $54 as
+## the source charmap does.
 const MAX_LIGATURE: int = 2
 
 static var _table: Dictionary = {}
@@ -149,12 +161,25 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 	# `PlaceNextChar` hands $54 to `CheckDict`, whose `PlacePOKe` prints four
 	# characters, so the source's own "#" is four tiles and not one. Expanding
 	# here is what puts POKé on screen: $54 is no glyph and would draw a blank.
+	# `<POKE>` and `<PKMN>` are the other two dict entries and are not spellings:
+	# each places its own pair of tiles below, or its letters where the strip
+	# has none.
 	var expanded: String = text.replace(POKE_SHORTHAND, POKE_WORD)
-	for spelling: String in WORD_SPELLINGS:
-		expanded = expanded.replace(spelling, WORD_SPELLINGS[spelling])
+	for spelling: String in WORD_TILES:
+		if not _strip_draws(WORD_TILES[spelling], font):
+			expanded = expanded.replace(spelling, WORD_FALLBACKS[spelling])
 
 	while at < expanded.length():
 		var taken: int = 0
+		for spelling: String in WORD_TILES:
+			if expanded.substr(at, spelling.length()) == spelling:
+				for code: int in WORD_TILES[spelling] as Array:
+					out.append(code)
+				taken = spelling.length()
+				break
+		if taken > 0:
+			at += taken
+			continue
 		# Longest first, so "'s" wins over a "'" with no "s" code after it.
 		for length: int in range(mini(MAX_LIGATURE, expanded.length() - at), 0, -1):
 			var candidate: String = expanded.substr(at, length)
@@ -168,6 +193,18 @@ static func encode(text: String, font: StringName = FONT_MAIN) -> PackedByteArra
 		at += taken
 
 	return out
+
+
+## Whether every tile of a [constant WORD_TILES] pair is drawn by the loaded
+## strip. `_LoadFontsBattleExtra` overwrites $60 to $78, so $70 and $71 are the
+## HP bar's neighbours there and only the letters can stand in.
+static func _strip_draws(tiles: Array, font: StringName) -> bool:
+	if font == FONT_MAIN:
+		return true
+	for code: int in tiles:
+		if code >= BATTLE_EXTRA_FIRST_CODE and code <= BATTLE_EXTRA_LAST_CODE:
+			return false
+	return true
 
 
 ## Tiles, not length: a ligature is two characters in one, so layout has to ask.
@@ -231,6 +268,10 @@ static func _characters() -> Dictionary:
 	table[0xF4] = ","
 	table[0xF5] = "♀"
 	table[0x6D] = ":"
+	# `PlacePOKEText`'s two tiles, out of `FontExtra`'s $63 to $78 run. Spelled
+	# as charmap spells them so nothing collapses them onto letters.
+	table[0x70] = "<PO>"
+	table[0x71] = "<KE>"
 	table[0x72] = "“"
 	table[0x73] = "”"
 	table[0x74] = "·"
@@ -252,8 +293,11 @@ static func _characters() -> Dictionary:
 	table[0xD6] = "'v"
 
 	# Codes that stand for whole words at print time.
-	table[0x24] = "POKé"
-	table[0x4A] = "PKMN"
+	# $24 and $4a are two tiles each and $54 is four, so the first two decode to
+	# the spelling [constant WORD_TILES] re-encodes exactly and only $54 to the
+	# word. Reading all three as "POKé"/"PKMN" is what drew `<POKE>` as letters.
+	table[0x24] = "<POKE>"
+	table[0x4A] = "<PKMN>"
 	table[0x54] = "POKé"
 	table[0x5B] = "PC"
 	table[0x5C] = "TM"

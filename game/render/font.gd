@@ -135,14 +135,21 @@ func draw_code(
 ## Draws a string left to right from [param at_x], advancing eight pixels per
 ## tile. Returns how many tiles were drawn, which is not the string's length
 ## when it contains a ligature.
+##
+## [param max_tiles] stops the run short. `PlaceString` has no such bound and
+## needs none: every cartridge string is written to fit the box it is placed in.
+## A label a mod supplies is not, so a caller drawing into a fixed width passes
+## the room it has and the rest of the string is dropped rather than written
+## over whatever is beside the box. Negative means no bound.
 func draw_text(
 	text: String, into: PackedByteArray, into_width: int, at_x: int, at_y: int,
-	font: StringName = Gen2Text.FONT_MAIN
+	font: StringName = Gen2Text.FONT_MAIN, max_tiles: int = -1
 ) -> int:
 	var codes: PackedByteArray = Gen2Text.encode(text, font)
-	for i: int in codes.size():
+	var drawn: int = codes.size() if max_tiles < 0 else mini(codes.size(), max_tiles)
+	for i: int in drawn:
 		draw_code(codes[i], into, into_width, at_x + i * TILE, at_y, font)
-	return codes.size()
+	return drawn
 
 
 ## Draws one tile of one text box border. [param code] is a box-drawing code

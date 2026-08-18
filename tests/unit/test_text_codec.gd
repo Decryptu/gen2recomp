@@ -67,14 +67,30 @@ func test_hash_encodes_the_word_the_source_dictionary_prints() -> void:
 
 ## `constants/charmap.asm` spells the same two codes `<POKE>` and `<PKMN>`, and a
 ## caller copying a source string writes them; an unexpanded bracket is UNKNOWN,
-## which is the "?" the start menu's POKéGEAR row was printing.
+## which is the "?" the start menu's POKéGEAR row was printing. Neither is the
+## four letters `#` prints: `PlacePOKE`'s text is `db "<PO><KE>@"` and
+## `PlacePKMN`'s is `db "<PK><MN>@"`, two dedicated tiles each.
 func test_angle_bracket_word_spellings_encode_like_their_codes() -> void:
-	assert_eq(Gen2Text.encode("<POKE>"), Gen2Text.encode("POKé"))
-	assert_eq(Gen2Text.encode("<POKE>GEAR"), Gen2Text.encode("POKéGEAR"))
-	assert_eq(Gen2Text.encoded_length("<POKE>GEAR"), 8)
-	assert_eq(Gen2Text.encode("<PKMN>"), Gen2Text.encode("PKMN"))
+	assert_eq(Gen2Text.encode("<POKE>"), PackedByteArray([0x70, 0x71]))
+	assert_eq(Gen2Text.encode("<PKMN>"), PackedByteArray([0xE1, 0xE2]))
+	assert_eq(Gen2Text.encoded_length("<POKE>GEAR"), 6, "four tiles narrower than POKéGEAR")
+	assert_ne(Gen2Text.encode("<POKE>"), Gen2Text.encode("POKé"), "$24 is not $54")
 	for code: int in Gen2Text.encode("<POKE>GEAR"):
 		assert_ne(code, Gen2Text.UNKNOWN)
+	# The two codes decode to the spelling that re-encodes to those same tiles;
+	# only $54 is the word, so a round trip never widens a name.
+	assert_eq(Gen2Text.character(0x24), "<POKE>")
+	assert_eq(Gen2Text.character(0x4A), "<PKMN>")
+	assert_eq(Gen2Text.encode(Gen2Text.character(0x24)), PackedByteArray([0x70, 0x71]))
+	assert_eq(Gen2Text.encode(Gen2Text.character(0x4A)), PackedByteArray([0xE1, 0xE2]))
+	# `_LoadFontsBattleExtra` overwrites $70 and $71, so only there do the
+	# letters stand in, the way the ellipsis is dropped from that strip.
+	assert_eq(
+		Gen2Text.encode("<POKE>", Gen2Text.FONT_BATTLE_EXTRA), Gen2Text.encode("POKé")
+	)
+	assert_eq(
+		Gen2Text.encode("<PKMN>", Gen2Text.FONT_BATTLE_EXTRA), PackedByteArray([0xE1, 0xE2])
+	)
 
 
 ## $75 is decode-only for the same reason $54 is, and source text writes the
