@@ -23,6 +23,10 @@ jobs:
   tests:
     name: editor scan and GUT
     runs-on: ubuntu-latest
+    # The whole job is about four minutes. A step that has printed its result
+    # and not exited should fail here rather than sit for GitHub's six-hour
+    # default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
