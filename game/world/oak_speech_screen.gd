@@ -107,6 +107,7 @@ func _ready() -> void:
 	add_child(_pic)
 
 	_text_box = Gen2TextBox.new()
+	_text_box.driven = true
 	_text_box.font = Gen2Font.from_data(_data)
 	_text_box.frame_style = Gen2OptionsStore.current().textbox_frame
 	_text_box.position = Vector2(0, Gen2TextBox.STANDARD_TOP * TILE)
@@ -120,6 +121,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _text_box != null:
+		_text_box.accelerated = Gen2Button.text_accelerating()
 	_accumulator += delta * Gen2IntroPresentation.FRAME_RATE
 	var frames: int = int(_accumulator)
 	_accumulator -= float(frames)
@@ -131,6 +134,8 @@ func _process(delta: float) -> void:
 ## `DelayFrames` without a clock; [method _process] is the only other caller.
 func advance_frames(count: int) -> void:
 	for _frame: int in count:
+		if _text_box != null:
+			_text_box.advance_frame()
 		if _phase != Phase.ANIMATING:
 			# The cry sits inside `OakText2`'s own `text_asm`, so it fires when
 			# the words have finished appearing rather than when A is pressed.
@@ -167,9 +172,13 @@ func name_choice_image() -> Image:
 	return _name_menu.image() if _name_menu != null else null
 
 
-## How many source frames the queued animation still owes, zero at a `PrintText`.
+## How many source frames the screen still owes before it is waiting on a press:
+## the queued animation, or the rest of a text that is still printing. A press
+## cannot shorten either, so a caller settling the screen spends these.
 func animation_frames_left() -> int:
-	return _presentation.remaining_frames() if _phase == Phase.ANIMATING else 0
+	if _phase == Phase.ANIMATING:
+		return _presentation.remaining_frames()
+	return _text_box.frames_left() if _text_box != null else 0
 
 
 ## The name the intro has settled on so far, empty until the naming screen

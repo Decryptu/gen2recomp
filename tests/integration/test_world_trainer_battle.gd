@@ -20,6 +20,12 @@ func before_each() -> void:
 	_data = Fixture.build()
 	_add_capture_metadata()
 	_data = GameData.open_directory(Fixture.directory())
+	## The box reveals at the OPTION menu's TEXT SPEED and a press cannot
+	## shorten it, so a page count depends on the setting: run on the test
+	## path's defaults rather than on whatever an earlier script, or this
+	## machine's own installed options, left behind.
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func after_each() -> void:
@@ -367,10 +373,11 @@ func test_production_world_entry_and_facing_object_story_persist_separate_flags(
 	assert_false(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_false(_world_screen._world.state.hall_of_fame())
 
-	## Two presses, not one: the box reveals at the OPTION menu's TEXT SPEED now,
-	## and the first press completes the page the way holding A does in
-	## `PrintLetterDelay`. The second is the one that acknowledges it.
-	_world_screen._advance_script_input()
+	## The box reveals at the OPTION menu's TEXT SPEED, and a press cannot shorten
+	## it: `PrintLetterDelay` is all a button reaches while a text is running, and
+	## the most it does there is one letter a frame. So the page is spent in
+	## frames and then one press acknowledges it.
+	_world_screen.advance_frames(_world_screen._text_box.frames_left())
 	_world_screen._advance_script_input()
 	assert_true(_world_screen._world.event_flag_active(STORY_EVENT_FLAG))
 	assert_true(_world_screen._world.state.hall_of_fame())

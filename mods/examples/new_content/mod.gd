@@ -18,29 +18,55 @@ const STATIC_FIELD: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
 ## An effect byte no cartridge move carries.
 const RECOIL_AND_PARALYSE: int = 0xF0
 
-## Electric. RomLayout names only the types the engine itself names; the rest are
-## reached by number, since a move's type byte is already one.
-const ELECTRIC: int = 0x17
+const ELECTRIC: int = RomLayout.TYPE_ELECTRIC
+## A type of the mod's own. Types are the one kind numbered from zero, the
+## cartridge chart being zero-based, so a DEFINED one still sits past 256.
+const PLASMA: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
+## An item of the mod's own, and the pack pocket it lands in. A mod pocket is at
+## or above Gen2ModHost.FIRST_MOD_POCKET; 1 to 4 are the cartridge's.
+const CELL_BATTERY: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
+const CURIOS_POCKET: int = Gen2ModHost.FIRST_MOD_POCKET
 ## Cartridge numbers, for the two rows this mod changes rather than adds.
 const PIKACHU: int = 25
 const THUNDERBOLT: int = 85
 
-
 func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
+	_add_a_type(host, manifest.id)
 	_add_a_species(host, manifest.id)
 	_add_a_move(host, manifest.id)
+	_add_an_item_and_its_shelf(host, manifest.id)
+	_add_a_control(host, manifest.id)
+	_populate_the_map(host, manifest.id)
 	_rebalance(host, manifest.id)
 	_watch(host, manifest.id)
+
+
+## A type, and the two chart exceptions that make it mean something
+## (`api_version` 4).
+##
+## The chart is a sparse table of exceptions, so a pair nobody names is already
+## neutral: there is no row to define and matchups are patched even for a type
+## this mod invented. `physical` is which stat pair the type uses, which
+## Generation II decides by type number rather than per move, so a number past
+## the cartridge chart has to say.
+func _add_a_type(host: Gen2ModHost, id: StringName) -> void:
+	host.register_content(Gen2ContentOverlay.KIND_TYPE, id, PLASMA, {
+		"name": "PLASMA",
+		"physical": false,
+	})
+	# Multipliers are in tenths, the way the damage formula divides.
+	host.patch_type_matchup(id, PLASMA, RomLayout.TYPE_STEEL, {
+		"multiplier": RomLayout.MATCHUP_SUPER_EFFECTIVE,
+	})
+	host.patch_type_matchup(id, RomLayout.TYPE_GROUND, PLASMA, {
+		"multiplier": RomLayout.MATCHUP_NOT_VERY_EFFECTIVE,
+	})
 
 
 ## A whole Pokémon. Everything a species carries is a field on one row, so the
 ## learnset, the evolution and the TM flags are part of the definition rather
 ## than four separate registrations; anything left out gets the kind's default,
 ## which is why this does not have to name a hatch cycle or a gender ratio.
-##
-## It has no pic: the atlas is decoded from the cartridge and holds 251 slots. A
-## mod wanting art for its own species needs a renderer, which is the other half
-## of docs/MODS.md.
 func _add_a_species(host: Gen2ModHost, id: StringName) -> void:
 	host.register_content(Gen2ContentOverlay.KIND_SPECIES, id, VOLTLING, {
 		"name": "VOLTLING",
@@ -48,8 +74,7 @@ func _add_a_species(host: Gen2ModHost, id: StringName) -> void:
 			"hp": 70, "attack": 65, "defense": 60,
 			"speed": 115, "sp_attack": 110, "sp_defense": 70,
 		},
-		# The second slot repeated is how the cartridge writes a single type.
-		"types": [ELECTRIC, ELECTRIC],
+		"types": [ELECTRIC, PLASMA],
 		"catch_rate": 45,
 		"base_exp": 180,
 		"growth_rate": Gen2Experience.GROWTH_MEDIUM_FAST,
@@ -60,7 +85,29 @@ func _add_a_species(host: Gen2ModHost, id: StringName) -> void:
 			{"level": 36, "move": THUNDERBOLT},
 		],
 		"evolutions": [],
+		# The pic atlases hold the cartridge's own slots and nothing else, so a
+		# defined species supplies decoded indices instead: two bits a pixel,
+		# row-major, exactly tiles * tiles * 64 of them (`api_version` 4).
+		"pics": {
+			"front": {"tiles": 7, "indices": _plaid(7)},
+			"back": {"tiles": 6, "indices": _plaid(6)},
+		},
+		# Eight tiles, the two 2x2 frames of the party menu's own strip. A
+		# cartridge icon number, 1 to 38, borrows a picture that already exists.
+		"icon": {"indices": _plaid(0, 8)},
+		"palette": {"normal": [0x3F1F, 0x1084], "shiny": [0x7FE0, 0x1084]},
 	})
+
+
+## Two bits a pixel is four shades, and a readable placeholder is worth more here
+## than a picture: the point of the example is the SHAPE the host takes.
+func _plaid(tiles: int, count: int = 0) -> PackedByteArray:
+	var pixels: int = count * 64 if count > 0 else tiles * tiles * 64
+	var out: PackedByteArray = PackedByteArray()
+	out.resize(pixels)
+	for at: int in pixels:
+		out[at] = ((at >> 3) + at) & 3
+	return out
 
 
 ## A move, and the effect that decides what it does.
@@ -96,6 +143,160 @@ func _add_a_move(host: Gen2ModHost, id: StringName) -> void:
 	})
 
 
+## An item, the pocket it lands in, and the mart shelf it is sold from
+## (`api_version` 3).
+##
+## The shelf row is a MENU entry rather than content: the item exists whatever a
+## mart sells, and `available` decides which marts carry it. A filter is handed
+## the resolved mart, `mart_id` included, and a row is dropped when it answers
+## false or when the cartridge shelf already sells that item.
+func _add_an_item_and_its_shelf(host: Gen2ModHost, id: StringName) -> void:
+	host.register_content(Gen2ContentOverlay.KIND_ITEM, id, CELL_BATTERY, {
+		"name": "CELLBATTERY",
+		"price": 800,
+		"pocket": CURIOS_POCKET,
+	})
+	host.register_menu_entry(Gen2ModHost.MENU_PACK_POCKET, id, {
+		"label": "CURIOS",
+		"pocket": CURIOS_POCKET,
+	})
+	host.register_menu_entry(Gen2ModHost.MENU_MART, id, {
+		"label": "CELLBATTERY",
+		"item": CELL_BATTERY,
+		# Half what the pack values it at, so the shelf price is visibly the
+		# shelf's rather than the item's.
+		"price": 400,
+		"available": func(mart: Dictionary) -> bool:
+			return int(mart.get("variant", 0)) == 0,
+	})
+
+
+## A control of the mod's own, as the two halves of one named axis
+## (`api_version` 3).
+##
+## A mod cannot see the cartridge's eight and the screen claims every one of them
+## first, so a raw keycode read out of `handle_world_input` would produce a
+## control that cannot be rebound and does not exist on a touchscreen. A default
+## already bound to one of the eight is dropped and reported rather than
+## silently never firing, which is why neither of these is `A` or `D`.
+func _add_a_control(host: Gen2ModHost, id: StringName) -> void:
+	host.register_action(id, {
+		"key": "survey_left", "label": "Survey left",
+		"default": [{"kind": "key", "code": KEY_Q}],
+	})
+	host.register_action(id, {
+		"key": "survey_right", "label": "Survey right",
+		"default": [{"kind": "key", "code": KEY_E}],
+	})
+
+
+## Wild Pokemon standing on the map instead of a roll on every step
+## (`api_version` 2), and the run's own rules deciding how they behave
+## (`api_version` 5).
+##
+## The provider owns its population and nothing else: which cells a wild may
+## stand on, which table each is checked against and what a battle costs all stay
+## the host's. It is a RefCounted and never a Node, and its four methods are
+## refused by name at registration.
+func _populate_the_map(host: Gen2ModHost, id: StringName) -> void:
+	host.register_visible_encounters(id, Population.new())
+
+
+## Rewriting how an event is PRESENTED, without changing what happened
+## (`api_version` 4).
+##
+## One mutator per channel, ahead of every watcher, and the host refuses a return
+## that changed the event's own kind: a mutator may dress a result and may not
+## turn one result into another. This is why the pair is registered rather than
+## the subscriber doing both jobs.
+func _rewrite_presentation(host: Gen2ModHost, id: StringName) -> void:
+	host.register_event_mutator(Gen2ModHost.CHANNEL_WORLD, id, _dress_world_event)
+
+
+## `status` is the world channel's routing key and is left exactly as it came:
+## the text a waiting result is showing is presentation, and which screen
+## operation the result is is not.
+func _dress_world_event(result: Dictionary) -> Dictionary:
+	var event: Dictionary = result.get("event", {})
+	if StringName(event.get("type", &"")) == &"text":
+		event["text"] = String(event.get("text", "")).replace("PIKACHU", "VOLTLING")
+		result["event"] = event
+	return result
+
+
+## The population itself. A separate object because a provider is a RefCounted
+## the host holds by name, and because everything it is told is a SNAPSHOT: the
+## context is a copy taken when the map or the player's pose changed, never a
+## live handle on the world.
+class Population:
+	extends RefCounted
+
+	## How many wanderers stand on a map, out of the cells the host says a wild
+	## is allowed on at all.
+	const POPULATION: int = 3
+
+	var _context: Dictionary = {}
+	var _entries: Array = []
+	var _generation: int = -1
+
+	func set_context(context: Dictionary) -> void:
+		_context = context
+		# `generation` is bumped on every map change, so this is the one test
+		# that says "a new map" rather than "the player moved".
+		if int(context.get("generation", -1)) == _generation:
+			return
+		_generation = int(context.get("generation", -1))
+		_repopulate()
+
+	func advance_frame() -> void:
+		pass
+
+	func encounters() -> Array:
+		return _entries
+
+	## This provider's rule, which every provider owes its reader: an entry the
+	## player fought is gone whatever the battle did.
+	func battle_finished(id: StringName, _result: Dictionary) -> void:
+		for at: int in _entries.size():
+			if StringName((_entries[at] as Dictionary)["id"]) == id:
+				_entries.remove_at(at)
+				return
+
+	func _repopulate() -> void:
+		_entries = []
+		var cells: PackedVector2Array = (
+			_context.get("eligible", {}).get("grass", PackedVector2Array())
+		)
+		var table: Array = _context.get("tables", {}).get("grass", {}).get("slots", [])
+		if cells.is_empty() or table.is_empty():
+			return
+		# The run's seed rather than a fresh generator, so the same save walking
+		# back onto the same map meets the same population.
+		var rolls := RandomNumberGenerator.new()
+		rolls.seed = int(_context.get("run_seed", 0)) ^ _generation
+		# `Gen2Rules` is the run's own divergence flags. A run reproducing the
+		# cartridge's bugs is the one that wants the cartridge's density; read
+		# it, never write it, since a rule that changed mid-run would make the
+		# save it produced unreproducible.
+		var count: int = POPULATION
+		if Gen2Rules.active().difficulty == Gen2Rules.DIFFICULTY_HARD:
+			count += 1
+		for at: int in mini(count, cells.size()):
+			var slot: Dictionary = table[rolls.randi_range(0, table.size() - 1)]
+			_entries.append({
+				"id": StringName("voltling_%d_%d" % [_generation, at]),
+				"cell": Vector2i(cells[rolls.randi_range(0, cells.size() - 1)]),
+				"facing": Gen2WorldSprite.FACING_DOWN,
+				"species": int(slot.get("species", 0)),
+				"level": int(slot.get("min_level", 2)),
+				"dvs": Gen2BattleMon.PERFECT_DVS,
+				# Asked for on spawn; the host drops a repeat inside
+				# Gen2WorldEncounters.PULSE_FRAMES and draws nothing over a
+				# Pokemon that is not shiny.
+				"pulse": true,
+			})
+
+
 ## Changing what the cartridge shipped, rather than adding to it. A patch names
 ## only the fields it changes, and a Dictionary field merges, so this moves one
 ## stat and one number and leaves everything else on both rows alone.
@@ -113,6 +314,7 @@ func _rebalance(host: Gen2ModHost, id: StringName) -> void:
 func _watch(host: Gen2ModHost, id: StringName) -> void:
 	host.subscribe(Gen2ModHost.CHANNEL_BATTLE, id, _on_battle_event)
 	host.subscribe(Gen2ModHost.CHANNEL_WORLD, id, _on_world_event)
+	_rewrite_presentation(host, id)
 
 
 func _on_battle_event(event: Dictionary) -> void:

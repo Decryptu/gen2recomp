@@ -261,6 +261,31 @@ static func slider(
 	return line
 
 
+## The one file picker every launcher dialog is built from.
+##
+## `use_native_dialog` is asked for unconditionally rather than gated on
+## `FEATURE_NATIVE_DIALOG_FILE`: [FileDialog] already makes that exact test
+## before it goes native and falls back to its own window when the platform says
+## no, so a second gate here can only refuse a picker the platform would have
+## given us. That is what left iOS on the built-in browser, which lists paths
+## `FileAccess.open()` then refuses on every sandboxed platform. Any new
+## file-picking UI goes through here rather than building its own [FileDialog].
+static func file_picker(
+	theme: Gen2LauncherTheme,
+	title_text: String,
+	mode: FileDialog.FileMode,
+	filters: PackedStringArray
+) -> FileDialog:
+	var dialog := FileDialog.new()
+	dialog.file_mode = mode
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.filters = filters
+	dialog.title = title_text
+	dialog.use_native_dialog = true
+	dialog.theme = theme.control_theme()
+	return dialog
+
+
 static func _label(text: String, size: int, colour: Color) -> Label:
 	var label := Label.new()
 	label.text = text

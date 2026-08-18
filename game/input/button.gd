@@ -103,3 +103,11 @@ static func released_in(event: InputEvent) -> int:
 
 static func held(button: int) -> bool:
 	return Input.is_action_pressed(ACTIONS.get(button, &""))
+
+
+## Whether a printing text should run at one letter a frame. `PrintLetterDelay`
+## reads `hJoyDown` and answers a HELD A or B with a single `DelayFrame`
+## (`home/print_text.asm`), so this is the whole of what a button does to text
+## that is still appearing, and it is a hold rather than a press.
+static func text_accelerating() -> bool:
+	return held(A) or held(B)

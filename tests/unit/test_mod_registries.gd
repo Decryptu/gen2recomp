@@ -301,6 +301,58 @@ func test_the_shipped_example_mod_registers_everything_it_documents() -> void:
 	assert_eq(int(pikachu["stats"]["hp"]), 35)
 	assert_eq(String(pikachu["name"]), "PIKACHU")
 
+	# The example is the documentation for the whole contract, so it declares the
+	# current one and demonstrates each surface a version added. A host bump with
+	# the example left behind fails here rather than in a mod author's reading.
+	for id: String in ["new_content", "voxel_preview"]:
+		var declared: Dictionary = Gen2ModManifest.read("res://mods/examples/%s" % id)
+		assert_true(bool(declared.get("ok", false)), id)
+		assert_eq(
+			(declared["manifest"] as Gen2ModManifest).api_version,
+			Gen2ModManifest.API_VERSION,
+			id
+		)
+	# 4: a type of its own, and a chart exception naming it.
+	assert_eq(
+		overlay.defined_numbers(Gen2ContentOverlay.KIND_TYPE),
+		[Gen2ContentOverlay.FIRST_MOD_NUMBER] as Array[int]
+	)
+	assert_eq(int(overlay.resolve(
+		Gen2ContentOverlay.KIND_MATCHUP,
+		Gen2ContentOverlay.matchup_number(
+			Gen2ContentOverlay.FIRST_MOD_NUMBER, RomLayout.TYPE_STEEL
+		),
+		{"multiplier": RomLayout.MATCHUP_EFFECTIVE}
+	).get("multiplier", 0)), RomLayout.MATCHUP_SUPER_EFFECTIVE)
+	# 4: decoded art, which is exactly tiles * tiles * 64 indices or it is dropped.
+	var voltling: Dictionary = overlay.resolve(
+		Gen2ContentOverlay.KIND_SPECIES, Gen2ContentOverlay.FIRST_MOD_NUMBER, {}
+	)
+	var front: Dictionary = (voltling["pics"] as Dictionary)["front"]
+	assert_eq((front["indices"] as PackedByteArray).size(), 7 * 7 * 64)
+	# 3: an item in a mod pocket, and the mart shelf it is sold from.
+	assert_eq(
+		int(overlay.resolve(
+			Gen2ContentOverlay.KIND_ITEM, Gen2ContentOverlay.FIRST_MOD_NUMBER, {}
+		)["pocket"]),
+		Gen2ModHost.FIRST_MOD_POCKET
+	)
+	var shelf: Array = host.mart_entries({"mart_id": 0, "variant": 0, "items": []})
+	assert_eq(shelf.size(), 1)
+	assert_eq(int((shelf[0] as Dictionary)["item"]), Gen2ContentOverlay.FIRST_MOD_NUMBER)
+	assert_eq(int((shelf[0] as Dictionary)["price"]), 400)
+	# 3: a named axis, whose two halves both registered rather than colliding
+	# with the cartridge's eight.
+	assert_eq(host.actions().size(), 2)
+	# 2: a visible-encounter population.
+	assert_eq(host.visible_encounter_ids().size(), 1)
+	# 4: one presentation mutator, which may not change the routing key.
+	var dressed: Dictionary = Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, {
+		"status": &"waiting", "event": {"type": &"text", "text": "PIKACHU!"},
+	})
+	assert_eq(StringName(dressed["status"]), &"waiting")
+	assert_eq(String((dressed["event"] as Dictionary)["text"]), "VOLTLING!")
+
 
 func test_every_refusal_reason_the_mod_layer_produces_has_player_wording() -> void:
 	# The launcher and the index dialog share one table now; a reason worded in

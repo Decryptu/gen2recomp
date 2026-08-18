@@ -12,8 +12,10 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 const PLAYER_CELL: Vector2i = Vector2i(2, 2)
 const TUTORIAL_CELL: Vector2i = Vector2i(4, 5)
 const GOODBYE_TEXT: int = 0x6400
-## Each page takes two presses: one completes the reveal, the next advances.
-const PRESSES_PER_PAGE: int = 2
+## A page costs one press, once it has finished printing. A press cannot shorten
+## the printing: `PrintLetterDelay` is the only thing a button reaches while text
+## is running, so a page is spent in frames and then turned.
+const PRESSES_PER_PAGE: int = 1
 
 var _data: GameData = null
 var _world_screen: Gen2WorldScreen = null
@@ -23,6 +25,12 @@ func before_each() -> void:
 	Fixture.build()
 	_write_oak_script()
 	_data = GameData.open_directory(Fixture.directory())
+	## The box reveals at the OPTION menu's TEXT SPEED and a press cannot
+	## shorten it, so a page count depends on the setting: run on the test
+	## path's defaults rather than on whatever an earlier script, or this
+	## machine's own installed options, left behind.
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func after_each() -> void:
@@ -63,6 +71,10 @@ func _open_world() -> void:
 	_world_screen.set_save(save)
 	add_child(_world_screen)
 	await get_tree().process_frame
+	# The box reveals on hardware frames now, and this test counts pages against
+	# exact presses: take the host's processing away so the frames it spends are
+	# the ones it asked for.
+	_world_screen.set_process(false)
 
 
 func _run_script() -> void:
@@ -87,10 +99,12 @@ func test_a_or_b_walks_the_pages_and_hands_the_box_back_to_the_script() -> void:
 	await _open_world()
 	_run_script()
 	for _press: int in PRESSES_PER_PAGE * 2:
+		_settle_text()
 		_world_screen.press_button(Gen2Button.B)
 	assert_eq(_world_screen._oak_pc_pages.size(), 1, "the rating is up")
 
 	for _press: int in PRESSES_PER_PAGE:
+		_settle_text()
 		_world_screen.press_button(Gen2Button.A)
 	assert_eq(_world_screen._oak_pc_pages.size(), 0)
 	assert_true(_world_screen._text_box.visible, "the script's own text now")
@@ -104,3 +118,12 @@ func test_the_pages_hold_the_world() -> void:
 	_run_script()
 	assert_false(_world_screen.move_player(Vector2i.RIGHT))
 	assert_false(_world_screen.interact())
+
+
+## Spends the frames the box still owes, which is what a player waits through.
+func _settle_text() -> void:
+	var box: Gen2TextBox = _world_screen._text_box
+	var guard: int = 600
+	while box != null and box.is_revealing() and guard > 0:
+		_world_screen.advance_frame()
+		guard -= 1

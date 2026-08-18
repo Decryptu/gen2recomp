@@ -97,6 +97,41 @@ func test_every_named_icon_rasterises_rather_than_drawing_nothing() -> void:
 	assert_eq(Gen2LauncherIcon.source_path(&"nonesuch"), "")
 
 
+## The built-in browser lists paths `FileAccess.open()` then refuses on every
+## sandboxed platform, so a dialog that does not ask for the system picker is a
+## picker the player cannot import with. `FileDialog` makes the feature test
+## itself, so asking is always right and gating is what breaks iOS.
+func test_every_file_picker_asks_for_the_systems_own() -> void:
+	var dialog: FileDialog = Gen2LauncherUI.file_picker(
+		_light, "Choose", FileDialog.FILE_MODE_OPEN_FILE, PackedStringArray(["*.gbc; Dump"])
+	)
+	autofree(dialog)
+	assert_true(dialog.use_native_dialog)
+	assert_eq(dialog.access, FileDialog.ACCESS_FILESYSTEM)
+	assert_eq(dialog.file_mode, FileDialog.FILE_MODE_OPEN_FILE)
+	assert_eq(dialog.title, "Choose")
+	# One helper, so a screen added later cannot reintroduce its own gate.
+	for path: String in _scripts_under("res://game"):
+		var source: String = FileAccess.get_file_as_string(path)
+		if path.ends_with("launcher/launcher_ui.gd"):
+			continue
+		assert_false(source.contains("FileDialog.new()"), path)
+		assert_false(source.contains("FEATURE_NATIVE_DIALOG_FILE"), path)
+
+
+func _scripts_under(root: String) -> Array[String]:
+	var found: Array[String] = []
+	var queue: Array[String] = [root]
+	while not queue.is_empty():
+		var directory: String = queue.pop_front()
+		for name: String in DirAccess.get_directories_at(directory):
+			queue.append("%s/%s" % [directory, name])
+		for name: String in DirAccess.get_files_at(directory):
+			if name.ends_with(".gd"):
+				found.append("%s/%s" % [directory, name])
+	return found
+
+
 ## A launcher page scrolls vertically only, so nothing inside one may measure
 ## wider than the window it is given: a portrait phone is the ordinary case.
 func test_a_settings_row_stacks_rather_than_running_off_a_narrow_page() -> void:

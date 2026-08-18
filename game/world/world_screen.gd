@@ -309,6 +309,10 @@ func _build_world() -> void:
 	add_child(_audio_player)
 	_play_current_map_music()
 	_text_box = Gen2TextBox.new()
+	# The overworld owns the frame, so the reveal is spent in [method
+	# advance_frame] with everything else the frame draws rather than on a second
+	# clock only real time turns.
+	_text_box.driven = true
 	_text_box.font = Gen2Font.from_data(_data)
 	_apply_text_box_options()
 	_text_box.place_at_bottom()
@@ -475,6 +479,9 @@ func advance_frames(count: int) -> void:
 ## [member Gen2WorldAPI.frame_number] and not of banked real time.
 func advance_frame() -> void:
 	_spending_frame = true
+	if _text_box != null:
+		_text_box.accelerated = Gen2Button.text_accelerating()
+		_text_box.advance_frame()
 	if _world != null:
 		_world.advance_frame_counter()
 		if _replaying_input:
@@ -2194,10 +2201,6 @@ func _on_battle_finished(result: Dictionary) -> void:
 
 
 func _advance_script_input() -> void:
-	if _text_box.is_revealing():
-		_text_box.finish()
-		_continue_if_text_settled()
-		return
 	if _text_box.advance():
 		_continue_if_text_settled()
 		return
@@ -2663,9 +2666,6 @@ func _show_prof_oaks_pc_page() -> void:
 func _advance_prof_oaks_pc() -> void:
 	if _text_box == null:
 		_close_prof_oaks_pc()
-		return
-	if _text_box.is_revealing():
-		_text_box.finish()
 		return
 	if _text_box.advance():
 		return
