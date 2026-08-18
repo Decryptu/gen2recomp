@@ -2078,6 +2078,10 @@ func _on_capture_requested(ball: int) -> void:
 			save.world = _world.snapshot()
 		_active_battle_save = save
 		_active_battle_persist = false
+	## The ball is thrown from a party that has already fought: the catch's own
+	## candidate is built from this save, so the fought HP and PP have to be on
+	## it before the transaction opens.
+	_battle_host.sync_live_party()
 	var target: Gen2BattleMon = _battle_host.capture_target()
 	## A contest throw is its own transaction: the ball is the contest's, the
 	## catch goes to wContestMon and no save is touched.

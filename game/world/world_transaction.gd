@@ -90,9 +90,21 @@ static func copy_into(target: Gen2SaveData, source: Gen2SaveData) -> void:
 	target.rom_sha1 = source.rom_sha1
 	target.slot = source.slot
 	target.player_name = source.player_name
+	target.player_id = source.player_id
+	target.gender = source.gender
+	target.label = source.label
 	target.party = source.party.duplicate(true)
 	target.boxes = source.boxes
 	target.world = source.world
+	target.mods = source.mods.duplicate(true)
+	target.run_seed = source.run_seed
+	target.run_mods = source.run_mods.duplicate(true)
+	target.run_options = source.run_options.duplicate(true)
+	target.run_rules = source.run_rules.duplicate_rules() if source.run_rules != null else null
+	target.boxes_shape_valid = source.boxes_shape_valid
+	## `game_time` is the one field the live save owns rather than the candidate:
+	## `Gen2WorldScreen._advance_game_time_frame` has been counting frames into it
+	## since the candidate was cloned, and copying the clone back loses them.
 
 
 static func failure(reason: StringName, details: Dictionary) -> Dictionary:

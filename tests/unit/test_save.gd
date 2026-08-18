@@ -296,6 +296,41 @@ func test_the_runs_rules_round_trip_and_are_absent_when_never_recorded() -> void
 	assert_eq(save.run_rules.difficulty, Gen2Rules.DIFFICULTY_HARD)
 
 
+## `Gen2WorldTransaction.copy_into` is the write-back every world-owned commit
+## and the battle save both end on, and it names its fields one by one: a field
+## added to the save and forgotten here reaches disk and never the live save,
+## which is what made a won battle revert. Compared through `to_dict`, so a new
+## field fails this rather than nothing.
+func test_the_transaction_write_back_carries_every_field_but_the_live_clock() -> void:
+	var live: Gen2SaveData = _save()
+	var candidate: Gen2SaveData = _save()
+	candidate.player_name = "AFTER"
+	candidate.player_id = 0x4321
+	candidate.gender = 1
+	candidate.label = "committed"
+	candidate.slot = live.slot + 1
+	candidate.mods = {"probe": {"kept": true}}
+	candidate.run_seed = 99
+	candidate.run_mods = ["probe"]
+	candidate.run_options = {"probe": {"level": 2}}
+	var rules := Gen2Rules.new()
+	rules.difficulty = Gen2Rules.DIFFICULTY_HARD
+	candidate.run_rules = rules
+	live.game_time.frames = 12
+
+	Gen2WorldTransaction.copy_into(live, candidate)
+
+	var written: Dictionary = live.to_dict()
+	var expected: Dictionary = candidate.to_dict()
+	written.erase("game_time")
+	expected.erase("game_time")
+	assert_eq(written, expected)
+	assert_eq(live.game_time.frames, 12, "the frames counted since the clone are the live save's")
+	# Its own objects, so the discarded candidate cannot be edited through it.
+	live.run_rules.difficulty = Gen2Rules.DIFFICULTY_EASY
+	assert_eq(candidate.run_rules.difficulty, Gen2Rules.DIFFICULTY_HARD)
+
+
 ## A slot written before the block existed says so rather than claiming frame
 ## zero of a seeded run.
 func test_a_save_without_a_run_block_records_no_seed() -> void:
