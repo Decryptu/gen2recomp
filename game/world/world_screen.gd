@@ -172,6 +172,12 @@ var _replay_held_direction: int = Gen2Button.NONE
 ## Whether a frame is being spent right now, which is what tells a press
 ## delivered from inside the pump from one that arrived between two frames.
 var _spending_frame: bool = false
+## `HealMachineAnim`'s own sounds and the frame of its wait each is due on, taken
+## from the event the special emits and spent by [method advance_frame]. The
+## machine's two tiles are not drawn with them: `gfx/overworld/heal_machine.2bpp`
+## is imported by nothing.
+var _heal_machine_sounds: Array = []
+var _heal_machine_frame: int = 0
 var _screen_base_position: Vector2 = Vector2.ZERO
 
 @onready var _screen: Gen2Screen = %Screen
@@ -531,6 +537,10 @@ func advance_frame() -> void:
 		var wait_results: Array = _world.advance_script_wait_frame()
 		if not wait_results.is_empty():
 			_show_script_results(wait_results)
+	_advance_heal_machine_sounds()
+	## `_ContText`'s scroll ends on a frame rather than on a press, and the page
+	## it lands on may be the text's last, which is where the script runs on.
+	_continue_if_text_settled()
 	if not _trainer_approach.is_empty():
 		_advance_trainer_approach()
 	if _world != null and _world.phone_ring_active():
@@ -884,16 +894,33 @@ func _advance_script_pause() -> void:
 		if not audio_results.is_empty():
 			_show_script_results(audio_results)
 		return
-	var pending_save: Gen2SaveData = _injected_save if _injected_save != null \
-		else _selected_runtime_save()
-	var host_result: Dictionary = Gen2WorldHost.complete_runtime_request(
-		_world, {"ok": true}, pending_save, _injected_save == null, _encounter_random
-	)
+	var host_result: Dictionary = _complete_pending_request()
 	if bool(host_result.get("ok", false)):
 		_show_script_results(host_result.get("results", []))
 		return
 	_script_prompt = "Host unavailable: %s" % String(host_result.get("reason", "unknown"))
 	_refresh_labels()
+
+
+## One pending runtime request answered by the host with the selected save,
+## which is the same call whether a press asked for it or nothing did.
+func _complete_pending_request(result: Dictionary = {"ok": true}) -> Dictionary:
+	var pending_save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	return Gen2WorldHost.complete_runtime_request(
+		_world, result, pending_save, _injected_save == null, _encounter_random
+	)
+
+
+## A request that spends no press on the cartridge, settled where it is staged.
+## Empty when the host refused it, which leaves the caller its own prompt: a
+## save with no party heals nothing, and that is a reason, not a press.
+func _complete_unattended_request() -> Array:
+	var settled: Dictionary = _complete_pending_request()
+	if not bool(settled.get("ok", false)):
+		_script_prompt = "Host unavailable: %s" % String(settled.get("reason", "unknown"))
+		return []
+	return settled.get("results", [])
 
 
 ## Scaffolding that reaches parts of the world no cartridge control does: the
@@ -2169,12 +2196,10 @@ func _on_battle_finished(result: Dictionary) -> void:
 func _advance_script_input() -> void:
 	if _text_box.is_revealing():
 		_text_box.finish()
+		_continue_if_text_settled()
 		return
 	if _text_box.advance():
-		## The press that reaches a `<DONE>` last page is that page's `<PARA>`,
-		## not an acknowledgement of the text: the script runs on behind it.
-		if not _text_awaits_press and not _text_box.has_pages_left():
-			_continue_after_text()
+		_continue_if_text_settled()
 		return
 	_text_box_rect_held += 1
 	_text_box.visible = false
@@ -2183,6 +2208,28 @@ func _advance_script_input() -> void:
 	_text_box_rect_held -= 1
 	_push_text_box_rect()
 	_refresh_labels()
+
+
+## `Script_writetext` is `MapTextbox` and returns as soon as the string is
+## placed, so a text ending in `<DONE>` owes no press of its own and the script
+## runs on the moment its last page is up. The box reaches that page three ways:
+## shown whole, turned to by the press that clears a `<PARA>`, or scrolled into
+## by `_ContText`, and only the first two are a press. The scroll ends on a
+## frame, which is why [method advance_frame] asks this as well; without it the
+## last page sat there with the script still suspended and the press that closed
+## the box paid for the `waitbutton` behind it, so every `<CONT>`-terminated
+## text cost one press more than the cartridge spends.
+func _continue_if_text_settled() -> bool:
+	if _text_box == null or not _text_box.visible or _world == null:
+		return false
+	if _text_awaits_press or not _oak_pc_pages.is_empty():
+		return false
+	if _text_box.is_scrolling() or _text_box.has_pages_left():
+		return false
+	if StringName(_world.pending_script_input().get("type", &"")) != &"text":
+		return false
+	_continue_after_text()
+	return true
 
 
 ## Runs a script on past a text that owes no press, leaving the box up: the
@@ -3325,6 +3372,8 @@ func _on_service_completed(results: Array) -> void:
 
 
 func _show_script_results(results: Array) -> void:
+	## Whether this result staged a text at all; whether it owes a press is
+	## [method _continue_if_text_settled]'s question, asked once the loop is done.
 	var continue_after_text: bool = false
 	var waiting: bool = false
 	var failed: bool = false
@@ -3359,8 +3408,7 @@ func _show_script_results(results: Array) -> void:
 					_text_box.visible = true
 				_script_prompt = "A: advance text"
 				_text_awaits_press = bool(event.get("prompt", true))
-				continue_after_text = not _text_awaits_press \
-					and not _text_box.has_pages_left()
+				continue_after_text = true
 			elif event_type == &"button":
 				if _text_box != null:
 					_text_box.visible = true
@@ -3404,10 +3452,12 @@ func _show_script_results(results: Array) -> void:
 					})
 					_show_script_results(swarm_results)
 					return
-				if StringName(request.get("kind", &"")) in [
-					&"pokemon_requested", &"trade_requested",
-				]:
-					_script_prompt = "Party transaction: press A to confirm"
+				if StringName(request.get("kind", &"")) in \
+					Gen2WorldHost.UNATTENDED_REQUESTS:
+					var settled: Array = _complete_unattended_request()
+					if not settled.is_empty():
+						_show_script_results(settled)
+						return
 					continue
 				if StringName(request.get("kind", &"")) in [
 					&"mart_requested", &"phone_call_requested",
@@ -3433,6 +3483,9 @@ func _show_script_results(results: Array) -> void:
 			if result_event.get("type", &"") == &"presentation_special_applied" \
 				and StringName(result_event.get("kind", &"")) == &"prof_oaks_pc_boot":
 				open_prof_oaks_pc()
+			elif result_event.get("type", &"") == &"presentation_special_applied" \
+				and StringName(result_event.get("kind", &"")) == &"heal_machine_anim":
+				_start_heal_machine_sounds(result_event)
 			elif result_event.get("type", &"") == &"hall_of_fame_requested":
 				## An event, not a runtime request: `halloffame` commits its flag
 				## and runs on, and the source's own `end` is the next command,
@@ -3506,8 +3559,7 @@ func _show_script_results(results: Array) -> void:
 			_renderer.refresh()
 	## Decided in the loop and spent here, because a special drawing its own
 	## pages is an event on the same result as the text waiting behind them.
-	if continue_after_text and _oak_pc_pages.is_empty():
-		_continue_after_text()
+	if continue_after_text and _continue_if_text_settled():
 		return
 	_refresh_labels()
 
@@ -3830,6 +3882,39 @@ func _play_encounter_sounds() -> void:
 	for command: Dictionary in _encounters.frame_commands():
 		if StringName(command["name"]) == Gen2BattleAnimScript.SOUND:
 			_play_sfx(int((command["operands"] as Array)[1]))
+
+
+## The machine's sounds, started where the special asked for them. A schedule
+## already running is replaced rather than mixed: two heal machines cannot be
+## going at once, since the script that started the first is waiting for it.
+func _start_heal_machine_sounds(event: Dictionary) -> void:
+	_heal_machine_sounds = (event.get("sounds", []) as Array).duplicate(true)
+	_heal_machine_frame = 0
+	_advance_heal_machine_sounds()
+
+
+## One frame of that schedule, spent from the same pump the script's own wait is.
+func _advance_heal_machine_sounds() -> void:
+	if _heal_machine_sounds.is_empty():
+		return
+	while not _heal_machine_sounds.is_empty() \
+		and int(_heal_machine_sounds[0].get("frame", 0)) <= _heal_machine_frame:
+		var due: Dictionary = _heal_machine_sounds.pop_front()
+		var index: int = int(due.get("index", 0))
+		if StringName(due.get("kind", &"sound")) == &"music":
+			_play_music(index)
+		else:
+			_play_sfx(index)
+	_heal_machine_frame += 1
+
+
+func _play_music(index: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.world_audio(&"music", index)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
 
 
 func _play_sfx(index: int) -> void:

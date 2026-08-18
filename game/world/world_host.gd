@@ -7,6 +7,16 @@ extends RefCounted
 ## pending with a specific reason rather than being guessed or acknowledged as
 ## if the subsystem had run.
 
+## The requests the host settles out of the save alone. `special HealParty`,
+## `givepoke` and `giveegg` each run to completion inside the command that asked
+## for them and the script runs straight on, so a screen completes one where it
+## is staged rather than waiting for a press: the cartridge spends none, and a
+## request nothing draws for has nothing to acknowledge.
+const UNATTENDED_REQUESTS: Array[StringName] = [
+	&"party_heal_requested", &"pokemon_requested", &"trade_requested",
+]
+
+
 static func complete_runtime_request(
 	world: Gen2WorldAPI,
 	result: Dictionary,

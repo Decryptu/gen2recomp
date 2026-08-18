@@ -3187,6 +3187,39 @@ func test_heal_machine_anim_special_emits_presentation_event_without_state_chang
 		JSON.stringify(result),
 	)
 	assert_false(world.event_flag_active(0))
+	## `ld a, [wPartyCount] / and a / ret z`: with no party the routine returns
+	## before it has loaded a tile, so it spends no frame and no sound.
+	assert_eq(
+		_event_value(result[0]["events"], &"presentation_special_applied", "sounds"), []
+	)
+
+
+## `.HallOfFame`'s sequence is the only one that differs: two effects around
+## `.FlashPalettes8Times` where the other two start `MUSIC_HEAL` under it.
+func test_heal_machine_sounds_follow_the_sequence_the_machine_type_selects() -> void:
+	var centre: Array = Gen2WorldScriptRunner.heal_machine_sounds(0, 3)
+	assert_eq(centre.size(), 4)
+	for ball: int in 3:
+		assert_eq(int(centre[ball]["frame"]), ball * 30)
+		assert_eq(
+			int(centre[ball]["index"]),
+			Gen2WorldScriptRunner.SFX_SECOND_PART_OF_ITEMFINDER,
+		)
+	assert_eq(StringName(centre[3]["kind"]), &"music")
+	assert_eq(int(centre[3]["frame"]), 90)
+
+	var hall: Array = Gen2WorldScriptRunner.heal_machine_sounds(
+		Gen2WorldScriptRunner.HEAL_MACHINE_HALL_OF_FAME, 1
+	)
+	assert_eq(
+		[int(hall[1]["frame"]), int(hall[1]["index"])],
+		[30, Gen2WorldScriptRunner.SFX_GAME_FREAK_LOGO_GS],
+	)
+	## `WaitSFX` between the two is not spent, like the world's other two.
+	assert_eq(
+		[int(hall[2]["frame"]), int(hall[2]["index"])],
+		[110, Gen2WorldScriptRunner.SFX_BOOT_PC],
+	)
 
 
 func test_check_pokerus_special_reads_the_low_nibble_across_the_party_summary() -> void:
