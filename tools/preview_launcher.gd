@@ -5,9 +5,14 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_launcher.gd -- \
 ##       <out.png> [light|dark] [width] [height] [page] [empty|mixed|full] [view] [mod id] \
-##       [scroll] [focus index]
+##       [scroll] [focus index] [fade step]
 ##
 ## `view` is the mods page's own: `list`, `sources`, or `mod` with an id.
+## `fade` is which step of the screen transition to photograph, 0 for none and 1
+## to 4 for one of `FadeOutToWhite`'s own rows: the launcher's leave-the-screen
+## sheet is stepped rather than tweened, so a still is the only way to see that
+## it is discrete. See [method Gen2LauncherShell.flash].
+##
 ## `scroll` is how far down the page's own scroll to photograph, in pixels, for a
 ## card that does not fit the window. `focus` puts the keyboard on the nth
 ## focusable control in tree order, which is the only way to photograph a focus
@@ -33,6 +38,7 @@ var _view: String = ""
 var _mod: String = ""
 var _scroll: int = 0
 var _focus: int = -1
+var _fade: int = 0
 
 
 func _initialize() -> void:
@@ -51,6 +57,7 @@ func _initialize() -> void:
 	_mod = args[7] if args.size() > 7 else ""
 	_scroll = int(args[8]) if args.size() > 8 else 0
 	_focus = int(args[9]) if args.size() > 9 else -1
+	_fade = int(args[10]) if args.size() > 10 else 0
 
 	# Both, because the window already exists by the time a tool script runs and
 	# only the display server moves it.
@@ -94,6 +101,10 @@ func _process(_delta: float) -> bool:
 			reachable[_focus].grab_focus()
 		else:
 			push_error("Only %d focusable controls" % reachable.size())
+	# After the page and the focus, so the sheet lies over the screen the fade is
+	# actually leaving.
+	if _frames == 24 and _fade > 0:
+		_launcher.preview_fade_step(_fade)
 	if _frames < 26:
 		return false
 	var image: Image = root.get_texture().get_image()

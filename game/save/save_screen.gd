@@ -598,7 +598,7 @@ func _continue_selected() -> void:
 		)
 		return
 	Gen2LauncherAudio.play(&"power")
-	await _shell.flash(0.35)
+	await _shell.flash(false)
 	get_tree().change_scene_to_file.call_deferred("res://game/world/world_screen.tscn")
 
 
@@ -615,7 +615,10 @@ func _open_party() -> void:
 	get_tree().change_scene_to_file.call_deferred("res://game/save/party_screen.tscn")
 
 
+## The same transition the launcher opened this screen with, walked the other
+## way: both ends carry a shell, so the sheet is handed over the scene change.
 func _back_to_launcher() -> void:
+	await _shell.flash()
 	get_tree().change_scene_to_file.call_deferred("res://game/main/main.tscn")
 
 

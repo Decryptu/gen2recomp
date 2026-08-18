@@ -4076,3 +4076,123 @@ func test_a_wild_force_switch_skips_the_end_of_turn_tail() -> void:
 		"`ResidualDamage` sits behind the `ret nz`")
 	assert_eq(battle.weather_turns, Gen2Weather.TURNS, "and so does the weather count")
 	assert_eq(_of_type(events, Gen2Battle.OVER).size(), 1)
+
+
+## `PlayBattleMusic` (engine/battle/start_battle.asm), whose whole answer is the
+## battle type, the trainer class and id, the landmark and `wTimeOfDay`.
+const JOHTO_LANDMARK: int = Gen2WorldRadio.LANDMARK_RUINS_OF_ALPH
+const KANTO_LANDMARK: int = Gen2WorldRadio.KANTO_LANDMARK
+
+
+func _music(
+	trainer_class: int = 0,
+	landmark: int = JOHTO_LANDMARK,
+	time_of_day: int = Gen2WorldPalette.TIME_DAY,
+	trainer_id: int = 1,
+	battle_type: int = Gen2Battle.BATTLETYPE_NORMAL,
+) -> int:
+	return Gen2Battle.battle_music(
+		battle_type, trainer_class, trainer_id, landmark, time_of_day
+	)
+
+
+func test_a_wild_battle_takes_the_region_and_the_hour() -> void:
+	assert_eq(_music(), Gen2Battle.MUSIC_JOHTO_WILD_BATTLE)
+	assert_eq(
+		_music(0, JOHTO_LANDMARK, Gen2WorldPalette.TIME_NIGHT),
+		Gen2Battle.MUSIC_JOHTO_WILD_BATTLE_NIGHT
+	)
+	## Kanto has one wild track, so the hour does not reach it.
+	assert_eq(_music(0, KANTO_LANDMARK), Gen2Battle.MUSIC_KANTO_WILD_BATTLE)
+	assert_eq(
+		_music(0, KANTO_LANDMARK, Gen2WorldPalette.TIME_NIGHT),
+		Gen2Battle.MUSIC_KANTO_WILD_BATTLE
+	)
+
+
+## `cp BATTLETYPE_SUICUNE` and `cp BATTLETYPE_ROAMING` both `jp z, .done` with
+## `MUSIC_SUICUNE_BATTLE` already in `de`, and both sit in front of the trainer
+## check, so a trainer class cannot take either of them off.
+func test_the_two_battle_types_in_front_answer_before_anything_else() -> void:
+	for battle_type: int in [Gen2Battle.BATTLETYPE_SUICUNE, Gen2Battle.BATTLETYPE_ROAMING]:
+		assert_eq(
+			_music(0, JOHTO_LANDMARK, Gen2WorldPalette.TIME_DAY, 1, battle_type),
+			Gen2Battle.MUSIC_SUICUNE_BATTLE
+		)
+		assert_eq(
+			_music(
+				Gen2Battle.TRAINER_CLASS_CHAMPION, KANTO_LANDMARK,
+				Gen2WorldPalette.TIME_DAY, 1, battle_type
+			),
+			Gen2Battle.MUSIC_SUICUNE_BATTLE
+		)
+
+
+func test_the_champion_and_red_answer_before_the_leader_lists() -> void:
+	assert_eq(_music(Gen2Battle.TRAINER_CLASS_CHAMPION), Gen2Battle.MUSIC_CHAMPION_BATTLE)
+	assert_eq(_music(Gen2Battle.TRAINER_CLASS_RED), Gen2Battle.MUSIC_CHAMPION_BATTLE)
+
+
+## `docs/bugs_and_glitches.md`: only the two grunt classes reach the Rocket
+## track. EXECUTIVEM and EXECUTIVEF fall through to the ordinary trainer rows.
+func test_only_the_two_grunt_classes_reach_the_rocket_track() -> void:
+	assert_eq(_music(Gen2Battle.TRAINER_CLASS_GRUNTM), Gen2Battle.MUSIC_ROCKET_BATTLE)
+	assert_eq(_music(Gen2Battle.TRAINER_CLASS_GRUNTF), Gen2Battle.MUSIC_ROCKET_BATTLE)
+	assert_eq(_music(0x33), Gen2Battle.MUSIC_JOHTO_TRAINER_BATTLE, "EXECUTIVEM")
+	assert_eq(_music(0x37), Gen2Battle.MUSIC_JOHTO_TRAINER_BATTLE, "EXECUTIVEF")
+	assert_eq(_music(0x14), Gen2Battle.MUSIC_JOHTO_TRAINER_BATTLE, "SCIENTIST")
+
+
+func test_the_kanto_list_is_checked_before_the_johto_one() -> void:
+	for leader: int in Gen2Battle.KANTO_GYM_LEADERS:
+		assert_eq(
+			_music(leader), Gen2Battle.MUSIC_KANTO_GYM_LEADER_BATTLE,
+			"class %d" % leader
+		)
+	for leader: int in Gen2Battle.JOHTO_GYM_LEADERS:
+		if leader in [Gen2Battle.TRAINER_CLASS_CHAMPION, Gen2Battle.TRAINER_CLASS_RED]:
+			continue
+		assert_eq(
+			_music(leader), Gen2Battle.MUSIC_JOHTO_GYM_LEADER_BATTLE,
+			"class %d" % leader
+		)
+
+
+## `cp RIVAL2_2_CHIKORITA / jr c, .done` keeps the three ids below the Indigo
+## Plateau rematch on the rival's own track and gives it the champion's.
+func test_the_second_rival_class_splits_on_its_trainer_id() -> void:
+	assert_eq(_music(Gen2Battle.TRAINER_CLASS_RIVAL1), Gen2Battle.MUSIC_RIVAL_BATTLE)
+	for id: int in [1, 2, 3]:
+		assert_eq(
+			_music(Gen2Battle.TRAINER_CLASS_RIVAL2, JOHTO_LANDMARK,
+				Gen2WorldPalette.TIME_DAY, id),
+			Gen2Battle.MUSIC_RIVAL_BATTLE, "id %d" % id
+		)
+	for id: int in [4, 5, 6]:
+		assert_eq(
+			_music(Gen2Battle.TRAINER_CLASS_RIVAL2, JOHTO_LANDMARK,
+				Gen2WorldPalette.TIME_DAY, id),
+			Gen2Battle.MUSIC_CHAMPION_BATTLE, "id %d" % id
+		)
+
+
+func test_an_ordinary_trainer_takes_the_region() -> void:
+	assert_eq(_music(0x16), Gen2Battle.MUSIC_JOHTO_TRAINER_BATTLE, "YOUNGSTER in Johto")
+	assert_eq(
+		_music(0x16, KANTO_LANDMARK), Gen2Battle.MUSIC_KANTO_TRAINER_BATTLE,
+		"YOUNGSTER in Kanto"
+	)
+
+
+## `RegionCheck` is not `IsInJohto`: the Fast Ship is Johto on both, and so is
+## Victory Road and everything above it, which `IsInJohto` calls Kanto.
+func test_region_check_keeps_the_fast_ship_and_victory_road_in_johto() -> void:
+	assert_false(Gen2Battle.region_is_kanto(Gen2WorldRadio.LANDMARK_FAST_SHIP))
+	assert_false(Gen2Battle.region_is_kanto(Gen2Battle.LANDMARK_VICTORY_ROAD))
+	assert_false(Gen2Battle.region_is_kanto(Gen2Battle.LANDMARK_VICTORY_ROAD + 1))
+	assert_true(Gen2Battle.region_is_kanto(Gen2Battle.LANDMARK_VICTORY_ROAD - 1))
+	assert_true(Gen2Battle.region_is_kanto(Gen2WorldRadio.KANTO_LANDMARK))
+	assert_false(Gen2Battle.region_is_kanto(Gen2WorldRadio.KANTO_LANDMARK - 1))
+	## Gold and Silver's table is one shorter from LANDMARK_BATTLE_TOWER on.
+	assert_true(Gen2Battle.region_is_kanto(Gen2WorldRadio.KANTO_LANDMARK - 1, false))
+	assert_false(Gen2Battle.region_is_kanto(Gen2WorldRadio.LANDMARK_FAST_SHIP - 1, false))
