@@ -27,6 +27,13 @@ func after_each() -> void:
 	RomCache.clear(Fixture.directory())
 
 
+## `_ContText`'s two `TextScroll` steps, which the box spends on its own frames.
+const TEXT_SCROLL_FRAMES: int = 16
+## The fixture's coord event, which every script case below is written onto.
+const SCRIPT_CELL: Vector2i = Vector2i(4, 5)
+const SCROLL_TEXT: int = 0x6400
+
+
 func _open_world(seed_value: int = 4242) -> Gen2WorldScreen:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	var screen: Gen2WorldScreen = packed.instantiate() as Gen2WorldScreen
@@ -153,3 +160,94 @@ func test_the_day_cycle_stays_on_real_seconds() -> void:
 		int(_world_screen._world.world_clock()["day"]),
 		(day + 1) % Gen2WorldClock.DAYS_PER_WEEK
 	)
+
+
+## A `writetext` whose text breaks at `<CONT>` and ends at `<DONE>`, with the
+## `waitbutton` the source puts behind every such command.
+func _write_scroll_script() -> void:
+	var directory: String = Fixture.directory()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT)] = [
+		Gen2WorldScript.WRITETEXT, SCROLL_TEXT & 0xFF, SCROLL_TEXT >> 8,
+		Gen2WorldScript.WAITBUTTON,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+	var text: Dictionary = RomCache.read_json(RomCache.world_text_path(directory))
+	var encoded: Array = [Gen2WorldScript.TEXT_START]
+	for byte: int in Gen2Text.encode("AB"):
+		encoded.append(byte)
+	encoded.append(Gen2TextStream.CHAR_CONT)
+	for byte: int in Gen2Text.encode("CD"):
+		encoded.append(byte)
+	encoded.append(Gen2TextStream.CHAR_DONE)
+	text[Gen2WorldScript.pointer_key(Fixture.BANK, SCROLL_TEXT)] = encoded
+	RomCache.write_json(RomCache.world_text_path(directory), text)
+	_data = GameData.open_directory(directory)
+
+
+## Frames until the box is neither revealing a page nor scrolling into one, so
+## the press that follows is the one the cartridge charges rather than the one
+## that skips a reveal.
+func _settle_text_box(screen: Gen2WorldScreen) -> void:
+	for _frame: int in 240:
+		if not screen._text_box.is_revealing() and not screen._text_box.is_scrolling():
+			return
+		screen.advance_frame()
+		screen._text_box.advance_frame()
+		screen._text_box.advance_scroll_frames(1.0)
+
+
+## `_ContText` waits for a press and scrolls; the `<DONE>` behind it owes none,
+## so the script runs on where the scroll lands and the `waitbutton` is paid for
+## once. The scroll ends on a frame rather than on a press, which is why the pump
+## asks: while it did not, the press that closed the box paid for the scroll and
+## the `waitbutton` needed one more.
+func test_a_scroll_landing_on_the_last_page_runs_the_script_on_without_a_press() -> void:
+	_write_scroll_script()
+	_world_screen = await _open_world()
+	_world_screen._show_script_results(
+		_world_screen._world.dispatch_script_events(SCRIPT_CELL)
+	)
+	_settle_text_box(_world_screen)
+	assert_true(_world_screen._text_box.visible)
+
+	# The `<CONT>`.
+	_world_screen.press_button(Gen2Button.A)
+	assert_true(_world_screen._text_box.is_scrolling(), "TextScroll is running")
+	_settle_text_box(_world_screen)
+	assert_eq(
+		StringName(_world_screen._world.pending_script_input().get("type", &"")),
+		&"button",
+		"the script ran on to its waitbutton where the scroll landed",
+	)
+	assert_true(_world_screen._text_box.visible, "closetext takes the box down, not this")
+
+	# The `waitbutton`.
+	_world_screen.press_button(Gen2Button.A)
+	assert_true(_world_screen._world.pending_script_input().is_empty())
+	assert_false(_world_screen._text_box.visible)
+
+
+## `special HealParty` is a save transaction with nothing drawn in front of it,
+## so the cartridge spends no press on it and neither does the screen.
+func test_a_party_heal_request_is_settled_where_it_is_staged() -> void:
+	var directory: String = Fixture.directory()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT)] = [
+		Gen2WorldScript.SPECIAL, 27, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+	_data = GameData.open_directory(directory)
+	_world_screen = await _open_world()
+	var save: Gen2SaveData = Gen2SaveStore.create_development_save(_data, 0)
+	(save.party[0] as Gen2SaveMon).hp = 1
+	_world_screen.set_save(save)
+	await get_tree().process_frame
+
+	_world_screen._show_script_results(
+		_world_screen._world.dispatch_script_events(SCRIPT_CELL)
+	)
+	assert_true(_world_screen._world.pending_runtime_request().is_empty())
+	assert_true((save.party[0] as Gen2SaveMon).hp > 1, "the party healed with no press")

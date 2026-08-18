@@ -599,14 +599,36 @@ func test_nurse_script_heals_the_party_after_accepting_and_shows_the_heal_machin
 	)
 	assert_true(complete["ok"], JSON.stringify(complete))
 	var results: Array = complete.get("results", [])
-	assert_eq(results[results.size() - 1]["status"], &"complete", JSON.stringify(results))
+	var last: Dictionary = results[results.size() - 1]
 	assert_eq(
-		_event_value(results[results.size() - 1].get("events", []), &"presentation_special_applied", "kind"),
+		_event_value(last.get("events", []), &"presentation_special_applied", "kind"),
 		&"heal_machine_anim",
 		JSON.stringify(results),
 	)
 	var healed_mon: Gen2SaveMon = save.party[0]
 	assert_eq(healed_mon.hp, battle_mon.max_hp())
+
+	## `HealMachineAnim` is thirty frames a ball and `.FlashPalettes8Times`'
+	## eighty, so the script is still standing in the special rather than past it.
+	assert_eq(StringName(last["status"]), &"waiting", JSON.stringify(results))
+	assert_eq(
+		int(last["event"]["frames"]),
+		Gen2WorldScriptRunner.HEAL_MACHINE_BALL_FRAMES
+			+ Gen2WorldScriptRunner.HEAL_MACHINE_FLASH_FRAMES,
+	)
+	assert_eq(
+		_event_value(last.get("events", []), &"presentation_special_applied", "sounds"),
+		[
+			{
+				"frame": 0, "kind": &"sound",
+				"index": Gen2WorldScriptRunner.SFX_SECOND_PART_OF_ITEMFINDER,
+			},
+			{
+				"frame": Gen2WorldScriptRunner.HEAL_MACHINE_BALL_FRAMES,
+				"kind": &"music", "index": Gen2WorldScriptRunner.MUSIC_HEAL,
+			},
+		],
+	)
 
 
 func test_nurse_script_leaves_the_party_unhealed_on_refusal() -> void:

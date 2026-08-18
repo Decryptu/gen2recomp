@@ -110,6 +110,22 @@ const SPECIAL_SET_DAY_OF_WEEK: int = 37
 const SPECIAL_PLAY_MAP_MUSIC: int = 60
 const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_HEAL_MACHINE_ANIM: int = 62
+## `HealMachineAnim.Pointers`' three sequences. Only the Hall of Fame's differs:
+## it loads its balls from a second OAM table and plays two effects where the
+## other two play `MUSIC_HEAL`.
+const HEAL_MACHINE_HALL_OF_FAME: int = 2
+## `.LoadBallsOntoMachine`'s `ld c, 30 / call DelayFrames`, once a party member.
+const HEAL_MACHINE_BALL_FRAMES: int = 30
+## `.FlashPalettes8Times`: eight passes of `ld c, 10 / call DelayFrames`.
+const HEAL_MACHINE_FLASH_FRAMES: int = 80
+## constants/sfx_constants.asm. The first is played once a ball by
+## `.LoadBallsOntoMachine`; the other two are `.HOF_PlaySFX`'s pair.
+const SFX_SECOND_PART_OF_ITEMFINDER: int = 0x12
+const SFX_GAME_FREAK_LOGO_GS: int = 0xAA
+const SFX_BOOT_PC: int = 0x0D
+## constants/music_constants.asm's MUSIC_HEAL, which `.PlayHealMusic` starts
+## under the flashes rather than after them.
+const MUSIC_HEAL: int = 0x0D
 const SPECIAL_CHECK_POKERUS: int = 78
 ## MagnetTrain, the ride's cutscene. wScriptVar picks the direction, which a
 ## preceding SETVAL loads: TRUE for Saffron to Goldenrod, FALSE for the return
@@ -2282,6 +2298,36 @@ func _clock_minute() -> int:
 	return clampi(int(clock.get("minute", 0)), 0, 59)
 
 
+## `HealMachineAnim`'s sounds and the frame of its own wait each is played on.
+## `.LoadBallsOntoMachine` plays one effect a ball and then delays thirty frames,
+## so ball zero sounds on the frame the routine starts. `.PlayHealMusic` starts
+## `MUSIC_HEAL` under `.FlashPalettes8Times` rather than after it; the Hall of
+## Fame's sequence plays one effect there instead and a second once the flashes
+## are done. Its `WaitSFX` between the two is not spent, like the other two the
+## world leaves unspent.
+static func heal_machine_sounds(machine_type: int, balls: int) -> Array:
+	if balls <= 0:
+		return []
+	var schedule: Array = []
+	for ball: int in balls:
+		schedule.append({
+			"frame": ball * HEAL_MACHINE_BALL_FRAMES,
+			"kind": &"sound", "index": SFX_SECOND_PART_OF_ITEMFINDER,
+		})
+	var flashes_at: int = balls * HEAL_MACHINE_BALL_FRAMES
+	if machine_type == HEAL_MACHINE_HALL_OF_FAME:
+		schedule.append({
+			"frame": flashes_at, "kind": &"sound", "index": SFX_GAME_FREAK_LOGO_GS,
+		})
+		schedule.append({
+			"frame": flashes_at + HEAL_MACHINE_FLASH_FRAMES,
+			"kind": &"sound", "index": SFX_BOOT_PC,
+		})
+	else:
+		schedule.append({"frame": flashes_at, "kind": &"music", "index": MUSIC_HEAL})
+	return schedule
+
+
 ## [param special] is the Crystal-canonical index from
 ## Gen2WorldScript.special_index(), not the raw stream byte, so the payloads
 ## below report that index on both profiles.
@@ -2338,12 +2384,26 @@ func _execute_special(special: int) -> Dictionary:
 			return _stage_runtime_request(&"party_heal_requested", {"special": special})
 		SPECIAL_HEAL_MACHINE_ANIM:
 			## wScriptVar selects the machine's screen position: 0 Pokemon Center,
-			## 1 Elm's Lab, 2 Hall of Fame. A preceding SETVAL loads it, so it is
-			## carried through as presentation only; nothing here changes state.
+			## 1 Elm's Lab, 2 Hall of Fame. A preceding SETVAL loads it. Nothing
+			## here changes state, but the routine is not free: it spends thirty
+			## frames a ball and `.FlashPalettes8Times`' eighty, with a sound on
+			## each ball, so the script waits for it the way the cartridge does.
+			var machine_type: int = clampi(_script_value, 0, HEAL_MACHINE_HALL_OF_FAME)
+			var balls: int = int((_request.get("party", {}) as Dictionary).get("count", 0))
+			var sounds: Array = heal_machine_sounds(machine_type, balls)
 			_emit_runtime_event(&"presentation_special_applied", {
 				"special": special, "kind": &"heal_machine_anim",
-				"machine_type": _script_value,
+				"machine_type": machine_type,
+				"balls": balls,
+				"sounds": sounds.duplicate(true),
 			})
+			## `ld a, [wPartyCount] / and a / ret z`: an empty party leaves the
+			## machine alone and spends nothing.
+			if balls > 0:
+				return _stage_frame_wait(
+					balls * HEAL_MACHINE_BALL_FRAMES + HEAL_MACHINE_FLASH_FRAMES,
+					{"special": special, "kind": &"heal_machine_anim"}
+				)
 		SPECIAL_MAGNET_TRAIN:
 			## engine/events/magnet_train.asm's MagnetTrain is scroll positions,
 			## graphics, music and a VBlank cutscene handler. It reads
