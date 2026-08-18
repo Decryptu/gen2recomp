@@ -269,6 +269,9 @@ func test_the_speech_ends_on_the_shrink_rather_than_on_the_last_text() -> void:
 	for _step: int in 40:
 		if _screen.beat_index() >= _screen.beat_count():
 			break
+		# The page has to print before a press can turn it; only the shrink the
+		# last page starts is deliberately left unspent.
+		_screen.advance_frames(_screen.animation_frames_left())
 		_screen.handle_button(Gen2Button.A)
 	assert_eq(_finished.size(), 0, "the speech has not handed a name over yet")
 	assert_eq(_screen.animation_frames_left(), 8, "ShrinkPlayer's first DelayFrames")

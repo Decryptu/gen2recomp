@@ -112,6 +112,52 @@ func _box() -> Gen2TextBox:
 	return box
 
 
+## `PrintLetterDelay` is the only thing a button reaches while a text is still
+## printing, and the most it does there is one letter a frame. There is no path
+## from a press to the end of a page, so a repeated press cannot tear through a
+## text: it is spent and the page keeps printing at its own rate.
+func test_a_press_cannot_finish_a_printing_page() -> void:
+	var box: Gen2TextBox = _box()
+	box.reveal_speed = 30.0
+	box.show_text("hello there" + Gen2TextStream.PAGE_BREAK + "second")
+	assert_true(box.is_revealing())
+
+	for _press: int in 20:
+		assert_true(box.advance(), "the press is spent on the box")
+	assert_true(box.is_revealing(), "and the page is still printing")
+	assert_true(box.has_pages_left(), "so no page was turned")
+
+	# It finishes on frames, and only then does a press turn the page.
+	var owed: int = box.frames_left()
+	assert_gt(owed, 0)
+	for _frame: int in owed:
+		box.advance_frame()
+	assert_false(box.is_revealing(), "frames_left() is enough to finish the page")
+	assert_true(box.advance())
+	assert_false(box.has_pages_left())
+
+
+## `PrintLetterDelay` answers a HELD A or B with a single `DelayFrame`, whatever
+## TEXT SPEED says, so holding one prints at the fastest the setting reaches and
+## never faster.
+func test_holding_a_button_prints_one_letter_a_frame() -> void:
+	var slow: Gen2TextBox = _box()
+	slow.reveal_speed = 12.0
+	slow.show_text("hello there")
+	var patient: int = slow.frames_left()
+
+	var held: Gen2TextBox = _box()
+	held.reveal_speed = 12.0
+	held.show_text("hello there")
+	held.accelerated = true
+	assert_lt(held.frames_left(), patient, "a held button is faster than TEXT SPEED slow")
+
+	for _frame: int in held.frames_left():
+		held.advance_frame()
+	assert_false(held.is_revealing())
+	assert_eq(held.frames_left(), 0)
+
+
 ## `_ContText` is `PromptButton` and then `TextScroll` twice, five frames each,
 ## so a continuation costs one press and ten frames rather than a page turn.
 func test_a_continuation_scrolls_for_ten_frames_after_its_press() -> void:

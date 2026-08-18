@@ -409,6 +409,9 @@ func test_experience_says_its_line_first_and_the_level_line_after_the_bar() -> v
 		"the level line waited for the bar to reach the end"
 	)
 
+	# The level line has to finish printing before a press can turn its page: a
+	# press reaches nothing but `PrintLetterDelay` while a text is running.
+	_battle_screen._box.finish()
 	_battle_screen._box.advance()
 	_battle_screen.advance()
 	assert_false(_battle_screen._exp_bar.paused(), "the press let the next fill start")

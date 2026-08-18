@@ -101,18 +101,9 @@ func _build_dialogs() -> void:
 
 
 func _picker(title: String, filters: PackedStringArray) -> FileDialog:
-	var dialog := FileDialog.new()
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.filters = filters
-	dialog.title = title
-	# Android's own picker is the only one that returns a readable file: the app
-	# declares no storage permission, so a path the built-in browser lists still
-	# fails to open. The system picker grants access to the one file chosen.
-	dialog.use_native_dialog = DisplayServer.has_feature(
-		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
+	var dialog: FileDialog = Gen2LauncherUI.file_picker(
+		_palette, title, FileDialog.FILE_MODE_OPEN_FILE, filters
 	)
-	dialog.theme = _palette.control_theme()
 	add_child(dialog)
 	return dialog
 

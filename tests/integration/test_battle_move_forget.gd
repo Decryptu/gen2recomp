@@ -93,8 +93,16 @@ func _stage() -> String:
 ## test_a_confirm_pages_the_prompt_before_answering_it.
 func _drain_box() -> void:
 	var box: Gen2TextBox = _screen.get("_box")
-	while box != null and box.advance():
-		pass
+	if box == null:
+		return
+	# A press cannot finish a printing page any more than it can on the
+	# cartridge, so reading to the end is frames first and then the page turn.
+	while true:
+		if box.is_revealing():
+			box.advance_frame()
+			continue
+		if not box.advance():
+			return
 
 
 func _press(button: int) -> void:

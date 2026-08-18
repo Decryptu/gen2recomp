@@ -96,7 +96,7 @@ Two example mods are in `mods/examples/`, to copy into `user://mods/`:
 | Mod | Shows |
 |---|---|
 | `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it, on the native layer with a translucent text box and one registered setting |
-| `new_content/` | A species, a move, a move effect, two rebalancing patches and both event channels |
+| `new_content/` | Every non-renderer surface in one file: a type and two matchups, a species with its own art, a move, a move effect, an item with its pocket and mart shelf, a named control axis, a visible-encounter population that reads the run's rules, two rebalancing patches, both event channels and the world channel's presentation mutator |
 
 The repository examples are development material and are excluded from every
 export preset. A distributed build contains the loader but no preinstalled mod;
@@ -201,9 +201,13 @@ belongs to the first one followed, so it is on screen once.
 
 ## Adding content
 
-`mods/examples/new_content/` registers a species, a move, a move effect and two
-rebalancing patches, and watches both event channels. Copy it and read it beside
-this section.
+`mods/examples/new_content/` is every non-renderer surface of the contract in one
+file, `api_version` 5: it registers a type and two chart exceptions, a species
+with its own decoded art, a move and its effect, an item with a pack pocket and a
+mart shelf, a named control axis and a visible-encounter population that reads
+the run's rules, patches two cartridge rows, watches both event channels and
+rewrites the world channel's presentation. Copy it and read it beside this
+section.
 
 A content number is per kind and starts at `Gen2ContentOverlay.FIRST_MOD_NUMBER`,
 which is 256. Every cartridge number fits in a byte, so a number that does not is

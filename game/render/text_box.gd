@@ -58,6 +58,27 @@ const TILE: int = Gen2Font.TILE
 ## Tiles per second while a page is revealing. The games run this off the frame
 ## counter; a rate is the same thing said in a way that does not assume 60 Hz.
 @export var reveal_speed: float = 30.0
+## Whether A or B is being HELD, which is the whole of what a button does to a
+## printing text. `PrintLetterDelay` reads `hJoyDown` and answers a held A or B
+## with a single `DelayFrame`, whatever the speed setting says
+## (`home/print_text.asm`): one letter a frame, and never the rest of the page.
+## A host sets this per frame; nothing here polls, so a replay and a check drive
+## the same acceleration a player does.
+@export var accelerated: bool = false
+## Whether a host spends this box's hardware frames itself with
+## [method advance_frame]. The reveal is a frame count on the cartridge, so a
+## screen that already owns the frame drives the box on the same clock as
+## everything else it draws, and the box never runs a second one of its own.
+## Off leaves the box on real time, which is what a dev viewer with no frame
+## pump wants.
+var driven: bool = false:
+	set(value):
+		driven = value
+		if value:
+			set_process(false)
+## `TEXT_DELAY_FAST` is one frame a letter, which is what a held A or B costs and
+## also the fastest the speed setting goes.
+const ACCELERATED_SPEED: float = 60.0
 ## Per-scanline background offsets for the box's own rows, empty when the
 ## background is sitting still. A box is drawn into the background plane like
 ## everything else, so a routine that scrolls the plane scrolls the box with it;
@@ -127,7 +148,8 @@ func _process(delta: float) -> void:
 		_advance_scroll(delta)
 		return
 	if _shown < float(_tiles_on_page):
-		_shown = minf(_shown + delta * reveal_speed, float(_tiles_on_page))
+		var rate: float = maxf(reveal_speed, ACCELERATED_SPEED) if accelerated else reveal_speed
+		_shown = minf(_shown + delta * rate, float(_tiles_on_page))
 		_redraw()
 		return
 	if _pages.is_empty():
@@ -158,6 +180,29 @@ func show_text(text: String) -> void:
 	_scroll_page = -1
 	_scroll_lines = []
 	_start_page()
+
+
+## How many hardware frames the box still owes before it reaches its
+## `PromptButton`: the rest of the page, or the rest of a `TextScroll`. Zero
+## while it is waiting on a press, which is what it is waiting on there.
+##
+## Public so a caller settling a screen by frames settles the text with it. A
+## screen that owns the frame has no other way to know a printing text is not
+## finished, and a press cannot shorten it.
+func frames_left() -> int:
+	if _scroll_page >= 0:
+		var steps: int = SCROLL_STEPS - _scroll_rows
+		return int(ceil(float(steps) * float(SCROLL_STEP_FRAMES) - _scroll_elapsed))
+	var rate: float = maxf(reveal_speed, ACCELERATED_SPEED) if accelerated else reveal_speed
+	if rate <= 0.0 or _shown >= float(_tiles_on_page):
+		return 0
+	var frames: float = (float(_tiles_on_page) - _shown) / (rate * FRAME_SECONDS)
+	var whole: int = int(ceil(frames))
+	# The reveal is a float summed a frame at a time, so a run that divides
+	# exactly lands a hair short of its own total and owes one more frame. A
+	# count that is one low leaves the caller waiting on a press that will not
+	# come, which is worse than a spare frame.
+	return whole + 1 if is_equal_approx(float(whole), frames) else whole
 
 
 ## True while a page still has tiles left to reveal, or while the box is in the
@@ -192,14 +237,19 @@ func finish() -> void:
 	_redraw()
 
 
-## What a button press does: completes the page if it is still revealing,
-## otherwise moves to the next one. Returns false once there is nothing left,
-## having emitted [signal finished].
+## What a button press does: moves to the next page. Returns false once there is
+## nothing left, having emitted [signal finished].
+##
+## A press while the page is still printing is SPENT and does nothing else. The
+## cartridge has no path from a press to the end of a page: `PrintLetterDelay`
+## is the only thing a button reaches while text is running and the most it does
+## is [member accelerated]. Completing the page on the press instead let a
+## repeated one tear through a whole text a page per press, which is what
+## holding the advance key looked like.
 func advance() -> bool:
 	if _pages.is_empty():
 		return false
 	if is_revealing():
-		finish()
 		return true
 
 	if _enter_of(_page + 1) == &"scroll":
@@ -265,7 +315,7 @@ func _begin_scroll(next_page: int) -> void:
 	_lines = []
 	_tiles_on_page = 0
 	_shown = 0.0
-	set_process(true)
+	set_process(not driven)
 	_redraw()
 
 
@@ -325,7 +375,7 @@ func _start_page() -> void:
 
 	_shown = 0.0
 	_blink = 0.0
-	set_process(_tiles_on_page > 0)
+	set_process(_tiles_on_page > 0 and not driven)
 	if reveal_speed <= 0.0:
 		_shown = float(_tiles_on_page)
 	_redraw()

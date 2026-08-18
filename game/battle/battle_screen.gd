@@ -325,12 +325,21 @@ var _audio_player: Gen2AudioPlayer = null
 ## step `HPBarAnim_BGMapUpdate` waits and `BattleIntroSlidingPics`' own
 ## `DelayFrame` are both hardware frame counts.
 func _process(delta: float) -> void:
+	if _box != null:
+		_box.accelerated = Gen2Button.text_accelerating()
 	## The yes/no box appears when the question above it has finished printing,
 	## and the box prints on its own clock rather than on a press.
 	if _switch_stage != &"":
 		_advance_party_icons(delta)
 		_refresh_menu_layer()
-	if not frames_running():
+	## The box is on the same hardware clock as everything else the screen draws,
+	## and it keeps counting while nothing else does: a text prints, scrolls and
+	## blinks its arrow whether or not a bar or an animation is running.
+	## [method frames_running] deliberately does not answer for it, since a box
+	## waiting at a page is waiting on a press and a caller draining frames on
+	## that answer would never stop.
+	var running: bool = frames_running()
+	if not running and (_box == null or not _box.visible):
 		_frame_elapsed = 0.0
 		return
 	## Capped the way [method Gen2WorldScreen._process] caps it: a stall should
@@ -339,9 +348,14 @@ func _process(delta: float) -> void:
 		_frame_elapsed + delta,
 		Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
 	)
-	while _frame_elapsed >= Gen2WorldAnimation.FRAME_SECONDS and frames_running():
+	while _frame_elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
 		_frame_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
-		advance_frame()
+		if frames_running():
+			advance_frame()
+		elif _box != null:
+			_box.advance_frame()
+		else:
+			break
 
 
 ## Whether anything is counting hardware frames right now. Public with
@@ -362,6 +376,8 @@ func frames_running() -> bool:
 ## [method advance_bars] and [method advance_intro] so a test or a screenshot
 ## driver can settle either without waiting on real time.
 func advance_frame() -> bool:
+	if _box != null:
+		_box.advance_frame()
 	var moved: bool = advance_intro()
 	moved = advance_bars() or moved
 	moved = advance_faint() or moved
@@ -425,6 +441,7 @@ func _ready() -> void:
 	_screen.display(_menu_layer)
 
 	_box = Gen2TextBox.new()
+	_box.driven = true
 	_box.font = Gen2Font.from_data(_data)
 	## wTextboxFrame and the TEXT SPEED delay: a battle's own boxes are the
 	## player's boxes, drawn through `PrintLetterDelay` like every other one.

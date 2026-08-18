@@ -242,15 +242,7 @@ func _build_ui() -> void:
 	_slot_import_dialog.file_selected.connect(_import_slot_file)
 
 func _picker(title: String, mode: FileDialog.FileMode, filters: PackedStringArray) -> FileDialog:
-	var dialog := FileDialog.new()
-	dialog.file_mode = mode
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.filters = filters
-	dialog.title = title
-	dialog.use_native_dialog = DisplayServer.has_feature(
-		DisplayServer.FEATURE_NATIVE_DIALOG_FILE
-	)
-	dialog.theme = _palette.control_theme()
+	var dialog: FileDialog = Gen2LauncherUI.file_picker(_palette, title, mode, filters)
 	add_child(dialog)
 	return dialog
 

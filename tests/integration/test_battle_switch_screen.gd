@@ -109,6 +109,9 @@ func _read_question() -> void:
 
 func _press(button: int) -> void:
 	_settle_bars()
+	# A press cannot finish a printing page, so the page is read first, which is
+	# what a player waits through.
+	_screen.finish()
 	_screen._handle_button(button)
 	await get_tree().process_frame
 
@@ -204,10 +207,8 @@ func test_the_one_already_out_is_refused_and_the_list_comes_back() -> void:
 	)
 	assert_eq(battle.awaiting_switch_offer(), 1, "and nothing was answered")
 
-	## The first press finishes the line the box is still revealing, as it does
-	## anywhere else; the second is the one `StdBattleTextbox` was waiting for.
-	await _press(Gen2Button.A)
-	assert_eq(_stage(), "refused")
+	## One press, which is the one `StdBattleTextbox` was waiting for: the line is
+	## read first and a press cannot shorten the reading.
 	await _press(Gen2Button.A)
 	assert_eq(_stage(), "pick", "the list is redrawn")
 	assert_true(_layer().visible)
@@ -397,7 +398,6 @@ func test_the_fainted_row_is_refused_and_the_list_comes_back() -> void:
 	)
 	assert_true(battle.must_replace(Gen2Battle.PLAYER), "and nothing was answered")
 
-	await _press(Gen2Button.A)
 	await _press(Gen2Button.A)
 	assert_eq(_stage(), "pick", "the list is redrawn")
 	assert_true(bool(_screen.battle_snapshot()["switch_forced"]), "still with no way out")
