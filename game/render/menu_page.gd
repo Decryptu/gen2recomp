@@ -52,9 +52,16 @@ func draw(
 		var title_at: Vector2i = box.title_position(title_indent)
 		font.draw_text(title, indices, width, title_at.x * TILE, title_at.y * TILE)
 
+	# Every cartridge label is written to fit its box, so `PlaceVerticalMenuItems`
+	# needs no bound; a label a mod registers can be any length, and unbounded it
+	# is drawn straight through the right-hand border and over the map beside it.
+	var last_column: int = box.left + box.interior().x
 	for index: int in options.size():
 		var item: Vector2i = box.item_position(index)
-		font.draw_text(String(options[index]), indices, width, item.x * TILE, item.y * TILE)
+		font.draw_text(
+			String(options[index]), indices, width, item.x * TILE, item.y * TILE,
+			Gen2Text.FONT_MAIN, maxi(0, last_column - item.x + 1)
+		)
 
 	for extra: Dictionary in extras:
 		var extra_at: Vector2i = extra.get("at", Vector2i.ZERO)

@@ -173,3 +173,22 @@ func test_the_pokepic_box_refuses_a_species_the_cache_does_not_hold() -> void:
 	var data: GameData = GameData.open_directory(Fixture.directory())
 	assert_null(Gen2PokepicPage.render(data, BattleFixture.MAX_SPECIES + 1, Gen2WorldMap.new()))
 	assert_null(Gen2PokepicPage.render(data, BattleFixture.CHARMANDER, null))
+
+
+## `PlaceVerticalMenuItems` has no bound and needs none: every cartridge label is
+## written to fit the box it is placed in. A label a mod registers is not, and
+## unbounded it was drawn straight through the right-hand border and over
+## whatever the box sits on, which is what the in-game MODS row could do.
+func test_a_row_too_wide_for_its_box_is_cut_at_the_border() -> void:
+	var box: Gen2MenuBox = _box()
+	var indices: PackedByteArray = _blank()
+	_page.draw(box, ["A VERY LONG MOD NAME INDEED"], 0, indices, WIDTH)
+
+	# The last interior column, one short of the right-hand border at box.right.
+	var last: int = box.left + box.interior().x
+	assert_true(_ink_in_tile(indices, Vector2i(last, box.item_position(0).y)), "fills the row")
+	for column: int in range(box.right + 1, Gen2Screen.WIDTH / TILE):
+		assert_false(
+			_ink_in_tile(indices, Vector2i(column, box.item_position(0).y)),
+			"nothing past the border at column %d" % column
+		)
