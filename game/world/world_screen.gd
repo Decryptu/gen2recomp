@@ -2912,6 +2912,7 @@ func _open_embedded_party() -> void:
 	add_child(host)
 	host.closed.connect(_on_party_closed)
 	host.action_chosen.connect(_on_party_action)
+	host.sfx_requested.connect(_play_sfx)
 	_party_host = host
 	_script_prompt = "Party open"
 	_refresh_labels()

@@ -399,17 +399,12 @@ func advance_frame() -> bool:
 ## animation, `AnimateHPBar` and `MonFaintedAnimation` and whatever follows them,
 ## so the pump continues here rather than standing still until a press.
 ##
-## The waits that are real are all a box: a message on screen is left alone, and
-## so is a bar that is holding one (`_held_message`, released by
-## [method advance_bars]) or the exp bar stopped at a level boundary.
+## The waits that are real are all a box, and [method _continue_after_messages]
+## owns that test: a message on screen is left alone, and so is a bar holding one.
 func _resume_after_frames(was_running: bool) -> void:
-	if not was_running or frames_running() or _pending.is_empty():
+	if not was_running or frames_running():
 		return
-	if not _held_message.is_empty() or not _intro_message.is_empty():
-		return
-	if _message_awaits_press:
-		return
-	_show_next_event()
+	_continue_after_messages()
 
 
 ## Whether a picture is still sinking off its square.
@@ -988,11 +983,7 @@ func advance_bars() -> bool:
 	if moved:
 		_push_view()
 
-	if not _held_message.is_empty() and _bars.is_empty() and not fainting():
-		var text: String = _held_message
-		_held_message = ""
-		show_message(text)
-	elif boundary and _exp_bar != null:
+	if boundary and _exp_bar != null:
 		# The bar has reached the end of the level it was filling and stopped
 		# there. `.LoopLevels` prints its grew-to-level line at exactly this
 		# point, so the pump runs on to the event that carries it.
@@ -1415,7 +1406,9 @@ func show_message(text: String) -> void:
 		_intro_message = text
 		return
 	_last_message = text
-	_message_awaits_press = true
+	## `StdBattleTextbox` blocks on a press for a line it printed; an empty box
+	## is the one a menu is drawn over and owes nothing.
+	_message_awaits_press = not text.is_empty()
 	if _box != null:
 		_box.show_text(text)
 
@@ -2122,7 +2115,39 @@ func advance() -> void:
 	if _menu_stage != &"":
 		_answer_menu(Gen2Button.A)
 		return
+	_continue_after_messages()
+
+
+## What the source runs on to once nothing is left to say. `DoTurn` falls
+## straight out of the last command into `HandleBetweenTurnEffects` and then
+## into `BattleMenu`, and nothing between them reads a button, so this is
+## reached both by the press that dismissed the last box and by
+## [method _show_next_event] finding no line left to print.
+func _continue_after_messages() -> void:
+	if _box == null:
+		return
+	## The same waits [method _resume_after_frames] respects: a box still up, a
+	## line held behind a bar, or frames nobody has spent yet.
+	if _intro != null or bars_animating() or fainting() or animation_running():
+		return
+	## `applydamage` animates the bar and sinks the picture before `criticaltext`
+	## prints, so a line produced while either was running was held rather than
+	## raced. Released here, where every wait it can be held behind ends: a faint
+	## with no bar beside it is one, and the bar pump never sees that frame.
+	if not _held_message.is_empty():
+		var held: String = _held_message
+		_held_message = ""
+		show_message(held)
+		return
+	if _message_awaits_press or not _intro_message.is_empty():
+		return
 	if _capture_selecting or _capture_waiting:
+		return
+	## A list already up owns the joypad: the battle menu, the pack and its two
+	## sub-lists, and the forget offer are each answered by a press rather than
+	## run past by the pump.
+	if _menu_stage != &"" or _pack_selecting or _pack_move_selecting \
+		or _forget_stage != &"":
 		return
 	if _world_battle_tutorial:
 		return
@@ -3046,6 +3071,10 @@ func _show_next_event() -> void:
 			else:
 				show_message(text)
 			return
+	## The queue ran dry with nothing to print. `DoTurn` does not read a button
+	## between its last command and `BattleMenu`, so the screen runs on rather
+	## than leaving a stale box up until a press nobody owes.
+	_continue_after_messages()
 
 
 ## The events that mean a bar moved rather than a bar was placed: each is a

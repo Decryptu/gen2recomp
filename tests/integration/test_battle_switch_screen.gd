@@ -87,9 +87,12 @@ func _layer() -> TextureRect:
 
 func _advance_to(stage: String, limit: int = 40) -> void:
 	for _press: int in limit:
+		## Settled first: the frames a turn owes can reach the state by
+		## themselves, and a press spent after it has arrived is a press into
+		## whatever the state opened.
+		_settle_bars()
 		if _stage() == stage:
 			return
-		_settle_bars()
 		_screen.finish()
 		_screen.advance()
 		await get_tree().process_frame
@@ -435,9 +438,9 @@ func _menu_layer() -> TextureRect:
 
 func _advance_to_menu(limit: int = 40) -> void:
 	for _press: int in limit:
+		_settle_bars()
 		if _menu_stage() != "":
 			return
-		_settle_bars()
 		_screen.finish()
 		_screen.advance()
 		await get_tree().process_frame

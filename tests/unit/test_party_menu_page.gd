@@ -256,6 +256,30 @@ func test_cancel_prints_below_the_last_member() -> void:
 		)
 
 
+## `SwitchPartyMons` reopens through `InitPartyMenuNoCancel` and writes `▷` over
+## `hlcoord 0, 1` plus two rows per held member.
+func test_a_held_row_wears_its_marker_and_the_switch_list_has_no_cancel() -> void:
+	var rows: Array = _rows(2)
+	var image: Image = _page().render(
+		rows, 1, Gen2BattleSwitchMenu.prompt_text(), false, 0
+	)
+	assert_eq(
+		_ink_in_tile(image, Gen2PartyMenuPage.CANCEL_COLUMN, 5), 0,
+		"InitPartyMenuNoCancel prints no CANCEL"
+	)
+	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.CURSOR_COLUMN, 1), 0, "the marker")
+	assert_ne(_ink_in_tile(image, Gen2PartyMenuPage.CURSOR_COLUMN, 3), 0, "the cursor")
+	## Without a member held, column 0 of that row is the blank it always was:
+	## the fixture's glyphs are solid tiles, so which glyph landed cannot be read
+	## off the picture, only that one did.
+	assert_eq(
+		_ink_in_tile(
+			_page().render(rows, 1, Gen2BattleSwitchMenu.prompt_text(), false, -1),
+			Gen2PartyMenuPage.CURSOR_COLUMN, 1
+		), 0, "and nothing is written there otherwise"
+	)
+
+
 ## The four qualities `.Default` asks for, each in its own column on the row
 ## under the nickname, except the HP numbers which share the nickname's.
 func test_every_quality_lands_in_its_own_column() -> void:
