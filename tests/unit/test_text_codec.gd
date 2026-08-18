@@ -65,6 +65,18 @@ func test_hash_encodes_the_word_the_source_dictionary_prints() -> void:
 	assert_eq(Gen2Text.encoded_length("POKéMON"), 7)
 
 
+## `constants/charmap.asm` spells the same two codes `<POKE>` and `<PKMN>`, and a
+## caller copying a source string writes them; an unexpanded bracket is UNKNOWN,
+## which is the "?" the start menu's POKéGEAR row was printing.
+func test_angle_bracket_word_spellings_encode_like_their_codes() -> void:
+	assert_eq(Gen2Text.encode("<POKE>"), Gen2Text.encode("POKé"))
+	assert_eq(Gen2Text.encode("<POKE>GEAR"), Gen2Text.encode("POKéGEAR"))
+	assert_eq(Gen2Text.encoded_length("<POKE>GEAR"), 8)
+	assert_eq(Gen2Text.encode("<PKMN>"), Gen2Text.encode("PKMN"))
+	for code: int in Gen2Text.encode("<POKE>GEAR"):
+		assert_ne(code, Gen2Text.UNKNOWN)
+
+
 ## $75 is decode-only for the same reason $54 is, and source text writes the
 ## character itself, so a synthesized line quoting it has to encode.
 func test_ellipsis_encodes_the_source_charmap_code() -> void:

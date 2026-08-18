@@ -140,6 +140,9 @@ func test_the_gender_question_comes_first() -> void:
 	assert_true(_screen.current() is Gen2OakSpeechScreen, "then the speech")
 
 
+## `InitClock` is hour and minutes: it ends on `OakText_ResponseToSetTime` after
+## `.MinutesAreSet`. The weekday is `SetDayOfWeek`, which only Mom's errand in
+## `PlayersHouse1F.asm` calls, so a new game leaves the RTC's own SUNDAY alone.
 func test_clock_set_wraps_each_source_dial_and_reaches_the_speech() -> void:
 	_begin()
 	_screen.handle_button(Gen2Button.A)
@@ -149,10 +152,7 @@ func test_clock_set_wraps_each_source_dial_and_reaches_the_speech() -> void:
 	clock.handle_button(Gen2Button.A)
 	clock.handle_button(Gen2Button.A)
 	clock.handle_button(Gen2Button.DOWN)
-	clock.handle_button(Gen2Button.A)
-	clock.handle_button(Gen2Button.A)
-	clock.handle_button(Gen2Button.DOWN)
-	assert_eq(clock.value(), {"day": 6, "hour": 9, "minute": 59})
+	assert_eq(clock.value(), {"day": 0, "hour": 9, "minute": 59})
 	clock.handle_button(Gen2Button.A)
 	clock.handle_button(Gen2Button.A)
 	assert_true(_screen.current() is Gen2OakSpeechScreen)

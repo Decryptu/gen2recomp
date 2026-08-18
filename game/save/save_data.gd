@@ -236,6 +236,18 @@ func first_empty_box_slot() -> Dictionary:
 	return {"ok": false, "reason": &"storage_full"}
 
 
+## `_GetVarAction`'s `.BoxFreeSpace`, which is `MONS_PER_BOX - [sBoxCount]`. The
+## save model keeps no current-box pointer, so the box a deposit would land in is
+## the one [method first_empty_box_slot] picks; a full storage answers 0, which is
+## the same refusal the source's zero gives every script that reads the var.
+func box_free_space() -> int:
+	var destination: Dictionary = first_empty_box_slot()
+	if not bool(destination.get("ok", false)):
+		return 0
+	var box: Gen2SaveBox = boxes[int(destination["box"])]
+	return Gen2SaveBox.CAPACITY - box.occupied_count()
+
+
 func add_party_or_box(mon: Gen2SaveMon) -> Dictionary:
 	if mon == null:
 		return {"ok": false, "reason": &"missing_pokemon"}
