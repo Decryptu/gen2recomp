@@ -2913,6 +2913,9 @@ func _open_embedded_party() -> void:
 	host.closed.connect(_on_party_closed)
 	host.action_chosen.connect(_on_party_action)
 	host.sfx_requested.connect(_play_sfx)
+	## `OpenPartyStats`' `PlayMonCry2` reaches the same player the Pokedex's own
+	## CRY button does.
+	host.cry_requested.connect(_on_pokedex_cry_requested)
 	_party_host = host
 	_script_prompt = "Party open"
 	_refresh_labels()

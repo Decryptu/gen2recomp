@@ -159,10 +159,14 @@ func draw_hp_bar(
 ## `DrawBattleHPBar` it lays no empty template first and instead writes $62 for
 ## every tile the fill did not reach. Filling the other way put the bar's lit
 ## end on the wrong side, and skipping the empties left the trough unpainted.
-func draw_exp_bar(into: PackedByteArray, width: int, pixels: int) -> void:
+## [param at] is the bar's left-hand tile, which is the HUD's own everywhere but
+## the stats screen, where `LoadPinkPage` fills the same bar in at (11,16).
+func draw_exp_bar(
+	into: PackedByteArray, width: int, pixels: int, at: Vector2i = PLAYER_EXP
+) -> void:
 	var remaining: int = clampi(pixels, 0, EXP_BAR_TILES * TILE)
-	var right: int = PLAYER_EXP.x + EXP_BAR_TILES - 1
-	var top: int = PLAYER_EXP.y * TILE
+	var right: int = at.x + EXP_BAR_TILES - 1
+	var top: int = at.y * TILE
 
 	for tile: int in EXP_BAR_TILES:
 		var number: int = Gen2BattleTiles.HP_BAR_EMPTY

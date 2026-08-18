@@ -25,6 +25,9 @@ signal action_chosen(action: Dictionary)
 ## A sound this screen owes, by `constants/sfx_constants.asm` index. Emitted
 ## rather than played: the audio player belongs to whoever embedded this.
 signal sfx_requested(index: int)
+## `PlayMonCry2`, which the stats screen this menu opens plays on every mon it
+## loads. Emitted for the same reason [signal sfx_requested] is.
+signal cry_requested(species: int)
 
 const HARDWARE_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
 
@@ -127,6 +130,13 @@ var _menu_page: Gen2MenuPage = null
 ## clears. See [constant MESSAGE_NOT_ENOUGH_HP].
 var _message: String = ""
 var _elapsed: float = 0.0
+## `OpenPartyStats`' own screen, standing over the whole party menu while it is
+## up, and the page that draws it.
+var _stats: Gen2MonStatsScreen = null
+var _stats_page: Gen2StatsScreenPage = null
+## `ManagePokemonMoves`' own screen, opened the same way over the same menu.
+var _moves: Gen2MoveScreen = null
+var _moves_page: Gen2MoveScreenPage = null
 
 
 func _ready() -> void:
@@ -158,6 +168,8 @@ func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> 
 	_submenu_items = []
 	_submenu_cursor = 0
 	_switch_from = -1
+	_stats = null
+	_moves = null
 	if is_inside_tree() and _cards != null:
 		_refresh()
 
@@ -181,10 +193,9 @@ func party_snapshot() -> Dictionary:
 ##
 ## An egg gets three entries and no moves. Otherwise the four move slots are
 ## walked in the mon's own slot order, appending every move that appears in
-## MonMenuOptions' field-move rows, then the fixed options follow. Only entries
-## this project acts on are marked available; the rest keep their source
-## position rather than being omitted, the same way Gen2WorldStartMenu carries
-## its unimplemented entries.
+## MonMenuOptions' field-move rows, then the fixed options follow. Every row is
+## acted on: the screens STATS and MOVE open are built, so a row that cannot be
+## chosen no longer exists here.
 ##
 ## The MAIL branch is not reproduced: ItemIsMail tests the held item against
 ## data/items/mail_items.asm, and this project has no mail, so ITEM is always
@@ -204,7 +215,7 @@ static func submenu_items_for(
 	## nothing to follow, teach or send out, and the source itself offers less.
 	if mon.is_egg:
 		items.append(_option_entry(OPTION_STATS, "STATS"))
-		items.append(_option_entry(OPTION_SWITCH, "SWITCH", true))
+		items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
 		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
 		return items
 	for move: int in mon.moves:
@@ -214,14 +225,13 @@ static func submenu_items_for(
 			"kind": &"field_move",
 			"move": move,
 			"label": String(data.move(move).get("name", "MOVE")) if data != null else "MOVE",
-			"available": true,
 		})
 	items.append(_option_entry(OPTION_STATS, "STATS"))
 	## `SwitchPartyMons` makes its own `cp 2` refusal rather than being greyed
 	## out, so the row is offered whatever the party holds.
-	items.append(_option_entry(OPTION_SWITCH, "SWITCH", true))
+	items.append(_option_entry(OPTION_SWITCH, "SWITCH"))
 	items.append(_option_entry(OPTION_MOVE, "MOVE"))
-	items.append(_option_entry(OPTION_ITEM, "ITEM", true))
+	items.append(_option_entry(OPTION_ITEM, "ITEM"))
 	## After every cartridge action and before CANCEL, which is the source's own
 	## last row and the way out of the box. A mod cannot displace one: the list
 	## still stops at `NUM_MONMENU_ITEMS`, so rows past it are simply not offered.
@@ -230,17 +240,15 @@ static func submenu_items_for(
 			break
 		items.append({
 			"kind": &"mod_party_action", "mod": entry["kind"],
-			"label": entry["label"], "handler": entry["handler"], "available": true,
+			"label": entry["label"], "handler": entry["handler"],
 		})
 	if items.size() < MAX_SUBMENU_ITEMS:
 		items.append(_option_entry(OPTION_CANCEL, "CANCEL"))
 	return items
 
 
-static func _option_entry(
-	option: StringName, label: String, available: bool = false
-) -> Dictionary:
-	return {"kind": &"option", "option": option, "label": label, "available": available}
+static func _option_entry(option: StringName, label: String) -> Dictionary:
+	return {"kind": &"option", "option": option, "label": label}
 
 
 ## `GiveTakeItemMenuData`, the two-row box ITEM opens. Both answers need the live
@@ -248,8 +256,8 @@ static func _option_entry(
 ## field move is.
 static func item_menu_items() -> Array:
 	return [
-		{"kind": &"mon_item", "option": OPTION_GIVE, "label": "GIVE", "available": true},
-		{"kind": &"mon_item", "option": OPTION_TAKE, "label": "TAKE", "available": true},
+		{"kind": &"mon_item", "option": OPTION_GIVE, "label": "GIVE"},
+		{"kind": &"mon_item", "option": OPTION_TAKE, "label": "TAKE"},
 	]
 
 
@@ -260,6 +268,18 @@ func _party_size() -> int:
 ## Button driver for the embedded overworld view, mirroring
 ## Gen2StartMenuScreen.handle_button. Returns whether the button was used.
 func handle_button(button: int) -> bool:
+	## `StatsScreenInit` runs its own joypad loop over the whole screen, so
+	## nothing below it is reachable while it is up.
+	if _stats != null:
+		var used: bool = _stats.handle_button(button)
+		if _stats != null:
+			_refresh()
+		return used
+	if _moves != null:
+		var used_move: bool = _moves.handle_button(button)
+		if _moves != null:
+			_refresh()
+		return used_move
 	## `JoyWaitAorB` behind a refusal: the press that clears the box does nothing
 	## else, and a direction is not one of the two it waits for.
 	if not _message.is_empty():
@@ -337,9 +357,6 @@ func _confirm() -> void:
 	if StringName(entry.get("option", &"")) == OPTION_CANCEL:
 		_close_submenu()
 		return
-	if not bool(entry.get("available", false)):
-		_say("%s is not available yet." % String(entry.get("label", "")))
-		return
 	match StringName(entry.get("kind", &"")):
 		&"field_move":
 			var move: int = int(entry.get("move", 0))
@@ -376,6 +393,62 @@ func _confirm() -> void:
 					_open_item_menu()
 				OPTION_SWITCH:
 					_begin_switch()
+				OPTION_STATS:
+					_open_stats()
+				OPTION_MOVE:
+					_open_moves()
+
+
+## `MonMenu_Stats` reaches `OpenPartyStats`, which is `StatsScreenInit` over the
+## whole party menu. It answers 0, which is `.choosemenu`: the list comes back
+## with the submenu shut and the prompt reset, on whichever row the stats screen
+## was left on.
+func _open_stats() -> void:
+	if _data == null or _save == null or _member_cursor >= _party_size():
+		return
+	_stats = Gen2MonStatsScreen.create(_data, _save.party, _member_cursor)
+	_stats.closed.connect(_close_stats)
+	_stats.cry_requested.connect(cry_requested.emit)
+	## `StatsScreenInit` clears the tilemap before it draws, so the submenu is
+	## gone rather than standing behind the screen.
+	_submenu_open = false
+	_item_menu_open = false
+	_stats.announce()
+	_refresh()
+
+
+## `MonMenu_Move` reaches `ManagePokemonMoves`, which answers 0 for the same
+## `.choosemenu` STATS answers with, and refuses an egg outright.
+func _open_moves() -> void:
+	if _data == null or _save == null or _member_cursor >= _party_size():
+		return
+	var mon: Gen2SaveMon = _save.party[_member_cursor]
+	if mon == null or mon.is_egg:
+		_close_submenu()
+		return
+	_moves = Gen2MoveScreen.create(_data, _save.party, _member_cursor)
+	_moves.closed.connect(_close_moves)
+	_moves.sfx_requested.connect(sfx_requested.emit)
+	## `SetUpMoveScreenBG`'s own `ClearTilemap`, as above.
+	_submenu_open = false
+	_item_menu_open = false
+	_refresh()
+
+
+func _close_moves() -> void:
+	if _moves == null:
+		return
+	_member_cursor = clampi(_moves.cursor(), 0, _row_count() - 1)
+	_moves = null
+	_close_submenu()
+
+
+func _close_stats() -> void:
+	if _stats == null:
+		return
+	_member_cursor = clampi(_stats.cursor(), 0, _row_count() - 1)
+	_stats = null
+	_close_submenu()
 
 
 func _cancel() -> void:
@@ -532,11 +605,8 @@ func _render_submenu() -> void:
 	for index: int in _submenu_items.size():
 		var entry: Dictionary = _submenu_items[index]
 		var label := Label.new()
-		var text: String = String(entry.get("label", ""))
-		if not bool(entry.get("available", false)) \
-			and StringName(entry.get("option", &"")) != OPTION_CANCEL:
-			text = "%s (unavailable)" % text
-		label.text = ("> " if index == _submenu_cursor else "  ") + text
+		label.text = ("> " if index == _submenu_cursor else "  ") \
+			+ String(entry.get("label", ""))
 		label.add_theme_color_override("font_color", ACCENT if index == _submenu_cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
 		_submenu.add_child(label)
@@ -576,12 +646,22 @@ func _process(delta: float) -> void:
 	while _elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
 		_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
 		frames += 1
-	if frames == 0 or _submenu_open or _item_menu_open:
+	if frames == 0 or _submenu_open or _item_menu_open or _stats != null:
+		return
+	if _moves != null:
+		for _icon_frame: int in frames:
+			_moves_page_advance()
+		_render_hardware()
 		return
 	var rows: Array = _rows()
 	for _frame: int in frames:
 		_page.advance(rows, _cursor_row())
 	_render_hardware()
+
+
+func _moves_page_advance() -> void:
+	if _moves_page != null:
+		_moves_page.advance()
 
 
 ## `WritePartyMenuTilemap`'s rows, in [Gen2BattleSwitchMenu]'s own shape plus the
@@ -622,6 +702,12 @@ func _prompt() -> String:
 func _render_hardware() -> void:
 	if _view == null or _data == null:
 		return
+	if _stats != null:
+		_render_stats()
+		return
+	if _moves != null:
+		_render_moves()
+		return
 	if _page == null:
 		_page = Gen2PartyMenuPage.from_data(_data)
 	if _menu_page == null:
@@ -644,6 +730,57 @@ func _render_hardware() -> void:
 	_view.texture = ImageTexture.create_from_image(image)
 
 
+## `StatsScreenInit`'s own screen, over the party menu rather than beside it. The
+## front pic has a palette of its own, so it is composed on top the way a party
+## icon is rather than written into the page's index buffer.
+func _render_stats() -> void:
+	if _stats_page == null:
+		_stats_page = Gen2StatsScreenPage.from_data(_data)
+	if _stats_page == null:
+		return
+	var snapshot: Dictionary = _stats.snapshot()
+	var image: Image = _stats_page.render(snapshot, _data)
+	_blend_stats_pic(image, snapshot)
+	_view.texture = ImageTexture.create_from_image(image)
+
+
+## `MoveScreenLoop`'s own screen, which steps its one mon icon per frame the way
+## the party list steps six.
+func _render_moves() -> void:
+	if _moves_page == null:
+		_moves_page = Gen2MoveScreenPage.from_data(_data)
+	if _moves_page == null:
+		return
+	_view.texture = ImageTexture.create_from_image(
+		_moves_page.render(_moves.snapshot(), _data)
+	)
+
+
+## `PrepMonFrontpic` centres a seven-tile cell on `hlcoord 0, 0` and sits a
+## smaller pic on its bottom, which is what the Pokedex and the Hall of Fame do
+## with the same cell.
+func _blend_stats_pic(image: Image, snapshot: Dictionary) -> void:
+	var species: int = int(snapshot.get("species", 0))
+	if species <= 0:
+		return
+	var pic: Dictionary = _data.species_pic(species)
+	if pic.is_empty():
+		return
+	var art: Image = Gen2PicImage.from_atlas(
+		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic,
+		_data.palette(species, bool(snapshot.get("shiny", false)))
+	)
+	if art == null:
+		return
+	var cell: int = Gen2StatsScreenPage.pic_size()
+	var at: Vector2i = Gen2StatsScreenPage.pic_position()
+	@warning_ignore("integer_division")
+	var origin := Vector2i(
+		at.x + (cell - art.get_width()) / 2, at.y + cell - art.get_height()
+	)
+	image.blit_rect(art, Rect2i(Vector2i.ZERO, art.get_size()), origin)
+
+
 ## `.GetTopCoord` for the mon's own submenu, and `GiveTakeItemMenuData`'s fixed
 ## box for the GIVE/TAKE it opens.
 func _submenu_box() -> Gen2MenuBox:
@@ -658,10 +795,7 @@ func _submenu_box() -> Gen2MenuBox:
 	)
 
 
-## `PopulateMonMenu` places the option strings themselves. The "(unavailable)"
-## the panel appends is the launcher's affordance and has no room in a box the
-## cartridge sized for a name, so an option this project does not act on says so
-## when it is chosen instead.
+## `PopulateMonMenu` places the option strings themselves.
 func _submenu_labels() -> Array:
 	var out: Array = []
 	for entry: Variant in _submenu_items:

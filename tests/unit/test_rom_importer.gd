@@ -700,7 +700,24 @@ func _battle_dump() -> PackedByteArray:
 	_write_hud(data, int(_layout["player_hud"]), RomLayout.PLAYER_HUD_TILES)
 	_write_bar_palettes(data)
 	_write_battle_object_palettes(data)
+	_write_stats_tiles(data)
 	return data
+
+
+## `StatsScreenPageTilesGFX`, which sits immediately before the enemy HUD: the
+## two shapes `verify_battle_graphics` reads, its two-column divider and the
+## `⁂` fourteen tiles on.
+func _write_stats_tiles(data: PackedByteArray) -> void:
+	var at: int = RomLayout.stats_tiles_offset(_layout)
+	var divider: PackedByteArray = PackedByteArray()
+	divider.resize(Gen2Tiles.TILE_BYTES)
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		divider[row * 2] = 0xC0
+	_write(data, at, divider)
+	_write(
+		data, at + RomLayout.STATS_SHINY_TILE * Gen2Tiles.TILE_BYTES,
+		_lit_tile(Gen2Tiles.TILE_WIDTH)
+	)
 
 
 ## The four bar palettes, whose values are the check on where they are.
@@ -784,6 +801,25 @@ func test_a_bar_whose_levels_do_not_climb_fails() -> void:
 		int(_layout["battle_font"]) + (RomLayout.HP_BAR_FIRST_TILE + 4) * Gen2Tiles.TILE_BYTES,
 		_lit_tile(Gen2Tiles.TILE_WIDTH)
 	)
+	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
+
+
+## The stats sheet has no address of its own: it is walked back from the enemy
+## HUD, so its own two shapes are what pin it.
+func test_stats_tiles_that_are_not_where_the_enemy_hud_says_fail() -> void:
+	var data: PackedByteArray = _battle_dump()
+	data[RomLayout.stats_tiles_offset(_layout)] = 0xFF
+	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(String(result["message"]), "vertical divider")
+
+
+func test_stats_tiles_missing_their_shiny_icon_fail() -> void:
+	var data: PackedByteArray = _battle_dump()
+	var at: int = RomLayout.stats_tiles_offset(_layout) \
+		+ RomLayout.STATS_SHINY_TILE * Gen2Tiles.TILE_BYTES
+	for i: int in Gen2Tiles.TILE_BYTES:
+		data[at + i] = 0
 	assert_false(RomImporter.verify_battle_graphics(_rom(data), _layout)["ok"])
 
 

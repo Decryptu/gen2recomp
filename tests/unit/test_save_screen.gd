@@ -409,3 +409,137 @@ func _find_button(node: Node, label: String) -> Button:
 		if found != null:
 			return found
 	return null
+
+
+## `MonMenu_Stats` and `MonMenu_Move`, the two whole screens the party submenu
+## opens over itself. Both are models with no nodes, so they are driven here
+## rather than through the screen that embeds them.
+func test_the_stats_screen_turns_its_three_pages_and_wraps_both_ways() -> void:
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, _save().party)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.PINK_PAGE)
+	screen.handle_button(Gen2Button.RIGHT)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.GREEN_PAGE)
+	screen.handle_button(Gen2Button.RIGHT)
+	screen.handle_button(Gen2Button.RIGHT)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.PINK_PAGE)
+	screen.handle_button(Gen2Button.LEFT)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.BLUE_PAGE)
+
+
+func test_the_stats_screen_leaves_on_b_and_on_a_over_its_last_page() -> void:
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, _save().party)
+	watch_signals(screen)
+	screen.handle_button(Gen2Button.A)
+	screen.handle_button(Gen2Button.A)
+	assert_signal_not_emitted(screen, "closed")
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.BLUE_PAGE)
+	screen.handle_button(Gen2Button.A)
+	assert_signal_emitted(screen, "closed")
+
+
+## `.d_up` and `.d_down` neither wrap nor reach past the party, and each reload
+## is a `PlayMonCry2`. The first member is poisoned rather than asleep or frozen,
+## so `CheckFaintedFrzSlp` lets both cries through.
+func test_the_stats_screen_walks_the_party_without_wrapping_and_cries() -> void:
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, _save_with_two().party)
+	watch_signals(screen)
+	assert_false(screen.handle_button(Gen2Button.UP))
+	assert_true(screen.handle_button(Gen2Button.DOWN))
+	assert_eq(screen.cursor(), 1)
+	assert_false(screen.handle_button(Gen2Button.DOWN))
+	assert_eq(get_signal_emit_count(screen, "cry_requested"), 1)
+
+
+## `.PrintNextLevel` and `.CalcExpToNextLevel` on the pink page: the debt is the
+## curve's own next step less what the Pokémon has.
+func test_the_pink_page_owes_the_experience_its_next_level_costs() -> void:
+	var save: Gen2SaveData = _save()
+	var mon: Gen2SaveMon = save.party[0]
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, save.party)
+	var page: Dictionary = screen.snapshot()
+	var rate: int = int(_data.species(mon.species).get("growth_rate", 0))
+	assert_eq(int(page["next_level"]), mon.level + 1)
+	assert_eq(
+		int(page["exp_to_next"]),
+		Gen2Experience.total_exp_at(rate, mon.level + 1) - mon.exp
+	)
+
+
+## `EggStatsScreen`'s four hints, chosen off the step counter the egg keeps in
+## its happiness byte.
+func test_the_egg_page_picks_its_hint_off_the_step_counter() -> void:
+	assert_eq(Gen2StatsScreenPage.egg_message(0), Gen2StatsScreenPage.EGG_MESSAGES[0])
+	assert_eq(Gen2StatsScreenPage.egg_message(6), Gen2StatsScreenPage.EGG_MESSAGES[1])
+	assert_eq(Gen2StatsScreenPage.egg_message(11), Gen2StatsScreenPage.EGG_MESSAGES[2])
+	assert_eq(Gen2StatsScreenPage.egg_message(41), Gen2StatsScreenPage.EGG_MESSAGES[3])
+
+
+## `.place_move`: the two rows trade their move and their PP together, which is
+## the second `.copy_move` over `wPartyMon1PP`.
+func test_the_move_screen_trades_a_moves_pp_with_the_move() -> void:
+	var save: Gen2SaveData = _save()
+	var mon: Gen2SaveMon = save.party[0]
+	mon.pp[1] = 3
+	var before: Array = [mon.moves[0], mon.moves[1], mon.pp[0], mon.pp[1]]
+	var screen: Gen2MoveScreen = Gen2MoveScreen.create(_data, save.party)
+	screen.handle_button(Gen2Button.A)
+	screen.handle_button(Gen2Button.DOWN)
+	screen.handle_button(Gen2Button.A)
+	assert_eq(mon.moves[0], before[1])
+	assert_eq(mon.moves[1], before[0])
+	assert_eq(mon.pp[0], before[3])
+	assert_eq(mon.pp[1], before[2])
+	assert_eq(int(screen.snapshot()["held"]), -1)
+
+
+## `.b_button` with something held is `.loop` again: the cursor goes back to the
+## row that was picked up and the screen stays open.
+func test_b_puts_a_held_move_back_rather_than_leaving() -> void:
+	var save: Gen2SaveData = _save()
+	var screen: Gen2MoveScreen = Gen2MoveScreen.create(_data, save.party)
+	watch_signals(screen)
+	screen.handle_button(Gen2Button.DOWN)
+	screen.handle_button(Gen2Button.A)
+	screen.handle_button(Gen2Button.B)
+	assert_signal_not_emitted(screen, "closed")
+	assert_eq(int(screen.snapshot()["held"]), -1)
+	assert_eq(int(screen.snapshot()["cursor"]), 1)
+	screen.handle_button(Gen2Button.B)
+	assert_signal_emitted(screen, "closed")
+	assert_eq(save.party[0].moves[0], Fixture.TACKLE)
+
+
+## `.d_left` and `.d_right` return to `.joy_loop` untouched while a move is held,
+## and the arrows are only drawn for a neighbour there is one.
+func test_the_move_screen_refuses_to_change_pokemon_while_a_move_is_held() -> void:
+	var save: Gen2SaveData = _save_with_two()
+	var screen: Gen2MoveScreen = Gen2MoveScreen.create(_data, save.party)
+	assert_false(screen.has_neighbour(-1))
+	assert_true(screen.has_neighbour(1))
+	screen.handle_button(Gen2Button.A)
+	assert_false(screen.handle_button(Gen2Button.RIGHT))
+	assert_eq(screen.cursor(), 0)
+	screen.handle_button(Gen2Button.B)
+	assert_true(screen.handle_button(Gen2Button.RIGHT))
+	assert_eq(screen.cursor(), 1)
+
+
+## `ManagePokemonMoves`' own `cp EGG`, and `MonMenuOptions`' egg row set, which
+## offers STATS and SWITCH and nothing else.
+func test_an_egg_is_offered_stats_and_switch_and_no_move_row() -> void:
+	var egg := Gen2SaveMon.new()
+	egg.is_egg = true
+	egg.species = Fixture.PIKACHU
+	var rows: Array = Gen2PartyScreen.submenu_items_for(_data, egg)
+	var options: Array = []
+	for row: Dictionary in rows:
+		options.append(StringName(row.get("option", &"")))
+	assert_eq(options, [
+		Gen2PartyScreen.OPTION_STATS, Gen2PartyScreen.OPTION_SWITCH,
+		Gen2PartyScreen.OPTION_CANCEL,
+	])
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, [egg])
+	watch_signals(screen)
+	## `EggStatsJoypad` answers A with `.quit` rather than with a page.
+	screen.handle_button(Gen2Button.A)
+	assert_signal_emitted(screen, "closed")

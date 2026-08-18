@@ -3175,6 +3175,28 @@ static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictiona
 	if not levels["ok"]:
 		return levels
 
+	## `StatsScreenPageTilesGFX` carries no progression to sweep, so it is
+	## checked on the two tiles the source names by shape: tile 0 is the
+	## vertical divider, two lit columns on every row, and tile 14 is the `'⁂'`
+	## `constants/charmap.asm` points at. Both pin the address, which is walked
+	## back from the enemy HUD rather than stored.
+	var stats_tiles: PackedByteArray = Gen2Tiles.decode_2bpp_strip(
+		data, RomLayout.stats_tiles_offset(layout), RomLayout.STATS_TILES
+	)
+	var divider: PackedByteArray = _strip_tile(
+		stats_tiles, RomLayout.STATS_TILES, 0
+	)
+	for row: int in Gen2Tiles.TILE_HEIGHT:
+		for column: int in Gen2Tiles.TILE_WIDTH:
+			var lit: bool = divider[row * Gen2Tiles.TILE_WIDTH + column] != 0
+			if lit != (column < 2):
+				return {
+					"ok": false,
+					"message": "Stats tiles: the vertical divider is not two columns wide.",
+				}
+	if _ink(_strip_tile(stats_tiles, RomLayout.STATS_TILES, RomLayout.STATS_SHINY_TILE)) == 0:
+		return {"ok": false, "message": "Stats tiles: the shiny icon is blank."}
+
 	for name: String in ["enemy_hud", "player_hud"]:
 		var tiles: int = RomLayout.ENEMY_HUD_TILES if name == "enemy_hud" \
 			else RomLayout.PLAYER_HUD_TILES
@@ -5221,6 +5243,14 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 		"exp_bar": {
 			"offset": int(layout["exp_bar"]),
 			"tiles": RomLayout.EXP_BAR_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		## `StatsScreenPageTilesGFX`, which the stats screen and the move
+		## screen both load at `vTiles2 tile $31`.
+		"stats_tiles": {
+			"offset": RomLayout.stats_tiles_offset(layout),
+			"tiles": RomLayout.STATS_TILES,
 			"first_code": 0,
 			"bits": 2,
 		},

@@ -1114,21 +1114,24 @@ func test_the_cancel_row_closes_the_menu_the_way_b_does() -> void:
 
 ## A refusal stands in the menu's own bottom box and `JoyWaitAorB` holds there:
 ## a direction does not answer it and the next A or B does nothing but clear it.
+## `.SelectMilkDrinkRecipient`'s `.cant_use` is the one that loops back to the
+## recipient list rather than closing anything, so the list is still up after it.
 func test_a_refusal_holds_the_menu_until_a_or_b() -> void:
-	await _open_world()
+	await _open_world(true, Gen2WorldFieldMove.MOVE_SOFTBOILED)
 	var party: Gen2PartyScreen = await _open_party()
+	## SOFTBOILED is the first row, being the only move the member knows.
 	party.handle_button(Gen2Button.A)
-	## STATS, the first row this project does not act on.
-	party.handle_button(Gen2Button.DOWN)
+	party.handle_button(Gen2Button.A)
+	assert_false(bool(party.submenu_snapshot()["open"]), "the recipient list is open")
+	## `.cant_use`: a member cannot give its own health to itself.
 	party.handle_button(Gen2Button.A)
 	var refused: Dictionary = party.submenu_snapshot()
-	assert_ne(String(refused["message"]), "", "the refusal is in the box")
-
+	assert_eq(String(refused["message"]), Gen2PartyScreen.MESSAGE_NO_EFFECT)
 	assert_false(party.handle_button(Gen2Button.DOWN), "a direction is not one of the two")
-	assert_eq(int(party.submenu_snapshot()["cursor"]), int(refused["cursor"]))
+	assert_eq(int(party.submenu_snapshot()["member"]), int(refused["member"]))
 	assert_true(party.handle_button(Gen2Button.B))
 	assert_eq(String(party.submenu_snapshot()["message"]), "")
-	assert_true(bool(party.submenu_snapshot()["open"]), "and the submenu is still up")
+	assert_not_null(_world_screen._party_host, "and the party menu is still up")
 
 
 ## A mod's party-member rows land after every cartridge action and before CANCEL,

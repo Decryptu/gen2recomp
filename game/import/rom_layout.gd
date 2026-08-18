@@ -604,6 +604,17 @@ const ENEMY_HUD_TILES: int = 4
 const PLAYER_HUD_TILES: int = 6
 const EXP_BAR_TILES: int = 9
 
+## `StatsScreenPageTilesGFX`, the seventeen tiles `LoadStatsScreenPageTilesGFX`
+## puts at `vTiles2 tile $31`: the vertical divider, the page indicator squares,
+## the exp bar's two end caps and `'⁂'`, which `constants/charmap.asm` names as
+## this sheet's tile 14. The stats screen and the move screen are the two that
+## load it.
+const STATS_TILES: int = 17
+const STATS_FIRST_TILE: int = 0x31
+## `PrintPartyMonPage1` and `StatsScreen_PlaceShinyIcon` both draw `'⁂'`,
+## which is this sheet's tile 14.
+const STATS_SHINY_TILE: int = 14
+
 ## The trainer card's graphics (engine/menus/trainer_card.asm). `CardStatusGFX`
 ## is six tiles but `_Option`'s page 1 asks for 86, running on into `LeaderGFX`,
 ## so page 1's strip is those 86 from the card_status offset; pages 2 and 3 load
@@ -2890,6 +2901,14 @@ static func font_offset(layout: Dictionary) -> int:
 ## of its own. Its own content is what checks that (`verify_layout`).
 static func font_extra_offset(layout: Dictionary) -> int:
 	return font_offset(layout) - FONT_EXTRA_TILES * Gen2Tiles.TILE_BYTES
+
+
+## `StatsScreenPageTilesGFX` is the entry immediately before
+## `EnemyHPBarBorderGFX` in `gfx/font.asm` on all three dumps, so the pinned
+## enemy HUD offset walks back to it and it needs no address of its own. Its own
+## content is what checks that (`verify_layout`).
+static func stats_tiles_offset(layout: Dictionary) -> int:
+	return int(layout["enemy_hud"]) - STATS_TILES * Gen2Tiles.TILE_BYTES
 
 
 ## Frames are stored back to back in selection order, six tiles of 1bpp each.
