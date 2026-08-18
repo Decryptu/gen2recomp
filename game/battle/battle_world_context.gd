@@ -25,6 +25,9 @@ var player_facing: int = Gen2WorldSprite.FACING_DOWN
 ## The row the world was drawn with rather than the hour: a dark cave is night
 ## until Flash is used. See [method Gen2WorldPalette.map_time_of_day].
 var time_of_day: int = Gen2WorldPalette.TIME_DAY
+## `GetWorldMapLocation`'s answer for this map, which is what `RegionCheck`
+## reads and so what `PlayBattleMusic` picks a wild track off.
+var landmark: int = Gen2WorldRadio.LANDMARK_SPECIAL
 
 
 ## The world's own values, read once. [param drawn_time_of_day] is the caller's,
@@ -40,6 +43,7 @@ static func capture(
 	out.tileset = world.current_map.tileset
 	out.player_cell = world.player_cell
 	out.player_facing = world.player_facing
+	out.landmark = world.landmark()
 	out.time_of_day = clampi(
 		drawn_time_of_day if drawn_time_of_day >= 0 else world.map_time_of_day(), 0, 3
 	)
@@ -61,4 +65,5 @@ func to_dictionary() -> Dictionary:
 		"player_cell": player_cell,
 		"player_facing": player_facing,
 		"time_of_day": time_of_day,
+		"landmark": landmark,
 	}

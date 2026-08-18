@@ -389,6 +389,13 @@ func select_page(id: StringName) -> void:
 		_shell.select(id)
 
 
+## Preview seam: holds the transition sheet at one of `FadeOutToWhite`'s four
+## rows so a still can show that the fade is stepped. Photography only; the
+## launcher itself only ever runs the whole walk.
+func preview_fade_step(step: int) -> void:
+	_shell.preview_fade_step(step)
+
+
 ## Preview seam: shows the shelf as if these cartridges were imported, so the
 ## empty and full states can be photographed on one machine. Changes nothing on
 ## disk and is never called by the launcher itself.
@@ -459,7 +466,8 @@ func _launch_game(game_id: StringName) -> void:
 		)
 		return
 	_selected_game_id = game_id
-	_set_status(&"success", "Starting %s." % RomRegistry.title_for(game_id), "")
+	# The launch says itself with the transition; a toast announcing it would be
+	# a second, slower answer to the same press.
 	_shelf.set_busy(true)
 	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
 	if seated != null:

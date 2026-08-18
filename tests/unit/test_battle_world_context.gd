@@ -59,3 +59,12 @@ func test_an_unnamed_time_of_day_falls_back_to_the_maps_own_row() -> void:
 
 func test_a_world_without_a_map_answers_nothing() -> void:
 	assert_null(Gen2BattleWorldContext.capture(null))
+
+
+## `RegionCheck` reads `GetWorldMapLocation`, which is what `PlayBattleMusic`
+## picks a wild track off, so the snapshot has to carry it.
+func test_capture_copies_the_maps_landmark() -> void:
+	var world: Gen2WorldAPI = _world()
+	var context: Gen2BattleWorldContext = Gen2BattleWorldContext.capture(world)
+	assert_eq(context.landmark, world.landmark())
+	assert_eq(int(context.to_dictionary()["landmark"]), world.landmark())

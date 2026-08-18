@@ -44,6 +44,11 @@ var _page_nodes: Dictionary = {}
 var _current: StringName = &""
 var _focus: Gen2FocusGuard = null
 
+## Set by [method flash] and consumed by the next shell built, which is what
+## carries one transition across a scene change. Static because the shell that
+## faded out is gone by the time the next one exists.
+static var _transition_pending: bool = false
+
 
 static func create(palette: Gen2LauncherTheme) -> Gen2LauncherShell:
 	var shell := Gen2LauncherShell.new()
@@ -131,6 +136,12 @@ func _build() -> void:
 	_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_flash)
+	# The screen this one replaced left through `flash()`, so this one arrives
+	# under the same sheet and walks it back rather than cutting in under it.
+	if _transition_pending:
+		_transition_pending = false
+		_flash.color = Color(_flash_color(), 1.0)
+		ready.connect(fade_in, CONNECT_ONE_SHOT)
 
 	resized.connect(_apply_layout)
 	_apply_layout()
@@ -268,14 +279,62 @@ func _art_layer() -> TextureRect:
 	return layer
 
 
-## A wipe over everything, used when a game is about to open.
-func flash(duration: float = 0.4) -> void:
+## The screen-to-screen transition, in the family of the cartridge's own:
+## `FadeOutToWhite` walks `Gen2WorldPalette.FADE_OUT_ORDERS` one row at a time,
+## holding each for `FADE_STEP_FRAMES`, so the screen leaves in four discrete
+## steps rather than on a continuous ramp. The launcher is not a cartridge
+## screen, so the colour it flattens onto is the palette's own rather than a
+## map's white, and the steps are alpha rather than palette rows.
+##
+## The next shell built after one of these fades in from the same colour, so a
+## launch is one transition across the scene change instead of a wipe and a cut.
+## [param hand_over] is false when the screen after this one is not a shell
+## screen: the world arrives on its own map fade, which is the cartridge's, so
+## it must not be walked back out of the launcher's sheet as well.
+func flash(hand_over: bool = true) -> void:
 	if not is_inside_tree():
 		return
-	_flash.color = Color(0, 0, 0, 0) if theme_palette.is_dark() else Color(1, 1, 1, 0)
-	var tween: Tween = create_tween()
-	tween.tween_property(_flash, "color:a", 1.0, duration).set_ease(Tween.EASE_IN)
-	await tween.finished
+	_transition_pending = hand_over
+	await _step_flash(_flash_color(), 0.0, 1.0)
+
+
+## `FadeInFromWhite`: the same four rows walked back. Run by `_build` when the
+## screen before this one left through [method flash], and by nothing else, so
+## a cold boot opens on the launcher rather than on a wipe.
+func fade_in() -> void:
+	if not is_inside_tree():
+		return
+	await _step_flash(_flash_color(), 1.0, 0.0)
+	_flash.color = _flash_color()
+
+
+## Preview seam for `tools/preview_launcher.gd`: the sheet as [method flash]
+## leaves it after [param step] of its four, which a moving fade cannot be
+## photographed at.
+func preview_fade_step(step: int) -> void:
+	if _flash == null:
+		return
+	var steps: int = Gen2WorldPalette.FADE_OUT_ORDERS.size()
+	var color: Color = _flash_color()
+	color.a = float(clampi(step, 0, steps)) / float(steps)
+	_flash.color = color
+
+
+func _flash_color() -> Color:
+	return Color(0, 0, 0, 0) if theme_palette.is_dark() else Color(1, 1, 1, 0)
+
+
+func _step_flash(color: Color, from: float, to: float) -> void:
+	var steps: int = Gen2WorldPalette.FADE_OUT_ORDERS.size()
+	color.a = from
+	_flash.color = color
+	for step: int in steps:
+		for _frame: int in Gen2WorldPalette.FADE_STEP_FRAMES:
+			await get_tree().process_frame
+			if not is_inside_tree():
+				return
+		color.a = lerpf(from, to, float(step + 1) / float(steps))
+		_flash.color = color
 
 
 func _rebuild_dock() -> void:

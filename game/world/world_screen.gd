@@ -2114,6 +2114,11 @@ func _start_battle_request(request: Dictionary) -> void:
 	## deferred call: `startbattle` is a script command, so the fight belongs to
 	## the frame the encounter fired on, and a run driven frame by frame (a check,
 	## a replay) never reaches a deferred call at all.
+	## `PlayBattleMusic` opens with `PlayMusic MUSIC_NONE`, which is one driver
+	## silencing itself. The battle runs its own [Gen2AudioPlayer], so the map's
+	## has to be the thing that stops, or both pieces play at once.
+	if _audio_player != null:
+		_audio_player.stop_all()
 	host.start_world_battle(request.duplicate(true), save, badges)
 	## After the fight exists, because starting one clears whatever capture action
 	## was staged: the bag belongs to this battle rather than to the last one.
@@ -2241,6 +2246,10 @@ func _on_battle_finished(result: Dictionary) -> void:
 		_show_script_results(resumed)
 	_active_battle_save = null
 	_active_battle_persist = false
+	## `MapSetupScript_ReloadMap`'s `ForceMapMusic`, which is `TryRestartMapMusic`:
+	## a battle leaves through a map reload, and that reload is what puts the
+	## map's own track back over the one `PlayBattleMusic` started.
+	_play_current_map_music()
 	_refresh_labels()
 
 

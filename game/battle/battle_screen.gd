@@ -321,6 +321,8 @@ var _anim_delay: int = 0
 var _anim_event: Dictionary = {}
 var _anim_hud_hidden: bool = false
 var _audio_player: Gen2AudioPlayer = null
+## `PlayBattleMusic`'s answer for this fight; see [method battle_music].
+var _battle_music: int = Gen2Battle.MUSIC_NONE
 
 @onready var _screen: Gen2Screen = %Screen
 
@@ -760,6 +762,7 @@ func start_world_battle(
 	_enemy = enemy_party_ready.active_mon().species
 	_enemy_level = enemy_party_ready.active_mon().level
 	_init_battle_display()
+	_play_battle_music()
 
 	if _world_battle_tutorial:
 		show_message("Gotcha! %s was caught!" % _name_of(_enemy))
@@ -1235,6 +1238,32 @@ func _end_script() -> void:
 		_bg_map = _anim.background().bg_map.duplicate()
 	_anim = null
 	_run_next_anim_step()
+
+
+## `PlayBattleMusic`, which `FindFirstAliveMonAndStartBattle` runs in front of
+## `DoBattleTransition`: the piece playing is stopped, the volume goes back to
+## maximum, and the battle's own track starts. The world's map music is stopped
+## by the screen that opened this one, so the two players never overlap.
+func _play_battle_music() -> void:
+	_battle_music = Gen2Battle.MUSIC_NONE
+	if _audio_player == null or _data == null or _battle == null:
+		return
+	var landmark: int = _world_context.landmark if _world_context != null \
+		else Gen2WorldRadio.LANDMARK_SPECIAL
+	_battle_music = Gen2Battle.battle_music(
+		_battle.battle_type, _enemy_trainer_class, _enemy_trainer_index,
+		landmark, _time_of_day, Gen2WorldState.is_crystal_profile(_data),
+	)
+	var record: Dictionary = _data.world_audio(&"music", _battle_music)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
+## Which track [method _play_battle_music] chose, for a check or a test that
+## cannot hear one. `MUSIC_NONE` until a world battle has started.
+func battle_music() -> int:
+	return _battle_music
 
 
 ## `BattleAnimCmd_Sound`'s second operand, which is the SFX id `PlayStereoSFX`

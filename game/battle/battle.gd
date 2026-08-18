@@ -392,6 +392,8 @@ const BATTLETYPE_NORMAL: int = 0
 const BATTLETYPE_DEBUG: int = 2
 const BATTLETYPE_CONTEST: int = 6
 const BATTLETYPE_FORCESHINY: int = 7
+## Named by `PlayBattleMusic` alone: nothing else here branches on it.
+const BATTLETYPE_ROAMING: int = 5
 ## What TreeMonEncounter writes before a headbutt battle. CheckSleepingTreeMon
 ## is the only thing that reads it.
 const BATTLETYPE_TREE: int = 8
@@ -2409,3 +2411,111 @@ func _run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
 		called_turn.called = true
 		_run_move_effect(called_turn, depth + 1)
 		return
+
+
+## `PlayBattleMusic` (engine/battle/start_battle.asm) and the two routines it
+## calls, `RegionCheck` and `IsGymLeader`. Kept here rather than on the screen
+## because every input is battle state: `wBattleType`, `wOtherTrainerClass`,
+## `wOtherTrainerID`, `wTimeOfDay` and the map's landmark.
+##
+## `MUSIC_SUICUNE_BATTLE` exists on Crystal alone; the two `BATTLETYPE_` rows in
+## front of the trainer check are the only place either game reaches it, and
+## Gold and Silver never write those types.
+const MUSIC_NONE: int = 0x00
+const MUSIC_KANTO_GYM_LEADER_BATTLE: int = 0x06
+const MUSIC_KANTO_TRAINER_BATTLE: int = 0x07
+const MUSIC_KANTO_WILD_BATTLE: int = 0x08
+const MUSIC_JOHTO_WILD_BATTLE: int = 0x29
+const MUSIC_JOHTO_TRAINER_BATTLE: int = 0x2A
+const MUSIC_JOHTO_GYM_LEADER_BATTLE: int = 0x2E
+const MUSIC_CHAMPION_BATTLE: int = 0x2F
+const MUSIC_RIVAL_BATTLE: int = 0x30
+const MUSIC_ROCKET_BATTLE: int = 0x31
+const MUSIC_JOHTO_WILD_BATTLE_NIGHT: int = 0x4A
+const MUSIC_SUICUNE_BATTLE: int = 0x64
+
+## constants/trainer_constants.asm. The `trainerclass` indexes agree byte for
+## byte between the two pins, so there is no profile conversion here.
+const TRAINER_CLASS_RIVAL1: int = 0x09
+const TRAINER_CLASS_CHAMPION: int = 0x10
+const TRAINER_CLASS_GRUNTM: int = 0x1F
+const TRAINER_CLASS_RIVAL2: int = 0x2A
+const TRAINER_CLASS_RED: int = 0x3F
+const TRAINER_CLASS_GRUNTF: int = 0x42
+## `RIVAL2_2_CHIKORITA`. `trainerclass` restarts the id count at 1, so the
+## Indigo Plateau rematch is the fourth id of the class and `jr c, .done` keeps
+## the three below it on `MUSIC_RIVAL_BATTLE`.
+const TRAINER_ID_RIVAL2_2_CHIKORITA: int = 4
+
+## `data/trainers/leaders.asm`. `GymLeaders` falls through into
+## `KantoGymLeaders`, so `IsGymLeader` matches both rows and `IsKantoGymLeader`
+## only the second. CHAMPION and RED sit in the first list and are unreachable
+## from the music check, which the file's own comment says.
+const KANTO_GYM_LEADERS: Array[int] = [
+	0x11, 0x12, 0x13, 0x15, 0x1A, 0x23, 0x2E, 0x40,
+]
+const JOHTO_GYM_LEADERS: Array[int] = [
+	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+	0x0B, 0x0D, 0x0E, 0x0F, TRAINER_CLASS_CHAMPION, TRAINER_CLASS_RED,
+]
+
+## constants/landmark_constants.asm, Crystal-canonical like
+## [constant Gen2WorldRadio.KANTO_LANDMARK], which is where the Gold and Silver
+## conversion lives.
+const LANDMARK_VICTORY_ROAD: int = 0x58
+
+
+## `RegionCheck`, which is not `IsInJohto`: the Fast Ship counts as Johto, so
+## does everything below `KANTO_LANDMARK`, and so does Victory Road and every
+## landmark above it, because `cp LANDMARK_VICTORY_ROAD / jr c, .kanto` only
+## takes the Kanto branch below that row.
+##
+## The `LANDMARK_SPECIAL` backup lookup in front of it is the six Cable Club
+## rooms and is deliberately not modelled; see [method Gen2WorldAPI.landmark].
+static func region_is_kanto(landmark: int, crystal: bool = true) -> bool:
+	if landmark == Gen2WorldRadio.fast_ship_landmark(crystal):
+		return false
+	if landmark < Gen2WorldRadio.kanto_landmark(crystal):
+		return false
+	return landmark < Gen2WorldRadio.profile_landmark(LANDMARK_VICTORY_ROAD, crystal)
+
+
+## `PlayBattleMusic`'s answer: the track a battle opens on.
+##
+## [param landmark] is `GetWorldMapLocation`'s, [param trainer_class] and
+## [param trainer_id] are `wOtherTrainerClass` and `wOtherTrainerID` (class 0
+## being a wild fight), and [param time_of_day] is `wTimeOfDay`.
+static func battle_music(
+	battle_type: int,
+	trainer_class: int,
+	trainer_id: int,
+	landmark: int,
+	time_of_day: int,
+	crystal: bool = true,
+) -> int:
+	# `ld de, MUSIC_SUICUNE_BATTLE` sits in front of both compares, so the
+	# roaming branch reaches `.done` with the same track still in `de`.
+	if battle_type == BATTLETYPE_SUICUNE or battle_type == BATTLETYPE_ROAMING:
+		return MUSIC_SUICUNE_BATTLE
+	var kanto: bool = region_is_kanto(landmark, crystal)
+	if trainer_class <= 0:
+		if kanto:
+			return MUSIC_KANTO_WILD_BATTLE
+		return MUSIC_JOHTO_WILD_BATTLE_NIGHT \
+			if time_of_day == Gen2WorldPalette.TIME_NIGHT else MUSIC_JOHTO_WILD_BATTLE
+	if trainer_class == TRAINER_CLASS_CHAMPION or trainer_class == TRAINER_CLASS_RED:
+		return MUSIC_CHAMPION_BATTLE
+	# `docs/bugs_and_glitches.md`: only the two grunt classes reach the Rocket
+	# track, so an Executive or a Scientist falls through to the trainer rows.
+	if trainer_class == TRAINER_CLASS_GRUNTM or trainer_class == TRAINER_CLASS_GRUNTF:
+		return MUSIC_ROCKET_BATTLE
+	if KANTO_GYM_LEADERS.has(trainer_class):
+		return MUSIC_KANTO_GYM_LEADER_BATTLE
+	if JOHTO_GYM_LEADERS.has(trainer_class):
+		return MUSIC_JOHTO_GYM_LEADER_BATTLE
+	if trainer_class == TRAINER_CLASS_RIVAL1:
+		return MUSIC_RIVAL_BATTLE
+	if trainer_class == TRAINER_CLASS_RIVAL2:
+		return MUSIC_CHAMPION_BATTLE \
+			if trainer_id >= TRAINER_ID_RIVAL2_2_CHIKORITA else MUSIC_RIVAL_BATTLE
+	return MUSIC_KANTO_TRAINER_BATTLE if kanto else MUSIC_JOHTO_TRAINER_BATTLE
