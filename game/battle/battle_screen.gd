@@ -2099,13 +2099,36 @@ func advance() -> void:
 	_open_battle_menu()
 
 
+## The fought party over the live save, with nothing written to disk.
+##
+## A ball is thrown mid-battle and the catch is its own transaction, which
+## builds its candidate from the live save; without this the party that reaches
+## the candidate is the pre-battle one, so the HP and PP spent weakening the
+## wild are given back the moment it is caught.
+func sync_live_party() -> bool:
+	if _source_save == null or _battle == null or _data == null:
+		return false
+	var fought: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
+		_data.id, _data.sha1, _source_save.slot, _battle.party(Gen2Battle.PLAYER),
+		"", _source_save
+	)
+	if fought == null:
+		return false
+	_source_save.party = fought.party
+	return true
+
+
 ## Writes back only after every event from a finished battle has been shown.
 ## Saving during a resolved turn would capture battle state the player has not
 ## seen yet, while the persistent save model intentionally has no such state.
 func _save_battle_result() -> bool:
 	if _save_slot < 0 or _save_written or _battle == null:
 		return true
-	if _battle.winner() != Gen2Battle.PLAYER:
+	## `wPartyMon` holds the fighting copy on the cartridge, so damage taken and
+	## PP spent belong to the party whatever ended the battle: a run keeps them
+	## the same way a win does. A loss is the one exception, since the blackout
+	## puts the pre-battle party back rather than keeping the fought one.
+	if _battle.winner() != Gen2Battle.PLAYER and not _battle.has_fled():
 		return true
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save

@@ -757,6 +757,85 @@ func test_hp_experience_and_pp_survive_into_the_next_wild_battle() -> void:
 	)
 
 
+## `wPartyMon` is the fighting copy, so a run keeps the damage taken and the PP
+## spent exactly as a win does; only a blackout puts the pre-battle party back.
+## `_save_battle_result` used to refuse every battle the player did not win, so
+## a wild encounter walked away from cost nothing.
+func test_running_away_keeps_the_damage_taken_and_the_pp_spent() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	var starting_pp: int = (save.party[0] as Gen2SaveMon).pp[0]
+	var starting_hp: int = (save.party[0] as Gen2SaveMon).hp
+
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	host.finish()
+	host.advance()
+
+	var player_mon: Gen2BattleMon = host._battle.party(Gen2Battle.PLAYER).mons[0]
+	player_mon.take_damage(3)
+	player_mon.pp[0] -= 1
+
+	host.run_from_battle()
+	assert_true(host._battle.has_fled())
+	var guard: int = 10
+	while _battle_child() != null and guard > 0:
+		host.finish()
+		host.advance()
+		guard -= 1
+	await get_tree().process_frame
+	assert_null(_battle_child())
+
+	var after: Gen2SaveMon = save.party[0] as Gen2SaveMon
+	assert_eq(after.hp, starting_hp - 3, "the live save must carry the damage taken")
+	assert_eq(after.pp[0], starting_pp - 1, "the live save must carry the PP spent")
+
+
+## The catch is its own transaction and builds its candidate from the live save,
+## so the party that fought the wild down has to reach that save before the ball
+## is thrown; otherwise catching gives the HP and PP back.
+func test_a_capture_keeps_the_damage_taken_and_the_pp_spent() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	var starting_pp: int = (save.party[0] as Gen2SaveMon).pp[0]
+	var starting_hp: int = (save.party[0] as Gen2SaveMon).hp
+	var added: Dictionary = _world_screen._world.state.apply_changes(
+		{}, {}, {"items": {Gen2WorldPartyHost.ITEM_MASTER_BALL: 1}}
+	)
+	assert_true(added["ok"])
+
+	_world_screen.preview_wild_encounter()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var host: Gen2BattleScreen = _battle_host()
+	assert_not_null(host)
+	host.finish()
+	host.advance()
+
+	var player_mon: Gen2BattleMon = host._battle.party(Gen2Battle.PLAYER).mons[0]
+	player_mon.take_damage(3)
+	player_mon.pp[0] -= 1
+
+	assert_true(host.begin_capture()["ok"])
+	assert_true(host.select_capture_ball(1)["ok"])
+	assert_true(host.throw_capture_ball()["ok"])
+	var guard: int = 12
+	while _battle_child() != null and guard > 0:
+		host.finish()
+		host.advance()
+		guard -= 1
+	await get_tree().process_frame
+	assert_null(_battle_child())
+	assert_eq(_world_screen.world_snapshot()["script_prompt"], "Caught %s" % _wild_name())
+
+	var after: Gen2SaveMon = save.party[0] as Gen2SaveMon
+	assert_eq(after.hp, starting_hp - 3, "the caught save must carry the damage taken")
+	assert_eq(after.pp[0], starting_pp - 1, "the caught save must carry the PP spent")
+
+
 func _event_value(events: Array, event_type: StringName, key: String) -> Variant:
 	for event: Dictionary in events:
 		if event.get("type", &"") == event_type:
