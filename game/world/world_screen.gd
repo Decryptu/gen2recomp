@@ -1675,8 +1675,8 @@ func preview_pack_use() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
@@ -1704,9 +1704,29 @@ func preview_options() -> void:
 		_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_OPTION:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_OPTION):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
+
+
+## Walks the open start menu's cursor onto [param kind] and answers whether it
+## got there. Bounded by the row count on purpose: a row the menu is not
+## offering, because its gate is shut on this save, is a cursor that never
+## reaches it, and an unbounded walk there spins a core without ever rendering a
+## frame. Every `preview_*` driver below goes through this.
+func _walk_start_menu_to(kind: StringName) -> bool:
+	if _start_menu_host == null:
+		return false
+	var menu: Variant = _start_menu_host.get("_menu")
+	for _row: int in Gen2WorldStartMenu.SOURCE_ENTRIES.size():
+		if menu.selected_kind() == kind:
+			return true
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if menu.selected_kind() == kind:
+		return true
+	_script_prompt = "The start menu is not offering %s" % kind
+	_refresh_labels()
+	return false
 
 
 ## Public screenshot driver for the Pokegear, reached the way a player reaches
@@ -1724,11 +1744,8 @@ func preview_pokegear() -> void:
 		})
 		_open_start_menu()
 	if _start_menu_host != null:
-		for _row: int in Gen2WorldStartMenu.SOURCE_ENTRIES.size():
-			if _start_menu_host.get("_menu").selected_kind() \
-				== Gen2WorldStartMenu.ITEM_POKEGEAR:
-				break
-			_start_menu_host.handle_button(Gen2Button.DOWN)
+		if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_POKEGEAR):
+			return
 		## The row opens the overlay through the same signal a press does, so
 		## the card list is up by the time this returns.
 		_start_menu_host.handle_button(Gen2Button.A)
@@ -1761,8 +1778,8 @@ func _preview_save_menu(answers: int) -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_SAVE:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_SAVE):
+		return
 	for _press: int in answers + 1:
 		_start_menu_host.handle_button(Gen2Button.A)
 
@@ -1795,8 +1812,8 @@ func preview_pack_toss() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
@@ -1834,8 +1851,8 @@ func preview_move_forget() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 	# The pack opens on the ITEM pocket, and the granted item is in the TM/HM
 	# one. The guard bounds the walk in case no such pocket is built.
@@ -1944,8 +1961,8 @@ func preview_field_item(item: int = Gen2WorldPack.ITEM_ITEMFINDER) -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 	# The row itself, rather than whichever one the pocket opens on: the save may
 	# already own other key items, and a capture has to photograph the named one.

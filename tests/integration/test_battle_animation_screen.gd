@@ -12,20 +12,21 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
 var _data: GameData = null
 var _screen: Gen2BattleScreen = null
-var _battle_scene: bool = true
 
 
 func before_each() -> void:
 	Gen2ModHost.reset()
 	Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
-	_battle_scene = Gen2OptionsStore.current().battle_scene
+	## The battle-scene row and the reveal speed are both read off the options
+	## store, and a case here writes one: redirect the store first, so a test run
+	## reads and writes the test path rather than the settings on this machine.
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func after_each() -> void:
-	var options: Gen2Options = Gen2OptionsStore.current()
-	options.battle_scene = _battle_scene
-	Gen2OptionsStore.save(options)
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 	if is_instance_valid(_screen):
 		_screen.free()
 		_screen = null
@@ -285,5 +286,19 @@ func test_a_line_on_screen_still_owes_its_press() -> void:
 	_screen._begin_animation(_animation_event())
 	_settle_animation()
 	assert_eq(_screen._pending.size(), 1, "the line was not pressed past")
+	## The reveal is a frame count at the OPTION menu's text speed, and a press
+	## cannot shorten one, so the line is spent before the press that dismisses
+	## it: how many frames the animation happened to cover is not the subject.
+	_settle_message()
+	assert_false(_screen._box.is_revealing(), "the line has finished printing")
 	_screen.advance()
 	assert_eq(_screen._pending.size(), 0)
+
+
+## Spends the frames the box still owes, the way a player waits through them.
+func _settle_message() -> void:
+	var box: Gen2TextBox = _screen._box
+	var guard: int = 4000
+	while box != null and box.is_revealing() and guard > 0:
+		_screen.advance_frame()
+		guard -= 1
