@@ -10,7 +10,13 @@ extends SceneTree
 ## tree. That mode drives the screen's own path and needs a display, so it runs
 ## without `--headless`:
 ##
-##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y]
+##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y] [WxH] [touch]
+##
+## `WxH` is the window to photograph in, for the two shapes a phone has, and
+## `touch` draws the on-screen controller with it, which is the only way to see
+## how [Gen2GameFrame] splits a portrait screen:
+##
+##   ... live effects 4 4 430x932 touch
 ##
 ## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
 ## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
@@ -47,6 +53,8 @@ extends SceneTree
 ## is photographed.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
+## What the live mode actually opens in, which a phone-shaped argument replaces.
+var _window: Vector2i = WINDOW_SIZE
 ## Longer than a step onto a warp tile and the fade behind it, for the `warp`
 ## kind, which drives to a frame rather than spending a count.
 const WARP_FRAME_CAP: int = 120
@@ -112,6 +120,14 @@ func _initialize() -> void:
 			return
 		_output_path = args[3]
 		_kind = StringName(args[5]) if args.size() >= 6 else &"effects"
+		if args.size() >= 9:
+			var shape: PackedStringArray = args[8].split("x")
+			if shape.size() == 2:
+				_window = Vector2i(int(shape[0]), int(shape[1]))
+		if args.size() >= 10 and args[9] == "touch":
+			var options: Gen2Options = Gen2OptionsStore.current()
+			options.touch_mode = Gen2Options.TOUCH_ALWAYS
+			Gen2InputRuntime.instance().apply_options(options)
 		_build_live(
 			data, int(args[1]), int(args[2]),
 			Vector2i(int(args[6]), int(args[7])) if args.size() >= 8 else Vector2i(-1, -1),
@@ -143,8 +159,9 @@ func _initialize() -> void:
 ## once. Each is started through the same call the game makes, so what is
 ## photographed is the renderer's own path rather than a drawing of it.
 func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> void:
-	root.set_content_scale_size(WINDOW_SIZE)
-	root.size = WINDOW_SIZE
+	DisplayServer.window_set_size(_window)
+	root.set_content_scale_size(_window)
+	root.size = _window
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_screen = packed.instantiate() as Gen2WorldScreen
 	_screen.map_group = group
