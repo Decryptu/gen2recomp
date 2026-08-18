@@ -345,13 +345,28 @@ func start_step(direction: Vector2i, frames: int) -> void:
 ## Adds one step of a scripted stream to the trail. The first one starts at
 ## once and the rest wait their turn, so a five-step applymovement is drawn as
 ## five steps rather than as one arrival.
-func queue_step(direction: Vector2i, frames: int, jumping: bool = false) -> void:
-	scripted_steps = true
-	if step_frames_remaining > 0:
+## [param facing] is the direction the object is drawn looking while this step
+## runs, which is not the step's own vector for a `jump_step` and is the whole of
+## a queued `turn_head`. `NormalStep` writes OBJECT_FACING as it starts the step,
+## so a stream applied in one call still turns one step at a time rather than
+## walking its whole path already facing the last command's way.
+func queue_step(
+	direction: Vector2i, frames: int, jumping: bool = false,
+	facing: Vector2i = Vector2i.ZERO
+) -> void:
+	if step_frames_remaining > 0 or not queued_steps.is_empty():
+		scripted_steps = true
 		queued_steps.append({
 			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
+			"facing": facing,
 		})
 		return
+	apply_direction(facing)
+	## A turn spends no frames, so an entry with none to spend leaves nothing
+	## for the stream's wait to end on: it is the turn and nothing else.
+	if frames <= 0 and direction == Vector2i.ZERO:
+		return
+	scripted_steps = true
 	_begin_step(direction, frames, jumping)
 
 
@@ -405,14 +420,23 @@ func tick_step() -> bool:
 			weird_tree = false
 			step_frame = 0
 			frame = 0
-		if queued_steps.is_empty():
-			scripted_steps = false
-		else:
-			var next: Dictionary = queued_steps.pop_front()
+		_start_next_queued_step()
+	return true
+
+
+## Pops the trail's next entry, turning where it says to. A `turn_head` queued
+## behind a step is an entry of no frames and no vector, so the drain runs on
+## past it rather than stalling the rest of the stream on it.
+func _start_next_queued_step() -> void:
+	while not queued_steps.is_empty():
+		var next: Dictionary = queued_steps.pop_front()
+		apply_direction(next.get("facing", Vector2i.ZERO))
+		if int(next["frames"]) > 0 or next["direction"] != Vector2i.ZERO:
 			_begin_step(
 				next["direction"], int(next["frames"]), bool(next.get("jumping", false))
 			)
-	return true
+			return
+	scripted_steps = false
 
 
 func is_stepping() -> bool:

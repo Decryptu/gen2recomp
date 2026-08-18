@@ -12,20 +12,21 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 
 var _data: GameData = null
 var _screen: Gen2BattleScreen = null
-var _battle_scene: bool = true
 
 
 func before_each() -> void:
 	Gen2ModHost.reset()
 	Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
-	_battle_scene = Gen2OptionsStore.current().battle_scene
+	## The battle-scene row and the reveal speed are both read off the options
+	## store, and a case here writes one: redirect the store first, so a test run
+	## reads and writes the test path rather than the settings on this machine.
+	Gen2OptionsStore.use_test_path()
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 
 
 func after_each() -> void:
-	var options: Gen2Options = Gen2OptionsStore.current()
-	options.battle_scene = _battle_scene
-	Gen2OptionsStore.save(options)
+	DirAccess.remove_absolute(Gen2OptionsStore.path())
 	if is_instance_valid(_screen):
 		_screen.free()
 		_screen = null
@@ -257,3 +258,47 @@ func test_a_send_out_draws_a_picture_rather_than_the_doll_the_last_one_had() -> 
 		"level": 5, "hp": 20, "max_hp": 20,
 	})
 	assert_false(bool(_view()["player_substitute"]))
+
+
+func test_the_frames_an_animation_spends_do_not_owe_a_press() -> void:
+	# `DoMove` reads no joypad between `PlayFXAnimID` and the command after it,
+	# so the line behind an animation is said when its frames run out rather
+	# than when the player presses A.
+	await _open_battle()
+	_screen._pending = [{
+		"type": Gen2Battle.MISSED, "side": Gen2Battle.PLAYER, "move": 33,
+	}]
+	_screen._begin_animation(_animation_event())
+	_settle_animation()
+	assert_false(_screen.animation_running())
+	assert_eq(_screen._pending.size(), 0, "the pump ran on without a press")
+	assert_ne(String(_screen.battle_snapshot()["message"]), "",
+		"the held line was said")
+
+
+func test_a_line_on_screen_still_owes_its_press() -> void:
+	# The same pump must not walk past a box: only a button dismisses one.
+	await _open_battle()
+	_screen.show_message("ATTACK MISSED!")
+	_screen._pending = [{
+		"type": Gen2Battle.MISSED, "side": Gen2Battle.PLAYER, "move": 33,
+	}]
+	_screen._begin_animation(_animation_event())
+	_settle_animation()
+	assert_eq(_screen._pending.size(), 1, "the line was not pressed past")
+	## The reveal is a frame count at the OPTION menu's text speed, and a press
+	## cannot shorten one, so the line is spent before the press that dismisses
+	## it: how many frames the animation happened to cover is not the subject.
+	_settle_message()
+	assert_false(_screen._box.is_revealing(), "the line has finished printing")
+	_screen.advance()
+	assert_eq(_screen._pending.size(), 0)
+
+
+## Spends the frames the box still owes, the way a player waits through them.
+func _settle_message() -> void:
+	var box: Gen2TextBox = _screen._box
+	var guard: int = 4000
+	while box != null and box.is_revealing() and guard > 0:
+		_screen.advance_frame()
+		guard -= 1

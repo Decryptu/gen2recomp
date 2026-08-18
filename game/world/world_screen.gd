@@ -1675,8 +1675,8 @@ func preview_pack_use() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
@@ -1704,9 +1704,53 @@ func preview_options() -> void:
 		_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_OPTION:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_OPTION):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
+
+
+## Walks the open start menu's cursor onto [param kind] and answers whether it
+## got there. Bounded by the row count on purpose: a row the menu is not
+## offering, because its gate is shut on this save, is a cursor that never
+## reaches it, and an unbounded walk there spins a core without ever rendering a
+## frame. Every `preview_*` driver below goes through this.
+func _walk_start_menu_to(kind: StringName) -> bool:
+	if _start_menu_host == null:
+		return false
+	var menu: Variant = _start_menu_host.get("_menu")
+	for _row: int in Gen2WorldStartMenu.SOURCE_ENTRIES.size():
+		if menu.selected_kind() == kind:
+			return true
+		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if menu.selected_kind() == kind:
+		return true
+	_script_prompt = "The start menu is not offering %s" % kind
+	_refresh_labels()
+	return false
+
+
+## Public screenshot driver for the Pokegear, reached the way a player reaches
+## it: START, the POKEGEAR row, and then A on the card list. What it is for is
+## the panel-over-panel stack, so the picture has to be the card over the list.
+func preview_pokegear() -> void:
+	if _world == null or _data == null:
+		return
+	if _service_host == null and _start_menu_host == null:
+		_injected_save = _embedded_party_save()
+		## The row is gated on ENGINE_POKEGEAR, which a world opened straight
+		## onto a map has not been given yet.
+		_world.state.apply_changes({}, {}, {
+			"engine_flags": {Gen2WorldStartMenu.ENGINE_POKEGEAR: true},
+		})
+		_open_start_menu()
+	if _start_menu_host != null:
+		if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_POKEGEAR):
+			return
+		## The row opens the overlay through the same signal a press does, so
+		## the card list is up by the time this returns.
+		_start_menu_host.handle_button(Gen2Button.A)
+	if _service_host != null:
+		_service_host.handle_button(Gen2Button.A)
 
 
 ## Public screenshot drivers for `SaveMenu`, one per box it puts up:
@@ -1734,8 +1778,8 @@ func _preview_save_menu(answers: int) -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_SAVE:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_SAVE):
+		return
 	for _press: int in answers + 1:
 		_start_menu_host.handle_button(Gen2Button.A)
 
@@ -1768,8 +1812,8 @@ func preview_pack_toss() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
@@ -1807,8 +1851,8 @@ func preview_move_forget() -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 	# The pack opens on the ITEM pocket, and the granted item is in the TM/HM
 	# one. The guard bounds the walk in case no such pocket is built.
@@ -1917,8 +1961,8 @@ func preview_field_item(item: int = Gen2WorldPack.ITEM_ITEMFINDER) -> void:
 	_open_start_menu()
 	if _start_menu_host == null:
 		return
-	while _start_menu_host.get("_menu").selected_kind() != Gen2WorldStartMenu.ITEM_PACK:
-		_start_menu_host.handle_button(Gen2Button.DOWN)
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
 	_start_menu_host.handle_button(Gen2Button.A)
 	# The row itself, rather than whichever one the pocket opens on: the save may
 	# already own other key items, and a capture has to photograph the named one.
@@ -3383,6 +3427,74 @@ func _show_script_results(results: Array) -> void:
 	var recovery_prompt: String = ""
 	for source_result: Dictionary in results:
 		var result: Dictionary = Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, source_result)
+		## Applied before the status below, and before any branch of it that leaves
+		## the loop: a command's presentation effect happened before the wait the
+		## same result ends on, and a `break` that skipped this dropped it. That is
+		## what left a `pokepic` undrawn, since `Script_pokepic` is followed by the
+		## `cry` whose runtime request breaks out of the loop.
+		for result_event: Dictionary in result.get("events", []):
+			if result_event.get("type", &"") == &"presentation_special_applied" \
+				and StringName(result_event.get("kind", &"")) == &"prof_oaks_pc_boot":
+				open_prof_oaks_pc()
+			elif result_event.get("type", &"") == &"presentation_special_applied" \
+				and StringName(result_event.get("kind", &"")) == &"heal_machine_anim":
+				_start_heal_machine_sounds(result_event)
+			elif result_event.get("type", &"") == &"hall_of_fame_requested":
+				## An event, not a runtime request: `halloffame` commits its flag
+				## and runs on, and the source's own `end` is the next command,
+				## so nothing is waiting to be resumed when this opens.
+				open_hall_of_fame()
+			elif result_event.get("type", &"") == &"credits_requested":
+				open_credits()
+			elif result_event.get("type", &"") == &"field_move_confirmed":
+				## `iftrue Script_Cut` and its four counterparts. The move is the
+				## host's, and it is the same staged request and acknowledge the
+				## party submenu reaches, so the two ways in stay one path.
+				_use_prompted_field_move(int(result_event.get("move", 0)),
+					int(result_event.get("slot", -1)))
+			elif result_event.get("type", &"") == &"pokemon_picture_requested":
+				_show_story_picture(int(result_event.get("pokemon", 0)))
+			elif result_event.get("type", &"") == &"pokemon_picture_closed":
+				_hide_story_picture()
+			elif result_event.get("type", &"") == &"screen_shake_requested":
+				if _effects != null:
+					_effects.start_screen_shake(
+						int(result_event.get("strength", 0)),
+						&"screen_shake",
+						result_event,
+					)
+				_apply_world_effect_offset()
+			elif result_event.get("type", &"") == &"tree_shake_requested":
+				## The object animates itself for the frames the stream sleeps;
+				## there is nothing for a host to start.
+				pass
+			elif result_event.get("type", &"") in [
+				&"rock_smash_effect_requested",
+				&"movement_command_requested",
+			]:
+				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
+			elif result_event.get("type", &"") == &"warp":
+				map_changed = true
+			elif result_event.get("type", &"") == &"world_clock_changed":
+				clock_changed = true
+			elif result_event.get("type", &"") == &"battle_map_reload_requested":
+				map_changed = true
+			elif result_event.get("type", &"") == &"blackout":
+				recovered = true
+				var recovery: Variant = result_event.get("recovery", {})
+				var source: StringName = StringName(
+					recovery.get("source", &"save") if recovery is Dictionary else &"save"
+				)
+				recovery_prompt = (
+					"Blackout recovered from the development party"
+					if source == &"development"
+					else "Blackout recovered from the last saved party"
+				)
+			elif result_event.get("type", &"") in [
+				&"item_changed", &"money_changed", &"coins_changed", &"movement_blocked",
+				&"movement_failed",
+			]:
+				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
 		if result.has("clock"):
 			clock_changed = true
 		var status: StringName = StringName(result.get("status", &""))
@@ -3479,69 +3591,6 @@ func _show_script_results(results: Array) -> void:
 		elif not bool(result.get("ok", false)):
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
-		for result_event: Dictionary in result.get("events", []):
-			if result_event.get("type", &"") == &"presentation_special_applied" \
-				and StringName(result_event.get("kind", &"")) == &"prof_oaks_pc_boot":
-				open_prof_oaks_pc()
-			elif result_event.get("type", &"") == &"presentation_special_applied" \
-				and StringName(result_event.get("kind", &"")) == &"heal_machine_anim":
-				_start_heal_machine_sounds(result_event)
-			elif result_event.get("type", &"") == &"hall_of_fame_requested":
-				## An event, not a runtime request: `halloffame` commits its flag
-				## and runs on, and the source's own `end` is the next command,
-				## so nothing is waiting to be resumed when this opens.
-				open_hall_of_fame()
-			elif result_event.get("type", &"") == &"credits_requested":
-				open_credits()
-			elif result_event.get("type", &"") == &"field_move_confirmed":
-				## `iftrue Script_Cut` and its four counterparts. The move is the
-				## host's, and it is the same staged request and acknowledge the
-				## party submenu reaches, so the two ways in stay one path.
-				_use_prompted_field_move(int(result_event.get("move", 0)),
-					int(result_event.get("slot", -1)))
-			elif result_event.get("type", &"") == &"pokemon_picture_requested":
-				_show_story_picture(int(result_event.get("pokemon", 0)))
-			elif result_event.get("type", &"") == &"pokemon_picture_closed":
-				_hide_story_picture()
-			elif result_event.get("type", &"") == &"screen_shake_requested":
-				if _effects != null:
-					_effects.start_screen_shake(
-						int(result_event.get("strength", 0)),
-						&"screen_shake",
-						result_event,
-					)
-				_apply_world_effect_offset()
-			elif result_event.get("type", &"") == &"tree_shake_requested":
-				## The object animates itself for the frames the stream sleeps;
-				## there is nothing for a host to start.
-				pass
-			elif result_event.get("type", &"") in [
-				&"rock_smash_effect_requested",
-				&"movement_command_requested",
-			]:
-				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
-			elif result_event.get("type", &"") == &"warp":
-				map_changed = true
-			elif result_event.get("type", &"") == &"world_clock_changed":
-				clock_changed = true
-			elif result_event.get("type", &"") == &"battle_map_reload_requested":
-				map_changed = true
-			elif result_event.get("type", &"") == &"blackout":
-				recovered = true
-				var recovery: Variant = result_event.get("recovery", {})
-				var source: StringName = StringName(
-					recovery.get("source", &"save") if recovery is Dictionary else &"save"
-				)
-				recovery_prompt = (
-					"Blackout recovered from the development party"
-					if source == &"development"
-					else "Blackout recovered from the last saved party"
-				)
-			elif result_event.get("type", &"") in [
-				&"item_changed", &"money_changed", &"coins_changed", &"movement_blocked",
-				&"movement_failed",
-			]:
-				_script_prompt = "Applied: %s" % String(result_event.get("type", &"effect"))
 	if recovered and not recovery_prompt.is_empty():
 		_script_prompt = recovery_prompt
 	elif not waiting and not failed:

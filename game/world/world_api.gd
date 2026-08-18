@@ -732,14 +732,46 @@ func _start_player_step(
 
 ## One step of a scripted stream, behind whatever the player is already walking.
 ## See Gen2WorldObject.queue_step().
-func _queue_player_step(direction: Vector2i, frames: int, jumping: bool = false) -> void:
-	_player_scripted_steps = true
-	if _player_step_frames_remaining > 0:
+## [param facing] is the direction the player is drawn looking while this step
+## runs, the way [method Gen2WorldObject.queue_step] takes one: `NormalStep`
+## writes OBJECT_FACING as the step starts, so a stream applied in one call still
+## turns a step at a time.
+func _queue_player_step(
+	direction: Vector2i, frames: int, jumping: bool = false,
+	facing: Vector2i = Vector2i.ZERO
+) -> void:
+	if _player_step_frames_remaining > 0 or not _player_queued_steps.is_empty():
+		_player_scripted_steps = true
 		_player_queued_steps.append({
 			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
+			"facing": facing,
 		})
 		return
+	_face_player_toward(facing)
+	## See [method Gen2WorldObject.queue_step]: a turn with nothing to spend
+	## leaves the stream's wait nothing to end on.
+	if frames <= 0 and direction == Vector2i.ZERO:
+		return
+	_player_scripted_steps = true
 	_begin_player_step(direction, frames, jumping)
+
+
+func _face_player_toward(direction: Vector2i) -> void:
+	if direction != Vector2i.ZERO:
+		player_facing = _facing_for_direction(direction)
+
+
+## The player's half of [method Gen2WorldObject._start_next_queued_step].
+func _start_next_player_step() -> void:
+	while not _player_queued_steps.is_empty():
+		var next: Dictionary = _player_queued_steps.pop_front()
+		_face_player_toward(next.get("facing", Vector2i.ZERO))
+		if int(next["frames"]) > 0 or next["direction"] != Vector2i.ZERO:
+			_begin_player_step(
+				next["direction"], int(next["frames"]), bool(next.get("jumping", false))
+			)
+			return
+	_player_scripted_steps = false
 
 
 func _begin_player_step(
@@ -778,13 +810,7 @@ func advance_player_step_frame() -> bool:
 	_player_step_frame = (_player_step_frame + 1) & 0x0F
 	_player_step_frames_remaining -= 1
 	if _player_step_frames_remaining <= 0:
-		if _player_queued_steps.is_empty():
-			_player_scripted_steps = false
-		else:
-			var next: Dictionary = _player_queued_steps.pop_front()
-			_begin_player_step(
-				next["direction"], int(next["frames"]), bool(next.get("jumping", false))
-			)
+		_start_next_player_step()
 	return true
 
 
@@ -3934,17 +3960,25 @@ func _apply_object_movement(event: Dictionary) -> Array:
 		})
 		return generated
 	var object: Gen2WorldObject = objects[object_index]
+	## Where the stream leaves the object looking. The drawn facing trails the
+	## walk one step at a time, so the record the next map load restores is this
+	## rather than whichever step is on screen when the stream is applied.
+	var final_facing: int = object.facing
 	for command: Dictionary in decoded.get("commands", []):
 		var kind: StringName = StringName(command.get("kind", &""))
 		if kind in SCRIPTED_TURN_KINDS:
-			object.apply_direction(_movement_direction(int(command.get("direction", 0))))
+			## Queued rather than applied, so a turn behind a walk turns where
+			## the walk ends. `queue_step` drains an entry of no frames itself.
+			var turn: Vector2i = _movement_direction(int(command.get("direction", 0)))
+			object.queue_step(Vector2i.ZERO, 0, false, turn)
+			final_facing = _facing_for_direction(turn)
 			continue
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
-			object.apply_direction(direction)
 			var jumping: bool = kind in JUMP_STEP_KINDS
 			var cells: int = 2 if jumping else 1
 			var destination: Vector2i = object.cell + direction * cells
+			final_facing = _facing_for_direction(direction)
 			if _cell_in_bounds(destination):
 				var vacated: Vector2i = object.cell
 				object.cell = destination
@@ -3953,10 +3987,14 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				# so the whole path is queued and drawn a step at a time by
 				# advance_scripted_steps_frame().
 				object.queue_step(
-					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
+					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping,
+					direction,
 				)
 				_advance_followers(object_index, vacated)
 			else:
+				## `NormalStep` writes the facing before `GetNextTile` refuses,
+				## so a step off the map turns the object where it stands.
+				object.queue_step(Vector2i.ZERO, 0, false, direction)
 				generated.append({
 					"type": &"movement_blocked", "object_index": object_index,
 					"cell": destination,
@@ -4018,7 +4056,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				})
 	var key: String = _object_key(map_group, map_number, object_index)
 	_object_position_overrides[key] = object.cell
-	_object_facing_overrides[key] = object.facing
+	_object_facing_overrides[key] = final_facing
 	return generated
 
 
@@ -4054,13 +4092,15 @@ func _apply_player_movement(event: Dictionary) -> Array:
 	for command: Dictionary in decoded.get("commands", []):
 		var kind: StringName = StringName(command.get("kind", &""))
 		if kind in SCRIPTED_TURN_KINDS:
-			player_facing = _facing_for_direction(
-				_movement_direction(int(command.get("direction", 0)))
+			## Queued behind whatever is still walking, so the turn lands where
+			## the walk ends rather than on the frame the stream was applied.
+			_queue_player_step(
+				Vector2i.ZERO, 0, false,
+				_movement_direction(int(command.get("direction", 0))),
 			)
 			continue
 		if SCRIPTED_STEP_FRAMES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
-			player_facing = _facing_for_direction(direction)
 			var jumping: bool = kind in JUMP_STEP_KINDS
 			var cells: int = 2 if jumping else 1
 			var destination: Vector2i = player_cell + direction * cells
@@ -4068,10 +4108,14 @@ func _apply_player_movement(event: Dictionary) -> Array:
 				var vacated: Vector2i = player_cell
 				player_cell = destination
 				_queue_player_step(
-					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping
+					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping,
+					direction,
 				)
 				_advance_followers(-1, vacated)
 			else:
+				## `NormalStep` writes the facing before the refusal, so a step
+				## off the map turns the player where they stand.
+				_queue_player_step(Vector2i.ZERO, 0, false, direction)
 				generated.append({
 					"type": &"movement_blocked", "player": true, "cell": destination,
 				})
