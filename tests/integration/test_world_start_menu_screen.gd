@@ -915,6 +915,54 @@ func test_use_on_a_party_item_asks_which_mon_then_heals_and_spends_it() -> void:
 	assert_eq(((host.get("_pack_pockets")[0] as Dictionary)["items"] as Array).size(), 0)
 
 
+## `.Party` opens the party menu itself, not a panel: `GiveItem` and every
+## healing item write their own `wPartyMenuActionText` first, and
+## `InitPartyMenuWithCancel` puts CANCEL after the last member.
+func test_the_target_list_is_the_party_menu_with_its_own_prompt_and_cancel() -> void:
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	var save: Gen2SaveData = _world_screen.get("_injected_save")
+	var before: int = (save.party[0] as Gen2SaveMon).hp
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
+	assert_eq(String(host.call("_target_prompt")), Gen2PartyScreen.PROMPT_USE_ON_WHICH)
+	assert_not_null(host.call("_hardware_image"), "the list has a cartridge page")
+
+	## `WritePartyMenuTilemap` draws a level and a status beside every nickname,
+	## so the rows carry what that page reads rather than a name and an HP pair.
+	var rows: Array = host.call("_party_targets")
+	assert_gt(rows.size(), 0)
+	for key: String in ["index", "species", "name", "level", "hp", "max_hp", "status", "egg"]:
+		assert_true((rows[0] as Dictionary).has(key), key)
+
+	## The row after the last member is CANCEL, and the cursor wraps around it.
+	var members: int = rows.size()
+	for _step: int in members + 1:
+		host.handle_button(Gen2Button.DOWN)
+	assert_eq(int(host.get("_target_cursor")), 0, "the cursor wrapped past CANCEL")
+	for _step: int in members:
+		host.handle_button(Gen2Button.DOWN)
+	assert_eq(int(host.get("_target_cursor")), members, "CANCEL is the last row")
+
+	## `PartyMenuSelect` returns carry there, which the caller answers the way it
+	## answers B: back to the item's own submenu, with nothing used.
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
+	assert_eq((save.party[0] as Gen2SaveMon).hp, before)
+	assert_eq(_world_screen._world.state.item_quantity(7), 1)
+
+
+## `GiveItem` writes PARTYMENUACTION_GIVE_ITEM, which is a different
+## `PartyMenuStrings` row from the healing items' above.
+func test_give_opens_the_same_list_under_its_own_prompt() -> void:
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	host.handle_button(Gen2Button.A)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
+	assert_eq(String(host.call("_target_prompt")), Gen2PartyScreen.PROMPT_TO_WHICH)
+
+
 func test_using_an_item_with_nothing_to_do_reports_it_and_spends_nothing() -> void:
 	await _open_world()
 	_world_screen._open_start_menu()

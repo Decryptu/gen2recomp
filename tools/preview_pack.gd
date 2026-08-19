@@ -3,10 +3,13 @@ extends SceneTree
 ## Captures the pack against a real imported cache.
 ##
 ##   Godot --headless --path . -s res://tools/preview_pack.gd -- \
-##       crystal /tmp/pack.png [items|balls|key|tmhm] [presses] [female]
+##       crystal /tmp/pack.png [items|balls|key|tmhm|use|give] [presses] [female]
 ##
 ## The world behind it is a new game holding enough of each pocket to fill the
-## five visible rows and scroll past them. [presses] is a `u,d,l,r,a,b` list
+## five visible rows and scroll past them, with a development party behind it so
+## `use` and `give` reach `.Party`'s own list. Those two are the party menu
+## `GiveItem` and every `.Party` item effect open, so what they photograph is
+## [Gen2PartyMenuPage] with the prompt that entrance writes. [presses] is a `u,d,l,r,a,b` list
 ## driven into the real screen before the shot, so the picture is what the
 ## cartridge's own listing would show after those buttons.
 ##
@@ -29,6 +32,10 @@ const ROUTES: Dictionary = {
 	"balls": "r",
 	"key": "r,r",
 	"tmhm": "l",
+	## The first Items row is a healing item, so its submenu is USE / GIVE / TOSS
+	## and both rows reach `.Party`'s own list.
+	"use": "a,a",
+	"give": "a,d,a",
 }
 
 ## What the preview's world is carrying: enough items for the listing to scroll,
@@ -78,6 +85,11 @@ func _capture() -> void:
 
 	var host := Gen2StartMenuScreen.new()
 	root.add_child(host)
+	## No slot on disk, so nothing this photographs is written anywhere.
+	var save: Gen2SaveData = Gen2SaveStore.create_development_save(data, 0)
+	if save != null:
+		save.world = world.snapshot()
+		host.set_party_context(save, false)
 	if not host.open(world, data, func() -> Dictionary: return {"ok": true}):
 		push_error("The %s cache holds no start menu." % args[0])
 		quit(1)
@@ -99,13 +111,20 @@ func _capture() -> void:
 		if BUTTONS.has(key):
 			host.handle_button(int(BUTTONS[key]))
 
-	var error: Error = (host.call("_pack_image") as Image).save_png(args[1])
+	## Whichever cartridge screen the presses landed on, so a route that opens
+	## `.Party`'s list photographs that rather than the pocket behind it.
+	var image: Image = host.call("_hardware_image") as Image
+	if image == null:
+		push_error("Mode %d has no cartridge screen to photograph." % int(host.get("_mode")))
+		quit(1)
+		return
+	var error: Error = image.save_png(args[1])
 	if error != OK:
 		push_error("Could not write %s (error %d)" % [args[1], error])
 		quit(1)
 		return
-	print("Wrote %s: %s pocket, cursor %d" % [
+	print("Wrote %s: %s pocket, cursor %d, mode %d" % [
 		args[1], String(host.call("_current_pocket").get("name", "?")),
-		int(host.get("_pack_cursor")),
+		int(host.get("_pack_cursor")), int(host.get("_mode")),
 	])
 	quit(0)

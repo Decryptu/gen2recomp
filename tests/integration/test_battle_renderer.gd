@@ -443,6 +443,61 @@ func test_a_benched_gainer_animates_no_bar() -> void:
 	assert_false(_battle_screen.bars_animating())
 
 
+## `.skip_exp_bar_animation` draws its stats box once per award, after
+## `.level_loop` has raised every level: two levels crossed is one box, showing
+## what the walk finished on, and it lasts exactly as long as the line beside it.
+func test_the_level_up_stats_box_stands_beside_the_last_level_line() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+	_settle_intro()
+
+	var mon: Gen2BattleMon = _battle_screen._battle.player
+	var benched: int = _battle_screen._battle.party(Gen2Battle.PLAYER).active + 1
+	var middle: Dictionary = {"attack": 11, "defense": 12, "sp_attack": 13, "sp_defense": 14, "speed": 15}
+	var settled: Dictionary = {"attack": 21, "defense": 22, "sp_attack": 23, "sp_defense": 24, "speed": 25}
+	_battle_screen._pending = [
+		{
+			"type": Gen2Battle.GREW_LEVEL, "side": Gen2Battle.PLAYER, "index": benched,
+			"species": mon.species, "old_level": 9, "new_level": 10,
+			"old_stats": {}, "new_stats": middle,
+		},
+		{
+			"type": Gen2Battle.GREW_LEVEL, "side": Gen2Battle.PLAYER, "index": benched,
+			"species": mon.species, "old_level": 10, "new_level": 11,
+			"old_stats": middle, "new_stats": settled,
+		},
+	]
+
+	## The events are fed by hand, so the menu `_settle_intro` left open has to
+	## come down the way a real turn takes it down before a press means "next
+	## line" rather than "FIGHT".
+	_battle_screen._close_battle_menu()
+
+	_battle_screen._show_next_event()
+	assert_eq(
+		_battle_screen.battle_snapshot()["level_up_stats"], {},
+		"the level in the middle of the walk draws no box"
+	)
+
+	_battle_screen._box.finish()
+	_battle_screen._box.advance()
+	_battle_screen.advance()
+	assert_eq(
+		_battle_screen.battle_snapshot()["level_up_stats"], settled,
+		"the box goes up beside the last level's line, with the stats it settled on"
+	)
+	assert_true(_battle_screen._level_up_layer.visible, "and it is on screen")
+
+	_battle_screen._box.finish()
+	_battle_screen._box.advance()
+	_battle_screen.advance()
+	assert_eq(
+		_battle_screen.battle_snapshot()["level_up_stats"], {},
+		"and `SafeLoadTempTilemapToTilemap` takes it away with that line"
+	)
+	assert_false(_battle_screen._level_up_layer.visible)
+
+
 ## `InitBattleDisplay` runs `BattleIntroSlidingPics` and only then does
 ## `BattleStartMessage` say anything, so a battle opens on an empty box with the
 ## background sliding, and the player's back pic is not on the map at all until

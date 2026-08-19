@@ -1399,6 +1399,61 @@ func test_levelling_up_learns_a_move_into_an_empty_slot_without_asking() -> void
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
 
 
+## `LevelUpHappinessMod`: once per award that levelled, not once per level, and
+## HAPPINESS_GAINLEVELATHOME only where the Pokemon was caught. The table's own
+## rows are signed, so the numbers come out of the cache rather than out of here.
+func test_levelling_up_raises_happiness_once_and_more_at_home() -> void:
+	var away: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	away.player.hp = away.player.max_hp() * 10
+	away.player.caught_location = 4
+	away.landmark = 9
+	away.enemy.hp = 1
+	var before: int = away.player.happiness
+	var events: Array = away.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.GREW_LEVEL).size(), 3, "three levels, one rise")
+	assert_eq(
+		away.player.happiness,
+		Gen2WorldPartyHost.change_happiness(_data, before, Gen2Battle.HAPPINESS_GAINLEVEL),
+		"HAPPINESS_GAINLEVEL, applied once for the whole walk"
+	)
+
+	var home: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	home.player.hp = home.player.max_hp() * 10
+	home.player.caught_location = 9
+	home.landmark = 9
+	home.enemy.hp = 1
+	home.take_turn(0, 0)
+	assert_eq(
+		home.player.happiness,
+		Gen2WorldPartyHost.change_happiness(_data, before, Gen2Battle.HAPPINESS_GAINLEVELATHOME),
+		"the same landmark reaches HAPPINESS_GAINLEVELATHOME"
+	)
+	## +5 against +10 at a base happiness of 70, so the two branches are visibly
+	## different rows rather than one row read twice.
+	assert_gt(home.player.happiness, away.player.happiness)
+
+
+## An award too small to cross a level runs `.next_mon` before
+## `.skip_active_mon_update`, so nothing touches happiness.
+func test_experience_without_a_level_leaves_happiness_alone() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 2, [Fixture.TACKLE])
+	)
+	battle.player.hp = battle.player.max_hp() * 10
+	battle.enemy.hp = 1
+	var before: int = battle.player.happiness
+	var events: Array = battle.take_turn(0, 0)
+	assert_eq(_of_type(events, Gen2Battle.GREW_LEVEL).size(), 0, "no level was crossed")
+	assert_eq(battle.player.happiness, before)
+
+
 func test_a_full_moveset_is_offered_a_new_move_rather_than_taught_it() -> void:
 	# Geodude's own curve also reads 135 at level 5. A level 33 Magcargo (base
 	# exp 154) is worth floor(154*33/7) = 726 exactly, landing at 861, which is

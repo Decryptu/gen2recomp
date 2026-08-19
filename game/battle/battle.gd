@@ -470,6 +470,11 @@ var safeguard_turns: Dictionary = {PLAYER: 0, ENEMY: 0}
 ## unmapped. A battle nobody told stands at midday.
 var time_of_day: int = Gen2WorldPalette.TIME_DAY
 
+## `GetWorldMapLocation`'s answer for the map this is being fought on, which
+## `LevelUpHappinessMod` compares a Pokémon's caught location against. A battle
+## nobody told is nowhere, and no Pokémon was caught there.
+var landmark: int = LANDMARK_NONE
+
 ## `wEnemyTrainerItem1` and `wEnemyTrainerItem2`, one copy for the whole battle
 ## and each removed as it is spent (`xor a; ld [de], a`). Empty for a wild battle
 ## and for a class carrying `NO_ITEM` twice.
@@ -2165,6 +2170,7 @@ func _give_experience_to(
 	})
 
 	var target_level: int = learner.level_for_exp()
+	var grew: bool = learner.level < target_level
 	while learner.level < target_level:
 		var old_level: int = learner.level
 		var old_stats: Dictionary = learner.stats.duplicate()
@@ -2192,6 +2198,23 @@ func _give_experience_to(
 		# `LearnLevelMoves` runs after the species has been replaced, so an
 		# evolved species gets its own move at the level that triggered it.
 		_offer_moves_learned_at(learner, index, learner.level, events)
+
+	## `LevelUpHappinessMod` sits after `.level_loop`, outside it: an award that
+	## crossed four levels raises happiness once, not four times.
+	if grew:
+		_gain_level_happiness(learner)
+
+
+## `LevelUpHappinessMod`: HAPPINESS_GAINLEVELATHOME when the Pokémon is standing
+## on the landmark it was caught on and HAPPINESS_GAINLEVEL anywhere else. The
+## compare is Crystal's alone; Gold and Silver inline HAPPINESS_GAINLEVEL with no
+## row to reach for, which is also why their table is one row shorter.
+func _gain_level_happiness(learner: Gen2BattleMon) -> void:
+	var kind: int = HAPPINESS_GAINLEVEL
+	if Gen2WorldState.is_crystal_profile(data) and landmark != LANDMARK_NONE \
+			and learner.caught_location == landmark:
+		kind = HAPPINESS_GAINLEVELATHOME
+	learner.happiness = Gen2WorldPartyHost.change_happiness(data, learner.happiness, kind)
 
 
 ## What [param learner] is taught at exactly [param level]: into an empty slot
@@ -2458,6 +2481,16 @@ const JOHTO_GYM_LEADERS: Array[int] = [
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 	0x0B, 0x0D, 0x0E, 0x0F, TRAINER_CLASS_CHAMPION, TRAINER_CLASS_RED,
 ]
+
+## A landmark no map has, so an untold battle matches nobody's caught location.
+const LANDMARK_NONE: int = -1
+
+## `constants/pokemon_data_constants.asm`, one-based the way `ChangeHappiness`
+## takes it. Gold and Silver ship neither the second row nor the compare in
+## front of it: their `.skip_active_mon_update` passes HAPPINESS_GAINLEVEL flat.
+const HAPPINESS_GAINLEVEL: int = 0x01
+const HAPPINESS_GAINLEVELATHOME: int = 0x13
+
 
 ## constants/landmark_constants.asm, Crystal-canonical like
 ## [constant Gen2WorldRadio.KANTO_LANDMARK], which is where the Gold and Silver

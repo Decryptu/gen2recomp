@@ -179,6 +179,11 @@ var _mod_option_cursor: int = 0
 var _screen: Gen2Screen = null
 var _view: TextureRect = null
 var _page: Gen2StartMenuPage = null
+## `LoadPartyMenuGFX`: the target list is the party menu, so it is drawn by the
+## page that draws the party menu everywhere else.
+var _target_page: Gen2PartyMenuPage = null
+## Leftover of a hardware frame the target list's icons have not counted yet.
+var _target_elapsed: float = 0.0
 ## The panel's own two roots, hidden whenever a cartridge screen is up.
 var _scrim: ColorRect = null
 var _center: CenterContainer = null
@@ -362,9 +367,12 @@ func _move(direction: Vector2i) -> void:
 				_swap_cursor = 1 - _swap_cursor
 				_render_give_swap()
 		Mode.PACK_TARGET:
+			## `InitPartyMenuWithCancel`: CANCEL is the row after the last member
+			## and the cursor wraps around it, which is `w2DMenuNumRows` being the
+			## party count plus one.
 			if direction.y != 0 and not _party_targets().is_empty():
 				_target_cursor = wrapi(
-					_target_cursor + signi(direction.y), 0, _party_targets().size()
+					_target_cursor + signi(direction.y), 0, _party_targets().size() + 1
 				)
 				_render_targets()
 		## `VerticalMenu` over `YesNoMenuHeader`, which is only up while a
@@ -428,7 +436,11 @@ func _confirm() -> void:
 		Mode.PACK_GIVE_SWAP:
 			_confirm_give_swap()
 		Mode.PACK_TARGET:
-			if _teaching:
+			## `PartyMenuSelect` returns carry on CANCEL, which the caller answers
+			## the same way it answers B.
+			if _target_cursor >= _party_targets().size():
+				_open_item_mode()
+			elif _teaching:
 				_teach_selected_item(_target_cursor)
 			elif _giving:
 				_give_selected_item(_target_cursor)
@@ -1105,7 +1117,9 @@ func _resolve_field_item(item: int) -> Dictionary:
 
 
 ## `.Party`'s party list. Reads the same save the USE will be applied to, so a
-## screen without one offers no targets and answers `.NoPokemon`.
+## screen without one offers no targets and answers `.NoPokemon`. The rows are
+## `WritePartyMenuTilemap`'s, in the shape [Gen2PartyMenuPage] draws and
+## [Gen2PartyScreen] builds, since the list this opens is that same menu.
 func _party_targets() -> Array:
 	if _pack_save == null:
 		return []
@@ -1117,13 +1131,48 @@ func _party_targets() -> Array:
 		# Max HP is derived, not stored, the same way Gen2PartyScreen derives it.
 		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
 		targets.append({
+			"index": targets.size(),
+			"species": mon.species,
+			"item": mon.item,
 			"name": mon.nickname if not mon.nickname.is_empty() \
 				else String(_data.species(mon.species).get("name", "UNKNOWN")),
+			"level": mon.level,
 			"hp": mon.hp,
-			"max_hp": battle_mon.max_hp() if battle_mon != null else 0,
+			"max_hp": 0 if mon.is_egg else (battle_mon.max_hp() if battle_mon != null else 0),
+			"status": mon.status,
+			"fainted": not mon.is_egg and mon.hp <= 0,
 			"egg": mon.is_egg,
 		})
 	return targets
+
+
+## `PartyMenuStrings`, picked by the `wPartyMenuActionText` each of the three
+## entrances writes: `TeachTMHM`'s PARTYMENUACTION_TEACH_TMHM, `GiveItem`'s
+## PARTYMENUACTION_GIVE_ITEM, and the PARTYMENUACTION_HEALING_ITEM every
+## `.Party` item effect writes.
+func _target_prompt() -> String:
+	if _teaching:
+		return Gen2PartyScreen.PROMPT_TEACH_WHICH
+	return Gen2PartyScreen.PROMPT_TO_WHICH if _giving \
+		else Gen2PartyScreen.PROMPT_USE_ON_WHICH
+
+
+## `LoadPartyMenuGFX`, built the first time the list is opened and kept, the way
+## [member _page] is.
+func _party_menu_page() -> Gen2PartyMenuPage:
+	if _target_page == null and _data != null:
+		_target_page = Gen2PartyMenuPage.from_data(_data)
+	return _target_page
+
+
+## One pass of the target list's icons, which animate on the hardware clock the
+## rest of the party menu's do. Public the way [method advance_save_frame] is, so
+## a test or a screenshot driver can step them without waiting on real time.
+func advance_target_icons() -> void:
+	if _target_page == null or _mode != Mode.PACK_TARGET:
+		return
+	_target_page.advance(_party_targets(), _target_cursor)
+	_render_hardware()
 
 
 ## AskTeachTMHM: the booted-up text and its yes/no. A TM/HM the cartridge does
@@ -1321,17 +1370,32 @@ func _teach_refusal(reason: StringName, party_index: int) -> String:
 
 func _open_target_mode() -> void:
 	_mode = Mode.PACK_TARGET
-	_target_cursor = clampi(_target_cursor, 0, maxi(_party_targets().size() - 1, 0))
+	_target_cursor = clampi(_target_cursor, 0, _party_targets().size())
+	## `InitPartyMenuGFX` respawns one icon struct per member every time the list
+	## is opened, which is what puts the icons on the page at all.
+	if _party_menu_page() != null:
+		_target_page.reset(_party_targets())
 	_status.text = ""
 	_footer.text = "Up and down: move    A: %s    B: back" % ("give" if _giving else "use")
+	_target_elapsed = 0.0
 	_render_targets()
+	## `InitPartyMenuGFX` opens every struct on frame -1, so the icons are blank
+	## until `DoNextFrameForAllSprites` has run once; the list is drawn after
+	## that first pass rather than before it.
+	advance_target_icons()
 
 
 func _render_targets() -> void:
 	_title.text = "GIVE TO" if _giving else "USE ON"
 	_summary.text = String(_selected_item().get("name", ""))
-	_render_options(_party_targets(), 0 if _party_targets().is_empty() else _target_cursor,
+	## The panel fallback carries the same CANCEL row the hardware page draws, so
+	## the cursor means one thing whichever of the two is up.
+	var rows: Array = _party_targets()
+	rows.append({"cancel": true})
+	_render_options(rows, _target_cursor,
 		func(entry: Dictionary) -> String:
+			if bool(entry.get("cancel", false)):
+				return Gen2BattleSwitchMenu.cancel_label()
 			if bool(entry.get("egg", false)):
 				return "%s    EGG" % String(entry.get("name", ""))
 			return "%s    %d/%d HP" % [
@@ -1625,6 +1689,18 @@ func advance_save_frames(count: int) -> void:
 
 
 func _process(delta: float) -> void:
+	if _mode == Mode.PACK_TARGET:
+		## Capped the way every other hardware-frame pump here caps it: a stall
+		## drops icon passes rather than running a second of them at once.
+		_target_elapsed = minf(
+			_target_elapsed + delta,
+			Gen2WorldAnimation.FRAME_SECONDS * float(Gen2WorldAnimation.MAX_CATCHUP_FRAMES),
+		)
+		while _target_elapsed >= Gen2WorldAnimation.FRAME_SECONDS:
+			_target_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
+			advance_target_icons()
+		return
+	_target_elapsed = 0.0
 	if _mode != Mode.SAVE_SAVING and _mode != Mode.SAVE_SAVED:
 		return
 	_save_elapsed += delta
@@ -1809,6 +1885,12 @@ func _hardware_image() -> Image:
 			return _page.render_options(_options_menu.rows(), _options_menu.cursor)
 		Mode.PACK:
 			return _pack_image()
+		Mode.PACK_TARGET:
+			if _party_menu_page() == null:
+				return null
+			return _target_page.render(
+				_party_targets(), _target_cursor, _target_prompt()
+			)
 		Mode.MODS:
 			var rows: Array = []
 			for id: StringName in _mod_ids:

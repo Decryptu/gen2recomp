@@ -197,6 +197,15 @@ var minimized: bool = false
 ## that is the default rather than zero.
 var happiness: int = BASE_HAPPINESS
 
+## constants/pokemon_data_constants.asm's CAUGHT_LOCATION_MASK, the low seven
+## bits of the caught-data byte the caught gender shares.
+const CAUGHT_LOCATION_MASK: int = 0x7F
+
+## `MON_CAUGHT_LOCATION` masked with CAUGHT_LOCATION_MASK: the landmark the
+## Pokémon was caught on. `LevelUpHappinessMod` is the only thing in a battle to
+## read it, and a mon nobody told (a wild one, a trainer's) has none.
+var caught_location: int = 0
+
 
 ## Builds a Pokémon at a level, at full health, knowing [param moves].
 ##
