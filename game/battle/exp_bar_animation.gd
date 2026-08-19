@@ -19,8 +19,8 @@ extends RefCounted
 ## tiles.
 const LENGTH_PX: int = Gen2BattleHud.EXP_BAR_TILES * Gen2BattleHud.TILE
 
-## `.PlayExpBarSound`'s `ld c, 10`, spent before each segment moves. Its
-## `SFX_EXP_BAR` is the Poof's boundary: no battle screen has an SFX route.
+## `.PlayExpBarSound`'s `ld c, 10`, spent before each segment moves. Its own
+## `SFX_EXP_BAR` is played by the screen, which owns the audio player.
 const LEAD_FRAMES: int = 10
 
 ## `.LoopBarAnimation`'s `ld d, 3` and its floor: 3, 3, 2, 2, 1, 1 and on at a

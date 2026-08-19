@@ -269,6 +269,11 @@ var _move_cursor: int = 0
 ## `MoveInfoBox`, which is its own `Textbox` beside the list rather than part of
 ## it, so it is drawn into a layer of its own.
 var _info_layer: TextureRect = null
+## `.skip_exp_bar_animation`'s stats box, over the upper screen while the
+## grew-to-level line it accompanies is up.
+var _level_up_layer: TextureRect = null
+## The stats that box is showing, empty while there is no box.
+var _level_up_stats: Dictionary = {}
 ## The menu itself, which unlike [member _menu_layer] sits over the text box.
 var _battle_menu_layer: TextureRect = null
 
@@ -487,6 +492,10 @@ func _ready() -> void:
 	_info_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_info_layer.visible = false
 	_screen.display(_info_layer)
+	_level_up_layer = TextureRect.new()
+	_level_up_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_level_up_layer.visible = false
+	_screen.display(_level_up_layer)
 	_apply_renderer_interface_style()
 
 	## Whatever this screen was opened on its own for. A battle inside the
@@ -749,6 +758,10 @@ func start_world_battle(
 	_enemy_trainer_index = int(prepared.get("trainer_index", 0))
 	_battle = prepared["battle"]
 	_battle.time_of_day = _time_of_day
+	## `GetWorldMapLocation`, the same reading [method _play_battle_music] uses:
+	## `LevelUpHappinessMod` compares it against the winner's caught location.
+	_battle.landmark = _world_context.landmark if _world_context != null \
+		else Gen2Battle.LANDMARK_NONE
 	_battle.load_trainer_items(_enemy_trainer_class)
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
@@ -924,6 +937,7 @@ func _init_battle_display() -> void:
 	_enemy_unown_form = Gen2Battle.unown_form_of(_battle.enemy)
 	_player_unown_form = Gen2Battle.unown_form_of(_battle.player)
 	_close_switch()
+	_clear_level_up_box()
 	_reseed_bg_map()
 	set_hp(
 		_battle.enemy.hp, _battle.enemy.max_hp(),
@@ -1029,6 +1043,12 @@ const CRY_TRACKS_PLAYER: int = 0xF0
 
 const SFX_DAMAGE: int = 0xAC
 const SFX_SUPER_EFFECTIVE: int = 0xAD
+
+## `AnimateExpBar`'s two: `.PlayExpBarSound`'s at the head of every segment, and
+## the one `.LoopLevels` and `.skip_exp_bar_animation` both play before their
+## grew-to-level line.
+const SFX_EXP_BAR: int = 0x8C
+const SFX_HIT_END_OF_EXP_BAR: int = 0xB6
 
 
 ## Whether an animation, or any of the delays `PlayBattleAnim` wraps it in, is
@@ -1395,7 +1415,54 @@ func _start_exp_bar(event: Dictionary, from_pixels: int) -> void:
 		targets.append(Gen2ExpBarAnimation.LENGTH_PX)
 	targets.append(Gen2ExpBarAnimation.pixels_for(rate, mon.level, mon.exp))
 	_exp_bar = Gen2ExpBarAnimation.create(from_pixels, targets)
+	## `.PlayExpBarSound` runs before the first `.LoopBarAnimation`, so the sound
+	## leads the fill by its own ten frames.
+	if not _exp_bar.finished():
+		_play_anim_sound(SFX_EXP_BAR)
 	_push_view()
+
+
+## Whether [param index] has another [constant Gen2Battle.GREW_LEVEL] still
+## queued before the next award. `.level_loop` raises every level first and the
+## box is drawn once after it, so only the last one carries a box.
+func _more_levels_queued(index: int) -> bool:
+	for queued: Dictionary in _pending:
+		var kind: StringName = StringName(queued["type"])
+		if kind == Gen2Battle.EXP_GAINED:
+			return false
+		if kind == Gen2Battle.GREW_LEVEL and int(queued["index"]) == index:
+			return true
+	return false
+
+
+## `.skip_exp_bar_animation`'s `Textbox` and `PrintTempMonStats`, or nothing
+## while [member _level_up_stats] is empty. `SafeLoadTempTilemapToTilemap` puts
+## the screen back afterwards, which is what clearing it is.
+func _refresh_level_up_box() -> void:
+	if _level_up_layer == null:
+		return
+	if _level_up_stats.is_empty() or _menu_page == null:
+		_level_up_layer.visible = false
+		return
+	var box: Gen2MenuBox = Gen2BattleMenu.level_up_box()
+	_show_layer_image(
+		_level_up_layer,
+		_menu_page.render(
+			box, [], -1, "", 0,
+			Gen2StatsScreenPage.stats_placements(
+				Gen2BattleMenu.LEVEL_UP_STATS_AT, _level_up_stats,
+				Gen2BattleMenu.LEVEL_UP_STATS_SPACING
+			)
+		),
+		box.border_position() * Gen2Font.TILE
+	)
+
+
+func _clear_level_up_box() -> void:
+	if _level_up_stats.is_empty():
+		return
+	_level_up_stats = {}
+	_refresh_level_up_box()
 
 
 func show_message(text: String) -> void:
@@ -1457,6 +1524,7 @@ func battle_snapshot() -> Dictionary:
 		"capture_ball": _selected_capture_ball(),
 		"capture_balls": _capture_balls.duplicate(),
 		"capture_quantities": _capture_quantities.duplicate(),
+		"level_up_stats": _level_up_stats.duplicate(),
 	}
 
 
@@ -2097,6 +2165,9 @@ func advance() -> void:
 		if _box.advance():
 			return
 		_exp_bar.resume()
+		## The loop reaches `.PlayExpBarSound` again for the segment this press
+		## releases, the same as the first one.
+		_play_anim_sound(SFX_EXP_BAR)
 		return
 	## A bar the source is still animating has not printed its message yet, so
 	## there is nothing for a press to advance past. Without this the press
@@ -2141,6 +2212,9 @@ func _continue_after_messages() -> void:
 		return
 	if _message_awaits_press or not _intro_message.is_empty():
 		return
+	## Nothing is left to print, so the line the box stood beside is gone even
+	## though no event was popped to take it away.
+	_clear_level_up_box()
 	if _capture_selecting or _capture_waiting:
 		return
 	## A list already up owns the joypad: the battle menu, the pack and its two
@@ -3051,6 +3125,9 @@ func _replace_the_fallen() -> bool:
 func _show_next_event() -> void:
 	while not _pending.is_empty():
 		var event: Dictionary = _pending.pop_front()
+		## The box lasts exactly as long as the line it was drawn beside, and
+		## this is the press that took that line away.
+		_clear_level_up_box()
 		event = Gen2ModHost.publish(Gen2ModHost.CHANNEL_BATTLE, event)
 		if StringName(event["type"]) == Gen2Battle.ANIMATION:
 			## The engine has already resolved; this event is the frames the
@@ -3166,6 +3243,16 @@ func _apply_event_state(event: Dictionary) -> void:
 				_push_view()
 			if _exp_bar == null:
 				_refresh_exp_bar()
+			## `SFX_HIT_END_OF_EXP_BAR`, then `WaitSFX`, then the line. Both
+			## paths play it: `.LoopLevels` for whoever is out and
+			## `.skip_exp_bar_animation` for a benched participant.
+			_play_anim_sound(SFX_HIT_END_OF_EXP_BAR)
+			## `.skip_exp_bar_animation` draws the box once per award, after the
+			## last level it crossed, so a walk of several levels shows the
+			## stats it finished on rather than one box a level.
+			if not _more_levels_queued(int(event["index"])):
+				_level_up_stats = (event["new_stats"] as Dictionary).duplicate()
+			_refresh_level_up_box()
 
 
 ## An event as a sentence, or an empty string for one there is nothing to say

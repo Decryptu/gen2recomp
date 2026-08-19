@@ -8,7 +8,8 @@ extends SceneTree
 ##   Godot --path . -s res://tools/preview_battle_switch.gd -- crystal /tmp/s.png [stage] [presses] [passes]
 ##
 ## [stage] is one of `offer` (the default), `menu`, `move`, `contest`, `pack`,
-## `pick`, `use_next` and `replace`;
+## `pick`, `use_next`, `replace` and `level_up`, which is the stats box
+## `.skip_exp_bar_animation` draws beside its grew-to-level line;
 ## [presses] is a `u,d,l,r,a,b` list driven into the menu before the shot, so a
 ## cursor row or a refusal can be photographed; [passes] is how many sprite
 ## passes the party page's icons are given, which is what moves the chosen row's
@@ -141,6 +142,17 @@ func _open() -> void:
 		_screen.set("_pending", [
 			{"type": Gen2Battle.FAINTED, "side": Gen2Battle.PLAYER},
 		])
+	elif _stage == "level_up":
+		## A real knockout, not a staged event: the lead is parked one point
+		## under its next threshold so the award is certain to cross it, and the
+		## turn it takes is the one that runs `GiveExperiencePoints`.
+		battle.player.exp = Gen2Experience.total_exp_at(
+			battle.player.growth_rate(), battle.player.level + 1
+		) - 1
+		battle.enemy.hp = 1
+		_screen.set("_pending", battle.take_actions(
+			Gen2Battle.use_move(0), Gen2Battle.use_move(0)
+		))
 	elif _stage not in ["menu", "move", "contest", "pack"]:
 		_screen.set("_pending", battle.take_actions(
 			Gen2Battle.use_move(0), Gen2Battle.switch_to(1)
@@ -155,6 +167,13 @@ func _open() -> void:
 			[Gen2WorldPartyHost.ITEM_PARK_BALL],
 			{Gen2WorldPartyHost.ITEM_PARK_BALL: Gen2WorldBugContest.BALLS}
 		)
+
+	if _stage == "level_up":
+		_drain_to_level_up()
+		_read_question()
+		_screen.finish()
+		_settle_icons()
+		return
 
 	## Both menu stages are what the intro leads into with nothing else staged,
 	## which is `BattleMenu`'s own first opening.
@@ -196,6 +215,19 @@ func _settle_icons() -> void:
 	for _pass: int in _icon_passes:
 		_screen.advance_party_icons()
 	_screen._refresh_menu_layer()
+
+
+## The same drain, stopping on the frame the level-up stats box is up.
+func _drain_to_level_up() -> void:
+	for _press: int in 60:
+		## The box is popped by the bar pump inside `_settle`, not by the press
+		## after it, so the check goes between the two: pressing on would scroll
+		## the line being photographed away.
+		_settle()
+		if not Dictionary(_screen.battle_snapshot()["level_up_stats"]).is_empty():
+			return
+		_screen.finish()
+		_screen.advance()
 
 
 ## The same drain, stopping at `BattleMenu` rather than at a switch question.

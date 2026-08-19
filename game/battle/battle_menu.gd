@@ -62,6 +62,17 @@ const INFO_TYPE_LABEL: String = "TYPE/"
 const INFO_DISABLED_AT := Vector2i(1, 10)
 const INFO_DISABLED: String = "Disabled!"
 
+## The level-up stats box `.skip_exp_bar_animation` draws over the upper screen:
+## `hlcoord 9, 0` with `ld b, 10` and `ld c, 9`, then `PrintTempMonStats` at
+## `hlcoord 11, 1` with a spacing of four. No options and no cursor; the ten
+## strings are [method Gen2StatsScreenPage.stats_placements].
+const LEVEL_UP_LEFT: int = 9
+const LEVEL_UP_TOP: int = 0
+const LEVEL_UP_RIGHT: int = 19
+const LEVEL_UP_BOTTOM: int = 11
+const LEVEL_UP_STATS_AT := Vector2i(11, 1)
+const LEVEL_UP_STATS_SPACING: int = 4
+
 ## `BattleText_TheresNoPPLeftForThisMove` and `BattleText_TheMoveIsDisabled`,
 ## which `.use_move` prints over the list and then reopens it behind.
 const NO_PP_TEXT: String = "There's no PP left for this move!"
@@ -103,6 +114,12 @@ static func move_box() -> Gen2MenuBox:
 static func info_box() -> Gen2MenuBox:
 	return Gen2MenuBox.from_coords(
 		INFO_LEFT, INFO_TOP, INFO_RIGHT, INFO_BOTTOM, 0
+	)
+
+
+static func level_up_box() -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(
+		LEVEL_UP_LEFT, LEVEL_UP_TOP, LEVEL_UP_RIGHT, LEVEL_UP_BOTTOM, 0
 	)
 
 

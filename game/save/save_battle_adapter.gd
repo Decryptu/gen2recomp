@@ -20,6 +20,7 @@ static func from_battle_mon(mon: Gen2BattleMon) -> Gen2SaveMon:
 	out.hp = mon.hp
 	out.status = mon.status
 	out.happiness = mon.happiness
+	out.caught_location = mon.caught_location
 	for slot: int in Gen2SaveMon.MAX_MOVES:
 		# Mimic and Transform edit only the battle move struct. Sketch edits the
 		# party move too, so it needs no exception here.
@@ -47,6 +48,7 @@ static func to_battle_mon(data: GameData, saved: Gen2SaveMon) -> Gen2BattleMon:
 	out.exp = saved.exp
 	out.status = saved.status
 	out.happiness = saved.happiness
+	out.caught_location = saved.caught_location & Gen2BattleMon.CAUGHT_LOCATION_MASK
 	out.pp = saved_pp
 	out.hp = clampi(saved.hp, 0, out.max_hp())
 	return out

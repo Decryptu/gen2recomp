@@ -127,6 +127,25 @@ func test_the_move_info_box_is_the_source_rectangle() -> void:
 	assert_eq(box.border_size(), Vector2i(11, 5))
 
 
+## `.skip_exp_bar_animation`'s `hlcoord 9, 0` with `b, 10` and `c, 9`, and the
+## `PrintTempMonStats` at `hlcoord 11, 1` whose spacing of four puts the numbers
+## two columns further left than the stats screen's six does.
+func test_the_level_up_stats_box_is_the_source_rectangle() -> void:
+	var box: Gen2MenuBox = Gen2BattleMenu.level_up_box()
+	assert_eq(box.interior(), Vector2i(9, 10))
+	assert_eq(box.border_position(), Vector2i(9, 0))
+	assert_eq(box.border_size(), Vector2i(11, 12))
+	var placements: Array = Gen2StatsScreenPage.stats_placements(
+		Gen2BattleMenu.LEVEL_UP_STATS_AT, {"attack": 12, "speed": 7},
+		Gen2BattleMenu.LEVEL_UP_STATS_SPACING
+	)
+	assert_eq(placements.size(), 10)
+	assert_eq(placements[0], {"text": "ATTACK", "at": Vector2i(11, 1)})
+	assert_eq(placements[4], {"text": "SPEED", "at": Vector2i(11, 9)})
+	assert_eq(placements[5], {"text": " 12", "at": Vector2i(15, 2)})
+	assert_eq(placements[9], {"text": "  7", "at": Vector2i(15, 10)})
+
+
 ## `MenuHeaders_UnownWalls`' `menu_coords 9 - n, 4, 10 + n, 9`: the box is built
 ## around the word, so "ESCAPE" and "HO-OH" are different sizes and both are
 ## centred on the same two columns.

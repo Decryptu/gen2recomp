@@ -265,14 +265,28 @@ func draw_stats(
 	into: PackedByteArray, width: int, at: Vector2i, stats: Dictionary,
 	spacing: int = STATS_SPACING
 ) -> void:
+	for placement: Dictionary in stats_placements(at, stats, spacing):
+		_text(into, width, String(placement["text"]), placement["at"])
+
+
+## The same ten strings as `PlaceString` calls, for a caller that draws them
+## through [method Gen2MenuPage.draw]'s extras rather than into a page: the
+## battle's level-up box is a plain `Textbox`, not a stats screen.
+static func stats_placements(
+	at: Vector2i, stats: Dictionary, spacing: int = STATS_SPACING
+) -> Array:
+	var out: Array = []
 	for index: int in STAT_NAMES.size():
-		_text(into, width, STAT_NAMES[index], at + Vector2i(0, index * STAT_ROW_STEP))
+		out.append({
+			"text": STAT_NAMES[index], "at": at + Vector2i(0, index * STAT_ROW_STEP),
+		})
 	var numbers: Vector2i = at + Vector2i(spacing, 1)
 	for index: int in STAT_KEYS.size():
-		_text(
-			into, width, str(int(stats.get(STAT_KEYS[index], 0))).lpad(STAT_DIGITS),
-			numbers + Vector2i(0, index * STAT_ROW_STEP)
-		)
+		out.append({
+			"text": str(int(stats.get(STAT_KEYS[index], 0))).lpad(STAT_DIGITS),
+			"at": numbers + Vector2i(0, index * STAT_ROW_STEP),
+		})
+	return out
 
 
 ## `StatsScreen_InitUpperHalf` plus `StatsScreen_LoadPageIndicators`, which
