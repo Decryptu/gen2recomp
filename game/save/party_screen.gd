@@ -67,6 +67,14 @@ const MAX_SUBMENU_ITEMS: int = 8
 const PROMPT_CHOOSE: String = "Choose a #MON."
 const PROMPT_USE_ON_WHICH: String = "Use on which PKMN?"
 
+## The two more of `PartyMenuStrings` the pack's own lists reach:
+## `ToWhichPKMNString` for `PARTYMENUACTION_GIVE_ITEM`, which `GiveItem` writes,
+## and `TeachWhichPKMNString` for the `PARTYMENUACTION_TEACH_TMHM` that
+## `TeachTMHM` writes. Kept beside the two above rather than in the screen that
+## reads them, so all four strings are in one place.
+const PROMPT_TO_WHICH: String = "To which PKMN?"
+const PROMPT_TEACH_WHICH: String = "Teach which PKMN?"
+
 ## `SwitchPartyMons`' own `PARTYMENUACTION_MOVE` string, `MoveToWhereString`.
 const PROMPT_MOVE_TO_WHERE: String = "Move to where?"
 
