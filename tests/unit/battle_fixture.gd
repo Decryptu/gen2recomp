@@ -403,8 +403,10 @@ const MATCHUPS: Array = [
 const FORESIGHT_MATCHUPS: Array = [[NORMAL, GHOST, 0], [FIGHTING, GHOST, 0]]
 
 
-## Writes a cache at [param directory] and opens it.
-static func build(directory: String) -> GameData:
+## Writes a cache at [param directory] and opens it. [param id] is the cartridge
+## the cache claims to be, which the two profiles are told apart by: everything
+## but `gold` and `silver` is Crystal's own branch.
+static func build(directory: String, id: String = "testgame") -> GameData:
 	RomCache.clear(directory)
 	RomCache.prepare(directory)
 
@@ -418,7 +420,7 @@ static func build(directory: String) -> GameData:
 	RomCache.write_json(RomCache.happiness_changes_path(directory), HAPPINESS_CHANGES)
 	RomCache.write_json(RomCache.manifest_path(directory), {
 		"format_version": RomCache.FORMAT_VERSION,
-		"game_id": "testgame",
+		"game_id": id,
 		"sha1": "0123456789abcdef",
 		"complete": true,
 	})

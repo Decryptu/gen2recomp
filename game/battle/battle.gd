@@ -1243,8 +1243,8 @@ func send_out(
 
 ## `SendOutPlayerMon` and `ShowSetEnemyMonAndSendOutAnimation`, which every
 ## entrance in the source runs and which are the same three steps on both sides:
-## `ANIM_SEND_OUT_MON`, a second pass of it for a shiny, and the cry
-## `CheckFaintedFrzSlp` allows. Public because a battle's opening entrance is not
+## `ANIM_SEND_OUT_MON`, a second pass of it for a shiny, and the cry Crystal's
+## own `CheckFaintedFrzSlp` allows. Public because a battle's opening entrance is not
 ## a [method send_out]: both sides are already standing there when the pics
 ## finish sliding, and the screen plays the same list for them.
 ##
@@ -1264,8 +1264,11 @@ func entrance_events(side: int, ball: bool = true) -> Array:
 	if Gen2Stats.is_shiny(entering.dvs):
 		out.append(_send_out_animation(enemy_turn, SEND_OUT_ANIM_SHINY))
 	# `CheckFaintedFrzSlp`: no cry from a fainted, frozen or sleeping Pokemon.
-	if entering.is_fainted() \
-		or (entering.status & (Gen2Status.FREEZE | Gen2Status.SLEEP_MASK)) != 0:
+	# Crystal's alone: pokegold's `SendOutPlayerMon` and
+	# `ShowSetEnemyMonAndSendOutAnimation` both reach `PlayStereoCry` with no
+	# test in front of it, the same place their own pic animation is missing.
+	if Gen2WorldState.is_crystal_profile(data) and (entering.is_fainted() \
+			or (entering.status & (Gen2Status.FREEZE | Gen2Status.SLEEP_MASK)) != 0):
 		return out
 	out.append({"type": CRY, "side": side, "species": entering.species})
 	return out

@@ -563,6 +563,33 @@ func test_an_entrance_plays_the_ball_the_shiny_pass_and_the_cry() -> void:
 	)
 
 
+## The one thing the two profiles part company on here: pokegold's
+## `SendOutPlayerMon` and `ShowSetEnemyMonAndSendOutAnimation` both reach
+## `PlayStereoCry` with nothing in front of it, so a Pokemon that is asleep,
+## frozen or fainted still cries there. `CheckFaintedFrzSlp` is Crystal's, and
+## so is the pic animation it was added beside.
+func test_gold_and_silver_cry_where_crystal_checks_first() -> void:
+	var directory: String = RomCache.directory_for(&"battletestgold", "0123456789abcdef")
+	var gold: GameData = Fixture.build(directory, "gold")
+	var battle: Gen2Battle = Gen2Battle.create(
+		gold,
+		Gen2BattleMon.create(gold, Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		Gen2BattleMon.create(gold, Fixture.CHARMANDER, 20, [Fixture.TACKLE]),
+		_rng
+	)
+	battle.player.status = Gen2Status.FREEZE
+	assert_eq(
+		_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 1
+	)
+	battle.player.status = Gen2Status.NONE
+	battle.player.hp = 0
+	assert_eq(
+		_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 1,
+		"and a fainted one, which is the third silence Crystal added"
+	)
+	RomCache.clear(directory)
+
+
 ## `SendOutMonText`'s four lines, at the three boundaries its compares name.
 func test_the_send_out_line_follows_the_opponents_remaining_hp() -> void:
 	var battle: Gen2Battle = _battle(
